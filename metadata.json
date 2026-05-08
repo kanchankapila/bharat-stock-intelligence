@@ -1,0 +1,6 @@
+{
+  "name": "Bharat Stock Intelligence",
+  "description": "Premium AI-powered stock analysis platform for Indian markets with real-time insights, backtesting, and sentiment analysis.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["AI-Powered Trading Signals", "Strategy Backtesting", "Real-time Market Insights"]
+}

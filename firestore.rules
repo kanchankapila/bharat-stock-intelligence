@@ -1,0 +1,107 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helpers ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isEmailVerified() {
+      return request.auth.token.email_verified == true;
+    }
+
+    // --- Validation Helpers ---
+
+    function isValidStock(data) {
+      return data.keys().hasAll(['symbol', 'name', 'exchange']) &&
+             data.symbol is string && data.symbol.size() <= 20 &&
+             data.name is string && data.name.size() <= 100 &&
+             data.exchange is string && data.exchange.size() <= 10;
+    }
+
+    function isValidSignal(data) {
+      return data.keys().hasAll(['stockId', 'symbol', 'type', 'entry', 'createdAt']) &&
+             data.stockId is string && data.symbol is string &&
+             data.type in ['BUY', 'SELL', 'HOLD'] &&
+             data.entry is number &&
+             data.createdAt == request.time;
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email']) &&
+             data.uid == request.auth.uid &&
+             data.email == request.auth.token.email;
+    }
+
+    function isValidWatchlistItem(data) {
+      return data.keys().hasAll(['userId', 'symbol', 'stockId', 'addedAt']) &&
+             data.userId == request.auth.uid &&
+             data.addedAt == request.time;
+    }
+
+    // --- Match Rules ---
+
+    // Stocks: Publicly readable, writeable only by admin (simulated via some check or restricted for now)
+    match /stocks/{stockId} {
+      allow read: if true;
+      allow create, update: if false; // Only system/admin should update stocks
+      
+      match /ohlcv/{ohlcvId} {
+        allow read: if true;
+        allow write: if false;
+      }
+    }
+
+    // Signals: Publicly readable for signed in users, writeable by system
+    match /signals/{signalId} {
+      allow read: if true;
+      allow create, update: if true; // Relaxed for the background job currently using client SDK
+    }
+
+    // User Profiles
+    match /users/{userId} {
+      allow get: if isOwner(userId);
+      allow list: if false;
+      allow create: if isOwner(userId) && isValidUser(incoming());
+      allow update: if isOwner(userId) && 
+                      isValidUser(incoming()) && 
+                      incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'photoURL']);
+    }
+
+    // Watchlist
+    match /users/{userId}/watchlist/{watchlistId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidWatchlistItem(incoming());
+      allow delete: if isOwner(userId);
+    }
+
+    // Portfolio
+    match /users/{userId}/portfolio/{portfolioId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && incoming().userId == userId;
+      allow update: if isOwner(userId) && incoming().userId == userId;
+      allow delete: if isOwner(userId);
+    }
+  }
+}
