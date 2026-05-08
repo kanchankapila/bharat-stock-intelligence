@@ -1,33 +1,126 @@
 import { MarketData } from '../services/marketService';
 import { getAllStocks } from './stockMapping';
 
-/**
- * LIVE DATA FETCHING MODULE
- * 
- * This module fetches real-time stock data from external APIs instead of using dummy data.
- * 
- * Data Sources:
- * 1. MoneyControl API - Primary source for Indian stock quotes
- * 2. Finnhub API - Alternative source (requires API key)
- * 3. BSE/NSE Direct APIs - Direct exchange data
- */
+// ─── Yahoo Finance (primary, free, no API key) ───────────────────────────────
 
 /**
- * Fetch stock quote data from MoneyControl
- * API: https://www.moneycontrol.com/mcapi/v1/quote/
+ * Batch-fetch up to 50 NSE stocks at once via Yahoo Finance v7 quote API.
+ * Returns a map of NSE symbol → raw YF quote object.
  */
+async function fetchBatchYahooFinance(symbols: string[]): Promise<Map<string, MarketData>> {
+  const stockList = getAllStocks();
+  const yfSymbols = symbols.map(s => `${s}.NS`).join(',');
+  const url =
+    `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${yfSymbols}` +
+    `&fields=regularMarketPrice,regularMarketChange,regularMarketChangePercent,` +
+    `regularMarketVolume,regularMarketDayHigh,regularMarketDayLow,` +
+    `regularMarketOpen,regularMarketPreviousClose`;
+
+  const response = await fetch(url, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      'Accept': 'application/json',
+    },
+  });
+
+  if (!response.ok) return new Map();
+
+  const data = await response.json();
+  const quotes: any[] = data.quoteResponse?.result ?? [];
+  const result = new Map<string, MarketData>();
+
+  for (const q of quotes) {
+    const nseSymbol = (q.symbol as string).replace(/\.(NS|BO)$/, '');
+    const mapping = stockList.find(s => s.symbol === nseSymbol);
+    if (!mapping) continue;
+
+    const price: number = q.regularMarketPrice ?? 0;
+    const prevClose: number = q.regularMarketPreviousClose ?? 0;
+    const change: number = q.regularMarketChange ?? (price - prevClose);
+    const changePct: number = q.regularMarketChangePercent ?? 0;
+
+    result.set(nseSymbol, {
+      symbol: nseSymbol,
+      name: mapping.name,
+      price: Number(price.toFixed(2)),
+      change: Number(change.toFixed(2)),
+      changePct: Number(changePct.toFixed(2)),
+      volume: formatVolume(q.regularMarketVolume ?? 0),
+      high: q.regularMarketDayHigh ?? 0,
+      low: q.regularMarketDayLow ?? 0,
+      open: q.regularMarketOpen ?? 0,
+      prevClose: Number(prevClose.toFixed(2)),
+    });
+  }
+
+  return result;
+}
+
+/**
+ * Fetch a single stock from Yahoo Finance v8 chart API.
+ * Used as a per-symbol fallback when the batch call misses a symbol.
+ */
+async function fetchStockQuoteYahooFinance(symbol: string): Promise<MarketData | null> {
+  try {
+    const stockMapping = getAllStocks().find(s => s.symbol === symbol);
+    if (!stockMapping) return null;
+
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}.NS?interval=1d&range=1d`;
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Accept': 'application/json',
+      },
+    });
+
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    const result = data.chart?.result?.[0];
+    if (!result) return null;
+
+    const meta = result.meta;
+    const price: number = meta.regularMarketPrice ?? 0;
+    const prevClose: number = meta.chartPreviousClose ?? meta.previousClose ?? 0;
+    const change = price - prevClose;
+    const changePct = prevClose > 0 ? (change / prevClose) * 100 : 0;
+    const volumeArr: number[] = result.indicators?.quote?.[0]?.volume ?? [];
+    const volume = volumeArr.length > 0 ? (volumeArr[volumeArr.length - 1] ?? 0) : 0;
+
+    return {
+      symbol,
+      name: stockMapping.name,
+      price: Number(price.toFixed(2)),
+      change: Number(change.toFixed(2)),
+      changePct: Number(changePct.toFixed(2)),
+      volume: formatVolume(volume),
+      high: meta.regularMarketDayHigh ?? 0,
+      low: meta.regularMarketDayLow ?? 0,
+      open: meta.regularMarketOpen ?? 0,
+      prevClose: Number(prevClose.toFixed(2)),
+    };
+  } catch {
+    return null;
+  }
+}
+
+// ─── MoneyControl (secondary, kept for non-quote endpoints) ──────────────────
+
 export async function fetchStockQuoteMoneyControl(symbol: string): Promise<MarketData | null> {
   try {
     const stockMapping = getAllStocks().find(s => s.symbol === symbol);
     if (!stockMapping) return null;
 
-    // MoneyControl API endpoint for stock quote
     const url = `https://www.moneycontrol.com/mcapi/v1/quote/${stockMapping.mcsymbol}`;
-    
+
     const response = await fetch(url, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-      }
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/plain, */*',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Referer': 'https://www.moneycontrol.com/',
+        'Origin': 'https://www.moneycontrol.com',
+      },
     });
 
     if (!response.ok) {
@@ -36,128 +129,135 @@ export async function fetchStockQuoteMoneyControl(symbol: string): Promise<Marke
     }
 
     const data = await response.json();
-    
-    // Transform MoneyControl data to MarketData format
     const quote = data.data?.quote;
     if (!quote) return null;
 
+    const price: number = quote.ltPrice ?? quote.lastPrice ?? 0;
+    const prevClose: number = quote.previousPrice ?? quote.prevClose ?? 0;
+    const change = price - prevClose;
+    const changePct = prevClose > 0 ? (change / prevClose) * 100 : 0;
+
     return {
-      symbol: symbol,
+      symbol,
       name: stockMapping.name,
-      price: quote.ltPrice || quote.lastPrice || 0,
-      change: (quote.ltPrice || quote.lastPrice || 0) - (quote.previousPrice || quote.prevClose || 0),
-      changePct: ((quote.ltPrice || quote.lastPrice || 0) - (quote.previousPrice || quote.prevClose || 0)) / (quote.previousPrice || quote.prevClose || 1) * 100,
-      volume: formatVolume(quote.totalTradedVolume || 0),
-      high: quote.highPrice || quote.high || 0,
-      low: quote.lowPrice || quote.low || 0,
-      open: quote.openPrice || quote.open || 0,
-      prevClose: quote.previousPrice || quote.prevClose || 0,
+      price: Number(price.toFixed(2)),
+      change: Number(change.toFixed(2)),
+      changePct: Number(changePct.toFixed(2)),
+      volume: formatVolume(quote.totalTradedVolume ?? 0),
+      high: quote.highPrice ?? quote.high ?? 0,
+      low: quote.lowPrice ?? quote.low ?? 0,
+      open: quote.openPrice ?? quote.open ?? 0,
+      prevClose: Number(prevClose.toFixed(2)),
     };
-  } catch (error) {
-    console.error(`Error fetching ${symbol} from MoneyControl:`, error);
+  } catch {
     return null;
   }
 }
 
-/**
- * Fetch stock data from Finnhub API
- * Requires API key in environment: FINNHUB_API_KEY
- * Register at: https://finnhub.io/
- */
+// ─── Finnhub (tertiary, requires env var) ────────────────────────────────────
+
 export async function fetchStockQuoteFinnhub(symbol: string): Promise<MarketData | null> {
   try {
     const apiKey = process.env.FINNHUB_API_KEY;
-    if (!apiKey) {
-      console.warn('FINNHUB_API_KEY not configured');
-      return null;
-    }
+    if (!apiKey) return null;
 
     const stockMapping = getAllStocks().find(s => s.symbol === symbol);
     if (!stockMapping) return null;
 
-    // For Indian stocks, Finnhub uses NSE or BSE prefix
-    const finnhubSymbol = `${symbol}.NS`; // NSE (National Stock Exchange)
-    
-    const url = `https://finnhub.io/api/v1/quote?symbol=${finnhubSymbol}&token=${apiKey}`;
-    
+    const url = `https://finnhub.io/api/v1/quote?symbol=${symbol}.NS&token=${apiKey}`;
     const response = await fetch(url);
     if (!response.ok) return null;
 
     const data = await response.json();
-    
+    const price: number = data.c ?? 0;
+    const prevClose: number = data.pc ?? 0;
+
     return {
-      symbol: symbol,
+      symbol,
       name: stockMapping.name,
-      price: data.c || 0, // current price
-      change: (data.c || 0) - (data.pc || 0), // change from prev close
-      changePct: ((data.c || 0) - (data.pc || 0)) / (data.pc || 1) * 100,
-      volume: formatVolume(0), // Finnhub doesn't provide volume in free tier
-      high: data.h || 0, // day high
-      low: data.l || 0, // day low
-      open: data.o || 0, // open price
-      prevClose: data.pc || 0, // previous close
+      price,
+      change: Number((price - prevClose).toFixed(2)),
+      changePct: prevClose > 0 ? Number(((price - prevClose) / prevClose * 100).toFixed(2)) : 0,
+      volume: formatVolume(0),
+      high: data.h ?? 0,
+      low: data.l ?? 0,
+      open: data.o ?? 0,
+      prevClose,
     };
-  } catch (error) {
-    console.error(`Error fetching ${symbol} from Finnhub:`, error);
+  } catch {
     return null;
   }
 }
 
-/**
- * Fetch all stock data in parallel with fallback mechanism
- * Tries MoneyControl first, then falls back to other sources if available
- */
+// ─── Bulk fetch with batching ─────────────────────────────────────────────────
+
+const BATCH_SIZE = 50;
+const BATCH_DELAY_MS = 200;
+
 export async function fetchAllLiveStocks(): Promise<MarketData[]> {
   const allStocks = getAllStocks();
-  
-  console.log(`[LIVE DATA] Fetching data for ${allStocks.length} stocks...`);
-  
-  // Fetch all stocks in parallel with Promise.allSettled for error handling
-  const stockPromises = allStocks.map(async (stock) => {
-    // Try MoneyControl first
-    let quoteData = await fetchStockQuoteMoneyControl(stock.symbol);
-    
-    // Fallback to Finnhub if MoneyControl fails
-    if (!quoteData && process.env.FINNHUB_API_KEY) {
-      quoteData = await fetchStockQuoteFinnhub(stock.symbol);
+  console.log(`[LIVE DATA] Fetching data for ${allStocks.length} stocks via Yahoo Finance...`);
+
+  const allSymbols = allStocks.map(s => s.symbol);
+  const collected = new Map<string, MarketData>();
+
+  // Batch fetch via YF v7 (most efficient — 50 stocks per request)
+  for (let i = 0; i < allSymbols.length; i += BATCH_SIZE) {
+    const batch = allSymbols.slice(i, i + BATCH_SIZE);
+    try {
+      const batchResult = await fetchBatchYahooFinance(batch);
+      batchResult.forEach((v, k) => collected.set(k, v));
+    } catch (err) {
+      console.error(`[LIVE DATA] Batch ${i / BATCH_SIZE + 1} failed:`, err);
     }
-    
-    return quoteData;
-  });
+    if (i + BATCH_SIZE < allSymbols.length) {
+      await new Promise(r => setTimeout(r, BATCH_DELAY_MS));
+    }
+  }
 
-  const results = await Promise.allSettled(stockPromises);
-  
-  // Filter successful results
-  const liveData = results
-    .filter((result): result is PromiseFulfilledResult<MarketData | null> => 
-      result.status === 'fulfilled' && result.value !== null
-    )
-    .map(result => result.value);
+  // Per-symbol fallback (YF v8 chart) for anything the batch missed
+  const missed = allSymbols.filter(s => !collected.has(s));
+  if (missed.length > 0) {
+    console.log(`[LIVE DATA] Retrying ${missed.length} symbols individually...`);
+    const fallbacks = await Promise.allSettled(missed.map(s => fetchStockQuoteYahooFinance(s)));
+    fallbacks.forEach(r => {
+      if (r.status === 'fulfilled' && r.value) {
+        collected.set(r.value.symbol, r.value);
+      }
+    });
+  }
 
-  console.log(`[LIVE DATA] Successfully fetched ${liveData.length} stock quotes`);
-  
-  return liveData;
+  // Last-resort: MoneyControl for anything still missing
+  const stillMissed = allSymbols.filter(s => !collected.has(s));
+  if (stillMissed.length > 0) {
+    console.log(`[LIVE DATA] MoneyControl fallback for ${stillMissed.length} symbols...`);
+    const mcResults = await Promise.allSettled(stillMissed.map(s => fetchStockQuoteMoneyControl(s)));
+    mcResults.forEach(r => {
+      if (r.status === 'fulfilled' && r.value) {
+        collected.set(r.value.symbol, r.value);
+      }
+    });
+  }
+
+  const results = Array.from(collected.values());
+  console.log(`[LIVE DATA] Successfully fetched ${results.length} stock quotes`);
+  return results;
 }
 
-/**
- * Fetch single stock with caching (cache for 30 seconds)
- */
+// ─── Per-symbol cache (30s TTL) ──────────────────────────────────────────────
+
 const stockCache = new Map<string, { data: MarketData; timestamp: number }>();
-const CACHE_DURATION = 30000; // 30 seconds
+const CACHE_DURATION = 30_000;
 
 export async function fetchStockDataWithCache(symbol: string): Promise<MarketData | null> {
-  // Check cache first
   const cached = stockCache.get(symbol);
   if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
     return cached.data;
   }
 
-  // Fetch fresh data
-  let quoteData = await fetchStockQuoteMoneyControl(symbol);
-  
-  if (!quoteData && process.env.FINNHUB_API_KEY) {
-    quoteData = await fetchStockQuoteFinnhub(symbol);
-  }
+  let quoteData = await fetchStockQuoteYahooFinance(symbol);
+  if (!quoteData) quoteData = await fetchStockQuoteMoneyControl(symbol);
+  if (!quoteData && process.env.FINNHUB_API_KEY) quoteData = await fetchStockQuoteFinnhub(symbol);
 
   if (quoteData) {
     stockCache.set(symbol, { data: quoteData, timestamp: Date.now() });
@@ -166,41 +266,30 @@ export async function fetchStockDataWithCache(symbol: string): Promise<MarketDat
   return quoteData;
 }
 
-/**
- * Format volume number to human-readable format (e.g., 1.2M, 500K)
- */
-function formatVolume(volume: number): string {
-  if (volume >= 1000000) {
-    return (volume / 1000000).toFixed(1) + 'M';
-  } else if (volume >= 1000) {
-    return (volume / 1000).toFixed(1) + 'K';
-  }
-  return volume.toString();
-}
+// ─── Periodic bulk refresh (every 5 min) ─────────────────────────────────────
 
-/**
- * Setup periodic data refresh (refresh every 5 minutes)
- */
 let lastFetchTime = 0;
-const REFRESH_INTERVAL = 5 * 60 * 1000; // 5 minutes
+const REFRESH_INTERVAL = 5 * 60 * 1000;
 
 export async function getOrRefreshAllStocks(): Promise<MarketData[]> {
   const now = Date.now();
-  
-  // Only fetch if last fetch was more than REFRESH_INTERVAL ago
+
   if (now - lastFetchTime < REFRESH_INTERVAL) {
-    // Return cached data if available
     const stocks = getAllStocks();
-    const promises = stocks.map(s => fetchStockDataWithCache(s.symbol));
-    const results = await Promise.allSettled(promises);
-    
+    const results = await Promise.allSettled(stocks.map(s => fetchStockDataWithCache(s.symbol)));
     return results
-      .filter((result): result is PromiseFulfilledResult<MarketData | null> => 
-        result.status === 'fulfilled' && result.value !== null
-      )
-      .map(result => result.value);
+      .filter((r): r is PromiseFulfilledResult<MarketData | null> => r.status === 'fulfilled' && r.value !== null)
+      .map(r => r.value as MarketData);
   }
-  
+
   lastFetchTime = now;
-  return await fetchAllLiveStocks();
+  return fetchAllLiveStocks();
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function formatVolume(volume: number): string {
+  if (volume >= 1_000_000) return (volume / 1_000_000).toFixed(1) + 'M';
+  if (volume >= 1_000) return (volume / 1_000).toFixed(1) + 'K';
+  return volume.toString();
 }

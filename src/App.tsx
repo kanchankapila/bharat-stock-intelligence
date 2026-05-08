@@ -4,12 +4,12 @@ import {
   AreaChart, Area, BarChart, Bar, ReferenceLine, PieChart as RePieChart, Pie, Cell,
   ComposedChart, ReferenceArea
 } from 'recharts';
-import { 
-  TrendingUp, TrendingDown, Search, BarChart3, PieChart, Info, 
-  AlertCircle, ArrowUpRight, ArrowDownRight, Activity, Zap, 
+import {
+  TrendingUp, TrendingDown, Search, BarChart3, PieChart, Info,
+  AlertCircle, ArrowUpRight, ArrowDownRight, Activity, Zap,
   LayoutDashboard, Filter, History, User, LogIn, Plus, Heart, Share2, Download,
   ArrowLeft, Eye, ChevronUp, ChevronDown, Save, Bookmark, BrainCircuit, CheckCircle2,
-  Users, Trophy, Bookmark as WatchlistIcon
+  Users, Trophy, Bookmark as WatchlistIcon, BarChart2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format } from 'date-fns';
@@ -19,7 +19,7 @@ import {
   signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User as FirebaseUser 
 } from 'firebase/auth';
 
-import { useMarketData, getIndexData, MarketData } from './services/marketService';
+import { useMarketData, MarketData } from './services/marketService';
 
 import { trpc } from './lib/trpc';
 import { useNewsFeed, NewsArticle } from './services/newsService';
@@ -89,6 +89,7 @@ const Navbar: React.FC<{
         <div className="hidden md:flex items-center gap-6">
           {[
             { icon: LayoutDashboard, label: 'Dashboard', id: 'dashboard' },
+            { icon: BarChart2, label: 'Indices', id: 'indices' },
             { icon: Activity, label: 'Market Map', id: 'market-map' },
             { icon: Filter, label: 'Screener', id: 'screener' },
             { icon: History, label: 'Backtest', id: 'backtest' },
@@ -530,44 +531,453 @@ const SectorPerformance: React.FC = () => {
 };
 
 // --- Index Overview Component ---
+// ─── Indices Feature ─────────────────────────────────────────────────────────
+
+function extractIndexId(url: string): string | null {
+  const m = url.match(/-(\d+)\.html$/);
+  return m ? m[1] : null;
+}
+
+const IndexDetailPage: React.FC<{
+  indexId: string;
+  indexName: string;
+  onBack: () => void;
+}> = ({ indexId, indexName, onBack }) => {
+  const [techPeriod, setTechPeriod] = useState<'D' | 'W' | 'M'>('D');
+
+  const { data: details } = trpc.getIndexDetails.useQuery({ indexId }, { refetchInterval: 30000 });
+  const { data: fullDetails } = trpc.getIndexFullDetails.useQuery({ indId: indexId }, { refetchInterval: 60000 });
+  const { data: priceFeed } = trpc.getIndexPriceFeed.useQuery(
+    { bridgeSymbol: (details as any)?.bridgeSymbol ?? '' },
+    { enabled: !!(details as any)?.bridgeSymbol, refetchInterval: 30000 }
+  );
+  const { data: stocksList } = trpc.getIndexStocksList.useQuery({ indId: indexId, type: '0' }, { refetchInterval: 60000 });
+  const { data: technicals } = trpc.getIndexTechnicals.useQuery(
+    { period: techPeriod, bridgeSymbol: (details as any)?.bridgeSymbol ?? '' },
+    { enabled: !!(details as any)?.bridgeSymbol, refetchInterval: 60000 }
+  );
+
+  const d = details as any;
+  const idx = (fullDetails as any)?.indices;
+  const pf = (priceFeed as any)?.data;
+  const stocks = (stocksList as any)?.item ?? [];
+  const tech = (technicals as any)?.data;
+  const isUp = (d?.direction ?? 1) === 1;
+
+  const perf = idx ? [
+    { label: 'YTD', value: idx.ytd },
+    { label: '1W', value: idx.week1 },
+    { label: '1M', value: idx.month1 },
+    { label: '3M', value: idx.month3 },
+    { label: '6M', value: idx.month6 },
+    { label: '1Y', value: idx.year1 },
+    { label: '2Y', value: idx.year2 },
+    { label: '3Y', value: idx.year3 },
+    { label: '5Y', value: idx.year5 },
+  ] : [];
+
+  const mas = idx ? [
+    { label: '30D MA', value: idx.dayavg30 },
+    { label: '50D MA', value: idx.dayavg50 },
+    { label: '150D MA', value: idx.dayavg150 },
+    { label: '200D MA', value: idx.dayavg200 },
+  ] : [];
+
+  return (
+    <div className="space-y-6 p-6">
+      <button onClick={onBack} className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors text-sm font-bold">
+        <ArrowLeft className="w-4 h-4" /> All Indices
+      </button>
+
+      {/* Header */}
+      <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6">
+        <div className="flex flex-wrap items-start justify-between gap-6">
+          <div>
+            <div className="flex items-center gap-3 mb-2">
+              <h1 className="text-2xl font-black text-white uppercase tracking-tight">{indexName}</h1>
+              <span className={cn("px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-widest",
+                isUp ? "bg-emerald-500/10 text-emerald-400" : "bg-rose-500/10 text-rose-400")}>
+                {isUp ? 'Bullish' : 'Bearish'}
+              </span>
+            </div>
+            <div className="flex items-end gap-3">
+              <span className="text-4xl font-black text-white tabular-nums">{d?.currentPrice ?? '—'}</span>
+              <div className={cn("flex items-center gap-1 mb-1", isUp ? "text-emerald-400" : "text-rose-400")}>
+                {isUp ? <ArrowUpRight className="w-5 h-5" /> : <ArrowDownRight className="w-5 h-5" />}
+                <span className="text-lg font-black">{d?.priceChange}</span>
+                <span className="text-sm opacity-70">({d?.perChange}%)</span>
+              </div>
+            </div>
+            {idx && <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest mt-2">Updated: {idx.lastupdated}</p>}
+          </div>
+          {idx && (
+            <div className="grid grid-cols-2 gap-3">
+              {[
+                { label: 'Open', value: idx.open },
+                { label: 'High', value: idx.high },
+                { label: 'Low', value: idx.low },
+                { label: 'Prev Close', value: idx.prevclose },
+              ].map(s => (
+                <div key={s.label} className="bg-slate-950 rounded-xl p-3 text-right min-w-[100px]">
+                  <p className="text-[9px] font-black uppercase tracking-widest text-slate-500">{s.label}</p>
+                  <p className="text-sm font-black text-white tabular-nums">{s.value}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        {idx && (() => {
+          const cur = parseFloat((idx.lastprice ?? '0').replace(/,/g, ''));
+          const lo = parseFloat((idx.yearlylow ?? '0').replace(/,/g, ''));
+          const hi = parseFloat((idx.yearlyhigh ?? '1').replace(/,/g, ''));
+          const pct = Math.max(5, Math.min(95, ((cur - lo) / (hi - lo || 1)) * 100));
+          return (
+            <div className="mt-6">
+              <div className="flex justify-between text-[9px] font-black uppercase tracking-widest text-slate-500 mb-1">
+                <span>52W Low: {idx.yearlylow}</span>
+                <span>52W High: {idx.yearlyhigh}</span>
+              </div>
+              <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                <div className={cn("h-full rounded-full", isUp ? "bg-emerald-500" : "bg-rose-500")} style={{ width: `${pct}%` }} />
+              </div>
+            </div>
+          );
+        })()}
+      </div>
+
+      {/* Performance Returns */}
+      {perf.length > 0 && (
+        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6">
+          <h2 className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-4">Performance Returns</h2>
+          <div className="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-9 gap-3">
+            {perf.map(p => {
+              const v = parseFloat(String(p.value ?? 0));
+              return (
+                <div key={p.label} className="bg-slate-950 rounded-xl p-3 text-center">
+                  <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-1">{p.label}</p>
+                  <p className={cn("text-sm font-black tabular-nums", v >= 0 ? "text-emerald-400" : "text-rose-400")}>
+                    {v >= 0 ? '+' : ''}{v.toFixed(1)}%
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Moving Averages + A/D */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {mas.length > 0 && (
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6">
+            <h2 className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-4">Moving Averages vs Current</h2>
+            <div className="space-y-3">
+              {mas.map(ma => {
+                const cur = parseFloat((idx!.lastprice ?? '0').replace(/,/g, ''));
+                const maV = parseFloat((ma.value ?? '0').replace(/,/g, ''));
+                const above = cur > maV;
+                return (
+                  <div key={ma.label} className="flex items-center justify-between p-3 bg-slate-950 rounded-xl">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">{ma.label}</span>
+                    <div className="flex items-center gap-3">
+                      <span className="text-sm font-black text-white tabular-nums">{ma.value}</span>
+                      <span className={cn("text-[9px] font-black px-2 py-0.5 rounded uppercase",
+                        above ? "bg-emerald-500/10 text-emerald-400" : "bg-rose-500/10 text-rose-400")}>
+                        {above ? 'Above' : 'Below'}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Advance / Decline */}
+        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6">
+          <h2 className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-4">Advance / Decline</h2>
+          {(() => {
+            const adv = Number(pf?.adv ?? 0);
+            const decl = Number(pf?.decl ?? 0);
+            const unchg = Number(pf?.unchg ?? 0);
+            const total = adv + decl + unchg || 1;
+            return (
+              <div className="space-y-4">
+                <div className="flex h-8 rounded-lg overflow-hidden gap-px">
+                  <div className="bg-emerald-500 transition-all" style={{ width: `${(adv / total) * 100}%` }} />
+                  <div className="bg-slate-700 transition-all" style={{ width: `${(unchg / total) * 100}%` }} />
+                  <div className="bg-rose-500 transition-all" style={{ width: `${(decl / total) * 100}%` }} />
+                </div>
+                <div className="grid grid-cols-3 gap-3">
+                  {[
+                    { label: 'Advances', value: adv, color: 'text-emerald-400' },
+                    { label: 'Unchanged', value: unchg, color: 'text-slate-400' },
+                    { label: 'Declines', value: decl, color: 'text-rose-400' },
+                  ].map(item => (
+                    <div key={item.label} className="bg-slate-950 rounded-xl p-3 text-center">
+                      <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-1">{item.label}</p>
+                      <p className={cn("text-xl font-black tabular-nums", item.color)}>{item.value}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+        </div>
+      </div>
+
+      {/* Technical Analysis */}
+      {tech && (
+        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6">
+          <div className="flex items-center justify-between mb-5">
+            <h2 className="text-[10px] font-black uppercase tracking-widest text-slate-500">Technical Analysis</h2>
+            <div className="flex gap-1">
+              {(['D', 'W', 'M'] as const).map(p => (
+                <button key={p} onClick={() => setTechPeriod(p)}
+                  className={cn("px-3 py-1 rounded text-[10px] font-black uppercase transition-colors",
+                    techPeriod === p ? "bg-blue-500 text-white" : "bg-slate-800 text-slate-400 hover:text-white")}>
+                  {p === 'D' ? 'Daily' : p === 'W' ? 'Weekly' : 'Monthly'}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {tech.sentiments && (
+            <div className="mb-5 p-4 bg-slate-950 rounded-2xl">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Overall Sentiment</span>
+                <span className={cn("px-3 py-1 rounded text-[10px] font-black uppercase",
+                  tech.sentiments.indication?.includes('Bullish') ? "bg-emerald-500/10 text-emerald-400" :
+                  tech.sentiments.indication?.includes('Bearish') ? "bg-rose-500/10 text-rose-400" :
+                  "bg-slate-700 text-slate-300")}>
+                  {tech.sentiments.indication}
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-3 text-center">
+                <div><p className="text-emerald-400 text-xl font-black">{tech.sentiments.totalBullish}</p><p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mt-1">Bullish</p></div>
+                <div><p className="text-slate-400 text-xl font-black">{tech.sentiments.totalNeutral}</p><p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mt-1">Neutral</p></div>
+                <div><p className="text-rose-400 text-xl font-black">{tech.sentiments.totalBearish}</p><p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mt-1">Bearish</p></div>
+              </div>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {tech.indicators && (
+              <div>
+                <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-3">Indicators</p>
+                <div className="space-y-2">
+                  {tech.indicators.map((ind: any) => {
+                    const val = Array.isArray(ind.value)
+                      ? `UB:${ind.value[0]?.value} LB:${ind.value[1]?.value}`
+                      : ind.value;
+                    return (
+                      <div key={ind.id} className="flex items-center justify-between p-2 bg-slate-950 rounded-lg">
+                        <span className="text-[10px] font-black text-slate-400">{ind.displayName}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] text-white font-bold tabular-nums">{val}</span>
+                          <span className={cn("text-[9px] font-black px-2 py-0.5 rounded uppercase",
+                            ind.indication === 'Bullish' ? "bg-emerald-500/10 text-emerald-400" :
+                            ind.indication === 'Bearish' ? "bg-rose-500/10 text-rose-400" :
+                            "bg-slate-700 text-slate-400")}>
+                            {ind.indication}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {tech.sma && (
+              <div>
+                <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-3">SMA Signals</p>
+                <div className="space-y-2">
+                  {tech.sma.map((s: any) => (
+                    <div key={s.key} className="flex items-center justify-between p-2 bg-slate-950 rounded-lg">
+                      <span className="text-[10px] font-black text-slate-400">SMA {s.key}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-white font-bold tabular-nums">{s.value}</span>
+                        <span className={cn("text-[9px] font-black px-2 py-0.5 rounded uppercase",
+                          s.indication === 'Bullish' ? "bg-emerald-500/10 text-emerald-400" : "bg-rose-500/10 text-rose-400")}>
+                          {s.indication}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Constituent Stocks */}
+      {stocks.length > 0 && (
+        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6">
+          <h2 className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-4">
+            Constituent Stocks ({stocks.length})
+          </h2>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="text-[9px] font-black uppercase tracking-widest text-slate-500 border-b border-slate-800">
+                  <th className="text-left pb-3 pr-4">Symbol / Company</th>
+                  <th className="text-right pb-3 pr-4">Price</th>
+                  <th className="text-right pb-3 pr-4">Change</th>
+                  <th className="text-right pb-3 pr-4">Chg%</th>
+                  <th className="text-right pb-3 pr-4">Volume</th>
+                  <th className="text-right pb-3">Mkt Cap (Cr)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {stocks.slice(0, 50).map((s: any) => {
+                  const up = s.direction === '1';
+                  return (
+                    <tr key={s.id} className="border-t border-slate-800/40 hover:bg-slate-800/30 transition-colors">
+                      <td className="py-2.5 pr-4">
+                        <p className="text-sm font-black text-white">{s.id}</p>
+                        <p className="text-[9px] text-slate-500 font-bold">{s.shortname}</p>
+                      </td>
+                      <td className="py-2.5 pr-4 text-right text-sm font-black text-white tabular-nums">₹{s.lastvalue}</td>
+                      <td className={cn("py-2.5 pr-4 text-right text-sm font-black tabular-nums", up ? "text-emerald-400" : "text-rose-400")}>
+                        {up ? '+' : ''}{s.change}
+                      </td>
+                      <td className="py-2.5 pr-4 text-right">
+                        <span className={cn("text-[9px] font-black px-2 py-0.5 rounded",
+                          up ? "bg-emerald-500/10 text-emerald-400" : "bg-rose-500/10 text-rose-400")}>
+                          {up ? '+' : ''}{s.percentchange}%
+                        </span>
+                      </td>
+                      <td className="py-2.5 pr-4 text-right text-[10px] font-bold text-slate-400 tabular-nums">{s.volume}</td>
+                      <td className="py-2.5 text-right text-[10px] font-bold text-slate-400 tabular-nums">{s.mktcap}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const IndicesPage: React.FC = () => {
+  const [selectedIndex, setSelectedIndex] = useState<{ id: string; name: string } | null>(null);
+
+  const { data: indicesData, isLoading } = trpc.getAllIndices.useQuery(undefined, { refetchInterval: 30000 });
+
+  if (selectedIndex) {
+    return (
+      <IndexDetailPage
+        indexId={selectedIndex.id}
+        indexName={selectedIndex.name}
+        onBack={() => setSelectedIndex(null)}
+      />
+    );
+  }
+
+  const raw = (indicesData as any)?.data;
+  const indicesList: { name: string; list: any[] }[] = raw?.indiceList ?? [];
+
+  if (isLoading) {
+    return (
+      <div className="p-6 space-y-6">
+        <h1 className="text-2xl font-black text-white uppercase tracking-tight">Market Indices</h1>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {Array.from({ length: 12 }).map((_, i) => (
+            <div key={i} className="h-24 bg-slate-900 border border-slate-800 rounded-2xl animate-pulse" />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-6 space-y-8">
+      <div>
+        <h1 className="text-2xl font-black text-white uppercase tracking-tight mb-1">Market Indices</h1>
+        <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Live Indian Market Intelligence — Click any index for details</p>
+      </div>
+
+      {indicesList.map(group => (
+        <div key={group.name}>
+          <h2 className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-4 pl-1">{group.name}</h2>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+            {group.list
+              .filter((idx: any) => idx.name)
+              .map((idx: any) => {
+                const idxId = extractIndexId(idx.url);
+                const up = idx.direction === 1;
+                const changePct = parseFloat(idx.changePer ?? '0');
+                return (
+                  <motion.button
+                    key={idx.name + idx.url}
+                    onClick={() => idxId && setSelectedIndex({ id: idxId, name: idx.name })}
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    className={cn(
+                      "bg-slate-900 border rounded-2xl p-4 text-left transition-all hover:shadow-lg group",
+                      up ? "border-slate-800 hover:border-emerald-500/30" : "border-slate-800 hover:border-rose-500/30"
+                    )}
+                  >
+                    <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-2 group-hover:text-slate-400 transition-colors line-clamp-2 leading-relaxed">
+                      {idx.name}
+                    </p>
+                    <p className="text-base font-black text-white tabular-nums mb-1">{idx.value}</p>
+                    <div className={cn("flex items-center gap-1 text-[10px] font-black", up ? "text-emerald-400" : "text-rose-400")}>
+                      {up ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
+                      {up ? '+' : ''}{idx.change} ({up ? '+' : ''}{changePct.toFixed(2)}%)
+                    </div>
+                  </motion.button>
+                );
+              })}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+};
+
 const IndexOverview: React.FC = () => {
   const { data: indices, isLoading } = trpc.getAllIndices.useQuery(undefined, {
-    refetchInterval: 30000, // Refresh every 30s
+    refetchInterval: 30000,
   });
 
   if (isLoading || !indices) return <div className="h-40 bg-slate-900/50 animate-pulse rounded-2xl" />;
 
-  // Mapping the API response to the UI format
-  // Moneycontrol indices API usually returns { success: 1, data: [...] } or { data: { indexList: [...] } }
-  const rawData = (indices as any)?.data;
-  const indicesList = Array.isArray(rawData) ? rawData : (rawData?.indexList || [
-    { indexName: 'NIFTY 50', lastPrice: '22453.20', percentChange: '0.84', direction: '1' },
-    { indexName: 'SENSEX', lastPrice: '73845.54', percentChange: '0.72', direction: '1' },
-    { indexName: 'NIFTY BANK', lastPrice: '47285.30', percentChange: '1.24', direction: '1' },
-    { indexName: 'INDIA VIX', lastPrice: '14.82', percentChange: '2.40', direction: '-1' }
-  ]);
+  // MC API returns: { data: { indiceList: [{ name: "Key Indices", list: [...] }, ...] } }
+  const groups: { name: string; list: any[] }[] = (indices as any)?.data?.indiceList ?? [];
+  const keyList = groups.find(g => g.name === 'Key Indices')?.list ?? [];
 
   return (
     <Card title="Market Watch" icon={Activity}>
-       <div className="space-y-4 pt-2">
-         {indicesList.slice(4, 10).map((idx: any) => (
-           <div key={idx.indexName} className="flex justify-between items-center p-3 bg-slate-950 rounded-xl border border-slate-800/50 hover:border-slate-700 transition-all">
-             <div>
-               <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{idx.indexName}</p>
-               <p className="text-sm font-black text-white tabular-nums mt-0.5">₹{idx.lastPrice}</p>
-             </div>
-             <div className="text-right">
-               <div className={cn(
-                 "flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded",
-                 idx.direction === "1" ? "bg-emerald-500/10 text-emerald-500" : "bg-rose-500/10 text-rose-500"
-               )}>
-                 {idx.direction === "1" ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-                 {idx.percentChange}%
-               </div>
-             </div>
-           </div>
-         ))}
-       </div>
+      <div className="space-y-3 pt-2">
+        {keyList.slice(0, 8).filter((idx: any) => idx.name).map((idx: any) => {
+          const isUp = idx.direction === 1;
+          const pct = parseFloat(idx.changePer ?? '0');
+          return (
+            <div key={idx.name} className="flex justify-between items-center p-3 bg-slate-950 rounded-xl border border-slate-800/50 hover:border-slate-700 transition-all">
+              <div>
+                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{idx.name}</p>
+                <p className="text-sm font-black text-white tabular-nums mt-0.5">{idx.value}</p>
+              </div>
+              <div className="text-right">
+                <div className={cn(
+                  "flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded",
+                  isUp ? "bg-emerald-500/10 text-emerald-500" : "bg-rose-500/10 text-rose-500"
+                )}>
+                  {isUp ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+                  {isUp ? '+' : ''}{pct.toFixed(2)}%
+                </div>
+                <p className={cn("text-[9px] font-bold mt-1 tabular-nums", isUp ? "text-emerald-600" : "text-rose-600")}>
+                  {isUp ? '+' : ''}{idx.change}
+                </p>
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </Card>
   );
 };
@@ -2073,7 +2483,7 @@ const MarketMap: React.FC = () => {
     setActiveInd(val);
   };
 
-  const indexList = indices?.data?.indexList || [];
+  const indexList: any[] = (indices as any)?.data?.indiceList?.flatMap((g: any) => g.list) ?? [];
   const quickIndices = [
     { id: '9', name: 'Nifty 50' },
     { id: '4', name: 'Sensex' },
@@ -2100,13 +2510,13 @@ const MarketMap: React.FC = () => {
              </p>
              {currentIndexData && (
                 <div className="flex items-center gap-2 bg-slate-900 px-3 py-1 rounded-lg border border-slate-800">
-                   <span className="text-xs font-black text-white tabular-nums">{parseFloat(currentIndexData.lastprice).toLocaleString()}</span>
+                   <span className="text-xs font-black text-white tabular-nums">{parseFloat(currentIndexData.value).toLocaleString()}</span>
                    <span className={cn(
                       "text-[10px] font-bold flex items-center gap-0.5",
-                      parseFloat(currentIndexData.percentchange) >= 0 ? "text-emerald-400" : "text-rose-400"
+                      parseFloat(currentIndexData.changePer) >= 0 ? "text-emerald-400" : "text-rose-400"
                    )}>
-                      {parseFloat(currentIndexData.percentchange) >= 0 ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                      {Math.abs(parseFloat(currentIndexData.percentchange)).toFixed(2)}%
+                      {parseFloat(currentIndexData.changePer) >= 0 ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                      {Math.abs(parseFloat(currentIndexData.changePer)).toFixed(2)}%
                    </span>
                 </div>
              )}
@@ -2566,15 +2976,18 @@ const Backtest: React.FC = () => {
 // --- Stock Details Page ---
 
 const TechnicalAnalysis: React.FC<{ symbol: string }> = ({ symbol }) => {
-  const { data: tech, isLoading } = trpc.getTechnicalDetails.useQuery({ symbol });
+  const [timeframe, setTimeframe] = useState<'D' | 'W' | 'M'>('D');
+  const [maType, setMaType] = useState<'SMA' | 'EMA'>('SMA');
+  const { data: tech, isLoading } = trpc.getTechnicalDetails.useQuery({ symbol, dur: timeframe });
   const { data: technicalScan, isLoading: scanLoading } = trpc.getTechnicalScan.useQuery({ symbol });
   const { data: ohlcData, isLoading: ohlcLoading } = trpc.getOHLCData.useQuery({ symbol, dur: '1y' });
 
   if (isLoading || scanLoading || ohlcLoading) return <div className="p-20 text-center animate-pulse text-slate-500">Processing signals...</div>;
 
-  const indicators = tech?.data?.indicators || [];
-  const movingAverages = tech?.data?.movingAverages || [];
-  const macdData = indicators.find((i: any) => i.name === 'MACD') || { value: 'N/A', sentiment: 'Neutral' };
+  const indicators = tech?.data?.indicators?.map((i: any) => ({ name: i.displayName, value: i.value, sentiment: i.indication })) || [];
+  const movingAverages = tech?.data?.[maType.toLowerCase()]?.map((i: any) => ({ name: `${maType} ${i.key}`, value: i.value, sentiment: i.indication })) || [];
+  const crossovers = tech?.data?.crossover || [];
+  const macdData = indicators.find((i: any) => i.name.includes('MACD')) || { value: 'N/A', sentiment: 'Neutral' };
 
   // Map OHLC to Candlestick format for detection
   const candles: Candlestick[] = ohlcData?.data?.map((d: any) => ({
@@ -2589,18 +3002,45 @@ const TechnicalAnalysis: React.FC<{ symbol: string }> = ({ symbol }) => {
 
   return (
     <div className="space-y-6">
+      {/* Timeframe Selector */}
+      <div className="flex justify-end gap-2 mb-4">
+        {[
+          { id: 'D', label: 'Daily' },
+          { id: 'W', label: 'Weekly' },
+          { id: 'M', label: 'Monthly' }
+        ].map(tf => (
+          <button
+            key={tf.id}
+            onClick={() => setTimeframe(tf.id as any)}
+            className={cn(
+              "px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all border",
+              timeframe === tf.id ? "bg-blue-600 border-blue-600 text-white shadow-lg" : "bg-slate-950 border-slate-800 text-slate-500 hover:text-white"
+            )}
+          >
+            {tf.label}
+          </button>
+        ))}
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <Card title="Momentum Indicators" icon={Activity}>
            <div className="space-y-4">
-              {indicators.slice(0, 6).map((ind: any) => (
+              {indicators.map((ind: any) => (
                 <div key={ind.name} className="flex justify-between items-center p-3 bg-slate-950 rounded-xl border border-slate-800/50">
                   <div>
                     <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{ind.name}</p>
-                    <p className="text-xs font-bold text-white mt-0.5">{ind.value}</p>
+                    {Array.isArray(ind.value) ? (
+                      <p className="text-xs font-bold text-slate-400 mt-0.5">Multiple Bands</p>
+                    ) : (
+                      <p className="text-xs font-bold text-white mt-0.5">{ind.value}</p>
+                    )}
                   </div>
                   <span className={cn(
-                    "text-[9px] font-black px-2 py-0.5 rounded uppercase tracking-tighter",
-                    ind.sentiment === 'Bullish' ? "bg-emerald-500/10 text-emerald-500" : "bg-rose-500/10 text-rose-500"
+                    "text-[9px] font-black px-2 py-0.5 rounded uppercase tracking-tighter whitespace-nowrap",
+                    ind.sentiment.includes('Bullish') ? "bg-emerald-500/10 text-emerald-500" :
+                    ind.sentiment.includes('Bearish') ? "bg-rose-500/10 text-rose-500" :
+                    ind.sentiment.includes('Overbought') || ind.sentiment.includes('High') ? "bg-purple-500/10 text-purple-400" :
+                    ind.sentiment.includes('Oversold') ? "bg-amber-500/10 text-amber-500" : "bg-slate-800 text-slate-400"
                   )}>
                     {ind.sentiment}
                   </span>
@@ -2608,60 +3048,102 @@ const TechnicalAnalysis: React.FC<{ symbol: string }> = ({ symbol }) => {
               ))}
            </div>
         </Card>
-        <Card title="MACD Analysis" icon={Zap}>
-           <div className="space-y-5">
-              <div className="p-4 bg-slate-950 border border-slate-800 rounded-2xl">
-                 <div className="flex justify-between items-end mb-4">
-                    <div>
-                       <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Momentum Oscillator</p>
-                       <h4 className="text-xl font-black text-white italic tracking-tighter">MACD Line</h4>
-                    </div>
-                    <span className={cn(
-                       "text-[10px] font-black px-3 py-1 rounded uppercase italic tracking-tighter",
-                       macdData.sentiment === 'Bullish' ? "bg-emerald-500/20 text-emerald-500 border border-emerald-500/30" : "bg-rose-500/20 text-rose-500 border border-rose-500/30"
-                    )}>
-                       {macdData.sentiment}
-                    </span>
-                 </div>
-                 
-                 <div className="space-y-3">
-                    <div className="flex justify-between text-[11px] font-bold">
-                       <span className="text-slate-400">Current Value:</span>
-                       <span className="text-white">{macdData.value}</span>
-                    </div>
-                    <div className="flex justify-between text-[11px] font-bold">
-                       <span className="text-slate-400">Signal Crossover:</span>
-                       <span className={macdData.sentiment === 'Bullish' ? "text-emerald-400" : "text-rose-400"}>
-                          {macdData.sentiment === 'Bullish' ? 'Bullish Crossover' : 'Bearish Crossover'}
-                       </span>
-                    </div>
-                 </div>
+        
+        <div className="space-y-6">
+          <Card title="MACD Analysis" icon={Zap}>
+             <div className="space-y-5">
+                <div className="p-4 bg-slate-950 border border-slate-800 rounded-2xl">
+                   <div className="flex justify-between items-end mb-4">
+                      <div>
+                         <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Momentum Oscillator</p>
+                         <h4 className="text-xl font-black text-white italic tracking-tighter">MACD Line</h4>
+                      </div>
+                      <span className={cn(
+                         "text-[10px] font-black px-3 py-1 rounded uppercase italic tracking-tighter",
+                         macdData.sentiment === 'Bullish' ? "bg-emerald-500/20 text-emerald-500 border border-emerald-500/30" : "bg-rose-500/20 text-rose-500 border border-rose-500/30"
+                      )}>
+                         {macdData.sentiment}
+                      </span>
+                   </div>
+                   
+                   <div className="space-y-3">
+                      <div className="flex justify-between text-[11px] font-bold">
+                         <span className="text-slate-400">Current Value:</span>
+                         <span className="text-white">{macdData.value}</span>
+                      </div>
+                      <div className="flex justify-between text-[11px] font-bold">
+                         <span className="text-slate-400">Signal Crossover:</span>
+                         <span className={macdData.sentiment === 'Bullish' ? "text-emerald-400" : "text-rose-400"}>
+                            {macdData.sentiment === 'Bullish' ? 'Bullish Crossover' : 'Bearish Crossover'}
+                         </span>
+                      </div>
+                   </div>
 
-                 <div className="mt-5 pt-5 border-t border-slate-900">
-                    <div className="flex items-start gap-3">
-                       <Info className="w-4 h-4 text-blue-500 mt-0.5 shrink-0" />
-                       <p className="text-[11px] text-slate-400 leading-relaxed italic">
-                          MACD is a trend-following momentum indicator. A <span className="text-white font-bold">Bullish Crossover</span> occurs when the MACD line passes above the signal line.
-                       </p>
-                    </div>
-                 </div>
-              </div>
+                   <div className="mt-5 pt-5 border-t border-slate-900">
+                      <div className="flex items-start gap-3">
+                         <Info className="w-4 h-4 text-blue-500 mt-0.5 shrink-0" />
+                         <p className="text-[11px] text-slate-400 leading-relaxed italic">
+                            MACD is a trend-following momentum indicator. A <span className="text-white font-bold">Bullish Crossover</span> occurs when the MACD line passes above the signal line.
+                         </p>
+                      </div>
+                   </div>
+                </div>
 
-              <div className="space-y-3">
-                 <h5 className="text-[10px] font-black text-slate-500 uppercase tracking-widest pl-1">Scanner Insights</h5>
-                 {technicalScan?.signals?.filter((s: any) => s.type === 'MACD').map((signal: any, idx: number) => (
-                    <div key={idx} className="p-3 bg-blue-500/5 border border-blue-500/10 rounded-xl">
-                       <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest mb-1">{signal.label}</p>
-                       <p className="text-[11px] text-slate-400 leading-relaxed italic">{signal.description}</p>
-                    </div>
-                 ))}
-              </div>
-           </div>
-        </Card>
+                <div className="space-y-3">
+                   <h5 className="text-[10px] font-black text-slate-500 uppercase tracking-widest pl-1">Scanner Insights</h5>
+                   {technicalScan?.signals?.filter((s: any) => s.type === 'MACD').map((signal: any, idx: number) => (
+                      <div key={idx} className="p-3 bg-blue-500/5 border border-blue-500/10 rounded-xl">
+                         <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest mb-1">{signal.label}</p>
+                         <p className="text-[11px] text-slate-400 leading-relaxed italic">{signal.description}</p>
+                      </div>
+                   ))}
+                </div>
+             </div>
+          </Card>
+
+          <Card title="Moving Average Crossovers" icon={Activity}>
+             <div className="space-y-4">
+                {crossovers.map((cross: any) => (
+                   <div key={cross.key} className="p-4 bg-slate-950 border border-slate-800 rounded-2xl flex items-center justify-between">
+                      <div>
+                         <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">{cross.period}</p>
+                         <p className="text-sm font-bold text-white leading-tight">{cross.displayValue}</p>
+                      </div>
+                      <span className={cn(
+                         "text-[9px] font-black px-2 py-1 rounded uppercase tracking-tighter whitespace-nowrap",
+                         cross.indication === 'Bullish' ? "bg-emerald-500/10 text-emerald-500" :
+                         cross.indication === 'Bearish' ? "bg-rose-500/10 text-rose-500" : "bg-slate-800 text-slate-400"
+                      )}>
+                         {cross.indication}
+                      </span>
+                   </div>
+                ))}
+             </div>
+          </Card>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <Card title="Moving Averages" icon={TrendingUp}>
+        <Card 
+          title="Moving Averages" 
+          icon={TrendingUp}
+          action={
+            <div className="flex bg-slate-900 rounded-lg p-0.5 border border-slate-800">
+              <button 
+                onClick={() => setMaType('SMA')}
+                className={cn("px-3 py-1 rounded-md text-[9px] font-black uppercase tracking-widest transition-all", maType === 'SMA' ? "bg-slate-800 text-white" : "text-slate-500")}
+              >
+                SMA
+              </button>
+              <button 
+                onClick={() => setMaType('EMA')}
+                className={cn("px-3 py-1 rounded-md text-[9px] font-black uppercase tracking-widest transition-all", maType === 'EMA' ? "bg-slate-800 text-white" : "text-slate-500")}
+              >
+                EMA
+              </button>
+            </div>
+          }
+        >
            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {movingAverages.map((ma: any) => (
                  <div key={ma.name} className="flex justify-between items-center p-3 bg-slate-950 rounded-xl border border-slate-800/50">
@@ -2752,11 +3234,11 @@ const TechnicalAnalysis: React.FC<{ symbol: string }> = ({ symbol }) => {
       <Card title="Pivot Levels (Standard)" icon={Filter}>
          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
             {[
-              { label: 'R2', val: (tech as any)?.data?.pivotPoints?.r2 || '---' },
-              { label: 'R1', val: (tech as any)?.data?.pivotPoints?.r1 || '---' },
-              { label: 'Pivot', val: (tech as any)?.data?.pivotPoints?.pivot || '---' },
-              { label: 'S1', val: (tech as any)?.data?.pivotPoints?.s1 || '---' },
-              { label: 'S2', val: (tech as any)?.data?.pivotPoints?.s2 || '---' },
+              { label: 'R2', val: (tech as any)?.data?.pivotLevels?.find((p: any) => p.key === 'Classic')?.pivotLevel?.r2 || '---' },
+              { label: 'R1', val: (tech as any)?.data?.pivotLevels?.find((p: any) => p.key === 'Classic')?.pivotLevel?.r1 || '---' },
+              { label: 'Pivot', val: (tech as any)?.data?.pivotLevels?.find((p: any) => p.key === 'Classic')?.pivotLevel?.pivotPoint || '---' },
+              { label: 'S1', val: (tech as any)?.data?.pivotLevels?.find((p: any) => p.key === 'Classic')?.pivotLevel?.s1 || '---' },
+              { label: 'S2', val: (tech as any)?.data?.pivotLevels?.find((p: any) => p.key === 'Classic')?.pivotLevel?.s2 || '---' },
             ].map(p => (
               <div key={p.label} className="p-4 bg-slate-950 rounded-2xl border border-slate-800 text-center">
                  <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">{p.label}</p>
@@ -2770,8 +3252,8 @@ const TechnicalAnalysis: React.FC<{ symbol: string }> = ({ symbol }) => {
 };
 
 const MoneycontrolInsights: React.FC<{ symbol: string }> = ({ symbol }) => {
-  const { data: response, isLoading, error } = trpc.getInsights.useQuery({ symbol });
-  const insights = response?.success ? response.data : null;
+  const { data: response, isLoading } = trpc.getStockInsights.useQuery({ symbol });
+  const insights = (response as any)?.mcInsights;
 
   if (isLoading) return (
     <div className="animate-pulse space-y-4">
@@ -3116,6 +3598,82 @@ const FnOSignals: React.FC<{ symbol: string }> = ({ symbol }) => {
           </div>
         </Card>
       </div>
+    </div>
+  );
+};
+
+const AnalystEstimates: React.FC<{ symbol: string }> = ({ symbol }) => {
+  const { data: rawInsights, isLoading } = trpc.getStockInsights.useQuery({ symbol });
+  const insights = rawInsights as any;
+
+  if (isLoading) return <div className="p-10 animate-pulse bg-slate-900 rounded-2xl border border-slate-800" />;
+  if (!insights || (!insights.analystRating && !insights.estimates && !insights.priceForecast)) return null;
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      {insights.analystRating && (
+        <Card title="Analyst Consensus" icon={Users}>
+          <div className="space-y-4 pt-2">
+            <div className="flex justify-between items-center">
+               <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Consensus</span>
+               <span className={cn(
+                 "text-xs font-black uppercase px-2 py-1 rounded",
+                 insights.analystRating.consensus.includes('Buy') ? "bg-emerald-500/20 text-emerald-400" :
+                 insights.analystRating.consensus.includes('Sell') ? "bg-rose-500/20 text-rose-400" : "bg-amber-500/20 text-amber-400"
+               )}>{insights.analystRating.consensus}</span>
+            </div>
+            <div className="flex justify-between text-[11px] font-bold">
+               <div className="text-emerald-400">Buy: {insights.analystRating.buy}%</div>
+               <div className="text-amber-400">Hold: {insights.analystRating.hold}%</div>
+               <div className="text-rose-400">Sell: {insights.analystRating.sell}%</div>
+            </div>
+            {insights.analystRating.targetPrice > 0 && (
+               <div className="pt-2 border-t border-slate-800 flex justify-between items-center">
+                  <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Target Price</span>
+                  <span className="text-sm font-black text-white italic">₹{insights.analystRating.targetPrice}</span>
+               </div>
+            )}
+          </div>
+        </Card>
+      )}
+
+      {insights.priceForecast && (
+        <Card title="Price Forecast" icon={TrendingUp}>
+          <div className="space-y-3 pt-2">
+             <div className="flex justify-between items-center">
+                <span className="text-[10px] font-black text-emerald-500 uppercase tracking-widest">High</span>
+                <span className="text-xs font-black text-white">₹{insights.priceForecast.high}</span>
+             </div>
+             <div className="flex justify-between items-center">
+                <span className="text-[10px] font-black text-amber-500 uppercase tracking-widest">Median</span>
+                <span className="text-xs font-black text-white">₹{insights.priceForecast.median}</span>
+             </div>
+             <div className="flex justify-between items-center">
+                <span className="text-[10px] font-black text-rose-500 uppercase tracking-widest">Low</span>
+                <span className="text-xs font-black text-white">₹{insights.priceForecast.low}</span>
+             </div>
+          </div>
+        </Card>
+      )}
+      
+      {insights.estimates?.revenue && (
+        <Card title="Revenue Estimates (Cr)" icon={BarChart2}>
+          <div className="space-y-3 pt-2">
+             <div className="flex justify-between items-center">
+                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">High Estimate</span>
+                <span className="text-xs font-black text-white">₹{insights.estimates.revenue.high}</span>
+             </div>
+             <div className="flex justify-between items-center">
+                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Average Estimate</span>
+                <span className="text-xs font-black text-white">₹{insights.estimates.revenue.average}</span>
+             </div>
+             <div className="flex justify-between items-center">
+                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Low Estimate</span>
+                <span className="text-xs font-black text-white">₹{insights.estimates.revenue.low}</span>
+             </div>
+          </div>
+        </Card>
+      )}
     </div>
   );
 };
@@ -3470,6 +4028,7 @@ const StockDetails: React.FC<{
               )}
 
               <StockSWOT symbol={symbol} />
+              <AnalystEstimates symbol={symbol} />
               
               <Card title="Interactive Technical Chart" icon={Activity}>
                 <div className="flex gap-4 mb-6 overflow-x-auto pb-2 hide-scrollbar">
@@ -3877,7 +4436,6 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const stocks = useMarketData();
-  const indices = getIndexData();
   const { data: realIndices } = trpc.getAllIndices.useQuery();
   
   const rawIndexData = realIndices?.data;
@@ -3888,7 +4446,11 @@ export default function App() {
     value: parseFloat(idx.lastPrice),
     change: parseFloat(idx.percentChange),
     isUp: parseFloat(idx.percentChange) >= 0
-  })) : indices;
+  })) : [
+    { name: 'Nifty 50', value: 22453.20, change: 0.84, isUp: true },
+    { name: 'Sensex', value: 73845.54, change: 0.72, isUp: true },
+    { name: 'Bank Nifty', value: 47285.30, change: 1.24, isUp: true }
+  ];
 
   const addToast = (signal: any) => {
     const id = Math.random().toString(36).substring(2, 9);
@@ -4016,6 +4578,7 @@ export default function App() {
               transition={{ duration: 0.25, ease: 'easeOut' }}
             >
               {activeTab === 'dashboard' && <Dashboard stocks={stocks} onNewSignal={addToast} onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />}
+              {activeTab === 'indices' && <IndicesPage />}
               {activeTab === 'market-map' && <MarketMap />}
               {activeTab === 'screener' && <Screener stocks={stocks} onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />}
               {activeTab === 'details' && selectedSymbol && (

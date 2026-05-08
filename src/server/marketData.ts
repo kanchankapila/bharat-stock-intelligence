@@ -4,10 +4,12 @@ export async function fetchTechIndicators(symbol: string, dur: 'D' | 'W' | 'M' =
   const map = getStockMapping(symbol);
   if (!map) throw new Error("Stock mapping not found for symbol: " + symbol);
   
-  // Example URL from user list: https://priceapi.moneycontrol.com/pricefeed/techindicator/W/BE03?field=RSI
-  // Better one: https://api.moneycontrol.com/mcapi/technicals/v2/details?scId={mcsymbol}&dur=D&deviceType=W
-  const url = `https://api.moneycontrol.com/mcapi/technicals/v2/details?scId=${map.mcsymbol}&dur=${dur}&deviceType=W`;
-  const response = await fetch(url);
+  const url = `https://priceapi.moneycontrol.com/pricefeed/techindicator/${dur}/${map.mcsymbol}?fields=sentiments,pivotLevels,sma,ema,indicators,crossover`;
+  const response = await fetch(url, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    }
+  });
   if (!response.ok) return null;
   return response.json();
 }
@@ -169,6 +171,45 @@ export async function fetchTechnicalTrends(type: 'bullish' | 'bearish' | 'turnin
 export async function fetchETStats(type: 'gainers' | 'losers', duration: string = '1 day') {
   const url = `https://etmarketsapis.indiatimes.com/ET_Stats/${type}?pagesize=25&marketcap=largecap%2Cmidcap%2Csmallcap&duration=${encodeURIComponent(duration)}&sort=intraday&sortby=percentchange&sortorder=desc`;
   const response = await fetch(url);
+  if (!response.ok) return null;
+  return response.json();
+}
+
+const MC_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  'Accept': 'application/json',
+};
+
+// Full index details: OHLC, period returns (YTD/1W/1M/.../5Y), moving averages
+export async function fetchIndexFullDetails(indId: string) {
+  const url = `https://appfeeds.moneycontrol.com/jsonapi/market/indices&format=json&ind_id=${indId}`;
+  const response = await fetch(url, { headers: MC_HEADERS });
+  if (!response.ok) return null;
+  return response.json();
+}
+
+// Stocks (type=0) or industries (type=1) constituent list for an index
+export async function fetchIndexStocksList(indId: string, type: '0' | '1' = '0') {
+  const url = `https://appfeeds.moneycontrol.com/jsonapi/market/marketmap&format=json&type=${type}&ind_id=${indId}`;
+  const response = await fetch(url, { headers: MC_HEADERS });
+  if (!response.ok) return null;
+  return response.json();
+}
+
+// Detailed price feed for an index via bridgeSymbol (e.g. "in;NSX")
+export async function fetchIndexPriceFeed(bridgeSymbol: string) {
+  const encoded = encodeURIComponent(bridgeSymbol);
+  const url = `https://priceapi.moneycontrol.com/pricefeed/notapplicable/inidicesindia/${encoded}`;
+  const response = await fetch(url, { headers: MC_HEADERS });
+  if (!response.ok) return null;
+  return response.json();
+}
+
+// Technical indicators for an index (D/W/M period)
+export async function fetchIndexTechnicals(period: 'D' | 'W' | 'M', bridgeSymbol: string) {
+  const encoded = encodeURIComponent(bridgeSymbol);
+  const url = `https://priceapi.moneycontrol.com/pricefeed/techindicator/${period}/${encoded}`;
+  const response = await fetch(url, { headers: MC_HEADERS });
   if (!response.ok) return null;
   return response.json();
 }

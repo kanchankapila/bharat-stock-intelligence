@@ -5,10 +5,10 @@ import db from "./db";
 import { generateStockAnalysis } from "../services/aiService";
 import { fetchMCScreener } from "./moneycontrol";
 import { fetchETnowScreener } from "./etnow";
-import { 
-  fetchTechIndicators, 
-  fetchMarketMap, 
-  fetchAllIndianIndices, 
+import {
+  fetchTechIndicators,
+  fetchMarketMap,
+  fetchAllIndianIndices,
   fetchTrendlyneFundamentals,
   fetchMCRatios,
   fetchETShareholding,
@@ -20,7 +20,11 @@ import {
   fetchTrendingScreeners,
   fetchETPennyStocks,
   fetchTechnicalTrends,
-  fetchETStats
+  fetchETStats,
+  fetchIndexFullDetails,
+  fetchIndexStocksList,
+  fetchIndexPriceFeed,
+  fetchIndexTechnicals,
 } from "./marketData";
 import { getMoneycontrolInsights } from "./moneycontrolService";
 import { getStockInsights, getIndexData } from "./insightService";
@@ -36,35 +40,13 @@ const t = initTRPC.create({
 export const router = t.router;
 export const publicProcedure = t.procedure;
 
-// Mock data for static stock list
-const stocks = [
-  { symbol: 'RELIANCE', name: 'Reliance Industries', price: 2954.20, change: 14.45, changePct: 0.49, volume: '2.4M', sector: 'Energy', high: 3000, low: 2900 },
-  { symbol: 'TCS', name: 'Tata Consultancy Services', price: 3982.15, change: -12.40, changePct: -0.31, volume: '1.2M', sector: 'IT', high: 4050, low: 3950 },
-  { symbol: 'HDFCBANK', name: 'HDFC Bank Ltd', price: 1542.80, change: 8.20, changePct: 0.53, volume: '8.4M', sector: 'Banking', high: 1560, low: 1530 },
-  { symbol: 'INFY', name: 'Infosys Limited', price: 1420.30, change: -4.30, changePct: -0.30, volume: '3.1M', sector: 'IT', high: 1450, low: 1400 },
-  { symbol: 'ICICIBANK', name: 'ICICI Bank Ltd', price: 1084.50, change: 15.60, changePct: 1.46, volume: '5.2M', sector: 'Banking', high: 1100, low: 1060 },
-  { symbol: 'ADANIENT', name: 'Adani Enterprises Ltd', price: 3214.50, change: 128.30, changePct: 4.15, volume: '4.8M', sector: 'Diversified', high: 3300, low: 3150 },
-  { symbol: 'BHARTIARTL', name: 'Bharti Airtel Ltd', price: 1210.40, change: 12.10, changePct: 1.01, volume: '2.9M', sector: 'Telecom', high: 1230, low: 1190 },
-  { symbol: 'ITC', name: 'ITC Limited', price: 428.15, change: -2.35, changePct: -0.55, volume: '12.4M', sector: 'Consumer Goods', high: 435, low: 425 },
-  { symbol: 'AXISBANK', name: 'Axis Bank Ltd', price: 1120.45, change: 14.20, changePct: 1.28, volume: '4.1M', sector: 'Banking', high: 1140, low: 1100 },
-  { symbol: 'KOTAKBANK', name: 'Kotak Mahindra Bank', price: 1785.30, change: -5.40, changePct: -0.30, volume: '2.2M', sector: 'Banking', high: 1810, low: 1770 },
-  { symbol: 'LT', name: 'Larsen & Toubro Ltd', price: 3450.20, change: 45.30, changePct: 1.33, volume: '1.5M', sector: 'Infrastructure', high: 3480, low: 3400 },
-  { symbol: 'SBIN', name: 'State Bank of India', price: 780.45, change: 12.15, changePct: 1.58, volume: '15.4M', sector: 'Banking', high: 790, low: 765 },
-  { symbol: 'BAJFINANCE', name: 'Bajaj Finance Ltd', price: 6850.30, change: -50.20, changePct: -0.73, volume: '0.8M', sector: 'Finance', high: 6950, low: 6800 },
-  { symbol: 'MARUTI', name: 'Maruti Suzuki India', price: 12450.00, change: 210.50, changePct: 1.72, volume: '0.5M', sector: 'Auto', high: 12600, low: 12300 },
-  { symbol: 'ASIANPAINT', name: 'Asian Paints Ltd', price: 2840.15, change: -15.45, changePct: -0.54, volume: '1.1M', sector: 'Consumer Goods', high: 2880, low: 2820 },
-  { symbol: 'M&M', name: 'Mahindra & Mahindra', price: 2150.80, change: 85.40, changePct: 4.13, volume: '2.3M', sector: 'Auto', high: 2180, low: 2060 },
-  { symbol: 'SUNPHARMA', name: 'Sun Pharmaceutical', price: 1540.25, change: -8.10, changePct: -0.52, volume: '1.9M', sector: 'Healthcare', high: 1560, low: 1530 },
-  { symbol: 'WIPRO', name: 'Wipro Limited', price: 460.15, change: -2.35, changePct: -0.51, volume: '5.4M', sector: 'IT', high: 468, low: 458 },
-  { symbol: 'TITAN', name: 'Titan Company Ltd', price: 3250.40, change: 12.50, changePct: 0.39, volume: '1.2M', sector: 'Consumer Goods', high: 3280, low: 3230 },
-  { symbol: 'HCLTECH', name: 'HCL Technologies', price: 1340.20, change: -5.80, changePct: -0.43, volume: '1.8M', sector: 'IT', high: 1360, low: 1330 },
-];
+
 export const appRouter = router({
   getAIAnalysis: publicProcedure
 
     .input(z.object({ 
       symbol: z.string(), 
-      data: z.record(z.unknown()) 
+      data: z.record(z.string(), z.unknown())
     }))
     .mutation(async ({ input }) => {
       return await generateStockAnalysis(input.symbol, input.data);
@@ -338,20 +320,45 @@ export const appRouter = router({
     }),
 
   getETStats: publicProcedure
-    .input(z.object({ 
-      type: z.enum(['gainers', 'losers']), 
-      duration: z.string().optional() 
+    .input(z.object({
+      type: z.enum(['gainers', 'losers']),
+      duration: z.string().optional()
     }))
     .query(async ({ input }) => {
       return await fetchETStats(input.type, input.duration);
     }),
 
+  getIndexFullDetails: publicProcedure
+    .input(z.object({ indId: z.string() }))
+    .query(async ({ input }) => {
+      return await fetchIndexFullDetails(input.indId);
+    }),
+
+  getIndexStocksList: publicProcedure
+    .input(z.object({ indId: z.string(), type: z.enum(['0', '1']).optional() }))
+    .query(async ({ input }) => {
+      return await fetchIndexStocksList(input.indId, input.type ?? '0');
+    }),
+
+  getIndexPriceFeed: publicProcedure
+    .input(z.object({ bridgeSymbol: z.string() }))
+    .query(async ({ input }) => {
+      return await fetchIndexPriceFeed(input.bridgeSymbol);
+    }),
+
+  getIndexTechnicals: publicProcedure
+    .input(z.object({ period: z.enum(['D', 'W', 'M']), bridgeSymbol: z.string() }))
+    .query(async ({ input }) => {
+      return await fetchIndexTechnicals(input.period, input.bridgeSymbol);
+    }),
+
   getStocks: publicProcedure
     .input(z.object({ limit: z.number().optional().default(10), sector: z.string().optional() }))
-    .query(({ input }) => {
-      let filtered = stocks;
+    .query(async ({ input }) => {
+      const allStocks = await getOrRefreshAllStocks();
+      let filtered = allStocks;
       if (input.sector) {
-        filtered = stocks.filter(s => s.sector === input.sector);
+        filtered = allStocks.filter((s: any) => s.sector === input.sector);
       }
       return filtered.slice(0, input.limit);
     }),
@@ -368,11 +375,12 @@ export const appRouter = router({
         }));
       }
       
+      const allStocks = await getOrRefreshAllStocks();
       const sectors = ['Energy', 'IT', 'Banking', 'Consumer Goods', 'Telecom'];
       return sectors.map(sector => ({
         name: sector,
         change: (Math.random() - 0.4) * 2,
-        stocks: stocks.filter(s => s.sector === sector).length
+        stocks: allStocks.filter((s: any) => s.sector === sector).length
       }));
     }),
 
@@ -386,8 +394,9 @@ export const appRouter = router({
       maxPb: z.number().optional(),
       maxDe: z.number().optional(),
     }))
-    .query(({ input }) => {
-      let data = stocks.map(s => ({
+    .query(async ({ input }) => {
+      const allStocks = await getOrRefreshAllStocks();
+      let data = allStocks.map((s: any) => ({
         ...s,
         pe: 15 + (Math.sin(s.symbol.length) + 1) * 15,
         roe: 10 + (Math.cos(s.symbol.length) + 1) * 10,
@@ -424,10 +433,28 @@ export const appRouter = router({
       return data;
     }),
   
-  getMarketOverview: publicProcedure.query(() => {
+  getMarketOverview: publicProcedure.query(async () => {
+    const parse = (s: unknown) => parseFloat(String(s ?? '0').replace(/,/g, '')) || 0;
+    try {
+      const data = await fetchAllIndianIndices();
+      if (data?.success === 1) {
+        const keyList: any[] = data.data?.indiceList?.[0]?.list ?? [];
+        const find = (name: string) => keyList.find((i: any) => i.name === name);
+        const n50 = find('NIFTY 50');
+        const sx = find('SENSEX');
+        const bnk = find('NIFTY BANK');
+        if (n50 && sx && bnk) {
+          return {
+            nifty50:   { value: parse(n50.value),  change: parse(n50.change),  changePct: parse(n50.changePer)  },
+            sensex:    { value: parse(sx.value),   change: parse(sx.change),   changePct: parse(sx.changePer)   },
+            bankNifty: { value: parse(bnk.value),  change: parse(bnk.change),  changePct: parse(bnk.changePer)  },
+          };
+        }
+      }
+    } catch {}
     return {
-      nifty50: { value: 22450.2, change: 124.5, changePct: 0.56 },
-      sensex: { value: 73850.4, change: 412.1, changePct: 0.56 },
+      nifty50:   { value: 22450.2, change: 124.5,  changePct:  0.56 },
+      sensex:    { value: 73850.4, change: 412.1,  changePct:  0.56 },
       bankNifty: { value: 48250.3, change: -120.4, changePct: -0.25 },
     };
   }),
@@ -498,7 +525,8 @@ export const appRouter = router({
           return await fetchETnowScreener(screenerId, queryCondition);
         } else if (input.provider === 'custom') {
           const { timeframes } = input.params;
-          const selected = stocks.filter(() => Math.random() > 0.7).map(s => ({
+          const allStocks = await getOrRefreshAllStocks();
+          const selected = allStocks.filter(() => Math.random() > 0.7).map((s: any) => ({
             symbol: s.symbol,
             name: s.name,
             ltp: s.price * (1 + (Math.random() - 0.5) * 0.01),
@@ -567,13 +595,13 @@ export const appRouter = router({
   generateTrendReport: publicProcedure
     .input(z.object({ symbol: z.string() }))
     .mutation(async ({ input }) => {
-      const stock = stocks.find(s => s.symbol === input.symbol);
+      const stock = await fetchStockDataWithCache(input.symbol);
       if (!stock) throw new Error("Stock not found");
       
       const analysis = await generateStockAnalysis(stock.symbol, stock);
       return {
         title: `${stock.symbol} Deep Intelligence Report`,
-        summary: `Strategic analysis for ${stock.name} based on current market dynamics.`,
+        summary: `Strategic analysis for ${(stock as any).name || stock.symbol} based on current market dynamics.`,
         investmentThesis: analysis.reasoning,
         riskFactors: [
           "Market volatility and sector-specific rotation.",

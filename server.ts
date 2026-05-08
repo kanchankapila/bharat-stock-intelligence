@@ -7,6 +7,7 @@ import { fileURLToPath } from "url";
 import * as trpcExpress from "@trpc/server/adapters/express";
 import { appRouter } from "./src/server/router";
 import { createContext } from "./src/server/context";
+import { fetchStockDataWithCache } from "./src/server/liveStockData";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -22,9 +23,15 @@ async function startServer() {
     // In a real app, this would iterate through all active signals
     // For demo, we'll just simulate updates for a few stocks
     const symbols = ['RELIANCE', 'TCS', 'HDFCBANK'];
-    symbols.forEach(symbol => {
-      const mockPrice = 2000 + Math.random() * 2000; // Random price simulation
-      updateSignalAccuracy(symbol, mockPrice).catch(console.error);
+    symbols.forEach(async symbol => {
+      try {
+        const data = await fetchStockDataWithCache(symbol);
+        if (data && data.price) {
+          await updateSignalAccuracy(symbol, data.price);
+        }
+      } catch (error) {
+        console.error(`Failed to update signal accuracy for ${symbol}`, error);
+      }
     });
   }, 30000); // Every 30 seconds
 
