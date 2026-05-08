@@ -3618,8 +3618,8 @@ const AnalystEstimates: React.FC<{ symbol: string }> = ({ symbol }) => {
                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Consensus</span>
                <span className={cn(
                  "text-xs font-black uppercase px-2 py-1 rounded",
-                 insights.analystRating.consensus.includes('Buy') ? "bg-emerald-500/20 text-emerald-400" :
-                 insights.analystRating.consensus.includes('Sell') ? "bg-rose-500/20 text-rose-400" : "bg-amber-500/20 text-amber-400"
+                 insights.analystRating.consensus.includes('Buy') || insights.analystRating.consensus.includes('Outperform') ? "bg-emerald-500/20 text-emerald-400" :
+                 insights.analystRating.consensus.includes('Sell') || insights.analystRating.consensus.includes('Underperform') ? "bg-rose-500/20 text-rose-400" : "bg-amber-500/20 text-amber-400"
                )}>{insights.analystRating.consensus}</span>
             </div>
             <div className="flex justify-between text-[11px] font-bold">
@@ -3627,10 +3627,23 @@ const AnalystEstimates: React.FC<{ symbol: string }> = ({ symbol }) => {
                <div className="text-amber-400">Hold: {insights.analystRating.hold}%</div>
                <div className="text-rose-400">Sell: {insights.analystRating.sell}%</div>
             </div>
-            {insights.analystRating.targetPrice > 0 && (
+            {insights.analystRating.analystCount > 0 && (
                <div className="pt-2 border-t border-slate-800 flex justify-between items-center">
-                  <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Target Price</span>
-                  <span className="text-sm font-black text-white italic">₹{insights.analystRating.targetPrice}</span>
+                  <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Analysts</span>
+                  <span className="text-sm font-black text-white italic">{insights.analystRating.analystCount}</span>
+               </div>
+            )}
+            {insights.analystRating.ratings && insights.analystRating.ratings.length > 0 && (
+               <div className="pt-2 border-t border-slate-800 space-y-2">
+                  {insights.analystRating.ratings.map((r: any, i: number) => (
+                    <div key={i} className="flex justify-between items-center text-[10px] font-bold">
+                       <span className={cn(
+                         r.name === 'Buy' || r.name === 'Outperform' ? "text-emerald-400" :
+                         r.name === 'Sell' || r.name === 'Underperform' ? "text-rose-400" : "text-amber-400"
+                       )}>{r.name}</span>
+                       <span className="text-white">{r.value}%</span>
+                    </div>
+                  ))}
                </div>
             )}
           </div>
@@ -3656,24 +3669,243 @@ const AnalystEstimates: React.FC<{ symbol: string }> = ({ symbol }) => {
         </Card>
       )}
       
-      {insights.estimates?.revenue && (
-        <Card title="Revenue Estimates (Cr)" icon={BarChart2}>
-          <div className="space-y-3 pt-2">
-             <div className="flex justify-between items-center">
-                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">High Estimate</span>
-                <span className="text-xs font-black text-white">₹{insights.estimates.revenue.high}</span>
-             </div>
-             <div className="flex justify-between items-center">
-                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Average Estimate</span>
-                <span className="text-xs font-black text-white">₹{insights.estimates.revenue.average}</span>
-             </div>
-             <div className="flex justify-between items-center">
-                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Low Estimate</span>
-                <span className="text-xs font-black text-white">₹{insights.estimates.revenue.low}</span>
-             </div>
+      {insights.earningsForecast?.eps && insights.earningsForecast.eps.length > 0 && (
+        <Card title="Earnings Forecast (EPS)" icon={BarChart3}>
+          <div className="overflow-x-auto pt-2">
+            <table className="w-full text-left">
+              <thead>
+                <tr className="text-[9px] font-black uppercase tracking-widest text-slate-500 border-b border-slate-800">
+                  <th className="pb-2 pr-3">Period</th>
+                  <th className="pb-2 pr-3 text-right">High</th>
+                  <th className="pb-2 pr-3 text-right">Avg</th>
+                  <th className="pb-2 pr-3 text-right">Low</th>
+                  <th className="pb-2 text-right">Actual</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/50">
+                {insights.earningsForecast.eps.map((row: any, i: number) => (
+                  <tr key={i} className="text-[11px] font-bold">
+                    <td className="py-2 pr-3 text-slate-300">{row.date}</td>
+                    <td className="py-2 pr-3 text-right text-slate-300">{row.high || '—'}</td>
+                    <td className="py-2 pr-3 text-right text-white">{row.avg || '—'}</td>
+                    <td className="py-2 pr-3 text-right text-slate-300">{row.low || '—'}</td>
+                    <td className={cn("py-2 text-right", row.actual ? "text-emerald-400" : "text-slate-600")}>{row.actual || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </Card>
       )}
+
+      {insights.earningsForecast?.revenue && insights.earningsForecast.revenue.length > 0 && (
+        <Card title="Revenue Forecast (Cr)" icon={BarChart2}>
+          <div className="overflow-x-auto pt-2">
+            <table className="w-full text-left">
+              <thead>
+                <tr className="text-[9px] font-black uppercase tracking-widest text-slate-500 border-b border-slate-800">
+                  <th className="pb-2 pr-3">Period</th>
+                  <th className="pb-2 pr-3 text-right">High</th>
+                  <th className="pb-2 pr-3 text-right">Avg</th>
+                  <th className="pb-2 pr-3 text-right">Low</th>
+                  <th className="pb-2 text-right">Actual</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/50">
+                {insights.earningsForecast.revenue.map((row: any, i: number) => (
+                  <tr key={i} className="text-[11px] font-bold">
+                    <td className="py-2 pr-3 text-slate-300">{row.date}</td>
+                    <td className="py-2 pr-3 text-right text-slate-300">{row.high ? `₹${row.high}` : '—'}</td>
+                    <td className="py-2 pr-3 text-right text-white">{row.avg ? `₹${row.avg}` : '—'}</td>
+                    <td className="py-2 pr-3 text-right text-slate-300">{row.low ? `₹${row.low}` : '—'}</td>
+                    <td className={cn("py-2 text-right", row.actual ? "text-emerald-400" : "text-slate-600")}>{row.actual || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+
+      {insights.hitsMisses?.list && insights.hitsMisses.list.length > 0 && (
+        <Card title="Earnings Hits & Misses" icon={Activity}>
+          <div className="overflow-x-auto pt-2">
+            <table className="w-full text-left">
+              <thead>
+                <tr className="text-[9px] font-black uppercase tracking-widest text-slate-500 border-b border-slate-800">
+                  <th className="pb-2 pr-3">Quarter</th>
+                  <th className="pb-2 pr-3 text-right">Actual</th>
+                  <th className="pb-2 pr-3 text-right">Estimates</th>
+                  <th className="pb-2 text-right">Surprise</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/50">
+                {insights.hitsMisses.list.map((row: any, i: number) => (
+                  <tr key={i} className="text-[11px] font-bold">
+                    <td className="py-2 pr-3 text-slate-300">{row.quarter}</td>
+                    <td className="py-2 pr-3 text-right text-white">{row.actual || '—'}</td>
+                    <td className="py-2 pr-3 text-right text-slate-300">{row.estimates || '—'}</td>
+                    <td className="py-2 text-right">
+                      <span className={cn(
+                        row.type === 'positive' ? "text-emerald-400" :
+                        row.type === 'negative' ? "text-rose-400" : "text-slate-500"
+                      )}>{row.surplus || row.surprise || '—'}</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+
+      {insights.hitsMisses?.graphData && insights.hitsMisses.graphData.length > 0 && (
+        <Card title="Price Forecast vs Actual" icon={TrendingUp}>
+          <div className="space-y-3 pt-2">
+            <div className="flex justify-between items-center">
+              <span className="text-[10px] font-black text-emerald-500 uppercase tracking-widest">High</span>
+              <span className="text-xs font-black text-white">₹{insights.hitsMisses.high}</span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-[10px] font-black text-blue-500 uppercase tracking-widest">Mean</span>
+              <span className="text-xs font-black text-white">₹{insights.hitsMisses.mean}</span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-[10px] font-black text-rose-500 uppercase tracking-widest">Low</span>
+              <span className="text-xs font-black text-white">₹{insights.hitsMisses.low}</span>
+            </div>
+            {insights.hitsMisses.graphData.length > 0 && (
+              <div className="h-32 mt-2">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={insights.hitsMisses.graphData.map((d: number[]) => ({ time: d[0], price: d[1] }))}>
+                    <defs>
+                      <linearGradient id="hitsMissesGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.2}/>
+                        <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                      </linearGradient>
+                    </defs>
+                    <XAxis dataKey="time" hide />
+                    <YAxis hide domain={['auto', 'auto']} />
+                    <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px' }} />
+                    <Area type="monotone" dataKey="price" stroke="#3b82f6" fill="url(#hitsMissesGrad)" strokeWidth={2} />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </div>
+        </Card>
+      )}
+
+      {insights.valuation?.list && insights.valuation.list.length > 0 && (
+        <Card title="Valuation Estimates" icon={BarChart2}>
+          <div className="space-y-4 pt-2">
+            {insights.valuation.list.map((v: any, i: number) => (
+              <div key={i} className="space-y-2">
+                <h5 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{v.heading}</h5>
+                <div className="grid grid-cols-2 gap-2">
+                  {v.data.eps && <div className="p-2 bg-slate-950 rounded-lg border border-slate-800/50 text-center">
+                    <p className="text-[8px] font-black text-slate-500 uppercase">EPS</p>
+                    <p className="text-xs font-bold text-white">{v.data.eps || '—'}</p>
+                  </div>}
+                  {v.data.pe && <div className="p-2 bg-slate-950 rounded-lg border border-slate-800/50 text-center">
+                    <p className="text-[8px] font-black text-slate-500 uppercase">P/E</p>
+                    <p className="text-xs font-bold text-white">{v.data.pe || '—'}</p>
+                  </div>}
+                  {v.data.bvps && <div className="p-2 bg-slate-950 rounded-lg border border-slate-800/50 text-center">
+                    <p className="text-[8px] font-black text-slate-500 uppercase">BVPS</p>
+                    <p className="text-xs font-bold text-white">{v.data.bvps || '—'}</p>
+                  </div>}
+                  {v.data.pb && <div className="p-2 bg-slate-950 rounded-lg border border-slate-800/50 text-center">
+                    <p className="text-[8px] font-black text-slate-500 uppercase">P/B</p>
+                    <p className="text-xs font-bold text-white">{v.data.pb || '—'}</p>
+                  </div>}
+                </div>
+                {v.data.analyst && (
+                  <p className="text-[8px] text-slate-600 italic text-center">{v.data.analyst}</p>
+                )}
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+    </div>
+  );
+};
+
+const PriceVolume: React.FC<{ symbol: string }> = ({ symbol }) => {
+  const { data: rawInsights, isLoading } = trpc.getStockInsights.useQuery({ symbol });
+  const insights = rawInsights as any;
+  const pv = insights?.stockPriceVolume;
+
+  if (isLoading) return <div className="p-6 animate-pulse bg-slate-900 rounded-2xl border border-slate-800"><div className="h-32 bg-slate-800/50 rounded-xl" /></div>;
+  if (!pv) return null;
+
+  const pricePeriods = [
+    { label: 'YTD', value: pv.price?.YTD },
+    { label: '1W', value: pv.price?.['1 WEEK'] },
+    { label: '1M', value: pv.price?.['1 MONTH'] },
+    { label: '3M', value: pv.price?.['3 MONTHS'] },
+    { label: '6M', value: pv.price?.['6 MONTHS'] },
+    { label: '1Y', value: pv.price?.['1 YEAR'] },
+    { label: '2Y', value: pv.price?.['2 YEARS'] },
+    { label: '3Y', value: pv.price?.['3 YEARS'] },
+    { label: '5Y', value: pv.price?.['5 YEARS'] },
+  ];
+
+  const volumePeriods = ['Today', 'Yesterday', '1 Week Avg', '1 Month Avg'] as const;
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <Card title="Price Performance" icon={TrendingUp}>
+        <div className="grid grid-cols-3 gap-3 pt-2">
+          {pricePeriods.map(p => {
+            const val = p.value;
+            const isUp = val !== undefined && val >= 0;
+            return (
+              <div key={p.label} className="p-3 bg-slate-950 rounded-xl border border-slate-800/50 text-center">
+                <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">{p.label}</p>
+                <p className={cn(
+                  "text-sm font-black italic tracking-tighter",
+                  val === undefined ? "text-slate-600" : isUp ? "text-emerald-400" : "text-rose-400"
+                )}>
+                  {val !== undefined ? `${isUp ? '+' : ''}${val.toFixed(2)}%` : '—'}
+                </p>
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+
+      <Card title="Volume & Delivery" icon={BarChart3}>
+        <div className="space-y-3 pt-2">
+          {volumePeriods.map(period => {
+            const v = pv.volume?.[period];
+            if (!v) return null;
+            return (
+              <div key={period} className="p-3 bg-slate-950 rounded-xl border border-slate-800/50">
+                <div className="flex justify-between items-center mb-2">
+                  <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{period}</span>
+                  <span className="text-[10px] font-bold text-slate-400">{v.cvol_display_text}</span>
+                </div>
+                <div className="flex justify-between items-center text-[10px] font-bold">
+                  <span className="text-slate-400">Delivery:</span>
+                  <span className={cn(
+                    v.delivery_display_text ? "text-emerald-400" : "text-slate-600"
+                  )}>{v.delivery_display_text || 'N/A'}</span>
+                </div>
+                {v.delivery > 0 && (
+                  <div className="mt-1.5 h-1 bg-slate-800 rounded-full overflow-hidden">
+                    <div 
+                      className="h-full bg-emerald-500 rounded-full" 
+                      style={{ width: `${Math.min(100, (v.delivery / v.cvol) * 100)}%` }} 
+                    />
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </Card>
     </div>
   );
 };
@@ -4029,6 +4261,7 @@ const StockDetails: React.FC<{
 
               <StockSWOT symbol={symbol} />
               <AnalystEstimates symbol={symbol} />
+              <PriceVolume symbol={symbol} />
               
               <Card title="Interactive Technical Chart" icon={Activity}>
                 <div className="flex gap-4 mb-6 overflow-x-auto pb-2 hide-scrollbar">

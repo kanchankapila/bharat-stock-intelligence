@@ -23,12 +23,83 @@ export interface StockInsight {
     hold: number;
     sell: number;
     targetPrice: number;
+    ratings: { name: string; value: string }[];
+    finalRating: string;
+    analystCount: string;
   };
   mcInsights?: any;
   technicalIndicators?: any;
   movingAverages?: any;
   priceForecast?: any;
   estimates?: any;
+  stockPriceVolume?: {
+    price: {
+      YTD: number;
+      "1 WEEK": number;
+      "1 MONTH": number;
+      "3 MONTHS": number;
+      "6 MONTHS": number;
+      "1 YEAR": number;
+      "2 YEARS": number;
+      "3 YEARS": number;
+      "5 YEARS": number;
+    };
+    volume: {
+      Today: {
+        delivery: number;
+        cvol: number;
+        cvol_display_text: string;
+        delivery_display_text: string;
+        delivery_tooltip_text: string;
+        cvol_tooltip_text: string;
+      };
+      Yesterday: {
+        delivery: number;
+        cvol: number;
+        cvol_display_text: string;
+        delivery_display_text: string;
+        delivery_tooltip_text: string;
+        cvol_tooltip_text: string;
+      };
+      "1 Week Avg": {
+        delivery: number;
+        cvol: number;
+        cvol_display_text: string;
+        delivery_display_text: string;
+        delivery_tooltip_text: string;
+        cvol_tooltip_text: string;
+      };
+      "1 Month Avg": {
+        delivery: number;
+        cvol: number;
+        cvol_display_text: string;
+        delivery_display_text: string;
+        delivery_tooltip_text: string;
+        cvol_tooltip_text: string;
+      };
+    };
+  };
+  earningsForecast?: {
+    eps: { date: string; high: string; low: string; avg: string; actual: string }[];
+    netProfit: { date: string; high: string; low: string; avg: string; actual: string }[];
+    revenue: { date: string; high: string; low: string; avg: string; actual: string }[];
+    displayLock: string;
+  };
+  hitsMisses?: {
+    graphData: number[][];
+    high: string;
+    mean: string;
+    low: string;
+    displayLock: string;
+    beats?: { total: string; selected: string; unselected: string };
+    misses?: { total: string; selected: string; unselected: string };
+    inline?: { total: string; selected: string; unselected: string };
+    list?: { quarter: string; actual: string; estimates: string; surprise: string; type: string }[];
+  };
+  valuation?: {
+    list: { heading: string; data: { eps: string; pe: string; bvps: string; pb: string; analyst: string } }[];
+    displayLock: string;
+  };
 }
 
 export async function getStockInsights(query: string): Promise<StockInsight | null> {
@@ -58,15 +129,21 @@ export async function getStockInsights(query: string): Promise<StockInsight | nu
       techIndRes,
       forecastRes,
       consensusRes,
-      earningForecastRes
+      earningForecastRes,
+      priceVolumeRes,
+      hitsMissesRes,
+      valuationRes
     ] = await Promise.all([
       fetchJson(`https://api.moneycontrol.com/mcapi/v1/swot/details?scId=${scId}&type=all`),
       fetchJson(`https://api.moneycontrol.com/mcapi/extdata/v2/mc-essentials?scId=${scId}&type=ed&deviceType=W`),
       fetchJson(`https://api.moneycontrol.com/mcapi/extdata/v2/mc-insights?scId=${scId}&type=c&deviceType=W&appVersion=185`),
       fetchJson(`https://priceapi.moneycontrol.com/pricefeed/techindicator/D/${scId}?fields=sentiments,pivotLevels,sma,ema`),
       fetchJson(`https://api.moneycontrol.com/mcapi/v1/stock/estimates/price-forecast?scId=${scId}&ex=N&deviceType=W`),
-      fetchJson(`https://api.moneycontrol.com/mcapi/v1/stock/estimates/consensus?scId=${scId}&ex=N&deviceType=W`),
-      fetchJson(`https://api.moneycontrol.com/mcapi/v1/stock/estimates/earning-forecast?scId=${scId}&ex=N&deviceType=W&frequency=12&financialType=C`)
+      fetchJson(`https://api.moneycontrol.com/mcapi/v1/stock/estimates/analyst-rating?deviceType=W&scId=${scId}&ex=N`),
+      fetchJson(`https://api.moneycontrol.com/mcapi/v1/stock/estimates/earning-forecast?scId=${scId}&ex=N&deviceType=W&frequency=12&financialType=C`),
+      fetchJson(`https://api.moneycontrol.com/mcapi/v1/stock/price-volume?scId=${scId}&ex=&appVersion=175`),
+      fetchJson(`https://api.moneycontrol.com/mcapi/v1/stock/estimates/hits-misses?deviceType=W&scId=${scId}&ex=N&type=eps&financialType=C`),
+      fetchJson(`https://api.moneycontrol.com/mcapi/v1/stock/estimates/valuation?deviceType=W&scId=${scId}&ex=N&financialType=C`)
     ]);
 
     const result: StockInsight = {};
@@ -117,17 +194,44 @@ export async function getStockInsights(query: string): Promise<StockInsight | nu
     }
 
     if (consensusRes?.success === 1 && consensusRes.data) {
+        const ratings = consensusRes.data.ratings || [];
+        const buyRating = ratings.find((r: any) => r.name === 'Buy');
+        const sellRating = ratings.find((r: any) => r.name === 'Sell');
+        const holdRating = ratings.find((r: any) => r.name === 'Hold');
+        const underperformRating = ratings.find((r: any) => r.name === 'Underperform');
+        const outperformRating = ratings.find((r: any) => r.name === 'Outperform');
+        
         result.analystRating = {
-            consensus: consensusRes.data.consensus || '',
-            buy: consensusRes.data.buyPercentage || 0,
-            hold: consensusRes.data.holdPercentage || 0,
-            sell: consensusRes.data.sellPercentage || 0,
-            targetPrice: consensusRes.data.targetPrice || 0
+            consensus: consensusRes.data.finalRating || '',
+            buy: parseInt(buyRating?.value || '0'),
+            hold: parseInt(holdRating?.value || '0'),
+            sell: parseInt(sellRating?.value || '0') + parseInt(underperformRating?.value || '0'),
+            targetPrice: 0,
+            ratings: ratings,
+            finalRating: consensusRes.data.finalRating || '',
+            analystCount: consensusRes.data.analystCount || '0'
         };
     }
 
     if (earningForecastRes?.success === 1 && earningForecastRes.data) {
-        result.estimates = earningForecastRes.data;
+        result.earningsForecast = {
+            eps: earningForecastRes.data.eps || [],
+            netProfit: earningForecastRes.data.netProfit || [],
+            revenue: earningForecastRes.data.revenue || [],
+            displayLock: earningForecastRes.data.displayLock || ''
+        };
+    }
+
+    if (priceVolumeRes?.success === 1 && priceVolumeRes.data?.stock_price_volume_data) {
+        result.stockPriceVolume = priceVolumeRes.data.stock_price_volume_data;
+    }
+
+    if (hitsMissesRes?.success === 1 && hitsMissesRes.data) {
+        result.hitsMisses = hitsMissesRes.data;
+    }
+
+    if (valuationRes?.success === 1 && valuationRes.data) {
+        result.valuation = valuationRes.data;
     }
 
     return result;
@@ -138,7 +242,6 @@ export async function getStockInsights(query: string): Promise<StockInsight | nu
 }
 
 export async function getIndexData(indexId: string) {
-  // Use the ID from mapping
   try {
       const response = await fetch(`https://api.moneycontrol.com/mcapi/v1/indices/get-indices-details?indexId=${indexId}`);
       if (response.ok) {
