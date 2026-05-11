@@ -1,6 +1,11 @@
 import { initTRPC } from "@trpc/server";
 import { z } from "zod";
 import superjson from "superjson";
+import { fileURLToPath } from "url";
+import { dirname } from "path";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 import db from "./db";
 import { generateStockAnalysis } from "../services/aiService";
 import { fetchMCScreener } from "./moneycontrol";
@@ -32,6 +37,8 @@ import { getAllStocks, getStockMapping } from "./stockMapping";
 import { getCachedScan, runTechnicalScan } from "./technicalScanner";
 import { getFnOSignals } from "./fnoService";
 import { fetchStockDataWithCache, getOrRefreshAllStocks } from "./liveStockData";
+import { getMcConsolidatedData } from "./mcApiService";
+import { fetchTrendlyneScreenerData, fetchAllTrendlyneScreenerNames, getTrendlyneScreenerList, getTrendlyneScreenerCategories, updateFetchInterval, updateScreenerNamesInterval } from "./trendlyneScreener";
 
 const t = initTRPC.create({
   transformer: superjson,
@@ -610,6 +617,236 @@ export const appRouter = router({
         ],
         outlook: analysis.sentiment,
         generatedAt: new Date().toISOString()
+      };
+    }),
+
+  // ─── MoneyControl Consolidated Data API ──────────────────────────────────
+  // Fetches ALL MoneyControl data for a given stock symbol
+  // The timeframe parameter (D/W/M) controls the technical analysis period
+  // Replace BE03 with other scId values for different stocks
+  getMcConsolidated: publicProcedure
+    .input(z.object({ 
+      symbol: z.string(),
+      timeframe: z.enum(['D', 'W', 'M']).optional().default('D')
+    }))
+    .query(async ({ input }) => {
+      const mapping = getStockMapping(input.symbol);
+      const scId = mapping?.mcsymbol || input.symbol;
+      return await getMcConsolidatedData(scId, input.symbol, input.timeframe);
+    }),
+
+  // Fetch MC technical data for a specific timeframe (D/W/M)
+  getMcTechnical: publicProcedure
+    .input(z.object({
+      symbol: z.string(),
+      duration: z.enum(['D', 'W', 'M']).optional().default('D')
+    }))
+    .query(async ({ input }) => {
+      const mapping = getStockMapping(input.symbol);
+      const scId = mapping?.mcsymbol || input.symbol;
+      const { fetchMcTechnicalData } = await import('./mcApiService');
+      return await fetchMcTechnicalData(scId, input.duration);
+    }),
+
+  // Fetch MC equity cash quote
+  getMcEquityCash: publicProcedure
+    .input(z.object({ symbol: z.string() }))
+    .query(async ({ input }) => {
+      const mapping = getStockMapping(input.symbol);
+      const scId = mapping?.mcsymbol || input.symbol;
+      const { fetchMcEquityCash } = await import('./mcApiService');
+      return await fetchMcEquityCash(scId);
+    }),
+
+  // Fetch MC SWOT analysis
+  getMcSwot: publicProcedure
+    .input(z.object({ symbol: z.string() }))
+    .query(async ({ input }) => {
+      const mapping = getStockMapping(input.symbol);
+      const scId = mapping?.mcsymbol || input.symbol;
+      const { fetchMcSwot } = await import('./mcApiService');
+      return await fetchMcSwot(scId);
+    }),
+
+  // Fetch MC essentials (PE, PB, Market Cap, etc.)
+  getMcEssentials: publicProcedure
+    .input(z.object({ symbol: z.string() }))
+    .query(async ({ input }) => {
+      const mapping = getStockMapping(input.symbol);
+      const scId = mapping?.mcsymbol || input.symbol;
+      const { fetchMcEssentials } = await import('./mcApiService');
+      return await fetchMcEssentials(scId);
+    }),
+
+  // Fetch MC classification insights
+  getMcInsights: publicProcedure
+    .input(z.object({ symbol: z.string() }))
+    .query(async ({ input }) => {
+      const mapping = getStockMapping(input.symbol);
+      const scId = mapping?.mcsymbol || input.symbol;
+      const { fetchMcInsights } = await import('./mcApiService');
+      return await fetchMcInsights(scId);
+    }),
+
+  // Fetch detailed MC insights (insightData)
+  getMcDetailedInsights: publicProcedure
+    .input(z.object({ symbol: z.string() }))
+    .query(async ({ input }) => {
+      const mapping = getStockMapping(input.symbol);
+      const scId = mapping?.mcsymbol || input.symbol;
+      const { fetchMcDetailedInsights } = await import('./mcApiService');
+      return await fetchMcDetailedInsights(scId);
+    }),
+
+  // Fetch MC price-volume data
+  getMcPriceVolume: publicProcedure
+    .input(z.object({ symbol: z.string() }))
+    .query(async ({ input }) => {
+      const mapping = getStockMapping(input.symbol);
+      const scId = mapping?.mcsymbol || input.symbol;
+      const { fetchMcPriceVolume } = await import('./mcApiService');
+      return await fetchMcPriceVolume(scId);
+    }),
+
+  // Fetch MC analyst ratings
+  getMcAnalystRating: publicProcedure
+    .input(z.object({ symbol: z.string() }))
+    .query(async ({ input }) => {
+      const mapping = getStockMapping(input.symbol);
+      const scId = mapping?.mcsymbol || input.symbol;
+      const { fetchMcAnalystRating } = await import('./mcApiService');
+      return await fetchMcAnalystRating(scId);
+    }),
+
+  // Fetch MC earnings forecast
+  getMcEarningsForecast: publicProcedure
+    .input(z.object({ symbol: z.string() }))
+    .query(async ({ input }) => {
+      const mapping = getStockMapping(input.symbol);
+      const scId = mapping?.mcsymbol || input.symbol;
+      const { fetchMcEarningsForecast } = await import('./mcApiService');
+      return await fetchMcEarningsForecast(scId);
+    }),
+
+  // Fetch MC price forecast
+  getMcPriceForecast: publicProcedure
+    .input(z.object({ symbol: z.string() }))
+    .query(async ({ input }) => {
+      const mapping = getStockMapping(input.symbol);
+      const scId = mapping?.mcsymbol || input.symbol;
+      const { fetchMcPriceForecast } = await import('./mcApiService');
+      return await fetchMcPriceForecast(scId);
+    }),
+
+  // Fetch MC consensus data
+  getMcConsensus: publicProcedure
+    .input(z.object({ symbol: z.string() }))
+    .query(async ({ input }) => {
+      const mapping = getStockMapping(input.symbol);
+      const scId = mapping?.mcsymbol || input.symbol;
+      const { fetchMcConsensus } = await import('./mcApiService');
+      return await fetchMcConsensus(scId);
+    }),
+
+  // TradingView TA Data
+  getTvTa: publicProcedure
+    .input(z.object({ symbol: z.string(), exchange: z.string().optional().default('NSE') }))
+    .query(async ({ input }) => {
+      const { execFile } = await import('child_process');
+      const path = await import('path');
+      
+      return new Promise<any>((resolve, reject) => {
+        const scriptPath = path.join(__dirname, 'tv_bridge.py');
+        execFile('python', [scriptPath, 'ta', '--symbol', input.symbol, '--exchange', input.exchange], (error, stdout, stderr) => {
+          if (error) {
+            console.error("TV TA Error:", stderr);
+            return resolve({ error: stderr });
+          }
+          try {
+            resolve(JSON.parse(stdout));
+          } catch (e) {
+            resolve({ error: "Parse error" });
+          }
+        });
+      });
+    }),
+
+  // TradingView Screener Data
+  getTvScreener: publicProcedure
+    .query(async () => {
+      const { execFile } = await import('child_process');
+      const path = await import('path');
+      
+      return new Promise<any>((resolve, reject) => {
+        const scriptPath = path.join(__dirname, 'tv_bridge.py');
+        execFile('python', [scriptPath, 'screener'], { maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
+          if (error) {
+            console.error("TV Screener Error:", stderr);
+            return resolve({ error: stderr });
+          }
+          try {
+            resolve(JSON.parse(stdout));
+          } catch (e) {
+            resolve({ error: "Parse error" });
+          }
+        });
+      });
+    }),
+
+  // ─── Trendlyne Screener Integration ───────────────────────────────────
+  getTrendlyneScreener: publicProcedure
+    .input(z.object({
+      stockId: z.string().optional(),
+      pageNumber: z.number().optional().default(0),
+      groupName: z.string().optional()
+    }))
+    .query(async ({ input }) => {
+      return await fetchTrendlyneScreenerData(
+        input.stockId,
+        input.pageNumber,
+        input.groupName
+      );
+    }),
+
+  getTrendlyneScreenerBatch: publicProcedure
+    .input(z.object({
+      stockIds: z.array(z.string()),
+      pageNumber: z.number().optional().default(0),
+      groupName: z.string().optional()
+    }))
+    .query(async ({ input }) => {
+      const batchedIds = input.stockIds.slice(0, 30).join(',');
+      return await fetchTrendlyneScreenerData(
+        batchedIds,
+        input.pageNumber,
+        input.groupName
+      );
+    }),
+
+  getTrendlyneCategories: publicProcedure
+    .query(() => {
+      return getTrendlyneScreenerCategories();
+    }),
+
+  getTrendlyneScreenerNames: publicProcedure
+    .query(async () => {
+      return await getTrendlyneScreenerList();
+    }),
+
+  configTrendlyneFetchInterval: publicProcedure
+    .input(z.object({
+      intervalMs: z.number().min(0),
+      type: z.enum(['screener', 'names']).optional().default('screener')
+    }))
+    .mutation(async ({ input }) => {
+      if (input.type === 'names') {
+        updateScreenerNamesInterval(input.intervalMs);
+      } else {
+        updateFetchInterval(input.intervalMs);
+      }
+      return {
+        success: true,
+        message: `${input.type} fetch interval updated to ${input.intervalMs}ms (${(input.intervalMs / 1000 / 60).toFixed(2)} minutes)`
       };
     }),
 });

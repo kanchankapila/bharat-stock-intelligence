@@ -29,7 +29,7 @@ export function useMarketData() {
     if (isLoadingLive) {
       setIsLoading(true);
     } else if (liveStocks && liveStocks.length > 0) {
-      setStocks(liveStocks);
+      setStocks(liveStocks as MarketData[]);
       setIsLoading(false);
       setError(null);
     } else {

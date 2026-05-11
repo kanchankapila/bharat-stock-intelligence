@@ -24,6 +24,33 @@ import { useMarketData, MarketData } from './services/marketService';
 import { trpc } from './lib/trpc';
 import { useNewsFeed, NewsArticle } from './services/newsService';
 import { detectCandlestickPatterns, Candlestick } from './lib/candlestickUtils';
+import MCStockInfoPanel from './components/MCStockInfoPanel';
+import TrendlyneScreenerPanel from './components/TrendlyneScreenerPanel';
+
+class MCErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { hasError: boolean; message: string }
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, message: '' };
+  }
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, message: error.message };
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="p-8 text-center bg-slate-900/30 border border-slate-800 rounded-2xl">
+          <AlertCircle className="w-8 h-8 text-rose-500 mx-auto mb-3" />
+          <p className="text-sm text-slate-400 font-bold">MC Intelligence failed to render</p>
+          <p className="text-[10px] text-slate-600 mt-1">{this.state.message}</p>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 // --- Types ---
 
@@ -92,6 +119,7 @@ const Navbar: React.FC<{
             { icon: BarChart2, label: 'Indices', id: 'indices' },
             { icon: Activity, label: 'Market Map', id: 'market-map' },
             { icon: Filter, label: 'Screener', id: 'screener' },
+            { icon: Zap, label: 'Trendlyne', id: 'trendlyne' },
             { icon: History, label: 'Backtest', id: 'backtest' },
             { icon: PieChart, label: 'Portfolio', id: 'portfolio' },
             { icon: WatchlistIcon, label: 'Watchlist', id: 'watchlist' },
@@ -187,15 +215,15 @@ const Navbar: React.FC<{
   );
 };
 
-const Card: React.FC<{ children: React.ReactNode; className?: string; title?: string; icon?: any }> = ({ children, className, title, icon: Icon }) => (
-  <div className={cn("bg-slate-900/50 border border-slate-800 rounded-2xl overflow-hidden", className)}>
+const Card: React.FC<{ children: React.ReactNode; className?: string; title?: string; icon?: any; onClick?: () => void; action?: React.ReactNode }> = ({ children, className, title, icon: Icon, onClick, action }) => (
+  <div className={cn("bg-slate-900/50 border border-slate-800 rounded-2xl overflow-hidden", className)} onClick={onClick}>
     {title && (
       <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
         <h3 className="text-sm font-bold text-slate-300 flex items-center gap-2 italic uppercase tracking-wider">
           {Icon && <Icon className="w-4 h-4 text-blue-500" />}
           {title}
         </h3>
-        <Info className="w-4 h-4 text-slate-600 cursor-help" />
+        {action ?? <Info className="w-4 h-4 text-slate-600 cursor-help" />}
       </div>
     )}
     <div className="p-5">
@@ -1273,7 +1301,7 @@ const Dashboard: React.FC<{
       
       for (const stock of topStocks) {
         try {
-          const analysis = await getAIAnalysisMutation.mutateAsync({ symbol: stock.symbol, data: stock });
+          const analysis = await getAIAnalysisMutation.mutateAsync({ symbol: stock.symbol, data: stock as unknown as Record<string, unknown> });
           
           const dataPoints = 20;
           let currentPrice = stock.price * 0.95;
@@ -1461,7 +1489,7 @@ const Dashboard: React.FC<{
                           if (active && payload && payload.length) {
                             return (
                               <div className="bg-slate-900 border border-slate-800 p-2 rounded-lg shadow-xl">
-                                <p className="text-[10px] font-black text-white">₹{payload[0].value?.toFixed(2)}</p>
+                                <p className="text-[10px] font-black text-white">₹{typeof payload[0].value === 'number' ? payload[0].value.toFixed(2) : payload[0].value}</p>
                               </div>
                             );
                           }
@@ -1804,9 +1832,10 @@ const Dashboard: React.FC<{
     </div>
   );
 };
- const Screener: React.FC<{ 
-  onSelectStock: (symbol: string) => void; 
-  watchlist: string[]; 
+ const Screener: React.FC<{
+  stocks?: MarketData[];
+  onSelectStock: (symbol: string) => void;
+  watchlist: string[];
   onToggleWatchlist: (symbol: string) => void;
 }> = ({ onSelectStock, watchlist, onToggleWatchlist }) => {
   const [filter, setFilter] = useState('All');
@@ -1839,8 +1868,12 @@ const Dashboard: React.FC<{
       maxPb,
       maxDe
     },
-    { enabled: filter !== 'External' && activeTab === 'fundamental' }
+    { enabled: filter !== 'External' && filter !== 'TradingView' && activeTab === 'fundamental' }
   );
+
+  const { data: tvScreener, isLoading: tvScreenerLoading } = trpc.getTvScreener.useQuery(undefined, {
+    enabled: filter === 'TradingView' && activeTab === 'fundamental'
+  });
 
   const { data: scannerGroups } = trpc.getMarketScanners.useQuery();
   
@@ -1867,7 +1900,7 @@ const Dashboard: React.FC<{
     setActiveTab('technical');
   };
 
-  const isLoading = (activeTab === 'fundamental' && stocksLoading) || (activeTab === 'technical' && marketLoading);
+  const isLoading = (activeTab === 'fundamental' && (stocksLoading || tvScreenerLoading)) || (activeTab === 'technical' && marketLoading);
 
   // Process data based on provider
   let displayStocks: any[] = [];
@@ -1888,6 +1921,9 @@ const Dashboard: React.FC<{
         !['stkId', 'stkname', 'ltp', 'perChg', 'scUrl', 'symbol', 'name', 'companyName', 'recoid', 'id'].includes(k)
       ).slice(0, 4); // Limit to key columns
     }
+  } else if (activeTab === 'fundamental' && filter === 'TradingView') {
+    displayStocks = tvScreener?.results || [];
+    displayColumns = ['market_cap', 'volume', 'recommendation'];
   } else if (activeTab === 'fundamental') {
     displayStocks = stocks || [];
     displayColumns = ['pe', 'roe', 'pb', 'debtEquity'];
@@ -1967,7 +2003,7 @@ const Dashboard: React.FC<{
                     <Zap className="w-3 h-3 text-blue-500" /> System Presets
                   </h4>
                   <div className="flex flex-col gap-2">
-                    {['All', 'Gainers', 'Losers', 'High ROE', 'Low Debt', 'Near 52W High', 'Near 52W Low'].map(tag => (
+                    {['All', 'TradingView', 'Gainers', 'Losers', 'High ROE', 'Low Debt', 'Near 52W High', 'Near 52W Low'].map(tag => (
                       <button 
                           key={tag} 
                           onClick={() => { setFilter(tag); setActiveScanner(null); }}
@@ -2242,8 +2278,8 @@ const Dashboard: React.FC<{
                             <WatchlistIcon className={cn("w-3.5 h-3.5", watchlist.includes(symbol) && "fill-amber-500")} />
                           </button>
                           <div className="cursor-pointer" onClick={() => onSelectStock(symbol)}>
-                            <div className="font-black text-white text-xs tracking-tight group-hover:text-blue-400 transition-colors uppercase">{symbol}</div>
-                            <div className="text-[8px] text-slate-600 font-bold tracking-widest mt-1 uppercase italic truncate max-w-[150px]">{name}</div>
+                            <div className="font-black text-white text-xs tracking-tight group-hover:text-blue-400 transition-colors uppercase truncate max-w-[150px]">{name || symbol}</div>
+                            <div className="text-[8px] text-slate-600 font-bold tracking-widest mt-1 uppercase italic truncate max-w-[150px]">{symbol}</div>
                           </div>
                         </div>
                       </td>
@@ -2270,7 +2306,10 @@ const Dashboard: React.FC<{
                         ))
                       )}
                       <td className="px-6 py-6 text-right">
-                         <button className="p-2.5 bg-slate-900 border border-slate-800 rounded-xl text-slate-500 hover:text-white hover:border-slate-600 transition-all">
+                         <button 
+                            onClick={() => onSelectStock(symbol)}
+                            className="p-2.5 bg-slate-900 border border-slate-800 rounded-xl text-slate-500 hover:text-white hover:border-slate-600 transition-all"
+                         >
                             <ArrowUpRight className="w-4 h-4" />
                          </button>
                       </td>
@@ -2633,7 +2672,7 @@ const MarketMap: React.FC = () => {
   );
 };
 
-const Backtest: React.FC = () => {
+const Backtest: React.FC<{ stocks?: MarketData[] }> = () => {
   const [isRunning, setIsRunning] = useState(false);
   const [results, setResults] = useState<any>(null);
   const [symbol, setSymbol] = useState('RELIANCE');
@@ -2981,6 +3020,7 @@ const TechnicalAnalysis: React.FC<{ symbol: string }> = ({ symbol }) => {
   const { data: tech, isLoading } = trpc.getTechnicalDetails.useQuery({ symbol, dur: timeframe });
   const { data: technicalScan, isLoading: scanLoading } = trpc.getTechnicalScan.useQuery({ symbol });
   const { data: ohlcData, isLoading: ohlcLoading } = trpc.getOHLCData.useQuery({ symbol, dur: '1y' });
+  const { data: tvTa } = trpc.getTvTa.useQuery({ symbol });
 
   if (isLoading || scanLoading || ohlcLoading) return <div className="p-20 text-center animate-pulse text-slate-500">Processing signals...</div>;
 
@@ -3021,6 +3061,34 @@ const TechnicalAnalysis: React.FC<{ symbol: string }> = ({ symbol }) => {
           </button>
         ))}
       </div>
+
+      {tvTa && tvTa.summary && (
+        <Card title="TradingView Advanced TA" icon={Zap}>
+          <div className="grid grid-cols-3 gap-4 text-center mb-6">
+            <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800">
+              <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Oscillators</p>
+              <p className={cn("text-xl font-black italic tracking-tighter uppercase", 
+                tvTa.oscillators?.RECOMMENDATION?.includes('BUY') ? 'text-emerald-500' :
+                tvTa.oscillators?.RECOMMENDATION?.includes('SELL') ? 'text-rose-500' : 'text-amber-500'
+              )}>{tvTa.oscillators?.RECOMMENDATION || 'NEUTRAL'}</p>
+            </div>
+            <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800">
+              <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Summary</p>
+              <p className={cn("text-2xl font-black italic tracking-tighter uppercase", 
+                tvTa.summary?.RECOMMENDATION?.includes('BUY') ? 'text-emerald-500' :
+                tvTa.summary?.RECOMMENDATION?.includes('SELL') ? 'text-rose-500' : 'text-amber-500'
+              )}>{tvTa.summary?.RECOMMENDATION || 'NEUTRAL'}</p>
+            </div>
+            <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800">
+              <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Moving Averages</p>
+              <p className={cn("text-xl font-black italic tracking-tighter uppercase", 
+                tvTa.moving_averages?.RECOMMENDATION?.includes('BUY') ? 'text-emerald-500' :
+                tvTa.moving_averages?.RECOMMENDATION?.includes('SELL') ? 'text-rose-500' : 'text-amber-500'
+              )}>{tvTa.moving_averages?.RECOMMENDATION || 'NEUTRAL'}</p>
+            </div>
+          </div>
+        </Card>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <Card title="Momentum Indicators" icon={Activity}>
@@ -4178,6 +4246,8 @@ const StockDetails: React.FC<{
         </div>
       </div>
 
+      {/* Get scId from stock mapping or use symbol as fallback */}
+      
       {/* Tabs */}
       <div className="flex gap-2 border-b border-slate-800 pb-px overflow-x-auto hide-scrollbar">
         {[
@@ -4186,6 +4256,7 @@ const StockDetails: React.FC<{
           { id: 'fundamentals', label: 'Fundamental' },
           { id: 'mf', label: 'MF Insights' },
           { id: 'fno', label: 'F&O Insights' },
+          { id: 'mc', label: 'MC Intelligence' },
           { id: 'news', label: 'News Feed' },
         ].map(tab => (
           <button
@@ -4527,13 +4598,37 @@ const StockDetails: React.FC<{
                     )}
                  </Card>
               </div>
+              <MCErrorBoundary>
+                <MCStockInfoPanel symbol={symbol} scId={symbol} section="insights" />
+              </MCErrorBoundary>
             </div>
           )}
 
-          {activeTab === 'technicals' && <TechnicalAnalysis symbol={symbol} />}
-          {activeTab === 'fundamentals' && <FundamentalInsights symbol={symbol} />}
+          {activeTab === 'technicals' && (
+            <div className="space-y-6">
+              <TechnicalAnalysis symbol={symbol} />
+              <MCErrorBoundary>
+                <MCStockInfoPanel symbol={symbol} scId={symbol} section="technical" />
+              </MCErrorBoundary>
+            </div>
+          )}
+          {activeTab === 'fundamentals' && (
+            <div className="space-y-6">
+              <FundamentalInsights symbol={symbol} />
+              <MCErrorBoundary>
+                <MCStockInfoPanel symbol={symbol} scId={symbol} section="fundamental" />
+              </MCErrorBoundary>
+            </div>
+          )}
           {activeTab === 'mf' && <MFAnalysis symbol={symbol} />}
           {activeTab === 'news' && <NewsTab symbol={symbol} />}
+          {activeTab === 'mc' && (
+            <div className="space-y-6">
+              <MCErrorBoundary>
+                <McTab symbol={symbol} scId={symbol} />
+              </MCErrorBoundary>
+            </div>
+          )}
 
            {activeTab === 'fno' && (
             <div className="space-y-6">
@@ -4559,7 +4654,7 @@ const StockDetails: React.FC<{
           )}
 
           {/* Other tabs can be implemented similarly */}
-          {activeTab !== 'insights' && activeTab !== 'fno' && activeTab !== 'technicals' && activeTab !== 'fundamentals' && activeTab !== 'mf' && activeTab !== 'news' && (
+          {activeTab !== 'insights' && activeTab !== 'fno' && activeTab !== 'technicals' && activeTab !== 'fundamentals' && activeTab !== 'mf' && activeTab !== 'news' && activeTab !== 'mc' && (
             <div className="flex flex-col items-center justify-center py-20 bg-slate-950 rounded-2xl border border-slate-800 border-dashed">
                <Activity className="w-12 h-12 text-slate-800 animate-pulse mb-4" />
                <h3 className="text-slate-500 font-black text-lg uppercase tracking-tighter italic">Coming to Bharat Stock Pro</h3>
@@ -4657,6 +4752,24 @@ const StockDetails: React.FC<{
           </Card>
         </div>
       </div>
+    </div>
+  );
+};
+
+/**
+ * MC Intelligence Tab - Shows MoneyControl consolidated data with Daily/Weekly/Monthly timeframe toggle
+ * scId is the MoneyControl symbol ID (e.g., BE03 for Bharat Electronics)
+ * Replace BE03 with other scId values for different stocks
+ * Data sources: https://priceapi.moneycontrol.com/pricefeed/techindicator/{D/W/M}/{scId}
+ *              https://api.moneycontrol.com/mcapi/v1/swot/details?scId={scId}&type=all
+ *              https://api.moneycontrol.com/mcapi/v1/extdata/mc-essentials?scId={scId}&type=ed
+ *              https://api.moneycontrol.com/mcapi/v1/extdata/mc-insights?scId={scId}&type=d
+ *              https://api.moneycontrol.com/mcapi/v1/stock/estimates/*?scId={scId}
+ */
+const McTab: React.FC<{ symbol: string; scId: string }> = ({ symbol, scId }) => {
+  return (
+    <div className="space-y-6">
+      <MCStockInfoPanel symbol={symbol} scId={scId} />
     </div>
   );
 };
@@ -4814,6 +4927,7 @@ export default function App() {
               {activeTab === 'indices' && <IndicesPage />}
               {activeTab === 'market-map' && <MarketMap />}
               {activeTab === 'screener' && <Screener stocks={stocks} onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />}
+              {activeTab === 'trendlyne' && <TrendlyneScreenerPanel />}
               {activeTab === 'details' && selectedSymbol && (
                 <StockDetails 
                   symbol={selectedSymbol} 

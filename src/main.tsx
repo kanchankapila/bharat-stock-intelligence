@@ -7,6 +7,11 @@ import { trpc } from "./lib/trpc";
 import App from './App.tsx';
 import './index.css';
 
+// superjson v2 changed serialize() to accept SuperJSONValue instead of unknown,
+// which breaks tRPC's DataTransformer structural type check — cast to any as workaround.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const transformer = superjson as any;
+
 const Main = () => {
   const [queryClient] = useState(() => new QueryClient());
   const [trpcClient] = useState(() =>
@@ -14,7 +19,7 @@ const Main = () => {
       links: [
         httpBatchLink({
           url: "/api/trpc",
-          transformer: superjson,
+          transformer,
         }),
       ],
     })
