@@ -132,6 +132,13 @@ export interface TrendlyneStock {
   [key: string]: any;
 }
 
+export interface TrendlyneScreenerData {
+  success: boolean;
+  data: TrendlyneStock[];
+  screenerName?: string;
+  totalResults?: number;
+}
+
 /**
  * Debug function to test API response and see actual structure
  */
@@ -161,21 +168,45 @@ export async function testTrendlyneApiResponse(
     console.log('📊 Response Status:', response.status);
 
     const json = await response.json();
-    console.log('📋 Raw API Response:', JSON.stringify(json, null, 2));
+    console.log('📋 Raw API Response (head):', JSON.stringify(json.head, null, 2));
 
-    const stocks: TrendlyneStock[] = (json.result || []).map((item: any) => ({
-      stockId: item.stock_id || item.id,
-      name: item.stock_name || item.name || '',
-      ltp: parseFloat(item.ltp || item.price || 0),
-      change: parseFloat(item.change || 0),
-      changePercent: parseFloat(item.change_percent || item.changePercent || 0),
-      screenerName: item.screener_name || 'Trendlyne Screener',
-      screenerType: item.screener_type || 'all-in-one',
-      ...item
-    }));
+    const stocks: TrendlyneStock[] = [];
 
-    console.log('✅ Parsed Stocks:', stocks);
-    console.log('📌 Available Fields in First Stock:', Object.keys(json.result?.[0] || {}));
+    // API returns { body: { screenObj: { title, description, ... }, tableData: [...], tableHeaders: [...] }, head: {...} }
+    if (json?.head?.status === '0' && json.body) {
+      const screenerTitle = json.body.screenObj?.title || 'Trendlyne Screener';
+      const tableData = json.body.tableData || [];
+      const tableHeaders = json.body.tableHeaders || [];
+
+      console.log(`📋 Screener: ${screenerTitle}`);
+      console.log(`📋 Table Headers: ${tableHeaders.map((h: any) => h.unique_name).join(', ')}`);
+      console.log(`📋 Data rows: ${tableData.length}`);
+
+      // Find indices of important columns
+      const stockIdIndex = tableHeaders.findIndex((h: any) => h.unique_name === 'stock_id');
+      const nameIndex = tableHeaders.findIndex((h: any) => h.unique_name === 'get_full_name');
+      const priceIndex = tableHeaders.findIndex((h: any) => h.unique_name === 'currentPrice');
+
+      console.log(`📋 Column indices - stockId: ${stockIdIndex}, name: ${nameIndex}, price: ${priceIndex}`);
+
+      // Map tableData rows to stock objects
+      tableData.forEach((row: any[]) => {
+        stocks.push({
+          stockId: String(row[stockIdIndex] || ''),
+          name: String(row[nameIndex] || ''),
+          ltp: parseFloat(row[priceIndex] || 0),
+          change: 0,
+          changePercent: 0,
+          screenerName: screenerTitle,
+          screenerType: 'all-in-one'
+        });
+      });
+    } else {
+      console.log('❌ API returned error:', json?.head?.statusDescription);
+    }
+
+    console.log('✅ Parsed Stocks:', stocks.length);
+    console.log('📌 First Stock Sample:', stocks.length > 0 ? stocks[0] : 'No stocks found');
 
     return { rawResponse: json, parsedStocks: stocks };
   } catch (error) {
@@ -281,22 +312,35 @@ export async function fetchTrendlyneScreenerData(
     const json = await response.json();
 
     // Transform the response to our expected format
-    if (json && json.result) {
-      const stocks: TrendlyneStock[] = (json.result || []).map((item: any) => ({
-        stockId: item.stock_id || item.id,
-        name: item.stock_name || item.name || '',
-        ltp: parseFloat(item.ltp || item.price || 0),
-        change: parseFloat(item.change || 0),
-        changePercent: parseFloat(item.change_percent || item.changePercent || 0),
-        screenerName: item.screener_name || 'Trendlyne Screener',
-        screenerType: item.screener_type || 'all-in-one',
-        ...item // Include all other fields
-      }));
+    // API returns: { body: { screenObj: { title, description, ... }, tableData: [...], tableHeaders: [...] }, head: {...} }
+    if (json && json.head?.status === '0' && json.body) {
+      const stocks: TrendlyneStock[] = [];
+      const screenerTitle = json.body.screenObj?.title || 'Trendlyne Screener';
+      const tableData = json.body.tableData || [];
+      const tableHeaders = json.body.tableHeaders || [];
+
+      // Find indices of important columns
+      const stockIdIndex = tableHeaders.findIndex((h: any) => h.unique_name === 'stock_id');
+      const nameIndex = tableHeaders.findIndex((h: any) => h.unique_name === 'get_full_name');
+      const priceIndex = tableHeaders.findIndex((h: any) => h.unique_name === 'currentPrice');
+
+      // Map tableData rows to stock objects
+      tableData.forEach((row: any[]) => {
+        stocks.push({
+          stockId: String(row[stockIdIndex] || ''),
+          name: String(row[nameIndex] || ''),
+          ltp: parseFloat(row[priceIndex] || 0),
+          change: 0,
+          changePercent: 0,
+          screenerName: screenerTitle,
+          screenerType: 'all-in-one'
+        });
+      });
 
       const result = {
         success: true,
         data: stocks,
-        screenerName: 'Trendlyne All-in-One Screener',
+        screenerName: screenerTitle,
         totalResults: stocks.length
       };
 
@@ -321,8 +365,8 @@ export async function fetchTrendlyneScreenerData(
 }
 
 /**
- * Fetch all unique screener names from Trendlyne in one efficient call
- * Uses batching to handle large stock lists with polite fetching
+ * Fetch all unique screener names from Trendlyne
+ * Samples stocks across the full list to discover screener types efficiently
  * @returns Set of unique screener names
  */
 export async function fetchAllTrendlyneScreenerNames(): Promise<Set<string>> {
@@ -335,12 +379,26 @@ export async function fetchAllTrendlyneScreenerNames(): Promise<Set<string>> {
 
     const screenerNames = new Set<string>();
     const allStockIds = STOCK_IDS[0].split(',');
-    const batchSize = 30; // Reduced from 100 to prevent URI length exceeded (414) error
 
-    console.log(`Fetching screener names from ${allStockIds.length} stocks in batches of ${batchSize}...`);
+    // Sample stocks: take first 5, then every 50th stock to discover screener types efficiently
+    const sampleIndices: number[] = [];
 
-    for (let i = 0; i < allStockIds.length; i += batchSize) {
-      const batch = allStockIds.slice(i, i + batchSize).join(',');
+    // Always include first 5 stocks
+    for (let i = 0; i < Math.min(5, allStockIds.length); i++) {
+      sampleIndices.push(i);
+    }
+
+    // Then sample every 50th stock for diversity
+    for (let i = 50; i < allStockIds.length; i += 50) {
+      sampleIndices.push(i);
+    }
+
+    console.log(`📊 Sampling ${sampleIndices.length} stocks from ${allStockIds.length} to discover screener types...`);
+
+    // Fetch sampled stocks
+    for (let idx = 0; idx < sampleIndices.length; idx++) {
+      const i = sampleIndices[idx];
+      const stockId = allStockIds[i];
 
       // Apply jitter delay for polite fetching
       const jitterDelay = getJitter(TRENDLYNE_CONFIG.BASE_DELAY_MS, TRENDLYNE_CONFIG.JITTER_PERCENT);
@@ -350,7 +408,7 @@ export async function fetchAllTrendlyneScreenerNames(): Promise<Set<string>> {
         const params = new URLSearchParams({
           perPageCount: '200',
           pageNumber: '0',
-          screenpk: batch,
+          screenpk: stockId,
           groupType: 'all',
           groupName: ''
         });
@@ -372,31 +430,28 @@ export async function fetchAllTrendlyneScreenerNames(): Promise<Set<string>> {
         clearTimeout(timeoutId);
 
         if (!response.ok) {
-          console.warn(`Batch fetch error: ${response.status}`);
           continue;
         }
 
         const json = await response.json();
-        if (json && json.result) {
-          (json.result || []).forEach((item: any) => {
-            const screenerName = item.screener_name || item.category || 'Trendlyne Screener';
-            screenerNames.add(screenerName);
-          });
+        // API returns { body: { screenObj: { title: "..." }, ... }, head: { status: "0" } }
+        if (json?.head?.status === '0' && json.body?.screenObj?.title) {
+          const screenerName = json.body.screenObj.title;
+          screenerNames.add(screenerName);
+          console.log(`✅ Stock ${i + 1}: Found screener "${screenerName}"`);
         }
-
-        console.log(`Batch ${Math.floor(i / batchSize) + 1}: Extracted ${screenerNames.size} unique screeners`);
       } catch (error) {
-        console.error(`Error fetching batch starting at index ${i}:`, error);
+        // Silently continue on individual stock fetch errors
       }
     }
 
     // Cache the results
     setCachedScreenerNames(screenerNames);
-    console.log(`Total unique screener names cached: ${screenerNames.size}`);
+    console.log(`✅ Sampled ${sampleIndices.length} stocks. Found ${screenerNames.size} unique screeners: ${Array.from(screenerNames).join(', ')}`);
 
     return screenerNames;
   } catch (error) {
-    console.error('Error fetching screener names:', error);
+    console.error('❌ Error fetching screener names:', error);
     return new Set();
   }
 }

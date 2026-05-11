@@ -37,16 +37,21 @@ const TrendlyneScreenerPanel: React.FC = () => {
     { enabled: false }
   );
 
+  const getTrendlyneScreenerNames = trpc.getTrendlyneScreenerNames.useQuery();
   const getTrendlyneCategories = trpc.getTrendlyneCategories.useQuery();
 
   // Fetch screener data
   const handleFetchScreeners = async () => {
     setIsLoading(true);
     try {
+      console.log('📊 Fetching Trendlyne screeners with category:', selectedCategory);
       const result = await getTrendlyneScreener.refetch();
+      console.log('📊 Trendlyne response:', result.data);
+
       if (result.data?.success) {
-        const stocks = result.data.data || [];
-        
+        const stocks = (result.data.data || []) as TrendlyneStock[];
+        console.log(`✅ Received ${stocks.length} stocks from Trendlyne`);
+
         // Apply search filter
         let filtered = stocks;
         if (searchQuery) {
@@ -55,14 +60,28 @@ const TrendlyneScreenerPanel: React.FC = () => {
             s.screenerName.toLowerCase().includes(searchQuery.toLowerCase())
           );
         }
-        
+
         setFilteredStocks(filtered);
+      } else {
+        console.error('❌ Trendlyne API returned unsuccessful:', result.data);
       }
     } catch (error) {
-      console.error('Error fetching Trendlyne screeners:', error);
+      console.error('❌ Error fetching Trendlyne screeners:', error);
     } finally {
       setIsLoading(false);
     }
+  };
+
+  // Test API connection
+  const testApi = trpc.testTrendlyneApi.useQuery(
+    { stockId: '19814' },
+    { enabled: false }
+  );
+
+  const handleTestApi = async () => {
+    console.log('🧪 Testing Trendlyne API...');
+    const result = await testApi.refetch();
+    console.log('🧪 API Test Result:', result.data);
   };
 
   // Auto-fetch on category change
@@ -70,7 +89,11 @@ const TrendlyneScreenerPanel: React.FC = () => {
     handleFetchScreeners();
   }, [selectedCategory]);
 
-  const categories = getTrendlyneCategories.data || [];
+  // Use dynamic screener names if available, fallback to hardcoded categories
+  const dynamicCategories = getTrendlyneScreenerNames.data;
+  const categories = (dynamicCategories && dynamicCategories.length > 0)
+    ? dynamicCategories
+    : (getTrendlyneCategories.data || []);
 
   const isPositive = (value: number) => value >= 0;
 
@@ -88,14 +111,23 @@ const TrendlyneScreenerPanel: React.FC = () => {
               Live technical and fundamental screener data from Trendlyne
             </p>
           </div>
-          <button
-            onClick={handleFetchScreeners}
-            disabled={isLoading}
-            className="flex items-center gap-2 px-4 py-2 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-400/50 rounded-lg text-amber-400 font-medium transition-all disabled:opacity-50"
-          >
-            <RefreshCw className={cn("w-4 h-4", isLoading && "animate-spin")} />
-            Refresh
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={handleFetchScreeners}
+              disabled={isLoading}
+              className="flex items-center gap-2 px-4 py-2 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-400/50 rounded-lg text-amber-400 font-medium transition-all disabled:opacity-50"
+            >
+              <RefreshCw className={cn("w-4 h-4", isLoading && "animate-spin")} />
+              Refresh
+            </button>
+            <button
+              onClick={handleTestApi}
+              className="flex items-center gap-2 px-3 py-2 bg-slate-700/50 hover:bg-slate-700 border border-slate-600 rounded-lg text-slate-400 text-sm font-medium transition-all"
+              title="Test API connection"
+            >
+              🧪 Test API
+            </button>
+          </div>
         </div>
       </div>
 
@@ -142,6 +174,16 @@ const TrendlyneScreenerPanel: React.FC = () => {
 
             {/* Category Filter */}
             <div className="flex flex-wrap gap-2">
+              {getTrendlyneScreenerNames.isLoading && (
+                <div className="text-xs text-slate-500 w-full animate-pulse">
+                  Loading screener names from API...
+                </div>
+              )}
+              {categories.length === 0 && !getTrendlyneScreenerNames.isLoading && (
+                <div className="text-xs text-slate-500 w-full">
+                  No categories available. Click "Test API" to debug.
+                </div>
+              )}
               {categories.map((cat) => (
                 <button
                   key={cat.id}
@@ -276,10 +318,20 @@ const TrendlyneScreenerPanel: React.FC = () => {
       )}
 
       {/* Footer Info */}
-      <div className="bg-slate-800/30 border border-slate-700/50 rounded-lg p-3 text-xs text-slate-500">
+      <div className="bg-slate-800/30 border border-slate-700/50 rounded-lg p-3 text-xs text-slate-500 space-y-1">
         <p>
           Data provided by Trendlyne's All-in-One Screener API. Updates every 5 minutes.
         </p>
+        <p>
+          Categories: {categories.length > 0 ? `${categories.length} loaded` : 'Loading...'} |
+          Screeners: {filteredStocks.length} found
+        </p>
+        {getTrendlyneScreenerNames.isLoading && (
+          <p className="text-amber-600">⏳ Fetching screener names from API...</p>
+        )}
+        {getTrendlyneScreenerNames.error && (
+          <p className="text-rose-600">❌ Error loading screeners: {String(getTrendlyneScreenerNames.error)}</p>
+        )}
       </div>
     </div>
   );
