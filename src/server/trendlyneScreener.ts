@@ -43,8 +43,14 @@ interface ScreenerNamesCache {
   timestamp: number;
 }
 
+interface ScreenerStocksCache {
+  mapping: Map<string, string[]>; // screenerName -> stockIds
+  timestamp: number;
+}
+
 const cache = new Map<string, CacheEntry>();
 let screenerNamesCache: ScreenerNamesCache | null = null;
+let screenerStocksCache: ScreenerStocksCache | null = null;
 
 /**
  * Get random jitter for polite API fetching
@@ -117,6 +123,35 @@ function getCachedScreenerNames(): Set<string> | null {
 function setCachedScreenerNames(names: Set<string>): void {
   screenerNamesCache = {
     names,
+    timestamp: Date.now()
+  };
+}
+
+/**
+ * Check if screener->stocks mapping cache is fresh
+ */
+function isScreenerStocksCacheFresh(): boolean {
+  if (!screenerStocksCache) return false;
+  const age = Date.now() - screenerStocksCache.timestamp;
+  return age < TRENDLYNE_CONFIG.SCREENER_NAMES_INTERVAL_MS;
+}
+
+/**
+ * Get cached screener->stocks mapping
+ */
+function getCachedScreenerStocks(): Map<string, string[]> | null {
+  if (isScreenerStocksCacheFresh()) {
+    return screenerStocksCache?.mapping || null;
+  }
+  return null;
+}
+
+/**
+ * Set cached screener->stocks mapping
+ */
+function setCachedScreenerStocks(mapping: Map<string, string[]>): void {
+  screenerStocksCache = {
+    mapping,
     timestamp: Date.now()
   };
 }
@@ -234,7 +269,28 @@ export async function fetchTrendlyneScreenerData(
   skipCache: boolean = false
 ): Promise<TrendlyneScreenerData> {
   try {
-    const ids = stockId.split(',');
+    let idsToFetch: string[];
+
+    // If a specific screener (groupName) is selected, fetch stocks for that screener
+    if (groupName && groupName !== 'all') {
+      const screenerStocksMapping = getCachedScreenerStocks();
+      if (screenerStocksMapping && screenerStocksMapping.has(groupName)) {
+        idsToFetch = screenerStocksMapping.get(groupName)!;
+        console.log(`📊 Fetching ${idsToFetch.length} stocks for screener: "${groupName}"`);
+      } else {
+        console.warn(`⚠️ No stocks found cached for screener: "${groupName}". Ensure screener names have been fetched first.`);
+        return {
+          success: false,
+          data: [],
+          totalResults: 0
+        };
+      }
+    } else {
+      // Use provided stock IDs or default
+      idsToFetch = stockId.split(',');
+    }
+
+    const ids = idsToFetch;
 
     // If too many IDs, batch them
     if (ids.length > 30) {
@@ -326,21 +382,25 @@ export async function fetchTrendlyneScreenerData(
 
       // Map tableData rows to stock objects
       tableData.forEach((row: any[]) => {
-        stocks.push({
-          stockId: String(row[stockIdIndex] || ''),
-          name: String(row[nameIndex] || ''),
-          ltp: parseFloat(row[priceIndex] || 0),
-          change: 0,
-          changePercent: 0,
-          screenerName: screenerTitle,
-          screenerType: 'all-in-one'
-        });
+        // Only include if filtering by a specific screener and this stock belongs to it
+        // OR if not filtering by a specific screener (fetch all)
+        if (!groupName || groupName === 'all' || screenerTitle === groupName) {
+          stocks.push({
+            stockId: String(row[stockIdIndex] || ''),
+            name: String(row[nameIndex] || ''),
+            ltp: parseFloat(row[priceIndex] || 0),
+            change: 0,
+            changePercent: 0,
+            screenerName: screenerTitle,
+            screenerType: 'all-in-one'
+          });
+        }
       });
 
       const result = {
         success: true,
         data: stocks,
-        screenerName: screenerTitle,
+        screenerName: groupName || screenerTitle,
         totalResults: stocks.length
       };
 
@@ -367,6 +427,7 @@ export async function fetchTrendlyneScreenerData(
 /**
  * Fetch all unique screener names from Trendlyne
  * Samples stocks across the full list to discover screener types efficiently
+ * Also builds a mapping of screener names to stock IDs
  * @returns Set of unique screener names
  */
 export async function fetchAllTrendlyneScreenerNames(): Promise<Set<string>> {
@@ -378,6 +439,7 @@ export async function fetchAllTrendlyneScreenerNames(): Promise<Set<string>> {
     }
 
     const screenerNames = new Set<string>();
+    const screenerStocksMapping = new Map<string, string[]>();
     const allStockIds = STOCK_IDS[0].split(',');
 
     // Sample stocks: take first 5, then every 50th stock to discover screener types efficiently
@@ -438,16 +500,25 @@ export async function fetchAllTrendlyneScreenerNames(): Promise<Set<string>> {
         if (json?.head?.status === '0' && json.body?.screenObj?.title) {
           const screenerName = json.body.screenObj.title;
           screenerNames.add(screenerName);
-          console.log(`✅ Stock ${i + 1}: Found screener "${screenerName}"`);
+
+          // Add this stock to the screener's list
+          if (!screenerStocksMapping.has(screenerName)) {
+            screenerStocksMapping.set(screenerName, []);
+          }
+          screenerStocksMapping.get(screenerName)!.push(stockId);
+
+          console.log(`✅ Stock ${i + 1} (${stockId}): Found screener "${screenerName}"`);
         }
       } catch (error) {
         // Silently continue on individual stock fetch errors
       }
     }
 
-    // Cache the results
+    // Cache both the screener names and the stock mapping
     setCachedScreenerNames(screenerNames);
+    setCachedScreenerStocks(screenerStocksMapping);
     console.log(`✅ Sampled ${sampleIndices.length} stocks. Found ${screenerNames.size} unique screeners: ${Array.from(screenerNames).join(', ')}`);
+    console.log(`✅ Built screener->stocks mapping with ${screenerStocksMapping.size} entries`);
 
     return screenerNames;
   } catch (error) {

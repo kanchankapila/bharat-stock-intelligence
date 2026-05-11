@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx tsc *)",
+      "Bash(npm run *)",
+      "PowerShell(Get-Process -Name node -ErrorAction SilentlyContinue)",
+      "PowerShell(\"=== SERVER LOGS \\(last 15 lines\\) ===\")",
+      "PowerShell(\"=== API CALL STATUS ===\")"
+    ]
+  }
+}

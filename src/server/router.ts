@@ -38,7 +38,7 @@ import { getCachedScan, runTechnicalScan } from "./technicalScanner";
 import { getFnOSignals } from "./fnoService";
 import { fetchStockDataWithCache, getOrRefreshAllStocks } from "./liveStockData";
 import { getMcConsolidatedData } from "./mcApiService";
-import { fetchTrendlyneScreenerData, fetchAllTrendlyneScreenerNames, getTrendlyneScreenerList, getTrendlyneScreenerCategories, updateFetchInterval, updateScreenerNamesInterval } from "./trendlyneScreener";
+import { fetchTrendlyneScreenerData, fetchAllTrendlyneScreenerNames, getTrendlyneScreenerList, getTrendlyneScreenerCategories, updateFetchInterval, updateScreenerNamesInterval, testTrendlyneApiResponse } from "./trendlyneScreener";
 
 const t = initTRPC.create({
   transformer: superjson,
@@ -848,6 +848,17 @@ export const appRouter = router({
         success: true,
         message: `${input.type} fetch interval updated to ${input.intervalMs}ms (${(input.intervalMs / 1000 / 60).toFixed(2)} minutes)`
       };
+    }),
+
+  testTrendlyneApi: publicProcedure
+    .input(z.object({ stockId: z.string().optional() }))
+    .query(async ({ input }) => {
+      return await testTrendlyneApiResponse(input.stockId);
+    }),
+
+  fetchTrendlyneScreenerNames: publicProcedure
+    .query(async () => {
+      return await fetchAllTrendlyneScreenerNames();
     }),
 });
 
