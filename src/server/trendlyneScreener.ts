@@ -501,11 +501,14 @@ export async function fetchAllTrendlyneScreenerNames(): Promise<Set<string>> {
           const screenerName = json.body.screenObj.title;
           screenerNames.add(screenerName);
 
-          // Add this stock to the screener's list
-          if (!screenerStocksMapping.has(screenerName)) {
-            screenerStocksMapping.set(screenerName, []);
+          // Create ID in same format as frontend uses
+          const screenerNameId = screenerName.toLowerCase().replace(/\s+/g, '-');
+
+          // Add this stock to the screener's list (keyed by ID, not original name)
+          if (!screenerStocksMapping.has(screenerNameId)) {
+            screenerStocksMapping.set(screenerNameId, []);
           }
-          screenerStocksMapping.get(screenerName)!.push(stockId);
+          screenerStocksMapping.get(screenerNameId)!.push(stockId);
 
           console.log(`✅ Stock ${i + 1} (${stockId}): Found screener "${screenerName}"`);
         }
