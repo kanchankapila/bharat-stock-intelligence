@@ -6,3 +6,15 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# SQLite database files
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+# Redis binaries and data
+redis/
+*.zip
+
+# Data files
+EQUITY_L.csv
