@@ -1,9 +1,13 @@
 import { getStockMapping } from './stockMapping';
+import { fetchTrendlyneFundamentals } from './trendlyneService';
+
+export { fetchTrendlyneFundamentals };
 
 export async function fetchTechIndicators(symbol: string, dur: 'D' | 'W' | 'M' = 'D') {
   const map = getStockMapping(symbol);
   if (!map) throw new Error("Stock mapping not found for symbol: " + symbol);
   
+  console.log(`[MONEYCONTROL] Fetching tech indicators for ${symbol} using scId: ${map.mcsymbol}`);
   const url = `https://priceapi.moneycontrol.com/pricefeed/techindicator/${dur}/${map.mcsymbol}?fields=sentiments,pivotLevels,sma,ema,indicators,crossover`;
   const response = await fetch(url, {
     headers: {
@@ -18,6 +22,7 @@ export async function fetchETCompanyData(symbol: string) {
   const map = getStockMapping(symbol);
   if (!map) return null;
 
+  console.log(`[ET] Fetching company data for ${symbol} using companyid: ${map.companyid}`);
   // https://json.bselivefeeds.indiatimes.com/ET_Community/companypagedata?companyid=8581&companytype=&callback=...
   const url = `https://json.bselivefeeds.indiatimes.com/ET_Community/companypagedata?companyid=${map.companyid}&companytype=`;
   const response = await fetch(url);
@@ -45,6 +50,7 @@ export async function fetchMCRatios(symbol: string) {
   const map = getStockMapping(symbol);
   if (!map) throw new Error("Stock mapping not found for symbol: " + symbol);
   
+  console.log(`[MONEYCONTROL] Fetching ratios for ${symbol} using scId: ${map.mcsymbol}`);
   // https://www.moneycontrol.com/mc/widget/mcfinancials/getFinancialData?classic=true&referenceId=ratios&requestType=S&scId=BE03&frequency=3
   const url = `https://www.moneycontrol.com/mc/widget/mcfinancials/getFinancialData?classic=true&referenceId=ratios&requestType=S&scId=${map.mcsymbol}&frequency=3`;
   const response = await fetch(url);
@@ -56,6 +62,7 @@ export async function fetchETShareholding(symbol: string) {
   const map = getStockMapping(symbol);
   if (!map) return null;
 
+  console.log(`[ET] Fetching shareholding for ${symbol} using companyid: ${map.companyid}`);
   // https://marketservices.indiatimes.com/marketservices/shareholding?companyid=11945
   const url = `https://marketservices.indiatimes.com/marketservices/shareholding?companyid=${map.companyid}`;
   const response = await fetch(url);
@@ -79,6 +86,7 @@ export async function fetchHistoricalOHLC(symbol: string, dur: string = '1y') {
   const map = getStockMapping(symbol);
   if (!map) throw new Error("Stock mapping not found for symbol: " + symbol);
   
+  console.log(`[MONEYCONTROL] Fetching historical OHLC for ${symbol} using scId: ${map.mcsymbol}`);
   // Using a common MC charting endpoint that provides OHLC data
   const url = `https://www.moneycontrol.com/mcapi/v1/stock/chart?scId=${map.mcsymbol}&dur=${dur}`;
   const response = await fetch(url);
@@ -106,16 +114,6 @@ export async function fetchSectorPerformance(indId?: string) {
   return response.json();
 }
 
-export async function fetchTrendlyneFundamentals(symbol: string) {
-  const map = getStockMapping(symbol);
-  if (!map) return null;
-
-  // https://trendlyne.com/fundamentals/get-fundamental_results/346/
-  const url = `https://trendlyne.com/fundamentals/get-fundamental_results/${map.tlid}/`;
-  const response = await fetch(url);
-  if (!response.ok) return null;
-  return response.json();
-}
 
 export async function fetchGlobalIndices() {
   const url = `https://api.moneycontrol.com/mcapi/v1/indices/get-global-indices`;

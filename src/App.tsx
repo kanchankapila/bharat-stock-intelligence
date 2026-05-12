@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
   AreaChart, Area, BarChart, Bar, ReferenceLine, PieChart as RePieChart, Pie, Cell,
@@ -26,6 +26,10 @@ import { useNewsFeed, NewsArticle } from './services/newsService';
 import { detectCandlestickPatterns, Candlestick } from './lib/candlestickUtils';
 import MCStockInfoPanel from './components/MCStockInfoPanel';
 import TrendlyneScreenerPanel from './components/TrendlyneScreenerPanel';
+import NSEStockDiscovery from './components/NSEStockDiscovery';
+import stockData from './data/stocklist';
+import { nseStocksData } from './data/nseStocks';
+import TopRatedStocks from './components/TopRatedStocks';
 
 class MCErrorBoundary extends React.Component<
   { children: React.ReactNode },
@@ -85,10 +89,10 @@ const IndexBar: React.FC<IndexBarProps> = ({ name, value, change, isUp }) => (
   </div>
 );
 
-const Navbar: React.FC<{ 
-  user: FirebaseUser | null; 
-  onLogin: () => void; 
-  activeTab: string; 
+const Navbar: React.FC<{
+  user: FirebaseUser | null;
+  onLogin: () => void;
+  activeTab: string;
   setActiveTab: (tab: string) => void;
   stocks: MarketData[];
   onSelectStock: (symbol: string) => void;
@@ -96,15 +100,18 @@ const Navbar: React.FC<{
   const [searchQuery, setSearchQuery] = useState('');
   const [showResults, setShowResults] = useState(false);
 
-  const searchResults = searchQuery.length > 0 
-    ? stocks.filter(s => 
-        s.symbol.toLowerCase().includes(searchQuery.toLowerCase()) || 
-        s.name.toLowerCase().includes(searchQuery.toLowerCase())
-      ).slice(0, 8)
+  const searchResults = searchQuery.length > 0
+    ? nseStocksData.filter(s =>
+        (s.symbol && s.symbol.toLowerCase().includes(searchQuery.toLowerCase())) ||
+        (s.name && s.name.toLowerCase().includes(searchQuery.toLowerCase()))
+      ).slice(0, 8).map(s => ({
+        symbol: s.symbol,
+        name: s.name,
+        changePct: stocks.find(ms => ms.symbol === s.symbol)?.changePct || 0
+      }))
     : [];
 
-  return (
-    <nav className="h-16 border-b border-slate-800 bg-slate-950 flex items-center justify-between px-6 sticky top-0 z-50">
+  return (    <nav className="h-16 border-b border-slate-800 bg-slate-950 flex items-center justify-between px-6 sticky top-0 z-50">
       <div className="flex items-center gap-8">
         <div className="flex items-center gap-2 cursor-pointer" onClick={() => setActiveTab('dashboard')}>
           <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
@@ -116,10 +123,12 @@ const Navbar: React.FC<{
         <div className="hidden md:flex items-center gap-6">
           {[
             { icon: LayoutDashboard, label: 'Dashboard', id: 'dashboard' },
+            { icon: Trophy, label: 'Top Rated', id: 'top-rated' },
             { icon: BarChart2, label: 'Indices', id: 'indices' },
             { icon: Activity, label: 'Market Map', id: 'market-map' },
             { icon: Filter, label: 'Screener', id: 'screener' },
             { icon: Zap, label: 'Trendlyne', id: 'trendlyne' },
+            { icon: Search, label: 'Discover', id: 'discover' },
             { icon: History, label: 'Backtest', id: 'backtest' },
             { icon: PieChart, label: 'Portfolio', id: 'portfolio' },
             { icon: WatchlistIcon, label: 'Watchlist', id: 'watchlist' },
@@ -1276,6 +1285,7 @@ const Dashboard: React.FC<{
   const [newsFilter, setNewsFilter] = useState('All');
   const [aiSignals, setAiSignals] = useState<any[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [queueProgress, setQueueProgress] = useState<{ completed: number; total: number } | null>(null);
   const [selectedSignal, setSelectedSignal] = useState<any | null>(null);
   const [historySymbol, setHistorySymbol] = useState<string | null>(null);
   
@@ -1283,76 +1293,88 @@ const Dashboard: React.FC<{
     newsFilter === 'All' ? true : item.category === newsFilter
   );
 
-  const [graphData] = useState(
-    Array.from({ length: 20 }, (_, i) => ({
+  const { data: niftyOhlc } = trpc.getOHLCData.useQuery({ symbol: 'in;NSX', dur: '1M' });
+  const graphData = useMemo(() => {
+    const candles: any[] = niftyOhlc?.data ?? [];
+    if (candles.length === 0) return [];
+    return candles.slice(-30).map((d: any, i: number) => ({
       time: i,
-      value: 22000 + Math.random() * 500,
-    }))
+      value: d.close ?? d.c ?? 0,
+    }));
+  }, [niftyOhlc]);
+
+  const enqueueSignalsMutation = trpc.enqueueSignals.useMutation();
+  const { data: queueStats, refetch: refetchStats } = trpc.getQueueStats.useQuery(undefined, {
+    refetchInterval: isGenerating ? 2000 : false,
+  });
+  const { data: savedSignals, refetch: refetchSignals } = trpc.getSignals.useQuery(
+    { limit: 50 },
+    { refetchInterval: isGenerating ? 3000 : false },
   );
 
-  const saveSignalMutation = trpc.saveSignal.useMutation();
-  const getAIAnalysisMutation = trpc.getAIAnalysis.useMutation();
+  // Sync completed signals from DB into local state while the queue is running
+  useEffect(() => {
+    if (!isGenerating || !savedSignals) return;
+    const mapped = (savedSignals as any[]).map((s: any) => ({
+      symbol: s.symbol,
+      type: s.type,
+      signal: s.type,
+      entry: s.entry,
+      target: s.target,
+      stopLoss: s.stopLoss,
+      confidence: s.confidence,
+      reasoning: s.reasoning,
+      history: [],
+    }));
+    setAiSignals(mapped);
+
+    if (queueStats) {
+      const { waiting, active, completed, total } = queueStats as any;
+      setQueueProgress({ completed: completed ?? 0, total: total ?? 0 });
+      if ((waiting === 0 && active === 0 && total > 0) || !queueStats.available) {
+        setIsGenerating(false);
+        setQueueProgress(null);
+        // Surface high-confidence signals as toasts
+        mapped
+          .filter((s: any) => (s.type === 'BUY' || s.type === 'SELL') && s.confidence > 70)
+          .slice(0, 5)
+          .forEach((s: any) => onNewSignal(s));
+      }
+    }
+  }, [queueStats, savedSignals, isGenerating]);
 
   const handleGenerateSignals = async () => {
+    if (stocks.length === 0) return;
     setIsGenerating(true);
+    setQueueProgress({ completed: 0, total: stocks.length });
     try {
-      const topStocks = stocks.slice(0, 3);
-      const newSignals = [];
-      
-      for (const stock of topStocks) {
-        try {
-          const analysis = await getAIAnalysisMutation.mutateAsync({ symbol: stock.symbol, data: stock as unknown as Record<string, unknown> });
-          
-          const dataPoints = 20;
-          let currentPrice = stock.price * 0.95;
-          const history = Array.from({ length: dataPoints }, (_, i) => {
-            const change = currentPrice * (Math.random() - 0.5) * 0.02;
-            currentPrice += change;
-            return { time: i, price: currentPrice };
-          });
+      const payload = stocks.map(s => ({
+        symbol: s.symbol,
+        stockData: s as unknown as Record<string, unknown>,
+      }));
+      const result = await enqueueSignalsMutation.mutateAsync(payload);
 
-          const signal = {
-            symbol: stock.symbol,
-            type: analysis.signal as "BUY" | "SELL" | "HOLD",
-            entry: analysis.entry,
-            target: analysis.target,
-            stopLoss: analysis.stopLoss,
-            confidence: analysis.confidence,
-            reasoning: analysis.reasoning,
-          };
-
-          await saveSignalMutation.mutateAsync(signal);
-
-          const signalWithHistory = {
-            ...signal,
-            signal: signal.type,
-            history
-          };
-          
-          if ((signal.type === 'BUY' || signal.type === 'SELL') && signal.confidence > 70) {
-            onNewSignal(signalWithHistory);
-          }
-          
-          newSignals.push(signalWithHistory);
-        } catch (err) {
-          console.error(`Failed to analyze ${stock.symbol}:`, err);
-        }
+      if (!result.queueAvailable) {
+        // BullMQ/Redis unavailable — signal generation requires Redis
+        console.warn('[SIGNALS] Queue unavailable — start Redis to enable signal generation');
+        setIsGenerating(false);
+        setQueueProgress(null);
+      } else {
+        setQueueProgress({ completed: 0, total: result.queued });
+        refetchStats();
+        refetchSignals();
       }
-
-      setAiSignals(newSignals);
-    } catch (error) {
-      console.error("Failed to generate signals:", error);
-    } finally {
+    } catch (err) {
+      console.error('[SIGNALS] enqueue failed:', err);
       setIsGenerating(false);
+      setQueueProgress(null);
     }
   };
 
   useEffect(() => {
-    // Initial generation - only if we don't have signals and aren't already generating
     if (aiSignals.length === 0 && stocks.length > 0 && !isGenerating) {
       handleGenerateSignals();
     }
-    // We only want this to run once on mount or when stocks first become available
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stocks.length > 0]);
 
@@ -1698,7 +1720,22 @@ const Dashboard: React.FC<{
                   </div>
                 )}
              </div>
-             <button 
+             {/* BullMQ progress bar */}
+             {isGenerating && queueProgress && queueProgress.total > 0 && (
+               <div className="mt-3 space-y-1">
+                 <div className="flex justify-between text-[9px] font-black text-slate-500 uppercase tracking-widest">
+                   <span>Queue progress</span>
+                   <span>{queueProgress.completed} / {queueProgress.total}</span>
+                 </div>
+                 <div className="h-1 bg-slate-800 rounded-full overflow-hidden">
+                   <div
+                     className="h-full bg-blue-500 transition-all duration-500"
+                     style={{ width: `${Math.round((queueProgress.completed / queueProgress.total) * 100)}%` }}
+                   />
+                 </div>
+               </div>
+             )}
+             <button
                 onClick={handleGenerateSignals}
                 disabled={isGenerating}
                 className={cn(
@@ -1709,12 +1746,14 @@ const Dashboard: React.FC<{
                 {isGenerating ? (
                     <>
                         <Activity className="w-3 h-3 animate-spin" />
-                        Analyzing via Local LLM...
+                        {queueProgress
+                          ? `Queued ${queueProgress.total} stocks · ${queueProgress.completed} done`
+                          : 'Enqueuing jobs...'}
                     </>
                 ) : (
                     <>
                         <Zap className="w-3 h-3" />
-                        Regenerate Signals
+                        Generate Signals ({stocks.length} stocks)
                     </>
                 )}
              </button>
@@ -2360,10 +2399,11 @@ const OptionChain: React.FC<{ symbol: string; stockPrice: number }> = ({ symbol,
       theta: theta.toFixed(2),
       vega: vega.toFixed(3),
       iv: iv.toFixed(1) + '%',
-      oi: Math.round(Math.random() * 50000).toLocaleString(),
-      vol: Math.round(Math.random() * 200000).toLocaleString(),
-      bid: (itm ? (Math.abs(stockPrice - strike) + 5) : 5 + Math.random() * 5).toFixed(2),
-      ask: (itm ? (Math.abs(stockPrice - strike) + 6) : 6 + Math.random() * 5).toFixed(2),
+      // Deterministic simulation: OI peaks near ATM, decays by moneyness
+      oi: Math.round(50000 * Math.max(0.1, 1 - diff * 4)).toLocaleString(),
+      vol: Math.round(20000 * Math.max(0.05, 1 - diff * 5)).toLocaleString(),
+      bid: (itm ? Math.abs(stockPrice - strike) + iv * 0.5 : iv * Math.max(0.1, 1 - diff * 3)).toFixed(2),
+      ask: (itm ? Math.abs(stockPrice - strike) + iv * 0.5 + 0.5 : iv * Math.max(0.1, 1 - diff * 3) + 0.5).toFixed(2),
     };
   };
 
@@ -3508,20 +3548,33 @@ const FundamentalInsights: React.FC<{ symbol: string }> = ({ symbol }) => {
           </Card>
        </div>
 
-       <Card title="Quarterly Performance" icon={BarChart3}>
-          <div className="h-64 mt-4">
-             <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={Array.from({ length: 4 }, (_, i) => ({ q: `Q${i+1}`, revenue: 1000 + Math.random() * 500, profit: 200 + Math.random() * 100 }))}>
-                   <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                   <XAxis dataKey="q" />
-                   <YAxis hide />
-                   <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b' }} />
-                   <Bar dataKey="revenue" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-                   <Bar dataKey="profit" fill="#10b981" radius={[4, 4, 0, 0]} />
-                </BarChart>
-             </ResponsiveContainer>
-          </div>
-       </Card>
+       {(() => {
+          // Use real quarterly data from Trendlyne fundamentals if available
+          const quarterlyRows: any[] = (funds as any)?.data?.financials?.quarterly?.revenue ?? [];
+          const profitRows: any[] = (funds as any)?.data?.financials?.quarterly?.profit ?? [];
+          if (quarterlyRows.length === 0 && profitRows.length === 0) return null;
+          const chartData = quarterlyRows.slice(-6).map((r: any, i: number) => ({
+            q: r.period || `Q${i + 1}`,
+            revenue: r.value ?? 0,
+            profit: profitRows[i]?.value ?? 0,
+          }));
+          return (
+            <Card title="Quarterly Performance" icon={BarChart3}>
+               <div className="h-64 mt-4">
+                  <ResponsiveContainer width="100%" height="100%">
+                     <BarChart data={chartData}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                        <XAxis dataKey="q" tick={{ fill: '#64748b', fontSize: 10 }} />
+                        <YAxis hide />
+                        <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b' }} />
+                        <Bar dataKey="revenue" fill="#3b82f6" radius={[4, 4, 0, 0]} name="Revenue" />
+                        <Bar dataKey="profit" fill="#10b981" radius={[4, 4, 0, 0]} name="Profit" />
+                     </BarChart>
+                  </ResponsiveContainer>
+               </div>
+            </Card>
+          );
+       })()}
     </div>
   );
 };
@@ -4126,17 +4179,46 @@ const StockDetails: React.FC<{
   onBack: () => void;
   watchlist: string[];
   onToggleWatchlist: (symbol: string) => void;
-}> = ({ symbol, stock, onBack, watchlist, onToggleWatchlist }) => {
+}> = ({ symbol, stock: initialStock, onBack, watchlist, onToggleWatchlist }) => {
   const news = useNewsFeed().filter(n => n.relatedSymbols?.includes(symbol));
   const [activeTab, setActiveTab] = useState('insights');
   const [report, setReport] = useState<any>(null);
+
+  // Resolve MC symbol (scId) from stocklist mapping for MoneyControl API calls
+  const stockMapping = stockData.find(s => s.symbol.toUpperCase() === symbol.toUpperCase());
+  const mcScId = stockMapping?.mcsymbol || symbol;
+
+  // Fetch stock data if it wasn't provided in the initial props
+  const { data: liveStock, isLoading, isError } = trpc.getLiveStockQuote.useQuery(
+    { symbol },
+    { enabled: !initialStock, refetchInterval: 30000, retry: 1 }
+  );
+
+  const stock = initialStock || liveStock;
+
+  // Fallback name/sector from NSE master list when live data is unavailable
+  const nseEntry = !stock ? nseStocksData.find(s => s.symbol === symbol) : null;
+  const displayName = stock?.name ?? nseEntry?.name ?? symbol;
 
   const reportMutation = trpc.generateTrendReport.useMutation({
     onSuccess: (data) => {
       setReport(data);
     }
   });
-  
+
+  // Full-page loading while fetching live quote
+  if (!initialStock && isLoading) {
+    return (
+      <div className="p-20 text-center">
+        <button onClick={onBack} className="mb-8 p-2 bg-slate-900 border border-slate-800 rounded-xl text-slate-400 hover:text-white transition-all inline-block">
+          <ArrowLeft className="w-5 h-5" />
+        </button>
+        <div className="text-2xl font-black text-white italic tracking-tighter uppercase mb-2">{symbol}</div>
+        <div className="animate-pulse text-slate-500 text-sm">Loading live data...</div>
+      </div>
+    );
+  }
+
   // Synthetic high-fidelity candlestick data
   const [chartData] = useState(() => {
     const base = stock?.price || 1000;
@@ -4196,14 +4278,15 @@ const StockDetails: React.FC<{
     };
   }, [chartData]);
 
-  if (!stock) return <div className="p-20 text-center text-slate-500">Stock data missing</div>;
+  const priceLoading = !stock && !isError && isLoading;
+  const priceUnavailable = !stock && (isError || (!isLoading && !initialStock));
 
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-6">
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex items-center gap-4">
-          <button 
+          <button
             onClick={onBack}
             className="p-2 bg-slate-900 border border-slate-800 rounded-xl text-slate-400 hover:text-white transition-all"
           >
@@ -4211,9 +4294,12 @@ const StockDetails: React.FC<{
           </button>
           <div>
             <div className="flex items-center gap-3">
-              <h1 className="text-3xl font-black text-white italic tracking-tighter uppercase">{stock.symbol}</h1>
-              <span className="text-slate-500 font-bold text-sm bg-slate-900 px-3 py-1 rounded-lg border border-slate-800">{stock.name}</span>
-              <button 
+              <h1 className="text-3xl font-black text-white italic tracking-tighter uppercase">{symbol}</h1>
+              {priceLoading
+                ? <div className="h-6 w-40 bg-slate-800 rounded animate-pulse" />
+                : <span className="text-slate-500 font-bold text-sm bg-slate-900 px-3 py-1 rounded-lg border border-slate-800">{displayName}</span>
+              }
+              <button
                 onClick={() => onToggleWatchlist(symbol)}
                 className={cn(
                   "p-2 rounded-xl border transition-all",
@@ -4224,14 +4310,21 @@ const StockDetails: React.FC<{
               </button>
             </div>
             <div className="flex items-center gap-3 mt-1">
-              <span className="text-2xl font-black text-white tabular-nums">₹{stock.price.toLocaleString()}</span>
-              <span className={cn(
-                "font-bold text-sm flex items-center gap-1",
-                stock.changePct >= 0 ? "text-emerald-400" : "text-rose-400"
-              )}>
-                {stock.changePct >= 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
-                {stock.changePct >= 0 ? '+' : ''}{stock.changePct}%
-              </span>
+              {priceLoading
+                ? <div className="h-7 w-32 bg-slate-800 rounded animate-pulse" />
+                : priceUnavailable
+                  ? <span className="text-sm text-slate-500 italic">Live price unavailable</span>
+                  : <>
+                      <span className="text-2xl font-black text-white tabular-nums">₹{stock?.price?.toLocaleString() ?? '—'}</span>
+                      <span className={cn(
+                        "font-bold text-sm flex items-center gap-1",
+                        (stock?.changePct ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400"
+                      )}>
+                        {(stock?.changePct ?? 0) >= 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
+                        {(stock?.changePct ?? 0) >= 0 ? '+' : ''}{stock?.changePct ?? 0}%
+                      </span>
+                    </>
+              }
             </div>
           </div>
         </div>
@@ -4246,8 +4339,6 @@ const StockDetails: React.FC<{
         </div>
       </div>
 
-      {/* Get scId from stock mapping or use symbol as fallback */}
-      
       {/* Tabs */}
       <div className="flex gap-2 border-b border-slate-800 pb-px overflow-x-auto hide-scrollbar">
         {[
@@ -4503,7 +4594,7 @@ const StockDetails: React.FC<{
                           Harness the power of Bharat Stock AI to generate a high-fidelity intelligence report including fundamental analysis, technical positioning, and risk scoring.
                         </p>
                         <button 
-                          onClick={() => reportMutation.mutate({ symbol: stock.symbol })}
+                          onClick={() => reportMutation.mutate({ symbol })}
                           disabled={reportMutation.isPending}
                           className={cn(
                             "px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-2xl transition-all shadow-lg flex items-center gap-2 uppercase text-xs tracking-widest",
@@ -4599,7 +4690,7 @@ const StockDetails: React.FC<{
                  </Card>
               </div>
               <MCErrorBoundary>
-                <MCStockInfoPanel symbol={symbol} scId={symbol} section="insights" />
+                <MCStockInfoPanel symbol={symbol} scId={mcScId} section="insights" />
               </MCErrorBoundary>
             </div>
           )}
@@ -4608,7 +4699,7 @@ const StockDetails: React.FC<{
             <div className="space-y-6">
               <TechnicalAnalysis symbol={symbol} />
               <MCErrorBoundary>
-                <MCStockInfoPanel symbol={symbol} scId={symbol} section="technical" />
+                <MCStockInfoPanel symbol={symbol} scId={mcScId} section="technical" />
               </MCErrorBoundary>
             </div>
           )}
@@ -4616,7 +4707,7 @@ const StockDetails: React.FC<{
             <div className="space-y-6">
               <FundamentalInsights symbol={symbol} />
               <MCErrorBoundary>
-                <MCStockInfoPanel symbol={symbol} scId={symbol} section="fundamental" />
+                <MCStockInfoPanel symbol={symbol} scId={mcScId} section="fundamental" />
               </MCErrorBoundary>
             </div>
           )}
@@ -4625,14 +4716,14 @@ const StockDetails: React.FC<{
           {activeTab === 'mc' && (
             <div className="space-y-6">
               <MCErrorBoundary>
-                <McTab symbol={symbol} scId={symbol} />
+                <McTab symbol={symbol} scId={mcScId} />
               </MCErrorBoundary>
             </div>
           )}
 
            {activeTab === 'fno' && (
             <div className="space-y-6">
-               <OptionChain symbol={symbol} stockPrice={stock.price} />
+               <OptionChain symbol={symbol} stockPrice={stock?.price ?? 0} />
                <FnOSignals symbol={symbol} />
 
                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -4693,11 +4784,11 @@ const StockDetails: React.FC<{
                    <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest pl-1">Pivot Points (Standard)</p>
                    <div className="space-y-1">
                       {[
-                        { label: 'R2', val: stock.high + 10, color: 'text-emerald-400' },
-                        { label: 'R1', val: stock.high, color: 'text-emerald-500' },
-                        { label: 'PP', val: stock.price, color: 'text-white' },
-                        { label: 'S1', val: stock.low, color: 'text-rose-500' },
-                        { label: 'S2', val: stock.low - 10, color: 'text-rose-400' },
+                        { label: 'R2', val: (stock?.high ?? 0) + 10, color: 'text-emerald-400' },
+                        { label: 'R1', val: stock?.high ?? 0, color: 'text-emerald-500' },
+                        { label: 'PP', val: stock?.price ?? 0, color: 'text-white' },
+                        { label: 'S1', val: stock?.low ?? 0, color: 'text-rose-500' },
+                        { label: 'S2', val: (stock?.low ?? 0) - 10, color: 'text-rose-400' },
                       ].map(p => (
                         <div key={p.label} className="flex justify-between items-center px-4 py-2 bg-slate-950 rounded-lg border border-slate-800/50">
                            <span className={cn("text-[9px] font-black uppercase tracking-widest", p.color)}>{p.label}</span>
@@ -4719,7 +4810,7 @@ const StockDetails: React.FC<{
                     </div>
                   ) : (
                     <button 
-                      onClick={() => reportMutation.mutate({ symbol: stock.symbol })}
+                      onClick={() => reportMutation.mutate({ symbol })}
                       disabled={reportMutation.isPending}
                       className={cn(
                         "w-full py-3 rounded-xl border font-black text-[10px] uppercase tracking-widest transition-all",
@@ -4733,7 +4824,7 @@ const StockDetails: React.FC<{
              </div>
           </Card>
 
-          <Card title={`Latest ${stock.symbol} News`} icon={Info}>
+          <Card title={`Latest ${symbol} News`} icon={Info}>
              <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2 hide-scrollbar">
                 {news.length > 0 ? news.map(item => (
                    <div key={item.id} className="group cursor-pointer">
@@ -4783,7 +4874,14 @@ export default function App() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const stocks = useMarketData();
   const { data: realIndices } = trpc.getAllIndices.useQuery();
-  
+  const syncNSEStocksMutation = trpc.syncNSEStocks.useMutation();
+
+  // Initialize NSE stocks on app load
+  useEffect(() => {
+    console.log('📊 Initializing NSE stocks database...');
+    syncNSEStocksMutation.mutate();
+  }, []);
+
   const rawIndexData = realIndices?.data;
   const indexSource = Array.isArray(rawIndexData) ? rawIndexData : (rawIndexData?.indexList || []);
   
@@ -4924,10 +5022,12 @@ export default function App() {
               transition={{ duration: 0.25, ease: 'easeOut' }}
             >
               {activeTab === 'dashboard' && <Dashboard stocks={stocks} onNewSignal={addToast} onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />}
+              {activeTab === 'top-rated' && <TopRatedStocks />}
               {activeTab === 'indices' && <IndicesPage />}
               {activeTab === 'market-map' && <MarketMap />}
               {activeTab === 'screener' && <Screener stocks={stocks} onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />}
               {activeTab === 'trendlyne' && <TrendlyneScreenerPanel />}
+              {activeTab === 'discover' && <div className="p-6"><NSEStockDiscovery onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} /></div>}
               {activeTab === 'details' && selectedSymbol && (
                 <StockDetails 
                   symbol={selectedSymbol} 

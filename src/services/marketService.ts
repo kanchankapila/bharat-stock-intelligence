@@ -12,6 +12,12 @@ export interface MarketData {
   low: number;
   open: number;
   prevClose: number;
+  high52w?: number;
+  low52w?: number;
+  sector?: string;
+  mcsymbol?: string;
+  tlid?: string;
+  tlname?: string;
 }
 
 export function useMarketData() {

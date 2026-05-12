@@ -8,6 +8,8 @@ import * as trpcExpress from "@trpc/server/adapters/express";
 import { appRouter } from "./src/server/router";
 import { createContext } from "./src/server/context";
 import { fetchStockDataWithCache } from "./src/server/liveStockData";
+import { initCache } from "./src/server/cacheService";
+import { initQueues, shutdownQueues } from "./src/server/queues";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -17,6 +19,36 @@ import { updateSignalAccuracy } from "./src/server/signals";
 async function startServer() {
   const app = express();
   const PORT = 3000;
+
+  // Initialise Redis cache (gracefully falls back to in-memory if Redis is down)
+  await initCache();
+
+  // Initialise BullMQ queues + workers (stock-refresh repeatable + ai-signals)
+  // Falls back to legacy setInterval if Redis is unavailable
+  const bullmqReady = await initQueues();
+  if (!bullmqReady) {
+    // Legacy fallback: simple periodic refresh without job queue
+    const { startBackgroundRefresh } = await import('./src/server/liveStockData');
+    startBackgroundRefresh();
+
+    // Fallback for scoring: run once every 24 hours
+    const { syncAndScore } = await import('./src/server/scoringService');
+    setInterval(async () => {
+      console.log('[FALLBACK] Triggering scheduled stock scoring...');
+      await syncAndScore();
+    }, 24 * 60 * 60 * 1000);
+    
+    // Fallback for MC screener sync: run every 12 hours
+    setInterval(async () => {
+      console.log('[FALLBACK] Triggering MoneyControl screener sync...');
+      const { syncMoneyControlScreeners } = await import('./src/server/moneycontrolScreener');
+      await syncMoneyControlScreeners();
+    }, 12 * 60 * 60 * 1000);
+
+    // Trigger immediate sync on start if fallback
+    syncAndScore();
+    import('./src/server/moneycontrolScreener').then(m => m.syncMoneyControlScreeners());
+  }
 
   // Background job for signal accuracy tracking (Phase 4)
   setInterval(() => {
@@ -35,8 +67,9 @@ async function startServer() {
     });
   }, 30000); // Every 30 seconds
 
-  // JSON body parser
-  app.use(express.json());
+  // JSON body parser with increased limit for large payloads (e.g. stock list sync)
+  app.use(express.json({ limit: '50mb' }));
+  app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
   // tRPC middleware
   app.use(
@@ -77,3 +110,12 @@ startServer().catch((error) => {
   console.error("Failed to start server:", error);
   process.exit(1);
 });
+
+// Graceful shutdown — close BullMQ workers before exiting
+for (const sig of ['SIGTERM', 'SIGINT'] as NodeJS.Signals[]) {
+  process.on(sig, async () => {
+    console.log(`[SERVER] ${sig} received, shutting down queues...`);
+    await shutdownQueues();
+    process.exit(0);
+  });
+}

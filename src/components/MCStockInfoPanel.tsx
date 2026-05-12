@@ -1,6 +1,7 @@
 import React from 'react';
 import { cn } from '../lib/utils';
 import { trpc } from '../lib/trpc';
+import stockData from '../data/stocklist';
 import {
   TrendingUp, TrendingDown, Activity, Zap, Info, AlertCircle,
   BarChart3, PieChart, Users, Filter, ArrowUpRight, ArrowDownRight,
@@ -78,10 +79,20 @@ const IndicatorRow: React.FC<{ name: string; value: string | number | any[] | un
 
 export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({ symbol, scId, section }) => {
   const [timeframe, setTimeframe] = React.useState<Timeframe>('D');
-  
+
+  // Resolve Trendlyne stockid for screener lookups (numeric ID, different from MC scId)
+  const stockMapping = stockData.find(s => s.symbol.toUpperCase() === symbol.toUpperCase());
+  const trendlyneStockId = stockMapping?.stockid || scId;
+
   const { data: mc, isLoading, error } = trpc.getMcConsolidated.useQuery(
     { symbol, timeframe },
     { refetchInterval: 60000 }
+  );
+
+  // Fetch screeners containing this stock using Trendlyne stockid
+  const { data: screeners = [], isLoading: screenersLoading } = trpc.getStockScreeners.useQuery(
+    { stockId: trendlyneStockId },
+    { refetchInterval: 300000 } // Refresh every 5 minutes
   );
 
   if (isLoading) {
@@ -170,6 +181,60 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({ symbol, scId
           ))}
         </div>
       </div>
+
+      {/* Trendlyne Screeners Section */}
+      {screeners && screeners.length > 0 && (
+        <div className="bg-slate-800/40 border border-slate-700/50 rounded-2xl p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <Zap className="w-4 h-4 text-amber-400" />
+            <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest">
+              Trendlyne Screeners ({screeners.length})
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {screeners.map((screener) => {
+              const isBullish = screener.sentiment === 'bullish';
+              const isBearish = screener.sentiment === 'bearish';
+
+              return (
+                <div
+                  key={screener.id}
+                  className={cn(
+                    "px-3 py-1.5 rounded-lg text-[9px] font-bold uppercase tracking-tight border flex items-center gap-1.5",
+                    isBullish
+                      ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-400"
+                      : isBearish
+                      ? "bg-rose-500/15 border-rose-500/30 text-rose-400"
+                      : "bg-slate-700/50 border-slate-600/30 text-slate-300"
+                  )}
+                  title={screener.name}
+                >
+                  {isBullish ? (
+                    <TrendingUp className="w-3 h-3" />
+                  ) : isBearish ? (
+                    <TrendingDown className="w-3 h-3" />
+                  ) : (
+                    <Filter className="w-3 h-3" />
+                  )}
+                  <span className="truncate max-w-xs">{screener.name}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Loading Screeners */}
+      {screenersLoading && (
+        <div className="bg-slate-800/40 border border-slate-700/50 rounded-2xl p-4 animate-pulse">
+          <div className="flex items-center gap-2">
+            <Zap className="w-4 h-4 text-amber-400" />
+            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+              Loading screeners...
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* Price & Key Stats Row */}
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">

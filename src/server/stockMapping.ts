@@ -6,12 +6,98 @@ export function getStockMapping(query: string): StockMapping | undefined {
   return stockData.find(s => 
     s.symbol.toUpperCase() === upperQuery || 
     s.name.toUpperCase() === upperQuery ||
-    s.mcsymbol.toUpperCase() === upperQuery
+    s.mcsymbol.toUpperCase() === upperQuery ||
+    s.isin.toUpperCase() === upperQuery ||
+    s.tlid === query
   );
+}
+
+/**
+ * Returns all mapped tickers for a given stock symbol/name
+ */
+export function getStockTickers(query: string) {
+  const mapping = getStockMapping(query);
+  if (!mapping) return null;
+  return {
+    mcsymbol: mapping.mcsymbol,
+    tlid: mapping.tlid,
+    tlname: mapping.tlname,
+    isin: mapping.isin,
+    symbol: mapping.symbol,
+    stockid: mapping.stockid,
+    companyid: mapping.companyid
+  };
+}
+
+// In-memory cache to avoid redundant API calls
+const scIdCache = new Map<string, string>();
+
+export async function resolveMoneycontrolSymbol(query: string): Promise<string | null> {
+  if (!query) return null;
+  const upperQuery = query.toUpperCase();
+  
+  // 1. Check hardcoded mapping first
+  const mapping = getStockMapping(upperQuery);
+  if (mapping && mapping.mcsymbol) {
+    return mapping.mcsymbol;
+  }
+  
+  // 2. Check cache
+  if (scIdCache.has(upperQuery)) {
+    return scIdCache.get(upperQuery) || null;
+  }
+
+  // 3. Fallback to Moneycontrol autocomplete API
+  try {
+    const res = await fetch(`https://www.moneycontrol.com/mccode/common/autosuggestion_solr.php?query=${encodeURIComponent(upperQuery)}&type=1&format=json`, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+      }
+    });
+    
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data) && data.length > 0) {
+        // Try to find exact match by looking for the symbol in the display name
+        const exactMatch = data.find(item => {
+           const matchText = (item.pdt_dis_nm || "").toUpperCase();
+           // Common formats in MC: "... <span>INE..., SYMBOL, ..." or just matching the name
+           return matchText.includes(` ${upperQuery},`) || 
+                  matchText.includes(`, ${upperQuery},`) ||
+                  matchText.includes(`, ${upperQuery}<`);
+        });
+        
+        if (exactMatch && exactMatch.sc_id) {
+          scIdCache.set(upperQuery, exactMatch.sc_id);
+          return exactMatch.sc_id;
+        }
+        
+        // If no exact symbol match, just return the first one as best effort
+        if (data[0].sc_id) {
+          scIdCache.set(upperQuery, data[0].sc_id);
+          return data[0].sc_id;
+        }
+      }
+    }
+  } catch (error) {
+    console.error(`Error resolving Moneycontrol scId for ${query}:`, error);
+  }
+  
+  return null;
 }
 
 export function getAllStocks(): StockMapping[] {
   return stockData;
+}
+
+/**
+ * Returns the NSE symbol for a given MoneyControl mcsymbol (scId)
+ */
+export function getSymbolFromMcsymbol(mcsymbol: string): string | null {
+  if (!mcsymbol) return null;
+  const upper = mcsymbol.toUpperCase();
+  const found = stockData.find(s => s.mcsymbol.toUpperCase() === upper);
+  return found ? found.symbol : null;
 }
 
 export interface IndexMapping {

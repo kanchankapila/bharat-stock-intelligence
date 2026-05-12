@@ -20,7 +20,17 @@ export interface MCScreenerResponse {
   }
 }
 
+// --- Simple In-Memory Cache for Screeners (30 mins) ---
+const screenerCache: Record<string, { data: MCScreenerResponse, timestamp: number }> = {};
+const CACHE_DURATION = 30 * 60 * 1000; 
+
 export async function fetchMCScreener(type: 'proscanner' | 'techscanner' | 'technical-trends', catId: string | number, scanId: string | number): Promise<MCScreenerResponse> {
+  const cacheKey = `${type}:${catId}:${scanId}`;
+  const cached = screenerCache[cacheKey];
+  if (cached && (Date.now() - cached.timestamp < CACHE_DURATION)) {
+    return cached.data;
+  }
+
   let url = '';
   if (type === 'technical-trends') {
     // catId used as 'trendType' (e.g. uptrend/bullish), scanId used as indexId
@@ -36,9 +46,8 @@ export async function fetchMCScreener(type: 'proscanner' | 'techscanner' | 'tech
   
   const json = await response.json();
   
-  // Normalize technical-trends response to match the scannerDetails structure
   if (type === 'technical-trends' && json.success === 1 && Array.isArray(json.data)) {
-    return {
+    const response: MCScreenerResponse = {
       success: 1,
       data: {
         list: {
@@ -59,7 +68,12 @@ export async function fetchMCScreener(type: 'proscanner' | 'techscanner' | 'tech
         }
       }
     };
+    screenerCache[cacheKey] = { data: response, timestamp: Date.now() };
+    return response;
   }
   
+  if (json.success === 1) {
+    screenerCache[cacheKey] = { data: json, timestamp: Date.now() };
+  }
   return json;
 }

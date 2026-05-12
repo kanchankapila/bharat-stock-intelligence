@@ -14,7 +14,6 @@ import {
   fetchTechIndicators,
   fetchMarketMap,
   fetchAllIndianIndices,
-  fetchTrendlyneFundamentals,
   fetchMCRatios,
   fetchETShareholding,
   fetchETCorporateActions,
@@ -31,6 +30,18 @@ import {
   fetchIndexPriceFeed,
   fetchIndexTechnicals,
 } from "./marketData";
+import { 
+  fetchTrendlyneFundamentals, 
+  fetchTrendlyneSwot, 
+  fetchTrendlyneChecklist, 
+  fetchTrendlyneDVM, 
+  getTrendlyneOverview 
+} from "./trendlyneService";
+import { 
+  getTopRatedStocks, 
+  syncAndScore,
+  recalculateScores
+} from "./scoringService";
 import { getMoneycontrolInsights } from "./moneycontrolService";
 import { getStockInsights, getIndexData } from "./insightService";
 import { getAllStocks, getStockMapping } from "./stockMapping";
@@ -38,7 +49,9 @@ import { getCachedScan, runTechnicalScan } from "./technicalScanner";
 import { getFnOSignals } from "./fnoService";
 import { fetchStockDataWithCache, getOrRefreshAllStocks } from "./liveStockData";
 import { getMcConsolidatedData } from "./mcApiService";
-import { fetchTrendlyneScreenerData, fetchAllTrendlyneScreenerNames, getTrendlyneScreenerList, getTrendlyneScreenerCategories, updateFetchInterval, updateScreenerNamesInterval, testTrendlyneApiResponse } from "./trendlyneScreener";
+import { fetchTrendlyneScreenerData, fetchAllTrendlyneScreenerNames, getTrendlyneScreenerList, getTrendlyneScreenerCategories, updateFetchInterval, updateScreenerNamesInterval, testTrendlyneApiResponse, findScreenersByStock } from "./trendlyneScreener";
+import { syncNSEStocksToDatabase, getAllNSEStocksFromDB, searchNSEStocksFromDB, getNSEStockFromDB, getNSEStocksBySectorFromDB, getNSEStocksByIndustryFromDB, getAllSectorsFromDB, getAllIndustriesFromDB, getNSEStockCount } from "./nseService";
+import { enqueueAISignals, getAIQueueStats } from "./queues";
 
 const t = initTRPC.create({
   transformer: superjson,
@@ -132,6 +145,21 @@ export const appRouter = router({
       stmt.run(input.symbol, input.type, input.entry, input.target, input.stopLoss, input.confidence, input.reasoning);
       return { success: true };
     }),
+
+  // Enqueue AI analysis for all provided stocks via BullMQ
+  enqueueSignals: publicProcedure
+    .input(z.array(z.object({
+      symbol:    z.string(),
+      stockData: z.record(z.string(), z.unknown()),
+    })))
+    .mutation(async ({ input }) => {
+      return await enqueueAISignals(input);
+    }),
+
+  // Real-time BullMQ queue stats for progress tracking
+  getQueueStats: publicProcedure.query(async () => {
+    return await getAIQueueStats();
+  }),
 
   getSignalHistory: publicProcedure
     .input(z.object({ symbol: z.string() }))
@@ -381,14 +409,24 @@ export const appRouter = router({
           stocks: s.stocksCount || 0
         }));
       }
-      
+
+      // Fallback: aggregate from live stock data grouped by sector
       const allStocks = await getOrRefreshAllStocks();
-      const sectors = ['Energy', 'IT', 'Banking', 'Consumer Goods', 'Telecom'];
-      return sectors.map(sector => ({
-        name: sector,
-        change: (Math.random() - 0.4) * 2,
-        stocks: allStocks.filter((s: any) => s.sector === sector).length
-      }));
+      const sectorMap = new Map<string, number[]>();
+      for (const stock of allStocks) {
+        const sector = (stock as any).sector;
+        if (sector && sector !== 'Unknown') {
+          if (!sectorMap.has(sector)) sectorMap.set(sector, []);
+          sectorMap.get(sector)!.push(stock.changePct);
+        }
+      }
+      return Array.from(sectorMap.entries())
+        .map(([name, changes]) => ({
+          name,
+          change: Number((changes.reduce((a, b) => a + b, 0) / changes.length).toFixed(2)),
+          stocks: changes.length,
+        }))
+        .sort((a, b) => b.change - a.change);
     }),
 
   getScreenerResults: publicProcedure
@@ -403,41 +441,37 @@ export const appRouter = router({
     }))
     .query(async ({ input }) => {
       const allStocks = await getOrRefreshAllStocks();
-      let data = allStocks.map((s: any) => ({
-        ...s,
-        pe: 15 + (Math.sin(s.symbol.length) + 1) * 15,
-        roe: 10 + (Math.cos(s.symbol.length) + 1) * 10,
-        pb: 2 + (Math.sin(s.symbol.length * 2) + 1) * 4,
-        debtEquity: (Math.abs(Math.sin(s.symbol.length * 3))) * 2,
-        high52w: s.price * (1.1 + Math.abs(Math.sin(s.symbol.length)) * 0.2),
-        low52w: s.price * (0.7 + Math.abs(Math.cos(s.symbol.length)) * 0.2),
-      }));
+      let data: any[] = allStocks;
 
-      if (input.filter === 'High ROE') {
-        data = data.filter(s => s.roe > 15);
-      } else if (input.filter === 'Low Debt') {
-        data = data.filter(s => s.debtEquity < 0.5);
-      } else if (input.filter === 'Gainers') {
-        data = data.filter(s => s.changePct > 0);
+      // Price-based filters using real market data
+      if (input.filter === 'Gainers') {
+        data = data.filter(s => s.changePct > 0).sort((a, b) => b.changePct - a.changePct);
       } else if (input.filter === 'Losers') {
-        data = data.filter(s => s.changePct < 0);
+        data = data.filter(s => s.changePct < 0).sort((a, b) => a.changePct - b.changePct);
       } else if (input.filter === 'Near 52W High') {
-        data = data.filter(s => (s.price / s.high52w) > 0.95);
+        data = data
+          .filter(s => s.high52w && s.high52w > 0 && (s.price / s.high52w) > 0.95)
+          .sort((a, b) => (b.price / b.high52w) - (a.price / a.high52w));
       } else if (input.filter === 'Near 52W Low') {
-        data = data.filter(s => (s.price / s.low52w) < 1.05);
+        data = data
+          .filter(s => s.low52w && s.low52w > 0 && (s.price / s.low52w) < 1.05)
+          .sort((a, b) => (a.price / a.low52w) - (b.price / b.low52w));
+      } else if (input.filter === 'High Volume') {
+        data = [...data].sort((a, b) => {
+          const va = parseFloat(String(a.volume).replace(/[KM]/g, m => m === 'K' ? '000' : '000000'));
+          const vb = parseFloat(String(b.volume).replace(/[KM]/g, m => m === 'K' ? '000' : '000000'));
+          return vb - va;
+        });
       }
+      // Note: High ROE, Low Debt, PE-based filters require fundamental data not
+      // available from real-time price feeds. Return all stocks for these presets.
 
       if (input.sector && input.sector !== 'All') {
         data = data.filter(s => s.sector === input.sector);
       }
 
-      if (input.minPe !== undefined) data = data.filter(s => s.pe >= input.minPe!);
-      if (input.maxPe !== undefined) data = data.filter(s => s.pe <= input.maxPe!);
-      if (input.minRoe !== undefined) data = data.filter(s => s.roe >= input.minRoe!);
-      if (input.maxPb !== undefined) data = data.filter(s => s.pb <= input.maxPb!);
-      if (input.maxDe !== undefined) data = data.filter(s => s.debtEquity <= input.maxDe!);
-
-      return data;
+      // Return top 200 to keep payload manageable
+      return data.slice(0, 200);
     }),
   
   getMarketOverview: publicProcedure.query(async () => {
@@ -531,20 +565,36 @@ export const appRouter = router({
           const { screenerId, queryCondition } = input.params;
           return await fetchETnowScreener(screenerId, queryCondition);
         } else if (input.provider === 'custom') {
-          const { timeframes } = input.params;
+          const { timeframes, minVolume = 0 } = input.params;
           const allStocks = await getOrRefreshAllStocks();
-          const selected = allStocks.filter(() => Math.random() > 0.7).map((s: any) => ({
-            symbol: s.symbol,
-            name: s.name,
-            ltp: s.price * (1 + (Math.random() - 0.5) * 0.01),
-            perChg: (Math.random() * 5).toFixed(2),
-            volume: (Math.random() * 1000000).toFixed(0),
-            mktCap: "₹" + (Math.random() * 100000).toFixed(0) + " Cr",
-            sector: s.sector,
-            timeframesMet: timeframes?.join(", ") || "D, W",
-            momentum: "Strong Bullish",
-            pattern: "Channel Breakout"
-          }));
+
+          const parseVol = (v: string): number => {
+            if (!v) return 0;
+            if (v.endsWith('M')) return parseFloat(v) * 1_000_000;
+            if (v.endsWith('K')) return parseFloat(v) * 1_000;
+            return parseFloat(v) || 0;
+          };
+
+          // Select stocks with positive price movement and non-zero volume
+          const selected = allStocks
+            .filter((s: any) => {
+              const vol = parseVol(s.volume);
+              return s.changePct > 0 && vol > minVolume && s.price > 0;
+            })
+            .sort((a: any, b: any) => b.changePct - a.changePct)
+            .slice(0, 50)
+            .map((s: any) => ({
+              symbol: s.symbol,
+              name: s.name,
+              ltp: s.price,
+              perChg: s.changePct.toFixed(2),
+              volume: s.volume,
+              mktCap: '—',
+              sector: s.sector || '—',
+              timeframesMet: timeframes?.join(', ') || 'D, W',
+              momentum: s.changePct > 2 ? 'Strong Bullish' : 'Bullish',
+              pattern: s.high52w && (s.price / s.high52w) > 0.95 ? 'Near 52W High' : 'Uptrend',
+            }));
 
           return {
             success: true,
@@ -792,34 +842,67 @@ export const appRouter = router({
         });
       });
     }),
+  
+  // --- Trendlyne Data APIs ---
+  getTrendlyneFundamentals: publicProcedure
+    .input(z.object({ symbol: z.string() }))
+    .query(async ({ input }) => {
+      return await fetchTrendlyneFundamentals(input.symbol);
+    }),
+
+  getTrendlyneSwot: publicProcedure
+    .input(z.object({ symbol: z.string() }))
+    .query(async ({ input }) => {
+      return await fetchTrendlyneSwot(input.symbol);
+    }),
+
+  getTrendlyneChecklist: publicProcedure
+    .input(z.object({ symbol: z.string() }))
+    .query(async ({ input }) => {
+      return await fetchTrendlyneChecklist(input.symbol);
+    }),
+
+  getTrendlyneDVM: publicProcedure
+    .input(z.object({ symbol: z.string() }))
+    .query(async ({ input }) => {
+      return await fetchTrendlyneDVM(input.symbol);
+    }),
+
+  getTrendlyneOverview: publicProcedure
+    .input(z.object({ symbol: z.string() }))
+    .query(async ({ input }) => {
+      return await getTrendlyneOverview(input.symbol);
+    }),
+
+  // --- Stock Scoring APIs ---
+  getTopRatedStocks: publicProcedure
+    .input(z.object({ limit: z.number().optional().default(50) }))
+    .query(({ input }) => {
+      return getTopRatedStocks(input.limit);
+    }),
+
+  triggerStockScoring: publicProcedure
+    .mutation(async () => {
+      return await syncAndScore();
+    }),
+
+  recalculateScoresOnly: publicProcedure
+    .mutation(async () => {
+      return await recalculateScores();
+    }),
 
   // ─── Trendlyne Screener Integration ───────────────────────────────────
   getTrendlyneScreener: publicProcedure
     .input(z.object({
-      stockId: z.string().optional(),
-      pageNumber: z.number().optional().default(0),
-      groupName: z.string().optional()
+      screenpk: z.string(),
+      screenerName: z.string(),
+      pageNumber: z.number().optional().default(0)
     }))
     .query(async ({ input }) => {
       return await fetchTrendlyneScreenerData(
-        input.stockId,
-        input.pageNumber,
-        input.groupName
-      );
-    }),
-
-  getTrendlyneScreenerBatch: publicProcedure
-    .input(z.object({
-      stockIds: z.array(z.string()),
-      pageNumber: z.number().optional().default(0),
-      groupName: z.string().optional()
-    }))
-    .query(async ({ input }) => {
-      const batchedIds = input.stockIds.slice(0, 30).join(',');
-      return await fetchTrendlyneScreenerData(
-        batchedIds,
-        input.pageNumber,
-        input.groupName
+        input.screenpk,
+        input.screenerName,
+        input.pageNumber
       );
     }),
 
@@ -859,6 +942,97 @@ export const appRouter = router({
   fetchTrendlyneScreenerNames: publicProcedure
     .query(async () => {
       return await fetchAllTrendlyneScreenerNames();
+    }),
+
+  getStockScreeners: publicProcedure
+    .input(z.object({
+      stockId: z.string()
+    }))
+    .query(async ({ input }) => {
+      return await findScreenersByStock(input.stockId);
+    }),
+
+  refreshTrendlyneScreenersDB: publicProcedure
+    .mutation(async () => {
+      try {
+        console.log(`🔄 Refreshing Trendlyne screeners database...`);
+        const screenerNames = await fetchAllTrendlyneScreenerNames();
+        return {
+          success: true,
+          message: `✅ Refreshed screener database with ${screenerNames.size} screeners`,
+          count: screenerNames.size
+        };
+      } catch (error) {
+        console.error(`❌ Error refreshing screeners:`, error);
+        return {
+          success: false,
+          message: `❌ Error refreshing screeners: ${String(error)}`,
+          count: 0
+        };
+      }
+    }),
+
+  // --- NSE Stocks Management ---
+  syncNSEStocks: publicProcedure
+    .mutation(async () => {
+      return syncNSEStocksToDatabase();
+    }),
+
+  getAllNSEStocks: publicProcedure
+    .query(() => {
+      const stocks = getAllNSEStocksFromDB();
+      return { stocks, count: stocks.length };
+    }),
+
+  searchNSEStocks: publicProcedure
+    .input(z.object({
+      query: z.string().min(1)
+    }))
+    .query(({ input }) => {
+      const stocks = searchNSEStocksFromDB(input.query);
+      return { stocks, count: stocks.length };
+    }),
+
+  getNSEStockBySymbol: publicProcedure
+    .input(z.object({
+      symbol: z.string().min(1)
+    }))
+    .query(({ input }) => {
+      const stock = getNSEStockFromDB(input.symbol.toUpperCase());
+      return stock || { error: 'Stock not found' };
+    }),
+
+  getNSEStocksBySector: publicProcedure
+    .input(z.object({
+      sector: z.string().min(1)
+    }))
+    .query(({ input }) => {
+      const stocks = getNSEStocksBySectorFromDB(input.sector);
+      return { stocks, count: stocks.length };
+    }),
+
+  getNSEStocksByIndustry: publicProcedure
+    .input(z.object({
+      industry: z.string().min(1)
+    }))
+    .query(({ input }) => {
+      const stocks = getNSEStocksByIndustryFromDB(input.industry);
+      return { stocks, count: stocks.length };
+    }),
+
+  getAllSectors: publicProcedure
+    .query(() => {
+      return getAllSectorsFromDB();
+    }),
+
+  getAllIndustries: publicProcedure
+    .query(() => {
+      return getAllIndustriesFromDB();
+    }),
+
+  getNSEStockCount: publicProcedure
+    .query(() => {
+      return getNSEStockCount();
     }),
 });
 

@@ -1,20 +1,48 @@
 import { MarketData } from '../services/marketService';
-import { getAllStocks } from './stockMapping';
+import { getAllStocks, getStockMapping } from './stockMapping';
+import { nseStocksData } from '../data/nseStocks';
+import { cacheGet, cacheSet } from './cacheService';
 
-// ─── Yahoo Finance (primary, free, no API key) ───────────────────────────────
+// ─── Symbol & name resolution ─────────────────────────────────────────────────
 
-/**
- * Batch-fetch up to 50 NSE stocks at once via Yahoo Finance v7 quote API.
- * Returns a map of NSE symbol → raw YF quote object.
- */
+/** Combined NSE symbols: stocklist (180) + full NSE list (2000+), deduplicated. */
+function getAllNSESymbols(): string[] {
+  const stocklistSymbols = getAllStocks().map(s => s.symbol);
+  const nseSymbols = nseStocksData.map(s => s.symbol);
+  return [...new Set([...stocklistSymbols, ...nseSymbols])];
+}
+
+/** Name lookup: nseStocksData as base, stocklist overrides (more canonical names). */
+function buildNameMap(): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const s of nseStocksData) map.set(s.symbol, s.name);
+  for (const s of getAllStocks()) map.set(s.symbol, s.name);
+  return map;
+}
+
+/** Sector lookup from nseStocksData (only non-Unknown entries). */
+function buildSectorMap(): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const s of nseStocksData) {
+    if (s.sector && s.sector !== 'Unknown') map.set(s.symbol, s.sector);
+  }
+  return map;
+}
+
+// ─── Yahoo Finance batch fetch (v7) ──────────────────────────────────────────
+
+const BATCH_SIZE = 50;
+const BATCH_CONCURRENCY = 8;
+
 async function fetchBatchYahooFinance(symbols: string[]): Promise<Map<string, MarketData>> {
-  const stockList = getAllStocks();
+  const nameMap = buildNameMap();
+  const sectorMap = buildSectorMap();
   const yfSymbols = symbols.map(s => `${s}.NS`).join(',');
   const url =
     `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${yfSymbols}` +
     `&fields=regularMarketPrice,regularMarketChange,regularMarketChangePercent,` +
     `regularMarketVolume,regularMarketDayHigh,regularMarketDayLow,` +
-    `regularMarketOpen,regularMarketPreviousClose`;
+    `regularMarketOpen,regularMarketPreviousClose,fiftyTwoWeekHigh,fiftyTwoWeekLow`;
 
   const response = await fetch(url, {
     headers: {
@@ -31,8 +59,7 @@ async function fetchBatchYahooFinance(symbols: string[]): Promise<Map<string, Ma
 
   for (const q of quotes) {
     const nseSymbol = (q.symbol as string).replace(/\.(NS|BO)$/, '');
-    const mapping = stockList.find(s => s.symbol === nseSymbol);
-    if (!mapping) continue;
+    const name = nameMap.get(nseSymbol) || nseSymbol;
 
     const price: number = q.regularMarketPrice ?? 0;
     const prevClose: number = q.regularMarketPreviousClose ?? 0;
@@ -41,7 +68,7 @@ async function fetchBatchYahooFinance(symbols: string[]): Promise<Map<string, Ma
 
     result.set(nseSymbol, {
       symbol: nseSymbol,
-      name: mapping.name,
+      name,
       price: Number(price.toFixed(2)),
       change: Number(change.toFixed(2)),
       changePct: Number(changePct.toFixed(2)),
@@ -50,20 +77,21 @@ async function fetchBatchYahooFinance(symbols: string[]): Promise<Map<string, Ma
       low: q.regularMarketDayLow ?? 0,
       open: q.regularMarketOpen ?? 0,
       prevClose: Number(prevClose.toFixed(2)),
+      high52w: q.fiftyTwoWeekHigh ?? undefined,
+      low52w: q.fiftyTwoWeekLow ?? undefined,
+      sector: sectorMap.get(nseSymbol),
     });
   }
 
   return result;
 }
 
-/**
- * Fetch a single stock from Yahoo Finance v8 chart API.
- * Used as a per-symbol fallback when the batch call misses a symbol.
- */
+// ─── Yahoo Finance per-symbol fallback (v8 chart) ────────────────────────────
+
 async function fetchStockQuoteYahooFinance(symbol: string): Promise<MarketData | null> {
   try {
-    const stockMapping = getAllStocks().find(s => s.symbol === symbol);
-    if (!stockMapping) return null;
+    const nameMap = buildNameMap();
+    const name = nameMap.get(symbol) || symbol;
 
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}.NS?interval=1d&range=1d`;
     const response = await fetch(url, {
@@ -89,7 +117,7 @@ async function fetchStockQuoteYahooFinance(symbol: string): Promise<MarketData |
 
     return {
       symbol,
-      name: stockMapping.name,
+      name,
       price: Number(price.toFixed(2)),
       change: Number(change.toFixed(2)),
       changePct: Number(changePct.toFixed(2)),
@@ -104,7 +132,7 @@ async function fetchStockQuoteYahooFinance(symbol: string): Promise<MarketData |
   }
 }
 
-// ─── MoneyControl (secondary, kept for non-quote endpoints) ──────────────────
+// ─── MoneyControl (secondary, kept for stocklist stocks only) ─────────────────
 
 export async function fetchStockQuoteMoneyControl(symbol: string, retries: number = 3): Promise<MarketData | null> {
   let lastError: Error | null = null;
@@ -129,11 +157,10 @@ export async function fetchStockQuoteMoneyControl(symbol: string, retries: numbe
       if (!response.ok) {
         if (response.status === 503 && attempt < retries) {
           const delay = Math.min(1000 * Math.pow(2, attempt - 1), 10000) + Math.random() * 1000;
-          console.warn(`Failed to fetch ${symbol} from MoneyControl: ${response.status}. Retrying in ${Math.round(delay)}ms (attempt ${attempt}/${retries})...`);
+          console.warn(`MoneyControl ${symbol} (${stockMapping.mcsymbol}): ${response.status}, retrying in ${Math.round(delay)}ms (attempt ${attempt}/${retries})`);
           await new Promise(resolve => setTimeout(resolve, delay));
           continue;
         }
-        console.error(`Failed to fetch ${symbol} from MoneyControl:`, response.status);
         return null;
       }
 
@@ -162,7 +189,6 @@ export async function fetchStockQuoteMoneyControl(symbol: string, retries: numbe
       lastError = e instanceof Error ? e : new Error(String(e));
       if (attempt < retries) {
         const delay = Math.min(1000 * Math.pow(2, attempt - 1), 10000) + Math.random() * 1000;
-        console.warn(`MoneyControl fetch error for ${symbol}. Retrying in ${Math.round(delay)}ms (attempt ${attempt}/${retries})...`);
         await new Promise(resolve => setTimeout(resolve, delay));
       }
     }
@@ -181,8 +207,8 @@ export async function fetchStockQuoteFinnhub(symbol: string): Promise<MarketData
     const apiKey = process.env.FINNHUB_API_KEY;
     if (!apiKey) return null;
 
-    const stockMapping = getAllStocks().find(s => s.symbol === symbol);
-    if (!stockMapping) return null;
+    const nameMap = buildNameMap();
+    const name = nameMap.get(symbol) || symbol;
 
     const url = `https://finnhub.io/api/v1/quote?symbol=${symbol}.NS&token=${apiKey}`;
     const response = await fetch(url);
@@ -194,7 +220,7 @@ export async function fetchStockQuoteFinnhub(symbol: string): Promise<MarketData
 
     return {
       symbol,
-      name: stockMapping.name,
+      name,
       price,
       change: Number((price - prevClose).toFixed(2)),
       changePct: prevClose > 0 ? Number(((price - prevClose) / prevClose * 100).toFixed(2)) : 0,
@@ -209,36 +235,36 @@ export async function fetchStockQuoteFinnhub(symbol: string): Promise<MarketData
   }
 }
 
-// ─── Bulk fetch with batching ─────────────────────────────────────────────────
-
-const BATCH_SIZE = 50;
-const BATCH_DELAY_MS = 200;
+// ─── Parallel bulk fetch ──────────────────────────────────────────────────────
 
 export async function fetchAllLiveStocks(): Promise<MarketData[]> {
-  const allStocks = getAllStocks();
-  console.log(`[LIVE DATA] Fetching data for ${allStocks.length} stocks via Yahoo Finance...`);
+  const allSymbols = getAllNSESymbols();
+  console.log(`[LIVE DATA] Fetching ${allSymbols.length} NSE stocks via Yahoo Finance (parallel batches)...`);
 
-  const allSymbols = allStocks.map(s => s.symbol);
   const collected = new Map<string, MarketData>();
 
-  // Batch fetch via YF v7 (most efficient — 50 stocks per request)
+  // Split into chunks of 50, run BATCH_CONCURRENCY at a time
+  const chunks: string[][] = [];
   for (let i = 0; i < allSymbols.length; i += BATCH_SIZE) {
-    const batch = allSymbols.slice(i, i + BATCH_SIZE);
-    try {
-      const batchResult = await fetchBatchYahooFinance(batch);
-      batchResult.forEach((v, k) => collected.set(k, v));
-    } catch (err) {
-      console.error(`[LIVE DATA] Batch ${i / BATCH_SIZE + 1} failed:`, err);
-    }
-    if (i + BATCH_SIZE < allSymbols.length) {
-      await new Promise(r => setTimeout(r, BATCH_DELAY_MS));
+    chunks.push(allSymbols.slice(i, i + BATCH_SIZE));
+  }
+
+  for (let i = 0; i < chunks.length; i += BATCH_CONCURRENCY) {
+    const group = chunks.slice(i, i + BATCH_CONCURRENCY);
+    const groupResults = await Promise.allSettled(group.map(batch => fetchBatchYahooFinance(batch)));
+    for (const r of groupResults) {
+      if (r.status === 'fulfilled') {
+        r.value.forEach((v, k) => collected.set(k, v));
+      } else {
+        console.error(`[LIVE DATA] Batch group ${i / BATCH_CONCURRENCY + 1} had failure:`, r.reason);
+      }
     }
   }
 
-  // Per-symbol fallback (YF v8 chart) for anything the batch missed
+  // Per-symbol YF v8 fallback for symbols the batch missed
   const missed = allSymbols.filter(s => !collected.has(s));
   if (missed.length > 0) {
-    console.log(`[LIVE DATA] Retrying ${missed.length} symbols individually...`);
+    console.log(`[LIVE DATA] Retrying ${missed.length} missed symbols individually...`);
     const fallbacks = await Promise.allSettled(missed.map(s => fetchStockQuoteYahooFinance(s)));
     fallbacks.forEach(r => {
       if (r.status === 'fulfilled' && r.value) {
@@ -247,11 +273,12 @@ export async function fetchAllLiveStocks(): Promise<MarketData[]> {
     });
   }
 
-  // Last-resort: MoneyControl for anything still missing
-  const stillMissed = allSymbols.filter(s => !collected.has(s));
-  if (stillMissed.length > 0) {
-    console.log(`[LIVE DATA] MoneyControl fallback for ${stillMissed.length} symbols...`);
-    const mcResults = await Promise.allSettled(stillMissed.map(s => fetchStockQuoteMoneyControl(s)));
+  // MoneyControl last-resort for stocklist stocks still missing
+  const stocklistSet = new Set(getAllStocks().map(s => s.symbol));
+  const mcRetry = allSymbols.filter(s => !collected.has(s) && stocklistSet.has(s));
+  if (mcRetry.length > 0) {
+    console.log(`[LIVE DATA] MoneyControl fallback for ${mcRetry.length} stocklist symbols...`);
+    const mcResults = await Promise.allSettled(mcRetry.map(s => fetchStockQuoteMoneyControl(s)));
     mcResults.forEach(r => {
       if (r.status === 'fulfilled' && r.value) {
         collected.set(r.value.symbol, r.value);
@@ -259,51 +286,106 @@ export async function fetchAllLiveStocks(): Promise<MarketData[]> {
     });
   }
 
-  const results = Array.from(collected.values());
-  console.log(`[LIVE DATA] Successfully fetched ${results.length} stock quotes`);
+  const results = Array.from(collected.values()).map(enrichMarketData);
+  console.log(`[LIVE DATA] Successfully fetched ${results.length}/${allSymbols.length} stock quotes`);
   return results;
 }
 
-// ─── Per-symbol cache (30s TTL) ──────────────────────────────────────────────
+// ─── Cache keys ───────────────────────────────────────────────────────────────
 
-const stockCache = new Map<string, { data: MarketData; timestamp: number }>();
-const CACHE_DURATION = 30_000;
+const BULK_CACHE_KEY = 'live-stocks-bulk';
+const PER_SYMBOL_TTL = 30;          // seconds
+const BULK_TTL = 5 * 60;            // 5 minutes
+const BULK_REFRESH_INTERVAL = BULK_TTL * 1000;
+
+// In-memory mirror of bulk data for O(1) symbol lookups (avoids deserialising
+// the full ~2000-entry JSON blob from Redis on every quote request).
+let bulkMirror: Map<string, MarketData> = new Map();
+let lastBulkFetchTime = 0;
+
+// ─── Background refresh task ─────────────────────────────────────────────────
+
+let refreshRunning = false;
+
+async function runBulkRefresh(): Promise<void> {
+  if (refreshRunning) return;
+  refreshRunning = true;
+  try {
+    const freshData = await fetchAllLiveStocks();
+    bulkMirror = new Map(freshData.map(s => [s.symbol, s]));
+    lastBulkFetchTime = Date.now();
+    await cacheSet(BULK_CACHE_KEY, freshData, BULK_TTL);
+    console.log(`[LIVE DATA] Background refresh complete: ${freshData.length} stocks cached`);
+  } catch (err) {
+    console.error('[LIVE DATA] Background refresh failed:', err);
+  } finally {
+    refreshRunning = false;
+  }
+}
+
+/** Start the periodic background refresh. Call once on server start. */
+export function startBackgroundRefresh(): void {
+  // Kick off an immediate refresh, then repeat on interval.
+  runBulkRefresh();
+  setInterval(runBulkRefresh, BULK_REFRESH_INTERVAL);
+  console.log(`[LIVE DATA] Background refresh started (every ${BULK_TTL / 60} min)`);
+}
+
+// ─── Per-symbol cache (Redis / in-memory, 30-sec TTL) ────────────────────────
 
 export async function fetchStockDataWithCache(symbol: string): Promise<MarketData | null> {
-  const cached = stockCache.get(symbol);
-  if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
-    return cached.data;
+  const perKey = `live-stock:${symbol}`;
+
+  // 1. Per-symbol short-lived cache
+  const cached = await cacheGet<MarketData>(perKey);
+  if (cached) return cached;
+
+  // 2. Bulk mirror (populated by background refresh)
+  if (bulkMirror.has(symbol)) return bulkMirror.get(symbol)!;
+
+  // 3. Try to hydrate bulk mirror from Redis/memory cache
+  if (bulkMirror.size === 0) {
+    const bulk = await cacheGet<MarketData[]>(BULK_CACHE_KEY);
+    if (bulk && bulk.length > 0) {
+      bulkMirror = new Map(bulk.map(s => [s.symbol, s]));
+      if (bulkMirror.has(symbol)) return bulkMirror.get(symbol)!;
+    }
   }
 
+  // 4. Individual fetch as last resort
   let quoteData = await fetchStockQuoteYahooFinance(symbol);
   if (!quoteData) quoteData = await fetchStockQuoteMoneyControl(symbol);
   if (!quoteData && process.env.FINNHUB_API_KEY) quoteData = await fetchStockQuoteFinnhub(symbol);
 
   if (quoteData) {
-    stockCache.set(symbol, { data: quoteData, timestamp: Date.now() });
+    quoteData = enrichMarketData(quoteData);
+    await cacheSet(perKey, quoteData, PER_SYMBOL_TTL);
   }
 
   return quoteData;
 }
 
-// ─── Periodic bulk refresh (every 5 min) ─────────────────────────────────────
-
-let lastFetchTime = 0;
-const REFRESH_INTERVAL = 5 * 60 * 1000;
+// ─── Bulk accessor (used by getLiveStocks route) ──────────────────────────────
 
 export async function getOrRefreshAllStocks(): Promise<MarketData[]> {
   const now = Date.now();
 
-  if (now - lastFetchTime < REFRESH_INTERVAL) {
-    const stocks = getAllStocks();
-    const results = await Promise.allSettled(stocks.map(s => fetchStockDataWithCache(s.symbol)));
-    return results
-      .filter((r): r is PromiseFulfilledResult<MarketData | null> => r.status === 'fulfilled' && r.value !== null)
-      .map(r => r.value as MarketData);
+  // Serve from in-process mirror if still fresh
+  if (bulkMirror.size > 0 && now - lastBulkFetchTime < BULK_REFRESH_INTERVAL) {
+    return Array.from(bulkMirror.values());
   }
 
-  lastFetchTime = now;
-  return fetchAllLiveStocks();
+  // Try Redis / memory cache
+  const cached = await cacheGet<MarketData[]>(BULK_CACHE_KEY);
+  if (cached && cached.length > 0) {
+    bulkMirror = new Map(cached.map(s => [s.symbol, s]));
+    lastBulkFetchTime = now;
+    return cached;
+  }
+
+  // Synchronous refresh (only happens on cold start before background task runs)
+  await runBulkRefresh();
+  return Array.from(bulkMirror.values());
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -312,4 +394,20 @@ function formatVolume(volume: number): string {
   if (volume >= 1_000_000) return (volume / 1_000_000).toFixed(1) + 'M';
   if (volume >= 1_000) return (volume / 1_000).toFixed(1) + 'K';
   return volume.toString();
+}
+
+/**
+ * Enriches market data with mapped tickers from stocklist.ts
+ */
+function enrichMarketData(data: MarketData): MarketData {
+  const mapping = getStockMapping(data.symbol);
+  if (mapping) {
+    return {
+      ...data,
+      mcsymbol: mapping.mcsymbol,
+      tlid: mapping.tlid,
+      tlname: mapping.tlname
+    };
+  }
+  return data;
 }

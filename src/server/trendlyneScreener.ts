@@ -2,10 +2,14 @@
  * Trendlyne Screener Service
  * Fetches screener data from Trendlyne's All-in-One Screener API
  * Features:
+ * - Database-backed screener name to screenpk mapping (fetched once)
  * - Intelligent caching with configurable fetch frequency
  * - Polite fetching with random jitter
  * - Batch processing for large stock lists
  */
+
+import db from './db';
+import { getStockMapping } from './stockMapping';
 
 const TRENDLYNE_BASE_URL = 'https://kayal.trendlyne.com/broker-webview/kayal/all-in-one-screener-data-get/';
 
@@ -30,6 +34,83 @@ export function updateFetchInterval(intervalMs: number): void {
 
 export function updateScreenerNamesInterval(intervalMs: number): void {
   TRENDLYNE_CONFIG.SCREENER_NAMES_INTERVAL_MS = intervalMs;
+}
+
+// Database operations for screener mappings
+export function saveScreenerToDB(
+  screenerId: string,
+  screenerName: string,
+  screenpk: string,
+  description?: string
+): void {
+  try {
+    const stmt = db.prepare(`
+      INSERT OR REPLACE INTO trendlyne_screeners (screener_id, screener_name, screenpk, description, last_updated)
+      VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+    `);
+    stmt.run(screenerId, screenerName, screenpk, description || `${screenerName} from Trendlyne`);
+  } catch (error) {
+    console.error(`❌ Error saving screener to DB:`, error);
+  }
+}
+
+export function saveScreenerStocksToDB(
+  screenerId: string,
+  stocks: Array<{ stockId: string; name: string }>
+): void {
+  try {
+    const deleteStmt = db.prepare(`DELETE FROM trendlyne_screener_stocks WHERE screener_id = ?`);
+    const insertStmt = db.prepare(`
+      INSERT INTO trendlyne_screener_stocks (screener_id, stock_id, symbol)
+      VALUES (?, ?, ?)
+    `);
+
+    db.transaction(() => {
+      deleteStmt.run(screenerId);
+      for (const stock of stocks) {
+        // Attempt to find symbol for the stockId
+        const mapping = getStockMapping(stock.stockId);
+        const symbol = mapping ? mapping.symbol : null;
+        insertStmt.run(screenerId, stock.stockId, symbol);
+      }
+    })();
+  } catch (error) {
+    console.error(`❌ Error saving screener stocks to DB:`, error);
+  }
+}
+
+export function getScreenerFromDB(screenerId: string): { screener_name: string; screenpk: string } | null {
+  try {
+    const stmt = db.prepare(`
+      SELECT screener_name, screenpk FROM trendlyne_screeners WHERE screener_id = ?
+    `);
+    return stmt.get(screenerId) as { screener_name: string; screenpk: string } | null;
+  } catch (error) {
+    console.error(`❌ Error retrieving screener from DB:`, error);
+    return null;
+  }
+}
+
+export function getAllScreenersFromDB(): Array<{ screener_id: string; screener_name: string; screenpk: string; description: string }> {
+  try {
+    const stmt = db.prepare(`
+      SELECT screener_id, screener_name, screenpk, description FROM trendlyne_screeners ORDER BY screener_name
+    `);
+    return stmt.all() as Array<{ screener_id: string; screener_name: string; screenpk: string; description: string }>;
+  } catch (error) {
+    console.error(`❌ Error retrieving all screeners from DB:`, error);
+    return [];
+  }
+}
+
+export function clearScreenersDB(): void {
+  try {
+    const stmt = db.prepare(`DELETE FROM trendlyne_screeners`);
+    stmt.run();
+    console.log(`🗑️ Cleared all screeners from database`);
+  } catch (error) {
+    console.error(`❌ Error clearing screeners from DB:`, error);
+  }
 }
 
 // Cache for screener data
@@ -255,75 +336,37 @@ const STOCK_IDS = [
 ];
 
 /**
- * Fetch screener data from Trendlyne API
- * @param stockId - The stock ID to fetch screener data for (or comma-separated IDs, max 30 per request to avoid 414 error)
+ * Fetch screener data from Trendlyne API using screenpk and screenerName
+ * @param screenpk - A sample stock ID to use as context for the API call
+ * @param screenerName - The name of the screener to fetch stocks for
  * @param pageNumber - Page number for pagination (default 0)
- * @param groupName - Group name filter (optional)
  * @param skipCache - Force bypass cache (default false)
- * @returns Screener data with stocks and names
+ * @returns Screener data with stocks
  */
 export async function fetchTrendlyneScreenerData(
-  stockId: string = STOCK_IDS[0],
+  screenpk: string,
+  screenerName: string,
   pageNumber: number = 0,
-  groupName: string = '',
   skipCache: boolean = false
 ): Promise<TrendlyneScreenerData> {
   try {
-    let idsToFetch: string[];
-
-    // If a specific screener (groupName) is selected, fetch stocks for that screener
-    if (groupName && groupName !== 'all') {
-      const screenerStocksMapping = getCachedScreenerStocks();
-      if (screenerStocksMapping && screenerStocksMapping.has(groupName)) {
-        idsToFetch = screenerStocksMapping.get(groupName)!;
-        console.log(`📊 Fetching ${idsToFetch.length} stocks for screener: "${groupName}"`);
-      } else {
-        console.warn(`⚠️ No stocks found cached for screener: "${groupName}". Ensure screener names have been fetched first.`);
-        return {
-          success: false,
-          data: [],
-          totalResults: 0
-        };
-      }
-    } else {
-      // Use provided stock IDs or default
-      idsToFetch = stockId.split(',');
-    }
-
-    const ids = idsToFetch;
-
-    // If too many IDs, batch them
-    if (ids.length > 30) {
-      console.warn(`⚠️ WARNING: ${ids.length} stock IDs provided. Batching into requests of 30 to avoid URL length limit...`);
-      const batchSize = 30;
-      const allStocks: TrendlyneStock[] = [];
-
-      for (let i = 0; i < ids.length; i += batchSize) {
-        const batch = ids.slice(i, i + batchSize).join(',');
-        const result = await fetchTrendlyneScreenerData(batch, pageNumber, groupName, skipCache);
-        if (result.success) {
-          allStocks.push(...result.data);
-        }
-      }
-
+    if (!screenpk || !screenerName) {
+      console.warn(`⚠️ Missing screenpk or screenerName for screener fetch`);
       return {
-        success: true,
-        data: allStocks,
-        screenerName: 'Trendlyne All-in-One Screener',
-        totalResults: allStocks.length
+        success: false,
+        data: [],
+        totalResults: 0
       };
     }
 
-    // Validate stock ID count to prevent 414 URI Too Long errors
-    validateStockIdCount(stockId);
-
-    // Create cache key
-    const cacheKey = `${stockId}:${pageNumber}:${groupName}`;
+    // Create cache key using both screenpk and screenerName
+    const cacheKey = `${screenpk}:${screenerName}:${pageNumber}`;
 
     // Check cache if not skipping
     if (!skipCache) {
       const cached = getCachedData(cacheKey);
       if (cached) {
+        console.log(`📦 Using cached data for screener: ${screenerName}`);
         return cached;
       }
     }
@@ -335,12 +378,13 @@ export async function fetchTrendlyneScreenerData(
     const params = new URLSearchParams({
       perPageCount: '200',
       pageNumber: pageNumber.toString(),
-      screenpk: stockId,
+      screenpk: screenpk,
       groupType: 'all',
-      groupName: groupName || ''
+      groupName: screenerName  // Use the screener name as groupName to filter
     });
 
     const url = `${TRENDLYNE_BASE_URL}?${params.toString()}`;
+    console.log(`📊 Fetching screener data for: ${screenerName} (sample screenpk: ${screenpk})`);
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), TRENDLYNE_CONFIG.REQUEST_TIMEOUT_MS);
@@ -357,7 +401,7 @@ export async function fetchTrendlyneScreenerData(
     clearTimeout(timeoutId);
 
     if (!response.ok) {
-      console.error(`Trendlyne API error: ${response.status}`);
+      console.error(`❌ Trendlyne API error: ${response.status}`);
       return {
         success: false,
         data: [],
@@ -382,40 +426,38 @@ export async function fetchTrendlyneScreenerData(
 
       // Map tableData rows to stock objects
       tableData.forEach((row: any[]) => {
-        // Only include if filtering by a specific screener and this stock belongs to it
-        // OR if not filtering by a specific screener (fetch all)
-        if (!groupName || groupName === 'all' || screenerTitle === groupName) {
-          stocks.push({
-            stockId: String(row[stockIdIndex] || ''),
-            name: String(row[nameIndex] || ''),
-            ltp: parseFloat(row[priceIndex] || 0),
-            change: 0,
-            changePercent: 0,
-            screenerName: screenerTitle,
-            screenerType: 'all-in-one'
-          });
-        }
+        stocks.push({
+          stockId: String(row[stockIdIndex] || ''),
+          name: String(row[nameIndex] || ''),
+          ltp: parseFloat(row[priceIndex] || 0),
+          change: 0,
+          changePercent: 0,
+          screenerName: screenerTitle,
+          screenerType: 'all-in-one'
+        });
       });
 
       const result = {
         success: true,
         data: stocks,
-        screenerName: groupName || screenerTitle,
+        screenerName: screenerTitle,
         totalResults: stocks.length
       };
 
       // Cache the result
       cache.set(cacheKey, { data: result, timestamp: Date.now() });
+      console.log(`✅ Fetched ${stocks.length} stocks for screener: ${screenerTitle}`);
       return result;
     }
 
+    console.warn(`⚠️ Unexpected API response format`);
     return {
       success: false,
       data: [],
       totalResults: 0
     };
   } catch (error) {
-    console.error('Error fetching Trendlyne screener data:', error);
+    console.error('❌ Error fetching Trendlyne screener data:', error);
     return {
       success: false,
       data: [],
@@ -425,42 +467,44 @@ export async function fetchTrendlyneScreenerData(
 }
 
 /**
- * Fetch all unique screener names from Trendlyne
- * Samples stocks across the full list to discover screener types efficiently
- * Also builds a mapping of screener names to stock IDs
+ * Fetch all unique screener names from Trendlyne API and save to database
+ * Queries ALL NSE stocks in the database to discover ALL screener types comprehensively
+ * Stores screener name -> screenpk mapping in database for one-time fetch
  * @returns Set of unique screener names
  */
 export async function fetchAllTrendlyneScreenerNames(): Promise<Set<string>> {
   try {
-    // Check cache first
-    const cached = getCachedScreenerNames();
-    if (cached) {
-      return cached;
+    // Check if screeners are already in database
+    const existingScreeners = getAllScreenersFromDB();
+    if (existingScreeners.length > 0) {
+      console.log(`✅ Using ${existingScreeners.length} screeners from database (previously fetched)`);
+      return new Set(existingScreeners.map(s => s.screener_name));
     }
 
-    const screenerNames = new Set<string>();
-    const screenerStocksMapping = new Map<string, string[]>();
+    // Get stock IDs from the hardcoded list (fallback to existing data)
+    // In the future, this can be extended to use NSE stocks from database
     const allStockIds = STOCK_IDS[0].split(',');
 
-    // Sample stocks: take first 5, then every 50th stock to discover screener types efficiently
-    const sampleIndices: number[] = [];
+    console.log(`🔍 Fetching ALL ${allStockIds.length} stocks to discover comprehensive screener list...`);
+    console.log(`⏱️  This is a one-time operation. Please be patient (may take 10-15 minutes)...`);
 
-    // Always include first 5 stocks
-    for (let i = 0; i < Math.min(5, allStockIds.length); i++) {
-      sampleIndices.push(i);
-    }
+    const screenerNames = new Set<string>();
+    const screenerMappings = new Map<string, string>(); // screener_id -> screenpk
 
-    // Then sample every 50th stock for diversity
-    for (let i = 50; i < allStockIds.length; i += 50) {
-      sampleIndices.push(i);
-    }
+    let successCount = 0;
+    let errorCount = 0;
+    const startTime = Date.now();
 
-    console.log(`📊 Sampling ${sampleIndices.length} stocks from ${allStockIds.length} to discover screener types...`);
+    // Fetch ALL stocks to discover all screeners
+    for (let idx = 0; idx < allStockIds.length; idx++) {
+      const stockId = allStockIds[idx];
 
-    // Fetch sampled stocks
-    for (let idx = 0; idx < sampleIndices.length; idx++) {
-      const i = sampleIndices[idx];
-      const stockId = allStockIds[i];
+      // Progress update every 50 stocks
+      if (idx % 50 === 0) {
+        const elapsedSeconds = Math.round((Date.now() - startTime) / 1000);
+        const percentComplete = Math.round((idx / allStockIds.length) * 100);
+        console.log(`📊 Progress: ${idx}/${allStockIds.length} (${percentComplete}%) | Found ${screenerMappings.size} screeners | Elapsed: ${elapsedSeconds}s`);
+      }
 
       // Apply jitter delay for polite fetching
       const jitterDelay = getJitter(TRENDLYNE_CONFIG.BASE_DELAY_MS, TRENDLYNE_CONFIG.JITTER_PERCENT);
@@ -492,6 +536,7 @@ export async function fetchAllTrendlyneScreenerNames(): Promise<Set<string>> {
         clearTimeout(timeoutId);
 
         if (!response.ok) {
+          errorCount++;
           continue;
         }
 
@@ -500,28 +545,40 @@ export async function fetchAllTrendlyneScreenerNames(): Promise<Set<string>> {
         if (json?.head?.status === '0' && json.body?.screenObj?.title) {
           const screenerName = json.body.screenObj.title;
           screenerNames.add(screenerName);
+          successCount++;
 
           // Create ID in same format as frontend uses
           const screenerNameId = screenerName.toLowerCase().replace(/\s+/g, '-');
 
-          // Add this stock to the screener's list (keyed by ID, not original name)
-          if (!screenerStocksMapping.has(screenerNameId)) {
-            screenerStocksMapping.set(screenerNameId, []);
+          // Store the screenpk (stockId) for this screener
+          // Only store the first screenpk found for each screener
+          if (!screenerMappings.has(screenerNameId)) {
+            screenerMappings.set(screenerNameId, stockId);
+            console.log(`  ✅ [${screenerMappings.size}] Stock ${idx + 1}: "${screenerName}" (pk: ${stockId})`);
           }
-          screenerStocksMapping.get(screenerNameId)!.push(stockId);
-
-          console.log(`✅ Stock ${i + 1} (${stockId}): Found screener "${screenerName}"`);
         }
       } catch (error) {
+        errorCount++;
         // Silently continue on individual stock fetch errors
       }
     }
 
-    // Cache both the screener names and the stock mapping
-    setCachedScreenerNames(screenerNames);
-    setCachedScreenerStocks(screenerStocksMapping);
-    console.log(`✅ Sampled ${sampleIndices.length} stocks. Found ${screenerNames.size} unique screeners: ${Array.from(screenerNames).join(', ')}`);
-    console.log(`✅ Built screener->stocks mapping with ${screenerStocksMapping.size} entries`);
+    // Save all screener mappings to database (one-time operation)
+    const totalTime = Math.round((Date.now() - startTime) / 1000);
+    console.log(`\n💾 Saving ${screenerMappings.size} screener mappings to database...`);
+    console.log(`📈 Statistics: ${successCount} successful | ${errorCount} errors | ${totalTime}s total time`);
+
+    screenerMappings.forEach((screenpk, screenerNameId) => {
+      // Get the full name from screenerNames
+      const screenerName = Array.from(screenerNames).find(
+        name => name.toLowerCase().replace(/\s+/g, '-') === screenerNameId
+      ) || screenerNameId;
+
+      saveScreenerToDB(screenerNameId, screenerName, screenpk);
+    });
+
+    console.log(`✅ Fetched and saved ${screenerNames.size} unique screeners to database`);
+    console.log(`✅ Average time per stock: ${Math.round(totalTime / allStockIds.length * 1000)}ms`);
 
     return screenerNames;
   } catch (error) {
@@ -532,15 +589,181 @@ export async function fetchAllTrendlyneScreenerNames(): Promise<Set<string>> {
 
 /**
  * Get list of screener names/categories available
- * Fetches once and caches based on configured interval
+ * Returns screeners from database (fetched once on first call)
+ * Also includes screenpk for direct API calls
  */
 export async function getTrendlyneScreenerList() {
-  const screenerNames = await fetchAllTrendlyneScreenerNames();
-  return Array.from(screenerNames).map(name => ({
-    id: name.toLowerCase().replace(/\s+/g, '-'),
-    name: name,
-    description: `${name} from Trendlyne`
+  // Try to get from database first
+  let screeners = getAllScreenersFromDB();
+
+  // If database is empty, fetch from API and save to DB
+  if (screeners.length === 0) {
+    console.log(`📊 Database empty, fetching screener names from Trendlyne API...`);
+    await fetchAllTrendlyneScreenerNames();
+    screeners = getAllScreenersFromDB();
+  }
+
+  return screeners.map(s => ({
+    id: s.screener_id,
+    name: s.screener_name,
+    description: s.description,
+    screenpk: s.screenpk  // Include screenpk for API calls
   }));
+}
+
+/**
+ * Determine sentiment from screener name
+ * Returns: 'bullish' | 'bearish' | 'neutral'
+ */
+function determineSentiment(screenerName: string): 'bullish' | 'bearish' | 'neutral' {
+  const name = screenerName.toLowerCase();
+
+  // Bullish indicators
+  if (name.includes('bullish') || name.includes('buy') || name.includes('breakout') ||
+      name.includes('outperform') || name.includes('rising') || name.includes('gaining') ||
+      name.includes('high momentum') || name.includes('high growth') || name.includes('top gainers') ||
+      name.includes('increasing') || name.includes('above') || name.includes('crossed above')) {
+    return 'bullish';
+  }
+
+  // Bearish indicators
+  if (name.includes('bearish') || name.includes('sell') || name.includes('breakdown') ||
+      name.includes('underperform') || name.includes('falling') || name.includes('declining') ||
+      name.includes('negative') || name.includes('below') || name.includes('crossed below')) {
+    return 'bearish';
+  }
+
+  // Default to neutral
+  return 'neutral';
+}
+
+/**
+ * Find all screeners that contain a specific stock
+ * @param stockId - The stock ID to search for
+ * @returns Array of screeners containing the stock with sentiment info
+ */
+export async function findScreenersByStock(stockId: string): Promise<Array<{
+  id: string;
+  name: string;
+  sentiment: 'bullish' | 'bearish' | 'neutral';
+}>> {
+  try {
+    if (!stockId) {
+      return [];
+    }
+
+    // Get all screeners from database
+    const screeners = getAllScreenersFromDB();
+
+    if (screeners.length === 0) {
+      console.log('📊 No screeners in database, fetching them first...');
+      await fetchAllTrendlyneScreenerNames();
+      return [];
+    }
+
+    const matchingScreeners: Array<{
+      id: string;
+      name: string;
+      sentiment: 'bullish' | 'bearish' | 'neutral';
+    }> = [];
+
+    console.log(`🔍 Searching for stock ${stockId} in ${screeners.length} screeners...`);
+
+    // Check each screener to see if it contains the stock
+    for (const screener of screeners) {
+      try {
+        // Apply small delay to be polite
+        await new Promise(resolve => setTimeout(resolve, 100));
+
+        // Fetch stocks from this screener
+        const result = await fetchTrendlyneScreenerData(
+          screener.screenpk,
+          screener.screener_name,
+          0,
+          true  // skipCache to get fresh data
+        );
+
+        // Check if our stock is in the results
+        if (result.success && result.data) {
+          const found = result.data.some(stock => String(stock.stockId) === String(stockId));
+
+          if (found) {
+            const sentiment = determineSentiment(screener.screener_name);
+            matchingScreeners.push({
+              id: screener.screener_id,
+              name: screener.screener_name,
+              sentiment
+            });
+            console.log(`  ✅ Found in screener: ${screener.screener_name} (${sentiment})`);
+          }
+        }
+      } catch (error) {
+        // Continue checking other screeners even if one fails
+        continue;
+      }
+    }
+
+    console.log(`✅ Stock ${stockId} found in ${matchingScreeners.length} screeners`);
+    return matchingScreeners;
+  } catch (error) {
+    console.error('❌ Error finding screeners for stock:', error);
+    return [];
+  }
+}
+
+/**
+ * Synchronize all screener constituents to the database
+ */
+export async function syncAllScreenerStocksToDB() {
+  try {
+    console.log('🔄 Starting full Trendlyne screener synchronization...');
+    
+    // 1. Ensure we have screeners in the DB
+    let screeners = getAllScreenersFromDB();
+    if (screeners.length === 0) {
+      await fetchAllTrendlyneScreenerNames();
+      screeners = getAllScreenersFromDB();
+    }
+    
+    console.log(`📊 Found ${screeners.length} screeners to sync`);
+    let successCount = 0;
+    
+    for (const screener of screeners) {
+      try {
+        console.log(`⏳ Fetching stocks for: ${screener.screener_name}...`);
+        
+        // Fetch stocks for this screener (skip cache to get fresh mapping)
+        const result = await fetchTrendlyneScreenerData(
+          screener.screenpk,
+          screener.screener_name,
+          0,
+          true
+        );
+        
+        if (result.success && result.data) {
+          const stocksToSave = result.data.map(s => ({
+            stockId: s.stockId,
+            name: s.name
+          }));
+          
+          saveScreenerStocksToDB(screener.screener_id, stocksToSave);
+          successCount++;
+          console.log(`  ✅ Saved ${stocksToSave.length} stocks for ${screener.screener_name}`);
+        }
+        
+        // Polite delay
+        await new Promise(resolve => setTimeout(resolve, 500));
+      } catch (err) {
+        console.error(`  ❌ Error syncing screener ${screener.screener_name}:`, err);
+      }
+    }
+    
+    console.log(`✅ Completed synchronization of ${successCount}/${screeners.length} screeners`);
+    return { success: true, count: successCount };
+  } catch (error) {
+    console.error('❌ Error during full screener sync:', error);
+    return { success: false, error: String(error) };
+  }
 }
 
 /**

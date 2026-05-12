@@ -1,0 +1,372 @@
+/**
+ * BullMQ queues & workers
+ *
+ * Two queues:
+ *   stock-refresh  – repeatable job every 5 min, refreshes all NSE live prices
+ *   ai-signals     – per-stock AI analysis jobs, concurrency 3
+ *
+ * Both require Redis.  If Redis is unavailable the module exports no-op stubs
+ * and the server falls back to the legacy setInterval approach.
+ */
+
+import { Queue, Worker, QueueEvents, Job, ConnectionOptions } from 'bullmq';
+import { fetchAllLiveStocks } from './liveStockData';
+import { cacheSet } from './cacheService';
+import { generateStockAnalysis } from '../services/aiService';
+import db from './db';
+import { syncAndScore } from './scoringService';
+import Redis from 'ioredis';
+
+// ─── Redis connection shared across all BullMQ objects ───────────────────────
+
+function makeConnection(isProbe = false): ConnectionOptions {
+  const base = {
+    host: process.env.REDIS_HOST || 'localhost',
+    port: parseInt(process.env.REDIS_PORT || '6379', 10),
+    password: process.env.REDIS_PASSWORD || undefined,
+    connectTimeout: 5000,
+  };
+
+  if (isProbe) {
+    return {
+      ...base,
+      maxRetriesPerRequest: 0,
+      enableOfflineQueue: false,
+      autoResubscribe: false,
+      retryStrategy: () => null,
+    };
+  }
+
+  return {
+    ...base,
+    maxRetriesPerRequest: null, // Required by BullMQ for blocking commands
+    enableOfflineQueue: true,
+    autoResubscribe: true,
+    retryStrategy: (times) => {
+      const delay = Math.min(times * 100, 3000);
+      return delay;
+    },
+  };
+}
+
+// ─── Queue names ─────────────────────────────────────────────────────────────
+
+export const QUEUE_STOCK_REFRESH = 'stock-refresh';
+export const QUEUE_AI_SIGNALS   = 'ai-signals';
+export const QUEUE_STOCK_SCORING = 'stock-scoring';
+export const QUEUE_MC_SCREENER_SYNC = 'mc-screener-sync';
+
+const BULK_CACHE_KEY      = 'live-stocks-bulk';
+const BULK_TTL_SECONDS    = 5 * 60;
+const REFRESH_REPEAT_MS   = BULK_TTL_SECONDS * 1000;
+
+// ─── Module-level handles (null when Redis unavailable) ───────────────────────
+
+export let stockRefreshQueue: Queue | null = null;
+export let aiSignalsQueue:    Queue | null = null;
+export let stockScoringQueue: Queue | null = null;
+export let mcScreenerSyncQueue: Queue | null = null;
+
+let stockWorker:  Worker | null = null;
+let signalWorker: Worker | null = null;
+let scoringWorker: Worker | null = null;
+let mcScreenerSyncWorker: Worker | null = null;
+
+// Shared in-process mirror populated by the stock-refresh worker
+// (same reference as the one exported from liveStockData via the cache layer)
+let bulkMirror: Map<string, any> = new Map();
+
+// ─── Stock-refresh worker processor ──────────────────────────────────────────
+
+async function processStockRefresh(_job: Job): Promise<{ count: number }> {
+  const freshData = await fetchAllLiveStocks();
+  bulkMirror = new Map(freshData.map((s: any) => [s.symbol, s]));
+  await cacheSet(BULK_CACHE_KEY, freshData, BULK_TTL_SECONDS);
+  return { count: freshData.length };
+}
+
+// ─── AI-signals worker processor ─────────────────────────────────────────────
+
+async function processAISignal(job: Job): Promise<void> {
+  const { symbol, stockData } = job.data as { symbol: string; stockData: Record<string, unknown> };
+
+  const analysis = await generateStockAnalysis(symbol, stockData);
+
+  // Persist to DB (same schema as the existing saveSignal procedure)
+  db.prepare(`
+    INSERT INTO signals (symbol, type, entry, target, stopLoss, confidence, reasoning, createdAt)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT DO NOTHING
+  `).run(
+    symbol,
+    analysis.signal,
+    analysis.entry,
+    analysis.target,
+    analysis.stopLoss,
+    analysis.confidence,
+    analysis.reasoning,
+    new Date().toISOString(),
+  );
+
+  // Update job progress so the frontend can display it
+  await job.updateProgress(100);
+}
+
+// ─── Stock-scoring worker processor ──────────────────────────────────────────
+
+async function processStockScoring(_job: Job): Promise<{ success: boolean }> {
+  console.log('[QUEUE] Starting scheduled stock scoring...');
+  const result = await syncAndScore();
+  return { success: result.success };
+}
+
+// ─── MC screener sync worker processor ───────────────────────────────────────
+
+async function processMcScreenerSync(_job: Job): Promise<{ success: boolean }> {
+  console.log('[QUEUE] Starting scheduled MoneyControl screener sync...');
+  const { syncMoneyControlScreeners } = await import('./moneycontrolScreener');
+  await syncMoneyControlScreeners();
+  return { success: true };
+}
+
+// ─── Initialise queues & workers ─────────────────────────────────────────────
+
+export async function initQueues(): Promise<boolean> {
+  // 1. Fail-fast probe to see if Redis is even there
+  const probeConnection = makeConnection(true);
+  const probe = new Redis({ ...probeConnection, lazyConnect: true });
+  
+  try {
+    await probe.connect();
+    await probe.quit();
+    console.log('[QUEUE] Redis connection probe successful');
+  } catch (err: any) {
+    console.warn('[QUEUE] Redis unavailable, disabling BullMQ:', err.message);
+    return false;
+  }
+
+  // 2. Initialise resilient queues & workers
+  const connection = makeConnection(false);
+  try {
+    // ── Stock refresh queue ──────────────────────────────────────────────────
+    stockRefreshQueue = new Queue(QUEUE_STOCK_REFRESH, { connection });
+
+    // Remove any stale repeatable job and re-register with current interval
+    const repeatables = await stockRefreshQueue.getRepeatableJobs();
+    for (const r of repeatables) {
+      await stockRefreshQueue.removeRepeatableByKey(r.key);
+    }
+    await stockRefreshQueue.add(
+      'refresh-all',
+      {},
+      {
+        repeat: { every: REFRESH_REPEAT_MS },
+        jobId: 'refresh-all-repeatable',
+        removeOnComplete: 5,
+        removeOnFail: 3,
+      },
+    );
+
+    stockWorker = new Worker(
+      QUEUE_STOCK_REFRESH,
+      processStockRefresh,
+      { connection, concurrency: 1 },
+    );
+
+    stockWorker.on('completed', (job, result) => {
+      console.log(`[QUEUE] stock-refresh completed: ${result.count} stocks`);
+    });
+    stockWorker.on('failed', (job, err) => {
+      console.error(`[QUEUE] stock-refresh failed:`, err.message);
+    });
+
+    // Trigger an immediate first refresh
+    await stockRefreshQueue.add('refresh-all', {}, { removeOnComplete: 1 });
+
+    // ── AI signals queue ─────────────────────────────────────────────────────
+    aiSignalsQueue = new Queue(QUEUE_AI_SIGNALS, { connection });
+
+    signalWorker = new Worker(
+      QUEUE_AI_SIGNALS,
+      processAISignal,
+      {
+        connection,
+        concurrency: 3,           // 3 Ollama calls in parallel
+        limiter: {
+          max: 10,                 // max 10 jobs per
+          duration: 5_000,         // 5-second window (avoid hammering Ollama)
+        },
+      },
+    );
+
+    signalWorker.on('failed', (job, err) => {
+      console.warn(`[QUEUE] ai-signals job ${job?.data?.symbol} failed:`, err.message);
+    });
+
+    console.log('[QUEUE] BullMQ initialised (stock-refresh + ai-signals)');
+
+    // ── Stock scoring queue ──────────────────────────────────────────────────
+    stockScoringQueue = new Queue(QUEUE_STOCK_SCORING, { connection });
+
+    // Repeat every 24 hours
+    const scoringRepeatables = await stockScoringQueue.getRepeatableJobs();
+    for (const r of scoringRepeatables) {
+      await stockScoringQueue.removeRepeatableByKey(r.key);
+    }
+    await stockScoringQueue.add(
+      'score-all',
+      {},
+      {
+        repeat: { every: 24 * 60 * 60 * 1000 }, // 24 hours
+        jobId: 'score-all-repeatable',
+        removeOnComplete: 5,
+        removeOnFail: 3,
+      },
+    );
+
+    scoringWorker = new Worker(
+      QUEUE_STOCK_SCORING,
+      processStockScoring,
+      { connection, concurrency: 1 },
+    );
+
+    scoringWorker.on('completed', (job) => {
+      console.log(`[QUEUE] stock-scoring completed`);
+    });
+    scoringWorker.on('failed', (job, err) => {
+      console.error(`[QUEUE] stock-scoring failed:`, err.message);
+    });
+
+    // ── MC screener sync queue ───────────────────────────────────────────────
+    mcScreenerSyncQueue = new Queue(QUEUE_MC_SCREENER_SYNC, { connection });
+
+    // Repeat every 12 hours
+    const mcRepeatables = await mcScreenerSyncQueue.getRepeatableJobs();
+    for (const r of mcRepeatables) {
+      await mcScreenerSyncQueue.removeRepeatableByKey(r.key);
+    }
+    await mcScreenerSyncQueue.add(
+      'mc-sync',
+      {},
+      {
+        repeat: { every: 12 * 60 * 60 * 1000 }, // 12 hours
+        jobId: 'mc-sync-repeatable',
+        removeOnComplete: 5,
+        removeOnFail: 3,
+      },
+    );
+
+    mcScreenerSyncWorker = new Worker(
+      QUEUE_MC_SCREENER_SYNC,
+      processMcScreenerSync,
+      { connection, concurrency: 1 },
+    );
+
+    mcScreenerSyncWorker.on('completed', (job) => {
+      console.log(`[QUEUE] mc-screener-sync completed`);
+    });
+    mcScreenerSyncWorker.on('failed', (job, err) => {
+      console.error(`[QUEUE] mc-screener-sync failed:`, err.message);
+    });
+
+    return true;
+  } catch (err: any) {
+    console.warn('[QUEUE] BullMQ unavailable (Redis down?) — falling back to setInterval:', err.message);
+    stockRefreshQueue = null;
+    aiSignalsQueue    = null;
+    stockScoringQueue = null;
+    return false;
+  }
+}
+
+// ─── Graceful shutdown ────────────────────────────────────────────────────────
+
+export async function shutdownQueues(): Promise<void> {
+  await Promise.allSettled([
+    stockWorker?.close(),
+    signalWorker?.close(),
+    scoringWorker?.close(),
+    mcScreenerSyncWorker?.close(),
+    stockRefreshQueue?.close(),
+    aiSignalsQueue?.close(),
+    stockScoringQueue?.close(),
+    mcScreenerSyncQueue?.close(),
+  ]);
+}
+
+// ─── Enqueue AI-signals for an array of stocks ───────────────────────────────
+
+export interface EnqueueResult {
+  queued: number;
+  skipped: number;
+  queueAvailable: boolean;
+}
+
+export async function enqueueAISignals(
+  stocks: { symbol: string; stockData: Record<string, unknown> }[],
+): Promise<EnqueueResult> {
+  if (!aiSignalsQueue) {
+    return { queued: 0, skipped: stocks.length, queueAvailable: false };
+  }
+
+  // Deduplicate: skip symbols that already have an active/waiting job today
+  const waiting  = await aiSignalsQueue.getWaiting();
+  const active   = await aiSignalsQueue.getActive();
+  const existing = new Set([...waiting, ...active].map(j => j.data?.symbol as string));
+
+  const toAdd = stocks.filter(s => !existing.has(s.symbol));
+
+  if (toAdd.length > 0) {
+    await aiSignalsQueue.addBulk(
+      toAdd.map(s => ({
+        name: 'analyze-stock',
+        data: s,
+        opts: {
+          jobId: `signal-${s.symbol}-${new Date().toDateString()}`,
+          removeOnComplete: 100,
+          removeOnFail: 20,
+          attempts: 2,
+          backoff: { type: 'exponential' as const, delay: 5_000 },
+        },
+      })),
+    );
+  }
+
+  return {
+    queued:         toAdd.length,
+    skipped:        stocks.length - toAdd.length,
+    queueAvailable: true,
+  };
+}
+
+// ─── Queue stats ──────────────────────────────────────────────────────────────
+
+export interface QueueStats {
+  waiting:  number;
+  active:   number;
+  completed: number;
+  failed:   number;
+  total:    number;
+  available: boolean;
+}
+
+export async function getAIQueueStats(): Promise<QueueStats> {
+  if (!aiSignalsQueue) {
+    return { waiting: 0, active: 0, completed: 0, failed: 0, total: 0, available: false };
+  }
+  const counts = await aiSignalsQueue.getJobCounts(
+    'waiting', 'active', 'completed', 'failed',
+  );
+  const waiting   = counts.waiting   ?? 0;
+  const active    = counts.active    ?? 0;
+  const completed = counts.completed ?? 0;
+  const failed    = counts.failed    ?? 0;
+  return {
+    waiting,
+    active,
+    completed,
+    failed,
+    total:    waiting + active + completed + failed,
+    available: true,
+  };
+}

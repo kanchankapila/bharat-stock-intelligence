@@ -1,4 +1,4 @@
-import { getStockMapping } from './stockMapping';
+import { getStockMapping, resolveMoneycontrolSymbol } from './stockMapping';
 import { getMoneycontrolInsights } from './moneycontrolService';
 
 export interface StockInsight {
@@ -103,10 +103,8 @@ export interface StockInsight {
 }
 
 export async function getStockInsights(query: string): Promise<StockInsight | null> {
-  const mapping = getStockMapping(query);
-  if (!mapping) return null;
-
-  const scId = mapping.mcsymbol;
+  const scId = await resolveMoneycontrolSymbol(query);
+  if (!scId) return null;
   
   try {
     const fetchJson = async (url: string) => {

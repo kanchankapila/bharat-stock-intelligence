@@ -33,6 +33,10 @@ export interface MoneycontrolInsightsResponse {
   error?: string;
 }
 
+// --- Simple In-Memory Cache for Insights (1 hour) ---
+const insightsCache: Record<string, { data: MoneycontrolInsightsResponse, timestamp: number }> = {};
+const CACHE_DURATION = 60 * 60 * 1000; 
+
 /**
  * Fetches stock insights from Moneycontrol API.
  * Maps stock name or symbol to scId (mcsymbol) using stocklist.ts
@@ -41,6 +45,11 @@ export interface MoneycontrolInsightsResponse {
  * @returns Structured insights data
  */
 export async function getMoneycontrolInsights(query: string): Promise<MoneycontrolInsightsResponse> {
+  const cached = insightsCache[query];
+  if (cached && (Date.now() - cached.timestamp < CACHE_DURATION)) {
+    return cached.data;
+  }
+
   try {
     const mapping = getStockMapping(query);
 
@@ -59,6 +68,7 @@ export async function getMoneycontrolInsights(query: string): Promise<Moneycontr
       };
     }
 
+    console.log(`[MONEYCONTROL] Fetching insights for ${query} using scId: ${scId}`);
     const url = `https://api.moneycontrol.com/mcapi/extdata/v2/mc-insights?scId=${scId}&type=c&deviceType=W&appVersion=185`;
 
     const response = await fetch(url, {
@@ -87,10 +97,12 @@ export async function getMoneycontrolInsights(query: string): Promise<Moneycontr
     // Some MC APIs return combined data, others don't.
     // Based on the endpoint extdata/v2/mc-insights, it usually returns classification and SWOT.
     
-    return {
+    const result: MoneycontrolInsightsResponse = {
       success: true,
       data: json.data as StockInsight
     };
+    insightsCache[query] = { data: result, timestamp: Date.now() };
+    return result;
   } catch (error) {
     console.error(`Error in getMoneycontrolInsights for query "${query}":`, error);
     return {
