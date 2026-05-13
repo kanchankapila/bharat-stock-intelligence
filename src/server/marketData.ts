@@ -1,5 +1,6 @@
 import { getStockMapping } from './stockMapping';
 import { fetchTrendlyneFundamentals } from './trendlyneService';
+import { mcFetchJson } from './mcApiService';
 
 export { fetchTrendlyneFundamentals };
 
@@ -8,14 +9,9 @@ export async function fetchTechIndicators(symbol: string, dur: 'D' | 'W' | 'M' =
   if (!map) throw new Error("Stock mapping not found for symbol: " + symbol);
   
   console.log(`[MONEYCONTROL] Fetching tech indicators for ${symbol} using scId: ${map.mcsymbol}`);
+  console.log(`[MONEYCONTROL] Fetching tech indicators for ${symbol} using scId: ${map.mcsymbol}`);
   const url = `https://priceapi.moneycontrol.com/pricefeed/techindicator/${dur}/${map.mcsymbol}?fields=sentiments,pivotLevels,sma,ema,indicators,crossover`;
-  const response = await fetch(url, {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    }
-  });
-  if (!response.ok) return null;
-  return response.json();
+  return mcFetchJson(url, 3, symbol);
 }
 
 export async function fetchETCompanyData(symbol: string) {
@@ -31,19 +27,16 @@ export async function fetchETCompanyData(symbol: string) {
 }
 
 export async function fetchMarketMap(indId: string = '38') {
-  // https://appfeeds.moneycontrol.com/jsonapi/market/marketmap&format=json&type=1&ind_id=38
-  const url = `https://appfeeds.moneycontrol.com/jsonapi/market/marketmap&format=json&type=1&ind_id=${indId}`;
-  const response = await fetch(url);
-  if (!response.ok) return null;
-  return response.json();
+  // https://appfeeds.moneycontrol.com/jsonapi/market/marketmap?format=json&type=1&ind_id=38
+  const url = `https://appfeeds.moneycontrol.com/jsonapi/market/marketmap?format=json&type=1&ind_id=${indId}`;
+  return mcFetchJson(url);
 }
 
 export async function fetchAllIndianIndices() {
   // https://api.moneycontrol.com/mcapi/v1/indices/get-indian-indices
+  // https://api.moneycontrol.com/mcapi/v1/indices/get-indian-indices
   const url = `https://api.moneycontrol.com/mcapi/v1/indices/get-indian-indices`;
-  const response = await fetch(url);
-  if (!response.ok) return null;
-  return response.json();
+  return mcFetchJson(url);
 }
 
 export async function fetchMCRatios(symbol: string) {
@@ -52,10 +45,10 @@ export async function fetchMCRatios(symbol: string) {
   
   console.log(`[MONEYCONTROL] Fetching ratios for ${symbol} using scId: ${map.mcsymbol}`);
   // https://www.moneycontrol.com/mc/widget/mcfinancials/getFinancialData?classic=true&referenceId=ratios&requestType=S&scId=BE03&frequency=3
+  console.log(`[MONEYCONTROL] Fetching ratios for ${symbol} using scId: ${map.mcsymbol}`);
+  // https://www.moneycontrol.com/mc/widget/mcfinancials/getFinancialData?classic=true&referenceId=ratios&requestType=S&scId=${map.mcsymbol}&frequency=3
   const url = `https://www.moneycontrol.com/mc/widget/mcfinancials/getFinancialData?classic=true&referenceId=ratios&requestType=S&scId=${map.mcsymbol}&frequency=3`;
-  const response = await fetch(url);
-  if (!response.ok) return null;
-  return response.json();
+  return mcFetchJson(url, 3, symbol);
 }
 
 export async function fetchETShareholding(symbol: string) {
@@ -83,15 +76,57 @@ export async function fetchETCorporateActions(symbol: string) {
 }
 
 export async function fetchHistoricalOHLC(symbol: string, dur: string = '1y') {
-  const map = getStockMapping(symbol);
-  if (!map) throw new Error("Stock mapping not found for symbol: " + symbol);
-  
-  console.log(`[MONEYCONTROL] Fetching historical OHLC for ${symbol} using scId: ${map.mcsymbol}`);
-  // Using a common MC charting endpoint that provides OHLC data
-  const url = `https://www.moneycontrol.com/mcapi/v1/stock/chart?scId=${map.mcsymbol}&dur=${dur}`;
-  const response = await fetch(url);
-  if (!response.ok) return null;
-  return response.json();
+  try {
+    let yfSymbol = `${symbol}.NS`;
+    // Map common indices to Yahoo Finance symbols
+    if (symbol.toLowerCase() === 'in;nsx') yfSymbol = '^NSEI';
+    else if (symbol.toLowerCase() === 'in;sen') yfSymbol = '^BSESN';
+    else if (symbol.toLowerCase() === 'in;nbx') yfSymbol = '^NSEBANK';
+    else if (symbol.toLowerCase() === 'in;cnit') yfSymbol = '^CNXIT';
+    else if (symbol.startsWith('in;') || symbol.startsWith('mc;')) {
+      // Fallback for other indices: we just return empty array instead of crashing
+      console.warn(`[OHLC] No Yahoo mapping for index ${symbol}`);
+      return { success: 1, data: [] };
+    }
+
+    // Convert duration formats (e.g. '1M' -> '1mo', '1y' -> '1y', '5y' -> '5y')
+    let yfRange = dur.toLowerCase();
+    if (yfRange.endsWith('m')) yfRange = yfRange.replace('m', 'mo');
+    
+    console.log(`[OHLC] Fetching historical OHLC for ${symbol} via Yahoo (${yfSymbol})`);
+    
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${yfSymbol}?interval=1d&range=${yfRange}`;
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+        'Accept': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      console.error(`[OHLC] Yahoo Finance returned ${response.status} for ${yfSymbol}`);
+      return { success: 0, data: [] };
+    }
+
+    const data = await response.json();
+    const result = data.chart?.result?.[0];
+    if (!result) return { success: 0, data: [] };
+
+    const timestamps = result.timestamp || [];
+    const quotes = result.indicators?.quote?.[0] || {};
+    const closes = quotes.close || [];
+
+    const mappedData = timestamps.map((ts: number, i: number) => ({
+      time: ts,
+      c: closes[i],
+      close: closes[i],
+    })).filter((d: any) => d.close !== null && d.close !== undefined);
+
+    return { success: 1, data: mappedData };
+  } catch (error) {
+    console.error(`[OHLC] Error fetching OHLC for ${symbol}:`, error);
+    return { success: 0, data: [] };
+  }
 }
 
 export async function fetchSectorPerformance(indId?: string) {
@@ -107,19 +142,16 @@ export async function fetchSectorPerformance(indId?: string) {
       }))
     };
   }
-  // https://api.moneycontrol.com/mcapi/v1/sector/performance
-  const url = `https://api.moneycontrol.com/mcapi/v1/sector/performance`;
-  const response = await fetch(url);
-  if (!response.ok) return null;
-  return response.json();
+  // https://api.moneycontrol.com/mcapi/v1/sector/performance?dur=1d&type=top&section=sector
+  // https://api.moneycontrol.com/mcapi/v1/sector/performance?dur=1d&type=top&section=sector
+  const url = `https://api.moneycontrol.com/mcapi/v1/sector/performance?dur=1d&type=top&section=sector`;
+  return mcFetchJson(url);
 }
 
 
 export async function fetchGlobalIndices() {
   const url = `https://api.moneycontrol.com/mcapi/v1/indices/get-global-indices`;
-  const response = await fetch(url);
-  if (!response.ok) return null;
-  return response.json();
+  return mcFetchJson(url);
 }
 
 export async function fetchMFInvestments(symbol: string) {
@@ -161,9 +193,7 @@ export async function fetchETPennyStocks() {
 export async function fetchTechnicalTrends(type: 'bullish' | 'bearish' | 'turning-bullish' | 'turning-bearish', index: string = 'FNO') {
   const base = type.includes('bullish') ? 'uptrend' : 'downtrend';
   const url = `https://api.moneycontrol.com/mcapi/v1/technical-trends/${base}/${type}?ex=N&index=${index}&page=1&order=desc&deviceType=W&sort=performance&appVersion=142`;
-  const response = await fetch(url);
-  if (!response.ok) return null;
-  return response.json();
+  return mcFetchJson(url);
 }
 
 export async function fetchETStats(type: 'gainers' | 'losers', duration: string = '1 day') {
@@ -181,33 +211,25 @@ const MC_HEADERS = {
 // Full index details: OHLC, period returns (YTD/1W/1M/.../5Y), moving averages
 export async function fetchIndexFullDetails(indId: string) {
   const url = `https://appfeeds.moneycontrol.com/jsonapi/market/indices&format=json&ind_id=${indId}`;
-  const response = await fetch(url, { headers: MC_HEADERS });
-  if (!response.ok) return null;
-  return response.json();
+  return mcFetchJson(url);
 }
 
 // Stocks (type=0) or industries (type=1) constituent list for an index
 export async function fetchIndexStocksList(indId: string, type: '0' | '1' = '0') {
   const url = `https://appfeeds.moneycontrol.com/jsonapi/market/marketmap&format=json&type=${type}&ind_id=${indId}`;
-  const response = await fetch(url, { headers: MC_HEADERS });
-  if (!response.ok) return null;
-  return response.json();
+  return mcFetchJson(url);
 }
 
 // Detailed price feed for an index via bridgeSymbol (e.g. "in;NSX")
 export async function fetchIndexPriceFeed(bridgeSymbol: string) {
   const encoded = encodeURIComponent(bridgeSymbol);
   const url = `https://priceapi.moneycontrol.com/pricefeed/notapplicable/inidicesindia/${encoded}`;
-  const response = await fetch(url, { headers: MC_HEADERS });
-  if (!response.ok) return null;
-  return response.json();
+  return mcFetchJson(url);
 }
 
 // Technical indicators for an index (D/W/M period)
 export async function fetchIndexTechnicals(period: 'D' | 'W' | 'M', bridgeSymbol: string) {
   const encoded = encodeURIComponent(bridgeSymbol);
   const url = `https://priceapi.moneycontrol.com/pricefeed/techindicator/${period}/${encoded}`;
-  const response = await fetch(url, { headers: MC_HEADERS });
-  if (!response.ok) return null;
-  return response.json();
+  return mcFetchJson(url);
 }

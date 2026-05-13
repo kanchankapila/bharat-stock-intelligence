@@ -26,9 +26,10 @@ export function useMarketData() {
   const [error, setError] = useState<string | null>(null);
 
   const { data: liveStocks, isLoading: isLoadingLive } = trpc.getLiveStocks.useQuery(undefined, {
-    refetchInterval: 5 * 60 * 1000,
-    staleTime: 30 * 1000,
+    // Match backend 5-min cache TTL; background refresh keeps server data fresh
+    staleTime: 5 * 60 * 1000,
     gcTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
   });
 
   useEffect(() => {
@@ -48,7 +49,8 @@ export function useMarketData() {
   useEffect(() => {
     if (!liveStocks || liveStocks.length === 0) return;
 
-    const interval = setInterval(() => {
+    const tick = () => {
+      if (document.hidden) return; // skip updates when tab is not visible
       setStocks(prevStocks =>
         prevStocks.map(stock => {
           const volatility = 0.0005;
@@ -66,8 +68,9 @@ export function useMarketData() {
           };
         })
       );
-    }, 5000);
+    };
 
+    const interval = setInterval(tick, 5000);
     return () => clearInterval(interval);
   }, [liveStocks]);
 

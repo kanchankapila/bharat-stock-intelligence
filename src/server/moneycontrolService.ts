@@ -1,4 +1,5 @@
 import { getStockMapping } from './stockMapping';
+import { mcFetchJson } from './mcApiService';
 
 export interface StockInsight {
   classification: {
@@ -71,20 +72,7 @@ export async function getMoneycontrolInsights(query: string): Promise<Moneycontr
     console.log(`[MONEYCONTROL] Fetching insights for ${query} using scId: ${scId}`);
     const url = `https://api.moneycontrol.com/mcapi/extdata/v2/mc-insights?scId=${scId}&type=c&deviceType=W&appVersion=185`;
 
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-      }
-    });
-    
-    if (!response.ok) {
-      return {
-        success: false,
-        error: `External API error: ${response.status} ${response.statusText}`
-      };
-    }
-
-    const json = await response.json();
+    const json = await mcFetchJson(url, 3, query);
 
     if (json.success !== 1 || !json.data) {
       return {

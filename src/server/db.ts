@@ -106,6 +106,19 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_mss_symbol ON moneycontrol_screener_stocks(symbol);
 
+  -- 5b. Unified Screener Metadata (NLP Inferred)
+  CREATE TABLE IF NOT EXISTS screener_master (
+    scan_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    source TEXT NOT NULL,
+    inferred_sentiment TEXT, -- 'bullish', 'bearish', 'neutral'
+    inferred_category TEXT,  -- 'technical', 'fundamental', etc.
+    inferred_timeframe TEXT DEFAULT 'long_term', -- 'long_term', 'intraday'
+    confidence REAL,
+    weight_override REAL,
+    last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
   -- 6. ETnow Intelligence (Placeholder for future sync)
   CREATE TABLE IF NOT EXISTS etnow_screeners (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -123,19 +136,79 @@ db.exec(`
     FOREIGN KEY (screener_id) REFERENCES etnow_screeners(screener_id)
   );
 
+  -- 6b. News & Sentiment
+  CREATE TABLE IF NOT EXISTS news_articles (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    summary TEXT,
+    source TEXT,
+    sentiment TEXT, -- 'Positive', 'Negative', 'Neutral'
+    category TEXT,
+    url TEXT,
+    symbols TEXT, -- Comma-separated symbols
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
   -- 7. Scoring & Analysis Signals
   CREATE TABLE IF NOT EXISTS stock_scores (
-    symbol TEXT PRIMARY KEY,
-    stock_id TEXT,
-    score REAL DEFAULT 0,
-    positive_count INTEGER DEFAULT 0,
-    negative_count INTEGER DEFAULT 0,
-    reasons TEXT, -- JSON string of screeners contributing
-    last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
+    symbol TEXT NOT NULL,
+    timeframe TEXT NOT NULL, -- 'long_term' | 'intraday'
+    score REAL,
+    confidence REAL,
+    classification TEXT, -- 'Strong Buy' | 'Buy' | 'Hold' | 'Sell' | 'Strong Sell'
+    top_domain TEXT, -- 'Fundamental' | 'Technical' | 'Momentum' | 'Delivery'
+    positive_count INTEGER,
+    negative_count INTEGER,
+    reasons TEXT, -- JSON string of screener names/sentiments
+    last_updated TEXT,
+    PRIMARY KEY (symbol, timeframe)
   );
 
   CREATE INDEX IF NOT EXISTS idx_ss_score ON stock_scores(score);
+  CREATE INDEX IF NOT EXISTS idx_ss_class ON stock_scores(classification);
+  CREATE INDEX IF NOT EXISTS idx_ss_timeframe ON stock_scores(timeframe);
 
+  CREATE TABLE IF NOT EXISTS stock_factor_breakdown (
+    symbol TEXT NOT NULL,
+    timeframe TEXT NOT NULL DEFAULT 'long_term',
+    technical REAL DEFAULT 0,
+    fundamental REAL DEFAULT 0,
+    momentum REAL DEFAULT 0,
+    valuation REAL DEFAULT 0,
+    delivery REAL DEFAULT 0,
+    news REAL DEFAULT 0,
+    last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (symbol, timeframe),
+    FOREIGN KEY (symbol, timeframe) REFERENCES stock_scores(symbol, timeframe) ON DELETE CASCADE
+  );
+
+  -- 8. Historical Price Data (Structured for Python Analysis)
+  CREATE TABLE IF NOT EXISTS stock_ohlcv (
+    symbol TEXT NOT NULL,
+    date TEXT NOT NULL,
+    open REAL,
+    high REAL,
+    low REAL,
+    close REAL,
+    volume INTEGER,
+    PRIMARY KEY (symbol, date)
+  );
+
+  -- 9. Technical Analysis Signals & Predictions
+  CREATE TABLE IF NOT EXISTS technical_analysis_signals (
+    symbol TEXT PRIMARY KEY,
+    trend TEXT, -- 'Bullish' | 'Bearish' | 'Neutral'
+    rsi REAL,
+    macd TEXT,
+    bollinger TEXT,
+    patterns TEXT, -- JSON array of detected candlestick patterns
+    entry_price REAL,
+    target_price REAL,
+    stop_loss REAL,
+    last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  -- 10. Signals
   CREATE TABLE IF NOT EXISTS signals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     symbol TEXT NOT NULL,

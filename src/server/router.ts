@@ -40,17 +40,19 @@ import {
 import { 
   getTopRatedStocks, 
   syncAndScore,
-  recalculateScores
+  recalculateScores,
+  getStockScoreDetail
 } from "./scoringService";
 import { getMoneycontrolInsights } from "./moneycontrolService";
 import { getStockInsights, getIndexData } from "./insightService";
-import { getAllStocks, getStockMapping } from "./stockMapping";
+import { getAllStocks, getStockMapping, getSymbolFromMcsymbol } from "./stockMapping";
 import { getCachedScan, runTechnicalScan } from "./technicalScanner";
 import { getFnOSignals } from "./fnoService";
 import { fetchStockDataWithCache, getOrRefreshAllStocks } from "./liveStockData";
 import { getMcConsolidatedData } from "./mcApiService";
 import { fetchTrendlyneScreenerData, fetchAllTrendlyneScreenerNames, getTrendlyneScreenerList, getTrendlyneScreenerCategories, updateFetchInterval, updateScreenerNamesInterval, testTrendlyneApiResponse, findScreenersByStock } from "./trendlyneScreener";
 import { syncNSEStocksToDatabase, getAllNSEStocksFromDB, searchNSEStocksFromDB, getNSEStockFromDB, getNSEStocksBySectorFromDB, getNSEStocksByIndustryFromDB, getAllSectorsFromDB, getAllIndustriesFromDB, getNSEStockCount } from "./nseService";
+import { fetchOptionChain, fetchFnoSymbols } from "./optionChainService";
 import { enqueueAISignals, getAIQueueStats } from "./queues";
 
 const t = initTRPC.create({
@@ -233,6 +235,17 @@ export const appRouter = router({
       return await runTechnicalScan(symbol);
     }),
 
+  getTechnicalPredictions: publicProcedure
+    .input(z.object({ symbol: z.string() }))
+    .query(async ({ input }) => {
+      const row = db.prepare('SELECT * FROM technical_analysis_signals WHERE symbol = ?').get(input.symbol) as any;
+      if (!row) return null;
+      return {
+        ...row,
+        patterns: JSON.parse(row.patterns || '[]')
+      };
+    }),
+
   getStockList: publicProcedure.query(() => {
     return getAllStocks();
   }),
@@ -248,6 +261,38 @@ export const appRouter = router({
         throw new Error(`Failed to fetch live data for ${input.symbol}`);
       }
       return quoteData;
+    }),
+
+  // Batch fetching for visibility-based updating
+  getLiveQuotesBatch: publicProcedure
+    .input(z.array(z.string()))
+    .query(async ({ input }) => {
+      if (!input || input.length === 0) return [];
+      const promises = input.map(sym => fetchStockDataWithCache(sym));
+      const results = await Promise.all(promises);
+      return results.filter(Boolean); // Filter out nulls
+    }),
+
+  getOptionChain: publicProcedure
+    .input(z.object({ symbol: z.string() }))
+    .query(async ({ input }) => {
+      return await fetchOptionChain(input.symbol);
+    }),
+
+  getFnoSymbols: publicProcedure
+    .query(async () => {
+      // Simple server-side cache to avoid repeated heavy API calls
+      const cacheKey = 'fno_symbols_cache';
+      const cached = (global as any)[cacheKey];
+      if (cached && Date.now() - cached.timestamp < 3600000) {
+        return cached.data;
+      }
+      
+      const data = await fetchFnoSymbols();
+      if (data && data.length > 0) {
+        (global as any)[cacheKey] = { data, timestamp: Date.now() };
+      }
+      return data;
     }),
 
   getLiveStocks: publicProcedure.query(async () => {
@@ -351,7 +396,16 @@ export const appRouter = router({
       index: z.string().optional() 
     }))
     .query(async ({ input }) => {
-      return await fetchTechnicalTrends(input.type, input.index);
+      const result = await fetchTechnicalTrends(input.type, input.index);
+      if (result?.success === 1) {
+        const enrichItem = (item: any) => {
+          const symbol = getSymbolFromMcsymbol(item.scId);
+          return { ...item, symbol: symbol || item.scId, shortName: symbol || item.scId };
+        };
+        if (result.data?.list) result.data.list = result.data.list.map(enrichItem);
+        if (result.data?.tableDataList) result.data.tableDataList = result.data.tableDataList.map(enrichItem);
+      }
+      return result;
     }),
 
   getETStats: publicProcedure
@@ -403,29 +457,37 @@ export const appRouter = router({
     .query(async ({ input }) => {
       const data = await fetchSectorPerformance(input?.indexId);
       if (data && data.success === 1 && data.data) {
-        return data.data.map((s: any) => ({
-          name: s.sectorName,
-          change: parseFloat(s.percentChange),
-          stocks: s.stocksCount || 0
-        }));
+        return data.data.map((s: any) => {
+          const name = s.sectorName || s.sector || 'Unknown';
+          const rawChange = s.percentChange ?? s.mcapPerChange ?? 0;
+          const change = typeof rawChange === 'number' ? rawChange : parseFloat(String(rawChange).replace(/,/g, ''));
+          return {
+            name,
+            change: isNaN(change) ? 0 : change,
+            stocks: s.stocksCount || 0
+          };
+        });
       }
 
       // Fallback: aggregate from live stock data grouped by sector
       const allStocks = await getOrRefreshAllStocks();
       const sectorMap = new Map<string, number[]>();
       for (const stock of allStocks) {
-        const sector = (stock as any).sector;
+        const sector = (stock as any).sector || (stock as any).industry;
         if (sector && sector !== 'Unknown') {
           if (!sectorMap.has(sector)) sectorMap.set(sector, []);
           sectorMap.get(sector)!.push(stock.changePct);
         }
       }
       return Array.from(sectorMap.entries())
-        .map(([name, changes]) => ({
-          name,
-          change: Number((changes.reduce((a, b) => a + b, 0) / changes.length).toFixed(2)),
-          stocks: changes.length,
-        }))
+        .map(([name, changes]) => {
+          const avgChange = changes.reduce((a, b) => a + b, 0) / changes.length;
+          return {
+            name,
+            change: isNaN(avgChange) ? 0 : Number(avgChange.toFixed(2)),
+            stocks: changes.length,
+          };
+        })
         .sort((a, b) => b.change - a.change);
     }),
 
@@ -476,6 +538,17 @@ export const appRouter = router({
   
   getMarketOverview: publicProcedure.query(async () => {
     const parse = (s: unknown) => parseFloat(String(s ?? '0').replace(/,/g, '')) || 0;
+    const { getIndexByName } = await import('./indexMapping');
+    
+    const extractId = (name: string, url: string) => {
+      // Try URL first
+      const m = url?.match(/-(\d+)\.html$/);
+      if (m) return m[1];
+      // Fallback to mapping
+      const mapped = getIndexByName(name);
+      return mapped?.id || null;
+    };
+    
     try {
       const data = await fetchAllIndianIndices();
       if (data?.success === 1) {
@@ -486,17 +559,17 @@ export const appRouter = router({
         const bnk = find('NIFTY BANK');
         if (n50 && sx && bnk) {
           return {
-            nifty50:   { value: parse(n50.value),  change: parse(n50.change),  changePct: parse(n50.changePer)  },
-            sensex:    { value: parse(sx.value),   change: parse(sx.change),   changePct: parse(sx.changePer)   },
-            bankNifty: { value: parse(bnk.value),  change: parse(bnk.change),  changePct: parse(bnk.changePer)  },
+            nifty50:   { indId: extractId('NIFTY 50', n50.url), value: parse(n50.value),  change: parse(n50.change),  changePct: parse(n50.changePer)  },
+            sensex:    { indId: extractId('SENSEX', sx.url),    value: parse(sx.value),   change: parse(sx.change),   changePct: parse(sx.changePer)   },
+            bankNifty: { indId: extractId('NIFTY BANK', bnk.url), value: parse(bnk.value),  change: parse(bnk.change),  changePct: parse(bnk.changePer)  },
           };
         }
       }
     } catch {}
     return {
-      nifty50:   { value: 22450.2, change: 124.5,  changePct:  0.56 },
-      sensex:    { value: 73850.4, change: 412.1,  changePct:  0.56 },
-      bankNifty: { value: 48250.3, change: -120.4, changePct: -0.25 },
+      nifty50:   { indId: '9',  value: 22450.2, change: 124.5,  changePct:  0.56 },
+      sensex:    { indId: '4',  value: 73850.4, change: 412.1,  changePct:  0.56 },
+      bankNifty: { indId: '23', value: 48250.3, change: -120.4, changePct: -0.25 },
     };
   }),
 
@@ -682,7 +755,83 @@ export const appRouter = router({
     .query(async ({ input }) => {
       const mapping = getStockMapping(input.symbol);
       const scId = mapping?.mcsymbol || input.symbol;
+      const { getMcConsolidatedData } = await import('./mcApiService');
       return await getMcConsolidatedData(scId, input.symbol, input.timeframe);
+    }),
+
+  // ─── MoneyControl Index APIs ───────────────────────────────────────────
+  getIndicesList: publicProcedure.query(async () => {
+    const { fetchIndianIndices } = await import('./indexApiService');
+    return await fetchIndianIndices();
+  }),
+
+  getIndexFullData: publicProcedure
+    .input(z.object({ 
+      indId: z.string(),
+      bridgeSymbol: z.string().optional(),
+      timeframe: z.enum(['D', 'W', 'M']).optional().default('D')
+    }))
+    .query(async ({ input }) => {
+      const { 
+        fetchIndexFullDetails, 
+        fetchIndexFundamentals, 
+        fetchIndexTechnicals 
+      } = await import('./indexApiService');
+      const { getIndexById } = await import('./indexMapping');
+      
+      const [details, fundamentals] = await Promise.all([
+        fetchIndexFullDetails(input.indId),
+        fetchIndexFundamentals(input.indId)
+      ]);
+      
+      let technicals = null;
+      // Use mapping as fallback if API doesn't provide bridgesymbol
+      const mapped = getIndexById(input.indId);
+      const bSym = input.bridgeSymbol || details?.indices?.bridgesymbol || mapped?.symbol;
+      
+      if (bSym) {
+        technicals = await fetchIndexTechnicals(input.timeframe, bSym);
+      }
+      
+      return {
+        details,
+        fundamentals,
+        technicals
+      };
+    }),
+
+  getIndexMapping: publicProcedure
+    .query(async () => {
+      const { INDEX_MAPPING } = await import('./indexMapping');
+      return INDEX_MAPPING;
+    }),
+
+  getIndexConstituents: publicProcedure
+    .input(z.object({ 
+      indId: z.string(),
+      type: z.enum(['0', '1']).optional().default('0') 
+    }))
+    .query(async ({ input }) => {
+      const { fetchIndexConstituents } = await import('./indexApiService');
+      return await fetchIndexConstituents(input.indId, input.type);
+    }),
+
+  getAdvanceDecline: publicProcedure
+    .input(z.object({ ex: z.string().optional().default('N') }))
+    .query(async ({ input }) => {
+      const { fetchAdvanceDecline } = await import('./indexApiService');
+      return await fetchAdvanceDecline(input.ex);
+    }),
+
+  getIndexGraph: publicProcedure
+    .input(z.object({ 
+      indId: z.string(),
+      range: z.string().optional().default('1d'),
+      type: z.string().optional().default('line')
+    }))
+    .query(async ({ input }) => {
+      const { fetchIndexGraph } = await import('./indexApiService');
+      return await fetchIndexGraph(input.indId, input.range, input.type);
     }),
 
   // Fetch MC technical data for a specific timeframe (D/W/M)
@@ -843,12 +992,6 @@ export const appRouter = router({
       });
     }),
   
-  // --- Trendlyne Data APIs ---
-  getTrendlyneFundamentals: publicProcedure
-    .input(z.object({ symbol: z.string() }))
-    .query(async ({ input }) => {
-      return await fetchTrendlyneFundamentals(input.symbol);
-    }),
 
   getTrendlyneSwot: publicProcedure
     .input(z.object({ symbol: z.string() }))
@@ -876,9 +1019,21 @@ export const appRouter = router({
 
   // --- Stock Scoring APIs ---
   getTopRatedStocks: publicProcedure
-    .input(z.object({ limit: z.number().optional().default(50) }))
+    .input(z.object({ 
+      limit: z.number().optional().default(50),
+      timeframe: z.enum(['long_term', 'intraday']).optional().default('long_term')
+    }))
     .query(({ input }) => {
-      return getTopRatedStocks(input.limit);
+      return getTopRatedStocks(input.limit, input.timeframe);
+    }),
+
+  getStockScoreDetail: publicProcedure
+    .input(z.object({ 
+      symbol: z.string(),
+      timeframe: z.enum(['long_term', 'intraday']).optional().default('long_term')
+    }))
+    .query(({ input }) => {
+      return getStockScoreDetail(input.symbol, input.timeframe);
     }),
 
   triggerStockScoring: publicProcedure

@@ -1,0 +1,16 @@
+pandas
+pandas-ta
+yfinance
+ta
+sqlalchemy
+numpy
+requests
+beautifulsoup4
+ollama
+frozendict
+curl_cffi
+rich
+psycopg2-binary
+ipython
+markdown-it-py
+mdurl

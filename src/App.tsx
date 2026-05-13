@@ -22,6 +22,7 @@ import {
 import { useMarketData, MarketData } from './services/marketService';
 
 import { trpc } from './lib/trpc';
+import { useIntersectionObserver } from './hooks/useIntersectionObserver';
 import { useNewsFeed, NewsArticle } from './services/newsService';
 import { detectCandlestickPatterns, Candlestick } from './lib/candlestickUtils';
 import MCStockInfoPanel from './components/MCStockInfoPanel';
@@ -245,8 +246,8 @@ const MomentumIntelligence: React.FC<{ watchlist: string[]; onToggle: (symbol: s
   const { data: bullish } = trpc.getTechnicalTrends.useQuery({ type: 'bullish' });
   const { data: bearish } = trpc.getTechnicalTrends.useQuery({ type: 'bearish' });
 
-  const bullishList = bullish?.data?.tableDataList?.slice(0, 5) || [];
-  const bearishList = bearish?.data?.tableDataList?.slice(0, 5) || [];
+  const bullishList = (bullish?.data?.list || bullish?.data?.tableDataList)?.slice(0, 5) || [];
+  const bearishList = (bearish?.data?.list || bearish?.data?.tableDataList)?.slice(0, 5) || [];
 
   return (
     <Card title="Momentum Intelligence" icon={Zap} className="col-span-12">
@@ -424,10 +425,24 @@ const Watchlist: React.FC<{
   onSelectStock: (symbol: string) => void;
   onRemove: (symbol: string) => void;
 }> = ({ watchlist, stocks, onSelectStock, onRemove }) => {
-  const watchlistStocks = stocks.filter(s => watchlist.includes(s.symbol));
+  const ref = React.useRef<HTMLDivElement>(null);
+  const isVisible = useIntersectionObserver(ref, { threshold: 0.1 });
+
+  const { data: liveQuotes } = trpc.getLiveQuotesBatch.useQuery(watchlist, {
+    enabled: isVisible && watchlist.length > 0,
+    refetchInterval: isVisible ? 10000 : false,
+  });
+
+  const watchlistStocks = stocks.filter(s => watchlist.includes(s.symbol)).map(stock => {
+    const live = liveQuotes?.find((q: any) => q.symbol === stock.symbol);
+    if (live) {
+      return { ...stock, price: live.price, changePct: live.changePct ?? stock.changePct };
+    }
+    return stock;
+  });
 
   return (
-    <div className="p-6 space-y-6">
+    <div ref={ref} className="p-6 space-y-6">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h2 className="text-3xl font-black text-white italic tracking-tighter uppercase flex items-center gap-3">
@@ -499,7 +514,8 @@ const Watchlist: React.FC<{
 // --- Sector Heatmap Component ---
 const SectorHeatmap: React.FC<{ indexId?: string }> = ({ indexId }) => {
   const { data: sectors, isLoading } = trpc.getSectorPerformance.useQuery({ indexId }, {
-    refetchInterval: 10000,
+    refetchInterval: 60000,
+    refetchOnWindowFocus: false,
   });
 
   if (isLoading || !sectors) return <div className="h-40 bg-slate-900/50 animate-pulse rounded-2xl" />;
@@ -945,8 +961,8 @@ const IndicesPage: React.FC = () => {
               .filter((idx: any) => idx.name)
               .map((idx: any) => {
                 const idxId = extractIndexId(idx.url);
-                const up = idx.direction === 1;
                 const changePct = parseFloat(idx.changePer ?? '0');
+                const up = Number(idx.direction) === 1 || changePct >= 0;
                 return (
                   <motion.button
                     key={idx.name + idx.url}
@@ -977,21 +993,26 @@ const IndicesPage: React.FC = () => {
 };
 
 const IndexOverview: React.FC = () => {
+  const ref = React.useRef<HTMLDivElement>(null);
+  const isVisible = useIntersectionObserver(ref, { threshold: 0.1 });
+
   const { data: indices, isLoading } = trpc.getAllIndices.useQuery(undefined, {
-    refetchInterval: 30000,
+    enabled: isVisible,
+    refetchInterval: isVisible ? 30000 : false,
   });
 
-  if (isLoading || !indices) return <div className="h-40 bg-slate-900/50 animate-pulse rounded-2xl" />;
+  if (isLoading || !indices) return <div ref={ref} className="h-40 bg-slate-900/50 animate-pulse rounded-2xl" />;
 
   // MC API returns: { data: { indiceList: [{ name: "Key Indices", list: [...] }, ...] } }
   const groups: { name: string; list: any[] }[] = (indices as any)?.data?.indiceList ?? [];
   const keyList = groups.find(g => g.name === 'Key Indices')?.list ?? [];
 
   return (
-    <Card title="Market Watch" icon={Activity}>
+    <div ref={ref}>
+      <Card title="Market Watch" icon={Activity}>
       <div className="space-y-3 pt-2">
         {keyList.slice(0, 8).filter((idx: any) => idx.name).map((idx: any) => {
-          const isUp = idx.direction === 1;
+          const isUp = Number(idx.direction) === 1 || parseFloat(idx.changePer ?? '0') >= 0;
           const pct = parseFloat(idx.changePer ?? '0');
           return (
             <div key={idx.name} className="flex justify-between items-center p-3 bg-slate-950 rounded-xl border border-slate-800/50 hover:border-slate-700 transition-all">
@@ -1015,31 +1036,37 @@ const IndexOverview: React.FC = () => {
           );
         })}
       </div>
-    </Card>
+      </Card>
+    </div>
   );
 };
 
-const MarketIndices: React.FC = () => {
+const MarketIndices: React.FC<{ onSelect?: (id: string, name: string) => void }> = ({ onSelect }) => {
+  const ref = React.useRef<HTMLDivElement>(null);
+  const isVisible = useIntersectionObserver(ref, { threshold: 0.1 });
+
   const { data: indices, isLoading } = trpc.getMarketOverview.useQuery(undefined, {
-    refetchInterval: 10000,
+    enabled: isVisible,
+    refetchInterval: isVisible ? 10000 : false,
   });
 
   if (isLoading || !indices) return (
-    <div className="col-span-12 grid grid-cols-1 md:grid-cols-3 gap-6 mb-2">
+    <div ref={ref} className="col-span-12 grid grid-cols-1 md:grid-cols-3 gap-6 mb-2">
       {[1, 2, 3].map(i => (
         <div key={i} className="h-32 bg-slate-900 border border-slate-800 rounded-3xl animate-pulse" />
       ))}
     </div>
   );
 
+  const defaultIndex = { value: 0, change: 0, changePct: 0 };
   const displayItems = [
-    { name: 'NIFTY 50', ...indices.nifty50 },
-    { name: 'SENSEX', ...indices.sensex },
-    { name: 'BANK NIFTY', ...indices.bankNifty },
+    { name: 'NIFTY 50', ...(indices.nifty50 || defaultIndex) },
+    { name: 'SENSEX', ...(indices.sensex || defaultIndex) },
+    { name: 'BANK NIFTY', ...(indices.bankNifty || defaultIndex) },
   ];
 
   return (
-    <div className="col-span-12 grid grid-cols-1 md:grid-cols-3 gap-6 mb-2">
+    <div ref={ref} className="col-span-12 grid grid-cols-1 md:grid-cols-3 gap-6 mb-2">
       {displayItems.map((item, idx) => (
         <motion.div
           key={item.name}
@@ -1097,18 +1124,24 @@ const MarketIndices: React.FC = () => {
 };
 
 const GlobalMarkets: React.FC = () => {
+  const ref = React.useRef<HTMLDivElement>(null);
+  const isVisible = useIntersectionObserver(ref, { threshold: 0.1 });
+
   const { data: globalData, isLoading } = trpc.getGlobalIndices.useQuery(undefined, {
-    refetchInterval: 30000,
+    enabled: isVisible,
+    refetchInterval: isVisible ? 30000 : false,
   });
 
   if (isLoading || !globalData) return (
-    <Card title="Global Markets" icon={Activity} className="col-span-12 lg:col-span-4 h-full">
-      <div className="space-y-4 animate-pulse pt-2">
-        {[1, 2, 3, 4].map(i => (
-          <div key={i} className="h-12 bg-slate-800 rounded-xl" />
-        ))}
-      </div>
-    </Card>
+    <div ref={ref} className="col-span-12 lg:col-span-4 h-full">
+      <Card title="Global Markets" icon={Activity} className="h-full">
+        <div className="space-y-4 animate-pulse pt-2">
+          {[1, 2, 3, 4].map(i => (
+            <div key={i} className="h-12 bg-slate-800 rounded-xl" />
+          ))}
+        </div>
+      </Card>
+    </div>
   );
 
   const getRawIndices = () => {
@@ -1126,8 +1159,9 @@ const GlobalMarkets: React.FC = () => {
   ) : [];
 
   return (
-    <Card title="Global Intelligence" icon={Activity} className="col-span-12 lg:col-span-4">
-      <div className="space-y-3 pt-2">
+    <div ref={ref} className="col-span-12 lg:col-span-4">
+      <Card title="Global Intelligence" icon={Activity} className="h-full">
+        <div className="space-y-3 pt-2">
         {filteredIndices.slice(0, 6).map((idx: any) => (
           <div key={idx.indexName} className="flex justify-between items-center p-3 bg-slate-950 rounded-xl border border-slate-800/50 hover:border-slate-700 transition-all group">
             <div>
@@ -1147,6 +1181,7 @@ const GlobalMarkets: React.FC = () => {
         ))}
       </div>
     </Card>
+    </div>
   );
 };
 
@@ -4883,13 +4918,18 @@ export default function App() {
   }, []);
 
   const rawIndexData = realIndices?.data;
-  const indexSource = Array.isArray(rawIndexData) ? rawIndexData : (rawIndexData?.indexList || []);
-  
-  const displayIndices = indexSource.length > 0 ? indexSource.map((idx: any) => ({
-    name: idx.indexName || idx.name,
-    value: parseFloat(idx.lastPrice),
-    change: parseFloat(idx.percentChange),
-    isUp: parseFloat(idx.percentChange) >= 0
+  // MC API returns { indiceList: [{ name: "Key Indices", list: [...] }, ...] }
+  const indexGroups: any[] = rawIndexData?.indiceList ?? [];
+  const allIndices: any[] = indexGroups.flatMap((g: any) => Array.isArray(g.list) ? g.list : []);
+  const keyIndices = allIndices.filter((idx: any) =>
+    ['NIFTY 50', 'SENSEX', 'NIFTY BANK'].includes(idx.name)
+  );
+
+  const displayIndices = keyIndices.length > 0 ? keyIndices.map((idx: any) => ({
+    name: idx.name,
+    value: parseFloat(String(idx.value ?? '0').replace(/,/g, '')),
+    change: parseFloat(idx.changePer ?? '0'),
+    isUp: parseFloat(idx.changePer ?? '0') >= 0
   })) : [
     { name: 'Nifty 50', value: 22453.20, change: 0.84, isUp: true },
     { name: 'Sensex', value: 73845.54, change: 0.72, isUp: true },
@@ -5022,7 +5062,7 @@ export default function App() {
               transition={{ duration: 0.25, ease: 'easeOut' }}
             >
               {activeTab === 'dashboard' && <Dashboard stocks={stocks} onNewSignal={addToast} onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />}
-              {activeTab === 'top-rated' && <TopRatedStocks />}
+              {activeTab === 'top-rated' && <TopRatedStocks onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} />}
               {activeTab === 'indices' && <IndicesPage />}
               {activeTab === 'market-map' && <MarketMap />}
               {activeTab === 'screener' && <Screener stocks={stocks} onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />}

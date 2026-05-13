@@ -596,11 +596,19 @@ export async function getTrendlyneScreenerList() {
   // Try to get from database first
   let screeners = getAllScreenersFromDB();
 
-  // If database is empty, fetch from API and save to DB
+  // If database is empty, return hardcoded categories immediately and trigger fetch in background
   if (screeners.length === 0) {
-    console.log(`📊 Database empty, fetching screener names from Trendlyne API...`);
-    await fetchAllTrendlyneScreenerNames();
-    screeners = getAllScreenersFromDB();
+    console.log(`📊 Database empty, triggering background fetch of screener names from Trendlyne API...`);
+    // Trigger in background, don't await
+    fetchAllTrendlyneScreenerNames().catch(err => console.error('Background fetch error:', err));
+    
+    // Return hardcoded ones as fallback for now
+    return getTrendlyneScreenerCategories().map(c => ({
+      id: c.id,
+      name: c.name,
+      description: c.description,
+      screenpk: '19814' // Default sample pk
+    }));
   }
 
   return screeners.map(s => ({

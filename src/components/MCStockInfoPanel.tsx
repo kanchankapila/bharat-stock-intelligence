@@ -17,68 +17,27 @@ interface MCStockInfoPanelProps {
 
 type Timeframe = 'D' | 'W' | 'M';
 
-const Card: React.FC<{ children: React.ReactNode; className?: string; title?: string; icon?: any }> = ({ children, className, title, icon: Icon }) => (
-  <div className={cn("bg-slate-900/50 border border-slate-800 rounded-2xl overflow-hidden", className)}>
-    {title && (
-      <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
-        <h3 className="text-sm font-bold text-slate-300 flex items-center gap-2 italic uppercase tracking-wider">
-          {Icon && <Icon className="w-4 h-4 text-blue-500" />}
-          {title}
-        </h3>
-        <Info className="w-4 h-4 text-slate-600 cursor-help" />
-      </div>
-    )}
-    <div className="p-5">{children}</div>
-  </div>
-);
-
-const SentimentBadge: React.FC<{ sentiment: string }> = ({ sentiment }) => {
-  const s = sentiment?.toLowerCase() || '';
-  const isBullish = s.includes('bullish') || s.includes('buy') || s.includes('outperform') || s === 'positive';
-  const isBearish = s.includes('bearish') || s.includes('sell') || s.includes('underperform') || s === 'negative';
-  const isNeutral = s.includes('neutral') || s === 'neutral' || s === '- -' || !sentiment;
-
-  return (
-    <span className={cn(
-      "text-[9px] font-black px-2 py-0.5 rounded uppercase tracking-tighter whitespace-nowrap",
-      isBullish ? "bg-emerald-500/10 text-emerald-500" :
-      isBearish ? "bg-rose-500/10 text-rose-500" :
-      "bg-slate-800 text-slate-400"
-    )}>
-      {isBullish ? (s.includes('very') ? 'Very Bullish' : 'Bullish') :
-       isBearish ? (s.includes('very') ? 'Very Bearish' : 'Bearish') :
-       sentiment || 'Neutral'}
-    </span>
-  );
-};
-
-const ValueDisplay: React.FC<{ label: string; value: string | number | undefined; sub?: string; color?: string }> = ({ label, value, sub, color }) => (
-  <div className="p-3 bg-slate-950 rounded-xl border border-slate-800/50 text-center">
-    <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">{label}</p>
-    <p className={cn("text-sm font-black italic tracking-tighter", color || "text-white")}>{value ?? '—'}</p>
-    {sub && <p className="text-[8px] text-slate-600 font-bold uppercase mt-1">{sub}</p>}
-  </div>
-);
-
-const IndicatorRow: React.FC<{ name: string; value: string | number | any[] | undefined; sentiment: string }> = ({ name, value, sentiment }) => (
-  <div className="flex items-center justify-between p-2.5 bg-slate-950 rounded-xl border border-slate-800/50 hover:border-slate-700 transition-all">
-    <div className="flex-1 min-w-0">
-      <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest truncate">{name}</p>
-      <p className="text-xs font-bold text-white mt-0.5 tabular-nums">
-        {Array.isArray(value) ? (
-          <span className="text-[10px] text-slate-400">
-            UB: {(value as any[]).find((v: any) => v.displayName === 'UB' || v.id === 'upperband')?.value || '-'} |
-            LB: {(value as any[]).find((v: any) => v.displayName === 'LB' || v.id === 'lowerband')?.value || '-'}
-          </span>
-        ) : String(value ?? '—')}
-      </p>
-    </div>
-    <SentimentBadge sentiment={sentiment} />
-  </div>
-);
+import { Card, SentimentBadge, ValueDisplay, IndicatorRow } from './MCCommon';
 
 export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({ symbol, scId, section }) => {
   const [timeframe, setTimeframe] = React.useState<Timeframe>('D');
+  const containerRef = React.useRef<HTMLDivElement>(null);
+  const [isVisible, setIsVisible] = React.useState(false);
+
+  React.useEffect(() => {
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        setIsVisible(entry.isIntersecting);
+      },
+      { threshold: 0.05, rootMargin: '200px' } // Load slightly before it enters the viewport
+    );
+
+    if (containerRef.current) {
+      observer.observe(containerRef.current);
+    }
+
+    return () => observer.disconnect();
+  }, []);
 
   // Resolve Trendlyne stockid for screener lookups (numeric ID, different from MC scId)
   const stockMapping = stockData.find(s => s.symbol.toUpperCase() === symbol.toUpperCase());
@@ -86,18 +45,44 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({ symbol, scId
 
   const { data: mc, isLoading, error } = trpc.getMcConsolidated.useQuery(
     { symbol, timeframe },
-    { refetchInterval: 60000 }
+    { 
+      enabled: isVisible,
+      refetchInterval: isVisible ? 60000 : false,
+      staleTime: 30000
+    }
+  );
+
+  // Fetch AlphaQuant V2 Score
+  const { data: alphaData } = trpc.getStockScoreDetail.useQuery(
+    { symbol },
+    { 
+      enabled: isVisible,
+      staleTime: 300000 
+    }
   );
 
   // Fetch screeners containing this stock using Trendlyne stockid
   const { data: screeners = [], isLoading: screenersLoading } = trpc.getStockScreeners.useQuery(
     { stockId: trendlyneStockId },
-    { refetchInterval: 300000 } // Refresh every 5 minutes
+    { 
+      enabled: isVisible,
+      refetchInterval: 300000 
+    }
   );
+
+  if (!isVisible && !mc) {
+    return (
+      <div ref={containerRef} className="h-40 flex items-center justify-center bg-slate-900/10 border border-dashed border-slate-800 rounded-2xl">
+        <p className="text-[10px] font-black text-slate-700 uppercase tracking-widest italic">
+          Waiting for visibility... {symbol}
+        </p>
+      </div>
+    );
+  }
 
   if (isLoading) {
     return (
-      <div className="space-y-4 animate-pulse">
+      <div ref={containerRef} className="space-y-4 animate-pulse">
         <div className="flex gap-2 mb-4">
           {[1,2,3].map(i => <div key={i} className="h-8 w-20 bg-slate-800 rounded-lg" />)}
         </div>
@@ -111,7 +96,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({ symbol, scId
 
   if (error || !mc) {
     return (
-      <div className="p-8 text-center bg-slate-900/30 border border-slate-800 rounded-2xl">
+      <div ref={containerRef} className="p-8 text-center bg-slate-900/30 border border-slate-800 rounded-2xl">
         <AlertCircle className="w-8 h-8 text-rose-500 mx-auto mb-3" />
         <p className="text-sm text-slate-500 font-bold">Failed to load MC data for {symbol}</p>
         <p className="text-[10px] text-slate-600 mt-1">scId: {scId}</p>
@@ -122,7 +107,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({ symbol, scId
   const hasAnyData = mc.technical || mc.equityCash || mc.stockPrice || mc.swot || mc.essentials || mc.mcInsights;
   if (!hasAnyData) {
     return (
-      <div className="p-8 text-center bg-slate-900/30 border border-slate-800 rounded-2xl">
+      <div ref={containerRef} className="p-8 text-center bg-slate-900/30 border border-slate-800 rounded-2xl">
         <AlertCircle className="w-8 h-8 text-amber-500 mx-auto mb-3" />
         <p className="text-sm text-slate-400 font-bold">No MoneyControl data available for {symbol}</p>
         <p className="text-[10px] text-slate-600 mt-1">This stock may not be mapped to a MoneyControl ID (scId: {mc.scId})</p>
@@ -149,22 +134,42 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({ symbol, scId
   const changePct = eq?.pricepercentchange || sp?.perChange || '—';
 
   return (
-    <div className="space-y-6">
-      {/* Timeframe Toggle for Technical Data */}
+    <div ref={containerRef} className="space-y-6">
+      {/* Header with Dual Scoring */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <BrainCircuit className="w-4 h-4 text-blue-500" />
-          <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">MoneyControl Intelligence</span>
-          {classification && (
-            <span className={cn(
-              "text-[9px] font-black px-2 py-0.5 rounded uppercase",
-              classification.stockScore >= 70 ? "bg-emerald-500/10 text-emerald-500" :
-              classification.stockScore >= 50 ? "bg-amber-500/10 text-amber-500" :
-              "bg-rose-500/10 text-rose-500"
-            )}>
-              Score: {classification.stockScore}
-            </span>
-          )}
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2 pr-4 border-r border-slate-800">
+            <Zap className="w-4 h-4 text-blue-500" />
+            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">AlphaQuant V2</span>
+            {alphaData && (
+              <div className="flex items-center gap-2">
+                <span className={cn(
+                  "text-[9px] font-black px-2 py-0.5 rounded uppercase",
+                  alphaData.score.score >= 70 ? "bg-blue-500/20 text-blue-400" :
+                  alphaData.score.score >= 50 ? "bg-slate-800 text-slate-400" :
+                  "bg-rose-500/10 text-rose-500"
+                )}>
+                  Rank: #{alphaData.score.score.toFixed(1)}
+                </span>
+                <span className="text-[8px] font-black text-blue-500/60 uppercase">{alphaData.score.classification}</span>
+              </div>
+            )}
+          </div>
+          
+          <div className="flex items-center gap-2">
+            <BrainCircuit className="w-4 h-4 text-emerald-500" />
+            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">MoneyControl</span>
+            {classification && (
+              <span className={cn(
+                "text-[9px] font-black px-2 py-0.5 rounded uppercase",
+                classification.stockScore >= 70 ? "bg-emerald-500/10 text-emerald-500" :
+                classification.stockScore >= 50 ? "bg-amber-500/10 text-amber-500" :
+                "bg-rose-500/10 text-rose-500"
+              )}>
+                Score: {classification.stockScore}
+              </span>
+            )}
+          </div>
         </div>
         <div className="flex gap-1 bg-slate-900 rounded-lg p-0.5 border border-slate-800">
           {(['D', 'W', 'M'] as Timeframe[]).map(tf => (
@@ -181,6 +186,33 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({ symbol, scId
           ))}
         </div>
       </div>
+
+      {/* AlphaQuant Factor Breakdown */}
+      {alphaData && (
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          {[
+            { label: 'Technical', value: alphaData.factors.technical, color: 'text-blue-400', icon: Activity },
+            { label: 'Fundamental', value: alphaData.factors.fundamental, color: 'text-emerald-400', icon: PieChart },
+            { label: 'Momentum', value: alphaData.factors.momentum, color: 'text-purple-400', icon: Zap },
+            { label: 'Valuation', value: alphaData.factors.valuation, color: 'text-amber-400', icon: BarChart3 },
+            { label: 'Delivery', value: alphaData.factors.delivery, color: 'text-rose-400', icon: Users },
+          ].map((factor) => (
+            <div key={factor.label} className="bg-slate-950 p-3 rounded-2xl border border-slate-800/50 flex flex-col items-center justify-center text-center group hover:border-slate-700 transition-all">
+              <factor.icon className={cn("w-4 h-4 mb-2 opacity-40 group-hover:opacity-100 transition-opacity", factor.color)} />
+              <p className="text-[8px] font-black text-slate-500 uppercase tracking-[0.2em] mb-1">{factor.label}</p>
+              <div className="flex items-center gap-2">
+                <span className={cn("text-lg font-black italic", factor.color)}>{factor.value.toFixed(1)}</span>
+              </div>
+              <div className="w-full h-1 bg-slate-900 rounded-full mt-2 overflow-hidden">
+                <div 
+                  className={cn("h-full rounded-full transition-all duration-1000", factor.color.replace('text-', 'bg-'))} 
+                  style={{ width: `${Math.min(100, factor.value * 10)}%` }} 
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Trendlyne Screeners Section */}
       {screeners && screeners.length > 0 && (
@@ -613,22 +645,57 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({ symbol, scId
               </div>
             </div>
             <div>
-              <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-3">Volume & Delivery</p>
-              <div className="space-y-2">
-                {Object.entries(pv.volume || {}).map(([period, v]) => (
-                  <div key={period} className="p-2.5 bg-slate-950 rounded-xl border border-slate-800/50">
-                    <div className="flex justify-between items-center">
-                      <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{period}</span>
-                      <span className="text-[9px] font-bold text-slate-400">{v.cvol_display_text}</span>
+              <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-3">Volume Profile & Delivery</p>
+              <div className="space-y-3">
+                {Object.entries(pv.volume || {}).map(([period, v]) => {
+                  const deliveryPctMatch = v.delivery_display_text?.match(/\(([\d.]+)%\)/);
+                  const deliveryPct = deliveryPctMatch ? parseFloat(deliveryPctMatch[1]) : 0;
+                  
+                  return (
+                    <div key={period} className="p-3 bg-slate-950 rounded-xl border border-slate-800/50 group hover:border-slate-700 transition-all">
+                      <div className="flex justify-between items-center mb-2">
+                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{period}</span>
+                        <div className="flex flex-col items-end">
+                          <span className="text-[11px] font-black text-white italic">{v.cvol_display_text}</span>
+                          <span className="text-[8px] font-bold text-slate-500 uppercase tracking-tighter">Total Traded</span>
+                        </div>
+                      </div>
+                      
+                      <div className="space-y-1.5">
+                        <div className="flex justify-between items-center text-[9px]">
+                          <span className="text-slate-500 font-bold uppercase">Delivery Volume</span>
+                          <span className={cn(
+                            "font-black italic",
+                            deliveryPct >= 50 ? "text-emerald-400" : 
+                            deliveryPct >= 30 ? "text-blue-400" : "text-amber-400"
+                          )}>
+                            {v.delivery_display_text.split('(')[0].trim()} ({deliveryPct}%)
+                          </span>
+                        </div>
+                        <div className="h-1.5 w-full bg-slate-900 rounded-full overflow-hidden flex">
+                          <motion.div 
+                            initial={{ width: 0 }}
+                            animate={{ width: `${deliveryPct}%` }}
+                            className={cn(
+                              "h-full rounded-full transition-all duration-1000",
+                              deliveryPct >= 50 ? "bg-emerald-500" : 
+                              deliveryPct >= 30 ? "bg-blue-500" : "bg-amber-500"
+                            )}
+                          />
+                        </div>
+                      </div>
+                      
+                      {(v.cvol_tooltip_text || v.delivery_tooltip_text) && (
+                        <div className="mt-2 pt-2 border-t border-slate-900/50 flex gap-2 overflow-hidden">
+                           <Info className="w-3 h-3 text-slate-700 shrink-0" />
+                           <p className="text-[8px] text-slate-600 font-medium truncate italic">
+                             {v.cvol_tooltip_text || v.delivery_tooltip_text}
+                           </p>
+                        </div>
+                      )}
                     </div>
-                    <div className="flex justify-between items-center mt-1">
-                      <span className="text-[9px] text-slate-600 font-bold">Delivery:</span>
-                      <span className={cn("text-[9px] font-bold", v.delivery_display_text ? "text-emerald-400" : "text-slate-600")}>
-                        {v.delivery_display_text || 'N/A'}
-                      </span>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           </div>

@@ -1,5 +1,6 @@
 import db from './db';
 import { getStockMapping, getSymbolFromMcsymbol } from './stockMapping';
+import { mcFetchJson } from './mcApiService';
 import fs from 'fs';
 import path from 'path';
 
@@ -137,22 +138,6 @@ const MC_SCREENERS: McScreenerConfig[] = [
   { catId: '17', scanId: 'OHLC_D_P_ALLTIMEL', type: 'tech', is_positive: false }
 ];
 
-async function fetchJson(url: string) {
-  try {
-    const res = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'application/json, text/plain, */*',
-        'Referer': 'https://www.moneycontrol.com/'
-      }
-    });
-    if (!res.ok) return null;
-    return await res.json();
-  } catch (error) {
-    console.error(`Failed to fetch MC screener: ${url}`, error);
-    return null;
-  }
-}
 
 /**
  * Updates stocklist.ts with new mcsymbol mappings
@@ -197,7 +182,7 @@ export async function syncMoneyControlScreeners() {
       : 'https://api.moneycontrol.com/mcapi/v1/techscanner/scanner-detail';
     
     const url = `${baseUrl}?catId=${config.catId}&scanId=${config.scanId}`;
-    const response = await fetchJson(url);
+    const response = await mcFetchJson(url);
 
     if (response?.success === 1 && response.data) {
       const screenerName = response.data.scanName || response.data.scanname || `MC Screener ${config.scanId}`;

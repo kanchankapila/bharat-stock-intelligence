@@ -148,14 +148,17 @@ export async function initQueues(): Promise<boolean> {
   // 2. Initialise resilient queues & workers
   const connection = makeConnection(false);
   try {
-    // ── Stock refresh queue ──────────────────────────────────────────────────
+    // ── Stock refresh queue (PAUSED for visibility-based fetching) ───────────
     stockRefreshQueue = new Queue(QUEUE_STOCK_REFRESH, { connection });
 
-    // Remove any stale repeatable job and re-register with current interval
+    // Remove any stale repeatable job
     const repeatables = await stockRefreshQueue.getRepeatableJobs();
     for (const r of repeatables) {
       await stockRefreshQueue.removeRepeatableByKey(r.key);
     }
+    
+    // Continuous background fetching paused to prevent API limits
+    /*
     await stockRefreshQueue.add(
       'refresh-all',
       {},
@@ -166,11 +169,17 @@ export async function initQueues(): Promise<boolean> {
         removeOnFail: 3,
       },
     );
+    */
 
     stockWorker = new Worker(
       QUEUE_STOCK_REFRESH,
       processStockRefresh,
-      { connection, concurrency: 1 },
+      { 
+        connection, 
+        concurrency: 1,
+        lockDuration: 120000, // 120s
+        lockRenewTime: 30000, // 30s
+      },
     );
 
     stockWorker.on('completed', (job, result) => {
@@ -180,8 +189,8 @@ export async function initQueues(): Promise<boolean> {
       console.error(`[QUEUE] stock-refresh failed:`, err.message);
     });
 
-    // Trigger an immediate first refresh
-    await stockRefreshQueue.add('refresh-all', {}, { removeOnComplete: 1 });
+    // Trigger an immediate first refresh (Paused)
+    // await stockRefreshQueue.add('refresh-all', {}, { removeOnComplete: 1 });
 
     // ── AI signals queue ─────────────────────────────────────────────────────
     aiSignalsQueue = new Queue(QUEUE_AI_SIGNALS, { connection });
@@ -191,10 +200,14 @@ export async function initQueues(): Promise<boolean> {
       processAISignal,
       {
         connection,
-        concurrency: 3,           // 3 Ollama calls in parallel
+        concurrency: 1,           // Reduced to 1 to prevent CPU thrashing during local Ollama inference
+        lockDuration: 300000,    // 5 minutes (Windows/Ollama can be very slow)
+        lockRenewTime: 60000,    // 1 minute renewal
+        stalledInterval: 60000,  // Check for stalled jobs every minute
+        maxStalledCount: 3,      // Allow up to 3 stall events before failing
         limiter: {
-          max: 10,                 // max 10 jobs per
-          duration: 5_000,         // 5-second window (avoid hammering Ollama)
+          max: 5,                 
+          duration: 10_000,        
         },
       },
     );
@@ -227,7 +240,11 @@ export async function initQueues(): Promise<boolean> {
     scoringWorker = new Worker(
       QUEUE_STOCK_SCORING,
       processStockScoring,
-      { connection, concurrency: 1 },
+      { 
+        connection, 
+        concurrency: 1,
+        lockDuration: 300000, // 5 minutes for heavy scoring sync
+      },
     );
 
     scoringWorker.on('completed', (job) => {
@@ -259,7 +276,11 @@ export async function initQueues(): Promise<boolean> {
     mcScreenerSyncWorker = new Worker(
       QUEUE_MC_SCREENER_SYNC,
       processMcScreenerSync,
-      { connection, concurrency: 1 },
+      { 
+        connection, 
+        concurrency: 1,
+        lockDuration: 60000,
+      },
     );
 
     mcScreenerSyncWorker.on('completed', (job) => {

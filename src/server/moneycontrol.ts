@@ -1,3 +1,4 @@
+import { mcFetchJson } from './mcApiService';
 
 export interface MCScreenerItem {
   stkname: string;
@@ -39,12 +40,8 @@ export async function fetchMCScreener(type: 'proscanner' | 'techscanner' | 'tech
     url = `https://api.moneycontrol.com/mcapi/v1/${type}/scanner-detail?catId=${catId}&scanId=${scanId}`;
   }
   
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch from Moneycontrol: ${response.statusText}`);
-  }
-  
-  const json = await response.json();
+  const json = await mcFetchJson(url);
+  if (!json) return { success: 0, data: { list: { scannerName: '', scannerDescription: '', scannerDetails: [], catName: '' } } } as any;
   
   if (type === 'technical-trends' && json.success === 1 && Array.isArray(json.data)) {
     const response: MCScreenerResponse = {

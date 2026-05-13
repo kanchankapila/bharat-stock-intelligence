@@ -1,5 +1,6 @@
 import { MarketData } from '../services/marketService';
 import { getAllStocks, getStockMapping } from './stockMapping';
+import { mcFetchJson } from './mcApiService';
 import { nseStocksData } from '../data/nseStocks';
 import { cacheGet, cacheSet } from './cacheService';
 
@@ -135,69 +136,32 @@ async function fetchStockQuoteYahooFinance(symbol: string): Promise<MarketData |
 // ─── MoneyControl (secondary, kept for stocklist stocks only) ─────────────────
 
 export async function fetchStockQuoteMoneyControl(symbol: string, retries: number = 3): Promise<MarketData | null> {
-  let lastError: Error | null = null;
+  const stockMapping = getAllStocks().find(s => s.symbol === symbol);
+  if (!stockMapping) return null;
 
-  for (let attempt = 1; attempt <= retries; attempt++) {
-    try {
-      const stockMapping = getAllStocks().find(s => s.symbol === symbol);
-      if (!stockMapping) return null;
+  const url = `https://www.moneycontrol.com/mcapi/v1/quote/${stockMapping.mcsymbol}`;
+  const data = await mcFetchJson(url, retries, symbol);
+  
+  const quote = data?.data?.quote;
+  if (!quote) return null;
 
-      const url = `https://www.moneycontrol.com/mcapi/v1/quote/${stockMapping.mcsymbol}`;
+  const price: number = quote.ltPrice ?? quote.lastPrice ?? 0;
+  const prevClose: number = quote.previousPrice ?? quote.prevClose ?? 0;
+  const change = price - prevClose;
+  const changePct = prevClose > 0 ? (change / prevClose) * 100 : 0;
 
-      const response = await fetch(url, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-          'Accept': 'application/json, text/plain, */*',
-          'Accept-Language': 'en-US,en;q=0.9',
-          'Referer': 'https://www.moneycontrol.com/',
-          'Origin': 'https://www.moneycontrol.com',
-        },
-      });
-
-      if (!response.ok) {
-        if (response.status === 503 && attempt < retries) {
-          const delay = Math.min(1000 * Math.pow(2, attempt - 1), 10000) + Math.random() * 1000;
-          console.warn(`MoneyControl ${symbol} (${stockMapping.mcsymbol}): ${response.status}, retrying in ${Math.round(delay)}ms (attempt ${attempt}/${retries})`);
-          await new Promise(resolve => setTimeout(resolve, delay));
-          continue;
-        }
-        return null;
-      }
-
-      const data = await response.json();
-      const quote = data.data?.quote;
-      if (!quote) return null;
-
-      const price: number = quote.ltPrice ?? quote.lastPrice ?? 0;
-      const prevClose: number = quote.previousPrice ?? quote.prevClose ?? 0;
-      const change = price - prevClose;
-      const changePct = prevClose > 0 ? (change / prevClose) * 100 : 0;
-
-      return {
-        symbol,
-        name: stockMapping.name,
-        price: Number(price.toFixed(2)),
-        change: Number(change.toFixed(2)),
-        changePct: Number(changePct.toFixed(2)),
-        volume: formatVolume(quote.totalTradedVolume ?? 0),
-        high: quote.highPrice ?? quote.high ?? 0,
-        low: quote.lowPrice ?? quote.low ?? 0,
-        open: quote.openPrice ?? quote.open ?? 0,
-        prevClose: Number(prevClose.toFixed(2)),
-      };
-    } catch (e) {
-      lastError = e instanceof Error ? e : new Error(String(e));
-      if (attempt < retries) {
-        const delay = Math.min(1000 * Math.pow(2, attempt - 1), 10000) + Math.random() * 1000;
-        await new Promise(resolve => setTimeout(resolve, delay));
-      }
-    }
-  }
-
-  if (lastError) {
-    console.error(`MoneyControl fetch failed for ${symbol} after ${retries} retries:`, lastError.message);
-  }
-  return null;
+  return {
+    symbol,
+    name: stockMapping.name,
+    price: Number(price.toFixed(2)),
+    change: Number(change.toFixed(2)),
+    changePct: Number(changePct.toFixed(2)),
+    volume: formatVolume(quote.totalTradedVolume ?? 0),
+    high: quote.highPrice ?? quote.high ?? 0,
+    low: quote.lowPrice ?? quote.low ?? 0,
+    open: quote.openPrice ?? quote.open ?? 0,
+    prevClose: Number(prevClose.toFixed(2)),
+  };
 }
 
 // ─── Finnhub (tertiary, requires env var) ────────────────────────────────────
@@ -273,18 +237,9 @@ export async function fetchAllLiveStocks(): Promise<MarketData[]> {
     });
   }
 
-  // MoneyControl last-resort for stocklist stocks still missing
-  const stocklistSet = new Set(getAllStocks().map(s => s.symbol));
-  const mcRetry = allSymbols.filter(s => !collected.has(s) && stocklistSet.has(s));
-  if (mcRetry.length > 0) {
-    console.log(`[LIVE DATA] MoneyControl fallback for ${mcRetry.length} stocklist symbols...`);
-    const mcResults = await Promise.allSettled(mcRetry.map(s => fetchStockQuoteMoneyControl(s)));
-    mcResults.forEach(r => {
-      if (r.status === 'fulfilled' && r.value) {
-        collected.set(r.value.symbol, r.value);
-      }
-    });
-  }
+  // MoneyControl last-resort removed to prevent API rate limits (503s) and blocking the global mcSemaphore.
+  // Missing symbols will be fetched on-demand when visible via getLiveQuotesBatch.
+
 
   const results = Array.from(collected.values()).map(enrichMarketData);
   console.log(`[LIVE DATA] Successfully fetched ${results.length}/${allSymbols.length} stock quotes`);

@@ -1,4 +1,7 @@
 import { getStockMapping } from './stockMapping';
+import { Semaphore } from './semaphore';
+
+const mcSemaphore = new Semaphore(3);
 
 interface McApiResponse<T = any> {
   success: number;
@@ -109,7 +112,14 @@ export interface McDetailedInsights {
 
 export interface McPriceVolume {
   price: Record<string, number>;
-  volume: Record<string, { delivery: number; cvol: number; cvol_display_text: string; delivery_display_text: string }>;
+  volume: Record<string, { 
+    delivery: number; 
+    cvol: number; 
+    cvol_display_text: string; 
+    delivery_display_text: string;
+    cvol_tooltip_text?: string;
+    delivery_tooltip_text?: string;
+  }>;
 }
 
 export interface McAnalystRating {
@@ -232,56 +242,58 @@ export interface McConsolidatedData {
   financialOverview: { ttmEpsText: string; ttmPeText: string; pbText: string } | null;
 }
 
-async function fetchJson<T = any>(url: string, retries: number = 3, symbol?: string): Promise<T | null> {
-  let lastError: Error | null = null;
+export async function mcFetchJson<T = any>(url: string, retries: number = 3, symbol?: string): Promise<T | null> {
+  return mcSemaphore.run(async () => {
+    let lastError: Error | null = null;
 
-  for (let attempt = 1; attempt <= retries; attempt++) {
-    try {
-      const res = await fetch(url, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'application/json, text/plain, */*',
-          'Referer': 'https://www.moneycontrol.com/'
-        },
-        signal: AbortSignal.timeout(10000)
-      });
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        const res = await fetch(url, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'application/json, text/plain, */*',
+            'Referer': 'https://www.moneycontrol.com/'
+          },
+          signal: AbortSignal.timeout(10000)
+        });
 
-      if (!res.ok) {
-        // Retry on 503 Service Unavailable
-        if (res.status === 503 && attempt < retries) {
-          const delay = Math.min(1000 * Math.pow(2, attempt - 1), 10000) + Math.random() * 1000;
-          const logSymbol = symbol ? `${symbol} (${url.split('/').pop()?.split('?')[0]})` : url;
-          console.warn(`MoneyControl API ${logSymbol} returned 503. Retrying in ${Math.round(delay)}ms (attempt ${attempt}/${retries})...`);
-          await new Promise(resolve => setTimeout(resolve, delay));
-          continue;
+        if (!res.ok) {
+          // Retry on 503 Service Unavailable
+          if (res.status === 503 && attempt < retries) {
+            const delay = Math.min(1000 * Math.pow(2, attempt - 1), 10000) + Math.random() * 1000;
+            const logSymbol = symbol ? `${symbol} (${url.split('/').pop()?.split('?')[0]})` : url;
+            console.warn(`MoneyControl API ${logSymbol} returned 503. Retrying in ${Math.round(delay)}ms (attempt ${attempt}/${retries})...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            continue;
+          }
+          return null;
         }
-        return null;
-      }
 
-      const contentType = res.headers.get('content-type') || '';
-      if (contentType.includes('application/json')) {
-        return await res.json();
-      }
-      const text = await res.text();
-      try { return JSON.parse(text); } catch { return null; }
-    } catch (e) {
-      lastError = e instanceof Error ? e : new Error(String(e));
-      if (attempt < retries) {
-        const delay = Math.min(1000 * Math.pow(2, attempt - 1), 10000) + Math.random() * 1000;
-        console.warn(`MoneyControl API error. Retrying in ${Math.round(delay)}ms (attempt ${attempt}/${retries})...`);
-        await new Promise(resolve => setTimeout(resolve, delay));
+        const contentType = res.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          return await res.json();
+        }
+        const text = await res.text();
+        try { return JSON.parse(text); } catch { return null; }
+      } catch (e) {
+        lastError = e instanceof Error ? e : new Error(String(e));
+        if (attempt < retries) {
+          const delay = Math.min(1000 * Math.pow(2, attempt - 1), 10000) + Math.random() * 1000;
+          console.warn(`MoneyControl API error. Retrying in ${Math.round(delay)}ms (attempt ${attempt}/${retries})...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
       }
     }
-  }
 
-  if (lastError) {
-    console.error('MoneyControl API failed after retries:', lastError.message);
-  }
-  return null;
+    if (lastError) {
+      console.error('MoneyControl API failed after retries:', lastError.message);
+    }
+    return null;
+  });
 }
 
 export async function fetchMcTechnicalData(scId: string, dur: 'D' | 'W' | 'M', symbol?: string): Promise<McTechData | null> {
-  const res = await fetchJson<{ code: string; data: McTechData }>(
+  const res = await mcFetchJson<{ code: string; data: McTechData }>(
     `https://priceapi.moneycontrol.com/pricefeed/techindicator/${dur}/${scId}?fields=sentiments,pivotLevels,sma,ema,crossover,indicators`,
     3,
     symbol
@@ -293,7 +305,7 @@ export async function fetchMcTechnicalData(scId: string, dur: 'D' | 'W' | 'M', s
 }
 
 export async function fetchMcEquityCash(scId: string, symbol?: string): Promise<McEquityCash | null> {
-  const res = await fetchJson<{ code: string; data: McEquityCash }>(
+  const res = await mcFetchJson<{ code: string; data: McEquityCash }>(
     `https://priceapi.moneycontrol.com/pricefeed/nse/equitycash/${scId}`,
     3,
     symbol
@@ -303,7 +315,7 @@ export async function fetchMcEquityCash(scId: string, symbol?: string): Promise<
 }
 
 export async function fetchMcSwot(scId: string, symbol?: string): Promise<McSwotData | null> {
-  const res = await fetchJson<McApiResponse<{ strengths: { info: string[] }; weaknesses: { info: string[] }; opportunities: { info: string[] }; threats: { info: string[] } }>>(
+  const res = await mcFetchJson<McApiResponse<{ strengths: { info: string[] }; weaknesses: { info: string[] }; opportunities: { info: string[] }; threats: { info: string[] } }>>(
     `https://api.moneycontrol.com/mcapi/v1/swot/details?scId=${scId}&type=all`,
     3,
     symbol
@@ -320,14 +332,14 @@ export async function fetchMcSwot(scId: string, symbol?: string): Promise<McSwot
 }
 
 export async function fetchMcEssentials(scId: string, symbol?: string): Promise<McEssentialsData | null> {
-  const res = await fetchJson<McApiResponse<any>>(
+  const res = await mcFetchJson<McApiResponse<any>>(
     `https://api.moneycontrol.com/mcapi/v1/extdata/mc-essentials?scId=${scId}&type=ed`,
     3,
     symbol
   );
   
   // Also try v2 endpoint
-  const res2 = await fetchJson<McApiResponse<any>>(
+  const res2 = await mcFetchJson<McApiResponse<any>>(
     `https://api.moneycontrol.com/mcapi/extdata/v2/mc-essentials?scId=${scId}&type=ed&deviceType=W`,
     3,
     symbol
@@ -354,12 +366,12 @@ export async function fetchMcEssentials(scId: string, symbol?: string): Promise<
 }
 
 export async function fetchMcInsights(scId: string, symbol?: string): Promise<McInsightsData | null> {
-  const res = await fetchJson<McApiResponse<McInsightsData['classification'] & { classification: McInsightsData['classification'] }>>(
+  const res = await mcFetchJson<McApiResponse<McInsightsData['classification'] & { classification: McInsightsData['classification'] }>>(
     `https://api.moneycontrol.com/mcapi/v1/extdata/mc-insights?scId=${scId}&type=c`,
     3,
     symbol
   );
-  const res2 = await fetchJson<McApiResponse<{ classification: McInsightsData['classification'] }>>(
+  const res2 = await mcFetchJson<McApiResponse<{ classification: McInsightsData['classification'] }>>(
     `https://api.moneycontrol.com/mcapi/extdata/v2/mc-insights?scId=${scId}&type=c&deviceType=W&appVersion=185`,
     3,
     symbol
@@ -378,7 +390,7 @@ export async function fetchMcInsights(scId: string, symbol?: string): Promise<Mc
 }
 
 export async function fetchMcDetailedInsights(scId: string, symbol?: string): Promise<McDetailedInsights | null> {
-  const res = await fetchJson<McApiResponse<{ insightData: McDetailedInsights }>>(
+  const res = await mcFetchJson<McApiResponse<{ insightData: McDetailedInsights }>>(
     `https://api.moneycontrol.com/mcapi/v1/extdata/mc-insights?scId=${scId}&type=d`,
     3,
     symbol
@@ -387,7 +399,7 @@ export async function fetchMcDetailedInsights(scId: string, symbol?: string): Pr
     return res.data.insightData;
   }
   // Try v2
-  const res2 = await fetchJson<McApiResponse<{ insightData: McDetailedInsights }>>(
+  const res2 = await mcFetchJson<McApiResponse<{ insightData: McDetailedInsights }>>(
     `https://api.moneycontrol.com/mcapi/extdata/v2/mc-insights?scId=${scId}&type=d&deviceType=W&appVersion=185`,
     3,
     symbol
@@ -399,7 +411,7 @@ export async function fetchMcDetailedInsights(scId: string, symbol?: string): Pr
 }
 
 export async function fetchMcPriceVolume(scId: string, symbol?: string): Promise<McPriceVolume | null> {
-  const res = await fetchJson<McApiResponse<{ stock_price_volume_data: McPriceVolume }>>(
+  const res = await mcFetchJson<McApiResponse<{ stock_price_volume_data: McPriceVolume }>>(
     `https://api.moneycontrol.com/mcapi/v1/stock/price-volume?scId=${scId}&ex=&appVersion=175`,
     3,
     symbol
@@ -411,7 +423,7 @@ export async function fetchMcPriceVolume(scId: string, symbol?: string): Promise
 }
 
 export async function fetchMcAnalystRating(scId: string, symbol?: string): Promise<McAnalystRating | null> {
-  const res = await fetchJson<McApiResponse<McAnalystRating>>(
+  const res = await mcFetchJson<McApiResponse<McAnalystRating>>(
     `https://api.moneycontrol.com/mcapi/v1/stock/estimates/analyst-rating?deviceType=W&scId=${scId}&ex=N`,
     3,
     symbol
@@ -421,7 +433,7 @@ export async function fetchMcAnalystRating(scId: string, symbol?: string): Promi
 }
 
 export async function fetchMcEarningsForecast(scId: string, symbol?: string): Promise<McEarningsForecast | null> {
-  const res = await fetchJson<McApiResponse<McEarningsForecast>>(
+  const res = await mcFetchJson<McApiResponse<McEarningsForecast>>(
     `https://api.moneycontrol.com/mcapi/v1/stock/estimates/earning-forecast?scId=${scId}&ex=N&deviceType=W&frequency=12&financialType=C`,
     3,
     symbol
@@ -431,7 +443,7 @@ export async function fetchMcEarningsForecast(scId: string, symbol?: string): Pr
 }
 
 export async function fetchMcPriceForecast(scId: string, symbol?: string): Promise<McPriceForecast | null> {
-  const res = await fetchJson<McApiResponse<McPriceForecast>>(
+  const res = await mcFetchJson<McApiResponse<McPriceForecast>>(
     `https://api.moneycontrol.com/mcapi/v1/stock/estimates/price-forecast?scId=${scId}&ex=N&deviceType=W`,
     3,
     symbol
@@ -441,7 +453,7 @@ export async function fetchMcPriceForecast(scId: string, symbol?: string): Promi
 }
 
 export async function fetchMcConsensus(scId: string, symbol?: string): Promise<McConsensusData | null> {
-  const res = await fetchJson<McApiResponse<McConsensusData>>(
+  const res = await mcFetchJson<McApiResponse<McConsensusData>>(
     `https://api.moneycontrol.com/mcapi/v1/stock/estimates/consensus?scId=${scId}&ex=N&deviceType=W`,
     3,
     symbol
@@ -451,7 +463,7 @@ export async function fetchMcConsensus(scId: string, symbol?: string): Promise<M
 }
 
 export async function fetchMcHitsMisses(scId: string, symbol?: string): Promise<McHitsMisses | null> {
-  const res = await fetchJson<McApiResponse<McHitsMisses>>(
+  const res = await mcFetchJson<McApiResponse<McHitsMisses>>(
     `https://api.moneycontrol.com/mcapi/v1/stock/estimates/hits-misses?deviceType=W&scId=${scId}&ex=N&type=eps&financialType=C`,
     3,
     symbol
@@ -461,7 +473,7 @@ export async function fetchMcHitsMisses(scId: string, symbol?: string): Promise<
 }
 
 export async function fetchMcValuation(scId: string, symbol?: string): Promise<McValuation | null> {
-  const res = await fetchJson<McApiResponse<McValuation>>(
+  const res = await mcFetchJson<McApiResponse<McValuation>>(
     `https://api.moneycontrol.com/mcapi/v1/stock/estimates/valuation?deviceType=W&scId=${scId}&ex=N&financialType=C`,
     3,
     symbol
@@ -471,7 +483,7 @@ export async function fetchMcValuation(scId: string, symbol?: string): Promise<M
 }
 
 export async function fetchMcFinancialOverview(scId: string, symbol?: string): Promise<{ ttmEpsText: string; ttmPeText: string; pbText: string } | null> {
-  const res = await fetchJson<McApiResponse<{ ttmEpsText: string; ttmPeText: string; pbText: string }>>(
+  const res = await mcFetchJson<McApiResponse<{ ttmEpsText: string; ttmPeText: string; pbText: string }>>(
     `https://api.moneycontrol.com/mcapi/v1/stock/financial-historical/overview?scId=${scId}&ex=N`,
     3,
     symbol
@@ -481,7 +493,7 @@ export async function fetchMcFinancialOverview(scId: string, symbol?: string): P
 }
 
 export async function fetchMcStockPrice(scId: string, symbol?: string): Promise<McStockPrice | null> {
-  const res = await fetchJson<McApiResponse<McStockPrice[]>>(
+  const res = await mcFetchJson<McApiResponse<McStockPrice[]>>(
     `https://api.moneycontrol.com/mcapi/v1/stock/get-stock-price?scIdList=${scId}&scId=${scId}`,
     3,
     symbol
@@ -493,49 +505,49 @@ export async function fetchMcStockPrice(scId: string, symbol?: string): Promise<
 }
 
 export async function fetchMcHistoricalRating(scId: string, period: 'D' | 'W' | 'M'): Promise<any | null> {
-  const res = await fetchJson<any>(
+  const res = await mcFetchJson<any>(
     `https://www.moneycontrol.com/mc/widget/historicalrating/ratingPro?classic=true&type=gson&sc_did=${scId}&period=${period}&dur=6m`
   );
   return res;
 }
 
 export async function fetchMcTechnicalV2(scId: string, dur: 'D' | 'W' | 'M'): Promise<any | null> {
-  const res = await fetchJson<any>(
+  const res = await mcFetchJson<any>(
     `https://api.moneycontrol.com/mcapi/technicals/v2/details?scId=${scId}&dur=${dur}&deviceType=W`
   );
   return res;
 }
 
 export async function fetchMcTechnicalRating(scId: string, period: 'D' | 'W' | 'M'): Promise<any | null> {
-  const res = await fetchJson<any>(
+  const res = await mcFetchJson<any>(
     `https://www.moneycontrol.com/mc/widget/pricechart_technicals/technical_rating_summary?sc_did=${scId}&page=mc_technicals&period=D&classic=true&period=${period}`
   );
   return res;
 }
 
 export async function fetchMcMovingAverages(scId: string, period: 'D' | 'W' | 'M'): Promise<any | null> {
-  const res = await fetchJson<any>(
+  const res = await mcFetchJson<any>(
     `https://www.moneycontrol.com/mc/widget/pricechart_technicals/moving_average?sc_did=${scId}&page=mc_technicals&period=D&classic=true&period=${period}`
   );
   return res;
 }
 
 export async function fetchMcPivotLevels(scId: string, period: 'D' | 'W' | 'M'): Promise<any | null> {
-  const res = await fetchJson<any>(
+  const res = await mcFetchJson<any>(
     `https://www.moneycontrol.com/mc/widget/pricechart_technicals/pivot_level?sc_did=${scId}&page=mc_technicals&classic=true&period=${period}`
   );
   return res;
 }
 
 export async function fetchMcCrossovers(scId: string, period: 'D' | 'W' | 'M'): Promise<any | null> {
-  const res = await fetchJson<any>(
+  const res = await mcFetchJson<any>(
     `https://www.moneycontrol.com/mc/widget/pricechart_technicals/moving_average_crossovers?sc_did=${scId}&page=mc_technicals&period=D&classic=true&period=${period}`
   );
   return res;
 }
 
 export async function fetchMcTechnicalIndicators(scId: string, period: 'D' | 'W' | 'M'): Promise<any | null> {
-  const res = await fetchJson<any>(
+  const res = await mcFetchJson<any>(
     `https://www.moneycontrol.com/mc/widget/pricechart_technicals/technical_indicator?sc_did=${scId}&page=mc_technicals&period=D&classic=true&period=${period}`
   );
   return res;
