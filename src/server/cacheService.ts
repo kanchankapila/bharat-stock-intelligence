@@ -19,7 +19,7 @@ function createRedisClient(): Redis | null {
     enableOfflineQueue: false,
     autoResubscribe: false,
     maxRetriesPerRequest: 0,
-    retryStrategy: (times) => null // Stop retrying immediately
+    retryStrategy: () => null // Stop retrying immediately
   });
 
   client.on('connect', () => {
@@ -114,4 +114,22 @@ export async function cacheDel(key: string): Promise<void> {
 
 export function isCacheAvailable(): boolean {
   return redisAvailable;
+}
+
+/**
+ * Return cached value for `key` if present; otherwise call `fetcher`,
+ * store the result with `ttlSeconds`, and return it.
+ */
+export async function fetchWithCache<T>(
+  key: string,
+  fetcher: () => Promise<T>,
+  ttlSeconds: number = 300,
+): Promise<T> {
+  const cached = await cacheGet<T>(key);
+  if (cached !== null) return cached;
+  const value = await fetcher();
+  if (value !== null && value !== undefined) {
+    await cacheSet(key, value, ttlSeconds);
+  }
+  return value;
 }

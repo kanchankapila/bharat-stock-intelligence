@@ -3,6 +3,7 @@ import path from 'path';
 import db from './db';
 import { syncAllScreenerStocksToDB } from './trendlyneScreener';
 import { syncMoneyControlScreeners } from './moneycontrolScreener';
+import { initEtnowScreeners } from './etnow';
 
 export interface ScoredStock {
   symbol: string;
@@ -55,7 +56,10 @@ export async function recalculateScores(): Promise<{ success: boolean; message: 
  */
 export async function syncAndScore(): Promise<{ success: boolean; message: string }> {
   console.log('🔄 Initiating full sync and score process...');
-  
+
+  // Ensure ETnow screeners exist in DB (idempotent — safe to call every time)
+  initEtnowScreeners();
+
   const syncResult = await syncAllScreenerStocksToDB();
   if (!syncResult.success) {
     console.error(`Trendlyne sync failed: ${syncResult.error}`);

@@ -260,6 +260,8 @@ export interface McConsolidatedData {
     moneycontrol: Array<{ id: string; name: string; sentiment: string }>;
     trendlyne: Array<{ id: string; name: string; sentiment: string }>;
   };
+  ratios?: any;
+  shareholdingPattern?: any;
 }
 
 export async function mcFetchJson<T = any>(url: string, retries: number = 3, symbol?: string, priority: boolean = false): Promise<T | null> {
@@ -606,6 +608,25 @@ export async function fetchMcTechnicalIndicators(scId: string, period: 'D' | 'W'
   return res;
 }
 
+export async function fetchMcRatios(scId: string, symbol?: string): Promise<any | null> {
+  const url = `https://www.moneycontrol.com/mc/widget/mcfinancials/getFinancialData?classic=true&referenceId=ratios&requestType=S&scId=${scId}&frequency=3`;
+  return mcFetchJson(url, 3, symbol);
+}
+
+export async function fetchMcShareholdingPattern(scId: string, symbol?: string): Promise<any | null> {
+  // Try v1 first
+  const res = await mcFetchJson<any>(
+    `https://api.moneycontrol.com/mcapi/v1/stock/shareholding/pattern?scId=${scId}`,
+    3,
+    symbol
+  );
+  if (res?.success === 1 && res.data) return res.data;
+  
+  // Fallback to widget if API fails
+  const widgetUrl = `https://www.moneycontrol.com/mc/widget/mcshareholding/getShareholdingPattern?classic=true&scId=${scId}`;
+  return mcFetchJson(widgetUrl, 3, symbol);
+}
+
 /**
  * Main consolidated fetch - gets ALL MC data for a stock.
  * Optimised: Refreshes Price/Technical data every time, but caches Fundamentals for 1 hour.
@@ -645,7 +666,9 @@ export async function getMcConsolidatedData(scId: string, symbol: string, timefr
     financialOverview,
     historicalRating,
     technicalV2,
-    technicalRating
+    technicalRating,
+    ratios,
+    shareholdingPattern
   ] = await Promise.all([
     fetchMcTechnicalData(effectiveScId, timeframe, symbol),
     fetchMcEquityCash(effectiveScId, symbol),
@@ -665,6 +688,8 @@ export async function getMcConsolidatedData(scId: string, symbol: string, timefr
     fetchWithCache(`historical_rating_${timeframe}`, () => fetchMcHistoricalRating(effectiveScId, timeframe)),
     fetchWithCache(`technical_v2_${timeframe}`, () => fetchMcTechnicalV2(effectiveScId, timeframe)),
     fetchWithCache(`technical_rating_${timeframe}`, () => fetchMcTechnicalRating(effectiveScId, timeframe)),
+    fetchWithCache('ratios', () => fetchMcRatios(effectiveScId, symbol)),
+    fetchWithCache('shareholding_pattern', () => fetchMcShareholdingPattern(effectiveScId, symbol)),
   ]);
 
   return {
@@ -688,10 +713,46 @@ export async function getMcConsolidatedData(scId: string, symbol: string, timefr
     historicalRating,
     technicalV2,
     technicalRating,
+    ratios,
+    shareholdingPattern: shareholdingPattern || extractShareholdingFromInsights(detailedInsights),
     screeners: {
       moneycontrol: mcScreeners,
       trendlyne: tlScreeners
     }
   };
+}
+
+/**
+ * Fallback: Extracts shareholding percentages from textual insights if the structured API fails.
+ */
+function extractShareholdingFromInsights(insights: McDetailedInsights | null): any {
+  if (!insights?.shareholding) return null;
+  
+  const list: any[] = [];
+  let promoterPledging = "0.00";
+
+  const extractPercent = (text: string) => {
+    const match = text.match(/(\d+\.?\d*)%/);
+    return match ? match[1] : null;
+  };
+
+  insights.shareholding.forEach(item => {
+    const val = extractPercent(item.longtext);
+    if (!val) return;
+
+    if (item.shorttext.includes('Promoter')) {
+      list.push({ name: 'Promoter', value: val });
+    } else if (item.shorttext.includes('Pledge')) {
+      promoterPledging = val;
+    } else if (item.shorttext.includes('FII')) {
+      list.push({ name: 'FII', value: val });
+    } else if (item.shorttext.includes('DII')) {
+      list.push({ name: 'DII', value: val });
+    } else if (item.shorttext.includes('Public')) {
+      list.push({ name: 'Public', value: val });
+    }
+  });
+
+  return list.length > 0 ? { list, promoterPledging } : null;
 }
 

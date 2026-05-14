@@ -3431,32 +3431,53 @@ const TechnicalAnalysis: React.FC<{ symbol: string }> = ({ symbol }) => {
 };
 
 const FundamentalInsights: React.FC<{ symbol: string }> = ({ symbol }) => {
+  const { data: unifiedData, isLoading: loadingUnified } = trpc.getAlphaQuantDetail.useQuery({ symbol });
   const { data: funds, isLoading: loadingFunds } = trpc.getTrendlyneFundamentals.useQuery({ symbol });
-  const { data: ratios, isLoading: loadingRatios } = trpc.getRatios.useQuery({ symbol });
-  const { data: shareholding, isLoading: loadingShareholding } = trpc.getShareholding.useQuery({ symbol });
   const { data: actions, isLoading: loadingActions } = trpc.getCorporateActions.useQuery({ symbol });
 
-  if (loadingFunds || loadingRatios || loadingShareholding || loadingActions) return <div className="p-20 text-center animate-pulse text-slate-500">Auditing financials...</div>;
+  if (loadingUnified || loadingFunds || loadingActions) return <div className="p-20 text-center animate-pulse text-slate-500">Auditing financials...</div>;
 
-  // Extract key ratios if available
-  const ratioItems = (ratios as any)?.item || [];
-  const getRatio = (name: string) => {
-    const row = ratioItems.find((r: any) => r.label?.toLowerCase().includes(name.toLowerCase()));
-    return row ? row.value : 'N/A';
+  // Extract ratios from consolidated data
+  const ratioItems = (unifiedData as any)?.ratios?.item || [];
+  const detailedInsights = (unifiedData as any)?.detailedInsights;
+  
+  const getRatio = (name: string, fallbackNames: string[] = []) => {
+    const allNames = [name, ...fallbackNames].map(n => n.toLowerCase().replace(/[^a-z0-9]/g, ''));
+    
+    // 1. Try primary ratios items
+    const row = ratioItems.find((r: any) => {
+      const label = (r.label || "").toLowerCase().replace(/[^a-z0-9]/g, '');
+      return allNames.some(an => label.includes(an));
+    });
+    if (row && row.value !== undefined) return row.value;
+    
+    // 2. Try industry comparison in detailed insights
+    const icRow = detailedInsights?.industryComparison?.find((ic: any) => {
+      const title = (ic.title || "").toLowerCase().replace(/[^a-z0-9]/g, '');
+      return allNames.some(an => title.includes(an));
+    });
+    return icRow ? icRow.value : 'N/A';
   };
 
   const displayRatios = [
-    { label: 'Debt/Equity', name: 'debt-equity', icon: Filter },
-    { label: 'Current Ratio', name: 'current ratio', icon: Activity },
-    { label: 'Quick Ratio', name: 'quick ratio', icon: TrendingUp },
-    { label: 'Interest Coverage', name: 'interest coverage', icon: Activity },
+    { label: 'Debt/Equity', name: 'debt/equity', fallbacks: ['debt equity', 'debt to equity', 'gearing'], icon: Filter },
+    { label: 'P/E Ratio', name: 'p/e ratio', fallbacks: ['ttm pe ratio', 'pe'], icon: Activity },
+    { label: 'P/B Ratio', name: 'p/b ratio', fallbacks: ['price to book ratio', 'pb'], icon: TrendingUp },
+    { label: 'ROE %', name: 'roe', fallbacks: ['return on equity', 'roe %'], icon: Activity },
   ];
 
-  const shData = (shareholding as any)?.data || {};
-  const promoters = shData.promoters || 0;
-  const fii = shData.fii || 0;
-  const dii = shData.dii || 0;
-  const publicHolding = shData.public || 0;
+  // Extract shareholding from consolidated data
+  const shPattern = (unifiedData as any)?.shareholdingPattern;
+  let promoters = 0, fii = 0, dii = 0, publicHolding = 0, pledging = '0.00';
+  
+  if (shPattern?.list) {
+    const findVal = (name: string) => parseFloat(shPattern.list.find((i: any) => i.name?.includes(name))?.value) || 0;
+    promoters = findVal('Promoter');
+    fii = findVal('FII');
+    dii = findVal('DII');
+    publicHolding = findVal('Public');
+    pledging = shPattern.promoterPledging || '0.00';
+  }
 
   const corpActions = (actions as any)?.corporate_actions || [];
 
@@ -3471,7 +3492,7 @@ const FundamentalInsights: React.FC<{ symbol: string }> = ({ symbol }) => {
                   <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest border border-slate-800 px-1.5 py-0.5 rounded">Ratios</span>
                </div>
                <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">{ratio.label}</p>
-               <p className="text-xl font-black text-white italic tracking-tighter mt-1">{getRatio(ratio.name)}</p>
+               <p className="text-xl font-black text-white italic tracking-tighter mt-1">{getRatio(ratio.name, (ratio as any).fallbacks)}</p>
             </div>
           ))}
        </div>
@@ -3501,7 +3522,7 @@ const FundamentalInsights: React.FC<{ symbol: string }> = ({ symbol }) => {
                   </div>
                 ))}
                 <p className="text-[9px] text-slate-600 italic mt-4 font-bold text-center uppercase tracking-tighter">
-                  Promoter pledging: {shData.promoterPledging || '0.00'}%
+                  Promoter pledging: {pledging}%
                 </p>
              </div>
           </Card>

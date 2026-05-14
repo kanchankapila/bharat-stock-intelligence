@@ -1219,16 +1219,19 @@ export const appRouter = router({
       
       const { getMcConsolidatedData } = await import('./mcApiService');
       const { getStockScoreDetail } = await import('./scoringService');
+      const { fetchTradebrainsData } = await import('./tradebrainsService');
       
-      const [mcData, scoreData] = await Promise.all([
+      const [mcData, scoreData, tbData] = await Promise.all([
         getMcConsolidatedData(scId, input.symbol, input.timeframe),
-        getStockScoreDetail(input.symbol, input.scoreTimeframe)
+        getStockScoreDetail(input.symbol, input.scoreTimeframe),
+        fetchTradebrainsData(input.symbol)
       ]);
 
       return {
         ...mcData,
         score: scoreData?.score || null,
-        factors: scoreData?.factors || null
+        factors: scoreData?.factors || null,
+        tradebrains: tbData || null
       };
     }),
 });

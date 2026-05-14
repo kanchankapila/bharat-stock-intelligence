@@ -142,6 +142,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({ symbol, scId
   const historicalRating = mc.historicalRating;
   const technicalV2 = mc.technicalV2;
   const technicalRating = mc.technicalRating;
+  const tb = (unifiedData as any).tradebrains;
 
   const currentPrice = eq?.pricecurrent || sp?.lastPrice || tech?.close?.toString() || '—';
   const changePct = eq?.pricepercentchange || sp?.perChange || '—';
@@ -183,6 +184,26 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({ symbol, scId
               </span>
             )}
           </div>
+
+          {(() => {
+            const tbScore = tb?.portalScore?.score;
+            if (tbScore == null || typeof tbScore !== 'number') return null;
+            const pct = Math.round((tbScore / 5) * 100);
+            return (
+              <div className="flex items-center gap-2 pl-4 border-l border-slate-800">
+                <BarChart3 className="w-4 h-4 text-violet-500" />
+                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">TradeBrains</span>
+                <span className={cn(
+                  "text-[9px] font-black px-2 py-0.5 rounded uppercase",
+                  pct >= 60 ? "bg-violet-500/10 text-violet-400" :
+                  pct >= 40 ? "bg-amber-500/10 text-amber-400" :
+                  "bg-rose-500/10 text-rose-500"
+                )}>
+                  {tbScore.toFixed(2)}/5
+                </span>
+              </div>
+            );
+          })()}
         </div>
         <div className="flex gap-1 bg-slate-900 rounded-lg p-0.5 border border-slate-800">
           {(['D', 'W', 'M'] as Timeframe[]).map(tf => (
@@ -226,6 +247,56 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({ symbol, scId
           ))}
         </div>
       )}
+
+      {/* TradeBrains Portal Score Breakdown */}
+      {tb?.portalScore && (() => {
+        const ps = tb.portalScore;
+        const dims = [
+          { label: 'Performance',   val: ps.performance,   color: 'bg-blue-500',   text: 'text-blue-400' },
+          { label: 'Growth',        val: ps.growth,        color: 'bg-emerald-500', text: 'text-emerald-400' },
+          { label: 'Profitability', val: ps.profitability, color: 'bg-teal-500',    text: 'text-teal-400' },
+          { label: 'Valuation',     val: ps.valuation,     color: 'bg-amber-500',   text: 'text-amber-400' },
+          { label: 'Ownership',     val: ps.ownership,     color: 'bg-purple-500',  text: 'text-purple-400' },
+          { label: 'Quality',       val: ps.quality,       color: 'bg-violet-500',  text: 'text-violet-400' },
+        ].filter(d => d.val != null);
+        if (dims.length === 0) return null;
+        return (
+          <div className="bg-slate-950 border border-slate-800 rounded-2xl p-4">
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-[10px] font-black text-violet-500 uppercase tracking-widest flex items-center gap-2">
+                <BarChart3 className="w-3 h-3" /> TradeBrains Score Breakdown
+              </p>
+              {ps.score != null && (
+                <span className={cn(
+                  "text-sm font-black italic px-2 py-0.5 rounded",
+                  ps.score >= 3.5 ? "text-emerald-400" : ps.score >= 2.5 ? "text-amber-400" : "text-rose-400"
+                )}>{Number(ps.score).toFixed(2)}<span className="text-[9px] text-slate-500 font-bold">/5</span></span>
+              )}
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              {dims.map((d) => {
+                const pct = Math.round((Number(d.val) / 5) * 100);
+                return (
+                  <div key={d.label} className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">{d.label}</span>
+                      <span className={cn("text-[10px] font-black", d.text)}>{Number(d.val).toFixed(2)}</span>
+                    </div>
+                    <div className="h-1.5 w-full bg-slate-900 rounded-full overflow-hidden">
+                      <motion.div
+                        initial={{ width: 0 }}
+                        animate={{ width: `${pct}%` }}
+                        transition={{ duration: 0.8, delay: 0.1 }}
+                        className={cn("h-full rounded-full", d.color)}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Multi-Timeframe Divergence Panel */}
       {(techD || techW || techM) && (
@@ -346,6 +417,44 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({ symbol, scId
         <ValueDisplay label="Face Value" value={essentials?.faceValue || eq?.FV || '—'} />
       </div>
 
+      {/* TradeBrains Company Profile + Ace Investors */}
+      {(tb?.profile || tb?.overviewData?.stock_mentions) && (
+        <div className="flex flex-wrap gap-3">
+          {tb?.profile && (
+            <div className="flex-1 min-w-0 flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl">
+              {tb.profile.founded_year && (
+                <span className="text-[9px] font-bold text-slate-500">
+                  Founded <span className="text-slate-300 font-black">{tb.profile.founded_year}</span>
+                </span>
+              )}
+              {tb.profile.chairman && (
+                <span className="text-[9px] font-bold text-slate-500">
+                  Chairman <span className="text-slate-300 font-black">{tb.profile.chairman}</span>
+                </span>
+              )}
+              {tb.profile.website && (
+                <a href={tb.profile.website} target="_blank" rel="noopener noreferrer"
+                  className="text-[9px] font-black text-violet-400 hover:text-violet-300 uppercase tracking-widest">
+                  Website ↗
+                </a>
+              )}
+              {tb.profile.address && (
+                <span className="text-[9px] font-bold text-slate-600 truncate">{tb.profile.address}</span>
+              )}
+            </div>
+          )}
+          {Array.isArray(tb?.overviewData?.stock_mentions?.ace_investors) && tb.overviewData.stock_mentions.ace_investors.length > 0 && (
+            <div className="flex items-center gap-2 px-4 py-2.5 bg-violet-500/5 border border-violet-500/20 rounded-xl">
+              <Users className="w-3 h-3 text-violet-500 shrink-0" />
+              <span className="text-[9px] font-black text-violet-400 uppercase tracking-widest">Ace Investors:</span>
+              <span className="text-[9px] font-bold text-slate-300">
+                {tb.overviewData.stock_mentions.ace_investors.map((a: any) => a.name || a).join(', ')}
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Classification Summary */}
       {(!section || section === 'all' || section === 'insights') && classification && classification.longDesc && (
         <div className={cn(
@@ -395,6 +504,39 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({ symbol, scId
           <div className="p-3 bg-purple-500/5 border border-purple-500/20 rounded-xl text-center">
             <p className="text-[8px] font-black text-purple-500 uppercase tracking-widest">P/B</p>
             <p className="text-xs font-black text-white italic">{fov.pbText}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Tradebrains Key Metrics */}
+      {tb?.keyMetrics && typeof tb.keyMetrics === 'object' && !Array.isArray(tb.keyMetrics) && (
+        <div className="bg-slate-950 border border-slate-800 rounded-2xl p-4">
+          <p className="text-[10px] font-black text-violet-500 uppercase tracking-widest mb-3 flex items-center gap-2">
+            <BarChart3 className="w-3 h-3" />
+            TradeBrains Key Metrics
+          </p>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+            {([
+              { label: 'P/E',          val: tb.keyMetrics.pe,            color: 'text-blue-400' },
+              { label: 'Industry P/E', val: tb.keyMetrics.industry_pe,   color: 'text-slate-400' },
+              { label: 'PEG Ratio',    val: tb.keyMetrics.peg_ratio,     color: 'text-violet-400' },
+              { label: 'ROE %',        val: tb.keyMetrics.roe != null ? `${Number(tb.keyMetrics.roe).toFixed(2)}%` : null, color: 'text-emerald-400' },
+              { label: 'ROCE %',       val: tb.keyMetrics.roce != null ? `${Number(tb.keyMetrics.roce).toFixed(2)}%` : null, color: 'text-emerald-400' },
+              { label: 'ROA %',        val: tb.keyMetrics.roa != null ? `${Number(tb.keyMetrics.roa).toFixed(2)}%` : null, color: 'text-teal-400' },
+              { label: 'EPS',          val: tb.keyMetrics.eps,           color: 'text-amber-400' },
+              { label: 'Debt/Equity',  val: tb.keyMetrics.debt_equity,   color: tb.keyMetrics.debt_equity > 1 ? 'text-rose-400' : 'text-emerald-400' },
+              { label: 'Current Ratio',val: tb.keyMetrics.current_ratio, color: tb.keyMetrics.current_ratio >= 1.5 ? 'text-emerald-400' : 'text-amber-400' },
+              { label: 'Total Debt ₹Cr',val: tb.keyMetrics.total_debt,   color: 'text-rose-400' },
+              { label: 'Div Yield %',  val: tb.keyMetrics.divyield != null ? `${tb.keyMetrics.divyield}%` : null, color: 'text-amber-400' },
+              { label: 'EV/Sales',     val: tb.keyMetrics.ev_sales,      color: 'text-slate-400' },
+            ] as { label: string; val: any; color: string }[])
+              .filter(m => m.val != null && m.val !== '')
+              .map((m, i) => (
+                <div key={i} className="p-2.5 bg-slate-900/60 rounded-xl border border-slate-800/50 text-center">
+                  <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest truncate mb-0.5">{m.label}</p>
+                  <p className={cn("text-[11px] font-black italic", m.color)}>{String(m.val)}</p>
+                </div>
+              ))}
           </div>
         </div>
       )}
@@ -472,7 +614,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({ symbol, scId
               ))}
               {detailedInsights.financials?.cagr && (
                 <div className="mt-3 p-3 bg-slate-950 rounded-xl border border-slate-800/50">
-                  <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2">CAGR Growth</p>
+                  <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2">CAGR Growth (3Y)</p>
                   <div className="grid grid-cols-3 gap-2 text-center">
                     <div>
                       <p className="text-[8px] font-black text-emerald-500 uppercase">Revenue</p>
@@ -489,6 +631,58 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({ symbol, scId
                   </div>
                 </div>
               )}
+              {tb?.cagrData && (() => {
+                const cd = tb.cagrData;
+                const rows: { label: string; color: string; y1?: number|null; y3?: number|null; y5?: number|null }[] = [
+                  { label: 'Sales', color: 'text-emerald-500',
+                    y1: cd.sales_growth?.value?.one_year,
+                    y3: cd.sales_growth?.value?.three_year,
+                    y5: cd.sales_growth?.value?.five_year },
+                  { label: 'Net Profit', color: 'text-blue-500',
+                    y1: cd.net_profit_growth?.value?.one_year,
+                    y3: cd.net_profit_growth?.value?.three_year,
+                    y5: cd.net_profit_growth?.value?.five_year },
+                  { label: 'Op Profit', color: 'text-amber-500',
+                    y1: cd.operating_profit_growth?.value?.one_year,
+                    y3: cd.operating_profit_growth?.value?.three_year,
+                    y5: cd.operating_profit_growth?.value?.five_year },
+                  { label: 'Stock', color: 'text-violet-500',
+                    y1: cd.stock_growth?.value?.one_year,
+                    y3: cd.stock_growth?.value?.three_year,
+                    y5: cd.stock_growth?.value?.five_year },
+                ];
+                const hasData = rows.some(r => r.y1 != null || r.y3 != null || r.y5 != null);
+                if (!hasData) return null;
+                return (
+                  <div className="mt-3 p-3 bg-violet-500/5 rounded-xl border border-violet-500/20">
+                    <p className="text-[9px] font-black text-violet-500 uppercase tracking-widest mb-2">TradeBrains CAGR</p>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-center">
+                        <thead>
+                          <tr className="text-[8px] font-black uppercase tracking-widest text-slate-500">
+                            <th className="pb-1.5 text-left">Metric</th>
+                            <th className="pb-1.5">1Y</th>
+                            <th className="pb-1.5">3Y</th>
+                            <th className="pb-1.5">5Y</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-800/40">
+                          {rows.filter(r => r.y1 != null || r.y3 != null || r.y5 != null).map((r, i) => (
+                            <tr key={i}>
+                              <td className={cn("py-1 text-left text-[9px] font-black uppercase", r.color)}>{r.label}</td>
+                              {[r.y1, r.y3, r.y5].map((v, j) => (
+                                <td key={j} className="py-1 text-[10px] font-black text-white tabular-nums">
+                                  {v != null ? `${Number(v) >= 0 ? '+' : ''}${Number(v).toFixed(1)}%` : '—'}
+                                </td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           </Card>
 
@@ -521,6 +715,37 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({ symbol, scId
                   ))}
                 </>
               )}
+              {tb?.shareHoldingGraph?.insights && (() => {
+                const shi = tb.shareHoldingGraph.insights;
+                const allInsights: string[] = [
+                  ...(Array.isArray(shi.Blue) ? shi.Blue : []),
+                  ...(Array.isArray(shi.Green) ? shi.Green : []),
+                  ...(Array.isArray(shi.Red) ? shi.Red : []),
+                ];
+                if (allInsights.length === 0) return null;
+                return (
+                  <>
+                    <div className="h-px bg-slate-800 my-2" />
+                    <p className="text-[9px] font-black text-violet-500 uppercase tracking-widest mb-2">Shareholding Trends</p>
+                    <div className="space-y-1">
+                      {allInsights.slice(0, 4).map((ins: string, i: number) => {
+                        const isPositive = shi.Blue?.includes(ins) || shi.Green?.includes(ins);
+                        return (
+                          <div key={i} className={cn(
+                            "flex items-start gap-2 p-2 rounded-lg border text-[10px] font-medium text-slate-300 leading-relaxed",
+                            isPositive ? "bg-emerald-500/5 border-emerald-500/10" : "bg-rose-500/5 border-rose-500/10"
+                          )}>
+                            <span className={cn("shrink-0 mt-0.5 text-[9px] font-black", isPositive ? "text-emerald-400" : "text-rose-400")}>
+                              {isPositive ? '↑' : '↓'}
+                            </span>
+                            {ins}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </>
+                );
+              })()}
             </div>
           </Card>
         </div>
@@ -638,6 +863,43 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({ symbol, scId
         </Card>
       )}
 
+      {/* TradeBrains Pivot Levels */}
+      {tb?.pivotData && (() => {
+        const pd = tb.pivotData;
+        const levels = [
+          { label: 'Fibonacci', data: pd.fibonacci },
+          { label: 'Standard',  data: pd.standard  },
+        ].filter(l => l.data);
+        if (levels.length === 0) return null;
+        return (
+          <Card title="TradeBrains Pivot Levels" icon={Filter}>
+            <div className="space-y-4 pt-2">
+              {levels.map(({ label, data }) => (
+                <div key={label} className="p-4 bg-slate-950 rounded-2xl border border-slate-800/50">
+                  <p className="text-[10px] font-black text-violet-500 uppercase tracking-widest mb-3">{label}</p>
+                  <div className="grid grid-cols-3 md:grid-cols-7 gap-2 text-center">
+                    {[
+                      { k: 'res_three',    label: 'R3', cls: 'border-emerald-500/40 text-emerald-300' },
+                      { k: 'res_two',      label: 'R2', cls: 'border-emerald-500/30 text-emerald-400' },
+                      { k: 'res_one',      label: 'R1', cls: 'border-emerald-500/20 text-emerald-400' },
+                      { k: 'pivot',        label: 'PP', cls: 'border-blue-500/40 text-blue-400 ring-1 ring-blue-500/20' },
+                      { k: 'support_one',  label: 'S1', cls: 'border-rose-500/20 text-rose-400' },
+                      { k: 'support_two',  label: 'S2', cls: 'border-rose-500/30 text-rose-400' },
+                      { k: 'support_three',label: 'S3', cls: 'border-rose-500/40 text-rose-300' },
+                    ].map(({ k, label: lbl, cls }) => data[k] != null ? (
+                      <div key={k} className={cn("p-2 bg-slate-900 rounded-lg border", cls)}>
+                        <p className="text-[8px] font-black uppercase tracking-widest mb-0.5">{lbl}</p>
+                        <p className="text-[10px] font-black text-white tabular-nums">₹{Number(data[k]).toFixed(2)}</p>
+                      </div>
+                    ) : null)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Card>
+        );
+      })()}
+
       {/* Moving Averages */}
       {(!section || section === 'all' || section === 'technical') && tech && (tech.sma?.length > 0 || tech.ema?.length > 0) && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -669,6 +931,46 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({ symbol, scId
           </Card>
         </div>
       )}
+
+      {/* Tradebrains Insights — Pros & Cons */}
+      {tb?.insights && (() => {
+        const ins = tb.insights;
+        const pros: string[] = Array.isArray(ins?.pros) ? ins.pros :
+                               Array.isArray(ins?.positives) ? ins.positives :
+                               Array.isArray(ins?.strengths) ? ins.strengths : [];
+        const cons: string[] = Array.isArray(ins?.cons) ? ins.cons :
+                               Array.isArray(ins?.negatives) ? ins.negatives :
+                               Array.isArray(ins?.weaknesses) ? ins.weaknesses : [];
+        if (pros.length === 0 && cons.length === 0) return null;
+        return (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {pros.length > 0 && (
+              <Card title="TradeBrains Pros" icon={TrendingUp}>
+                <div className="space-y-1.5 pt-2">
+                  {pros.slice(0, 6).map((p: string, i: number) => (
+                    <div key={i} className="flex items-start gap-2 p-2 bg-violet-500/5 rounded-xl border border-violet-500/10">
+                      <span className="text-[9px] text-violet-400 font-black mt-0.5 shrink-0">✓</span>
+                      <span className="text-[11px] text-slate-300 font-medium leading-relaxed">{p}</span>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            )}
+            {cons.length > 0 && (
+              <Card title="TradeBrains Cons" icon={TrendingDown}>
+                <div className="space-y-1.5 pt-2">
+                  {cons.slice(0, 6).map((c: string, i: number) => (
+                    <div key={i} className="flex items-start gap-2 p-2 bg-rose-500/5 rounded-xl border border-rose-500/10">
+                      <AlertCircle className="w-3 h-3 text-rose-500 mt-0.5 shrink-0" />
+                      <span className="text-[11px] text-slate-300 font-medium leading-relaxed">{c}</span>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            )}
+          </div>
+        );
+      })()}
 
       {/* SWOT Analysis */}
       {swot && (
@@ -748,18 +1050,50 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({ symbol, scId
       {pv && (
         <Card title="Price & Volume Performance" icon={BarChart3}>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
-            <div>
-              <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-3">Price Returns</p>
-              <div className="grid grid-cols-3 gap-2">
-                {Object.entries(pv.price || {}).map(([period, val]) => (
-                  <div key={period} className="p-2.5 bg-slate-950 rounded-xl border border-slate-800/50 text-center">
-                    <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-0.5">{period}</p>
-                    <p className={cn("text-xs font-black italic", val >= 0 ? "text-emerald-400" : "text-rose-400")}>
-                      {val >= 0 ? '+' : ''}{val}%
-                    </p>
-                  </div>
-                ))}
+            <div className="space-y-4">
+              <div>
+                <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-3">Price Returns</p>
+                <div className="grid grid-cols-3 gap-2">
+                  {Object.entries(pv.price || {}).map(([period, val]) => (
+                    <div key={period} className="p-2.5 bg-slate-950 rounded-xl border border-slate-800/50 text-center">
+                      <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-0.5">{period}</p>
+                      <p className={cn("text-xs font-black italic", val >= 0 ? "text-emerald-400" : "text-rose-400")}>
+                        {val >= 0 ? '+' : ''}{val}%
+                      </p>
+                    </div>
+                  ))}
+                </div>
               </div>
+              {tb?.stockReturns && (() => {
+                const sr = tb.stockReturns;
+                const periods = [
+                  { label: '1W', val: sr.one_week },
+                  { label: '1M', val: sr.one_month },
+                  { label: '6M', val: sr.six_months },
+                  { label: '1Y', val: sr.one_year },
+                  { label: '3Y', val: sr.three_year },
+                  { label: '5Y', val: sr.five_year },
+                ].filter(p => p.val != null);
+                if (periods.length === 0) return null;
+                return (
+                  <div>
+                    <p className="text-[9px] font-black text-violet-500 uppercase tracking-widest mb-2">TradeBrains Returns</p>
+                    <div className="grid grid-cols-4 gap-1.5">
+                      {periods.map(({ label, val }) => {
+                        const n = typeof val === 'string' ? parseFloat(val) : Number(val);
+                        return (
+                          <div key={label} className="p-2 bg-violet-500/5 rounded-lg border border-violet-500/10 text-center">
+                            <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-0.5">{label}</p>
+                            <p className={cn("text-[10px] font-black italic", n >= 0 ? "text-emerald-400" : "text-rose-400")}>
+                              {n >= 0 ? '+' : ''}{n.toFixed(1)}%
+                            </p>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
             <div>
               <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-3">Volume Profile & Delivery</p>
@@ -1068,6 +1402,40 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({ symbol, scId
         </Card>
       )}
 
+      {/* Tradebrains Credit Rating */}
+      {Array.isArray(tb?.creditRating) && tb.creditRating.length > 0 && (
+        <Card title="Credit Ratings" icon={Filter}>
+          <div className="space-y-2 pt-2">
+            {tb.creditRating.slice(0, 6).map((cr: any, i: number) => {
+              const rating   = cr.rating   || '—';
+              const agency   = cr.ratingby || '';
+              const sectype  = cr.sectype  || '';
+              const status   = cr.stattype || '';
+              const date     = cr.ratdate  || '';
+              const isSafe   = /AAA|AA\+?|A\+?(?![-B])|BBB/.test(rating.toUpperCase());
+              const isDanger = /B[-+]?|CCC|D/.test(rating.toUpperCase()) && !/BBB|AAA|AA/.test(rating.toUpperCase());
+              return (
+                <div key={i} className="flex items-center justify-between p-3 bg-slate-950 rounded-xl border border-slate-800/50">
+                  <div className="flex items-center gap-3">
+                    <span className={cn(
+                      "text-sm font-black italic px-2 py-0.5 rounded min-w-[3rem] text-center",
+                      isSafe ? "bg-emerald-500/10 text-emerald-400" :
+                      isDanger ? "bg-rose-500/10 text-rose-400" :
+                      "bg-amber-500/10 text-amber-400"
+                    )}>{rating}</span>
+                    <div>
+                      {agency && <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest">{agency}</p>}
+                      <p className="text-[9px] text-slate-500 font-bold">{[sectype, status].filter(Boolean).join(' · ')}</p>
+                    </div>
+                  </div>
+                  {date && <p className="text-[9px] text-slate-600 font-bold shrink-0">{String(date).slice(0, 10)}</p>}
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      )}
+
       {/* Technical Rating Summary from V2 endpoint */}
       {(technicalRating || technicalV2) && (() => {
         const rating = technicalRating?.data || technicalRating;
@@ -1175,7 +1543,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({ symbol, scId
       {/* Data source footer */}
       <div className="text-center pt-4 border-t border-slate-800">
         <p className="text-[8px] text-slate-700 font-bold uppercase tracking-widest">
-          Data sourced from MoneyControl · Refreshes every 60s
+          Data sourced from MoneyControl{tb ? ' · TradeBrains' : ''} · Refreshes every 60s
         </p>
       </div>
     </div>
