@@ -97,7 +97,7 @@ const stockData: StockMapping[] = [
   { name: 'Tube Investments of India Ltd', mcsymbol: 'TIIND54076', tlid: '67548', tlname: 'tube-investments-of-india-ltd', isin: 'INE974X01010', symbol: 'TIINDIA', stockid: '1002874', companyid: '67230' },
   { name: 'IDFC First Bank ', mcsymbol: 'IDF01', tlid: '1786', tlname: 'idfc-first-bank-ltd', isin: 'INE092T01019', symbol: 'IDFCFIRSTB', stockid: '999987', companyid: '62245' },
   { name: 'Syngene International', mcsymbol: 'SI62', tlid: '1771', tlname: 'syngene-international-ltd', isin: 'INE398R01022', symbol: 'SYNGENE', stockid: '197397', companyid: '303' },
-  { name: 'Adani Green Energy Limited', mcsymbol: 'ADANI54145', tlid: '93115', tlname: 'adani-green-energy-ltd', isin: 'INE364U01010', symbol: 'ADANIGREEN', stockid: '#N/A', companyid: '64847' },
+  { name: 'Adani Green Energy Limited', mcsymbol: 'ADANI54145', tlid: '93115', tlname: 'adani-green-energy-ltd', isin: 'INE364U01010', symbol: 'ADANIGREEN', stockid: '93115', companyid: '64847' },
   { name: 'Tata Elxsi', mcsymbol: 'TEI', tlid: '1358', tlname: 'tata-elxsi-ltd', isin: 'INE670A01012', symbol: 'TATAELXSI', stockid: '949649', companyid: '12207' },
   { name: 'Godrej Properties', mcsymbol: 'GP11', tlid: '478', tlname: 'godrej-properties-ltd', isin: 'INE484J01027', symbol: 'GODREJPROP', stockid: '608999', companyid: '5733' },
   { name: 'Federal Bank', mcsymbol: 'FB', tlid: '412', tlname: 'federal-bank-ltd', isin: 'INE171A01029', symbol: 'FEDERALBNK', stockid: '533514', companyid: '9211' },

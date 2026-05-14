@@ -26,6 +26,7 @@ import { useIntersectionObserver } from './hooks/useIntersectionObserver';
 import { useNewsFeed, NewsArticle } from './services/newsService';
 import { detectCandlestickPatterns, Candlestick } from './lib/candlestickUtils';
 import MCStockInfoPanel from './components/MCStockInfoPanel';
+import { MCIndexDetailPanel } from './components/MCIndexDetailPanel';
 import TrendlyneScreenerPanel from './components/TrendlyneScreenerPanel';
 import NSEStockDiscovery from './components/NSEStockDiscovery';
 import stockData from './data/stocklist';
@@ -242,12 +243,21 @@ const Card: React.FC<{ children: React.ReactNode; className?: string; title?: st
   </div>
 );
 
-const MomentumIntelligence: React.FC<{ watchlist: string[]; onToggle: (symbol: string) => void }> = ({ watchlist, onToggle }) => {
+const MomentumIntelligence: React.FC<{
+  watchlist: string[];
+  onToggle: (symbol: string) => void;
+  onSelectStock: (symbol: string) => void;
+}> = ({ watchlist, onToggle, onSelectStock }) => {
   const { data: bullish } = trpc.getTechnicalTrends.useQuery({ type: 'bullish' });
   const { data: bearish } = trpc.getTechnicalTrends.useQuery({ type: 'bearish' });
 
   const bullishList = (bullish?.data?.list || bullish?.data?.tableDataList)?.slice(0, 5) || [];
   const bearishList = (bearish?.data?.list || bearish?.data?.tableDataList)?.slice(0, 5) || [];
+
+  const resolveStock = (shortName: string) => {
+    const match = stockData.find(s => s.symbol.toUpperCase() === shortName.toUpperCase());
+    return { symbol: match?.symbol || shortName, name: match?.name || '' };
+  };
 
   return (
     <Card title="Momentum Intelligence" icon={Zap} className="col-span-12">
@@ -257,32 +267,40 @@ const MomentumIntelligence: React.FC<{ watchlist: string[]; onToggle: (symbol: s
             <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
             <h3 className="text-[10px] font-black text-emerald-500 uppercase tracking-[0.2em]">Institutional Accumulation</h3>
           </div>
-          {bullishList.map((stock: any) => (
-            <div key={stock.stockId} className="flex justify-between items-center p-3 bg-slate-950/50 rounded-xl border border-emerald-500/10 hover:border-emerald-500/30 transition-all group">
-              <div className="flex items-center gap-3">
-                <button 
-                  onClick={() => onToggle(stock.shortName)}
-                  className={cn(
-                    "p-1.5 rounded-lg transition-all",
-                    watchlist.includes(stock.shortName) ? "bg-amber-500/20 text-amber-500" : "text-slate-700 hover:text-slate-400"
-                  )}
-                >
-                  <WatchlistIcon className={cn("w-3.5 h-3.5", watchlist.includes(stock.shortName) && "fill-amber-500")} />
-                </button>
-                <div>
-                  <p className="text-xs font-black text-white group-hover:text-emerald-400 transition-colors uppercase">{stock.shortName}</p>
-                  <div className="flex items-center gap-2 mt-0.5">
-                    <span className="text-[10px] font-bold text-slate-500 tabular-nums">₹{stock.lastPrice}</span>
-                    <span className="text-[9px] font-black text-slate-600 uppercase tracking-tighter bg-slate-900 px-1.5 py-0.5 rounded italic">RSI: {stock.rsi}</span>
+          {bullishList.map((stock: any) => {
+            const { symbol, name } = resolveStock(stock.shortName);
+            return (
+              <div
+                key={stock.stockId}
+                onClick={() => onSelectStock(symbol)}
+                className="flex justify-between items-center p-3 bg-slate-950/50 rounded-xl border border-emerald-500/10 hover:border-emerald-500/30 transition-all group cursor-pointer"
+              >
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onToggle(symbol); }}
+                    className={cn(
+                      "p-1.5 rounded-lg transition-all",
+                      watchlist.includes(symbol) ? "bg-amber-500/20 text-amber-500" : "text-slate-700 hover:text-slate-400"
+                    )}
+                  >
+                    <WatchlistIcon className={cn("w-3.5 h-3.5", watchlist.includes(symbol) && "fill-amber-500")} />
+                  </button>
+                  <div>
+                    <p className="text-xs font-black text-white group-hover:text-emerald-400 transition-colors uppercase">{symbol}</p>
+                    {name && <p className="text-[9px] font-bold text-slate-500 truncate max-w-[140px]">{name}</p>}
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span className="text-[10px] font-bold text-slate-500 tabular-nums">₹{stock.lastPrice}</span>
+                      <span className="text-[9px] font-black text-slate-600 uppercase tracking-tighter bg-slate-900 px-1.5 py-0.5 rounded italic">RSI: {stock.rsi}</span>
+                    </div>
                   </div>
                 </div>
+                <div className="text-right">
+                  <span className="text-[10px] font-black text-emerald-500 bg-emerald-500/10 px-2 py-1 rounded-lg">+{stock.percentChange}%</span>
+                  <p className="text-[9px] font-bold text-slate-600 mt-1 uppercase tracking-widest">{stock.trend}</p>
+                </div>
               </div>
-              <div className="text-right">
-                <span className="text-[10px] font-black text-emerald-500 bg-emerald-500/10 px-2 py-1 rounded-lg">+{stock.percentChange}%</span>
-                <p className="text-[9px] font-bold text-slate-600 mt-1 uppercase tracking-widest">{stock.trend}</p>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         <div className="space-y-4">
@@ -290,44 +308,52 @@ const MomentumIntelligence: React.FC<{ watchlist: string[]; onToggle: (symbol: s
             <div className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
             <h3 className="text-[10px] font-black text-rose-500 uppercase tracking-[0.2em]">Distribution Pressure</h3>
           </div>
-          {bearishList.map((stock: any) => (
-            <div key={stock.stockId} className="flex justify-between items-center p-3 bg-slate-950/50 rounded-xl border border-rose-500/10 hover:border-rose-500/30 transition-all group">
-              <div className="flex items-center gap-3">
-                <button 
-                  onClick={() => onToggle(stock.shortName)}
-                  className={cn(
-                    "p-1.5 rounded-lg transition-all",
-                    watchlist.includes(stock.shortName) ? "bg-amber-500/20 text-amber-500" : "text-slate-700 hover:text-slate-400"
-                  )}
-                >
-                  <WatchlistIcon className={cn("w-3.5 h-3.5", watchlist.includes(stock.shortName) && "fill-amber-500")} />
-                </button>
-                <div>
-                  <p className="text-xs font-black text-white group-hover:text-rose-400 transition-colors uppercase">{stock.shortName}</p>
-                  <div className="flex items-center gap-2 mt-0.5">
-                    <span className="text-[10px] font-bold text-slate-500 tabular-nums">₹{stock.lastPrice}</span>
-                    <span className="text-[9px] font-black text-slate-600 uppercase tracking-tighter bg-slate-900 px-1.5 py-0.5 rounded italic">RSI: {stock.rsi}</span>
+          {bearishList.map((stock: any) => {
+            const { symbol, name } = resolveStock(stock.shortName);
+            return (
+              <div
+                key={stock.stockId}
+                onClick={() => onSelectStock(symbol)}
+                className="flex justify-between items-center p-3 bg-slate-950/50 rounded-xl border border-rose-500/10 hover:border-rose-500/30 transition-all group cursor-pointer"
+              >
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onToggle(symbol); }}
+                    className={cn(
+                      "p-1.5 rounded-lg transition-all",
+                      watchlist.includes(symbol) ? "bg-amber-500/20 text-amber-500" : "text-slate-700 hover:text-slate-400"
+                    )}
+                  >
+                    <WatchlistIcon className={cn("w-3.5 h-3.5", watchlist.includes(symbol) && "fill-amber-500")} />
+                  </button>
+                  <div>
+                    <p className="text-xs font-black text-white group-hover:text-rose-400 transition-colors uppercase">{symbol}</p>
+                    {name && <p className="text-[9px] font-bold text-slate-500 truncate max-w-[140px]">{name}</p>}
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span className="text-[10px] font-bold text-slate-500 tabular-nums">₹{stock.lastPrice}</span>
+                      <span className="text-[9px] font-black text-slate-600 uppercase tracking-tighter bg-slate-900 px-1.5 py-0.5 rounded italic">RSI: {stock.rsi}</span>
+                    </div>
                   </div>
                 </div>
+                <div className="text-right">
+                  <span className="text-[10px] font-black text-rose-500 bg-rose-500/10 px-2 py-1 rounded-lg">{stock.percentChange}%</span>
+                  <p className="text-[9px] font-bold text-slate-600 mt-1 uppercase tracking-widest">{stock.trend}</p>
+                </div>
               </div>
-              <div className="text-right">
-                <span className="text-[10px] font-black text-rose-500 bg-rose-500/10 px-2 py-1 rounded-lg">{stock.percentChange}%</span>
-                <p className="text-[9px] font-bold text-slate-600 mt-1 uppercase tracking-widest">{stock.trend}</p>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </Card>
   );
 };
 
-const InstitutionalInsights: React.FC = () => {
-  const { data: mfData } = trpc.getMFInvestments.useQuery({ symbol: 'RELIANCE' });
+const InstitutionalInsights: React.FC<{ symbol?: string }> = ({ symbol = 'RELIANCE' }) => {
+  const { data: mfData } = trpc.getMFInvestments.useQuery({ symbol });
   const mfs = mfData?.Table || [];
 
   return (
-    <Card title="Institutional Velocity" icon={Users} className="col-span-12 lg:col-span-4">
+    <Card title={`Institutional Velocity (${symbol})`} icon={Users} className="col-span-12 lg:col-span-4">
       <div className="space-y-4 pt-2">
         <div className="p-4 bg-blue-600/10 border border-blue-500/20 rounded-2xl">
           <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest mb-1">Top Active Insight</p>
@@ -595,7 +621,8 @@ const IndexDetailPage: React.FC<{
   indexId: string;
   indexName: string;
   onBack: () => void;
-}> = ({ indexId, indexName, onBack }) => {
+  onSelectStock: (symbol: string) => void;
+}> = ({ indexId, indexName, onBack, onSelectStock }) => {
   const [techPeriod, setTechPeriod] = useState<'D' | 'W' | 'M'>('D');
 
   const { data: details } = trpc.getIndexDetails.useQuery({ indexId }, { refetchInterval: 30000 });
@@ -864,6 +891,9 @@ const IndexDetailPage: React.FC<{
         </div>
       )}
 
+      {/* Extended MC Index Intelligence Panel — PE/PB charts, fundamentals, intraday A/D breadth */}
+      <MCIndexDetailPanel indId={indexId} name={indexName} bridgeSymbol={d?.bridgeSymbol ?? ''} onSelectStock={onSelectStock} />
+
       {/* Constituent Stocks */}
       {stocks.length > 0 && (
         <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6">
@@ -885,10 +915,15 @@ const IndexDetailPage: React.FC<{
               <tbody>
                 {stocks.slice(0, 50).map((s: any) => {
                   const up = s.direction === '1';
+                  const nseSym = stockData.find(st => st.symbol.toUpperCase() === String(s.id).toUpperCase())?.symbol || s.id;
                   return (
-                    <tr key={s.id} className="border-t border-slate-800/40 hover:bg-slate-800/30 transition-colors">
+                    <tr
+                      key={s.id}
+                      onClick={() => onSelectStock(nseSym)}
+                      className="border-t border-slate-800/40 hover:bg-slate-800/30 transition-colors cursor-pointer"
+                    >
                       <td className="py-2.5 pr-4">
-                        <p className="text-sm font-black text-white">{s.id}</p>
+                        <p className="text-sm font-black text-white group-hover:text-blue-400">{nseSym}</p>
                         <p className="text-[9px] text-slate-500 font-bold">{s.shortname}</p>
                       </td>
                       <td className="py-2.5 pr-4 text-right text-sm font-black text-white tabular-nums">₹{s.lastvalue}</td>
@@ -915,7 +950,7 @@ const IndexDetailPage: React.FC<{
   );
 };
 
-const IndicesPage: React.FC = () => {
+const IndicesPage: React.FC<{ onSelectStock: (symbol: string) => void }> = ({ onSelectStock }) => {
   const [selectedIndex, setSelectedIndex] = useState<{ id: string; name: string } | null>(null);
 
   const { data: indicesData, isLoading } = trpc.getAllIndices.useQuery(undefined, { refetchInterval: 30000 });
@@ -926,6 +961,7 @@ const IndicesPage: React.FC = () => {
         indexId={selectedIndex.id}
         indexName={selectedIndex.name}
         onBack={() => setSelectedIndex(null)}
+        onSelectStock={onSelectStock}
       />
     );
   }
@@ -1430,8 +1466,8 @@ const Dashboard: React.FC<{
       </div>
 
       <div className="col-span-12 grid grid-cols-12 gap-6">
-        <MomentumIntelligence watchlist={watchlist} onToggle={onToggleWatchlist} />
-        <InstitutionalInsights />
+        <MomentumIntelligence watchlist={watchlist} onToggle={onToggleWatchlist} onSelectStock={onSelectStock} />
+        <InstitutionalInsights symbol={stocks[0]?.symbol || 'RELIANCE'} />
         <PennyStockIntelligence watchlist={watchlist} onToggleWatchlist={onToggleWatchlist} onSelectStock={onSelectStock} />
       </div>
 
@@ -3394,99 +3430,6 @@ const TechnicalAnalysis: React.FC<{ symbol: string }> = ({ symbol }) => {
   );
 };
 
-const MoneycontrolInsights: React.FC<{ symbol: string }> = ({ symbol }) => {
-  const { data: response, isLoading } = trpc.getStockInsights.useQuery({ symbol });
-  const insights = (response as any)?.mcInsights;
-
-  if (isLoading) return (
-    <div className="animate-pulse space-y-4">
-      <div className="h-24 bg-slate-800/50 rounded-2xl" />
-      <div className="grid grid-cols-2 gap-4">
-        <div className="h-32 bg-slate-800/50 rounded-2xl" />
-        <div className="h-32 bg-slate-800/50 rounded-2xl" />
-      </div>
-    </div>
-  );
-
-  if (!insights) return null;
-
-  return (
-    <div className="space-y-6">
-      <div className={cn(
-        "p-6 rounded-3xl border relative overflow-hidden",
-        insights.classification.color === "green" ? "bg-emerald-500/5 border-emerald-500/20" : 
-        insights.classification.color === "red" ? "bg-rose-500/5 border-rose-500/20" : "bg-slate-800/30 border-slate-700/50"
-      )}>
-        <div className="absolute top-0 right-0 p-8 opacity-5">
-          <BrainCircuit className="w-32 h-32" />
-        </div>
-        <div className="relative z-10">
-          <div className="flex items-center gap-2 mb-4">
-            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest bg-slate-900/50 px-2 py-0.5 rounded border border-slate-800">MC Intelligence</span>
-            <div className="text-[10px] font-black uppercase text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded">Score: {insights.classification.stockScore}</div>
-          </div>
-          <h3 className="text-2xl font-black text-white italic tracking-tighter uppercase mb-2">
-            Analysis: {insights.classification.name}
-          </h3>
-          <p className="text-sm text-slate-400 leading-relaxed max-w-2xl">
-            {insights.classification.longDesc}
-          </p>
-        </div>
-      </div>
-
-      {insights.swot && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Card title="Strengths & Opportunities" icon={TrendingUp}>
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <h5 className="text-[10px] font-black text-emerald-500 uppercase tracking-widest pl-1">Strengths</h5>
-                {insights.swot.s.map((s, i) => (
-                  <div key={i} className="flex items-start gap-2 p-2 bg-emerald-500/5 rounded-xl border border-emerald-500/10">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-500 mt-0.5" />
-                    <span className="text-xs text-slate-300 font-medium">{s}</span>
-                  </div>
-                ))}
-              </div>
-              <div className="space-y-2">
-                <h5 className="text-[10px] font-black text-blue-500 uppercase tracking-widest pl-1">Opportunities</h5>
-                {insights.swot.o.map((o, i) => (
-                  <div key={i} className="flex items-start gap-2 p-2 bg-blue-500/5 rounded-xl border border-blue-500/10">
-                    <Zap className="w-4 h-4 text-blue-500 mt-0.5" />
-                    <span className="text-xs text-slate-300 font-medium">{o}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </Card>
-
-          <Card title="Weaknesses & Threats" icon={TrendingDown}>
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <h5 className="text-[10px] font-black text-rose-500 uppercase tracking-widest pl-1">Weaknesses</h5>
-                {insights.swot.w.map((w, i) => (
-                  <div key={i} className="flex items-start gap-2 p-2 bg-rose-500/5 rounded-xl border border-rose-500/10">
-                    <AlertCircle className="w-4 h-4 text-rose-500 mt-0.5" />
-                    <span className="text-xs text-slate-300 font-medium">{w}</span>
-                  </div>
-                ))}
-              </div>
-              <div className="space-y-2">
-                <h5 className="text-[10px] font-black text-amber-500 uppercase tracking-widest pl-1">Threats</h5>
-                {insights.swot.t.map((t, i) => (
-                  <div key={i} className="flex items-start gap-2 p-2 bg-amber-500/5 rounded-xl border border-amber-500/10">
-                    <Info className="w-4 h-4 text-amber-500 mt-0.5" />
-                    <span className="text-xs text-slate-300 font-medium">{t}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </Card>
-        </div>
-      )}
-    </div>
-  );
-};
-
 const FundamentalInsights: React.FC<{ symbol: string }> = ({ symbol }) => {
   const { data: funds, isLoading: loadingFunds } = trpc.getTrendlyneFundamentals.useQuery({ symbol });
   const { data: ratios, isLoading: loadingRatios } = trpc.getRatios.useQuery({ symbol });
@@ -3758,397 +3701,7 @@ const FnOSignals: React.FC<{ symbol: string }> = ({ symbol }) => {
   );
 };
 
-const AnalystEstimates: React.FC<{ symbol: string }> = ({ symbol }) => {
-  const { data: rawInsights, isLoading } = trpc.getStockInsights.useQuery({ symbol });
-  const insights = rawInsights as any;
-
-  if (isLoading) return <div className="p-10 animate-pulse bg-slate-900 rounded-2xl border border-slate-800" />;
-  if (!insights || (!insights.analystRating && !insights.estimates && !insights.priceForecast)) return null;
-
-  return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-      {insights.analystRating && (
-        <Card title="Analyst Consensus" icon={Users}>
-          <div className="space-y-4 pt-2">
-            <div className="flex justify-between items-center">
-               <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Consensus</span>
-               <span className={cn(
-                 "text-xs font-black uppercase px-2 py-1 rounded",
-                 insights.analystRating.consensus.includes('Buy') || insights.analystRating.consensus.includes('Outperform') ? "bg-emerald-500/20 text-emerald-400" :
-                 insights.analystRating.consensus.includes('Sell') || insights.analystRating.consensus.includes('Underperform') ? "bg-rose-500/20 text-rose-400" : "bg-amber-500/20 text-amber-400"
-               )}>{insights.analystRating.consensus}</span>
-            </div>
-            <div className="flex justify-between text-[11px] font-bold">
-               <div className="text-emerald-400">Buy: {insights.analystRating.buy}%</div>
-               <div className="text-amber-400">Hold: {insights.analystRating.hold}%</div>
-               <div className="text-rose-400">Sell: {insights.analystRating.sell}%</div>
-            </div>
-            {insights.analystRating.analystCount > 0 && (
-               <div className="pt-2 border-t border-slate-800 flex justify-between items-center">
-                  <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Analysts</span>
-                  <span className="text-sm font-black text-white italic">{insights.analystRating.analystCount}</span>
-               </div>
-            )}
-            {insights.analystRating.ratings && insights.analystRating.ratings.length > 0 && (
-               <div className="pt-2 border-t border-slate-800 space-y-2">
-                  {insights.analystRating.ratings.map((r: any, i: number) => (
-                    <div key={i} className="flex justify-between items-center text-[10px] font-bold">
-                       <span className={cn(
-                         r.name === 'Buy' || r.name === 'Outperform' ? "text-emerald-400" :
-                         r.name === 'Sell' || r.name === 'Underperform' ? "text-rose-400" : "text-amber-400"
-                       )}>{r.name}</span>
-                       <span className="text-white">{r.value}%</span>
-                    </div>
-                  ))}
-               </div>
-            )}
-          </div>
-        </Card>
-      )}
-
-      {insights.priceForecast && (
-        <Card title="Price Forecast" icon={TrendingUp}>
-          <div className="space-y-3 pt-2">
-             <div className="flex justify-between items-center">
-                <span className="text-[10px] font-black text-emerald-500 uppercase tracking-widest">High</span>
-                <span className="text-xs font-black text-white">₹{insights.priceForecast.high}</span>
-             </div>
-             <div className="flex justify-between items-center">
-                <span className="text-[10px] font-black text-amber-500 uppercase tracking-widest">Median</span>
-                <span className="text-xs font-black text-white">₹{insights.priceForecast.median}</span>
-             </div>
-             <div className="flex justify-between items-center">
-                <span className="text-[10px] font-black text-rose-500 uppercase tracking-widest">Low</span>
-                <span className="text-xs font-black text-white">₹{insights.priceForecast.low}</span>
-             </div>
-          </div>
-        </Card>
-      )}
-      
-      {insights.earningsForecast?.eps && insights.earningsForecast.eps.length > 0 && (
-        <Card title="Earnings Forecast (EPS)" icon={BarChart3}>
-          <div className="overflow-x-auto pt-2">
-            <table className="w-full text-left">
-              <thead>
-                <tr className="text-[9px] font-black uppercase tracking-widest text-slate-500 border-b border-slate-800">
-                  <th className="pb-2 pr-3">Period</th>
-                  <th className="pb-2 pr-3 text-right">High</th>
-                  <th className="pb-2 pr-3 text-right">Avg</th>
-                  <th className="pb-2 pr-3 text-right">Low</th>
-                  <th className="pb-2 text-right">Actual</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800/50">
-                {insights.earningsForecast.eps.map((row: any, i: number) => (
-                  <tr key={i} className="text-[11px] font-bold">
-                    <td className="py-2 pr-3 text-slate-300">{row.date}</td>
-                    <td className="py-2 pr-3 text-right text-slate-300">{row.high || '—'}</td>
-                    <td className="py-2 pr-3 text-right text-white">{row.avg || '—'}</td>
-                    <td className="py-2 pr-3 text-right text-slate-300">{row.low || '—'}</td>
-                    <td className={cn("py-2 text-right", row.actual ? "text-emerald-400" : "text-slate-600")}>{row.actual || '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
-      )}
-
-      {insights.earningsForecast?.revenue && insights.earningsForecast.revenue.length > 0 && (
-        <Card title="Revenue Forecast (Cr)" icon={BarChart2}>
-          <div className="overflow-x-auto pt-2">
-            <table className="w-full text-left">
-              <thead>
-                <tr className="text-[9px] font-black uppercase tracking-widest text-slate-500 border-b border-slate-800">
-                  <th className="pb-2 pr-3">Period</th>
-                  <th className="pb-2 pr-3 text-right">High</th>
-                  <th className="pb-2 pr-3 text-right">Avg</th>
-                  <th className="pb-2 pr-3 text-right">Low</th>
-                  <th className="pb-2 text-right">Actual</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800/50">
-                {insights.earningsForecast.revenue.map((row: any, i: number) => (
-                  <tr key={i} className="text-[11px] font-bold">
-                    <td className="py-2 pr-3 text-slate-300">{row.date}</td>
-                    <td className="py-2 pr-3 text-right text-slate-300">{row.high ? `₹${row.high}` : '—'}</td>
-                    <td className="py-2 pr-3 text-right text-white">{row.avg ? `₹${row.avg}` : '—'}</td>
-                    <td className="py-2 pr-3 text-right text-slate-300">{row.low ? `₹${row.low}` : '—'}</td>
-                    <td className={cn("py-2 text-right", row.actual ? "text-emerald-400" : "text-slate-600")}>{row.actual || '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
-      )}
-
-      {insights.hitsMisses?.list && insights.hitsMisses.list.length > 0 && (
-        <Card title="Earnings Hits & Misses" icon={Activity}>
-          <div className="overflow-x-auto pt-2">
-            <table className="w-full text-left">
-              <thead>
-                <tr className="text-[9px] font-black uppercase tracking-widest text-slate-500 border-b border-slate-800">
-                  <th className="pb-2 pr-3">Quarter</th>
-                  <th className="pb-2 pr-3 text-right">Actual</th>
-                  <th className="pb-2 pr-3 text-right">Estimates</th>
-                  <th className="pb-2 text-right">Surprise</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800/50">
-                {insights.hitsMisses.list.map((row: any, i: number) => (
-                  <tr key={i} className="text-[11px] font-bold">
-                    <td className="py-2 pr-3 text-slate-300">{row.quarter}</td>
-                    <td className="py-2 pr-3 text-right text-white">{row.actual || '—'}</td>
-                    <td className="py-2 pr-3 text-right text-slate-300">{row.estimates || '—'}</td>
-                    <td className="py-2 text-right">
-                      <span className={cn(
-                        row.type === 'positive' ? "text-emerald-400" :
-                        row.type === 'negative' ? "text-rose-400" : "text-slate-500"
-                      )}>{row.surplus || row.surprise || '—'}</span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
-      )}
-
-      {insights.hitsMisses?.graphData && insights.hitsMisses.graphData.length > 0 && (
-        <Card title="Price Forecast vs Actual" icon={TrendingUp}>
-          <div className="space-y-3 pt-2">
-            <div className="flex justify-between items-center">
-              <span className="text-[10px] font-black text-emerald-500 uppercase tracking-widest">High</span>
-              <span className="text-xs font-black text-white">₹{insights.hitsMisses.high}</span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-[10px] font-black text-blue-500 uppercase tracking-widest">Mean</span>
-              <span className="text-xs font-black text-white">₹{insights.hitsMisses.mean}</span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-[10px] font-black text-rose-500 uppercase tracking-widest">Low</span>
-              <span className="text-xs font-black text-white">₹{insights.hitsMisses.low}</span>
-            </div>
-            {insights.hitsMisses.graphData.length > 0 && (
-              <div className="h-32 mt-2">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={insights.hitsMisses.graphData.map((d: number[]) => ({ time: d[0], price: d[1] }))}>
-                    <defs>
-                      <linearGradient id="hitsMissesGrad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.2}/>
-                        <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
-                      </linearGradient>
-                    </defs>
-                    <XAxis dataKey="time" hide />
-                    <YAxis hide domain={['auto', 'auto']} />
-                    <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px' }} />
-                    <Area type="monotone" dataKey="price" stroke="#3b82f6" fill="url(#hitsMissesGrad)" strokeWidth={2} />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
-            )}
-          </div>
-        </Card>
-      )}
-
-      {insights.valuation?.list && insights.valuation.list.length > 0 && (
-        <Card title="Valuation Estimates" icon={BarChart2}>
-          <div className="space-y-4 pt-2">
-            {insights.valuation.list.map((v: any, i: number) => (
-              <div key={i} className="space-y-2">
-                <h5 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{v.heading}</h5>
-                <div className="grid grid-cols-2 gap-2">
-                  {v.data.eps && <div className="p-2 bg-slate-950 rounded-lg border border-slate-800/50 text-center">
-                    <p className="text-[8px] font-black text-slate-500 uppercase">EPS</p>
-                    <p className="text-xs font-bold text-white">{v.data.eps || '—'}</p>
-                  </div>}
-                  {v.data.pe && <div className="p-2 bg-slate-950 rounded-lg border border-slate-800/50 text-center">
-                    <p className="text-[8px] font-black text-slate-500 uppercase">P/E</p>
-                    <p className="text-xs font-bold text-white">{v.data.pe || '—'}</p>
-                  </div>}
-                  {v.data.bvps && <div className="p-2 bg-slate-950 rounded-lg border border-slate-800/50 text-center">
-                    <p className="text-[8px] font-black text-slate-500 uppercase">BVPS</p>
-                    <p className="text-xs font-bold text-white">{v.data.bvps || '—'}</p>
-                  </div>}
-                  {v.data.pb && <div className="p-2 bg-slate-950 rounded-lg border border-slate-800/50 text-center">
-                    <p className="text-[8px] font-black text-slate-500 uppercase">P/B</p>
-                    <p className="text-xs font-bold text-white">{v.data.pb || '—'}</p>
-                  </div>}
-                </div>
-                {v.data.analyst && (
-                  <p className="text-[8px] text-slate-600 italic text-center">{v.data.analyst}</p>
-                )}
-              </div>
-            ))}
-          </div>
-        </Card>
-      )}
-    </div>
-  );
-};
-
-const PriceVolume: React.FC<{ symbol: string }> = ({ symbol }) => {
-  const { data: rawInsights, isLoading } = trpc.getStockInsights.useQuery({ symbol });
-  const insights = rawInsights as any;
-  const pv = insights?.stockPriceVolume;
-
-  if (isLoading) return <div className="p-6 animate-pulse bg-slate-900 rounded-2xl border border-slate-800"><div className="h-32 bg-slate-800/50 rounded-xl" /></div>;
-  if (!pv) return null;
-
-  const pricePeriods = [
-    { label: 'YTD', value: pv.price?.YTD },
-    { label: '1W', value: pv.price?.['1 WEEK'] },
-    { label: '1M', value: pv.price?.['1 MONTH'] },
-    { label: '3M', value: pv.price?.['3 MONTHS'] },
-    { label: '6M', value: pv.price?.['6 MONTHS'] },
-    { label: '1Y', value: pv.price?.['1 YEAR'] },
-    { label: '2Y', value: pv.price?.['2 YEARS'] },
-    { label: '3Y', value: pv.price?.['3 YEARS'] },
-    { label: '5Y', value: pv.price?.['5 YEARS'] },
-  ];
-
-  const volumePeriods = ['Today', 'Yesterday', '1 Week Avg', '1 Month Avg'] as const;
-
-  return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-      <Card title="Price Performance" icon={TrendingUp}>
-        <div className="grid grid-cols-3 gap-3 pt-2">
-          {pricePeriods.map(p => {
-            const val = p.value;
-            const isUp = val !== undefined && val >= 0;
-            return (
-              <div key={p.label} className="p-3 bg-slate-950 rounded-xl border border-slate-800/50 text-center">
-                <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">{p.label}</p>
-                <p className={cn(
-                  "text-sm font-black italic tracking-tighter",
-                  val === undefined ? "text-slate-600" : isUp ? "text-emerald-400" : "text-rose-400"
-                )}>
-                  {val !== undefined ? `${isUp ? '+' : ''}${val.toFixed(2)}%` : '—'}
-                </p>
-              </div>
-            );
-          })}
-        </div>
-      </Card>
-
-      <Card title="Volume & Delivery" icon={BarChart3}>
-        <div className="space-y-3 pt-2">
-          {volumePeriods.map(period => {
-            const v = pv.volume?.[period];
-            if (!v) return null;
-            return (
-              <div key={period} className="p-3 bg-slate-950 rounded-xl border border-slate-800/50">
-                <div className="flex justify-between items-center mb-2">
-                  <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{period}</span>
-                  <span className="text-[10px] font-bold text-slate-400">{v.cvol_display_text}</span>
-                </div>
-                <div className="flex justify-between items-center text-[10px] font-bold">
-                  <span className="text-slate-400">Delivery:</span>
-                  <span className={cn(
-                    v.delivery_display_text ? "text-emerald-400" : "text-slate-600"
-                  )}>{v.delivery_display_text || 'N/A'}</span>
-                </div>
-                {v.delivery > 0 && (
-                  <div className="mt-1.5 h-1 bg-slate-800 rounded-full overflow-hidden">
-                    <div 
-                      className="h-full bg-emerald-500 rounded-full" 
-                      style={{ width: `${Math.min(100, (v.delivery / v.cvol) * 100)}%` }} 
-                    />
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </Card>
-    </div>
-  );
-};
-
-const StockSWOT: React.FC<{ symbol: string }> = ({ symbol }) => {
-  const { data: insights, isLoading } = trpc.getStockInsights.useQuery({ symbol });
-
-  if (isLoading) return <div className="p-10 animate-pulse bg-slate-900 rounded-2xl border border-slate-800" />;
-  if (!insights || !(insights as any).swot) return null;
-
-  const { strengths, weaknesses, opportunities, threats } = (insights as any).swot;
-
-  return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-      <div className="p-4 bg-emerald-500/5 border border-emerald-500/20 rounded-2xl">
-        <h5 className="text-[10px] font-black text-emerald-500 uppercase tracking-widest mb-3 flex items-center gap-2">
-          <TrendingUp className="w-3 h-3" /> Strengths
-        </h5>
-        <ul className="space-y-2">
-          {strengths.map((s, i) => (
-            <li key={i} className="text-[11px] text-slate-400 font-bold italic leading-relaxed">• {s}</li>
-          ))}
-        </ul>
-      </div>
-      <div className="p-4 bg-rose-500/5 border border-rose-500/20 rounded-2xl">
-        <h5 className="text-[10px] font-black text-rose-500 uppercase tracking-widest mb-3 flex items-center gap-2">
-          <TrendingDown className="w-3 h-3" /> Weaknesses
-        </h5>
-        <ul className="space-y-2">
-          {weaknesses.map((s, i) => (
-            <li key={i} className="text-[11px] text-slate-400 font-bold italic leading-relaxed">• {s}</li>
-          ))}
-        </ul>
-      </div>
-      <div className="p-4 bg-blue-500/5 border border-blue-500/20 rounded-2xl">
-        <h5 className="text-[10px] font-black text-blue-500 uppercase tracking-widest mb-3 flex items-center gap-2">
-          <Zap className="w-3 h-3" /> Opportunities
-        </h5>
-        <ul className="space-y-2">
-          {opportunities.map((s, i) => (
-            <li key={i} className="text-[11px] text-slate-400 font-bold italic leading-relaxed">• {s}</li>
-          ))}
-        </ul>
-      </div>
-      <div className="p-4 bg-amber-500/5 border border-amber-500/20 rounded-2xl">
-        <h5 className="text-[10px] font-black text-amber-500 uppercase tracking-widest mb-3 flex items-center gap-2">
-          <AlertCircle className="w-3 h-3" /> Threats
-        </h5>
-        <ul className="space-y-2">
-          {threats.map((s, i) => (
-            <li key={i} className="text-[11px] text-slate-400 font-bold italic leading-relaxed">• {s}</li>
-          ))}
-        </ul>
-      </div>
-    </div>
-  );
-};
-
-const FundamentalEssentials: React.FC<{ symbol: string }> = ({ symbol }) => {
-  const { data: insights, isLoading } = trpc.getStockInsights.useQuery({ symbol });
-
-  if (isLoading) return <div className="grid grid-cols-2 md:grid-cols-6 gap-4 p-4 animate-pulse" />;
-  if (!insights || !(insights as any).essentials) return null;
-
-  const { pe, sectorPe, pb, dividendYield, marketCap, faceValue } = (insights as any).essentials;
-
-  const items = [
-    { label: 'P/E Ratio', value: pe, sub: `Sector: ${sectorPe}` },
-    { label: 'P/B Ratio', value: pb },
-    { label: 'Div Yield', value: `${dividendYield}%` },
-    { label: 'Market Cap', value: marketCap },
-    { label: 'Face Value', value: faceValue },
-    { label: 'Trend', value: (insights as any).technicalTrend, color: (insights as any).technicalTrend === 'BULLISH' ? 'text-emerald-400' : 'text-rose-400' }
-  ];
-
-  return (
-    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-      {items.map((item, i) => (
-        <div key={i} className="p-4 bg-slate-950 border border-slate-800 rounded-2xl">
-          <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">{item.label}</p>
-          <p className={cn("text-lg font-black italic tracking-tighter", item.color || "text-white")}>{item.value}</p>
-          {item.sub && <p className="text-[8px] text-slate-600 font-bold uppercase mt-1">{item.sub}</p>}
-        </div>
-      ))}
-    </div>
-  );
-};
+// AnalystEstimates, PriceVolume, StockSWOT, FundamentalEssentials removed — data now shown via MCStockInfoPanel
 
 const NewsTab: React.FC<{ symbol: string }> = ({ symbol }) => {
   const allNews = useNewsFeed();
@@ -4241,19 +3794,6 @@ const StockDetails: React.FC<{
     }
   });
 
-  // Full-page loading while fetching live quote
-  if (!initialStock && isLoading) {
-    return (
-      <div className="p-20 text-center">
-        <button onClick={onBack} className="mb-8 p-2 bg-slate-900 border border-slate-800 rounded-xl text-slate-400 hover:text-white transition-all inline-block">
-          <ArrowLeft className="w-5 h-5" />
-        </button>
-        <div className="text-2xl font-black text-white italic tracking-tighter uppercase mb-2">{symbol}</div>
-        <div className="animate-pulse text-slate-500 text-sm">Loading live data...</div>
-      </div>
-    );
-  }
-
   // Synthetic high-fidelity candlestick data
   const [chartData] = useState(() => {
     const base = stock?.price || 1000;
@@ -4312,6 +3852,19 @@ const StockDetails: React.FC<{
       max
     };
   }, [chartData]);
+
+  // Full-page loading while fetching live quote
+  if (!initialStock && isLoading) {
+    return (
+      <div className="p-20 text-center">
+        <button onClick={onBack} className="mb-8 p-2 bg-slate-900 border border-slate-800 rounded-xl text-slate-400 hover:text-white transition-all inline-block">
+          <ArrowLeft className="w-5 h-5" />
+        </button>
+        <div className="text-2xl font-black text-white italic tracking-tighter uppercase mb-2">{symbol}</div>
+        <div className="animate-pulse text-slate-500 text-sm">Loading live data...</div>
+      </div>
+    );
+  }
 
   const priceLoading = !stock && !isError && isLoading;
   const priceUnavailable = !stock && (isError || (!isLoading && !initialStock));
@@ -4382,7 +3935,6 @@ const StockDetails: React.FC<{
           { id: 'fundamentals', label: 'Fundamental' },
           { id: 'mf', label: 'MF Insights' },
           { id: 'fno', label: 'F&O Insights' },
-          { id: 'mc', label: 'MC Intelligence' },
           { id: 'news', label: 'News Feed' },
         ].map(tab => (
           <button
@@ -4403,9 +3955,10 @@ const StockDetails: React.FC<{
         <div className="col-span-12 lg:col-span-8 space-y-6">
           {activeTab === 'insights' && (
             <div className="space-y-6">
-              <FundamentalEssentials symbol={symbol} />
-              <MoneycontrolInsights symbol={symbol} />
-              
+              <MCErrorBoundary>
+                <MCStockInfoPanel symbol={symbol} scId={mcScId} />
+              </MCErrorBoundary>
+
               {/* Real-time Candlestick Pattern Recognition */}
               {patterns.length > 0 && (
                 <motion.div 
@@ -4456,10 +4009,6 @@ const StockDetails: React.FC<{
                 </motion.div>
               )}
 
-              <StockSWOT symbol={symbol} />
-              <AnalystEstimates symbol={symbol} />
-              <PriceVolume symbol={symbol} />
-              
               <Card title="Interactive Technical Chart" icon={Activity}>
                 <div className="flex gap-4 mb-6 overflow-x-auto pb-2 hide-scrollbar">
                     {['1m', '5m', '15m', '1H', '1D', '1W'].map(tf => (
@@ -4600,7 +4149,7 @@ const StockDetails: React.FC<{
                 <Card title="Market Summary" icon={Info}>
                    <div className="space-y-4">
                       <p className="text-xs text-slate-400 leading-relaxed italic">
-                        {stock.name} is currently showing a {stock.changePct > 0 ? 'bullish' : 'bearish'} bias with volumes trending {Math.random() > 0.5 ? 'above' : 'below'} the 20-day average. The Relative Strength Index (RSI) is sitting at 58.4, indicating neutral momentum.
+                        {stock?.name ?? displayName} is currently showing a {(stock?.changePct ?? 0) > 0 ? 'bullish' : 'bearish'} bias with volumes trending {Math.random() > 0.5 ? 'above' : 'below'} the 20-day average. The Relative Strength Index (RSI) is sitting at 58.4, indicating neutral momentum.
                       </p>
                       <div className="flex gap-4">
                          <div className="flex-1 p-3 bg-slate-950 rounded-xl border border-slate-800">
@@ -4609,7 +4158,7 @@ const StockDetails: React.FC<{
                          </div>
                          <div className="flex-1 p-3 bg-slate-950 rounded-xl border border-slate-800">
                             <span className="text-[8px] font-black text-slate-500 uppercase block mb-1">52W High</span>
-                            <span className="text-xs font-bold text-white">₹{stock.high + 100}</span>
+                            <span className="text-xs font-bold text-white">{stock?.high ? `₹${stock.high + 100}` : '—'}</span>
                          </div>
                       </div>
                    </div>
@@ -4724,9 +4273,6 @@ const StockDetails: React.FC<{
                     )}
                  </Card>
               </div>
-              <MCErrorBoundary>
-                <MCStockInfoPanel symbol={symbol} scId={mcScId} section="insights" />
-              </MCErrorBoundary>
             </div>
           )}
 
@@ -4748,13 +4294,6 @@ const StockDetails: React.FC<{
           )}
           {activeTab === 'mf' && <MFAnalysis symbol={symbol} />}
           {activeTab === 'news' && <NewsTab symbol={symbol} />}
-          {activeTab === 'mc' && (
-            <div className="space-y-6">
-              <MCErrorBoundary>
-                <McTab symbol={symbol} scId={mcScId} />
-              </MCErrorBoundary>
-            </div>
-          )}
 
            {activeTab === 'fno' && (
             <div className="space-y-6">
@@ -4878,24 +4417,6 @@ const StockDetails: React.FC<{
           </Card>
         </div>
       </div>
-    </div>
-  );
-};
-
-/**
- * MC Intelligence Tab - Shows MoneyControl consolidated data with Daily/Weekly/Monthly timeframe toggle
- * scId is the MoneyControl symbol ID (e.g., BE03 for Bharat Electronics)
- * Replace BE03 with other scId values for different stocks
- * Data sources: https://priceapi.moneycontrol.com/pricefeed/techindicator/{D/W/M}/{scId}
- *              https://api.moneycontrol.com/mcapi/v1/swot/details?scId={scId}&type=all
- *              https://api.moneycontrol.com/mcapi/v1/extdata/mc-essentials?scId={scId}&type=ed
- *              https://api.moneycontrol.com/mcapi/v1/extdata/mc-insights?scId={scId}&type=d
- *              https://api.moneycontrol.com/mcapi/v1/stock/estimates/*?scId={scId}
- */
-const McTab: React.FC<{ symbol: string; scId: string }> = ({ symbol, scId }) => {
-  return (
-    <div className="space-y-6">
-      <MCStockInfoPanel symbol={symbol} scId={scId} />
     </div>
   );
 };
@@ -5063,16 +4584,17 @@ export default function App() {
             >
               {activeTab === 'dashboard' && <Dashboard stocks={stocks} onNewSignal={addToast} onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />}
               {activeTab === 'top-rated' && <TopRatedStocks onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} />}
-              {activeTab === 'indices' && <IndicesPage />}
+              {activeTab === 'indices' && <IndicesPage onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} />}
               {activeTab === 'market-map' && <MarketMap />}
               {activeTab === 'screener' && <Screener stocks={stocks} onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />}
-              {activeTab === 'trendlyne' && <TrendlyneScreenerPanel />}
+              {activeTab === 'trendlyne' && <TrendlyneScreenerPanel onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} />}
               {activeTab === 'discover' && <div className="p-6"><NSEStockDiscovery onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} /></div>}
               {activeTab === 'details' && selectedSymbol && (
-                <StockDetails 
-                  symbol={selectedSymbol} 
-                  stock={stocks.find(s => s.symbol === selectedSymbol)} 
-                  onBack={() => setActiveTab('dashboard')} 
+                <StockDetails
+                  key={selectedSymbol}
+                  symbol={selectedSymbol}
+                  stock={stocks.find(s => s.symbol === selectedSymbol)}
+                  onBack={() => setActiveTab('dashboard')}
                   watchlist={watchlist}
                   onToggleWatchlist={toggleWatchlist}
                 />

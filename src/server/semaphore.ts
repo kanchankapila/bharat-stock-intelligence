@@ -1,15 +1,23 @@
 export class Semaphore {
   private tasks: (() => void)[] = [];
-  private count: number;
+  private _count: number;
 
   constructor(count: number) {
-    this.count = count;
+    this._count = count;
+  }
+
+  get count() {
+    return this._count;
+  }
+
+  get queueDepth() {
+    return this.tasks.length;
   }
 
   async acquire() {
     return new Promise<void>((resolve) => {
-      if (this.count > 0) {
-        this.count--;
+      if (this._count > 0) {
+        this._count--;
         resolve();
       } else {
         this.tasks.push(resolve);
@@ -18,10 +26,10 @@ export class Semaphore {
   }
 
   release() {
-    this.count++;
+    this._count++;
     const next = this.tasks.shift();
     if (next) {
-      this.count--;
+      this._count--;
       next();
     }
   }
@@ -32,6 +40,26 @@ export class Semaphore {
       return await task();
     } finally {
       this.release();
+    }
+  }
+
+  /**
+   * Run a task immediately if the semaphore has slots, 
+   * otherwise run it without waiting for acquisition.
+   * Useful for high-priority or cached operations.
+   */
+  async runPriority<T>(task: () => Promise<T>): Promise<T> {
+    const hasSlot = this._count > 0;
+    if (hasSlot) {
+      await this.acquire();
+      try {
+        return await task();
+      } finally {
+        this.release();
+      }
+    } else {
+      // Just run it - we don't want to block the entire pipeline if the semaphore is full
+      return await task();
     }
   }
 }

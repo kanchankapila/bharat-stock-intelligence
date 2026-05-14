@@ -2,21 +2,49 @@ import React from 'react';
 import { cn } from '../lib/utils';
 import { trpc } from '../lib/trpc';
 import {
-  TrendingUp, TrendingDown, Activity, Info, BarChart3, 
+  TrendingUp, TrendingDown, Activity, Info, BarChart3,
   PieChart, ArrowUpRight, ArrowDownRight, Layers, Target, Zap
 } from 'lucide-react';
 import { motion } from 'motion/react';
+import {
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
+} from 'recharts';
 import { Card, SentimentBadge, ValueDisplay, IndicatorRow } from './MCCommon';
+import stockData from '../data/stocklist';
 
 interface MCIndexDetailPanelProps {
   indId: string;
   name: string;
   bridgeSymbol?: string;
+  onSelectStock?: (symbol: string) => void;
 }
 
 type Timeframe = 'D' | 'W' | 'M';
 
-export const MCIndexDetailPanel: React.FC<MCIndexDetailPanelProps> = ({ indId, name, bridgeSymbol }) => {
+function resolveConstituentSymbol(s: any): string | null {
+  // s.id from MC marketmap is the NSE/BSE ticker (e.g. "RELIANCE")
+  if (s.id) {
+    const bySymbol = stockData.find(st => st.symbol.toUpperCase() === String(s.id).toUpperCase());
+    if (bySymbol) return bySymbol.symbol;
+    // also try matching against mcsymbol
+    const byMc = stockData.find(st => st.mcsymbol?.toUpperCase() === String(s.id).toUpperCase());
+    if (byMc) return byMc.symbol;
+  }
+  // fallback: match company name
+  if (s.shortname) {
+    const nameLower = String(s.shortname).toLowerCase();
+    const byName = stockData.find(st => st.name.toLowerCase() === nameLower);
+    if (byName) return byName.symbol;
+    const firstWord = nameLower.split(' ')[0];
+    if (firstWord.length >= 4) {
+      const partial = stockData.find(st => st.name.toLowerCase().startsWith(firstWord));
+      if (partial) return partial.symbol;
+    }
+  }
+  return null;
+}
+
+export const MCIndexDetailPanel: React.FC<MCIndexDetailPanelProps> = ({ indId, name, bridgeSymbol, onSelectStock }) => {
   const [timeframe, setTimeframe] = React.useState<Timeframe>('D');
   
   // Data Queries
@@ -33,6 +61,16 @@ export const MCIndexDetailPanel: React.FC<MCIndexDetailPanelProps> = ({ indId, n
   const { data: advDec } = trpc.getAdvanceDecline.useQuery(
     { ex: bridgeSymbol?.includes('NSX') || name.toUpperCase().includes('NIFTY') ? 'N' : 'B' },
     { enabled: !!indId }
+  );
+
+  const { data: peChart } = trpc.getIndexPeChart.useQuery(
+    { indId },
+    { enabled: !!indId, staleTime: 3600000 }
+  );
+
+  const { data: pbChart } = trpc.getIndexPbChart.useQuery(
+    { indId },
+    { enabled: !!indId, staleTime: 3600000 }
   );
 
   if (loadingDetails) {
@@ -86,45 +124,68 @@ export const MCIndexDetailPanel: React.FC<MCIndexDetailPanelProps> = ({ indId, n
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Market Breadth & Fundamentals */}
         <div className="lg:col-span-1 space-y-6">
-          {/* Advance Decline */}
-          {ad && (
-            <Card title="Market Breadth" icon={Activity}>
-              <div className="space-y-4">
-                <div className="flex justify-between items-end mb-1">
-                  <div className="text-center">
-                    <span className="text-[10px] font-black text-emerald-500 uppercase">Adv</span>
-                    <p className="text-lg font-black text-white">{ad.adv || '0'}</p>
+          {/* Advance Decline — intraday breadth chart */}
+          {ad && (() => {
+            const latest = (ad as any)['0'] || {};
+            const advances = latest.advances ?? 0;
+            const declines = latest.declines ?? 0;
+            const unchanged = latest.unchanged ?? 0;
+            const total = advances + declines + unchanged || 1;
+
+            const allPoints = Object.values(ad as Record<string, any>)
+              .filter((p: any) => p && typeof p.advances === 'number')
+              .reverse();
+            const step = Math.max(1, Math.floor(allPoints.length / 40));
+            const chartSeries = allPoints
+              .filter((_: any, i: number) => i % step === 0)
+              .map((p: any, i: number) => ({ t: i, adv: p.advances, dec: p.declines }));
+
+            return (
+              <Card title="Market Breadth (Intraday)" icon={Activity}>
+                <div className="space-y-3">
+                  <div className="flex justify-between items-end">
+                    <div className="text-center">
+                      <span className="text-[10px] font-black text-emerald-500 uppercase">Advances</span>
+                      <p className="text-lg font-black text-emerald-400">{advances}</p>
+                    </div>
+                    <div className="text-center">
+                      <span className="text-[10px] font-black text-slate-500 uppercase">Unchanged</span>
+                      <p className="text-lg font-black text-slate-400">{unchanged}</p>
+                    </div>
+                    <div className="text-center">
+                      <span className="text-[10px] font-black text-rose-500 uppercase">Declines</span>
+                      <p className="text-lg font-black text-rose-400">{declines}</p>
+                    </div>
                   </div>
-                  <div className="text-center">
-                    <span className="text-[10px] font-black text-slate-500 uppercase">Unch</span>
-                    <p className="text-lg font-black text-white">{ad.unch || '0'}</p>
+                  <div className="h-2 w-full bg-slate-900 rounded-full overflow-hidden flex">
+                    <div className="h-full bg-emerald-500" style={{ width: `${(advances / total) * 100}%` }} />
+                    <div className="h-full bg-slate-700" style={{ width: `${(unchanged / total) * 100}%` }} />
+                    <div className="h-full bg-rose-500" style={{ width: `${(declines / total) * 100}%` }} />
                   </div>
-                  <div className="text-center">
-                    <span className="text-[10px] font-black text-rose-500 uppercase">Dec</span>
-                    <p className="text-lg font-black text-white">{ad.dec || '0'}</p>
-                  </div>
+                  {chartSeries.length > 3 && (
+                    <div className="h-28">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={chartSeries} margin={{ top: 2, right: 2, bottom: 0, left: -28 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                          <XAxis dataKey="t" hide />
+                          <YAxis tick={{ fontSize: 8, fill: '#64748b' }} />
+                          <Tooltip
+                            contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '8px', fontSize: '9px' }}
+                            formatter={(v: any, n: string) => [v, n === 'adv' ? 'Advances' : 'Declines']}
+                          />
+                          <Line type="monotone" dataKey="adv" stroke="#10b981" strokeWidth={1.5} dot={false} />
+                          <Line type="monotone" dataKey="dec" stroke="#f43f5e" strokeWidth={1.5} dot={false} />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  )}
+                  <p className="text-[8px] text-center text-slate-700 font-bold uppercase tracking-widest">
+                    {total} stocks • A/D Ratio: {declines > 0 ? (advances / declines).toFixed(2) : '—'}
+                  </p>
                 </div>
-                
-                <div className="h-3 w-full bg-slate-900 rounded-full overflow-hidden flex">
-                  <div 
-                    className="h-full bg-emerald-500 transition-all duration-1000" 
-                    style={{ width: `${(parseFloat(ad.adv || '0') / (parseFloat(ad.total || '1') || 1)) * 100}%` }}
-                  />
-                  <div 
-                    className="h-full bg-slate-700 transition-all duration-1000" 
-                    style={{ width: `${(parseFloat(ad.unch || '0') / (parseFloat(ad.total || '1') || 1)) * 100}%` }}
-                  />
-                  <div 
-                    className="h-full bg-rose-500 transition-all duration-1000" 
-                    style={{ width: `${(parseFloat(ad.dec || '0') / (parseFloat(ad.total || '1') || 1)) * 100}%` }}
-                  />
-                </div>
-                <p className="text-[9px] text-center text-slate-600 font-bold uppercase tracking-widest">
-                  Total Stocks: {ad.total || '—'}
-                </p>
-              </div>
-            </Card>
-          )}
+              </Card>
+            );
+          })()}
 
           {/* Fundamentals */}
           {fundamentals && (
@@ -257,6 +318,60 @@ export const MCIndexDetailPanel: React.FC<MCIndexDetailPanelProps> = ({ indId, n
             </Card>
           )}
 
+          {/* PE/PB Valuation Time Series Charts */}
+          {(peChart || pbChart) && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {peChart && peChart.length > 0 && (
+                <Card title="PE Ratio — 1 Year History" icon={BarChart3}>
+                  <div className="h-48 mt-3">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={peChart.slice(-60)} margin={{ top: 4, right: 4, bottom: 0, left: -20 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                        <XAxis dataKey="date" hide />
+                        <YAxis domain={['auto', 'auto']} tick={{ fontSize: 9, fill: '#64748b' }} width={40} />
+                        <Tooltip
+                          contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '8px', fontSize: '10px' }}
+                          formatter={(v: any) => [v.toFixed(2), 'PE']}
+                          labelFormatter={(l) => l}
+                        />
+                        <Line type="monotone" dataKey="value" stroke="#3b82f6" strokeWidth={2} dot={false} name="PE" />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div className="flex justify-between mt-2 text-[9px] font-black text-slate-500 uppercase tracking-widest">
+                    <span>Current: <span className="text-white">{peChart[peChart.length - 1]?.value?.toFixed(2)}</span></span>
+                    <span>Min: <span className="text-emerald-400">{Math.min(...peChart.map(d => d.value)).toFixed(2)}</span></span>
+                    <span>Max: <span className="text-rose-400">{Math.max(...peChart.map(d => d.value)).toFixed(2)}</span></span>
+                  </div>
+                </Card>
+              )}
+              {pbChart && pbChart.length > 0 && (
+                <Card title="PB Ratio — 1 Year History" icon={BarChart3}>
+                  <div className="h-48 mt-3">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={pbChart.slice(-60)} margin={{ top: 4, right: 4, bottom: 0, left: -20 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                        <XAxis dataKey="date" hide />
+                        <YAxis domain={['auto', 'auto']} tick={{ fontSize: 9, fill: '#64748b' }} width={40} />
+                        <Tooltip
+                          contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '8px', fontSize: '10px' }}
+                          formatter={(v: any) => [v.toFixed(2), 'PB']}
+                          labelFormatter={(l) => l}
+                        />
+                        <Line type="monotone" dataKey="value" stroke="#a855f7" strokeWidth={2} dot={false} name="PB" />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div className="flex justify-between mt-2 text-[9px] font-black text-slate-500 uppercase tracking-widest">
+                    <span>Current: <span className="text-white">{pbChart[pbChart.length - 1]?.value?.toFixed(2)}</span></span>
+                    <span>Min: <span className="text-emerald-400">{Math.min(...pbChart.map(d => d.value)).toFixed(2)}</span></span>
+                    <span>Max: <span className="text-rose-400">{Math.max(...pbChart.map(d => d.value)).toFixed(2)}</span></span>
+                  </div>
+                </Card>
+              )}
+            </div>
+          )}
+
           {/* Constituents */}
           {constituents && constituents.item && (
             <Card title="Top Constituents" icon={Layers}>
@@ -270,10 +385,20 @@ export const MCIndexDetailPanel: React.FC<MCIndexDetailPanelProps> = ({ indId, n
                     </tr>
                   </thead>
                   <tbody>
-                    {constituents.item.slice(0, 10).map((s: any, i: number) => (
-                      <tr key={i} className="border-b border-slate-800/30 hover:bg-slate-800/20 transition-colors cursor-pointer group">
+                    {constituents.item.slice(0, 10).map((s: any, i: number) => {
+                      const sym = resolveConstituentSymbol(s);
+                      return (
+                      <tr
+                        key={i}
+                        onClick={() => sym && onSelectStock && onSelectStock(sym)}
+                        className={cn(
+                          "border-b border-slate-800/30 hover:bg-slate-800/20 transition-colors group",
+                          sym && onSelectStock ? "cursor-pointer" : ""
+                        )}
+                      >
                         <td className="py-3">
                           <p className="text-xs font-black text-white group-hover:text-blue-400 transition-colors uppercase italic">{s.shortname}</p>
+                          {sym && <p className="text-[9px] text-slate-600 font-bold uppercase tracking-widest">{sym}</p>}
                         </td>
                         <td className="py-3 text-right">
                           <p className="text-xs font-black text-white tabular-nums">{s.lastprice}</p>
@@ -287,7 +412,8 @@ export const MCIndexDetailPanel: React.FC<MCIndexDetailPanelProps> = ({ indId, n
                           </span>
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

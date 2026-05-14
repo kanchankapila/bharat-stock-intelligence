@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { trpc } from '../lib/trpc';
+import stockData from '../data/stocklist';
 
 interface TrendlyneStock {
   stockId: string;
@@ -24,7 +25,24 @@ interface ScreenerCategory {
   screenpk?: string;
 }
 
-const TrendlyneScreenerPanel: React.FC = () => {
+function resolveNseSymbol(stock: TrendlyneStock): string | null {
+  // 1. match Trendlyne stockId against stocklist.stockid
+  const byId = stockData.find(s => s.stockid === stock.stockId);
+  if (byId) return byId.symbol;
+  // 2. exact name match
+  const nameLower = stock.name.toLowerCase();
+  const byName = stockData.find(s => s.name.toLowerCase() === nameLower);
+  if (byName) return byName.symbol;
+  // 3. partial name match (first word of Trendlyne name inside stocklist name)
+  const firstWord = nameLower.split(' ')[0];
+  if (firstWord.length >= 4) {
+    const partial = stockData.find(s => s.name.toLowerCase().startsWith(firstWord));
+    if (partial) return partial.symbol;
+  }
+  return null;
+}
+
+const TrendlyneScreenerPanel: React.FC<{ onSelectStock?: (symbol: string) => void }> = ({ onSelectStock }) => {
   const [selectedScreener, setSelectedScreener] = useState<ScreenerCategory | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [filteredStocks, setFilteredStocks] = useState<TrendlyneStock[]>([]);
@@ -213,12 +231,15 @@ const TrendlyneScreenerPanel: React.FC = () => {
                 )}
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {filteredStocks.map((stock) => (
+                {filteredStocks.map((stock) => {
+                  const nseSymbol = resolveNseSymbol(stock);
+                  return (
                   <div
                     key={`${stock.stockId}-${stock.screenerName}`}
+                    onClick={() => nseSymbol && onSelectStock && onSelectStock(nseSymbol)}
                     className={cn(
-                      "bg-slate-800/50 border rounded-lg p-4 transition-all hover:shadow-lg hover:shadow-amber-500/10 group cursor-pointer",
-                      "border-slate-700 hover:border-slate-600"
+                      "bg-slate-800/50 border rounded-lg p-4 transition-all hover:shadow-lg hover:shadow-amber-500/10 group",
+                      nseSymbol && onSelectStock ? "cursor-pointer border-slate-700 hover:border-amber-400/50" : "border-slate-700 hover:border-slate-600"
                     )}
                   >
                     {/* Stock Header */}
@@ -271,12 +292,16 @@ const TrendlyneScreenerPanel: React.FC = () => {
                     </div>
 
                     {/* Footer */}
-                    <div className="pt-3 border-t border-slate-700 flex items-center gap-2 text-slate-500 text-xs group-hover:text-amber-400/70 transition-colors">
-                      <Filter className="w-3 h-3" />
-                      <span>View details</span>
+                    <div className="pt-3 border-t border-slate-700 flex items-center justify-between text-slate-500 text-xs group-hover:text-amber-400/70 transition-colors">
+                      <div className="flex items-center gap-2">
+                        <Filter className="w-3 h-3" />
+                        <span>{nseSymbol ? nseSymbol : 'View details'}</span>
+                      </div>
+                      {nseSymbol && onSelectStock && <ChevronRight className="w-3 h-3" />}
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}

@@ -16,15 +16,15 @@ const TRENDLYNE_BASE_URL = 'https://kayal.trendlyne.com/broker-webview/kayal/all
 // Configuration for fetch behavior (easily parameterized)
 export const TRENDLYNE_CONFIG = {
   // Fetch interval in milliseconds (set to 0 to disable auto-refresh)
-  FETCH_INTERVAL_MS: 300000, // 5 minutes
+  FETCH_INTERVAL_MS: process.env.TRENDLYNE_FETCH_INTERVAL_MS ? parseInt(process.env.TRENDLYNE_FETCH_INTERVAL_MS, 10) : 300000, // 5 minutes
   // Screener names fetch interval (runs once per interval)
-  SCREENER_NAMES_INTERVAL_MS: 86400000, // 24 hours
+  SCREENER_NAMES_INTERVAL_MS: process.env.TRENDLYNE_SCREENER_NAMES_INTERVAL_MS ? parseInt(process.env.TRENDLYNE_SCREENER_NAMES_INTERVAL_MS, 10) : 86400000, // 24 hours
   // Base delay before API call (adds jitter on top)
-  BASE_DELAY_MS: 500,
+  BASE_DELAY_MS: process.env.TRENDLYNE_BASE_DELAY_MS ? parseInt(process.env.TRENDLYNE_BASE_DELAY_MS, 10) : 500,
   // Maximum jitter percentage (10-20% is polite)
-  JITTER_PERCENT: 15,
+  JITTER_PERCENT: process.env.TRENDLYNE_JITTER_PERCENT ? parseInt(process.env.TRENDLYNE_JITTER_PERCENT, 10) : 15,
   // Request timeout
-  REQUEST_TIMEOUT_MS: 30000
+  REQUEST_TIMEOUT_MS: process.env.TRENDLYNE_REQUEST_TIMEOUT_MS ? parseInt(process.env.TRENDLYNE_REQUEST_TIMEOUT_MS, 10) : 30000
 };
 
 // Helper to update fetch intervals
@@ -646,78 +646,51 @@ function determineSentiment(screenerName: string): 'bullish' | 'bearish' | 'neut
 }
 
 /**
- * Find all screeners that contain a specific stock
+ * Find all screeners that contain a specific stock (Synchronous version for API integration)
  * @param stockId - The stock ID to search for
  * @returns Array of screeners containing the stock with sentiment info
  */
-export async function findScreenersByStock(stockId: string): Promise<Array<{
+export function findScreenersByStock(stockId: string): Array<{
   id: string;
   name: string;
   sentiment: 'bullish' | 'bearish' | 'neutral';
-}>> {
+}> {
   try {
-    if (!stockId) {
+    if (!stockId || stockId === '#N/A' || stockId === 'undefined' || stockId === 'null') {
       return [];
     }
 
-    // Get all screeners from database
-    const screeners = getAllScreenersFromDB();
+    // Get matching screeners from database using the stock_id mapping
+    const stmt = db.prepare(`
+      SELECT s.screener_id, s.screener_name
+      FROM trendlyne_screeners s
+      JOIN trendlyne_screener_stocks ss ON s.screener_id = ss.screener_id
+      WHERE ss.stock_id = ? OR ss.symbol = ?
+    `);
+    
+    // Attempt to resolve symbol if stockId is passed as a symbol or mapping exists
+    const mapping = getStockMapping(stockId);
+    const symbol = mapping ? mapping.symbol : stockId;
+    
+    const matches = stmt.all(stockId, symbol) as Array<{ screener_id: string; screener_name: string }>;
 
-    if (screeners.length === 0) {
-      console.log('📊 No screeners in database, fetching them first...');
-      await fetchAllTrendlyneScreenerNames();
+    if (matches.length === 0) {
       return [];
     }
 
-    const matchingScreeners: Array<{
-      id: string;
-      name: string;
-      sentiment: 'bullish' | 'bearish' | 'neutral';
-    }> = [];
+    const result = matches.map(m => ({
+      id: m.screener_id,
+      name: m.screener_name,
+      sentiment: determineSentiment(m.screener_name)
+    }));
 
-    console.log(`🔍 Searching for stock ${stockId} in ${screeners.length} screeners...`);
-
-    // Check each screener to see if it contains the stock
-    for (const screener of screeners) {
-      try {
-        // Apply small delay to be polite
-        await new Promise(resolve => setTimeout(resolve, 100));
-
-        // Fetch stocks from this screener
-        const result = await fetchTrendlyneScreenerData(
-          screener.screenpk,
-          screener.screener_name,
-          0,
-          true  // skipCache to get fresh data
-        );
-
-        // Check if our stock is in the results
-        if (result.success && result.data) {
-          const found = result.data.some(stock => String(stock.stockId) === String(stockId));
-
-          if (found) {
-            const sentiment = determineSentiment(screener.screener_name);
-            matchingScreeners.push({
-              id: screener.screener_id,
-              name: screener.screener_name,
-              sentiment
-            });
-            console.log(`  ✅ Found in screener: ${screener.screener_name} (${sentiment})`);
-          }
-        }
-      } catch (error) {
-        // Continue checking other screeners even if one fails
-        continue;
-      }
-    }
-
-    console.log(`✅ Stock ${stockId} found in ${matchingScreeners.length} screeners`);
-    return matchingScreeners;
+    return result;
   } catch (error) {
-    console.error('❌ Error finding screeners for stock:', error);
+    console.error('❌ Error finding screeners for stock from DB:', error);
     return [];
   }
 }
+
 
 /**
  * Synchronize all screener constituents to the database

@@ -177,8 +177,8 @@ export async function initQueues(): Promise<boolean> {
       { 
         connection, 
         concurrency: 1,
-        lockDuration: 120000, // 120s
-        lockRenewTime: 30000, // 30s
+        lockDuration: 600000, // 10 minutes (Ollama can be very slow)
+        lockRenewTime: 120000, // 2 minutes
       },
     );
 
@@ -201,10 +201,10 @@ export async function initQueues(): Promise<boolean> {
       {
         connection,
         concurrency: 1,           // Reduced to 1 to prevent CPU thrashing during local Ollama inference
-        lockDuration: 300000,    // 5 minutes (Windows/Ollama can be very slow)
-        lockRenewTime: 60000,    // 1 minute renewal
-        stalledInterval: 60000,  // Check for stalled jobs every minute
-        maxStalledCount: 3,      // Allow up to 3 stall events before failing
+        lockDuration: 600000,    // 10 minutes (Windows/Ollama can be very slow)
+        lockRenewTime: 120000,   // 2 minutes renewal
+        stalledInterval: 300000, // 5 minutes (Don't check for stalls too frequently)
+        maxStalledCount: 2,      // Fewer stalls allowed to trigger fail-fast
         limiter: {
           max: 5,                 
           duration: 10_000,        
@@ -243,7 +243,7 @@ export async function initQueues(): Promise<boolean> {
       { 
         connection, 
         concurrency: 1,
-        lockDuration: 300000, // 5 minutes for heavy scoring sync
+        lockDuration: 600000, // 10 minutes for heavy scoring sync
       },
     );
 

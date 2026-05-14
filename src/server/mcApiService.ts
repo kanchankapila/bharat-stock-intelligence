@@ -1,7 +1,10 @@
 import { getStockMapping } from './stockMapping';
 import { Semaphore } from './semaphore';
+import { findMcScreenersByStock } from './moneycontrolScreener';
+import { findScreenersByStock } from './trendlyneScreener';
 
-const mcSemaphore = new Semaphore(3);
+const mcSemaphore = new Semaphore(10); // Increased concurrency
+
 
 interface McApiResponse<T = any> {
   success: number;
@@ -86,6 +89,16 @@ export interface McEssentialsData {
   mcapText: string;
   high52: number;
   low52: number;
+  checklist?: {
+    financials: { question: string; answer: boolean }[];
+    industry: { question: string; answer: boolean }[];
+    ownership: { question: string; answer: boolean }[];
+    others: { question: string; answer: boolean }[];
+  };
+  passPercent?: number;
+  passText?: string;
+  passYes?: number;
+  passNo?: number;
 }
 
 export interface McInsightsData {
@@ -240,10 +253,19 @@ export interface McConsolidatedData {
   hitsMisses: McHitsMisses | null;
   valuation: McValuation | null;
   financialOverview: { ttmEpsText: string; ttmPeText: string; pbText: string } | null;
+  historicalRating: any | null;
+  technicalV2: any | null;
+  technicalRating: any | null;
+  screeners?: {
+    moneycontrol: Array<{ id: string; name: string; sentiment: string }>;
+    trendlyne: Array<{ id: string; name: string; sentiment: string }>;
+  };
 }
 
-export async function mcFetchJson<T = any>(url: string, retries: number = 3, symbol?: string): Promise<T | null> {
-  return mcSemaphore.run(async () => {
+export async function mcFetchJson<T = any>(url: string, retries: number = 3, symbol?: string, priority: boolean = false): Promise<T | null> {
+  const runner = priority ? mcSemaphore.runPriority.bind(mcSemaphore) : mcSemaphore.run.bind(mcSemaphore);
+  return runner(async () => {
+
     let lastError: Error | null = null;
 
     for (let attempt = 1; attempt <= retries; attempt++) {
@@ -332,37 +354,68 @@ export async function fetchMcSwot(scId: string, symbol?: string): Promise<McSwot
 }
 
 export async function fetchMcEssentials(scId: string, symbol?: string): Promise<McEssentialsData | null> {
-  const res = await mcFetchJson<McApiResponse<any>>(
-    `https://api.moneycontrol.com/mcapi/v1/extdata/mc-essentials?scId=${scId}&type=ed`,
-    3,
-    symbol
-  );
-  
-  // Also try v2 endpoint
-  const res2 = await mcFetchJson<McApiResponse<any>>(
-    `https://api.moneycontrol.com/mcapi/extdata/v2/mc-essentials?scId=${scId}&type=ed&deviceType=W`,
-    3,
-    symbol
-  );
+  const [res, res2, checklistRes] = await Promise.all([
+    mcFetchJson<McApiResponse<any>>(
+      `https://api.moneycontrol.com/mcapi/v1/extdata/mc-essentials?scId=${scId}&type=ed`,
+      3, symbol
+    ),
+    mcFetchJson<McApiResponse<any>>(
+      `https://api.moneycontrol.com/mcapi/extdata/v2/mc-essentials?scId=${scId}&type=ed&deviceType=W`,
+      3, symbol
+    ),
+    mcFetchJson<McApiResponse<any>>(
+      `https://api.moneycontrol.com/mcapi/v1/extdata/mc-essentials?scId=${scId}&type=all`,
+      3, symbol
+    ),
+  ]);
 
-  const data = (res?.success === 1 && res.data) ? res.data : 
+  const data = (res?.success === 1 && res.data) ? res.data :
                (res2?.success === 1 && res2.data) ? res2.data : null;
-  if (data) {
-    const ed = data.essentialsData || data;
-    return {
-      pe: parseFloat(ed.pe) || 0,
-      sectorPe: parseFloat(ed.sectorPe) || 0,
-      pb: parseFloat(ed.pb) || 0,
-      dividendYield: parseFloat(ed.dividendYield) || 0,
-      marketCap: ed.marketCap || "N/A",
-      faceValue: parseFloat(ed.faceValue) || 0,
-      industry: ed.industry || ed.newSubsector || "",
-      mcapText: ed.marketCapText || "",
-      high52: parseFloat(ed.high52) || 0,
-      low52: parseFloat(ed.low52) || 0
+  if (!data) return null;
+
+  const ed = data.essentialsData || data;
+
+  const toItems = (arr: any[]) =>
+    (arr || []).map((i: any) => ({ question: i.question, answer: i.answer === 'true' || i.answer === true }));
+
+  let checklist: McEssentialsData['checklist'] | undefined;
+  let passPercent: number | undefined;
+  let passText: string | undefined;
+  let passYes: number | undefined;
+  let passNo: number | undefined;
+
+  if (checklistRes?.success === 1 && checklistRes.data?.essentialsData) {
+    const cl = checklistRes.data.essentialsData;
+    checklist = {
+      financials: toItems(cl.financials),
+      industry: toItems(cl.industry),
+      ownership: toItems(cl.ownership),
+      others: toItems(cl.others),
     };
+    const pc = checklistRes.data.perCount;
+    passPercent = pc?.passper;
+    passText = pc?.passpertext;
+    passYes = pc?.Yes;
+    passNo = pc?.No;
   }
-  return null;
+
+  return {
+    pe: parseFloat(ed.pe) || 0,
+    sectorPe: parseFloat(ed.sectorPe) || 0,
+    pb: parseFloat(ed.pb) || 0,
+    dividendYield: parseFloat(ed.dividendYield) || 0,
+    marketCap: ed.marketCap || "N/A",
+    faceValue: parseFloat(ed.faceValue) || 0,
+    industry: ed.industry || ed.newSubsector || "",
+    mcapText: ed.marketCapText || "",
+    high52: parseFloat(ed.high52) || 0,
+    low52: parseFloat(ed.low52) || 0,
+    checklist,
+    passPercent,
+    passText,
+    passYes,
+    passNo,
+  };
 }
 
 export async function fetchMcInsights(scId: string, symbol?: string): Promise<McInsightsData | null> {
@@ -561,12 +614,11 @@ export async function getMcConsolidatedData(scId: string, symbol: string, timefr
   const mapping = getStockMapping(symbol);
   const effectiveScId = mapping?.mcsymbol || scId;
 
-  // 1. Always fetch Price/Technical Data (The "Live" parts)
-  const technical = await fetchMcTechnicalData(effectiveScId, timeframe, symbol);
-  const equityCash = await fetchMcEquityCash(effectiveScId, symbol);
-  const stockPrice = await fetchMcStockPrice(effectiveScId, symbol);
+  // 1. Local Screeners (Instant)
+  const mcScreeners = findMcScreenersByStock(symbol);
+  const tlScreeners = findScreenersByStock(symbol);
 
-  // 2. Fetch or Use Cache for Fundamentals
+  // 2. Fetch all data points in parallel
   const fetchWithCache = async (key: string, fetcher: () => Promise<any>) => {
     const cached = getCachedFundamental(effectiveScId, key);
     if (cached) return cached;
@@ -575,18 +627,45 @@ export async function getMcConsolidatedData(scId: string, symbol: string, timefr
     return fresh;
   };
 
-  const swot = await fetchWithCache('swot', () => fetchMcSwot(effectiveScId, symbol));
-  const essentials = await fetchWithCache('essentials', () => fetchMcEssentials(effectiveScId, symbol));
-  const mcInsights = await fetchWithCache('insights', () => fetchMcInsights(effectiveScId, symbol));
-  const detailedInsights = await fetchWithCache('detailed_insights', () => fetchMcDetailedInsights(effectiveScId, symbol));
-  const priceVolume = await fetchWithCache('price_volume', () => fetchMcPriceVolume(effectiveScId, symbol));
-  const analystRating = await fetchWithCache('analyst_rating', () => fetchMcAnalystRating(effectiveScId, symbol));
-  const earningsForecast = await fetchWithCache('earnings_forecast', () => fetchMcEarningsForecast(effectiveScId, symbol));
-  const priceForecast = await fetchWithCache('price_forecast', () => fetchMcPriceForecast(effectiveScId, symbol));
-  const consensus = await fetchWithCache('consensus', () => fetchMcConsensus(effectiveScId, symbol));
-  const hitsMisses = await fetchWithCache('hits_misses', () => fetchMcHitsMisses(effectiveScId, symbol));
-  const valuation = await fetchWithCache('valuation', () => fetchMcValuation(effectiveScId, symbol));
-  const financialOverview = await fetchWithCache('financial_overview', () => fetchMcFinancialOverview(effectiveScId, symbol));
+  const [
+    technical,
+    equityCash,
+    stockPrice,
+    swot,
+    essentials,
+    mcInsights,
+    detailedInsights,
+    priceVolume,
+    analystRating,
+    earningsForecast,
+    priceForecast,
+    consensus,
+    hitsMisses,
+    valuation,
+    financialOverview,
+    historicalRating,
+    technicalV2,
+    technicalRating
+  ] = await Promise.all([
+    fetchMcTechnicalData(effectiveScId, timeframe, symbol),
+    fetchMcEquityCash(effectiveScId, symbol),
+    fetchMcStockPrice(effectiveScId, symbol),
+    fetchWithCache('swot', () => fetchMcSwot(effectiveScId, symbol)),
+    fetchWithCache('essentials', () => fetchMcEssentials(effectiveScId, symbol)),
+    fetchWithCache('insights', () => fetchMcInsights(effectiveScId, symbol)),
+    fetchWithCache('detailed_insights', () => fetchMcDetailedInsights(effectiveScId, symbol)),
+    fetchWithCache('price_volume', () => fetchMcPriceVolume(effectiveScId, symbol)),
+    fetchWithCache('analyst_rating', () => fetchMcAnalystRating(effectiveScId, symbol)),
+    fetchWithCache('earnings_forecast', () => fetchMcEarningsForecast(effectiveScId, symbol)),
+    fetchWithCache('price_forecast', () => fetchMcPriceForecast(effectiveScId, symbol)),
+    fetchWithCache('consensus', () => fetchMcConsensus(effectiveScId, symbol)),
+    fetchWithCache('hits_misses', () => fetchMcHitsMisses(effectiveScId, symbol)),
+    fetchWithCache('valuation', () => fetchMcValuation(effectiveScId, symbol)),
+    fetchWithCache('financial_overview', () => fetchMcFinancialOverview(effectiveScId, symbol)),
+    fetchWithCache(`historical_rating_${timeframe}`, () => fetchMcHistoricalRating(effectiveScId, timeframe)),
+    fetchWithCache(`technical_v2_${timeframe}`, () => fetchMcTechnicalV2(effectiveScId, timeframe)),
+    fetchWithCache(`technical_rating_${timeframe}`, () => fetchMcTechnicalRating(effectiveScId, timeframe)),
+  ]);
 
   return {
     scId: effectiveScId,
@@ -605,6 +684,14 @@ export async function getMcConsolidatedData(scId: string, symbol: string, timefr
     consensus,
     hitsMisses,
     valuation,
-    financialOverview
+    financialOverview,
+    historicalRating,
+    technicalV2,
+    technicalRating,
+    screeners: {
+      moneycontrol: mcScreeners,
+      trendlyne: tlScreeners
+    }
   };
-}
+}
+

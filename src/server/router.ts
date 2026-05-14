@@ -834,6 +834,20 @@ export const appRouter = router({
       return await fetchIndexGraph(input.indId, input.range, input.type);
     }),
 
+  getIndexPeChart: publicProcedure
+    .input(z.object({ indId: z.string(), duration: z.string().optional().default('1Y') }))
+    .query(async ({ input }) => {
+      const { fetchIndexPeChart } = await import('./indexApiService');
+      return await fetchIndexPeChart(input.indId, input.duration);
+    }),
+
+  getIndexPbChart: publicProcedure
+    .input(z.object({ indId: z.string(), duration: z.string().optional().default('1Y') }))
+    .query(async ({ input }) => {
+      const { fetchIndexPbChart } = await import('./indexApiService');
+      return await fetchIndexPbChart(input.indId, input.duration);
+    }),
+
   // Fetch MC technical data for a specific timeframe (D/W/M)
   getMcTechnical: publicProcedure
     .input(z.object({
@@ -1189,6 +1203,35 @@ export const appRouter = router({
     .query(() => {
       return getNSEStockCount();
     }),
+
+  // ─── HIGH PERFORMANCE CONSOLIDATED DETAIL ──────────────────────────────
+  // Combines MC consolidated data, Scoring Engine results, and Screeners
+  // into a single round-trip to eliminate frontend batching overhead.
+  getAlphaQuantDetail: publicProcedure
+    .input(z.object({ 
+      symbol: z.string(),
+      timeframe: z.enum(['D', 'W', 'M']).optional().default('D'),
+      scoreTimeframe: z.enum(['long_term', 'intraday']).optional().default('long_term')
+    }))
+    .query(async ({ input }) => {
+      const mapping = getStockMapping(input.symbol);
+      const scId = mapping?.mcsymbol || input.symbol;
+      
+      const { getMcConsolidatedData } = await import('./mcApiService');
+      const { getStockScoreDetail } = await import('./scoringService');
+      
+      const [mcData, scoreData] = await Promise.all([
+        getMcConsolidatedData(scId, input.symbol, input.timeframe),
+        getStockScoreDetail(input.symbol, input.scoreTimeframe)
+      ]);
+
+      return {
+        ...mcData,
+        score: scoreData?.score || null,
+        factors: scoreData?.factors || null
+      };
+    }),
 });
+
 
 export type AppRouter = typeof appRouter;

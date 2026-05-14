@@ -236,3 +236,37 @@ export async function syncMoneyControlScreeners() {
 
   console.log('✅ MoneyControl screener synchronization complete.');
 }
+
+/**
+ * Find all MoneyControl screeners that contain a specific stock
+ * @param symbol - The NSE symbol to search for
+ * @returns Array of screeners containing the stock with sentiment info
+ */
+export function findMcScreenersByStock(symbol: string): Array<{
+  id: string;
+  name: string;
+  sentiment: 'bullish' | 'bearish' | 'neutral';
+}> {
+  try {
+    if (!symbol) return [];
+
+    const stmt = db.prepare(`
+      SELECT s.scan_id, s.screener_name, s.is_positive
+      FROM moneycontrol_screeners s
+      JOIN moneycontrol_screener_stocks ss ON s.scan_id = ss.scan_id
+      WHERE ss.symbol = ?
+    `);
+    
+    const matches = stmt.all(symbol) as Array<{ scan_id: string; screener_name: string; is_positive: number }>;
+
+    return matches.map(m => ({
+      id: m.scan_id,
+      name: m.screener_name,
+      sentiment: m.is_positive === 1 ? 'bullish' : 'bearish'
+    }));
+  } catch (error) {
+    console.error(`❌ Error finding MC screeners for stock ${symbol}:`, error);
+    return [];
+  }
+}
+

@@ -8,6 +8,9 @@ import {
   CheckCircle2, BrainCircuit
 } from 'lucide-react';
 import { motion } from 'motion/react';
+import {
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
+} from 'recharts';
 
 interface MCStockInfoPanelProps {
   symbol: string;
@@ -29,7 +32,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({ symbol, scId
       ([entry]) => {
         setIsVisible(entry.isIntersecting);
       },
-      { threshold: 0.05, rootMargin: '200px' } // Load slightly before it enters the viewport
+      { threshold: 0.05, rootMargin: '50px' } // Reduced margin to avoid overwhelming background requests
     );
 
     if (containerRef.current) {
@@ -41,9 +44,12 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({ symbol, scId
 
   // Resolve Trendlyne stockid for screener lookups (numeric ID, different from MC scId)
   const stockMapping = stockData.find(s => s.symbol.toUpperCase() === symbol.toUpperCase());
-  const trendlyneStockId = stockMapping?.stockid || scId;
+  const trendlyneStockId = stockMapping?.tlid || stockMapping?.stockid || scId;
 
-  const { data: mc, isLoading, error } = trpc.getMcConsolidated.useQuery(
+  // ─── UNIFIED BATCH QUERY ───────────────────────────────────────────
+  // Replaces getMcConsolidated, getStockScoreDetail, getStockScreeners, 
+  // and multiple getMcTechnical calls with a single high-performance endpoint.
+  const { data: unifiedData, isLoading, error } = trpc.getAlphaQuantDetail.useQuery(
     { symbol, timeframe },
     { 
       enabled: isVisible,
@@ -52,25 +58,19 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({ symbol, scId
     }
   );
 
-  // Fetch AlphaQuant V2 Score
-  const { data: alphaData } = trpc.getStockScoreDetail.useQuery(
-    { symbol },
-    { 
-      enabled: isVisible,
-      staleTime: 300000 
-    }
+  // Fetch only necessary secondary timeframes (W/M) for the divergence panel
+  // Primary (D) is already part of the mcData
+  const { data: techW } = trpc.getMcTechnical.useQuery(
+    { symbol, duration: 'W' },
+    { enabled: isVisible, staleTime: 300000 }
+  );
+  const { data: techM } = trpc.getMcTechnical.useQuery(
+    { symbol, duration: 'M' },
+    { enabled: isVisible, staleTime: 3600000 }
   );
 
-  // Fetch screeners containing this stock using Trendlyne stockid
-  const { data: screeners = [], isLoading: screenersLoading } = trpc.getStockScreeners.useQuery(
-    { stockId: trendlyneStockId },
-    { 
-      enabled: isVisible,
-      refetchInterval: 300000 
-    }
-  );
+  if (!isVisible && !unifiedData) {
 
-  if (!isVisible && !mc) {
     return (
       <div ref={containerRef} className="h-40 flex items-center justify-center bg-slate-900/10 border border-dashed border-slate-800 rounded-2xl">
         <p className="text-[10px] font-black text-slate-700 uppercase tracking-widest italic">
@@ -94,28 +94,37 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({ symbol, scId
     );
   }
 
-  if (error || !mc) {
+  if (error || !unifiedData) {
+    const stockName = stockData.find(s => s.symbol.toUpperCase() === symbol.toUpperCase())?.name || symbol;
     return (
       <div ref={containerRef} className="p-8 text-center bg-slate-900/30 border border-slate-800 rounded-2xl">
         <AlertCircle className="w-8 h-8 text-rose-500 mx-auto mb-3" />
-        <p className="text-sm text-slate-500 font-bold">Failed to load MC data for {symbol}</p>
-        <p className="text-[10px] text-slate-600 mt-1">scId: {scId}</p>
+        <p className="text-sm text-slate-500 font-bold">Failed to load data for {stockName}</p>
+        <p className="text-[10px] text-slate-600 mt-1 uppercase tracking-widest">{symbol}</p>
       </div>
     );
   }
 
+  const mc = unifiedData;
+  const alphaData = unifiedData.score ? { score: unifiedData.score, factors: unifiedData.factors } : null;
+  const mcScreeners = unifiedData.screeners?.moneycontrol || [];
+  const tlScreeners = unifiedData.screeners?.trendlyne || [];
+  const allScreeners = [...mcScreeners, ...tlScreeners];
+
   const hasAnyData = mc.technical || mc.equityCash || mc.stockPrice || mc.swot || mc.essentials || mc.mcInsights;
   if (!hasAnyData) {
+    const stockName = stockData.find(s => s.symbol.toUpperCase() === symbol.toUpperCase())?.name || symbol;
     return (
       <div ref={containerRef} className="p-8 text-center bg-slate-900/30 border border-slate-800 rounded-2xl">
         <AlertCircle className="w-8 h-8 text-amber-500 mx-auto mb-3" />
-        <p className="text-sm text-slate-400 font-bold">No MoneyControl data available for {symbol}</p>
-        <p className="text-[10px] text-slate-600 mt-1">This stock may not be mapped to a MoneyControl ID (scId: {mc.scId})</p>
+        <p className="text-sm text-slate-400 font-bold">No MoneyControl data available for {stockName}</p>
+        <p className="text-[10px] text-slate-600 mt-1 uppercase tracking-widest">{symbol} — not mapped to a MoneyControl ID</p>
       </div>
     );
   }
 
   const tech = mc.technical;
+  const techD = tech; // Use the primary timeframe tech for divergence (Daily by default)
   const eq = mc.equityCash;
   const sp = mc.stockPrice;
   const swot = mc.swot;
@@ -129,6 +138,10 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({ symbol, scId
   const consensus = mc.consensus;
   const hm = mc.hitsMisses;
   const fov = mc.financialOverview;
+  const valuation = mc.valuation;
+  const historicalRating = mc.historicalRating;
+  const technicalV2 = mc.technicalV2;
+  const technicalRating = mc.technicalRating;
 
   const currentPrice = eq?.pricecurrent || sp?.lastPrice || tech?.close?.toString() || '—';
   const changePct = eq?.pricepercentchange || sp?.perChange || '—';
@@ -214,23 +227,88 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({ symbol, scId
         </div>
       )}
 
-      {/* Trendlyne Screeners Section */}
-      {screeners && screeners.length > 0 && (
+      {/* Multi-Timeframe Divergence Panel */}
+      {(techD || techW || techM) && (
+        <div className="bg-slate-950 border border-slate-800 rounded-2xl p-4">
+          <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-3 flex items-center gap-2">
+            <Activity className="w-3 h-3" /> Multi-Timeframe Signal
+          </p>
+          <div className="grid grid-cols-3 gap-3">
+            {([
+              { label: 'Daily', tech: techD },
+              { label: 'Weekly', tech: techW },
+              { label: 'Monthly', tech: techM },
+            ] as const).map(({ label, tech }) => {
+              const indication = (tech as any)?.sentiments?.indication || '';
+              const bullish = (tech as any)?.sentiments?.totalBullish ?? 0;
+              const bearish = (tech as any)?.sentiments?.totalBearish ?? 0;
+              const isBull = indication.toLowerCase().includes('bullish');
+              const isBear = indication.toLowerCase().includes('bearish');
+              return (
+                <div key={label} className={cn(
+                  "p-3 rounded-xl border text-center",
+                  isBull ? "bg-emerald-500/5 border-emerald-500/20" :
+                  isBear ? "bg-rose-500/5 border-rose-500/20" : "bg-slate-900 border-slate-800"
+                )}>
+                  <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">{label}</p>
+                  {indication ? (
+                    <>
+                      <p className={cn(
+                        "text-[10px] font-black uppercase leading-tight",
+                        isBull ? "text-emerald-400" : isBear ? "text-rose-400" : "text-slate-400"
+                      )}>{indication}</p>
+                      <div className="flex justify-center gap-2 mt-1.5 text-[8px] font-black">
+                        <span className="text-emerald-500">{bullish}B</span>
+                        <span className="text-slate-700">/</span>
+                        <span className="text-rose-500">{bearish}Be</span>
+                      </div>
+                    </>
+                  ) : (
+                    <p className="text-[9px] text-slate-700 italic">Loading…</p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          {/* Highlight divergence */}
+          {techD && techW && techM && (() => {
+            const sD = ((techD as any)?.sentiments?.indication || '').toLowerCase();
+            const sW = ((techW as any)?.sentiments?.indication || '').toLowerCase();
+            const sM = ((techM as any)?.sentiments?.indication || '').toLowerCase();
+            const allSame = sD === sW && sW === sM;
+            if (allSame || !sD || !sW || !sM) return null;
+            const mBull = sM.includes('bullish'), dBear = sD.includes('bearish');
+            return (
+              <div className={cn(
+                "mt-3 px-3 py-2 rounded-lg text-[9px] font-bold italic",
+                mBull && dBear ? "bg-blue-500/10 text-blue-400 border border-blue-500/20" : "bg-amber-500/10 text-amber-400 border border-amber-500/20"
+              )}>
+                {mBull && dBear
+                  ? "⚡ Divergence: Long-term bullish trend with short-term pullback — potential entry zone"
+                  : "⚠ Timeframe divergence detected — signals not aligned across D/W/M"}
+              </div>
+            );
+          })()}
+        </div>
+      )}
+
+      {/* Integrated Screeners Section */}
+      {allScreeners && allScreeners.length > 0 && (
         <div className="bg-slate-800/40 border border-slate-700/50 rounded-2xl p-4">
           <div className="flex items-center gap-2 mb-3">
             <Zap className="w-4 h-4 text-amber-400" />
             <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest">
-              Trendlyne Screeners ({screeners.length})
+              AlphaQuant Signals ({allScreeners.length})
             </span>
           </div>
           <div className="flex flex-wrap gap-2">
-            {screeners.map((screener) => {
+            {allScreeners.map((screener) => {
               const isBullish = screener.sentiment === 'bullish';
               const isBearish = screener.sentiment === 'bearish';
 
               return (
                 <div
-                  key={screener.id}
+                  key={`${screener.id}-${screener.name}`}
                   className={cn(
                     "px-3 py-1.5 rounded-lg text-[9px] font-bold uppercase tracking-tight border flex items-center gap-1.5",
                     isBullish
@@ -256,17 +334,6 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({ symbol, scId
         </div>
       )}
 
-      {/* Loading Screeners */}
-      {screenersLoading && (
-        <div className="bg-slate-800/40 border border-slate-700/50 rounded-2xl p-4 animate-pulse">
-          <div className="flex items-center gap-2">
-            <Zap className="w-4 h-4 text-amber-400" />
-            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-              Loading screeners...
-            </span>
-          </div>
-        </div>
-      )}
 
       {/* Price & Key Stats Row */}
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
@@ -328,6 +395,56 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({ symbol, scId
           <div className="p-3 bg-purple-500/5 border border-purple-500/20 rounded-xl text-center">
             <p className="text-[8px] font-black text-purple-500 uppercase tracking-widest">P/B</p>
             <p className="text-xs font-black text-white italic">{fov.pbText}</p>
+          </div>
+        </div>
+      )}
+
+      {/* MC Essentials Investment Checklist */}
+      {essentials?.checklist && (
+        <div className="bg-slate-950 border border-slate-800 rounded-2xl p-4">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">MC Investment Checklist</span>
+            </div>
+            {essentials.passText && (
+              <div className="flex items-center gap-3">
+                <span className="text-[9px] font-black text-emerald-400">{essentials.passYes} Yes</span>
+                <span className="text-[9px] font-black text-rose-400">{essentials.passNo} No</span>
+                <span className={cn(
+                  "text-[9px] font-black px-2 py-0.5 rounded uppercase",
+                  (essentials.passPercent ?? 0) >= 70 ? "bg-emerald-500/10 text-emerald-400" :
+                  (essentials.passPercent ?? 0) >= 50 ? "bg-amber-500/10 text-amber-400" : "bg-rose-500/10 text-rose-400"
+                )}>{essentials.passText}</span>
+              </div>
+            )}
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {([
+              { key: 'financials', label: 'Financials', color: 'text-blue-400' },
+              { key: 'industry', label: 'Industry', color: 'text-purple-400' },
+              { key: 'ownership', label: 'Ownership', color: 'text-amber-400' },
+              { key: 'others', label: 'Others', color: 'text-slate-400' },
+            ] as const).map(({ key, label, color }) => {
+              const items = essentials.checklist![key];
+              if (!items?.length) return null;
+              return (
+                <div key={key}>
+                  <p className={cn("text-[9px] font-black uppercase tracking-widest mb-2", color)}>{label}</p>
+                  <div className="space-y-1.5">
+                    {items.map((item, i) => (
+                      <div key={i} className="flex items-start gap-2 p-2 bg-slate-900/60 rounded-lg">
+                        <span className={cn(
+                          "text-[9px] font-black mt-0.5 shrink-0 w-3",
+                          item.answer ? "text-emerald-400" : "text-rose-400"
+                        )}>{item.answer ? "✓" : "✗"}</span>
+                        <span className="text-[10px] text-slate-400 font-medium leading-tight">{item.question}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -910,13 +1027,155 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({ symbol, scId
         </div>
       )}
 
-      {/* Data source info */}
+      {/* Valuation Table — EPS, PE, BVPS, PB, Analyst Target by year */}
+      {valuation?.list && valuation.list.length > 0 && (
+        <Card title="Analyst Valuation Estimates" icon={BarChart3}>
+          <div className="overflow-x-auto pt-2">
+            <table className="w-full text-left">
+              <thead>
+                <tr className="text-[9px] font-black uppercase tracking-widest text-slate-500 border-b border-slate-800">
+                  <th className="pb-2 pr-3">Period</th>
+                  <th className="pb-2 pr-3 text-right">EPS</th>
+                  <th className="pb-2 pr-3 text-right">PE</th>
+                  <th className="pb-2 pr-3 text-right">BVPS</th>
+                  <th className="pb-2 pr-3 text-right">PB</th>
+                  <th className="pb-2 text-right">Target</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/50">
+                {valuation.list.map((row, i) => (
+                  <tr key={i} className="text-[11px] font-bold hover:bg-slate-900/30 transition-colors">
+                    <td className="py-2.5 pr-3 text-blue-400 font-black uppercase tracking-widest">{row.heading}</td>
+                    <td className="py-2.5 pr-3 text-right text-white tabular-nums">{row.data?.eps || '—'}</td>
+                    <td className="py-2.5 pr-3 text-right text-slate-300 tabular-nums">{row.data?.pe || '—'}</td>
+                    <td className="py-2.5 pr-3 text-right text-slate-300 tabular-nums">{row.data?.bvps || '—'}</td>
+                    <td className="py-2.5 pr-3 text-right text-slate-300 tabular-nums">{row.data?.pb || '—'}</td>
+                    <td className="py-2.5 text-right">
+                      {row.data?.analyst ? (
+                        <span className="text-emerald-400 font-black">₹{row.data.analyst}</span>
+                      ) : '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {valuation.displayLock === '1' && (
+              <p className="text-[9px] text-amber-500/70 font-bold uppercase tracking-widest mt-3 text-center italic">
+                Some data requires a MoneyControl Pro subscription
+              </p>
+            )}
+          </div>
+        </Card>
+      )}
+
+      {/* Technical Rating Summary from V2 endpoint */}
+      {(technicalRating || technicalV2) && (() => {
+        const rating = technicalRating?.data || technicalRating;
+        const v2 = technicalV2?.data || technicalV2;
+        const ratingText = rating?.rating || v2?.sentiments?.indication || '';
+        const buyCount = rating?.buyCount ?? rating?.buy ?? v2?.sentiments?.totalBullish ?? null;
+        const sellCount = rating?.sellCount ?? rating?.sell ?? v2?.sentiments?.totalBearish ?? null;
+        const holdCount = rating?.holdCount ?? rating?.hold ?? v2?.sentiments?.totalNeutral ?? null;
+        if (!ratingText && buyCount === null) return null;
+        const isBull = ratingText.toLowerCase().includes('bullish') || ratingText.toLowerCase().includes('buy');
+        const isBear = ratingText.toLowerCase().includes('bearish') || ratingText.toLowerCase().includes('sell');
+        return (
+          <div className={cn(
+            "p-4 rounded-2xl border flex items-center justify-between gap-4",
+            isBull ? "bg-emerald-500/5 border-emerald-500/20" :
+            isBear ? "bg-rose-500/5 border-rose-500/20" : "bg-slate-950 border-slate-800"
+          )}>
+            <div className="flex items-center gap-3">
+              <Zap className={cn("w-5 h-5", isBull ? "text-emerald-400" : isBear ? "text-rose-400" : "text-slate-500")} />
+              <div>
+                <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">MC Technical Rating ({timeframe === 'D' ? 'Daily' : timeframe === 'W' ? 'Weekly' : 'Monthly'})</p>
+                <p className={cn("text-sm font-black uppercase italic", isBull ? "text-emerald-400" : isBear ? "text-rose-400" : "text-slate-300")}>
+                  {ratingText || 'Neutral'}
+                </p>
+              </div>
+            </div>
+            {(buyCount !== null || sellCount !== null) && (
+              <div className="flex gap-4 text-center">
+                {buyCount !== null && (
+                  <div>
+                    <p className="text-[8px] font-black text-emerald-500 uppercase tracking-widest">Buy</p>
+                    <p className="text-lg font-black text-emerald-400">{buyCount}</p>
+                  </div>
+                )}
+                {holdCount !== null && (
+                  <div>
+                    <p className="text-[8px] font-black text-amber-500 uppercase tracking-widest">Hold</p>
+                    <p className="text-lg font-black text-amber-400">{holdCount}</p>
+                  </div>
+                )}
+                {sellCount !== null && (
+                  <div>
+                    <p className="text-[8px] font-black text-rose-500 uppercase tracking-widest">Sell</p>
+                    <p className="text-lg font-black text-rose-400">{sellCount}</p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
+      {/* Historical Technical Rating — 6-month sentiment trend chart */}
+      {historicalRating && (() => {
+        // Normalise various possible response shapes from the widget API
+        const raw: any[] =
+          Array.isArray(historicalRating) ? historicalRating :
+          Array.isArray(historicalRating?.data) ? historicalRating.data :
+          Array.isArray(historicalRating?.data?.ratingData) ? historicalRating.data.ratingData :
+          Array.isArray(historicalRating?.ratingData) ? historicalRating.ratingData : [];
+
+        if (raw.length === 0) return null;
+
+        const chartData = raw.map((d: any) => ({
+          date: d.date || d.dt || '',
+          bullish: d.bullish ?? d.bullishCount ?? d.buy ?? 0,
+          bearish: d.bearish ?? d.bearishCount ?? d.sell ?? 0,
+          neutral: d.neutral ?? d.neutralCount ?? d.hold ?? 0,
+        })).filter((d: any) => d.date || d.bullish || d.bearish);
+
+        if (chartData.length < 2) return null;
+
+        return (
+          <Card title="Historical Technical Rating — 6 Month Trend" icon={Activity}>
+            <div className="h-44 mt-3">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={chartData} margin={{ top: 4, right: 4, bottom: 0, left: -24 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                  <XAxis
+                    dataKey="date"
+                    tick={{ fontSize: 8, fill: '#475569' }}
+                    tickFormatter={(v: string) => v?.slice(0, 6) || ''}
+                    interval="preserveStartEnd"
+                  />
+                  <YAxis tick={{ fontSize: 8, fill: '#475569' }} />
+                  <Tooltip
+                    contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '8px', fontSize: '9px' }}
+                    formatter={(v: any, n: string) => [v, n.charAt(0).toUpperCase() + n.slice(1)]}
+                    labelFormatter={(l: string) => l}
+                  />
+                  <Legend wrapperStyle={{ fontSize: '9px', paddingTop: '8px' }} />
+                  <Line type="monotone" dataKey="bullish" stroke="#10b981" strokeWidth={2} dot={false} name="bullish" />
+                  <Line type="monotone" dataKey="neutral" stroke="#f59e0b" strokeWidth={1.5} dot={false} name="neutral" />
+                  <Line type="monotone" dataKey="bearish" stroke="#f43f5e" strokeWidth={2} dot={false} name="bearish" />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+            <p className="text-[8px] text-center text-slate-700 font-bold uppercase tracking-widest mt-2">
+              {chartData.length} data points • {timeframe === 'D' ? 'Daily' : timeframe === 'W' ? 'Weekly' : 'Monthly'} period
+            </p>
+          </Card>
+        );
+      })()}
+
+      {/* Data source footer */}
       <div className="text-center pt-4 border-t border-slate-800">
         <p className="text-[8px] text-slate-700 font-bold uppercase tracking-widest">
-          Data sourced from MoneyControl API | scId: {mc.scId} | Refreshes every 60s
-        </p>
-        <p className="text-[8px] text-slate-800 font-black uppercase tracking-widest mt-0.5">
-          Replace BE03 with other scId values for different stocks
+          Data sourced from MoneyControl · Refreshes every 60s
         </p>
       </div>
     </div>

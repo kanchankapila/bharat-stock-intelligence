@@ -1,12 +1,13 @@
 import React from 'react';
 import { trpc } from '../lib/trpc';
-import { 
-  Trophy, TrendingUp, TrendingDown, RefreshCw, 
+import {
+  Trophy, TrendingUp, TrendingDown, RefreshCw,
   Search, ExternalLink, Activity, Zap, CheckCircle2,
   AlertCircle, Star
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { motion } from 'motion/react';
+import stockData from '../data/stocklist';
 
 interface ScoredStock {
   symbol: string;
@@ -59,6 +60,9 @@ const RankingList: React.FC<{
               <div>
                 <div className="flex items-center gap-2">
                   <h3 className="text-sm font-black text-white italic uppercase tracking-tight">{stock.symbol}</h3>
+                  <span className="text-[9px] font-bold text-slate-500 truncate max-w-[120px]">
+                    {stockData.find(s => s.symbol.toUpperCase() === stock.symbol.toUpperCase())?.name || ''}
+                  </span>
                   <span className={cn(
                     "px-1.5 py-0.5 rounded text-[7px] font-black uppercase tracking-widest",
                     stock.classification.includes('Strong Buy') ? "bg-emerald-500/20 text-emerald-400" :

@@ -94,3 +94,25 @@ export async function fetchIndexGraph(indId: string, range: string = '1d', type:
   const url = `https://appfeeds.moneycontrol.com/jsonapi/market/graph&format=json&ind_id=${indId}&range=${range}&type=${type}`;
   return mcFetchJson<any>(url);
 }
+
+export async function fetchIndexPeChart(indId: string, duration: string = '1Y') {
+  const url = `https://api.moneycontrol.com/mcapi/v1/indices/fundamentals/graph/pe?indId=${indId}&duration=${duration}`;
+  const res = await mcFetchJson<any>(url);
+  if (!res || res.success !== 1 || !res.data?.graphData) return null;
+  return (res.data.graphData as any[]).map((d: any) => ({
+    date: d.date as string,
+    value: d.data as number,
+    indexValue: d.niftydata as number,
+  }));
+}
+
+export async function fetchIndexPbChart(indId: string, duration: string = '1Y') {
+  const url = `https://api.moneycontrol.com/mcapi/v1/indices/fundamentals/graph/pb?indId=${indId}&duration=${duration}`;
+  const res = await mcFetchJson<any>(url);
+  if (!res || res.success !== 1 || !res.data?.graphData) return null;
+  return (res.data.graphData as any[]).map((d: any) => ({
+    date: d.date as string,
+    value: d.data as number,
+    indexValue: d.niftydata as number,
+  }));
+}
