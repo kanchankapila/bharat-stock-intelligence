@@ -31,12 +31,32 @@ export async function generateStockAnalysis(symbol: string, data: any): Promise<
     }
   `;
 
+  const model = process.env.OLLAMA_MODEL || 'mistral';
+  let response;
+
   try {
-    const response = await ollama.chat({
-      model: process.env.OLLAMA_MODEL || 'mistral',
-      messages: [{ role: 'user', content: prompt }],
-      format: 'json',
-    });
+    try {
+      response = await ollama.chat({
+        model,
+        messages: [{ role: 'user', content: prompt }],
+        format: 'json',
+      });
+    } catch (error: any) {
+      const errorStr = String(error.message || error.error || "");
+      if (errorStr.includes('CUDA') || errorStr.includes('allocate') || errorStr.includes('runner process has terminated')) {
+        console.warn(`[AI] Ollama CUDA error detected for ${symbol}, retrying with CPU fallback...`);
+        response = await ollama.chat({
+          model,
+          messages: [{ role: 'user', content: prompt }],
+          format: 'json',
+          options: {
+            num_gpu: 0, // Force CPU
+          }
+        });
+      } else {
+        throw error;
+      }
+    }
 
 
     if (response.message.content) {

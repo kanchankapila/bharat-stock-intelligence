@@ -36,6 +36,8 @@ import { nseStocksData } from './data/nseStocks';
 import TopRatedStocks from './components/TopRatedStocks';
 import FnOIntelligenceCenter from './components/FnOIntelligenceCenter';
 import IndexFnoOverview from './components/IndexFnoOverview';
+import { ToDoPage } from './components/ToDoPage';
+import { GlobalMarketCards } from './components/GlobalMarketCards';
 
 class MCErrorBoundary extends React.Component<
   { children: React.ReactNode },
@@ -139,6 +141,7 @@ const Navbar: React.FC<{
             { icon: History, label: 'Backtest', id: 'backtest' },
             { icon: PieChart, label: 'Portfolio', id: 'portfolio' },
             { icon: WatchlistIcon, label: 'Watchlist', id: 'watchlist' },
+            { icon: CheckCircle2, label: 'ToDo', id: 'todo' },
           ].map((item) => (
             <button
               key={item.id}
@@ -1266,52 +1269,83 @@ const GlobalMarkets: React.FC = () => {
 
   if (isLoading || !globalData) return (
     <div ref={ref} className="col-span-12 lg:col-span-4 h-full">
-      <Card title="Global Markets" icon={Activity} className="h-full">
-        <div className="space-y-4 animate-pulse pt-2">
-          {[1, 2, 3, 4].map(i => (
-            <div key={i} className="h-12 bg-slate-800 rounded-xl" />
+      <Card title="Global Intelligence" icon={Activity} className="h-full">
+        <div className="grid grid-cols-2 gap-3 animate-pulse pt-2">
+          {[1, 2, 3, 4, 5, 6].map(i => (
+            <div key={i} className="h-24 bg-slate-800/50 rounded-2xl" />
           ))}
         </div>
       </Card>
     </div>
   );
 
-  const getRawIndices = () => {
-    if (Array.isArray(globalData)) return globalData;
-    if (Array.isArray(globalData?.data)) return globalData.data;
-    if (globalData?.data && typeof globalData.data === 'object') return Object.values(globalData.data).flat();
-    return [];
-  };
+  const allIndices = (() => {
+    const raw = (globalData as any)?.data?.indiceList ?? [];
+    return raw.flatMap((group: any) => 
+      (group.list || []).map((idx: any) => ({
+        name: idx.name,
+        price: idx.value,
+        change: idx.change,
+        percentChange: idx.changePer,
+        direction: idx.direction,
+        region: group.name
+      }))
+    );
+  })();
 
-  const rawIndices = getRawIndices() as any[];
+  const importantIndices = ['S&P 500', 'Nasdaq', 'FTSE 100', 'Nikkei 225', 'DAX', 'Hang Seng', 'Dow Jones', 'S&P 500 Futures', 'Nasdaq Futures', 'CAC 40', 'Shanghai Composite'];
   
-  const importantIndices = ['S&P 500', 'Nasdaq', 'FTSE 100', 'Nikkei 225', 'DAX', 'Hang Seng'];
-  const filteredIndices = Array.isArray(rawIndices) ? rawIndices.filter((idx: any) => 
-    idx && idx.indexName && importantIndices.some(name => idx.indexName.includes(name))
-  ) : [];
+  const displayIndices = allIndices.filter((idx: any) => 
+    importantIndices.some(name => idx.name.includes(name))
+  );
 
   return (
     <div ref={ref} className="col-span-12 lg:col-span-4">
       <Card title="Global Intelligence" icon={Activity} className="h-full">
-        <div className="space-y-3 pt-2">
-        {filteredIndices.slice(0, 6).map((idx: any) => (
-          <div key={idx.indexName} className="flex justify-between items-center p-3 bg-slate-950 rounded-xl border border-slate-800/50 hover:border-slate-700 transition-all group">
-            <div>
-              <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest group-hover:text-slate-400 transition-colors">{idx.indexName}</p>
-              <p className="text-sm font-black text-white tabular-nums mt-0.5">{idx.lastPrice}</p>
-            </div>
-            <div className="text-right">
-              <div className={cn(
-                "flex items-center gap-1 text-[10px] font-black px-2 py-1 rounded-lg",
-                idx.direction === "1" ? "bg-emerald-500/10 text-emerald-500" : "bg-rose-500/10 text-rose-400"
-              )}>
-                {idx.direction === "1" ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
-                {idx.percentChange}%
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
+        <div className="grid grid-cols-2 gap-3 pt-2">
+          {displayIndices.map((idx: any) => {
+            const isUp = Number(idx.direction) === 1 || parseFloat(idx.percentChange) >= 0;
+            return (
+              <motion.div
+                key={idx.name}
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                whileHover={{ scale: 1.02, translateY: -2 }}
+                className={cn(
+                  "p-3 rounded-2xl border bg-slate-950/50 backdrop-blur-sm transition-all group cursor-default",
+                  isUp ? "border-emerald-500/20 hover:border-emerald-500/40 shadow-[0_0_15px_rgba(16,185,129,0.05)]" : "border-rose-500/20 hover:border-rose-500/40 shadow-[0_0_15px_rgba(244,63,94,0.05)]"
+                )}
+              >
+                <div className="flex justify-between items-start mb-2">
+                  <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest truncate pr-2">
+                    {idx.name}
+                  </span>
+                  <span className="text-[7px] font-bold text-slate-700 bg-slate-900 px-1.5 py-0.5 rounded uppercase shrink-0">
+                    {idx.region}
+                  </span>
+                </div>
+                
+                <div className="mb-1.5">
+                  <span className="text-sm font-black text-white tabular-nums tracking-tighter">
+                    {idx.price}
+                  </span>
+                </div>
+
+                <div className={cn(
+                  "flex items-center gap-1 text-[10px] font-black",
+                  isUp ? "text-emerald-400" : "text-rose-400"
+                )}>
+                  {isUp ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
+                  {idx.percentChange}%
+                </div>
+              </motion.div>
+            );
+          })}
+        </div>
+        <div className="mt-4 pt-4 border-t border-slate-800/50">
+           <p className="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em] mb-4 text-center">Extended Market Insight</p>
+           <GlobalMarketCards />
+        </div>
     </Card>
     </div>
   );
@@ -4729,6 +4763,7 @@ export default function App() {
                 />
               )}
               {activeTab === 'backtest' && <Backtest stocks={stocks} />}
+              {activeTab === 'todo' && <ToDoPage />}
               {activeTab === 'portfolio' && (
                 <div className="p-6">
                    <Card title="Wealth Intelligence" icon={PieChart}>

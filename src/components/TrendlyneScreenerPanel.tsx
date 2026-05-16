@@ -287,8 +287,8 @@ const TrendlyneScreenerPanel: React.FC<{ onSelectStock?: (symbol: string) => voi
                 key={screener.id}
                 onClick={() => setSelectedScreener(screener)}
                 className={cn(
-                  "p-3 rounded-xl border text-left transition-all relative overflow-hidden group",
-                  screener.sentiment === 'bullish' ? "border-emerald-500/50" : screener.sentiment === 'bearish' ? "border-rose-500/50" : "border-yellow-500/50",
+                  "p-3 rounded-xl border transition-all relative overflow-hidden group text-left",
+                  screener.sentiment === 'bullish' ? "border-green-500" : screener.sentiment === 'bearish' ? "border-red-500" : "border-yellow-500",
                   selectedScreener?.id === screener.id
                     ? "bg-slate-800/80 shadow-lg"
                     : "bg-slate-900/50 hover:bg-slate-800/50"
@@ -296,16 +296,16 @@ const TrendlyneScreenerPanel: React.FC<{ onSelectStock?: (symbol: string) => voi
               >
                 <div className={cn(
                   "absolute top-0 right-0 w-12 h-12 -mr-4 -mt-4 opacity-5 group-hover:opacity-10 transition-opacity",
-                  screener.sentiment === 'bullish' ? "bg-emerald-500" : screener.sentiment === 'bearish' ? "bg-rose-500" : "bg-slate-500"
+                  screener.sentiment === 'bullish' ? "bg-green-500" : screener.sentiment === 'bearish' ? "bg-red-500" : "bg-yellow-500"
                 )} />
                 <div className="relative z-10">
                    <p className={cn(
                      "text-[8px] font-black uppercase tracking-[0.2em] mb-1",
-                     screener.sentiment === 'bullish' ? "text-emerald-400" : screener.sentiment === 'bearish' ? "text-rose-400" : "text-slate-500"
+                     screener.sentiment === 'bullish' ? "text-green-400" : screener.sentiment === 'bearish' ? "text-red-400" : "text-yellow-500"
                    )}>
                      {screener.sentiment || 'NEUTRAL'}
                    </p>
-                   <p className="text-[10px] font-black text-white leading-tight uppercase group-hover:text-amber-400 transition-colors">
+                   <p className="text-[10px] font-black text-white leading-tight uppercase group-hover:text-amber-400 transition-colors break-words whitespace-normal">
                      {screener.name}
                    </p>
                    {screener.confidence && screener.confidence > 0.8 && (
@@ -429,22 +429,22 @@ const TrendlyneScreenerPanel: React.FC<{ onSelectStock?: (symbol: string) => voi
               }}
               className={cn(
                 "bg-slate-900/50 border rounded-2xl p-6 hover:bg-slate-800/50 transition-all cursor-pointer group relative",
-                screener.sentiment === 'bullish' ? "border-emerald-500/30 hover:border-emerald-500/50" :
-                screener.sentiment === 'bearish' ? "border-rose-500/30 hover:border-rose-500/50" :
-                "border-yellow-500/30 hover:border-yellow-500/50"
+                screener.sentiment === 'bullish' ? "border-green-500" :
+                screener.sentiment === 'bearish' ? "border-red-500" :
+                "border-yellow-500"
               )}
             >
               <div className={cn(
                 "w-1 h-12 rounded-full absolute left-0 top-1/2 -translate-y-1/2 transition-all group-hover:h-full group-hover:w-1.5",
-                screener.sentiment === 'bullish' ? "bg-emerald-500" : screener.sentiment === 'bearish' ? "bg-rose-500" : "bg-yellow-500"
+                screener.sentiment === 'bullish' ? "bg-green-500" : screener.sentiment === 'bearish' ? "bg-red-500" : "bg-yellow-500"
               )} />
               
               <div className="flex items-center justify-between mb-3">
                  <div className="flex gap-2">
                     <span className={cn(
                       "px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest border",
-                      screener.sentiment === 'bullish' ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/20" : 
-                      screener.sentiment === 'bearish' ? "bg-rose-500/10 text-rose-500 border-rose-500/20" : 
+                      screener.sentiment === 'bullish' ? "bg-green-500/10 text-green-500 border-green-500/20" : 
+                      screener.sentiment === 'bearish' ? "bg-red-500/10 text-red-500 border-red-500/20" : 
                       "bg-yellow-500/10 text-yellow-500 border-yellow-500/20"
                     )}>
                       {screener.sentiment}
@@ -456,7 +456,7 @@ const TrendlyneScreenerPanel: React.FC<{ onSelectStock?: (symbol: string) => voi
                  <span className="text-[8px] font-black text-slate-600 uppercase tracking-widest">{screener.timeframe}</span>
               </div>
 
-              <h3 className="font-black text-white text-base mb-2 uppercase italic group-hover:text-amber-400 transition-colors">{screener.name}</h3>
+              <h3 className="font-black text-white text-base mb-2 uppercase italic group-hover:text-amber-400 transition-colors break-words whitespace-normal">{screener.name}</h3>
               <p className="text-[11px] font-bold text-slate-500 leading-relaxed line-clamp-2">{screener.description}</p>
               
               {screener.confidence && (

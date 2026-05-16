@@ -9,8 +9,26 @@ import {
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
+  LineChart, Line, AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, ComposedChart
 } from 'recharts';
+
+const Candlestick = (props: any) => {
+  const { x, y, width, height, payload } = props;
+  const isGrowing = payload.close > payload.open;
+  const color = isGrowing ? '#10b981' : '#f43f5e';
+  const range = Math.abs(payload.high - payload.low);
+  if (range === 0) return <line x1={x} y1={y} x2={x + width} y2={y} stroke={color} strokeWidth={2} />;
+  const ratio = height / range;
+  const yTop = y + (payload.high - Math.max(payload.open, payload.close)) * ratio;
+  const boxHeight = Math.max(1, Math.abs(payload.open - payload.close) * ratio);
+
+  return (
+    <g stroke={color} fill={color} strokeWidth="1">
+      <line x1={x + width / 2} y1={y} x2={x + width / 2} y2={y + height} />
+      <rect x={x} y={yTop} width={width} height={boxHeight} />
+    </g>
+  );
+};
 
 import { Card, SentimentBadge, ValueDisplay, IndicatorRow } from './MCCommon';
 import ScreenerDetailsModal from './ScreenerDetailsModal';
@@ -39,6 +57,9 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({ symbol, sect
   const [isModalOpen, setIsModalOpen] = React.useState(false);
   const [selectedScreener, setSelectedScreener] = React.useState<any>(null);
 
+  const [chartDuration, setChartDuration] = React.useState<string>('max');
+  const [chartType, setChartType] = React.useState<'line' | 'ohlc'>('line');
+
   // Sync activeTab if section changes
   React.useEffect(() => {
     if (section === 'technical') setActiveTab('technical');
@@ -61,6 +82,11 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({ symbol, sect
   }, []);
 
   const stockMapping = stockData.find(s => s.symbol.toUpperCase() === symbol.toUpperCase());
+
+  const { data: maxOhlcData, isLoading: loadingOhlc } = trpc.getOHLCData.useQuery(
+    { symbol, dur: chartDuration },
+    { enabled: isVisible && activeTab === 'technical', staleTime: 60000 }
+  );
 
   const { data: unifiedData, isLoading, error } = trpc.getAlphaQuantDetail.useQuery(
     { symbol, timeframe },
@@ -462,7 +488,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({ symbol, sect
                         "bg-slate-700/50 border-slate-600/30 text-slate-300 hover:bg-slate-700"
                       )} title={screener.name}>
                       {isBullish ? <TrendingUp className="w-3 h-3" /> : isBearish ? <TrendingDown className="w-3 h-3" /> : <Filter className="w-3 h-3" />}
-                      <span className="truncate max-w-xs">{screener.name}</span>
+                      <span className="whitespace-normal leading-tight max-w-xs">{screener.name}</span>
                     </div>
                   );
                 })}
@@ -1014,6 +1040,97 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({ symbol, sect
       {/* ══════════════════════════════════════════════════════════════ */}
       {activeTab === 'technical' && (
         <div className="space-y-6">
+
+          {/* Historical Max Data Chart */}
+          <Card title="Historical Price Action" icon={TrendingUp}>
+            <div className="space-y-4">
+              <div className="flex flex-wrap justify-between items-center gap-4">
+                <div className="flex flex-wrap gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
+                  {['1d', '5d', '1m', '3m', '6m', '1y', '5y', 'max'].map((d) => (
+                    <button
+                      key={d}
+                      onClick={() => setChartDuration(d)}
+                      className={cn(
+                        "px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all",
+                        chartDuration === d ? "bg-blue-600 text-white shadow-lg" : "text-slate-500 hover:text-slate-300"
+                      )}
+                    >
+                      {d}
+                    </button>
+                  ))}
+                </div>
+                
+                <div className="flex gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
+                  {['line', 'ohlc'].map((t) => (
+                    <button
+                      key={t}
+                      onClick={() => setChartType(t as any)}
+                      className={cn(
+                        "px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all",
+                        chartType === t ? "bg-blue-600 text-white shadow-lg" : "text-slate-500 hover:text-slate-300"
+                      )}
+                    >
+                      {t}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="h-[350px] w-full bg-slate-950/50 rounded-2xl border border-slate-800/30 p-4">
+                {loadingOhlc ? (
+                  <div className="h-full flex items-center justify-center">
+                    <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500"></div>
+                  </div>
+                ) : maxOhlcData?.data && maxOhlcData.data.length > 0 ? (() => {
+                    const mappedData = maxOhlcData.data.map((d: any) => ({
+                      ...d,
+                      date: new Date(d.time * 1000).toLocaleDateString(),
+                      lowHigh: [d.low, d.high]
+                    }));
+                    return (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <ComposedChart data={mappedData}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                          <XAxis 
+                            dataKey="date" 
+                            tick={{ fontSize: 9, fill: '#64748b' }} 
+                            axisLine={false}
+                            tickLine={false}
+                            minTickGap={30}
+                          />
+                          <YAxis 
+                            domain={['auto', 'auto']} 
+                            tick={{ fontSize: 9, fill: '#64748b' }} 
+                            axisLine={false}
+                            tickLine={false}
+                            width={40}
+                          />
+                          <Tooltip
+                            contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px', fontSize: '10px' }}
+                            formatter={(value: any, name: string, props: any) => {
+                              if (name === 'lowHigh') {
+                                const p = props.payload;
+                                return [`O: ${p.open} H: ${p.high} L: ${p.low} C: ${p.close}`, 'OHLC'];
+                              }
+                              return [parseFloat(value).toLocaleString(), name];
+                            }}
+                          />
+                          {chartType === 'ohlc' ? (
+                            <Bar dataKey="lowHigh" shape={<Candlestick />} />
+                          ) : (
+                            <Line type="monotone" dataKey="close" stroke="#3b82f6" strokeWidth={2} dot={false} />
+                          )}
+                        </ComposedChart>
+                      </ResponsiveContainer>
+                    );
+                  })() : (
+                  <div className="h-full flex items-center justify-center text-slate-500 text-sm font-bold">
+                    No historical data available
+                  </div>
+                )}
+              </div>
+            </div>
+          </Card>
 
           {/* Technical Analysis */}
           {tech && (

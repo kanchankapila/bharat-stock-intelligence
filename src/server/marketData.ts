@@ -108,9 +108,15 @@ export async function fetchHistoricalOHLC(symbol: string, dur: string = '1y') {
     } else if (dur.toLowerCase() === '5y') {
       from = to - (5 * 365 * 24 * 60 * 60);
       resolution = '1W';
+    } else if (dur.toLowerCase() === 'max') {
+      from = 543110400; // As requested, very old timestamp
+      resolution = '1D';
     }
 
-    const url = `https://priceapi.moneycontrol.com/techCharts/indianMarket/stock/history?symbol=${encodeURIComponent(mcSymbol)}&resolution=${resolution}&from=${from}&to=${to}&countback=329&currencyCode=INR`;
+    let url = `https://priceapi.moneycontrol.com/techCharts/indianMarket/stock/history?symbol=${encodeURIComponent(mcSymbol)}&resolution=${resolution}&from=${from}&to=${to}&countback=329&currencyCode=INR`;
+    if (dur.toLowerCase() === 'max') {
+      url = `https://priceapi.moneycontrol.com/techCharts/indianMarket/stock/history?symbol=${encodeURIComponent(mcSymbol)}&resolution=1D&from=543110400&to=${to}&countback=9869&currencyCode=INR`;
+    }
     
     const response = await fetch(url, {
       headers: {

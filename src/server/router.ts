@@ -58,6 +58,7 @@ import { syncNSEStocksToDatabase, getAllNSEStocksFromDB, searchNSEStocksFromDB, 
 import { fetchOptionChain, fetchFnoSymbols } from "./optionChainService";
 import { fetchTopMovers } from "./topMoversService";
 import { enqueueAISignals, getAIQueueStats } from "./queues";
+import { fetchGlobalMarketData } from "./globalMarketService";
 
 const t = initTRPC.create({
   transformer: superjson,
@@ -66,8 +67,26 @@ const t = initTRPC.create({
 export const router = t.router;
 export const publicProcedure = t.procedure;
 
+// Ensure todos table exists (temporary safeguard)
+db.exec(`
+  CREATE TABLE IF NOT EXISTS todos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    description TEXT,
+    status TEXT CHECK(status IN ('PENDING', 'IN_PROGRESS', 'COMPLETED')) DEFAULT 'PENDING',
+    category TEXT DEFAULT 'IDEAS',
+    priority TEXT CHECK(priority IN ('LOW', 'MEDIUM', 'HIGH')) DEFAULT 'MEDIUM',
+    createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+`);
 
 export const appRouter = router({
+  getGlobalMarketData: publicProcedure
+    .query(async () => {
+      return await fetchGlobalMarketData();
+    }),
+
   getAIAnalysis: publicProcedure
 
     .input(z.object({ 
@@ -1351,6 +1370,75 @@ export const appRouter = router({
         factors: scoreData?.factors || null,
         tradebrains: tbData || null
       };
+    }),
+
+  // ─── TODOS & IDEAS ────────────────────────────────────────────────────────
+  getTodos: publicProcedure
+    .query(() => {
+      try {
+        const todos = db.prepare('SELECT * FROM todos ORDER BY priority DESC, createdAt DESC').all() as any[];
+        console.log(`[ROUTER] Fetched ${todos.length} todos`);
+        return todos;
+      } catch (error) {
+        console.error('[ROUTER] Error fetching todos:', error);
+        return [];
+      }
+    }),
+
+  addTodo: publicProcedure
+    .input(z.object({
+      title: z.string().min(1),
+      description: z.string().optional(),
+      status: z.enum(['PENDING', 'IN_PROGRESS', 'COMPLETED']).optional().default('PENDING'),
+      priority: z.enum(['LOW', 'MEDIUM', 'HIGH']).optional().default('MEDIUM'),
+      category: z.string().optional().default('IDEAS'),
+    }))
+    .mutation(({ input }) => {
+      console.log('[ROUTER] Adding todo:', input);
+      const stmt = db.prepare(`
+        INSERT INTO todos (title, description, status, priority, category)
+        VALUES (?, ?, ?, ?, ?)
+      `);
+      try {
+        const info = stmt.run(input.title, input.description || null, input.status, input.priority, input.category);
+        console.log('[ROUTER] Todo added successfully, ID:', info.lastInsertRowid);
+        return { id: info.lastInsertRowid };
+      } catch (error) {
+        console.error('[ROUTER] Error adding todo:', error);
+        throw error;
+      }
+    }),
+
+  updateTodo: publicProcedure
+    .input(z.object({
+      id: z.number(),
+      title: z.string().optional(),
+      description: z.string().optional(),
+      status: z.enum(['PENDING', 'IN_PROGRESS', 'COMPLETED']).optional(),
+      priority: z.enum(['LOW', 'MEDIUM', 'HIGH']).optional(),
+      category: z.string().optional(),
+    }))
+    .mutation(({ input }) => {
+      const { id, ...updates } = input;
+      const keys = Object.keys(updates);
+      if (keys.length === 0) return { success: true };
+
+      const setClause = keys.map(k => `${k} = ?`).join(', ');
+      const values = keys.map(k => (updates as any)[k]);
+      
+      const stmt = db.prepare(`
+        UPDATE todos SET ${setClause}, updatedAt = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `);
+      stmt.run(...values, id);
+      return { success: true };
+    }),
+
+  deleteTodo: publicProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(({ input }) => {
+      db.prepare('DELETE FROM todos WHERE id = ?').run(input.id);
+      return { success: true };
     }),
 });
 

@@ -242,6 +242,18 @@ db.exec(`
     value TEXT,
     updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
   );
+
+  -- 11. Implementation Ideas & TODOs
+  CREATE TABLE IF NOT EXISTS todos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    description TEXT,
+    status TEXT CHECK(status IN ('PENDING', 'IN_PROGRESS', 'COMPLETED')) DEFAULT 'PENDING',
+    category TEXT DEFAULT 'IDEAS',
+    priority TEXT CHECK(priority IN ('LOW', 'MEDIUM', 'HIGH')) DEFAULT 'MEDIUM',
+    createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
 `);
 
 export default db;

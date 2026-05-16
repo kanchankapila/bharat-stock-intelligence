@@ -32,7 +32,12 @@ export async function startOllama(): Promise<boolean> {
       // Using 'ollama serve' as it's the standard way to start the background server
       ollamaProcess = spawn('ollama', ['serve'], {
         detached: false,
-        stdio: 'ignore'
+        stdio: 'ignore',
+        env: {
+          ...process.env,
+          OLLAMA_NUM_PARALLEL: '1',
+          OLLAMA_MAX_LOADED_MODELS: '1',
+        }
       });
 
       ollamaProcess.on('error', (err) => {
