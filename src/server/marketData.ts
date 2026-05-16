@@ -77,50 +77,67 @@ export async function fetchETCorporateActions(symbol: string) {
 
 export async function fetchHistoricalOHLC(symbol: string, dur: string = '1y') {
   try {
-    let yfSymbol = `${symbol}.NS`;
-    // Map common indices to Yahoo Finance symbols
-    if (symbol.toLowerCase() === 'in;nsx') yfSymbol = '^NSEI';
-    else if (symbol.toLowerCase() === 'in;sen') yfSymbol = '^BSESN';
-    else if (symbol.toLowerCase() === 'in;nbx') yfSymbol = '^NSEBANK';
-    else if (symbol.toLowerCase() === 'in;cnit') yfSymbol = '^CNXIT';
-    else if (symbol.startsWith('in;') || symbol.startsWith('mc;')) {
-      // Fallback for other indices: we just return empty array instead of crashing
-      console.warn(`[OHLC] No Yahoo mapping for index ${symbol}`);
-      return { success: 1, data: [] };
+    const map = getStockMapping(symbol);
+    const mcSymbol = map?.symbol || symbol.split(';').pop() || symbol;
+
+    console.log(`[OHLC] Fetching historical OHLC for ${symbol} via Moneycontrol (${mcSymbol})`);
+
+    // Calculate timestamps
+    const to = Math.floor(Date.now() / 1000);
+    let from = to;
+    let resolution = '1D';
+
+    if (dur.toLowerCase() === '1d') {
+      from = to - (24 * 60 * 60);
+      resolution = '1'; // 1 minute resolution for intraday
+    } else if (dur.toLowerCase() === '5d') {
+      from = to - (5 * 24 * 60 * 60);
+      resolution = '5'; // 5 minute
+    } else if (dur.toLowerCase() === '1m') {
+      from = to - (30 * 24 * 60 * 60);
+      resolution = '30'; // 30 min
+    } else if (dur.toLowerCase() === '3m') {
+      from = to - (90 * 24 * 60 * 60);
+      resolution = '1D';
+    } else if (dur.toLowerCase() === '6m') {
+      from = to - (180 * 24 * 60 * 60);
+      resolution = '1D';
+    } else if (dur.toLowerCase() === '1y') {
+      from = to - (365 * 24 * 60 * 60);
+      resolution = '1D';
+    } else if (dur.toLowerCase() === '5y') {
+      from = to - (5 * 365 * 24 * 60 * 60);
+      resolution = '1W';
     }
 
-    // Convert duration formats (e.g. '1M' -> '1mo', '1y' -> '1y', '5y' -> '5y')
-    let yfRange = dur.toLowerCase();
-    if (yfRange.endsWith('m')) yfRange = yfRange.replace('m', 'mo');
+    const url = `https://priceapi.moneycontrol.com/techCharts/indianMarket/stock/history?symbol=${encodeURIComponent(mcSymbol)}&resolution=${resolution}&from=${from}&to=${to}&countback=329&currencyCode=INR`;
     
-    console.log(`[OHLC] Fetching historical OHLC for ${symbol} via Yahoo (${yfSymbol})`);
-    
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${yfSymbol}?interval=1d&range=${yfRange}`;
     const response = await fetch(url, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'application/json',
       },
     });
 
     if (!response.ok) {
-      console.error(`[OHLC] Yahoo Finance returned ${response.status} for ${yfSymbol}`);
+      console.error(`[OHLC] Moneycontrol returned ${response.status} for ${mcSymbol}`);
       return { success: 0, data: [] };
     }
 
     const data = await response.json();
-    const result = data.chart?.result?.[0];
-    if (!result) return { success: 0, data: [] };
+    if (data.s !== 'ok' || !data.t) {
+      return { success: 0, data: [] };
+    }
 
-    const timestamps = result.timestamp || [];
-    const quotes = result.indicators?.quote?.[0] || {};
-    const closes = quotes.close || [];
-
-    const mappedData = timestamps.map((ts: number, i: number) => ({
-      time: ts,
-      c: closes[i],
-      close: closes[i],
-    })).filter((d: any) => d.close !== null && d.close !== undefined);
+    const mappedData = data.t.map((ts: number, i: number) => ({
+      time: ts, // Moneycontrol provides timestamp in seconds, which is what lightweight-charts prefers
+      open: data.o[i],
+      high: data.h[i],
+      low: data.l[i],
+      close: data.c[i],
+      c: data.c[i], // For backward compatibility if any component relies on 'c'
+      volume: data.v ? data.v[i] : 0,
+    }));
 
     return { success: 1, data: mappedData };
   } catch (error) {
@@ -233,3 +250,27 @@ export async function fetchIndexTechnicals(period: 'D' | 'W' | 'M', bridgeSymbol
   const url = `https://priceapi.moneycontrol.com/pricefeed/techindicator/${period}/${encoded}`;
   return mcFetchJson(url);
 }
+
+export async function fetchIndexGraph(indId: string, range: string = '1d', type: string = 'line') {
+  const url = `https://appfeeds.moneycontrol.com/jsonapi/market/graph&format=json&ind_id=${indId}&range=${range}&type=${type}`;
+  return mcFetchJson(url);
+}
+
+export async function fetchNiftyTraderBreakouts() {
+  const url = `https://webapi.niftytrader.in/webapi/Resource/nse-break-out-data`;
+  try {
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+        'Accept': 'application/json',
+      },
+    });
+    if (!response.ok) return { success: false, data: [] };
+    const data = await response.json();
+    return { success: true, data: data.resultData || [] };
+  } catch (error) {
+    console.error(`[NIFTYTRADER] Error fetching breakouts:`, error);
+    return { success: false, data: [] };
+  }
+}
+

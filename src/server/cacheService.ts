@@ -41,14 +41,16 @@ function createRedisClient(): Redis | null {
   return client;
 }
 
-export async function initCache(): Promise<void> {
+export async function initCache(): Promise<boolean> {
   try {
     redis = createRedisClient();
     await redis.connect();
+    return true;
   } catch {
     console.log('[CACHE] Redis unavailable — using in-memory cache');
     redis = null;
     redisAvailable = false;
+    return false;
   }
 }
 

@@ -24,6 +24,13 @@ const ETNOW_SCREENER_DEFINITIONS = [
  * Safe to call on every server start.
  */
 export function initEtnowScreeners(): void {
+  // Check if DB already has screeners (e.g. from the 438-import script)
+  const count = db.prepare('SELECT count(*) as count FROM etnow_screeners').get() as { count: number };
+  if (count.count > 20) {
+    console.log(`ℹ️ etnow_screeners already populated with ${count.count} items. Skipping default seed.`);
+    return;
+  }
+
   const insert = db.prepare(`
     INSERT OR IGNORE INTO etnow_screeners (screener_id, screener_name)
     VALUES (?, ?)
@@ -75,4 +82,40 @@ export async function fetchETnowScreener(screenerId: string, queryCondition: str
   }
 
   return response.json();
+}
+export function findEtScreenersByStock(symbol: string): Array<{
+  id: string;
+  name: string;
+  sentiment: 'bullish' | 'bearish' | 'neutral';
+  screenpk: string;
+  source: string;
+  description: string;
+}> {
+  try {
+    if (!symbol) return [];
+
+    const stmt = db.prepare(`
+      SELECT s.screener_id, s.screener_name
+      FROM etnow_screeners s
+      JOIN etnow_screener_stocks ss ON s.screener_id = ss.screener_id
+      WHERE ss.symbol = ?
+    `);
+    
+    const matches = stmt.all(symbol) as Array<{ 
+      screener_id: string; 
+      screener_name: string;
+    }>;
+
+    return matches.map(m => ({
+      id: m.screener_id,
+      name: m.screener_name,
+      sentiment: 'neutral' as const, // ET screeners usually don't have explicit sentiment in DB
+      screenpk: 'ET_' + m.screener_id,
+      source: 'etnow',
+      description: 'ETnow Market Screener'
+    }));
+  } catch (error) {
+    console.error(`❌ Error finding ETnow screeners for stock ${symbol}:`, error);
+    return [];
+  }
 }

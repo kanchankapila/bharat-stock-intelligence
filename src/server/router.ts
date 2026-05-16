@@ -29,15 +29,18 @@ import {
   fetchIndexStocksList,
   fetchIndexPriceFeed,
   fetchIndexTechnicals,
+  fetchIndexGraph,
+  fetchNiftyTraderBreakouts,
 } from "./marketData";
-import { 
-  fetchTrendlyneFundamentals, 
-  fetchTrendlyneSwot, 
-  fetchTrendlyneChecklist, 
-  fetchTrendlyneDVM, 
-  getTrendlyneOverview 
-} from "./trendlyneService";
-import { 
+import {
+  fetchTrendlyneFundamentals,
+  fetchTrendlyneSwot,
+  fetchTrendlyneChecklist,
+  fetchTrendlyneDVM,
+  getTrendlyneOverview,
+  fetchTrendlyneSectorRotation,
+  fetchTrendlyneIndexRotation
+} from "./trendlyneService";import { 
   getTopRatedStocks, 
   syncAndScore,
   recalculateScores,
@@ -50,9 +53,10 @@ import { getCachedScan, runTechnicalScan } from "./technicalScanner";
 import { getFnOSignals } from "./fnoService";
 import { fetchStockDataWithCache, getOrRefreshAllStocks } from "./liveStockData";
 import { getMcConsolidatedData } from "./mcApiService";
-import { fetchTrendlyneScreenerData, fetchAllTrendlyneScreenerNames, getTrendlyneScreenerList, getTrendlyneScreenerCategories, updateFetchInterval, updateScreenerNamesInterval, testTrendlyneApiResponse, findScreenersByStock } from "./trendlyneScreener";
+import { fetchTrendlyneScreenerData, fetchAllTrendlyneScreenerNames, getTrendlyneScreenerList, getTrendlyneScreenerCategories, updateFetchInterval, updateScreenerNamesInterval, testTrendlyneApiResponse, findScreenersByStock, recategorizeAllScreeners } from "./trendlyneScreener";
 import { syncNSEStocksToDatabase, getAllNSEStocksFromDB, searchNSEStocksFromDB, getNSEStockFromDB, getNSEStocksBySectorFromDB, getNSEStocksByIndustryFromDB, getAllSectorsFromDB, getAllIndustriesFromDB, getNSEStockCount } from "./nseService";
 import { fetchOptionChain, fetchFnoSymbols } from "./optionChainService";
+import { fetchTopMovers } from "./topMoversService";
 import { enqueueAISignals, getAIQueueStats } from "./queues";
 
 const t = initTRPC.create({
@@ -224,6 +228,26 @@ export const appRouter = router({
       return await getFnOSignals(input.symbol);
     }),
 
+  getTrendlyneFnoScanners: publicProcedure
+    .input(z.object({ mtype: z.enum(['options', 'futures']), screenType: z.string(), instType: z.string().optional() }))
+    .query(async ({ input }) => {
+      const { getTrendlyneFnoScanners } = await import("./fnoService");
+      return await getTrendlyneFnoScanners(input.mtype, input.screenType, input.instType);
+    }),
+
+  getMCFnoOverview: publicProcedure
+    .input(z.object({ id: z.string(), instType: z.enum(['futures', 'options']).optional().default('futures') }))
+    .query(async ({ input }) => {
+      const { getMCFnoOverview } = await import("./fnoService");
+      return await getMCFnoOverview(input.id, input.instType);
+    }),
+
+  getTrendlyneFnoHeatmap: publicProcedure
+    .query(async () => {
+      const { getTrendlyneFnoHeatmap } = await import("./fnoService");
+      return await getTrendlyneFnoHeatmap();
+    }),
+
   getTechnicalScan: publicProcedure
     .input(z.object({ symbol: z.string(), forceRefresh: z.boolean().optional() }))
     .query(async ({ input }) => {
@@ -278,6 +302,14 @@ export const appRouter = router({
     .query(async ({ input }) => {
       return await fetchOptionChain(input.symbol);
     }),
+
+  getTopMovers: publicProcedure.query(async () => {
+    return await fetchTopMovers();
+  }),
+
+  getBreakouts: publicProcedure.query(async () => {
+    return await fetchNiftyTraderBreakouts();
+  }),
 
   getFnoSymbols: publicProcedure
     .query(async () => {
@@ -1031,6 +1063,16 @@ export const appRouter = router({
       return await getTrendlyneOverview(input.symbol);
     }),
 
+  getTrendlyneSectorRotation: publicProcedure
+    .query(async () => {
+      return await fetchTrendlyneSectorRotation();
+    }),
+
+  getTrendlyneIndexRotation: publicProcedure
+    .query(async () => {
+      return await fetchTrendlyneIndexRotation();
+    }),
+
   // --- Stock Scoring APIs ---
   getTopRatedStocks: publicProcedure
     .input(z.object({ 
@@ -1068,6 +1110,71 @@ export const appRouter = router({
       pageNumber: z.number().optional().default(0)
     }))
     .query(async ({ input }) => {
+      // 1. MoneyControl
+      if (input.screenpk.startsWith('MC_')) {
+        const scanId = input.screenpk.replace('MC_', '');
+        try {
+          const stocks = db.prepare(`
+            SELECT ss.symbol as stockId, ss.stock_name as name, ss.symbol
+            FROM moneycontrol_screener_stocks ss
+            WHERE ss.scan_id = ?
+          `).all(scanId) as any[];
+          
+          return {
+            success: true,
+            data: stocks.map(s => ({
+              stockId: s.stockId || s.symbol || '',
+              name: s.name || s.symbol || '',
+              symbol: s.symbol || s.stockId || '',
+              ltp: 0,
+              change: 0,
+              changePercent: 0,
+              screenerName: input.screenerName,
+              screenerType: 'moneycontrol'
+            })),
+            screenerName: input.screenerName,
+            totalResults: stocks.length
+          };
+        } catch (error) {
+          console.error('❌ Error fetching MC screener data:', error);
+          return { success: false, data: [], totalResults: 0 };
+        }
+      }
+
+      // 2. ETnow
+      if (input.screenpk.startsWith('ET_')) {
+        const screenerId = input.screenpk.replace('ET_', '');
+        try {
+          const etScreener = db.prepare(`
+            SELECT query_condition FROM etnow_screeners WHERE screener_id = ?
+          `).get(screenerId) as { query_condition: string } | undefined;
+
+          if (etScreener) {
+            const result = await fetchETnowScreener(screenerId, etScreener.query_condition);
+            const records = result?.searchResult?.searchData?.records || [];
+            
+            return {
+              success: true,
+              data: records.map((r: any) => ({
+                stockId: r.symbol || '',
+                name: r.companyName || r.name || '',
+                ltp: parseFloat(r.currentPrice || 0),
+                change: parseFloat(r.priceChange || 0),
+                changePercent: parseFloat(r.percentChange || 0),
+                screenerName: input.screenerName,
+                screenerType: 'etnow'
+              })),
+              screenerName: input.screenerName,
+              totalResults: records.length
+            };
+          }
+        } catch (error) {
+          console.error('❌ Error fetching ETnow screener data:', error);
+          return { success: false, data: [], totalResults: 0 };
+        }
+      }
+
+      // 3. Trendlyne (Default)
       return await fetchTrendlyneScreenerData(
         input.screenpk,
         input.screenerName,
@@ -1118,7 +1225,13 @@ export const appRouter = router({
       stockId: z.string()
     }))
     .query(async ({ input }) => {
-      return await findScreenersByStock(input.stockId);
+      const { findScreenersByStock } = await import('./trendlyneScreener');
+      const { findMcScreenersByStock } = await import('./moneycontrolScreener');
+      
+      const tl = findScreenersByStock(input.stockId);
+      const mc = findMcScreenersByStock(input.stockId);
+      
+      return [...tl, ...mc];
     }),
 
   refreshTrendlyneScreenersDB: publicProcedure
@@ -1139,6 +1252,11 @@ export const appRouter = router({
           count: 0
         };
       }
+    }),
+
+  recategorizeTrendlyneScreeners: publicProcedure
+    .mutation(async () => {
+      return await recategorizeAllScreeners();
     }),
 
   // --- NSE Stocks Management ---

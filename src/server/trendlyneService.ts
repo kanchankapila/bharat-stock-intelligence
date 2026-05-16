@@ -1,4 +1,6 @@
 import { getStockMapping } from './stockMapping';
+import * as fs from 'fs';
+import * as path from 'path';
 
 const HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -69,4 +71,50 @@ export async function getTrendlyneOverview(symbol: string) {
     checklist,
     dvm
   };
+}
+
+export async function fetchTrendlyneSectorRotation() {
+  console.log(`[TRENDLYNE] Fetching sector rotation data`);
+  const url = `https://trendlyne.com/fundamentals/api/sector-rotation/sector/?format=json&metric=count`;
+  try {
+    const response = await fetch(url, { headers: HEADERS });
+    if (!response.ok) {
+      throw new Error(`Status: ${response.status}`);
+    }
+    return await response.json();
+  } catch (error) {
+    console.error(`[TRENDLYNE] Sector rotation fetch error:`, error);
+    console.log(`[TRENDLYNE] Falling back to mock data...`);
+    try {
+      const mockDataPath = path.join(__dirname, 'mockSectorRotation.json');
+      const mockData = JSON.parse(fs.readFileSync(mockDataPath, 'utf8'));
+      return mockData;
+    } catch (mockError) {
+      console.error(`[TRENDLYNE] Failed to load mock data:`, mockError);
+      return null;
+    }
+  }
+}
+
+export async function fetchTrendlyneIndexRotation() {
+  console.log(`[TRENDLYNE] Fetching index rotation data`);
+  const url = `https://trendlyne.com/fundamentals/api/sector-rotation/indices/?format=json&metric=count`;
+  try {
+    const response = await fetch(url, { headers: HEADERS });
+    if (!response.ok) {
+      throw new Error(`Status: ${response.status}`);
+    }
+    return await response.json();
+  } catch (error) {
+    console.error(`[TRENDLYNE] Index rotation fetch error:`, error);
+    console.log(`[TRENDLYNE] Falling back to mock index rotation data...`);
+    try {
+      const mockDataPath = path.join(__dirname, 'mockIndexRotation.json');
+      const mockData = JSON.parse(fs.readFileSync(mockDataPath, 'utf8'));
+      return mockData;
+    } catch (mockError) {
+      console.error(`[TRENDLYNE] Failed to load mock index rotation data:`, mockError);
+      return null;
+    }
+  }
 }

@@ -158,3 +158,14 @@ export function getIndexMapping(query: string): IndexMapping | undefined {
     idx.id === query
   );
 }
+
+export function getStockMappingByTLId(tlId: string): StockMapping | undefined {
+  if (!tlId) return undefined;
+  return stockData.find(s => s.tlid === tlId);
+}
+
+export function getStockMappingByName(name: string): StockMapping | undefined {
+  if (!name) return undefined;
+  const upperName = name.toUpperCase();
+  return stockData.find(s => s.name.toUpperCase() === upperName || s.tlname.toUpperCase() === name.toLowerCase().replace(/ /g, '-'));
+}

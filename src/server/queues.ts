@@ -134,7 +134,7 @@ async function processMcScreenerSync(_job: Job): Promise<{ success: boolean }> {
 export async function initQueues(): Promise<boolean> {
   // 1. Fail-fast probe to see if Redis is even there
   const probeConnection = makeConnection(true);
-  const probe = new Redis({ ...probeConnection, lazyConnect: true });
+  const probe = new Redis({ ...(probeConnection as any), lazyConnect: true });
   
   try {
     await probe.connect();

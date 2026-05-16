@@ -9,7 +9,7 @@
  */
 
 import db from './db';
-import { getStockMapping } from './stockMapping';
+import { getStockMapping, getStockMappingByTLId, getStockMappingByName } from './stockMapping';
 
 const TRENDLYNE_BASE_URL = 'https://kayal.trendlyne.com/broker-webview/kayal/all-in-one-screener-data-get/';
 
@@ -36,6 +36,59 @@ export function updateScreenerNamesInterval(intervalMs: number): void {
   TRENDLYNE_CONFIG.SCREENER_NAMES_INTERVAL_MS = intervalMs;
 }
 
+/**
+ * Categorize screener based on its name and description
+ */
+export function categorizeScreener(name: string, description: string = ''): {
+  sentiment: 'bullish' | 'bearish' | 'neutral';
+  category: 'technical' | 'fundamental' | 'valuation' | 'delivery' | 'intraday' | 'momentum' | 'sector';
+  timeframe: 'intraday' | 'long_term';
+} {
+  const text = (name + ' ' + (description || '')).toLowerCase();
+  
+  // 1. Determine Sentiment
+  let sentiment: 'bullish' | 'bearish' | 'neutral' = 'neutral';
+  if (text.includes('bullish') || text.includes('buy') || text.includes('breakout') || 
+      text.includes('rising') || text.includes('golden cross') || text.includes('outperform') ||
+      text.includes('top gainer') || text.includes('gaining') || text.includes('uptrend') ||
+      text.includes('support') || text.includes('oversold')) {
+    sentiment = 'bullish';
+  } else if (text.includes('bearish') || text.includes('sell') || text.includes('breakdown') || 
+             text.includes('falling') || text.includes('death cross') || text.includes('underperform') ||
+             text.includes('top loser') || text.includes('declining') || text.includes('downtrend') ||
+             text.includes('resistance') || text.includes('overbought')) {
+    sentiment = 'bearish';
+  }
+
+  // 2. Determine Timeframe
+  let timeframe: 'intraday' | 'long_term' = 'long_term';
+  if (text.includes('intraday') || text.includes('15m') || text.includes('5m') || 
+      text.includes('hour') || text.includes('day trade') || text.includes('min')) {
+    timeframe = 'intraday';
+  }
+
+  // 3. Determine Category
+  let category: 'technical' | 'fundamental' | 'valuation' | 'delivery' | 'intraday' | 'momentum' | 'sector' = 'technical';
+  if (text.includes('momentum') || text.includes('relative strength') || text.includes('gainer') || text.includes('rally')) {
+    category = 'momentum';
+  } else if (text.includes('tata') || text.includes('adani') || text.includes('psu') || text.includes('sector') || text.includes('defense') || text.includes('infra')) {
+    category = 'sector';
+  } else if (text.includes('fundamental') || text.includes('roe') || text.includes('debt') || 
+      text.includes('profit') || text.includes('sales') || text.includes('growth') || text.includes('margin') ||
+      text.includes('asset') || text.includes('balance sheet') || text.includes('dividend')) {
+    category = 'fundamental';
+  } else if (text.includes('valuation') || text.includes('pe ratio') || text.includes('undervalued') || 
+             text.includes('cheap') || text.includes('p/e') || text.includes('pb ratio') || text.includes('intrinsic')) {
+    category = 'valuation';
+  } else if (text.includes('delivery') || text.includes('volume') || text.includes('bulk deal') || text.includes('block deal') || text.includes('turnover')) {
+    category = 'delivery';
+  } else if (timeframe === 'intraday' || text.includes('scalping')) {
+    category = 'intraday';
+  }
+
+  return { sentiment, category, timeframe };
+}
+
 // Database operations for screener mappings
 export function saveScreenerToDB(
   screenerId: string,
@@ -44,11 +97,23 @@ export function saveScreenerToDB(
   description?: string
 ): void {
   try {
+    const { sentiment, category, timeframe } = categorizeScreener(screenerName, description);
     const stmt = db.prepare(`
-      INSERT OR REPLACE INTO trendlyne_screeners (screener_id, screener_name, screenpk, description, last_updated)
-      VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+      INSERT OR REPLACE INTO trendlyne_screeners (
+        screener_id, screener_name, screenpk, description, 
+        sentiment, category, timeframe, last_updated
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     `);
-    stmt.run(screenerId, screenerName, screenpk, description || `${screenerName} from Trendlyne`);
+    stmt.run(
+      screenerId, 
+      screenerName, 
+      screenpk, 
+      description || `${screenerName} from Trendlyne`,
+      sentiment,
+      category,
+      timeframe
+    );
   } catch (error) {
     console.error(`❌ Error saving screener to DB:`, error);
   }
@@ -91,12 +156,22 @@ export function getScreenerFromDB(screenerId: string): { screener_name: string; 
   }
 }
 
-export function getAllScreenersFromDB(): Array<{ screener_id: string; screener_name: string; screenpk: string; description: string }> {
+export function getAllScreenersFromDB(): Array<{ 
+  screener_id: string; 
+  screener_name: string; 
+  screenpk: string; 
+  description: string;
+  sentiment: string;
+  category: string;
+  timeframe: string;
+}> {
   try {
     const stmt = db.prepare(`
-      SELECT screener_id, screener_name, screenpk, description FROM trendlyne_screeners ORDER BY screener_name
+      SELECT screener_id, screener_name, screenpk, description, sentiment, category, timeframe 
+      FROM trendlyne_screeners 
+      ORDER BY screener_name
     `);
-    return stmt.all() as Array<{ screener_id: string; screener_name: string; screenpk: string; description: string }>;
+    return stmt.all() as any[];
   } catch (error) {
     console.error(`❌ Error retrieving all screeners from DB:`, error);
     return [];
@@ -240,6 +315,7 @@ function setCachedScreenerStocks(mapping: Map<string, string[]>): void {
 export interface TrendlyneStock {
   stockId: string;
   name: string;
+  symbol?: string;
   ltp: number;
   change: number;
   changePercent: number;
@@ -307,9 +383,18 @@ export async function testTrendlyneApiResponse(
 
       // Map tableData rows to stock objects
       tableData.forEach((row: any[]) => {
+        const tlId = String(row[stockIdIndex] || '');
+        const fullName = String(row[nameIndex] || '');
+        
+        let mapping = getStockMappingByTLId(tlId);
+        if (!mapping) {
+          mapping = getStockMappingByName(fullName);
+        }
+
         stocks.push({
-          stockId: String(row[stockIdIndex] || ''),
-          name: String(row[nameIndex] || ''),
+          stockId: tlId,
+          name: fullName,
+          symbol: mapping?.symbol,
           ltp: parseFloat(row[priceIndex] || 0),
           change: 0,
           changePercent: 0,
@@ -426,9 +511,19 @@ export async function fetchTrendlyneScreenerData(
 
       // Map tableData rows to stock objects
       tableData.forEach((row: any[]) => {
+        const tlId = String(row[stockIdIndex] || '');
+        const fullName = String(row[nameIndex] || '');
+        
+        const { getStockMappingByTLId, getStockMappingByName } = require('./stockMapping');
+        let mapping = getStockMappingByTLId(tlId);
+        if (!mapping) {
+          mapping = getStockMappingByName(fullName);
+        }
+
         stocks.push({
-          stockId: String(row[stockIdIndex] || ''),
-          name: String(row[nameIndex] || ''),
+          stockId: tlId,
+          name: fullName,
+          symbol: mapping?.symbol,
           ltp: parseFloat(row[priceIndex] || 0),
           change: 0,
           changePercent: 0,
@@ -589,34 +684,123 @@ export async function fetchAllTrendlyneScreenerNames(): Promise<Set<string>> {
 
 /**
  * Get list of screener names/categories available
- * Returns screeners from database (fetched once on first call)
- * Also includes screenpk for direct API calls
+ * Returns screeners from database, enriched with NLP-inferred metadata from screener_master
  */
 export async function getTrendlyneScreenerList() {
-  // Try to get from database first
-  let screeners = getAllScreenersFromDB();
-
-  // If database is empty, return hardcoded categories immediately and trigger fetch in background
-  if (screeners.length === 0) {
-    console.log(`📊 Database empty, triggering background fetch of screener names from Trendlyne API...`);
-    // Trigger in background, don't await
-    fetchAllTrendlyneScreenerNames().catch(err => console.error('Background fetch error:', err));
-    
-    // Return hardcoded ones as fallback for now
-    return getTrendlyneScreenerCategories().map(c => ({
-      id: c.id,
-      name: c.name,
-      description: c.description,
-      screenpk: '19814' // Default sample pk
-    }));
+  // 1. Get raw screeners from their respective source tables
+  const trendlyneScreeners = getAllScreenersFromDB();
+  
+  let mcScreeners: any[] = [];
+  try {
+    const db = require('./db').default;
+    const stmt = db.prepare(`
+      SELECT scan_id, screener_name, type, is_positive
+      FROM moneycontrol_screeners
+      ORDER BY screener_name
+    `);
+    mcScreeners = stmt.all();
+  } catch (error) {
+    console.error('❌ Error fetching MC screeners for list:', error);
   }
 
-  return screeners.map(s => ({
-    id: s.screener_id,
-    name: s.screener_name,
-    description: s.description,
-    screenpk: s.screenpk  // Include screenpk for API calls
-  }));
+  // 2. Load the "New Analysis" metadata from screener_master
+  const masterMeta = new Map<string, any>();
+  try {
+    const db = require('./db').default;
+    const rows = db.prepare(`
+      SELECT scan_id, inferred_sentiment, inferred_category, inferred_timeframe, confidence 
+      FROM screener_master
+    `).all();
+    for (const r of rows) {
+      masterMeta.set(r.scan_id, r);
+    }
+  } catch (err) {
+    console.error('❌ Error loading screener_master metadata:', err);
+  }
+
+  // If database is empty, trigger background fetch
+  if (trendlyneScreeners.length === 0 && mcScreeners.length === 0) {
+    console.log(`📊 Database empty, triggering background fetch of screener names from Trendlyne API...`);
+    fetchAllTrendlyneScreenerNames().catch(err => console.error('Background fetch error:', err));
+    
+    return getTrendlyneScreenerCategories().map(c => {
+      const { sentiment, category, timeframe } = categorizeScreener(c.name, c.description);
+      return {
+        id: c.id,
+        name: c.name,
+        description: c.description,
+        screenpk: '19814',
+        sentiment,
+        category,
+        timeframe,
+        source: 'trendlyne'
+      };
+    });
+  }
+
+  const result = [];
+  
+  // 3. Process Trendlyne screeners
+  for (const s of trendlyneScreeners) {
+    const meta = masterMeta.get(s.screener_id);
+    result.push({
+      id: s.screener_id,
+      name: s.screener_name,
+      description: s.description,
+      screenpk: s.screenpk,
+      // Use NLP analysis if available, otherwise fall back to simple regex
+      sentiment: meta?.inferred_sentiment || s.sentiment,
+      category:  meta?.inferred_category  || s.category,
+      timeframe: meta?.inferred_timeframe || s.timeframe,
+      confidence: meta?.confidence || 0.5,
+      source: 'trendlyne'
+    });
+  }
+  
+  // 4. Process MoneyControl screeners
+  for (const mc of mcScreeners) {
+    const meta = masterMeta.get(mc.scan_id);
+    result.push({
+      id: mc.scan_id,
+      name: mc.screener_name,
+      description: 'Moneycontrol ' + (mc.type === 'pro' ? 'Fundamental' : 'Technical') + ' Screener',
+      screenpk: 'MC_' + mc.scan_id,
+      sentiment: meta?.inferred_sentiment || (mc.is_positive === 1 ? 'bullish' : 'bearish'),
+      category:  meta?.inferred_category  || (mc.type === 'pro' ? 'fundamental' : 'technical'),
+      timeframe: meta?.inferred_timeframe || (mc.type === 'pro' ? 'long_term' : 'intraday'),
+      confidence: meta?.confidence || 0.7,
+      source: 'moneycontrol'
+    });
+  }
+
+  // 5. Process ETnow screeners
+  try {
+    const db = require('./db').default;
+    const etScreeners = db.prepare(`
+      SELECT screener_id, screener_name, query_condition
+      FROM etnow_screeners
+      ORDER BY screener_name
+    `).all();
+
+    for (const et of etScreeners) {
+      const meta = masterMeta.get(et.screener_id);
+      result.push({
+        id: et.screener_id,
+        name: et.screener_name,
+        description: 'ETnow Market Screener',
+        screenpk: 'ET_' + et.screener_id,
+        sentiment: meta?.inferred_sentiment || 'neutral',
+        category:  meta?.inferred_category  || 'fundamental',
+        timeframe: meta?.inferred_timeframe || 'long_term',
+        confidence: meta?.confidence || 0.6,
+        source: 'etnow'
+      });
+    }
+  } catch (error) {
+    console.error('❌ Error fetching ETnow screeners for list:', error);
+  }
+
+  return result;
 }
 
 /**
@@ -654,17 +838,21 @@ export function findScreenersByStock(stockId: string): Array<{
   id: string;
   name: string;
   sentiment: 'bullish' | 'bearish' | 'neutral';
+  screenpk: string;
+  source: string;
+  description: string;
 }> {
   try {
     if (!stockId || stockId === '#N/A' || stockId === 'undefined' || stockId === 'null') {
       return [];
     }
 
-    // Get matching screeners from database using the stock_id mapping
+    // Get matching screeners enriched with NLP metadata
     const stmt = db.prepare(`
-      SELECT s.screener_id, s.screener_name
+      SELECT s.screener_id, s.screener_name, s.screenpk, s.description, m.inferred_sentiment, s.sentiment as fallback_sentiment
       FROM trendlyne_screeners s
       JOIN trendlyne_screener_stocks ss ON s.screener_id = ss.screener_id
+      LEFT JOIN screener_master m ON s.screener_id = m.scan_id
       WHERE ss.stock_id = ? OR ss.symbol = ?
     `);
     
@@ -672,7 +860,14 @@ export function findScreenersByStock(stockId: string): Array<{
     const mapping = getStockMapping(stockId);
     const symbol = mapping ? mapping.symbol : stockId;
     
-    const matches = stmt.all(stockId, symbol) as Array<{ screener_id: string; screener_name: string }>;
+    const matches = stmt.all(stockId, symbol) as Array<{ 
+      screener_id: string; 
+      screener_name: string;
+      screenpk: string;
+      description: string;
+      inferred_sentiment: string | null;
+      fallback_sentiment: string;
+    }>;
 
     if (matches.length === 0) {
       return [];
@@ -681,7 +876,10 @@ export function findScreenersByStock(stockId: string): Array<{
     const result = matches.map(m => ({
       id: m.screener_id,
       name: m.screener_name,
-      sentiment: determineSentiment(m.screener_name)
+      sentiment: (m.inferred_sentiment || m.fallback_sentiment || determineSentiment(m.screener_name)) as 'bullish' | 'bearish' | 'neutral',
+      screenpk: m.screenpk,
+      source: 'trendlyne',
+      description: m.description || 'Trendlyne Intelligent Screener'
     }));
 
     return result;
@@ -748,17 +946,50 @@ export async function syncAllScreenerStocksToDB() {
 }
 
 /**
+ * Re-categorize all screeners in the database based on current logic
+ */
+export async function recategorizeAllScreeners() {
+  try {
+    const screeners = getAllScreenersFromDB();
+    console.log(`🔄 Re-categorizing ${screeners.length} screeners...`);
+    
+    let updatedCount = 0;
+    const updateStmt = db.prepare(`
+      UPDATE trendlyne_screeners 
+      SET sentiment = ?, category = ?, timeframe = ? 
+      WHERE screener_id = ?
+    `);
+
+    db.transaction(() => {
+      for (const s of screeners) {
+        const { sentiment, category, timeframe } = categorizeScreener(s.screener_name, s.description);
+        if (sentiment !== s.sentiment || category !== s.category || timeframe !== s.timeframe) {
+          updateStmt.run(sentiment, category, timeframe, s.screener_id);
+          updatedCount++;
+        }
+      }
+    })();
+
+    console.log(`✅ Re-categorization complete. Updated ${updatedCount} screeners.`);
+    return { success: true, updatedCount };
+  } catch (error) {
+    console.error('❌ Error during re-categorization:', error);
+    return { success: false, error: String(error) };
+  }
+}
+
+/**
  * Get hardcoded fallback categories if API fails
  */
 export function getTrendlyneScreenerCategories() {
   return [
-    { id: 'all', name: 'All Screeners', description: 'All available Trendlyne screeners' },
-    { id: 'bullish', name: 'Bullish Signals', description: 'Stocks showing bullish signals' },
-    { id: 'bearish', name: 'Bearish Signals', description: 'Stocks showing bearish signals' },
-    { id: 'breakout', name: 'Breakouts', description: 'Stocks breaking out of resistance' },
-    { id: 'trending', name: 'Trending', description: 'Stocks in strong trends' },
-    { id: 'momentum', name: 'Momentum', description: 'High momentum stocks' },
-    { id: 'reversal', name: 'Reversals', description: 'Potential reversal signals' },
-    { id: 'volume', name: 'Volume Leaders', description: 'High volume stocks' }
+    { id: 'all', name: 'All Screeners', description: 'All available Trendlyne screeners', sentiment: 'neutral' as const, category: 'technical' as const, timeframe: 'long_term' as const, source: 'trendlyne' },
+    { id: 'bullish', name: 'Bullish Signals', description: 'Stocks showing bullish signals', sentiment: 'bullish' as const, category: 'technical' as const, timeframe: 'long_term' as const, source: 'trendlyne' },
+    { id: 'bearish', name: 'Bearish Signals', description: 'Stocks showing bearish signals', sentiment: 'bearish' as const, category: 'technical' as const, timeframe: 'long_term' as const, source: 'trendlyne' },
+    { id: 'breakout', name: 'Breakouts', description: 'Stocks breaking out of resistance', sentiment: 'bullish' as const, category: 'technical' as const, timeframe: 'long_term' as const, source: 'trendlyne' },
+    { id: 'trending', name: 'Trending', description: 'Stocks in strong trends', sentiment: 'neutral' as const, category: 'technical' as const, timeframe: 'long_term' as const, source: 'trendlyne' },
+    { id: 'momentum', name: 'Momentum', description: 'High momentum stocks', sentiment: 'bullish' as const, category: 'technical' as const, timeframe: 'long_term' as const, source: 'trendlyne' },
+    { id: 'reversal', name: 'Reversals', description: 'Potential reversal signals', sentiment: 'neutral' as const, category: 'technical' as const, timeframe: 'long_term' as const, source: 'trendlyne' },
+    { id: 'volume', name: 'Volume Leaders', description: 'High volume stocks', sentiment: 'neutral' as const, category: 'delivery' as const, timeframe: 'long_term' as const, source: 'trendlyne' }
   ];
 }

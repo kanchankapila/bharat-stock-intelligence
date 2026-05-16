@@ -10,17 +10,17 @@ import { motion } from 'motion/react';
 import stockData from '../data/stocklist';
 
 interface ScoredStock {
-  symbol: string;
-  timeframe: string;
-  stock_id: string;
-  score: number;
-  confidence: number;
-  classification: string;
-  top_domain: string;
-  positive_count: number;
-  negative_count: number;
-  reasons: Array<{ name: string; sentiment: string; source: string }>;
-  last_updated: string;
+  symbol?: string;
+  timeframe?: string;
+  stock_id?: string;
+  score?: number;
+  confidence?: number;
+  classification?: string;
+  top_domain?: string;
+  positive_count?: number;
+  negative_count?: number;
+  reasons?: Array<{ name?: string; sentiment?: string; source?: string }>;
+  last_updated?: string;
 }
 
 const RankingList: React.FC<{ 
@@ -141,7 +141,7 @@ const TopRatedStocks: React.FC<{ onSelectStock: (symbol: string) => void }> = ({
           </div>
           <p className="text-slate-500 text-[10px] font-black uppercase tracking-[0.2em] flex items-center gap-2">
             <Zap className="w-3 h-3 text-amber-500" />
-            Cross-Horizon Quantitative Ranking System
+            FinBERT-Powered Multi-Factor Multi-Horizon Ranking
           </p>
         </div>
 
@@ -186,9 +186,9 @@ const TopRatedStocks: React.FC<{ onSelectStock: (symbol: string) => void }> = ({
             </h3>
             <div className="space-y-4">
               <div className="p-3 bg-slate-950 rounded-2xl border border-slate-800">
-                <p className="text-[9px] font-black text-white uppercase mb-1 italic">Timeframe Engine</p>
+                <p className="text-[9px] font-black text-white uppercase mb-1 italic">FinBERT Sentiment Engine</p>
                 <p className="text-[9px] text-slate-500 leading-relaxed font-medium italic">
-                  Screeners are automatically segmented into Intraday (High Frequency) vs Long Term (Fundamental/DVM) using institutional intent analysis.
+                  Utilizes ProsusAI FinBERT deep learning models to perform high-fidelity semantic analysis of screeners, neutralizing bias and identifying institutional intent.
                 </p>
               </div>
               <div className="p-3 bg-slate-950 rounded-2xl border border-slate-800">

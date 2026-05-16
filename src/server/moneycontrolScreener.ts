@@ -185,7 +185,7 @@ export async function syncMoneyControlScreeners() {
     const response = await mcFetchJson(url);
 
     if (response?.success === 1 && response.data) {
-      const screenerName = response.data.scanName || response.data.scanname || `MC Screener ${config.scanId}`;
+      const screenerName = response.data.list?.scannerName || response.data.scanName || response.data.scanname || `MC Screener ${config.scanId}`;
       
       // Upsert screener
       db.prepare(`
@@ -197,7 +197,7 @@ export async function syncMoneyControlScreeners() {
       `).run(config.scanId, config.catId, screenerName, config.type, config.is_positive ? 1 : 0);
 
       // Get stocks
-      const stocks = response.data.stock || response.data.stocks || [];
+      const stocks = response.data.list?.scannerDetails || response.data.stock || response.data.stocks || [];
       console.log(`✅ Fetched ${stocks.length} stocks for MC: ${screenerName}`);
 
       // Clear existing stocks for this screener
@@ -246,23 +246,36 @@ export function findMcScreenersByStock(symbol: string): Array<{
   id: string;
   name: string;
   sentiment: 'bullish' | 'bearish' | 'neutral';
+  screenpk: string;
+  source: string;
+  description: string;
 }> {
   try {
     if (!symbol) return [];
 
     const stmt = db.prepare(`
-      SELECT s.scan_id, s.screener_name, s.is_positive
+      SELECT s.scan_id, s.screener_name, m.inferred_sentiment, s.is_positive, s.type
       FROM moneycontrol_screeners s
       JOIN moneycontrol_screener_stocks ss ON s.scan_id = ss.scan_id
+      LEFT JOIN screener_master m ON s.scan_id = m.scan_id
       WHERE ss.symbol = ?
     `);
     
-    const matches = stmt.all(symbol) as Array<{ scan_id: string; screener_name: string; is_positive: number }>;
+    const matches = stmt.all(symbol) as Array<{ 
+      scan_id: string; 
+      screener_name: string; 
+      inferred_sentiment: string | null;
+      is_positive: number;
+      type: string;
+    }>;
 
     return matches.map(m => ({
       id: m.scan_id,
       name: m.screener_name,
-      sentiment: m.is_positive === 1 ? 'bullish' : 'bearish'
+      sentiment: (m.inferred_sentiment || (m.is_positive === 1 ? 'bullish' : 'bearish')) as 'bullish' | 'bearish' | 'neutral',
+      screenpk: 'MC_' + m.scan_id,
+      source: 'moneycontrol',
+      description: 'Moneycontrol ' + (m.type === 'pro' ? 'Fundamental' : 'Technical') + ' Screener'
     }));
   } catch (error) {
     console.error(`❌ Error finding MC screeners for stock ${symbol}:`, error);

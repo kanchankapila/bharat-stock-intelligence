@@ -9,7 +9,7 @@ import {
   AlertCircle, ArrowUpRight, ArrowDownRight, Activity, Zap,
   LayoutDashboard, Filter, History, User, LogIn, Plus, Heart, Share2, Download,
   ArrowLeft, Eye, ChevronUp, ChevronDown, Save, Bookmark, BrainCircuit, CheckCircle2,
-  Users, Trophy, Bookmark as WatchlistIcon, BarChart2
+  Users, Trophy, Bookmark as WatchlistIcon, BarChart2, Star, Target
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format } from 'date-fns';
@@ -28,10 +28,14 @@ import { detectCandlestickPatterns, Candlestick } from './lib/candlestickUtils';
 import MCStockInfoPanel from './components/MCStockInfoPanel';
 import { MCIndexDetailPanel } from './components/MCIndexDetailPanel';
 import TrendlyneScreenerPanel from './components/TrendlyneScreenerPanel';
+import { TrendlyneSectorDashboard } from './components/TrendlyneSectorDashboard';
+import { IntradayBreakouts } from './components/IntradayBreakouts';
 import NSEStockDiscovery from './components/NSEStockDiscovery';
 import stockData from './data/stocklist';
 import { nseStocksData } from './data/nseStocks';
 import TopRatedStocks from './components/TopRatedStocks';
+import FnOIntelligenceCenter from './components/FnOIntelligenceCenter';
+import IndexFnoOverview from './components/IndexFnoOverview';
 
 class MCErrorBoundary extends React.Component<
   { children: React.ReactNode },
@@ -129,6 +133,7 @@ const Navbar: React.FC<{
             { icon: BarChart2, label: 'Indices', id: 'indices' },
             { icon: Activity, label: 'Market Map', id: 'market-map' },
             { icon: Filter, label: 'Screener', id: 'screener' },
+            { icon: Target, label: 'F&O Intel', id: 'fno-scanners' },
             { icon: Zap, label: 'Trendlyne', id: 'trendlyne' },
             { icon: Search, label: 'Discover', id: 'discover' },
             { icon: History, label: 'Backtest', id: 'backtest' },
@@ -609,6 +614,92 @@ const SectorPerformance: React.FC = () => {
   );
 };
 
+// --- Top Movers Intelligence Component ---
+const TopMoversIntelligence: React.FC<{ onSelectStock: (symbol: string) => void }> = ({ onSelectStock }) => {
+  const { data: movers, isLoading } = trpc.getTopMovers.useQuery(undefined, {
+    refetchInterval: 60000
+  });
+
+  const renderMoversList = (list: any[], color: string) => (
+    <div className="space-y-3">
+      {list.slice(0, 6).map((stock: any) => (
+        <div 
+          key={stock.symbol_name} 
+          onClick={() => onSelectStock(stock.symbol_name)}
+          className="flex items-center justify-between group hover:bg-slate-800/40 p-2 rounded-xl transition-all cursor-pointer border border-transparent hover:border-slate-700"
+        >
+          <div>
+            <p className="text-white font-black text-[11px] tracking-tight uppercase italic">{stock.symbol_name}</p>
+            <p className="text-slate-500 text-[9px] font-bold tracking-widest uppercase">
+              Vol: {stock.today_volume ? `${(stock.today_volume / 1000000).toFixed(1)}M` : '—'}
+            </p>
+          </div>
+          <div className="text-right">
+            <p className="text-white font-black text-xs tabular-nums">₹{Number(stock.today_close).toLocaleString()}</p>
+            <p className={cn(
+              "text-[10px] font-black tabular-nums",
+              Number(stock.change_percent) >= 0 ? "text-emerald-400" : "text-rose-400"
+            )}>
+              {Number(stock.change_percent) >= 0 ? '+' : ''}{Number(stock.change_percent).toFixed(2)}%
+            </p>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+
+  if (isLoading) {
+    return (
+      <div className="col-span-12 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {[1, 2, 3, 4, 5, 6].map(i => (
+          <div key={i} className="h-48 bg-slate-900/50 animate-pulse rounded-3xl border border-slate-800" />
+        ))}
+      </div>
+    );
+  }
+
+  const sections = [
+    { title: 'Top Gainers', data: movers?.topGainers || [], icon: TrendingUp, color: 'emerald' },
+    { title: 'Top Losers', data: movers?.topLosers || [], icon: TrendingDown, color: 'rose' },
+    { title: 'Top Watchlist', data: movers?.topWatchList || [], icon: Star, color: 'violet' },
+    { title: 'Gap Up Stocks', data: movers?.gapUp || [], icon: ArrowUpRight, color: 'blue' },
+    { title: 'Gap Down Stocks', data: movers?.gapDown || [], icon: ArrowDownRight, color: 'orange' },
+    { title: 'Open = Low (Bullish)', data: movers?.sameOpenAndLow || [], icon: Zap, color: 'emerald' },
+    { title: 'Open = High (Bearish)', data: movers?.sameOpenAndHigh || [], icon: Activity, color: 'rose' },
+  ];
+
+  return (
+    <div className="col-span-12 space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-black text-white tracking-tighter uppercase italic flex items-center gap-3">
+            <Trophy className="w-6 h-6 text-amber-500 fill-amber-500/20" />
+            Top Movers (Live)
+          </h2>
+          <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">Real-time market activity and setup detection</p>
+        </div>
+        <div className="flex items-center gap-2 px-3 py-1 bg-slate-900 border border-slate-800 rounded-full">
+           <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+           <span className="text-[9px] font-black text-white uppercase tracking-widest">Live NSE Data</span>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        {sections.map(section => (
+          <Card key={section.title} title={section.title} icon={section.icon}>
+            {renderMoversList(section.data, section.color)}
+            {section.data.length === 0 && (
+              <div className="py-8 text-center">
+                <p className="text-slate-600 text-[10px] font-bold uppercase tracking-widest italic">No data detected</p>
+              </div>
+            )}
+          </Card>
+        ))}
+      </div>
+    </div>
+  );
+};
+
 // --- Index Overview Component ---
 // ─── Indices Feature ─────────────────────────────────────────────────────────
 
@@ -889,6 +980,11 @@ const IndexDetailPage: React.FC<{
             )}
           </div>
         </div>
+      )}
+
+      {/* Derivative Intelligence */}
+      {['NIFTY 50', 'NIFTY BANK', 'NIFTY FIN SERVICE'].includes(indexName.toUpperCase()) && (
+        <IndexFnoOverview symbol={indexName} />
       )}
 
       {/* Extended MC Index Intelligence Panel — PE/PB charts, fundamentals, intraday A/D breadth */}
@@ -1657,32 +1753,11 @@ const Dashboard: React.FC<{
           </div>
         </Card>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <Card title="Top Movers (Live)" icon={TrendingUp}>
-             <div className="space-y-4 pt-2">
-              {stocks.slice(0, 5).map((stock) => (
-                <div 
-                  key={stock.symbol} 
-                  onClick={() => onSelectStock(stock.symbol)}
-                  className="flex items-center justify-between group hover:bg-slate-800/40 p-2 rounded-xl transition-all cursor-pointer border border-transparent hover:border-slate-700"
-                >
-                  <div>
-                    <p className="text-white font-bold text-sm tracking-tight">{stock.symbol}</p>
-                    <p className="text-slate-500 text-[10px] font-medium tracking-wider">Vol: {stock.volume}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-white font-black text-sm tabular-nums">₹{stock.price.toLocaleString()}</p>
-                    <p className={cn(
-                      "text-[10px] font-bold tabular-nums",
-                      stock.changePct >= 0 ? "text-emerald-400" : "text-rose-400"
-                    )}>
-                      {stock.changePct >= 0 ? '+' : ''}{stock.changePct}%
-                    </p>
-                  </div>
-                </div>
-              ))}
-             </div>
-          </Card>
+        <TopMoversIntelligence onSelectStock={onSelectStock} />
+
+        <IntradayBreakouts onSelectStock={onSelectStock} />
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 col-span-12">
           <Card title="AI Intelligence Hub" icon={Zap}>
              <div className="space-y-4 pt-2 min-h-[180px]">
                 {aiSignals.length > 0 ? aiSignals.map((signal) => (
@@ -2439,59 +2514,64 @@ const Dashboard: React.FC<{
 };
 
 const OptionChain: React.FC<{ symbol: string; stockPrice: number }> = ({ symbol, stockPrice }) => {
-  const { data: fno } = trpc.getFnOSignals.useQuery({ symbol });
+  const { data: fnoSignals } = trpc.getFnOSignals.useQuery({ symbol });
+  const { data: ocResponse, isLoading } = trpc.getOptionChain.useQuery({ symbol }, {
+    refetchInterval: 30000
+  });
+
+  const ocData = ocResponse?.success ? ocResponse.data : null;
+  const chain = ocData?.optionChain || [];
   
-  // Generate strikes around current price
-  const baseStrike = Math.round(stockPrice / 50) * 50;
-  const strikes = Array.from({ length: 11 }, (_, i) => baseStrike + (i - 5) * 50);
+  const ivRank = ocData?.marketSentiment?.ivRank;
+  const ivPercentile = ocData?.marketSentiment?.ivPercentile;
+  const maxPain = ocData?.marketSentiment?.maxPain;
 
-  // Stats for the stock from signal data or defaults
-  const ivRank = fno?.marketSentiment.ivRank || 42;
-  const ivPercentile = fno?.marketSentiment.ivPercentile || 68;
+  if (isLoading) {
+    return (
+      <div className="py-20 text-center bg-slate-950 rounded-2xl border border-slate-800 border-dashed">
+        <Activity className="w-8 h-8 text-blue-500 animate-spin mx-auto mb-4" />
+        <p className="text-slate-500 font-bold uppercase tracking-widest text-[10px]">Fetching real-time option chain...</p>
+      </div>
+    );
+  }
 
-  const getGreeks = (strike: number, type: 'CALL' | 'PUT') => {
-    const isCall = type === 'CALL';
-    const itm = isCall ? stockPrice > strike : stockPrice < strike;
-    const diff = Math.abs(stockPrice - strike) / stockPrice;
-    
-    // Mock calculations
-    const delta = isCall 
-      ? (itm ? 0.5 + (1 - diff) * 0.4 : 0.5 - diff * 0.4)
-      : (itm ? -0.5 - (1 - diff) * 0.4 : -0.5 + diff * 0.4);
-    
-    const gamma = 0.002 * (1 - diff * 5);
-    const theta = -15 * (1 + diff);
-    const vega = 0.12 * (1 - diff * 3);
-    const iv = 18 + diff * 20;
-
-    return {
-      delta: delta.toFixed(2),
-      gamma: gamma.toFixed(4),
-      theta: theta.toFixed(2),
-      vega: vega.toFixed(3),
-      iv: iv.toFixed(1) + '%',
-      // Deterministic simulation: OI peaks near ATM, decays by moneyness
-      oi: Math.round(50000 * Math.max(0.1, 1 - diff * 4)).toLocaleString(),
-      vol: Math.round(20000 * Math.max(0.05, 1 - diff * 5)).toLocaleString(),
-      bid: (itm ? Math.abs(stockPrice - strike) + iv * 0.5 : iv * Math.max(0.1, 1 - diff * 3)).toFixed(2),
-      ask: (itm ? Math.abs(stockPrice - strike) + iv * 0.5 + 0.5 : iv * Math.max(0.1, 1 - diff * 3) + 0.5).toFixed(2),
-    };
-  };
+  if (!ocData || chain.length === 0) {
+    return (
+      <div className="py-20 text-center bg-slate-950 rounded-2xl border border-slate-800 border-dashed">
+        <AlertCircle className="w-8 h-8 text-rose-500 mx-auto mb-4" />
+        <h3 className="text-white font-black text-lg uppercase tracking-tighter italic">Option Chain Unavailable</h3>
+        <p className="text-slate-500 text-[10px] uppercase font-bold tracking-widest mt-2">Could not retrieve F&O data for {symbol}</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
       {/* IV Section */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      {/* F&O Sentiment Metrics */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="p-4 bg-slate-900 border border-slate-800 rounded-2xl flex items-center justify-between">
+          <div>
+            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Max Pain Strike</p>
+            <p className="text-2xl font-black text-white italic">₹{maxPain || '—'}</p>
+            <p className="text-[8px] text-slate-600 font-bold uppercase mt-1">Expiry Magnet</p>
+          </div>
+          <div className="p-3 bg-blue-500/10 rounded-xl">
+             <Target className="w-5 h-5 text-blue-400" />
+          </div>
+        </div>
+
         <div className="p-4 bg-slate-900 border border-slate-800 rounded-2xl flex items-center justify-between">
           <div>
             <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">IV Rank</p>
-            <p className="text-2xl font-black text-white italic">{ivRank}</p>
+            <p className="text-2xl font-black text-white italic">{ivRank || 'N/A'}</p>
+            <p className="text-[8px] text-slate-600 font-bold uppercase mt-1">Volatility vs History</p>
           </div>
-          <div className="w-16 h-16 relative">
+          <div className="w-12 h-12 relative opacity-50">
             <ResponsiveContainer width="100%" height="100%">
               <RePieChart>
                 <Pie
-                  data={[{ value: ivRank }, { value: 100 - ivRank }]}
+                  data={[{ value: ivRank || 1 }, { value: Math.max(0, 100 - (ivRank || 0)) }]}
                   innerRadius="80%"
                   outerRadius="100%"
                   paddingAngle={0}
@@ -2499,23 +2579,25 @@ const OptionChain: React.FC<{ symbol: string; stockPrice: number }> = ({ symbol,
                   startAngle={90}
                   endAngle={-270}
                 >
-                  <Cell fill="#3b82f6" />
+                  <Cell fill={ivRank ? "#3b82f6" : "#1e293b"} />
                   <Cell fill="#1e293b" />
                 </Pie>
               </RePieChart>
             </ResponsiveContainer>
           </div>
         </div>
+
         <div className="p-4 bg-slate-900 border border-slate-800 rounded-2xl flex items-center justify-between">
           <div>
             <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">IV Percentile</p>
-            <p className="text-2xl font-black text-emerald-400 italic">{ivPercentile}%</p>
+            <p className="text-2xl font-black text-emerald-400 italic">{ivPercentile ? `${ivPercentile}%` : 'N/A'}</p>
+            <p className="text-[8px] text-slate-600 font-bold uppercase mt-1">Relative Volatility</p>
           </div>
-          <div className="w-16 h-16 relative">
+          <div className="w-12 h-12 relative opacity-50">
             <ResponsiveContainer width="100%" height="100%">
               <RePieChart>
                 <Pie
-                  data={[{ value: ivPercentile }, { value: 100 - ivPercentile }]}
+                  data={[{ value: ivPercentile || 1 }, { value: Math.max(0, 100 - (ivPercentile || 0)) }]}
                   innerRadius="80%"
                   outerRadius="100%"
                   paddingAngle={0}
@@ -2523,7 +2605,7 @@ const OptionChain: React.FC<{ symbol: string; stockPrice: number }> = ({ symbol,
                   startAngle={90}
                   endAngle={-270}
                 >
-                  <Cell fill="#10b981" />
+                  <Cell fill={ivPercentile ? "#10b981" : "#1e293b"} />
                   <Cell fill="#1e293b" />
                 </Pie>
               </RePieChart>
@@ -2534,49 +2616,55 @@ const OptionChain: React.FC<{ symbol: string; stockPrice: number }> = ({ symbol,
 
       {/* Option Chain Table */}
       <div className="overflow-x-auto rounded-2xl border border-slate-800 bg-slate-950/50">
-        <table className="w-full text-left border-collapse min-w-[1000px]">
+        <table className="w-full text-left border-collapse min-w-[1200px]">
           <thead>
             <tr className="bg-slate-900">
-              <th colSpan={4} className="px-4 py-2 text-center text-[10px] font-black uppercase text-blue-500 border-b border-slate-800">Calls</th>
+              <th colSpan={5} className="px-4 py-2 text-center text-[10px] font-black uppercase text-blue-500 border-b border-slate-800">Calls</th>
               <th className="px-4 py-2 text-center text-[10px] font-black uppercase text-slate-400 border-b border-slate-800">Strike</th>
-              <th colSpan={4} className="px-4 py-2 text-center text-[10px] font-black uppercase text-rose-500 border-b border-slate-800">Puts</th>
+              <th colSpan={5} className="px-4 py-2 text-center text-[10px] font-black uppercase text-rose-500 border-b border-slate-800">Puts</th>
             </tr>
             <tr className="bg-slate-900/50">
-              {['OI', 'Delta', 'IV', 'Vol', 'Bid/Ask'].map(h => (
+              {['Buildup', 'OI', 'Delta', 'IV', 'LTP'].map(h => (
                 <th key={`c-${h}`} className="px-3 py-3 text-[8px] font-black uppercase text-slate-500 tracking-widest text-center">{h}</th>
               ))}
               <th className="px-3 py-3 text-[8px] font-black uppercase text-white tracking-widest text-center bg-slate-800">Price</th>
-              {['Bid/Ask', 'Vol', 'IV', 'Delta', 'OI'].map(h => (
+              {['LTP', 'IV', 'Delta', 'OI', 'Buildup'].map(h => (
                 <th key={`p-${h}`} className="px-3 py-3 text-[8px] font-black uppercase text-slate-500 tracking-widest text-center">{h}</th>
               ))}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-800/50">
-            {strikes.map(strike => {
-              const call = getGreeks(strike, 'CALL');
-              const put = getGreeks(strike, 'PUT');
-              const isAtTheMoney = Math.abs(stockPrice - strike) < 25;
+            {chain.map((row: any) => {
+              const strike = row.strikePrice;
+              const isAtTheMoney = Math.abs(stockPrice - strike) < (stockPrice * 0.005);
 
               return (
                 <tr key={strike} className={cn(
                   "hover:bg-slate-900/40 transition-colors text-center",
                   isAtTheMoney && "bg-blue-600/5"
                 )}>
-                  <td className="px-3 py-4 text-[10px] font-medium text-slate-500">{call.oi}</td>
-                  <td className="px-3 py-4 text-[10px] font-bold text-emerald-400">{call.delta}</td>
-                  <td className="px-3 py-4 text-[10px] font-medium text-slate-400">{call.iv}</td>
-                  <td className="px-3 py-4 text-[10px] font-medium text-slate-400">{call.vol}</td>
-                  <td className="px-3 py-4 text-[10px] font-bold text-white tracking-tighter">
-                    {call.bid} <span className="text-slate-600">/</span> {call.ask}
-                  </td>
+                  {/* CALLS */}
+                  <td className={cn(
+                    "px-3 py-4 text-[8px] font-black uppercase",
+                    row.callBuiltup.includes('Long') ? "text-emerald-400" : row.callBuiltup.includes('Short') ? "text-rose-400" : "text-slate-600"
+                  )}>{row.callBuiltup}</td>
+                  <td className="px-3 py-4 text-[10px] font-medium text-slate-400">{(row.callOi/1000).toFixed(1)}k</td>
+                  <td className="px-3 py-4 text-[10px] font-bold text-emerald-400">{row.callDelta?.toFixed(2)}</td>
+                  <td className="px-3 py-4 text-[10px] font-medium text-slate-400">{row.callIv?.toFixed(1)}%</td>
+                  <td className="px-3 py-4 text-[10px] font-black text-white tabular-nums">₹{row.callLtp?.toFixed(2)}</td>
+                  
+                  {/* STRIKE */}
                   <td className="px-3 py-4 text-xs font-black text-white bg-slate-800/30 border-x border-slate-800 tabular-nums">₹{strike}</td>
-                  <td className="px-3 py-4 text-[10px] font-bold text-white tracking-tighter">
-                    {put.bid} <span className="text-slate-600">/</span> {put.ask}
-                  </td>
-                  <td className="px-3 py-4 text-[10px] font-medium text-slate-400">{put.vol}</td>
-                  <td className="px-3 py-4 text-[10px] font-medium text-slate-400">{put.iv}</td>
-                  <td className="px-3 py-4 text-[10px] font-bold text-rose-400">{put.delta}</td>
-                  <td className="px-3 py-4 text-[10px] font-medium text-slate-500">{put.oi}</td>
+                  
+                  {/* PUTS */}
+                  <td className="px-3 py-4 text-[10px] font-black text-white tabular-nums">₹{row.putLtp?.toFixed(2)}</td>
+                  <td className="px-3 py-4 text-[10px] font-medium text-slate-400">{row.putIv?.toFixed(1)}%</td>
+                  <td className="px-3 py-4 text-[10px] font-bold text-rose-400">{row.putDelta?.toFixed(2)}</td>
+                  <td className="px-3 py-4 text-[10px] font-medium text-slate-400">{(row.putOi/1000).toFixed(1)}k</td>
+                  <td className={cn(
+                    "px-3 py-4 text-[8px] font-black uppercase",
+                    row.putBuiltup.includes('Long') ? "text-emerald-400" : row.putBuiltup.includes('Short') ? "text-rose-400" : "text-slate-600"
+                  )}>{row.putBuiltup}</td>
                 </tr>
               );
             })}
@@ -2587,11 +2675,11 @@ const OptionChain: React.FC<{ symbol: string; stockPrice: number }> = ({ symbol,
       <Card title="Greeks Analysis (Portfolio Impact)" icon={Activity}>
         <div className="h-64">
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={strikes.map(s => ({ 
-              strike: s, 
-              delta: parseFloat(getGreeks(s, 'CALL').delta),
-              theta: Math.abs(parseFloat(getGreeks(s, 'CALL').theta)) / 30, // normalized
-              vega: parseFloat(getGreeks(s, 'CALL').vega) * 8 // scaled
+            <AreaChart data={chain.map(row => ({ 
+              strike: row.strikePrice, 
+              delta: row.callDelta || 0,
+              theta: Math.abs(row.callTheta || 0) / 10, // normalized
+              vega: (row.callVega || 0) * 5 // scaled
             }))}>
               <XAxis dataKey="strike" hide />
               <YAxis hide />
@@ -2705,6 +2793,8 @@ const MarketMap: React.FC = () => {
       <div className="grid grid-cols-1 gap-6">
         <SectorHeatmap indexId={activeInd} />
         
+        <TrendlyneSectorDashboard />
+
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           <Card title="Distribution Analysis" icon={BarChart3}>
             <div className="h-48 pt-4">
@@ -3418,12 +3508,15 @@ const TechnicalAnalysis: React.FC<{ symbol: string }> = ({ symbol }) => {
               { label: 'Pivot', val: (tech as any)?.data?.pivotLevels?.find((p: any) => p.key === 'Classic')?.pivotLevel?.pivotPoint || '---' },
               { label: 'S1', val: (tech as any)?.data?.pivotLevels?.find((p: any) => p.key === 'Classic')?.pivotLevel?.s1 || '---' },
               { label: 'S2', val: (tech as any)?.data?.pivotLevels?.find((p: any) => p.key === 'Classic')?.pivotLevel?.s2 || '---' },
-            ].map(p => (
-              <div key={p.label} className="p-4 bg-slate-950 rounded-2xl border border-slate-800 text-center">
-                 <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">{p.label}</p>
-                 <p className="text-sm font-black text-white italic">₹{p.val}</p>
-              </div>
-            ))}
+            ].map(p => {
+              const displayVal = typeof p.val === 'number' ? `₹${p.val.toFixed(2)}` : p.val;
+              return (
+                <div key={p.label} className="p-4 bg-slate-950 rounded-2xl border border-slate-800 text-center">
+                   <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">{p.label}</p>
+                   <p className="text-sm font-black text-white italic">{displayVal}</p>
+                </div>
+              );
+            })}
          </div>
       </Card>
     </div>
@@ -3456,14 +3549,30 @@ const FundamentalInsights: React.FC<{ symbol: string }> = ({ symbol }) => {
       const title = (ic.title || "").toLowerCase().replace(/[^a-z0-9]/g, '');
       return allNames.some(an => title.includes(an));
     });
-    return icRow ? icRow.value : 'N/A';
+    if (icRow && icRow.value !== undefined) return icRow.value;
+
+    // 3. Try Tradebrains key metrics fallback
+    const tbMetrics = (unifiedData as any)?.tradebrains?.keyMetrics;
+    if (tbMetrics) {
+      // Direct match or include
+      const tbEntry = Object.entries(tbMetrics).find(([k, v]) => {
+        const key = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+        return allNames.some(an => key.includes(an) || an.includes(key));
+      });
+      if (tbEntry && tbEntry[1] !== undefined && tbEntry[1] !== null) return tbEntry[1];
+    }
+
+    return 'N/A';
   };
 
   const displayRatios = [
     { label: 'Debt/Equity', name: 'debt/equity', fallbacks: ['debt equity', 'debt to equity', 'gearing'], icon: Filter },
+    { label: 'Current Ratio', name: 'current ratio', fallbacks: ['current'], icon: Activity },
+    { label: 'Quick Ratio', name: 'quick ratio', fallbacks: ['quick'], icon: Activity },
+    { label: 'Interest Coverage', name: 'interest coverage', fallbacks: ['interest coverage ratio'], icon: Activity },
+    { label: 'ROE %', name: 'roe', fallbacks: ['return on equity', 'roe %'], icon: Activity },
     { label: 'P/E Ratio', name: 'p/e ratio', fallbacks: ['ttm pe ratio', 'pe'], icon: Activity },
     { label: 'P/B Ratio', name: 'p/b ratio', fallbacks: ['price to book ratio', 'pb'], icon: TrendingUp },
-    { label: 'ROE %', name: 'roe', fallbacks: ['return on equity', 'roe %'], icon: Activity },
   ];
 
   // Extract shareholding from consolidated data
@@ -3498,7 +3607,7 @@ const FundamentalInsights: React.FC<{ symbol: string }> = ({ symbol }) => {
        </div>
 
        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Shareholding Pattern */}
+          {/* Shareholding Pattern Visual */}
           <Card title="Shareholding Pattern" icon={PieChart}>
              <div className="space-y-4 mt-2">
                 {[
@@ -3526,7 +3635,9 @@ const FundamentalInsights: React.FC<{ symbol: string }> = ({ symbol }) => {
                 </p>
              </div>
           </Card>
+        </div>
 
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {/* Corporate Actions */}
           <Card title="Corporate Actions" icon={History}>
              <div className="space-y-3 mt-2 max-h-[250px] overflow-y-auto pr-2 custom-scrollbar">
@@ -3788,10 +3899,12 @@ const StockDetails: React.FC<{
   onBack: () => void;
   watchlist: string[];
   onToggleWatchlist: (symbol: string) => void;
-}> = ({ symbol, stock: initialStock, onBack, watchlist, onToggleWatchlist }) => {
+  onSelectStock: (symbol: string) => void;
+}> = ({ symbol, stock: initialStock, onBack, watchlist, onToggleWatchlist, onSelectStock }) => {
   const news = useNewsFeed().filter(n => n.relatedSymbols?.includes(symbol));
   const [activeTab, setActiveTab] = useState('insights');
   const [report, setReport] = useState<any>(null);
+  const { data: unifiedData } = trpc.getAlphaQuantDetail.useQuery({ symbol });
 
   // Resolve MC symbol (scId) from stocklist mapping for MoneyControl API calls
   const stockMapping = stockData.find(s => s.symbol.toUpperCase() === symbol.toUpperCase());
@@ -3954,6 +4067,9 @@ const StockDetails: React.FC<{
           { id: 'insights', label: 'Overview' },
           { id: 'technicals', label: 'Technical' },
           { id: 'fundamentals', label: 'Fundamental' },
+          { id: 'financials', label: 'Financials' },
+          { id: 'peers', label: 'Peers' },
+          { id: 'analysis', label: 'Analysis' },
           { id: 'mf', label: 'MF Insights' },
           { id: 'fno', label: 'F&O Insights' },
           { id: 'news', label: 'News Feed' },
@@ -3977,7 +4093,7 @@ const StockDetails: React.FC<{
           {activeTab === 'insights' && (
             <div className="space-y-6">
               <MCErrorBoundary>
-                <MCStockInfoPanel symbol={symbol} scId={mcScId} />
+                <MCStockInfoPanel symbol={symbol} scId={mcScId} section="overview" onSelectStock={onSelectStock} />
               </MCErrorBoundary>
 
               {/* Real-time Candlestick Pattern Recognition */}
@@ -4030,161 +4146,23 @@ const StockDetails: React.FC<{
                 </motion.div>
               )}
 
-              <Card title="Interactive Technical Chart" icon={Activity}>
-                <div className="flex gap-4 mb-6 overflow-x-auto pb-2 hide-scrollbar">
-                    {['1m', '5m', '15m', '1H', '1D', '1W'].map(tf => (
-                      <button key={tf} className={cn(
-                        "px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all border",
-                        tf === '15m' ? "bg-blue-600 border-blue-600 text-white" : "bg-slate-950 border-slate-800 text-slate-500 hover:text-white"
-                      )}>
-                        {tf}
-                      </button>
-                    ))}
-                </div>
-                
-                <div className="h-[400px] w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <ComposedChart data={chartData}>
-                        <defs>
-                          <linearGradient id="chartGradient" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.1}/>
-                            <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
-                          </linearGradient>
-                        </defs>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                        <XAxis dataKey="time" hide />
-                        <YAxis hide domain={['auto', 'auto']} />
-                        <Tooltip 
-                          contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.5)' }}
-                          itemStyle={{ fontSize: '10px', fontWeight: '900', textTransform: 'uppercase' }}
-                          labelStyle={{ color: '#64748b', fontSize: '10px', fontWeight: 'bold', marginBottom: '4px' }}
-                          content={({ active, payload }) => {
-                            if (active && payload && payload.length) {
-                              const data = payload[0].payload;
-                              return (
-                                <div className="bg-slate-950 border border-slate-800 p-3 rounded-xl shadow-2xl backdrop-blur-md">
-                                  <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 border-b border-slate-800 pb-1">{data.time}</p>
-                                  <div className="space-y-1.5">
-                                    <div className="flex justify-between gap-4">
-                                      <span className="text-[10px] font-bold text-slate-400">O:</span>
-                                      <span className="text-[10px] font-black text-white">₹{data.open.toFixed(2)}</span>
-                                    </div>
-                                    <div className="flex justify-between gap-4">
-                                      <span className="text-[10px] font-bold text-slate-400">H:</span>
-                                      <span className="text-[10px] font-black text-emerald-400">₹{data.high.toFixed(2)}</span>
-                                    </div>
-                                    <div className="flex justify-between gap-4">
-                                      <span className="text-[10px] font-bold text-slate-400">L:</span>
-                                      <span className="text-[10px] font-black text-rose-400">₹{data.low.toFixed(2)}</span>
-                                    </div>
-                                    <div className="flex justify-between gap-4">
-                                      <span className="text-[10px] font-bold text-slate-400">C:</span>
-                                      <span className="text-[10px] font-black text-white">₹{data.close.toFixed(2)}</span>
-                                    </div>
-                                  </div>
-                                </div>
-                              );
-                            }
-                            return null;
-                          }}
-                        />
-                        <Area 
-                          type="monotone" 
-                          dataKey="bollinger" 
-                          stroke="none" 
-                          fill="#3b82f6" 
-                          fillOpacity={0.05} 
-                          name="Volatility Band" 
-                        />
-                        <Bar 
-                          dataKey="price" 
-                          fill="#3b82f6" 
-                          opacity={0.1} 
-                          barSize={2} 
-                        />
-                        <Line type="monotone" dataKey="price" stroke="#fff" strokeWidth={2} dot={false} name="Price" activeDot={{ r: 4, fill: '#3b82f6', stroke: '#fff', strokeWidth: 2 }} />
-                        <Line type="monotone" dataKey="vwap" stroke="#ec4899" strokeWidth={1} dot={false} name="VWAP" strokeDasharray="3 3" />
-                        
-                        <ReferenceLine 
-                          y={levels.resistance} 
-                          stroke="#f43f5e" 
-                          strokeWidth={1.5} 
-                          strokeDasharray="4 4" 
-                        />
-                        <ReferenceLine 
-                          y={levels.support} 
-                          stroke="#10b981" 
-                          strokeWidth={1.5} 
-                          strokeDasharray="4 4" 
-                        />
-
-                        {patterns.length > 0 && patterns[patterns.length - 1].sentiment !== 'neutral' && (
-                          <ReferenceArea 
-                            {...({
-                              x1: chartData[chartData.length - 3].time,
-                              x2: chartData[chartData.length - 1].time,
-                              fill: patterns[patterns.length - 1].sentiment === 'bullish' ? '#10b981' : '#f43f5e',
-                              fillOpacity: 0.08,
-                              stroke: patterns[patterns.length - 1].sentiment === 'bullish' ? '#10b981' : '#f43f5e',
-                              strokeOpacity: 0.2,
-                              strokeDasharray: "3 3"
-                            } as any)}
-                          />
-                        )}
-                      </ComposedChart>
-                    </ResponsiveContainer>
-                </div>
-
-                <div className="mt-6 flex flex-col md:flex-row gap-4">
-                  <div className="flex-1 p-4 bg-slate-900/50 border border-slate-800/80 rounded-2xl">
-                    <div className="flex items-center gap-2 mb-2">
-                       <div className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
-                       <h4 className="text-[10px] font-black text-white uppercase tracking-widest">Resistance Level: ₹{levels.resistance.toFixed(2)}</h4>
-                    </div>
-                    <p className="text-[11px] text-slate-400 leading-relaxed italic">
-                      Price has struggled to break above this ceiling. A strong breakout with volume could signal a bullish reversal or trend continuation.
-                    </p>
-                  </div>
-                  <div className="flex-1 p-4 bg-slate-900/50 border border-slate-800/80 rounded-2xl">
-                    <div className="flex items-center gap-2 mb-2">
-                       <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                       <h4 className="text-[10px] font-black text-white uppercase tracking-widest">Support Level: ₹{levels.support.toFixed(2)}</h4>
-                    </div>
-                    <p className="text-[11px] text-slate-400 leading-relaxed italic">
-                      Buyers have historically entered the market at this floor. Holding this level is critical to maintain current trend integrity.
-                    </p>
-                  </div>
-                </div>
-              </Card>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <Card title="Volume Insights" icon={BarChart3}>
-                  <div className="h-40">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={chartData.slice(0, 20)}>
-                        <Bar dataKey="volume" fill="#1e293b" radius={[4, 4, 0, 0]} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                </Card>
-                <Card title="Market Summary" icon={Info}>
+              <Card title="Market Sentiment Summary" icon={Info}>
                    <div className="space-y-4">
                       <p className="text-xs text-slate-400 leading-relaxed italic">
-                        {stock?.name ?? displayName} is currently showing a {(stock?.changePct ?? 0) > 0 ? 'bullish' : 'bearish'} bias with volumes trending {Math.random() > 0.5 ? 'above' : 'below'} the 20-day average. The Relative Strength Index (RSI) is sitting at 58.4, indicating neutral momentum.
+                        {stock?.name ?? displayName} is currently showing a {(stock?.changePct ?? 0) > 0 ? 'bullish' : 'bearish'} bias. The technical rating stands at <span className="text-white font-bold">{(unifiedData as any)?.technicalRating?.text || 'Neutral'}</span> with high institutional interest observed in recent sessions.
                       </p>
                       <div className="flex gap-4">
-                         <div className="flex-1 p-3 bg-slate-950 rounded-xl border border-slate-800">
-                            <span className="text-[8px] font-black text-slate-500 uppercase block mb-1">Mkt Cap</span>
-                            <span className="text-xs font-bold text-white">₹18.42T</span>
-                         </div>
                          <div className="flex-1 p-3 bg-slate-950 rounded-xl border border-slate-800">
                             <span className="text-[8px] font-black text-slate-500 uppercase block mb-1">52W High</span>
                             <span className="text-xs font-bold text-white">{stock?.high ? `₹${stock.high + 100}` : '—'}</span>
                          </div>
+                         <div className="flex-1 p-3 bg-slate-950 rounded-xl border border-slate-800">
+                            <span className="text-[8px] font-black text-slate-500 uppercase block mb-1">52W Low</span>
+                            <span className="text-xs font-bold text-white">{stock?.low ? `₹${stock.low - 50}` : '—'}</span>
+                         </div>
                       </div>
                    </div>
                 </Card>
-              </div>
 
               {/* AI Analyst Report Component */}
               <div className="mt-8">
@@ -4299,18 +4277,143 @@ const StockDetails: React.FC<{
 
           {activeTab === 'technicals' && (
             <div className="space-y-6">
+              <Card title="Interactive Technical Chart" icon={Activity}>
+                <div className="flex gap-4 mb-6 overflow-x-auto pb-2 hide-scrollbar">
+                    {['1m', '5m', '15m', '1H', '1D', '1W'].map(tf => (
+                      <button key={tf} className={cn(
+                        "px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all border",
+                        tf === '15m' ? "bg-blue-600 border-blue-600 text-white" : "bg-slate-950 border-slate-800 text-slate-500 hover:text-white"
+                      )}>
+                        {tf}
+                      </button>
+                    ))}
+                </div>
+                
+                <div className="h-[400px] w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <ComposedChart data={chartData}>
+                        <defs>
+                          <linearGradient id="chartGradient" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.1}/>
+                            <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                        <XAxis dataKey="time" hide />
+                        <YAxis hide domain={['auto', 'auto']} />
+                        <Tooltip 
+                          contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.5)' }}
+                          itemStyle={{ fontSize: '10px', fontWeight: '900', textTransform: 'uppercase' }}
+                          labelStyle={{ color: '#64748b', fontSize: '10px', fontWeight: 'bold', marginBottom: '4px' }}
+                          content={({ active, payload }) => {
+                            if (active && payload && payload.length) {
+                              const data = payload[0].payload;
+                              return (
+                                <div className="bg-slate-950 border border-slate-800 p-3 rounded-xl shadow-2xl backdrop-blur-md">
+                                  <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 border-b border-slate-800 pb-1">{data.time}</p>
+                                  <div className="space-y-1.5">
+                                    <div className="flex justify-between gap-4">
+                                      <span className="text-[10px] font-bold text-slate-400">O:</span>
+                                      <span className="text-[10px] font-black text-white">₹{data.open.toFixed(2)}</span>
+                                    </div>
+                                    <div className="flex justify-between gap-4">
+                                      <span className="text-[10px] font-bold text-slate-400">H:</span>
+                                      <span className="text-[10px] font-black text-emerald-400">₹{data.high.toFixed(2)}</span>
+                                    </div>
+                                    <div className="flex justify-between gap-4">
+                                      <span className="text-[10px] font-bold text-slate-400">L:</span>
+                                      <span className="text-[10px] font-black text-rose-400">₹{data.low.toFixed(2)}</span>
+                                    </div>
+                                    <div className="flex justify-between gap-4">
+                                      <span className="text-[10px] font-bold text-slate-400">C:</span>
+                                      <span className="text-[10px] font-black text-white">₹{data.close.toFixed(2)}</span>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            }
+                            return null;
+                          }}
+                        />
+                        <Area 
+                          type="monotone" 
+                          dataKey="bollinger" 
+                          stroke="none" 
+                          fill="#3b82f6" 
+                          fillOpacity={0.05} 
+                          name="Volatility Band" 
+                        />
+                        <Bar 
+                          dataKey="price" 
+                          fill="#3b82f6" 
+                          opacity={0.1} 
+                          barSize={2} 
+                        />
+                        <Line type="monotone" dataKey="price" stroke="#fff" strokeWidth={2} dot={false} name="Price" activeDot={{ r: 4, fill: '#3b82f6', stroke: '#fff', strokeWidth: 2 }} />
+                        <Line type="monotone" dataKey="vwap" stroke="#ec4899" strokeWidth={1} dot={false} name="VWAP" strokeDasharray="3 3" />
+                        
+                        <ReferenceLine 
+                          y={levels.resistance} 
+                          stroke="#f43f5e" 
+                          strokeWidth={1.5} 
+                          strokeDasharray="4 4" 
+                        />
+                        <ReferenceLine 
+                          y={levels.support} 
+                          stroke="#10b981" 
+                          strokeWidth={1.5} 
+                          strokeDasharray="4 4" 
+                        />
+
+                        {patterns.length > 0 && patterns[patterns.length - 1].sentiment !== 'neutral' && (
+                          <ReferenceArea 
+                            {...({
+                              x1: chartData[chartData.length - 3].time,
+                              x2: chartData[chartData.length - 1].time,
+                              fill: patterns[patterns.length - 1].sentiment === 'bullish' ? '#10b981' : '#f43f5e',
+                              fillOpacity: 0.08,
+                              stroke: patterns[patterns.length - 1].sentiment === 'bullish' ? '#10b981' : '#f43f5e',
+                              strokeOpacity: 0.2,
+                              strokeDasharray: "3 3"
+                            } as any)}
+                          />
+                        )}
+                      </ComposedChart>
+                    </ResponsiveContainer>
+                </div>
+              </Card>
+
               <TechnicalAnalysis symbol={symbol} />
               <MCErrorBoundary>
-                <MCStockInfoPanel symbol={symbol} scId={mcScId} section="technical" />
+                <MCStockInfoPanel symbol={symbol} scId={mcScId} section="technical" onSelectStock={onSelectStock} />
               </MCErrorBoundary>
             </div>
           )}
           {activeTab === 'fundamentals' && (
             <div className="space-y-6">
               <FundamentalInsights symbol={symbol} />
-              <MCErrorBoundary>
-                <MCStockInfoPanel symbol={symbol} scId={mcScId} section="fundamental" />
-              </MCErrorBoundary>
+            </div>
+          )}
+          {activeTab === 'financials' && (
+            <div className="space-y-6">
+               <MCErrorBoundary>
+                 <MCStockInfoPanel symbol={symbol} scId={mcScId} section="fundamental" onSelectStock={onSelectStock} />
+               </MCErrorBoundary>
+            </div>
+          )}
+          {activeTab === 'peers' && (
+            <div className="space-y-6">
+               <MCErrorBoundary>
+                 <MCStockInfoPanel symbol={symbol} scId={mcScId} section="peers" onSelectStock={onSelectStock} />
+               </MCErrorBoundary>
+            </div>
+          )}
+
+          {activeTab === 'analysis' && (
+            <div className="space-y-6">
+               <MCErrorBoundary>
+                 <MCStockInfoPanel symbol={symbol} scId={mcScId} section="insights" onSelectStock={onSelectStock} />
+               </MCErrorBoundary>
             </div>
           )}
           {activeTab === 'mf' && <MFAnalysis symbol={symbol} />}
@@ -4340,7 +4443,7 @@ const StockDetails: React.FC<{
           )}
 
           {/* Other tabs can be implemented similarly */}
-          {activeTab !== 'insights' && activeTab !== 'fno' && activeTab !== 'technicals' && activeTab !== 'fundamentals' && activeTab !== 'mf' && activeTab !== 'news' && activeTab !== 'mc' && (
+          {activeTab !== 'insights' && activeTab !== 'fno' && activeTab !== 'technicals' && activeTab !== 'fundamentals' && activeTab !== 'financials' && activeTab !== 'peers' && activeTab !== 'mf' && activeTab !== 'news' && activeTab !== 'mc' && (
             <div className="flex flex-col items-center justify-center py-20 bg-slate-950 rounded-2xl border border-slate-800 border-dashed">
                <Activity className="w-12 h-12 text-slate-800 animate-pulse mb-4" />
                <h3 className="text-slate-500 font-black text-lg uppercase tracking-tighter italic">Coming to Bharat Stock Pro</h3>
@@ -4384,12 +4487,15 @@ const StockDetails: React.FC<{
                         { label: 'PP', val: stock?.price ?? 0, color: 'text-white' },
                         { label: 'S1', val: stock?.low ?? 0, color: 'text-rose-500' },
                         { label: 'S2', val: (stock?.low ?? 0) - 10, color: 'text-rose-400' },
-                      ].map(p => (
-                        <div key={p.label} className="flex justify-between items-center px-4 py-2 bg-slate-950 rounded-lg border border-slate-800/50">
-                           <span className={cn("text-[9px] font-black uppercase tracking-widest", p.color)}>{p.label}</span>
-                           <span className="text-xs font-bold tabular-nums text-slate-300">₹{p.val}</span>
-                        </div>
-                      ))}
+                      ].map(p => {
+                         const displayVal = typeof p.val === 'number' ? `₹${p.val.toFixed(2)}` : p.val;
+                         return (
+                           <div key={p.label} className="flex justify-between items-center px-4 py-2 bg-slate-950 rounded-lg border border-slate-800/50">
+                              <span className={cn("text-[9px] font-black uppercase tracking-widest", p.color)}>{p.label}</span>
+                              <span className="text-xs font-bold tabular-nums text-slate-300">{displayVal}</span>
+                           </div>
+                         );
+                       })}
                    </div>
                 </div>
 
@@ -4610,6 +4716,7 @@ export default function App() {
               {activeTab === 'screener' && <Screener stocks={stocks} onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />}
               {activeTab === 'trendlyne' && <TrendlyneScreenerPanel onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} />}
               {activeTab === 'discover' && <div className="p-6"><NSEStockDiscovery onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} /></div>}
+              {activeTab === 'fno-scanners' && <FnOIntelligenceCenter onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} />}
               {activeTab === 'details' && selectedSymbol && (
                 <StockDetails
                   key={selectedSymbol}
@@ -4618,6 +4725,7 @@ export default function App() {
                   onBack={() => setActiveTab('dashboard')}
                   watchlist={watchlist}
                   onToggleWatchlist={toggleWatchlist}
+                  onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }}
                 />
               )}
               {activeTab === 'backtest' && <Backtest stocks={stocks} />}

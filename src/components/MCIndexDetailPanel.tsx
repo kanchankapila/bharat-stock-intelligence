@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
+  LineChart, Line, AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, ComposedChart
 } from 'recharts';
 import { Card, SentimentBadge, ValueDisplay, IndicatorRow } from './MCCommon';
 import stockData from '../data/stocklist';
@@ -46,6 +46,8 @@ function resolveConstituentSymbol(s: any): string | null {
 
 export const MCIndexDetailPanel: React.FC<MCIndexDetailPanelProps> = ({ indId, name, bridgeSymbol, onSelectStock }) => {
   const [timeframe, setTimeframe] = React.useState<Timeframe>('D');
+  const [graphRange, setGraphRange] = React.useState<string>('1d');
+  const [graphType, setGraphType] = React.useState<string>('line');
   
   // Data Queries
   const { data: indexData, isLoading: loadingDetails } = trpc.getIndexFullData.useQuery(
@@ -71,6 +73,11 @@ export const MCIndexDetailPanel: React.FC<MCIndexDetailPanelProps> = ({ indId, n
   const { data: pbChart } = trpc.getIndexPbChart.useQuery(
     { indId },
     { enabled: !!indId, staleTime: 3600000 }
+  );
+  
+  const { data: graphData, isLoading: loadingGraph } = trpc.getIndexGraph.useQuery(
+    { indId, range: graphRange, type: graphType },
+    { enabled: !!indId, staleTime: 60000 }
   );
 
   if (loadingDetails) {
@@ -120,6 +127,136 @@ export const MCIndexDetailPanel: React.FC<MCIndexDetailPanelProps> = ({ indId, n
           </span>
         </div>
       </div>
+      
+      {/* Price Graph Section */}
+      <Card title="Market Performance" icon={TrendingUp}>
+        <div className="space-y-4">
+          <div className="flex flex-wrap justify-between items-center gap-4">
+            <div className="flex gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
+              {['1d', '5d', '1m', '3m', '6m', '1yr', '2yr', '5yr'].map((r) => (
+                <button
+                  key={r}
+                  onClick={() => setGraphRange(r)}
+                  className={cn(
+                    "px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all",
+                    graphRange === r ? "bg-blue-600 text-white shadow-lg" : "text-slate-500 hover:text-slate-300"
+                  )}
+                >
+                  {r}
+                </button>
+              ))}
+            </div>
+            
+            <div className="flex gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
+              {['line', 'area', 'stick', 'ohlc'].map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setGraphType(t)}
+                  className={cn(
+                    "px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all",
+                    graphType === t ? "bg-blue-600 text-white shadow-lg" : "text-slate-500 hover:text-slate-300"
+                  )}
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="h-[350px] w-full bg-slate-950/50 rounded-2xl border border-slate-800/30 p-4">
+            {loadingGraph ? (
+              <div className="h-full flex items-center justify-center">
+                <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500"></div>
+              </div>
+            ) : graphData?.graph?.values ? (
+              <ResponsiveContainer width="100%" height="100%">
+                {graphType === 'area' ? (
+                  <AreaChart data={graphData.graph.values}>
+                    <defs>
+                      <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/>
+                        <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                    <XAxis 
+                      dataKey="_time" 
+                      tick={{ fontSize: 9, fill: '#64748b' }} 
+                      axisLine={false}
+                      tickLine={false}
+                      minTickGap={30}
+                    />
+                    <YAxis 
+                      domain={['auto', 'auto']} 
+                      tick={{ fontSize: 9, fill: '#64748b' }} 
+                      axisLine={false}
+                      tickLine={false}
+                      width={40}
+                    />
+                    <Tooltip
+                      contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px', fontSize: '10px' }}
+                      itemStyle={{ color: '#fff', fontWeight: 'bold' }}
+                      labelStyle={{ color: '#64748b', marginBottom: '4px' }}
+                      formatter={(v: any) => [parseFloat(v).toLocaleString(), 'Price']}
+                    />
+                    <Area type="monotone" dataKey="_value" stroke="#3b82f6" strokeWidth={2} fillOpacity={1} fill="url(#colorValue)" />
+                  </AreaChart>
+                ) : graphType === 'stick' ? (
+                  <BarChart data={graphData.graph.values}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                    <XAxis 
+                      dataKey="_time" 
+                      tick={{ fontSize: 9, fill: '#64748b' }} 
+                      axisLine={false}
+                      tickLine={false}
+                      minTickGap={30}
+                    />
+                    <YAxis 
+                      domain={['auto', 'auto']} 
+                      tick={{ fontSize: 9, fill: '#64748b' }} 
+                      axisLine={false}
+                      tickLine={false}
+                      width={40}
+                    />
+                    <Tooltip
+                      contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px', fontSize: '10px' }}
+                      formatter={(v: any) => [parseFloat(v).toLocaleString(), 'Price']}
+                    />
+                    <Bar dataKey="_value" fill="#3b82f6" radius={[2, 2, 0, 0]} />
+                  </BarChart>
+                ) : (
+                  <LineChart data={graphData.graph.values}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                    <XAxis 
+                      dataKey="_time" 
+                      tick={{ fontSize: 9, fill: '#64748b' }} 
+                      axisLine={false}
+                      tickLine={false}
+                      minTickGap={30}
+                    />
+                    <YAxis 
+                      domain={['auto', 'auto']} 
+                      tick={{ fontSize: 9, fill: '#64748b' }} 
+                      axisLine={false}
+                      tickLine={false}
+                      width={40}
+                    />
+                    <Tooltip
+                      contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px', fontSize: '10px' }}
+                      formatter={(v: any) => [parseFloat(v).toLocaleString(), 'Price']}
+                    />
+                    <Line type="monotone" dataKey="_value" stroke="#3b82f6" strokeWidth={2} dot={false} />
+                  </LineChart>
+                )}
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-full flex items-center justify-center text-slate-500 text-sm font-bold">
+                No graph data available
+              </div>
+            )}
+          </div>
+        </div>
+      </Card>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Market Breadth & Fundamentals */}

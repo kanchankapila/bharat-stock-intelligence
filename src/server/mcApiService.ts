@@ -2,6 +2,7 @@ import { getStockMapping } from './stockMapping';
 import { Semaphore } from './semaphore';
 import { findMcScreenersByStock } from './moneycontrolScreener';
 import { findScreenersByStock } from './trendlyneScreener';
+import { findEtScreenersByStock } from './etnow';
 
 const mcSemaphore = new Semaphore(10); // Increased concurrency
 
@@ -161,6 +162,26 @@ export interface McConsensusData {
   categories: string[];
 }
 
+export interface McGraphDataPoint {
+  _time: string;
+  _value: string;
+  _volume: string;
+  _chg: string;
+  _pchg: string;
+  _dir: string;
+}
+
+export interface McGraphResponse {
+  graph: {
+    name: string;
+    date_time: string;
+    current_close: string;
+    prev_close: string;
+    direction: string;
+    values: McGraphDataPoint[];
+  };
+}
+
 export interface McHitsMisses {
   beats: { total: string; selected: string; unselected: string };
   misses: { total: string; selected: string; unselected: string };
@@ -235,6 +256,15 @@ function setCachedFundamental(scId: string, key: string, data: any) {
   fundamentalCache[cacheKey] = { data, timestamp: Date.now() };
 }
 
+export interface ScreenerInfo {
+  id: string;
+  name: string;
+  sentiment: 'bullish' | 'bearish' | 'neutral';
+  screenpk: string;
+  source: string;
+  description: string;
+}
+
 export interface McConsolidatedData {
   scId: string;
   timeframe: 'D' | 'W' | 'M';
@@ -255,13 +285,16 @@ export interface McConsolidatedData {
   financialOverview: { ttmEpsText: string; ttmPeText: string; pbText: string } | null;
   historicalRating: any | null;
   technicalV2: any | null;
+  technicalAnalysisV2?: any | null;
   technicalRating: any | null;
-  screeners?: {
-    moneycontrol: Array<{ id: string; name: string; sentiment: string }>;
-    trendlyne: Array<{ id: string; name: string; sentiment: string }>;
-  };
   ratios?: any;
   shareholdingPattern?: any;
+  chartPatterns?: any;
+  screeners?: {
+    moneycontrol: ScreenerInfo[];
+    trendlyne: ScreenerInfo[];
+    etnow: ScreenerInfo[];
+  };
 }
 
 export async function mcFetchJson<T = any>(url: string, retries: number = 3, symbol?: string, priority: boolean = false): Promise<T | null> {
@@ -573,6 +606,13 @@ export async function fetchMcTechnicalV2(scId: string, dur: 'D' | 'W' | 'M'): Pr
   return res;
 }
 
+export async function fetchMcTechnicalAnalysisV2(scId: string, dur: 'D' | 'W' | 'M'): Promise<any | null> {
+  const res = await mcFetchJson<any>(
+    `https://api.moneycontrol.com/mcapi/technicals/v2/analysis?scId=${scId}&dur=${dur}&fields=all&deviceType=W&appVersion=189`
+  );
+  return res;
+}
+
 export async function fetchMcTechnicalRating(scId: string, period: 'D' | 'W' | 'M'): Promise<any | null> {
   const res = await mcFetchJson<any>(
     `https://www.moneycontrol.com/mc/widget/pricechart_technicals/technical_rating_summary?sc_did=${scId}&page=mc_technicals&period=D&classic=true&period=${period}`
@@ -627,6 +667,13 @@ export async function fetchMcShareholdingPattern(scId: string, symbol?: string):
   return mcFetchJson(widgetUrl, 3, symbol);
 }
 
+export async function fetchMcChartPatterns(scId: string, symbol?: string): Promise<any | null> {
+  const url = `https://api.moneycontrol.com/mcapi/technicalpicks/chart-patterns?deviceType=W&version=174&start=0&limit=12&pattern_type=all&sc_id=${scId}`;
+  const res = await mcFetchJson<any>(url, 3, symbol);
+  if (res?.status === 'success' && res.list) return res.list;
+  return null;
+}
+
 /**
  * Main consolidated fetch - gets ALL MC data for a stock.
  * Optimised: Refreshes Price/Technical data every time, but caches Fundamentals for 1 hour.
@@ -638,6 +685,7 @@ export async function getMcConsolidatedData(scId: string, symbol: string, timefr
   // 1. Local Screeners (Instant)
   const mcScreeners = findMcScreenersByStock(symbol);
   const tlScreeners = findScreenersByStock(symbol);
+  const etScreeners = findEtScreenersByStock(symbol);
 
   // 2. Fetch all data points in parallel
   const fetchWithCache = async (key: string, fetcher: () => Promise<any>) => {
@@ -666,9 +714,11 @@ export async function getMcConsolidatedData(scId: string, symbol: string, timefr
     financialOverview,
     historicalRating,
     technicalV2,
+    technicalAnalysisV2,
     technicalRating,
     ratios,
-    shareholdingPattern
+    shareholdingPattern,
+    chartPatterns
   ] = await Promise.all([
     fetchMcTechnicalData(effectiveScId, timeframe, symbol),
     fetchMcEquityCash(effectiveScId, symbol),
@@ -687,9 +737,11 @@ export async function getMcConsolidatedData(scId: string, symbol: string, timefr
     fetchWithCache('financial_overview', () => fetchMcFinancialOverview(effectiveScId, symbol)),
     fetchWithCache(`historical_rating_${timeframe}`, () => fetchMcHistoricalRating(effectiveScId, timeframe)),
     fetchWithCache(`technical_v2_${timeframe}`, () => fetchMcTechnicalV2(effectiveScId, timeframe)),
+    fetchWithCache(`technical_analysis_v2_${timeframe}`, () => fetchMcTechnicalAnalysisV2(effectiveScId, timeframe)),
     fetchWithCache(`technical_rating_${timeframe}`, () => fetchMcTechnicalRating(effectiveScId, timeframe)),
     fetchWithCache('ratios', () => fetchMcRatios(effectiveScId, symbol)),
     fetchWithCache('shareholding_pattern', () => fetchMcShareholdingPattern(effectiveScId, symbol)),
+    fetchWithCache('chart_patterns', () => fetchMcChartPatterns(effectiveScId, symbol)),
   ]);
 
   return {
@@ -712,12 +764,15 @@ export async function getMcConsolidatedData(scId: string, symbol: string, timefr
     financialOverview,
     historicalRating,
     technicalV2,
+    technicalAnalysisV2,
     technicalRating,
     ratios,
     shareholdingPattern: shareholdingPattern || extractShareholdingFromInsights(detailedInsights),
+    chartPatterns,
     screeners: {
       moneycontrol: mcScreeners,
-      trendlyne: tlScreeners
+      trendlyne: tlScreeners,
+      etnow: etScreeners
     }
   };
 }
@@ -754,5 +809,4 @@ function extractShareholdingFromInsights(insights: McDetailedInsights | null): a
   });
 
   return list.length > 0 ? { list, promoterPledging } : null;
-}
-
+  }

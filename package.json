@@ -19,6 +19,7 @@
     "@trpc/server": "^11.17.0",
     "@types/ioredis": "^4.28.10",
     "@vitejs/plugin-react": "^5.0.4",
+    "axios": "^1.16.1",
     "better-sqlite3": "^12.9.0",
     "bullmq": "^5.76.7",
     "clsx": "^2.1.1",

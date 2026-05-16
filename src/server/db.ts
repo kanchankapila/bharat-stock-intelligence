@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 
-const dbPath = path.resolve(process.cwd(), 'database.sqlite');
+const dbPath = path.resolve(process.cwd(), process.env.DATABASE_URL || 'database.sqlite');
 const db = new Database(dbPath);
 
 // Enable WAL mode for better concurrency
@@ -71,6 +71,9 @@ db.exec(`
     screener_name TEXT NOT NULL,
     screenpk TEXT NOT NULL,
     description TEXT,
+    sentiment TEXT DEFAULT 'neutral', -- 'bullish', 'bearish', 'neutral'
+    category TEXT DEFAULT 'technical', -- 'technical', 'fundamental', 'valuation', 'delivery'
+    timeframe TEXT DEFAULT 'long_term', -- 'intraday', 'long_term'
     last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 

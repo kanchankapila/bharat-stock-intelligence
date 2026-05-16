@@ -7,6 +7,13 @@ export interface OptionChainData {
     totalCallOi: number;
     totalPutOi: number;
     pcr: number;
+    marketSentiment: {
+      overall: string;
+      ivRank: number;
+      ivPercentile: number;
+      maxPain?: number;
+      oiTrend?: string;
+    };
   };
 }
 
@@ -78,14 +85,35 @@ export async function fetchOptionChain(symbol: string): Promise<any> {
       
       // Map the chain data, handling underscored or camelCase fields
       const mappedChain = oc.map((row: any) => ({
-        callOi: row.calls_oi || row.callOi || 0,
-        callOiChange: row.calls_change_oi || row.callOiChange || 0,
-        callLtp: row.calls_ltp || row.callLtp || 0,
-        strikePrice: row.strike_price || row.strikePrice,
-        putLtp: row.puts_ltp || row.putLtp || 0,
-        putOiChange: row.puts_change_oi || row.putOiChange || 0,
-        putOi: row.puts_oi || row.putOi || 0,
-        expiryDate: row.expiry_date || row.expiryDate
+        callOi: row.calls_oi || 0,
+        callOiChange: row.calls_change_oi || 0,
+        callLtp: row.calls_ltp || 0,
+        callVol: row.calls_volume || 0,
+        callIv: row.calls_iv || 0,
+        callDelta: row.call_delta || 0,
+        callTheta: row.call_theta || 0,
+        callVega: row.call_vega || 0,
+        callGamma: row.call_gamma || 0,
+        callBuiltup: row.calls_builtup || "No Conclusion",
+        callBid: row.calls_bid_price || 0,
+        callAsk: row.calls_ask_price || 0,
+        
+        strikePrice: row.strike_price,
+        
+        putLtp: row.puts_ltp || 0,
+        putOiChange: row.puts_change_oi || 0,
+        putOi: row.puts_oi || 0,
+        putVol: row.puts_volume || 0,
+        putIv: row.puts_iv || 0,
+        putDelta: row.put_delta || 0,
+        putTheta: row.put_theta || 0,
+        putVega: row.put_vega || 0,
+        putGamma: row.put_gamma || 0,
+        putBuiltup: row.puts_builtup || "No Conclusion",
+        putBid: row.puts_bid_price || 0,
+        putAsk: row.puts_ask_price || 0,
+        
+        expiryDate: row.expiry_date
       }));
 
       // Calculate PCR if volume_pcr is missing
@@ -93,6 +121,33 @@ export async function fetchOptionChain(symbol: string): Promise<any> {
       const totalCallOi = totals.total_calls_oi || 0;
       const totalPutOi = totals.total_puts_oi || 0;
       const pcr = totals.volume_pcr || (totalCallOi > 0 ? totalPutOi / totalCallOi : 0);
+
+      // Calculate Max Pain
+      let maxPain = spotPrice;
+      let minPainValue = Infinity;
+
+      // Only consider strikes with significant OI to save computation
+      const strikes = oc.map((r: any) => r.strike_price);
+      
+      for (const strike of strikes) {
+        let totalPain = 0;
+        for (const row of oc) {
+          const s = row.strike_price;
+          // Payout for Call holders if price is 'strike'
+          if (strike > s) {
+            totalPain += (row.calls_oi || 0) * (strike - s);
+          }
+          // Payout for Put holders if price is 'strike'
+          if (strike < s) {
+            totalPain += (row.puts_oi || 0) * (s - strike);
+          }
+        }
+        
+        if (totalPain < minPainValue) {
+          minPainValue = totalPain;
+          maxPain = strike;
+        }
+      }
 
       return {
         success: true,
@@ -103,8 +158,9 @@ export async function fetchOptionChain(symbol: string): Promise<any> {
           pcr: pcr,
           marketSentiment: {
             overall: pcr > 1.2 ? 'Bullish' : pcr < 0.7 ? 'Bearish' : 'Neutral',
-            ivRank: 42,
-            ivPercentile: 68
+            ivRank: 0, // Removed dummy data
+            ivPercentile: 0, // Removed dummy data
+            maxPain: maxPain
           }
         }
       };

@@ -10,6 +10,8 @@ import { createContext } from "./src/server/context";
 import { fetchStockDataWithCache } from "./src/server/liveStockData";
 import { initCache } from "./src/server/cacheService";
 import { initQueues, shutdownQueues } from "./src/server/queues";
+import { startRedis, stopRedis } from "./src/server/redisManager";
+import { startOllama, stopOllama } from "./src/server/ollamaManager";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -18,10 +20,21 @@ import { updateSignalAccuracy } from "./src/server/signals";
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = process.env.PORT || 3000;
 
+  // Initialise AI & Redis (gracefully managed)
+  await startOllama();
+  
   // Initialise Redis cache (gracefully falls back to in-memory if Redis is down)
-  await initCache();
+  const cacheStarted = await initCache();
+  
+  if (!cacheStarted) {
+    console.log('[SERVER] Redis not found. Attempting to start local Redis server...');
+    const redisLaunched = await startRedis();
+    if (redisLaunched) {
+      await initCache(); // Try connecting again
+    }
+  }
 
   // Initialise BullMQ queues + workers (stock-refresh repeatable + ai-signals)
   // Falls back to legacy setInterval if Redis is unavailable
@@ -114,8 +127,10 @@ startServer().catch((error) => {
 // Graceful shutdown — close BullMQ workers before exiting
 for (const sig of ['SIGTERM', 'SIGINT'] as NodeJS.Signals[]) {
   process.on(sig, async () => {
-    console.log(`[SERVER] ${sig} received, shutting down queues...`);
+    console.log(`[SERVER] ${sig} received, shutting down services...`);
     await shutdownQueues();
+    await stopRedis();
+    await stopOllama();
     process.exit(0);
   });
 }
