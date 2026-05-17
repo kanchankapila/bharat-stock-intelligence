@@ -43,12 +43,20 @@ interface MCStockInfoPanelProps {
   scId: string;
   section?: 'all' | 'technical' | 'fundamental' | 'insights' | 'overview' | 'shareholding' | 'peers' | 'trendlyne';
   onSelectStock?: (symbol: string) => void;
+  watchlist?: string[];
+  onToggleWatchlist?: (symbol: string, metadata?: { price?: number; name?: string; source?: string }) => void;
 }
 
 type Timeframe = 'D' | 'W' | 'M';
 type Tab = 'overview' | 'financials' | 'technical' | 'analysis' | 'analyst' | 'trendlyne';
 
-export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({ symbol, section, onSelectStock }) => {
+export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({ 
+  symbol, 
+  section, 
+  onSelectStock,
+  watchlist = [],
+  onToggleWatchlist = () => {}
+}) => {
   const [timeframe, setTimeframe] = React.useState<Timeframe>('D');
   const [activeTab, setActiveTab] = React.useState<Tab>(
     section === 'technical' ? 'technical' :
@@ -588,6 +596,8 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({ symbol, sect
             onClose={() => setIsModalOpen(false)}
             screener={selectedScreener}
             onSelectStock={(sym) => { if (onSelectStock) onSelectStock(sym); }}
+            watchlist={watchlist}
+            onToggleWatchlist={onToggleWatchlist}
           />
 
         </div>

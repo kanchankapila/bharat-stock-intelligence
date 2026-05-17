@@ -29,6 +29,13 @@ export const MarketIndices: React.FC<{ onSelect?: (id: string, name: string) => 
     { name: 'BANK NIFTY', ...(indices.bankNifty  || defaultIndex) },
   ];
 
+  const getIndexId = (name: string) => {
+    if (name === 'NIFTY 50') return '9';
+    if (name === 'SENSEX') return '4';
+    if (name === 'BANK NIFTY') return '23';
+    return '';
+  };
+
   return (
     <div ref={ref} className="col-span-12 grid grid-cols-1 md:grid-cols-3 gap-4 mb-2">
       {displayItems.map((item, idx) => {
@@ -40,7 +47,7 @@ export const MarketIndices: React.FC<{ onSelect?: (id: string, name: string) => 
             initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: idx * 0.08, type: 'spring', stiffness: 220, damping: 22 }}
-            onClick={() => onSelect?.(item.name, item.name)}
+            onClick={() => onSelect?.(getIndexId(item.name), item.name)}
             className={cn(
               'relative rounded-2xl overflow-hidden transition-all duration-300 cursor-pointer group',
               'bg-slate-900/60 backdrop-blur-xl',

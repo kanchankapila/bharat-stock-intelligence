@@ -3,7 +3,7 @@ import { trpc } from '../lib/trpc';
 import {
   TrendingDown, Zap, RefreshCw, AlertCircle,
   Loader2, ChevronUp, ChevronDown, SlidersHorizontal, X,
-  CheckCircle2, Activity, Target, BarChart2
+  CheckCircle2, Activity, Target, BarChart2, ArrowUpRight, Plus, Minus
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 
@@ -298,7 +298,13 @@ function SortTh({ label, sortKey, sort, onSort }: {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export function DailySignals({ onSelectStock }: { onSelectStock: (symbol: string) => void }) {
+interface DailySignalsProps {
+  onSelectStock: (symbol: string) => void;
+  watchlist: string[];
+  onToggleWatchlist: (symbol: string, metadata?: { price?: number; name?: string; source?: string }) => void;
+}
+
+export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist }: DailySignalsProps) {
   const [selectedDate, setSelectedDate] = useState<string | undefined>(undefined);
   const [filters, setFilters] = useState<Filters>({ minScore: 1, signalTypes: [], aboveSma200: false, minVolumeRatio: 1 });
   const [showFilters, setShowFilters] = useState(false);
@@ -775,8 +781,41 @@ export function DailySignals({ onSelectStock }: { onSelectStock: (symbol: string
                   >
                     <td className="py-2.5 px-3 text-slate-600 text-xs">{i + 1}</td>
                     <td className="py-2.5 px-3">
-                      <div className="font-bold text-white">{r.symbol}</div>
-                      {r.name && <div className="text-[10px] text-slate-500 truncate max-w-[100px]">{r.name}</div>}
+                      <div className="flex items-center gap-2">
+                        <div onClick={(e) => e.stopPropagation()}>
+                          {watchlist.includes(r.symbol) ? (
+                            <button
+                              onClick={() => onToggleWatchlist(r.symbol)}
+                              className="p-1 bg-rose-500/10 border border-rose-500/20 rounded text-rose-500 hover:bg-rose-500 hover:text-white transition-all shadow-sm flex items-center justify-center w-5.5 h-5.5"
+                              title="Remove from Watchlist"
+                            >
+                              <Minus className="w-2.5 h-2.5" />
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => onToggleWatchlist(r.symbol, { price: r.cmp, name: r.name, source: `Scanner: ${r.signals[0]?.detail || 'Technical Scan'}` })}
+                              className="p-1 bg-emerald-500/10 border border-emerald-500/20 rounded text-emerald-500 hover:bg-emerald-500 hover:text-white transition-all shadow-sm flex items-center justify-center w-5.5 h-5.5"
+                              title="Add to Watchlist"
+                            >
+                              <Plus className="w-2.5 h-2.5" />
+                            </button>
+                          )}
+                        </div>
+
+                        <div 
+                          className="cursor-pointer group/sym min-w-[70px]"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onSelectStock(r.symbol);
+                          }}
+                        >
+                          <div className="font-black text-white group-hover/sym:text-indigo-400 transition-colors flex items-center gap-1 text-[11px] leading-tight">
+                            {r.symbol}
+                            <ArrowUpRight className="w-2.5 h-2.5 opacity-0 group-hover/sym:opacity-100 transition-opacity text-indigo-400" />
+                          </div>
+                          {r.name && <div className="text-[9px] text-slate-500 font-bold uppercase tracking-wider truncate max-w-[120px] mt-0.5 leading-none">{r.name}</div>}
+                        </div>
+                      </div>
                     </td>
                     <td className="py-2.5 px-3">
                       <div className="flex flex-wrap gap-1">

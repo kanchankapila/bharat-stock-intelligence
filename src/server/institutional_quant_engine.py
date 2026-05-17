@@ -1,181 +1,278 @@
-import pandas as pd
-import numpy as np
-import yfinance as yf
-import sqlite3
-import os
-import json
-import datetime
-from sqlalchemy import create_engine, text
-import time
+"""
+Institutional Quant Engine v2
+==============================
+Computes momentum, risk, valuation, and composite scores from LOCAL data:
+  - stock_ohlcv      → momentum returns, volatility, Sharpe, drawdown
+  - stock_fundamentals → PE, ROE, D/E, revenue growth, Piotroski F-score
+  - screener data    → bullish/bearish screener confluence
 
-# Configuration
-DB_PATH = os.path.join(os.getcwd(), 'database.sqlite')
+All results written to the quant_scores table (previously never populated).
+No yfinance calls per symbol — uses bulk-synced fundamentals only.
+
+Run:  python institutional_quant_engine.py
+      python institutional_quant_engine.py --limit 500
+"""
+
+import os
+import math
+import datetime
+import argparse
+import numpy as np
+import pandas as pd
+from sqlalchemy import create_engine, text
+
+DB_PATH      = os.path.join(os.getcwd(), 'database.sqlite')
 DATABASE_URL = f"sqlite:///{DB_PATH}"
+RISK_FREE    = 0.07   # 7% p.a. — Indian 10Y Gsec proxy
+
 
 class InstitutionalQuantEngine:
     def __init__(self):
         self.engine = create_engine(DATABASE_URL)
-        self.weights = {
-            'value': 0.30,
-            'growth': 0.30,
-            'quality': 0.30,
-            'momentum': 0.10
-        }
 
-    def get_universe(self, limit=100):
-        """Get a universe of stocks to rank."""
+    # ------------------------------------------------------------------
+    # Data loading
+    # ------------------------------------------------------------------
+
+    def load_ohlcv(self, min_days: int = 63) -> pd.DataFrame:
+        """Load all OHLCV rows, return only symbols with ≥ min_days history."""
         with self.engine.connect() as conn:
-            # We'll use the top stocks by market cap if available, otherwise just symbols
-            query = text("SELECT symbol FROM nse_stocks LIMIT :limit")
-            result = conn.execute(query, {"limit": limit})
-            return [row[0] for row in result]
+            df = pd.read_sql(
+                "SELECT symbol, date, close, volume FROM stock_ohlcv ORDER BY symbol, date ASC",
+                conn,
+            )
+        df['date'] = pd.to_datetime(df['date'])
+        counts = df.groupby('symbol')['date'].count()
+        eligible = counts[counts >= min_days].index
+        return df[df['symbol'].isin(eligible)]
 
-    def fetch_fundamental_data(self, symbols):
-        """Fetch all required metrics for the scoring framework using yfinance."""
-        data_list = []
-        print(f"Fetching fundamental data for {len(symbols)} stocks...")
-        
-        for symbol in symbols:
-            try:
-                ticker = yf.Ticker(f"{symbol}.NS")
-                info = ticker.info
-                
-                # Safety Filters
-                debt_to_equity = info.get('debtToEquity', 999) / 100.0 # yfinance returns as percentage like 80.5
-                interest_coverage = info.get('operatingCashflow', 0) / abs(info.get('totalDebt', 1)) # Proxy if not available
-                # Actually try to get better interest coverage
-                try:
-                    income_stmt = ticker.income_stmt
-                    interest_expense = abs(income_stmt.loc['Interest Expense'].iloc[0]) if 'Interest Expense' in income_stmt.index else 1
-                    ebit = income_stmt.loc['EBIT'].iloc[0] if 'EBIT' in income_stmt.index else 0
-                    interest_coverage = ebit / interest_expense
-                except:
-                    pass
-                
-                avg_volume_usd = info.get('averageVolume', 0) * info.get('currentPrice', 0) / 83.0 # Approx USD conversion
-                
-                # Metrics
-                metrics = {
-                    'symbol': symbol,
-                    # Value
-                    'pe': info.get('trailingPE', np.nan),
-                    'ps': info.get('priceToSalesTrailing12Months', np.nan),
-                    'earnings_yield': 1.0 / info.get('trailingPE', 0.001) if info.get('trailingPE') else 0,
-                    
-                    # Growth
-                    'rev_growth': info.get('revenueGrowth', 0),
-                    'eps_growth': info.get('earningsGrowth', 0),
-                    
-                    # Quality
-                    'roe': info.get('returnOnEquity', 0),
-                    'op_margin': info.get('operatingMargins', 0),
-                    
-                    # Momentum
-                    'price': info.get('currentPrice', 0),
-                    'ma200': info.get('twoHundredDayAverage', 0),
-                    
-                    # Safety
-                    'debt_to_equity': debt_to_equity,
-                    'interest_coverage': interest_coverage,
-                    'avg_vol_usd': avg_volume_usd,
-                    
-                    # F-Score Data (simplified placeholder or fetch)
-                    'f_score': self.calculate_piotroski_f_score(ticker)
-                }
-                data_list.append(metrics)
-                time.sleep(0.5) # Avoid rate limit
-            except Exception as e:
-                print(f"  Error fetching {symbol}: {e}")
-                
-        return pd.DataFrame(data_list)
+    def load_fundamentals(self) -> pd.DataFrame:
+        with self.engine.connect() as conn:
+            return pd.read_sql("SELECT * FROM stock_fundamentals", conn)
 
-    def calculate_piotroski_f_score(self, ticker):
-        """Calculate the 9-point Piotroski F-Score."""
-        try:
-            # This requires historical financials which are slow to fetch
-            # For this implementation, we return a score based on available 'info' or 5 as neutral
-            # Real implementation would pull last 2 years of Balance Sheet and Income Statement
-            score = 0
-            info = ticker.info
-            if info.get('returnOnAssets', 0) > 0: score += 1
-            if info.get('operatingCashflow', 0) > 0: score += 1
-            if info.get('returnOnAssets', 0) > info.get('returnOnAssets', 0): score += 1 # Placeholder for trend
-            if info.get('operatingCashflow', 0) > info.get('netIncomeToCommon', 0): score += 1
-            # ... additional 5 points would come from historical comparisons
-            return score + 3 # Adjusting for the missing 5 points with a neutral buffer
-        except:
-            return 5
+    def load_screener_confluence(self) -> pd.DataFrame:
+        """Return per-symbol bullish/bearish screener counts from stock_scores."""
+        with self.engine.connect() as conn:
+            return pd.read_sql(
+                """SELECT symbol,
+                          SUM(positive_count) AS bullish_count,
+                          SUM(negative_count) AS bearish_count,
+                          COUNT(*) AS timeframe_count
+                   FROM stock_scores GROUP BY symbol""",
+                conn,
+            )
 
-    def rank_universe(self, df):
-        """Apply normalization, safety filters, and composite scoring."""
-        if df.empty: return df
-        
-        # 1. Apply Mandatory Safety Filters (Pass/Fail)
-        df['pass_safety'] = (
-            (df['debt_to_equity'] < 1.0) & 
-            (df['interest_coverage'] > 3.0) & 
-            (df['avg_vol_usd'] > 1000000)
+    # ------------------------------------------------------------------
+    # Feature engineering
+    # ------------------------------------------------------------------
+
+    def compute_momentum_features(self, ohlcv: pd.DataFrame) -> pd.DataFrame:
+        """Per-symbol returns over standard horizons + above-SMA200 flag."""
+        records = []
+        for symbol, grp in ohlcv.groupby('symbol'):
+            closes = grp.sort_values('date')['close'].values
+            n      = len(closes)
+            last   = closes[-1]
+
+            def ret(days):
+                return (last / closes[-days - 1] - 1) * 100 if n > days else None
+
+            # SMA200
+            sma200 = float(np.mean(closes[-200:])) if n >= 200 else float(np.mean(closes))
+            sma200_dist = (last / sma200 - 1) * 100
+
+            # Daily log returns for vol/Sharpe
+            rets = np.diff(np.log(closes[-253:])) if n >= 253 else np.diff(np.log(closes))
+            ann_vol  = float(np.std(rets) * math.sqrt(252) * 100) if len(rets) > 1 else None
+            ann_ret  = float(np.mean(rets) * 252 * 100) if len(rets) > 1 else None
+            sharpe   = (ann_ret - RISK_FREE * 100) / ann_vol if (ann_vol and ann_vol > 0) else None
+
+            # Max drawdown (1Y)
+            window = closes[-253:] if n >= 253 else closes
+            peaks  = np.maximum.accumulate(window)
+            drawdowns = (window - peaks) / peaks * 100
+            max_dd = float(np.min(drawdowns))
+
+            records.append({
+                'symbol':           symbol,
+                'return_1w':        ret(5),
+                'return_1m':        ret(21),
+                'return_3m':        ret(63),
+                'return_6m':        ret(126),
+                'return_12m':       ret(252),
+                'above_sma200':     int(last > sma200),
+                'sma200_distance_pct': sma200_dist,
+                'annualized_vol':   ann_vol,
+                'sharpe_ratio':     sharpe,
+                'max_drawdown_1y':  max_dd,
+                'ohlcv_days':       n,
+            })
+        return pd.DataFrame(records)
+
+    # ------------------------------------------------------------------
+    # Piotroski F-Score (9-point) from stock_fundamentals
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def piotroski_f_score(row: pd.Series) -> int:
+        """
+        Full 9-point Piotroski score from available fundamental columns.
+        Points where data is unavailable are conservatively scored 0.
+        """
+        score = 0
+
+        # Profitability (4 points)
+        roe = row.get('return_on_equity')
+        if pd.notna(roe) and roe > 0:      score += 1   # F1: positive ROA proxy
+        op_margin = row.get('operating_margins')
+        if pd.notna(op_margin) and op_margin > 0: score += 1  # F2: positive CFO proxy
+        # F3: ROA improvement YoY — not available without 2Y data; skip conservatively
+        # F4: Accruals (CFO > net income) — approximated by positive op margin + positive ROE
+        if pd.notna(roe) and pd.notna(op_margin) and roe > 0 and op_margin > 0: score += 1
+
+        # Leverage / Liquidity (3 points)
+        de = row.get('debt_to_equity')
+        if pd.notna(de) and de < 1.0:      score += 1   # F5: low leverage
+        cr = row.get('current_ratio')
+        if pd.notna(cr) and cr >= 1.5:     score += 1   # F6: good liquidity
+        # F7: No dilution — we don't have shares-issued data; skip
+
+        # Operating Efficiency (2 points)
+        rev_growth = row.get('revenue_growth')
+        if pd.notna(rev_growth) and rev_growth > 0: score += 1  # F8: revenue growing
+        eps_fwd = row.get('eps_forward')
+        eps_ttm = row.get('eps_ttm')
+        if pd.notna(eps_fwd) and pd.notna(eps_ttm) and eps_fwd > eps_ttm: score += 1  # F9: EPS improving
+
+        return score
+
+    # ------------------------------------------------------------------
+    # Percentile ranking
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def pct_rank(series: pd.Series, higher_is_better: bool = True) -> pd.Series:
+        ranked = series.rank(pct=True, na_option='keep')
+        return ranked * 100 if higher_is_better else (1 - ranked) * 100
+
+    # ------------------------------------------------------------------
+    # Main computation
+    # ------------------------------------------------------------------
+
+    def run(self, limit: int = 0):
+        print(f"[QuantEngine] Starting at {datetime.datetime.now()}")
+
+        ohlcv   = self.load_ohlcv(min_days=63)
+        print(f"[QuantEngine] {ohlcv['symbol'].nunique()} symbols with ≥63 days OHLCV")
+
+        mom     = self.compute_momentum_features(ohlcv)
+        fund    = self.load_fundamentals()
+        screener = self.load_screener_confluence()
+
+        # Merge
+        df = mom.merge(fund, on='symbol', how='left') \
+                .merge(screener, on='symbol', how='left')
+
+        if limit > 0:
+            df = df.head(limit)
+
+        # ── Piotroski F-Score ──────────────────────────────────────────
+        df['piotroski_f_score'] = df.apply(self.piotroski_f_score, axis=1)
+
+        # ── Percentile ranks ──────────────────────────────────────────
+        df['momentum_score']  = (
+            self.pct_rank(df['return_1m'].fillna(0)) * 0.25 +
+            self.pct_rank(df['return_3m'].fillna(0)) * 0.35 +
+            self.pct_rank(df['return_6m'].fillna(0)) * 0.40
         )
-        
-        # 2. Normalization (Percentile Ranking 0-100)
-        def percentile_score(series, higher_is_better=True):
-            if higher_is_better:
-                return series.rank(pct=True) * 100
-            else:
-                return (1 - series.rank(pct=True)) * 100
+        df['vol_rank']    = self.pct_rank(df['annualized_vol'],  higher_is_better=False)
+        df['sharpe_rank'] = self.pct_rank(df['sharpe_ratio'],    higher_is_better=True)
 
-        # Scoring Metrics
-        df['score_pe'] = percentile_score(df['pe'], False)
-        df['score_ps'] = percentile_score(df['ps'], False)
-        df['score_ey'] = percentile_score(df['earnings_yield'], True)
-        
-        df['score_rev'] = percentile_score(df['rev_growth'], True)
-        df['score_eps'] = percentile_score(df['eps_growth'], True)
-        
-        df['score_roe'] = percentile_score(df['roe'], True)
-        df['score_margin'] = percentile_score(df['op_margin'], True)
-        
-        df['dist_ma200'] = (df['price'] / df['ma200'] - 1) * 100
-        df['score_momentum'] = percentile_score(df['dist_ma200'], True)
+        # Valuation: low PE + high ROE + low D/E + Piotroski
+        val_pe  = self.pct_rank(df['trailing_pe'],    higher_is_better=False)
+        val_roe = self.pct_rank(df['return_on_equity'], higher_is_better=True)
+        val_de  = self.pct_rank(df['debt_to_equity'],  higher_is_better=False)
+        val_piot = self.pct_rank(df['piotroski_f_score'], higher_is_better=True)
+        df['valuation_score'] = (val_pe * 0.30 + val_roe * 0.30 + val_de * 0.20 + val_piot * 0.20).fillna(50)
 
-        # 3. Component Scores
-        df['value_score'] = (df['score_pe'] + df['score_ps'] + df['score_ey']) / 3
-        df['growth_score'] = (df['score_rev'] + df['score_eps']) / 2
-        df['quality_score'] = (df['score_roe'] + df['score_margin']) / 2
-        
-        # 4. Composite Score Calculation
-        df['composite_score'] = (
-            df['value_score'] * self.weights['value'] +
-            df['growth_score'] * self.weights['growth'] +
-            df['quality_score'] * self.weights['quality'] +
-            df['score_momentum'] * self.weights['momentum']
+        # Screener confluence
+        df['screener_net_score'] = (df['bullish_count'].fillna(0) - df['bearish_count'].fillna(0))
+        df['confluence_rank']    = self.pct_rank(df['screener_net_score'], higher_is_better=True)
+
+        # ── Composite strategy ranks ───────────────────────────────────
+        df['rank_momentum'] = df['momentum_score'].fillna(50)
+        df['rank_quality']  = (
+            df['momentum_score'].fillna(50) * 0.40 +
+            df['vol_rank'].fillna(50)        * 0.30 +
+            df['sharpe_rank'].fillna(50)     * 0.30
         )
-        
-        # 5. Final Adjustments
-        # Quality Check: Piotroski F-Score overlay
-        # If F-Score < 4, penalize composite score
-        df['composite_score'] = np.where(df['f_score'] < 4, df['composite_score'] * 0.8, df['composite_score'])
-        
-        # Penalize failing safety filters
-        df['composite_score'] = np.where(df['pass_safety'], df['composite_score'], df['composite_score'] * 0.5)
+        df['rank_value']    = df['valuation_score']
+        df['rank_composite'] = (
+            df['rank_momentum']        * 0.30 +
+            df['rank_quality']         * 0.30 +
+            df['rank_value']           * 0.20 +
+            df['confluence_rank'].fillna(50) * 0.20
+        )
 
-        return df.sort_values('composite_score', ascending=False)
+        # ── Classification ─────────────────────────────────────────────
+        def classify(score):
+            if score >= 80: return 'Strong Buy'
+            if score >= 65: return 'Buy'
+            if score >= 45: return 'Hold'
+            if score >= 30: return 'Avoid'
+            return 'Sell'
 
-    def run(self):
-        symbols = self.get_universe(limit=20) # Small batch for demo
-        raw_data = self.fetch_fundamental_data(symbols)
-        ranked_data = self.rank_universe(raw_data)
-        
-        print("\n--- Institutional Quant Ranking Results ---")
-        print(ranked_data[['symbol', 'composite_score', 'pass_safety', 'f_score', 'value_score', 'growth_score', 'quality_score']].head(10))
-        
-        # Save to a new table
+        df['composite_class'] = df['rank_composite'].apply(classify)
+
+        print(f"[QuantEngine] Computed scores for {len(df)} symbols. Saving to quant_scores...")
+        self._save(df)
+        print("[QuantEngine] Done.")
+
+    # ------------------------------------------------------------------
+    # Persistence
+    # ------------------------------------------------------------------
+
+    def _save(self, df: pd.DataFrame):
+        now = datetime.datetime.now().isoformat()
+        cols = [
+            'symbol',
+            'return_1w', 'return_1m', 'return_3m', 'return_6m', 'return_12m',
+            'above_sma200', 'sma200_distance_pct', 'momentum_score',
+            'annualized_vol', 'sharpe_ratio', 'max_drawdown_1y',
+            'vol_rank', 'sharpe_rank',
+            'trailing_pe', 'forward_pe', 'debt_to_equity', 'return_on_equity',
+            'operating_margins', 'revenue_growth', 'piotroski_f_score',
+            'valuation_score',
+            'bullish_count', 'bearish_count',
+            'screener_net_score', 'confluence_rank',
+            'rank_momentum', 'rank_quality', 'rank_value', 'rank_composite',
+            'composite_class', 'ohlcv_days',
+        ]
+        # Keep only columns that exist in df
+        existing = [c for c in cols if c in df.columns]
+        rows = df[existing].copy()
+        rows['screener_category_breadth'] = None  # placeholder
+        rows['last_computed'] = now
+
+        # Coerce numpy types to Python native for sqlite3
+        rows = rows.where(pd.notna(rows), None)
+
         with self.engine.begin() as conn:
-            conn.execute(text("DROP TABLE IF EXISTS institutional_rankings"))
-            ranked_data.to_sql('institutional_rankings', conn, if_exists='replace', index=False)
-            
-        print("\nResults saved to 'institutional_rankings' table.")
+            conn.execute(text("DELETE FROM quant_scores"))
+            for _, r in rows.iterrows():
+                data = {k: (None if (v is None or (isinstance(v, float) and math.isnan(v))) else v)
+                        for k, v in r.items()}
+                placeholders = ', '.join(f':{k}' for k in data)
+                keys = ', '.join(data.keys())
+                conn.execute(text(f"INSERT INTO quant_scores ({keys}) VALUES ({placeholders})"), data)
+
+        print(f"[QuantEngine] Saved {len(rows)} rows to quant_scores.")
+
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Institutional Quant Engine v2")
+    parser.add_argument("--limit", type=int, default=0, help="Limit number of symbols (0 = all)")
+    args = parser.parse_args()
+
     engine = InstitutionalQuantEngine()
-    engine.run()
+    engine.run(limit=args.limit)

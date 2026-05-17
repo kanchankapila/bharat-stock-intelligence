@@ -2,12 +2,12 @@ import React from 'react';
 import { Card } from './Card';
 import { trpc } from '../lib/trpc';
 import { cn } from '../lib/utils';
-import { Zap, Bookmark as WatchlistIcon } from 'lucide-react';
+import { Zap, Bookmark as WatchlistIcon, Plus, Minus } from 'lucide-react';
 import stockData from '../data/stocklist';
 
 interface MomentumIntelligenceProps {
   watchlist: string[];
-  onToggle: (symbol: string) => void;
+  onToggle: (symbol: string, metadata?: { price?: number; name?: string; source?: string }) => void;
   onSelectStock: (symbol: string) => void;
 }
 
@@ -41,22 +41,32 @@ export const MomentumIntelligence: React.FC<MomentumIntelligenceProps> = ({
               <div
                 key={stock.stockId}
                 onClick={() => onSelectStock(symbol)}
-                className="flex justify-between items-center p-2.5 bg-slate-950/50 rounded-lg border border-emerald-500/10 hover:border-emerald-500/30 transition-all group cursor-pointer"
+                className="flex justify-between items-center p-2.5 bg-slate-950/50 rounded-lg border border-emerald-500/10 hover:border-emerald-500/30 transition-all group cursor-pointer animate-fade-in"
               >
                 <div className="flex items-center gap-3">
-                  <button
-                    onClick={(e) => { e.stopPropagation(); onToggle(symbol); }}
-                    className={cn(
-                      "p-1.5 rounded-lg transition-all",
-                      watchlist.includes(symbol) ? "bg-amber-500/20 text-amber-500" : "text-slate-700 hover:text-slate-400"
+                  <div onClick={(e) => e.stopPropagation()}>
+                    {watchlist.includes(symbol) ? (
+                      <button
+                        onClick={() => onToggle(symbol)}
+                        className="p-1.5 bg-rose-500/10 border border-rose-500/20 rounded-lg text-rose-500 hover:bg-rose-500 hover:text-white transition-all shadow-md flex items-center justify-center w-7 h-7"
+                        title="Remove from Watchlist"
+                      >
+                        <Minus className="w-3.5 h-3.5" />
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => onToggle(symbol, { price: parseFloat(stock.lastPrice || '0'), name, source: 'Momentum: Accumulation' })}
+                        className="p-1.5 bg-emerald-500/10 border border-emerald-500/20 rounded-lg text-emerald-500 hover:bg-emerald-500 hover:text-white transition-all shadow-md flex items-center justify-center w-7 h-7"
+                        title="Add to Watchlist"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                      </button>
                     )}
-                  >
-                    <WatchlistIcon className={cn("w-3.5 h-3.5", watchlist.includes(symbol) && "fill-amber-500")} />
-                  </button>
+                  </div>
                   <div>
-                    <p className="text-xs font-black text-white group-hover:text-emerald-400 transition-colors uppercase">{symbol}</p>
-                    {name && <p className="text-[9px] font-bold text-slate-500 truncate max-w-[140px]">{name}</p>}
-                    <div className="flex items-center gap-2 mt-0.5">
+                    <p className="text-xs font-black text-white group-hover:text-emerald-400 transition-colors uppercase leading-none truncate max-w-[150px]">{name || symbol}</p>
+                    <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mt-1 leading-none">{symbol}</p>
+                    <div className="flex items-center gap-2 mt-1.5">
                       <span className="text-[10px] font-bold text-slate-500 tabular-nums">₹{stock.lastPrice}</span>
                       <span className="text-[9px] font-black text-slate-600 uppercase tracking-tighter bg-slate-900 px-1.5 py-0.5 rounded italic">RSI: {stock.rsi}</span>
                     </div>
@@ -82,22 +92,32 @@ export const MomentumIntelligence: React.FC<MomentumIntelligenceProps> = ({
               <div
                 key={stock.stockId}
                 onClick={() => onSelectStock(symbol)}
-                className="flex justify-between items-center p-2.5 bg-slate-950/50 rounded-lg border border-rose-500/10 hover:border-rose-500/30 transition-all group cursor-pointer"
+                className="flex justify-between items-center p-2.5 bg-slate-950/50 rounded-lg border border-rose-500/10 hover:border-rose-500/30 transition-all group cursor-pointer animate-fade-in"
               >
                 <div className="flex items-center gap-3">
-                  <button
-                    onClick={(e) => { e.stopPropagation(); onToggle(symbol); }}
-                    className={cn(
-                      "p-1.5 rounded-lg transition-all",
-                      watchlist.includes(symbol) ? "bg-amber-500/20 text-amber-500" : "text-slate-700 hover:text-slate-400"
+                  <div onClick={(e) => e.stopPropagation()}>
+                    {watchlist.includes(symbol) ? (
+                      <button
+                        onClick={() => onToggle(symbol)}
+                        className="p-1.5 bg-rose-500/10 border border-rose-500/20 rounded-lg text-rose-500 hover:bg-rose-500 hover:text-white transition-all shadow-md flex items-center justify-center w-7 h-7"
+                        title="Remove from Watchlist"
+                      >
+                        <Minus className="w-3.5 h-3.5" />
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => onToggle(symbol, { price: parseFloat(stock.lastPrice || '0'), name, source: 'Momentum: Distribution' })}
+                        className="p-1.5 bg-emerald-500/10 border border-emerald-500/20 rounded-lg text-emerald-500 hover:bg-emerald-500 hover:text-white transition-all shadow-md flex items-center justify-center w-7 h-7"
+                        title="Add to Watchlist"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                      </button>
                     )}
-                  >
-                    <WatchlistIcon className={cn("w-3.5 h-3.5", watchlist.includes(symbol) && "fill-amber-500")} />
-                  </button>
+                  </div>
                   <div>
-                    <p className="text-xs font-black text-white group-hover:text-rose-400 transition-colors uppercase">{symbol}</p>
-                    {name && <p className="text-[9px] font-bold text-slate-500 truncate max-w-[140px]">{name}</p>}
-                    <div className="flex items-center gap-2 mt-0.5">
+                    <p className="text-xs font-black text-white group-hover:text-rose-400 transition-colors uppercase leading-none truncate max-w-[150px]">{name || symbol}</p>
+                    <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mt-1 leading-none">{symbol}</p>
+                    <div className="flex items-center gap-2 mt-1.5">
                       <span className="text-[10px] font-bold text-slate-500 tabular-nums">₹{stock.lastPrice}</span>
                       <span className="text-[9px] font-black text-slate-600 uppercase tracking-tighter bg-slate-900 px-1.5 py-0.5 rounded italic">RSI: {stock.rsi}</span>
                     </div>

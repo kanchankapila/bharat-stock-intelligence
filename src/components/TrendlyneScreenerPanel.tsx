@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   Search, Zap, TrendingUp, TrendingDown, Loader, RefreshCw,
-  ChevronRight, Filter, BarChart3, AlertCircle
+  ChevronRight, Filter, BarChart3, AlertCircle, Plus, Minus
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { trpc } from '../lib/trpc';
@@ -59,7 +59,13 @@ function resolveNseSymbol(stock: TrendlyneStock): string | null {
   return null;
 }
 
-const TrendlyneScreenerPanel: React.FC<{ onSelectStock?: (symbol: string) => void }> = ({ onSelectStock }) => {
+interface TrendlyneScreenerPanelProps {
+  onSelectStock?: (symbol: string) => void;
+  watchlist: string[];
+  onToggleWatchlist: (symbol: string, metadata?: { price?: number; name?: string; source?: string }) => void;
+}
+
+const TrendlyneScreenerPanel: React.FC<TrendlyneScreenerPanelProps> = ({ onSelectStock, watchlist = [], onToggleWatchlist }) => {
   const [selectedScreener, setSelectedScreener] = useState<ScreenerCategory | null>(null);
   const [screenerSearchQuery, setScreenerSearchQuery] = useState('');
   const [stockSearchQuery, setStockSearchQuery] = useState('');
@@ -339,11 +345,32 @@ const TrendlyneScreenerPanel: React.FC<{ onSelectStock?: (symbol: string) => voi
                            </span>
                         </div>
                       </div>
-                      <div className={cn(
-                        "p-1.5 rounded-lg border",
-                        stock.changePercent >= 0 ? "bg-emerald-500/5 border-emerald-500/10 text-emerald-500" : "bg-rose-500/5 border-rose-500/10 text-rose-500"
-                      )}>
-                        {stock.changePercent >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+                      <div className="flex items-center gap-1.5 z-10 animate-fade-in" onClick={(e) => e.stopPropagation()}>
+                        {nseSymbol && (
+                          watchlist.includes(nseSymbol) ? (
+                            <button
+                              onClick={() => onToggleWatchlist(nseSymbol)}
+                              className="p-1.5 bg-rose-500/10 border border-rose-500/20 rounded-lg text-rose-500 hover:bg-rose-500 hover:text-white transition-all shadow-md flex items-center justify-center w-7 h-7"
+                              title="Remove from Watchlist"
+                            >
+                              <Minus className="w-3 h-3" />
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => onToggleWatchlist(nseSymbol, { price: stock.ltp, name: stock.name, source: `Trendlyne: ${selectedScreener?.name || 'Screener'}` })}
+                              className="p-1.5 bg-emerald-500/10 border border-emerald-500/20 rounded-lg text-emerald-500 hover:bg-emerald-500 hover:text-white transition-all shadow-md flex items-center justify-center w-7 h-7"
+                              title="Add to Watchlist"
+                            >
+                              <Plus className="w-3 h-3" />
+                            </button>
+                          )
+                        )}
+                        <div className={cn(
+                          "p-1.5 rounded-lg border flex items-center justify-center w-7 h-7",
+                          stock.changePercent >= 0 ? "bg-emerald-500/5 border-emerald-500/10 text-emerald-500" : "bg-rose-500/5 border-rose-500/10 text-rose-500"
+                        )}>
+                          {stock.changePercent >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+                        </div>
                       </div>
                     </div>
 

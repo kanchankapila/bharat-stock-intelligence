@@ -409,7 +409,7 @@ export async function runQuantScoring(): Promise<void> {
 
 // ─── Query helpers ────────────────────────────────────────────────────────────
 
-export type Strategy = 'composite' | 'momentum' | 'quality' | 'value' | 'confluence';
+export type Strategy = 'composite' | 'momentum' | 'quality' | 'value' | 'confluence' | 'investment_picks';
 
 export interface StrategyFilters {
   minSharpe?: number;          // e.g. 0.5
@@ -428,16 +428,37 @@ export function getStrategyStocks(
   limit = 25,
   filters: StrategyFilters = {},
 ): any[] {
-  const rankCol: Record<Strategy, string> = {
-    composite:  'rank_composite',
-    momentum:   'rank_momentum',
-    quality:    'rank_quality',
-    value:      'rank_value',
-    confluence: 'confluence_rank',
-  };
-  const col = rankCol[strategy];
+  let col = '';
+  let customSelect = '';
+  let customWhere = '';
 
-  const conditions: string[] = [`qs.${col} IS NOT NULL`];
+  if (strategy === 'investment_picks') {
+    col = '(0.40 * qs.rank_composite + 0.30 * qs.confluence_rank + 0.30 * qs.rank_quality)';
+    customSelect = `, ${col} AS strategy_rank`;
+    customWhere = `
+      AND qs.above_sma200 = 1 
+      AND (qs.return_on_equity IS NULL OR qs.return_on_equity >= 0.12)
+      AND (qs.piotroski_f_score IS NULL OR qs.piotroski_f_score >= 5)
+      AND (qs.debt_to_equity IS NULL OR qs.debt_to_equity < 150)
+      AND qs.bullish_screener_count >= 3
+      AND qs.bearish_screener_count <= 2
+    `;
+  } else {
+    const rankCol: Record<Strategy, string> = {
+      composite:  'rank_composite',
+      momentum:   'rank_momentum',
+      quality:    'rank_quality',
+      value:      'rank_value',
+      confluence: 'confluence_rank',
+      investment_picks: '',
+    };
+    const cName = rankCol[strategy] || 'rank_composite';
+    col = `qs.${cName}`;
+    customSelect = `, ${col} AS strategy_rank`;
+  }
+
+  const selectColName = strategy === 'investment_picks' ? col : col;
+  const conditions: string[] = [strategy === 'investment_picks' ? 'qs.rank_composite IS NOT NULL' : `${col} IS NOT NULL`];
   const params: any[] = [];
 
   if (filters.aboveSma200) {
@@ -486,7 +507,7 @@ export function getStrategyStocks(
       ns.name,
       ns.sector,
       -- momentum
-      qs.return_1m, qs.return_3m, qs.return_6m, qs.return_12m,
+      qs.return_1w, qs.return_1m, qs.return_3m, qs.return_6m, qs.return_12m,
       qs.above_sma200, qs.sma200_distance_pct, qs.momentum_score,
       -- risk
       qs.annualized_vol, qs.sharpe_ratio, qs.max_drawdown_1y,
@@ -502,13 +523,13 @@ export function getStrategyStocks(
       qs.rank_momentum, qs.rank_quality, qs.rank_value, qs.rank_composite,
       qs.composite_class, qs.ohlcv_days,
       -- live price ref
-      sf.market_cap, sf.analyst_rating,
-      qs.${col} AS strategy_rank
+      sf.market_cap, sf.analyst_rating
+      ${customSelect}
     FROM quant_scores qs
     LEFT JOIN nse_stocks  ns ON ns.symbol = qs.symbol
     LEFT JOIN stock_fundamentals sf ON sf.symbol = qs.symbol
-    WHERE ${where}
-    ORDER BY qs.${col} DESC
+    WHERE ${where} ${customWhere}
+    ORDER BY ${selectColName} DESC
     LIMIT ?
   `).all(...params) as any[];
 

@@ -3,7 +3,7 @@ import { Card } from './Card';
 import { trpc } from '../lib/trpc';
 import { cn } from '../lib/utils';
 import { 
-  Bookmark as WatchlistIcon, Plus 
+  Bookmark as WatchlistIcon, Minus 
 } from 'lucide-react';
 import { 
   ResponsiveContainer, BarChart, Bar 
@@ -14,6 +14,13 @@ import { MarketData } from '../services/marketService';
 interface WatchlistProps {
   watchlist: string[];
   stocks: MarketData[];
+  watchlistDetails?: Array<{
+    symbol: string;
+    price?: number;
+    name?: string;
+    addedAt: string;
+    source?: string;
+  }>;
   onSelectStock: (symbol: string) => void;
   onRemove: (symbol: string) => void;
 }
@@ -21,6 +28,7 @@ interface WatchlistProps {
 export const Watchlist: React.FC<WatchlistProps> = ({ 
   watchlist, 
   stocks, 
+  watchlistDetails,
   onSelectStock, 
   onRemove 
 }) => {
@@ -34,10 +42,17 @@ export const Watchlist: React.FC<WatchlistProps> = ({
 
   const watchlistStocks = stocks.filter(s => watchlist.includes(s.symbol)).map(stock => {
     const live = liveQuotes?.find((q: any) => q.symbol === stock.symbol);
-    if (live) {
-      return { ...stock, price: live.price, changePct: live.changePct ?? stock.changePct };
-    }
-    return stock;
+    const detail = watchlistDetails?.find(d => d.symbol === stock.symbol);
+    
+    return { 
+      ...stock, 
+      price: live ? live.price : stock.price, 
+      changePct: live ? (live.changePct ?? stock.changePct) : stock.changePct,
+      capturedPrice: detail?.price,
+      capturedName: detail?.name,
+      capturedDate: detail?.addedAt,
+      capturedSource: detail?.source
+    };
   });
 
   return (
@@ -59,43 +74,72 @@ export const Watchlist: React.FC<WatchlistProps> = ({
             return (
               <Card 
                 key={stock.symbol} 
-                className="group hover:border-blue-500/30 transition-all cursor-pointer relative overflow-hidden" 
+                className="group hover:border-blue-500/30 transition-all cursor-pointer relative overflow-hidden flex flex-col justify-between" 
                 onClick={() => onSelectStock(stock.symbol)}
               >
-                <div className="absolute top-0 right-0 p-4 z-10">
-                  <button 
-                    onClick={(e) => { e.stopPropagation(); onRemove(stock.symbol); }}
-                    className="p-1.5 bg-slate-900/50 backdrop-blur-md rounded-lg text-rose-500 hover:bg-rose-500 hover:text-white transition-all shadow-lg border border-slate-800"
-                  >
-                    <Plus className="w-3.5 h-3.5 rotate-45" />
-                  </button>
-                </div>
-                
-                <div className="flex justify-between items-start mb-2">
-                  <div>
-                    <h4 className="text-xs font-semibold text-white tracking-wider uppercase">{stock.symbol}</h4>
-                    <p className="text-[10px] text-slate-500 truncate max-w-[120px]">{stock.name}</p>
+                <div>
+                  <div className="absolute top-0 right-0 p-4 z-10">
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); onRemove(stock.symbol); }}
+                      className="p-1.5 bg-rose-500/10 backdrop-blur-md rounded-lg text-rose-500 hover:bg-rose-500 hover:text-white transition-all shadow-lg border border-rose-500/20"
+                      title="Remove from Watchlist"
+                    >
+                      <Minus className="w-3.5 h-3.5" />
+                    </button>
                   </div>
-                  <div className={cn(
-                    "px-2 py-1 rounded-lg text-[10px] font-semibold",
-                    isUp ? "bg-emerald-500/10 text-emerald-500" : "bg-rose-500/10 text-rose-500"
-                  )}>
-                    {isUp ? '+' : ''}{stock.changePct}%
+                  
+                  <div className="flex justify-between items-start mb-2 pr-8">
+                    <div className="min-w-0">
+                      <h4 className="text-sm font-black text-white tracking-tight group-hover:text-amber-400 transition-colors uppercase italic leading-none truncate" title={stock.capturedName || stock.name}>
+                        {stock.capturedName || stock.name}
+                      </h4>
+                      <p className="text-[9px] font-black text-slate-500 tracking-widest mt-1 uppercase">{stock.symbol}</p>
+                    </div>
+                    <div className={cn(
+                      "px-2 py-1 rounded-lg text-[10px] font-black shrink-0 ml-2 italic",
+                      isUp ? "bg-emerald-500/10 text-emerald-400" : "bg-rose-500/10 text-rose-400"
+                    )}>
+                      {isUp ? '+' : ''}{stock.changePct}%
+                    </div>
+                  </div>
+                  
+                  <div className="mt-4 flex items-end justify-between">
+                     <div>
+                        <p className="text-[7px] font-black text-slate-600 uppercase tracking-widest mb-1">LTP</p>
+                        <p className="text-xl font-black text-white tabular-nums tracking-tight italic">₹{stock.price.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
+                     </div>
+                     <div className="h-8 w-20">
+                        <ResponsiveContainer width="100%" height="100%">
+                           <BarChart data={Array.from({length: 8}, () => ({ v: Math.random() }))}>
+                              <Bar dataKey="v" fill={isUp ? "#10b981" : "#f43f5e"} opacity={0.3} radius={[2, 2, 0, 0]} />
+                           </BarChart>
+                        </ResponsiveContainer>
+                     </div>
                   </div>
                 </div>
-                
-                <div className="mt-4 flex items-end justify-between">
-                   <div>
-                      <p className="text-[9px] text-slate-500 uppercase tracking-wider mb-1">Price</p>
-                      <p className="text-xl font-bold text-white tabular-nums tracking-tight">₹{stock.price.toLocaleString()}</p>
-                   </div>
-                   <div className="h-8 w-20">
-                      <ResponsiveContainer width="100%" height="100%">
-                         <BarChart data={Array.from({length: 8}, () => ({ v: Math.random() }))}>
-                            <Bar dataKey="v" fill={isUp ? "#10b981" : "#f43f5e"} opacity={0.3} radius={[2, 2, 0, 0]} />
-                         </BarChart>
-                      </ResponsiveContainer>
-                   </div>
+
+                {/* Enriched Watchlist Metadata Badging */}
+                <div className="mt-4 pt-4 border-t border-slate-800/50 space-y-1.5 text-[8px] font-black text-slate-500 uppercase tracking-widest">
+                  {stock.capturedPrice != null && (
+                    <div className="flex items-center justify-between">
+                      <span>Captured Price</span>
+                      <span className="text-slate-300 italic font-black text-[9px]">₹{stock.capturedPrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                    </div>
+                  )}
+                  {stock.capturedSource && (
+                    <div className="flex items-center justify-between">
+                      <span>Added Via</span>
+                      <span className="text-indigo-400 truncate max-w-[140px] font-black leading-none">{stock.capturedSource}</span>
+                    </div>
+                  )}
+                  {stock.capturedDate && (
+                    <div className="flex items-center justify-between">
+                      <span>Added Date</span>
+                      <span className="text-slate-400 italic">
+                        {new Date(stock.capturedDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+                      </span>
+                    </div>
+                  )}
                 </div>
               </Card>
             );

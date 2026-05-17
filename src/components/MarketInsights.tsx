@@ -4,11 +4,11 @@ import { trpc } from '../lib/trpc';
 import { cn } from '../lib/utils';
 import { 
   Activity, TrendingUp, TrendingDown, Users, Trophy, 
-  Bookmark as WatchlistIcon 
+  Bookmark as WatchlistIcon, Plus, Minus
 } from 'lucide-react';
 import { useIntersectionObserver } from '../hooks/useIntersectionObserver';
 
-export const IndexOverview: React.FC<{ className?: string }> = ({ className }) => {
+export const IndexOverview: React.FC<{ className?: string; onSelectIndex?: (id: string, name: string) => void }> = ({ className, onSelectIndex }) => {
   const ref = React.useRef<HTMLDivElement>(null);
   const isVisible = useIntersectionObserver(ref, { threshold: 0.1 });
 
@@ -17,74 +17,93 @@ export const IndexOverview: React.FC<{ className?: string }> = ({ className }) =
     refetchInterval: isVisible ? 30000 : false,
   });
 
+  const getIndexId = (name: string) => {
+    if (name.includes('Nifty 50') || name.toUpperCase() === 'NIFTY 50') return '9';
+    if (name.includes('Sensex') || name.toUpperCase() === 'SENSEX') return '4';
+    if (name.includes('Bank Nifty') || name.toUpperCase() === 'BANK NIFTY') return '23';
+    return '';
+  };
+
   if (isLoading || !indices) return <div ref={ref} className="h-40 bg-slate-900/50 animate-pulse rounded-2xl" />;
 
   const groups: { name: string; list: any[] }[] = (indices as any)?.data?.indiceList ?? [];
   const keyList = groups.find(g => g.name === 'Key Indices')?.list ?? [];
 
   return (
-    <div ref={ref}>
-      <Card title="Market Watch" icon={Activity} className={cn("h-full", className)}>
-        <div className="space-y-3 pt-2">
-          {keyList.slice(0, 8).filter((idx: any) => idx.name).map((idx: any) => {
-            const isUp = Number(idx.direction) === 1 || parseFloat(idx.changePer ?? '0') >= 0;
-            const pct = parseFloat(idx.changePer ?? '0');
-            return (
-              <div key={idx.name} className="flex justify-between items-center p-2 bg-slate-950 rounded-lg border border-slate-800/50 hover:border-slate-700 transition-all">
-                <div>
-                  <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{idx.name}</p>
-                  <p className="text-sm font-black text-white tabular-nums mt-0.5">{idx.value}</p>
-                </div>
-                <div className="text-right">
-                  <div className={cn(
-                    "flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded",
-                    isUp ? "bg-emerald-500/10 text-emerald-500" : "bg-rose-500/10 text-rose-500"
-                  )}>
-                    {isUp ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-                    {isUp ? '+' : ''}{pct.toFixed(2)}%
-                  </div>
-                  <p className={cn("text-[9px] font-bold mt-1 tabular-nums", isUp ? "text-emerald-600" : "text-rose-600")}>
-                    {isUp ? '+' : ''}{idx.change}
-                  </p>
-                </div>
+    <Card title="Key Market Indices" icon={Activity} className={className}>
+      <div ref={ref} className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
+        {keyList.slice(0, 3).map((idx: any) => {
+          const indexId = getIndexId(idx.name);
+          const isClickable = !!indexId && !!onSelectIndex;
+          
+          return (
+            <div 
+              key={idx.name} 
+              onClick={() => isClickable && onSelectIndex(indexId, idx.name)}
+              className={cn(
+                "p-4 bg-slate-950 border border-slate-800 rounded-2xl transition-all group relative overflow-hidden",
+                isClickable ? "cursor-pointer hover:border-blue-500/30 hover:shadow-lg hover:translate-y-[-1px]" : ""
+              )}
+            >
+              <div className="flex justify-between items-start mb-2">
+                <h4 className="text-xs font-black text-slate-400 group-hover:text-white transition-colors uppercase tracking-widest">{idx.name}</h4>
+                <span className={cn(
+                  "text-[9px] font-black px-1.5 py-0.5 rounded uppercase tracking-tighter",
+                  parseFloat(idx.percentChange) >= 0 ? "bg-emerald-500/10 text-emerald-400" : "bg-rose-500/10 text-rose-400"
+                )}>
+                  {parseFloat(idx.percentChange) >= 0 ? '▲' : '▼'} {Math.abs(parseFloat(idx.percentChange)).toFixed(2)}%
+                </span>
               </div>
-            );
-          })}
-        </div>
-      </Card>
-    </div>
+              <div className="flex items-baseline gap-2">
+                <span className="text-xl font-black text-white italic tracking-tight">{idx.lastPrice}</span>
+                <span className={cn(
+                  "text-[10px] font-bold",
+                  parseFloat(idx.change) >= 0 ? "text-emerald-500" : "text-rose-500"
+                )}>
+                  {parseFloat(idx.change) >= 0 ? '+' : ''}{idx.change}
+                </span>
+              </div>
+              
+              {/* Dynamic bottom strip for click indicators */}
+              {isClickable && (
+                <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-gradient-to-r from-blue-500 to-indigo-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </Card>
   );
 };
 
-export const InstitutionalInsights: React.FC<{ symbol?: string; className?: string }> = ({ symbol = 'RELIANCE', className }) => {
-  const { data: mfData } = trpc.getMFInvestments.useQuery({ symbol });
-  const mfs = mfData?.Table || [];
+export const InstitutionalInsights: React.FC<{ symbol?: string; className?: string }> = ({ symbol, className }) => {
+  const { data: instData } = trpc.getInstitutionalFlows.useQuery();
+  const flows = instData?.data?.institutionalDetails ?? [];
 
   return (
-    <Card title={`Institutional Velocity (${symbol})`} icon={Users} className={cn("h-full", className)}>
+    <Card title="Institutional Flows" icon={Users} className={className}>
       <div className="space-y-4 pt-2">
-        <div className="p-3 bg-blue-600/10 border border-blue-500/20 rounded-xl">
-          <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest mb-1">Top Active Insight</p>
-          <p className="text-xs text-slate-300 italic leading-relaxed">
-            Institutional activity tracks heavy volume inflows into index leaders. Reliability: <span className="text-white font-black">94%</span>
-          </p>
-        </div>
-        
-        <div className="space-y-3">
-          <h4 className="text-[9px] font-black text-slate-600 uppercase tracking-[0.2em] mb-2">Major MF Positions</h4>
-          {mfs.slice(0, 5).map((mf: any, idx: number) => (
-            <div key={idx} className="flex justify-between items-center p-2 bg-slate-950 rounded-lg border border-slate-800/50">
-              <div className="flex-1 mr-4">
-                <p className="text-[10px] font-black text-white line-clamp-1 uppercase tracking-tight">{mf.schemeName}</p>
-                <p className="text-[9px] font-bold text-slate-500 mt-0.5">{mf.marketValue} Cr held</p>
-              </div>
-              <div className="text-right">
-                <p className="text-[10px] font-black text-white italic">{mf.percentToAum}%</p>
-                <p className="text-[9px] font-bold text-slate-600 uppercase tracking-tighter">of AUM</p>
+        {flows.slice(0, 2).map((flow: any) => (
+          <div key={flow.category} className="p-4 bg-slate-950 border border-slate-800 rounded-2xl flex justify-between items-center">
+            <div>
+              <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest">{flow.category} Activity</h4>
+              <p className="text-[9px] font-bold text-slate-600 mt-1 uppercase tracking-wider">Date: {flow.date}</p>
+            </div>
+            <div className="text-right">
+              <span className={cn(
+                "text-sm font-black italic tracking-tight px-3 py-1 rounded-xl block mb-1",
+                parseFloat(flow.netBuySell) >= 0 ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/10" : "bg-rose-500/10 text-rose-400 border border-rose-500/10"
+              )}>
+                {parseFloat(flow.netBuySell) >= 0 ? '+' : ''}₹{parseFloat(flow.netBuySell).toLocaleString()} Cr
+              </span>
+              <div className="flex gap-2 text-[9px] font-bold text-slate-500 justify-end">
+                <span>B: ₹{parseFloat(flow.buyValue).toLocaleString()}</span>
+                <span>•</span>
+                <span>S: ₹{parseFloat(flow.sellValue).toLocaleString()}</span>
               </div>
             </div>
-          ))}
-        </div>
+          </div>
+        ))}
       </div>
     </Card>
   );
@@ -92,7 +111,7 @@ export const InstitutionalInsights: React.FC<{ symbol?: string; className?: stri
 
 export const PennyStockIntelligence: React.FC<{ 
   watchlist: string[]; 
-  onToggleWatchlist: (symbol: string) => void;
+  onToggleWatchlist: (symbol: string, metadata?: { price?: number; name?: string; source?: string }) => void;
   onSelectStock: (symbol: string) => void;
   className?: string;
 }> = ({ watchlist, onToggleWatchlist, onSelectStock, className }) => {
@@ -116,18 +135,30 @@ export const PennyStockIntelligence: React.FC<{
               <tr key={stock.fincode || stock.symbol} className="group hover:bg-slate-900/50 transition-colors">
                 <td className="py-3">
                   <div className="flex items-center gap-2">
-                    <button 
-                      onClick={() => onToggleWatchlist(stock.symbol)}
-                      className={cn(
-                        "p-1 rounded-lg transition-all",
-                        watchlist.includes(stock.symbol) ? "bg-amber-500/20 text-amber-500" : "text-slate-600 hover:text-slate-400"
+                    <div onClick={(e) => e.stopPropagation()}>
+                      {watchlist.includes(stock.symbol) ? (
+                        <button 
+                          onClick={() => onToggleWatchlist(stock.symbol)}
+                          className="p-1 bg-rose-500/10 border border-rose-500/20 rounded text-rose-500 hover:bg-rose-500 hover:text-white transition-all shadow-md flex items-center justify-center w-5.5 h-5.5"
+                          title="Remove from Watchlist"
+                        >
+                          <Minus className="w-2.5 h-2.5" />
+                        </button>
+                      ) : (
+                        <button 
+                          onClick={() => onToggleWatchlist(stock.symbol, { price: parseFloat(stock.currentPrice || '0'), name: stock.companyName || stock.name, source: 'Micro-Cap Opportunity' })}
+                          className="p-1 bg-emerald-500/10 border border-emerald-500/20 rounded text-emerald-500 hover:bg-emerald-500 hover:text-white transition-all shadow-md flex items-center justify-center w-5.5 h-5.5"
+                          title="Add to Watchlist"
+                        >
+                          <Plus className="w-2.5 h-2.5" />
+                        </button>
                       )}
-                    >
-                      <WatchlistIcon className={cn("w-3 h-3", watchlist.includes(stock.symbol) && "fill-amber-500")} />
-                    </button>
+                    </div>
                     <div>
-                      <p className="text-xs font-black text-white group-hover:text-amber-400 transition-colors uppercase cursor-pointer" onClick={() => onSelectStock(stock.symbol)}>{stock.symbol}</p>
-                      <p className="text-[9px] font-bold text-slate-600 line-clamp-1">{stock.companyName || stock.name}</p>
+                      <p className="text-xs font-black text-white group-hover:text-amber-400 transition-colors uppercase cursor-pointer truncate max-w-[120px] leading-tight" onClick={() => onSelectStock(stock.symbol)}>
+                        {stock.companyName || stock.name}
+                      </p>
+                      <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mt-0.5">{stock.symbol}</p>
                     </div>
                   </div>
                 </td>

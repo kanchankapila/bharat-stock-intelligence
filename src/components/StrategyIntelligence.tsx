@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 
-type Strategy = 'composite' | 'momentum' | 'quality' | 'value' | 'confluence';
+type Strategy = 'composite' | 'momentum' | 'quality' | 'value' | 'confluence' | 'investment_picks';
 
 interface Filters {
   minSharpe?: number;
@@ -61,6 +61,7 @@ const STRATEGIES: { id: Strategy; label: string; icon: React.ElementType; desc: 
   { id: 'quality',   label: 'Quality',    icon: Shield,    desc: 'Sharpe ratio, ROE, operating margins, Piotroski F-Score' },
   { id: 'value',     label: 'Value',      icon: BarChart3, desc: 'Trailing/forward PE, earnings yield, D/E ratio' },
   { id: 'confluence',label: 'Confluence', icon: Zap,       desc: 'Screener breadth across Trendlyne + MoneyControl' },
+  { id: 'investment_picks', label: 'Best Buys', icon: Star, desc: 'Highest conviction buys: positive trend + high quality + high multi-screener confluence' },
 ];
 
 function ScoreBar({ value, color = 'indigo' }: { value: number; color?: string }) {
@@ -220,6 +221,7 @@ export function StrategyIntelligence({ onSelectStock }: { onSelectStock: (symbol
     quality:    { key: 'rank_quality',   label: 'Quality',    color: 'sky' },
     value:      { key: 'rank_value',     label: 'Value',      color: 'amber' },
     confluence: { key: 'rank_confluence',label: 'Confluence', color: 'violet' },
+    investment_picks: { key: 'strategy_rank', label: 'Buy Score', color: 'emerald' },
   };
   const { key: scoreKey, label: scoreLabel, color: scoreColor } = scoreColByStrategy[strategy];
 

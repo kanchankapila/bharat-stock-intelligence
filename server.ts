@@ -132,6 +132,28 @@ async function startServer() {
       runTechnicalSignalScan().catch(console.error);
     }, 24 * 60 * 60 * 1000);
   }
+  // ─── Trendlyne Intraday Screeners: scheduling & startup trigger ─────────
+  const { runIntradayScreenerScan } = await import('./src/server/trendlyneScreener');
+  const { trendlyneIntradayQueue } = await import('./src/server/queues');
+
+  if (bullmqReady && trendlyneIntradayQueue) {
+    console.log('[SERVER] Triggering first-time Trendlyne intraday scan via BullMQ...');
+    await trendlyneIntradayQueue.add(
+      'trendlyne-intraday-first-run',
+      {},
+      { removeOnComplete: 3, removeOnFail: 3, attempts: 1, priority: 2 },
+    );
+  } else {
+    console.log('[SERVER] No Redis — starting first-time Trendlyne intraday scan directly...');
+    runIntradayScreenerScan().catch(err =>
+      console.error('[SERVER] First-time Trendlyne scan error:', err.message)
+    );
+    // Legacy fallback: run every 5 minutes
+    setInterval(() => {
+      console.log('[FALLBACK] Triggering scheduled Trendlyne intraday scan...');
+      runIntradayScreenerScan().catch(console.error);
+    }, 5 * 60 * 1000);
+  }
   // ─────────────────────────────────────────────────────────────────────────
 
   if (!bullmqReady) {

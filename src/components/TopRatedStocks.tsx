@@ -3,7 +3,7 @@ import { trpc } from '../lib/trpc';
 import {
   Trophy, TrendingUp, TrendingDown, RefreshCw,
   Search, ExternalLink, Activity, Zap, CheckCircle2,
-  AlertCircle, Star
+  AlertCircle, Star, Plus, Minus
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { motion } from 'motion/react';
@@ -30,7 +30,9 @@ const RankingList: React.FC<{
   icon: React.ReactNode;
   subtitle: string;
   onSelectStock: (symbol: string) => void;
-}> = ({ title, stocks, isLoading, icon, subtitle, onSelectStock }) => (
+  watchlist: string[];
+  onToggleWatchlist: (symbol: string, metadata?: { price?: number; name?: string; source?: string }) => void;
+}> = ({ title, stocks, isLoading, icon, subtitle, onSelectStock, watchlist = [], onToggleWatchlist }) => (
   <div className="space-y-6">
     <div className="flex items-center gap-3 px-2">
       <div className="w-8 h-8 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-center">
@@ -50,32 +52,58 @@ const RankingList: React.FC<{
           transition={{ delay: index * 0.03 }}
           key={`${stock.symbol}-${stock.timeframe}`}
           onClick={() => onSelectStock(stock.symbol)}
-          className="bg-slate-950 border border-slate-800/50 rounded-2xl p-4 hover:border-blue-500/30 transition-all group relative overflow-hidden cursor-pointer"
+          className="bg-slate-950 border border-slate-800/50 rounded-2xl p-4 hover:border-blue-500/30 transition-all group relative overflow-hidden cursor-pointer animate-fade-in"
         >
           <div className="flex justify-between items-center relative z-10">
             <div className="flex items-center gap-4">
               <div className="w-8 h-8 bg-slate-900 rounded-lg flex items-center justify-center border border-slate-800 text-xs font-black text-slate-400 group-hover:text-blue-400 transition-all">
                 #{index + 1}
               </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <h3 className="text-sm font-black text-white italic uppercase tracking-tight">{stock.symbol}</h3>
-                  <span className="text-[9px] font-bold text-slate-500 truncate max-w-[120px]">
-                    {stockData.find(s => s.symbol.toUpperCase() === stock.symbol.toUpperCase())?.name || ''}
-                  </span>
-                  <span className={cn(
-                    "px-1.5 py-0.5 rounded text-[7px] font-black uppercase tracking-widest",
-                    stock.classification.includes('Strong Buy') ? "bg-emerald-500/20 text-emerald-400" :
-                    stock.classification.includes('Buy') ? "bg-emerald-500/10 text-emerald-500/80" :
-                    "bg-slate-800 text-slate-400"
-                  )}>
-                    {stock.classification}
-                  </span>
+              
+              <div className="flex items-center gap-3">
+                {/* Watchlist toggle buttons */}
+                <div onClick={(e) => e.stopPropagation()}>
+                  {watchlist.includes(stock.symbol) ? (
+                    <button
+                      onClick={() => onToggleWatchlist(stock.symbol)}
+                      className="p-1.5 bg-rose-500/10 border border-rose-500/20 rounded-lg text-rose-500 hover:bg-rose-500 hover:text-white transition-all shadow-md flex items-center justify-center w-7 h-7"
+                      title="Remove from Watchlist"
+                    >
+                      <Minus className="w-3.5 h-3.5" />
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => onToggleWatchlist(stock.symbol, { price: undefined, name: stockData.find(s => s.symbol.toUpperCase() === stock.symbol.toUpperCase())?.name, source: `Consensus: ${title}` })}
+                      className="p-1.5 bg-emerald-500/10 border border-emerald-500/20 rounded-lg text-emerald-500 hover:bg-emerald-500 hover:text-white transition-all shadow-md flex items-center justify-center w-7 h-7"
+                      title="Add to Watchlist"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
-                <div className="flex items-center gap-3 mt-1">
-                  <span className="text-[9px] font-black text-slate-600 uppercase">Score <span className="text-white">{stock.score.toFixed(1)}</span></span>
-                  <span className="text-[9px] font-black text-slate-600 uppercase">Conf <span className="text-blue-400">{stock.confidence.toFixed(0)}%</span></span>
-                  <span className="text-[9px] font-black text-blue-500/80 uppercase tracking-tighter bg-blue-500/5 px-1.5 py-0.5 rounded italic">Driver: {stock.top_domain}</span>
+
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-sm font-black text-white italic uppercase tracking-tight leading-none truncate max-w-[180px]" title={stockData.find(s => s.symbol.toUpperCase() === stock.symbol.toUpperCase())?.name}>
+                      {stockData.find(s => s.symbol.toUpperCase() === stock.symbol.toUpperCase())?.name || stock.symbol}
+                    </h3>
+                    <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest leading-none">
+                      {stock.symbol}
+                    </span>
+                    <span className={cn(
+                      "px-1.5 py-0.5 rounded text-[7px] font-black uppercase tracking-widest leading-none",
+                      stock.classification.includes('Strong Buy') ? "bg-emerald-500/20 text-emerald-400" :
+                      stock.classification.includes('Buy') ? "bg-emerald-500/10 text-emerald-500/80" :
+                      "bg-slate-800 text-slate-400"
+                    )}>
+                      {stock.classification}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3 mt-1.5">
+                    <span className="text-[9px] font-black text-slate-600 uppercase">Score <span className="text-white">{stock.score.toFixed(1)}</span></span>
+                    <span className="text-[9px] font-black text-slate-600 uppercase">Conf <span className="text-blue-400">{stock.confidence.toFixed(0)}%</span></span>
+                    <span className="text-[9px] font-black text-blue-500/80 uppercase tracking-tighter bg-blue-500/5 px-1.5 py-0.5 rounded italic">Driver: {stock.top_domain}</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -101,14 +129,18 @@ const RankingList: React.FC<{
   </div>
 );
 
-const TopRatedStocks: React.FC<{ onSelectStock: (symbol: string) => void }> = ({ onSelectStock }) => {
+const TopRatedStocks: React.FC<{ 
+  onSelectStock: (symbol: string) => void;
+  watchlist: string[];
+  onToggleWatchlist: (symbol: string, metadata?: { price?: number; name?: string; source?: string }) => void;
+}> = ({ onSelectStock, watchlist = [], onToggleWatchlist }) => {
   const { data: longTermStocks, isLoading: isLoadingLT, refetch: refetchLT } = trpc.getTopRatedStocks.useQuery({ limit: 20, timeframe: 'long_term' });
   const { data: intradayStocks, isLoading: isLoadingID, refetch: refetchID } = trpc.getTopRatedStocks.useQuery({ limit: 20, timeframe: 'intraday' });
-  const triggerScoring = trpc.triggerStockScoring.useMutation();
+  const triggerStockScoring = trpc.triggerStockScoring.useMutation();
 
   const handleRecalculate = async () => {
     try {
-      await triggerScoring.mutateAsync();
+      await triggerStockScoring.mutateAsync();
       refetchLT();
       refetchID();
     } catch (err) {
@@ -147,11 +179,11 @@ const TopRatedStocks: React.FC<{ onSelectStock: (symbol: string) => void }> = ({
 
         <button
           onClick={handleRecalculate}
-          disabled={triggerScoring.isPending}
+          disabled={triggerStockScoring.isPending}
           className="flex items-center gap-2 bg-slate-900 border border-slate-800 hover:border-blue-500/50 text-white px-6 py-3 rounded-2xl text-xs font-black uppercase tracking-widest transition-all group disabled:opacity-50"
         >
-          <RefreshCw className={cn("w-4 h-4 transition-transform group-hover:rotate-180", triggerScoring.isPending && "animate-spin")} />
-          {triggerScoring.isPending ? 'Syncing intelligence...' : 'Refresh All Scopes'}
+          <RefreshCw className={cn("w-4 h-4 transition-transform group-hover:rotate-180", triggerStockScoring.isPending && "animate-spin")} />
+          {triggerStockScoring.isPending ? 'Syncing intelligence...' : 'Refresh All Scopes'}
         </button>
       </div>
 
@@ -165,6 +197,8 @@ const TopRatedStocks: React.FC<{ onSelectStock: (symbol: string) => void }> = ({
             isLoading={isLoadingLT}
             icon={<Trophy className="w-4 h-4 text-amber-500" />}
             onSelectStock={onSelectStock}
+            watchlist={watchlist}
+            onToggleWatchlist={onToggleWatchlist}
           />
 
           {/* Column 2: Intraday */}
@@ -175,6 +209,8 @@ const TopRatedStocks: React.FC<{ onSelectStock: (symbol: string) => void }> = ({
             isLoading={isLoadingID}
             icon={<Zap className="w-4 h-4 text-blue-500" />}
             onSelectStock={onSelectStock}
+            watchlist={watchlist}
+            onToggleWatchlist={onToggleWatchlist}
           />
         </div>
 
@@ -225,8 +261,5 @@ const TopRatedStocks: React.FC<{ onSelectStock: (symbol: string) => void }> = ({
     </div>
   );
 };
-
-// Mock Icons needed for the methodology section that were missing in the first import
-const BrainCircuit = ({ className }: { className?: string }) => <Activity className={className} />;
 
 export default TopRatedStocks;

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   X, TrendingUp, TrendingDown, Filter, ExternalLink, 
-  Search, ArrowUpRight, ArrowDownRight, Zap, Activity 
+  Search, ArrowUpRight, ArrowDownRight, Zap, Activity, Plus, Minus
 } from 'lucide-react';
 import { trpc } from '../lib/trpc';
 import { cn } from '../lib/utils';
@@ -19,13 +19,17 @@ interface ScreenerDetailsModalProps {
     description?: string;
   } | null;
   onSelectStock: (symbol: string) => void;
+  watchlist: string[];
+  onToggleWatchlist: (symbol: string, metadata?: { price?: number; name?: string; source?: string }) => void;
 }
 
 const ScreenerDetailsModal: React.FC<ScreenerDetailsModalProps> = ({ 
   isOpen, 
   onClose, 
   screener,
-  onSelectStock
+  onSelectStock,
+  watchlist = [],
+  onToggleWatchlist
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -164,25 +168,51 @@ const ScreenerDetailsModal: React.FC<ScreenerDetailsModalProps> = ({
                     }}
                     className="p-3 bg-slate-950/50 border border-slate-800 rounded-2xl hover:border-blue-500/30 hover:bg-slate-900 transition-all cursor-pointer group flex flex-col justify-between"
                   >
-                    <div className="flex justify-between items-start mb-2">
+                    <div className="flex justify-between items-start mb-2 pr-12 relative">
                       <div className="min-w-0">
-                        <h4 className="text-[11px] font-black text-white group-hover:text-blue-400 transition-colors uppercase italic leading-none truncate">
-                          {stock.symbol || stock.stockId}
+                        <h4 className="text-[11px] font-black text-white group-hover:text-amber-400 transition-colors uppercase italic leading-none truncate" title={stock.name}>
+                          {stock.name}
                         </h4>
                         <p className="text-[8px] text-slate-500 font-bold uppercase truncate mt-1">
-                          {stock.name}
+                          {stock.symbol || stock.stockId}
                         </p>
                       </div>
-                      {stock.score != null && (
-                        <div className={cn(
-                          "px-1.5 py-0.5 rounded text-[9px] font-black italic",
-                          stock.score >= 70 ? "text-emerald-400 bg-emerald-500/10" :
-                          stock.score >= 40 ? "text-amber-400 bg-amber-500/10" :
-                          "text-rose-400 bg-rose-500/10"
-                        )}>
-                          {Math.round(stock.score)}
-                        </div>
-                      )}
+
+                      <div className="flex items-center gap-1 absolute top-0 right-0 z-10" onClick={(e) => e.stopPropagation()}>
+                        {/* Plus and Minus Watchlist toggle */}
+                        {(() => {
+                          const symbol = stock.symbol || stock.stockId;
+                          if (!symbol) return null;
+                          return watchlist.includes(symbol) ? (
+                            <button
+                              onClick={() => onToggleWatchlist(symbol)}
+                              className="p-1 bg-rose-500/10 border border-rose-500/20 rounded-md text-rose-500 hover:bg-rose-500 hover:text-white transition-all shadow-sm flex items-center justify-center w-6 h-6"
+                              title="Remove from Watchlist"
+                            >
+                              <Minus className="w-2.5 h-2.5" />
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => onToggleWatchlist(symbol, { price: stock.ltp, name: stock.name, source: `Screener: ${screener?.name || 'Category'}` })}
+                              className="p-1 bg-emerald-500/10 border border-emerald-500/20 rounded-md text-emerald-500 hover:bg-emerald-500 hover:text-white transition-all shadow-sm flex items-center justify-center w-6 h-6"
+                              title="Add to Watchlist"
+                            >
+                              <Plus className="w-2.5 h-2.5" />
+                            </button>
+                          );
+                        })()}
+
+                        {stock.score != null && (
+                          <div className={cn(
+                            "px-1.5 py-0.5 rounded text-[8px] font-black italic",
+                            stock.score >= 70 ? "text-emerald-400 bg-emerald-500/10" :
+                            stock.score >= 40 ? "text-amber-400 bg-amber-500/10" :
+                            "text-rose-400 bg-rose-500/10"
+                          )}>
+                            {Math.round(stock.score)}
+                          </div>
+                        )}
+                      </div>
                     </div>
 
                     <div className="grid grid-cols-2 gap-2 mb-2">

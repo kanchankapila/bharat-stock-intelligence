@@ -60,6 +60,7 @@ export const QUEUE_QUANT_SCORING        = 'quant-scoring';
 export const QUEUE_TECHNICAL_SIGNALS    = 'technical-signals';
 export const QUEUE_SIGNAL_OUTCOMES      = 'signal-outcomes';
 export const QUEUE_NEWS_SENTIMENT       = 'news-sentiment';
+export const QUEUE_TRENDLYNE_INTRADAY   = 'trendlyne-intraday';
 
 const BULK_CACHE_KEY      = 'live-stocks-bulk';
 const BULK_TTL_SECONDS    = 5 * 60;
@@ -76,6 +77,7 @@ export let quantScoringQueue:      Queue | null = null;
 export let technicalSignalsQueue:  Queue | null = null;
 export let signalOutcomesQueue:    Queue | null = null;
 export let newsSentimentQueue:     Queue | null = null;
+export let trendlyneIntradayQueue: Queue | null = null;
 
 let stockWorker:              Worker | null = null;
 let signalWorker:             Worker | null = null;
@@ -86,6 +88,7 @@ let quantScoringWorker:       Worker | null = null;
 let technicalSignalsWorker:   Worker | null = null;
 let signalOutcomesWorker:     Worker | null = null;
 let newsSentimentWorker:      Worker | null = null;
+let trendlyneIntradayWorker:  Worker | null = null;
 
 // Shared in-process mirror populated by the stock-refresh worker
 // (same reference as the one exported from liveStockData via the cache layer)
@@ -523,12 +526,51 @@ export async function initQueues(): Promise<boolean> {
       console.error('[QUEUE] news-sentiment failed:', err.message);
     });
 
+    // ── Trendlyne intraday queue (every 5 min) ───────────────────────────────
+    trendlyneIntradayQueue = new Queue(QUEUE_TRENDLYNE_INTRADAY, { connection });
+
+    const tlRepeatables = await trendlyneIntradayQueue.getRepeatableJobs();
+    for (const r of tlRepeatables) {
+      await trendlyneIntradayQueue.removeRepeatableByKey(r.key);
+    }
+    await trendlyneIntradayQueue.add(
+      'trendlyne-intraday-scan',
+      {},
+      {
+        repeat: { every: 5 * 60 * 1000 }, // 5 minutes
+        jobId: 'trendlyne-intraday-repeatable',
+        removeOnComplete: 5,
+        removeOnFail: 3,
+      },
+    );
+
+    trendlyneIntradayWorker = new Worker(
+      QUEUE_TRENDLYNE_INTRADAY,
+      async (_job: Job) => {
+        const { runIntradayScreenerScan } = await import('./trendlyneScreener');
+        await runIntradayScreenerScan();
+      },
+      {
+        connection,
+        concurrency: 1,
+        lockDuration: 4 * 60 * 1000, // 4 minutes
+      },
+    );
+
+    trendlyneIntradayWorker.on('completed', (_job) => {
+      console.log('[QUEUE] trendlyne-intraday completed');
+    });
+    trendlyneIntradayWorker.on('failed', (_job, err) => {
+      console.error('[QUEUE] trendlyne-intraday failed:', err.message);
+    });
+
     return true;
   } catch (err: any) {
     console.warn('[QUEUE] BullMQ unavailable (Redis down?) — falling back to setInterval:', err.message);
     stockRefreshQueue = null;
     aiSignalsQueue    = null;
     stockScoringQueue = null;
+    trendlyneIntradayQueue = null;
     return false;
   }
 }
@@ -555,6 +597,8 @@ export async function shutdownQueues(): Promise<void> {
     signalOutcomesQueue?.close(),
     newsSentimentWorker?.close(),
     newsSentimentQueue?.close(),
+    trendlyneIntradayWorker?.close(),
+    trendlyneIntradayQueue?.close(),
   ]);
 }
 

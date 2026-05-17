@@ -1050,3 +1050,124 @@ export function getTrendlyneScreenerCategories() {
     { id: 'volume', name: 'Volume Leaders', description: 'High volume stocks', sentiment: 'neutral' as const, category: 'delivery' as const, timeframe: 'long_term' as const, source: 'trendlyne' }
   ];
 }
+
+/**
+ * Scan all Intraday Trendlyne screeners and automatically generate BUY/SELL signals for high-scoring stock constituents.
+ */
+export async function runIntradayScreenerScan(): Promise<{
+  screenersScanned: number;
+  highScoringStocksFound: number;
+  newSignalsGenerated: number;
+}> {
+  console.log('⚡ [INTRADAY SCAN] Starting scan of Intraday Trendlyne Screeners...');
+  
+  let screenersScanned = 0;
+  let highScoringStocksFound = 0;
+  let newSignalsGenerated = 0;
+
+  try {
+    // 1. Fetch all intraday screeners
+    const screeners = db.prepare(`
+      SELECT DISTINCT s.screener_id, s.screener_name, s.screenpk, s.sentiment, m.inferred_sentiment
+      FROM trendlyne_screeners s
+      LEFT JOIN screener_master m ON s.screener_id = m.scan_id
+      WHERE s.timeframe = 'intraday' OR m.inferred_timeframe = 'intraday'
+    `).all() as any[];
+
+    console.log(`⚡ [INTRADAY SCAN] Found ${screeners.length} intraday screeners to process.`);
+
+    for (const screener of screeners) {
+      screenersScanned++;
+      const name = screener.screener_name;
+      const screenpk = screener.screenpk;
+      const sentiment = screener.inferred_sentiment || screener.sentiment || 'neutral';
+
+      console.log(`🔍 [INTRADAY SCAN] Scanning screener: ${name} (PK: ${screenpk}, Sentiment: ${sentiment})...`);
+
+      // 2. Fetch stock constituents bypassing cache
+      const result = await fetchTrendlyneScreenerData(screenpk, name, 0, true);
+      if (!result.success || !result.data || result.data.length === 0) {
+        console.log(`⚠️ [INTRADAY SCAN] No stocks found or scan failed for: ${name}`);
+        continue;
+      }
+
+      console.log(`📊 [INTRADAY SCAN] Processing ${result.data.length} stocks for screener: ${name}`);
+
+      for (const stock of result.data) {
+        // Resolve stock symbol if not directly present
+        let symbol = stock.symbol;
+        if (!symbol) {
+          const mapping = getStockMappingByTLId(stock.stockId) || getStockMappingByName(stock.name);
+          symbol = mapping?.symbol;
+        }
+
+        if (!symbol) {
+          continue; // Skip stocks that cannot be mapped to a clean NSE symbol
+        }
+
+        // 3. Lookup stock score from quant_scores or stock_scores fallback
+        let score: number | null = null;
+        try {
+          const qScore = db.prepare('SELECT rank_composite FROM quant_scores WHERE symbol = ?').get(symbol) as any;
+          if (qScore?.rank_composite !== undefined && qScore?.rank_composite !== null) {
+            score = qScore.rank_composite;
+          } else {
+            const sScore = db.prepare("SELECT score FROM stock_scores WHERE symbol = ? AND timeframe = 'long_term'").get(symbol) as any;
+            if (sScore?.score !== undefined && sScore?.score !== null) {
+              score = sScore.score;
+            }
+          }
+        } catch (err) {
+          console.error(`❌ [INTRADAY SCAN] Error checking score for ${symbol}:`, err);
+        }
+
+        if (score === null || score < 80) {
+          continue; // Only proceed if stock has a High Score (>= 80)
+        }
+
+        highScoringStocksFound++;
+
+        // 4. Deduplicate active signals
+        let existingActive = 0;
+        try {
+          const check = db.prepare("SELECT COUNT(*) as count FROM signals WHERE symbol = ? AND status = 'ACTIVE'").get(symbol) as any;
+          existingActive = check?.count || 0;
+        } catch (err) {
+          console.error(`❌ [INTRADAY SCAN] Error checking active signals for ${symbol}:`, err);
+        }
+
+        if (existingActive > 0) {
+          console.log(`⏭️ [INTRADAY SCAN] Symbol ${symbol} has score ${score.toFixed(1)}% but already has an ACTIVE signal. Skipping.`);
+          continue;
+        }
+
+        // 5. Generate and save trading signal
+        const type = sentiment === 'bearish' ? 'SELL' : 'BUY';
+        const entry = stock.ltp || 0;
+        const target = type === 'BUY' ? parseFloat((entry * 1.05).toFixed(2)) : parseFloat((entry * 0.95).toFixed(2));
+        const stopLoss = type === 'BUY' ? parseFloat((entry * 0.97).toFixed(2)) : parseFloat((entry * 1.03).toFixed(2));
+        const confidence = Math.round(score);
+        const reasoning = `Strong quantitative score of ${score.toFixed(1)}% and active intraday breakout spotted in Trendlyne screener '${name}'.`;
+
+        try {
+          db.prepare(`
+            INSERT INTO signals (symbol, type, entry, target, stopLoss, confidence, reasoning, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'ACTIVE')
+          `).run(symbol, type, entry, target, stopLoss, confidence, reasoning);
+
+          newSignalsGenerated++;
+          console.log(`🎯 [INTRADAY SCAN] GENERATED ${type} SIGNAL FOR ${symbol}! Score: ${score.toFixed(1)}% | Entry: ₹${entry} | Target: ₹${target} | SL: ₹${stopLoss}`);
+        } catch (err) {
+          console.error(`❌ [INTRADAY SCAN] Failed to save signal for ${symbol}:`, err);
+        }
+      }
+    }
+
+    console.log(`✅ [INTRADAY SCAN] Scan completed. Scanned: ${screenersScanned} | High-Scoring Stocks: ${highScoringStocksFound} | New Signals: ${newSignalsGenerated}`);
+  } catch (error) {
+    console.error('❌ [INTRADAY SCAN] Fatal error during intraday screener scan:', error);
+  }
+
+  return { screenersScanned, highScoringStocksFound, newSignalsGenerated };
+}
+

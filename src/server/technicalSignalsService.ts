@@ -36,7 +36,8 @@ export type SignalType =
   | 'VOLUME_ACCUMULATION'
   | 'NEAR_52W_HIGH'
   | 'CONSECUTIVE_STRENGTH'
-  | 'ATR_CONTRACTION';
+  | 'ATR_CONTRACTION'
+  | 'PCR_EXTREME';
 
 export type SignalStrength = 'HIGH' | 'MEDIUM' | 'WATCH';
 
@@ -60,6 +61,10 @@ export interface SignalResult {
   bbWidth: number;
   volumeRatio: number;
   aboveSma200: boolean;
+  adx: number;
+  niftyRegime: 'BULL' | 'BEAR' | 'SIDEWAYS';
+  winProbability?: number;
+  fii3dNet?: number | null;
   signals: TechSignal[];
   signalScore: number;
   aiInsight?: string;
@@ -166,8 +171,8 @@ function computeBBWidth(closes: number[], period = 20): (number | null)[] {
   });
 }
 
-// SuperTrend(period, multiplier) — returns per-bar bullish flag array
-function computeSuperTrend(rows: OHLCVRow[], period = 7, multiplier = 3): boolean[] {
+// SuperTrend(period=10, multiplier=2.5) — calibrated for Indian markets, reduces whipsaws
+function computeSuperTrend(rows: OHLCVRow[], period = 10, multiplier = 2.5): boolean[] {
   const n = rows.length;
   const bullish = new Array<boolean>(n).fill(false);
   if (n < period + 2) return bullish;
@@ -239,6 +244,108 @@ function computeATR(rows: OHLCVRow[], period = 14): number[] {
   return atr;
 }
 
+// ADX(14) — trend strength. >25 = strong trend. Returns per-bar ADX values.
+function computeADX(rows: OHLCVRow[], period = 14): number[] {
+  const n = rows.length;
+  const adx = new Array<number>(n).fill(0);
+  if (n < period * 2 + 1) return adx;
+
+  const plusDM  = new Array<number>(n).fill(0);
+  const minusDM = new Array<number>(n).fill(0);
+  const tr      = new Array<number>(n).fill(0);
+
+  for (let i = 1; i < n; i++) {
+    const upMove   = rows[i].high - rows[i - 1].high;
+    const downMove = rows[i - 1].low - rows[i].low;
+    plusDM[i]  = upMove > downMove && upMove > 0 ? upMove : 0;
+    minusDM[i] = downMove > upMove && downMove > 0 ? downMove : 0;
+    tr[i] = Math.max(
+      rows[i].high - rows[i].low,
+      Math.abs(rows[i].high - rows[i - 1].close),
+      Math.abs(rows[i].low  - rows[i - 1].close),
+    );
+  }
+
+  // Wilder smoothed sums
+  let trS  = tr.slice(1, period + 1).reduce((a, b) => a + b, 0);
+  let pDMS = plusDM.slice(1, period + 1).reduce((a, b) => a + b, 0);
+  let mDMS = minusDM.slice(1, period + 1).reduce((a, b) => a + b, 0);
+
+  const dx = new Array<number>(n).fill(0);
+  const calcDX = (i: number) => {
+    const pDI = trS > 0 ? (pDMS / trS) * 100 : 0;
+    const mDI = trS > 0 ? (mDMS / trS) * 100 : 0;
+    const sum = pDI + mDI;
+    dx[i] = sum > 0 ? Math.abs(pDI - mDI) / sum * 100 : 0;
+  };
+  calcDX(period);
+
+  for (let i = period + 1; i < n; i++) {
+    trS  = trS  - trS  / period + tr[i];
+    pDMS = pDMS - pDMS / period + plusDM[i];
+    mDMS = mDMS - mDMS / period + minusDM[i];
+    calcDX(i);
+  }
+
+  // ADX = Wilder-smoothed DX over 'period' bars
+  let adxVal = dx.slice(period, period * 2).reduce((a, b) => a + b, 0) / period;
+  adx[period * 2 - 1] = adxVal;
+  for (let i = period * 2; i < n; i++) {
+    adxVal = (adxVal * (period - 1) + dx[i]) / period;
+    adx[i] = adxVal;
+  }
+  return adx;
+}
+
+// Nifty50 regime — reads from stock_ohlcv; defaults to BULL if Nifty data absent
+function computeNiftyRegime(): 'BULL' | 'BEAR' | 'SIDEWAYS' {
+  try {
+    const rows = db.prepare(
+      `SELECT close FROM stock_ohlcv
+       WHERE symbol IN ('NIFTY50','NIFTY','NIFTY 50','^NSEI','INDIA50')
+       ORDER BY date DESC LIMIT 210`
+    ).all() as { close: number }[];
+    if (rows.length < 50) return 'BULL';
+
+    const closes = rows.map(r => r.close).reverse();
+    const last   = closes[closes.length - 1];
+    const len200 = Math.min(closes.length, 200);
+    const sma200 = closes.slice(-len200).reduce((a, b) => a + b, 0) / len200;
+
+    if (last > sma200 * 1.02)  return 'BULL';
+    if (last < sma200 * 0.98)  return 'BEAR';
+    return 'SIDEWAYS';
+  } catch {
+    return 'BULL';
+  }
+}
+
+// Load per-signal win rates from signal_type_stats (populated by computeSignalTypeStats)
+function loadSignalWinRates(horizonDays = 15): Map<string, number> {
+  const map = new Map<string, number>();
+  try {
+    const rows = db.prepare(`
+      SELECT signal_type, win_rate FROM signal_type_stats
+      WHERE horizon_days = ? AND market_regime = 'ALL' AND total_occurrences >= 20
+    `).all(horizonDays) as { signal_type: string; win_rate: number }[];
+    for (const r of rows) map.set(r.signal_type, r.win_rate);
+  } catch { /* table may not be populated yet */ }
+  return map;
+}
+
+// Load 3-day FII net flow (negative = institutions selling)
+function loadFIIFlow3d(): number | null {
+  try {
+    const rows = db.prepare(
+      `SELECT fii_net FROM fii_dii_flow ORDER BY date DESC LIMIT 3`
+    ).all() as { fii_net: number }[];
+    if (rows.length === 0) return null;
+    return rows.reduce((a, r) => a + (r.fii_net ?? 0), 0);
+  } catch {
+    return null;
+  }
+}
+
 // ─── Signal Scoring ───────────────────────────────────────────────────────────
 
 const SIGNAL_SCORES: Record<SignalType, Record<SignalStrength, number>> = {
@@ -258,22 +365,43 @@ const SIGNAL_SCORES: Record<SignalType, Record<SignalStrength, number>> = {
   NEAR_52W_HIGH:      { HIGH: 3, MEDIUM: 2, WATCH: 1 },
   CONSECUTIVE_STRENGTH:{ HIGH: 4, MEDIUM: 2, WATCH: 1 },
   ATR_CONTRACTION:    { HIGH: 3, MEDIUM: 2, WATCH: 1 },
+  PCR_EXTREME:        { HIGH: 4, MEDIUM: 3, WATCH: 1 },
 };
 
-function scoreSignals(signals: TechSignal[]): number {
-  return Math.min(
-    signals.reduce((t, s) => t + (SIGNAL_SCORES[s.type]?.[s.strength] ?? 0), 0),
-    10
-  );
+function scoreSignals(
+  signals: TechSignal[],
+  winRates: Map<string, number> = new Map(),
+  regime: 'BULL' | 'BEAR' | 'SIDEWAYS' = 'BULL',
+  fii3dNet: number | null = null,
+): number {
+  let total = 0;
+  for (const s of signals) {
+    const base = SIGNAL_SCORES[s.type]?.[s.strength] ?? 0;
+    const wr = winRates.get(s.type);
+    // Win-rate multiplier: if we have ≥20 historical samples, adjust score
+    const wrMult = wr != null
+      ? (wr >= 0.65 ? 1.25 : wr >= 0.55 ? 1.0 : wr >= 0.45 ? 0.85 : 0.70)
+      : 1.0;
+    total += base * wrMult;
+  }
+
+  // Nifty regime discount — bull market keeps full score, bear = -40%, sideways = -20%
+  const regimeMult = regime === 'BEAR' ? 0.60 : regime === 'SIDEWAYS' ? 0.80 : 1.0;
+  total *= regimeMult;
+
+  // FII headwind discount — heavy selling (< -3000 Cr 3-day net) reduces score 15%
+  if (fii3dNet != null && fii3dNet < -3000) total *= 0.85;
+
+  return Math.min(Math.round(total), 10);
 }
 
 // ─── Signal Detection ─────────────────────────────────────────────────────────
 
-function detectSignals(rows: OHLCVRow[]): {
+function detectSignals(rows: OHLCVRow[], symbol = ''): {
   signals: TechSignal[];
   rsi: number; sma50: number; sma200: number;
   macd: number; macdSignal: number; bbWidth: number;
-  volumeRatio: number; aboveSma200: boolean;
+  volumeRatio: number; aboveSma200: boolean; adx: number;
 } {
   const closes  = rows.map(r => r.close);
   const opens   = rows.map(r => r.open);
@@ -291,8 +419,9 @@ function detectSignals(rows: OHLCVRow[]): {
   const ema8Arr    = ema(closes, 8);
   const ema21Arr   = ema(closes, 21);
   const ema50Arr   = ema(closes, 50);
-  const stBullish  = computeSuperTrend(rows);
+  const stBullish  = computeSuperTrend(rows);      // now period=10, mult=2.5
   const atrArr     = computeATR(rows);
+  const adxArr     = computeADX(rows);
   const vol20Arr   = smaArr(volumes, 20);
 
   const latestRSI    = rsiArr[n - 1]    ?? 50;
@@ -301,9 +430,11 @@ function detectSignals(rows: OHLCVRow[]): {
   const latestBBW    = bbWidths[n - 1]  ?? 0;
   const latestMACD   = macdLine[n - 1];
   const latestSig    = signalLine[n - 1];
+  const latestADX    = adxArr[n - 1] ?? 0;
   const vol10        = vol10Arr[n - 1];
   const volRatio     = vol10 != null && vol10 > 0 ? volumes[n - 1] / vol10 : 1;
   const aboveSma200  = closes[n - 1] > latestSMA200;
+  const trendStrong  = latestADX >= 20;   // ADX gate: confirms a real trend exists
 
   const signals: TechSignal[] = [];
 
@@ -335,14 +466,14 @@ function detectSignals(rows: OHLCVRow[]): {
     }
   }
 
-  // 3. Resistance Breakout (price > 20D high, volume > 1.5× avg)
+  // 3. Resistance Breakout (price > 20D high, volume > 1.5× avg, ADX ≥ 20 gates fake breakouts)
   if (n >= 22) {
     const hi20 = Math.max(...highs.slice(n - 21, n - 1));
     if (closes[n - 1] > hi20 && volRatio > 1.5) {
       signals.push({
         type: 'RESISTANCE_BREAKOUT',
-        strength: volRatio > 2.0 ? 'HIGH' : 'MEDIUM',
-        detail: `Broke 20-day high ₹${hi20.toFixed(2)} on ${volRatio.toFixed(1)}× avg volume`,
+        strength: volRatio > 2.0 && trendStrong ? 'HIGH' : trendStrong ? 'MEDIUM' : 'WATCH',
+        detail: `Broke 20-day high ₹${hi20.toFixed(2)} on ${volRatio.toFixed(1)}× volume | ADX ${latestADX.toFixed(1)}${trendStrong ? ' (trend confirmed)' : ' (weak trend — watch for fakeout)'}`,
       });
     }
   }
@@ -418,14 +549,14 @@ function detectSignals(rows: OHLCVRow[]): {
     }
   }
 
-  // 9. 52-Week High Breakout (close > max of prior 252-day highs)
+  // 9. 52-Week High Breakout (close > max of prior 252-day highs, ADX gates momentum quality)
   if (n >= 254) {
     const hi252 = Math.max(...highs.slice(n - 253, n - 1));
     if (closes[n - 1] > hi252) {
       signals.push({
         type: 'WEEK_52_BREAKOUT',
-        strength: volRatio > 2.0 ? 'HIGH' : volRatio > 1.3 ? 'MEDIUM' : 'WATCH',
-        detail: `Breaking 52-week high of ₹${hi252.toFixed(2)} on ${volRatio.toFixed(1)}× volume — price discovery mode`,
+        strength: volRatio > 2.0 && trendStrong ? 'HIGH' : volRatio > 1.3 ? 'MEDIUM' : 'WATCH',
+        detail: `Breaking 52-week high ₹${hi252.toFixed(2)} on ${volRatio.toFixed(1)}× volume | ADX ${latestADX.toFixed(1)}${trendStrong ? ' (strong trend)' : ' (trend weak)'}`,
       });
     }
   }
@@ -528,8 +659,8 @@ function detectSignals(rows: OHLCVRow[]): {
       const totalGain = ((closes[n - 1] - closes[n - 1 - streak]) / closes[n - 1 - streak]) * 100;
       signals.push({
         type: 'CONSECUTIVE_STRENGTH',
-        strength: streak >= 5 && volumeConfirmed ? 'HIGH' : streak >= 5 ? 'MEDIUM' : 'WATCH',
-        detail: `${streak} consecutive up-closes, +${totalGain.toFixed(1)}% total${volumeConfirmed ? ' with confirming volume' : ''} — sustained buying pressure`,
+        strength: streak >= 5 && volumeConfirmed && trendStrong ? 'HIGH' : streak >= 5 ? 'MEDIUM' : 'WATCH',
+        detail: `${streak} consecutive up-closes, +${totalGain.toFixed(1)}%${volumeConfirmed ? ' vol-confirmed' : ''} | ADX ${latestADX.toFixed(1)}${trendStrong ? ' (momentum confirmed)' : ''}`,
       });
     }
   }
@@ -555,6 +686,32 @@ function detectSignals(rows: OHLCVRow[]): {
     }
   }
 
+  // 16. PCR_EXTREME — extreme put/call ratio signals support or resistance
+  if (symbol) {
+    const pcrRow = db.prepare(
+      `SELECT pcr FROM stock_options_oi WHERE symbol = ? ORDER BY date DESC LIMIT 1`
+    ).get(symbol) as { pcr: number } | undefined;
+
+    if (pcrRow) {
+      const pcr = pcrRow.pcr;
+      if (pcr > 1.3) {
+        // High PCR = excess puts = bearish sentiment peak = contrarian support
+        signals.push({
+          type: 'PCR_EXTREME',
+          strength: pcr > 1.8 ? 'HIGH' : pcr > 1.5 ? 'MEDIUM' : 'WATCH',
+          detail: `PCR ${pcr.toFixed(2)} > 1.3 — extreme put buildup signals bearish sentiment peak; contrarian support zone`,
+        });
+      } else if (pcr < 0.7) {
+        // Low PCR = excess calls = complacency = potential resistance / reversal risk
+        signals.push({
+          type: 'PCR_EXTREME',
+          strength: pcr < 0.4 ? 'HIGH' : pcr < 0.55 ? 'MEDIUM' : 'WATCH',
+          detail: `PCR ${pcr.toFixed(2)} < 0.7 — excess call buying signals complacency; watch for resistance and reversal`,
+        });
+      }
+    }
+  }
+
   return {
     signals,
     rsi: latestRSI,
@@ -565,6 +722,7 @@ function detectSignals(rows: OHLCVRow[]): {
     bbWidth: latestBBW,
     volumeRatio: volRatio,
     aboveSma200,
+    adx: latestADX,
   };
 }
 
@@ -648,6 +806,7 @@ const SIG_SHORT: Record<SignalType, string> = {
   NEAR_52W_HIGH:       'Near 52W',
   CONSECUTIVE_STRENGTH:'Consec↑',
   ATR_CONTRACTION:     'ATR Squeeze',
+  PCR_EXTREME:         'PCR Extreme',
 };
 
 async function sendTelegramSignals(results: SignalResult[], date: string): Promise<void> {
@@ -708,6 +867,12 @@ export async function runTechnicalSignalScan(options: {
   };
 
   try {
+    // ── Pre-scan context (computed once, applied to all stocks) ──────────────
+    const niftyRegime = computeNiftyRegime();
+    const winRates    = loadSignalWinRates(15);
+    const fii3dNet    = loadFIIFlow3d();
+    console.log(`[SIGNALS] Regime: ${niftyRegime} | Win-rate records: ${winRates.size} | FII 3d: ${fii3dNet ?? 'N/A'} Cr`);
+
     console.log('[SIGNALS] Loading OHLCV data...');
     const allRows = db.prepare(
       `SELECT symbol, date, open, high, low, close, volume FROM stock_ohlcv ORDER BY symbol, date ASC`
@@ -735,11 +900,11 @@ export async function runTechnicalSignalScan(options: {
 
     for (const [symbol, rows] of eligible) {
       try {
-        const { signals, ...indicators } = detectSignals(rows);
+        const { signals, ...indicators } = detectSignals(rows, symbol);
         progress.processed++;
 
         if (signals.length === 0) continue;
-        const score = scoreSignals(signals);
+        const score = scoreSignals(signals, winRates, niftyRegime, fii3dNet);
         if (score < minScore) continue;
 
         const latest = rows[rows.length - 1];
@@ -749,12 +914,14 @@ export async function runTechnicalSignalScan(options: {
 
         results.push({
           symbol,
-          name:    m?.name,
-          sector:  m?.sector,
-          cmp:     latest.close,
+          name:        m?.name,
+          sector:      m?.sector,
+          cmp:         latest.close,
           changePct,
           signals,
           signalScore: score,
+          niftyRegime,
+          fii3dNet,
           ...indicators,
         });
       } catch {
@@ -777,17 +944,19 @@ export async function runTechnicalSignalScan(options: {
       }
     }
 
-    // Upsert all results into DB
+    // Upsert all results into DB (including new accuracy-context columns)
     const upsert = db.prepare(`
       INSERT INTO technical_signals (
         symbol, date, signals_json, signal_score,
         rsi, sma50, sma200, macd, macd_signal, bb_width, volume_ratio, above_sma200,
+        adx, nifty_regime, fii_3d_net,
         cmp, change_pct,
         ai_insight, entry_zone, stop_loss, targets, setup_quality, time_horizon,
         computed_at
       ) VALUES (
         @symbol, @date, @signals_json, @signal_score,
         @rsi, @sma50, @sma200, @macd, @macd_signal, @bb_width, @volume_ratio, @above_sma200,
+        @adx, @nifty_regime, @fii_3d_net,
         @cmp, @change_pct,
         @ai_insight, @entry_zone, @stop_loss, @targets, @setup_quality, @time_horizon,
         CURRENT_TIMESTAMP
@@ -798,6 +967,7 @@ export async function runTechnicalSignalScan(options: {
         macd=excluded.macd, macd_signal=excluded.macd_signal,
         bb_width=excluded.bb_width, volume_ratio=excluded.volume_ratio,
         above_sma200=excluded.above_sma200,
+        adx=excluded.adx, nifty_regime=excluded.nifty_regime, fii_3d_net=excluded.fii_3d_net,
         cmp=excluded.cmp, change_pct=excluded.change_pct,
         ai_insight=excluded.ai_insight, entry_zone=excluded.entry_zone,
         stop_loss=excluded.stop_loss, targets=excluded.targets,
@@ -815,6 +985,9 @@ export async function runTechnicalSignalScan(options: {
           macd: r.macd, macd_signal: r.macdSignal,
           bb_width: r.bbWidth, volume_ratio: r.volumeRatio,
           above_sma200: r.aboveSma200 ? 1 : 0,
+          adx:          r.adx,
+          nifty_regime: r.niftyRegime,
+          fii_3d_net:   r.fii3dNet ?? null,
           cmp: r.cmp, change_pct: r.changePct,
           ai_insight:    r.aiInsight    ?? null,
           entry_zone:    r.entryZone    ?? null,
@@ -968,6 +1141,76 @@ export function getSectorSignalStats(date?: string): SectorSignalStat[] {
   }
 
   return result.sort((a, b) => b.totalSignals - a.totalSignals || b.avgScore - a.avgScore);
+}
+
+// ─── Signal Type Stats (accuracy backfill) ───────────────────────────────────
+
+export function computeSignalTypeStats(): { updated: number } {
+  const outcomes = db.prepare(`
+    SELECT so.symbol, so.horizon_days, so.return_pct, so.outcome, so.signals_json,
+           ts.nifty_regime
+    FROM signal_outcomes so
+    LEFT JOIN technical_signals ts ON ts.symbol = so.symbol AND ts.date = so.signal_date
+    WHERE so.outcome IN ('WIN', 'LOSS', 'NEUTRAL')
+  `).all() as {
+    symbol: string; horizon_days: number; return_pct: number;
+    outcome: string; signals_json: string; nifty_regime: string | null;
+  }[];
+
+  type Acc = { wins: number; total: number; returns: number[] };
+  const statsMap = new Map<string, Acc>();
+
+  for (const o of outcomes) {
+    let sigs: { type: string }[] = [];
+    try { sigs = JSON.parse(o.signals_json ?? '[]'); } catch { continue; }
+    const regime = o.nifty_regime ?? 'ALL';
+
+    for (const sig of sigs) {
+      for (const reg of ['ALL', regime]) {
+        const key = `${sig.type}|${o.horizon_days}|${reg}`;
+        if (!statsMap.has(key)) statsMap.set(key, { wins: 0, total: 0, returns: [] });
+        const acc = statsMap.get(key)!;
+        acc.total++;
+        if (o.outcome === 'WIN') acc.wins++;
+        if (o.return_pct != null) acc.returns.push(o.return_pct);
+      }
+    }
+  }
+
+  const upsert = db.prepare(`
+    INSERT INTO signal_type_stats
+      (signal_type, horizon_days, market_regime, total_occurrences, win_count,
+       avg_return_pct, median_return_pct, win_rate, last_computed)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(signal_type, horizon_days, market_regime) DO UPDATE SET
+      total_occurrences=excluded.total_occurrences, win_count=excluded.win_count,
+      avg_return_pct=excluded.avg_return_pct, median_return_pct=excluded.median_return_pct,
+      win_rate=excluded.win_rate, last_computed=excluded.last_computed
+  `);
+
+  let updated = 0;
+  db.transaction(() => {
+    for (const [key, acc] of statsMap) {
+      if (acc.total < 5) continue;
+      const [sigType, horizon, regime] = key.split('|');
+      const sorted = [...acc.returns].sort((a, b) => a - b);
+      const median = sorted.length > 0 ? sorted[Math.floor(sorted.length / 2)] : 0;
+      const avg    = acc.returns.length > 0
+        ? acc.returns.reduce((a, b) => a + b, 0) / acc.returns.length : 0;
+      upsert.run(sigType, parseInt(horizon), regime, acc.total, acc.wins, avg, median, acc.wins / acc.total);
+      updated++;
+    }
+  })();
+
+  return { updated };
+}
+
+export function getSignalTypeStats(horizonDays = 15): Record<string, unknown>[] {
+  return db.prepare(`
+    SELECT * FROM signal_type_stats
+    WHERE horizon_days = ? AND market_regime = 'ALL'
+    ORDER BY win_rate DESC, total_occurrences DESC
+  `).all(horizonDays) as Record<string, unknown>[];
 }
 
 export function getLatestRSIForSymbols(symbols: string[]): Map<string, number> {

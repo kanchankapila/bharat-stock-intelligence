@@ -57,6 +57,27 @@ class AlphaQuantScoringEngine:
         self.engine = create_engine(DATABASE_URL)
         self.nlp = NLPScreenerInference()
         self.stock_stats = {}
+        self._load_optimised_weights()
+
+    def _load_optimised_weights(self):
+        """Override default weights with ML-optimised values from app_settings if available."""
+        try:
+            with self.engine.connect() as conn:
+                row = conn.execute(
+                    text("SELECT value FROM app_settings WHERE key = 'optimal_category_weights'")
+                ).fetchone()
+                if row:
+                    loaded = json.loads(row[0])
+                    self.CATEGORY_WEIGHTS = {**self.CATEGORY_WEIGHTS, **loaded}
+
+                row2 = conn.execute(
+                    text("SELECT value FROM app_settings WHERE key = 'optimal_source_weights'")
+                ).fetchone()
+                if row2:
+                    loaded2 = json.loads(row2[0])
+                    self.SOURCE_WEIGHTS = {**self.SOURCE_WEIGHTS, **loaded2}
+        except Exception:
+            pass  # use defaults if app_settings not populated yet
 
     # ------------------------------------------------------------------
     # Data Loading
@@ -216,32 +237,94 @@ class AlphaQuantScoringEngine:
     # Scoring
     # ------------------------------------------------------------------
 
+    # ------------------------------------------------------------------
+    # Source deduplication: cap contribution per (source, category, sentiment)
+    # bucket so correlated signals don't inflate raw_sum.
+    # E.g. 8 bullish Trendlyne technical screeners → max 2.5× base, not 8×.
+    # ------------------------------------------------------------------
+    SOURCE_CAT_CAP = 2.5   # max screeners per (source, category) that count fully
+    SOURCE_CAT_DECAY = 0.3  # each additional screener beyond cap adds only 30%
+
+    @staticmethod
+    def _source_cat_key(meta: dict) -> str:
+        return f"{meta['source']}|{meta['category']}|{meta['sentiment']}"
+
+    # ------------------------------------------------------------------
+    # Recency decay: screeners last_updated > DECAY_HALFLIFE_DAYS ago
+    # are down-weighted exponentially. Keeps stale data from over-influencing.
+    # ------------------------------------------------------------------
+    DECAY_HALFLIFE_DAYS = 30  # score halves every 30 days
+
+    @staticmethod
+    def _recency_weight(last_updated_str: str) -> float:
+        try:
+            last = datetime.datetime.fromisoformat(str(last_updated_str))
+            age_days = max(0, (datetime.datetime.now() - last).days)
+            import math
+            return math.exp(-math.log(2) * age_days / AlphaQuantScoringEngine.DECAY_HALFLIFE_DAYS)
+        except Exception:
+            return 1.0
+
     def process_scoring(self, force_rebuild: bool = False):
-        print(f"Starting AlphaQuant Scoring Engine v2 (Multi-Timeframe) at {datetime.datetime.now()}")
+        print(f"Starting AlphaQuant Scoring Engine v3 (Dedup+Decay) at {datetime.datetime.now()}")
         screeners, mappings = self.load_data()
 
         print("Building screener metadata (NLP inference)...")
         screeners_meta = self.build_screener_metadata(screeners, force_rebuild=force_rebuild)
         print(f"screener_master has {len(screeners_meta)} entries.")
 
-        # Load news sentiment
+        # Load news sentiment from enriched table first, fall back to legacy
         print("Loading news sentiment data...")
         with self.engine.connect() as conn:
-            news_df = pd.read_sql(
-                "SELECT symbols, sentiment, title, source FROM news_articles", conn
-            )
+            try:
+                news_df = pd.read_sql(
+                    """SELECT symbols_json AS symbols, sentiment, title, source, published_at
+                       FROM news_sentiment_items
+                       WHERE published_at >= datetime('now', '-7 days')
+                         AND sentiment != 'NEUTRAL'""",
+                    conn,
+                )
+                # Normalise: BULLISH→positive, BEARISH→negative
+                news_df['sentiment'] = news_df['sentiment'].str.lower().map(
+                    {'bullish': 'positive', 'bearish': 'negative'}
+                ).fillna('neutral')
+                news_df['is_json_symbols'] = True
+            except Exception:
+                news_df = pd.read_sql(
+                    "SELECT symbols, sentiment, title, source, timestamp AS published_at FROM news_articles",
+                    conn,
+                )
+                news_df['sentiment'] = news_df['sentiment'].str.lower()
+                news_df['is_json_symbols'] = False
 
         news_map: Dict[str, list] = {}
         for _, n in news_df.iterrows():
-            if not n['symbols']:
+            raw = n.get('symbols') or ''
+            if not raw:
                 continue
-            for s in [x.strip() for x in n['symbols'].split(',')]:
+            # Support both JSON arrays (new table) and comma-separated (legacy)
+            try:
+                sym_list = json.loads(raw) if str(raw).startswith('[') else [s.strip() for s in str(raw).split(',')]
+            except Exception:
+                sym_list = [s.strip() for s in str(raw).split(',')]
+            recency = self._recency_weight(n.get('published_at') or '')
+            for s in sym_list:
+                if not s or s == '#N/A':
+                    continue
                 news_map.setdefault(s, []).append({
                     'name':      n['title'],
-                    'sentiment': n['sentiment'].lower(),
-                    'source':    n['source'],
+                    'sentiment': n['sentiment'],
+                    'source':    n.get('source', 'news'),
                     'category':  'news',
+                    'recency':   recency,
                 })
+
+        # Attach last_updated to screener metadata for recency decay
+        with self.engine.connect() as conn:
+            sm_rows = conn.execute(text(
+                "SELECT scan_id, last_updated FROM screener_master"
+            )).fetchall()
+        screener_updated = {r[0]: r[1] for r in sm_rows}
 
         # Score per timeframe
         timeframes = ['long_term', 'intraday']
@@ -251,58 +334,73 @@ class AlphaQuantScoringEngine:
             print(f"Processing {tf} rankings...")
             stock_scores: Dict[str, dict] = {}
 
-            # Seed with news (applies to both timeframes)
-            for symbol, news_items in news_map.items():
-                stock_scores.setdefault(symbol, {
-                    'raw_sum': 0,
-                    'factors': {cat: 0 for cat in self.CATEGORY_WEIGHTS},
+            def _init_stock(sym: str):
+                stock_scores.setdefault(sym, {
+                    'raw_sum': 0.0,
+                    'factors': {cat: 0.0 for cat in self.CATEGORY_WEIGHTS},
                     'positive_screeners': [],
                     'negative_screeners': [],
                     'sources': set(),
                     'categories': set(),
+                    'source_cat_counts': {},  # tracks dedup per (src|cat|sent) bucket
                 })
+
+            # ── News seed (both timeframes) ──────────────────────────────
+            for symbol, news_items in news_map.items():
+                _init_stock(symbol)
+                news_src_counts: Dict[str, int] = {}
                 for item in news_items:
                     mult = 1 if item['sentiment'] == 'positive' else (-1 if item['sentiment'] == 'negative' else 0)
-                    contrib = 7.0 * mult
+                    if mult == 0:
+                        continue
+                    bucket = f"news|news|{'bullish' if mult > 0 else 'bearish'}"
+                    cnt = news_src_counts.get(bucket, 0)
+                    # Dedup: first SOURCE_CAT_CAP news items count fully, rest at DECAY
+                    decay = 1.0 if cnt < self.SOURCE_CAT_CAP else self.SOURCE_CAT_DECAY
+                    news_src_counts[bucket] = cnt + 1
+                    recency = item.get('recency', 1.0)
+                    # News base is 5.0 (same as screeners — was 7.0, reduced to prevent over-dominance)
+                    contrib = 5.0 * mult * decay * recency
                     stock_scores[symbol]['raw_sum'] += contrib
                     stock_scores[symbol]['factors']['news'] += contrib
                     stock_scores[symbol]['sources'].add(item['source'])
                     stock_scores[symbol]['categories'].add('news')
-                    if mult > 0:
-                        stock_scores[symbol]['positive_screeners'].append(item)
-                    elif mult < 0:
-                        stock_scores[symbol]['negative_screeners'].append(item)
+                    lst = stock_scores[symbol]['positive_screeners' if mult > 0 else 'negative_screeners']
+                    lst.append({'name': item['name'], 'sentiment': item['sentiment'],
+                                'source': item['source'], 'category': 'news'})
 
+            # ── Screener scoring ─────────────────────────────────────────
             for _, m in mappings.iterrows():
                 symbol = m['symbol']
                 if not symbol or symbol == '#N/A':
                     continue
-
                 scan_id = m['scan_id']
                 meta = screeners_meta.get(scan_id)
                 if not meta:
                     continue
 
-                # Fundamental screeners apply to BOTH timeframes; others only to their own
                 is_fundamental = meta['category'] in ('fundamental', 'valuation')
                 if not is_fundamental and meta['timeframe'] != tf:
                     continue
 
-                stock_scores.setdefault(symbol, {
-                    'raw_sum': 0,
-                    'factors': {cat: 0 for cat in self.CATEGORY_WEIGHTS},
-                    'positive_screeners': [],
-                    'negative_screeners': [],
-                    'sources': set(),
-                    'categories': set(),
-                })
+                _init_stock(symbol)
 
-                base_score = 5.0
+                base_score  = 5.0
                 sentiment_mult = 1 if meta['sentiment'] == 'bullish' else -1
-                cat_weight = self.CATEGORY_WEIGHTS.get(meta['category'], 0.5)
-                src_weight = self.SOURCE_WEIGHTS.get(meta['source'], 0.9)
+                cat_weight  = self.CATEGORY_WEIGHTS.get(meta['category'], 0.5)
+                src_weight  = self.SOURCE_WEIGHTS.get(meta['source'], 0.9)
 
-                contrib = base_score * cat_weight * src_weight * sentiment_mult
+                # Recency decay on screener itself
+                recency = self._recency_weight(screener_updated.get(scan_id) or '')
+
+                # Source-category deduplication
+                bucket = self._source_cat_key(meta)
+                scc = stock_scores[symbol]['source_cat_counts']
+                cnt = scc.get(bucket, 0)
+                dedup = 1.0 if cnt < self.SOURCE_CAT_CAP else self.SOURCE_CAT_DECAY
+                scc[bucket] = cnt + 1
+
+                contrib = base_score * cat_weight * src_weight * sentiment_mult * recency * dedup
                 cat_key = meta['category'] if meta['category'] in self.CATEGORY_WEIGHTS else 'other'
 
                 stock_scores[symbol]['raw_sum'] += contrib
@@ -310,51 +408,48 @@ class AlphaQuantScoringEngine:
                 stock_scores[symbol]['sources'].add(meta['source'])
                 stock_scores[symbol]['categories'].add(meta['category'])
 
-                reason = {
-                    'name':      meta['name'],
-                    'sentiment': meta['sentiment'],
-                    'source':    meta['source'],
-                    'category':  meta['category'],
-                }
-                if meta['sentiment'] == 'bullish':
-                    stock_scores[symbol]['positive_screeners'].append(reason)
-                else:
-                    stock_scores[symbol]['negative_screeners'].append(reason)
+                reason = {'name': meta['name'], 'sentiment': meta['sentiment'],
+                          'source': meta['source'], 'category': meta['category']}
+                lst_key = 'positive_screeners' if meta['sentiment'] == 'bullish' else 'negative_screeners'
+                stock_scores[symbol][lst_key].append(reason)
 
+            # ── Final score aggregation ──────────────────────────────────
             for symbol, data in stock_scores.items():
                 cat_count = len(data['categories'])
-                consensus_mult = 1 + (0.1 * (cat_count - 1)) if cat_count > 1 else 1.0
+                # Multi-category consensus bonus (capped at 3 categories → +20%)
+                consensus_mult = 1.0 + min(0.1 * (cat_count - 1), 0.20)
                 final_score = data['raw_sum'] * consensus_mult
 
                 screener_count = len(data['positive_screeners']) + len(data['negative_screeners'])
-                source_count = len(data['sources'])
+                source_count   = len(data['sources'])
                 confidence = min(100, screener_count * 10 * (1 + 0.2 * (source_count - 1)))
 
-                if final_score > 30:       classification = "Strong Buy"
-                elif final_score > 10:     classification = "Buy"
-                elif final_score < -20:    classification = "Strong Sell"
-                elif final_score < -5:     classification = "Sell"
-                else:                      classification = "Hold"
+                # Calibrated classification thresholds
+                if   final_score > 30:   classification = "Strong Buy"
+                elif final_score > 10:   classification = "Buy"
+                elif final_score < -20:  classification = "Strong Sell"
+                elif final_score < -5:   classification = "Sell"
+                else:                    classification = "Hold"
 
                 normalized_score = min(100, max(0, 50 + (final_score * 2)))
 
                 top_domain = "Other"
                 if data['factors']:
-                    abs_factors = {k: abs(v) for k, v in data['factors'].items()}
-                    top_domain = max(abs_factors, key=abs_factors.get).capitalize()
+                    abs_f = {k: abs(v) for k, v in data['factors'].items()}
+                    top_domain = max(abs_f, key=abs_f.get).capitalize()
 
                 all_timeframe_results.append({
-                    'symbol':         symbol,
-                    'timeframe':      tf,
-                    'score':          normalized_score,
-                    'confidence':     confidence,
-                    'classification': classification,
-                    'top_domain':     top_domain,
-                    'positive_count': len(data['positive_screeners']),
-                    'negative_count': len(data['negative_screeners']),
-                    'reasons':        json.dumps(data['positive_screeners'] + data['negative_screeners']),
+                    'symbol':           symbol,
+                    'timeframe':        tf,
+                    'score':            normalized_score,
+                    'confidence':       confidence,
+                    'classification':   classification,
+                    'top_domain':       top_domain,
+                    'positive_count':   len(data['positive_screeners']),
+                    'negative_count':   len(data['negative_screeners']),
+                    'reasons':          json.dumps(data['positive_screeners'] + data['negative_screeners']),
                     'factor_breakdown': json.dumps(data['factors']),
-                    'last_updated':   datetime.datetime.now().isoformat(),
+                    'last_updated':     datetime.datetime.now().isoformat(),
                 })
 
         self.save_results(all_timeframe_results)
@@ -404,6 +499,43 @@ class AlphaQuantScoringEngine:
                 """), breakdowns)
 
         print("Ranking and scoring complete!")
+        self._log_recommendations(results)
+
+    def _log_recommendations(self, results: list):
+        """Write top BUY/STRONG BUY recommendations to recommendation_log for outcome tracking."""
+        now        = datetime.datetime.now().isoformat()
+        today      = datetime.date.today().isoformat()
+        candidates = [r for r in results if r.get('classification') in ('Strong Buy', 'Buy')]
+        if not candidates:
+            return
+
+        rows = []
+        for r in candidates:
+            rows.append({
+                'symbol':         r['symbol'],
+                'rec_type':       'BUY' if r['classification'] == 'Buy' else 'STRONG_BUY',
+                'signal_date':    today,
+                'generated_at':   now,
+                'timeframe':      r.get('timeframe', 'medium'),
+                'confidence_score': r.get('confidence'),
+                'screener_score': r.get('score'),
+                'reasoning':      r.get('reasons', ''),
+                'source':         'scoring_engine',
+                'status':         'ACTIVE',
+                'horizon_days':   15,
+            })
+
+        try:
+            with self.engine.begin() as conn:
+                for row in rows:
+                    keys   = ', '.join(row.keys())
+                    places = ', '.join(f':{k}' for k in row.keys())
+                    conn.execute(text(f"""
+                        INSERT OR IGNORE INTO recommendation_log ({keys}) VALUES ({places})
+                    """), row)
+            print(f"[ScoringEngine] Logged {len(rows)} recommendations to recommendation_log.")
+        except Exception as e:
+            print(f"[ScoringEngine] recommendation_log error: {e}")
 
 
 if __name__ == "__main__":

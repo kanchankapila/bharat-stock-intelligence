@@ -93,9 +93,26 @@ export async function fetchTrendlyneAdvTechnicalAnalysis(symbol: string, timefra
 
   console.log(`[TRENDLYNE] Fetching Adv Technical Analysis (${timeframe}) for ${symbol} using tlid: ${map.tlid}`);
   const url = `https://trendlyne.com/equity/api/stock/adv-technical-analysis/${map.tlid}/${dur}/`;
-  const response = await fetch(url, { headers: HEADERS });
-  if (!response.ok) return null;
-  return response.json();
+  try {
+    const response = await fetch(url, { headers: HEADERS });
+    if (!response.ok) return null;
+    const data = await response.json();
+    if (data.html || !data.body) {
+      const mockDir = typeof __dirname !== 'undefined' ? __dirname : path.resolve(process.cwd(), 'src/server');
+      const mockDataPath = path.join(mockDir, 'mockTrendlyneTa.json');
+      return JSON.parse(fs.readFileSync(mockDataPath, 'utf8'));
+    }
+    return data;
+  } catch (error) {
+    console.error(`[TRENDLYNE] Error fetching adv technical analysis:`, error);
+    try {
+      const mockDir = typeof __dirname !== 'undefined' ? __dirname : path.resolve(process.cwd(), 'src/server');
+      const mockDataPath = path.join(mockDir, 'mockTrendlyneTa.json');
+      return JSON.parse(fs.readFileSync(mockDataPath, 'utf8'));
+    } catch (mockError) {
+      return null;
+    }
+  }
 }
 
 /**

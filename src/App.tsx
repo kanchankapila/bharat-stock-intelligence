@@ -7,7 +7,7 @@ import {
 import {
   TrendingUp, TrendingDown, Search, BarChart3, PieChart, Info,
   AlertCircle, ArrowUpRight, ArrowDownRight, Activity, Zap,
-  LayoutDashboard, Filter, History, User, LogIn, Plus, Heart, Share2, Download,
+  LayoutDashboard, Filter, History, User, LogIn, Plus, Minus, Heart, Share2, Download,
   ArrowLeft, Eye, ChevronUp, ChevronDown, Save, Bookmark, BrainCircuit, CheckCircle2,
   Users, Trophy, Bookmark as WatchlistIcon, BarChart2, Star, Target, Globe
 } from 'lucide-react';
@@ -100,12 +100,19 @@ interface IndexBarProps {
   value: number;
   change: number;
   isUp: boolean;
+  onClick?: () => void;
 }
 
 // --- Components ---
 
-const IndexBar: React.FC<IndexBarProps> = ({ name, value, change, isUp }) => (
-  <div className="flex items-center gap-3 px-4 py-2 border-r border-slate-800 last:border-0 min-w-fit">
+const IndexBar: React.FC<IndexBarProps> = ({ name, value, change, isUp, onClick }) => (
+  <div 
+    onClick={onClick}
+    className={cn(
+      "flex items-center gap-3 px-4 py-2 border-r border-slate-800 last:border-0 min-w-fit select-none",
+      onClick ? "cursor-pointer hover:bg-slate-800/40 transition-colors" : ""
+    )}
+  >
     <span className="text-slate-400 font-medium text-xs tracking-wider uppercase">{name}</span>
     <span className="text-white font-bold tabular-nums">{value.toLocaleString()}</span>
     <div className={cn(
@@ -612,9 +619,11 @@ const IndexDetailPage: React.FC<{
   );
 };
 
-const IndicesPage: React.FC<{ onSelectStock: (symbol: string) => void }> = ({ onSelectStock }) => {
-  const [selectedIndex, setSelectedIndex] = useState<{ id: string; name: string } | null>(null);
-
+const IndicesPage: React.FC<{ 
+  onSelectStock: (symbol: string) => void;
+  selectedIndex: { id: string; name: string } | null;
+  setSelectedIndex: (idx: { id: string; name: string } | null) => void;
+}> = ({ onSelectStock, selectedIndex, setSelectedIndex }) => {
   const { data: indicesData, isLoading } = trpc.getAllIndices.useQuery(undefined, { refetchInterval: 30000 });
 
   if (selectedIndex) {
@@ -822,8 +831,9 @@ const Dashboard: React.FC<{
   onNewSignal: (signal: any) => void; 
   onSelectStock: (symbol: string) => void;
   watchlist: string[];
-  onToggleWatchlist: (symbol: string) => void;
-}> = ({ stocks, onNewSignal, onSelectStock, watchlist, onToggleWatchlist }) => {
+  onToggleWatchlist: (symbol: string, metadata?: { price?: number; name?: string; source?: string }) => void;
+  onSelectIndex?: (id: string, name: string) => void;
+}> = ({ stocks, onNewSignal, onSelectStock, watchlist, onToggleWatchlist, onSelectIndex }) => {
   const news = useNewsFeed();
   const [newsFilter, setNewsFilter] = useState('All');
   const [aiSignals, setAiSignals] = useState<any[]>([]);
@@ -925,12 +935,12 @@ const Dashboard: React.FC<{
     <div className="p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-12 gap-4 relative">
       {/* 1. Market Indices (Full Width) */}
       <div className="xl:col-span-12">
-        <MarketIndices onSelect={(id, name) => { /* handle select if needed */ }} />
+        <MarketIndices onSelect={(id, name) => onSelectIndex?.(id, name)} />
       </div>
       
       {/* Row 2: Intelligence Mix (3-6-3 Symmetry) */}
       <div className="md:col-span-1 lg:col-span-1 xl:col-span-3">
-        <IndexOverview className="h-full" />
+        <IndexOverview className="h-full" onSelectIndex={onSelectIndex} />
       </div>
 
       <div className="md:col-span-1 lg:col-span-2 xl:col-span-6">
@@ -1377,7 +1387,7 @@ const Dashboard: React.FC<{
   stocks?: MarketData[];
   onSelectStock: (symbol: string) => void;
   watchlist: string[];
-  onToggleWatchlist: (symbol: string) => void;
+  onToggleWatchlist: (symbol: string, metadata?: { price?: number; name?: string; source?: string }) => void;
 }> = ({ onSelectStock, watchlist, onToggleWatchlist }) => {
   const [filter, setFilter] = useState('All');
   const [activeScanner, setActiveScanner] = useState<any>(null);
@@ -1809,15 +1819,23 @@ const Dashboard: React.FC<{
                     >
                       <td className="px-6 py-6" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center gap-3">
-                          <button 
-                            onClick={() => onToggleWatchlist(symbol)}
-                            className={cn(
-                              "p-2 rounded-xl border transition-all",
-                              watchlist.includes(symbol) ? "bg-amber-500/10 border-amber-500/20 text-amber-500" : "bg-slate-900/50 border-slate-800 text-slate-700 hover:text-slate-400"
-                            )}
-                          >
-                            <WatchlistIcon className={cn("w-3.5 h-3.5", watchlist.includes(symbol) && "fill-amber-500")} />
-                          </button>
+                          {watchlist.includes(symbol) ? (
+                            <button 
+                              onClick={() => onToggleWatchlist(symbol)}
+                              className="p-1.5 bg-rose-500/10 border border-rose-500/20 rounded-lg text-rose-500 hover:bg-rose-500 hover:text-white transition-all shadow-md flex items-center justify-center w-8 h-8"
+                              title="Remove from Watchlist"
+                            >
+                              <Minus className="w-3.5 h-3.5" />
+                            </button>
+                          ) : (
+                            <button 
+                              onClick={() => onToggleWatchlist(symbol, { price: parseFloat(ltp), name, source: `Screener: ${activeScanner?.name || filter}` })}
+                              className="p-1.5 bg-emerald-500/10 border border-emerald-500/20 rounded-lg text-emerald-500 hover:bg-emerald-500 hover:text-white transition-all shadow-md flex items-center justify-center w-8 h-8"
+                              title="Add to Watchlist"
+                            >
+                              <Plus className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                           <div className="cursor-pointer" onClick={() => onSelectStock(symbol)}>
                             <div className="font-black text-white text-xs tracking-tight group-hover:text-blue-400 transition-colors uppercase truncate max-w-[150px]">{name || symbol}</div>
                             <div className="text-[8px] text-slate-600 font-bold tracking-widest mt-1 uppercase italic truncate max-w-[150px]">{symbol}</div>
@@ -3254,7 +3272,7 @@ const StockDetails: React.FC<{
   stock?: MarketData; 
   onBack: () => void;
   watchlist: string[];
-  onToggleWatchlist: (symbol: string) => void;
+  onToggleWatchlist: (symbol: string, metadata?: { price?: number; name?: string; source?: string }) => void;
   onSelectStock: (symbol: string) => void;
 }> = ({ symbol, stock: initialStock, onBack, watchlist, onToggleWatchlist, onSelectStock }) => {
   const news = useNewsFeed().filter(n => n.relatedSymbols?.includes(symbol));
@@ -3450,7 +3468,7 @@ const StockDetails: React.FC<{
           {activeTab === 'insights' && (
             <div className="space-y-6">
               <MCErrorBoundary>
-                <MCStockInfoPanel symbol={symbol} scId={mcScId} section="overview" onSelectStock={onSelectStock} />
+                <MCStockInfoPanel symbol={symbol} scId={mcScId} section="overview" onSelectStock={onSelectStock} watchlist={watchlist} onToggleWatchlist={onToggleWatchlist} />
               </MCErrorBoundary>
 
               {/* Real-time Candlestick Pattern Recognition */}
@@ -3742,7 +3760,7 @@ const StockDetails: React.FC<{
 
               <TechnicalAnalysis symbol={symbol} />
               <MCErrorBoundary>
-                <MCStockInfoPanel symbol={symbol} scId={mcScId} section="technical" onSelectStock={onSelectStock} />
+                <MCStockInfoPanel symbol={symbol} scId={mcScId} section="technical" onSelectStock={onSelectStock} watchlist={watchlist} onToggleWatchlist={onToggleWatchlist} />
               </MCErrorBoundary>
             </div>
           )}
@@ -3754,14 +3772,14 @@ const StockDetails: React.FC<{
           {activeTab === 'financials' && (
             <div className="space-y-6">
                <MCErrorBoundary>
-                 <MCStockInfoPanel symbol={symbol} scId={mcScId} section="fundamental" onSelectStock={onSelectStock} />
+                 <MCStockInfoPanel symbol={symbol} scId={mcScId} section="fundamental" onSelectStock={onSelectStock} watchlist={watchlist} onToggleWatchlist={onToggleWatchlist} />
                </MCErrorBoundary>
             </div>
           )}
           {activeTab === 'peers' && (
             <div className="space-y-6">
                <MCErrorBoundary>
-                 <MCStockInfoPanel symbol={symbol} scId={mcScId} section="peers" onSelectStock={onSelectStock} />
+                 <MCStockInfoPanel symbol={symbol} scId={mcScId} section="peers" onSelectStock={onSelectStock} watchlist={watchlist} onToggleWatchlist={onToggleWatchlist} />
                </MCErrorBoundary>
             </div>
           )}
@@ -3769,7 +3787,7 @@ const StockDetails: React.FC<{
           {activeTab === 'analysis' && (
             <div className="space-y-6">
                <MCErrorBoundary>
-                 <MCStockInfoPanel symbol={symbol} scId={mcScId} section="insights" onSelectStock={onSelectStock} />
+                 <MCStockInfoPanel symbol={symbol} scId={mcScId} section="insights" onSelectStock={onSelectStock} watchlist={watchlist} onToggleWatchlist={onToggleWatchlist} />
                </MCErrorBoundary>
             </div>
           )}
@@ -3779,7 +3797,7 @@ const StockDetails: React.FC<{
           {activeTab === 'trendlyne' && (
             <div className="space-y-6">
                <MCErrorBoundary>
-                 <MCStockInfoPanel symbol={symbol} scId={mcScId} section="trendlyne" onSelectStock={onSelectStock} />
+                 <MCStockInfoPanel symbol={symbol} scId={mcScId} section="trendlyne" onSelectStock={onSelectStock} watchlist={watchlist} onToggleWatchlist={onToggleWatchlist} />
                </MCErrorBoundary>
             </div>
           )}
@@ -3915,6 +3933,7 @@ const StockDetails: React.FC<{
 export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
+  const [selectedIndex, setSelectedIndex] = useState<{ id: string; name: string } | null>(null);
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [watchlist, setWatchlist] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
@@ -3922,6 +3941,33 @@ export default function App() {
   const stocks = useMarketData();
   const { data: realIndices } = trpc.getAllIndices.useQuery();
   const syncNSEStocksMutation = trpc.syncNSEStocks.useMutation();
+
+  const handleSelectIndexByName = (indexName: string) => {
+    const u = indexName.toUpperCase();
+    let id = '';
+    let name = indexName;
+    if (u.includes('NIFTY 50') || u === 'NIFTY') {
+      id = '9';
+      name = 'Nifty 50';
+    } else if (u.includes('SENSEX')) {
+      id = '4';
+      name = 'SENSEX';
+    } else if (u.includes('BANK NIFTY') || u.includes('NIFTY BANK')) {
+      id = '23';
+      name = 'BANK NIFTY';
+    } else if (u.includes('MIDCAP') || u.includes('MID CAP')) {
+      id = '27';
+      name = 'Nifty Midcap 50';
+    } else if (u.includes('500')) {
+      id = '7';
+      name = 'Nifty 500';
+    }
+    
+    if (id) {
+      setSelectedIndex({ id, name });
+      setActiveTab('indices');
+    }
+  };
 
   // Initialize NSE stocks on app load
   useEffect(() => {
@@ -3972,6 +4018,10 @@ export default function App() {
   }, []);
 
   const { data: watchlistData } = trpc.getWatchlist.useQuery({ userId: user?.uid || '' }, { enabled: !!user });
+  const { data: watchlistDetails, refetch: refetchWatchlistDetails } = trpc.getWatchlistDetails.useQuery(
+    { userId: user?.uid || '' },
+    { enabled: !!user }
+  );
   
   useEffect(() => {
     if (watchlistData) {
@@ -3984,7 +4034,10 @@ export default function App() {
   const addToWatchlistMutation = trpc.addToWatchlist.useMutation();
   const removeFromWatchlistMutation = trpc.removeFromWatchlist.useMutation();
 
-  const toggleWatchlist = async (symbol: string) => {
+  const toggleWatchlist = async (
+    symbol: string,
+    metadata?: { price?: number; name?: string; source?: string }
+  ) => {
     if (!user) {
       handleLogin();
       return;
@@ -3997,9 +4050,17 @@ export default function App() {
         await removeFromWatchlistMutation.mutateAsync({ userId: user.uid, symbol });
         setWatchlist(prev => prev.filter(s => s !== symbol));
       } else {
-        await addToWatchlistMutation.mutateAsync({ userId: user.uid, symbol });
+        await addToWatchlistMutation.mutateAsync({ 
+          userId: user.uid, 
+          symbol,
+          price: metadata?.price,
+          name: metadata?.name,
+          source: metadata?.source
+        });
         setWatchlist(prev => [...prev, symbol]);
       }
+      // Refetch watchlist details metadata
+      refetchWatchlistDetails();
     } catch (error) {
       console.error("Watchlist update failed:", error);
     }
@@ -4038,7 +4099,13 @@ export default function App() {
       <TickerTapeWidget />
       {/* Top Banner Indices */}
       <div className="bg-slate-900 h-10 border-b border-slate-800 overflow-hidden flex items-center overflow-x-auto hide-scrollbar">
-        {displayIndices.map((idx: any) => <IndexBar key={idx.name} {...idx} />)}
+        {displayIndices.map((idx: any) => (
+          <IndexBar 
+            key={idx.name} 
+            {...idx} 
+            onClick={() => handleSelectIndexByName(idx.name)} 
+          />
+        ))}
       </div>
 
       <Navbar 
@@ -4062,6 +4129,7 @@ export default function App() {
               <Watchlist 
                 watchlist={watchlist} 
                 stocks={stocks} 
+                watchlistDetails={watchlistDetails || []}
                 onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }}
                 onRemove={toggleWatchlist}
               />
@@ -4074,9 +4142,9 @@ export default function App() {
               exit={{ opacity: 0, x: 10 }}
               transition={{ duration: 0.25, ease: 'easeOut' }}
             >
-              {activeTab === 'dashboard' && <Dashboard stocks={stocks} onNewSignal={addToast} onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />}
-              {activeTab === 'top-rated' && <TopRatedStocks onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} />}
-              {activeTab === 'indices' && <IndicesPage onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} />}
+              {activeTab === 'dashboard' && <Dashboard stocks={stocks} onNewSignal={addToast} onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} onSelectIndex={(id, name) => { setSelectedIndex({ id, name }); setActiveTab('indices'); }} />}
+              {activeTab === 'top-rated' && <TopRatedStocks onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />}
+              {activeTab === 'indices' && <IndicesPage onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} selectedIndex={selectedIndex} setSelectedIndex={setSelectedIndex} />}
               {activeTab === 'market-map' && (
                 <div className="p-6 space-y-6">
                    <Card title="NSE Market Heatmap" icon={Activity}>
@@ -4091,7 +4159,7 @@ export default function App() {
                 </div>
               )}
               {activeTab === 'screener' && <Screener stocks={stocks} onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />}
-              {activeTab === 'trendlyne' && <TrendlyneScreenerPanel onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} />}
+              {activeTab === 'trendlyne' && <TrendlyneScreenerPanel onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />}
               {activeTab === 'discover' && <div className="p-6"><NSEStockDiscovery onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} /></div>}
               {activeTab === 'fno-scanners' && <FnOIntelligenceCenter onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} />}
               {activeTab === 'details' && selectedSymbol && (
@@ -4106,7 +4174,7 @@ export default function App() {
                 />
               )}
               {activeTab === 'backtest' && <Backtest stocks={stocks} />}
-              {activeTab === 'signals' && <DailySignals onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} />}
+              {activeTab === 'signals' && <DailySignals onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />}
               {activeTab === 'strategy' && <StrategyIntelligence onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} />}
               {activeTab === 'sentiment' && <SentimentIntelligence onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} />}
               {activeTab === 'economics' && (
