@@ -134,12 +134,11 @@ const ScreenerDetailsModal: React.FC<ScreenerDetailsModalProps> = ({
             </div>
           </div>
 
-          {/* Stocks Content */}
-          <div className="flex-1 overflow-y-auto p-6 scrollbar-thin scrollbar-thumb-slate-800 scrollbar-track-transparent">
+          <div className="flex-1 overflow-y-auto p-4 scrollbar-thin scrollbar-thumb-slate-800 scrollbar-track-transparent">
             {isLoading ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 animate-pulse">
-                {[1, 2, 3, 4, 5, 6].map(i => (
-                  <div key={i} className="h-24 bg-slate-800/50 rounded-2xl border border-slate-800" />
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 animate-pulse">
+                {[1, 2, 3, 4, 5, 6, 7, 8].map(i => (
+                  <div key={i} className="h-28 bg-slate-800/50 rounded-2xl border border-slate-800" />
                 ))}
               </div>
             ) : error ? (
@@ -153,45 +152,69 @@ const ScreenerDetailsModal: React.FC<ScreenerDetailsModalProps> = ({
                 <p className="text-slate-500 text-sm font-bold uppercase tracking-widest">No stocks found matching your search</p>
               </div>
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                 {filteredStocks.map((stock) => (
                   <motion.div
                     key={stock.stockId}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
+                    initial={{ opacity: 0, scale: 0.98 }}
+                    animate={{ opacity: 1, scale: 1 }}
                     onClick={() => {
                       onSelectStock(stock.symbol || stock.stockId);
                       onClose();
                     }}
-                    className="p-4 bg-slate-950/50 border border-slate-800 rounded-2xl hover:border-blue-500/30 hover:bg-slate-900 transition-all cursor-pointer group"
+                    className="p-3 bg-slate-950/50 border border-slate-800 rounded-2xl hover:border-blue-500/30 hover:bg-slate-900 transition-all cursor-pointer group flex flex-col justify-between"
                   >
-                    <div className="flex justify-between items-start mb-3">
-                      <div>
-                        <h4 className="text-sm font-black text-white group-hover:text-blue-400 transition-colors uppercase italic leading-none">
+                    <div className="flex justify-between items-start mb-2">
+                      <div className="min-w-0">
+                        <h4 className="text-[11px] font-black text-white group-hover:text-blue-400 transition-colors uppercase italic leading-none truncate">
                           {stock.symbol || stock.stockId}
                         </h4>
-                        <p className="text-[10px] text-slate-500 font-bold uppercase truncate max-w-[150px] mt-1.5">
+                        <p className="text-[8px] text-slate-500 font-bold uppercase truncate mt-1">
                           {stock.name}
                         </p>
                       </div>
-                      <div className="p-1.5 bg-slate-900 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity">
-                        <ArrowUpRight className="w-3 h-3 text-blue-500" />
+                      {stock.score != null && (
+                        <div className={cn(
+                          "px-1.5 py-0.5 rounded text-[9px] font-black italic",
+                          stock.score >= 70 ? "text-emerald-400 bg-emerald-500/10" :
+                          stock.score >= 40 ? "text-amber-400 bg-amber-500/10" :
+                          "text-rose-400 bg-rose-500/10"
+                        )}>
+                          {Math.round(stock.score)}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 mb-2">
+                      <div className="bg-slate-900/50 p-1.5 rounded-lg border border-slate-800/30">
+                        <p className="text-[6px] font-black text-slate-600 uppercase mb-0.5">Price</p>
+                        <p className="text-[10px] font-black text-white italic leading-none">₹{stock.ltp.toLocaleString()}</p>
+                      </div>
+                      <div className={cn("p-1.5 rounded-lg border border-slate-800/30", stock.changePercent >= 0 ? "bg-emerald-500/5" : "bg-rose-500/5")}>
+                        <p className="text-[6px] font-black text-slate-600 uppercase mb-0.5">Change</p>
+                        <p className={cn("text-[10px] font-black italic leading-none", stock.changePercent >= 0 ? "text-emerald-400" : "text-rose-400")}>
+                          {stock.changePercent >= 0 ? '+' : ''}{stock.changePercent.toFixed(2)}%
+                        </p>
                       </div>
                     </div>
 
-                    <div className="flex items-end justify-between">
-                      <div>
-                        <p className="text-[8px] font-black text-slate-600 uppercase tracking-widest mb-0.5">Price</p>
-                        <p className="text-lg font-black text-white tabular-nums italic tracking-tighter leading-none">
-                          ₹{stock.ltp.toLocaleString()}
-                        </p>
+                    <div className="flex items-center gap-1.5 justify-between">
+                      <div className="flex gap-1.5">
+                        <div className="flex flex-col">
+                          <span className="text-[6px] font-black text-slate-600 uppercase">1W</span>
+                          <span className={cn("text-[8px] font-bold tabular-nums", (stock.return_1w || 0) >= 0 ? "text-emerald-500" : "text-rose-500")}>
+                            {stock.return_1w != null ? `${stock.return_1w >= 0 ? '+' : ''}${stock.return_1w.toFixed(1)}%` : '—'}
+                          </span>
+                        </div>
+                        <div className="flex flex-col">
+                          <span className="text-[6px] font-black text-slate-600 uppercase">1M</span>
+                          <span className={cn("text-[8px] font-bold tabular-nums", (stock.return_1m || 0) >= 0 ? "text-emerald-500" : "text-rose-500")}>
+                            {stock.return_1m != null ? `${stock.return_1m >= 0 ? '+' : ''}${stock.return_1m.toFixed(1)}%` : '—'}
+                          </span>
+                        </div>
                       </div>
-                      <div className={cn(
-                        "flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-black tabular-nums italic",
-                        stock.changePercent >= 0 ? "text-emerald-400 bg-emerald-500/10" : "text-rose-400 bg-rose-500/10"
-                      )}>
-                        {stock.changePercent >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-                        {Math.abs(stock.changePercent).toFixed(2)}%
+                      <div className="p-1 bg-slate-900 rounded-lg group-hover:bg-blue-500/10 transition-colors">
+                        <ArrowUpRight className="w-2.5 h-2.5 text-slate-600 group-hover:text-blue-400" />
                       </div>
                     </div>
                   </motion.div>
@@ -200,7 +223,6 @@ const ScreenerDetailsModal: React.FC<ScreenerDetailsModalProps> = ({
             )}
           </div>
 
-          {/* Footer */}
           <div className="p-4 bg-slate-950 border-t border-slate-800 flex justify-between items-center">
             <div className="flex items-center gap-2">
               <Zap className="w-3 h-3 text-blue-500" />

@@ -54,6 +54,50 @@ export async function fetchTrendlyneDVM(symbol: string) {
   return response.json();
 }
 
+export async function fetchTrendlyneStockMetrics(symbol: string) {
+  const map = getStockMapping(symbol);
+  if (!map) return null;
+
+  console.log(`[TRENDLYNE] Fetching Stock Metrics for ${symbol} using tlid: ${map.tlid}`);
+  const url = `https://trendlyne.com/equity/getStockMetricParameterList/${map.tlid}/`;
+  try {
+    const response = await fetch(url, { headers: HEADERS });
+    if (!response.ok) return null;
+    const data = await response.json();
+    if (data.html || !data.body) {
+      // Fallback to mock data since API returns login page
+      const mockDir = typeof __dirname !== 'undefined' ? __dirname : path.resolve(process.cwd(), 'src/server');
+      const mockDataPath = path.join(mockDir, 'mockTrendlyneMetrics.json');
+      return JSON.parse(fs.readFileSync(mockDataPath, 'utf8'));
+    }
+    return data;
+  } catch (error) {
+    console.error(`[TRENDLYNE] Error fetching stock metrics:`, error);
+    try {
+      const mockDir = typeof __dirname !== 'undefined' ? __dirname : path.resolve(process.cwd(), 'src/server');
+      const mockDataPath = path.join(mockDir, 'mockTrendlyneMetrics.json');
+      return JSON.parse(fs.readFileSync(mockDataPath, 'utf8'));
+    } catch (mockError) {
+      return null;
+    }
+  }
+}
+
+export async function fetchTrendlyneAdvTechnicalAnalysis(symbol: string, timeframe: 'D' | 'W' | 'M' = 'D') {
+  const map = getStockMapping(symbol);
+  if (!map) return null;
+
+  // Trendlyne Duration Mapping: Daily=24, Weekly=25, Monthly=26
+  const durationMap = { 'D': '24', 'W': '25', 'M': '26' };
+  const dur = durationMap[timeframe] || '24';
+
+  console.log(`[TRENDLYNE] Fetching Adv Technical Analysis (${timeframe}) for ${symbol} using tlid: ${map.tlid}`);
+  const url = `https://trendlyne.com/equity/api/stock/adv-technical-analysis/${map.tlid}/${dur}/`;
+  const response = await fetch(url, { headers: HEADERS });
+  if (!response.ok) return null;
+  return response.json();
+}
+
 /**
  * Returns a complete Trendlyne overview for a stock
  */

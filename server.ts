@@ -20,7 +20,7 @@ import { updateSignalAccuracy } from "./src/server/signals";
 
 async function startServer() {
   const app = express();
-  const PORT = process.env.PORT || 3000;
+  const PORT = parseInt(process.env.PORT || '3000', 10);
 
   // Initialise AI & Redis (gracefully managed)
   await startOllama();
@@ -39,6 +39,101 @@ async function startServer() {
   // Initialise BullMQ queues + workers (stock-refresh repeatable + ai-signals)
   // Falls back to legacy setInterval if Redis is unavailable
   const bullmqReady = await initQueues();
+
+  // ── Quant strategy scoring: first-time trigger + daily scheduling ─────────
+  const { getQuantScoreCount, runQuantScoring } = await import('./src/server/quantScoringService');
+  const { quantScoringQueue } = await import('./src/server/queues');
+  const quantCount = getQuantScoreCount();
+
+  if (bullmqReady && quantScoringQueue) {
+    if (quantCount === 0) {
+      console.log('[SERVER] quant_scores is empty — triggering first-time scoring via BullMQ...');
+      await quantScoringQueue.add(
+        'quant-score-first-run',
+        {},
+        { removeOnComplete: 3, removeOnFail: 3, attempts: 1, priority: 2 },
+      );
+    } else {
+      console.log(`[SERVER] quant_scores has ${quantCount} rows — skipping first-run trigger`);
+    }
+  } else {
+    if (quantCount === 0) {
+      console.log('[SERVER] No Redis — starting first-time quant scoring directly...');
+      runQuantScoring().catch(err =>
+        console.error('[SERVER] First-time quant scoring error:', err.message)
+      );
+    }
+    setInterval(() => {
+      console.log('[FALLBACK] Triggering daily quant strategy scoring...');
+      runQuantScoring().catch(console.error);
+    }, 24 * 60 * 60 * 1000);
+  }
+  // ─────────────────────────────────────────────────────────────────────────
+
+  // ── Fundamentals sync: first-time trigger + scheduling ────────────────────
+  const { getFundamentalsCount, runFullFundamentalsSync } = await import('./src/server/fundamentalsSyncService');
+  const { fundamentalsSyncQueue } = await import('./src/server/queues');
+  const fundCounts = getFundamentalsCount();
+  const isFirstRun = fundCounts.phase1 === 0;
+
+  if (bullmqReady && fundamentalsSyncQueue) {
+    if (isFirstRun) {
+      console.log('[SERVER] stock_fundamentals is empty — triggering first-time sync via BullMQ...');
+      await fundamentalsSyncQueue.add(
+        'sync-fundamentals-first-run',
+        { phase2Only: false },
+        { removeOnComplete: 3, removeOnFail: 3, attempts: 1, priority: 1 },
+      );
+    } else {
+      console.log(`[SERVER] stock_fundamentals has ${fundCounts.phase1} Phase-1 rows — skipping first-run trigger`);
+    }
+  } else {
+    // No Redis — run directly in background (non-blocking)
+    if (isFirstRun) {
+      console.log('[SERVER] No Redis — starting first-time fundamentals sync directly...');
+      runFullFundamentalsSync(false).catch(err =>
+        console.error('[SERVER] First-time fundamentals sync error:', err.message)
+      );
+    }
+    // Schedule weekly re-sync via setInterval fallback
+    setInterval(() => {
+      console.log('[FALLBACK] Triggering weekly fundamentals sync...');
+      runFullFundamentalsSync(false).catch(console.error);
+    }, 7 * 24 * 60 * 60 * 1000);
+  }
+  // ─────────────────────────────────────────────────────────────────────────
+
+  // ── Technical signals: schedule daily + fallback ──────────────────────────
+  const { getTechnicalSignalCount, runTechnicalSignalScan } = await import('./src/server/technicalSignalsService');
+  const { technicalSignalsQueue } = await import('./src/server/queues');
+  const signalCount = getTechnicalSignalCount();
+
+  if (bullmqReady && technicalSignalsQueue) {
+    if (signalCount === 0) {
+      console.log('[SERVER] No technical signals today — triggering first scan via BullMQ...');
+      await technicalSignalsQueue.add(
+        'technical-signals-first-run',
+        {},
+        { removeOnComplete: 3, removeOnFail: 3, attempts: 1, priority: 3 },
+      );
+    } else {
+      console.log(`[SERVER] technical_signals already has ${signalCount} rows for today — skipping`);
+    }
+  } else {
+    if (signalCount === 0) {
+      console.log('[SERVER] No Redis — starting technical signal scan directly...');
+      runTechnicalSignalScan().catch(err =>
+        console.error('[SERVER] Technical signal scan error:', err.message)
+      );
+    }
+    // Fallback: run every 24 hours
+    setInterval(() => {
+      console.log('[FALLBACK] Triggering daily technical signal scan...');
+      runTechnicalSignalScan().catch(console.error);
+    }, 24 * 60 * 60 * 1000);
+  }
+  // ─────────────────────────────────────────────────────────────────────────
+
   if (!bullmqReady) {
     // Legacy fallback: simple periodic refresh without job queue
     const { startBackgroundRefresh } = await import('./src/server/liveStockData');
@@ -50,7 +145,7 @@ async function startServer() {
       console.log('[FALLBACK] Triggering scheduled stock scoring...');
       await syncAndScore();
     }, 24 * 60 * 60 * 1000);
-    
+
     // Fallback for MC screener sync: run every 12 hours
     setInterval(async () => {
       console.log('[FALLBACK] Triggering MoneyControl screener sync...');

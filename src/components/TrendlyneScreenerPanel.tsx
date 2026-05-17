@@ -10,9 +10,15 @@ import stockData from '../data/stocklist';
 interface TrendlyneStock {
   stockId: string;
   name: string;
+  symbol?: string;
   ltp: number;
   change: number;
   changePercent: number;
+  score?: number;
+  return_1w?: number;
+  return_1m?: number;
+  classification?: string;
+  otherScreeners?: string[];
   screenerName: string;
   screenerType?: string;
   [key: string]: any;
@@ -280,64 +286,9 @@ const TrendlyneScreenerPanel: React.FC<{ onSelectStock?: (symbol: string) => voi
 
       {activeTab === 'screeners' ? (
         <>
-          {/* Quick Select Grid */}
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
-            {filteredCategories.slice(0, 12).map((screener) => (
-              <button
-                key={screener.id}
-                onClick={() => setSelectedScreener(screener)}
-                className={cn(
-                  "p-3 rounded-xl border transition-all relative overflow-hidden group text-left",
-                  screener.sentiment === 'bullish' ? "border-green-500" : screener.sentiment === 'bearish' ? "border-red-500" : "border-yellow-500",
-                  selectedScreener?.id === screener.id
-                    ? "bg-slate-800/80 shadow-lg"
-                    : "bg-slate-900/50 hover:bg-slate-800/50"
-                )}
-              >
-                <div className={cn(
-                  "absolute top-0 right-0 w-12 h-12 -mr-4 -mt-4 opacity-5 group-hover:opacity-10 transition-opacity",
-                  screener.sentiment === 'bullish' ? "bg-green-500" : screener.sentiment === 'bearish' ? "bg-red-500" : "bg-yellow-500"
-                )} />
-                <div className="relative z-10">
-                   <p className={cn(
-                     "text-[8px] font-black uppercase tracking-[0.2em] mb-1",
-                     screener.sentiment === 'bullish' ? "text-green-400" : screener.sentiment === 'bearish' ? "text-red-400" : "text-yellow-500"
-                   )}>
-                     {screener.sentiment || 'NEUTRAL'}
-                   </p>
-                   <p className="text-[10px] font-black text-white leading-tight uppercase group-hover:text-amber-400 transition-colors break-words whitespace-normal">
-                     {screener.name}
-                   </p>
-                   {screener.confidence && screener.confidence > 0.8 && (
-                     <span className="absolute bottom-2 right-2 text-[6px] font-black text-blue-400/50 uppercase tracking-tighter">AI Analyzed</span>
-                   )}
-                </div>
-              </button>
-            ))}
-          </div>
-
-          {/* Loading State */}
-          {isLoading && (
-            <div className="flex flex-col items-center justify-center py-20 bg-slate-900/30 rounded-2xl border border-dashed border-slate-800">
-              <Loader className="w-10 h-10 text-amber-500 animate-spin mb-4" />
-              <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Compiling live results...</p>
-            </div>
-          )}
-
-          {/* No Results */}
-          {!isLoading && filteredStocks.length === 0 && (
-            <div className="bg-slate-900/30 border border-dashed border-slate-800 rounded-2xl p-12 text-center">
-              <AlertCircle className="w-12 h-12 text-slate-700 mx-auto mb-4" />
-              <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em]">Select a scan to view results</p>
-              <p className="text-[9px] font-bold text-slate-600 mt-2 uppercase tracking-widest">
-                Data will be fetched in real-time from Trendlyne
-              </p>
-            </div>
-          )}
-
-          {/* Stocks Grid */}
+          {/* Stocks Grid (Now on Top) */}
           {!isLoading && filteredStocks.length > 0 && (
-            <div className="space-y-4">
+            <div className="space-y-4 mb-12">
               <div className="flex items-center justify-between px-2">
                  <div className="flex items-center gap-3">
                    <div className={cn(
@@ -360,7 +311,7 @@ const TrendlyneScreenerPanel: React.FC<{ onSelectStock?: (symbol: string) => voi
                  </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
                 {filteredStocks.map((stock) => {
                   const nseSymbol = resolveNseSymbol(stock);
                   return (
@@ -368,53 +319,119 @@ const TrendlyneScreenerPanel: React.FC<{ onSelectStock?: (symbol: string) => voi
                     key={`${stock.stockId}-${stock.screenerName}`}
                     onClick={() => nseSymbol && onSelectStock && onSelectStock(nseSymbol)}
                     className={cn(
-                      "bg-slate-900/50 border rounded-2xl p-5 transition-all hover:shadow-2xl hover:translate-y-[-2px] group relative overflow-hidden",
+                      "bg-slate-950/40 border rounded-xl p-4 transition-all hover:shadow-2xl hover:translate-y-[-2px] group relative overflow-hidden",
                       nseSymbol && onSelectStock ? "cursor-pointer border-slate-800 hover:border-amber-500/40" : "border-slate-800"
                     )}
                   >
-                    {/* Glass highlight */}
-                    <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-amber-500/20 to-transparent" />
-                    
-                    <div className="flex items-start justify-between mb-4">
-                      <div>
-                        <h3 className="font-black text-white text-lg tracking-tight group-hover:text-amber-400 transition-colors uppercase italic leading-none">
+                    <div className="flex items-start justify-between mb-3">
+                      <div className="min-w-0">
+                        <h3 className="font-black text-white text-[13px] tracking-tight group-hover:text-amber-400 transition-colors uppercase italic leading-none truncate">
                           {stock.name}
                         </h3>
-                        <div className="flex items-center gap-2 mt-2">
-                           <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">NSE: {nseSymbol || '—'}</span>
-                           <span className="w-1 h-1 rounded-full bg-slate-700" />
-                           <span className="text-[9px] font-black text-amber-500/80 uppercase tracking-widest">{selectedScreener?.category || 'TECH'}</span>
+                        <div className="flex items-center gap-2 mt-1.5">
+                           <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">{nseSymbol || '—'}</span>
+                           <span className="w-1 h-1 rounded-full bg-slate-800" />
+                           <span className={cn(
+                             "text-[8px] font-black uppercase px-1.5 py-0.5 rounded",
+                             stock.score >= 70 ? "text-emerald-400 bg-emerald-500/10" : "text-amber-400 bg-amber-500/10"
+                           )}>
+                             {Math.round(stock.score || 0)}
+                           </span>
                         </div>
                       </div>
-                      <div className="p-2 bg-slate-800/50 rounded-xl">
-                        <ChevronRight className="w-4 h-4 text-slate-600 group-hover:text-amber-400 transition-colors" />
+                      <div className={cn(
+                        "p-1.5 rounded-lg border",
+                        stock.changePercent >= 0 ? "bg-emerald-500/5 border-emerald-500/10 text-emerald-500" : "bg-rose-500/5 border-rose-500/10 text-rose-500"
+                      )}>
+                        {stock.changePercent >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
                       </div>
                     </div>
 
-                    <div className="flex items-end justify-between">
-                       <div className="space-y-0.5">
-                         <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest">LTP (₹)</p>
-                         <p className="text-2xl font-black text-white tabular-nums tracking-tighter italic leading-none">
-                           {stock.ltp.toLocaleString()}
-                         </p>
+                    <div className="grid grid-cols-2 gap-2 mb-3">
+                      <div className="bg-slate-900/50 p-2 rounded-lg border border-slate-800/30">
+                        <p className="text-[6px] font-black text-slate-600 uppercase mb-0.5 tracking-widest">LTP</p>
+                        <p className="text-[12px] font-black text-white italic leading-none">₹{stock.ltp.toLocaleString()}</p>
+                      </div>
+                      <div className={cn("p-2 rounded-lg border border-slate-800/30", stock.changePercent >= 0 ? "bg-emerald-500/5" : "bg-rose-500/5")}>
+                        <p className="text-[6px] font-black text-slate-600 uppercase mb-0.5 tracking-widest">24H</p>
+                        <p className={cn("text-[12px] font-black italic leading-none", stock.changePercent >= 0 ? "text-emerald-400" : "text-rose-400")}>
+                          {stock.changePercent >= 0 ? '+' : ''}{stock.changePercent.toFixed(2)}%
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between border-t border-slate-800/50 pt-3">
+                       <div className="flex gap-3">
+                          <div className="flex flex-col">
+                            <span className="text-[6px] font-black text-slate-600 uppercase">1W</span>
+                            <span className={cn("text-[9px] font-black italic", (stock.return_1w || 0) >= 0 ? "text-emerald-500" : "text-rose-500")}>
+                              {stock.return_1w != null ? `${stock.return_1w.toFixed(1)}%` : '—'}
+                            </span>
+                          </div>
+                          <div className="flex flex-col">
+                            <span className="text-[6px] font-black text-slate-600 uppercase">1M</span>
+                            <span className={cn("text-[9px] font-black italic", (stock.return_1m || 0) >= 0 ? "text-emerald-500" : "text-rose-500")}>
+                              {stock.return_1m != null ? `${stock.return_1m.toFixed(1)}%` : '—'}
+                            </span>
+                          </div>
                        </div>
-                       
-                       <div className={cn(
-                         "flex flex-col items-end gap-1 px-3 py-2 rounded-xl border",
-                         isPositive(stock.changePercent)
-                           ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
-                           : "bg-rose-500/10 border-rose-500/20 text-rose-400"
-                       )}>
-                         <div className="flex items-center gap-1">
-                           {isPositive(stock.changePercent) ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-                           <span className="text-xs font-black tabular-nums">{Math.abs(stock.changePercent).toFixed(2)}%</span>
-                         </div>
-                       </div>
+                       <ChevronRight className="w-3 h-3 text-slate-700 group-hover:text-amber-500 transition-colors" />
                     </div>
                   </div>
                   );
                 })}
               </div>
+            </div>
+          )}
+
+          {/* Quick Select Grid (Now at Bottom) */}
+          <div className="space-y-4">
+            <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] px-2">Quick Directory</h4>
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
+              {filteredCategories.map((screener) => (
+                <button
+                  key={screener.id}
+                  onClick={() => setSelectedScreener(screener)}
+                  className={cn(
+                    "p-3 rounded-xl border transition-all relative overflow-hidden group text-left",
+                    screener.sentiment === 'bullish' ? "border-green-500/30" : screener.sentiment === 'bearish' ? "border-red-500/30" : "border-yellow-500/30",
+                    selectedScreener?.id === screener.id
+                      ? "bg-slate-800/80 shadow-lg border-amber-500/50"
+                      : "bg-slate-900/50 hover:bg-slate-800/50"
+                  )}
+                >
+                  <div className="relative z-10">
+                    <p className={cn(
+                      "text-[8px] font-black uppercase tracking-[0.2em] mb-1",
+                      screener.sentiment === 'bullish' ? "text-green-400" : screener.sentiment === 'bearish' ? "text-red-400" : "text-yellow-500"
+                    )}>
+                      {screener.sentiment || 'NEUTRAL'}
+                    </p>
+                    <p className="text-[10px] font-black text-white leading-tight uppercase group-hover:text-amber-400 transition-colors break-words whitespace-normal">
+                      {screener.name}
+                    </p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Loading State */}
+          {isLoading && (
+            <div className="flex flex-col items-center justify-center py-20 bg-slate-900/30 rounded-2xl border border-dashed border-slate-800">
+              <Loader className="w-10 h-10 text-amber-500 animate-spin mb-4" />
+              <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Compiling live results...</p>
+            </div>
+          )}
+
+          {/* No Results */}
+          {!isLoading && filteredStocks.length === 0 && (
+            <div className="bg-slate-900/30 border border-dashed border-slate-800 rounded-2xl p-12 text-center">
+              <AlertCircle className="w-12 h-12 text-slate-700 mx-auto mb-4" />
+              <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em]">Select a scan to view results</p>
+              <p className="text-[9px] font-bold text-slate-600 mt-2 uppercase tracking-widest">
+                Data will be fetched in real-time from Trendlyne
+              </p>
             </div>
           )}
         </>

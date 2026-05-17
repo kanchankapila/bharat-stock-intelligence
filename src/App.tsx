@@ -9,8 +9,9 @@ import {
   AlertCircle, ArrowUpRight, ArrowDownRight, Activity, Zap,
   LayoutDashboard, Filter, History, User, LogIn, Plus, Heart, Share2, Download,
   ArrowLeft, Eye, ChevronUp, ChevronDown, Save, Bookmark, BrainCircuit, CheckCircle2,
-  Users, Trophy, Bookmark as WatchlistIcon, BarChart2, Star, Target
+  Users, Trophy, Bookmark as WatchlistIcon, BarChart2, Star, Target, Globe
 } from 'lucide-react';
+
 import { motion, AnimatePresence } from 'motion/react';
 import { format } from 'date-fns';
 import { cn } from './lib/utils';
@@ -38,6 +39,26 @@ import FnOIntelligenceCenter from './components/FnOIntelligenceCenter';
 import IndexFnoOverview from './components/IndexFnoOverview';
 import { ToDoPage } from './components/ToDoPage';
 import { GlobalMarketCards } from './components/GlobalMarketCards';
+import { Card } from './components/Card';
+import { SectorHeatmap, SectorPerformance } from './components/SectorIntelligence';
+import { MomentumIntelligence } from './components/MomentumIntelligence';
+import { IndexOverview, InstitutionalInsights, PennyStockIntelligence } from './components/MarketInsights';
+import { TopMoversIntelligence } from './components/TopMoversIntelligence';
+import { MarketIndices } from './components/MarketIndices';
+import { GlobalMarkets } from './components/GlobalMarkets';
+import { Watchlist } from './components/Watchlist';
+import { StrategyIntelligence } from './components/StrategyIntelligence';
+import { DailySignals } from './components/DailySignals';
+import { SentimentIntelligence } from './components/SentimentIntelligence';
+import { 
+  TickerTapeWidget, 
+  TechnicalAnalysisWidget, 
+  EconomicCalendarWidget, 
+  MarketHeatmapWidget, 
+  AdvancedChartWidget,
+  MarketOverviewWidget 
+} from './components/TradingViewWidgets';
+
 
 class MCErrorBoundary extends React.Component<
   { children: React.ReactNode },
@@ -119,13 +140,13 @@ const Navbar: React.FC<{
       }))
     : [];
 
-  return (    <nav className="h-16 border-b border-slate-800 bg-slate-950 flex items-center justify-between px-6 sticky top-0 z-50">
+  return (    <nav className="h-16 border-b border-white/[0.06] bg-slate-950/90 backdrop-blur-xl flex items-center justify-between px-6 sticky top-0 z-50">
       <div className="flex items-center gap-8">
         <div className="flex items-center gap-2 cursor-pointer" onClick={() => setActiveTab('dashboard')}>
-          <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
-            <Zap className="text-white w-5 h-5 fill-white" />
+          <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-violet-600 rounded-xl flex items-center justify-center shadow-[0_0_16px_rgba(99,102,241,0.35)]">
+            <Zap className="text-white w-4 h-4 fill-white" />
           </div>
-          <span className="text-xl font-black text-white tracking-tight">BHARAT<span className="text-blue-500">STOCK</span></span>
+          <span className="text-xl font-black text-white tracking-tight">BHARAT<span className="gradient-text-indigo">STOCK</span></span>
         </div>
         
         <div className="hidden md:flex items-center gap-6">
@@ -141,14 +162,19 @@ const Navbar: React.FC<{
             { icon: History, label: 'Backtest', id: 'backtest' },
             { icon: PieChart, label: 'Portfolio', id: 'portfolio' },
             { icon: WatchlistIcon, label: 'Watchlist', id: 'watchlist' },
+            { icon: Zap, label: 'Signals', id: 'signals' },
+            { icon: BarChart2, label: 'Sentiment', id: 'sentiment' },
+            { icon: Globe, label: 'Economics', id: 'economics' },
+            { icon: Star, label: 'Strategy', id: 'strategy' },
             { icon: CheckCircle2, label: 'ToDo', id: 'todo' },
           ].map((item) => (
+
             <button
               key={item.id}
               onClick={() => setActiveTab(item.id)}
               className={cn(
                 "flex items-center gap-2 text-sm font-medium transition-colors",
-                activeTab === item.id ? "text-blue-500" : "text-slate-400 hover:text-white"
+                activeTab === item.id ? "text-indigo-400" : "text-slate-500 hover:text-slate-200"
               )}
             >
               <item.icon className="w-4 h-4" />
@@ -170,7 +196,7 @@ const Navbar: React.FC<{
               setShowResults(true);
             }}
             onFocus={() => setShowResults(true)}
-            className="bg-slate-900 border border-slate-800 rounded-full py-1.5 pl-10 pr-4 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500 w-48 lg:w-64"
+            className="bg-slate-900/50 border border-white/[0.08] rounded-xl py-1.5 pl-10 pr-4 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:ring-1 focus:ring-indigo-500/40 focus:border-indigo-500/30 w-48 lg:w-64 transition-all"
           />
           
           <AnimatePresence>
@@ -184,7 +210,7 @@ const Navbar: React.FC<{
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: 10 }}
-                  className="absolute top-full mt-2 w-full bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl z-[60]"
+                  className="absolute top-full mt-2 w-full bg-slate-900/95 backdrop-blur-xl border border-white/[0.08] rounded-2xl overflow-hidden shadow-[0_16px_48px_rgba(0,0,0,0.6)] z-[60]"
                 >
                   {searchResults.map(s => (
                     <button
@@ -194,7 +220,7 @@ const Navbar: React.FC<{
                         setSearchQuery('');
                         setShowResults(false);
                       }}
-                      className="w-full px-4 py-3 hover:bg-slate-800 flex items-center justify-between transition-colors border-b border-slate-800/50 last:border-0"
+                      className="w-full px-4 py-3 hover:bg-white/[0.04] flex items-center justify-between transition-colors border-b border-white/[0.04] last:border-0"
                     >
                       <div className="text-left">
                         <div className="text-xs font-black text-white italic tracking-tighter uppercase">{s.symbol}</div>
@@ -223,7 +249,7 @@ const Navbar: React.FC<{
       ) : (
         <button 
           onClick={onLogin}
-          className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded-full text-sm font-semibold transition-all"
+          className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-1.5 rounded-xl text-sm font-semibold transition-all shadow-[0_0_14px_rgba(99,102,241,0.25)] hover:shadow-[0_0_18px_rgba(99,102,241,0.38)]"
         >
           <LogIn className="w-4 h-4" />
           Login
@@ -234,474 +260,11 @@ const Navbar: React.FC<{
   );
 };
 
-const Card: React.FC<{ children: React.ReactNode; className?: string; title?: string; icon?: any; onClick?: () => void; action?: React.ReactNode }> = ({ children, className, title, icon: Icon, onClick, action }) => (
-  <div className={cn("bg-slate-900/50 border border-slate-800 rounded-2xl overflow-hidden", className)} onClick={onClick}>
-    {title && (
-      <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
-        <h3 className="text-sm font-bold text-slate-300 flex items-center gap-2 italic uppercase tracking-wider">
-          {Icon && <Icon className="w-4 h-4 text-blue-500" />}
-          {title}
-        </h3>
-        {action ?? <Info className="w-4 h-4 text-slate-600 cursor-help" />}
-      </div>
-    )}
-    <div className="p-5">
-      {children}
-    </div>
-  </div>
-);
 
-const MomentumIntelligence: React.FC<{
-  watchlist: string[];
-  onToggle: (symbol: string) => void;
-  onSelectStock: (symbol: string) => void;
-}> = ({ watchlist, onToggle, onSelectStock }) => {
-  const { data: bullish } = trpc.getTechnicalTrends.useQuery({ type: 'bullish' });
-  const { data: bearish } = trpc.getTechnicalTrends.useQuery({ type: 'bearish' });
+// --- Types ---
 
-  const bullishList = (bullish?.data?.list || bullish?.data?.tableDataList)?.slice(0, 5) || [];
-  const bearishList = (bearish?.data?.list || bearish?.data?.tableDataList)?.slice(0, 5) || [];
 
-  const resolveStock = (shortName: string) => {
-    const match = stockData.find(s => s.symbol.toUpperCase() === shortName.toUpperCase());
-    return { symbol: match?.symbol || shortName, name: match?.name || '' };
-  };
-
-  return (
-    <Card title="Momentum Intelligence" icon={Zap} className="col-span-12">
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pt-2">
-        <div className="space-y-4">
-          <div className="flex items-center gap-2 mb-4">
-            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            <h3 className="text-[10px] font-black text-emerald-500 uppercase tracking-[0.2em]">Institutional Accumulation</h3>
-          </div>
-          {bullishList.map((stock: any) => {
-            const { symbol, name } = resolveStock(stock.shortName);
-            return (
-              <div
-                key={stock.stockId}
-                onClick={() => onSelectStock(symbol)}
-                className="flex justify-between items-center p-3 bg-slate-950/50 rounded-xl border border-emerald-500/10 hover:border-emerald-500/30 transition-all group cursor-pointer"
-              >
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={(e) => { e.stopPropagation(); onToggle(symbol); }}
-                    className={cn(
-                      "p-1.5 rounded-lg transition-all",
-                      watchlist.includes(symbol) ? "bg-amber-500/20 text-amber-500" : "text-slate-700 hover:text-slate-400"
-                    )}
-                  >
-                    <WatchlistIcon className={cn("w-3.5 h-3.5", watchlist.includes(symbol) && "fill-amber-500")} />
-                  </button>
-                  <div>
-                    <p className="text-xs font-black text-white group-hover:text-emerald-400 transition-colors uppercase">{symbol}</p>
-                    {name && <p className="text-[9px] font-bold text-slate-500 truncate max-w-[140px]">{name}</p>}
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <span className="text-[10px] font-bold text-slate-500 tabular-nums">₹{stock.lastPrice}</span>
-                      <span className="text-[9px] font-black text-slate-600 uppercase tracking-tighter bg-slate-900 px-1.5 py-0.5 rounded italic">RSI: {stock.rsi}</span>
-                    </div>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <span className="text-[10px] font-black text-emerald-500 bg-emerald-500/10 px-2 py-1 rounded-lg">+{stock.percentChange}%</span>
-                  <p className="text-[9px] font-bold text-slate-600 mt-1 uppercase tracking-widest">{stock.trend}</p>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        <div className="space-y-4">
-          <div className="flex items-center gap-2 mb-4">
-            <div className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
-            <h3 className="text-[10px] font-black text-rose-500 uppercase tracking-[0.2em]">Distribution Pressure</h3>
-          </div>
-          {bearishList.map((stock: any) => {
-            const { symbol, name } = resolveStock(stock.shortName);
-            return (
-              <div
-                key={stock.stockId}
-                onClick={() => onSelectStock(symbol)}
-                className="flex justify-between items-center p-3 bg-slate-950/50 rounded-xl border border-rose-500/10 hover:border-rose-500/30 transition-all group cursor-pointer"
-              >
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={(e) => { e.stopPropagation(); onToggle(symbol); }}
-                    className={cn(
-                      "p-1.5 rounded-lg transition-all",
-                      watchlist.includes(symbol) ? "bg-amber-500/20 text-amber-500" : "text-slate-700 hover:text-slate-400"
-                    )}
-                  >
-                    <WatchlistIcon className={cn("w-3.5 h-3.5", watchlist.includes(symbol) && "fill-amber-500")} />
-                  </button>
-                  <div>
-                    <p className="text-xs font-black text-white group-hover:text-rose-400 transition-colors uppercase">{symbol}</p>
-                    {name && <p className="text-[9px] font-bold text-slate-500 truncate max-w-[140px]">{name}</p>}
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <span className="text-[10px] font-bold text-slate-500 tabular-nums">₹{stock.lastPrice}</span>
-                      <span className="text-[9px] font-black text-slate-600 uppercase tracking-tighter bg-slate-900 px-1.5 py-0.5 rounded italic">RSI: {stock.rsi}</span>
-                    </div>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <span className="text-[10px] font-black text-rose-500 bg-rose-500/10 px-2 py-1 rounded-lg">{stock.percentChange}%</span>
-                  <p className="text-[9px] font-bold text-slate-600 mt-1 uppercase tracking-widest">{stock.trend}</p>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    </Card>
-  );
-};
-
-const InstitutionalInsights: React.FC<{ symbol?: string }> = ({ symbol = 'RELIANCE' }) => {
-  const { data: mfData } = trpc.getMFInvestments.useQuery({ symbol });
-  const mfs = mfData?.Table || [];
-
-  return (
-    <Card title={`Institutional Velocity (${symbol})`} icon={Users} className="col-span-12 lg:col-span-4">
-      <div className="space-y-4 pt-2">
-        <div className="p-4 bg-blue-600/10 border border-blue-500/20 rounded-2xl">
-          <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest mb-1">Top Active Insight</p>
-          <p className="text-xs text-slate-300 italic leading-relaxed">
-            Institutional activity tracks heavy volume inflows into index leaders. Reliability: <span className="text-white font-black">94%</span>
-          </p>
-        </div>
-        
-        <div className="space-y-3">
-          <h4 className="text-[9px] font-black text-slate-600 uppercase tracking-[0.2em] mb-2">Major MF Positions</h4>
-          {mfs.slice(0, 5).map((mf: any, idx: number) => (
-            <div key={idx} className="flex justify-between items-center p-3 bg-slate-950 rounded-xl border border-slate-800/50">
-              <div className="flex-1 mr-4">
-                <p className="text-[10px] font-black text-white line-clamp-1 uppercase tracking-tight">{mf.schemeName}</p>
-                <p className="text-[9px] font-bold text-slate-500 mt-0.5">{mf.marketValue} Cr held</p>
-              </div>
-              <div className="text-right">
-                <p className="text-[10px] font-black text-white italic">{mf.percentToAum}%</p>
-                <p className="text-[9px] font-bold text-slate-600 uppercase tracking-tighter">of AUM</p>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </Card>
-  );
-};
-
-const PennyStockIntelligence: React.FC<{ 
-  watchlist: string[]; 
-  onToggleWatchlist: (symbol: string) => void;
-  onSelectStock: (symbol: string) => void;
-}> = ({ watchlist, onToggleWatchlist, onSelectStock }) => {
-  const { data: pennyData } = trpc.getETPennyStocks.useQuery();
-  const pennies = pennyData?.searchResult?.searchData?.records?.slice(0, 5) || [];
-
-  return (
-    <Card title="Micro-Cap Opportunity" icon={Trophy} className="col-span-12 lg:col-span-8">
-      <div className="overflow-x-auto pt-2">
-        <table className="w-full">
-          <thead>
-            <tr className="border-b border-slate-800">
-              <th className="pb-3 text-left text-[9px] font-black text-slate-500 uppercase tracking-widest">Symbol</th>
-              <th className="pb-3 text-right text-[9px] font-black text-slate-500 uppercase tracking-widest">Price</th>
-              <th className="pb-3 text-right text-[9px] font-black text-slate-500 uppercase tracking-widest">Wk %</th>
-              <th className="pb-3 text-right text-[9px] font-black text-slate-500 uppercase tracking-widest">Vol Chg</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-800/50">
-            {pennies.map((stock: any) => (
-              <tr key={stock.fincode || stock.symbol} className="group hover:bg-slate-900/50 transition-colors">
-                <td className="py-4">
-                  <div className="flex items-center gap-2">
-                    <button 
-                      onClick={() => onToggleWatchlist(stock.symbol)}
-                      className={cn(
-                        "p-1.5 rounded-lg transition-all",
-                        watchlist.includes(stock.symbol) ? "bg-amber-500/20 text-amber-500" : "text-slate-600 hover:text-slate-400"
-                      )}
-                    >
-                      <WatchlistIcon className={cn("w-3.5 h-3.5", watchlist.includes(stock.symbol) && "fill-amber-500")} />
-                    </button>
-                    <div>
-                      <p className="text-xs font-black text-white group-hover:text-amber-400 transition-colors uppercase cursor-pointer" onClick={() => onSelectStock(stock.symbol)}>{stock.symbol}</p>
-                      <p className="text-[9px] font-bold text-slate-600 line-clamp-1">{stock.companyName || stock.name}</p>
-                    </div>
-                  </div>
-                </td>
-                <td className="py-4 text-right">
-                  <p className="text-xs font-black text-white tabular-nums">₹{stock.currentPrice}</p>
-                </td>
-                <td className="py-4 text-right">
-                  <span className={cn(
-                    "text-[10px] font-black px-2 py-0.5 rounded",
-                    parseFloat(stock.weekPercentChange) >= 0 ? "text-emerald-500 bg-emerald-500/10" : "text-rose-500 bg-rose-500/10"
-                  )}>
-                    {stock.weekPercentChange}%
-                  </span>
-                </td>
-                <td className="py-4 text-right">
-                  <p className="text-[10px] font-bold text-slate-500">{stock.volumeChange}x</p>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </Card>
-  );
-};
-
-const Watchlist: React.FC<{ 
-  watchlist: string[]; 
-  stocks: MarketData[]; 
-  onSelectStock: (symbol: string) => void;
-  onRemove: (symbol: string) => void;
-}> = ({ watchlist, stocks, onSelectStock, onRemove }) => {
-  const ref = React.useRef<HTMLDivElement>(null);
-  const isVisible = useIntersectionObserver(ref, { threshold: 0.1 });
-
-  const { data: liveQuotes } = trpc.getLiveQuotesBatch.useQuery(watchlist, {
-    enabled: isVisible && watchlist.length > 0,
-    refetchInterval: isVisible ? 10000 : false,
-  });
-
-  const watchlistStocks = stocks.filter(s => watchlist.includes(s.symbol)).map(stock => {
-    const live = liveQuotes?.find((q: any) => q.symbol === stock.symbol);
-    if (live) {
-      return { ...stock, price: live.price, changePct: live.changePct ?? stock.changePct };
-    }
-    return stock;
-  });
-
-  return (
-    <div ref={ref} className="p-6 space-y-6">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div>
-          <h2 className="text-3xl font-black text-white italic tracking-tighter uppercase flex items-center gap-3">
-            <WatchlistIcon className="w-8 h-8 text-blue-500" />
-            My Watchlist
-          </h2>
-          <p className="text-slate-500 text-xs font-bold uppercase tracking-widest mt-1">Efficiently tracking your custom selected assets</p>
-        </div>
-      </div>
-
-      {watchlistStocks.length > 0 ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {watchlistStocks.map(stock => {
-            const isUp = stock.changePct >= 0;
-            return (
-              <Card key={stock.symbol} className="group hover:border-blue-500/30 transition-all cursor-pointer relative overflow-hidden" onClick={() => onSelectStock(stock.symbol)}>
-                <div className="absolute top-0 right-0 p-4 z-10">
-                  <button 
-                    onClick={(e) => { e.stopPropagation(); onRemove(stock.symbol); }}
-                    className="p-1.5 bg-slate-900/50 backdrop-blur-md rounded-lg text-rose-500 hover:bg-rose-500 hover:text-white transition-all shadow-lg border border-slate-800"
-                  >
-                    <Plus className="w-3.5 h-3.5 rotate-45" />
-                  </button>
-                </div>
-                
-                <div className="flex justify-between items-start mb-2">
-                  <div>
-                    <h4 className="text-xs font-black text-white tracking-widest uppercase italic">{stock.symbol}</h4>
-                    <p className="text-[10px] text-slate-500 font-bold uppercase truncate max-w-[120px]">{stock.name}</p>
-                  </div>
-                  <div className={cn(
-                    "px-2 py-1 rounded text-[10px] font-black italic",
-                    isUp ? "bg-emerald-500/10 text-emerald-500" : "bg-rose-500/10 text-rose-500"
-                  )}>
-                    {isUp ? '+' : ''}{stock.changePct}%
-                  </div>
-                </div>
-                
-                <div className="mt-4 flex items-end justify-between">
-                   <div>
-                      <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">Live Price</p>
-                      <p className="text-xl font-black text-white tabular-nums italic tracking-tighter">₹{stock.price.toLocaleString()}</p>
-                   </div>
-                   <div className="h-8 w-20">
-                      <ResponsiveContainer width="100%" height="100%">
-                         <BarChart data={Array.from({length: 8}, () => ({ v: Math.random() }))}>
-                            <Bar dataKey="v" fill={isUp ? "#10b981" : "#f43f5e"} opacity={0.3} radius={[2, 2, 0, 0]} />
-                         </BarChart>
-                      </ResponsiveContainer>
-                   </div>
-                </div>
-              </Card>
-            );
-          })}
-        </div>
-      ) : (
-        <div className="py-32 flex flex-col items-center justify-center bg-slate-900/30 rounded-3xl border border-slate-800 border-dashed">
-          <WatchlistIcon className="w-16 h-16 text-slate-800 mb-6 animate-pulse" />
-          <h3 className="text-white font-black text-2xl uppercase italic tracking-tighter mb-2">Your Watchlist is Empty</h3>
-          <p className="text-slate-500 text-xs uppercase font-bold tracking-widest max-w-xs text-center leading-loose">
-            Start tracking high-conviction assets to build your institutional-grade perspective.
-          </p>
-        </div>
-      )}
-    </div>
-  );
-};
-
-// --- Sector Heatmap Component ---
-const SectorHeatmap: React.FC<{ indexId?: string }> = ({ indexId }) => {
-  const { data: sectors, isLoading } = trpc.getSectorPerformance.useQuery({ indexId }, {
-    refetchInterval: 60000,
-    refetchOnWindowFocus: false,
-  });
-
-  if (isLoading || !sectors) return <div className="h-40 bg-slate-900/50 animate-pulse rounded-2xl" />;
-
-  return (
-    <Card title="Sector Heatmap" icon={PieChart}>
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 pt-2">
-        {sectors.map((sector) => (
-          <div 
-            key={sector.name}
-            className={cn(
-              "p-3 rounded-xl border flex flex-col justify-between transition-all hover:scale-[1.02]",
-              sector.change >= 0 
-                ? "bg-emerald-500/5 border-emerald-500/20 text-emerald-400" 
-                : "bg-rose-500/5 border-rose-500/20 text-rose-400"
-            )}
-          >
-            <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">{sector.name}</span>
-            <div className="flex items-end justify-between mt-2">
-              <span className="text-lg font-black italic tracking-tighter truncate">
-                {sector.change >= 0 ? '+' : ''}{sector.change.toFixed(2)}%
-              </span>
-              <span className="text-[8px] font-bold text-slate-500">{sector.stocks} Stocks</span>
-            </div>
-          </div>
-        ))}
-      </div>
-    </Card>
-  );
-};
-
-// --- Sector Performance Component ---
-const SectorPerformance: React.FC = () => {
-  const { data, isLoading } = trpc.getMarketMapData.useQuery({ indId: '38' }); // Energy by default
-
-  if (isLoading || !data) return <div className="h-40 bg-slate-900/50 animate-pulse rounded-2xl" />;
-
-  const sectors = (data as any)?.item || [];
-
-  return (
-    <Card title="Market Map (Sectors)" icon={PieChart}>
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {sectors.slice(0, 8).map((s: any) => (
-          <div key={s.id} className="p-4 bg-slate-950 border border-slate-800 rounded-2xl hover:border-slate-700 transition-all">
-            <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">{s.shortname}</p>
-            <div className="flex items-center justify-between">
-              <p className={cn(
-                "text-lg font-black italic tracking-tighter",
-                s.direction === "1" ? "text-emerald-400" : "text-rose-400"
-              )}>
-                {s.percentchange}%
-              </p>
-              <div className={cn(
-                "p-1 rounded",
-                s.direction === "1" ? "bg-emerald-500/10 text-emerald-500" : "bg-rose-500/10 text-rose-500"
-              )}>
-                {s.direction === "1" ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-              </div>
-            </div>
-            <p className="text-[8px] text-slate-600 font-bold uppercase mt-2">Cap: ₹{s.mktcap} Cr</p>
-          </div>
-        ))}
-      </div>
-    </Card>
-  );
-};
-
-// --- Top Movers Intelligence Component ---
-const TopMoversIntelligence: React.FC<{ onSelectStock: (symbol: string) => void }> = ({ onSelectStock }) => {
-  const { data: movers, isLoading } = trpc.getTopMovers.useQuery(undefined, {
-    refetchInterval: 60000
-  });
-
-  const renderMoversList = (list: any[], color: string) => (
-    <div className="space-y-3">
-      {list.slice(0, 6).map((stock: any) => (
-        <div 
-          key={stock.symbol_name} 
-          onClick={() => onSelectStock(stock.symbol_name)}
-          className="flex items-center justify-between group hover:bg-slate-800/40 p-2 rounded-xl transition-all cursor-pointer border border-transparent hover:border-slate-700"
-        >
-          <div>
-            <p className="text-white font-black text-[11px] tracking-tight uppercase italic">{stock.symbol_name}</p>
-            <p className="text-slate-500 text-[9px] font-bold tracking-widest uppercase">
-              Vol: {stock.today_volume ? `${(stock.today_volume / 1000000).toFixed(1)}M` : '—'}
-            </p>
-          </div>
-          <div className="text-right">
-            <p className="text-white font-black text-xs tabular-nums">₹{Number(stock.today_close).toLocaleString()}</p>
-            <p className={cn(
-              "text-[10px] font-black tabular-nums",
-              Number(stock.change_percent) >= 0 ? "text-emerald-400" : "text-rose-400"
-            )}>
-              {Number(stock.change_percent) >= 0 ? '+' : ''}{Number(stock.change_percent).toFixed(2)}%
-            </p>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-
-  if (isLoading) {
-    return (
-      <div className="col-span-12 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {[1, 2, 3, 4, 5, 6].map(i => (
-          <div key={i} className="h-48 bg-slate-900/50 animate-pulse rounded-3xl border border-slate-800" />
-        ))}
-      </div>
-    );
-  }
-
-  const sections = [
-    { title: 'Top Gainers', data: movers?.topGainers || [], icon: TrendingUp, color: 'emerald' },
-    { title: 'Top Losers', data: movers?.topLosers || [], icon: TrendingDown, color: 'rose' },
-    { title: 'Top Watchlist', data: movers?.topWatchList || [], icon: Star, color: 'violet' },
-    { title: 'Gap Up Stocks', data: movers?.gapUp || [], icon: ArrowUpRight, color: 'blue' },
-    { title: 'Gap Down Stocks', data: movers?.gapDown || [], icon: ArrowDownRight, color: 'orange' },
-    { title: 'Open = Low (Bullish)', data: movers?.sameOpenAndLow || [], icon: Zap, color: 'emerald' },
-    { title: 'Open = High (Bearish)', data: movers?.sameOpenAndHigh || [], icon: Activity, color: 'rose' },
-  ];
-
-  return (
-    <div className="col-span-12 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-black text-white tracking-tighter uppercase italic flex items-center gap-3">
-            <Trophy className="w-6 h-6 text-amber-500 fill-amber-500/20" />
-            Top Movers (Live)
-          </h2>
-          <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">Real-time market activity and setup detection</p>
-        </div>
-        <div className="flex items-center gap-2 px-3 py-1 bg-slate-900 border border-slate-800 rounded-full">
-           <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-           <span className="text-[9px] font-black text-white uppercase tracking-widest">Live NSE Data</span>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {sections.map(section => (
-          <Card key={section.title} title={section.title} icon={section.icon}>
-            {renderMoversList(section.data, section.color)}
-            {section.data.length === 0 && (
-              <div className="py-8 text-center">
-                <p className="text-slate-600 text-[10px] font-bold uppercase tracking-widest italic">No data detected</p>
-              </div>
-            )}
-          </Card>
-        ))}
-      </div>
-    </div>
-  );
-};
+// --- Dashboard Intelligence Components (Moved to separate files) ---
 
 // --- Index Overview Component ---
 // ─── Indices Feature ─────────────────────────────────────────────────────────
@@ -1127,229 +690,8 @@ const IndicesPage: React.FC<{ onSelectStock: (symbol: string) => void }> = ({ on
   );
 };
 
-const IndexOverview: React.FC = () => {
-  const ref = React.useRef<HTMLDivElement>(null);
-  const isVisible = useIntersectionObserver(ref, { threshold: 0.1 });
 
-  const { data: indices, isLoading } = trpc.getAllIndices.useQuery(undefined, {
-    enabled: isVisible,
-    refetchInterval: isVisible ? 30000 : false,
-  });
-
-  if (isLoading || !indices) return <div ref={ref} className="h-40 bg-slate-900/50 animate-pulse rounded-2xl" />;
-
-  // MC API returns: { data: { indiceList: [{ name: "Key Indices", list: [...] }, ...] } }
-  const groups: { name: string; list: any[] }[] = (indices as any)?.data?.indiceList ?? [];
-  const keyList = groups.find(g => g.name === 'Key Indices')?.list ?? [];
-
-  return (
-    <div ref={ref}>
-      <Card title="Market Watch" icon={Activity}>
-      <div className="space-y-3 pt-2">
-        {keyList.slice(0, 8).filter((idx: any) => idx.name).map((idx: any) => {
-          const isUp = Number(idx.direction) === 1 || parseFloat(idx.changePer ?? '0') >= 0;
-          const pct = parseFloat(idx.changePer ?? '0');
-          return (
-            <div key={idx.name} className="flex justify-between items-center p-3 bg-slate-950 rounded-xl border border-slate-800/50 hover:border-slate-700 transition-all">
-              <div>
-                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{idx.name}</p>
-                <p className="text-sm font-black text-white tabular-nums mt-0.5">{idx.value}</p>
-              </div>
-              <div className="text-right">
-                <div className={cn(
-                  "flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded",
-                  isUp ? "bg-emerald-500/10 text-emerald-500" : "bg-rose-500/10 text-rose-500"
-                )}>
-                  {isUp ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-                  {isUp ? '+' : ''}{pct.toFixed(2)}%
-                </div>
-                <p className={cn("text-[9px] font-bold mt-1 tabular-nums", isUp ? "text-emerald-600" : "text-rose-600")}>
-                  {isUp ? '+' : ''}{idx.change}
-                </p>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-      </Card>
-    </div>
-  );
-};
-
-const MarketIndices: React.FC<{ onSelect?: (id: string, name: string) => void }> = ({ onSelect }) => {
-  const ref = React.useRef<HTMLDivElement>(null);
-  const isVisible = useIntersectionObserver(ref, { threshold: 0.1 });
-
-  const { data: indices, isLoading } = trpc.getMarketOverview.useQuery(undefined, {
-    enabled: isVisible,
-    refetchInterval: isVisible ? 10000 : false,
-  });
-
-  if (isLoading || !indices) return (
-    <div ref={ref} className="col-span-12 grid grid-cols-1 md:grid-cols-3 gap-6 mb-2">
-      {[1, 2, 3].map(i => (
-        <div key={i} className="h-32 bg-slate-900 border border-slate-800 rounded-3xl animate-pulse" />
-      ))}
-    </div>
-  );
-
-  const defaultIndex = { value: 0, change: 0, changePct: 0 };
-  const displayItems = [
-    { name: 'NIFTY 50', ...(indices.nifty50 || defaultIndex) },
-    { name: 'SENSEX', ...(indices.sensex || defaultIndex) },
-    { name: 'BANK NIFTY', ...(indices.bankNifty || defaultIndex) },
-  ];
-
-  return (
-    <div ref={ref} className="col-span-12 grid grid-cols-1 md:grid-cols-3 gap-6 mb-2">
-      {displayItems.map((item, idx) => (
-        <motion.div
-          key={item.name}
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: idx * 0.1 }}
-          className="bg-slate-900 border border-slate-800 p-6 rounded-[2.5rem] relative overflow-hidden group hover:border-blue-500/30 transition-all shadow-2xl"
-        >
-          <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:opacity-10 transition-opacity">
-            <TrendingUp className={cn("w-24 h-24", item.change >= 0 ? "text-emerald-500" : "text-rose-500")} />
-          </div>
-          
-          <div className="relative z-10">
-            <div className="flex items-center justify-between mb-4">
-               <span className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">{item.name}</span>
-               <div className={cn(
-                 "px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-widest",
-                 item.change >= 0 ? "bg-emerald-500/10 text-emerald-400" : "bg-rose-500/10 text-rose-400"
-               )}>
-                 {item.change >= 0 ? 'Bullish' : 'Bearish'}
-               </div>
-            </div>
-
-            <div className="flex items-end gap-3">
-               <h2 className="text-3xl font-black text-white tabular-nums tracking-tighter italic">
-                 {item.value.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-               </h2>
-               <div className={cn(
-                 "flex items-center gap-1 mb-1.5",
-                 item.change >= 0 ? "text-emerald-400" : "text-rose-400"
-               )}>
-                 <span className="text-sm font-black tabular-nums">
-                   {item.change >= 0 ? '+' : ''}{item.change.toFixed(2)}
-                 </span>
-                 <span className="text-[10px] font-black opacity-60">
-                   ({item.changePct >= 0 ? '+' : ''}{item.changePct.toFixed(2)}%)
-                 </span>
-               </div>
-            </div>
-
-            <div className="mt-4 flex gap-2">
-               <div className="h-1 flex-1 bg-slate-800 rounded-full overflow-hidden">
-                  <motion.div 
-                    initial={{ width: 0 }}
-                    animate={{ width: `${60 + Math.random() * 30}%` }}
-                    className={cn("h-full", item.change >= 0 ? "bg-emerald-500" : "bg-rose-500")}
-                  />
-               </div>
-            </div>
-          </div>
-        </motion.div>
-      ))}
-    </div>
-  );
-};
-
-const GlobalMarkets: React.FC = () => {
-  const ref = React.useRef<HTMLDivElement>(null);
-  const isVisible = useIntersectionObserver(ref, { threshold: 0.1 });
-
-  const { data: globalData, isLoading } = trpc.getGlobalIndices.useQuery(undefined, {
-    enabled: isVisible,
-    refetchInterval: isVisible ? 30000 : false,
-  });
-
-  if (isLoading || !globalData) return (
-    <div ref={ref} className="col-span-12 lg:col-span-4 h-full">
-      <Card title="Global Intelligence" icon={Activity} className="h-full">
-        <div className="grid grid-cols-2 gap-3 animate-pulse pt-2">
-          {[1, 2, 3, 4, 5, 6].map(i => (
-            <div key={i} className="h-24 bg-slate-800/50 rounded-2xl" />
-          ))}
-        </div>
-      </Card>
-    </div>
-  );
-
-  const allIndices = (() => {
-    const raw = (globalData as any)?.data?.indiceList ?? [];
-    return raw.flatMap((group: any) => 
-      (group.list || []).map((idx: any) => ({
-        name: idx.name,
-        price: idx.value,
-        change: idx.change,
-        percentChange: idx.changePer,
-        direction: idx.direction,
-        region: group.name
-      }))
-    );
-  })();
-
-  const importantIndices = ['S&P 500', 'Nasdaq', 'FTSE 100', 'Nikkei 225', 'DAX', 'Hang Seng', 'Dow Jones', 'S&P 500 Futures', 'Nasdaq Futures', 'CAC 40', 'Shanghai Composite'];
-  
-  const displayIndices = allIndices.filter((idx: any) => 
-    importantIndices.some(name => idx.name.includes(name))
-  );
-
-  return (
-    <div ref={ref} className="col-span-12 lg:col-span-4">
-      <Card title="Global Intelligence" icon={Activity} className="h-full">
-        <div className="grid grid-cols-2 gap-3 pt-2">
-          {displayIndices.map((idx: any) => {
-            const isUp = Number(idx.direction) === 1 || parseFloat(idx.percentChange) >= 0;
-            return (
-              <motion.div
-                key={idx.name}
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                whileHover={{ scale: 1.02, translateY: -2 }}
-                className={cn(
-                  "p-3 rounded-2xl border bg-slate-950/50 backdrop-blur-sm transition-all group cursor-default",
-                  isUp ? "border-emerald-500/20 hover:border-emerald-500/40 shadow-[0_0_15px_rgba(16,185,129,0.05)]" : "border-rose-500/20 hover:border-rose-500/40 shadow-[0_0_15px_rgba(244,63,94,0.05)]"
-                )}
-              >
-                <div className="flex justify-between items-start mb-2">
-                  <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest truncate pr-2">
-                    {idx.name}
-                  </span>
-                  <span className="text-[7px] font-bold text-slate-700 bg-slate-900 px-1.5 py-0.5 rounded uppercase shrink-0">
-                    {idx.region}
-                  </span>
-                </div>
-                
-                <div className="mb-1.5">
-                  <span className="text-sm font-black text-white tabular-nums tracking-tighter">
-                    {idx.price}
-                  </span>
-                </div>
-
-                <div className={cn(
-                  "flex items-center gap-1 text-[10px] font-black",
-                  isUp ? "text-emerald-400" : "text-rose-400"
-                )}>
-                  {isUp ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
-                  {idx.percentChange}%
-                </div>
-              </motion.div>
-            );
-          })}
-        </div>
-        <div className="mt-4 pt-4 border-t border-slate-800/50">
-           <p className="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em] mb-4 text-center">Extended Market Insight</p>
-           <GlobalMarketCards />
-        </div>
-    </Card>
-    </div>
-  );
-};
+// --- Market Overview Components (Moved to separate files) ---
 
 // --- Signal History Modal Component ---
 const SignalHistoryModal: React.FC<{ symbol: string; onClose: () => void }> = ({ symbol, onClose }) => {
@@ -1580,34 +922,355 @@ const Dashboard: React.FC<{
   }, [stocks.length > 0]);
 
   return (
-    <div className="p-6 grid grid-cols-12 gap-6 relative">
-      <MarketIndices />
+    <div className="p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-12 gap-4 relative">
+      {/* 1. Market Indices (Full Width) */}
+      <div className="xl:col-span-12">
+        <MarketIndices onSelect={(id, name) => { /* handle select if needed */ }} />
+      </div>
       
-      {/* High-level Overview */}
-      <div className="col-span-12 grid grid-cols-1 lg:grid-cols-12 gap-6">
-        <div className="lg:col-span-4 flex flex-col gap-6">
-          <IndexOverview />
-          <GlobalMarkets />
-        </div>
-        <div className="lg:col-span-8 flex flex-col gap-6">
-          <SectorHeatmap />
-          <SectorPerformance />
-        </div>
+      {/* Row 2: Intelligence Mix (3-6-3 Symmetry) */}
+      <div className="md:col-span-1 lg:col-span-1 xl:col-span-3">
+        <IndexOverview className="h-full" />
       </div>
 
-      <div className="col-span-12 grid grid-cols-12 gap-6">
+      <div className="md:col-span-1 lg:col-span-2 xl:col-span-6">
+        <SectorHeatmap className="h-full" />
+      </div>
+
+      <div className="md:col-span-1 lg:col-span-1 xl:col-span-3">
+        <GlobalMarkets className="h-full" />
+      </div>
+
+      {/* Row 3: Sector Detail (Full Width) */}
+      <div className="xl:col-span-12">
+        <SectorPerformance className="h-full" />
+      </div>
+
+      {/* 4. Core Intelligence Modules */}
+      <div className="xl:col-span-12">
         <MomentumIntelligence watchlist={watchlist} onToggle={onToggleWatchlist} onSelectStock={onSelectStock} />
-        <InstitutionalInsights symbol={stocks[0]?.symbol || 'RELIANCE'} />
-        <PennyStockIntelligence watchlist={watchlist} onToggleWatchlist={onToggleWatchlist} onSelectStock={onSelectStock} />
       </div>
 
+      <div className="md:col-span-1 lg:col-span-1 xl:col-span-6">
+        <InstitutionalInsights symbol={stocks[0]?.symbol || 'RELIANCE'} className="h-full" />
+      </div>
+
+      <div className="md:col-span-1 lg:col-span-2 xl:col-span-6">
+        <PennyStockIntelligence watchlist={watchlist} onToggleWatchlist={onToggleWatchlist} onSelectStock={onSelectStock} className="h-full" />
+      </div>
+
+
+      {/* Row 4: Chart & Sidebar */}
+      <div className="md:col-span-2 lg:col-span-2 xl:col-span-8 flex flex-col gap-4">
+        <Card title="Market Sentiment" icon={Activity} className="flex-1 flex flex-col">
+          <div className="flex-1 min-h-[300px] mt-4">
+            <ResponsiveContainer width="100%" height="100%">
+              {graphData.length > 0 ? (
+                <AreaChart data={graphData}>
+                  <defs>
+                    <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/>
+                      <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                  <XAxis dataKey="time" hide />
+                  <YAxis hide domain={['auto', 'auto']} />
+                  <Tooltip 
+                    contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px' }}
+                    itemStyle={{ color: '#fff' }}
+                  />
+                  <Area type="monotone" dataKey="value" stroke="#3b82f6" fillOpacity={1} fill="url(#colorValue)" strokeWidth={3} />
+                </AreaChart>
+              ) : (
+                <div className="flex items-center justify-center h-full">
+                  <Activity className="w-8 h-8 text-blue-500/20 animate-pulse" />
+                </div>
+              )}
+            </ResponsiveContainer>
+          </div>
+          <div className="flex justify-between items-center mt-6 p-4 bg-slate-950 rounded-xl border border-slate-800">
+            <div>
+              <p className="text-slate-500 text-xs font-bold uppercase tracking-widest">Nifty 50 Rank</p>
+              <p className="text-xl font-black text-white">22,453.20</p>
+            </div>
+            <div className="text-right">
+              <p className="text-slate-500 text-xs font-bold uppercase tracking-widest">Day Range</p>
+              <div className="w-32 h-1.5 bg-slate-800 rounded-full mt-2 relative">
+                 <div className="absolute left-[40%] w-2 h-2 -top-0.5 bg-blue-500 rounded-full shadow-[0_0_8px_rgba(59,130,246,0.8)]" />
+              </div>
+              <div className="flex justify-between text-[10px] text-slate-500 mt-1 font-bold">
+                <span>22,380</span>
+                <span>22,510</span>
+              </div>
+            </div>
+          </div>
+        </Card>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 flex-1">
+          <Card title="AI Intelligence Hub" icon={Zap} className="h-full">
+             <div className="space-y-4 pt-2">
+                {aiSignals.length > 0 ? aiSignals.map((signal, idx) => (
+                  <div 
+                    key={`${signal.symbol}-${idx}`} 
+                    onClick={() => onSelectStock(signal.symbol)}
+                    className="p-4 bg-slate-950 rounded-2xl border border-slate-800 flex flex-col gap-4 hover:border-slate-700 transition-all cursor-pointer group relative overflow-hidden"
+                  >
+                    <div className="flex justify-between items-start relative z-10">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-black text-white italic tracking-tighter uppercase">{signal.symbol}</span>
+                          <div className={cn(
+                            "px-2 py-0.5 rounded text-[8px] font-black tracking-widest uppercase",
+                            signal.signal === 'BUY' ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20" : 
+                            signal.signal === 'SELL' ? "bg-rose-500/10 text-rose-500 border border-rose-500/20" : "bg-slate-500/10 text-slate-500 border border-slate-500/20"
+                          )}>
+                            {signal.signal} Signal
+                          </div>
+                        </div>
+                        <p className="text-[10px] text-slate-500 mt-1 italic line-clamp-1 leading-relaxed">
+                          {signal.reasoning}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-[10px] font-black text-white tracking-widest mb-1">{signal.confidence}% <span className="text-slate-500">CONF.</span></div>
+                        <div className="w-16 h-1 bg-slate-900 rounded-full overflow-hidden border border-slate-800 ml-auto">
+                          <motion.div 
+                            initial={{ width: 0 }}
+                            animate={{ width: `${signal.confidence}%` }}
+                            className={cn(
+                              "h-full",
+                              signal.signal === 'BUY' ? "bg-emerald-500" : 
+                              signal.signal === 'SELL' ? "bg-rose-500" : "bg-slate-500"
+                            )}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="h-20 w-full relative group/chart">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <AreaChart data={signal.history}>
+                          <defs>
+                            <linearGradient id={`gradient-${signal.symbol}`} x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor={signal.signal === 'BUY' ? "#10b981" : "#f43f5e"} stopOpacity={0.1}/>
+                              <stop offset="95%" stopColor={signal.signal === 'BUY' ? "#10b981" : "#f43f5e"} stopOpacity={0}/>
+                            </linearGradient>
+                          </defs>
+                          <Area 
+                            type="monotone" 
+                            dataKey="price" 
+                            stroke={signal.signal === 'BUY' ? "#10b981" : "#f43f5e"} 
+                            strokeWidth={2} 
+                            fill={`url(#gradient-${signal.symbol})`} 
+                            dot={false}
+                          />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    </div>
+
+                    <div className="flex justify-between items-center text-[9px] font-black uppercase tracking-widest text-slate-500 border-t border-slate-900 pt-3">
+                      <div className="flex gap-4">
+                        <span>Entry: <span className="text-white">₹{signal.entry}</span></span>
+                      </div>
+                      <div className="flex gap-2">
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setHistorySymbol(signal.symbol);
+                          }}
+                          className="px-3 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-lg text-slate-400 hover:text-white flex items-center gap-1.5 transition-all group/hist shadow-lg"
+                        >
+                          <History className="w-3 h-3 group-hover/hist:rotate-[-45deg] transition-transform text-blue-500" /> 
+                          History
+                        </button>
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedSignal(signal);
+                          }}
+                          className="px-3 py-1 bg-blue-500/10 hover:bg-blue-500 border border-blue-500/20 hover:border-blue-500 rounded-lg text-blue-500 hover:text-white flex items-center gap-1.5 transition-all shadow-lg"
+                        >
+                          Deep Insight <ArrowUpRight className="w-3 h-3" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )) : (
+                  <div className="flex-1 flex flex-col items-center justify-center min-h-[400px]">
+                     <Activity className="w-12 h-12 text-blue-500/20 animate-pulse mb-4" />
+                     <p className="text-slate-500 text-xs font-black uppercase tracking-[0.2em] text-center">AI Intelligence Engine<br/><span className="text-[10px] text-blue-500/50">Analyzing Market Cycles...</span></p>
+                  </div>
+                )}
+             </div>
+             {isGenerating && queueProgress && queueProgress.total > 0 && (
+               <div className="mt-3 space-y-1">
+                 <div className="flex justify-between text-[9px] font-black text-slate-500 uppercase tracking-widest">
+                   <span>Progress</span>
+                   <span>{queueProgress.completed} / {queueProgress.total}</span>
+                 </div>
+                 <div className="h-1 bg-slate-800 rounded-full overflow-hidden">
+                   <div
+                     className="h-full bg-blue-500 transition-all duration-500"
+                     style={{ width: `${Math.round((queueProgress.completed / queueProgress.total) * 100)}%` }}
+                   />
+                 </div>
+               </div>
+             )}
+             <button
+                onClick={handleGenerateSignals}
+                disabled={isGenerating}
+                className={cn(
+                    "w-full mt-4 py-2 border border-slate-800 rounded-xl text-[10px] font-black transition-all uppercase tracking-widest flex items-center justify-center gap-2",
+                    isGenerating ? "bg-slate-900 border-slate-800 text-slate-600 cursor-not-allowed" : "text-blue-500 hover:text-white hover:bg-blue-600 hover:border-blue-600"
+                )}
+             >
+                {isGenerating ? 'Analyzing...' : 'Generate Signals'}
+             </button>
+          </Card>
+          
+          <Card title="Signal Performance" icon={TrendingUp} className="h-full">
+             <div className="flex flex-col items-center justify-center h-full py-8">
+                <div className="text-5xl font-black text-emerald-500 mb-2 italic">84%</div>
+                <p className="text-slate-500 text-[10px] font-black uppercase tracking-widest">Historical Win Rate</p>
+                <div className="w-full h-1 bg-slate-900 rounded-full mt-8 overflow-hidden">
+                   <div className="h-full bg-emerald-500 w-[84%]" />
+                </div>
+                <p className="text-[10px] text-slate-600 mt-6 italic font-medium text-center leading-relaxed">
+                  Based on backtested machine learning models for the current Nifty cycle.
+                </p>
+                <div className="grid grid-cols-2 gap-4 w-full mt-8">
+                   <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 text-center">
+                      <p className="text-[8px] font-black text-slate-500 uppercase mb-1">Total Signals</p>
+                      <p className="text-lg font-black text-white italic">1,240</p>
+                   </div>
+                   <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 text-center">
+                      <p className="text-[8px] font-black text-slate-500 uppercase mb-1">Avg Profit</p>
+                      <p className="text-lg font-black text-emerald-500 italic">+4.2%</p>
+                   </div>
+                </div>
+             </div>
+          </Card>
+        </div>
+      </div>
+
+      {/* Sidebar Section */}
+      <div className="md:col-span-2 lg:col-span-1 xl:col-span-4 flex flex-col gap-4">
+        <Card title="Market Heatmap" icon={Filter} className="flex-1">
+            <div className="grid grid-cols-4 gap-1 h-full min-h-[120px]">
+                {stocks.map(s => (
+                    <div 
+                        key={s.symbol} 
+                        onClick={() => onSelectStock(s.symbol)}
+                        className={cn(
+                            "rounded-sm transition-all duration-500 cursor-pointer hover:ring-2 hover:ring-white/20 select-none",
+                            s.changePct > 2 ? "bg-emerald-600" : 
+                            s.changePct > 0 ? "bg-emerald-900" : 
+                            s.changePct < -2 ? "bg-rose-600" : "bg-rose-900"
+                        )}
+                        title={`${s.symbol}: ${s.changePct}%`}
+                    />
+                ))}
+            </div>
+            <div className="flex justify-between text-[10px] font-bold text-slate-500 mt-2">
+                <span>BEARISH</span>
+                <span>BULLISH</span>
+            </div>
+        </Card>
+
+        <Card title="Live Market News" icon={Activity} className="flex-[2]">
+            <div className="flex gap-2 mb-4 overflow-x-auto hide-scrollbar pb-1">
+                {['All', 'Market', 'Stock', 'Economy'].map(cat => (
+                    <button 
+                        key={cat}
+                        onClick={() => setNewsFilter(cat)}
+                        className={cn(
+                            "px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-tighter border transition-all shrink-0",
+                            newsFilter === cat ? "bg-blue-600 border-blue-600 text-white" : "bg-slate-950 border-slate-800 text-slate-500 hover:text-white"
+                        )}
+                    >
+                        {cat}
+                    </button>
+                ))}
+            </div>
+            <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2 hide-scrollbar">
+                {filteredNews.map((item) => (
+                    <div key={item.id} className="group cursor-pointer">
+                        <div className="flex gap-2 items-center mb-1">
+                            <span className={cn(
+                                "text-[8px] font-black px-1.5 py-0.5 rounded uppercase tracking-tighter",
+                                item.category === 'Economy' ? "bg-amber-500/10 text-amber-500" :
+                                item.category === 'Stock' ? "bg-blue-500/10 text-blue-500" : "bg-purple-500/10 text-purple-500"
+                            )}>
+                                {item.category}
+                            </span>
+                            <span className="text-[8px] font-bold text-slate-600 uppercase tracking-widest">{item.time}</span>
+                            <span className="text-[8px] font-black text-slate-800 mx-1">•</span>
+                            <span className="text-[8px] font-black text-blue-500/70 uppercase tracking-widest">{item.source}</span>
+                        </div>
+                        <h4 className="text-xs font-bold text-slate-200 leading-snug group-hover:text-blue-400 transition-colors line-clamp-2">
+                            {item.title}
+                        </h4>
+                        <p className="text-[10px] text-slate-500 line-clamp-2 mt-1 italic leading-relaxed">
+                            {item.summary}
+                        </p>
+                    </div>
+                ))}
+            </div>
+            <button className="w-full mt-6 py-2 border border-slate-800 rounded-xl text-xs font-bold text-slate-500 hover:text-white hover:border-slate-700 transition-all uppercase tracking-widest">
+                Browse News Hub
+            </button>
+        </Card>
+
+        <Card title="Portfolio Snapshot" icon={PieChart}>
+           <div className="text-center py-4">
+              <h4 className="text-slate-500 text-xs font-bold uppercase tracking-widest mb-1">Unrealized Gain</h4>
+              <p className="text-3xl font-black text-white">₹12,450.40</p>
+              <div className="flex items-center justify-center gap-2 mt-2 text-emerald-400 font-bold text-sm">
+                <ArrowUpRight className="w-4 h-4" />
+                +₹450.20 (3.20%)
+              </div>
+           </div>
+           <div className="mt-4 border-t border-slate-800 pt-4 space-y-3">
+             <div className="flex justify-between text-xs">
+               <span className="text-slate-500 font-medium tracking-tight">Invested Value</span>
+               <span className="text-white font-bold">₹380,000.00</span>
+             </div>
+             <div className="flex justify-between text-xs">
+               <span className="text-slate-500 font-medium tracking-tight">Daily Change</span>
+               <span className="text-emerald-400 font-bold">+₹1,240</span>
+             </div>
+           </div>
+        </Card>
+
+        <div className="relative group cursor-pointer overflow-hidden rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-800 p-6 shadow-2xl">
+           <div className="relative z-10">
+             <h3 className="text-white font-black text-xl leading-tight">ADVANCED BACKTESTING<br/>ENGINE</h3>
+             <p className="text-blue-100/70 text-[10px] font-bold mt-2 uppercase tracking-widest">Test strategies against 10yr NSE history</p>
+             <button className="mt-6 bg-white text-blue-900 text-xs font-black px-4 py-2 rounded-lg items-center inline-flex gap-2 group-hover:gap-3 transition-all">
+                TRY BETA <ArrowUpRight className="w-3 h-3" />
+             </button>
+           </div>
+           <History className="absolute -right-4 -bottom-4 w-32 h-32 text-white/10 -rotate-12 group-hover:scale-110 transition-transform" />
+        </div>
+      </div>
+
+      <div className="xl:col-span-12">
+        <TopMoversIntelligence onSelectStock={onSelectStock} />
+      </div>
+
+      <div className="xl:col-span-12">
+        <IntradayBreakouts onSelectStock={onSelectStock} />
+      </div>
+
+
+      {/* Modals & Overlays (Outside Grid Flow) */}
       <AnimatePresence>
         {historySymbol && (
           <SignalHistoryModal symbol={historySymbol} onClose={() => setHistorySymbol(null)} />
         )}
       </AnimatePresence>
 
-      {/* Signal Details Modal */}
       <AnimatePresence>
         {selectedSignal && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
@@ -1679,57 +1342,19 @@ const Dashboard: React.FC<{
                    </div>
                 </div>
 
-                <div className="h-56 mb-8 bg-slate-950 rounded-3xl border border-slate-800 p-6 relative overflow-hidden group/modalchart">
-                  <div className="absolute top-6 left-6 z-10">
-                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Signal Visualization</p>
-                    <div className="flex items-center gap-2">
-                       <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
-                       <span className="text-xs font-bold text-white uppercase italic">Real-time Analysis</span>
-                    </div>
-                  </div>
-                  
-                  <div className="absolute top-6 right-6 z-10 flex gap-3">
-                     <div className="flex items-center gap-1.5">
-                        <div className="w-2 h-0.5 bg-emerald-500" />
-                        <span className="text-[8px] font-black text-slate-500 uppercase">Target</span>
-                     </div>
-                     <div className="flex items-center gap-1.5">
-                        <div className="w-2 h-0.5 bg-rose-500" />
-                        <span className="text-[8px] font-black text-slate-500 uppercase">Stop Loss</span>
-                     </div>
-                  </div>
-
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={selectedSignal.history || []} margin={{ top: 40, right: 0, left: 0, bottom: 0 }}>
+                <div className="h-56 mb-8 bg-slate-950 rounded-3xl border border-slate-800 p-6 relative overflow-hidden">
+                   <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={selectedSignal.history || []}>
                       <defs>
-                        <linearGradient id="modalGradient" x1="0" y1="0" x2="0" y2="1">
+                        <linearGradient id="modalGradientDashboard" x1="0" y1="0" x2="0" y2="1">
                           <stop offset="5%" stopColor={selectedSignal.signal === 'BUY' ? "#10b981" : "#f43f5e"} stopOpacity={0.2}/>
                           <stop offset="95%" stopColor={selectedSignal.signal === 'BUY' ? "#10b981" : "#f43f5e"} stopOpacity={0}/>
                         </linearGradient>
                       </defs>
-                      <Tooltip 
-                        content={({ active, payload }) => {
-                          if (active && payload && payload.length) {
-                            return (
-                              <div className="bg-slate-900 border border-slate-800 p-2 rounded-lg shadow-xl">
-                                <p className="text-[10px] font-black text-white">₹{typeof payload[0].value === 'number' ? payload[0].value.toFixed(2) : payload[0].value}</p>
-                              </div>
-                            );
-                          }
-                          return null;
-                        }}
-                      />
-                      <Area 
-                        type="monotone" 
-                        dataKey="price" 
-                        stroke={selectedSignal.signal === 'BUY' ? "#10b981" : "#f43f5e"} 
-                        strokeWidth={3} 
-                        fill="url(#modalGradient)" 
-                        animationDuration={1500}
-                      />
-                      <ReferenceLine y={selectedSignal.entry} stroke="#94a3b8" strokeDasharray="5 5" label={{ position: 'right', value: 'ENTRY', fill: '#94a3b8', fontSize: 8, fontWeight: 900 }} />
-                      <ReferenceLine y={selectedSignal.target} stroke="#10b981" strokeDasharray="3 3" label={{ position: 'right', value: 'TARGET', fill: '#10b981', fontSize: 8, fontWeight: 900 }} />
-                      <ReferenceLine y={selectedSignal.stopLoss} stroke="#f43f5e" strokeDasharray="3 3" label={{ position: 'right', value: 'STOP LOSS', fill: '#f43f5e', fontSize: 8, fontWeight: 900 }} />
+                      <Area type="monotone" dataKey="price" stroke={selectedSignal.signal === 'BUY' ? "#10b981" : "#f43f5e"} strokeWidth={3} fill="url(#modalGradientDashboard)" />
+                      <ReferenceLine y={selectedSignal.entry} stroke="#94a3b8" strokeDasharray="5 5" />
+                      <ReferenceLine y={selectedSignal.target} stroke="#10b981" strokeDasharray="3 3" />
+                      <ReferenceLine y={selectedSignal.stopLoss} stroke="#f43f5e" strokeDasharray="3 3" />
                     </AreaChart>
                   </ResponsiveContainer>
                 </div>
@@ -1745,309 +1370,6 @@ const Dashboard: React.FC<{
           </div>
         )}
       </AnimatePresence>
-
-      {/* Chart Section */}
-      <div className="col-span-12 lg:col-span-8 space-y-6">
-        <Card title="Market Sentiment" icon={Activity}>
-          <div className="h-64 mt-4">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={graphData}>
-                <defs>
-                  <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/>
-                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                <XAxis dataKey="time" hide />
-                <YAxis hide domain={['auto', 'auto']} />
-                <Tooltip 
-                  contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px' }}
-                  itemStyle={{ color: '#fff' }}
-                />
-                <Area type="monotone" dataKey="value" stroke="#3b82f6" fillOpacity={1} fill="url(#colorValue)" strokeWidth={3} />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-          <div className="flex justify-between items-center mt-6 p-4 bg-slate-950 rounded-xl border border-slate-800">
-            <div>
-              <p className="text-slate-500 text-xs font-bold uppercase tracking-widest">Nifty 50 Rank</p>
-              <p className="text-xl font-black text-white">22,453.20</p>
-            </div>
-            <div className="text-right">
-              <p className="text-slate-500 text-xs font-bold uppercase tracking-widest">Day Range</p>
-              <div className="w-32 h-1.5 bg-slate-800 rounded-full mt-2 relative">
-                 <div className="absolute left-[40%] w-2 h-2 -top-0.5 bg-blue-500 rounded-full shadow-[0_0_8px_rgba(59,130,246,0.8)]" />
-              </div>
-              <div className="flex justify-between text-[10px] text-slate-500 mt-1 font-bold">
-                <span>22,380</span>
-                <span>22,510</span>
-              </div>
-            </div>
-          </div>
-        </Card>
-
-        <TopMoversIntelligence onSelectStock={onSelectStock} />
-
-        <IntradayBreakouts onSelectStock={onSelectStock} />
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 col-span-12">
-          <Card title="AI Intelligence Hub" icon={Zap}>
-             <div className="space-y-4 pt-2 min-h-[180px]">
-                {aiSignals.length > 0 ? aiSignals.map((signal) => (
-                  <div 
-                    key={signal.symbol} 
-                    onClick={() => onSelectStock(signal.symbol)}
-                    className="p-4 bg-slate-950 rounded-2xl border border-slate-800 flex flex-col gap-4 hover:border-slate-700 transition-all cursor-pointer group relative overflow-hidden"
-                  >
-                    <div className="flex justify-between items-start relative z-10">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-black text-white italic tracking-tighter uppercase">{signal.symbol}</span>
-                          <div className={cn(
-                            "px-2 py-0.5 rounded text-[8px] font-black tracking-widest uppercase",
-                            signal.signal === 'BUY' ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20" : 
-                            signal.signal === 'SELL' ? "bg-rose-500/10 text-rose-500 border border-rose-500/20" : "bg-slate-500/10 text-slate-500 border border-slate-500/20"
-                          )}>
-                            {signal.signal} Signal
-                          </div>
-                        </div>
-                        <p className="text-[10px] text-slate-500 mt-1 italic line-clamp-1 leading-relaxed">
-                          {signal.reasoning}
-                        </p>
-                      </div>
-                      <div className="text-right">
-                        <div className="text-[10px] font-black text-white tracking-widest mb-1">{signal.confidence}% <span className="text-slate-500">CONF.</span></div>
-                        <div className="w-16 h-1 bg-slate-900 rounded-full overflow-hidden border border-slate-800 ml-auto">
-                          <motion.div 
-                            initial={{ width: 0 }}
-                            animate={{ width: `${signal.confidence}%` }}
-                            className={cn(
-                              "h-full",
-                              signal.signal === 'BUY' ? "bg-emerald-500" : 
-                              signal.signal === 'SELL' ? "bg-rose-500" : "bg-slate-500"
-                            )}
-                          />
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="h-20 w-full relative group/chart">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <AreaChart data={signal.history}>
-                          <defs>
-                            <linearGradient id={`gradient-${signal.symbol}`} x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="5%" stopColor={signal.signal === 'BUY' ? "#10b981" : "#f43f5e"} stopOpacity={0.1}/>
-                              <stop offset="95%" stopColor={signal.signal === 'BUY' ? "#10b981" : "#f43f5e"} stopOpacity={0}/>
-                            </linearGradient>
-                          </defs>
-                          <Area 
-                            type="monotone" 
-                            dataKey="price" 
-                            stroke={signal.signal === 'BUY' ? "#10b981" : "#f43f5e"} 
-                            strokeWidth={2} 
-                            fill={`url(#gradient-${signal.symbol})`} 
-                            dot={false}
-                          />
-                          <ReferenceLine y={signal.entry} stroke="#94a3b8" strokeDasharray="3 3" opacity={0.3} />
-                          <ReferenceLine y={signal.target} stroke="#3b82f6" strokeDasharray="3 3" opacity={0.3} />
-                          <ReferenceLine y={signal.stopLoss} stroke="#f43f5e" strokeDasharray="3 3" opacity={0.3} />
-                        </AreaChart>
-                      </ResponsiveContainer>
-                      
-                      {/* Floating Labels on Hover */}
-                      <div className="absolute inset-0 flex flex-col justify-between opacity-0 group-hover/chart:opacity-100 transition-opacity pointer-events-none p-1">
-                         <div className="flex justify-between items-center bg-slate-900/40 backdrop-blur-[2px] rounded px-1.5 py-0.5 border border-white/5 w-fit">
-                            <span className="text-[8px] font-black text-blue-400 uppercase tracking-tighter">TGT: ₹{signal.target}</span>
-                         </div>
-                         <div className="flex justify-between items-center bg-slate-900/40 backdrop-blur-[2px] rounded px-1.5 py-0.5 border border-white/5 w-fit">
-                            <span className="text-[8px] font-black text-rose-400 uppercase tracking-tighter">SL: ₹{signal.stopLoss}</span>
-                         </div>
-                      </div>
-                    </div>
-
-                    <div className="flex justify-between items-center text-[9px] font-black uppercase tracking-widest text-slate-500 border-t border-slate-900 pt-3">
-                      <div className="flex gap-4">
-                        <span>Entry: <span className="text-white">₹{signal.entry}</span></span>
-                      </div>
-                      <div className="flex gap-2">
-                        <button 
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setHistorySymbol(signal.symbol);
-                          }}
-                          className="px-3 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-lg text-slate-400 hover:text-white flex items-center gap-1.5 transition-all group/hist shadow-lg"
-                        >
-                          <History className="w-3 h-3 group-hover/hist:rotate-[-45deg] transition-transform text-blue-500" /> 
-                          View History
-                        </button>
-                        <button 
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setSelectedSignal(signal);
-                          }}
-                          className="px-3 py-1 bg-blue-500/10 hover:bg-blue-500 border border-blue-500/20 hover:border-blue-500 rounded-lg text-blue-500 hover:text-white flex items-center gap-1.5 transition-all shadow-lg"
-                        >
-                          Deep Insight <ArrowUpRight className="w-3 h-3" />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                )) : (
-                  <div className="flex flex-col items-center justify-center py-8">
-                     <Activity className="w-8 h-8 text-slate-800 animate-pulse mb-2" />
-                     <p className="text-slate-600 text-[10px] font-bold uppercase tracking-widest">Ready to analyze market data...</p>
-                  </div>
-                )}
-             </div>
-             {/* BullMQ progress bar */}
-             {isGenerating && queueProgress && queueProgress.total > 0 && (
-               <div className="mt-3 space-y-1">
-                 <div className="flex justify-between text-[9px] font-black text-slate-500 uppercase tracking-widest">
-                   <span>Queue progress</span>
-                   <span>{queueProgress.completed} / {queueProgress.total}</span>
-                 </div>
-                 <div className="h-1 bg-slate-800 rounded-full overflow-hidden">
-                   <div
-                     className="h-full bg-blue-500 transition-all duration-500"
-                     style={{ width: `${Math.round((queueProgress.completed / queueProgress.total) * 100)}%` }}
-                   />
-                 </div>
-               </div>
-             )}
-             <button
-                onClick={handleGenerateSignals}
-                disabled={isGenerating}
-                className={cn(
-                    "w-full mt-4 py-2 border border-slate-800 rounded-xl text-xs font-bold transition-all uppercase tracking-widest flex items-center justify-center gap-2",
-                    isGenerating ? "bg-slate-900 border-slate-800 text-slate-600 cursor-not-allowed" : "text-blue-500 hover:text-white hover:bg-blue-600 hover:border-blue-600"
-                )}
-             >
-                {isGenerating ? (
-                    <>
-                        <Activity className="w-3 h-3 animate-spin" />
-                        {queueProgress
-                          ? `Queued ${queueProgress.total} stocks · ${queueProgress.completed} done`
-                          : 'Enqueuing jobs...'}
-                    </>
-                ) : (
-                    <>
-                        <Zap className="w-3 h-3" />
-                        Generate Signals ({stocks.length} stocks)
-                    </>
-                )}
-             </button>
-          </Card>
-        </div>
-      </div>
-
-      {/* Sidebar Section */}
-      <div className="col-span-12 lg:col-span-4 space-y-6">
-        <Card title="Market Heatmap" icon={Filter}>
-            <div className="grid grid-cols-4 gap-1 h-32">
-                {stocks.map(s => (
-                    <div 
-                        key={s.symbol} 
-                        onClick={() => onSelectStock(s.symbol)}
-                        className={cn(
-                            "rounded-sm transition-all duration-500 cursor-pointer hover:ring-2 hover:ring-white/20 select-none",
-                            s.changePct > 2 ? "bg-emerald-600" : 
-                            s.changePct > 0 ? "bg-emerald-900" : 
-                            s.changePct < -2 ? "bg-rose-600" : "bg-rose-900"
-                        )}
-                        title={`${s.symbol}: ${s.changePct}%`}
-                    />
-                ))}
-            </div>
-            <div className="flex justify-between text-[10px] font-bold text-slate-500 mt-2">
-                <span>BEARISH</span>
-                <span>BULLISH</span>
-            </div>
-        </Card>
-
-        <Card title="Live Market News" icon={Activity}>
-            <div className="flex gap-2 mb-4 overflow-x-auto hide-scrollbar pb-1">
-                {['All', 'Market', 'Stock', 'Economy'].map(cat => (
-                    <button 
-                        key={cat}
-                        onClick={() => setNewsFilter(cat)}
-                        className={cn(
-                            "px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-tighter border transition-all shrink-0",
-                            newsFilter === cat ? "bg-blue-600 border-blue-600 text-white" : "bg-slate-950 border-slate-800 text-slate-500 hover:text-white"
-                        )}
-                    >
-                        {cat}
-                    </button>
-                ))}
-            </div>
-            <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2 hide-scrollbar">
-                {filteredNews.map((item) => (
-                    <div key={item.id} className="group cursor-pointer">
-                        <div className="flex gap-2 items-center mb-1">
-                            <span className={cn(
-                                "text-[8px] font-black px-1.5 py-0.5 rounded uppercase tracking-tighter",
-                                item.category === 'Economy' ? "bg-amber-500/10 text-amber-500" :
-                                item.category === 'Stock' ? "bg-blue-500/10 text-blue-500" : "bg-purple-500/10 text-purple-500"
-                            )}>
-                                {item.category}
-                            </span>
-                            <span className="text-[8px] font-bold text-slate-600 uppercase tracking-widest">{item.time}</span>
-                            <span className="text-[8px] font-black text-slate-800 mx-1">•</span>
-                            <span className="text-[8px] font-black text-blue-500/70 uppercase tracking-widest">{item.source}</span>
-                        </div>
-                        <h4 className="text-xs font-bold text-slate-200 leading-snug group-hover:text-blue-400 transition-colors line-clamp-2">
-                            {item.title}
-                        </h4>
-                        <p className="text-[10px] text-slate-500 line-clamp-2 mt-1 italic leading-relaxed">
-                            {item.summary}
-                        </p>
-                        <div className="flex gap-1 mt-2 flex-wrap">
-                            {item.relatedSymbols?.map(symbol => (
-                                <span key={symbol} className="text-[8px] font-black text-slate-500 bg-slate-950 px-1 border border-slate-800 rounded">
-                                    ${symbol}
-                                </span>
-                            ))}
-                        </div>
-                    </div>
-                ))}
-            </div>
-            <button className="w-full mt-6 py-2 border border-slate-800 rounded-xl text-xs font-bold text-slate-500 hover:text-white hover:border-slate-700 transition-all uppercase tracking-widest">
-                Browse News Hub
-            </button>
-        </Card>
-
-        <Card title="Portfolio Snapshot" icon={PieChart}>
-           <div className="text-center py-4">
-              <h4 className="text-slate-500 text-xs font-bold uppercase tracking-widest mb-1">Unrealized Gain</h4>
-              <p className="text-3xl font-black text-white">₹12,450.40</p>
-              <div className="flex items-center justify-center gap-2 mt-2 text-emerald-400 font-bold text-sm">
-                <ArrowUpRight className="w-4 h-4" />
-                +₹450.20 (3.20%)
-              </div>
-           </div>
-           <div className="mt-4 border-t border-slate-800 pt-4 space-y-3">
-             <div className="flex justify-between text-xs">
-               <span className="text-slate-500 font-medium tracking-tight">Invested Value</span>
-               <span className="text-white font-bold">₹380,000.00</span>
-             </div>
-             <div className="flex justify-between text-xs">
-               <span className="text-slate-500 font-medium tracking-tight">Daily Change</span>
-               <span className="text-emerald-400 font-bold">+₹1,240</span>
-             </div>
-           </div>
-        </Card>
-
-        <div className="relative group cursor-pointer overflow-hidden rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-800 p-6 shadow-2xl">
-           <div className="relative z-10">
-             <h3 className="text-white font-black text-xl leading-tight">ADVANCED BACKTESTING<br/>ENGINE</h3>
-             <p className="text-blue-100/70 text-[10px] font-bold mt-2 uppercase tracking-widest">Test strategies against 10yr NSE history</p>
-             <button className="mt-6 bg-white text-blue-900 text-xs font-black px-4 py-2 rounded-lg items-center inline-flex gap-2 group-hover:gap-3 transition-all">
-                TRY BETA <ArrowUpRight className="w-3 h-3" />
-             </button>
-           </div>
-           <History className="absolute -right-4 -bottom-4 w-32 h-32 text-white/10 -rotate-12 group-hover:scale-110 transition-transform" />
-        </div>
-      </div>
     </div>
   );
 };
@@ -4106,6 +3428,7 @@ const StockDetails: React.FC<{
           { id: 'analysis', label: 'Analysis' },
           { id: 'mf', label: 'MF Insights' },
           { id: 'fno', label: 'F&O Insights' },
+          { id: 'trendlyne', label: 'Trendlyne' },
           { id: 'news', label: 'News Feed' },
         ].map(tab => (
           <button
@@ -4453,7 +3776,15 @@ const StockDetails: React.FC<{
           {activeTab === 'mf' && <MFAnalysis symbol={symbol} />}
           {activeTab === 'news' && <NewsTab symbol={symbol} />}
 
-           {activeTab === 'fno' && (
+          {activeTab === 'trendlyne' && (
+            <div className="space-y-6">
+               <MCErrorBoundary>
+                 <MCStockInfoPanel symbol={symbol} scId={mcScId} section="trendlyne" onSelectStock={onSelectStock} />
+               </MCErrorBoundary>
+            </div>
+          )}
+
+          {activeTab === 'fno' && (
             <div className="space-y-6">
                <OptionChain symbol={symbol} stockPrice={stock?.price ?? 0} />
                <FnOSignals symbol={symbol} />
@@ -4477,14 +3808,13 @@ const StockDetails: React.FC<{
           )}
 
           {/* Other tabs can be implemented similarly */}
-          {activeTab !== 'insights' && activeTab !== 'fno' && activeTab !== 'technicals' && activeTab !== 'fundamentals' && activeTab !== 'financials' && activeTab !== 'peers' && activeTab !== 'mf' && activeTab !== 'news' && activeTab !== 'mc' && (
+          {activeTab !== 'insights' && activeTab !== 'fno' && activeTab !== 'technicals' && activeTab !== 'fundamentals' && activeTab !== 'financials' && activeTab !== 'peers' && activeTab !== 'mf' && activeTab !== 'news' && activeTab !== 'mc' && activeTab !== 'trendlyne' && (
             <div className="flex flex-col items-center justify-center py-20 bg-slate-950 rounded-2xl border border-slate-800 border-dashed">
                <Activity className="w-12 h-12 text-slate-800 animate-pulse mb-4" />
                <h3 className="text-slate-500 font-black text-lg uppercase tracking-tighter italic">Coming to Bharat Stock Pro</h3>
                <p className="text-slate-600 text-[10px] uppercase font-bold tracking-widest mt-2">{activeTab} section under maintenance</p>
             </div>
-          )}
-        </div>
+          )}        </div>
 
         {/* Sidebar Insights */}
         <div className="col-span-12 lg:col-span-4 space-y-6">
@@ -4704,7 +4034,8 @@ export default function App() {
   );
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-200 font-sans selection:bg-blue-500/30 selection:text-white">
+    <div className="min-h-screen bg-slate-950 text-slate-200 font-sans selection:bg-indigo-500/30">
+      <TickerTapeWidget />
       {/* Top Banner Indices */}
       <div className="bg-slate-900 h-10 border-b border-slate-800 overflow-hidden flex items-center overflow-x-auto hide-scrollbar">
         {displayIndices.map((idx: any) => <IndexBar key={idx.name} {...idx} />)}
@@ -4746,7 +4077,19 @@ export default function App() {
               {activeTab === 'dashboard' && <Dashboard stocks={stocks} onNewSignal={addToast} onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />}
               {activeTab === 'top-rated' && <TopRatedStocks onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} />}
               {activeTab === 'indices' && <IndicesPage onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} />}
-              {activeTab === 'market-map' && <MarketMap />}
+              {activeTab === 'market-map' && (
+                <div className="p-6 space-y-6">
+                   <Card title="NSE Market Heatmap" icon={Activity}>
+                      <div className="pt-2">
+                         <MarketHeatmapWidget />
+                      </div>
+                   </Card>
+                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <SectorPerformance />
+                      <SectorHeatmap />
+                   </div>
+                </div>
+              )}
               {activeTab === 'screener' && <Screener stocks={stocks} onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />}
               {activeTab === 'trendlyne' && <TrendlyneScreenerPanel onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} />}
               {activeTab === 'discover' && <div className="p-6"><NSEStockDiscovery onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} /></div>}
@@ -4763,6 +4106,29 @@ export default function App() {
                 />
               )}
               {activeTab === 'backtest' && <Backtest stocks={stocks} />}
+              {activeTab === 'signals' && <DailySignals onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} />}
+              {activeTab === 'strategy' && <StrategyIntelligence onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} />}
+              {activeTab === 'sentiment' && <SentimentIntelligence onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} />}
+              {activeTab === 'economics' && (
+                <div className="p-6 space-y-6">
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <div className="lg:col-span-2">
+                      <Card title="Global Economic Calendar" icon={Globe}>
+                        <div className="pt-2">
+                          <EconomicCalendarWidget />
+                        </div>
+                      </Card>
+                    </div>
+                    <div>
+                      <Card title="Market Sentiment Overview" icon={Activity}>
+                        <div className="pt-2">
+                          <MarketOverviewWidget />
+                        </div>
+                      </Card>
+                    </div>
+                  </div>
+                </div>
+              )}
               {activeTab === 'todo' && <ToDoPage />}
               {activeTab === 'portfolio' && (
                 <div className="p-6">

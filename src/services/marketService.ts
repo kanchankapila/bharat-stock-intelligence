@@ -36,7 +36,9 @@ export function useMarketData() {
     if (isLoadingLive) {
       setIsLoading(true);
     } else if (liveStocks && liveStocks.length > 0) {
-      setStocks(liveStocks as MarketData[]);
+      // Deduplicate by symbol to prevent React key warnings
+      const uniqueStocks = Array.from(new Map((liveStocks as MarketData[]).map(s => [s.symbol, s])).values());
+      setStocks(uniqueStocks);
       setIsLoading(false);
       setError(null);
     } else {

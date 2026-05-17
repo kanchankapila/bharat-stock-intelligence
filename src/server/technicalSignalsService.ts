@@ -1,0 +1,994 @@
+/**
+ * Technical Signals Service
+ *
+ * Scans all stocks in stock_ohlcv and detects 7 daily technical patterns:
+ *   1. RSI Bullish Divergence      — price falls, RSI holds/rises above SMA200
+ *   2. Hidden Bullish Divergence   — price higher-low, RSI lower-low (trend continuation)
+ *   3. Resistance Breakout         — price > 20-day high on ≥1.5× average volume
+ *   4. MACD Bullish Crossover      — MACD crossed above signal line today
+ *   5. Bollinger Band Compression  — BB width at 60-day low (coiling spring)
+ *   6. Golden Cross                — SMA50 just crossed above SMA200
+ *   7. Oversold Recovery           — RSI bounced from <35 to >40, price rising
+ *
+ * Signals are scored 0–10 (capped). Top stocks get AI insights via Anthropic API.
+ * Results delivered to Telegram if TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID are set.
+ *
+ * Risk-free rate: 4% p.a. (Indian T-bill proxy)
+ */
+
+import db from './db';
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+export type SignalType =
+  | 'RSI_DIVERGENCE'
+  | 'HIDDEN_DIVERGENCE'
+  | 'RESISTANCE_BREAKOUT'
+  | 'MACD_CROSSOVER'
+  | 'BB_COMPRESSION'
+  | 'GOLDEN_CROSS'
+  | 'OVERSOLD_RECOVERY'
+  | 'EMA_BULL_STACK'
+  | 'WEEK_52_BREAKOUT'
+  | 'BULLISH_ENGULFING'
+  | 'SUPERTREND_CROSS'
+  | 'NR7_COMPRESSION'
+  | 'VOLUME_ACCUMULATION'
+  | 'NEAR_52W_HIGH'
+  | 'CONSECUTIVE_STRENGTH'
+  | 'ATR_CONTRACTION';
+
+export type SignalStrength = 'HIGH' | 'MEDIUM' | 'WATCH';
+
+export interface TechSignal {
+  type: SignalType;
+  strength: SignalStrength;
+  detail: string;
+}
+
+export interface SignalResult {
+  symbol: string;
+  name?: string;
+  sector?: string;
+  cmp: number;
+  changePct: number;
+  rsi: number;
+  sma50: number;
+  sma200: number;
+  macd: number;
+  macdSignal: number;
+  bbWidth: number;
+  volumeRatio: number;
+  aboveSma200: boolean;
+  signals: TechSignal[];
+  signalScore: number;
+  aiInsight?: string;
+  entryZone?: string;
+  stopLoss?: string;
+  targets?: string;
+  setupQuality?: string;
+  timeHorizon?: string;
+}
+
+export interface TechnicalSignalsProgress {
+  isRunning: boolean;
+  totalSymbols: number;
+  processed: number;
+  found: number;
+  startedAt: string | null;
+  completedAt: string | null;
+  lastError: string | null;
+}
+
+// ─── Progress state ───────────────────────────────────────────────────────────
+
+let progress: TechnicalSignalsProgress = {
+  isRunning: false,
+  totalSymbols: 0,
+  processed: 0,
+  found: 0,
+  startedAt: null,
+  completedAt: null,
+  lastError: null,
+};
+
+export function getTechnicalSignalsProgress(): TechnicalSignalsProgress {
+  return { ...progress };
+}
+
+export function getTechnicalSignalCount(): number {
+  const today = new Date().toISOString().slice(0, 10);
+  return (db.prepare(
+    'SELECT COUNT(*) as n FROM technical_signals WHERE date = ?'
+  ).get(today) as { n: number }).n;
+}
+
+// ─── Indicator Math ───────────────────────────────────────────────────────────
+
+interface OHLCVRow { date: string; open: number; high: number; low: number; close: number; volume: number }
+
+function ema(values: number[], period: number): number[] {
+  const k = 2 / (period + 1);
+  const out: number[] = [values[0]];
+  for (let i = 1; i < values.length; i++) {
+    out.push(values[i] * k + out[i - 1] * (1 - k));
+  }
+  return out;
+}
+
+function smaArr(values: number[], period: number): (number | null)[] {
+  return values.map((_, i) => {
+    if (i < period - 1) return null;
+    let sum = 0;
+    for (let j = i - period + 1; j <= i; j++) sum += values[j];
+    return sum / period;
+  });
+}
+
+// Wilder's RSI
+function computeRSI(closes: number[], period = 14): (number | null)[] {
+  const result: (number | null)[] = new Array(closes.length).fill(null);
+  if (closes.length < period + 1) return result;
+
+  const deltas = closes.slice(1).map((c, i) => c - closes[i]);
+  let avgGain = 0, avgLoss = 0;
+  for (let i = 0; i < period; i++) {
+    avgGain += Math.max(deltas[i], 0);
+    avgLoss += Math.max(-deltas[i], 0);
+  }
+  avgGain /= period;
+  avgLoss /= period;
+  result[period] = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
+
+  for (let i = period; i < deltas.length; i++) {
+    avgGain = (avgGain * (period - 1) + Math.max(deltas[i], 0)) / period;
+    avgLoss = (avgLoss * (period - 1) + Math.max(-deltas[i], 0)) / period;
+    result[i + 1] = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
+  }
+  return result;
+}
+
+function computeMACD(closes: number[]): { macdLine: number[]; signalLine: number[] } {
+  const ema12 = ema(closes, 12);
+  const ema26 = ema(closes, 26);
+  const macdLine = ema12.map((v, i) => v - ema26[i]);
+  const signalLine = ema(macdLine, 9);
+  return { macdLine, signalLine };
+}
+
+function computeBBWidth(closes: number[], period = 20): (number | null)[] {
+  return closes.map((_, i) => {
+    if (i < period - 1) return null;
+    const slice = closes.slice(i - period + 1, i + 1);
+    const mean = slice.reduce((a, b) => a + b, 0) / period;
+    const std  = Math.sqrt(slice.reduce((a, b) => a + (b - mean) ** 2, 0) / period);
+    return mean > 0 ? ((mean + 2 * std) - (mean - 2 * std)) / mean : null;
+  });
+}
+
+// SuperTrend(period, multiplier) — returns per-bar bullish flag array
+function computeSuperTrend(rows: OHLCVRow[], period = 7, multiplier = 3): boolean[] {
+  const n = rows.length;
+  const bullish = new Array<boolean>(n).fill(false);
+  if (n < period + 2) return bullish;
+
+  // Wilder ATR
+  const tr: number[] = [0];
+  for (let i = 1; i < n; i++) {
+    tr.push(Math.max(
+      rows[i].high - rows[i].low,
+      Math.abs(rows[i].high - rows[i - 1].close),
+      Math.abs(rows[i].low  - rows[i - 1].close),
+    ));
+  }
+  let atrVal = tr.slice(1, period + 1).reduce((a, b) => a + b, 0) / period;
+  const atr = new Array<number>(n).fill(0);
+  atr[period] = atrVal;
+  for (let i = period + 1; i < n; i++) {
+    atrVal = (atrVal * (period - 1) + tr[i]) / period;
+    atr[i] = atrVal;
+  }
+
+  // Final bands with continuity rule
+  const up = new Array<number>(n).fill(0);
+  const dn = new Array<number>(n).fill(0);
+
+  for (let i = period; i < n; i++) {
+    const mid  = (rows[i].high + rows[i].low) / 2;
+    const bUp  = mid + multiplier * atr[i];
+    const bDn  = mid - multiplier * atr[i];
+    const pClose = rows[i - 1].close;
+    up[i] = (i > period && bUp < up[i - 1]) || pClose > up[i - 1] ? bUp : up[i - 1];
+    dn[i] = (i > period && bDn > dn[i - 1]) || pClose < dn[i - 1] ? bDn : dn[i - 1];
+  }
+
+  // Determine trend direction
+  for (let i = period; i < n; i++) {
+    if (i === period) {
+      bullish[i] = rows[i].close > up[i];
+    } else if (!bullish[i - 1]) {
+      bullish[i] = rows[i].close > up[i];
+    } else {
+      bullish[i] = rows[i].close >= dn[i];
+    }
+  }
+  return bullish;
+}
+
+// Wilder ATR(14) — returns per-bar ATR values (0 for bars with insufficient history)
+function computeATR(rows: OHLCVRow[], period = 14): number[] {
+  const n = rows.length;
+  const atr = new Array<number>(n).fill(0);
+  if (n < period + 1) return atr;
+
+  const tr: number[] = [0];
+  for (let i = 1; i < n; i++) {
+    tr.push(Math.max(
+      rows[i].high - rows[i].low,
+      Math.abs(rows[i].high - rows[i - 1].close),
+      Math.abs(rows[i].low  - rows[i - 1].close),
+    ));
+  }
+
+  let val = tr.slice(1, period + 1).reduce((a, b) => a + b, 0) / period;
+  atr[period] = val;
+  for (let i = period + 1; i < n; i++) {
+    val = (val * (period - 1) + tr[i]) / period;
+    atr[i] = val;
+  }
+  return atr;
+}
+
+// ─── Signal Scoring ───────────────────────────────────────────────────────────
+
+const SIGNAL_SCORES: Record<SignalType, Record<SignalStrength, number>> = {
+  RSI_DIVERGENCE:     { HIGH: 4, MEDIUM: 2, WATCH: 1 },
+  HIDDEN_DIVERGENCE:  { HIGH: 5, MEDIUM: 3, WATCH: 1 },
+  RESISTANCE_BREAKOUT:{ HIGH: 4, MEDIUM: 3, WATCH: 1 },
+  MACD_CROSSOVER:     { HIGH: 3, MEDIUM: 2, WATCH: 1 },
+  BB_COMPRESSION:     { HIGH: 2, MEDIUM: 1, WATCH: 1 },
+  GOLDEN_CROSS:       { HIGH: 5, MEDIUM: 3, WATCH: 2 },
+  OVERSOLD_RECOVERY:  { HIGH: 3, MEDIUM: 2, WATCH: 1 },
+  EMA_BULL_STACK:     { HIGH: 4, MEDIUM: 3, WATCH: 1 },
+  WEEK_52_BREAKOUT:   { HIGH: 5, MEDIUM: 4, WATCH: 2 },
+  BULLISH_ENGULFING:  { HIGH: 4, MEDIUM: 2, WATCH: 1 },
+  SUPERTREND_CROSS:   { HIGH: 4, MEDIUM: 3, WATCH: 1 },
+  NR7_COMPRESSION:    { HIGH: 2, MEDIUM: 1, WATCH: 1 },
+  VOLUME_ACCUMULATION:{ HIGH: 5, MEDIUM: 3, WATCH: 2 },
+  NEAR_52W_HIGH:      { HIGH: 3, MEDIUM: 2, WATCH: 1 },
+  CONSECUTIVE_STRENGTH:{ HIGH: 4, MEDIUM: 2, WATCH: 1 },
+  ATR_CONTRACTION:    { HIGH: 3, MEDIUM: 2, WATCH: 1 },
+};
+
+function scoreSignals(signals: TechSignal[]): number {
+  return Math.min(
+    signals.reduce((t, s) => t + (SIGNAL_SCORES[s.type]?.[s.strength] ?? 0), 0),
+    10
+  );
+}
+
+// ─── Signal Detection ─────────────────────────────────────────────────────────
+
+function detectSignals(rows: OHLCVRow[]): {
+  signals: TechSignal[];
+  rsi: number; sma50: number; sma200: number;
+  macd: number; macdSignal: number; bbWidth: number;
+  volumeRatio: number; aboveSma200: boolean;
+} {
+  const closes  = rows.map(r => r.close);
+  const opens   = rows.map(r => r.open);
+  const highs   = rows.map(r => r.high);
+  const lows    = rows.map(r => r.low);
+  const volumes = rows.map(r => r.volume);
+  const n = closes.length;
+
+  const rsiArr     = computeRSI(closes);
+  const sma50Arr   = smaArr(closes, 50);
+  const sma200Arr  = smaArr(closes, 200);
+  const bbWidths   = computeBBWidth(closes);
+  const { macdLine, signalLine } = computeMACD(closes);
+  const vol10Arr   = smaArr(volumes, 10);
+  const ema8Arr    = ema(closes, 8);
+  const ema21Arr   = ema(closes, 21);
+  const ema50Arr   = ema(closes, 50);
+  const stBullish  = computeSuperTrend(rows);
+  const atrArr     = computeATR(rows);
+  const vol20Arr   = smaArr(volumes, 20);
+
+  const latestRSI    = rsiArr[n - 1]    ?? 50;
+  const latestSMA50  = sma50Arr[n - 1]  ?? closes[n - 1];
+  const latestSMA200 = sma200Arr[n - 1] ?? closes[n - 1];
+  const latestBBW    = bbWidths[n - 1]  ?? 0;
+  const latestMACD   = macdLine[n - 1];
+  const latestSig    = signalLine[n - 1];
+  const vol10        = vol10Arr[n - 1];
+  const volRatio     = vol10 != null && vol10 > 0 ? volumes[n - 1] / vol10 : 1;
+  const aboveSma200  = closes[n - 1] > latestSMA200;
+
+  const signals: TechSignal[] = [];
+
+  // 1. RSI Bullish Divergence (price lower 5D, RSI higher 5D, RSI 35-60, above SMA200)
+  if (n >= 7 && aboveSma200) {
+    const rsi5  = rsiArr[n - 6] ?? 50;
+    if (closes[n - 1] < closes[n - 6] && latestRSI > rsi5 &&
+        latestRSI >= 35 && latestRSI <= 60) {
+      const drop = ((closes[n - 6] - closes[n - 1]) / closes[n - 6]) * 100;
+      const gain = latestRSI - rsi5;
+      signals.push({
+        type: 'RSI_DIVERGENCE',
+        strength: gain > 3 ? 'HIGH' : 'MEDIUM',
+        detail: `Price fell ${drop.toFixed(1)}% but RSI rose ${gain.toFixed(1)}pts — momentum diverging`,
+      });
+    }
+  }
+
+  // 2. Hidden Bullish Divergence (price HL 10D, RSI LL, RSI 40-65, above SMA200)
+  if (n >= 12 && aboveSma200) {
+    const rsi10 = rsiArr[n - 11] ?? 50;
+    if (closes[n - 1] > closes[n - 11] && latestRSI < rsi10 &&
+        latestRSI >= 40 && latestRSI <= 65) {
+      signals.push({
+        type: 'HIDDEN_DIVERGENCE',
+        strength: 'HIGH',
+        detail: 'Hidden bullish divergence: price higher-low + RSI lower-low — uptrend continuation',
+      });
+    }
+  }
+
+  // 3. Resistance Breakout (price > 20D high, volume > 1.5× avg)
+  if (n >= 22) {
+    const hi20 = Math.max(...highs.slice(n - 21, n - 1));
+    if (closes[n - 1] > hi20 && volRatio > 1.5) {
+      signals.push({
+        type: 'RESISTANCE_BREAKOUT',
+        strength: volRatio > 2.0 ? 'HIGH' : 'MEDIUM',
+        detail: `Broke 20-day high ₹${hi20.toFixed(2)} on ${volRatio.toFixed(1)}× avg volume`,
+      });
+    }
+  }
+
+  // 4. MACD Bullish Crossover (crossed above signal today, above SMA200)
+  if (n >= 2 && aboveSma200) {
+    if (macdLine[n - 1] > signalLine[n - 1] && macdLine[n - 2] < signalLine[n - 2]) {
+      signals.push({
+        type: 'MACD_CROSSOVER',
+        strength: 'MEDIUM',
+        detail: 'MACD crossed above signal line — histogram turning positive',
+      });
+    }
+  }
+
+  // 5. BB Compression (BB width at 60D low, above SMA200)
+  if (n >= 62 && aboveSma200) {
+    const bbs = bbWidths.slice(n - 61, n - 1).filter((v): v is number => v != null);
+    if (bbs.length > 0) {
+      const bb60min = Math.min(...bbs);
+      if (latestBBW < bb60min * 1.15) {
+        signals.push({
+          type: 'BB_COMPRESSION',
+          strength: 'WATCH',
+          detail: 'Bollinger Band width at 60-day low — volatility squeeze, breakout imminent',
+        });
+      }
+    }
+  }
+
+  // 6. Golden Cross (SMA50 just crossed above SMA200 today)
+  if (n >= 202) {
+    const sma50prev  = sma50Arr[n - 2]  ?? 0;
+    const sma200prev = sma200Arr[n - 2] ?? 0;
+    if (latestSMA50 > latestSMA200 && sma50prev < sma200prev) {
+      signals.push({
+        type: 'GOLDEN_CROSS',
+        strength: 'HIGH',
+        detail: 'SMA50 just crossed above SMA200 — golden cross, strong long-term buy signal',
+      });
+    }
+  }
+
+  // 7. Oversold Recovery (RSI was <35 four sessions ago, now >40, price bouncing, above SMA200)
+  if (n >= 6 && aboveSma200) {
+    const rsi4 = rsiArr[n - 5] ?? 50;
+    if (rsi4 < 35 && latestRSI > 40 && closes[n - 1] > closes[n - 5]) {
+      signals.push({
+        type: 'OVERSOLD_RECOVERY',
+        strength: 'MEDIUM',
+        detail: `RSI recovering from oversold (<35) — bounce play confirmed above SMA200`,
+      });
+    }
+  }
+
+  // 8. EMA Bull Stack (EMA8 > EMA21 > EMA50 > SMA200, price above all, RSI 45-70)
+  if (n >= 55 && aboveSma200) {
+    const e8  = ema8Arr[n - 1];
+    const e21 = ema21Arr[n - 1];
+    const e50 = ema50Arr[n - 1];
+    const c   = closes[n - 1];
+    if (e8 > e21 && e21 > e50 && e50 > latestSMA200 &&
+        c > e8 && latestRSI >= 45 && latestRSI <= 70) {
+      const e8prev  = ema8Arr[n - 4];
+      const e21prev = ema21Arr[n - 4];
+      const spread  = ((e8 - e21) / e21) * 100;
+      const justAligned = e8prev < e21prev && e8 > e21;
+      signals.push({
+        type: 'EMA_BULL_STACK',
+        strength: justAligned ? 'HIGH' : spread > 0.5 ? 'MEDIUM' : 'WATCH',
+        detail: `EMA8 > EMA21 > EMA50 > SMA200 — perfect bull stack, price leading EMAs (spread ${spread.toFixed(2)}%)`,
+      });
+    }
+  }
+
+  // 9. 52-Week High Breakout (close > max of prior 252-day highs)
+  if (n >= 254) {
+    const hi252 = Math.max(...highs.slice(n - 253, n - 1));
+    if (closes[n - 1] > hi252) {
+      signals.push({
+        type: 'WEEK_52_BREAKOUT',
+        strength: volRatio > 2.0 ? 'HIGH' : volRatio > 1.3 ? 'MEDIUM' : 'WATCH',
+        detail: `Breaking 52-week high of ₹${hi252.toFixed(2)} on ${volRatio.toFixed(1)}× volume — price discovery mode`,
+      });
+    }
+  }
+
+  // 10. Bullish Engulfing (today's candle fully engulfs yesterday's bearish body, volume surge)
+  if (n >= 3 && aboveSma200) {
+    const todayOpen  = opens[n - 1];
+    const todayClose = closes[n - 1];
+    const prevOpen   = opens[n - 2];
+    const prevClose  = closes[n - 2];
+    const prevBearish = prevClose < prevOpen;
+    const engulfs     = todayOpen <= prevClose && todayClose >= prevOpen;
+    const bullishToday = todayClose > todayOpen;
+    if (prevBearish && engulfs && bullishToday && volRatio > 1.2) {
+      const bodyPct = ((todayClose - todayOpen) / todayOpen) * 100;
+      signals.push({
+        type: 'BULLISH_ENGULFING',
+        strength: volRatio > 2.0 && bodyPct > 1.5 ? 'HIGH' : 'MEDIUM',
+        detail: `Bullish engulfing candle (body +${bodyPct.toFixed(1)}%) on ${volRatio.toFixed(1)}× volume — bears trapped`,
+      });
+    }
+  }
+
+  // 11. SuperTrend Crossover (was bearish yesterday, flipped bullish today)
+  if (n >= 10) {
+    if (!stBullish[n - 2] && stBullish[n - 1]) {
+      signals.push({
+        type: 'SUPERTREND_CROSS',
+        strength: aboveSma200 ? 'HIGH' : 'MEDIUM',
+        detail: `SuperTrend(7,3) just flipped bullish — trend reversal signal${aboveSma200 ? ' above SMA200' : ''}`,
+      });
+    }
+  }
+
+  // 12. NR7 Compression (today's high-low range is narrowest of last 7 bars, above SMA200)
+  if (n >= 8 && aboveSma200) {
+    const todayRange = highs[n - 1] - lows[n - 1];
+    const ranges7 = Array.from({ length: 6 }, (_, i) => highs[n - 2 - i] - lows[n - 2 - i]);
+    if (todayRange < Math.min(...ranges7) && todayRange > 0) {
+      const avgRange = ranges7.reduce((a, b) => a + b, 0) / 6;
+      const compression = (1 - todayRange / avgRange) * 100;
+      signals.push({
+        type: 'NR7_COMPRESSION',
+        strength: compression > 50 ? 'MEDIUM' : 'WATCH',
+        detail: `NR7: narrowest range in 7 days (${compression.toFixed(0)}% tighter than avg) — coiling before breakout`,
+      });
+    }
+  }
+
+  // 13. Volume Accumulation — stealth institutional buying (pre-earnings / pre-news smart money)
+  // 3+ of last 5 sessions had volume > 2× 20D avg, but price is flat (<5% total move)
+  // Mirrors what happened in Balaji Amines, NLC India, Saregama before their 15-20% moves
+  if (n >= 22) {
+    const vol20 = vol20Arr[n - 1];
+    if (vol20 != null && vol20 > 0) {
+      let heavyVolDays = 0;
+      for (let i = n - 5; i < n; i++) {
+        if (volumes[i] > 2 * vol20) heavyVolDays++;
+      }
+      const priceMove5d = Math.abs((closes[n - 1] - closes[n - 6]) / closes[n - 6]) * 100;
+      if (heavyVolDays >= 3 && priceMove5d < 5) {
+        const totalVolMult = volumes.slice(n - 5).reduce((a, b) => a + b, 0) / (5 * vol20);
+        signals.push({
+          type: 'VOLUME_ACCUMULATION',
+          strength: heavyVolDays >= 4 && priceMove5d < 3 ? 'HIGH' : 'MEDIUM',
+          detail: `${heavyVolDays}/5 sessions with >2× avg volume — price only moved ${priceMove5d.toFixed(1)}%, avg volume ${totalVolMult.toFixed(1)}× normal (smart money accumulating)`,
+        });
+      }
+    }
+  }
+
+  // 14. Near 52-Week High — price within 3% of 52W high but not yet broken (pre-breakout watch)
+  // Catches stocks like Craftsman Automation days before it hit the all-time high
+  if (n >= 254) {
+    const hi252 = Math.max(...highs.slice(n - 253, n - 1));
+    const proximity = (hi252 - closes[n - 1]) / hi252 * 100;
+    if (proximity > 0 && proximity <= 3 && closes[n - 1] > latestSMA50) {
+      signals.push({
+        type: 'NEAR_52W_HIGH',
+        strength: proximity <= 1 ? 'HIGH' : proximity <= 2 ? 'MEDIUM' : 'WATCH',
+        detail: `Just ${proximity.toFixed(1)}% below 52-week high of ₹${hi252.toFixed(2)} — breakout imminent if volume confirms`,
+      });
+    }
+  }
+
+  // 15. Consecutive Strength — 4+ days of higher closes with non-declining volume (momentum build)
+  // Pattern seen in TVS Holdings, Afcons before their move accelerated
+  if (n >= 7) {
+    let streak = 0;
+    let volumeConfirmed = true;
+    for (let i = n - 1; i >= n - 6 && i >= 1; i--) {
+      if (closes[i] > closes[i - 1]) {
+        streak++;
+        if (volumes[i] < volumes[i - 1] * 0.7) volumeConfirmed = false;
+      } else {
+        break;
+      }
+    }
+    if (streak >= 4 && aboveSma200) {
+      const totalGain = ((closes[n - 1] - closes[n - 1 - streak]) / closes[n - 1 - streak]) * 100;
+      signals.push({
+        type: 'CONSECUTIVE_STRENGTH',
+        strength: streak >= 5 && volumeConfirmed ? 'HIGH' : streak >= 5 ? 'MEDIUM' : 'WATCH',
+        detail: `${streak} consecutive up-closes, +${totalGain.toFixed(1)}% total${volumeConfirmed ? ' with confirming volume' : ''} — sustained buying pressure`,
+      });
+    }
+  }
+
+  // 16. ATR Contraction — 14-day ATR at a 60-day low (multi-week volatility squeeze before earnings moves)
+  // Longer-timeframe version of BB Compression; caught Saregama, NLC India before their 15% surges
+  if (n >= 76) {
+    const todayATR = atrArr[n - 1];
+    if (todayATR > 0) {
+      const atr60 = atrArr.slice(n - 61, n - 1).filter(v => v > 0);
+      if (atr60.length > 0) {
+        const minATR60 = Math.min(...atr60);
+        const avgATR60 = atr60.reduce((a, b) => a + b, 0) / atr60.length;
+        const contractionPct = (1 - todayATR / avgATR60) * 100;
+        if (todayATR <= minATR60 * 1.05 && aboveSma200) {
+          signals.push({
+            type: 'ATR_CONTRACTION',
+            strength: contractionPct > 50 ? 'HIGH' : contractionPct > 30 ? 'MEDIUM' : 'WATCH',
+            detail: `ATR(14) at ${contractionPct.toFixed(0)}% below 60-day avg — deepest volatility contraction in 3 months, explosive move loading`,
+          });
+        }
+      }
+    }
+  }
+
+  return {
+    signals,
+    rsi: latestRSI,
+    sma50: latestSMA50,
+    sma200: latestSMA200,
+    macd: latestMACD,
+    macdSignal: latestSig,
+    bbWidth: latestBBW,
+    volumeRatio: volRatio,
+    aboveSma200,
+  };
+}
+
+// ─── AI Insights (Anthropic API) ──────────────────────────────────────────────
+
+async function getAIInsight(r: SignalResult): Promise<{
+  aiInsight: string; entryZone: string; stopLoss: string;
+  targets: string; setupQuality: string; timeHorizon: string;
+}> {
+  const empty = { aiInsight: '', entryZone: '', stopLoss: '', targets: '', setupQuality: '', timeHorizon: '' };
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return empty;
+
+  const sma200gap = r.sma200 > 0 ? ((r.cmp - r.sma200) / r.sma200 * 100).toFixed(1) : '0';
+  const sma50gap  = r.sma50  > 0 ? ((r.cmp - r.sma50)  / r.sma50  * 100).toFixed(1) : '0';
+  const sigDetail = r.signals.map(s => `• ${s.type} (${s.strength}): ${s.detail}`).join('\n');
+
+  const prompt = `You are a SEBI-registered technical analyst covering Indian equities (NSE).
+Analyse this stock and give a CONCISE trading setup.
+
+Stock: ${r.name ?? r.symbol} (${r.symbol})
+CMP: ₹${r.cmp.toFixed(2)}  |  Day Change: ${r.changePct.toFixed(2)}%
+RSI(14): ${r.rsi.toFixed(1)}  |  SMA50: ₹${r.sma50.toFixed(2)}  |  SMA200: ₹${r.sma200.toFixed(2)}
+vs SMA50: ${sma50gap}%  |  vs SMA200: ${sma200gap}%
+Volume ratio: ${r.volumeRatio.toFixed(2)}x 10-day average
+
+Signals detected:
+${sigDetail}
+
+Respond in EXACTLY this JSON format (no markdown, no preamble):
+{"insight":"2-sentence plain English summary of why this is a setup worth watching","entry_zone":"₹X – ₹Y","stop_loss":"₹Z (below key level)","targets":"T1: ₹A | T2: ₹B | T3: ₹C","setup_quality":"High / Medium / Low","time_horizon":"Swing (3-7D) / Positional (2-4W)"}`;
+
+  try {
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: process.env.ANTHROPIC_MODEL ?? 'claude-haiku-4-5-20251001',
+        max_tokens: 400,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    });
+    const data = await resp.json() as { content?: { text?: string }[] };
+    const text = data?.content?.[0]?.text?.trim() ?? '';
+    const parsed = JSON.parse(text);
+    return {
+      aiInsight:    parsed.insight        ?? '',
+      entryZone:    parsed.entry_zone     ?? '',
+      stopLoss:     parsed.stop_loss      ?? '',
+      targets:      parsed.targets        ?? '',
+      setupQuality: parsed.setup_quality  ?? '',
+      timeHorizon:  parsed.time_horizon   ?? '',
+    };
+  } catch (e) {
+    console.error('[SIGNALS] AI insight failed for', r.symbol, ':', (e as Error).message);
+    return empty;
+  }
+}
+
+// ─── Telegram Delivery ────────────────────────────────────────────────────────
+
+const STRENGTH_EMOJI: Record<SignalStrength, string> = { HIGH: '🟢', MEDIUM: '🟡', WATCH: '⚪' };
+const SIG_SHORT: Record<SignalType, string> = {
+  RSI_DIVERGENCE:     'RSI Div',
+  HIDDEN_DIVERGENCE:  'Hidden Div',
+  RESISTANCE_BREAKOUT:'Breakout',
+  MACD_CROSSOVER:     'MACD ✗',
+  BB_COMPRESSION:     'Squeeze',
+  GOLDEN_CROSS:       'Golden ✗',
+  OVERSOLD_RECOVERY:  'Oversold↑',
+  EMA_BULL_STACK:      'EMA Stack',
+  WEEK_52_BREAKOUT:    '52W High',
+  BULLISH_ENGULFING:   'Engulfing',
+  SUPERTREND_CROSS:    'SuperTrend↑',
+  NR7_COMPRESSION:     'NR7',
+  VOLUME_ACCUMULATION: 'Vol Accum',
+  NEAR_52W_HIGH:       'Near 52W',
+  CONSECUTIVE_STRENGTH:'Consec↑',
+  ATR_CONTRACTION:     'ATR Squeeze',
+};
+
+async function sendTelegramSignals(results: SignalResult[], date: string): Promise<void> {
+  const token  = process.env.TELEGRAM_BOT_TOKEN;
+  const chatId = process.env.TELEGRAM_CHAT_ID;
+  if (!token || !chatId) return;
+
+  let body = '';
+  for (const r of results.slice(0, 6)) {
+    const e   = r.changePct >= 0 ? '📈' : '📉';
+    const sig = r.signals.map(s => `${STRENGTH_EMOJI[s.strength]} ${SIG_SHORT[s.type]}`).join('  ');
+    body += `*${r.name ?? r.symbol}* (${r.symbol})\n`;
+    body += `₹${r.cmp.toFixed(2)} ${e}${Math.abs(r.changePct).toFixed(1)}%  RSI:${r.rsi.toFixed(0)}  Score:${r.signalScore}/10\n`;
+    body += `${sig}\n`;
+    if (r.entryZone) body += `Entry: ${r.entryZone}  SL: ${r.stopLoss}\n`;
+    if (r.targets)   body += `Targets: ${r.targets}\n`;
+    if (r.aiInsight) body += `_${r.aiInsight.slice(0, 180)}_\n`;
+    body += '\n';
+  }
+
+  const message = `🇮🇳 *NSE DAILY SCAN — ${date}*\n${'─'.repeat(28)}\n\n${body}⚠️ _Educational only. Not SEBI advice. DYOR._`;
+
+  try {
+    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text: message, parse_mode: 'Markdown' }),
+    });
+    console.log('[SIGNALS] Telegram notification sent');
+  } catch (e) {
+    console.error('[SIGNALS] Telegram delivery failed:', (e as Error).message);
+  }
+}
+
+// ─── Main Scan ────────────────────────────────────────────────────────────────
+
+export async function runTechnicalSignalScan(options: {
+  minScore?: number;
+  aiInsightsLimit?: number;
+  date?: string;
+} = {}): Promise<void> {
+  if (progress.isRunning) {
+    console.log('[SIGNALS] Scan already in progress, skipping');
+    return;
+  }
+
+  const { minScore = 2, aiInsightsLimit = 10 } = options;
+  const scanDate = options.date ?? new Date().toISOString().slice(0, 10);
+
+  progress = {
+    isRunning: true,
+    totalSymbols: 0,
+    processed: 0,
+    found: 0,
+    startedAt: new Date().toISOString(),
+    completedAt: null,
+    lastError: null,
+  };
+
+  try {
+    console.log('[SIGNALS] Loading OHLCV data...');
+    const allRows = db.prepare(
+      `SELECT symbol, date, open, high, low, close, volume FROM stock_ohlcv ORDER BY symbol, date ASC`
+    ).all() as (OHLCVRow & { symbol: string })[];
+
+    // Group by symbol
+    const bySymbol = new Map<string, OHLCVRow[]>();
+    for (const r of allRows) {
+      if (!bySymbol.has(r.symbol)) bySymbol.set(r.symbol, []);
+      bySymbol.get(r.symbol)!.push(r);
+    }
+
+    // Load stock names + sectors
+    const meta = new Map<string, { name: string; sector: string }>();
+    (db.prepare('SELECT symbol, name, sector FROM nse_stocks').all() as
+      { symbol: string; name: string; sector: string }[])
+      .forEach(r => meta.set(r.symbol, { name: r.name, sector: r.sector }));
+
+    const eligible = [...bySymbol.entries()].filter(([, rows]) => rows.length >= 22);
+    progress.totalSymbols = eligible.length;
+
+    console.log(`[SIGNALS] Scanning ${eligible.length} symbols for patterns...`);
+
+    const results: SignalResult[] = [];
+
+    for (const [symbol, rows] of eligible) {
+      try {
+        const { signals, ...indicators } = detectSignals(rows);
+        progress.processed++;
+
+        if (signals.length === 0) continue;
+        const score = scoreSignals(signals);
+        if (score < minScore) continue;
+
+        const latest = rows[rows.length - 1];
+        const prev   = rows[rows.length - 2];
+        const changePct = prev.close > 0 ? ((latest.close - prev.close) / prev.close) * 100 : 0;
+        const m = meta.get(symbol);
+
+        results.push({
+          symbol,
+          name:    m?.name,
+          sector:  m?.sector,
+          cmp:     latest.close,
+          changePct,
+          signals,
+          signalScore: score,
+          ...indicators,
+        });
+      } catch {
+        // skip malformed symbol data
+      }
+    }
+
+    results.sort((a, b) => b.signalScore - a.signalScore);
+    progress.found = results.length;
+    console.log(`[SIGNALS] Found ${results.length} setups (score ≥ ${minScore})`);
+
+    // AI insights for top N
+    const aiLimit = Math.min(aiInsightsLimit, results.length);
+    if (aiLimit > 0 && process.env.ANTHROPIC_API_KEY) {
+      console.log(`[SIGNALS] Fetching AI insights for top ${aiLimit} stocks...`);
+      for (let i = 0; i < aiLimit; i++) {
+        const insight = await getAIInsight(results[i]);
+        Object.assign(results[i], insight);
+        if (i < aiLimit - 1) await new Promise(r => setTimeout(r, 350));
+      }
+    }
+
+    // Upsert all results into DB
+    const upsert = db.prepare(`
+      INSERT INTO technical_signals (
+        symbol, date, signals_json, signal_score,
+        rsi, sma50, sma200, macd, macd_signal, bb_width, volume_ratio, above_sma200,
+        cmp, change_pct,
+        ai_insight, entry_zone, stop_loss, targets, setup_quality, time_horizon,
+        computed_at
+      ) VALUES (
+        @symbol, @date, @signals_json, @signal_score,
+        @rsi, @sma50, @sma200, @macd, @macd_signal, @bb_width, @volume_ratio, @above_sma200,
+        @cmp, @change_pct,
+        @ai_insight, @entry_zone, @stop_loss, @targets, @setup_quality, @time_horizon,
+        CURRENT_TIMESTAMP
+      )
+      ON CONFLICT(symbol, date) DO UPDATE SET
+        signals_json=excluded.signals_json, signal_score=excluded.signal_score,
+        rsi=excluded.rsi, sma50=excluded.sma50, sma200=excluded.sma200,
+        macd=excluded.macd, macd_signal=excluded.macd_signal,
+        bb_width=excluded.bb_width, volume_ratio=excluded.volume_ratio,
+        above_sma200=excluded.above_sma200,
+        cmp=excluded.cmp, change_pct=excluded.change_pct,
+        ai_insight=excluded.ai_insight, entry_zone=excluded.entry_zone,
+        stop_loss=excluded.stop_loss, targets=excluded.targets,
+        setup_quality=excluded.setup_quality, time_horizon=excluded.time_horizon,
+        computed_at=excluded.computed_at
+    `);
+
+    db.transaction((rows: SignalResult[]) => {
+      for (const r of rows) {
+        upsert.run({
+          symbol: r.symbol, date: scanDate,
+          signals_json: JSON.stringify(r.signals),
+          signal_score: r.signalScore,
+          rsi: r.rsi, sma50: r.sma50, sma200: r.sma200,
+          macd: r.macd, macd_signal: r.macdSignal,
+          bb_width: r.bbWidth, volume_ratio: r.volumeRatio,
+          above_sma200: r.aboveSma200 ? 1 : 0,
+          cmp: r.cmp, change_pct: r.changePct,
+          ai_insight:    r.aiInsight    ?? null,
+          entry_zone:    r.entryZone    ?? null,
+          stop_loss:     r.stopLoss     ?? null,
+          targets:       r.targets      ?? null,
+          setup_quality: r.setupQuality ?? null,
+          time_horizon:  r.timeHorizon  ?? null,
+        });
+      }
+    })(results);
+
+    console.log(`[SIGNALS] Upserted ${results.length} records for ${scanDate}`);
+
+    if (results.length > 0) await sendTelegramSignals(results, scanDate);
+
+    progress.completedAt = new Date().toISOString();
+    progress.isRunning   = false;
+
+  } catch (err) {
+    progress.lastError = (err as Error).message;
+    progress.isRunning = false;
+    console.error('[SIGNALS] Scan failed:', (err as Error).message);
+    throw err;
+  }
+}
+
+// ─── Query Helpers ────────────────────────────────────────────────────────────
+
+export function getTechnicalSignalsForDate(
+  date?: string,
+  minScore = 1,
+  limit = 100
+): Record<string, unknown>[] {
+  const d = date ?? new Date().toISOString().slice(0, 10);
+  return db.prepare(`
+    SELECT ts.*, ns.name, ns.sector
+    FROM technical_signals ts
+    LEFT JOIN nse_stocks ns ON ns.symbol = ts.symbol
+    WHERE ts.date = ? AND ts.signal_score >= ?
+    ORDER BY ts.signal_score DESC
+    LIMIT ?
+  `).all(d, minScore, limit) as Record<string, unknown>[];
+}
+
+export function getSignalDates(): string[] {
+  return (db.prepare(
+    `SELECT DISTINCT date FROM technical_signals ORDER BY date DESC LIMIT 30`
+  ).all() as { date: string }[]).map(r => r.date);
+}
+
+export function getSignalSummary(): {
+  totalToday: number;
+  bySignalType: Record<string, number>;
+  byScore: Record<string, number>;
+  lastComputed: string | null;
+} {
+  const today = new Date().toISOString().slice(0, 10);
+  const totalToday = (db.prepare(
+    `SELECT COUNT(*) as n FROM technical_signals WHERE date = ?`
+  ).get(today) as { n: number }).n;
+
+  const rows = db.prepare(
+    `SELECT signals_json, signal_score FROM technical_signals WHERE date = ?`
+  ).all(today) as { signals_json: string; signal_score: number }[];
+
+  const bySignalType: Record<string, number> = {};
+  const byScore: Record<string, number> = { '1-3': 0, '4-6': 0, '7-10': 0 };
+
+  for (const row of rows) {
+    try {
+      const sigs = JSON.parse(row.signals_json ?? '[]') as { type: string }[];
+      for (const s of sigs) bySignalType[s.type] = (bySignalType[s.type] ?? 0) + 1;
+    } catch { /* skip */ }
+    if (row.signal_score <= 3)      byScore['1-3']++;
+    else if (row.signal_score <= 6) byScore['4-6']++;
+    else                            byScore['7-10']++;
+  }
+
+  const lastComputed = (db.prepare(
+    `SELECT computed_at FROM technical_signals WHERE date = ? ORDER BY computed_at DESC LIMIT 1`
+  ).get(today) as { computed_at: string } | undefined)?.computed_at ?? null;
+
+  return { totalToday, bySignalType, byScore, lastComputed };
+}
+
+export interface SectorSignalStat {
+  sector: string;
+  totalSignals: number;
+  avgScore: number;
+  highScoreCount: number;   // stocks with score >= 7
+  topStocks: {
+    symbol: string;
+    name: string;
+    score: number;
+    cmp: number;
+    changePct: number;
+    signalTypes: string[];
+  }[];
+  hotFlag: boolean;         // sector has 5+ signal stocks today
+}
+
+export function getSectorSignalStats(date?: string): SectorSignalStat[] {
+  const d = date ?? new Date().toISOString().slice(0, 10);
+
+  const rows = db.prepare(`
+    SELECT ts.symbol, ts.signal_score, ts.signals_json, ts.cmp, ts.change_pct,
+           ns.name, ns.sector
+    FROM technical_signals ts
+    LEFT JOIN nse_stocks ns ON ns.symbol = ts.symbol
+    WHERE ts.date = ? AND ts.signal_score >= 2 AND ns.sector IS NOT NULL AND ns.sector != ''
+    ORDER BY ts.signal_score DESC
+  `).all(d) as {
+    symbol: string; signal_score: number; signals_json: string;
+    cmp: number; change_pct: number; name: string; sector: string;
+  }[];
+
+  const bySection = new Map<string, typeof rows>();
+  for (const r of rows) {
+    if (!bySection.has(r.sector)) bySection.set(r.sector, []);
+    bySection.get(r.sector)!.push(r);
+  }
+
+  const result: SectorSignalStat[] = [];
+
+  for (const [sector, stocks] of bySection) {
+    const avgScore = stocks.reduce((a, s) => a + s.signal_score, 0) / stocks.length;
+    const highScoreCount = stocks.filter(s => s.signal_score >= 7).length;
+
+    const topStocks = stocks.slice(0, 5).map(s => {
+      let signalTypes: string[] = [];
+      try { signalTypes = (JSON.parse(s.signals_json ?? '[]') as { type: string }[]).map(x => x.type); }
+      catch { /* skip */ }
+      return {
+        symbol: s.symbol,
+        name: s.name ?? s.symbol,
+        score: s.signal_score,
+        cmp: s.cmp ?? 0,
+        changePct: s.change_pct ?? 0,
+        signalTypes,
+      };
+    });
+
+    result.push({
+      sector,
+      totalSignals: stocks.length,
+      avgScore: Math.round(avgScore * 10) / 10,
+      highScoreCount,
+      topStocks,
+      hotFlag: stocks.length >= 5,
+    });
+  }
+
+  return result.sort((a, b) => b.totalSignals - a.totalSignals || b.avgScore - a.avgScore);
+}
+
+export function getLatestRSIForSymbols(symbols: string[]): Map<string, number> {
+  if (symbols.length === 0) return new Map();
+  const placeholders = symbols.map(() => '?').join(',');
+  
+  // Get latest date available in the table
+  const latestDateRow = db.prepare('SELECT MAX(date) as d FROM technical_signals').get() as { d: string };
+  if (!latestDateRow?.d) return new Map();
+
+  const rows = db.prepare(`
+    SELECT symbol, rsi 
+    FROM technical_signals 
+    WHERE date = ? AND symbol IN (${placeholders})
+  `).all(latestDateRow.d, ...symbols) as { symbol: string; rsi: number }[];
+
+
+  const map = new Map<string, number>();
+  for (const r of rows) {
+    if (r.rsi != null) map.set(r.symbol, r.rsi);
+  }
+  return map;
+}
+

@@ -615,14 +615,14 @@ export async function fetchMcTechnicalAnalysisV2(scId: string, dur: 'D' | 'W' | 
 
 export async function fetchMcTechnicalRating(scId: string, period: 'D' | 'W' | 'M'): Promise<any | null> {
   const res = await mcFetchJson<any>(
-    `https://www.moneycontrol.com/mc/widget/pricechart_technicals/technical_rating_summary?sc_did=${scId}&page=mc_technicals&period=D&classic=true&period=${period}`
+    `https://www.moneycontrol.com/mc/widget/pricechart_technicals/technical_rating_summary?sc_did=${scId}&page=mc_technicals&classic=true&period=${period}`
   );
   return res;
 }
 
 export async function fetchMcMovingAverages(scId: string, period: 'D' | 'W' | 'M'): Promise<any | null> {
   const res = await mcFetchJson<any>(
-    `https://www.moneycontrol.com/mc/widget/pricechart_technicals/moving_average?sc_did=${scId}&page=mc_technicals&period=D&classic=true&period=${period}`
+    `https://www.moneycontrol.com/mc/widget/pricechart_technicals/moving_average?sc_did=${scId}&page=mc_technicals&classic=true&period=${period}`
   );
   return res;
 }
@@ -636,14 +636,14 @@ export async function fetchMcPivotLevels(scId: string, period: 'D' | 'W' | 'M'):
 
 export async function fetchMcCrossovers(scId: string, period: 'D' | 'W' | 'M'): Promise<any | null> {
   const res = await mcFetchJson<any>(
-    `https://www.moneycontrol.com/mc/widget/pricechart_technicals/moving_average_crossovers?sc_did=${scId}&page=mc_technicals&period=D&classic=true&period=${period}`
+    `https://www.moneycontrol.com/mc/widget/pricechart_technicals/moving_average_crossovers?sc_did=${scId}&page=mc_technicals&classic=true&period=${period}`
   );
   return res;
 }
 
 export async function fetchMcTechnicalIndicators(scId: string, period: 'D' | 'W' | 'M'): Promise<any | null> {
   const res = await mcFetchJson<any>(
-    `https://www.moneycontrol.com/mc/widget/pricechart_technicals/technical_indicator?sc_did=${scId}&page=mc_technicals&period=D&classic=true&period=${period}`
+    `https://www.moneycontrol.com/mc/widget/pricechart_technicals/technical_indicator?sc_did=${scId}&page=mc_technicals&classic=true&period=${period}`
   );
   return res;
 }

@@ -254,6 +254,209 @@ db.exec(`
     createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
     updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
   );
+
+  -- 12. Stock Fundamentals (bulk synced from Yahoo Finance)
+  CREATE TABLE IF NOT EXISTS stock_fundamentals (
+    symbol TEXT PRIMARY KEY,
+    -- Valuation
+    trailing_pe REAL,
+    forward_pe REAL,
+    price_to_book REAL,
+    book_value REAL,
+    earnings_yield REAL,           -- 1 / trailing_pe
+    -- Earnings
+    eps_ttm REAL,
+    eps_forward REAL,
+    -- Size & Market
+    market_cap REAL,               -- in INR
+    shares_outstanding INTEGER,
+    -- Price reference
+    fifty_two_week_high REAL,
+    fifty_two_week_low REAL,
+    fifty_two_week_change_pct REAL,
+    sma200 REAL,                   -- Yahoo's 200-day avg
+    price_vs_sma200_pct REAL,      -- (price - sma200) / sma200 * 100
+    avg_volume_3m INTEGER,
+    -- Income
+    dividend_yield REAL,
+    -- Analyst
+    analyst_rating TEXT,           -- e.g. "1.3 - Strong Buy"
+    -- Deep fields (Phase 2 — Yahoo quoteSummary, per-symbol)
+    debt_to_equity REAL,
+    return_on_equity REAL,
+    revenue_growth REAL,
+    earnings_growth REAL,
+    operating_margins REAL,
+    current_ratio REAL,
+    -- Piotroski components (computed after Phase 2)
+    piotroski_f_score INTEGER,
+    -- Sync tracking
+    phase1_synced_at DATETIME,
+    phase2_synced_at DATETIME,
+    last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_sf_pe ON stock_fundamentals(trailing_pe);
+  CREATE INDEX IF NOT EXISTS idx_sf_mktcap ON stock_fundamentals(market_cap);
+  CREATE INDEX IF NOT EXISTS idx_sf_roe ON stock_fundamentals(return_on_equity);
+
+  -- 13. Quantitative Strategy Scores (computed nightly from OHLCV + fundamentals + screeners)
+  CREATE TABLE IF NOT EXISTS quant_scores (
+    symbol TEXT PRIMARY KEY,
+
+    -- ── Momentum ──────────────────────────────────────────────────────────────
+    return_1w  REAL,    -- 5-day price return (%)
+    return_1m  REAL,    -- 21-day price return (%)
+    return_3m  REAL,    -- 63-day price return (%)
+    return_6m  REAL,    -- 126-day price return (%)
+    return_12m REAL,    -- 252-day price return (%)
+    above_sma200       INTEGER,   -- 1 = price > 200-day SMA
+    sma200_distance_pct REAL,     -- (price − SMA200) / SMA200 × 100
+    momentum_score     REAL,      -- percentile rank 0–100
+
+    -- ── Risk / Volatility ──────────────────────────────────────────────────
+    annualized_vol     REAL,      -- σ(daily_returns) × √252 × 100  (%)
+    sharpe_ratio       REAL,      -- (annualised_return − 0.04) / vol
+    max_drawdown_1y    REAL,      -- peak-to-trough (%) over last 252 days
+    vol_rank           REAL,      -- percentile rank (lower vol = higher rank)
+    sharpe_rank        REAL,      -- percentile rank
+
+    -- ── Valuation / Fundamentals ───────────────────────────────────────────
+    trailing_pe        REAL,
+    forward_pe         REAL,
+    debt_to_equity     REAL,
+    return_on_equity   REAL,      -- stored as decimal (0.15 = 15%)
+    operating_margins  REAL,
+    revenue_growth     REAL,
+    piotroski_f_score  INTEGER,
+    valuation_score    REAL,      -- percentile rank (low PE + high ROE + low D/E)
+
+    -- ── Screener Confluence ────────────────────────────────────────────────
+    bullish_screener_count   INTEGER,
+    bearish_screener_count   INTEGER,
+    screener_category_breadth INTEGER,
+    screener_net_score       REAL,    -- bullish_weighted − bearish_weighted
+    confluence_rank          REAL,    -- percentile rank
+
+    -- ── Composite Strategy Ranks (0–100 percentile) ────────────────────────
+    rank_momentum    REAL,   -- pure momentum strategy
+    rank_quality     REAL,   -- momentum × (low vol) × (high Sharpe)
+    rank_value       REAL,   -- valuation screen (PE + D/E + ROE + growth)
+    rank_composite   REAL,   -- all four pillars combined
+
+    -- ── Classification ────────────────────────────────────────────────────
+    composite_class  TEXT,   -- 'Strong Buy'|'Buy'|'Hold'|'Avoid'|'Sell'
+    ohlcv_days       INTEGER,
+
+    last_computed DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_qs_composite  ON quant_scores(rank_composite DESC);
+  CREATE INDEX IF NOT EXISTS idx_qs_momentum   ON quant_scores(rank_momentum DESC);
+  CREATE INDEX IF NOT EXISTS idx_qs_quality    ON quant_scores(rank_quality DESC);
+  CREATE INDEX IF NOT EXISTS idx_qs_value      ON quant_scores(rank_value DESC);
+  CREATE INDEX IF NOT EXISTS idx_qs_class      ON quant_scores(composite_class);
+
+  -- 14. Daily Technical Signals (computed from OHLCV — 7 pattern types)
+  CREATE TABLE IF NOT EXISTS technical_signals (
+    symbol        TEXT NOT NULL,
+    date          TEXT NOT NULL,   -- scan date YYYY-MM-DD
+    -- Detected signals (serialised)
+    signals_json  TEXT,            -- JSON: [{type,strength,detail}]
+    signal_score  INTEGER DEFAULT 0, -- 0-10 composite score
+    -- Key indicator snapshot
+    rsi           REAL,
+    sma50         REAL,
+    sma200        REAL,
+    macd          REAL,
+    macd_signal   REAL,
+    bb_width      REAL,
+    volume_ratio  REAL,
+    above_sma200  INTEGER DEFAULT 0,
+    -- Price
+    cmp           REAL,
+    change_pct    REAL,
+    -- AI-generated setup (Anthropic, top-N stocks only)
+    ai_insight    TEXT,
+    entry_zone    TEXT,
+    stop_loss     TEXT,
+    targets       TEXT,
+    setup_quality TEXT,
+    time_horizon  TEXT,
+    computed_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (symbol, date)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_tsig_date  ON technical_signals(date DESC);
+  CREATE INDEX IF NOT EXISTS idx_tsig_score ON technical_signals(signal_score DESC);
+  CREATE INDEX IF NOT EXISTS idx_tsig_sym   ON technical_signals(symbol);
+
+  -- 15. Signal Outcomes — win rate tracking (entry vs exit N days later)
+  CREATE TABLE IF NOT EXISTS signal_outcomes (
+    symbol        TEXT NOT NULL,
+    signal_date   TEXT NOT NULL,
+    horizon_days  INTEGER NOT NULL,   -- 5 or 15
+    entry_price   REAL NOT NULL,
+    check_date    TEXT,               -- date we found exit price
+    exit_price    REAL,
+    return_pct    REAL,
+    outcome       TEXT,               -- 'WIN' | 'LOSS' | 'NEUTRAL' | 'PENDING'
+    signal_score  INTEGER,
+    signals_json  TEXT,
+    computed_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (symbol, signal_date, horizon_days)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_sout_date    ON signal_outcomes(signal_date DESC);
+  CREATE INDEX IF NOT EXISTS idx_sout_outcome ON signal_outcomes(outcome);
+  CREATE INDEX IF NOT EXISTS idx_sout_sym     ON signal_outcomes(symbol);
+
+  -- 16. News Sentiment Items — enriched news from multiple sources (replaces basic news_articles)
+  CREATE TABLE IF NOT EXISTS news_sentiment_items (
+    id            TEXT PRIMARY KEY,
+    title         TEXT NOT NULL,
+    summary       TEXT,
+    source        TEXT NOT NULL,
+    source_type   TEXT DEFAULT 'INDIAN',  -- 'INDIAN' | 'GLOBAL'
+    url           TEXT,
+    published_at  DATETIME,
+    fetched_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+    sentiment     TEXT DEFAULT 'NEUTRAL', -- 'BULLISH' | 'BEARISH' | 'NEUTRAL'
+    sentiment_score REAL DEFAULT 0,       -- -1.0 to +1.0
+    impact        TEXT DEFAULT 'LOW',     -- 'HIGH' | 'MEDIUM' | 'LOW'
+    category      TEXT DEFAULT 'GENERAL', -- 'EARNINGS' | 'ORDER_WIN' | 'BUYBACK' | 'POLICY' | 'IPO' | 'GLOBAL' | 'SECTOR' | 'GENERAL'
+    symbols_json  TEXT,                   -- JSON array of NSE symbols mentioned
+    sector        TEXT,
+    ai_scored     INTEGER DEFAULT 0
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_nsi_published ON news_sentiment_items(published_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_nsi_sentiment ON news_sentiment_items(sentiment);
+  CREATE INDEX IF NOT EXISTS idx_nsi_category  ON news_sentiment_items(category);
+  CREATE INDEX IF NOT EXISTS idx_nsi_fetched   ON news_sentiment_items(fetched_at DESC);
+
+  -- 17. Market Sentiment Snapshots — aggregate sentiment every 15 minutes
+  CREATE TABLE IF NOT EXISTS market_sentiment_snapshots (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    snapshot_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+    overall_score      REAL DEFAULT 0,        -- -100 to +100
+    overall_label      TEXT DEFAULT 'Neutral', -- 'Extreme Fear'|'Fear'|'Neutral'|'Greed'|'Extreme Greed'
+    bullish_count      INTEGER DEFAULT 0,
+    bearish_count      INTEGER DEFAULT 0,
+    neutral_count      INTEGER DEFAULT 0,
+    high_impact_count  INTEGER DEFAULT 0,
+    nifty_bias         TEXT DEFAULT 'Neutral', -- 'Bullish' | 'Bearish' | 'Neutral'
+    nifty_support      REAL,
+    nifty_resistance   REAL,
+    nifty_last_close   REAL,
+    global_cue         TEXT DEFAULT 'Mixed',   -- 'Positive' | 'Negative' | 'Mixed'
+    global_score       REAL DEFAULT 0,
+    key_themes_json    TEXT,                   -- JSON array of top themes
+    source_count       INTEGER DEFAULT 0
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_mss_at ON market_sentiment_snapshots(snapshot_at DESC);
 `);
+
 
 export default db;

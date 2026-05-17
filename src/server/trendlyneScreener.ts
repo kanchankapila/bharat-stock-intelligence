@@ -378,8 +378,10 @@ export async function testTrendlyneApiResponse(
       const stockIdIndex = tableHeaders.findIndex((h: any) => h.unique_name === 'stock_id');
       const nameIndex = tableHeaders.findIndex((h: any) => h.unique_name === 'get_full_name');
       const priceIndex = tableHeaders.findIndex((h: any) => h.unique_name === 'currentPrice');
+      const changeIndex = tableHeaders.findIndex((h: any) => h.unique_name === 'pPriceChange' || h.unique_name === 'priceChange');
+      const changePctIndex = tableHeaders.findIndex((h: any) => h.unique_name === 'pPercentChange' || h.unique_name === 'percentChange');
 
-      console.log(`📋 Column indices - stockId: ${stockIdIndex}, name: ${nameIndex}, price: ${priceIndex}`);
+      console.log(`📋 Column indices - stockId: ${stockIdIndex}, name: ${nameIndex}, price: ${priceIndex}, change: ${changeIndex}, changePct: ${changePctIndex}`);
 
       // Map tableData rows to stock objects
       tableData.forEach((row: any[]) => {
@@ -396,8 +398,8 @@ export async function testTrendlyneApiResponse(
           name: fullName,
           symbol: mapping?.symbol,
           ltp: parseFloat(row[priceIndex] || 0),
-          change: 0,
-          changePercent: 0,
+          change: changeIndex !== -1 ? parseFloat(row[changeIndex] || 0) : 0,
+          changePercent: changePctIndex !== -1 ? parseFloat(row[changePctIndex] || 0) : 0,
           screenerName: screenerTitle,
           screenerType: 'all-in-one'
         });
@@ -461,7 +463,7 @@ export async function fetchTrendlyneScreenerData(
     await new Promise(resolve => setTimeout(resolve, jitterDelay));
 
     const params = new URLSearchParams({
-      perPageCount: '200',
+      perPageCount: '1000',
       pageNumber: pageNumber.toString(),
       screenpk: screenpk,
       groupType: 'all',
@@ -508,13 +510,16 @@ export async function fetchTrendlyneScreenerData(
       const stockIdIndex = tableHeaders.findIndex((h: any) => h.unique_name === 'stock_id');
       const nameIndex = tableHeaders.findIndex((h: any) => h.unique_name === 'get_full_name');
       const priceIndex = tableHeaders.findIndex((h: any) => h.unique_name === 'currentPrice');
+      const changeIndex = tableHeaders.findIndex((h: any) => h.unique_name === 'pPriceChange' || h.unique_name === 'priceChange');
+      const changePctIndex = tableHeaders.findIndex((h: any) => h.unique_name === 'pPercentChange' || h.unique_name === 'percentChange');
+      const return1wIndex = tableHeaders.findIndex((h: any) => h.unique_name === 'pReturn1W' || h.unique_name === 'return1W' || h.unique_name === 'pReturn5D');
+      const return1mIndex = tableHeaders.findIndex((h: any) => h.unique_name === 'pReturn1M' || h.unique_name === 'return1M' || h.unique_name === 'pReturn21D');
 
       // Map tableData rows to stock objects
       tableData.forEach((row: any[]) => {
         const tlId = String(row[stockIdIndex] || '');
         const fullName = String(row[nameIndex] || '');
         
-        const { getStockMappingByTLId, getStockMappingByName } = require('./stockMapping');
         let mapping = getStockMappingByTLId(tlId);
         if (!mapping) {
           mapping = getStockMappingByName(fullName);
@@ -525,12 +530,67 @@ export async function fetchTrendlyneScreenerData(
           name: fullName,
           symbol: mapping?.symbol,
           ltp: parseFloat(row[priceIndex] || 0),
-          change: 0,
-          changePercent: 0,
+          change: changeIndex !== -1 ? parseFloat(row[changeIndex] || 0) : 0,
+          changePercent: changePctIndex !== -1 ? parseFloat(row[changePctIndex] || 0) : 0,
+          return_1w: return1wIndex !== -1 ? parseFloat(row[return1wIndex] || 0) : undefined,
+          return_1m: return1mIndex !== -1 ? parseFloat(row[return1mIndex] || 0) : undefined,
           screenerName: screenerTitle,
           screenerType: 'all-in-one'
         });
       });
+
+      // --- Enrichment & Sorting ---
+      const symbols = stocks.map(s => s.symbol).filter(Boolean) as string[];
+      if (symbols.length > 0) {
+        try {
+          // 1. Fetch Quant Scores
+          const placeholders = symbols.map(() => '?').join(',');
+          const qScores = db.prepare(`
+            SELECT symbol, rank_composite, return_1w, return_1m, composite_class
+            FROM quant_scores
+            WHERE symbol IN (${placeholders})
+          `).all(...symbols) as any[];
+          
+          const scoreMap = new Map(qScores.map(q => [q.symbol, q]));
+          
+          // 2. Fetch Other Screeners
+          const otherScrs = db.prepare(`
+            SELECT ss.symbol, s.screener_name
+            FROM trendlyne_screener_stocks ss
+            JOIN trendlyne_screeners s ON s.screener_id = ss.screener_id
+            WHERE ss.symbol IN (${placeholders})
+          `).all(...symbols) as any[];
+          
+          const scrMap = new Map<string, string[]>();
+          otherScrs.forEach(o => {
+            if (!scrMap.has(o.symbol)) scrMap.set(o.symbol, []);
+            if (o.screener_name !== screenerTitle) { // Avoid redundancy
+              scrMap.get(o.symbol)!.push(o.screener_name);
+            }
+          });
+
+          // 3. Apply to stocks
+          stocks.forEach(s => {
+            if (s.symbol) {
+              const score = scoreMap.get(s.symbol);
+              if (score) {
+                s.score = score.rank_composite;
+                if (s.return_1w === undefined) s.return_1w = score.return_1w;
+                if (s.return_1m === undefined) s.return_1m = score.return_1m;
+                s.classification = score.composite_class;
+              }
+              s.otherScreeners = scrMap.get(s.symbol) || [];
+            }
+          });
+
+          // 4. Sort by score (High to Low) - Actionable Intelligence
+          stocks.sort((a, b) => (b.score || 0) - (a.score || 0));
+          
+          console.log(`✨ Enriched ${stocks.length} stocks with AlphaQuant Intelligence`);
+        } catch (enrichError) {
+          console.error('❌ Error enriching screener stocks:', enrichError);
+        }
+      }
 
       const result = {
         success: true,
@@ -607,7 +667,7 @@ export async function fetchAllTrendlyneScreenerNames(): Promise<Set<string>> {
 
       try {
         const params = new URLSearchParams({
-          perPageCount: '200',
+          perPageCount: '1000',
           pageNumber: '0',
           screenpk: stockId,
           groupType: 'all',
@@ -692,13 +752,12 @@ export async function getTrendlyneScreenerList() {
   
   let mcScreeners: any[] = [];
   try {
-    const db = require('./db').default;
     const stmt = db.prepare(`
       SELECT scan_id, screener_name, type, is_positive
       FROM moneycontrol_screeners
       ORDER BY screener_name
     `);
-    mcScreeners = stmt.all();
+    mcScreeners = stmt.all() as any[];
   } catch (error) {
     console.error('❌ Error fetching MC screeners for list:', error);
   }
@@ -706,11 +765,10 @@ export async function getTrendlyneScreenerList() {
   // 2. Load the "New Analysis" metadata from screener_master
   const masterMeta = new Map<string, any>();
   try {
-    const db = require('./db').default;
     const rows = db.prepare(`
       SELECT scan_id, inferred_sentiment, inferred_category, inferred_timeframe, confidence 
       FROM screener_master
-    `).all();
+    `).all() as any[];
     for (const r of rows) {
       masterMeta.set(r.scan_id, r);
     }
@@ -775,12 +833,11 @@ export async function getTrendlyneScreenerList() {
 
   // 5. Process ETnow screeners
   try {
-    const db = require('./db').default;
     const etScreeners = db.prepare(`
       SELECT screener_id, screener_name, query_condition
       FROM etnow_screeners
       ORDER BY screener_name
-    `).all();
+    `).all() as any[];
 
     for (const et of etScreeners) {
       const meta = masterMeta.get(et.screener_id);

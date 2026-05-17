@@ -37,6 +37,8 @@ import {
   fetchTrendlyneSwot,
   fetchTrendlyneChecklist,
   fetchTrendlyneDVM,
+  fetchTrendlyneStockMetrics,
+  fetchTrendlyneAdvTechnicalAnalysis,
   getTrendlyneOverview,
   fetchTrendlyneSectorRotation,
   fetchTrendlyneIndexRotation
@@ -48,6 +50,8 @@ import {
 } from "./scoringService";
 import { getMoneycontrolInsights } from "./moneycontrolService";
 import { getStockInsights, getIndexData } from "./insightService";
+import { getLatestRSIForSymbols } from "./technicalSignalsService";
+
 import { getAllStocks, getStockMapping, getSymbolFromMcsymbol } from "./stockMapping";
 import { getCachedScan, runTechnicalScan } from "./technicalScanner";
 import { getFnOSignals } from "./fnoService";
@@ -184,6 +188,214 @@ export const appRouter = router({
   // Real-time BullMQ queue stats for progress tracking
   getQueueStats: publicProcedure.query(async () => {
     return await getAIQueueStats();
+  }),
+
+  // ── Fundamentals sync ─────────────────────────────────────────────────────
+
+  triggerFundamentalsSync: publicProcedure
+    .input(z.object({ phase2Only: z.boolean().optional() }).optional())
+    .mutation(async ({ input }) => {
+      const { fundamentalsSyncQueue } = await import('./queues');
+      if (!fundamentalsSyncQueue) {
+        // No Redis — run directly in a detached async call (non-blocking)
+        const { runFullFundamentalsSync } = await import('./fundamentalsSyncService');
+        runFullFundamentalsSync(input?.phase2Only ?? false).catch(console.error);
+        return { queued: false, message: 'Running directly (no Redis)' };
+      }
+      const waiting = await fundamentalsSyncQueue.getWaiting();
+      const active  = await fundamentalsSyncQueue.getActive();
+      if (waiting.length + active.length > 0) {
+        return { queued: false, message: 'Sync already queued or running' };
+      }
+      await fundamentalsSyncQueue.add(
+        'sync-fundamentals',
+        { phase2Only: input?.phase2Only ?? false },
+        { removeOnComplete: 3, removeOnFail: 3, attempts: 1 },
+      );
+      return { queued: true, message: 'Fundamentals sync job enqueued' };
+    }),
+
+  getFundamentalsStatus: publicProcedure.query(async () => {
+    const { getSyncProgress, getFundamentalsCount } = await import('./fundamentalsSyncService');
+    return {
+      progress: getSyncProgress(),
+      dbCounts: getFundamentalsCount(),
+    };
+  }),
+
+  getStockFundamentals: publicProcedure
+    .input(z.object({ symbol: z.string() }))
+    .query(async ({ input }) => {
+      const { getStoredFundamentals, refreshSymbolFundamentals } = await import('./fundamentalsSyncService');
+      let row = getStoredFundamentals(input.symbol);
+      if (!row) {
+        // Fetch on-demand for individual stock views
+        await refreshSymbolFundamentals(input.symbol).catch(() => null);
+        row = getStoredFundamentals(input.symbol);
+      }
+      return row ?? null;
+    }),
+
+  // ── Quantitative strategy scoring ─────────────────────────────────────────
+
+  runQuantScoring: publicProcedure
+    .mutation(async () => {
+      const { quantScoringQueue } = await import('./queues');
+      if (!quantScoringQueue) {
+        const { runQuantScoring } = await import('./quantScoringService');
+        runQuantScoring().catch(console.error);
+        return { queued: false, message: 'Running directly (no Redis)' };
+      }
+      const waiting = await quantScoringQueue.getWaiting();
+      const active  = await quantScoringQueue.getActive();
+      if (waiting.length + active.length > 0) {
+        return { queued: false, message: 'Scoring already queued or running' };
+      }
+      await quantScoringQueue.add(
+        'quant-score-manual',
+        {},
+        { removeOnComplete: 3, removeOnFail: 3, attempts: 1 },
+      );
+      return { queued: true, message: 'Quant scoring job enqueued' };
+    }),
+
+  getQuantScoringStatus: publicProcedure.query(async () => {
+    const { getQuantScoringProgress, getQuantScoreSummary } = await import('./quantScoringService');
+    return {
+      progress: getQuantScoringProgress(),
+      summary:  getQuantScoreSummary(),
+    };
+  }),
+
+  getStrategyStocks: publicProcedure
+    .input(z.object({
+      strategy: z.enum(['composite', 'momentum', 'quality', 'value', 'confluence']).default('composite'),
+      limit:    z.number().min(1).max(100).default(25),
+      filters:  z.object({
+        minSharpe:         z.number().optional(),
+        maxVol:            z.number().optional(),
+        maxDrawdown:       z.number().optional(),
+        aboveSma200:       z.boolean().optional(),
+        maxPE:             z.number().optional(),
+        minROE:            z.number().optional(),
+        maxDebtToEquity:   z.number().optional(),
+        minPiotroski:      z.number().optional(),
+        minMarketCapCr:    z.number().optional(),
+      }).optional(),
+    }))
+    .query(async ({ input }) => {
+      const { getStrategyStocks } = await import('./quantScoringService');
+      return getStrategyStocks(input.strategy, input.limit, input.filters ?? {});
+    }),
+
+  getQuantScore: publicProcedure
+    .input(z.object({ symbol: z.string() }))
+    .query(async ({ input }) => {
+      const { getQuantScore } = await import('./quantScoringService');
+      return getQuantScore(input.symbol) ?? null;
+    }),
+
+  // ── Technical Signals (7 daily patterns from OHLCV) ──────────────────────
+
+  runTechnicalSignalScan: publicProcedure
+    .input(z.object({ minScore: z.number().min(1).max(10).optional() }).optional())
+    .mutation(async ({ input }) => {
+      const { runTechnicalSignalScan } = await import('./technicalSignalsService');
+      runTechnicalSignalScan({ minScore: input?.minScore ?? 2 }).catch(console.error);
+      return { triggered: true };
+    }),
+
+  getTechnicalSignalsStatus: publicProcedure.query(async () => {
+    const { getTechnicalSignalsProgress, getSignalSummary } = await import('./technicalSignalsService');
+    return {
+      progress: getTechnicalSignalsProgress(),
+      summary:  getSignalSummary(),
+    };
+  }),
+
+  getTechnicalSignals: publicProcedure
+    .input(z.object({
+      date:     z.string().optional(),
+      minScore: z.number().min(1).max(10).default(1),
+      limit:    z.number().min(1).max(200).default(100),
+    }))
+    .query(async ({ input }) => {
+      const { getTechnicalSignalsForDate } = await import('./technicalSignalsService');
+      const rows = getTechnicalSignalsForDate(input.date, input.minScore, input.limit);
+      return rows.map(r => ({
+        ...r,
+        signals: (() => { try { return JSON.parse((r.signals_json as string) ?? '[]'); } catch { return []; } })(),
+      }));
+    }),
+
+  getSignalDates: publicProcedure.query(async () => {
+    const { getSignalDates } = await import('./technicalSignalsService');
+    return getSignalDates();
+  }),
+
+  getSectorSignalStats: publicProcedure
+    .input(z.object({ date: z.string().optional() }).optional())
+    .query(async ({ input }) => {
+      const { getSectorSignalStats } = await import('./technicalSignalsService');
+      return getSectorSignalStats(input?.date);
+    }),
+
+  getSignalWinRates: publicProcedure.query(async () => {
+    const { getWinRateStats } = await import('./signalOutcomesService');
+    return getWinRateStats();
+  }),
+
+  computeSignalOutcomes: publicProcedure
+    .input(z.object({ horizonDays: z.union([z.literal(5), z.literal(15)]).default(5) }))
+    .mutation(async ({ input }) => {
+      const { computeSignalOutcomes } = await import('./signalOutcomesService');
+      return computeSignalOutcomes(input.horizonDays);
+    }),
+
+  // ── News Sentiment ────────────────────────────────────────────────────────
+
+  getMarketSentiment: publicProcedure
+    .input(z.object({ historyHours: z.number().min(1).max(168).optional() }).optional())
+    .query(async ({ input }) => {
+      const { getLatestSentimentSnapshot, getSentimentHistory } = await import('./newsSentimentService');
+      return {
+        latest:  getLatestSentimentSnapshot(),
+        history: getSentimentHistory(input?.historyHours ?? 24),
+      };
+    }),
+
+  getNewsItems: publicProcedure
+    .input(z.object({
+      limit:      z.number().min(1).max(200).default(60),
+      category:   z.enum(['ALL','EARNINGS','ORDER_WIN','BUYBACK','POLICY','IPO','GLOBAL','SECTOR','GENERAL']).default('ALL'),
+      sentiment:  z.enum(['ALL','BULLISH','BEARISH','NEUTRAL']).default('ALL'),
+      sourceType: z.enum(['ALL','INDIAN','GLOBAL']).default('ALL'),
+      hours:      z.number().min(1).max(72).default(8),
+    }).optional())
+    .query(async ({ input }) => {
+      const { getNewsItems } = await import('./newsSentimentService');
+      return getNewsItems(input ?? {});
+    }),
+
+  getSectorNewsSentiment: publicProcedure.query(async () => {
+    const { getSectorSentiment } = await import('./newsSentimentService');
+    return getSectorSentiment();
+  }),
+
+  getCorporateEventNews: publicProcedure.query(async () => {
+    const { getCorporateEventNews } = await import('./newsSentimentService');
+    return getCorporateEventNews();
+  }),
+
+  refreshNewsSentiment: publicProcedure.mutation(async () => {
+    const { newsSentimentQueue } = await import('./queues');
+    if (newsSentimentQueue) {
+      await newsSentimentQueue.add('news-sentiment-manual', {}, { removeOnComplete: 3 });
+      return { queued: true };
+    }
+    const { runNewsSentimentCycle } = await import('./newsSentimentService');
+    runNewsSentimentCycle().catch(console.error);
+    return { queued: false };
   }),
 
   getSignalHistory: publicProcedure
@@ -449,15 +661,58 @@ export const appRouter = router({
     .query(async ({ input }) => {
       const result = await fetchTechnicalTrends(input.type, input.index);
       if (result?.success === 1) {
-        const enrichItem = (item: any) => {
+        const list = result.data?.list || result.data?.tableDataList || [];
+        
+        // 1. Resolve symbols for all items
+        const enrichedList = list.map((item: any) => {
           const symbol = getSymbolFromMcsymbol(item.scId);
-          return { ...item, symbol: symbol || item.scId, shortName: symbol || item.scId };
-        };
-        if (result.data?.list) result.data.list = result.data.list.map(enrichItem);
-        if (result.data?.tableDataList) result.data.tableDataList = result.data.tableDataList.map(enrichItem);
+          return { 
+            ...item, 
+            symbol: symbol || item.scId, 
+            shortName: symbol || item.scId,
+            // Map MC fields to frontend expected fields
+            lastPrice: parseFloat(String(item.currPrice || '0').replace(/,/g, '')),
+            percentChange: parseFloat(item.performance || '0'),
+            trend: item.currTrend || '',
+            stockId: item.scId
+          };
+        });
+
+        // 2. Batch fetch RSI from local DB
+        const symbols = enrichedList.map((item: any) => item.symbol);
+        const rsiMap = getLatestRSIForSymbols(symbols);
+
+        // 3. Add RSI to items (with API fallback)
+        const finalData = await Promise.all(enrichedList.map(async (item: any) => {
+          let rsi = rsiMap.get(item.symbol);
+          
+          if (rsi === undefined || rsi === 0) {
+            try {
+              const tech = await fetchTechIndicators(item.symbol);
+              const rsiInd = tech?.data?.indicators?.find((i: any) => 
+                i.displayName?.includes('RSI') || i.id === 'RSI'
+              );
+              if (rsiInd) {
+                rsi = parseFloat(String(rsiInd.value || '0'));
+              }
+            } catch (err) {
+              console.error(`[RSI FALLBACK] Failed for ${item.symbol}:`, err);
+            }
+          }
+          
+          return {
+            ...item,
+            rsi: rsi || 0
+          };
+        }));
+
+        if (result.data?.list) result.data.list = finalData;
+        if (result.data?.tableDataList) result.data.tableDataList = finalData;
+
       }
       return result;
     }),
+
 
   getETStats: publicProcedure
     .input(z.object({
@@ -1074,6 +1329,21 @@ export const appRouter = router({
     .input(z.object({ symbol: z.string() }))
     .query(async ({ input }) => {
       return await fetchTrendlyneDVM(input.symbol);
+    }),
+
+  getTrendlyneStockMetrics: publicProcedure
+    .input(z.object({ symbol: z.string() }))
+    .query(async ({ input }) => {
+      return await fetchTrendlyneStockMetrics(input.symbol);
+    }),
+
+  getTrendlyneAdvTechnicalAnalysis: publicProcedure
+    .input(z.object({ 
+      symbol: z.string(),
+      timeframe: z.enum(['D', 'W', 'M']).optional().default('D')
+    }))
+    .query(async ({ input }) => {
+      return await fetchTrendlyneAdvTechnicalAnalysis(input.symbol, input.timeframe);
     }),
 
   getTrendlyneOverview: publicProcedure
