@@ -41,8 +41,11 @@ SECTOR_MAP    = {
     'healthcare':              'PHARMA',
     'automobile':              'AUTO',
     'auto':                    'AUTO',
+    'automobiles':             'AUTO',
+    'financials':              'BANK',
     'energy':                  'ENERGY',
     'oil':                     'ENERGY',
+    'oil & gas':               'ENERGY',
     'power':                   'ENERGY',
 }
 
@@ -108,13 +111,7 @@ def get_state_key(regime: str, sector_or_bucket: str, score: int) -> str:
         sector_bucket = sector_or_bucket
     else:
         sector_bucket = get_sector_bucket(sector_or_bucket)
-    if score <= 5:
-        score_bucket = 'LOW'
-    elif score <= 7:
-        score_bucket = 'MED'
-    else:
-        score_bucket = 'HIGH'
-    return f"{regime_clean}_{sector_bucket}_{score_bucket}"
+    return f"{regime_clean}_{sector_bucket}_{get_score_bucket(score)}"
 
 
 def get_q(conn: sqlite3.Connection, state_key: str, action: str) -> float:
@@ -246,7 +243,7 @@ def daily_update(conn: sqlite3.Connection, dry_run: bool = False) -> dict[str, i
 
         if dry_run:
             print(f"  [DRY] state={state_key} action={action} "
-                  f"reward={reward:.3f} Q: {old_q:.4f}→{new_q:.4f}")
+                  f"reward={reward:.3f} Q: {old_q:.4f}->{new_q:.4f}")
             updated += 1
             continue
 
@@ -255,13 +252,17 @@ def daily_update(conn: sqlite3.Connection, dry_run: bool = False) -> dict[str, i
                      (round(reward, 4), ep_id))
         updated += 1
 
-    new_epsilon = max(EPSILON_MIN, epsilon * EPSILON_DECAY)
+    if updated > 0:
+        new_epsilon = max(EPSILON_MIN, epsilon * EPSILON_DECAY)
+        if not dry_run:
+            _save_epsilon(conn, new_epsilon)
+    else:
+        new_epsilon = epsilon
     if not dry_run:
-        _save_epsilon(conn, new_epsilon)
         conn.commit()
 
     print(f"[RLAgent] Updated {updated}/{len(episodes)} episodes. "
-          f"epsilon={epsilon:.4f}→{new_epsilon:.4f}")
+          f"epsilon={epsilon:.4f}->{new_epsilon:.4f}")
     return {'episodes': len(episodes), 'updated': updated}
 
 
