@@ -122,11 +122,20 @@ class AlphaQuantScoringEngine:
 
     def _get_rl_action(self, regime: str, sector: str, signal_score: int) -> str:
         try:
-            import sys, os
+            import sys, os, sqlite3, datetime
             sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-            from rl_agent import get_state_key
+            from rl_agent import get_state_key, log_episode
             state_key = get_state_key(regime, sector, signal_score)
-            return self._rl_q_cache.get(state_key, 'BALANCED')
+            action = self._rl_q_cache.get(state_key, 'BALANCED')
+            # Log episode for daily Q-learning update
+            try:
+                db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'database.sqlite')
+                conn = sqlite3.connect(db_path)
+                log_episode(conn, datetime.date.today().isoformat(), state_key, action, self._rl_epsilon)
+                conn.close()
+            except Exception:
+                pass
+            return action
         except Exception:
             return 'BALANCED'
 
@@ -404,6 +413,29 @@ class AlphaQuantScoringEngine:
             )).fetchall()
         screener_updated = {r[0]: r[1] for r in sm_rows}
 
+        # Load current nifty regime (most recent entry from technical_signals)
+        current_regime = 'SIDEWAYS'
+        try:
+            with self.engine.connect() as conn:
+                regime_row = conn.execute(text(
+                    "SELECT nifty_regime FROM technical_signals ORDER BY date DESC LIMIT 1"
+                )).fetchone()
+                if regime_row and regime_row[0]:
+                    current_regime = regime_row[0]
+        except Exception:
+            pass
+
+        # Load sector per symbol from nse_stocks
+        symbol_sector: Dict[str, str] = {}
+        try:
+            with self.engine.connect() as conn:
+                sector_rows = conn.execute(text(
+                    "SELECT symbol, sector FROM nse_stocks WHERE sector IS NOT NULL"
+                )).fetchall()
+                symbol_sector = {r[0]: r[1] for r in sector_rows}
+        except Exception:
+            pass
+
         # Score per timeframe
         timeframes = ['long_term', 'intraday']
         all_timeframe_results = []
@@ -496,7 +528,21 @@ class AlphaQuantScoringEngine:
                 cat_count = len(data['categories'])
                 # Multi-category consensus bonus (capped at 3 categories → +20%)
                 consensus_mult = 1.0 + min(0.1 * (cat_count - 1), 0.20)
-                final_score = data['raw_sum'] * consensus_mult
+                raw_score = data['raw_sum'] * consensus_mult
+
+                signal_types = list({
+                    item['category']
+                    for item in data['positive_screeners'] + data['negative_screeners']
+                    if item.get('category')
+                })
+                sector = symbol_sector.get(symbol, 'OTHER')
+                final_score = self.apply_signal_multipliers(
+                    raw_score=raw_score,
+                    signal_types=signal_types,
+                    regime=current_regime,
+                    sector=sector,
+                    signal_score=int(raw_score),
+                )
 
                 screener_count = len(data['positive_screeners']) + len(data['negative_screeners'])
                 source_count   = len(data['sources'])
