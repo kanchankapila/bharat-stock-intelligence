@@ -58,6 +58,8 @@ class AlphaQuantScoringEngine:
         self.nlp = NLPScreenerInference()
         self.stock_stats = {}
         self._load_optimised_weights()
+        self._load_signal_type_weights()
+        self._load_rl_policy()
 
     def _load_optimised_weights(self):
         """Override default weights with ML-optimised values from app_settings if available."""
@@ -78,6 +80,79 @@ class AlphaQuantScoringEngine:
                     self.SOURCE_WEIGHTS = {**self.SOURCE_WEIGHTS, **loaded2}
         except Exception:
             pass  # use defaults if app_settings not populated yet
+
+    def _load_signal_type_weights(self):
+        self._signal_type_weights: dict = {}
+        try:
+            with self.engine.connect() as conn:
+                rows = conn.execute(
+                    text("SELECT signal_type, regime, sector, weight FROM signal_type_weights")
+                ).fetchall()
+                for row in rows:
+                    self._signal_type_weights[(row[0], row[1], row[2])] = float(row[3])
+        except Exception:
+            pass
+
+    def _get_signal_weight(self, signal_type: str, regime: str, sector: str) -> float:
+        w = self._signal_type_weights.get((signal_type, regime, sector))
+        if w is not None:
+            return w
+        return self._signal_type_weights.get((signal_type, regime, 'ALL'), 1.0)
+
+    def _load_rl_policy(self):
+        self._rl_epsilon: float = 0.05
+        self._rl_q_cache: dict = {}
+        try:
+            with self.engine.connect() as conn:
+                row = conn.execute(
+                    text("SELECT value FROM app_settings WHERE key='rl_epsilon'")
+                ).fetchone()
+                if row:
+                    self._rl_epsilon = float(row[0])
+                rows = conn.execute(text(
+                    "SELECT state_key, action, q_value FROM rl_q_table"
+                )).fetchall()
+                state_q: dict = {}
+                for state_key, action, q_value in rows:
+                    state_q.setdefault(state_key, {})[action] = float(q_value)
+                for state_key, actions in state_q.items():
+                    self._rl_q_cache[state_key] = max(actions, key=lambda a: actions[a])
+        except Exception:
+            pass
+
+    def _get_rl_action(self, regime: str, sector: str, signal_score: int) -> str:
+        try:
+            import sys, os
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            from rl_agent import get_state_key
+            state_key = get_state_key(regime, sector, signal_score)
+            return self._rl_q_cache.get(state_key, 'BALANCED')
+        except Exception:
+            return 'BALANCED'
+
+    def apply_signal_multipliers(
+        self,
+        raw_score: float,
+        signal_types: list,
+        regime: str,
+        sector: str,
+        signal_score: int,
+    ) -> float:
+        try:
+            import sys, os
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            from rl_agent import get_multipliers
+            action   = self._get_rl_action(regime, sector, signal_score)
+            rl_mults = get_multipliers(action)
+        except Exception:
+            rl_mults = {}
+
+        adjusted = raw_score
+        for st in signal_types:
+            stw = self._get_signal_weight(st, regime, sector)
+            rlm = rl_mults.get(st, 1.0)
+            adjusted *= (stw * rlm)
+        return adjusted
 
     # ------------------------------------------------------------------
     # Data Loading
@@ -528,6 +603,9 @@ class AlphaQuantScoringEngine:
         try:
             with self.engine.begin() as conn:
                 for row in rows:
+                    win_prob = float(row.get('win_probability') or 0)
+                    if row['rec_type'] in ('BUY', 'STRONG_BUY') and win_prob > 0 and win_prob < 0.45:
+                        continue
                     keys   = ', '.join(row.keys())
                     places = ', '.join(f':{k}' for k in row.keys())
                     conn.execute(text(f"""
