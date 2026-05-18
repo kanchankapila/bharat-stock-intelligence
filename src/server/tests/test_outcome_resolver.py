@@ -80,3 +80,65 @@ def test_dry_run_writes_nothing():
 
     count = conn.execute("SELECT COUNT(*) FROM signal_outcomes").fetchone()[0]
     assert count == 0
+
+def test_loss_outcome():
+    conn = make_db()
+    signal_date = (datetime.date.today() - datetime.timedelta(days=20)).isoformat()
+    exit_date   = (datetime.date.today() - datetime.timedelta(days=5)).isoformat()
+    conn.execute("INSERT INTO technical_signals VALUES (?,?,100.0,5,'[]',NULL)",
+                 ('HDFCBANK', signal_date))
+    conn.execute("INSERT INTO stock_ohlcv VALUES (?,?,95,96,94,95,300000)",
+                 ('HDFCBANK', exit_date))
+    conn.commit()
+
+    from outcome_resolver import resolve_outcomes
+    result = resolve_outcomes(conn, horizon_days=15, dry_run=False)
+    assert result['resolved'] >= 1
+
+    row = conn.execute(
+        "SELECT outcome, return_pct FROM signal_outcomes WHERE symbol='HDFCBANK'"
+    ).fetchone()
+    assert row is not None
+    assert row[0] == 'LOSS'
+    assert row[1] < -1.0
+
+def test_neutral_outcome():
+    conn = make_db()
+    signal_date = (datetime.date.today() - datetime.timedelta(days=20)).isoformat()
+    exit_date   = (datetime.date.today() - datetime.timedelta(days=5)).isoformat()
+    conn.execute("INSERT INTO technical_signals VALUES (?,?,100.0,4,'[]',NULL)",
+                 ('ICICIBANK', signal_date))
+    # exit at 100.5 = +0.5% (within NEUTRAL band)
+    conn.execute("INSERT INTO stock_ohlcv VALUES (?,?,100,101,99,100.5,200000)",
+                 ('ICICIBANK', exit_date))
+    conn.commit()
+
+    from outcome_resolver import resolve_outcomes
+    result = resolve_outcomes(conn, horizon_days=15, dry_run=False)
+    assert result['resolved'] >= 1
+
+    row = conn.execute(
+        "SELECT outcome FROM signal_outcomes WHERE symbol='ICICIBANK'"
+    ).fetchone()
+    assert row is not None
+    assert row[0] == 'NEUTRAL'
+
+def test_pending_when_no_ohlcv():
+    conn = make_db()
+    # Signal is old enough but no OHLCV data available for exit date
+    signal_date = (datetime.date.today() - datetime.timedelta(days=20)).isoformat()
+    conn.execute("INSERT INTO technical_signals VALUES (?,?,100.0,6,'[]',NULL)",
+                 ('WIPRO', signal_date))
+    # No OHLCV row inserted
+    conn.commit()
+
+    from outcome_resolver import resolve_outcomes
+    result = resolve_outcomes(conn, horizon_days=15, dry_run=False)
+    # PENDING is not counted as resolved
+    assert result['resolved'] == 0
+
+    row = conn.execute(
+        "SELECT outcome FROM signal_outcomes WHERE symbol='WIPRO'"
+    ).fetchone()
+    assert row is not None
+    assert row[0] == 'PENDING'

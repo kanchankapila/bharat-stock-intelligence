@@ -9,8 +9,7 @@ Run:  python outcome_resolver.py
       python outcome_resolver.py --dry-run
 """
 
-import os, sys, sqlite3, datetime, argparse
-from typing import Any
+import os, sqlite3, datetime, argparse
 
 DB_PATH = os.path.join(os.getcwd(), 'database.sqlite')
 
@@ -139,6 +138,8 @@ def resolve_outcomes(
 
 
 def run(horizon_days: int = 15, dry_run: bool = False):
+    if not os.path.exists(DB_PATH):
+        raise FileNotFoundError(f"[OutcomeResolver] DB not found: {DB_PATH}. Run from project root.")
     conn = sqlite3.connect(DB_PATH)
     try:
         resolve_outcomes(conn, horizon_days=horizon_days, dry_run=dry_run)
