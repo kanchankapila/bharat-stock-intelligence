@@ -669,16 +669,15 @@ db.exec(`
 db.exec(`
   -- Per-(signal_type, regime, sector) EMA-smoothed reward weights
   CREATE TABLE IF NOT EXISTS signal_type_weights (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    id           INTEGER PRIMARY KEY,
     signal_type  TEXT NOT NULL,
     regime       TEXT NOT NULL,
     sector       TEXT NOT NULL DEFAULT 'ALL',
     weight       REAL NOT NULL DEFAULT 1.0,
     sample_count INTEGER NOT NULL DEFAULT 0,
-    last_updated TEXT NOT NULL,
+    last_updated TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now')),
     UNIQUE(signal_type, regime, sector)
   );
-  CREATE INDEX IF NOT EXISTS idx_stw_key ON signal_type_weights(signal_type, regime, sector);
 
   -- Q-learning table: Q(state, action) values
   CREATE TABLE IF NOT EXISTS rl_q_table (
@@ -686,7 +685,7 @@ db.exec(`
     action       TEXT NOT NULL,
     q_value      REAL NOT NULL DEFAULT 0.0,
     visit_count  INTEGER NOT NULL DEFAULT 0,
-    last_updated TEXT NOT NULL,
+    last_updated TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now')),
     PRIMARY KEY (state_key, action)
   );
 
@@ -700,7 +699,7 @@ db.exec(`
     epsilon      REAL,
     notes        TEXT
   );
-  CREATE INDEX IF NOT EXISTS idx_rlepi_date ON rl_episodes(date DESC);
+  CREATE INDEX IF NOT EXISTS idx_rlepi_date ON rl_episodes(date);
 `);
 
 // --- Migrations & Upgrades ---
