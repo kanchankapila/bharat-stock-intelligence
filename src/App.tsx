@@ -9,7 +9,7 @@ import {
   AlertCircle, ArrowUpRight, ArrowDownRight, Activity, Zap,
   LayoutDashboard, Filter, History, User, LogIn, Plus, Minus, Heart, Share2, Download,
   ArrowLeft, Eye, ChevronUp, ChevronDown, Save, Bookmark, BrainCircuit, CheckCircle2,
-  Users, Trophy, Bookmark as WatchlistIcon, BarChart2, Star, Target, Globe
+  Users, Trophy, Bookmark as WatchlistIcon, BarChart2, Star, Target, Globe, Coins, Sparkles
 } from 'lucide-react';
 
 import { motion, AnimatePresence } from 'motion/react';
@@ -38,6 +38,8 @@ import TopRatedStocks from './components/TopRatedStocks';
 import FnOIntelligenceCenter from './components/FnOIntelligenceCenter';
 import IndexFnoOverview from './components/IndexFnoOverview';
 import { ToDoPage } from './components/ToDoPage';
+import { SmartMoneyFlowPage } from './components/SmartMoneyFlowPage';
+import { TradeDecisionCockpit } from './components/TradeDecisionCockpit';
 import { GlobalMarketCards } from './components/GlobalMarketCards';
 import { Card } from './components/Card';
 import { SectorHeatmap, SectorPerformance } from './components/SectorIntelligence';
@@ -159,11 +161,13 @@ const Navbar: React.FC<{
         <div className="hidden md:flex items-center gap-6">
           {[
             { icon: LayoutDashboard, label: 'Dashboard', id: 'dashboard' },
+            { icon: Sparkles, label: 'Trade Cockpit', id: 'trade-cockpit' },
             { icon: Trophy, label: 'Top Rated', id: 'top-rated' },
             { icon: BarChart2, label: 'Indices', id: 'indices' },
             { icon: Activity, label: 'Market Map', id: 'market-map' },
             { icon: Filter, label: 'Screener', id: 'screener' },
             { icon: Target, label: 'F&O Intel', id: 'fno-scanners' },
+            { icon: Coins, label: 'Smart Money', id: 'smart-money' },
             { icon: Zap, label: 'Trendlyne', id: 'trendlyne' },
             { icon: Search, label: 'Discover', id: 'discover' },
             { icon: History, label: 'Backtest', id: 'backtest' },
@@ -1900,6 +1904,13 @@ const OptionChain: React.FC<{ symbol: string; stockPrice: number }> = ({ symbol,
   const ivPercentile = ocData?.marketSentiment?.ivPercentile;
   const maxPain = ocData?.marketSentiment?.maxPain;
 
+  const atmRow = useMemo(() => {
+    if (chain.length === 0) return null;
+    return chain.reduce((prev: any, curr: any) => {
+      return Math.abs(curr.strikePrice - stockPrice) < Math.abs(prev.strikePrice - stockPrice) ? curr : prev;
+    }, chain[0]);
+  }, [chain, stockPrice]);
+
   if (isLoading) {
     return (
       <div className="py-20 text-center bg-slate-950 rounded-2xl border border-slate-800 border-dashed">
@@ -2046,42 +2057,74 @@ const OptionChain: React.FC<{ symbol: string; stockPrice: number }> = ({ symbol,
         </table>
       </div>
 
-      <Card title="Greeks Analysis (Portfolio Impact)" icon={Activity}>
-        <div className="h-64">
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={chain.map(row => ({ 
-              strike: row.strikePrice, 
-              delta: row.callDelta || 0,
-              theta: Math.abs(row.callTheta || 0) / 10, // normalized
-              vega: (row.callVega || 0) * 5 // scaled
-            }))}>
-              <XAxis dataKey="strike" hide />
-              <YAxis hide />
-              <Tooltip 
-                contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px' }}
-                itemStyle={{ fontSize: '11px', fontWeight: 'bold' }}
-              />
-              <Area type="monotone" dataKey="delta" stroke="#10b981" fill="#10b981" fillOpacity={0.1} name="Delta" />
-              <Area type="monotone" dataKey="theta" stroke="#f43f5e" fill="#f43f5e" fillOpacity={0.1} name="Theta" />
-              <Area type="monotone" dataKey="vega" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.1} name="Vega" />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-        <div className="grid grid-cols-4 gap-4 mt-6">
-           {['Delta', 'Gamma', 'Theta', 'Vega'].map(g => (
-             <div key={g} className="text-center p-3 bg-slate-950 rounded-xl border border-slate-800">
-                <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">{g}</p>
-                <div className={cn(
-                  "h-1 rounded-full mb-1",
-                  g === 'Delta' ? 'bg-emerald-500' : g === 'Theta' ? 'bg-rose-500' : 'bg-blue-500'
-                )} />
-                <p className="text-[10px] font-bold text-slate-300">
-                  {g === 'Gamma' ? '0.0024' : Math.random().toFixed(2)}
-                </p>
-             </div>
-           ))}
-        </div>
-      </Card>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <Card title="Greeks Analysis (Portfolio Impact)" icon={Activity}>
+          <div className="h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={chain.map(row => ({ 
+                strike: row.strikePrice, 
+                delta: row.callDelta || 0,
+                theta: Math.abs(row.callTheta || 0) / 10, // normalized
+                vega: (row.callVega || 0) * 5 // scaled
+              }))}>
+                <XAxis dataKey="strike" hide />
+                <YAxis hide />
+                <Tooltip 
+                  contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px' }}
+                  itemStyle={{ fontSize: '11px', fontWeight: 'bold' }}
+                />
+                <Area type="monotone" dataKey="delta" stroke="#10b981" fill="#10b981" fillOpacity={0.1} name="Delta" />
+                <Area type="monotone" dataKey="theta" stroke="#f43f5e" fill="#f43f5e" fillOpacity={0.1} name="Theta" />
+                <Area type="monotone" dataKey="vega" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.1} name="Vega" />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="grid grid-cols-4 gap-4 mt-6">
+             {[
+               { name: 'Delta', val: atmRow?.callDelta ?? 0 },
+               { name: 'Gamma', val: atmRow?.callGamma ?? 0 },
+               { name: 'Theta', val: atmRow?.callTheta ?? 0 },
+               { name: 'Vega', val: atmRow?.callVega ?? 0 }
+             ].map(g => (
+               <div key={g.name} className="text-center p-3 bg-slate-950 rounded-xl border border-slate-800">
+                  <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">{g.name}</p>
+                  <div className={cn(
+                    "h-1 rounded-full mb-1",
+                    g.name === 'Delta' ? 'bg-emerald-500' : g.name === 'Theta' ? 'bg-rose-500' : 'bg-blue-500'
+                  )} />
+                  <p className="text-[10px] font-bold text-slate-300">
+                    {g.name === 'Gamma' ? g.val.toFixed(5) : g.val.toFixed(3)}
+                  </p>
+               </div>
+             ))}
+          </div>
+        </Card>
+
+        <Card title="Implied Volatility Smile (IV Skew)" icon={Activity}>
+          <div className="h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={chain.map(row => ({ 
+                strike: row.strikePrice, 
+                callIv: row.callIv || 0,
+                putIv: row.putIv || 0
+              }))}>
+                <CartesianGrid stroke="#1e293b" strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="strike" stroke="#475569" fontSize={9} tickLine={false} />
+                <YAxis stroke="#475569" fontSize={9} tickLine={false} unit="%" />
+                <Tooltip 
+                  contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px' }}
+                  itemStyle={{ fontSize: '11px', fontWeight: 'bold' }}
+                />
+                <Area type="monotone" dataKey="callIv" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.05} name="Call IV" />
+                <Area type="monotone" dataKey="putIv" stroke="#ec4899" fill="#ec4899" fillOpacity={0.05} name="Put IV" />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 text-[10px] text-slate-400 leading-normal text-center mt-6">
+            📈 The classic <strong>U-shape skew (Smile)</strong> represents dynamic premium pricing across out-of-the-money options contracts.
+          </div>
+        </Card>
+      </div>
     </div>
   );
 };
@@ -3979,8 +4022,17 @@ export default function App() {
   // MC API returns { indiceList: [{ name: "Key Indices", list: [...] }, ...] }
   const indexGroups: any[] = rawIndexData?.indiceList ?? [];
   const allIndices: any[] = indexGroups.flatMap((g: any) => Array.isArray(g.list) ? g.list : []);
+  
+  const allowedIndices = [
+    'nifty 50', 'sensex', 'nifty bank', 'nifty next 50', 'nifty 500', 
+    'nifty midcap 100', 'nifty smallcap 100', 'nifty it', 'nifty auto', 
+    'nifty pharma', 'nifty fmcg', 'nifty metal', 'nifty infra', 
+    'nifty energy', 'nifty realty', 'nifty psu bank', 'nifty pvt bank',
+    'nifty financial services', 'nifty media'
+  ];
+
   const keyIndices = allIndices.filter((idx: any) =>
-    ['NIFTY 50', 'SENSEX', 'NIFTY BANK'].includes(idx.name)
+    idx && idx.name && allowedIndices.includes(idx.name.toLowerCase())
   );
 
   const displayIndices = keyIndices.length > 0 ? keyIndices.map((idx: any) => ({
@@ -3991,7 +4043,16 @@ export default function App() {
   })) : [
     { name: 'Nifty 50', value: 22453.20, change: 0.84, isUp: true },
     { name: 'Sensex', value: 73845.54, change: 0.72, isUp: true },
-    { name: 'Bank Nifty', value: 47285.30, change: 1.24, isUp: true }
+    { name: 'Nifty Bank', value: 47285.30, change: 1.24, isUp: true },
+    { name: 'Nifty Next 50', value: 62450.15, change: 0.95, isUp: true },
+    { name: 'Nifty 500', value: 20650.40, change: 0.65, isUp: true },
+    { name: 'Nifty Midcap 100', value: 50450.80, change: 1.12, isUp: true },
+    { name: 'Nifty Smallcap 100', value: 16420.25, change: 1.45, isUp: true },
+    { name: 'Nifty IT', value: 34120.50, change: -0.42, isUp: false },
+    { name: 'Nifty Auto', value: 22150.30, change: 2.15, isUp: true },
+    { name: 'Nifty Pharma', value: 18950.45, change: 0.32, isUp: true },
+    { name: 'Nifty FMCG', value: 54120.10, change: -0.15, isUp: false },
+    { name: 'Nifty Metal', value: 8950.20, change: 1.84, isUp: true }
   ];
 
   const addToast = (signal: any) => {
@@ -4142,6 +4203,7 @@ export default function App() {
               exit={{ opacity: 0, x: 10 }}
               transition={{ duration: 0.25, ease: 'easeOut' }}
             >
+              {activeTab === 'trade-cockpit' && <TradeDecisionCockpit onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} />}
               {activeTab === 'dashboard' && <Dashboard stocks={stocks} onNewSignal={addToast} onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} onSelectIndex={(id, name) => { setSelectedIndex({ id, name }); setActiveTab('indices'); }} />}
               {activeTab === 'top-rated' && <TopRatedStocks onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />}
               {activeTab === 'indices' && <IndicesPage onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} selectedIndex={selectedIndex} setSelectedIndex={setSelectedIndex} />}
@@ -4198,6 +4260,7 @@ export default function App() {
                 </div>
               )}
               {activeTab === 'todo' && <ToDoPage />}
+              {activeTab === 'smart-money' && <SmartMoneyFlowPage onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} />}
               {activeTab === 'portfolio' && (
                 <div className="p-6">
                    <Card title="Wealth Intelligence" icon={PieChart}>

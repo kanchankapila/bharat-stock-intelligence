@@ -3,6 +3,7 @@ import { getAllStocks, getStockMapping } from "./stockMapping";
 import { mcFetchJson } from "./mcApiService";
 import { nseStocksData } from "../data/nseStocks";
 import { cacheGet, cacheSet } from "./cacheService";
+import { resilientFetch } from "./networkService";
 
 // ─── Symbol & name resolution ─────────────────────────────────────────────────
 
@@ -47,15 +48,17 @@ async function fetchBatchYahooFinance(
     `regularMarketVolume,regularMarketDayHigh,regularMarketDayLow,` +
     `regularMarketOpen,regularMarketPreviousClose,fiftyTwoWeekHigh,fiftyTwoWeekLow`;
 
-  const response = await fetch(url, {
+  const response = await resilientFetch(url, {
+    timeoutMs: 6000,
+    retries: 3,
     headers: {
       "User-Agent":
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
       Accept: "application/json",
     },
-  });
+  }).catch(() => null);
 
-  if (!response.ok) return new Map();
+  if (!response || !response.ok) return new Map();
 
   const data = await response.json();
   const quotes: any[] = data.quoteResponse?.result ?? [];
@@ -100,15 +103,17 @@ async function fetchStockQuoteYahooFinance(
     const name = nameMap.get(symbol) || symbol;
 
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}.NS?interval=1d&range=1d`;
-    const response = await fetch(url, {
+    const response = await resilientFetch(url, {
+      timeoutMs: 5000,
+      retries: 2,
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         Accept: "application/json",
       },
-    });
+    }).catch(() => null);
 
-    if (!response.ok) return null;
+    if (!response || !response.ok) return null;
 
     const data = await response.json();
     const result = data.chart?.result?.[0];
