@@ -111,6 +111,7 @@ class Backtester:
         max_positions: int = 20,
         initial_capital: float = INITIAL_CAPITAL,
         slippage_bps: float = 10,
+        stop_loss_pct: float = 7.0,
     ) -> tuple[list[dict], pd.Series]:
         """
         Simulate trades from signals.  Returns (trade_log, equity_curve_daily).
@@ -228,7 +229,7 @@ class Backtester:
                 cost = shares * entry_price
                 cash -= cost
 
-                sl = float(row['stop_loss']) if pd.notna(row['stop_loss']) else entry_price * 0.93
+                sl = float(row['stop_loss']) if pd.notna(row['stop_loss']) else entry_price * (1 - stop_loss_pct / 100)
                 open_positions[sym] = {
                     'entry_date':   date,
                     'entry_price':  entry_price,
@@ -439,6 +440,7 @@ class Backtester:
             max_positions=max_positions,
             initial_capital=initial_capital,
             slippage_bps=slippage_bps,
+            stop_loss_pct=stop_loss_pct,
         )
 
         if not trade_log:

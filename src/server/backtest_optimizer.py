@@ -6,7 +6,7 @@ Finds config maximising Sharpe ratio subject to constraints:
   win_rate >= 0.45, max_drawdown_pct >= -25.0, total_trades >= 20
 
 Writes optimal params to app_settings:
-  optimal_min_score, optimal_horizon_days, optimal_stop_loss_pct
+  optimal_min_score, optimal_horizon_days, optimal_stop_loss_pct, optimal_max_positions
 
 Only updates app_settings if new Sharpe >= current x 1.05.
 Uses the most recent `--window` days of data (default 365).
@@ -68,6 +68,7 @@ def _write_optimal_params(conn: sqlite3.Connection, config: dict, sharpe: float)
         ('optimal_min_score',     str(config['min_score'])),
         ('optimal_horizon_days',  str(config['horizon_days'])),
         ('optimal_stop_loss_pct', str(config['stop_loss_pct'])),
+        ('optimal_max_positions', str(config['max_positions'])),
         ('optimal_sharpe',        str(round(sharpe, 4))),
     ]
     for key, value in pairs:
@@ -129,6 +130,10 @@ def run_grid_search(
 
     finally:
         bt.close()
+
+    # Clean up intermediate optimizer run rows (run_names like 'opt_%')
+    conn.execute("DELETE FROM backtesting_runs WHERE run_name LIKE 'opt_%'")
+    conn.commit()
 
     if not results:
         print("[BtOptimizer] No results -- cannot optimise.")
