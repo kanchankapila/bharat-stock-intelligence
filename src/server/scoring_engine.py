@@ -147,12 +147,15 @@ class AlphaQuantScoringEngine:
         except Exception:
             rl_mults = {}
 
-        adjusted = raw_score
-        for st in signal_types:
-            stw = self._get_signal_weight(st, regime, sector)
-            rlm = rl_mults.get(st, 1.0)
-            adjusted *= (stw * rlm)
-        return adjusted
+        if not signal_types:
+            return raw_score
+
+        total_mult = sum(
+            self._get_signal_weight(st, regime, sector) * rl_mults.get(st, 1.0)
+            for st in signal_types
+        ) / len(signal_types)
+
+        return raw_score * total_mult
 
     # ------------------------------------------------------------------
     # Data Loading

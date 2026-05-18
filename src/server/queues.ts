@@ -280,7 +280,7 @@ const PYTHON_SCRIPTS_DIR = path.join(process.cwd(), 'src', 'server');
 function runPythonScript(script: string, args: string[] = []): Promise<void> {
   return new Promise((resolve, reject) => {
     execFile(
-      'python',
+      process.env.PYTHON_BIN ?? 'python3',
       [path.join(PYTHON_SCRIPTS_DIR, script), ...args],
       { timeout: 10 * 60 * 1000 },
       (err, stdout, stderr) => {
