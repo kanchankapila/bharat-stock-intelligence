@@ -93,19 +93,23 @@ def test_stop_loss_decreases_weight_more_than_loss():
 
 def test_weight_clamped_to_floor():
     conn = make_db()
+    # Pre-seed weight at 0.32 for (RSI_DIVERGENCE, BULL, IT) — matching the outcome's sector
     conn.execute("""
         INSERT INTO signal_type_weights
         (signal_type, regime, sector, weight, sample_count, last_updated)
-        VALUES ('RSI_DIVERGENCE','BULL','ALL',0.32,5,CURRENT_TIMESTAMP)
+        VALUES ('RSI_DIVERGENCE','BULL','IT',0.32,5,CURRENT_TIMESTAMP)
     """)
     conn.commit()
-    insert_outcome(conn, 'X', '2024-01-01', -20.0, 'STOP_LOSS')
+    # Insert 3 outcomes (MIN_SAMPLES=3) with massive STOP_LOSS to drive weight toward floor
+    for i, sym in enumerate(['X1', 'X2', 'X3']):
+        insert_outcome(conn, sym, f'2024-01-0{i+1}', -20.0, 'STOP_LOSS')
     from reward_engine import update_weights
     update_weights(conn, dry_run=False)
     row = conn.execute("""
         SELECT weight FROM signal_type_weights
-        WHERE signal_type='RSI_DIVERGENCE' AND regime='BULL'
+        WHERE signal_type='RSI_DIVERGENCE' AND regime='BULL' AND sector='IT'
     """).fetchone()
+    assert row is not None
     assert row[0] >= 0.3, f"Weight should not go below 0.3, got {row[0]}"
 
 def test_dry_run_no_writes():
