@@ -43,7 +43,7 @@ def make_db():
 def test_get_state_key():
     from rl_agent import get_state_key
     assert get_state_key('BULL', 'IT', 8)   == 'BULL_IT_HIGH'
-    assert get_state_key('BEAR', 'BANK', 4) == 'BEAR_BANK_MED'
+    assert get_state_key('BEAR', 'BANK', 4) == 'BEAR_BANK_LOW'
     assert get_state_key('SIDEWAYS', 'PHARMA', 2) == 'SIDEWAYS_PHARMA_LOW'
 
 def test_get_sector_bucket():

@@ -108,9 +108,9 @@ def get_state_key(regime: str, sector_or_bucket: str, score: int) -> str:
         sector_bucket = sector_or_bucket
     else:
         sector_bucket = get_sector_bucket(sector_or_bucket)
-    if score <= 3:
+    if score <= 5:
         score_bucket = 'LOW'
-    elif score <= 6:
+    elif score <= 7:
         score_bucket = 'MED'
     else:
         score_bucket = 'HIGH'
