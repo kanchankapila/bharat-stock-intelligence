@@ -2,10 +2,11 @@ import Database from 'better-sqlite3';
 import path from 'path';
 
 const dbPath = path.resolve(process.cwd(), process.env.DATABASE_URL || 'database.sqlite');
-const db = new Database(dbPath);
+const db = new Database(dbPath, { timeout: 10000 });
 
 // Enable WAL mode for better concurrency
 db.pragma('journal_mode = WAL');
+db.pragma('synchronous = NORMAL');
 
 /**
  * Initialize Database Schema
@@ -662,6 +663,44 @@ db.exec(`
     trade_log_json        TEXT,
     run_at                DATETIME DEFAULT CURRENT_TIMESTAMP
   );
+`);
+
+// --- RL & Reward Loop Tables ---
+db.exec(`
+  -- Per-(signal_type, regime, sector) EMA-smoothed reward weights
+  CREATE TABLE IF NOT EXISTS signal_type_weights (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    signal_type  TEXT NOT NULL,
+    regime       TEXT NOT NULL,
+    sector       TEXT NOT NULL DEFAULT 'ALL',
+    weight       REAL NOT NULL DEFAULT 1.0,
+    sample_count INTEGER NOT NULL DEFAULT 0,
+    last_updated TEXT NOT NULL,
+    UNIQUE(signal_type, regime, sector)
+  );
+  CREATE INDEX IF NOT EXISTS idx_stw_key ON signal_type_weights(signal_type, regime, sector);
+
+  -- Q-learning table: Q(state, action) values
+  CREATE TABLE IF NOT EXISTS rl_q_table (
+    state_key    TEXT NOT NULL,
+    action       TEXT NOT NULL,
+    q_value      REAL NOT NULL DEFAULT 0.0,
+    visit_count  INTEGER NOT NULL DEFAULT 0,
+    last_updated TEXT NOT NULL,
+    PRIMARY KEY (state_key, action)
+  );
+
+  -- Audit trail of every RL episode (state chosen, action taken, reward assigned later)
+  CREATE TABLE IF NOT EXISTS rl_episodes (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    date         TEXT NOT NULL,
+    state_key    TEXT NOT NULL,
+    action_taken TEXT NOT NULL,
+    reward       REAL,
+    epsilon      REAL,
+    notes        TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_rlepi_date ON rl_episodes(date DESC);
 `);
 
 // --- Migrations & Upgrades ---
