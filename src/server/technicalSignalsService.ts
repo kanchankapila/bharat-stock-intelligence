@@ -1027,6 +1027,7 @@ export function getTechnicalSignalsForDate(
     FROM technical_signals ts
     LEFT JOIN nse_stocks ns ON ns.symbol = ts.symbol
     WHERE ts.date = ? AND ts.signal_score >= ?
+      AND (ts.win_probability IS NULL OR ts.win_probability >= 0.40)
     ORDER BY ts.signal_score DESC
     LIMIT ?
   `).all(d, minScore, limit) as Record<string, unknown>[];
