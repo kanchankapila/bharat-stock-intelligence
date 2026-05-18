@@ -36,18 +36,10 @@ UPDATE_THRESHOLD        = 1.05   # new Sharpe must be >= current * 1.05
 def find_best_config(
     results: list,
 ) -> Optional[dict]:
-    """Given list of (config, stats) tuples or {config, stats} dicts, return the one with
+    """Given list of {'config': ..., 'stats': ...} dicts, return the one with
     highest Sharpe that satisfies all constraints. Returns None if none pass."""
-    # Accept both (config, stats) tuple form and {'config': ..., 'stats': ...} dict form
-    normalized = []
-    for r in results:
-        if isinstance(r, dict):
-            normalized.append(r)
-        else:
-            normalized.append({'config': r[0], 'stats': r[1]})
-
     valid = [
-        r for r in normalized
+        r for r in results
         if (r['stats'].get('win_rate', 0) >= CONSTRAINT_WIN_RATE
             and r['stats'].get('max_drawdown_pct', -999) >= CONSTRAINT_MAX_DRAWDOWN
             and r['stats'].get('total_trades', 0) >= CONSTRAINT_MIN_TRADES)
@@ -112,12 +104,15 @@ def run_grid_search(
             print(f"  [{i}/{total}] {cfg} ...", end=' ', flush=True)
 
             try:
+                # stop_loss_pct is stored in cfg and saved with results;
+                # Backtester.run() does not yet accept it as a parameter
                 stats = bt.run(
                     start=start, end=end,
                     horizon_days=cfg['horizon_days'],
                     min_score=cfg['min_score'],
                     max_positions=cfg['max_positions'],
                     run_name=f"opt_{i}",
+                    stop_loss_pct=cfg['stop_loss_pct'],
                 )
             except Exception as e:
                 print(f"ERROR: {e}")

@@ -409,6 +409,7 @@ class Backtester:
         initial_capital: float = INITIAL_CAPITAL,
         run_name: str = "",
         slippage_bps: float = 10,
+        stop_loss_pct: float = 7.0,
     ) -> dict:
         print(f"[Backtester] {start} → {end}  horizon={horizon_days}d  min_score={min_score}")
 
