@@ -7,7 +7,7 @@ import {
 import {
   TrendingUp, TrendingDown, Search, BarChart3, PieChart, Info,
   AlertCircle, ArrowUpRight, ArrowDownRight, Activity, Zap,
-  LayoutDashboard, Filter, History, User, LogIn, Plus, Minus, Heart, Share2, Download,
+  LayoutDashboard, Filter, History, Plus, Minus, Heart, Share2, Download,
   ArrowLeft, Eye, ChevronUp, ChevronDown, Save, Bookmark, BrainCircuit, CheckCircle2,
   Users, Trophy, Bookmark as WatchlistIcon, BarChart2, Star, Target, Globe, Coins, Sparkles
 } from 'lucide-react';
@@ -15,10 +15,6 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { format } from 'date-fns';
 import { cn } from './lib/utils';
-import { auth } from './lib/firebase';
-import { 
-  signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User as FirebaseUser 
-} from 'firebase/auth';
 
 import { useMarketData, MarketData } from './services/marketService';
 
@@ -225,11 +221,9 @@ const SideNav: React.FC<{
 };
 
 const TopHeader: React.FC<{
-  user: FirebaseUser | null;
-  onLogin: () => void;
   stocks: MarketData[];
   onSelectStock: (symbol: string) => void;
-}> = ({ user, onLogin, stocks, onSelectStock }) => {
+}> = ({ stocks, onSelectStock }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [showResults, setShowResults] = useState(false);
 
@@ -290,24 +284,7 @@ const TopHeader: React.FC<{
         </AnimatePresence>
       </div>
 
-      <div className="flex items-center gap-3">
-        {user ? (
-          <div className="flex items-center gap-2.5">
-            <span className="text-xs text-zinc-500 hidden md:block truncate max-w-[120px]">{user.displayName}</span>
-            <div className="w-8 h-8 rounded-full border border-white/10 overflow-hidden">
-              <img src={user.photoURL || ''} alt="avatar" className="w-full h-full object-cover" />
-            </div>
-          </div>
-        ) : (
-          <button
-            onClick={onLogin}
-            className="flex items-center gap-2 bg-violet-600 hover:bg-violet-500 text-white px-4 py-1.5 rounded-lg text-xs font-medium transition-all shadow-[0_0_16px_rgba(124,58,237,0.2)]"
-          >
-            <LogIn className="w-3.5 h-3.5" />
-            Sign in
-          </button>
-        )}
-      </div>
+      <div className="flex items-center gap-3" />
     </header>
   );
 };
@@ -4041,9 +4018,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [selectedIndex, setSelectedIndex] = useState<{ id: string; name: string } | null>(null);
-  const [user, setUser] = useState<FirebaseUser | null>(null);
   const [watchlist, setWatchlist] = useState<string[]>([]);
-  const [loading, setLoading] = useState(true);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const stocks = useMarketData();
   const { data: realIndices } = trpc.getAllIndices.useQuery();
@@ -4134,98 +4109,17 @@ export default function App() {
     }, 5000);
   };
 
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (u) => {
-      setUser(u);
-      setLoading(false);
-    });
-    return unsubscribe;
-  }, []);
-
-  const { data: watchlistData } = trpc.getWatchlist.useQuery({ userId: user?.uid || '' }, { enabled: !!user });
-  const { data: watchlistDetails, refetch: refetchWatchlistDetails } = trpc.getWatchlistDetails.useQuery(
-    { userId: user?.uid || '' },
-    { enabled: !!user }
+  const { data: watchlistData } = trpc.getWatchlist.useQuery({ userId: '' }, { enabled: false });
+  const { data: watchlistDetails } = trpc.getWatchlistDetails.useQuery(
+    { userId: '' },
+    { enabled: false }
   );
-  
-  useEffect(() => {
-    if (watchlistData) {
-      setWatchlist(watchlistData);
-    } else if (!user) {
-      setWatchlist([]);
-    }
-  }, [watchlistData, user]);
 
-  const addToWatchlistMutation = trpc.addToWatchlist.useMutation();
-  const removeFromWatchlistMutation = trpc.removeFromWatchlist.useMutation();
-
-  const toggleWatchlist = async (
-    symbol: string,
-    metadata?: { price?: number; name?: string; source?: string }
-  ) => {
-    if (!user) {
-      handleLogin();
-      return;
-    }
-
-    const isInWatchlist = watchlist.includes(symbol);
-
-    try {
-      if (isInWatchlist) {
-        await removeFromWatchlistMutation.mutateAsync({ userId: user.uid, symbol });
-        setWatchlist(prev => prev.filter(s => s !== symbol));
-      } else {
-        await addToWatchlistMutation.mutateAsync({ 
-          userId: user.uid, 
-          symbol,
-          price: metadata?.price,
-          name: metadata?.name,
-          source: metadata?.source
-        });
-        setWatchlist(prev => [...prev, symbol]);
-      }
-      // Refetch watchlist details metadata
-      refetchWatchlistDetails();
-    } catch (error) {
-      console.error("Watchlist update failed:", error);
-    }
+  const toggleWatchlist = (symbol: string) => {
+    setWatchlist(prev =>
+      prev.includes(symbol) ? prev.filter(s => s !== symbol) : [...prev, symbol]
+    );
   };
-
-  const syncUserMutation = trpc.syncUser.useMutation();
-
-  const handleLogin = async () => {
-    try {
-      const provider = new GoogleAuthProvider();
-      const result = await signInWithPopup(auth, provider);
-      
-      await syncUserMutation.mutateAsync({
-        id: result.user.uid,
-        email: result.user.email,
-        name: result.user.displayName,
-        photoURL: result.user.photoURL
-      });
-
-    } catch (error) {
-      console.error("Login failed:", error);
-    }
-  };
-
-  if (loading) return (
-    <div className="h-screen w-screen bg-[#0c0c0e] flex items-center justify-center">
-      <div className="flex flex-col items-center gap-5">
-        <div className="relative">
-          <div className="w-12 h-12 bg-gradient-to-br from-violet-600 to-indigo-600 rounded-2xl flex items-center justify-center shadow-[0_0_32px_rgba(124,58,237,0.35)]">
-            <Zap className="text-white w-6 h-6 fill-white" />
-          </div>
-          <div className="absolute inset-0 rounded-2xl animate-ping bg-violet-500/15" />
-        </div>
-        <div className="text-center">
-          <p className="text-sm font-bold text-white">BHARAT<span className="text-violet-400">STOCK</span></p>
-          <p className="text-zinc-600 text-xs mt-1.5 font-medium">Connecting to markets...</p>
-        </div>
-      </div>
-    </div>
-  );
 
   return (
     <div className="min-h-screen bg-[#0c0c0e] text-zinc-200 font-sans selection:bg-violet-500/20">
@@ -4248,8 +4142,6 @@ export default function App() {
         </div>
 
         <TopHeader
-          user={user}
-          onLogin={handleLogin}
           stocks={stocks}
           onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }}
         />
