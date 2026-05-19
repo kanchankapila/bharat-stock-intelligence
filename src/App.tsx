@@ -7,7 +7,7 @@ import {
 import {
   TrendingUp, TrendingDown, Search, BarChart3, PieChart, Info,
   AlertCircle, ArrowUpRight, ArrowDownRight, Activity, Zap,
-  LayoutDashboard, Filter, History, User, LogIn, Plus, Minus, Heart, Share2, Download,
+  LayoutDashboard, Filter, History, Plus, Minus, Heart, Share2, Download,
   ArrowLeft, Eye, ChevronUp, ChevronDown, Save, Bookmark, BrainCircuit, CheckCircle2,
   Users, Trophy, Bookmark as WatchlistIcon, BarChart2, Star, Target, Globe, Coins, Sparkles
 } from 'lucide-react';
@@ -15,10 +15,6 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { format } from 'date-fns';
 import { cn } from './lib/utils';
-import { auth } from './lib/firebase';
-import { 
-  signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User as FirebaseUser 
-} from 'firebase/auth';
 
 import { useMarketData, MarketData } from './services/marketService';
 
@@ -128,13 +124,11 @@ const IndexBar: React.FC<IndexBarProps> = ({ name, value, change, isUp, onClick 
 );
 
 const Navbar: React.FC<{
-  user: FirebaseUser | null;
-  onLogin: () => void;
   activeTab: string;
   setActiveTab: (tab: string) => void;
   stocks: MarketData[];
   onSelectStock: (symbol: string) => void;
-}> = ({ user, onLogin, activeTab, setActiveTab, stocks, onSelectStock }) => {
+}> = ({ activeTab, setActiveTab, stocks, onSelectStock }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [showResults, setShowResults] = useState(false);
 
@@ -251,22 +245,7 @@ const Navbar: React.FC<{
           </AnimatePresence>
         </div>
 
-      {user ? (
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-full border border-slate-800 p-0.5">
-            <img src={user.photoURL || ''} alt="avatar" className="w-full h-full rounded-full" />
-          </div>
-        </div>
-      ) : (
-        <button 
-          onClick={onLogin}
-          className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-1.5 rounded-xl text-sm font-semibold transition-all shadow-[0_0_14px_rgba(99,102,241,0.25)] hover:shadow-[0_0_18px_rgba(99,102,241,0.38)]"
-        >
-          <LogIn className="w-4 h-4" />
-          Login
-        </button>
-      )}
-    </div>
+    <div />
   </nav>
   );
 };
@@ -4000,9 +3979,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [selectedIndex, setSelectedIndex] = useState<{ id: string; name: string } | null>(null);
-  const [user, setUser] = useState<FirebaseUser | null>(null);
   const [watchlist, setWatchlist] = useState<string[]>([]);
-  const [loading, setLoading] = useState(true);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const stocks = useMarketData();
   const { data: realIndices } = trpc.getAllIndices.useQuery();
@@ -4093,90 +4070,16 @@ export default function App() {
     }, 5000);
   };
 
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (u) => {
-      setUser(u);
-      setLoading(false);
-    });
-    return unsubscribe;
-  }, []);
-
-  const { data: watchlistData } = trpc.getWatchlist.useQuery({ userId: user?.uid || '' }, { enabled: !!user });
-  const { data: watchlistDetails, refetch: refetchWatchlistDetails } = trpc.getWatchlistDetails.useQuery(
-    { userId: user?.uid || '' },
-    { enabled: !!user }
+  const { data: watchlistDetails } = trpc.getWatchlistDetails.useQuery(
+    { userId: '' },
+    { enabled: false }
   );
-  
-  useEffect(() => {
-    if (watchlistData) {
-      setWatchlist(watchlistData);
-    } else if (!user) {
-      setWatchlist([]);
-    }
-  }, [watchlistData, user]);
 
-  const addToWatchlistMutation = trpc.addToWatchlist.useMutation();
-  const removeFromWatchlistMutation = trpc.removeFromWatchlist.useMutation();
-
-  const toggleWatchlist = async (
-    symbol: string,
-    metadata?: { price?: number; name?: string; source?: string }
-  ) => {
-    if (!user) {
-      handleLogin();
-      return;
-    }
-
-    const isInWatchlist = watchlist.includes(symbol);
-
-    try {
-      if (isInWatchlist) {
-        await removeFromWatchlistMutation.mutateAsync({ userId: user.uid, symbol });
-        setWatchlist(prev => prev.filter(s => s !== symbol));
-      } else {
-        await addToWatchlistMutation.mutateAsync({ 
-          userId: user.uid, 
-          symbol,
-          price: metadata?.price,
-          name: metadata?.name,
-          source: metadata?.source
-        });
-        setWatchlist(prev => [...prev, symbol]);
-      }
-      // Refetch watchlist details metadata
-      refetchWatchlistDetails();
-    } catch (error) {
-      console.error("Watchlist update failed:", error);
-    }
+  const toggleWatchlist = (symbol: string) => {
+    setWatchlist(prev =>
+      prev.includes(symbol) ? prev.filter(s => s !== symbol) : [...prev, symbol]
+    );
   };
-
-  const syncUserMutation = trpc.syncUser.useMutation();
-
-  const handleLogin = async () => {
-    try {
-      const provider = new GoogleAuthProvider();
-      const result = await signInWithPopup(auth, provider);
-      
-      await syncUserMutation.mutateAsync({
-        id: result.user.uid,
-        email: result.user.email,
-        name: result.user.displayName,
-        photoURL: result.user.photoURL
-      });
-
-    } catch (error) {
-      console.error("Login failed:", error);
-    }
-  };
-
-  if (loading) return (
-    <div className="h-screen w-screen bg-slate-950 flex items-center justify-center">
-      <div className="flex flex-col items-center gap-4">
-        <Zap className="text-blue-500 w-12 h-12 fill-blue-500 animate-pulse" />
-        <span className="text-slate-400 text-xs font-black uppercase tracking-[0.4em] animate-pulse italic">Connecting to NSE Gateway...</span>
-      </div>
-    </div>
-  );
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-200 font-sans selection:bg-indigo-500/30">
@@ -4192,11 +4095,9 @@ export default function App() {
         ))}
       </div>
 
-      <Navbar 
-        user={user} 
-        onLogin={handleLogin} 
-        activeTab={activeTab} 
-        setActiveTab={setActiveTab} 
+      <Navbar
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
         stocks={stocks}
         onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }}
       />

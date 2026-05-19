@@ -6,7 +6,14 @@
       "Bash(python -m pytest tests/test_rl_agent.py -v)",
       "Bash(python src/server/rl_agent.py --inspect)",
       "Bash(python src/server/rl_agent.py --update --dry-run)",
-      "Read(//c/Users/amit_/.claude/plugins/cache/claude-plugins-official/superpowers/5.1.0/skills/requesting-code-review/**)"
+      "Read(//c/Users/amit_/.claude/plugins/cache/claude-plugins-official/superpowers/5.1.0/skills/requesting-code-review/**)",
+      "Bash(git -C \"c:/Github/bharat-stock-intelligence\" log --oneline claude/frosty-rhodes-61ac13..HEAD)",
+      "Bash(git -C \"c:/Github/bharat-stock-intelligence\" log --oneline HEAD..claude/frosty-rhodes-61ac13)",
+      "Bash(git -C \"c:/Github/bharat-stock-intelligence\" merge claude/frosty-rhodes-61ac13 --no-edit)",
+      "Bash(git -C \"c:/Github/bharat-stock-intelligence\" status --short)",
+      "Bash(git -C \"c:/Github/bharat-stock-intelligence\" diff --name-only --diff-filter=U)",
+      "Bash(git checkout *)",
+      "Bash(git -C \"c:/Github/bharat-stock-intelligence\" add src/App.tsx src/components/Card.tsx src/components/MCStockInfoPanel.tsx src/index.css)"
     ]
   }
 }

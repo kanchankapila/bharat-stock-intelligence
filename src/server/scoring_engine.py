@@ -3,7 +3,6 @@ import json
 import os
 import datetime
 import pandas as pd
-import numpy as np
 from sqlalchemy import create_engine, text
 from nlp_engine import NLPScreenerInference, NLP_VERSION
 from typing import Dict, Any, List
@@ -356,6 +355,16 @@ class AlphaQuantScoringEngine:
         print(f"Starting AlphaQuant Scoring Engine v3 (Dedup+Decay) at {datetime.datetime.now()}")
         screeners, mappings = self.load_data()
 
+        # Build a symbol whitelist from the screener universe so news signals only
+        # boost stocks that are already on at least one screener.  This prevents
+        # purely news-driven scores from surfacing stocks that no screener has
+        # qualified, keeping the output focused on already-positive candidates.
+        screener_symbols = set(
+            s for s in mappings['symbol'].dropna().unique()
+            if s and s != '#N/A'
+        )
+        print(f"Screener universe: {len(screener_symbols)} symbols across all sources")
+
         print("Building screener metadata (NLP inference)...")
         screeners_meta = self.build_screener_metadata(screeners, force_rebuild=force_rebuild)
         print(f"screener_master has {len(screeners_meta)} entries.")
@@ -494,6 +503,8 @@ class AlphaQuantScoringEngine:
 
             # ── News seed (both timeframes) ──────────────────────────────
             for symbol, news_items in news_map.items():
+                if screener_symbols and symbol not in screener_symbols:
+                    continue  # skip news-only stocks not in any screener
                 _init_stock(symbol)
                 news_src_counts: Dict[str, int] = {}
                 for item in news_items:
