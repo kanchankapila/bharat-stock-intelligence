@@ -187,7 +187,7 @@ export const AdvancedChartWidget: React.FC<AdvancedChartWidgetProps> = memo(({ s
   }, [tvSymbol, height]);
 
   return (
-    <div id="tv-advanced-chart" className="w-full rounded-2xl overflow-hidden border border-slate-800" ref={container} />
+    <div id="tv-advanced-chart" className="w-full rounded-2xl overflow-hidden border border-white/[0.07]" ref={container} />
   );
 });
 

@@ -47,7 +47,7 @@ export const SmartMoneyFlowPage: React.FC<{ onSelectStock: (symbol: string) => v
           <div className="absolute inset-0 border-2 border-indigo-500/20 rounded-full" />
           <div className="absolute inset-0 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
         </div>
-        <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] animate-pulse">Scanning Institutional Filings...</p>
+        <p className="text-[10px] font-black text-zinc-500 uppercase tracking-[0.3em] animate-pulse">Scanning Institutional Filings...</p>
       </div>
     );
   }
@@ -64,14 +64,14 @@ export const SmartMoneyFlowPage: React.FC<{ onSelectStock: (symbol: string) => v
             <CircleDollarSign className="w-8 h-8 text-indigo-400" />
             Smart Money Flow Tracker
           </h2>
-          <p className="text-slate-500 text-xs font-bold uppercase tracking-widest mt-1 italic">
+          <p className="text-zinc-500 text-xs font-bold uppercase tracking-widest mt-1 italic">
             Analyzing corporate insider trade filings and institutional block deals
           </p>
         </div>
 
         <div className="flex items-center gap-4">
           {syncStatus && (
-            <span className="text-[10px] font-bold text-slate-400 bg-slate-900 border border-slate-800 px-4 py-2.5 rounded-xl">
+            <span className="text-[10px] font-bold text-zinc-400 bg-[#141416] border border-white/[0.07] px-4 py-2.5 rounded-xl">
               {syncStatus}
             </span>
           )}
@@ -89,12 +89,12 @@ export const SmartMoneyFlowPage: React.FC<{ onSelectStock: (symbol: string) => v
       {/* Overview stats cards */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Institutional FII/DII Buys */}
-        <div className="p-5 bg-slate-900/60 border border-slate-800 rounded-3xl space-y-4">
+        <div className="p-5 bg-[#141416]/60 border border-white/[0.07] rounded-3xl space-y-4">
           <div className="flex justify-between items-center">
-            <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+            <h3 className="text-xs font-black text-zinc-400 uppercase tracking-widest flex items-center gap-2">
               <Award className="w-4 h-4 text-amber-500" /> FII/DII Net Accumulation Leaders
             </h3>
-            <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">30-day window</span>
+            <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-wider">30-day window</span>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -102,7 +102,7 @@ export const SmartMoneyFlowPage: React.FC<{ onSelectStock: (symbol: string) => v
               <div 
                 key={item.symbol} 
                 onClick={() => onSelectStock(item.symbol)}
-                className="p-3 bg-slate-950 border border-slate-800/80 rounded-2xl hover:border-slate-700 transition-all cursor-pointer flex justify-between items-center"
+                className="p-3 bg-[#0c0c0e] border border-white/[0.07]/80 rounded-2xl hover:border-white/[0.1] transition-all cursor-pointer flex justify-between items-center"
               >
                 <div>
                   <p className="text-xs font-black text-white">{item.symbol}</p>
@@ -115,12 +115,12 @@ export const SmartMoneyFlowPage: React.FC<{ onSelectStock: (symbol: string) => v
         </div>
 
         {/* Promoter Accumulations */}
-        <div className="p-5 bg-slate-900/60 border border-slate-800 rounded-3xl space-y-4">
+        <div className="p-5 bg-[#141416]/60 border border-white/[0.07] rounded-3xl space-y-4">
           <div className="flex justify-between items-center">
-            <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+            <h3 className="text-xs font-black text-zinc-400 uppercase tracking-widest flex items-center gap-2">
               <Layers className="w-4 h-4 text-indigo-400" /> Promoter Insider buying signals
             </h3>
-            <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Acquisition Filings</span>
+            <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-wider">Acquisition Filings</span>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -128,7 +128,7 @@ export const SmartMoneyFlowPage: React.FC<{ onSelectStock: (symbol: string) => v
               <div 
                 key={item.symbol} 
                 onClick={() => onSelectStock(item.symbol)}
-                className="p-3 bg-slate-950 border border-slate-800/80 rounded-2xl hover:border-slate-700 transition-all cursor-pointer flex justify-between items-center"
+                className="p-3 bg-[#0c0c0e] border border-white/[0.07]/80 rounded-2xl hover:border-white/[0.1] transition-all cursor-pointer flex justify-between items-center"
               >
                 <div>
                   <p className="text-xs font-black text-white">{item.symbol}</p>
@@ -143,19 +143,19 @@ export const SmartMoneyFlowPage: React.FC<{ onSelectStock: (symbol: string) => v
 
       {/* Chart Panel */}
       {bulkDeals && bulkDeals.length > 0 && (
-        <div className="p-5 bg-slate-900/40 border border-slate-800/60 rounded-3xl space-y-4">
-          <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">FII/DII Institutional Block Deal Flow Intensity</h3>
+        <div className="p-5 bg-[#141416]/40 border border-white/[0.07]/60 rounded-3xl space-y-4">
+          <h3 className="text-xs font-black text-zinc-400 uppercase tracking-widest">FII/DII Institutional Block Deal Flow Intensity</h3>
           <div className="h-64 pt-4">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={bulkDeals.slice().reverse().map((d: any) => ({
                 date: d.date,
                 valueCr: d.valueCr
               }))}>
-                <CartesianGrid stroke="#1e293b" strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="date" stroke="#475569" fontSize={9} tickLine={false} />
-                <YAxis stroke="#475569" fontSize={9} tickLine={false} unit="Cr" />
+                <CartesianGrid stroke="rgba(255,255,255,0.05)" strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="date" stroke="#52525b" fontSize={9} tickLine={false} />
+                <YAxis stroke="#52525b" fontSize={9} tickLine={false} unit="Cr" />
                 <Tooltip 
-                  contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px' }}
+                  contentStyle={{ backgroundColor: '#141416', border: '1px solid rgba(255,255,255,0.07)', borderRadius: '12px' }}
                   itemStyle={{ fontSize: '11px', fontWeight: 'bold' }}
                 />
                 <Area type="monotone" dataKey="valueCr" stroke="#6366f1" fill="#6366f1" fillOpacity={0.08} name="Transaction Value" />
@@ -168,20 +168,20 @@ export const SmartMoneyFlowPage: React.FC<{ onSelectStock: (symbol: string) => v
       {/* Dual Table Grid */}
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
         {/* Bulk Deals */}
-        <div className="xl:col-span-7 bg-slate-950 border border-slate-800/80 rounded-3xl overflow-hidden flex flex-col">
-          <div className="p-5 border-b border-slate-800 bg-slate-900/40 flex justify-between items-center">
+        <div className="xl:col-span-7 bg-[#0c0c0e] border border-white/[0.07]/80 rounded-3xl overflow-hidden flex flex-col">
+          <div className="p-5 border-b border-white/[0.07] bg-[#141416]/40 flex justify-between items-center">
             <h3 className="text-xs font-black text-white uppercase tracking-wider">Institutional Bulk/Block Deals</h3>
-            <span className="text-[8px] bg-slate-800 text-slate-300 font-bold px-2 py-1 rounded-md uppercase">NSE/BSE</span>
+            <span className="text-[8px] bg-white/[0.08] text-zinc-300 font-bold px-2 py-1 rounded-md uppercase">NSE/BSE</span>
           </div>
 
           <div className="overflow-x-auto max-h-[400px]">
             <table className="w-full text-left border-collapse">
               <thead>
-                <tr className="bg-slate-900/30 border-b border-slate-800/60">
-                  <th className="px-4 py-3 text-[8px] font-black text-slate-500 uppercase tracking-widest">Asset</th>
-                  <th className="px-4 py-3 text-[8px] font-black text-slate-500 uppercase tracking-widest">Investor Client</th>
-                  <th className="px-4 py-3 text-[8px] font-black text-slate-500 uppercase tracking-widest text-center">Type</th>
-                  <th className="px-4 py-3 text-[8px] font-black text-slate-500 uppercase tracking-widest text-right">Value (Cr)</th>
+                <tr className="bg-[#141416]/50 border-b border-white/[0.07]/60">
+                  <th className="px-4 py-3 text-[8px] font-black text-zinc-500 uppercase tracking-widest">Asset</th>
+                  <th className="px-4 py-3 text-[8px] font-black text-zinc-500 uppercase tracking-widest">Investor Client</th>
+                  <th className="px-4 py-3 text-[8px] font-black text-zinc-500 uppercase tracking-widest text-center">Type</th>
+                  <th className="px-4 py-3 text-[8px] font-black text-zinc-500 uppercase tracking-widest text-right">Value (Cr)</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/20">
@@ -189,13 +189,13 @@ export const SmartMoneyFlowPage: React.FC<{ onSelectStock: (symbol: string) => v
                   <tr 
                     key={i} 
                     onClick={() => onSelectStock(deal.symbol)}
-                    className="hover:bg-slate-900/20 transition-colors cursor-pointer"
+                    className="hover:bg-[#141416]/20 transition-colors cursor-pointer"
                   >
                     <td className="px-4 py-3.5">
                       <span className="text-xs font-black text-white group-hover:text-indigo-400">{deal.symbol}</span>
-                      <span className="block text-[8px] text-slate-500 font-semibold mt-0.5">{deal.date}</span>
+                      <span className="block text-[8px] text-zinc-500 font-semibold mt-0.5">{deal.date}</span>
                     </td>
-                    <td className="px-4 py-3.5 text-xs text-slate-300 truncate max-w-[150px] font-medium">{deal.clientName}</td>
+                    <td className="px-4 py-3.5 text-xs text-zinc-300 truncate max-w-[150px] font-medium">{deal.clientName}</td>
                     <td className="px-4 py-3.5 text-center">
                       <span className={`text-[8px] font-black px-2 py-1 rounded-md border ${
                         deal.dealType === 'BUY' 
@@ -214,19 +214,19 @@ export const SmartMoneyFlowPage: React.FC<{ onSelectStock: (symbol: string) => v
         </div>
 
         {/* Insider Transactions */}
-        <div className="xl:col-span-5 bg-slate-950 border border-slate-800/80 rounded-3xl overflow-hidden flex flex-col">
-          <div className="p-5 border-b border-slate-800 bg-slate-900/40 flex justify-between items-center">
+        <div className="xl:col-span-5 bg-[#0c0c0e] border border-white/[0.07]/80 rounded-3xl overflow-hidden flex flex-col">
+          <div className="p-5 border-b border-white/[0.07] bg-[#141416]/40 flex justify-between items-center">
             <h3 className="text-xs font-black text-white uppercase tracking-wider">Promoter Holdings Changes</h3>
-            <span className="text-[8px] bg-slate-800 text-slate-300 font-bold px-2 py-1 rounded-md uppercase">SEBI Filings</span>
+            <span className="text-[8px] bg-white/[0.08] text-zinc-300 font-bold px-2 py-1 rounded-md uppercase">SEBI Filings</span>
           </div>
 
           <div className="overflow-x-auto max-h-[400px]">
             <table className="w-full text-left border-collapse">
               <thead>
-                <tr className="bg-slate-900/30 border-b border-slate-800/60">
-                  <th className="px-4 py-3 text-[8px] font-black text-slate-500 uppercase tracking-widest">Asset</th>
-                  <th className="px-4 py-3 text-[8px] font-black text-slate-500 uppercase tracking-widest">Acquirer/Category</th>
-                  <th className="px-4 py-3 text-[8px] font-black text-slate-500 uppercase tracking-widest text-right">Value</th>
+                <tr className="bg-[#141416]/50 border-b border-white/[0.07]/60">
+                  <th className="px-4 py-3 text-[8px] font-black text-zinc-500 uppercase tracking-widest">Asset</th>
+                  <th className="px-4 py-3 text-[8px] font-black text-zinc-500 uppercase tracking-widest">Acquirer/Category</th>
+                  <th className="px-4 py-3 text-[8px] font-black text-zinc-500 uppercase tracking-widest text-right">Value</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/20">
@@ -234,14 +234,14 @@ export const SmartMoneyFlowPage: React.FC<{ onSelectStock: (symbol: string) => v
                   <tr 
                     key={i} 
                     onClick={() => onSelectStock(t.symbol)}
-                    className="hover:bg-slate-900/20 transition-colors cursor-pointer"
+                    className="hover:bg-[#141416]/20 transition-colors cursor-pointer"
                   >
                     <td className="px-4 py-3.5">
                       <span className="text-xs font-black text-white group-hover:text-indigo-400">{t.symbol}</span>
-                      <span className="block text-[8px] text-slate-500 font-semibold mt-0.5">{t.date}</span>
+                      <span className="block text-[8px] text-zinc-500 font-semibold mt-0.5">{t.date}</span>
                     </td>
                     <td className="px-4 py-3.5">
-                      <span className="text-xs text-slate-300 font-semibold block truncate max-w-[150px]">{t.acquirerName}</span>
+                      <span className="text-xs text-zinc-300 font-semibold block truncate max-w-[150px]">{t.acquirerName}</span>
                       <span className="text-[8px] font-black uppercase text-indigo-400 mt-0.5 block">{t.category} ({t.typeOfTransaction})</span>
                     </td>
                     <td className="px-4 py-3.5 text-right font-black text-xs text-white">

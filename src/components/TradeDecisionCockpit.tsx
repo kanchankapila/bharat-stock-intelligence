@@ -21,7 +21,7 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
           <div className="absolute inset-0 border-2 border-indigo-500/20 rounded-full" />
           <div className="absolute inset-0 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
         </div>
-        <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] animate-pulse">Running Unified Multi-Factor Quant Scans...</p>
+        <p className="text-[10px] font-black text-zinc-500 uppercase tracking-[0.3em] animate-pulse">Running Unified Multi-Factor Quant Scans...</p>
       </div>
     );
   }
@@ -45,7 +45,7 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
           <Sparkles className="w-8 h-8 text-indigo-400 animate-pulse" />
           Bharat Quant Trade Cockpit
         </h2>
-        <p className="text-slate-500 text-xs font-bold uppercase tracking-widest mt-1 italic">
+        <p className="text-zinc-500 text-xs font-bold uppercase tracking-widest mt-1 italic">
           The ultimate multi-factor trade recommendation and execution cockpit
         </p>
       </div>
@@ -68,14 +68,14 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
               {isTradeActive ? <ShieldCheck className="w-3.5 h-3.5" /> : <AlertTriangle className="w-3.5 h-3.5" />}
               {isTradeActive ? 'TRADE SIGNAL ACTIVE' : 'RISK-OFF NO-TRADE SYSTEM'}
             </span>
-            <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Live Market Scanner Status</span>
+            <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-wider">Live Market Scanner Status</span>
           </div>
 
           <h3 className="text-2xl font-black text-white italic tracking-tight uppercase">
             {isTradeActive ? '🔥 High Confluence Trade Regime Detected' : '🛡️ Capital Preservation Mode Enabled'}
           </h3>
           
-          <p className="text-xs text-slate-400 leading-relaxed font-medium max-w-3xl">
+          <p className="text-xs text-zinc-400 leading-relaxed font-medium max-w-3xl">
             {overview.verdictReason}
           </p>
         </div>
@@ -84,7 +84,7 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
         <div className="shrink-0">
           <button 
             onClick={() => refetch()}
-            className="px-6 py-4 bg-slate-900 border border-slate-800 hover:border-slate-700 hover:text-white rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-300 transition-all flex items-center gap-2"
+            className="px-6 py-4 bg-[#141416] border border-white/[0.07] hover:border-white/[0.1] hover:text-white rounded-2xl text-[10px] font-black uppercase tracking-widest text-zinc-300 transition-all flex items-center gap-2"
           >
             <Activity className="w-4 h-4 text-indigo-400 animate-pulse" />
             Recalculate Factors
@@ -94,48 +94,48 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
 
       {/* Overview Stat Widgets */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <div className="p-4 bg-slate-900/60 border border-slate-800 rounded-2xl flex items-center justify-between">
+        <div className="p-4 bg-[#141416]/60 border border-white/[0.07] rounded-2xl flex items-center justify-between">
           <div>
-            <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Global Decision</p>
+            <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-1">Global Decision</p>
             <p className={cn("text-xl font-black italic uppercase", isTradeActive ? "text-emerald-400" : "text-amber-400")}>
               {isTradeActive ? 'Active Trade' : 'Risk Off'}
             </p>
-            <p className="text-[8px] text-slate-600 font-bold uppercase mt-1">Regime Verdict</p>
+            <p className="text-[8px] text-zinc-600 font-bold uppercase mt-1">Regime Verdict</p>
           </div>
           <div className="p-3 bg-indigo-500/10 rounded-xl">
              <Play className="w-4 h-4 text-indigo-400" />
           </div>
         </div>
 
-        <div className="p-4 bg-slate-900/60 border border-slate-800 rounded-2xl flex items-center justify-between">
+        <div className="p-4 bg-[#141416]/60 border border-white/[0.07] rounded-2xl flex items-center justify-between">
           <div>
-            <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Adv / Dec Ratio</p>
+            <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-1">Adv / Dec Ratio</p>
             <p className="text-xl font-black text-white italic">{overview.advDecRatio}x</p>
             <p className={cn("text-[8px] font-black uppercase mt-1", overview.advDecRatio >= 1.0 ? "text-emerald-500" : "text-rose-500")}>
               {overview.advDecRatio >= 1.0 ? 'Bulls in Control' : 'Bears Dominating'}
             </p>
           </div>
           <div className="p-3 bg-blue-500/10 rounded-xl">
-             <BarChart2 className="w-4 h-4 text-blue-400" />
+             <BarChart2 className="w-4 h-4 text-violet-400" />
           </div>
         </div>
 
-        <div className="p-4 bg-slate-900/60 border border-slate-800 rounded-2xl flex items-center justify-between">
+        <div className="p-4 bg-[#141416]/60 border border-white/[0.07] rounded-2xl flex items-center justify-between">
           <div>
-            <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Avg ML Win Prob</p>
+            <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-1">Avg ML Win Prob</p>
             <p className="text-xl font-black text-indigo-400 italic">{overview.avgWinProbability}%</p>
-            <p className="text-[8px] text-slate-600 font-bold uppercase mt-1">Ensemble Accuracy Edge</p>
+            <p className="text-[8px] text-zinc-600 font-bold uppercase mt-1">Ensemble Accuracy Edge</p>
           </div>
           <div className="p-3 bg-indigo-500/10 rounded-xl">
              <BrainCircuit className="w-4 h-4 text-indigo-400" />
           </div>
         </div>
 
-        <div className="p-4 bg-slate-900/60 border border-slate-800 rounded-2xl flex items-center justify-between">
+        <div className="p-4 bg-[#141416]/60 border border-white/[0.07] rounded-2xl flex items-center justify-between">
           <div>
-            <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Active Quant Signals</p>
+            <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-1">Active Quant Signals</p>
             <p className="text-xl font-black text-white italic">{overview.activeSignalsCount}</p>
-            <p className="text-[8px] text-slate-600 font-bold uppercase mt-1">Confluence Scans Run</p>
+            <p className="text-[8px] text-zinc-600 font-bold uppercase mt-1">Confluence Scans Run</p>
           </div>
           <div className="p-3 bg-pink-500/10 rounded-xl">
              <CircleDollarSign className="w-4 h-4 text-pink-400" />
@@ -146,24 +146,24 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
       {/* Main candidates and Multi-Factor Detail Drawer */}
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
         {/* Candidates recommendation panel */}
-        <div className="xl:col-span-8 bg-slate-950 border border-slate-800 rounded-3xl overflow-hidden flex flex-col">
-          <div className="p-5 border-b border-slate-800 bg-slate-900/40 flex justify-between items-center">
+        <div className="xl:col-span-8 bg-[#0c0c0e] border border-white/[0.07] rounded-3xl overflow-hidden flex flex-col">
+          <div className="p-5 border-b border-white/[0.07] bg-[#141416]/40 flex justify-between items-center">
             <div>
               <h3 className="text-xs font-black text-white uppercase tracking-wider">Bharat Confluence Trade Candidates</h3>
-              <p className="text-[8px] text-slate-500 font-bold uppercase mt-0.5">Scored by ML, Fundamentals, Technicals, & Smart Money Flows</p>
+              <p className="text-[8px] text-zinc-500 font-bold uppercase mt-0.5">Scored by ML, Fundamentals, Technicals, & Smart Money Flows</p>
             </div>
-            <span className="text-[8px] bg-slate-800 text-slate-300 font-bold px-2.5 py-1 rounded-md uppercase">Top {candidates.length}</span>
+            <span className="text-[8px] bg-white/[0.08] text-zinc-300 font-bold px-2.5 py-1 rounded-md uppercase">Top {candidates.length}</span>
           </div>
 
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
-                <tr className="bg-slate-900/25 border-b border-slate-800/60">
-                  <th className="px-5 py-4 text-[8px] font-black text-slate-500 uppercase tracking-widest">Asset</th>
-                  <th className="px-5 py-4 text-[8px] font-black text-slate-500 uppercase tracking-widest text-center">Advice</th>
-                  <th className="px-5 py-4 text-[8px] font-black text-slate-500 uppercase tracking-widest text-center">Quant Score</th>
-                  <th className="px-5 py-4 text-[8px] font-black text-slate-500 uppercase tracking-widest text-center">ML Win Prob</th>
-                  <th className="px-5 py-4 text-[8px] font-black text-slate-500 uppercase tracking-widest text-right">Details</th>
+                <tr className="bg-[#141416]/25 border-b border-white/[0.07]/60">
+                  <th className="px-5 py-4 text-[8px] font-black text-zinc-500 uppercase tracking-widest">Asset</th>
+                  <th className="px-5 py-4 text-[8px] font-black text-zinc-500 uppercase tracking-widest text-center">Advice</th>
+                  <th className="px-5 py-4 text-[8px] font-black text-zinc-500 uppercase tracking-widest text-center">Quant Score</th>
+                  <th className="px-5 py-4 text-[8px] font-black text-zinc-500 uppercase tracking-widest text-center">ML Win Prob</th>
+                  <th className="px-5 py-4 text-[8px] font-black text-zinc-500 uppercase tracking-widest text-right">Details</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/20">
@@ -174,7 +174,7 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
                       key={cand.symbol} 
                       onClick={() => setSelectedCandidate(cand)}
                       className={cn(
-                        "hover:bg-slate-900/30 transition-colors cursor-pointer group",
+                        "hover:bg-[#141416]/50 transition-colors cursor-pointer group",
                         isSelected && "bg-indigo-500/5 hover:bg-indigo-500/10"
                       )}
                     >
@@ -186,7 +186,7 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
                           )} />
                           <div>
                             <span className="text-xs font-black text-white group-hover:text-indigo-400 transition-colors uppercase">{cand.symbol}</span>
-                            <span className="block text-[8px] text-slate-500 font-semibold mt-0.5 max-w-[150px] truncate">{cand.name}</span>
+                            <span className="block text-[8px] text-zinc-500 font-semibold mt-0.5 max-w-[150px] truncate">{cand.name}</span>
                           </div>
                         </div>
                       </td>
@@ -197,7 +197,7 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
                             ? 'text-violet-400 bg-violet-400/5 border-violet-400/10 shadow-[0_0_10px_rgba(167,139,250,0.1)]' 
                             : cand.actionAdvice === 'BUY'
                             ? 'text-emerald-400 bg-emerald-400/5 border-emerald-400/10'
-                            : 'text-slate-400 bg-slate-800/20 border-slate-700'
+                            : 'text-zinc-400 bg-white/[0.08]/20 border-white/[0.1]'
                         )}>
                           {cand.actionAdvice}
                         </span>
@@ -205,7 +205,7 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
                       <td className="px-5 py-4 text-center">
                         <div className="flex items-center justify-center gap-2">
                           <span className="text-xs font-black text-white tabular-nums">{cand.compositeScore}</span>
-                          <div className="w-16 h-1.5 bg-slate-900 border border-slate-800 rounded-full overflow-hidden hidden md:block">
+                          <div className="w-16 h-1.5 bg-[#141416] border border-white/[0.07] rounded-full overflow-hidden hidden md:block">
                             <div 
                               className={cn(
                                 "h-full rounded-full",
@@ -222,7 +222,7 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
                       <td className="px-5 py-4 text-right">
                         <button 
                           onClick={(e) => { e.stopPropagation(); onSelectStock(cand.symbol); }}
-                          className="p-2 bg-slate-900 border border-slate-800 hover:border-slate-700 hover:text-white rounded-xl text-slate-500 transition-all"
+                          className="p-2 bg-[#141416] border border-white/[0.07] hover:border-white/[0.1] hover:text-white rounded-xl text-zinc-500 transition-all"
                         >
                           <ChevronRight className="w-3.5 h-3.5" />
                         </button>
@@ -238,22 +238,22 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
         {/* Selected Candidate Factor Matrix Details */}
         <div className="xl:col-span-4 space-y-6">
           {selectedCandidate ? (
-            <div className="p-5 bg-slate-900/40 border border-slate-800 rounded-3xl space-y-6">
+            <div className="p-5 bg-[#141416]/40 border border-white/[0.07] rounded-3xl space-y-6">
               {/* Header */}
-              <div className="flex justify-between items-start border-b border-slate-800 pb-4">
+              <div className="flex justify-between items-start border-b border-white/[0.07] pb-4">
                 <div>
                   <h3 className="text-lg font-black text-white italic uppercase">{selectedCandidate.symbol}</h3>
-                  <p className="text-[9px] text-slate-500 font-bold uppercase mt-0.5">{selectedCandidate.name}</p>
+                  <p className="text-[9px] text-zinc-500 font-bold uppercase mt-0.5">{selectedCandidate.name}</p>
                 </div>
                 <div className="text-right">
-                  <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-0.5">Bharat Score</p>
+                  <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-0.5">Bharat Score</p>
                   <span className="text-2xl font-black text-indigo-400 italic tabular-nums">{selectedCandidate.compositeScore}</span>
                 </div>
               </div>
 
               {/* Multi-Factor Radar Matrix */}
               <div className="space-y-4">
-                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
+                <h4 className="text-[10px] font-black text-zinc-400 uppercase tracking-widest flex items-center gap-1.5">
                   <Coins className="w-4 h-4 text-indigo-400" /> Quantitative Factor Analysis
                 </h4>
 
@@ -264,7 +264,7 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
                       <span className="text-indigo-400 flex items-center gap-1">🤖 ML Model Win Probability</span>
                       <span className="text-white font-bold">{selectedCandidate.mlProbability}%</span>
                     </div>
-                    <div className="w-full h-2 bg-slate-950 border border-slate-800 rounded-full overflow-hidden">
+                    <div className="w-full h-2 bg-[#0c0c0e] border border-white/[0.07] rounded-full overflow-hidden">
                       <div className="h-full bg-indigo-500 rounded-full" style={{ width: `${selectedCandidate.mlProbability}%` }} />
                     </div>
                   </div>
@@ -275,7 +275,7 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
                       <span className="text-amber-500 flex items-center gap-1">💎 Fundamental composite score</span>
                       <span className="text-white font-bold">#{selectedCandidate.quantRank} Rank</span>
                     </div>
-                    <div className="w-full h-2 bg-slate-950 border border-slate-800 rounded-full overflow-hidden">
+                    <div className="w-full h-2 bg-[#0c0c0e] border border-white/[0.07] rounded-full overflow-hidden">
                       <div className="h-full bg-amber-500 rounded-full" style={{ width: `${Math.max(0, 100 - selectedCandidate.quantRank)}%` }} />
                     </div>
                   </div>
@@ -286,7 +286,7 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
                       <span className="text-emerald-400 flex items-center gap-1">📈 technical scan indicators</span>
                       <span className="text-white font-bold">{selectedCandidate.techSignalCount} Bullish Setups</span>
                     </div>
-                    <div className="w-full h-2 bg-slate-950 border border-slate-800 rounded-full overflow-hidden">
+                    <div className="w-full h-2 bg-[#0c0c0e] border border-white/[0.07] rounded-full overflow-hidden">
                       <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${Math.min(100, selectedCandidate.techSignalCount * 25)}%` }} />
                     </div>
                   </div>
@@ -297,7 +297,7 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
                       <span className="text-pink-500 flex items-center gap-1">💸 FII Smart Money Net Buy</span>
                       <span className="text-white font-bold">₹{selectedCandidate.smartMoneyCr} Cr</span>
                     </div>
-                    <div className="w-full h-2 bg-slate-950 border border-slate-800 rounded-full overflow-hidden">
+                    <div className="w-full h-2 bg-[#0c0c0e] border border-white/[0.07] rounded-full overflow-hidden">
                       <div className="h-full bg-pink-500 rounded-full" style={{ width: `${Math.min(100, Math.max(0, 50 + selectedCandidate.smartMoneyCr * 5))}%` }} />
                     </div>
                   </div>
@@ -305,10 +305,10 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
                   {/* News Sentiment */}
                   <div>
                     <div className="flex justify-between text-[9px] font-black uppercase tracking-wider mb-1">
-                      <span className="text-blue-400 flex items-center gap-1">📰 Average News Sentiment Radar</span>
+                      <span className="text-violet-400 flex items-center gap-1">📰 Average News Sentiment Radar</span>
                       <span className="text-white font-bold">{selectedCandidate.newsSentiment} Score</span>
                     </div>
-                    <div className="w-full h-2 bg-slate-950 border border-slate-800 rounded-full overflow-hidden">
+                    <div className="w-full h-2 bg-[#0c0c0e] border border-white/[0.07] rounded-full overflow-hidden">
                       <div className="h-full bg-blue-500 rounded-full" style={{ width: `${50 + selectedCandidate.newsSentiment * 50}%` }} />
                     </div>
                   </div>
@@ -316,8 +316,8 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
               </div>
 
               {/* Execution decision checklist */}
-              <div className="p-4 bg-slate-950 border border-slate-800/80 rounded-2xl space-y-3">
-                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
+              <div className="p-4 bg-[#0c0c0e] border border-white/[0.07]/80 rounded-2xl space-y-3">
+                <h4 className="text-[10px] font-black text-zinc-400 uppercase tracking-widest flex items-center gap-1.5">
                   <CheckSquare className="w-4 h-4 text-emerald-400" /> Decision Execution Checklist
                 </h4>
 
@@ -334,11 +334,11 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
                         "w-4 h-4 rounded border flex items-center justify-center shrink-0",
                         chk.val 
                           ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400 font-extrabold" 
-                          : "border-slate-800 bg-slate-900 text-slate-600"
+                          : "border-white/[0.07] bg-[#141416] text-zinc-600"
                       )}>
                         {chk.val ? '✓' : '—'}
                       </span>
-                      <span className={chk.val ? "text-slate-200" : "text-slate-500"}>{chk.label}</span>
+                      <span className={chk.val ? "text-zinc-200" : "text-zinc-500"}>{chk.label}</span>
                     </div>
                   ))}
                 </div>
@@ -354,9 +354,9 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
               </button>
             </div>
           ) : (
-            <div className="py-24 text-center bg-slate-900/20 border border-slate-800/80 rounded-3xl border-dashed flex flex-col justify-center items-center">
-              <Sparkles className="w-8 h-8 text-slate-700 mb-2" />
-              <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Select a candidate for full matrix audit</p>
+            <div className="py-24 text-center bg-[#141416]/20 border border-white/[0.07]/80 rounded-3xl border-dashed flex flex-col justify-center items-center">
+              <Sparkles className="w-8 h-8 text-zinc-700 mb-2" />
+              <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Select a candidate for full matrix audit</p>
             </div>
           )}
         </div>
