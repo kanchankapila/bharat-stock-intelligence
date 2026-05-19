@@ -1625,9 +1625,17 @@ export const appRouter = router({
       const { execFile } = await import('child_process');
       const path = await import('path');
       
+      let cleanSymbol = input.symbol;
+      let cleanExchange = input.exchange;
+      if (cleanSymbol.includes(':')) {
+        const parts = cleanSymbol.split(':');
+        cleanExchange = parts[0];
+        cleanSymbol = parts[1];
+      }
+      
       return new Promise<any>((resolve, reject) => {
         const scriptPath = path.join(__dirname, 'tv_bridge.py');
-        execFile('python', [scriptPath, 'ta', '--symbol', input.symbol, '--exchange', input.exchange], (error, stdout, stderr) => {
+        execFile('python', [scriptPath, 'ta', '--symbol', cleanSymbol, '--exchange', cleanExchange], (error, stdout, stderr) => {
           if (error) {
             console.error("TV TA Error:", stderr);
             return resolve({ error: stderr });

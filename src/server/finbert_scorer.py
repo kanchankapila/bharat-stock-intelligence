@@ -65,14 +65,25 @@ def score_batch(texts: list[str], tokenizer, model, device) -> list[dict]:
         label_idx  = int(p.argmax())
         label_map  = {0: "positive", 1: "negative", 2: "neutral"}
         label      = label_map[label_idx]
+        
+        # Confidence delta threshold gating
+        delta_p = abs(float(p[0]) - float(p[1]))
+        if label in ["positive", "negative"] and delta_p < 0.35:
+            label = "neutral"
+            sent_score = 0.0
+            conf = float(p[2])
+        else:
+            sent_score = float(p[0] - p[1])
+            conf = float(p[label_idx])
+
         results.append({
             "positive":   float(p[0]),
             "negative":   float(p[1]),
             "neutral":    float(p[2]),
             "label":      label,
-            "confidence": float(p[label_idx]),
+            "confidence": conf,
             # Signed score: positive probability - negative probability, range [-1, +1]
-            "sentiment_score": float(p[0] - p[1]),
+            "sentiment_score": sent_score,
         })
     return results
 

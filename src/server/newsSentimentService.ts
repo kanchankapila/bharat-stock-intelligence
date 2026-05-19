@@ -420,7 +420,7 @@ async function enrichWithAI(items: { id: string; title: string; summary: string;
 
 async function buildMarketSentimentSnapshot(): Promise<void> {
   // Last 4 hours of news
-  const cutoff = new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString();
+  const cutoff = toSqliteDateTime(new Date(Date.now() - 4 * 60 * 60 * 1000));
   const recent = db.prepare(`
     SELECT sentiment, sentiment_score, impact, category, sector, title
     FROM news_sentiment_items

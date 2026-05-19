@@ -360,6 +360,21 @@ class AlphaQuantScoringEngine:
         screeners_meta = self.build_screener_metadata(screeners, force_rebuild=force_rebuild)
         print(f"screener_master has {len(screeners_meta)} entries.")
 
+        # Load sector per symbol and construct sector-to-symbols map from nse_stocks
+        symbol_sector: Dict[str, str] = {}
+        sector_symbols: Dict[str, List[str]] = {}
+        try:
+            with self.engine.connect() as conn:
+                sector_rows = conn.execute(text(
+                    "SELECT symbol, sector FROM nse_stocks WHERE sector IS NOT NULL"
+                )).fetchall()
+                for r in sector_rows:
+                    sym, sec = r[0], r[1]
+                    symbol_sector[sym] = sec
+                    sector_symbols.setdefault(sec, []).append(sym)
+        except Exception:
+            pass
+
         # Load news sentiment from enriched table first, fall back to legacy
         print("Loading news sentiment data...")
         with self.engine.connect() as conn:
@@ -384,6 +399,8 @@ class AlphaQuantScoringEngine:
                 news_df['sentiment'] = news_df['sentiment'].str.lower()
                 news_df['is_json_symbols'] = False
 
+        authoritative_sources = {"bloomberg", "reuters", "moneycontrol", "economic times", "nse", "bse", "finbert"}
+
         news_map: Dict[str, list] = {}
         for _, n in news_df.iterrows():
             raw = n.get('symbols') or ''
@@ -395,16 +412,47 @@ class AlphaQuantScoringEngine:
             except Exception:
                 sym_list = [s.strip() for s in str(raw).split(',')]
             recency = self._recency_weight(n.get('published_at') or '')
+            
             for s in sym_list:
                 if not s or s == '#N/A':
                     continue
+                
+                # 1. Source Authority Weighting
+                source_lower = str(n.get('source', 'news')).lower()
+                authority_mult = 1.5 if any(src in source_lower for src in authoritative_sources) else 0.8
+                
+                # 2. Relevance Gating (is symbol mentioned in the title/headline?)
+                title_lower = str(n.get('title', '')).lower()
+                is_in_title = str(s).lower() in title_lower
+                relevance_mult = 1.5 if is_in_title else 0.6
+                
                 news_map.setdefault(s, []).append({
                     'name':      n['title'],
                     'sentiment': n['sentiment'],
                     'source':    n.get('source', 'news'),
                     'category':  'news',
                     'recency':   recency,
+                    'authority_mult': authority_mult,
+                    'relevance_mult': relevance_mult,
+                    'propagation_mult': 1.0
                 })
+                
+                # 3. Sector Sentiment Propagation (if this is a direct headline mention)
+                if is_in_title:
+                    symbol_sec = symbol_sector.get(s)
+                    if symbol_sec and symbol_sec != 'OTHER':
+                        for peer_sym in sector_symbols.get(symbol_sec, []):
+                            if peer_sym != s:  # do not propagate to itself
+                                news_map.setdefault(peer_sym, []).append({
+                                    'name':      f"Sector Catalyst ({symbol_sec}): {n['title']}",
+                                    'sentiment': n['sentiment'],
+                                    'source':    n.get('source', 'news'),
+                                    'category':  'news',
+                                    'recency':   recency,
+                                    'authority_mult': authority_mult,
+                                    'relevance_mult': 0.6,  # lower relevance for peer stock
+                                    'propagation_mult': 0.4  # propagate fraction of the score
+                                })
 
         # Attach last_updated to screener metadata for recency decay
         with self.engine.connect() as conn:
@@ -422,17 +470,6 @@ class AlphaQuantScoringEngine:
                 )).fetchone()
                 if regime_row and regime_row[0]:
                     current_regime = regime_row[0]
-        except Exception:
-            pass
-
-        # Load sector per symbol from nse_stocks
-        symbol_sector: Dict[str, str] = {}
-        try:
-            with self.engine.connect() as conn:
-                sector_rows = conn.execute(text(
-                    "SELECT symbol, sector FROM nse_stocks WHERE sector IS NOT NULL"
-                )).fetchall()
-                symbol_sector = {r[0]: r[1] for r in sector_rows}
         except Exception:
             pass
 
@@ -469,8 +506,14 @@ class AlphaQuantScoringEngine:
                     decay = 1.0 if cnt < self.SOURCE_CAT_CAP else self.SOURCE_CAT_DECAY
                     news_src_counts[bucket] = cnt + 1
                     recency = item.get('recency', 1.0)
-                    # News base is 5.0 (same as screeners — was 7.0, reduced to prevent over-dominance)
-                    contrib = 5.0 * mult * decay * recency
+                    
+                    # Apply authority, relevance, and sector propagation multipliers
+                    auth_mult = item.get('authority_mult', 1.0)
+                    rel_mult = item.get('relevance_mult', 1.0)
+                    prop_mult = item.get('propagation_mult', 1.0)
+                    
+                    # News base is 5.0 (same as screeners)
+                    contrib = 5.0 * mult * decay * recency * auth_mult * rel_mult * prop_mult
                     stock_scores[symbol]['raw_sum'] += contrib
                     stock_scores[symbol]['factors']['news'] += contrib
                     stock_scores[symbol]['sources'].add(item['source'])

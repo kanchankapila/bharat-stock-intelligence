@@ -15,6 +15,7 @@ export interface OptionChainData {
       ivPercentile: number;
       maxPain?: number;
       oiTrend?: string;
+      ivSkew?: number;
     };
   };
 }
@@ -181,18 +182,35 @@ export async function fetchOptionChain(symbol: string): Promise<any> {
         }
       }
 
+      // Compute IV Skew: Put IV (OTM) - Call IV (OTM)
+      const otmCalls = mappedChain.filter(row => row.strikePrice > spotPrice && row.callIv > 0);
+      const otmPuts = mappedChain.filter(row => row.strikePrice < spotPrice && row.putIv > 0);
+
+      const avgCallIv = otmCalls.length > 0
+        ? otmCalls.reduce((acc, row) => acc + row.callIv, 0) / otmCalls.length
+        : 0;
+
+      const avgPutIv = otmPuts.length > 0
+        ? otmPuts.reduce((acc, row) => acc + row.putIv, 0) / otmPuts.length
+        : 0;
+
+      const ivSkew = avgPutIv > 0 && avgCallIv > 0 ? Number((avgPutIv - avgCallIv).toFixed(2)) : 0;
+
       return {
         success: true,
         data: {
           optionChain: mappedChain,
           expiryDates: rd.expiryDates || [],
           spotPrice: spotPrice,
+          totalCallOi: totalCallOi,
+          totalPutOi: totalPutOi,
           pcr: pcr,
           marketSentiment: {
             overall: pcr > 1.2 ? 'Bullish' : pcr < 0.7 ? 'Bearish' : 'Neutral',
             ivRank: 0, // Removed dummy data
             ivPercentile: 0, // Removed dummy data
-            maxPain: maxPain
+            maxPain: maxPain,
+            ivSkew: ivSkew
           }
         }
       };

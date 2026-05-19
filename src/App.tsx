@@ -1494,19 +1494,24 @@ const Dashboard: React.FC<{
     let aVal: any, bVal: any;
     
     if (activeTab === 'fundamental') {
-      aVal = (a as any)[sortField];
-      bVal = (b as any)[sortField];
+      let field = sortField;
+      if (filter === 'TradingView') {
+        if (field === 'market_cap') field = 'market_cap_basic';
+        if (field === 'recommendation') field = 'AnalystRating';
+      }
+      aVal = (a as any)[field];
+      bVal = (b as any)[field];
     } else {
       // For external, we mostly sort by price or change if available
       if (sortField === 'ltp' || sortField === 'price') {
-         aVal = parseFloat(a.ltp || a.price || a.lastPrice || 0);
-         bVal = parseFloat(b.ltp || b.price || b.lastPrice || 0);
+         aVal = parseFloat(a.ltp || a.price || a.lastPrice || a.close || 0);
+         bVal = parseFloat(b.ltp || b.price || b.lastPrice || b.close || 0);
       } else if (sortField === 'perChg' || sortField === 'changePct') {
-         aVal = parseFloat(a.perChg || a.changePct || a.percentageChange || 0);
-         bVal = parseFloat(b.perChg || b.changePct || b.percentageChange || 0);
+         aVal = parseFloat(a.perChg || a.changePct || a.percentageChange || a.change || 0);
+         bVal = parseFloat(b.perChg || b.changePct || b.percentageChange || b.change || 0);
       } else {
-         aVal = (a.stkname || a.companyName || a.symbol || "").toLowerCase();
-         bVal = (b.stkname || b.companyName || b.symbol || "").toLowerCase();
+         aVal = (a.stkname || a.companyName || a.symbol || a.ticker || "").toLowerCase();
+         bVal = (b.stkname || b.companyName || b.symbol || b.ticker || "").toLowerCase();
       }
     }
 
@@ -1810,10 +1815,13 @@ const Dashboard: React.FC<{
               </thead>
               <tbody className="divide-y divide-slate-800/30">
                 {processedStocks.map((row: any, idx: number) => {
-                  const symbol = row.symbol || row.stkId || row.ticker;
+                  let symbol = row.symbol || row.stkId || row.ticker;
+                  if (symbol && symbol.includes(':')) {
+                    symbol = symbol.split(':').pop() || symbol;
+                  }
                   const name = row.name || row.stkname || row.companyName || "";
-                  const ltp = row.price || row.ltp || row.lastPrice || 0;
-                  const perChg = row.changePct || row.perChg || row.percentageChange || 0;
+                  const ltp = row.price || row.ltp || row.lastPrice || row.close || 0;
+                  const perChg = row.changePct || row.perChg || row.percentageChange || row.change || 0;
                   
                   return (
                     <tr 
@@ -1855,18 +1863,33 @@ const Dashboard: React.FC<{
                           {parseFloat(perChg) >= 0 ? '+' : ''}{parseFloat(perChg).toFixed(2)}%
                         </span>
                       </td>
-                      {activeTab === 'fundamental' ? (
+                      {activeTab === 'fundamental' && filter !== 'TradingView' ? (
                         ['pe', 'roe', 'pb', 'debtEquity'].map(f => (
                           <td key={f} className="px-6 py-6 text-center font-bold text-[10px] text-slate-400 uppercase tracking-widest">
                             {row[f]?.toFixed(2) || '-'}
                           </td>
                         ))
                       ) : (
-                        (row.columns || displayColumns.map(c => ({ name: c, value: row[c] }))).map((c: any, cidx: number) => (
-                          <td key={cidx} className="px-6 py-6 text-center font-bold text-[10px] text-slate-300 uppercase italic">
-                            {c.value || '-'}
-                          </td>
-                        ))
+                        (row.columns || displayColumns.map(c => {
+                          let val = row[c];
+                          if (filter === 'TradingView') {
+                            if (c === 'market_cap') val = row.market_cap_basic;
+                            if (c === 'recommendation') val = row.AnalystRating;
+                          }
+                          return { name: c, value: val };
+                        })).map((c: any, cidx: number) => {
+                          let displayValue = c.value;
+                          if (c.name === 'market_cap' && typeof displayValue === 'number') {
+                            displayValue = `₹${(displayValue / 1e9).toFixed(1)}B`;
+                          } else if (c.name === 'volume' && typeof displayValue === 'number') {
+                            displayValue = displayValue.toLocaleString('en-IN');
+                          }
+                          return (
+                            <td key={cidx} className="px-6 py-6 text-center font-bold text-[10px] text-slate-300 uppercase italic">
+                              {displayValue || '-'}
+                            </td>
+                          );
+                        })
                       )}
                       <td className="px-6 py-6 text-right">
                          <button 
