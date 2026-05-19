@@ -1,111 +1,360 @@
-# 🚀 AlphaQuant Pro: Institutional-Grade Stock Intelligence
+# AlphaQuant Pro: Institutional-Grade Indian Stock Intelligence
 
-AlphaQuant Pro is a powerful, local-first quantitative stock ranking and intelligence platform. It synthesizes technical, fundamental, and sentiment signals to provide high-conviction trading signals and multi-horizon consensus rankings.
-
-## 🌟 Key Features
-
-### 1. 🧬 Multi-Factor Consensus Engine
-- **Cross-Screener Intelligence**: Ingests and normalizes data from **Trendlyne**, **Moneycontrol**, and **ETnow**.
-- **Domain Attribution**: Automatically identifies the primary driver of a stock's performance (Fundamental, Technical, Momentum, or Delivery).
-- **Dual-Horizon Ranking**: Separate leaderboards for **Long-Term Institutional Investing** and **Intraday Momentum Trading**.
-
-### 2. 📰 Real-Time Sentiment Analysis
-- **News Ingestion**: Automated tracking of major market news and corporate announcements.
-- **Sentiment Scoring**: NLP-driven classification (Positive/Negative/Neutral) with high-impact weightage (1.2x) in the final score.
-
-### 3. 📊 Quantitative Technical Engine
-- **Automated Backfilling**: Scripted OHLCV data retrieval using `yfinance` for deep historical context.
-- **Indicator Suite**: Real-time calculation of **RSI**, **MACD**, **EMA Crossovers**, and **Bollinger Bands**.
-- **Pattern Recognition**: AI-powered detection of candlestick patterns (Bullish Engulfing, Doji, Hammer, etc.).
-- **Predictive Signaling**: Automated **Entry**, **Target**, and **Stop-Loss** price predictions with institutional risk/reward ratios.
-
-### 4. 🤖 Local-First AI Architecture
-- **Ollama Integration**: Runs heavy LLM analysis (Mistral/Llama3) locally to ensure data privacy and zero API costs.
-- **BullMQ Pipeline**: Scalable background job system for parallel stock analysis and data refreshes.
-- **Stability Optimized**: Fine-tuned worker concurrency and lock durations for robust performance on local hardware.
+A real-time, local-first quantitative intelligence platform for NSE/BSE markets. Synthesizes live prices, technical signals, fundamental data, news sentiment, F&O intelligence, and a self-improving ML feedback loop into actionable BUY/SELL/HOLD recommendations.
 
 ---
 
-## 🛠️ Setup & Installation
+## Key Features
 
-### Prerequisites
-- **Node.js** (v18+)
-- **Python** (3.10+)
-- **Redis Server** (Local or Remote)
-- **Ollama** (Optional, for AI features)
+### Multi-Factor Consensus Engine
+- Ingests and normalizes screener data from **Trendlyne**, **MoneyControl**, and **ETnow**
+- Dual-horizon rankings: **Long-Term Institutional** and **Intraday Momentum**
+- Domain attribution: Fundamental, Technical, Momentum, Delivery
+- Quantitative scoring via `quantScoringService.ts` with Sharpe, drawdown, and Piotroski factors
 
-### 1. Environment Configuration
-Create a `.env` file in the root directory and configure the following variables:
+### Live Market Intelligence
+- 5-second price simulation + 5-minute Yahoo Finance batch refresh (50 symbols/batch, 8 concurrent)
+- Nifty 50, Sensex, Bank Nifty, global indices (US, Asia, Europe)
+- Top movers, intraday breakouts, sector heatmaps
+- NSE stock discovery across 2000+ stocks with sector/industry filtering
 
-```env
-# AI & Intelligence
-GEMINI_API_KEY=your_gemini_key_here
-OLLAMA_MODEL=mistral                  # Model name in Ollama
+### Technical Analysis Engine
+- OHLCV backfill via `backfill_ohlcv.py` (yfinance, 200 stocks)
+- Signal detection: RSI divergence, MACD crossover, Bollinger squeeze, EMA crossovers, candlestick patterns
+- Entry/Target/Stop-Loss predictions with risk/reward ratios
+- Win-probability gating: only signals with `win_probability >= 0.40` are surfaced
 
-# Infrastructure
-REDIS_HOST=localhost
-REDIS_PORT=6379
-REDIS_PASSWORD=                       # Optional
+### News Sentiment Intelligence
+- Multi-source news ingestion (Indian + global) with NLP classification
+- FinBERT scoring (`finbert_scorer.py`) for High/Medium/Low impact events
+- Claude AI re-scoring of high-impact items via Anthropic API (Haiku)
+- Market sentiment snapshots every 15 minutes; symbol-level sentiment overlay
 
-# Database
-DATABASE_URL=sqlite:///database.sqlite
+### F&O Intelligence Center
+- Options chain with OI, PCR, IV from NiftyTrader
+- Buildup analysis (Long/Short buildup, OI unwinding)
+- FII/DII daily flow tracking (`fii_dii_fetcher.py`, `pcr_fetcher.py`)
+- F&O screeners from MoneyControl and Trendlyne
+
+### Smart Money Flow & Trade Decision Cockpit
+- Institutional quant engine (`institutional_quant_engine.py`)
+- Smart Money Flow visualization page
+- Trade Decision Cockpit: all signals consolidated into a single decision view
+
+### Self-Improving ML Feedback Loop
+- **Outcome Resolver** (`outcome_resolver.py`): evaluates signal_outcomes, detects stop-loss hits
+- **Reward Engine** (`reward_engine.py`): EMA-smoothed reward/penalty propagation per signal type
+- **RL Agent** (`rl_agent.py`): Q-learning meta-controller, state = (regime × sector × score_bucket)
+- **Performance Tracker** (`performance_tracker.py`): segments win rates by signal_type, regime, sector
+- **ML Ensemble** (`ml_ensemble.py`): GradientBoosting + RandomForest + ExtraTrees + LogisticRegression stacking; calibrated probabilities written to `technical_signals.win_probability`
+- **Online Learner** (`online_learner.py`): incremental SGD (40% blend) on rolling 180-day window
+- **Strategy Optimizer** (`strategy_optimizer.py`): scipy differential_evolution on CATEGORY_WEIGHTS + SOURCE_WEIGHTS
+- **Backtest Optimizer** (`backtest_optimizer.py`): grid search over stop_loss_pct, hold_days, score_threshold
+- **Backtester** (`backtester.py`): replays historical signals vs OHLCV; Nifty benchmark; Sharpe/Calmar/Sortino
+
+### Backtesting & Strategy Management
+- Full backtest framework with equity curve, trade log, alpha vs Nifty
+- Saved strategy configs with parameter versioning
+- ML model registry with AUC, accuracy, feature importance
+
+---
+
+## Architecture
+
+| Layer | Technology |
+|---|---|
+| **Frontend** | React 19 + TypeScript, Vite 6, TailwindCSS 4, Recharts, Framer Motion, Lucide React |
+| **Backend** | Express.js + tRPC (type-safe RPC) + SuperJSON, React Query |
+| **Database** | SQLite (better-sqlite3, WAL mode) — 25+ tables |
+| **Cache** | Redis (ioredis) → in-memory fallback |
+| **Background Jobs** | BullMQ on Redis → setInterval fallback |
+| **AI (LLM)** | Ollama (local: Mistral/Llama3) → Google Gemini fallback |
+| **AI (Sentiment)** | Anthropic Claude Haiku (news re-scoring) |
+| **Analytics** | Python 3.10+: pandas, pandas-ta, scikit-learn, yfinance, transformers (FinBERT) |
+| **Auth** | Firebase Google OAuth |
+
+---
+
+## Project Structure
+
+```
+src/
+  App.tsx                        # Main app layout + routing (2000+ lines)
+  components/                    # 27 React components
+    SmartMoneyFlowPage.tsx        # Institutional flow visualization
+    TradeDecisionCockpit.tsx      # Unified trade decision view
+    FnOIntelligenceCenter.tsx     # Options chain + F&O signals
+    SentimentIntelligence.tsx     # News sentiment dashboard
+    NSEStockDiscovery.tsx         # 2000+ stock discovery
+    StrategyIntelligence.tsx      # Backtesting + ML performance
+    ... (22 more)
+  services/
+    marketService.ts              # Live stock hook, 5s price polling
+    aiService.ts                  # Ollama integration
+    geminiService.ts              # Gemini fallback
+  data/
+    stocklist.ts                  # 180 stocks with multi-provider mappings
+    nseStocks.ts                  # 2000+ NSE master list
+
+src/server/
+  router.ts                      # 100+ tRPC procedures
+  db.ts                          # SQLite schema (25+ tables)
+  cacheService.ts                # Redis + in-memory fallback
+  liveStockData.ts               # Yahoo Finance batch fetching
+  queues.ts                      # BullMQ: stock-refresh, ai-signals, daily-learning-loop, weekly-backtest-optimizer
+  newsSentimentService.ts        # News ingestion + Claude AI scoring
+  technicalSignalsService.ts     # Technical signal generation + win_probability gating
+  quantScoringService.ts         # Quant factor scoring (momentum, quality, value)
+  smartMoneyService.ts           # Smart money flow analysis
+  optionsMath.ts                 # Options pricing / Greeks
+  networkService.ts              # Network resilience utilities
+  fnoService.ts                  # F&O signal generation
+  optionChainService.ts          # NiftyTrader options chain
+  technicalScanner.ts            # 30-min cached scan results
+  scoringService.ts              # Python engine invocation
+  signalOutcomesService.ts       # Signal accuracy tracking
+  ... (20+ more services)
+
+  # Python Engines
+  backfill_ohlcv.py              # Historical OHLCV backfill (yfinance)
+  technical_analysis_engine.py   # Technical signals generation
+  scoring_engine.py              # Multi-factor composite scoring
+  finbert_scorer.py              # FinBERT news sentiment
+  fii_dii_fetcher.py             # FII/DII daily institutional flow
+  pcr_fetcher.py                 # Put/Call ratio from NSE
+  institutional_quant_engine.py  # Institutional quant scoring
+  performance_tracker.py         # Signal outcome tracking
+  outcome_resolver.py            # Stop-loss detection + outcome labeling
+  reward_engine.py               # EMA reward/penalty propagation
+  rl_agent.py                    # Q-learning meta-controller
+  ml_ensemble.py                 # Stacking ensemble (GB+RF+ET+LR)
+  online_learner.py              # Incremental SGD online learning
+  strategy_optimizer.py          # Differential evolution weight optimizer
+  backtester.py                  # Historical signal backtesting
+  backtest_optimizer.py          # Grid search for optimal backtest params
+  ml_signal_scorer.py            # ML signal scoring utility
 ```
 
-### 2. Install Dependencies
+---
+
+## Database Schema (25+ Tables)
+
+| Table | Purpose |
+|---|---|
+| `users` | Firebase auth users |
+| `watchlist` | Per-user watchlists |
+| `nse_stocks` | 2000+ NSE master list |
+| `stock_scores` | AI composite scores by timeframe |
+| `stock_factor_breakdown` | Domain scores |
+| `technical_scans` | 30-min cached scan results |
+| `technical_analysis_signals` | RSI, MACD, Bollinger signals |
+| `technical_signals` | Daily signals with win_probability (ML gated) |
+| `signal_outcomes` | Win/loss outcome tracking |
+| `signal_type_stats` | Per-signal-type historical accuracy |
+| `signals` | Trading signals (entry/target/SL) |
+| `quant_scores` | Quantitative strategy scores (momentum/quality/value) |
+| `stock_fundamentals` | Yahoo Finance fundamentals (PE, ROE, D/E, Piotroski) |
+| `stock_ohlcv` | Historical OHLC + volume |
+| `intraday_ohlcv` | 15-minute intraday bars |
+| `fii_dii_flow` | Daily institutional flow |
+| `stock_options_oi` | Options OI for PCR |
+| `news_articles` | Basic news (legacy) |
+| `news_sentiment_items` | Enriched news with FinBERT/Claude scoring |
+| `market_sentiment_snapshots` | 15-min market sentiment aggregates |
+| `trendlyne_screeners` + `_stocks` | Trendlyne screener data |
+| `moneycontrol_screeners` + `_stocks` | MoneyControl screener data |
+| `etnow_screeners` + `_stocks` | ETnow screener data |
+| `screener_master` | Unified screener metadata + weight overrides |
+| `backtest_strategies` | Saved backtest configs |
+| `backtesting_runs` | Full backtest results (equity curve, Sharpe, alpha) |
+| `recommendation_log` | Full audit trail of every recommendation |
+| `strategy_performance` | Segmented win rates by signal_type/sector/regime |
+| `screener_weight_history` | Weight optimization history |
+| `model_registry` | ML model versioning (AUC, accuracy, features) |
+| `feature_importance_log` | Per-model feature importances |
+| `signal_type_weights` | EMA-smoothed RL reward weights |
+| `rl_q_table` | Q-learning Q(state, action) values |
+| `rl_episodes` | RL episode audit trail |
+| `app_settings` | Key-value config store |
+| `todos` | Implementation ideas / TODOs |
+
+---
+
+## Setup & Installation
+
+### Prerequisites
+- **Node.js** v18+
+- **Python** 3.10+
+- **Redis** (local or remote — optional, falls back to in-memory)
+- **Ollama** (optional, for local LLM analysis)
+
+### 1. Clone & Install
+
 ```bash
-# Install Node.js dependencies
+# Node.js dependencies
 npm install
 
-# Install Python analytical libraries
+# Python analytical libraries
 pip install -r requirements.txt
 ```
 
+### 2. Environment Configuration
+
+Copy `.env` and fill in the required values (see [Environment Variables](#environment-variables)):
+
+```bash
+cp .env .env.local
+```
+
 ### 3. Initialize Database
+
 ```bash
 npx tsx scratch/init_db.js
 ```
 
+### 4. Pull Ollama Model (Optional)
+
+```bash
+ollama pull mistral
+```
+
 ---
 
-## 🚀 Execution Workflow
+## Running the Application
 
-### 1. Start the Core Services
-Ensure Redis is running, then start the application:
+### Start Core Services
+
 ```bash
-# Terminal 1: Start Redis (if local)
+# Terminal 1: Redis (if running locally on Windows)
 .\redis-server.exe
 
-# Terminal 2: Start the Web App & tRPC Server
+# Terminal 2: Web app + tRPC server
 npm run dev
 ```
 
-### 2. Run the Intelligence Pipeline
-Execute these scripts periodically to update the quantitative engine:
+App runs at `http://localhost:3000`.
+
+### Intelligence Pipeline (Run after market close)
 
 ```bash
-# Step A: Backfill historical OHLCV data (Top 200 stocks)
+# Daily — run in order after 3:30 PM IST
+python src/server/fii_dii_fetcher.py
+python src/server/pcr_fetcher.py
 python src/server/backfill_ohlcv.py
-
-# Step B: Generate Technical Signals & Price Predictions
 python src/server/technical_analysis_engine.py
-
-# Step C: Run Multi-Factor Consensus Scoring (Consolidates all signals)
+python src/server/finbert_scorer.py --days 1
+python src/server/institutional_quant_engine.py
 python src/server/scoring_engine.py
+python src/server/performance_tracker.py --horizon 15
+python src/server/outcome_resolver.py
+python src/server/reward_engine.py
+python src/server/rl_agent.py
+python src/server/online_learner.py --window 180
 ```
 
-### 3. Seed Initial Intelligence (Optional)
+```bash
+# Weekly — retrain ML ensemble
+python src/server/ml_ensemble.py --train
+```
+
+```bash
+# Monthly — reoptimize weights and full backtest
+python src/server/strategy_optimizer.py
+python src/server/backtester.py --start 2023-01-01
+python src/server/backtest_optimizer.py
+```
+
+### Seed Initial Data (Optional)
+
 ```bash
 node src/server/seed_news.cjs
 ```
 
 ---
 
-## 🏗️ Architecture Stack
-- **Frontend**: React 18, Tailwind CSS, Motion (Framer Motion)
-- **Backend**: tRPC (Type-safe API), Node.js (Vite Runtime)
-- **Background Jobs**: BullMQ + Redis
-- **Analytics**: Python (Pandas, yfinance, ta-lib alternative)
-- **Database**: SQLite (Local Persistence)
+## Environment Variables
+
+Create a `.env` file in the project root:
+
+```env
+# ── Server ────────────────────────────────────────────────────────────────────
+PORT=3000
+NODE_ENV=development
+APP_URL=http://localhost:3000
+
+# ── Database ──────────────────────────────────────────────────────────────────
+# SQLite file path (relative to project root)
+DATABASE_URL=database.sqlite
+
+# ── Redis (BullMQ + Cache) ────────────────────────────────────────────────────
+# Falls back to in-memory cache if Redis is unavailable
+REDIS_HOST=localhost
+REDIS_PORT=6379
+REDIS_PASSWORD=
+
+# ── AI — Local LLM (Ollama) ───────────────────────────────────────────────────
+OLLAMA_API_URL=http://localhost:11434
+OLLAMA_MODEL=mistral                   # Any model pulled via 'ollama pull <model>'
+
+# ── AI — Google Gemini (Ollama fallback) ──────────────────────────────────────
+GEMINI_API_KEY=
+
+# ── AI — Anthropic Claude (news sentiment + technical signal insights) ────────
+# Used for high-impact news re-scoring and top-N technical signal AI insights
+ANTHROPIC_API_KEY=
+ANTHROPIC_MODEL=claude-haiku-4-5-20251001   # Default; override for higher quality
+
+# ── Live Price Fallback ───────────────────────────────────────────────────────
+FINNHUB_API_KEY=
+
+# ── Alerts (optional) ────────────────────────────────────────────────────────
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_CHAT_ID=
+
+# ── Python Runtime ────────────────────────────────────────────────────────────
+# Override if python3 is not on PATH (e.g., Windows: 'python' or full path)
+PYTHON_BIN=python3
+
+# ── Trendlyne Screener Polling ────────────────────────────────────────────────
+TRENDLYNE_FETCH_INTERVAL_MS=43200000        # 12 hours (default)
+TRENDLYNE_SCREENER_NAMES_INTERVAL_MS=86400000  # 24 hours (default)
+TRENDLYNE_BASE_DELAY_MS=500
+TRENDLYNE_JITTER_PERCENT=15
+TRENDLYNE_REQUEST_TIMEOUT_MS=30000
+```
 
 ---
-*Built with ❤️ for High-Conviction Traders.*
+
+## tRPC API Reference (Key Endpoints)
+
+| Category | Procedures |
+|---|---|
+| **Market Data** | `getLiveStocks`, `getLiveStockQuote`, `getLiveQuotesBatch`, `getMarketOverview`, `getAllIndices`, `getGlobalIndices`, `getTopMovers`, `getBreakouts` |
+| **Technical** | `getTechnicalDetails`, `getTechnicalScan`, `getTechnicalPredictions`, `getTechnicalTrends`, `getTechnicalSignalsForDate` |
+| **Signals** | `getSignals`, `saveSignal`, `getSignalHistory`, `getAccuracyMetrics`, `getSignalTypeWeights` |
+| **Scoring** | `getTopRatedStocks`, `enqueueSignals`, `getQueueStats`, `getSignalQualityReport` |
+| **Fundamentals** | `getTrendlyneFundamentals`, `getInsights`, `getRatios`, `getShareholding`, `getCorporateActions` |
+| **F&O** | `getFnOSignals`, `getOptionChain`, `getFnoSymbols`, `getTrendlyneFnoScanners`, `getMCFnoOverview` |
+| **Screeners** | `getMarketScanners`, `getTrendlyneScreenerData`, `getMCScreener`, `getScreenerResults` |
+| **News/Sentiment** | `getNewsSentiment`, `getMarketSentimentSnapshot` |
+| **Indices** | `getIndexFullDetails`, `getIndexTechnicals`, `getIndexGraph`, `getIndexConstituents`, `getAdvanceDecline` |
+| **ML / Backtesting** | `runFullBacktest`, `optimizeScreenerWeights`, `getStrategyPerformance`, `getPerformanceDashboard`, `getMLModelRegistry`, `getFeatureImportance`, `getScreenerWeightHistory` |
+| **RL / Rewards** | `getSignalTypeWeights`, `getRLPolicy`, `getRLEpisodeHistory`, `getBacktestOptimization` |
+| **User / Watchlist** | `syncUser`, `getWatchlist`, `addToWatchlist`, `removeFromWatchlist` |
+| **AI** | `getAIAnalysis`, `getGlobalMarketData` |
+
+---
+
+## ML Model Files
+
+```
+src/server/ml_models/
+  ensemble.pkl      # Stacking ensemble (GB + RF + ET + LR)
+  online_sgd.pkl    # Incremental SGD online model
+```
+
+These are generated by `ml_ensemble.py --train` and `online_learner.py`. The model registry in SQLite tracks all versions with AUC, accuracy, and feature importances.
+
+---
+
+*Built for high-conviction Indian equity traders.*

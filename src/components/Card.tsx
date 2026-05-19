@@ -14,16 +14,16 @@ export interface CardProps {
 }
 
 const variantBase: Record<CardVariant, string> = {
-  default:  'bg-[#141416] border border-white/[0.06] shadow-[0_2px_12px_rgba(0,0,0,0.4)]',
-  elevated: 'bg-[#1c1c1f] backdrop-blur-xl border border-white/[0.08] shadow-[0_8px_32px_rgba(0,0,0,0.5)]',
-  accent:   'bg-[#141416] border border-violet-500/20 shadow-[0_0_0_1px_rgba(124,58,237,0.08),0_8px_32px_rgba(0,0,0,0.4)]',
+  default:  'bg-slate-900/50 border border-white/[0.06] shadow-[0_2px_12px_rgba(0,0,0,0.35)]',
+  elevated: 'bg-slate-900/70 backdrop-blur-xl border border-white/[0.08] shadow-[0_8px_32px_rgba(0,0,0,0.5)]',
+  accent:   'bg-slate-900/50 border border-indigo-500/20 shadow-[0_0_0_1px_rgba(99,102,241,0.08),0_8px_32px_rgba(0,0,0,0.4)]',
   ghost:    'bg-transparent border border-transparent',
 };
 
 const variantHover: Record<CardVariant, string> = {
-  default:  'hover:border-white/[0.1] hover:shadow-[0_8px_32px_rgba(0,0,0,0.5)]',
-  elevated: 'hover:border-white/[0.12] hover:shadow-[0_16px_48px_rgba(0,0,0,0.6)]',
-  accent:   'hover:border-violet-500/30 hover:shadow-[0_0_0_1px_rgba(124,58,237,0.15),0_8px_32px_rgba(0,0,0,0.5)]',
+  default:  'hover:border-white/[0.1] hover:shadow-[0_8px_32px_rgba(0,0,0,0.45)]',
+  elevated: 'hover:border-white/[0.12] hover:shadow-[0_16px_48px_rgba(0,0,0,0.55)]',
+  accent:   'hover:border-indigo-500/30 hover:shadow-[0_0_0_1px_rgba(99,102,241,0.15),0_8px_32px_rgba(0,0,0,0.5)]',
   ghost:    'hover:bg-white/[0.02]',
 };
 
@@ -48,8 +48,8 @@ export const Card = React.forwardRef<HTMLDivElement, CardProps>(({
   >
     {title && (
       <div className="px-5 py-3.5 border-b border-white/[0.05] flex items-center justify-between">
-        <h3 className="text-[11px] font-medium text-zinc-400 flex items-center gap-2 uppercase tracking-wider">
-          {Icon && <Icon className="w-3.5 h-3.5 text-violet-500" />}
+        <h3 className="text-[10px] font-semibold text-slate-400 flex items-center gap-2 uppercase tracking-widest">
+          {Icon && <Icon className="w-3.5 h-3.5 text-indigo-500" />}
           {title}
         </h3>
         {action ?? null}

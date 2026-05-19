@@ -4,6 +4,7 @@ import { mcFetchJson } from "./mcApiService";
 import { nseStocksData } from "../data/nseStocks";
 import { cacheGet, cacheSet } from "./cacheService";
 import { resilientFetch } from "./networkService";
+import { getScreenerUniverse, getWatchlistedSymbols, INDEX_SYMBOLS } from "./screenerUniverse";
 
 // ─── Symbol & name resolution ─────────────────────────────────────────────────
 
@@ -12,6 +13,21 @@ function getAllNSESymbols(): string[] {
   const stocklistSymbols = getAllStocks().map((s) => s.symbol);
   const nseSymbols = nseStocksData.map((s) => s.symbol);
   return [...new Set([...stocklistSymbols, ...nseSymbols])];
+}
+
+/**
+ * Returns the filtered symbol list for bulk live-data fetches.
+ * When screeners are populated: screener stocks + indices + watchlist.
+ * When screeners are empty (fresh install): falls back to full NSE list.
+ */
+function getLiveFetchUniverse(): string[] {
+  const { all: screenerAll } = getScreenerUniverse();
+  const watchlisted = getWatchlistedSymbols();
+  if (screenerAll.size === 0) return getAllNSESymbols();
+  const universe = new Set([...screenerAll, ...INDEX_SYMBOLS, ...watchlisted]);
+  // Always include the core stocklist (180 mapped stocks) for MoneyControl fallback
+  for (const s of getAllStocks()) universe.add(s.symbol);
+  return [...universe];
 }
 
 /** Name lookup: nseStocksData as base, stocklist overrides (more canonical names). */
@@ -34,7 +50,7 @@ function buildSectorMap(): Map<string, string> {
 // ─── Yahoo Finance batch fetch (v7) ──────────────────────────────────────────
 
 const BATCH_SIZE = 50;
-const BATCH_CONCURRENCY = 8;
+const BATCH_CONCURRENCY = 4; // reduced to avoid Yahoo rate limiting
 
 async function fetchBatchYahooFinance(
   symbols: string[],
@@ -222,10 +238,28 @@ export async function fetchStockQuoteFinnhub(
 
 // ─── Parallel bulk fetch ──────────────────────────────────────────────────────
 
+// Per-symbol v8 fallback with bounded concurrency to avoid rate limiting
+const FALLBACK_CONCURRENCY = 20;
+
+async function fetchMissedWithConcurrencyLimit(missed: string[]): Promise<Map<string, MarketData>> {
+  const result = new Map<string, MarketData>();
+  for (let i = 0; i < missed.length; i += FALLBACK_CONCURRENCY) {
+    const group = missed.slice(i, i + FALLBACK_CONCURRENCY);
+    const settled = await Promise.allSettled(group.map((s) => fetchStockQuoteYahooFinance(s)));
+    for (const r of settled) {
+      if (r.status === "fulfilled" && r.value) result.set(r.value.symbol, r.value);
+    }
+  }
+  return result;
+}
+
 export async function fetchAllLiveStocks(): Promise<MarketData[]> {
-  const allSymbols = getAllNSESymbols();
+  const { all: screenerAll } = getScreenerUniverse();
+  const allSymbols = getLiveFetchUniverse();
   console.log(
-    `[LIVE DATA] Fetching ${allSymbols.length} NSE stocks via Yahoo Finance (parallel batches)...`,
+    `[LIVE DATA] Fetching ${allSymbols.length} symbols` +
+    (screenerAll.size > 0 ? ` (screener-filtered from ${getAllNSESymbols().length} total)` : ` (full universe — screeners not yet populated)`) +
+    ` via Yahoo Finance (parallel batches)...`,
   );
 
   const collected = new Map<string, MarketData>();
@@ -253,20 +287,14 @@ export async function fetchAllLiveStocks(): Promise<MarketData[]> {
     }
   }
 
-  // Per-symbol YF v8 fallback for symbols the batch missed
+  // Per-symbol YF v8 fallback — bounded concurrency to avoid rate limiting
   const missed = allSymbols.filter((s) => !collected.has(s));
   if (missed.length > 0) {
     console.log(
-      `[LIVE DATA] Retrying ${missed.length} missed symbols individually...`,
+      `[LIVE DATA] Retrying ${missed.length} missed symbols individually (${FALLBACK_CONCURRENCY} concurrent)...`,
     );
-    const fallbacks = await Promise.allSettled(
-      missed.map((s) => fetchStockQuoteYahooFinance(s)),
-    );
-    fallbacks.forEach((r) => {
-      if (r.status === "fulfilled" && r.value) {
-        collected.set(r.value.symbol, r.value);
-      }
-    });
+    const fallbackResult = await fetchMissedWithConcurrencyLimit(missed);
+    fallbackResult.forEach((v, k) => collected.set(k, v));
   }
 
   // MoneyControl last-resort removed to prevent API rate limits (503s) and blocking the global mcSemaphore.

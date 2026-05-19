@@ -17,6 +17,7 @@
  */
 
 import db from './db';
+import { getScreenerUniverse, getWatchlistedSymbols, INDEX_SYMBOLS } from './screenerUniverse';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -947,10 +948,23 @@ export async function runTechnicalSignalScan(options: {
       { symbol: string; name: string; sector: string }[])
       .forEach(r => meta.set(r.symbol, { name: r.name, sector: r.sector }));
 
-    const eligible = [...bySymbol.entries()].filter(([, rows]) => rows.length >= 22);
-    progress.totalSymbols = eligible.length;
+    // Build scan universe: screener stocks + indices (always) + user watchlist
+    const { all: screenerAll } = getScreenerUniverse();
+    const watchlisted = getWatchlistedSymbols();
+    const scanUniverse = screenerAll.size > 0
+      ? new Set([...screenerAll, ...INDEX_SYMBOLS, ...watchlisted])
+      : null; // null = no filter when screeners not yet populated
 
-    console.log(`[SIGNALS] Scanning ${eligible.length} symbols for patterns...`);
+    const allEligible = [...bySymbol.entries()].filter(([, rows]) => rows.length >= 22);
+    const eligible = scanUniverse
+      ? allEligible.filter(([sym]) => scanUniverse.has(sym))
+      : allEligible;
+
+    console.log(
+      `[SIGNALS] Universe: ${screenerAll.size} screener + ${INDEX_SYMBOLS.size} indices + ${watchlisted.size} watchlisted` +
+      ` → scanning ${eligible.length} of ${allEligible.length} total symbols`
+    );
+    progress.totalSymbols = eligible.length;
 
     const results: SignalResult[] = [];
 

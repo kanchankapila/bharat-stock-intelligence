@@ -63,6 +63,7 @@ import { fetchOptionChain, fetchFnoSymbols } from "./optionChainService";
 import { fetchTopMovers } from "./topMoversService";
 import { enqueueAISignals, getAIQueueStats } from "./queues";
 import { fetchGlobalMarketData } from "./globalMarketService";
+import { getScreenerUniverse, getWatchlistedSymbols, INDEX_SYMBOLS } from "./screenerUniverse";
 
 const t = initTRPC.create({
   transformer: superjson,
@@ -203,12 +204,33 @@ export const appRouter = router({
       stockData: z.record(z.string(), z.unknown()),
     })))
     .mutation(async ({ input }) => {
-      return await enqueueAISignals(input);
+      const { tier1, tier2 } = getScreenerUniverse();
+      const watchlisted = getWatchlistedSymbols();
+      const hasUniverse = tier1.size + tier2.size > 0;
+      // When screeners are populated, limit AI analysis to screener stocks + user watchlist.
+      // Fall back to full input when screeners haven't been synced yet.
+      const filtered = hasUniverse
+        ? input.filter(s => tier1.has(s.symbol) || tier2.has(s.symbol) || watchlisted.has(s.symbol))
+        : input;
+      return await enqueueAISignals(filtered);
     }),
 
   // Real-time BullMQ queue stats for progress tracking
   getQueueStats: publicProcedure.query(async () => {
     return await getAIQueueStats();
+  }),
+
+  // Returns the tiered screener universe so the frontend can show which stocks
+  // are in scope for full vs. technical-only scoring.
+  getScreenerUniverse: publicProcedure.query(() => {
+    const { tier1, tier2, counts } = getScreenerUniverse();
+    return {
+      tier1: [...tier1].sort(),
+      tier2: [...tier2].sort(),
+      indices: [...INDEX_SYMBOLS].sort(),
+      total: tier1.size + tier2.size,
+      counts: Object.fromEntries(counts),
+    };
   }),
 
   // ── Fundamentals sync ─────────────────────────────────────────────────────
@@ -2211,7 +2233,7 @@ export const appRouter = router({
 
       // 4. Fetch smart money sums (last 30 days)
       const bulkDeals = db.prepare(`
-        SELECT symbol, SUM(CASE WHEN deal_type = 'BUY' THEN value_cr ELSE -value_cr END) as net_fii
+        SELECT symbol, SUM(CASE WHEN dealType = 'BUY' THEN valueCr ELSE -valueCr END) as net_fii
         FROM bulk_deals
         WHERE date >= date('now', '-30 days')
         GROUP BY symbol
@@ -2219,7 +2241,7 @@ export const appRouter = router({
       const fiiMap = new Map(bulkDeals.map(b => [b.symbol, b.net_fii]));
 
       const insiderTrades = db.prepare(`
-        SELECT symbol, SUM(CASE WHEN type_of_transaction = 'Acquisition' THEN value_inr ELSE -value_inr END) as net_insider
+        SELECT symbol, SUM(CASE WHEN typeOfTransaction = 'Acquisition' THEN valueInr ELSE -valueInr END) as net_insider
         FROM insider_trades
         WHERE date >= date('now', '-30 days')
         GROUP BY symbol
