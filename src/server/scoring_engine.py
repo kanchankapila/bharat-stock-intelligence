@@ -3,7 +3,6 @@ import json
 import os
 import datetime
 import pandas as pd
-import numpy as np
 from sqlalchemy import create_engine, text
 from nlp_engine import NLPScreenerInference, NLP_VERSION
 from typing import Dict, Any, List
@@ -58,6 +57,8 @@ class AlphaQuantScoringEngine:
         self.nlp = NLPScreenerInference()
         self.stock_stats = {}
         self._load_optimised_weights()
+        self._load_signal_type_weights()
+        self._load_rl_policy()
 
     def _load_optimised_weights(self):
         """Override default weights with ML-optimised values from app_settings if available."""
@@ -78,6 +79,91 @@ class AlphaQuantScoringEngine:
                     self.SOURCE_WEIGHTS = {**self.SOURCE_WEIGHTS, **loaded2}
         except Exception:
             pass  # use defaults if app_settings not populated yet
+
+    def _load_signal_type_weights(self):
+        self._signal_type_weights: dict = {}
+        try:
+            with self.engine.connect() as conn:
+                rows = conn.execute(
+                    text("SELECT signal_type, regime, sector, weight FROM signal_type_weights")
+                ).fetchall()
+                for row in rows:
+                    self._signal_type_weights[(row[0], row[1], row[2])] = float(row[3])
+        except Exception:
+            pass
+
+    def _get_signal_weight(self, signal_type: str, regime: str, sector: str) -> float:
+        w = self._signal_type_weights.get((signal_type, regime, sector))
+        if w is not None:
+            return w
+        return self._signal_type_weights.get((signal_type, regime, 'ALL'), 1.0)
+
+    def _load_rl_policy(self):
+        self._rl_epsilon: float = 0.05
+        self._rl_q_cache: dict = {}
+        try:
+            with self.engine.connect() as conn:
+                row = conn.execute(
+                    text("SELECT value FROM app_settings WHERE key='rl_epsilon'")
+                ).fetchone()
+                if row:
+                    self._rl_epsilon = float(row[0])
+                rows = conn.execute(text(
+                    "SELECT state_key, action, q_value FROM rl_q_table"
+                )).fetchall()
+                state_q: dict = {}
+                for state_key, action, q_value in rows:
+                    state_q.setdefault(state_key, {})[action] = float(q_value)
+                for state_key, actions in state_q.items():
+                    self._rl_q_cache[state_key] = max(actions, key=lambda a: actions[a])
+        except Exception:
+            pass
+
+    def _get_rl_action(self, regime: str, sector: str, signal_score: int) -> str:
+        try:
+            import sys, os, sqlite3, datetime
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            from rl_agent import get_state_key, log_episode
+            state_key = get_state_key(regime, sector, signal_score)
+            action = self._rl_q_cache.get(state_key, 'BALANCED')
+            # Log episode for daily Q-learning update
+            try:
+                db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'database.sqlite')
+                conn = sqlite3.connect(db_path)
+                log_episode(conn, datetime.date.today().isoformat(), state_key, action, self._rl_epsilon)
+                conn.close()
+            except Exception:
+                pass
+            return action
+        except Exception:
+            return 'BALANCED'
+
+    def apply_signal_multipliers(
+        self,
+        raw_score: float,
+        signal_types: list,
+        regime: str,
+        sector: str,
+        signal_score: int,
+    ) -> float:
+        try:
+            import sys, os
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            from rl_agent import get_multipliers
+            action   = self._get_rl_action(regime, sector, signal_score)
+            rl_mults = get_multipliers(action)
+        except Exception:
+            rl_mults = {}
+
+        if not signal_types:
+            return raw_score
+
+        total_mult = sum(
+            self._get_signal_weight(st, regime, sector) * rl_mults.get(st, 1.0)
+            for st in signal_types
+        ) / len(signal_types)
+
+        return raw_score * total_mult
 
     # ------------------------------------------------------------------
     # Data Loading
@@ -269,9 +355,34 @@ class AlphaQuantScoringEngine:
         print(f"Starting AlphaQuant Scoring Engine v3 (Dedup+Decay) at {datetime.datetime.now()}")
         screeners, mappings = self.load_data()
 
+        # Build a symbol whitelist from the screener universe so news signals only
+        # boost stocks that are already on at least one screener.  This prevents
+        # purely news-driven scores from surfacing stocks that no screener has
+        # qualified, keeping the output focused on already-positive candidates.
+        screener_symbols = set(
+            s for s in mappings['symbol'].dropna().unique()
+            if s and s != '#N/A'
+        )
+        print(f"Screener universe: {len(screener_symbols)} symbols across all sources")
+
         print("Building screener metadata (NLP inference)...")
         screeners_meta = self.build_screener_metadata(screeners, force_rebuild=force_rebuild)
         print(f"screener_master has {len(screeners_meta)} entries.")
+
+        # Load sector per symbol and construct sector-to-symbols map from nse_stocks
+        symbol_sector: Dict[str, str] = {}
+        sector_symbols: Dict[str, List[str]] = {}
+        try:
+            with self.engine.connect() as conn:
+                sector_rows = conn.execute(text(
+                    "SELECT symbol, sector FROM nse_stocks WHERE sector IS NOT NULL"
+                )).fetchall()
+                for r in sector_rows:
+                    sym, sec = r[0], r[1]
+                    symbol_sector[sym] = sec
+                    sector_symbols.setdefault(sec, []).append(sym)
+        except Exception:
+            pass
 
         # Load news sentiment from enriched table first, fall back to legacy
         print("Loading news sentiment data...")
@@ -297,6 +408,8 @@ class AlphaQuantScoringEngine:
                 news_df['sentiment'] = news_df['sentiment'].str.lower()
                 news_df['is_json_symbols'] = False
 
+        authoritative_sources = {"bloomberg", "reuters", "moneycontrol", "economic times", "nse", "bse", "finbert"}
+
         news_map: Dict[str, list] = {}
         for _, n in news_df.iterrows():
             raw = n.get('symbols') or ''
@@ -308,16 +421,47 @@ class AlphaQuantScoringEngine:
             except Exception:
                 sym_list = [s.strip() for s in str(raw).split(',')]
             recency = self._recency_weight(n.get('published_at') or '')
+            
             for s in sym_list:
                 if not s or s == '#N/A':
                     continue
+                
+                # 1. Source Authority Weighting
+                source_lower = str(n.get('source', 'news')).lower()
+                authority_mult = 1.5 if any(src in source_lower for src in authoritative_sources) else 0.8
+                
+                # 2. Relevance Gating (is symbol mentioned in the title/headline?)
+                title_lower = str(n.get('title', '')).lower()
+                is_in_title = str(s).lower() in title_lower
+                relevance_mult = 1.5 if is_in_title else 0.6
+                
                 news_map.setdefault(s, []).append({
                     'name':      n['title'],
                     'sentiment': n['sentiment'],
                     'source':    n.get('source', 'news'),
                     'category':  'news',
                     'recency':   recency,
+                    'authority_mult': authority_mult,
+                    'relevance_mult': relevance_mult,
+                    'propagation_mult': 1.0
                 })
+                
+                # 3. Sector Sentiment Propagation (if this is a direct headline mention)
+                if is_in_title:
+                    symbol_sec = symbol_sector.get(s)
+                    if symbol_sec and symbol_sec != 'OTHER':
+                        for peer_sym in sector_symbols.get(symbol_sec, []):
+                            if peer_sym != s:  # do not propagate to itself
+                                news_map.setdefault(peer_sym, []).append({
+                                    'name':      f"Sector Catalyst ({symbol_sec}): {n['title']}",
+                                    'sentiment': n['sentiment'],
+                                    'source':    n.get('source', 'news'),
+                                    'category':  'news',
+                                    'recency':   recency,
+                                    'authority_mult': authority_mult,
+                                    'relevance_mult': 0.6,  # lower relevance for peer stock
+                                    'propagation_mult': 0.4  # propagate fraction of the score
+                                })
 
         # Attach last_updated to screener metadata for recency decay
         with self.engine.connect() as conn:
@@ -325,6 +469,18 @@ class AlphaQuantScoringEngine:
                 "SELECT scan_id, last_updated FROM screener_master"
             )).fetchall()
         screener_updated = {r[0]: r[1] for r in sm_rows}
+
+        # Load current nifty regime (most recent entry from technical_signals)
+        current_regime = 'SIDEWAYS'
+        try:
+            with self.engine.connect() as conn:
+                regime_row = conn.execute(text(
+                    "SELECT nifty_regime FROM technical_signals ORDER BY date DESC LIMIT 1"
+                )).fetchone()
+                if regime_row and regime_row[0]:
+                    current_regime = regime_row[0]
+        except Exception:
+            pass
 
         # Score per timeframe
         timeframes = ['long_term', 'intraday']
@@ -347,6 +503,8 @@ class AlphaQuantScoringEngine:
 
             # ── News seed (both timeframes) ──────────────────────────────
             for symbol, news_items in news_map.items():
+                if screener_symbols and symbol not in screener_symbols:
+                    continue  # skip news-only stocks not in any screener
                 _init_stock(symbol)
                 news_src_counts: Dict[str, int] = {}
                 for item in news_items:
@@ -359,8 +517,14 @@ class AlphaQuantScoringEngine:
                     decay = 1.0 if cnt < self.SOURCE_CAT_CAP else self.SOURCE_CAT_DECAY
                     news_src_counts[bucket] = cnt + 1
                     recency = item.get('recency', 1.0)
-                    # News base is 5.0 (same as screeners — was 7.0, reduced to prevent over-dominance)
-                    contrib = 5.0 * mult * decay * recency
+                    
+                    # Apply authority, relevance, and sector propagation multipliers
+                    auth_mult = item.get('authority_mult', 1.0)
+                    rel_mult = item.get('relevance_mult', 1.0)
+                    prop_mult = item.get('propagation_mult', 1.0)
+                    
+                    # News base is 5.0 (same as screeners)
+                    contrib = 5.0 * mult * decay * recency * auth_mult * rel_mult * prop_mult
                     stock_scores[symbol]['raw_sum'] += contrib
                     stock_scores[symbol]['factors']['news'] += contrib
                     stock_scores[symbol]['sources'].add(item['source'])
@@ -418,7 +582,21 @@ class AlphaQuantScoringEngine:
                 cat_count = len(data['categories'])
                 # Multi-category consensus bonus (capped at 3 categories → +20%)
                 consensus_mult = 1.0 + min(0.1 * (cat_count - 1), 0.20)
-                final_score = data['raw_sum'] * consensus_mult
+                raw_score = data['raw_sum'] * consensus_mult
+
+                signal_types = list({
+                    item['category']
+                    for item in data['positive_screeners'] + data['negative_screeners']
+                    if item.get('category')
+                })
+                sector = symbol_sector.get(symbol, 'OTHER')
+                final_score = self.apply_signal_multipliers(
+                    raw_score=raw_score,
+                    signal_types=signal_types,
+                    regime=current_regime,
+                    sector=sector,
+                    signal_score=int(raw_score),
+                )
 
                 screener_count = len(data['positive_screeners']) + len(data['negative_screeners'])
                 source_count   = len(data['sources'])
@@ -528,6 +706,9 @@ class AlphaQuantScoringEngine:
         try:
             with self.engine.begin() as conn:
                 for row in rows:
+                    win_prob = float(row.get('win_probability') or 0)
+                    if row['rec_type'] in ('BUY', 'STRONG_BUY') and win_prob > 0 and win_prob < 0.45:
+                        continue
                     keys   = ', '.join(row.keys())
                     places = ', '.join(f':{k}' for k in row.keys())
                     conn.execute(text(f"""

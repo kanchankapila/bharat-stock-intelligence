@@ -74,10 +74,10 @@ function ScoreBar({ value, color = 'indigo' }: { value: number; color?: string }
   };
   return (
     <div className="flex items-center gap-2">
-      <div className="flex-1 h-1 bg-slate-800 rounded-full overflow-hidden">
+      <div className="flex-1 h-1 bg-white/[0.08] rounded-full overflow-hidden">
         <div className={cn('h-full rounded-full', colorMap[color] || 'bg-indigo-500')} style={{ width: `${Math.max(0, Math.min(100, value))}%` }} />
       </div>
-      <span className="text-xs font-bold tabular-nums text-slate-300 w-8 text-right">{value.toFixed(0)}</span>
+      <span className="text-xs font-bold tabular-nums text-zinc-300 w-8 text-right">{value.toFixed(0)}</span>
     </div>
   );
 }
@@ -93,13 +93,13 @@ function ClassBadge({ cls }: { cls: string }) {
 }
 
 function fmt(v?: number | null, dec = 1, suffix = '') {
-  if (v == null || isNaN(v)) return <span className="text-slate-600">—</span>;
+  if (v == null || isNaN(v)) return <span className="text-zinc-600">—</span>;
   const s = v.toFixed(dec) + suffix;
   return <span>{s}</span>;
 }
 
 function fmtPct(v?: number | null) {
-  if (v == null || isNaN(v)) return <span className="text-slate-600">—</span>;
+  if (v == null || isNaN(v)) return <span className="text-zinc-600">—</span>;
   const cls = v >= 0 ? 'text-emerald-400' : 'text-rose-400';
   return <span className={cls}>{v >= 0 ? '+' : ''}{v.toFixed(1)}%</span>;
 }
@@ -110,7 +110,7 @@ function SortableHeader({ label, sortKey, sort, onSort }: { label: string; sortK
   const active = sort.key === sortKey;
   return (
     <th
-      className="text-left py-2 px-3 text-[10px] font-bold uppercase tracking-wider text-slate-500 cursor-pointer hover:text-slate-300 select-none whitespace-nowrap"
+      className="text-left py-2 px-3 text-[10px] font-bold uppercase tracking-wider text-zinc-500 cursor-pointer hover:text-zinc-300 select-none whitespace-nowrap"
       onClick={() => onSort(sortKey)}
     >
       <span className="flex items-center gap-1">
@@ -130,7 +130,7 @@ function FilterPanel({ filters, onChange, onClose }: { filters: Filters; onChang
   function num(key: keyof Filters, label: string, placeholder: string, min?: number, max?: number) {
     return (
       <div className="flex flex-col gap-1">
-        <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{label}</label>
+        <label className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">{label}</label>
         <input
           type="number"
           placeholder={placeholder}
@@ -139,17 +139,17 @@ function FilterPanel({ filters, onChange, onClose }: { filters: Filters; onChang
           max={max}
           step="0.1"
           onChange={e => setLocal(p => ({ ...p, [key]: e.target.value === '' ? undefined : parseFloat(e.target.value) }))}
-          className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:ring-1 focus:ring-indigo-500/40 w-full"
+          className="bg-white/[0.08] border border-white/[0.1] rounded-lg px-3 py-1.5 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-indigo-500/40 w-full"
         />
       </div>
     );
   }
 
   return (
-    <div className="bg-slate-900 border border-slate-700 rounded-2xl p-4 space-y-4 w-72 shadow-2xl">
+    <div className="bg-[#141416] border border-white/[0.1] rounded-2xl p-4 space-y-4 w-72 shadow-2xl">
       <div className="flex items-center justify-between">
         <span className="text-sm font-bold text-white">Filters</span>
-        <button onClick={onClose} className="text-slate-500 hover:text-white"><X className="w-4 h-4" /></button>
+        <button onClick={onClose} className="text-zinc-500 hover:text-white"><X className="w-4 h-4" /></button>
       </div>
       <div className="grid grid-cols-2 gap-3">
         {num('minSharpe', 'Min Sharpe', '0.5', 0)}
@@ -169,11 +169,11 @@ function FilterPanel({ filters, onChange, onClose }: { filters: Filters; onChang
           onChange={e => setLocal(p => ({ ...p, aboveSma200: e.target.checked || undefined }))}
           className="rounded"
         />
-        <label htmlFor="sma200" className="text-sm text-slate-300">Above 200-day SMA only</label>
+        <label htmlFor="sma200" className="text-sm text-zinc-300">Above 200-day SMA only</label>
       </div>
       <div className="flex gap-2">
         <button onClick={apply} className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold py-2 rounded-xl transition-colors">Apply</button>
-        <button onClick={reset} className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm font-bold py-2 rounded-xl transition-colors">Reset</button>
+        <button onClick={reset} className="flex-1 bg-white/[0.08] hover:bg-slate-700 text-zinc-300 text-sm font-bold py-2 rounded-xl transition-colors">Reset</button>
       </div>
     </div>
   );
@@ -234,7 +234,7 @@ export function StrategyIntelligence({ onSelectStock }: { onSelectStock: (symbol
             <Target className="w-6 h-6 text-indigo-400" />
             Strategy Intelligence
           </h2>
-          <p className="text-slate-500 text-sm mt-1">Quantitative scoring across {total.toLocaleString()} NSE stocks</p>
+          <p className="text-zinc-500 text-sm mt-1">Quantitative scoring across {total.toLocaleString()} NSE stocks</p>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -243,7 +243,7 @@ export function StrategyIntelligence({ onSelectStock }: { onSelectStock: (symbol
               'flex items-center gap-2 px-3 py-1.5 rounded-xl text-sm font-bold border transition-colors',
               showFilters || activeFiltersCount > 0
                 ? 'bg-indigo-600/20 border-indigo-500/40 text-indigo-300'
-                : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white'
+                : 'bg-white/[0.08] border-white/[0.1] text-zinc-400 hover:text-white'
             )}
           >
             <SlidersHorizontal className="w-4 h-4" />
@@ -251,7 +251,7 @@ export function StrategyIntelligence({ onSelectStock }: { onSelectStock: (symbol
           </button>
           <button
             onClick={() => refetch()}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-sm font-bold bg-slate-800 border border-slate-700 text-slate-400 hover:text-white transition-colors"
+            className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-sm font-bold bg-white/[0.08] border border-white/[0.1] text-zinc-400 hover:text-white transition-colors"
           >
             <RefreshCw className="w-4 h-4" />
           </button>
@@ -263,8 +263,8 @@ export function StrategyIntelligence({ onSelectStock }: { onSelectStock: (symbol
         {(['Strong Buy','Buy','Hold','Avoid','Sell'] as const).map(cls => {
           const c = CLASS_COLORS[cls];
           return (
-            <div key={cls} className={cn('rounded-xl border border-slate-800 p-3 flex flex-col gap-1', c.bg)}>
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{cls}</span>
+            <div key={cls} className={cn('rounded-xl border border-white/[0.07] p-3 flex flex-col gap-1', c.bg)}>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">{cls}</span>
               <span className={cn('text-2xl font-black tabular-nums', c.text)}>{byClass[cls] ?? 0}</span>
             </div>
           );
@@ -283,7 +283,7 @@ export function StrategyIntelligence({ onSelectStock }: { onSelectStock: (symbol
                 'flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-bold border transition-all',
                 strategy === s.id
                   ? 'bg-indigo-600 border-indigo-500 text-white shadow-[0_0_12px_rgba(99,102,241,0.3)]'
-                  : 'bg-slate-900 border-slate-700 text-slate-400 hover:text-white hover:border-slate-500'
+                  : 'bg-[#141416] border-white/[0.1] text-zinc-400 hover:text-white hover:border-slate-500'
               )}
             >
               <Icon className="w-4 h-4" />
@@ -291,7 +291,7 @@ export function StrategyIntelligence({ onSelectStock }: { onSelectStock: (symbol
             </button>
           );
         })}
-        <div className="ml-auto flex items-center gap-2 text-sm text-slate-500">
+        <div className="ml-auto flex items-center gap-2 text-sm text-zinc-500">
           <span className="hidden md:block">{stratInfo.desc}</span>
         </div>
       </div>
@@ -307,13 +307,13 @@ export function StrategyIntelligence({ onSelectStock }: { onSelectStock: (symbol
           <AlertCircle className="w-5 h-5 text-rose-400 shrink-0" />
           <div>
             <p className="text-sm font-bold text-rose-400">Failed to load strategy data</p>
-            <p className="text-xs text-slate-500 mt-0.5">{(error as { message?: string })?.message ?? String(error)}</p>
+            <p className="text-xs text-zinc-500 mt-0.5">{(error as { message?: string })?.message ?? String(error)}</p>
           </div>
         </div>
       )}
 
       {isLoading && !stocks.length && (
-        <div className="flex items-center justify-center py-24 gap-3 text-slate-500">
+        <div className="flex items-center justify-center py-24 gap-3 text-zinc-500">
           <Loader2 className="w-5 h-5 animate-spin" />
           <span className="text-sm">Loading strategy data…</span>
         </div>
@@ -322,19 +322,19 @@ export function StrategyIntelligence({ onSelectStock }: { onSelectStock: (symbol
       {/* Scores not computed yet */}
       {!isLoading && !error && total === 0 && (
         <div className="flex flex-col items-center py-24 gap-4 text-center">
-          <Activity className="w-12 h-12 text-slate-700" />
+          <Activity className="w-12 h-12 text-zinc-700" />
           <p className="text-white font-bold">Quant scoring not yet computed</p>
-          <p className="text-slate-500 text-sm">The engine will run automatically on server start. Check back in a few minutes.</p>
+          <p className="text-zinc-500 text-sm">The engine will run automatically on server start. Check back in a few minutes.</p>
         </div>
       )}
 
       {/* Main table */}
       {sorted.length > 0 && (
-        <div className="rounded-2xl border border-slate-800 bg-slate-900/30 overflow-x-auto">
+        <div className="rounded-2xl border border-white/[0.07] bg-[#141416]/50 overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="border-b border-slate-800">
+            <thead className="border-b border-white/[0.07]">
               <tr>
-                <th className="text-left py-2 px-3 text-[10px] font-bold uppercase tracking-wider text-slate-500 w-8">#</th>
+                <th className="text-left py-2 px-3 text-[10px] font-bold uppercase tracking-wider text-zinc-500 w-8">#</th>
                 <SortableHeader label="Symbol" sortKey="symbol" sort={sort} onSort={toggleSort} />
                 <SortableHeader label="Class" sortKey="composite_class" sort={sort} onSort={toggleSort} />
                 <SortableHeader label={scoreLabel} sortKey={scoreKey} sort={sort} onSort={toggleSort} />
@@ -351,7 +351,7 @@ export function StrategyIntelligence({ onSelectStock }: { onSelectStock: (symbol
                 <SortableHeader label="ROE" sortKey="return_on_equity" sort={sort} onSort={toggleSort} />
                 <SortableHeader label="F-Sc" sortKey="piotroski_f_score" sort={sort} onSort={toggleSort} />
                 <SortableHeader label="Bull" sortKey="bullish_screener_count" sort={sort} onSort={toggleSort} />
-                <th className="text-left py-2 px-3 text-[10px] font-bold uppercase tracking-wider text-slate-500">SMA</th>
+                <th className="text-left py-2 px-3 text-[10px] font-bold uppercase tracking-wider text-zinc-500">SMA</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/50">
@@ -363,24 +363,24 @@ export function StrategyIntelligence({ onSelectStock }: { onSelectStock: (symbol
                     className="hover:bg-white/[0.02] cursor-pointer transition-colors"
                     onClick={() => onSelectStock(s.symbol)}
                   >
-                    <td className="py-2 px-3 text-slate-600 text-xs">{i + 1}</td>
+                    <td className="py-2 px-3 text-zinc-600 text-xs">{i + 1}</td>
                     <td className="py-2 px-3">
                       <div className="font-bold text-white">{s.symbol}</div>
-                      {s.name && <div className="text-[10px] text-slate-500 truncate max-w-[120px]">{s.name}</div>}
+                      {s.name && <div className="text-[10px] text-zinc-500 truncate max-w-[120px]">{s.name}</div>}
                     </td>
                     <td className="py-2 px-3"><ClassBadge cls={s.composite_class} /></td>
                     <td className="py-2 px-3 w-32"><ScoreBar value={score} color={scoreColor} /></td>
-                    <td className="py-2 px-3 text-slate-300 tabular-nums">{s.rank_composite?.toFixed(1)}</td>
-                    <td className="py-2 px-3 text-slate-300 tabular-nums">{s.rank_momentum?.toFixed(1)}</td>
-                    <td className="py-2 px-3 text-slate-300 tabular-nums">{s.rank_quality?.toFixed(1)}</td>
-                    <td className="py-2 px-3 text-slate-300 tabular-nums">{s.rank_value?.toFixed(1)}</td>
+                    <td className="py-2 px-3 text-zinc-300 tabular-nums">{s.rank_composite?.toFixed(1)}</td>
+                    <td className="py-2 px-3 text-zinc-300 tabular-nums">{s.rank_momentum?.toFixed(1)}</td>
+                    <td className="py-2 px-3 text-zinc-300 tabular-nums">{s.rank_quality?.toFixed(1)}</td>
+                    <td className="py-2 px-3 text-zinc-300 tabular-nums">{s.rank_value?.toFixed(1)}</td>
                     <td className="py-2 px-3">{fmtPct(s.return_12m)}</td>
-                    <td className="py-2 px-3 tabular-nums text-slate-300">{fmt(s.sharpe_ratio, 2)}</td>
-                    <td className="py-2 px-3 tabular-nums text-slate-300">{fmt(s.annualized_vol, 1, '%')}</td>
-                    <td className="py-2 px-3 tabular-nums text-slate-300">{fmt(s.max_drawdown_1y, 1, '%')}</td>
-                    <td className="py-2 px-3 tabular-nums text-slate-300">{fmt(s.trailing_pe, 1, 'x')}</td>
-                    <td className="py-2 px-3 tabular-nums text-slate-300">{fmt(s.debt_to_equity, 1)}</td>
-                    <td className="py-2 px-3 tabular-nums text-slate-300">{fmt(s.return_on_equity, 1, '%')}</td>
+                    <td className="py-2 px-3 tabular-nums text-zinc-300">{fmt(s.sharpe_ratio, 2)}</td>
+                    <td className="py-2 px-3 tabular-nums text-zinc-300">{fmt(s.annualized_vol, 1, '%')}</td>
+                    <td className="py-2 px-3 tabular-nums text-zinc-300">{fmt(s.max_drawdown_1y, 1, '%')}</td>
+                    <td className="py-2 px-3 tabular-nums text-zinc-300">{fmt(s.trailing_pe, 1, 'x')}</td>
+                    <td className="py-2 px-3 tabular-nums text-zinc-300">{fmt(s.debt_to_equity, 1)}</td>
+                    <td className="py-2 px-3 tabular-nums text-zinc-300">{fmt(s.return_on_equity, 1, '%')}</td>
                     <td className="py-2 px-3">
                       <span className={cn(
                         'font-bold tabular-nums',
@@ -390,11 +390,11 @@ export function StrategyIntelligence({ onSelectStock }: { onSelectStock: (symbol
                         {s.piotroski_f_score ?? '—'}
                       </span>
                     </td>
-                    <td className="py-2 px-3 tabular-nums text-slate-300">{s.bullish_screener_count ?? '—'}</td>
+                    <td className="py-2 px-3 tabular-nums text-zinc-300">{s.bullish_screener_count ?? '—'}</td>
                     <td className="py-2 px-3">
                       {s.above_sma200
                         ? <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                        : <span className="text-slate-700">—</span>}
+                        : <span className="text-zinc-700">—</span>}
                     </td>
                   </tr>
                 );
@@ -409,7 +409,7 @@ export function StrategyIntelligence({ onSelectStock }: { onSelectStock: (symbol
         <div className="flex justify-center">
           <button
             onClick={() => setLimit(l => l + 50)}
-            className="px-6 py-2 rounded-xl text-sm font-bold bg-slate-800 border border-slate-700 text-slate-300 hover:text-white hover:border-slate-500 transition-colors"
+            className="px-6 py-2 rounded-xl text-sm font-bold bg-white/[0.08] border border-white/[0.1] text-zinc-300 hover:text-white hover:border-slate-500 transition-colors"
           >
             Load more ({limit} shown)
           </button>
@@ -417,9 +417,9 @@ export function StrategyIntelligence({ onSelectStock }: { onSelectStock: (symbol
       )}
 
       {/* Legend / methodology note */}
-      <div className="rounded-xl border border-slate-800 bg-slate-900/20 p-4">
-        <p className="text-xs font-bold text-slate-400 mb-2">Scoring Methodology</p>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[11px] text-slate-500">
+      <div className="rounded-xl border border-white/[0.07] bg-[#141416]/20 p-4">
+        <p className="text-xs font-bold text-zinc-400 mb-2">Scoring Methodology</p>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[11px] text-zinc-500">
           <span><span className="text-indigo-400 font-bold">Composite</span> = 30% Momentum + 25% Quality + 25% Value + 20% Confluence</span>
           <span><span className="text-emerald-400 font-bold">Momentum</span> = 50%×12M + 30%×6M + 20%×3M return percentile rank</span>
           <span><span className="text-sky-400 font-bold">Quality</span> = Sharpe + ROE + Operating Margins + Piotroski F-Score</span>

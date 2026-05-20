@@ -151,7 +151,7 @@ const TrendlyneScreenerPanel: React.FC<TrendlyneScreenerPanelProps> = ({ onSelec
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 rounded-lg border border-slate-700/50 p-6 shadow-2xl">
+      <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 rounded-lg border border-white/[0.1]/50 p-6 shadow-2xl">
         <div className="flex flex-col md:flex-row items-start justify-between gap-4">
           <div className="flex-1">
             <div className="flex items-center gap-2 mb-2">
@@ -160,8 +160,8 @@ const TrendlyneScreenerPanel: React.FC<TrendlyneScreenerPanelProps> = ({ onSelec
               </div>
               <div>
                 <h2 className="text-2xl font-black text-white tracking-tight uppercase italic">Screener Intelligence</h2>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5 flex items-center gap-2">
-                  <span className="bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded text-[8px] border border-blue-500/20">FinBERT AI POWERED</span>
+                <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mt-0.5 flex items-center gap-2">
+                  <span className="bg-blue-500/20 text-violet-400 px-1.5 py-0.5 rounded text-[8px] border border-violet-500/20">FinBERT AI POWERED</span>
                   Advanced Multi-Factor Market Scanners
                 </p>
               </div>
@@ -188,7 +188,7 @@ const TrendlyneScreenerPanel: React.FC<TrendlyneScreenerPanelProps> = ({ onSelec
 
       {/* Tabs and Filters */}
       <div className="space-y-4">
-        <div className="flex items-center justify-between border-b border-slate-800 pb-px">
+        <div className="flex items-center justify-between border-b border-white/[0.07] pb-px">
           <div className="flex gap-1">
             <button
               onClick={() => setActiveTab('screeners')}
@@ -196,7 +196,7 @@ const TrendlyneScreenerPanel: React.FC<TrendlyneScreenerPanelProps> = ({ onSelec
                 "px-4 py-3 text-[10px] font-black uppercase tracking-widest border-b-2 transition-all",
                 activeTab === 'screeners'
                   ? "border-amber-400 text-amber-400 bg-amber-400/5"
-                  : "border-transparent text-slate-500 hover:text-slate-300"
+                  : "border-transparent text-zinc-500 hover:text-zinc-300"
               )}
             >
               Active Scans
@@ -207,7 +207,7 @@ const TrendlyneScreenerPanel: React.FC<TrendlyneScreenerPanelProps> = ({ onSelec
                 "px-4 py-3 text-[10px] font-black uppercase tracking-widest border-b-2 transition-all",
                 activeTab === 'details'
                   ? "border-amber-400 text-amber-400 bg-amber-400/5"
-                  : "border-transparent text-slate-500 hover:text-slate-300"
+                  : "border-transparent text-zinc-500 hover:text-zinc-300"
               )}
             >
               Master Directory
@@ -216,26 +216,26 @@ const TrendlyneScreenerPanel: React.FC<TrendlyneScreenerPanelProps> = ({ onSelec
           
           <div className="flex items-center gap-4">
              <div className="relative w-64 hidden md:block">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-500" />
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3 h-3 text-zinc-500" />
                 <input 
                   type="text" 
                   placeholder="SEARCH SCREENERS..."
                   value={screenerSearchQuery}
                   onChange={(e) => setScreenerSearchQuery(e.target.value)}
-                  className="w-full bg-slate-900/50 border border-slate-800 rounded-full pl-9 pr-4 py-1.5 text-[10px] font-bold text-white placeholder:text-slate-600 focus:outline-none focus:border-amber-500/50"
+                  className="w-full bg-[#141416]/80 border border-white/[0.07] rounded-full pl-9 pr-4 py-1.5 text-[10px] font-bold text-white placeholder:text-zinc-600 focus:outline-none focus:border-amber-500/50"
                 />
              </div>
           </div>
         </div>
 
         {/* Global Filters */}
-        <div className="flex flex-wrap gap-3 p-3 bg-slate-900/30 border border-slate-800/50 rounded-xl">
-          <div className="flex items-center gap-2 bg-slate-800/50 px-2 py-1 rounded-lg">
-            <TrendingUp className="w-3 h-3 text-slate-500" />
+        <div className="flex flex-wrap gap-3 p-3 bg-[#141416]/50 border border-white/[0.05] rounded-xl">
+          <div className="flex items-center gap-2 bg-white/[0.08]/50 px-2 py-1 rounded-lg">
+            <TrendingUp className="w-3 h-3 text-zinc-500" />
             <select 
               value={filterSentiment} 
               onChange={(e) => setFilterSentiment(e.target.value)}
-              className="bg-transparent text-[10px] font-black text-slate-300 uppercase focus:outline-none"
+              className="bg-transparent text-[10px] font-black text-zinc-300 uppercase focus:outline-none"
             >
               <option value="all">ALL SENTIMENTS</option>
               <option value="bullish">BULLISH</option>
@@ -244,12 +244,12 @@ const TrendlyneScreenerPanel: React.FC<TrendlyneScreenerPanelProps> = ({ onSelec
             </select>
           </div>
           
-          <div className="flex items-center gap-2 bg-slate-800/50 px-2 py-1 rounded-lg">
-            <Filter className="w-3 h-3 text-slate-500" />
+          <div className="flex items-center gap-2 bg-white/[0.08]/50 px-2 py-1 rounded-lg">
+            <Filter className="w-3 h-3 text-zinc-500" />
             <select 
               value={filterType} 
               onChange={(e) => setFilterType(e.target.value)}
-              className="bg-transparent text-[10px] font-black text-slate-300 uppercase focus:outline-none"
+              className="bg-transparent text-[10px] font-black text-zinc-300 uppercase focus:outline-none"
             >
               <option value="all">ALL TYPES</option>
               <option value="fundamental">FUNDAMENTAL</option>
@@ -261,12 +261,12 @@ const TrendlyneScreenerPanel: React.FC<TrendlyneScreenerPanelProps> = ({ onSelec
             </select>
           </div>
 
-          <div className="flex items-center gap-2 bg-slate-800/50 px-2 py-1 rounded-lg">
-            <Zap className="w-3 h-3 text-slate-500" />
+          <div className="flex items-center gap-2 bg-white/[0.08]/50 px-2 py-1 rounded-lg">
+            <Zap className="w-3 h-3 text-zinc-500" />
             <select 
               value={filterTimeframe} 
               onChange={(e) => setFilterTimeframe(e.target.value)}
-              className="bg-transparent text-[10px] font-black text-slate-300 uppercase focus:outline-none"
+              className="bg-transparent text-[10px] font-black text-zinc-300 uppercase focus:outline-none"
             >
               <option value="all">ALL TIMEFRAMES</option>
               <option value="intraday">INTRADAY</option>
@@ -274,12 +274,12 @@ const TrendlyneScreenerPanel: React.FC<TrendlyneScreenerPanelProps> = ({ onSelec
             </select>
           </div>
 
-          <div className="flex items-center gap-2 bg-slate-800/50 px-2 py-1 rounded-lg">
-            <BarChart3 className="w-3 h-3 text-slate-500" />
+          <div className="flex items-center gap-2 bg-white/[0.08]/50 px-2 py-1 rounded-lg">
+            <BarChart3 className="w-3 h-3 text-zinc-500" />
             <select 
               value={filterSource} 
               onChange={(e) => setFilterSource(e.target.value)}
-              className="bg-transparent text-[10px] font-black text-slate-300 uppercase focus:outline-none"
+              className="bg-transparent text-[10px] font-black text-zinc-300 uppercase focus:outline-none"
             >
               <option value="all">ALL SOURCES</option>
               <option value="trendlyne">TRENDLYNE</option>
@@ -302,17 +302,17 @@ const TrendlyneScreenerPanel: React.FC<TrendlyneScreenerPanelProps> = ({ onSelec
                      selectedScreener?.sentiment === 'bullish' ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" : "bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.5)]"
                    )} />
                    <h3 className="text-sm font-black text-white uppercase tracking-wider italic">
-                     {selectedScreener?.name} <span className="text-slate-500 font-bold not-italic ml-2">({filteredStocks.length} Results)</span>
+                     {selectedScreener?.name} <span className="text-zinc-500 font-bold not-italic ml-2">({filteredStocks.length} Results)</span>
                    </h3>
                  </div>
                  <div className="relative w-48 hidden md:block">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-500" />
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3 h-3 text-zinc-500" />
                     <input 
                       type="text" 
                       placeholder="FILTER STOCKS..."
                       value={stockSearchQuery}
                       onChange={(e) => setStockSearchQuery(e.target.value)}
-                      className="w-full bg-slate-900/50 border border-slate-800 rounded-full pl-9 pr-4 py-1.5 text-[8px] font-bold text-white placeholder:text-slate-600 focus:outline-none focus:border-amber-500/50"
+                      className="w-full bg-[#141416]/80 border border-white/[0.07] rounded-full pl-9 pr-4 py-1.5 text-[8px] font-bold text-white placeholder:text-zinc-600 focus:outline-none focus:border-amber-500/50"
                     />
                  </div>
               </div>
@@ -325,8 +325,8 @@ const TrendlyneScreenerPanel: React.FC<TrendlyneScreenerPanelProps> = ({ onSelec
                     key={`${stock.stockId}-${stock.screenerName}`}
                     onClick={() => nseSymbol && onSelectStock && onSelectStock(nseSymbol)}
                     className={cn(
-                      "bg-slate-950/40 border rounded-xl p-4 transition-all hover:shadow-2xl hover:translate-y-[-2px] group relative overflow-hidden",
-                      nseSymbol && onSelectStock ? "cursor-pointer border-slate-800 hover:border-amber-500/40" : "border-slate-800"
+                      "bg-[#0c0c0e]/40 border rounded-xl p-4 transition-all hover:shadow-2xl hover:translate-y-[-2px] group relative overflow-hidden",
+                      nseSymbol && onSelectStock ? "cursor-pointer border-white/[0.07] hover:border-amber-500/40" : "border-white/[0.07]"
                     )}
                   >
                     <div className="flex items-start justify-between mb-3">
@@ -335,8 +335,8 @@ const TrendlyneScreenerPanel: React.FC<TrendlyneScreenerPanelProps> = ({ onSelec
                           {stock.name}
                         </h3>
                         <div className="flex items-center gap-2 mt-1.5">
-                           <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">{nseSymbol || '—'}</span>
-                           <span className="w-1 h-1 rounded-full bg-slate-800" />
+                           <span className="text-[8px] font-black text-zinc-500 uppercase tracking-widest">{nseSymbol || '—'}</span>
+                           <span className="w-1 h-1 rounded-full bg-white/[0.08]" />
                            <span className={cn(
                              "text-[8px] font-black uppercase px-1.5 py-0.5 rounded",
                              stock.score >= 70 ? "text-emerald-400 bg-emerald-500/10" : "text-amber-400 bg-amber-500/10"
@@ -375,34 +375,34 @@ const TrendlyneScreenerPanel: React.FC<TrendlyneScreenerPanelProps> = ({ onSelec
                     </div>
 
                     <div className="grid grid-cols-2 gap-2 mb-3">
-                      <div className="bg-slate-900/50 p-2 rounded-lg border border-slate-800/30">
-                        <p className="text-[6px] font-black text-slate-600 uppercase mb-0.5 tracking-widest">LTP</p>
+                      <div className="bg-[#141416]/80 p-2 rounded-lg border border-white/[0.04]">
+                        <p className="text-[6px] font-black text-zinc-600 uppercase mb-0.5 tracking-widest">LTP</p>
                         <p className="text-[12px] font-black text-white italic leading-none">₹{stock.ltp.toLocaleString()}</p>
                       </div>
-                      <div className={cn("p-2 rounded-lg border border-slate-800/30", stock.changePercent >= 0 ? "bg-emerald-500/5" : "bg-rose-500/5")}>
-                        <p className="text-[6px] font-black text-slate-600 uppercase mb-0.5 tracking-widest">24H</p>
+                      <div className={cn("p-2 rounded-lg border border-white/[0.04]", stock.changePercent >= 0 ? "bg-emerald-500/5" : "bg-rose-500/5")}>
+                        <p className="text-[6px] font-black text-zinc-600 uppercase mb-0.5 tracking-widest">24H</p>
                         <p className={cn("text-[12px] font-black italic leading-none", stock.changePercent >= 0 ? "text-emerald-400" : "text-rose-400")}>
                           {stock.changePercent >= 0 ? '+' : ''}{stock.changePercent.toFixed(2)}%
                         </p>
                       </div>
                     </div>
 
-                    <div className="flex items-center justify-between border-t border-slate-800/50 pt-3">
+                    <div className="flex items-center justify-between border-t border-white/[0.05] pt-3">
                        <div className="flex gap-3">
                           <div className="flex flex-col">
-                            <span className="text-[6px] font-black text-slate-600 uppercase">1W</span>
+                            <span className="text-[6px] font-black text-zinc-600 uppercase">1W</span>
                             <span className={cn("text-[9px] font-black italic", (stock.return_1w || 0) >= 0 ? "text-emerald-500" : "text-rose-500")}>
                               {stock.return_1w != null ? `${stock.return_1w.toFixed(1)}%` : '—'}
                             </span>
                           </div>
                           <div className="flex flex-col">
-                            <span className="text-[6px] font-black text-slate-600 uppercase">1M</span>
+                            <span className="text-[6px] font-black text-zinc-600 uppercase">1M</span>
                             <span className={cn("text-[9px] font-black italic", (stock.return_1m || 0) >= 0 ? "text-emerald-500" : "text-rose-500")}>
                               {stock.return_1m != null ? `${stock.return_1m.toFixed(1)}%` : '—'}
                             </span>
                           </div>
                        </div>
-                       <ChevronRight className="w-3 h-3 text-slate-700 group-hover:text-amber-500 transition-colors" />
+                       <ChevronRight className="w-3 h-3 text-zinc-700 group-hover:text-amber-500 transition-colors" />
                     </div>
                   </div>
                   );
@@ -413,7 +413,7 @@ const TrendlyneScreenerPanel: React.FC<TrendlyneScreenerPanelProps> = ({ onSelec
 
           {/* Quick Select Grid (Now at Bottom) */}
           <div className="space-y-4">
-            <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] px-2">Quick Directory</h4>
+            <h4 className="text-[10px] font-black text-zinc-500 uppercase tracking-[0.3em] px-2">Quick Directory</h4>
             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
               {filteredCategories.map((screener) => (
                 <button
@@ -423,8 +423,8 @@ const TrendlyneScreenerPanel: React.FC<TrendlyneScreenerPanelProps> = ({ onSelec
                     "p-3 rounded-xl border transition-all relative overflow-hidden group text-left",
                     screener.sentiment === 'bullish' ? "border-green-500/30" : screener.sentiment === 'bearish' ? "border-red-500/30" : "border-yellow-500/30",
                     selectedScreener?.id === screener.id
-                      ? "bg-slate-800/80 shadow-lg border-amber-500/50"
-                      : "bg-slate-900/50 hover:bg-slate-800/50"
+                      ? "bg-white/[0.08]/80 shadow-lg border-amber-500/50"
+                      : "bg-[#141416]/80 hover:bg-white/[0.08]/50"
                   )}
                 >
                   <div className="relative z-10">
@@ -445,18 +445,18 @@ const TrendlyneScreenerPanel: React.FC<TrendlyneScreenerPanelProps> = ({ onSelec
 
           {/* Loading State */}
           {isLoading && (
-            <div className="flex flex-col items-center justify-center py-20 bg-slate-900/30 rounded-2xl border border-dashed border-slate-800">
+            <div className="flex flex-col items-center justify-center py-20 bg-[#141416]/50 rounded-2xl border border-dashed border-white/[0.07]">
               <Loader className="w-10 h-10 text-amber-500 animate-spin mb-4" />
-              <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Compiling live results...</p>
+              <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Compiling live results...</p>
             </div>
           )}
 
           {/* No Results */}
           {!isLoading && filteredStocks.length === 0 && (
-            <div className="bg-slate-900/30 border border-dashed border-slate-800 rounded-2xl p-12 text-center">
-              <AlertCircle className="w-12 h-12 text-slate-700 mx-auto mb-4" />
-              <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em]">Select a scan to view results</p>
-              <p className="text-[9px] font-bold text-slate-600 mt-2 uppercase tracking-widest">
+            <div className="bg-[#141416]/50 border border-dashed border-white/[0.07] rounded-2xl p-12 text-center">
+              <AlertCircle className="w-12 h-12 text-zinc-700 mx-auto mb-4" />
+              <p className="text-[11px] font-black text-zinc-400 uppercase tracking-[0.2em]">Select a scan to view results</p>
+              <p className="text-[9px] font-bold text-zinc-600 mt-2 uppercase tracking-widest">
                 Data will be fetched in real-time from Trendlyne
               </p>
             </div>
@@ -472,7 +472,7 @@ const TrendlyneScreenerPanel: React.FC<TrendlyneScreenerPanelProps> = ({ onSelec
                 setActiveTab('screeners');
               }}
               className={cn(
-                "bg-slate-900/50 border rounded-2xl p-6 hover:bg-slate-800/50 transition-all cursor-pointer group relative",
+                "bg-[#141416]/80 border rounded-2xl p-6 hover:bg-white/[0.08]/50 transition-all cursor-pointer group relative",
                 screener.sentiment === 'bullish' ? "border-green-500" :
                 screener.sentiment === 'bearish' ? "border-red-500" :
                 "border-yellow-500"
@@ -493,31 +493,31 @@ const TrendlyneScreenerPanel: React.FC<TrendlyneScreenerPanelProps> = ({ onSelec
                     )}>
                       {screener.sentiment}
                     </span>
-                    <span className="px-2 py-0.5 bg-slate-800 rounded text-[8px] font-black text-slate-500 uppercase tracking-widest border border-slate-700">
+                    <span className="px-2 py-0.5 bg-white/[0.08] rounded text-[8px] font-black text-zinc-500 uppercase tracking-widest border border-white/[0.1]">
                       {screener.category}
                     </span>
                  </div>
-                 <span className="text-[8px] font-black text-slate-600 uppercase tracking-widest">{screener.timeframe}</span>
+                 <span className="text-[8px] font-black text-zinc-600 uppercase tracking-widest">{screener.timeframe}</span>
               </div>
 
               <h3 className="font-black text-white text-base mb-2 uppercase italic group-hover:text-amber-400 transition-colors break-words whitespace-normal">{screener.name}</h3>
-              <p className="text-[11px] font-bold text-slate-500 leading-relaxed line-clamp-2">{screener.description}</p>
+              <p className="text-[11px] font-bold text-zinc-500 leading-relaxed line-clamp-2">{screener.description}</p>
               
               {screener.confidence && (
                 <div className="mt-3 flex items-center gap-2">
-                  <div className="flex-1 h-1 bg-slate-800 rounded-full overflow-hidden">
+                  <div className="flex-1 h-1 bg-white/[0.08] rounded-full overflow-hidden">
                     <div 
                       className="h-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.5)]" 
                       style={{ width: `${screener.confidence * 100}%` }} 
                     />
                   </div>
-                  <span className="text-[8px] font-black text-blue-400 uppercase tracking-widest">AI {Math.round(screener.confidence * 100)}%</span>
+                  <span className="text-[8px] font-black text-violet-400 uppercase tracking-widest">AI {Math.round(screener.confidence * 100)}%</span>
                 </div>
               )}
               
-              <div className="mt-4 pt-4 border-t border-slate-800 flex items-center justify-between">
+              <div className="mt-4 pt-4 border-t border-white/[0.07] flex items-center justify-between">
                  <span className="text-[9px] font-black text-amber-500/80 uppercase tracking-widest">Execute Scan</span>
-                 <ChevronRight className="w-4 h-4 text-slate-700 group-hover:text-amber-500 transition-all group-hover:translate-x-1" />
+                 <ChevronRight className="w-4 h-4 text-zinc-700 group-hover:text-amber-500 transition-all group-hover:translate-x-1" />
               </div>
             </div>
           ))}
@@ -525,15 +525,15 @@ const TrendlyneScreenerPanel: React.FC<TrendlyneScreenerPanelProps> = ({ onSelec
       )}
 
       {/* Footer Info */}
-      <div className="mt-12 p-6 bg-slate-900/50 border border-slate-800 rounded-2xl">
+      <div className="mt-12 p-6 bg-[#141416]/80 border border-white/[0.07] rounded-2xl">
          <div className="flex flex-col md:flex-row items-center justify-between gap-6">
             <div className="flex items-center gap-4">
-               <div className="p-3 bg-slate-800 rounded-xl">
-                  <AlertCircle className="w-5 h-5 text-slate-500" />
+               <div className="p-3 bg-white/[0.08] rounded-xl">
+                  <AlertCircle className="w-5 h-5 text-zinc-500" />
                </div>
                <div>
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Intelligence Network</p>
-                  <p className="text-[9px] font-bold text-slate-600 uppercase tracking-wider mt-1">
+                  <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Intelligence Network</p>
+                  <p className="text-[9px] font-bold text-zinc-600 uppercase tracking-wider mt-1">
                     Powered by Trendlyne & Moneycontrol APIs • Database Optimized
                   </p>
                </div>
@@ -541,14 +541,14 @@ const TrendlyneScreenerPanel: React.FC<TrendlyneScreenerPanelProps> = ({ onSelec
             <div className="flex gap-4">
                <div className="text-right">
                   <p className="text-xl font-black text-white tabular-nums italic">{categories.length}</p>
-                  <p className="text-[8px] font-black text-slate-600 uppercase tracking-[0.2em]">Total Screeners</p>
+                  <p className="text-[8px] font-black text-zinc-600 uppercase tracking-[0.2em]">Total Screeners</p>
                </div>
-               <div className="w-px h-10 bg-slate-800" />
+               <div className="w-px h-10 bg-white/[0.08]" />
                <div className="text-right">
                   <p className="text-xl font-black text-amber-500 tabular-nums italic">
                      {categories.filter(c => c.sentiment === 'bullish').length}
                   </p>
-                  <p className="text-[8px] font-black text-slate-600 uppercase tracking-[0.2em]">Bullish Scans</p>
+                  <p className="text-[8px] font-black text-zinc-600 uppercase tracking-[0.2em]">Bullish Scans</p>
                </div>
             </div>
          </div>

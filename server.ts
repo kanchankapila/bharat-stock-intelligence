@@ -175,9 +175,17 @@ async function startServer() {
       await syncMoneyControlScreeners();
     }, 12 * 60 * 60 * 1000);
 
+    // Fallback for news sentiment cycle: run every 15 minutes
+    const { runNewsSentimentCycle } = await import('./src/server/newsSentimentService');
+    setInterval(async () => {
+      console.log('[FALLBACK] Triggering scheduled news sentiment refresh...');
+      await runNewsSentimentCycle().catch(console.error);
+    }, 15 * 60 * 1000);
+
     // Trigger immediate sync on start if fallback
     syncAndScore();
     import('./src/server/moneycontrolScreener').then(m => m.syncMoneyControlScreeners());
+    runNewsSentimentCycle().catch(console.error);
   }
 
   // Background job for signal accuracy tracking (Phase 4)

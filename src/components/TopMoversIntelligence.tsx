@@ -26,7 +26,7 @@ export const TopMoversIntelligence: React.FC<TopMoversIntelligenceProps> = ({ on
         >
           <div>
             <p className="text-white font-semibold text-[11px] tracking-tight uppercase">{stock.symbol_name}</p>
-            <p className="text-slate-500 text-[9px] tracking-wide">
+            <p className="text-zinc-500 text-[9px] tracking-wide">
               Vol: {stock.today_volume ? `${(stock.today_volume / 1000000).toFixed(1)}M` : '—'}
             </p>
           </div>
@@ -48,7 +48,7 @@ export const TopMoversIntelligence: React.FC<TopMoversIntelligenceProps> = ({ on
     return (
       <div className="col-span-12 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {[1, 2, 3, 4].map(i => (
-          <div key={i} className="h-40 bg-slate-900/50 animate-pulse rounded-2xl border border-slate-800" />
+          <div key={i} className="h-40 bg-[#141416]/80 animate-pulse rounded-2xl border border-white/[0.07]" />
         ))}
       </div>
     );
@@ -72,11 +72,11 @@ export const TopMoversIntelligence: React.FC<TopMoversIntelligenceProps> = ({ on
             <Trophy className="w-5 h-5 text-amber-500 fill-amber-500/20" />
             Top Movers
           </h2>
-          <p className="text-xs text-slate-500 mt-1">Real-time market activity and setup detection</p>
+          <p className="text-xs text-zinc-500 mt-1">Real-time market activity and setup detection</p>
         </div>
-        <div className="flex items-center gap-2 px-3 py-1 bg-slate-900/60 border border-white/[0.08] rounded-full backdrop-blur-sm">
+        <div className="flex items-center gap-2 px-3 py-1 bg-[#141416]/60 border border-white/[0.08] rounded-full backdrop-blur-sm">
            <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-           <span className="text-[9px] font-semibold text-slate-400 uppercase tracking-widest">Live NSE</span>
+           <span className="text-[9px] font-semibold text-zinc-400 uppercase tracking-widest">Live NSE</span>
         </div>
       </div>
 
@@ -86,7 +86,7 @@ export const TopMoversIntelligence: React.FC<TopMoversIntelligenceProps> = ({ on
             {renderMoversList(section.data, section.color)}
             {section.data.length === 0 && (
               <div className="py-8 text-center">
-                <p className="text-slate-600 text-[10px] font-bold uppercase tracking-widest italic">No data detected</p>
+                <p className="text-zinc-600 text-[10px] font-bold uppercase tracking-widest italic">No data detected</p>
               </div>
             )}
           </Card>

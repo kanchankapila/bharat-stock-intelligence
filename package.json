@@ -27,7 +27,6 @@
     "date-fns": "^4.1.0",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
-    "firebase": "^12.12.1",
     "ioredis": "^5.10.1",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",

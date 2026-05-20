@@ -14,13 +14,17 @@ export class Semaphore {
     return this.tasks.length;
   }
 
-  async acquire() {
+  async acquire(priority = false) {
     return new Promise<void>((resolve) => {
       if (this._count > 0) {
         this._count--;
         resolve();
       } else {
-        this.tasks.push(resolve);
+        if (priority) {
+          this.tasks.unshift(resolve); // Jump the line!
+        } else {
+          this.tasks.push(resolve);
+        }
       }
     });
   }
@@ -35,7 +39,7 @@ export class Semaphore {
   }
 
   async run<T>(task: () => Promise<T>): Promise<T> {
-    await this.acquire();
+    await this.acquire(false);
     try {
       return await task();
     } finally {
@@ -44,22 +48,15 @@ export class Semaphore {
   }
 
   /**
-   * Run a task immediately if the semaphore has slots, 
-   * otherwise run it without waiting for acquisition.
-   * Useful for high-priority or cached operations.
+   * Run a high-priority task. Always acquires the lock to keep concurrency strictly
+   * within bounds, but jumps to the front of the queue to ensure low latency.
    */
   async runPriority<T>(task: () => Promise<T>): Promise<T> {
-    const hasSlot = this._count > 0;
-    if (hasSlot) {
-      await this.acquire();
-      try {
-        return await task();
-      } finally {
-        this.release();
-      }
-    } else {
-      // Just run it - we don't want to block the entire pipeline if the semaphore is full
+    await this.acquire(true); // Enforce strict lock, but jump to the front of the waitlist!
+    try {
       return await task();
+    } finally {
+      this.release();
     }
   }
 }

@@ -20,6 +20,7 @@ export interface FnOResponse {
     oiTrend: string;
     ivRank: number;
     ivPercentile: number;
+    ivSkew?: number;
   };
   error?: string;
 }
@@ -31,7 +32,7 @@ export async function getFnOSignals(query: string): Promise<FnOResponse> {
       return { 
         success: false, 
         signals: [], 
-        marketSentiment: { pcr: 0, maxPain: 0, oiTrend: '', ivRank: 0, ivPercentile: 0 }, 
+        marketSentiment: { pcr: 0, maxPain: 0, oiTrend: '', ivRank: 0, ivPercentile: 0, ivSkew: 0 }, 
         error: 'Stock mapping not found' 
       };
     }
@@ -41,7 +42,7 @@ export async function getFnOSignals(query: string): Promise<FnOResponse> {
       return {
         success: false,
         signals: [],
-        marketSentiment: { pcr: 0, maxPain: 0, oiTrend: '', ivRank: 0, ivPercentile: 0 },
+        marketSentiment: { pcr: 0, maxPain: 0, oiTrend: '', ivRank: 0, ivPercentile: 0, ivSkew: 0 },
         error: 'Failed to fetch real-time option chain'
       };
     }
@@ -103,9 +104,45 @@ export async function getFnOSignals(query: string): Promise<FnOResponse> {
       });
     }
 
-    // 2. High OI Resistance/Support
+    // 2. High OI Resistance/Support & Statistical OI Density Clustering
     const sortedByCallOi = [...chain].sort((a, b) => b.callOi - a.callOi);
     const sortedByPutOi = [...chain].sort((a, b) => b.putOi - a.putOi);
+
+    const callOis = chain.map((r: any) => r.callOi).filter((v: any) => v > 0);
+    const putOis = chain.map((r: any) => r.putOi).filter((v: any) => v > 0);
+
+    if (callOis.length > 2 && putOis.length > 2) {
+      const avgCallOi = callOis.reduce((a, b) => a + b, 0) / callOis.length;
+      const avgPutOi = putOis.reduce((a, b) => a + b, 0) / putOis.length;
+
+      const stdDevCall = Math.sqrt(callOis.reduce((acc, val) => acc + Math.pow(val - avgCallOi, 2), 0) / callOis.length);
+      const stdDevPut = Math.sqrt(putOis.reduce((acc, val) => acc + Math.pow(val - avgPutOi, 2), 0) / putOis.length);
+
+      const callOiThreshold = avgCallOi + 1.2 * stdDevCall;
+      const putOiThreshold = avgPutOi + 1.2 * stdDevPut;
+
+      const callClusters = chain.filter((r: any) => r.callOi > callOiThreshold).map((r: any) => r.strikePrice).sort((a, b) => a - b);
+      const putClusters = chain.filter((r: any) => r.putOi > putOiThreshold).map((r: any) => r.strikePrice).sort((a, b) => a - b);
+
+      if (callClusters.length > 1) {
+        signals.push({
+          type: 'OI_SPIKE',
+          sentiment: 'bearish',
+          value: `Resistance Zone: ₹${callClusters[0]} - ₹${callClusters[callClusters.length - 1]}`,
+          description: `OI Density Clustering shows an overhead resistance zone between ₹${callClusters[0]} and ₹${callClusters[callClusters.length - 1]} with heavily concentrated call writing. A breakout above this zone will trigger aggressive short-covering.`,
+          confidence: 'high'
+        });
+      }
+      if (putClusters.length > 1) {
+        signals.push({
+          type: 'OI_SPIKE',
+          sentiment: 'bullish',
+          value: `Support Zone: ₹${putClusters[0]} - ₹${putClusters[putClusters.length - 1]}`,
+          description: `OI Density Clustering shows a strong support zone between ₹${putClusters[0]} and ₹${putClusters[putClusters.length - 1]} backed by major put writing clusters.`,
+          confidence: 'high'
+        });
+      }
+    }
 
     if (sortedByCallOi[0]) {
       signals.push({
@@ -166,7 +203,8 @@ export async function getFnOSignals(query: string): Promise<FnOResponse> {
         maxPain,
         oiTrend: allCounts[0]?.name || 'Neutral',
         ivRank: sentiment.ivRank,
-        ivPercentile: sentiment.ivPercentile
+        ivPercentile: sentiment.ivPercentile,
+        ivSkew: sentiment.ivSkew ?? 0
       }
     };
   } catch (error) {
@@ -174,7 +212,7 @@ export async function getFnOSignals(query: string): Promise<FnOResponse> {
     return {
       success: false,
       signals: [],
-      marketSentiment: { pcr: 0, maxPain: 0, oiTrend: '', ivRank: 0, ivPercentile: 0 },
+      marketSentiment: { pcr: 0, maxPain: 0, oiTrend: '', ivRank: 0, ivPercentile: 0, ivSkew: 0 },
       error: error instanceof Error ? error.message : 'Unknown error'
     };
   }
