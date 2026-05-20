@@ -63,7 +63,6 @@ import { fetchOptionChain, fetchFnoSymbols } from "./optionChainService";
 import { fetchTopMovers } from "./topMoversService";
 import { enqueueAISignals, getAIQueueStats } from "./queues";
 import { fetchGlobalMarketData } from "./globalMarketService";
-import { getScreenerUniverse, getWatchlistedSymbols, INDEX_SYMBOLS } from "./screenerUniverse";
 
 const t = initTRPC.create({
   transformer: superjson,
@@ -204,33 +203,12 @@ export const appRouter = router({
       stockData: z.record(z.string(), z.unknown()),
     })))
     .mutation(async ({ input }) => {
-      const { tier1, tier2 } = getScreenerUniverse();
-      const watchlisted = getWatchlistedSymbols();
-      const hasUniverse = tier1.size + tier2.size > 0;
-      // When screeners are populated, limit AI analysis to screener stocks + user watchlist.
-      // Fall back to full input when screeners haven't been synced yet.
-      const filtered = hasUniverse
-        ? input.filter(s => tier1.has(s.symbol) || tier2.has(s.symbol) || watchlisted.has(s.symbol))
-        : input;
-      return await enqueueAISignals(filtered);
+      return await enqueueAISignals(input);
     }),
 
   // Real-time BullMQ queue stats for progress tracking
   getQueueStats: publicProcedure.query(async () => {
     return await getAIQueueStats();
-  }),
-
-  // Returns the tiered screener universe so the frontend can show which stocks
-  // are in scope for full vs. technical-only scoring.
-  getScreenerUniverse: publicProcedure.query(() => {
-    const { tier1, tier2, counts } = getScreenerUniverse();
-    return {
-      tier1: [...tier1].sort(),
-      tier2: [...tier2].sort(),
-      indices: [...INDEX_SYMBOLS].sort(),
-      total: tier1.size + tier2.size,
-      counts: Object.fromEntries(counts),
-    };
   }),
 
   // ── Fundamentals sync ─────────────────────────────────────────────────────
@@ -618,88 +596,6 @@ export const appRouter = router({
         });
       });
     }),
-
-  getSignalTypeWeights: publicProcedure
-    .input(z.object({
-      regime:     z.string().optional(),
-      signalType: z.string().optional(),
-    }).optional())
-    .query(({ input }) => {
-      let query = `SELECT signal_type, regime, sector, weight, sample_count, last_updated
-                   FROM signal_type_weights`;
-      const params: string[] = [];
-      const conditions: string[] = [];
-      if (input?.regime) {
-        conditions.push('regime = ?');
-        params.push(input.regime);
-      }
-      if (input?.signalType) {
-        conditions.push('signal_type = ?');
-        params.push(input.signalType);
-      }
-      if (conditions.length) query += ` WHERE ${conditions.join(' AND ')}`;
-      query += ' ORDER BY signal_type, regime, sector';
-      return db.prepare(query).all(...params);
-    }),
-
-  getRLPolicy: publicProcedure.query(() => {
-    const rows = db.prepare(`
-      SELECT state_key, action, q_value, visit_count, last_updated
-      FROM rl_q_table
-      ORDER BY state_key, q_value DESC
-    `).all() as { state_key: string; action: string; q_value: number; visit_count: number; last_updated: string }[];
-
-    const policy: Record<string, { action: string; q_value: number; visit_count: number }> = {};
-    for (const row of rows) {
-      if (!policy[row.state_key]) {
-        policy[row.state_key] = {
-          action:      row.action,
-          q_value:     row.q_value,
-          visit_count: row.visit_count,
-        };
-      }
-    }
-
-    const epsilon = (db.prepare(
-      `SELECT value FROM app_settings WHERE key='rl_epsilon'`
-    ).get() as { value: string } | undefined)?.value ?? '0.30';
-
-    return { policy, epsilon: parseFloat(epsilon), total_states: Object.keys(policy).length };
-  }),
-
-  getRLEpisodeHistory: publicProcedure
-    .input(z.object({ days: z.number().min(1).max(90).default(30) }).optional())
-    .query(({ input }) => {
-      const cutoff = new Date();
-      cutoff.setDate(cutoff.getDate() - (input?.days ?? 30));
-      const cutoffStr = cutoff.toISOString().slice(0, 10);
-      return db.prepare(`
-        SELECT id, date, state_key, action_taken, reward, epsilon
-        FROM rl_episodes
-        WHERE date >= ?
-        ORDER BY id DESC
-        LIMIT 500
-      `).all(cutoffStr);
-    }),
-
-  getBacktestOptimization: publicProcedure.query(() => {
-    const keys = [
-      'optimal_min_score', 'optimal_horizon_days',
-      'optimal_stop_loss_pct', 'optimal_sharpe', 'optimal_max_positions',
-      'optimal_category_weights', 'optimal_source_weights',
-    ];
-    const rows = db.prepare(`
-      SELECT key, value, updatedAt FROM app_settings
-      WHERE key IN (${keys.map(() => '?').join(',')})
-    `).all(...keys) as { key: string; value: string; updatedAt: string }[];
-
-    const result: Record<string, string | number | null> = {};
-    for (const row of rows) {
-      const num = parseFloat(row.value);
-      result[row.key] = isNaN(num) ? row.value : num;
-    }
-    return { params: result };
-  }),
 
   // ── News Sentiment ────────────────────────────────────────────────────────
 
@@ -1647,17 +1543,9 @@ export const appRouter = router({
       const { execFile } = await import('child_process');
       const path = await import('path');
       
-      let cleanSymbol = input.symbol;
-      let cleanExchange = input.exchange;
-      if (cleanSymbol.includes(':')) {
-        const parts = cleanSymbol.split(':');
-        cleanExchange = parts[0];
-        cleanSymbol = parts[1];
-      }
-      
       return new Promise<any>((resolve, reject) => {
         const scriptPath = path.join(__dirname, 'tv_bridge.py');
-        execFile('python', [scriptPath, 'ta', '--symbol', cleanSymbol, '--exchange', cleanExchange], (error, stdout, stderr) => {
+        execFile('python', [scriptPath, 'ta', '--symbol', input.symbol, '--exchange', input.exchange], (error, stdout, stderr) => {
           if (error) {
             console.error("TV TA Error:", stderr);
             return resolve({ error: stderr });
@@ -2090,283 +1978,6 @@ export const appRouter = router({
     .mutation(({ input }) => {
       db.prepare('DELETE FROM todos WHERE id = ?').run(input.id);
       return { success: true };
-    }),
-
-  // ─── WATCHLIST ALERTS PROCEDURES ───────────────────────────────────────────
-  createWatchlistAlert: publicProcedure
-    .input(z.object({
-      userId: z.string().default('default_user'),
-      symbol: z.string().min(1),
-      indicator: z.enum(['PRICE', 'RSI', 'SMA200']),
-      operator: z.enum(['GREATER_THAN', 'LESS_THAN', 'CROSSES_ABOVE', 'CROSSES_BELOW']),
-      value: z.number(),
-    }))
-    .mutation(({ input }) => {
-      console.log('[ROUTER] Registering watchlist alert:', input);
-      const stmt = db.prepare(`
-        INSERT INTO watchlist_alerts (userId, symbol, indicator, operator, value)
-        VALUES (?, ?, ?, ?, ?)
-      `);
-      try {
-        const info = stmt.run(input.userId, input.symbol.toUpperCase(), input.indicator, input.operator, input.value);
-        return { success: true, id: info.lastInsertRowid };
-      } catch (error) {
-        console.error('[ROUTER] Error creating alert:', error);
-        throw error;
-      }
-    }),
-
-  listWatchlistAlerts: publicProcedure
-    .input(z.object({
-      userId: z.string().default('default_user'),
-    }))
-    .query(({ input }) => {
-      try {
-        return db.prepare(
-          'SELECT * FROM watchlist_alerts WHERE userId = ? ORDER BY createdAt DESC'
-        ).all(input.userId) as any[];
-      } catch (error) {
-        console.error('[ROUTER] Error listing alerts:', error);
-        return [];
-      }
-    }),
-
-  deleteWatchlistAlert: publicProcedure
-    .input(z.object({ id: z.number() }))
-    .mutation(({ input }) => {
-      db.prepare('DELETE FROM watchlist_alerts WHERE id = ?').run(input.id);
-      return { success: true };
-    }),
-
-  // ─── ML MODEL REGISTRY PROCEDURES ──────────────────────────────────────────
-  registerMLModel: publicProcedure
-    .input(z.object({
-      modelName: z.string(),
-      modelVersion: z.string(),
-      modelType: z.string(),
-      trainingSamples: z.number().optional().default(1000),
-      cvAccuracy: z.number().optional().default(0.85),
-      topFeaturesJson: z.string().optional().default('{}'),
-      isActive: z.number().optional().default(1),
-      notes: z.string().optional(),
-    }))
-    .mutation(({ input }) => {
-      console.log('[ROUTER] Registering ML model run:', input);
-      const stmt = db.prepare(`
-        INSERT INTO model_registry (model_name, model_version, model_type, training_samples, cv_accuracy, top_features_json, is_active, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `);
-      try {
-        const info = stmt.run(
-          input.modelName,
-          input.modelVersion,
-          input.modelType,
-          input.trainingSamples,
-          input.cvAccuracy,
-          input.topFeaturesJson,
-          input.isActive,
-          input.notes || null
-        );
-        return { success: true, id: info.lastInsertRowid };
-      } catch (error) {
-        console.error('[ROUTER] Error registering ML model:', error);
-        throw error;
-      }
-    }),
-
-  getMLModels: publicProcedure
-    .query(() => {
-      try {
-        return db.prepare('SELECT * FROM model_registry ORDER BY trained_at DESC').all() as any[];
-      } catch (error) {
-        console.error('[ROUTER] Error listing models:', error);
-        return [];
-      }
-    }),
-
-  // ─── SMART MONEY FLOW PROCEDURES ───────────────────────────────────────────
-  syncSmartMoney: publicProcedure
-    .mutation(async () => {
-      const { syncSmartMoneyFlows } = await import('./smartMoneyService');
-      return await syncSmartMoneyFlows();
-    }),
-
-  getBulkDealsData: publicProcedure
-    .input(z.object({ symbol: z.string().optional() }))
-    .query(async ({ input }) => {
-      const { getTopBulkDeals } = await import('./smartMoneyService');
-      return getTopBulkDeals(input.symbol);
-    }),
-
-  getInsiderTradesData: publicProcedure
-    .input(z.object({ symbol: z.string().optional() }))
-    .query(async ({ input }) => {
-      const { getInsiderTrades } = await import('./smartMoneyService');
-      return getInsiderTrades(input.symbol);
-    }),
-
-  getSmartMoneyDashboardData: publicProcedure
-    .query(async () => {
-      const { getSmartMoneyDashboard } = await import('./smartMoneyService');
-      return getSmartMoneyDashboard();
-    }),
-
-  getTradeDecisionCockpitData: publicProcedure
-    .query(async () => {
-      // 1. Fetch nse_stocks to map company names
-      const stocksList = db.prepare("SELECT symbol, name FROM nse_stocks").all() as any[];
-      const nameMap = new Map(stocksList.map(s => [s.symbol, s.name]));
-
-      // 2. Fetch technical signals
-      const techSignals = db.prepare(`
-        SELECT symbol, signals_json, signal_score, rsi, cmp, change_pct, win_probability, computed_at
-        FROM technical_signals
-        WHERE computed_at >= date('now', '-7 days')
-      `).all() as any[];
-
-      // 3. Fetch quant scores
-      const quantScores = db.prepare(`
-        SELECT symbol, rank_composite, composite_class, trailing_pe, momentum_score
-        FROM quant_scores
-      `).all() as any[];
-      const quantMap = new Map(quantScores.map(q => [q.symbol, q]));
-
-      // 4. Fetch smart money sums (last 30 days)
-      const bulkDeals = db.prepare(`
-        SELECT symbol, SUM(CASE WHEN dealType = 'BUY' THEN valueCr ELSE -valueCr END) as net_fii
-        FROM bulk_deals
-        WHERE date >= date('now', '-30 days')
-        GROUP BY symbol
-      `).all() as any[];
-      const fiiMap = new Map(bulkDeals.map(b => [b.symbol, b.net_fii]));
-
-      const insiderTrades = db.prepare(`
-        SELECT symbol, SUM(CASE WHEN typeOfTransaction = 'Acquisition' THEN valueInr ELSE -valueInr END) as net_insider
-        FROM insider_trades
-        WHERE date >= date('now', '-30 days')
-        GROUP BY symbol
-      `).all() as any[];
-      const insiderMap = new Map(insiderTrades.map(i => [i.symbol, i.net_insider]));
-
-      // 5. Fetch news sentiments
-      const newsSentiments = db.prepare(`
-        SELECT symbols_json, AVG(sentiment_score) as avg_sentiment
-        FROM news_sentiment_items
-        WHERE fetched_at >= date('now', '-7 days')
-        GROUP BY symbols_json
-      `).all() as any[];
-      
-      const newsSentimentMap = new Map<string, number>();
-      for (const item of newsSentiments) {
-        try {
-          const syms = JSON.parse(item.symbols_json || '[]');
-          for (const s of syms) {
-            newsSentimentMap.set(s, (newsSentimentMap.get(s) || 0) + item.avg_sentiment);
-          }
-        } catch(e) {}
-      }
-
-      // 6. Aggregate multi-factor cockpit candidates
-      const candidates: any[] = [];
-      let totalWinProb = 0;
-      let ratedWinProbCount = 0;
-
-      for (const sig of techSignals) {
-        const symbol = sig.symbol;
-        const name = nameMap.get(symbol) || symbol;
-        const quant = quantMap.get(symbol);
-        const netFii = fiiMap.get(symbol) || 0;
-        const netInsider = insiderMap.get(symbol) || 0;
-        const newsSentiment = newsSentimentMap.get(symbol) || 0;
-
-        // Default or calculate ML Win Probability
-        let winProb = sig.win_probability;
-        if (winProb === null || winProb === undefined) {
-          // fallback mock-predict using technical/fundamental strength
-          winProb = 0.50 + (sig.signal_score || 5) * 0.012 + (newsSentiment * 0.04);
-          winProb = Math.min(Math.max(winProb, 0.45), 0.72);
-        }
-
-        totalWinProb += (winProb * 100);
-        ratedWinProbCount++;
-
-        // Composite scoring (0-100 scale)
-        const quantRank = quant ? quant.rank_composite : 50; // lower composite rank is better (1 is best)
-        const fundamentalFactor = Math.max(0, 100 - quantRank); // invert so higher is better
-        const technicalFactor = Math.min(100, (sig.signal_score || 5) * 10);
-        const sentimentFactor = 50 + (newsSentiment * 50); // scale -1..1 to 0..100
-        const smartMoneyFactor = Math.min(100, Math.max(0, 50 + (netFii * 5) + (netInsider / 10_000_000)));
-
-        const compositeScore = Math.round(
-          (winProb * 100 * 0.3) +
-          (fundamentalFactor * 0.25) +
-          (technicalFactor * 0.2) +
-          (smartMoneyFactor * 0.15) +
-          (sentimentFactor * 0.1)
-        );
-
-        // Parse technical signals count
-        let techCount = 1;
-        try {
-          techCount = JSON.parse(sig.signals_json || '[]').length;
-        } catch(e) {}
-
-        let actionAdvice = 'NO TRADE';
-        if (compositeScore >= 75) actionAdvice = 'STRONG BUY';
-        else if (compositeScore >= 70) actionAdvice = 'BUY';
-        else if (compositeScore >= 60) actionAdvice = 'MOMENTUM WATCH';
-
-        candidates.push({
-          symbol,
-          name,
-          cmp: sig.cmp || 0,
-          changePct: sig.change_pct || 0,
-          compositeScore,
-          actionAdvice,
-          techSignalCount: techCount,
-          mlProbability: Math.round(winProb * 100 * 10) / 10,
-          newsSentiment: Math.round(newsSentiment * 10) / 10,
-          smartMoneyCr: Math.round(netFii * 10) / 10,
-          quantRank: Math.round(quantRank * 10) / 10,
-          rsi: sig.rsi || 50,
-        });
-      }
-
-      // Sort by composite trade score descending
-      candidates.sort((a, b) => b.compositeScore - a.compositeScore);
-
-      // 7. Calculate overall market health for Decision Verdict
-      const avgWinProb = ratedWinProbCount > 0 ? (totalWinProb / ratedWinProbCount) : 53;
-      const advancingCount = candidates.filter(c => c.changePct >= 0).length;
-      const decliningCount = candidates.filter(c => c.changePct < 0).length;
-      const advDecRatio = decliningCount > 0 ? (advancingCount / decliningCount) : 1;
-
-      // Determine Trade verdict
-      let verdict = 'NO TRADE';
-      let verdictReason = 'Stale market breadth and low signal quality across scanners.';
-
-      if (advDecRatio >= 1.1 && avgWinProb >= 54) {
-        verdict = 'TRADE';
-        verdictReason = 'High confluence of bullish institutional net accumulation, robust technical breadth, and favorable ML win probabilities.';
-      } else if (advDecRatio < 0.8) {
-        verdictReason = 'Risk-off regime detected. Declines outnumber advances significantly. Conserve capital.';
-      } else {
-        verdictReason = 'Market is consolidating sideways. Selectively scout high-score defensive momentum plays.';
-      }
-
-      return {
-        success: true,
-        data: {
-          marketOverview: {
-            verdict,
-            verdictReason,
-            advDecRatio: Math.round(advDecRatio * 10) / 10,
-            avgWinProbability: Math.round(avgWinProb * 10) / 10,
-            activeSignalsCount: techSignals.length,
-          },
-          candidates: candidates.slice(0, 15),
-        }
-      };
     }),
 });
 

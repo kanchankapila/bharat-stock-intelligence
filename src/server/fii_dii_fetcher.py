@@ -59,45 +59,40 @@ class FiiDiiFetcher:
             print(f"[FiiDii] Fetch error: {e}")
             return []
 
-        by_date = {}
+        records = []
         for row in data:
             try:
                 date_str = self._parse_date(row.get("date", ""))
                 if not date_str:
                     continue
 
-                category = str(row.get("category", "")).upper()
-                buy = self._parse_float(row.get("buyValue"))
-                sell = self._parse_float(row.get("sellValue"))
-                net = self._parse_float(row.get("netValue"))
+                fii_buy  = self._parse_float(row.get("fiiBuy"))
+                fii_sell = self._parse_float(row.get("fiiSell"))
+                fii_net  = self._parse_float(row.get("fiiNet"))
+                dii_buy  = self._parse_float(row.get("diiBuy"))
+                dii_sell = self._parse_float(row.get("diiSell"))
+                dii_net  = self._parse_float(row.get("diiNet"))
 
-                if net is None and buy is not None and sell is not None:
-                    net = buy - sell
+                # Fallback: compute net if not provided
+                if fii_net is None and fii_buy is not None and fii_sell is not None:
+                    fii_net = fii_buy - fii_sell
+                if dii_net is None and dii_buy is not None and dii_sell is not None:
+                    dii_net = dii_buy - dii_sell
 
-                if date_str not in by_date:
-                    by_date[date_str] = {
-                        "date":     date_str,
-                        "fii_buy":  None,
-                        "fii_sell": None,
-                        "fii_net":  None,
-                        "dii_buy":  None,
-                        "dii_sell": None,
-                        "dii_net":  None,
-                        "source":   "NSE",
-                    }
-
-                if "FII" in category:
-                    by_date[date_str]["fii_buy"] = buy
-                    by_date[date_str]["fii_sell"] = sell
-                    by_date[date_str]["fii_net"] = net
-                elif "DII" in category:
-                    by_date[date_str]["dii_buy"] = buy
-                    by_date[date_str]["dii_sell"] = sell
-                    by_date[date_str]["dii_net"] = net
+                records.append({
+                    "date":     date_str,
+                    "fii_buy":  fii_buy,
+                    "fii_sell": fii_sell,
+                    "fii_net":  fii_net,
+                    "dii_buy":  dii_buy,
+                    "dii_sell": dii_sell,
+                    "dii_net":  dii_net,
+                    "source":   "NSE",
+                })
             except Exception as e:
                 print(f"[FiiDii] Row parse error: {e} — row={row}")
 
-        return list(by_date.values())
+        return records
 
     @staticmethod
     def _parse_date(raw: str) -> str | None:

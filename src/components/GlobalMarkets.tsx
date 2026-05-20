@@ -20,7 +20,7 @@ export const GlobalMarkets: React.FC<{ className?: string }> = ({ className }) =
     <Card ref={ref} title="Global Intelligence" icon={Activity} className={cn("h-full", className)}>
       <div className="grid grid-cols-2 gap-3 animate-pulse pt-2">
         {[1, 2, 3, 4, 5, 6].map(i => (
-          <div key={i} className="h-24 bg-white/[0.08]/50 rounded-2xl" />
+          <div key={i} className="h-24 bg-slate-800/50 rounded-2xl" />
         ))}
       </div>
     </Card>
@@ -58,15 +58,15 @@ export const GlobalMarkets: React.FC<{ className?: string }> = ({ className }) =
               animate={{ opacity: 1, scale: 1 }}
               whileHover={{ scale: 1.02, translateY: -2 }}
               className={cn(
-                "p-2 rounded-xl border bg-[#0c0c0e]/50 backdrop-blur-sm transition-all group cursor-default",
+                "p-2 rounded-xl border bg-slate-950/50 backdrop-blur-sm transition-all group cursor-default",
                 isUp ? "border-emerald-500/20 hover:border-emerald-500/40 shadow-[0_0_15px_rgba(16,185,129,0.05)]" : "border-rose-500/20 hover:border-rose-500/40 shadow-[0_0_15px_rgba(244,63,94,0.05)]"
               )}
             >
               <div className="flex justify-between items-start mb-2">
-                <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest truncate pr-2">
+                <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest truncate pr-2">
                   {idx.name}
                 </span>
-                <span className="text-[7px] font-bold text-zinc-700 bg-[#141416] px-1.5 py-0.5 rounded uppercase shrink-0">
+                <span className="text-[7px] font-bold text-slate-700 bg-slate-900 px-1.5 py-0.5 rounded uppercase shrink-0">
                   {idx.region}
                 </span>
               </div>
@@ -88,8 +88,8 @@ export const GlobalMarkets: React.FC<{ className?: string }> = ({ className }) =
           );
         })}
       </div>
-      <div className="mt-2 pt-2 border-t border-white/[0.05]">
-          <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.2em] mb-2 text-center">Extended Market Insight</p>
+      <div className="mt-2 pt-2 border-t border-slate-800/50">
+          <p className="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em] mb-2 text-center">Extended Market Insight</p>
           <GlobalMarketCards />
       </div>
     </Card>

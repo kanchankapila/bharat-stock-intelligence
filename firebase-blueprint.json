@@ -1,0 +1,118 @@
+{
+  "entities": {
+    "Stock": {
+      "title": "Stock",
+      "description": "Master data for a stock.",
+      "type": "object",
+      "properties": {
+        "symbol": { "type": "string" },
+        "name": { "type": "string" },
+        "exchange": { "type": "string" },
+        "sector": { "type": "string" },
+        "industry": { "type": "string" },
+        "marketCap": { "type": "number" },
+        "isNifty50": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["symbol", "name", "exchange"]
+    },
+    "OHLCV": {
+      "title": "OHLCV Data",
+      "description": "Price data for a specific timeframe.",
+      "type": "object",
+      "properties": {
+        "timestamp": { "type": "string", "format": "date-time" },
+        "open": { "type": "number" },
+        "high": { "type": "number" },
+        "low": { "type": "number" },
+        "close": { "type": "number" },
+        "volume": { "type": "number" },
+        "timeframe": { "type": "string" }
+      },
+      "required": ["timestamp", "open", "high", "low", "close", "volume"]
+    },
+    "Signal": {
+      "title": "Trading Signal",
+      "description": "AI-generated trading signal.",
+      "type": "object",
+      "properties": {
+        "stockId": { "type": "string" },
+        "symbol": { "type": "string" },
+        "type": { "type": "string", "enum": ["BUY", "SELL", "HOLD"] },
+        "entry": { "type": "number" },
+        "target": { "type": "number" },
+        "stopLoss": { "type": "number" },
+        "confidence": { "type": "number" },
+        "reasoning": { "type": "string" },
+        "timeframe": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["ACTIVE", "EXPIRED", "COMPLETED"] }
+      },
+      "required": ["stockId", "symbol", "type", "entry", "createdAt"]
+    },
+    "User": {
+      "title": "User",
+      "description": "User profile data.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email"]
+    },
+    "WatchlistItem": {
+      "title": "Watchlist Item",
+      "description": "A stock added to a user's watchlist.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "symbol": { "type": "string" },
+        "stockId": { "type": "string" },
+        "addedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "symbol", "stockId", "addedAt"]
+    },
+    "PortfolioItem": {
+      "title": "Portfolio Item",
+      "description": "A stock held in a user's portfolio.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "symbol": { "type": "string" },
+        "quantity": { "type": "number" },
+        "avgPrice": { "type": "number" },
+        "purchaseDate": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "symbol", "quantity", "avgPrice"]
+    }
+  },
+  "firestore": {
+    "/stocks/{stockId}": {
+      "schema": "Stock",
+      "description": "Collection of stocks."
+    },
+    "/stocks/{stockId}/ohlcv/{ohlcvId}": {
+      "schema": "OHLCV",
+      "description": "Historical price data for a stock."
+    },
+    "/signals/{signalId}": {
+      "schema": "Signal",
+      "description": "Generated AI trading signals."
+    },
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profile information."
+    },
+    "/users/{userId}/watchlist/{watchlistId}": {
+      "schema": "WatchlistItem",
+      "description": "User's individual watchlist items."
+    },
+    "/users/{userId}/portfolio/{portfolioId}": {
+      "schema": "PortfolioItem",
+      "description": "User's stock holdings."
+    }
+  }
+}

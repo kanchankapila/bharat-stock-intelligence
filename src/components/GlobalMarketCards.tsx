@@ -19,9 +19,9 @@ export const GlobalMarketCards: React.FC = () => {
     return (
       <div className="flex justify-center items-center p-4">
         <div className="animate-pulse flex space-x-4">
-          <div className="h-20 w-40 bg-white/[0.08] rounded-lg"></div>
-          <div className="h-20 w-40 bg-white/[0.08] rounded-lg"></div>
-          <div className="h-20 w-40 bg-white/[0.08] rounded-lg"></div>
+          <div className="h-20 w-40 bg-slate-800 rounded-lg"></div>
+          <div className="h-20 w-40 bg-slate-800 rounded-lg"></div>
+          <div className="h-20 w-40 bg-slate-800 rounded-lg"></div>
         </div>
       </div>
     );
@@ -60,15 +60,15 @@ export const GlobalMarketCards: React.FC = () => {
               transition={{ delay: index * 0.05 }}
               key={`${market.symbol}-${index}`}
               className={cn(
-                "flex flex-col p-3 rounded-2xl border bg-[#141416]/40 backdrop-blur-sm transition-all hover:shadow-lg",
+                "flex flex-col p-3 rounded-2xl border bg-slate-900/40 backdrop-blur-sm transition-all hover:shadow-lg",
                 statusColor
               )}
             >
               <div className="flex justify-between items-start mb-1">
-                <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest truncate mr-1">
+                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest truncate mr-1">
                   {market.symbol}
                 </span>
-                <span className="text-[8px] text-zinc-600 font-bold uppercase">
+                <span className="text-[8px] text-slate-600 font-bold uppercase">
                   {market.country}
                 </span>
               </div>

@@ -41,7 +41,7 @@ export const MomentumIntelligence: React.FC<MomentumIntelligenceProps> = ({
               <div
                 key={stock.stockId}
                 onClick={() => onSelectStock(symbol)}
-                className="flex justify-between items-center p-2.5 bg-[#0c0c0e]/50 rounded-lg border border-emerald-500/10 hover:border-emerald-500/30 transition-all group cursor-pointer animate-fade-in"
+                className="flex justify-between items-center p-2.5 bg-slate-950/50 rounded-lg border border-emerald-500/10 hover:border-emerald-500/30 transition-all group cursor-pointer animate-fade-in"
               >
                 <div className="flex items-center gap-3">
                   <div onClick={(e) => e.stopPropagation()}>
@@ -65,16 +65,16 @@ export const MomentumIntelligence: React.FC<MomentumIntelligenceProps> = ({
                   </div>
                   <div>
                     <p className="text-xs font-black text-white group-hover:text-emerald-400 transition-colors uppercase leading-none truncate max-w-[150px]">{name || symbol}</p>
-                    <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest mt-1 leading-none">{symbol}</p>
+                    <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mt-1 leading-none">{symbol}</p>
                     <div className="flex items-center gap-2 mt-1.5">
-                      <span className="text-[10px] font-bold text-zinc-500 tabular-nums">₹{stock.lastPrice}</span>
-                      <span className="text-[9px] font-black text-zinc-600 uppercase tracking-tighter bg-[#141416] px-1.5 py-0.5 rounded italic">RSI: {stock.rsi}</span>
+                      <span className="text-[10px] font-bold text-slate-500 tabular-nums">₹{stock.lastPrice}</span>
+                      <span className="text-[9px] font-black text-slate-600 uppercase tracking-tighter bg-slate-900 px-1.5 py-0.5 rounded italic">RSI: {stock.rsi}</span>
                     </div>
                   </div>
                 </div>
                 <div className="text-right">
                   <span className="text-[10px] font-black text-emerald-500 bg-emerald-500/10 px-2 py-1 rounded-lg">+{stock.percentChange}%</span>
-                  <p className="text-[9px] font-bold text-zinc-600 mt-1 uppercase tracking-widest">{stock.trend}</p>
+                  <p className="text-[9px] font-bold text-slate-600 mt-1 uppercase tracking-widest">{stock.trend}</p>
                 </div>
               </div>
             );
@@ -92,7 +92,7 @@ export const MomentumIntelligence: React.FC<MomentumIntelligenceProps> = ({
               <div
                 key={stock.stockId}
                 onClick={() => onSelectStock(symbol)}
-                className="flex justify-between items-center p-2.5 bg-[#0c0c0e]/50 rounded-lg border border-rose-500/10 hover:border-rose-500/30 transition-all group cursor-pointer animate-fade-in"
+                className="flex justify-between items-center p-2.5 bg-slate-950/50 rounded-lg border border-rose-500/10 hover:border-rose-500/30 transition-all group cursor-pointer animate-fade-in"
               >
                 <div className="flex items-center gap-3">
                   <div onClick={(e) => e.stopPropagation()}>
@@ -116,16 +116,16 @@ export const MomentumIntelligence: React.FC<MomentumIntelligenceProps> = ({
                   </div>
                   <div>
                     <p className="text-xs font-black text-white group-hover:text-rose-400 transition-colors uppercase leading-none truncate max-w-[150px]">{name || symbol}</p>
-                    <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest mt-1 leading-none">{symbol}</p>
+                    <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mt-1 leading-none">{symbol}</p>
                     <div className="flex items-center gap-2 mt-1.5">
-                      <span className="text-[10px] font-bold text-zinc-500 tabular-nums">₹{stock.lastPrice}</span>
-                      <span className="text-[9px] font-black text-zinc-600 uppercase tracking-tighter bg-[#141416] px-1.5 py-0.5 rounded italic">RSI: {stock.rsi}</span>
+                      <span className="text-[10px] font-bold text-slate-500 tabular-nums">₹{stock.lastPrice}</span>
+                      <span className="text-[9px] font-black text-slate-600 uppercase tracking-tighter bg-slate-900 px-1.5 py-0.5 rounded italic">RSI: {stock.rsi}</span>
                     </div>
                   </div>
                 </div>
                 <div className="text-right">
                   <span className="text-[10px] font-black text-rose-500 bg-rose-500/10 px-2 py-1 rounded-lg">{stock.percentChange}%</span>
-                  <p className="text-[9px] font-bold text-zinc-600 mt-1 uppercase tracking-widest">{stock.trend}</p>
+                  <p className="text-[9px] font-bold text-slate-600 mt-1 uppercase tracking-widest">{stock.trend}</p>
                 </div>
               </div>
             );

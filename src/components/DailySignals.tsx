@@ -63,13 +63,13 @@ const SIG_META: Record<SignalType, { label: string; short: string; color: string
   VOLUME_ACCUMULATION: { label: 'Volume Accumulation',   short: 'Vol Accum',   color: 'text-rose-400',   bg: 'bg-rose-500/10 border-rose-500/30' },
   NEAR_52W_HIGH:       { label: 'Near 52-Week High',     short: 'Near 52W',    color: 'text-fuchsia-400',bg: 'bg-fuchsia-500/10 border-fuchsia-500/30' },
   CONSECUTIVE_STRENGTH:{ label: 'Consecutive Strength',  short: 'Consec↑',     color: 'text-emerald-300',bg: 'bg-emerald-600/10 border-emerald-600/30' },
-  ATR_CONTRACTION:     { label: 'ATR Contraction',       short: 'ATR Squeeze', color: 'text-zinc-300',  bg: 'bg-slate-500/10 border-slate-500/30' },
+  ATR_CONTRACTION:     { label: 'ATR Contraction',       short: 'ATR Squeeze', color: 'text-slate-300',  bg: 'bg-slate-500/10 border-slate-500/30' },
 };
 
 const STRENGTH_COLOR: Record<SignalStrength, string> = {
   HIGH:   'text-emerald-400',
   MEDIUM: 'text-amber-400',
-  WATCH:  'text-zinc-500',
+  WATCH:  'text-slate-500',
 };
 
 const STRENGTH_DOT: Record<SignalStrength, string> = {
@@ -85,10 +85,10 @@ function ScoreBar({ score }: { score: number }) {
   const color = score >= 7 ? 'bg-emerald-500' : score >= 4 ? 'bg-amber-500' : 'bg-slate-600';
   return (
     <div className="flex items-center gap-2 min-w-[80px]">
-      <div className="flex-1 h-1.5 bg-white/[0.08] rounded-full overflow-hidden">
+      <div className="flex-1 h-1.5 bg-slate-800 rounded-full overflow-hidden">
         <div className={cn('h-full rounded-full transition-all', color)} style={{ width: `${pct}%` }} />
       </div>
-      <span className={cn('text-xs font-black tabular-nums w-6 text-right', score >= 7 ? 'text-emerald-400' : score >= 4 ? 'text-amber-400' : 'text-zinc-500')}>
+      <span className={cn('text-xs font-black tabular-nums w-6 text-right', score >= 7 ? 'text-emerald-400' : score >= 4 ? 'text-amber-400' : 'text-slate-500')}>
         {score}
       </span>
     </div>
@@ -106,7 +106,7 @@ function SignalPill({ sig }: { sig: TechSignal }) {
 }
 
 function fmtPct(v?: number | null) {
-  if (v == null) return <span className="text-zinc-600">—</span>;
+  if (v == null) return <span className="text-slate-600">—</span>;
   return <span className={v >= 0 ? 'text-emerald-400' : 'text-rose-400'}>{v >= 0 ? '+' : ''}{v.toFixed(1)}%</span>;
 }
 
@@ -118,8 +118,8 @@ function ExpandedRow({ r, onSelectStock }: { r: SignalRow; onSelectStock: (s: st
 
   return (
     <tr>
-      <td colSpan={10} className="px-4 pb-4 pt-0 bg-[#141416]/60">
-        <div className="rounded-xl border border-white/[0.07] bg-[#141416]/40 p-4 space-y-4">
+      <td colSpan={10} className="px-4 pb-4 pt-0 bg-slate-900/60">
+        <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 space-y-4">
           {/* Signal details */}
           <div className="space-y-2">
             {r.signals.map((s, i) => {
@@ -128,7 +128,7 @@ function ExpandedRow({ r, onSelectStock }: { r: SignalRow; onSelectStock: (s: st
                 <div key={i} className={cn('rounded-lg border px-3 py-2 flex items-start gap-3', m.bg)}>
                   <span className={cn('text-[10px] font-black uppercase tracking-wider shrink-0 mt-0.5', m.color)}>{m.label}</span>
                   <span className={cn('text-[10px] font-bold uppercase tracking-wider shrink-0 mt-0.5', STRENGTH_COLOR[s.strength])}>{s.strength}</span>
-                  <span className="text-xs text-zinc-400">{s.detail}</span>
+                  <span className="text-xs text-slate-400">{s.detail}</span>
                 </div>
               );
             })}
@@ -146,9 +146,9 @@ function ExpandedRow({ r, onSelectStock }: { r: SignalRow; onSelectStock: (s: st
               { label: 'BB Width',  value: r.bb_width?.toFixed(3) },
               { label: 'SMA200',    value: r.above_sma200 ? '✓ Above' : '✗ Below' },
             ].map(({ label, value }) => (
-              <div key={label} className="bg-white/[0.08]/50 rounded-lg p-2 text-center">
-                <div className="text-[9px] font-bold uppercase tracking-wider text-zinc-500 mb-0.5">{label}</div>
-                <div className="text-xs font-bold text-zinc-200">{value ?? '—'}</div>
+              <div key={label} className="bg-slate-800/50 rounded-lg p-2 text-center">
+                <div className="text-[9px] font-bold uppercase tracking-wider text-slate-500 mb-0.5">{label}</div>
+                <div className="text-xs font-bold text-slate-200">{value ?? '—'}</div>
               </div>
             ))}
           </div>
@@ -157,7 +157,7 @@ function ExpandedRow({ r, onSelectStock }: { r: SignalRow; onSelectStock: (s: st
           {r.ai_insight && (
             <div className="bg-indigo-500/5 border border-indigo-500/20 rounded-xl p-3 space-y-2">
               <p className="text-xs font-bold text-indigo-400 uppercase tracking-wider">AI Analysis</p>
-              <p className="text-sm text-zinc-300 leading-relaxed">{r.ai_insight}</p>
+              <p className="text-sm text-slate-300 leading-relaxed">{r.ai_insight}</p>
               <div className="grid grid-cols-3 gap-2 mt-2">
                 {r.entry_zone && (
                   <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-lg p-2 text-center">
@@ -179,9 +179,9 @@ function ExpandedRow({ r, onSelectStock }: { r: SignalRow; onSelectStock: (s: st
                 )}
               </div>
               {(r.setup_quality || r.time_horizon) && (
-                <div className="flex items-center gap-3 text-[10px] text-zinc-500">
-                  {r.setup_quality && <span>Quality: <span className="text-zinc-300 font-bold">{r.setup_quality}</span></span>}
-                  {r.time_horizon  && <span>Horizon: <span className="text-zinc-300 font-bold">{r.time_horizon}</span></span>}
+                <div className="flex items-center gap-3 text-[10px] text-slate-500">
+                  {r.setup_quality && <span>Quality: <span className="text-slate-300 font-bold">{r.setup_quality}</span></span>}
+                  {r.time_horizon  && <span>Horizon: <span className="text-slate-300 font-bold">{r.time_horizon}</span></span>}
                 </div>
               )}
             </div>
@@ -213,14 +213,14 @@ function FilterPanel({ filters, onChange, onClose }: {
   const allTypes = Object.keys(SIG_META) as SignalType[];
 
   return (
-    <div className="bg-[#141416] border border-white/[0.1] rounded-2xl p-4 space-y-4 w-80 shadow-2xl">
+    <div className="bg-slate-900 border border-slate-700 rounded-2xl p-4 space-y-4 w-80 shadow-2xl">
       <div className="flex items-center justify-between">
         <span className="text-sm font-bold text-white">Filters</span>
-        <button onClick={onClose} className="text-zinc-500 hover:text-white"><X className="w-4 h-4" /></button>
+        <button onClick={onClose} className="text-slate-500 hover:text-white"><X className="w-4 h-4" /></button>
       </div>
 
       <div>
-        <label className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">Min Score: {local.minScore}</label>
+        <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Min Score: {local.minScore}</label>
         <input type="range" min={1} max={10} value={local.minScore}
           onChange={e => setLocal(p => ({ ...p, minScore: +e.target.value }))}
           className="w-full mt-1 accent-indigo-500"
@@ -228,7 +228,7 @@ function FilterPanel({ filters, onChange, onClose }: {
       </div>
 
       <div>
-        <label className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 block mb-2">Signal Types</label>
+        <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-2">Signal Types</label>
         <div className="flex flex-wrap gap-1.5">
           {allTypes.map(t => {
             const m = SIG_META[t];
@@ -242,7 +242,7 @@ function FilterPanel({ filters, onChange, onClose }: {
                   return { ...p, signalTypes: next.length === allTypes.length ? [] : next };
                 })}
                 className={cn('px-2 py-0.5 rounded-md border text-[10px] font-bold transition-all',
-                  active ? cn(m.bg, m.color) : 'bg-white/[0.08] border-white/[0.1] text-zinc-600'
+                  active ? cn(m.bg, m.color) : 'bg-slate-800 border-slate-700 text-slate-600'
                 )}
               >{m.short}</button>
             );
@@ -254,11 +254,11 @@ function FilterPanel({ filters, onChange, onClose }: {
         <input id="sma200f" type="checkbox" checked={local.aboveSma200}
           onChange={e => setLocal(p => ({ ...p, aboveSma200: e.target.checked }))}
           className="rounded" />
-        <label htmlFor="sma200f" className="text-sm text-zinc-300">Above SMA200 only</label>
+        <label htmlFor="sma200f" className="text-sm text-slate-300">Above SMA200 only</label>
       </div>
 
       <div>
-        <label className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">
+        <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
           Min Volume Ratio: {local.minVolumeRatio.toFixed(1)}×
         </label>
         <input type="range" min={1} max={5} step={0.5} value={local.minVolumeRatio}
@@ -271,7 +271,7 @@ function FilterPanel({ filters, onChange, onClose }: {
         <button onClick={() => { onChange(local); onClose(); }}
           className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold py-2 rounded-xl transition-colors">Apply</button>
         <button onClick={() => { const d = { minScore: 1, signalTypes: [], aboveSma200: false, minVolumeRatio: 1 }; setLocal(d); onChange(d); onClose(); }}
-          className="flex-1 bg-white/[0.08] hover:bg-slate-700 text-zinc-300 text-sm font-bold py-2 rounded-xl transition-colors">Reset</button>
+          className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm font-bold py-2 rounded-xl transition-colors">Reset</button>
       </div>
     </div>
   );
@@ -286,7 +286,7 @@ function SortTh({ label, sortKey, sort, onSort }: {
 }) {
   const active = sort.key === sortKey;
   return (
-    <th className="text-left py-2 px-3 text-[10px] font-bold uppercase tracking-wider text-zinc-500 cursor-pointer hover:text-zinc-300 select-none whitespace-nowrap"
+    <th className="text-left py-2 px-3 text-[10px] font-bold uppercase tracking-wider text-slate-500 cursor-pointer hover:text-slate-300 select-none whitespace-nowrap"
       onClick={() => onSort(sortKey)}>
       <span className="flex items-center gap-1">
         {label}
@@ -370,7 +370,7 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
             <Zap className="w-6 h-6 text-amber-400" />
             Daily Technical Signals
           </h2>
-          <p className="text-zinc-500 text-sm mt-1">
+          <p className="text-slate-500 text-sm mt-1">
             {totalToday > 0
               ? `${totalToday} setups detected today across all NSE stocks`
               : 'Scan runs daily at 8:30 AM IST — 12 pattern types across all NSE stocks'}
@@ -388,7 +388,7 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
             className={cn('flex items-center gap-2 px-3 py-1.5 rounded-xl text-sm font-bold border transition-colors',
               showFilters || activeFilterCount > 0
                 ? 'bg-indigo-600/20 border-indigo-500/40 text-indigo-300'
-                : 'bg-white/[0.08] border-white/[0.1] text-zinc-400 hover:text-white'
+                : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white'
             )}
           >
             <SlidersHorizontal className="w-4 h-4" />
@@ -398,7 +398,7 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
           </button>
           <button
             onClick={() => { refetch(); refetchStatus(); }}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-sm font-bold bg-white/[0.08] border border-white/[0.1] text-zinc-400 hover:text-white transition-colors"
+            className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-sm font-bold bg-slate-800 border border-slate-700 text-slate-400 hover:text-white transition-colors"
           >
             <RefreshCw className="w-4 h-4" />
           </button>
@@ -407,7 +407,7 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
             className={cn('flex items-center gap-2 px-3 py-1.5 rounded-xl text-sm font-bold border transition-colors',
               showSector
                 ? 'bg-violet-600/20 border-violet-500/40 text-violet-300'
-                : 'bg-white/[0.08] border-white/[0.1] text-zinc-400 hover:text-white'
+                : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white'
             )}
           >
             <Activity className="w-4 h-4" />
@@ -418,7 +418,7 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
             className={cn('flex items-center gap-2 px-3 py-1.5 rounded-xl text-sm font-bold border transition-colors',
               showWinRates
                 ? 'bg-emerald-600/20 border-emerald-500/40 text-emerald-300'
-                : 'bg-white/[0.08] border-white/[0.1] text-zinc-400 hover:text-white'
+                : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white'
             )}
           >
             <BarChart2 className="w-4 h-4" />
@@ -438,22 +438,22 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
       {/* Summary stats */}
       {totalToday > 0 && (
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-          <div className="rounded-xl border border-white/[0.07] bg-[#141416]/50 p-3">
-            <div className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Total Setups</div>
+          <div className="rounded-xl border border-slate-800 bg-slate-900/30 p-3">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Total Setups</div>
             <div className="text-2xl font-black text-white tabular-nums mt-1">{totalToday}</div>
           </div>
           {Object.entries(byScore).map(([band, count]) => (
-            <div key={band} className="rounded-xl border border-white/[0.07] bg-[#141416]/50 p-3">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Score {band}</div>
+            <div key={band} className="rounded-xl border border-slate-800 bg-slate-900/30 p-3">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Score {band}</div>
               <div className={cn('text-2xl font-black tabular-nums mt-1',
-                band === '7-10' ? 'text-emerald-400' : band === '4-6' ? 'text-amber-400' : 'text-zinc-400'
+                band === '7-10' ? 'text-emerald-400' : band === '4-6' ? 'text-amber-400' : 'text-slate-400'
               )}>{count}</div>
             </div>
           ))}
           {lastComputed && (
-            <div className="rounded-xl border border-white/[0.07] bg-[#141416]/50 p-3 col-span-2 md:col-span-1">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Last Computed</div>
-              <div className="text-xs font-bold text-zinc-300 mt-1">
+            <div className="rounded-xl border border-slate-800 bg-slate-900/30 p-3 col-span-2 md:col-span-1">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Last Computed</div>
+              <div className="text-xs font-bold text-slate-300 mt-1">
                 {new Date(lastComputed).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
               </div>
             </div>
@@ -479,14 +479,14 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
       {/* Date selector */}
       {dates && dates.length > 1 && (
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Date:</span>
+          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Date:</span>
           {dates.slice(0, 7).map(d => (
             <button key={d}
               onClick={() => setSelectedDate(d === selectedDate ? undefined : d)}
               className={cn('px-3 py-1 rounded-lg text-xs font-bold border transition-colors',
                 d === (selectedDate ?? dates[0])
                   ? 'bg-indigo-600 border-indigo-500 text-white'
-                  : 'bg-white/[0.08] border-white/[0.1] text-zinc-400 hover:text-white'
+                  : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white'
               )}
             >{d}</button>
           ))}
@@ -501,18 +501,18 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
               <BarChart2 className="w-4 h-4" />
               Historical Win Rates
             </p>
-            <p className="text-[10px] text-zinc-500">Based on actual stock prices N days after signal date</p>
+            <p className="text-[10px] text-slate-500">Based on actual stock prices N days after signal date</p>
           </div>
 
           {!winRates && (
-            <div className="flex items-center gap-2 text-sm text-zinc-500">
+            <div className="flex items-center gap-2 text-sm text-slate-500">
               <Loader2 className="w-4 h-4 animate-spin" />
               Loading win rate data…
             </div>
           )}
 
           {winRates && winRates.overall.total === 0 && (
-            <p className="text-sm text-zinc-500">No resolved outcomes yet. Win rates populate automatically as signal dates age past 5 and 15 days.</p>
+            <p className="text-sm text-slate-500">No resolved outcomes yet. Win rates populate automatically as signal dates age past 5 and 15 days.</p>
           )}
 
           {winRates && winRates.overall.total > 0 && (
@@ -526,8 +526,8 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
                   { label: 'Avg Win', value: `+${winRates.overall.avgWin.toFixed(2)}%`, color: 'text-emerald-400' },
                   { label: 'Avg Loss', value: `${winRates.overall.avgLoss.toFixed(2)}%`, color: 'text-rose-400' },
                 ].map(({ label, value, color }) => (
-                  <div key={label} className="bg-[#141416]/60 rounded-xl border border-white/[0.07] p-3 text-center">
-                    <div className="text-[9px] font-bold uppercase tracking-wider text-zinc-500 mb-1">{label}</div>
+                  <div key={label} className="bg-slate-900/60 rounded-xl border border-slate-800 p-3 text-center">
+                    <div className="text-[9px] font-bold uppercase tracking-wider text-slate-500 mb-1">{label}</div>
                     <div className={cn('text-xl font-black tabular-nums', color)}>{value}</div>
                   </div>
                 ))}
@@ -539,10 +539,10 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
                   const hd = winRates.byHorizon[h];
                   if (!hd || hd.total === 0) return null;
                   return (
-                    <div key={h} className="bg-[#141416]/40 rounded-xl border border-white/[0.07] p-3">
-                      <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 mb-2">{h}-Day Horizon</p>
+                    <div key={h} className="bg-slate-900/40 rounded-xl border border-slate-800 p-3">
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-2">{h}-Day Horizon</p>
                       <div className="flex items-center justify-between">
-                        <span className="text-sm text-zinc-400">{hd.total} trades</span>
+                        <span className="text-sm text-slate-400">{hd.total} trades</span>
                         <span className={cn('text-lg font-black', hd.winRate >= 55 ? 'text-emerald-400' : hd.winRate >= 45 ? 'text-amber-400' : 'text-rose-400')}>
                           {hd.winRate.toFixed(1)}% WR
                         </span>
@@ -558,7 +558,7 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
               {/* By signal type */}
               {Object.keys(winRates.bySignalType).length > 0 && (
                 <div>
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 mb-2">Win Rate by Signal Type</p>
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-2">Win Rate by Signal Type</p>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                     {(Object.entries(winRates.bySignalType) as [SignalType, { total: number; wins: number; winRate: number; avgReturn: number }][])
                       .sort((a, b) => b[1].winRate - a[1].winRate)
@@ -567,16 +567,16 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
                         if (!m || stats.total < 3) return null;
                         const wr = stats.winRate;
                         return (
-                          <div key={type} className="flex items-center gap-3 bg-[#141416]/40 rounded-lg border border-white/[0.07] px-3 py-2">
+                          <div key={type} className="flex items-center gap-3 bg-slate-900/40 rounded-lg border border-slate-800 px-3 py-2">
                             <span className={cn('text-[10px] font-black min-w-[80px]', m.color)}>{m.short}</span>
-                            <div className="flex-1 h-1.5 bg-white/[0.08] rounded-full overflow-hidden">
+                            <div className="flex-1 h-1.5 bg-slate-800 rounded-full overflow-hidden">
                               <div className={cn('h-full rounded-full', wr >= 55 ? 'bg-emerald-500' : wr >= 45 ? 'bg-amber-500' : 'bg-rose-500')}
                                 style={{ width: `${Math.min(wr, 100)}%` }} />
                             </div>
                             <span className={cn('text-xs font-black w-12 text-right tabular-nums', wr >= 55 ? 'text-emerald-400' : wr >= 45 ? 'text-amber-400' : 'text-rose-400')}>
                               {wr.toFixed(0)}%
                             </span>
-                            <span className="text-[10px] text-zinc-500 w-12 text-right tabular-nums">n={stats.total}</span>
+                            <span className="text-[10px] text-slate-500 w-12 text-right tabular-nums">n={stats.total}</span>
                           </div>
                         );
                       })
@@ -588,18 +588,18 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
               {/* By score bucket */}
               {Object.keys(winRates.byScoreBucket).length > 0 && (
                 <div>
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 mb-2">Win Rate by Signal Score</p>
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-2">Win Rate by Signal Score</p>
                   <div className="grid grid-cols-3 gap-2">
                     {(['7-10', '4-6', '1-3'] as const).map(bucket => {
                       const b = winRates.byScoreBucket[bucket];
                       if (!b || b.total === 0) return null;
                       return (
-                        <div key={bucket} className="bg-[#141416]/40 rounded-xl border border-white/[0.07] p-3 text-center">
-                          <div className="text-[9px] font-bold uppercase tracking-wider text-zinc-500 mb-1">Score {bucket}</div>
+                        <div key={bucket} className="bg-slate-900/40 rounded-xl border border-slate-800 p-3 text-center">
+                          <div className="text-[9px] font-bold uppercase tracking-wider text-slate-500 mb-1">Score {bucket}</div>
                           <div className={cn('text-lg font-black', b.winRate >= 55 ? 'text-emerald-400' : b.winRate >= 45 ? 'text-amber-400' : 'text-rose-400')}>
                             {b.winRate.toFixed(0)}%
                           </div>
-                          <div className="text-[10px] text-zinc-500 mt-0.5">{b.total} trades</div>
+                          <div className="text-[10px] text-slate-500 mt-0.5">{b.total} trades</div>
                         </div>
                       );
                     })}
@@ -619,11 +619,11 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
               <Activity className="w-4 h-4" />
               Sector Momentum — Sympathy Play Radar
             </p>
-            <p className="text-[10px] text-zinc-500">Sectors with most technical setups today · use to find sympathy stocks before they move</p>
+            <p className="text-[10px] text-slate-500">Sectors with most technical setups today · use to find sympathy stocks before they move</p>
           </div>
 
           {(!sectorStats || sectorStats.length === 0) && (
-            <div className="flex items-center gap-2 text-sm text-zinc-500">
+            <div className="flex items-center gap-2 text-sm text-slate-500">
               <Loader2 className="w-4 h-4 animate-spin" />
               Loading sector data…
             </div>
@@ -636,7 +636,7 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
                   className={cn('rounded-xl border p-3 space-y-2',
                     sec.hotFlag
                       ? 'border-violet-500/40 bg-violet-500/10'
-                      : 'border-white/[0.1] bg-[#141416]/40'
+                      : 'border-slate-700 bg-slate-900/40'
                   )}
                 >
                   {/* Sector header */}
@@ -654,14 +654,14 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
 
                   {/* Avg score bar */}
                   <div className="flex items-center gap-2">
-                    <span className="text-[9px] text-zinc-500 w-16 shrink-0">Avg score</span>
-                    <div className="flex-1 h-1 bg-white/[0.08] rounded-full overflow-hidden">
+                    <span className="text-[9px] text-slate-500 w-16 shrink-0">Avg score</span>
+                    <div className="flex-1 h-1 bg-slate-800 rounded-full overflow-hidden">
                       <div
                         className={cn('h-full rounded-full', sec.avgScore >= 6 ? 'bg-emerald-500' : sec.avgScore >= 4 ? 'bg-amber-500' : 'bg-slate-600')}
                         style={{ width: `${sec.avgScore * 10}%` }}
                       />
                     </div>
-                    <span className={cn('text-[10px] font-black w-6 tabular-nums', sec.avgScore >= 6 ? 'text-emerald-400' : sec.avgScore >= 4 ? 'text-amber-400' : 'text-zinc-500')}>
+                    <span className={cn('text-[10px] font-black w-6 tabular-nums', sec.avgScore >= 6 ? 'text-emerald-400' : sec.avgScore >= 4 ? 'text-amber-400' : 'text-slate-500')}>
                       {sec.avgScore}
                     </span>
                   </div>
@@ -676,7 +676,7 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
                         <div className="min-w-0 flex-1">
                           <span className="text-[11px] font-bold text-white">{s.symbol}</span>
                           {s.name && s.name !== s.symbol && (
-                            <span className="text-[9px] text-zinc-500 ml-1 truncate hidden sm:inline">{s.name}</span>
+                            <span className="text-[9px] text-slate-500 ml-1 truncate hidden sm:inline">{s.name}</span>
                           )}
                         </div>
                         <div className="flex items-center gap-1 shrink-0">
@@ -685,7 +685,7 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
                           </span>
                           <span className={cn('text-[9px] font-black px-1 py-0.5 rounded',
                             s.score >= 7 ? 'bg-emerald-500/20 text-emerald-400' :
-                            s.score >= 4 ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-700 text-zinc-400'
+                            s.score >= 4 ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-700 text-slate-400'
                           )}>{s.score}</span>
                         </div>
                         {/* Signal type pills (max 2) */}
@@ -713,7 +713,7 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
             </div>
           )}
 
-          <p className="text-[10px] text-zinc-600">
+          <p className="text-[10px] text-slate-600">
             💡 When a sector peer reports strong earnings/order win, other stocks in the same sector often move in sympathy within 1-2 sessions. Use this panel to front-run that rotation.
           </p>
         </div>
@@ -730,14 +730,14 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
           <AlertCircle className="w-5 h-5 text-rose-400 shrink-0" />
           <div>
             <p className="text-sm font-bold text-rose-400">Failed to load signals</p>
-            <p className="text-xs text-zinc-500 mt-0.5">{(error as { message?: string })?.message}</p>
+            <p className="text-xs text-slate-500 mt-0.5">{(error as { message?: string })?.message}</p>
           </div>
         </div>
       )}
 
       {/* Loading */}
       {isLoading && !rows.length && (
-        <div className="flex items-center justify-center py-24 gap-3 text-zinc-500">
+        <div className="flex items-center justify-center py-24 gap-3 text-slate-500">
           <Loader2 className="w-5 h-5 animate-spin" />
           <span className="text-sm">Loading signal data…</span>
         </div>
@@ -746,9 +746,9 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
       {/* Empty state */}
       {!isLoading && !error && totalToday === 0 && (
         <div className="flex flex-col items-center py-24 gap-4 text-center">
-          <Zap className="w-12 h-12 text-zinc-700" />
+          <Zap className="w-12 h-12 text-slate-700" />
           <p className="text-white font-bold">No signals computed yet for today</p>
-          <p className="text-zinc-500 text-sm max-w-sm">
+          <p className="text-slate-500 text-sm max-w-sm">
             The scanner runs automatically at 8:30 AM IST. You can also trigger it manually via the Rescan button.
           </p>
         </div>
@@ -756,20 +756,20 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
 
       {/* Results table */}
       {filtered.length > 0 && (
-        <div className="rounded-2xl border border-white/[0.07] bg-[#141416]/50 overflow-x-auto">
+        <div className="rounded-2xl border border-slate-800 bg-slate-900/30 overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="border-b border-white/[0.07]">
+            <thead className="border-b border-slate-800">
               <tr>
-                <th className="text-left py-2 px-3 text-[10px] font-bold uppercase tracking-wider text-zinc-500 w-6">#</th>
+                <th className="text-left py-2 px-3 text-[10px] font-bold uppercase tracking-wider text-slate-500 w-6">#</th>
                 <SortTh label="Symbol"   sortKey="symbol"       sort={sort} onSort={toggleSort} />
-                <th className="text-left py-2 px-3 text-[10px] font-bold uppercase tracking-wider text-zinc-500">Signals</th>
+                <th className="text-left py-2 px-3 text-[10px] font-bold uppercase tracking-wider text-slate-500">Signals</th>
                 <SortTh label="Score"    sortKey="signal_score" sort={sort} onSort={toggleSort} />
                 <SortTh label="CMP"      sortKey="cmp"          sort={sort} onSort={toggleSort} />
                 <SortTh label="Chg%"     sortKey="change_pct"   sort={sort} onSort={toggleSort} />
                 <SortTh label="RSI"      sortKey="rsi"          sort={sort} onSort={toggleSort} />
                 <SortTh label="Vol Ratio" sortKey="volume_ratio" sort={sort} onSort={toggleSort} />
-                <th className="text-left py-2 px-3 text-[10px] font-bold uppercase tracking-wider text-zinc-500">SMA200</th>
-                <th className="text-left py-2 px-3 text-[10px] font-bold uppercase tracking-wider text-zinc-500">AI</th>
+                <th className="text-left py-2 px-3 text-[10px] font-bold uppercase tracking-wider text-slate-500">SMA200</th>
+                <th className="text-left py-2 px-3 text-[10px] font-bold uppercase tracking-wider text-slate-500">AI</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/40">
@@ -779,7 +779,7 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
                     className={cn('cursor-pointer transition-colors', expanded === r.symbol ? 'bg-white/[0.03]' : 'hover:bg-white/[0.02]')}
                     onClick={() => setExpanded(expanded === r.symbol ? null : r.symbol)}
                   >
-                    <td className="py-2.5 px-3 text-zinc-600 text-xs">{i + 1}</td>
+                    <td className="py-2.5 px-3 text-slate-600 text-xs">{i + 1}</td>
                     <td className="py-2.5 px-3">
                       <div className="flex items-center gap-2">
                         <div onClick={(e) => e.stopPropagation()}>
@@ -813,7 +813,7 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
                             {r.symbol}
                             <ArrowUpRight className="w-2.5 h-2.5 opacity-0 group-hover/sym:opacity-100 transition-opacity text-indigo-400" />
                           </div>
-                          {r.name && <div className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider truncate max-w-[120px] mt-0.5 leading-none">{r.name}</div>}
+                          {r.name && <div className="text-[9px] text-slate-500 font-bold uppercase tracking-wider truncate max-w-[120px] mt-0.5 leading-none">{r.name}</div>}
                         </div>
                       </div>
                     </td>
@@ -827,14 +827,14 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
                       {r.cmp ? `₹${r.cmp.toFixed(2)}` : '—'}
                     </td>
                     <td className="py-2.5 px-3">{fmtPct(r.change_pct)}</td>
-                    <td className="py-2.5 px-3 tabular-nums text-zinc-300">
+                    <td className="py-2.5 px-3 tabular-nums text-slate-300">
                       <span className={cn(
                         'font-bold',
                         (r.rsi ?? 50) >= 70 ? 'text-rose-400' :
-                        (r.rsi ?? 50) <= 30 ? 'text-emerald-400' : 'text-zinc-300'
+                        (r.rsi ?? 50) <= 30 ? 'text-emerald-400' : 'text-slate-300'
                       )}>{r.rsi?.toFixed(1) ?? '—'}</span>
                     </td>
-                    <td className="py-2.5 px-3 tabular-nums text-zinc-300">
+                    <td className="py-2.5 px-3 tabular-nums text-slate-300">
                       <span className={cn((r.volume_ratio ?? 0) >= 2 ? 'text-emerald-400 font-bold' : '')}>
                         {r.volume_ratio ? `${r.volume_ratio.toFixed(1)}×` : '—'}
                       </span>
@@ -847,7 +847,7 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
                     <td className="py-2.5 px-3">
                       {r.ai_insight
                         ? <span title="AI insight available"><Target className="w-4 h-4 text-indigo-400" /></span>
-                        : <span className="text-zinc-700">—</span>}
+                        : <span className="text-slate-700">—</span>}
                     </td>
                   </tr>
                   {expanded === r.symbol && (
@@ -861,13 +861,13 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
       )}
 
       {/* Legend */}
-      <div className="rounded-xl border border-white/[0.07] bg-[#141416]/20 p-4">
-        <p className="text-xs font-bold text-zinc-400 mb-3">Signal Legend</p>
+      <div className="rounded-xl border border-slate-800 bg-slate-900/20 p-4">
+        <p className="text-xs font-bold text-slate-400 mb-3">Signal Legend</p>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
           {(Object.entries(SIG_META) as [SignalType, typeof SIG_META[SignalType]][]).map(([type, m]) => (
             <div key={type} className={cn('rounded-lg border px-3 py-2', m.bg)}>
               <div className={cn('text-[10px] font-black uppercase tracking-wider', m.color)}>{m.label}</div>
-              <div className="text-[10px] text-zinc-500 mt-0.5">
+              <div className="text-[10px] text-slate-500 mt-0.5">
                 {type === 'RSI_DIVERGENCE'     && 'Price falls, RSI rises above SMA200'}
                 {type === 'HIDDEN_DIVERGENCE'  && 'Price HL, RSI LL — trend continuation'}
                 {type === 'RESISTANCE_BREAKOUT'&& 'Price > 20D high on ≥1.5× volume'}
@@ -888,7 +888,7 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
             </div>
           ))}
         </div>
-        <p className="text-[10px] text-zinc-600 mt-3">⚠️ Educational only. Not SEBI-registered investment advice. Always do your own research.</p>
+        <p className="text-[10px] text-slate-600 mt-3">⚠️ Educational only. Not SEBI-registered investment advice. Always do your own research.</p>
       </div>
     </div>
   );

@@ -17,7 +17,6 @@
  */
 
 import db from './db';
-import { getScreenerUniverse, getWatchlistedSymbols, INDEX_SYMBOLS } from './screenerUniverse';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -310,69 +309,13 @@ function computeNiftyRegime(): 'BULL' | 'BEAR' | 'SIDEWAYS' {
 
     const closes = rows.map(r => r.close).reverse();
     const last   = closes[closes.length - 1];
+    const len200 = Math.min(closes.length, 200);
+    const sma200 = closes.slice(-len200).reduce((a, b) => a + b, 0) / len200;
 
-    // 1. Price Factor: Proximity to 50 & 200 EMA
-    const ema50Arr = ema(closes, 50);
-    const ema200Arr = ema(closes, 200);
-    const lastEma50 = ema50Arr[ema50Arr.length - 1];
-    const lastEma200 = ema200Arr[ema200Arr.length - 1];
-
-    const fp = (last > lastEma50 ? 0.4 : 0.0) + (last > lastEma200 ? 0.6 : 0.0);
-
-    // 2. Breadth Factor: % of stocks above SMA50 from last scan
-    let breadth = 0.5; // default 50%
-    const prevDateRow = db.prepare(
-      `SELECT date FROM technical_signals ORDER BY date DESC LIMIT 1`
-    ).get() as { date: string } | undefined;
-
-    if (prevDateRow) {
-      const stats = db.prepare(
-        `SELECT 
-           COUNT(*) as total,
-           SUM(CASE WHEN cmp > sma50 THEN 1 ELSE 0 END) as above50
-         FROM technical_signals
-         WHERE date = ?`
-      ).get(prevDateRow.date) as { total: number; above50: number } | undefined;
-
-      if (stats && stats.total > 0) {
-        breadth = stats.above50 / stats.total;
-      }
-    }
-
-    // 3. Volatility Factor: Rolling 20-day annualized realized volatility
-    const dailyReturns: number[] = [];
-    const volStartIdx = Math.max(0, closes.length - 21);
-    for (let i = volStartIdx + 1; i < closes.length; i++) {
-      if (closes[i - 1] > 0) {
-        dailyReturns.push(Math.log(closes[i] / closes[i - 1]));
-      }
-    }
-    
-    let fv = 0.5;
-    if (dailyReturns.length > 5) {
-      const meanReturn = dailyReturns.reduce((a, b) => a + b, 0) / dailyReturns.length;
-      const variance = dailyReturns.reduce((acc, val) => acc + Math.pow(val - meanReturn, 2), 0) / dailyReturns.length;
-      const dailyVol = Math.sqrt(variance);
-      const annualizedVol = dailyVol * Math.sqrt(252);
-      
-      // Scale volatility factor: below 12% is low risk (1.0), above 25% is high risk (0.0)
-      fv = Math.max(0, Math.min(1, 1 - (annualizedVol - 0.12) / (0.25 - 0.12)));
-    }
-
-    // 4. Composite MFRI calculation
-    const mfri = 0.5 * fp + 0.3 * breadth + 0.2 * fv;
-    
-    let regime: 'BULL' | 'BEAR' | 'SIDEWAYS' = 'SIDEWAYS';
-    if (mfri >= 0.65) regime = 'BULL';
-    else if (mfri < 0.40) regime = 'BEAR';
-
-    console.log(
-      `[MFRI REGIME] Price-EMA: ${fp.toFixed(2)} | Breadth: ${(breadth * 100).toFixed(1)}% | Vol-Factor: ${fv.toFixed(2)} | Composite MFRI: ${mfri.toFixed(3)} -> ${regime}`
-    );
-
-    return regime;
-  } catch (e) {
-    console.error('[MFRI REGIME] Calculation failed, defaulting to BULL:', e);
+    if (last > sma200 * 1.02)  return 'BULL';
+    if (last < sma200 * 0.98)  return 'BEAR';
+    return 'SIDEWAYS';
+  } catch {
     return 'BULL';
   }
 }
@@ -948,23 +891,10 @@ export async function runTechnicalSignalScan(options: {
       { symbol: string; name: string; sector: string }[])
       .forEach(r => meta.set(r.symbol, { name: r.name, sector: r.sector }));
 
-    // Build scan universe: screener stocks + indices (always) + user watchlist
-    const { all: screenerAll } = getScreenerUniverse();
-    const watchlisted = getWatchlistedSymbols();
-    const scanUniverse = screenerAll.size > 0
-      ? new Set([...screenerAll, ...INDEX_SYMBOLS, ...watchlisted])
-      : null; // null = no filter when screeners not yet populated
-
-    const allEligible = [...bySymbol.entries()].filter(([, rows]) => rows.length >= 22);
-    const eligible = scanUniverse
-      ? allEligible.filter(([sym]) => scanUniverse.has(sym))
-      : allEligible;
-
-    console.log(
-      `[SIGNALS] Universe: ${screenerAll.size} screener + ${INDEX_SYMBOLS.size} indices + ${watchlisted.size} watchlisted` +
-      ` → scanning ${eligible.length} of ${allEligible.length} total symbols`
-    );
+    const eligible = [...bySymbol.entries()].filter(([, rows]) => rows.length >= 22);
     progress.totalSymbols = eligible.length;
+
+    console.log(`[SIGNALS] Scanning ${eligible.length} symbols for patterns...`);
 
     const results: SignalResult[] = [];
 
@@ -1097,7 +1027,6 @@ export function getTechnicalSignalsForDate(
     FROM technical_signals ts
     LEFT JOIN nse_stocks ns ON ns.symbol = ts.symbol
     WHERE ts.date = ? AND ts.signal_score >= ?
-      AND (ts.win_probability IS NULL OR ts.win_probability >= 0.40)
     ORDER BY ts.signal_score DESC
     LIMIT ?
   `).all(d, minScore, limit) as Record<string, unknown>[];
