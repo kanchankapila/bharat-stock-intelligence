@@ -1911,6 +1911,48 @@ export const appRouter = router({
       };
     }),
 
+  // ─── SUPERSTAR PORTFOLIO ──────────────────────────────────────────────────
+  getSuperstarList: publicProcedure
+    .query(async () => {
+      const { fetchWithCache } = await import('./cacheService');
+      return fetchWithCache('superstar_list', async () => {
+        const res = await fetch(
+          'https://portal.tradebrains.in/api/prices/superstar/portfolio/star/view/?page_size=100&page=1&search=',
+          {
+            headers: {
+              'Accept': 'application/json, text/plain, */*',
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+              'Referer': 'https://portal.tradebrains.in/superstar-portfolio',
+              'Origin': 'https://portal.tradebrains.in',
+            },
+            signal: AbortSignal.timeout(10000),
+          }
+        );
+        if (!res.ok) throw new Error(`TradeBrains superstar list HTTP ${res.status}`);
+        return res.json();
+      }, 3600);
+    }),
+
+  getSuperstarPortfolio: publicProcedure
+    .input(z.object({ slug: z.string(), quarter: z.string() }))
+    .query(async ({ input }) => {
+      const { fetchWithCache } = await import('./cacheService');
+      return fetchWithCache(`superstar_${input.slug}_${input.quarter}`, async () => {
+        const url = `https://portal.tradebrains.in/api/prices/superstar/stocklist/${encodeURIComponent(input.slug)}/?quater=${input.quarter}&sort_by=total_quantity&is_ascending=false`;
+        const res = await fetch(url, {
+          headers: {
+            'Accept': 'application/json, text/plain, */*',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            'Referer': `https://portal.tradebrains.in/superstar-portfolio/${input.slug}`,
+            'Origin': 'https://portal.tradebrains.in',
+          },
+          signal: AbortSignal.timeout(10000),
+        });
+        if (!res.ok) throw new Error(`TradeBrains portfolio ${input.slug} HTTP ${res.status}`);
+        return res.json();
+      }, 1800);
+    }),
+
   // ─── TODOS & IDEAS ────────────────────────────────────────────────────────
   getTodos: publicProcedure
     .query(() => {

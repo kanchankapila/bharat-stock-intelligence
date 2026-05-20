@@ -49,7 +49,10 @@ import { GlobalMarkets } from './components/GlobalMarkets';
 import { Watchlist } from './components/Watchlist';
 import { StrategyIntelligence } from './components/StrategyIntelligence';
 import { DailySignals } from './components/DailySignals';
+import DashboardPage from './components/DashboardPage';
+import SuperstarPortfolio from './components/SuperstarPortfolio';
 import { SentimentIntelligence } from './components/SentimentIntelligence';
+import { AppShell } from './components/AppShell';
 import { 
   TickerTapeWidget, 
   TechnicalAnalysisWidget, 
@@ -124,149 +127,6 @@ const IndexBar: React.FC<IndexBarProps> = ({ name, value, change, isUp, onClick 
     </div>
   </div>
 );
-
-const Navbar: React.FC<{
-  user: FirebaseUser | null;
-  onLogin: () => void;
-  activeTab: string;
-  setActiveTab: (tab: string) => void;
-  stocks: MarketData[];
-  onSelectStock: (symbol: string) => void;
-}> = ({ user, onLogin, activeTab, setActiveTab, stocks, onSelectStock }) => {
-  const [searchQuery, setSearchQuery] = useState('');
-  const [showResults, setShowResults] = useState(false);
-
-  const searchResults = searchQuery.length > 0
-    ? nseStocksData.filter(s =>
-        (s.symbol && s.symbol.toLowerCase().includes(searchQuery.toLowerCase())) ||
-        (s.name && s.name.toLowerCase().includes(searchQuery.toLowerCase()))
-      ).slice(0, 8).map(s => ({
-        symbol: s.symbol,
-        name: s.name,
-        changePct: stocks.find(ms => ms.symbol === s.symbol)?.changePct || 0
-      }))
-    : [];
-
-  return (    <nav className="h-16 border-b border-white/[0.06] bg-slate-950/90 backdrop-blur-xl flex items-center justify-between px-6 sticky top-0 z-50">
-      <div className="flex items-center gap-8">
-        <div className="flex items-center gap-2 cursor-pointer" onClick={() => setActiveTab('dashboard')}>
-          <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-violet-600 rounded-xl flex items-center justify-center shadow-[0_0_16px_rgba(99,102,241,0.35)]">
-            <Zap className="text-white w-4 h-4 fill-white" />
-          </div>
-          <span className="text-xl font-black text-white tracking-tight">BHARAT<span className="gradient-text-indigo">STOCK</span></span>
-        </div>
-        
-        <div className="hidden md:flex items-center gap-6">
-          {[
-            { icon: LayoutDashboard, label: 'Dashboard', id: 'dashboard' },
-            { icon: Trophy, label: 'Top Rated', id: 'top-rated' },
-            { icon: BarChart2, label: 'Indices', id: 'indices' },
-            { icon: Activity, label: 'Market Map', id: 'market-map' },
-            { icon: Filter, label: 'Screener', id: 'screener' },
-            { icon: Target, label: 'F&O Intel', id: 'fno-scanners' },
-            { icon: Zap, label: 'Trendlyne', id: 'trendlyne' },
-            { icon: Search, label: 'Discover', id: 'discover' },
-            { icon: History, label: 'Backtest', id: 'backtest' },
-            { icon: PieChart, label: 'Portfolio', id: 'portfolio' },
-            { icon: WatchlistIcon, label: 'Watchlist', id: 'watchlist' },
-            { icon: Zap, label: 'Signals', id: 'signals' },
-            { icon: BarChart2, label: 'Sentiment', id: 'sentiment' },
-            { icon: Globe, label: 'Economics', id: 'economics' },
-            { icon: Star, label: 'Strategy', id: 'strategy' },
-            { icon: CheckCircle2, label: 'ToDo', id: 'todo' },
-          ].map((item) => (
-
-            <button
-              key={item.id}
-              onClick={() => setActiveTab(item.id)}
-              className={cn(
-                "flex items-center gap-2 text-sm font-medium transition-colors",
-                activeTab === item.id ? "text-indigo-400" : "text-slate-500 hover:text-slate-200"
-              )}
-            >
-              <item.icon className="w-4 h-4" />
-              {item.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="flex items-center gap-4">
-        <div className="relative search-container">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-          <input 
-            type="text" 
-            placeholder="Search symbols..." 
-            value={searchQuery}
-            onChange={(e) => {
-              setSearchQuery(e.target.value);
-              setShowResults(true);
-            }}
-            onFocus={() => setShowResults(true)}
-            className="bg-slate-900/50 border border-white/[0.08] rounded-xl py-1.5 pl-10 pr-4 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:ring-1 focus:ring-indigo-500/40 focus:border-indigo-500/30 w-48 lg:w-64 transition-all"
-          />
-          
-          <AnimatePresence>
-            {showResults && searchResults.length > 0 && (
-              <>
-                <div 
-                  className="fixed inset-0 z-[-1]" 
-                  onClick={() => setShowResults(false)} 
-                />
-                <motion.div 
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 10 }}
-                  className="absolute top-full mt-2 w-full bg-slate-900/95 backdrop-blur-xl border border-white/[0.08] rounded-2xl overflow-hidden shadow-[0_16px_48px_rgba(0,0,0,0.6)] z-[60]"
-                >
-                  {searchResults.map(s => (
-                    <button
-                      key={s.symbol}
-                      onClick={() => {
-                        onSelectStock(s.symbol);
-                        setSearchQuery('');
-                        setShowResults(false);
-                      }}
-                      className="w-full px-4 py-3 hover:bg-white/[0.04] flex items-center justify-between transition-colors border-b border-white/[0.04] last:border-0"
-                    >
-                      <div className="text-left">
-                        <div className="text-xs font-black text-white italic tracking-tighter uppercase">{s.symbol}</div>
-                        <div className="text-[10px] text-slate-500 italic uppercase">{s.name}</div>
-                      </div>
-                      <div className={cn(
-                        "text-[10px] font-black tabular-nums",
-                        s.changePct >= 0 ? "text-emerald-400" : "text-rose-400"
-                      )}>
-                        {s.changePct > 0 ? '+' : ''}{s.changePct}%
-                      </div>
-                    </button>
-                  ))}
-                </motion.div>
-              </>
-            )}
-          </AnimatePresence>
-        </div>
-
-      {user ? (
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-full border border-slate-800 p-0.5">
-            <img src={user.photoURL || ''} alt="avatar" className="w-full h-full rounded-full" />
-          </div>
-        </div>
-      ) : (
-        <button 
-          onClick={onLogin}
-          className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-1.5 rounded-xl text-sm font-semibold transition-all shadow-[0_0_14px_rgba(99,102,241,0.25)] hover:shadow-[0_0_18px_rgba(99,102,241,0.38)]"
-        >
-          <LogIn className="w-4 h-4" />
-          Login
-        </button>
-      )}
-    </div>
-  </nav>
-  );
-};
-
 
 // --- Types ---
 
@@ -4095,29 +3955,18 @@ export default function App() {
   );
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-200 font-sans selection:bg-indigo-500/30">
-      <TickerTapeWidget />
-      {/* Top Banner Indices */}
-      <div className="bg-slate-900 h-10 border-b border-slate-800 overflow-hidden flex items-center overflow-x-auto hide-scrollbar">
-        {displayIndices.map((idx: any) => (
-          <IndexBar 
-            key={idx.name} 
-            {...idx} 
-            onClick={() => handleSelectIndexByName(idx.name)} 
-          />
-        ))}
-      </div>
-
-      <Navbar 
-        user={user} 
-        onLogin={handleLogin} 
-        activeTab={activeTab} 
-        setActiveTab={setActiveTab} 
+    <>
+      <AppShell
+        user={user}
+        onLogin={handleLogin}
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
         stocks={stocks}
         onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }}
-      />
-
-      <main className="max-w-7xl mx-auto pb-20">
+        displayIndices={displayIndices}
+        onSelectIndexByName={handleSelectIndexByName}
+      >
+        <TickerTapeWidget />
         <AnimatePresence mode="wait">
           {activeTab === 'watchlist' ? (
             <motion.div
@@ -4126,9 +3975,9 @@ export default function App() {
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -20 }}
             >
-              <Watchlist 
-                watchlist={watchlist} 
-                stocks={stocks} 
+              <Watchlist
+                watchlist={watchlist}
+                stocks={stocks}
                 watchlistDetails={watchlistDetails || []}
                 onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }}
                 onRemove={toggleWatchlist}
@@ -4140,27 +3989,26 @@ export default function App() {
               initial={{ opacity: 0, x: -10 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: 10 }}
-              transition={{ duration: 0.25, ease: 'easeOut' }}
+              transition={{ duration: 0.22, ease: 'easeOut' }}
+              className="pb-10"
             >
-              {activeTab === 'dashboard' && <Dashboard stocks={stocks} onNewSignal={addToast} onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} onSelectIndex={(id, name) => { setSelectedIndex({ id, name }); setActiveTab('indices'); }} />}
+              {activeTab === 'dashboard' && <DashboardPage stocks={stocks} onNewSignal={addToast} onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} onSelectIndex={(id, name) => { setSelectedIndex({ id, name }); setActiveTab('indices'); }} />}
               {activeTab === 'top-rated' && <TopRatedStocks onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />}
               {activeTab === 'indices' && <IndicesPage onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} selectedIndex={selectedIndex} setSelectedIndex={setSelectedIndex} />}
               {activeTab === 'market-map' && (
                 <div className="p-6 space-y-6">
-                   <Card title="NSE Market Heatmap" icon={Activity}>
-                      <div className="pt-2">
-                         <MarketHeatmapWidget />
-                      </div>
-                   </Card>
-                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <SectorPerformance />
-                      <SectorHeatmap />
-                   </div>
+                  <Card title="NSE Market Heatmap" icon={Activity}>
+                    <div className="pt-2"><MarketHeatmapWidget /></div>
+                  </Card>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <SectorPerformance />
+                    <SectorHeatmap />
+                  </div>
                 </div>
               )}
-              {activeTab === 'screener' && <Screener stocks={stocks} onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />}
-              {activeTab === 'trendlyne' && <TrendlyneScreenerPanel onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />}
-              {activeTab === 'discover' && <div className="p-6"><NSEStockDiscovery onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} /></div>}
+              {activeTab === 'screener'     && <Screener stocks={stocks} onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />}
+              {activeTab === 'trendlyne'    && <TrendlyneScreenerPanel onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />}
+              {activeTab === 'discover'     && <div className="p-6"><NSEStockDiscovery onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} /></div>}
               {activeTab === 'fno-scanners' && <FnOIntelligenceCenter onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} />}
               {activeTab === 'details' && selectedSymbol && (
                 <StockDetails
@@ -4173,55 +4021,52 @@ export default function App() {
                   onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }}
                 />
               )}
-              {activeTab === 'backtest' && <Backtest stocks={stocks} />}
-              {activeTab === 'signals' && <DailySignals onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />}
-              {activeTab === 'strategy' && <StrategyIntelligence onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} />}
+              {activeTab === 'backtest'  && <Backtest stocks={stocks} />}
+              {activeTab === 'signals'   && <DailySignals onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />}
+              {activeTab === 'strategy'  && <StrategyIntelligence onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} />}
               {activeTab === 'sentiment' && <SentimentIntelligence onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} />}
               {activeTab === 'economics' && (
                 <div className="p-6 space-y-6">
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                     <div className="lg:col-span-2">
                       <Card title="Global Economic Calendar" icon={Globe}>
-                        <div className="pt-2">
-                          <EconomicCalendarWidget />
-                        </div>
+                        <div className="pt-2"><EconomicCalendarWidget /></div>
                       </Card>
                     </div>
                     <div>
                       <Card title="Market Sentiment Overview" icon={Activity}>
-                        <div className="pt-2">
-                          <MarketOverviewWidget />
-                        </div>
+                        <div className="pt-2"><MarketOverviewWidget /></div>
                       </Card>
                     </div>
                   </div>
                 </div>
               )}
-              {activeTab === 'todo' && <ToDoPage />}
-              {activeTab === 'portfolio' && (
+              {activeTab === 'superstars' && <SuperstarPortfolio />}
+              {activeTab === 'todo'       && <ToDoPage />}
+              {activeTab === 'portfolio'  && (
                 <div className="p-6">
-                   <Card title="Wealth Intelligence" icon={PieChart}>
-                      <div className="py-24 text-center">
-                         <div className="relative inline-block mb-8">
-                              <PieChart className="text-slate-800 w-24 h-24" />
-                              <motion.div 
-                                  animate={{ rotate: 360 }}
-                                  transition={{ duration: 10, repeat: Infinity, ease: 'linear' }}
-                                  className="absolute inset-0 border-2 border-dashed border-blue-500/20 rounded-full"
-                              />
-                         </div>
-                         <h3 className="text-white font-black text-2xl italic tracking-tighter uppercase tracking-widest text-blue-500 text-center">Elite Wealth Engine</h3>
-                         <p className="text-slate-500 text-[10px] font-black uppercase tracking-[0.2em] mt-3">Advanced tracking is deploying soon</p>
+                  <Card title="Wealth Intelligence" icon={PieChart}>
+                    <div className="py-24 text-center">
+                      <div className="relative inline-block mb-8">
+                        <PieChart className="text-slate-800 w-24 h-24" />
+                        <motion.div
+                          animate={{ rotate: 360 }}
+                          transition={{ duration: 10, repeat: Infinity, ease: 'linear' }}
+                          className="absolute inset-0 border-2 border-dashed border-blue-500/20 rounded-full"
+                        />
                       </div>
-                   </Card>
+                      <h3 className="text-white font-black text-2xl italic uppercase tracking-widest text-blue-500 text-center">Elite Wealth Engine</h3>
+                      <p className="text-slate-500 text-[10px] font-black uppercase tracking-[0.2em] mt-3">Advanced tracking is deploying soon</p>
+                    </div>
+                  </Card>
                 </div>
               )}
             </motion.div>
           )}
         </AnimatePresence>
-      </main>
+      </AppShell>
 
-      {/* Notifications Portal */}
+      {/* Signal toast notifications */}
       <div className="fixed bottom-6 right-6 z-[100] flex flex-col gap-3 pointer-events-none">
         <AnimatePresence>
           {toasts.map((toast) => (
@@ -4231,28 +4076,28 @@ export default function App() {
               animate={{ opacity: 1, x: 0, scale: 1 }}
               exit={{ opacity: 0, x: 20, scale: 0.95 }}
               className={cn(
-                "w-72 bg-slate-900 border-l-4 p-4 rounded-xl shadow-2xl pointer-events-auto flex gap-3",
-                toast.type === 'BUY' ? "border-emerald-500" : "border-rose-500"
+                'w-72 bg-slate-900 border-l-4 p-4 rounded-xl shadow-2xl pointer-events-auto flex gap-3',
+                toast.type === 'BUY' ? 'border-emerald-500' : 'border-rose-500',
               )}
             >
               <div className={cn(
-                "w-8 h-8 rounded-full flex items-center justify-center shrink-0",
-                toast.type === 'BUY' ? "bg-emerald-500/10 text-emerald-500" : "bg-rose-500/10 text-rose-500"
+                'w-8 h-8 rounded-full flex items-center justify-center shrink-0',
+                toast.type === 'BUY' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-rose-500/10 text-rose-500',
               )}>
                 {toast.type === 'BUY' ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
               </div>
-              <div>
+              <div className="min-w-0">
                 <div className="flex items-center gap-2 mb-0.5">
-                  <h5 className="text-[10px] font-black uppercase tracking-widest text-slate-400">{toast.title}</h5>
-                  <span className="text-[9px] font-black text-slate-500 bg-slate-950 px-1 border border-slate-800 rounded">{toast.confidence}% Conf.</span>
+                  <h5 className="text-[10px] font-black uppercase tracking-widest text-slate-400 truncate">{toast.title}</h5>
+                  <span className="text-[9px] font-black text-slate-500 bg-slate-950 px-1 border border-slate-800 rounded shrink-0">{toast.confidence}%</span>
                 </div>
                 <p className="text-[11px] text-white font-bold line-clamp-2 leading-relaxed italic opacity-90">
                   {toast.message}
                 </p>
               </div>
-              <button 
+              <button
                 onClick={() => setToasts(prev => prev.filter(t => t.id !== toast.id))}
-                className="text-slate-600 hover:text-white transition-colors ml-auto"
+                className="text-slate-600 hover:text-white transition-colors ml-auto shrink-0"
               >
                 <Plus className="w-4 h-4 rotate-45" />
               </button>
@@ -4260,27 +4105,7 @@ export default function App() {
           ))}
         </AnimatePresence>
       </div>
-
-      <footer className="py-12 border-t border-slate-900 bg-slate-950 text-center relative">
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-slate-950 px-4">
-             <div className="w-10 h-10 bg-slate-900 rounded-full border border-slate-800 flex items-center justify-center">
-                 <Zap className="text-blue-500 w-5 h-5 fill-blue-500" />
-             </div>
-        </div>
-        <div className="flex items-center justify-center gap-2 mb-4 mt-4">
-          <span className="text-xl font-black text-white tracking-tight">BHARAT<span className="text-blue-500">STOCK</span></span>
-        </div>
-        <p className="text-slate-600 text-[10px] font-bold uppercase tracking-[0.4em] mb-6">Trade with the edge of AI Intelligence</p>
-        <div className="flex justify-center gap-10 text-slate-500 mb-8">
-           <a href="#" className="flex items-center gap-2 text-xs font-bold hover:text-white transition-colors"><Share2 className="w-3 h-3" /> Community</a>
-           <a href="#" className="flex items-center gap-2 text-xs font-bold hover:text-white transition-colors"><Download className="w-3 h-3" /> Documentation</a>
-           <a href="#" className="flex items-center gap-2 text-xs font-bold hover:text-white transition-colors"><Info className="w-4 h-4" /> Legal</a>
-        </div>
-        <p className="text-slate-800 text-[8px] font-black uppercase tracking-widest px-6 max-w-2xl mx-auto">
-            Investment in securities market are subject to market risks. Read all the related documents carefully before investing. AI signals are research representations and not advisory.
-        </p>
-      </footer>
-    </div>
+    </>
   );
 }
 
