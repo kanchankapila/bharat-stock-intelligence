@@ -499,7 +499,7 @@ server.tool(
       console.error(`🚀 MCP Agent spawning: python src/server/${scriptFilename} ${args.join(" ")}`);
 
       // Spawn process and fetch output safely
-      execFile("python", [scriptPath, ...args], { timeout: 300_000, maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
+      execFile("python", [scriptPath, ...args], { timeout: 300_000 }, (error, stdout, stderr) => {
         let output = `## Engine Execution: ${engineName}\n\n`;
         output += `**Command:** \`python src/server/${scriptFilename} ${args.join(" ")}\`\n\n`;
 

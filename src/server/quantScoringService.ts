@@ -181,24 +181,35 @@ export async function runQuantScoring(): Promise<void> {
   };
 
   try {
+    console.log('[QUANT] Loading OHLCV data...');
+
+    // Load all OHLCV rows ordered by symbol then date
+    const allRows = db.prepare(
+      `SELECT symbol, date, close, volume FROM stock_ohlcv
+       WHERE close > 0 ORDER BY symbol, date ASC`
+    ).all() as (OHLCVRow & { symbol: string })[];
+
+    // Group by symbol
+    const bySymbol = new Map<string, OHLCVRow[]>();
+    for (const r of allRows) {
+      if (!bySymbol.has(r.symbol)) bySymbol.set(r.symbol, []);
+      bySymbol.get(r.symbol)!.push({ date: r.date, close: r.close, volume: r.volume });
+    }
+
+    // Filter to symbols with enough history
+    const eligible = [...bySymbol.entries()].filter(([, rows]) => rows.length >= MIN_DAYS);
+    scoringProgress.totalSymbols = eligible.length;
+    console.log(`[QUANT] ${eligible.length} eligible symbols`);
+
     // Pre-load screener confluence and fundamentals
     const screenerMap  = loadScreenerConfluence();
     const fundMap      = loadFundamentals();
 
+    // ── Compute raw metrics per symbol ──────────────────────────────────────
+
     const computed: QuantRow[] = [];
 
-    // Prepare streaming query
-    const statement = db.prepare(
-      `SELECT symbol, date, close, volume FROM stock_ohlcv
-       WHERE close > 0 ORDER BY symbol, date ASC`
-    );
-
-    let currentSymbol = '';
-    let currentRows: OHLCVRow[] = [];
-
-    function processCompletedSymbol(symbol: string, rows: OHLCVRow[]) {
-      if (rows.length < MIN_DAYS) return;
-
+    for (const [symbol, rows] of eligible) {
       const price  = rows[rows.length - 1].close;
       const s200   = sma(rows, 200);
       const r1w    = pctReturn(rows, 5);
@@ -237,27 +248,6 @@ export async function runQuantScoring(): Promise<void> {
         ohlcv_days: rows.length,
       });
     }
-
-    console.log('[QUANT] Streaming and processing OHLCV data...');
-
-    for (const r of statement.iterate() as any) {
-      if (r.symbol !== currentSymbol) {
-        if (currentSymbol) {
-          processCompletedSymbol(currentSymbol, currentRows);
-        }
-        currentSymbol = r.symbol;
-        currentRows = [];
-      }
-      currentRows.push({ date: r.date, close: r.close, volume: r.volume });
-    }
-
-    // Process the last symbol in the stream
-    if (currentSymbol) {
-      processCompletedSymbol(currentSymbol, currentRows);
-    }
-
-    scoringProgress.totalSymbols = computed.length;
-    console.log(`[QUANT] ${computed.length} eligible symbols processed`);
 
     // ── Percentile ranks ────────────────────────────────────────────────────
 

@@ -35,7 +35,7 @@ const Candlestick = (props: any) => {
   );
 };
 
-import { Card, SentimentBadge, ValueDisplay, IndicatorRow, CompactMetricCard, ScoreRing } from './MCCommon';
+import { Card, SentimentBadge, ValueDisplay, IndicatorRow, CompactMetricCard } from './MCCommon';
 import ScreenerDetailsModal from './ScreenerDetailsModal';
 
 interface MCStockInfoPanelProps {
@@ -134,9 +134,9 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
 
   if (!isVisible && !unifiedData) {
     return (
-      <div ref={containerRef} className="h-40 flex items-center justify-center border border-dashed border-slate-800/60 rounded-2xl">
-        <p className="text-[10px] font-black text-slate-700 uppercase tracking-[0.15em]">
-          Loading {symbol}…
+      <div ref={containerRef} className="h-40 flex items-center justify-center bg-slate-900/10 border border-dashed border-slate-800 rounded-2xl">
+        <p className="text-[10px] font-black text-slate-700 uppercase tracking-widest italic">
+          Waiting for visibility... {symbol}
         </p>
       </div>
     );
@@ -144,17 +144,14 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
 
   if (isLoading) {
     return (
-      <div ref={containerRef} className="space-y-3 animate-pulse">
-        <div className="h-40 bg-slate-900/50 rounded-2xl border border-slate-800/50" />
-        <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
-          {[1,2,3,4,5,6].map(i => <div key={i} className="h-16 bg-slate-900/40 rounded-xl border border-slate-800/40" />)}
+      <div ref={containerRef} className="space-y-4 animate-pulse">
+        <div className="flex gap-2 mb-4">
+          {[1,2,3].map(i => <div key={i} className="h-8 w-20 bg-slate-800 rounded-lg" />)}
         </div>
-        <div className="flex gap-1">
-          {[1,2,3,4,5,6].map(i => <div key={i} className="h-9 w-20 bg-slate-900/40 rounded-lg border border-slate-800/40" />)}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {[1,2,3,4,5,6,7,8].map(i => <div key={i} className="h-20 bg-slate-800/50 rounded-2xl" />)}
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {[1,2,3,4].map(i => <div key={i} className="h-28 bg-slate-900/30 rounded-2xl border border-slate-800/30" />)}
-        </div>
+        <div className="h-64 bg-slate-800/30 rounded-2xl" />
       </div>
     );
   }
@@ -162,10 +159,10 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
   if (error || !unifiedData) {
     const stockName = stockMapping?.name || symbol;
     return (
-      <div ref={containerRef} className="p-10 text-center bg-slate-900/30 border border-slate-800/60 rounded-2xl">
-        <AlertCircle className="w-8 h-8 text-rose-500/70 mx-auto mb-4" />
-        <p className="text-sm text-slate-400 font-black">Failed to load {stockName}</p>
-        <p className="text-[9px] text-slate-600 mt-1 uppercase tracking-[0.15em] font-black">{symbol}</p>
+      <div ref={containerRef} className="p-8 text-center bg-slate-900/30 border border-slate-800 rounded-2xl">
+        <AlertCircle className="w-8 h-8 text-rose-500 mx-auto mb-3" />
+        <p className="text-sm text-slate-500 font-bold">Failed to load data for {stockName}</p>
+        <p className="text-[10px] text-slate-600 mt-1 uppercase tracking-widest">{symbol}</p>
       </div>
     );
   }
@@ -180,10 +177,10 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
   if (!hasAnyData) {
     const stockName = stockMapping?.name || symbol;
     return (
-      <div ref={containerRef} className="p-10 text-center bg-slate-900/30 border border-slate-800/60 rounded-2xl">
-        <AlertCircle className="w-7 h-7 text-amber-500/70 mx-auto mb-4" />
-        <p className="text-sm text-slate-400 font-black">No data for {stockName}</p>
-        <p className="text-[9px] text-slate-600 mt-1 uppercase tracking-[0.15em] font-black">{symbol} — not mapped to MoneyControl</p>
+      <div ref={containerRef} className="p-8 text-center bg-slate-900/30 border border-slate-800 rounded-2xl">
+        <AlertCircle className="w-8 h-8 text-amber-500 mx-auto mb-3" />
+        <p className="text-sm text-slate-400 font-bold">No MoneyControl data available for {stockName}</p>
+        <p className="text-[10px] text-slate-600 mt-1 uppercase tracking-widest">{symbol} — not mapped to a MoneyControl ID</p>
       </div>
     );
   }
@@ -225,203 +222,137 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
     { key: 'trendlyne',  label: 'Trendlyne'   },
   ];
 
-  const isPositiveChange = parseFloat(String(changePct || 0)) >= 0;
-
   return (
-    <div ref={containerRef} className="space-y-0">
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,400;0,500;1,400&family=Barlow+Condensed:wght@400;600;700;800;900&display=swap');`}</style>
+    <div ref={containerRef} className="space-y-4">
 
-      {/* ══ PRICE HERO HEADER ══ */}
+      {/* ── HEADER: Scores (Only show in 'all' or 'overview') ── */}
       {(!section || section === 'all' || section === 'overview') && (
-        <div className="relative overflow-hidden rounded-2xl border border-slate-800/70 mb-3" style={{ background: 'linear-gradient(135deg, #050b18 0%, #0d1520 50%, #060c16 100%)' }}>
-          {/* Terminal grid texture */}
-          <div className="absolute inset-0 opacity-[0.025]" style={{ backgroundImage: 'linear-gradient(rgba(148,163,184,1) 1px, transparent 1px), linear-gradient(90deg, rgba(148,163,184,1) 1px, transparent 1px)', backgroundSize: '28px 28px' }} />
-          {/* Top accent line */}
-          <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-blue-500/50 to-transparent" />
-
-          <div className="relative z-10 p-5">
-            <div className="flex items-start justify-between gap-4 flex-wrap">
-              {/* Left: Identity + Score rings */}
-              <div>
-                <div className="flex items-center gap-2.5 mb-1">
-                  <span
-                    className="text-[26px] font-black text-white tracking-tight leading-none"
-                    style={{ fontFamily: "'Barlow Condensed', sans-serif" }}
-                  >
-                    {symbol}
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2 pr-4 border-r border-slate-800">
+              <Zap className="w-4 h-4 text-blue-500" />
+              <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">AlphaQuant V2</span>
+              {alphaData && (
+                <div className="flex items-center gap-2">
+                  <span className={cn(
+                    "text-[9px] font-black px-2 py-0.5 rounded uppercase",
+                    alphaData.score.score >= 70 ? "bg-blue-500/20 text-blue-400" :
+                    alphaData.score.score >= 50 ? "bg-slate-800 text-slate-400" :
+                    "bg-rose-500/10 text-rose-500"
+                  )}>
+                    Rank: #{alphaData.score.score.toFixed(1)}
                   </span>
-                  <span className="text-[8px] font-black text-slate-500 bg-slate-800/80 border border-slate-700/50 px-2 py-0.5 rounded-md uppercase tracking-[0.12em] self-center">
-                    NSE
-                  </span>
-                  {stockMapping?.name && (
-                    <span className="text-[11px] text-slate-400 font-medium truncate max-w-[180px] self-center">
-                      {stockMapping.name}
-                    </span>
-                  )}
+                  <span className="text-[8px] font-black text-blue-500/60 uppercase">{alphaData.score.classification}</span>
                 </div>
-
-                {/* Score rings */}
-                <div className="flex items-end gap-4 mt-4">
-                  {alphaData && (
-                    <ScoreRing
-                      score={alphaData.score.score}
-                      label="AlphaQuant"
-                      color={alphaData.score.score >= 70 ? '#3b82f6' : alphaData.score.score >= 50 ? '#f59e0b' : '#f43f5e'}
-                      size={68}
-                      sublabel={alphaData.score.classification?.slice(0, 6)}
-                    />
-                  )}
-                  {classification && (
-                    <ScoreRing
-                      score={classification.stockScore}
-                      label="MoneyCtrl"
-                      color={classification.stockScore >= 70 ? '#10b981' : classification.stockScore >= 50 ? '#f59e0b' : '#f43f5e'}
-                      size={68}
-                    />
-                  )}
-                  {tb?.portalScore?.score != null && (
-                    <ScoreRing
-                      score={Number(tb.portalScore.score)}
-                      max={5}
-                      label="TradeBrains"
-                      color={Number(tb.portalScore.score) >= 3.5 ? '#8b5cf6' : Number(tb.portalScore.score) >= 2.5 ? '#f59e0b' : '#f43f5e'}
-                      size={68}
-                      sublabel="/5"
-                    />
-                  )}
-                </div>
-
-                {/* Company profile strip */}
-                {tb?.profile && (
-                  <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1">
-                    {tb.profile.founded_year && (
-                      <span className="text-[9px] text-slate-500 font-bold">
-                        Est. <span className="text-slate-300 font-black">{tb.profile.founded_year}</span>
-                      </span>
-                    )}
-                    {tb.profile.chairman && (
-                      <span className="text-[9px] text-slate-500 font-bold">
-                        Chair: <span className="text-slate-300 font-black">{tb.profile.chairman}</span>
-                      </span>
-                    )}
-                    {tb.profile.website && (
-                      <a href={tb.profile.website} target="_blank" rel="noopener noreferrer"
-                        className="text-[9px] font-black text-blue-400/80 hover:text-blue-300 uppercase tracking-widest transition-colors">
-                        Website ↗
-                      </a>
-                    )}
-                    {Array.isArray(tb?.overviewData?.stock_mentions?.ace_investors) && tb.overviewData.stock_mentions.ace_investors.length > 0 && (
-                      <div className="flex items-center gap-1.5">
-                        <Users className="w-3 h-3 text-violet-400 shrink-0" />
-                        <span className="text-[9px] font-black text-violet-400">
-                          {tb.overviewData.stock_mentions.ace_investors.slice(0, 2).map((a: any) => a.name || a).join(', ')}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Right: Price + 52w range + timeframe */}
-              <div className="text-right shrink-0">
-                <div className="flex items-baseline justify-end gap-1">
-                  <span className="text-[10px] font-black text-slate-500" style={{ fontFamily: "'DM Mono', monospace" }}>₹</span>
-                  <span
-                    className="text-[36px] font-black text-white leading-none tabular-nums tracking-tight"
-                    style={{ fontFamily: "'DM Mono', monospace" }}
-                  >
-                    {currentPrice}
-                  </span>
-                </div>
-                <div className={cn(
-                  "flex items-center justify-end gap-1.5 mt-1.5",
-                  isPositiveChange ? "text-emerald-400" : "text-rose-400"
-                )}>
-                  {isPositiveChange ? <TrendingUp className="w-3.5 h-3.5" /> : <TrendingDown className="w-3.5 h-3.5" />}
-                  <span className="text-[15px] font-black tabular-nums" style={{ fontFamily: "'DM Mono', monospace" }}>
-                    {isPositiveChange ? '+' : ''}{changePct}%
-                  </span>
-                </div>
-
-                {/* 52-week range bar */}
-                {(eq?.high52 || eq?.low52) && (() => {
-                  const hi52 = eq?.high52;
-                  const lo52 = eq?.low52;
-                  const lo = parseFloat(String(lo52 || 0));
-                  const hi = parseFloat(String(hi52 || 0));
-                  const cur = parseFloat(String(currentPrice));
-                  const pct = isNaN(lo) || isNaN(hi) || hi === lo ? 50 : Math.min(100, Math.max(0, ((cur - lo) / (hi - lo)) * 100));
-                  return (
-                    <div className="mt-4 w-44 ml-auto">
-                      <div className="flex justify-between text-[7px] font-black text-slate-600 uppercase tracking-widest mb-1.5">
-                        <span>52W Low</span>
-                        <span>52W High</span>
-                      </div>
-                      <div className="h-1.5 bg-slate-800/80 rounded-full overflow-hidden relative">
-                        <div className="absolute inset-y-0 left-0 rounded-full" style={{ width: `${pct}%`, background: `linear-gradient(90deg, #1d4ed8 0%, ${isPositiveChange ? '#10b981' : '#f43f5e'} 100%)` }} />
-                        <div className="absolute inset-y-0 w-1 bg-white/80 rounded-full shadow-sm" style={{ left: `${pct}%`, transform: 'translateX(-50%)' }} />
-                      </div>
-                      <div className="flex justify-between mt-1" style={{ fontFamily: "'DM Mono', monospace" }}>
-                        <span className="text-[8px] font-black text-rose-400">₹{lo52 || '—'}</span>
-                        <span className="text-[8px] font-black text-emerald-400">₹{hi52 || '—'}</span>
-                      </div>
-                    </div>
-                  );
-                })()}
-
-                {/* Timeframe selector */}
-                <div className="flex gap-0.5 bg-slate-950/60 rounded-xl p-1 border border-slate-800/50 mt-3 justify-end">
-                  {(['D', 'W', 'M'] as Timeframe[]).map(tf => (
-                    <button
-                      key={tf}
-                      onClick={() => setTimeframe(tf)}
-                      className={cn(
-                        "px-3.5 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-[0.1em] transition-all",
-                        timeframe === tf
-                          ? "bg-blue-600 text-white shadow-lg shadow-blue-900/30"
-                          : "text-slate-500 hover:text-slate-300"
-                      )}
-                    >
-                      {tf === 'D' ? 'Daily' : tf === 'W' ? 'Weekly' : 'Monthly'}
-                    </button>
-                  ))}
-                </div>
-              </div>
+              )}
             </div>
+            <div className="flex items-center gap-2">
+              <BrainCircuit className="w-4 h-4 text-emerald-500" />
+              <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">MoneyControl</span>
+              {classification && (
+                <span className={cn(
+                  "text-[9px] font-black px-2 py-0.5 rounded uppercase",
+                  classification.stockScore >= 70 ? "bg-emerald-500/10 text-emerald-500" :
+                  classification.stockScore >= 50 ? "bg-amber-500/10 text-amber-500" :
+                  "bg-rose-500/10 text-rose-500"
+                )}>
+                  Score: {classification.stockScore}
+                </span>
+              )}
+            </div>
+            {(() => {
+              const tbScore = tb?.portalScore?.score;
+              if (tbScore == null || typeof tbScore !== 'number') return null;
+              const pct = Math.round((tbScore / 5) * 100);
+              return (
+                <div className="flex items-center gap-2 pl-4 border-l border-slate-800">
+                  <BarChart3 className="w-4 h-4 text-violet-500" />
+                  <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">TradeBrains</span>
+                  <span className={cn(
+                    "text-[9px] font-black px-2 py-0.5 rounded uppercase",
+                    pct >= 60 ? "bg-violet-500/10 text-violet-400" :
+                    pct >= 40 ? "bg-amber-500/10 text-amber-400" :
+                    "bg-rose-500/10 text-rose-500"
+                  )}>
+                    {tbScore.toFixed(2)}/5
+                  </span>
+                </div>
+              );
+            })()}
+          </div>
+          <div className="flex gap-1 bg-slate-900 rounded-lg p-0.5 border border-slate-800">
+            {(['D', 'W', 'M'] as Timeframe[]).map(tf => (
+              <button
+                key={tf}
+                onClick={() => setTimeframe(tf)}
+                className={cn(
+                  "px-3 py-1.5 rounded-md text-[9px] font-black uppercase tracking-widest transition-all",
+                  timeframe === tf ? "bg-blue-600 text-white shadow-lg" : "text-slate-500 hover:text-white"
+                )}
+              >
+                {tf === 'D' ? 'Daily' : tf === 'W' ? 'Weekly' : 'Monthly'}
+              </button>
+            ))}
           </div>
         </div>
       )}
 
-      {/* ══ KEY METRICS STRIP ══ */}
+      {/* ── KEY STATS (Show in 'all' or 'overview') ── */}
       {(!section || section === 'all' || activeTab === 'overview') && (
-        <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2 mb-3">
-          <CompactMetricCard label="Price" value={`₹${currentPrice}`}
-            sub={changePct ? `${isPositiveChange ? '+' : ''}${changePct}%` : undefined}
-            color={isPositiveChange ? 'text-emerald-400' : 'text-rose-400'} icon={Activity} />
-          <CompactMetricCard label="P/E (TTM)" value={eq?.PE || sp?.scTtm || essentials?.pe || tb?.keyMetrics?.pe || '—'}
-            sub={`Sec: ${essentials?.sectorPe || eq?.IND_PE || tb?.keyMetrics?.industry_pe || '—'}`} icon={BarChart3} />
+        <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
+          <CompactMetricCard label="Price" value={`₹${currentPrice}`} sub={changePct ? `${parseFloat(String(changePct)) >= 0 ? '+' : ''}${changePct}%` : undefined}
+            color={parseFloat(String(changePct || 0)) >= 0 ? 'text-emerald-400' : 'text-rose-400'} icon={Activity} />
+          <CompactMetricCard label="P/E (TTM)" value={eq?.PE || sp?.scTtm || essentials?.pe || tb?.keyMetrics?.pe || '—'} sub={`Sec: ${essentials?.sectorPe || eq?.IND_PE || tb?.keyMetrics?.industry_pe || '—'}`} icon={BarChart3} />
           <CompactMetricCard label="P/B Ratio" value={eq?.PB || essentials?.pb || sp?.priceBook || '—'} icon={PieChart} />
-          <CompactMetricCard label="ROE %"
-            value={tb?.keyMetrics?.roe != null ? `${Number(tb.keyMetrics.roe).toFixed(1)}%` : '—'}
-            color="text-emerald-400" icon={TrendingUp} />
-          <CompactMetricCard label="Mkt Cap"
-            value={essentials?.marketCap || eq?.MKTCAP ? `₹${String(eq?.MKTCAP || essentials?.marketCap || '0').replace(/[^\d.]/g, '')}Cr` : '—'}
-            color="text-blue-400" icon={Users} />
-          <CompactMetricCard label="Div Yield"
-            value={essentials?.dividendYield ? `${essentials.dividendYield}%` : eq?.DY ? `${eq.DY}%` : tb?.keyMetrics?.divyield ? `${tb.keyMetrics.divyield}%` : '—'}
-            color="text-amber-400" icon={Zap} />
+          <CompactMetricCard label="ROE %" value={tb?.keyMetrics?.roe != null ? `${Number(tb.keyMetrics.roe).toFixed(1)}%` : '—'} color="text-emerald-400" icon={TrendingUp} />
+          <CompactMetricCard label="Market Cap" value={essentials?.marketCap || eq?.MKTCAP ? `₹${String(eq?.MKTCAP || essentials?.marketCap || '0').replace(/[^\d.]/g, '')}Cr` : '—'} color="text-blue-400" icon={Users} />
+          <CompactMetricCard label="Div Yield" value={essentials?.dividendYield ? `${essentials.dividendYield}%` : eq?.DY ? `${eq.DY}%` : tb?.keyMetrics?.divyield ? `${tb.keyMetrics.divyield}%` : '—'} color="text-amber-400" icon={Zap} />
         </div>
       )}
 
-      {/* ══ TAB BAR ══ */}
+      {/* ── COMPANY PROFILE (Only show if section is 'all') ── */}
+      {(!section || section === 'all') && (tb?.profile || tb?.overviewData?.stock_mentions) && (
+        <div className="flex flex-wrap gap-3">
+          {tb?.profile && (
+            <div className="flex-1 min-w-0 flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl">
+              {tb.profile.founded_year && (
+                <span className="text-[9px] font-bold text-slate-500">Founded <span className="text-slate-300 font-black">{tb.profile.founded_year}</span></span>
+              )}
+              {tb.profile.chairman && (
+                <span className="text-[9px] font-bold text-slate-500">Chairman <span className="text-slate-300 font-black">{tb.profile.chairman}</span></span>
+              )}
+              {tb.profile.website && (
+                <a href={tb.profile.website} target="_blank" rel="noopener noreferrer"
+                  className="text-[9px] font-black text-violet-400 hover:text-violet-300 uppercase tracking-widest">
+                  Website ↗
+                </a>
+              )}
+              {tb.profile.address && (
+                <span className="text-[9px] font-bold text-slate-600 truncate">{tb.profile.address}</span>
+              )}
+            </div>
+          )}
+          {Array.isArray(tb?.overviewData?.stock_mentions?.ace_investors) && tb.overviewData.stock_mentions.ace_investors.length > 0 && (
+            <div className="flex items-center gap-2 px-4 py-2.5 bg-violet-500/5 border border-violet-500/20 rounded-xl">
+              <Users className="w-3 h-3 text-violet-500 shrink-0" />
+              <span className="text-[9px] font-black text-violet-400 uppercase tracking-widest">Ace Investors:</span>
+              <span className="text-[9px] font-bold text-slate-300">
+                {tb.overviewData.stock_mentions.ace_investors.map((a: any) => a.name || a).join(', ')}
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── TAB BAR (Only show if section is 'all' or undefined) ── */}
       {(!section || section === 'all') && (
-        <div className="relative flex border-b border-slate-800/60 overflow-x-auto mb-4 scrollbar-none">
+        <div className="flex border-b border-slate-800 overflow-x-auto">
           {TABS.map(tab => (
             <button
               key={tab.key}
               onClick={() => setActiveTab(tab.key)}
               className={cn(
-                "relative px-5 py-2.5 text-[10px] font-black uppercase tracking-[0.12em] transition-all whitespace-nowrap border-b-2 -mb-px",
+                "px-5 py-2.5 text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap border-b-2 -mb-px",
                 activeTab === tab.key
                   ? "border-blue-500 text-blue-400"
                   : "border-transparent text-slate-500 hover:text-slate-300"
@@ -433,48 +364,40 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
         </div>
       )}
 
-
       {/* ══════════════════════════════════════════════════════════════ */}
       {activeTab === 'overview' && (
         <div className="space-y-4">
 
-          {/* Intelligence Grid */}
+          {/* High-Density Intelligence Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-            {/* AlphaQuant Factor Breakdown — premium bar chart style */}
+            {/* AlphaQuant Factor Breakdown */}
             {alphaData && (
-              <div className="bg-slate-950/60 border border-slate-800/70 rounded-2xl p-4 flex flex-col gap-3 min-h-[160px]">
-                <div className="flex items-center justify-between">
-                  <p className="text-[9px] font-black text-blue-400 uppercase tracking-[0.12em] flex items-center gap-1.5">
-                    <Zap className="w-3 h-3" /> AlphaQuant
-                  </p>
-                  <span className="text-[9px] font-black text-blue-400/70 bg-blue-500/10 border border-blue-500/20 px-2 py-0.5 rounded-full">
-                    {alphaData.score.classification}
-                  </span>
-                </div>
-                <div className="space-y-2 flex-1">
+              <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-3 flex flex-col justify-between min-h-[140px]">
+                <p className="text-[9px] font-black text-blue-500 uppercase tracking-widest mb-3 flex items-center gap-1.5">
+                  <Zap className="w-3 h-3" /> AlphaQuant Core
+                </p>
+                <div className="grid grid-cols-5 gap-1">
                   {[
-                    { label: 'Technical',    value: alphaData.factors.technical,   hex: '#3b82f6' },
-                    { label: 'Fundamental',  value: alphaData.factors.fundamental, hex: '#10b981' },
-                    { label: 'Momentum',     value: alphaData.factors.momentum,    hex: '#8b5cf6' },
-                    { label: 'Valuation',    value: alphaData.factors.valuation,   hex: '#f59e0b' },
-                    { label: 'Delivery',     value: alphaData.factors.delivery,    hex: '#f43f5e' },
+                    { label: 'TECH', value: alphaData.factors.technical,    color: 'text-blue-400'    },
+                    { label: 'FUND', value: alphaData.factors.fundamental,  color: 'text-emerald-400' },
+                    { label: 'MOM',  value: alphaData.factors.momentum,     color: 'text-purple-400'  },
+                    { label: 'VAL',  value: alphaData.factors.valuation,    color: 'text-amber-400'   },
+                    { label: 'DELV', value: alphaData.factors.delivery,     color: 'text-rose-400'    },
                   ].map((factor) => (
-                    <div key={factor.label}>
-                      <div className="flex items-center justify-between mb-0.5">
-                        <span className="text-[8px] font-black text-slate-500 uppercase tracking-tight">{factor.label}</span>
-                        <span className="text-[9px] font-black tabular-nums" style={{ color: factor.hex, fontFamily: "'DM Mono', monospace" }}>{factor.value.toFixed(1)}</span>
-                      </div>
-                      <div className="h-1 bg-slate-800/80 rounded-full overflow-hidden">
-                        <motion.div
-                          initial={{ width: 0 }}
-                          animate={{ width: `${Math.min(100, factor.value * 10)}%` }}
-                          transition={{ duration: 0.8, ease: 'easeOut', delay: 0.1 }}
-                          className="h-full rounded-full"
-                          style={{ backgroundColor: factor.hex }}
-                        />
-                      </div>
+                    <div key={factor.label} className="text-center">
+                      <span className={cn("text-[10px] font-black italic", factor.color)}>{factor.value.toFixed(1)}</span>
+                      <p className="text-[6px] font-black text-slate-600 uppercase tracking-tighter">{factor.label}</p>
                     </div>
                   ))}
+                </div>
+                <div className="mt-3">
+                  <div className="flex items-center justify-between text-[8px] font-black uppercase tracking-widest text-slate-600 mb-1">
+                    <span>Aggregate</span>
+                    <span className="text-blue-400">{(alphaData.factors.momentum * 10).toFixed(0)}%</span>
+                  </div>
+                  <div className="h-0.5 w-full bg-slate-900 rounded-full overflow-hidden">
+                    <div className="h-full bg-blue-500 rounded-full" style={{ width: `${alphaData.factors.momentum * 10}%` }} />
+                  </div>
                 </div>
               </div>
             )}
@@ -483,37 +406,33 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
             {tb?.portalScore && (() => {
               const ps = tb.portalScore;
               const dims = [
-                { label: 'Performance', val: ps.performance,   hex: '#3b82f6' },
-                { label: 'Growth',      val: ps.growth,        hex: '#10b981' },
-                { label: 'Profit',      val: ps.profitability, hex: '#14b8a6' },
-                { label: 'Valuation',   val: ps.valuation,     hex: '#f59e0b' },
-                { label: 'Ownership',   val: ps.ownership,     hex: '#8b5cf6' },
-                { label: 'Quality',     val: ps.quality,       hex: '#a855f7' },
+                { label: 'Perf',   val: ps.performance,   color: 'bg-blue-500',    text: 'text-blue-400'    },
+                { label: 'Growth', val: ps.growth,        color: 'bg-emerald-500', text: 'text-emerald-400' },
+                { label: 'Profit', val: ps.profitability, color: 'bg-teal-500',    text: 'text-teal-400'    },
+                { label: 'Value',  val: ps.valuation,     color: 'bg-amber-500',   text: 'text-amber-400'   },
+                { label: 'Owner',  val: ps.ownership,     color: 'bg-purple-500',  text: 'text-purple-400'  },
+                { label: 'Qual',   val: ps.quality,       color: 'bg-violet-500',  text: 'text-violet-400'  },
               ].filter(d => d.val != null);
               if (dims.length === 0) return null;
-              const scoreNum = Number(ps.score);
               return (
-                <div className="bg-slate-950/60 border border-slate-800/70 rounded-2xl p-4 min-h-[160px]">
-                  <div className="flex items-center justify-between mb-3">
-                    <p className="text-[9px] font-black text-violet-400 uppercase tracking-[0.12em] flex items-center gap-1.5">
-                      <BarChart3 className="w-3 h-3" /> TradeBrains
+                <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-3 min-h-[140px]">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-[9px] font-black text-violet-500 uppercase tracking-widest flex items-center gap-1.5">
+                      <BarChart3 className="w-3 h-3" /> TB Matrix
                     </p>
-                    <span
-                      className="text-[13px] font-black tabular-nums"
-                      style={{ color: scoreNum >= 3.5 ? '#10b981' : scoreNum >= 2.5 ? '#f59e0b' : '#f43f5e', fontFamily: "'DM Mono', monospace" }}
-                    >
-                      {scoreNum.toFixed(1)}<span className="text-[9px] text-slate-600">/5</span>
-                    </span>
+                    <span className={cn("text-[10px] font-black italic",
+                      ps.score >= 3.5 ? "text-emerald-400" : ps.score >= 2.5 ? "text-amber-400" : "text-rose-400"
+                    )}>{Number(ps.score).toFixed(1)}/5</span>
                   </div>
-                  <div className="space-y-2">
+                  <div className="grid grid-cols-3 gap-y-1.5 gap-x-3">
                     {dims.map((d) => (
-                      <div key={d.label}>
-                        <div className="flex items-center justify-between mb-0.5">
-                          <span className="text-[8px] font-black text-slate-500 uppercase tracking-tight">{d.label}</span>
-                          <span className="text-[9px] font-black tabular-nums" style={{ color: d.hex, fontFamily: "'DM Mono', monospace" }}>{Number(d.val).toFixed(1)}</span>
+                      <div key={d.label} className="space-y-0.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[7px] font-black text-slate-500 uppercase tracking-tight">{d.label}</span>
+                          <span className={cn("text-[8px] font-black", d.text)}>{Number(d.val).toFixed(1)}</span>
                         </div>
-                        <div className="h-1 bg-slate-800/80 rounded-full overflow-hidden">
-                          <motion.div initial={{ width: 0 }} animate={{ width: `${(Number(d.val) / 5) * 100}%` }} transition={{ duration: 0.8, ease: 'easeOut' }} className="h-full rounded-full" style={{ backgroundColor: d.hex }} />
+                        <div className="h-0.5 w-full bg-slate-900 rounded-full overflow-hidden">
+                          <motion.div initial={{ width: 0 }} animate={{ width: `${(Number(d.val) / 5) * 100}%` }} className={cn("h-full rounded-full", d.color)} />
                         </div>
                       </div>
                     ))}
@@ -524,11 +443,11 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
 
             {/* Multi-Timeframe Confluence */}
             {(techD || techW || techM) && (
-              <div className="bg-slate-950/60 border border-slate-800/70 rounded-2xl p-4 min-h-[160px]">
-                <p className="text-[9px] font-black text-slate-400 uppercase tracking-[0.12em] flex items-center gap-1.5 mb-3">
-                  <Activity className="w-3 h-3 text-slate-500" /> Multi-TF Confluence
+              <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-3 min-h-[140px]">
+                <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-1.5 mb-2">
+                  <Activity className="w-3 h-3" /> Multi-TF Confluence
                 </p>
-                <div className="grid grid-cols-3 gap-1.5 mb-3">
+                <div className="grid grid-cols-3 gap-1.5 mb-2">
                   {[
                     { label: 'D', tech: techD },
                     { label: 'W', tech: techW_final },
@@ -571,37 +490,29 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
             )}
 
             {/* Active Signals List */}
-            <div className="bg-slate-950/60 border border-slate-800/70 rounded-2xl p-4 flex flex-col min-h-[160px]">
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-1.5">
-                  <Zap className="w-3 h-3 text-amber-400" />
-                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-[0.12em]">Active Signals</span>
-                </div>
-                <span className="text-[9px] font-black text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full">
-                  {allScreeners.length}
-                </span>
+            <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-3 flex flex-col min-h-[140px]">
+              <div className="flex items-center gap-1.5 mb-2">
+                <Zap className="w-3 h-3 text-amber-400" />
+                <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Active Signals ({allScreeners.length})</span>
               </div>
-              <div className="flex flex-col gap-1.5 overflow-y-auto flex-1 pr-0.5 scrollbar-none">
-                {allScreeners.slice(0, 8).map((screener, i) => {
+              <div className="grid grid-cols-2 gap-1.5 overflow-y-auto max-h-[85px] pr-1 scrollbar-none">
+                {allScreeners.slice(0, 10).map((screener, i) => {
                   const isBullish = screener.sentiment === 'bullish';
                   const isBearish = screener.sentiment === 'bearish';
                   return (
                     <div key={`${screener.id}-${i}`}
                       onClick={() => { setSelectedScreener(screener); setIsModalOpen(true); }}
-                      className={cn(
-                        "px-2.5 py-1.5 rounded-lg text-[8px] font-black border flex items-center gap-2 transition-all cursor-pointer active:scale-95",
-                        isBullish ? "bg-emerald-500/5 border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/10" :
-                        isBearish ? "bg-rose-500/5 border-rose-500/20 text-rose-400 hover:bg-rose-500/10" :
-                        "bg-slate-900/40 border-slate-800/60 text-slate-400 hover:bg-slate-800/40"
+                      className={cn("px-2 py-1 rounded-md text-[7px] font-black uppercase tracking-tighter border flex items-center gap-1.5 transition-all cursor-pointer hover:bg-slate-900 active:scale-95",
+                        isBullish ? "bg-emerald-500/5 border-emerald-500/20 text-emerald-400" :
+                        isBearish ? "bg-rose-500/5 border-rose-500/20 text-rose-400" :
+                        "bg-slate-900 border-slate-800 text-slate-400"
                       )}>
-                      {isBullish ? <TrendingUp className="w-2.5 h-2.5 shrink-0" /> : isBearish ? <TrendingDown className="w-2.5 h-2.5 shrink-0" /> : <Filter className="w-2.5 h-2.5 shrink-0" />}
-                      <span className="truncate uppercase tracking-tight">{screener.name}</span>
+                      {isBullish ? <TrendingUp className="w-2 h-2" /> : isBearish ? <TrendingDown className="w-2 h-2" /> : <Filter className="w-2 h-2" />}
+                      <span className="truncate">{screener.name}</span>
                     </div>
                   );
                 })}
-                {allScreeners.length === 0 && (
-                  <p className="text-[8px] text-slate-700 font-black text-center mt-4 uppercase tracking-widest">No active signals</p>
-                )}
+                {allScreeners.length === 0 && <p className="text-[8px] text-slate-700 italic font-bold text-center mt-4">No active signals</p>}
               </div>
             </div>
           </div>
@@ -609,81 +520,64 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {/* MC Classification */}
             {classification?.longDesc && (
-              <div className={cn(
-                "p-4 rounded-2xl border relative overflow-hidden flex flex-col justify-between",
-                classification.stockScore >= 70 ? "border-emerald-500/25" :
-                classification.stockScore >= 50 ? "border-amber-500/25" : "border-rose-500/25"
-              )} style={{ background: classification.stockScore >= 70 ? 'rgba(16,185,129,0.04)' : classification.stockScore >= 50 ? 'rgba(245,158,11,0.04)' : 'rgba(244,63,94,0.04)' }}>
-                <div className="absolute top-2 right-3 pointer-events-none opacity-[0.04]">
-                  <BrainCircuit className="w-20 h-20" />
-                </div>
+              <div className={cn("p-3 rounded-2xl border relative overflow-hidden flex flex-col justify-between",
+                classification.stockScore >= 70 ? "bg-emerald-500/5 border-emerald-500/20" :
+                classification.stockScore >= 50 ? "bg-amber-500/5 border-amber-500/20" :
+                "bg-rose-500/5 border-rose-500/20"
+              )}>
+                <div className="absolute top-0 right-0 p-4 opacity-[0.03] pointer-events-none"><BrainCircuit className="w-16 h-16" /></div>
                 <div className="relative z-10">
-                  <p className={cn(
-                    "text-[9px] font-black uppercase tracking-[0.12em] mb-2 flex items-center gap-1.5",
-                    classification.stockScore >= 70 ? "text-emerald-400" : classification.stockScore >= 50 ? "text-amber-400" : "text-rose-400"
-                  )}>
+                  <p className="text-[9px] font-black text-emerald-500 uppercase tracking-widest mb-1.5 flex items-center gap-1.5">
                     <CheckCircle2 className="w-3 h-3" /> MC Expert Analysis
                   </p>
-                  <p className="text-[11px] text-slate-300 font-medium leading-relaxed">{classification.longDesc}</p>
+                  <p className="text-[11px] text-slate-300 font-medium italic leading-relaxed">{classification.longDesc}</p>
                 </div>
-                <div className="flex items-center gap-3 mt-4 relative z-10">
-                  <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest shrink-0">Score</span>
-                  <div className="flex-1 h-1.5 bg-slate-800/60 rounded-full overflow-hidden">
-                    <motion.div
-                      initial={{ width: 0 }}
-                      animate={{ width: `${classification.stockScore}%` }}
-                      transition={{ duration: 1, ease: 'easeOut' }}
-                      className={cn("h-full rounded-full", classification.stockScore >= 70 ? "bg-emerald-500" : classification.stockScore >= 50 ? "bg-amber-500" : "bg-rose-500")}
-                    />
+                <div className="flex items-center gap-3 mt-3 relative z-10">
+                  <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Score</span>
+                  <div className="flex-1 h-1 bg-slate-800 rounded-full overflow-hidden">
+                    <motion.div initial={{ width: 0 }} animate={{ width: `${classification.stockScore}%` }}
+                      className={cn("h-full rounded-full", classification.stockScore >= 70 ? "bg-emerald-500" : classification.stockScore >= 50 ? "bg-amber-500" : "bg-rose-500")} />
                   </div>
-                  <span className={cn(
-                    "text-[14px] font-black tabular-nums shrink-0",
+                  <span className={cn("text-[10px] font-black italic",
                     classification.stockScore >= 70 ? "text-emerald-400" : classification.stockScore >= 50 ? "text-amber-400" : "text-rose-400"
-                  )} style={{ fontFamily: "'DM Mono', monospace" }}>
-                    {classification.stockScore}<span className="text-[9px] text-slate-600 font-bold">/100</span>
-                  </span>
+                  )}>{classification.stockScore}<span className="text-[7px] text-slate-600 font-bold ml-0.5">/100</span></span>
                 </div>
               </div>
             )}
 
             {/* MC Investment Checklist */}
             {essentials?.checklist && (
-              <div className="bg-slate-950/60 border border-slate-800/70 rounded-2xl p-4">
-                <div className="flex items-center justify-between mb-4">
+              <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-3">
+                <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-1.5">
                     <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-[0.12em]">MC Checklist</span>
+                    <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">MC Checklist</span>
                   </div>
                   {essentials.passText && (
                     <div className="flex items-center gap-2">
-                      <span className="text-[8px] font-black text-emerald-400/80 tabular-nums" style={{ fontFamily: "'DM Mono', monospace" }}>{essentials.passYes}Y</span>
-                      <span className="text-[8px] text-slate-700">/</span>
-                      <span className="text-[8px] font-black text-rose-400/80 tabular-nums" style={{ fontFamily: "'DM Mono', monospace" }}>{essentials.passNo}N</span>
-                      <span className={cn(
-                        "text-[8px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider border",
-                        (essentials.passPercent ?? 0) >= 70 ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" :
-                        (essentials.passPercent ?? 0) >= 50 ? "bg-amber-500/10 text-amber-400 border-amber-500/20" :
-                        "bg-rose-500/10 text-rose-400 border-rose-500/20"
+                      <span className="text-[8px] font-black text-emerald-500/60">{essentials.passYes}Y</span>
+                      <span className="text-[8px] font-black text-rose-500/60">{essentials.passNo}N</span>
+                      <span className={cn("text-[8px] font-black px-1.5 py-0.5 rounded uppercase tracking-widest",
+                        (essentials.passPercent ?? 0) >= 70 ? "bg-emerald-500/10 text-emerald-400" :
+                        (essentials.passPercent ?? 0) >= 50 ? "bg-amber-500/10 text-amber-400" : "bg-rose-500/10 text-rose-400"
                       )}>{essentials.passText}</span>
                     </div>
                   )}
                 </div>
                 <div className="grid grid-cols-2 gap-x-4 gap-y-3">
                   {(['financials', 'industry', 'ownership', 'others'] as const).map((key) => {
-                    const labelMap = { financials: 'Financials', industry: 'Industry', ownership: 'Ownership', others: 'Others' };
-                    const colorMap = { financials: '#3b82f6', industry: '#8b5cf6', ownership: '#f59e0b', others: '#64748b' };
+                    const labelMap = { financials: 'FIN', industry: 'IND', ownership: 'OWN', others: 'OTH' };
+                    const colorMap = { financials: 'text-blue-500', industry: 'text-purple-500', ownership: 'text-amber-500', others: 'text-slate-500' };
                     const items = essentials.checklist![key];
                     if (!items?.length) return null;
                     return (
                       <div key={key}>
-                        <p className="text-[8px] font-black uppercase tracking-[0.1em] mb-2 pb-1 border-b border-slate-800/50" style={{ color: colorMap[key] }}>{labelMap[key]}</p>
-                        <div className="space-y-1">
+                        <p className={cn("text-[7px] font-black uppercase tracking-widest mb-1.5 border-b border-slate-800/50 pb-0.5", colorMap[key])}>{labelMap[key]}</p>
+                        <div className="grid grid-cols-1 gap-1">
                           {items.slice(0, 3).map((item, i) => (
-                            <div key={i} className="flex items-center justify-between px-2 py-1.5 bg-slate-900/30 rounded-lg border border-slate-800/30">
+                            <div key={i} className="flex items-center justify-between px-1.5 py-1 bg-slate-900/30 rounded border border-slate-800/20">
                               <span className="text-[8px] text-slate-500 font-bold leading-tight truncate mr-2">{item.question}</span>
-                              <span className={cn("text-[8px] font-black shrink-0 px-1.5 py-0.5 rounded-full",
-                                item.answer ? "text-emerald-400 bg-emerald-500/10" : "text-rose-400 bg-rose-500/10"
-                              )}>
+                              <span className={cn("text-[8px] font-black shrink-0", item.answer ? "text-emerald-500" : "text-rose-500")}>
                                 {item.answer ? "YES" : "NO"}
                               </span>
                             </div>
@@ -713,11 +607,11 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
       {/* FINANCIALS TAB                                                 */}
       {/* ══════════════════════════════════════════════════════════════ */}
       {activeTab === 'financials' && (
-        <div className="space-y-4">
+        <div className="space-y-6">
 
-          {/* Valuation & Key Metrics */}
+          {/* High-Density Valuation & Key Metrics */}
           {(fov || tb?.keyMetrics) && (
-            <Card title="Valuation & Profitability Matrix" icon={BarChart3} accent="#f59e0b">
+            <Card title="Valuation & Profitability Matrix" icon={BarChart3}>
               <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2 pt-2">
                 {[
                   { label: 'TTM EPS',    val: fov?.ttmEpsText || tb?.keyMetrics?.eps, color: 'text-blue-400' },
@@ -979,30 +873,17 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
 
           {/* Piotroski Score */}
           {detailedInsights?.financials?.piotroskiData && (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <div className="p-5 bg-slate-950/70 border border-slate-800/70 rounded-2xl text-center flex flex-col items-center gap-2">
-                <p className="text-[8px] font-black text-slate-500 uppercase tracking-[0.15em]">Piotroski Score</p>
-                <p
-                  className={cn("text-3xl font-black tracking-tight tabular-nums",
-                    parseInt(detailedInsights.financials.piotroskiData.score) >= 7 ? "text-emerald-400" :
-                    parseInt(detailedInsights.financials.piotroskiData.score) >= 5 ? "text-amber-400" : "text-rose-400"
-                  )}
-                  style={{ fontFamily: "'DM Mono', monospace" }}
-                >
-                  {detailedInsights.financials.piotroskiData.score}
-                  <span className="text-lg text-slate-600">/9</span>
-                </p>
-                <span className={cn(
-                  "text-[8px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider border",
-                  parseInt(detailedInsights.financials.piotroskiData.score) >= 7 ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/20" :
-                  parseInt(detailedInsights.financials.piotroskiData.score) >= 5 ? "text-amber-400 bg-amber-500/10 border-amber-500/20" :
-                  "text-rose-400 bg-rose-500/10 border-rose-500/20"
-                )}>
-                  {detailedInsights.financials.piotroskiData.shortDesc}
-                </span>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="p-4 bg-slate-950 border border-slate-800 rounded-2xl text-center">
+                <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Piotroski Score</p>
+                <p className={cn("text-2xl font-black italic",
+                  parseInt(detailedInsights.financials.piotroskiData.score) >= 7 ? "text-emerald-400" :
+                  parseInt(detailedInsights.financials.piotroskiData.score) >= 5 ? "text-amber-400" : "text-rose-400"
+                )}>{detailedInsights.financials.piotroskiData.score}/9</p>
+                <p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest mt-1">{detailedInsights.financials.piotroskiData.shortDesc}</p>
               </div>
-              <div className="md:col-span-2 p-4 bg-slate-950/70 border border-slate-800/70 rounded-2xl flex items-center">
-                <p className="text-[11px] text-slate-400 leading-relaxed">{detailedInsights.financials.piotroskiData.tooltip}</p>
+              <div className="md:col-span-2 p-4 bg-slate-950 border border-slate-800 rounded-2xl flex items-center">
+                <p className="text-[10px] text-slate-400 italic font-medium">{detailedInsights.financials.piotroskiData.tooltip}</p>
               </div>
             </div>
           )}
@@ -1046,20 +927,19 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
       {/* TECHNICAL TAB                                                  */}
       {/* ══════════════════════════════════════════════════════════════ */}
       {activeTab === 'technical' && (
-        <div className="space-y-4">
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            <div className="lg:col-span-2 space-y-4">
-              {/* Historical Price Chart */}
-              <Card
-                title={useTVChart ? "Advanced TradingView Chart" : "Historical Price Action"}
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="lg:col-span-2 space-y-6">
+              {/* Historical Max Data Chart */}
+              <Card 
+                title={useTVChart ? "Advanced TradingView Chart" : "Historical Price Action"} 
                 icon={TrendingUp}
-                accent="#3b82f6"
                 action={
                   <button
                     onClick={() => setUseTVChart(!useTVChart)}
-                    className="px-3 py-1 bg-blue-600/15 hover:bg-blue-600/25 text-blue-400 text-[9px] font-black uppercase tracking-[0.1em] rounded-lg border border-blue-500/25 transition-all"
+                    className="px-3 py-1 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 text-[9px] font-black uppercase tracking-widest rounded-lg border border-blue-500/30 transition-all"
                   >
-                    {useTVChart ? 'Basic Chart' : 'Advanced Chart'}
+                    {useTVChart ? 'Show Basic Chart' : 'Show Advanced Chart'}
                   </button>
                 }
               >
@@ -1162,26 +1042,26 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
 
               {/* Technical Analysis */}
               {tech && (
-                <Card title={`Technical Signals — ${timeframe === 'D' ? 'Daily' : timeframe === 'W' ? 'Weekly' : 'Monthly'}`} icon={Activity} accent="#10b981">
-                  <div className="space-y-4">
+                <Card title={`Technical Signals (${timeframe === 'D' ? 'Daily' : timeframe === 'W' ? 'Weekly' : 'Monthly'})`} icon={Activity}>
+                  <div className="space-y-6">
                     {tech.sentiments && (
-                      <div className="p-4 bg-slate-950/60 rounded-2xl border border-slate-800/60">
-                        <div className="flex items-center justify-between mb-4">
+                      <div className="p-3 bg-slate-950/60 rounded-2xl border border-slate-800">
+                        <div className="flex items-center justify-between mb-3">
                           <div className="flex items-center gap-2">
-                            <Activity className="w-3.5 h-3.5 text-blue-400" />
-                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-[0.12em]">Sentiment Breakdown</span>
+                            <Activity className="w-3.5 h-3.5 text-blue-500" />
+                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Sentiment Hub</span>
                           </div>
                           <SentimentBadge sentiment={tech.sentiments.indication} />
                         </div>
-                        <div className="grid grid-cols-3 gap-2">
+                        <div className="grid grid-cols-3 gap-1.5">
                           {[
-                            { label: 'Bullish', val: tech.sentiments.totalBullish, color: 'text-emerald-400', bg: 'bg-emerald-500/5 border-emerald-500/15' },
-                            { label: 'Neutral', val: tech.sentiments.totalNeutral, color: 'text-slate-400', bg: 'bg-slate-800/20 border-slate-700/20' },
-                            { label: 'Bearish', val: tech.sentiments.totalBearish, color: 'text-rose-400', bg: 'bg-rose-500/5 border-rose-500/15' },
+                            { label: 'Bull', val: tech.sentiments.totalBullish, color: 'text-emerald-400' },
+                            { label: 'Neu', val: tech.sentiments.totalNeutral, color: 'text-slate-400' },
+                            { label: 'Bear', val: tech.sentiments.totalBearish, color: 'text-rose-400' },
                           ].map(s => (
-                            <div key={s.label} className={cn("p-3 rounded-xl border text-center", s.bg)}>
-                              <p className={cn("text-xl font-black tabular-nums", s.color)} style={{ fontFamily: "'DM Mono', monospace" }}>{s.val}</p>
-                              <p className="text-[7px] font-black uppercase tracking-[0.12em] text-slate-600 mt-0.5">{s.label}</p>
+                            <div key={s.label} className="p-1.5 bg-slate-900/40 rounded-xl border border-slate-800/30 text-center">
+                              <p className={cn("text-base font-black italic", s.color)}>{s.val}</p>
+                              <p className="text-[6px] font-black uppercase tracking-widest text-slate-600">{s.label}</p>
                             </div>
                           ))}
                         </div>
@@ -1282,7 +1162,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
           </div>
 
           {/* Unified Pivot Hub */}
-          <Card title="Pivot Alignment Dashboard" icon={Filter} accent="#8b5cf6">
+          <Card title="Pivot Alignment Dashboard" icon={Filter}>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pt-2">
               {/* MoneyControl Standard Pivots */}
               {tech?.pivotLevels && tech.pivotLevels.length > 0 && (
@@ -1363,40 +1243,21 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
             const isBull = ratingText.toLowerCase().includes('bullish') || ratingText.toLowerCase().includes('buy');
             const isBear = ratingText.toLowerCase().includes('bearish') || ratingText.toLowerCase().includes('sell');
             return (
-              <div className={cn(
-                "px-5 py-4 rounded-2xl border flex items-center justify-between gap-4",
-                isBull ? "border-emerald-500/25" : isBear ? "border-rose-500/25" : "border-slate-800/60"
-              )} style={{ background: isBull ? 'rgba(16,185,129,0.04)' : isBear ? 'rgba(244,63,94,0.04)' : 'rgba(15,23,42,0.4)' }}>
+              <div className={cn("p-4 rounded-2xl border flex items-center justify-between gap-4",
+                isBull ? "bg-emerald-500/5 border-emerald-500/20" :
+                isBear ? "bg-rose-500/5 border-rose-500/20" : "bg-slate-950 border-slate-800"
+              )}>
                 <div className="flex items-center gap-3">
                   <Zap className={cn("w-5 h-5", isBull ? "text-emerald-400" : isBear ? "text-rose-400" : "text-slate-500")} />
                   <div>
-                    <p className="text-[8px] font-black text-slate-500 uppercase tracking-[0.15em]">
-                      MC Technical Rating — {timeframe === 'D' ? 'Daily' : timeframe === 'W' ? 'Weekly' : 'Monthly'}
+                    <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">
+                      MC Technical Rating ({timeframe === 'D' ? 'Daily' : timeframe === 'W' ? 'Weekly' : 'Monthly'})
                     </p>
-                    <p className={cn(
-                      "text-base font-black uppercase tracking-tight mt-0.5",
-                      isBull ? "text-emerald-400" : isBear ? "text-rose-400" : "text-slate-300"
-                    )} style={{ fontFamily: "'Barlow Condensed', sans-serif" }}>
+                    <p className={cn("text-sm font-black uppercase italic", isBull ? "text-emerald-400" : isBear ? "text-rose-400" : "text-slate-300")}>
                       {ratingText || 'Neutral'}
                     </p>
                   </div>
                 </div>
-                {buyCount !== null && (
-                  <div className="flex gap-3 text-right shrink-0">
-                    <div className="text-center">
-                      <p className="text-[15px] font-black text-emerald-400 tabular-nums" style={{ fontFamily: "'DM Mono', monospace" }}>{buyCount}</p>
-                      <p className="text-[7px] font-black text-slate-600 uppercase">Buy</p>
-                    </div>
-                    <div className="text-center">
-                      <p className="text-[15px] font-black text-slate-400 tabular-nums" style={{ fontFamily: "'DM Mono', monospace" }}>{holdCount}</p>
-                      <p className="text-[7px] font-black text-slate-600 uppercase">Hold</p>
-                    </div>
-                    <div className="text-center">
-                      <p className="text-[15px] font-black text-rose-400 tabular-nums" style={{ fontFamily: "'DM Mono', monospace" }}>{sellCount}</p>
-                      <p className="text-[7px] font-black text-slate-600 uppercase">Sell</p>
-                    </div>
-                  </div>
-                )}
               </div>
             );
           })()}
@@ -1407,11 +1268,11 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
       {/* ANALYSIS TAB                                                   */}
       {/* ══════════════════════════════════════════════════════════════ */}
       {activeTab === 'analysis' && (
-        <div className="space-y-4">
+        <div className="space-y-6">
 
           {/* Intelligence Hub: Qualitative Factors */}
           {(swot || tb?.insights) && (
-            <Card title="Intelligence Hub — Qualitative Core" icon={Search} accent="#10b981">
+            <Card title="Intelligence Hub: Qualitative Core" icon={Search}>
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 pt-2">
                 {/* Alpha Drivers */}
                 <div className="bg-emerald-500/5 border border-emerald-500/10 rounded-2xl p-3">
@@ -1512,12 +1373,14 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
       {/* ANALYST TAB                                                    */}
       {/* ══════════════════════════════════════════════════════════════ */}
       {activeTab === 'analyst' && (
-        <div className="space-y-4">
+        <div className="space-y-6">
 
+          {/* Analyst Intelligence Dashboard */}
           {(ar || pf) && (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {/* Analyst Consensus */}
               {ar && (
-                <Card title="Market Consensus" icon={Users} accent="#8b5cf6">
+                <Card title="Market Consensus" icon={Users}>
                   <div className="space-y-3 pt-1">
                     <div className="flex justify-between items-center">
                       <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Sentiment</span>
@@ -1649,15 +1512,15 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
       {/* TRENDLYNE TAB                                                  */}
       {/* ══════════════════════════════════════════════════════════════ */}
       {activeTab === 'trendlyne' && (
-        <div className="space-y-4">
+        <div className="space-y-6">
           {loadingTlMetrics || loadingTlTa ? (
-            <div className="flex items-center justify-center p-10 border border-slate-800/50 border-dashed rounded-2xl">
-              <span className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-600 animate-pulse">Loading Trendlyne…</span>
+            <div className="flex items-center justify-center p-8 bg-slate-900/10 border border-slate-800 border-dashed rounded-2xl">
+              <span className="text-[10px] font-black uppercase tracking-widest text-slate-500 animate-pulse">Loading Trendlyne Data...</span>
             </div>
           ) : (
             <>
               {trendlyneMetrics?.body && (
-                <Card title="Stock Metrics — Trendlyne" icon={BarChart3} accent="#f59e0b">
+                <Card title="Stock Metrics (Trendlyne)" icon={BarChart3}>
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-2">
                     {Object.entries(trendlyneMetrics.body).filter(([key]) => key !== 'prepend_params' && key !== 'head').map(([key, metric]: [string, any]) => (
                       <div key={key} className={cn("p-3 rounded-xl border flex flex-col justify-between",

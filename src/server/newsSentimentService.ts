@@ -14,10 +14,6 @@ import db from './db';
 import crypto from 'crypto';
 import { fetchGlobalMarketData } from './globalMarketService';
 
-function toSqliteDateTime(date: Date): string {
-  return date.toISOString().replace('T', ' ').slice(0, 19);
-}
-
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export type NewsSentiment = 'BULLISH' | 'BEARISH' | 'NEUTRAL';
@@ -420,7 +416,7 @@ async function enrichWithAI(items: { id: string; title: string; summary: string;
 
 async function buildMarketSentimentSnapshot(): Promise<void> {
   // Last 4 hours of news
-  const cutoff = toSqliteDateTime(new Date(Date.now() - 4 * 60 * 60 * 1000));
+  const cutoff = new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString();
   const recent = db.prepare(`
     SELECT sentiment, sentiment_score, impact, category, sector, title
     FROM news_sentiment_items
@@ -536,29 +532,18 @@ async function buildMarketSentimentSnapshot(): Promise<void> {
 // ─── Query Helpers ────────────────────────────────────────────────────────────
 
 export function getLatestSentimentSnapshot(): MarketSentimentSnapshot | null {
-  const row = db.prepare(`
+  return db.prepare(`
     SELECT * FROM market_sentiment_snapshots ORDER BY snapshot_at DESC LIMIT 1
   `).get() as MarketSentimentSnapshot | null;
-  if (row && row.snapshot_at) {
-    row.snapshot_at = row.snapshot_at.replace(' ', 'T') + 'Z';
-  }
-  return row;
 }
 
 export function getSentimentHistory(hours = 24): MarketSentimentSnapshot[] {
-  const cutoff = toSqliteDateTime(new Date(Date.now() - hours * 60 * 60 * 1000));
-  const rows = db.prepare(`
+  const cutoff = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+  return db.prepare(`
     SELECT * FROM market_sentiment_snapshots
     WHERE snapshot_at >= ?
     ORDER BY snapshot_at ASC
   `).all(cutoff) as MarketSentimentSnapshot[];
-  
-  for (const r of rows) {
-    if (r.snapshot_at) {
-      r.snapshot_at = r.snapshot_at.replace(' ', 'T') + 'Z';
-    }
-  }
-  return rows;
 }
 
 export function getNewsItems(opts: {
@@ -569,7 +554,7 @@ export function getNewsItems(opts: {
   hours?: number;
 } = {}): NewsItem[] {
   const { limit = 60, category = 'ALL', sentiment = 'ALL', sourceType = 'ALL', hours = 8 } = opts;
-  const cutoff = toSqliteDateTime(new Date(Date.now() - hours * 60 * 60 * 1000));
+  const cutoff = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
 
   let query = `
     SELECT * FROM news_sentiment_items
@@ -591,7 +576,7 @@ export function getNewsItems(opts: {
 }
 
 export function getSectorSentiment(): { sector: string; bullish: number; bearish: number; neutral: number; netScore: number }[] {
-  const cutoff = toSqliteDateTime(new Date(Date.now() - 8 * 60 * 60 * 1000));
+  const cutoff = new Date(Date.now() - 8 * 60 * 60 * 1000).toISOString();
   const rows = db.prepare(`
     SELECT sector, sentiment, COUNT(*) as cnt
     FROM news_sentiment_items
@@ -618,7 +603,7 @@ export function getSectorSentiment(): { sector: string; bullish: number; bearish
 }
 
 export function getCorporateEventNews(): NewsItem[] {
-  const cutoff = toSqliteDateTime(new Date(Date.now() - 24 * 60 * 60 * 1000));
+  const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   return db.prepare(`
     SELECT * FROM news_sentiment_items
     WHERE fetched_at >= ?

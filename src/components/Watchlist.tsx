@@ -63,7 +63,7 @@ export const Watchlist: React.FC<WatchlistProps> = ({
             <WatchlistIcon className="w-5 h-5 text-indigo-400" />
             My Watchlist
           </h2>
-          <p className="text-zinc-500 text-xs mt-1">Tracking your selected assets</p>
+          <p className="text-slate-500 text-xs mt-1">Tracking your selected assets</p>
         </div>
       </div>
 
@@ -74,7 +74,7 @@ export const Watchlist: React.FC<WatchlistProps> = ({
             return (
               <Card 
                 key={stock.symbol} 
-                className="group hover:border-violet-500/30 transition-all cursor-pointer relative overflow-hidden flex flex-col justify-between" 
+                className="group hover:border-blue-500/30 transition-all cursor-pointer relative overflow-hidden flex flex-col justify-between" 
                 onClick={() => onSelectStock(stock.symbol)}
               >
                 <div>
@@ -93,7 +93,7 @@ export const Watchlist: React.FC<WatchlistProps> = ({
                       <h4 className="text-sm font-black text-white tracking-tight group-hover:text-amber-400 transition-colors uppercase italic leading-none truncate" title={stock.capturedName || stock.name}>
                         {stock.capturedName || stock.name}
                       </h4>
-                      <p className="text-[9px] font-black text-zinc-500 tracking-widest mt-1 uppercase">{stock.symbol}</p>
+                      <p className="text-[9px] font-black text-slate-500 tracking-widest mt-1 uppercase">{stock.symbol}</p>
                     </div>
                     <div className={cn(
                       "px-2 py-1 rounded-lg text-[10px] font-black shrink-0 ml-2 italic",
@@ -105,7 +105,7 @@ export const Watchlist: React.FC<WatchlistProps> = ({
                   
                   <div className="mt-4 flex items-end justify-between">
                      <div>
-                        <p className="text-[7px] font-black text-zinc-600 uppercase tracking-widest mb-1">LTP</p>
+                        <p className="text-[7px] font-black text-slate-600 uppercase tracking-widest mb-1">LTP</p>
                         <p className="text-xl font-black text-white tabular-nums tracking-tight italic">₹{stock.price.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
                      </div>
                      <div className="h-8 w-20">
@@ -119,11 +119,11 @@ export const Watchlist: React.FC<WatchlistProps> = ({
                 </div>
 
                 {/* Enriched Watchlist Metadata Badging */}
-                <div className="mt-4 pt-4 border-t border-white/[0.05] space-y-1.5 text-[8px] font-black text-zinc-500 uppercase tracking-widest">
+                <div className="mt-4 pt-4 border-t border-slate-800/50 space-y-1.5 text-[8px] font-black text-slate-500 uppercase tracking-widest">
                   {stock.capturedPrice != null && (
                     <div className="flex items-center justify-between">
                       <span>Captured Price</span>
-                      <span className="text-zinc-300 italic font-black text-[9px]">₹{stock.capturedPrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                      <span className="text-slate-300 italic font-black text-[9px]">₹{stock.capturedPrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                     </div>
                   )}
                   {stock.capturedSource && (
@@ -135,7 +135,7 @@ export const Watchlist: React.FC<WatchlistProps> = ({
                   {stock.capturedDate && (
                     <div className="flex items-center justify-between">
                       <span>Added Date</span>
-                      <span className="text-zinc-400 italic">
+                      <span className="text-slate-400 italic">
                         {new Date(stock.capturedDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
                       </span>
                     </div>
@@ -146,10 +146,10 @@ export const Watchlist: React.FC<WatchlistProps> = ({
           })}
         </div>
       ) : (
-        <div className="py-32 flex flex-col items-center justify-center bg-[#141416]/20 rounded-2xl border border-white/[0.05] border-dashed">
-          <WatchlistIcon className="w-12 h-12 text-zinc-700 mb-5" />
+        <div className="py-32 flex flex-col items-center justify-center bg-slate-900/20 rounded-2xl border border-white/[0.05] border-dashed">
+          <WatchlistIcon className="w-12 h-12 text-slate-700 mb-5" />
           <h3 className="text-white font-semibold text-lg tracking-tight mb-2">Your Watchlist is Empty</h3>
-          <p className="text-zinc-500 text-xs max-w-xs text-center leading-relaxed">
+          <p className="text-slate-500 text-xs max-w-xs text-center leading-relaxed">
             Add stocks to track them here.
           </p>
         </div>

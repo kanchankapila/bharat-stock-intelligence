@@ -24,7 +24,7 @@ export const IndexOverview: React.FC<{ className?: string; onSelectIndex?: (id: 
     return '';
   };
 
-  if (isLoading || !indices) return <div ref={ref} className="h-40 bg-[#141416]/80 animate-pulse rounded-2xl" />;
+  if (isLoading || !indices) return <div ref={ref} className="h-40 bg-slate-900/50 animate-pulse rounded-2xl" />;
 
   const groups: { name: string; list: any[] }[] = (indices as any)?.data?.indiceList ?? [];
   const keyList = groups.find(g => g.name === 'Key Indices')?.list ?? [];
@@ -41,12 +41,12 @@ export const IndexOverview: React.FC<{ className?: string; onSelectIndex?: (id: 
               key={idx.name} 
               onClick={() => isClickable && onSelectIndex(indexId, idx.name)}
               className={cn(
-                "p-4 bg-[#0c0c0e] border border-white/[0.07] rounded-2xl transition-all group relative overflow-hidden",
-                isClickable ? "cursor-pointer hover:border-violet-500/30 hover:shadow-lg hover:translate-y-[-1px]" : ""
+                "p-4 bg-slate-950 border border-slate-800 rounded-2xl transition-all group relative overflow-hidden",
+                isClickable ? "cursor-pointer hover:border-blue-500/30 hover:shadow-lg hover:translate-y-[-1px]" : ""
               )}
             >
               <div className="flex justify-between items-start mb-2">
-                <h4 className="text-xs font-black text-zinc-400 group-hover:text-white transition-colors uppercase tracking-widest">{idx.name}</h4>
+                <h4 className="text-xs font-black text-slate-400 group-hover:text-white transition-colors uppercase tracking-widest">{idx.name}</h4>
                 <span className={cn(
                   "text-[9px] font-black px-1.5 py-0.5 rounded uppercase tracking-tighter",
                   parseFloat(idx.percentChange) >= 0 ? "bg-emerald-500/10 text-emerald-400" : "bg-rose-500/10 text-rose-400"
@@ -84,10 +84,10 @@ export const InstitutionalInsights: React.FC<{ symbol?: string; className?: stri
     <Card title="Institutional Flows" icon={Users} className={className}>
       <div className="space-y-4 pt-2">
         {flows.slice(0, 2).map((flow: any) => (
-          <div key={flow.category} className="p-4 bg-[#0c0c0e] border border-white/[0.07] rounded-2xl flex justify-between items-center">
+          <div key={flow.category} className="p-4 bg-slate-950 border border-slate-800 rounded-2xl flex justify-between items-center">
             <div>
-              <h4 className="text-xs font-black text-zinc-400 uppercase tracking-widest">{flow.category} Activity</h4>
-              <p className="text-[9px] font-bold text-zinc-600 mt-1 uppercase tracking-wider">Date: {flow.date}</p>
+              <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest">{flow.category} Activity</h4>
+              <p className="text-[9px] font-bold text-slate-600 mt-1 uppercase tracking-wider">Date: {flow.date}</p>
             </div>
             <div className="text-right">
               <span className={cn(
@@ -96,7 +96,7 @@ export const InstitutionalInsights: React.FC<{ symbol?: string; className?: stri
               )}>
                 {parseFloat(flow.netBuySell) >= 0 ? '+' : ''}₹{parseFloat(flow.netBuySell).toLocaleString()} Cr
               </span>
-              <div className="flex gap-2 text-[9px] font-bold text-zinc-500 justify-end">
+              <div className="flex gap-2 text-[9px] font-bold text-slate-500 justify-end">
                 <span>B: ₹{parseFloat(flow.buyValue).toLocaleString()}</span>
                 <span>•</span>
                 <span>S: ₹{parseFloat(flow.sellValue).toLocaleString()}</span>
@@ -123,16 +123,16 @@ export const PennyStockIntelligence: React.FC<{
       <div className="overflow-x-auto pt-2">
         <table className="w-full">
           <thead>
-            <tr className="border-b border-white/[0.07]">
-              <th className="pb-3 text-left text-[9px] font-black text-zinc-500 uppercase tracking-widest">Symbol</th>
-              <th className="pb-3 text-right text-[9px] font-black text-zinc-500 uppercase tracking-widest">Price</th>
-              <th className="pb-3 text-right text-[9px] font-black text-zinc-500 uppercase tracking-widest">Wk %</th>
-              <th className="pb-3 text-right text-[9px] font-black text-zinc-500 uppercase tracking-widest">Vol Chg</th>
+            <tr className="border-b border-slate-800">
+              <th className="pb-3 text-left text-[9px] font-black text-slate-500 uppercase tracking-widest">Symbol</th>
+              <th className="pb-3 text-right text-[9px] font-black text-slate-500 uppercase tracking-widest">Price</th>
+              <th className="pb-3 text-right text-[9px] font-black text-slate-500 uppercase tracking-widest">Wk %</th>
+              <th className="pb-3 text-right text-[9px] font-black text-slate-500 uppercase tracking-widest">Vol Chg</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-800/50">
             {pennies.map((stock: any) => (
-              <tr key={stock.fincode || stock.symbol} className="group hover:bg-[#141416]/80 transition-colors">
+              <tr key={stock.fincode || stock.symbol} className="group hover:bg-slate-900/50 transition-colors">
                 <td className="py-3">
                   <div className="flex items-center gap-2">
                     <div onClick={(e) => e.stopPropagation()}>
@@ -158,7 +158,7 @@ export const PennyStockIntelligence: React.FC<{
                       <p className="text-xs font-black text-white group-hover:text-amber-400 transition-colors uppercase cursor-pointer truncate max-w-[120px] leading-tight" onClick={() => onSelectStock(stock.symbol)}>
                         {stock.companyName || stock.name}
                       </p>
-                      <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest mt-0.5">{stock.symbol}</p>
+                      <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mt-0.5">{stock.symbol}</p>
                     </div>
                   </div>
                 </td>
@@ -174,7 +174,7 @@ export const PennyStockIntelligence: React.FC<{
                   </span>
                 </td>
                 <td className="py-3 text-right">
-                  <p className="text-[10px] font-bold text-zinc-500">{stock.volumeChange || '—'}</p>
+                  <p className="text-[10px] font-bold text-slate-500">{stock.volumeChange || '—'}</p>
                 </td>
               </tr>
             ))}

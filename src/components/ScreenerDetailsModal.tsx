@@ -63,7 +63,7 @@ const ScreenerDetailsModal: React.FC<ScreenerDetailsModalProps> = ({
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           onClick={onClose}
-          className="absolute inset-0 bg-[#0c0c0e]/80 backdrop-blur-md"
+          className="absolute inset-0 bg-slate-950/80 backdrop-blur-md"
         />
 
         {/* Modal Content */}
@@ -71,17 +71,17 @@ const ScreenerDetailsModal: React.FC<ScreenerDetailsModalProps> = ({
           initial={{ opacity: 0, scale: 0.95, y: 20 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.95, y: 20 }}
-          className="relative w-full max-w-4xl max-h-[85vh] bg-[#141416] border border-white/[0.07] rounded-3xl shadow-2xl overflow-hidden flex flex-col"
+          className="relative w-full max-w-4xl max-h-[85vh] bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl overflow-hidden flex flex-col"
         >
           {/* Header */}
-          <div className="p-6 border-b border-white/[0.07] flex flex-wrap items-start justify-between gap-4">
+          <div className="p-6 border-b border-slate-800 flex flex-wrap items-start justify-between gap-4">
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-3 mb-2">
                 <div className={cn(
                   "p-2 rounded-xl",
                   isBullish ? "bg-emerald-500/10 text-emerald-500" :
                   isBearish ? "bg-rose-500/10 text-rose-500" :
-                  "bg-white/[0.08] text-zinc-400"
+                  "bg-slate-800 text-slate-400"
                 )}>
                   {isBullish ? <TrendingUp className="w-5 h-5" /> : 
                    isBearish ? <TrendingDown className="w-5 h-5" /> : 
@@ -92,14 +92,14 @@ const ScreenerDetailsModal: React.FC<ScreenerDetailsModalProps> = ({
                     {screener.name}
                   </h2>
                   <div className="flex items-center gap-2 mt-2">
-                    <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest bg-white/[0.08] px-2 py-0.5 rounded">
+                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest bg-slate-800 px-2 py-0.5 rounded">
                       Source: {screener.source}
                     </span>
                     <span className={cn(
                       "text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded",
                       isBullish ? "text-emerald-400 bg-emerald-500/10" :
                       isBearish ? "text-rose-400 bg-rose-500/10" :
-                      "text-zinc-400 bg-white/[0.08]"
+                      "text-slate-400 bg-slate-800"
                     )}>
                       {screener.sentiment}
                     </span>
@@ -107,32 +107,32 @@ const ScreenerDetailsModal: React.FC<ScreenerDetailsModalProps> = ({
                 </div>
               </div>
               {screener.description && (
-                <p className="text-xs text-zinc-400 font-medium leading-relaxed italic">
+                <p className="text-xs text-slate-400 font-medium leading-relaxed italic">
                   {screener.description}
                 </p>
               )}
             </div>
             <button 
               onClick={onClose}
-              className="p-2 hover:bg-white/[0.08] rounded-xl transition-colors text-zinc-500 hover:text-white"
+              className="p-2 hover:bg-slate-800 rounded-xl transition-colors text-slate-500 hover:text-white"
             >
               <X className="w-6 h-6" />
             </button>
           </div>
 
           {/* Search bar */}
-          <div className="px-6 py-4 bg-[#141416]/80 border-b border-white/[0.05] flex items-center gap-4">
+          <div className="px-6 py-4 bg-slate-900/50 border-b border-slate-800/50 flex items-center gap-4">
             <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
               <input 
                 type="text" 
                 placeholder="Search stocks in this screener..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full bg-[#0c0c0e] border border-white/[0.07] rounded-xl pl-10 pr-4 py-2 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-violet-500/50"
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-blue-500/50"
               />
             </div>
-            <div className="flex items-center gap-2 text-[10px] font-black text-zinc-500 uppercase tracking-widest whitespace-nowrap">
+            <div className="flex items-center gap-2 text-[10px] font-black text-slate-500 uppercase tracking-widest whitespace-nowrap">
               <Activity className="w-3 h-3" />
               {filteredStocks.length} Results
             </div>
@@ -142,18 +142,18 @@ const ScreenerDetailsModal: React.FC<ScreenerDetailsModalProps> = ({
             {isLoading ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 animate-pulse">
                 {[1, 2, 3, 4, 5, 6, 7, 8].map(i => (
-                  <div key={i} className="h-28 bg-white/[0.08]/50 rounded-2xl border border-white/[0.07]" />
+                  <div key={i} className="h-28 bg-slate-800/50 rounded-2xl border border-slate-800" />
                 ))}
               </div>
             ) : error ? (
               <div className="py-20 text-center">
-                <Activity className="w-12 h-12 text-zinc-800 mx-auto mb-4" />
-                <p className="text-zinc-500 text-sm font-bold uppercase tracking-widest">Failed to load screener results</p>
+                <Activity className="w-12 h-12 text-slate-800 mx-auto mb-4" />
+                <p className="text-slate-500 text-sm font-bold uppercase tracking-widest">Failed to load screener results</p>
               </div>
             ) : filteredStocks.length === 0 ? (
               <div className="py-20 text-center">
-                <Search className="w-12 h-12 text-zinc-800 mx-auto mb-4" />
-                <p className="text-zinc-500 text-sm font-bold uppercase tracking-widest">No stocks found matching your search</p>
+                <Search className="w-12 h-12 text-slate-800 mx-auto mb-4" />
+                <p className="text-slate-500 text-sm font-bold uppercase tracking-widest">No stocks found matching your search</p>
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
@@ -166,14 +166,14 @@ const ScreenerDetailsModal: React.FC<ScreenerDetailsModalProps> = ({
                       onSelectStock(stock.symbol || stock.stockId);
                       onClose();
                     }}
-                    className="p-3 bg-[#0c0c0e]/50 border border-white/[0.07] rounded-2xl hover:border-violet-500/30 hover:bg-[#141416] transition-all cursor-pointer group flex flex-col justify-between"
+                    className="p-3 bg-slate-950/50 border border-slate-800 rounded-2xl hover:border-blue-500/30 hover:bg-slate-900 transition-all cursor-pointer group flex flex-col justify-between"
                   >
                     <div className="flex justify-between items-start mb-2 pr-12 relative">
                       <div className="min-w-0">
                         <h4 className="text-[11px] font-black text-white group-hover:text-amber-400 transition-colors uppercase italic leading-none truncate" title={stock.name}>
                           {stock.name}
                         </h4>
-                        <p className="text-[8px] text-zinc-500 font-bold uppercase truncate mt-1">
+                        <p className="text-[8px] text-slate-500 font-bold uppercase truncate mt-1">
                           {stock.symbol || stock.stockId}
                         </p>
                       </div>
@@ -216,12 +216,12 @@ const ScreenerDetailsModal: React.FC<ScreenerDetailsModalProps> = ({
                     </div>
 
                     <div className="grid grid-cols-2 gap-2 mb-2">
-                      <div className="bg-[#141416]/80 p-1.5 rounded-lg border border-white/[0.04]">
-                        <p className="text-[6px] font-black text-zinc-600 uppercase mb-0.5">Price</p>
+                      <div className="bg-slate-900/50 p-1.5 rounded-lg border border-slate-800/30">
+                        <p className="text-[6px] font-black text-slate-600 uppercase mb-0.5">Price</p>
                         <p className="text-[10px] font-black text-white italic leading-none">₹{stock.ltp.toLocaleString()}</p>
                       </div>
-                      <div className={cn("p-1.5 rounded-lg border border-white/[0.04]", stock.changePercent >= 0 ? "bg-emerald-500/5" : "bg-rose-500/5")}>
-                        <p className="text-[6px] font-black text-zinc-600 uppercase mb-0.5">Change</p>
+                      <div className={cn("p-1.5 rounded-lg border border-slate-800/30", stock.changePercent >= 0 ? "bg-emerald-500/5" : "bg-rose-500/5")}>
+                        <p className="text-[6px] font-black text-slate-600 uppercase mb-0.5">Change</p>
                         <p className={cn("text-[10px] font-black italic leading-none", stock.changePercent >= 0 ? "text-emerald-400" : "text-rose-400")}>
                           {stock.changePercent >= 0 ? '+' : ''}{stock.changePercent.toFixed(2)}%
                         </p>
@@ -231,20 +231,20 @@ const ScreenerDetailsModal: React.FC<ScreenerDetailsModalProps> = ({
                     <div className="flex items-center gap-1.5 justify-between">
                       <div className="flex gap-1.5">
                         <div className="flex flex-col">
-                          <span className="text-[6px] font-black text-zinc-600 uppercase">1W</span>
+                          <span className="text-[6px] font-black text-slate-600 uppercase">1W</span>
                           <span className={cn("text-[8px] font-bold tabular-nums", (stock.return_1w || 0) >= 0 ? "text-emerald-500" : "text-rose-500")}>
                             {stock.return_1w != null ? `${stock.return_1w >= 0 ? '+' : ''}${stock.return_1w.toFixed(1)}%` : '—'}
                           </span>
                         </div>
                         <div className="flex flex-col">
-                          <span className="text-[6px] font-black text-zinc-600 uppercase">1M</span>
+                          <span className="text-[6px] font-black text-slate-600 uppercase">1M</span>
                           <span className={cn("text-[8px] font-bold tabular-nums", (stock.return_1m || 0) >= 0 ? "text-emerald-500" : "text-rose-500")}>
                             {stock.return_1m != null ? `${stock.return_1m >= 0 ? '+' : ''}${stock.return_1m.toFixed(1)}%` : '—'}
                           </span>
                         </div>
                       </div>
-                      <div className="p-1 bg-[#141416] rounded-lg group-hover:bg-blue-500/10 transition-colors">
-                        <ArrowUpRight className="w-2.5 h-2.5 text-zinc-600 group-hover:text-violet-400" />
+                      <div className="p-1 bg-slate-900 rounded-lg group-hover:bg-blue-500/10 transition-colors">
+                        <ArrowUpRight className="w-2.5 h-2.5 text-slate-600 group-hover:text-blue-400" />
                       </div>
                     </div>
                   </motion.div>
@@ -253,14 +253,14 @@ const ScreenerDetailsModal: React.FC<ScreenerDetailsModalProps> = ({
             )}
           </div>
 
-          <div className="p-4 bg-[#0c0c0e] border-t border-white/[0.07] flex justify-between items-center">
+          <div className="p-4 bg-slate-950 border-t border-slate-800 flex justify-between items-center">
             <div className="flex items-center gap-2">
-              <Zap className="w-3 h-3 text-violet-500" />
-              <span className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.2em]">AlphaQuant Intelligent Engine</span>
+              <Zap className="w-3 h-3 text-blue-500" />
+              <span className="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em]">AlphaQuant Intelligent Engine</span>
             </div>
             <button 
               onClick={onClose}
-              className="text-[10px] font-black text-zinc-400 hover:text-white uppercase tracking-widest px-4 py-2 bg-[#141416] rounded-xl transition-colors border border-white/[0.07]"
+              className="text-[10px] font-black text-slate-400 hover:text-white uppercase tracking-widest px-4 py-2 bg-slate-900 rounded-xl transition-colors border border-slate-800"
             >
               Close Window
             </button>

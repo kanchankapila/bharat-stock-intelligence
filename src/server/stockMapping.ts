@@ -2,16 +2,13 @@ import stockData, { StockMapping } from '../data/stocklist';
 
 export function getStockMapping(query: string): StockMapping | undefined {
   if (!query) return undefined;
-  let cleanQuery = query.toUpperCase();
-  if (cleanQuery.includes(':')) {
-    cleanQuery = cleanQuery.split(':').pop() || cleanQuery;
-  }
+  const upperQuery = query.toUpperCase();
   return stockData.find(s => 
-    s.symbol.toUpperCase() === cleanQuery || 
-    s.name.toUpperCase() === cleanQuery ||
-    s.mcsymbol.toUpperCase() === cleanQuery ||
-    s.isin.toUpperCase() === cleanQuery ||
-    s.tlid === cleanQuery
+    s.symbol.toUpperCase() === upperQuery || 
+    s.name.toUpperCase() === upperQuery ||
+    s.mcsymbol.toUpperCase() === upperQuery ||
+    s.isin.toUpperCase() === upperQuery ||
+    s.tlid === query
   );
 }
 

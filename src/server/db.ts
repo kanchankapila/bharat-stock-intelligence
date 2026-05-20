@@ -700,48 +700,6 @@ db.exec(`
     notes        TEXT
   );
   CREATE INDEX IF NOT EXISTS idx_rlepi_date ON rl_episodes(date);
-
-  -- Watchlist Alert Triggers
-  CREATE TABLE IF NOT EXISTS watchlist_alerts (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    userId TEXT NOT NULL,
-    symbol TEXT NOT NULL,
-    indicator TEXT NOT NULL, -- 'PRICE', 'RSI', 'SMA200'
-    operator TEXT NOT NULL,  -- 'GREATER_THAN', 'LESS_THAN', 'CROSSES_ABOVE', 'CROSSES_BELOW'
-    value REAL NOT NULL,
-    isActive INTEGER DEFAULT 1,
-    triggeredAt TEXT,
-    createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
-  );
-  CREATE INDEX IF NOT EXISTS idx_alerts_user ON watchlist_alerts(userId);
-
-  -- Alternative Data: FII/DII Bulk & Block Deals
-  CREATE TABLE IF NOT EXISTS bulk_deals (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    date TEXT NOT NULL,
-    symbol TEXT NOT NULL,
-    clientName TEXT NOT NULL,
-    dealType TEXT NOT NULL, -- 'BUY' or 'SELL'
-    quantity INTEGER NOT NULL,
-    price REAL NOT NULL,
-    valueCr REAL NOT NULL,
-    source TEXT
-  );
-  CREATE INDEX IF NOT EXISTS idx_bulk_sym_date ON bulk_deals(symbol, date DESC);
-
-  -- Alternative Data: Promoter Pledge & Insider Transactions
-  CREATE TABLE IF NOT EXISTS insider_trades (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    symbol TEXT NOT NULL,
-    acquirerName TEXT NOT NULL,
-    category TEXT NOT NULL, -- 'Promoters', 'Directors', 'KMP'
-    typeOfTransaction TEXT NOT NULL, -- 'Acquisition' or 'Disposal'
-    quantity INTEGER NOT NULL,
-    valueInr REAL NOT NULL,
-    date TEXT NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_insider_sym ON insider_trades(symbol, date DESC);
 `);
 
 // --- Migrations & Upgrades ---

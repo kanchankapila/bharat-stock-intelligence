@@ -50,7 +50,7 @@ export const MarketIndices: React.FC<{ onSelect?: (id: string, name: string) => 
             onClick={() => onSelect?.(getIndexId(item.name), item.name)}
             className={cn(
               'relative rounded-2xl overflow-hidden transition-all duration-300 cursor-pointer group',
-              'bg-[#141416]/60 backdrop-blur-xl',
+              'bg-slate-900/60 backdrop-blur-xl',
               isUp
                 ? 'border border-emerald-500/20 hover:border-emerald-500/35 shadow-[0_4px_24px_rgba(0,0,0,0.4)]'
                 : 'border border-rose-500/20 hover:border-rose-500/35 shadow-[0_4px_24px_rgba(0,0,0,0.4)]'
@@ -78,7 +78,7 @@ export const MarketIndices: React.FC<{ onSelect?: (id: string, name: string) => 
                     'w-1.5 h-1.5 rounded-full animate-pulse',
                     isUp ? 'bg-emerald-400' : 'bg-rose-400'
                   )} />
-                  <span className="text-[10px] font-semibold text-zinc-400 uppercase tracking-widest">{item.name}</span>
+                  <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">{item.name}</span>
                 </div>
                 <span className={cn(
                   'text-[9px] font-semibold px-2 py-0.5 rounded-full uppercase tracking-wider border',
@@ -113,7 +113,7 @@ export const MarketIndices: React.FC<{ onSelect?: (id: string, name: string) => 
 
               {/* Day range bar */}
               <div>
-                <div className="h-[3px] bg-white/[0.08]/80 rounded-full overflow-hidden mb-1.5">
+                <div className="h-[3px] bg-slate-800/80 rounded-full overflow-hidden mb-1.5">
                   <motion.div
                     initial={{ width: 0 }}
                     animate={{ width: `${55 + idx * 14}%` }}
@@ -127,8 +127,8 @@ export const MarketIndices: React.FC<{ onSelect?: (id: string, name: string) => 
                   />
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-[9px] text-zinc-600 font-medium">Day Low</span>
-                  <span className="text-[9px] text-zinc-600 font-medium">Day High</span>
+                  <span className="text-[9px] text-slate-600 font-medium">Day Low</span>
+                  <span className="text-[9px] text-slate-600 font-medium">Day High</span>
                 </div>
               </div>
             </div>

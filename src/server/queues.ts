@@ -10,8 +10,6 @@
  */
 
 import { Queue, Worker, QueueEvents, Job, ConnectionOptions } from 'bullmq';
-import { execFile } from 'child_process';
-import path from 'path';
 import { fetchAllLiveStocks } from './liveStockData';
 import { cacheSet } from './cacheService';
 import { generateStockAnalysis } from '../services/aiService';
@@ -63,8 +61,6 @@ export const QUEUE_TECHNICAL_SIGNALS    = 'technical-signals';
 export const QUEUE_SIGNAL_OUTCOMES      = 'signal-outcomes';
 export const QUEUE_NEWS_SENTIMENT       = 'news-sentiment';
 export const QUEUE_TRENDLYNE_INTRADAY   = 'trendlyne-intraday';
-export const QUEUE_DAILY_LEARNING       = 'daily-learning-loop';
-export const QUEUE_WEEKLY_BACKTEST      = 'weekly-backtest-optimizer';
 
 const BULK_CACHE_KEY      = 'live-stocks-bulk';
 const BULK_TTL_SECONDS    = 5 * 60;
@@ -82,8 +78,6 @@ export let technicalSignalsQueue:  Queue | null = null;
 export let signalOutcomesQueue:    Queue | null = null;
 export let newsSentimentQueue:     Queue | null = null;
 export let trendlyneIntradayQueue: Queue | null = null;
-export let dailyLearningQueue:     Queue | null = null;
-export let weeklyBacktestQueue:    Queue | null = null;
 
 let stockWorker:              Worker | null = null;
 let signalWorker:             Worker | null = null;
@@ -95,107 +89,10 @@ let technicalSignalsWorker:   Worker | null = null;
 let signalOutcomesWorker:     Worker | null = null;
 let newsSentimentWorker:      Worker | null = null;
 let trendlyneIntradayWorker:  Worker | null = null;
-let dailyLearningWorker:      Worker | null = null;
-let weeklyBacktestWorker:     Worker | null = null;
 
 // Shared in-process mirror populated by the stock-refresh worker
 // (same reference as the one exported from liveStockData via the cache layer)
 let bulkMirror: Map<string, any> = new Map();
-
-// ─── Stateful Watchlist Alert Checking Engine ───────────────────────────────
-
-async function checkWatchlistAlerts(freshData: any[]) {
-  try {
-    const activeAlerts = db.prepare(
-      `SELECT * FROM watchlist_alerts WHERE isActive = 1`
-    ).all() as any[];
-
-    if (activeAlerts.length === 0) return;
-
-    // Create a fast symbol map for quick quote lookup
-    const symbolMap = new Map<string, any>();
-    for (const stock of freshData) {
-      symbolMap.set(stock.symbol.toUpperCase(), stock);
-    }
-
-    console.log(`[ALERT ENGINE] Evaluating ${activeAlerts.length} active alerts...`);
-
-    for (const alert of activeAlerts) {
-      const symbol = alert.symbol.toUpperCase();
-      const stock = symbolMap.get(symbol);
-      if (!stock) continue;
-
-      const livePrice = stock.price || stock.lastPrice || 0;
-      if (livePrice <= 0) continue;
-
-      let indicatorValue = livePrice; // Default to raw price
-      
-      // If indicator is RSI or SMA, we fetch technical analysis signals
-      if (alert.indicator === 'RSI' || alert.indicator === 'SMA200') {
-        const ta = db.prepare(
-          `SELECT rsi, sma200 FROM technical_analysis_signals WHERE symbol = ?`
-        ).get(alert.symbol) as any;
-
-        if (ta) {
-          if (alert.indicator === 'RSI') {
-            indicatorValue = ta.rsi || 50;
-          } else if (alert.indicator === 'SMA200') {
-            indicatorValue = ta.sma200 || livePrice;
-          }
-        }
-      }
-
-      let isTriggered = false;
-      const targetValue = alert.value;
-
-      switch (alert.operator) {
-        case 'GREATER_THAN':
-          isTriggered = indicatorValue > targetValue;
-          break;
-        case 'LESS_THAN':
-          isTriggered = indicatorValue < targetValue;
-          break;
-        case 'CROSSES_ABOVE':
-          isTriggered = indicatorValue >= targetValue;
-          break;
-        case 'CROSSES_BELOW':
-          isTriggered = indicatorValue <= targetValue;
-          break;
-      }
-
-      if (isTriggered) {
-        console.log(`🚀 [ALERT TRIGGERED] ${symbol} ${alert.indicator} (${indicatorValue}) ${alert.operator} ${targetValue}!`);
-        
-        // Mark alert as inactive and record triggered timestamp in DB
-        db.prepare(
-          `UPDATE watchlist_alerts SET isActive = 0, triggeredAt = ? WHERE id = ?`
-        ).run(new Date().toISOString(), alert.id);
-
-        const msg = `🚀 *ALERT TRIGGERED*: \`${symbol}\` is currently trading at \`₹${livePrice}\`!\nTarget: \`${alert.indicator}\` ${alert.operator} \`${targetValue}\` (Current: \`${indicatorValue.toFixed(2)}\`)`;
-        
-        // Dispatch to Telegram using standard Telegram config if available
-        const botToken = process.env.TELEGRAM_BOT_TOKEN;
-        const chatId = process.env.TELEGRAM_CHAT_ID;
-        if (botToken && chatId) {
-          const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
-          fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              chat_id: chatId,
-              text: msg,
-              parse_mode: 'Markdown',
-            }),
-          }).catch((err) => console.error('[ALERT DISPATCH] Telegram failed:', err));
-        } else {
-          console.log(`[ALERT NOTIFICATION] (Telegram disabled) Message: ${msg}`);
-        }
-      }
-    }
-  } catch (error) {
-    console.error('[ALERT ENGINE] Evaluation error:', error);
-  }
-}
 
 // ─── Stock-refresh worker processor ──────────────────────────────────────────
 
@@ -203,10 +100,6 @@ async function processStockRefresh(_job: Job): Promise<{ count: number }> {
   const freshData = await fetchAllLiveStocks();
   bulkMirror = new Map(freshData.map((s: any) => [s.symbol, s]));
   await cacheSet(BULK_CACHE_KEY, freshData, BULK_TTL_SECONDS);
-  
-  // Evaluate watchlist active alerts programmatically
-  await checkWatchlistAlerts(freshData);
-  
   return { count: freshData.length };
 }
 
@@ -270,49 +163,6 @@ async function processQuantScoring(_job: Job): Promise<{ success: boolean }> {
   console.log('[QUEUE] Starting quant strategy scoring...');
   const { runQuantScoring } = await import('./quantScoringService');
   await runQuantScoring();
-  return { success: true };
-}
-
-// ─── Python script runner + ML learning processors ───────────────────────────
-
-const PYTHON_SCRIPTS_DIR = path.join(process.cwd(), 'src', 'server');
-
-function runPythonScript(script: string, args: string[] = []): Promise<void> {
-  return new Promise((resolve, reject) => {
-    execFile(
-      process.env.PYTHON_BIN ?? 'python3',
-      [path.join(PYTHON_SCRIPTS_DIR, script), ...args],
-      { timeout: 10 * 60 * 1000 },
-      (err, stdout, stderr) => {
-        if (stdout) console.log(`[QUEUE][${script}]`, stdout.slice(0, 500));
-        if (stderr) console.warn(`[QUEUE][${script}] stderr:`, stderr.slice(0, 200));
-        if (err) { reject(err); return; }
-        resolve();
-      },
-    );
-  });
-}
-
-async function processDailyLearningLoop(_job: Job): Promise<{ success: boolean }> {
-  console.log('[QUEUE] Starting daily learning loop...');
-  const scripts: [string, string[]][] = [
-    ['outcome_resolver.py',    ['--horizon', '15']],
-    ['performance_tracker.py', ['--horizon', '15']],
-    ['reward_engine.py',       []],
-    ['rl_agent.py',            ['--update']],
-    ['online_learner.py',      ['--window', '180']],
-  ];
-  for (const [script, args] of scripts) {
-    console.log(`[QUEUE] Running ${script}...`);
-    await runPythonScript(script, args);
-  }
-  return { success: true };
-}
-
-async function processWeeklyBacktestOptimizer(_job: Job): Promise<{ success: boolean }> {
-  console.log('[QUEUE] Starting weekly backtest optimizer...');
-  await runPythonScript('backtest_optimizer.py', ['--window', '365']);
-  await runPythonScript('ml_ensemble.py', ['--train']);
   return { success: true };
 }
 
@@ -713,52 +563,6 @@ export async function initQueues(): Promise<boolean> {
     trendlyneIntradayWorker.on('failed', (_job, err) => {
       console.error('[QUEUE] trendlyne-intraday failed:', err.message);
     });
-
-    // ── Daily learning loop (weekdays 16:30 IST = 11:00 UTC) ──────────────
-    dailyLearningQueue = new Queue(QUEUE_DAILY_LEARNING, { connection });
-    const dlRepeatables = await dailyLearningQueue.getRepeatableJobs();
-    for (const r of dlRepeatables) await dailyLearningQueue.removeRepeatableByKey(r.key);
-    await dailyLearningQueue.add(
-      'daily-learn',
-      {},
-      {
-        repeat: { pattern: '0 11 * * 1-5' },
-        jobId: 'daily-learn-repeatable',
-        removeOnComplete: 5,
-        removeOnFail: 3,
-      },
-    );
-    dailyLearningWorker = new Worker(
-      QUEUE_DAILY_LEARNING,
-      processDailyLearningLoop,
-      { connection, concurrency: 1, lockDuration: 30 * 60 * 1000 },
-    );
-    dailyLearningWorker.on('completed', () => console.log('[QUEUE] daily-learning-loop done'));
-    dailyLearningWorker.on('failed', (_job, err) =>
-      console.error('[QUEUE] daily-learning-loop failed:', err.message));
-
-    // ── Weekly backtest optimizer (Sunday 20:30 UTC = Mon 02:00 IST) ──────
-    weeklyBacktestQueue = new Queue(QUEUE_WEEKLY_BACKTEST, { connection });
-    const wbRepeatables = await weeklyBacktestQueue.getRepeatableJobs();
-    for (const r of wbRepeatables) await weeklyBacktestQueue.removeRepeatableByKey(r.key);
-    await weeklyBacktestQueue.add(
-      'weekly-backtest',
-      {},
-      {
-        repeat: { pattern: '30 20 * * 0' },
-        jobId: 'weekly-backtest-repeatable',
-        removeOnComplete: 3,
-        removeOnFail: 2,
-      },
-    );
-    weeklyBacktestWorker = new Worker(
-      QUEUE_WEEKLY_BACKTEST,
-      processWeeklyBacktestOptimizer,
-      { connection, concurrency: 1, lockDuration: 60 * 60 * 1000 },
-    );
-    weeklyBacktestWorker.on('completed', () => console.log('[QUEUE] weekly-backtest-optimizer done'));
-    weeklyBacktestWorker.on('failed', (_job, err) =>
-      console.error('[QUEUE] weekly-backtest-optimizer failed:', err.message));
 
     return true;
   } catch (err: any) {
