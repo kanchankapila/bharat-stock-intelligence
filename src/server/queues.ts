@@ -55,12 +55,15 @@ export const QUEUE_STOCK_REFRESH        = 'stock-refresh';
 export const QUEUE_AI_SIGNALS           = 'ai-signals';
 export const QUEUE_STOCK_SCORING        = 'stock-scoring';
 export const QUEUE_MC_SCREENER_SYNC     = 'mc-screener-sync';
+export const QUEUE_ETNOW_SCREENER_SYNC  = 'etnow-screener-sync';
 export const QUEUE_FUNDAMENTALS_SYNC    = 'fundamentals-sync';
 export const QUEUE_QUANT_SCORING        = 'quant-scoring';
 export const QUEUE_TECHNICAL_SIGNALS    = 'technical-signals';
 export const QUEUE_SIGNAL_OUTCOMES      = 'signal-outcomes';
 export const QUEUE_NEWS_SENTIMENT       = 'news-sentiment';
 export const QUEUE_TRENDLYNE_INTRADAY   = 'trendlyne-intraday';
+export const QUEUE_OUTCOME_RESOLVER     = 'outcome-resolver';
+export const QUEUE_ML_DAILY_OPS        = 'ml-daily-ops';
 
 const BULK_CACHE_KEY      = 'live-stocks-bulk';
 const BULK_TTL_SECONDS    = 5 * 60;
@@ -72,6 +75,7 @@ export let stockRefreshQueue:      Queue | null = null;
 export let aiSignalsQueue:         Queue | null = null;
 export let stockScoringQueue:      Queue | null = null;
 export let mcScreenerSyncQueue:    Queue | null = null;
+export let etnowScreenerSyncQueue: Queue | null = null;
 export let fundamentalsSyncQueue:  Queue | null = null;
 export let quantScoringQueue:      Queue | null = null;
 export let technicalSignalsQueue:  Queue | null = null;
@@ -83,12 +87,17 @@ let stockWorker:              Worker | null = null;
 let signalWorker:             Worker | null = null;
 let scoringWorker:            Worker | null = null;
 let mcScreenerSyncWorker:     Worker | null = null;
+let etnowScreenerSyncWorker:  Worker | null = null;
 let fundamentalsSyncWorker:   Worker | null = null;
 let quantScoringWorker:       Worker | null = null;
 let technicalSignalsWorker:   Worker | null = null;
 let signalOutcomesWorker:     Worker | null = null;
 let newsSentimentWorker:      Worker | null = null;
 let trendlyneIntradayWorker:  Worker | null = null;
+export let outcomeResolverQueue: Queue | null = null;
+let outcomeResolverWorker: Worker | null = null;
+export let mlDailyOpsQueue: Queue | null = null;
+let mlDailyOpsWorker: Worker | null = null;
 
 // Shared in-process mirror populated by the stock-refresh worker
 // (same reference as the one exported from liveStockData via the cache layer)
@@ -147,6 +156,15 @@ async function processMcScreenerSync(_job: Job): Promise<{ success: boolean }> {
   return { success: true };
 }
 
+// ─── ETNow screener sync worker processor ────────────────────────────────────
+
+async function processEtnowScreenerSync(_job: Job): Promise<{ success: boolean }> {
+  console.log('[QUEUE] Starting scheduled ETNow screener sync...');
+  const { syncETnowScreeners } = await import('./etnowScreenerSync');
+  await syncETnowScreeners();
+  return { success: true };
+}
+
 // ─── Fundamentals-sync worker processor ──────────────────────────────────────
 
 async function processFundamentalsSync(job: Job): Promise<{ success: boolean }> {
@@ -163,6 +181,30 @@ async function processQuantScoring(_job: Job): Promise<{ success: boolean }> {
   console.log('[QUEUE] Starting quant strategy scoring...');
   const { runQuantScoring } = await import('./quantScoringService');
   await runQuantScoring();
+  return { success: true };
+}
+
+// ─── Outcome resolver worker processor ───────────────────────────────────────
+
+async function processOutcomeResolver(_job: Job): Promise<{ success: boolean }> {
+  const { exec } = await import('child_process');
+  const { promisify } = await import('util');
+  const execAsync = promisify(exec);
+  const pyDir = process.cwd() + '/src/server';
+  await execAsync(`python outcome_resolver.py --horizon 5`, { cwd: pyDir });
+  await execAsync(`python outcome_resolver.py --horizon 15`, { cwd: pyDir });
+  return { success: true };
+}
+
+// ─── ML daily ops worker processor ───────────────────────────────────────────
+
+async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
+  const { exec } = await import('child_process');
+  const { promisify } = await import('util');
+  const execAsync = promisify(exec);
+  const pyDir = process.cwd() + '/src/server';
+  await execAsync(`python reward_engine.py`, { cwd: pyDir });
+  await execAsync(`python rl_agent.py --update`, { cwd: pyDir });
   return { success: true };
 }
 
@@ -333,6 +375,42 @@ export async function initQueues(): Promise<boolean> {
     });
     mcScreenerSyncWorker.on('failed', (_job, err) => {
       console.error(`[QUEUE] mc-screener-sync failed:`, err.message);
+    });
+
+    // ── ETNow screener sync queue ────────────────────────────────────────────
+    etnowScreenerSyncQueue = new Queue(QUEUE_ETNOW_SCREENER_SYNC, { connection });
+
+    // Repeat every 12 hours
+    const etnowRepeatables = await etnowScreenerSyncQueue.getRepeatableJobs();
+    for (const r of etnowRepeatables) {
+      await etnowScreenerSyncQueue.removeRepeatableByKey(r.key);
+    }
+    await etnowScreenerSyncQueue.add(
+      'etnow-sync',
+      {},
+      {
+        repeat: { every: 12 * 60 * 60 * 1000 }, // 12 hours
+        jobId: 'etnow-sync-repeatable',
+        removeOnComplete: 5,
+        removeOnFail: 3,
+      },
+    );
+
+    etnowScreenerSyncWorker = new Worker(
+      QUEUE_ETNOW_SCREENER_SYNC,
+      processEtnowScreenerSync,
+      { 
+        connection, 
+        concurrency: 1,
+        lockDuration: 60000,
+      },
+    );
+
+    etnowScreenerSyncWorker.on('completed', (_job) => {
+      console.log(`[QUEUE] etnow-screener-sync completed`);
+    });
+    etnowScreenerSyncWorker.on('failed', (_job, err) => {
+      console.error(`[QUEUE] etnow-screener-sync failed:`, err.message);
     });
 
     // ── Fundamentals sync queue ──────────────────────────────────────────────
@@ -564,6 +642,78 @@ export async function initQueues(): Promise<boolean> {
       console.error('[QUEUE] trendlyne-intraday failed:', err.message);
     });
 
+    // ── Outcome resolver queue (daily at 9:30 AM IST = 04:00 UTC, weekdays) ──
+    outcomeResolverQueue = new Queue(QUEUE_OUTCOME_RESOLVER, { connection });
+
+    const orRepeatables = await outcomeResolverQueue.getRepeatableJobs();
+    for (const r of orRepeatables) {
+      await outcomeResolverQueue.removeRepeatableByKey(r.key);
+    }
+    await outcomeResolverQueue.add(
+      'outcome-resolver-daily',
+      {},
+      {
+        repeat: { pattern: '0 4 * * 1-5' },
+        jobId: 'outcome-resolver-daily',
+        removeOnComplete: 3,
+        removeOnFail: 3,
+      },
+    );
+
+    outcomeResolverWorker = new Worker(
+      QUEUE_OUTCOME_RESOLVER,
+      processOutcomeResolver,
+      {
+        connection,
+        concurrency: 1,
+        lockDuration: 10 * 60 * 1000,
+        lockRenewTime: 2 * 60 * 1000,
+      },
+    );
+
+    outcomeResolverWorker.on('completed', (_job) => {
+      console.log('[QUEUE] outcome-resolver completed');
+    });
+    outcomeResolverWorker.on('failed', (_job, err) => {
+      console.error('[QUEUE] outcome-resolver failed:', err.message);
+    });
+
+    // ── ML daily ops queue (5:00 PM IST = 11:30 UTC, weekdays) ─────────────
+    mlDailyOpsQueue = new Queue(QUEUE_ML_DAILY_OPS, { connection });
+
+    const mlRepeatables = await mlDailyOpsQueue.getRepeatableJobs();
+    for (const r of mlRepeatables) {
+      await mlDailyOpsQueue.removeRepeatableByKey(r.key);
+    }
+    await mlDailyOpsQueue.add(
+      'ml-daily-ops',
+      {},
+      {
+        repeat: { pattern: '30 11 * * 1-5' },
+        jobId: 'ml-daily-ops',
+        removeOnComplete: 3,
+        removeOnFail: 3,
+      },
+    );
+
+    mlDailyOpsWorker = new Worker(
+      QUEUE_ML_DAILY_OPS,
+      processMlDailyOps,
+      {
+        connection,
+        concurrency: 1,
+        lockDuration: 15 * 60 * 1000,
+        lockRenewTime: 3 * 60 * 1000,
+      },
+    );
+
+    mlDailyOpsWorker.on('completed', (_job) => {
+      console.log('[QUEUE] ml-daily-ops completed');
+    });
+    mlDailyOpsWorker.on('failed', (_job, err) => {
+      console.error('[QUEUE] ml-daily-ops failed:', err.message);
+    });
+
     return true;
   } catch (err: any) {
     console.warn('[QUEUE] BullMQ unavailable (Redis down?) — falling back to setInterval:', err.message);
@@ -583,12 +733,14 @@ export async function shutdownQueues(): Promise<void> {
     signalWorker?.close(),
     scoringWorker?.close(),
     mcScreenerSyncWorker?.close(),
+    etnowScreenerSyncWorker?.close(),
     fundamentalsSyncWorker?.close(),
     quantScoringWorker?.close(),
     stockRefreshQueue?.close(),
     aiSignalsQueue?.close(),
     stockScoringQueue?.close(),
     mcScreenerSyncQueue?.close(),
+    etnowScreenerSyncQueue?.close(),
     fundamentalsSyncQueue?.close(),
     quantScoringQueue?.close(),
     technicalSignalsWorker?.close(),
@@ -599,6 +751,10 @@ export async function shutdownQueues(): Promise<void> {
     newsSentimentQueue?.close(),
     trendlyneIntradayWorker?.close(),
     trendlyneIntradayQueue?.close(),
+    outcomeResolverWorker?.close(),
+    outcomeResolverQueue?.close(),
+    mlDailyOpsWorker?.close(),
+    mlDailyOpsQueue?.close(),
   ]);
 }
 
