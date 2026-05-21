@@ -99,6 +99,11 @@ YAHOO_SYMBOL_MAP: dict[str, str] = {
     "POLICYBZR":    "POLICYBZR",
     "PAYTM":        "ONE97",
     "ZOMATO":       "ZOMATO",
+    "MAHINDRA":     "M&M",
+    "SRTRANSFIN":   "SHRIRAMFIN",
+    "CHOLAFINSV":   "CHOLAFIN",
+    "LTFH":         "LTF",
+    "BAJAJINSUR":   "BAJAJFINSV",
 }
 
 # When a symbol fails, try these suffix/prefix patterns in order

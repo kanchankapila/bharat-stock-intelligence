@@ -151,13 +151,18 @@ class AlphaQuantScoringEngine:
 
     def build_screener_metadata(self, screeners: pd.DataFrame, force_rebuild: bool = False) -> Dict[str, Any]:
         """
+        PHASE 2 FIX: Add confidence threshold to ensure reliable metadata
+        
         Infer and persist screener metadata into screener_master.
 
         - First call (or after NLP version bump): rebuilds all entries.
         - Subsequent calls: only inserts NEW screeners; existing ones are untouched.
+        - PHASE 2: Low-confidence predictions get reduced weight in scoring
 
         Returns a dict of scan_id -> metadata for use in scoring.
         """
+        MIN_NLP_CONFIDENCE = 0.5  # Require minimum 50% confidence from NLP
+        
         with self.engine.begin() as conn:
             stored_version = self._get_stored_nlp_version(conn)
             version_changed = stored_version != NLP_VERSION
@@ -179,13 +184,29 @@ class AlphaQuantScoringEngine:
 
             # Infer metadata for screeners that need it
             new_master_data = []
+            low_confidence_count = 0
+            
             for _, s in screeners_to_infer.iterrows():
                 inference = self.nlp.infer(s['name'], s.get('description', '') or '')
 
                 sentiment = inference['sentiment']
-                # For MoneyControl only: use the explicit is_positive flag to resolve neutral
-                if sentiment == 'neutral' and s['source'] == 'MoneyControl' and pd.notna(s.get('is_positive')):
-                    sentiment = 'bullish' if int(s['is_positive']) == 1 else 'bearish'
+                confidence = float(inference.get('confidence', 0.0))
+                
+                # PHASE 2 FIX: Handle low-confidence predictions
+                if confidence < MIN_NLP_CONFIDENCE:
+                    low_confidence_count += 1
+                    print(f"  [PHASE2] Low-confidence NLP for {s['name']} ({confidence:.2f}), using fallback")
+                    # For MoneyControl only: use the explicit is_positive flag as fallback
+                    if s['source'] == 'MoneyControl' and pd.notna(s.get('is_positive')):
+                        sentiment = 'bullish' if int(s['is_positive']) == 1 else 'bearish'
+                    # For other sources with low confidence, mark as neutral to reduce impact
+                    else:
+                        sentiment = 'neutral'
+                        confidence = 0.3  # Mark as unreliable
+                else:
+                    # For MoneyControl with high confidence but neutral NLP: use explicit flag
+                    if sentiment == 'neutral' and s['source'] == 'MoneyControl' and pd.notna(s.get('is_positive')):
+                        sentiment = 'bullish' if int(s['is_positive']) == 1 else 'bearish'
 
                 new_master_data.append({
                     'scan_id':            s['scan_id'],
@@ -194,7 +215,7 @@ class AlphaQuantScoringEngine:
                     'inferred_sentiment': sentiment,
                     'inferred_category':  inference['category'],
                     'inferred_timeframe': inference['timeframe'],
-                    'confidence':         inference['confidence'],
+                    'confidence':         confidence,  # Now reflects reliability
                     'last_updated':       datetime.datetime.now().isoformat(),
                 })
 
@@ -208,6 +229,9 @@ class AlphaQuantScoringEngine:
                          :inferred_timeframe, :confidence, :last_updated)
                     ON CONFLICT(scan_id) DO NOTHING
                 """), new_master_data)
+            
+            if low_confidence_count > 0:
+                print(f"[PHASE2] {low_confidence_count} screeners had low-confidence NLP predictions")
 
             # Persist version so next run skips rebuild
             self._set_stored_nlp_version(conn, NLP_VERSION)
@@ -266,7 +290,16 @@ class AlphaQuantScoringEngine:
             return 1.0
 
     def process_scoring(self, force_rebuild: bool = False):
+        """
+        PHASE 1 FIX: Reload ML weights before scoring to pick up optimization updates
+        """
         print(f"Starting AlphaQuant Scoring Engine v3 (Dedup+Decay) at {datetime.datetime.now()}")
+        
+        # PHASE 1 FIX: Reload weights before each scoring run
+        # This ensures strategy_optimizer.py updates are picked up immediately
+        self._load_optimised_weights()
+        print(f"[SCORING] Reloaded optimised weights from app_settings")
+        
         screeners, mappings = self.load_data()
 
         print("Building screener metadata (NLP inference)...")
@@ -390,6 +423,10 @@ class AlphaQuantScoringEngine:
                 cat_weight  = self.CATEGORY_WEIGHTS.get(meta['category'], 0.5)
                 src_weight  = self.SOURCE_WEIGHTS.get(meta['source'], 0.9)
 
+                # PHASE 2 FIX: Apply confidence-based weight to reduce impact of low-confidence predictions
+                confidence = float(meta.get('confidence', 0.7))
+                confidence_weight = max(0.3, min(1.0, confidence))  # Between 0.3 and 1.0
+
                 # Recency decay on screener itself
                 recency = self._recency_weight(screener_updated.get(scan_id) or '')
 
@@ -400,7 +437,7 @@ class AlphaQuantScoringEngine:
                 dedup = 1.0 if cnt < self.SOURCE_CAT_CAP else self.SOURCE_CAT_DECAY
                 scc[bucket] = cnt + 1
 
-                contrib = base_score * cat_weight * src_weight * sentiment_mult * recency * dedup
+                contrib = base_score * cat_weight * src_weight * sentiment_mult * recency * dedup * confidence_weight
                 cat_key = meta['category'] if meta['category'] in self.CATEGORY_WEIGHTS else 'other'
 
                 stock_scores[symbol]['raw_sum'] += contrib

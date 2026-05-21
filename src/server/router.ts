@@ -2180,6 +2180,253 @@ export const appRouter = router({
 
     return { investmentPicks, intradayPicks };
   }),
+
+  // PHASE 3.3: Signal Actions — Track user execution vs recommendations
+  saveSignalAction: publicProcedure
+    .input(z.object({
+      signalId: z.number(),
+      signalSource: z.enum(['AI', 'technical', 'quant', 'news']),
+      symbol: z.string(),
+      userId: z.string().optional(),
+      actionType: z.enum(['BUY', 'SELL', 'HOLD', 'SKIP']),
+      quantity: z.number().optional(),
+      entryPriceRec: z.number().optional(),
+      entryActual: z.number().optional(),
+      targetPriceRec: z.number().optional(),
+      exitPriceActual: z.number().optional(),
+      exitDate: z.string().datetime().optional(),
+      pnl: z.number().optional(),
+      pnlPct: z.number().optional(),
+      notes: z.string().optional(),
+    }))
+    .mutation(async ({ input }) => {
+      try {
+        const stmt = db.prepare(`
+          INSERT OR REPLACE INTO signal_actions (
+            signal_id, signal_source, symbol, user_id, action_type,
+            quantity, entry_price_rec, entry_actual, target_price_rec,
+            exit_price_actual, exit_date, pnl, pnl_pct, notes, executed_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        `);
+        
+        stmt.run([
+          input.signalId,
+          input.signalSource,
+          input.symbol,
+          input.userId || null,
+          input.actionType,
+          input.quantity || null,
+          input.entryPriceRec || null,
+          input.entryActual || null,
+          input.targetPriceRec || null,
+          input.exitPriceActual || null,
+          input.exitDate || null,
+          input.pnl || null,
+          input.pnlPct || null,
+          input.notes || null,
+        ]);
+
+        return { success: true, signalId: input.signalId };
+      } catch (err) {
+        console.error('[Router] saveSignalAction error:', err);
+        throw new Error('Failed to save signal action');
+      }
+    }),
+
+  getSignalActions: publicProcedure
+    .input(z.object({
+      symbol: z.string().optional(),
+      userId: z.string().optional(),
+      signalSource: z.enum(['AI', 'technical', 'quant', 'news']).optional(),
+      limit: z.number().default(50),
+      offset: z.number().default(0),
+    }))
+    .query(async ({ input }) => {
+      try {
+        let query = `
+          SELECT id, signal_id, signal_source, symbol, action_type,
+                 executed_at, quantity, entry_price_rec, entry_actual,
+                 target_price_rec, exit_price_actual, pnl, pnl_pct, notes
+          FROM signal_actions
+          WHERE 1=1
+        `;
+        const params: any[] = [];
+
+        if (input.symbol) {
+          query += ` AND symbol = ?`;
+          params.push(input.symbol);
+        }
+        if (input.userId) {
+          query += ` AND user_id = ?`;
+          params.push(input.userId);
+        }
+        if (input.signalSource) {
+          query += ` AND signal_source = ?`;
+          params.push(input.signalSource);
+        }
+
+        query += ` ORDER BY executed_at DESC LIMIT ? OFFSET ?`;
+        params.push(input.limit, input.offset);
+
+        const actions = db.prepare(query).all(...params);
+        
+        // Calculate summary stats
+        let totalPnl = 0;
+        let winCount = 0;
+        let totalCount = 0;
+
+        for (const action of actions) {
+          if (action.pnl !== null) {
+            totalPnl += action.pnl;
+            if (action.pnl > 0) winCount++;
+            totalCount++;
+          }
+        }
+
+        return {
+          actions,
+          stats: {
+            totalPnl,
+            winCount,
+            totalCount,
+            winRate: totalCount > 0 ? (winCount / totalCount * 100).toFixed(2) : '0',
+          },
+        };
+      } catch (err) {
+        console.error('[Router] getSignalActions error:', err);
+        throw new Error('Failed to fetch signal actions');
+      }
+    }),
+
+  getSignalActionMetrics: publicProcedure
+    .input(z.object({
+      userId: z.string().optional(),
+      signalSource: z.enum(['AI', 'technical', 'quant', 'news']).optional(),
+      days: z.number().default(30),
+    }))
+    .query(async ({ input }) => {
+      try {
+        let query = `
+          SELECT signal_source, action_type, COUNT(*) as count,
+                 AVG(pnl_pct) as avg_pnl_pct, SUM(pnl) as total_pnl
+          FROM signal_actions
+          WHERE executed_at >= datetime('now', '-' || ? || ' days')
+        `;
+        const params: any[] = [input.days];
+
+        if (input.userId) {
+          query += ` AND user_id = ?`;
+          params.push(input.userId);
+        }
+        if (input.signalSource) {
+          query += ` AND signal_source = ?`;
+          params.push(input.signalSource);
+        }
+
+        query += ` GROUP BY signal_source, action_type`;
+
+        const metrics = db.prepare(query).all(...params);
+        return { metrics };
+      } catch (err) {
+        console.error('[Router] getSignalActionMetrics error:', err);
+        throw new Error('Failed to fetch metrics');
+      }
+    }),
+
+  // PHASE 3.4: Portfolio-Signal Correlation
+  getPortfolioSignalAlignment: publicProcedure
+    .input(z.object({
+      signalId: z.number(),
+      signalSymbol: z.string(),
+      portfolio: z.array(z.object({
+        symbol: z.string(),
+        weight: z.number(),
+        quantity: z.number(),
+        avgCost: z.number(),
+        currentPrice: z.number(),
+      })),
+    }))
+    .query(async ({ input }) => {
+      try {
+        const { correlationService } = await import('./correlationService');
+        
+        // Analyze signal's correlation with portfolio
+        const correlations = await correlationService.analyzeSignalPortfolioAlignment(
+          input.signalId,
+          input.signalSymbol,
+          input.portfolio,
+        );
+
+        // Get alignment score
+        const alignmentScore = await correlationService.getPortfolioAlignmentScore(input.signalId);
+
+        // Get hedge recommendations
+        const hedges = correlationService.getHedgeRecommendations(input.signalId);
+
+        // Get concentration risk
+        const concentrationRisk = correlationService.getConcentrationRisk(input.signalId);
+
+        return {
+          correlations,
+          alignmentScore,
+          hedges,
+          concentrationRisk,
+          recommendation: {
+            alignmentLevel: alignmentScore > 70 ? 'high' : alignmentScore > 40 ? 'moderate' : 'low',
+            isHedge: hedges.length > 0,
+            riskLevel: concentrationRisk > 2 ? 'high' : concentrationRisk > 0 ? 'moderate' : 'low',
+          },
+        };
+      } catch (err) {
+        console.error('[Router] getPortfolioSignalAlignment error:', err);
+        throw new Error('Failed to analyze signal-portfolio alignment');
+      }
+    }),
+
+  getSignalCorrelationMetrics: publicProcedure
+    .input(z.object({
+      signalId: z.number(),
+    }))
+    .query(async ({ input }) => {
+      try {
+        const metrics = db.prepare(`
+          SELECT 
+            portfolio_symbol,
+            correlation_score,
+            co_movement_pct,
+            hedge_potential,
+            momentum_alignment,
+            weight
+          FROM signal_portfolio_correlation
+          WHERE signal_id = ?
+          ORDER BY ABS(correlation_score) DESC
+        `).all(input.signalId) as any[];
+
+        // Calculate stats
+        let avgCorrelation = 0;
+        let positiveCorr = 0;
+        let negativeCorr = 0;
+
+        if (metrics.length > 0) {
+          avgCorrelation = metrics.reduce((sum, m) => sum + m.correlation_score, 0) / metrics.length;
+          positiveCorr = metrics.filter((m) => m.correlation_score > 0.3).length;
+          negativeCorr = metrics.filter((m) => m.correlation_score < -0.3).length;
+        }
+
+        return {
+          metrics,
+          stats: {
+            avgCorrelation: parseFloat(avgCorrelation.toFixed(4)),
+            positiveCorr,
+            negativeCorr,
+            totalHoldings: metrics.length,
+          },
+        };
+      } catch (err) {
+        console.error('[Router] getSignalCorrelationMetrics error:', err);
+        throw new Error('Failed to fetch correlation metrics');
+      }
+    }),
 });
 
 

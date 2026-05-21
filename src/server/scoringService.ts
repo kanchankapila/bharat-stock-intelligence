@@ -75,6 +75,13 @@ export async function syncAndScore(): Promise<{ success: boolean; message: strin
   } catch (err: any) {
     console.error(`MoneyControl sync failed: ${err.message}`);
   }
+
+  try {
+    const { syncETnowScreeners } = await import('./etnowScreenerSync');
+    await syncETnowScreeners();
+  } catch (err: any) {
+    console.error(`ETNow sync failed: ${err.message}`);
+  }
   
   const scoreResult = await recalculateScores();
   return scoreResult;

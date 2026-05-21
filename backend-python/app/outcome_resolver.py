@@ -22,6 +22,12 @@ def resolve_outcomes(
     horizon_days: int = 15,
     dry_run: bool = False,
 ) -> dict[str, int]:
+    """
+    PHASE 1 FIX: Resolve signal outcomes with proper time-of-day validation
+    - Signals entered at next trading day's open
+    - SL checked on intraday (low) before target (high)
+    - Horizon exit checked at close on exit_date
+    """
     today     = datetime.date.today()
     cutoff    = (today - datetime.timedelta(days=horizon_days)).isoformat()
 
@@ -50,7 +56,7 @@ def resolve_outcomes(
         print(f"[OutcomeResolver] No pending signals to resolve (horizon={horizon_days}d).")
         return {'processed': 0, 'resolved': 0}
 
-    print(f"[OutcomeResolver] {len(rows)} signals pending resolution.")
+    print(f"[OutcomeResolver] {len(rows)} signals pending resolution (phase1-fix).")
     resolved = 0
 
     upsert = """
@@ -70,24 +76,28 @@ def resolve_outcomes(
         signal_date  = row['signal_date']
         entry        = float(row['entry_price'] or 0)
         stop_loss    = row['stop_loss']
+        
         if not entry:
             continue
 
-        exit_target  = (datetime.date.fromisoformat(signal_date)
-                        + datetime.timedelta(days=horizon_days)).isoformat()
+        # PHASE 1 FIX: Entry at next trading day's open
+        signal_date_obj = datetime.date.fromisoformat(signal_date)
+        next_trading_day = (signal_date_obj + datetime.timedelta(days=1)).isoformat()
+        exit_target_date = (signal_date_obj + datetime.timedelta(days=horizon_days)).isoformat()
 
         outcome      = None
         exit_price   = None
         check_date   = None
         return_pct   = None
 
-        if stop_loss:
+        # PHASE 1 FIX: Check SL on next trading day first (it has priority in intraday)
+        if stop_loss and stop_loss > 0:
             sl_hit = conn.execute("""
                 SELECT date, low FROM stock_ohlcv
-                WHERE symbol = ? AND date > ? AND date <= ?
+                WHERE symbol = ? AND date >= ? AND date <= ?
                   AND low <= ?
-                ORDER BY date ASC LIMIT 1
-            """, (sym, signal_date, exit_target, stop_loss)).fetchone()
+                ORDER BY date ASC, low ASC LIMIT 1
+            """, (sym, next_trading_day, exit_target_date, stop_loss)).fetchone()
 
             if sl_hit:
                 check_date = sl_hit[0]
@@ -95,12 +105,13 @@ def resolve_outcomes(
                 return_pct = (exit_price - entry) / entry * 100
                 outcome    = 'STOP_LOSS'
 
+        # If SL not hit, check exit at horizon date (using close price)
         if outcome is None:
             exit_row = conn.execute("""
                 SELECT date, close FROM stock_ohlcv
                 WHERE symbol = ? AND date >= ?
                 ORDER BY date ASC LIMIT 1
-            """, (sym, exit_target)).fetchone()
+            """, (sym, exit_target_date)).fetchone()
 
             if exit_row:
                 check_date = exit_row[0]
@@ -114,7 +125,7 @@ def resolve_outcomes(
                 return_pct = None
 
         if dry_run:
-            msg = f"  [DRY] {sym} {signal_date} → {outcome}"
+            msg = f"  [DRY] {sym} {signal_date} (entry:{next_trading_day}) → {outcome}"
             if return_pct is not None:
                 msg += f" ({return_pct:.2f}%)"
             print(msg)

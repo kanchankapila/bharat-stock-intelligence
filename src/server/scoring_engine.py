@@ -260,6 +260,26 @@ class AlphaQuantScoringEngine:
     # ------------------------------------------------------------------
     DECAY_HALFLIFE_DAYS = 30  # score halves every 30 days
 
+    # Quality tier for news sources (used as multiplier on news contribution)
+    NEWS_SOURCE_QUALITY: dict[str, float] = {
+        # Tier 1 — institutional / wire services
+        'Reuters Business':          1.3,
+        'Reuters India':             1.3,
+        'Financial Times':           1.3,
+        'Business Standard Markets': 1.2,
+        'Business Standard Companies': 1.2,
+        # Tier 2 — established financial media
+        'Economic Times Markets':    1.0,
+        'Economic Times Economy':    1.0,
+        'LiveMint Markets':          1.0,
+        'LiveMint Companies':        1.0,
+        'MoneyControl Latest':       1.0,
+        'MoneyControl Markets':      1.0,
+        # Tier 3 — commentary / aggregators
+        'Hindu BusinessLine':        0.85,
+        'NDTV Profit':               0.80,
+    }
+
     @staticmethod
     def _recency_weight(last_updated_str: str) -> float:
         try:
@@ -390,7 +410,8 @@ class AlphaQuantScoringEngine:
                     news_src_counts[bucket] = cnt + 1
                     recency = item.get('recency', 1.0)
                     # News base is 5.0 (same as screeners — was 7.0, reduced to prevent over-dominance)
-                    contrib = 5.0 * mult * decay * recency
+                    source_quality = self.NEWS_SOURCE_QUALITY.get(item.get('source', ''), 0.90)
+                    contrib = 5.0 * mult * decay * recency * source_quality
                     stock_scores[symbol]['raw_sum'] += contrib
                     stock_scores[symbol]['factors']['news'] += contrib
                     stock_scores[symbol]['sources'].add(item['source'])
@@ -453,12 +474,36 @@ class AlphaQuantScoringEngine:
 
                 normalized_score = min(100, max(0, 50 + (final_score * 2)))
                 wp = win_prob_map.get(symbol)
-                if wp is not None and normalized_score >= 60 and wp >= 0.55:
-                    final_score *= 1.10
+                if wp is not None:
+                    if normalized_score >= 60 and wp >= 0.55:
+                        final_score *= 1.10   # ML consensus bonus: both systems agree bullish
+                    elif wp < 0.40:
+                        # ML sees weak probability — discount composite score
+                        discount = 0.85 if wp < 0.30 else 0.92
+                        final_score *= discount
 
                 screener_count = len(data['positive_screeners']) + len(data['negative_screeners'])
                 source_count   = len(data['sources'])
-                confidence = min(100, screener_count * 10 * (1 + 0.2 * (source_count - 1)))
+                cat_count      = len(data['categories'])
+
+                # Factor 1: source diversity (0–40 points) — cross-source agreement is strongest signal
+                source_pts = min(40, source_count * 14)  # 1 src=14, 2 src=28, 3 src=40
+
+                # Factor 2: category breadth (0–30 points) — multi-domain consensus
+                cat_pts = min(30, cat_count * 8)  # 1 cat=8, 2=16, 3=24, 4+=30
+
+                # Factor 3: ML win_probability alignment (0–20 points)
+                wp = win_prob_map.get(symbol)
+                if wp is not None:
+                    ml_pts = min(20, int(wp * 24))   # wp=0.55 → 13pts, wp=0.80 → 19pts
+                else:
+                    ml_pts = 8  # neutral if no ML signal
+
+                # Factor 4: screener volume (0–10 points) — secondary signal of conviction
+                vol_pts = min(10, screener_count * 2)
+
+                confidence = int(source_pts + cat_pts + ml_pts + vol_pts)
+                confidence = min(95, max(5, confidence))   # cap at 95 (never report 100% certainty)
 
                 # Calibrated classification thresholds
                 if   final_score > 30:   classification = "Strong Buy"

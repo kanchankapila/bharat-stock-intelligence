@@ -1,5 +1,33 @@
 import db from './db';
 
+function persistStrategySignal(
+  symbol: string,
+  signalType: string,
+  score: number,
+  detail: string,
+): void {
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const existing = db.prepare(
+      `SELECT 1 FROM technical_signals WHERE symbol = ? AND date = ?`
+    ).get(symbol, today);
+    if (existing) return;
+
+    db.prepare(`
+      INSERT INTO technical_signals
+        (symbol, date, signals_json, signal_score, computed_at)
+      VALUES
+        (@symbol, @date, @signals_json, @signal_score, CURRENT_TIMESTAMP)
+      ON CONFLICT(symbol, date) DO NOTHING
+    `).run({
+      symbol,
+      date: today,
+      signals_json: JSON.stringify([{ type: signalType, strength: 'MEDIUM', detail }]),
+      signal_score: Math.min(10, Math.max(1, Math.round(score / 10))),
+    });
+  } catch { /* non-fatal — signal still returned to caller */ }
+}
+
 export interface ConvergenceSignal {
   symbol: string;
   score: number;
@@ -61,6 +89,12 @@ export function crossSourceFilter(minScore = 65): ConvergenceSignal[] {
         etPositiveCount: 1,
         classification: row.classification,
       });
+      persistStrategySignal(
+        row.symbol,
+        'CONVERGENCE_SIGNAL',
+        row.score,
+        'Multi-source convergence: bullish in Trendlyne + MoneyControl + ETnow simultaneously',
+      );
     }
     return results;
   } catch (err: any) {
@@ -139,6 +173,12 @@ export function regimeSectorFilter(topNSectors = 3, minScore = 60, minWinProbabi
         classification: row.classification,
         regime,
       });
+      persistStrategySignal(
+        row.symbol,
+        'REGIME_SECTOR_SIGNAL',
+        row.score,
+        `BULL regime sector rotation signal — sector: ${row.sector}`,
+      );
     }
     return results;
   } catch (err: any) {
@@ -200,6 +240,12 @@ export function qualityOversoldScanner(maxRsi = 35, maxScore = 65): QualityOvers
         classification: scoreData.classification,
         qualityScreener: screenerName,
       });
+      persistStrategySignal(
+        symbol,
+        'QUALITY_OVERSOLD_SIGNAL',
+        scoreData.score,
+        `Quality oversold entry: RSI ${rsiMap.get(symbol) ?? 'N/A'} in ${screenerName}`,
+      );
     }
     results.sort((a, b) => (a.rsi ?? 99) - (b.rsi ?? 99));
     return results;

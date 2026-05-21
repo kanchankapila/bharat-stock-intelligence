@@ -458,3 +458,134 @@ function enrichMarketData(data: MarketData): MarketData {
   }
   return data;
 }
+
+// ─── PHASE 1 FIX: Persist OHLCV data to database ───────────────────────────────
+
+/**
+ * Persists today's OHLCV data to stock_ohlcv table for backtesting
+ * Called daily after market close via BullMQ queue
+ */
+export async function persistTodayOHLCVData(stocks: MarketData[]): Promise<{ inserted: number; failed: number }> {
+  const db = await import('./db').then(m => m.default);
+  const today = new Date().toISOString().split('T')[0];  // YYYY-MM-DD
+  
+  let inserted = 0;
+  let failed = 0;
+  
+  const stmt = db.prepare(`
+    INSERT INTO stock_ohlcv (symbol, date, open, high, low, close, volume)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(symbol, date) DO UPDATE SET
+      open=excluded.open,
+      high=excluded.high,
+      low=excluded.low,
+      close=excluded.close,
+      volume=excluded.volume
+  `);
+  
+  for (const stock of stocks) {
+    try {
+      // Use close price as OHLC if intraday data not available
+      // In production, this should come from detailed OHLCV API
+      stmt.run(
+        stock.symbol,
+        today,
+        stock.open || stock.prevClose || stock.price,  // open
+        stock.high || stock.price,                      // high
+        stock.low || stock.price,                       // low
+        stock.price,                                    // close
+        typeof stock.volume === 'string' 
+          ? parseFloat(stock.volume) * (stock.volume.includes('M') ? 1_000_000 : stock.volume.includes('K') ? 1_000 : 1)
+          : (stock.volume || 0)  // volume
+      );
+      inserted++;
+    } catch (err: any) {
+      console.error(`[OHLCV] Failed to persist ${stock.symbol}:`, err.message);
+      failed++;
+    }
+  }
+  
+  console.log(`[OHLCV] Persisted ${inserted}/${stocks.length} stocks for ${today}, failed: ${failed}`);
+  return { inserted, failed };
+}
+
+/**
+ * Wrapper for BullMQ queue worker
+ * Fetches latest stocks and persists OHLCV data
+ */
+export async function fetchAndPersistOHLCVData(): Promise<{ count: number; persisted: number }> {
+  try {
+    const stocks = await fetchAllLiveStocks();
+    const result = await persistTodayOHLCVData(stocks);
+    
+    // PHASE 2.4 FIX: Detect significant price movements and trigger signal updates
+    await detectAndQueueSignalUpdates(stocks);
+    
+    return { count: stocks.length, persisted: result.inserted };
+  } catch (err: any) {
+    console.error('[OHLCV] Error in fetchAndPersistOHLCVData:', err.message);
+    return { count: 0, persisted: 0 };
+  }
+}
+
+// ─── PHASE 2.4 FIX: Detect price changes and trigger signal updates ─────────
+
+const PRICE_CHANGE_THRESHOLD = 2.0;  // Re-evaluate signals if price moves > 2%
+const lastPriceCache = new Map<string, number>();  // Track previous prices
+
+/**
+ * Detects significant price movements and queues signal re-evaluation
+ * Called after each stock refresh to trigger dynamic signal updates
+ */
+async function detectAndQueueSignalUpdates(stocks: MarketData[]): Promise<void> {
+  const db = await import('./db').then(m => m.default);
+  const symbelsToUpdate: string[] = [];
+
+  for (const stock of stocks) {
+    const lastPrice = lastPriceCache.get(stock.symbol);
+    if (!lastPrice) {
+      // First time seeing this stock, just cache the price
+      lastPriceCache.set(stock.symbol, stock.price);
+      continue;
+    }
+
+    const priceChange = Math.abs((stock.price - lastPrice) / lastPrice * 100);
+    
+    if (priceChange > PRICE_CHANGE_THRESHOLD) {
+      console.log(`[SIGNAL-UPDATE] ${stock.symbol}: ${priceChange.toFixed(2)}% price move detected`);
+      symbelsToUpdate.push(stock.symbol);
+    }
+    
+    lastPriceCache.set(stock.symbol, stock.price);
+  }
+
+  // Queue signal updates for affected symbols
+  if (symbelsToUpdate.length > 0) {
+    try {
+      const { technicalSignalsQueue } = await import('./queues');
+      if (technicalSignalsQueue) {
+        await technicalSignalsQueue.add(
+          'signal-update-batch',
+          { symbols: symbelsToUpdate },
+          {
+            removeOnComplete: true,
+            attempts: 1,
+          }
+        );
+        console.log(`[SIGNAL-UPDATE] Queued ${symbelsToUpdate.length} symbols for signal re-evaluation`);
+      }
+    } catch (err: any) {
+      console.warn('[SIGNAL-UPDATE] Could not queue signal updates:', err.message);
+    }
+  }
+}
+
+/**
+ * Clear price cache (useful after market close or for testing)
+ */
+export function clearPriceCache(): void {
+  lastPriceCache.clear();
+  console.log('[PRICE-CACHE] Cleared');
+}
+
+

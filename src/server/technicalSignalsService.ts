@@ -37,7 +37,13 @@ export type SignalType =
   | 'NEAR_52W_HIGH'
   | 'CONSECUTIVE_STRENGTH'
   | 'ATR_CONTRACTION'
-  | 'PCR_EXTREME';
+  | 'PCR_EXTREME'
+  | 'DEATH_CROSS'
+  | 'RSI_BEARISH_DIVERGENCE'
+  | 'DISTRIBUTION_DAY'
+  | 'CONVERGENCE_SIGNAL'
+  | 'REGIME_SECTOR_SIGNAL'
+  | 'QUALITY_OVERSOLD_SIGNAL';
 
 export type SignalStrength = 'HIGH' | 'MEDIUM' | 'WATCH';
 
@@ -321,15 +327,43 @@ function computeNiftyRegime(): 'BULL' | 'BEAR' | 'SIDEWAYS' {
 }
 
 // Load per-signal win rates from signal_type_stats (populated by computeSignalTypeStats)
-function loadSignalWinRates(horizonDays = 15): Map<string, number> {
+function loadSignalWinRates(horizonDays = 15, regime: 'BULL' | 'BEAR' | 'SIDEWAYS' | 'ALL' = 'ALL'): Map<string, number> {
   const map = new Map<string, number>();
   try {
-    const rows = db.prepare(`
+    // First try regime-specific rates (require ≥10 samples to be reliable)
+    const regimeRows = db.prepare(`
+      SELECT signal_type, win_rate FROM signal_type_stats
+      WHERE horizon_days = ? AND market_regime = ? AND total_occurrences >= 10
+    `).all(horizonDays, regime) as { signal_type: string; win_rate: number }[];
+    for (const r of regimeRows) map.set(r.signal_type, r.win_rate);
+
+    // Fall back to 'ALL' for types not yet seen in this regime
+    const allRows = db.prepare(`
       SELECT signal_type, win_rate FROM signal_type_stats
       WHERE horizon_days = ? AND market_regime = 'ALL' AND total_occurrences >= 20
     `).all(horizonDays) as { signal_type: string; win_rate: number }[];
-    for (const r of rows) map.set(r.signal_type, r.win_rate);
+    for (const r of allRows) {
+      if (!map.has(r.signal_type)) map.set(r.signal_type, r.win_rate);
+    }
   } catch { /* table may not be populated yet */ }
+  return map;
+}
+
+// Returns symbol -> nearest upcoming earnings date (YYYY-MM-DD)
+function loadEarningsCalendar(): Map<string, string> {
+  const map = new Map<string, string>();
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const rows = db.prepare(`
+      SELECT symbol, MAX(event_date) as next_earnings
+      FROM corporate_actions
+      WHERE event_type IN ('Quarterly Results', 'Board Meeting', 'Earnings')
+        AND event_date >= ?
+        AND event_date <= date(?, '+30 days')
+      GROUP BY symbol
+    `).all(today, today) as { symbol: string; next_earnings: string }[];
+    for (const r of rows) map.set(r.symbol, r.next_earnings);
+  } catch { /* table may not exist or have no data */ }
   return map;
 }
 
@@ -366,6 +400,12 @@ const SIGNAL_SCORES: Record<SignalType, Record<SignalStrength, number>> = {
   CONSECUTIVE_STRENGTH:{ HIGH: 4, MEDIUM: 2, WATCH: 1 },
   ATR_CONTRACTION:    { HIGH: 3, MEDIUM: 2, WATCH: 1 },
   PCR_EXTREME:        { HIGH: 4, MEDIUM: 3, WATCH: 1 },
+  DEATH_CROSS:            { HIGH: -5, MEDIUM: -3, WATCH: -2 },
+  RSI_BEARISH_DIVERGENCE: { HIGH: -4, MEDIUM: -2, WATCH: -1 },
+  DISTRIBUTION_DAY:       { HIGH: -4, MEDIUM: -3, WATCH: -2 },
+  CONVERGENCE_SIGNAL:      { HIGH: 6, MEDIUM: 4, WATCH: 2 },
+  REGIME_SECTOR_SIGNAL:    { HIGH: 5, MEDIUM: 3, WATCH: 2 },
+  QUALITY_OVERSOLD_SIGNAL: { HIGH: 4, MEDIUM: 3, WATCH: 2 },
 };
 
 function scoreSignals(
@@ -382,7 +422,9 @@ function scoreSignals(
     const wrMult = wr != null
       ? (wr >= 0.65 ? 1.25 : wr >= 0.55 ? 1.0 : wr >= 0.45 ? 0.85 : 0.70)
       : 1.0;
-    total += base * wrMult;
+    // Setup signals (volatility squeeze) predict a move but not direction — 50% discount
+    const setupDiscount = (s.type === 'BB_COMPRESSION' || s.type === 'ATR_CONTRACTION') ? 0.5 : 1.0;
+    total += base * wrMult * setupDiscount;
   }
 
   // Nifty regime discount — bull market keeps full score, bear = -40%, sideways = -20%
@@ -415,7 +457,6 @@ function detectSignals(rows: OHLCVRow[], symbol = ''): {
   const sma200Arr  = smaArr(closes, 200);
   const bbWidths   = computeBBWidth(closes);
   const { macdLine, signalLine } = computeMACD(closes);
-  const vol10Arr   = smaArr(volumes, 10);
   const ema8Arr    = ema(closes, 8);
   const ema21Arr   = ema(closes, 21);
   const ema50Arr   = ema(closes, 50);
@@ -431,8 +472,8 @@ function detectSignals(rows: OHLCVRow[], symbol = ''): {
   const latestMACD   = macdLine[n - 1];
   const latestSig    = signalLine[n - 1];
   const latestADX    = adxArr[n - 1] ?? 0;
-  const vol10        = vol10Arr[n - 1];
-  const volRatio     = vol10 != null && vol10 > 0 ? volumes[n - 1] / vol10 : 1;
+  const vol20        = vol20Arr[n - 1];
+  const volRatio     = vol20 != null && vol20 > 0 ? volumes[n - 1] / vol20 : 1;
   const aboveSma200  = closes[n - 1] > latestSMA200;
   const trendStrong  = latestADX >= 20;   // ADX gate: confirms a real trend exists
 
@@ -712,6 +753,53 @@ function detectSignals(rows: OHLCVRow[], symbol = ''): {
     }
   }
 
+  // B1. Death Cross (SMA50 just crossed below SMA200 today — strong long-term bearish)
+  if (n >= 202) {
+    const sma50prev  = sma50Arr[n - 2]  ?? 0;
+    const sma200prev = sma200Arr[n - 2] ?? 0;
+    if (latestSMA50 < latestSMA200 && sma50prev >= sma200prev) {
+      signals.push({
+        type: 'DEATH_CROSS',
+        strength: 'HIGH',
+        detail: 'SMA50 just crossed below SMA200 — death cross, strong long-term sell signal',
+      });
+    }
+  }
+
+  // B2. RSI Bearish Divergence (price higher high 5D, RSI lower high, RSI 55–75 zone)
+  if (n >= 7) {
+    const rsi5 = rsiArr[n - 6] ?? 50;
+    if (closes[n - 1] > closes[n - 6] && latestRSI < rsi5 &&
+        latestRSI >= 55 && latestRSI <= 75) {
+      const gain   = ((closes[n - 1] - closes[n - 6]) / closes[n - 6]) * 100;
+      const rsiFall = rsi5 - latestRSI;
+      signals.push({
+        type: 'RSI_BEARISH_DIVERGENCE',
+        strength: rsiFall > 4 ? 'HIGH' : rsiFall > 2 ? 'MEDIUM' : 'WATCH',
+        detail: `Price rose ${gain.toFixed(1)}% but RSI fell ${rsiFall.toFixed(1)}pts — bearish divergence, momentum fading`,
+      });
+    }
+  }
+
+  // B3. Distribution Day (heavy volume sell-off: 3+ of last 5 days had close < open AND vol > 1.5× 20D avg)
+  if (n >= 22) {
+    const vol20 = vol20Arr[n - 1];
+    if (vol20 != null && vol20 > 0) {
+      let distDays = 0;
+      for (let i = n - 5; i < n; i++) {
+        if (closes[i] < opens[i] && volumes[i] > 1.5 * vol20) distDays++;
+      }
+      if (distDays >= 3) {
+        const priceMove5d = ((closes[n - 1] - closes[n - 6]) / closes[n - 6]) * 100;
+        signals.push({
+          type: 'DISTRIBUTION_DAY',
+          strength: distDays >= 4 ? 'HIGH' : 'MEDIUM',
+          detail: `${distDays}/5 sessions show distribution (high-vol down-close) — institutional selling pattern, price ${priceMove5d.toFixed(1)}%`,
+        });
+      }
+    }
+  }
+
   return {
     signals,
     rsi: latestRSI,
@@ -807,6 +895,12 @@ const SIG_SHORT: Record<SignalType, string> = {
   CONSECUTIVE_STRENGTH:'Consec↑',
   ATR_CONTRACTION:     'ATR Squeeze',
   PCR_EXTREME:         'PCR Extreme',
+  DEATH_CROSS:            'Death ✗',
+  RSI_BEARISH_DIVERGENCE: 'RSI Bear Div',
+  DISTRIBUTION_DAY:       'Distribution',
+  CONVERGENCE_SIGNAL:      'Convergence',
+  REGIME_SECTOR_SIGNAL:    'Regime+Sector',
+  QUALITY_OVERSOLD_SIGNAL: 'Quality Ovsld',
 };
 
 async function sendTelegramSignals(results: SignalResult[], date: string): Promise<void> {
@@ -868,10 +962,11 @@ export async function runTechnicalSignalScan(options: {
 
   try {
     // ── Pre-scan context (computed once, applied to all stocks) ──────────────
-    const niftyRegime = computeNiftyRegime();
-    const winRates    = loadSignalWinRates(15);
-    const fii3dNet    = loadFIIFlow3d();
-    console.log(`[SIGNALS] Regime: ${niftyRegime} | Win-rate records: ${winRates.size} | FII 3d: ${fii3dNet ?? 'N/A'} Cr`);
+    const niftyRegime      = computeNiftyRegime();
+    const winRates         = loadSignalWinRates(15, niftyRegime);
+    const fii3dNet         = loadFIIFlow3d();
+    const earningsCalendar = loadEarningsCalendar();
+    console.log(`[SIGNALS] Regime: ${niftyRegime} | Win-rate records: ${winRates.size} | FII 3d: ${fii3dNet ?? 'N/A'} Cr | Earnings watchlist: ${earningsCalendar.size}`);
 
     console.log('[SIGNALS] Loading OHLCV data...');
     const allRows = db.prepare(
@@ -907,6 +1002,19 @@ export async function runTechnicalSignalScan(options: {
         const score = scoreSignals(signals, winRates, niftyRegime, fii3dNet);
         if (score < minScore) continue;
 
+        // Pre-earnings discount: signals within 5 days of results date are lower quality
+        let adjustedScore = score;
+        const earningsDate = earningsCalendar.get(symbol);
+        if (earningsDate) {
+          const daysToEarnings = Math.round(
+            (new Date(earningsDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
+          );
+          if (daysToEarnings >= 0 && daysToEarnings <= 5) {
+            adjustedScore = Math.round(score * 0.70); // 30% discount within 5 days of earnings
+          }
+        }
+        if (adjustedScore < minScore) continue;
+
         const latest = rows[rows.length - 1];
         const prev   = rows[rows.length - 2];
         const changePct = prev.close > 0 ? ((latest.close - prev.close) / prev.close) * 100 : 0;
@@ -919,7 +1027,7 @@ export async function runTechnicalSignalScan(options: {
           cmp:         latest.close,
           changePct,
           signals,
-          signalScore: score,
+          signalScore: adjustedScore,
           niftyRegime,
           fii3dNet,
           ...indicators,

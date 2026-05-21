@@ -1,5 +1,6 @@
 import "dotenv/config";
 import express from "express";
+import { createServer as createHttpServer } from "http";
 
 import { createServer as createViteServer } from "vite";
 import path from "path";
@@ -12,6 +13,7 @@ import { initCache } from "./src/server/cacheService";
 import { initQueues, shutdownQueues } from "./src/server/queues";
 import { startRedis, stopRedis } from "./src/server/redisManager";
 import { startOllama, stopOllama } from "./src/server/ollamaManager";
+import { wsSignalService } from "./src/server/websocketService";  // PHASE 3.2: WebSocket
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -246,8 +248,13 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  // PHASE 3.2: Create HTTP server and attach WebSocket service
+  const httpServer = createHttpServer(app);
+  wsSignalService.initialize(httpServer);
+
+  httpServer.listen(PORT, "0.0.0.0", () => {
     console.log(`🚀 Server running on http://localhost:${PORT}`);
+    console.log(`📡 WebSocket signals available on ws://localhost:${PORT}/signals`);
   });
 }
 
@@ -260,6 +267,7 @@ startServer().catch((error) => {
 for (const sig of ['SIGTERM', 'SIGINT'] as NodeJS.Signals[]) {
   process.on(sig, async () => {
     console.log(`[SERVER] ${sig} received, shutting down services...`);
+    wsSignalService.shutdown();  // PHASE 3.2: Shutdown WebSocket
     await shutdownQueues();
     await stopRedis();
     await stopOllama();

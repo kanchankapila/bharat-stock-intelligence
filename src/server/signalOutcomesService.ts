@@ -11,6 +11,7 @@ interface OutcomeRow {
   check_date: string | null;
   exit_price: number | null;
   return_pct: number | null;
+  max_return_pct: number | null;
   outcome: OutcomeResult;
   signal_score: number | null;
   signals_json: string | null;
@@ -65,17 +66,17 @@ export function computeSignalOutcomes(horizonDays: HorizonDays = 5): {
   const upsert = db.prepare(`
     INSERT INTO signal_outcomes (
       symbol, signal_date, horizon_days, entry_price,
-      check_date, exit_price, return_pct, outcome,
+      check_date, exit_price, return_pct, max_return_pct, outcome,
       signal_score, signals_json, computed_at
     ) VALUES (
       @symbol, @signal_date, @horizon_days, @entry_price,
-      @check_date, @exit_price, @return_pct, @outcome,
+      @check_date, @exit_price, @return_pct, @max_return_pct, @outcome,
       @signal_score, @signals_json, CURRENT_TIMESTAMP
     )
     ON CONFLICT(symbol, signal_date, horizon_days) DO UPDATE SET
       check_date=excluded.check_date, exit_price=excluded.exit_price,
-      return_pct=excluded.return_pct, outcome=excluded.outcome,
-      computed_at=excluded.computed_at
+      return_pct=excluded.return_pct, max_return_pct=excluded.max_return_pct,
+      outcome=excluded.outcome, computed_at=excluded.computed_at
   `);
 
   let resolved = 0;
@@ -101,13 +102,38 @@ export function computeSignalOutcomes(horizonDays: HorizonDays = 5): {
           symbol: row.symbol, signal_date: row.signal_date,
           horizon_days: horizonDays, entry_price: row.entry_price,
           check_date: stopLossRow.date, exit_price: row.stop_loss,
-          return_pct: stopReturnPct, outcome: 'LOSS',
+          return_pct: stopReturnPct, max_return_pct: null, outcome: 'LOSS',
           signal_score: row.signal_score, signals_json: row.signals_json,
         });
         resolved++;
         continue;
       }
 
+      // Check MAX(high) over the full horizon for WIN detection
+      const maxHighRow = db.prepare(`
+        SELECT MAX(high) as max_high FROM stock_ohlcv
+        WHERE symbol = ? AND date > ? AND date <= ?
+      `).get(row.symbol, row.signal_date, targetStr) as { max_high: number | null } | undefined;
+
+      const maxHigh = maxHighRow?.max_high ?? null;
+      const maxReturnPct = maxHigh != null
+        ? ((maxHigh - row.entry_price) / row.entry_price) * 100
+        : null;
+
+      if (maxReturnPct != null && maxReturnPct > 2.0) {
+        // Hit target intraday at some point during the horizon — WIN
+        upsert.run({
+          symbol: row.symbol, signal_date: row.signal_date,
+          horizon_days: horizonDays, entry_price: row.entry_price,
+          check_date: targetStr, exit_price: maxHigh,
+          return_pct: maxReturnPct, max_return_pct: maxReturnPct, outcome: 'WIN',
+          signal_score: row.signal_score, signals_json: row.signals_json,
+        });
+        resolved++;
+        continue;
+      }
+
+      // No WIN from max high — fall back to terminal close for LOSS/NEUTRAL
       const exitRow = db.prepare(`
         SELECT date, close FROM stock_ohlcv
         WHERE symbol = ? AND date >= ?
@@ -120,22 +146,20 @@ export function computeSignalOutcomes(horizonDays: HorizonDays = 5): {
           symbol: row.symbol, signal_date: row.signal_date,
           horizon_days: horizonDays, entry_price: row.entry_price,
           check_date: null, exit_price: null, return_pct: null,
-          outcome: 'PENDING', signal_score: row.signal_score,
-          signals_json: row.signals_json,
+          max_return_pct: maxReturnPct, outcome: 'PENDING',
+          signal_score: row.signal_score, signals_json: row.signals_json,
         });
         continue;
       }
 
       const returnPct = ((exitRow.close - row.entry_price) / row.entry_price) * 100;
-      const outcome: OutcomeResult =
-        returnPct > 1.0  ? 'WIN'  :
-        returnPct < -1.0 ? 'LOSS' : 'NEUTRAL';
+      const outcome: OutcomeResult = returnPct < -1.0 ? 'LOSS' : 'NEUTRAL';
 
       upsert.run({
         symbol: row.symbol, signal_date: row.signal_date,
         horizon_days: horizonDays, entry_price: row.entry_price,
         check_date: exitRow.date, exit_price: exitRow.close,
-        return_pct: returnPct, outcome,
+        return_pct: returnPct, max_return_pct: maxReturnPct, outcome,
         signal_score: row.signal_score, signals_json: row.signals_json,
       });
       resolved++;

@@ -56,6 +56,7 @@ export const QUEUE_AI_SIGNALS           = 'ai-signals';
 export const QUEUE_STOCK_SCORING        = 'stock-scoring';
 export const QUEUE_MC_SCREENER_SYNC     = 'mc-screener-sync';
 export const QUEUE_ETNOW_SCREENER_SYNC  = 'etnow-screener-sync';
+export const QUEUE_NSE_SYNC             = 'nse-sync';  // PHASE 2: Weekly NSE master data sync
 export const QUEUE_FUNDAMENTALS_SYNC    = 'fundamentals-sync';
 export const QUEUE_QUANT_SCORING        = 'quant-scoring';
 export const QUEUE_TECHNICAL_SIGNALS    = 'technical-signals';
@@ -76,6 +77,7 @@ export let aiSignalsQueue:         Queue | null = null;
 export let stockScoringQueue:      Queue | null = null;
 export let mcScreenerSyncQueue:    Queue | null = null;
 export let etnowScreenerSyncQueue: Queue | null = null;
+export let nseScreenerSyncQueue:   Queue | null = null;  // PHASE 2: NSE master data sync
 export let fundamentalsSyncQueue:  Queue | null = null;
 export let quantScoringQueue:      Queue | null = null;
 export let technicalSignalsQueue:  Queue | null = null;
@@ -88,6 +90,7 @@ let signalWorker:             Worker | null = null;
 let scoringWorker:            Worker | null = null;
 let mcScreenerSyncWorker:     Worker | null = null;
 let etnowScreenerSyncWorker:  Worker | null = null;
+let nseScreenerSyncWorker:    Worker | null = null;  // PHASE 2: NSE worker
 let fundamentalsSyncWorker:   Worker | null = null;
 let quantScoringWorker:       Worker | null = null;
 let technicalSignalsWorker:   Worker | null = null;
@@ -103,13 +106,12 @@ let mlDailyOpsWorker: Worker | null = null;
 // (same reference as the one exported from liveStockData via the cache layer)
 let bulkMirror: Map<string, any> = new Map();
 
-// ─── Stock-refresh worker processor ──────────────────────────────────────────
+// ─── Stock-refresh worker processor (PHASE 1: Now persists OHLCV) ──────────
 
-async function processStockRefresh(_job: Job): Promise<{ count: number }> {
-  const freshData = await fetchAllLiveStocks();
-  bulkMirror = new Map(freshData.map((s: any) => [s.symbol, s]));
-  await cacheSet(BULK_CACHE_KEY, freshData, BULK_TTL_SECONDS);
-  return { count: freshData.length };
+async function processStockRefresh(_job: Job): Promise<{ count: number; persisted: number }> {
+  const { fetchAndPersistOHLCVData } = await import('./liveStockData');
+  const result = await fetchAndPersistOHLCVData();
+  return result;
 }
 
 // ─── AI-signals worker processor ─────────────────────────────────────────────
@@ -163,6 +165,22 @@ async function processEtnowScreenerSync(_job: Job): Promise<{ success: boolean }
   const { syncETnowScreeners } = await import('./etnowScreenerSync');
   await syncETnowScreeners();
   return { success: true };
+}
+
+// ─── NSE-sync worker processor (PHASE 2: Weekly NSE master data sync) ───────
+
+async function processNSESync(_job: Job): Promise<{ success: boolean; stockCount: number }> {
+  console.log('[QUEUE] Starting NSE master data sync...');
+  try {
+    const { syncNSEStocksToDatabase } = await import('./nseService');
+    const result = await syncNSEStocksToDatabase();
+    const stockCount = result?.stock_count || 0;
+    console.log(`[QUEUE] NSE sync completed, ${stockCount} stocks updated`);
+    return { success: true, stockCount };
+  } catch (err: any) {
+    console.error('[QUEUE] NSE sync failed:', err.message);
+    throw err;
+  }
 }
 
 // ─── Fundamentals-sync worker processor ──────────────────────────────────────
@@ -227,7 +245,7 @@ export async function initQueues(): Promise<boolean> {
   // 2. Initialise resilient queues & workers
   const connection = makeConnection(false);
   try {
-    // ── Stock refresh queue (PAUSED for visibility-based fetching) ───────────
+    // ── Stock refresh queue (PHASE 1 FIX: Resume daily OHLCV sync) ────────
     stockRefreshQueue = new Queue(QUEUE_STOCK_REFRESH, { connection });
 
     // Remove any stale repeatable job
@@ -236,19 +254,20 @@ export async function initQueues(): Promise<boolean> {
       await stockRefreshQueue.removeRepeatableByKey(r.key);
     }
     
-    // Continuous background fetching paused to prevent API limits
-    /*
+    // Daily sync after market close (4 PM IST = 10:30 AM UTC)
+    // This ensures OHLCV data is persisted for backtesting
     await stockRefreshQueue.add(
-      'refresh-all',
+      'refresh-all-daily',
       {},
       {
-        repeat: { every: REFRESH_REPEAT_MS },
-        jobId: 'refresh-all-repeatable',
-        removeOnComplete: 5,
-        removeOnFail: 3,
+        repeat: { cron: '30 10 * * 1-5' },  // 10:30 AM UTC = 4:00 PM IST, weekdays only
+        jobId: 'refresh-all-daily-repeatable',
+        removeOnComplete: { age: 86400 },   // Keep completed jobs for 1 day
+        removeOnFail: { age: 604800 },      // Keep failed jobs for 7 days (for debugging)
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 2000 },
       },
     );
-    */
 
     stockWorker = new Worker(
       QUEUE_STOCK_REFRESH,
@@ -411,6 +430,47 @@ export async function initQueues(): Promise<boolean> {
     });
     etnowScreenerSyncWorker.on('failed', (_job, err) => {
       console.error(`[QUEUE] etnow-screener-sync failed:`, err.message);
+    });
+
+    // ── NSE sync queue (PHASE 2: Weekly master data update) ──────────────────
+    nseScreenerSyncQueue = new Queue(QUEUE_NSE_SYNC, { connection });
+
+    // Remove any stale repeatable job
+    const nseRepeatables = await nseScreenerSyncQueue.getRepeatableJobs();
+    for (const r of nseRepeatables) {
+      await nseScreenerSyncQueue.removeRepeatableByKey(r.key);
+    }
+
+    // Repeat weekly on Sunday at 2 AM UTC (7:30 AM IST) for low load time
+    await nseScreenerSyncQueue.add(
+      'nse-sync-weekly',
+      {},
+      {
+        repeat: { cron: '0 2 * * 0' },  // Weekly Sunday 2 AM UTC
+        jobId: 'nse-sync-weekly-repeatable',
+        removeOnComplete: { age: 86400 },   // Keep for 1 day
+        removeOnFail: { age: 604800 },      // Keep failures for 7 days
+        attempts: 2,
+        backoff: { type: 'exponential', delay: 5000 },
+      },
+    );
+
+    nseScreenerSyncWorker = new Worker(
+      QUEUE_NSE_SYNC,
+      processNSESync,
+      { 
+        connection, 
+        concurrency: 1,
+        lockDuration: 180000,  // 3 minutes for NSE API calls
+      },
+    );
+
+    nseScreenerSyncWorker.on('completed', (job) => {
+      const result = job.returnvalue as any;
+      console.log(`[QUEUE] nse-sync completed (${result?.stockCount || 0} stocks)`);
+    });
+    nseScreenerSyncWorker.on('failed', (_job, err) => {
+      console.error(`[QUEUE] nse-sync failed:`, err.message);
     });
 
     // ── Fundamentals sync queue ──────────────────────────────────────────────
@@ -576,7 +636,7 @@ export async function initQueues(): Promise<boolean> {
       'news-sentiment-refresh',
       {},
       {
-        repeat: { every: 1 * 60 * 1000 }, // every 1 minute
+        repeat: { every: 15 * 60 * 1000 }, // every 15 minutes
         jobId: 'news-sentiment-repeatable',
         removeOnComplete: 5,
         removeOnFail: 3,
