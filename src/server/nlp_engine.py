@@ -8,7 +8,7 @@ except ImportError:
 
 # Bump this version whenever keyword rules or model change.
 # scoring_engine checks this and rebuilds screener_master when it changes.
-NLP_VERSION = "3.5"
+NLP_VERSION = "3.6"
 
 
 class FinBERTInference:
@@ -201,6 +201,24 @@ class NLPScreenerInference:
         r'negative\s+return',
         r'avoid',
     ]
+
+    SIGNAL_TYPE_PATTERNS: Dict[str, List[str]] = {
+        'RSI':          [r'\brsi\b', r'relative\s+strength', r'oversold', r'overbought'],
+        'MACD':         [r'\bmacd\b', r'moving\s+average\s+conv'],
+        'VOLUME':       [r'\bvolume\b', r'delivery', r'accumulation', r'distribution', r'turnover'],
+        'PRICE_ACTION': [r'breakout', r'breakdown', r'\bsupport\b', r'\bresistance\b', r'candlestick',
+                         r'pattern', r'chart', r'circuit', r'52.?week', r'all.?time.?high', r'gap\s+up',
+                         r'momentum', r'\bema\b', r'\bsma\b', r'moving\s+average', r'golden\s+cross',
+                         r'death\s+cross', r'supertrend', r'near\s+high', r'near\s+low'],
+        'FUNDAMENTAL':  [r'\bpe\b', r'\bpb\b', r'\beps\b', r'\broe\b', r'\broa\b', r'piotroski',
+                         r'\bdebt\b', r'earnings', r'revenue', r'profit', r'\bmargin\b', r'dividend',
+                         r'checklist', r'quality', r'cash\s+cow', r'zero\s*debt', r'debt\s*free',
+                         r'strong\s+fundamental', r'balance\s+sheet'],
+        'VALUATION':    [r'valuation', r'undervalued', r'bargain', r'low\s+pe', r'low\s+pb',
+                         r'pe\s+buy\s+zone', r'attractive\s+price'],
+        'SECTOR':       [r'sector', r'industry', r'thematic', r'conglomerate', r'empire',
+                         r'universe', r'gems', r'monopoly', r'\bpsu\b', r'infra', r'defence'],
+    }
 
     TIMEFRAME_MAPPING = {
         'intraday': [
@@ -464,6 +482,15 @@ class NLPScreenerInference:
         if confidence == 0:
             confidence = 0.2  # low-confidence default for unrecognised screeners
 
+        # 5. Signal type tag for dedup
+        signal_type_tag = 'OTHER'
+        max_sig_score = 0
+        for sig_type, patterns in self.SIGNAL_TYPE_PATTERNS.items():
+            sig_score = sum(1 for p in patterns if re.search(p, text))
+            if sig_score > max_sig_score:
+                max_sig_score = sig_score
+                signal_type_tag = sig_type
+
         return {
             "sentiment": sentiment,
             "category": inferred_category,
@@ -471,6 +498,7 @@ class NLPScreenerInference:
             "confidence": confidence,
             "bullish_hits": bullish_score,
             "bearish_hits": bearish_score,
+            "signal_type_tag": signal_type_tag,
         }
 
 

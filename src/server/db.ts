@@ -719,4 +719,7 @@ migrateColumn('technical_signals', 'delivery_pct',   'REAL');
 migrateColumn('technical_signals', 'fii_3d_net',     'REAL');
 migrateColumn('technical_signals', 'win_probability', 'REAL');
 
+// screener_master — signal type tag for dedup (prevents momentum/technical cross-bleed)
+migrateColumn('screener_master', 'signal_type_tag', "TEXT DEFAULT 'OTHER'");
+
 export default db;

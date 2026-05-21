@@ -195,6 +195,7 @@ class AlphaQuantScoringEngine:
                     'inferred_category':  inference['category'],
                     'inferred_timeframe': inference['timeframe'],
                     'confidence':         inference['confidence'],
+                    'signal_type_tag':    inference.get('signal_type_tag', 'OTHER'),
                     'last_updated':       datetime.datetime.now().isoformat(),
                 })
 
@@ -202,10 +203,10 @@ class AlphaQuantScoringEngine:
                 conn.execute(text("""
                     INSERT INTO screener_master
                         (scan_id, name, source, inferred_sentiment, inferred_category,
-                         inferred_timeframe, confidence, last_updated)
+                         inferred_timeframe, confidence, signal_type_tag, last_updated)
                     VALUES
                         (:scan_id, :name, :source, :inferred_sentiment, :inferred_category,
-                         :inferred_timeframe, :confidence, :last_updated)
+                         :inferred_timeframe, :confidence, :signal_type_tag, :last_updated)
                     ON CONFLICT(scan_id) DO NOTHING
                 """), new_master_data)
 
@@ -219,7 +220,8 @@ class AlphaQuantScoringEngine:
         with self.engine.connect() as conn:
             rows = conn.execute(text(
                 "SELECT scan_id, name, source, inferred_sentiment, inferred_category, "
-                "inferred_timeframe, confidence, COALESCE(weight_override, 1.0) AS weight_override "
+                "inferred_timeframe, confidence, COALESCE(weight_override, 1.0) AS weight_override, "
+                "COALESCE(signal_type_tag, 'OTHER') AS signal_type_tag "
                 "FROM screener_master"
             )).fetchall()
         return {
@@ -231,6 +233,7 @@ class AlphaQuantScoringEngine:
                 'timeframe':       r[5],
                 'confidence':      r[6],
                 'weight_override': float(r[7]),
+                'signal_type_tag': r[8],
             }
             for r in rows
         }
@@ -249,7 +252,7 @@ class AlphaQuantScoringEngine:
 
     @staticmethod
     def _source_cat_key(meta: dict) -> str:
-        return f"{meta['source']}|{meta['category']}|{meta['sentiment']}"
+        return f"{meta['source']}|{meta['signal_type_tag']}|{meta['sentiment']}"
 
     # ------------------------------------------------------------------
     # Recency decay: screeners last_updated > DECAY_HALFLIFE_DAYS ago
