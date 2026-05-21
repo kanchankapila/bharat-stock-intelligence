@@ -63,6 +63,7 @@ import { fetchOptionChain, fetchFnoSymbols } from "./optionChainService";
 import { fetchTopMovers } from "./topMoversService";
 import { enqueueAISignals, getAIQueueStats } from "./queues";
 import { fetchGlobalMarketData } from "./globalMarketService";
+import { crossSourceFilter, regimeSectorFilter, qualityOversoldScanner } from './strategySignalsService';
 
 const t = initTRPC.create({
   transformer: superjson,
@@ -1679,6 +1680,33 @@ export const appRouter = router({
       return getStockScoreDetail(input.symbol, input.timeframe);
     }),
 
+  getConvergenceSignals: publicProcedure
+    .input(z.object({
+      minScore: z.number().optional().default(65),
+    }))
+    .query(({ input }) => {
+      return crossSourceFilter(input.minScore);
+    }),
+
+  getRegimeSectorSignals: publicProcedure
+    .input(z.object({
+      topNSectors: z.number().optional().default(3),
+      minScore: z.number().optional().default(60),
+      minWinProbability: z.number().optional().default(0.50),
+    }))
+    .query(({ input }) => {
+      return regimeSectorFilter(input.topNSectors, input.minScore, input.minWinProbability);
+    }),
+
+  getQualityOversoldSignals: publicProcedure
+    .input(z.object({
+      maxRsi: z.number().optional().default(35),
+      maxScore: z.number().optional().default(65),
+    }))
+    .query(({ input }) => {
+      return qualityOversoldScanner(input.maxRsi, input.maxScore);
+    }),
+
   triggerStockScoring: publicProcedure
     .mutation(async () => {
       return await syncAndScore();
@@ -1844,6 +1872,27 @@ export const appRouter = router({
   recategorizeTrendlyneScreeners: publicProcedure
     .mutation(async () => {
       return await recategorizeAllScreeners();
+    }),
+
+  refreshEtnowScreenersDB: publicProcedure
+    .mutation(async () => {
+      try {
+        console.log(`🔄 Refreshing ETNow screeners database...`);
+        const { syncETnowScreeners } = await import('./etnowScreenerSync');
+        await syncETnowScreeners();
+        return {
+          success: true,
+          message: `✅ Refreshed ETNow screeners database successfully`,
+          count: 0
+        };
+      } catch (error) {
+        console.error(`❌ Error refreshing ETNow screeners:`, error);
+        return {
+          success: false,
+          message: `❌ Error refreshing ETNow screeners: ${String(error)}`,
+          count: 0
+        };
+      }
     }),
 
   // --- NSE Stocks Management ---
@@ -2065,77 +2114,124 @@ export const appRouter = router({
     `;
 
     // 1. Fetch Investment Picks (Bharat Quality Compounders)
-    // Looking for a confluence of ET Now Quality/Cash Cow screeners + Value/Dips screeners
-    // ET Now IDs: 79(Zero Debt), 73(Cash Cows), 75(Bluechips), 195(Multibaggers), 91(Buy on Dips), 362(RSI Oversold)
-    const invRows = db.prepare(`${latestPriceCte}
-      SELECT n.symbol, n.name as companyName, n.sector, lp.close as currentPrice,
-             GROUP_CONCAT(DISTINCT es.screener_id) as et_screeners,
-             GROUP_CONCAT(DISTINCT ms.scan_id) as mc_screeners
-      FROM nse_stocks n
-      JOIN etnow_screener_stocks es ON n.symbol = es.symbol
-      LEFT JOIN moneycontrol_screener_stocks ms ON n.symbol = ms.symbol
-      LEFT JOIN latest_prices lp ON lp.symbol = n.symbol
-      WHERE es.screener_id IN ('79', '73', '75', '195', '515', '91', '362')
-      GROUP BY n.symbol
-      HAVING COUNT(DISTINCT es.screener_id) >= 2
-      ORDER BY COUNT(DISTINCT es.screener_id) DESC
-      LIMIT 30
-    `).all() as any[];
+    // Primary: ETNow Quality screeners (Zero Debt, Cash Cows, Elite Bluechips, etc.)
+    // Fallback: Use MoneyControl value & quality screeners when ETNow data is unavailable
+    
+    // First, check if ETNow data exists
+    const etnowCount = db.prepare('SELECT COUNT(*) as count FROM etnow_screener_stocks').get() as any;
+    
+    let investmentPicks: any[] = [];
+    
+    if (etnowCount.count > 100) {
+      // Use ETNow screeners if data exists
+      const invRows = db.prepare(`${latestPriceCte}
+        SELECT n.symbol, n.name as companyName, n.sector, lp.close as currentPrice,
+               GROUP_CONCAT(DISTINCT es.screener_id) as et_screeners,
+               GROUP_CONCAT(DISTINCT ms.scan_id) as mc_screeners
+        FROM nse_stocks n
+        JOIN etnow_screener_stocks es ON n.symbol = es.symbol
+        LEFT JOIN moneycontrol_screener_stocks ms ON n.symbol = ms.symbol
+        LEFT JOIN latest_prices lp ON lp.symbol = n.symbol
+        WHERE es.screener_id IN ('79', '73', '75', '195', '515', '91', '362')
+        GROUP BY n.symbol
+        HAVING COUNT(DISTINCT es.screener_id) >= 2
+        ORDER BY COUNT(DISTINCT es.screener_id) DESC
+        LIMIT 30
+      `).all() as any[];
 
-    const investmentPicks = invRows.map(r => {
-      const etIds = r.et_screeners ? r.et_screeners.split(',') : [];
-      let fundamentalScore = 0;
-      let technicalScore = 0;
-      const reasons: string[] = [];
+      investmentPicks = invRows.map(r => {
+        const etIds = r.et_screeners ? r.et_screeners.split(',') : [];
+        let fundamentalScore = 0;
+        let technicalScore = 0;
+        const reasons: string[] = [];
 
-      if (etIds.includes('79')) { fundamentalScore += 30; reasons.push('Zero Debt'); }
-      if (etIds.includes('73')) { fundamentalScore += 30; reasons.push('Cash Cow'); }
-      if (etIds.includes('75')) { fundamentalScore += 20; reasons.push('Elite Bluechip'); }
-      if (etIds.includes('195')) { fundamentalScore += 20; reasons.push('Multibagger Potential'); }
-      if (etIds.includes('515')) { fundamentalScore += 20; reasons.push('Monopoly Biz'); }
+        if (etIds.includes('79')) { fundamentalScore += 30; reasons.push('Zero Debt'); }
+        if (etIds.includes('73')) { fundamentalScore += 30; reasons.push('Cash Cow'); }
+        if (etIds.includes('75')) { fundamentalScore += 20; reasons.push('Elite Bluechip'); }
+        if (etIds.includes('195')) { fundamentalScore += 20; reasons.push('Multibagger Potential'); }
+        if (etIds.includes('515')) { fundamentalScore += 20; reasons.push('Monopoly Biz'); }
 
-      if (etIds.includes('91')) { technicalScore += 50; reasons.push('Buy on Dips'); }
-      if (etIds.includes('362')) { technicalScore += 50; reasons.push('RSI Oversold'); }
-      
-      const mcIds = r.mc_screeners ? r.mc_screeners.split(',') : [];
-      if (mcIds.length > 0) {
-        fundamentalScore += 10;
-        reasons.push('MC Pro Fundamental Pick');
-      }
+        if (etIds.includes('91')) { technicalScore += 50; reasons.push('Buy on Dips'); }
+        if (etIds.includes('362')) { technicalScore += 50; reasons.push('RSI Oversold'); }
+        
+        const mcIds = r.mc_screeners ? r.mc_screeners.split(',') : [];
+        if (mcIds.length > 0) {
+          fundamentalScore += 10;
+          reasons.push('MC Pro Fundamental Pick');
+        }
 
-      return {
-        symbol: r.symbol,
-        name: r.companyName,
-        sector: r.sector,
-        price: r.currentPrice,
-        score: Math.min(100, Math.round((fundamentalScore * 0.6) + (technicalScore * 0.4))),
-        reasons
-      };
-    }).filter(p => p.score > 30).sort((a, b) => b.score - a.score);
+        return {
+          symbol: r.symbol,
+          name: r.companyName,
+          sector: r.sector,
+          price: r.currentPrice,
+          score: Math.min(100, Math.round((fundamentalScore * 0.6) + (technicalScore * 0.4))),
+          reasons
+        };
+      }).filter(p => p.score > 30).sort((a, b) => b.score - a.score);
+    } else {
+      // Fallback: Use MoneyControl value & quality screeners
+      const mcValueScreeners = ['146', '181', '178']; // Bargain Buys, Reasonable Price, Growth Stocks
+      const invRows = db.prepare(`${latestPriceCte}
+        SELECT n.symbol, n.name as companyName, n.sector, lp.close as currentPrice,
+               COUNT(DISTINCT ms.scan_id) as screener_count,
+               GROUP_CONCAT(DISTINCT ms.scan_id) as mc_screeners
+        FROM nse_stocks n
+        JOIN moneycontrol_screener_stocks ms ON n.symbol = ms.symbol
+        LEFT JOIN latest_prices lp ON lp.symbol = n.symbol
+        WHERE ms.scan_id IN (?, ?, ?)
+        GROUP BY n.symbol
+        ORDER BY screener_count DESC, n.symbol
+        LIMIT 50
+      `).all(mcValueScreeners[0], mcValueScreeners[1], mcValueScreeners[2]) as any[];
+
+      investmentPicks = invRows.map(r => {
+        let score = 50 + (r.screener_count * 20);
+        const reasons: string[] = ['MoneyControl Value Pick'];
+        
+        if (r.mc_screeners?.includes('146')) reasons.push('Bargain Buy');
+        if (r.mc_screeners?.includes('181')) reasons.push('Reasonable Price');
+        if (r.mc_screeners?.includes('178')) reasons.push('Growth Stock');
+
+        return {
+          symbol: r.symbol,
+          name: r.companyName,
+          sector: r.sector,
+          price: r.currentPrice,
+          score: Math.min(100, score),
+          reasons
+        };
+      }).filter(p => p.score > 40).sort((a, b) => b.score - a.score).slice(0, 30);
+    }
 
     // 2. Fetch Intraday Picks (Momentum/Breakout)
-    // Cross-referencing Trendlyne intraday screeners with MC Tech and ET Breakouts
+    // Cross-referencing Trendlyne intraday screeners with MC Tech scanners
     const intradayRows = db.prepare(`${latestPriceCte}
       SELECT n.symbol, n.name as companyName, n.sector, lp.close as currentPrice,
-             GROUP_CONCAT(DISTINCT ts.screener_id) as tl_screeners,
-             GROUP_CONCAT(DISTINCT ms.scan_id) as mc_screeners
+             COUNT(DISTINCT ts.screener_id) as tl_count,
+             GROUP_CONCAT(DISTINCT ts.screener_id LIMIT 3) as tl_ids,
+             COUNT(DISTINCT ms.scan_id) as mc_count
       FROM nse_stocks n
       JOIN trendlyne_screener_stocks ts ON n.symbol = ts.symbol
-      JOIN trendlyne_screeners tls ON tls.screener_id = ts.screener_id
-      LEFT JOIN screener_master sm ON sm.scan_id = ts.screener_id
+      LEFT JOIN trendlyne_screeners tls ON tls.screener_id = ts.screener_id
       LEFT JOIN moneycontrol_screener_stocks ms ON n.symbol = ms.symbol
       LEFT JOIN latest_prices lp ON lp.symbol = n.symbol
-      WHERE tls.timeframe = 'intraday' OR sm.inferred_timeframe = 'intraday'
+      WHERE (tls.timeframe = 'intraday' OR tls.timeframe LIKE '%intraday%')
       GROUP BY n.symbol
-      HAVING tl_screeners IS NOT NULL
-      ORDER BY COUNT(DISTINCT ts.screener_id) DESC
-      LIMIT 30
+      HAVING tl_count >= 1
+      ORDER BY (tl_count + mc_count * 0.5) DESC
+      LIMIT 50
     `).all() as any[];
 
     const intradayPicks = intradayRows.map(r => {
-      const tlIds = r.tl_screeners ? r.tl_screeners.split(',') : [];
-      const mcIds = r.mc_screeners ? r.mc_screeners.split(',') : [];
-      let score = 50 + (tlIds.length * 15) + (mcIds.length * 5);
+      let score = 50 + (r.tl_count * 12) + (r.mc_count * 8);
+      const reasons: string[] = [];
+      
+      if (r.tl_count >= 3) reasons.push('Strong TL Confluence');
+      else if (r.tl_count >= 2) reasons.push('TL Multi-Signal');
+      else reasons.push('TL Intraday Signal');
+      
+      if (r.mc_count > 0) reasons.push('MC Tech Support');
       
       return {
         symbol: r.symbol,
@@ -2143,12 +2239,9 @@ export const appRouter = router({
         sector: r.sector,
         price: r.currentPrice,
         score: Math.min(100, score),
-        reasons: [
-          ...tlIds.map((id: string) => 'Trendlyne Intraday ID: ' + id),
-          ...(mcIds.length > 0 ? ['MC Tech/Pro Scanner'] : [])
-        ]
+        reasons
       };
-    }).sort((a, b) => b.score - a.score);
+    }).filter(p => p.score > 45).sort((a, b) => b.score - a.score).slice(0, 30);
 
     return { investmentPicks, intradayPicks };
   }),
