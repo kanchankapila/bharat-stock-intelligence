@@ -219,16 +219,18 @@ class AlphaQuantScoringEngine:
         with self.engine.connect() as conn:
             rows = conn.execute(text(
                 "SELECT scan_id, name, source, inferred_sentiment, inferred_category, "
-                "inferred_timeframe, confidence FROM screener_master"
+                "inferred_timeframe, confidence, COALESCE(weight_override, 1.0) AS weight_override "
+                "FROM screener_master"
             )).fetchall()
         return {
             r[0]: {
-                'name':      r[1],
-                'source':    r[2],
-                'sentiment': r[3],
-                'category':  r[4],
-                'timeframe': r[5],
-                'confidence': r[6],
+                'name':            r[1],
+                'source':          r[2],
+                'sentiment':       r[3],
+                'category':        r[4],
+                'timeframe':       r[5],
+                'confidence':      r[6],
+                'weight_override': float(r[7]),
             }
             for r in rows
         }
@@ -400,7 +402,8 @@ class AlphaQuantScoringEngine:
                 dedup = 1.0 if cnt < self.SOURCE_CAT_CAP else self.SOURCE_CAT_DECAY
                 scc[bucket] = cnt + 1
 
-                contrib = base_score * cat_weight * src_weight * sentiment_mult * recency * dedup
+                override = meta.get('weight_override', 1.0)
+                contrib = base_score * cat_weight * src_weight * sentiment_mult * recency * dedup * override
                 cat_key = meta['category'] if meta['category'] in self.CATEGORY_WEIGHTS else 'other'
 
                 stock_scores[symbol]['raw_sum'] += contrib
