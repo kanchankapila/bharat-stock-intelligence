@@ -33,22 +33,27 @@ export interface FactorBreakdown {
  * Recalculate all stock scores by running the Python engine
  */
 export async function recalculateScores(): Promise<{ success: boolean; message: string }> {
-  return new Promise((resolve) => {
-    const scriptPath = path.join(process.cwd(), 'src', 'server', 'scoring_engine.py');
-    console.log(`🚀 Running AlphaQuant Scoring Engine v2: python "${scriptPath}"`);
-
-    exec(`python "${scriptPath}"`, (error, stdout, stderr) => {
-      if (error) {
-        console.error(`❌ Scoring engine error: ${error.message}`);
-        return resolve({ success: false, message: error.message });
-      }
-      if (stderr) {
-        console.warn(`⚠️ Scoring engine warning: ${stderr}`);
-      }
-      console.log(`✅ Scoring engine output: ${stdout}`);
-      resolve({ success: true, message: stdout });
+  try {
+    console.log(`🚀 Running AlphaQuant Scoring Engine via FastAPI`);
+    const res = await fetch('http://127.0.0.1:8000/api/v1/score', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rebuild: false })
     });
-  });
+    
+    if (!res.ok) {
+      const errText = await res.text();
+      console.error(`❌ Scoring engine error: ${errText}`);
+      return { success: false, message: errText };
+    }
+    
+    const data = await res.json();
+    console.log(`✅ Scoring engine output: ${data.message}`);
+    return { success: true, message: data.message };
+  } catch (error: any) {
+    console.error(`❌ Scoring engine fetch error: ${error.message}`);
+    return { success: false, message: error.message };
+  }
 }
 
 /**

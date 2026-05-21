@@ -1,11 +1,26 @@
+# Dependencies
 node_modules/
+venv/
+.venv/
+env/
+.env/
+
+# Build and coverage output
 build/
 dist/
 coverage/
-.DS_Store
-*.log
+*.tsbuildinfo
+
+# Local environment
 .env*
 !.env.example
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
 # SQLite database files
 *.sqlite
@@ -19,10 +34,22 @@ redis/
 # Data files
 EQUITY_L.csv
 
-# Python cache
+# Python cache and tooling
 __pycache__/
 *.pyc
 *.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 
 # Scratch/temp directories
 scratch/
+.claude/worktrees/
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

@@ -4,7 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "start": "concurrently \"npm run dev\" \"npm run api\"",
     "dev": "tsx watch server.ts",
+    "api": "cd backend-python && venv\\Scripts\\python main.py",
     "build": "vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist",
@@ -12,6 +14,7 @@
   },
   "dependencies": {
     "@google/genai": "^2.0.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@tailwindcss/vite": "^4.1.14",
     "@tanstack/react-query": "^5.100.9",
     "@trpc/client": "^11.17.0",
@@ -34,6 +37,7 @@
     "ollama": "^0.6.3",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
+    "react-router-dom": "^7.15.1",
     "recharts": "^3.8.1",
     "superjson": "^2.2.6",
     "tailwind-merge": "^3.5.0",
@@ -47,6 +51,7 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "autoprefixer": "^10.4.21",
+    "concurrently": "^9.2.1",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",

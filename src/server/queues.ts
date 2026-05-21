@@ -498,7 +498,7 @@ export async function initQueues(): Promise<boolean> {
       'news-sentiment-refresh',
       {},
       {
-        repeat: { every: 15 * 60 * 1000 }, // every 15 minutes
+        repeat: { every: 1 * 60 * 1000 }, // every 1 minute
         jobId: 'news-sentiment-repeatable',
         removeOnComplete: 5,
         removeOnFail: 3,

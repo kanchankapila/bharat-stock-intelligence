@@ -534,33 +534,34 @@ export const appRouter = router({
       runName:     z.string().optional(),
     }))
     .mutation(async ({ input }) => {
-      const { execFile } = await import('child_process');
-      const path = await import('path');
-      return new Promise<{ run_id?: number; message: string }>((resolve) => {
-        const script = path.join(__dirname, 'backtester.py');
+      try {
         const end = input.end ?? new Date().toISOString().split('T')[0];
-        const args = [
-          script,
-          '--start', input.start,
-          '--end', end,
-          '--horizon', String(input.horizonDays),
-          '--min-score', String(input.minScore),
-          '--max-pos', String(input.maxPositions),
-          '--capital', String(input.initialCapital),
-          ...(input.runName ? ['--name', input.runName] : []),
-        ];
-        execFile('python', args, { timeout: 300_000 }, (err, stdout, stderr) => {
-          if (err) {
-            console.error('[runFullBacktest]', stderr);
-            resolve({ message: `Error: ${stderr?.slice(0, 500) ?? err.message}` });
-            return;
-          }
-          const lastRow = db.prepare(
-            `SELECT id FROM backtesting_runs ORDER BY run_at DESC LIMIT 1`
-          ).get() as { id: number } | undefined;
-          resolve({ run_id: lastRow?.id, message: 'Backtest complete' });
+        const res = await fetch('http://127.0.0.1:8000/api/v1/backtest', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            start: input.start,
+            end: end,
+            horizon: input.horizonDays,
+            min_score: input.minScore,
+            max_pos: input.maxPositions,
+            capital: input.initialCapital,
+            name: input.runName || ''
+          })
         });
-      });
+        
+        if (!res.ok) {
+           const errText = await res.text();
+           console.error('[runFullBacktest]', errText);
+           return { message: `Error: ${errText.slice(0, 500)}` };
+        }
+        
+        const data = await res.json();
+        return { run_id: data.run_id, message: 'Backtest complete' };
+      } catch (err: any) {
+        console.error('[runFullBacktest] Fetch error:', err);
+        return { message: `Error: ${err.message}` };
+      }
     }),
 
   optimizeScreenerWeights: publicProcedure
@@ -570,31 +571,29 @@ export const appRouter = router({
       apply:       z.boolean().default(true),
     }).optional())
     .mutation(async ({ input }) => {
-      const { execFile } = await import('child_process');
-      const path = await import('path');
-      return new Promise<{ message: string; improvement?: number }>((resolve) => {
-        const script = path.join(__dirname, 'strategy_optimizer.py');
-        const args = [
-          script,
-          '--horizon', String(input?.horizonDays ?? 15),
-          '--iterations', String(input?.iterations ?? 300),
-          ...(input?.apply === false ? ['--no-apply'] : []),
-        ];
-        execFile('python', args, { timeout: 600_000 }, (err, stdout, stderr) => {
-          if (err) {
-            console.error('[optimizeScreenerWeights]', stderr);
-            resolve({ message: `Error: ${stderr?.slice(0, 500) ?? err.message}` });
-            return;
-          }
-          const latest = db.prepare(
-            `SELECT improvement_pct FROM screener_weight_history ORDER BY snapshot_at DESC LIMIT 1`
-          ).get() as { improvement_pct: number } | undefined;
-          resolve({
-            message: 'Optimization complete',
-            improvement: latest?.improvement_pct,
-          });
+      try {
+        const res = await fetch('http://127.0.0.1:8000/api/v1/optimize', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            horizon_days: input?.horizonDays ?? 15,
+            iterations: input?.iterations ?? 300,
+            apply: input?.apply ?? true
+          })
         });
-      });
+        
+        if (!res.ok) {
+           const errText = await res.text();
+           console.error('[optimizeScreenerWeights]', errText);
+           return { message: `Optimization failed: ${errText.slice(0, 500)}` };
+        }
+        
+        const data = await res.json();
+        return { message: 'Optimization completed', improvement: data.improvement_pct };
+      } catch (err: any) {
+        console.error('[optimizeScreenerWeights] Fetch error:', err);
+        return { message: `Error: ${err.message}` };
+      }
     }),
 
   // ── News Sentiment ────────────────────────────────────────────────────────
@@ -740,6 +739,42 @@ export const appRouter = router({
     .query(async ({ input }) => {
       const { getMCFnoOverview } = await import("./fnoService");
       return await getMCFnoOverview(input.id, input.instType);
+    }),
+
+  getOptionsIntelligence: publicProcedure
+    .query(async () => {
+      try {
+        const res = await fetch('http://127.0.0.1:8000/api/v1/options/pcr');
+        if (!res.ok) {
+          throw new Error('Failed to fetch options PCR from backend');
+        }
+        return await res.json();
+      } catch (e: any) {
+        console.error('Error in getOptionsIntelligence:', e.message);
+        return [];
+      }
+    }),
+
+  analyzePortfolio: publicProcedure
+    .input(z.object({
+      symbols: z.array(z.string()),
+      weights: z.array(z.number())
+    }))
+    .mutation(async ({ input }) => {
+      try {
+        const res = await fetch('http://127.0.0.1:8000/api/v1/portfolio/analyze', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(input)
+        });
+        if (!res.ok) {
+          throw new Error('Failed to analyze portfolio');
+        }
+        return await res.json();
+      } catch (e: any) {
+        console.error('Error analyzing portfolio:', e.message);
+        return { error: e.message };
+      }
     }),
 
   getTrendlyneFnoHeatmap: publicProcedure
@@ -1540,45 +1575,39 @@ export const appRouter = router({
   getTvTa: publicProcedure
     .input(z.object({ symbol: z.string(), exchange: z.string().optional().default('NSE') }))
     .query(async ({ input }) => {
-      const { execFile } = await import('child_process');
-      const path = await import('path');
-      
-      return new Promise<any>((resolve, reject) => {
-        const scriptPath = path.join(__dirname, 'tv_bridge.py');
-        execFile('python', [scriptPath, 'ta', '--symbol', input.symbol, '--exchange', input.exchange], (error, stdout, stderr) => {
-          if (error) {
-            console.error("TV TA Error:", stderr);
-            return resolve({ error: stderr });
-          }
-          try {
-            resolve(JSON.parse(stdout));
-          } catch (e) {
-            resolve({ error: "Parse error" });
-          }
+      try {
+        const res = await fetch('http://127.0.0.1:8000/api/v1/tv/ta', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ symbol: input.symbol, exchange: input.exchange })
         });
-      });
+        if (!res.ok) {
+          const errText = await res.text();
+          console.error("TV TA Error:", errText);
+          return { error: errText };
+        }
+        return await res.json();
+      } catch (err: any) {
+        console.error("TV TA Fetch Error:", err);
+        return { error: err.message };
+      }
     }),
 
   // TradingView Screener Data
   getTvScreener: publicProcedure
     .query(async () => {
-      const { execFile } = await import('child_process');
-      const path = await import('path');
-      
-      return new Promise<any>((resolve, reject) => {
-        const scriptPath = path.join(__dirname, 'tv_bridge.py');
-        execFile('python', [scriptPath, 'screener'], { maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
-          if (error) {
-            console.error("TV Screener Error:", stderr);
-            return resolve({ error: stderr });
-          }
-          try {
-            resolve(JSON.parse(stdout));
-          } catch (e) {
-            resolve({ error: "Parse error" });
-          }
-        });
-      });
+      try {
+        const res = await fetch('http://127.0.0.1:8000/api/v1/tv/screener');
+        if (!res.ok) {
+          const errText = await res.text();
+          console.error("TV Screener Error:", errText);
+          return { error: errText };
+        }
+        return await res.json();
+      } catch (err: any) {
+        console.error("TV Screener Fetch Error:", err);
+        return { error: err.message };
+      }
     }),
   
 
@@ -2021,6 +2050,91 @@ export const appRouter = router({
       db.prepare('DELETE FROM todos WHERE id = ?').run(input.id);
       return { success: true };
     }),
+
+  getStrategyPicks: publicProcedure.query(async () => {
+    // 1. Fetch Investment Picks (Bharat Quality Compounders)
+    // Looking for a confluence of ET Now Quality/Cash Cow screeners + Value/Dips screeners
+    // ET Now IDs: 79(Zero Debt), 73(Cash Cows), 75(Bluechips), 195(Multibaggers), 91(Buy on Dips), 362(RSI Oversold)
+    const invRows = db.prepare(`
+      SELECT n.symbol, n.companyName, n.sector, n.currentPrice,
+             GROUP_CONCAT(DISTINCT es.screener_id) as et_screeners,
+             GROUP_CONCAT(DISTINCT ms.scan_id) as mc_screeners
+      FROM nse_stocks n
+      JOIN etnow_screener_stocks es ON n.symbol = es.symbol
+      LEFT JOIN moneycontrol_screener_stocks ms ON n.symbol = ms.symbol
+      WHERE es.screener_id IN ('79', '73', '75', '195', '515', '91', '362')
+      GROUP BY n.symbol
+      HAVING COUNT(DISTINCT es.screener_id) >= 2
+      ORDER BY COUNT(DISTINCT es.screener_id) DESC
+      LIMIT 30
+    `).all() as any[];
+
+    const investmentPicks = invRows.map(r => {
+      const etIds = r.et_screeners ? r.et_screeners.split(',') : [];
+      let fundamentalScore = 0;
+      let technicalScore = 0;
+      const reasons: string[] = [];
+
+      if (etIds.includes('79')) { fundamentalScore += 30; reasons.push('Zero Debt'); }
+      if (etIds.includes('73')) { fundamentalScore += 30; reasons.push('Cash Cow'); }
+      if (etIds.includes('75')) { fundamentalScore += 20; reasons.push('Elite Bluechip'); }
+      if (etIds.includes('195')) { fundamentalScore += 20; reasons.push('Multibagger Potential'); }
+      if (etIds.includes('515')) { fundamentalScore += 20; reasons.push('Monopoly Biz'); }
+
+      if (etIds.includes('91')) { technicalScore += 50; reasons.push('Buy on Dips'); }
+      if (etIds.includes('362')) { technicalScore += 50; reasons.push('RSI Oversold'); }
+      
+      const mcIds = r.mc_screeners ? r.mc_screeners.split(',') : [];
+      if (mcIds.length > 0) {
+        fundamentalScore += 10;
+        reasons.push('MC Pro Fundamental Pick');
+      }
+
+      return {
+        symbol: r.symbol,
+        name: r.companyName,
+        sector: r.sector,
+        price: r.currentPrice,
+        score: Math.min(100, Math.round((fundamentalScore * 0.6) + (technicalScore * 0.4))),
+        reasons
+      };
+    }).filter(p => p.score > 30).sort((a, b) => b.score - a.score);
+
+    // 2. Fetch Intraday Picks (Momentum/Breakout)
+    // Cross-referencing Trendlyne intraday screeners with MC Tech and ET Breakouts
+    const intradayRows = db.prepare(`
+      SELECT n.symbol, n.companyName, n.sector, n.currentPrice,
+             GROUP_CONCAT(DISTINCT ts.screener_id) as tl_screeners,
+             GROUP_CONCAT(DISTINCT ms.scan_id) as mc_screeners
+      FROM nse_stocks n
+      JOIN trendlyne_screener_stocks ts ON n.symbol = ts.symbol
+      LEFT JOIN moneycontrol_screener_stocks ms ON n.symbol = ms.symbol
+      GROUP BY n.symbol
+      HAVING tl_screeners IS NOT NULL
+      ORDER BY RANDOM()
+      LIMIT 30
+    `).all() as any[];
+
+    const intradayPicks = intradayRows.map(r => {
+      const tlIds = r.tl_screeners ? r.tl_screeners.split(',') : [];
+      const mcIds = r.mc_screeners ? r.mc_screeners.split(',') : [];
+      let score = 50 + (tlIds.length * 15) + (mcIds.length * 5);
+      
+      return {
+        symbol: r.symbol,
+        name: r.companyName,
+        sector: r.sector,
+        price: r.currentPrice,
+        score: Math.min(100, score),
+        reasons: [
+          ...tlIds.map((id: string) => 'Trendlyne Intraday ID: ' + id),
+          ...(mcIds.length > 0 ? ['MC Tech/Pro Scanner'] : [])
+        ]
+      };
+    }).sort((a, b) => b.score - a.score);
+
+    return { investmentPicks, intradayPicks };
+  }),
 });
 
 

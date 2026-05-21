@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
   AreaChart, Area, BarChart, Bar, ReferenceLine, PieChart as RePieChart, Pie, Cell,
@@ -32,19 +33,27 @@ import TrendlyneScreenerPanel from './components/TrendlyneScreenerPanel';
 import { TrendlyneSectorDashboard } from './components/TrendlyneSectorDashboard';
 import { IntradayBreakouts } from './components/IntradayBreakouts';
 import NSEStockDiscovery from './components/NSEStockDiscovery';
-import stockData from './data/stocklist';
-import { nseStocksData } from './data/nseStocks';
 import TopRatedStocks from './components/TopRatedStocks';
 import FnOIntelligenceCenter from './components/FnOIntelligenceCenter';
+import OptionsIntelligence from './components/OptionsIntelligence';
+import PortfolioAnalytics from './components/PortfolioAnalytics';
 import IndexFnoOverview from './components/IndexFnoOverview';
 import { ToDoPage } from './components/ToDoPage';
 import { GlobalMarketCards } from './components/GlobalMarketCards';
 import { Card } from './components/Card';
+import { AlertsToast } from './components/AlertsToast';
+import StrategyBuilder from './components/StrategyBuilder';
+import { InvestmentStrategy } from './components/InvestmentStrategy';
 import { SectorHeatmap, SectorPerformance } from './components/SectorIntelligence';
 import { MomentumIntelligence } from './components/MomentumIntelligence';
 import { IndexOverview, InstitutionalInsights, PennyStockIntelligence } from './components/MarketInsights';
+
+import stockData from './data/stocklist';
+import { nseStocksData } from './data/nseStocks';
+
 import { TopMoversIntelligence } from './components/TopMoversIntelligence';
 import { MarketIndices } from './components/MarketIndices';
+import { IndicesPage } from './components/IndicesPage';
 import { GlobalMarkets } from './components/GlobalMarkets';
 import { Watchlist } from './components/Watchlist';
 import { StrategyIntelligence } from './components/StrategyIntelligence';
@@ -140,424 +149,6 @@ function extractIndexId(url: string): string | null {
   const m = url.match(/-(\d+)\.html$/);
   return m ? m[1] : null;
 }
-
-const IndexDetailPage: React.FC<{
-  indexId: string;
-  indexName: string;
-  onBack: () => void;
-  onSelectStock: (symbol: string) => void;
-}> = ({ indexId, indexName, onBack, onSelectStock }) => {
-  const [techPeriod, setTechPeriod] = useState<'D' | 'W' | 'M'>('D');
-
-  const { data: details } = trpc.getIndexDetails.useQuery({ indexId }, { refetchInterval: 30000 });
-  const { data: fullDetails } = trpc.getIndexFullDetails.useQuery({ indId: indexId }, { refetchInterval: 60000 });
-  const { data: priceFeed } = trpc.getIndexPriceFeed.useQuery(
-    { bridgeSymbol: (details as any)?.bridgeSymbol ?? '' },
-    { enabled: !!(details as any)?.bridgeSymbol, refetchInterval: 30000 }
-  );
-  const { data: stocksList } = trpc.getIndexStocksList.useQuery({ indId: indexId, type: '0' }, { refetchInterval: 60000 });
-  const { data: technicals } = trpc.getIndexTechnicals.useQuery(
-    { period: techPeriod, bridgeSymbol: (details as any)?.bridgeSymbol ?? '' },
-    { enabled: !!(details as any)?.bridgeSymbol, refetchInterval: 60000 }
-  );
-
-  const d = details as any;
-  const idx = (fullDetails as any)?.indices;
-  const pf = (priceFeed as any)?.data;
-  const stocks = (stocksList as any)?.item ?? [];
-  const tech = (technicals as any)?.data;
-  const isUp = (d?.direction ?? 1) === 1;
-
-  const perf = idx ? [
-    { label: 'YTD', value: idx.ytd },
-    { label: '1W', value: idx.week1 },
-    { label: '1M', value: idx.month1 },
-    { label: '3M', value: idx.month3 },
-    { label: '6M', value: idx.month6 },
-    { label: '1Y', value: idx.year1 },
-    { label: '2Y', value: idx.year2 },
-    { label: '3Y', value: idx.year3 },
-    { label: '5Y', value: idx.year5 },
-  ] : [];
-
-  const mas = idx ? [
-    { label: '30D MA', value: idx.dayavg30 },
-    { label: '50D MA', value: idx.dayavg50 },
-    { label: '150D MA', value: idx.dayavg150 },
-    { label: '200D MA', value: idx.dayavg200 },
-  ] : [];
-
-  return (
-    <div className="space-y-6 p-6">
-      <button onClick={onBack} className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors text-sm font-bold">
-        <ArrowLeft className="w-4 h-4" /> All Indices
-      </button>
-
-      {/* Header */}
-      <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6">
-        <div className="flex flex-wrap items-start justify-between gap-6">
-          <div>
-            <div className="flex items-center gap-3 mb-2">
-              <h1 className="text-2xl font-black text-white uppercase tracking-tight">{indexName}</h1>
-              <span className={cn("px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-widest",
-                isUp ? "bg-emerald-500/10 text-emerald-400" : "bg-rose-500/10 text-rose-400")}>
-                {isUp ? 'Bullish' : 'Bearish'}
-              </span>
-            </div>
-            <div className="flex items-end gap-3">
-              <span className="text-4xl font-black text-white tabular-nums">{d?.currentPrice ?? '—'}</span>
-              <div className={cn("flex items-center gap-1 mb-1", isUp ? "text-emerald-400" : "text-rose-400")}>
-                {isUp ? <ArrowUpRight className="w-5 h-5" /> : <ArrowDownRight className="w-5 h-5" />}
-                <span className="text-lg font-black">{d?.priceChange}</span>
-                <span className="text-sm opacity-70">({d?.perChange}%)</span>
-              </div>
-            </div>
-            {idx && <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest mt-2">Updated: {idx.lastupdated}</p>}
-          </div>
-          {idx && (
-            <div className="grid grid-cols-2 gap-3">
-              {[
-                { label: 'Open', value: idx.open },
-                { label: 'High', value: idx.high },
-                { label: 'Low', value: idx.low },
-                { label: 'Prev Close', value: idx.prevclose },
-              ].map(s => (
-                <div key={s.label} className="bg-slate-950 rounded-xl p-3 text-right min-w-[100px]">
-                  <p className="text-[9px] font-black uppercase tracking-widest text-slate-500">{s.label}</p>
-                  <p className="text-sm font-black text-white tabular-nums">{s.value}</p>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-        {idx && (() => {
-          const cur = parseFloat((idx.lastprice ?? '0').replace(/,/g, ''));
-          const lo = parseFloat((idx.yearlylow ?? '0').replace(/,/g, ''));
-          const hi = parseFloat((idx.yearlyhigh ?? '1').replace(/,/g, ''));
-          const pct = Math.max(5, Math.min(95, ((cur - lo) / (hi - lo || 1)) * 100));
-          return (
-            <div className="mt-6">
-              <div className="flex justify-between text-[9px] font-black uppercase tracking-widest text-slate-500 mb-1">
-                <span>52W Low: {idx.yearlylow}</span>
-                <span>52W High: {idx.yearlyhigh}</span>
-              </div>
-              <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                <div className={cn("h-full rounded-full", isUp ? "bg-emerald-500" : "bg-rose-500")} style={{ width: `${pct}%` }} />
-              </div>
-            </div>
-          );
-        })()}
-      </div>
-
-      {/* Performance Returns */}
-      {perf.length > 0 && (
-        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6">
-          <h2 className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-4">Performance Returns</h2>
-          <div className="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-9 gap-3">
-            {perf.map(p => {
-              const v = parseFloat(String(p.value ?? 0));
-              return (
-                <div key={p.label} className="bg-slate-950 rounded-xl p-3 text-center">
-                  <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-1">{p.label}</p>
-                  <p className={cn("text-sm font-black tabular-nums", v >= 0 ? "text-emerald-400" : "text-rose-400")}>
-                    {v >= 0 ? '+' : ''}{v.toFixed(1)}%
-                  </p>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* Moving Averages + A/D */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {mas.length > 0 && (
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6">
-            <h2 className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-4">Moving Averages vs Current</h2>
-            <div className="space-y-3">
-              {mas.map(ma => {
-                const cur = parseFloat((idx!.lastprice ?? '0').replace(/,/g, ''));
-                const maV = parseFloat((ma.value ?? '0').replace(/,/g, ''));
-                const above = cur > maV;
-                return (
-                  <div key={ma.label} className="flex items-center justify-between p-3 bg-slate-950 rounded-xl">
-                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">{ma.label}</span>
-                    <div className="flex items-center gap-3">
-                      <span className="text-sm font-black text-white tabular-nums">{ma.value}</span>
-                      <span className={cn("text-[9px] font-black px-2 py-0.5 rounded uppercase",
-                        above ? "bg-emerald-500/10 text-emerald-400" : "bg-rose-500/10 text-rose-400")}>
-                        {above ? 'Above' : 'Below'}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* Advance / Decline */}
-        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6">
-          <h2 className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-4">Advance / Decline</h2>
-          {(() => {
-            const adv = Number(pf?.adv ?? 0);
-            const decl = Number(pf?.decl ?? 0);
-            const unchg = Number(pf?.unchg ?? 0);
-            const total = adv + decl + unchg || 1;
-            return (
-              <div className="space-y-4">
-                <div className="flex h-8 rounded-lg overflow-hidden gap-px">
-                  <div className="bg-emerald-500 transition-all" style={{ width: `${(adv / total) * 100}%` }} />
-                  <div className="bg-slate-700 transition-all" style={{ width: `${(unchg / total) * 100}%` }} />
-                  <div className="bg-rose-500 transition-all" style={{ width: `${(decl / total) * 100}%` }} />
-                </div>
-                <div className="grid grid-cols-3 gap-3">
-                  {[
-                    { label: 'Advances', value: adv, color: 'text-emerald-400' },
-                    { label: 'Unchanged', value: unchg, color: 'text-slate-400' },
-                    { label: 'Declines', value: decl, color: 'text-rose-400' },
-                  ].map(item => (
-                    <div key={item.label} className="bg-slate-950 rounded-xl p-3 text-center">
-                      <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-1">{item.label}</p>
-                      <p className={cn("text-xl font-black tabular-nums", item.color)}>{item.value}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            );
-          })()}
-        </div>
-      </div>
-
-      {/* Technical Analysis */}
-      {tech && (
-        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6">
-          <div className="flex items-center justify-between mb-5">
-            <h2 className="text-[10px] font-black uppercase tracking-widest text-slate-500">Technical Analysis</h2>
-            <div className="flex gap-1">
-              {(['D', 'W', 'M'] as const).map(p => (
-                <button key={p} onClick={() => setTechPeriod(p)}
-                  className={cn("px-3 py-1 rounded text-[10px] font-black uppercase transition-colors",
-                    techPeriod === p ? "bg-blue-500 text-white" : "bg-slate-800 text-slate-400 hover:text-white")}>
-                  {p === 'D' ? 'Daily' : p === 'W' ? 'Weekly' : 'Monthly'}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {tech.sentiments && (
-            <div className="mb-5 p-4 bg-slate-950 rounded-2xl">
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Overall Sentiment</span>
-                <span className={cn("px-3 py-1 rounded text-[10px] font-black uppercase",
-                  tech.sentiments.indication?.includes('Bullish') ? "bg-emerald-500/10 text-emerald-400" :
-                  tech.sentiments.indication?.includes('Bearish') ? "bg-rose-500/10 text-rose-400" :
-                  "bg-slate-700 text-slate-300")}>
-                  {tech.sentiments.indication}
-                </span>
-              </div>
-              <div className="grid grid-cols-3 gap-3 text-center">
-                <div><p className="text-emerald-400 text-xl font-black">{tech.sentiments.totalBullish}</p><p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mt-1">Bullish</p></div>
-                <div><p className="text-slate-400 text-xl font-black">{tech.sentiments.totalNeutral}</p><p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mt-1">Neutral</p></div>
-                <div><p className="text-rose-400 text-xl font-black">{tech.sentiments.totalBearish}</p><p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mt-1">Bearish</p></div>
-              </div>
-            </div>
-          )}
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {tech.indicators && (
-              <div>
-                <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-3">Indicators</p>
-                <div className="space-y-2">
-                  {tech.indicators.map((ind: any) => {
-                    const val = Array.isArray(ind.value)
-                      ? `UB:${ind.value[0]?.value} LB:${ind.value[1]?.value}`
-                      : ind.value;
-                    return (
-                      <div key={ind.id} className="flex items-center justify-between p-2 bg-slate-950 rounded-lg">
-                        <span className="text-[10px] font-black text-slate-400">{ind.displayName}</span>
-                        <div className="flex items-center gap-2">
-                          <span className="text-[10px] text-white font-bold tabular-nums">{val}</span>
-                          <span className={cn("text-[9px] font-black px-2 py-0.5 rounded uppercase",
-                            ind.indication === 'Bullish' ? "bg-emerald-500/10 text-emerald-400" :
-                            ind.indication === 'Bearish' ? "bg-rose-500/10 text-rose-400" :
-                            "bg-slate-700 text-slate-400")}>
-                            {ind.indication}
-                          </span>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {tech.sma && (
-              <div>
-                <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-3">SMA Signals</p>
-                <div className="space-y-2">
-                  {tech.sma.map((s: any) => (
-                    <div key={s.key} className="flex items-center justify-between p-2 bg-slate-950 rounded-lg">
-                      <span className="text-[10px] font-black text-slate-400">SMA {s.key}</span>
-                      <div className="flex items-center gap-2">
-                        <span className="text-[10px] text-white font-bold tabular-nums">{s.value}</span>
-                        <span className={cn("text-[9px] font-black px-2 py-0.5 rounded uppercase",
-                          s.indication === 'Bullish' ? "bg-emerald-500/10 text-emerald-400" : "bg-rose-500/10 text-rose-400")}>
-                          {s.indication}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Derivative Intelligence */}
-      {['NIFTY 50', 'NIFTY BANK', 'NIFTY FIN SERVICE'].includes(indexName.toUpperCase()) && (
-        <IndexFnoOverview symbol={indexName} />
-      )}
-
-      {/* Extended MC Index Intelligence Panel — PE/PB charts, fundamentals, intraday A/D breadth */}
-      <MCIndexDetailPanel indId={indexId} name={indexName} bridgeSymbol={d?.bridgeSymbol ?? ''} onSelectStock={onSelectStock} />
-
-      {/* Constituent Stocks */}
-      {stocks.length > 0 && (
-        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6">
-          <h2 className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-4">
-            Constituent Stocks ({stocks.length})
-          </h2>
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="text-[9px] font-black uppercase tracking-widest text-slate-500 border-b border-slate-800">
-                  <th className="text-left pb-3 pr-4">Symbol / Company</th>
-                  <th className="text-right pb-3 pr-4">Price</th>
-                  <th className="text-right pb-3 pr-4">Change</th>
-                  <th className="text-right pb-3 pr-4">Chg%</th>
-                  <th className="text-right pb-3 pr-4">Volume</th>
-                  <th className="text-right pb-3">Mkt Cap (Cr)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {stocks.slice(0, 50).map((s: any) => {
-                  const up = s.direction === '1';
-                  const nseSym = stockData.find(st => st.symbol.toUpperCase() === String(s.id).toUpperCase())?.symbol || s.id;
-                  return (
-                    <tr
-                      key={s.id}
-                      onClick={() => onSelectStock(nseSym)}
-                      className="border-t border-slate-800/40 hover:bg-slate-800/30 transition-colors cursor-pointer"
-                    >
-                      <td className="py-2.5 pr-4">
-                        <p className="text-sm font-black text-white group-hover:text-blue-400">{nseSym}</p>
-                        <p className="text-[9px] text-slate-500 font-bold">{s.shortname}</p>
-                      </td>
-                      <td className="py-2.5 pr-4 text-right text-sm font-black text-white tabular-nums">₹{s.lastvalue}</td>
-                      <td className={cn("py-2.5 pr-4 text-right text-sm font-black tabular-nums", up ? "text-emerald-400" : "text-rose-400")}>
-                        {up ? '+' : ''}{s.change}
-                      </td>
-                      <td className="py-2.5 pr-4 text-right">
-                        <span className={cn("text-[9px] font-black px-2 py-0.5 rounded",
-                          up ? "bg-emerald-500/10 text-emerald-400" : "bg-rose-500/10 text-rose-400")}>
-                          {up ? '+' : ''}{s.percentchange}%
-                        </span>
-                      </td>
-                      <td className="py-2.5 pr-4 text-right text-[10px] font-bold text-slate-400 tabular-nums">{s.volume}</td>
-                      <td className="py-2.5 text-right text-[10px] font-bold text-slate-400 tabular-nums">{s.mktcap}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
-
-const IndicesPage: React.FC<{ 
-  onSelectStock: (symbol: string) => void;
-  selectedIndex: { id: string; name: string } | null;
-  setSelectedIndex: (idx: { id: string; name: string } | null) => void;
-}> = ({ onSelectStock, selectedIndex, setSelectedIndex }) => {
-  const { data: indicesData, isLoading } = trpc.getAllIndices.useQuery(undefined, { refetchInterval: 30000 });
-
-  if (selectedIndex) {
-    return (
-      <IndexDetailPage
-        indexId={selectedIndex.id}
-        indexName={selectedIndex.name}
-        onBack={() => setSelectedIndex(null)}
-        onSelectStock={onSelectStock}
-      />
-    );
-  }
-
-  const raw = (indicesData as any)?.data;
-  const indicesList: { name: string; list: any[] }[] = raw?.indiceList ?? [];
-
-  if (isLoading) {
-    return (
-      <div className="p-6 space-y-6">
-        <h1 className="text-2xl font-black text-white uppercase tracking-tight">Market Indices</h1>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {Array.from({ length: 12 }).map((_, i) => (
-            <div key={i} className="h-24 bg-slate-900 border border-slate-800 rounded-2xl animate-pulse" />
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="p-6 space-y-8">
-      <div>
-        <h1 className="text-2xl font-black text-white uppercase tracking-tight mb-1">Market Indices</h1>
-        <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Live Indian Market Intelligence — Click any index for details</p>
-      </div>
-
-      {indicesList.map(group => (
-        <div key={group.name}>
-          <h2 className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-4 pl-1">{group.name}</h2>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-            {group.list
-              .filter((idx: any) => idx.name)
-              .map((idx: any) => {
-                const idxId = extractIndexId(idx.url);
-                const changePct = parseFloat(idx.changePer ?? '0');
-                const up = Number(idx.direction) === 1 || changePct >= 0;
-                return (
-                  <motion.button
-                    key={idx.name + idx.url}
-                    onClick={() => idxId && setSelectedIndex({ id: idxId, name: idx.name })}
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    className={cn(
-                      "bg-slate-900 border rounded-2xl p-4 text-left transition-all hover:shadow-lg group",
-                      up ? "border-slate-800 hover:border-emerald-500/30" : "border-slate-800 hover:border-rose-500/30"
-                    )}
-                  >
-                    <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-2 group-hover:text-slate-400 transition-colors line-clamp-2 leading-relaxed">
-                      {idx.name}
-                    </p>
-                    <p className="text-base font-black text-white tabular-nums mb-1">{idx.value}</p>
-                    <div className={cn("flex items-center gap-1 text-[10px] font-black", up ? "text-emerald-400" : "text-rose-400")}>
-                      {up ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
-                      {up ? '+' : ''}{idx.change} ({up ? '+' : ''}{changePct.toFixed(2)}%)
-                    </div>
-                  </motion.button>
-                );
-              })}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-};
 
 
 // --- Market Overview Components (Moved to separate files) ---
@@ -3791,7 +3382,15 @@ const StockDetails: React.FC<{
 };
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const navigate = useNavigate();
+  const location = useLocation();
+  
+  // Extract base tab from location (e.g. /indices/nifty -> indices)
+  const pathParts = location.pathname.split('/').filter(Boolean);
+  const activeTab = pathParts[0] || 'dashboard';
+  
+  const setActiveTab = (tab: string) => navigate('/' + tab);
+
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [selectedIndex, setSelectedIndex] = useState<{ id: string; name: string } | null>(null);
   const [user, setUser] = useState<FirebaseUser | null>(null);
@@ -3825,7 +3424,7 @@ export default function App() {
     
     if (id) {
       setSelectedIndex({ id, name });
-      setActiveTab('indices');
+      navigate('/indices');
     }
   };
 
@@ -3968,7 +3567,8 @@ export default function App() {
       >
         <TickerTapeWidget />
         <AnimatePresence mode="wait">
-          {activeTab === 'watchlist' ? (
+          <Routes location={location} key={activeTab}>
+            <Route path="/watchlist" element={
             <motion.div
               key="watchlist"
               initial={{ opacity: 0, x: 20 }}
@@ -3983,19 +3583,21 @@ export default function App() {
                 onRemove={toggleWatchlist}
               />
             </motion.div>
-          ) : (
+            } />
+            <Route path="/*" element={
             <motion.div
               key={activeTab}
               initial={{ opacity: 0, x: -10 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: 10 }}
-              transition={{ duration: 0.22, ease: 'easeOut' }}
               className="pb-10"
             >
-              {activeTab === 'dashboard' && <DashboardPage stocks={stocks} onNewSignal={addToast} onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} onSelectIndex={(id, name) => { setSelectedIndex({ id, name }); setActiveTab('indices'); }} />}
-              {activeTab === 'top-rated' && <TopRatedStocks onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />}
-              {activeTab === 'indices' && <IndicesPage onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} selectedIndex={selectedIndex} setSelectedIndex={setSelectedIndex} />}
-              {activeTab === 'market-map' && (
+              <Routes>
+                <Route path="/" element={<DashboardPage stocks={stocks} onNewSignal={addToast} onSelectStock={(s) => { setSelectedSymbol(s); navigate('/details'); }} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} onSelectIndex={(id, name) => { setSelectedIndex({ id, name }); navigate('/indices'); }} />} />
+                <Route path="/dashboard" element={<DashboardPage stocks={stocks} onNewSignal={addToast} onSelectStock={(s) => { setSelectedSymbol(s); navigate('/details'); }} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} onSelectIndex={(id, name) => { setSelectedIndex({ id, name }); navigate('/indices'); }} />} />
+                <Route path="/top-rated" element={<TopRatedStocks onSelectStock={(s) => { setSelectedSymbol(s); navigate('/details'); }} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
+                <Route path="/indices" element={<IndicesPage onSelectStock={(s) => { setSelectedSymbol(s); navigate('/details'); }} selectedIndex={selectedIndex} setSelectedIndex={setSelectedIndex} />} />
+                <Route path="/market-map" element={
                 <div className="p-6 space-y-6">
                   <Card title="NSE Market Heatmap" icon={Activity}>
                     <div className="pt-2"><MarketHeatmapWidget /></div>
@@ -4005,27 +3607,29 @@ export default function App() {
                     <SectorHeatmap />
                   </div>
                 </div>
-              )}
-              {activeTab === 'screener'     && <Screener stocks={stocks} onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />}
-              {activeTab === 'trendlyne'    && <TrendlyneScreenerPanel onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />}
-              {activeTab === 'discover'     && <div className="p-6"><NSEStockDiscovery onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} /></div>}
-              {activeTab === 'fno-scanners' && <FnOIntelligenceCenter onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} />}
-              {activeTab === 'details' && selectedSymbol && (
+              } />
+              <Route path="/screener" element={<Screener stocks={stocks} onSelectStock={(s) => { setSelectedSymbol(s); navigate('/details'); }} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
+              <Route path="/trendlyne" element={<TrendlyneScreenerPanel onSelectStock={(s) => { setSelectedSymbol(s); navigate('/details'); }} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
+              <Route path="/discover" element={<div className="p-6"><NSEStockDiscovery onSelectStock={(s) => { setSelectedSymbol(s); navigate('/details'); }} /></div>} />
+              <Route path="/fno-scanners" element={<FnOIntelligenceCenter onSelectStock={(s) => { setSelectedSymbol(s); navigate('/details'); }} />} />
+              <Route path="/options" element={<div className="p-6"><OptionsIntelligence /></div>} />
+              <Route path="/details" element={selectedSymbol ? (
                 <StockDetails
                   key={selectedSymbol}
                   symbol={selectedSymbol}
                   stock={stocks.find(s => s.symbol === selectedSymbol)}
-                  onBack={() => setActiveTab('dashboard')}
+                  onBack={() => navigate('/dashboard')}
                   watchlist={watchlist}
                   onToggleWatchlist={toggleWatchlist}
-                  onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }}
+                  onSelectStock={(s) => { setSelectedSymbol(s); navigate('/details'); }}
                 />
-              )}
-              {activeTab === 'backtest'  && <Backtest stocks={stocks} />}
-              {activeTab === 'signals'   && <DailySignals onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />}
-              {activeTab === 'strategy'  && <StrategyIntelligence onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} />}
-              {activeTab === 'sentiment' && <SentimentIntelligence onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }} />}
-              {activeTab === 'economics' && (
+              ) : <div className="p-6">Select a stock to view details</div>} />
+              <Route path="/backtest" element={<Backtest stocks={stocks} />} />
+              <Route path="/signals" element={<DailySignals onSelectStock={(s) => { setSelectedSymbol(s); navigate('/details'); }} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
+              <Route path="/strategy" element={<StrategyIntelligence onSelectStock={(s) => { setSelectedSymbol(s); navigate('/details'); }} />} />
+              <Route path="/strategy-builder" element={<InvestmentStrategy onSelectStock={(s) => { setSelectedSymbol(s); navigate('/details'); }} />} />
+              <Route path="/sentiment" element={<SentimentIntelligence onSelectStock={(s) => { setSelectedSymbol(s); navigate('/details'); }} />} />
+              <Route path="/economics" element={
                 <div className="p-6 space-y-6">
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                     <div className="lg:col-span-2">
@@ -4040,31 +3644,19 @@ export default function App() {
                     </div>
                   </div>
                 </div>
-              )}
-              {activeTab === 'superstars' && <SuperstarPortfolio />}
-              {activeTab === 'todo'       && <ToDoPage />}
-              {activeTab === 'portfolio'  && (
-                <div className="p-6">
-                  <Card title="Wealth Intelligence" icon={PieChart}>
-                    <div className="py-24 text-center">
-                      <div className="relative inline-block mb-8">
-                        <PieChart className="text-slate-800 w-24 h-24" />
-                        <motion.div
-                          animate={{ rotate: 360 }}
-                          transition={{ duration: 10, repeat: Infinity, ease: 'linear' }}
-                          className="absolute inset-0 border-2 border-dashed border-blue-500/20 rounded-full"
-                        />
-                      </div>
-                      <h3 className="text-white font-black text-2xl italic uppercase tracking-widest text-blue-500 text-center">Elite Wealth Engine</h3>
-                      <p className="text-slate-500 text-[10px] font-black uppercase tracking-[0.2em] mt-3">Advanced tracking is deploying soon</p>
-                    </div>
-                  </Card>
-                </div>
-              )}
+              } />
+              <Route path="/superstars" element={<SuperstarPortfolio />} />
+              <Route path="/todo" element={<ToDoPage />} />
+              <Route path="/portfolio" element={<div className="p-6"><PortfolioAnalytics /></div>} />
+              <Route path="/builder" element={<div className="p-6"><StrategyBuilder /></div>} />
+              </Routes>
             </motion.div>
-          )}
+            } />
+          </Routes>
         </AnimatePresence>
       </AppShell>
+
+      <AlertsToast />
 
       {/* Signal toast notifications */}
       <div className="fixed bottom-6 right-6 z-[100] flex flex-col gap-3 pointer-events-none">

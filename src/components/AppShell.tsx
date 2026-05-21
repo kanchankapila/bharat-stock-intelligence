@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Trophy, BarChart2, Activity, Filter, Target, Zap,
   Search, History, PieChart, Bookmark, Users, Globe, CheckCircle2,
   Star, LogIn, TrendingUp, ArrowUpRight, ArrowDownRight, Menu,
-  ChevronLeft, ChevronRight, Radio,
+  ChevronLeft, ChevronRight, Radio, Settings2,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { nseStocksData } from '../data/nseStocks';
@@ -31,6 +31,7 @@ const NAV_GROUPS: NavGroup[] = [
       { icon: Trophy,  label: 'Top Rated',  id: 'top-rated'   },
       { icon: Filter,  label: 'Screener',   id: 'screener'    },
       { icon: Target,  label: 'F&O Intel',  id: 'fno-scanners'},
+      { icon: TrendingUp, label: 'Options Intel', id: 'options' },
       { icon: Zap,     label: 'Trendlyne',  id: 'trendlyne'   },
       { icon: Search,  label: 'Discover',   id: 'discover'    },
     ],
@@ -40,8 +41,10 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { icon: Radio,   label: 'Signals',    id: 'signals'     },
       { icon: Star,    label: 'Strategy',   id: 'strategy'    },
+      { icon: Target,  label: 'Builder',    id: 'strategy-builder' },
       { icon: Activity,label: 'Sentiment',  id: 'sentiment'   },
       { icon: History, label: 'Backtest',   id: 'backtest'    },
+      { icon: Settings2, label: 'ML Builder', id: 'builder'   },
     ],
   },
   {

@@ -175,6 +175,13 @@ async function startServer() {
       await syncMoneyControlScreeners();
     }, 12 * 60 * 60 * 1000);
 
+    // Fallback for News Sentiment sync: run every 1 minute
+    setInterval(async () => {
+      console.log('[FALLBACK] Triggering News Sentiment cycle...');
+      const { runNewsSentimentCycle } = await import('./src/server/newsSentimentService');
+      await runNewsSentimentCycle();
+    }, 1 * 60 * 1000);
+
     // Trigger immediate sync on start if fallback
     syncAndScore();
     import('./src/server/moneycontrolScreener').then(m => m.syncMoneyControlScreeners());
@@ -213,6 +220,14 @@ async function startServer() {
   // Health check
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
+  });
+
+  // SSE and Webhook for Alerts
+  const { sseHandler, broadcastAlert } = await import('./src/server/sse');
+  app.get("/api/stream", sseHandler);
+  app.post("/api/internal/notify", (req, res) => {
+    broadcastAlert(req.body);
+    res.json({ success: true });
   });
 
   // Vite middleware for development
