@@ -47,6 +47,29 @@ SECTOR_MAP    = {
     'oil':                     'ENERGY',
     'oil & gas':               'ENERGY',
     'power':                   'ENERGY',
+    'infrastructure':          'INFRA',
+    'capital goods':           'INFRA',
+    'ports':                   'INFRA',
+    'logistics':               'INFRA',
+    'construction':            'INFRA',
+    'cement':                  'INFRA',
+    'metals':                  'METALS',
+    'metal':                   'METALS',
+    'steel':                   'METALS',
+    'mining':                  'METALS',
+    'consumer':                'CONSUMER',
+    'consumer goods':          'CONSUMER',
+    'fmcg':                    'CONSUMER',
+    'retail':                  'CONSUMER',
+    'telecom':                 'TELECOM',
+    'telecommunications':      'TELECOM',
+    'realty':                  'REALTY',
+    'real estate':             'REALTY',
+    'chemicals':               'CHEMICALS',
+    'fertilizers':             'CHEMICALS',
+    'textiles':                'TEXTILES',
+    'media':                   'MEDIA',
+    'fdi':                     'OTHER',
 }
 
 ACTIONS = ['AGGRESSIVE', 'CONSERVATIVE', 'BALANCED', 'SECTOR_FOCUSED']
@@ -107,7 +130,7 @@ def get_score_bucket(score: int) -> str:
 
 def get_state_key(regime: str, sector_or_bucket: str, score: int) -> str:
     regime_clean = regime if regime in REGIMES else 'SIDEWAYS'
-    if sector_or_bucket in ('IT', 'BANK', 'PHARMA', 'AUTO', 'ENERGY', 'OTHER'):
+    if sector_or_bucket in ('IT', 'BANK', 'PHARMA', 'AUTO', 'ENERGY', 'INFRA', 'METALS', 'CONSUMER', 'TELECOM', 'REALTY', 'CHEMICALS', 'TEXTILES', 'MEDIA', 'OTHER'):
         sector_bucket = sector_or_bucket
     else:
         sector_bucket = get_sector_bucket(sector_or_bucket)
@@ -271,7 +294,7 @@ def inspect_policy(conn: sqlite3.Connection):
     print(f"{'State':<30} {'Action':<18} {'Q-value':>8}")
     print("-" * 60)
     for regime in REGIMES:
-        for sector in ['IT', 'BANK', 'PHARMA', 'AUTO', 'ENERGY', 'OTHER']:
+        for sector in ['IT', 'BANK', 'PHARMA', 'AUTO', 'ENERGY', 'INFRA', 'METALS', 'CONSUMER', 'TELECOM', 'REALTY', 'CHEMICALS', 'TEXTILES', 'MEDIA', 'OTHER']:
             for bucket in SCORE_BUCKETS:
                 sk     = f"{regime}_{sector}_{bucket}"
                 action = get_policy(conn, sk, epsilon=0.0)
