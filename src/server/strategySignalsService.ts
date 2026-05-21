@@ -105,6 +105,7 @@ export function regimeSectorFilter(topNSectors = 3, minScore = 60, minWinProbabi
     if (sectorScores.length === 0) return [];
     const topSectorSet = new Set(sectorScores.map(s => s.sector));
 
+    // win_probability added via db migration at line 720 in db.ts
     const wpRows = db.prepare(`
       SELECT symbol, MAX(win_probability) AS wp
       FROM technical_signals
