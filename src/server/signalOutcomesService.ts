@@ -43,7 +43,7 @@ export function computeSignalOutcomes(horizonDays: HorizonDays = 5): {
   // Find signals from `horizonDays` ago that haven't been resolved yet
   const pending = db.prepare(`
     SELECT ts.symbol, ts.date as signal_date, ts.cmp as entry_price,
-           ts.signal_score, ts.signals_json
+           ts.signal_score, ts.signals_json, ts.stop_loss
     FROM technical_signals ts
     WHERE ts.date <= ?
       AND NOT EXISTS (
@@ -57,7 +57,7 @@ export function computeSignalOutcomes(horizonDays: HorizonDays = 5): {
     LIMIT 500
   `).all(cutoff, horizonDays) as {
     symbol: string; signal_date: string; entry_price: number;
-    signal_score: number; signals_json: string;
+    signal_score: number; signals_json: string; stop_loss: number | null;
   }[];
 
   if (pending.length === 0) return { processed: 0, resolved: 0 };
@@ -87,6 +87,27 @@ export function computeSignalOutcomes(horizonDays: HorizonDays = 5): {
       targetDate.setDate(targetDate.getDate() + horizonDays);
       const targetStr = targetDate.toISOString().slice(0, 10);
 
+      // Check for stop-loss hit before target exit date
+      const stopLossRow = db.prepare(`
+        SELECT date FROM stock_ohlcv
+        WHERE symbol = ? AND date > ? AND date <= ?
+          AND low <= ?
+        ORDER BY date ASC LIMIT 1
+      `).get(row.symbol, row.signal_date, targetStr, row.stop_loss) as { date: string } | undefined;
+
+      if (stopLossRow) {
+        const stopReturnPct = ((row.stop_loss! - row.entry_price) / row.entry_price) * 100;
+        upsert.run({
+          symbol: row.symbol, signal_date: row.signal_date,
+          horizon_days: horizonDays, entry_price: row.entry_price,
+          check_date: stopLossRow.date, exit_price: row.stop_loss,
+          return_pct: stopReturnPct, outcome: 'LOSS',
+          signal_score: row.signal_score, signals_json: row.signals_json,
+        });
+        resolved++;
+        continue;
+      }
+
       const exitRow = db.prepare(`
         SELECT date, close FROM stock_ohlcv
         WHERE symbol = ? AND date >= ?
@@ -107,8 +128,8 @@ export function computeSignalOutcomes(horizonDays: HorizonDays = 5): {
 
       const returnPct = ((exitRow.close - row.entry_price) / row.entry_price) * 100;
       const outcome: OutcomeResult =
-        returnPct > 0.5  ? 'WIN'  :
-        returnPct < -0.5 ? 'LOSS' : 'NEUTRAL';
+        returnPct > 1.0  ? 'WIN'  :
+        returnPct < -1.0 ? 'LOSS' : 'NEUTRAL';
 
       upsert.run({
         symbol: row.symbol, signal_date: row.signal_date,
