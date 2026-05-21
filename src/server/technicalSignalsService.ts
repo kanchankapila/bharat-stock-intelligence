@@ -297,7 +297,7 @@ function computeADX(rows: OHLCVRow[], period = 14): number[] {
   return adx;
 }
 
-// Nifty50 regime — reads from stock_ohlcv; defaults to BULL if Nifty data absent
+// Nifty50 regime — reads from stock_ohlcv; defaults to SIDEWAYS if Nifty data absent
 function computeNiftyRegime(): 'BULL' | 'BEAR' | 'SIDEWAYS' {
   try {
     const rows = db.prepare(
@@ -305,7 +305,7 @@ function computeNiftyRegime(): 'BULL' | 'BEAR' | 'SIDEWAYS' {
        WHERE symbol IN ('NIFTY50','NIFTY','NIFTY 50','^NSEI','INDIA50')
        ORDER BY date DESC LIMIT 210`
     ).all() as { close: number }[];
-    if (rows.length < 50) return 'BULL';
+    if (rows.length < 50) return 'SIDEWAYS';
 
     const closes = rows.map(r => r.close).reverse();
     const last   = closes[closes.length - 1];
@@ -316,7 +316,7 @@ function computeNiftyRegime(): 'BULL' | 'BEAR' | 'SIDEWAYS' {
     if (last < sma200 * 0.98)  return 'BEAR';
     return 'SIDEWAYS';
   } catch {
-    return 'BULL';
+    return 'SIDEWAYS';
   }
 }
 
