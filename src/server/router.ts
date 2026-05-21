@@ -2052,16 +2052,29 @@ export const appRouter = router({
     }),
 
   getStrategyPicks: publicProcedure.query(async () => {
+    const latestPriceCte = `
+      WITH latest_prices AS (
+        SELECT o.symbol, o.close
+        FROM stock_ohlcv o
+        JOIN (
+          SELECT symbol, MAX(date) AS max_date
+          FROM stock_ohlcv
+          GROUP BY symbol
+        ) latest ON latest.symbol = o.symbol AND latest.max_date = o.date
+      )
+    `;
+
     // 1. Fetch Investment Picks (Bharat Quality Compounders)
     // Looking for a confluence of ET Now Quality/Cash Cow screeners + Value/Dips screeners
     // ET Now IDs: 79(Zero Debt), 73(Cash Cows), 75(Bluechips), 195(Multibaggers), 91(Buy on Dips), 362(RSI Oversold)
-    const invRows = db.prepare(`
-      SELECT n.symbol, n.companyName, n.sector, n.currentPrice,
+    const invRows = db.prepare(`${latestPriceCte}
+      SELECT n.symbol, n.name as companyName, n.sector, lp.close as currentPrice,
              GROUP_CONCAT(DISTINCT es.screener_id) as et_screeners,
              GROUP_CONCAT(DISTINCT ms.scan_id) as mc_screeners
       FROM nse_stocks n
       JOIN etnow_screener_stocks es ON n.symbol = es.symbol
       LEFT JOIN moneycontrol_screener_stocks ms ON n.symbol = ms.symbol
+      LEFT JOIN latest_prices lp ON lp.symbol = n.symbol
       WHERE es.screener_id IN ('79', '73', '75', '195', '515', '91', '362')
       GROUP BY n.symbol
       HAVING COUNT(DISTINCT es.screener_id) >= 2
@@ -2102,16 +2115,20 @@ export const appRouter = router({
 
     // 2. Fetch Intraday Picks (Momentum/Breakout)
     // Cross-referencing Trendlyne intraday screeners with MC Tech and ET Breakouts
-    const intradayRows = db.prepare(`
-      SELECT n.symbol, n.companyName, n.sector, n.currentPrice,
+    const intradayRows = db.prepare(`${latestPriceCte}
+      SELECT n.symbol, n.name as companyName, n.sector, lp.close as currentPrice,
              GROUP_CONCAT(DISTINCT ts.screener_id) as tl_screeners,
              GROUP_CONCAT(DISTINCT ms.scan_id) as mc_screeners
       FROM nse_stocks n
       JOIN trendlyne_screener_stocks ts ON n.symbol = ts.symbol
+      JOIN trendlyne_screeners tls ON tls.screener_id = ts.screener_id
+      LEFT JOIN screener_master sm ON sm.scan_id = ts.screener_id
       LEFT JOIN moneycontrol_screener_stocks ms ON n.symbol = ms.symbol
+      LEFT JOIN latest_prices lp ON lp.symbol = n.symbol
+      WHERE tls.timeframe = 'intraday' OR sm.inferred_timeframe = 'intraday'
       GROUP BY n.symbol
       HAVING tl_screeners IS NOT NULL
-      ORDER BY RANDOM()
+      ORDER BY COUNT(DISTINCT ts.screener_id) DESC
       LIMIT 30
     `).all() as any[];
 

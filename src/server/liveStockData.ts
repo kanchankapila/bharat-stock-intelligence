@@ -34,6 +34,18 @@ function buildSectorMap(): Map<string, string> {
 
 const BATCH_SIZE = 50;
 const BATCH_CONCURRENCY = 8;
+const QUOTE_FETCH_TIMEOUT_MS = Number(process.env.QUOTE_FETCH_TIMEOUT_MS ?? 8000);
+const MAX_INDIVIDUAL_FALLBACKS = Number(process.env.MAX_INDIVIDUAL_FALLBACKS ?? 250);
+
+async function fetchWithTimeout(url: string, init: RequestInit = {}): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), QUOTE_FETCH_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 async function fetchBatchYahooFinance(
   symbols: string[],
@@ -47,7 +59,7 @@ async function fetchBatchYahooFinance(
     `regularMarketVolume,regularMarketDayHigh,regularMarketDayLow,` +
     `regularMarketOpen,regularMarketPreviousClose,fiftyTwoWeekHigh,fiftyTwoWeekLow`;
 
-  const response = await fetch(url, {
+  const response = await fetchWithTimeout(url, {
     headers: {
       "User-Agent":
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -100,7 +112,7 @@ async function fetchStockQuoteYahooFinance(
     const name = nameMap.get(symbol) || symbol;
 
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}.NS?interval=1d&range=1d`;
-    const response = await fetch(url, {
+    const response = await fetchWithTimeout(url, {
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -250,7 +262,7 @@ export async function fetchAllLiveStocks(): Promise<MarketData[]> {
 
   // Per-symbol YF v8 fallback for symbols the batch missed
   const missed = allSymbols.filter((s) => !collected.has(s));
-  if (missed.length > 0) {
+  if (missed.length > 0 && collected.size > 0 && missed.length <= MAX_INDIVIDUAL_FALLBACKS) {
     console.log(
       `[LIVE DATA] Retrying ${missed.length} missed symbols individually...`,
     );
@@ -262,6 +274,10 @@ export async function fetchAllLiveStocks(): Promise<MarketData[]> {
         collected.set(r.value.symbol, r.value);
       }
     });
+  } else if (missed.length > MAX_INDIVIDUAL_FALLBACKS || (missed.length > 0 && collected.size === 0)) {
+    console.warn(
+      `[LIVE DATA] Skipping individual fallback for ${missed.length} symbols after weak/failed batch fetch.`,
+    );
   }
 
   // MoneyControl last-resort removed to prevent API rate limits (503s) and blocking the global mcSemaphore.
@@ -326,6 +342,11 @@ async function runBulkRefresh(): Promise<void> {
   refreshRunning = true;
   try {
     const freshData = await fetchAllLiveStocks();
+    if (freshData.length === 0) {
+      console.warn("[LIVE DATA] Refresh returned no quotes; keeping existing cache/mirror.");
+      return;
+    }
+
     bulkMirror = new Map(freshData.map((s) => [s.symbol, s]));
     lastBulkFetchTime = Date.now();
     hasFetchedOnce = true;
@@ -379,7 +400,7 @@ export async function fetchStockDataWithCache(
 
   // 4. Individual fetch as last resort
   let quoteData = await fetchStockQuoteYahooFinance(symbol);
-  if (!quoteData) quoteData = await fetchStockQuoteMoneyControl(symbol);
+  if (!quoteData) quoteData = await fetchStockQuoteMoneyControl(symbol, 1);
   if (!quoteData && process.env.FINNHUB_API_KEY)
     quoteData = await fetchStockQuoteFinnhub(symbol);
 

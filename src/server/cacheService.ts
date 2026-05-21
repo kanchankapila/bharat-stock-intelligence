@@ -74,12 +74,13 @@ function memSet(key: string, value: unknown, ttlSeconds: number): void {
 }
 
 // Evict expired keys periodically to avoid unbounded memory growth
-setInterval(() => {
+const memCacheEvictionInterval = setInterval(() => {
   const now = Date.now();
   for (const [k, v] of memCache) {
     if (v.expires < now) memCache.delete(k);
   }
 }, 60_000);
+memCacheEvictionInterval.unref?.();
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
