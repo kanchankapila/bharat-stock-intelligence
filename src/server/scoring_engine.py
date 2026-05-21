@@ -267,6 +267,16 @@ class AlphaQuantScoringEngine:
         except Exception:
             return 1.0
 
+    @staticmethod
+    def _news_recency_weight(published_at_str) -> float:
+        try:
+            import math
+            published = datetime.datetime.fromisoformat(str(published_at_str))
+            age_hours = max(0, (datetime.datetime.now() - published).total_seconds() / 3600)
+            return math.exp(-math.log(2) * age_hours / 48)  # 2-day half-life
+        except Exception:
+            return 1.0
+
     def process_scoring(self, force_rebuild: bool = False):
         print(f"Starting AlphaQuant Scoring Engine v3 (Dedup+Decay) at {datetime.datetime.now()}")
         screeners, mappings = self.load_data()
@@ -309,7 +319,7 @@ class AlphaQuantScoringEngine:
                 sym_list = json.loads(raw) if str(raw).startswith('[') else [s.strip() for s in str(raw).split(',')]
             except Exception:
                 sym_list = [s.strip() for s in str(raw).split(',')]
-            recency = self._recency_weight(n.get('published_at') or '')
+            recency = self._news_recency_weight(n.get('published_at') or '')
             for s in sym_list:
                 if not s or s == '#N/A':
                     continue
