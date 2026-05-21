@@ -328,6 +328,21 @@ class AlphaQuantScoringEngine:
             )).fetchall()
         screener_updated = {r[0]: r[1] for r in sm_rows}
 
+        # Load latest win_probability per symbol from ML ensemble
+        win_prob_map: Dict[str, float] = {}
+        try:
+            with self.engine.connect() as conn:
+                wp_rows = conn.execute(text("""
+                    SELECT symbol, MAX(win_probability) AS wp
+                    FROM technical_analysis_signals
+                    WHERE created_at >= datetime('now', '-1 day')
+                      AND win_probability IS NOT NULL
+                    GROUP BY symbol
+                """)).fetchall()
+            win_prob_map = {r[0]: float(r[1]) for r in wp_rows}
+        except Exception:
+            pass
+
         # Score per timeframe
         timeframes = ['long_term', 'intraday']
         all_timeframe_results = []
@@ -422,6 +437,11 @@ class AlphaQuantScoringEngine:
                 # Multi-category consensus bonus (capped at 3 categories → +20%)
                 consensus_mult = 1.0 + min(0.1 * (cat_count - 1), 0.20)
                 final_score = data['raw_sum'] * consensus_mult
+
+                normalized_score = min(100, max(0, 50 + (final_score * 2)))
+                wp = win_prob_map.get(symbol)
+                if wp is not None and normalized_score >= 60 and wp >= 0.55:
+                    final_score *= 1.10
 
                 screener_count = len(data['positive_screeners']) + len(data['negative_screeners'])
                 source_count   = len(data['sources'])
