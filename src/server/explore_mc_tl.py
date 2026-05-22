@@ -683,3 +683,78 @@ def fetch_all(
     print(f"Done. {total} URLs in {elapsed:.1f}s", flush=True)
 
 
+# ─── Summary Report ───────────────────────────────────────────────────────────
+
+def print_summary(conn: sqlite3.Connection) -> None:
+    total    = conn.execute("SELECT COUNT(*) FROM api_responses").fetchone()[0]
+    success  = conn.execute(
+        "SELECT COUNT(*) FROM api_responses WHERE http_status=200 AND raw_json IS NOT NULL"
+    ).fetchone()[0]
+    failed   = conn.execute(
+        "SELECT COUNT(*) FROM api_responses WHERE http_status IS NULL OR http_status != 200"
+    ).fetchone()[0]
+    empty    = conn.execute(
+        "SELECT COUNT(*) FROM api_responses WHERE http_status=200 AND raw_json IS NULL"
+    ).fetchone()[0]
+    avg_ms   = conn.execute(
+        "SELECT AVG(latency_ms) FROM api_responses WHERE latency_ms IS NOT NULL"
+    ).fetchone()[0] or 0
+
+    print("\n" + "=" * 70)
+    print("MC + TL EXPLORATION SUMMARY")
+    print("=" * 70)
+    print(f"Total calls : {total}")
+    print(f"Success     : {success}  (HTTP 200 + non-empty body)")
+    print(f"Failed      : {failed}  (non-200 or network error)")
+    print(f"Empty       : {empty}   (HTTP 200 but no body)")
+    print(f"Avg latency : {avg_ms:.0f}ms")
+
+    print("\n--- CATEGORY BREAKDOWN ---")
+    hdr = f"{'domain':<15} {'category':<15} {'subcategory':<30} {'tot':>4} {'ok':>4} {'fail':>4} {'empty':>5} {'ms':>6}  sample_keys"
+    print(hdr)
+    print("-" * len(hdr))
+
+    rows = conn.execute("""
+        SELECT
+            domain, category, subcategory,
+            COUNT(*) AS tot,
+            SUM(CASE WHEN http_status=200 AND raw_json IS NOT NULL THEN 1 ELSE 0 END) AS ok,
+            SUM(CASE WHEN http_status IS NULL OR http_status != 200 THEN 1 ELSE 0 END) AS fail,
+            SUM(CASE WHEN http_status=200 AND raw_json IS NULL THEN 1 ELSE 0 END) AS empty,
+            CAST(AVG(CASE WHEN latency_ms IS NOT NULL THEN latency_ms END) AS INT) AS avg_ms,
+            (SELECT top_keys FROM api_responses a2
+             WHERE a2.domain=a1.domain AND a2.category=a1.category
+               AND a2.subcategory=a1.subcategory AND a2.raw_json IS NOT NULL
+             LIMIT 1) AS sample_keys
+        FROM api_responses a1
+        GROUP BY domain, category, subcategory
+        ORDER BY domain, category, subcategory
+    """).fetchall()
+
+    for r in rows:
+        domain, cat, sub, tot, ok, fail, empty, avg, keys = r
+        print(f"{domain:<15} {cat:<15} {sub:<30} {tot:>4} {ok:>4} {fail:>4} {empty:>5} {avg or 0:>6}  {keys or '[]'}")
+
+    print("\n--- FAILURES BY STATUS ---")
+    status_rows = conn.execute("""
+        SELECT COALESCE(CAST(http_status AS TEXT), 'network/timeout') AS status,
+               COUNT(*) AS cnt
+        FROM api_responses
+        WHERE http_status IS NULL OR http_status != 200
+        GROUP BY status ORDER BY cnt DESC
+    """).fetchall()
+    for status, cnt in status_rows:
+        print(f"  HTTP {status} → {cnt} URLs")
+
+    print("\n--- EMPTY RESPONSES (200 but no body) ---")
+    empty_rows = conn.execute("""
+        SELECT domain, subcategory, url
+        FROM api_responses
+        WHERE http_status=200 AND raw_json IS NULL
+        LIMIT 20
+    """).fetchall()
+    for domain, sub, url in empty_rows:
+        print(f"  [{domain}] {sub}: {url[:90]}")
+
+    print("=" * 70 + "\n")
+
