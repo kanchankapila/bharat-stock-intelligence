@@ -91,3 +91,39 @@ def insert_rows(conn: sqlite3.Connection, rows: list[dict]) -> None:
         rows,
     )
     conn.commit()
+
+# ─── Response Parsing ─────────────────────────────────────────────────────────
+
+def extract_top_keys(raw):
+    """Returns JSON array of top-level keys (up to 10) for the summary report."""
+    if not raw:
+        return "[]"
+    try:
+        data = json.loads(raw)
+        if isinstance(data, dict):
+            return json.dumps(list(data.keys())[:10])
+        if isinstance(data, list) and data and isinstance(data[0], dict):
+            return json.dumps(list(data[0].keys())[:10])
+        return "[]"
+    except Exception:
+        return "[]"
+
+
+def extract_item_count(raw):
+    """Returns the length of the primary list in the response, if any."""
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+        if isinstance(data, list):
+            return len(data)
+        if isinstance(data, dict):
+            for key in ("data", "stocks", "results", "items", "list",
+                        "scan_result", "graphData", "indices", "deals",
+                        "earnings", "articles"):
+                val = data.get(key)
+                if isinstance(val, list):
+                    return len(val)
+        return None
+    except Exception:
+        return None
