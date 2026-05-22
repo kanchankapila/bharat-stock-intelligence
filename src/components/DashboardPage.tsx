@@ -19,6 +19,7 @@ import { TopMoversIntelligence } from './TopMoversIntelligence';
 import { IntradayBreakouts } from './IntradayBreakouts';
 import { IndexOverview } from './MarketInsights';
 import { GlobalMarkets } from './GlobalMarkets';
+import { PremarketPanel } from './PremarketPanel';
 
 // ─── Fonts injected once ──────────────────────────────────────────────────────
 const FONT_FAMILY_DISPLAY = "'Rajdhani', sans-serif";
@@ -788,6 +789,11 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
       {/* ── Row 6: Momentum ──────────────────────────────────────────────── */}
       <div>
         <MomentumIntelligence watchlist={watchlist} onToggle={onToggleWatchlist} onSelectStock={onSelectStock} />
+      </div>
+
+      {/* Pre-Market Intelligence */}
+      <div className="mt-6">
+        <PremarketPanel onSelectStock={onSelectStock} />
       </div>
 
       {/* ── Modals ───────────────────────────────────────────────────────── */}
