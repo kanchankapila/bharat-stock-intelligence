@@ -758,3 +758,45 @@ def print_summary(conn: sqlite3.Connection) -> None:
 
     print("=" * 70 + "\n")
 
+# ─── Main ─────────────────────────────────────────────────────────────────────
+
+def build_all_specs() -> list[EndpointSpec]:
+    specs: list[EndpointSpec] = []
+    specs.extend(build_index_urls())
+    specs.extend(build_stock_urls("BE03"))
+    specs.extend(build_market_intel_urls())
+    specs.extend(build_screener_urls())
+    specs.extend(build_trendlyne_urls())
+    return specs
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="MC + Trendlyne data exploration")
+    parser.add_argument("--db",    default="mc_tl_explore.db",
+                        help="SQLite output path (default: mc_tl_explore.db)")
+    parser.add_argument("--limit", type=int, default=None,
+                        help="Limit to first N URLs (for testing)")
+    parser.add_argument("--count", action="store_true",
+                        help="Print URL count by category and exit without fetching")
+    args = parser.parse_args()
+
+    specs = build_all_specs()
+
+    if args.count:
+        from collections import Counter
+        print(f"Total URLs: {len(specs)}")
+        for (dom, cat, sub), cnt in sorted(
+            Counter((s["domain"], s["category"], s["subcategory"]) for s in specs).items()
+        ):
+            print(f"  {dom}/{cat}/{sub}: {cnt}")
+        return
+
+    conn = create_db(args.db)
+    fetch_all(specs, conn, limit=args.limit)
+    print_summary(conn)
+    conn.close()
+    print(f"Raw data saved to: {args.db}")
+
+
+if __name__ == "__main__":
+    main()
