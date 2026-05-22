@@ -744,7 +744,7 @@ def print_summary(conn: sqlite3.Connection) -> None:
         GROUP BY status ORDER BY cnt DESC
     """).fetchall()
     for status, cnt in status_rows:
-        print(f"  HTTP {status} → {cnt} URLs")
+        print(f"  HTTP {status} -> {cnt} URLs")
 
     print("\n--- EMPTY RESPONSES (200 but no body) ---")
     empty_rows = conn.execute("""
