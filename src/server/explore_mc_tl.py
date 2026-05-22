@@ -243,3 +243,87 @@ def build_index_urls():
                           "url": f"https://www.moneycontrol.com/mc/widget/historicalrating?classic=true&type=gson&indice_id={sym}&period={period}"})
 
     return specs
+
+# ─── MC Stock Detail ──────────────────────────────────────────────────────────
+
+def _next_monthly_expiry():
+    """Returns last Thursday of current (or next) month as 'YYYY-MM-DD'."""
+    today = datetime.date.today()
+    year, month = today.year, today.month
+    cal = calendar.monthcalendar(year, month)
+    thursdays = [week[3] for week in cal if week[3] != 0]
+    expiry = datetime.date(year, month, thursdays[-1])
+    if expiry <= today:
+        month = month % 12 + 1
+        year = year + (1 if month == 1 else 0)
+        cal = calendar.monthcalendar(year, month)
+        thursdays = [week[3] for week in cal if week[3] != 0]
+        expiry = datetime.date(year, month, thursdays[-1])
+    return expiry.strftime("%Y-%m-%d")
+
+
+def build_stock_urls(sc_id="BE03"):
+    specs = []
+    cat = "stock_detail"
+
+    def add(sub, url):
+        specs.append({"domain": "moneycontrol", "category": cat,
+                      "subcategory": sub, "url": url})
+
+    add("stock_price", f"https://priceapi.moneycontrol.com/pricefeed/nse/equitycash/{sc_id}")
+    add("stock_price", f"https://api.moneycontrol.com/mcapi/v1/stock/price-volume?scId={sc_id}&ex=&appVersion=175")
+    add("stock_price", f"https://api.moneycontrol.com/mcapi/v1/stock/get-stock-price?scIdList={sc_id}&scId={sc_id}")
+    add("stock_financial", f"https://api.moneycontrol.com/mcapi/v1/stock/financial-historical/overview?scId={sc_id}&ex=N")
+
+    for period in TECH_PERIODS:
+        add("stock_techindicator",
+            f"https://priceapi.moneycontrol.com/pricefeed/techindicator/{period}/{sc_id}")
+
+    for dur in TECH_PERIODS:
+        add("stock_tech_v2",
+            f"https://api.moneycontrol.com/mcapi/technicals/v2/details?scId={sc_id}&dur={dur}&deviceType=W")
+
+    for period in TECH_PERIODS:
+        for widget in ("technical_rating_summary", "moving_average",
+                       "technical_indicator", "moving_average_crossovers"):
+            add("stock_tech_widget",
+                f"https://www.moneycontrol.com/mc/widget/pricechart_technicals/{widget}?sc_did={sc_id}&page=mc_technicals&period=D&classic=true&period={period}")
+
+    for period in TECH_PERIODS:
+        add("stock_pivot",
+            f"https://www.moneycontrol.com/mc/widget/pricechart_technicals/pivot_level?sc_did={sc_id}&page=mc_technicals&classic=true&period={period}")
+
+    for period in TECH_PERIODS:
+        add("stock_hist_rating",
+            f"https://www.moneycontrol.com/mc/widget/historicalrating/ratingPro?classic=true&type=gson&sc_did={sc_id}&period={period}&dur=6m")
+
+    add("stock_swot", f"https://api.moneycontrol.com/mcapi/v1/swot/details?scId={sc_id}&type=all")
+    add("stock_essentials", f"https://api.moneycontrol.com/mcapi/v1/extdata/mc-essentials?scId={sc_id}&type=all")
+    add("stock_insights", f"https://api.moneycontrol.com/mcapi/v1/extdata/mc-insights?scId={sc_id}&type=d")
+    add("stock_insights", f"https://api.moneycontrol.com/mcapi/v1/extdata/mc-insights?scId={sc_id}&type=c")
+    add("stock_essentials_v2", f"https://api.moneycontrol.com/mcapi/extdata/v2/mc-essentials?scId={sc_id}&type=ed&deviceType=W")
+    add("stock_insights_v2", f"https://api.moneycontrol.com/mcapi/extdata/v2/mc-insights?scId={sc_id}&type=c&deviceType=W&appVersion=185")
+
+    add("stock_est_price_forecast",
+        f"https://api.moneycontrol.com/mcapi/v1/stock/estimates/price-forecast?scId={sc_id}&ex=N&deviceType=W")
+    add("stock_est_consensus",
+        f"https://api.moneycontrol.com/mcapi/v1/stock/estimates/consensus?scId={sc_id}&ex=N&deviceType=W")
+    add("stock_est_analyst_rating",
+        f"https://api.moneycontrol.com/mcapi/v1/stock/estimates/analyst-rating?deviceType=W&scId={sc_id}&ex=N")
+    add("stock_est_earning_forecast",
+        f"https://api.moneycontrol.com/mcapi/v1/stock/estimates/earning-forecast?scId={sc_id}&ex=N&deviceType=W&frequency=12&financialType=C")
+    add("stock_est_valuation",
+        f"https://api.moneycontrol.com/mcapi/v1/stock/estimates/valuation?deviceType=W&scId={sc_id}&ex=N&financialType=C")
+    add("stock_est_hits_misses",
+        f"https://api.moneycontrol.com/mcapi/v1/stock/estimates/hits-misses?deviceType=W&scId={sc_id}&ex=N&type=eps&financialType=C")
+
+    expiry = _next_monthly_expiry()
+    add("stock_fno_expiry", f"https://api.moneycontrol.com/mcapi/v1/fno/futures/getExpDts?id={sc_id}")
+    add("stock_fno_futures",
+        f"https://api.moneycontrol.com/mcapi/v1/fno/futures/getFuturesData?fut=FUTSTK&id={sc_id}&expirydate={expiry}")
+    add("stock_fno_strike",
+        f"https://api.moneycontrol.com/mcapi/v1/fno/options/getStrikePrice?id={sc_id}&expirydate={expiry}&optiontype=CE")
+    add("stock_fno_options",
+        f"https://api.moneycontrol.com/mcapi/v1/fno/options/getOptionsData?opt=OPTSTK&id={sc_id}&expirydate={expiry}&optiontype=CE&strikeprice=405.00")
+
+    return specs
