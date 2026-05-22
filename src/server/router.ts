@@ -31,6 +31,9 @@ import {
   fetchIndexTechnicals,
   fetchIndexGraph,
   fetchNiftyTraderBreakouts,
+  fetchTrendlyneJsonScreener,
+  fetchTrendlyneAllInOneScreener,
+  fetchMCTechTrendsAllSegments,
 } from "./marketData";
 import {
   fetchTrendlyneFundamentals,
@@ -56,7 +59,18 @@ import { getAllStocks, getStockMapping, getSymbolFromMcsymbol } from "./stockMap
 import { getCachedScan, runTechnicalScan } from "./technicalScanner";
 import { getFnOSignals } from "./fnoService";
 import { fetchStockDataWithCache, getOrRefreshAllStocks } from "./liveStockData";
-import { getMcConsolidatedData } from "./mcApiService";
+import { getMcConsolidatedData, fetchMcVwapChart, fetchKayalScreener } from "./mcApiService";
+import {
+  fetchPremarketAll,
+  fetchDealsAll,
+  fetchEarningsAll,
+  fetchEarningsCalendar,
+  fetchEarningsData,
+  fetchEarningsRapidResults,
+  fetchEarningsPriceShockers,
+  fetchIndexFnoAll,
+  type FnoIndexId,
+} from './marketIntelService';
 import { fetchTrendlyneScreenerData, fetchAllTrendlyneScreenerNames, getTrendlyneScreenerList, getTrendlyneScreenerCategories, updateFetchInterval, updateScreenerNamesInterval, testTrendlyneApiResponse, findScreenersByStock, recategorizeAllScreeners } from "./trendlyneScreener";
 import { syncNSEStocksToDatabase, getAllNSEStocksFromDB, searchNSEStocksFromDB, getNSEStockFromDB, getNSEStocksBySectorFromDB, getNSEStocksByIndustryFromDB, getAllSectorsFromDB, getAllIndustriesFromDB, getNSEStockCount } from "./nseService";
 import { fetchOptionChain, fetchFnoSymbols } from "./optionChainService";
@@ -1018,6 +1032,50 @@ export const appRouter = router({
       return result;
     }),
 
+  // Multi-segment MC Technical Trends (All/FNO/LargeCap/MidCap/SmallCap)
+  getTechTrendsBySegment: publicProcedure
+    .input(z.object({
+      type: z.enum(['bullish', 'bearish', 'turning-bullish', 'turning-bearish']),
+    }))
+    .query(async ({ input }) => {
+      const result = await fetchMCTechTrendsAllSegments(input.type);
+      // Enrich each segment's stocks with resolved NSE symbols
+      for (const [seg, list] of Object.entries(result)) {
+        result[seg] = list.map((item: any) => {
+          const symbol = getSymbolFromMcsymbol(item.scId);
+          return {
+            ...item,
+            symbol: symbol || item.scId,
+            lastPrice: parseFloat(String(item.currPrice || '0').replace(/,/g, '')),
+            percentChange: parseFloat(item.performance || '0'),
+            trend: item.currTrend || '',
+            prevTrend: item.prevTrend || '',
+            trendChangeDate: item.trendChngDate || '',
+          };
+        });
+      }
+      return result;
+    }),
+
+  // Trendlyne JSON screener (lightweight /json-screener/ endpoint)
+  getTrendlyneJsonScreener: publicProcedure
+    .input(z.object({
+      screenerId: z.string(),
+      limit: z.number().optional().default(25),
+    }))
+    .query(async ({ input }) => {
+      return fetchTrendlyneJsonScreener(input.screenerId, input.limit);
+    }),
+
+  // Trendlyne All-in-One Screener (tl-all-in-one-screener-data-get)
+  getTrendlyneAIOScreener: publicProcedure
+    .input(z.object({
+      screenpk: z.string(),
+      limit: z.number().optional().default(25),
+    }))
+    .query(async ({ input }) => {
+      return fetchTrendlyneAllInOneScreener(input.screenpk, input.limit);
+    }),
 
   getETStats: publicProcedure
     .input(z.object({
@@ -2426,6 +2484,64 @@ export const appRouter = router({
         console.error('[Router] getSignalCorrelationMetrics error:', err);
         throw new Error('Failed to fetch correlation metrics');
       }
+    }),
+
+  // ─── Premarket ──────────────────────────────────────────────────────────────
+  getPremarket: publicProcedure.query(async () => {
+    return await fetchPremarketAll();
+  }),
+
+  // ─── Deals / Smart Money ────────────────────────────────────────────────────
+  getDeals: publicProcedure.query(async () => {
+    return await fetchDealsAll();
+  }),
+
+  // ─── Earnings ───────────────────────────────────────────────────────────────
+  getEarnings: publicProcedure
+    .input(z.object({ date: z.string().optional() }))
+    .query(async ({ input }) => {
+      return await fetchEarningsAll(input.date);
+    }),
+
+  getEarningsCalendar: publicProcedure
+    .input(z.object({ date: z.string().optional() }))
+    .query(async ({ input }) => {
+      return await fetchEarningsCalendar(input.date);
+    }),
+
+  getEarningsRapidResults: publicProcedure
+    .input(z.object({ type: z.enum(['LR', 'BP']).optional().default('BP') }))
+    .query(async ({ input }) => {
+      return await fetchEarningsRapidResults(input.type);
+    }),
+
+  getEarningsPriceShockers: publicProcedure.query(async () => {
+    return await fetchEarningsPriceShockers();
+  }),
+
+  // ─── Index F&O ──────────────────────────────────────────────────────────────
+  getIndexFno: publicProcedure
+    .input(z.object({
+      id: z.enum(['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'SENSEX'])
+    }))
+    .query(async ({ input }) => {
+      return await fetchIndexFnoAll(input.id as FnoIndexId);
+    }),
+
+  // ─── VWAP Chart ─────────────────────────────────────────────────────────────
+  getMcVwapChart: publicProcedure
+    .input(z.object({ symbol: z.string() }))
+    .query(async ({ input }) => {
+      const mapping = getStockMapping(input.symbol);
+      const scId = mapping?.mcsymbol || input.symbol;
+      return await fetchMcVwapChart(scId);
+    }),
+
+  // ─── Kayal Screener ─────────────────────────────────────────────────────────
+  getKayalScreener: publicProcedure
+    .input(z.object({ screenpk: z.string(), limit: z.number().optional().default(50) }))
+    .query(async ({ input }) => {
+      return await fetchKayalScreener(input.screenpk, input.limit);
     }),
 });
 
