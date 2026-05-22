@@ -810,3 +810,26 @@ function extractShareholdingFromInsights(insights: McDetailedInsights | null): a
 
   return list.length > 0 ? { list, promoterPledging } : null;
   }
+
+// ─── VWAP Chart ───────────────────────────────────────────────────────────────
+
+export async function fetchMcVwapChart(scId: string): Promise<{ BSE: any[]; NSE: any[] } | null> {
+  const res = await mcFetchJson<{ BSE: any[]; NSE: any[] }>(
+    `https://www.moneycontrol.com/stocks/company_info/get_vwap_chart_data.php?classic=true&sc_did=${scId}`
+  );
+  if (res?.NSE || res?.BSE) return res;
+  return null;
+}
+
+// ─── Kayal TrendLyne screener ─────────────────────────────────────────────────
+
+export async function fetchKayalScreener(
+  screenpk: string | number,
+  perPageCount = 50
+): Promise<{ head: any; body: { tableHeaders: any[]; tableData: any[][] } } | null> {
+  const res = await mcFetchJson<any>(
+    `https://kayal.trendlyne.com/broker-webview/kayal/all-in-one-screener-data-get/?perPageCount=${perPageCount}&pageNumber=0&screenpk=${screenpk}&groupType=all&groupName=`
+  );
+  if (res?.head && res?.body) return res;
+  return null;
+}
