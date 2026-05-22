@@ -327,3 +327,95 @@ def build_stock_urls(sc_id="BE03"):
         f"https://api.moneycontrol.com/mcapi/v1/fno/options/getOptionsData?opt=OPTSTK&id={sc_id}&expirydate={expiry}&optiontype=CE&strikeprice=405.00")
 
     return specs
+
+# ─── MC Market Intelligence ───────────────────────────────────────────────────
+
+TECH_TREND_CONFIGS = [
+    ("uptrend",   "bullish",        "7",     "performance", "desc"),
+    ("uptrend",   "turning-bullish","7",     "changeDate",  "desc"),
+    ("downtrend", "bearish",        "7",     "performance", "asc"),
+    ("downtrend", "turning-bearish","7",     "changeDate",  "desc"),
+    ("uptrend",   "bullish",        "FNO",   "performance", "desc"),
+    ("uptrend",   "turning-bullish","FNO",   "changeDate",  "desc"),
+    ("downtrend", "bearish",        "FNO",   "performance", "asc"),
+    ("downtrend", "turning-bearish","FNO",   "changeDate",  "desc"),
+    ("uptrend",   "bullish",        "LCAP",  "performance", "desc"),
+    ("downtrend", "bearish",        "LCAP",  "performance", "asc"),
+    ("downtrend", "turning-bearish","LCAP",  "changeDate",  "desc"),
+    ("downtrend", "bearish",        "MDCAP", "performance", "asc"),
+    ("downtrend", "bearish",        "SMCAP", "performance", "asc"),
+]
+
+
+def build_market_intel_urls():
+    specs = []
+
+    def add(cat, sub, url):
+        specs.append({"domain": "moneycontrol", "category": cat,
+                      "subcategory": sub, "url": url})
+
+    for tdir, ttype, idx, sort, order in TECH_TREND_CONFIGS:
+        add("tech_trends", f"trend_{tdir}_{ttype}",
+            f"https://api.moneycontrol.com/mcapi/v1/technical-trends/{tdir}/{ttype}?ex=N&index={idx}&page=1&order={order}&deviceType=W&sort={sort}&appVersion=142")
+
+    add("deals", "deals_large",
+        "https://api.moneycontrol.com/mcapi/v1/deals/list?start=0&limit=24&orderBy=deal_date&sortBy=DESC&dealType=large&deviceType=W&apiVersion=177")
+    add("deals", "deals_top_stock",
+        "https://api.moneycontrol.com/mcapi/v1/deals/list?start=0&limit=24&orderBy=dealsValue&sortBy=DESC&dealType=topStock&deviceType=W&apiVersion=177")
+    add("deals", "deals_sector_wise",
+        "https://api.moneycontrol.com/mcapi/v1/deals/list?start=0&limit=24&orderBy=dealsValue&sortBy=DESC&dealType=topStockSectorWise&deviceType=W&apiVersion=177")
+    add("deals", "deals_all",
+        "https://api.moneycontrol.com/mcapi/v1/deals/list?start=0&limit=24&orderBy=deal_date&sortBy=DESC&deviceType=W")
+    add("deals", "deals_largedeals_insight",
+        "https://api.moneycontrol.com/mcapi/v1/deals/largedeals-insight?start=0&limit=3&orderBy=dealsValue&deviceType=W")
+    add("deals", "deals_stock_news",
+        "https://api.moneycontrol.com/mcapi/v1/deals/get-stock-news")
+    for action in ("buy", "sell"):
+        add("deals", f"deals_insight_{action}",
+            f"https://api.moneycontrol.com/mcapi/v1/deals/insight?start=0&limit=9&value=value&range=1W&action={action}&dealsType=topDeal")
+        add("deals", f"deals_insider_{action}",
+            f"https://api.moneycontrol.com/mcapi/v1/deals/insight?start=0&limit=9&value=value&range=1W&action={action}&dealsType=topInsider")
+        add("deals", f"deals_investor_{action}",
+            f"https://api.moneycontrol.com/mcapi/v1/deals/insight?start=0&limit=9&value=value&range=1W&action={action}&dealsType=topInvestor")
+
+    today = datetime.date.today().isoformat()
+    add("earnings", "earnings_inc_widget",
+        "https://api.moneycontrol.com/mcapi/v1/earnings/inc-widget?indexId=all")
+    add("earnings", "earnings_price_shockers",
+        "https://api.moneycontrol.com/mcapi/v1/earnings/price-shockers?limit=8&page=1")
+    add("earnings", "earnings_actual_estimate",
+        "https://api.moneycontrol.com/mcapi/v1/earnings/actual-estimate?page=1&limit=6")
+    add("earnings", "earnings_rapid_results_lr",
+        "https://api.moneycontrol.com/mcapi/v1/earnings/rapid-results?limit=9&page=1&type=LR&subType=yoy")
+    add("earnings", "earnings_rapid_results_bp",
+        "https://api.moneycontrol.com/mcapi/v1/earnings/rapid-results?limit=21&page=1&type=BP&subType=yoy&category=all&sortBy=growth&indexId=N&sector=&search=&seq=desc")
+    add("earnings", "earnings_calendar",
+        f"https://api.moneycontrol.com/mcapi/v1/earnings/result-calendar?indexId=All&fromDate={today}&toDate={today}&sector=")
+    add("earnings", "earnings_get_data",
+        f"https://api.moneycontrol.com/mcapi/v1/earnings/get-earnings-data?indexId=All&page=1&startDate={today}&endDate={today}&sector=&limit=18")
+    add("earnings", "earnings_dashboard",
+        "https://api.moneycontrol.com/mcapi/v1/earnings/result-dashboard")
+
+    for slug in ("market-cues", "international-markets", "asian-markets",
+                 "taking-stock", "mc-essentials"):
+        add("premarket", f"premarket_article_{slug.replace('-', '_')}",
+            f"https://api.moneycontrol.com/mcapi/v1/premarket/article?slug={slug}&limit=1")
+    add("premarket", "premarket_global_marketdata",
+        "https://api.moneycontrol.com/mcapi/v1/premarket/get-global-marketdata?section=mi")
+    add("premarket", "premarket_ecalendar",
+        "https://api.moneycontrol.com/mcapi/v1/ecalendar/get-upcoming-event-data?page=1&pageSize=7")
+    add("premarket", "premarket_market_views",
+        "https://api.moneycontrol.com/mcapi/v1/premarket/getMarketViewsData?cat=all&start=0&limit=9")
+    add("premarket", "premarket_fll_activity",
+        "https://api.moneycontrol.com/mcapi/v1/premarket/getFllActivityData?type=cash")
+    add("premarket", "premarket_stocks_to_watch",
+        "https://api.moneycontrol.com/mcapi/v1/premarket/getStockToWatchData?start=0&limit=3&sortby=rank&sortorder=asc")
+    add("premarket", "premarket_news",
+        "https://api.moneycontrol.com/mcapi/v1/premarket/getMarketNewsData?limit=6")
+    add("premarket", "premarket_broker_reco",
+        "https://api.moneycontrol.com/mcapi/v1/premarket/getBrokerResearchReco?sublevel=stocks&start=0&limit=6")
+
+    add("news", "news_results",
+        'https://www.moneycontrol.com/newsapi/mc_news.php?query=tags_slug:("results" "result-poll")&start=0&limit=8&sortby=creation_date&sortorder=desc')
+
+    return specs
