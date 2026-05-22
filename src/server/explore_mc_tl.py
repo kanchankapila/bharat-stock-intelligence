@@ -419,3 +419,68 @@ def build_market_intel_urls():
         'https://www.moneycontrol.com/newsapi/mc_news.php?query=tags_slug:("results" "result-poll")&start=0&limit=8&sortby=creation_date&sortorder=desc')
 
     return specs
+
+# ─── MC Screeners ─────────────────────────────────────────────────────────────
+
+PROSCANNER = {
+    1: [146, 181, 178, 182, 176, 184, 177, 165, 174, 179, 168, 364, 366, 369,
+        367, 370, 374, 371, 378, 376, 365, 379, 382, 375, 381, 383, 388, 390,
+        362, 391, 377, 397, 405, 403, 399, 412, 400, 408, 411, 419, 416, 410,
+        422, 430, 389, 409, 425, 429, 424, 432, 431, 423, 435, 434],
+    2: [172, 169, 181, 171, 168, 167, 170, 378, 376, 369, 392, 398, 391, 397,
+        377, 362, 393, 395, 416, 417, 413, 396, 394],
+    3: [166, 165, 176, 177, 363, 364, 372, 382, 380, 365, 383, 373, 386, 405,
+        408, 410, 421, 420, 387, 409],
+    4: [184, 174, 182, 173, 367, 366, 370, 371, 379, 375, 384, 381, 390, 385,
+        374, 401, 402, 404, 399, 403, 400, 426, 432, 435, 423, 434],
+    6: [178, 168, 179, 167, 378, 368, 388, 380, 389, 427, 428],
+    7: [401, 402, 404, 417, 422, 420, 426, 432, 423, 427],
+    8: [419, 430, 431, 429],
+    9: [182, 184, 174, 177, 173, 367, 366, 372, 384, 379, 386, 401, 402, 403,
+        404, 400, 385, 417, 421, 422, 420, 399, 432, 423, 434, 520, 519, 522,
+        521, 525],
+}
+
+TECHSCANNER = {
+    25: [
+        "OHLC_D_P_BPBULL", "OHLC_D_I_DSMARTBULLC", "OHLC_D_P_BPBEAR",
+        "OHLC_D_I_DSMARTBEARC", "OHLC_D_I_RSIPOWBO", "OHLC_D_I_RSI70607DNBU",
+        "OHLC_D_I_ADBBPBUY", "OHLC_D_I_MOMRAVBU", "OHLC_D_I_ST5133BULL",
+        "OHLC_D_I_SQZBULLBO", "OHLC_D_I_10DSTOCHBULL", "OHLC_20D_P_CLABVPWH",
+        "OHLC_W_I_RSIMULTIBAG", "OHLC_D_I_BOLDBULL", "OHLC_D_I_BTSTOND",
+        "OHLC_D_I_CLSERIESBULL", "OHLC_D_I_TRNGLCANDBULL", "OHLC_D_I_RISE3BULL",
+        "OHLC_D_I_RSIPOWBD", "OHLC_D_I_RSI70607DNBE", "OHLC_D_I_ADBBPSELL",
+        "OHLC_D_I_MOMRAVBE", "OHLC_D_I_ST5133BEAR", "OHLC_D_I_SQZBEARBO",
+        "OHLC_D_I_10DSTOCHBEAR", "OHLC_20D_P_CLBLWPWL", "OHLC_D_I_BOLDBEAR",
+        "OHLC_D_I_STBTOND", "OHLC_D_I_CLSERIESBEAR", "OHLC_D_I_TRNGLCANDBEAR",
+        "OHLC_D_I_RISE3BEAR",
+    ],
+    17: [
+        "OHLC_W_P_52HIGH", "OHLC_D_P_2YRHIGH", "OHLC_D_P_3YRHIGH",
+        "OHLC_D_P_5YRHIGH", "OHLC_D_P_ALLTIMEH", "OHLC_D_P_OPENLOW",
+        "OHLC_W_P_52LOW", "OHLC_D_P_2YRLOW", "OHLC_D_P_3YRLOW",
+        "OHLC_D_P_5YRLOW", "OHLC_D_P_ALLTIMEL",
+    ],
+}
+
+
+def build_screener_urls():
+    specs = []
+
+    for cat_id, scan_ids in PROSCANNER.items():
+        for scan_id in scan_ids:
+            specs.append({
+                "domain": "moneycontrol", "category": "screeners",
+                "subcategory": "proscanner",
+                "url": f"https://api.moneycontrol.com/mcapi/v1/proscanner/scanner-detail?catId={cat_id}&scanId={scan_id}",
+            })
+
+    for cat_id, scan_ids in TECHSCANNER.items():
+        for scan_id in scan_ids:
+            specs.append({
+                "domain": "moneycontrol", "category": "screeners",
+                "subcategory": "techscanner",
+                "url": f"https://api.moneycontrol.com/mcapi/v1/techscanner/scanner-detail?catId={cat_id}&scanId={scan_id}",
+            })
+
+    return specs
