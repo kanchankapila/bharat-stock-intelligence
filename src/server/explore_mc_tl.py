@@ -609,3 +609,77 @@ def _tl_expiry_slug() -> str:
     """Returns Trendlyne expiry slug e.g. '29-may-2026'."""
     expiry_date = datetime.date.fromisoformat(_next_monthly_expiry())
     return expiry_date.strftime("%#d-%b-%Y").lower()
+
+# ─── Fetch Engine ─────────────────────────────────────────────────────────────
+
+def fetch_one(session: requests.Session, spec: EndpointSpec) -> dict:
+    """Fetch a single endpoint and return a DB row dict."""
+    row = {
+        "domain":      spec["domain"],
+        "category":    spec["category"],
+        "subcategory": spec["subcategory"],
+        "url":         spec["url"],
+        "http_status": None,
+        "latency_ms":  None,
+        "top_keys":    "[]",
+        "item_count":  None,
+        "raw_json":    None,
+        "error_msg":   None,
+        "fetched_at":  datetime.datetime.utcnow().isoformat(),
+    }
+    try:
+        t0 = time.monotonic()
+        resp = session.get(spec["url"], headers=HEADERS, timeout=TIMEOUT)
+        row["latency_ms"] = int((time.monotonic() - t0) * 1000)
+        row["http_status"] = resp.status_code
+        if resp.status_code == 200 and resp.text.strip():
+            row["raw_json"] = resp.text
+            row["top_keys"] = extract_top_keys(resp.text)
+            row["item_count"] = extract_item_count(resp.text)
+        elif resp.status_code != 200:
+            row["error_msg"] = f"HTTP {resp.status_code}"
+    except requests.exceptions.Timeout:
+        row["error_msg"] = "timeout"
+    except Exception as exc:
+        row["error_msg"] = str(exc)[:200]
+    return row
+
+
+def fetch_all(
+    specs: list[EndpointSpec],
+    conn: sqlite3.Connection,
+    limit: Optional[int] = None,
+) -> None:
+    """Fetch all specs concurrently, batch-write to DB, print progress."""
+    if limit:
+        specs = specs[:limit]
+
+    total = len(specs)
+    done = 0
+    buffer: list[dict] = []
+
+    print(f"Fetching {total} URLs with concurrency={CONCURRENCY}...", flush=True)
+    t_start = time.monotonic()
+
+    with requests.Session() as session:
+        with ThreadPoolExecutor(max_workers=CONCURRENCY) as pool:
+            futures = {pool.submit(fetch_one, session, spec): spec for spec in specs}
+            for future in as_completed(futures):
+                row = future.result()
+                buffer.append(row)
+                done += 1
+                if len(buffer) >= BATCH_SIZE:
+                    insert_rows(conn, buffer)
+                    buffer.clear()
+                if done % 100 == 0 or done == total:
+                    elapsed = time.monotonic() - t_start
+                    pct = done / total * 100
+                    print(f"  {done}/{total} ({pct:.0f}%) — {elapsed:.0f}s elapsed", flush=True)
+
+    if buffer:
+        insert_rows(conn, buffer)
+
+    elapsed = time.monotonic() - t_start
+    print(f"Done. {total} URLs in {elapsed:.1f}s", flush=True)
+
+
