@@ -13,7 +13,8 @@
       "WebFetch(domain:priceapi.moneycontrol.com)",
       "WebFetch(domain:appfeeds.moneycontrol.com)",
       "Bash(npm start *)",
-      "Bash(jobs)"
+      "Bash(jobs)",
+      "Bash(curl -s \"http://localhost:3000/api/health\")"
     ]
   }
 }

@@ -885,26 +885,20 @@ migrateColumn('stock_scores', 'updated_at', 'DATETIME DEFAULT CURRENT_TIMESTAMP'
 migrateColumn('screener_master', 'created_at', 'DATETIME DEFAULT CURRENT_TIMESTAMP');
 migrateColumn('screener_master', 'updated_at', 'DATETIME DEFAULT CURRENT_TIMESTAMP');
 
-// Add indexes for common queries on timestamps
-try {
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_users_created_at ON users(created_at DESC)`);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_watchlist_created_at ON watchlist(created_at DESC)`);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_technical_signals_created_at ON technical_signals(created_at DESC)`);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_stock_scores_created_at ON stock_scores(created_at DESC)`);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_screener_master_created_at ON screener_master(created_at DESC)`);
-  
-  // Add indexes for common FK queries
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_watchlist_userId ON watchlist(userId)`);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_technical_signals_symbol ON technical_signals(symbol)`);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_signals_symbol ON signals(symbol)`);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_stock_scores_symbol ON stock_scores(symbol)`);
-  
-  // Add indexes for date range queries
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_stock_ohlcv_date ON stock_ohlcv(date DESC)`);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_unified_signals_date ON unified_signals(signal_date DESC)`);
-} catch (err) {
-  console.warn('[DB] Index creation warning:', err);
-}
+// Add indexes — each wrapped individually so one missing column doesn't abort the rest
+const tryIndex = (sql: string) => { try { db.exec(sql); } catch { /* column/table not yet migrated */ } };
+
+tryIndex(`CREATE INDEX IF NOT EXISTS idx_users_created_at ON users(created_at DESC)`);
+tryIndex(`CREATE INDEX IF NOT EXISTS idx_watchlist_created_at ON watchlist(created_at DESC)`);
+tryIndex(`CREATE INDEX IF NOT EXISTS idx_technical_signals_created_at ON technical_signals(created_at DESC)`);
+tryIndex(`CREATE INDEX IF NOT EXISTS idx_stock_scores_created_at ON stock_scores(created_at DESC)`);
+tryIndex(`CREATE INDEX IF NOT EXISTS idx_screener_master_created_at ON screener_master(created_at DESC)`);
+tryIndex(`CREATE INDEX IF NOT EXISTS idx_watchlist_userId ON watchlist(userId)`);
+tryIndex(`CREATE INDEX IF NOT EXISTS idx_technical_signals_symbol ON technical_signals(symbol)`);
+tryIndex(`CREATE INDEX IF NOT EXISTS idx_signals_symbol ON signals(symbol)`);
+tryIndex(`CREATE INDEX IF NOT EXISTS idx_stock_scores_symbol ON stock_scores(symbol)`);
+tryIndex(`CREATE INDEX IF NOT EXISTS idx_stock_ohlcv_date ON stock_ohlcv(date DESC)`);
+tryIndex(`CREATE INDEX IF NOT EXISTS idx_unified_signals_date ON unified_signals(signal_date DESC)`);
 
 // Verify key constraints
 console.log('[DB] Schema normalization complete (Phase 3.5)');
