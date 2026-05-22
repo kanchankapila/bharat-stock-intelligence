@@ -484,3 +484,128 @@ def build_screener_urls():
             })
 
     return specs
+
+# ─── Trendlyne ────────────────────────────────────────────────────────────────
+
+TL_JSON_SCREENERS: dict[int, str] = {
+    79790: "Relative Outperformance vs Nifty500 - 2Y",
+    79791: "Relative Outperformance vs Nifty500 - 1Y",
+    79792: "Relative Outperformance vs Nifty500 - 6M",
+    79793: "Relative Outperformance vs Nifty500 - 1Q",
+    79794: "Relative Outperformance vs Nifty500 - 1M",
+    79795: "Relative Outperformance vs Nifty500 - 1W",
+    79796: "Relative Outperformance vs Nifty500 - 1D",
+    79797: "Volume Shockers",
+    79799: "High Volume High Gain",
+    79800: "Relative Underperformance vs Nifty500 - 3Y",
+    79801: "Relative Underperformance vs Nifty500 - 2Y",
+    79802: "Relative Underperformance vs Nifty500 - 1Y",
+    79803: "Relative Underperformance vs Nifty500 - 6M",
+    79806: "Relative Underperformance vs Nifty500 - 1Q",
+    79808: "Relative Underperformance vs Nifty500 - 1M",
+    79810: "Relative Underperformance vs Nifty500 - 1W",
+    79811: "Relative Underperformance vs Nifty500 - 1D",
+    17096: "Top Gainers",
+    17097: "Volume Shockers (alt)",
+    17098: "Top Losers",
+    17099: "High Volume High Gain (alt)",
+    17100: "High Volume Top Losers",
+    17109: "New 52W Low",
+    17110: "New 52W High",
+    9844:  "Rising Delivery Percentage",
+    20014: "Broker Price/Reco Upgrades",
+    27:    "Overbought RSI+MFI",
+    28:    "Oversold RSI+MFI",
+    15:    "High Revenue Profit Growth High ROE Low PE",
+    10:    "Increasing Revenue Every Quarter - 4Q",
+    21:    "Screener 21",
+    22:    "Promoters Buying Growth Stocks",
+    24:    "High Analyst Rating 20pct Upside",
+    31:    "Small Cap Stars",
+    40:    "Near Day High/Low 2x Avg Volume",
+    42:    "High Volume High Growth",
+}
+
+TL_ALLONE_BULLISH = [
+    19814, 153269, 19746, 3057, 280337, 6211, 190803, 387668, 66655, 548705,
+    16996, 45884, 501877, 691112, 7154, 211854, 208805, 24645, 523595, 691113,
+    11502, 174452, 205167, 32574, 371832, 222864, 6159,
+]
+
+TL_ALLONE_BEARISH = [
+    93730, 154274, 463821, 36308, 4897, 3059, 7205, 208109, 497177, 15045,
+]
+
+TL_FNO_FILTERS = [
+    ("options", "near", "oi_gainers_call", "all"),
+    ("options", "near", "oi_gainers_put", "all"),
+    ("futures", "next", "contract_gainers", ""),
+    ("futures", "next", "price_gainers", ""),
+    ("futures", "next", "most_active_value", ""),
+    ("futures", "next", "most_active_contract", ""),
+    ("futures", "next", "oi_gainers", ""),
+    ("futures", "next", "oi_losers", ""),
+    ("futures", "next", "premium", ""),
+    ("futures", "next", "discount", ""),
+]
+
+TL_MF_CATEGORIES = ["ELSS", "Multi+%26+Flexi-Cap"]
+
+
+def build_trendlyne_urls() -> list[EndpointSpec]:
+    specs: list[EndpointSpec] = []
+
+    def add(sub: str, url: str) -> None:
+        specs.append({"domain": "trendlyne", "category": "screeners",
+                      "subcategory": sub, "url": url})
+
+    # JSON screeners (NIFTY500 group)
+    for pk, name in TL_JSON_SCREENERS.items():
+        add("tl_json_screener",
+            f"https://trendlyne.com/fundamentals/json-screener/{pk}/5/0/index/NIFTY500/nifty-500/")
+
+    # All-in-one screeners — bullish
+    for pk in TL_ALLONE_BULLISH:
+        add("tl_allone_bullish",
+            f"https://trendlyne.com/fundamentals/tl-all-in-one-screener-data-get/?screenpk={pk}&perPageCount=25&groupType=all&groupName=all")
+
+    # All-in-one screeners — bearish
+    for pk in TL_ALLONE_BEARISH:
+        add("tl_allone_bearish",
+            f"https://trendlyne.com/fundamentals/tl-all-in-one-screener-data-get/?screenpk={pk}&perPageCount=25&groupType=all&groupName=all")
+
+    # Custom query screeners
+    specs.append({"domain": "trendlyne", "category": "screeners",
+                  "subcategory": "tl_custom_query",
+                  "url": "https://trendlyne.com/fundamentals/all-in-one-screener-data-get/?perPageCount=25&pageNumber=0&query=FIIPCT1Q+%3E+1&columns=FIIPCT1Q%2Csholding_date%2CcurrentPrice%2Cday_changeP&groupType=all&groupName=&sortBy=FIIPCT1Q&order=DESC"})
+    specs.append({"domain": "trendlyne", "category": "screeners",
+                  "subcategory": "tl_custom_query",
+                  "url": "https://trendlyne.com/fundamentals/all-in-one-screener-data-get/?perPageCount=25&pageNumber=0&query=vol_day+%3E%3D+1.5+*+vol_week&columns=vol_day%2Cvol_week%2CcurrentPrice%2Cday_changeP&groupType=all&groupName=&sortBy=vol_day&order=DESC"})
+    specs.append({"domain": "trendlyne", "category": "screeners",
+                  "subcategory": "tl_custom_query",
+                  "url": "https://trendlyne.com/fundamentals/tl-all-in-one-screener-data-get/?screenpk=515760&perPageCount=25&groupType=all&groupName=all"})
+    specs.append({"domain": "trendlyne", "category": "screeners",
+                  "subcategory": "tl_52w_high_nifty500",
+                  "url": "https://trendlyne.com/fundamentals/tl-all-in-one-screener-data-get/?screenpk=19814&perPageCount=25&groupType=index&groupName=NIFTY500&groupSlug=nifty-500"})
+
+    # FnO filters
+    expiry_slug = _tl_expiry_slug()
+    for inst, tenor, filter_type, suffix in TL_FNO_FILTERS:
+        path_suffix = f"/{suffix}" if suffix else "/"
+        specs.append({"domain": "trendlyne", "category": "fno",
+                      "subcategory": "tl_fno_filter",
+                      "url": f"https://trendlyne.com/futures-options/api-filter/{inst}/{expiry_slug}-{tenor}/{filter_type}{path_suffix}"})
+
+    # MF
+    for cat in TL_MF_CATEGORIES:
+        specs.append({"domain": "trendlyne", "category": "mf",
+                      "subcategory": "tl_mf",
+                      "url": f"https://trendlyne.com/mutual-fund/getMFhome/?category={cat}"})
+
+    return specs
+
+
+def _tl_expiry_slug() -> str:
+    """Returns Trendlyne expiry slug e.g. '29-may-2026'."""
+    expiry_date = datetime.date.fromisoformat(_next_monthly_expiry())
+    return expiry_date.strftime("%#d-%b-%Y").lower()
