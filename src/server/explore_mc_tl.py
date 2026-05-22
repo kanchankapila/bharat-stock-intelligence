@@ -173,9 +173,19 @@ INDICES = [
     {"symbol": "mc;nmotm30",   "name": "Nifty200 Momentum 30",   "id": "mc;nmotm30"},
 ]
 
-GRAPH_RANGES = ["1d", "5d", "1m", "3m", "6m", "1yr", "2yr", "5yr"]
+GRAPH_RANGES = ["1d", "5d", "1m", "3m", "6m", "1yr", "2yr", "5yr", "max"]
+GRAPH_TYPES = ["line", "ohlc", "area", "stick"]
 TECH_PERIODS = ["D", "W", "M"]
 HIST_RATING_PERIODS = ["D", "W"]
+
+# FnO-capable index IDs (those that have F&O contracts)
+FNO_INDICES = [
+    {"id": "NIFTY",     "name": "NIFTY 50"},
+    {"id": "BANKNIFTY", "name": "NIFTY BANK"},
+    {"id": "FINNIFTY",  "name": "NIFTY FIN SERVICE"},
+    {"id": "MIDCPNIFTY","name": "NIFTY MIDCAP SELECT"},
+    {"id": "SENSEX",    "name": "SENSEX"},
+]
 
 
 def _enc(symbol):
@@ -186,12 +196,19 @@ def _enc(symbol):
 def build_index_urls():
     specs = []
 
+    # ── Global index list endpoints ──────────────────────────────────────────
     specs.append({"domain": "moneycontrol", "category": "indices",
                   "subcategory": "indices_list",
                   "url": "https://api.moneycontrol.com/mcapi/v1/indices/get-indices-list"})
     specs.append({"domain": "moneycontrol", "category": "indices",
                   "subcategory": "indices_list",
                   "url": "https://api.moneycontrol.com/mcapi/v1/indices/get-indian-indices"})
+    # appVersion variants — may expose extra indices or fields
+    for av in [136, 137]:
+        specs.append({"domain": "moneycontrol", "category": "indices",
+                      "subcategory": "indices_list_versioned",
+                      "url": f"https://api.moneycontrol.com/mcapi/v1/indices/get-indices-list?appVersion={av}"})
+
     specs.append({"domain": "moneycontrol", "category": "indices",
                   "subcategory": "advance_decline",
                   "url": "https://api.moneycontrol.com/mcapi/v1/indices/chart/exchange-advdec?ex=N"})
@@ -200,6 +217,12 @@ def build_index_urls():
         sym = idx["symbol"]
         ind_id = idx["id"]
         enc = _enc(sym)
+
+        # ── Per-index detail endpoint (NEW) ───────────────────────────────────
+        if ind_id.isdigit():
+            specs.append({"domain": "moneycontrol", "category": "indices",
+                          "subcategory": "index_detail",
+                          "url": f"https://api.moneycontrol.com/mcapi/v1/indices/get-indices-details?indexId={ind_id}"})
 
         specs.append({"domain": "moneycontrol", "category": "indices",
                       "subcategory": "index_overview",
@@ -213,10 +236,15 @@ def build_index_urls():
                           "subcategory": f"index_marketmap_type{mtype}",
                           "url": f"https://appfeeds.moneycontrol.com/jsonapi/market/marketmap&format=json&type={mtype}&ind_id={ind_id}"})
 
+        # ── Graph: all ranges × all chart types (NEW: max range, ohlc/area/stick types) ──
         for rng in GRAPH_RANGES:
-            specs.append({"domain": "moneycontrol", "category": "indices",
-                          "subcategory": "index_graph",
-                          "url": f"https://appfeeds.moneycontrol.com/jsonapi/market/graph&format=json&ind_id={ind_id}&range={rng}&type=line"})
+            for gtype in GRAPH_TYPES:
+                # Only fetch all type variants for 1d range; other ranges use line only
+                if rng != "1d" and gtype != "line":
+                    continue
+                specs.append({"domain": "moneycontrol", "category": "indices",
+                              "subcategory": f"index_graph_{gtype}" if gtype != "line" else "index_graph",
+                              "url": f"https://appfeeds.moneycontrol.com/jsonapi/market/graph&format=json&ind_id={ind_id}&range={rng}&type={gtype}"})
 
         for period in TECH_PERIODS:
             specs.append({"domain": "moneycontrol", "category": "indices",
@@ -241,6 +269,19 @@ def build_index_urls():
             specs.append({"domain": "moneycontrol", "category": "indices",
                           "subcategory": "index_hist_rating",
                           "url": f"https://www.moneycontrol.com/mc/widget/historicalrating?classic=true&type=gson&indice_id={sym}&period={period}"})
+
+    # ── Index FnO overview (NEW) — Futures + Options CE/PE per expiry ────────
+    for fno_idx in FNO_INDICES:
+        fid = fno_idx["id"]
+        # Futures overview (empty ExpiryDate = nearest expiry)
+        specs.append({"domain": "moneycontrol", "category": "index_fno",
+                      "subcategory": "index_fno_futures",
+                      "url": f"https://appfeeds.moneycontrol.com/jsonapi/fno/overview&format=json&inst_type=Futures&id={fid}&ExpiryDate="})
+        # Options CE and PE overview
+        for opt_type in ["CE", "PE"]:
+            specs.append({"domain": "moneycontrol", "category": "index_fno",
+                          "subcategory": f"index_fno_options_{opt_type.lower()}",
+                          "url": f"https://appfeeds.moneycontrol.com/jsonapi/fno/overview&format=json&inst_type=Options&option_type={opt_type}&id={fid}&ExpiryDate="})
 
     return specs
 
