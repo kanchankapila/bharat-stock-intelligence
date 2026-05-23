@@ -2544,6 +2544,186 @@ export const appRouter = router({
     .query(async ({ input }) => {
       return await fetchKayalScreener(input.screenpk, input.limit);
     }),
+
+  // ─── Trade Decision Cockpit ──────────────────────────────────────────────────
+  getTradeDecisionCockpitData: publicProcedure.query(() => {
+    try {
+      const signals = db.prepare(`
+        SELECT ts.*, ns.sector, ns.industry
+        FROM technical_signals ts
+        LEFT JOIN nse_stocks ns ON ns.symbol = ts.symbol
+        WHERE ts.signal_date >= date('now', '-3 days')
+          AND ts.win_probability >= 0.40
+        ORDER BY ts.win_probability DESC, ts.created_at DESC
+        LIMIT 60
+      `).all() as Array<Record<string, unknown>>;
+
+      const quantRows = db.prepare(`
+        SELECT symbol, composite_score, technical_score, fundamental_score,
+               momentum_score, sentiment_score, risk_score, timeframe
+        FROM stock_scores
+        WHERE timeframe = 'short'
+        ORDER BY composite_score DESC
+        LIMIT 200
+      `).all() as Array<Record<string, unknown>>;
+
+      const quantMap = new Map<string, Record<string, unknown>>();
+      for (const q of quantRows) quantMap.set(q.symbol as string, q);
+
+      let bulkDeals: Array<Record<string, unknown>> = [];
+      try {
+        bulkDeals = db.prepare(`
+          SELECT symbol, deal_type, quantity, price, deal_date
+          FROM bulk_deals
+          WHERE deal_date >= date('now', '-7 days')
+          ORDER BY deal_date DESC
+        `).all() as Array<Record<string, unknown>>;
+      } catch { /* table may not exist */ }
+
+      let insiderTrades: Array<Record<string, unknown>> = [];
+      try {
+        insiderTrades = db.prepare(`
+          SELECT symbol, transaction_type, quantity, price, trade_date
+          FROM insider_trades
+          WHERE trade_date >= date('now', '-14 days')
+          ORDER BY trade_date DESC
+        `).all() as Array<Record<string, unknown>>;
+      } catch { /* table may not exist */ }
+
+      let newsSentiment: Array<Record<string, unknown>> = [];
+      try {
+        newsSentiment = db.prepare(`
+          SELECT symbol, sentiment_score, headline, published_at
+          FROM news_sentiment_items
+          WHERE published_at >= datetime('now', '-2 days')
+          ORDER BY published_at DESC
+        `).all() as Array<Record<string, unknown>>;
+      } catch { /* table may not exist */ }
+
+      const sentimentMap = new Map<string, number[]>();
+      for (const n of newsSentiment) {
+        const sym = n.symbol as string;
+        if (!sentimentMap.has(sym)) sentimentMap.set(sym, []);
+        sentimentMap.get(sym)!.push(n.sentiment_score as number);
+      }
+
+      const bulkSet = new Set(bulkDeals.map((d) => d.symbol as string));
+      const insiderBuySet = new Set(
+        insiderTrades.filter((t) => (t.transaction_type as string)?.toLowerCase().includes('buy')).map((t) => t.symbol as string)
+      );
+
+      const symbolMap = new Map<string, {
+        signals: Array<Record<string, unknown>>;
+        quant: Record<string, unknown> | undefined;
+        hasBulkDeal: boolean;
+        hasInsiderBuy: boolean;
+        avgSentiment: number;
+        sector: string;
+      }>();
+
+      for (const sig of signals) {
+        const sym = sig.symbol as string;
+        if (!symbolMap.has(sym)) {
+          const scores = sentimentMap.get(sym) || [];
+          symbolMap.set(sym, {
+            signals: [],
+            quant: quantMap.get(sym),
+            hasBulkDeal: bulkSet.has(sym),
+            hasInsiderBuy: insiderBuySet.has(sym),
+            avgSentiment: scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : 0,
+            sector: (sig.sector as string) || 'Unknown',
+          });
+        }
+        symbolMap.get(sym)!.signals.push(sig);
+      }
+
+      const candidates = Array.from(symbolMap.entries()).map(([symbol, data]) => {
+        const avgWinProb = data.signals.reduce((s, sg) => s + ((sg.win_probability as number) || 0), 0) / data.signals.length;
+        const quant = data.quant;
+        const techScore = quant ? (quant.technical_score as number) || 0 : avgWinProb * 100;
+        const fundScore = quant ? (quant.fundamental_score as number) || 0 : 50;
+        const momScore = quant ? (quant.momentum_score as number) || 0 : avgWinProb * 80;
+        const sentScore = data.avgSentiment > 0 ? 60 + data.avgSentiment * 40 : 50;
+        const smartScore = (data.hasBulkDeal ? 20 : 0) + (data.hasInsiderBuy ? 30 : 0) + 50;
+
+        const compositeScore = techScore * 0.35 + fundScore * 0.20 + momScore * 0.20 + sentScore * 0.15 + smartScore * 0.10;
+
+        const primarySignal = data.signals[0];
+        const advice = (primarySignal?.signal_type as string) === 'BUY' ? 'BUY' :
+                       (primarySignal?.signal_type as string) === 'SELL' ? 'SELL' : 'HOLD';
+
+        return {
+          symbol,
+          sector: data.sector,
+          advice,
+          compositeScore: parseFloat(compositeScore.toFixed(1)),
+          mlWinProbability: parseFloat((avgWinProb * 100).toFixed(1)),
+          signalCount: data.signals.length,
+          factors: {
+            technical: parseFloat(techScore.toFixed(1)),
+            fundamental: parseFloat(fundScore.toFixed(1)),
+            momentum: parseFloat(momScore.toFixed(1)),
+            sentiment: parseFloat(sentScore.toFixed(1)),
+            smartMoney: parseFloat(smartScore.toFixed(1)),
+          },
+          entryPrice: primarySignal?.entry_price as number || null,
+          targetPrice: primarySignal?.target_price as number || null,
+          stopLoss: primarySignal?.stop_loss as number || null,
+          hasBulkDeal: data.hasBulkDeal,
+          hasInsiderBuy: data.hasInsiderBuy,
+        };
+      });
+
+      candidates.sort((a, b) => b.compositeScore - a.compositeScore);
+      const top15 = candidates.slice(0, 15);
+
+      const advances = signals.filter((s) => (s.signal_type as string) === 'BUY').length;
+      const declines = signals.filter((s) => (s.signal_type as string) === 'SELL').length;
+      const advDecRatio = declines > 0 ? parseFloat((advances / declines).toFixed(2)) : advances > 0 ? 5 : 1;
+      const avgWinProbability = signals.length
+        ? parseFloat((signals.reduce((s, sg) => s + ((sg.win_probability as number) || 0), 0) / signals.length * 100).toFixed(1))
+        : 0;
+
+      const verdict = top15.length >= 3 && avgWinProbability >= 50 ? 'TRADE' : 'NO TRADE';
+      const verdictReason = verdict === 'TRADE'
+        ? `${top15.length} high-probability setups with ${avgWinProbability}% avg win rate`
+        : top15.length < 3
+          ? 'Insufficient high-quality setups today'
+          : 'Win probability below threshold';
+
+      return {
+        success: true,
+        data: {
+          marketOverview: { verdict, verdictReason, advDecRatio, avgWinProbability, activeSignalsCount: signals.length },
+          candidates: top15,
+        },
+      };
+    } catch (err) {
+      console.error('[Router] getTradeDecisionCockpitData error:', err);
+      return { success: false, data: { marketOverview: { verdict: 'NO TRADE', verdictReason: 'Data unavailable', advDecRatio: 1, avgWinProbability: 0, activeSignalsCount: 0 }, candidates: [] } };
+    }
+  }),
+
+  // ─── PCR Fetch (trigger Python engine) ───────────────────────────────────────
+  runPcrFetch: publicProcedure
+    .input(z.object({ symbols: z.array(z.string()).optional() }))
+    .mutation(async ({ input }) => {
+      try {
+        const body = input.symbols?.length ? { symbols: input.symbols } : {};
+        const resp = await fetch('http://127.0.0.1:8000/api/v1/options/pcr', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(30000),
+        });
+        if (!resp.ok) throw new Error(`PCR fetch failed: ${resp.status}`);
+        const data = await resp.json();
+        return { success: true, data };
+      } catch (err) {
+        console.error('[Router] runPcrFetch error:', err);
+        return { success: false, error: String(err) };
+      }
+    }),
 });
 
 

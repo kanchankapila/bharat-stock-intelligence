@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Trophy, BarChart2, Activity, Filter, Target, Zap,
   Search, History, PieChart, Bookmark, Users, Globe, CheckCircle2,
   Star, LogIn, TrendingUp, ArrowUpRight, ArrowDownRight, Menu,
-  ChevronLeft, ChevronRight, Radio, Settings2, Briefcase, Calendar,
+  ChevronLeft, ChevronRight, Radio, Settings2, Briefcase, Calendar, Sparkles,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { nseStocksData } from '../data/nseStocks';
@@ -41,6 +41,7 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Intelligence',
     items: [
+      { icon: Sparkles, label: 'Trade Cockpit', id: 'trade-cockpit' },
       { icon: Radio,   label: 'Signals',    id: 'signals'     },
       { icon: Star,    label: 'Strategy',   id: 'strategy'    },
       { icon: Target,  label: 'Builder',    id: 'strategy-builder' },

@@ -303,13 +303,35 @@ def _next_monthly_expiry():
     return expiry.strftime("%Y-%m-%d")
 
 
-def build_stock_urls(sc_id="BE03"):
+# techCharts OHLCV chart ranges: (label, resolution, days_back, countback)
+# resolution: "1D"=daily, "60"=1h, "30"=30min, "15"=15min, "5"=5min, "1"=1min
+STOCK_CHART_CONFIGS = [
+    ("chart_max", "1D",  365 * 20, 9869),  # all-time daily (~20yr)
+    ("chart_1yr", "1D",  365,       329),   # 1-year daily
+    ("chart_6m",  "1D",  183,       132),   # 6-month daily
+    ("chart_3m",  "1D",  91,         66),   # 3-month daily
+    ("chart_1m",  "60",  30,        180),   # 1-month hourly
+    ("chart_5d",  "60",  5,          35),   # 5-day hourly
+    ("chart_1d",  "30",  1,          14),   # 1-day 30min bars
+]
+
+
+def build_stock_urls(sc_id="BE03", nse_symbol="BEL"):
     specs = []
     cat = "stock_detail"
 
     def add(sub, url):
         specs.append({"domain": "moneycontrol", "category": cat,
                       "subcategory": sub, "url": url})
+
+    # ── TradingView-style OHLCV chart history (techCharts API) ───────────────
+    now_ts = int(time.time())
+    for label, resolution, days_back, countback in STOCK_CHART_CONFIGS:
+        from_ts = now_ts - days_back * 86400
+        add(label,
+            f"https://priceapi.moneycontrol.com/techCharts/indianMarket/stock/history"
+            f"?symbol={nse_symbol}&resolution={resolution}"
+            f"&from={from_ts}&to={now_ts}&countback={countback}&currencyCode=INR")
 
     add("stock_price", f"https://priceapi.moneycontrol.com/pricefeed/nse/equitycash/{sc_id}")
     add("stock_price", f"https://api.moneycontrol.com/mcapi/v1/stock/price-volume?scId={sc_id}&ex=&appVersion=175")
@@ -339,11 +361,22 @@ def build_stock_urls(sc_id="BE03"):
             f"https://www.moneycontrol.com/mc/widget/historicalrating/ratingPro?classic=true&type=gson&sc_did={sc_id}&period={period}&dur=6m")
 
     add("stock_swot", f"https://api.moneycontrol.com/mcapi/v1/swot/details?scId={sc_id}&type=all")
+    add("stock_swot_widget",
+        f"https://www.moneycontrol.com/mc/widget/swot/swotCount?scDid={sc_id}&device_type=desktop&scId={sc_id}&stkname=bharatelectronics")
     add("stock_essentials", f"https://api.moneycontrol.com/mcapi/v1/extdata/mc-essentials?scId={sc_id}&type=all")
+    add("stock_essentials", f"https://api.moneycontrol.com/mcapi/v1/extdata/mc-essentials?scId={sc_id}&type=ed")
     add("stock_insights", f"https://api.moneycontrol.com/mcapi/v1/extdata/mc-insights?scId={sc_id}&type=d")
     add("stock_insights", f"https://api.moneycontrol.com/mcapi/v1/extdata/mc-insights?scId={sc_id}&type=c")
     add("stock_essentials_v2", f"https://api.moneycontrol.com/mcapi/extdata/v2/mc-essentials?scId={sc_id}&type=ed&deviceType=W")
     add("stock_insights_v2", f"https://api.moneycontrol.com/mcapi/extdata/v2/mc-insights?scId={sc_id}&type=c&deviceType=W&appVersion=185")
+    add("stock_widget_insider",
+        f"https://www.moneycontrol.com/mc/widget/mcinsider?sc_did={sc_id}&sc_id={sc_id}")
+    add("stock_widget_insights",
+        f"https://www.moneycontrol.com/mc/widget/mcinsights?sc_did={sc_id}&sc_id={sc_id}")
+    add("stock_widget_essentials",
+        f"https://www.moneycontrol.com/mc/widget/mcessentials?sc_did={sc_id}&sc_id={sc_id}")
+    add("stock_vwap_chart",
+        f"https://www.moneycontrol.com/stocks/company_info/get_vwap_chart_data.php?classic=true&sc_did={sc_id}")
 
     add("stock_est_price_forecast",
         f"https://api.moneycontrol.com/mcapi/v1/stock/estimates/price-forecast?scId={sc_id}&ex=N&deviceType=W")
@@ -381,10 +414,17 @@ TECH_TREND_CONFIGS = [
     ("downtrend", "bearish",        "FNO",   "performance", "asc"),
     ("downtrend", "turning-bearish","FNO",   "changeDate",  "desc"),
     ("uptrend",   "bullish",        "LCAP",  "performance", "desc"),
+    ("uptrend",   "turning-bullish","LCAP",  "changeDate",  "desc"),
     ("downtrend", "bearish",        "LCAP",  "performance", "asc"),
     ("downtrend", "turning-bearish","LCAP",  "changeDate",  "desc"),
+    ("uptrend",   "bullish",        "MDCAP", "performance", "desc"),
+    ("uptrend",   "turning-bullish","MDCAP", "changeDate",  "desc"),
     ("downtrend", "bearish",        "MDCAP", "performance", "asc"),
+    ("downtrend", "turning-bearish","MDCAP", "changeDate",  "desc"),
+    ("uptrend",   "bullish",        "SMCAP", "performance", "desc"),
+    ("uptrend",   "turning-bullish","SMCAP", "changeDate",  "desc"),
     ("downtrend", "bearish",        "SMCAP", "performance", "asc"),
+    ("downtrend", "turning-bearish","SMCAP", "changeDate",  "desc"),
 ]
 
 
@@ -414,6 +454,8 @@ def build_market_intel_urls():
     for action in ("buy", "sell"):
         add("deals", f"deals_insight_{action}",
             f"https://api.moneycontrol.com/mcapi/v1/deals/insight?start=0&limit=9&value=value&range=1W&action={action}&dealsType=topDeal")
+        add("deals", f"deals_insight_{action}_notype",
+            f"https://api.moneycontrol.com/mcapi/v1/deals/insight?start=0&limit=3&value=value&range=1W&action={action}")
         add("deals", f"deals_insider_{action}",
             f"https://api.moneycontrol.com/mcapi/v1/deals/insight?start=0&limit=9&value=value&range=1W&action={action}&dealsType=topInsider")
         add("deals", f"deals_investor_{action}",
@@ -455,9 +497,19 @@ def build_market_intel_urls():
         "https://api.moneycontrol.com/mcapi/v1/premarket/getMarketNewsData?limit=6")
     add("premarket", "premarket_broker_reco",
         "https://api.moneycontrol.com/mcapi/v1/premarket/getBrokerResearchReco?sublevel=stocks&start=0&limit=6")
+    add("premarket", "premarket_broker_reco_p2",
+        "https://api.moneycontrol.com/mcapi/v1/premarket/getBrokerResearchReco?sublevel=stocks&start=8&limit=24")
 
     add("news", "news_results",
         'https://www.moneycontrol.com/newsapi/mc_news.php?query=tags_slug:("results" "result-poll")&start=0&limit=8&sortby=creation_date&sortorder=desc')
+    add("news", "news_brokerage_estimates",
+        'https://www.moneycontrol.com/newsapi/mc_news.php?query=tags_slug:("brokerage-results-estimates")&start=0&limit=8&sortby=creation_date&sortorder=desc')
+    add("news", "news_result_analysis",
+        'https://www.moneycontrol.com/newsapi/mc_news.php?query=tags_slug:("result-analysis")&start=0&limit=8&sortby=creation_date&sortorder=desc')
+
+    # GIFT Nifty futures price chart (ind_id uses semicolon-encoded symbol)
+    add("indices", "gift_nifty_graph",
+        "https://appfeeds.moneycontrol.com/jsonapi/market/graph&format=json&range=1d&type=line&ind_id=in%3Bgsx")
 
     return specs
 
@@ -1277,7 +1329,7 @@ def print_summary(conn: sqlite3.Connection) -> None:
 def build_all_specs() -> list[EndpointSpec]:
     specs: list[EndpointSpec] = []
     specs.extend(build_index_urls())
-    specs.extend(build_stock_urls("BE03"))
+    specs.extend(build_stock_urls("BE03", "BEL"))
     specs.extend(build_market_intel_urls())
     specs.extend(build_screener_urls())
     specs.extend(build_trendlyne_urls())
@@ -1299,6 +1351,8 @@ def main() -> None:
                         help="Limit to first N URLs (for testing)")
     parser.add_argument("--count", action="store_true",
                         help="Print URL count by category and exit without fetching")
+    parser.add_argument("--new-only", action="store_true",
+                        help="Skip URLs already present in the DB (fetch only new ones)")
     args = parser.parse_args()
 
     specs = build_all_specs()
@@ -1313,6 +1367,16 @@ def main() -> None:
         return
 
     conn = create_db(args.db)
+
+    if args.new_only:
+        existing = {
+            row[0]
+            for row in conn.execute("SELECT url FROM api_responses").fetchall()
+        }
+        before = len(specs)
+        specs = [s for s in specs if s["url"] not in existing]
+        print(f"--new-only: {before} total, {len(existing)} already in DB, {len(specs)} new to fetch")
+
     fetch_all(specs, conn, limit=args.limit)
     print_summary(conn)
     conn.close()

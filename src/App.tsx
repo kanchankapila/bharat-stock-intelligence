@@ -65,6 +65,7 @@ import { AppShell } from './components/AppShell';
 import PremarketPanel from './components/PremarketPanel';
 import SmartMoneyPage from './components/SmartMoneyPage';
 import EarningsPage from './components/EarningsPage';
+import TradeDecisionCockpit from './components/TradeDecisionCockpit';
 import { 
   TickerTapeWidget, 
   TechnicalAnalysisWidget, 
@@ -3622,6 +3623,7 @@ export default function App() {
               } />
               <Route path="/fno-scanners" element={<FnOIntelligenceCenter onSelectStock={(s) => { setSelectedSymbol(s); navigate('/details'); }} />} />
               <Route path="/options" element={<div className="p-6"><OptionsIntelligence /></div>} />
+              <Route path="/trade-cockpit" element={<TradeDecisionCockpit onSelectStock={(s) => { setSelectedSymbol(s); navigate('/details'); }} />} />
               <Route path="/details" element={selectedSymbol ? (
                 <StockDetails
                   key={selectedSymbol}

@@ -160,13 +160,61 @@ python backtester.py --start 2023-01-01
 
 **ML model artifacts:** `src/server/ml_models/ensemble.pkl`, `src/server/ml_models/online_sgd.pkl` — generated at runtime by `ml_ensemble.py` and `online_learner.py`; directory is created on first training run.
 
+## Ticker Resolution Strategy
+
+> **Read this before onboarding any new data provider or URL.**
+
+### Canonical Identifier
+
+The **NSE symbol** (e.g., `HDFCBANK`, `INFY`, `BAJAJ-AUTO`) is the single source of truth across the entire platform. All provider-specific IDs are derived from it, never the reverse.
+
+### Provider ID Map
+
+| Provider | ID field in `StockMapping` | Format | Example |
+|---|---|---|---|
+| NSE / internal | `symbol` | Uppercase ticker | `HDFCBANK` |
+| Yahoo Finance | _(derived)_ | `symbol + ".NS"` | `HDFCBANK.NS` |
+| MoneyControl | `mcsymbol` | Opaque short code | `HDF01` |
+| Trendlyne | `tlid` / `tlname` | Numeric string / kebab slug | `533` / `hdfc-bank-ltd` |
+| ET / ETnow | `companyid` | Numeric string | `9195` |
+| ISIN (universal) | `isin` | 12-char alphanumeric | `INE040A01034` |
+| MoneyControl stockid | `stockid` | Numeric string | `592009` |
+
+### Resolution Files
+
+- **`src/data/stocklist.ts`** — authoritative mapping table for 180 liquid stocks; holds all provider fields. Always preferred.
+- **`src/data/nseStocks.ts`** — master list of 2000+ NSE stocks; NSE symbol + basic info only, no provider mappings.
+- **`src/server/stockMapping.ts`** — lookup functions; `stocklist.ts` takes precedence over `nseStocks.ts`.
+
+### Resolution Order (for any new provider)
+
+1. **`stocklist.ts` first** — call `getStockMapping(nseTicker)` to get the full `StockMapping` object and read the provider's field directly.
+2. **Provider autocomplete API second** — if the stock is not in the 180-stock list, call the provider's search/autocomplete endpoint with the NSE symbol and cache the result in the `scIdCache` pattern already used for MoneyControl.
+3. **ISIN as fallback** — if the provider accepts ISIN, it is universally available from `StockMapping.isin` for all 180 stocks.
+4. **Never guess** — do not construct provider IDs by convention. Each provider's ID scheme is opaque and must be resolved explicitly.
+
+### Adding a New Provider
+
+When integrating a new data source (new URL, new API endpoint):
+
+1. **Identify the provider's ID type** — look at its API docs/response to find what it uses to identify a stock (symbol, ISIN, internal ID, slug).
+2. **Add a field to `StockMapping`** in `src/data/stocklist.ts` if the provider has its own opaque ID not derivable from existing fields.
+3. **Populate mappings for the 180 stocks** in `stocklist.ts` before writing any fetch logic.
+4. **Add a resolver function** in `src/server/stockMapping.ts` following the `resolveMoneycontrolSymbol` pattern: hardcoded map first → in-memory cache → provider autocomplete API fallback.
+5. **For Yahoo Finance-style providers** — if the provider accepts `symbol.NS` or `symbol.BO` suffix conventions, derive it inline without adding a new field.
+6. **Cache the resolved ID** — use `Map<string, string>` keyed on the uppercase NSE symbol, populated on first resolution.
+
+### Index Resolution
+
+Indices use a separate `indexData` array in `src/server/stockMapping.ts` with `{ symbol, name, id }` tuples. Provider IDs for indices (e.g., MoneyControl `id` field) are stored there, not in `StockMapping`. Follow the same lookup-first pattern via `getIndexMapping(query)` before calling any index API.
+
 ## API Calling Strategies
 
 - **Cache**: Redis first → in-memory Map fallback. TTLs: live stocks 5 min, insights 1 hr, technical 30 min.
 - **Batching**: Yahoo Finance 50 symbols/batch, 8 concurrent batches. tRPC `httpBatchLink` groups frontend calls.
 - **Polling**: BullMQ repeatable job every 5 min. Accuracy tracking every 30 s. Screener sync every 12 hr.
 - **Resilience**: `AbortSignal.timeout(10000)`, exponential backoff+jitter, Gemini fallback, setInterval fallback if Redis down.
-- **Symbol resolution**: 3-way map NSE → MCSymbol → Trendlyne ID → ET company ID. `stocklist.ts` takes precedence over `nseStocks.ts`.
+- **Symbol resolution**: See **Ticker Resolution Strategy** section above. `stocklist.ts` (180 stocks) takes precedence over `nseStocks.ts` (2000+ stocks).
 
 ## General Rules
 
