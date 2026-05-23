@@ -496,12 +496,13 @@ server.tool(
         });
       }
 
-      console.error(`🚀 MCP Agent spawning: python src/server/${scriptFilename} ${args.join(" ")}`);
+      const pythonBin = process.env.PYTHON_BIN || "python";
+      console.error(`🚀 MCP Agent spawning: ${pythonBin} src/server/${scriptFilename} ${args.join(" ")}`);
 
       // Spawn process and fetch output safely
-      execFile("python", [scriptPath, ...args], { timeout: 300_000 }, (error, stdout, stderr) => {
+      execFile(pythonBin, [scriptPath, ...args], { timeout: 300_000 }, (error, stdout, stderr) => {
         let output = `## Engine Execution: ${engineName}\n\n`;
-        output += `**Command:** \`python src/server/${scriptFilename} ${args.join(" ")}\`\n\n`;
+        output += `**Command:** \`${pythonBin} src/server/${scriptFilename} ${args.join(" ")}\`\n\n`;
 
         if (error) {
           output += `❌ **Failed with Exit Code:** ${error.code}\n`;

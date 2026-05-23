@@ -53,9 +53,11 @@ SIGNAL_TYPES = [
 
 # ── Feature Engineering ──────────────────────────────────────────────────────
 
-def _parse_signal_types(signals_json: str) -> set[str]:
+def _parse_signal_types(signals_json) -> set[str]:
+    if signals_json is None:
+        return set()
     try:
-        return {s.get('type', '') for s in json.loads(signals_json or '[]') if isinstance(s, dict)}
+        return {s.get('type', '') for s in json.loads(signals_json) if isinstance(s, dict)}
     except Exception:
         return set()
 

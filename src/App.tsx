@@ -384,7 +384,7 @@ const Dashboard: React.FC<{
       handleGenerateSignals();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stocks.length > 0]);
+  }, [stocks.length]);
 
   return (
     <div className="p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-12 gap-4 relative">
@@ -1475,7 +1475,7 @@ const OptionChain: React.FC<{ symbol: string; stockPrice: number }> = ({ symbol,
                   {/* CALLS */}
                   <td className={cn(
                     "px-3 py-4 text-[8px] font-black uppercase",
-                    row.callBuiltup.includes('Long') ? "text-emerald-400" : row.callBuiltup.includes('Short') ? "text-rose-400" : "text-slate-600"
+                    row.callBuiltup?.includes('Long') ? "text-emerald-400" : row.callBuiltup?.includes('Short') ? "text-rose-400" : "text-slate-600"
                   )}>{row.callBuiltup}</td>
                   <td className="px-3 py-4 text-[10px] font-medium text-slate-400">{(row.callOi/1000).toFixed(1)}k</td>
                   <td className="px-3 py-4 text-[10px] font-bold text-emerald-400">{row.callDelta?.toFixed(2)}</td>
@@ -1492,7 +1492,7 @@ const OptionChain: React.FC<{ symbol: string; stockPrice: number }> = ({ symbol,
                   <td className="px-3 py-4 text-[10px] font-medium text-slate-400">{(row.putOi/1000).toFixed(1)}k</td>
                   <td className={cn(
                     "px-3 py-4 text-[8px] font-black uppercase",
-                    row.putBuiltup.includes('Long') ? "text-emerald-400" : row.putBuiltup.includes('Short') ? "text-rose-400" : "text-slate-600"
+                    row.putBuiltup?.includes('Long') ? "text-emerald-400" : row.putBuiltup?.includes('Short') ? "text-rose-400" : "text-slate-600"
                   )}>{row.putBuiltup}</td>
                 </tr>
               );
@@ -2593,23 +2593,23 @@ const FnOSignals: React.FC<{ symbol: string }> = ({ symbol }) => {
           <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Put-Call Ratio (PCR)</p>
           <p className={cn(
             "text-xl font-black italic",
-            fno.marketSentiment.pcr > 1 ? "text-emerald-400" : "text-rose-400"
-          )}>{fno.marketSentiment.pcr.toFixed(2)}</p>
-          <p className="text-[8px] text-slate-600 font-bold uppercase mt-1">{fno.marketSentiment.pcr > 1.2 ? 'Bullish Sentiment' : fno.marketSentiment.pcr < 0.8 ? 'Bearish Sentiment' : 'Neutral Zone'}</p>
+            (fno.marketSentiment?.pcr ?? 0) > 1 ? "text-emerald-400" : "text-rose-400"
+          )}>{fno.marketSentiment?.pcr?.toFixed(2) ?? '—'}</p>
+          <p className="text-[8px] text-slate-600 font-bold uppercase mt-1">{(fno.marketSentiment?.pcr ?? 0) > 1.2 ? 'Bullish Sentiment' : (fno.marketSentiment?.pcr ?? 0) < 0.8 ? 'Bearish Sentiment' : 'Neutral Zone'}</p>
         </div>
         <div className="p-4 bg-slate-950 border border-slate-800 rounded-2xl">
           <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Max Pain Strike</p>
-          <p className="text-xl font-black text-white italic">₹{fno.marketSentiment.maxPain}</p>
+          <p className="text-xl font-black text-white italic">₹{fno.marketSentiment?.maxPain ?? '—'}</p>
           <p className="text-[8px] text-slate-600 font-bold uppercase mt-1">Expected Expiry Zone</p>
         </div>
         <div className="p-4 bg-slate-950 border border-slate-800 rounded-2xl">
           <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Overall OI Trend</p>
-          <p className="text-xl font-black text-blue-400 italic uppercase">{fno.marketSentiment.oiTrend}</p>
+          <p className="text-xl font-black text-blue-400 italic uppercase">{fno.marketSentiment?.oiTrend ?? '—'}</p>
           <p className="text-[8px] text-slate-600 font-bold uppercase mt-1">Positioning Analysis</p>
         </div>
         <div className="p-4 bg-slate-950 border border-slate-800 rounded-2xl">
           <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Active Signals</p>
-          <p className="text-xl font-black text-white italic">{fno.signals.length}</p>
+          <p className="text-xl font-black text-white italic">{fno.signals?.length ?? 0}</p>
           <p className="text-[8px] text-slate-600 font-bold uppercase mt-1">Institutional Alerts</p>
         </div>
       </div>
@@ -2617,7 +2617,7 @@ const FnOSignals: React.FC<{ symbol: string }> = ({ symbol }) => {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <Card title="Unusual Options Activity" icon={Zap}>
           <div className="space-y-3 pt-2">
-            {fno.signals.filter(s => s.type === 'UNUSUAL_VOLUME' || s.type === 'PCR_SIGNAL').map((sig, idx) => (
+            {(fno.signals ?? []).filter(s => s.type === 'UNUSUAL_VOLUME' || s.type === 'PCR_SIGNAL').map((sig, idx) => (
               <div key={idx} className="p-4 bg-slate-900/50 border border-slate-800/80 rounded-2xl group hover:border-blue-500/30 transition-all">
                 <div className="flex justify-between items-start mb-2">
                   <div className="flex items-center gap-2">
@@ -2640,7 +2640,7 @@ const FnOSignals: React.FC<{ symbol: string }> = ({ symbol }) => {
 
         <Card title="Significant OI Shifts" icon={Activity}>
            <div className="space-y-3 pt-2">
-            {fno.signals.filter(s => s.type === 'OI_SPIKE' || s.type === 'BUILDUP').map((sig, idx) => (
+            {(fno.signals ?? []).filter(s => s.type === 'OI_SPIKE' || s.type === 'BUILDUP').map((sig, idx) => (
               <div key={idx} className="p-4 bg-slate-900/50 border border-slate-800/80 rounded-2xl group hover:border-purple-500/30 transition-all">
                 <div className="flex justify-between items-start mb-2">
                   <div className="flex items-center gap-2">

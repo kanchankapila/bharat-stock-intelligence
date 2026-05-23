@@ -759,7 +759,9 @@ export const appRouter = router({
   getOptionsIntelligence: publicProcedure
     .query(async () => {
       try {
-        const res = await fetch('http://127.0.0.1:8000/api/v1/options/pcr');
+        const res = await fetch('http://127.0.0.1:8000/api/v1/options/pcr', {
+          signal: AbortSignal.timeout(10000)
+        });
         if (!res.ok) {
           throw new Error('Failed to fetch options PCR from backend');
         }
@@ -780,7 +782,8 @@ export const appRouter = router({
         const res = await fetch('http://127.0.0.1:8000/api/v1/portfolio/analyze', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(input)
+          body: JSON.stringify(input),
+          signal: AbortSignal.timeout(10000)
         });
         if (!res.ok) {
           throw new Error('Failed to analyze portfolio');

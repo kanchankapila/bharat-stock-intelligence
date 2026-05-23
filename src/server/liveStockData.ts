@@ -456,6 +456,8 @@ function enrichMarketData(data: MarketData): MarketData {
       tlname: mapping.tlname,
     };
   }
+  // Stock is in NSE master list but not in 180-stock mapping — provider IDs unavailable
+  console.debug(`[enrichMarketData] No provider mapping for ${data.symbol}; MC/TL calls will be skipped`);
   return data;
 }
 

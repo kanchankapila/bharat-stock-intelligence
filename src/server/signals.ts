@@ -35,36 +35,41 @@ export async function updateSignalAccuracy(symbol: string, currentPrice: number)
   const signals = db.prepare('SELECT * FROM signals WHERE symbol = ? AND status = ?')
     .all(symbol, 'ACTIVE') as Signal[];
 
-  for (const signal of signals) {
-    let newStatus = signal.status;
-    let result = signal.result;
+  const updateStmt = db.prepare(`
+    UPDATE signals
+    SET status = ?, result = ?, updatedAt = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `);
 
-    if (signal.type === "BUY") {
-      if (currentPrice >= signal.target) {
-        newStatus = "COMPLETED";
-        result = "PROFIT";
-      } else if (currentPrice <= signal.stopLoss) {
-        newStatus = "FAILED";
-        result = "LOSS";
+  const runUpdates = db.transaction(() => {
+    for (const signal of signals) {
+      let newStatus = signal.status;
+      let result = signal.result;
+
+      if (signal.type === "BUY") {
+        if (currentPrice >= signal.target) {
+          newStatus = "COMPLETED";
+          result = "PROFIT";
+        } else if (currentPrice <= signal.stopLoss) {
+          newStatus = "FAILED";
+          result = "LOSS";
+        }
+      } else if (signal.type === "SELL") {
+        if (currentPrice <= signal.target) {
+          newStatus = "COMPLETED";
+          result = "PROFIT";
+        } else if (currentPrice >= signal.stopLoss) {
+          newStatus = "FAILED";
+          result = "LOSS";
+        }
       }
-    } else if (signal.type === "SELL") {
-      if (currentPrice <= signal.target) {
-        newStatus = "COMPLETED";
-        result = "PROFIT";
-      } else if (currentPrice >= signal.stopLoss) {
-        newStatus = "FAILED";
-        result = "LOSS";
+
+      if (newStatus !== "ACTIVE") {
+        updateStmt.run(newStatus, result, signal.id);
       }
     }
+  });
 
-    if (newStatus !== "ACTIVE") {
-      const updateStmt = db.prepare(`
-        UPDATE signals 
-        SET status = ?, result = ?, updatedAt = CURRENT_TIMESTAMP 
-        WHERE id = ?
-      `);
-      updateStmt.run(newStatus, result, signal.id);
-    }
-  }
+  runUpdates();
 }
 

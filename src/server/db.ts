@@ -838,7 +838,11 @@ db.exec(`
 
 // --- Migrations & Upgrades ---
 const migrateColumn = (table: string, col: string, def: string) => {
-  try { db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`); } catch { /* already exists */ }
+  try { db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`); } catch (e: any) {
+    if (!e?.message?.includes('duplicate column name')) {
+      console.warn(`[DB] migrateColumn failed for ${table}.${col}: ${e?.message}`);
+    }
+  }
 };
 
 // watchlist extras

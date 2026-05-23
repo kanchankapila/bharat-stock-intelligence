@@ -435,7 +435,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
     if (aiSignals.length === 0 && stocks.length > 0 && !isGenerating) {
       handleGenerateSignals();
     }
-  }, [stocks.length > 0]);
+  }, [stocks.length]);
 
   // Derived market stats
   const advancers = stocks.filter(s => s.changePct > 0).length;

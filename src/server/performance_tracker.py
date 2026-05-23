@@ -73,9 +73,11 @@ class PerformanceTracker:
             WHERE so.outcome IN ('WIN', 'LOSS', 'NEUTRAL')
               AND so.return_pct IS NOT NULL
         """
+        params = []
         if horizon_days:
-            base_q += f" AND so.horizon_days = {horizon_days}"
-        df = pd.read_sql_query(base_q, self.conn)
+            base_q += " AND so.horizon_days = ?"
+            params.append(horizon_days)
+        df = pd.read_sql_query(base_q, self.conn, params=params if params else None)
         df['return_pct'] = pd.to_numeric(df['return_pct'], errors='coerce')
         df['signal_score'] = pd.to_numeric(df['signal_score'], errors='coerce').fillna(5)
         df['nifty_regime'] = df['nifty_regime'].fillna('UNKNOWN')

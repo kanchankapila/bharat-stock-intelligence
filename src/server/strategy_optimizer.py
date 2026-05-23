@@ -115,7 +115,7 @@ class StrategyOptimizer:
         weighted_score = sum(df[c] * cat_weights.get(c, 1.0) for c in cat_cols)
 
         # Source weight modifier — default 1.0 if source unknown
-        src_modifier = df['source'].map(src_weights).fillna(1.0)
+        src_modifier = df.get('source', pd.Series(['unknown'] * len(df), index=df.index)).map(src_weights).fillna(1.0)
         trial_score  = (weighted_score * src_modifier).clip(0, 100)
 
         # Split into quartiles by trial score; evaluate top quartile performance

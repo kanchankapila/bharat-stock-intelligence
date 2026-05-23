@@ -22,7 +22,7 @@ import { updateSignalAccuracy } from "./src/server/signals";
 
 async function startServer() {
   const app = express();
-  const PORT = parseInt(process.env.PORT || '3002', 10);
+  const PORT = parseInt(process.env.PORT || '3000', 10);
 
   // Initialise AI & Redis (gracefully managed)
   await startOllama();

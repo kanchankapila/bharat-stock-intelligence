@@ -6,7 +6,7 @@
   "scripts": {
     "start": "concurrently \"npm run dev\" \"npm run api\"",
     "dev": "tsx watch server.ts",
-    "api": "cd backend-python && venv\\Scripts\\python main.py",
+    "api": "cd backend-python && node -e \"const{spawnSync:s}=require('child_process');const py=process.env.PYTHON_BIN||(process.platform==='win32'?'venv/Scripts/python':'venv/bin/python');const r=s(py,['main.py'],{stdio:'inherit'});process.exit(r.status||0);\"",
     "build": "vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist",
