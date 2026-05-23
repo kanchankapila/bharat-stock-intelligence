@@ -174,7 +174,7 @@ async function processNSESync(_job: Job): Promise<{ success: boolean; stockCount
   try {
     const { syncNSEStocksToDatabase } = await import('./nseService');
     const result = await syncNSEStocksToDatabase();
-    const stockCount = result?.stock_count || 0;
+    const stockCount = (result?.inserted || 0) + (result?.updated || 0);
     console.log(`[QUEUE] NSE sync completed, ${stockCount} stocks updated`);
     return { success: true, stockCount };
   } catch (err: any) {
@@ -260,7 +260,7 @@ export async function initQueues(): Promise<boolean> {
       'refresh-all-daily',
       {},
       {
-        repeat: { cron: '30 10 * * 1-5' },  // 10:30 AM UTC = 4:00 PM IST, weekdays only
+        repeat: { pattern: '30 10 * * 1-5' },  // 10:30 AM UTC = 4:00 PM IST, weekdays only
         jobId: 'refresh-all-daily-repeatable',
         removeOnComplete: { age: 86400 },   // Keep completed jobs for 1 day
         removeOnFail: { age: 604800 },      // Keep failed jobs for 7 days (for debugging)
@@ -446,7 +446,7 @@ export async function initQueues(): Promise<boolean> {
       'nse-sync-weekly',
       {},
       {
-        repeat: { cron: '0 2 * * 0' },  // Weekly Sunday 2 AM UTC
+        repeat: { pattern: '0 2 * * 0' },  // Weekly Sunday 2 AM UTC
         jobId: 'nse-sync-weekly-repeatable',
         removeOnComplete: { age: 86400 },   // Keep for 1 day
         removeOnFail: { age: 604800 },      // Keep failures for 7 days

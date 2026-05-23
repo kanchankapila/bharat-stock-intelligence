@@ -2326,17 +2326,18 @@ export const appRouter = router({
         query += ` ORDER BY executed_at DESC LIMIT ? OFFSET ?`;
         params.push(input.limit, input.offset);
 
-        const actions = db.prepare(query).all(...params);
-        
+        const actions = db.prepare(query).all(...params) as Array<Record<string, unknown>>;
+
         // Calculate summary stats
         let totalPnl = 0;
         let winCount = 0;
         let totalCount = 0;
 
         for (const action of actions) {
-          if (action.pnl !== null) {
-            totalPnl += action.pnl;
-            if (action.pnl > 0) winCount++;
+          const pnl = action.pnl as number | null;
+          if (pnl !== null) {
+            totalPnl += pnl;
+            if (pnl > 0) winCount++;
             totalCount++;
           }
         }
