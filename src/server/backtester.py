@@ -52,13 +52,13 @@ class Backtester:
         horizon_days: int = 15,
     ) -> pd.DataFrame:
         q = """
-            SELECT ts.symbol, ts.scan_date AS signal_date, ts.signal_score,
+            SELECT ts.symbol, ts.date AS signal_date, ts.signal_score,
                    ts.cmp AS entry_price_ref, ts.stop_loss, ts.signals_json,
                    ts.nifty_regime, ts.adx
             FROM technical_signals ts
-            WHERE ts.scan_date BETWEEN ? AND ?
+            WHERE ts.date BETWEEN ? AND ?
               AND ts.signal_score >= ?
-            ORDER BY ts.scan_date ASC
+            ORDER BY ts.date ASC
         """
         df = pd.read_sql_query(q, self.conn, params=(start, end, min_score))
         df['signal_date']    = pd.to_datetime(df['signal_date'])
@@ -412,7 +412,7 @@ class Backtester:
         slippage_bps: float = 10,
         stop_loss_pct: float = 7.0,
     ) -> dict:
-        print(f"[Backtester] {start} → {end}  horizon={horizon_days}d  min_score={min_score}")
+        print(f"[Backtester] {start} -> {end}  horizon={horizon_days}d  min_score={min_score}")
 
         signals = self.load_signals(start, end, min_score, horizon_days)
         if signals.empty:
@@ -428,7 +428,7 @@ class Backtester:
         ohlcv_all = self.load_ohlcv(symbols, start, extended_end)
 
         if ohlcv_all.empty:
-            print("[Backtester] No OHLCV data — cannot simulate.")
+            print("[Backtester] No OHLCV data - cannot simulate.")
             return {}
 
         ohlcv_dict = {sym: grp.reset_index(drop=True) for sym, grp in ohlcv_all.groupby('symbol')}
@@ -458,7 +458,7 @@ class Backtester:
         }
 
         print(f"\n{'='*60}")
-        print(f" BACKTEST RESULTS  {start} → {end}")
+        print(f" BACKTEST RESULTS  {start} -> {end}")
         print(f"{'='*60}")
         for k, v in stats.items():
             if k not in ('monthly_returns',):

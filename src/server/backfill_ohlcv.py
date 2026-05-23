@@ -21,22 +21,28 @@ def init_db(conn):
         )
     """)
     conn.commit()
-    print(f"✓ stock_ohlcv table ready  [DB: {DB_PATH}]")
+    print(f"[OK] stock_ohlcv table ready  [DB: {DB_PATH}]")
 
 def get_all_nse_symbols(conn):
     try:
         rows = conn.execute("SELECT symbol FROM nse_stocks WHERE status = 'ACTIVE'").fetchall()
         if not rows:
-            print("⚠️  No active stocks in nse_stocks — run syncNSEStocks first.")
+            print("[WARN] No active stocks in nse_stocks - run syncNSEStocks first.")
             return []
         return [r[0] for r in rows]
     except sqlite3.OperationalError:
-        print("❌  Table nse_stocks not found — start the app to trigger NSE sync.")
+        print("[ERROR] Table nse_stocks not found - start the app to trigger NSE sync.")
         return []
 
 def _extract_records(symbol: str, df: pd.DataFrame) -> list:
     """Convert a single-symbol OHLCV DataFrame to insert-ready tuples."""
-    if df is None or df.empty or "Close" not in df.columns:
+    if df is None or df.empty:
+        return []
+    # Newer yfinance returns MultiIndex columns like ('Close', 'SYM.NS') even for
+    # single-ticker downloads. Flatten to simple string column names.
+    if isinstance(df.columns, pd.MultiIndex):
+        df = df.droplevel(level=-1, axis=1)
+    if "Close" not in df.columns:
         return []
     df = df.dropna(subset=["Close"])
     if df.empty:
@@ -97,13 +103,23 @@ YAHOO_SYMBOL_MAP: dict[str, str] = {
     "SURYODAY":     "SURYODAYBNK",
     "NYKAA":        "FSN",
     "POLICYBZR":    "POLICYBZR",
+    "POLICYBAZAAR": "POLICYBZR",
     "PAYTM":        "ONE97",
     "ZOMATO":       "ZOMATO",
     "MAHINDRA":     "M&M",
     "SRTRANSFIN":   "SHRIRAMFIN",
     "CHOLAFINSV":   "CHOLAFIN",
     "LTFH":         "LTF",
+    "LTIM":         "LTI",
     "BAJAJINSUR":   "BAJAJFINSV",
+    "TATAMOTORS":   "TATAMTRDVR",
+    "OBEROI":       "OBEROIRLTY",
+    "LARSEN":       "LT",
+    "NESTLE":       "NESTLEIND",
+    "MCDOWELL":     "MCDOWELL-N",
+    "VODAFONE":     "IDEA",
+    "JIOFINANCIAL": "JIOFIN",
+    "ONE97":        "ONE97",
 }
 
 # When a symbol fails, try these suffix/prefix patterns in order
@@ -117,15 +133,15 @@ _YAHOO_FALLBACK_PATTERNS = [
 def _try_download(yahoo_symbol: str) -> pd.DataFrame | None:
     """Download a single Yahoo Finance ticker (no .NS suffix needed here)."""
     ticker = f"{yahoo_symbol}.NS"
-    for attempt in range(3):
+    for attempt in range(2):
         try:
             df = yf.download(ticker, period="1y", progress=False, auto_adjust=True)
             if df is not None and not df.empty:
                 return df
         except Exception:
             pass
-        if attempt < 2:
-            time.sleep(2 ** attempt)
+        if attempt < 1:
+            time.sleep(1)
     return None
 
 def _download_one(symbol: str) -> pd.DataFrame | None:
@@ -146,7 +162,7 @@ def _download_one(symbol: str) -> pd.DataFrame | None:
         if alt and alt != symbol:
             df = _try_download(alt)
             if df is not None:
-                tqdm.write(f"  ↳ {symbol} resolved via alias {alt}.NS")
+                tqdm.write(f"  -> {symbol} resolved via alias {alt}.NS")
                 return df
 
     return None
@@ -203,16 +219,16 @@ def fetch_and_store(conn, symbols: list, batch_size: int = 50):
                     _upsert(conn, recs)
                 else:
                     failed.append(symbol)
-                    tqdm.write(f"  ✗ {symbol}: no data")
+                    tqdm.write(f"  x {symbol}: no data")
                 bar.update(1)
                 time.sleep(0.3)
 
             time.sleep(1)  # rate-limit between batches
 
     if failed:
-        print(f"\n⚠️  {len(failed)} symbols could not be fetched: {failed}")
+        print(f"\n[WARN] {len(failed)} symbols could not be fetched: {failed}")
     else:
-        print("\n✓  All symbols backfilled successfully!")
+        print("\n[OK] All symbols backfilled successfully!")
 
 if __name__ == "__main__":
     with sqlite3.connect(DB_PATH) as conn:

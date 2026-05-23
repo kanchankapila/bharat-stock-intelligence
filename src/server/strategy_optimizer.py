@@ -83,20 +83,19 @@ class StrategyOptimizer:
                    so.outcome, so.return_pct, so.signal_score,
                    sfb.technical, sfb.fundamental, sfb.momentum,
                    sfb.valuation, sfb.delivery, sfb.news,
-                   ss.source
+                   NULL AS source
             FROM signal_outcomes so
             LEFT JOIN stock_factor_breakdown sfb
                    ON sfb.symbol = so.symbol
-            LEFT JOIN (
-                SELECT symbol, source FROM screener_master
-            ) ss ON ss.symbol = so.symbol
             WHERE so.outcome IN ('WIN','LOSS','NEUTRAL')
               AND so.return_pct IS NOT NULL
               AND so.horizon_days = ?
         """
         df = pd.read_sql_query(q, self.conn, params=(horizon_days,))
         for col in CATEGORIES:
-            df[col] = pd.to_numeric(df.get(col, np.nan), errors='coerce').fillna(0)
+            if col not in df.columns:
+                df[col] = 0.0
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
         return df
 
     # ──────────────────────────────────────────────────────────────────────────
@@ -180,7 +179,7 @@ class StrategyOptimizer:
             tol=1e-6,
             mutation=(0.5, 1.5),
             recombination=0.7,
-            workers=-1,  # parallel evaluation
+            workers=1,  # sqlite3.Connection is not picklable; single-threaded
             callback=lambda xk, convergence: print(
                 f"[Optimizer]   iter... obj={-self._objective(xk, df):.4f}"
             ) if False else None,
@@ -331,15 +330,15 @@ class StrategyOptimizer:
         print("\n[Optimizer] Optimised Category Weights:")
         for k, v in result['category_weights'].items():
             default = DEFAULT_CATEGORY_WEIGHTS.get(k, 1.0)
-            print(f"  {k:<15} {default:.2f} → {v:.4f}  ({(v/default - 1)*100:+.1f}%)")
+            print(f"  {k:<15} {default:.2f} -> {v:.4f}  ({(v/default - 1)*100:+.1f}%)")
 
         print("\n[Optimizer] Optimised Source Weights:")
         for k, v in result['source_weights'].items():
             default = DEFAULT_SOURCE_WEIGHTS.get(k, 1.0)
-            print(f"  {k:<15} {default:.2f} → {v:.4f}  ({(v/default - 1)*100:+.1f}%)")
+            print(f"  {k:<15} {default:.2f} -> {v:.4f}  ({(v/default - 1)*100:+.1f}%)")
 
         print(f"\n[Optimizer] Win rate:  baseline={result['baseline_win_rate']:.1%}  "
-              f"→ optimised={result['optimised_win_rate']:.1%}  "
+              f"-> optimised={result['optimised_win_rate']:.1%}  "
               f"({result['improvement_pct']:+.1f}%)")
 
         overrides = self.compute_screener_overrides(result)

@@ -94,7 +94,7 @@ def load_recent_outcomes(conn: sqlite3.Connection, window_days: int, min_new: in
                ts.rsi, ts.adx, ts.nifty_regime, ts.cmp, ts.sma200, ts.volume_ratio
         FROM signal_outcomes so
         LEFT JOIN technical_signals ts
-               ON ts.symbol = so.symbol AND ts.scan_date = so.signal_date
+               ON ts.symbol = so.symbol AND ts.date = so.signal_date
         WHERE so.outcome IN ('WIN','LOSS','NEUTRAL')
           AND so.signal_date >= ?
         ORDER BY so.signal_date DESC
@@ -105,11 +105,11 @@ def load_recent_outcomes(conn: sqlite3.Connection, window_days: int, min_new: in
 
 def load_pending_signals(conn: sqlite3.Connection) -> pd.DataFrame:
     q = """
-        SELECT symbol, scan_date AS signal_date, signal_score, signals_json,
+        SELECT symbol, date AS signal_date, signal_score, signals_json,
                rsi, adx, nifty_regime, cmp, sma200, volume_ratio
         FROM technical_signals
         WHERE win_probability IS NULL
-        ORDER BY scan_date DESC
+        ORDER BY date DESC
         LIMIT 10000
     """
     df = pd.read_sql_query(q, conn)
@@ -128,7 +128,7 @@ def load_or_init_sgd() -> dict:
     from sklearn.preprocessing import StandardScaler
     sgd = SGDClassifier(
         loss='log_loss', penalty='l2', alpha=1e-4,
-        max_iter=1, warm_start=True, random_state=42, class_weight='balanced',
+        max_iter=1, warm_start=True, random_state=42,
     )
     scaler = StandardScaler()
     return {
@@ -149,13 +149,15 @@ def save_sgd(state: dict):
 def partial_fit_sgd(state: dict, X: np.ndarray, y: np.ndarray) -> dict:
     from sklearn.linear_model import SGDClassifier
 
+    from sklearn.utils.class_weight import compute_sample_weight
     classes = np.array([0, 1])
     if not state['scaler_fitted']:
         state['scaler'].fit(X)
         state['scaler_fitted'] = True
     Xs = state['scaler'].transform(X)
+    sample_weights = compute_sample_weight('balanced', y)
 
-    state['model'].partial_fit(Xs, y, classes=classes)
+    state['model'].partial_fit(Xs, y, classes=classes, sample_weight=sample_weights)
     state['n_samples_seen'] += len(X)
     state['last_updated']    = datetime.datetime.now().isoformat()
     return state
@@ -229,7 +231,7 @@ def score_pending_with_ensemble_blend(
     updated = 0
     for (_, row), prob in zip(df.iterrows(), probs):
         cur.execute(
-            "UPDATE technical_signals SET win_probability = ? WHERE symbol = ? AND scan_date = ?",
+            "UPDATE technical_signals SET win_probability = ? WHERE symbol = ? AND date = ?",
             (round(float(prob), 4), row['symbol'], row['signal_date']),
         )
         updated += 1

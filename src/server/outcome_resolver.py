@@ -114,7 +114,7 @@ def resolve_outcomes(
                 return_pct = None
 
         if dry_run:
-            msg = f"  [DRY] {sym} {signal_date} → {outcome}"
+            msg = f"  [DRY] {sym} {signal_date} -> {outcome}"
             if return_pct is not None:
                 msg += f" ({return_pct:.2f}%)"
             print(msg)
