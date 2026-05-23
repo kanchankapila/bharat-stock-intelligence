@@ -231,8 +231,14 @@ class StrategyOptimizer:
                    COUNT(so.symbol) AS appearances,
                    SUM(CASE WHEN so.outcome = 'WIN' THEN 1 ELSE 0 END) AS wins
             FROM screener_master sm
-            JOIN trendlyne_screener_stocks tss ON tss.screener_id = sm.scan_id
-            JOIN signal_outcomes so ON so.symbol = tss.symbol
+            JOIN (
+                SELECT screener_id AS scan_id, symbol FROM trendlyne_screener_stocks
+                UNION ALL
+                SELECT scan_id,                symbol FROM moneycontrol_screener_stocks
+                UNION ALL
+                SELECT screener_id AS scan_id, symbol FROM etnow_screener_stocks
+            ) all_stocks ON all_stocks.scan_id = sm.scan_id
+            JOIN signal_outcomes so ON so.symbol = all_stocks.symbol
             WHERE so.outcome IN ('WIN','LOSS','NEUTRAL')
             GROUP BY sm.scan_id, sm.name
             HAVING appearances >= 10

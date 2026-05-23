@@ -62,6 +62,9 @@ import DashboardPage from './components/DashboardPage';
 import SuperstarPortfolio from './components/SuperstarPortfolio';
 import { SentimentIntelligence } from './components/SentimentIntelligence';
 import { AppShell } from './components/AppShell';
+import PremarketPanel from './components/PremarketPanel';
+import SmartMoneyPage from './components/SmartMoneyPage';
+import EarningsPage from './components/EarningsPage';
 import { 
   TickerTapeWidget, 
   TechnicalAnalysisWidget, 
@@ -3611,6 +3614,12 @@ export default function App() {
               <Route path="/screener" element={<Screener stocks={stocks} onSelectStock={(s) => { setSelectedSymbol(s); navigate('/details'); }} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
               <Route path="/trendlyne" element={<TrendlyneScreenerPanel onSelectStock={(s) => { setSelectedSymbol(s); navigate('/details'); }} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
               <Route path="/discover" element={<div className="p-6"><NSEStockDiscovery onSelectStock={(s) => { setSelectedSymbol(s); navigate('/details'); }} /></div>} />
+              <Route path="/smart-money" element={
+                <SmartMoneyPage onSelectStock={(s) => { setSelectedSymbol(s); navigate('/details'); }} />
+              } />
+              <Route path="/earnings" element={
+                <EarningsPage onSelectStock={(s) => { setSelectedSymbol(s); navigate('/details'); }} />
+              } />
               <Route path="/fno-scanners" element={<FnOIntelligenceCenter onSelectStock={(s) => { setSelectedSymbol(s); navigate('/details'); }} />} />
               <Route path="/options" element={<div className="p-6"><OptionsIntelligence /></div>} />
               <Route path="/details" element={selectedSymbol ? (

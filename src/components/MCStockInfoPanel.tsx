@@ -48,7 +48,7 @@ interface MCStockInfoPanelProps {
 }
 
 type Timeframe = 'D' | 'W' | 'M';
-type Tab = 'overview' | 'financials' | 'technical' | 'analysis' | 'analyst' | 'trendlyne';
+type Tab = 'overview' | 'financials' | 'technical' | 'analysis' | 'analyst' | 'trendlyne' | 'fno';
 
 export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({ 
   symbol, 
@@ -130,6 +130,15 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
   const { data: trendlyneTa, isLoading: loadingTlTa } = trpc.getTrendlyneAdvTechnicalAnalysis.useQuery(
     { symbol, timeframe },
     { enabled: isVisible && activeTab === 'trendlyne', staleTime: 60000 }
+  );
+
+  const { data: vwapData } = trpc.getMcVwapChart.useQuery(
+    { symbol },
+    { enabled: isVisible && activeTab === 'overview', staleTime: 300000 }
+  );
+  const { data: indexFnoData } = trpc.getIndexFno.useQuery(
+    { id: 'NIFTY' },
+    { enabled: isVisible && activeTab === 'fno', staleTime: 60000 }
   );
 
   if (!isVisible && !unifiedData) {
@@ -217,6 +226,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
     { key: 'overview',   label: 'Overview'   },
     { key: 'financials', label: 'Financials'  },
     { key: 'technical',  label: 'Technical'   },
+    { key: 'fno',        label: 'F&O'         },
     { key: 'analysis',   label: 'Analysis'    },
     { key: 'analyst',    label: 'Analyst'     },
     { key: 'trendlyne',  label: 'Trendlyne'   },
@@ -591,7 +601,35 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
             )}
           </div>
 
-          <ScreenerDetailsModal 
+          {/* VWAP Chart */}
+          {(vwapData as any)?.NSE && (vwapData as any).NSE.length > 0 && (
+            <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-sm font-semibold text-slate-300">VWAP — Intraday</span>
+                <span className="text-xs text-slate-500">NSE</span>
+              </div>
+              <ResponsiveContainer width="100%" height={120}>
+                <AreaChart data={(vwapData as any).NSE.slice(-60)} margin={{ top: 4, right: 4, bottom: 0, left: -20 }}>
+                  <defs>
+                    <linearGradient id="vwapGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
+                      <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <XAxis dataKey="time" hide />
+                  <YAxis domain={['auto', 'auto']} tick={{ fontSize: 9, fill: '#94a3b8' }} />
+                  <Tooltip
+                    contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 6 }}
+                    formatter={(v: any) => [`₹${parseFloat(v).toFixed(2)}`, 'VWAP']}
+                  />
+                  <Area type="monotone" dataKey="vwap" stroke="#3b82f6" strokeWidth={1.5}
+                        fill="url(#vwapGrad)" dot={false} />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+
+          <ScreenerDetailsModal
             isOpen={isModalOpen}
             onClose={() => setIsModalOpen(false)}
             screener={selectedScreener}
@@ -1231,6 +1269,32 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
             </div>
           </Card>
 
+          {(mc as any)?.technical?.pivotLevels && (
+            <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50 mt-3">
+              <div className="text-sm font-semibold text-slate-300 mb-3">Pivot Levels</div>
+              {Object.entries((mc as any).technical.pivotLevels).map(([method, levels]: [string, any]) => (
+                <div key={method} className="mb-3">
+                  <div className="text-xs text-slate-500 uppercase tracking-wider mb-2">{method}</div>
+                  <div className="grid grid-cols-7 gap-1 text-center">
+                    {['S3', 'S2', 'S1', 'P', 'R1', 'R2', 'R3'].map(label => {
+                      const val = levels?.[label.toLowerCase()] ?? levels?.[label];
+                      const isP = label === 'P';
+                      const isR = label.startsWith('R');
+                      return (
+                        <div key={label} className={`rounded p-1.5 ${isP ? 'bg-amber-500/20 border border-amber-500/40' : isR ? 'bg-emerald-500/10' : 'bg-red-500/10'}`}>
+                          <div className={`text-xs font-bold ${isP ? 'text-amber-400' : isR ? 'text-emerald-400' : 'text-red-400'}`}>{label}</div>
+                          <div className="text-xs text-slate-300 font-mono mt-0.5">
+                            {val ? parseFloat(val).toFixed(0) : '—'}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* Technical Rating */}
           {(technicalRating || technicalV2) && (() => {
             const rating = technicalRating?.data || technicalRating;
@@ -1595,6 +1659,88 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                 </div>
               )}
             </>
+          )}
+        </div>
+      )}
+
+      {/* ── F&O Tab ── */}
+      {activeTab === 'fno' && (
+        <div className="space-y-4">
+          {(mc as any)?.fnoExpiry && (
+            <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
+              <div className="text-sm font-semibold text-slate-300 mb-3">Futures — {symbol}</div>
+              {(mc as any)?.fnoFutures?.data?.futureData ? (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b border-slate-700/50">
+                        {['Expiry', 'LTP', 'Change%', 'OI', 'OI Change', 'Volume'].map(h => (
+                          <th key={h} className="text-left pb-2 pr-4 text-slate-400 font-semibold whitespace-nowrap">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {((mc as any).fnoFutures.data.futureData || []).slice(0, 5).map((row: any, i: number) => {
+                        const chg = parseFloat(row.pChange || row.change || 0);
+                        return (
+                          <tr key={i} className="border-b border-slate-700/20">
+                            <td className="py-2 pr-4 text-slate-300">{row.expiryDate || row.expiry}</td>
+                            <td className="py-2 pr-4 font-mono text-white">₹{row.lastPrice || row.ltp}</td>
+                            <td className={`py-2 pr-4 font-bold ${chg >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                              {chg >= 0 ? '+' : ''}{chg.toFixed(2)}%
+                            </td>
+                            <td className="py-2 pr-4 text-slate-300">{row.openInterest || row.oi}</td>
+                            <td className="py-2 pr-4 text-slate-400">{row.changeinOpenInterest || row.oiChange}</td>
+                            <td className="py-2 text-slate-400">{row.totalTradedVolume || row.volume}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="text-xs text-slate-500 text-center py-4">No futures data available for {symbol}</div>
+              )}
+            </div>
+          )}
+
+          {(indexFnoData as any)?.futures?.refresh_details && (
+            <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
+              <div className="text-sm font-semibold text-slate-300 mb-3">Index F&O — NIFTY Futures</div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-slate-700/50">
+                      {['Expiry', 'LTP', 'Change', 'OI Lots', 'Volume'].map(h => (
+                        <th key={h} className="text-left pb-2 pr-4 text-slate-400 font-semibold">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {((indexFnoData as any).futures.fno_list || []).slice(0, 3).map((row: any, i: number) => {
+                      const chg = parseFloat(row.pChange || 0);
+                      return (
+                        <tr key={i} className="border-b border-slate-700/20">
+                          <td className="py-2 pr-4 text-slate-300">{row.expiry}</td>
+                          <td className="py-2 pr-4 font-mono text-white">{row.lastPrice}</td>
+                          <td className={`py-2 pr-4 font-bold ${chg >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                            {chg >= 0 ? '+' : ''}{chg.toFixed(2)}%
+                          </td>
+                          <td className="py-2 pr-4 text-slate-300">{row.openInterest}</td>
+                          <td className="py-2 text-slate-400">{row.totalTradedVolume}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {!(mc as any)?.fnoExpiry && !(indexFnoData as any)?.futures?.refresh_details && (
+            <div className="text-center py-8 text-slate-500 text-sm">
+              No F&amp;O data available. This stock may not be in the F&amp;O segment.
+            </div>
           )}
         </div>
       )}

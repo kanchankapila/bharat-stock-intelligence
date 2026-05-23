@@ -55,12 +55,16 @@ export const QUEUE_STOCK_REFRESH        = 'stock-refresh';
 export const QUEUE_AI_SIGNALS           = 'ai-signals';
 export const QUEUE_STOCK_SCORING        = 'stock-scoring';
 export const QUEUE_MC_SCREENER_SYNC     = 'mc-screener-sync';
+export const QUEUE_ETNOW_SCREENER_SYNC  = 'etnow-screener-sync';
+export const QUEUE_NSE_SYNC             = 'nse-sync';  // PHASE 2: Weekly NSE master data sync
 export const QUEUE_FUNDAMENTALS_SYNC    = 'fundamentals-sync';
 export const QUEUE_QUANT_SCORING        = 'quant-scoring';
 export const QUEUE_TECHNICAL_SIGNALS    = 'technical-signals';
 export const QUEUE_SIGNAL_OUTCOMES      = 'signal-outcomes';
 export const QUEUE_NEWS_SENTIMENT       = 'news-sentiment';
 export const QUEUE_TRENDLYNE_INTRADAY   = 'trendlyne-intraday';
+export const QUEUE_OUTCOME_RESOLVER     = 'outcome-resolver';
+export const QUEUE_ML_DAILY_OPS        = 'ml-daily-ops';
 
 const BULK_CACHE_KEY      = 'live-stocks-bulk';
 const BULK_TTL_SECONDS    = 5 * 60;
@@ -72,6 +76,8 @@ export let stockRefreshQueue:      Queue | null = null;
 export let aiSignalsQueue:         Queue | null = null;
 export let stockScoringQueue:      Queue | null = null;
 export let mcScreenerSyncQueue:    Queue | null = null;
+export let etnowScreenerSyncQueue: Queue | null = null;
+export let nseScreenerSyncQueue:   Queue | null = null;  // PHASE 2: NSE master data sync
 export let fundamentalsSyncQueue:  Queue | null = null;
 export let quantScoringQueue:      Queue | null = null;
 export let technicalSignalsQueue:  Queue | null = null;
@@ -83,24 +89,29 @@ let stockWorker:              Worker | null = null;
 let signalWorker:             Worker | null = null;
 let scoringWorker:            Worker | null = null;
 let mcScreenerSyncWorker:     Worker | null = null;
+let etnowScreenerSyncWorker:  Worker | null = null;
+let nseScreenerSyncWorker:    Worker | null = null;  // PHASE 2: NSE worker
 let fundamentalsSyncWorker:   Worker | null = null;
 let quantScoringWorker:       Worker | null = null;
 let technicalSignalsWorker:   Worker | null = null;
 let signalOutcomesWorker:     Worker | null = null;
 let newsSentimentWorker:      Worker | null = null;
 let trendlyneIntradayWorker:  Worker | null = null;
+export let outcomeResolverQueue: Queue | null = null;
+let outcomeResolverWorker: Worker | null = null;
+export let mlDailyOpsQueue: Queue | null = null;
+let mlDailyOpsWorker: Worker | null = null;
 
 // Shared in-process mirror populated by the stock-refresh worker
 // (same reference as the one exported from liveStockData via the cache layer)
 let bulkMirror: Map<string, any> = new Map();
 
-// ─── Stock-refresh worker processor ──────────────────────────────────────────
+// ─── Stock-refresh worker processor (PHASE 1: Now persists OHLCV) ──────────
 
-async function processStockRefresh(_job: Job): Promise<{ count: number }> {
-  const freshData = await fetchAllLiveStocks();
-  bulkMirror = new Map(freshData.map((s: any) => [s.symbol, s]));
-  await cacheSet(BULK_CACHE_KEY, freshData, BULK_TTL_SECONDS);
-  return { count: freshData.length };
+async function processStockRefresh(_job: Job): Promise<{ count: number; persisted: number }> {
+  const { fetchAndPersistOHLCVData } = await import('./liveStockData');
+  const result = await fetchAndPersistOHLCVData();
+  return result;
 }
 
 // ─── AI-signals worker processor ─────────────────────────────────────────────
@@ -147,6 +158,31 @@ async function processMcScreenerSync(_job: Job): Promise<{ success: boolean }> {
   return { success: true };
 }
 
+// ─── ETNow screener sync worker processor ────────────────────────────────────
+
+async function processEtnowScreenerSync(_job: Job): Promise<{ success: boolean }> {
+  console.log('[QUEUE] Starting scheduled ETNow screener sync...');
+  const { syncETnowScreeners } = await import('./etnowScreenerSync');
+  await syncETnowScreeners();
+  return { success: true };
+}
+
+// ─── NSE-sync worker processor (PHASE 2: Weekly NSE master data sync) ───────
+
+async function processNSESync(_job: Job): Promise<{ success: boolean; stockCount: number }> {
+  console.log('[QUEUE] Starting NSE master data sync...');
+  try {
+    const { syncNSEStocksToDatabase } = await import('./nseService');
+    const result = await syncNSEStocksToDatabase();
+    const stockCount = (result?.inserted || 0) + (result?.updated || 0);
+    console.log(`[QUEUE] NSE sync completed, ${stockCount} stocks updated`);
+    return { success: true, stockCount };
+  } catch (err: any) {
+    console.error('[QUEUE] NSE sync failed:', err.message);
+    throw err;
+  }
+}
+
 // ─── Fundamentals-sync worker processor ──────────────────────────────────────
 
 async function processFundamentalsSync(job: Job): Promise<{ success: boolean }> {
@@ -163,6 +199,30 @@ async function processQuantScoring(_job: Job): Promise<{ success: boolean }> {
   console.log('[QUEUE] Starting quant strategy scoring...');
   const { runQuantScoring } = await import('./quantScoringService');
   await runQuantScoring();
+  return { success: true };
+}
+
+// ─── Outcome resolver worker processor ───────────────────────────────────────
+
+async function processOutcomeResolver(_job: Job): Promise<{ success: boolean }> {
+  const { exec } = await import('child_process');
+  const { promisify } = await import('util');
+  const execAsync = promisify(exec);
+  const pyDir = process.cwd() + '/src/server';
+  await execAsync(`python outcome_resolver.py --horizon 5`, { cwd: pyDir });
+  await execAsync(`python outcome_resolver.py --horizon 15`, { cwd: pyDir });
+  return { success: true };
+}
+
+// ─── ML daily ops worker processor ───────────────────────────────────────────
+
+async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
+  const { exec } = await import('child_process');
+  const { promisify } = await import('util');
+  const execAsync = promisify(exec);
+  const pyDir = process.cwd() + '/src/server';
+  await execAsync(`python reward_engine.py`, { cwd: pyDir });
+  await execAsync(`python rl_agent.py --update`, { cwd: pyDir });
   return { success: true };
 }
 
@@ -185,7 +245,7 @@ export async function initQueues(): Promise<boolean> {
   // 2. Initialise resilient queues & workers
   const connection = makeConnection(false);
   try {
-    // ── Stock refresh queue (PAUSED for visibility-based fetching) ───────────
+    // ── Stock refresh queue (PHASE 1 FIX: Resume daily OHLCV sync) ────────
     stockRefreshQueue = new Queue(QUEUE_STOCK_REFRESH, { connection });
 
     // Remove any stale repeatable job
@@ -194,19 +254,20 @@ export async function initQueues(): Promise<boolean> {
       await stockRefreshQueue.removeRepeatableByKey(r.key);
     }
     
-    // Continuous background fetching paused to prevent API limits
-    /*
+    // Daily sync after market close (4 PM IST = 10:30 AM UTC)
+    // This ensures OHLCV data is persisted for backtesting
     await stockRefreshQueue.add(
-      'refresh-all',
+      'refresh-all-daily',
       {},
       {
-        repeat: { every: REFRESH_REPEAT_MS },
-        jobId: 'refresh-all-repeatable',
-        removeOnComplete: 5,
-        removeOnFail: 3,
+        repeat: { pattern: '30 10 * * 1-5' },  // 10:30 AM UTC = 4:00 PM IST, weekdays only
+        jobId: 'refresh-all-daily-repeatable',
+        removeOnComplete: { age: 86400 },   // Keep completed jobs for 1 day
+        removeOnFail: { age: 604800 },      // Keep failed jobs for 7 days (for debugging)
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 2000 },
       },
     );
-    */
 
     stockWorker = new Worker(
       QUEUE_STOCK_REFRESH,
@@ -333,6 +394,83 @@ export async function initQueues(): Promise<boolean> {
     });
     mcScreenerSyncWorker.on('failed', (_job, err) => {
       console.error(`[QUEUE] mc-screener-sync failed:`, err.message);
+    });
+
+    // ── ETNow screener sync queue ────────────────────────────────────────────
+    etnowScreenerSyncQueue = new Queue(QUEUE_ETNOW_SCREENER_SYNC, { connection });
+
+    // Repeat every 12 hours
+    const etnowRepeatables = await etnowScreenerSyncQueue.getRepeatableJobs();
+    for (const r of etnowRepeatables) {
+      await etnowScreenerSyncQueue.removeRepeatableByKey(r.key);
+    }
+    await etnowScreenerSyncQueue.add(
+      'etnow-sync',
+      {},
+      {
+        repeat: { every: 12 * 60 * 60 * 1000 }, // 12 hours
+        jobId: 'etnow-sync-repeatable',
+        removeOnComplete: 5,
+        removeOnFail: 3,
+      },
+    );
+
+    etnowScreenerSyncWorker = new Worker(
+      QUEUE_ETNOW_SCREENER_SYNC,
+      processEtnowScreenerSync,
+      { 
+        connection, 
+        concurrency: 1,
+        lockDuration: 60000,
+      },
+    );
+
+    etnowScreenerSyncWorker.on('completed', (_job) => {
+      console.log(`[QUEUE] etnow-screener-sync completed`);
+    });
+    etnowScreenerSyncWorker.on('failed', (_job, err) => {
+      console.error(`[QUEUE] etnow-screener-sync failed:`, err.message);
+    });
+
+    // ── NSE sync queue (PHASE 2: Weekly master data update) ──────────────────
+    nseScreenerSyncQueue = new Queue(QUEUE_NSE_SYNC, { connection });
+
+    // Remove any stale repeatable job
+    const nseRepeatables = await nseScreenerSyncQueue.getRepeatableJobs();
+    for (const r of nseRepeatables) {
+      await nseScreenerSyncQueue.removeRepeatableByKey(r.key);
+    }
+
+    // Repeat weekly on Sunday at 2 AM UTC (7:30 AM IST) for low load time
+    await nseScreenerSyncQueue.add(
+      'nse-sync-weekly',
+      {},
+      {
+        repeat: { pattern: '0 2 * * 0' },  // Weekly Sunday 2 AM UTC
+        jobId: 'nse-sync-weekly-repeatable',
+        removeOnComplete: { age: 86400 },   // Keep for 1 day
+        removeOnFail: { age: 604800 },      // Keep failures for 7 days
+        attempts: 2,
+        backoff: { type: 'exponential', delay: 5000 },
+      },
+    );
+
+    nseScreenerSyncWorker = new Worker(
+      QUEUE_NSE_SYNC,
+      processNSESync,
+      { 
+        connection, 
+        concurrency: 1,
+        lockDuration: 180000,  // 3 minutes for NSE API calls
+      },
+    );
+
+    nseScreenerSyncWorker.on('completed', (job) => {
+      const result = job.returnvalue as any;
+      console.log(`[QUEUE] nse-sync completed (${result?.stockCount || 0} stocks)`);
+    });
+    nseScreenerSyncWorker.on('failed', (_job, err) => {
+      console.error(`[QUEUE] nse-sync failed:`, err.message);
     });
 
     // ── Fundamentals sync queue ──────────────────────────────────────────────
@@ -498,7 +636,7 @@ export async function initQueues(): Promise<boolean> {
       'news-sentiment-refresh',
       {},
       {
-        repeat: { every: 1 * 60 * 1000 }, // every 1 minute
+        repeat: { every: 15 * 60 * 1000 }, // every 15 minutes
         jobId: 'news-sentiment-repeatable',
         removeOnComplete: 5,
         removeOnFail: 3,
@@ -564,6 +702,78 @@ export async function initQueues(): Promise<boolean> {
       console.error('[QUEUE] trendlyne-intraday failed:', err.message);
     });
 
+    // ── Outcome resolver queue (daily at 9:30 AM IST = 04:00 UTC, weekdays) ──
+    outcomeResolverQueue = new Queue(QUEUE_OUTCOME_RESOLVER, { connection });
+
+    const orRepeatables = await outcomeResolverQueue.getRepeatableJobs();
+    for (const r of orRepeatables) {
+      await outcomeResolverQueue.removeRepeatableByKey(r.key);
+    }
+    await outcomeResolverQueue.add(
+      'outcome-resolver-daily',
+      {},
+      {
+        repeat: { pattern: '0 4 * * 1-5' },
+        jobId: 'outcome-resolver-daily',
+        removeOnComplete: 3,
+        removeOnFail: 3,
+      },
+    );
+
+    outcomeResolverWorker = new Worker(
+      QUEUE_OUTCOME_RESOLVER,
+      processOutcomeResolver,
+      {
+        connection,
+        concurrency: 1,
+        lockDuration: 10 * 60 * 1000,
+        lockRenewTime: 2 * 60 * 1000,
+      },
+    );
+
+    outcomeResolverWorker.on('completed', (_job) => {
+      console.log('[QUEUE] outcome-resolver completed');
+    });
+    outcomeResolverWorker.on('failed', (_job, err) => {
+      console.error('[QUEUE] outcome-resolver failed:', err.message);
+    });
+
+    // ── ML daily ops queue (5:00 PM IST = 11:30 UTC, weekdays) ─────────────
+    mlDailyOpsQueue = new Queue(QUEUE_ML_DAILY_OPS, { connection });
+
+    const mlRepeatables = await mlDailyOpsQueue.getRepeatableJobs();
+    for (const r of mlRepeatables) {
+      await mlDailyOpsQueue.removeRepeatableByKey(r.key);
+    }
+    await mlDailyOpsQueue.add(
+      'ml-daily-ops',
+      {},
+      {
+        repeat: { pattern: '30 11 * * 1-5' },
+        jobId: 'ml-daily-ops',
+        removeOnComplete: 3,
+        removeOnFail: 3,
+      },
+    );
+
+    mlDailyOpsWorker = new Worker(
+      QUEUE_ML_DAILY_OPS,
+      processMlDailyOps,
+      {
+        connection,
+        concurrency: 1,
+        lockDuration: 15 * 60 * 1000,
+        lockRenewTime: 3 * 60 * 1000,
+      },
+    );
+
+    mlDailyOpsWorker.on('completed', (_job) => {
+      console.log('[QUEUE] ml-daily-ops completed');
+    });
+    mlDailyOpsWorker.on('failed', (_job, err) => {
+      console.error('[QUEUE] ml-daily-ops failed:', err.message);
+    });
+
     return true;
   } catch (err: any) {
     console.warn('[QUEUE] BullMQ unavailable (Redis down?) — falling back to setInterval:', err.message);
@@ -583,12 +793,14 @@ export async function shutdownQueues(): Promise<void> {
     signalWorker?.close(),
     scoringWorker?.close(),
     mcScreenerSyncWorker?.close(),
+    etnowScreenerSyncWorker?.close(),
     fundamentalsSyncWorker?.close(),
     quantScoringWorker?.close(),
     stockRefreshQueue?.close(),
     aiSignalsQueue?.close(),
     stockScoringQueue?.close(),
     mcScreenerSyncQueue?.close(),
+    etnowScreenerSyncQueue?.close(),
     fundamentalsSyncQueue?.close(),
     quantScoringQueue?.close(),
     technicalSignalsWorker?.close(),
@@ -599,6 +811,10 @@ export async function shutdownQueues(): Promise<void> {
     newsSentimentQueue?.close(),
     trendlyneIntradayWorker?.close(),
     trendlyneIntradayQueue?.close(),
+    outcomeResolverWorker?.close(),
+    outcomeResolverQueue?.close(),
+    mlDailyOpsWorker?.close(),
+    mlDailyOpsQueue?.close(),
   ]);
 }
 

@@ -1040,16 +1040,150 @@ export async function recategorizeAllScreeners() {
  */
 export function getTrendlyneScreenerCategories() {
   return [
-    { id: 'all', name: 'All Screeners', description: 'All available Trendlyne screeners', sentiment: 'neutral' as const, category: 'technical' as const, timeframe: 'long_term' as const, source: 'trendlyne' },
-    { id: 'bullish', name: 'Bullish Signals', description: 'Stocks showing bullish signals', sentiment: 'bullish' as const, category: 'technical' as const, timeframe: 'long_term' as const, source: 'trendlyne' },
-    { id: 'bearish', name: 'Bearish Signals', description: 'Stocks showing bearish signals', sentiment: 'bearish' as const, category: 'technical' as const, timeframe: 'long_term' as const, source: 'trendlyne' },
-    { id: 'breakout', name: 'Breakouts', description: 'Stocks breaking out of resistance', sentiment: 'bullish' as const, category: 'technical' as const, timeframe: 'long_term' as const, source: 'trendlyne' },
-    { id: 'trending', name: 'Trending', description: 'Stocks in strong trends', sentiment: 'neutral' as const, category: 'technical' as const, timeframe: 'long_term' as const, source: 'trendlyne' },
-    { id: 'momentum', name: 'Momentum', description: 'High momentum stocks', sentiment: 'bullish' as const, category: 'technical' as const, timeframe: 'long_term' as const, source: 'trendlyne' },
-    { id: 'reversal', name: 'Reversals', description: 'Potential reversal signals', sentiment: 'neutral' as const, category: 'technical' as const, timeframe: 'long_term' as const, source: 'trendlyne' },
-    { id: 'volume', name: 'Volume Leaders', description: 'High volume stocks', sentiment: 'neutral' as const, category: 'delivery' as const, timeframe: 'long_term' as const, source: 'trendlyne' }
+    // ── Expert Bullish ────────────────────────────────────────────────────
+    { id: '19814', name: 'MFs & FII/DII Increasing QoQ', description: 'Institutions increasing shareholding quarter-on-quarter', sentiment: 'bullish' as const, category: 'fundamental' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '19814' },
+    { id: '153269', name: 'Superstar Investor Buys', description: 'Stocks bought by superstar investors', sentiment: 'bullish' as const, category: 'fundamental' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '153269' },
+    { id: '3057', name: 'High Momentum Score', description: 'Highest Trendlyne Momentum Score stocks', sentiment: 'bullish' as const, category: 'momentum' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '3057' },
+    { id: '6211', name: 'High Piotroski Score', description: 'Companies with strong financials (High F-Score)', sentiment: 'bullish' as const, category: 'fundamental' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '6211' },
+    { id: '190803', name: 'All Stars: High Scorers', description: 'High scorers across all metrics', sentiment: 'bullish' as const, category: 'fundamental' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '190803' },
+    { id: '387668', name: 'High Trendlyne Checklist Score', description: 'Top checklist score stocks', sentiment: 'bullish' as const, category: 'fundamental' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '387668' },
+    { id: '548705', name: 'Low PE vs Historical Avg', description: 'PE TTM lower than 3Y, 5Y, 10Y average PE', sentiment: 'bullish' as const, category: 'valuation' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '548705' },
+    { id: '45884', name: 'Upcoming Bonus/Split', description: 'Stocks with upcoming bonus or stock split', sentiment: 'bullish' as const, category: 'fundamental' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '45884' },
+    { id: '501877', name: 'Consistently Performing Growth Stocks', description: 'Consistent growth with strong performance', sentiment: 'bullish' as const, category: 'fundamental' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '501877' },
+    { id: '691112', name: 'Darvas Scan', description: 'Darvas Box breakout stocks', sentiment: 'bullish' as const, category: 'technical' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '691112' },
+    { id: '7154', name: 'Improving Cash Flow', description: 'Good durability with improving cash flow', sentiment: 'bullish' as const, category: 'fundamental' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '7154' },
+    { id: '24645', name: 'Golden Cross (50 > 200 SMA)', description: 'Golden cross 50 day over 200 day', sentiment: 'bullish' as const, category: 'technical' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '24645' },
+    { id: '691113', name: 'Magic Formula (Joel Greenblatt)', description: 'Magic formula investing stocks', sentiment: 'bullish' as const, category: 'valuation' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '691113' },
+    { id: '174452', name: 'PLI Scheme Beneficiaries', description: 'Companies benefiting from government PLI schemes', sentiment: 'bullish' as const, category: 'fundamental' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '174452' },
+    { id: '32574', name: 'Consistent Performers (5Y)', description: 'Consistent high performing stocks over five years', sentiment: 'bullish' as const, category: 'fundamental' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '32574' },
+    { id: '222864', name: 'PE Less Than Sector PE', description: 'Undervalued relative to sector peers', sentiment: 'bullish' as const, category: 'valuation' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '222864' },
+    { id: '14567', name: "Jim Slater's Zulu Principle", description: 'Discover growth stocks using Zulu Principle', sentiment: 'bullish' as const, category: 'fundamental' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '14567' },
+    { id: '123150', name: 'Richard Dreihaus Momentum', description: 'Momentum driven strategy by Richard Dreihaus', sentiment: 'bullish' as const, category: 'momentum' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '123150' },
+    { id: '6159', name: 'Momentum Score Daily Gainers', description: 'Stocks gaining momentum score daily', sentiment: 'bullish' as const, category: 'momentum' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '6159' },
+
+    // ── Expert Bearish ────────────────────────────────────────────────────
+    { id: '93730', name: 'PE Sell Zone', description: 'Stocks in the PE sell zone', sentiment: 'bearish' as const, category: 'valuation' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '93730' },
+    { id: '154274', name: 'Superstar Investor Sells', description: 'Stocks sold by superstar investors', sentiment: 'bearish' as const, category: 'fundamental' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '154274' },
+    { id: '463821', name: 'Wealth Destroyers (6M)', description: 'Wealth destroyers in the past 6 months', sentiment: 'bearish' as const, category: 'momentum' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '463821' },
+    { id: '36308', name: 'High Debt Companies', description: 'Highly leveraged companies', sentiment: 'bearish' as const, category: 'fundamental' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '36308' },
+    { id: '4897', name: 'About to Cross Below SMA-200', description: 'Stocks in downtrend likely to cross below SMA-200', sentiment: 'bearish' as const, category: 'technical' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '4897' },
+    { id: '3059', name: 'Low Momentum Score (Bearish)', description: 'Stocks with medium to low momentum score', sentiment: 'bearish' as const, category: 'momentum' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '3059' },
+    { id: '7205', name: 'Low DVM Stocks', description: 'Stocks to exercise caution on (Low DVM)', sentiment: 'bearish' as const, category: 'fundamental' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '7205' },
+
+    // ── High DVM ─────────────────────────────────────────────────────────
+    { id: '9818', name: 'Strong Performers (High DVM)', description: 'High DVM strong performer stocks', sentiment: 'bullish' as const, category: 'fundamental' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '9818' },
+    { id: '9823', name: 'Strong Performer, Getting Expensive (DVM)', description: 'High DVM but becoming expensive', sentiment: 'neutral' as const, category: 'fundamental' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '9823' },
+    { id: '9824', name: 'Expensive Stars (DVM)', description: 'High DVM expensive stocks', sentiment: 'neutral' as const, category: 'valuation' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '9824' },
+    { id: '9819', name: 'Under Radar Strong Performers (DVM)', description: 'High DVM under-radar stocks', sentiment: 'bullish' as const, category: 'fundamental' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '9819' },
+
+    // ── Price/Volume ──────────────────────────────────────────────────────
+    { id: '788358', name: 'NSE Stocks at Upper Circuit', description: 'Stocks at upper circuit limit', sentiment: 'bullish' as const, category: 'momentum' as const, timeframe: 'intraday' as const, source: 'trendlyne', screenpk: '788358' },
+    { id: '788354', name: 'NSE Stocks at Lower Circuit', description: 'Stocks at lower circuit limit', sentiment: 'bearish' as const, category: 'momentum' as const, timeframe: 'intraday' as const, source: 'trendlyne', screenpk: '788354' },
+    { id: '786325', name: 'NSE Stocks Hit Upper Circuit Today', description: 'Stocks that hit upper circuit today', sentiment: 'bullish' as const, category: 'momentum' as const, timeframe: 'intraday' as const, source: 'trendlyne', screenpk: '786325' },
+    { id: '786299', name: 'NSE Stocks Hit Lower Circuit Today', description: 'Stocks that hit lower circuit today', sentiment: 'bearish' as const, category: 'momentum' as const, timeframe: 'intraday' as const, source: 'trendlyne', screenpk: '786299' },
+    { id: '17110', name: 'New 52 Week High Today', description: 'Stocks making new 52 week highs', sentiment: 'bullish' as const, category: 'momentum' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '17110' },
+    { id: '17109', name: 'New 52 Week Low Today', description: 'Stocks at new 52 week lows', sentiment: 'bearish' as const, category: 'momentum' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '17109' },
+    { id: '470223', name: 'Gap Up Opening', description: 'Gap up opening in price screener', sentiment: 'bullish' as const, category: 'momentum' as const, timeframe: 'intraday' as const, source: 'trendlyne', screenpk: '470223' },
+    { id: '470230', name: 'Gap Down Opening', description: 'Gap down opening in price screener', sentiment: 'bearish' as const, category: 'momentum' as const, timeframe: 'intraday' as const, source: 'trendlyne', screenpk: '470230' },
+    { id: '17096', name: 'Top Gainers', description: 'Bullish stocks for today on exchanges', sentiment: 'bullish' as const, category: 'momentum' as const, timeframe: 'intraday' as const, source: 'trendlyne', screenpk: '17096' },
+    { id: '17098', name: 'Top Losers', description: 'Top losing stocks for today', sentiment: 'bearish' as const, category: 'momentum' as const, timeframe: 'intraday' as const, source: 'trendlyne', screenpk: '17098' },
+    { id: '17097', name: 'Volume Shockers', description: 'Stocks with unusual high volume', sentiment: 'neutral' as const, category: 'delivery' as const, timeframe: 'intraday' as const, source: 'trendlyne', screenpk: '17097' },
+    { id: '17099', name: 'High Volume High Gain', description: 'Unusual high volume, top gainers', sentiment: 'bullish' as const, category: 'delivery' as const, timeframe: 'intraday' as const, source: 'trendlyne', screenpk: '17099' },
+    { id: '17100', name: 'High Volume Top Losers', description: 'Unusual high volume, top losers', sentiment: 'bearish' as const, category: 'delivery' as const, timeframe: 'intraday' as const, source: 'trendlyne', screenpk: '17100' },
+    { id: '286949', name: '>30% Below 52W High', description: 'Significant distance from 52 week high', sentiment: 'bearish' as const, category: 'valuation' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '286949' },
+
+    // ── Delivery ──────────────────────────────────────────────────────────
+    { id: '9844', name: 'Rising Delivery % (vs Prev Day)', description: 'Stocks seeing rising delivery percentage', sentiment: 'bullish' as const, category: 'delivery' as const, timeframe: 'intraday' as const, source: 'trendlyne', screenpk: '9844' },
+    { id: '9588', name: 'High Delivery Percentage', description: 'Stocks with high delivery percentage', sentiment: 'bullish' as const, category: 'delivery' as const, timeframe: 'intraday' as const, source: 'trendlyne', screenpk: '9588' },
+    { id: '48091', name: 'Upcoming Results + Rising Delivery', description: 'Rising delivery volumes before results', sentiment: 'bullish' as const, category: 'delivery' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '48091' },
+
+    // ── Intraday Positive Technical ───────────────────────────────────────
+    { id: '22717', name: 'MACD Crossover Above Signal', description: 'MACD crossover above signal line', sentiment: 'bullish' as const, category: 'intraday' as const, timeframe: 'intraday' as const, source: 'trendlyne', screenpk: '22717' },
+    { id: '756398', name: '30min MACD Crossover ↑', description: '30 min MACD crossover above signal line', sentiment: 'bullish' as const, category: 'intraday' as const, timeframe: 'intraday' as const, source: 'trendlyne', screenpk: '756398' },
+    { id: '756399', name: '1H MACD Crossover ↑', description: '1H MACD crossover above signal line', sentiment: 'bullish' as const, category: 'intraday' as const, timeframe: 'intraday' as const, source: 'trendlyne', screenpk: '756399' },
+    { id: '5388', name: 'RSI Bullish', description: 'RSI bullish signal stocks', sentiment: 'bullish' as const, category: 'intraday' as const, timeframe: 'intraday' as const, source: 'trendlyne', screenpk: '5388' },
+    { id: '756409', name: '15min RSI Bullish', description: '15 min RSI bullish stocks', sentiment: 'bullish' as const, category: 'intraday' as const, timeframe: 'intraday' as const, source: 'trendlyne', screenpk: '756409' },
+    { id: '24728', name: 'Positive Breakout > R1', description: 'LTP breakout above first resistance', sentiment: 'bullish' as const, category: 'intraday' as const, timeframe: 'intraday' as const, source: 'trendlyne', screenpk: '24728' },
+    { id: '24729', name: 'Positive Breakout > R2', description: 'LTP breakout above second resistance', sentiment: 'bullish' as const, category: 'intraday' as const, timeframe: 'intraday' as const, source: 'trendlyne', screenpk: '24729' },
+    { id: '258543', name: 'Price Above Pivot', description: 'Stocks with price above pivot point', sentiment: 'bullish' as const, category: 'intraday' as const, timeframe: 'intraday' as const, source: 'trendlyne', screenpk: '258543' },
+    { id: '756446', name: '30min Bollinger Band Breakout', description: '30 min Bollinger Band breakout', sentiment: 'bullish' as const, category: 'intraday' as const, timeframe: 'intraday' as const, source: 'trendlyne', screenpk: '756446' },
+
+    // ── Intraday Negative Technical ───────────────────────────────────────
+    { id: '22719', name: 'MACD Crossover Below Signal', description: 'MACD crossover below signal line', sentiment: 'bearish' as const, category: 'intraday' as const, timeframe: 'intraday' as const, source: 'trendlyne', screenpk: '22719' },
+    { id: '756402', name: '30min MACD Crossover ↓', description: '30 min MACD crossover below signal line', sentiment: 'bearish' as const, category: 'intraday' as const, timeframe: 'intraday' as const, source: 'trendlyne', screenpk: '756402' },
+    { id: '5389', name: 'RSI Bearish', description: 'RSI bearish signal stocks', sentiment: 'bearish' as const, category: 'intraday' as const, timeframe: 'intraday' as const, source: 'trendlyne', screenpk: '5389' },
+    { id: '24733', name: 'Negative Breakdown < S1', description: 'LTP breakdown below first support', sentiment: 'bearish' as const, category: 'intraday' as const, timeframe: 'intraday' as const, source: 'trendlyne', screenpk: '24733' },
+    { id: '258545', name: 'Price Below Pivot', description: 'Stocks with price below pivot point', sentiment: 'bearish' as const, category: 'intraday' as const, timeframe: 'intraday' as const, source: 'trendlyne', screenpk: '258545' },
+    { id: '24870', name: 'Death Cross', description: 'Death cross pattern stocks', sentiment: 'bearish' as const, category: 'technical' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '24870' },
+    { id: '756449', name: '15min Bollinger Band Breakdown', description: '15 min Bollinger Band breakdown', sentiment: 'bearish' as const, category: 'intraday' as const, timeframe: 'intraday' as const, source: 'trendlyne', screenpk: '756449' },
+
+    // ── Positive Candlesticks ─────────────────────────────────────────────
+    { id: '5906', name: 'Dragonfly Doji (Bullish Reversal)', description: 'Dragonfly Doji bullish reversal pattern', sentiment: 'bullish' as const, category: 'technical' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '5906' },
+    { id: '5892', name: 'Bullish Engulfing', description: 'Bullish engulfing reversal pattern', sentiment: 'bullish' as const, category: 'technical' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '5892' },
+    { id: '5899', name: 'White Marubozu', description: 'White Marubozu bullish candlestick', sentiment: 'bullish' as const, category: 'technical' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '5899' },
+    { id: '5898', name: 'Morning Star (Bullish Reversal)', description: 'Morning Star bullish reversal pattern', sentiment: 'bullish' as const, category: 'technical' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '5898' },
+    { id: '5889', name: 'Hammer (Bullish Reversal)', description: 'Hammer bullish reversal pattern', sentiment: 'bullish' as const, category: 'technical' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '5889' },
+    { id: '5902', name: 'Three White Soldiers', description: 'Three white soldiers bullish reversal', sentiment: 'bullish' as const, category: 'technical' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '5902' },
+    { id: '5885', name: 'Inverted Hammer (Bullish)', description: 'Inverted Hammer bullish reversal', sentiment: 'bullish' as const, category: 'technical' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '5885' },
+
+    // ── Negative Candlesticks ─────────────────────────────────────────────
+    { id: '5893', name: 'Bearish Engulfing', description: 'Bearish engulfing reversal pattern', sentiment: 'bearish' as const, category: 'technical' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '5893' },
+    { id: '5896', name: 'Black Marubozu (Bearish)', description: 'Black Marubozu bearish candlestick', sentiment: 'bearish' as const, category: 'technical' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '5896' },
+    { id: '5904', name: 'Shooting Star (Bearish)', description: 'Shooting Star bearish reversal pattern', sentiment: 'bearish' as const, category: 'technical' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '5904' },
+    { id: '5884', name: 'Identical Three Crows', description: 'Identical Three Crows bearish reversal', sentiment: 'bearish' as const, category: 'technical' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '5884' },
+    { id: '5901', name: 'Hanging Man (Bearish)', description: 'Hanging Man bearish reversal pattern', sentiment: 'bearish' as const, category: 'technical' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '5901' },
+    { id: '5895', name: 'Dark Cloud Cover (Bearish)', description: 'Dark cloud cover bearish reversal', sentiment: 'bearish' as const, category: 'technical' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '5895' },
+
+    // ── Swing Trading ─────────────────────────────────────────────────────
+    { id: '79795', name: 'Outperform Nifty500 – 1 Week', description: 'Relative outperformance vs Nifty500 over week', sentiment: 'bullish' as const, category: 'momentum' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '79795' },
+    { id: '79796', name: 'Outperform Nifty500 – 1 Day', description: 'Relative outperformance vs Nifty500 over day', sentiment: 'bullish' as const, category: 'momentum' as const, timeframe: 'intraday' as const, source: 'trendlyne', screenpk: '79796' },
+    { id: '79794', name: 'Outperform Nifty500 – 1 Month', description: 'Relative outperformance vs Nifty500 over month', sentiment: 'bullish' as const, category: 'momentum' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '79794' },
+    { id: '79793', name: 'Outperform Nifty500 – 1 Quarter', description: 'Relative outperformance vs Nifty500 over 1 quarter', sentiment: 'bullish' as const, category: 'momentum' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '79793' },
+    { id: '79792', name: 'Outperform Nifty500 – 6 Months', description: 'Relative outperformance vs Nifty500 over 6 months', sentiment: 'bullish' as const, category: 'momentum' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '79792' },
+    { id: '79791', name: 'Outperform Nifty500 – 1 Year', description: 'Relative outperformance vs Nifty500 over 1 year', sentiment: 'bullish' as const, category: 'momentum' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '79791' },
+    { id: '79790', name: 'Outperform Nifty500 – 2 Years', description: 'Relative outperformance vs Nifty500 over 2 years', sentiment: 'bullish' as const, category: 'momentum' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '79790' },
+    { id: '79811', name: 'Underperform Nifty500 – 1 Day', description: 'Relative underperformance vs Nifty500 over day', sentiment: 'bearish' as const, category: 'momentum' as const, timeframe: 'intraday' as const, source: 'trendlyne', screenpk: '79811' },
+    { id: '79810', name: 'Underperform Nifty500 – 1 Week', description: 'Relative underperformance vs Nifty500 over week', sentiment: 'bearish' as const, category: 'momentum' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '79810' },
+    { id: '79808', name: 'Underperform Nifty500 – 1 Month', description: 'Relative underperformance vs Nifty500 over month', sentiment: 'bearish' as const, category: 'momentum' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '79808' },
+    { id: '79711', name: 'Outperform Nifty50 – 1 Week', description: 'Relative outperformance vs Nifty50 over week', sentiment: 'bullish' as const, category: 'momentum' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '79711' },
+    { id: '79710', name: 'Outperform Nifty50 – 1 Month', description: 'Relative outperformance vs Nifty50 over month', sentiment: 'bullish' as const, category: 'momentum' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '79710' },
+
+    // ── Swing Positive Technical ──────────────────────────────────────────
+    { id: '35316', name: 'Price Above 5D EMA', description: 'Current price above 5 day EMA', sentiment: 'bullish' as const, category: 'technical' as const, timeframe: 'intraday' as const, source: 'trendlyne', screenpk: '35316' },
+    { id: '35325', name: 'Price Above 50D EMA', description: 'Current price above 50 day EMA', sentiment: 'bullish' as const, category: 'technical' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '35325' },
+    { id: '434325', name: 'Golden Cross Made Today', description: 'Golden cross happened today', sentiment: 'bullish' as const, category: 'technical' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '434325' },
+    { id: '24866', name: 'Positive Breakout – Short Trend', description: 'Short term positive breakout', sentiment: 'bullish' as const, category: 'technical' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '24866' },
+    { id: '208626', name: 'Long Buildup', description: 'Securities seeing a long buildup in FnO', sentiment: 'bullish' as const, category: 'technical' as const, timeframe: 'intraday' as const, source: 'trendlyne', screenpk: '208626' },
+    { id: '208625', name: 'Short Covering', description: 'Securities seeing short covering in FnO', sentiment: 'bullish' as const, category: 'technical' as const, timeframe: 'intraday' as const, source: 'trendlyne', screenpk: '208625' },
+
+    // ── Swing Negative Technical ──────────────────────────────────────────
+    { id: '35336', name: 'Price Below 5D EMA', description: 'Current price below 5 day EMA', sentiment: 'bearish' as const, category: 'technical' as const, timeframe: 'intraday' as const, source: 'trendlyne', screenpk: '35336' },
+    { id: '35343', name: 'Price Below 100D EMA', description: 'Current price below 100 day EMA', sentiment: 'bearish' as const, category: 'technical' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '35343' },
+    { id: '24871', name: 'Negative Breakout – Short Trend', description: 'Short term negative breakout', sentiment: 'bearish' as const, category: 'technical' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '24871' },
+    { id: '208631', name: 'Short Buildup', description: 'Securities seeing a short build-up in FnO', sentiment: 'bearish' as const, category: 'technical' as const, timeframe: 'intraday' as const, source: 'trendlyne', screenpk: '208631' },
+
+    // ── Fundamental Valuation ─────────────────────────────────────────────
+    { id: '178571', name: 'PE Higher Than Industry PE', description: 'Potentially overvalued vs industry', sentiment: 'bearish' as const, category: 'valuation' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '178571' },
+    { id: '178573', name: 'PE Less Than Industry PE', description: 'Potentially undervalued vs industry', sentiment: 'bullish' as const, category: 'valuation' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '178573' },
+    { id: '218473', name: 'ROCE Higher Than Industry', description: 'Return on capital employed above industry', sentiment: 'bullish' as const, category: 'fundamental' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '218473' },
+    { id: '218481', name: 'ROE Higher Than Industry', description: 'Return on equity above industry', sentiment: 'bullish' as const, category: 'fundamental' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '218481' },
+    { id: '222872', name: 'Quarterly Profit Growth > Industry', description: 'Quarterly profit growth above industry average', sentiment: 'bullish' as const, category: 'fundamental' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '222872' },
+    { id: '222877', name: 'Quarterly Revenue Growth > Industry', description: 'Quarterly revenue growth above industry', sentiment: 'bullish' as const, category: 'fundamental' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '222877' },
+
+    // ── Fundamental Analysis ──────────────────────────────────────────────
+    { id: '27', name: 'Overbought (RSI + MFI)', description: 'Overbought on both RSI and MFI, possible reversal', sentiment: 'bearish' as const, category: 'technical' as const, timeframe: 'intraday' as const, source: 'trendlyne', screenpk: '27' },
+    { id: '28', name: 'Oversold (RSI + MFI)', description: 'Oversold on both RSI and MFI, possible bounce', sentiment: 'bullish' as const, category: 'technical' as const, timeframe: 'intraday' as const, source: 'trendlyne', screenpk: '28' },
+    { id: '15', name: 'Hi Revenue & Profit Growth, Hi ROE, Low PE', description: 'Quality growth at value price', sentiment: 'bullish' as const, category: 'fundamental' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '15' },
+    { id: '10', name: 'Rising Revenue Every Quarter (4 Qtrs)', description: 'Increasing revenue for 4 consecutive quarters', sentiment: 'bullish' as const, category: 'fundamental' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '10' },
+    { id: '22', name: 'Promoters Buying Growth Stocks', description: 'Promoters increasing stake in growth stocks', sentiment: 'bullish' as const, category: 'fundamental' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '22' },
+    { id: '24', name: 'Pataka Stocks (Analyst Upgrades + 20% Upside)', description: 'High analyst rating with 20%+ upside potential', sentiment: 'bullish' as const, category: 'fundamental' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '24' },
+    { id: '20014', name: 'Broker Price/Reco Upgrades (1M)', description: 'Stocks with broker upgrades in past one month', sentiment: 'bullish' as const, category: 'fundamental' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '20014' },
+    { id: '42', name: 'High Volume High Growth', description: 'High volume stocks with high growth', sentiment: 'bullish' as const, category: 'delivery' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '42' },
+    { id: '40', name: 'Near Day High/Low + 2x Year Avg Vol', description: 'Near day high or low with 2x yearly average volume', sentiment: 'neutral' as const, category: 'delivery' as const, timeframe: 'intraday' as const, source: 'trendlyne', screenpk: '40' },
+    { id: '31', name: 'Small Cap Stars', description: 'High performing small cap stocks', sentiment: 'bullish' as const, category: 'fundamental' as const, timeframe: 'long_term' as const, source: 'trendlyne', screenpk: '31' },
   ];
 }
+
 
 /**
  * Scan all Intraday Trendlyne screeners and automatically generate BUY/SELL signals for high-scoring stock constituents.

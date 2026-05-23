@@ -81,6 +81,24 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     # Rsi deviation from neutral zone
     X['rsi_deviation']  = (X['rsi'] - 50).abs()
 
+    # FII flow — normalized (Cr), negative = selling pressure
+    X['fii_3d_net'] = pd.to_numeric(df.get('fii_3d_net', 0), errors='coerce').fillna(0) / 10000.0
+
+    # Above SMA200 binary flag
+    X['above_sma200'] = pd.to_numeric(df.get('above_sma200', 0), errors='coerce').fillna(0).clip(0, 1)
+
+    # Distance from 52-week high (as % — negative means below the high)
+    cmp_s      = pd.to_numeric(df.get('cmp', np.nan), errors='coerce')
+    hi52_s     = pd.to_numeric(df.get('fifty_two_week_high', np.nan), errors='coerce')
+    X['dist_52w_high'] = ((cmp_s - hi52_s) / hi52_s.replace(0, np.nan) * 100).fillna(0)
+
+    # Composite screener score (0–100 scale from scoring engine)
+    X['screener_score'] = pd.to_numeric(df.get('screener_score', 50), errors='coerce').fillna(50) / 100.0
+
+    # Max return pct during horizon (available in training data, not in pending)
+    if 'max_return_pct' in df.columns:
+        X['max_return_pct'] = pd.to_numeric(df['max_return_pct'], errors='coerce').fillna(0)
+
     # Signal type one-hot
     sig_col = df.get('signals_json', pd.Series(['[]'] * len(df), index=df.index))
     type_sets = sig_col.apply(_parse_signal_types)
@@ -99,10 +117,19 @@ def load_training_data(conn: sqlite3.Connection) -> pd.DataFrame:
     q = """
         SELECT so.symbol, so.signal_date, so.horizon_days, so.outcome,
                so.signal_score, so.signals_json, so.return_pct,
-               ts.rsi, ts.adx, ts.nifty_regime, ts.cmp, ts.sma200, ts.volume_ratio
+               ts.rsi, ts.adx, ts.nifty_regime, ts.cmp, ts.sma200, ts.volume_ratio,
+               ts.fii_3d_net,
+               ts.above_sma200,
+               sf.fifty_two_week_high,
+               ss.score AS screener_score,
+               so.max_return_pct
         FROM signal_outcomes so
         LEFT JOIN technical_signals ts
-               ON ts.symbol = so.symbol AND ts.scan_date = so.signal_date
+               ON ts.symbol = so.symbol AND ts.date = so.signal_date
+        LEFT JOIN stock_fundamentals sf
+               ON sf.symbol = so.symbol
+        LEFT JOIN stock_scores ss
+               ON ss.symbol = so.symbol AND ss.timeframe = 'long_term'
         WHERE so.outcome IN ('WIN','LOSS','NEUTRAL')
           AND so.return_pct IS NOT NULL
     """
@@ -113,12 +140,18 @@ def load_training_data(conn: sqlite3.Connection) -> pd.DataFrame:
 
 def load_pending_signals(conn: sqlite3.Connection) -> pd.DataFrame:
     q = """
-        SELECT symbol, scan_date AS signal_date, signal_score, signals_json,
-               rsi, adx, nifty_regime, cmp, sma200, volume_ratio
-        FROM technical_signals
-        WHERE win_probability IS NULL
-          AND signals_json IS NOT NULL
-        ORDER BY scan_date DESC
+        SELECT ts.symbol, ts.date AS signal_date, ts.signal_score, ts.signals_json,
+               ts.rsi, ts.adx, ts.nifty_regime, ts.cmp, ts.sma200, ts.volume_ratio,
+               ts.fii_3d_net,
+               ts.above_sma200,
+               sf.fifty_two_week_high,
+               ss.score AS screener_score
+        FROM technical_signals ts
+        LEFT JOIN stock_fundamentals sf ON sf.symbol = ts.symbol
+        LEFT JOIN stock_scores ss ON ss.symbol = ts.symbol AND ss.timeframe = 'long_term'
+        WHERE ts.win_probability IS NULL
+          AND ts.signals_json IS NOT NULL
+        ORDER BY ts.date DESC
         LIMIT 10000
     """
     df = pd.read_sql_query(q, conn)
@@ -323,7 +356,7 @@ def score_pending(conn: sqlite3.Connection, ensemble: dict) -> int:
     updated = 0
     for (_, row), prob in zip(df.iterrows(), probs):
         cur.execute(
-            "UPDATE technical_signals SET win_probability = ? WHERE symbol = ? AND scan_date = ?",
+            "UPDATE technical_signals SET win_probability = ? WHERE symbol = ? AND date = ?",
             (round(float(prob), 4), row['symbol'], row['signal_date']),
         )
         updated += 1

@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Trophy, BarChart2, Activity, Filter, Target, Zap,
   Search, History, PieChart, Bookmark, Users, Globe, CheckCircle2,
   Star, LogIn, TrendingUp, ArrowUpRight, ArrowDownRight, Menu,
-  ChevronLeft, ChevronRight, Radio, Settings2,
+  ChevronLeft, ChevronRight, Radio, Settings2, Briefcase, Calendar,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { nseStocksData } from '../data/nseStocks';
@@ -33,7 +33,9 @@ const NAV_GROUPS: NavGroup[] = [
       { icon: Target,  label: 'F&O Intel',  id: 'fno-scanners'},
       { icon: TrendingUp, label: 'Options Intel', id: 'options' },
       { icon: Zap,     label: 'Trendlyne',  id: 'trendlyne'   },
-      { icon: Search,  label: 'Discover',   id: 'discover'    },
+      { icon: Search,     label: 'Discover',    id: 'discover'    },
+      { icon: Briefcase,  label: 'Smart Money', id: 'smart-money' },
+      { icon: Calendar,   label: 'Earnings',    id: 'earnings'    },
     ],
   },
   {

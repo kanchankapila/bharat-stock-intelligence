@@ -33,6 +33,63 @@ DB_PATH = os.path.join(os.getcwd(), os.environ.get('DATABASE_URL', 'database.sql
 NIFTY_SYMBOLS  = ('NIFTY50', 'NIFTY', '^NSEI')
 INITIAL_CAPITAL = 1_000_000   # ₹10L default
 
+# ──────────────────────────────────────────────────────────────────────────
+# PHASE 3.1: Indian Market Holidays (NSE/BSE closed)
+# Updated for 2024-2025. Add new holidays annually.
+# ──────────────────────────────────────────────────────────────────────────
+NSE_MARKET_HOLIDAYS = {
+    # 2024
+    datetime.date(2024, 1, 26),   # Republic Day
+    datetime.date(2024, 3, 8),    # Maha Shivaratri
+    datetime.date(2024, 3, 25),   # Holi
+    datetime.date(2024, 3, 29),   # Good Friday
+    datetime.date(2024, 4, 11),   # Eid-ul-Fitr (tentative)
+    datetime.date(2024, 4, 17),   # Ram Navami
+    datetime.date(2024, 4, 21),   # Mahavir Jayanti
+    datetime.date(2024, 5, 23),   # Buddha Purnima
+    datetime.date(2024, 6, 17),   # Eid-ul-Adha (tentative)
+    datetime.date(2024, 7, 17),   # Muharram
+    datetime.date(2024, 8, 15),   # Independence Day
+    datetime.date(2024, 8, 26),   # Janmashtami
+    datetime.date(2024, 9, 16),   # Milad-un-Nabi
+    datetime.date(2024, 10, 2),   # Gandhi Jayanti
+    datetime.date(2024, 10, 12),  # Dussehra
+    datetime.date(2024, 10, 31),  # Diwali
+    datetime.date(2024, 11, 1),   # Diwali (Day 2)
+    datetime.date(2024, 11, 15),  # Guru Nanak Jayanti
+    datetime.date(2024, 12, 25),  # Christmas
+    
+    # 2025
+    datetime.date(2025, 1, 26),   # Republic Day
+    datetime.date(2025, 3, 14),   # Holi
+    datetime.date(2025, 3, 21),   # Good Friday
+    datetime.date(2025, 4, 11),   # Eid-ul-Fitr
+    datetime.date(2025, 4, 18),   # Ram Navami
+    datetime.date(2025, 4, 21),   # Mahavir Jayanti
+    datetime.date(2025, 5, 23),   # Buddha Purnima
+    datetime.date(2025, 6, 7),    # Eid-ul-Adha
+    datetime.date(2025, 7, 7),    # Muharram
+    datetime.date(2025, 8, 15),   # Independence Day
+    datetime.date(2025, 8, 27),   # Janmashtami
+    datetime.date(2025, 9, 5),    # Milad-un-Nabi
+    datetime.date(2025, 10, 2),   # Gandhi Jayanti
+    datetime.date(2025, 10, 1),   # Dussehra
+    datetime.date(2025, 10, 20),  # Diwali
+    datetime.date(2025, 10, 21),  # Diwali (Day 2)
+    datetime.date(2025, 11, 15),  # Guru Nanak Jayanti
+    datetime.date(2025, 12, 25),  # Christmas
+}
+
+def is_market_open(date: datetime.date) -> bool:
+    """Check if market is open on given date (not weekend or holiday)"""
+    # Sundays (6) and Saturdays (5) are weekends
+    if date.weekday() >= 5:
+        return False
+    # Check if it's a market holiday
+    if date in NSE_MARKET_HOLIDAYS:
+        return False
+    return True
+
 
 class Backtester:
     def __init__(self, db_path: str = DB_PATH):
@@ -116,6 +173,8 @@ class Backtester:
         """
         Simulate trades from signals.  Returns (trade_log, equity_curve_daily).
         equity_curve_daily: pd.Series indexed by date.
+        
+        PHASE 3.1: Respects market holidays and weekends.
         """
         trade_log: list[dict] = []
         # Position state: symbol -> {entry_date, entry_price, sl, horizon_days, shares}
@@ -125,6 +184,9 @@ class Backtester:
                 d for df in ohlcv_dict.values() for d in df['date'].tolist()
             }))
         )
+        # PHASE 3.1: Filter out market holidays and weekends
+        all_dates = [d for d in all_dates if is_market_open(d.date())]
+        
         if not all_dates:
             return [], pd.Series(dtype=float)
 
@@ -146,8 +208,12 @@ class Backtester:
             # ── Close positions that have reached their horizon ──────────────
             for sym in list(open_positions.keys()):
                 pos   = open_positions[sym]
-                days_held = (date - pos['entry_date']).days
-                if days_held < pos['horizon_days']:
+                # PHASE 3.1: Count only trading days (market-open days) not calendar days
+                trading_days_held = sum(
+                    1 for check_date in all_dates 
+                    if pos['entry_date'] <= check_date <= date
+                )
+                if trading_days_held < pos['horizon_days']:
                     continue
                 if sym not in ohlcv_dict:
                     continue
@@ -169,7 +235,7 @@ class Backtester:
                     'pnl':          round(pnl, 2),
                     'outcome':      outcome,
                     'signal_score': pos['signal_score'],
-                    'holding_days': days_held,
+                    'holding_days': trading_days_held,
                 })
                 del open_positions[sym]
 
@@ -187,6 +253,11 @@ class Backtester:
                     ret_pct    = (exit_price - pos['entry_price']) / pos['entry_price'] * 100
                     pnl        = (exit_price - pos['entry_price']) * pos['shares']
                     cash      += exit_price * pos['shares']
+                    # PHASE 3.1: Count only trading days for stop-loss trades
+                    trading_days_held_sl = sum(
+                        1 for check_date in all_dates 
+                        if pos['entry_date'] <= check_date <= date
+                    )
                     trade_log.append({
                         'symbol':       sym,
                         'entry_date':   pos['entry_date'].isoformat(),
@@ -197,7 +268,7 @@ class Backtester:
                         'pnl':          round(pnl, 2),
                         'outcome':      'STOP_LOSS',
                         'signal_score': pos['signal_score'],
-                        'holding_days': (date - pos['entry_date']).days,
+                        'holding_days': trading_days_held_sl,
                     })
                     del open_positions[sym]
 
@@ -209,10 +280,12 @@ class Backtester:
                     continue
                 if sym not in ohlcv_dict:
                     continue
-                # Entry: next trading day's open (look ahead 1 day)
+                
+                # PHASE 1 FIX: Use next trading day's open price (not signal_date close)
                 next_days = ohlcv_dict[sym][ohlcv_dict[sym]['date'] > date].head(1)
                 if next_days.empty:
                     continue
+                entry_date = pd.to_datetime(next_days['date'].iloc[0])
                 entry_price = float(next_days['open'].iloc[0]) * slippage
                 if pd.isna(entry_price) or entry_price <= 0:
                     continue
@@ -229,9 +302,10 @@ class Backtester:
                 cost = shares * entry_price
                 cash -= cost
 
+                # Use signal's stop_loss if provided, else calculate based on entry price
                 sl = float(row['stop_loss']) if pd.notna(row['stop_loss']) else entry_price * (1 - stop_loss_pct / 100)
                 open_positions[sym] = {
-                    'entry_date':   date,
+                    'entry_date':   entry_date,  # Actual entry date (next trading day), not signal_date
                     'entry_price':  entry_price,
                     'stop_loss':    sl,
                     'horizon_days': int(row['horizon_days']),

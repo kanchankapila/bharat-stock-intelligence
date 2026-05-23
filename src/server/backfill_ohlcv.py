@@ -36,7 +36,7 @@ def get_all_nse_symbols(conn):
 
 def _extract_records(symbol: str, df: pd.DataFrame) -> list:
     """Convert a single-symbol OHLCV DataFrame to insert-ready tuples."""
-    if df is None or df.empty:
+    if df is None or df.empty or "Close" not in df.columns:
         return []
     df = df.dropna(subset=["Close"])
     if df.empty:
@@ -99,6 +99,11 @@ YAHOO_SYMBOL_MAP: dict[str, str] = {
     "POLICYBZR":    "POLICYBZR",
     "PAYTM":        "ONE97",
     "ZOMATO":       "ZOMATO",
+    "MAHINDRA":     "M&M",
+    "SRTRANSFIN":   "SHRIRAMFIN",
+    "CHOLAFINSV":   "CHOLAFIN",
+    "LTFH":         "LTF",
+    "BAJAJINSUR":   "BAJAJFINSV",
 }
 
 # When a symbol fails, try these suffix/prefix patterns in order

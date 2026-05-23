@@ -292,3 +292,122 @@ export async function fetchNiftyTraderBreakouts() {
   }
 }
 
+/**
+ * Fetch Trendlyne JSON screener results (the lightweight /json-screener/ endpoints)
+ * Returns top N stocks with name, value (change%), price, stockurl
+ */
+export async function fetchTrendlyneJsonScreener(screenerId: string, limit: number = 25): Promise<{
+  success: boolean;
+  title: string;
+  description: string;
+  data: Array<{ name: string; value: string; currentPrice: string; stockurl: string }>;
+}> {
+  try {
+    const url = `https://trendlyne.com/fundamentals/json-screener/${screenerId}/5/0/index/NIFTY500/nifty-500/`;
+    const res = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json',
+        'Referer': 'https://trendlyne.com/',
+      },
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!res.ok) return { success: false, title: '', description: '', data: [] };
+    const json = await res.json();
+    const screen = json?.screen || {};
+    const rawData: any[] = (json?.screenData || []).slice(0, limit);
+    return {
+      success: true,
+      title: screen.title || `Screener ${screenerId}`,
+      description: screen.description || '',
+      data: rawData.map((d: any) => ({
+        name: d.name || '',
+        value: d.value || '0',
+        currentPrice: d.tooltipParams?.find((p: any) => p.key === 'currentPrice')?.value || '0',
+        stockurl: d.stockurl || '',
+      })),
+    };
+  } catch (err) {
+    console.error(`[TRENDLYNE JSON SCREENER] Error for ${screenerId}:`, err);
+    return { success: false, title: '', description: '', data: [] };
+  }
+}
+
+/**
+ * Fetch Trendlyne All-in-One Screener (the /tl-all-in-one-screener-data-get/ endpoints)
+ * Supports screenpk IDs like 515760, 19814, etc.
+ */
+export async function fetchTrendlyneAllInOneScreener(screenpk: string, limit: number = 25): Promise<{
+  success: boolean;
+  title: string;
+  data: Array<{ name: string; currentPrice: string; change: string; mcap: string }>;
+}> {
+  try {
+    const url = `https://trendlyne.com/fundamentals/tl-all-in-one-screener-data-get/?screenpk=${screenpk}&perPageCount=${limit}&groupType=all&groupName=all`;
+    const res = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json',
+        'Referer': 'https://trendlyne.com/',
+      },
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!res.ok) return { success: false, title: '', data: [] };
+    const json = await res.json();
+    if (json?.head?.status !== '0') return { success: false, title: '', data: [] };
+    const headers: any[] = json?.body?.tableHeaders || [];
+    const rows: any[][] = json?.body?.tableData || [];
+    const screenObj = json?.body?.screenObj || {};
+    const nameIdx = headers.findIndex((h: any) => h.unique_name === 'get_full_name');
+    const priceIdx = headers.findIndex((h: any) => h.unique_name === 'currentPrice');
+    const changeIdx = headers.findIndex((h: any) => h.unique_name === 'day_changeP');
+    const mcapIdx = headers.findIndex((h: any) => h.unique_name === 'MCAP_Q');
+    return {
+      success: true,
+      title: screenObj.title || `Screener ${screenpk}`,
+      data: rows.slice(0, limit).map((r: any[]) => ({
+        name: String(r[nameIdx] ?? ''),
+        currentPrice: String(r[priceIdx] ?? '0'),
+        change: String(r[changeIdx] ?? '0'),
+        mcap: String(r[mcapIdx] ?? ''),
+      })),
+    };
+  } catch (err) {
+    console.error(`[TRENDLYNE AIO SCREENER] Error for ${screenpk}:`, err);
+    return { success: false, title: '', data: [] };
+  }
+}
+
+/**
+ * Fetch MC Technical Trends for ALL market segments at once
+ * Returns bullish/bearish/turning-bullish/turning-bearish for FNO, NIFTY500, LCAP, MDCAP, SMCAP
+ */
+export async function fetchMCTechTrendsAllSegments(
+  type: 'bullish' | 'bearish' | 'turning-bullish' | 'turning-bearish'
+): Promise<Record<string, any[]>> {
+  const base = type.includes('bullish') ? 'uptrend' : 'downtrend';
+  const sort = (type === 'turning-bullish' || type === 'turning-bearish') ? 'changeDate' : 'performance';
+  const order = type === 'bearish' ? 'asc' : 'desc';
+
+  const segments: Record<string, string> = {
+    all: '7',
+    fno: 'FNO',
+    largecap: 'LCAP',
+    midcap: 'MDCAP',
+    smallcap: 'SMCAP',
+  };
+
+  const results: Record<string, any[]> = {};
+  await Promise.all(
+    Object.entries(segments).map(async ([key, index]) => {
+      try {
+        const url = `https://api.moneycontrol.com/mcapi/v1/technical-trends/${base}/${type}?ex=N&index=${index}&page=1&order=${order}&deviceType=W&sort=${sort}&appVersion=142`;
+        const data = await mcFetchJson(url);
+        results[key] = data?.success === 1 ? (data.data?.list || []) : [];
+      } catch {
+        results[key] = [];
+      }
+    })
+  );
+  return results;
+}

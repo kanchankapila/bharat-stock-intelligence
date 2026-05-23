@@ -1,5 +1,6 @@
 import "dotenv/config";
 import express from "express";
+import { createServer as createHttpServer } from "http";
 
 import { createServer as createViteServer } from "vite";
 import path from "path";
@@ -12,6 +13,7 @@ import { initCache } from "./src/server/cacheService";
 import { initQueues, shutdownQueues } from "./src/server/queues";
 import { startRedis, stopRedis } from "./src/server/redisManager";
 import { startOllama, stopOllama } from "./src/server/ollamaManager";
+import { wsSignalService } from "./src/server/websocketService";  // PHASE 3.2: WebSocket
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -20,7 +22,7 @@ import { updateSignalAccuracy } from "./src/server/signals";
 
 async function startServer() {
   const app = express();
-  const PORT = parseInt(process.env.PORT || '3000', 10);
+  const PORT = parseInt(process.env.PORT || '3002', 10);
 
   // Initialise AI & Redis (gracefully managed)
   await startOllama();
@@ -154,6 +156,28 @@ async function startServer() {
       runIntradayScreenerScan().catch(console.error);
     }, 5 * 60 * 1000);
   }
+  // ─── ETnow screener stocks: first-time trigger ───────────────────────────
+  const { getETnowStockCount, syncETnowScreeners } = await import('./src/server/etnowScreenerSync');
+  const { etnowScreenerSyncQueue } = await import('./src/server/queues');
+  const etnowStockCount = getETnowStockCount();
+
+  if (etnowStockCount === 0) {
+    if (bullmqReady && etnowScreenerSyncQueue) {
+      console.log('[SERVER] ETnow screener stocks empty — triggering first-time sync via BullMQ...');
+      await etnowScreenerSyncQueue.add(
+        'etnow-sync-first-run',
+        {},
+        { removeOnComplete: 3, removeOnFail: 3, attempts: 1, priority: 2 },
+      );
+    } else {
+      console.log('[SERVER] No Redis — starting ETnow sync directly...');
+      syncETnowScreeners().catch(err =>
+        console.error('[SERVER] ETnow first-time sync error:', err.message)
+      );
+    }
+  } else {
+    console.log(`[SERVER] ETnow screener stocks has ${etnowStockCount} rows — skipping first-run trigger`);
+  }
   // ─────────────────────────────────────────────────────────────────────────
 
   if (!bullmqReady) {
@@ -246,8 +270,13 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  // PHASE 3.2: Create HTTP server and attach WebSocket service
+  const httpServer = createHttpServer(app);
+  wsSignalService.initialize(httpServer);
+
+  httpServer.listen(PORT, "0.0.0.0", () => {
     console.log(`🚀 Server running on http://localhost:${PORT}`);
+    console.log(`📡 WebSocket signals available on ws://localhost:${PORT}/signals`);
   });
 }
 
@@ -260,6 +289,7 @@ startServer().catch((error) => {
 for (const sig of ['SIGTERM', 'SIGINT'] as NodeJS.Signals[]) {
   process.on(sig, async () => {
     console.log(`[SERVER] ${sig} received, shutting down services...`);
+    wsSignalService.shutdown();  // PHASE 3.2: Shutdown WebSocket
     await shutdownQueues();
     await stopRedis();
     await stopOllama();

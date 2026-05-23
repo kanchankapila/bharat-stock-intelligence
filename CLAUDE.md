@@ -15,15 +15,15 @@ Key memory files:
 
 ## Project Summary (quick reference)
 
-Real-time Indian stock market intelligence platform (NSE/BSE). Backend: Express + tRPC (`src/server/router.ts`, ~1985 lines, 130+ procedures). Frontend: React 19 + Vite (`src/App.tsx`, ~4300 lines). DB: SQLite (`src/server/db.ts`). Cache: Redis → in-memory fallback (`src/server/cacheService.ts`). Background jobs: BullMQ (`src/server/queues.ts`). AI: Ollama primary, Gemini fallback + 15 Python engines.
+Real-time Indian stock market intelligence platform (NSE/BSE). Backend: Express + tRPC (`src/server/router.ts`, ~2433 lines, 130+ procedures). Frontend: React 19 + Vite (`src/App.tsx`, ~3704 lines). DB: SQLite (`src/server/db.ts`). Cache: Redis → in-memory fallback (`src/server/cacheService.ts`). Background jobs: BullMQ (`src/server/queues.ts`). AI: Ollama primary, Gemini fallback + 15 Python engines.
 
 ## Key File Locations
 
 ```
 src/
-  App.tsx                      ← Main app (~4300 lines), layout + all tab routing
+  App.tsx                      ← Main app (~3704 lines), layout + all tab routing
   main.tsx                     ← tRPC + React Query setup
-  components/                  ← 26+ React components (see list below)
+  components/                  ← 36+ React components (see list below)
   services/
     marketService.ts           ← Live stock hook, 5s price polling
     aiService.ts               ← Ollama integration
@@ -83,7 +83,7 @@ App.tsx routes to these tabs: `dashboard`, `trade-cockpit`, `top-rated`, `indice
 
 ## React Components (`src/components/`)
 
-`Card`, `DailySignals`, `FnOHeatmap`, `FnOIntelligenceCenter`, `GlobalMarketCards`, `GlobalMarkets`, `IndexFnoOverview`, `IntradayBreakouts`, `MCCommon`, `MCIndexDetailPanel`, `MCStockInfoPanel`, `MarketIndices`, `MarketInsights`, `MomentumIntelligence`, `NSEStockDiscovery`, `ScreenerDetailsModal`, `SectorIntelligence`, `SentimentIntelligence`, `StrategyIntelligence`, `ToDoPage`, `TopMoversIntelligence`, `TopRatedStocks`, `TradingViewWidgets`, `TrendlyneScreenerPanel`, `TrendlyneSectorDashboard`, `Watchlist`
+`AlertsToast`, `AppShell`, `Card`, `DailySignals`, `DashboardPage`, `FnOHeatmap`, `FnOIntelligenceCenter`, `GlobalMarketCards`, `GlobalMarkets`, `IndexDetailPage`, `IndexFnoOverview`, `IndicesPage`, `IntradayBreakouts`, `InvestmentStrategy`, `MCCommon`, `MCIndexDetailPanel`, `MCStockInfoPanel`, `MarketIndices`, `MarketInsights`, `MomentumIntelligence`, `NSEStockDiscovery`, `OptionsIntelligence`, `PortfolioAnalytics`, `ScreenerDetailsModal`, `SectorIntelligence`, `SentimentIntelligence`, `StrategyBuilder`, `StrategyIntelligence`, `SuperstarPortfolio`, `ToDoPage`, `TopMoversIntelligence`, `TopRatedStocks`, `TradingViewWidgets`, `TrendlyneScreenerPanel`, `TrendlyneSectorDashboard`, `Watchlist`
 
 ## SQLite Schema (20+ Tables)
 
@@ -158,7 +158,7 @@ python backtester.py --start 2023-01-01
 
 **RL Agent:** `rl_agent.py` is a Q-learning meta-controller. `scoring_engine.py` gates signal output to `win_probability >= 0.40`. Weights learned by `strategy_optimizer.py` are persisted in `app_settings` (`optimal_category_weights`, `optimal_source_weights`) and loaded at scoring engine startup.
 
-**ML model artifacts:** `src/server/ml_models/ensemble.pkl`, `src/server/ml_models/online_sgd.pkl`
+**ML model artifacts:** `src/server/ml_models/ensemble.pkl`, `src/server/ml_models/online_sgd.pkl` — generated at runtime by `ml_ensemble.py` and `online_learner.py`; directory is created on first training run.
 
 ## API Calling Strategies
 

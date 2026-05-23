@@ -31,6 +31,9 @@ import {
   fetchIndexTechnicals,
   fetchIndexGraph,
   fetchNiftyTraderBreakouts,
+  fetchTrendlyneJsonScreener,
+  fetchTrendlyneAllInOneScreener,
+  fetchMCTechTrendsAllSegments,
 } from "./marketData";
 import {
   fetchTrendlyneFundamentals,
@@ -56,13 +59,25 @@ import { getAllStocks, getStockMapping, getSymbolFromMcsymbol } from "./stockMap
 import { getCachedScan, runTechnicalScan } from "./technicalScanner";
 import { getFnOSignals } from "./fnoService";
 import { fetchStockDataWithCache, getOrRefreshAllStocks } from "./liveStockData";
-import { getMcConsolidatedData } from "./mcApiService";
+import { getMcConsolidatedData, fetchMcVwapChart, fetchKayalScreener } from "./mcApiService";
+import {
+  fetchPremarketAll,
+  fetchDealsAll,
+  fetchEarningsAll,
+  fetchEarningsCalendar,
+  fetchEarningsData,
+  fetchEarningsRapidResults,
+  fetchEarningsPriceShockers,
+  fetchIndexFnoAll,
+  type FnoIndexId,
+} from './marketIntelService';
 import { fetchTrendlyneScreenerData, fetchAllTrendlyneScreenerNames, getTrendlyneScreenerList, getTrendlyneScreenerCategories, updateFetchInterval, updateScreenerNamesInterval, testTrendlyneApiResponse, findScreenersByStock, recategorizeAllScreeners } from "./trendlyneScreener";
 import { syncNSEStocksToDatabase, getAllNSEStocksFromDB, searchNSEStocksFromDB, getNSEStockFromDB, getNSEStocksBySectorFromDB, getNSEStocksByIndustryFromDB, getAllSectorsFromDB, getAllIndustriesFromDB, getNSEStockCount } from "./nseService";
 import { fetchOptionChain, fetchFnoSymbols } from "./optionChainService";
 import { fetchTopMovers } from "./topMoversService";
 import { enqueueAISignals, getAIQueueStats } from "./queues";
 import { fetchGlobalMarketData } from "./globalMarketService";
+import { crossSourceFilter, regimeSectorFilter, qualityOversoldScanner } from './strategySignalsService';
 
 const t = initTRPC.create({
   transformer: superjson,
@@ -1017,6 +1032,50 @@ export const appRouter = router({
       return result;
     }),
 
+  // Multi-segment MC Technical Trends (All/FNO/LargeCap/MidCap/SmallCap)
+  getTechTrendsBySegment: publicProcedure
+    .input(z.object({
+      type: z.enum(['bullish', 'bearish', 'turning-bullish', 'turning-bearish']),
+    }))
+    .query(async ({ input }) => {
+      const result = await fetchMCTechTrendsAllSegments(input.type);
+      // Enrich each segment's stocks with resolved NSE symbols
+      for (const [seg, list] of Object.entries(result)) {
+        result[seg] = list.map((item: any) => {
+          const symbol = getSymbolFromMcsymbol(item.scId);
+          return {
+            ...item,
+            symbol: symbol || item.scId,
+            lastPrice: parseFloat(String(item.currPrice || '0').replace(/,/g, '')),
+            percentChange: parseFloat(item.performance || '0'),
+            trend: item.currTrend || '',
+            prevTrend: item.prevTrend || '',
+            trendChangeDate: item.trendChngDate || '',
+          };
+        });
+      }
+      return result;
+    }),
+
+  // Trendlyne JSON screener (lightweight /json-screener/ endpoint)
+  getTrendlyneJsonScreener: publicProcedure
+    .input(z.object({
+      screenerId: z.string(),
+      limit: z.number().optional().default(25),
+    }))
+    .query(async ({ input }) => {
+      return fetchTrendlyneJsonScreener(input.screenerId, input.limit);
+    }),
+
+  // Trendlyne All-in-One Screener (tl-all-in-one-screener-data-get)
+  getTrendlyneAIOScreener: publicProcedure
+    .input(z.object({
+      screenpk: z.string(),
+      limit: z.number().optional().default(25),
+    }))
+    .query(async ({ input }) => {
+      return fetchTrendlyneAllInOneScreener(input.screenpk, input.limit);
+    }),
 
   getETStats: publicProcedure
     .input(z.object({
@@ -1679,6 +1738,33 @@ export const appRouter = router({
       return getStockScoreDetail(input.symbol, input.timeframe);
     }),
 
+  getConvergenceSignals: publicProcedure
+    .input(z.object({
+      minScore: z.number().optional().default(65),
+    }))
+    .query(({ input }) => {
+      return crossSourceFilter(input.minScore);
+    }),
+
+  getRegimeSectorSignals: publicProcedure
+    .input(z.object({
+      topNSectors: z.number().optional().default(3),
+      minScore: z.number().optional().default(60),
+      minWinProbability: z.number().optional().default(0.50),
+    }))
+    .query(({ input }) => {
+      return regimeSectorFilter(input.topNSectors, input.minScore, input.minWinProbability);
+    }),
+
+  getQualityOversoldSignals: publicProcedure
+    .input(z.object({
+      maxRsi: z.number().optional().default(35),
+      maxScore: z.number().optional().default(65),
+    }))
+    .query(({ input }) => {
+      return qualityOversoldScanner(input.maxRsi, input.maxScore);
+    }),
+
   triggerStockScoring: publicProcedure
     .mutation(async () => {
       return await syncAndScore();
@@ -2096,7 +2182,7 @@ export const appRouter = router({
 
       if (etIds.includes('91')) { technicalScore += 50; reasons.push('Buy on Dips'); }
       if (etIds.includes('362')) { technicalScore += 50; reasons.push('RSI Oversold'); }
-      
+
       const mcIds = r.mc_screeners ? r.mc_screeners.split(',') : [];
       if (mcIds.length > 0) {
         fundamentalScore += 10;
@@ -2136,7 +2222,7 @@ export const appRouter = router({
       const tlIds = r.tl_screeners ? r.tl_screeners.split(',') : [];
       const mcIds = r.mc_screeners ? r.mc_screeners.split(',') : [];
       let score = 50 + (tlIds.length * 15) + (mcIds.length * 5);
-      
+
       return {
         symbol: r.symbol,
         name: r.companyName,
@@ -2152,6 +2238,312 @@ export const appRouter = router({
 
     return { investmentPicks, intradayPicks };
   }),
+
+  // PHASE 3.3: Signal Actions — Track user execution vs recommendations
+  saveSignalAction: publicProcedure
+    .input(z.object({
+      signalId: z.number(),
+      signalSource: z.enum(['AI', 'technical', 'quant', 'news']),
+      symbol: z.string(),
+      userId: z.string().optional(),
+      actionType: z.enum(['BUY', 'SELL', 'HOLD', 'SKIP']),
+      quantity: z.number().optional(),
+      entryPriceRec: z.number().optional(),
+      entryActual: z.number().optional(),
+      targetPriceRec: z.number().optional(),
+      exitPriceActual: z.number().optional(),
+      exitDate: z.string().datetime().optional(),
+      pnl: z.number().optional(),
+      pnlPct: z.number().optional(),
+      notes: z.string().optional(),
+    }))
+    .mutation(async ({ input }) => {
+      try {
+        const stmt = db.prepare(`
+          INSERT OR REPLACE INTO signal_actions (
+            signal_id, signal_source, symbol, user_id, action_type,
+            quantity, entry_price_rec, entry_actual, target_price_rec,
+            exit_price_actual, exit_date, pnl, pnl_pct, notes, executed_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        `);
+        
+        stmt.run([
+          input.signalId,
+          input.signalSource,
+          input.symbol,
+          input.userId || null,
+          input.actionType,
+          input.quantity || null,
+          input.entryPriceRec || null,
+          input.entryActual || null,
+          input.targetPriceRec || null,
+          input.exitPriceActual || null,
+          input.exitDate || null,
+          input.pnl || null,
+          input.pnlPct || null,
+          input.notes || null,
+        ]);
+
+        return { success: true, signalId: input.signalId };
+      } catch (err) {
+        console.error('[Router] saveSignalAction error:', err);
+        throw new Error('Failed to save signal action');
+      }
+    }),
+
+  getSignalActions: publicProcedure
+    .input(z.object({
+      symbol: z.string().optional(),
+      userId: z.string().optional(),
+      signalSource: z.enum(['AI', 'technical', 'quant', 'news']).optional(),
+      limit: z.number().default(50),
+      offset: z.number().default(0),
+    }))
+    .query(async ({ input }) => {
+      try {
+        let query = `
+          SELECT id, signal_id, signal_source, symbol, action_type,
+                 executed_at, quantity, entry_price_rec, entry_actual,
+                 target_price_rec, exit_price_actual, pnl, pnl_pct, notes
+          FROM signal_actions
+          WHERE 1=1
+        `;
+        const params: any[] = [];
+
+        if (input.symbol) {
+          query += ` AND symbol = ?`;
+          params.push(input.symbol);
+        }
+        if (input.userId) {
+          query += ` AND user_id = ?`;
+          params.push(input.userId);
+        }
+        if (input.signalSource) {
+          query += ` AND signal_source = ?`;
+          params.push(input.signalSource);
+        }
+
+        query += ` ORDER BY executed_at DESC LIMIT ? OFFSET ?`;
+        params.push(input.limit, input.offset);
+
+        const actions = db.prepare(query).all(...params) as Array<Record<string, unknown>>;
+
+        // Calculate summary stats
+        let totalPnl = 0;
+        let winCount = 0;
+        let totalCount = 0;
+
+        for (const action of actions) {
+          const pnl = action.pnl as number | null;
+          if (pnl !== null) {
+            totalPnl += pnl;
+            if (pnl > 0) winCount++;
+            totalCount++;
+          }
+        }
+
+        return {
+          actions,
+          stats: {
+            totalPnl,
+            winCount,
+            totalCount,
+            winRate: totalCount > 0 ? (winCount / totalCount * 100).toFixed(2) : '0',
+          },
+        };
+      } catch (err) {
+        console.error('[Router] getSignalActions error:', err);
+        throw new Error('Failed to fetch signal actions');
+      }
+    }),
+
+  getSignalActionMetrics: publicProcedure
+    .input(z.object({
+      userId: z.string().optional(),
+      signalSource: z.enum(['AI', 'technical', 'quant', 'news']).optional(),
+      days: z.number().default(30),
+    }))
+    .query(async ({ input }) => {
+      try {
+        let query = `
+          SELECT signal_source, action_type, COUNT(*) as count,
+                 AVG(pnl_pct) as avg_pnl_pct, SUM(pnl) as total_pnl
+          FROM signal_actions
+          WHERE executed_at >= datetime('now', '-' || ? || ' days')
+        `;
+        const params: any[] = [input.days];
+
+        if (input.userId) {
+          query += ` AND user_id = ?`;
+          params.push(input.userId);
+        }
+        if (input.signalSource) {
+          query += ` AND signal_source = ?`;
+          params.push(input.signalSource);
+        }
+
+        query += ` GROUP BY signal_source, action_type`;
+
+        const metrics = db.prepare(query).all(...params);
+        return { metrics };
+      } catch (err) {
+        console.error('[Router] getSignalActionMetrics error:', err);
+        throw new Error('Failed to fetch metrics');
+      }
+    }),
+
+  // PHASE 3.4: Portfolio-Signal Correlation
+  getPortfolioSignalAlignment: publicProcedure
+    .input(z.object({
+      signalId: z.number(),
+      signalSymbol: z.string(),
+      portfolio: z.array(z.object({
+        symbol: z.string(),
+        weight: z.number(),
+        quantity: z.number(),
+        avgCost: z.number(),
+        currentPrice: z.number(),
+      })),
+    }))
+    .query(async ({ input }) => {
+      try {
+        const { correlationService } = await import('./correlationService');
+        
+        // Analyze signal's correlation with portfolio
+        const correlations = await correlationService.analyzeSignalPortfolioAlignment(
+          input.signalId,
+          input.signalSymbol,
+          input.portfolio,
+        );
+
+        // Get alignment score
+        const alignmentScore = await correlationService.getPortfolioAlignmentScore(input.signalId);
+
+        // Get hedge recommendations
+        const hedges = correlationService.getHedgeRecommendations(input.signalId);
+
+        // Get concentration risk
+        const concentrationRisk = correlationService.getConcentrationRisk(input.signalId);
+
+        return {
+          correlations,
+          alignmentScore,
+          hedges,
+          concentrationRisk,
+          recommendation: {
+            alignmentLevel: alignmentScore > 70 ? 'high' : alignmentScore > 40 ? 'moderate' : 'low',
+            isHedge: hedges.length > 0,
+            riskLevel: concentrationRisk > 2 ? 'high' : concentrationRisk > 0 ? 'moderate' : 'low',
+          },
+        };
+      } catch (err) {
+        console.error('[Router] getPortfolioSignalAlignment error:', err);
+        throw new Error('Failed to analyze signal-portfolio alignment');
+      }
+    }),
+
+  getSignalCorrelationMetrics: publicProcedure
+    .input(z.object({
+      signalId: z.number(),
+    }))
+    .query(async ({ input }) => {
+      try {
+        const metrics = db.prepare(`
+          SELECT 
+            portfolio_symbol,
+            correlation_score,
+            co_movement_pct,
+            hedge_potential,
+            momentum_alignment,
+            weight
+          FROM signal_portfolio_correlation
+          WHERE signal_id = ?
+          ORDER BY ABS(correlation_score) DESC
+        `).all(input.signalId) as any[];
+
+        // Calculate stats
+        let avgCorrelation = 0;
+        let positiveCorr = 0;
+        let negativeCorr = 0;
+
+        if (metrics.length > 0) {
+          avgCorrelation = metrics.reduce((sum, m) => sum + m.correlation_score, 0) / metrics.length;
+          positiveCorr = metrics.filter((m) => m.correlation_score > 0.3).length;
+          negativeCorr = metrics.filter((m) => m.correlation_score < -0.3).length;
+        }
+
+        return {
+          metrics,
+          stats: {
+            avgCorrelation: parseFloat(avgCorrelation.toFixed(4)),
+            positiveCorr,
+            negativeCorr,
+            totalHoldings: metrics.length,
+          },
+        };
+      } catch (err) {
+        console.error('[Router] getSignalCorrelationMetrics error:', err);
+        throw new Error('Failed to fetch correlation metrics');
+      }
+    }),
+
+  // ─── Premarket ──────────────────────────────────────────────────────────────
+  getPremarket: publicProcedure.query(async () => {
+    return await fetchPremarketAll();
+  }),
+
+  // ─── Deals / Smart Money ────────────────────────────────────────────────────
+  getDeals: publicProcedure.query(async () => {
+    return await fetchDealsAll();
+  }),
+
+  // ─── Earnings ───────────────────────────────────────────────────────────────
+  getEarnings: publicProcedure
+    .input(z.object({ date: z.string().optional() }))
+    .query(async ({ input }) => {
+      return await fetchEarningsAll(input.date);
+    }),
+
+  getEarningsCalendar: publicProcedure
+    .input(z.object({ date: z.string().optional() }))
+    .query(async ({ input }) => {
+      return await fetchEarningsCalendar(input.date);
+    }),
+
+  getEarningsRapidResults: publicProcedure
+    .input(z.object({ type: z.enum(['LR', 'BP']).optional().default('BP') }))
+    .query(async ({ input }) => {
+      return await fetchEarningsRapidResults(input.type);
+    }),
+
+  getEarningsPriceShockers: publicProcedure.query(async () => {
+    return await fetchEarningsPriceShockers();
+  }),
+
+  // ─── Index F&O ──────────────────────────────────────────────────────────────
+  getIndexFno: publicProcedure
+    .input(z.object({
+      id: z.enum(['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'SENSEX'])
+    }))
+    .query(async ({ input }) => {
+      return await fetchIndexFnoAll(input.id as FnoIndexId);
+    }),
+
+  // ─── VWAP Chart ─────────────────────────────────────────────────────────────
+  getMcVwapChart: publicProcedure
+    .input(z.object({ symbol: z.string() }))
+    .query(async ({ input }) => {
+      const mapping = getStockMapping(input.symbol);
+      const scId = mapping?.mcsymbol || input.symbol;
+      return await fetchMcVwapChart(scId);
+    }),
+
+  // ─── Kayal Screener ─────────────────────────────────────────────────────────
+  getKayalScreener: publicProcedure
+    .input(z.object({ screenpk: z.string(), limit: z.number().optional().default(50) }))
+    .query(async ({ input }) => {
+      return await fetchKayalScreener(input.screenpk, input.limit);
+    }),
 });
 
 

@@ -1,0 +1,27 @@
+﻿Full run: 2410 URLs in 145.8s
+Success: 2327 (96.6%) | Failed: 83 | Empty: 0
+Avg latency: 602ms
+
+NEW PROVIDERS - RESULTS:
+kayal_trendlyne  screeners  kayal_allone        1053/1053  100%  SUCCESS - all open, head+body keys
+marketsmojo      all        all endpoints        12/12     100%  SUCCESS - code+message envelope
+trading80        all        all endpoints         9/9      100%  SUCCESS - code+message envelope
+finology         market     indices/gainers/losers 3/3     100%  SUCCESS (partial - others 404)
+stockedge        market     exchanges             1/1      100%  SUCCESS (others 404/auth-gated)
+etmarkets        all        only et_recommendations 1/24    4%   MOSTLY FAILED (CORS/auth)
+niftytrader      all        all endpoints         0/14      0%   ALL FAILED (wrong API paths)
+
+FAILURES BREAKDOWN:
+HTTP 404: 34 (finology stock detail, stockedge most endpoints, niftytrader)
+HTTP 400: 27 (etmarkets JSONP endpoints - need callback param)
+HTTP 503: 10 (etmarkets service unavailable)
+HTTP 502: 7  (etmarkets bad gateway)
+HTTP 403: 3  (auth-gated)
+HTTP 500: 1
+HTTP 204: 1
+
+KNOWN ISSUES CARRIED OVER:
+moneycontrol  index_fund_eps    11/38 ok (27 indices have no EPS data)
+moneycontrol  stock_fno_options  0/1  (hardcoded strike 405.00 invalid)
+moneycontrol  stock_pivot        3/3  ok but HTML response (not JSON)
+trendlyne     tl_json_screener  35/36 (1 screener not found)

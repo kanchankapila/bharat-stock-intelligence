@@ -27,6 +27,9 @@ pnpm-debug.log*
 *.sqlite-shm
 *.sqlite-wal
 
+# MC+TL exploration output
+mc_tl_explore.db
+
 # Redis binaries and data
 redis/
 *.zip

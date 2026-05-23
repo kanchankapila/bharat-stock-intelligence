@@ -702,6 +702,140 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_rlepi_date ON rl_episodes(date);
 `);
 
+// --- PHASE 1: Unified Signal & Outcome Tracking ---
+db.exec(`
+  -- Unified signal schema that consolidates AI, Technical, and Quant signals
+  CREATE TABLE IF NOT EXISTS unified_signals (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol             TEXT NOT NULL,
+    signal_date        DATETIME DEFAULT CURRENT_TIMESTAMP,
+    signal_source      TEXT NOT NULL,  -- 'AI', 'TECHNICAL', 'QUANT', 'ENSEMBLE'
+    signal_type        TEXT NOT NULL,  -- 'BUY', 'SELL', 'HOLD'
+    entry_price        REAL,
+    target_price       REAL,
+    stop_loss          REAL,
+    confidence_score   REAL,           -- 0-100, from any source
+    reasoning          TEXT,
+    technical_score    REAL,           -- Technical analysis component score
+    quant_score        REAL,           -- Quantitative analysis component score
+    ai_reasoning       TEXT,           -- AI model reasoning (Ollama/Gemini)
+    status             TEXT DEFAULT 'ACTIVE',  -- 'ACTIVE', 'COMPLETED', 'EXPIRED', 'FAILED'
+    signal_generated_at DATETIME NOT NULL,  -- Exact time signal was generated (critical for outcome matching)
+    created_at         DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(symbol, signal_date, signal_source)
+  );
+  CREATE INDEX IF NOT EXISTS idx_us_symbol_date ON unified_signals(symbol, signal_date DESC);
+  CREATE INDEX IF NOT EXISTS idx_us_source ON unified_signals(signal_source);
+  CREATE INDEX IF NOT EXISTS idx_us_confidence ON unified_signals(confidence_score DESC);
+  CREATE INDEX IF NOT EXISTS idx_us_status ON unified_signals(status);
+
+  -- Unified signal outcome tracking (replaces per-source outcomes)
+  CREATE TABLE IF NOT EXISTS unified_signal_outcomes (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    unified_signal_id  INTEGER NOT NULL,
+    symbol             TEXT NOT NULL,
+    signal_date        TEXT NOT NULL,
+    signal_source      TEXT NOT NULL,
+    horizon_days       INTEGER NOT NULL,
+    entry_price        REAL NOT NULL,
+    entry_time         DATETIME NOT NULL,
+    check_date         TEXT,
+    exit_price         REAL,
+    exit_time          DATETIME,
+    return_pct         REAL,
+    intraday_max_return_pct REAL,  -- Highest return before outcome
+    intraday_min_return_pct REAL,  -- Lowest return before outcome
+    outcome            TEXT,  -- 'WIN', 'LOSS', 'NEUTRAL', 'STOP_LOSS', 'PENDING'
+    exit_reason        TEXT,  -- 'TARGET_HIT', 'STOP_LOSS_HIT', 'HORIZON_EXPIRED', 'PENDING'
+    signal_score       INTEGER,
+    computed_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (unified_signal_id) REFERENCES unified_signals(id),
+    UNIQUE(unified_signal_id, horizon_days)
+  );
+  CREATE INDEX IF NOT EXISTS idx_uso_symbol_date ON unified_signal_outcomes(symbol, signal_date);
+  CREATE INDEX IF NOT EXISTS idx_uso_outcome ON unified_signal_outcomes(outcome);
+  CREATE INDEX IF NOT EXISTS idx_uso_source ON unified_signal_outcomes(signal_source);
+
+  -- Intraday tick-level data for real-time analysis and accurate entry/exit detection
+  CREATE TABLE IF NOT EXISTS tick_data (
+    symbol          TEXT NOT NULL,
+    tick_time       DATETIME NOT NULL,  -- Must include time for intraday matching
+    price           REAL NOT NULL,
+    bid             REAL,
+    ask             REAL,
+    volume          INTEGER,
+    volume_cum      INTEGER,  -- Cumulative volume for the day
+    PRIMARY KEY (symbol, tick_time)
+  );
+  CREATE INDEX IF NOT EXISTS idx_tick_symbol ON tick_data(symbol, tick_time DESC);
+  CREATE INDEX IF NOT EXISTS idx_tick_date ON tick_data(tick_time DESC);
+
+  -- PHASE 3.3: Signal Actions — Track user actions taken on signals (executed vs recommended)
+  CREATE TABLE IF NOT EXISTS signal_actions (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    signal_id           INTEGER NOT NULL,
+    signal_source       TEXT NOT NULL,  -- 'AI' | 'technical' | 'quant' | 'news'
+    symbol              TEXT NOT NULL,
+    user_id             TEXT,
+    action_type         TEXT NOT NULL,  -- 'BUY' | 'SELL' | 'HOLD' | 'SKIP'
+    executed_at         DATETIME NOT NULL,
+    quantity            INTEGER,
+    entry_price_rec     REAL,  -- Recommended entry price from signal
+    entry_actual        REAL,  -- Actual entry price if executed
+    target_price_rec    REAL,  -- Recommended target from signal
+    exit_price_actual   REAL,  -- Actual exit price if executed
+    exit_date           DATETIME,
+    pnl                 REAL,  -- Profit/loss amount if executed
+    pnl_pct             REAL,  -- Profit/loss percentage if executed
+    notes               TEXT,
+    created_at          DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at          DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (signal_id) REFERENCES unified_signals(id) ON DELETE CASCADE,
+    UNIQUE(signal_id, user_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_sa_user_id ON signal_actions(user_id);
+  CREATE INDEX IF NOT EXISTS idx_sa_symbol ON signal_actions(symbol);
+  CREATE INDEX IF NOT EXISTS idx_sa_source ON signal_actions(signal_source);
+  CREATE INDEX IF NOT EXISTS idx_sa_executed_at ON signal_actions(executed_at DESC);
+
+  -- PHASE 3.4: Portfolio-Signal Correlation — Track alignment between signals and portfolio
+  CREATE TABLE IF NOT EXISTS signal_portfolio_correlation (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    signal_id           INTEGER NOT NULL,
+    portfolio_symbol    TEXT NOT NULL,  -- Symbol in user's portfolio
+    signal_symbol       TEXT NOT NULL,  -- Symbol from signal
+    weight              REAL,  -- Portfolio weight (0-1) of the symbol
+    correlation_score   REAL,  -- Pearson correlation: -1 to 1
+    co_movement_pct     REAL,  -- % time both move in same direction
+    hedge_potential     INTEGER,  -- 1 if negatively correlated (hedge), 0 otherwise
+    momentum_alignment  INTEGER,  -- 1 if momentum aligned, 0 otherwise
+    computed_at         DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (signal_id) REFERENCES unified_signals(id) ON DELETE CASCADE,
+    UNIQUE(signal_id, portfolio_symbol)
+  );
+  CREATE INDEX IF NOT EXISTS idx_spc_portfolio_symbol ON signal_portfolio_correlation(portfolio_symbol);
+  CREATE INDEX IF NOT EXISTS idx_spc_correlation_score ON signal_portfolio_correlation(correlation_score DESC);
+  CREATE INDEX IF NOT EXISTS idx_spc_hedge ON signal_portfolio_correlation(hedge_potential);
+
+  -- PHASE 3.6: Multi-source reward tracking — Per-source signal performance
+  CREATE TABLE IF NOT EXISTS signal_source_weights (
+    signal_source       TEXT PRIMARY KEY,  -- 'AI' | 'technical' | 'quant' | 'news'
+    regime              TEXT NOT NULL,     -- 'UPTREND' | 'DOWNTREND' | 'SIDEWAYS'
+    sector              TEXT DEFAULT 'OTHER',
+    win_rate            REAL,              -- % of signals that were winners
+    avg_return_pct      REAL,              -- Average return on winning trades
+    total_signals       INTEGER DEFAULT 0, -- Total signals from this source
+    total_wins          INTEGER DEFAULT 0,
+    total_losses        INTEGER DEFAULT 0,
+    avg_sharpe_ratio    REAL,              -- Risk-adjusted returns
+    weight_multiplier   REAL DEFAULT 1.0,  -- EMA-smoothed performance multiplier
+    last_updated        DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(signal_source, regime, sector)
+  );
+  CREATE INDEX IF NOT EXISTS idx_source_weights_win_rate ON signal_source_weights(win_rate DESC);
+  CREATE INDEX IF NOT EXISTS idx_source_weights_sector ON signal_source_weights(sector);
+`);
+
 // --- Migrations & Upgrades ---
 const migrateColumn = (table: string, col: string, def: string) => {
   try { db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`); } catch { /* already exists */ }
@@ -718,5 +852,55 @@ migrateColumn('technical_signals', 'nifty_regime',   'TEXT');
 migrateColumn('technical_signals', 'delivery_pct',   'REAL');
 migrateColumn('technical_signals', 'fii_3d_net',     'REAL');
 migrateColumn('technical_signals', 'win_probability', 'REAL');
+
+// screener_master — signal type tag for dedup (prevents momentum/technical cross-bleed)
+migrateColumn('screener_master', 'signal_type_tag', "TEXT DEFAULT 'OTHER'");
+
+// signal_outcomes — max intraday high return over horizon for accurate WIN detection
+migrateColumn('signal_outcomes', 'max_return_pct', 'REAL');
+
+// PHASE 3.5: Schema Normalization — Ensure consistency across all tables
+// Standardize timestamp column naming: created_at, updated_at
+migrateColumn('users', 'created_at', 'DATETIME');
+migrateColumn('users', 'updated_at', 'DATETIME');
+
+migrateColumn('watchlist', 'created_at', 'DATETIME');
+migrateColumn('watchlist', 'updated_at', 'DATETIME');
+
+migrateColumn('stocks', 'created_at', 'DATETIME');
+migrateColumn('stocks', 'updated_at', 'DATETIME');
+
+migrateColumn('technical_signals', 'created_at', 'DATETIME');
+migrateColumn('technical_signals', 'updated_at', 'DATETIME');
+
+migrateColumn('signals', 'created_at', 'DATETIME');
+migrateColumn('signals', 'updated_at', 'DATETIME');
+
+migrateColumn('stock_fundamentals', 'created_at', 'DATETIME');
+migrateColumn('stock_fundamentals', 'updated_at', 'DATETIME');
+
+migrateColumn('stock_scores', 'created_at', 'DATETIME');
+migrateColumn('stock_scores', 'updated_at', 'DATETIME');
+
+migrateColumn('screener_master', 'created_at', 'DATETIME');
+migrateColumn('screener_master', 'updated_at', 'DATETIME');
+
+// Add indexes — each wrapped individually so one missing column doesn't abort the rest
+const tryIndex = (sql: string) => { try { db.exec(sql); } catch { /* column/table not yet migrated */ } };
+
+tryIndex(`CREATE INDEX IF NOT EXISTS idx_users_created_at ON users(created_at DESC)`);
+tryIndex(`CREATE INDEX IF NOT EXISTS idx_watchlist_created_at ON watchlist(created_at DESC)`);
+tryIndex(`CREATE INDEX IF NOT EXISTS idx_technical_signals_created_at ON technical_signals(created_at DESC)`);
+tryIndex(`CREATE INDEX IF NOT EXISTS idx_stock_scores_created_at ON stock_scores(created_at DESC)`);
+tryIndex(`CREATE INDEX IF NOT EXISTS idx_screener_master_created_at ON screener_master(created_at DESC)`);
+tryIndex(`CREATE INDEX IF NOT EXISTS idx_watchlist_userId ON watchlist(userId)`);
+tryIndex(`CREATE INDEX IF NOT EXISTS idx_technical_signals_symbol ON technical_signals(symbol)`);
+tryIndex(`CREATE INDEX IF NOT EXISTS idx_signals_symbol ON signals(symbol)`);
+tryIndex(`CREATE INDEX IF NOT EXISTS idx_stock_scores_symbol ON stock_scores(symbol)`);
+tryIndex(`CREATE INDEX IF NOT EXISTS idx_stock_ohlcv_date ON stock_ohlcv(date DESC)`);
+tryIndex(`CREATE INDEX IF NOT EXISTS idx_unified_signals_date ON unified_signals(signal_date DESC)`);
+
+// Verify key constraints
+console.log('[DB] Schema normalization complete (Phase 3.5)');
 
 export default db;
