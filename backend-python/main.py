@@ -4,6 +4,10 @@ from pydantic import BaseModel
 import sys
 import os
 
+# Ensure all app modules resolve database.sqlite relative to the project root,
+# not relative to wherever the process was launched from (e.g. backend-python/).
+os.chdir(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+
 app = FastAPI(title="Bharat Stock Intelligence - AI & Quant Engine")
 
 # Configure CORS
