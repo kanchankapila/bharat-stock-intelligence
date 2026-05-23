@@ -861,29 +861,29 @@ migrateColumn('signal_outcomes', 'max_return_pct', 'REAL');
 
 // PHASE 3.5: Schema Normalization — Ensure consistency across all tables
 // Standardize timestamp column naming: created_at, updated_at
-migrateColumn('users', 'created_at', 'DATETIME DEFAULT CURRENT_TIMESTAMP');
-migrateColumn('users', 'updated_at', 'DATETIME DEFAULT CURRENT_TIMESTAMP');
+migrateColumn('users', 'created_at', 'DATETIME');
+migrateColumn('users', 'updated_at', 'DATETIME');
 
-migrateColumn('watchlist', 'created_at', 'DATETIME DEFAULT CURRENT_TIMESTAMP');
-migrateColumn('watchlist', 'updated_at', 'DATETIME DEFAULT CURRENT_TIMESTAMP');
+migrateColumn('watchlist', 'created_at', 'DATETIME');
+migrateColumn('watchlist', 'updated_at', 'DATETIME');
 
-migrateColumn('stocks', 'created_at', 'DATETIME DEFAULT CURRENT_TIMESTAMP');
-migrateColumn('stocks', 'updated_at', 'DATETIME DEFAULT CURRENT_TIMESTAMP');
+migrateColumn('stocks', 'created_at', 'DATETIME');
+migrateColumn('stocks', 'updated_at', 'DATETIME');
 
-migrateColumn('technical_signals', 'created_at', 'DATETIME DEFAULT CURRENT_TIMESTAMP');
-migrateColumn('technical_signals', 'updated_at', 'DATETIME DEFAULT CURRENT_TIMESTAMP');
+migrateColumn('technical_signals', 'created_at', 'DATETIME');
+migrateColumn('technical_signals', 'updated_at', 'DATETIME');
 
-migrateColumn('signals', 'created_at', 'DATETIME DEFAULT CURRENT_TIMESTAMP');
-migrateColumn('signals', 'updated_at', 'DATETIME DEFAULT CURRENT_TIMESTAMP');
+migrateColumn('signals', 'created_at', 'DATETIME');
+migrateColumn('signals', 'updated_at', 'DATETIME');
 
-migrateColumn('stock_fundamentals', 'created_at', 'DATETIME DEFAULT CURRENT_TIMESTAMP');
-migrateColumn('stock_fundamentals', 'updated_at', 'DATETIME DEFAULT CURRENT_TIMESTAMP');
+migrateColumn('stock_fundamentals', 'created_at', 'DATETIME');
+migrateColumn('stock_fundamentals', 'updated_at', 'DATETIME');
 
-migrateColumn('stock_scores', 'created_at', 'DATETIME DEFAULT CURRENT_TIMESTAMP');
-migrateColumn('stock_scores', 'updated_at', 'DATETIME DEFAULT CURRENT_TIMESTAMP');
+migrateColumn('stock_scores', 'created_at', 'DATETIME');
+migrateColumn('stock_scores', 'updated_at', 'DATETIME');
 
-migrateColumn('screener_master', 'created_at', 'DATETIME DEFAULT CURRENT_TIMESTAMP');
-migrateColumn('screener_master', 'updated_at', 'DATETIME DEFAULT CURRENT_TIMESTAMP');
+migrateColumn('screener_master', 'created_at', 'DATETIME');
+migrateColumn('screener_master', 'updated_at', 'DATETIME');
 
 // Add indexes — each wrapped individually so one missing column doesn't abort the rest
 const tryIndex = (sql: string) => { try { db.exec(sql); } catch { /* column/table not yet migrated */ } };

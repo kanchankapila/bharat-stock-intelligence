@@ -22,7 +22,7 @@ import { updateSignalAccuracy } from "./src/server/signals";
 
 async function startServer() {
   const app = express();
-  const PORT = parseInt(process.env.PORT || '3000', 10);
+  const PORT = parseInt(process.env.PORT || '3002', 10);
 
   // Initialise AI & Redis (gracefully managed)
   await startOllama();
@@ -155,6 +155,28 @@ async function startServer() {
       console.log('[FALLBACK] Triggering scheduled Trendlyne intraday scan...');
       runIntradayScreenerScan().catch(console.error);
     }, 5 * 60 * 1000);
+  }
+  // ─── ETnow screener stocks: first-time trigger ───────────────────────────
+  const { getETnowStockCount, syncETnowScreeners } = await import('./src/server/etnowScreenerSync');
+  const { etnowScreenerSyncQueue } = await import('./src/server/queues');
+  const etnowStockCount = getETnowStockCount();
+
+  if (etnowStockCount === 0) {
+    if (bullmqReady && etnowScreenerSyncQueue) {
+      console.log('[SERVER] ETnow screener stocks empty — triggering first-time sync via BullMQ...');
+      await etnowScreenerSyncQueue.add(
+        'etnow-sync-first-run',
+        {},
+        { removeOnComplete: 3, removeOnFail: 3, attempts: 1, priority: 2 },
+      );
+    } else {
+      console.log('[SERVER] No Redis — starting ETnow sync directly...');
+      syncETnowScreeners().catch(err =>
+        console.error('[SERVER] ETnow first-time sync error:', err.message)
+      );
+    }
+  } else {
+    console.log(`[SERVER] ETnow screener stocks has ${etnowStockCount} rows — skipping first-run trigger`);
   }
   // ─────────────────────────────────────────────────────────────────────────
 

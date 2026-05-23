@@ -2,6 +2,14 @@ import db from './db';
 import { fetchETnowScreener } from './etnow';
 import { getSymbolFromMcsymbol } from './stockMapping';
 
+export function getETnowStockCount(): number {
+  try {
+    return (db.prepare('SELECT COUNT(*) as n FROM etnow_screener_stocks').get() as { n: number }).n;
+  } catch {
+    return 0;
+  }
+}
+
 /**
  * Sync ETNow screeners data and populate etnow_screener_stocks table.
  * Fetches stocks for each ETNow screener and inserts them into the DB.
@@ -11,8 +19,8 @@ export async function syncETnowScreeners(): Promise<void> {
   console.log('🔄 Starting ETNow screener synchronization...');
 
   const screeners = db.prepare(`
-    SELECT screener_id, screener_name FROM etnow_screeners
-  `).all() as Array<{ screener_id: string; screener_name: string }>;
+    SELECT screener_id, screener_name, query_condition FROM etnow_screeners
+  `).all() as Array<{ screener_id: string; screener_name: string; query_condition: string | null }>;
 
   if (screeners.length === 0) {
     console.warn('⚠️  No ETNow screeners found in database. Run initEtnowScreeners() first.');
@@ -34,8 +42,18 @@ export async function syncETnowScreeners(): Promise<void> {
     try {
       console.log(`  📍 Fetching: ${screener.screener_name} (ID: ${screener.screener_id})`);
 
+      // Parse the stored query_condition (double-encoded JSON) to extract the actual filter string
+      let queryCondition = '';
+      if (screener.query_condition) {
+        try {
+          const outer = JSON.parse(screener.query_condition);
+          const inner = typeof outer === 'string' ? JSON.parse(outer) : outer;
+          queryCondition = inner?.queryCondition ?? '';
+        } catch { /* fall back to empty string */ }
+      }
+
       // Fetch screener data from ETNow API
-      const response = await fetchETnowScreener(screener.screener_id, '');
+      const response = await fetchETnowScreener(screener.screener_id, queryCondition);
       
       // Handle actual API response format: { dataList, message, statusCode, unixDateTime }
       const records = response.dataList || 
@@ -56,17 +74,18 @@ export async function syncETnowScreeners(): Promise<void> {
 
         // Insert each stock
         for (const record of records) {
-          // ETNow API returns data in various formats depending on screener
-          const stockName = record.name || record.companyName || record.stock_name || record.shortName || '';
-          const stockSymbol = record.stkId || record.symbol || record.code || record.nseid || '';
+          const stockName = record.assetName || record.name || record.companyName || record.stock_name || record.shortName || '';
+          const rawSymbol = record.assetSymbol || record.stkId || record.symbol || record.code || record.nseid || '';
 
-          if (stockSymbol) {
-            // Try to resolve to NSE symbol if it's a different format
-            const nseSymbol = stockSymbol.includes('-NSE') 
-              ? stockSymbol.replace('-NSE', '')
-              : stockSymbol;
+          if (rawSymbol) {
+            // assetSymbol comes as e.g. "COALINDIAEQ" — strip exchange suffix
+            const nseSymbol = rawSymbol
+              .replace(/-NSE$/i, '')
+              .replace(/EQ$/i, '')
+              .replace(/BE$/i, '')
+              .trim();
 
-            insertStmt.run(screener.screener_id, nseSymbol, stockName);
+            if (nseSymbol) insertStmt.run(screener.screener_id, nseSymbol, stockName);
           }
         }
       })();
