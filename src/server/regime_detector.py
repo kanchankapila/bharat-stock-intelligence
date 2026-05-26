@@ -129,37 +129,38 @@ def update_regime(date: str = None) -> str:
     state_labels: dict      = bundle["state_labels"]
 
     con = sqlite3.connect(DB_PATH)
-    df = _load_hmm_features(con, lookback_days=120)  # recent 6 months for inference
+    try:
+        df = _load_hmm_features(con, lookback_days=120)  # recent 6 months for inference
 
-    if df.empty:
+        if df.empty:
+            return "SIDEWAYS"
+
+        X = scaler.transform(df.fillna(0))
+        viterbi_states = model.predict(X)            # most probable state sequence
+        fwd_probs      = model.predict_proba(X)      # forward algorithm probabilities
+
+        today_state     = int(viterbi_states[-1])
+        today_probs     = fwd_probs[-1]
+        today_regime    = state_labels.get(today_state, "SIDEWAYS")
+        today_prob      = float(today_probs[today_state])
+        viterbi_path    = [state_labels.get(int(s), "SIDEWAYS") for s in viterbi_states[-30:]]
+
+        features_dict = df.iloc[-1].to_dict()
+
+        con.execute(
+            """INSERT OR REPLACE INTO market_regimes
+               (date, regime, regime_prob, hmm_state, viterbi_path_json, features_json, computed_at)
+               VALUES (?,?,?,?,?,?,CURRENT_TIMESTAMP)""",
+            (date, today_regime, today_prob, today_state,
+             json.dumps(viterbi_path), json.dumps({k: float(v) if pd.notna(v) else None
+                                                   for k, v in features_dict.items()})),
+        )
+        con.commit()
+
+        print(f"[HMM] Regime for {date}: {today_regime} (prob={today_prob:.2f}, state={today_state})")
+        return today_regime
+    finally:
         con.close()
-        return "SIDEWAYS"
-
-    X = scaler.transform(df.fillna(0))
-    viterbi_states = model.predict(X)            # most probable state sequence
-    fwd_probs      = model.predict_proba(X)      # forward algorithm probabilities
-
-    today_state     = int(viterbi_states[-1])
-    today_probs     = fwd_probs[-1]
-    today_regime    = state_labels.get(today_state, "SIDEWAYS")
-    today_prob      = float(today_probs[today_state])
-    viterbi_path    = [state_labels.get(int(s), "SIDEWAYS") for s in viterbi_states[-30:]]
-
-    features_dict = df.iloc[-1].to_dict()
-
-    con.execute(
-        """INSERT OR REPLACE INTO market_regimes
-           (date, regime, regime_prob, hmm_state, viterbi_path_json, features_json, computed_at)
-           VALUES (?,?,?,?,?,?,CURRENT_TIMESTAMP)""",
-        (date, today_regime, today_prob, today_state,
-         json.dumps(viterbi_path), json.dumps({k: float(v) if pd.notna(v) else None
-                                               for k, v in features_dict.items()})),
-    )
-    con.commit()
-    con.close()
-
-    print(f"[HMM] Regime for {date}: {today_regime} (prob={today_prob:.2f}, state={today_state})")
-    return today_regime
 
 
 if __name__ == "__main__":
