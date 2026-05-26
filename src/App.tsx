@@ -67,6 +67,7 @@ import PremarketPanel from './components/PremarketPanel';
 import SmartMoneyPage from './components/SmartMoneyPage';
 import EarningsPage from './components/EarningsPage';
 import TradeDecisionCockpit from './components/TradeDecisionCockpit';
+import HedgeFundResearch from './components/HedgeFundResearch';
 import { 
   TickerTapeWidget, 
   TechnicalAnalysisWidget, 
@@ -3639,6 +3640,7 @@ export default function App() {
               ) : <div className="p-6">Select a stock to view details</div>} />
               <Route path="/backtest" element={<Backtest stocks={stocks} />} />
               <Route path="/signals" element={<DailySignals onSelectStock={(s) => setDrawerSymbol(s)} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
+              <Route path="/research" element={<HedgeFundResearch onAddWatchlist={toggleWatchlist} />} />
               <Route path="/strategy" element={<StrategyIntelligence onSelectStock={(s) => setDrawerSymbol(s)} />} />
               <Route path="/strategy-builder" element={<InvestmentStrategy onSelectStock={(s) => setDrawerSymbol(s)} />} />
               <Route path="/sentiment" element={<SentimentIntelligence onSelectStock={(s) => setDrawerSymbol(s)} />} />
