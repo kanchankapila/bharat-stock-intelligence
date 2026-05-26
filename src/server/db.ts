@@ -903,6 +903,26 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_source_weights_sector ON signal_source_weights(sector);
 `);
 
+// --- Daily Research Reports ---
+db.exec(`
+  CREATE TABLE IF NOT EXISTS daily_research_reports (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    report_date     TEXT NOT NULL,
+    report_type     TEXT NOT NULL CHECK(report_type IN ('PRE_MARKET','POST_CLOSE')),
+    status          TEXT NOT NULL DEFAULT 'PENDING'
+                    CHECK(status IN ('PENDING','GENERATING','READY','FAILED')),
+    generated_at    DATETIME,
+    market_regime   TEXT,
+    sentiment_score REAL,
+    fii_net_5d      REAL,
+    top_picks_json  TEXT,
+    report_json     TEXT,
+    ai_blurbs_json  TEXT,
+    error_message   TEXT,
+    UNIQUE(report_date, report_type)
+  );
+`);
+
 // --- Migrations & Upgrades ---
 const migrateColumn = (table: string, col: string, def: string) => {
   try { db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`); } catch (e: any) {
