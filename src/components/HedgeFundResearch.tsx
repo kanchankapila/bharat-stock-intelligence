@@ -497,10 +497,6 @@ export default function HedgeFundResearch({ onAddWatchlist }: HedgeFundResearchP
   );
 
   const { data: history } = trpc.getDailyResearchHistory.useQuery({ limit: 7 });
-  const { data: statusData } = trpc.getResearchStatus.useQuery(undefined, {
-    refetchInterval: pollStatus ? 15000 : false,
-  });
-
   const triggerGeneration = trpc.triggerResearchGeneration.useMutation();
 
   // Poll when GENERATING
