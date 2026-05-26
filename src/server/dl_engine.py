@@ -24,7 +24,7 @@ MODEL_DIR = Path(__file__).parent / "ml_models"
 CONFIG_PATH = MODEL_DIR / "dl_model_config.json"
 
 SEQUENCE_LEN = 60
-N_FEATURES   = 84
+N_FEATURES   = 79
 FEATURE_COLS = [
     "ret_1d","ret_5d","ret_15d","ret_21d","ret_63d","ret_126d","ret_252d",
     "sma20","sma50","sma200","ema8","ema21","dist_sma20_pct","dist_sma200_pct","above_sma200",
@@ -45,7 +45,7 @@ FEATURE_COLS = [
     # mtf cols already numeric; pad to 84
     "pcr_oi","pcr_vol","iv_rank","delivery_pct",
     "pb","rev_growth","eps_growth","advance_decline_ratio","nifty_pe",
-    "max_pain","dii_3d_net",  # duplicate fills to reach 84
+    "max_pain",
 ]
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -153,7 +153,7 @@ def load_inference_sequence(
     df = pd.read_sql(
         f"""SELECT date, {cols_sql}
             FROM feature_store WHERE symbol=? AND timeframe='D'
-            ORDER BY date DESC LIMIT {seq_len}""",
+            ORDER BY date DESC LIMIT {int(seq_len)}""",
         con, params=(symbol,),
     )
     if len(df) < seq_len:
@@ -315,16 +315,16 @@ def run_inference(prediction_date: str = None) -> None:
     conf_modifier   = {"BULL": 1.0, "SIDEWAYS": 1.0, "HIGH_VOL": 0.85, "BEAR": 0.85, "CRASH": 0.50}.get(regime, 1.0)
 
     written = 0
-    batch_X, batch_syms, batch_dates = [], [], []
+    batch_X, batch_syms = [], []
 
-    def flush(b_X, b_syms, b_dates):
+    def flush(b_X, b_syms):
         nonlocal written
         if not b_X:
             return
         X_np = np.concatenate(b_X, axis=0)
         preds = _predict_batch(model, X_np)
         cur = con.cursor()
-        for i, (sym, d) in enumerate(zip(b_syms, b_dates)):
+        for i, sym in enumerate(b_syms):
             pu_1d  = float(preds["dir_1d"][i][1])
             pu_5d  = float(preds["dir_5d"][i][1])
             pu_15d = float(preds["dir_15d"][i][1])
@@ -351,12 +351,12 @@ def run_inference(prediction_date: str = None) -> None:
         X, d = load_inference_sequence(sym, con)
         if X is None:
             continue
-        batch_X.append(X); batch_syms.append(sym); batch_dates.append(d)
+        batch_X.append(X); batch_syms.append(sym)
         if len(batch_X) >= 50:
-            flush(batch_X, batch_syms, batch_dates)
-            batch_X, batch_syms, batch_dates = [], [], []
+            flush(batch_X, batch_syms)
+            batch_X, batch_syms = [], []
 
-    flush(batch_X, batch_syms, batch_dates)
+    flush(batch_X, batch_syms)
     con.close()
     print(f"[DL] Inference complete: {written} predictions written for {prediction_date}")
 
