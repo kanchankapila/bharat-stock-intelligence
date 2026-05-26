@@ -69,6 +69,12 @@ export const QUEUE_OUTCOME_RESOLVER     = 'outcome-resolver';
 export const QUEUE_ML_DAILY_OPS        = 'ml-daily-ops';
 export const QUEUE_RESEARCH_PREMARKET  = 'research-premarket';
 export const QUEUE_RESEARCH_POSTCLOSE  = 'research-postclose';
+export const QUEUE_DL_MACRO_FETCH       = 'dl-macro-fetch';
+export const QUEUE_DL_FEATURE_REFRESH   = 'dl-feature-refresh';
+export const QUEUE_DL_INFERENCE         = 'dl-inference';
+export const QUEUE_DL_REGIME_UPDATE     = 'dl-regime-update';
+export const QUEUE_DL_RETRAIN_WEEKLY    = 'dl-retrain-weekly';
+export const QUEUE_DL_RETRAIN_EMERGENCY = 'dl-retrain-emergency';
 
 const BULK_CACHE_KEY      = 'live-stocks-bulk';
 const BULK_TTL_SECONDS    = 5 * 60;
@@ -109,6 +115,19 @@ export let researchPremarketQueue: Queue | null = null;
 export let researchPostcloseQueue: Queue | null = null;
 let researchPremarketWorker: Worker | null = null;
 let researchPostcloseWorker: Worker | null = null;
+export let dlMacroFetchQueue:       Queue | null = null;
+export let dlFeatureRefreshQueue:   Queue | null = null;
+export let dlInferenceQueue:        Queue | null = null;
+export let dlRegimeUpdateQueue:     Queue | null = null;
+export let dlRetrainWeeklyQueue:    Queue | null = null;
+export let dlRetrainEmergencyQueue: Queue | null = null;
+
+let dlMacroFetchWorker:       Worker | null = null;
+let dlFeatureRefreshWorker:   Worker | null = null;
+let dlInferenceWorker:        Worker | null = null;
+let dlRegimeUpdateWorker:     Worker | null = null;
+let dlRetrainWeeklyWorker:    Worker | null = null;
+let dlRetrainEmergencyWorker: Worker | null = null;
 
 // Shared in-process mirror populated by the stock-refresh worker
 // (same reference as the one exported from liveStockData via the cache layer)
@@ -247,6 +266,19 @@ async function processResearchPostclose(_job: Job): Promise<{ success: boolean }
   const { generateDailyReport } = await import('./researchEngine');
   const today = new Date().toISOString().split('T')[0];
   await generateDailyReport(today, 'POST_CLOSE');
+  return { success: true };
+}
+
+// ─── DL Python runner ────────────────────────────────────────────────────────
+
+async function processDLPython(script: string, args: string = ''): Promise<{ success: boolean }> {
+  const { exec } = await import('child_process');
+  const { promisify } = await import('util');
+  const execAsync = promisify(exec);
+  const pyDir = process.cwd() + '/src/server';
+  const { stdout, stderr } = await execAsync(`python ${script} ${args}`, { cwd: pyDir, timeout: 6 * 60 * 60 * 1000 });
+  if (stdout) console.log(`[QUEUE] ${script}:`, stdout.slice(0, 200));
+  if (stderr) console.warn(`[QUEUE] ${script} stderr:`, stderr.slice(0, 200));
   return { success: true };
 }
 
@@ -859,6 +891,92 @@ export async function initQueues(): Promise<boolean> {
     researchPostcloseWorker.on('completed', () => console.log('[QUEUE] research-postclose done'));
     researchPostcloseWorker.on('failed', (_, err) => console.error('[QUEUE] research-postclose failed:', err.message));
 
+    // ── DL Macro Fetch (8:00 AM IST = 2:30 AM UTC, weekdays) ────────────────
+    dlMacroFetchQueue = new Queue(QUEUE_DL_MACRO_FETCH, { connection });
+    const dlMacroRep = await dlMacroFetchQueue.getRepeatableJobs();
+    for (const r of dlMacroRep) await dlMacroFetchQueue.removeRepeatableByKey(r.key);
+    await dlMacroFetchQueue.add('dl-macro-daily', {}, {
+      repeat: { pattern: '30 2 * * 1-5' },
+      jobId: 'dl-macro-daily',
+      removeOnComplete: 3, removeOnFail: 3,
+    });
+    dlMacroFetchWorker = new Worker(QUEUE_DL_MACRO_FETCH,
+      async () => processDLPython('global_macro_fetcher.py'),
+      { connection, concurrency: 1, lockDuration: 5 * 60 * 1000 });
+    dlMacroFetchWorker.on('completed', () => console.log('[QUEUE] dl-macro-fetch done'));
+    dlMacroFetchWorker.on('failed', (_, err) => console.error('[QUEUE] dl-macro-fetch failed:', err.message));
+
+    // ── DL Feature Refresh (3:30 PM IST = 10:00 AM UTC, weekdays) ───────────
+    dlFeatureRefreshQueue = new Queue(QUEUE_DL_FEATURE_REFRESH, { connection });
+    const dlFeatRep = await dlFeatureRefreshQueue.getRepeatableJobs();
+    for (const r of dlFeatRep) await dlFeatureRefreshQueue.removeRepeatableByKey(r.key);
+    await dlFeatureRefreshQueue.add('dl-feature-daily', {}, {
+      repeat: { pattern: '0 10 * * 1-5' },
+      jobId: 'dl-feature-daily',
+      removeOnComplete: 3, removeOnFail: 3,
+    });
+    dlFeatureRefreshWorker = new Worker(QUEUE_DL_FEATURE_REFRESH,
+      async () => processDLPython('feature_engineering.py'),
+      { connection, concurrency: 1, lockDuration: 60 * 60 * 1000, lockRenewTime: 10 * 60 * 1000 });
+    dlFeatureRefreshWorker.on('completed', () => console.log('[QUEUE] dl-feature-refresh done'));
+    dlFeatureRefreshWorker.on('failed', (_, err) => console.error('[QUEUE] dl-feature-refresh failed:', err.message));
+
+    // ── DL Inference (4:30 PM IST = 11:00 AM UTC, weekdays) ─────────────────
+    dlInferenceQueue = new Queue(QUEUE_DL_INFERENCE, { connection });
+    const dlInfRep = await dlInferenceQueue.getRepeatableJobs();
+    for (const r of dlInfRep) await dlInferenceQueue.removeRepeatableByKey(r.key);
+    await dlInferenceQueue.add('dl-infer-daily', {}, {
+      repeat: { pattern: '0 11 * * 1-5' },
+      jobId: 'dl-infer-daily',
+      removeOnComplete: 3, removeOnFail: 3,
+    });
+    dlInferenceWorker = new Worker(QUEUE_DL_INFERENCE,
+      async () => processDLPython('dl_engine.py', '--mode infer'),
+      { connection, concurrency: 1, lockDuration: 30 * 60 * 1000, lockRenewTime: 5 * 60 * 1000 });
+    dlInferenceWorker.on('completed', () => console.log('[QUEUE] dl-inference done'));
+    dlInferenceWorker.on('failed', (_, err) => console.error('[QUEUE] dl-inference failed:', err.message));
+
+    // ── DL Regime Update (4:45 PM IST = 11:15 AM UTC, weekdays) ─────────────
+    dlRegimeUpdateQueue = new Queue(QUEUE_DL_REGIME_UPDATE, { connection });
+    const dlRegRep = await dlRegimeUpdateQueue.getRepeatableJobs();
+    for (const r of dlRegRep) await dlRegimeUpdateQueue.removeRepeatableByKey(r.key);
+    await dlRegimeUpdateQueue.add('dl-regime-daily', {}, {
+      repeat: { pattern: '15 11 * * 1-5' },
+      jobId: 'dl-regime-daily',
+      removeOnComplete: 3, removeOnFail: 3,
+    });
+    dlRegimeUpdateWorker = new Worker(QUEUE_DL_REGIME_UPDATE,
+      async () => processDLPython('regime_detector.py', '--mode update'),
+      { connection, concurrency: 1, lockDuration: 5 * 60 * 1000 });
+    dlRegimeUpdateWorker.on('completed', () => console.log('[QUEUE] dl-regime-update done'));
+    dlRegimeUpdateWorker.on('failed', (_, err) => console.error('[QUEUE] dl-regime-update failed:', err.message));
+
+    // ── DL Weekly Retrain (Sunday 11:00 PM IST = Sun 17:30 UTC) ─────────────
+    dlRetrainWeeklyQueue = new Queue(QUEUE_DL_RETRAIN_WEEKLY, { connection });
+    const dlWkRep = await dlRetrainWeeklyQueue.getRepeatableJobs();
+    for (const r of dlWkRep) await dlRetrainWeeklyQueue.removeRepeatableByKey(r.key);
+    await dlRetrainWeeklyQueue.add('dl-retrain-weekly', {}, {
+      repeat: { pattern: '30 17 * * 0' },
+      jobId: 'dl-retrain-weekly',
+      removeOnComplete: 2, removeOnFail: 3,
+    });
+    dlRetrainWeeklyWorker = new Worker(QUEUE_DL_RETRAIN_WEEKLY,
+      async (_job: Job) => {
+        const trigger = _job.data?.trigger || 'scheduled';
+        return processDLPython('dl_trainer.py', `--trigger ${trigger}`);
+      },
+      { connection, concurrency: 1, lockDuration: 6 * 60 * 60 * 1000, lockRenewTime: 30 * 60 * 1000 });
+    dlRetrainWeeklyWorker.on('completed', () => console.log('[QUEUE] dl-retrain-weekly done'));
+    dlRetrainWeeklyWorker.on('failed', (_, err) => console.error('[QUEUE] dl-retrain-weekly failed:', err.message));
+
+    // ── DL Emergency Retrain (on-demand, triggered by drift detector) ────────
+    dlRetrainEmergencyQueue = new Queue(QUEUE_DL_RETRAIN_EMERGENCY, { connection });
+    dlRetrainEmergencyWorker = new Worker(QUEUE_DL_RETRAIN_EMERGENCY,
+      async () => processDLPython('dl_trainer.py', '--trigger drift'),
+      { connection, concurrency: 1, lockDuration: 6 * 60 * 60 * 1000, lockRenewTime: 30 * 60 * 1000 });
+    dlRetrainEmergencyWorker.on('completed', () => console.log('[QUEUE] dl-retrain-emergency done'));
+    dlRetrainEmergencyWorker.on('failed', (_, err) => console.error('[QUEUE] dl-retrain-emergency failed:', err.message));
+
     console.warn = _origWarn;
     console.log('[QUEUE] BullMQ initialised (stock-refresh + ai-signals)');
     return true;
@@ -907,6 +1025,18 @@ export async function shutdownQueues(): Promise<void> {
     researchPremarketQueue?.close(),
     researchPostcloseWorker?.close(),
     researchPostcloseQueue?.close(),
+    dlMacroFetchWorker?.close(),
+    dlMacroFetchQueue?.close(),
+    dlFeatureRefreshWorker?.close(),
+    dlFeatureRefreshQueue?.close(),
+    dlInferenceWorker?.close(),
+    dlInferenceQueue?.close(),
+    dlRegimeUpdateWorker?.close(),
+    dlRegimeUpdateQueue?.close(),
+    dlRetrainWeeklyWorker?.close(),
+    dlRetrainWeeklyQueue?.close(),
+    dlRetrainEmergencyWorker?.close(),
+    dlRetrainEmergencyQueue?.close(),
   ]);
 }
 
