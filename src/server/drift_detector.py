@@ -116,9 +116,10 @@ def check_accuracy_drift(model_name: str = "LSTM_TFT_ENSEMBLE", horizon: int = 5
         baseline_acc = baseline_row[0]
 
         cutoff = (datetime.today() - timedelta(days=30)).strftime("%Y-%m-%d")
+        h = int(horizon)
         rows = pd.read_sql(
-            f"""SELECT prob_up_{horizon}d, outcome_{horizon}d FROM deep_learning_predictions
-                WHERE model_name=? AND prediction_date>=? AND outcome_{horizon}d IS NOT NULL""",
+            f"""SELECT prob_up_{h}d, outcome_{h}d FROM deep_learning_predictions
+                WHERE model_name=? AND prediction_date>=? AND outcome_{h}d IS NOT NULL""",
             con, params=(model_name, cutoff),
         )
     finally:
@@ -127,8 +128,8 @@ def check_accuracy_drift(model_name: str = "LSTM_TFT_ENSEMBLE", horizon: int = 5
     if len(rows) < 20:
         return {"status": "INSUFFICIENT_OUTCOMES", "n_resolved": len(rows)}
 
-    pred_dir = (rows[f"prob_up_{horizon}d"] > 0.5).astype(int)
-    actual   = (rows[f"outcome_{horizon}d"] == "WIN").astype(int)
+    pred_dir = (rows[f"prob_up_{h}d"] > 0.5).astype(int)
+    actual   = (rows[f"outcome_{h}d"] == "WIN").astype(int)
     recent_acc = float((pred_dir == actual).mean())
     drop       = baseline_acc - recent_acc
 
