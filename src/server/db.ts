@@ -923,6 +923,105 @@ db.exec(`
   );
 `);
 
+// --- Deep Learning Engine Tables ---
+db.exec(`
+  CREATE TABLE IF NOT EXISTS macro_indicators (
+    date        TEXT NOT NULL,
+    symbol      TEXT NOT NULL,
+    close       REAL,
+    ret_1d      REAL,
+    ret_5d      REAL,
+    fetched_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (date, symbol)
+  );
+
+  CREATE TABLE IF NOT EXISTS feature_store (
+    symbol          TEXT NOT NULL,
+    date            TEXT NOT NULL,
+    timeframe       TEXT NOT NULL DEFAULT 'D',
+    ret_1d REAL, ret_5d REAL, ret_15d REAL, ret_21d REAL,
+    ret_63d REAL, ret_126d REAL, ret_252d REAL,
+    sma20 REAL, sma50 REAL, sma200 REAL, ema8 REAL, ema21 REAL,
+    dist_sma20_pct REAL, dist_sma200_pct REAL, above_sma200 INTEGER,
+    rsi_14 REAL, rsi_28 REAL,
+    macd REAL, macd_signal REAL, macd_hist REAL,
+    adx REAL, di_plus REAL, di_minus REAL,
+    stoch_k REAL, stoch_d REAL, cci REAL, williams_r REAL,
+    atr_14 REAL, atr_pct REAL,
+    bb_upper REAL, bb_lower REAL, bb_width REAL, bb_pct REAL,
+    hist_vol_21d REAL, hist_vol_63d REAL, vol_regime TEXT,
+    volume_ratio_20d REAL, volume_ratio_5d REAL,
+    obv REAL, obv_slope REAL, vwap REAL, vwap_dist_pct REAL,
+    trend_1d TEXT, trend_1w TEXT, trend_1m TEXT, mtf_alignment_score REAL,
+    pcr_oi REAL, pcr_vol REAL, iv_rank REAL, max_pain REAL,
+    fii_3d_net REAL, fii_10d_net REAL, dii_3d_net REAL, delivery_pct REAL,
+    trailing_pe REAL, pb REAL, roe REAL, debt_to_equity REAL,
+    op_margins REAL, rev_growth REAL, eps_growth REAL,
+    piotroski_f REAL, earnings_yield REAL,
+    nifty_vix REAL, nifty_pe REAL, advance_decline_ratio REAL,
+    nifty_ret_5d REAL, nifty_ret_21d REAL,
+    us_10y_yield REAL, dxy REAL,
+    crude_ret_5d REAL, gold_ret_5d REAL, sp500_ret_5d REAL,
+    news_sentiment_score REAL, news_impact_count INTEGER,
+    target_ret_1d REAL, target_ret_5d REAL, target_ret_15d REAL,
+    target_dir_1d INTEGER, target_dir_5d INTEGER, target_dir_15d INTEGER,
+    computed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (symbol, date, timeframe)
+  );
+
+  CREATE TABLE IF NOT EXISTS deep_learning_predictions (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol          TEXT NOT NULL,
+    prediction_date TEXT NOT NULL,
+    model_name      TEXT NOT NULL,
+    model_version   TEXT NOT NULL,
+    prob_up_1d  REAL, prob_up_5d  REAL, prob_up_15d  REAL,
+    prob_dn_1d  REAL, prob_dn_5d  REAL, prob_dn_15d  REAL,
+    exp_ret_1d  REAL, exp_ret_5d  REAL, exp_ret_15d  REAL,
+    confidence  REAL,
+    uncertainty REAL,
+    regime            TEXT,
+    regime_confidence REAL,
+    top_features_json TEXT,
+    attention_json    TEXT,
+    actual_ret_5d   REAL,
+    actual_ret_15d  REAL,
+    outcome_5d      TEXT,
+    outcome_15d     TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(symbol, prediction_date, model_name)
+  );
+
+  CREATE TABLE IF NOT EXISTS dl_model_performance (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    model_name    TEXT NOT NULL,
+    model_version TEXT NOT NULL,
+    eval_date     TEXT NOT NULL,
+    horizon_days  INTEGER NOT NULL,
+    directional_accuracy REAL,
+    roc_auc       REAL,
+    precision_up  REAL,
+    recall_up     REAL,
+    f1_score      REAL,
+    sharpe_ratio  REAL,
+    profit_factor REAL,
+    sample_count  INTEGER,
+    drift_score   REAL,
+    retrain_triggered INTEGER DEFAULT 0,
+    UNIQUE(model_name, eval_date, horizon_days)
+  );
+
+  CREATE TABLE IF NOT EXISTS market_regimes (
+    date            TEXT PRIMARY KEY,
+    regime          TEXT NOT NULL,
+    regime_prob     REAL,
+    hmm_state       INTEGER,
+    viterbi_path_json TEXT,
+    features_json   TEXT,
+    computed_at     DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+`);
+
 // --- Migrations & Upgrades ---
 const migrateColumn = (table: string, col: string, def: string) => {
   try { db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`); } catch (e: any) {
