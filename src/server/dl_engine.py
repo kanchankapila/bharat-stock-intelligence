@@ -24,7 +24,7 @@ MODEL_DIR = Path(__file__).parent / "ml_models"
 CONFIG_PATH = MODEL_DIR / "dl_model_config.json"
 
 SEQUENCE_LEN = 60
-N_FEATURES   = 79
+N_FEATURES   = 78
 FEATURE_COLS = [
     "ret_1d","ret_5d","ret_15d","ret_21d","ret_63d","ret_126d","ret_252d",
     "sma20","sma50","sma200","ema8","ema21","dist_sma20_pct","dist_sma200_pct","above_sma200",
