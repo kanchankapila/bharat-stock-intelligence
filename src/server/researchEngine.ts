@@ -103,10 +103,12 @@ function scoreStocks(): { picks: StockPick[]; avoid: { symbol: string; reason: s
   `).all() as any[]).forEach(r => techMap.set(r.symbol, r));
 
   const xgbMap = new Map<string, any>();
-  (db.prepare(`
-    SELECT symbol, xgboost_score, signal, is_growth, is_breakout
-    FROM xgboost_predictions WHERE signal = 'BUY'
-  `).all() as any[]).forEach(r => xgbMap.set(r.symbol, r));
+  try {
+    (db.prepare(`
+      SELECT symbol, xgboost_score, signal, is_growth, is_breakout
+      FROM xgboost_predictions WHERE signal = 'BUY'
+    `).all() as any[]).forEach(r => xgbMap.set(r.symbol, r));
+  } catch { /* table may not exist */ }
 
   const newsMap = new Map<string, number>();
   (db.prepare(`
@@ -271,6 +273,21 @@ function getSectorRankings(): { sector: string; score: number; momentum: string 
   }));
 }
 
+function buildExecutiveSummary(
+  regime: string,
+  fii_net_5d: number,
+  sentimentScore: number,
+  topPick: StockPick | undefined,
+  topSector: string | undefined
+): string {
+  const fiiDir = fii_net_5d > 0 ? 'net buyers' : 'net sellers';
+  const fiiAmt = Math.abs(fii_net_5d / 100).toFixed(0);
+  const sentDir = sentimentScore > 10 ? 'bullish' : sentimentScore < -10 ? 'bearish' : 'neutral';
+  const pickStr = topPick ? `Top conviction pick is ${topPick.symbol} with score ${topPick.conviction_score}/100.` : '';
+  const sectorStr = topSector ? `${topSector} leads sector momentum.` : '';
+  return `Market regime is ${regime} with FIIs being ${fiiDir} (₹${fiiAmt}Cr over 5 days) and overall sentiment ${sentDir}. ${pickStr} ${sectorStr}`.trim();
+}
+
 export async function generateDailyReport(
   report_date: string,
   report_type: 'PRE_MARKET' | 'POST_CLOSE'
@@ -305,7 +322,7 @@ export async function generateDailyReport(
       watchlist:         watch10,
       avoid_list:        avoid.slice(0, 10),
       sector_rankings:   sectors,
-      executive_summary: '',
+      executive_summary: buildExecutiveSummary(ctx.regime, ctx.fii_net_5d, ctx.sentiment_score, top10[0], sectors[0]?.sector),
     };
 
     db.prepare(`
