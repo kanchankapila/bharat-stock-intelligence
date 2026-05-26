@@ -925,7 +925,7 @@ db.exec(`
 
 // --- Deep Learning Engine Tables ---
 db.exec(`
-  CREATE TABLE IF NOT EXISTS macro_indicators (
+  CREATE TABLE IF NOT EXISTS macro_asset_prices (
     date        TEXT NOT NULL,
     symbol      TEXT NOT NULL,
     close       REAL,
