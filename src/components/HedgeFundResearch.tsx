@@ -269,8 +269,8 @@ function StockDeepDive({
               <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3">AI Model Signals</p>
               <div className="flex gap-2 mb-3">
                 {([1, 5, 15] as const).map(h => {
-                  const prob = dl[`prob_up_${h}d`] as number;
-                  const ret  = dl[`exp_ret_${h}d`] as number;
+                  const prob = (dl[`prob_up_${h}d`] as number) ?? 0;
+                  const ret  = dl[`exp_ret_${h}d`] as number | null;
                   const color = prob >= 0.65 ? 'text-emerald-400' : prob >= 0.50 ? 'text-amber-400' : 'text-rose-400';
                   return (
                     <div key={h} className="flex-1 glass rounded-lg p-2 text-center">
@@ -359,7 +359,7 @@ function TopPicksTable({
                 {(() => {
                   const dl = dlBySymbol?.get(pick.symbol);
                   if (!dl) return <span className="text-slate-600">—</span>;
-                  const prob = dl.prob_up_5d as number;
+                  const prob = (dl.prob_up_5d as number) ?? 0;
                   const color = prob >= 0.65 ? 'text-emerald-400' : prob >= 0.50 ? 'text-amber-400' : 'text-rose-400';
                   return <span className={color}>{(prob * 100).toFixed(0)}%</span>;
                 })()}
