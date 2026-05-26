@@ -128,11 +128,11 @@ async function startServer() {
         console.error('[SERVER] Technical signal scan error:', err.message)
       );
     }
-    // Fallback: run every 24 hours
+    // Fallback: run every 30 minutes
     setInterval(() => {
-      console.log('[FALLBACK] Triggering daily technical signal scan...');
+      console.log('[FALLBACK] Triggering scheduled 30-min technical signal scan...');
       runTechnicalSignalScan().catch(console.error);
-    }, 24 * 60 * 60 * 1000);
+    }, 30 * 60 * 1000);
   }
   // ─── Trendlyne Intraday Screeners: scheduling & startup trigger ─────────
   const { runIntradayScreenerScan } = await import('./src/server/trendlyneScreener');
@@ -146,15 +146,31 @@ async function startServer() {
       { removeOnComplete: 3, removeOnFail: 3, attempts: 1, priority: 2 },
     );
   } else {
-    console.log('[SERVER] No Redis — starting first-time Trendlyne intraday scan directly...');
-    runIntradayScreenerScan().catch(err =>
+    console.log('[SERVER] No Redis — starting first-time Trendlyne intraday sync & scan directly...');
+    (async () => {
+      const { syncAllScreenerStocksToDB } = await import('./src/server/trendlyneScreener');
+      const { syncMoneyControlScreeners } = await import('./src/server/moneycontrolScreener');
+      const { syncETnowScreeners } = await import('./src/server/etnowScreenerSync');
+      
+      await syncAllScreenerStocksToDB('intraday').catch(console.error);
+      await syncMoneyControlScreeners('intraday').catch(console.error);
+      await syncETnowScreeners('intraday').catch(console.error);
+      await runIntradayScreenerScan();
+    })().catch(err =>
       console.error('[SERVER] First-time Trendlyne scan error:', err.message)
     );
-    // Legacy fallback: run every 5 minutes
-    setInterval(() => {
-      console.log('[FALLBACK] Triggering scheduled Trendlyne intraday scan...');
+    // Legacy fallback: run every 15 minutes
+    setInterval(async () => {
+      console.log('[FALLBACK] Triggering scheduled Trendlyne intraday scan & sync...');
+      const { syncAllScreenerStocksToDB } = await import('./src/server/trendlyneScreener');
+      const { syncMoneyControlScreeners } = await import('./src/server/moneycontrolScreener');
+      const { syncETnowScreeners } = await import('./src/server/etnowScreenerSync');
+      
+      await syncAllScreenerStocksToDB('intraday').catch(console.error);
+      await syncMoneyControlScreeners('intraday').catch(console.error);
+      await syncETnowScreeners('intraday').catch(console.error);
       runIntradayScreenerScan().catch(console.error);
-    }, 5 * 60 * 1000);
+    }, 15 * 60 * 1000);
   }
   // ─── ETnow screener stocks: first-time trigger ───────────────────────────
   const { getETnowStockCount, syncETnowScreeners } = await import('./src/server/etnowScreenerSync');
@@ -185,6 +201,22 @@ async function startServer() {
     const { startBackgroundRefresh } = await import('./src/server/liveStockData');
     startBackgroundRefresh();
 
+    // Fallback for daily OHLCV persistence (Mon-Fri at 4:30 PM IST / 11:00 AM UTC)
+    setInterval(async () => {
+      const now = new Date();
+      const hours = now.getUTCHours();
+      if (hours === 11) { // 11:00 AM UTC = 4:30 PM IST
+        console.log('[FALLBACK] Triggering daily OHLCV persistence...');
+        const { getOrRefreshAllStocks, persistTodayOHLCVData } = await import('./src/server/liveStockData');
+        try {
+          const stocks = await getOrRefreshAllStocks();
+          await persistTodayOHLCVData(stocks);
+        } catch (err: any) {
+          console.error('[FALLBACK] Failed to persist daily OHLCV:', err.message);
+        }
+      }
+    }, 60 * 60 * 1000); // Check hourly
+
     // Fallback for scoring: run once every 24 hours
     const { syncAndScore } = await import('./src/server/scoringService');
     setInterval(async () => {
@@ -199,12 +231,12 @@ async function startServer() {
       await syncMoneyControlScreeners();
     }, 12 * 60 * 60 * 1000);
 
-    // Fallback for News Sentiment sync: run every 1 minute
+    // Fallback for News Sentiment sync: run every 30 seconds
     setInterval(async () => {
       console.log('[FALLBACK] Triggering News Sentiment cycle...');
       const { runNewsSentimentCycle } = await import('./src/server/newsSentimentService');
       await runNewsSentimentCycle();
-    }, 1 * 60 * 1000);
+    }, 30 * 1000);
 
     // Trigger immediate sync on start if fallback
     syncAndScore();

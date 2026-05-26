@@ -290,9 +290,23 @@ class Backtester:
                 if pd.isna(entry_price) or entry_price <= 0:
                     continue
 
-                # Equal-weight position size
-                position_capital = cash / max(max_positions - len(open_positions), 1)
-                position_capital = min(position_capital, cash * 0.1)  # max 10% per trade
+                # Position sizing logic
+                use_kelly = False  # Phase 3 scaffold flag
+                if use_kelly:
+                    # Phase 3 Scaffold: Kelly Criterion
+                    # f* = W - (1-W)/R, where W = win_rate, R = win/loss ratio
+                    # TODO: Fetch dynamic win rate and W/L ratio per signal type from database
+                    historical_win_rate = 0.55
+                    historical_win_loss_ratio = 1.2
+                    kelly_f = historical_win_rate - ((1 - historical_win_rate) / historical_win_loss_ratio)
+                    kelly_f = max(0, min(kelly_f, 0.2)) # Cap at 20% max allocation
+                    position_capital = capital * kelly_f  # fraction of total capital
+                    position_capital = min(position_capital, cash) # Can't invest more than cash
+                else:
+                    # Equal-weight position size
+                    position_capital = cash / max(max_positions - len(open_positions), 1)
+                    
+                position_capital = min(position_capital, capital * 0.1)  # max 10% per trade hard cap
                 if position_capital < 1000:
                     continue
                 shares = math.floor(position_capital / entry_price)

@@ -92,7 +92,7 @@ const SuperstarCard: React.FC<{
         'w-full text-left rounded-xl border transition-all duration-200 overflow-hidden group',
         selected
           ? 'border-indigo-500/60 bg-indigo-950/40 shadow-[0_0_24px_rgba(99,102,241,0.15)]'
-          : 'border-white/[0.06] bg-slate-900/60 hover:border-white/[0.12] hover:bg-slate-900'
+          : 'border-white/[0.06] bg-slate-900/60 hover:border-white/[0.12] hover:glass'
       )}
     >
       <div className="p-4">
@@ -111,9 +111,9 @@ const SuperstarCard: React.FC<{
             </div>
           )}
           <div className="min-w-0">
-            <div className="text-white font-bold text-sm leading-tight truncate">{name}</div>
+            <div className="text-slate-100 font-bold text-sm leading-tight truncate">{name}</div>
             {star.category && (
-              <div className="text-[9px] text-indigo-400 uppercase tracking-widest font-bold mt-0.5">{star.category}</div>
+              <div className="text-[10px] text-indigo-400 uppercase tracking-widest font-bold mt-0.5">{star.category}</div>
             )}
           </div>
           {selected && (
@@ -126,18 +126,18 @@ const SuperstarCard: React.FC<{
         {/* Stats */}
         <div className="grid grid-cols-2 gap-2">
           <div className="bg-slate-950/60 rounded-lg px-2.5 py-2 border border-white/[0.04]">
-            <div className="text-[8px] text-slate-500 uppercase tracking-widest font-bold mb-0.5">Stocks</div>
+            <div className="text-[9.5px] text-slate-400 uppercase tracking-widest font-bold mb-0.5">Stocks</div>
             <div className="text-white font-black text-sm tabular-nums">{stockCount || '—'}</div>
           </div>
           <div className="bg-slate-950/60 rounded-lg px-2.5 py-2 border border-white/[0.04]">
-            <div className="text-[8px] text-slate-500 uppercase tracking-widest font-bold mb-0.5">Portfolio</div>
+            <div className="text-[9.5px] text-slate-400 uppercase tracking-widest font-bold mb-0.5">Portfolio</div>
             <div className="text-emerald-400 font-black text-xs tabular-nums truncate">{portfolioVal}</div>
           </div>
         </div>
 
         {netWorth && netWorth !== '—' && (
-          <div className="mt-2 flex justify-between text-[9px]">
-            <span className="text-slate-600 font-bold uppercase tracking-wider">Net Worth</span>
+          <div className="mt-2 flex justify-between text-[10px]">
+            <span className="text-slate-400 font-bold uppercase tracking-wider">Net Worth</span>
             <span className="text-slate-400 font-bold">{netWorth}</span>
           </div>
         )}
@@ -185,7 +185,7 @@ const HoldingRow: React.FC<{ holding: any; rank: number }> = ({ holding, rank })
       >
         {/* Rank */}
         <td className="py-3 pl-4 pr-2 w-10">
-          <span className="text-[10px] text-slate-700 font-bold tabular-nums">{rank}</span>
+          <span className="text-[10px] text-slate-300 font-bold tabular-nums">{rank}</span>
         </td>
 
         {/* Stock */}
@@ -201,7 +201,7 @@ const HoldingRow: React.FC<{ holding: any; rank: number }> = ({ holding, rank })
                   <span className="text-[7px] font-black bg-rose-500/15 text-rose-400 border border-rose-500/20 rounded px-1 py-px tracking-wider">EXITED</span>
                 )}
               </div>
-              <div className="text-[10px] text-slate-500 truncate max-w-[160px]">{name}</div>
+              <div className="text-[10px] text-slate-400 truncate max-w-[160px]">{name}</div>
             </div>
           </div>
         </td>
@@ -209,7 +209,7 @@ const HoldingRow: React.FC<{ holding: any; rank: number }> = ({ holding, rank })
         {/* Sector */}
         <td className="py-3 pr-3 hidden lg:table-cell">
           {sector && (
-            <span className="text-[9px] text-slate-600 bg-slate-800/60 px-2 py-0.5 rounded uppercase tracking-wider font-bold">
+            <span className="text-[10px] text-slate-400 bg-slate-800/60 px-2 py-0.5 rounded uppercase tracking-wider font-bold">
               {sector}
             </span>
           )}
@@ -217,10 +217,10 @@ const HoldingRow: React.FC<{ holding: any; rank: number }> = ({ holding, rank })
 
         {/* Quantity */}
         <td className="py-3 pr-3 text-right">
-          <div className="text-xs font-bold text-white tabular-nums">{fmtQty(qty)}</div>
+          <div className="text-xs font-bold text-slate-100 tabular-nums">{fmtQty(qty)}</div>
           {qtyChange !== 0 && prevQty > 0 && (
             <div className={cn(
-              'text-[9px] font-bold tabular-nums flex items-center justify-end gap-0.5',
+              'text-[10px] font-bold tabular-nums flex items-center justify-end gap-0.5',
               qtyChange > 0 ? 'text-emerald-400' : 'text-rose-400'
             )}>
               {qtyChange > 0 ? <ChevronUp className="w-2.5 h-2.5" /> : <ChevronDown className="w-2.5 h-2.5" />}
@@ -231,7 +231,7 @@ const HoldingRow: React.FC<{ holding: any; rank: number }> = ({ holding, rank })
 
         {/* Value */}
         <td className="py-3 pr-3 text-right">
-          <div className="text-xs font-bold text-white tabular-nums">{fmtCr(value)}</div>
+          <div className="text-xs font-bold text-slate-100 tabular-nums">{fmtCr(value)}</div>
         </td>
 
         {/* Portfolio % */}
@@ -246,7 +246,7 @@ const HoldingRow: React.FC<{ holding: any; rank: number }> = ({ holding, rank })
               </div>
               <span className="text-[10px] font-bold text-slate-400 tabular-nums w-8 text-right">{portPct.toFixed(1)}%</span>
             </div>
-          ) : <span className="text-slate-700">—</span>}
+          ) : <span className="text-slate-300">—</span>}
         </td>
 
         {/* Price change */}
@@ -267,15 +267,15 @@ const HoldingRow: React.FC<{ holding: any; rank: number }> = ({ holding, rank })
               )}>
                 {fmtPct(pct)}
               </span>
-            ) : <span className="text-slate-700">—</span>
+            ) : <span className="text-slate-300">—</span>
           )}
         </td>
 
         {/* Expand toggle */}
         <td className="py-3 pr-3 text-right w-8">
           {expanded
-            ? <ChevronUp className="w-3 h-3 text-slate-600" />
-            : <ChevronDown className="w-3 h-3 text-slate-700 group-hover:text-slate-500" />}
+            ? <ChevronUp className="w-3 h-3 text-slate-400" />
+            : <ChevronDown className="w-3 h-3 text-slate-300 group-hover:text-slate-400" />}
         </td>
       </motion.tr>
 
@@ -298,7 +298,7 @@ const HoldingRow: React.FC<{ holding: any; rank: number }> = ({ holding, rank })
                     { label: 'Total Value', value: fmtCr(value) },
                   ].map(({ label, value }) => (
                     <div key={label}>
-                      <div className="text-[8px] text-slate-600 uppercase tracking-widest font-bold mb-1">{label}</div>
+                      <div className="text-[9.5px] text-slate-400 uppercase tracking-widest font-bold mb-1">{label}</div>
                       <div className="text-xs font-bold text-slate-300">{value}</div>
                     </div>
                   ))}
@@ -373,7 +373,7 @@ const PortfolioDetail: React.FC<{
   const SortTh: React.FC<{ field: typeof sortField; children: React.ReactNode }> = ({ field, children }) => (
     <th
       onClick={() => { if (sortField === field) setSortAsc(!sortAsc); else { setSortField(field); setSortAsc(false); } }}
-      className="py-2 pr-3 text-right text-[9px] font-bold text-slate-500 uppercase tracking-widest cursor-pointer hover:text-white transition-colors select-none"
+      className="py-2 pr-3 text-right text-[10px] font-bold text-slate-400 uppercase tracking-widest cursor-pointer hover:text-indigo-600 transition-colors select-none"
     >
       <span className="flex items-center justify-end gap-1">
         {children}
@@ -390,7 +390,7 @@ const PortfolioDetail: React.FC<{
       <div className="flex items-center gap-4 mb-6">
         <button
           onClick={onBack}
-          className="p-2 rounded-xl bg-slate-900 border border-white/[0.06] text-slate-400 hover:text-white transition-colors"
+          className="p-2 rounded-xl glass border border-white/[0.06] text-slate-400 hover:text-white transition-colors"
         >
           <ArrowLeft className="w-4 h-4" />
         </button>
@@ -425,7 +425,7 @@ const PortfolioDetail: React.FC<{
           { label: 'Quarter', value: quarterLabel(quarter), icon: <Star className="w-3 h-3" /> },
         ].map(({ label, value, icon, color }) => (
           <div key={label} className="bg-slate-900/60 border border-white/[0.06] rounded-xl px-4 py-3">
-            <div className="flex items-center gap-1.5 text-[9px] text-slate-500 font-bold uppercase tracking-widest mb-1">
+            <div className="flex items-center gap-1.5 text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-1">
               {icon}{label}
             </div>
             <div className={cn('text-lg font-black tabular-nums', color ?? 'text-white')}>{value}</div>
@@ -436,13 +436,13 @@ const PortfolioDetail: React.FC<{
       {/* Controls */}
       <div className="flex flex-wrap items-center gap-3 mb-4">
         <div className="relative flex-1 min-w-[160px]">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-600" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
           <input
             type="text"
             placeholder="Search symbol or company…"
             value={search}
             onChange={e => setSearch(e.target.value)}
-            className="w-full bg-slate-900/60 border border-white/[0.07] rounded-xl py-2 pl-9 pr-4 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:ring-1 focus:ring-indigo-500/40 focus:border-indigo-500/30"
+            className="w-full bg-slate-900/60 border border-white/[0.07] rounded-xl py-2 pl-9 pr-4 text-sm text-white placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500/40 focus:border-indigo-500/30"
           />
         </div>
 
@@ -452,13 +452,13 @@ const PortfolioDetail: React.FC<{
               key={f}
               onClick={() => setFilter(f)}
               className={cn(
-                'px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider border transition-all',
+                'px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider border transition-all',
                 filter === f
                   ? f === 'new' ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400'
                     : f === 'increased' ? 'bg-sky-500/15 border-sky-500/30 text-sky-400'
                     : f === 'decreased' ? 'bg-rose-500/15 border-rose-500/30 text-rose-400'
                     : 'bg-indigo-500/15 border-indigo-500/30 text-indigo-400'
-                  : 'bg-slate-900 border-white/[0.06] text-slate-500 hover:text-white'
+                  : 'glass border-white/[0.06] text-slate-400 hover:text-white'
               )}
             >
               {f === 'all' ? 'All' : f === 'new' ? '🟢 New' : f === 'increased' ? '↑ Added' : '↓ Trimmed'}
@@ -471,18 +471,18 @@ const PortfolioDetail: React.FC<{
       {isLoading ? (
         <div className="flex flex-col items-center justify-center py-24 gap-3">
           <RefreshCw className="w-6 h-6 text-indigo-500 animate-spin" />
-          <p className="text-slate-500 text-xs font-bold uppercase tracking-widest">Loading portfolio…</p>
+          <p className="text-slate-400 text-xs font-bold uppercase tracking-widest">Loading portfolio…</p>
         </div>
       ) : error ? (
         <div className="flex flex-col items-center justify-center py-24 gap-3">
           <AlertCircle className="w-8 h-8 text-rose-500/40" />
-          <p className="text-slate-500 text-xs font-bold uppercase tracking-widest">Failed to load portfolio data</p>
-          <p className="text-slate-700 text-[10px]">The API may require authentication or has rate-limited the request.</p>
+          <p className="text-slate-400 text-xs font-bold uppercase tracking-widest">Failed to load portfolio data</p>
+          <p className="text-slate-300 text-[10px]">The API may require authentication or has rate-limited the request.</p>
         </div>
       ) : filtered.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-24 gap-3">
-          <Briefcase className="w-8 h-8 text-slate-800" />
-          <p className="text-slate-600 text-xs font-bold uppercase tracking-widest">
+          <Briefcase className="w-8 h-8 text-slate-200" />
+          <p className="text-slate-400 text-xs font-bold uppercase tracking-widest">
             {holdings.length === 0 ? 'No holdings found for this quarter' : 'No results match your filter'}
           </p>
         </div>
@@ -492,9 +492,9 @@ const PortfolioDetail: React.FC<{
             <table className="w-full">
               <thead>
                 <tr className="border-b border-white/[0.06] bg-slate-950/40">
-                  <th className="py-3 pl-4 pr-2 text-left text-[9px] font-bold text-slate-600 uppercase tracking-widest w-10">#</th>
-                  <th className="py-3 pr-3 text-left text-[9px] font-bold text-slate-500 uppercase tracking-widest">Stock</th>
-                  <th className="py-3 pr-3 text-left text-[9px] font-bold text-slate-500 uppercase tracking-widest hidden lg:table-cell">Sector</th>
+                  <th className="py-3 pl-4 pr-2 text-left text-[10px] font-bold text-slate-400 uppercase tracking-widest w-10">#</th>
+                  <th className="py-3 pr-3 text-left text-[10px] font-bold text-slate-400 uppercase tracking-widest">Stock</th>
+                  <th className="py-3 pr-3 text-left text-[10px] font-bold text-slate-400 uppercase tracking-widest hidden lg:table-cell">Sector</th>
                   <SortTh field="total_quantity">Quantity</SortTh>
                   <SortTh field="total_value">Value</SortTh>
                   <SortTh field="portfolio_percentage">Port %</SortTh>
@@ -511,10 +511,10 @@ const PortfolioDetail: React.FC<{
           </div>
 
           <div className="px-4 py-3 border-t border-white/[0.04] flex items-center justify-between">
-            <span className="text-[9px] text-slate-600 font-bold uppercase tracking-widest">
+            <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">
               {filtered.length} of {holdings.length} holdings · {quarterLabel(quarter)}
             </span>
-            <span className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">
+            <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">
               Total: <span className="text-emerald-400">{fmtCr(totalValue)}</span>
             </span>
           </div>
@@ -557,14 +557,14 @@ const SuperstarPortfolio: React.FC = () => {
       <div className="p-4 md:p-6 max-w-7xl mx-auto">
         {/* Quarter selector */}
         <div className="flex items-center justify-end gap-2 mb-4">
-          <span className="text-[9px] text-slate-600 font-bold uppercase tracking-widest">Quarter:</span>
+          <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Quarter:</span>
           <div className="relative">
             <button
               onClick={() => setShowQPicker(!showQPicker)}
-              className="flex items-center gap-2 px-3 py-1.5 bg-slate-900 border border-white/[0.08] rounded-lg text-xs font-bold text-white hover:border-indigo-500/40 transition-colors"
+              className="flex items-center gap-2 px-3 py-1.5 glass border border-white/[0.08] rounded-lg text-xs font-bold text-slate-100 hover:border-indigo-500/40 transition-colors"
             >
               {quarterLabel(quarter)}
-              <ChevronDown className="w-3 h-3 text-slate-500" />
+              <ChevronDown className="w-3 h-3 text-slate-400" />
             </button>
             <AnimatePresence>
               {showQPicker && (
@@ -572,7 +572,7 @@ const SuperstarPortfolio: React.FC = () => {
                   initial={{ opacity: 0, y: 6 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: 6 }}
-                  className="absolute right-0 top-full mt-1 bg-slate-900 border border-white/[0.08] rounded-xl overflow-hidden shadow-2xl z-50 min-w-[120px]"
+                  className="absolute right-0 top-full mt-1 glass border border-white/[0.08] rounded-xl overflow-hidden shadow-2xl z-50 min-w-[120px]"
                 >
                   {quarters.map(q => (
                     <button
@@ -609,7 +609,7 @@ const SuperstarPortfolio: React.FC = () => {
             </div>
             <h1 className="text-2xl font-black text-white tracking-tight">Superstar Portfolio</h1>
           </div>
-          <p className="text-slate-500 text-xs font-medium">
+          <p className="text-slate-400 text-xs font-medium">
             Track India's legendary investors · Powered by TradeBrains · {quarterLabel(quarter)}
           </p>
         </div>
@@ -619,11 +619,11 @@ const SuperstarPortfolio: React.FC = () => {
           <div className="relative">
             <button
               onClick={() => setShowQPicker(!showQPicker)}
-              className="flex items-center gap-2 px-4 py-2 bg-slate-900 border border-white/[0.08] rounded-xl text-sm font-bold text-white hover:border-indigo-500/40 transition-colors"
+              className="flex items-center gap-2 px-4 py-2 glass border border-white/[0.08] rounded-xl text-sm font-bold text-slate-100 hover:border-indigo-500/40 transition-colors"
             >
-              <span className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">Quarter</span>
+              <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Quarter</span>
               {quarterLabel(quarter)}
-              <ChevronDown className="w-3.5 h-3.5 text-slate-500" />
+              <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
             </button>
             <AnimatePresence>
               {showQPicker && (
@@ -631,7 +631,7 @@ const SuperstarPortfolio: React.FC = () => {
                   initial={{ opacity: 0, y: 6 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: 6 }}
-                  className="absolute right-0 top-full mt-1 bg-slate-900 border border-white/[0.08] rounded-xl overflow-hidden shadow-2xl z-50 min-w-[130px]"
+                  className="absolute right-0 top-full mt-1 glass border border-white/[0.08] rounded-xl overflow-hidden shadow-2xl z-50 min-w-[130px]"
                 >
                   {quarters.map(q => (
                     <button
@@ -652,7 +652,7 @@ const SuperstarPortfolio: React.FC = () => {
 
           <button
             onClick={() => refetch()}
-            className="p-2 bg-slate-900 border border-white/[0.06] rounded-xl text-slate-500 hover:text-white transition-colors"
+            className="p-2 glass border border-white/[0.06] rounded-xl text-slate-400 hover:text-white transition-colors"
           >
             <RefreshCw className="w-4 h-4" />
           </button>
@@ -661,13 +661,13 @@ const SuperstarPortfolio: React.FC = () => {
 
       {/* Search */}
       <div className="relative mb-6">
-        <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-600" />
+        <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
         <input
           type="text"
           placeholder="Search investor name…"
           value={search}
           onChange={e => setSearch(e.target.value)}
-          className="w-full max-w-sm bg-slate-900/60 border border-white/[0.07] rounded-xl py-2.5 pl-11 pr-4 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:ring-1 focus:ring-indigo-500/40 focus:border-indigo-500/30"
+          className="w-full max-w-sm bg-slate-900/60 border border-white/[0.07] rounded-xl py-2.5 pl-11 pr-4 text-sm text-white placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500/40 focus:border-indigo-500/30"
         />
       </div>
 
@@ -675,13 +675,13 @@ const SuperstarPortfolio: React.FC = () => {
       {isLoading ? (
         <div className="flex flex-col items-center justify-center py-32 gap-4">
           <RefreshCw className="w-7 h-7 text-indigo-500 animate-spin" />
-          <p className="text-slate-500 text-xs font-bold uppercase tracking-widest">Fetching superstar list…</p>
+          <p className="text-slate-400 text-xs font-bold uppercase tracking-widest">Fetching superstar list…</p>
         </div>
       ) : error ? (
         <div className="flex flex-col items-center justify-center py-32 gap-4">
           <AlertCircle className="w-10 h-10 text-rose-500/40" />
           <p className="text-slate-400 text-sm font-bold">Could not load data from TradeBrains</p>
-          <p className="text-slate-600 text-[10px] max-w-xs text-center">
+          <p className="text-slate-400 text-[10px] max-w-xs text-center">
             The API may require a session cookie from the browser. Try opening the server with proxy headers or logging in to portal.tradebrains.in first.
           </p>
           <button
@@ -693,14 +693,14 @@ const SuperstarPortfolio: React.FC = () => {
         </div>
       ) : filtered.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-32 gap-3">
-          <Users className="w-10 h-10 text-slate-800" />
-          <p className="text-slate-600 text-xs font-bold uppercase tracking-widest">
+          <Users className="w-10 h-10 text-slate-200" />
+          <p className="text-slate-400 text-xs font-bold uppercase tracking-widest">
             {superstars.length === 0 ? 'No superstars found' : 'No results match your search'}
           </p>
         </div>
       ) : (
         <>
-          <div className="text-[9px] text-slate-600 font-bold uppercase tracking-widest mb-4">
+          <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-4">
             {filtered.length} investor{filtered.length !== 1 ? 's' : ''} · click to view portfolio
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">

@@ -30,6 +30,53 @@ function buildSectorMap(): Map<string, string> {
   return map;
 }
 
+// ─── Yahoo Finance session variables ─────────────────────────────────────────
+let yfCookie: string | null = null;
+let yfCrumb: string | null = null;
+let lastHandshakeTime = 0;
+
+async function ensureYahooFinanceSession(): Promise<{ cookie: string; crumb: string } | null> {
+  const now = Date.now();
+  // Session is cached for 1 hour to prevent excessive calls
+  if (yfCookie && yfCrumb && now - lastHandshakeTime < 3600000) {
+    return { cookie: yfCookie, crumb: yfCrumb };
+  }
+
+  try {
+    const headers = {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
+    };
+
+    const resCookie = await fetch("https://fc.yahoo.com", { headers });
+    const setCookieHeaders = resCookie.headers.getSetCookie();
+    const cookies = setCookieHeaders.map(c => c.split(';')[0]).join('; ');
+
+    if (!cookies) {
+      console.warn("[LIVE DATA] Yahoo Finance handshake: No cookies returned by fc.yahoo.com");
+      return null;
+    }
+
+    const crumbHeaders = { ...headers, "Cookie": cookies };
+    const resCrumb = await fetch("https://query2.finance.yahoo.com/v1/test/getcrumb", { headers: crumbHeaders });
+    const crumb = (await resCrumb.text()).trim();
+
+    if (resCrumb.status !== 200 || !crumb) {
+      console.warn(`[LIVE DATA] Yahoo Finance handshake: getcrumb failed with status ${resCrumb.status}`);
+      return null;
+    }
+
+    yfCookie = cookies;
+    yfCrumb = crumb;
+    lastHandshakeTime = now;
+    console.log(`[LIVE DATA] Yahoo Finance handshake successful. Crumb: ${crumb}`);
+    return { cookie: yfCookie, crumb: yfCrumb };
+  } catch (err: any) {
+    console.error("[LIVE DATA] Yahoo Finance session handshake error:", err.message);
+    return null;
+  }
+}
+
 // ─── Yahoo Finance batch fetch (v7) ──────────────────────────────────────────
 
 const BATCH_SIZE = 50;
@@ -52,22 +99,33 @@ async function fetchBatchYahooFinance(
 ): Promise<Map<string, MarketData>> {
   const nameMap = buildNameMap();
   const sectorMap = buildSectorMap();
+  
+  const session = await ensureYahooFinanceSession();
+  const crumbParam = session ? `&crumb=${session.crumb}` : '';
+  const requestHeaders: Record<string, string> = {
+    "User-Agent":
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    Accept: "application/json",
+  };
+  if (session) {
+    requestHeaders["Cookie"] = session.cookie;
+  }
+
   const yfSymbols = symbols.map((s) => `${s}.NS`).join(",");
   const url =
-    `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${yfSymbols}` +
+    `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${yfSymbols}${crumbParam}` +
     `&fields=regularMarketPrice,regularMarketChange,regularMarketChangePercent,` +
     `regularMarketVolume,regularMarketDayHigh,regularMarketDayLow,` +
     `regularMarketOpen,regularMarketPreviousClose,fiftyTwoWeekHigh,fiftyTwoWeekLow`;
 
   const response = await fetchWithTimeout(url, {
-    headers: {
-      "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-      Accept: "application/json",
-    },
+    headers: requestHeaders,
   });
 
-  if (!response.ok) return new Map();
+  if (!response.ok) {
+    console.error(`[LIVE DATA] Yahoo Finance batch fetch failed with status ${response.status}`);
+    return new Map();
+  }
 
   const data = await response.json();
   const quotes: any[] = data.quoteResponse?.result ?? [];

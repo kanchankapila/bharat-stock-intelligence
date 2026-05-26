@@ -5,25 +5,31 @@
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 }
 
-/* ─── Base ─────────────────────────────────────────────────────────────── */
+/* ─── Base (Premium Dark Theme) ───────────────────────────────────────── */
 body {
-  @apply bg-slate-950 text-slate-200;
+  background: radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.15) 0px, transparent 50%),
+              radial-gradient(at 50% 0%, rgba(167, 139, 250, 0.1) 0px, transparent 50%),
+              radial-gradient(at 100% 0%, rgba(59, 130, 246, 0.15) 0px, transparent 50%),
+              #050508; /* Premium deep black base */
+  color: #f1f5f9; /* Light slate text for dark theme readability */
+  min-height: 100vh;
   font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  background-attachment: fixed;
 }
 
-/* ─── Custom Scrollbar ──────────────────────────────────────────────────── */
+/* ─── Custom Scrollbar (Dark Theme) ────────────────────────────────────── */
 ::-webkit-scrollbar {
-  width: 4px;
-  height: 4px;
+  width: 5px;
+  height: 5px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
   background: rgba(99, 102, 241, 0.2);
-  border-radius: 2px;
+  border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(99, 102, 241, 0.4);
@@ -41,19 +47,21 @@ body {
   .hide-scrollbar::-webkit-scrollbar { display: none; }
   .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
-  /* Glass surfaces */
+  /* Premium Dark Glass surfaces */
   .glass {
-    background: rgba(15, 23, 42, 0.55);
+    background: rgba(10, 11, 16, 0.65);
     backdrop-filter: blur(20px) saturate(160%);
     -webkit-backdrop-filter: blur(20px) saturate(160%);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    box-shadow: 0 4px 30px rgba(0, 0, 0, 0.2);
   }
 
   .glass-strong {
-    background: rgba(15, 23, 42, 0.82);
+    background: rgba(8, 9, 12, 0.88);
     backdrop-filter: blur(32px) saturate(200%);
     -webkit-backdrop-filter: blur(32px) saturate(200%);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.11);
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
   }
 
   /* Ambient glow effects */
@@ -86,7 +94,7 @@ body {
 
   /* Card section label */
   .card-label {
-    @apply text-[10px] font-semibold text-slate-500 uppercase tracking-widest;
+    @apply text-[10px] font-semibold text-slate-400 uppercase tracking-widest;
   }
 
   /* Ticker animation */
@@ -99,13 +107,13 @@ body {
     to   { transform: translateX(-50%); }
   }
 
-  /* Shimmer for skeletons */
+  /* Shimmer for skeletons (Dark Theme) */
   .shimmer {
     background: linear-gradient(
       90deg,
-      rgba(30, 41, 59, 0.6) 0%,
-      rgba(51, 65, 85, 0.4) 50%,
-      rgba(30, 41, 59, 0.6) 100%
+      rgba(15, 23, 42, 0.6) 0%,
+      rgba(30, 41, 59, 0.45) 50%,
+      rgba(15, 23, 42, 0.6) 100%
     );
     background-size: 200% 100%;
     animation: shimmer 1.6s ease infinite;

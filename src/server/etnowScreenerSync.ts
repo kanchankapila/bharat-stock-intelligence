@@ -15,15 +15,32 @@ export function getETnowStockCount(): number {
  * Fetches stocks for each ETNow screener and inserts them into the DB.
  * Follows the pattern from moneycontrolScreener.ts and trendlyneScreener.ts.
  */
-export async function syncETnowScreeners(): Promise<void> {
-  console.log('🔄 Starting ETNow screener synchronization...');
+export async function syncETnowScreeners(timeframeFilter?: 'intraday' | 'long_term'): Promise<void> {
+  console.log(`🔄 Starting ETNow screener synchronization (filter: ${timeframeFilter || 'all'})...`);
 
-  const screeners = db.prepare(`
+  let screeners = db.prepare(`
     SELECT screener_id, screener_name, query_condition FROM etnow_screeners
   `).all() as Array<{ screener_id: string; screener_name: string; query_condition: string | null }>;
 
   if (screeners.length === 0) {
-    console.warn('⚠️  No ETNow screeners found in database. Run initEtnowScreeners() first.');
+    console.log('[SYNC] etnow_screeners is empty — seeding definitions with initEtnowScreeners()...');
+    const { initEtnowScreeners } = await import('./etnow');
+    initEtnowScreeners();
+    screeners = db.prepare(`
+      SELECT screener_id, screener_name, query_condition FROM etnow_screeners
+    `).all() as Array<{ screener_id: string; screener_name: string; query_condition: string | null }>;
+  }
+
+  if (timeframeFilter) {
+    const { isIntradayScreener } = await import('./trendlyneScreener');
+    screeners = screeners.filter(s => {
+      const isIntraday = isIntradayScreener(s.screener_name);
+      return timeframeFilter === 'intraday' ? isIntraday : !isIntraday;
+    });
+  }
+
+  if (screeners.length === 0) {
+    console.warn('⚠️  No ETNow screeners found in database even after seeding.');
     return;
   }
 

@@ -15,19 +15,19 @@ DATABASE_URL = DB_PATH if DB_PATH.startswith("sqlite:///") else f"sqlite:///{DB_
 # ETnow screeners (mirrors router.ts getMarketScanners — hardcoded because
 # they are not stored in etnow_screeners DB table yet).
 ETNOW_SCREENERS = [
-    { 'scan_id': 'et-73',   'name': 'Cash Cows',              'is_positive': 1 },
-    { 'scan_id': 'et-75',   'name': 'Elite Bluechips',         'is_positive': 1 },
-    { 'scan_id': 'et-79',   'name': 'Zero Debt Quality',       'is_positive': 1 },
-    { 'scan_id': 'et-91',   'name': 'Buy on Dips',             'is_positive': 1 },
-    { 'scan_id': 'et-195',  'name': 'Potential Multibaggers',  'is_positive': 1 },
-    { 'scan_id': 'et-118',  'name': 'Straight Flush',          'is_positive': 1 },
-    { 'scan_id': 'et-362',  'name': 'RSI Oversold',            'is_positive': 1 },
-    { 'scan_id': 'et-518',  'name': 'The Tata Empire',         'is_positive': 0 },
-    { 'scan_id': 'et-520',  'name': 'Adani Universe',          'is_positive': 0 },
-    { 'scan_id': 'et-514',  'name': 'PSU Gems',                'is_positive': 0 },
-    { 'scan_id': 'et-515',  'name': 'Monopoly Biz',            'is_positive': 0 },
-    { 'scan_id': 'et-1101', 'name': 'Defence Sector',          'is_positive': 0 },
-    { 'scan_id': 'et-1100', 'name': 'Infra Boost',             'is_positive': 1 },
+    { 'scan_id': '73',   'name': 'Cash Cows',             'is_positive': None },
+    { 'scan_id': '75',   'name': 'Elite Bluechips',        'is_positive': None },
+    { 'scan_id': '79',   'name': 'Zero Debt Quality',      'is_positive': None },
+    { 'scan_id': '91',   'name': 'Buy on Dips',            'is_positive': None },
+    { 'scan_id': '195',  'name': 'Potential Multibaggers', 'is_positive': None },
+    { 'scan_id': '118',  'name': 'Straight Flush',         'is_positive': None },
+    { 'scan_id': '362',  'name': 'RSI Oversold',           'is_positive': None },
+    { 'scan_id': '518',  'name': 'The Tata Empire',        'is_positive': None },
+    { 'scan_id': '520',  'name': 'Adani Universe',         'is_positive': None },
+    { 'scan_id': '514',  'name': 'PSU Gems',               'is_positive': None },
+    { 'scan_id': '515',  'name': 'Monopoly Biz',           'is_positive': None },
+    { 'scan_id': '1101', 'name': 'Defence Sector',         'is_positive': None },
+    { 'scan_id': '1100', 'name': 'Infra Boost',            'is_positive': None },
 ]
 
 
@@ -119,7 +119,7 @@ class AlphaQuantScoringEngine:
                 et_screeners = pd.DataFrame(ETNOW_SCREENERS)
             else:
                 et_screeners = et_db
-                et_screeners['is_positive'] = 1
+                et_screeners['is_positive'] = None  # let NLP determine; no forced override
             et_screeners['source'] = 'ETnow'
             et_screeners['description'] = ""
 
@@ -215,7 +215,8 @@ class AlphaQuantScoringEngine:
                     'inferred_sentiment': sentiment,
                     'inferred_category':  inference['category'],
                     'inferred_timeframe': inference['timeframe'],
-                    'confidence':         confidence,  # Now reflects reliability
+                    'confidence':         confidence,
+                    'signal_type_tag':    inference.get('signal_type_tag', 'OTHER'),
                     'last_updated':       datetime.datetime.now().isoformat(),
                 })
 
@@ -223,11 +224,18 @@ class AlphaQuantScoringEngine:
                 conn.execute(text("""
                     INSERT INTO screener_master
                         (scan_id, name, source, inferred_sentiment, inferred_category,
-                         inferred_timeframe, confidence, last_updated)
+                         inferred_timeframe, confidence, signal_type_tag, last_updated)
                     VALUES
                         (:scan_id, :name, :source, :inferred_sentiment, :inferred_category,
-                         :inferred_timeframe, :confidence, :last_updated)
-                    ON CONFLICT(scan_id) DO NOTHING
+                         :inferred_timeframe, :confidence, :signal_type_tag, :last_updated)
+                    ON CONFLICT(scan_id) DO UPDATE SET
+                        name=excluded.name,
+                        inferred_sentiment=excluded.inferred_sentiment,
+                        inferred_category=excluded.inferred_category,
+                        inferred_timeframe=excluded.inferred_timeframe,
+                        confidence=excluded.confidence,
+                        signal_type_tag=excluded.signal_type_tag,
+                        last_updated=excluded.last_updated
                 """), new_master_data)
             
             if low_confidence_count > 0:
@@ -342,7 +350,7 @@ class AlphaQuantScoringEngine:
                 sym_list = [s.strip() for s in str(raw).split(',')]
             recency = self._recency_weight(n.get('published_at') or '')
             for s in sym_list:
-                if not s or s == '#N/A':
+                if not s or not isinstance(s, str) or pd.isna(s) or s.strip() == '' or s.upper() in ('NAN', 'NULL', '#N/A'):
                     continue
                 news_map.setdefault(s, []).append({
                     'name':      n['title'],
@@ -405,7 +413,7 @@ class AlphaQuantScoringEngine:
             # ── Screener scoring ─────────────────────────────────────────
             for _, m in mappings.iterrows():
                 symbol = m['symbol']
-                if not symbol or symbol == '#N/A':
+                if not symbol or not isinstance(symbol, str) or pd.isna(symbol) or symbol.strip() == '' or symbol.upper() in ('NAN', 'NULL', '#N/A'):
                     continue
                 scan_id = m['scan_id']
                 meta = screeners_meta.get(scan_id)

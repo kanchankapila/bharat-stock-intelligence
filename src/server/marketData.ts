@@ -78,7 +78,7 @@ export async function fetchETCorporateActions(symbol: string) {
 export async function fetchHistoricalOHLC(symbol: string, dur: string = '1y') {
   try {
     const map = getStockMapping(symbol);
-    const mcSymbol = map?.symbol || symbol.split(';').pop() || symbol;
+    const mcSymbol = map?.symbol || (symbol.startsWith('in;') ? symbol : symbol.split(';').pop() || symbol);
 
     console.log(`[OHLC] Fetching historical OHLC for ${symbol} via Moneycontrol (${mcSymbol})`);
 

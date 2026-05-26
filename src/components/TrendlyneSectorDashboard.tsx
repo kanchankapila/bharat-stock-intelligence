@@ -53,7 +53,7 @@ export const TrendlyneSectorDashboard: React.FC = () => {
   const renderContent = () => {
     if (isLoading) {
       return (
-        <div className="flex flex-col items-center justify-center h-64 bg-slate-900/50 rounded-2xl border border-slate-800 animate-pulse">
+        <div className="flex flex-col items-center justify-center h-64 glass/50 rounded-2xl border border-slate-800/50 animate-pulse">
           <Activity className="w-8 h-8 text-blue-500 animate-spin mb-4" />
           <p className="text-slate-400 text-sm font-bold uppercase tracking-widest">Loading Data...</p>
         </div>
@@ -62,10 +62,10 @@ export const TrendlyneSectorDashboard: React.FC = () => {
 
     if (error || !currentDataResponse?.body?.tableData) {
       return (
-        <div className="p-6 bg-slate-900/50 rounded-2xl border border-rose-900/50 flex flex-col items-center justify-center">
+        <div className="p-6 glass/50 rounded-2xl border border-rose-900/50 flex flex-col items-center justify-center">
           <Activity className="w-8 h-8 text-rose-500 mb-4" />
           <p className="text-rose-400 font-bold">Failed to load data.</p>
-          <p className="text-slate-500 text-sm mt-2">{error?.message || "Data unavailable"}</p>
+          <p className="text-slate-400 text-sm mt-2">{error?.message || "Data unavailable"}</p>
         </div>
       );
     }
@@ -88,14 +88,14 @@ export const TrendlyneSectorDashboard: React.FC = () => {
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 mb-6">
           <div className="lg:col-span-4 grid grid-cols-2 md:grid-cols-4 gap-4">
              {sortedItems.slice(0, 4).map((s) => (
-               <div key={s.name.stockName} className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col justify-between hover:border-slate-700 transition-colors">
+               <div key={s.name.stockName} className="glass border border-slate-800/50 rounded-xl p-4 flex flex-col justify-between hover:border-slate-800/30 transition-colors">
                  <div className="flex justify-between items-start mb-4">
                    <h3 className="text-sm font-black text-slate-300 uppercase tracking-tight leading-tight">{s.name.stockName}</h3>
                    <div className={cn("px-2 py-1 rounded text-[10px] font-black border", getMomentumColor(s.weighted_avg_ms))}>
                       {s.weighted_avg_ms.toFixed(1)} MS
                    </div>
                  </div>
-                 <div className="grid grid-cols-2 gap-2 text-[10px] uppercase font-bold tracking-widest text-slate-500">
+                 <div className="grid grid-cols-2 gap-2 text-[10px] uppercase font-bold tracking-widest text-slate-400">
                    <div>
                      <span className="block text-slate-400 mb-0.5">RSI &gt; 50</span>
                      <span className={s.rsi_gt_50 > 50 ? "text-emerald-400" : "text-rose-400"}>{s.rsi_gt_50}%</span>
@@ -118,11 +118,11 @@ export const TrendlyneSectorDashboard: React.FC = () => {
           </div>
         </div>
 
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
+        <div className="glass border border-slate-800/50 rounded-2xl overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
-                <tr className="bg-slate-950/50 border-b border-slate-800 text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                <tr className="glass-strong/50 border-b border-slate-800/50 text-[10px] font-black text-slate-400 uppercase tracking-widest">
                   <th className="p-4 cursor-pointer group" onClick={() => handleSort('name')}>
                     <div className="flex items-center">{viewMode === 'sectors' ? 'Sector' : 'Index'} {renderSortIcon('name')}</div>
                   </th>
@@ -152,7 +152,7 @@ export const TrendlyneSectorDashboard: React.FC = () => {
                     <td className="p-4">
                       <div className="flex flex-col">
                         <span className="font-bold text-slate-200">{s.name.stockName}</span>
-                        <span className="text-[10px] text-slate-500 mt-1">{s.sp_count} Stocks</span>
+                        <span className="text-[10px] text-slate-400 mt-1">{s.sp_count} Stocks</span>
                       </div>
                     </td>
                     <td className="p-4">
@@ -212,7 +212,7 @@ export const TrendlyneSectorDashboard: React.FC = () => {
             )}
           </p>
         </div>
-        <div className="flex items-center p-1 bg-slate-900 border border-slate-800 rounded-xl">
+        <div className="flex items-center p-1 glass border border-slate-800/50 rounded-xl">
            <button
              onClick={() => setViewMode('sectors')}
              className={cn(

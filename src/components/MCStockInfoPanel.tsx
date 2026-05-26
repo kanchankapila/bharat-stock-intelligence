@@ -48,7 +48,7 @@ interface MCStockInfoPanelProps {
 }
 
 type Timeframe = 'D' | 'W' | 'M';
-type Tab = 'overview' | 'financials' | 'technical' | 'analysis' | 'analyst' | 'trendlyne' | 'fno';
+type Tab = 'overview' | 'financials' | 'technical' | 'analysis' | 'analyst' | 'trendlyne' | 'fno' | 'peers';
 
 export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({ 
   symbol, 
@@ -129,16 +129,51 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
 
   const { data: trendlyneTa, isLoading: loadingTlTa } = trpc.getTrendlyneAdvTechnicalAnalysis.useQuery(
     { symbol, timeframe },
-    { enabled: isVisible && activeTab === 'trendlyne', staleTime: 60000 }
+    { enabled: isVisible, staleTime: 60000 }
   );
 
   const { data: vwapData } = trpc.getMcVwapChart.useQuery(
     { symbol },
-    { enabled: isVisible && activeTab === 'overview', staleTime: 300000 }
+    { enabled: isVisible && (activeTab === 'overview' || activeTab === 'technical'), staleTime: 300000 }
   );
+
+  const { data: nseStock } = trpc.getNSEStockBySymbol.useQuery(
+    { symbol },
+    { enabled: isVisible }
+  );
+
+  const nseStockData = nseStock as any;
+
+  const { data: peersData, isLoading: loadingPeers } = trpc.getNSEStocksBySector.useQuery(
+    { sector: nseStockData?.sector ?? '' },
+    { enabled: isVisible && activeTab === 'peers' && !!nseStockData?.sector }
+  );
+
   const { data: indexFnoData } = trpc.getIndexFno.useQuery(
     { id: 'NIFTY' },
     { enabled: isVisible && activeTab === 'fno', staleTime: 60000 }
+  );
+
+  const [selectedExpiry, setSelectedExpiry] = React.useState<string>('');
+
+  const { data: expiriesList } = trpc.getTrendlyneStockExpiries.useQuery(
+    { symbol },
+    { enabled: isVisible && activeTab === 'fno', staleTime: 300000 }
+  );
+
+  React.useEffect(() => {
+    if (expiriesList && expiriesList.length > 0 && !selectedExpiry) {
+      setSelectedExpiry(expiriesList[0]);
+    }
+  }, [expiriesList, selectedExpiry]);
+
+  React.useEffect(() => {
+    setSelectedExpiry('');
+  }, [symbol]);
+
+  const { data: trendlyneOc, isLoading: loadingOc } = trpc.getTrendlyneStockOptionChain.useQuery(
+    { symbol, expiryDate: selectedExpiry || undefined },
+    { enabled: isVisible && activeTab === 'fno', staleTime: 30000 }
   );
 
   if (!isVisible && !unifiedData) {
@@ -226,6 +261,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
     { key: 'overview',   label: 'Overview'   },
     { key: 'financials', label: 'Financials'  },
     { key: 'technical',  label: 'Technical'   },
+    { key: 'peers',      label: 'Peers'       },
     { key: 'fno',        label: 'F&O'         },
     { key: 'analysis',   label: 'Analysis'    },
     { key: 'analyst',    label: 'Analyst'     },
@@ -307,6 +343,87 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
         </div>
       )}
 
+      {/* ── Trendlyne Price Return Insights (Visible on top across all tabs) ── */}
+      {trendlyneTa?.body?.parameters?.price_analysis && (
+        <div className="bg-slate-950/40 border border-slate-800/80 rounded-2xl p-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
+              <TrendingUp className="w-3.5 h-3.5 text-indigo-500" />
+              Trendlyne Performance Returns ({trendlyneTa.body.parameters.beta_benchmark_index || 'NIFTY 50'})
+            </span>
+            {trendlyneTa.body.parameters.last_modified && (
+              <span className="text-[8px] text-slate-500">
+                Updated: {trendlyneTa.body.parameters.last_modified}
+              </span>
+            )}
+          </div>
+          
+          <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-none">
+            {trendlyneTa.body.parameters.price_analysis.map((item: any, idx: number) => {
+              const isPositive = item.colorSafe === 'positive' || item.color === 'positive';
+              const isNegative = item.colorSafe === 'negative' || item.color === 'negative';
+              const changePctVal = item.changePercentSafe != null ? item.changePercentSafe : item.changePercent;
+              const changePctFormatted = typeof changePctVal === 'number' ? changePctVal.toFixed(2) : changePctVal;
+              
+              return (
+                <div 
+                  key={idx} 
+                  className="flex-shrink-0 min-w-[100px] p-2 bg-slate-950/60 rounded-xl border border-slate-800/40 flex flex-col justify-between hover:border-slate-700 transition-colors"
+                >
+                  <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">{item.name}</span>
+                  <span className={cn(
+                    "text-xs font-black italic mt-1",
+                    isPositive ? "text-emerald-400" : isNegative ? "text-rose-400" : "text-slate-300"
+                  )}>
+                    {isPositive ? '+' : ''}{changePctFormatted}%
+                  </span>
+                  {item.low != null && item.high != null && (
+                    <span className="text-[7px] text-slate-500 font-bold mt-0.5">
+                      L: {item.low} | H: {item.high}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          
+          {trendlyneTa.body.parameters.price_insight && trendlyneTa.body.parameters.price_insight.length > 0 && (
+            <div className="space-y-1 pt-1 border-t border-slate-800/50">
+              {trendlyneTa.body.parameters.price_insight.map((insight: any, idx: number) => (
+                <div key={idx} className={cn("text-[9px] px-2 py-0.5 rounded border flex items-center gap-1.5", 
+                  insight.color === 'positive' ? "bg-emerald-500/5 border-emerald-500/10 text-emerald-400" :
+                  insight.color === 'negative' ? "bg-rose-500/5 border-rose-500/10 text-rose-400" :
+                  "bg-slate-900 border-slate-800 text-slate-400"
+                )}>
+                  <span className="inline-block w-1 h-1 rounded-full bg-current shrink-0" />
+                  <span>{insight.longtext || insight.shorttext || String(insight)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── TAB BAR (Only show if section is 'all' or undefined) ── */}
+      {(!section || section === 'all') && (
+        <div className="flex border-b border-white/[0.06] overflow-x-auto gap-1 scrollbar-none">
+          {TABS.map(tab => (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              className={cn(
+                "px-4 py-2 text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap border-b-2 -mb-px",
+                activeTab === tab.key
+                  ? "border-blue-500 text-blue-400 font-extrabold"
+                  : "border-transparent text-slate-500 hover:text-slate-300"
+              )}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* ── KEY STATS (Show in 'all' or 'overview') ── */}
       {(!section || section === 'all' || activeTab === 'overview') && (
         <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
@@ -320,66 +437,10 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
         </div>
       )}
 
-      {/* ── COMPANY PROFILE (Only show if section is 'all') ── */}
-      {(!section || section === 'all') && (tb?.profile || tb?.overviewData?.stock_mentions) && (
-        <div className="flex flex-wrap gap-3">
-          {tb?.profile && (
-            <div className="flex-1 min-w-0 flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl">
-              {tb.profile.founded_year && (
-                <span className="text-[9px] font-bold text-slate-500">Founded <span className="text-slate-300 font-black">{tb.profile.founded_year}</span></span>
-              )}
-              {tb.profile.chairman && (
-                <span className="text-[9px] font-bold text-slate-500">Chairman <span className="text-slate-300 font-black">{tb.profile.chairman}</span></span>
-              )}
-              {tb.profile.website && (
-                <a href={tb.profile.website} target="_blank" rel="noopener noreferrer"
-                  className="text-[9px] font-black text-violet-400 hover:text-violet-300 uppercase tracking-widest">
-                  Website ↗
-                </a>
-              )}
-              {tb.profile.address && (
-                <span className="text-[9px] font-bold text-slate-600 truncate">{tb.profile.address}</span>
-              )}
-            </div>
-          )}
-          {Array.isArray(tb?.overviewData?.stock_mentions?.ace_investors) && tb.overviewData.stock_mentions.ace_investors.length > 0 && (
-            <div className="flex items-center gap-2 px-4 py-2.5 bg-violet-500/5 border border-violet-500/20 rounded-xl">
-              <Users className="w-3 h-3 text-violet-500 shrink-0" />
-              <span className="text-[9px] font-black text-violet-400 uppercase tracking-widest">Ace Investors:</span>
-              <span className="text-[9px] font-bold text-slate-300">
-                {tb.overviewData.stock_mentions.ace_investors.map((a: any) => a.name || a).join(', ')}
-              </span>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ── TAB BAR (Only show if section is 'all' or undefined) ── */}
-      {(!section || section === 'all') && (
-        <div className="flex border-b border-slate-800 overflow-x-auto">
-          {TABS.map(tab => (
-            <button
-              key={tab.key}
-              onClick={() => setActiveTab(tab.key)}
-              className={cn(
-                "px-5 py-2.5 text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap border-b-2 -mb-px",
-                activeTab === tab.key
-                  ? "border-blue-500 text-blue-400"
-                  : "border-transparent text-slate-500 hover:text-slate-300"
-              )}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* ══════════════════════════════════════════════════════════════ */}
       {activeTab === 'overview' && (
         <div className="space-y-4">
-
           {/* High-Density Intelligence Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {/* AlphaQuant Factor Breakdown */}
             {alphaData && (
               <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-3 flex flex-col justify-between min-h-[140px]">
@@ -396,12 +457,12 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                   ].map((factor) => (
                     <div key={factor.label} className="text-center">
                       <span className={cn("text-[10px] font-black italic", factor.color)}>{factor.value.toFixed(1)}</span>
-                      <p className="text-[6px] font-black text-slate-600 uppercase tracking-tighter">{factor.label}</p>
+                      <p className="text-[6px] font-black text-slate-405 uppercase tracking-tighter">{factor.label}</p>
                     </div>
                   ))}
                 </div>
                 <div className="mt-3">
-                  <div className="flex items-center justify-between text-[8px] font-black uppercase tracking-widest text-slate-600 mb-1">
+                  <div className="flex items-center justify-between text-[8px] font-black uppercase tracking-widest text-slate-405 mb-1">
                     <span>Aggregate</span>
                     <span className="text-blue-400">{(alphaData.factors.momentum * 10).toFixed(0)}%</span>
                   </div>
@@ -438,7 +499,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                     {dims.map((d) => (
                       <div key={d.label} className="space-y-0.5">
                         <div className="flex items-center justify-between">
-                          <span className="text-[7px] font-black text-slate-500 uppercase tracking-tight">{d.label}</span>
+                          <span className="text-[7px] font-black text-slate-405 uppercase tracking-tight">{d.label}</span>
                           <span className={cn("text-[8px] font-black", d.text)}>{Number(d.val).toFixed(1)}</span>
                         </div>
                         <div className="h-0.5 w-full bg-slate-900 rounded-full overflow-hidden">
@@ -450,83 +511,60 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                 </div>
               );
             })()}
-
-            {/* Multi-Timeframe Confluence */}
-            {(techD || techW || techM) && (
-              <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-3 min-h-[140px]">
-                <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-1.5 mb-2">
-                  <Activity className="w-3 h-3" /> Multi-TF Confluence
-                </p>
-                <div className="grid grid-cols-3 gap-1.5 mb-2">
-                  {[
-                    { label: 'D', tech: techD },
-                    { label: 'W', tech: techW_final },
-                    { label: 'M', tech: techM_final },
-                  ].map(({ label, tech: t }) => {
-                    const indication = (t as any)?.sentiments?.indication || '';
-                    const isBull = indication.toLowerCase().includes('bullish');
-                    const isBear = indication.toLowerCase().includes('bearish');
-                    return (
-                      <div key={label} className={cn("p-1.5 rounded-lg border text-center",
-                        isBull ? "bg-emerald-500/5 border-emerald-500/10" :
-                        isBear ? "bg-rose-500/5 border-rose-500/10" : "bg-slate-900 border-slate-800"
-                      )}>
-                        <p className="text-[7px] font-black text-slate-600 uppercase mb-0.5">{label}</p>
-                        <p className={cn("text-[8px] font-black uppercase leading-tight truncate",
-                          isBull ? "text-emerald-400" : isBear ? "text-rose-400" : "text-slate-500"
-                        )}>{indication.split(' ')[0] || '—'}</p>
-                      </div>
-                    );
-                  })}
-                </div>
-                {techD && techW && techM && (() => {
-                  const sD = ((techD as any)?.sentiments?.indication || '').toLowerCase();
-                  const sW = ((techW_final as any)?.sentiments?.indication || '').toLowerCase();
-                  const sM = ((techM_final as any)?.sentiments?.indication || '').toLowerCase();
-                  if (!sD || !sW || !sM) return null;
-                  const mBull = sM.includes('bullish'), dBear = sD.includes('bearish');
-                  return (
-                    <div className={cn("px-2 py-1 rounded-lg text-[8px] font-bold italic border flex gap-1.5 items-center",
-                      mBull && dBear ? "bg-blue-500/5 text-blue-400 border-blue-500/10" : "bg-amber-500/5 text-amber-400 border-amber-500/10"
-                    )}>
-                      <Info className="w-2.5 h-2.5 shrink-0" />
-                      <span className="truncate text-[8px] font-black uppercase tracking-tighter">
-                        {mBull && dBear ? "Bullish Trend / Pullback" : "Mixed Divergence"}
-                      </span>
-                    </div>
-                  );
-                })()}
-              </div>
-            )}
-
-            {/* Active Signals List */}
-            <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-3 flex flex-col min-h-[140px]">
-              <div className="flex items-center gap-1.5 mb-2">
-                <Zap className="w-3 h-3 text-amber-400" />
-                <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Active Signals ({allScreeners.length})</span>
-              </div>
-              <div className="grid grid-cols-2 gap-1.5 overflow-y-auto max-h-[85px] pr-1 scrollbar-none">
-                {allScreeners.slice(0, 10).map((screener, i) => {
-                  const isBullish = screener.sentiment === 'bullish';
-                  const isBearish = screener.sentiment === 'bearish';
-                  return (
-                    <div key={`${screener.id}-${i}`}
-                      onClick={() => { setSelectedScreener(screener); setIsModalOpen(true); }}
-                      className={cn("px-2 py-1 rounded-md text-[7px] font-black uppercase tracking-tighter border flex items-center gap-1.5 transition-all cursor-pointer hover:bg-slate-900 active:scale-95",
-                        isBullish ? "bg-emerald-500/5 border-emerald-500/20 text-emerald-400" :
-                        isBearish ? "bg-rose-500/5 border-rose-500/20 text-rose-400" :
-                        "bg-slate-900 border-slate-800 text-slate-400"
-                      )}>
-                      {isBullish ? <TrendingUp className="w-2 h-2" /> : isBearish ? <TrendingDown className="w-2 h-2" /> : <Filter className="w-2 h-2" />}
-                      <span className="truncate">{screener.name}</span>
-                    </div>
-                  );
-                })}
-                {allScreeners.length === 0 && <p className="text-[8px] text-slate-700 italic font-bold text-center mt-4">No active signals</p>}
-              </div>
-            </div>
           </div>
 
+          {/* Qualitative Drivers: SWOT / Pros-Cons */}
+          {(swot || tb?.insights) && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {/* Alpha Drivers */}
+              <div className="bg-emerald-500/5 border border-emerald-500/10 rounded-2xl p-3">
+                <p className="text-[9px] font-black text-emerald-500 uppercase tracking-widest mb-3 flex items-center gap-1.5">
+                  <TrendingUp className="w-3.5 h-3.5" /> Alpha Drivers & Strengths
+                </p>
+                <div className="space-y-1.5">
+                  {(() => {
+                    const ins = tb?.insights;
+                    const pros = Array.isArray(ins?.pros) ? ins.pros : Array.isArray(ins?.positives) ? ins.positives : Array.isArray(ins?.strengths) ? ins.strengths : [];
+                    return pros.slice(0, 3).map((p: string, i: number) => (
+                      <div key={i} className="flex items-start gap-2 text-[10px] text-slate-300 font-medium leading-relaxed bg-emerald-500/5 p-1.5 rounded-lg">
+                        <span className="text-emerald-400 font-black">✓</span> {p}
+                      </div>
+                    ));
+                  })()}
+                  {swot?.strengths?.slice(0, 3).map((s: string, i: number) => (
+                    <div key={`s-${i}`} className="flex items-start gap-2 text-[10px] text-slate-300 font-medium leading-relaxed bg-blue-500/5 p-1.5 rounded-lg">
+                      <Zap className="w-3.5 h-3.5 text-blue-400 shrink-0" /> {s}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Risk Vectors */}
+              <div className="bg-rose-500/5 border border-rose-500/10 rounded-2xl p-3">
+                <p className="text-[9px] font-black text-rose-500 uppercase tracking-widest mb-3 flex items-center gap-1.5">
+                  <AlertCircle className="w-3.5 h-3.5" /> Risk Vectors & Weaknesses
+                </p>
+                <div className="space-y-1.5">
+                  {(() => {
+                    const ins = tb?.insights;
+                    const cons = Array.isArray(ins?.cons) ? ins.cons : Array.isArray(ins?.negatives) ? ins.negatives : Array.isArray(ins?.weaknesses) ? ins.weaknesses : [];
+                    return cons.slice(0, 3).map((c: string, i: number) => (
+                      <div key={i} className="flex items-start gap-2 text-[10px] text-slate-300 font-medium leading-relaxed bg-rose-500/5 p-1.5 rounded-lg">
+                        <AlertCircle className="w-3.5 h-3.5 text-rose-500 shrink-0" /> {c}
+                      </div>
+                    ));
+                  })()}
+                  {swot?.weaknesses?.slice(0, 3).map((w: string, i: number) => (
+                    <div key={`w-${i}`} className="flex items-start gap-2 text-[10px] text-slate-300 font-medium leading-relaxed bg-amber-500/5 p-1.5 rounded-lg">
+                      <Info className="w-3.5 h-3.5 text-amber-500 shrink-0" /> {w}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Expert Classification & Checklist */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {/* MC Classification */}
             {classification?.longDesc && (
@@ -538,19 +576,19 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                 <div className="absolute top-0 right-0 p-4 opacity-[0.03] pointer-events-none"><BrainCircuit className="w-16 h-16" /></div>
                 <div className="relative z-10">
                   <p className="text-[9px] font-black text-emerald-500 uppercase tracking-widest mb-1.5 flex items-center gap-1.5">
-                    <CheckCircle2 className="w-3 h-3" /> MC Expert Analysis
+                    <CheckCircle2 className="w-3.5 h-3.5" /> MC Expert Analysis
                   </p>
                   <p className="text-[11px] text-slate-300 font-medium italic leading-relaxed">{classification.longDesc}</p>
                 </div>
                 <div className="flex items-center gap-3 mt-3 relative z-10">
-                  <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Score</span>
+                  <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Score</span>
                   <div className="flex-1 h-1 bg-slate-800 rounded-full overflow-hidden">
                     <motion.div initial={{ width: 0 }} animate={{ width: `${classification.stockScore}%` }}
                       className={cn("h-full rounded-full", classification.stockScore >= 70 ? "bg-emerald-500" : classification.stockScore >= 50 ? "bg-amber-500" : "bg-rose-500")} />
                   </div>
                   <span className={cn("text-[10px] font-black italic",
                     classification.stockScore >= 70 ? "text-emerald-400" : classification.stockScore >= 50 ? "text-amber-400" : "text-rose-400"
-                  )}>{classification.stockScore}<span className="text-[7px] text-slate-600 font-bold ml-0.5">/100</span></span>
+                  )}>{classification.stockScore}<span className="text-[7px] text-slate-400 font-bold ml-0.5">/100</span></span>
                 </div>
               </div>
             )}
@@ -561,7 +599,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-1.5">
                     <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-                    <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">MC Checklist</span>
+                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">MC Checklist</span>
                   </div>
                   {essentials.passText && (
                     <div className="flex items-center gap-2">
@@ -577,7 +615,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                 <div className="grid grid-cols-2 gap-x-4 gap-y-3">
                   {(['financials', 'industry', 'ownership', 'others'] as const).map((key) => {
                     const labelMap = { financials: 'FIN', industry: 'IND', ownership: 'OWN', others: 'OTH' };
-                    const colorMap = { financials: 'text-blue-500', industry: 'text-purple-500', ownership: 'text-amber-500', others: 'text-slate-500' };
+                    const colorMap = { financials: 'text-blue-500', industry: 'text-purple-500', ownership: 'text-amber-500', others: 'text-slate-400' };
                     const items = essentials.checklist![key];
                     if (!items?.length) return null;
                     return (
@@ -586,7 +624,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                         <div className="grid grid-cols-1 gap-1">
                           {items.slice(0, 3).map((item, i) => (
                             <div key={i} className="flex items-center justify-between px-1.5 py-1 bg-slate-900/30 rounded border border-slate-800/20">
-                              <span className="text-[8px] text-slate-500 font-bold leading-tight truncate mr-2">{item.question}</span>
+                              <span className="text-[8px] text-slate-400 font-bold leading-tight truncate mr-2">{item.question}</span>
                               <span className={cn("text-[8px] font-black shrink-0", item.answer ? "text-emerald-500" : "text-rose-500")}>
                                 {item.answer ? "YES" : "NO"}
                               </span>
@@ -601,34 +639,44 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
             )}
           </div>
 
-          {/* VWAP Chart */}
-          {(vwapData as any)?.NSE && (vwapData as any).NSE.length > 0 && (
-            <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-sm font-semibold text-slate-300">VWAP — Intraday</span>
-                <span className="text-xs text-slate-500">NSE</span>
+          {/* Company Profile (Rendered directly in Overview Tab) */}
+          {(tb?.profile || tb?.overviewData?.stock_mentions) && (
+            <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-4">
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 border-l-2 border-slate-500 pl-2">
+                Company Profile
+              </p>
+              <div className="flex flex-wrap gap-3">
+                {tb?.profile && (
+                  <div className="flex-1 min-w-0 flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2.5 bg-slate-900/35 border border-white/[0.06] rounded-xl">
+                    {tb.profile.founded_year && (
+                      <span className="text-[10px] font-bold text-slate-400">Founded <span className="text-slate-200 font-black">{tb.profile.founded_year}</span></span>
+                    )}
+                    {tb.profile.chairman && (
+                      <span className="text-[10px] font-bold text-slate-400">Chairman <span className="text-slate-200 font-black">{tb.profile.chairman}</span></span>
+                    )}
+                    {tb.profile.website && (
+                      <a href={tb.profile.website} target="_blank" rel="noopener noreferrer"
+                        className="text-[10px] font-black text-indigo-400 hover:text-indigo-300 uppercase tracking-widest">
+                        Website ↗
+                      </a>
+                    )}
+                    {tb.profile.address && (
+                      <span className="text-[10px] font-bold text-slate-400 truncate max-w-sm">{tb.profile.address}</span>
+                    )}
+                  </div>
+                )}
+                {Array.isArray(tb?.overviewData?.stock_mentions?.ace_investors) && tb.overviewData.stock_mentions.ace_investors.length > 0 && (
+                  <div className="flex items-center gap-2 px-4 py-2.5 bg-indigo-500/5 border border-indigo-500/20 rounded-xl">
+                    <Users className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                    <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Ace Investors:</span>
+                    <span className="text-[10px] font-bold text-slate-200">
+                      {tb.overviewData.stock_mentions.ace_investors.map((a: any) => a.name || a).join(', ')}
+                    </span>
+                  </div>
+                )}
               </div>
-              <ResponsiveContainer width="100%" height={120}>
-                <AreaChart data={(vwapData as any).NSE.slice(-60)} margin={{ top: 4, right: 4, bottom: 0, left: -20 }}>
-                  <defs>
-                    <linearGradient id="vwapGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
-                      <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <XAxis dataKey="time" hide />
-                  <YAxis domain={['auto', 'auto']} tick={{ fontSize: 9, fill: '#94a3b8' }} />
-                  <Tooltip
-                    contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 6 }}
-                    formatter={(v: any) => [`₹${parseFloat(v).toFixed(2)}`, 'VWAP']}
-                  />
-                  <Area type="monotone" dataKey="vwap" stroke="#3b82f6" strokeWidth={1.5}
-                        fill="url(#vwapGrad)" dot={false} />
-                </AreaChart>
-              </ResponsiveContainer>
             </div>
           )}
-
           <ScreenerDetailsModal
             isOpen={isModalOpen}
             onClose={() => setIsModalOpen(false)}
@@ -637,7 +685,6 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
             watchlist={watchlist}
             onToggleWatchlist={onToggleWatchlist}
           />
-
         </div>
       )}
 
@@ -958,6 +1005,176 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
             </Card>
           )}
 
+          {/* Growth & CAGR Analysis */}
+          {tb?.cagrData && (
+            <Card title="Growth & CAGR Analysis" icon={TrendingUp}>
+              <div className="overflow-x-auto pt-2">
+                <table className="w-full text-left text-[10px]">
+                  <thead>
+                    <tr className="text-slate-500 font-black uppercase tracking-widest border-b border-slate-800">
+                      <th className="pb-2">Metric</th>
+                      <th className="pb-2 text-right">1 Year</th>
+                      <th className="pb-2 text-right">3 Years</th>
+                      <th className="pb-2 text-right">5 Years</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/30">
+                    {[
+                      { label: 'Revenue Growth', d: tb.cagrData.sales_growth },
+                      { label: 'Operating Profit Growth', d: tb.cagrData.operating_profit_growth },
+                      { label: 'Net Profit Growth', d: tb.cagrData.net_profit_growth },
+                      { label: 'Dividend Growth', d: tb.cagrData.dps },
+                      { label: 'Stock CAGR', d: tb.cagrData.stock_growth },
+                    ].filter(item => item.d && item.d.value).map((item, i) => {
+                      const v1 = item.d.value.one_year;
+                      const v3 = item.d.value.three_year;
+                      const v5 = item.d.value.five_year;
+                      const formatVal = (v: any) => {
+                        if (v == null || v === '') return '—';
+                        const n = Number(v);
+                        return `${n >= 0 ? '+' : ''}${n.toFixed(1)}%`;
+                      };
+                      const getColor = (v: any) => {
+                        if (v == null || v === '') return 'text-slate-400';
+                        return Number(v) >= 0 ? 'text-emerald-400' : 'text-rose-400';
+                      };
+                      return (
+                        <tr key={i} className="group hover:bg-slate-900/30 transition-colors">
+                          <td className="py-2.5 font-black text-slate-350">{item.label}</td>
+                          <td className={cn("py-2.5 text-right font-bold tabular-nums", getColor(v1))}>{formatVal(v1)}</td>
+                          <td className={cn("py-2.5 text-right font-bold tabular-nums", getColor(v3))}>{formatVal(v3)}</td>
+                          <td className={cn("py-2.5 text-right font-bold tabular-nums", getColor(v5))}>{formatVal(v5)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          )}
+
+          {/* Shareholding & Ownership Suite */}
+          {((tb?.shareHoldingGraph?.holdings) || (mc?.shareholdingPattern)) && (
+            <Card title="Shareholding & Ownership Analysis" icon={PieChart}>
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 pt-2">
+                
+                {/* Latest Ownership Pie Breakdown */}
+                <div className="space-y-4">
+                  <p className="text-[9px] font-black text-blue-500 uppercase tracking-widest border-l-2 border-blue-500 pl-2">Latest Holdings</p>
+                  
+                  {(() => {
+                    let holdingsList: { name: string; value: string | number }[] = [];
+                    let pledge = "0.00";
+                    
+                    if (tb?.shareHoldingGraph?.holdings) {
+                      const qKeys = Object.keys(tb.shareHoldingGraph.holdings).sort();
+                      const latestQ = qKeys[qKeys.length - 1];
+                      if (latestQ) {
+                        const h = tb.shareHoldingGraph.holdings[latestQ];
+                        holdingsList = [
+                          { name: 'Promoters', value: h.promoters_holding },
+                          { name: 'FIIs', value: h.fiis_holding },
+                          { name: 'DIIs', value: h.diis_holding },
+                          { name: 'Public', value: h.public_holding },
+                        ];
+                      }
+                    }
+                    
+                    // Fallback to moneycontrol shareholdingPattern
+                    if (holdingsList.length === 0 && mc?.shareholdingPattern?.list) {
+                      holdingsList = mc.shareholdingPattern.list.map((item: any) => ({
+                        name: item.name === 'Promoter' ? 'Promoters' : item.name === 'FII' ? 'FIIs' : item.name === 'DII' ? 'DIIs' : item.name,
+                        value: item.value
+                      }));
+                    }
+                    
+                    pledge = mc?.shareholdingPattern?.promoterPledging || tb?.shareHoldingGraph?.promoterPledging || "0.00";
+                    const pledgeNum = parseFloat(String(pledge || 0));
+
+                    if (holdingsList.length === 0) return <p className="text-[10px] text-slate-500 italic">No holdings data available</p>;
+                    
+                    return (
+                      <div className="space-y-3">
+                        <div className="grid grid-cols-2 gap-2">
+                          {holdingsList.map((h, i) => (
+                            <div key={i} className="p-3 bg-slate-950 rounded-xl border border-slate-800/50">
+                              <p className="text-[7px] font-black text-slate-500 uppercase tracking-widest mb-1">{h.name}</p>
+                              <p className="text-sm font-black text-white italic">{Number(h.value).toFixed(2)}%</p>
+                            </div>
+                          ))}
+                        </div>
+                        
+                        {pledgeNum > 0 ? (
+                          <div className="flex items-center gap-2 px-3 py-2 bg-rose-500/10 border border-rose-500/20 rounded-xl">
+                            <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
+                            <div>
+                              <p className="text-[9px] font-black text-rose-400 uppercase tracking-widest">Promoter Pledging Detected</p>
+                              <p className="text-[10px] text-slate-350 font-bold">{pledgeNum.toFixed(2)}% of promoter holding is pledged.</p>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2 px-3 py-2 bg-emerald-500/5 border border-emerald-500/10 rounded-xl">
+                            <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                            <p className="text-[9px] font-black text-emerald-400 uppercase tracking-widest">Zero Promoter Shares Pledged</p>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                {/* Stacked Recharts Bar Chart for Quarterly Trends */}
+                <div className="lg:col-span-2 space-y-4">
+                  <p className="text-[9px] font-black text-violet-500 uppercase tracking-widest border-l-2 border-violet-500 pl-2">Quarterly Historical Trends</p>
+                  <div className="bg-slate-950/40 border border-slate-800/40 rounded-2xl p-2.5 overflow-hidden">
+                    {(() => {
+                      const holdings = tb?.shareHoldingGraph?.holdings;
+                      if (!holdings) return <div className="h-40 flex items-center justify-center text-slate-700 text-[10px] font-black uppercase tracking-widest italic">No historical trend data</div>;
+                      
+                      const chartData = Object.entries(holdings).sort(([a], [b]) => a.localeCompare(b)).map(([quarter, val]: [string, any]) => {
+                        const year = quarter.substring(2, 4);
+                        const monthNum = quarter.substring(4, 6);
+                        let qLabel = quarter;
+                        if (monthNum === '03') qLabel = `Mar '${year}`;
+                        else if (monthNum === '06') qLabel = `Jun '${year}`;
+                        else if (monthNum === '09') qLabel = `Sep '${year}`;
+                        else if (monthNum === '12') qLabel = `Dec '${year}`;
+                        return {
+                          quarter: qLabel,
+                          Promoter: val.promoters_holding,
+                          FII: val.fiis_holding,
+                          DII: val.diis_holding,
+                          Public: val.public_holding
+                        };
+                      });
+                      
+                      return (
+                        <ResponsiveContainer width="100%" height={180}>
+                          <BarChart data={chartData} margin={{ top: 5, right: 5, left: -25, bottom: 0 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                            <XAxis dataKey="quarter" tick={{ fontSize: 8, fill: '#64748b' }} axisLine={false} tickLine={false} />
+                            <YAxis tick={{ fontSize: 8, fill: '#64748b' }} axisLine={false} tickLine={false} domain={[0, 100]} />
+                            <Tooltip 
+                              contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px' }}
+                              labelStyle={{ fontSize: 9, fontWeight: 900, color: '#94a3b8' }}
+                              itemStyle={{ fontSize: 10, fontWeight: 700 }}
+                            />
+                            <Legend wrapperStyle={{ fontSize: 8, paddingTop: 10 }} />
+                            <Bar dataKey="Promoter" stackId="a" fill="#2563eb" name="Promoter" />
+                            <Bar dataKey="FII" stackId="a" fill="#10b981" name="FII" />
+                            <Bar dataKey="DII" stackId="a" fill="#8b5cf6" name="DII" />
+                            <Bar dataKey="Public" stackId="a" fill="#f59e0b" name="Public" />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      );
+                    })()}
+                  </div>
+                </div>
+
+              </div>
+            </Card>
+          )}
+
         </div>
       )}
 
@@ -1078,6 +1295,32 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                 </div>
               </Card>
 
+              {/* VWAP Intraday Chart */}
+              {(vwapData as any)?.NSE && (vwapData as any).NSE.length > 0 && (
+                <Card title="VWAP — Intraday (NSE)" icon={Activity}>
+                  <div className="pt-2">
+                    <ResponsiveContainer width="100%" height={120}>
+                      <AreaChart data={(vwapData as any).NSE.slice(-60)} margin={{ top: 4, right: 4, bottom: 0, left: -20 }}>
+                        <defs>
+                          <linearGradient id="vwapGrad" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
+                            <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                          </linearGradient>
+                        </defs>
+                        <XAxis dataKey="time" hide />
+                        <YAxis domain={['auto', 'auto']} tick={{ fontSize: 9, fill: '#94a3b8' }} />
+                        <Tooltip
+                          contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 6 }}
+                          formatter={(v: any) => [`₹${parseFloat(v).toFixed(2)}`, 'VWAP']}
+                        />
+                        <Area type="monotone" dataKey="vwap" stroke="#3b82f6" strokeWidth={1.5}
+                              fill="url(#vwapGrad)" dot={false} />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+                </Card>
+              )}
+
               {/* Technical Analysis */}
               {tech && (
                 <Card title={`Technical Signals (${timeframe === 'D' ? 'Daily' : timeframe === 'W' ? 'Weekly' : 'Monthly'})`} icon={Activity}>
@@ -1196,6 +1439,81 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                   </div>
                 </Card>
               )}
+
+              {/* Multi-Timeframe Confluence */}
+              {(techD || techW || techM) && (
+                <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-3">
+                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5 mb-2">
+                    <Activity className="w-3 h-3 text-blue-500" /> Multi-TF Confluence
+                  </p>
+                  <div className="grid grid-cols-3 gap-1.5 mb-2">
+                    {[
+                      { label: 'D', tech: techD },
+                      { label: 'W', tech: techW_final },
+                      { label: 'M', tech: techM_final },
+                    ].map(({ label, tech: t }) => {
+                      const indication = (t as any)?.sentiments?.indication || '';
+                      const isBull = indication.toLowerCase().includes('bullish');
+                      const isBear = indication.toLowerCase().includes('bearish');
+                      return (
+                        <div key={label} className={cn("p-1.5 rounded-lg border text-center",
+                          isBull ? "bg-emerald-500/5 border-emerald-500/10" :
+                          isBear ? "bg-rose-500/5 border-rose-500/10" : "bg-slate-900 border-slate-800"
+                        )}>
+                          <p className="text-[7px] font-black text-slate-500 uppercase mb-0.5">{label}</p>
+                          <p className={cn("text-[8px] font-black uppercase leading-tight truncate",
+                            isBull ? "text-emerald-400" : isBear ? "text-rose-400" : "text-slate-450"
+                          )}>{indication.split(' ')[0] || '—'}</p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {techD && techW && techM && (() => {
+                    const sD = ((techD as any)?.sentiments?.indication || '').toLowerCase();
+                    const sW = ((techW_final as any)?.sentiments?.indication || '').toLowerCase();
+                    const sM = ((techM_final as any)?.sentiments?.indication || '').toLowerCase();
+                    if (!sD || !sW || !sM) return null;
+                    const mBull = sM.includes('bullish'), dBear = sD.includes('bearish');
+                    return (
+                      <div className={cn("px-2 py-1 rounded-lg text-[8px] font-bold italic border flex gap-1.5 items-center",
+                        mBull && dBear ? "bg-blue-500/5 text-blue-400 border-blue-500/10" : "bg-amber-500/5 text-amber-400 border-amber-500/10"
+                      )}>
+                        <Info className="w-2.5 h-2.5 shrink-0" />
+                        <span className="truncate text-[8px] font-black uppercase tracking-tighter">
+                          {mBull && dBear ? "Bullish Trend / Pullback" : "Mixed Divergence"}
+                        </span>
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+
+              {/* Active Signals List */}
+              <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-3 flex flex-col">
+                <div className="flex items-center gap-1.5 mb-2">
+                  <Zap className="w-3 h-3 text-amber-400" />
+                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Active Signals ({allScreeners.length})</span>
+                </div>
+                <div className="grid grid-cols-2 gap-1.5 overflow-y-auto max-h-[85px] pr-1 scrollbar-none">
+                  {allScreeners.slice(0, 10).map((screener, i) => {
+                    const isBullish = screener.sentiment === 'bullish';
+                    const isBearish = screener.sentiment === 'bearish';
+                    return (
+                      <div key={`${screener.id}-${i}`}
+                        onClick={() => { setSelectedScreener(screener); setIsModalOpen(true); }}
+                        className={cn("px-2 py-1 rounded-md text-[7px] font-black uppercase tracking-tighter border flex items-center gap-1.5 transition-all cursor-pointer hover:bg-slate-900 active:scale-95",
+                          isBullish ? "bg-emerald-500/5 border-emerald-500/20 text-emerald-400" :
+                          isBearish ? "bg-rose-500/5 border-rose-500/20 text-rose-400" :
+                          "bg-slate-900 border-slate-800 text-slate-400"
+                        )}>
+                        {isBullish ? <TrendingUp className="w-2 h-2" /> : isBearish ? <TrendingDown className="w-2 h-2" /> : <Filter className="w-2 h-2" />}
+                        <span className="truncate">{screener.name}</span>
+                      </div>
+                    );
+                  })}
+                  {allScreeners.length === 0 && <p className="text-[8px] text-slate-400 italic font-bold text-center mt-4">No active signals</p>}
+                </div>
+              </div>
             </div>
           </div>
 
@@ -1329,6 +1647,124 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
       )}
 
       {/* ══════════════════════════════════════════════════════════════ */}
+      {/* PEERS TAB                                                      */}
+      {/* ══════════════════════════════════════════════════════════════ */}
+      {activeTab === 'peers' && (
+        <div className="space-y-6">
+          {loadingPeers ? (
+            <div className="flex items-center justify-center p-8 bg-slate-900/10 border border-slate-800 border-dashed rounded-2xl">
+              <span className="text-[10px] font-black uppercase tracking-widest text-slate-500 animate-pulse">Loading Peer Data...</span>
+            </div>
+          ) : (
+            <>
+              {/* Industry Comparison Matrix */}
+              {(() => {
+                const list = peersData?.stocks || [];
+                const topPeers = list.filter((p: any) => p.symbol.toUpperCase() !== symbol.toUpperCase()).slice(0, 4);
+                if (topPeers.length === 0) return null;
+                return (
+                  <Card title="Industry Comparison Matrix (Top Peers)" icon={BarChart3}>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-2">
+                      {topPeers.map((peer: any, i: number) => {
+                        const mcap = peer.market_cap ? Number(peer.market_cap) : 0;
+                        const formattedMcap = mcap > 0 ? `₹${mcap.toLocaleString('en-IN', { maximumFractionDigits: 0 })} Cr` : '—';
+                        return (
+                          <div 
+                            key={i} 
+                            onClick={() => onSelectStock && onSelectStock(peer.symbol)}
+                            className="p-3.5 bg-slate-950/60 hover:bg-slate-900/60 border border-slate-800 hover:border-blue-500/50 rounded-xl transition-all cursor-pointer group active:scale-[0.98]"
+                          >
+                            <div className="flex justify-between items-start mb-2">
+                              <div>
+                                <p className="text-xs font-black text-white group-hover:text-blue-400 transition-colors uppercase">{peer.symbol}</p>
+                                <p className="text-[9px] text-slate-500 font-bold truncate max-w-[120px]">{peer.name}</p>
+                              </div>
+                              <span className="text-[8px] font-black text-slate-400 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800">#{i + 1}</span>
+                            </div>
+                            <div className="space-y-1 text-[10px]">
+                              <div className="flex justify-between">
+                                <span className="text-slate-500 font-bold">M.Cap:</span>
+                                <span className="text-slate-300 font-black">{formattedMcap}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-slate-500 font-bold">P/E Ratio:</span>
+                                <span className={cn(
+                                  "font-black",
+                                  peer.pe_ratio != null && peer.pe_ratio > 0 ? "text-amber-400" : "text-slate-400"
+                                )}>{peer.pe_ratio != null && peer.pe_ratio > 0 ? peer.pe_ratio.toFixed(1) : '—'}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-slate-500 font-bold">Div Yield:</span>
+                                <span className="text-emerald-400 font-black">{peer.dividend_yield != null ? `${peer.dividend_yield.toFixed(2)}%` : '—'}</span>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </Card>
+                );
+              })()}
+
+              {/* Sector Peers Table */}
+              <Card title={`Sector Peers: ${nseStockData?.sector || '—'} (${peersData?.count || 0} stocks)`} icon={Filter}>
+                <div className="overflow-x-auto pt-2">
+                  <table className="w-full text-left text-[10px]">
+                    <thead>
+                      <tr className="text-slate-500 font-black uppercase tracking-widest border-b border-slate-800">
+                        <th className="pb-2">Symbol</th>
+                        <th className="pb-2">Company Name</th>
+                        <th className="pb-2 text-right">Market Cap (Cr)</th>
+                        <th className="pb-2 text-right">P/E Ratio</th>
+                        <th className="pb-2 text-right">Div Yield (%)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/30">
+                      {(peersData?.stocks || []).map((peer: any, i: number) => {
+                        const isCurrent = peer.symbol.toUpperCase() === symbol.toUpperCase();
+                        const mcap = peer.market_cap ? Number(peer.market_cap) : 0;
+                        return (
+                          <tr 
+                            key={i} 
+                            onClick={() => onSelectStock && onSelectStock(peer.symbol)}
+                            className={cn(
+                              "group hover:bg-slate-900/35 transition-colors cursor-pointer",
+                              isCurrent ? "bg-blue-600/10 border-l-2 border-blue-500 text-blue-400" : ""
+                            )}
+                          >
+                            <td className={cn("py-2.5 font-black uppercase tracking-widest", isCurrent ? "text-blue-400 pl-1" : "text-white group-hover:text-blue-400 transition-colors")}>
+                              {peer.symbol}
+                            </td>
+                            <td className="py-2.5 font-bold text-slate-350 truncate max-w-[200px]">
+                              {peer.name}
+                            </td>
+                            <td className="py-2.5 text-right font-bold tabular-nums text-slate-200">
+                              {mcap > 0 ? mcap.toLocaleString('en-IN', { maximumFractionDigits: 1 }) : '—'}
+                            </td>
+                            <td className="py-2.5 text-right font-bold tabular-nums text-slate-300">
+                              {peer.pe_ratio != null && peer.pe_ratio > 0 ? peer.pe_ratio.toFixed(1) : '—'}
+                            </td>
+                            <td className="py-2.5 text-right font-bold tabular-nums text-emerald-400">
+                              {peer.dividend_yield != null ? `${peer.dividend_yield.toFixed(2)}%` : '—'}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {(!peersData?.stocks || peersData.stocks.length === 0) && (
+                        <tr>
+                          <td colSpan={5} className="py-8 text-center text-slate-500 italic">No peer stocks found in this sector.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ══════════════════════════════════════════════════════════════ */}
       {/* ANALYSIS TAB                                                   */}
       {/* ══════════════════════════════════════════════════════════════ */}
       {activeTab === 'analysis' && (
@@ -1428,6 +1864,117 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                 )}
               </div>
             </Card>
+          )}
+
+          {/* Trendlyne Advanced Technical Analysis (Integrated under Analysis Tab) */}
+          {trendlyneTa?.body?.parameters && (
+            <>
+              {/* Beta & Volatility Dynamics */}
+              {trendlyneTa.body.parameters.beta_analysis && (
+                <Card 
+                  title={`Beta & Volatility Dynamics (${trendlyneTa.body.parameters.beta_benchmark_index || 'NIFTY 50'})`} 
+                  icon={TrendingUp}
+                >
+                  <div className="space-y-4 pt-2">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      {trendlyneTa.body.parameters.beta_analysis.map((beta: any, idx: number) => (
+                        <div key={idx} className="bg-slate-950/60 p-3 rounded-xl border border-slate-800/50 flex flex-col items-center justify-center">
+                          <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">{beta.label} Beta</span>
+                          <span className={cn("text-lg font-black italic mt-1", 
+                            beta.color === 'positive' ? 'text-emerald-400' : 
+                            beta.color === 'negative' ? 'text-rose-400' : 'text-slate-300'
+                          )}>
+                            {beta.data}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                    {trendlyneTa.body.parameters.beta_insight && trendlyneTa.body.parameters.beta_insight.length > 0 && (
+                      <div className="bg-slate-950/40 border border-slate-800/50 p-3 rounded-xl space-y-1.5">
+                        {trendlyneTa.body.parameters.beta_insight.map((insight: any, idx: number) => (
+                          <div key={idx} className="flex items-start gap-2 text-[10px] text-slate-300">
+                            <span className={cn("inline-block w-1.5 h-1.5 rounded-full mt-1.5 shrink-0", 
+                              insight.color === 'positive' ? 'bg-emerald-500' : 
+                              insight.color === 'negative' ? 'bg-rose-500' : 'bg-slate-500'
+                            )} />
+                            <span>{insight.longtext || insight.shorttext || String(insight)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </Card>
+              )}
+
+              {/* Oscillators Dashboard & Technical Insights */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {/* Oscillators & Indicators Dashboard */}
+                {trendlyneTa.body.parameters.oscillator_parameter && (
+                  <Card title="Oscillators & Indicators Dashboard" icon={Activity}>
+                    <div className="space-y-4 pt-2">
+                      {trendlyneTa.body.parameters.oscillator_signal && (
+                        <div className={cn("p-3 rounded-xl border flex items-center justify-between",
+                          trendlyneTa.body.parameters.oscillator_signal.color === 'positive' ? 'bg-emerald-500/5 border-emerald-500/20 text-emerald-400' :
+                          trendlyneTa.body.parameters.oscillator_signal.color === 'negative' ? 'bg-rose-500/5 border-rose-500/20 text-rose-400' :
+                          'bg-slate-900 border-slate-800 text-slate-300'
+                        )}>
+                          <span className="text-[10px] font-black uppercase tracking-wider">Overall Signal</span>
+                          <span className="text-[10px] font-black italic">{trendlyneTa.body.parameters.oscillator_signal.insight}</span>
+                        </div>
+                      )}
+                      
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {trendlyneTa.body.parameters.oscillator_parameter.map((osc: any, idx: number) => (
+                          <div key={idx} className="flex items-center justify-between p-2 bg-slate-950/30 rounded-lg border border-slate-800/50 hover:bg-slate-950/60 hover:border-slate-300 transition-all">
+                            <div className="flex-1 min-w-0 pr-2">
+                              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest truncate">{osc.name}</p>
+                              {osc.description && (
+                                <p className="text-[7px] text-slate-500 line-clamp-1 hover:line-clamp-none mt-0.5 leading-tight">{osc.description}</p>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <span className="text-[10px] font-black text-slate-300 tabular-nums">{osc.value}</span>
+                              {osc.color && (
+                                <span className={cn("text-[8px] font-black px-1.5 py-0.5 rounded uppercase tracking-tighter",
+                                  osc.color === 'positive' ? "bg-emerald-500/10 text-emerald-400" :
+                                  osc.color === 'negative' ? "bg-rose-500/10 text-rose-400" :
+                                  "bg-slate-900 text-slate-400 border border-slate-800/50"
+                                )}>
+                                  {osc.color === 'positive' ? 'Bullish' : osc.color === 'negative' ? 'Bearish' : 'Neutral'}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </Card>
+                )}
+
+                {/* Trendlyne Technical Insights */}
+                {trendlyneTa.body.parameters.technicals_insight && trendlyneTa.body.parameters.technicals_insight.length > 0 && (
+                  <Card title="Trendlyne Technical Insights" icon={BrainCircuit}>
+                    <div className="space-y-2 pt-2">
+                      {trendlyneTa.body.parameters.technicals_insight.map((insight: any, idx: number) => (
+                        <div key={idx} className={cn("p-3 rounded-xl border flex items-start gap-2.5 text-[10px]",
+                          insight.color === 'positive' ? 'bg-emerald-500/5 border-emerald-500/20 text-slate-200' :
+                          insight.color === 'negative' ? 'bg-rose-500/5 border-rose-500/20 text-slate-200' :
+                          'bg-slate-900 border-slate-800 text-slate-200'
+                        )}>
+                          <span className={cn("inline-block w-1.5 h-1.5 rounded-full mt-1.5 shrink-0", 
+                            insight.color === 'positive' ? 'bg-emerald-500' : 
+                            insight.color === 'negative' ? 'bg-rose-500' : 'bg-slate-500'
+                          )} />
+                          <div>
+                            <p className="font-bold leading-relaxed">{insight.longtext || insight.shorttext}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </Card>
+                )}
+              </div>
+            </>
           )}
 
         </div>
@@ -1666,80 +2213,334 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
       {/* ── F&O Tab ── */}
       {activeTab === 'fno' && (
         <div className="space-y-4">
-          {(mc as any)?.fnoExpiry && (
-            <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
-              <div className="text-sm font-semibold text-slate-300 mb-3">Futures — {symbol}</div>
-              {(mc as any)?.fnoFutures?.data?.futureData ? (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-xs">
-                    <thead>
-                      <tr className="border-b border-slate-700/50">
-                        {['Expiry', 'LTP', 'Change%', 'OI', 'OI Change', 'Volume'].map(h => (
-                          <th key={h} className="text-left pb-2 pr-4 text-slate-400 font-semibold whitespace-nowrap">{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {((mc as any).fnoFutures.data.futureData || []).slice(0, 5).map((row: any, i: number) => {
-                        const chg = parseFloat(row.pChange || row.change || 0);
-                        return (
-                          <tr key={i} className="border-b border-slate-700/20">
-                            <td className="py-2 pr-4 text-slate-300">{row.expiryDate || row.expiry}</td>
-                            <td className="py-2 pr-4 font-mono text-white">₹{row.lastPrice || row.ltp}</td>
-                            <td className={`py-2 pr-4 font-bold ${chg >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                              {chg >= 0 ? '+' : ''}{chg.toFixed(2)}%
-                            </td>
-                            <td className="py-2 pr-4 text-slate-300">{row.openInterest || row.oi}</td>
-                            <td className="py-2 pr-4 text-slate-400">{row.changeinOpenInterest || row.oiChange}</td>
-                            <td className="py-2 text-slate-400">{row.totalTradedVolume || row.volume}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <div className="text-xs text-slate-500 text-center py-4">No futures data available for {symbol}</div>
+          
+          {/* Expiry Selector & Contract Headers */}
+          <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-950/40 border border-slate-800/80 rounded-2xl p-4">
+            <div>
+              <h3 className="text-sm font-black text-white flex items-center gap-1.5 uppercase tracking-wider">
+                <Activity className="w-4 h-4 text-purple-400" />
+                {symbol} Derivatives
+              </h3>
+              {trendlyneOc?.data?.body?.contractLastUpdated && (
+                <p className="text-[9px] text-slate-500 font-bold uppercase mt-0.5">
+                  Last Updated: {trendlyneOc.data.body.contractLastUpdated}
+                </p>
               )}
             </div>
-          )}
+            
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Expiry:</span>
+              {expiriesList && expiriesList.length > 0 ? (
+                <select
+                  value={selectedExpiry}
+                  onChange={(e) => setSelectedExpiry(e.target.value)}
+                  className="bg-slate-900 border border-slate-800 rounded px-2 py-1 text-[10px] text-slate-200 font-black uppercase tracking-wider cursor-pointer"
+                >
+                  {expiriesList.map((exp: string) => {
+                    const formattedDate = new Date(exp).toLocaleDateString('en-IN', {
+                      day: '2-digit',
+                      month: 'short',
+                      year: 'numeric'
+                    });
+                    return (
+                      <option key={exp} value={exp} className="bg-slate-950 text-slate-200 font-mono text-[10px] uppercase">
+                        {formattedDate}
+                      </option>
+                    );
+                  })}
+                </select>
+              ) : (
+                <span className="text-[10px] text-slate-400 font-bold animate-pulse">Loading Expiries…</span>
+              )}
+            </div>
+          </div>
 
-          {(indexFnoData as any)?.futures?.refresh_details && (
-            <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
-              <div className="text-sm font-semibold text-slate-300 mb-3">Index F&O — NIFTY Futures</div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="border-b border-slate-700/50">
-                      {['Expiry', 'LTP', 'Change', 'OI Lots', 'Volume'].map(h => (
-                        <th key={h} className="text-left pb-2 pr-4 text-slate-400 font-semibold">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {((indexFnoData as any).futures.fno_list || []).slice(0, 3).map((row: any, i: number) => {
-                      const chg = parseFloat(row.pChange || 0);
-                      return (
-                        <tr key={i} className="border-b border-slate-700/20">
-                          <td className="py-2 pr-4 text-slate-300">{row.expiry}</td>
-                          <td className="py-2 pr-4 font-mono text-white">{row.lastPrice}</td>
-                          <td className={`py-2 pr-4 font-bold ${chg >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                            {chg >= 0 ? '+' : ''}{chg.toFixed(2)}%
-                          </td>
-                          <td className="py-2 pr-4 text-slate-300">{row.openInterest}</td>
-                          <td className="py-2 text-slate-400">{row.totalTradedVolume}</td>
+          {loadingOc ? (
+            <div className="flex items-center justify-center p-12 border border-slate-800/50 border-dashed rounded-2xl">
+              <span className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-600 animate-pulse">Loading Options Chain…</span>
+            </div>
+          ) : trendlyneOc?.success && trendlyneOc?.data?.body ? (() => {
+            const body = trendlyneOc.data.body;
+            const stockLevel = body.stockLevelData || {};
+            const pcrMetrics = stockLevel.PCR_metrcs || {};
+            const expPcr = body.expiryLevelPCRValues || {};
+            
+            // Calculate Support & Resistance
+            const list = body.tableDataV2 || [];
+            let maxCallOi = -1;
+            let maxPutOi = -1;
+            let resistanceStrike = null;
+            let supportStrike = null;
+            
+            list.forEach((row: any) => {
+              const callOi = row.c?.open_interest || 0;
+              const putOi = row.p?.open_interest || 0;
+              if (callOi > maxCallOi) {
+                maxCallOi = callOi;
+                resistanceStrike = row.strike;
+              }
+              if (putOi > maxPutOi) {
+                maxPutOi = putOi;
+                supportStrike = row.strike;
+              }
+            });
+
+            // Filter strikes closest to At-The-Money (ATM)
+            const atm = body.atTheMoney || stockLevel.currentPrice || 0;
+            const sorted = [...list].sort((a, b) => a.strike - b.strike);
+            let closestIdx = 0;
+            let minDiff = Infinity;
+            for (let i = 0; i < sorted.length; i++) {
+              const diff = Math.abs(sorted[i].strike - atm);
+              if (diff < minDiff) {
+                minDiff = diff;
+                closestIdx = i;
+              }
+            }
+            const start = Math.max(0, closestIdx - 6);
+            const end = Math.min(sorted.length, closestIdx + 7);
+            const slicedStrikes = sorted.slice(start, end);
+
+            return (
+              <div className="space-y-4">
+                
+                {/* Insights / Metrics Grid */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+                  <div className="bg-slate-950/40 border border-slate-800/80 rounded-xl p-3 flex flex-col justify-between">
+                    <span className="text-[8px] font-black text-slate-500 uppercase tracking-wider">Expiry PCR (OI)</span>
+                    <span className={cn(
+                      "text-base font-black tracking-tight mt-1",
+                      (expPcr.pcr_oi ?? 0) >= 1.3 ? "text-emerald-400" : (expPcr.pcr_oi ?? 0) <= 0.6 ? "text-rose-400" : "text-slate-200"
+                    )}>
+                      {expPcr.pcr_oi != null ? expPcr.pcr_oi.toFixed(2) : '—'}
+                    </span>
+                    <span className="text-[7px] font-black text-slate-600 uppercase mt-0.5">
+                      {(expPcr.pcr_oi ?? 0) >= 1.3 ? 'Contrarian Bullish' : (expPcr.pcr_oi ?? 0) <= 0.6 ? 'Oversold / Bearish' : 'Neutral'}
+                    </span>
+                  </div>
+
+                  <div className="bg-slate-950/40 border border-slate-800/80 rounded-xl p-3 flex flex-col justify-between">
+                    <span className="text-[8px] font-black text-slate-500 uppercase tracking-wider">Max Pain Point</span>
+                    <span className="text-base font-black tracking-tight text-blue-400 mt-1">
+                      {body.maxPain != null ? `₹${body.maxPain}` : '—'}
+                    </span>
+                    <span className="text-[7px] font-black text-slate-600 uppercase mt-0.5">
+                      Magnet Strike Level
+                    </span>
+                  </div>
+
+                  <div className="bg-slate-950/40 border border-slate-800/80 rounded-xl p-3 flex flex-col justify-between">
+                    <span className="text-[8px] font-black text-slate-500 uppercase tracking-wider">Rollover Score</span>
+                    <span className="text-base font-black tracking-tight text-amber-400 mt-1">
+                      {stockLevel.rollover_percent != null ? `${stockLevel.rollover_percent.toFixed(1)}%` : '—'}
+                    </span>
+                    <span className="text-[7px] font-black text-slate-600 uppercase mt-0.5">
+                      Cost: {stockLevel.rollover_cost_percent != null ? `${stockLevel.rollover_cost_percent.toFixed(2)}%` : '—'}
+                    </span>
+                  </div>
+
+                  <div className="bg-slate-950/40 border border-slate-800/80 rounded-xl p-3 flex flex-col justify-between">
+                    <span className="text-[8px] font-black text-slate-500 uppercase tracking-wider">MWPL Limit %</span>
+                    <span className="text-base font-black tracking-tight text-purple-400 mt-1">
+                      {body.MWPL != null ? `${body.MWPL}%` : '—'}
+                    </span>
+                    <span className="text-[7px] font-black text-slate-600 uppercase mt-0.5">
+                      Market Position Limit
+                    </span>
+                  </div>
+                </div>
+
+                {/* Support & Resistance Intelligence Card */}
+                {(supportStrike !== null || resistanceStrike !== null) && (
+                  <div className="bg-slate-950/30 border border-slate-800/60 rounded-2xl p-4 space-y-2">
+                    <h4 className="text-[10px] font-black uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                      <Zap className="w-3.5 h-3.5 text-blue-500" />
+                      Derivatives Structural Floor & Ceiling
+                    </h4>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+                      {supportStrike !== null && (
+                        <div className="flex items-center justify-between border border-slate-800/60 rounded-xl px-3 py-2 bg-emerald-500/[0.02]">
+                          <div>
+                            <p className="text-[8px] font-black text-emerald-500 uppercase tracking-wider">Option Support Base</p>
+                            <p className="text-sm font-black text-white mt-0.5">Strike ₹{supportStrike}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-[8px] font-black text-slate-500 uppercase">Put OI</p>
+                            <p className="text-xs font-black text-emerald-400 tabular-nums">{(maxPutOi / 1000).toFixed(1)}k</p>
+                          </div>
+                        </div>
+                      )}
+                      {resistanceStrike !== null && (
+                        <div className="flex items-center justify-between border border-slate-800/60 rounded-xl px-3 py-2 bg-rose-500/[0.02]">
+                          <div>
+                            <p className="text-[8px] font-black text-rose-500 uppercase tracking-wider">Option Resistance Wall</p>
+                            <p className="text-sm font-black text-white mt-0.5">Strike ₹{resistanceStrike}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-[8px] font-black text-slate-500 uppercase">Call OI</p>
+                            <p className="text-xs font-black text-rose-400 tabular-nums">{(maxCallOi / 1000).toFixed(1)}k</p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    <p className="text-[9px] text-slate-500 font-medium">
+                      Maximum concentration of writing is sitting at ₹{resistanceStrike} (resistance) and ₹{supportStrike} (support). Standard pivots are mapped below for intraday convergence.
+                    </p>
+                  </div>
+                )}
+
+                {/* Option Chain Table */}
+                <div className="border border-white/[0.06] rounded-2xl overflow-hidden bg-slate-950/20">
+                  <div className="px-4 py-2 bg-slate-900/30 border-b border-white/[0.06] flex items-center justify-between">
+                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Option Chain Table (ATM Slice)</span>
+                    <span className="text-[9px] text-slate-500 font-bold">ATM Strike: ₹{atm}</span>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="border-b border-white/[0.06] text-[9px] font-black uppercase tracking-widest text-slate-500 bg-slate-900/20">
+                          <th className="py-2 px-3 text-left">OI (Call)</th>
+                          <th className="py-2 px-2 text-left">Chg%</th>
+                          <th className="py-2 px-2 text-right">IV</th>
+                          <th className="py-2 px-3 text-right">LTP (Call)</th>
+                          <th className="py-2 px-3 text-center bg-slate-900/40">Strike</th>
+                          <th className="py-2 px-3 text-left">LTP (Put)</th>
+                          <th className="py-2 px-2 text-left">IV</th>
+                          <th className="py-2 px-2 text-right">Chg%</th>
+                          <th className="py-2 px-3 text-right">OI (Put)</th>
                         </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                      </thead>
+                      <tbody className="divide-y divide-white/[0.03]">
+                        {slicedStrikes.map((row: any) => {
+                          const isAtmRow = Math.abs(row.strike - atm) < 0.01 || (row.strike === atm);
+                          const c = row.c || {};
+                          const p = row.p || {};
+                          
+                          // Determine ITM status
+                          const isCallItm = row.strike < atm;
+                          const isPutItm = row.strike > atm;
+
+                          const formatBuildUp = (bu: string | null) => {
+                            if (!bu) return null;
+                            const isGreen = bu === 'Long Buildup' || bu === 'Short Covering';
+                            return (
+                              <span className={cn(
+                                "text-[7px] font-black uppercase px-1 py-0.5 rounded leading-none shrink-0",
+                                isGreen ? "bg-emerald-500/10 text-emerald-400" : "bg-rose-500/10 text-rose-400"
+                              )}>
+                                {bu.replace(' Buildup', '').replace(' Covering', ' Cov')}
+                              </span>
+                            );
+                          };
+
+                          return (
+                            <tr
+                              key={row.strike}
+                              className={cn(
+                                "hover:bg-slate-900/30 transition-all font-bold",
+                                isAtmRow ? "bg-blue-500/[0.04] border-y border-blue-500/30" : ""
+                              )}
+                            >
+                              {/* CALL SIDE */}
+                              <td className={cn("py-2 px-3 text-slate-300 font-mono", isCallItm ? "bg-blue-500/[0.01]" : "")}>
+                                <div className="flex items-center gap-1.5 justify-between">
+                                  <span>{c.open_interest != null ? (c.open_interest / 1000).toFixed(1) + 'k' : '—'}</span>
+                                  {formatBuildUp(c.built_up)}
+                                </div>
+                              </td>
+                              <td className={cn("py-2 px-2 font-mono tabular-nums", isCallItm ? "bg-blue-500/[0.01]" : "", (c.oi_changeP ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400")}>
+                                {c.oi_changeP != null ? `${c.oi_changeP >= 0 ? '+' : ''}${c.oi_changeP.toFixed(1)}%` : '—'}
+                              </td>
+                              <td className={cn("py-2 px-2 text-right text-slate-500 font-mono", isCallItm ? "bg-blue-500/[0.01]" : "")}>
+                                {c.iv != null ? `${c.iv.toFixed(1)}%` : '—'}
+                              </td>
+                              <td className={cn("py-2 px-3 text-right text-white font-mono", isCallItm ? "bg-blue-500/[0.01]" : "")}>
+                                {c.current_price != null ? `₹${c.current_price.toFixed(2)}` : '—'}
+                              </td>
+
+                              {/* STRIKE (CENTER) */}
+                              <td className={cn(
+                                "py-2 px-3 text-center bg-slate-900/40 text-blue-400 font-black tabular-nums border-x border-white/[0.04]",
+                                isAtmRow ? "text-blue-300 font-extrabold" : ""
+                              )}>
+                                {row.strike.toFixed(1)}
+                              </td>
+
+                              {/* PUT SIDE */}
+                              <td className={cn("py-2 px-3 text-left text-white font-mono", isPutItm ? "bg-blue-500/[0.01]" : "")}>
+                                {p.current_price != null ? `₹${p.current_price.toFixed(2)}` : '—'}
+                              </td>
+                              <td className={cn("py-2 px-2 text-slate-500 font-mono", isPutItm ? "bg-blue-500/[0.01]" : "")}>
+                                {p.iv != null ? `${p.iv.toFixed(1)}%` : '—'}
+                              </td>
+                              <td className={cn("py-2 px-2 text-right font-mono tabular-nums", isPutItm ? "bg-blue-500/[0.01]" : "", (p.oi_changeP ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400")}>
+                                {p.oi_changeP != null ? `${p.oi_changeP >= 0 ? '+' : ''}${p.oi_changeP.toFixed(1)}%` : '—'}
+                              </td>
+                              <td className={cn("py-2 px-3 text-slate-300 font-mono", isPutItm ? "bg-blue-500/[0.01]" : "")}>
+                                <div className="flex items-center gap-1.5 justify-between">
+                                  {formatBuildUp(p.built_up)}
+                                  <span>{p.open_interest != null ? (p.open_interest / 1000).toFixed(1) + 'k' : '—'}</span>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
               </div>
+            );
+          })() : (
+            <div className="text-center py-10 bg-slate-950 border border-slate-800 rounded-2xl">
+              <p className="text-slate-500 text-sm font-bold">This symbol may not have derivative options contracts available.</p>
             </div>
           )}
-
-          {!(mc as any)?.fnoExpiry && !(indexFnoData as any)?.futures?.refresh_details && (
-            <div className="text-center py-8 text-slate-500 text-sm">
-              No F&amp;O data available. This stock may not be in the F&amp;O segment.
+          
+          {/* Keep Moneycontrol Futures as Collapsible secondary detail */}
+          {(mc as any)?.fnoExpiry && (
+            <div className="border-t border-slate-800/80 pt-3">
+              <details className="group cursor-pointer">
+                <summary className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2 hover:text-slate-300 select-none">
+                  <span>View Underlying Futures Contracts</span>
+                  <span className="text-[8px] group-open:rotate-180 transition-transform">▼</span>
+                </summary>
+                <div className="mt-3 bg-slate-800/20 rounded-xl p-4 border border-slate-800/60">
+                  <div className="text-xs font-semibold text-slate-300 mb-3">Futures — {symbol}</div>
+                  {(mc as any)?.fnoFutures?.data?.futureData ? (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="border-b border-slate-700/50">
+                            {['Expiry', 'LTP', 'Change%', 'OI', 'OI Change', 'Volume'].map(h => (
+                              <th key={h} className="text-left pb-2 pr-4 text-slate-400 font-semibold whitespace-nowrap">{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {((mc as any).fnoFutures.data.futureData || []).slice(0, 5).map((row: any, i: number) => {
+                            const chg = parseFloat(row.pChange || row.change || 0);
+                            return (
+                              <tr key={i} className="border-b border-slate-700/20 font-medium">
+                                <td className="py-2 pr-4 text-slate-300">{row.expiryDate || row.expiry}</td>
+                                <td className="py-2 pr-4 font-mono text-white">₹{row.lastPrice || row.ltp}</td>
+                                <td className={`py-2 pr-4 font-bold ${chg >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                  {chg >= 0 ? '+' : ''}{chg.toFixed(2)}%
+                                </td>
+                                <td className="py-2 pr-4 text-slate-300">{row.openInterest || row.oi}</td>
+                                <td className="py-2 pr-4 text-slate-400">{row.changeinOpenInterest || row.oiChange}</td>
+                                <td className="py-2 text-slate-400">{row.totalTradedVolume || row.volume}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="text-xs text-slate-500 text-center">No futures data available.</div>
+                  )}
+                </div>
+              </details>
             </div>
           )}
         </div>

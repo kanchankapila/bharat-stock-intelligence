@@ -9,7 +9,7 @@ export function InvestmentStrategy({ onSelectStock }: { onSelectStock: (symbol: 
 
   if (isLoading) {
     return (
-      <div className="p-8 flex flex-col items-center justify-center text-slate-500 min-h-[400px]">
+      <div className="p-8 flex flex-col items-center justify-center text-slate-400 min-h-[400px]">
         <Loader2 className="w-8 h-8 animate-spin mb-4 text-indigo-500" />
         <p className="font-bold">Analyzing cross-platform screeners...</p>
         <p className="text-xs mt-2">Computing fundamental and technical confluence</p>
@@ -35,7 +35,7 @@ export function InvestmentStrategy({ onSelectStock }: { onSelectStock: (symbol: 
         </div>
         
         {/* Tabs */}
-        <div className="flex items-center gap-2 bg-slate-900/50 p-1 rounded-xl border border-slate-800">
+        <div className="flex items-center gap-2 glass/50 p-1 rounded-xl border border-slate-800/50">
           <button
             onClick={() => setActiveTab('INVESTMENT')}
             className={cn(
@@ -71,23 +71,23 @@ export function InvestmentStrategy({ onSelectStock }: { onSelectStock: (symbol: 
           </div>
 
           {investmentPicks.length === 0 ? (
-            <div className="text-center py-12 text-slate-500 bg-slate-900/30 rounded-xl border border-slate-800">
+            <div className="text-center py-12 text-slate-400 bg-slate-950/30 rounded-xl border border-slate-800/50">
               No stocks currently meet the strict quality + value criteria.
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {investmentPicks.map((pick: any) => (
-                <div key={pick.symbol} className="bg-slate-900/40 border border-slate-800 hover:border-indigo-500/50 transition-colors rounded-xl p-4 flex flex-col">
+                <div key={pick.symbol} className="bg-slate-900/40 border border-slate-800/50 hover:border-indigo-500/50 transition-colors rounded-xl p-4 flex flex-col">
                   <div className="flex justify-between items-start mb-3">
                     <div>
                       <button onClick={() => onSelectStock(pick.symbol)} className="text-lg font-black text-white hover:text-indigo-400 transition-colors text-left">
                         {pick.symbol}
                       </button>
-                      <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold truncate max-w-[150px]">{pick.sector || 'Unknown Sector'}</p>
+                      <p className="text-[10px] text-slate-400 uppercase tracking-widest font-bold truncate max-w-[150px]">{pick.sector || 'Unknown Sector'}</p>
                     </div>
                     <div className="flex flex-col items-end">
                       <span className="text-2xl font-black text-emerald-400">{pick.score}</span>
-                      <span className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">Conviction</span>
+                      <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Conviction</span>
                     </div>
                   </div>
                   
@@ -95,7 +95,7 @@ export function InvestmentStrategy({ onSelectStock }: { onSelectStock: (symbol: 
                     <div className="flex flex-wrap gap-1.5">
                       {pick.reasons.map((r: string, i: number) => (
                         <span key={i} className={cn(
-                          "text-[9px] font-bold px-2 py-0.5 rounded border",
+                          "text-[10px] font-bold px-2 py-0.5 rounded border",
                           r.includes('Debt') || r.includes('Cash') || r.includes('Monopoly') || r.includes('Bluechip') || r.includes('Fundamental')
                             ? "bg-indigo-500/10 border-indigo-500/20 text-indigo-300" 
                             : "bg-emerald-500/10 border-emerald-500/20 text-emerald-300"
@@ -125,23 +125,23 @@ export function InvestmentStrategy({ onSelectStock }: { onSelectStock: (symbol: 
           </div>
 
           {intradayPicks.length === 0 ? (
-            <div className="text-center py-12 text-slate-500 bg-slate-900/30 rounded-xl border border-slate-800">
+            <div className="text-center py-12 text-slate-400 bg-slate-950/30 rounded-xl border border-slate-800/50">
               No intraday momentum triggers detected right now. (Wait for market hours)
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {intradayPicks.map((pick: any) => (
-                <div key={pick.symbol} className="bg-slate-900/40 border border-slate-800 hover:border-rose-500/50 transition-colors rounded-xl p-4 flex flex-col">
+                <div key={pick.symbol} className="bg-slate-900/40 border border-slate-800/50 hover:border-rose-500/50 transition-colors rounded-xl p-4 flex flex-col">
                   <div className="flex justify-between items-start mb-3">
                     <div>
                       <button onClick={() => onSelectStock(pick.symbol)} className="text-lg font-black text-white hover:text-rose-400 transition-colors text-left">
                         {pick.symbol}
                       </button>
-                      <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold truncate max-w-[150px]">{pick.sector || 'Unknown Sector'}</p>
+                      <p className="text-[10px] text-slate-400 uppercase tracking-widest font-bold truncate max-w-[150px]">{pick.sector || 'Unknown Sector'}</p>
                     </div>
                     <div className="flex flex-col items-end">
                       <span className="text-2xl font-black text-rose-400">{pick.score}</span>
-                      <span className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">Strength</span>
+                      <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Strength</span>
                     </div>
                   </div>
                   
@@ -153,7 +153,7 @@ export function InvestmentStrategy({ onSelectStock }: { onSelectStock: (symbol: 
                         const label = isTl ? r.replace('Trendlyne Intraday ID: ', 'TL Scan: ') : r;
                         return (
                           <span key={i} className={cn(
-                            "text-[9px] font-bold px-2 py-0.5 rounded border",
+                            "text-[10px] font-bold px-2 py-0.5 rounded border",
                             isTl ? "bg-amber-500/10 border-amber-500/20 text-amber-300" : "bg-rose-500/10 border-rose-500/20 text-rose-300"
                           )}>
                             {label}

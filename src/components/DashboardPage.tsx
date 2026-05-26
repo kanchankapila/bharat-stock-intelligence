@@ -168,7 +168,7 @@ const SignalCard: React.FC<{
               {signal.signal}
             </span>
           </div>
-          <p className="text-slate-500 truncate" style={{ fontFamily: FONT_FAMILY_MONO, fontSize: 9, marginTop: 2 }}>
+          <p className="text-slate-400 truncate" style={{ fontFamily: FONT_FAMILY_MONO, fontSize: 9, marginTop: 2 }}>
             {signal.reasoning?.slice(0, 48) ?? ''}…
           </p>
           <div className="flex items-center gap-3 mt-1.5">
@@ -177,7 +177,7 @@ const SignalCard: React.FC<{
             </span>
             <button
               onClick={(e) => { e.stopPropagation(); onHistory(); }}
-              className="ml-auto flex items-center gap-1 text-slate-600 hover:text-slate-300 transition-colors"
+              className="ml-auto flex items-center gap-1 text-slate-400 hover:text-slate-300 transition-colors"
               style={{ fontSize: 9, fontFamily: FONT_FAMILY_DISPLAY, letterSpacing: 1 }}
             >
               <History size={9} /> HIST
@@ -229,7 +229,7 @@ export const SignalHistoryModal: React.FC<{ symbol: string; onClose: () => void 
               </div>
             </div>
           </div>
-          <button onClick={onClose} className="text-slate-500 hover:text-white transition-colors">
+          <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors">
             <Plus className="w-5 h-5 rotate-45" />
           </button>
         </div>
@@ -310,26 +310,24 @@ const KpiChip: React.FC<{
   accent?: string;
   icon?: React.ReactNode;
 }> = ({ label, value, sub, up, accent = amber, icon }) => (
-  <div style={{
+  <div className="glass shadow-[0_4px_20px_rgba(0,0,0,0.02)] border border-slate-800/50 border-t-2" style={{
     flex: 1, minWidth: 0,
-    background: '#0a0b0e',
-    border: `1px solid rgba(255,255,255,0.06)`,
-    borderTop: `2px solid ${accent}`,
+    borderTopColor: accent,
     borderRadius: 10,
     padding: '12px 16px',
     display: 'flex', flexDirection: 'column', gap: 4,
   }}>
-    <div className="flex items-center gap-1.5" style={{ fontFamily: FONT_FAMILY_DISPLAY, fontSize: 9, color: '#475569', letterSpacing: 3, textTransform: 'uppercase' }}>
+    <div className="flex items-center gap-1.5" style={{ fontFamily: FONT_FAMILY_DISPLAY, fontSize: 9, color: '#64748b', letterSpacing: 3, textTransform: 'uppercase' }}>
       {icon}
       {label}
     </div>
-    <div style={{ fontFamily: FONT_FAMILY_MONO, fontSize: 18, fontWeight: 700, color: '#f8fafc', letterSpacing: -0.5 }}>
+    <div style={{ fontFamily: FONT_FAMILY_MONO, fontSize: 18, fontWeight: 700, color: '#0f172a', letterSpacing: -0.5 }}>
       {value}
     </div>
     {sub !== undefined && (
       <div style={{
         fontFamily: FONT_FAMILY_MONO, fontSize: 10,
-        color: up === true ? emerald : up === false ? rose : '#64748b',
+        color: up === true ? '#059669' : up === false ? '#dc2626' : '#64748b',
       }}>
         {sub}
       </div>
@@ -458,7 +456,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
   const chartColor = chartTrending ? emerald : rose;
 
   return (
-    <div style={{ padding: '12px 16px', background: '#050507', minHeight: '100vh' }}>
+    <div style={{ padding: '12px 16px', background: 'transparent', minHeight: '100vh' }}>
 
       {/* ── Row 0: Market Indices Strip ─────────────────────────────────── */}
       <div style={{ marginBottom: 12 }}>
@@ -508,10 +506,8 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
 
           {/* Breadth gauge */}
-          <div style={{
-            background: '#0a0b0e',
-            border: '1px solid rgba(255,255,255,0.06)',
-            borderTop: `2px solid ${amber}`,
+          <div className="glass shadow-[0_4px_20px_rgba(0,0,0,0.02)] border border-slate-800/50 border-t-2" style={{
+            borderTopColor: amber,
             borderRadius: 10,
             padding: '14px 10px',
           }}>
@@ -531,9 +527,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
           </div>
 
           {/* Top movers */}
-          <div style={{
-            background: '#0a0b0e',
-            border: '1px solid rgba(255,255,255,0.06)',
+          <div className="glass border border-slate-800/50 shadow-[0_4px_20px_rgba(0,0,0,0.02)]" style={{
             borderRadius: 10,
             padding: '14px 12px',
             flex: 1,
@@ -550,7 +544,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
                     borderRadius: 6, padding: '5px 8px', cursor: 'pointer',
                   }}
                 >
-                  <span style={{ fontFamily: FONT_FAMILY_DISPLAY, fontSize: 11, fontWeight: 700, color: '#e2e8f0', letterSpacing: 0.5 }}>
+                  <span style={{ fontFamily: FONT_FAMILY_DISPLAY, fontSize: 11, fontWeight: 700, color: '#1e293b', letterSpacing: 0.5 }}>
                     {s.symbol}
                   </span>
                   <span style={{ fontFamily: FONT_FAMILY_MONO, fontSize: 10, color: emerald }}>
@@ -574,7 +568,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
                     borderRadius: 6, padding: '5px 8px', cursor: 'pointer',
                   }}
                 >
-                  <span style={{ fontFamily: FONT_FAMILY_DISPLAY, fontSize: 11, fontWeight: 700, color: '#e2e8f0', letterSpacing: 0.5 }}>
+                  <span style={{ fontFamily: FONT_FAMILY_DISPLAY, fontSize: 11, fontWeight: 700, color: '#1e293b', letterSpacing: 0.5 }}>
                     {s.symbol}
                   </span>
                   <span style={{ fontFamily: FONT_FAMILY_MONO, fontSize: 10, color: rose }}>
@@ -590,10 +584,8 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
 
           {/* Nifty chart */}
-          <div style={{
-            background: '#0a0b0e',
-            border: '1px solid rgba(255,255,255,0.06)',
-            borderTop: `2px solid ${chartColor}`,
+          <div className="glass border border-slate-800/50 border-t-2 shadow-[0_4px_20px_rgba(0,0,0,0.02)]" style={{
+            borderTopColor: chartColor,
             borderRadius: 10,
             padding: '14px 16px',
           }}>
@@ -601,7 +593,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
               <div>
                 <SectionLabel>NIFTY 50 — 30D</SectionLabel>
                 {graphData.length > 0 && (
-                  <div style={{ fontFamily: FONT_FAMILY_MONO, fontSize: 22, fontWeight: 700, color: '#f8fafc', lineHeight: 1 }}>
+                  <div style={{ fontFamily: FONT_FAMILY_MONO, fontSize: 22, fontWeight: 700, color: '#0f172a', lineHeight: 1 }}>
                     {graphData[graphData.length - 1].value.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                   </div>
                 )}
@@ -627,13 +619,13 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
                       <stop offset="95%" stopColor={chartColor} stopOpacity={0} />
                     </linearGradient>
                   </defs>
-                  <CartesianGrid strokeDasharray="2 4" stroke="rgba(255,255,255,0.04)" vertical={false} />
+                  <CartesianGrid strokeDasharray="2 4" stroke="rgba(0,0,0,0.04)" vertical={false} />
                   <XAxis dataKey="time" hide />
                   <YAxis hide domain={[chartMin, chartMax]} />
                   <Tooltip
                     contentStyle={{
-                      background: '#0d0f13', border: '1px solid rgba(255,255,255,0.08)',
-                      borderRadius: 8, fontFamily: FONT_FAMILY_MONO, fontSize: 10, color: '#f8fafc',
+                      background: '#ffffff', border: '1px solid rgba(0,0,0,0.08)',
+                      borderRadius: 8, fontFamily: FONT_FAMILY_MONO, fontSize: 10, color: '#0f172a',
                     }}
                     formatter={(v: any) => [v.toLocaleString('en-IN', { maximumFractionDigits: 0 }), 'Nifty']}
                     labelFormatter={() => ''}
@@ -653,9 +645,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
           </div>
 
           {/* Sector Heatmap */}
-          <div style={{
-            background: '#0a0b0e',
-            border: '1px solid rgba(255,255,255,0.06)',
+          <div className="glass border border-slate-800/50 shadow-[0_4px_20px_rgba(0,0,0,0.02)]" style={{
             borderRadius: 10,
             padding: '14px 16px',
             flex: 1,
@@ -669,10 +659,8 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
 
           {/* AI Signals */}
-          <div style={{
-            background: '#0a0b0e',
-            border: '1px solid rgba(255,255,255,0.06)',
-            borderTop: `2px solid ${amber}`,
+          <div className="glass border border-slate-800/50 border-t-2 shadow-[0_4px_20px_rgba(0,0,0,0.02)]" style={{
+            borderTopColor: amber,
             borderRadius: 10,
             padding: '14px 12px',
             flex: 1,
@@ -700,7 +688,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
             {/* Progress bar */}
             {isGenerating && queueProgress && queueProgress.total > 0 && (
               <div style={{ marginBottom: 8 }}>
-                <div style={{ height: 2, background: 'rgba(255,255,255,0.06)', borderRadius: 1, overflow: 'hidden' }}>
+                <div style={{ height: 2, background: 'rgba(0,0,0,0.05)', borderRadius: 1, overflow: 'hidden' }}>
                   <motion.div
                     style={{ height: '100%', background: amber, borderRadius: 1 }}
                     animate={{ width: `${Math.round((queueProgress.completed / queueProgress.total) * 100)}%` }}
@@ -735,16 +723,14 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
           </div>
 
           {/* Latest News */}
-          <div style={{
-            background: '#0a0b0e',
-            border: '1px solid rgba(255,255,255,0.06)',
+          <div className="glass border border-slate-800/50 shadow-[0_4px_20px_rgba(0,0,0,0.02)]" style={{
             borderRadius: 10,
             padding: '14px 12px',
           }}>
             <SectionLabel>Live News</SectionLabel>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {news.slice(0, 4).map(item => (
-                <div key={item.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)', paddingBottom: 8 }}>
+                <div key={item.id} style={{ borderBottom: '1px solid rgba(0,0,0,0.05)', paddingBottom: 8 }}>
                   <div className="flex items-center gap-2" style={{ marginBottom: 3 }}>
                     <span style={{
                       fontFamily: FONT_FAMILY_MONO, fontSize: 8, letterSpacing: 1,
@@ -754,7 +740,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
                     }}>{item.category}</span>
                     <span style={{ fontFamily: FONT_FAMILY_MONO, fontSize: 8, color: '#334155' }}>{item.time}</span>
                   </div>
-                  <p style={{ fontFamily: FONT_FAMILY_DISPLAY, fontSize: 11, fontWeight: 600, color: '#cbd5e1', lineHeight: 1.4, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                  <p style={{ fontFamily: FONT_FAMILY_DISPLAY, fontSize: 11, fontWeight: 600, color: '#334155', lineHeight: 1.4, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
                     {item.title}
                   </p>
                 </div>
@@ -766,11 +752,11 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
 
       {/* ── Row 3: Index Overview + Global Markets ────────────────────────── */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
-        <div style={{ background: '#0a0b0e', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 10, padding: '14px 16px' }}>
+        <div className="glass border border-slate-800/50 shadow-[0_4px_20px_rgba(0,0,0,0.02)]" style={{ borderRadius: 10, padding: '14px 16px' }}>
           <SectionLabel>Index Overview</SectionLabel>
           <IndexOverview onSelectIndex={onSelectIndex} />
         </div>
-        <div style={{ background: '#0a0b0e', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 10, padding: '14px 16px' }}>
+        <div className="glass border border-slate-800/50 shadow-[0_4px_20px_rgba(0,0,0,0.02)]" style={{ borderRadius: 10, padding: '14px 16px' }}>
           <SectionLabel>Global Markets</SectionLabel>
           <GlobalMarkets />
         </div>
@@ -831,7 +817,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
                     AI DEEP ANALYSIS · {selectedSignal.confidence}% CONFIDENCE
                   </div>
                 </div>
-                <button onClick={() => setSelectedSignal(null)} className="text-slate-500 hover:text-white transition-colors">
+                <button onClick={() => setSelectedSignal(null)} className="text-slate-400 hover:text-white transition-colors">
                   <Plus className="w-5 h-5 rotate-45" />
                 </button>
               </div>

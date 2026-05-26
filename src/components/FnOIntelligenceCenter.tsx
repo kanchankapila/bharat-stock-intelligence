@@ -273,8 +273,8 @@ const SentimentMeter: React.FC<{ pct: number; bull: number; bear: number; total:
   const color = pct >= 60 ? 'bg-emerald-500' : pct <= 40 ? 'bg-rose-500' : 'bg-amber-500';
   const label = pct >= 60 ? 'Bullish' : pct <= 40 ? 'Bearish' : 'Neutral';
   return (
-    <div className="flex-1 min-w-[180px] p-4 bg-slate-900/60 border border-slate-800 rounded-2xl">
-      <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2">Market Sentiment</p>
+    <div className="flex-1 min-w-[180px] p-4 bg-slate-900/60 border border-slate-800/50 rounded-2xl">
+      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Market Sentiment</p>
       <div className="flex items-center gap-3">
         <div className="flex-1 h-2 bg-slate-800 rounded-full overflow-hidden">
           <div className={cn("h-full rounded-full transition-all", color)} style={{ width: `${pct}%` }} />
@@ -282,9 +282,9 @@ const SentimentMeter: React.FC<{ pct: number; bull: number; bear: number; total:
         <span className={cn("text-[10px] font-black uppercase", pct >= 60 ? 'text-emerald-400' : pct <= 40 ? 'text-rose-400' : 'text-amber-400')}>{label}</span>
       </div>
       <div className="flex gap-3 mt-2">
-        <span className="text-[9px] text-emerald-500 font-black">▲ {bull} Bull</span>
-        <span className="text-[9px] text-rose-500 font-black">▼ {bear} Bear</span>
-        <span className="text-[9px] text-slate-600 font-bold">● {total} Total</span>
+        <span className="text-[10px] text-emerald-500 font-black">▲ {bull} Bull</span>
+        <span className="text-[10px] text-rose-500 font-black">▼ {bear} Bear</span>
+        <span className="text-[10px] text-slate-400 font-bold">● {total} Total</span>
       </div>
     </div>
   );
@@ -390,27 +390,27 @@ const FnOIntelligenceCenter: React.FC<FnOScannerProps> = ({ onSelectStock }) => 
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
         <div>
           <h1 className="text-3xl font-black text-white italic uppercase tracking-tighter">F&O Intelligence Center</h1>
-          <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mt-1 italic">Real-time derivative analytics — {scannerData?.expiry ? `Expiry: ${scannerData.expiry}` : 'Live'}</p>
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1 italic">Real-time derivative analytics — {scannerData?.expiry ? `Expiry: ${scannerData.expiry}` : 'Live'}</p>
         </div>
 
         <div className="flex flex-col gap-3 items-end">
-          <div className="flex bg-slate-900 border border-slate-800 p-1 rounded-2xl">
+          <div className="flex glass border border-slate-800/50 p-1 rounded-2xl">
             <button onClick={() => { setActiveTab('futures'); setActiveScanner('long-build-up'); }}
               className={cn("px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
-                activeTab === 'futures' ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20" : "text-slate-500 hover:text-slate-300")}>
+                activeTab === 'futures' ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20" : "text-slate-400 hover:text-slate-300")}>
               Futures
             </button>
             <button onClick={() => { setActiveTab('options'); setActiveScanner('oi-gainers-call'); }}
               className={cn("px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
-                activeTab === 'options' ? "bg-indigo-600 text-white shadow-lg shadow-indigo-500/20" : "text-slate-500 hover:text-slate-300")}>
+                activeTab === 'options' ? "bg-indigo-600 text-white shadow-lg shadow-indigo-500/20" : "text-slate-400 hover:text-slate-300")}>
               Options
             </button>
           </div>
-          <div className="flex bg-slate-900 border border-slate-800 p-1 rounded-xl gap-0.5">
+          <div className="flex glass border border-slate-800/50 p-1 rounded-xl gap-0.5">
             {(['all', 'index', 'stock'] as const).map(t => (
               <button key={t} onClick={() => setInstType(t)}
-                className={cn("px-4 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all",
-                  instType === t ? "bg-slate-700 text-white" : "text-slate-600 hover:text-slate-400")}>
+                className={cn("px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all",
+                  instType === t ? "bg-slate-700 text-white" : "text-slate-400 hover:text-slate-400")}>
                 {t === 'all' ? 'All' : t === 'index' ? 'Indices' : 'Stocks'}
               </button>
             ))}
@@ -426,41 +426,41 @@ const FnOIntelligenceCenter: React.FC<FnOScannerProps> = ({ onSelectStock }) => 
         <div className="flex flex-wrap gap-3">
           <SentimentMeter pct={intel.sentimentPct} bull={intel.bull} bear={intel.bear} total={intel.total} />
 
-          <div className="flex-1 min-w-[140px] p-4 bg-slate-900/60 border border-slate-800 rounded-2xl">
-            <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Dominant Buildup</p>
+          <div className="flex-1 min-w-[140px] p-4 bg-slate-900/60 border border-slate-800/50 rounded-2xl">
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Dominant Buildup</p>
             <p className={cn("text-sm font-black uppercase italic",
               BUILDUP_META[intel.dominantBuildup]?.signal === 'bullish' ? 'text-emerald-400' :
               BUILDUP_META[intel.dominantBuildup]?.signal === 'bearish' ? 'text-rose-400' : 'text-amber-400')}>
               {intel.dominantBuildup}
             </p>
-            <p className="text-[9px] text-slate-600 font-bold mt-1 uppercase tracking-widest">
+            <p className="text-[10px] text-slate-400 font-bold mt-1 uppercase tracking-widest">
               {BUILDUP_META[intel.dominantBuildup]?.signal === 'bullish' ? '→ Smart money accumulating' :
                BUILDUP_META[intel.dominantBuildup]?.signal === 'bearish' ? '→ Distribution underway' : '→ Mixed signals'}
             </p>
           </div>
 
           {intel.avgOIChg != null && (
-            <div className="flex-1 min-w-[130px] p-4 bg-slate-900/60 border border-slate-800 rounded-2xl">
-              <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Avg OI Change</p>
+            <div className="flex-1 min-w-[130px] p-4 bg-slate-900/60 border border-slate-800/50 rounded-2xl">
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Avg OI Change</p>
               <p className={cn("text-xl font-black tabular-nums italic",
                 intel.avgOIChg >= 0 ? 'text-emerald-400' : 'text-rose-400')}>
                 {intel.avgOIChg >= 0 ? '+' : ''}{intel.avgOIChg.toFixed(1)}%
               </p>
-              <p className="text-[9px] text-slate-600 font-bold mt-1 uppercase tracking-widest">
+              <p className="text-[10px] text-slate-400 font-bold mt-1 uppercase tracking-widest">
                 {Math.abs(intel.avgOIChg) > 20 ? 'Aggressive' : Math.abs(intel.avgOIChg) > 10 ? 'Moderate' : 'Mild'} flow
               </p>
             </div>
           )}
 
           {intel.avgIV != null && (
-            <div className="flex-1 min-w-[130px] p-4 bg-slate-900/60 border border-slate-800 rounded-2xl">
-              <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Avg IV</p>
+            <div className="flex-1 min-w-[130px] p-4 bg-slate-900/60 border border-slate-800/50 rounded-2xl">
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Avg IV</p>
               <p className={cn("text-xl font-black tabular-nums italic",
                 intel.avgIV > 30 ? 'text-amber-400' : intel.avgIV > 20 ? 'text-yellow-400' : 'text-slate-300')}>
                 {intel.avgIV.toFixed(1)}%
               </p>
-              <p className={cn("text-[9px] font-bold mt-1 uppercase tracking-widest",
-                intel.avgIVChg != null && intel.avgIVChg > 0 ? 'text-amber-500' : 'text-slate-600')}>
+              <p className={cn("text-[10px] font-bold mt-1 uppercase tracking-widest",
+                intel.avgIVChg != null && intel.avgIVChg > 0 ? 'text-amber-500' : 'text-slate-400')}>
                 {intel.avgIVChg != null ? `${intel.avgIVChg >= 0 ? '+' : ''}${intel.avgIVChg.toFixed(1)}% vs prev` : 'Implied Volatility'}
               </p>
             </div>
@@ -471,16 +471,16 @@ const FnOIntelligenceCenter: React.FC<FnOScannerProps> = ({ onSelectStock }) => 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
         {/* Sidebar Scanners */}
         <div className="lg:col-span-3 space-y-2">
-          <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-4 flex items-center gap-2">
+          <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
             <Filter className="w-3 h-3" /> Select Strategy
           </h3>
           {scanners[activeTab].map(s => (
             <button key={s.id} onClick={() => setActiveScanner(s.id)}
               className={cn("w-full p-3.5 rounded-2xl border text-left transition-all group relative overflow-hidden",
-                activeScanner === s.id ? "bg-slate-800 border-blue-500/50" : "bg-slate-950 border-slate-800 hover:border-slate-700")}>
+                activeScanner === s.id ? "bg-slate-800 border-blue-500/50" : "glass-strong border-slate-800/50 hover:border-slate-800/30")}>
               <div className="flex items-center gap-3 relative z-10">
                 <div className={cn("p-2 rounded-xl transition-colors flex-shrink-0",
-                  activeScanner === s.id ? "bg-blue-500 text-white" : "bg-slate-900 text-slate-500 group-hover:text-slate-300")}>
+                  activeScanner === s.id ? "bg-blue-500 text-white" : "glass text-slate-400 group-hover:text-slate-300")}>
                   <s.icon className="w-3.5 h-3.5" />
                 </div>
                 <div className="min-w-0">
@@ -489,11 +489,11 @@ const FnOIntelligenceCenter: React.FC<FnOScannerProps> = ({ onSelectStock }) => 
                       activeScanner === s.id ? "text-white" : "text-slate-400")}>{s.name}</p>
                     <span className={cn("text-[7px] font-black px-1 py-0.5 rounded uppercase flex-shrink-0",
                       s.sentiment === 'bullish' ? 'bg-emerald-500/10 text-emerald-500' :
-                      s.sentiment === 'bearish' ? 'bg-rose-500/10 text-rose-500' : 'bg-slate-800 text-slate-500')}>
+                      s.sentiment === 'bearish' ? 'bg-rose-500/10 text-rose-500' : 'bg-slate-800 text-slate-400')}>
                       {s.sentiment}
                     </span>
                   </div>
-                  <p className="text-[8px] font-bold text-slate-600 uppercase tracking-widest mt-0.5 leading-tight">{s.desc}</p>
+                  <p className="text-[9.5px] font-bold text-slate-400 uppercase tracking-widest mt-0.5 leading-tight">{s.desc}</p>
                 </div>
               </div>
               {activeScanner === s.id && <div className="absolute right-0 top-0 bottom-0 w-1 bg-blue-500" />}
@@ -504,26 +504,26 @@ const FnOIntelligenceCenter: React.FC<FnOScannerProps> = ({ onSelectStock }) => 
         {/* Main Panel */}
         <div className="lg:col-span-9 space-y-5">
           <Card title={`${(currentScanner?.name || activeScanner).toUpperCase()} — ${instType === 'all' ? 'All F&O' : instType === 'index' ? 'Index' : 'Stocks'}`} icon={BarChart3}>
-            <div className="overflow-x-auto rounded-2xl border border-slate-800/50 bg-slate-950/50">
+            <div className="overflow-x-auto rounded-2xl border border-slate-800/30 glass-strong/50">
               {isLoading ? (
                 <div className="py-48 flex flex-col items-center justify-center space-y-4">
                   <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-                  <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] animate-pulse">Scanning F&O Universe...</p>
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] animate-pulse">Scanning F&O Universe...</p>
                 </div>
               ) : rows.length > 0 ? (
                 <table className="w-full text-left border-collapse">
                   <thead>
                     <tr className="bg-slate-900/60">
-                      <th className="px-5 py-3.5 font-black text-[9px] text-slate-500 uppercase tracking-widest border-b border-slate-800">Asset</th>
+                      <th className="px-5 py-3.5 font-black text-[10px] text-slate-400 uppercase tracking-widest border-b border-slate-800/50">Asset</th>
                       {isOptions && (
-                        <th className="px-3 py-3.5 font-black text-[9px] text-slate-500 uppercase tracking-widest border-b border-slate-800 text-center">Type</th>
+                        <th className="px-3 py-3.5 font-black text-[10px] text-slate-400 uppercase tracking-widest border-b border-slate-800/50 text-center">Type</th>
                       )}
                       {resolvedCols.map(({ def }) => (
-                        <th key={def.label} className="px-5 py-3.5 font-black text-[9px] text-slate-500 uppercase tracking-widest border-b border-slate-800 text-right">{def.label}</th>
+                        <th key={def.label} className="px-5 py-3.5 font-black text-[10px] text-slate-400 uppercase tracking-widest border-b border-slate-800/50 text-right">{def.label}</th>
                       ))}
-                      <th className="px-3 py-3.5 font-black text-[9px] text-slate-500 uppercase tracking-widest border-b border-slate-800 text-center">OI Flow</th>
-                      <th className="px-4 py-3.5 font-black text-[9px] text-slate-500 uppercase tracking-widest border-b border-slate-800 text-center">Signal</th>
-                      <th className="px-4 py-3.5 font-black text-[9px] text-slate-500 uppercase tracking-widest border-b border-slate-800 text-right">Go</th>
+                      <th className="px-3 py-3.5 font-black text-[10px] text-slate-400 uppercase tracking-widest border-b border-slate-800/50 text-center">OI Flow</th>
+                      <th className="px-4 py-3.5 font-black text-[10px] text-slate-400 uppercase tracking-widest border-b border-slate-800/50 text-center">Signal</th>
+                      <th className="px-4 py-3.5 font-black text-[10px] text-slate-400 uppercase tracking-widest border-b border-slate-800/50 text-right">Go</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/30">
@@ -551,22 +551,22 @@ const FnOIntelligenceCenter: React.FC<FnOScannerProps> = ({ onSelectStock }) => 
                             <div className="flex items-center gap-2.5">
                               <div className={cn("p-1.5 rounded-lg transition-colors",
                                 buildupMeta?.signal === 'bullish' ? 'bg-emerald-500/10' :
-                                buildupMeta?.signal === 'bearish' ? 'bg-rose-500/10' : 'bg-slate-900')}>
+                                buildupMeta?.signal === 'bearish' ? 'bg-rose-500/10' : 'glass')}>
                                 {buildupMeta?.signal === 'bullish' ? <TrendingUp className="w-3 h-3 text-emerald-400" /> :
                                  buildupMeta?.signal === 'bearish' ? <TrendingDown className="w-3 h-3 text-rose-400" /> :
-                                 <Activity className="w-3 h-3 text-slate-500" />}
+                                 <Activity className="w-3 h-3 text-slate-400" />}
                               </div>
                               <div>
                                 <p className="text-[11px] font-black text-white group-hover:text-blue-400 transition-colors uppercase italic leading-none">{stockInfo?.name}</p>
                                 {isOptions && strikePrice != null ? (
                                   <div className="flex items-center gap-1 mt-0.5">
-                                    <p className="text-[9px] text-slate-500 font-bold">₹{strikePrice.toLocaleString('en-IN')}</p>
+                                    <p className="text-[10px] text-slate-400 font-bold">₹{strikePrice.toLocaleString('en-IN')}</p>
                                     {moneyness && (
                                       <span className={cn("text-[7px] font-black px-1 py-0.5 rounded", moneyness.cls)}>{moneyness.label}</span>
                                     )}
                                   </div>
                                 ) : (
-                                  <p className="text-[9px] text-slate-600 font-bold uppercase tracking-widest mt-0.5">{nseCode}</p>
+                                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">{nseCode}</p>
                                 )}
                               </div>
                             </div>
@@ -574,7 +574,7 @@ const FnOIntelligenceCenter: React.FC<FnOScannerProps> = ({ onSelectStock }) => 
 
                           {isOptions && optType && (
                             <td className="px-3 py-3.5 text-center">
-                              <span className={cn("px-1.5 py-0.5 rounded text-[8px] font-black uppercase",
+                              <span className={cn("px-1.5 py-0.5 rounded text-[9.5px] font-black uppercase",
                                 optType === 'Call' ? "bg-emerald-500/10 text-emerald-400" : "bg-rose-500/10 text-rose-400")}>
                                 {optType === 'Call' ? 'CE' : 'PE'}
                               </span>
@@ -598,7 +598,7 @@ const FnOIntelligenceCenter: React.FC<FnOScannerProps> = ({ onSelectStock }) => 
                               <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
                                 <div className={cn("h-full rounded-full", barColor)} style={{ width: `${barWidth}%` }} />
                               </div>
-                              <span className={cn("text-[8px] font-black tabular-nums",
+                              <span className={cn("text-[9.5px] font-black tabular-nums",
                                 oiChgVal >= 0 ? 'text-emerald-500' : 'text-rose-500')}>
                                 {oiChgVal >= 0 ? '+' : ''}{oiChgVal.toFixed(1)}%
                               </span>
@@ -609,16 +609,16 @@ const FnOIntelligenceCenter: React.FC<FnOScannerProps> = ({ onSelectStock }) => 
                           <td className="px-4 py-3.5 text-center">
                             {buildup ? (
                               <span className={cn("px-2 py-0.5 rounded-full text-[7px] font-black uppercase whitespace-nowrap border",
-                                buildupMeta?.color || 'bg-slate-800 text-slate-400 border-slate-700')}>
+                                buildupMeta?.color || 'bg-slate-800 text-slate-400 border-slate-800/30')}>
                                 {buildupMeta?.icon} {buildup}
                               </span>
-                            ) : <Eye className="w-3 h-3 text-slate-700 mx-auto" />}
+                            ) : <Eye className="w-3 h-3 text-slate-300 mx-auto" />}
                           </td>
 
                           <td className="px-4 py-3.5 text-right">
                             <button
                               onClick={e => { e.stopPropagation(); onSelectStock(nseCode); }}
-                              className="p-1.5 bg-slate-900 border border-slate-800 rounded-lg text-slate-500 hover:text-white hover:border-slate-600 transition-all">
+                              className="p-1.5 glass border border-slate-800/50 rounded-lg text-slate-400 hover:text-white hover:border-slate-600 transition-all">
                               <ChevronRight className="w-3.5 h-3.5" />
                             </button>
                           </td>
@@ -629,8 +629,8 @@ const FnOIntelligenceCenter: React.FC<FnOScannerProps> = ({ onSelectStock }) => 
                 </table>
               ) : (
                 <div className="py-24 text-center">
-                  <AlertTriangle className="w-8 h-8 text-slate-800 mx-auto mb-4" />
-                  <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest">No signals detected — market may be closed or data loading</p>
+                  <AlertTriangle className="w-8 h-8 text-slate-200 mx-auto mb-4" />
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">No signals detected — market may be closed or data loading</p>
                 </div>
               )}
             </div>
@@ -642,7 +642,7 @@ const FnOIntelligenceCenter: React.FC<FnOScannerProps> = ({ onSelectStock }) => 
               <Zap className="absolute -right-4 -bottom-4 w-20 h-20 text-blue-500/10 -rotate-12" />
               <div className="flex items-center gap-2 mb-2">
                 <Eye className="w-3 h-3 text-blue-400" />
-                <h4 className="text-[9px] font-black text-blue-400 uppercase tracking-widest italic">Live Market Read</h4>
+                <h4 className="text-[10px] font-black text-blue-400 uppercase tracking-widest italic">Live Market Read</h4>
               </div>
               <p className="text-[11px] text-slate-400 leading-relaxed font-medium relative z-10 italic">
                 "{expertCommentary}"
@@ -653,7 +653,7 @@ const FnOIntelligenceCenter: React.FC<FnOScannerProps> = ({ onSelectStock }) => 
               <Target className="absolute -right-4 -bottom-4 w-20 h-20 text-emerald-500/10 -rotate-12" />
               <div className="flex items-center gap-2 mb-2">
                 <Target className="w-3 h-3 text-emerald-400" />
-                <h4 className="text-[9px] font-black text-emerald-400 uppercase tracking-widest italic">Strategy Playbook</h4>
+                <h4 className="text-[10px] font-black text-emerald-400 uppercase tracking-widest italic">Strategy Playbook</h4>
               </div>
               <p className="text-[11px] text-slate-400 leading-relaxed font-medium relative z-10 italic">
                 {strategyNote}

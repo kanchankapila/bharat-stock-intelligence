@@ -3,6 +3,7 @@ import { getStockMapping, getSymbolFromMcsymbol } from './stockMapping';
 import { mcFetchJson } from './mcApiService';
 import fs from 'fs';
 import path from 'path';
+import { isIntradayScreener } from './trendlyneScreener';
 
 interface McScreenerConfig {
   catId: string;
@@ -171,12 +172,20 @@ async function updateStockMappingsFile(symbolMap: Map<string, string>) {
   }
 }
 
-export async function syncMoneyControlScreeners() {
-  console.log(`🔄 Starting MoneyControl screener synchronization (${MC_SCREENERS.length} screeners)...`);
+export async function syncMoneyControlScreeners(timeframeFilter?: 'intraday' | 'long_term') {
+  console.log(`🔄 Starting MoneyControl screener synchronization (${MC_SCREENERS.length} screeners, filter: ${timeframeFilter || 'all'})...`);
   
   const mappingsToUpdate = new Map<string, string>();
 
   for (const config of MC_SCREENERS) {
+    // Determine screener name from DB or use fallback to check timeframe
+    const row = db.prepare('SELECT screener_name FROM moneycontrol_screeners WHERE scan_id = ?').get(config.scanId) as { screener_name: string } | undefined;
+    const name = row?.screener_name || `MC Screener ${config.scanId}`;
+    const isIntraday = isIntradayScreener(name);
+    
+    if (timeframeFilter === 'intraday' && !isIntraday) continue;
+    if (timeframeFilter === 'long_term' && isIntraday) continue;
+
     const baseUrl = config.type === 'pro' 
       ? 'https://api.moneycontrol.com/mcapi/v1/proscanner/scanner-detail'
       : 'https://api.moneycontrol.com/mcapi/v1/techscanner/scanner-detail';

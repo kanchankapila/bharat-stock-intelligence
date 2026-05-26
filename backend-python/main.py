@@ -4,9 +4,12 @@ from pydantic import BaseModel
 import sys
 import os
 
-# Ensure all app modules resolve database.sqlite relative to the project root,
-# not relative to wherever the process was launched from (e.g. backend-python/).
-os.chdir(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+_here = os.path.dirname(os.path.abspath(__file__))
+# Ensure app package is importable regardless of cwd
+if _here not in sys.path:
+    sys.path.insert(0, _here)
+# Resolve database.sqlite relative to project root, not launch dir
+os.chdir(os.path.join(_here, ".."))
 
 app = FastAPI(title="Bharat Stock Intelligence - AI & Quant Engine")
 
@@ -80,4 +83,4 @@ def api_tv_screener():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=8002, reload=False)

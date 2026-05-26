@@ -156,12 +156,132 @@ def update_weights(
     return {'processed': len(rows), 'updated': updated}
 
 
+def update_source_weights(
+    conn: sqlite3.Connection,
+    days: Optional[int] = None,
+    dry_run: bool = False,
+) -> dict[str, int]:
+    """
+    PHASE 3.6: Update per-source reward weights for multi-source learning
+    Tracks performance metrics per signal source (AI, technical, quant, news)
+    """
+    query = """
+        SELECT uso.signal_source, uso.outcome, uso.return_pct, uso.horizon_days,
+               us.signal_date, us.symbol
+        FROM unified_signal_outcomes uso
+        JOIN unified_signals us ON uso.unified_signal_id = us.id
+        WHERE uso.outcome IN ('WIN','LOSS','NEUTRAL','STOP_LOSS')
+          AND uso.return_pct IS NOT NULL
+          AND uso.signal_source IS NOT NULL
+    """
+    params: tuple = ()
+    if days:
+        cutoff = (datetime.datetime.now() - datetime.timedelta(days=days)).strftime('%Y-%m-%d')
+        query += " AND us.signal_date >= ?"
+        params = (cutoff,)
+
+    rows = conn.execute(query, params).fetchall()
+    if not rows:
+        print("[RewardEngine] No unified signal outcomes found for source tracking.")
+        return {'processed': 0, 'updated': 0}
+
+    print(f"[RewardEngine] Processing {len(rows)} unified outcomes for source weights...")
+
+    # Organize by (source, regime, sector)
+    source_stats: dict[tuple, dict] = {}
+
+    for signal_source, outcome, return_pct, horizon_days, signal_date, symbol in rows:
+        regime = _get_regime(conn, symbol, signal_date)
+        sector = _get_sector(conn, symbol)
+        key = (signal_source or 'unknown', regime, sector)
+
+        if key not in source_stats:
+            source_stats[key] = {
+                'total': 0,
+                'wins': 0,
+                'losses': 0,
+                'returns': [],
+                'rewards': [],
+            }
+
+        source_stats[key]['total'] += 1
+        reward = _compute_reward(float(return_pct), int(horizon_days), outcome)
+        source_stats[key]['rewards'].append(reward)
+        source_stats[key]['returns'].append(float(return_pct))
+
+        if outcome == 'WIN':
+            source_stats[key]['wins'] += 1
+        elif outcome in ('LOSS', 'STOP_LOSS'):
+            source_stats[key]['losses'] += 1
+
+    updated = 0
+    for (signal_source, regime, sector), stats in source_stats.items():
+        if stats['total'] < MIN_SAMPLES:
+            continue
+
+        win_rate = (stats['wins'] / stats['total'] * 100) if stats['total'] > 0 else 0
+        avg_return = sum(stats['returns']) / len(stats['returns']) if stats['returns'] else 0
+        avg_reward = sum(stats['rewards']) / len(stats['rewards']) if stats['rewards'] else 0
+
+        # Calculate Sharpe ratio (simplified: reward/volatility)
+        if len(stats['rewards']) > 1:
+            variance = sum((r - avg_reward) ** 2 for r in stats['rewards']) / len(stats['rewards'])
+            sharpe = avg_reward / (variance ** 0.5) if variance > 0 else 0
+        else:
+            sharpe = 0
+
+        if not dry_run:
+            now = datetime.datetime.now().isoformat()
+            conn.execute("""
+                INSERT INTO signal_source_weights
+                    (signal_source, regime, sector, win_rate, avg_return_pct,
+                     total_signals, total_wins, total_losses, avg_sharpe_ratio,
+                     weight_multiplier, last_updated)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(signal_source, regime, sector) DO UPDATE SET
+                    win_rate = excluded.win_rate,
+                    avg_return_pct = excluded.avg_return_pct,
+                    total_signals = excluded.total_signals,
+                    total_wins = excluded.total_wins,
+                    total_losses = excluded.total_losses,
+                    avg_sharpe_ratio = excluded.avg_sharpe_ratio,
+                    weight_multiplier = (weight_multiplier * 0.85 + 
+                        MAX(0.3, MIN(2.0, 1.0 + avg_sharpe_ratio * 0.1)) * 0.15),
+                    last_updated = excluded.last_updated
+            """, (
+                signal_source,
+                regime,
+                sector,
+                round(win_rate, 2),
+                round(avg_return, 4),
+                stats['total'],
+                stats['wins'],
+                stats['losses'],
+                round(sharpe, 4),
+                round(1.0 + sharpe * 0.1, 4),
+                now,
+            ))
+            updated += 1
+        else:
+            print(f"  [DRY] {signal_source}|{regime}|{sector}: "
+                  f"WinRate={win_rate:.1f}%, AvgReturn={avg_return:.2f}%, Sharpe={sharpe:.4f}")
+
+    if not dry_run:
+        conn.commit()
+
+    print(f"[RewardEngine] Updated {updated} signal_source_weights rows (Phase 3.6)")
+    return {'processed': len(rows), 'updated': updated}
+
+
 def run(days: Optional[int] = None, dry_run: bool = False):
     if not os.path.exists(DB_PATH):
         raise FileNotFoundError(f"[RewardEngine] DB not found: {DB_PATH}. Run from project root.")
     conn = sqlite3.connect(DB_PATH)
     try:
+        # Run traditional weight updates
         update_weights(conn, days=days, dry_run=dry_run)
+        # PHASE 3.6: Run source-aware weight updates
+        update_source_weights(conn, days=days, dry_run=dry_run)
     finally:
         conn.close()
 

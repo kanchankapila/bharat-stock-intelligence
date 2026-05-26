@@ -62,12 +62,12 @@ export const SmartMoneyPage: React.FC<SmartMoneyPageProps> = ({ onSelectStock })
         initial={{ opacity: 0, x: -8 }}
         animate={{ opacity: 1, x: 0 }}
         transition={{ delay: i * 0.03 }}
-        className="border-b border-slate-700/30 hover:bg-slate-700/20 cursor-pointer"
+        className="border-b border-slate-800/20 hover:bg-slate-700/20 cursor-pointer"
         onClick={() => onSelectStock?.(deal.symbol || deal.scId)}
       >
         <td className="py-2.5 px-3">
-          <div className="text-xs font-bold text-white">{deal.companyName || deal.company || deal.symbol}</div>
-          <div className="text-xs text-slate-500">{deal.dealType || deal.type}</div>
+          <div className="text-xs font-bold text-slate-100">{deal.companyName || deal.company || deal.symbol}</div>
+          <div className="text-xs text-slate-400">{deal.dealType || deal.type}</div>
         </td>
         <td className="py-2.5 px-3 text-xs text-slate-300">{deal.buyerName || deal.sellerName || deal.party || '—'}</td>
         <td className="py-2.5 px-3 text-xs font-mono text-white text-right">
@@ -105,10 +105,10 @@ export const SmartMoneyPage: React.FC<SmartMoneyPageProps> = ({ onSelectStock })
           { label: 'Insider Sells', value: insiderSellList.length, icon: TrendingDown,color: 'text-red-400'    },
           { label: 'Top Stocks',    value: topStockList.length,    icon: BarChart2,  color: 'text-amber-400'   },
         ].map((card, i) => (
-          <div key={i} className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
+          <div key={i} className="bg-slate-800/50 rounded-xl p-4 border border-slate-800/30">
             <card.icon className={cn('w-4 h-4 mb-2', card.color)} />
             <div className="text-2xl font-black text-white">{card.value}</div>
-            <div className="text-xs text-slate-500 mt-0.5">{card.label}</div>
+            <div className="text-xs text-slate-400 mt-0.5">{card.label}</div>
           </div>
         ))}
       </div>
@@ -132,7 +132,7 @@ export const SmartMoneyPage: React.FC<SmartMoneyPageProps> = ({ onSelectStock })
       </div>
 
       {activeTab === 'large' && (
-        <div className="bg-slate-800/50 rounded-xl border border-slate-700/50 overflow-hidden">
+        <div className="bg-slate-800/50 rounded-xl border border-slate-800/30 overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead className="bg-slate-900/60">
@@ -154,7 +154,7 @@ export const SmartMoneyPage: React.FC<SmartMoneyPageProps> = ({ onSelectStock })
 
       {activeTab === 'insider' && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
+          <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-800/30">
             <div className="text-sm font-semibold text-slate-300 mb-3">Insider Buy vs Sell</div>
             <ResponsiveContainer width="100%" height={180}>
               <PieChart>
@@ -167,7 +167,7 @@ export const SmartMoneyPage: React.FC<SmartMoneyPageProps> = ({ onSelectStock })
               </PieChart>
             </ResponsiveContainer>
           </div>
-          <div className="bg-slate-800/50 rounded-xl border border-slate-700/50 overflow-hidden">
+          <div className="bg-slate-800/50 rounded-xl border border-slate-800/30 overflow-hidden">
             <div className="px-3 py-2 bg-emerald-500/10 border-b border-emerald-500/20">
               <span className="text-xs font-bold text-emerald-400">Insider BUYS ({insiderBuyList.length})</span>
             </div>
@@ -177,7 +177,7 @@ export const SmartMoneyPage: React.FC<SmartMoneyPageProps> = ({ onSelectStock })
               </table>
             </div>
           </div>
-          <div className="bg-slate-800/50 rounded-xl border border-slate-700/50 overflow-hidden">
+          <div className="bg-slate-800/50 rounded-xl border border-slate-800/30 overflow-hidden">
             <div className="px-3 py-2 bg-red-500/10 border-b border-red-500/20">
               <span className="text-xs font-bold text-red-400">Insider SELLS ({insiderSellList.length})</span>
             </div>
@@ -192,7 +192,7 @@ export const SmartMoneyPage: React.FC<SmartMoneyPageProps> = ({ onSelectStock })
 
       {activeTab === 'institutional' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div className="bg-slate-800/50 rounded-xl border border-slate-700/50 overflow-hidden">
+          <div className="bg-slate-800/50 rounded-xl border border-slate-800/30 overflow-hidden">
             <div className="px-3 py-2 bg-emerald-500/10 border-b border-emerald-500/20">
               <span className="text-xs font-bold text-emerald-400">Investor BUYS</span>
             </div>
@@ -202,7 +202,7 @@ export const SmartMoneyPage: React.FC<SmartMoneyPageProps> = ({ onSelectStock })
               </table>
             </div>
           </div>
-          <div className="bg-slate-800/50 rounded-xl border border-slate-700/50 overflow-hidden">
+          <div className="bg-slate-800/50 rounded-xl border border-slate-800/30 overflow-hidden">
             <div className="px-3 py-2 bg-red-500/10 border-b border-red-500/20">
               <span className="text-xs font-bold text-red-400">Investor SELLS</span>
             </div>
@@ -217,7 +217,7 @@ export const SmartMoneyPage: React.FC<SmartMoneyPageProps> = ({ onSelectStock })
 
       {activeTab === 'sector' && sectorChartData.length > 0 && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
+          <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-800/30">
             <div className="text-sm font-semibold text-slate-300 mb-3">Deal Value by Sector</div>
             <ResponsiveContainer width="100%" height={280}>
               <BarChart data={sectorChartData} layout="vertical" margin={{ left: 80, right: 16 }}>
@@ -235,8 +235,8 @@ export const SmartMoneyPage: React.FC<SmartMoneyPageProps> = ({ onSelectStock })
               </BarChart>
             </ResponsiveContainer>
           </div>
-          <div className="bg-slate-800/50 rounded-xl border border-slate-700/50 overflow-hidden">
-            <div className="px-3 py-2 bg-slate-900/60 border-b border-slate-700/50">
+          <div className="bg-slate-800/50 rounded-xl border border-slate-800/30 overflow-hidden">
+            <div className="px-3 py-2 bg-slate-900/60 border-b border-slate-800/30">
               <span className="text-xs font-bold text-slate-300">Top Stocks by Deal Value</span>
             </div>
             <div className="overflow-y-auto max-h-80">

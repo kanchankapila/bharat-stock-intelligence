@@ -68,8 +68,8 @@ const StockRow: React.FC<{
       className={cn(
         'flex items-center gap-3 px-3 py-2.5 rounded-xl border transition-all cursor-pointer group',
         isBullish
-          ? 'border-emerald-500/10 hover:border-emerald-500/30 bg-emerald-500/[0.03]'
-          : 'border-rose-500/10 hover:border-rose-500/30 bg-rose-500/[0.03]'
+          ? 'border-emerald-500/20 hover:border-emerald-500/40 bg-emerald-500/[0.05] hover:bg-emerald-500/[0.08]'
+          : 'border-rose-500/20 hover:border-rose-500/40 bg-rose-500/[0.05] hover:bg-rose-500/[0.08]'
       )}
     >
       {/* Watchlist btn */}
@@ -85,7 +85,7 @@ const StockRow: React.FC<{
               ? 'bg-rose-500/10 border-rose-500/20 text-rose-400 hover:bg-rose-500 hover:text-white'
               : isBullish
                 ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400 hover:bg-emerald-500 hover:text-white'
-                : 'bg-slate-800 border-slate-700 text-slate-500 hover:bg-slate-700 hover:text-white'
+                : 'bg-slate-900 border-slate-850 text-slate-400 hover:bg-slate-200 hover:text-slate-200'
           )}
         >
           {inWatch ? <Minus className="w-3 h-3" /> : <Plus className="w-3 h-3" />}
@@ -96,11 +96,11 @@ const StockRow: React.FC<{
       <div className="flex-1 min-w-0">
         <p className={cn(
           'text-[11px] font-black uppercase truncate leading-none',
-          isBullish ? 'text-white group-hover:text-emerald-400' : 'text-white group-hover:text-rose-400'
+          isBullish ? 'text-slate-200 group-hover:text-emerald-700' : 'text-slate-200 group-hover:text-rose-700'
         )} style={{ fontFamily: "'Space Mono', monospace" }}>
           {sym}
         </p>
-        <p className="text-[8px] text-slate-600 truncate mt-0.5 leading-none" style={{ fontFamily: "'Rajdhani', sans-serif", letterSpacing: 2 }}>
+        <p className="text-[9.5px] text-slate-400 font-semibold truncate mt-0.5 leading-none" style={{ fontFamily: "'Rajdhani', sans-serif", letterSpacing: 2 }}>
           {stock.trend || ''}
         </p>
       </div>
@@ -110,7 +110,7 @@ const StockRow: React.FC<{
         <p className="text-[11px] font-bold text-slate-300 tabular-nums" style={{ fontFamily: "'Space Mono', monospace" }}>
           ₹{Number(stock.lastPrice || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
         </p>
-        <p className={cn('text-[9px] font-black tabular-nums mt-0.5', pct >= 0 ? 'text-emerald-400' : 'text-rose-400')}>
+        <p className={cn('text-[10px] font-black tabular-nums mt-0.5', pct >= 0 ? 'text-emerald-400' : 'text-rose-400')}>
           {pct >= 0 ? '+' : ''}{pct.toFixed(2)}%
         </p>
       </div>
@@ -129,26 +129,26 @@ const QuickScreenerTile: React.FC<{
     { enabled: expanded, staleTime: 5 * 60 * 1000 }
   );
 
-  const color = screener.sentiment === 'bullish' ? '#22c55e' : screener.sentiment === 'bearish' ? '#ef4444' : '#f59e0b';
+  const color = screener.sentiment === 'bullish' ? '#16a34a' : screener.sentiment === 'bearish' ? '#dc2626' : '#d97706';
 
   return (
     <div
-      style={{ border: `1px solid ${color}22`, background: '#0a0b0e', borderRadius: 10 }}
-      className="overflow-hidden"
+      style={{ border: `1px solid ${color}33`, background: 'rgba(10, 11, 16, 0.65)', borderRadius: 10 }}
+      className="overflow-hidden shadow-[0_1px_4px_rgba(0,0,0,0.01)]"
     >
       <button
         onClick={() => { setExpanded(v => !v); if (!expanded) refetch(); }}
-        className="w-full flex items-center justify-between px-3 py-2.5 gap-2 hover:bg-white/[0.02] transition-all"
+        className="w-full flex items-center justify-between px-3 py-2.5 gap-2 hover:bg-white/[0.03] transition-all"
       >
         <div className="flex items-center gap-2 min-w-0">
           <span className="text-sm">{screener.icon}</span>
-          <span className="text-[9px] font-black uppercase truncate" style={{ fontFamily: "'Rajdhani', sans-serif", letterSpacing: 2, color: '#94a3b8' }}>
+          <span className="text-[11px] font-black uppercase truncate" style={{ fontFamily: "'Rajdhani', sans-serif", letterSpacing: 2, color: '#475569' }}>
             {screener.label}
           </span>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
           {data?.data?.length ? (
-            <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: `${color}18`, color }}>
+            <span className="text-[9.5px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: `${color}18`, color }}>
               {data.data.length}
             </span>
           ) : null}
@@ -157,7 +157,7 @@ const QuickScreenerTile: React.FC<{
       </button>
 
       {expanded && (
-        <div className="border-t border-white/[0.04] px-3 py-2 space-y-1 max-h-48 overflow-y-auto">
+        <div className="border-t border-slate-800/50 px-3 py-2 space-y-1 max-h-48 overflow-y-auto">
           {isLoading ? (
             <div className="flex items-center justify-center py-4">
               <RefreshCw className="w-4 h-4 animate-spin" style={{ color: '#334155' }} />
@@ -171,11 +171,11 @@ const QuickScreenerTile: React.FC<{
                 rel="noreferrer"
                 className="flex items-center justify-between py-1 hover:bg-white/[0.03] rounded-lg px-1 transition-all"
               >
-                <span className="text-[10px] font-black uppercase" style={{ fontFamily: "'Space Mono', monospace", color: '#cbd5e1' }}>
+                <span className="text-[11px] font-black uppercase" style={{ fontFamily: "'Space Mono', monospace", color: '#1e293b' }}>
                   {item.name}
                 </span>
                 <div className="flex items-center gap-2">
-                  <span className="text-[9px] tabular-nums" style={{ color: '#64748b' }}>
+                  <span className="text-[9px] tabular-nums" style={{ color: '#334155' }}>
                     ₹{item.currentPrice}
                   </span>
                   <span className={cn('text-[10px] font-black tabular-nums', parseFloat(item.value) >= 0 ? 'text-emerald-400' : 'text-rose-400')}>
@@ -185,7 +185,7 @@ const QuickScreenerTile: React.FC<{
               </a>
             ))
           ) : (
-            <p className="text-[9px] text-slate-600 text-center py-2">No data available</p>
+            <p className="text-[9px] text-slate-400 text-center py-2">No data available</p>
           )}
         </div>
       )}
@@ -209,10 +209,10 @@ export const MomentumIntelligence: React.FC<MomentumIntelligenceProps> = ({
 
   const stocks: any[] = (trendsData as any)?.[segment] || [];
   const isBullishMode = trendType.includes('bullish');
-  const accentColor = isBullishMode ? '#22c55e' : '#ef4444';
+  const accentColor = isBullishMode ? '#16a34a' : '#dc2626';
 
   return (
-    <div style={{ background: '#0a0b0e', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 14, padding: '18px 20px', minHeight: 480 }}>
+    <div className="glass rounded-2xl p-[18px_20px] min-h-[480px] shadow-sm flex flex-col justify-between">
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2.5">
@@ -223,7 +223,7 @@ export const MomentumIntelligence: React.FC<MomentumIntelligenceProps> = ({
             <h3 style={{ fontFamily: "'Rajdhani', sans-serif", fontWeight: 800, fontSize: 13, letterSpacing: 3, color: '#f8fafc', textTransform: 'uppercase' }}>
               Momentum Intelligence
             </h3>
-            <p style={{ fontFamily: "'Space Mono', monospace", fontSize: 8, color: '#334155', letterSpacing: 2 }}>
+            <p style={{ fontFamily: "'Space Mono', monospace", fontSize: 9.5, color: '#334155', letterSpacing: 2 }}>
               LIVE · 5 MIN REFRESH
             </p>
           </div>
@@ -239,7 +239,7 @@ export const MomentumIntelligence: React.FC<MomentumIntelligenceProps> = ({
                 style={{
                   padding: '3px 10px',
                   borderRadius: 6,
-                  fontSize: 8,
+                  fontSize: 9.5,
                   fontWeight: 800,
                   letterSpacing: 2,
                   textTransform: 'uppercase',
@@ -247,6 +247,7 @@ export const MomentumIntelligence: React.FC<MomentumIntelligenceProps> = ({
                   transition: 'all 0.2s',
                   background: view === v ? 'rgba(255,255,255,0.08)' : 'transparent',
                   color: view === v ? '#f8fafc' : '#475569',
+                  boxShadow: view === v ? '0 1px 3px rgba(0,0,0,0.05)' : 'none',
                   border: 'none',
                   cursor: 'pointer',
                 }}
@@ -271,10 +272,10 @@ export const MomentumIntelligence: React.FC<MomentumIntelligenceProps> = ({
           {/* Trend Type Row */}
           <div className="flex gap-1.5 mb-3 flex-wrap">
             {[
-              { v: 'bullish', label: '🟢 Bullish', color: '#22c55e' },
-              { v: 'turning-bullish', label: '↗ Turning ↑', color: '#86efac' },
-              { v: 'bearish', label: '🔴 Bearish', color: '#ef4444' },
-              { v: 'turning-bearish', label: '↘ Turning ↓', color: '#fca5a5' },
+              { v: 'bullish', label: '🟢 Bullish', color: '#16a34a' },
+              { v: 'turning-bullish', label: '↗ Turning ↑', color: '#22c55e' },
+              { v: 'bearish', label: '🔴 Bearish', color: '#dc2626' },
+              { v: 'turning-bearish', label: '↘ Turning ↓', color: '#ef4444' },
             ].map(opt => (
               <button
                 key={opt.v}
@@ -282,7 +283,7 @@ export const MomentumIntelligence: React.FC<MomentumIntelligenceProps> = ({
                 style={{
                   padding: '4px 10px',
                   borderRadius: 20,
-                  fontSize: 9,
+                  fontSize: 10.5,
                   fontWeight: 800,
                   letterSpacing: 1.5,
                   fontFamily: "'Rajdhani', sans-serif",
@@ -309,7 +310,7 @@ export const MomentumIntelligence: React.FC<MomentumIntelligenceProps> = ({
                   flex: 1,
                   padding: '5px 0',
                   borderRadius: 8,
-                  fontSize: 8,
+                  fontSize: 9.5,
                   fontWeight: 800,
                   letterSpacing: 2,
                   fontFamily: "'Rajdhani', sans-serif",
@@ -330,12 +331,12 @@ export const MomentumIntelligence: React.FC<MomentumIntelligenceProps> = ({
           <div className="space-y-1.5 max-h-72 overflow-y-auto pr-0.5">
             {isLoading ? (
               Array.from({ length: 6 }).map((_, i) => (
-                <div key={i} className="h-10 rounded-xl bg-slate-900/50 animate-pulse" />
+                <div key={i} className="h-10 rounded-xl shimmer" />
               ))
             ) : stocks.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-32 text-center">
                 <Activity className="w-8 h-8 mb-2" style={{ color: '#1e293b' }} />
-                <p style={{ fontFamily: "'Rajdhani', sans-serif", fontSize: 9, color: '#334155', letterSpacing: 2 }}>NO DATA FOR THIS SEGMENT</p>
+                <p style={{ fontFamily: "'Rajdhani', sans-serif", fontSize: 10.5, color: '#334155', letterSpacing: 2 }}>NO DATA FOR THIS SEGMENT</p>
               </div>
             ) : (
               stocks.slice(0, 15).map((stock: any, i: number) => (
@@ -352,8 +353,8 @@ export const MomentumIntelligence: React.FC<MomentumIntelligenceProps> = ({
           </div>
 
           {/* Footer count */}
-          <div className="flex items-center justify-between mt-3 pt-2 border-t border-white/[0.04]">
-            <span style={{ fontFamily: "'Rajdhani', sans-serif", fontSize: 8, color: '#334155', letterSpacing: 2 }}>
+          <div className="flex items-center justify-between mt-3 pt-2 border-t border-slate-800/50">
+            <span style={{ fontFamily: "'Rajdhani', sans-serif", fontSize: 9.5, color: '#334155', letterSpacing: 2 }}>
               SOURCE: MONEYCONTROL TECHNICAL TRENDS
             </span>
             <div className="flex items-center gap-1.5">
@@ -361,7 +362,7 @@ export const MomentumIntelligence: React.FC<MomentumIntelligenceProps> = ({
                 ? <ArrowUpRight className="w-3 h-3" style={{ color: accentColor }} />
                 : <ArrowDownRight className="w-3 h-3" style={{ color: accentColor }} />
               }
-              <span style={{ fontFamily: "'Space Mono', monospace", fontSize: 9, fontWeight: 700, color: accentColor }}>
+              <span style={{ fontFamily: "'Space Mono', monospace", fontSize: 10.5, fontWeight: 700, color: accentColor }}>
                 {stocks.length} STOCKS
               </span>
             </div>
@@ -370,7 +371,7 @@ export const MomentumIntelligence: React.FC<MomentumIntelligenceProps> = ({
       ) : (
         /* Quick Screeners Grid */
         <div>
-          <p style={{ fontFamily: "'Rajdhani', sans-serif", fontSize: 9, letterSpacing: 3, color: '#334155', textTransform: 'uppercase', marginBottom: 12 }}>
+          <p style={{ fontFamily: "'Rajdhani', sans-serif", fontSize: 10.5, letterSpacing: 3, color: '#334155', textTransform: 'uppercase', marginBottom: 12 }}>
             TRENDLYNE QUICK-ACCESS SCREENERS — CLICK TO EXPAND
           </p>
           <div className="grid grid-cols-2 gap-2 max-h-96 overflow-y-auto">

@@ -96,7 +96,7 @@ export const MCIndexDetailPanel: React.FC<MCIndexDetailPanelProps> = ({ indId, n
   return (
     <div className="space-y-6">
       {/* Header Info */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-slate-900/40 p-6 rounded-2xl border border-slate-800/50 backdrop-blur-xl">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-slate-900/40 p-6 rounded-2xl border border-slate-800/30 backdrop-blur-xl">
         <div>
           <div className="flex items-center gap-3">
             <h2 className="text-2xl font-black text-white italic uppercase tracking-tight">{name}</h2>
@@ -110,7 +110,7 @@ export const MCIndexDetailPanel: React.FC<MCIndexDetailPanelProps> = ({ indId, n
               </span>
             )}
           </div>
-          <p className="text-slate-500 text-[10px] font-bold uppercase tracking-widest mt-1">
+          <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mt-1">
             {details?.exchange} • {details?.lastupdated}
           </p>
         </div>
@@ -132,14 +132,14 @@ export const MCIndexDetailPanel: React.FC<MCIndexDetailPanelProps> = ({ indId, n
       <Card title="Market Performance" icon={TrendingUp}>
         <div className="space-y-4">
           <div className="flex flex-wrap justify-between items-center gap-4">
-            <div className="flex gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
+            <div className="flex gap-1 glass-strong p-1 rounded-xl border border-slate-800/50">
               {['1d', '5d', '1m', '3m', '6m', '1yr', '2yr', '5yr'].map((r) => (
                 <button
                   key={r}
                   onClick={() => setGraphRange(r)}
                   className={cn(
-                    "px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all",
-                    graphRange === r ? "bg-blue-600 text-white shadow-lg" : "text-slate-500 hover:text-slate-300"
+                    "px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all",
+                    graphRange === r ? "bg-blue-600 text-white shadow-lg" : "text-slate-400 hover:text-slate-300"
                   )}
                 >
                   {r}
@@ -147,14 +147,14 @@ export const MCIndexDetailPanel: React.FC<MCIndexDetailPanelProps> = ({ indId, n
               ))}
             </div>
             
-            <div className="flex gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
+            <div className="flex gap-1 glass-strong p-1 rounded-xl border border-slate-800/50">
               {['line', 'area', 'stick', 'ohlc'].map((t) => (
                 <button
                   key={t}
                   onClick={() => setGraphType(t)}
                   className={cn(
-                    "px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all",
-                    graphType === t ? "bg-blue-600 text-white shadow-lg" : "text-slate-500 hover:text-slate-300"
+                    "px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all",
+                    graphType === t ? "bg-blue-600 text-white shadow-lg" : "text-slate-400 hover:text-slate-300"
                   )}
                 >
                   {t}
@@ -163,7 +163,7 @@ export const MCIndexDetailPanel: React.FC<MCIndexDetailPanelProps> = ({ indId, n
             </div>
           </div>
 
-          <div className="h-[350px] w-full bg-slate-950/50 rounded-2xl border border-slate-800/30 p-4">
+          <div className="h-[350px] w-full glass-strong/50 rounded-2xl border border-slate-800/20 p-4">
             {loadingGraph ? (
               <div className="h-full flex items-center justify-center">
                 <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500"></div>
@@ -250,7 +250,7 @@ export const MCIndexDetailPanel: React.FC<MCIndexDetailPanelProps> = ({ indId, n
                 )}
               </ResponsiveContainer>
             ) : (
-              <div className="h-full flex items-center justify-center text-slate-500 text-sm font-bold">
+              <div className="h-full flex items-center justify-center text-slate-400 text-sm font-bold">
                 No graph data available
               </div>
             )}
@@ -286,7 +286,7 @@ export const MCIndexDetailPanel: React.FC<MCIndexDetailPanelProps> = ({ indId, n
                       <p className="text-lg font-black text-emerald-400">{advances}</p>
                     </div>
                     <div className="text-center">
-                      <span className="text-[10px] font-black text-slate-500 uppercase">Unchanged</span>
+                      <span className="text-[10px] font-black text-slate-400 uppercase">Unchanged</span>
                       <p className="text-lg font-black text-slate-400">{unchanged}</p>
                     </div>
                     <div className="text-center">
@@ -294,7 +294,7 @@ export const MCIndexDetailPanel: React.FC<MCIndexDetailPanelProps> = ({ indId, n
                       <p className="text-lg font-black text-rose-400">{declines}</p>
                     </div>
                   </div>
-                  <div className="h-2 w-full bg-slate-900 rounded-full overflow-hidden flex">
+                  <div className="h-2 w-full glass rounded-full overflow-hidden flex">
                     <div className="h-full bg-emerald-500" style={{ width: `${(advances / total) * 100}%` }} />
                     <div className="h-full bg-slate-700" style={{ width: `${(unchanged / total) * 100}%` }} />
                     <div className="h-full bg-rose-500" style={{ width: `${(declines / total) * 100}%` }} />
@@ -316,7 +316,7 @@ export const MCIndexDetailPanel: React.FC<MCIndexDetailPanelProps> = ({ indId, n
                       </ResponsiveContainer>
                     </div>
                   )}
-                  <p className="text-[8px] text-center text-slate-700 font-bold uppercase tracking-widest">
+                  <p className="text-[9.5px] text-center text-slate-300 font-bold uppercase tracking-widest">
                     {total} stocks • A/D Ratio: {declines > 0 ? (advances / declines).toFixed(2) : '—'}
                   </p>
                 </div>
@@ -335,7 +335,7 @@ export const MCIndexDetailPanel: React.FC<MCIndexDetailPanelProps> = ({ indId, n
               
               {fundamentals.sectorWeights && fundamentals.sectorWeights.length > 0 && (
                 <div className="mt-6">
-                   <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-3">Top Sectoral Weights</p>
+                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Top Sectoral Weights</p>
                    <div className="space-y-2">
                      {fundamentals.sectorWeights.slice(0, 5).map((sw: any, i: number) => (
                        <div key={i} className="flex justify-between items-center text-[10px]">
@@ -363,42 +363,42 @@ export const MCIndexDetailPanel: React.FC<MCIndexDetailPanelProps> = ({ indId, n
              
              <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
-                   <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-3">OHLC Stats</p>
+                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">OHLC Stats</p>
                    <div className="grid grid-cols-2 gap-2">
-                      <div className="bg-slate-950 p-2 rounded-lg border border-slate-800/50">
-                        <span className="text-[8px] text-slate-600 font-bold uppercase">Open</span>
+                      <div className="glass-strong p-2 rounded-lg border border-slate-800/30">
+                        <span className="text-[9.5px] text-slate-400 font-bold uppercase">Open</span>
                         <p className="text-xs font-black text-white tabular-nums">{details?.open}</p>
                       </div>
-                      <div className="bg-slate-950 p-2 rounded-lg border border-slate-800/50">
-                        <span className="text-[8px] text-slate-600 font-bold uppercase">High</span>
+                      <div className="glass-strong p-2 rounded-lg border border-slate-800/30">
+                        <span className="text-[9.5px] text-slate-400 font-bold uppercase">High</span>
                         <p className="text-xs font-black text-white tabular-nums">{details?.high}</p>
                       </div>
-                      <div className="bg-slate-950 p-2 rounded-lg border border-slate-800/50">
-                        <span className="text-[8px] text-slate-600 font-bold uppercase">Low</span>
+                      <div className="glass-strong p-2 rounded-lg border border-slate-800/30">
+                        <span className="text-[9.5px] text-slate-400 font-bold uppercase">Low</span>
                         <p className="text-xs font-black text-white tabular-nums">{details?.low}</p>
                       </div>
-                      <div className="bg-slate-950 p-2 rounded-lg border border-slate-800/50">
-                        <span className="text-[8px] text-slate-600 font-bold uppercase">Prev Close</span>
+                      <div className="glass-strong p-2 rounded-lg border border-slate-800/30">
+                        <span className="text-[9.5px] text-slate-400 font-bold uppercase">Prev Close</span>
                         <p className="text-xs font-black text-white tabular-nums">{details?.prevclose}</p>
                       </div>
                    </div>
                 </div>
                 
                 <div>
-                   <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-3">Range Analysis</p>
+                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Range Analysis</p>
                    <div className="space-y-3">
                       <div>
-                        <div className="flex justify-between text-[9px] mb-1">
-                          <span className="text-slate-500 font-bold">52W LOW: {details?.yearlylow}</span>
-                          <span className="text-slate-500 font-bold">52W HIGH: {details?.yearlyhigh}</span>
+                        <div className="flex justify-between text-[10px] mb-1">
+                          <span className="text-slate-400 font-bold">52W LOW: {details?.yearlylow}</span>
+                          <span className="text-slate-400 font-bold">52W HIGH: {details?.yearlyhigh}</span>
                         </div>
-                        <div className="h-1 w-full bg-slate-900 rounded-full overflow-hidden relative">
+                        <div className="h-1 w-full glass rounded-full overflow-hidden relative">
                            {/* Simplified range indicator */}
                            <div className="absolute top-0 h-full bg-blue-500 w-1 left-1/2" />
                         </div>
                       </div>
-                      <div className="bg-slate-950 p-2 rounded-lg border border-slate-800/50 flex justify-between">
-                         <span className="text-[8px] text-slate-600 font-bold uppercase">Yrs Avg 200</span>
+                      <div className="glass-strong p-2 rounded-lg border border-slate-800/30 flex justify-between">
+                         <span className="text-[9.5px] text-slate-400 font-bold uppercase">Yrs Avg 200</span>
                          <p className="text-xs font-black text-blue-400 tabular-nums">{details?.dayavg200}</p>
                       </div>
                    </div>
@@ -409,14 +409,14 @@ export const MCIndexDetailPanel: React.FC<MCIndexDetailPanelProps> = ({ indId, n
           {/* Technicals */}
           {technicals && technicals.data && (
             <Card title="Technical Analysis" icon={Zap}>
-              <div className="flex gap-2 mb-6 bg-slate-950 p-1 rounded-xl border border-slate-800 w-fit">
+              <div className="flex gap-2 mb-6 glass-strong p-1 rounded-xl border border-slate-800/50 w-fit">
                 {(['D', 'W', 'M'] as const).map((p) => (
                   <button
                     key={p}
                     onClick={() => setTimeframe(p)}
                     className={cn(
                       "px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all",
-                      timeframe === p ? "bg-blue-600 text-white shadow-lg shadow-blue-900/20" : "text-slate-500 hover:text-slate-300"
+                      timeframe === p ? "bg-blue-600 text-white shadow-lg shadow-blue-900/20" : "text-slate-400 hover:text-slate-300"
                     )}
                   >
                     {p === 'D' ? 'Daily' : p === 'W' ? 'Weekly' : 'Monthly'}
@@ -426,12 +426,12 @@ export const MCIndexDetailPanel: React.FC<MCIndexDetailPanelProps> = ({ indId, n
               
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                  <div>
-                   <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-3">Pivot Levels</p>
+                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Pivot Levels</p>
                    <div className="space-y-1.5">
                      {technicals.data.pivotLevels?.[0]?.pivotLevel && (
                         Object.entries(technicals.data.pivotLevels[0].pivotLevel).map(([key, val]) => (
                           <div key={key} className="flex justify-between items-center text-[10px]">
-                            <span className="text-slate-500 font-bold uppercase">{key}</span>
+                            <span className="text-slate-400 font-bold uppercase">{key}</span>
                             <span className="text-white font-black tabular-nums">{val as string}</span>
                           </div>
                         ))
@@ -475,7 +475,7 @@ export const MCIndexDetailPanel: React.FC<MCIndexDetailPanelProps> = ({ indId, n
                       </LineChart>
                     </ResponsiveContainer>
                   </div>
-                  <div className="flex justify-between mt-2 text-[9px] font-black text-slate-500 uppercase tracking-widest">
+                  <div className="flex justify-between mt-2 text-[10px] font-black text-slate-400 uppercase tracking-widest">
                     <span>Current: <span className="text-white">{peChart[peChart.length - 1]?.value?.toFixed(2)}</span></span>
                     <span>Min: <span className="text-emerald-400">{Math.min(...peChart.map(d => d.value)).toFixed(2)}</span></span>
                     <span>Max: <span className="text-rose-400">{Math.max(...peChart.map(d => d.value)).toFixed(2)}</span></span>
@@ -499,7 +499,7 @@ export const MCIndexDetailPanel: React.FC<MCIndexDetailPanelProps> = ({ indId, n
                       </LineChart>
                     </ResponsiveContainer>
                   </div>
-                  <div className="flex justify-between mt-2 text-[9px] font-black text-slate-500 uppercase tracking-widest">
+                  <div className="flex justify-between mt-2 text-[10px] font-black text-slate-400 uppercase tracking-widest">
                     <span>Current: <span className="text-white">{pbChart[pbChart.length - 1]?.value?.toFixed(2)}</span></span>
                     <span>Min: <span className="text-emerald-400">{Math.min(...pbChart.map(d => d.value)).toFixed(2)}</span></span>
                     <span>Max: <span className="text-rose-400">{Math.max(...pbChart.map(d => d.value)).toFixed(2)}</span></span>
@@ -515,10 +515,10 @@ export const MCIndexDetailPanel: React.FC<MCIndexDetailPanelProps> = ({ indId, n
               <div className="overflow-x-auto">
                 <table className="w-full text-left">
                   <thead>
-                    <tr className="border-b border-slate-800">
-                      <th className="py-3 text-[9px] font-black text-slate-500 uppercase tracking-widest">Symbol</th>
-                      <th className="py-3 text-[9px] font-black text-slate-500 uppercase tracking-widest text-right">LTP</th>
-                      <th className="py-3 text-[9px] font-black text-slate-500 uppercase tracking-widest text-right">Change</th>
+                    <tr className="border-b border-slate-800/50">
+                      <th className="py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest">Symbol</th>
+                      <th className="py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">LTP</th>
+                      <th className="py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Change</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -529,13 +529,13 @@ export const MCIndexDetailPanel: React.FC<MCIndexDetailPanelProps> = ({ indId, n
                         key={i}
                         onClick={() => sym && onSelectStock && onSelectStock(sym)}
                         className={cn(
-                          "border-b border-slate-800/30 hover:bg-slate-800/20 transition-colors group",
+                          "border-b border-slate-800/20 hover:bg-slate-800/20 transition-colors group",
                           sym && onSelectStock ? "cursor-pointer" : ""
                         )}
                       >
                         <td className="py-3">
                           <p className="text-xs font-black text-white group-hover:text-blue-400 transition-colors uppercase italic">{s.shortname}</p>
-                          {sym && <p className="text-[9px] text-slate-600 font-bold uppercase tracking-widest">{sym}</p>}
+                          {sym && <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{sym}</p>}
                         </td>
                         <td className="py-3 text-right">
                           <p className="text-xs font-black text-white tabular-nums">{s.lastprice}</p>

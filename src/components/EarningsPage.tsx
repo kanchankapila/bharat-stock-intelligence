@@ -85,9 +85,9 @@ export const EarningsPage: React.FC<EarningsPageProps> = ({ onSelectStock }) => 
             { label: 'Missed Estimates', value: dashboard.miss || dashboard.missed || '—',              color: 'text-red-400'    },
             { label: 'In Line',          value: dashboard.inline || dashboard.neutral || '—',           color: 'text-amber-400'  },
           ].map((card, i) => (
-            <div key={i} className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
+            <div key={i} className="bg-slate-800/50 rounded-xl p-4 border border-slate-800/30">
               <div className={cn('text-2xl font-black', card.color)}>{card.value}</div>
-              <div className="text-xs text-slate-500 mt-0.5">{card.label}</div>
+              <div className="text-xs text-slate-400 mt-0.5">{card.label}</div>
             </div>
           ))}
         </div>
@@ -112,7 +112,7 @@ export const EarningsPage: React.FC<EarningsPageProps> = ({ onSelectStock }) => 
       </div>
 
       {activeTab === 'today' && (
-        <div className="bg-slate-800/50 rounded-xl border border-slate-700/50 overflow-hidden">
+        <div className="bg-slate-800/50 rounded-xl border border-slate-800/30 overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead className="bg-slate-900/60">
@@ -132,12 +132,12 @@ export const EarningsPage: React.FC<EarningsPageProps> = ({ onSelectStock }) => 
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
                       transition={{ delay: i * 0.02 }}
-                      className="border-b border-slate-700/30 hover:bg-slate-700/20 cursor-pointer"
+                      className="border-b border-slate-800/20 hover:bg-slate-700/20 cursor-pointer"
                       onClick={() => onSelectStock?.(item.symbol || item.scId)}
                     >
                       <td className="py-2.5 px-3">
-                        <div className="text-xs font-bold text-white">{item.companyName || item.name}</div>
-                        <div className="text-xs text-slate-500">{item.symbol}</div>
+                        <div className="text-xs font-bold text-slate-100">{item.companyName || item.name}</div>
+                        <div className="text-xs text-slate-400">{item.symbol}</div>
                       </td>
                       <td className="py-2.5 px-3 text-xs text-slate-300">₹{item.revenue || item.sales || '—'}Cr</td>
                       <td className="py-2.5 px-3 text-xs text-slate-300">₹{item.netProfit || item.profit || '—'}Cr</td>
@@ -174,13 +174,13 @@ export const EarningsPage: React.FC<EarningsPageProps> = ({ onSelectStock }) => 
           {calendarList.map((item: any, i: number) => (
             <div
               key={i}
-              className="bg-slate-800/50 rounded-xl p-3 border border-slate-700/50 cursor-pointer hover:border-emerald-500/40 transition-colors"
+              className="bg-slate-800/50 rounded-xl p-3 border border-slate-800/30 cursor-pointer hover:border-emerald-500/40 transition-colors"
               onClick={() => onSelectStock?.(item.symbol)}
             >
               <div className="flex items-start justify-between gap-2">
                 <div>
-                  <div className="text-xs font-bold text-white">{item.companyName || item.name}</div>
-                  <div className="text-xs text-slate-500">{item.symbol}</div>
+                  <div className="text-xs font-bold text-slate-100">{item.companyName || item.name}</div>
+                  <div className="text-xs text-slate-400">{item.symbol}</div>
                 </div>
                 <div className="text-xs text-cyan-400 font-mono shrink-0">{item.resultDate || item.date}</div>
               </div>
@@ -194,7 +194,7 @@ export const EarningsPage: React.FC<EarningsPageProps> = ({ onSelectStock }) => 
 
       {activeTab === 'beatmiss' && beatMissData.length > 0 && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
+          <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-800/30">
             <div className="text-sm font-semibold text-slate-300 mb-3">Actual vs Estimate Growth (%)</div>
             <ResponsiveContainer width="100%" height={300}>
               <BarChart data={beatMissData} margin={{ left: -10, right: 8 }}>
@@ -214,25 +214,25 @@ export const EarningsPage: React.FC<EarningsPageProps> = ({ onSelectStock }) => 
               </BarChart>
             </ResponsiveContainer>
           </div>
-          <div className="bg-slate-800/50 rounded-xl border border-slate-700/50 overflow-hidden">
-            <div className="px-3 py-2 bg-slate-900/60 border-b border-slate-700/50">
+          <div className="bg-slate-800/50 rounded-xl border border-slate-800/30 overflow-hidden">
+            <div className="px-3 py-2 bg-slate-900/60 border-b border-slate-800/30">
               <span className="text-xs font-bold text-slate-300">Actual vs Estimate Detail</span>
             </div>
             <div className="overflow-y-auto max-h-80">
               {actualEstimateList.slice(0, 15).map((item: any, i: number) => {
                 const beat = parseFloat(item.actual || 0) >= parseFloat(item.estimate || 0);
                 return (
-                  <div key={i} className="flex items-center justify-between px-3 py-2 border-b border-slate-700/30 hover:bg-slate-700/20 cursor-pointer"
+                  <div key={i} className="flex items-center justify-between px-3 py-2 border-b border-slate-800/20 hover:bg-slate-700/20 cursor-pointer"
                        onClick={() => onSelectStock?.(item.symbol)}>
                     <div>
-                      <div className="text-xs font-bold text-white">{item.companyName || item.symbol}</div>
-                      <div className="text-xs text-slate-500">{item.metric || 'Net Profit'}</div>
+                      <div className="text-xs font-bold text-slate-100">{item.companyName || item.symbol}</div>
+                      <div className="text-xs text-slate-400">{item.metric || 'Net Profit'}</div>
                     </div>
                     <div className="text-right">
                       <div className={cn('text-xs font-bold', beat ? 'text-emerald-400' : 'text-red-400')}>
                         {beat ? '✓ Beat' : '✗ Miss'}
                       </div>
-                      <div className="text-xs text-slate-500">{item.actual} vs {item.estimate}</div>
+                      <div className="text-xs text-slate-400">{item.actual} vs {item.estimate}</div>
                     </div>
                   </div>
                 );
@@ -244,7 +244,7 @@ export const EarningsPage: React.FC<EarningsPageProps> = ({ onSelectStock }) => 
 
       {activeTab === 'shockers' && shockerData.length > 0 && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
+          <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-800/30">
             <div className="text-sm font-semibold text-slate-300 mb-3">Price Impact After Results (%)</div>
             <ResponsiveContainer width="100%" height={300}>
               <BarChart data={shockerData} layout="vertical" margin={{ left: 60, right: 20 }}>
@@ -263,19 +263,19 @@ export const EarningsPage: React.FC<EarningsPageProps> = ({ onSelectStock }) => 
               </BarChart>
             </ResponsiveContainer>
           </div>
-          <div className="bg-slate-800/50 rounded-xl border border-slate-700/50 overflow-hidden">
-            <div className="px-3 py-2 bg-slate-900/60 border-b border-slate-700/50">
+          <div className="bg-slate-800/50 rounded-xl border border-slate-800/30 overflow-hidden">
+            <div className="px-3 py-2 bg-slate-900/60 border-b border-slate-800/30">
               <span className="text-xs font-bold text-slate-300">Price Shockers List</span>
             </div>
             <div className="overflow-y-auto max-h-80">
               {priceShockerList.slice(0, 15).map((item: any, i: number) => {
                 const chg = parseFloat(item.pChange || item.change || 0);
                 return (
-                  <div key={i} className="flex items-center justify-between px-3 py-2.5 border-b border-slate-700/30 hover:bg-slate-700/20 cursor-pointer"
+                  <div key={i} className="flex items-center justify-between px-3 py-2.5 border-b border-slate-800/20 hover:bg-slate-700/20 cursor-pointer"
                        onClick={() => onSelectStock?.(item.symbol)}>
                     <div>
-                      <div className="text-xs font-bold text-white">{item.companyName || item.symbol}</div>
-                      <div className="text-xs text-slate-500">₹{item.price || item.lastPrice}</div>
+                      <div className="text-xs font-bold text-slate-100">{item.companyName || item.symbol}</div>
+                      <div className="text-xs text-slate-400">₹{item.price || item.lastPrice}</div>
                     </div>
                     <div className={cn('text-sm font-black', chg >= 0 ? 'text-emerald-400' : 'text-red-400')}>
                       {chg >= 0 ? '+' : ''}{chg.toFixed(2)}%

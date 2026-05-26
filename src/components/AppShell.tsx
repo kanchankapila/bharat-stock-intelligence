@@ -169,13 +169,13 @@ const SidebarInner: React.FC<{
   return (
     <div className="flex flex-col h-full">
       {/* Logo row */}
-      <div className="h-14 flex items-center justify-between px-3 border-b border-white/[0.05] shrink-0">
+      <div className="h-14 flex items-center justify-between px-3 border-b border-slate-800/50 shrink-0">
         <button
           onClick={() => handleNav('dashboard')}
           className="flex items-center gap-2 min-w-0"
         >
-          <div className="w-7 h-7 bg-amber-500 rounded-md flex items-center justify-center shadow-[0_0_10px_rgba(245,158,11,0.45)] shrink-0">
-            <TrendingUp className="w-3.5 h-3.5 text-black" />
+          <div className="w-7 h-7 bg-indigo-600 rounded-md flex items-center justify-center shadow-[0_0_10px_rgba(79,70,229,0.25)] shrink-0">
+            <TrendingUp className="w-3.5 h-3.5 text-white" />
           </div>
           <AnimatePresence initial={false}>
             {!collapsed && (
@@ -185,7 +185,7 @@ const SidebarInner: React.FC<{
                 animate={{ opacity: 1, width: 'auto' }}
                 exit={{ opacity: 0, width: 0 }}
                 transition={{ duration: 0.18 }}
-                className="text-sm font-black text-white tracking-wider overflow-hidden whitespace-nowrap"
+                className="text-sm font-black text-slate-200 tracking-wider overflow-hidden whitespace-nowrap"
                 style={{ fontFamily: "'Rajdhani', sans-serif" }}
               >
                 BHARAT<span className="text-amber-400">STOCK</span>
@@ -197,7 +197,7 @@ const SidebarInner: React.FC<{
         {!collapsed && (
           <button
             onClick={() => setCollapsed(true)}
-            className="p-1 rounded-md text-slate-700 hover:text-slate-400 hover:bg-white/[0.05] transition-all shrink-0"
+            className="p-1 rounded-md text-slate-400 hover:text-slate-300 hover:bg-slate-900/50 transition-all shrink-0"
           >
             <ChevronLeft className="w-4 h-4" />
           </button>
@@ -209,12 +209,12 @@ const SidebarInner: React.FC<{
         <div className={cn(
           'rounded-lg border px-2.5 py-2 flex items-center gap-2 transition-colors',
           marketStatus.isOpen
-            ? 'bg-emerald-500/5 border-emerald-500/20'
-            : 'bg-slate-900/40 border-white/[0.05]',
+            ? 'bg-emerald-50 border-emerald-200'
+            : 'bg-slate-900/50 border-slate-800/50',
         )}>
           <div className={cn(
             'w-1.5 h-1.5 rounded-full shrink-0',
-            marketStatus.isOpen ? 'bg-emerald-400 animate-pulse' : 'bg-slate-600',
+            marketStatus.isOpen ? 'bg-emerald-400 animate-pulse' : 'bg-slate-400',
           )} />
           <AnimatePresence initial={false}>
             {!collapsed && (
@@ -225,10 +225,10 @@ const SidebarInner: React.FC<{
                 exit={{ opacity: 0 }}
                 className="overflow-hidden min-w-0"
               >
-                <p className={cn('text-[10px] font-black uppercase tracking-widest leading-none', marketStatus.isOpen ? 'text-emerald-400' : 'text-slate-500')}>
+                <p className={cn('text-[10px] font-black uppercase tracking-widest leading-none', marketStatus.isOpen ? 'text-emerald-400' : 'text-slate-400')}>
                   NSE {marketStatus.isOpen ? 'LIVE' : 'CLOSED'}
                 </p>
-                <p className="text-[9px] text-slate-700 mt-0.5 leading-none truncate">{marketStatus.countdown}</p>
+                <p className="text-[9px] text-slate-400 mt-0.5 leading-none truncate">{marketStatus.countdown}</p>
               </motion.div>
             )}
           </AnimatePresence>
@@ -245,7 +245,7 @@ const SidebarInner: React.FC<{
             exit={{ opacity: 0, height: 0 }}
             className="mx-2.5 mt-2 relative shrink-0"
           >
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-700 pointer-events-none" />
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-400 pointer-events-none" />
             <input
               ref={searchRef}
               type="text"
@@ -253,21 +253,21 @@ const SidebarInner: React.FC<{
               value={searchQuery}
               onChange={e => { setSearchQuery(e.target.value); setShowSearch(true); }}
               onFocus={() => setShowSearch(true)}
-              className="w-full bg-slate-900/50 border border-white/[0.06] rounded-lg py-1.5 pl-7 pr-3 text-[11px] text-slate-300 placeholder:text-slate-700 focus:outline-none focus:border-amber-500/30 focus:ring-1 focus:ring-amber-500/20 transition-all"
+              className="w-full bg-white/45 border border-slate-850/80 rounded-lg py-1.5 pl-7 pr-3 text-[11px] text-slate-200 placeholder:text-slate-400 focus:outline-none focus:border-indigo-500/30 focus:ring-1 focus:ring-indigo-500/20 transition-all shadow-[inset_0_1px_2px_rgba(0,0,0,0.02)]"
             />
             {showSearch && searchResults.length > 0 && (
               <>
                 <div className="fixed inset-0 z-10" onClick={() => { setShowSearch(false); setSearchQuery(''); }} />
-                <div className="absolute top-full mt-1 left-0 right-0 bg-[#0f0f1f] border border-white/[0.08] rounded-xl overflow-hidden shadow-2xl z-20">
+                <div className="absolute top-full mt-1 left-0 right-0 glass-strong border border-slate-800/50 rounded-xl overflow-hidden shadow-2xl z-20">
                   {searchResults.map(s => (
                     <button
                       key={s.symbol}
                       onClick={() => { onSelectStock(s.symbol); setSearchQuery(''); setShowSearch(false); closeMobile?.(); }}
-                      className="w-full px-3 py-2.5 hover:bg-white/[0.04] flex items-center justify-between transition-colors border-b border-white/[0.04] last:border-0"
+                      className="w-full px-3 py-2.5 hover:bg-indigo-50/50 flex items-center justify-between transition-colors border-b border-slate-800 last:border-0"
                     >
                       <div className="text-left min-w-0">
-                        <div className="text-[11px] font-bold text-white">{s.symbol}</div>
-                        <div className="text-[9px] text-slate-600 truncate">{s.name}</div>
+                        <div className="text-[11px] font-bold text-slate-200">{s.symbol}</div>
+                        <div className="text-[9px] text-slate-400 truncate">{s.name}</div>
                       </div>
                       <span className={cn('text-[10px] font-bold tabular-nums shrink-0 ml-2', s.changePct >= 0 ? 'text-emerald-400' : 'text-rose-400')}>
                         {s.changePct > 0 ? '+' : ''}{s.changePct.toFixed(2)}%
@@ -282,7 +282,7 @@ const SidebarInner: React.FC<{
       </AnimatePresence>
 
       {/* Divider */}
-      <div className="mx-2.5 mt-2 border-t border-white/[0.04] shrink-0" />
+      <div className="mx-2.5 mt-2 border-t border-slate-800/50 shrink-0" />
 
       {/* Nav */}
       <nav className="flex-1 overflow-y-auto py-1 px-2 space-y-px" style={{ scrollbarWidth: 'none' }}>
@@ -295,13 +295,13 @@ const SidebarInner: React.FC<{
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
-                  className="px-2 pt-3 pb-1 text-[9px] font-black uppercase tracking-[0.15em] text-slate-700"
+                  className="px-2 pt-3 pb-1 text-[9px] font-black uppercase tracking-[0.15em] text-slate-400"
                 >
                   {group.label}
                 </motion.p>
               )}
             </AnimatePresence>
-            {collapsed && <div className="my-1 mx-1 border-t border-white/[0.04]" />}
+            {collapsed && <div className="my-1 mx-1 border-t border-slate-800/50" />}
 
             {group.items.map(item => {
               const active = activeTab === item.id;
@@ -313,13 +313,13 @@ const SidebarInner: React.FC<{
                   className={cn(
                     'relative w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left transition-all duration-100 group',
                     active
-                      ? 'bg-amber-500/10 text-amber-400'
-                      : 'text-slate-500 hover:text-slate-200 hover:bg-white/[0.04]',
+                      ? 'bg-indigo-500/10 text-amber-400 font-bold'
+                      : 'text-slate-400 hover:text-slate-900 hover:bg-slate-900/40',
                     collapsed ? 'justify-center' : '',
                   )}
                 >
                   {active && (
-                    <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-4 bg-amber-400 rounded-r-full" />
+                    <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-4 bg-indigo-500 rounded-r-full" />
                   )}
                   <item.icon className={cn('w-4 h-4 shrink-0', active ? 'text-amber-400' : '')} />
                   <AnimatePresence initial={false}>
@@ -338,7 +338,7 @@ const SidebarInner: React.FC<{
                   </AnimatePresence>
                   {/* Tooltip when collapsed */}
                   {collapsed && (
-                    <span className="absolute left-full ml-2 px-2 py-1 bg-slate-800 border border-white/[0.08] text-white text-[10px] font-bold rounded-md whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50 shadow-xl">
+                    <span className="absolute left-full ml-2 px-2 py-1 bg-slate-900 border border-slate-850/10 text-white text-[10px] font-bold rounded-md whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50 shadow-xl">
                       {item.label}
                     </span>
                   )}
@@ -350,7 +350,7 @@ const SidebarInner: React.FC<{
       </nav>
 
       {/* Bottom: mini index strip + user */}
-      <div className="shrink-0 border-t border-white/[0.05]">
+      <div className="shrink-0 border-t border-slate-800/50">
         <AnimatePresence initial={false}>
           {!collapsed && displayIndices.length > 0 && (
             <motion.div
@@ -362,7 +362,7 @@ const SidebarInner: React.FC<{
             >
               {displayIndices.slice(0, 3).map(idx => (
                 <div key={idx.name} className="flex items-center justify-between">
-                  <span className="text-[9px] text-slate-700 uppercase tracking-wide truncate max-w-[80px]">{idx.name}</span>
+                  <span className="text-[9px] text-slate-400 uppercase tracking-wide truncate max-w-[80px]">{idx.name}</span>
                   <div className="flex items-center gap-1 shrink-0">
                     <span className="text-[9px] font-bold text-slate-400 tabular-nums">{idx.value.toLocaleString('en-IN')}</span>
                     <span className={cn('text-[8px] font-bold', idx.isUp ? 'text-emerald-400' : 'text-rose-400')}>
@@ -381,7 +381,7 @@ const SidebarInner: React.FC<{
               <img
                 src={user.photoURL || ''}
                 alt="avatar"
-                className="w-7 h-7 rounded-full border border-slate-700 shrink-0"
+                className="w-7 h-7 rounded-full border border-slate-850 shrink-0"
               />
               <AnimatePresence initial={false}>
                 {!collapsed && (
@@ -392,8 +392,8 @@ const SidebarInner: React.FC<{
                     exit={{ opacity: 0 }}
                     className="min-w-0 overflow-hidden"
                   >
-                    <p className="text-[10px] font-bold text-slate-300 truncate">{user.displayName}</p>
-                    <p className="text-[9px] text-slate-600 truncate">{user.email}</p>
+                    <p className="text-[10px] font-bold text-slate-200 truncate">{user.displayName}</p>
+                    <p className="text-[9px] text-slate-400 truncate">{user.email}</p>
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -416,7 +416,7 @@ const SidebarInner: React.FC<{
           <div className="pb-2 flex justify-center">
             <button
               onClick={() => setCollapsed(false)}
-              className="p-1.5 rounded-md text-slate-700 hover:text-slate-400 hover:bg-white/[0.05] transition-all"
+              className="p-1.5 rounded-md text-slate-400 hover:text-slate-300 hover:bg-slate-900/50 transition-all"
             >
               <ChevronRight className="w-4 h-4" />
             </button>
@@ -446,12 +446,12 @@ export const AppShell: React.FC<AppShellProps> = ({
   };
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[#07070f] text-slate-200">
+    <div className="flex h-screen overflow-hidden bg-transparent text-slate-200">
       {/* ── Desktop sidebar ── */}
       <motion.aside
         animate={{ width: collapsed ? 60 : 232 }}
         transition={{ duration: 0.2, ease: 'easeInOut' }}
-        className="hidden md:flex flex-col h-full bg-[#0b0b18] border-r border-white/[0.05] shrink-0 overflow-hidden z-20"
+        className="hidden md:flex flex-col h-full glass border-r border-slate-800/50 shrink-0 overflow-hidden z-20 shadow-sm"
       >
         <SidebarInner {...sidebarProps} />
       </motion.aside>
@@ -465,7 +465,7 @@ export const AppShell: React.FC<AppShellProps> = ({
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black/60 backdrop-blur-sm z-30 md:hidden"
+              className="fixed inset-0 bg-slate-900/30 backdrop-blur-sm z-30 md:hidden"
               onClick={() => setMobileOpen(false)}
             />
             <motion.aside
@@ -474,7 +474,7 @@ export const AppShell: React.FC<AppShellProps> = ({
               animate={{ x: 0 }}
               exit={{ x: -240 }}
               transition={{ duration: 0.2, ease: 'easeOut' }}
-              className="fixed left-0 top-0 h-full w-56 bg-[#0b0b18] border-r border-white/[0.05] z-40 flex flex-col md:hidden"
+              className="fixed left-0 top-0 h-full w-56 glass-strong border-r border-slate-800/50 z-40 flex flex-col md:hidden shadow-2xl"
             >
               <SidebarInner {...sidebarProps} collapsed={false} closeMobile={() => setMobileOpen(false)} />
             </motion.aside>
@@ -485,25 +485,25 @@ export const AppShell: React.FC<AppShellProps> = ({
       {/* ── Content area ── */}
       <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
         {/* Top bar */}
-        <header className="h-11 border-b border-white/[0.05] bg-[#09091a]/80 backdrop-blur-xl flex items-center px-4 gap-3 shrink-0 z-10">
+        <header className="h-11 border-b border-slate-800/30 bg-slate-950/20 backdrop-blur-md flex items-center px-4 gap-3 shrink-0 z-10">
           {/* Mobile hamburger */}
           <button
             onClick={() => setMobileOpen(true)}
-            className="md:hidden p-1.5 rounded-md text-slate-600 hover:text-slate-300 hover:bg-white/[0.05]"
+            className="md:hidden p-1.5 rounded-md text-slate-400 hover:text-slate-200 hover:bg-slate-900/50"
           >
             <Menu className="w-4 h-4" />
           </button>
 
           {/* Page breadcrumb */}
           <div className="flex items-center gap-1.5 min-w-0">
-            <span className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-700 hidden sm:block"
+            <span className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-400 hidden sm:block"
               style={{ fontFamily: "'Rajdhani', sans-serif" }}>
               BHARAT STOCK
             </span>
             {activeLabel && (
               <>
-                <span className="text-slate-800 hidden sm:block">/</span>
-                {ActiveIcon && <ActiveIcon className="w-3 h-3 text-amber-500 shrink-0" />}
+                <span className="text-slate-300 hidden sm:block">/</span>
+                {ActiveIcon && <ActiveIcon className="w-3 h-3 text-amber-400 shrink-0" />}
                 <span className="text-[11px] font-black text-amber-400 uppercase tracking-wide truncate"
                   style={{ fontFamily: "'Rajdhani', sans-serif" }}>
                   {activeLabel}
@@ -522,7 +522,7 @@ export const AppShell: React.FC<AppShellProps> = ({
                 onClick={() => onSelectIndexByName(idx.name)}
                 className="flex items-center gap-1.5 group"
               >
-                <span className="text-[9px] text-slate-700 uppercase tracking-wider group-hover:text-slate-500 transition-colors">
+                <span className="text-[9px] text-slate-400 uppercase tracking-wider group-hover:text-slate-300 transition-colors">
                   {idx.name.replace('NIFTY BANK', 'BANKNIFTY').replace('NIFTY 50', 'NIFTY50').replace('SENSEX', 'SENSEX')}
                 </span>
                 <span className="text-[11px] font-bold text-slate-300 tabular-nums">{idx.value.toLocaleString('en-IN')}</span>
@@ -535,12 +535,12 @@ export const AppShell: React.FC<AppShellProps> = ({
           </div>
 
           {/* Live dot */}
-          <div className="flex items-center gap-1.5 bg-slate-900/60 border border-white/[0.05] rounded-md px-2 py-1 shrink-0">
+          <div className="flex items-center gap-1.5 bg-slate-900/60 border border-slate-800/50 rounded-md px-2 py-1 shrink-0">
             <div className={cn(
               'w-1.5 h-1.5 rounded-full',
-              getMarketStatus().isOpen ? 'bg-emerald-400 animate-pulse' : 'bg-slate-700',
+              getMarketStatus().isOpen ? 'bg-emerald-400 animate-pulse' : 'bg-slate-400',
             )} />
-            <span className="text-[9px] font-black uppercase tracking-wider text-slate-600">
+            <span className="text-[9px] font-black uppercase tracking-wider text-slate-400">
               {getMarketStatus().isOpen ? 'LIVE' : 'CLOSED'}
             </span>
           </div>

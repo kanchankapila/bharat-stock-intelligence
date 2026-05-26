@@ -44,7 +44,8 @@ import {
   fetchTrendlyneAdvTechnicalAnalysis,
   getTrendlyneOverview,
   fetchTrendlyneSectorRotation,
-  fetchTrendlyneIndexRotation
+  fetchTrendlyneIndexRotation,
+  fetchTrendlyneStockOptionChain
 } from "./trendlyneService";import { 
   getTopRatedStocks, 
   syncAndScore,
@@ -551,7 +552,7 @@ export const appRouter = router({
     .mutation(async ({ input }) => {
       try {
         const end = input.end ?? new Date().toISOString().split('T')[0];
-        const res = await fetch('http://127.0.0.1:8000/api/v1/backtest', {
+        const res = await fetch('http://127.0.0.1:8002/api/v1/backtest', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -587,7 +588,7 @@ export const appRouter = router({
     }).optional())
     .mutation(async ({ input }) => {
       try {
-        const res = await fetch('http://127.0.0.1:8000/api/v1/optimize', {
+        const res = await fetch('http://127.0.0.1:8002/api/v1/optimize', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -759,7 +760,7 @@ export const appRouter = router({
   getOptionsIntelligence: publicProcedure
     .query(async () => {
       try {
-        const res = await fetch('http://127.0.0.1:8000/api/v1/options/pcr', {
+        const res = await fetch('http://127.0.0.1:8002/api/v1/options/pcr', {
           signal: AbortSignal.timeout(10000)
         });
         if (!res.ok) {
@@ -779,7 +780,7 @@ export const appRouter = router({
     }))
     .mutation(async ({ input }) => {
       try {
-        const res = await fetch('http://127.0.0.1:8000/api/v1/portfolio/analyze', {
+        const res = await fetch('http://127.0.0.1:8002/api/v1/portfolio/analyze', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(input),
@@ -1638,7 +1639,7 @@ export const appRouter = router({
     .input(z.object({ symbol: z.string(), exchange: z.string().optional().default('NSE') }))
     .query(async ({ input }) => {
       try {
-        const res = await fetch('http://127.0.0.1:8000/api/v1/tv/ta', {
+        const res = await fetch('http://127.0.0.1:8002/api/v1/tv/ta', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ symbol: input.symbol, exchange: input.exchange })
@@ -1659,7 +1660,7 @@ export const appRouter = router({
   getTvScreener: publicProcedure
     .query(async () => {
       try {
-        const res = await fetch('http://127.0.0.1:8000/api/v1/tv/screener');
+        const res = await fetch('http://127.0.0.1:8002/api/v1/tv/screener');
         if (!res.ok) {
           const errText = await res.text();
           console.error("TV Screener Error:", errText);
@@ -1695,6 +1696,38 @@ export const appRouter = router({
     .input(z.object({ symbol: z.string() }))
     .query(async ({ input }) => {
       return await fetchTrendlyneStockMetrics(input.symbol);
+    }),
+
+  getTrendlyneStockOptionChain: publicProcedure
+    .input(z.object({ 
+      symbol: z.string(),
+      expiryDate: z.string().optional()
+    }))
+    .query(async ({ input }) => {
+      return await fetchTrendlyneStockOptionChain(input.symbol, input.expiryDate);
+    }),
+
+  getTrendlyneStockExpiries: publicProcedure
+    .input(z.object({ symbol: z.string() }))
+    .query(async ({ input }) => {
+      const symbol = input.symbol.toUpperCase();
+      try {
+        const url = `https://webapi.niftytrader.in/webapi/Symbol/symbol-expiry-all?symbol=${symbol}&exchange=nse`;
+        const res = await fetch(url, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'application/json'
+          }
+        });
+        if (res.ok) {
+          const json = await res.json();
+          const list = json?.resultData?.filter((d: any) => d.symbol_name === symbol) || [];
+          return list.map((d: any) => d.expiry_date.split('T')[0]);
+        }
+      } catch (e) {
+        console.error('[TRENDLYNE EXPIRIES] Failed to fetch expiries:', e);
+      }
+      return ['2026-05-26'];
     }),
 
   getTrendlyneAdvTechnicalAnalysis: publicProcedure
@@ -1914,7 +1947,7 @@ export const appRouter = router({
     .mutation(async () => {
       try {
         console.log(`🔄 Refreshing Trendlyne screeners database...`);
-        const screenerNames = await fetchAllTrendlyneScreenerNames();
+        const screenerNames = await fetchAllTrendlyneScreenerNames(true);
         return {
           success: true,
           message: `✅ Refreshed screener database with ${screenerNames.size} screeners`,
@@ -2555,9 +2588,9 @@ export const appRouter = router({
         SELECT ts.*, ns.sector, ns.industry
         FROM technical_signals ts
         LEFT JOIN nse_stocks ns ON ns.symbol = ts.symbol
-        WHERE ts.signal_date >= date('now', '-3 days')
+        WHERE ts.date >= date('now', '-7 days')
           AND ts.win_probability >= 0.40
-        ORDER BY ts.win_probability DESC, ts.created_at DESC
+        ORDER BY ts.win_probability DESC, ts.computed_at DESC
         LIMIT 60
       `).all() as Array<Record<string, unknown>>;
 
@@ -2578,7 +2611,7 @@ export const appRouter = router({
         bulkDeals = db.prepare(`
           SELECT symbol, deal_type, quantity, price, deal_date
           FROM bulk_deals
-          WHERE deal_date >= date('now', '-7 days')
+          WHERE deal_date >= date('now', '-14 days')
           ORDER BY deal_date DESC
         `).all() as Array<Record<string, unknown>>;
       } catch { /* table may not exist */ }
@@ -2588,7 +2621,7 @@ export const appRouter = router({
         insiderTrades = db.prepare(`
           SELECT symbol, transaction_type, quantity, price, trade_date
           FROM insider_trades
-          WHERE trade_date >= date('now', '-14 days')
+          WHERE trade_date >= date('now', '-30 days')
           ORDER BY trade_date DESC
         `).all() as Array<Record<string, unknown>>;
       } catch { /* table may not exist */ }
@@ -2598,7 +2631,7 @@ export const appRouter = router({
         newsSentiment = db.prepare(`
           SELECT symbol, sentiment_score, headline, published_at
           FROM news_sentiment_items
-          WHERE published_at >= datetime('now', '-2 days')
+          WHERE published_at >= datetime('now', '-7 days')
           ORDER BY published_at DESC
         `).all() as Array<Record<string, unknown>>;
       } catch { /* table may not exist */ }
@@ -2650,18 +2683,26 @@ export const appRouter = router({
         const smartScore = (data.hasBulkDeal ? 20 : 0) + (data.hasInsiderBuy ? 30 : 0) + 50;
 
         const compositeScore = techScore * 0.35 + fundScore * 0.20 + momScore * 0.20 + sentScore * 0.15 + smartScore * 0.10;
+        const actionAdvice = compositeScore >= 75 ? 'STRONG BUY' :
+                             compositeScore >= 70 ? 'BUY' :
+                             compositeScore <= 45 ? 'SELL' : 'HOLD';
 
         const primarySignal = data.signals[0];
-        const advice = (primarySignal?.signal_type as string) === 'BUY' ? 'BUY' :
-                       (primarySignal?.signal_type as string) === 'SELL' ? 'SELL' : 'HOLD';
 
         return {
           symbol,
+          name: getStockMapping(symbol)?.name || symbol,
           sector: data.sector,
-          advice,
+          advice: actionAdvice,
+          actionAdvice,
           compositeScore: parseFloat(compositeScore.toFixed(1)),
           mlWinProbability: parseFloat((avgWinProb * 100).toFixed(1)),
+          mlProbability: parseFloat((avgWinProb * 100).toFixed(1)),
           signalCount: data.signals.length,
+          techSignalCount: data.signals.length,
+          quantRank: Math.round(100 - fundScore),
+          smartMoneyCr: parseFloat((smartScore - 50).toFixed(1)),
+          newsSentiment: parseFloat(data.avgSentiment.toFixed(2)),
           factors: {
             technical: parseFloat(techScore.toFixed(1)),
             fundamental: parseFloat(fundScore.toFixed(1)),
@@ -2674,14 +2715,30 @@ export const appRouter = router({
           stopLoss: primarySignal?.stop_loss as number || null,
           hasBulkDeal: data.hasBulkDeal,
           hasInsiderBuy: data.hasInsiderBuy,
+          // Technical indicators for real analysis
+          rsi: primarySignal?.rsi || null,
+          macd: primarySignal?.macd || null,
+          macdSignal: primarySignal?.macd_signal || null,
+          sma50: primarySignal?.sma50 || null,
+          sma200: primarySignal?.sma200 || null,
+          bbWidth: primarySignal?.bb_width || null,
+          volumeRatio: primarySignal?.volume_ratio || null,
+          cmp: primarySignal?.cmp || null,
+          changePct: primarySignal?.change_pct || 0,
+          aiInsight: primarySignal?.ai_insight || null,
+          entryZone: primarySignal?.entry_zone || null,
+          targets: primarySignal?.targets || null,
+          setupQuality: primarySignal?.setup_quality || 'MEDIUM',
+          timeHorizon: primarySignal?.time_horizon || 'Short Term',
+          signalsJson: primarySignal?.signals_json || '[]',
         };
       });
 
       candidates.sort((a, b) => b.compositeScore - a.compositeScore);
       const top15 = candidates.slice(0, 15);
 
-      const advances = signals.filter((s) => (s.signal_type as string) === 'BUY').length;
-      const declines = signals.filter((s) => (s.signal_type as string) === 'SELL').length;
+      const advances = signals.filter((s) => ((s.signal_score as number) || 0) >= 0).length;
+      const declines = signals.filter((s) => ((s.signal_score as number) || 0) < 0).length;
       const advDecRatio = declines > 0 ? parseFloat((advances / declines).toFixed(2)) : advances > 0 ? 5 : 1;
       const avgWinProbability = signals.length
         ? parseFloat((signals.reduce((s, sg) => s + ((sg.win_probability as number) || 0), 0) / signals.length * 100).toFixed(1))
@@ -2712,12 +2769,15 @@ export const appRouter = router({
     .input(z.object({ symbols: z.array(z.string()).optional() }))
     .mutation(async ({ input }) => {
       try {
-        const body = input.symbols?.length ? { symbols: input.symbols } : {};
-        const resp = await fetch('http://127.0.0.1:8000/api/v1/options/pcr', {
+        const body = {
+          symbols: input.symbols?.length ? input.symbols : undefined,
+          delay: 0.2,
+        };
+        const resp = await fetch('http://127.0.0.1:8002/api/v1/options/pcr', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
-          signal: AbortSignal.timeout(30000),
+          signal: AbortSignal.timeout(60000),
         });
         if (!resp.ok) throw new Error(`PCR fetch failed: ${resp.status}`);
         const data = await resp.json();

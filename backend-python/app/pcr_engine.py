@@ -40,16 +40,11 @@ class PCRFetcher:
         self._prime_session()
 
     def _prime_session(self):
-        try:
-            self.session.get("https://www.nseindia.com", timeout=10)
-            time.sleep(1.5)
-        except Exception as e:
-            print(f"[PCR] Session prime warning: {e}")
+        # NiftyTrader does not require session priming
+        pass
 
     def fetch_symbol(self, symbol: str, is_index: bool = False) -> dict | None:
-        url = (NSE_INDEX_CHAIN_URL if is_index else NSE_OPTION_CHAIN_URL).format(
-            symbol=symbol
-        )
+        url = f"https://webapi.niftytrader.in/webapi/option/option-chain-data?symbol={symbol}&exchange=nse&expiryDate=&atmBelow=0&atmAbove=0"
         try:
             resp = self.session.get(url, timeout=15)
             resp.raise_for_status()
@@ -59,43 +54,43 @@ class PCRFetcher:
             return None
 
         try:
-            records = data.get("records", {})
-            expiry_dates = records.get("expiryDates", [])
-            if not expiry_dates:
+            result_data = data.get("resultData")
+            if not result_data or not isinstance(result_data, dict):
+                print(f"[PCR] {symbol}: no resultData returned")
                 return None
 
-            nearest_expiry = expiry_dates[0]
-            chain_data     = records.get("data", [])
+            op_totals = result_data.get("opTotals", {})
+            total_calls_puts = op_totals.get("total_calls_puts", {})
+            if not total_calls_puts:
+                print(f"[PCR] {symbol}: total_calls_puts not found in opTotals")
+                return None
 
-            total_call_oi = 0
-            total_put_oi  = 0
-            near_call_oi  = 0
-            near_put_oi   = 0
+            total_call_oi = total_calls_puts.get("total_calls_oi", 0) or 0
+            total_put_oi  = total_calls_puts.get("total_puts_oi", 0) or 0
 
-            for strike in chain_data:
-                ce = strike.get("CE", {})
-                pe = strike.get("PE", {})
-                c_oi = ce.get("openInterest", 0) or 0
-                p_oi = pe.get("openInterest", 0) or 0
-                total_call_oi += c_oi
-                total_put_oi  += p_oi
+            op_datas = result_data.get("opDatas", [])
+            nearest_expiry = "N/A"
+            if op_datas and isinstance(op_datas, list):
+                first_item = op_datas[0]
+                if isinstance(first_item, dict) and "expiry_date" in first_item:
+                    # Format "2026-05-26T00:00:00" -> "2026-05-26"
+                    nearest_expiry = first_item["expiry_date"].split("T")[0]
 
-                if ce.get("expiryDate") == nearest_expiry:
-                    near_call_oi += c_oi
-                if pe.get("expiryDate") == nearest_expiry:
-                    near_put_oi  += p_oi
+            if nearest_expiry == "N/A" or not nearest_expiry:
+                nearest_expiry = datetime.date.today().isoformat()
 
-            near_pcr  = near_put_oi  / near_call_oi  if near_call_oi  > 0 else None
-            total_pcr = total_put_oi / total_call_oi if total_call_oi > 0 else None
+            # PCR = put OI / call OI
+            near_pcr  = total_put_oi / total_call_oi if total_call_oi > 0 else None
+            total_pcr = near_pcr
 
             return {
                 "symbol":        symbol,
                 "expiry":        nearest_expiry,
-                "call_oi":       near_call_oi,
-                "put_oi":        near_put_oi,
+                "call_oi":       int(total_call_oi),
+                "put_oi":        int(total_put_oi),
                 "pcr":           near_pcr,
-                "total_call_oi": total_call_oi,
-                "total_put_oi":  total_put_oi,
+                "total_call_oi": int(total_call_oi),
+                "total_put_oi":  int(total_put_oi),
                 "market_pcr":    total_pcr,
             }
         except Exception as e:
@@ -129,7 +124,7 @@ class PCRFetcher:
                 saved += 1
         return saved
 
-    def run(self, symbols: list[str], delay: float = 1.5):
+    def run(self, symbols: list[str], delay: float = 0.2):
         results = []
         for sym in symbols:
             rec = self.fetch_symbol(sym)
@@ -141,7 +136,7 @@ class PCRFetcher:
 
 class PcrRequest(BaseModel):
     symbols: Optional[List[str]] = None
-    delay: Optional[float] = 1.5
+    delay: Optional[float] = 0.2
 
 def run_pcr_fetch(req: PcrRequest):
     fetcher = PCRFetcher()

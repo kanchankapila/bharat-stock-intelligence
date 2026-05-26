@@ -12,6 +12,17 @@ db.pragma('synchronous = NORMAL');
  * Initialize Database Schema
  * All tables required for all features are created here if they don't exist.
  */
+try {
+  const tableInfo = db.prepare("PRAGMA table_info(signal_source_weights)").all() as any[];
+  const pkCount = tableInfo.filter(c => c.pk > 0).length;
+  if (pkCount === 1) {
+    console.log('[DB] Migrating signal_source_weights to composite primary key...');
+    db.exec("DROP TABLE IF EXISTS signal_source_weights");
+  }
+} catch (e) {
+  // Table might not exist yet
+}
+
 db.exec(`
   -- 1. Users & Personalization
   CREATE TABLE IF NOT EXISTS users (
@@ -49,6 +60,7 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_nse_symbol ON nse_stocks(symbol);
   CREATE INDEX IF NOT EXISTS idx_nse_sector ON nse_stocks(sector);
+  CREATE INDEX IF NOT EXISTS idx_nse_industry ON nse_stocks(industry);
 
   -- 3. Historical Data & Scans Cache
   CREATE TABLE IF NOT EXISTS historical_ohlc (
@@ -384,6 +396,7 @@ db.exec(`
     targets       TEXT,
     setup_quality TEXT,
     time_horizon  TEXT,
+    news_sentiment_score REAL,
     computed_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (symbol, date)
   );
@@ -457,6 +470,36 @@ db.exec(`
   );
 
   CREATE INDEX IF NOT EXISTS idx_mss_at ON market_sentiment_snapshots(snapshot_at DESC);
+
+  -- MoneyControl Chart Patterns (technical picks)
+  CREATE TABLE IF NOT EXISTS mc_chart_patterns (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    mcsymbol           TEXT NOT NULL,
+    symbol             TEXT,                  -- NSE symbol (resolved from mcsymbol)
+    pattern_id         INTEGER NOT NULL,
+    pattern_name       TEXT NOT NULL,         -- e.g., 'Falling Trendline', 'Horizontal Trendline'
+    comment            TEXT,                  -- e.g., 'Retesting the Resistance'
+    time_frame         TEXT,                  -- e.g., '1 hour', '1 day', '30 mins'
+    exchange           TEXT DEFAULT 'nse',
+    p_status           TEXT,                  -- 'New', 'Updated'
+    is_closed          TEXT DEFAULT 'N',
+    entry_price        REAL,
+    target_price       REAL,
+    stoploss_price     REAL,
+    target_return_pct  REAL,
+    stoploss_pct       REAL,
+    cmp                REAL,                  -- current market price from metadata
+    metadata_json      TEXT,                  -- full meta_data from API (stringified)
+    end_date           TEXT,
+    analyst_name       TEXT,
+    analyst_image      TEXT,
+    fetched_at         DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(mcsymbol, pattern_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_mcp_symbol ON mc_chart_patterns(mcsymbol);
+  CREATE INDEX IF NOT EXISTS idx_mcp_nse_symbol ON mc_chart_patterns(symbol);
+  CREATE INDEX IF NOT EXISTS idx_mcp_pattern_id ON mc_chart_patterns(pattern_id);
+  CREATE INDEX IF NOT EXISTS idx_mcp_fetched ON mc_chart_patterns(fetched_at DESC);
 `);
 
 // --- New Tables (Phase 2 accuracy improvements) ---
@@ -770,6 +813,30 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_tick_symbol ON tick_data(symbol, tick_time DESC);
   CREATE INDEX IF NOT EXISTS idx_tick_date ON tick_data(tick_time DESC);
 
+  -- PHASE 3: Prepare database schema for new data sources (macro overlays & order book)
+  CREATE TABLE IF NOT EXISTS macro_indicators (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    indicator_name TEXT NOT NULL,  -- e.g. 'US_10Y_YIELD', 'VIX', 'NIFTY_PE'
+    date           TEXT NOT NULL,
+    value          REAL,
+    created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(indicator_name, date)
+  );
+  CREATE INDEX IF NOT EXISTS idx_macro_date ON macro_indicators(date DESC);
+
+  CREATE TABLE IF NOT EXISTS order_book_snapshots (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol         TEXT NOT NULL,
+    timestamp      DATETIME NOT NULL,
+    total_buy_qty  INTEGER,
+    total_sell_qty INTEGER,
+    bid_ask_spread REAL,
+    vwap           REAL,
+    created_at     DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE INDEX IF NOT EXISTS idx_ob_symbol_time ON order_book_snapshots(symbol, timestamp DESC);
+
+
   -- PHASE 3.3: Signal Actions — Track user actions taken on signals (executed vs recommended)
   CREATE TABLE IF NOT EXISTS signal_actions (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -819,7 +886,7 @@ db.exec(`
 
   -- PHASE 3.6: Multi-source reward tracking — Per-source signal performance
   CREATE TABLE IF NOT EXISTS signal_source_weights (
-    signal_source       TEXT PRIMARY KEY,  -- 'AI' | 'technical' | 'quant' | 'news'
+    signal_source       TEXT NOT NULL,  -- 'AI' | 'technical' | 'quant' | 'news'
     regime              TEXT NOT NULL,     -- 'UPTREND' | 'DOWNTREND' | 'SIDEWAYS'
     sector              TEXT DEFAULT 'OTHER',
     win_rate            REAL,              -- % of signals that were winners
@@ -830,7 +897,7 @@ db.exec(`
     avg_sharpe_ratio    REAL,              -- Risk-adjusted returns
     weight_multiplier   REAL DEFAULT 1.0,  -- EMA-smoothed performance multiplier
     last_updated        DATETIME DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(signal_source, regime, sector)
+    PRIMARY KEY (signal_source, regime, sector)
   );
   CREATE INDEX IF NOT EXISTS idx_source_weights_win_rate ON signal_source_weights(win_rate DESC);
   CREATE INDEX IF NOT EXISTS idx_source_weights_sector ON signal_source_weights(sector);
@@ -856,6 +923,7 @@ migrateColumn('technical_signals', 'nifty_regime',   'TEXT');
 migrateColumn('technical_signals', 'delivery_pct',   'REAL');
 migrateColumn('technical_signals', 'fii_3d_net',     'REAL');
 migrateColumn('technical_signals', 'win_probability', 'REAL');
+migrateColumn('technical_signals', 'news_sentiment_score', 'REAL');
 
 // screener_master — signal type tag for dedup (prevents momentum/technical cross-bleed)
 migrateColumn('screener_master', 'signal_type_tag', "TEXT DEFAULT 'OTHER'");

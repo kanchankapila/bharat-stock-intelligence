@@ -22,7 +22,6 @@ export const PremarketPanel: React.FC<PremarketPanelProps> = ({ onSelectStock })
       <div className="animate-spin w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full" />
     </div>
   );
-  if (!data) return null;
 
   const globalMarkets = (data as any)?.globalMarkets?.data?.globalMarketData || [];
   const stocks = (data as any)?.stocksToWatch?.data?.list || [];
@@ -30,6 +29,23 @@ export const PremarketPanel: React.FC<PremarketPanelProps> = ({ onSelectStock })
   const fllData = (data as any)?.fllActivity?.data;
   const upcomingEvents = (data as any)?.ecalendar?.data?.upcoming_event_calendar || [];
   const news = (data as any)?.news?.data?.list || [];
+
+  const hasAnyData = globalMarkets.length > 0 || stocks.length > 0 || brokerRecos.length > 0
+    || !!fllData || upcomingEvents.length > 0 || news.length > 0;
+
+  if (!data || !hasAnyData) return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2">
+        <Activity className="w-5 h-5 text-emerald-400" />
+        <h2 className="text-lg font-bold text-white">Pre-Market Intelligence</h2>
+      </div>
+      <div className="bg-slate-800/40 rounded-xl p-6 border border-slate-700/30 text-center">
+        <Globe className="w-8 h-8 text-slate-500 mx-auto mb-2" />
+        <p className="text-sm text-slate-400">Pre-market data unavailable</p>
+        <p className="text-xs text-slate-500 mt-1">MoneyControl API may be temporarily unreachable</p>
+      </div>
+    </div>
+  );
 
   const fllChartData = fllData ? [
     { name: 'FII Buy', value: parseFloat(fllData.fii_buy || 0), fill: '#10b981' },

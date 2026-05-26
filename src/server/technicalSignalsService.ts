@@ -71,6 +71,7 @@ export interface SignalResult {
   niftyRegime: 'BULL' | 'BEAR' | 'SIDEWAYS';
   winProbability?: number;
   fii3dNet?: number | null;
+  newsSentimentScore?: number;
   signals: TechSignal[];
   signalScore: number;
   aiInsight?: string;
@@ -408,11 +409,45 @@ const SIGNAL_SCORES: Record<SignalType, Record<SignalStrength, number>> = {
   QUALITY_OVERSOLD_SIGNAL: { HIGH: 4, MEDIUM: 3, WATCH: 2 },
 };
 
+function loadRecentNewsSentiment(days = 2): Map<string, number> {
+  const map = new Map<string, number>();
+  try {
+    const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+    const rows = db.prepare(`
+      SELECT symbols_json, sentiment_score 
+      FROM news_sentiment_items
+      WHERE fetched_at >= ? AND symbols_json IS NOT NULL AND symbols_json != '' AND symbols_json != '[]'
+    `).all(cutoff) as { symbols_json: string; sentiment_score: number }[];
+
+    const symbolScores = new Map<string, number[]>();
+    for (const r of rows) {
+      try {
+        const symbols = JSON.parse(r.symbols_json) as string[];
+        for (const sym of symbols) {
+          if (!symbolScores.has(sym)) symbolScores.set(sym, []);
+          symbolScores.get(sym)!.push(r.sentiment_score);
+        }
+      } catch { /* skip */ }
+    }
+
+    for (const [sym, scores] of symbolScores.entries()) {
+      if (scores.length > 0) {
+        const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
+        map.set(sym, avg);
+      }
+    }
+  } catch (err: any) {
+    console.warn('[SIGNALS] Error loading news sentiment:', err.message);
+  }
+  return map;
+}
+
 function scoreSignals(
   signals: TechSignal[],
   winRates: Map<string, number> = new Map(),
   regime: 'BULL' | 'BEAR' | 'SIDEWAYS' = 'BULL',
   fii3dNet: number | null = null,
+  newsSentimentScore = 0,
 ): number {
   let total = 0;
   for (const s of signals) {
@@ -433,6 +468,13 @@ function scoreSignals(
 
   // FII headwind discount — heavy selling (< -3000 Cr 3-day net) reduces score 15%
   if (fii3dNet != null && fii3dNet < -3000) total *= 0.85;
+
+  // News Sentiment Modifier — highly bullish (>0.25) boosts score 15%, highly bearish (<-0.25) penalizes 25%
+  if (newsSentimentScore > 0.25) {
+    total *= 1.15;
+  } else if (newsSentimentScore < -0.25) {
+    total *= 0.75;
+  }
 
   return Math.min(Math.round(total), 10);
 }
@@ -966,7 +1008,8 @@ export async function runTechnicalSignalScan(options: {
     const winRates         = loadSignalWinRates(15, niftyRegime);
     const fii3dNet         = loadFIIFlow3d();
     const earningsCalendar = loadEarningsCalendar();
-    console.log(`[SIGNALS] Regime: ${niftyRegime} | Win-rate records: ${winRates.size} | FII 3d: ${fii3dNet ?? 'N/A'} Cr | Earnings watchlist: ${earningsCalendar.size}`);
+    const newsSentiment    = loadRecentNewsSentiment(2); // past 48 hours of news
+    console.log(`[SIGNALS] Regime: ${niftyRegime} | Win-rate records: ${winRates.size} | FII 3d: ${fii3dNet ?? 'N/A'} Cr | News Sentiment: ${newsSentiment.size} stocks | Earnings watchlist: ${earningsCalendar.size}`);
 
     console.log('[SIGNALS] Loading OHLCV data...');
     const allRows = db.prepare(
@@ -999,7 +1042,8 @@ export async function runTechnicalSignalScan(options: {
         progress.processed++;
 
         if (signals.length === 0) continue;
-        const score = scoreSignals(signals, winRates, niftyRegime, fii3dNet);
+        const sentimentScore = newsSentiment.get(symbol) ?? 0;
+        const score = scoreSignals(signals, winRates, niftyRegime, fii3dNet, sentimentScore);
         if (score < minScore) continue;
 
         // Pre-earnings discount: signals within 5 days of results date are lower quality
@@ -1030,6 +1074,7 @@ export async function runTechnicalSignalScan(options: {
           signalScore: adjustedScore,
           niftyRegime,
           fii3dNet,
+          newsSentimentScore: sentimentScore,
           ...indicators,
         });
       } catch {
@@ -1057,14 +1102,14 @@ export async function runTechnicalSignalScan(options: {
       INSERT INTO technical_signals (
         symbol, date, signals_json, signal_score,
         rsi, sma50, sma200, macd, macd_signal, bb_width, volume_ratio, above_sma200,
-        adx, nifty_regime, fii_3d_net,
+        adx, nifty_regime, fii_3d_net, news_sentiment_score,
         cmp, change_pct,
         ai_insight, entry_zone, stop_loss, targets, setup_quality, time_horizon,
         computed_at
       ) VALUES (
         @symbol, @date, @signals_json, @signal_score,
         @rsi, @sma50, @sma200, @macd, @macd_signal, @bb_width, @volume_ratio, @above_sma200,
-        @adx, @nifty_regime, @fii_3d_net,
+        @adx, @nifty_regime, @fii_3d_net, @news_sentiment_score,
         @cmp, @change_pct,
         @ai_insight, @entry_zone, @stop_loss, @targets, @setup_quality, @time_horizon,
         CURRENT_TIMESTAMP
@@ -1076,6 +1121,7 @@ export async function runTechnicalSignalScan(options: {
         bb_width=excluded.bb_width, volume_ratio=excluded.volume_ratio,
         above_sma200=excluded.above_sma200,
         adx=excluded.adx, nifty_regime=excluded.nifty_regime, fii_3d_net=excluded.fii_3d_net,
+        news_sentiment_score=excluded.news_sentiment_score,
         cmp=excluded.cmp, change_pct=excluded.change_pct,
         ai_insight=excluded.ai_insight, entry_zone=excluded.entry_zone,
         stop_loss=excluded.stop_loss, targets=excluded.targets,
@@ -1096,6 +1142,7 @@ export async function runTechnicalSignalScan(options: {
           adx:          r.adx,
           nifty_regime: r.niftyRegime,
           fii_3d_net:   r.fii3dNet ?? null,
+          news_sentiment_score: r.newsSentimentScore ?? 0,
           cmp: r.cmp, change_pct: r.changePct,
           ai_insight:    r.aiInsight    ?? null,
           entry_zone:    r.entryZone    ?? null,

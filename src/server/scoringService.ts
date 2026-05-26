@@ -35,7 +35,7 @@ export interface FactorBreakdown {
 export async function recalculateScores(): Promise<{ success: boolean; message: string }> {
   try {
     console.log(`🚀 Running AlphaQuant Scoring Engine via FastAPI`);
-    const res = await fetch('http://127.0.0.1:8000/api/v1/score', {
+    const res = await fetch('http://127.0.0.1:8002/api/v1/score', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ rebuild: false })
@@ -65,20 +65,20 @@ export async function syncAndScore(): Promise<{ success: boolean; message: strin
   // Ensure ETnow screeners exist in DB (idempotent — safe to call every time)
   initEtnowScreeners();
 
-  const syncResult = await syncAllScreenerStocksToDB();
+  const syncResult = await syncAllScreenerStocksToDB('long_term');
   if (!syncResult.success) {
     console.error(`Trendlyne sync failed: ${syncResult.error}`);
   }
   
   try {
-    await syncMoneyControlScreeners();
+    await syncMoneyControlScreeners('long_term');
   } catch (err: any) {
     console.error(`MoneyControl sync failed: ${err.message}`);
   }
 
   try {
     const { syncETnowScreeners } = await import('./etnowScreenerSync');
-    await syncETnowScreeners();
+    await syncETnowScreeners('long_term');
   } catch (err: any) {
     console.error(`ETNow sync failed: ${err.message}`);
   }

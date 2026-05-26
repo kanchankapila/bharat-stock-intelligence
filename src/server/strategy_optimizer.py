@@ -28,7 +28,7 @@ warnings.filterwarnings('ignore')
 import numpy as np
 import pandas as pd
 
-DB_PATH = os.path.join(os.getcwd(), 'database.sqlite')
+DB_PATH = os.path.join(os.getcwd(), os.environ.get('DATABASE_URL', 'database.sqlite'))
 
 # Default weights — mirrors scoring_engine.py defaults
 DEFAULT_CATEGORY_WEIGHTS = {
@@ -83,30 +83,27 @@ class StrategyOptimizer:
                    so.outcome, so.return_pct, so.signal_score,
                    sfb.technical, sfb.fundamental, sfb.momentum,
                    sfb.valuation, sfb.delivery, sfb.news,
-                   NULL AS source
+                   ss.source
             FROM signal_outcomes so
             LEFT JOIN stock_factor_breakdown sfb
                    ON sfb.symbol = so.symbol
+            LEFT JOIN (
+                SELECT symbol, source FROM screener_master
+            ) ss ON ss.symbol = so.symbol
             WHERE so.outcome IN ('WIN','LOSS','NEUTRAL')
               AND so.return_pct IS NOT NULL
               AND so.horizon_days = ?
         """
         df = pd.read_sql_query(q, self.conn, params=(horizon_days,))
         for col in CATEGORIES:
-            if col not in df.columns:
-                df[col] = 0.0
-            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+            df[col] = pd.to_numeric(df.get(col, np.nan), errors='coerce').fillna(0)
         return df
 
     # ──────────────────────────────────────────────────────────────────────────
     # Objective function
     # ──────────────────────────────────────────────────────────────────────────
 
-    def _objective(self, params: np.ndarray, df: pd.DataFrame) -> float:
-        """
-        Simulate weighted scores with trial weights, compute objective.
-        Returns negative value (scipy minimises).
-        """
+    def _compute_score(self, params: np.ndarray, df: pd.DataFrame) -> float:
         cat_weights = dict(zip(CATEGORIES, params[:len(CATEGORIES)]))
         src_weights = dict(zip(SOURCES,    params[len(CATEGORIES):]))
 
@@ -115,7 +112,7 @@ class StrategyOptimizer:
         weighted_score = sum(df[c] * cat_weights.get(c, 1.0) for c in cat_cols)
 
         # Source weight modifier — default 1.0 if source unknown
-        src_modifier = df.get('source', pd.Series(['unknown'] * len(df), index=df.index)).map(src_weights).fillna(1.0)
+        src_modifier = df['source'].map(src_weights).fillna(1.0)
         trial_score  = (weighted_score * src_modifier).clip(0, 100)
 
         # Split into quartiles by trial score; evaluate top quartile performance
@@ -123,7 +120,7 @@ class StrategyOptimizer:
         top_signals = df[trial_score >= threshold]
 
         if len(top_signals) < 10:
-            return 1.0  # penalise — insufficient top signals
+            return -1.0  # penalise — insufficient top signals
 
         win_rate      = (top_signals['outcome'] == 'WIN').mean()
         avg_ret       = top_signals['return_pct'].mean()
@@ -139,6 +136,21 @@ class StrategyOptimizer:
         sharpe_norm = min(max(sharpe, 0) / 3.0, 1.0)
 
         objective = 0.5 * win_rate + 0.3 * pf_norm + 0.2 * sharpe_norm
+        return objective
+        
+    def _objective(self, params: np.ndarray, train_df: pd.DataFrame, test_df: pd.DataFrame) -> float:
+        """
+        Simulate weighted scores with trial weights on train/test, compute objective.
+        Returns negative value (scipy minimises).
+        """
+        train_score = self._compute_score(params, train_df)
+        test_score  = self._compute_score(params, test_df)
+        
+        # Penalize if test score diverges significantly from train score (overfitting)
+        overfit_penalty = max(0, train_score - test_score) * 0.5
+        
+        # Weighted average objective
+        objective = 0.7 * train_score + 0.3 * test_score - overfit_penalty
         return -objective  # minimise
 
     def optimise(
@@ -159,10 +171,14 @@ class StrategyOptimizer:
             return {}
 
         print(f"[Optimizer] Optimising on {len(df)} outcome rows  (horizon={horizon_days}d)...")
+        
+        # 80/20 train/test split based on time or random (time-based walk-forward proxy)
+        train_df = df.sample(frac=0.8, random_state=42)
+        test_df = df.drop(train_df.index)
 
         baseline = -self._objective(
             list(DEFAULT_CATEGORY_WEIGHTS.values()) + list(DEFAULT_SOURCE_WEIGHTS.values()),
-            df,
+            train_df, test_df
         )
         print(f"[Optimizer] Baseline objective: {baseline:.4f}")
 
@@ -172,16 +188,16 @@ class StrategyOptimizer:
         result = differential_evolution(
             self._objective,
             bounds=bounds,
-            args=(df,),
+            args=(train_df, test_df),
             maxiter=max_iterations,
             popsize=popsize,
             seed=42,
             tol=1e-6,
             mutation=(0.5, 1.5),
             recombination=0.7,
-            workers=1,  # sqlite3.Connection is not picklable; single-threaded
+            workers=1,  # SQLite connection cannot be pickled to multiple processes easily
             callback=lambda xk, convergence: print(
-                f"[Optimizer]   iter... obj={-self._objective(xk, df):.4f}"
+                f"[Optimizer]   iter... obj={-self._objective(xk, train_df, test_df):.4f}"
             ) if False else None,
         )
 
@@ -230,14 +246,8 @@ class StrategyOptimizer:
                    COUNT(so.symbol) AS appearances,
                    SUM(CASE WHEN so.outcome = 'WIN' THEN 1 ELSE 0 END) AS wins
             FROM screener_master sm
-            JOIN (
-                SELECT screener_id AS scan_id, symbol FROM trendlyne_screener_stocks
-                UNION ALL
-                SELECT scan_id,                symbol FROM moneycontrol_screener_stocks
-                UNION ALL
-                SELECT screener_id AS scan_id, symbol FROM etnow_screener_stocks
-            ) all_stocks ON all_stocks.scan_id = sm.scan_id
-            JOIN signal_outcomes so ON so.symbol = all_stocks.symbol
+            JOIN trendlyne_screener_stocks tss ON tss.screener_id = sm.scan_id
+            JOIN signal_outcomes so ON so.symbol = tss.symbol
             WHERE so.outcome IN ('WIN','LOSS','NEUTRAL')
             GROUP BY sm.scan_id, sm.name
             HAVING appearances >= 10
@@ -295,6 +305,17 @@ class StrategyOptimizer:
             if cur.rowcount > 0:
                 n += 1
         self.conn.commit()
+        
+        import requests
+        try:
+            requests.post("http://127.0.0.1:3000/api/internal/notify", json={
+                "type": "SUCCESS",
+                "title": "Optimization Complete",
+                "message": "Strategy Optimizer finished. Weight overrides applied."
+            }, timeout=2)
+        except:
+            pass
+            
         print(f"[Optimizer] Applied weight_override to {n} screeners in screener_master.")
 
     def apply_to_scoring_engine(self, result: dict):
@@ -354,6 +375,28 @@ class StrategyOptimizer:
             self.apply_screener_overrides(overrides)
 
         print("[Optimizer] Done.")
+        return result
+
+
+from pydantic import BaseModel
+class OptimizeRequest(BaseModel):
+    horizon_days: int = 15
+    iterations: int = 300
+    dry_run: bool = False
+    apply: bool = True
+
+
+def run_optimizer(req: OptimizeRequest):
+    opt = StrategyOptimizer()
+    try:
+        return opt.run(
+            horizon_days=req.horizon_days,
+            max_iterations=req.iterations,
+            dry_run=req.dry_run,
+            apply=req.apply,
+        )
+    finally:
+        opt.close()
 
 
 if __name__ == "__main__":

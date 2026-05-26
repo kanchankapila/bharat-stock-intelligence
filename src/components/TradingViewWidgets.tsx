@@ -9,21 +9,25 @@ export const TickerTapeWidget: React.FC = memo(() => {
 
   useEffect(() => {
     if (!container.current) return;
-    container.current.innerHTML = '';
+    
+    // Clear container and append the target widget container
+    container.current.innerHTML = '<div class="tradingview-widget-container__widget"></div>';
+    
     const script = document.createElement("script");
     script.src = "https://s3.tradingview.com/external-embedding/embed-widget-ticker-tape.js";
     script.type = "text/javascript";
     script.async = true;
     script.innerHTML = JSON.stringify({
       "symbols": [
+        { "proName": "NSE:NIFTY", "title": "NIFTY 50" },
+        { "proName": "NSE:BANKNIFTY", "title": "BANK NIFTY" },
+        { "proName": "NSE:RELIANCE", "title": "RELIANCE" },
+        { "proName": "NSE:HDFCBANK", "title": "HDFC BANK" },
+        { "proName": "NSE:TCS", "title": "TCS" },
         { "proName": "FOREXCOM:SPX500", "title": "S&P 500" },
         { "proName": "FOREXCOM:NSXUSD", "title": "US 100" },
-        { "proName": "FX_IDC:INRUSD", "title": "INR/USD" },
-        { "proName": "BITSTAMP:BTCUSD", "title": "Bitcoin" },
-        { "proName": "NSE:NIFTY", "title": "Nifty 50" },
-        { "proName": "NSE:BANKNIFTY", "title": "Bank Nifty" },
-        { "proName": "NSE:RELIANCE", "title": "Reliance" },
-        { "proName": "NSE:HDFCBANK", "title": "HDFC Bank" }
+        { "proName": "FX_IDC:USDINR", "title": "USD/INR" },
+        { "proName": "BITSTAMP:BTCUSD", "title": "Bitcoin" }
       ],
       "showSymbolLogo": true,
       "colorTheme": "dark",
@@ -32,12 +36,17 @@ export const TickerTapeWidget: React.FC = memo(() => {
       "locale": "in"
     });
     container.current.appendChild(script);
+
+    // Cleanup on unmount to prevent duplicate widgets and script conflicts in React StrictMode
+    return () => {
+      if (container.current) {
+        container.current.innerHTML = '';
+      }
+    };
   }, []);
 
   return (
-    <div className="tradingview-widget-container" ref={container}>
-      <div className="tradingview-widget-container__widget"></div>
-    </div>
+    <div className="tradingview-widget-container w-full" ref={container} />
   );
 });
 
@@ -54,7 +63,9 @@ export const TechnicalAnalysisWidget: React.FC<TechnicalAnalysisWidgetProps> = m
 
   useEffect(() => {
     if (!container.current) return;
-    container.current.innerHTML = '';
+    
+    container.current.innerHTML = '<div class="tradingview-widget-container__widget"></div>';
+    
     const script = document.createElement("script");
     script.src = "https://s3.tradingview.com/external-embedding/embed-widget-technical-analysis.js";
     script.type = "text/javascript";
@@ -70,12 +81,16 @@ export const TechnicalAnalysisWidget: React.FC<TechnicalAnalysisWidgetProps> = m
       "colorTheme": "dark"
     });
     container.current.appendChild(script);
+
+    return () => {
+      if (container.current) {
+        container.current.innerHTML = '';
+      }
+    };
   }, [tvSymbol, height, width]);
 
   return (
-    <div className="tradingview-widget-container" ref={container}>
-      <div className="tradingview-widget-container__widget"></div>
-    </div>
+    <div className="tradingview-widget-container" ref={container} />
   );
 });
 
@@ -85,7 +100,9 @@ export const EconomicCalendarWidget: React.FC = memo(() => {
 
   useEffect(() => {
     if (!container.current) return;
-    container.current.innerHTML = '';
+    
+    container.current.innerHTML = '<div class="tradingview-widget-container__widget"></div>';
+    
     const script = document.createElement("script");
     script.src = "https://s3.tradingview.com/external-embedding/embed-widget-events.js";
     script.type = "text/javascript";
@@ -100,12 +117,16 @@ export const EconomicCalendarWidget: React.FC = memo(() => {
       "currencyFilter": "INR,USD,EUR,GBP"
     });
     container.current.appendChild(script);
+
+    return () => {
+      if (container.current) {
+        container.current.innerHTML = '';
+      }
+    };
   }, []);
 
   return (
-    <div className="tradingview-widget-container" ref={container}>
-      <div className="tradingview-widget-container__widget"></div>
-    </div>
+    <div className="tradingview-widget-container" ref={container} />
   );
 });
 
@@ -115,7 +136,9 @@ export const MarketHeatmapWidget: React.FC = memo(() => {
 
   useEffect(() => {
     if (!container.current) return;
-    container.current.innerHTML = '';
+    
+    container.current.innerHTML = '<div class="tradingview-widget-container__widget"></div>';
+    
     const script = document.createElement("script");
     script.src = "https://s3.tradingview.com/external-embedding/embed-widget-stock-heatmap.js";
     script.type = "text/javascript";
@@ -136,12 +159,16 @@ export const MarketHeatmapWidget: React.FC = memo(() => {
       "height": "600"
     });
     container.current.appendChild(script);
+
+    return () => {
+      if (container.current) {
+        container.current.innerHTML = '';
+      }
+    };
   }, []);
 
   return (
-    <div className="tradingview-widget-container" ref={container}>
-      <div className="tradingview-widget-container__widget"></div>
-    </div>
+    <div className="tradingview-widget-container" ref={container} />
   );
 });
 
@@ -157,13 +184,13 @@ export const AdvancedChartWidget: React.FC<AdvancedChartWidgetProps> = memo(({ s
 
   useEffect(() => {
     if (!container.current) return;
+    
     container.current.innerHTML = '';
-    const script = document.createElement("script");
-    script.src = "https://s3.tradingview.com/tv.js";
-    script.type = "text/javascript";
-    script.async = true;
-    script.onload = () => {
-      if ((window as any).TradingView) {
+    const widgetId = generateId();
+    container.current.id = widgetId;
+
+    const initWidget = () => {
+      if ((window as any).TradingView && container.current) {
         new (window as any).TradingView.widget({
           "width": "100%",
           "height": height,
@@ -177,13 +204,27 @@ export const AdvancedChartWidget: React.FC<AdvancedChartWidgetProps> = memo(({ s
           "enable_publishing": false,
           "hide_side_toolbar": false,
           "allow_symbol_change": true,
-          "container_id": container.current?.id
+          "container_id": widgetId
         });
       }
     };
-    const widgetId = generateId();
-    container.current.id = widgetId;
-    document.head.appendChild(script);
+
+    if ((window as any).TradingView) {
+      initWidget();
+    } else {
+      const script = document.createElement("script");
+      script.src = "https://s3.tradingview.com/tv.js";
+      script.type = "text/javascript";
+      script.async = true;
+      script.onload = initWidget;
+      document.head.appendChild(script);
+    }
+
+    return () => {
+      if (container.current) {
+        container.current.innerHTML = '';
+      }
+    };
   }, [tvSymbol, height]);
 
   return (
@@ -197,7 +238,9 @@ export const MarketOverviewWidget: React.FC = memo(() => {
 
   useEffect(() => {
     if (!container.current) return;
-    container.current.innerHTML = '';
+    
+    container.current.innerHTML = '<div class="tradingview-widget-container__widget"></div>';
+    
     const script = document.createElement("script");
     script.src = "https://s3.tradingview.com/external-embedding/embed-widget-market-overview.js";
     script.type = "text/javascript";
@@ -236,11 +279,15 @@ export const MarketOverviewWidget: React.FC = memo(() => {
       ]
     });
     container.current.appendChild(script);
+
+    return () => {
+      if (container.current) {
+        container.current.innerHTML = '';
+      }
+    };
   }, []);
 
   return (
-    <div className="tradingview-widget-container" ref={container}>
-      <div className="tradingview-widget-container__widget"></div>
-    </div>
+    <div className="tradingview-widget-container" ref={container} />
   );
 });

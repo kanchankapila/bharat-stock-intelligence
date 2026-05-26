@@ -19,7 +19,7 @@ LOSS_THRESHOLD = -1.0   # < -1% = LOSS
 
 def resolve_outcomes(
     conn: sqlite3.Connection,
-    horizon_days: int = 15,
+    horizon_days: int = 1,
     dry_run: bool = False,
 ) -> dict[str, int]:
     """
@@ -82,7 +82,16 @@ def resolve_outcomes(
 
         # PHASE 1 FIX: Entry at next trading day's open
         signal_date_obj = datetime.date.fromisoformat(signal_date)
-        next_trading_day = (signal_date_obj + datetime.timedelta(days=1)).isoformat()
+        
+        # Get actual next trading day from DB
+        next_trading_day_row = conn.execute("""
+            SELECT date FROM stock_ohlcv 
+            WHERE symbol = ? AND date > ? 
+            ORDER BY date ASC LIMIT 1
+        """, (sym, signal_date)).fetchone()
+        
+        next_trading_day = next_trading_day_row[0] if next_trading_day_row else (signal_date_obj + datetime.timedelta(days=1)).isoformat()
+        
         exit_target_date = (signal_date_obj + datetime.timedelta(days=horizon_days)).isoformat()
 
         outcome      = None
@@ -148,19 +157,143 @@ def resolve_outcomes(
     return {'processed': len(rows), 'resolved': resolved}
 
 
-def run(horizon_days: int = 15, dry_run: bool = False):
+def resolve_unified_outcomes(
+    conn: sqlite3.Connection,
+    horizon_days: int = 1,
+    dry_run: bool = False,
+) -> dict[str, int]:
+    """
+    Resolve outcomes for all signal sources (AI, Quant, Technical) from unified_signals.
+    """
+    today = datetime.date.today()
+    cutoff = (today - datetime.timedelta(days=horizon_days)).isoformat()
+
+    pending = conn.execute("""
+        SELECT us.id, us.symbol, us.signal_date, us.entry_price, us.stop_loss, us.signal_source, us.confidence_score
+        FROM unified_signals us
+        WHERE us.signal_date <= ?
+          AND us.status != 'COMPLETED'
+          AND NOT EXISTS (
+              SELECT 1 FROM unified_signal_outcomes uso
+              WHERE uso.unified_signal_id = us.id
+                AND uso.horizon_days = ?
+          )
+        ORDER BY us.signal_date DESC
+        LIMIT 2000
+    """, (cutoff, horizon_days)).fetchall()
+
+    cols = ['id', 'symbol', 'signal_date', 'entry_price', 'stop_loss', 'signal_source', 'confidence_score']
+    rows = [dict(zip(cols, r)) for r in pending]
+
+    if not rows:
+        print(f"[OutcomeResolver] No pending unified signals to resolve (horizon={horizon_days}d).")
+        return {'processed': 0, 'resolved': 0}
+
+    print(f"[OutcomeResolver] {len(rows)} unified signals pending resolution.")
+    resolved = 0
+
+    upsert = """
+        INSERT INTO unified_signal_outcomes
+            (unified_signal_id, signal_source, symbol, signal_date, horizon_days,
+             entry_price, check_date, exit_price, outcome, return_pct, computed_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
+        ON CONFLICT(unified_signal_id, horizon_days) DO UPDATE SET
+            check_date=excluded.check_date, exit_price=excluded.exit_price,
+            outcome=excluded.outcome, return_pct=excluded.return_pct,
+            computed_at=excluded.computed_at
+    """
+
+    for row in rows:
+        uid = row['id']
+        sym = row['symbol']
+        signal_date = row['signal_date']
+        entry = float(row['entry_price'] or 0)
+        stop_loss = float(row['stop_loss']) if row['stop_loss'] else None
+        source = row['signal_source']
+
+        if not entry:
+            continue
+
+        signal_date_obj = datetime.date.fromisoformat(signal_date[:10])
+        next_trading_day_row = conn.execute("""
+            SELECT date FROM stock_ohlcv 
+            WHERE symbol = ? AND date > ? 
+            ORDER BY date ASC LIMIT 1
+        """, (sym, signal_date[:10])).fetchone()
+        
+        next_trading_day = next_trading_day_row[0] if next_trading_day_row else (signal_date_obj + datetime.timedelta(days=1)).isoformat()
+        exit_target_date = (signal_date_obj + datetime.timedelta(days=horizon_days)).isoformat()
+
+        outcome, exit_price, check_date, return_pct = None, None, None, None
+
+        if stop_loss and stop_loss > 0:
+            sl_hit = conn.execute("""
+                SELECT date, low FROM stock_ohlcv
+                WHERE symbol = ? AND date >= ? AND date <= ? AND low <= ?
+                ORDER BY date ASC, low ASC LIMIT 1
+            """, (sym, next_trading_day, exit_target_date, stop_loss)).fetchone()
+
+            if sl_hit:
+                check_date = sl_hit[0]
+                exit_price = float(stop_loss)
+                return_pct = (exit_price - entry) / entry * 100
+                outcome = 'STOP_LOSS'
+
+        if outcome is None:
+            exit_row = conn.execute("""
+                SELECT date, close FROM stock_ohlcv
+                WHERE symbol = ? AND date >= ?
+                ORDER BY date ASC LIMIT 1
+            """, (sym, exit_target_date)).fetchone()
+
+            if exit_row:
+                check_date = exit_row[0]
+                exit_price = float(exit_row[1])
+                return_pct = (exit_price - entry) / entry * 100
+                outcome = ('WIN' if return_pct > WIN_THRESHOLD else
+                           'LOSS' if return_pct < LOSS_THRESHOLD else
+                           'NEUTRAL')
+            else:
+                outcome = 'PENDING'
+
+        if dry_run:
+            msg = f"  [DRY] UNIFIED {sym} {signal_date} (entry:{next_trading_day}) → {outcome}"
+            if return_pct is not None: msg += f" ({return_pct:.2f}%)"
+            print(msg)
+            continue
+
+        conn.execute(upsert, (
+            uid, source, sym, signal_date, horizon_days, entry,
+            check_date, exit_price, outcome,
+            round(return_pct, 4) if return_pct is not None else None,
+        ))
+        
+        if outcome != 'PENDING':
+            conn.execute("UPDATE unified_signals SET status = 'COMPLETED' WHERE id = ?", (uid,))
+            resolved += 1
+
+    if not dry_run:
+        conn.commit()
+
+    print(f"[OutcomeResolver] Resolved {resolved}/{len(rows)} unified signals.")
+    return {'processed': len(rows), 'resolved': resolved}
+
+
+def run(horizon_days: int = 1, dry_run: bool = False):
     if not os.path.exists(DB_PATH):
         raise FileNotFoundError(f"[OutcomeResolver] DB not found: {DB_PATH}. Run from project root.")
     conn = sqlite3.connect(DB_PATH)
     try:
         resolve_outcomes(conn, horizon_days=horizon_days, dry_run=dry_run)
+        resolve_unified_outcomes(conn, horizon_days=horizon_days, dry_run=dry_run)
     finally:
         conn.close()
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--horizon',  type=int, default=15)
+    parser.add_argument('--horizon',  type=int, default=1)
     parser.add_argument('--dry-run',  action='store_true')
     args = parser.parse_args()
     run(horizon_days=args.horizon, dry_run=args.dry_run)
+

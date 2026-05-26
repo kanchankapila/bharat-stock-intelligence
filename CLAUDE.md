@@ -11,11 +11,11 @@ Then load any memory files that are relevant to the current task. This prevents 
 Key memory files:
 - `project_architecture.md` — full system overview, tech stack, API strategies, file layout, DB schema, tRPC procedures. Read this before touching any backend or frontend code.
 - `nse_stocks_implementation.md` — NSE stock database, search, and sector/industry filtering.
-- `ml_feedback_framework.md` — Continuous learning loop: ML engines, RL agent, daily/weekly ops, new DB tables and tRPC endpoints.
+- `ml_feedback_framework.md` — Continuous learning loop: ML engines, RL agent, daily/weekly ops, DB tables, and tRPC endpoints.
 
 ## Project Summary (quick reference)
 
-Real-time Indian stock market intelligence platform (NSE/BSE). Backend: Express + tRPC (`src/server/router.ts`, ~2433 lines, 130+ procedures). Frontend: React 19 + Vite (`src/App.tsx`, ~3704 lines). DB: SQLite (`src/server/db.ts`). Cache: Redis → in-memory fallback (`src/server/cacheService.ts`). Background jobs: BullMQ (`src/server/queues.ts`). AI: Ollama primary, Gemini fallback + 15 Python engines.
+Real-time Indian stock market intelligence platform (NSE/BSE). Backend: Express + tRPC (`src/server/router.ts`, ~2770 lines, 130+ procedures). Frontend: React 19 + Vite (`src/App.tsx`, ~3704 lines). DB: SQLite (`src/server/db.ts`). Cache: Redis → in-memory fallback (`src/server/cacheService.ts`). Background jobs: BullMQ (`src/server/queues.ts`). AI: Ollama primary, Gemini fallback + 15 Python engines.
 
 ## Key File Locations
 
@@ -23,7 +23,7 @@ Real-time Indian stock market intelligence platform (NSE/BSE). Backend: Express 
 src/
   App.tsx                      ← Main app (~3704 lines), layout + all tab routing
   main.tsx                     ← tRPC + React Query setup
-  components/                  ← 36+ React components (see list below)
+  components/                  ← 36+ React components
   services/
     marketService.ts           ← Live stock hook, 5s price polling
     aiService.ts               ← Ollama integration
@@ -35,9 +35,9 @@ src/
   data/
     stocklist.ts               ← 180 stocks with multi-provider mappings
     nseStocks.ts               ← 2000+ NSE master list
-
+    
 src/server/
-  router.ts                    ← ALL 130+ tRPC procedures
+  router.ts                    ← ALL 130+ tRPC procedures (~2770 lines)
   db.ts                        ← SQLite schema (20+ tables)
   cacheService.ts              ← Redis + in-memory fallback cache
   liveStockData.ts             ← Yahoo Finance batch fetching
@@ -79,7 +79,7 @@ src/server/
 
 ## Frontend Tabs / Navigation
 
-App.tsx routes to these tabs: `dashboard`, `trade-cockpit`, `top-rated`, `indices`, `market-map`, `screener`, `fno-scanners`, `smart-money`, `trendlyne`, `discover`, `backtest`, `portfolio`, `watchlist`, `signals`, `sentiment`, `economics`, `strategy`, `todo`.
+`App.tsx` routes to these tabs: `dashboard`, `trade-cockpit`, `top-rated`, `indices`, `market-map`, `screener`, `fno-scanners`, `smart-money`, `trendlyne`, `discover`, `backtest`, `portfolio`, `watchlist`, `signals`, `sentiment`, `economics`, `strategy`, `todo`.
 
 ## React Components (`src/components/`)
 
@@ -161,8 +161,6 @@ python backtester.py --start 2023-01-01
 **ML model artifacts:** `src/server/ml_models/ensemble.pkl`, `src/server/ml_models/online_sgd.pkl` — generated at runtime by `ml_ensemble.py` and `online_learner.py`; directory is created on first training run.
 
 ## Ticker Resolution Strategy
-
-> **Read this before onboarding any new data provider or URL.**
 
 ### Canonical Identifier
 

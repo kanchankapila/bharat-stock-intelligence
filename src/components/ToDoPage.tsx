@@ -10,7 +10,7 @@ import { cn } from '../lib/utils';
 import { format } from 'date-fns';
 
 const Card: React.FC<{ children: React.ReactNode; className?: string }> = ({ children, className }) => (
-  <div className={cn("bg-slate-900/50 border border-slate-800 rounded-2xl overflow-hidden", className)}>
+  <div className={cn("glass/50 border border-slate-800/50 rounded-2xl overflow-hidden", className)}>
     {children}
   </div>
 );
@@ -69,7 +69,7 @@ export const ToDoPage: React.FC = () => {
             <Lightbulb className="w-8 h-8 text-amber-500 fill-amber-500/20" />
             Implementation Ideas
           </h1>
-          <p className="text-slate-500 text-xs font-bold uppercase tracking-widest mt-1">Capture and track future platform enhancements</p>
+          <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mt-1">Capture and track future platform enhancements</p>
         </div>
         <button 
           onClick={() => setIsAdding(!isAdding)}
@@ -88,25 +88,25 @@ export const ToDoPage: React.FC = () => {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
           >
-            <Card className="p-6 bg-slate-900 border-blue-500/30">
+            <Card className="p-6 glass border-blue-500/30">
               <form onSubmit={handleAdd} className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
                   <div className="md:col-span-3">
-                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5 block">Title</label>
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 block">Title</label>
                     <input 
                       type="text"
                       value={newIdea.title}
                       onChange={e => setNewIdea({...newIdea, title: e.target.value})}
                       placeholder="e.g. Implement WebSocket streaming"
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all"
+                      className="w-full glass-strong border border-slate-800/50 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all"
                     />
                   </div>
                   <div className="md:col-span-1.5">
-                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5 block">Priority</label>
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 block">Priority</label>
                     <select 
                       value={newIdea.priority}
                       onChange={e => setNewIdea({...newIdea, priority: e.target.value as any})}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all"
+                      className="w-full glass-strong border border-slate-800/50 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all"
                     >
                       <option value="LOW">Low</option>
                       <option value="MEDIUM">Medium</option>
@@ -114,11 +114,11 @@ export const ToDoPage: React.FC = () => {
                     </select>
                   </div>
                   <div className="md:col-span-1.5">
-                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5 block">Initial Status</label>
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 block">Initial Status</label>
                     <select 
                       value={newIdea.status}
                       onChange={e => setNewIdea({...newIdea, status: e.target.value as any})}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all"
+                      className="w-full glass-strong border border-slate-800/50 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all"
                     >
                       <option value="PENDING">Pending</option>
                       <option value="IN_PROGRESS">In Progress</option>
@@ -127,20 +127,20 @@ export const ToDoPage: React.FC = () => {
                   </div>
                 </div>
                 <div>
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5 block">Description</label>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 block">Description</label>
                   <textarea 
                     value={newIdea.description}
                     onChange={e => setNewIdea({...newIdea, description: e.target.value})}
                     placeholder="Briefly describe the implementation details..."
                     rows={3}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all resize-none"
+                    className="w-full glass-strong border border-slate-800/50 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all resize-none"
                   />
                 </div>
                 <div className="flex justify-end gap-3">
                   <button 
                     type="button"
                     onClick={() => setIsAdding(false)}
-                    className="text-slate-500 hover:text-white px-4 py-2 text-xs font-bold uppercase tracking-widest transition-colors"
+                    className="text-slate-400 hover:text-white px-4 py-2 text-xs font-bold uppercase tracking-widest transition-colors"
                   >
                     Cancel
                   </button>
@@ -168,7 +168,7 @@ export const ToDoPage: React.FC = () => {
               "px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-widest transition-all border whitespace-nowrap",
               filter === f 
                 ? "bg-blue-600 border-blue-500 text-white shadow-lg shadow-blue-500/20" 
-                : "bg-slate-900 border-slate-800 text-slate-500 hover:text-slate-300 hover:border-slate-700"
+                : "glass border-slate-800/50 text-slate-400 hover:text-slate-300 hover:border-slate-800/30"
             )}
           >
             {f.replace('_', ' ')}
@@ -179,7 +179,7 @@ export const ToDoPage: React.FC = () => {
       {/* List */}
       <div className="space-y-4">
         {isLoading ? (
-          [1, 2, 3].map(i => <div key={i} className="h-24 bg-slate-900/50 animate-pulse rounded-2xl border border-slate-800" />)
+          [1, 2, 3].map(i => <div key={i} className="h-24 glass/50 animate-pulse rounded-2xl border border-slate-800/50" />)
         ) : filteredTodos.length > 0 ? (
           filteredTodos.map((todo) => (
             <motion.div
@@ -202,7 +202,7 @@ export const ToDoPage: React.FC = () => {
                     className={cn(
                       "mt-1 p-0.5 rounded-full transition-colors",
                       todo.status === 'COMPLETED' ? "text-emerald-500" : 
-                      todo.status === 'IN_PROGRESS' ? "text-blue-500" : "text-slate-700 hover:text-slate-500"
+                      todo.status === 'IN_PROGRESS' ? "text-blue-500" : "text-slate-300 hover:text-slate-400"
                     )}
                   >
                     {todo.status === 'COMPLETED' ? <CheckCircle2 className="w-5 h-5" /> : 
@@ -215,7 +215,7 @@ export const ToDoPage: React.FC = () => {
                       <div>
                         <h3 className={cn(
                           "text-sm font-black text-white uppercase tracking-tight italic",
-                          todo.status === 'COMPLETED' && "line-through text-slate-500"
+                          todo.status === 'COMPLETED' && "line-through text-slate-400"
                         )}>
                           {todo.title}
                         </h3>
@@ -225,15 +225,15 @@ export const ToDoPage: React.FC = () => {
                       </div>
                       <div className="flex items-center gap-3">
                         <span className={cn(
-                          "text-[9px] font-black px-2 py-0.5 rounded tracking-tighter uppercase",
+                          "text-[10px] font-black px-2 py-0.5 rounded tracking-tighter uppercase",
                           todo.priority === 'HIGH' ? "bg-rose-500/10 text-rose-500" :
-                          todo.priority === 'MEDIUM' ? "bg-amber-500/10 text-amber-500" : "bg-slate-800 text-slate-500"
+                          todo.priority === 'MEDIUM' ? "bg-amber-500/10 text-amber-500" : "bg-slate-800 text-slate-400"
                         )}>
                           {todo.priority}
                         </span>
                         <button 
                           onClick={() => deleteMutation.mutate({ id: todo.id })}
-                          className="opacity-0 group-hover:opacity-100 p-1.5 text-slate-600 hover:text-rose-500 transition-all"
+                          className="opacity-0 group-hover:opacity-100 p-1.5 text-slate-400 hover:text-rose-500 transition-all"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -241,13 +241,13 @@ export const ToDoPage: React.FC = () => {
                     </div>
                     
                     <div className="flex items-center gap-4 mt-3">
-                      <div className="flex items-center gap-1.5 text-slate-600">
+                      <div className="flex items-center gap-1.5 text-slate-400">
                         <Clock className="w-3 h-3" />
-                        <span className="text-[9px] font-bold uppercase tracking-widest">{format(new Date(todo.createdAt), 'MMM dd, HH:mm')}</span>
+                        <span className="text-[10px] font-bold uppercase tracking-widest">{format(new Date(todo.createdAt), 'MMM dd, HH:mm')}</span>
                       </div>
-                      <div className="flex items-center gap-1.5 text-slate-600">
+                      <div className="flex items-center gap-1.5 text-slate-400">
                         <Filter className="w-3 h-3" />
-                        <span className="text-[9px] font-black uppercase tracking-widest italic">{todo.category}</span>
+                        <span className="text-[10px] font-black uppercase tracking-widest italic">{todo.category}</span>
                       </div>
                     </div>
                   </div>
@@ -256,10 +256,10 @@ export const ToDoPage: React.FC = () => {
             </motion.div>
           ))
         ) : (
-          <div className="py-24 flex flex-col items-center justify-center bg-slate-900/20 rounded-3xl border border-slate-800 border-dashed">
-            <Star className="w-12 h-12 text-slate-800 mb-4 animate-pulse" />
+          <div className="py-24 flex flex-col items-center justify-center bg-slate-950/20 rounded-3xl border border-slate-800/50 border-dashed">
+            <Star className="w-12 h-12 text-slate-200 mb-4 animate-pulse" />
             <h3 className="text-slate-400 font-black text-lg uppercase tracking-tighter italic">No ideas found</h3>
-            <p className="text-slate-600 text-[10px] font-bold uppercase tracking-widest mt-1">Start building the roadmap to intelligence</p>
+            <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mt-1">Start building the roadmap to intelligence</p>
           </div>
         )}
       </div>

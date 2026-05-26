@@ -36,6 +36,32 @@ export function updateScreenerNamesInterval(intervalMs: number): void {
   TRENDLYNE_CONFIG.SCREENER_NAMES_INTERVAL_MS = intervalMs;
 }
 
+export function isIntradayScreener(name: string, description: string = ''): boolean {
+  const text = (name + ' ' + (description || '')).toLowerCase();
+  return (
+    text.includes('intraday') ||
+    text.includes('15m') ||
+    text.includes('5m') ||
+    text.includes('15-min') ||
+    text.includes('5-min') ||
+    text.includes('hour') ||
+    text.includes('hourly') ||
+    text.includes('1h') ||
+    text.includes('day trade') ||
+    text.includes('min') ||
+    text.includes('circuit') ||
+    text.includes('btst') ||
+    text.includes('stbt') ||
+    text.includes('breakout') ||
+    text.includes('breakdown') ||
+    text.includes('momentum') ||
+    text.includes('squeeze') ||
+    text.includes('rsi power') ||
+    text.includes('smart breakout') ||
+    text.includes('smart breakdown')
+  );
+}
+
 /**
  * Categorize screener based on its name and description
  */
@@ -48,24 +74,22 @@ export function categorizeScreener(name: string, description: string = ''): {
   
   // 1. Determine Sentiment
   let sentiment: 'bullish' | 'bearish' | 'neutral' = 'neutral';
-  if (text.includes('bullish') || text.includes('buy') || text.includes('breakout') || 
+  // Compound bearish patterns checked first to prevent "momentum trap" → bullish
+  const compoundBearish = /momentum\s*trap|value\s*trap|wealth\s*destroy|low\s*dvm|dvm\s*low|exercise\s*caution|red\s*flag/.test(text);
+  if (compoundBearish || text.includes('bearish') || text.includes('sell') || text.includes('breakdown') ||
+      text.includes('falling') || text.includes('death cross') || text.includes('underperform') ||
+      text.includes('top loser') || text.includes('declining') || text.includes('downtrend') ||
+      text.includes('overbought') || text.includes('caution') || text.includes('avoid')) {
+    sentiment = 'bearish';
+  } else if (text.includes('bullish') || text.includes('buy') || text.includes('breakout') ||
       text.includes('rising') || text.includes('golden cross') || text.includes('outperform') ||
       text.includes('top gainer') || text.includes('gaining') || text.includes('uptrend') ||
-      text.includes('support') || text.includes('oversold')) {
+      text.includes('oversold')) {
     sentiment = 'bullish';
-  } else if (text.includes('bearish') || text.includes('sell') || text.includes('breakdown') || 
-             text.includes('falling') || text.includes('death cross') || text.includes('underperform') ||
-             text.includes('top loser') || text.includes('declining') || text.includes('downtrend') ||
-             text.includes('resistance') || text.includes('overbought')) {
-    sentiment = 'bearish';
   }
 
   // 2. Determine Timeframe
-  let timeframe: 'intraday' | 'long_term' = 'long_term';
-  if (text.includes('intraday') || text.includes('15m') || text.includes('5m') || 
-      text.includes('hour') || text.includes('day trade') || text.includes('min')) {
-    timeframe = 'intraday';
-  }
+  const timeframe = isIntradayScreener(name, description) ? 'intraday' : 'long_term';
 
   // 3. Determine Category
   let category: 'technical' | 'fundamental' | 'valuation' | 'delivery' | 'intraday' | 'momentum' | 'sector' = 'technical';
@@ -627,13 +651,19 @@ export async function fetchTrendlyneScreenerData(
  * Stores screener name -> screenpk mapping in database for one-time fetch
  * @returns Set of unique screener names
  */
-export async function fetchAllTrendlyneScreenerNames(): Promise<Set<string>> {
+export async function fetchAllTrendlyneScreenerNames(forceRefresh = false): Promise<Set<string>> {
   try {
-    // Check if screeners are already in database
-    const existingScreeners = getAllScreenersFromDB();
-    if (existingScreeners.length > 0) {
-      console.log(`✅ Using ${existingScreeners.length} screeners from database (previously fetched)`);
-      return new Set(existingScreeners.map(s => s.screener_name));
+    // Return cached screeners unless a forced refresh is requested
+    if (!forceRefresh) {
+      const existingScreeners = getAllScreenersFromDB();
+      if (existingScreeners.length > 0) {
+        console.log(`✅ Using ${existingScreeners.length} screeners from database (previously fetched)`);
+        return new Set(existingScreeners.map(s => s.screener_name));
+      }
+    } else {
+      // Clear existing screeners so the full discovery re-runs
+      db.prepare('DELETE FROM trendlyne_screeners').run();
+      console.log('🔄 Force-refreshing Trendlyne screeners — cleared existing DB entries');
     }
 
     // Get stock IDs from the hardcoded list (fallback to existing data)
@@ -867,19 +897,25 @@ export async function getTrendlyneScreenerList() {
 function determineSentiment(screenerName: string): 'bullish' | 'bearish' | 'neutral' {
   const name = screenerName.toLowerCase();
 
+  // Compound bearish patterns first to prevent "momentum trap" → bullish
+  if (/momentum\s*trap|value\s*trap|wealth\s*destroy|low\s*dvm|dvm\s*low|exercise\s*caution/.test(name)) {
+    return 'bearish';
+  }
+
+  // Bearish indicators
+  if (name.includes('bearish') || name.includes('sell') || name.includes('breakdown') ||
+      name.includes('underperform') || name.includes('falling') || name.includes('declining') ||
+      name.includes('negative') || name.includes('below') || name.includes('crossed below') ||
+      name.includes('caution') || name.includes('avoid') || name.includes('weak')) {
+    return 'bearish';
+  }
+
   // Bullish indicators
   if (name.includes('bullish') || name.includes('buy') || name.includes('breakout') ||
       name.includes('outperform') || name.includes('rising') || name.includes('gaining') ||
       name.includes('high momentum') || name.includes('high growth') || name.includes('top gainers') ||
       name.includes('increasing') || name.includes('above') || name.includes('crossed above')) {
     return 'bullish';
-  }
-
-  // Bearish indicators
-  if (name.includes('bearish') || name.includes('sell') || name.includes('breakdown') ||
-      name.includes('underperform') || name.includes('falling') || name.includes('declining') ||
-      name.includes('negative') || name.includes('below') || name.includes('crossed below')) {
-    return 'bearish';
   }
 
   // Default to neutral
@@ -950,15 +986,19 @@ export function findScreenersByStock(stockId: string): Array<{
 /**
  * Synchronize all screener constituents to the database
  */
-export async function syncAllScreenerStocksToDB() {
+export async function syncAllScreenerStocksToDB(timeframeFilter?: 'intraday' | 'long_term') {
   try {
-    console.log('🔄 Starting full Trendlyne screener synchronization...');
+    console.log(`🔄 Starting Trendlyne screener synchronization (filter: ${timeframeFilter || 'all'})...`);
     
     // 1. Ensure we have screeners in the DB
     let screeners = getAllScreenersFromDB();
     if (screeners.length === 0) {
       await fetchAllTrendlyneScreenerNames();
       screeners = getAllScreenersFromDB();
+    }
+    
+    if (timeframeFilter) {
+      screeners = screeners.filter(s => s.timeframe === timeframeFilter);
     }
     
     console.log(`📊 Found ${screeners.length} screeners to sync`);

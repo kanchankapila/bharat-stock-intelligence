@@ -83,7 +83,24 @@ export function syncNSEStocksToDatabase(): { success: boolean; message: string; 
 export function getAllNSEStocksFromDB(): NSEStockRow[] {
   try {
     const rows = db.prepare(`
-      SELECT * FROM nse_stocks WHERE status = 'ACTIVE' ORDER BY symbol ASC
+      SELECT 
+        n.id, 
+        n.symbol, 
+        n.name, 
+        n.sector, 
+        n.industry, 
+        n.isin, 
+        n.listing_date, 
+        n.exchange, 
+        n.status, 
+        COALESCE(f.market_cap, n.market_cap) as market_cap, 
+        COALESCE(f.trailing_pe, n.pe_ratio) as pe_ratio, 
+        COALESCE(f.dividend_yield, n.dividend_yield) as dividend_yield, 
+        n.last_updated
+      FROM nse_stocks n
+      LEFT JOIN stock_fundamentals f ON n.symbol = f.symbol
+      WHERE n.status = 'ACTIVE' 
+      ORDER BY n.symbol ASC
     `).all() as NSEStockRow[];
     return rows;
   } catch (error) {
@@ -96,7 +113,23 @@ export function getAllNSEStocksFromDB(): NSEStockRow[] {
 export function getNSEStockFromDB(symbol: string): NSEStockRow | undefined {
   try {
     const row = db.prepare(`
-      SELECT * FROM nse_stocks WHERE symbol = ? AND status = 'ACTIVE'
+      SELECT 
+        n.id, 
+        n.symbol, 
+        n.name, 
+        n.sector, 
+        n.industry, 
+        n.isin, 
+        n.listing_date, 
+        n.exchange, 
+        n.status, 
+        COALESCE(f.market_cap, n.market_cap) as market_cap, 
+        COALESCE(f.trailing_pe, n.pe_ratio) as pe_ratio, 
+        COALESCE(f.dividend_yield, n.dividend_yield) as dividend_yield, 
+        n.last_updated
+      FROM nse_stocks n
+      LEFT JOIN stock_fundamentals f ON n.symbol = f.symbol
+      WHERE n.symbol = ? AND n.status = 'ACTIVE'
     `).get(symbol) as NSEStockRow | undefined;
     return row;
   } catch (error) {
@@ -110,14 +143,29 @@ export function searchNSEStocksFromDB(query: string): NSEStockRow[] {
   try {
     const q = `%${query}%`;
     const rows = db.prepare(`
-      SELECT * FROM nse_stocks
-      WHERE status = 'ACTIVE' AND (
-        symbol LIKE ? OR
-        name LIKE ? OR
-        sector LIKE ? OR
-        industry LIKE ?
+      SELECT 
+        n.id, 
+        n.symbol, 
+        n.name, 
+        n.sector, 
+        n.industry, 
+        n.isin, 
+        n.listing_date, 
+        n.exchange, 
+        n.status, 
+        COALESCE(f.market_cap, n.market_cap) as market_cap, 
+        COALESCE(f.trailing_pe, n.pe_ratio) as pe_ratio, 
+        COALESCE(f.dividend_yield, n.dividend_yield) as dividend_yield, 
+        n.last_updated
+      FROM nse_stocks n
+      LEFT JOIN stock_fundamentals f ON n.symbol = f.symbol
+      WHERE n.status = 'ACTIVE' AND (
+        n.symbol LIKE ? OR
+        n.name LIKE ? OR
+        n.sector LIKE ? OR
+        n.industry LIKE ?
       )
-      ORDER BY symbol ASC
+      ORDER BY n.symbol ASC
       LIMIT 100
     `).all(q, q, q, q) as NSEStockRow[];
     return rows;
@@ -131,9 +179,24 @@ export function searchNSEStocksFromDB(query: string): NSEStockRow[] {
 export function getNSEStocksBySectorFromDB(sector: string): NSEStockRow[] {
   try {
     const rows = db.prepare(`
-      SELECT * FROM nse_stocks
-      WHERE status = 'ACTIVE' AND sector = ?
-      ORDER BY symbol ASC
+      SELECT 
+        n.id, 
+        n.symbol, 
+        n.name, 
+        n.sector, 
+        n.industry, 
+        n.isin, 
+        n.listing_date, 
+        n.exchange, 
+        n.status, 
+        COALESCE(f.market_cap, n.market_cap) as market_cap, 
+        COALESCE(f.trailing_pe, n.pe_ratio) as pe_ratio, 
+        COALESCE(f.dividend_yield, n.dividend_yield) as dividend_yield, 
+        n.last_updated
+      FROM nse_stocks n
+      LEFT JOIN stock_fundamentals f ON n.symbol = f.symbol
+      WHERE n.status = 'ACTIVE' AND n.sector = ?
+      ORDER BY market_cap DESC
     `).all(sector) as NSEStockRow[];
     return rows;
   } catch (error) {
@@ -146,9 +209,24 @@ export function getNSEStocksBySectorFromDB(sector: string): NSEStockRow[] {
 export function getNSEStocksByIndustryFromDB(industry: string): NSEStockRow[] {
   try {
     const rows = db.prepare(`
-      SELECT * FROM nse_stocks
-      WHERE status = 'ACTIVE' AND industry = ?
-      ORDER BY symbol ASC
+      SELECT 
+        n.id, 
+        n.symbol, 
+        n.name, 
+        n.sector, 
+        n.industry, 
+        n.isin, 
+        n.listing_date, 
+        n.exchange, 
+        n.status, 
+        COALESCE(f.market_cap, n.market_cap) as market_cap, 
+        COALESCE(f.trailing_pe, n.pe_ratio) as pe_ratio, 
+        COALESCE(f.dividend_yield, n.dividend_yield) as dividend_yield, 
+        n.last_updated
+      FROM nse_stocks n
+      LEFT JOIN stock_fundamentals f ON n.symbol = f.symbol
+      WHERE n.status = 'ACTIVE' AND n.industry = ?
+      ORDER BY market_cap DESC
     `).all(industry) as NSEStockRow[];
     return rows;
   } catch (error) {

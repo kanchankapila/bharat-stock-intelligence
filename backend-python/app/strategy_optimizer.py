@@ -103,11 +103,7 @@ class StrategyOptimizer:
     # Objective function
     # ──────────────────────────────────────────────────────────────────────────
 
-    def _objective(self, params: np.ndarray, df: pd.DataFrame) -> float:
-        """
-        Simulate weighted scores with trial weights, compute objective.
-        Returns negative value (scipy minimises).
-        """
+    def _compute_score(self, params: np.ndarray, df: pd.DataFrame) -> float:
         cat_weights = dict(zip(CATEGORIES, params[:len(CATEGORIES)]))
         src_weights = dict(zip(SOURCES,    params[len(CATEGORIES):]))
 
@@ -124,7 +120,7 @@ class StrategyOptimizer:
         top_signals = df[trial_score >= threshold]
 
         if len(top_signals) < 10:
-            return 1.0  # penalise — insufficient top signals
+            return -1.0  # penalise — insufficient top signals
 
         win_rate      = (top_signals['outcome'] == 'WIN').mean()
         avg_ret       = top_signals['return_pct'].mean()
@@ -140,6 +136,21 @@ class StrategyOptimizer:
         sharpe_norm = min(max(sharpe, 0) / 3.0, 1.0)
 
         objective = 0.5 * win_rate + 0.3 * pf_norm + 0.2 * sharpe_norm
+        return objective
+        
+    def _objective(self, params: np.ndarray, train_df: pd.DataFrame, test_df: pd.DataFrame) -> float:
+        """
+        Simulate weighted scores with trial weights on train/test, compute objective.
+        Returns negative value (scipy minimises).
+        """
+        train_score = self._compute_score(params, train_df)
+        test_score  = self._compute_score(params, test_df)
+        
+        # Penalize if test score diverges significantly from train score (overfitting)
+        overfit_penalty = max(0, train_score - test_score) * 0.5
+        
+        # Weighted average objective
+        objective = 0.7 * train_score + 0.3 * test_score - overfit_penalty
         return -objective  # minimise
 
     def optimise(
@@ -160,10 +171,15 @@ class StrategyOptimizer:
             return {}
 
         print(f"[Optimizer] Optimising on {len(df)} outcome rows  (horizon={horizon_days}d)...")
+        
+        # 80/20 train/test split based on time or random (time-based walk-forward proxy)
+        # Using random sample for now, but ordered walk-forward is better
+        train_df = df.sample(frac=0.8, random_state=42)
+        test_df = df.drop(train_df.index)
 
         baseline = -self._objective(
             list(DEFAULT_CATEGORY_WEIGHTS.values()) + list(DEFAULT_SOURCE_WEIGHTS.values()),
-            df,
+            train_df, test_df
         )
         print(f"[Optimizer] Baseline objective: {baseline:.4f}")
 
@@ -173,7 +189,7 @@ class StrategyOptimizer:
         result = differential_evolution(
             self._objective,
             bounds=bounds,
-            args=(df,),
+            args=(train_df, test_df),
             maxiter=max_iterations,
             popsize=popsize,
             seed=42,
@@ -182,7 +198,7 @@ class StrategyOptimizer:
             recombination=0.7,
             workers=-1,  # parallel evaluation
             callback=lambda xk, convergence: print(
-                f"[Optimizer]   iter... obj={-self._objective(xk, df):.4f}"
+                f"[Optimizer]   iter... obj={-self._objective(xk, train_df, test_df):.4f}"
             ) if False else None,
         )
 

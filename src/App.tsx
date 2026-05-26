@@ -62,6 +62,7 @@ import DashboardPage from './components/DashboardPage';
 import SuperstarPortfolio from './components/SuperstarPortfolio';
 import { SentimentIntelligence } from './components/SentimentIntelligence';
 import { AppShell } from './components/AppShell';
+import { SlideOutDrawer } from './components/SlideOutDrawer';
 import PremarketPanel from './components/PremarketPanel';
 import SmartMoneyPage from './components/SmartMoneyPage';
 import EarningsPage from './components/EarningsPage';
@@ -90,10 +91,10 @@ class MCErrorBoundary extends React.Component<
   render() {
     if (this.state.hasError) {
       return (
-        <div className="p-8 text-center bg-slate-900/30 border border-slate-800 rounded-2xl">
+        <div className="p-8 text-center bg-slate-950/30 border border-slate-800/50 rounded-2xl">
           <AlertCircle className="w-8 h-8 text-rose-500 mx-auto mb-3" />
           <p className="text-sm text-slate-400 font-bold">MC Intelligence failed to render</p>
-          <p className="text-[10px] text-slate-600 mt-1">{this.state.message}</p>
+          <p className="text-[10px] text-slate-400 mt-1">{this.state.message}</p>
         </div>
       );
     }
@@ -125,12 +126,12 @@ const IndexBar: React.FC<IndexBarProps> = ({ name, value, change, isUp, onClick 
   <div 
     onClick={onClick}
     className={cn(
-      "flex items-center gap-3 px-4 py-2 border-r border-slate-800 last:border-0 min-w-fit select-none",
+      "flex items-center gap-3 px-4 py-2 border-r border-slate-800/50 last:border-0 min-w-fit select-none",
       onClick ? "cursor-pointer hover:bg-slate-800/40 transition-colors" : ""
     )}
   >
     <span className="text-slate-400 font-medium text-xs tracking-wider uppercase">{name}</span>
-    <span className="text-white font-bold tabular-nums">{value.toLocaleString()}</span>
+    <span className="text-slate-200 font-bold tabular-nums">{value.toLocaleString()}</span>
     <div className={cn(
       "flex items-center text-xs font-semibold",
       isUp ? "text-emerald-400" : "text-rose-400"
@@ -168,25 +169,25 @@ const SignalHistoryModal: React.FC<{ symbol: string; onClose: () => void }> = ({
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
         onClick={onClose}
-        className="absolute inset-0 bg-slate-950/90 backdrop-blur-md"
+        className="absolute inset-0 glass-strong/90 backdrop-blur-md"
       />
       <motion.div 
         initial={{ opacity: 0, scale: 0.95, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.95, y: 20 }}
-        className="relative w-full max-w-3xl bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl flex flex-col max-h-[85vh]"
+        className="relative w-full max-w-3xl glass border border-slate-800/50 rounded-3xl overflow-hidden shadow-2xl flex flex-col max-h-[85vh]"
       >
-        <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-900/50 backdrop-blur-xl">
+        <div className="p-6 border-b border-slate-800/50 flex justify-between items-center glass/50 backdrop-blur-xl">
            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-slate-950 border border-slate-800 rounded-xl flex items-center justify-center">
+              <div className="w-10 h-10 glass-strong border border-slate-800/50 rounded-xl flex items-center justify-center">
                  <History className="w-5 h-5 text-blue-500" />
               </div>
               <div>
-                <h3 className="text-xl font-black text-white italic tracking-tighter uppercase">{symbol} Signal History</h3>
-                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-0.5">Historical AI Performance Tracking</p>
+                <h3 className="text-xl font-black text-slate-200 italic tracking-tighter uppercase">{symbol} Signal History</h3>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">Historical AI Performance Tracking</p>
               </div>
            </div>
-           <button onClick={onClose} className="p-2 text-slate-500 hover:text-white transition-colors">
+           <button onClick={onClose} className="p-2 text-slate-400 hover:text-white transition-colors">
               <Plus className="w-6 h-6 rotate-45" />
            </button>
         </div>
@@ -195,12 +196,12 @@ const SignalHistoryModal: React.FC<{ symbol: string; onClose: () => void }> = ({
            {isLoading ? (
              <div className="py-20 flex flex-col items-center justify-center">
                 <Activity className="w-10 h-10 text-blue-500/20 animate-pulse mb-4" />
-                <p className="text-slate-500 text-xs font-bold uppercase tracking-widest animate-pulse">Syncing with history logs...</p>
+                <p className="text-slate-400 text-xs font-bold uppercase tracking-widest animate-pulse">Syncing with history logs...</p>
              </div>
            ) : history && history.length > 0 ? (
              <div className="space-y-4">
                {history.map((sig: any) => (
-                 <div key={sig.id} className="p-4 bg-slate-950 rounded-2xl border border-slate-800/50 hover:border-slate-700 transition-all flex flex-col gap-4 group">
+                 <div key={sig.id} className="p-4 glass-strong rounded-2xl border border-slate-800/30 hover:border-slate-800/30 transition-all flex flex-col gap-4 group">
                     <div className="flex justify-between items-start">
                        <div className="flex items-center gap-3">
                           <div className={cn(
@@ -210,7 +211,7 @@ const SignalHistoryModal: React.FC<{ symbol: string; onClose: () => void }> = ({
                             {sig.type}
                           </div>
                           <div>
-                            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-0.5">
+                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">
                               {sig.createdAt?.seconds ? format(new Date(sig.createdAt.seconds * 1000), 'MMM dd, HH:mm') : 'Recent'}
                             </p>
                             <p className="text-xs text-white/70 italic line-clamp-1">"{sig.reasoning || sig.summary}"</p>
@@ -236,30 +237,30 @@ const SignalHistoryModal: React.FC<{ symbol: string; onClose: () => void }> = ({
                     </div>
 
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                       <div className="bg-slate-900/50 p-2 rounded-xl border border-slate-800/50 text-center">
-                          <span className="text-[8px] font-black text-slate-500 uppercase block tracking-widest mb-0.5">Entry</span>
-                          <span className="text-xs font-black text-white">₹{sig.entry}</span>
+                       <div className="glass/50 p-2 rounded-xl border border-slate-800/30 text-center">
+                          <span className="text-[8px] font-black text-slate-400 uppercase block tracking-widest mb-0.5">Entry</span>
+                          <span className="text-xs font-black text-slate-100">₹{sig.entry}</span>
                        </div>
-                       <div className="bg-slate-900/50 p-2 rounded-xl border border-slate-800/50 text-center">
+                       <div className="glass/50 p-2 rounded-xl border border-slate-800/30 text-center">
                           <span className="text-[8px] font-black text-blue-500 uppercase block tracking-widest mb-0.5">Target</span>
-                          <span className="text-xs font-black text-white">₹{sig.target}</span>
+                          <span className="text-xs font-black text-slate-100">₹{sig.target}</span>
                        </div>
-                       <div className="bg-slate-900/50 p-2 rounded-xl border border-slate-800/50 text-center">
+                       <div className="glass/50 p-2 rounded-xl border border-slate-800/30 text-center">
                           <span className="text-[8px] font-black text-rose-500 uppercase block tracking-widest mb-0.5">Exit Price</span>
-                          <span className="text-xs font-black text-white">
+                          <span className="text-xs font-black text-slate-100">
                              {sig.status === 'ACTIVE' ? (
-                               <span className="text-slate-600 italic">Pending</span>
+                               <span className="text-slate-400 italic">Pending</span>
                              ) : (
                                `₹${sig.exitPrice || (sig.result === 'PROFIT' ? sig.target : sig.stopLoss)}`
                              )}
                           </span>
                        </div>
-                       <div className="bg-slate-900/50 p-2 rounded-xl border border-slate-800/50 text-center">
+                       <div className="glass/50 p-2 rounded-xl border border-slate-800/30 text-center">
                           <span className="text-[8px] font-black text-amber-500 uppercase block tracking-widest mb-0.5">Outcome</span>
                           <span className={cn(
                              "text-[10px] font-black uppercase tracking-tighter",
                              sig.result === 'PROFIT' ? "text-emerald-400" : 
-                             sig.result === 'LOSS' ? "text-rose-400" : "text-slate-500"
+                             sig.result === 'LOSS' ? "text-rose-400" : "text-slate-400"
                           )}>
                              {sig.result ? sig.result : (sig.status === 'ACTIVE' ? 'Running' : 'Closed')}
                           </span>
@@ -270,9 +271,9 @@ const SignalHistoryModal: React.FC<{ symbol: string; onClose: () => void }> = ({
              </div>
            ) : (
              <div className="py-20 flex flex-col items-center justify-center opacity-50">
-                <Zap className="w-12 h-12 text-slate-800 mb-4" />
-                <p className="text-slate-600 font-black text-lg uppercase italic tracking-tighter">No historical signals found</p>
-                <p className="text-slate-500 text-[10px] uppercase font-bold tracking-widest mt-2 text-center">This asset hasn't been significantly tracked by AI yet.</p>
+                <Zap className="w-12 h-12 text-slate-200 mb-4" />
+                <p className="text-slate-400 font-black text-lg uppercase italic tracking-tighter">No historical signals found</p>
+                <p className="text-slate-400 text-[10px] uppercase font-bold tracking-widest mt-2 text-center">This asset hasn't been significantly tracked by AI yet.</p>
              </div>
            )}
         </div>
@@ -454,17 +455,17 @@ const Dashboard: React.FC<{
               )}
             </ResponsiveContainer>
           </div>
-          <div className="flex justify-between items-center mt-6 p-4 bg-slate-950 rounded-xl border border-slate-800">
+          <div className="flex justify-between items-center mt-6 p-4 glass-strong rounded-xl border border-slate-800/50">
             <div>
-              <p className="text-slate-500 text-xs font-bold uppercase tracking-widest">Nifty 50 Rank</p>
-              <p className="text-xl font-black text-white">22,453.20</p>
+              <p className="text-slate-400 text-xs font-bold uppercase tracking-widest">Nifty 50 Rank</p>
+              <p className="text-xl font-black text-slate-100">22,453.20</p>
             </div>
             <div className="text-right">
-              <p className="text-slate-500 text-xs font-bold uppercase tracking-widest">Day Range</p>
+              <p className="text-slate-400 text-xs font-bold uppercase tracking-widest">Day Range</p>
               <div className="w-32 h-1.5 bg-slate-800 rounded-full mt-2 relative">
                  <div className="absolute left-[40%] w-2 h-2 -top-0.5 bg-blue-500 rounded-full shadow-[0_0_8px_rgba(59,130,246,0.8)]" />
               </div>
-              <div className="flex justify-between text-[10px] text-slate-500 mt-1 font-bold">
+              <div className="flex justify-between text-[10px] text-slate-400 mt-1 font-bold">
                 <span>22,380</span>
                 <span>22,510</span>
               </div>
@@ -479,34 +480,34 @@ const Dashboard: React.FC<{
                   <div 
                     key={`${signal.symbol}-${idx}`} 
                     onClick={() => onSelectStock(signal.symbol)}
-                    className="p-4 bg-slate-950 rounded-2xl border border-slate-800 flex flex-col gap-4 hover:border-slate-700 transition-all cursor-pointer group relative overflow-hidden"
+                    className="p-4 glass-strong rounded-2xl border border-slate-800/50 flex flex-col gap-4 hover:border-slate-800/30 transition-all cursor-pointer group relative overflow-hidden"
                   >
                     <div className="flex justify-between items-start relative z-10">
                       <div>
                         <div className="flex items-center gap-2">
-                          <span className="text-sm font-black text-white italic tracking-tighter uppercase">{signal.symbol}</span>
+                          <span className="text-sm font-black text-slate-100 italic tracking-tighter uppercase">{signal.symbol}</span>
                           <div className={cn(
                             "px-2 py-0.5 rounded text-[8px] font-black tracking-widest uppercase",
                             signal.signal === 'BUY' ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20" : 
-                            signal.signal === 'SELL' ? "bg-rose-500/10 text-rose-500 border border-rose-500/20" : "bg-slate-500/10 text-slate-500 border border-slate-500/20"
+                            signal.signal === 'SELL' ? "bg-rose-500/10 text-rose-500 border border-rose-500/20" : "bg-slate-9000/10 text-slate-400 border border-slate-500/20"
                           )}>
                             {signal.signal} Signal
                           </div>
                         </div>
-                        <p className="text-[10px] text-slate-500 mt-1 italic line-clamp-1 leading-relaxed">
+                        <p className="text-[10px] text-slate-400 mt-1 italic line-clamp-1 leading-relaxed">
                           {signal.reasoning}
                         </p>
                       </div>
                       <div className="text-right">
-                        <div className="text-[10px] font-black text-white tracking-widest mb-1">{signal.confidence}% <span className="text-slate-500">CONF.</span></div>
-                        <div className="w-16 h-1 bg-slate-900 rounded-full overflow-hidden border border-slate-800 ml-auto">
+                        <div className="text-[10px] font-black text-slate-200 tracking-widest mb-1">{signal.confidence}% <span className="text-slate-400">CONF.</span></div>
+                        <div className="w-16 h-1 glass rounded-full overflow-hidden border border-slate-800/50 ml-auto">
                           <motion.div 
                             initial={{ width: 0 }}
                             animate={{ width: `${signal.confidence}%` }}
                             className={cn(
                               "h-full",
                               signal.signal === 'BUY' ? "bg-emerald-500" : 
-                              signal.signal === 'SELL' ? "bg-rose-500" : "bg-slate-500"
+                              signal.signal === 'SELL' ? "bg-rose-500" : "bg-slate-9000"
                             )}
                           />
                         </div>
@@ -534,9 +535,9 @@ const Dashboard: React.FC<{
                       </ResponsiveContainer>
                     </div>
 
-                    <div className="flex justify-between items-center text-[9px] font-black uppercase tracking-widest text-slate-500 border-t border-slate-900 pt-3">
+                    <div className="flex justify-between items-center text-[9px] font-black uppercase tracking-widest text-slate-400 border-t border-slate-900 pt-3">
                       <div className="flex gap-4">
-                        <span>Entry: <span className="text-white">₹{signal.entry}</span></span>
+                        <span>Entry: <span className="text-slate-200 font-bold">₹{signal.entry}</span></span>
                       </div>
                       <div className="flex gap-2">
                         <button 
@@ -544,7 +545,7 @@ const Dashboard: React.FC<{
                             e.stopPropagation();
                             setHistorySymbol(signal.symbol);
                           }}
-                          className="px-3 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-lg text-slate-400 hover:text-white flex items-center gap-1.5 transition-all group/hist shadow-lg"
+                          className="px-3 py-1 glass hover:bg-slate-800 border border-slate-800/50 rounded-lg text-slate-400 hover:text-white flex items-center gap-1.5 transition-all group/hist shadow-lg"
                         >
                           <History className="w-3 h-3 group-hover/hist:rotate-[-45deg] transition-transform text-blue-500" /> 
                           History
@@ -564,13 +565,13 @@ const Dashboard: React.FC<{
                 )) : (
                   <div className="flex-1 flex flex-col items-center justify-center min-h-[400px]">
                      <Activity className="w-12 h-12 text-blue-500/20 animate-pulse mb-4" />
-                     <p className="text-slate-500 text-xs font-black uppercase tracking-[0.2em] text-center">AI Intelligence Engine<br/><span className="text-[10px] text-blue-500/50">Analyzing Market Cycles...</span></p>
+                     <p className="text-slate-400 text-xs font-black uppercase tracking-[0.2em] text-center">AI Intelligence Engine<br/><span className="text-[10px] text-blue-500/50">Analyzing Market Cycles...</span></p>
                   </div>
                 )}
              </div>
              {isGenerating && queueProgress && queueProgress.total > 0 && (
                <div className="mt-3 space-y-1">
-                 <div className="flex justify-between text-[9px] font-black text-slate-500 uppercase tracking-widest">
+                 <div className="flex justify-between text-[9px] font-black text-slate-400 uppercase tracking-widest">
                    <span>Progress</span>
                    <span>{queueProgress.completed} / {queueProgress.total}</span>
                  </div>
@@ -586,8 +587,8 @@ const Dashboard: React.FC<{
                 onClick={handleGenerateSignals}
                 disabled={isGenerating}
                 className={cn(
-                    "w-full mt-4 py-2 border border-slate-800 rounded-xl text-[10px] font-black transition-all uppercase tracking-widest flex items-center justify-center gap-2",
-                    isGenerating ? "bg-slate-900 border-slate-800 text-slate-600 cursor-not-allowed" : "text-blue-500 hover:text-white hover:bg-blue-600 hover:border-blue-600"
+                    "w-full mt-4 py-2 border border-slate-800/50 rounded-xl text-[10px] font-black transition-all uppercase tracking-widest flex items-center justify-center gap-2",
+                    isGenerating ? "glass border-slate-800/50 text-slate-400 cursor-not-allowed" : "text-blue-500 hover:text-white hover:bg-blue-600 hover:border-blue-600"
                 )}
              >
                 {isGenerating ? 'Analyzing...' : 'Generate Signals'}
@@ -597,20 +598,20 @@ const Dashboard: React.FC<{
           <Card title="Signal Performance" icon={TrendingUp} className="h-full">
              <div className="flex flex-col items-center justify-center h-full py-8">
                 <div className="text-5xl font-black text-emerald-500 mb-2 italic">84%</div>
-                <p className="text-slate-500 text-[10px] font-black uppercase tracking-widest">Historical Win Rate</p>
-                <div className="w-full h-1 bg-slate-900 rounded-full mt-8 overflow-hidden">
+                <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest">Historical Win Rate</p>
+                <div className="w-full h-1 glass rounded-full mt-8 overflow-hidden">
                    <div className="h-full bg-emerald-500 w-[84%]" />
                 </div>
-                <p className="text-[10px] text-slate-600 mt-6 italic font-medium text-center leading-relaxed">
+                <p className="text-[10px] text-slate-400 mt-6 italic font-medium text-center leading-relaxed">
                   Based on backtested machine learning models for the current Nifty cycle.
                 </p>
                 <div className="grid grid-cols-2 gap-4 w-full mt-8">
-                   <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 text-center">
-                      <p className="text-[8px] font-black text-slate-500 uppercase mb-1">Total Signals</p>
-                      <p className="text-lg font-black text-white italic">1,240</p>
+                   <div className="p-3 glass-strong rounded-xl border border-slate-800/50 text-center">
+                      <p className="text-[8px] font-black text-slate-400 uppercase mb-1">Total Signals</p>
+                      <p className="text-lg font-black text-slate-100 italic">1,240</p>
                    </div>
-                   <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 text-center">
-                      <p className="text-[8px] font-black text-slate-500 uppercase mb-1">Avg Profit</p>
+                   <div className="p-3 glass-strong rounded-xl border border-slate-800/50 text-center">
+                      <p className="text-[8px] font-black text-slate-400 uppercase mb-1">Avg Profit</p>
                       <p className="text-lg font-black text-emerald-500 italic">+4.2%</p>
                    </div>
                 </div>
@@ -637,7 +638,7 @@ const Dashboard: React.FC<{
                     />
                 ))}
             </div>
-            <div className="flex justify-between text-[10px] font-bold text-slate-500 mt-2">
+            <div className="flex justify-between text-[10px] font-bold text-slate-400 mt-2">
                 <span>BEARISH</span>
                 <span>BULLISH</span>
             </div>
@@ -651,7 +652,7 @@ const Dashboard: React.FC<{
                         onClick={() => setNewsFilter(cat)}
                         className={cn(
                             "px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-tighter border transition-all shrink-0",
-                            newsFilter === cat ? "bg-blue-600 border-blue-600 text-white" : "bg-slate-950 border-slate-800 text-slate-500 hover:text-white"
+                            newsFilter === cat ? "bg-blue-600 border-blue-600 text-white" : "glass-strong border-slate-800/50 text-slate-400 hover:text-white"
                         )}
                     >
                         {cat}
@@ -669,40 +670,40 @@ const Dashboard: React.FC<{
                             )}>
                                 {item.category}
                             </span>
-                            <span className="text-[8px] font-bold text-slate-600 uppercase tracking-widest">{item.time}</span>
-                            <span className="text-[8px] font-black text-slate-800 mx-1">•</span>
+                            <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">{item.time}</span>
+                            <span className="text-[8px] font-black text-slate-200 mx-1">•</span>
                             <span className="text-[8px] font-black text-blue-500/70 uppercase tracking-widest">{item.source}</span>
                         </div>
                         <h4 className="text-xs font-bold text-slate-200 leading-snug group-hover:text-blue-400 transition-colors line-clamp-2">
                             {item.title}
                         </h4>
-                        <p className="text-[10px] text-slate-500 line-clamp-2 mt-1 italic leading-relaxed">
+                        <p className="text-[10px] text-slate-400 line-clamp-2 mt-1 italic leading-relaxed">
                             {item.summary}
                         </p>
                     </div>
                 ))}
             </div>
-            <button className="w-full mt-6 py-2 border border-slate-800 rounded-xl text-xs font-bold text-slate-500 hover:text-white hover:border-slate-700 transition-all uppercase tracking-widest">
+            <button className="w-full mt-6 py-2 border border-slate-800/50 rounded-xl text-xs font-bold text-slate-400 hover:text-white hover:border-slate-800/30 transition-all uppercase tracking-widest">
                 Browse News Hub
             </button>
         </Card>
 
         <Card title="Portfolio Snapshot" icon={PieChart}>
            <div className="text-center py-4">
-              <h4 className="text-slate-500 text-xs font-bold uppercase tracking-widest mb-1">Unrealized Gain</h4>
-              <p className="text-3xl font-black text-white">₹12,450.40</p>
+              <h4 className="text-slate-400 text-xs font-bold uppercase tracking-widest mb-1">Unrealized Gain</h4>
+              <p className="text-3xl font-black text-slate-100">₹12,450.40</p>
               <div className="flex items-center justify-center gap-2 mt-2 text-emerald-400 font-bold text-sm">
                 <ArrowUpRight className="w-4 h-4" />
                 +₹450.20 (3.20%)
               </div>
            </div>
-           <div className="mt-4 border-t border-slate-800 pt-4 space-y-3">
+           <div className="mt-4 border-t border-slate-800/50 pt-4 space-y-3">
              <div className="flex justify-between text-xs">
-               <span className="text-slate-500 font-medium tracking-tight">Invested Value</span>
-               <span className="text-white font-bold">₹380,000.00</span>
+               <span className="text-slate-400 font-medium tracking-tight">Invested Value</span>
+               <span className="text-slate-200 font-bold">₹380,000.00</span>
              </div>
              <div className="flex justify-between text-xs">
-               <span className="text-slate-500 font-medium tracking-tight">Daily Change</span>
+               <span className="text-slate-400 font-medium tracking-tight">Daily Change</span>
                <span className="text-emerald-400 font-bold">+₹1,240</span>
              </div>
            </div>
@@ -750,16 +751,16 @@ const Dashboard: React.FC<{
               initial={{ opacity: 0, scale: 0.9, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9, y: 20 }}
-              className="relative w-full max-w-2xl bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl"
+              className="relative w-full max-w-2xl glass border border-slate-800/50 rounded-3xl overflow-hidden shadow-2xl"
             >
               <div className="p-8">
                 <div className="flex justify-between items-start mb-8">
                   <div className="flex items-center gap-4">
-                    <div className="w-14 h-14 bg-slate-950 border border-slate-800 rounded-2xl flex items-center justify-center">
+                    <div className="w-14 h-14 glass-strong border border-slate-800/50 rounded-2xl flex items-center justify-center">
                        <Zap className="w-8 h-8 text-blue-500 fill-blue-500/20" />
                     </div>
                     <div>
-                      <h2 className="text-3xl font-black text-white tracking-tighter uppercase italic">{selectedSignal.symbol} Analysis</h2>
+                      <h2 className="text-3xl font-black text-slate-200 tracking-tighter uppercase italic">{selectedSignal.symbol} Analysis</h2>
                       <div className="flex gap-2 mt-1">
                         <span className={cn(
                           "px-2 py-0.5 rounded text-[10px] font-black tracking-widest uppercase",
@@ -767,39 +768,39 @@ const Dashboard: React.FC<{
                         )}>
                           {selectedSignal.signal} SIGNAL
                         </span>
-                        <span className="text-[10px] font-bold text-slate-500 bg-slate-950 px-2 py-0.5 rounded border border-slate-800 tracking-widest">{selectedSignal.confidence}% CONFIDENCE</span>
+                        <span className="text-[10px] font-bold text-slate-400 glass-strong px-2 py-0.5 rounded border border-slate-800/50 tracking-widest">{selectedSignal.confidence}% CONFIDENCE</span>
                       </div>
                     </div>
                   </div>
                   <button 
                     onClick={() => setSelectedSignal(null)}
-                    className="p-2 text-slate-500 hover:text-white transition-colors"
+                    className="p-2 text-slate-400 hover:text-white transition-colors"
                   >
                     <Plus className="w-6 h-6 rotate-45" />
                   </button>
                 </div>
 
                 <div className="grid grid-cols-3 gap-4 mb-8">
-                   <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800">
-                      <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1 text-center">Entry Price</p>
-                      <p className="text-xl font-black text-white text-center">₹{selectedSignal.entry}</p>
+                   <div className="p-4 glass-strong rounded-2xl border border-slate-800/50">
+                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 text-center">Entry Price</p>
+                      <p className="text-xl font-black text-slate-100 text-center">₹{selectedSignal.entry}</p>
                    </div>
-                   <div className="p-4 bg-slate-950 rounded-2xl border border-blue-500/30 ring-1 ring-blue-500/10">
+                   <div className="p-4 glass-strong rounded-2xl border border-blue-500/30 ring-1 ring-blue-500/10">
                       <p className="text-[9px] font-black text-blue-500 uppercase tracking-widest mb-1 text-center">AI Target</p>
-                      <p className="text-xl font-black text-white text-center">₹{selectedSignal.target}</p>
+                      <p className="text-xl font-black text-slate-100 text-center">₹{selectedSignal.target}</p>
                    </div>
-                   <div className="p-4 bg-slate-950 rounded-2xl border border-rose-500/30">
+                   <div className="p-4 glass-strong rounded-2xl border border-rose-500/30">
                       <p className="text-[9px] font-black text-rose-500 uppercase tracking-widest mb-1 text-center">Stop Loss</p>
-                      <p className="text-xl font-black text-white text-center">₹{selectedSignal.stopLoss}</p>
+                      <p className="text-xl font-black text-slate-100 text-center">₹{selectedSignal.stopLoss}</p>
                    </div>
                 </div>
 
                 <div className="mb-8">
-                   <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3 flex items-center gap-2">
+                   <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-2">
                      <Info className="w-3 h-3" />
                      Strategy Reasoning
                    </h4>
-                   <div className="p-5 bg-slate-950 rounded-2xl border border-slate-800 relative overflow-hidden">
+                   <div className="p-5 glass-strong rounded-2xl border border-slate-800/50 relative overflow-hidden">
                       <Zap className="absolute -right-4 -bottom-4 w-24 h-24 text-blue-500/5 rotate-12" />
                       <p className="text-sm text-slate-300 leading-relaxed font-medium italic">
                         "{selectedSignal.reasoning}"
@@ -807,7 +808,7 @@ const Dashboard: React.FC<{
                    </div>
                 </div>
 
-                <div className="h-56 mb-8 bg-slate-950 rounded-3xl border border-slate-800 p-6 relative overflow-hidden">
+                <div className="h-56 mb-8 glass-strong rounded-3xl border border-slate-800/50 p-6 relative overflow-hidden">
                    <ResponsiveContainer width="100%" height="100%">
                     <AreaChart data={selectedSignal.history || []}>
                       <defs>
@@ -991,11 +992,11 @@ const Dashboard: React.FC<{
                 <div className="relative z-10">
                   <div className="flex items-center gap-3 mb-2">
                     <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                    <h3 className="text-base font-black text-white italic tracking-tight uppercase">
+                    <h3 className="text-base font-black text-slate-200 italic tracking-tight uppercase">
                       {activeScanner.provider === 'mc' ? (marketData?.data?.list?.scannerName || activeScanner.name) : activeScanner.name}
                     </h3>
                   </div>
-                  <p className="text-xs text-slate-500 font-medium leading-relaxed italic max-w-2xl">
+                  <p className="text-xs text-slate-400 font-medium leading-relaxed italic max-w-2xl">
                     {activeScanner.provider === 'mc' ? (marketData?.data?.list?.scannerDescription || "Advanced technical analysis for professional trading.") : "Strategic fundamental screening powered by Economic Times Intelligence."}
                   </p>
                 </div>
@@ -1005,7 +1006,7 @@ const Dashboard: React.FC<{
            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
               <div className="lg:col-span-3 space-y-6">
                 <div className="space-y-4">
-                  <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] flex items-center gap-2">
+                  <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2">
                     <Zap className="w-3 h-3 text-blue-500" /> System Presets
                   </h4>
                   <div className="flex flex-col gap-2">
@@ -1015,7 +1016,7 @@ const Dashboard: React.FC<{
                           onClick={() => { setFilter(tag); setActiveScanner(null); }}
                           className={cn(
                               "px-4 py-2.5 rounded-xl text-[10px] font-black tracking-widest transition-all border uppercase text-left",
-                              (filter === tag && !activeScanner) ? "bg-blue-600 border-blue-600 text-white shadow-lg shadow-blue-500/20" : "bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-white"
+                              (filter === tag && !activeScanner) ? "bg-blue-600 border-blue-600 text-white shadow-lg shadow-blue-500/20" : "glass-strong border-slate-800/50 text-slate-400 hover:border-slate-800/30 hover:text-white"
                           )}
                       >
                         {tag}
@@ -1024,71 +1025,71 @@ const Dashboard: React.FC<{
                   </div>
                 </div>
 
-                <div className="space-y-4 pt-4 border-t border-slate-800/50">
-                  <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] flex items-center gap-2">
+                <div className="space-y-4 pt-4 border-t border-slate-800/30">
+                  <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2">
                     <Filter className="w-3 h-3 text-emerald-500" /> Fundamental Gears
                   </h4>
                   <div className="space-y-4">
                     <div className="space-y-1.5">
-                       <label className="text-[9px] font-black text-slate-600 uppercase tracking-widest">Max P/E Ratio</label>
+                       <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Max P/E Ratio</label>
                        <input 
                           type="range" min="0" max="60" step="5" 
                           value={maxPe || 60} 
                           onChange={(e) => setMaxPe(parseInt(e.target.value))}
-                          className="w-full accent-blue-500 h-1 bg-slate-900 rounded-full appearance-none cursor-pointer"
+                          className="w-full accent-blue-500 h-1 glass rounded-full appearance-none cursor-pointer"
                        />
-                       <div className="flex justify-between text-[8px] font-bold text-slate-500"><span>0</span><span>{maxPe || 60}</span></div>
+                       <div className="flex justify-between text-[8px] font-bold text-slate-400"><span>0</span><span>{maxPe || 60}</span></div>
                     </div>
                     <div className="space-y-1.5">
-                       <label className="text-[9px] font-black text-slate-600 uppercase tracking-widest">Min ROE %</label>
+                       <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Min ROE %</label>
                        <input 
                           type="range" min="0" max="40" step="5" 
                           value={minRoe || 0} 
                           onChange={(e) => setMinRoe(parseInt(e.target.value))}
-                          className="w-full accent-emerald-500 h-1 bg-slate-900 rounded-full appearance-none cursor-pointer"
+                          className="w-full accent-emerald-500 h-1 glass rounded-full appearance-none cursor-pointer"
                        />
-                       <div className="flex justify-between text-[8px] font-bold text-slate-500"><span>0</span><span>{minRoe || 0}%</span></div>
+                       <div className="flex justify-between text-[8px] font-bold text-slate-400"><span>0</span><span>{minRoe || 0}%</span></div>
                     </div>
                     <div className="space-y-1.5">
-                       <label className="text-[9px] font-black text-slate-600 uppercase tracking-widest">Max P/B Ratio</label>
+                       <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Max P/B Ratio</label>
                        <input 
                           type="range" min="0" max="15" step="1" 
                           value={maxPb || 15} 
                           onChange={(e) => setMaxPb(parseInt(e.target.value))}
-                          className="w-full accent-indigo-500 h-1 bg-slate-900 rounded-full appearance-none cursor-pointer"
+                          className="w-full accent-indigo-500 h-1 glass rounded-full appearance-none cursor-pointer"
                        />
-                       <div className="flex justify-between text-[8px] font-bold text-slate-500"><span>0</span><span>{maxPb || 15}</span></div>
+                       <div className="flex justify-between text-[8px] font-bold text-slate-400"><span>0</span><span>{maxPb || 15}</span></div>
                     </div>
                     <div className="space-y-1.5">
-                       <label className="text-[9px] font-black text-slate-600 uppercase tracking-widest">Max D/E Ratio</label>
+                       <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Max D/E Ratio</label>
                        <input 
                           type="range" min="0" max="3" step="0.5" 
                           value={maxDe || 3} 
                           onChange={(e) => setMaxDe(parseFloat(e.target.value))}
-                          className="w-full accent-rose-500 h-1 bg-slate-900 rounded-full appearance-none cursor-pointer"
+                          className="w-full accent-rose-500 h-1 glass rounded-full appearance-none cursor-pointer"
                        />
-                       <div className="flex justify-between text-[8px] font-bold text-slate-500"><span>0</span><span>{maxDe || 3.0}</span></div>
+                       <div className="flex justify-between text-[8px] font-bold text-slate-400"><span>0</span><span>{maxDe || 3.0}</span></div>
                     </div>
                     <button 
                        onClick={() => { setMaxPe(undefined); setMinRoe(undefined); setMaxDe(undefined); setMaxPb(undefined); }}
-                       className="w-full py-2 bg-slate-950 border border-slate-800 rounded-lg text-[8px] font-black text-slate-500 uppercase tracking-widest hover:border-slate-700 hover:text-slate-300 transition-all"
+                       className="w-full py-2 glass-strong border border-slate-800/50 rounded-lg text-[8px] font-black text-slate-400 uppercase tracking-widest hover:border-slate-800/30 hover:text-slate-300 transition-all"
                     >
                        Reset Gears
                     </button>
                   </div>
                 </div>
 
-                <div className="space-y-4 pt-4 border-t border-slate-800/50">
-                  <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] flex items-center gap-2">
+                <div className="space-y-4 pt-4 border-t border-slate-800/30">
+                  <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2">
                     <TrendingUp className="w-3 h-3 text-rose-500" /> Breakout & Trend
                   </h4>
                   <div className="space-y-4">
                     <div className="space-y-1.5">
-                       <label className="text-[9px] font-black text-slate-600 uppercase tracking-widest">Min Market Cap (Cr)</label>
+                       <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Min Market Cap (Cr)</label>
                        <select 
                           value={minMktCap}
                           onChange={(e) => setMinMktCap(parseInt(e.target.value))}
-                          className="w-full bg-slate-950 border border-slate-800 rounded-lg py-2 px-3 text-[10px] font-bold text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          className="w-full glass-strong border border-slate-800/50 rounded-lg py-2 px-3 text-[10px] font-bold text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
                        >
                           <option value="0">All Caps</option>
                           <option value="500">500 Cr+</option>
@@ -1098,11 +1099,11 @@ const Dashboard: React.FC<{
                        </select>
                     </div>
                     <div className="space-y-1.5">
-                       <label className="text-[9px] font-black text-slate-600 uppercase tracking-widest">Sector Focus</label>
+                       <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Sector Focus</label>
                        <select 
                           value={selectedSector}
                           onChange={(e) => setSelectedSector(e.target.value)}
-                          className="w-full bg-slate-950 border border-slate-800 rounded-lg py-2 px-3 text-[10px] font-bold text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          className="w-full glass-strong border border-slate-800/50 rounded-lg py-2 px-3 text-[10px] font-bold text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
                        >
                           <option value="All">All Sectors</option>
                           <option value="Energy">Energy</option>
@@ -1113,7 +1114,7 @@ const Dashboard: React.FC<{
                        </select>
                     </div>
                     <div className="space-y-2">
-                       <label className="text-[9px] font-black text-slate-600 uppercase tracking-widest">Timeframe Multi-Select</label>
+                       <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Timeframe Multi-Select</label>
                        <div className="grid grid-cols-2 gap-2">
                           {['15m', '1h', '4h', 'D', 'W'].map(tf => (
                             <button 
@@ -1127,7 +1128,7 @@ const Dashboard: React.FC<{
                               }}
                               className={cn(
                                 "px-2 py-1.5 rounded-lg text-[9px] font-black tracking-widest border transition-all",
-                                selectedTimeframes.includes(tf) ? "bg-blue-600 border-blue-600 text-white" : "bg-slate-950 border-slate-800 text-slate-500"
+                                selectedTimeframes.includes(tf) ? "bg-blue-600 border-blue-600 text-white" : "glass-strong border-slate-800/50 text-slate-400"
                               )}
                             >
                               {tf}
@@ -1142,7 +1143,7 @@ const Dashboard: React.FC<{
               <div className="lg:col-span-9 space-y-8">
                 {activeTab === 'technical' && scannerGroups?.map((group) => (
                   <div key={group.category} className="space-y-4">
-                    <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">{group.category}</h4>
+                    <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">{group.category}</h4>
                     <div className="flex flex-wrap gap-2">
                       {group.items.map(scanner => (
                         <button 
@@ -1150,7 +1151,7 @@ const Dashboard: React.FC<{
                             onClick={() => handleScannerSelect(scanner)}
                             className={cn(
                                 "px-4 py-2 rounded-xl text-[10px] font-black tracking-widest transition-all border uppercase",
-                                activeScanner?.id === scanner.id ? "bg-emerald-600 border-emerald-600 text-white shadow-lg shadow-emerald-500/20" : "bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-white"
+                                activeScanner?.id === scanner.id ? "bg-emerald-600 border-emerald-600 text-white shadow-lg shadow-emerald-500/20" : "glass-strong border-slate-800/50 text-slate-400 hover:border-slate-800/30 hover:text-white"
                             )}
                         >
                           {scanner.name}
@@ -1159,10 +1160,10 @@ const Dashboard: React.FC<{
                     </div>
                   </div>
                 ))}
-            <div className="flex flex-col md:flex-row gap-4 items-center justify-between pt-6 border-t border-slate-800/50">
+            <div className="flex flex-col md:flex-row gap-4 items-center justify-between pt-6 border-t border-slate-800/30">
               <div className="flex flex-col gap-4 w-full">
                 <div className="flex items-center gap-3">
-                   <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Quick Technical Screener:</h4>
+                   <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Quick Technical Screener:</h4>
                    <div className="flex flex-wrap gap-2">
                       {[
                         { name: 'Bullish BO', id: 'mc-25-BPBULL' },
@@ -1178,7 +1179,7 @@ const Dashboard: React.FC<{
                           }}
                           className={cn(
                             "px-3 py-1.5 rounded-lg text-[9px] font-bold tracking-tight uppercase border transition-all",
-                            activeScanner?.id === iq.id ? "bg-blue-600 border-blue-600 text-white" : "bg-slate-900 border-slate-800 text-slate-500 hover:border-slate-700 hover:text-white"
+                            activeScanner?.id === iq.id ? "bg-blue-600 border-blue-600 text-white" : "glass border-slate-800/50 text-slate-400 hover:border-slate-800/30 hover:text-white"
                           )}
                         >
                           {iq.name}
@@ -1188,75 +1189,75 @@ const Dashboard: React.FC<{
                 </div>
                 
                 <div className="relative w-full md:w-96">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                   <input 
                     type="text" 
                     placeholder="Deep search assets..." 
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="bg-slate-950 border border-slate-800 rounded-2xl py-3.5 pl-10 pr-4 text-xs text-white focus:outline-none focus:ring-1 focus:ring-blue-500 w-full transition-all"
+                    className="glass-strong border border-slate-800/50 rounded-2xl py-3.5 pl-10 pr-4 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 w-full transition-all"
                   />
                 </div>
               </div>
               <div className="flex gap-3 shrink-0">
-                <div className="flex bg-slate-950 border border-slate-800 p-1 rounded-2xl">
+                <div className="flex glass-strong border border-slate-800/50 p-1 rounded-2xl">
                    <button 
                     onClick={() => { setActiveTab('fundamental'); setFilter('All'); setActiveScanner(null); }}
                     className={cn(
                       "px-5 py-2.5 rounded-xl text-[10px] font-black tracking-widest uppercase transition-all",
-                      activeTab === 'fundamental' ? "bg-slate-800 text-white" : "text-slate-500 hover:text-slate-300"
+                      activeTab === 'fundamental' ? "bg-indigo-600 text-white shadow-sm" : "text-slate-400 hover:text-slate-300"
                     )}
                    >Fundamental</button>
                    <button 
                     onClick={() => setActiveTab('technical')}
                     className={cn(
                       "px-5 py-2.5 rounded-xl text-[10px] font-black tracking-widest uppercase transition-all",
-                      activeTab === 'technical' ? "bg-slate-800 text-white" : "text-slate-500 hover:text-slate-300"
+                      activeTab === 'technical' ? "bg-indigo-600 text-white shadow-sm" : "text-slate-400 hover:text-slate-300"
                     )}
                    >Technical</button>
                 </div>
-                <button className="flex items-center gap-2 bg-slate-950 text-slate-400 border border-slate-800 px-5 py-3 rounded-2xl text-[10px] font-black tracking-widest transition-all hover:text-white hover:border-slate-700 uppercase">
+                <button className="flex items-center gap-2 glass-strong text-slate-400 border border-slate-800/50 px-5 py-3 rounded-2xl text-[10px] font-black tracking-widest transition-all hover:text-white hover:border-slate-800/30 uppercase">
                   <Download className="w-3 h-3" />
                   Extract
                 </button>
               </div>
          </div>
 
-        <div className="overflow-x-auto rounded-3xl border border-slate-800/50 bg-slate-950/50 backdrop-blur-sm">
+        <div className="overflow-x-auto rounded-3xl border border-slate-800/30 glass-strong/50 backdrop-blur-sm">
           {isLoading ? (
             <div className="py-48 flex flex-col items-center justify-center space-y-6">
               <div className="relative w-12 h-12">
                 <div className="absolute inset-0 border-2 border-blue-500/20 rounded-full" />
                 <div className="absolute inset-0 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
               </div>
-              <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] animate-pulse">Synchronizing Intelligence...</p>
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] animate-pulse">Synchronizing Intelligence...</p>
             </div>
           ) : (
             <table className="w-full text-left border-collapse">
               <thead>
-                <tr className="bg-slate-900/50 backdrop-blur-xl">
+                <tr className="glass/50 backdrop-blur-xl">
                   <th 
-                    className="px-6 py-6 font-black text-[9px] text-slate-500 uppercase tracking-[0.25em] border-b border-slate-800 cursor-pointer hover:text-white transition-colors"
+                    className="px-6 py-6 font-black text-[9px] text-slate-400 uppercase tracking-[0.25em] border-b border-slate-800/50 cursor-pointer hover:text-white transition-colors"
                     onClick={() => handleSort('symbol')}
                   >
                     Asset {sortField === 'symbol' && (sortOrder === 'asc' ? '↑' : '↓')}
                   </th>
                   <th 
-                    className="px-6 py-6 font-black text-[9px] text-slate-500 uppercase tracking-[0.25em] border-b border-slate-800 text-right cursor-pointer hover:text-white transition-colors"
+                    className="px-6 py-6 font-black text-[9px] text-slate-400 uppercase tracking-[0.25em] border-b border-slate-800/50 text-right cursor-pointer hover:text-white transition-colors"
                     onClick={() => handleSort('price')}
                   >
                     LTP {sortField === 'price' && (sortOrder === 'asc' ? '↑' : '↓')}
                   </th>
                   <th 
-                    className="px-6 py-6 font-black text-[9px] text-slate-500 uppercase tracking-[0.25em] border-b border-slate-800 text-center cursor-pointer hover:text-white transition-colors"
+                    className="px-6 py-6 font-black text-[9px] text-slate-400 uppercase tracking-[0.25em] border-b border-slate-800/50 text-center cursor-pointer hover:text-white transition-colors"
                     onClick={() => handleSort('changePct')}
                   >
                     Momentum {sortField === 'changePct' && (sortOrder === 'asc' ? '↑' : '↓')}
                   </th>
                   {displayColumns.map(col => (
-                    <th key={col} className="px-6 py-6 font-black text-[9px] text-slate-500 uppercase tracking-[0.25em] border-b border-slate-800 text-center">{col}</th>
+                    <th key={col} className="px-6 py-6 font-black text-[9px] text-slate-400 uppercase tracking-[0.25em] border-b border-slate-800/50 text-center">{col}</th>
                   ))}
-                  <th className="px-6 py-6 font-black text-[9px] text-slate-500 uppercase tracking-[0.25em] border-b border-slate-800 text-right">Direct</th>
+                  <th className="px-6 py-6 font-black text-[9px] text-slate-400 uppercase tracking-[0.25em] border-b border-slate-800/50 text-right">Direct</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/30">
@@ -1292,12 +1293,12 @@ const Dashboard: React.FC<{
                             </button>
                           )}
                           <div className="cursor-pointer" onClick={() => onSelectStock(symbol)}>
-                            <div className="font-black text-white text-xs tracking-tight group-hover:text-blue-400 transition-colors uppercase truncate max-w-[150px]">{name || symbol}</div>
-                            <div className="text-[8px] text-slate-600 font-bold tracking-widest mt-1 uppercase italic truncate max-w-[150px]">{symbol}</div>
+                            <div className="font-black text-slate-200 text-xs tracking-tight group-hover:text-blue-400 transition-colors uppercase truncate max-w-[150px]">{name || symbol}</div>
+                            <div className="text-[8px] text-slate-400 font-bold tracking-widest mt-1 uppercase italic truncate max-w-[150px]">{symbol}</div>
                           </div>
                         </div>
                       </td>
-                      <td className="px-6 py-6 text-right font-black text-xs tabular-nums text-white">₹{parseFloat(ltp).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                      <td className="px-6 py-6 text-right font-black text-xs tabular-nums text-slate-100">₹{parseFloat(ltp).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
                       <td className="px-6 py-6 text-center">
                         <span className={cn(
                           "font-black text-[10px] tabular-nums px-3 py-1.5 rounded-lg border",
@@ -1322,7 +1323,7 @@ const Dashboard: React.FC<{
                       <td className="px-6 py-6 text-right">
                          <button 
                             onClick={() => onSelectStock(symbol)}
-                            className="p-2.5 bg-slate-900 border border-slate-800 rounded-xl text-slate-500 hover:text-white hover:border-slate-600 transition-all"
+                            className="p-2.5 glass border border-slate-800/50 rounded-xl text-slate-400 hover:text-white hover:border-slate-600 transition-all"
                          >
                             <ArrowUpRight className="w-4 h-4" />
                          </button>
@@ -1357,19 +1358,19 @@ const OptionChain: React.FC<{ symbol: string; stockPrice: number }> = ({ symbol,
 
   if (isLoading) {
     return (
-      <div className="py-20 text-center bg-slate-950 rounded-2xl border border-slate-800 border-dashed">
+      <div className="py-20 text-center glass-strong rounded-2xl border border-slate-800/50 border-dashed">
         <Activity className="w-8 h-8 text-blue-500 animate-spin mx-auto mb-4" />
-        <p className="text-slate-500 font-bold uppercase tracking-widest text-[10px]">Fetching real-time option chain...</p>
+        <p className="text-slate-400 font-bold uppercase tracking-widest text-[10px]">Fetching real-time option chain...</p>
       </div>
     );
   }
 
   if (!ocData || chain.length === 0) {
     return (
-      <div className="py-20 text-center bg-slate-950 rounded-2xl border border-slate-800 border-dashed">
+      <div className="py-20 text-center glass-strong rounded-2xl border border-slate-800/50 border-dashed">
         <AlertCircle className="w-8 h-8 text-rose-500 mx-auto mb-4" />
-        <h3 className="text-white font-black text-lg uppercase tracking-tighter italic">Option Chain Unavailable</h3>
-        <p className="text-slate-500 text-[10px] uppercase font-bold tracking-widest mt-2">Could not retrieve F&O data for {symbol}</p>
+        <h3 className="text-slate-300 font-black text-lg uppercase tracking-tighter italic">Option Chain Unavailable</h3>
+        <p className="text-slate-400 text-[10px] uppercase font-bold tracking-widest mt-2">Could not retrieve F&O data for {symbol}</p>
       </div>
     );
   }
@@ -1379,22 +1380,22 @@ const OptionChain: React.FC<{ symbol: string; stockPrice: number }> = ({ symbol,
       {/* IV Section */}
       {/* F&O Sentiment Metrics */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="p-4 bg-slate-900 border border-slate-800 rounded-2xl flex items-center justify-between">
+        <div className="p-4 glass border border-slate-800/50 rounded-2xl flex items-center justify-between">
           <div>
-            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Max Pain Strike</p>
-            <p className="text-2xl font-black text-white italic">₹{maxPain || '—'}</p>
-            <p className="text-[8px] text-slate-600 font-bold uppercase mt-1">Expiry Magnet</p>
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Max Pain Strike</p>
+            <p className="text-2xl font-black text-slate-100 italic">₹{maxPain || '—'}</p>
+            <p className="text-[8px] text-slate-400 font-bold uppercase mt-1">Expiry Magnet</p>
           </div>
           <div className="p-3 bg-blue-500/10 rounded-xl">
              <Target className="w-5 h-5 text-blue-400" />
           </div>
         </div>
 
-        <div className="p-4 bg-slate-900 border border-slate-800 rounded-2xl flex items-center justify-between">
+        <div className="p-4 glass border border-slate-800/50 rounded-2xl flex items-center justify-between">
           <div>
-            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">IV Rank</p>
-            <p className="text-2xl font-black text-white italic">{ivRank || 'N/A'}</p>
-            <p className="text-[8px] text-slate-600 font-bold uppercase mt-1">Volatility vs History</p>
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">IV Rank</p>
+            <p className="text-2xl font-black text-slate-100 italic">{ivRank || 'N/A'}</p>
+            <p className="text-[8px] text-slate-400 font-bold uppercase mt-1">Volatility vs History</p>
           </div>
           <div className="w-12 h-12 relative opacity-50">
             <ResponsiveContainer width="100%" height="100%">
@@ -1416,11 +1417,11 @@ const OptionChain: React.FC<{ symbol: string; stockPrice: number }> = ({ symbol,
           </div>
         </div>
 
-        <div className="p-4 bg-slate-900 border border-slate-800 rounded-2xl flex items-center justify-between">
+        <div className="p-4 glass border border-slate-800/50 rounded-2xl flex items-center justify-between">
           <div>
-            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">IV Percentile</p>
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">IV Percentile</p>
             <p className="text-2xl font-black text-emerald-400 italic">{ivPercentile ? `${ivPercentile}%` : 'N/A'}</p>
-            <p className="text-[8px] text-slate-600 font-bold uppercase mt-1">Relative Volatility</p>
+            <p className="text-[8px] text-slate-400 font-bold uppercase mt-1">Relative Volatility</p>
           </div>
           <div className="w-12 h-12 relative opacity-50">
             <ResponsiveContainer width="100%" height="100%">
@@ -1444,21 +1445,21 @@ const OptionChain: React.FC<{ symbol: string; stockPrice: number }> = ({ symbol,
       </div>
 
       {/* Option Chain Table */}
-      <div className="overflow-x-auto rounded-2xl border border-slate-800 bg-slate-950/50">
+      <div className="overflow-x-auto rounded-2xl border border-slate-800/50 glass-strong/50">
         <table className="w-full text-left border-collapse min-w-[1200px]">
           <thead>
-            <tr className="bg-slate-900">
-              <th colSpan={5} className="px-4 py-2 text-center text-[10px] font-black uppercase text-blue-500 border-b border-slate-800">Calls</th>
-              <th className="px-4 py-2 text-center text-[10px] font-black uppercase text-slate-400 border-b border-slate-800">Strike</th>
-              <th colSpan={5} className="px-4 py-2 text-center text-[10px] font-black uppercase text-rose-500 border-b border-slate-800">Puts</th>
+            <tr className="glass">
+              <th colSpan={5} className="px-4 py-2 text-center text-[10px] font-black uppercase text-blue-500 border-b border-slate-800/50">Calls</th>
+              <th className="px-4 py-2 text-center text-[10px] font-black uppercase text-slate-400 border-b border-slate-800/50">Strike</th>
+              <th colSpan={5} className="px-4 py-2 text-center text-[10px] font-black uppercase text-rose-500 border-b border-slate-800/50">Puts</th>
             </tr>
-            <tr className="bg-slate-900/50">
+            <tr className="glass/50">
               {['Buildup', 'OI', 'Delta', 'IV', 'LTP'].map(h => (
-                <th key={`c-${h}`} className="px-3 py-3 text-[8px] font-black uppercase text-slate-500 tracking-widest text-center">{h}</th>
+                <th key={`c-${h}`} className="px-3 py-3 text-[8px] font-black uppercase text-slate-400 tracking-widest text-center">{h}</th>
               ))}
-              <th className="px-3 py-3 text-[8px] font-black uppercase text-white tracking-widest text-center bg-slate-800">Price</th>
+              <th className="px-3 py-3 text-[8px] font-black uppercase text-slate-200 tracking-widest text-center bg-slate-800">Price</th>
               {['LTP', 'IV', 'Delta', 'OI', 'Buildup'].map(h => (
-                <th key={`p-${h}`} className="px-3 py-3 text-[8px] font-black uppercase text-slate-500 tracking-widest text-center">{h}</th>
+                <th key={`p-${h}`} className="px-3 py-3 text-[8px] font-black uppercase text-slate-400 tracking-widest text-center">{h}</th>
               ))}
             </tr>
           </thead>
@@ -1475,7 +1476,7 @@ const OptionChain: React.FC<{ symbol: string; stockPrice: number }> = ({ symbol,
                   {/* CALLS */}
                   <td className={cn(
                     "px-3 py-4 text-[8px] font-black uppercase",
-                    row.callBuiltup?.includes('Long') ? "text-emerald-400" : row.callBuiltup?.includes('Short') ? "text-rose-400" : "text-slate-600"
+                    row.callBuiltup?.includes('Long') ? "text-emerald-400" : row.callBuiltup?.includes('Short') ? "text-rose-400" : "text-slate-400"
                   )}>{row.callBuiltup}</td>
                   <td className="px-3 py-4 text-[10px] font-medium text-slate-400">{(row.callOi/1000).toFixed(1)}k</td>
                   <td className="px-3 py-4 text-[10px] font-bold text-emerald-400">{row.callDelta?.toFixed(2)}</td>
@@ -1483,7 +1484,7 @@ const OptionChain: React.FC<{ symbol: string; stockPrice: number }> = ({ symbol,
                   <td className="px-3 py-4 text-[10px] font-black text-white tabular-nums">₹{row.callLtp?.toFixed(2)}</td>
                   
                   {/* STRIKE */}
-                  <td className="px-3 py-4 text-xs font-black text-white bg-slate-800/30 border-x border-slate-800 tabular-nums">₹{strike}</td>
+                  <td className="px-3 py-4 text-xs font-black text-white bg-slate-800/30 border-x border-slate-800/50 tabular-nums">₹{strike}</td>
                   
                   {/* PUTS */}
                   <td className="px-3 py-4 text-[10px] font-black text-white tabular-nums">₹{row.putLtp?.toFixed(2)}</td>
@@ -1492,7 +1493,7 @@ const OptionChain: React.FC<{ symbol: string; stockPrice: number }> = ({ symbol,
                   <td className="px-3 py-4 text-[10px] font-medium text-slate-400">{(row.putOi/1000).toFixed(1)}k</td>
                   <td className={cn(
                     "px-3 py-4 text-[8px] font-black uppercase",
-                    row.putBuiltup?.includes('Long') ? "text-emerald-400" : row.putBuiltup?.includes('Short') ? "text-rose-400" : "text-slate-600"
+                    row.putBuiltup?.includes('Long') ? "text-emerald-400" : row.putBuiltup?.includes('Short') ? "text-rose-400" : "text-slate-400"
                   )}>{row.putBuiltup}</td>
                 </tr>
               );
@@ -1524,8 +1525,8 @@ const OptionChain: React.FC<{ symbol: string; stockPrice: number }> = ({ symbol,
         </div>
         <div className="grid grid-cols-4 gap-4 mt-6">
            {['Delta', 'Gamma', 'Theta', 'Vega'].map(g => (
-             <div key={g} className="text-center p-3 bg-slate-950 rounded-xl border border-slate-800">
-                <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">{g}</p>
+             <div key={g} className="text-center p-3 glass-strong rounded-xl border border-slate-800/50">
+                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">{g}</p>
                 <div className={cn(
                   "h-1 rounded-full mb-1",
                   g === 'Delta' ? 'bg-emerald-500' : g === 'Theta' ? 'bg-rose-500' : 'bg-blue-500'
@@ -1572,11 +1573,11 @@ const MarketMap: React.FC = () => {
             Market Intelligence Map
           </h2>
           <div className="flex items-center gap-3 mt-1">
-             <p className="text-slate-500 text-xs font-bold uppercase tracking-widest italic">
+             <p className="text-slate-400 text-xs font-bold uppercase tracking-widest italic">
                Analyzing sector rotation within <span className="text-white">{selectedIndexName}</span> context
              </p>
              {currentIndexData && (
-                <div className="flex items-center gap-2 bg-slate-900 px-3 py-1 rounded-lg border border-slate-800">
+                <div className="flex items-center gap-2 glass px-3 py-1 rounded-lg border border-slate-800/50">
                    <span className="text-xs font-black text-white tabular-nums">{parseFloat(currentIndexData.value).toLocaleString()}</span>
                    <span className={cn(
                       "text-[10px] font-bold flex items-center gap-0.5",
@@ -1599,7 +1600,7 @@ const MarketMap: React.FC = () => {
                 "px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all",
                 activeInd === idx.id 
                   ? "bg-blue-600 border-blue-600 text-white shadow-[0_0_15px_rgba(37,99,235,0.4)]" 
-                  : "bg-slate-900 border-slate-800 text-slate-500 hover:border-slate-700"
+                  : "glass border-slate-800/50 text-slate-400 hover:border-slate-800/30"
               )}
             >
               {idx.name}
@@ -1609,7 +1610,7 @@ const MarketMap: React.FC = () => {
           <select 
             value={activeInd} 
             onChange={(e) => handleIndChange(e.target.value)}
-            className="bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 text-xs font-bold text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="glass border border-slate-800/50 rounded-xl px-4 py-2 text-xs font-bold text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
           >
             <option value="">More Indices...</option>
             {indexList.map((idx: any) => (
@@ -1642,15 +1643,15 @@ const MarketMap: React.FC = () => {
             <div className="flex justify-between mt-4">
                <div className="text-center">
                   <p className="text-[9px] font-black text-emerald-500 uppercase">Advancing</p>
-                  <p className="text-lg font-black text-white italic">32</p>
+                  <p className="text-lg font-black text-slate-100 italic">32</p>
                </div>
                <div className="text-center">
                   <p className="text-[9px] font-black text-rose-500 uppercase">Declining</p>
-                  <p className="text-lg font-black text-white italic">18</p>
+                  <p className="text-lg font-black text-slate-100 italic">18</p>
                </div>
                <div className="text-center">
-                  <p className="text-[9px] font-black text-slate-500 uppercase">Unchanged</p>
-                  <p className="text-lg font-black text-white italic">0</p>
+                  <p className="text-[9px] font-black text-slate-400 uppercase">Unchanged</p>
+                  <p className="text-lg font-black text-slate-100 italic">0</p>
                </div>
             </div>
           </Card>
@@ -1660,11 +1661,11 @@ const MarketMap: React.FC = () => {
                 <div className="flex items-center gap-4">
                    <div className="relative w-20 h-20">
                       <svg className="w-full h-full" viewBox="0 0 100 100">
-                         <circle className="text-slate-800" strokeWidth="8" stroke="currentColor" fill="transparent" r="40" cx="50" cy="50" />
+                         <circle className="text-slate-200" strokeWidth="8" stroke="currentColor" fill="transparent" r="40" cx="50" cy="50" />
                          <circle className="text-blue-500" strokeWidth="8" strokeDasharray="251.2" strokeDashoffset={251.2 * (1 - 0.72)} strokeLinecap="round" stroke="currentColor" fill="transparent" r="40" cx="50" cy="50" />
                       </svg>
                       <div className="absolute inset-0 flex items-center justify-center">
-                         <span className="text-lg font-black text-white italic">72%</span>
+                         <span className="text-lg font-black text-slate-100 italic">72%</span>
                       </div>
                    </div>
                    <div>
@@ -1672,7 +1673,7 @@ const MarketMap: React.FC = () => {
                       <h4 className="text-xl font-black text-white italic tracking-tighter uppercase whitespace-nowrap">Extreme Optimism</h4>
                    </div>
                 </div>
-                <p className="text-[11px] text-slate-500 leading-relaxed italic font-medium">
+                <p className="text-[11px] text-slate-400 leading-relaxed italic font-medium">
                   The current sector rotation suggests institutional accumulation in defensive pockets like Healthcare while IT remains volatile.
                 </p>
              </div>
@@ -1774,22 +1775,22 @@ const Backtest: React.FC<{ stocks?: MarketData[] }> = () => {
           <Card title="Strategy Parameters" icon={Filter}>
             <div className="space-y-5">
                <div className="space-y-2">
-                 <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest pl-1">Target Symbol</label>
+                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Target Symbol</label>
                  <input 
                     type="text" 
                     value={symbol}
                     onChange={(e) => setSymbol(e.target.value.toUpperCase())}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs font-bold text-white focus:outline-none focus:ring-1 focus:ring-blue-500 uppercase"
+                    className="w-full glass-strong border border-slate-800/50 rounded-xl p-3 text-xs font-bold text-white focus:outline-none focus:ring-1 focus:ring-blue-500 uppercase"
                     placeholder="e.g. RELIANCE"
                  />
                </div>
 
                <div className="space-y-2">
-                 <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest pl-1">Timeframe</label>
+                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Timeframe</label>
                  <select 
                     value={timeframe}
                     onChange={(e) => setTimeframe(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs font-bold text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    className="w-full glass-strong border border-slate-800/50 rounded-xl p-3 text-xs font-bold text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
                  >
                    <option>Daily Candlesticks</option>
                    <option>1H Momentum</option>
@@ -1797,39 +1798,39 @@ const Backtest: React.FC<{ stocks?: MarketData[] }> = () => {
                  </select>
                </div>
 
-               <div className="pt-4 border-t border-slate-800/50 space-y-4">
+               <div className="pt-4 border-t border-slate-800/30 space-y-4">
                   <h4 className="text-[10px] font-black text-blue-500 uppercase tracking-[0.2em] mb-2">Technical Indicators</h4>
                   
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1.5">
-                      <label className="text-[9px] font-black text-slate-600 uppercase tracking-widest">RSI Upper (Sell)</label>
+                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">RSI Upper (Sell)</label>
                       <input 
                         type="number" value={rsiUpper} onChange={(e) => setRsiUpper(parseInt(e.target.value))}
-                        className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs font-bold text-white"
+                        className="w-full glass-strong border border-slate-800/50 rounded-lg p-2 text-xs font-bold text-white"
                       />
                     </div>
                     <div className="space-y-1.5">
-                      <label className="text-[9px] font-black text-slate-600 uppercase tracking-widest">RSI Lower (Buy)</label>
+                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">RSI Lower (Buy)</label>
                       <input 
                         type="number" value={rsiLower} onChange={(e) => setRsiLower(parseInt(e.target.value))}
-                        className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs font-bold text-white"
+                        className="w-full glass-strong border border-slate-800/50 rounded-lg p-2 text-xs font-bold text-white"
                       />
                     </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1.5">
-                      <label className="text-[9px] font-black text-slate-600 uppercase tracking-widest">EMA Short Period</label>
+                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">EMA Short Period</label>
                       <input 
                         type="number" value={emaShort} onChange={(e) => setEmaShort(parseInt(e.target.value))}
-                        className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs font-bold text-white"
+                        className="w-full glass-strong border border-slate-800/50 rounded-lg p-2 text-xs font-bold text-white"
                       />
                     </div>
                     <div className="space-y-1.5">
-                      <label className="text-[9px] font-black text-slate-600 uppercase tracking-widest">EMA Long Period</label>
+                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">EMA Long Period</label>
                       <input 
                         type="number" value={emaLong} onChange={(e) => setEmaLong(parseInt(e.target.value))}
-                        className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs font-bold text-white"
+                        className="w-full glass-strong border border-slate-800/50 rounded-lg p-2 text-xs font-bold text-white"
                       />
                     </div>
                   </div>
@@ -1848,7 +1849,7 @@ const Backtest: React.FC<{ stocks?: MarketData[] }> = () => {
                  </button>
                  <button 
                    onClick={() => setShowSaveModal(true)}
-                   className="p-3 bg-slate-950 border border-slate-800 rounded-xl text-slate-400 hover:text-white hover:border-slate-700 transition-all"
+                   className="p-3 glass-strong border border-slate-800/50 rounded-xl text-slate-400 hover:text-white hover:border-slate-800/30 transition-all"
                    title="Save Strategy"
                  >
                    <Save className="w-4 h-4" />
@@ -1864,13 +1865,13 @@ const Backtest: React.FC<{ stocks?: MarketData[] }> = () => {
                   <button
                     key={s.id}
                     onClick={() => loadStrategy(s)}
-                    className="w-full text-left p-3 bg-slate-950 border border-slate-800 rounded-xl hover:border-blue-500 transition-all group"
+                    className="w-full text-left p-3 glass-strong border border-slate-800/50 rounded-xl hover:border-blue-500 transition-all group"
                   >
                     <p className="text-xs font-black text-white italic group-hover:text-blue-400 uppercase tracking-tight">{s.name}</p>
                     <div className="flex gap-2 mt-1">
-                      <span className="text-[8px] font-bold text-slate-500 uppercase tracking-widest">{s.symbol}</span>
-                      <span className="text-[8px] font-bold text-slate-700 uppercase tracking-widest">•</span>
-                      <span className="text-[8px] font-bold text-slate-500 uppercase tracking-widest">{s.timeframe}</span>
+                      <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">{s.symbol}</span>
+                      <span className="text-[8px] font-bold text-slate-300 uppercase tracking-widest">•</span>
+                      <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">{s.timeframe}</span>
                     </div>
                   </button>
                 ))}
@@ -1887,11 +1888,11 @@ const Backtest: React.FC<{ stocks?: MarketData[] }> = () => {
                   <Activity className={cn("text-blue-500 w-12 h-12", isRunning && "animate-pulse")} />
                 </div>
                 <h4 className="text-white font-black text-2xl italic uppercase tracking-tighter">AI Scenario Simulation</h4>
-                <p className="text-slate-500 text-sm mt-3 max-w-sm mx-auto leading-relaxed">
+                <p className="text-slate-400 text-sm mt-3 max-w-sm mx-auto leading-relaxed">
                   {isRunning ? "Simulating thousands of trade paths across 10 years of market data history..." : "Adjust your strategy parameters on the left and initiate the simulation to validate your edge."}
                 </p>
                 {isRunning && (
-                  <div className="mt-8 w-48 h-1 bg-slate-900 rounded-full overflow-hidden border border-slate-800">
+                  <div className="mt-8 w-48 h-1 glass rounded-full overflow-hidden border border-slate-800/50">
                     <motion.div 
                       initial={{ left: '-100%' }}
                       animate={{ left: '100%' }}
@@ -1912,18 +1913,18 @@ const Backtest: React.FC<{ stocks?: MarketData[] }> = () => {
                      { label: 'Win Rate', value: `${results.winRate}%`, icon: Zap, color: 'text-amber-400' },
                      { label: 'Max DD', value: `${results.maxDrawdown}%`, icon: ArrowDownRight, color: 'text-rose-400' },
                    ].map(stat => (
-                     <div key={stat.label} className="p-5 bg-slate-950 border border-slate-800 rounded-2xl relative overflow-hidden group">
-                       <stat.icon className="w-4 h-4 text-slate-800 absolute -right-1 -top-1 scale-[300%] rotate-12 opacity-50 group-hover:scale-[400%] transition-transform" />
-                       <p className="text-slate-500 text-[10px] font-black uppercase tracking-widest relative z-10">{stat.label}</p>
+                     <div key={stat.label} className="p-5 glass-strong border border-slate-800/50 rounded-2xl relative overflow-hidden group">
+                       <stat.icon className="w-4 h-4 text-slate-200 absolute -right-1 -top-1 scale-[300%] rotate-12 opacity-50 group-hover:scale-[400%] transition-transform" />
+                       <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest relative z-10">{stat.label}</p>
                        <p className={cn("text-2xl font-black mt-2 relative z-10 tracking-tighter", stat.color)}>{stat.value}</p>
                      </div>
                    ))}
                  </div>
 
-                 <div className="p-6 bg-slate-950 rounded-3xl border border-slate-800">
+                 <div className="p-6 glass-strong rounded-3xl border border-slate-800/50">
                    <div className="flex justify-between items-center mb-8">
                      <div>
-                       <h5 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Equity Growth</h5>
+                       <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Equity Growth</h5>
                        <p className="text-sm font-black text-white italic">Backtest Period: 2014 - 2024</p>
                      </div>
                      <div className="flex gap-6">
@@ -2006,7 +2007,7 @@ const Backtest: React.FC<{ stocks?: MarketData[] }> = () => {
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="relative w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl"
+              className="relative w-full max-w-md glass border border-slate-800/50 rounded-3xl p-8 shadow-2xl"
             >
               <h3 className="text-xl font-black text-white italic tracking-tighter uppercase mb-6">Name Your Strategy</h3>
               <div className="space-y-4">
@@ -2014,14 +2015,14 @@ const Backtest: React.FC<{ stocks?: MarketData[] }> = () => {
                   type="text" 
                   value={strategyName}
                   onChange={(e) => setStrategyName(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-4 text-xs font-bold text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className="w-full glass-strong border border-slate-800/50 rounded-2xl p-4 text-xs font-bold text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
                   placeholder="e.g. Aggressive RSI Scalper"
                   autoFocus
                 />
                 <div className="flex gap-3 mt-4">
                   <button 
                     onClick={() => setShowSaveModal(false)}
-                    className="flex-1 py-3 bg-slate-950 border border-slate-800 text-slate-500 font-black rounded-xl text-[10px] tracking-widest uppercase transition-all"
+                    className="flex-1 py-3 glass-strong border border-slate-800/50 text-slate-400 font-black rounded-xl text-[10px] tracking-widest uppercase transition-all"
                   >
                     Cancel
                   </button>
@@ -2052,7 +2053,7 @@ const TechnicalAnalysis: React.FC<{ symbol: string }> = ({ symbol }) => {
   const { data: ohlcData, isLoading: ohlcLoading } = trpc.getOHLCData.useQuery({ symbol, dur: '1y' });
   const { data: tvTa } = trpc.getTvTa.useQuery({ symbol });
 
-  if (isLoading || scanLoading || ohlcLoading) return <div className="p-20 text-center animate-pulse text-slate-500">Processing signals...</div>;
+  if (isLoading || scanLoading || ohlcLoading) return <div className="p-20 text-center animate-pulse text-slate-400">Processing signals...</div>;
 
   const indicators = tech?.data?.indicators?.map((i: any) => ({ name: i.displayName, value: i.value, sentiment: i.indication })) || [];
   const movingAverages = tech?.data?.[maType.toLowerCase()]?.map((i: any) => ({ name: `${maType} ${i.key}`, value: i.value, sentiment: i.indication })) || [];
@@ -2084,7 +2085,7 @@ const TechnicalAnalysis: React.FC<{ symbol: string }> = ({ symbol }) => {
             onClick={() => setTimeframe(tf.id as any)}
             className={cn(
               "px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all border",
-              timeframe === tf.id ? "bg-blue-600 border-blue-600 text-white shadow-lg" : "bg-slate-950 border-slate-800 text-slate-500 hover:text-white"
+              timeframe === tf.id ? "bg-blue-600 border-blue-600 text-white shadow-lg" : "glass-strong border-slate-800/50 text-slate-400 hover:text-white"
             )}
           >
             {tf.label}
@@ -2095,22 +2096,22 @@ const TechnicalAnalysis: React.FC<{ symbol: string }> = ({ symbol }) => {
       {tvTa && tvTa.summary && (
         <Card title="TradingView Advanced TA" icon={Zap}>
           <div className="grid grid-cols-3 gap-4 text-center mb-6">
-            <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800">
-              <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Oscillators</p>
+            <div className="p-4 glass-strong rounded-2xl border border-slate-800/50">
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Oscillators</p>
               <p className={cn("text-xl font-black italic tracking-tighter uppercase", 
                 tvTa.oscillators?.RECOMMENDATION?.includes('BUY') ? 'text-emerald-500' :
                 tvTa.oscillators?.RECOMMENDATION?.includes('SELL') ? 'text-rose-500' : 'text-amber-500'
               )}>{tvTa.oscillators?.RECOMMENDATION || 'NEUTRAL'}</p>
             </div>
-            <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800">
-              <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Summary</p>
+            <div className="p-4 glass-strong rounded-2xl border border-slate-800/50">
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Summary</p>
               <p className={cn("text-2xl font-black italic tracking-tighter uppercase", 
                 tvTa.summary?.RECOMMENDATION?.includes('BUY') ? 'text-emerald-500' :
                 tvTa.summary?.RECOMMENDATION?.includes('SELL') ? 'text-rose-500' : 'text-amber-500'
               )}>{tvTa.summary?.RECOMMENDATION || 'NEUTRAL'}</p>
             </div>
-            <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800">
-              <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Moving Averages</p>
+            <div className="p-4 glass-strong rounded-2xl border border-slate-800/50">
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Moving Averages</p>
               <p className={cn("text-xl font-black italic tracking-tighter uppercase", 
                 tvTa.moving_averages?.RECOMMENDATION?.includes('BUY') ? 'text-emerald-500' :
                 tvTa.moving_averages?.RECOMMENDATION?.includes('SELL') ? 'text-rose-500' : 'text-amber-500'
@@ -2124,9 +2125,9 @@ const TechnicalAnalysis: React.FC<{ symbol: string }> = ({ symbol }) => {
         <Card title="Momentum Indicators" icon={Activity}>
            <div className="space-y-4">
               {indicators.map((ind: any) => (
-                <div key={ind.name} className="flex justify-between items-center p-3 bg-slate-950 rounded-xl border border-slate-800/50">
+                <div key={ind.name} className="flex justify-between items-center p-3 glass-strong rounded-xl border border-slate-800/30">
                   <div>
-                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{ind.name}</p>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{ind.name}</p>
                     {Array.isArray(ind.value) ? (
                       <p className="text-xs font-bold text-slate-400 mt-0.5">Multiple Bands</p>
                     ) : (
@@ -2150,10 +2151,10 @@ const TechnicalAnalysis: React.FC<{ symbol: string }> = ({ symbol }) => {
         <div className="space-y-6">
           <Card title="MACD Analysis" icon={Zap}>
              <div className="space-y-5">
-                <div className="p-4 bg-slate-950 border border-slate-800 rounded-2xl">
+                <div className="p-4 glass-strong border border-slate-800/50 rounded-2xl">
                    <div className="flex justify-between items-end mb-4">
                       <div>
-                         <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Momentum Oscillator</p>
+                         <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Momentum Oscillator</p>
                          <h4 className="text-xl font-black text-white italic tracking-tighter">MACD Line</h4>
                       </div>
                       <span className={cn(
@@ -2181,14 +2182,14 @@ const TechnicalAnalysis: React.FC<{ symbol: string }> = ({ symbol }) => {
                       <div className="flex items-start gap-3">
                          <Info className="w-4 h-4 text-blue-500 mt-0.5 shrink-0" />
                          <p className="text-[11px] text-slate-400 leading-relaxed italic">
-                            MACD is a trend-following momentum indicator. A <span className="text-white font-bold">Bullish Crossover</span> occurs when the MACD line passes above the signal line.
+                            MACD is a trend-following momentum indicator. A <span className="text-slate-200 font-bold">Bullish Crossover</span> occurs when the MACD line passes above the signal line.
                          </p>
                       </div>
                    </div>
                 </div>
 
                 <div className="space-y-3">
-                   <h5 className="text-[10px] font-black text-slate-500 uppercase tracking-widest pl-1">Scanner Insights</h5>
+                   <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Scanner Insights</h5>
                    {technicalScan?.signals?.filter((s: any) => s.type === 'MACD').map((signal: any, idx: number) => (
                       <div key={idx} className="p-3 bg-blue-500/5 border border-blue-500/10 rounded-xl">
                          <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest mb-1">{signal.label}</p>
@@ -2202,9 +2203,9 @@ const TechnicalAnalysis: React.FC<{ symbol: string }> = ({ symbol }) => {
           <Card title="Moving Average Crossovers" icon={Activity}>
              <div className="space-y-4">
                 {crossovers.map((cross: any) => (
-                   <div key={cross.key} className="p-4 bg-slate-950 border border-slate-800 rounded-2xl flex items-center justify-between">
+                   <div key={cross.key} className="p-4 glass-strong border border-slate-800/50 rounded-2xl flex items-center justify-between">
                       <div>
-                         <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">{cross.period}</p>
+                         <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{cross.period}</p>
                          <p className="text-sm font-bold text-white leading-tight">{cross.displayValue}</p>
                       </div>
                       <span className={cn(
@@ -2226,16 +2227,16 @@ const TechnicalAnalysis: React.FC<{ symbol: string }> = ({ symbol }) => {
           title="Moving Averages" 
           icon={TrendingUp}
           action={
-            <div className="flex bg-slate-900 rounded-lg p-0.5 border border-slate-800">
+            <div className="flex glass rounded-lg p-0.5 border border-slate-800/50">
               <button 
                 onClick={() => setMaType('SMA')}
-                className={cn("px-3 py-1 rounded-md text-[9px] font-black uppercase tracking-widest transition-all", maType === 'SMA' ? "bg-slate-800 text-white" : "text-slate-500")}
+                className={cn("px-3 py-1 rounded-md text-[9px] font-black uppercase tracking-widest transition-all", maType === 'SMA' ? "bg-slate-800 text-white" : "text-slate-400")}
               >
                 SMA
               </button>
               <button 
                 onClick={() => setMaType('EMA')}
-                className={cn("px-3 py-1 rounded-md text-[9px] font-black uppercase tracking-widest transition-all", maType === 'EMA' ? "bg-slate-800 text-white" : "text-slate-500")}
+                className={cn("px-3 py-1 rounded-md text-[9px] font-black uppercase tracking-widest transition-all", maType === 'EMA' ? "bg-slate-800 text-white" : "text-slate-400")}
               >
                 EMA
               </button>
@@ -2244,9 +2245,9 @@ const TechnicalAnalysis: React.FC<{ symbol: string }> = ({ symbol }) => {
         >
            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {movingAverages.map((ma: any) => (
-                 <div key={ma.name} className="flex justify-between items-center p-3 bg-slate-950 rounded-xl border border-slate-800/50">
+                 <div key={ma.name} className="flex justify-between items-center p-3 glass-strong rounded-xl border border-slate-800/30">
                     <div>
-                      <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{ma.name}</p>
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{ma.name}</p>
                       <p className="text-xs font-bold text-white mt-0.5">₹{ma.value}</p>
                     </div>
                     <span className={cn(
@@ -2265,11 +2266,11 @@ const TechnicalAnalysis: React.FC<{ symbol: string }> = ({ symbol }) => {
               {/* Custom patterns detected from chart data */}
               {detectedPatterns.length > 0 && (
                 <div className="space-y-3">
-                  <h5 className="text-[10px] font-black text-slate-500 uppercase tracking-widest pl-1">Chart Patterns Identified</h5>
+                  <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Chart Patterns Identified</h5>
                   {detectedPatterns.map((pattern, idx) => (
                     <div key={idx} className={cn(
-                      "p-4 bg-slate-950 border rounded-2xl relative overflow-hidden",
-                      pattern.sentiment === 'bullish' ? 'border-emerald-500/20' : pattern.sentiment === 'bearish' ? 'border-rose-500/20' : 'border-slate-800'
+                      "p-4 glass-strong border rounded-2xl relative overflow-hidden",
+                      pattern.sentiment === 'bullish' ? 'border-emerald-500/20' : pattern.sentiment === 'bearish' ? 'border-rose-500/20' : 'border-slate-800/50'
                     )}>
                       <div className="absolute top-0 right-0 p-2 opacity-10">
                         {pattern.sentiment === 'bullish' ? <TrendingUp className="text-emerald-500 w-12 h-12" /> : <TrendingDown className="text-rose-500 w-12 h-12" />}
@@ -2293,7 +2294,7 @@ const TechnicalAnalysis: React.FC<{ symbol: string }> = ({ symbol }) => {
                 </div>
               )}
 
-              <div className="p-4 bg-slate-950 border border-emerald-500/20 rounded-2xl relative overflow-hidden">
+              <div className="p-4 glass-strong border border-emerald-500/20 rounded-2xl relative overflow-hidden">
                  <div className="absolute top-0 right-0 p-2 opacity-10">
                     <Activity className="w-12 h-12 text-emerald-500" />
                  </div>
@@ -2311,9 +2312,9 @@ const TechnicalAnalysis: React.FC<{ symbol: string }> = ({ symbol }) => {
                  </div>
               </div>
 
-              <div className="p-4 bg-slate-950 border border-slate-800 rounded-2xl">
+              <div className="p-4 glass-strong border border-slate-800/50 rounded-2xl">
                  <div className="flex justify-between items-center mb-1">
-                    <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Volatility Status</span>
+                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Volatility Status</span>
                     <span className="text-[10px] font-black text-white uppercase">{technicalScan?.volatility?.label}</span>
                  </div>
                  <div className="h-1 bg-slate-800 rounded-full overflow-hidden">
@@ -2323,7 +2324,7 @@ const TechnicalAnalysis: React.FC<{ symbol: string }> = ({ symbol }) => {
                        className="h-full bg-blue-500"
                     />
                  </div>
-                 <p className="text-[9px] text-slate-600 mt-2 italic uppercase tracking-tighter">{technicalScan?.volatility?.description}</p>
+                 <p className="text-[9px] text-slate-400 mt-2 italic uppercase tracking-tighter">{technicalScan?.volatility?.description}</p>
               </div>
            </div>
         </Card>
@@ -2340,8 +2341,8 @@ const TechnicalAnalysis: React.FC<{ symbol: string }> = ({ symbol }) => {
             ].map(p => {
               const displayVal = typeof p.val === 'number' ? `₹${p.val.toFixed(2)}` : p.val;
               return (
-                <div key={p.label} className="p-4 bg-slate-950 rounded-2xl border border-slate-800 text-center">
-                   <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">{p.label}</p>
+                <div key={p.label} className="p-4 glass-strong rounded-2xl border border-slate-800/50 text-center">
+                   <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">{p.label}</p>
                    <p className="text-sm font-black text-white italic">{displayVal}</p>
                 </div>
               );
@@ -2357,7 +2358,7 @@ const FundamentalInsights: React.FC<{ symbol: string }> = ({ symbol }) => {
   const { data: funds, isLoading: loadingFunds } = trpc.getTrendlyneFundamentals.useQuery({ symbol });
   const { data: actions, isLoading: loadingActions } = trpc.getCorporateActions.useQuery({ symbol });
 
-  if (loadingUnified || loadingFunds || loadingActions) return <div className="p-20 text-center animate-pulse text-slate-500">Auditing financials...</div>;
+  if (loadingUnified || loadingFunds || loadingActions) return <div className="p-20 text-center animate-pulse text-slate-400">Auditing financials...</div>;
 
   // Extract ratios from consolidated data
   const ratioItems = (unifiedData as any)?.ratios?.item || [];
@@ -2424,12 +2425,12 @@ const FundamentalInsights: React.FC<{ symbol: string }> = ({ symbol }) => {
        {/* Financial Ratios Section */}
        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {displayRatios.map(ratio => (
-            <div key={ratio.label} className="p-4 bg-slate-900 border border-slate-800 rounded-2xl">
+            <div key={ratio.label} className="p-4 glass border border-slate-800/50 rounded-2xl">
                <div className="flex justify-between items-start mb-2">
                   <ratio.icon className="w-4 h-4 text-blue-400" />
-                  <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest border border-slate-800 px-1.5 py-0.5 rounded">Ratios</span>
+                  <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest border border-slate-800/50 px-1.5 py-0.5 rounded">Ratios</span>
                </div>
-               <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">{ratio.label}</p>
+               <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{ratio.label}</p>
                <p className="text-xl font-black text-white italic tracking-tighter mt-1">{getRatio(ratio.name, (ratio as any).fallbacks)}</p>
             </div>
           ))}
@@ -2450,7 +2451,7 @@ const FundamentalInsights: React.FC<{ symbol: string }> = ({ symbol }) => {
                        <span className="text-slate-400">{item.type}</span>
                        <span className="text-white">{item.val}%</span>
                     </div>
-                    <div className="h-1.5 bg-slate-950 rounded-full overflow-hidden border border-slate-800/30">
+                    <div className="h-1.5 glass-strong rounded-full overflow-hidden border border-slate-800/20">
                        <motion.div 
                           initial={{ width: 0 }}
                           animate={{ width: `${item.val}%` }}
@@ -2459,7 +2460,7 @@ const FundamentalInsights: React.FC<{ symbol: string }> = ({ symbol }) => {
                     </div>
                   </div>
                 ))}
-                <p className="text-[9px] text-slate-600 italic mt-4 font-bold text-center uppercase tracking-tighter">
+                <p className="text-[9px] text-slate-400 italic mt-4 font-bold text-center uppercase tracking-tighter">
                   Promoter pledging: {pledging}%
                 </p>
              </div>
@@ -2471,17 +2472,17 @@ const FundamentalInsights: React.FC<{ symbol: string }> = ({ symbol }) => {
           <Card title="Corporate Actions" icon={History}>
              <div className="space-y-3 mt-2 max-h-[250px] overflow-y-auto pr-2 custom-scrollbar">
                 {corpActions.length > 0 ? corpActions.map((action: any, i: number) => (
-                  <div key={i} className="flex justify-between items-center p-3 bg-slate-950 rounded-xl border border-slate-800/50 hover:border-slate-700 transition-colors">
+                  <div key={i} className="flex justify-between items-center p-3 glass-strong rounded-xl border border-slate-800/30 hover:border-slate-800/30 transition-colors">
                      <div>
                         <p className="text-[10px] font-black text-blue-500 uppercase tracking-widest">{action.purpose || 'Action'}</p>
                         <p className="text-xs font-bold text-slate-200 mt-0.5">{action.details || 'N/A'}</p>
                      </div>
-                     <span className="text-[9px] font-black text-slate-500 bg-slate-900 px-2 py-1 rounded">
+                     <span className="text-[9px] font-black text-slate-400 glass px-2 py-1 rounded">
                        {action.date || action.ex_date || 'TBA'}
                      </span>
                   </div>
                 )) : (
-                  <p className="text-center py-10 text-slate-600 italic text-xs font-bold uppercase tracking-widest">No recent actions recorded</p>
+                  <p className="text-center py-10 text-slate-400 italic text-xs font-bold uppercase tracking-widest">No recent actions recorded</p>
                 )}
              </div>
           </Card>
@@ -2522,18 +2523,18 @@ const MFAnalysis: React.FC<{ symbol: string }> = ({ symbol }) => {
   return (
     <div className="space-y-6">
        <Card title="Top Mutual Fund Holders" icon={PieChart}>
-          <div className="overflow-x-auto rounded-xl border border-slate-800">
+          <div className="overflow-x-auto rounded-xl border border-slate-800/50">
              <table className="w-full text-left">
-                <thead className="bg-slate-900">
+                <thead className="glass">
                    <tr>
                       {['Fund Name', 'Shares Held', 'Value (Cr)', 'Trend'].map(h => (
-                        <th key={h} className="px-4 py-3 text-[9px] font-black uppercase text-slate-500 tracking-widest">{h}</th>
+                        <th key={h} className="px-4 py-3 text-[9px] font-black uppercase text-slate-400 tracking-widest">{h}</th>
                       ))}
                    </tr>
                 </thead>
-                <tbody className="bg-slate-950 divide-y divide-slate-800">
+                <tbody className="glass-strong divide-y divide-slate-800">
                    {[1, 2, 3, 4, 5].map(i => (
-                     <tr key={i} className="hover:bg-slate-900 transition-colors">
+                     <tr key={i} className="hover:glass transition-colors">
                         <td className="px-4 py-3 font-bold text-white text-xs whitespace-nowrap uppercase italic">HDFC Top 100 Fund</td>
                         <td className="px-4 py-3 text-slate-400 text-xs font-bold tabular-nums">2,450,000</td>
                         <td className="px-4 py-3 text-slate-400 text-xs font-bold tabular-nums">₹412.5</td>
@@ -2559,16 +2560,16 @@ const MFAnalysis: React.FC<{ symbol: string }> = ({ symbol }) => {
                    </AreaChart>
                 </ResponsiveContainer>
              </div>
-             <p className="text-[10px] text-slate-600 mt-4 italic text-center font-bold">Consolidated inflow trend across last 6 months</p>
+             <p className="text-[10px] text-slate-400 mt-4 italic text-center font-bold">Consolidated inflow trend across last 6 months</p>
           </Card>
 
           <Card title="SIP Return Explorer" icon={TrendingUp}>
              <div className="space-y-6">
                 <div>
-                   <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">SIP Return (3Y Ann.)</p>
+                   <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">SIP Return (3Y Ann.)</p>
                    <p className="text-3xl font-black text-emerald-400 italic tracking-tighter">18.4%</p>
                 </div>
-                <div className="pt-4 border-t border-slate-800">
+                <div className="pt-4 border-t border-slate-800/50">
                    <p className="text-[10px] text-slate-400 leading-relaxed font-medium italic">
                      Historical SIP performance if invested ₹10,000 monthly since 2021.
                    </p>
@@ -2583,34 +2584,34 @@ const MFAnalysis: React.FC<{ symbol: string }> = ({ symbol }) => {
 const FnOSignals: React.FC<{ symbol: string }> = ({ symbol }) => {
   const { data: fno, isLoading } = trpc.getFnOSignals.useQuery({ symbol });
 
-  if (isLoading) return <div className="p-10 text-center animate-pulse text-slate-500">Scanning F&O Activity...</div>;
+  if (isLoading) return <div className="p-10 text-center animate-pulse text-slate-400">Scanning F&O Activity...</div>;
   if (!fno || !fno.success) return null;
 
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="p-4 bg-slate-950 border border-slate-800 rounded-2xl">
-          <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Put-Call Ratio (PCR)</p>
+        <div className="p-4 glass-strong border border-slate-800/50 rounded-2xl">
+          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Put-Call Ratio (PCR)</p>
           <p className={cn(
             "text-xl font-black italic",
             (fno.marketSentiment?.pcr ?? 0) > 1 ? "text-emerald-400" : "text-rose-400"
           )}>{fno.marketSentiment?.pcr?.toFixed(2) ?? '—'}</p>
-          <p className="text-[8px] text-slate-600 font-bold uppercase mt-1">{(fno.marketSentiment?.pcr ?? 0) > 1.2 ? 'Bullish Sentiment' : (fno.marketSentiment?.pcr ?? 0) < 0.8 ? 'Bearish Sentiment' : 'Neutral Zone'}</p>
+          <p className="text-[8px] text-slate-400 font-bold uppercase mt-1">{(fno.marketSentiment?.pcr ?? 0) > 1.2 ? 'Bullish Sentiment' : (fno.marketSentiment?.pcr ?? 0) < 0.8 ? 'Bearish Sentiment' : 'Neutral Zone'}</p>
         </div>
-        <div className="p-4 bg-slate-950 border border-slate-800 rounded-2xl">
-          <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Max Pain Strike</p>
+        <div className="p-4 glass-strong border border-slate-800/50 rounded-2xl">
+          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Max Pain Strike</p>
           <p className="text-xl font-black text-white italic">₹{fno.marketSentiment?.maxPain ?? '—'}</p>
-          <p className="text-[8px] text-slate-600 font-bold uppercase mt-1">Expected Expiry Zone</p>
+          <p className="text-[8px] text-slate-400 font-bold uppercase mt-1">Expected Expiry Zone</p>
         </div>
-        <div className="p-4 bg-slate-950 border border-slate-800 rounded-2xl">
-          <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Overall OI Trend</p>
+        <div className="p-4 glass-strong border border-slate-800/50 rounded-2xl">
+          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Overall OI Trend</p>
           <p className="text-xl font-black text-blue-400 italic uppercase">{fno.marketSentiment?.oiTrend ?? '—'}</p>
-          <p className="text-[8px] text-slate-600 font-bold uppercase mt-1">Positioning Analysis</p>
+          <p className="text-[8px] text-slate-400 font-bold uppercase mt-1">Positioning Analysis</p>
         </div>
-        <div className="p-4 bg-slate-950 border border-slate-800 rounded-2xl">
-          <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Active Signals</p>
+        <div className="p-4 glass-strong border border-slate-800/50 rounded-2xl">
+          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Active Signals</p>
           <p className="text-xl font-black text-white italic">{fno.signals?.length ?? 0}</p>
-          <p className="text-[8px] text-slate-600 font-bold uppercase mt-1">Institutional Alerts</p>
+          <p className="text-[8px] text-slate-400 font-bold uppercase mt-1">Institutional Alerts</p>
         </div>
       </div>
 
@@ -2618,7 +2619,7 @@ const FnOSignals: React.FC<{ symbol: string }> = ({ symbol }) => {
         <Card title="Unusual Options Activity" icon={Zap}>
           <div className="space-y-3 pt-2">
             {(fno.signals ?? []).filter(s => s.type === 'UNUSUAL_VOLUME' || s.type === 'PCR_SIGNAL').map((sig, idx) => (
-              <div key={idx} className="p-4 bg-slate-900/50 border border-slate-800/80 rounded-2xl group hover:border-blue-500/30 transition-all">
+              <div key={idx} className="p-4 glass/50 border border-slate-800/80 rounded-2xl group hover:border-blue-500/30 transition-all">
                 <div className="flex justify-between items-start mb-2">
                   <div className="flex items-center gap-2">
                     <div className={cn(
@@ -2629,7 +2630,7 @@ const FnOSignals: React.FC<{ symbol: string }> = ({ symbol }) => {
                   </div>
                   <span className={cn(
                     "text-[8px] font-black px-2 py-0.5 rounded uppercase tracking-widest",
-                    sig.confidence === 'high' ? "bg-blue-500/20 text-blue-400" : "bg-slate-800 text-slate-500"
+                    sig.confidence === 'high' ? "bg-blue-500/20 text-blue-400" : "bg-slate-800 text-slate-400"
                   )}>{sig.confidence} Confidence</span>
                 </div>
                 <p className="text-[11px] text-slate-400 font-medium leading-relaxed italic">{sig.description}</p>
@@ -2641,7 +2642,7 @@ const FnOSignals: React.FC<{ symbol: string }> = ({ symbol }) => {
         <Card title="Significant OI Shifts" icon={Activity}>
            <div className="space-y-3 pt-2">
             {(fno.signals ?? []).filter(s => s.type === 'OI_SPIKE' || s.type === 'BUILDUP').map((sig, idx) => (
-              <div key={idx} className="p-4 bg-slate-900/50 border border-slate-800/80 rounded-2xl group hover:border-purple-500/30 transition-all">
+              <div key={idx} className="p-4 glass/50 border border-slate-800/80 rounded-2xl group hover:border-purple-500/30 transition-all">
                 <div className="flex justify-between items-start mb-2">
                   <div className="flex items-center gap-2">
                     <div className={cn(
@@ -2650,7 +2651,7 @@ const FnOSignals: React.FC<{ symbol: string }> = ({ symbol }) => {
                     )} />
                     <h5 className="text-[10px] font-black text-white uppercase tracking-widest">{sig.value}</h5>
                   </div>
-                  <span className="text-[8px] font-black px-2 py-0.5 rounded bg-slate-800 text-slate-500 uppercase tracking-widest">{sig.type}</span>
+                  <span className="text-[8px] font-black px-2 py-0.5 rounded bg-slate-800 text-slate-400 uppercase tracking-widest">{sig.type}</span>
                 </div>
                 <p className="text-[11px] text-slate-400 font-medium leading-relaxed italic">{sig.description}</p>
               </div>
@@ -2670,10 +2671,10 @@ const NewsTab: React.FC<{ symbol: string }> = ({ symbol }) => {
 
   if (news.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-20 bg-slate-950 rounded-2xl border border-slate-800 border-dashed">
-         <Activity className="w-12 h-12 text-slate-800 animate-pulse mb-4" />
-         <h3 className="text-slate-500 font-black text-lg uppercase tracking-tighter italic text-center">No Targeted News Found</h3>
-         <p className="text-slate-600 text-[10px] uppercase font-bold tracking-widest mt-2">{symbol} section under observation</p>
+      <div className="flex flex-col items-center justify-center py-20 glass-strong rounded-2xl border border-slate-800/50 border-dashed">
+         <Activity className="w-12 h-12 text-slate-200 animate-pulse mb-4" />
+         <h3 className="text-slate-400 font-black text-lg uppercase tracking-tighter italic text-center">No Targeted News Found</h3>
+         <p className="text-slate-400 text-[10px] uppercase font-bold tracking-widest mt-2">{symbol} section under observation</p>
       </div>
     );
   }
@@ -2683,7 +2684,7 @@ const NewsTab: React.FC<{ symbol: string }> = ({ symbol }) => {
       <Card title={`${symbol} Intel Feed`} icon={Activity}>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
           {news.map((item) => (
-            <div key={item.id} className="p-5 bg-slate-950 border border-slate-800 rounded-2xl hover:border-blue-500/30 transition-all group">
+            <div key={item.id} className="p-5 glass-strong border border-slate-800/50 rounded-2xl hover:border-blue-500/30 transition-all group">
               <div className="flex gap-3 items-center mb-3">
                 <span className={cn(
                   "text-[9px] font-black px-2 py-0.5 rounded uppercase tracking-widest",
@@ -2692,20 +2693,20 @@ const NewsTab: React.FC<{ symbol: string }> = ({ symbol }) => {
                 )}>
                   {item.category}
                 </span>
-                <span className="text-[9px] font-bold text-slate-600 uppercase tracking-widest">{item.time}</span>
-                <span className="text-[9px] font-black text-slate-700 mx-1">•</span>
+                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{item.time}</span>
+                <span className="text-[9px] font-black text-slate-300 mx-1">•</span>
                 <span className="text-[9px] font-black text-blue-500/80 uppercase tracking-widest">{item.source}</span>
               </div>
               <h4 className="text-lg font-black text-white italic tracking-tighter leading-tight mb-2 group-hover:text-blue-400 transition-colors">
                 {item.title}
               </h4>
-              <p className="text-[11px] text-slate-500 font-medium leading-relaxed italic mb-4 line-clamp-3">
+              <p className="text-[11px] text-slate-400 font-medium leading-relaxed italic mb-4 line-clamp-3">
                 {item.summary}
               </p>
               <div className="flex justify-between items-center">
                 <div className="flex gap-2">
                   {item.relatedSymbols?.map(sym => (
-                    <span key={sym} className="text-[9px] font-black text-slate-400 bg-slate-900 px-2 py-0.5 border border-slate-800 rounded uppercase tracking-tighter">
+                    <span key={sym} className="text-[9px] font-black text-slate-400 glass px-2 py-0.5 border border-slate-800/50 rounded uppercase tracking-tighter">
                       ${sym}
                     </span>
                   ))}
@@ -2820,11 +2821,11 @@ const StockDetails: React.FC<{
   if (!initialStock && isLoading) {
     return (
       <div className="p-20 text-center">
-        <button onClick={onBack} className="mb-8 p-2 bg-slate-900 border border-slate-800 rounded-xl text-slate-400 hover:text-white transition-all inline-block">
+        <button onClick={onBack} className="mb-8 p-2 glass border border-slate-800/50 rounded-xl text-slate-400 hover:text-white transition-all inline-block">
           <ArrowLeft className="w-5 h-5" />
         </button>
         <div className="text-2xl font-black text-white italic tracking-tighter uppercase mb-2">{symbol}</div>
-        <div className="animate-pulse text-slate-500 text-sm">Loading live data...</div>
+        <div className="animate-pulse text-slate-400 text-sm">Loading live data...</div>
       </div>
     );
   }
@@ -2839,7 +2840,7 @@ const StockDetails: React.FC<{
         <div className="flex items-center gap-4">
           <button
             onClick={onBack}
-            className="p-2 bg-slate-900 border border-slate-800 rounded-xl text-slate-400 hover:text-white transition-all"
+            className="p-2 glass border border-slate-800/50 rounded-xl text-slate-400 hover:text-white transition-all"
           >
             <ArrowLeft className="w-5 h-5" />
           </button>
@@ -2848,13 +2849,13 @@ const StockDetails: React.FC<{
               <h1 className="text-3xl font-black text-white italic tracking-tighter uppercase">{symbol}</h1>
               {priceLoading
                 ? <div className="h-6 w-40 bg-slate-800 rounded animate-pulse" />
-                : <span className="text-slate-500 font-bold text-sm bg-slate-900 px-3 py-1 rounded-lg border border-slate-800">{displayName}</span>
+                : <span className="text-slate-400 font-bold text-sm glass px-3 py-1 rounded-lg border border-slate-800/50">{displayName}</span>
               }
               <button
                 onClick={() => onToggleWatchlist(symbol)}
                 className={cn(
                   "p-2 rounded-xl border transition-all",
-                  watchlist.includes(symbol) ? "bg-amber-500/10 border-amber-500/20 text-amber-500" : "bg-slate-900 border-slate-800 text-slate-600 hover:text-slate-400"
+                  watchlist.includes(symbol) ? "bg-amber-500/10 border-amber-500/20 text-amber-500" : "glass border-slate-800/50 text-slate-400 hover:text-slate-400"
                 )}
               >
                 <WatchlistIcon className={cn("w-5 h-5", watchlist.includes(symbol) && "fill-amber-500")} />
@@ -2864,7 +2865,7 @@ const StockDetails: React.FC<{
               {priceLoading
                 ? <div className="h-7 w-32 bg-slate-800 rounded animate-pulse" />
                 : priceUnavailable
-                  ? <span className="text-sm text-slate-500 italic">Live price unavailable</span>
+                  ? <span className="text-sm text-slate-400 italic">Live price unavailable</span>
                   : <>
                       <span className="text-2xl font-black text-white tabular-nums">₹{stock?.price?.toLocaleString() ?? '—'}</span>
                       <span className={cn(
@@ -2884,14 +2885,14 @@ const StockDetails: React.FC<{
           <button className="flex-1 md:flex-none bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-2xl font-black text-sm transition-all shadow-[0_10px_20px_rgba(37,99,235,0.2)] uppercase tracking-widest">
             Invest Now
           </button>
-          <button className="p-3 bg-slate-900 border border-slate-800 rounded-2xl text-slate-400 hover:text-white transition-all">
+          <button className="p-3 glass border border-slate-800/50 rounded-2xl text-slate-400 hover:text-white transition-all">
             <Heart className="w-5 h-5" />
           </button>
         </div>
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-2 border-b border-slate-800 pb-px overflow-x-auto hide-scrollbar">
+      <div className="flex gap-2 border-b border-slate-800/50 pb-px overflow-x-auto hide-scrollbar">
         {[
           { id: 'insights', label: 'Overview' },
           { id: 'technicals', label: 'Technical' },
@@ -2909,7 +2910,7 @@ const StockDetails: React.FC<{
             onClick={() => setActiveTab(tab.id)}
             className={cn(
               "px-6 py-3 text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap border-b-2",
-              activeTab === tab.id ? "border-blue-500 text-blue-500" : "border-transparent text-slate-500 hover:text-white"
+              activeTab === tab.id ? "border-blue-500 text-blue-500" : "border-transparent text-slate-400 hover:text-white"
             )}
           >
             {tab.label}
@@ -2931,7 +2932,7 @@ const StockDetails: React.FC<{
                 <motion.div 
                   initial={{ opacity: 0, y: -10 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="p-4 bg-slate-950 border border-blue-500/20 rounded-2xl relative overflow-hidden"
+                  className="p-4 glass-strong border border-blue-500/20 rounded-2xl relative overflow-hidden"
                 >
                   <div className="absolute top-0 right-0 p-3 opacity-10">
                     <Activity className="w-16 h-16 text-blue-500" />
@@ -2957,7 +2958,7 @@ const StockDetails: React.FC<{
                       </p>
                       <div className="flex items-center gap-4 mt-3">
                          <div className="flex items-center gap-1.5">
-                            <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Sentiment:</span>
+                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Sentiment:</span>
                             <span className={cn(
                               "text-[9px] font-black uppercase px-2 py-0.5 rounded",
                               patterns[patterns.length - 1].sentiment === 'bullish' ? "bg-emerald-500/10 text-emerald-400" :
@@ -2967,7 +2968,7 @@ const StockDetails: React.FC<{
                             </span>
                          </div>
                          <div className="flex items-center gap-1.5">
-                            <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Confidence:</span>
+                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Confidence:</span>
                             <span className="text-[9px] font-black text-white uppercase">{patterns[patterns.length - 1].confidence}</span>
                          </div>
                       </div>
@@ -2979,15 +2980,15 @@ const StockDetails: React.FC<{
               <Card title="Market Sentiment Summary" icon={Info}>
                    <div className="space-y-4">
                       <p className="text-xs text-slate-400 leading-relaxed italic">
-                        {stock?.name ?? displayName} is currently showing a {(stock?.changePct ?? 0) > 0 ? 'bullish' : 'bearish'} bias. The technical rating stands at <span className="text-white font-bold">{(unifiedData as any)?.technicalRating?.text || 'Neutral'}</span> with high institutional interest observed in recent sessions.
+                        {stock?.name ?? displayName} is currently showing a {(stock?.changePct ?? 0) > 0 ? 'bullish' : 'bearish'} bias. The technical rating stands at <span className="text-slate-200 font-bold">{(unifiedData as any)?.technicalRating?.text || 'Neutral'}</span> with high institutional interest observed in recent sessions.
                       </p>
                       <div className="flex gap-4">
-                         <div className="flex-1 p-3 bg-slate-950 rounded-xl border border-slate-800">
-                            <span className="text-[8px] font-black text-slate-500 uppercase block mb-1">52W High</span>
+                         <div className="flex-1 p-3 glass-strong rounded-xl border border-slate-800/50">
+                            <span className="text-[8px] font-black text-slate-400 uppercase block mb-1">52W High</span>
                             <span className="text-xs font-bold text-white">{stock?.high ? `₹${stock.high + 100}` : '—'}</span>
                          </div>
-                         <div className="flex-1 p-3 bg-slate-950 rounded-xl border border-slate-800">
-                            <span className="text-[8px] font-black text-slate-500 uppercase block mb-1">52W Low</span>
+                         <div className="flex-1 p-3 glass-strong rounded-xl border border-slate-800/50">
+                            <span className="text-[8px] font-black text-slate-400 uppercase block mb-1">52W Low</span>
                             <span className="text-xs font-bold text-white">{stock?.low ? `₹${stock.low - 50}` : '—'}</span>
                          </div>
                       </div>
@@ -3003,7 +3004,7 @@ const StockDetails: React.FC<{
                           <Activity className="w-8 h-8 text-blue-500 animate-pulse" />
                         </div>
                         <h4 className="text-lg font-black text-white italic uppercase tracking-tighter mb-2">Detailed Report Not Generated</h4>
-                        <p className="text-slate-500 text-xs max-w-md mb-6 uppercase font-bold tracking-widest leading-loose">
+                        <p className="text-slate-400 text-xs max-w-md mb-6 uppercase font-bold tracking-widest leading-loose">
                           Harness the power of Bharat Stock AI to generate a high-fidelity intelligence report including fundamental analysis, technical positioning, and risk scoring.
                         </p>
                         <button 
@@ -3024,7 +3025,7 @@ const StockDetails: React.FC<{
                         animate={{ opacity: 1, y: 0 }}
                         className="space-y-8"
                       >
-                        <div className="flex flex-col md:flex-row justify-between items-start gap-4 pb-6 border-b border-slate-800">
+                        <div className="flex flex-col md:flex-row justify-between items-start gap-4 pb-6 border-b border-slate-800/50">
                           <div>
                             <h3 className="text-2xl font-black text-white italic tracking-tighter uppercase mb-1">{report.title}</h3>
                             <div className="flex items-center gap-4">
@@ -3032,7 +3033,7 @@ const StockDetails: React.FC<{
                                 <Bookmark className="w-3 h-3" />
                                 Institutional Grade
                               </span>
-                              <span className="text-[10px] font-bold text-slate-600 uppercase tracking-widest">
+                              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
                                 Timestamp: {report.generatedAt ? format(new Date(report.generatedAt), 'MMM dd, yyyy HH:mm') : 'Live'}
                               </span>
                             </div>
@@ -3042,7 +3043,7 @@ const StockDetails: React.FC<{
                             report.outlook === 'BULLISH' ? "bg-emerald-500/10 border-emerald-500/20" : "bg-rose-500/10 border-rose-500/20"
                           )}>
                              <div className="text-right">
-                               <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Overall Outlook</p>
+                               <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Overall Outlook</p>
                                <p className={cn(
                                  "text-sm font-black italic",
                                  report.outlook === 'BULLISH' ? "text-emerald-400" : "text-rose-400"
@@ -3063,7 +3064,7 @@ const StockDetails: React.FC<{
                               
                               <div>
                                 <h5 className="text-[11px] font-black text-slate-300 uppercase tracking-widest border-l-2 border-pink-500 pl-3 mb-3">Investment Thesis</h5>
-                                <div className="p-5 bg-slate-950 rounded-2xl border border-slate-800 relative overflow-hidden">
+                                <div className="p-5 glass-strong rounded-2xl border border-slate-800/50 relative overflow-hidden">
                                   <div className="absolute top-0 right-0 p-4 opacity-5">
                                     <Activity className="w-24 h-24 text-slate-400" />
                                   </div>
@@ -3079,9 +3080,9 @@ const StockDetails: React.FC<{
                                 <h5 className="text-[11px] font-black text-slate-300 uppercase tracking-widest border-l-2 border-rose-500 pl-3 mb-3">Risk Assessment</h5>
                                 <div className="space-y-3">
                                   {report.riskFactors.map((risk: string, i: number) => (
-                                    <div key={i} className="flex gap-3 p-3 bg-slate-950 rounded-xl border border-rose-500/10 group hover:border-rose-500/20 transition-all">
+                                    <div key={i} className="flex gap-3 p-3 glass-strong rounded-xl border border-rose-500/10 group hover:border-rose-500/20 transition-all">
                                       <AlertCircle className="w-4 h-4 text-rose-500 flex-shrink-0 mt-0.5" />
-                                      <p className="text-[11px] text-slate-500 font-bold leading-snug">{risk}</p>
+                                      <p className="text-[11px] text-slate-400 font-bold leading-snug">{risk}</p>
                                     </div>
                                   ))}
                                 </div>
@@ -3092,7 +3093,7 @@ const StockDetails: React.FC<{
                                   <Zap className="w-3 h-3 fill-blue-400" />
                                   AI Probability Core
                                 </h6>
-                                <p className="text-[10px] text-slate-500 font-bold leading-relaxed">
+                                <p className="text-[10px] text-slate-400 font-bold leading-relaxed">
                                   Based on current volatility bands and historical earnings surprises, our core engine predicts a 68.4% probability of {report.outlook.toLowerCase()} continuation over the next 22 trading sessions.
                                 </p>
                               </div>
@@ -3112,7 +3113,7 @@ const StockDetails: React.FC<{
                     {['1m', '5m', '15m', '1H', '1D', '1W'].map(tf => (
                       <button key={tf} className={cn(
                         "px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all border",
-                        tf === '15m' ? "bg-blue-600 border-blue-600 text-white" : "bg-slate-950 border-slate-800 text-slate-500 hover:text-white"
+                        tf === '15m' ? "bg-blue-600 border-blue-600 text-white" : "glass-strong border-slate-800/50 text-slate-400 hover:text-white"
                       )}>
                         {tf}
                       </button>
@@ -3139,8 +3140,8 @@ const StockDetails: React.FC<{
                             if (active && payload && payload.length) {
                               const data = payload[0].payload;
                               return (
-                                <div className="bg-slate-950 border border-slate-800 p-3 rounded-xl shadow-2xl backdrop-blur-md">
-                                  <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 border-b border-slate-800 pb-1">{data.time}</p>
+                                <div className="glass-strong border border-slate-800/50 p-3 rounded-xl shadow-2xl backdrop-blur-md">
+                                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2 border-b border-slate-800/50 pb-1">{data.time}</p>
                                   <div className="space-y-1.5">
                                     <div className="flex justify-between gap-4">
                                       <span className="text-[10px] font-bold text-slate-400">O:</span>
@@ -3265,15 +3266,15 @@ const StockDetails: React.FC<{
                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <Card title="Institutional Flow (FII/DII)" icon={TrendingUp}>
                      <div className="space-y-4">
-                        <div className="flex justify-between items-center p-3 bg-slate-950 rounded-xl border border-slate-800">
+                        <div className="flex justify-between items-center p-3 glass-strong rounded-xl border border-slate-800/50">
                            <span className="text-xs font-bold text-slate-400">Net FII Position</span>
                            <span className="text-emerald-400 font-black">+₹4,250 Cr</span>
                         </div>
-                        <div className="flex justify-between items-center p-3 bg-slate-950 rounded-xl border border-slate-800">
+                        <div className="flex justify-between items-center p-3 glass-strong rounded-xl border border-slate-800/50">
                            <span className="text-xs font-bold text-slate-400">DII Activity</span>
                            <span className="text-rose-400 font-black">-₹1,120 Cr</span>
                         </div>
-                        <p className="text-[9px] text-slate-600 italic text-center uppercase tracking-widest mt-2 font-bold">Update: 15 mins ago</p>
+                        <p className="text-[9px] text-slate-400 italic text-center uppercase tracking-widest mt-2 font-bold">Update: 15 mins ago</p>
                      </div>
                   </Card>
                </div>
@@ -3282,10 +3283,10 @@ const StockDetails: React.FC<{
 
           {/* Other tabs can be implemented similarly */}
           {activeTab !== 'insights' && activeTab !== 'fno' && activeTab !== 'technicals' && activeTab !== 'fundamentals' && activeTab !== 'financials' && activeTab !== 'peers' && activeTab !== 'mf' && activeTab !== 'news' && activeTab !== 'mc' && activeTab !== 'trendlyne' && (
-            <div className="flex flex-col items-center justify-center py-20 bg-slate-950 rounded-2xl border border-slate-800 border-dashed">
-               <Activity className="w-12 h-12 text-slate-800 animate-pulse mb-4" />
-               <h3 className="text-slate-500 font-black text-lg uppercase tracking-tighter italic">Coming to Bharat Stock Pro</h3>
-               <p className="text-slate-600 text-[10px] uppercase font-bold tracking-widest mt-2">{activeTab} section under maintenance</p>
+            <div className="flex flex-col items-center justify-center py-20 glass-strong rounded-2xl border border-slate-800/50 border-dashed">
+               <Activity className="w-12 h-12 text-slate-200 animate-pulse mb-4" />
+               <h3 className="text-slate-400 font-black text-lg uppercase tracking-tighter italic">Coming to Bharat Stock Pro</h3>
+               <p className="text-slate-400 text-[10px] uppercase font-bold tracking-widest mt-2">{activeTab} section under maintenance</p>
             </div>
           )}        </div>
 
@@ -3298,25 +3299,25 @@ const StockDetails: React.FC<{
                     <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">RSI (14)</span>
                     <span className="text-amber-400 font-bold text-xs uppercase tracking-tighter">Neutral (58.4)</span>
                   </div>
-                  <div className="w-full h-2 bg-slate-950 rounded-full relative overflow-hidden border border-slate-800">
+                  <div className="w-full h-2 glass-strong rounded-full relative overflow-hidden border border-slate-800/50">
                     <div className="absolute inset-y-0 left-[30%] right-[70%] bg-blue-500/10 border-x border-blue-500/20" />
                     <div className="absolute top-0 h-full w-1 bg-amber-400 left-[58.4%]" />
                   </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
-                  <div className="p-3 bg-slate-950 rounded-xl border border-slate-800">
-                    <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">MACD</p>
+                  <div className="p-3 glass-strong rounded-xl border border-slate-800/50">
+                    <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">MACD</p>
                     <p className="text-xs font-bold text-emerald-400 italic">Bullish Crossover</p>
                   </div>
-                  <div className="p-3 bg-slate-950 rounded-xl border border-slate-800">
-                    <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">Bollinger</p>
+                  <div className="p-3 glass-strong rounded-xl border border-slate-800/50">
+                    <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Bollinger</p>
                     <p className="text-xs font-bold text-slate-300 italic">Upper Band Touch</p>
                   </div>
                 </div>
 
                 <div className="space-y-2">
-                   <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest pl-1">Pivot Points (Standard)</p>
+                   <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Pivot Points (Standard)</p>
                    <div className="space-y-1">
                       {[
                         { label: 'R2', val: (stock?.high ?? 0) + 10, color: 'text-emerald-400' },
@@ -3327,7 +3328,7 @@ const StockDetails: React.FC<{
                       ].map(p => {
                          const displayVal = typeof p.val === 'number' ? `₹${p.val.toFixed(2)}` : p.val;
                          return (
-                           <div key={p.label} className="flex justify-between items-center px-4 py-2 bg-slate-950 rounded-lg border border-slate-800/50">
+                           <div key={p.label} className="flex justify-between items-center px-4 py-2 glass-strong rounded-lg border border-slate-800/30">
                               <span className={cn("text-[9px] font-black uppercase tracking-widest", p.color)}>{p.label}</span>
                               <span className="text-xs font-bold tabular-nums text-slate-300">{displayVal}</span>
                            </div>
@@ -3338,7 +3339,7 @@ const StockDetails: React.FC<{
 
                 <div className="pt-2">
                   {report ? (
-                    <div className="p-4 bg-slate-950 border border-blue-500/30 rounded-xl space-y-3">
+                    <div className="p-4 glass-strong border border-blue-500/30 rounded-xl space-y-3">
                       <h6 className="text-[10px] font-black text-blue-400 uppercase italic">Intelligence Report Ready</h6>
                       <p className="text-[11px] text-white/80 leading-relaxed italic">"{report.summary}"</p>
                       <div className="flex justify-between items-center bg-blue-500/10 p-2 rounded">
@@ -3352,7 +3353,7 @@ const StockDetails: React.FC<{
                       disabled={reportMutation.isPending}
                       className={cn(
                         "w-full py-3 rounded-xl border font-black text-[10px] uppercase tracking-widest transition-all",
-                        reportMutation.isPending ? "bg-slate-900 border-slate-800 text-slate-600" : "bg-blue-600 border-blue-600 text-white hover:bg-blue-700 shadow-[0_5px_15px_rgba(37,99,235,0.3)]"
+                        reportMutation.isPending ? "glass border-slate-800/50 text-slate-400" : "bg-blue-600 border-blue-600 text-white hover:bg-blue-700 shadow-[0_5px_15px_rgba(37,99,235,0.3)]"
                       )}
                     >
                       {reportMutation.isPending ? 'Crunching Data...' : 'Generate Analyst Report'}
@@ -3366,7 +3367,7 @@ const StockDetails: React.FC<{
              <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2 hide-scrollbar">
                 {news.length > 0 ? news.map(item => (
                    <div key={item.id} className="group cursor-pointer">
-                      <p className="text-[8px] font-bold text-slate-600 uppercase tracking-widest mb-1">{item.time}</p>
+                      <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest mb-1">{item.time}</p>
                       <h4 className="text-xs font-bold text-slate-300 leading-snug group-hover:text-white transition-colors">
                         {item.title}
                       </h4>
@@ -3374,7 +3375,7 @@ const StockDetails: React.FC<{
                    </div>
                 )) : (
                   <div className="text-center py-8">
-                     <p className="text-[10px] text-slate-600 font-bold uppercase tracking-widest italic">No specific news for {symbol}</p>
+                     <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest italic">No specific news for {symbol}</p>
                   </div>
                 )}
              </div>
@@ -3396,6 +3397,7 @@ export default function App() {
   const setActiveTab = (tab: string) => navigate('/' + tab);
 
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
+  const [drawerSymbol, setDrawerSymbol] = useState<string | null>(null);
   const [selectedIndex, setSelectedIndex] = useState<{ id: string; name: string } | null>(null);
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [watchlist, setWatchlist] = useState<string[]>([]);
@@ -3549,7 +3551,7 @@ export default function App() {
   };
 
   if (loading) return (
-    <div className="h-screen w-screen bg-slate-950 flex items-center justify-center">
+    <div className="h-screen w-screen glass-strong flex items-center justify-center">
       <div className="flex flex-col items-center gap-4">
         <Zap className="text-blue-500 w-12 h-12 fill-blue-500 animate-pulse" />
         <span className="text-slate-400 text-xs font-black uppercase tracking-[0.4em] animate-pulse italic">Connecting to NSE Gateway...</span>
@@ -3565,7 +3567,7 @@ export default function App() {
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         stocks={stocks}
-        onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }}
+        onSelectStock={(s) => setDrawerSymbol(s)}
         displayIndices={displayIndices}
         onSelectIndexByName={handleSelectIndexByName}
       >
@@ -3583,7 +3585,7 @@ export default function App() {
                 watchlist={watchlist}
                 stocks={stocks}
                 watchlistDetails={watchlistDetails || []}
-                onSelectStock={(s) => { setSelectedSymbol(s); setActiveTab('details'); }}
+                onSelectStock={(s) => setDrawerSymbol(s)}
                 onRemove={toggleWatchlist}
               />
             </motion.div>
@@ -3597,10 +3599,10 @@ export default function App() {
               className="pb-10"
             >
               <Routes>
-                <Route path="/" element={<DashboardPage stocks={stocks} onNewSignal={addToast} onSelectStock={(s) => { setSelectedSymbol(s); navigate('/details'); }} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} onSelectIndex={(id, name) => { setSelectedIndex({ id, name }); navigate('/indices'); }} />} />
-                <Route path="/dashboard" element={<DashboardPage stocks={stocks} onNewSignal={addToast} onSelectStock={(s) => { setSelectedSymbol(s); navigate('/details'); }} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} onSelectIndex={(id, name) => { setSelectedIndex({ id, name }); navigate('/indices'); }} />} />
-                <Route path="/top-rated" element={<TopRatedStocks onSelectStock={(s) => { setSelectedSymbol(s); navigate('/details'); }} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
-                <Route path="/indices" element={<IndicesPage onSelectStock={(s) => { setSelectedSymbol(s); navigate('/details'); }} selectedIndex={selectedIndex} setSelectedIndex={setSelectedIndex} />} />
+                <Route path="/" element={<DashboardPage stocks={stocks} onNewSignal={addToast} onSelectStock={(s) => setDrawerSymbol(s)} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} onSelectIndex={(id, name) => { setSelectedIndex({ id, name }); navigate('/indices'); }} />} />
+                <Route path="/dashboard" element={<DashboardPage stocks={stocks} onNewSignal={addToast} onSelectStock={(s) => setDrawerSymbol(s)} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} onSelectIndex={(id, name) => { setSelectedIndex({ id, name }); navigate('/indices'); }} />} />
+                <Route path="/top-rated" element={<TopRatedStocks onSelectStock={(s) => setDrawerSymbol(s)} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
+                <Route path="/indices" element={<IndicesPage onSelectStock={(s) => setDrawerSymbol(s)} selectedIndex={selectedIndex} setSelectedIndex={setSelectedIndex} />} />
                 <Route path="/market-map" element={
                 <div className="p-6 space-y-6">
                   <Card title="NSE Market Heatmap" icon={Activity}>
@@ -3612,18 +3614,18 @@ export default function App() {
                   </div>
                 </div>
               } />
-              <Route path="/screener" element={<Screener stocks={stocks} onSelectStock={(s) => { setSelectedSymbol(s); navigate('/details'); }} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
-              <Route path="/trendlyne" element={<TrendlyneScreenerPanel onSelectStock={(s) => { setSelectedSymbol(s); navigate('/details'); }} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
-              <Route path="/discover" element={<div className="p-6"><NSEStockDiscovery onSelectStock={(s) => { setSelectedSymbol(s); navigate('/details'); }} /></div>} />
+              <Route path="/screener" element={<Screener stocks={stocks} onSelectStock={(s) => setDrawerSymbol(s)} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
+              <Route path="/trendlyne" element={<TrendlyneScreenerPanel onSelectStock={(s) => setDrawerSymbol(s)} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
+              <Route path="/discover" element={<div className="p-6"><NSEStockDiscovery onSelectStock={(s) => setDrawerSymbol(s)} /></div>} />
               <Route path="/smart-money" element={
-                <SmartMoneyPage onSelectStock={(s) => { setSelectedSymbol(s); navigate('/details'); }} />
+                <SmartMoneyPage onSelectStock={(s) => setDrawerSymbol(s)} />
               } />
               <Route path="/earnings" element={
-                <EarningsPage onSelectStock={(s) => { setSelectedSymbol(s); navigate('/details'); }} />
+                <EarningsPage onSelectStock={(s) => setDrawerSymbol(s)} />
               } />
-              <Route path="/fno-scanners" element={<FnOIntelligenceCenter onSelectStock={(s) => { setSelectedSymbol(s); navigate('/details'); }} />} />
+              <Route path="/fno-scanners" element={<FnOIntelligenceCenter onSelectStock={(s) => setDrawerSymbol(s)} />} />
               <Route path="/options" element={<div className="p-6"><OptionsIntelligence /></div>} />
-              <Route path="/trade-cockpit" element={<TradeDecisionCockpit onSelectStock={(s) => { setSelectedSymbol(s); navigate('/details'); }} />} />
+              <Route path="/trade-cockpit" element={<TradeDecisionCockpit onSelectStock={(s) => setDrawerSymbol(s)} />} />
               <Route path="/details" element={selectedSymbol ? (
                 <StockDetails
                   key={selectedSymbol}
@@ -3632,14 +3634,14 @@ export default function App() {
                   onBack={() => navigate('/dashboard')}
                   watchlist={watchlist}
                   onToggleWatchlist={toggleWatchlist}
-                  onSelectStock={(s) => { setSelectedSymbol(s); navigate('/details'); }}
+                  onSelectStock={(s) => setDrawerSymbol(s)}
                 />
               ) : <div className="p-6">Select a stock to view details</div>} />
               <Route path="/backtest" element={<Backtest stocks={stocks} />} />
-              <Route path="/signals" element={<DailySignals onSelectStock={(s) => { setSelectedSymbol(s); navigate('/details'); }} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
-              <Route path="/strategy" element={<StrategyIntelligence onSelectStock={(s) => { setSelectedSymbol(s); navigate('/details'); }} />} />
-              <Route path="/strategy-builder" element={<InvestmentStrategy onSelectStock={(s) => { setSelectedSymbol(s); navigate('/details'); }} />} />
-              <Route path="/sentiment" element={<SentimentIntelligence onSelectStock={(s) => { setSelectedSymbol(s); navigate('/details'); }} />} />
+              <Route path="/signals" element={<DailySignals onSelectStock={(s) => setDrawerSymbol(s)} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
+              <Route path="/strategy" element={<StrategyIntelligence onSelectStock={(s) => setDrawerSymbol(s)} />} />
+              <Route path="/strategy-builder" element={<InvestmentStrategy onSelectStock={(s) => setDrawerSymbol(s)} />} />
+              <Route path="/sentiment" element={<SentimentIntelligence onSelectStock={(s) => setDrawerSymbol(s)} />} />
               <Route path="/economics" element={
                 <div className="p-6 space-y-6">
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -3667,6 +3669,15 @@ export default function App() {
         </AnimatePresence>
       </AppShell>
 
+      <SlideOutDrawer
+        symbol={drawerSymbol}
+        isOpen={drawerSymbol !== null}
+        onClose={() => setDrawerSymbol(null)}
+        watchlist={watchlist}
+        onToggleWatchlist={toggleWatchlist}
+        onSelectStock={setDrawerSymbol}
+      />
+
       <AlertsToast />
 
       {/* Signal toast notifications */}
@@ -3679,7 +3690,7 @@ export default function App() {
               animate={{ opacity: 1, x: 0, scale: 1 }}
               exit={{ opacity: 0, x: 20, scale: 0.95 }}
               className={cn(
-                'w-72 bg-slate-900 border-l-4 p-4 rounded-xl shadow-2xl pointer-events-auto flex gap-3',
+                'w-72 glass border-l-4 p-4 rounded-xl shadow-2xl pointer-events-auto flex gap-3',
                 toast.type === 'BUY' ? 'border-emerald-500' : 'border-rose-500',
               )}
             >
@@ -3692,7 +3703,7 @@ export default function App() {
               <div className="min-w-0">
                 <div className="flex items-center gap-2 mb-0.5">
                   <h5 className="text-[10px] font-black uppercase tracking-widest text-slate-400 truncate">{toast.title}</h5>
-                  <span className="text-[9px] font-black text-slate-500 bg-slate-950 px-1 border border-slate-800 rounded shrink-0">{toast.confidence}%</span>
+                  <span className="text-[9px] font-black text-slate-400 glass-strong px-1 border border-slate-800/50 rounded shrink-0">{toast.confidence}%</span>
                 </div>
                 <p className="text-[11px] text-white font-bold line-clamp-2 leading-relaxed italic opacity-90">
                   {toast.message}
@@ -3700,7 +3711,7 @@ export default function App() {
               </div>
               <button
                 onClick={() => setToasts(prev => prev.filter(t => t.id !== toast.id))}
-                className="text-slate-600 hover:text-white transition-colors ml-auto shrink-0"
+                className="text-slate-400 hover:text-white transition-colors ml-auto shrink-0"
               >
                 <Plus className="w-4 h-4 rotate-45" />
               </button>

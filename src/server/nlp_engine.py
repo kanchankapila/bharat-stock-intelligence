@@ -8,7 +8,7 @@ except ImportError:
 
 # Bump this version whenever keyword rules or model change.
 # scoring_engine checks this and rebuilds screener_master when it changes.
-NLP_VERSION = "3.6"
+NLP_VERSION = "3.7"
 
 
 class FinBERTInference:
@@ -33,7 +33,7 @@ class FinBERTInference:
 
     def predict(self, text: str) -> Dict[str, Any]:
         if not self.classifier:
-            return {"label": "neutral", "score": 0.0}
+            return {"sentiment": "neutral", "score": 0.0}
         
         try:
             # Truncate text to BERT's max length (512 tokens, approx 300-400 words)
@@ -200,6 +200,12 @@ class NLPScreenerInference:
         r'\bweaker?\b',
         r'negative\s+return',
         r'avoid',
+        # Compound negative patterns
+        r'momentum\s+trap',
+        r'value\s+trap',
+        r'wealth\s+destroy',
+        r'dvm\s+low',
+        r'low\s+dvm',
     ]
 
     SIGNAL_TYPE_PATTERNS: Dict[str, List[str]] = {
@@ -316,6 +322,11 @@ class NLPScreenerInference:
             r'momentum\s+score',
             r'52.?week',
             r'\d+.?year.?(?:high|low)',
+            r'\bdivergence\b',
+            r'\bcci\b',
+            r'\bvwap\b',
+            r'\bfibonacci\b',
+            r'\bpivot\b',
         ],
         'valuation': [
             r'\bpe\b',
@@ -413,7 +424,11 @@ class NLPScreenerInference:
             else:
                 # Extra heuristics for financial terms that are naturally directional
                 # but might be missed by simple count comparison
-                if "momentum" in text or "breakout" in text or "performing" in text or "upgrade" in text:
+                # Compound bearish patterns take priority over generic "momentum" = bullish
+                if re.search(r'momentum\s+trap|value\s+trap|bear\s+trap|wealth\s+destro|low\s+dvm|dvm\s+low', text):
+                    sentiment = "bearish"
+                    sentiment_score = 0.7
+                elif "momentum" in text or "breakout" in text or "performing" in text or "upgrade" in text:
                     sentiment = "bullish"
                     sentiment_score = 0.6
                 elif "falling" in text or "breakdown" in text or "deteriorating" in text or "downgrade" in text:

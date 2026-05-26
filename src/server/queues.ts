@@ -25,6 +25,8 @@ function makeConnection(isProbe = false): ConnectionOptions {
     port: parseInt(process.env.REDIS_PORT || '6379', 10),
     password: process.env.REDIS_PASSWORD || undefined,
     connectTimeout: 5000,
+    // Suppress "minimum Redis version" console warnings from ioredis
+    showFriendlyErrorStack: false,
   };
 
   if (isProbe) {
@@ -209,8 +211,8 @@ async function processOutcomeResolver(_job: Job): Promise<{ success: boolean }> 
   const { promisify } = await import('util');
   const execAsync = promisify(exec);
   const pyDir = process.cwd() + '/src/server';
+  await execAsync(`python outcome_resolver.py --horizon 1`, { cwd: pyDir });
   await execAsync(`python outcome_resolver.py --horizon 5`, { cwd: pyDir });
-  await execAsync(`python outcome_resolver.py --horizon 15`, { cwd: pyDir });
   return { success: true };
 }
 
@@ -229,15 +231,23 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
 // ─── Initialise queues & workers ─────────────────────────────────────────────
 
 export async function initQueues(): Promise<boolean> {
+  // Suppress BullMQ's per-queue/worker Redis version warnings (Redis 5 works fine here)
+  const _origWarn = console.warn.bind(console);
+  console.warn = (...args: any[]) => {
+    if (typeof args[0] === 'string' && args[0].includes('minimum Redis version')) return;
+    _origWarn(...args);
+  };
+
   // 1. Fail-fast probe to see if Redis is even there
   const probeConnection = makeConnection(true);
   const probe = new Redis({ ...(probeConnection as any), lazyConnect: true });
-  
+
   try {
     await probe.connect();
     await probe.quit();
     console.log('[QUEUE] Redis connection probe successful');
   } catch (err: any) {
+    console.warn = _origWarn;
     console.warn('[QUEUE] Redis unavailable, disabling BullMQ:', err.message);
     return false;
   }
@@ -546,7 +556,7 @@ export async function initQueues(): Promise<boolean> {
       console.error('[QUEUE] quant-scoring failed:', err.message);
     });
 
-    // ── Technical signals queue (daily at 8:30 AM IST = 03:00 UTC) ──────────
+    // ── Technical signals queue (every 30 minutes) ──────────────────────────
     technicalSignalsQueue = new Queue(QUEUE_TECHNICAL_SIGNALS, { connection });
 
     const tsRepeatables = await technicalSignalsQueue.getRepeatableJobs();
@@ -557,7 +567,7 @@ export async function initQueues(): Promise<boolean> {
       'technical-signals-daily',
       {},
       {
-        repeat: { pattern: '0 3 * * 1-5' }, // 8:30 AM IST, Mon–Fri
+        repeat: { pattern: '*/30 * * * *' }, // Run every 30 minutes
         jobId: 'technical-signals-daily',
         removeOnComplete: 3,
         removeOnFail: 3,
@@ -625,7 +635,7 @@ export async function initQueues(): Promise<boolean> {
       console.error('[QUEUE] signal-outcomes failed:', err.message);
     });
 
-    // ── News sentiment queue (every 15 min) ──────────────────────────────────
+    // ── News sentiment queue (every 30 seconds) ──────────────────────────────
     newsSentimentQueue = new Queue(QUEUE_NEWS_SENTIMENT, { connection });
 
     const newsRepeatables = await newsSentimentQueue.getRepeatableJobs();
@@ -636,7 +646,7 @@ export async function initQueues(): Promise<boolean> {
       'news-sentiment-refresh',
       {},
       {
-        repeat: { every: 15 * 60 * 1000 }, // every 15 minutes
+        repeat: { every: 30 * 1000 }, // every 30 seconds
         jobId: 'news-sentiment-repeatable',
         removeOnComplete: 5,
         removeOnFail: 3,
@@ -675,7 +685,7 @@ export async function initQueues(): Promise<boolean> {
       'trendlyne-intraday-scan',
       {},
       {
-        repeat: { every: 5 * 60 * 1000 }, // 5 minutes
+        repeat: { every: 15 * 60 * 1000 }, // 15 minutes
         jobId: 'trendlyne-intraday-repeatable',
         removeOnComplete: 5,
         removeOnFail: 3,
@@ -685,13 +695,33 @@ export async function initQueues(): Promise<boolean> {
     trendlyneIntradayWorker = new Worker(
       QUEUE_TRENDLYNE_INTRADAY,
       async (_job: Job) => {
-        const { runIntradayScreenerScan } = await import('./trendlyneScreener');
+        console.log('[QUEUE] Starting scheduled 15-min intraday screener sync & scan...');
+        const { syncAllScreenerStocksToDB, runIntradayScreenerScan } = await import('./trendlyneScreener');
+        const { syncMoneyControlScreeners } = await import('./moneycontrolScreener');
+        const { syncETnowScreeners } = await import('./etnowScreenerSync');
+        
+        try {
+          await syncAllScreenerStocksToDB('intraday');
+        } catch (e: any) {
+          console.error('[QUEUE] Trendlyne intraday sync failed:', e.message);
+        }
+        try {
+          await syncMoneyControlScreeners('intraday');
+        } catch (e: any) {
+          console.error('[QUEUE] MoneyControl intraday sync failed:', e.message);
+        }
+        try {
+          await syncETnowScreeners('intraday');
+        } catch (e: any) {
+          console.error('[QUEUE] ETNow intraday sync failed:', e.message);
+        }
+
         await runIntradayScreenerScan();
       },
       {
         connection,
         concurrency: 1,
-        lockDuration: 4 * 60 * 1000, // 4 minutes
+        lockDuration: 8 * 60 * 1000, // 8 minutes (sufficient for 15-min sync and scan)
       },
     );
 
@@ -774,8 +804,11 @@ export async function initQueues(): Promise<boolean> {
       console.error('[QUEUE] ml-daily-ops failed:', err.message);
     });
 
+    console.warn = _origWarn;
+    console.log('[QUEUE] BullMQ initialised (stock-refresh + ai-signals)');
     return true;
   } catch (err: any) {
+    console.warn = _origWarn;
     console.warn('[QUEUE] BullMQ unavailable (Redis down?) — falling back to setInterval:', err.message);
     stockRefreshQueue = null;
     aiSignalsQueue    = null;
