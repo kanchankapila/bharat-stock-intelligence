@@ -68,6 +68,7 @@ import SmartMoneyPage from './components/SmartMoneyPage';
 import EarningsPage from './components/EarningsPage';
 import TradeDecisionCockpit from './components/TradeDecisionCockpit';
 import HedgeFundResearch from './components/HedgeFundResearch';
+import DLDashboard from './components/DLDashboard';
 import { 
   TickerTapeWidget, 
   TechnicalAnalysisWidget, 
@@ -3399,6 +3400,7 @@ export default function App() {
 
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [drawerSymbol, setDrawerSymbol] = useState<string | null>(null);
+  const [researchSubTab, setResearchSubTab] = useState<'overview' | 'deep-learning'>('overview');
   const [selectedIndex, setSelectedIndex] = useState<{ id: string; name: string } | null>(null);
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [watchlist, setWatchlist] = useState<string[]>([]);
@@ -3640,7 +3642,21 @@ export default function App() {
               ) : <div className="p-6">Select a stock to view details</div>} />
               <Route path="/backtest" element={<Backtest stocks={stocks} />} />
               <Route path="/signals" element={<DailySignals onSelectStock={(s) => setDrawerSymbol(s)} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
-              <Route path="/research" element={<HedgeFundResearch onAddWatchlist={toggleWatchlist} />} />
+              <Route path="/research" element={
+                <div className="flex flex-col">
+                  <div className="flex gap-2 px-4 py-2 border-b border-slate-800">
+                    <button
+                      onClick={() => setResearchSubTab('overview')}
+                      className={`text-xs px-3 py-1 rounded-full transition-colors ${researchSubTab === 'overview' ? 'bg-violet-600 text-white' : 'text-slate-400 hover:text-white'}`}
+                    >Overview</button>
+                    <button
+                      onClick={() => setResearchSubTab('deep-learning')}
+                      className={`text-xs px-3 py-1 rounded-full transition-colors ${researchSubTab === 'deep-learning' ? 'bg-violet-600 text-white' : 'text-slate-400 hover:text-white'}`}
+                    >Deep Learning</button>
+                  </div>
+                  {researchSubTab === 'overview' ? <HedgeFundResearch onAddWatchlist={toggleWatchlist} /> : <DLDashboard />}
+                </div>
+              } />
               <Route path="/strategy" element={<StrategyIntelligence onSelectStock={(s) => setDrawerSymbol(s)} />} />
               <Route path="/strategy-builder" element={<InvestmentStrategy onSelectStock={(s) => setDrawerSymbol(s)} />} />
               <Route path="/sentiment" element={<SentimentIntelligence onSelectStock={(s) => setDrawerSymbol(s)} />} />

@@ -1,5 +1,5 @@
 // src/components/HedgeFundResearch.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { trpc } from '../lib/trpc';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -151,10 +151,12 @@ function StockDeepDive({
   pick,
   blurbs,
   onAddWatchlist,
+  dlBySymbol,
 }: {
   pick: StockPick;
   blurbs?: Record<string, string>;
   onAddWatchlist?: (symbol: string, meta?: any) => void;
+  dlBySymbol?: Map<string, any>;
 }) {
   return (
     <motion.div
@@ -164,7 +166,7 @@ function StockDeepDive({
       transition={{ duration: 0.25 }}
       className="overflow-hidden"
     >
-      <div className="glass-strong border border-slate-800/30 rounded-2xl p-5 mt-1 mb-2">
+      <div className="glass-strong border border-slate-800/30 rounded-2xl p-5 mt-1 mb-2 overflow-hidden">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {/* Column 1: Score Breakdown */}
           <div className="space-y-3">
@@ -257,6 +259,40 @@ function StockDeepDive({
             )}
           </div>
         </div>
+
+        {/* AI Model Signals */}
+        {(() => {
+          const dl = dlBySymbol?.get(pick.symbol);
+          if (!dl) return null;
+          return (
+            <div className="mt-4 border-t border-slate-700/50 pt-4">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3">AI Model Signals</p>
+              <div className="flex gap-2 mb-3">
+                {([1, 5, 15] as const).map(h => {
+                  const prob = dl[`prob_up_${h}d`] as number;
+                  const ret  = dl[`exp_ret_${h}d`] as number;
+                  const color = prob >= 0.65 ? 'text-emerald-400' : prob >= 0.50 ? 'text-amber-400' : 'text-rose-400';
+                  return (
+                    <div key={h} className="flex-1 glass rounded-lg p-2 text-center">
+                      <div className="text-[9px] text-slate-500 mb-1">{h}D</div>
+                      <div className={`text-sm font-bold ${color}`}>{(prob * 100).toFixed(0)}%↑</div>
+                      {ret != null && (
+                        <div className={`text-[9px] ${ret >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                          {ret >= 0 ? '+' : ''}{(ret * 100).toFixed(1)}%
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="text-[10px] text-slate-500 mb-2">
+                Confidence: <span className="text-slate-300">{((dl.confidence ?? 0) * 100).toFixed(0)}%</span>
+                &nbsp;·&nbsp;
+                Uncertainty: <span className="text-slate-300">±{((dl.uncertainty ?? 0) * 100).toFixed(0)}%</span>
+              </div>
+            </div>
+          );
+        })()}
       </div>
     </motion.div>
   );
@@ -267,10 +303,14 @@ function TopPicksTable({
   picks,
   blurbs,
   onAddWatchlist,
+  dlBySymbol,
+  currentRegime,
 }: {
   picks: StockPick[];
   blurbs?: Record<string, string>;
   onAddWatchlist?: (symbol: string, meta?: any) => void;
+  dlBySymbol?: Map<string, any>;
+  currentRegime?: any;
 }) {
   const [expandedSymbol, setExpandedSymbol] = useState<string | null>(null);
 
@@ -279,7 +319,7 @@ function TopPicksTable({
   return (
     <div className="glass-strong border border-slate-800/30 rounded-2xl overflow-hidden">
       {/* Table Header */}
-      <div className="px-4 py-3 border-b border-slate-800/30 grid grid-cols-[24px_1fr_60px_40px_60px_50px_50px_50px] gap-2 text-[9px] font-black uppercase tracking-widest text-slate-500">
+      <div className="px-4 py-3 border-b border-slate-800/30 grid grid-cols-[24px_1fr_60px_40px_60px_50px_50px_50px_50px_60px] gap-2 text-[9px] font-black uppercase tracking-widest text-slate-500">
         <span>#</span>
         <span>Symbol</span>
         <span className="text-right">Score</span>
@@ -288,6 +328,8 @@ function TopPicksTable({
         <span className="text-right">SL%</span>
         <span className="text-right">T1%</span>
         <span className="text-right">R:R</span>
+        <span className="text-right">DL↑</span>
+        <span className="text-center">Regime</span>
       </div>
 
       {sorted.map((pick, idx) => {
@@ -297,7 +339,7 @@ function TopPicksTable({
             <div
               onClick={() => setExpandedSymbol(isExpanded ? null : pick.symbol)}
               className={cn(
-                'px-4 py-3 grid grid-cols-[24px_1fr_60px_40px_60px_50px_50px_50px] gap-2 items-center cursor-pointer transition-all',
+                'px-4 py-3 grid grid-cols-[24px_1fr_60px_40px_60px_50px_50px_50px_50px_60px] gap-2 items-center cursor-pointer transition-all',
                 'border-b border-slate-800/20 hover:bg-slate-800/20',
                 isExpanded && 'bg-slate-800/30'
               )}
@@ -313,12 +355,34 @@ function TopPicksTable({
               <span className="text-right text-[10px] font-black text-rose-400">{pick.stop_loss_pct.toFixed(1)}%</span>
               <span className="text-right text-[10px] font-black text-emerald-400">+{pick.target_1_pct.toFixed(1)}%</span>
               <span className="text-right text-[10px] font-black text-slate-300">{pick.risk_reward.toFixed(1)}</span>
+              <span className="text-right text-[10px] font-black">
+                {(() => {
+                  const dl = dlBySymbol?.get(pick.symbol);
+                  if (!dl) return <span className="text-slate-600">—</span>;
+                  const prob = dl.prob_up_5d as number;
+                  const color = prob >= 0.65 ? 'text-emerald-400' : prob >= 0.50 ? 'text-amber-400' : 'text-rose-400';
+                  return <span className={color}>{(prob * 100).toFixed(0)}%</span>;
+                })()}
+              </span>
+              <span className="text-center">
+                {currentRegime ? (
+                  <span className={`text-[9px] font-semibold px-1 py-0.5 rounded ${
+                    currentRegime.regime === 'BULL'     ? 'bg-emerald-900/60 text-emerald-300' :
+                    currentRegime.regime === 'BEAR'     ? 'bg-rose-900/60 text-rose-300' :
+                    currentRegime.regime === 'CRASH'    ? 'bg-red-950/80 text-red-200' :
+                    currentRegime.regime === 'HIGH_VOL' ? 'bg-amber-900/60 text-amber-300' :
+                                                          'bg-slate-800 text-slate-400'
+                  }`}>
+                    {currentRegime.regime}
+                  </span>
+                ) : <span className="text-slate-600 text-[9px]">—</span>}
+              </span>
             </div>
 
             <AnimatePresence>
               {isExpanded && (
                 <div className="px-3">
-                  <StockDeepDive pick={pick} blurbs={blurbs} onAddWatchlist={onAddWatchlist} />
+                  <StockDeepDive pick={pick} blurbs={blurbs} onAddWatchlist={onAddWatchlist} dlBySymbol={dlBySymbol} />
                 </div>
               )}
             </AnimatePresence>
@@ -494,6 +558,20 @@ export default function HedgeFundResearch({ onAddWatchlist }: HedgeFundResearchP
 
   const { data: history } = trpc.getDailyResearchHistory.useQuery({ limit: 7 });
   const triggerGeneration = trpc.triggerResearchGeneration.useMutation();
+
+  const { data: dlPredictions } = trpc.getDLPredictions.useQuery(
+    { date: selectedDate },
+    { staleTime: 5 * 60 * 1000 }
+  );
+  const { data: currentRegime } = trpc.getMarketRegime.useQuery(
+    { date: selectedDate },
+    { staleTime: 5 * 60 * 1000 }
+  );
+
+  const dlBySymbol = useMemo(
+    () => new Map((dlPredictions ?? []).map((d: any) => [d.symbol, d])),
+    [dlPredictions]
+  );
 
   // Poll when GENERATING
   useEffect(() => {
@@ -687,7 +765,7 @@ export default function HedgeFundResearch({ onAddWatchlist }: HedgeFundResearchP
                   <Trophy className="w-3 h-3 text-amber-400" /> Top Picks ({report.top_picks?.length ?? 0})
                 </p>
                 {report.top_picks?.length > 0 ? (
-                  <TopPicksTable picks={report.top_picks} blurbs={blurbs} onAddWatchlist={onAddWatchlist} />
+                  <TopPicksTable picks={report.top_picks} blurbs={blurbs} onAddWatchlist={onAddWatchlist} dlBySymbol={dlBySymbol} currentRegime={currentRegime} />
                 ) : (
                   <div className="glass-strong border border-slate-800/30 rounded-2xl p-6 text-center text-slate-500 text-xs">
                     No picks available for this report.
