@@ -7,6 +7,7 @@ import {
   ChevronDown, ChevronUp, RefreshCw, Clock, CheckCircle2,
   XCircle, Eye, BarChart2, Activity
 } from 'lucide-react';
+import { cn } from '../lib/utils';
 
 // --- Types ---
 interface StockPick {
@@ -48,11 +49,6 @@ interface ResearchReport {
   avoid_list: { symbol: string; reason: string }[];
   sector_rankings: { sector: string; score: number; momentum: string }[];
   executive_summary: string;
-}
-
-// --- Helper ---
-function cn(...classes: (string | boolean | undefined | null)[]): string {
-  return classes.filter(Boolean).join(' ');
 }
 
 // --- RegimeBadge ---
