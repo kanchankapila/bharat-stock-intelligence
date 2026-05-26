@@ -7,7 +7,7 @@ export const researchRouter = router({
 
   getDailyResearch: publicProcedure
     .input(z.object({
-      date: z.string().optional(),
+      date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
       type: z.enum(['PRE_MARKET', 'POST_CLOSE']).optional(),
     }).optional())
     .query(({ input }) => {
@@ -67,7 +67,7 @@ export const researchRouter = router({
 
   getResearchStatus: publicProcedure
     .input(z.object({
-      date: z.string().optional(),
+      date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
       type: z.enum(['PRE_MARKET', 'POST_CLOSE']).optional(),
     }).optional())
     .query(({ input }) => {
