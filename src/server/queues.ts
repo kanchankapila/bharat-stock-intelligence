@@ -67,6 +67,8 @@ export const QUEUE_NEWS_SENTIMENT       = 'news-sentiment';
 export const QUEUE_TRENDLYNE_INTRADAY   = 'trendlyne-intraday';
 export const QUEUE_OUTCOME_RESOLVER     = 'outcome-resolver';
 export const QUEUE_ML_DAILY_OPS        = 'ml-daily-ops';
+export const QUEUE_RESEARCH_PREMARKET  = 'research-premarket';
+export const QUEUE_RESEARCH_POSTCLOSE  = 'research-postclose';
 
 const BULK_CACHE_KEY      = 'live-stocks-bulk';
 const BULK_TTL_SECONDS    = 5 * 60;
@@ -103,6 +105,10 @@ export let outcomeResolverQueue: Queue | null = null;
 let outcomeResolverWorker: Worker | null = null;
 export let mlDailyOpsQueue: Queue | null = null;
 let mlDailyOpsWorker: Worker | null = null;
+export let researchPremarketQueue: Queue | null = null;
+export let researchPostcloseQueue: Queue | null = null;
+let researchPremarketWorker: Worker | null = null;
+let researchPostcloseWorker: Worker | null = null;
 
 // Shared in-process mirror populated by the stock-refresh worker
 // (same reference as the one exported from liveStockData via the cache layer)
@@ -225,6 +231,22 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   const pyDir = process.cwd() + '/src/server';
   await execAsync(`python reward_engine.py`, { cwd: pyDir });
   await execAsync(`python rl_agent.py --update`, { cwd: pyDir });
+  return { success: true };
+}
+
+// ─── Research report processor functions ─────────────────────────────────────
+
+async function processResearchPremarket(_job: Job): Promise<{ success: boolean }> {
+  const { generateDailyReport } = await import('./researchEngine');
+  const today = new Date().toISOString().split('T')[0];
+  await generateDailyReport(today, 'PRE_MARKET');
+  return { success: true };
+}
+
+async function processResearchPostclose(_job: Job): Promise<{ success: boolean }> {
+  const { generateDailyReport } = await import('./researchEngine');
+  const today = new Date().toISOString().split('T')[0];
+  await generateDailyReport(today, 'POST_CLOSE');
   return { success: true };
 }
 
@@ -804,6 +826,39 @@ export async function initQueues(): Promise<boolean> {
       console.error('[QUEUE] ml-daily-ops failed:', err.message);
     });
 
+    // ── Research report queues ───────────────────────────────────────────────
+    researchPremarketQueue = new Queue(QUEUE_RESEARCH_PREMARKET, { connection });
+    const premarketRep = await researchPremarketQueue.getRepeatableJobs();
+    for (const r of premarketRep) await researchPremarketQueue.removeRepeatableByKey(r.key);
+    await researchPremarketQueue.add('research-premarket-daily', {}, {
+      repeat: { pattern: '0 3 * * 1-5' },
+      jobId: 'research-premarket-repeatable',
+      removeOnComplete: { age: 86400 },
+      removeOnFail: { age: 604800 },
+      attempts: 2,
+      backoff: { type: 'exponential', delay: 5000 },
+    });
+    researchPremarketWorker = new Worker(QUEUE_RESEARCH_PREMARKET, processResearchPremarket,
+      { connection, concurrency: 1, lockDuration: 15 * 60 * 1000 });
+    researchPremarketWorker.on('completed', () => console.log('[QUEUE] research-premarket done'));
+    researchPremarketWorker.on('failed', (_, err) => console.error('[QUEUE] research-premarket failed:', err.message));
+
+    researchPostcloseQueue = new Queue(QUEUE_RESEARCH_POSTCLOSE, { connection });
+    const postcloseRep = await researchPostcloseQueue.getRepeatableJobs();
+    for (const r of postcloseRep) await researchPostcloseQueue.removeRepeatableByKey(r.key);
+    await researchPostcloseQueue.add('research-postclose-daily', {}, {
+      repeat: { pattern: '45 10 * * 1-5' },
+      jobId: 'research-postclose-repeatable',
+      removeOnComplete: { age: 86400 },
+      removeOnFail: { age: 604800 },
+      attempts: 2,
+      backoff: { type: 'exponential', delay: 5000 },
+    });
+    researchPostcloseWorker = new Worker(QUEUE_RESEARCH_POSTCLOSE, processResearchPostclose,
+      { connection, concurrency: 1, lockDuration: 15 * 60 * 1000 });
+    researchPostcloseWorker.on('completed', () => console.log('[QUEUE] research-postclose done'));
+    researchPostcloseWorker.on('failed', (_, err) => console.error('[QUEUE] research-postclose failed:', err.message));
+
     console.warn = _origWarn;
     console.log('[QUEUE] BullMQ initialised (stock-refresh + ai-signals)');
     return true;
@@ -848,6 +903,10 @@ export async function shutdownQueues(): Promise<void> {
     outcomeResolverQueue?.close(),
     mlDailyOpsWorker?.close(),
     mlDailyOpsQueue?.close(),
+    researchPremarketWorker?.close(),
+    researchPremarketQueue?.close(),
+    researchPostcloseWorker?.close(),
+    researchPostcloseQueue?.close(),
   ]);
 }
 
