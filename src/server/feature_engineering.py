@@ -1,0 +1,399 @@
+#!/usr/bin/env python3
+"""
+Feature engineering pipeline: computes 84 ML-ready features per (symbol, date)
+and writes to feature_store. Enforces strict leakage prevention rules.
+"""
+
+import sys
+import json
+import sqlite3
+import pickle
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Optional
+
+import numpy as np
+import pandas as pd
+from sklearn.preprocessing import RobustScaler
+import ta
+
+DB_PATH = Path(__file__).parent.parent.parent / "stock_intelligence.db"
+SCALER_PATH = Path(__file__).parent / "ml_models" / "feature_scaler_v1.pkl"
+
+# Fundamentals lag: data published ~45 days after quarter end
+FUND_LAG_DAYS = 45
+# FII/DII lag: published next morning
+FII_LAG_DAYS = 1
+
+
+class FeatureEngineer:
+    def __init__(self, db_path: str = str(DB_PATH)):
+        self.db_path = db_path
+        self.scaler: Optional[RobustScaler] = None
+
+    def _con(self) -> sqlite3.Connection:
+        con = sqlite3.connect(self.db_path)
+        con.row_factory = sqlite3.Row
+        return con
+
+    # ── Core OHLCV feature computation ──────────────────────────────────────
+
+    def _compute_ohlcv_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Compute price, momentum, volatility, volume features from OHLCV data."""
+        close = df["close"]
+        high  = df["high"]
+        low   = df["low"]
+        vol   = df["volume"]
+
+        out = pd.DataFrame(index=df.index)
+
+        # Returns
+        for d in [1, 5, 15, 21, 63, 126, 252]:
+            out[f"ret_{d}d"] = close.pct_change(d)
+
+        # Trend / moving averages
+        out["sma20"]  = close.rolling(20).mean()
+        out["sma50"]  = close.rolling(50).mean()
+        out["sma200"] = close.rolling(200).mean()
+        out["ema8"]   = close.ewm(span=8,  adjust=False).mean()
+        out["ema21"]  = close.ewm(span=21, adjust=False).mean()
+        out["dist_sma20_pct"]  = (close - out["sma20"])  / out["sma20"]
+        out["dist_sma200_pct"] = (close - out["sma200"]) / out["sma200"]
+        out["above_sma200"]    = (close > out["sma200"]).astype(int)
+
+        # Momentum
+        out["rsi_14"] = ta.momentum.RSIIndicator(close, window=14).rsi()
+        out["rsi_28"] = ta.momentum.RSIIndicator(close, window=28).rsi()
+        macd_ind = ta.trend.MACD(close)
+        out["macd"]        = macd_ind.macd()
+        out["macd_signal"] = macd_ind.macd_signal()
+        out["macd_hist"]   = macd_ind.macd_diff()
+        adx_ind = ta.trend.ADXIndicator(high, low, close, window=14)
+        out["adx"]      = adx_ind.adx()
+        out["di_plus"]  = adx_ind.adx_pos()
+        out["di_minus"] = adx_ind.adx_neg()
+        stoch = ta.momentum.StochasticOscillator(high, low, close, window=14, smooth_window=3)
+        out["stoch_k"] = stoch.stoch()
+        out["stoch_d"] = stoch.stoch_signal()
+        out["cci"]       = ta.trend.CCIIndicator(high, low, close, window=20).cci()
+        out["williams_r"] = ta.momentum.WilliamsRIndicator(high, low, close, lbp=14).williams_r()
+
+        # Volatility
+        atr = ta.volatility.AverageTrueRange(high, low, close, window=14)
+        out["atr_14"]  = atr.average_true_range()
+        out["atr_pct"] = out["atr_14"] / close
+        bb = ta.volatility.BollingerBands(close, window=20, window_dev=2)
+        out["bb_upper"] = bb.bollinger_hband()
+        out["bb_lower"] = bb.bollinger_lband()
+        out["bb_width"] = bb.bollinger_wband()
+        out["bb_pct"]   = bb.bollinger_pband()
+        log_ret = np.log(close / close.shift(1))
+        out["hist_vol_21d"] = log_ret.rolling(21).std() * np.sqrt(252)
+        out["hist_vol_63d"] = log_ret.rolling(63).std() * np.sqrt(252)
+        # vol_regime: LOW / MED / HIGH / SPIKE
+        p33 = out["hist_vol_21d"].quantile(0.33)
+        p67 = out["hist_vol_21d"].quantile(0.67)
+        p90 = out["hist_vol_21d"].quantile(0.90)
+        out["vol_regime"] = pd.cut(
+            out["hist_vol_21d"],
+            bins=[-np.inf, p33, p67, p90, np.inf],
+            labels=["LOW", "MED", "HIGH", "SPIKE"],
+        ).astype(str)
+
+        # Volume
+        vol_ma5  = vol.rolling(5).mean()
+        vol_ma20 = vol.rolling(20).mean()
+        out["volume_ratio_5d"]  = vol / vol_ma5
+        out["volume_ratio_20d"] = vol / vol_ma20
+        out["obv"] = ta.volume.OnBalanceVolumeIndicator(close, vol).on_balance_volume()
+        out["obv_slope"] = out["obv"].rolling(10).apply(
+            lambda x: np.polyfit(range(len(x)), x, 1)[0] if len(x) == 10 else np.nan
+        )
+        # VWAP: daily rolling approximation
+        tp = (high + low + close) / 3
+        out["vwap"] = (tp * vol).cumsum() / vol.cumsum()
+        out["vwap_dist_pct"] = (close - out["vwap"]) / out["vwap"]
+
+        # Multi-timeframe trend
+        def classify_trend(s: pd.Series) -> str:
+            if len(s.dropna()) < 2:
+                return "SIDEWAYS"
+            slope = np.polyfit(range(len(s)), s.values, 1)[0]
+            pct   = slope / s.iloc[0] if s.iloc[0] != 0 else 0
+            if pct > 0.001:  return "UP"
+            if pct < -0.001: return "DOWN"
+            return "SIDEWAYS"
+
+        out["trend_1d"] = close.rolling(5).apply(
+            lambda x: {"UP": 1, "DOWN": -1, "SIDEWAYS": 0}[classify_trend(pd.Series(x))],
+            raw=False,
+        )
+        out["trend_1w"] = close.rolling(25).apply(
+            lambda x: {"UP": 1, "DOWN": -1, "SIDEWAYS": 0}[classify_trend(pd.Series(x))],
+            raw=False,
+        )
+        out["trend_1m"] = close.rolling(63).apply(
+            lambda x: {"UP": 1, "DOWN": -1, "SIDEWAYS": 0}[classify_trend(pd.Series(x))],
+            raw=False,
+        )
+        out["mtf_alignment_score"] = (
+            out["trend_1d"] + out["trend_1w"] + out["trend_1m"]
+        ) / 3.0
+
+        # Forward targets — shift by 1 to avoid same-day leakage
+        # target at date T = return starting from T+1
+        out["target_ret_1d"]  = close.pct_change(1).shift(-2)
+        out["target_ret_5d"]  = close.pct_change(5).shift(-6)
+        out["target_ret_15d"] = close.pct_change(15).shift(-16)
+        out["target_dir_1d"]  = (out["target_ret_1d"]  > 0).astype("Int64")
+        out["target_dir_5d"]  = (out["target_ret_5d"]  > 0).astype("Int64")
+        out["target_dir_15d"] = (out["target_ret_15d"] > 0).astype("Int64")
+
+        return out
+
+    # ── Merge exogenous features ─────────────────────────────────────────────
+
+    def _merge_fii(self, feat: pd.DataFrame, con: sqlite3.Connection) -> pd.DataFrame:
+        """FII/DII flows — lagged 1 day (published next morning)."""
+        fii = pd.read_sql(
+            "SELECT date, fii_net, dii_net FROM fii_dii_flow ORDER BY date",
+            con, parse_dates=["date"], index_col="date",
+        )
+        fii = fii.shift(FII_LAG_DAYS)  # lag 1 day
+        feat["fii_3d_net"]  = fii["fii_net"].rolling(3).sum()
+        feat["fii_10d_net"] = fii["fii_net"].rolling(10).sum()
+        feat["dii_3d_net"]  = fii["dii_net"].rolling(3).sum()
+        return feat
+
+    def _merge_fundamentals(self, feat: pd.DataFrame, symbol: str,
+                             con: sqlite3.Connection) -> pd.DataFrame:
+        """Fundamentals — lagged 45 days (earnings reporting delay)."""
+        row = con.execute(
+            """SELECT trailing_pe, return_on_equity, debt_to_equity,
+                      operating_margins, piotroski_f_score, fetched_at
+               FROM stock_fundamentals WHERE symbol = ?
+               ORDER BY fetched_at DESC LIMIT 1""",
+            (symbol,),
+        ).fetchone()
+        if row:
+            fetched = pd.to_datetime(row["fetched_at"])
+            cutoff  = pd.Timestamp.today() - pd.Timedelta(days=FUND_LAG_DAYS)
+            if fetched < cutoff:
+                feat["trailing_pe"]    = row["trailing_pe"]
+                feat["roe"]            = row["return_on_equity"]
+                feat["debt_to_equity"] = row["debt_to_equity"]
+                feat["op_margins"]     = row["operating_margins"]
+                feat["piotroski_f"]    = row["piotroski_f_score"]
+                pe = row["trailing_pe"]
+                feat["earnings_yield"] = (1.0 / pe) if pe and pe > 0 else None
+        return feat
+
+    def _merge_macro(self, feat: pd.DataFrame, con: sqlite3.Connection) -> pd.DataFrame:
+        """India macro + global macro from macro_asset_prices."""
+        macro_syms = {
+            "US10Y": "us_10y_yield", "DXY": "dxy",
+            "CRUDE": "crude_ret_5d", "GOLD": "gold_ret_5d", "SP500": "sp500_ret_5d",
+        }
+        for sym, col in macro_syms.items():
+            df = pd.read_sql(
+                f"SELECT date, ret_5d FROM macro_asset_prices WHERE symbol='{sym}' ORDER BY date",
+                con, parse_dates=["date"], index_col="date",
+            )
+            if not df.empty:
+                feat[col] = df["ret_5d"].reindex(feat.index, method="ffill")
+
+        # Nifty metrics
+        nifty = pd.read_sql(
+            "SELECT date, close FROM stock_ohlcv WHERE symbol='NIFTY50' ORDER BY date",
+            con, parse_dates=["date"], index_col="date",
+        )
+        if not nifty.empty:
+            feat["nifty_ret_5d"]  = nifty["close"].pct_change(5).reindex(feat.index, method="ffill")
+            feat["nifty_ret_21d"] = nifty["close"].pct_change(21).reindex(feat.index, method="ffill")
+
+        # VIX proxy from NSEBANK in macro_asset_prices
+        vix_df = pd.read_sql(
+            "SELECT date, close FROM macro_asset_prices WHERE symbol='NSEBANK' ORDER BY date",
+            con, parse_dates=["date"], index_col="date",
+        )
+        if not vix_df.empty:
+            feat["nifty_vix"] = vix_df["close"].reindex(feat.index, method="ffill")
+
+        return feat
+
+    def _merge_sentiment(self, feat: pd.DataFrame, symbol: str,
+                          con: sqlite3.Connection) -> pd.DataFrame:
+        """News sentiment: 3-day avg score + 5-day HIGH-impact article count."""
+        rows = pd.read_sql(
+            """SELECT DATE(published_at) as date,
+                      AVG(CASE WHEN sentiment='BULLISH' THEN 1 WHEN sentiment='BEARISH' THEN -1 ELSE 0 END) as score,
+                      SUM(CASE WHEN impact='HIGH' THEN 1 ELSE 0 END) as high_count
+               FROM news_sentiment_items
+               WHERE symbol=? GROUP BY DATE(published_at) ORDER BY date""",
+            con, params=(symbol,), parse_dates=["date"], index_col="date",
+        )
+        if not rows.empty:
+            feat["news_sentiment_score"] = rows["score"].rolling(3).mean().reindex(
+                feat.index, method="ffill"
+            )
+            feat["news_impact_count"] = rows["high_count"].rolling(5).sum().reindex(
+                feat.index, method="ffill"
+            )
+        return feat
+
+    # ── Normalization ────────────────────────────────────────────────────────
+
+    def _fit_scaler(self, feat: pd.DataFrame, train_frac: float = 0.8) -> RobustScaler:
+        """Fit RobustScaler on first train_frac of dates only (no leakage)."""
+        numeric_cols = feat.select_dtypes(include=[np.number]).columns.tolist()
+        cutoff = int(len(feat) * train_frac)
+        train_slice = feat.iloc[:cutoff][numeric_cols].dropna()
+        scaler = RobustScaler()
+        scaler.fit(train_slice)
+        return scaler
+
+    def _apply_scaler(self, feat: pd.DataFrame, scaler: RobustScaler) -> pd.DataFrame:
+        numeric_cols = feat.select_dtypes(include=[np.number]).columns.tolist()
+        # log1p volume ratios before scaling
+        for col in ["volume_ratio_5d", "volume_ratio_20d"]:
+            if col in feat:
+                feat[col] = np.log1p(feat[col].clip(lower=0))
+        feat[numeric_cols] = scaler.transform(feat[numeric_cols].fillna(0))
+        return feat
+
+    # ── Per-symbol pipeline ──────────────────────────────────────────────────
+
+    def process_symbol(self, symbol: str, lookback_days: int = 504) -> int:
+        """Compute + persist features for one symbol. Returns row count written."""
+        con = self._con()
+        cutoff = (datetime.today() - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
+
+        ohlcv = pd.read_sql(
+            "SELECT date, open, high, low, close, volume FROM stock_ohlcv "
+            "WHERE symbol=? AND date>=? ORDER BY date",
+            con, params=(symbol, cutoff), parse_dates=["date"], index_col="date",
+        )
+        if len(ohlcv) < 60:
+            con.close()
+            return 0
+
+        feat = self._compute_ohlcv_features(ohlcv)
+        feat = self._merge_fii(feat, con)
+        feat = self._merge_fundamentals(feat, symbol, con)
+        feat = self._merge_macro(feat, con)
+        feat = self._merge_sentiment(feat, symbol, con)
+
+        # Fit scaler on training window, apply to all
+        scaler = self._fit_scaler(feat)
+        SCALER_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(SCALER_PATH, "wb") as f:
+            pickle.dump(scaler, f)
+        feat = self._apply_scaler(feat, scaler)
+
+        # Write to feature_store
+        cur = con.cursor()
+        written = 0
+        for date, row in feat.iterrows():
+            d = row.to_dict()
+            cur.execute(
+                """INSERT OR REPLACE INTO feature_store
+                   (symbol, date, timeframe,
+                    ret_1d, ret_5d, ret_15d, ret_21d, ret_63d, ret_126d, ret_252d,
+                    sma20, sma50, sma200, ema8, ema21, dist_sma20_pct, dist_sma200_pct, above_sma200,
+                    rsi_14, rsi_28, macd, macd_signal, macd_hist, adx, di_plus, di_minus,
+                    stoch_k, stoch_d, cci, williams_r,
+                    atr_14, atr_pct, bb_upper, bb_lower, bb_width, bb_pct,
+                    hist_vol_21d, hist_vol_63d, vol_regime,
+                    volume_ratio_20d, volume_ratio_5d, obv, obv_slope, vwap, vwap_dist_pct,
+                    trend_1d, trend_1w, trend_1m, mtf_alignment_score,
+                    fii_3d_net, fii_10d_net, dii_3d_net,
+                    trailing_pe, roe, debt_to_equity, op_margins, piotroski_f, earnings_yield,
+                    nifty_vix, nifty_ret_5d, nifty_ret_21d,
+                    us_10y_yield, dxy, crude_ret_5d, gold_ret_5d, sp500_ret_5d,
+                    news_sentiment_score, news_impact_count,
+                    target_ret_1d, target_ret_5d, target_ret_15d,
+                    target_dir_1d, target_dir_5d, target_dir_15d,
+                    computed_at)
+                   VALUES (?, ?, 'D',
+                    ?,?,?,?,?,?,?,
+                    ?,?,?,?,?,?,?,?,
+                    ?,?,?,?,?,?,?,?,
+                    ?,?,?,?,
+                    ?,?,?,?,?,?,
+                    ?,?,?,
+                    ?,?,?,?,?,?,
+                    ?,?,?,?,
+                    ?,?,?,
+                    ?,?,?,?,?,?,
+                    ?,?,?,
+                    ?,?,?,?,?,
+                    ?,?,
+                    ?,?,?,
+                    ?,?,?,
+                    CURRENT_TIMESTAMP)""",
+                (
+                    symbol, date.strftime("%Y-%m-%d"),
+                    d.get("ret_1d"), d.get("ret_5d"), d.get("ret_15d"), d.get("ret_21d"),
+                    d.get("ret_63d"), d.get("ret_126d"), d.get("ret_252d"),
+                    d.get("sma20"), d.get("sma50"), d.get("sma200"), d.get("ema8"), d.get("ema21"),
+                    d.get("dist_sma20_pct"), d.get("dist_sma200_pct"), d.get("above_sma200"),
+                    d.get("rsi_14"), d.get("rsi_28"),
+                    d.get("macd"), d.get("macd_signal"), d.get("macd_hist"),
+                    d.get("adx"), d.get("di_plus"), d.get("di_minus"),
+                    d.get("stoch_k"), d.get("stoch_d"), d.get("cci"), d.get("williams_r"),
+                    d.get("atr_14"), d.get("atr_pct"),
+                    d.get("bb_upper"), d.get("bb_lower"), d.get("bb_width"), d.get("bb_pct"),
+                    d.get("hist_vol_21d"), d.get("hist_vol_63d"), d.get("vol_regime"),
+                    d.get("volume_ratio_20d"), d.get("volume_ratio_5d"),
+                    d.get("obv"), d.get("obv_slope"), d.get("vwap"), d.get("vwap_dist_pct"),
+                    d.get("trend_1d"), d.get("trend_1w"), d.get("trend_1m"), d.get("mtf_alignment_score"),
+                    d.get("fii_3d_net"), d.get("fii_10d_net"), d.get("dii_3d_net"),
+                    d.get("trailing_pe"), d.get("roe"), d.get("debt_to_equity"),
+                    d.get("op_margins"), d.get("piotroski_f"), d.get("earnings_yield"),
+                    d.get("nifty_vix"), d.get("nifty_ret_5d"), d.get("nifty_ret_21d"),
+                    d.get("us_10y_yield"), d.get("dxy"),
+                    d.get("crude_ret_5d"), d.get("gold_ret_5d"), d.get("sp500_ret_5d"),
+                    d.get("news_sentiment_score"), d.get("news_impact_count"),
+                    d.get("target_ret_1d"), d.get("target_ret_5d"), d.get("target_ret_15d"),
+                    d.get("target_dir_1d"), d.get("target_dir_5d"), d.get("target_dir_15d"),
+                ),
+            )
+            written += 1
+        con.commit()
+        con.close()
+        return written
+
+    # ── Full pipeline ────────────────────────────────────────────────────────
+
+    def run_full_pipeline(self, symbols: list = None, lookback_days: int = 504) -> None:
+        con = self._con()
+        if symbols is None:
+            rows = con.execute(
+                "SELECT DISTINCT symbol FROM stock_ohlcv "
+                "GROUP BY symbol HAVING COUNT(*) >= 60"
+            ).fetchall()
+            symbols = [r["symbol"] for r in rows]
+        con.close()
+
+        print(f"[FE] Processing {len(symbols)} symbols...")
+        for i, sym in enumerate(symbols, 1):
+            try:
+                n = self.process_symbol(sym, lookback_days)
+                if i % 100 == 0:
+                    print(f"[FE] {i}/{len(symbols)} — {sym}: {n} rows")
+            except Exception as e:
+                print(f"[FE] ERROR {sym}: {e}")
+        print("[FE] Pipeline complete")
+
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--symbols", nargs="*", help="Specific symbols (default: all)")
+    parser.add_argument("--lookback", type=int, default=504)
+    parser.add_argument("--date", help="If 'today', only update today's features (fast mode)")
+    args = parser.parse_args()
+
+    fe = FeatureEngineer()
+    syms = args.symbols
+    fe.run_full_pipeline(symbols=syms, lookback_days=args.lookback)
