@@ -196,8 +196,8 @@ class FeatureEngineer:
         }
         for sym, col in macro_syms.items():
             df = pd.read_sql(
-                f"SELECT date, ret_5d FROM macro_asset_prices WHERE symbol='{sym}' ORDER BY date",
-                con, parse_dates=["date"], index_col="date",
+                "SELECT date, ret_5d FROM macro_asset_prices WHERE symbol=? ORDER BY date",
+                con, params=(sym,), parse_dates=["date"], index_col="date",
             )
             if not df.empty:
                 feat[col] = df["ret_5d"].reindex(feat.index, method="ffill")
@@ -268,100 +268,101 @@ class FeatureEngineer:
         con = self._con()
         cutoff = (datetime.today() - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
 
-        ohlcv = pd.read_sql(
-            "SELECT date, open, high, low, close, volume FROM stock_ohlcv "
-            "WHERE symbol=? AND date>=? ORDER BY date",
-            con, params=(symbol, cutoff), parse_dates=["date"], index_col="date",
-        )
-        if len(ohlcv) < 60:
-            con.close()
-            return 0
-
-        feat = self._compute_ohlcv_features(ohlcv)
-        feat = self._merge_fii(feat, con)
-        feat = self._merge_fundamentals(feat, symbol, con)
-        feat = self._merge_macro(feat, con)
-        feat = self._merge_sentiment(feat, symbol, con)
-
-        # Fit scaler on training window, apply to all
-        scaler = self._fit_scaler(feat)
-        SCALER_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with open(SCALER_PATH, "wb") as f:
-            pickle.dump(scaler, f)
-        feat = self._apply_scaler(feat, scaler)
-
-        # Write to feature_store
-        cur = con.cursor()
-        written = 0
-        for date, row in feat.iterrows():
-            d = row.to_dict()
-            cur.execute(
-                """INSERT OR REPLACE INTO feature_store
-                   (symbol, date, timeframe,
-                    ret_1d, ret_5d, ret_15d, ret_21d, ret_63d, ret_126d, ret_252d,
-                    sma20, sma50, sma200, ema8, ema21, dist_sma20_pct, dist_sma200_pct, above_sma200,
-                    rsi_14, rsi_28, macd, macd_signal, macd_hist, adx, di_plus, di_minus,
-                    stoch_k, stoch_d, cci, williams_r,
-                    atr_14, atr_pct, bb_upper, bb_lower, bb_width, bb_pct,
-                    hist_vol_21d, hist_vol_63d, vol_regime,
-                    volume_ratio_20d, volume_ratio_5d, obv, obv_slope, vwap, vwap_dist_pct,
-                    trend_1d, trend_1w, trend_1m, mtf_alignment_score,
-                    fii_3d_net, fii_10d_net, dii_3d_net,
-                    trailing_pe, roe, debt_to_equity, op_margins, piotroski_f, earnings_yield,
-                    nifty_vix, nifty_ret_5d, nifty_ret_21d,
-                    us_10y_yield, dxy, crude_ret_5d, gold_ret_5d, sp500_ret_5d,
-                    news_sentiment_score, news_impact_count,
-                    target_ret_1d, target_ret_5d, target_ret_15d,
-                    target_dir_1d, target_dir_5d, target_dir_15d,
-                    computed_at)
-                   VALUES (?, ?, 'D',
-                    ?,?,?,?,?,?,?,
-                    ?,?,?,?,?,?,?,?,
-                    ?,?,?,?,?,?,?,?,
-                    ?,?,?,?,
-                    ?,?,?,?,?,?,
-                    ?,?,?,
-                    ?,?,?,?,?,?,
-                    ?,?,?,?,
-                    ?,?,?,
-                    ?,?,?,?,?,?,
-                    ?,?,?,
-                    ?,?,?,?,?,
-                    ?,?,
-                    ?,?,?,
-                    ?,?,?,
-                    CURRENT_TIMESTAMP)""",
-                (
-                    symbol, date.strftime("%Y-%m-%d"),
-                    d.get("ret_1d"), d.get("ret_5d"), d.get("ret_15d"), d.get("ret_21d"),
-                    d.get("ret_63d"), d.get("ret_126d"), d.get("ret_252d"),
-                    d.get("sma20"), d.get("sma50"), d.get("sma200"), d.get("ema8"), d.get("ema21"),
-                    d.get("dist_sma20_pct"), d.get("dist_sma200_pct"), d.get("above_sma200"),
-                    d.get("rsi_14"), d.get("rsi_28"),
-                    d.get("macd"), d.get("macd_signal"), d.get("macd_hist"),
-                    d.get("adx"), d.get("di_plus"), d.get("di_minus"),
-                    d.get("stoch_k"), d.get("stoch_d"), d.get("cci"), d.get("williams_r"),
-                    d.get("atr_14"), d.get("atr_pct"),
-                    d.get("bb_upper"), d.get("bb_lower"), d.get("bb_width"), d.get("bb_pct"),
-                    d.get("hist_vol_21d"), d.get("hist_vol_63d"), d.get("vol_regime"),
-                    d.get("volume_ratio_20d"), d.get("volume_ratio_5d"),
-                    d.get("obv"), d.get("obv_slope"), d.get("vwap"), d.get("vwap_dist_pct"),
-                    d.get("trend_1d"), d.get("trend_1w"), d.get("trend_1m"), d.get("mtf_alignment_score"),
-                    d.get("fii_3d_net"), d.get("fii_10d_net"), d.get("dii_3d_net"),
-                    d.get("trailing_pe"), d.get("roe"), d.get("debt_to_equity"),
-                    d.get("op_margins"), d.get("piotroski_f"), d.get("earnings_yield"),
-                    d.get("nifty_vix"), d.get("nifty_ret_5d"), d.get("nifty_ret_21d"),
-                    d.get("us_10y_yield"), d.get("dxy"),
-                    d.get("crude_ret_5d"), d.get("gold_ret_5d"), d.get("sp500_ret_5d"),
-                    d.get("news_sentiment_score"), d.get("news_impact_count"),
-                    d.get("target_ret_1d"), d.get("target_ret_5d"), d.get("target_ret_15d"),
-                    d.get("target_dir_1d"), d.get("target_dir_5d"), d.get("target_dir_15d"),
-                ),
+        try:
+            ohlcv = pd.read_sql(
+                "SELECT date, open, high, low, close, volume FROM stock_ohlcv "
+                "WHERE symbol=? AND date>=? ORDER BY date",
+                con, params=(symbol, cutoff), parse_dates=["date"], index_col="date",
             )
-            written += 1
-        con.commit()
-        con.close()
-        return written
+            if len(ohlcv) < 60:
+                return 0
+
+            feat = self._compute_ohlcv_features(ohlcv)
+            feat = self._merge_fii(feat, con)
+            feat = self._merge_fundamentals(feat, symbol, con)
+            feat = self._merge_macro(feat, con)
+            feat = self._merge_sentiment(feat, symbol, con)
+
+            # Fit scaler on training window, apply to all
+            scaler = self._fit_scaler(feat)
+            SCALER_PATH.parent.mkdir(parents=True, exist_ok=True)
+            with open(SCALER_PATH, "wb") as f:
+                pickle.dump(scaler, f)
+            feat = self._apply_scaler(feat, scaler)
+
+            # Write to feature_store
+            cur = con.cursor()
+            written = 0
+            for date, row in feat.iterrows():
+                d = row.to_dict()
+                cur.execute(
+                    """INSERT OR REPLACE INTO feature_store
+                       (symbol, date, timeframe,
+                        ret_1d, ret_5d, ret_15d, ret_21d, ret_63d, ret_126d, ret_252d,
+                        sma20, sma50, sma200, ema8, ema21, dist_sma20_pct, dist_sma200_pct, above_sma200,
+                        rsi_14, rsi_28, macd, macd_signal, macd_hist, adx, di_plus, di_minus,
+                        stoch_k, stoch_d, cci, williams_r,
+                        atr_14, atr_pct, bb_upper, bb_lower, bb_width, bb_pct,
+                        hist_vol_21d, hist_vol_63d, vol_regime,
+                        volume_ratio_20d, volume_ratio_5d, obv, obv_slope, vwap, vwap_dist_pct,
+                        trend_1d, trend_1w, trend_1m, mtf_alignment_score,
+                        fii_3d_net, fii_10d_net, dii_3d_net,
+                        trailing_pe, roe, debt_to_equity, op_margins, piotroski_f, earnings_yield,
+                        nifty_vix, nifty_ret_5d, nifty_ret_21d,
+                        us_10y_yield, dxy, crude_ret_5d, gold_ret_5d, sp500_ret_5d,
+                        news_sentiment_score, news_impact_count,
+                        target_ret_1d, target_ret_5d, target_ret_15d,
+                        target_dir_1d, target_dir_5d, target_dir_15d,
+                        computed_at)
+                       VALUES (?, ?, 'D',
+                        ?,?,?,?,?,?,?,
+                        ?,?,?,?,?,?,?,?,
+                        ?,?,?,?,?,?,?,?,
+                        ?,?,?,?,
+                        ?,?,?,?,?,?,
+                        ?,?,?,
+                        ?,?,?,?,?,?,
+                        ?,?,?,?,
+                        ?,?,?,
+                        ?,?,?,?,?,?,
+                        ?,?,?,
+                        ?,?,?,?,?,
+                        ?,?,
+                        ?,?,?,
+                        ?,?,?,
+                        CURRENT_TIMESTAMP)""",
+                    (
+                        symbol, date.strftime("%Y-%m-%d"),
+                        d.get("ret_1d"), d.get("ret_5d"), d.get("ret_15d"), d.get("ret_21d"),
+                        d.get("ret_63d"), d.get("ret_126d"), d.get("ret_252d"),
+                        d.get("sma20"), d.get("sma50"), d.get("sma200"), d.get("ema8"), d.get("ema21"),
+                        d.get("dist_sma20_pct"), d.get("dist_sma200_pct"), d.get("above_sma200"),
+                        d.get("rsi_14"), d.get("rsi_28"),
+                        d.get("macd"), d.get("macd_signal"), d.get("macd_hist"),
+                        d.get("adx"), d.get("di_plus"), d.get("di_minus"),
+                        d.get("stoch_k"), d.get("stoch_d"), d.get("cci"), d.get("williams_r"),
+                        d.get("atr_14"), d.get("atr_pct"),
+                        d.get("bb_upper"), d.get("bb_lower"), d.get("bb_width"), d.get("bb_pct"),
+                        d.get("hist_vol_21d"), d.get("hist_vol_63d"), d.get("vol_regime"),
+                        d.get("volume_ratio_20d"), d.get("volume_ratio_5d"),
+                        d.get("obv"), d.get("obv_slope"), d.get("vwap"), d.get("vwap_dist_pct"),
+                        d.get("trend_1d"), d.get("trend_1w"), d.get("trend_1m"), d.get("mtf_alignment_score"),
+                        d.get("fii_3d_net"), d.get("fii_10d_net"), d.get("dii_3d_net"),
+                        d.get("trailing_pe"), d.get("roe"), d.get("debt_to_equity"),
+                        d.get("op_margins"), d.get("piotroski_f"), d.get("earnings_yield"),
+                        d.get("nifty_vix"), d.get("nifty_ret_5d"), d.get("nifty_ret_21d"),
+                        d.get("us_10y_yield"), d.get("dxy"),
+                        d.get("crude_ret_5d"), d.get("gold_ret_5d"), d.get("sp500_ret_5d"),
+                        d.get("news_sentiment_score"), d.get("news_impact_count"),
+                        d.get("target_ret_1d"), d.get("target_ret_5d"), d.get("target_ret_15d"),
+                        d.get("target_dir_1d"), d.get("target_dir_5d"), d.get("target_dir_15d"),
+                    ),
+                )
+                written += 1
+            con.commit()
+            return written
+        finally:
+            con.close()
 
     # ── Full pipeline ────────────────────────────────────────────────────────
 
