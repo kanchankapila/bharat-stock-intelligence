@@ -129,6 +129,7 @@ def recompute_screener_reliability(conn):
         # 30-day win rate
         stats_30 = conn.execute(f"""
             SELECT
+              COUNT(*) AS total,
               SUM(CASE WHEN outcome = 'WIN'  THEN 1 ELSE 0 END) AS wins,
               AVG(CASE WHEN outcome IN ('WIN','LOSS') THEN return_pct END) AS avg_return,
               MAX(CASE WHEN return_pct < 0 THEN ABS(return_pct) ELSE 0 END) AS max_dd
@@ -141,8 +142,9 @@ def recompute_screener_reliability(conn):
         wins_7 = stats_7['wins'] or 0
         win_rate_7 = wins_7 / total if total > 0 else 0
         avg_ret_7 = stats_7['avg_return'] or 0
+        total_30 = stats_30['total'] or 0
         wins_30 = stats_30['wins'] or 0
-        win_rate_30 = wins_30 / total if total > 0 else 0
+        win_rate_30 = wins_30 / total_30 if total_30 > 0 else 0
         avg_ret_30 = stats_30['avg_return'] or 0
         max_dd = stats_30['max_dd'] or 0
 
