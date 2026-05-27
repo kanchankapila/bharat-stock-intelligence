@@ -1,8 +1,7 @@
-import React, { useState, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import {
-  TrendingUp, TrendingDown, Zap, Target, BarChart3, Shield,
-  RefreshCw, ChevronUp, ChevronDown, Filter, Clock, Star,
-  Activity, AlertCircle, ArrowUpRight, Award, Layers,
+  Zap, BarChart3, RefreshCw, Filter, Clock, Star,
+  AlertCircle, Award,
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { motion, AnimatePresence } from 'motion/react';
@@ -212,7 +211,7 @@ function AIInsightPanel({ signal }: { signal: ConfluenceSignal }) {
           <div className="text-[10px] text-slate-500 uppercase tracking-widest">Active Scanners ({screenerNames.length})</div>
           <div className="flex flex-wrap gap-1.5">
             {screenerNames.slice(0, 8).map((name, i) => (
-              <span key={i} className="px-2 py-0.5 bg-indigo-900/30 border border-indigo-500/20 rounded text-[10px] text-indigo-300">
+              <span key={`${signal.symbol}-${i}-${name}`} className="px-2 py-0.5 bg-indigo-900/30 border border-indigo-500/20 rounded text-[10px] text-indigo-300">
                 {name}
               </span>
             ))}
