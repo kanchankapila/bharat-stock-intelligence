@@ -1022,6 +1022,86 @@ db.exec(`
   );
 `);
 
+// --- Confluence Intelligence Tables ---
+db.exec(`
+  -- Confluence Signals — ranked multi-screener stock opportunities (refreshed every 30 min)
+  CREATE TABLE IF NOT EXISTS confluence_signals (
+    symbol                 TEXT NOT NULL,
+    computed_at            DATETIME NOT NULL,
+    confluence_score       REAL NOT NULL,
+    conviction_level       TEXT NOT NULL CHECK(conviction_level IN ('ELITE','STRONG','MODERATE','WEAK')),
+    active_screener_count  INTEGER NOT NULL DEFAULT 0,
+    bullish_screener_count INTEGER NOT NULL DEFAULT 0,
+    bearish_screener_count INTEGER NOT NULL DEFAULT 0,
+    screener_ids_json      TEXT NOT NULL DEFAULT '[]',
+    screener_names_json    TEXT NOT NULL DEFAULT '[]',
+    screener_weights_json  TEXT NOT NULL DEFAULT '{}',
+    trend_alignment_score  REAL DEFAULT 0,
+    volume_score           REAL DEFAULT 0,
+    sector_strength_score  REAL DEFAULT 0,
+    fundamental_score      REAL DEFAULT 0,
+    ml_breakout_probability REAL,
+    ml_trend_probability   REAL,
+    suggested_timeframe    TEXT DEFAULT 'POSITIONAL',
+    entry_zone_low         REAL,
+    entry_zone_high        REAL,
+    stop_loss              REAL,
+    target_1               REAL,
+    target_2               REAL,
+    target_3               REAL,
+    risk_reward            REAL,
+    ai_conclusion          TEXT,
+    trade_reasoning        TEXT,
+    sector                 TEXT,
+    market_cap             REAL,
+    current_price          REAL,
+    current_volume         INTEGER,
+    rsi                    REAL,
+    atr                    REAL,
+    expires_at             DATETIME,
+    PRIMARY KEY (symbol, computed_at)
+  );
+  CREATE INDEX IF NOT EXISTS idx_csi_score   ON confluence_signals(confluence_score DESC);
+  CREATE INDEX IF NOT EXISTS idx_csi_symbol  ON confluence_signals(symbol);
+  CREATE INDEX IF NOT EXISTS idx_csi_computed ON confluence_signals(computed_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_csi_level   ON confluence_signals(conviction_level);
+
+  -- Screener Reliability — per-screener historical win rates (updated by confluence_outcome_tracker.py)
+  CREATE TABLE IF NOT EXISTS screener_reliability (
+    scan_id           TEXT PRIMARY KEY,
+    screener_name     TEXT NOT NULL,
+    source            TEXT NOT NULL,
+    total_signals     INTEGER DEFAULT 0,
+    wins_1d           INTEGER DEFAULT 0,
+    wins_3d           INTEGER DEFAULT 0,
+    wins_7d           INTEGER DEFAULT 0,
+    wins_14d          INTEGER DEFAULT 0,
+    wins_30d          INTEGER DEFAULT 0,
+    win_rate_1d       REAL DEFAULT 0,
+    win_rate_7d       REAL DEFAULT 0,
+    win_rate_30d      REAL DEFAULT 0,
+    avg_return_7d     REAL DEFAULT 0,
+    avg_return_30d    REAL DEFAULT 0,
+    max_drawdown      REAL DEFAULT 0,
+    avg_holding_days  REAL DEFAULT 0,
+    reliability_score REAL DEFAULT 50,
+    last_updated      DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  -- Confluence Alerts Log — audit trail for sent alerts
+  CREATE TABLE IF NOT EXISTS confluence_alerts_log (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol          TEXT NOT NULL,
+    alert_type      TEXT NOT NULL,
+    confluence_score REAL,
+    message         TEXT,
+    channels_json   TEXT DEFAULT '[]',
+    sent_at         DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE INDEX IF NOT EXISTS idx_cal_symbol ON confluence_alerts_log(symbol);
+  CREATE INDEX IF NOT EXISTS idx_cal_sent   ON confluence_alerts_log(sent_at DESC);
+`);
+
 // --- Migrations & Upgrades ---
 const migrateColumn = (table: string, col: string, def: string) => {
   try { db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`); } catch (e: any) {
