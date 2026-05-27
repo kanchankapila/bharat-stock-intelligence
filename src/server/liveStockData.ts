@@ -13,22 +13,19 @@ function getAllNSESymbols(): string[] {
   return [...new Set([...stocklistSymbols, ...nseSymbols])];
 }
 
-/** Name lookup: nseStocksData as base, stocklist overrides (more canonical names). */
-function buildNameMap(): Map<string, string> {
-  const map = new Map<string, string>();
-  for (const s of nseStocksData) map.set(s.symbol, s.name);
-  for (const s of getAllStocks()) map.set(s.symbol, s.name);
-  return map;
-}
+const _nameMap: Map<string, string> = (() => {
+  const m = new Map<string, string>();
+  for (const s of nseStocksData) m.set(s.symbol, s.name);
+  for (const s of getAllStocks()) m.set(s.symbol, s.name);
+  return m;
+})();
 
-/** Sector lookup from nseStocksData (only non-Unknown entries). */
-function buildSectorMap(): Map<string, string> {
-  const map = new Map<string, string>();
-  for (const s of nseStocksData) {
-    if (s.sector && s.sector !== "Unknown") map.set(s.symbol, s.sector);
-  }
-  return map;
-}
+const _sectorMap: Map<string, string> = (() => {
+  const m = new Map<string, string>();
+  for (const s of nseStocksData)
+    if (s.sector && s.sector !== "Unknown") m.set(s.symbol, s.sector);
+  return m;
+})();
 
 // ─── Yahoo Finance session variables ─────────────────────────────────────────
 let yfCookie: string | null = null;
@@ -97,9 +94,6 @@ async function fetchWithTimeout(url: string, init: RequestInit = {}): Promise<Re
 async function fetchBatchYahooFinance(
   symbols: string[],
 ): Promise<Map<string, MarketData>> {
-  const nameMap = buildNameMap();
-  const sectorMap = buildSectorMap();
-  
   const session = await ensureYahooFinanceSession();
   const crumbParam = session ? `&crumb=${session.crumb}` : '';
   const requestHeaders: Record<string, string> = {
@@ -133,7 +127,7 @@ async function fetchBatchYahooFinance(
 
   for (const q of quotes) {
     const nseSymbol = (q.symbol as string).replace(/\.(NS|BO)$/, "");
-    const name = nameMap.get(nseSymbol) || nseSymbol;
+    const name = _nameMap.get(nseSymbol) || nseSymbol;
 
     const price: number = q.regularMarketPrice ?? 0;
     const prevClose: number = q.regularMarketPreviousClose ?? 0;
@@ -153,7 +147,7 @@ async function fetchBatchYahooFinance(
       prevClose: Number(prevClose.toFixed(2)),
       high52w: q.fiftyTwoWeekHigh ?? undefined,
       low52w: q.fiftyTwoWeekLow ?? undefined,
-      sector: sectorMap.get(nseSymbol),
+      sector: _sectorMap.get(nseSymbol),
     });
   }
 
@@ -166,8 +160,7 @@ async function fetchStockQuoteYahooFinance(
   symbol: string,
 ): Promise<MarketData | null> {
   try {
-    const nameMap = buildNameMap();
-    const name = nameMap.get(symbol) || symbol;
+    const name = _nameMap.get(symbol) || symbol;
 
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}.NS?interval=1d&range=1d`;
     const response = await fetchWithTimeout(url, {
@@ -254,8 +247,7 @@ export async function fetchStockQuoteFinnhub(
     const apiKey = process.env.FINNHUB_API_KEY;
     if (!apiKey) return null;
 
-    const nameMap = buildNameMap();
-    const name = nameMap.get(symbol) || symbol;
+    const name = _nameMap.get(symbol) || symbol;
 
     const url = `https://finnhub.io/api/v1/quote?symbol=${symbol}.NS&token=${apiKey}`;
     const response = await fetch(url);
