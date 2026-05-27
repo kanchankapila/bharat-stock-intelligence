@@ -1,19 +1,4 @@
 import { mergeRouters } from "./trpc";
-import db from "./db";
-
-// Ensure todos table exists (created before routers load)
-db.exec(`
-  CREATE TABLE IF NOT EXISTS todos (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    title TEXT NOT NULL,
-    description TEXT,
-    status TEXT CHECK(status IN ('PENDING', 'IN_PROGRESS', 'COMPLETED')) DEFAULT 'PENDING',
-    category TEXT DEFAULT 'IDEAS',
-    priority TEXT CHECK(status IN ('LOW', 'MEDIUM', 'HIGH')) DEFAULT 'MEDIUM',
-    createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
-`);
 
 import { userRouter }         from "./routers/user.router";
 import { todoRouter }         from "./routers/todo.router";
