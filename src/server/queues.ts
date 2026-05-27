@@ -149,7 +149,9 @@ let bulkMirror: Map<string, any> = new Map();
 async function processConfluenceCompute(_job: Job): Promise<{ computed: number; elite: number; strong: number }> {
   const { computeConfluenceSignals, runMLProbabilityOverlay } = await import('./confluenceEngine');
   const result = await computeConfluenceSignals();
-  runMLProbabilityOverlay().catch(() => {});
+  runMLProbabilityOverlay().catch((err: any) =>
+    console.warn('[CONFLUENCE] ML overlay failed (non-blocking):', err?.message ?? err)
+  );
   return result;
 }
 
@@ -1078,10 +1080,13 @@ export async function initQueues(): Promise<boolean> {
       processConfluenceOutcomes,
       { connection: makeConnection(), concurrency: 1 }
     );
+    confluenceOutcomesWorker.on('failed', (job, err) =>
+      console.error(`[QUEUE] ${QUEUE_CONFLUENCE_OUTCOMES} job failed:`, err.message)
+    );
     await confluenceOutcomesQueue.add(
       'confluence-outcomes-daily',
       {},
-      { repeat: { every: 24 * 60 * 60 * 1000 }, removeOnComplete: 2, removeOnFail: 2 }
+      { repeat: { every: 24 * 60 * 60 * 1000 }, removeOnComplete: 3, removeOnFail: 3 }
     );
     console.log('[QUEUE] confluence-compute (every 30 min) + confluence-outcomes (daily) registered');
 
@@ -1147,6 +1152,10 @@ export async function shutdownQueues(): Promise<void> {
     dlRetrainEmergencyQueue?.close(),
     ohlcvBackfillWorker?.close(),
     ohlcvBackfillQueue?.close(),
+    confluenceComputeWorker?.close(),
+    confluenceOutcomesWorker?.close(),
+    confluenceComputeQueue?.close(),
+    confluenceOutcomesQueue?.close(),
   ]);
 }
 
