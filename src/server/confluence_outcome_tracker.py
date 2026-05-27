@@ -83,7 +83,7 @@ def track_outcomes(conn):
 def recompute_screener_reliability(conn):
     """Recompute win rates for every screener based on signal_outcomes."""
     screeners = conn.execute("""
-        SELECT scan_id, screener_name, 'trendlyne' AS source FROM trendlyne_screeners
+        SELECT screener_id AS scan_id, screener_name, 'trendlyne' AS source FROM trendlyne_screeners
         UNION ALL
         SELECT scan_id, screener_name, 'moneycontrol' AS source FROM moneycontrol_screeners
         UNION ALL
