@@ -1,4 +1,5 @@
 import Redis from 'ioredis';
+import { REDIS_BASE } from './redisConfig';
 
 // ─── Redis client (optional — gracefully falls back to in-process Map) ─────────
 
@@ -6,9 +7,7 @@ let redis: Redis | null = null;
 let redisAvailable = false;
 
 function createRedisClient(): Redis | null {
-  const host = process.env.REDIS_HOST || 'localhost';
-  const port = parseInt(process.env.REDIS_PORT || '6379', 10);
-  const password = process.env.REDIS_PASSWORD || undefined;
+  const { host, port, password } = REDIS_BASE;
 
   const client = new Redis({ 
     host, 

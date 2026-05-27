@@ -16,16 +16,14 @@ import { generateStockAnalysis } from '../services/aiService';
 import db from './db';
 import { syncAndScore } from './scoringService';
 import Redis from 'ioredis';
+import { REDIS_BASE } from './redisConfig';
 
 // ─── Redis connection shared across all BullMQ objects ───────────────────────
 
 function makeConnection(isProbe = false): ConnectionOptions {
   const base = {
-    host: process.env.REDIS_HOST || 'localhost',
-    port: parseInt(process.env.REDIS_PORT || '6379', 10),
-    password: process.env.REDIS_PASSWORD || undefined,
+    ...REDIS_BASE,
     connectTimeout: isProbe ? 2000 : 5000,
-    // Suppress "minimum Redis version" console warnings from ioredis
     showFriendlyErrorStack: false,
   };
 
