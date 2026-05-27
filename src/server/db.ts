@@ -8,20 +8,21 @@ const db = new Database(dbPath, { timeout: 10000 });
 db.pragma('journal_mode = WAL');
 db.pragma('synchronous = NORMAL');
 
-/**
- * Initialize Database Schema
- * All tables required for all features are created here if they don't exist.
- */
-try {
-  const tableInfo = db.prepare("PRAGMA table_info(signal_source_weights)").all() as any[];
-  const pkCount = tableInfo.filter(c => c.pk > 0).length;
-  if (pkCount === 1) {
-    console.log('[DB] Migrating signal_source_weights to composite primary key...');
-    db.exec("DROP TABLE IF EXISTS signal_source_weights");
-  }
-} catch (e) {
-  // Table might not exist yet
+db.exec(`CREATE TABLE IF NOT EXISTS _migrations (
+  name     TEXT PRIMARY KEY,
+  applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
+)`);
+
+function runMigration(name: string, sql: string): void {
+  if (db.prepare('SELECT 1 FROM _migrations WHERE name = ?').get(name)) return;
+  db.exec(sql);
+  db.prepare('INSERT INTO _migrations (name) VALUES (?)').run(name);
 }
+
+runMigration(
+  '001_signal_source_weights_composite_pk',
+  'DROP TABLE IF EXISTS signal_source_weights'
+);
 
 db.exec(`
   -- 1. Users & Personalization
