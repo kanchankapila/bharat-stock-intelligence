@@ -8,20 +8,19 @@ export const confluenceRouter = router({
   // Ranked list of high-conviction signals (latest batch)
   getConfluenceSignals: publicProcedure
     .input(z.object({
-      minScore:        z.number().min(0).max(100).optional().default(30),
+      minScore:        z.number().min(0).max(100).optional(),
       convictionLevel: z.enum(['ELITE', 'STRONG', 'MODERATE', 'WEAK']).optional(),
       sector:          z.string().optional(),
       timeframe:       z.enum(['INTRADAY', 'SWING', 'POSITIONAL']).optional(),
-      limit:           z.number().min(1).max(200).optional().default(50),
+      limit:           z.number().min(1).max(200).optional(),
     }).optional())
     .query(({ input }) => {
-      const opts = input ?? {};
       return getLatestConfluenceSignals({
-        minScore:        opts.minScore ?? 30,
-        convictionLevel: opts.convictionLevel,
-        sector:          opts.sector,
-        timeframe:       opts.timeframe,
-        limit:           opts.limit ?? 50,
+        minScore:        input?.minScore ?? 30,
+        convictionLevel: input?.convictionLevel,
+        sector:          input?.sector,
+        timeframe:       input?.timeframe,
+        limit:           input?.limit ?? 50,
       });
     }),
 
@@ -122,7 +121,8 @@ export const confluenceRouter = router({
       limit:  z.number().optional().default(50),
     }).optional())
     .query(({ input }) => {
-      const { symbol, limit = 50 } = input ?? {};
+      const symbol = input?.symbol;
+      const limit = input?.limit ?? 50;
       if (symbol) {
         return db.prepare(`
           SELECT so.*, cs.conviction_level, cs.bullish_screener_count, cs.screener_names_json
