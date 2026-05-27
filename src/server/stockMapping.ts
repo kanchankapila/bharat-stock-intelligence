@@ -1,15 +1,15 @@
 import stockData, { StockMapping } from '../data/stocklist';
 
+const _bySymbol = new Map<string, StockMapping>(stockData.map(s => [s.symbol.toUpperCase(), s]));
+const _byName   = new Map<string, StockMapping>(stockData.map(s => [s.name.toUpperCase(), s]));
+const _byMcSym  = new Map<string, StockMapping>(stockData.map(s => [s.mcsymbol.toUpperCase(), s]));
+const _byIsin   = new Map<string, StockMapping>(stockData.map(s => [s.isin.toUpperCase(), s]));
+const _byTlid   = new Map<string, StockMapping>(stockData.map(s => [s.tlid, s]));
+
 export function getStockMapping(query: string): StockMapping | undefined {
   if (!query) return undefined;
-  const upperQuery = query.toUpperCase();
-  return stockData.find(s => 
-    s.symbol.toUpperCase() === upperQuery || 
-    s.name.toUpperCase() === upperQuery ||
-    s.mcsymbol.toUpperCase() === upperQuery ||
-    s.isin.toUpperCase() === upperQuery ||
-    s.tlid === query
-  );
+  const q = query.toUpperCase();
+  return _bySymbol.get(q) ?? _byName.get(q) ?? _byMcSym.get(q) ?? _byIsin.get(q) ?? _byTlid.get(query);
 }
 
 /**
