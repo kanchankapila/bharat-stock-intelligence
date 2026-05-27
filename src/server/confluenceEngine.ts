@@ -209,7 +209,7 @@ function scoreStock(
     if (quant.rank_composite > 60)       trendScore += 4;
   }
   if (technical) {
-    if (technical.above_sma200 === 1)    trendScore = Math.min(15, trendScore + 3);
+    if (technical.above_sma200 === 1)    trendScore += 3;
   }
   trendScore = Math.min(15, trendScore);
 
@@ -379,7 +379,7 @@ export async function computeConfluenceSignals(): Promise<{ computed: number; el
     const scored = scoreStock({ symbol, screenerIds: ids, screenerNames: names, screenerClasses: classes }, tech, quant, fund, nse);
 
     const price = tech?.cmp ?? null;
-    const atr = price && tech?.bb_width ? price * (tech.bb_width / 100) : (price ? price * 0.03 : null);
+    const atr = price && tech?.bb_width && tech.bb_width > 0 ? price * (tech.bb_width / 100) : (price ? price * 0.03 : null);
     const setup = price && atr ? buildTradeSetup(price, atr, scored.confluenceScore) : null;
 
     const weightsObj: Record<string, number> = {};
@@ -403,7 +403,12 @@ export async function computeConfluenceSignals(): Promise<{ computed: number; el
     else if (scored.convictionLevel === 'STRONG') strong++;
   }
 
-  insertMany(rows);
+  try {
+    insertMany(rows);
+  } catch (err: any) {
+    console.error('[CONFLUENCE] Transaction failed:', err.message);
+    return { computed: 0, elite: 0, strong: 0 };
+  }
   console.log(`[CONFLUENCE] Computed ${rows.length} signals — ${elite} ELITE, ${strong} STRONG`);
   return { computed: rows.length, elite, strong };
 }
