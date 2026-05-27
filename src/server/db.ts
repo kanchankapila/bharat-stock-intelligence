@@ -1065,6 +1065,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_csi_symbol  ON confluence_signals(symbol);
   CREATE INDEX IF NOT EXISTS idx_csi_computed ON confluence_signals(computed_at DESC);
   CREATE INDEX IF NOT EXISTS idx_csi_level   ON confluence_signals(conviction_level);
+  CREATE INDEX IF NOT EXISTS idx_csi_sector  ON confluence_signals(sector);
 
   -- Screener Reliability — per-screener historical win rates (updated by confluence_outcome_tracker.py)
   CREATE TABLE IF NOT EXISTS screener_reliability (
@@ -1087,6 +1088,7 @@ db.exec(`
     reliability_score REAL DEFAULT 50,
     last_updated      DATETIME DEFAULT CURRENT_TIMESTAMP
   );
+  CREATE INDEX IF NOT EXISTS idx_sr_source   ON screener_reliability(source);
 
   -- Confluence Alerts Log — audit trail for sent alerts
   CREATE TABLE IF NOT EXISTS confluence_alerts_log (
