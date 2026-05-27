@@ -24,7 +24,7 @@ function makeConnection(isProbe = false): ConnectionOptions {
     host: process.env.REDIS_HOST || 'localhost',
     port: parseInt(process.env.REDIS_PORT || '6379', 10),
     password: process.env.REDIS_PASSWORD || undefined,
-    connectTimeout: 5000,
+    connectTimeout: isProbe ? 2000 : 5000,
     // Suppress "minimum Redis version" console warnings from ioredis
     showFriendlyErrorStack: false,
   };
@@ -45,8 +45,8 @@ function makeConnection(isProbe = false): ConnectionOptions {
     enableOfflineQueue: true,
     autoResubscribe: true,
     retryStrategy: (times) => {
-      const delay = Math.min(times * 100, 3000);
-      return delay;
+      if (times > 20) return null; // give up after ~60s of retries
+      return Math.min(times * 100, 3000);
     },
   };
 }
@@ -75,6 +75,9 @@ export const QUEUE_DL_INFERENCE         = 'dl-inference';
 export const QUEUE_DL_REGIME_UPDATE     = 'dl-regime-update';
 export const QUEUE_DL_RETRAIN_WEEKLY    = 'dl-retrain-weekly';
 export const QUEUE_DL_RETRAIN_EMERGENCY = 'dl-retrain-emergency';
+export const QUEUE_OHLCV_BACKFILL       = 'ohlcv-backfill';
+export const QUEUE_CONFLUENCE_COMPUTE  = 'confluence-compute';
+export const QUEUE_CONFLUENCE_OUTCOMES = 'confluence-outcomes';
 
 const BULK_CACHE_KEY      = 'live-stocks-bulk';
 const BULK_TTL_SECONDS    = 5 * 60;
@@ -129,9 +132,40 @@ let dlRegimeUpdateWorker:     Worker | null = null;
 let dlRetrainWeeklyWorker:    Worker | null = null;
 let dlRetrainEmergencyWorker: Worker | null = null;
 
+export let ohlcvBackfillQueue: Queue | null = null;
+let ohlcvBackfillWorker:       Worker | null = null;
+
+export let confluenceComputeQueue:  Queue | null = null;
+export let confluenceOutcomesQueue: Queue | null = null;
+let confluenceComputeWorker:  Worker | null = null;
+let confluenceOutcomesWorker: Worker | null = null;
+
 // Shared in-process mirror populated by the stock-refresh worker
 // (same reference as the one exported from liveStockData via the cache layer)
 let bulkMirror: Map<string, any> = new Map();
+
+// ─── Confluence compute processor ────────────────────────────────────────────
+
+async function processConfluenceCompute(_job: Job): Promise<{ computed: number; elite: number; strong: number }> {
+  const { computeConfluenceSignals, runMLProbabilityOverlay } = await import('./confluenceEngine');
+  const result = await computeConfluenceSignals();
+  runMLProbabilityOverlay().catch(() => {});
+  return result;
+}
+
+async function processConfluenceOutcomes(_job: Job): Promise<void> {
+  const { execFile } = await import('child_process');
+  const pathModule = await import('path');
+  const PYTHON = process.platform === 'win32' ? 'python' : 'python3';
+  const scriptPath = pathModule.default.resolve(process.cwd(), 'src/server/confluence_outcome_tracker.py');
+  await new Promise<void>((resolve, reject) => {
+    execFile(PYTHON, [scriptPath], { timeout: 120000 }, (err, stdout, stderr) => {
+      if (stdout) console.log('[OUTCOME-TRACKER]', stdout.trim());
+      if (stderr) console.error('[OUTCOME-TRACKER ERR]', stderr.trim());
+      err ? reject(err) : resolve();
+    });
+  });
+}
 
 // ─── Stock-refresh worker processor (PHASE 1: Now persists OHLCV) ──────────
 
@@ -295,12 +329,14 @@ export async function initQueues(): Promise<boolean> {
   // 1. Fail-fast probe to see if Redis is even there
   const probeConnection = makeConnection(true);
   const probe = new Redis({ ...(probeConnection as any), lazyConnect: true });
+  probe.on('error', () => {}); // silence ioredis default stderr output during probe
 
   try {
     await probe.connect();
     await probe.quit();
     console.log('[QUEUE] Redis connection probe successful');
   } catch (err: any) {
+    try { probe.disconnect(true); } catch { /* ignore */ }
     console.warn = _origWarn;
     console.warn('[QUEUE] Redis unavailable, disabling BullMQ:', err.message);
     return false;
@@ -977,6 +1013,78 @@ export async function initQueues(): Promise<boolean> {
     dlRetrainEmergencyWorker.on('completed', () => console.log('[QUEUE] dl-retrain-emergency done'));
     dlRetrainEmergencyWorker.on('failed', (_, err) => console.error('[QUEUE] dl-retrain-emergency failed:', err.message));
 
+    // ── OHLCV Backfill ───────────────────────────────────────────────────────
+    // Worker handles both one-time full backfill and recurring weekly gap-fill
+    ohlcvBackfillQueue = new Queue(QUEUE_OHLCV_BACKFILL, { connection });
+    ohlcvBackfillWorker = new Worker(QUEUE_OHLCV_BACKFILL,
+      async (job: Job) => {
+        const mode = (job.data?.mode as string) || 'gap-fill';
+        const lookback = (job.data?.lookback as number) || 30;
+        return processDLPython('backfill_ohlcv.py', `--mode ${mode} --lookback ${lookback}`);
+      },
+      { connection, concurrency: 1, lockDuration: 3 * 60 * 60 * 1000, lockRenewTime: 15 * 60 * 1000 });
+    ohlcvBackfillWorker.on('completed', (job) => console.log(`[QUEUE] ohlcv-backfill (${job.data?.mode}) done`));
+    ohlcvBackfillWorker.on('failed', (_, err) => console.error('[QUEUE] ohlcv-backfill failed:', err.message));
+
+    // Weekly gap-fill: Saturday 2:00 AM IST = Friday 20:30 UTC
+    const ohlcvRep = await ohlcvBackfillQueue.getRepeatableJobs();
+    for (const r of ohlcvRep) await ohlcvBackfillQueue.removeRepeatableByKey(r.key);
+    await ohlcvBackfillQueue.add('ohlcv-gap-fill-weekly', { mode: 'gap-fill', lookback: 30 }, {
+      repeat: { pattern: '30 20 * * 5' },
+      jobId: 'ohlcv-gap-fill-weekly',
+      removeOnComplete: 2, removeOnFail: 3,
+    });
+
+    // Startup check: if stock_ohlcv has fewer than 1000 rows trigger full backfill once
+    const ohlcvCount = (db.prepare('SELECT COUNT(*) as c FROM stock_ohlcv').get() as any)?.c ?? 0;
+    if (ohlcvCount < 1000) {
+      console.log(`[QUEUE] stock_ohlcv sparse (${ohlcvCount} rows) — queuing full backfill`);
+      await ohlcvBackfillQueue.add('ohlcv-full-backfill-startup', { mode: 'full' }, {
+        jobId: 'ohlcv-full-backfill-startup',
+        removeOnComplete: 1, removeOnFail: 3,
+      });
+    } else {
+      // Always ensure NIFTY50 index history is present
+      const niftyCount = (db.prepare("SELECT COUNT(*) as c FROM stock_ohlcv WHERE symbol='NIFTY50'").get() as any)?.c ?? 0;
+      if (niftyCount === 0) {
+        console.log('[QUEUE] NIFTY50 missing from stock_ohlcv — queuing index backfill');
+        await ohlcvBackfillQueue.add('ohlcv-indices-startup', { mode: 'indices' }, {
+          jobId: 'ohlcv-indices-startup',
+          removeOnComplete: 1, removeOnFail: 3,
+        });
+      }
+    }
+
+    // ── Confluence Compute Queue ──────────────────────────────────────────────
+    confluenceComputeQueue = new Queue(QUEUE_CONFLUENCE_COMPUTE, { connection: makeConnection() });
+    confluenceComputeWorker = new Worker(
+      QUEUE_CONFLUENCE_COMPUTE,
+      processConfluenceCompute,
+      { connection: makeConnection(), concurrency: 1 }
+    );
+    confluenceComputeWorker.on('failed', (_job, err) =>
+      console.error(`[QUEUE] ${QUEUE_CONFLUENCE_COMPUTE} job failed:`, err.message)
+    );
+    await confluenceComputeQueue.add(
+      'confluence-compute',
+      {},
+      { repeat: { every: 30 * 60 * 1000 }, removeOnComplete: 3, removeOnFail: 3 }
+    );
+
+    // ── Confluence Outcomes Queue ─────────────────────────────────────────────
+    confluenceOutcomesQueue = new Queue(QUEUE_CONFLUENCE_OUTCOMES, { connection: makeConnection() });
+    confluenceOutcomesWorker = new Worker(
+      QUEUE_CONFLUENCE_OUTCOMES,
+      processConfluenceOutcomes,
+      { connection: makeConnection(), concurrency: 1 }
+    );
+    await confluenceOutcomesQueue.add(
+      'confluence-outcomes-daily',
+      {},
+      { repeat: { every: 24 * 60 * 60 * 1000 }, removeOnComplete: 2, removeOnFail: 2 }
+    );
+    console.log('[QUEUE] confluence-compute (every 30 min) + confluence-outcomes (daily) registered');
+
     console.warn = _origWarn;
     console.log('[QUEUE] BullMQ initialised (stock-refresh + ai-signals)');
     return true;
@@ -1037,6 +1145,8 @@ export async function shutdownQueues(): Promise<void> {
     dlRetrainWeeklyQueue?.close(),
     dlRetrainEmergencyWorker?.close(),
     dlRetrainEmergencyQueue?.close(),
+    ohlcvBackfillWorker?.close(),
+    ohlcvBackfillQueue?.close(),
   ]);
 }
 
