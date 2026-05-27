@@ -49,15 +49,15 @@ export const signalsRouter = router({
       const stats = db.prepare(`
         SELECT
           COUNT(*) as total,
-          SUM(CASE WHEN status = 'COMPLETED' THEN 1 ELSE 0 END) as completed,
-          SUM(CASE WHEN status = 'FAILED' THEN 1 ELSE 0 END) as failed
+          SUM(CASE WHEN result = 'PROFIT' THEN 1 ELSE 0 END) as profit,
+          SUM(CASE WHEN result = 'LOSS'   THEN 1 ELSE 0 END) as loss,
+          SUM(CASE WHEN status IN ('COMPLETED', 'FAILED') THEN 1 ELSE 0 END) as resolved
         FROM signals
-      `).get() as { total: number; completed: number; failed: number };
-      const relevant = (stats.completed || 0) + (stats.failed || 0);
+      `).get() as { total: number; profit: number; loss: number; resolved: number };
       return {
-        precision: relevant > 0 ? (stats.completed / relevant) * 100 : 0,
-        totalSignals: stats.total || 0,
-        profitHitRate: relevant > 0 ? (stats.completed / relevant) * 100 : 0,
+        precision:     stats.resolved > 0 ? (stats.profit / stats.resolved) * 100 : 0,
+        profitHitRate: stats.resolved > 0 ? (stats.profit / stats.resolved) * 100 : 0,
+        totalSignals:  stats.total || 0,
       };
     }),
 
