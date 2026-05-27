@@ -5,7 +5,7 @@ import {
   Search, History, PieChart, Bookmark, Users, Globe, CheckCircle2,
   Star, LogIn, TrendingUp, ArrowUpRight, ArrowDownRight, Menu,
   ChevronLeft, ChevronRight, Radio, Settings2, Briefcase, Calendar, Sparkles,
-  FlaskConical,
+  FlaskConical, Layers,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { nseStocksData } from '../data/nseStocks';
@@ -44,6 +44,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { icon: Sparkles, label: 'Trade Cockpit', id: 'trade-cockpit' },
       { icon: Radio,   label: 'Signals',    id: 'signals'     },
+      { icon: Layers,  label: 'Signal Intel', id: 'signal-intelligence' },
       { icon: FlaskConical, label: 'Research', id: 'research' },
       { icon: Star,    label: 'Strategy',   id: 'strategy'    },
       { icon: Target,  label: 'Builder',    id: 'strategy-builder' },
@@ -546,6 +547,17 @@ export const AppShell: React.FC<AppShellProps> = ({
               {getMarketStatus().isOpen ? 'LIVE' : 'CLOSED'}
             </span>
           </div>
+
+          {/* V2 Switch */}
+          <button 
+            onClick={() => {
+              localStorage.setItem('v2Enabled', 'true');
+              window.location.reload();
+            }}
+            className="flex items-center gap-1 bg-indigo-600 hover:bg-indigo-500 text-white font-black text-[9px] rounded-md px-2 py-1 shrink-0 uppercase tracking-wider cursor-pointer transition-colors"
+          >
+            V2 Terminal
+          </button>
         </header>
 
         {/* Scrollable content */}

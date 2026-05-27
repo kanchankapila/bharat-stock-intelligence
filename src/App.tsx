@@ -63,11 +63,16 @@ import SuperstarPortfolio from './components/SuperstarPortfolio';
 import { SentimentIntelligence } from './components/SentimentIntelligence';
 import { AppShell } from './components/AppShell';
 import { SlideOutDrawer } from './components/SlideOutDrawer';
+import { V2AppShell } from './v2/components/layout/V2AppShell';
+import { V2StockDetails } from './v2/views/stock-analysis/V2StockDetails';
+import { V2Settings } from './v2/views/settings/V2Settings';
+import { V2Dashboard } from './v2/views/dashboard/V2Dashboard';
 import PremarketPanel from './components/PremarketPanel';
 import SmartMoneyPage from './components/SmartMoneyPage';
 import EarningsPage from './components/EarningsPage';
 import TradeDecisionCockpit from './components/TradeDecisionCockpit';
 import HedgeFundResearch from './components/HedgeFundResearch';
+import SignalIntelligence from './components/SignalIntelligence';
 import DLDashboard from './components/DLDashboard';
 import { 
   TickerTapeWidget, 
@@ -3400,6 +3405,11 @@ export default function App() {
 
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [drawerSymbol, setDrawerSymbol] = useState<string | null>(null);
+  const [v2Enabled, setV2Enabled] = useState(() => localStorage.getItem('v2Enabled') === 'true');
+  const toggleV2 = (enabled: boolean) => {
+    localStorage.setItem('v2Enabled', enabled ? 'true' : 'false');
+    setV2Enabled(enabled);
+  };
   const [researchSubTab, setResearchSubTab] = useState<'overview' | 'deep-learning'>('overview');
   const [selectedIndex, setSelectedIndex] = useState<{ id: string; name: string } | null>(null);
   const [user, setUser] = useState<FirebaseUser | null>(null);
@@ -3562,6 +3572,101 @@ export default function App() {
     </div>
   );
 
+  if (v2Enabled) {
+    return (
+      <V2AppShell
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        v2Enabled={v2Enabled}
+        setV2Enabled={(enabled) => {
+          toggleV2(enabled);
+          window.location.reload();
+        }}
+      >
+        <AnimatePresence mode="wait">
+          <Routes location={location} key={activeTab}>
+            <Route path="/watchlist" element={
+              <Watchlist
+                watchlist={watchlist}
+                stocks={stocks}
+                watchlistDetails={watchlistDetails || []}
+                onSelectStock={(s) => setDrawerSymbol(s)}
+                onRemove={toggleWatchlist}
+              />
+            } />
+            <Route path="/details" element={selectedSymbol ? (
+              <V2StockDetails
+                key={selectedSymbol}
+                symbol={selectedSymbol}
+                stock={stocks.find(s => s.symbol === selectedSymbol)}
+                onBack={() => navigate('/dashboard')}
+              />
+            ) : <div className="p-6">Select a stock to view details</div>} />
+            <Route path="/" element={<V2Dashboard />} />
+            <Route path="/dashboard" element={<V2Dashboard />} />
+            <Route path="/top-rated" element={<TopRatedStocks onSelectStock={(s) => setDrawerSymbol(s)} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
+            <Route path="/indices" element={<IndicesPage onSelectStock={(s) => setDrawerSymbol(s)} selectedIndex={selectedIndex} setSelectedIndex={setSelectedIndex} />} />
+            <Route path="/market-map" element={
+              <div className="p-6 space-y-6">
+                <Card title="NSE Market Heatmap" icon={Activity}>
+                  <div className="pt-2"><MarketHeatmapWidget /></div>
+                </Card>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <SectorPerformance />
+                  <SectorHeatmap />
+                </div>
+              </div>
+            } />
+            <Route path="/screener" element={<Screener stocks={stocks} onSelectStock={(s) => setDrawerSymbol(s)} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
+            <Route path="/trendlyne" element={<TrendlyneScreenerPanel onSelectStock={(s) => setDrawerSymbol(s)} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
+            <Route path="/discover" element={<div className="p-6"><NSEStockDiscovery onSelectStock={(s) => setDrawerSymbol(s)} /></div>} />
+            <Route path="/smart-money" element={<SmartMoneyPage onSelectStock={(s) => setDrawerSymbol(s)} />} />
+            <Route path="/earnings" element={<EarningsPage onSelectStock={(s) => setDrawerSymbol(s)} />} />
+            <Route path="/fno-scanners" element={<FnOIntelligenceCenter onSelectStock={(s) => setDrawerSymbol(s)} />} />
+            <Route path="/options" element={<div className="p-6"><OptionsIntelligence /></div>} />
+            <Route path="/trade-cockpit" element={<TradeDecisionCockpit onSelectStock={(s) => setDrawerSymbol(s)} />} />
+            <Route path="/backtest" element={<Backtest stocks={stocks} />} />
+            <Route path="/signals" element={<DailySignals onSelectStock={(s) => setDrawerSymbol(s)} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
+            <Route path="/signal-intelligence" element={<SignalIntelligence />} />
+            <Route path="/research" element={
+              <div className="flex flex-col">
+                <div className="flex gap-2 px-4 py-2 border-b border-slate-800">
+                  <button
+                    onClick={() => setResearchSubTab('overview')}
+                    className={`text-xs px-3 py-1 rounded-full transition-colors ${researchSubTab === 'overview' ? 'bg-violet-600 text-white' : 'text-slate-400 hover:text-white'}`}
+                  >Overview</button>
+                  <button
+                    onClick={() => setResearchSubTab('deep-learning')}
+                    className={`text-xs px-3 py-1 rounded-full transition-colors ${researchSubTab === 'deep-learning' ? 'bg-violet-600 text-white' : 'text-slate-400 hover:text-white'}`}
+                  >Deep Learning</button>
+                </div>
+                {researchSubTab === 'overview' ? <HedgeFundResearch onAddWatchlist={toggleWatchlist} /> : <DLDashboard />}
+              </div>
+            } />
+            <Route path="/strategy" element={<StrategyIntelligence onSelectStock={(s) => setDrawerSymbol(s)} />} />
+            <Route path="/strategy-builder" element={<InvestmentStrategy onSelectStock={(s) => setDrawerSymbol(s)} />} />
+            <Route path="/sentiment" element={<SentimentIntelligence onSelectStock={(s) => setDrawerSymbol(s)} />} />
+            <Route path="/superstars" element={<SuperstarPortfolio />} />
+            <Route path="/todo" element={<ToDoPage />} />
+            <Route path="/portfolio" element={<div className="p-6"><PortfolioAnalytics /></div>} />
+            <Route path="/builder" element={<div className="p-6"><StrategyBuilder /></div>} />
+            <Route path="/settings" element={<V2Settings />} />
+          </Routes>
+        </AnimatePresence>
+
+        <SlideOutDrawer
+          symbol={drawerSymbol}
+          isOpen={drawerSymbol !== null}
+          onClose={() => setDrawerSymbol(null)}
+          watchlist={watchlist}
+          onToggleWatchlist={toggleWatchlist}
+          onSelectStock={setDrawerSymbol}
+        />
+        <AlertsToast />
+      </V2AppShell>
+    );
+  }
+
   return (
     <>
       <AppShell
@@ -3642,6 +3747,7 @@ export default function App() {
               ) : <div className="p-6">Select a stock to view details</div>} />
               <Route path="/backtest" element={<Backtest stocks={stocks} />} />
               <Route path="/signals" element={<DailySignals onSelectStock={(s) => setDrawerSymbol(s)} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
+              <Route path="/signal-intelligence" element={<SignalIntelligence />} />
               <Route path="/research" element={
                 <div className="flex flex-col">
                   <div className="flex gap-2 px-4 py-2 border-b border-slate-800">
