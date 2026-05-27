@@ -58,7 +58,7 @@ def track_outcomes(conn):
                 continue  # not yet
 
             exit_price, actual_exit_date = get_ohlcv_close(conn, symbol, exit_date)
-            if exit_price is None:
+            if exit_price is None or entry_price <= 0:
                 continue
 
             return_pct = (exit_price - entry_price) / entry_price * 100
@@ -152,7 +152,7 @@ def recompute_screener_reliability(conn):
         reliability = min(100, max(0,
             win_rate_7 * 40 +
             win_rate_30 * 30 +
-            min(avg_ret_7, 10) / 10 * 20 +
+            min(max(avg_ret_7, 0), 10) / 10 * 20 +
             (1 - min(max_dd, 20) / 20) * 10
         ))
 
