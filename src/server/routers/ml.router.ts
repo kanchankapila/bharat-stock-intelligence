@@ -212,21 +212,5 @@ export const mlRouter = router({
         emaLong:  z.number().optional(),
       }).optional(),
     }))
-    .mutation(async ({ input }) => {
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      const rsiDiff  = (input.params?.rsiUpper || 70) - (input.params?.rsiLower || 30);
-      const emaDiff  = (input.params?.emaLong  || 50) - (input.params?.emaShort || 20);
-      return {
-        winRate:      parseFloat((60 + rsiDiff / 10).toFixed(1)),
-        profitFactor: 2.14,
-        maxDrawdown:  12.5,
-        totalReturn:  parseFloat((30 + emaDiff / 2).toFixed(1)),
-        trades:       124,
-        history: Array.from({ length: 100 }, (_, i) => ({
-          day: i,
-          equity: 10000 * Math.pow(1.002, i) + Math.random() * 500,
-          drawdown: -Math.random() * 5,
-        })),
-      };
-    }),
+    .mutation(() => null),
 });

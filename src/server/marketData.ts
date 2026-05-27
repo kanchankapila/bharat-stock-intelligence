@@ -213,15 +213,8 @@ export async function fetchETPennyStocks() {
   return { searchResult: { searchData: { records: [] } } };
 }
 
-export async function fetchMFInvestments(symbol: string) {
-  // Fallback: If Indiatimes is dead, return some generic data or fetch from MC insights
-  return { Table: [
-    { schemeName: 'Nippon India Small Cap Fund', marketValue: '425.50', percentToAum: '3.2' },
-    { schemeName: 'HDFC Mid-Cap Opportunities', marketValue: '310.20', percentToAum: '2.8' },
-    { schemeName: 'ICICI Prudential Bluechip', marketValue: '285.40', percentToAum: '1.5' },
-    { schemeName: 'SBI Bluechip Fund', marketValue: '198.60', percentToAum: '1.2' },
-    { schemeName: 'Axis Bluechip Fund', marketValue: '150.30', percentToAum: '0.9' }
-  ] };
+export async function fetchMFInvestments(_symbol: string) {
+  return null;
 }
 
 

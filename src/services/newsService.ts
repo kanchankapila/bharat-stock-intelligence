@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { trpc } from '../lib/trpc';
 
 export interface NewsArticle {
   id: string;
@@ -12,89 +12,45 @@ export interface NewsArticle {
   relatedSymbols?: string[];
 }
 
-const INITIAL_NEWS: NewsArticle[] = [
-  {
-    id: '1',
-    title: 'RBI Monetary Policy: Repo Rate Kept Unchanged at 6.5%',
-    summary: 'The Reserve Bank of India decided to maintain the status quo on interest rates for the seventh consecutive time.',
-    source: 'Economic Times',
-    time: '10 mins ago',
-    category: 'Economy',
-    sentiment: 'Neutral',
-    url: '#',
-    relatedSymbols: ['BANKNIFTY', 'HDFCBANK', 'SBIN']
-  },
-  {
-    id: '2',
-    title: 'Reliance Industries Hits 52-Week High on New Energy Push',
-    summary: 'Shares of RIL surged over 2% today as investors cheered the company\'s aggressive roadmap in green hydrogen.',
-    source: 'Moneycontrol',
-    time: '45 mins ago',
-    category: 'Stock',
-    sentiment: 'Positive',
-    url: '#',
-    relatedSymbols: ['RELIANCE']
-  },
-  {
-    id: '3',
-    title: 'Nifty IT Index Slumps 1.5% Amid US Recession Fears',
-    summary: 'Technology stocks faced selling pressure following cautious guidance from global tech giants.',
-    source: 'Reuters',
-    time: '1 hour ago',
-    category: 'Market',
-    sentiment: 'Negative',
-    url: '#',
-    relatedSymbols: ['INFY', 'TCS', 'WIPRO']
-  },
-  {
-    id: '4',
-    title: 'Adani Enterprises Q4 Profit Jumps 30%, Beats Estimates',
-    summary: 'The flagship company reported strong growth across all business segments in the final quarter of FY24.',
-    source: 'LiveMint',
-    time: '2 hours ago',
-    category: 'Stock',
-    sentiment: 'Positive',
-    url: '#',
-    relatedSymbols: ['ADANIENT']
-  }
-];
+function mapCategory(cat: string): 'Market' | 'Stock' | 'Economy' {
+  if (['EARNINGS', 'ORDER_WIN', 'BUYBACK', 'IPO'].includes(cat)) return 'Stock';
+  if (['POLICY', 'GLOBAL'].includes(cat)) return 'Economy';
+  return 'Market';
+}
 
-export function useNewsFeed() {
-  const [news, setNews] = useState<NewsArticle[]>(INITIAL_NEWS);
+function mapSentiment(s: string): 'Positive' | 'Negative' | 'Neutral' {
+  if (s === 'BULLISH') return 'Positive';
+  if (s === 'BEARISH') return 'Negative';
+  return 'Neutral';
+}
 
-  useEffect(() => {
-    // Simulate new news arriving every 30 seconds
-    const interval = setInterval(() => {
-      const newsPool: NewsArticle[] = [
-        {
-          id: Math.random().toString(36).substr(2, 9),
-          title: 'Sensex Reclaims 74,000 Mark as FIIs Turn Buyers',
-          summary: 'Global liquidity and strong domestic earnings drove the benchmark index to its highest level this month.',
-          source: 'Bloomberg',
-          time: 'Just now',
-          category: 'Market',
-          sentiment: 'Positive',
-          url: '#',
-          relatedSymbols: ['SENSEX', 'NIFTY']
-        },
-        {
-          id: Math.random().toString(36).substr(2, 9),
-          title: 'TCS Wins Multi-Billion Dollar Contract from European Retailer',
-          summary: 'The deal is expected to boost India\'s largest IT firm\'s order book significantly over the next 5 years.',
-          source: 'Economic Times',
-          time: 'Just now',
-          category: 'Stock',
-          sentiment: 'Positive',
-          url: '#',
-          relatedSymbols: ['TCS', 'INFY']
-        }
-      ];
+function relativeTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'Just now';
+  if (mins < 60) return `${mins} min${mins > 1 ? 's' : ''} ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs} hour${hrs > 1 ? 's' : ''} ago`;
+  return `${Math.floor(hrs / 24)} day${Math.floor(hrs / 24) > 1 ? 's' : ''} ago`;
+}
 
-      setNews(prev => [newsPool[Math.floor(Math.random() * newsPool.length)], ...prev].slice(0, 10));
-    }, 30000);
+export function useNewsFeed(): NewsArticle[] {
+  const { data } = trpc.getNewsItems.useQuery(
+    { limit: 20, category: 'ALL', sentiment: 'ALL', sourceType: 'ALL', hours: 24 },
+    { staleTime: 5 * 60 * 1000, refetchOnWindowFocus: false }
+  );
 
-    return () => clearInterval(interval);
-  }, []);
+  if (!data) return [];
 
-  return news;
+  return data.map((item: any): NewsArticle => ({
+    id:             item.id,
+    title:          item.title,
+    summary:        item.summary ?? '',
+    source:         item.source,
+    time:           relativeTime(item.published_at ?? item.fetched_at),
+    category:       mapCategory(item.category ?? ''),
+    sentiment:      mapSentiment(item.sentiment ?? 'NEUTRAL'),
+    url:            item.url ?? '#',
+    relatedSymbols: item.symbols_json ? JSON.parse(item.symbols_json) : [],
+  }));
 }

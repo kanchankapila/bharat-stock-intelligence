@@ -1,4 +1,5 @@
 import { z } from "zod";
+import db from "../db";
 import { router, publicProcedure } from "../trpc";
 
 export const sentimentRouter = router({
@@ -38,15 +39,25 @@ export const sentimentRouter = router({
     }),
 
   getInstitutionalFlows: publicProcedure
-    .query(() => ({
-      success: 1,
-      data: {
-        institutionalDetails: [
-          { category: 'FII/FPI', date: new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }), netBuySell: '1243.80', buyValue: '11450.20', sellValue: '10206.40' },
-          { category: 'DII',     date: new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }), netBuySell: '879.40',  buyValue: '9860.50',  sellValue: '8981.10' },
-        ],
-      },
-    })),
+    .query(() => {
+      const rows = db.prepare(
+        `SELECT date, fii_buy, fii_sell, fii_net, dii_buy, dii_sell, dii_net
+         FROM fii_dii_flow ORDER BY date DESC LIMIT 1`
+      ).all() as any[];
+      if (!rows.length) return null;
+      const r = rows[0];
+      const fmt = (n: number | null) => n != null ? Number(n).toFixed(2) : '0.00';
+      const date = new Date(r.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+      return {
+        success: 1,
+        data: {
+          institutionalDetails: [
+            { category: 'FII/FPI', date, netBuySell: fmt(r.fii_net), buyValue: fmt(r.fii_buy), sellValue: fmt(r.fii_sell) },
+            { category: 'DII',     date, netBuySell: fmt(r.dii_net), buyValue: fmt(r.dii_buy), sellValue: fmt(r.dii_sell) },
+          ],
+        },
+      };
+    }),
 
   refreshNewsSentiment: publicProcedure
     .mutation(async () => {
