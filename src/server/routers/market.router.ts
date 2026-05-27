@@ -71,9 +71,9 @@ export const marketRouter = router({
         }
       } catch {}
       return {
-        nifty50:   { indId: '9',  value: 22450.2, change: 124.5,  changePct:  0.56 },
-        sensex:    { indId: '4',  value: 73850.4, change: 412.1,  changePct:  0.56 },
-        bankNifty: { indId: '23', value: 48250.3, change: -120.4, changePct: -0.25 },
+        nifty50:   { indId: '9',  value: null, change: null, changePct: null, stale: true },
+        sensex:    { indId: '4',  value: null, change: null, changePct: null, stale: true },
+        bankNifty: { indId: '23', value: null, change: null, changePct: null, stale: true },
       };
     }),
 
