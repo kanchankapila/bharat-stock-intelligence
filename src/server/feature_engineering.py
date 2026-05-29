@@ -17,7 +17,7 @@ import pandas as pd
 from sklearn.preprocessing import RobustScaler
 import ta
 
-DB_PATH = Path(__file__).parent.parent.parent / "stock_intelligence.db"
+DB_PATH = Path(__file__).parent.parent.parent / "database.sqlite"
 SCALER_PATH = Path(__file__).parent / "ml_models" / "feature_scaler_v1.pkl"
 
 # Fundamentals lag: data published ~45 days after quarter end
@@ -94,11 +94,16 @@ class FeatureEngineer:
         p33 = out["hist_vol_21d"].quantile(0.33)
         p67 = out["hist_vol_21d"].quantile(0.67)
         p90 = out["hist_vol_21d"].quantile(0.90)
-        out["vol_regime"] = pd.cut(
-            out["hist_vol_21d"],
-            bins=[-np.inf, p33, p67, p90, np.inf],
-            labels=["LOW", "MED", "HIGH", "SPIKE"],
-        ).astype(str)
+        try:
+            out["vol_regime"] = pd.cut(
+                out["hist_vol_21d"],
+                bins=[-np.inf, p33, p67, p90, np.inf],
+                labels=["LOW", "MED", "HIGH", "SPIKE"],
+                duplicates="drop",
+            ).astype(str).replace("nan", "MED")
+        except ValueError:
+            # All quantiles equal (zero-variance vol) — assign uniform MED
+            out["vol_regime"] = "MED"
 
         # Volume
         vol_ma5  = vol.rolling(5).mean()
@@ -170,13 +175,13 @@ class FeatureEngineer:
         """Fundamentals — lagged 45 days (earnings reporting delay)."""
         row = con.execute(
             """SELECT trailing_pe, return_on_equity, debt_to_equity,
-                      operating_margins, piotroski_f_score, fetched_at
+                      operating_margins, piotroski_f_score, last_updated
                FROM stock_fundamentals WHERE symbol = ?
-               ORDER BY fetched_at DESC LIMIT 1""",
+               ORDER BY last_updated DESC LIMIT 1""",
             (symbol,),
         ).fetchone()
         if row:
-            fetched = pd.to_datetime(row["fetched_at"])
+            fetched = pd.to_datetime(row["last_updated"])
             cutoff  = pd.Timestamp.today() - pd.Timedelta(days=FUND_LAG_DAYS)
             if fetched < cutoff:
                 feat["trailing_pe"]    = row["trailing_pe"]
@@ -229,8 +234,8 @@ class FeatureEngineer:
                       AVG(CASE WHEN sentiment='BULLISH' THEN 1 WHEN sentiment='BEARISH' THEN -1 ELSE 0 END) as score,
                       SUM(CASE WHEN impact='HIGH' THEN 1 ELSE 0 END) as high_count
                FROM news_sentiment_items
-               WHERE symbol=? GROUP BY DATE(published_at) ORDER BY date""",
-            con, params=(symbol,), parse_dates=["date"], index_col="date",
+               WHERE symbols_json LIKE ? GROUP BY DATE(published_at) ORDER BY date""",
+            con, params=(f'%"{symbol}"%',), parse_dates=["date"], index_col="date",
         )
         if not rows.empty:
             feat["news_sentiment_score"] = rows["score"].rolling(3).mean().reindex(
@@ -246,8 +251,8 @@ class FeatureEngineer:
     def _fit_scaler(self, feat: pd.DataFrame, train_frac: float = 0.8) -> RobustScaler:
         """Fit RobustScaler on first train_frac of dates only (no leakage)."""
         numeric_cols = feat.select_dtypes(include=[np.number]).columns.tolist()
-        cutoff = int(len(feat) * train_frac)
-        train_slice = feat.iloc[:cutoff][numeric_cols].dropna()
+        cutoff = max(1, int(len(feat) * train_frac))
+        train_slice = feat.iloc[:cutoff][numeric_cols].fillna(0)
         scaler = RobustScaler()
         scaler.fit(train_slice)
         return scaler
@@ -263,8 +268,12 @@ class FeatureEngineer:
 
     # ── Per-symbol pipeline ──────────────────────────────────────────────────
 
-    def process_symbol(self, symbol: str, lookback_days: int = 504) -> int:
-        """Compute + persist features for one symbol. Returns row count written."""
+    def process_symbol(self, symbol: str, lookback_days: int = 504,
+                       only_date: str = None) -> int:
+        """Compute + persist features for one symbol. Returns row count written.
+
+        only_date: if set, only write the row matching this date (fast daily mode).
+        """
         con = self._con()
         cutoff = (datetime.today() - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
 
@@ -294,6 +303,8 @@ class FeatureEngineer:
             cur = con.cursor()
             written = 0
             for date, row in feat.iterrows():
+                if only_date and date.strftime("%Y-%m-%d") < only_date:
+                    continue
                 d = row.to_dict()
                 cur.execute(
                     """INSERT OR REPLACE INTO feature_store
@@ -366,7 +377,13 @@ class FeatureEngineer:
 
     # ── Full pipeline ────────────────────────────────────────────────────────
 
-    def run_full_pipeline(self, symbols: list = None, lookback_days: int = 504) -> None:
+    def run_full_pipeline(self, symbols: list = None, lookback_days: int = 504,
+                          date_filter: str = None) -> None:
+        """Run feature engineering for all symbols.
+
+        date_filter: if 'today', only write today's row per symbol (fast daily mode).
+                     Still loads full lookback for accurate indicator computation.
+        """
         con = self._con()
         if symbols is None:
             rows = con.execute(
@@ -376,15 +393,25 @@ class FeatureEngineer:
             symbols = [r["symbol"] for r in rows]
         con.close()
 
-        print(f"[FE] Processing {len(symbols)} symbols...")
+        today = datetime.today().strftime("%Y-%m-%d") if date_filter == "today" else None
+
+        print(f"[FE] Processing {len(symbols)} symbols{' (today-only mode)' if today else ''}...")
         for i, sym in enumerate(symbols, 1):
             try:
-                n = self.process_symbol(sym, lookback_days)
+                if today:
+                    # Fast mode: compute full lookback but only write today's row
+                    n = self._process_symbol_date(sym, lookback_days, today)
+                else:
+                    n = self.process_symbol(sym, lookback_days)
                 if i % 100 == 0:
                     print(f"[FE] {i}/{len(symbols)} — {sym}: {n} rows")
             except Exception as e:
                 print(f"[FE] ERROR {sym}: {e}")
         print("[FE] Pipeline complete")
+
+    def _process_symbol_date(self, symbol: str, lookback_days: int, target_date: str) -> int:
+        """Compute features for one symbol but only write the row for target_date."""
+        return self.process_symbol(symbol, lookback_days, only_date=target_date)
 
 
 if __name__ == "__main__":
@@ -397,4 +424,4 @@ if __name__ == "__main__":
 
     fe = FeatureEngineer()
     syms = args.symbols
-    fe.run_full_pipeline(symbols=syms, lookback_days=args.lookback)
+    fe.run_full_pipeline(symbols=syms, lookback_days=args.lookback, date_filter=args.date)

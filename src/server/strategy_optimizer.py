@@ -122,6 +122,7 @@ class StrategyOptimizer:
         if len(top_signals) < 10:
             return -1.0  # penalise — insufficient top signals
 
+        n             = len(top_signals)
         win_rate      = (top_signals['outcome'] == 'WIN').mean()
         avg_ret       = top_signals['return_pct'].mean()
         std_ret       = top_signals['return_pct'].std()
@@ -132,10 +133,12 @@ class StrategyOptimizer:
         sharpe = (avg_ret / std_ret) if std_ret > 0 else 0.0
 
         # Normalise profit_factor and Sharpe into [0, 1]
-        pf_norm     = min(profit_factor / 3.0, 1.0)
-        sharpe_norm = min(max(sharpe, 0) / 3.0, 1.0)
+        pf_norm       = min(profit_factor / 3.0, 1.0)
+        sharpe_norm   = min(max(sharpe, 0) / 3.0, 1.0)
+        # Weight by sample confidence: full weight at n>=100, half at n=50, near-zero at n<10
+        sample_weight = min(n, 100) / 100.0
 
-        objective = 0.5 * win_rate + 0.3 * pf_norm + 0.2 * sharpe_norm
+        objective = sample_weight * (0.5 * win_rate + 0.3 * pf_norm + 0.2 * sharpe_norm)
         return objective
         
     def _objective(self, params: np.ndarray, train_df: pd.DataFrame, test_df: pd.DataFrame) -> float:

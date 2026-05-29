@@ -302,13 +302,86 @@ def inspect_policy(conn: sqlite3.Connection):
                 print(f"{sk:<30} {action:<18} {best_q:>8.4f}")
 
 
-def run(mode: str = 'update', dry_run: bool = False):
+def backfill_episodes(conn: sqlite3.Connection, lookback_days: int = 180, dry_run: bool = False) -> dict:
+    """Construct synthetic RL episodes from resolved signal_outcomes + run Q-update on each."""
+    cutoff = (datetime.date.today() - datetime.timedelta(days=lookback_days)).isoformat()
+
+    rows = conn.execute("""
+        SELECT so.symbol, so.signal_date, so.return_pct, so.outcome,
+               so.signal_score, ts.nifty_regime, ns.sector
+        FROM signal_outcomes so
+        LEFT JOIN technical_signals ts
+               ON ts.symbol = so.symbol AND ts.date = so.signal_date
+        LEFT JOIN nse_stocks ns ON ns.symbol = so.symbol
+        WHERE so.outcome IN ('WIN','LOSS','NEUTRAL','STOP_LOSS')
+          AND so.signal_date >= ?
+          AND so.return_pct IS NOT NULL
+        ORDER BY so.signal_date ASC
+    """, (cutoff,)).fetchall()
+
+    if not rows:
+        print("[RLAgent] No resolved outcomes to backfill from.")
+        return {'rows': 0, 'episodes_created': 0, 'q_updates': 0}
+
+    epsilon = _load_epsilon(conn)
+    episodes_created = 0
+    q_updates = 0
+
+    for sym, sig_date, ret_pct, outcome, sig_score, regime, sector in rows:
+        regime    = regime or 'SIDEWAYS'
+        sig_score = sig_score or 5
+        sector    = sector or 'OTHER'
+        state_key = get_state_key(regime, sector, sig_score)
+
+        if sig_score >= 7:
+            action = 'AGGRESSIVE'
+        elif sig_score >= 5:
+            action = 'BALANCED'
+        elif sig_score >= 3:
+            action = 'CONSERVATIVE'
+        else:
+            action = 'SECTOR_FOCUSED'
+
+        nifty_ret = _get_nifty_return(conn, sig_date)
+        reward    = float(ret_pct) - nifty_ret
+        if outcome == 'STOP_LOSS':
+            reward *= 1.5
+
+        try:
+            conn.execute("""
+                INSERT OR IGNORE INTO rl_episodes (date, state_key, action_taken, reward, epsilon)
+                VALUES (?, ?, ?, ?, ?)
+            """, (sig_date, state_key, action, round(reward, 4), round(epsilon, 4)))
+            episodes_created += 1
+        except Exception:
+            pass
+
+        next_max = get_max_q(conn, state_key)
+        old_q    = get_q(conn, state_key, action)
+        new_q    = q_update(old_q, reward, next_max)
+
+        if dry_run:
+            print(f"  [DRY] {sig_date} {state_key} {action} r={reward:.3f} Q:{old_q:.4f}->{new_q:.4f}")
+        else:
+            set_q(conn, state_key, action, new_q)
+        q_updates += 1
+
+    if not dry_run:
+        conn.commit()
+
+    print(f"[RLAgent] Backfill complete: {len(rows)} outcomes → {episodes_created} episodes, {q_updates} Q-updates")
+    return {'rows': len(rows), 'episodes_created': episodes_created, 'q_updates': q_updates}
+
+
+def run(mode: str = 'update', dry_run: bool = False, lookback: int = 180):
     if not os.path.exists(DB_PATH):
         raise FileNotFoundError(f"[RLAgent] DB not found: {DB_PATH}. Run from project root.")
     conn = sqlite3.connect(DB_PATH)
     try:
         if mode == 'inspect':
             inspect_policy(conn)
+        elif mode == 'backfill':
+            backfill_episodes(conn, lookback_days=lookback, dry_run=dry_run)
         else:
             daily_update(conn, dry_run=dry_run)
     finally:
@@ -317,9 +390,10 @@ def run(mode: str = 'update', dry_run: bool = False):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--update',  dest='mode', action='store_const', const='update',
-                        default='update')
-    parser.add_argument('--inspect', dest='mode', action='store_const', const='inspect')
-    parser.add_argument('--dry-run', action='store_true')
+    parser.add_argument('--update',   dest='mode', action='store_const', const='update', default='update')
+    parser.add_argument('--inspect',  dest='mode', action='store_const', const='inspect')
+    parser.add_argument('--backfill', dest='mode', action='store_const', const='backfill')
+    parser.add_argument('--lookback', type=int, default=180, help='Days of history for backfill')
+    parser.add_argument('--dry-run',  action='store_true')
     args = parser.parse_args()
-    run(mode=args.mode, dry_run=args.dry_run)
+    run(mode=args.mode, dry_run=args.dry_run, lookback=getattr(args, 'lookback', 180))

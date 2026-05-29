@@ -59,6 +59,46 @@ export const technicalsRouter = router({
       }));
     }),
 
+  getUnifiedSignals: publicProcedure
+    .input(z.object({
+      date:          z.string().optional(),
+      minUnified:    z.number().min(0).max(1).default(0.55),
+      minConfluence: z.number().min(0).max(100).default(40),
+      limit:         z.number().min(1).max(100).default(50),
+    }))
+    .query(({ input }) => {
+      const d = input.date ?? new Date().toISOString().slice(0, 10);
+      return db.prepare(`
+        SELECT
+          ts.symbol, ns.name, ns.sector,
+          ts.signal_score, ts.win_probability,
+          cs.confluence_score, cs.conviction_level,
+          ts.cmp, ts.stop_loss, ts.targets,
+          ts.nifty_regime, ts.entry_zone, ts.ai_insight,
+          ROUND(
+            0.4 * (ts.signal_score / 10.0)
+            + 0.4 * COALESCE(ts.win_probability, 0.5)
+            + 0.2 * (COALESCE(cs.confluence_score, 0) / 100.0),
+            3
+          ) AS unified_score,
+          ts.computed_at
+        FROM technical_signals ts
+        LEFT JOIN nse_stocks ns ON ns.symbol = ts.symbol
+        LEFT JOIN confluence_signals cs
+               ON cs.symbol = ts.symbol AND date(cs.last_updated) = ?
+        WHERE ts.date = ?
+          AND ROUND(
+                0.4 * (ts.signal_score / 10.0)
+                + 0.4 * COALESCE(ts.win_probability, 0.5)
+                + 0.2 * (COALESCE(cs.confluence_score, 0) / 100.0),
+                3
+              ) >= ?
+          AND COALESCE(cs.confluence_score, 0) >= ?
+        ORDER BY unified_score DESC
+        LIMIT ?
+      `).all(d, d, input.minUnified, input.minConfluence, input.limit);
+    }),
+
   getSignalDates: publicProcedure
     .query(async () => {
       const { getSignalDates } = await import('../technicalSignalsService');
