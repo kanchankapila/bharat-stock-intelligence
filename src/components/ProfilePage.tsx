@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import {
-  Upload, TrendingUp, TrendingDown, FileText, X, AlertTriangle,
+  Upload, TrendingUp, TrendingDown, FileText, AlertTriangle,
   CheckCircle, Info, Wallet, ArrowUpRight, Receipt,
   BarChart2, Target, RefreshCw, ChevronDown, ChevronUp, User, Trash2,
 } from 'lucide-react';
@@ -153,15 +153,49 @@ function parseLedger(raw: string, fy: string): LRow[] {
   })).filter(r => /\d{2}\/\d{2}\/\d{4}/.test(r.date));
 }
 
-// ─── Ledger helpers ───────────────────────────────────────────────────────────
+// ─── Ledger entry categorisation (CA-level) ───────────────────────────────────
+//
+// Ledger entry types:
+//   OPBAL     – opening balance carry-forward
+//   Others    – year-boundary balance transfer
+//   RECEIPT   – cash deposited from your bank into Kotak
+//   PAYMENT   – cash withdrawn from Kotak to your bank
+//   Withdrawal– cash returned by exchange (SEBI mandate)
+//   BILL      – stock trade settlement (credit = sell proceeds, debit = buy cost)
+//               Sub-type "OTHER CHARGES" prefix = tiny exchange levies (< ₹50)
+//   JV        – journal vouchers: DP charges, interest, auction, blocked amounts
+//
+// JV sub-types (identified by narration):
+//   DP CHGS / DP TRANSACTION → demat maintenance charges (monthly fixed fee)
+//   IC - INTEREST             → debit interest (when account goes negative)
+//   AUC INT                   → auction penalty (actual cost of short delivery)
+//   SHORT 150%                → blocked deposit for short delivery (TEMPORARY – reversed)
+//   SHORT REV 150%            → reversal of the above block (nets to zero with SHORT 150%)
+//
+// IMPORTANT: SHORT 150% and SHORT REV 150% entries cancel each other → net zero.
+// They must be EXCLUDED from all charge totals to avoid double-counting.
 
-const isDeposit    = (l: LRow) => l.transType === 'RECEIPT' && l.credit > 0;
-const isWithdrawal = (l: LRow) => (l.transType === 'PAYMENT' || l.transType === 'Withdrawal') && l.debit > 0;
-const isBillCredit = (l: LRow) => l.transType === 'BILL' && l.credit > 0;
-const isBillDebit  = (l: LRow) => l.transType === 'BILL' && l.debit > 0;
-const isDPCharge   = (l: LRow) => l.narration.toUpperCase().includes('DP CHGS') || l.narration.toUpperCase().includes('DP TRANSACTION');
-const isAuction    = (l: LRow) => l.narration.toUpperCase().includes('AUC INT');
-const isInterest   = (l: LRow) => l.narration.toUpperCase().includes('IC - INTEREST');
+const isDeposit     = (l: LRow) => l.transType === 'RECEIPT' && l.credit > 0;
+const isWithdrawal  = (l: LRow) => (l.transType === 'PAYMENT' || l.transType === 'Withdrawal') && l.debit > 0;
+// Sell settlement: BILL credit (gross sell proceeds before netting)
+const isBillCredit  = (l: LRow) => l.transType === 'BILL' && l.credit > 0 && !l.narration.startsWith('OTHER CHARGES');
+// Buy settlement: BILL debit (gross buy cost after netting)
+const isBillDebit   = (l: LRow) => l.transType === 'BILL' && l.debit > 0 && !l.narration.startsWith('OTHER CHARGES');
+// Tiny exchange levies bundled inside BILL settlements
+const isBillLevy    = (l: LRow) => l.transType === 'BILL' && l.narration.startsWith('OTHER CHARGES');
+// DP charges — MUST be JV + debit + DP in narration (NOT BILL)
+const isDPCharge    = (l: LRow) => l.transType === 'JV' && l.debit > 0 &&
+  (l.narration.toUpperCase().includes('DP CHGS') || l.narration.toUpperCase().includes('DP TRANSACTION'));
+// Auction penalty — MUST be JV + debit + AUC INT (NOT the SHORT 150% block)
+const isAuction     = (l: LRow) => l.transType === 'JV' && l.debit > 0 && l.narration.toUpperCase().includes('AUC INT');
+// Debit interest — MUST be JV + debit + IC - INTEREST
+const isInterest    = (l: LRow) => l.transType === 'JV' && l.debit > 0 && l.narration.toUpperCase().includes('IC - INTEREST');
+// SHORT 150% block — temporary, reversed by SHORT REV — exclude from totals
+const isShortBlock  = (l: LRow) => l.transType === 'JV' && l.narration.toUpperCase().includes('SHORT 150%') && !l.narration.toUpperCase().includes('SHORT REV');
+const isShortRev    = (l: LRow) => l.transType === 'JV' && l.narration.toUpperCase().includes('SHORT REV');
+// Any remaining JV debits/credits not matching the above (miscellaneous adjustments)
+const isOtherJVDebit  = (l: LRow) => l.transType === 'JV' && l.debit > 0 && !isDPCharge(l) && !isAuction(l) && !isInterest(l) && !isShortBlock(l);
+const isOtherJVCredit = (l: LRow) => l.transType === 'JV' && l.credit > 0 && !isShortRev(l);
 
 // ─── INR formatter ────────────────────────────────────────────────────────────
 
@@ -211,19 +245,24 @@ function ClientAnalytics({ profile }: { profile: ClientProfile }) {
   const [tab, setTab]           = useState<'cashflow' | 'pnl' | 'stocks' | 'charges' | 'behavior'>('cashflow');
   const [expandedYear, setExpY] = useState<string | null>(null);
 
-  // Ledger
-  const totalDeposited = ledger.filter(isDeposit).reduce((s, l) => s + l.credit, 0);
-  const totalWithdrawn = ledger.filter(isWithdrawal).reduce((s, l) => s + l.debit, 0);
-  const billCredits    = ledger.filter(isBillCredit).reduce((s, l) => s + l.credit, 0);
-  const billDebits     = ledger.filter(isBillDebit).reduce((s, l) => s + l.debit, 0);
-  const totalDP        = ledger.filter(isDPCharge).reduce((s, l) => s + l.debit, 0);
-  const totalAuction   = ledger.filter(isAuction).reduce((s, l) => s + l.debit, 0);
-  const totalInterest  = ledger.filter(isInterest).reduce((s, l) => s + l.debit, 0);
-  const jvDebits       = ledger.filter(l => l.transType === 'JV' && !isDPCharge(l) && !isAuction(l) && !isInterest(l)).reduce((s, l) => s + l.debit, 0);
-  const jvCredits      = ledger.filter(l => l.transType === 'JV' && l.credit > 0 && !isAuction(l)).reduce((s, l) => s + l.credit, 0);
-  const openingBal     = (() => { const r = [...ledger].sort((a, b) => a.date.localeCompare(b.date)).find(l => l.transType === 'OPBAL'); return r ? (r.credit - r.debit) : 0; })();
-  const closingBal     = ledger.length > 0 ? ledger[0].netBalance : 0;
-  const netCashReturn  = totalWithdrawn - totalDeposited;
+  // ── Ledger aggregates (CA-precise categorisation) ──
+  const totalDeposited  = ledger.filter(isDeposit).reduce((s, l) => s + l.credit, 0);
+  const totalWithdrawn  = ledger.filter(isWithdrawal).reduce((s, l) => s + l.debit, 0);
+  const billCredits     = ledger.filter(isBillCredit).reduce((s, l) => s + l.credit, 0);
+  const billDebits      = ledger.filter(isBillDebit).reduce((s, l) => s + l.debit, 0);
+  const billLevies      = ledger.filter(isBillLevy).reduce((s, l) => s + l.debit, 0);
+  // JV sub-totals — each filter REQUIRES transType=JV to prevent BILL bleed-through
+  const totalDP         = ledger.filter(isDPCharge).reduce((s, l) => s + l.debit, 0);
+  const totalAuction    = ledger.filter(isAuction).reduce((s, l) => s + l.debit, 0);
+  const totalInterest   = ledger.filter(isInterest).reduce((s, l) => s + l.debit, 0);
+  // SHORT 150% block and its reversal net to zero — exclude from totals
+  const shortBlocked    = ledger.filter(isShortBlock).reduce((s, l) => s + l.debit, 0);
+  const shortReversed   = ledger.filter(isShortRev).reduce((s, l) => s + l.credit, 0);
+  const otherJVDebits   = ledger.filter(isOtherJVDebit).reduce((s, l) => s + l.debit, 0);
+  const otherJVCredits  = ledger.filter(isOtherJVCredit).reduce((s, l) => s + l.credit, 0);
+  const openingBal      = (() => { const r = [...ledger].sort((a, b) => a.date.localeCompare(b.date)).find(l => l.transType === 'OPBAL'); return r ? (r.credit - r.debit) : 0; })();
+  const closingBal      = ledger.length > 0 ? ledger[0].netBalance : 0;
+  const netCashReturn   = totalWithdrawn - totalDeposited;
 
   // Transactions
   const buyTxns        = txns.filter(t => t.transactionType === 'Buy');
@@ -319,16 +358,24 @@ function ClientAnalytics({ profile }: { profile: ClientProfile }) {
             {hasLedger ? (
               <div className="space-y-0">
                 <LRow_ label="Opening Balance" value={INR(openingBal, { sign: true })} />
-                <LRow_ label="+ Deposits from bank (RECEIPT)" value={INR(totalDeposited)} color="text-blue-400" indent />
-                <LRow_ label="+ Sell settlements (BILL credits)" value={INR(billCredits)} color="text-emerald-400" indent />
-                <LRow_ label="+ JV credits (reversals)" value={INR(jvCredits)} color="text-emerald-300" indent />
-                <LRow_ label="− Buy settlements (BILL debits)" value={`-${INR(billDebits)}`} color="text-slate-400" indent />
-                <LRow_ label="− DP charges" value={`-${INR(totalDP)}`} color="text-orange-400" indent />
-                <LRow_ label="− Auction penalties" value={`-${INR(totalAuction)}`} color="text-red-400" indent />
-                <LRow_ label="− Debit interest" value={`-${INR(totalInterest)}`} color="text-red-400" indent />
-                <LRow_ label="− Other JV debits" value={`-${INR(jvDebits)}`} color="text-slate-400" indent />
-                <LRow_ label="− Withdrawn to bank (PAYMENT)" value={`-${INR(totalWithdrawn)}`} color="text-red-400" indent />
+                <LRow_ label="+ Cash deposited from bank (RECEIPT)" value={INR(totalDeposited)} color="text-blue-400" indent />
+                <LRow_ label="+ Stock sale settlements (BILL credits)" value={INR(billCredits)} color="text-emerald-400" indent />
+                {otherJVCredits > 0 && <LRow_ label="+ Other JV credits (misc adjustments)" value={INR(otherJVCredits)} color="text-emerald-300" indent />}
+                <LRow_ label="− Stock purchase settlements (BILL debits)" value={`-${INR(billDebits)}`} color="text-slate-400" indent />
+                {billLevies > 0    && <LRow_ label="− Exchange levies (BILL other charges)" value={`-${INR(billLevies)}`} color="text-orange-300" indent />}
+                {totalDP > 0       && <LRow_ label="− DP / demat charges (JV)" value={`-${INR(totalDP)}`} color="text-orange-400" indent />}
+                {totalAuction > 0  && <LRow_ label="− Auction penalty — AUC INT (JV)" value={`-${INR(totalAuction)}`} color="text-red-400" indent />}
+                {totalInterest > 0 && <LRow_ label="− Debit interest (JV)" value={`-${INR(totalInterest)}`} color="text-red-400" indent />}
+                {otherJVDebits > 0 && <LRow_ label="− Other JV debits (misc adjustments)" value={`-${INR(otherJVDebits)}`} color="text-slate-400" indent />}
+                {shortBlocked > 0  && <LRow_ label="  SHORT 150% block (JV) — reversed below" value={`-${INR(shortBlocked)}`} color="text-slate-600" indent />}
+                {shortReversed > 0 && <LRow_ label="  SHORT REV 150% (JV) — nets zero with above" value={INR(shortReversed)} color="text-slate-600" indent />}
+                <LRow_ label="− Withdrawn to bank (PAYMENT / Withdrawal)" value={`-${INR(totalWithdrawn)}`} color="text-red-400" indent />
                 <LRow_ label="Closing Balance" value={INR(closingBal, { sign: true })} color="text-white" bold divider />
+                {shortBlocked > 0 && (
+                  <div className="mt-2 text-[10px] text-slate-600 px-1">
+                    ✓ SHORT 150% ({INR(shortBlocked)}) and SHORT REV ({INR(shortReversed)}) cancel out — net zero impact
+                  </div>
+                )}
               </div>
             ) : <p className="text-slate-500 text-sm">Upload Ledger CSVs to see full cash flow</p>}
           </div>
@@ -620,7 +667,7 @@ export default function ProfilePage() {
             const newTxns = parseTxns(content, fy);
             existing.txns = [...existing.txns, ...newTxns];
           } else if (type === 'gain_loss') {
-            const { rows, clientName: cn, clientId: ci } = parseGL(content, fy);
+            const { rows, clientName: cn } = parseGL(content, fy);
             if (cn) clientName = cn;
             existing.gl = [...existing.gl, ...rows];
             // If G&L reveals a different/canonical clientId, could remap — skip for simplicity
@@ -658,19 +705,7 @@ export default function ProfilePage() {
     if (activeClient === clientId) setActive('');
   };
 
-  const removeFile = (clientId: string, fileName: string) => {
-    // Remove file metadata only — re-parsing would require stored raw content
-    // Instead, just remove file from list and note user may need to re-upload if they want to remove data
-    setClients(prev => {
-      const next = new Map(prev);
-      const c    = next.get(clientId);
-      if (!c) return prev;
-      next.set(clientId, { ...c, files: c.files.filter(f => f.name !== fileName) });
-      return next;
-    });
-  };
-
-  const onDrop = useCallback((e: React.DragEvent) => { e.preventDefault(); setDragOver(false); processFiles(e.dataTransfer.files); }, [processFiles]);
+const onDrop = useCallback((e: React.DragEvent) => { e.preventDefault(); setDragOver(false); processFiles(e.dataTransfer.files); }, [processFiles]);
 
   const clientList = Array.from(clients.values()).sort((a, b) => a.clientId.localeCompare(b.clientId));
   const active     = clients.get(activeClient);
