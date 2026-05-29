@@ -354,7 +354,7 @@ function loadLearnedWeights(regime: string): Map<string, number> {
   const rows = db.prepare(`
     SELECT signal_type, weight
     FROM signal_type_weights
-    WHERE (regime = ? OR regime = 'ALL') AND sector = 'ALL'
+    WHERE (regime = ? OR regime = 'ALL') AND sector IN ('ALL', 'Unknown')
     ORDER BY regime DESC
   `).all(regime) as { signal_type: string; weight: number }[];
   return new Map(rows.map(r => [r.signal_type, r.weight]));
