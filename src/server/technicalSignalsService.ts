@@ -1169,7 +1169,12 @@ export async function runTechnicalSignalScan(options: {
 
         if (r.signalScore >= 4) {
           const sl = r.stopLoss ? parseFloat(r.stopLoss) : null;
-          const t1 = r.targets ? (() => { try { return JSON.parse(r.targets!)[0] ?? null; } catch { return null; } })() : null;
+          const t1 = r.targets
+            ? (() => {
+                const m = r.targets!.match(/₹([\d,]+)/);
+                return m ? parseFloat(m[1].replace(/,/g, '')) : null;
+              })()
+            : null;
           recLogUpsert.run(
             r.symbol, scanDate, r.cmp ?? null, sl, t1,
             r.signalScore, r.signalScore, JSON.stringify(r.signals),
