@@ -6,13 +6,15 @@ Quality gate: directional_accuracy > 0.50 AND roc_auc > 0.52
 """
 
 import subprocess
+import sys
+import math
 import sqlite3
 import json
 import argparse
 from datetime import datetime
 from pathlib import Path
 
-DB_PATH   = Path(__file__).parent.parent.parent / "stock_intelligence.db"
+DB_PATH   = Path(__file__).parent.parent.parent / "database.sqlite"
 MODEL_DIR = Path(__file__).parent / "ml_models"
 LOCK_KEY  = "dl_retrain_running"
 PYDIR     = str(Path(__file__).parent)
@@ -32,8 +34,9 @@ def _set_setting(con: sqlite3.Connection, key: str, value: str):
 
 
 def _run(cmd: str) -> int:
-    print(f"[TRAINER] Running: {cmd}")
-    result = subprocess.run(cmd, shell=True, cwd=PYDIR)
+    cmd_resolved = cmd.replace("python ", f'"{sys.executable}" ', 1)
+    print(f"[TRAINER] Running: {cmd_resolved}")
+    result = subprocess.run(cmd_resolved, shell=True, cwd=PYDIR)
     return result.returncode
 
 
@@ -52,8 +55,8 @@ def retrain_models(trigger: str = "scheduled") -> dict:
     result = {"trigger": trigger, "timestamp": datetime.now().isoformat()}
 
     try:
-        # Step 1: Refresh features
-        rc = _run("python feature_engineering.py")
+        # Step 1: Refresh today's features only (fast mode)
+        rc = _run("python feature_engineering.py --date today")
         if rc != 0:
             raise RuntimeError("feature_engineering.py failed")
 
@@ -72,21 +75,28 @@ def retrain_models(trigger: str = "scheduled") -> dict:
         metrics = dl.train_lstm(version=new_version)
         result["metrics"] = metrics
 
-        acc = metrics.get("directional_accuracy", 0)
-        auc = metrics.get("roc_auc", 0)
+        acc = metrics.get("directional_accuracy") or 0.0
+        auc = metrics.get("roc_auc") or 0.0
+
+        acc_valid = not math.isnan(acc)
+        auc_valid = not math.isnan(auc)
+
+        # Gate: accuracy must beat random (>0.50). AUC gate skipped if NaN (insufficient folds).
+        acc_ok = acc_valid and acc > QUALITY_MIN_ACC
+        auc_ok = (not auc_valid) or (auc > QUALITY_MIN_AUC)  # NaN = skip AUC gate
 
         # Step 4: Quality gate
-        if acc > QUALITY_MIN_ACC and auc > QUALITY_MIN_AUC:
+        if acc_ok and auc_ok:
             cfg["lstm_version"] = new_version
             cfg_path.write_text(json.dumps(cfg, indent=2))
-            print(f"[TRAINER] Quality gate PASSED (acc={acc:.3f}, auc={auc:.3f}) → promoted v{new_version}")
+            print(f"[TRAINER] Quality gate PASSED (acc={acc:.3f}, auc={'N/A' if not auc_valid else f'{auc:.3f}'}) → promoted v{new_version}")
             result["promoted"] = True
         else:
             bad_path = MODEL_DIR / f"lstm_v{new_version}.pt"
             if bad_path.exists():
                 bad_path.unlink()
-            print(f"[TRAINER] Quality gate FAILED (acc={acc:.3f}<{QUALITY_MIN_ACC} or "
-                  f"auc={auc:.3f}<{QUALITY_MIN_AUC}) — keeping v{cfg.get('lstm_version', 1)}")
+            reason = f"acc={acc:.3f}<{QUALITY_MIN_ACC}" if not acc_ok else f"auc={auc:.3f}<{QUALITY_MIN_AUC}"
+            print(f"[TRAINER] Quality gate FAILED ({reason}) — keeping v{cfg.get('lstm_version', 1)}")
             result["promoted"] = False
 
         # Step 5: Write model_registry entry

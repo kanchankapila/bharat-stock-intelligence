@@ -279,6 +279,36 @@ def resolve_unified_outcomes(
     return {'processed': len(rows), 'resolved': resolved}
 
 
+def expire_stale_pending(conn: sqlite3.Connection, horizon_days: int, dry_run: bool = False) -> int:
+    """Mark PENDING outcomes older than 2×horizon as NEUTRAL (stock/data unavailable)."""
+    cutoff = (datetime.date.today() - datetime.timedelta(days=horizon_days * 2)).isoformat()
+
+    rows = conn.execute("""
+        SELECT symbol, signal_date, horizon_days
+        FROM signal_outcomes
+        WHERE outcome = 'PENDING'
+          AND horizon_days = ?
+          AND signal_date < ?
+    """, (horizon_days, cutoff)).fetchall()
+
+    if dry_run:
+        print(f"[OutcomeResolver] Would expire {len(rows)} stale {horizon_days}D PENDING outcomes")
+        return len(rows)
+
+    conn.execute("""
+        UPDATE signal_outcomes
+        SET outcome = 'NEUTRAL',
+            return_pct = 0.0,
+            computed_at = CURRENT_TIMESTAMP
+        WHERE outcome = 'PENDING'
+          AND horizon_days = ?
+          AND signal_date < ?
+    """, (horizon_days, cutoff))
+    conn.commit()
+    print(f"[OutcomeResolver] Expired {len(rows)} stale {horizon_days}D outcomes → NEUTRAL")
+    return len(rows)
+
+
 def run(horizon_days: int = 1, dry_run: bool = False):
     if not os.path.exists(DB_PATH):
         raise FileNotFoundError(f"[OutcomeResolver] DB not found: {DB_PATH}. Run from project root.")
@@ -286,6 +316,7 @@ def run(horizon_days: int = 1, dry_run: bool = False):
     try:
         resolve_outcomes(conn, horizon_days=horizon_days, dry_run=dry_run)
         resolve_unified_outcomes(conn, horizon_days=horizon_days, dry_run=dry_run)
+        expire_stale_pending(conn, horizon_days=horizon_days, dry_run=dry_run)
     finally:
         conn.close()
 
