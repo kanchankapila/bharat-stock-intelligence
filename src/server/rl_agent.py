@@ -369,7 +369,7 @@ def backfill_episodes(conn: sqlite3.Connection, lookback_days: int = 180, dry_ru
     if not dry_run:
         conn.commit()
 
-    print(f"[RLAgent] Backfill complete: {len(rows)} outcomes → {episodes_created} episodes, {q_updates} Q-updates")
+    print(f"[RLAgent] Backfill complete: {len(rows)} outcomes -> {episodes_created} episodes, {q_updates} Q-updates")
     return {'rows': len(rows), 'episodes_created': episodes_created, 'q_updates': q_updates}
 
 
