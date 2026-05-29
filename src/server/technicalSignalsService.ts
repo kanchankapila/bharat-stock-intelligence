@@ -1129,6 +1129,21 @@ export async function runTechnicalSignalScan(options: {
         computed_at=excluded.computed_at
     `);
 
+    const recLogUpsert = db.prepare(`
+      INSERT INTO recommendation_log
+        (symbol, rec_type, signal_date, generated_at, entry_price, stop_loss,
+         target_1, confidence_score, signal_score, signals_json, nifty_regime,
+         win_probability, source, status, horizon_days)
+      VALUES (?, 'BUY', ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, 'technical_scan', 'ACTIVE', 5)
+      ON CONFLICT DO NOTHING
+    `);
+
+    const seedOutcome = db.prepare(`
+      INSERT OR IGNORE INTO signal_outcomes
+        (symbol, signal_date, horizon_days, entry_price, outcome)
+      VALUES (?, ?, ?, ?, 'PENDING')
+    `);
+
     db.transaction((rows: SignalResult[]) => {
       for (const r of rows) {
         upsert.run({
@@ -1151,6 +1166,20 @@ export async function runTechnicalSignalScan(options: {
           setup_quality: r.setupQuality ?? null,
           time_horizon:  r.timeHorizon  ?? null,
         });
+
+        if (r.signalScore >= 4) {
+          const sl = r.stopLoss ? parseFloat(r.stopLoss) : null;
+          const t1 = r.targets ? (() => { try { return JSON.parse(r.targets!)[0] ?? null; } catch { return null; } })() : null;
+          recLogUpsert.run(
+            r.symbol, scanDate, r.cmp ?? null, sl, t1,
+            r.signalScore, r.signalScore, JSON.stringify(r.signals),
+            r.niftyRegime ?? null, (r as any).winProbability ?? null,
+          );
+          if (r.cmp) {
+            seedOutcome.run(r.symbol, scanDate, 5,  r.cmp);
+            seedOutcome.run(r.symbol, scanDate, 15, r.cmp);
+          }
+        }
       }
     })(results);
 
