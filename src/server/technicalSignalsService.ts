@@ -350,6 +350,16 @@ function loadSignalWinRates(horizonDays = 15, regime: 'BULL' | 'BEAR' | 'SIDEWAY
   return map;
 }
 
+function loadLearnedWeights(regime: string): Map<string, number> {
+  const rows = db.prepare(`
+    SELECT signal_type, weight
+    FROM signal_type_weights
+    WHERE (regime = ? OR regime = 'ALL') AND sector = 'ALL'
+    ORDER BY regime DESC
+  `).all(regime) as { signal_type: string; weight: number }[];
+  return new Map(rows.map(r => [r.signal_type, r.weight]));
+}
+
 // Returns symbol -> nearest upcoming earnings date (YYYY-MM-DD)
 function loadEarningsCalendar(): Map<string, string> {
   const map = new Map<string, string>();
@@ -448,6 +458,7 @@ function scoreSignals(
   regime: 'BULL' | 'BEAR' | 'SIDEWAYS' = 'BULL',
   fii3dNet: number | null = null,
   newsSentimentScore = 0,
+  learnedWeights: Map<string, number> = new Map(),
 ): number {
   let total = 0;
   for (const s of signals) {
@@ -459,7 +470,8 @@ function scoreSignals(
       : 1.0;
     // Setup signals (volatility squeeze) predict a move but not direction — 50% discount
     const setupDiscount = (s.type === 'BB_COMPRESSION' || s.type === 'ATR_CONTRACTION') ? 0.5 : 1.0;
-    total += base * wrMult * setupDiscount;
+    const learned = Math.max(0.3, Math.min(2.0, learnedWeights.get(s.type) ?? 1.0));
+    total += base * wrMult * setupDiscount * learned;
   }
 
   // Nifty regime discount — bull market keeps full score, bear = -40%, sideways = -20%
@@ -1006,6 +1018,7 @@ export async function runTechnicalSignalScan(options: {
     // ── Pre-scan context (computed once, applied to all stocks) ──────────────
     const niftyRegime      = computeNiftyRegime();
     const winRates         = loadSignalWinRates(15, niftyRegime);
+    const learnedWeights   = loadLearnedWeights(niftyRegime);
     const fii3dNet         = loadFIIFlow3d();
     const earningsCalendar = loadEarningsCalendar();
     const newsSentiment    = loadRecentNewsSentiment(2); // past 48 hours of news
@@ -1043,7 +1056,7 @@ export async function runTechnicalSignalScan(options: {
 
         if (signals.length === 0) continue;
         const sentimentScore = newsSentiment.get(symbol) ?? 0;
-        const score = scoreSignals(signals, winRates, niftyRegime, fii3dNet, sentimentScore);
+        const score = scoreSignals(signals, winRates, niftyRegime, fii3dNet, sentimentScore, learnedWeights);
         if (score < minScore) continue;
 
         // Pre-earnings discount: signals within 5 days of results date are lower quality
