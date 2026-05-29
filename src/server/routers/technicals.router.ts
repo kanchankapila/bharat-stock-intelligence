@@ -85,7 +85,7 @@ export const technicalsRouter = router({
         FROM technical_signals ts
         LEFT JOIN nse_stocks ns ON ns.symbol = ts.symbol
         LEFT JOIN confluence_signals cs
-               ON cs.symbol = ts.symbol AND date(cs.last_updated) = ?
+               ON cs.symbol = ts.symbol AND date(cs.computed_at) = ?
         WHERE ts.date = ?
           AND ROUND(
                 0.4 * (ts.signal_score / 10.0)
