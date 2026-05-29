@@ -39,6 +39,8 @@ import OptionsIntelligence from './components/OptionsIntelligence';
 import PortfolioAnalytics from './components/PortfolioAnalytics';
 import IndexFnoOverview from './components/IndexFnoOverview';
 import { ToDoPage } from './components/ToDoPage';
+import SystemMonitorPage from './components/SystemMonitorPage';
+import ProfilePage from './components/ProfilePage';
 import { GlobalMarketCards } from './components/GlobalMarketCards';
 import { Card } from './components/Card';
 import { AlertsToast } from './components/AlertsToast';
@@ -3648,6 +3650,8 @@ export default function App() {
             <Route path="/sentiment" element={<SentimentIntelligence onSelectStock={(s) => setDrawerSymbol(s)} />} />
             <Route path="/superstars" element={<SuperstarPortfolio />} />
             <Route path="/todo" element={<ToDoPage />} />
+            <Route path="/monitor" element={<SystemMonitorPage />} />
+            <Route path="/profile" element={<ProfilePage />} />
             <Route path="/portfolio" element={<div className="p-6"><PortfolioAnalytics /></div>} />
             <Route path="/builder" element={<div className="p-6"><StrategyBuilder /></div>} />
             <Route path="/settings" element={<V2Settings />} />
@@ -3784,6 +3788,8 @@ export default function App() {
               } />
               <Route path="/superstars" element={<SuperstarPortfolio />} />
               <Route path="/todo" element={<ToDoPage />} />
+              <Route path="/monitor" element={<SystemMonitorPage />} />
+              <Route path="/profile" element={<ProfilePage />} />
               <Route path="/portfolio" element={<div className="p-6"><PortfolioAnalytics /></div>} />
               <Route path="/builder" element={<div className="p-6"><StrategyBuilder /></div>} />
               </Routes>

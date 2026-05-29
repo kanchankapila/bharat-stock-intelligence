@@ -5,7 +5,7 @@ import {
   Search, History, PieChart, Bookmark, Users, Globe, CheckCircle2,
   Star, LogIn, TrendingUp, ArrowUpRight, ArrowDownRight, Menu,
   ChevronLeft, ChevronRight, Radio, Settings2, Briefcase, Calendar, Sparkles,
-  FlaskConical, Layers,
+  FlaskConical, Layers, MonitorDot,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { nseStocksData } from '../data/nseStocks';
@@ -59,6 +59,7 @@ const NAV_GROUPS: NavGroup[] = [
       { icon: PieChart,  label: 'Portfolio',  id: 'portfolio'  },
       { icon: Bookmark,  label: 'Watchlist',  id: 'watchlist'  },
       { icon: Users,     label: 'Superstars', id: 'superstars' },
+      { icon: Star,      label: 'My Profile', id: 'profile'    },
     ],
   },
   {
@@ -66,6 +67,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { icon: Globe,       label: 'Economics', id: 'economics' },
       { icon: CheckCircle2,label: 'ToDo',      id: 'todo'      },
+      { icon: MonitorDot,  label: 'Monitor',   id: 'monitor'   },
     ],
   },
 ];
