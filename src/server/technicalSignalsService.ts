@@ -1225,11 +1225,14 @@ export function getTechnicalSignalsForDate(
 ): Record<string, unknown>[] {
   const d = date ?? new Date().toISOString().slice(0, 10);
   return db.prepare(`
-    SELECT ts.*, ns.name, ns.sector
+    SELECT ts.*,
+           ns.name,
+           ns.sector,
+           ROUND(ts.signal_score * (0.5 + COALESCE(ts.win_probability, 0.5)), 2) AS effective_score
     FROM technical_signals ts
     LEFT JOIN nse_stocks ns ON ns.symbol = ts.symbol
     WHERE ts.date = ? AND ts.signal_score >= ?
-    ORDER BY ts.signal_score DESC
+    ORDER BY effective_score DESC, ts.signal_score DESC
     LIMIT ?
   `).all(d, minScore, limit) as Record<string, unknown>[];
 }
