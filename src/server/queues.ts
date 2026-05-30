@@ -77,6 +77,7 @@ export const QUEUE_DL_RETRAIN_EMERGENCY = 'dl-retrain-emergency';
 export const QUEUE_OHLCV_BACKFILL       = 'ohlcv-backfill';
 export const QUEUE_CONFLUENCE_COMPUTE  = 'confluence-compute';
 export const QUEUE_CONFLUENCE_OUTCOMES = 'confluence-outcomes';
+export const QUEUE_SCREENER_PERFORMANCE = 'screener-performance';
 
 const PYTHON_BIN = process.env.PYTHON_PATH || (
   process.platform === 'win32'
@@ -146,6 +147,9 @@ export let confluenceComputeQueue:  Queue | null = null;
 export let confluenceOutcomesQueue: Queue | null = null;
 let confluenceComputeWorker:  Worker | null = null;
 let confluenceOutcomesWorker: Worker | null = null;
+
+export let screenerPerfQueue: Queue | null = null;
+let screenerPerfWorker: Worker | null = null;
 
 // Shared in-process mirror populated by the stock-refresh worker
 // (same reference as the one exported from liveStockData via the cache layer)
@@ -1163,6 +1167,51 @@ export async function initQueues(): Promise<boolean> {
       { repeat: { every: 24 * 60 * 60 * 1000 }, removeOnComplete: 3, removeOnFail: 3 }
     );
     console.log('[QUEUE] confluence-compute (every 30 min) + confluence-outcomes (daily) registered');
+
+    // ── Screener performance queue (daily 6 PM IST = 12:30 UTC, weekdays) ──────
+    screenerPerfQueue = new Queue(QUEUE_SCREENER_PERFORMANCE, { connection });
+
+    const screenerPerfRepeatables = await screenerPerfQueue.getRepeatableJobs();
+    for (const r of screenerPerfRepeatables) {
+      await screenerPerfQueue.removeRepeatableByKey(r.key);
+    }
+    await screenerPerfQueue.add(
+      'screener-performance-daily',
+      {},
+      {
+        repeat: { every: 24 * 60 * 60 * 1000 },
+        jobId: 'screener-performance-daily',
+        removeOnComplete: 3,
+        removeOnFail: 3,
+      },
+    );
+
+    screenerPerfWorker = new Worker(
+      QUEUE_SCREENER_PERFORMANCE,
+      async (_job: Job) => {
+        const { promisify } = await import('util');
+        const { exec } = await import('child_process');
+        const _execAsync = promisify(exec);
+        const pyDir = process.cwd() + '/src/server';
+        await _execAsync(`"${PYTHON_BIN}" screener_performance.py`, { cwd: pyDir, timeout: 15 * 60 * 1000 });
+        try {
+          const { classifyAllScreeners } = await import('./screenerClassifier');
+          await classifyAllScreeners();
+        } catch (e: any) {
+          console.error('[QUEUE] screener classification failed:', e.message);
+        }
+      },
+      { connection, concurrency: 1, lockDuration: 20 * 60 * 1000, lockRenewTime: 5 * 60 * 1000 },
+    );
+
+    screenerPerfWorker.on('completed', () => console.log('[QUEUE] screener-performance completed'));
+    screenerPerfWorker.on('failed', (_job, err) => console.error('[QUEUE] screener-performance failed:', err.message));
+    screenerPerfWorker.on('error', (err) => {
+      if ((err as any).code === -2 || err.message?.includes('Missing lock')) return;
+      console.error('[QUEUE] screener-performance error:', err.message);
+    });
+
+    console.log('[QUEUE] screener-performance (daily 6PM IST weekdays) registered');
 
     console.warn = _origWarn;
     console.log('[QUEUE] BullMQ initialised (stock-refresh + ai-signals)');
