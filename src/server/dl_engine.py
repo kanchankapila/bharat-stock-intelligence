@@ -4,6 +4,7 @@ BiLSTM + TFT deep learning models for multi-horizon stock prediction.
 Reads from feature_store, writes to deep_learning_predictions.
 """
 
+import os
 import sys
 import json
 import sqlite3
@@ -13,13 +14,16 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Tuple
 
+# Must be set before torch/cuBLAS initialises — fixes CUDNN_STATUS_INTERNAL_ERROR on Windows
+os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+
 import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
 from sklearn.metrics import roc_auc_score, accuracy_score
 
-DB_PATH   = Path(__file__).parent.parent.parent / "stock_intelligence.db"
+DB_PATH   = Path(__file__).parent.parent.parent / "database.sqlite"
 MODEL_DIR = Path(__file__).parent / "ml_models"
 CONFIG_PATH = MODEL_DIR / "dl_model_config.json"
 
@@ -49,6 +53,13 @@ FEATURE_COLS = [
 ]
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+if DEVICE.type == "cuda":
+    torch.backends.cudnn.enabled = False   # cuDNN LSTM backward broken on Windows/cu124; use PyTorch-native path
+    torch.backends.cudnn.benchmark = False
+    print(f"[DL] Device: cuda ({torch.cuda.get_device_name(0)}) "
+          f"{torch.cuda.get_device_properties(0).total_memory // 1024**2} MB VRAM (cudnn disabled)")
+else:
+    print("[DL] Device: cpu")
 
 
 # ── Model Architecture ───────────────────────────────────────────────────────
@@ -101,6 +112,16 @@ class BiLSTMModel(nn.Module):
 
 # ── Data Loading ─────────────────────────────────────────────────────────────
 
+_VOL_ONEHOT = ("vol_LOW", "vol_MED", "vol_HIGH", "vol_SPIKE")
+
+
+def _onehot_vol_regime(df: pd.DataFrame) -> pd.DataFrame:
+    for col in _VOL_ONEHOT:
+        regime = col[4:]  # "LOW", "MED", "HIGH", "SPIKE"
+        df[col] = (df["vol_regime"] == regime).astype(np.float32)
+    return df
+
+
 def load_symbol_sequences(
     symbol: str, con: sqlite3.Connection, seq_len: int = SEQUENCE_LEN
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, List[str]]:
@@ -109,15 +130,18 @@ def load_symbol_sequences(
     Only returns rows where all target columns are non-null (training mode).
     """
     feat_cols = FEATURE_COLS[:N_FEATURES]
-    cols_sql = ", ".join(f'COALESCE("{c}", 0) as "{c}"' for c in feat_cols)
+    numeric_cols = [c for c in feat_cols if c not in _VOL_ONEHOT]
+    cols_sql = ", ".join(f'COALESCE("{c}", 0) as "{c}"' for c in numeric_cols)
     df = pd.read_sql(
-        f"""SELECT date, {cols_sql},
+        f"""SELECT date, {cols_sql}, vol_regime,
                target_dir_5d, target_dir_15d, target_ret_5d, target_ret_15d
             FROM feature_store WHERE symbol=? AND timeframe='D'
             ORDER BY date""",
         con, params=(symbol,), parse_dates=["date"],
     )
+    df = _onehot_vol_regime(df)
     df = df.dropna(subset=["target_dir_5d", "target_dir_15d"])
+    df = df[(df["target_dir_5d"] >= 0) & (df["target_dir_15d"] >= 0)]
     df = df.fillna(0)
 
     X_all = df[feat_cols].values.astype(np.float32)
@@ -149,16 +173,18 @@ def load_inference_sequence(
 ) -> Tuple[np.ndarray, str]:
     """Load last seq_len rows for inference. Returns (1, seq_len, n_feat) and latest date."""
     feat_cols = FEATURE_COLS[:N_FEATURES]
-    cols_sql = ", ".join(f'COALESCE("{c}", 0) as "{c}"' for c in feat_cols)
+    numeric_cols = [c for c in feat_cols if c not in _VOL_ONEHOT]
+    cols_sql = ", ".join(f'COALESCE("{c}", 0) as "{c}"' for c in numeric_cols)
     df = pd.read_sql(
-        f"""SELECT date, {cols_sql}
+        f"""SELECT date, {cols_sql}, vol_regime
             FROM feature_store WHERE symbol=? AND timeframe='D'
             ORDER BY date DESC LIMIT {int(seq_len)}""",
         con, params=(symbol,),
     )
     if len(df) < seq_len:
         return None, None
-    df = df.sort_values("date").fillna(0)
+    df = df.sort_values("date")
+    df = _onehot_vol_regime(df).fillna(0)
     X = df[feat_cols].values.astype(np.float32)
     return X[np.newaxis], df["date"].iloc[-1]
 
@@ -190,6 +216,10 @@ def walk_forward_validate(model: BiLSTMModel, X: np.ndarray, y5: np.ndarray,
         _train_one_fold(model_copy, X_tr, y_tr, yr5[:train_end], epochs=30)
 
         preds = _predict_batch(model_copy, X_te)
+        del model_copy
+        if DEVICE.type == "cuda":
+            torch.cuda.empty_cache()
+
         prob_up = preds["dir_5d"][:, 1]
         pred_dir = (prob_up > 0.5).astype(int)
         accs.append(accuracy_score(y_te, pred_dir))
@@ -206,21 +236,30 @@ def walk_forward_validate(model: BiLSTMModel, X: np.ndarray, y5: np.ndarray,
 
 def _train_one_fold(model: BiLSTMModel, X: np.ndarray, y5: np.ndarray,
                     yr5: np.ndarray, epochs: int = 100):
-    opt  = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-4)
-    sch  = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=epochs)
-    ce   = nn.CrossEntropyLoss()
-    hub  = nn.HuberLoss(delta=0.02)
+    opt    = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-4)
+    sch    = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=epochs)
+    ce     = nn.CrossEntropyLoss()
+    hub    = nn.HuberLoss(delta=0.02)
+    is_cuda = DEVICE.type == "cuda"
 
-    bs = 512
+    # Convert to CPU tensors once — avoid per-batch numpy→tensor copies
+    X_t   = torch.from_numpy(np.ascontiguousarray(X,   dtype=np.float32))
+    y5_t  = torch.from_numpy(np.ascontiguousarray(y5,  dtype=np.int64))
+    yr5_t = torch.from_numpy(np.ascontiguousarray(yr5, dtype=np.float32))
+    if is_cuda:
+        X_t = X_t.pin_memory(); y5_t = y5_t.pin_memory(); yr5_t = yr5_t.pin_memory()
+
+    n = len(X_t)
+    bs = 128  # smaller batches reduce cuDNN workspace + VRAM pressure
     for ep in range(epochs):
         model.train()
-        idxs = np.random.permutation(len(X))
-        for start in range(0, len(X), bs):
-            batch = idxs[start:start + bs]
-            xb = torch.tensor(X[batch]).to(DEVICE)
-            yb = torch.tensor(y5[batch]).to(DEVICE)
-            rb = torch.tensor(yr5[batch]).to(DEVICE)
-            out = model(xb)
+        perm = torch.randperm(n)
+        for start in range(0, n, bs):
+            idx = perm[start:start + bs]
+            xb = X_t[idx].to(DEVICE, non_blocking=is_cuda)
+            yb = y5_t[idx].to(DEVICE, non_blocking=is_cuda)
+            rb = yr5_t[idx].to(DEVICE, non_blocking=is_cuda)
+            out  = model(xb)
             loss = ce(out["dir_5d"], yb) * 0.5 + hub(out["ret_5d"], rb) * 0.5
             opt.zero_grad(); loss.backward(); opt.step()
         sch.step()
@@ -228,10 +267,14 @@ def _train_one_fold(model: BiLSTMModel, X: np.ndarray, y5: np.ndarray,
 
 def _predict_batch(model: BiLSTMModel, X: np.ndarray, bs: int = 256) -> Dict[str, np.ndarray]:
     model.eval()
+    is_cuda = DEVICE.type == "cuda"
+    X_t = torch.from_numpy(np.ascontiguousarray(X, dtype=np.float32))
+    if is_cuda:
+        X_t = X_t.pin_memory()
     results = {"dir_1d": [], "dir_5d": [], "dir_15d": [], "ret_5d": [], "ret_15d": []}
     with torch.no_grad():
-        for start in range(0, len(X), bs):
-            xb = torch.tensor(X[start:start + bs]).to(DEVICE)
+        for start in range(0, len(X_t), bs):
+            xb = X_t[start:start + bs].to(DEVICE, non_blocking=is_cuda)
             out = model(xb)
             for k in results:
                 results[k].append(out[k].cpu().numpy())
@@ -240,13 +283,25 @@ def _predict_batch(model: BiLSTMModel, X: np.ndarray, bs: int = 256) -> Dict[str
 
 # ── Training Entry Point ─────────────────────────────────────────────────────
 
+try:
+    import psutil as _psutil
+    _free_gb = _psutil.virtual_memory().available / 1e9
+    MAX_TRAIN_SYMBOLS = min(150, max(20, int(_free_gb * 80)))
+except ImportError:
+    MAX_TRAIN_SYMBOLS = 150
+
+
 def train_lstm(version: int = 1) -> Dict:
-    """Train BiLSTM on all symbols with >= 252 days. Returns quality metrics."""
+    """Train BiLSTM on symbols with >= 252 days, capped at MAX_TRAIN_SYMBOLS."""
     con = sqlite3.connect(DB_PATH)
     symbols = [r[0] for r in con.execute(
         "SELECT DISTINCT symbol FROM feature_store "
         "GROUP BY symbol HAVING COUNT(*) >= 252"
     ).fetchall()]
+
+    if len(symbols) > MAX_TRAIN_SYMBOLS:
+        rng = np.random.default_rng(seed=42)
+        symbols = list(rng.choice(symbols, MAX_TRAIN_SYMBOLS, replace=False))
 
     print(f"[DL] Training BiLSTM on {len(symbols)} symbols...")
     all_X, all_y5, all_y15, all_yr5 = [], [], [], []
@@ -264,10 +319,11 @@ def train_lstm(version: int = 1) -> Dict:
     if not all_X:
         return {"error": "no training data"}
 
-    X_all  = np.concatenate(all_X)
-    y5_all = np.concatenate(all_y5)
-    y15_all= np.concatenate(all_y15)
-    yr5_all= np.concatenate(all_yr5)
+    X_all   = np.concatenate(all_X);  del all_X
+    y5_all  = np.concatenate(all_y5); del all_y5
+    y15_all = np.concatenate(all_y15);del all_y15
+    yr5_all = np.concatenate(all_yr5);del all_yr5
+    print(f"[DL] Dataset: {X_all.shape[0]} sequences, {X_all.nbytes // 1024 // 1024} MB")
 
     model = BiLSTMModel().to(DEVICE)
     _train_one_fold(model, X_all, y5_all, yr5_all, epochs=100)

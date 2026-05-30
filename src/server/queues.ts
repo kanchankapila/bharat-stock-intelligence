@@ -1,9 +1,9 @@
-/**
+﻿/**
  * BullMQ queues & workers
  *
  * Two queues:
- *   stock-refresh  – repeatable job every 5 min, refreshes all NSE live prices
- *   ai-signals     – per-stock AI analysis jobs, concurrency 3
+ *   stock-refresh  â€“ repeatable job every 5 min, refreshes all NSE live prices
+ *   ai-signals     â€“ per-stock AI analysis jobs, concurrency 3
  *
  * Both require Redis.  If Redis is unavailable the module exports no-op stubs
  * and the server falls back to the legacy setInterval approach.
@@ -18,7 +18,7 @@ import { syncAndScore } from './scoringService';
 import Redis from 'ioredis';
 import { REDIS_BASE } from './redisConfig';
 
-// ─── Redis connection shared across all BullMQ objects ───────────────────────
+// â”€â”€â”€ Redis connection shared across all BullMQ objects â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function makeConnection(isProbe = false): ConnectionOptions {
   const base = {
@@ -49,7 +49,7 @@ function makeConnection(isProbe = false): ConnectionOptions {
   };
 }
 
-// ─── Queue names ─────────────────────────────────────────────────────────────
+// â”€â”€â”€ Queue names â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export const QUEUE_STOCK_REFRESH        = 'stock-refresh';
 export const QUEUE_AI_SIGNALS           = 'ai-signals';
@@ -65,6 +65,7 @@ export const QUEUE_NEWS_SENTIMENT       = 'news-sentiment';
 export const QUEUE_TRENDLYNE_INTRADAY   = 'trendlyne-intraday';
 export const QUEUE_OUTCOME_RESOLVER     = 'outcome-resolver';
 export const QUEUE_ML_DAILY_OPS        = 'ml-daily-ops';
+export const QUEUE_ML_WEEKLY_RETRAIN   = 'ml-weekly-retrain';
 export const QUEUE_RESEARCH_PREMARKET  = 'research-premarket';
 export const QUEUE_RESEARCH_POSTCLOSE  = 'research-postclose';
 export const QUEUE_DL_MACRO_FETCH       = 'dl-macro-fetch';
@@ -77,11 +78,17 @@ export const QUEUE_OHLCV_BACKFILL       = 'ohlcv-backfill';
 export const QUEUE_CONFLUENCE_COMPUTE  = 'confluence-compute';
 export const QUEUE_CONFLUENCE_OUTCOMES = 'confluence-outcomes';
 
+const PYTHON_BIN = process.env.PYTHON_PATH || (
+  process.platform === 'win32'
+    ? 'C:\\Users\\amit_\\AppData\\Local\\Programs\\Python\\Python311\\python.exe'
+    : 'python3'
+);
+
 const BULK_CACHE_KEY      = 'live-stocks-bulk';
 const BULK_TTL_SECONDS    = 5 * 60;
 const REFRESH_REPEAT_MS   = BULK_TTL_SECONDS * 1000;
 
-// ─── Module-level handles (null when Redis unavailable) ───────────────────────
+// â”€â”€â”€ Module-level handles (null when Redis unavailable) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export let stockRefreshQueue:      Queue | null = null;
 export let aiSignalsQueue:         Queue | null = null;
@@ -112,6 +119,8 @@ export let outcomeResolverQueue: Queue | null = null;
 let outcomeResolverWorker: Worker | null = null;
 export let mlDailyOpsQueue: Queue | null = null;
 let mlDailyOpsWorker: Worker | null = null;
+export let mlWeeklyRetrainQueue: Queue | null = null;
+let mlWeeklyRetrainWorker: Worker | null = null;
 export let researchPremarketQueue: Queue | null = null;
 export let researchPostcloseQueue: Queue | null = null;
 let researchPremarketWorker: Worker | null = null;
@@ -142,7 +151,7 @@ let confluenceOutcomesWorker: Worker | null = null;
 // (same reference as the one exported from liveStockData via the cache layer)
 let bulkMirror: Map<string, any> = new Map();
 
-// ─── Confluence compute processor ────────────────────────────────────────────
+// â”€â”€â”€ Confluence compute processor â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function processConfluenceCompute(_job: Job): Promise<{ computed: number; elite: number; strong: number }> {
   const { computeConfluenceSignals, runMLProbabilityOverlay } = await import('./confluenceEngine');
@@ -156,10 +165,9 @@ async function processConfluenceCompute(_job: Job): Promise<{ computed: number; 
 async function processConfluenceOutcomes(_job: Job): Promise<void> {
   const { execFile } = await import('child_process');
   const pathModule = await import('path');
-  const PYTHON = process.platform === 'win32' ? 'python' : 'python3';
   const scriptPath = pathModule.default.resolve(process.cwd(), 'src/server/confluence_outcome_tracker.py');
   await new Promise<void>((resolve, reject) => {
-    execFile(PYTHON, [scriptPath], { timeout: 120000 }, (err, stdout, stderr) => {
+    execFile(PYTHON_BIN, [scriptPath], { timeout: 120000 }, (err, stdout, stderr) => {
       if (stdout) console.log('[OUTCOME-TRACKER]', stdout.trim());
       if (stderr) console.error('[OUTCOME-TRACKER ERR]', stderr.trim());
       err ? reject(err) : resolve();
@@ -167,7 +175,7 @@ async function processConfluenceOutcomes(_job: Job): Promise<void> {
   });
 }
 
-// ─── Stock-refresh worker processor (PHASE 1: Now persists OHLCV) ──────────
+// â”€â”€â”€ Stock-refresh worker processor (PHASE 1: Now persists OHLCV) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function processStockRefresh(_job: Job): Promise<{ count: number; persisted: number }> {
   const { fetchAndPersistOHLCVData } = await import('./liveStockData');
@@ -175,7 +183,7 @@ async function processStockRefresh(_job: Job): Promise<{ count: number; persiste
   return result;
 }
 
-// ─── AI-signals worker processor ─────────────────────────────────────────────
+// â”€â”€â”€ AI-signals worker processor â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function processAISignal(job: Job): Promise<void> {
   const { symbol, stockData } = job.data as { symbol: string; stockData: Record<string, unknown> };
@@ -202,7 +210,7 @@ async function processAISignal(job: Job): Promise<void> {
   await job.updateProgress(100);
 }
 
-// ─── Stock-scoring worker processor ──────────────────────────────────────────
+// â”€â”€â”€ Stock-scoring worker processor â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function processStockScoring(_job: Job): Promise<{ success: boolean }> {
   console.log('[QUEUE] Starting scheduled stock scoring...');
@@ -210,7 +218,7 @@ async function processStockScoring(_job: Job): Promise<{ success: boolean }> {
   return { success: result.success };
 }
 
-// ─── MC screener sync worker processor ───────────────────────────────────────
+// â”€â”€â”€ MC screener sync worker processor â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function processMcScreenerSync(_job: Job): Promise<{ success: boolean }> {
   console.log('[QUEUE] Starting scheduled MoneyControl screener sync...');
@@ -219,7 +227,7 @@ async function processMcScreenerSync(_job: Job): Promise<{ success: boolean }> {
   return { success: true };
 }
 
-// ─── ETNow screener sync worker processor ────────────────────────────────────
+// â”€â”€â”€ ETNow screener sync worker processor â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function processEtnowScreenerSync(_job: Job): Promise<{ success: boolean }> {
   console.log('[QUEUE] Starting scheduled ETNow screener sync...');
@@ -228,7 +236,7 @@ async function processEtnowScreenerSync(_job: Job): Promise<{ success: boolean }
   return { success: true };
 }
 
-// ─── NSE-sync worker processor (PHASE 2: Weekly NSE master data sync) ───────
+// â”€â”€â”€ NSE-sync worker processor (PHASE 2: Weekly NSE master data sync) â”€â”€â”€â”€â”€â”€â”€
 
 async function processNSESync(_job: Job): Promise<{ success: boolean; stockCount: number }> {
   console.log('[QUEUE] Starting NSE master data sync...');
@@ -244,7 +252,7 @@ async function processNSESync(_job: Job): Promise<{ success: boolean; stockCount
   }
 }
 
-// ─── Fundamentals-sync worker processor ──────────────────────────────────────
+// â”€â”€â”€ Fundamentals-sync worker processor â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function processFundamentalsSync(job: Job): Promise<{ success: boolean }> {
   const phase2Only = job.data?.phase2Only === true;
@@ -254,7 +262,7 @@ async function processFundamentalsSync(job: Job): Promise<{ success: boolean }> 
   return { success: true };
 }
 
-// ─── Quant-scoring worker processor ──────────────────────────────────────────
+// â”€â”€â”€ Quant-scoring worker processor â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function processQuantScoring(_job: Job): Promise<{ success: boolean }> {
   console.log('[QUEUE] Starting quant strategy scoring...');
@@ -263,31 +271,53 @@ async function processQuantScoring(_job: Job): Promise<{ success: boolean }> {
   return { success: true };
 }
 
-// ─── Outcome resolver worker processor ───────────────────────────────────────
+// â”€â”€â”€ Outcome resolver worker processor â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function processOutcomeResolver(_job: Job): Promise<{ success: boolean }> {
   const { exec } = await import('child_process');
   const { promisify } = await import('util');
   const execAsync = promisify(exec);
   const pyDir = process.cwd() + '/src/server';
-  await execAsync(`python outcome_resolver.py --horizon 1`, { cwd: pyDir });
-  await execAsync(`python outcome_resolver.py --horizon 5`, { cwd: pyDir });
+  // Refresh FII/DII so alpha computation has current benchmark data
+  await execAsync(`"${PYTHON_BIN}" fii_dii_fetcher.py`, { cwd: pyDir, timeout: 90_000 }).catch(() => {});
+  // Resolve outcomes for all horizons
+  await execAsync(`"${PYTHON_BIN}" outcome_resolver.py --horizon 1`, { cwd: pyDir });
+  await execAsync(`"${PYTHON_BIN}" outcome_resolver.py --horizon 5`, { cwd: pyDir });
+  await execAsync(`"${PYTHON_BIN}" outcome_resolver.py --horizon 15`, { cwd: pyDir });
+  // Recompute strategy performance (includes alpha_vs_nifty + signal_decay_halflife)
+  await execAsync(`"${PYTHON_BIN}" performance_tracker.py --horizon 5`, { cwd: pyDir });
+  await execAsync(`"${PYTHON_BIN}" performance_tracker.py --horizon 15`, { cwd: pyDir });
+  // Score all pending signals with ML model
+  await execAsync(`"${PYTHON_BIN}" ml_ensemble.py --score`, { cwd: pyDir, timeout: 300_000 }).catch(() => {});
   return { success: true };
 }
 
-// ─── ML daily ops worker processor ───────────────────────────────────────────
+// â”€â”€â”€ ML daily ops worker processor â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   const { exec } = await import('child_process');
   const { promisify } = await import('util');
   const execAsync = promisify(exec);
   const pyDir = process.cwd() + '/src/server';
-  await execAsync(`python reward_engine.py`, { cwd: pyDir });
-  await execAsync(`python rl_agent.py --update`, { cwd: pyDir });
+  // 1. Refresh FII/DII data (context feature for ML)
+  await execAsync(`"${PYTHON_BIN}" fii_dii_fetcher.py`, { cwd: pyDir, timeout: 90_000 }).catch(() => {});
+  // 2. Score today's news sentiment onto technical_signals rows
+  await execAsync(`"${PYTHON_BIN}" finbert_scorer.py --days 1`, { cwd: pyDir, timeout: 180_000 }).catch(() => {});
+  // 3. Resolve any newly-matured signal outcomes
+  await execAsync(`"${PYTHON_BIN}" outcome_resolver.py --horizon 5`, { cwd: pyDir });
+  await execAsync(`"${PYTHON_BIN}" outcome_resolver.py --horizon 15`, { cwd: pyDir });
+  // 4. Recompute strategy performance (alpha, decay, regime segments)
+  await execAsync(`"${PYTHON_BIN}" performance_tracker.py --horizon 5`, { cwd: pyDir });
+  await execAsync(`"${PYTHON_BIN}" performance_tracker.py --horizon 15`, { cwd: pyDir });
+  // 5. Score pending signals with the ensemble model
+  await execAsync(`"${PYTHON_BIN}" ml_ensemble.py --score`, { cwd: pyDir, timeout: 300_000 }).catch(() => {});
+  // 6. RL reward propagation
+  await execAsync(`"${PYTHON_BIN}" reward_engine.py`, { cwd: pyDir });
+  await execAsync(`"${PYTHON_BIN}" rl_agent.py --update`, { cwd: pyDir });
   return { success: true };
 }
 
-// ─── Research report processor functions ─────────────────────────────────────
+// â”€â”€â”€ Research report processor functions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function processResearchPremarket(_job: Job): Promise<{ success: boolean }> {
   const { generateDailyReport } = await import('./researchEngine');
@@ -303,20 +333,20 @@ async function processResearchPostclose(_job: Job): Promise<{ success: boolean }
   return { success: true };
 }
 
-// ─── DL Python runner ────────────────────────────────────────────────────────
+// â”€â”€â”€ DL Python runner â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function processDLPython(script: string, args: string = ''): Promise<{ success: boolean }> {
   const { exec } = await import('child_process');
   const { promisify } = await import('util');
   const execAsync = promisify(exec);
   const pyDir = process.cwd() + '/src/server';
-  const { stdout, stderr } = await execAsync(`python ${script} ${args}`, { cwd: pyDir, timeout: 6 * 60 * 60 * 1000 });
+  const { stdout, stderr } = await execAsync(`"${PYTHON_BIN}" ${script} ${args}`, { cwd: pyDir, timeout: 6 * 60 * 60 * 1000 });
   if (stdout) console.log(`[QUEUE] ${script}:`, stdout.slice(0, 200));
   if (stderr) console.warn(`[QUEUE] ${script} stderr:`, stderr.slice(0, 200));
   return { success: true };
 }
 
-// ─── Initialise queues & workers ─────────────────────────────────────────────
+// â”€â”€â”€ Initialise queues & workers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export async function initQueues(): Promise<boolean> {
   // Suppress BullMQ's per-queue/worker Redis version warnings (Redis 5 works fine here)
@@ -345,7 +375,7 @@ export async function initQueues(): Promise<boolean> {
   // 2. Initialise resilient queues & workers
   const connection = makeConnection(false);
   try {
-    // ── Stock refresh queue (PHASE 1 FIX: Resume daily OHLCV sync) ────────
+    // â”€â”€ Stock refresh queue (PHASE 1 FIX: Resume daily OHLCV sync) â”€â”€â”€â”€â”€â”€â”€â”€
     stockRefreshQueue = new Queue(QUEUE_STOCK_REFRESH, { connection });
 
     // Remove any stale repeatable job
@@ -386,11 +416,15 @@ export async function initQueues(): Promise<boolean> {
     stockWorker.on('failed', (job, err) => {
       console.error(`[QUEUE] stock-refresh failed:`, err.message);
     });
+    stockWorker.on('error', (err) => {
+      if ((err as any).code === -2 || err.message?.includes('Missing lock')) return;
+      console.error('[QUEUE] stock-refresh error:', err.message);
+    });
 
     // Trigger an immediate first refresh (Paused)
     // await stockRefreshQueue.add('refresh-all', {}, { removeOnComplete: 1 });
 
-    // ── AI signals queue ─────────────────────────────────────────────────────
+    // â”€â”€ AI signals queue â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     aiSignalsQueue = new Queue(QUEUE_AI_SIGNALS, { connection });
 
     signalWorker = new Worker(
@@ -424,7 +458,7 @@ export async function initQueues(): Promise<boolean> {
 
     console.log('[QUEUE] BullMQ initialised (stock-refresh + ai-signals)');
 
-    // ── Stock scoring queue ──────────────────────────────────────────────────
+    // â”€â”€ Stock scoring queue â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     stockScoringQueue = new Queue(QUEUE_STOCK_SCORING, { connection });
 
     // Repeat every 24 hours
@@ -460,7 +494,7 @@ export async function initQueues(): Promise<boolean> {
       console.error(`[QUEUE] stock-scoring failed:`, err.message);
     });
 
-    // ── MC screener sync queue ───────────────────────────────────────────────
+    // â”€â”€ MC screener sync queue â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     mcScreenerSyncQueue = new Queue(QUEUE_MC_SCREENER_SYNC, { connection });
 
     // Repeat every 12 hours
@@ -496,7 +530,7 @@ export async function initQueues(): Promise<boolean> {
       console.error(`[QUEUE] mc-screener-sync failed:`, err.message);
     });
 
-    // ── ETNow screener sync queue ────────────────────────────────────────────
+    // â”€â”€ ETNow screener sync queue â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     etnowScreenerSyncQueue = new Queue(QUEUE_ETNOW_SCREENER_SYNC, { connection });
 
     // Repeat every 12 hours
@@ -532,7 +566,7 @@ export async function initQueues(): Promise<boolean> {
       console.error(`[QUEUE] etnow-screener-sync failed:`, err.message);
     });
 
-    // ── NSE sync queue (PHASE 2: Weekly master data update) ──────────────────
+    // â”€â”€ NSE sync queue (PHASE 2: Weekly master data update) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     nseScreenerSyncQueue = new Queue(QUEUE_NSE_SYNC, { connection });
 
     // Remove any stale repeatable job
@@ -573,7 +607,7 @@ export async function initQueues(): Promise<boolean> {
       console.error(`[QUEUE] nse-sync failed:`, err.message);
     });
 
-    // ── Fundamentals sync queue ──────────────────────────────────────────────
+    // â”€â”€ Fundamentals sync queue â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     fundamentalsSyncQueue = new Queue(QUEUE_FUNDAMENTALS_SYNC, { connection });
 
     // Weekly repeatable job (Phase 1 + Phase 2 every 7 days)
@@ -598,7 +632,7 @@ export async function initQueues(): Promise<boolean> {
       {
         connection,
         concurrency: 1,
-        lockDuration: 30 * 60 * 1000,  // 30 min — Phase 2 deep sync is slow
+        lockDuration: 30 * 60 * 1000,  // 30 min â€” Phase 2 deep sync is slow
         lockRenewTime: 5 * 60 * 1000,
       },
     );
@@ -610,7 +644,7 @@ export async function initQueues(): Promise<boolean> {
       console.error('[QUEUE] fundamentals-sync failed:', err.message);
     });
 
-    // ── Quant scoring queue (daily) ──────────────────────────────────────────
+    // â”€â”€ Quant scoring queue (daily) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     quantScoringQueue = new Queue(QUEUE_QUANT_SCORING, { connection });
 
     const quantRepeatables = await quantScoringQueue.getRepeatableJobs();
@@ -634,7 +668,7 @@ export async function initQueues(): Promise<boolean> {
       {
         connection,
         concurrency: 1,
-        lockDuration: 10 * 60 * 1000, // 10 min — pure in-process computation
+        lockDuration: 10 * 60 * 1000, // 10 min â€” pure in-process computation
         lockRenewTime: 2 * 60 * 1000,
       },
     );
@@ -646,7 +680,7 @@ export async function initQueues(): Promise<boolean> {
       console.error('[QUEUE] quant-scoring failed:', err.message);
     });
 
-    // ── Technical signals queue (every 30 minutes) ──────────────────────────
+    // â”€â”€ Technical signals queue (every 30 minutes) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     technicalSignalsQueue = new Queue(QUEUE_TECHNICAL_SIGNALS, { connection });
 
     const tsRepeatables = await technicalSignalsQueue.getRepeatableJobs();
@@ -684,8 +718,12 @@ export async function initQueues(): Promise<boolean> {
     technicalSignalsWorker.on('failed', (_job, err) => {
       console.error('[QUEUE] technical-signals failed:', err.message);
     });
+    technicalSignalsWorker.on('error', (err) => {
+      if ((err as any).code === -2 || err.message?.includes('Missing lock')) return;
+      console.error('[QUEUE] technical-signals error:', err.message);
+    });
 
-    // ── Signal outcomes queue (daily, resolves 5D + 15D win rates) ───────────
+    // â”€â”€ Signal outcomes queue (daily, resolves 5D + 15D win rates) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     signalOutcomesQueue = new Queue(QUEUE_SIGNAL_OUTCOMES, { connection });
 
     const outRepeatables = await signalOutcomesQueue.getRepeatableJobs();
@@ -696,7 +734,7 @@ export async function initQueues(): Promise<boolean> {
       'signal-outcomes-daily',
       {},
       {
-        repeat: { pattern: '30 3 * * 1-5' }, // 9:00 AM IST, Mon–Fri (30 min after signals)
+        repeat: { pattern: '30 3 * * 1-5' }, // 9:00 AM IST, Monâ€“Fri (30 min after signals)
         jobId: 'signal-outcomes-daily',
         removeOnComplete: 3,
         removeOnFail: 3,
@@ -725,7 +763,7 @@ export async function initQueues(): Promise<boolean> {
       console.error('[QUEUE] signal-outcomes failed:', err.message);
     });
 
-    // ── News sentiment queue (every 30 seconds) ──────────────────────────────
+    // â”€â”€ News sentiment queue (every 30 seconds) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     newsSentimentQueue = new Queue(QUEUE_NEWS_SENTIMENT, { connection });
 
     const newsRepeatables = await newsSentimentQueue.getRepeatableJobs();
@@ -736,7 +774,7 @@ export async function initQueues(): Promise<boolean> {
       'news-sentiment-refresh',
       {},
       {
-        repeat: { every: 30 * 1000 }, // every 30 seconds
+        repeat: { every: 5 * 60 * 1000 }, // every 5 minutes
         jobId: 'news-sentiment-repeatable',
         removeOnComplete: 5,
         removeOnFail: 3,
@@ -763,8 +801,12 @@ export async function initQueues(): Promise<boolean> {
     newsSentimentWorker.on('failed', (_job, err) => {
       console.error('[QUEUE] news-sentiment failed:', err.message);
     });
+    newsSentimentWorker.on('error', (err) => {
+      if ((err as any).code === -2 || err.message?.includes('Missing lock')) return;
+      console.error('[QUEUE] news-sentiment error:', err.message);
+    });
 
-    // ── Trendlyne intraday queue (every 5 min) ───────────────────────────────
+    // â”€â”€ Trendlyne intraday queue (every 5 min) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     trendlyneIntradayQueue = new Queue(QUEUE_TRENDLYNE_INTRADAY, { connection });
 
     const tlRepeatables = await trendlyneIntradayQueue.getRepeatableJobs();
@@ -821,8 +863,12 @@ export async function initQueues(): Promise<boolean> {
     trendlyneIntradayWorker.on('failed', (_job, err) => {
       console.error('[QUEUE] trendlyne-intraday failed:', err.message);
     });
+    trendlyneIntradayWorker.on('error', (err) => {
+      if ((err as any).code === -2 || err.message?.includes('Missing lock')) return;
+      console.error('[QUEUE] trendlyne-intraday error:', err.message);
+    });
 
-    // ── Outcome resolver queue (daily at 9:30 AM IST = 04:00 UTC, weekdays) ──
+    // â”€â”€ Outcome resolver queue (daily at 9:30 AM IST = 04:00 UTC, weekdays) â”€â”€
     outcomeResolverQueue = new Queue(QUEUE_OUTCOME_RESOLVER, { connection });
 
     const orRepeatables = await outcomeResolverQueue.getRepeatableJobs();
@@ -858,7 +904,7 @@ export async function initQueues(): Promise<boolean> {
       console.error('[QUEUE] outcome-resolver failed:', err.message);
     });
 
-    // ── ML daily ops queue (5:00 PM IST = 11:30 UTC, weekdays) ─────────────
+    // â”€â”€ ML daily ops queue (5:00 PM IST = 11:30 UTC, weekdays) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     mlDailyOpsQueue = new Queue(QUEUE_ML_DAILY_OPS, { connection });
 
     const mlRepeatables = await mlDailyOpsQueue.getRepeatableJobs();
@@ -894,7 +940,33 @@ export async function initQueues(): Promise<boolean> {
       console.error('[QUEUE] ml-daily-ops failed:', err.message);
     });
 
-    // ── Research report queues ───────────────────────────────────────────────
+    // â”€â”€ ML weekly retrain + optimize (Sunday 6 PM IST = 12:30 UTC) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    mlWeeklyRetrainQueue = new Queue(QUEUE_ML_WEEKLY_RETRAIN, { connection });
+    const mlWkRep = await mlWeeklyRetrainQueue.getRepeatableJobs();
+    for (const r of mlWkRep) await mlWeeklyRetrainQueue.removeRepeatableByKey(r.key);
+    await mlWeeklyRetrainQueue.add('ml-weekly-retrain', {}, {
+      repeat: { pattern: '30 12 * * 0' },
+      jobId: 'ml-weekly-retrain',
+      removeOnComplete: 2, removeOnFail: 3,
+    });
+    mlWeeklyRetrainWorker = new Worker(QUEUE_ML_WEEKLY_RETRAIN, async (_job: Job) => {
+      const { exec } = await import('child_process');
+      const { promisify } = await import('util');
+      const execAsync = promisify(exec);
+      const pyDir = process.cwd() + '/src/server';
+      // Full retrain from scratch on accumulated outcomes
+      await execAsync(`"${PYTHON_BIN}" outcome_resolver.py --horizon 5`, { cwd: pyDir });
+      await execAsync(`"${PYTHON_BIN}" outcome_resolver.py --horizon 15`, { cwd: pyDir });
+      await execAsync(`"${PYTHON_BIN}" ml_ensemble.py --train --score`, { cwd: pyDir, timeout: 60 * 60 * 1000 });
+      await execAsync(`"${PYTHON_BIN}" strategy_optimizer.py`, { cwd: pyDir, timeout: 30 * 60 * 1000 }).catch(() => {});
+      await execAsync(`"${PYTHON_BIN}" performance_tracker.py --horizon 5`, { cwd: pyDir });
+      await execAsync(`"${PYTHON_BIN}" performance_tracker.py --horizon 15`, { cwd: pyDir });
+      return { success: true };
+    }, { connection, concurrency: 1, lockDuration: 90 * 60 * 1000, lockRenewTime: 10 * 60 * 1000 });
+    mlWeeklyRetrainWorker.on('completed', () => console.log('[QUEUE] ml-weekly-retrain done'));
+    mlWeeklyRetrainWorker.on('failed', (_, err) => console.error('[QUEUE] ml-weekly-retrain failed:', err.message));
+
+    // â”€â”€ Research report queues â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     researchPremarketQueue = new Queue(QUEUE_RESEARCH_PREMARKET, { connection });
     const premarketRep = await researchPremarketQueue.getRepeatableJobs();
     for (const r of premarketRep) await researchPremarketQueue.removeRepeatableByKey(r.key);
@@ -927,7 +999,7 @@ export async function initQueues(): Promise<boolean> {
     researchPostcloseWorker.on('completed', () => console.log('[QUEUE] research-postclose done'));
     researchPostcloseWorker.on('failed', (_, err) => console.error('[QUEUE] research-postclose failed:', err.message));
 
-    // ── DL Macro Fetch (8:00 AM IST = 2:30 AM UTC, weekdays) ────────────────
+    // â”€â”€ DL Macro Fetch (8:00 AM IST = 2:30 AM UTC, weekdays) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     dlMacroFetchQueue = new Queue(QUEUE_DL_MACRO_FETCH, { connection });
     const dlMacroRep = await dlMacroFetchQueue.getRepeatableJobs();
     for (const r of dlMacroRep) await dlMacroFetchQueue.removeRepeatableByKey(r.key);
@@ -942,7 +1014,7 @@ export async function initQueues(): Promise<boolean> {
     dlMacroFetchWorker.on('completed', () => console.log('[QUEUE] dl-macro-fetch done'));
     dlMacroFetchWorker.on('failed', (_, err) => console.error('[QUEUE] dl-macro-fetch failed:', err.message));
 
-    // ── DL Feature Refresh (3:30 PM IST = 10:00 AM UTC, weekdays) ───────────
+    // â”€â”€ DL Feature Refresh (3:30 PM IST = 10:00 AM UTC, weekdays) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     dlFeatureRefreshQueue = new Queue(QUEUE_DL_FEATURE_REFRESH, { connection });
     const dlFeatRep = await dlFeatureRefreshQueue.getRepeatableJobs();
     for (const r of dlFeatRep) await dlFeatureRefreshQueue.removeRepeatableByKey(r.key);
@@ -957,7 +1029,7 @@ export async function initQueues(): Promise<boolean> {
     dlFeatureRefreshWorker.on('completed', () => console.log('[QUEUE] dl-feature-refresh done'));
     dlFeatureRefreshWorker.on('failed', (_, err) => console.error('[QUEUE] dl-feature-refresh failed:', err.message));
 
-    // ── DL Inference (4:30 PM IST = 11:00 AM UTC, weekdays) ─────────────────
+    // â”€â”€ DL Inference (4:30 PM IST = 11:00 AM UTC, weekdays) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     dlInferenceQueue = new Queue(QUEUE_DL_INFERENCE, { connection });
     const dlInfRep = await dlInferenceQueue.getRepeatableJobs();
     for (const r of dlInfRep) await dlInferenceQueue.removeRepeatableByKey(r.key);
@@ -972,7 +1044,7 @@ export async function initQueues(): Promise<boolean> {
     dlInferenceWorker.on('completed', () => console.log('[QUEUE] dl-inference done'));
     dlInferenceWorker.on('failed', (_, err) => console.error('[QUEUE] dl-inference failed:', err.message));
 
-    // ── DL Regime Update (4:45 PM IST = 11:15 AM UTC, weekdays) ─────────────
+    // â”€â”€ DL Regime Update (4:45 PM IST = 11:15 AM UTC, weekdays) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     dlRegimeUpdateQueue = new Queue(QUEUE_DL_REGIME_UPDATE, { connection });
     const dlRegRep = await dlRegimeUpdateQueue.getRepeatableJobs();
     for (const r of dlRegRep) await dlRegimeUpdateQueue.removeRepeatableByKey(r.key);
@@ -987,7 +1059,7 @@ export async function initQueues(): Promise<boolean> {
     dlRegimeUpdateWorker.on('completed', () => console.log('[QUEUE] dl-regime-update done'));
     dlRegimeUpdateWorker.on('failed', (_, err) => console.error('[QUEUE] dl-regime-update failed:', err.message));
 
-    // ── DL Weekly Retrain (Sunday 11:00 PM IST = Sun 17:30 UTC) ─────────────
+    // â”€â”€ DL Weekly Retrain (Sunday 11:00 PM IST = Sun 17:30 UTC) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     dlRetrainWeeklyQueue = new Queue(QUEUE_DL_RETRAIN_WEEKLY, { connection });
     const dlWkRep = await dlRetrainWeeklyQueue.getRepeatableJobs();
     for (const r of dlWkRep) await dlRetrainWeeklyQueue.removeRepeatableByKey(r.key);
@@ -1005,7 +1077,7 @@ export async function initQueues(): Promise<boolean> {
     dlRetrainWeeklyWorker.on('completed', () => console.log('[QUEUE] dl-retrain-weekly done'));
     dlRetrainWeeklyWorker.on('failed', (_, err) => console.error('[QUEUE] dl-retrain-weekly failed:', err.message));
 
-    // ── DL Emergency Retrain (on-demand, triggered by drift detector) ────────
+    // â”€â”€ DL Emergency Retrain (on-demand, triggered by drift detector) â”€â”€â”€â”€â”€â”€â”€â”€
     dlRetrainEmergencyQueue = new Queue(QUEUE_DL_RETRAIN_EMERGENCY, { connection });
     dlRetrainEmergencyWorker = new Worker(QUEUE_DL_RETRAIN_EMERGENCY,
       async () => processDLPython('dl_trainer.py', '--trigger drift'),
@@ -1013,7 +1085,7 @@ export async function initQueues(): Promise<boolean> {
     dlRetrainEmergencyWorker.on('completed', () => console.log('[QUEUE] dl-retrain-emergency done'));
     dlRetrainEmergencyWorker.on('failed', (_, err) => console.error('[QUEUE] dl-retrain-emergency failed:', err.message));
 
-    // ── OHLCV Backfill ───────────────────────────────────────────────────────
+    // â”€â”€ OHLCV Backfill â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // Worker handles both one-time full backfill and recurring weekly gap-fill
     ohlcvBackfillQueue = new Queue(QUEUE_OHLCV_BACKFILL, { connection });
     ohlcvBackfillWorker = new Worker(QUEUE_OHLCV_BACKFILL,
@@ -1038,7 +1110,7 @@ export async function initQueues(): Promise<boolean> {
     // Startup check: if stock_ohlcv has fewer than 1000 rows trigger full backfill once
     const ohlcvCount = (db.prepare('SELECT COUNT(*) as c FROM stock_ohlcv').get() as any)?.c ?? 0;
     if (ohlcvCount < 1000) {
-      console.log(`[QUEUE] stock_ohlcv sparse (${ohlcvCount} rows) — queuing full backfill`);
+      console.log(`[QUEUE] stock_ohlcv sparse (${ohlcvCount} rows) â€” queuing full backfill`);
       await ohlcvBackfillQueue.add('ohlcv-full-backfill-startup', { mode: 'full' }, {
         jobId: 'ohlcv-full-backfill-startup',
         removeOnComplete: 1, removeOnFail: 3,
@@ -1047,7 +1119,7 @@ export async function initQueues(): Promise<boolean> {
       // Always ensure NIFTY50 index history is present
       const niftyCount = (db.prepare("SELECT COUNT(*) as c FROM stock_ohlcv WHERE symbol='NIFTY50'").get() as any)?.c ?? 0;
       if (niftyCount === 0) {
-        console.log('[QUEUE] NIFTY50 missing from stock_ohlcv — queuing index backfill');
+        console.log('[QUEUE] NIFTY50 missing from stock_ohlcv â€” queuing index backfill');
         await ohlcvBackfillQueue.add('ohlcv-indices-startup', { mode: 'indices' }, {
           jobId: 'ohlcv-indices-startup',
           removeOnComplete: 1, removeOnFail: 3,
@@ -1055,7 +1127,7 @@ export async function initQueues(): Promise<boolean> {
       }
     }
 
-    // ── Confluence Compute Queue ──────────────────────────────────────────────
+    // â”€â”€ Confluence Compute Queue â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     confluenceComputeQueue = new Queue(QUEUE_CONFLUENCE_COMPUTE, { connection: makeConnection() });
     confluenceComputeWorker = new Worker(
       QUEUE_CONFLUENCE_COMPUTE,
@@ -1065,13 +1137,17 @@ export async function initQueues(): Promise<boolean> {
     confluenceComputeWorker.on('failed', (_job, err) =>
       console.error(`[QUEUE] ${QUEUE_CONFLUENCE_COMPUTE} job failed:`, err.message)
     );
+    confluenceComputeWorker.on('error', (err) => {
+      if ((err as any).code === -2 || err.message?.includes('Missing lock')) return;
+      console.error(`[QUEUE] ${QUEUE_CONFLUENCE_COMPUTE} error:`, err.message);
+    });
     await confluenceComputeQueue.add(
       'confluence-compute',
       {},
       { repeat: { every: 30 * 60 * 1000 }, removeOnComplete: 3, removeOnFail: 3 }
     );
 
-    // ── Confluence Outcomes Queue ─────────────────────────────────────────────
+    // â”€â”€ Confluence Outcomes Queue â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     confluenceOutcomesQueue = new Queue(QUEUE_CONFLUENCE_OUTCOMES, { connection: makeConnection() });
     confluenceOutcomesWorker = new Worker(
       QUEUE_CONFLUENCE_OUTCOMES,
@@ -1093,7 +1169,7 @@ export async function initQueues(): Promise<boolean> {
     return true;
   } catch (err: any) {
     console.warn = _origWarn;
-    console.warn('[QUEUE] BullMQ unavailable (Redis down?) — falling back to setInterval:', err.message);
+    console.warn('[QUEUE] BullMQ unavailable (Redis down?) â€” falling back to setInterval:', err.message);
     stockRefreshQueue = null;
     aiSignalsQueue    = null;
     stockScoringQueue = null;
@@ -1102,7 +1178,7 @@ export async function initQueues(): Promise<boolean> {
   }
 }
 
-// ─── Graceful shutdown ────────────────────────────────────────────────────────
+// â”€â”€â”€ Graceful shutdown â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export async function shutdownQueues(): Promise<void> {
   await Promise.allSettled([
@@ -1157,7 +1233,7 @@ export async function shutdownQueues(): Promise<void> {
   ]);
 }
 
-// ─── Enqueue AI-signals for an array of stocks ───────────────────────────────
+// â”€â”€â”€ Enqueue AI-signals for an array of stocks â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export interface EnqueueResult {
   queued: number;
@@ -1202,7 +1278,7 @@ export async function enqueueAISignals(
   };
 }
 
-// ─── Queue stats ──────────────────────────────────────────────────────────────
+// â”€â”€â”€ Queue stats â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export interface QueueStats {
   waiting:  number;
@@ -1233,3 +1309,4 @@ export async function getAIQueueStats(): Promise<QueueStats> {
     available: true,
   };
 }
+
