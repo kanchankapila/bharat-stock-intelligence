@@ -1,3 +1,4 @@
+from pathlib import Path
 """
 Online / Incremental Learning Engine
 ========================================
@@ -25,7 +26,7 @@ warnings.filterwarnings('ignore')
 import numpy as np
 import pandas as pd
 
-DB_PATH        = os.path.join(os.getcwd(), 'database.sqlite')
+DB_PATH      = Path(__file__).parent.parent.parent / "database.sqlite"
 MODELS_DIR     = os.path.join(os.getcwd(), 'src', 'server', 'ml_models')
 ONLINE_PATH    = os.path.join(MODELS_DIR, 'online_sgd.pkl')
 ENSEMBLE_PATH  = os.path.join(MODELS_DIR, 'ensemble.pkl')

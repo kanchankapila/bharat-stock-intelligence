@@ -1,3 +1,4 @@
+from pathlib import Path
 import sqlite3
 import json
 import os
@@ -9,7 +10,7 @@ from nlp_engine import NLPScreenerInference, NLP_VERSION
 from typing import Dict, Any, List
 
 # Configuration
-DB_PATH = os.path.join(os.getcwd(), 'database.sqlite')
+DB_PATH      = Path(__file__).parent.parent.parent / "database.sqlite"
 DATABASE_URL = f"sqlite:///{DB_PATH}"
 
 # ETnow screeners (mirrors router.ts getMarketScanners — hardcoded because

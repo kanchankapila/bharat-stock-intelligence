@@ -1,3 +1,4 @@
+from pathlib import Path
 """
 Performance Feedback Engine
 ==============================
@@ -28,8 +29,7 @@ import numpy as np
 import pandas as pd
 from scipy.stats import spearmanr
 
-DB_PATH = os.path.join(os.getcwd(), 'database.sqlite')
-
+DB_PATH      = Path(__file__).parent.parent.parent / "database.sqlite"
 # WIN threshold: > +1% within horizon = WIN, < -1% = LOSS, else NEUTRAL
 WIN_THRESHOLD  =  1.0
 LOSS_THRESHOLD = -1.0
@@ -323,6 +323,7 @@ class PerformanceTracker:
     def resolve_recommendations(self):
         """Update recommendation_log rows that have a matching signal_outcomes entry."""
         cur = self.conn.cursor()
+        # Join on best-matching horizon: prefer exact match, fall back to any resolved outcome
         cur.execute("""
             UPDATE recommendation_log
             SET
@@ -330,22 +331,22 @@ class PerformanceTracker:
                     SELECT so.exit_price FROM signal_outcomes so
                     WHERE so.symbol = recommendation_log.symbol
                       AND so.signal_date = recommendation_log.signal_date
-                      AND so.horizon_days = recommendation_log.horizon_days
-                    ORDER BY so.computed_at DESC LIMIT 1
+                      AND so.outcome NOT IN ('PENDING')
+                    ORDER BY so.horizon_days ASC, so.computed_at DESC LIMIT 1
                 ),
                 actual_return_pct = (
                     SELECT so.return_pct FROM signal_outcomes so
                     WHERE so.symbol = recommendation_log.symbol
                       AND so.signal_date = recommendation_log.signal_date
-                      AND so.horizon_days = recommendation_log.horizon_days
-                    ORDER BY so.computed_at DESC LIMIT 1
+                      AND so.outcome NOT IN ('PENDING')
+                    ORDER BY so.horizon_days ASC, so.computed_at DESC LIMIT 1
                 ),
                 outcome = (
                     SELECT so.outcome FROM signal_outcomes so
                     WHERE so.symbol = recommendation_log.symbol
                       AND so.signal_date = recommendation_log.signal_date
-                      AND so.horizon_days = recommendation_log.horizon_days
-                    ORDER BY so.computed_at DESC LIMIT 1
+                      AND so.outcome NOT IN ('PENDING')
+                    ORDER BY so.horizon_days ASC, so.computed_at DESC LIMIT 1
                 ),
                 status = 'RESOLVED',
                 resolved_at = CURRENT_TIMESTAMP
@@ -354,7 +355,7 @@ class PerformanceTracker:
                 SELECT 1 FROM signal_outcomes so
                 WHERE so.symbol = recommendation_log.symbol
                   AND so.signal_date = recommendation_log.signal_date
-                  AND so.outcome != 'PENDING'
+                  AND so.outcome NOT IN ('PENDING')
               )
         """)
         updated = cur.rowcount

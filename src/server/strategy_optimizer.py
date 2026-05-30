@@ -1,3 +1,4 @@
+from pathlib import Path
 """
 Strategy Weight Optimizer
 ===========================
@@ -28,8 +29,7 @@ warnings.filterwarnings('ignore')
 import numpy as np
 import pandas as pd
 
-DB_PATH = os.path.join(os.getcwd(), os.environ.get('DATABASE_URL', 'database.sqlite'))
-
+DB_PATH      = Path(__file__).parent.parent.parent / "database.sqlite"
 # Default weights — mirrors scoring_engine.py defaults
 DEFAULT_CATEGORY_WEIGHTS = {
     'fundamental': 1.0,

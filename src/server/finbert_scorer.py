@@ -1,3 +1,4 @@
+from pathlib import Path
 """
 FinBERT News Sentiment Scorer
 ================================
@@ -19,8 +20,7 @@ import argparse
 import math
 import sqlite3
 
-DB_PATH = os.path.join(os.getcwd(), 'database.sqlite')
-
+DB_PATH      = Path(__file__).parent.parent.parent / "database.sqlite"
 MODEL_NAME = "ProsusAI/finbert"
 BATCH_SIZE = 16
 MAX_LENGTH = 512   # FinBERT max tokens

@@ -1,3 +1,4 @@
+from pathlib import Path
 """
 FII/DII Daily Flow Fetcher
 ===========================
@@ -16,7 +17,7 @@ import requests
 import pandas as pd
 from sqlalchemy import create_engine, text
 
-DB_PATH      = os.path.join(os.getcwd(), 'database.sqlite')
+DB_PATH      = Path(__file__).parent.parent.parent / "database.sqlite"
 DATABASE_URL = f"sqlite:///{DB_PATH}"
 
 NSE_FII_DII_URL = "https://www.nseindia.com/api/fiidiiTradeReact"
@@ -78,6 +79,11 @@ class FiiDiiFetcher:
                     fii_net = fii_buy - fii_sell
                 if dii_net is None and dii_buy is not None and dii_sell is not None:
                     dii_net = dii_buy - dii_sell
+
+                # Skip rows where all financial values are null (non-trading days / placeholders)
+                if all(v is None for v in (fii_buy, fii_sell, fii_net, dii_buy, dii_sell, dii_net)):
+                    print(f"[FiiDii] Skipping {date_str} — all values null (non-trading day)")
+                    continue
 
                 records.append({
                     "date":     date_str,

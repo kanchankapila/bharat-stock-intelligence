@@ -1,3 +1,4 @@
+from pathlib import Path
 """
 RL Meta-Controller (Tabular Q-Learning)
 ========================================
@@ -19,8 +20,7 @@ then get_multipliers(action) to get per-signal-type score multipliers.
 import os, sqlite3, datetime, argparse, random
 from typing import Optional
 
-DB_PATH   = os.path.join(os.getcwd(), 'database.sqlite')
-
+DB_PATH      = Path(__file__).parent.parent.parent / "database.sqlite"
 ALPHA        = 0.10
 GAMMA        = 0.85
 EPSILON_INIT = 0.30

@@ -230,11 +230,132 @@ def fetch_and_store(conn, symbols: list, batch_size: int = 50):
     else:
         print("\n[OK] All symbols backfilled successfully!")
 
+INDEX_TICKERS = {
+    "NIFTY50": "^NSEI",
+}
+
+
+def fetch_indices(conn) -> None:
+    """Backfill index OHLCV data — not in nse_stocks, fetched separately."""
+    import pandas as pd
+
+    for label, ticker in INDEX_TICKERS.items():
+        try:
+            df = yf.download(ticker, period="2y", progress=False, auto_adjust=True)
+            if df is None or df.empty:
+                print(f"[BACKFILL] No data for index {ticker}")
+                continue
+
+            if isinstance(df.columns, pd.MultiIndex):
+                df.columns = df.columns.get_level_values(0)
+
+            recs = _extract_records(label, df)
+            if recs:
+                _upsert(conn, recs)
+                print(f"[BACKFILL] {label}: {len(recs)} rows upserted into stock_ohlcv")
+            else:
+                print(f"[BACKFILL] {label}: no valid rows extracted")
+        except Exception as e:
+            print(f"[BACKFILL] ERROR {label}: {e}")
+
+
+def gap_fill(conn, lookback_days: int = 30) -> None:
+    """Fetch only missing trading days for symbols already in stock_ohlcv."""
+    import pandas as pd
+    from datetime import datetime, timedelta
+
+    cutoff = (datetime.today() - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
+    symbols = [r[0] for r in conn.execute(
+        "SELECT DISTINCT symbol FROM stock_ohlcv"
+    ).fetchall()]
+
+    if not symbols:
+        print("[GAP-FILL] No symbols in stock_ohlcv yet — run full backfill first")
+        return
+
+    print(f"[GAP-FILL] Checking {len(symbols)} symbols for gaps since {cutoff}...")
+    total_filled = 0
+
+    for i in range(0, len(symbols), 50):
+        batch = symbols[i:i + 50]
+        tickers = [f"{YAHOO_SYMBOL_MAP.get(s, s)}.NS" if s not in INDEX_TICKERS else INDEX_TICKERS.get(s, s)
+                   for s in batch]
+
+        existing = {}
+        for sym in batch:
+            rows = conn.execute(
+                "SELECT date FROM stock_ohlcv WHERE symbol=? AND date>=? ORDER BY date",
+                (sym, cutoff),
+            ).fetchall()
+            existing[sym] = {r[0] for r in rows}
+
+        for symbol, ticker in zip(batch, tickers):
+            try:
+                df = yf.download(ticker, start=cutoff, progress=False, auto_adjust=True)
+                if df is None or df.empty:
+                    continue
+                if isinstance(df.columns, pd.MultiIndex):
+                    df.columns = df.columns.get_level_values(0)
+                recs = _extract_records(symbol, df)
+                new_recs = [r for r in recs if r[1] not in existing[symbol]]
+                if new_recs:
+                    _upsert(conn, new_recs)
+                    total_filled += len(new_recs)
+            except Exception as e:
+                tqdm.write(f"[GAP-FILL] ERROR {symbol}: {e}")
+
+        time.sleep(0.5)
+
+    # Also gap-fill indices
+    for label, ticker in INDEX_TICKERS.items():
+        try:
+            existing = {r[0] for r in conn.execute(
+                "SELECT date FROM stock_ohlcv WHERE symbol=? AND date>=?", (label, cutoff)
+            ).fetchall()}
+            df = yf.download(ticker, start=cutoff, progress=False, auto_adjust=True)
+            if df is not None and not df.empty:
+                if isinstance(df.columns, pd.MultiIndex):
+                    df.columns = df.columns.get_level_values(0)
+                recs = _extract_records(label, df)
+                new_recs = [r for r in recs if r[1] not in existing]
+                if new_recs:
+                    _upsert(conn, new_recs)
+                    total_filled += len(new_recs)
+        except Exception as e:
+            print(f"[GAP-FILL] ERROR index {label}: {e}")
+
+    print(f"[GAP-FILL] Done — {total_filled} missing rows filled")
+
+
 if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--mode",
+        choices=["full", "gap-fill", "indices"],
+        default="full",
+        help="full=backfill all NSE stocks (1y), gap-fill=fill missing recent days, indices=indices only",
+    )
+    parser.add_argument("--lookback", type=int, default=30,
+                        help="Days to look back in gap-fill mode (default 30)")
+    args = parser.parse_args()
+
     with sqlite3.connect(DB_PATH) as conn:
         init_db(conn)
-        symbols = get_all_nse_symbols(conn)
-        if symbols:
-            print(f"Found {len(symbols)} active NSE stocks to backfill…")
-            fetch_and_store(conn, symbols)
+
+        if args.mode == "full":
+            symbols = get_all_nse_symbols(conn)
+            if symbols:
+                print(f"Found {len(symbols)} active NSE stocks to backfill…")
+                fetch_and_store(conn, symbols)
+            fetch_indices(conn)
+            print("Done.")
+
+        elif args.mode == "indices":
+            fetch_indices(conn)
+            print("Done.")
+
+        elif args.mode == "gap-fill":
+            gap_fill(conn, lookback_days=args.lookback)
             print("Done.")

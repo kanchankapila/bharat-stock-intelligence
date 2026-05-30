@@ -1,3 +1,4 @@
+from pathlib import Path
 """
 ML Signal Confidence Scorer
 ================================
@@ -32,7 +33,7 @@ import pickle
 import numpy as np
 import pandas as pd
 
-DB_PATH    = os.path.join(os.getcwd(), 'database.sqlite')
+DB_PATH      = Path(__file__).parent.parent.parent / "database.sqlite"
 MODEL_PATH = os.path.join(os.getcwd(), 'src', 'server', 'ml_signal_model.pkl')
 
 REGIME_MAP   = {'BULL': 1.0, 'SIDEWAYS': 0.0, 'BEAR': -1.0}

@@ -1,3 +1,4 @@
+from pathlib import Path
 """
 ML Ensemble Signal Confidence Scorer
 ======================================
@@ -37,7 +38,7 @@ warnings.filterwarnings('ignore')
 import numpy as np
 import pandas as pd
 
-DB_PATH     = os.path.join(os.getcwd(), 'database.sqlite')
+DB_PATH      = Path(__file__).parent.parent.parent / "database.sqlite"
 MODELS_DIR  = os.path.join(os.getcwd(), 'src', 'server', 'ml_models')
 ENSEMBLE_PATH = os.path.join(MODELS_DIR, 'ensemble.pkl')
 
@@ -238,19 +239,16 @@ def train_ensemble(X: pd.DataFrame, y: pd.Series, min_samples: int = 30):
     acc = ((meta_oof_proba > 0.5) == y).mean()
     print(f"[Ensemble]   Stacking OOF AUC={auc:.4f}  Accuracy={acc:.4f}")
 
-    # Feature importances from GB (unwrapped)
+    # Feature importances from GB — unwrap CalibratedClassifierCV to get the fitted estimator
+    imp = None
     try:
-        from sklearn.calibration import CalibratedClassifierCV as CCV
-        gb_model = fitted[0][1]
-        if hasattr(gb_model, 'base_estimator'):
-            raw = gb_model.base_estimator
-        elif hasattr(gb_model, 'estimator'):
-            raw = gb_model.estimator
-        else:
-            raw = gb_model
-        imp = getattr(raw, 'feature_importances_', None)
+        gb_cal = fitted[0][1]  # CalibratedClassifierCV for GB
+        # calibrated_classifiers_ holds (fitted_base, calibrator) pairs from each CV fold
+        if hasattr(gb_cal, 'calibrated_classifiers_') and gb_cal.calibrated_classifiers_:
+            inner = gb_cal.calibrated_classifiers_[0].estimator
+            imp = getattr(inner, 'feature_importances_', None)
     except Exception:
-        imp = None
+        pass
 
     return {
         'base_models': fitted,

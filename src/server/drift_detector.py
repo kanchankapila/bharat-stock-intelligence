@@ -15,7 +15,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-DB_PATH = Path(__file__).parent.parent.parent / "stock_intelligence.db"
+DB_PATH = Path(__file__).parent.parent.parent / "database.sqlite"
 
 PSI_WARN    = 0.20
 PSI_CRIT    = 0.25

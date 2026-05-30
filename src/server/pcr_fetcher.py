@@ -1,3 +1,4 @@
+from pathlib import Path
 """
 PCR (Put-Call Ratio) Fetcher
 ==============================
@@ -19,7 +20,7 @@ import requests
 import pandas as pd
 from sqlalchemy import create_engine, text
 
-DB_PATH      = os.path.join(os.getcwd(), 'database.sqlite')
+DB_PATH      = Path(__file__).parent.parent.parent / "database.sqlite"
 DATABASE_URL = f"sqlite:///{DB_PATH}"
 
 NSE_OPTION_CHAIN_URL = "https://www.nseindia.com/api/option-chain-equities?symbol={symbol}"

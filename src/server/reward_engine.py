@@ -1,3 +1,4 @@
+from pathlib import Path
 """
 Reward Engine
 =============
@@ -23,8 +24,7 @@ Run:  python reward_engine.py
 import os, json, sqlite3, datetime, argparse
 from typing import Optional
 
-DB_PATH = os.path.join(os.getcwd(), 'database.sqlite')
-
+DB_PATH      = Path(__file__).parent.parent.parent / "database.sqlite"
 EMA_ALPHA   = 0.15
 WEIGHT_MIN  = 0.3
 WEIGHT_MAX  = 2.0

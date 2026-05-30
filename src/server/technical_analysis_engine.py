@@ -1,3 +1,4 @@
+from pathlib import Path
 import pandas as pd
 import sqlite3
 import os
@@ -10,7 +11,7 @@ from ta.volatility import BollingerBands
 import numpy as np
 
 # Configuration
-DB_PATH = os.path.join(os.getcwd(), 'database.sqlite')
+DB_PATH      = Path(__file__).parent.parent.parent / "database.sqlite"
 DATABASE_URL = f"sqlite:///{DB_PATH}"
 
 class TechnicalAnalysisEngine:

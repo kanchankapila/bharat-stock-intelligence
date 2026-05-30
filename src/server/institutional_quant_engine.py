@@ -1,3 +1,4 @@
+from pathlib import Path
 """
 Institutional Quant Engine v2
 ==============================
@@ -21,7 +22,7 @@ import numpy as np
 import pandas as pd
 from sqlalchemy import create_engine, text
 
-DB_PATH      = os.path.join(os.getcwd(), 'database.sqlite')
+DB_PATH      = Path(__file__).parent.parent.parent / "database.sqlite"
 DATABASE_URL = f"sqlite:///{DB_PATH}"
 RISK_FREE    = 0.07   # 7% p.a. — Indian 10Y Gsec proxy
 

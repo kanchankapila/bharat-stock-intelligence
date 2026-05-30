@@ -18,7 +18,7 @@ import pandas as pd
 from hmmlearn import hmm
 from sklearn.preprocessing import StandardScaler
 
-DB_PATH    = Path(__file__).parent.parent.parent / "stock_intelligence.db"
+DB_PATH    = Path(__file__).parent.parent.parent / "database.sqlite"
 MODEL_DIR  = Path(__file__).parent / "ml_models"
 HMM_PATH   = MODEL_DIR / "hmm_regime.pkl"
 N_STATES   = 5
@@ -50,22 +50,28 @@ def _load_hmm_features(con: sqlite3.Connection, lookback_days: int = 756) -> pd.
     )
     df["nifty_vix"] = vix["close"].reindex(df.index, method="ffill")
 
-    # FII 5d net normalized
+    # FII 5d net normalized (sparse — fill 0 when no data)
     fii = pd.read_sql(
         "SELECT date, fii_net FROM fii_dii_flow WHERE date>=? ORDER BY date",
         con, params=(cutoff,), parse_dates=["date"], index_col="date",
     )
-    fii5 = fii["fii_net"].rolling(5).sum()
-    df["fii_5d_net_norm"] = (fii5 - fii5.mean()) / (fii5.std() + 1e-9)
-    df["fii_5d_net_norm"] = df["fii_5d_net_norm"].reindex(df.index, method="ffill")
+    if not fii.empty:
+        fii5 = fii["fii_net"].rolling(5, min_periods=1).sum()
+        fii_series = (fii5 - fii5.mean()) / (fii5.std() + 1e-9)
+        df["fii_5d_net_norm"] = fii_series.reindex(df.index, method="ffill").fillna(0.0)
+    else:
+        df["fii_5d_net_norm"] = 0.0
 
-    # Advance/decline ratio from market_sentiment_snapshots
+    # Advance/decline ratio from market_sentiment_snapshots (group by date to avoid duplicates)
     ad = pd.read_sql(
-        "SELECT DATE(snapshot_at) as date, overall_score FROM market_sentiment_snapshots "
-        "WHERE snapshot_at>=? ORDER BY snapshot_at",
+        "SELECT DATE(snapshot_at) as date, AVG(overall_score) as overall_score FROM market_sentiment_snapshots "
+        "WHERE snapshot_at>=? GROUP BY DATE(snapshot_at) ORDER BY date",
         con, params=(cutoff,), parse_dates=["date"], index_col="date",
     )
-    df["advance_decline_ratio"] = ad["overall_score"].reindex(df.index, method="ffill")
+    if not ad.empty:
+        df["advance_decline_ratio"] = ad["overall_score"].reindex(df.index, method="ffill").fillna(50.0)
+    else:
+        df["advance_decline_ratio"] = 50.0
 
     # Global macro from macro_asset_prices
     for sym, col in [("US10Y", "us10y_chg5d"), ("DXY", "dxy_ret_5d"), ("SP500", "sp500_ret_5d")]:
@@ -73,9 +79,10 @@ def _load_hmm_features(con: sqlite3.Connection, lookback_days: int = 756) -> pd.
             "SELECT date, ret_5d FROM macro_asset_prices WHERE symbol=? AND date>=? ORDER BY date",
             con, params=(sym, cutoff), parse_dates=["date"], index_col="date",
         )
-        df[col] = macro["ret_5d"].reindex(df.index, method="ffill")
+        df[col] = macro["ret_5d"].reindex(df.index, method="ffill").fillna(0.0)
 
-    return df.dropna()
+    # Drop only rows where core Nifty features are NaN (rolling window warmup)
+    return df.dropna(subset=["nifty_ret_21d", "nifty_vol_21d"])
 
 
 def train_hmm(lookback_days: int = 1260) -> dict:

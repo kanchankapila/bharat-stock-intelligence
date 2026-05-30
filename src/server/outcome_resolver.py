@@ -1,3 +1,4 @@
+from pathlib import Path
 """
 Outcome Resolver
 ================
@@ -11,8 +12,7 @@ Run:  python outcome_resolver.py
 
 import os, sqlite3, datetime, argparse
 
-DB_PATH = os.path.join(os.getcwd(), 'database.sqlite')
-
+DB_PATH      = Path(__file__).parent.parent.parent / "database.sqlite"
 WIN_THRESHOLD  =  1.0   # > +1% = WIN
 LOSS_THRESHOLD = -1.0   # < -1% = LOSS
 

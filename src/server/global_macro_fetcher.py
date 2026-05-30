@@ -9,7 +9,7 @@ from pathlib import Path
 import yfinance as yf
 import pandas as pd
 
-DB_PATH = Path(__file__).parent.parent.parent / "stock_intelligence.db"
+DB_PATH = Path(__file__).parent.parent.parent / "database.sqlite"
 
 TICKERS = {
     "^TNX":      "US10Y",
@@ -18,7 +18,12 @@ TICKERS = {
     "GC=F":      "GOLD",
     "^GSPC":     "SP500",
     "^NSEBANK":  "NSEBANK",
+    "^NSEI":     "NIFTY50",
 }
+
+# Labels that feature_engineering reads from stock_ohlcv (not just macro_asset_prices)
+OHLCV_WRITE_LABELS = {"NIFTY50"}
+
 
 def fetch_macro(days: int = 30) -> None:
     end = datetime.today()
@@ -35,14 +40,21 @@ def fetch_macro(days: int = 30) -> None:
                 print(f"[MACRO] No data for {ticker}")
                 continue
 
-            df = df[["Close"]].copy()
-            df.index = pd.to_datetime(df.index)
-            df["ret_1d"] = df["Close"].pct_change(1)
-            df["ret_5d"] = df["Close"].pct_change(5)
+            # Flatten MultiIndex columns if present (yfinance >= 0.2 single-ticker quirk)
+            if isinstance(df.columns, pd.MultiIndex):
+                df.columns = df.columns.get_level_values(0)
 
-            rows = []
-            for date, row in df.iterrows():
-                rows.append((
+            df.index = pd.to_datetime(df.index)
+
+            # ── Write to macro_asset_prices ──────────────────────────────────
+            close_col = "Close" if "Close" in df.columns else df.columns[0]
+            df_macro = df[[close_col]].copy().rename(columns={close_col: "Close"})
+            df_macro["ret_1d"] = df_macro["Close"].pct_change(1)
+            df_macro["ret_5d"] = df_macro["Close"].pct_change(5)
+
+            macro_rows = []
+            for date, row in df_macro.iterrows():
+                macro_rows.append((
                     date.strftime("%Y-%m-%d"),
                     label,
                     float(row["Close"]) if pd.notna(row["Close"]) else None,
@@ -55,10 +67,40 @@ def fetch_macro(days: int = 30) -> None:
                 """INSERT OR REPLACE INTO macro_asset_prices
                    (date, symbol, close, ret_1d, ret_5d, fetched_at)
                    VALUES (?, ?, ?, ?, ?, ?)""",
-                rows,
+                macro_rows,
             )
             con.commit()
-            print(f"[MACRO] {label}: {len(rows)} rows upserted")
+            print(f"[MACRO] {label}: {len(macro_rows)} rows upserted")
+
+            # ── Also write to stock_ohlcv for index symbols ──────────────────
+            # feature_engineering.py reads NIFTY50 from stock_ohlcv for nifty_ret_5d/21d
+            if label in OHLCV_WRITE_LABELS:
+                has_ohlc = all(c in df.columns for c in ["Open", "High", "Low", "Close"])
+                ohlcv_rows = []
+                for date, row in df.iterrows():
+                    close_val = float(row["Close"]) if pd.notna(row.get("Close")) else None
+                    if close_val is None:
+                        continue
+                    ohlcv_rows.append((
+                        label,
+                        date.strftime("%Y-%m-%d"),
+                        float(row["Open"])  if has_ohlc and pd.notna(row["Open"])  else close_val,
+                        float(row["High"])  if has_ohlc and pd.notna(row["High"])  else close_val,
+                        float(row["Low"])   if has_ohlc and pd.notna(row["Low"])   else close_val,
+                        close_val,
+                        int(row["Volume"]) if "Volume" in df.columns and pd.notna(row.get("Volume")) else 0,
+                    ))
+
+                if ohlcv_rows:
+                    cur.executemany(
+                        """INSERT OR REPLACE INTO stock_ohlcv
+                           (symbol, date, open, high, low, close, volume)
+                           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                        ohlcv_rows,
+                    )
+                    con.commit()
+                    print(f"[MACRO] {label}: {len(ohlcv_rows)} rows written to stock_ohlcv")
+
         except Exception as e:
             print(f"[MACRO] ERROR {ticker}: {e}")
 
