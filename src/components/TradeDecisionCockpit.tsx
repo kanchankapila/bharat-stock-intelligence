@@ -1,235 +1,292 @@
 import React, { useState } from 'react';
 import { trpc } from '../lib/trpc';
 import {
-  ShieldCheck, AlertTriangle, Play, Sparkles, BrainCircuit,
-  CircleDollarSign, TrendingUp, HelpCircle, Activity,
-  ChevronRight, BarChart2, CheckSquare, Coins, ArrowRight
+  Activity, TrendingUp, TrendingDown, ChevronRight, RefreshCw,
+  BarChart2, BrainCircuit, Sparkles, AlertTriangle, ShieldCheck,
+  ArrowRight, ArrowUpRight, ArrowDownRight
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 
+const fmt = (n: number | null | undefined, dec = 2) =>
+  n == null ? '—' : n.toLocaleString('en-IN', { minimumFractionDigits: dec, maximumFractionDigits: dec });
+
+const pctColor = (v: number | null | undefined) =>
+  v == null ? 'text-slate-400' : v >= 0 ? 'text-emerald-400' : 'text-rose-400';
+
+const sign = (v: number | null | undefined) =>
+  v == null ? '' : v >= 0 ? '+' : '';
+
 export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) => void }> = ({ onSelectStock }) => {
-  const { data: cockpitRes, isLoading, refetch } = trpc.getTradeDecisionCockpitData.useQuery(undefined, {
-    refetchInterval: 30000
-  });
+  const [rightPanel, setRightPanel] = useState<'context' | 'detail'>('context');
+  const [selectedCand, setSelectedCand] = useState<any>(null);
 
-  const [selectedCandidate, setSelectedCandidate] = useState<any>(null);
-  const [activeDetailTab, setActiveDetailTab] = useState<'audit' | 'tech' | 'thesis'>('audit');
+  const { data: cockpitRes, isLoading: cockpitLoading, refetch } =
+    trpc.getTradeDecisionCockpitData.useQuery(undefined, { refetchInterval: 60000 });
 
-  if (isLoading) {
+  const { data: overviewRes } =
+    trpc.getMarketOverview.useQuery(undefined, { refetchInterval: 30000 });
+
+  const { data: adRes } =
+    trpc.getAdvanceDecline.useQuery(undefined, { refetchInterval: 60000 });
+
+  const { data: sectorRes } =
+    trpc.getSectorPerformance.useQuery(undefined, { refetchInterval: 300000 });
+
+  const { data: moversRes } =
+    trpc.getTopMovers.useQuery(undefined, { refetchInterval: 60000 });
+
+  const { data: fiiRes } =
+    trpc.getFiiDiiFlow.useQuery(undefined, { refetchInterval: 300000 });
+
+  const { data: sentimentRes } =
+    trpc.getMarketSentiment.useQuery(undefined, { refetchInterval: 120000 });
+
+  const cockpitData = cockpitRes?.success ? cockpitRes.data : null;
+  const overview: any = cockpitData?.marketOverview || {};
+  const candidates: any[] = cockpitData?.candidates || [];
+
+  const isTradeActive = overview.verdict === 'TRADE';
+
+  // Market pulse data
+  const indices: any[] = (overviewRes as any)?.indices || (overviewRes as any)?.data || [];
+  const nifty    = indices.find((i: any) => /nifty\s*50/i.test(i.name) || i.symbol === 'NIFTY 50' || i.symbol === '^NSEI');
+  const bankNifty = indices.find((i: any) => /bank.?nifty/i.test(i.name) || i.symbol === 'NIFTY BANK');
+  const sensex   = indices.find((i: any) => /sensex/i.test(i.name) || i.symbol === 'BSE SENSEX');
+
+  const adData: any = adRes || {};
+  const advances = adData.advances ?? adData.advancing ?? null;
+  const declines = adData.declines ?? adData.declining ?? null;
+
+  const sectors: any[] = (sectorRes as any)?.sectors || (sectorRes as any)?.data || [];
+  const gainers: any[] = (moversRes as any)?.gainers || (moversRes as any)?.topGainers || [];
+  const losers:  any[] = (moversRes as any)?.losers  || (moversRes as any)?.topLosers  || [];
+  const fiiRows: any[] = (fiiRes   as any)?.data     || (fiiRes   as any)?.flows       || [];
+  const sentimentScore: number | null = (sentimentRes as any)?.score ?? (sentimentRes as any)?.overallScore ?? null;
+  const pcr: number | null = (sentimentRes as any)?.pcr ?? (sentimentRes as any)?.putCallRatio ?? null;
+
+  const selectCand = (c: any) => {
+    setSelectedCand(c);
+    setRightPanel('detail');
+  };
+
+  if (cockpitLoading) {
     return (
-      <div className="py-48 flex flex-col items-center justify-center space-y-6">
-        <div className="relative w-12 h-12">
-          <div className="absolute inset-0 border-2 border-indigo-500/20 rounded-full" />
-          <div className="absolute inset-0 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-        </div>
-        <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] animate-pulse">Running Unified Multi-Factor Quant Scans...</p>
+      <div className="py-48 flex flex-col items-center gap-4">
+        <div className="w-10 h-10 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest animate-pulse">Running Quant Scans…</p>
       </div>
     );
   }
 
-  const cockpitData = cockpitRes?.success ? cockpitRes.data : null;
-  const overview = cockpitData?.marketOverview || { verdict: 'NO TRADE', verdictReason: 'No signal data yet — run technical scans to populate.', advDecRatio: 1.0, avgWinProbability: 50.0, activeSignalsCount: 0 };
-  const candidates = cockpitData?.candidates || [];
-
-  if (!selectedCandidate && candidates.length > 0) {
-    setSelectedCandidate(candidates[0]);
-  }
-
-  const isTradeActive = overview.verdict === 'TRADE';
-
   return (
-    <div className="p-6 space-y-6 max-w-7xl mx-auto">
-      {/* Page Header */}
-      <div>
-        <h2 className="text-3xl font-black text-white italic tracking-tighter uppercase flex items-center gap-3">
-          <Sparkles className="w-8 h-8 text-indigo-400 animate-pulse" />
-          Bharat Quant Trade Cockpit
-        </h2>
-        <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mt-1 italic">
-          The ultimate multi-factor trade recommendation and execution cockpit
-        </p>
+    <div className="p-4 space-y-4 max-w-screen-2xl mx-auto">
+
+      {/* ── Market Pulse Strip ─────────────────────────────────────── */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+        {[
+          { label: 'Nifty 50',    v: nifty?.lastPrice    ?? nifty?.price,    chg: nifty?.change,    pct: nifty?.pChange    ?? nifty?.changePct },
+          { label: 'Bank Nifty',  v: bankNifty?.lastPrice ?? bankNifty?.price, chg: bankNifty?.change, pct: bankNifty?.pChange ?? bankNifty?.changePct },
+          { label: 'Sensex',      v: sensex?.lastPrice   ?? sensex?.price,   chg: sensex?.change,   pct: sensex?.pChange   ?? sensex?.changePct },
+          { label: 'Adv / Dec',   v: advances != null && declines != null ? `${advances}/${declines}` : null, pct: advances != null && declines != null ? (advances - declines) / Math.max(1, advances + declines) * 100 : null, plain: true },
+          { label: 'PCR',         v: pcr != null ? fmt(pcr, 2) : null, pct: pcr != null ? (pcr - 1) * 100 : null, plain: true },
+          { label: 'Sentiment',   v: sentimentScore != null ? `${sentimentScore > 0 ? '+' : ''}${fmt(sentimentScore, 1)}` : null, pct: sentimentScore, plain: true },
+        ].map((item, i) => (
+          <div key={i} className="bg-slate-900/60 border border-slate-800/50 rounded-xl px-3 py-2">
+            <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">{item.label}</p>
+            {item.v != null ? (
+              <>
+                <p className="text-sm font-black text-white tabular-nums mt-0.5">
+                  {item.plain ? item.v : `₹${fmt(item.v as number, 0)}`}
+                </p>
+                {item.pct != null && !item.plain && (
+                  <p className={cn('text-[10px] font-bold tabular-nums', pctColor(item.pct as number))}>
+                    {sign(item.pct as number)}{fmt(item.pct as number, 2)}%
+                  </p>
+                )}
+                {item.pct != null && item.plain && (
+                  <p className={cn('text-[10px] font-bold', pctColor(item.pct as number))}>
+                    {(item.pct as number) > 0 ? 'Bullish' : (item.pct as number) < 0 ? 'Bearish' : 'Neutral'}
+                  </p>
+                )}
+              </>
+            ) : (
+              <p className="text-sm font-black text-slate-600 mt-0.5">—</p>
+            )}
+          </div>
+        ))}
       </div>
 
-      {/* Global Trade Verdict Status Panel */}
+      {/* ── Verdict Banner ─────────────────────────────────────────── */}
       <div className={cn(
-        "p-6 rounded-3xl border transition-all flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6",
+        'flex items-center justify-between px-4 py-3 rounded-2xl border',
         isTradeActive
-          ? "bg-gradient-to-r from-emerald-950/40 to-teal-950/20 border-emerald-500/30 shadow-[0_0_30px_rgba(16,185,129,0.1)]"
-          : "bg-gradient-to-r from-amber-950/30 to-slate-900/40 border-amber-500/20 shadow-[0_0_30px_rgba(245,158,11,0.05)]"
+          ? 'bg-emerald-950/30 border-emerald-500/25 text-emerald-300'
+          : 'bg-amber-950/25 border-amber-500/20 text-amber-300'
       )}>
-        <div className="space-y-3 flex-1">
-          <div className="flex items-center gap-3">
-            <span className={cn(
-              "px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest border flex items-center gap-1.5",
-              isTradeActive
-                ? "bg-emerald-500/10 border-emerald-400/20 text-emerald-400"
-                : "bg-amber-500/10 border-amber-400/20 text-amber-400"
-            )}>
-              {isTradeActive ? <ShieldCheck className="w-3.5 h-3.5" /> : <AlertTriangle className="w-3.5 h-3.5" />}
-              {isTradeActive ? 'TRADE SIGNAL ACTIVE' : 'RISK-OFF NO-TRADE SYSTEM'}
+        <div className="flex items-center gap-3">
+          {isTradeActive
+            ? <ShieldCheck className="w-5 h-5 text-emerald-400 shrink-0" />
+            : <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0" />}
+          <div>
+            <span className="text-xs font-black uppercase tracking-wide">
+              {isTradeActive ? 'Trade Signal Active' : 'Risk-Off — No Trade'}
             </span>
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Live Market Scanner Status</span>
+            <p className="text-[10px] text-slate-400 font-medium mt-0.5">
+              {overview.verdictReason || 'Run technical scans from the Signals tab to populate candidates.'}
+            </p>
           </div>
-          <h3 className="text-2xl font-black text-white italic tracking-tight uppercase">
-            {isTradeActive ? '🔥 High Confluence Trade Regime Detected' : '🛡️ Capital Preservation Mode Enabled'}
-          </h3>
-          <p className="text-xs text-slate-400 leading-relaxed font-medium max-w-3xl">
-            {overview.verdictReason}
-          </p>
         </div>
-        <div className="shrink-0">
-          <button
-            onClick={() => refetch()}
-            className="px-6 py-4 glass border border-slate-800/50 hover:border-slate-800/30 hover:text-indigo-600 rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-300 transition-all flex items-center gap-2"
-          >
-            <Activity className="w-4 h-4 text-indigo-400 animate-pulse" />
-            Recalculate Factors
+        <div className="flex items-center gap-3 shrink-0">
+          <span className="text-[10px] font-bold text-slate-400 hidden sm:block">
+            {overview.activeSignalsCount ?? candidates.length} signals · A/D {overview.advDecRatio ?? '—'}x · Win {overview.avgWinProbability ?? '—'}%
+          </span>
+          <button onClick={() => refetch()}
+            className="p-2 bg-slate-800/60 hover:bg-slate-800 border border-slate-700/50 rounded-lg text-slate-400 transition-all">
+            <RefreshCw className="w-3.5 h-3.5" />
           </button>
         </div>
       </div>
 
-      {/* Overview Stat Widgets */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <div className="p-4 bg-slate-900/60 border border-slate-800/50 rounded-2xl flex items-center justify-between">
-          <div>
-            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Global Decision</p>
-            <p className={cn("text-xl font-black italic uppercase", isTradeActive ? "text-emerald-400" : "text-amber-400")}>
-              {isTradeActive ? 'Active Trade' : 'Risk Off'}
-            </p>
-            <p className="text-[9.5px] text-slate-400 font-bold uppercase mt-1">Regime Verdict</p>
-          </div>
-          <div className="p-3 bg-indigo-500/10 rounded-xl">
-            <Play className="w-4 h-4 text-indigo-400" />
-          </div>
-        </div>
+      {/* ── Main Grid ──────────────────────────────────────────────── */}
+      <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
 
-        <div className="p-4 bg-slate-900/60 border border-slate-800/50 rounded-2xl flex items-center justify-between">
-          <div>
-            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Adv / Dec Ratio</p>
-            <p className="text-xl font-black text-white italic">{overview.advDecRatio}x</p>
-            <p className={cn("text-[9.5px] font-black uppercase mt-1", overview.advDecRatio >= 1.0 ? "text-emerald-500" : "text-rose-500")}>
-              {overview.advDecRatio >= 1.0 ? 'Bulls in Control' : 'Bears Dominating'}
-            </p>
-          </div>
-          <div className="p-3 bg-blue-500/10 rounded-xl">
-            <BarChart2 className="w-4 h-4 text-blue-400" />
-          </div>
-        </div>
-
-        <div className="p-4 bg-slate-900/60 border border-slate-800/50 rounded-2xl flex items-center justify-between">
-          <div>
-            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Avg ML Win Prob</p>
-            <p className="text-xl font-black text-indigo-400 italic">{overview.avgWinProbability}%</p>
-            <p className="text-[9.5px] text-slate-400 font-bold uppercase mt-1">Ensemble Accuracy Edge</p>
-          </div>
-          <div className="p-3 bg-indigo-500/10 rounded-xl">
-            <BrainCircuit className="w-4 h-4 text-indigo-400" />
-          </div>
-        </div>
-
-        <div className="p-4 bg-slate-900/60 border border-slate-800/50 rounded-2xl flex items-center justify-between">
-          <div>
-            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Active Quant Signals</p>
-            <p className="text-xl font-black text-white italic">{overview.activeSignalsCount}</p>
-            <p className="text-[9.5px] text-slate-400 font-bold uppercase mt-1">Confluence Scans Run</p>
-          </div>
-          <div className="p-3 bg-pink-500/10 rounded-xl">
-            <CircleDollarSign className="w-4 h-4 text-pink-400" />
-          </div>
-        </div>
-      </div>
-
-      {candidates.length === 0 ? (
-        <div className="py-24 text-center bg-slate-950/20 border border-slate-800/80 rounded-3xl border-dashed flex flex-col justify-center items-center gap-4">
-          <HelpCircle className="w-10 h-10 text-slate-300" />
-          <div>
-            <p className="text-[11px] font-black text-slate-400 uppercase tracking-widest">No trade candidates yet</p>
-            <p className="text-[10px] text-slate-400 mt-1">Run technical signal scans from the Signals tab to populate candidates</p>
-          </div>
-        </div>
-      ) : (
-        /* Main candidates and Multi-Factor Detail Drawer */
-        <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
-          {/* Candidates panel */}
-          <div className="xl:col-span-8 glass-strong border border-slate-800/50 rounded-3xl overflow-hidden flex flex-col">
-            <div className="p-5 border-b border-slate-800/50 bg-slate-900/40 flex justify-between items-center">
-              <div>
-                <h3 className="text-xs font-black text-white uppercase tracking-wider">Bharat Confluence Trade Candidates</h3>
-                <p className="text-[9.5px] text-slate-400 font-bold uppercase mt-0.5">Scored by ML, Fundamentals, Technicals, & Smart Money Flows</p>
-              </div>
-              <span className="text-[9.5px] bg-slate-800 text-slate-300 font-bold px-2.5 py-1 rounded-md uppercase">Top {candidates.length}</span>
+        {/* Candidate Table — 8 cols */}
+        <div className="xl:col-span-8 bg-slate-900/40 border border-slate-800/50 rounded-2xl overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800/50">
+            <div>
+              <h3 className="text-xs font-black text-white uppercase tracking-wider">Trade Candidates</h3>
+              <p className="text-[9px] text-slate-500 font-bold uppercase mt-0.5">Ranked by composite quant score · click row for detail</p>
             </div>
+            <span className="text-[9px] bg-slate-800 text-slate-300 font-bold px-2 py-0.5 rounded uppercase">
+              Top {candidates.length}
+            </span>
+          </div>
 
+          {candidates.length === 0 ? (
+            <div className="py-16 text-center">
+              <Sparkles className="w-8 h-8 text-slate-700 mx-auto mb-2" />
+              <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">No candidates — run Signals scan first</p>
+            </div>
+          ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
+              <table className="w-full text-left">
                 <thead>
-                  <tr className="glass/25 border-b border-slate-800/50/60">
-                    <th className="px-5 py-4 text-[9.5px] font-black text-slate-400 uppercase tracking-widest">Asset</th>
-                    <th className="px-5 py-4 text-[9.5px] font-black text-slate-400 uppercase tracking-widest text-center">Advice</th>
-                    <th className="px-5 py-4 text-[9.5px] font-black text-slate-400 uppercase tracking-widest text-center">Quant Score</th>
-                    <th className="px-5 py-4 text-[9.5px] font-black text-slate-400 uppercase tracking-widest text-center">ML Win Prob</th>
-                    <th className="px-5 py-4 text-[9.5px] font-black text-slate-400 uppercase tracking-widest text-right">Details</th>
+                  <tr className="border-b border-slate-800/40">
+                    {['Stock / Sector', 'Price ₹', 'Chg%', 'RSI', 'MACD', 'Setup', 'Score', 'Entry / SL', 'Win%', ''].map((h, i) => (
+                      <th key={i} className={cn(
+                        'px-3 py-2.5 text-[9px] font-black text-slate-500 uppercase tracking-widest whitespace-nowrap',
+                        i > 1 && 'text-center'
+                      )}>{h}</th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/20">
-                  {candidates.map((cand: any) => {
-                    const isSelected = selectedCandidate?.symbol === cand.symbol;
+                  {candidates.map((c: any) => {
+                    const rsi = c.rsi ?? null;
+                    const macdBull = c.macd != null && c.macdSignal != null ? c.macd > c.macdSignal : null;
+                    const isSelected = selectedCand?.symbol === c.symbol;
                     return (
-                      <tr
-                        key={cand.symbol}
-                        onClick={() => setSelectedCandidate(cand)}
+                      <tr key={c.symbol}
+                        onClick={() => selectCand(c)}
                         className={cn(
-                          "hover:bg-slate-950/30 transition-colors cursor-pointer group",
-                          isSelected && "bg-indigo-500/5 hover:bg-indigo-500/10"
-                        )}
-                      >
-                        <td className="px-5 py-4">
-                          <div className="flex items-center gap-2">
-                            <span className={cn(
-                              "w-1.5 h-1.5 rounded-full",
-                              cand.changePct >= 0 ? "bg-emerald-500 animate-pulse" : "bg-rose-500"
-                            )} />
+                          'cursor-pointer hover:bg-slate-800/30 transition-colors',
+                          isSelected && 'bg-indigo-950/20'
+                        )}>
+
+                        {/* Stock + Sector */}
+                        <td className="px-3 py-3 min-w-[130px]">
+                          <div className="flex items-center gap-1.5">
+                            <span className={cn('w-1.5 h-1.5 rounded-full shrink-0',
+                              (c.changePct ?? 0) >= 0 ? 'bg-emerald-500' : 'bg-rose-500')} />
                             <div>
-                              <span className="text-xs font-black text-white group-hover:text-indigo-400 transition-colors uppercase">{cand.symbol}</span>
-                              <span className="block text-[9.5px] text-slate-400 font-semibold mt-0.5 max-w-[150px] truncate">{cand.name}</span>
+                              <p className="text-xs font-black text-white">{c.symbol}</p>
+                              <p className="text-[9px] text-slate-500 truncate max-w-[100px]">{c.sector || c.name || ''}</p>
                             </div>
                           </div>
                         </td>
-                        <td className="px-5 py-4 text-center">
-                          <span className={cn(
-                            "text-[9.5px] font-black px-2.5 py-1 rounded-md border",
-                            cand.actionAdvice === 'STRONG BUY'
-                              ? 'text-violet-400 bg-violet-400/5 border-violet-400/10'
-                              : cand.actionAdvice === 'BUY'
-                              ? 'text-emerald-400 bg-emerald-400/5 border-emerald-400/10'
-                              : 'text-slate-400 bg-slate-800/20 border-slate-800/30'
-                          )}>
-                            {cand.actionAdvice}
+
+                        {/* Price */}
+                        <td className="px-3 py-3 text-xs font-black text-white tabular-nums whitespace-nowrap">
+                          ₹{fmt(c.cmp ?? c.price, 1)}
+                        </td>
+
+                        {/* Change% */}
+                        <td className="px-3 py-3 text-center">
+                          <span className={cn('text-[10px] font-black tabular-nums', pctColor(c.changePct))}>
+                            {sign(c.changePct)}{fmt(c.changePct, 2)}%
                           </span>
                         </td>
-                        <td className="px-5 py-4 text-center">
-                          <div className="flex items-center justify-center gap-2">
-                            <span className="text-xs font-black text-white tabular-nums">{cand.compositeScore}</span>
-                            <div className="w-16 h-1.5 glass border border-slate-800/50 rounded-full overflow-hidden hidden md:block">
-                              <div
-                                className={cn(
-                                  "h-full rounded-full",
-                                  cand.compositeScore >= 75 ? "bg-violet-500" : cand.compositeScore >= 70 ? "bg-emerald-500" : "bg-slate-9000"
-                                )}
-                                style={{ width: `${cand.compositeScore}%` }}
-                              />
+
+                        {/* RSI */}
+                        <td className="px-3 py-3 text-center">
+                          {rsi != null ? (
+                            <span className={cn('text-[10px] font-black tabular-nums px-1.5 py-0.5 rounded',
+                              rsi >= 70 ? 'text-rose-400 bg-rose-950/30'
+                              : rsi <= 30 ? 'text-emerald-400 bg-emerald-950/30'
+                              : 'text-slate-300')}>
+                              {fmt(rsi, 1)}
+                              {rsi >= 70 ? ' OB' : rsi <= 30 ? ' OS' : ''}
+                            </span>
+                          ) : <span className="text-slate-600 text-[10px]">—</span>}
+                        </td>
+
+                        {/* MACD */}
+                        <td className="px-3 py-3 text-center">
+                          {macdBull != null ? (
+                            <span className={cn('text-[9px] font-black px-1.5 py-0.5 rounded border',
+                              macdBull
+                                ? 'text-emerald-400 bg-emerald-950/30 border-emerald-800/40'
+                                : 'text-rose-400 bg-rose-950/30 border-rose-800/40')}>
+                              {macdBull ? 'Bull' : 'Bear'}
+                            </span>
+                          ) : <span className="text-slate-600 text-[10px]">—</span>}
+                        </td>
+
+                        {/* Setup / Action Advice */}
+                        <td className="px-3 py-3 text-center">
+                          <span className={cn('text-[9px] font-black px-2 py-0.5 rounded border whitespace-nowrap',
+                            c.actionAdvice === 'STRONG BUY' ? 'text-violet-400 bg-violet-950/30 border-violet-800/40'
+                            : c.actionAdvice === 'BUY' ? 'text-emerald-400 bg-emerald-950/30 border-emerald-800/40'
+                            : 'text-slate-400 bg-slate-800/30 border-slate-700/40')}>
+                            {c.actionAdvice || 'WATCH'}
+                          </span>
+                        </td>
+
+                        {/* Score + mini bar */}
+                        <td className="px-3 py-3 text-center">
+                          <div className="flex flex-col items-center gap-1">
+                            <span className="text-xs font-black text-white tabular-nums">{c.compositeScore}</span>
+                            <div className="w-14 h-1 bg-slate-800 rounded-full overflow-hidden">
+                              <div className={cn('h-full rounded-full',
+                                c.compositeScore >= 75 ? 'bg-violet-500'
+                                : c.compositeScore >= 60 ? 'bg-emerald-500'
+                                : 'bg-amber-500')}
+                                style={{ width: `${Math.min(100, c.compositeScore)}%` }} />
                             </div>
                           </div>
                         </td>
-                        <td className="px-5 py-4 text-center text-xs font-black text-indigo-400 tabular-nums">
-                          {cand.mlProbability}%
+
+                        {/* Entry / SL */}
+                        <td className="px-3 py-3 text-center whitespace-nowrap">
+                          <p className="text-[10px] font-bold text-slate-300 tabular-nums">
+                            {c.entryPrice ? `₹${fmt(c.entryPrice, 1)}` : '—'}
+                          </p>
+                          <p className="text-[9px] font-bold text-rose-400 tabular-nums">
+                            {c.stopLoss ? `SL ₹${fmt(c.stopLoss, 1)}` : ''}
+                          </p>
                         </td>
-                        <td className="px-5 py-4 text-right">
+
+                        {/* Win% */}
+                        <td className="px-3 py-3 text-center text-xs font-black text-indigo-400 tabular-nums">
+                          {c.mlProbability != null ? `${c.mlProbability}%` : '—'}
+                        </td>
+
+                        {/* Open Full */}
+                        <td className="px-3 py-3 text-right">
                           <button
-                            onClick={(e) => { e.stopPropagation(); onSelectStock(cand.symbol); }}
-                            className="p-2 glass border border-slate-800/50 hover:border-slate-800/30 hover:text-indigo-600 rounded-xl text-slate-400 transition-all"
-                          >
-                            <ChevronRight className="w-3.5 h-3.5" />
+                            onClick={e => { e.stopPropagation(); onSelectStock(c.symbol); }}
+                            className="p-1.5 bg-slate-800/60 hover:bg-indigo-600/20 border border-slate-700/50 hover:border-indigo-500/40 rounded-lg text-slate-400 hover:text-indigo-400 transition-all">
+                            <ChevronRight className="w-3 h-3" />
                           </button>
                         </td>
                       </tr>
@@ -238,250 +295,340 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
                 </tbody>
               </table>
             </div>
+          )}
+        </div>
+
+        {/* Right Panel — 4 cols */}
+        <div className="xl:col-span-4 flex flex-col gap-3">
+          {/* Toggle tabs */}
+          <div className="flex gap-1 bg-slate-900/60 border border-slate-800/50 rounded-xl p-1">
+            {[
+              { id: 'context', label: 'Market Context', icon: BarChart2 },
+              { id: 'detail',  label: 'Candidate Detail', icon: BrainCircuit },
+            ].map(tab => (
+              <button key={tab.id}
+                onClick={() => setRightPanel(tab.id as any)}
+                className={cn(
+                  'flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all',
+                  rightPanel === tab.id
+                    ? 'bg-indigo-600/20 text-indigo-400 border border-indigo-500/30'
+                    : 'text-slate-500 hover:text-slate-300'
+                )}>
+                <tab.icon className="w-3 h-3" />
+                {tab.label}
+              </button>
+            ))}
           </div>
 
-          {/* Selected Candidate Detail */}
-          <div className="xl:col-span-4 space-y-6">
-            {selectedCandidate ? (
-              <div className="p-5 bg-slate-900/40 border border-slate-800/50 rounded-3xl space-y-6">
-                <div className="flex justify-between items-start border-b border-slate-800/50 pb-4">
-                  <div>
-                    <h3 className="text-lg font-black text-white italic uppercase">{selectedCandidate.symbol}</h3>
-                    <p className="text-[10px] text-slate-400 font-bold uppercase mt-0.5">{selectedCandidate.name}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Bharat Score</p>
-                    <span className="text-2xl font-black text-indigo-400 italic tabular-nums">{selectedCandidate.compositeScore}</span>
+          {/* Market Context panel */}
+          {rightPanel === 'context' && (
+            <div className="space-y-3">
+
+              {/* PCR + Sentiment */}
+              <div className="grid grid-cols-2 gap-2">
+                <div className="bg-slate-900/60 border border-slate-800/50 rounded-xl p-3">
+                  <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Put/Call Ratio</p>
+                  <p className={cn('text-lg font-black tabular-nums mt-0.5',
+                    pcr != null && pcr > 1.2 ? 'text-emerald-400'
+                    : pcr != null && pcr < 0.8 ? 'text-rose-400'
+                    : 'text-white')}>
+                    {pcr != null ? fmt(pcr, 2) : '—'}
+                  </p>
+                  <p className="text-[9px] text-slate-500 mt-0.5">
+                    {pcr == null ? '' : pcr > 1.2 ? 'Contrarian Bull' : pcr < 0.8 ? 'Contrarian Bear' : 'Neutral'}
+                  </p>
+                </div>
+                <div className="bg-slate-900/60 border border-slate-800/50 rounded-xl p-3">
+                  <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Sentiment</p>
+                  <p className={cn('text-lg font-black tabular-nums mt-0.5',
+                    sentimentScore != null && sentimentScore > 0 ? 'text-emerald-400'
+                    : sentimentScore != null && sentimentScore < 0 ? 'text-rose-400'
+                    : 'text-white')}>
+                    {sentimentScore != null ? `${sentimentScore > 0 ? '+' : ''}${fmt(sentimentScore, 2)}` : '—'}
+                  </p>
+                  <p className="text-[9px] text-slate-500 mt-0.5">
+                    {sentimentScore == null ? '' : sentimentScore > 0.3 ? 'Bullish' : sentimentScore < -0.3 ? 'Bearish' : 'Neutral'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Sector Performance */}
+              {sectors.length > 0 && (
+                <div className="bg-slate-900/60 border border-slate-800/50 rounded-xl p-3">
+                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1">
+                    <Activity className="w-3 h-3" /> Sector Performance
+                  </p>
+                  <div className="space-y-1.5">
+                    {sectors.slice(0, 7).map((s: any, i: number) => {
+                      const chg = s.change ?? s.changePct ?? s.pChange ?? 0;
+                      const pct = Math.abs(chg);
+                      return (
+                        <div key={i} className="flex items-center gap-2">
+                          <span className="text-[9px] text-slate-400 w-20 truncate shrink-0">{s.sector || s.name}</span>
+                          <div className="flex-1 h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                            <div
+                              className={cn('h-full rounded-full', chg >= 0 ? 'bg-emerald-500' : 'bg-rose-500')}
+                              style={{ width: `${Math.min(100, pct * 10)}%` }} />
+                          </div>
+                          <span className={cn('text-[9px] font-bold tabular-nums w-10 text-right', pctColor(chg))}>
+                            {sign(chg)}{fmt(chg, 1)}%
+                          </span>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
+              )}
 
-                {/* Tabs */}
-                <div className="flex gap-1 bg-slate-950/40 rounded-xl p-1">
-                  {[
-                    { id: 'audit',  label: 'Factor Audit', icon: ShieldCheck },
-                    { id: 'tech',   label: 'Technicals',   icon: Activity    },
-                    { id: 'thesis', label: 'Levels & AI',  icon: BrainCircuit},
-                  ].map(tab => (
-                    <button
-                      key={tab.id}
-                      onClick={() => setActiveDetailTab(tab.id as any)}
-                      className={cn(
-                        'flex-1 flex flex-col sm:flex-row items-center justify-center gap-1 py-1.5 px-2 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all',
-                        activeDetailTab === tab.id
-                          ? 'bg-indigo-600/20 text-indigo-400 border border-indigo-500/30'
-                          : 'text-slate-400 hover:text-slate-300'
-                      )}
-                    >
-                      <tab.icon className="w-3.5 h-3.5" />
-                      <span>{tab.label}</span>
-                    </button>
-                  ))}
+              {/* Top Movers */}
+              {(gainers.length > 0 || losers.length > 0) && (
+                <div className="bg-slate-900/60 border border-slate-800/50 rounded-xl p-3">
+                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1">
+                    <TrendingUp className="w-3 h-3" /> Top Movers
+                  </p>
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+                    {gainers.slice(0, 4).map((g: any, i: number) => (
+                      <div key={i} className="flex items-center justify-between">
+                        <span className="text-[9px] text-slate-300 font-bold truncate max-w-[55px]">{g.symbol}</span>
+                        <span className="text-[9px] font-black text-emerald-400 tabular-nums">
+                          +{fmt(g.pChange ?? g.changePct, 1)}%
+                        </span>
+                      </div>
+                    ))}
+                    {losers.slice(0, 4).map((l: any, i: number) => (
+                      <div key={i} className="flex items-center justify-between">
+                        <span className="text-[9px] text-slate-300 font-bold truncate max-w-[55px]">{l.symbol}</span>
+                        <span className="text-[9px] font-black text-rose-400 tabular-nums">
+                          {fmt(l.pChange ?? l.changePct, 1)}%
+                        </span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
+              )}
 
-                {activeDetailTab === 'audit' && (
-                  <>
-                    <div className="space-y-4">
-                      <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
-                        <Coins className="w-4 h-4 text-indigo-400" /> Quantitative Factor Analysis
-                      </h4>
-                      <div className="space-y-3.5">
-                        {[
-                          { label: '🤖 ML Model Win Probability', value: `${selectedCandidate.mlProbability}%`, pct: selectedCandidate.mlProbability, color: 'bg-indigo-500', textColor: 'text-indigo-400' },
-                          { label: '💎 Fundamental Composite Rank', value: `#${selectedCandidate.quantRank}`, pct: Math.max(0, 100 - selectedCandidate.quantRank), color: 'bg-amber-500', textColor: 'text-amber-500' },
-                          { label: '📈 Technical Bullish Setups', value: `${selectedCandidate.techSignalCount} signals`, pct: Math.min(100, selectedCandidate.techSignalCount * 25), color: 'bg-emerald-500', textColor: 'text-emerald-400' },
-                          { label: '💸 FII Smart Money Net', value: `₹${selectedCandidate.smartMoneyCr} Cr`, pct: Math.min(100, Math.max(0, 50 + selectedCandidate.smartMoneyCr * 5)), color: 'bg-pink-500', textColor: 'text-pink-500' },
-                          { label: '📰 News Sentiment Score', value: `${selectedCandidate.newsSentiment}`, pct: 50 + selectedCandidate.newsSentiment * 50, color: 'bg-blue-500', textColor: 'text-blue-400' },
-                        ].map((item, i) => (
-                          <div key={i}>
-                            <div className="flex justify-between text-[10px] font-black uppercase tracking-wider mb-1">
-                              <span className={item.textColor}>{item.label}</span>
-                              <span className="text-slate-100 font-bold">{item.value}</span>
-                            </div>
-                            <div className="w-full h-2 glass-strong border border-slate-800/50 rounded-full overflow-hidden">
-                              <div className={`h-full ${item.color} rounded-full`} style={{ width: `${item.pct}%` }} />
-                            </div>
-                          </div>
+              {/* FII/DII Flow */}
+              {fiiRows.length > 0 && (
+                <div className="bg-slate-900/60 border border-slate-800/50 rounded-xl p-3">
+                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider mb-2">FII / DII Flow (₹ Cr)</p>
+                  <table className="w-full">
+                    <thead>
+                      <tr>
+                        {['Date', 'FII Net', 'DII Net'].map(h => (
+                          <th key={h} className="text-[8.5px] font-bold text-slate-500 uppercase pb-1 text-right first:text-left">{h}</th>
                         ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {fiiRows.slice(0, 5).map((r: any, i: number) => {
+                        const fiiNet = r.fiiNet ?? r.fii_net ?? r.fiiNetPurchases ?? null;
+                        const diiNet = r.diiNet ?? r.dii_net ?? r.diiNetPurchases ?? null;
+                        return (
+                          <tr key={i} className="border-t border-slate-800/30">
+                            <td className="text-[9px] text-slate-400 py-1">{r.date ?? r.tradeDate ?? '—'}</td>
+                            <td className={cn('text-[9px] font-bold tabular-nums py-1 text-right', pctColor(fiiNet))}>
+                              {fiiNet != null ? `${sign(fiiNet)}${fmt(fiiNet, 0)}` : '—'}
+                            </td>
+                            <td className={cn('text-[9px] font-bold tabular-nums py-1 text-right', pctColor(diiNet))}>
+                              {diiNet != null ? `${sign(diiNet)}${fmt(diiNet, 0)}` : '—'}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Candidate Detail panel */}
+          {rightPanel === 'detail' && (
+            <div>
+              {!selectedCand ? (
+                <div className="py-16 bg-slate-900/40 border border-slate-800/50 rounded-xl text-center">
+                  <Sparkles className="w-7 h-7 text-slate-700 mx-auto mb-2" />
+                  <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                    Click a candidate to see detail
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {/* Header cards */}
+                  <div className="bg-slate-900/60 border border-slate-800/50 rounded-xl p-3">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <h4 className="text-base font-black text-white uppercase">{selectedCand.symbol}</h4>
+                        <p className="text-[9px] text-slate-500 font-bold">{selectedCand.sector || selectedCand.name}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-lg font-black text-white tabular-nums">
+                          ₹{fmt(selectedCand.cmp ?? selectedCand.price, 1)}
+                        </p>
+                        <p className={cn('text-[10px] font-black tabular-nums', pctColor(selectedCand.changePct))}>
+                          {sign(selectedCand.changePct)}{fmt(selectedCand.changePct, 2)}%
+                        </p>
                       </div>
                     </div>
-
-                    <div className="p-4 glass-strong border border-slate-800/80 rounded-2xl space-y-3">
-                      <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
-                        <CheckSquare className="w-4 h-4 text-emerald-400" /> Decision Execution Checklist
-                      </h4>
-                      <div className="space-y-2">
-                        {[
-                          { label: 'ML Win Probability exceeds 54.0% edge', val: selectedCandidate.mlProbability >= 54.0 },
-                          { label: 'Active bullish technical setups present', val: selectedCandidate.techSignalCount > 0 },
-                          { label: 'Top-quartile composite fundamental rank', val: selectedCandidate.quantRank <= 30 },
-                          { label: 'Positive average 7-day news sentiment', val: selectedCandidate.newsSentiment >= 0.0 },
-                          { label: 'Institutional FII/DII block deal support', val: selectedCandidate.smartMoneyCr >= 0 },
-                        ].map((chk, i) => (
-                          <div key={i} className="flex items-center gap-2 text-[10px] font-bold">
-                            <span className={cn(
-                              "w-4 h-4 rounded border flex items-center justify-center shrink-0",
-                              chk.val
-                                ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
-                                : "border-slate-800/50 glass text-slate-400"
-                            )}>
-                              {chk.val ? '✓' : '—'}
-                            </span>
-                            <span className={chk.val ? "text-slate-200" : "text-slate-400"}>{chk.label}</span>
-                          </div>
-                        ))}
+                    <div className="grid grid-cols-3 gap-2 mt-3 pt-3 border-t border-slate-800/40">
+                      <div>
+                        <p className="text-[8.5px] text-slate-500 uppercase">Score</p>
+                        <p className="text-sm font-black text-indigo-400">{selectedCand.compositeScore}</p>
+                      </div>
+                      <div>
+                        <p className="text-[8.5px] text-slate-500 uppercase">Win%</p>
+                        <p className="text-sm font-black text-emerald-400">
+                          {selectedCand.mlProbability != null ? `${selectedCand.mlProbability}%` : '—'}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[8.5px] text-slate-500 uppercase">Setup</p>
+                        <p className="text-[10px] font-black text-violet-400">{selectedCand.actionAdvice || '—'}</p>
                       </div>
                     </div>
-                  </>
-                )}
+                  </div>
 
-                {activeDetailTab === 'tech' && (
-                  <div className="space-y-4">
-                    <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
-                      <Activity className="w-4 h-4 text-indigo-400 animate-pulse" /> Technical Indicator Grid
-                    </h4>
-                    <div className="grid grid-cols-2 gap-2">
+                  {/* Entry / Target / SL */}
+                  <div className="bg-slate-900/60 border border-slate-800/50 rounded-xl p-3 space-y-2">
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Trade Levels</p>
+                    <div className="grid grid-cols-3 gap-2 text-center">
                       {[
-                        {
-                          label: 'RSI (14)',
-                          val: selectedCandidate.rsi ? selectedCandidate.rsi.toFixed(1) : '—',
-                          desc: selectedCandidate.rsi >= 70 ? 'Overbought' : selectedCandidate.rsi <= 30 ? 'Oversold' : 'Neutral',
-                          color: selectedCandidate.rsi >= 70 ? 'text-rose-400' : selectedCandidate.rsi <= 30 ? 'text-emerald-400' : 'text-slate-300'
-                        },
-                        {
-                          label: 'MACD Difference',
-                          val: selectedCandidate.macd ? selectedCandidate.macd.toFixed(2) : '—',
-                          desc: selectedCandidate.macd > selectedCandidate.macdSignal ? 'Bullish Cross' : 'Bearish Cross',
-                          color: selectedCandidate.macd > selectedCandidate.macdSignal ? 'text-emerald-400' : 'text-rose-400'
-                        },
-                        {
-                          label: 'SMA Alignment',
-                          val: selectedCandidate.sma50 && selectedCandidate.sma200 ? `₹${selectedCandidate.sma50.toFixed(0)} / ₹${selectedCandidate.sma200.toFixed(0)}` : '—',
-                          desc: selectedCandidate.sma50 > selectedCandidate.sma200 ? 'SMA50 > SMA200 (Golden)' : 'SMA50 < SMA200 (Death)',
-                          color: selectedCandidate.sma50 > selectedCandidate.sma200 ? 'text-emerald-400' : 'text-rose-400'
-                        },
-                        {
-                          label: 'Volume Multiplier',
-                          val: selectedCandidate.volumeRatio ? `${selectedCandidate.volumeRatio.toFixed(1)}x` : '—',
-                          desc: selectedCandidate.volumeRatio >= 1.5 ? 'High Volume Breakout' : 'Average Activity',
-                          color: selectedCandidate.volumeRatio >= 1.5 ? 'text-emerald-400' : 'text-slate-400'
-                        },
-                        {
-                          label: 'Bollinger Band Width',
-                          val: selectedCandidate.bbWidth ? `${(selectedCandidate.bbWidth * 100).toFixed(1)}%` : '—',
-                          desc: selectedCandidate.bbWidth <= 0.08 ? 'Squeeze (Volatility)' : 'Normal Volatility',
-                          color: selectedCandidate.bbWidth <= 0.08 ? 'text-indigo-400' : 'text-slate-400'
-                        },
-                        {
-                          label: 'Delivery Percentage',
-                          val: selectedCandidate.deliveryPct ? `${selectedCandidate.deliveryPct.toFixed(1)}%` : '—',
-                          desc: selectedCandidate.deliveryPct >= 45.0 ? 'Strong Accumulation' : 'Speculative Trade',
-                          color: selectedCandidate.deliveryPct >= 45.0 ? 'text-emerald-400' : 'text-slate-400'
-                        }
-                      ].map((ind, i) => (
-                        <div key={i} className="p-3 bg-slate-950/30 border border-slate-800/40 rounded-xl space-y-1">
-                          <span className="block text-[9px] font-bold text-slate-500 uppercase tracking-wider">{ind.label}</span>
-                          <span className="block text-sm font-black text-slate-100 tabular-nums">{ind.val}</span>
-                          <span className={cn('block text-[8.5px] font-black uppercase tracking-wide', ind.color)}>{ind.desc}</span>
+                        { label: 'Entry', v: selectedCand.entryPrice, color: 'text-indigo-400' },
+                        { label: 'Target', v: selectedCand.targetPrice, color: 'text-emerald-400' },
+                        { label: 'Stop', v: selectedCand.stopLoss, color: 'text-rose-400' },
+                      ].map((lv, i) => (
+                        <div key={i} className="bg-slate-800/40 rounded-lg p-2">
+                          <p className="text-[8.5px] text-slate-500 uppercase">{lv.label}</p>
+                          <p className={cn('text-xs font-black tabular-nums', lv.color)}>
+                            {lv.v ? `₹${fmt(lv.v, 1)}` : '—'}
+                          </p>
                         </div>
                       ))}
                     </div>
-                  </div>
-                )}
-
-                {activeDetailTab === 'thesis' && (
-                  <div className="space-y-4">
-                    <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
-                      <Sparkles className="w-4 h-4 text-indigo-400" /> Target Levels & AI Thesis
-                    </h4>
-
-                    {/* Visual execution ranges */}
-                    <div className="p-3 bg-slate-950/30 border border-slate-800/40 rounded-xl space-y-2">
-                      <div className="flex justify-between text-[10px] font-black uppercase">
-                        <span className="text-rose-400">Stop Loss</span>
-                        <span className="text-indigo-400">Entry Zone</span>
-                        <span className="text-emerald-400">Target</span>
-                      </div>
-                      <div className="flex justify-between text-xs font-black text-slate-200 tabular-nums">
-                        <span>₹{selectedCandidate.stopLoss || '—'}</span>
-                        <span>{selectedCandidate.entryZone || `₹${selectedCandidate.entryPrice || '—'}`}</span>
-                        <span>{selectedCandidate.targets || `₹${selectedCandidate.targetPrice || '—'}`}</span>
-                      </div>
-
-                      {/* Risk Reward Ratio calculator */}
-                      {(() => {
-                        const entry = parseFloat(selectedCandidate.entryPrice) || selectedCandidate.cmp || 0;
-                        const target = parseFloat(selectedCandidate.targetPrice) || 0;
-                        const stop = parseFloat(selectedCandidate.stopLoss) || 0;
-
-                        if (entry > 0 && target > 0 && stop > 0 && entry > stop && target > entry) {
-                          const reward = target - entry;
-                          const risk = entry - stop;
-                          const rr = (reward / risk).toFixed(2);
-                          return (
-                            <div className="border-t border-slate-800/30 pt-2 flex justify-between items-center text-[10px] font-black">
-                              <span className="text-slate-400 uppercase">Risk-to-Reward Ratio</span>
-                              <span className={cn('text-xs font-black px-2 py-0.5 rounded border uppercase',
-                                parseFloat(rr) >= 2.0 ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-slate-800 border-slate-700 text-slate-300'
-                              )}>
-                                {rr}x {parseFloat(rr) >= 2.0 ? 'Excellent' : 'Moderate'}
-                              </span>
-                            </div>
-                          );
-                        }
-                        return null;
-                      })()}
-                    </div>
-
-                    {/* AI Insight and Confluence List */}
-                    {selectedCandidate.aiInsight && (
-                      <div className="p-3 bg-slate-950/40 border border-slate-800/50 rounded-xl space-y-1.5">
-                        <span className="block text-[9px] font-bold text-slate-500 uppercase tracking-wider">AI Confluence Analysis</span>
-                        <p className="text-[10.5px] text-slate-300 leading-normal font-medium">{selectedCandidate.aiInsight}</p>
-                      </div>
-                    )}
-
-                    {/* Confluence signals parsed list */}
                     {(() => {
-                      try {
-                        const sigs = JSON.parse(selectedCandidate.signalsJson || '[]');
-                        if (sigs.length > 0) {
-                          return (
-                            <div className="space-y-1.5">
-                              <span className="block text-[9px] font-bold text-slate-500 uppercase tracking-wider">Breakout Confluence</span>
-                              <div className="space-y-1">
-                                {sigs.map((s: any, idx: number) => (
-                                  <div key={idx} className="p-2 bg-slate-900/60 border border-slate-800/30 rounded-lg text-[9.5px]">
-                                    <span className="block font-black text-indigo-400 uppercase">{s.type.replace(/_/g, ' ')}</span>
-                                    <p className="text-slate-400 font-semibold mt-0.5">{s.detail}</p>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          );
-                        }
-                      } catch { /* skip */ }
+                      const e = parseFloat(selectedCand.entryPrice);
+                      const t = parseFloat(selectedCand.targetPrice);
+                      const s = parseFloat(selectedCand.stopLoss);
+                      if (e > 0 && t > e && s > 0 && e > s) {
+                        const rr = ((t - e) / (e - s)).toFixed(1);
+                        return (
+                          <div className="flex justify-between items-center pt-2 border-t border-slate-800/40">
+                            <span className="text-[9px] text-slate-400 uppercase font-bold">Risk : Reward</span>
+                            <span className={cn('text-xs font-black px-2 py-0.5 rounded border',
+                              parseFloat(rr) >= 2 ? 'text-emerald-400 bg-emerald-950/30 border-emerald-800/40'
+                              : 'text-amber-400 bg-amber-950/20 border-amber-800/30')}>
+                              1 : {rr}
+                            </span>
+                          </div>
+                        );
+                      }
                       return null;
                     })()}
                   </div>
-                )}
 
-                <button
-                  onClick={() => onSelectStock(selectedCandidate.symbol)}
-                  className="w-full py-4 bg-gradient-to-r from-indigo-500 to-violet-600 text-white font-black text-[10px] uppercase tracking-widest rounded-2xl hover:shadow-[0_0_20px_rgba(99,102,241,0.35)] transition-all flex items-center justify-center gap-2"
-                >
-                  Execute Analysis
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            ) : (
-              <div className="py-24 text-center bg-slate-950/20 border border-slate-800/80 rounded-3xl border-dashed flex flex-col justify-center items-center">
-                <Sparkles className="w-8 h-8 text-slate-300 mb-2" />
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Select a candidate for full matrix audit</p>
-              </div>
-            )}
-          </div>
+                  {/* Factor Bars */}
+                  <div className="bg-slate-900/60 border border-slate-800/50 rounded-xl p-3 space-y-2">
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Factor Breakdown</p>
+                    {[
+                      { label: 'ML Win Prob', v: selectedCand.mlProbability, color: 'bg-indigo-500' },
+                      { label: 'Technical Signals', v: Math.min(100, (selectedCand.techSignalCount ?? 0) * 25), color: 'bg-emerald-500' },
+                      { label: 'Quant Rank', v: Math.max(0, 100 - (selectedCand.quantRank ?? 100)), color: 'bg-amber-500' },
+                      { label: 'Smart Money', v: Math.min(100, Math.max(0, 50 + (selectedCand.smartMoneyCr ?? 0) * 5)), color: 'bg-pink-500' },
+                      { label: 'News Sentiment', v: Math.min(100, Math.max(0, 50 + (selectedCand.newsSentiment ?? 0) * 50)), color: 'bg-blue-500' },
+                    ].map((f, i) => (
+                      <div key={i}>
+                        <div className="flex justify-between text-[9px] font-bold mb-0.5">
+                          <span className="text-slate-400">{f.label}</span>
+                          <span className="text-slate-300 tabular-nums">{f.v != null ? `${Math.round(f.v)}%` : '—'}</span>
+                        </div>
+                        <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                          <div className={cn('h-full rounded-full', f.color)}
+                            style={{ width: `${f.v ?? 0}%` }} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Technical Grid */}
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {[
+                      {
+                        label: 'RSI (14)',
+                        val: selectedCand.rsi ? fmt(selectedCand.rsi, 1) : '—',
+                        sub: selectedCand.rsi >= 70 ? 'Overbought' : selectedCand.rsi <= 30 ? 'Oversold' : 'Neutral',
+                        color: selectedCand.rsi >= 70 ? 'text-rose-400' : selectedCand.rsi <= 30 ? 'text-emerald-400' : 'text-slate-300'
+                      },
+                      {
+                        label: 'MACD',
+                        val: selectedCand.macd != null ? fmt(selectedCand.macd, 2) : '—',
+                        sub: selectedCand.macd != null && selectedCand.macdSignal != null
+                          ? (selectedCand.macd > selectedCand.macdSignal ? 'Bullish Cross' : 'Bearish Cross') : '',
+                        color: selectedCand.macd > selectedCand.macdSignal ? 'text-emerald-400' : 'text-rose-400'
+                      },
+                      {
+                        label: 'SMA 50/200',
+                        val: selectedCand.sma50 ? `${fmt(selectedCand.sma50, 0)}/${fmt(selectedCand.sma200, 0)}` : '—',
+                        sub: selectedCand.sma50 > selectedCand.sma200 ? 'Golden Cross' : 'Death Cross',
+                        color: selectedCand.sma50 > selectedCand.sma200 ? 'text-emerald-400' : 'text-rose-400'
+                      },
+                      {
+                        label: 'Vol Ratio',
+                        val: selectedCand.volumeRatio ? `${fmt(selectedCand.volumeRatio, 1)}x` : '—',
+                        sub: selectedCand.volumeRatio >= 1.5 ? 'High Volume' : 'Normal',
+                        color: selectedCand.volumeRatio >= 1.5 ? 'text-emerald-400' : 'text-slate-400'
+                      },
+                    ].map((ind, i) => (
+                      <div key={i} className="bg-slate-900/60 border border-slate-800/40 rounded-lg p-2">
+                        <p className="text-[8.5px] text-slate-500 uppercase font-bold">{ind.label}</p>
+                        <p className="text-xs font-black text-white tabular-nums mt-0.5">{ind.val}</p>
+                        <p className={cn('text-[8.5px] font-bold mt-0.5', ind.color)}>{ind.sub}</p>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* AI Insight */}
+                  {selectedCand.aiInsight && (
+                    <div className="bg-indigo-950/20 border border-indigo-800/30 rounded-xl p-3">
+                      <p className="text-[8.5px] font-bold text-indigo-400 uppercase tracking-wider mb-1">AI Analysis</p>
+                      <p className="text-[10px] text-slate-300 leading-relaxed">{selectedCand.aiInsight}</p>
+                    </div>
+                  )}
+
+                  {/* Signal Confluence */}
+                  {(() => {
+                    try {
+                      const sigs = JSON.parse(selectedCand.signalsJson || '[]');
+                      if (sigs.length > 0) return (
+                        <div className="bg-slate-900/60 border border-slate-800/50 rounded-xl p-3 space-y-1.5">
+                          <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Signal Confluence</p>
+                          {sigs.slice(0, 4).map((s: any, i: number) => (
+                            <div key={i} className="flex items-start gap-2">
+                              <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 mt-1 shrink-0" />
+                              <div>
+                                <p className="text-[9px] font-black text-indigo-300 uppercase">{s.type?.replace(/_/g, ' ')}</p>
+                                <p className="text-[9px] text-slate-400">{s.detail}</p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    } catch { /* skip */ }
+                    return null;
+                  })()}
+
+                  {/* Open Full Analysis */}
+                  <button
+                    onClick={() => onSelectStock(selectedCand.symbol)}
+                    className="w-full py-3 bg-gradient-to-r from-indigo-600 to-violet-600 text-white font-black text-[10px] uppercase tracking-widest rounded-xl hover:shadow-[0_0_20px_rgba(99,102,241,0.3)] transition-all flex items-center justify-center gap-2">
+                    Open Full Analysis
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 };

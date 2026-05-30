@@ -3,15 +3,19 @@ import { getAllStocks, getStockMapping } from "./stockMapping";
 import { mcFetchJson } from "./mcApiService";
 import { nseStocksData } from "../data/nseStocks";
 import { cacheGet, cacheSet } from "./cacheService";
+import db from "./db";
 
 // ─── Symbol & name resolution ─────────────────────────────────────────────────
 
-/** Combined NSE symbols: stocklist (180) + full NSE list (2000+), deduplicated. */
-function getAllNSESymbols(): string[] {
+/** Combined NSE symbols: computed once at module load — avoids re-allocation on every refresh. */
+const ALL_NSE_SYMBOLS: string[] = (() => {
   const stocklistSymbols = getAllStocks().map((s) => s.symbol);
   const nseSymbols = nseStocksData.map((s) => s.symbol);
   return [...new Set([...stocklistSymbols, ...nseSymbols])];
-}
+})();
+
+/** O(1) lookup map for the 180-stock list — used by MC/Finnhub quote fetchers. */
+const _stocklistMap = new Map(getAllStocks().map((s) => [s.symbol, s]));
 
 const _nameMap: Map<string, string> = (() => {
   const m = new Map<string, string>();
@@ -210,7 +214,7 @@ export async function fetchStockQuoteMoneyControl(
   symbol: string,
   retries: number = 3,
 ): Promise<MarketData | null> {
-  const stockMapping = getAllStocks().find((s) => s.symbol === symbol);
+  const stockMapping = _stocklistMap.get(symbol);
   if (!stockMapping) return null;
 
   const url = `https://www.moneycontrol.com/mcapi/v1/quote/${stockMapping.mcsymbol}`;
@@ -280,7 +284,7 @@ export async function fetchStockQuoteFinnhub(
 // ─── Parallel bulk fetch ──────────────────────────────────────────────────────
 
 export async function fetchAllLiveStocks(): Promise<MarketData[]> {
-  const allSymbols = getAllNSESymbols();
+  const allSymbols = ALL_NSE_SYMBOLS;
   console.log(
     `[LIVE DATA] Fetching ${allSymbols.length} NSE stocks via Yahoo Finance (parallel batches)...`,
   );
@@ -493,8 +497,26 @@ function formatVolume(volume: number): string {
   return volume.toString();
 }
 
+// ─── DB Mappings Cache ───────────────────────────────────────────────────────
+let dbMappingsCache: Map<string, { mcsymbol: string | null; tlid: string | null; tlname: string | null }> | null = null;
+
+function loadDbMappings() {
+  if (dbMappingsCache) return;
+  try {
+    const rows = db.prepare('SELECT symbol, mcsymbol, tlid, tlname FROM nse_stocks WHERE mcsymbol IS NOT NULL OR tlid IS NOT NULL').all() as any[];
+    dbMappingsCache = new Map();
+    for (const row of rows) {
+      dbMappingsCache.set(row.symbol, { mcsymbol: row.mcsymbol, tlid: row.tlid, tlname: row.tlname });
+    }
+    console.log(`[LIVE DATA] Loaded ${dbMappingsCache.size} tertiary API mappings from database.`);
+  } catch (err: any) {
+    console.error('[LIVE DATA] Failed to load DB mappings:', err.message);
+    dbMappingsCache = new Map();
+  }
+}
+
 /**
- * Enriches market data with mapped tickers from stocklist.ts
+ * Enriches market data with mapped tickers from stocklist.ts and DB
  */
 function enrichMarketData(data: MarketData): MarketData {
   const mapping = getStockMapping(data.symbol);
@@ -506,8 +528,21 @@ function enrichMarketData(data: MarketData): MarketData {
       tlname: mapping.tlname,
     };
   }
+
+  // Fallback to database cache
+  if (!dbMappingsCache) loadDbMappings();
+  const dbMapping = dbMappingsCache?.get(data.symbol);
+  if (dbMapping && (dbMapping.mcsymbol || dbMapping.tlid)) {
+    return {
+      ...data,
+      mcsymbol: dbMapping.mcsymbol || undefined,
+      tlid: dbMapping.tlid || undefined,
+      tlname: dbMapping.tlname || undefined,
+    };
+  }
+
   // Stock is in NSE master list but not in 180-stock mapping — provider IDs unavailable
-  console.debug(`[enrichMarketData] No provider mapping for ${data.symbol}; MC/TL calls will be skipped`);
+  // console.debug(`[enrichMarketData] No provider mapping for ${data.symbol}; MC/TL calls will be skipped`);
   return data;
 }
 
@@ -517,13 +552,16 @@ function enrichMarketData(data: MarketData): MarketData {
  * Persists today's OHLCV data to stock_ohlcv table for backtesting
  * Called daily after market close via BullMQ queue
  */
-export async function persistTodayOHLCVData(stocks: MarketData[]): Promise<{ inserted: number; failed: number }> {
-  const db = await import('./db').then(m => m.default);
-  const today = new Date().toISOString().split('T')[0];  // YYYY-MM-DD
-  
-  let inserted = 0;
-  let failed = 0;
-  
+function parseVolumeToNumber(v: string | number): number {
+  if (typeof v === 'number') return v;
+  if (v.endsWith('M')) return parseFloat(v) * 1_000_000;
+  if (v.endsWith('K')) return parseFloat(v) * 1_000;
+  return parseFloat(v) || 0;
+}
+
+export function persistTodayOHLCVData(stocks: MarketData[]): { inserted: number; failed: number } {
+  const today = new Date().toISOString().split('T')[0];
+
   const stmt = db.prepare(`
     INSERT INTO stock_ohlcv (symbol, date, open, high, low, close, volume)
     VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -534,29 +572,31 @@ export async function persistTodayOHLCVData(stocks: MarketData[]): Promise<{ ins
       close=excluded.close,
       volume=excluded.volume
   `);
-  
-  for (const stock of stocks) {
-    try {
-      // Use close price as OHLC if intraday data not available
-      // In production, this should come from detailed OHLCV API
-      stmt.run(
-        stock.symbol,
-        today,
-        stock.open || stock.prevClose || stock.price,  // open
-        stock.high || stock.price,                      // high
-        stock.low || stock.price,                       // low
-        stock.price,                                    // close
-        typeof stock.volume === 'string' 
-          ? parseFloat(stock.volume) * (stock.volume.includes('M') ? 1_000_000 : stock.volume.includes('K') ? 1_000 : 1)
-          : (stock.volume || 0)  // volume
-      );
-      inserted++;
-    } catch (err: any) {
-      console.error(`[OHLCV] Failed to persist ${stock.symbol}:`, err.message);
-      failed++;
+
+  let inserted = 0;
+  let failed = 0;
+
+  const insertAll = db.transaction((rows: MarketData[]) => {
+    for (const stock of rows) {
+      try {
+        stmt.run(
+          stock.symbol,
+          today,
+          stock.open || stock.prevClose || stock.price,
+          stock.high || stock.price,
+          stock.low || stock.price,
+          stock.price,
+          parseVolumeToNumber(stock.volume),
+        );
+        inserted++;
+      } catch (err: any) {
+        console.error(`[OHLCV] Failed to persist ${stock.symbol}:`, err.message);
+        failed++;
+      }
     }
-  }
-  
+  });
+
+  insertAll(stocks);
   console.log(`[OHLCV] Persisted ${inserted}/${stocks.length} stocks for ${today}, failed: ${failed}`);
   return { inserted, failed };
 }
@@ -568,7 +608,7 @@ export async function persistTodayOHLCVData(stocks: MarketData[]): Promise<{ ins
 export async function fetchAndPersistOHLCVData(): Promise<{ count: number; persisted: number }> {
   try {
     const stocks = await fetchAllLiveStocks();
-    const result = await persistTodayOHLCVData(stocks);
+    const result = persistTodayOHLCVData(stocks);
     
     // PHASE 2.4 FIX: Detect significant price movements and trigger signal updates
     await detectAndQueueSignalUpdates(stocks);
@@ -590,7 +630,6 @@ const lastPriceCache = new Map<string, number>();  // Track previous prices
  * Called after each stock refresh to trigger dynamic signal updates
  */
 async function detectAndQueueSignalUpdates(stocks: MarketData[]): Promise<void> {
-  const db = await import('./db').then(m => m.default);
   const symbelsToUpdate: string[] = [];
 
   for (const stock of stocks) {

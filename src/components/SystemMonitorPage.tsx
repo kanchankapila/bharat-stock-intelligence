@@ -1,0 +1,307 @@
+import { useState } from 'react';
+import { trpc } from '../lib/trpc';
+import {
+  Activity, CheckCircle, AlertCircle, Clock, RefreshCw, Play,
+  Zap, Database, Brain, BarChart2, AlertTriangle, XCircle,
+} from 'lucide-react';
+
+type RunState = 'never' | 'running' | 'success' | 'failed' | 'stale';
+
+interface ScriptStatus {
+  id: string;
+  label: string;
+  category: string;
+  critical: boolean;
+  description: string;
+  schedule: string;
+  lastRunAt: string | null;
+  runState: RunState;
+  stats: Record<string, string | number | null>;
+  error: string | null;
+}
+
+function relTime(iso: string | null): string {
+  if (!iso) return 'Never';
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'Just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  return `${days}d ago`;
+}
+
+function fmtDateTime(iso: string | null): string {
+  if (!iso) return '—';
+  try {
+    return new Date(iso).toLocaleString('en-IN', {
+      day: '2-digit', month: 'short', year: 'numeric',
+      hour: '2-digit', minute: '2-digit', hour12: true,
+    });
+  } catch {
+    return iso;
+  }
+}
+
+const STATE_CONFIG: Record<RunState, { label: string; color: string; bg: string; icon: any }> = {
+  never:   { label: 'Never Run', color: 'text-slate-400',  bg: 'bg-slate-800',    icon: Clock },
+  running: { label: 'Running',   color: 'text-blue-400',   bg: 'bg-blue-900/40',  icon: RefreshCw },
+  success: { label: 'OK',        color: 'text-emerald-400',bg: 'bg-emerald-900/30',icon: CheckCircle },
+  failed:  { label: 'Failed',    color: 'text-red-400',    bg: 'bg-red-900/30',   icon: XCircle },
+  stale:   { label: 'Stale',     color: 'text-amber-400',  bg: 'bg-amber-900/30', icon: AlertTriangle },
+};
+
+const CATEGORY_ICON: Record<string, any> = {
+  Signals: Activity,
+  ML:      Brain,
+  Data:    Database,
+};
+
+function ScriptCard({ script, onTrigger, triggering }: {
+  script: ScriptStatus;
+  onTrigger: (id: string) => void;
+  triggering: boolean;
+}) {
+  const state = STATE_CONFIG[script.runState];
+  const StateIcon = state.icon;
+  const CatIcon = CATEGORY_ICON[script.category] || Activity;
+  const isRunning = script.runState === 'running' || triggering;
+
+  return (
+    <div className={`rounded-xl border p-4 flex flex-col gap-3 transition-all
+      ${script.critical ? 'border-slate-700' : 'border-slate-800'}
+      bg-slate-900/70 hover:bg-slate-900`}>
+
+      {/* Header */}
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <CatIcon className="w-4 h-4 text-slate-500 shrink-0" />
+          <span className="text-sm font-semibold text-white truncate">{script.label}</span>
+          {script.critical && (
+            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-indigo-900/60 text-indigo-300 uppercase tracking-wider shrink-0">
+              Critical
+            </span>
+          )}
+        </div>
+        <span className={`flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full shrink-0 ${state.bg} ${state.color}`}>
+          <StateIcon className={`w-3 h-3 ${script.runState === 'running' ? 'animate-spin' : ''}`} />
+          {state.label}
+        </span>
+      </div>
+
+      {/* Description */}
+      <p className="text-xs text-slate-400 leading-snug">{script.description}</p>
+
+      {/* Stats */}
+      {Object.keys(script.stats).length > 0 && (
+        <div className="flex flex-wrap gap-x-4 gap-y-1">
+          {Object.entries(script.stats).map(([k, v]) => (
+            <div key={k} className="text-[11px]">
+              <span className="text-slate-500 capitalize">{k}: </span>
+              <span className="text-slate-200 font-mono font-semibold">{String(v ?? '—')}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Error */}
+      {script.error && (
+        <div className="text-[11px] text-red-400 bg-red-900/20 rounded px-2 py-1 font-mono truncate">
+          {script.error}
+        </div>
+      )}
+
+      {/* Footer */}
+      <div className="flex items-end justify-between mt-auto pt-1 border-t border-slate-800">
+        <div className="flex flex-col gap-0.5">
+          <div className="flex items-center gap-1 text-[11px] text-slate-400">
+            <Clock className="w-3 h-3" />
+            <span className="font-semibold text-slate-200">{relTime(script.lastRunAt)}</span>
+            <span className="text-slate-600">·</span>
+            <span>{fmtDateTime(script.lastRunAt)}</span>
+          </div>
+          <div className="text-[10px] text-slate-600">{script.schedule}</div>
+        </div>
+
+        <button
+          onClick={() => onTrigger(script.id)}
+          disabled={isRunning}
+          className={`flex items-center gap-1.5 text-[11px] font-semibold px-3 py-1.5 rounded-lg transition-all
+            ${isRunning
+              ? 'bg-slate-800 text-slate-600 cursor-not-allowed'
+              : 'bg-indigo-600 hover:bg-indigo-500 text-white active:scale-95'
+            }`}
+        >
+          {isRunning
+            ? <RefreshCw className="w-3 h-3 animate-spin" />
+            : <Play className="w-3 h-3" />
+          }
+          {isRunning ? 'Running...' : 'Run Now'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export default function SystemMonitorPage() {
+  const [triggeringIds, setTriggeringIds] = useState<Set<string>>(new Set());
+  const [triggerAllLoading, setTriggerAllLoading] = useState(false);
+
+  const { data: scripts, isLoading, refetch, dataUpdatedAt } = trpc.getSystemStatus.useQuery(undefined, {
+    refetchInterval: 30_000,
+    refetchOnWindowFocus: true,
+  });
+
+  const triggerMutation  = trpc.triggerScript.useMutation();
+  const triggerAllMutation = trpc.triggerAllDaily.useMutation();
+
+  const handleTrigger = async (scriptId: string) => {
+    setTriggeringIds(prev => new Set([...prev, scriptId]));
+    try {
+      await triggerMutation.mutateAsync({ scriptId });
+      setTimeout(() => refetch(), 1500);
+    } finally {
+      setTimeout(() => {
+        setTriggeringIds(prev => { const s = new Set(prev); s.delete(scriptId); return s; });
+      }, 3000);
+    }
+  };
+
+  const handleTriggerAll = async () => {
+    setTriggerAllLoading(true);
+    try {
+      await triggerAllMutation.mutateAsync();
+      setTimeout(() => refetch(), 2000);
+    } finally {
+      setTimeout(() => setTriggerAllLoading(false), 5000);
+    }
+  };
+
+  const categories = ['Signals', 'ML', 'Data'];
+  const grouped = categories.reduce((acc, cat) => {
+    acc[cat] = (scripts || []).filter(s => s.category === cat);
+    return acc;
+  }, {} as Record<string, ScriptStatus[]>);
+
+  const summary = {
+    ok:      (scripts || []).filter(s => s.runState === 'success').length,
+    stale:   (scripts || []).filter(s => s.runState === 'stale').length,
+    failed:  (scripts || []).filter(s => s.runState === 'failed').length,
+    running: (scripts || []).filter(s => s.runState === 'running').length,
+    never:   (scripts || []).filter(s => s.runState === 'never').length,
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-950 p-4 md:p-6 space-y-6">
+
+      {/* Page header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="p-2 bg-indigo-900/40 rounded-lg">
+            <Zap className="w-5 h-5 text-indigo-400" />
+          </div>
+          <div>
+            <h1 className="text-lg font-bold text-white">System Monitor</h1>
+            <p className="text-xs text-slate-400">Signal generation pipeline — script status & manual controls</p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-slate-600">
+            Updated {dataUpdatedAt ? relTime(new Date(dataUpdatedAt).toISOString()) : '—'}
+          </span>
+          <button
+            onClick={() => refetch()}
+            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors"
+            title="Refresh"
+          >
+            <RefreshCw className="w-4 h-4" />
+          </button>
+          <button
+            onClick={handleTriggerAll}
+            disabled={triggerAllLoading}
+            className={`flex items-center gap-2 text-xs font-bold px-4 py-2 rounded-lg transition-all
+              ${triggerAllLoading
+                ? 'bg-slate-700 text-slate-500 cursor-not-allowed'
+                : 'bg-emerald-600 hover:bg-emerald-500 text-white active:scale-95'}`}
+          >
+            {triggerAllLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
+            Run Daily Pipeline
+          </button>
+        </div>
+      </div>
+
+      {/* Summary bar */}
+      <div className="grid grid-cols-5 gap-3">
+        {[
+          { label: 'OK',      val: summary.ok,      color: 'text-emerald-400', bg: 'bg-emerald-900/20', icon: CheckCircle },
+          { label: 'Running', val: summary.running,  color: 'text-blue-400',   bg: 'bg-blue-900/20',    icon: RefreshCw },
+          { label: 'Stale',   val: summary.stale,    color: 'text-amber-400',  bg: 'bg-amber-900/20',   icon: AlertTriangle },
+          { label: 'Failed',  val: summary.failed,   color: 'text-red-400',    bg: 'bg-red-900/20',     icon: XCircle },
+          { label: 'Never',   val: summary.never,    color: 'text-slate-400',  bg: 'bg-slate-800',      icon: Clock },
+        ].map(({ label, val, color, bg, icon: Icon }) => (
+          <div key={label} className={`rounded-xl p-3 flex items-center gap-2 ${bg}`}>
+            <Icon className={`w-4 h-4 ${color} shrink-0 ${label === 'Running' && val > 0 ? 'animate-spin' : ''}`} />
+            <div>
+              <div className={`text-xl font-black ${color}`}>{val}</div>
+              <div className="text-[10px] text-slate-500 uppercase font-bold tracking-wide">{label}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {isLoading && (
+        <div className="flex justify-center py-12">
+          <RefreshCw className="w-6 h-6 text-slate-500 animate-spin" />
+        </div>
+      )}
+
+      {/* Script cards by category */}
+      {categories.map(cat => {
+        const catScripts = grouped[cat] || [];
+        if (!catScripts.length) return null;
+        const CatIcon = CATEGORY_ICON[cat] || BarChart2;
+        return (
+          <div key={cat} className="space-y-3">
+            <div className="flex items-center gap-2">
+              <CatIcon className="w-4 h-4 text-slate-500" />
+              <h2 className="text-sm font-bold text-slate-300 uppercase tracking-widest">{cat}</h2>
+              <div className="flex-1 h-px bg-slate-800" />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {catScripts.map(s => (
+                <ScriptCard
+                  key={s.id}
+                  script={s}
+                  onTrigger={handleTrigger}
+                  triggering={triggeringIds.has(s.id)}
+                />
+              ))}
+            </div>
+          </div>
+        );
+      })}
+
+      {/* Schedule reference */}
+      <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-4">
+        <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-2">
+          <Clock className="w-3.5 h-3.5" /> Auto-Schedule Reference
+        </h3>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+          {[
+            { time: 'Every 30 min',      scripts: 'Technical Signal Scan' },
+            { time: 'Daily 9:30 AM IST', scripts: 'Outcome Resolver, Performance Tracker, ML Score, FII/DII' },
+            { time: 'Daily 5:00 PM IST', scripts: 'Full ML Daily Ops (FII → FinBERT → Outcomes → Perf → Score → RL)' },
+            { time: 'Sunday 6 PM IST',   scripts: 'ML Retrain, Strategy Optimizer, Performance Recompute' },
+          ].map(({ time, scripts }) => (
+            <div key={time} className="space-y-1">
+              <div className="text-[11px] font-semibold text-indigo-400">{time}</div>
+              <div className="text-[11px] text-slate-400">{scripts}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}

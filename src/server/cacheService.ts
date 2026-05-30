@@ -43,7 +43,7 @@ function createRedisClient(): Redis | null {
 export async function initCache(): Promise<boolean> {
   try {
     redis = createRedisClient();
-    await redis.connect();
+    await redis!.connect();
     return true;
   } catch {
     console.log('[CACHE] Redis unavailable — using in-memory cache');
@@ -55,19 +55,22 @@ export async function initCache(): Promise<boolean> {
 
 // ─── In-memory fallback ──────────────────────────────────────────────────────
 
-interface MemEntry { data: string; expires: number }
+// `parsed` keeps the live object so hot-path reads skip JSON.parse entirely.
+// `data` is the serialised string used only when writing to Redis.
+interface MemEntry { data: string; parsed: unknown; expires: number }
 const memCache = new Map<string, MemEntry>();
 
 function memGet<T>(key: string): T | null {
   const entry = memCache.get(key);
   if (!entry) return null;
   if (entry.expires < Date.now()) { memCache.delete(key); return null; }
-  return JSON.parse(entry.data) as T;
+  return entry.parsed as T;
 }
 
 function memSet(key: string, value: unknown, ttlSeconds: number): void {
   memCache.set(key, {
     data: JSON.stringify(value),
+    parsed: value,
     expires: Date.now() + ttlSeconds * 1000,
   });
 }

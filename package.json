@@ -11,7 +11,8 @@
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
-    "fetch:chart-patterns": "tsx scripts/fetchChartPatterns.ts"
+    "fetch:chart-patterns": "tsx scripts/fetchChartPatterns.ts",
+    "sync:mappings": "tsx scripts/syncAllStockMappings.ts"
   },
   "dependencies": {
     "@google/genai": "^2.0.0",
@@ -33,6 +34,7 @@
     "express": "^4.21.2",
     "firebase": "^12.12.1",
     "ioredis": "^5.10.1",
+    "lightweight-charts": "^5.2.0",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
     "ollama": "^0.6.3",

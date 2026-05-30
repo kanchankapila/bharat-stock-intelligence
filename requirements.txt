@@ -15,6 +15,7 @@ ipython
 markdown-it-py
 mdurl
 transformers
+# Install CUDA build: pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
 torch>=2.2.0
 torchvision>=0.17.0
 pytorch-forecasting>=1.0.0

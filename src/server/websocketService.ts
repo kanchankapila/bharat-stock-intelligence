@@ -12,6 +12,7 @@
 
 import { WebSocketServer, WebSocket } from 'ws';
 import { Server as HttpServer } from 'http';
+import { telegramService } from './telegramService';
 
 export interface SignalAlert {
   type: 'new_signal' | 'price_cross' | 'technical_breakthrough' | 'portfolio_move';
@@ -93,19 +94,35 @@ export class WebSocketSignalService {
       type: 'new_signal',
       timestamp: new Date().toISOString(),
     });
+
+    if (alert.signal) {
+      telegramService.sendSignalNotification(
+        alert.symbol,
+        alert.signal.signalType as 'BUY' | 'SELL' | 'HOLD',
+        alert.signal.entryPrice,
+        alert.signal.targetPrice,
+        alert.signal.stopLoss,
+        alert.signal.confidence,
+        alert.signal.reasoning
+      ).catch(err => console.error('[WebSocketService] Telegram alert failed:', err));
+    }
   }
 
   /**
    * Broadcast price level crossing alert
    */
   public broadcastPriceCross(symbol: string, price: number, level: number, levelType: string): void {
+    const levelStr = `${levelType} (${level.toFixed(2)})`;
     this.broadcast({
       type: 'price_cross',
       symbol,
       price,
-      level: `${levelType} (${level.toFixed(2)})`,
+      level: levelStr,
       timestamp: new Date().toISOString(),
     } as SignalAlert);
+
+    telegramService.sendPriceCrossNotification(symbol, price, levelStr)
+      .catch(err => console.error('[WebSocketService] Telegram price cross failed:', err));
   }
 
   /**

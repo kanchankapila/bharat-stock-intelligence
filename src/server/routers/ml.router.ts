@@ -212,5 +212,58 @@ export const mlRouter = router({
         emaLong:  z.number().optional(),
       }).optional(),
     }))
-    .mutation(() => null),
+    .mutation(({ input }) => {
+      const rsiUpper = input.params?.rsiUpper ?? 70;
+      const rsiLower = input.params?.rsiLower ?? 30;
+
+      const outcomes = db.prepare(`
+        SELECT so.return_pct, so.outcome, so.entry_price, so.exit_price,
+               so.signal_date, ts.rsi
+        FROM signal_outcomes so
+        LEFT JOIN technical_signals ts ON so.symbol = ts.symbol AND so.signal_date = ts.date
+        WHERE so.symbol = ?
+          AND so.outcome IN ('WIN', 'LOSS', 'NEUTRAL')
+        ORDER BY so.signal_date ASC
+      `).all(input.symbol) as any[];
+
+      if (!outcomes.length) return null;
+
+      const filtered = outcomes.filter((r: any) => {
+        if (r.rsi == null) return true;
+        return r.rsi >= rsiLower && r.rsi <= rsiUpper;
+      });
+
+      if (!filtered.length) return null;
+
+      const wins   = filtered.filter((r: any) => r.outcome === 'WIN').length;
+      const losses = filtered.filter((r: any) => r.outcome === 'LOSS').length;
+      const winRate = filtered.length > 0 ? wins / filtered.length : 0;
+
+      const grossProfit = filtered.filter((r: any) => r.return_pct > 0).reduce((s: number, r: any) => s + r.return_pct, 0);
+      const grossLoss   = Math.abs(filtered.filter((r: any) => r.return_pct < 0).reduce((s: number, r: any) => s + r.return_pct, 0));
+      const profitFactor = grossLoss > 0 ? grossProfit / grossLoss : grossProfit > 0 ? Infinity : 0;
+
+      let equity = 100;
+      const equityCurve = filtered.map((r: any) => {
+        equity *= (1 + (r.return_pct ?? 0) / 100);
+        return { date: r.signal_date, equity: Math.round(equity * 100) / 100 };
+      });
+
+      const returns = filtered.map((r: any) => r.return_pct ?? 0);
+      const avgReturn = returns.reduce((s: number, v: number) => s + v, 0) / returns.length;
+      const variance  = returns.reduce((s: number, v: number) => s + (v - avgReturn) ** 2, 0) / returns.length;
+      const sharpe    = variance > 0 ? avgReturn / Math.sqrt(variance) : 0;
+
+      return {
+        symbol:       input.symbol,
+        totalTrades:  filtered.length,
+        wins,
+        losses,
+        winRate:      Math.round(winRate * 10000) / 100,
+        profitFactor: Math.round(profitFactor * 100) / 100,
+        avgReturn:    Math.round(avgReturn * 100) / 100,
+        sharpe:       Math.round(sharpe * 100) / 100,
+        equityCurve,
+      };
+    }),
 });

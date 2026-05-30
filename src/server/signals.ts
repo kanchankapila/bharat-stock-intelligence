@@ -16,19 +16,20 @@ export interface Signal {
 }
 
 export async function createSignal(signal: Omit<Signal, "id" | "createdAt" | "updatedAt" | "status">) {
-  const stmt = db.prepare(`
+  const today = new Date().toISOString().split('T')[0];
+
+  db.prepare(`
     INSERT INTO signals (symbol, type, entry, target, stopLoss, confidence, reasoning, status)
     VALUES (?, ?, ?, ?, ?, ?, ?, 'ACTIVE')
-  `);
-  stmt.run(
-    signal.symbol,
-    signal.type,
-    signal.entry,
-    signal.target,
-    signal.stopLoss,
-    signal.confidence,
-    signal.reasoning
-  );
+  `).run(signal.symbol, signal.type, signal.entry, signal.target, signal.stopLoss, signal.confidence, signal.reasoning);
+
+  db.prepare(`
+    INSERT INTO recommendation_log
+      (symbol, rec_type, signal_date, generated_at, entry_price, stop_loss,
+       target_1, confidence_score, reasoning, source, status, horizon_days)
+    VALUES (?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, 'platform', 'ACTIVE', 15)
+    ON CONFLICT DO NOTHING
+  `).run(signal.symbol, signal.type, today, signal.entry, signal.stopLoss, signal.target, signal.confidence, signal.reasoning);
 }
 
 export async function updateSignalAccuracy(symbol: string, currentPrice: number) {

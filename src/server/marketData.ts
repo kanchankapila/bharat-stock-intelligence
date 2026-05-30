@@ -213,8 +213,18 @@ export async function fetchETPennyStocks() {
   return { searchResult: { searchData: { records: [] } } };
 }
 
-export async function fetchMFInvestments(_symbol: string) {
-  return null;
+export async function fetchMFInvestments(symbol: string) {
+  const map = getStockMapping(symbol);
+  if (!map?.companyid) return null;
+
+  const url = `https://marketservices.indiatimes.com/marketservices/mf_holding?companyid=${map.companyid}`;
+  try {
+    const response = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    if (!response.ok) return null;
+    return response.json();
+  } catch {
+    return null;
+  }
 }
 
 

@@ -4,9 +4,12 @@ import path from 'path';
 const dbPath = path.resolve(process.cwd(), process.env.DATABASE_URL || 'database.sqlite');
 const db = new Database(dbPath, { timeout: 10000 });
 
-// Enable WAL mode for better concurrency
 db.pragma('journal_mode = WAL');
 db.pragma('synchronous = NORMAL');
+db.pragma('cache_size = -65536');     // 64 MB page cache
+db.pragma('mmap_size = 268435456');   // 256 MB memory-mapped I/O
+db.pragma('temp_store = MEMORY');     // temp tables in RAM
+db.pragma('busy_timeout = 5000');     // avoid SQLITE_BUSY under concurrent load
 
 db.exec(`CREATE TABLE IF NOT EXISTS _migrations (
   name     TEXT PRIMARY KEY,
@@ -22,6 +25,13 @@ function runMigration(name: string, sql: string): void {
 runMigration(
   '001_signal_source_weights_composite_pk',
   'DROP TABLE IF EXISTS signal_source_weights'
+);
+
+runMigration(
+  '002_add_mapping_columns_to_nse_stocks',
+  `ALTER TABLE nse_stocks ADD COLUMN mcsymbol TEXT;
+   ALTER TABLE nse_stocks ADD COLUMN tlid TEXT;
+   ALTER TABLE nse_stocks ADD COLUMN tlname TEXT;`
 );
 
 db.exec(`
@@ -56,6 +66,9 @@ db.exec(`
     market_cap REAL,
     pe_ratio REAL,
     dividend_yield REAL,
+    mcsymbol TEXT,
+    tlid TEXT,
+    tlname TEXT,
     last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
@@ -1106,12 +1119,22 @@ db.exec(`
 `);
 
 // --- Migrations & Upgrades ---
-const migrateColumn = (table: string, col: string, def: string) => {
-  try { db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`); } catch (e: any) {
-    if (!e?.message?.includes('duplicate column name')) {
-      console.warn(`[DB] migrateColumn failed for ${table}.${col}: ${e?.message}`);
-    }
+
+// Cache of existing columns per table — checked once via PRAGMA, never throws.
+const _tableColumns = new Map<string, Set<string>>();
+
+function hasColumn(table: string, col: string): boolean {
+  if (!_tableColumns.has(table)) {
+    const rows = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+    _tableColumns.set(table, new Set(rows.map(r => r.name)));
   }
+  return _tableColumns.get(table)!.has(col);
+}
+
+const migrateColumn = (table: string, col: string, def: string) => {
+  if (hasColumn(table, col)) return;
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`);
+  _tableColumns.get(table)?.add(col);
 };
 
 // watchlist extras
@@ -1140,9 +1163,6 @@ migrateColumn('users', 'updated_at', 'DATETIME');
 
 migrateColumn('watchlist', 'created_at', 'DATETIME');
 migrateColumn('watchlist', 'updated_at', 'DATETIME');
-
-migrateColumn('stocks', 'created_at', 'DATETIME');
-migrateColumn('stocks', 'updated_at', 'DATETIME');
 
 migrateColumn('technical_signals', 'created_at', 'DATETIME');
 migrateColumn('technical_signals', 'updated_at', 'DATETIME');
@@ -1174,7 +1194,7 @@ tryIndex(`CREATE INDEX IF NOT EXISTS idx_stock_scores_symbol ON stock_scores(sym
 tryIndex(`CREATE INDEX IF NOT EXISTS idx_stock_ohlcv_date ON stock_ohlcv(date DESC)`);
 tryIndex(`CREATE INDEX IF NOT EXISTS idx_unified_signals_date ON unified_signals(signal_date DESC)`);
 
-// Verify key constraints
-console.log('[DB] Schema normalization complete (Phase 3.5)');
+// Keep startup diagnostics off stdout so stdio-based clients can parse JSON-RPC.
+console.error('[DB] Schema normalization complete (Phase 3.5)');
 
 export default db;

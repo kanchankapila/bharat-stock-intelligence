@@ -4,7 +4,9 @@ import path from 'path';
 import { promisify } from 'util';
 
 const execFileAsync = promisify(execFile);
-const PYTHON = process.platform === 'win32' ? 'python' : 'python3';
+const PYTHON = process.platform === 'win32'
+  ? (process.env.PYTHON_PATH || 'C:\\Users\\amit_\\AppData\\Local\\Programs\\Python\\Python311\\python.exe')
+  : (process.env.PYTHON_PATH || 'python3');
 const ENGINE_DIR = path.resolve(process.cwd(), 'src/server');
 
 // ─── Screener Classification ────────────────────────────────────────────────

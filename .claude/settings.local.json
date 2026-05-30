@@ -16,7 +16,9 @@
       "Bash(jobs)",
       "Bash(curl -s \"http://localhost:3000/api/health\")",
       "Bash(npx tsx *)",
-      "Read(//tmp/**)"
+      "Read(//tmp/**)",
+      "mcp__alphaquant-pro__query_stocks_db"
     ]
-  }
+  },
+  "enabledPlugins": {}
 }

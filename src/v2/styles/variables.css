@@ -1,0 +1,35 @@
+/* V2 Institutional Terminal CSS Custom Properties */
+@theme {
+  --color-terminal-bg: #07090e;
+  --color-terminal-panel: #0d1117;
+  --color-terminal-panel-header: #161b22;
+  --color-terminal-border: #21262d;
+  --color-terminal-border-active: #388bfd;
+  --color-signal-up: rgb(0, 230, 118);
+  --color-signal-down: rgb(255, 23, 68);
+  --color-signal-warn: rgb(255, 145, 0);
+  --color-ai-glow: rgba(138, 43, 226, 0.15);
+  
+  --font-terminal-mono: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+:root {
+  color-scheme: dark;
+  background-color: var(--color-terminal-bg);
+}
+
+/* Custom Bloomberg-style thin scrollbar */
+.terminal-scrollbar::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+.terminal-scrollbar::-webkit-scrollbar-track {
+  background: var(--color-terminal-bg);
+}
+.terminal-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--color-terminal-border);
+  border-radius: 2px;
+}
+.terminal-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: var(--color-terminal-border-active);
+}

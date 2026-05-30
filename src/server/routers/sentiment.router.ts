@@ -39,24 +39,49 @@ export const sentimentRouter = router({
     }),
 
   getInstitutionalFlows: publicProcedure
-    .query(() => {
+    .query(async () => {
       const rows = db.prepare(
         `SELECT date, fii_buy, fii_sell, fii_net, dii_buy, dii_sell, dii_net
          FROM fii_dii_flow ORDER BY date DESC LIMIT 1`
       ).all() as any[];
-      if (!rows.length) return null;
-      const r = rows[0];
+
       const fmt = (n: number | null) => n != null ? Number(n).toFixed(2) : '0.00';
-      const date = new Date(r.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
-      return {
-        success: 1,
-        data: {
-          institutionalDetails: [
-            { category: 'FII/FPI', date, netBuySell: fmt(r.fii_net), buyValue: fmt(r.fii_buy), sellValue: fmt(r.fii_sell) },
-            { category: 'DII',     date, netBuySell: fmt(r.dii_net), buyValue: fmt(r.dii_buy), sellValue: fmt(r.dii_sell) },
-          ],
-        },
-      };
+
+      if (rows.length) {
+        const r = rows[0];
+        const date = new Date(r.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+        return {
+          success: 1,
+          data: {
+            institutionalDetails: [
+              { category: 'FII/FPI', date, netBuySell: fmt(r.fii_net), buyValue: fmt(r.fii_buy), sellValue: fmt(r.fii_sell) },
+              { category: 'DII',     date, netBuySell: fmt(r.dii_net), buyValue: fmt(r.dii_buy), sellValue: fmt(r.dii_sell) },
+            ],
+          },
+        };
+      }
+
+      // DB empty — fetch live from NSE
+      try {
+        const res = await fetch('https://www.nseindia.com/api/fiidiiTradeReact', {
+          signal: AbortSignal.timeout(8000),
+          headers: { 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0' },
+        });
+        if (!res.ok) return null;
+        const nseData = await res.json() as any[];
+        if (!Array.isArray(nseData) || !nseData.length) return null;
+
+        const details = nseData.map((row: any) => ({
+          category:   row.category,
+          date:       row.date,
+          netBuySell: fmt(row.netBuySell ?? null),
+          buyValue:   fmt(row.buyValue ?? null),
+          sellValue:  fmt(row.sellValue ?? null),
+        }));
+        return { success: 1, data: { institutionalDetails: details } };
+      } catch {
+        return null;
+      }
     }),
 
   refreshNewsSentiment: publicProcedure

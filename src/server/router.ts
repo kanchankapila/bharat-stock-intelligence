@@ -20,6 +20,7 @@ import { researchRouter }     from "./routers/research.router";
 import { dlRouter }           from "./routers/dl.router";
 import { telegramRouter }     from "./routers/telegram.router";
 import { confluenceRouter }   from "./routers/confluence.router";
+import { monitorRouter }      from "./routers/monitor.router";
 
 export const appRouter = mergeRouters(
   userRouter,
@@ -42,6 +43,7 @@ export const appRouter = mergeRouters(
   dlRouter,
   telegramRouter,
   confluenceRouter,
+  monitorRouter,
 );
 
 export type AppRouter = typeof appRouter;
