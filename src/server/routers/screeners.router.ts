@@ -156,4 +156,166 @@ export const screenersRouter = router({
 
   recategorizeTrendlyneScreeners: publicProcedure
     .mutation(async () => recategorizeAllScreeners()),
+
+  // ── Screener Intelligence (Sub-project A) ─────────────────────────────────
+
+  getScreenerLeaderboard: publicProcedure
+    .input(z.object({
+      category:    z.string().optional(),
+      subcategory: z.string().optional(),
+      source:      z.enum(['trendlyne', 'moneycontrol', 'etnow']).optional(),
+      horizon:     z.enum(['5d', '10d', '20d', '60d', '120d']).default('20d'),
+      tier:        z.enum(['A', 'B', 'C', 'D', 'Unranked']).optional(),
+      limit:       z.number().min(1).max(200).default(50),
+      offset:      z.number().min(0).default(0),
+    }))
+    .query(({ input }) => {
+      const validHorizonCols: Record<string, string> = {
+        '5d': 'wr_5d', '10d': 'wr_10d', '20d': 'wr_20d', '60d': 'wr_60d', '120d': 'wr_120d',
+      };
+      const wrCol = validHorizonCols[input.horizon] ?? 'wr_20d';
+
+      const conditions: string[] = [];
+      const params: unknown[] = [];
+
+      if (input.category)    { conditions.push('sm.inferred_category = ?'); params.push(input.category); }
+      if (input.subcategory) { conditions.push('sm.subcategory = ?');        params.push(input.subcategory); }
+      if (input.source)      { conditions.push('spv.source = ?');            params.push(input.source); }
+      if (input.tier)        { conditions.push('spv.tier = ?');              params.push(input.tier); }
+
+      const where = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : '';
+      params.push(input.limit, input.offset);
+
+      return db.prepare(`
+        SELECT
+          spv.screener_id,
+          sm.name,
+          spv.source,
+          sm.inferred_category  AS category,
+          sm.subcategory,
+          spv.tier,
+          spv.bayesian_score,
+          spv.${wrCol}          AS win_rate,
+          spv.avg_ret_20d       AS avg_return,
+          spv.alpha_20d         AS alpha,
+          spv.sharpe_20d        AS sharpe,
+          spv.resolved_count,
+          spv.total_appearances,
+          spv.data_source,
+          spv.last_computed
+        FROM screener_performance_v2 spv
+        JOIN screener_master sm ON sm.scan_id = spv.screener_id
+        ${where}
+        ORDER BY spv.bayesian_score DESC
+        LIMIT ? OFFSET ?
+      `).all(...params);
+    }),
+
+  getScreenerDetail: publicProcedure
+    .input(z.object({ screener_id: z.string() }))
+    .query(({ input }) => {
+      const perf = db.prepare(`
+        SELECT spv.*, sm.name, sm.inferred_category AS category, sm.subcategory,
+               sm.inferred_sentiment AS sentiment, sm.inferred_timeframe AS timeframe,
+               sm.classified_by
+        FROM screener_performance_v2 spv
+        JOIN screener_master sm ON sm.scan_id = spv.screener_id
+        WHERE spv.screener_id = ?
+      `).get(input.screener_id);
+
+      const recentAppearances = db.prepare(`
+        SELECT symbol, appeared_date, exited_date,
+               return_5d, return_10d, return_20d, return_60d, return_120d,
+               nifty_ret_20d, outcome_20d
+        FROM screener_appearances
+        WHERE screener_id = ?
+        ORDER BY appeared_date DESC
+        LIMIT 30
+      `).all(input.screener_id);
+
+      const topStocks = db.prepare(`
+        SELECT symbol, COUNT(*) AS appearances
+        FROM screener_appearances
+        WHERE screener_id = ?
+        GROUP BY symbol
+        ORDER BY appearances DESC
+        LIMIT 15
+      `).all(input.screener_id);
+
+      return { perf, recentAppearances, topStocks };
+    }),
+
+  getScreenerCategoryStats: publicProcedure
+    .input(z.object({
+      horizon: z.enum(['5d', '10d', '20d', '60d', '120d']).default('20d'),
+    }))
+    .query(({ input }) => {
+      const validHorizonCols: Record<string, string> = {
+        '5d': 'wr_5d', '10d': 'wr_10d', '20d': 'wr_20d', '60d': 'wr_60d', '120d': 'wr_120d',
+      };
+      const wrCol = validHorizonCols[input.horizon] ?? 'wr_20d';
+
+      return db.prepare(`
+        SELECT
+          sm.inferred_category                                              AS category,
+          sm.subcategory,
+          COUNT(*)                                                          AS screener_count,
+          AVG(spv.${wrCol})                                                 AS avg_win_rate,
+          AVG(spv.alpha_20d)                                                AS avg_alpha,
+          SUM(CASE WHEN spv.tier = 'A' THEN 1 ELSE 0 END)                  AS tier_a_count,
+          SUM(CASE WHEN spv.tier IN ('A','B') THEN 1 ELSE 0 END)           AS tier_ab_count,
+          MAX(spv.bayesian_score)                                           AS best_score
+        FROM screener_performance_v2 spv
+        JOIN screener_master sm ON sm.scan_id = spv.screener_id
+        WHERE sm.inferred_category IS NOT NULL
+        GROUP BY sm.inferred_category, sm.subcategory
+        ORDER BY avg_win_rate DESC
+      `).all();
+    }),
+
+  getScreenerAppearanceHistory: publicProcedure
+    .input(z.object({
+      symbol:      z.string().optional(),
+      screener_id: z.string().optional(),
+      from_date:   z.string().optional(),
+      limit:       z.number().min(1).max(500).default(100),
+    }).refine(d => d.symbol || d.screener_id, { message: 'Provide symbol or screener_id' }))
+    .query(({ input }) => {
+      const conditions: string[] = [];
+      const params: unknown[] = [];
+
+      if (input.symbol)      { conditions.push('sa.symbol = ?');       params.push(input.symbol); }
+      if (input.screener_id) { conditions.push('sa.screener_id = ?');   params.push(input.screener_id); }
+      if (input.from_date)   { conditions.push('sa.appeared_date >= ?'); params.push(input.from_date); }
+
+      const where = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : '';
+      params.push(input.limit);
+
+      return db.prepare(`
+        SELECT
+          sa.screener_id, sm.name AS screener_name, sa.source,
+          sa.symbol, sa.appeared_date, sa.exited_date,
+          sa.return_20d, sa.outcome_20d, sa.nifty_ret_20d,
+          spv.tier AS screener_tier
+        FROM screener_appearances sa
+        JOIN screener_master sm ON sm.scan_id = sa.screener_id
+        LEFT JOIN screener_performance_v2 spv ON spv.screener_id = sa.screener_id
+        ${where}
+        ORDER BY sa.appeared_date DESC
+        LIMIT ?
+      `).all(...params);
+    }),
+
+  triggerScreenerPerformanceRecompute: publicProcedure
+    .input(z.object({ force: z.boolean().optional() }))
+    .mutation(async () => {
+      try {
+        const { screenerPerfQueue } = await import('../queues');
+        if (!screenerPerfQueue) throw new Error('Queue not initialised');
+        await screenerPerfQueue.add('screener-performance-manual', {}, { removeOnComplete: 3 });
+        return { queued: true, message: 'Screener performance job queued' };
+      } catch (e: any) {
+        return { queued: false, message: `Queue unavailable: ${e.message}` };
+      }
+    }),
 });
