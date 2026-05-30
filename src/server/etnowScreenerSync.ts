@@ -85,27 +85,50 @@ export async function syncETnowScreeners(timeframeFilter?: 'intraday' | 'long_te
 
       console.log(`    ✅ Fetched ${records.length} records`);
 
-      // Clear existing stocks for this screener
+      // Snapshot previous active symbols BEFORE delete
+      const prevSymbols = new Set<string>(
+        (db.prepare(`SELECT symbol FROM screener_appearances WHERE screener_id = ? AND exited_date IS NULL`)
+          .all(screener.screener_id) as Array<{ symbol: string }>)
+          .map(r => r.symbol).filter(Boolean)
+      );
+
+      // Clear existing stocks and re-insert
+      const currentSymbols = new Set<string>();
       db.transaction(() => {
         deleteStmt.run(screener.screener_id);
 
-        // Insert each stock
         for (const record of records) {
           const stockName = record.assetName || record.name || record.companyName || record.stock_name || record.shortName || '';
           const rawSymbol = record.assetSymbol || record.stkId || record.symbol || record.code || record.nseid || '';
 
           if (rawSymbol) {
-            // assetSymbol comes as e.g. "COALINDIAEQ" — strip exchange suffix
             const nseSymbol = rawSymbol
               .replace(/-NSE$/i, '')
               .replace(/EQ$/i, '')
               .replace(/BE$/i, '')
               .trim();
 
-            if (nseSymbol) insertStmt.run(screener.screener_id, nseSymbol, stockName);
+            if (nseSymbol) {
+              insertStmt.run(screener.screener_id, nseSymbol, stockName);
+              currentSymbols.add(nseSymbol);
+            }
           }
         }
       })();
+
+      // Diff patch: record new appearances / exits
+      const today = new Date().toISOString().slice(0, 10);
+      const entered = Array.from(currentSymbols).filter(s => !prevSymbols.has(s));
+      const exited  = Array.from(prevSymbols).filter(s => !currentSymbols.has(s));
+
+      if (entered.length > 0) {
+        const insertApp = db.prepare(`INSERT OR IGNORE INTO screener_appearances (screener_id, source, symbol, appeared_date) VALUES (?, 'etnow', ?, ?)`);
+        db.transaction(() => { for (const s of entered) insertApp.run(screener.screener_id, s, today); })();
+      }
+      if (exited.length > 0) {
+        db.prepare(`UPDATE screener_appearances SET exited_date = ? WHERE screener_id = ? AND symbol IN (${exited.map(() => '?').join(',')}) AND exited_date IS NULL`)
+          .run(today, screener.screener_id, ...exited);
+      }
 
       // Small delay to avoid rate limiting
       await new Promise(resolve => setTimeout(resolve, 800));
