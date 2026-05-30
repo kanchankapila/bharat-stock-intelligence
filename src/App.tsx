@@ -77,6 +77,7 @@ const HedgeFundResearch       = React.lazy(() => import('./components/HedgeFundR
 const SignalIntelligence      = React.lazy(() => import('./components/SignalIntelligence'));
 const DLDashboard             = React.lazy(() => import('./components/DLDashboard'));
 const TodaysPicks             = React.lazy(() => import('./components/TodaysPicks').then(m => ({ default: m.TodaysPicks })));
+const ScreenerIntelligencePage = React.lazy(() => import('./components/ScreenerIntelligencePage').then(m => ({ default: m.ScreenerIntelligencePage })));
 // Named-export lazy wrappers
 const ToDoPage           = React.lazy(() => import('./components/ToDoPage').then(m => ({ default: m.ToDoPage })));
 const InvestmentStrategy = React.lazy(() => import('./components/InvestmentStrategy').then(m => ({ default: m.InvestmentStrategy })));
@@ -3707,6 +3708,7 @@ export default function App() {
             <Route path="/fno-scanners" element={<FnOIntelligenceCenter onSelectStock={(s) => setDrawerSymbol(s)} />} />
             <Route path="/options" element={<div className="p-6"><OptionsIntelligence /></div>} />
             <Route path="/todays-picks" element={<TodaysPicks onSelectStock={(s) => setDrawerSymbol(s)} />} />
+            <Route path="/screener-intelligence" element={<ScreenerIntelligencePage />} />
             <Route path="/trade-cockpit" element={<TradeDecisionCockpit onSelectStock={(s) => setDrawerSymbol(s)} />} />
             <Route path="/backtest" element={<Backtest stocks={stocks} />} />
             <Route path="/signals" element={<DailySignals onSelectStock={(s) => setDrawerSymbol(s)} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
@@ -3821,6 +3823,7 @@ export default function App() {
               <Route path="/fno-scanners" element={<FnOIntelligenceCenter onSelectStock={(s) => setDrawerSymbol(s)} />} />
               <Route path="/options" element={<div className="p-6"><OptionsIntelligence /></div>} />
               <Route path="/todays-picks" element={<TodaysPicks onSelectStock={(s) => setDrawerSymbol(s)} />} />
+              <Route path="/screener-intelligence" element={<ScreenerIntelligencePage />} />
               <Route path="/trade-cockpit" element={<TradeDecisionCockpit onSelectStock={(s) => setDrawerSymbol(s)} />} />
               <Route path="/details" element={selectedSymbol ? (
                 <StockDetails
