@@ -1194,6 +1194,60 @@ tryIndex(`CREATE INDEX IF NOT EXISTS idx_stock_scores_symbol ON stock_scores(sym
 tryIndex(`CREATE INDEX IF NOT EXISTS idx_stock_ohlcv_date ON stock_ohlcv(date DESC)`);
 tryIndex(`CREATE INDEX IF NOT EXISTS idx_unified_signals_date ON unified_signals(signal_date DESC)`);
 
+// ── Screener Intelligence Foundation (Sub-project A) ─────────────────────────
+runMigration('030_screener_appearances', `
+  CREATE TABLE IF NOT EXISTS screener_appearances (
+    screener_id   TEXT NOT NULL,
+    source        TEXT NOT NULL,
+    symbol        TEXT NOT NULL,
+    appeared_date DATE NOT NULL,
+    exited_date   DATE,
+    return_5d     REAL,
+    return_10d    REAL,
+    return_20d    REAL,
+    return_60d    REAL,
+    return_120d   REAL,
+    nifty_ret_20d REAL,
+    outcome_20d   TEXT,
+    PRIMARY KEY (screener_id, symbol, appeared_date)
+  );
+  CREATE INDEX IF NOT EXISTS idx_sa_symbol   ON screener_appearances(symbol);
+  CREATE INDEX IF NOT EXISTS idx_sa_date     ON screener_appearances(appeared_date);
+  CREATE INDEX IF NOT EXISTS idx_sa_screener ON screener_appearances(screener_id);
+`);
+
+runMigration('031_screener_performance_v2', `
+  CREATE TABLE IF NOT EXISTS screener_performance_v2 (
+    screener_id        TEXT PRIMARY KEY,
+    source             TEXT NOT NULL,
+    total_appearances  INTEGER DEFAULT 0,
+    resolved_count     INTEGER DEFAULT 0,
+    wr_5d     REAL, wr_10d    REAL, wr_20d    REAL, wr_60d    REAL, wr_120d   REAL,
+    avg_ret_5d  REAL, avg_ret_10d  REAL, avg_ret_20d  REAL,
+    avg_ret_60d REAL, avg_ret_120d REAL,
+    alpha_20d    REAL,
+    alpha_60d    REAL,
+    sharpe_20d   REAL,
+    max_drawdown REAL,
+    median_ret_20d REAL,
+    bayesian_score REAL,
+    tier           TEXT,
+    data_source    TEXT,
+    last_computed  DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+`);
+
+migrateColumn('screener_master', 'subcategory',         'TEXT');
+migrateColumn('screener_master', 'tier',                'TEXT');
+migrateColumn('screener_master', 'category_confidence', 'REAL');
+migrateColumn('screener_master', 'classified_by',       'TEXT');
+
+migrateColumn('screener_reliability', 'win_rate_5d',   'REAL');
+migrateColumn('screener_reliability', 'win_rate_10d',  'REAL');
+migrateColumn('screener_reliability', 'win_rate_20d',  'REAL');
+migrateColumn('screener_reliability', 'win_rate_60d',  'REAL');
+migrateColumn('screener_reliability', 'win_rate_120d', 'REAL');
+
 // Keep startup diagnostics off stdout so stdio-based clients can parse JSON-RPC.
 console.error('[DB] Schema normalization complete (Phase 3.5)');
 
