@@ -1,242 +1,154 @@
 import db from './db';
 
 export type ScreenerCategory =
-  | 'momentum' | 'institutional' | 'fundamental' | 'volume'
-  | 'trend' | 'reversal' | 'quality' | 'growth'
-  | 'sector' | 'valuation' | 'delivery' | 'other';
+  | 'technical_trend' | 'technical_reversal' | 'technical_breakout' | 'technical_momentum'
+  | 'fundamental_quality' | 'fundamental_growth'
+  | 'valuation' | 'ownership_institutional' | 'sector_theme' | 'composite_strategy'
+  | 'income_dividend' | 'event_corporate_action' | 'risk_red_flags'
+  | 'analyst_sentiment' | 'volume_liquidity' | 'volatility'
+  | 'market_cap_style' | 'derivatives_positioning' | 'other';
 
-interface ClassifyResult {
-  category: ScreenerCategory;
-  subcategory: string | null;
-  confidence: number;
-  classified_by: 'keyword' | 'ollama';
-}
+export type SignalBias = 'bullish' | 'bearish' | 'neutral';
+export type InvestmentHorizon = 'intraday' | 'swing' | 'positional' | 'long_term';
 
-// ── Keyword rule tables ──────────────────────────────────────────────────────
-
-const RULES: Array<{
+export interface ClassifyResult {
   category: ScreenerCategory;
   subcategory: string;
-  keywords: string[];
+  signal_bias: SignalBias;
+  investment_horizon: InvestmentHorizon;
   confidence: number;
-}> = [
-  // Momentum
-  { category: 'momentum', subcategory: '52W High',          keywords: ['52 week high', '52w high', '52-week high', '52wk high', 'year high', '52 high', 'all time high', 'ath', '52high', '52week'], confidence: 0.95 },
-  { category: 'momentum', subcategory: '52W Low',           keywords: ['52 week low', '52w low', '52-week low', 'year low', '52 low'], confidence: 0.95 },
-  { category: 'momentum', subcategory: 'Breakout',          keywords: ['breakout', 'break out', 'breaking out', 'resistance breakout', 'price breakout', 'brkout'], confidence: 0.90 },
-  { category: 'momentum', subcategory: 'Relative Strength', keywords: ['relative strength', 'rs rating', 'momentum score', 'trendlyne momentum', 'price momentum', 'rs screener'], confidence: 0.90 },
-  { category: 'momentum', subcategory: 'Multibagger',       keywords: ['multibagger', 'multi-bagger', 'multi bagger', 'wealth creator', 'potential multibagger'], confidence: 0.90 },
-  { category: 'momentum', subcategory: 'Price Surge',       keywords: ['price surge', 'surge', 'rally', 'gainer', 'top gainer', 'price rise', 'smart breakout', 'smart breakdown'], confidence: 0.85 },
+  classified_by: 'keyword';
+}
 
-  // Institutional
-  { category: 'institutional', subcategory: 'FII Buying',    keywords: ['fii buy', 'fii buying', 'fii purchased', 'foreign buy', 'foreign institutional buy', 'fpi buy', 'fii increasing', 'fii/dii increasing'], confidence: 0.95 },
-  { category: 'institutional', subcategory: 'DII Buying',    keywords: ['dii buy', 'dii buying', 'domestic institutional', 'mutual fund buy', 'mf buy', 'dii increasing'], confidence: 0.95 },
-  { category: 'institutional', subcategory: 'Bulk Deal',     keywords: ['bulk deal', 'bulk purchase', 'bulk transaction', 'bulk buy'], confidence: 0.95 },
-  { category: 'institutional', subcategory: 'Block Deal',    keywords: ['block deal', 'block trade', 'block transaction'], confidence: 0.95 },
-  { category: 'institutional', subcategory: 'Promoter Buy',  keywords: ['promoter buy', 'promoter purchase', 'promoter increas', 'insider buy', 'promoter buying'], confidence: 0.90 },
-  { category: 'institutional', subcategory: 'FII/DII',       keywords: ['fii', 'dii', 'fpi', 'institutional buying', 'institutional activity', 'mfs and fii', 'superstar investor', 'superstar portfolio'], confidence: 0.80 },
+// ── Rule table (mirrors categorizeScreenerNames.ts) ──────────────────────────
 
-  // Fundamental
-  { category: 'fundamental', subcategory: 'Low PE',          keywords: ['low pe', 'undervalued pe', 'pe below', 'cheap pe', 'low p/e', 'attractive pe', 'pe less than'], confidence: 0.90 },
-  { category: 'fundamental', subcategory: 'PEG Undervalued', keywords: ['peg', 'peg ratio', 'peg undervalued', 'low peg'], confidence: 0.90 },
-  { category: 'fundamental', subcategory: 'Earnings Growth', keywords: ['earnings growth', 'eps growth', 'profit growth qoq', 'qoq profit', 'net profit increas', 'earning', 'quarter profit'], confidence: 0.85 },
-  { category: 'fundamental', subcategory: 'ROCE Strong',     keywords: ['roce', 'return on capital', 'high roce', 'strong roce', 'good roce'], confidence: 0.90 },
-  { category: 'fundamental', subcategory: 'Debt-Free',       keywords: ['debt free', 'zero debt', 'debt-free', 'no debt', 'debt to equity < 0.1', 'debt to equity less', 'low debt'], confidence: 0.92 },
-  { category: 'fundamental', subcategory: 'Strong Financials', keywords: ['strong financials', 'piotroski', 'financial health', 'financial strength', 'good fundamentals'], confidence: 0.80 },
-  { category: 'fundamental', subcategory: 'Cash Flow',       keywords: ['cash flow', 'free cash', 'operating cash', 'fcf'], confidence: 0.85 },
+interface CategoryRule {
+  category: ScreenerCategory;
+  subcategory: string;
+  patterns: RegExp[];
+  weight?: number;
+}
 
-  // Volume
-  { category: 'volume', subcategory: 'Volume Shock',         keywords: ['volume shock', 'vol shock', 'unusual volume', 'volume spike', 'abnormal volume', 'extraordinary volume'], confidence: 0.95 },
-  { category: 'volume', subcategory: 'High Vol Breakout',    keywords: ['high volume breakout', 'volume breakout', 'volume expansion', 'vol breakout', 'volume surge', 'high volume'], confidence: 0.90 },
-  { category: 'volume', subcategory: 'Delivery Spike',       keywords: ['delivery volume', 'delivery percentage', 'delivery spike', 'high delivery', 'delivery ratio', 'rising delivery', 'delivery pct'], confidence: 0.90 },
-  { category: 'volume', subcategory: 'OI Buildup',           keywords: ['oi buildup', 'open interest', 'oi increase', 'put call', 'pcr', 'oi build'], confidence: 0.85 },
-
-  // Trend
-  { category: 'trend', subcategory: 'Golden Cross',          keywords: ['golden cross', 'sma50 above sma200', '50 200 crossover', '50/200 cross'], confidence: 0.95 },
-  { category: 'trend', subcategory: 'Death Cross',           keywords: ['death cross', 'sma50 below sma200'], confidence: 0.95 },
-  { category: 'trend', subcategory: 'EMA Crossover',         keywords: ['ema crossover', 'ema cross', 'ema bullish', 'ema bearish', 'ema stack', 'bull stack', 'ema alignment', 'ema8', 'ema21'], confidence: 0.90 },
-  { category: 'trend', subcategory: 'MA Breakout',           keywords: ['ma breakout', 'moving average breakout', 'crossed above sma', 'price above ma', 'above 200 dma', 'above 200ma', 'crossed above ema', 'above bollinger'], confidence: 0.88 },
-  { category: 'trend', subcategory: 'Supertrend',            keywords: ['supertrend', 'super trend', 'supertrend buy', 'supertrend signal'], confidence: 0.95 },
-  { category: 'trend', subcategory: 'ADX Strong',            keywords: ['adx', 'average directional', 'strong trend', 'trend strength', 'adx above'], confidence: 0.85 },
-  { category: 'trend', subcategory: 'Uptrend',               keywords: ['uptrend', 'up trend', 'trending up', 'price uptrend', 'bullish trend'], confidence: 0.82 },
-  { category: 'trend', subcategory: 'Downtrend',             keywords: ['downtrend', 'down trend', 'bearish trend', 'trending down'], confidence: 0.82 },
-
-  // Reversal
-  { category: 'reversal', subcategory: 'RSI Oversold',       keywords: ['rsi oversold', 'rsi below 30', 'oversold rsi', 'rsi reversal', 'rsi bounce', 'rsi power breakout'], confidence: 0.92 },
-  { category: 'reversal', subcategory: 'RSI Overbought',     keywords: ['rsi overbought', 'rsi above 70', 'overbought rsi'], confidence: 0.92 },
-  { category: 'reversal', subcategory: 'MACD Cross',         keywords: ['macd crossover', 'macd cross', 'macd bullish', 'macd bearish', 'macd signal', 'macd divergence'], confidence: 0.90 },
-  { category: 'reversal', subcategory: 'Support Bounce',     keywords: ['support bounce', 'bounce from support', 'support level', 'demand zone bounce', 'near support'], confidence: 0.88 },
-  { category: 'reversal', subcategory: 'BB Squeeze',         keywords: ['bollinger band', 'bb squeeze', 'bollinger squeeze', 'bb breakout', 'bandwidth', 'bollinger compression'], confidence: 0.88 },
-  { category: 'reversal', subcategory: 'Hammer/Doji',        keywords: ['hammer', 'doji', 'engulfing', 'candlestick pattern', 'morning star', 'evening star', 'harami', 'bullish candle', 'bearish candle'], confidence: 0.88 },
-  { category: 'reversal', subcategory: 'CCI Oversold',       keywords: ['cci oversold', 'cci below', 'commodity channel'], confidence: 0.88 },
-  { category: 'reversal', subcategory: 'MFI Oversold',       keywords: ['mfi oversold', 'money flow index', 'mfi below', 'oversold by month money flow'], confidence: 0.88 },
-  { category: 'reversal', subcategory: 'Stochastic',         keywords: ['stochastic oversold', 'stochastic cross', 'stoch', 'slow stochastic'], confidence: 0.85 },
-
-  // Quality
-  { category: 'quality', subcategory: 'Consistent Compounder', keywords: ['consistent compounder', 'compounder', 'consistent performer', 'consistent growth', 'consistent earnings'], confidence: 0.92 },
-  { category: 'quality', subcategory: 'High ROE',            keywords: ['high roe', 'roe above', 'return on equity', 'strong roe', 'good roe'], confidence: 0.90 },
-  { category: 'quality', subcategory: 'High ROCE',           keywords: ['high roce', 'roce above', 'return on capital employed', 'strong roce', 'good roce'], confidence: 0.90 },
-  { category: 'quality', subcategory: 'Dividend',            keywords: ['dividend yield', 'high dividend', 'dividend paying', 'regular dividend', 'dividend growth', 'dividend income'], confidence: 0.90 },
-  { category: 'quality', subcategory: 'Zero Debt',           keywords: ['zero debt', 'debt free', 'no debt', 'debt-free', 'debt to equity 0'], confidence: 0.92 },
-  { category: 'quality', subcategory: 'Cash Rich',           keywords: ['cash rich', 'cash cow', 'high cash', 'cash generation', 'cash and cash equivalent'], confidence: 0.88 },
-
-  // Growth
-  { category: 'growth', subcategory: 'Sales Growth',         keywords: ['sales growth', 'revenue growth', 'topline growth', 'top line growth', 'net sales growth', 'revenue increase'], confidence: 0.90 },
-  { category: 'growth', subcategory: 'Profit Growth',        keywords: ['profit growth', 'pat growth', 'net profit growth', 'earnings growth yoy', 'profit increas', 'profit acceleration'], confidence: 0.90 },
-  { category: 'growth', subcategory: 'Earnings Surprise',    keywords: ['earnings surprise', 'beat estimate', 'positive surprise', 'above estimate', 'beat expectation'], confidence: 0.90 },
-  { category: 'growth', subcategory: 'Margin Expansion',     keywords: ['margin expansion', 'margin improvement', 'operating margin', 'ebitda margin', 'ebitda growth'], confidence: 0.88 },
-
-  // Valuation
-  { category: 'valuation', subcategory: 'DVM',               keywords: ['dvm', 'dvm score', 'dvm rating', 'high dvm', 'low dvm', 'dvm screener'], confidence: 0.95 },
-  { category: 'valuation', subcategory: 'Low PB',            keywords: ['price to book', 'p/b below', 'low pb', 'book value', 'below book'], confidence: 0.88 },
-  { category: 'valuation', subcategory: 'Margin of Safety',  keywords: ['margin of safety', 'intrinsic value', 'graham', 'undervalued stock'], confidence: 0.85 },
-
-  // Delivery
-  { category: 'delivery', subcategory: 'Delivery Spike',     keywords: ['delivery spike', 'high delivery', 'delivery percentage increase', 'rising delivery percentage', 'delivery pct rise'], confidence: 0.92 },
-  { category: 'delivery', subcategory: 'Promoter Activity',  keywords: ['promoter holding', 'promoter pledge', 'promoter stake', 'promoter shareholding'], confidence: 0.88 },
-
-  // Sector
-  { category: 'sector', subcategory: 'Banking/NBFC',         keywords: ['banking', 'bank stocks', 'nbfc', 'financial sector', 'fintech', 'bank and finance'], confidence: 0.88 },
-  { category: 'sector', subcategory: 'IT/Tech',              keywords: ['it sector', 'technology stocks', 'software stocks', 'it companies', 'tech sector'], confidence: 0.88 },
-  { category: 'sector', subcategory: 'Pharma',               keywords: ['pharma', 'pharmaceutical', 'healthcare', 'hospital', 'medical'], confidence: 0.88 },
-  { category: 'sector', subcategory: 'Infra/Defence',        keywords: ['infrastructure', 'defence', 'defense', 'railway', 'roads', 'infra', 'capital goods'], confidence: 0.88 },
-  { category: 'sector', subcategory: 'PSU',                  keywords: ['psu', 'public sector', 'government company', 'psu gems', 'government owned', 'psu stocks'], confidence: 0.92 },
-  { category: 'sector', subcategory: 'Auto',                 keywords: ['auto sector', 'automobile', 'automotive', 'vehicle', 'ev stocks', 'electric vehicle'], confidence: 0.88 },
-  { category: 'sector', subcategory: 'FMCG',                 keywords: ['fmcg', 'consumer goods', 'food and beverage', 'consumer staples', 'fast moving'], confidence: 0.88 },
-  { category: 'sector', subcategory: 'Energy',               keywords: ['energy sector', 'oil gas', 'power sector', 'renewable energy', 'solar', 'wind energy'], confidence: 0.88 },
-  { category: 'sector', subcategory: 'Tata Group',           keywords: ['tata', 'tata empire', 'tata group', 'tata universe'], confidence: 0.95 },
-  { category: 'sector', subcategory: 'Adani Group',          keywords: ['adani', 'adani group', 'adani universe'], confidence: 0.95 },
+const RULES: CategoryRule[] = [
+  { category: 'derivatives_positioning', subcategory: 'open_interest', patterns: [/\bopen interest\b/, /\boi\b/, /\blong buildup\b/, /\blong build-up\b/, /\bshort buildup\b/, /\bshort build-up\b/, /\bshort covering\b/, /\blong unwinding\b/, /\bpcr\b/, /\bput.?call\b/, /\bfno\b/, /\bfutures and options\b/, /\btrade ban\b/] },
+  { category: 'ownership_institutional', subcategory: 'institutional_activity', patterns: [/\bfii?s?\b/, /\bfpi\b/, /\bdiis?\b/, /\bmutual fund/, /\bmfs?\b/, /\binstitution/, /\bforeign investor/, /\bsuperstar investor/, /\binsider/, /\bpromoter (?:buy|sell|increas|decreas|holding|stake|pledge)/, /\bshareholding/, /\bpublic holding\b/] },
+  { category: 'ownership_institutional', subcategory: 'bulk_block_deals', patterns: [/\bbulk deal/, /\bblock deal/] },
+  { category: 'analyst_sentiment', subcategory: 'broker_forecast', patterns: [/\bbrokers?\b/, /\bforecaster\b/, /\banalysts?\b/, /\btarget price\b/, /\bconsensus\b/, /\bstreet favorite\b/, /\breco\b/] },
+  { category: 'event_corporate_action', subcategory: 'corporate_action', patterns: [/\bbonus\b/, /\bsplit\b/, /\bbuyback\b/, /\bright issue\b/, /\bdividend announcement\b/, /\bboard meeting\b/] },
+  { category: 'event_corporate_action', subcategory: 'earnings_event', patterns: [/\bresult/, /\bsurprise\b/, /\bupcoming dividends?\b/] },
+  { category: 'income_dividend', subcategory: 'dividend_income', patterns: [/\bdividend\b/, /\byield stocks?\b/] },
+  { category: 'risk_red_flags', subcategory: 'financial_or_governance_risk', patterns: [/\bred flag/, /\bwealth destroy/, /\bvalue trap/, /\bmomentum trap/, /\bavoid\b/, /\bcaution\b/, /\bpledge/, /\bdeclining profit/, /\bdecreasing (?:eps|revenue|sales|profit|roe|roce)/, /\bincreasing debt/, /\bweak fundamental/, /\bpoor cash/, /\bloss(?:es| making)/, /\bprofit to loss\b/, /\bhigh debt/, /\bhigh leverage\b/, /\bdebt load\b/, /\bnpa\b/, /\bprovisions?\b/] },
+  { category: 'fundamental_quality', subcategory: 'balance_sheet_quality', patterns: [/\bzero debt\b/, /\bno debt\b/, /\bdebt.?free\b/, /\blow debt\b/, /\bdecreasing debt\b/, /\bdebt reduction\b/, /\blow leverage\b/, /\bcash rich\b/, /\bcash cow/, /\bcash king/, /\bpositive cash flow\b/, /\bfree cash flow\b/, /\bpiotroski\b/, /\bfinancial health\b/, /\bgood financials\b/, /\bbalance sheet\b/] },
+  { category: 'fundamental_quality', subcategory: 'capital_efficiency', patterns: [/\broe\b/, /\broce\b/, /\broa\b/, /\breturn on (?:equity|capital|assets)/, /\bprofit margins?\b/, /\bmargin expansion\b/, /\bmargin king/] },
+  { category: 'fundamental_growth', subcategory: 'earnings_growth', patterns: [/\bprofit growth\b/, /\beps growth\b/, /\bearnings growth\b/, /\bprofit increas/, /\brising profit/, /\bprofit acceleration\b/] },
+  { category: 'fundamental_growth', subcategory: 'revenue_growth', patterns: [/\bsales growth\b/, /\brevenue growth\b/, /\btop.?line growth\b/, /\brising revenue\b/, /\brising sales\b/, /\bsales increas/] },
+  { category: 'valuation', subcategory: 'relative_or_absolute_value', patterns: [/\bvalue stocks?\b/, /\bvaluation/, /\bundervalu/, /\bovervalu/, /\bbargain/, /\bmargin of safety\b/, /\blow pe\b/, /\bhigh pe\b/, /\bpe (?:ratio|century|buy zone|sell zone)\b/, /\bp\/e\b/, /\bprice.?to.?earnings\b/, /\bpeg\b/, /\blow pb\b/, /\bhigh pb\b/, /\bp\/b\b/, /\bprice.?to.?book\b/, /\bbook value\b/, /\bintrinsic value\b/, /\bgraham\b/, /\bdvm\b/] },
+  { category: 'technical_reversal', subcategory: 'candlestick_reversal', patterns: [/\breversal\b/, /\bcontinuation\b/, /\bengulfing\b/, /\bhammer\b/, /\bdoji\b/, /\bharami\b/, /\bmarubozu\b/, /\bmorning star\b/, /\bevening star\b/, /\bshooting star\b/, /\bcandlestick\b/] },
+  { category: 'technical_reversal', subcategory: 'oscillator_reversal', patterns: [/\boversold\b/, /\boverbought\b/, /\bdivergence\b/, /\brsi reversal\b/, /\bbounce\b/, /\bturnaround\b/, /buy on dips/, /\bcontrarian\b/] },
+  { category: 'technical_breakout', subcategory: 'price_breakout', patterns: [/\bbreakout/, /\bbreak out\b/, /\bbreakdown/, /\bbreak down\b/, /\bresistance\b/, /\bsupport\b/, /\bpivot\b/, /\btriangle\b/, /\bsqueeze\b/, /\bconsolidation\b/, /\bdarvas\b/, /\bbtst\b/, /\bstbt\b/, /\bperfect buy\b/, /\bperfect sell\b/] },
+  { category: 'technical_momentum', subcategory: 'relative_strength', patterns: [/\brelative (?:outperformance|underperformance|strength)\b/, /\boutperform/, /\bunderperform/, /\bmomentum\b/, /\bmultibagger breakout\b/] },
+  { category: 'technical_momentum', subcategory: 'price_leadership', patterns: [/\bstrong stocks?\b/, /\bweak stocks?\b/, /\bgainer/, /\bloser/, /\bnew highs?\b/, /\b52.?week (?:high|low)\b/, /\bupper circuit\b/, /\blower circuit\b/] },
+  { category: 'technical_trend', subcategory: 'moving_average_trend', patterns: [/\bema\d*/, /\bsma\d*/, /\bmoving average\b/, /\bgolden cross\b/, /\bdeath cross\b/, /\bma crossover\b/] },
+  { category: 'technical_trend', subcategory: 'trend_indicator', patterns: [/\badx\b/, /\bsupertrend\b/, /\btrend(?:ing)? (?:up|down)\b/, /\buptrend\b/, /\bdowntrend\b/, /\bbullish trend\b/, /\bbearish trend\b/, /\bmacd\b/, /\bichimoku\b/] },
+  { category: 'technical_reversal', subcategory: 'oscillator_signal', patterns: [/\brsi\b/, /\bmfi\b/, /\bcci\b/, /\bstoch/, /\bwilliams %?r\b/, /\brelative strength index\b/] },
+  { category: 'volume_liquidity', subcategory: 'volume_delivery', patterns: [/\bvolumes?\b/, /\bdelivery\b/, /\bturnover\b/, /\bliquidity\b/, /\bmost active\b/] },
+  { category: 'volatility', subcategory: 'volatility_range', patterns: [/\bvolatility\b/, /\batr\b/, /\bbollinger\b/, /\bbandwidth\b/, /\bprice range\b/, /\bgap (?:up|down)\b/] },
+  { category: 'market_cap_style', subcategory: 'size_style', patterns: [/\blarge.?cap\b/, /\bmid.?cap\b/, /\bsmall.?cap\b/, /\bmicro.?cap\b/, /\bpenny\b/, /\bbluechip\b/] },
+  { category: 'sector_theme', subcategory: 'sector_or_theme', patterns: [/\bsector\b/, /\bindustr/, /\bbank/, /\bnbfc\b/, /pharma/, /\bhealthcare\b/, /\bauto\b/, /\bfmcg\b/, /\bdefen[cs]e\b/, /infra/, /\brailway\b/, /\bcement\b/, /chemical/, /\benergy\b/, /\bpower\b/, /metals?/, /\breal estate\b/, /\bai stocks?\b/, /\bev stocks?\b/, /\btata\b/, /\badani\b/, /\bpsu\b/, /\bit stocks?\b/, /\btechnology\b/] },
+  { category: 'composite_strategy', subcategory: 'multi_factor_strategy', patterns: [/compounder/, /champion/, /\bleader\b/, /\bscore/, /\bchecklist\b/, /\bstrategy\b/, /\bmultibagger/, /\bwealth creator\b/, /magic formula/, /\bcanslim\b/, /\bwarren buffet/, /\bportfolio\b/, /superstars?/] },
 ];
 
-// ── Keyword classifier ───────────────────────────────────────────────────────
+const BULLISH_PATTERNS = [
+  /\bbull/, /\bbuy\b/, /\bbreakout\b/, /\buptrend\b/, /\btrending up\b/, /\bcrossed above\b/,
+  /\babove\b/, /\bgainer/, /\bhigh\b/, /\boversold\b/, /\bpositive\b/, /\brising\b/, /\bincreas/,
+  /\boutperform/, /\bgolden cross\b/, /\blong buildup\b/, /\bshort covering\b/, /\bstrong\b/,
+];
 
-export function classifyByKeyword(name: string, description = ''): ClassifyResult {
-  const text = (name + ' ' + description).toLowerCase();
+const BEARISH_PATTERNS = [
+  /\bbear/, /\bsell\b/, /\bbreakdown\b/, /\bdowntrend\b/, /\btrending down\b/, /\bcrossed below\b/,
+  /\bbelow\b/, /\bloser/, /\blow\b/, /\boverbought\b/, /\bnegative\b/, /\bfalling\b/, /\bdecreas/,
+  /\bunderperform/, /\bdeath cross\b/, /\bshort buildup\b/, /\blong unwinding\b/, /\bweak\b/,
+];
 
-  let best: ClassifyResult = { category: 'other', subcategory: null, confidence: 0, classified_by: 'keyword' };
+// ── Core classifier ──────────────────────────────────────────────────────────
+
+export function classifyByKeyword(name: string): ClassifyResult {
+  const text = name.toLowerCase().replace(/[–—]/g, '-');
+
+  let best: CategoryRule | undefined;
+  let bestScore = 0;
 
   for (const rule of RULES) {
-    for (const kw of rule.keywords) {
-      if (text.includes(kw)) {
-        if (rule.confidence > best.confidence) {
-          best = {
-            category: rule.category,
-            subcategory: rule.subcategory,
-            confidence: rule.confidence,
-            classified_by: 'keyword',
-          };
-        }
-      }
+    const matches = rule.patterns.filter(p => p.test(text)).length;
+    const score = matches === 0 ? 0 : matches + (rule.weight ?? 0);
+    if (score > bestScore) {
+      best = rule;
+      bestScore = score;
     }
   }
 
-  return best;
-}
+  const bullish = BULLISH_PATTERNS.some(p => p.test(text));
+  const bearish = BEARISH_PATTERNS.some(p => p.test(text));
+  const signal_bias: SignalBias = bullish === bearish ? 'neutral' : bullish ? 'bullish' : 'bearish';
 
-// ── Ollama fallback ──────────────────────────────────────────────────────────
-
-async function classifyViaOllama(name: string): Promise<ClassifyResult> {
-  const prompt = `You are classifying Indian stock market screeners.
-Screener name: "${name}"
-Available categories: momentum, institutional, fundamental, volume, trend, reversal, quality, growth, sector, valuation, delivery
-Return ONLY valid JSON with no explanation: {"category": "...", "subcategory": "...", "confidence": 0.85}
-If unsure use "other" as category.`;
-
-  try {
-    const res = await fetch('http://localhost:11434/api/generate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: 'llama3.2', prompt, stream: false }),
-      signal: AbortSignal.timeout(15000),
-    });
-    if (!res.ok) throw new Error(`Ollama ${res.status}`);
-    const data = await res.json() as { response: string };
-    const match = data.response.match(/\{[^}]+\}/);
-    if (!match) throw new Error('No JSON in response');
-    const parsed = JSON.parse(match[0]) as { category?: string; subcategory?: string; confidence?: number };
-    const validCategories: ScreenerCategory[] = [
-      'momentum', 'institutional', 'fundamental', 'volume', 'trend',
-      'reversal', 'quality', 'growth', 'sector', 'valuation', 'delivery', 'other',
-    ];
-    const cat = validCategories.includes(parsed.category as ScreenerCategory)
-      ? (parsed.category as ScreenerCategory)
-      : 'other';
-    return {
-      category: cat,
-      subcategory: parsed.subcategory ?? null,
-      confidence: parsed.confidence ?? 0.6,
-      classified_by: 'ollama',
-    };
-  } catch {
-    return { category: 'other', subcategory: null, confidence: 0, classified_by: 'keyword' };
+  let investment_horizon: InvestmentHorizon = 'long_term';
+  if (/\b(?:5|15|30|45|60)[ -]?min\b|\bintraday\b|\bday trade\b|\bbtst\b|\bstbt\b|\bgap (?:up|down)\b/.test(text)) {
+    investment_horizon = 'intraday';
+  } else if (/\b1h\b|\b2h\b|\b4h\b|\bhour\b|\bdaily\b|\bday\b|\bswing\b|\bweek\b/.test(text) || (best?.category ?? '').startsWith('technical_') || best?.category === 'volatility') {
+    investment_horizon = 'swing';
+  } else if (/\bmonth\b|\bquarter\b|\b6 months?\b|\b1 year\b|\b52.?week\b/.test(text)) {
+    investment_horizon = 'positional';
   }
+
+  const confidence = best ? Math.min(0.98, 0.66 + Math.min(bestScore, 4) * 0.08) : 0.35;
+
+  return {
+    category: best?.category ?? 'other',
+    subcategory: best?.subcategory ?? 'uncategorized',
+    signal_bias,
+    investment_horizon,
+    confidence,
+    classified_by: 'keyword',
+  };
 }
 
-// ── Main export ──────────────────────────────────────────────────────────────
+// ── DB update (runs on new screeners only) ───────────────────────────────────
 
 export async function classifyAllScreeners(): Promise<{
   classified: number;
-  ollama_used: number;
   remaining_other: number;
 }> {
   const rows = db.prepare(`
-    SELECT scan_id, name, source
-    FROM screener_master
-    WHERE subcategory IS NULL
-    ORDER BY source, name
-  `).all() as Array<{ scan_id: string; name: string; source: string }>;
+    SELECT scan_id, name FROM screener_master
+    WHERE subcategory IS NULL OR classified_by IS NULL
+    ORDER BY name
+  `).all() as Array<{ scan_id: string; name: string }>;
 
   if (rows.length === 0) {
     console.log('[Classifier] All screeners already classified.');
-    return { classified: 0, ollama_used: 0, remaining_other: 0 };
+    return { classified: 0, remaining_other: 0 };
   }
 
-  console.log(`[Classifier] Classifying ${rows.length} unclassified screeners...`);
+  console.log(`[Classifier] Classifying ${rows.length} screeners...`);
 
-  const updateStmt = db.prepare(`
+  const stmt = db.prepare(`
     UPDATE screener_master
-    SET subcategory = ?, inferred_category = ?, category_confidence = ?, classified_by = ?
+    SET subcategory = ?, inferred_category = ?, inferred_sentiment = ?,
+        inferred_timeframe = ?, category_confidence = ?, classified_by = ?
     WHERE scan_id = ?
   `);
 
   let classified = 0;
-  let ollama_used = 0;
   let remaining_other = 0;
 
-  const needOllama: Array<{ scan_id: string; name: string }> = [];
-
   for (const row of rows) {
-    const result = classifyByKeyword(row.name);
-    if (result.confidence >= 0.7) {
-      updateStmt.run(result.subcategory, result.category, result.confidence, 'keyword', row.scan_id);
-      classified++;
-    } else {
-      needOllama.push({ scan_id: row.scan_id, name: row.name });
-    }
+    const r = classifyByKeyword(row.name);
+    const timeframe = r.investment_horizon === 'intraday' ? 'intraday' : 'long_term';
+    stmt.run(r.subcategory, r.category, r.signal_bias, timeframe, r.confidence, 'keyword', row.scan_id);
+    if (r.category === 'other') remaining_other++;
+    else classified++;
   }
 
-  // Ollama batch: 5 at a time with 200ms between batches
-  const BATCH_SIZE = 5;
-  for (let i = 0; i < needOllama.length; i += BATCH_SIZE) {
-    const batch = needOllama.slice(i, i + BATCH_SIZE);
-    await Promise.all(
-      batch.map(async (item) => {
-        const result = await classifyViaOllama(item.name);
-        if (result.category !== 'other' && result.confidence >= 0.6) {
-          updateStmt.run(result.subcategory, result.category, result.confidence, 'ollama', item.scan_id);
-          classified++;
-          ollama_used++;
-        } else {
-          updateStmt.run('Other', 'other', 0.3, 'keyword', item.scan_id);
-          remaining_other++;
-        }
-      }),
-    );
-    if (i + BATCH_SIZE < needOllama.length) {
-      await new Promise(r => setTimeout(r, 200));
-    }
-  }
-
-  console.log(`[Classifier] Done: ${classified} classified, ${ollama_used} via Ollama, ${remaining_other} remain 'other'`);
-  return { classified, ollama_used, remaining_other };
+  console.log(`[Classifier] Done: ${classified} classified, ${remaining_other} remain 'other'`);
+  return { classified, remaining_other };
 }
