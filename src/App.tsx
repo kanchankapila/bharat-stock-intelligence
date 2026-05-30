@@ -27,63 +27,72 @@ import { trpc } from './lib/trpc';
 import { useIntersectionObserver } from './hooks/useIntersectionObserver';
 import { useNewsFeed, NewsArticle } from './services/newsService';
 import { detectCandlestickPatterns, Candlestick } from './lib/candlestickUtils';
+// ─── Always-loaded (shell, drawers, inline dashboard widgets) ─────────────────
 import MCStockInfoPanel from './components/MCStockInfoPanel';
 import { MCIndexDetailPanel } from './components/MCIndexDetailPanel';
-import TrendlyneScreenerPanel from './components/TrendlyneScreenerPanel';
-import { TrendlyneSectorDashboard } from './components/TrendlyneSectorDashboard';
-import { IntradayBreakouts } from './components/IntradayBreakouts';
-import NSEStockDiscovery from './components/NSEStockDiscovery';
-import TopRatedStocks from './components/TopRatedStocks';
-import FnOIntelligenceCenter from './components/FnOIntelligenceCenter';
-import OptionsIntelligence from './components/OptionsIntelligence';
-import PortfolioAnalytics from './components/PortfolioAnalytics';
-import IndexFnoOverview from './components/IndexFnoOverview';
-import { ToDoPage } from './components/ToDoPage';
-import SystemMonitorPage from './components/SystemMonitorPage';
-import ProfilePage from './components/ProfilePage';
 import { GlobalMarketCards } from './components/GlobalMarketCards';
 import { Card } from './components/Card';
 import { AlertsToast } from './components/AlertsToast';
-import StrategyBuilder from './components/StrategyBuilder';
-import { InvestmentStrategy } from './components/InvestmentStrategy';
+import { AppShell } from './components/AppShell';
+import { SlideOutDrawer } from './components/SlideOutDrawer';
 import { SectorHeatmap, SectorPerformance } from './components/SectorIntelligence';
 import { MomentumIntelligence } from './components/MomentumIntelligence';
 import { IndexOverview, InstitutionalInsights, PennyStockIntelligence } from './components/MarketInsights';
+import { TopMoversIntelligence } from './components/TopMoversIntelligence';
+import { MarketIndices } from './components/MarketIndices';
+import { GlobalMarkets } from './components/GlobalMarkets';
+import { Watchlist } from './components/Watchlist';
+import { TrendlyneSectorDashboard } from './components/TrendlyneSectorDashboard';
+import { IntradayBreakouts } from './components/IntradayBreakouts';
+import {
+  TickerTapeWidget,
+  EconomicCalendarWidget,
+  MarketHeatmapWidget,
+  MarketOverviewWidget
+} from './components/TradingViewWidgets';
 
 import stockData from './data/stocklist';
 import { nseStocksData } from './data/nseStocks';
 
-import { TopMoversIntelligence } from './components/TopMoversIntelligence';
-import { MarketIndices } from './components/MarketIndices';
-import { IndicesPage } from './components/IndicesPage';
-import { GlobalMarkets } from './components/GlobalMarkets';
-import { Watchlist } from './components/Watchlist';
-import { StrategyIntelligence } from './components/StrategyIntelligence';
-import { DailySignals } from './components/DailySignals';
-import DashboardPage from './components/DashboardPage';
-import SuperstarPortfolio from './components/SuperstarPortfolio';
-import { SentimentIntelligence } from './components/SentimentIntelligence';
-import { AppShell } from './components/AppShell';
-import { SlideOutDrawer } from './components/SlideOutDrawer';
-import { V2AppShell } from './v2/components/layout/V2AppShell';
-import { V2StockDetails } from './v2/views/stock-analysis/V2StockDetails';
-import { V2Settings } from './v2/views/settings/V2Settings';
-import { V2Dashboard } from './v2/views/dashboard/V2Dashboard';
-import PremarketPanel from './components/PremarketPanel';
-import SmartMoneyPage from './components/SmartMoneyPage';
-import EarningsPage from './components/EarningsPage';
-import TradeDecisionCockpit from './components/TradeDecisionCockpit';
-import HedgeFundResearch from './components/HedgeFundResearch';
-import SignalIntelligence from './components/SignalIntelligence';
-import DLDashboard from './components/DLDashboard';
-import { 
-  TickerTapeWidget, 
-  TechnicalAnalysisWidget, 
-  EconomicCalendarWidget, 
-  MarketHeatmapWidget, 
-  AdvancedChartWidget,
-  MarketOverviewWidget 
-} from './components/TradingViewWidgets';
+// O(1) lookup maps — avoids O(n) .find() on every stock detail open
+const _stockDataMap = new Map(stockData.map(s => [s.symbol.toUpperCase(), s]));
+const _nseSymbolMap = new Map(nseStocksData.map(s => [s.symbol, s]));
+
+// ─── Lazy-loaded tab/page components (not needed until navigation) ─────────────
+const TrendlyneScreenerPanel = React.lazy(() => import('./components/TrendlyneScreenerPanel'));
+const NSEStockDiscovery       = React.lazy(() => import('./components/NSEStockDiscovery'));
+const TopRatedStocks          = React.lazy(() => import('./components/TopRatedStocks'));
+const FnOIntelligenceCenter   = React.lazy(() => import('./components/FnOIntelligenceCenter'));
+const OptionsIntelligence     = React.lazy(() => import('./components/OptionsIntelligence'));
+const PortfolioAnalytics      = React.lazy(() => import('./components/PortfolioAnalytics'));
+const StrategyBuilder         = React.lazy(() => import('./components/StrategyBuilder'));
+const SystemMonitorPage       = React.lazy(() => import('./components/SystemMonitorPage'));
+const ProfilePage             = React.lazy(() => import('./components/ProfilePage'));
+const DashboardPage           = React.lazy(() => import('./components/DashboardPage'));
+const SuperstarPortfolio      = React.lazy(() => import('./components/SuperstarPortfolio'));
+const SmartMoneyPage          = React.lazy(() => import('./components/SmartMoneyPage'));
+const EarningsPage            = React.lazy(() => import('./components/EarningsPage'));
+const TradeDecisionCockpit    = React.lazy(() => import('./components/TradeDecisionCockpit'));
+const HedgeFundResearch       = React.lazy(() => import('./components/HedgeFundResearch'));
+const SignalIntelligence      = React.lazy(() => import('./components/SignalIntelligence'));
+const DLDashboard             = React.lazy(() => import('./components/DLDashboard'));
+const TodaysPicks             = React.lazy(() => import('./components/TodaysPicks').then(m => ({ default: m.TodaysPicks })));
+// Named-export lazy wrappers
+const ToDoPage           = React.lazy(() => import('./components/ToDoPage').then(m => ({ default: m.ToDoPage })));
+const InvestmentStrategy = React.lazy(() => import('./components/InvestmentStrategy').then(m => ({ default: m.InvestmentStrategy })));
+const IndicesPage        = React.lazy(() => import('./components/IndicesPage').then(m => ({ default: m.IndicesPage })));
+const StrategyIntelligence = React.lazy(() => import('./components/StrategyIntelligence').then(m => ({ default: m.StrategyIntelligence })));
+const DailySignals       = React.lazy(() => import('./components/DailySignals').then(m => ({ default: m.DailySignals })));
+const SentimentIntelligence = React.lazy(() => import('./components/SentimentIntelligence').then(m => ({ default: m.SentimentIntelligence })));
+const V2AppShell         = React.lazy(() => import('./v2/components/layout/V2AppShell').then(m => ({ default: m.V2AppShell })));
+const V2StockDetails     = React.lazy(() => import('./v2/views/stock-analysis/V2StockDetails').then(m => ({ default: m.V2StockDetails })));
+const V2Settings         = React.lazy(() => import('./v2/views/settings/V2Settings').then(m => ({ default: m.V2Settings })));
+const V2Dashboard        = React.lazy(() => import('./v2/views/dashboard/V2Dashboard').then(m => ({ default: m.V2Dashboard })));
+
+// Lazy Suspense fallback
+const PageFallback = () => (
+  <div className="flex items-center justify-center h-64 text-muted-foreground text-sm">Loading…</div>
+);
 
 
 class MCErrorBoundary extends React.Component<
@@ -109,6 +118,49 @@ class MCErrorBoundary extends React.Component<
     }
     return this.props.children;
   }
+}
+
+class TabErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { hasError: boolean; message: string }
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, message: '' };
+  }
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, message: error.message };
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex flex-col items-center justify-center h-64 gap-4">
+          <AlertCircle className="w-10 h-10 text-rose-500" />
+          <p className="text-slate-300 font-medium">Service temporarily unavailable</p>
+          <p className="text-xs text-slate-500">{this.state.message}</p>
+          <button
+            className="px-4 py-1.5 text-xs rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300"
+            onClick={() => this.setState({ hasError: false, message: '' })}
+          >
+            Retry
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+// Resets the error boundary on every navigation change (keyed by pathname)
+function SafeRoutes({ children }: { children: React.ReactNode }) {
+  const location = useLocation();
+  return (
+    <TabErrorBoundary key={location.pathname}>
+      <React.Suspense fallback={<PageFallback />}>
+        {children}
+      </React.Suspense>
+    </TabErrorBoundary>
+  );
 }
 
 // --- Types ---
@@ -2746,7 +2798,7 @@ const StockDetails: React.FC<{
   const { data: unifiedData } = trpc.getAlphaQuantDetail.useQuery({ symbol });
 
   // Resolve MC symbol (scId) from stocklist mapping for MoneyControl API calls
-  const stockMapping = stockData.find(s => s.symbol.toUpperCase() === symbol.toUpperCase());
+  const stockMapping = _stockDataMap.get(symbol.toUpperCase());
   const mcScId = stockMapping?.mcsymbol || symbol;
 
   // Fetch stock data if it wasn't provided in the initial props
@@ -2758,7 +2810,7 @@ const StockDetails: React.FC<{
   const stock = initialStock || liveStock;
 
   // Fallback name/sector from NSE master list when live data is unavailable
-  const nseEntry = !stock ? nseStocksData.find(s => s.symbol === symbol) : null;
+  const nseEntry = !stock ? (_nseSymbolMap.get(symbol) ?? null) : null;
   const displayName = stock?.name ?? nseEntry?.name ?? symbol;
 
   const reportMutation = trpc.generateTrendReport.useMutation({
@@ -3586,6 +3638,7 @@ export default function App() {
         }}
       >
         <AnimatePresence mode="wait">
+          <SafeRoutes>
           <Routes location={location} key={activeTab}>
             <Route path="/watchlist" element={
               <Watchlist
@@ -3626,6 +3679,7 @@ export default function App() {
             <Route path="/earnings" element={<EarningsPage onSelectStock={(s) => setDrawerSymbol(s)} />} />
             <Route path="/fno-scanners" element={<FnOIntelligenceCenter onSelectStock={(s) => setDrawerSymbol(s)} />} />
             <Route path="/options" element={<div className="p-6"><OptionsIntelligence /></div>} />
+            <Route path="/todays-picks" element={<TodaysPicks onSelectStock={(s) => setDrawerSymbol(s)} />} />
             <Route path="/trade-cockpit" element={<TradeDecisionCockpit onSelectStock={(s) => setDrawerSymbol(s)} />} />
             <Route path="/backtest" element={<Backtest stocks={stocks} />} />
             <Route path="/signals" element={<DailySignals onSelectStock={(s) => setDrawerSymbol(s)} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
@@ -3656,6 +3710,7 @@ export default function App() {
             <Route path="/builder" element={<div className="p-6"><StrategyBuilder /></div>} />
             <Route path="/settings" element={<V2Settings />} />
           </Routes>
+          </SafeRoutes>
         </AnimatePresence>
 
         <SlideOutDrawer
@@ -3685,6 +3740,7 @@ export default function App() {
       >
         <TickerTapeWidget />
         <AnimatePresence mode="wait">
+          <SafeRoutes>
           <Routes location={location} key={activeTab}>
             <Route path="/watchlist" element={
             <motion.div
@@ -3737,6 +3793,7 @@ export default function App() {
               } />
               <Route path="/fno-scanners" element={<FnOIntelligenceCenter onSelectStock={(s) => setDrawerSymbol(s)} />} />
               <Route path="/options" element={<div className="p-6"><OptionsIntelligence /></div>} />
+              <Route path="/todays-picks" element={<TodaysPicks onSelectStock={(s) => setDrawerSymbol(s)} />} />
               <Route path="/trade-cockpit" element={<TradeDecisionCockpit onSelectStock={(s) => setDrawerSymbol(s)} />} />
               <Route path="/details" element={selectedSymbol ? (
                 <StockDetails
@@ -3796,6 +3853,7 @@ export default function App() {
             </motion.div>
             } />
           </Routes>
+          </SafeRoutes>
         </AnimatePresence>
       </AppShell>
 

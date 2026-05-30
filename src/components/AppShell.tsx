@@ -42,6 +42,7 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Intelligence',
     items: [
+      { icon: Zap,      label: "Today's Picks", id: 'todays-picks'  },
       { icon: Sparkles, label: 'Trade Cockpit', id: 'trade-cockpit' },
       { icon: Radio,   label: 'Signals',    id: 'signals'     },
       { icon: Layers,  label: 'Signal Intel', id: 'signal-intelligence' },
