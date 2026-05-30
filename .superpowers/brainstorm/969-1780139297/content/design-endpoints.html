@@ -1,0 +1,91 @@
+<h2>Design — Section 3 of 3: tRPC Endpoints</h2>
+<p class="subtitle">5 new procedures in screeners.router.ts. Does this cover what you need?</p>
+
+<div style="display:flex;flex-direction:column;gap:12px;margin-top:16px">
+
+  <div style="background:#0f172a;border:1px solid #1e3a8a;border-radius:10px;padding:14px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <span style="color:#60a5fa;font-weight:700;font-size:13px">getScreenerLeaderboard</span>
+      <span style="background:#1e3a8a;color:#93c5fd;font-size:10px;padding:2px 8px;border-radius:10px">query</span>
+    </div>
+    <div style="font-family:monospace;font-size:11px;color:#94a3b8;line-height:1.7">
+      <span style="color:#6b7280">input:</span> { category?, source?, horizon: '5d'|'10d'|'20d'|'60d'|'120d', tier?, limit, offset }<br>
+      <span style="color:#6b7280">output:</span> [{ screener_id, name, source, category, subcategory, tier, bayesian_score,<br>
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;win_rate, avg_return, alpha, sharpe, resolved_count, tier_badge_color }]<br>
+      <span style="color:#4b5563">// Powers the Screener Leaderboard page — filterable ranked table with tier A/B/C/D badges</span>
+    </div>
+  </div>
+
+  <div style="background:#0f172a;border:1px solid #065f46;border-radius:10px;padding:14px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <span style="color:#34d399;font-weight:700;font-size:13px">getScreenerDetail</span>
+      <span style="background:#064e3b;color:#6ee7b7;font-size:10px;padding:2px 8px;border-radius:10px">query</span>
+    </div>
+    <div style="font-family:monospace;font-size:11px;color:#94a3b8;line-height:1.7">
+      <span style="color:#6b7280">input:</span> { screener_id }<br>
+      <span style="color:#6b7280">output:</span> { ...leaderboard fields, all_horizons: { 5d,10d,20d,60d,120d metrics },<br>
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;recent_appearances: [{ symbol, appeared_date, return_20d, outcome }],<br>
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;top_stocks: string[], tier_history: [{ date, tier }] }<br>
+      <span style="color:#4b5563">// Deep-dive on one screener — shown when user clicks a row in leaderboard</span>
+    </div>
+  </div>
+
+  <div style="background:#0f172a;border:1px solid #4c1d95;border-radius:10px;padding:14px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <span style="color:#a78bfa;font-weight:700;font-size:13px">getScreenerCategoryStats</span>
+      <span style="background:#4c1d95;color:#c4b5fd;font-size:10px;padding:2px 8px;border-radius:10px">query</span>
+    </div>
+    <div style="font-family:monospace;font-size:11px;color:#94a3b8;line-height:1.7">
+      <span style="color:#6b7280">input:</span> { horizon?: '20d' }<br>
+      <span style="color:#6b7280">output:</span> [{ category, subcategory, count, avg_win_rate, avg_alpha, tier_a_count,<br>
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;best_screener_name, best_screener_id }]<br>
+      <span style="color:#4b5563">// Category-level summary — e.g. "Momentum screeners avg 61% win rate, 3 are Tier A"</span>
+    </div>
+  </div>
+
+  <div style="background:#0f172a;border:1px solid #7c2d12;border-radius:10px;padding:14px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <span style="color:#fb923c;font-weight:700;font-size:13px">getScreenerAppearanceHistory</span>
+      <span style="background:#7c2d12;color:#fdba74;font-size:10px;padding:2px 8px;border-radius:10px">query</span>
+    </div>
+    <div style="font-family:monospace;font-size:11px;color:#94a3b8;line-height:1.7">
+      <span style="color:#6b7280">input:</span> { symbol?, screener_id?, from_date?, limit }<br>
+      <span style="color:#6b7280">output:</span> [{ screener_id, screener_name, symbol, appeared_date, return_20d,<br>
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;outcome_20d, tier_at_time }]<br>
+      <span style="color:#4b5563">// Reverse lookup — "which screeners has HDFCBANK appeared in, and what happened?"</span>
+    </div>
+  </div>
+
+  <div style="background:#0f172a;border:1px solid #1f2937;border-radius:10px;padding:14px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <span style="color:#9ca3af;font-weight:700;font-size:13px">triggerScreenerPerformanceRecompute</span>
+      <span style="background:#1f2937;color:#6b7280;font-size:10px;padding:2px 8px;border-radius:10px">mutation (admin)</span>
+    </div>
+    <div style="font-family:monospace;font-size:11px;color:#94a3b8;line-height:1.7">
+      <span style="color:#6b7280">input:</span> { force?: boolean }<br>
+      <span style="color:#6b7280">output:</span> { queued: true, message }<br>
+      <span style="color:#4b5563">// Queues screener_performance.py via BullMQ — exposed in Monitor page</span>
+    </div>
+  </div>
+
+</div>
+
+<!-- Router location note -->
+<div style="margin-top:16px;background:#111827;border:1px solid #374151;border-radius:10px;padding:12px;font-size:11px;color:#6b7280">
+  All 5 procedures added to <code style="color:#9ca3af">src/server/routers/screeners.router.ts</code>.
+  No new router file needed — consistent with existing pattern.
+  Screener performance script added to <code style="color:#9ca3af">MONITOR_SCRIPTS</code> in monitor.router.ts.
+</div>
+
+<div class="section" style="margin-top:20px">
+  <div class="options">
+    <div class="option" data-choice="approve" onclick="toggleSelect(this)">
+      <div class="letter">✓</div>
+      <div class="content"><h3>Endpoints look right — write the spec doc</h3></div>
+    </div>
+    <div class="option" data-choice="change" onclick="toggleSelect(this)">
+      <div class="letter">✎</div>
+      <div class="content"><h3>I want changes</h3><p>Tell me in terminal</p></div>
+    </div>
+  </div>
+</div>

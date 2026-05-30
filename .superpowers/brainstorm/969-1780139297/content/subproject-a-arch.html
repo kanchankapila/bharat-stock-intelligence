@@ -1,0 +1,106 @@
+<h2>Sub-project A — Screener Intelligence Foundation</h2>
+<p class="subtitle">What exists today vs. what gets built. Does this scope look right?</p>
+
+<div class="section">
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-top:16px">
+
+    <!-- Exists -->
+    <div style="background:#0f2a1a;border:1px solid #22543d;border-radius:12px;padding:20px">
+      <div class="label" style="color:#48bb78;margin-bottom:12px">✅ Already Exists</div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <div style="background:#1a3a2a;border-radius:8px;padding:10px 14px;font-size:13px">
+          <div style="color:#68d391;font-weight:600">screener_master</div>
+          <div style="color:#9ca3af;font-size:11px;margin-top:2px">1,521 screeners · NLP category/sentiment · 633 uncategorised ("other")</div>
+        </div>
+        <div style="background:#1a3a2a;border-radius:8px;padding:10px 14px;font-size:13px">
+          <div style="color:#68d391;font-weight:600">screener_reliability</div>
+          <div style="color:#9ca3af;font-size:11px;margin-top:2px">1,391 rows · win_rate_1d / 7d / 30d · reliability_score float · no tiers</div>
+        </div>
+        <div style="background:#1a3a2a;border-radius:8px;padding:10px 14px;font-size:13px">
+          <div style="color:#68d391;font-weight:600">signal_outcomes</div>
+          <div style="color:#9ca3af;font-size:11px;margin-top:2px">4,957 rows · WIN/LOSS/NEUTRAL · 5D + 15D horizons</div>
+        </div>
+        <div style="background:#1a3a2a;border-radius:8px;padding:10px 14px;font-size:13px">
+          <div style="color:#68d391;font-weight:600">categorizeScreener() in trendlyneScreener.ts</div>
+          <div style="color:#9ca3af;font-size:11px;margin-top:2px">keyword NLP · assigns sentiment/category/timeframe</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Gets Built -->
+    <div style="background:#1a1a2e;border:1px solid #4a3f8a;border-radius:12px;padding:20px">
+      <div class="label" style="color:#a78bfa;margin-bottom:12px">🔨 Gets Built</div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <div style="background:#252040;border-radius:8px;padding:10px 14px;font-size:13px">
+          <div style="color:#c4b5fd;font-weight:600">Tier Classifier</div>
+          <div style="color:#9ca3af;font-size:11px;margin-top:2px">A/B/C/D tier from reliability_score · stored in screener_master · auto-updates daily</div>
+        </div>
+        <div style="background:#252040;border-radius:8px;padding:10px 14px;font-size:13px">
+          <div style="color:#c4b5fd;font-weight:600">Multi-Horizon Performance</div>
+          <div style="color:#9ca3af;font-size:11px;margin-top:2px">Add 5d / 10d / 20d / 60d / 120d columns to screener_reliability · backfill from signal_outcomes</div>
+        </div>
+        <div style="background:#252040;border-radius:8px;padding:10px 14px;font-size:13px">
+          <div style="color:#c4b5fd;font-weight:600">Category Fixer</div>
+          <div style="color:#9ca3af;font-size:11px;margin-top:2px">Reduce "other" from 633 → &lt;100 · expand keyword rules + LLM-assist fallback for ambiguous names</div>
+        </div>
+        <div style="background:#252040;border-radius:8px;padding:10px 14px;font-size:13px">
+          <div style="color:#c4b5fd;font-weight:600">screener_performance_v2 table</div>
+          <div style="color:#9ca3af;font-size:11px;margin-top:2px">Sharpe / alpha / median return / max drawdown per screener per horizon · replaces flat reliability columns</div>
+        </div>
+        <div style="background:#252040;border-radius:8px;padding:10px 14px;font-size:13px">
+          <div style="color:#c4b5fd;font-weight:600">tRPC: getScreenerLeaderboard</div>
+          <div style="color:#9ca3af;font-size:11px;margin-top:2px">Ranked list with tier badges · filterable by category / source / horizon</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="section" style="margin-top:24px">
+  <h3>Data Flow</h3>
+  <div style="background:#111827;border-radius:12px;padding:20px;font-family:monospace;font-size:12px;color:#e2e8f0;line-height:1.8">
+    <span style="color:#9ca3af">Existing screener stocks</span><br>
+    trendlyne_screener_stocks / mc / etnow<br>
+    <span style="color:#4b5563">──────────────────────────────────────────────</span><br>
+    ↓ <span style="color:#fbbf24">join with stock_ohlcv (price N days after appearance)</span><br>
+    ↓ <span style="color:#fbbf24">calculate return at 5d / 10d / 20d / 60d / 120d</span><br>
+    <span style="color:#4b5563">──────────────────────────────────────────────</span><br>
+    ↓ aggregate per screener → <span style="color:#a78bfa">screener_performance_v2</span><br>
+    &nbsp;&nbsp;win_rate, avg_return, sharpe, alpha, drawdown per horizon<br>
+    <span style="color:#4b5563">──────────────────────────────────────────────</span><br>
+    ↓ <span style="color:#34d399">Tier Classifier</span> (rules-based on composite score)<br>
+    &nbsp;&nbsp;Tier A: top 10% · Tier B: 11–35% · Tier C: 36–65% · Tier D: bottom 35%<br>
+    <span style="color:#4b5563">──────────────────────────────────────────────</span><br>
+    ↓ written back to <span style="color:#68d391">screener_master.tier</span><br>
+    ↓ exposed via <span style="color:#60a5fa">tRPC: getScreenerLeaderboard</span>
+  </div>
+</div>
+
+<div class="section" style="margin-top:24px">
+  <h3>Does this scope look right?</h3>
+  <p class="subtitle">Click the option that best describes your reaction</p>
+  <div class="options">
+    <div class="option" data-choice="correct" onclick="toggleSelect(this)">
+      <div class="letter">A</div>
+      <div class="content">
+        <h3>Scope is correct</h3>
+        <p>Tier system + multi-horizon perf + category fixer. Proceed to design questions.</p>
+      </div>
+    </div>
+    <div class="option" data-choice="add-subcategory" onclick="toggleSelect(this)">
+      <div class="letter">B</div>
+      <div class="content">
+        <h3>Add subcategory depth</h3>
+        <p>Also want subcategories within each type (e.g. Momentum → Breakout / Relative Strength / Volume).</p>
+      </div>
+    </div>
+    <div class="option" data-choice="simpler" onclick="toggleSelect(this)">
+      <div class="letter">C</div>
+      <div class="content">
+        <h3>Keep it simpler</h3>
+        <p>Just tiers + 5 horizons. Don't bother with category improvements — good enough already.</p>
+      </div>
+    </div>
+  </div>
+</div>

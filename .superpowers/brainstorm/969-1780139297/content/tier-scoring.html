@@ -1,0 +1,75 @@
+<h2>Tier Scoring Formula</h2>
+<p class="subtitle">How should A/B/C/D tiers be computed from screener performance history?</p>
+
+<div class="options">
+
+  <div class="option" data-choice="percentile" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Percentile Rank</h3>
+      <p>Rank all screeners by composite score. Always produce all 4 tiers regardless of absolute quality.</p>
+      <div style="margin-top:10px;background:#0f172a;border-radius:8px;padding:12px;font-family:monospace;font-size:11px;color:#94a3b8">
+        composite = 0.4×win_rate_20d + 0.3×alpha_vs_nifty + 0.2×sharpe + 0.1×(1−drawdown)<br><br>
+        Tier A = top 15% by composite<br>
+        Tier B = 16–40%<br>
+        Tier C = 41–70%<br>
+        Tier D = bottom 30%
+      </div>
+      <div style="margin-top:8px">
+        <span style="color:#4ade80;font-size:11px">✓ Always has Tier A screeners</span><br>
+        <span style="color:#f87171;font-size:11px">✗ Tier A may still be mediocre if all screeners are bad</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="bayesian" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Bayesian Score (Recommended)</h3>
+      <p>Shrink each screener's stats toward the global mean based on sample size. Small-sample screeners get pulled to average; well-tested screeners keep their true score.</p>
+      <div style="margin-top:10px;background:#0f172a;border-radius:8px;padding:12px;font-family:monospace;font-size:11px;color:#94a3b8">
+        <span style="color:#a78bfa">// Bayesian shrinkage: n signals, global_mean win rate</span><br>
+        shrunk_wr = (n × win_rate + k × global_mean) / (n + k)<br>
+        <span style="color:#6b7280">// k=20 means need 20+ signals to trust own win rate</span><br><br>
+        composite = 0.4×shrunk_wr + 0.3×alpha + 0.2×sharpe + 0.1×consistency<br><br>
+        Tier A = composite ≥ 0.70<br>
+        Tier B = 0.55–0.69<br>
+        Tier C = 0.40–0.54<br>
+        Tier D = &lt;0.40 or &lt;10 signals
+      </div>
+      <div style="margin-top:8px">
+        <span style="color:#4ade80;font-size:11px">✓ New screeners won't falsely rank high on 2 wins</span><br>
+        <span style="color:#4ade80;font-size:11px">✓ Tier A means genuinely good, not just top-of-bad</span><br>
+        <span style="color:#f87171;font-size:11px">✗ Slightly more complex to compute</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="simple-absolute" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Simple Absolute Thresholds</h3>
+      <p>Win rate + alpha alone, no weighting magic. Easy to explain: "Tier A = beats Nifty 65%+ of the time on 20-day holds."</p>
+      <div style="margin-top:10px;background:#0f172a;border-radius:8px;padding:12px;font-family:monospace;font-size:11px;color:#94a3b8">
+        Tier A = win_rate_20d ≥ 0.65 AND alpha ≥ 3%<br>
+        Tier B = win_rate_20d ≥ 0.55 OR  alpha ≥ 1.5%<br>
+        Tier C = win_rate_20d ≥ 0.45<br>
+        Tier D = win_rate_20d &lt; 0.45 or insufficient data<br><br>
+        <span style="color:#6b7280">// Minimum 15 resolved signals to qualify for A/B</span>
+      </div>
+      <div style="margin-top:8px">
+        <span style="color:#4ade80;font-size:11px">✓ Transparent, explainable to users</span><br>
+        <span style="color:#f87171;font-size:11px">✗ No Sharpe/drawdown consideration</span><br>
+        <span style="color:#f87171;font-size:11px">✗ 3-win screener with 100% rate gets Tier A</span>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div style="margin-top:20px;background:#111827;border:1px solid #374151;border-radius:10px;padding:14px">
+  <div style="color:#9ca3af;font-size:11px">
+    <span style="color:#fbbf24">Note on data availability:</span> Current signal_outcomes has 4,957 resolved rows (1,651 WIN / 1,183 LOSS) across all screeners.
+    Many screeners will have &lt;10 resolved outcomes — Bayesian shrinkage handles this gracefully; absolute thresholds would leave most screeners as Tier D or Unranked.
+  </div>
+</div>

@@ -1,0 +1,111 @@
+<h2>Design — Section 1 of 3: Database Schema</h2>
+<p class="subtitle">2 new tables + additions to 2 existing tables. Does this look right?</p>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px">
+
+  <!-- New table 1 -->
+  <div style="background:#0f172a;border:2px solid #4f46e5;border-radius:10px;padding:16px">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+      <span style="background:#4f46e5;color:white;font-size:10px;padding:2px 8px;border-radius:10px;font-weight:700">NEW TABLE</span>
+      <span style="color:#a5b4fc;font-weight:700;font-size:13px">screener_appearances</span>
+    </div>
+    <div style="font-family:monospace;font-size:11px;color:#94a3b8;line-height:1.8">
+      <span style="color:#818cf8">screener_id</span>     TEXT NOT NULL<br>
+      <span style="color:#818cf8">source</span>          TEXT NOT NULL  <span style="color:#4b5563">-- 'trendlyne'|'mc'|'et'</span><br>
+      <span style="color:#818cf8">symbol</span>          TEXT NOT NULL<br>
+      <span style="color:#818cf8">appeared_date</span>   DATE NOT NULL<br>
+      <span style="color:#818cf8">exited_date</span>     DATE           <span style="color:#4b5563">-- NULL = still active</span><br>
+      <span style="color:#818cf8">return_5d</span>       REAL<br>
+      <span style="color:#818cf8">return_10d</span>      REAL<br>
+      <span style="color:#818cf8">return_20d</span>      REAL<br>
+      <span style="color:#818cf8">return_60d</span>      REAL<br>
+      <span style="color:#818cf8">return_120d</span>     REAL<br>
+      <span style="color:#818cf8">nifty_ret_20d</span>   REAL           <span style="color:#4b5563">-- benchmark</span><br>
+      <span style="color:#818cf8">outcome_20d</span>     TEXT           <span style="color:#4b5563">-- WIN|LOSS|PENDING</span><br>
+      PRIMARY KEY (screener_id, symbol, appeared_date)
+    </div>
+    <div style="margin-top:10px;font-size:11px;color:#6b7280">
+      Populated on every sync: diff current vs previous snapshot → insert new appearances. Returns filled in by nightly Python job from stock_ohlcv.
+    </div>
+  </div>
+
+  <!-- New table 2 -->
+  <div style="background:#0f172a;border:2px solid #4f46e5;border-radius:10px;padding:16px">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+      <span style="background:#4f46e5;color:white;font-size:10px;padding:2px 8px;border-radius:10px;font-weight:700">NEW TABLE</span>
+      <span style="color:#a5b4fc;font-weight:700;font-size:13px">screener_performance_v2</span>
+    </div>
+    <div style="font-family:monospace;font-size:11px;color:#94a3b8;line-height:1.8">
+      <span style="color:#818cf8">screener_id</span>     TEXT PRIMARY KEY<br>
+      <span style="color:#818cf8">source</span>          TEXT NOT NULL<br>
+      <span style="color:#818cf8">total_appearances</span> INTEGER<br>
+      <span style="color:#818cf8">resolved_count</span>  INTEGER<br>
+      <span style="color:#4b5563">-- per horizon metrics --</span><br>
+      <span style="color:#818cf8">wr_5d / wr_10d / wr_20d / wr_60d / wr_120d</span> REAL<br>
+      <span style="color:#818cf8">avg_ret_5d / _10d / _20d / _60d / _120d</span>   REAL<br>
+      <span style="color:#818cf8">alpha_20d / alpha_60d</span>   REAL  <span style="color:#4b5563">-- vs Nifty</span><br>
+      <span style="color:#818cf8">sharpe_20d</span>      REAL<br>
+      <span style="color:#818cf8">max_drawdown</span>    REAL<br>
+      <span style="color:#818cf8">bayesian_score</span>  REAL   <span style="color:#4b5563">-- composite 0–1</span><br>
+      <span style="color:#818cf8">tier</span>            TEXT   <span style="color:#4b5563">-- A|B|C|D|Unranked</span><br>
+      <span style="color:#818cf8">data_source</span>     TEXT   <span style="color:#4b5563">-- 'proxy'|'appearances'|'mixed'</span><br>
+      <span style="color:#818cf8">last_computed</span>   DATETIME
+    </div>
+  </div>
+
+  <!-- Modified table 1 -->
+  <div style="background:#0f172a;border:2px solid #065f46;border-radius:10px;padding:16px">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+      <span style="background:#065f46;color:#6ee7b7;font-size:10px;padding:2px 8px;border-radius:10px;font-weight:700">EXTENDED</span>
+      <span style="color:#6ee7b7;font-weight:700;font-size:13px">screener_master</span>
+    </div>
+    <div style="font-family:monospace;font-size:11px;color:#94a3b8;line-height:1.8">
+      <span style="color:#4b5563">-- existing columns unchanged --</span><br>
+      <span style="color:#34d399">+ subcategory</span>  TEXT  <span style="color:#4b5563">-- e.g. 'Breakout','MACD Cross'</span><br>
+      <span style="color:#34d399">+ tier</span>          TEXT  <span style="color:#4b5563">-- A|B|C|D|Unranked</span><br>
+      <span style="color:#34d399">+ category_confidence</span> REAL <span style="color:#4b5563">-- 0–1, how sure is the NLP</span><br>
+      <span style="color:#34d399">+ classified_by</span> TEXT <span style="color:#4b5563">-- 'keyword'|'ollama'|'manual'</span>
+    </div>
+    <div style="margin-top:10px;font-size:11px;color:#6b7280">
+      tier column synced daily from screener_performance_v2.tier
+    </div>
+  </div>
+
+  <!-- Modified table 2 -->
+  <div style="background:#0f172a;border:2px solid #065f46;border-radius:10px;padding:16px">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+      <span style="background:#065f46;color:#6ee7b7;font-size:10px;padding:2px 8px;border-radius:10px;font-weight:700">EXTENDED</span>
+      <span style="color:#6ee7b7;font-weight:700;font-size:13px">screener_reliability (existing)</span>
+    </div>
+    <div style="font-family:monospace;font-size:11px;color:#94a3b8;line-height:1.8">
+      <span style="color:#4b5563">-- existing: win_rate_1d / 7d / 30d kept as-is --</span><br>
+      <span style="color:#34d399">+ win_rate_5d</span>   REAL<br>
+      <span style="color:#34d399">+ win_rate_10d</span>  REAL<br>
+      <span style="color:#34d399">+ win_rate_20d</span>  REAL  <span style="color:#4b5563">-- primary tier input</span><br>
+      <span style="color:#34d399">+ win_rate_60d</span>  REAL<br>
+      <span style="color:#34d399">+ win_rate_120d</span> REAL
+    </div>
+    <div style="margin-top:10px;font-size:11px;color:#6b7280">
+      screener_performance_v2 is the canonical source. screener_reliability kept for backward-compat.
+    </div>
+  </div>
+
+</div>
+
+<div class="section" style="margin-top:20px">
+  <div class="options">
+    <div class="option" data-choice="approve" onclick="toggleSelect(this)">
+      <div class="letter">✓</div>
+      <div class="content">
+        <h3>Schema looks right — proceed to services</h3>
+      </div>
+    </div>
+    <div class="option" data-choice="change" onclick="toggleSelect(this)">
+      <div class="letter">✎</div>
+      <div class="content">
+        <h3>I want changes</h3>
+        <p>Let me know in terminal what to adjust</p>
+      </div>
+    </div>
+  </div>
+</div>

@@ -1,0 +1,73 @@
+<h2>Critical Data Gap — Screener History</h2>
+<p class="subtitle">Screener stock tables store only the <em>current snapshot</em>, not when a stock appeared. Two approaches to fix this.</p>
+
+<div style="background:#2d1515;border:1px solid #7f1d1d;border-radius:10px;padding:14px;margin-bottom:20px">
+  <div style="color:#fca5a5;font-weight:700;font-size:13px;margin-bottom:8px">⚠️ The Problem</div>
+  <div style="font-size:12px;color:#fcd4d4;line-height:1.7">
+    <code style="background:#1a0a0a;padding:2px 6px;border-radius:4px">trendlyne_screener_stocks</code> / <code style="background:#1a0a0a;padding:2px 6px;border-radius:4px">moneycontrol_screener_stocks</code> / <code style="background:#1a0a0a;padding:2px 6px;border-radius:4px">etnow_screener_stocks</code> — each has (screener_id, symbol) with <strong>no date column</strong>.<br>
+    Every sync overwrites the list. We don't know <em>when</em> a stock first appeared in a screener — so we can't measure "what happened 20 days after it appeared."
+  </div>
+</div>
+
+<div class="options">
+
+  <div class="option" data-choice="appearances-table" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Add screener_appearances table (forward-looking)</h3>
+      <p>Every sync run, diff the current screener stocks against the previous snapshot. Record new appearances with a date. Performance is computed from these dated appearances against OHLCV.</p>
+      <div style="margin-top:10px;background:#0f172a;border-radius:8px;padding:12px;font-family:monospace;font-size:11px;color:#94a3b8">
+        screener_appearances:<br>
+        &nbsp;&nbsp;screener_id, symbol, appeared_date, exited_date<br><br>
+        performance = join with stock_ohlcv<br>
+        &nbsp;&nbsp;WHERE date = appeared_date + N days<br>
+        &nbsp;&nbsp;→ return_pct, win/loss per horizon
+      </div>
+      <div style="margin-top:8px;font-size:11px">
+        <span style="color:#4ade80">✓ Clean, accurate, grows over time</span><br>
+        <span style="color:#4ade80">✓ Enables combination analytics (Phase B)</span><br>
+        <span style="color:#f87171">✗ No historical data — tiers meaningful only after 60-90 days</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="recommendation-proxy" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Use recommendation_log as proxy (immediate)</h3>
+      <p>22,175 recommendations already exist with outcomes. Extract screener signals from signals_json + screener_score. Compute per-screener win rates from resolved outcomes immediately.</p>
+      <div style="margin-top:10px;background:#0f172a;border-radius:8px;padding:12px;font-family:monospace;font-size:11px;color:#94a3b8">
+        recommendation_log<br>
+        &nbsp;&nbsp;→ signals_json (has active screeners)<br>
+        &nbsp;&nbsp;→ outcome (WIN/LOSS/NEUTRAL)<br>
+        &nbsp;&nbsp;→ actual_return_pct<br><br>
+        GROUP BY screener_id → win_rate, avg_return
+      </div>
+      <div style="margin-top:8px;font-size:11px">
+        <span style="color:#4ade80">✓ Immediate results — 22K rows usable today</span><br>
+        <span style="color:#f87171">✗ Only covers screeners that triggered recommendations</span><br>
+        <span style="color:#f87171">✗ signals_json may not itemise per-screener contribution</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="both" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Both — proxy now, appearances going forward (Recommended)</h3>
+      <p>Bootstrap initial tiers from recommendation_log today. Simultaneously start recording screener_appearances on every sync. Tiers improve automatically as appearance history accumulates.</p>
+      <div style="margin-top:10px;background:#0f172a;border-radius:8px;padding:12px;font-family:monospace;font-size:11px;color:#94a3b8">
+        Day 0: tiers from recommendation_log proxy<br>
+        Day 30+: appearances data starts filling in<br>
+        Day 90+: appearance-based tiers dominate<br>
+        Continuous: Bayesian blend of both sources
+      </div>
+      <div style="margin-top:8px;font-size:11px">
+        <span style="color:#4ade80">✓ Useful immediately</span><br>
+        <span style="color:#4ade80">✓ Accurate long-term</span><br>
+        <span style="color:#4ade80">✓ Enables Phase B combination engine</span>
+      </div>
+    </div>
+  </div>
+
+</div>
