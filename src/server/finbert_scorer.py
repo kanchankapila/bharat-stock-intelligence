@@ -82,23 +82,23 @@ def load_unscored_articles(conn: sqlite3.Connection, limit: int, days: int) -> l
     cur = conn.cursor()
 
     where_clauses = [
-        "a.id NOT IN (SELECT COALESCE(source_id,'') FROM news_sentiment_items WHERE source='finbert')"
+        "a.id NOT IN (SELECT COALESCE(id,'') FROM news_sentiment_items WHERE source='finbert')"
     ]
     params: list = []
 
     if days > 0:
         cutoff = (datetime.datetime.now() - datetime.timedelta(days=days)).isoformat()
-        where_clauses.append("a.published_at >= ?")
+        where_clauses.append("a.timestamp >= ?")
         params.append(cutoff)
 
     where = " AND ".join(where_clauses)
     limit_clause = f"LIMIT {limit}" if limit > 0 else ""
 
     cur.execute(f"""
-        SELECT a.id, a.title, a.description, a.symbol, a.published_at
+        SELECT a.id, a.title, a.summary, a.symbols, a.timestamp
         FROM news_articles a
         WHERE {where}
-        ORDER BY a.published_at DESC
+        ORDER BY a.timestamp DESC
         {limit_clause}
     """, params)
 
@@ -112,30 +112,43 @@ def load_unscored_articles(conn: sqlite3.Connection, limit: int, days: int) -> l
 
 def upsert_sentiment(conn: sqlite3.Connection, records: list[dict]):
     """Write FinBERT scores to news_sentiment_items."""
+    import json as _json
     now = datetime.datetime.now().isoformat()
     cur = conn.cursor()
 
     for r in records:
-        # Map label to positive_count / negative_count booleans
-        pos_count = 1 if r["label"] == "positive" else 0
-        neg_count = 1 if r["label"] == "negative" else 0
+        # Map finbert label → DB sentiment
+        label_map = {"positive": "BULLISH", "negative": "BEARISH", "neutral": "NEUTRAL"}
+        sentiment = label_map.get(r["label"], "NEUTRAL")
+
+        # Impact from confidence
+        confidence = max(abs(r.get("sentiment_score", 0)), r.get("confidence", 0))
+        impact = "HIGH" if confidence >= 0.80 else ("MEDIUM" if confidence >= 0.55 else "LOW")
+
+        # symbols_json: news_articles.symbols is comma-separated NSE symbols
+        raw_symbols = r.get("symbol", "")
+        symbols = [s.strip() for s in raw_symbols.split(",") if s.strip()]
+        symbols_json = _json.dumps(symbols)
 
         cur.execute("""
             INSERT INTO news_sentiment_items
-                (symbol, source, category, sentiment, score,
-                 positive_count, negative_count,
-                 headline, source_id, fetched_at)
-            VALUES (?, 'finbert', 'news', ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT DO NOTHING
+                (id, title, source, source_type, published_at, fetched_at,
+                 sentiment, sentiment_score, impact, symbols_json, ai_scored)
+            VALUES (?, ?, 'finbert', 'AI', ?, ?, ?, ?, ?, ?, 1)
+            ON CONFLICT(id) DO UPDATE SET
+                sentiment       = excluded.sentiment,
+                sentiment_score = excluded.sentiment_score,
+                impact          = excluded.impact,
+                ai_scored       = 1
         """, (
-            r["symbol"],
-            r["label"],
-            r["sentiment_score"],
-            pos_count,
-            neg_count,
-            r["title"][:500],
             str(r["id"]),
+            r["title"][:500],
+            r.get("published_at", now),
             now,
+            sentiment,
+            r["sentiment_score"],
+            impact,
+            symbols_json,
         ))
 
     conn.commit()
