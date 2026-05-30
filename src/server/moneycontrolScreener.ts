@@ -195,7 +195,7 @@ export async function syncMoneyControlScreeners(timeframeFilter?: 'intraday' | '
 
     if (response?.success === 1 && response.data) {
       const screenerName = response.data.list?.scannerName || response.data.scanName || response.data.scanname || `MC Screener ${config.scanId}`;
-      
+
       // Upsert screener
       db.prepare(`
         INSERT INTO moneycontrol_screeners (scan_id, cat_id, screener_name, type, is_positive)
@@ -205,32 +205,47 @@ export async function syncMoneyControlScreeners(timeframeFilter?: 'intraday' | '
           last_updated = CURRENT_TIMESTAMP
       `).run(config.scanId, config.catId, screenerName, config.type, config.is_positive ? 1 : 0);
 
-      // Get stocks
       const stocks = response.data.list?.scannerDetails || response.data.stock || response.data.stocks || [];
       console.log(`✅ Fetched ${stocks.length} stocks for MC: ${screenerName}`);
 
-      // Clear existing stocks for this screener
+      // Snapshot previous active symbols BEFORE delete
+      const prevSymbols = new Set<string>(
+        (db.prepare(`SELECT symbol FROM screener_appearances WHERE screener_id = ? AND exited_date IS NULL`)
+          .all(config.scanId) as Array<{ symbol: string }>)
+          .map(r => r.symbol).filter(Boolean)
+      );
+
       db.prepare('DELETE FROM moneycontrol_screener_stocks WHERE scan_id = ?').run(config.scanId);
 
       const insertStock = db.prepare(`
         INSERT INTO moneycontrol_screener_stocks (scan_id, mcsymbol, stock_name, symbol)
         VALUES (?, ?, ?, ?)
       `);
+      const currentSymbols = new Set<string>();
 
       for (const stock of stocks) {
         const mcsymbol = stock.stkId || stock.sc_id;
         const stkname = stock.stkname || stock.stock_name || stock.shortName;
-        
         if (mcsymbol) {
           const nseSymbol = getSymbolFromMcsymbol(mcsymbol);
           insertStock.run(config.scanId, mcsymbol, stkname, nseSymbol);
-
-          // Automated mapping update: if stkname matches a known NSE symbol, track it
-          if (stkname) {
-            const cleanStkName = stkname.toUpperCase().trim();
-            mappingsToUpdate.set(cleanStkName, mcsymbol);
-          }
+          if (nseSymbol) currentSymbols.add(nseSymbol);
+          if (stkname) mappingsToUpdate.set(stkname.toUpperCase().trim(), mcsymbol);
         }
+      }
+
+      // Diff patch
+      const today = new Date().toISOString().slice(0, 10);
+      const entered = Array.from(currentSymbols).filter(s => !prevSymbols.has(s));
+      const exited  = Array.from(prevSymbols).filter(s => !currentSymbols.has(s));
+
+      if (entered.length > 0) {
+        const insertApp = db.prepare(`INSERT OR IGNORE INTO screener_appearances (screener_id, source, symbol, appeared_date) VALUES (?, 'moneycontrol', ?, ?)`);
+        db.transaction(() => { for (const s of entered) insertApp.run(config.scanId, s, today); })();
+      }
+      if (exited.length > 0) {
+        db.prepare(`UPDATE screener_appearances SET exited_date = ? WHERE screener_id = ? AND symbol IN (${exited.map(() => '?').join(',')}) AND exited_date IS NULL`)
+          .run(today, config.scanId, ...exited);
       }
     }
 
