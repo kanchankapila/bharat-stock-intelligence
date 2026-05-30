@@ -120,19 +120,46 @@ class MCErrorBoundary extends React.Component<
   }
 }
 
+const CHUNK_LOAD_ERRORS = ['Failed to fetch dynamically imported module', 'Loading chunk', 'dynamically imported module', 'Importing a module script failed'];
+
 class TabErrorBoundary extends React.Component<
   { children: React.ReactNode },
-  { hasError: boolean; message: string }
+  { hasError: boolean; message: string; isChunkError: boolean }
 > {
   constructor(props: { children: React.ReactNode }) {
     super(props);
-    this.state = { hasError: false, message: '' };
+    this.state = { hasError: false, message: '', isChunkError: false };
   }
   static getDerivedStateFromError(error: Error) {
-    return { hasError: true, message: error.message };
+    const isChunkError = CHUNK_LOAD_ERRORS.some(msg => error.message?.includes(msg));
+    return { hasError: true, message: error.message, isChunkError };
+  }
+  componentDidUpdate(_: unknown, prev: { isChunkError: boolean }) {
+    // Auto-reload once on chunk load failures (transient network error from Vite)
+    if (this.state.isChunkError && !prev.isChunkError) {
+      const key = 'chunk_reload_' + window.location.pathname;
+      if (!sessionStorage.getItem(key)) {
+        sessionStorage.setItem(key, '1');
+        window.location.reload();
+      }
+    }
   }
   render() {
     if (this.state.hasError) {
+      if (this.state.isChunkError) {
+        return (
+          <div className="flex flex-col items-center justify-center h-64 gap-4">
+            <AlertCircle className="w-10 h-10 text-amber-500" />
+            <p className="text-slate-300 font-medium">Loading failed — reloading…</p>
+            <button
+              className="px-4 py-1.5 text-xs rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300"
+              onClick={() => window.location.reload()}
+            >
+              Reload now
+            </button>
+          </div>
+        );
+      }
       return (
         <div className="flex flex-col items-center justify-center h-64 gap-4">
           <AlertCircle className="w-10 h-10 text-rose-500" />
@@ -140,7 +167,7 @@ class TabErrorBoundary extends React.Component<
           <p className="text-xs text-slate-500">{this.state.message}</p>
           <button
             className="px-4 py-1.5 text-xs rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300"
-            onClick={() => this.setState({ hasError: false, message: '' })}
+            onClick={() => this.setState({ hasError: false, message: '', isChunkError: false })}
           >
             Retry
           </button>
