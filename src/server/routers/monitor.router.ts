@@ -191,6 +191,17 @@ export const MONITOR_SCRIPTS = [
     tsFunction: 'computeSignalTypeStats',
     staleLimitHours: 26,
   },
+  {
+    id: 'screener-performance',
+    label: 'Screener Performance Engine',
+    category: 'ML',
+    critical: false,
+    description: 'Fills screener_appearances returns, computes Bayesian tiers (A/B/C/D), classifies new screeners via Ollama',
+    schedule: 'Daily 6 PM',
+    pyScript: 'screener_performance.py',
+    queueName: 'screener-performance',
+    staleLimitHours: 26,
+  },
 ] as const;
 
 type ScriptId = typeof MONITOR_SCRIPTS[number]['id'];
@@ -249,6 +260,9 @@ function getLastRunAt(scriptId: ScriptId): string | null {
         break;
       case 'signal-type-stats':
         row = db.prepare("SELECT MAX(last_computed) as t FROM signal_type_stats").get();
+        break;
+      case 'screener-performance':
+        row = db.prepare("SELECT MAX(last_computed) as t FROM screener_performance_v2").get();
         break;
       default:
         return null;
@@ -327,6 +341,12 @@ function getScriptStats(scriptId: ScriptId): Record<string, number | string | nu
           types: (db.prepare("SELECT COUNT(DISTINCT signal_type) as n FROM signal_type_stats").get() as any)?.n ?? 0,
           rows: (db.prepare("SELECT COUNT(*) as n FROM signal_type_stats").get() as any)?.n ?? 0,
         };
+      case 'screener-performance': {
+        const total = (db.prepare("SELECT COUNT(*) as n FROM screener_performance_v2").get() as any)?.n ?? 0;
+        const tiers = db.prepare("SELECT tier, COUNT(*) as n FROM screener_performance_v2 GROUP BY tier ORDER BY tier").all() as any[];
+        const tierStr = tiers.map((t: any) => `${t.tier}:${t.n}`).join(', ');
+        return { screeners: total, tiers: tierStr };
+      }
       default:
         return {};
     }
