@@ -154,15 +154,48 @@ export function saveScreenerStocksToDB(
       VALUES (?, ?, ?)
     `);
 
+    // Snapshot previous active symbols BEFORE delete
+    const prevSymbols = new Set<string>(
+      (db.prepare(`SELECT symbol FROM screener_appearances WHERE screener_id = ? AND exited_date IS NULL`)
+        .all(screenerId) as Array<{ symbol: string }>)
+        .map(r => r.symbol)
+        .filter(Boolean)
+    );
+
     db.transaction(() => {
       deleteStmt.run(screenerId);
       for (const stock of stocks) {
-        // Attempt to find symbol for the stockId
         const mapping = getStockMapping(stock.stockId);
         const symbol = mapping ? mapping.symbol : null;
         insertStmt.run(screenerId, stock.stockId, symbol);
       }
     })();
+
+    // Diff patch: record entries/exits in screener_appearances
+    const today = new Date().toISOString().slice(0, 10);
+    const currentSymbols = new Set<string>(
+      stocks
+        .map(s => getStockMapping(s.stockId)?.symbol)
+        .filter((s): s is string => !!s)
+    );
+
+    const entered = Array.from(currentSymbols).filter(s => !prevSymbols.has(s));
+    const exited  = Array.from(prevSymbols).filter(s => !currentSymbols.has(s));
+
+    if (entered.length > 0) {
+      const insertApp = db.prepare(
+        `INSERT OR IGNORE INTO screener_appearances (screener_id, source, symbol, appeared_date) VALUES (?, 'trendlyne', ?, ?)`
+      );
+      db.transaction(() => {
+        for (const sym of entered) insertApp.run(screenerId, sym, today);
+      })();
+    }
+
+    if (exited.length > 0) {
+      db.prepare(
+        `UPDATE screener_appearances SET exited_date = ? WHERE screener_id = ? AND symbol IN (${exited.map(() => '?').join(',')}) AND exited_date IS NULL`
+      ).run(today, screenerId, ...exited);
+    }
   } catch (error) {
     console.error(`❌ Error saving screener stocks to DB:`, error);
   }
