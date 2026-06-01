@@ -160,7 +160,7 @@ let agentStrategistWorker:    Worker | null = null;
 let agentAuditorWorker:       Worker | null = null;
 let agentOptimizerWorker:     Worker | null = null;
 export let unifiedRankerQueue: Queue | null = null;
-let unifiedRankerWorker: Worker | null = null;
+export let unifiedRankerWorker: Worker | null = null;
 
 // Shared in-process mirror populated by the stock-refresh worker
 // (same reference as the one exported from liveStockData via the cache layer)
