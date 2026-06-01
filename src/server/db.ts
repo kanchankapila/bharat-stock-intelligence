@@ -1250,7 +1250,7 @@ migrateColumn('screener_reliability', 'win_rate_20d',  'REAL');
 migrateColumn('screener_reliability', 'win_rate_60d',  'REAL');
 migrateColumn('screener_reliability', 'win_rate_120d', 'REAL');
 
-runMigration('020_screener_catalog', `
+runMigration('032_screener_catalog', `
   CREATE TABLE IF NOT EXISTS screener_catalog (
     screener_id        TEXT NOT NULL,
     source             TEXT NOT NULL,
@@ -1268,7 +1268,7 @@ runMigration('020_screener_catalog', `
   );
 `);
 
-runMigration('021_unified_recommendations', `
+runMigration('033_unified_recommendations', `
   CREATE TABLE IF NOT EXISTS unified_recommendations (
     id                      INTEGER PRIMARY KEY AUTOINCREMENT,
     symbol                  TEXT NOT NULL,
