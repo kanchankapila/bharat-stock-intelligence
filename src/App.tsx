@@ -82,6 +82,7 @@ const AgentDataScientistPage   = React.lazy(() => import('./components/AgentData
 const AgentStrategistPage      = React.lazy(() => import('./components/AgentStrategistPage').then(m => ({ default: m.AgentStrategistPage })));
 const AgentAuditorPage         = React.lazy(() => import('./components/AgentAuditorPage').then(m => ({ default: m.AgentAuditorPage })));
 const AgentOptimizerPage       = React.lazy(() => import('./components/AgentOptimizerPage').then(m => ({ default: m.AgentOptimizerPage })));
+const CommandCenterDashboard   = React.lazy(() => import('./components/CommandCenterDashboard').then(m => ({ default: m.CommandCenterDashboard })));
 // Named-export lazy wrappers
 const ToDoPage           = React.lazy(() => import('./components/ToDoPage').then(m => ({ default: m.ToDoPage })));
 const InvestmentStrategy = React.lazy(() => import('./components/InvestmentStrategy').then(m => ({ default: m.InvestmentStrategy })));
@@ -3806,7 +3807,8 @@ export default function App() {
               <Routes>
                 <Route path="/" element={<DashboardPage stocks={stocks} onNewSignal={addToast} onSelectStock={(s) => setDrawerSymbol(s)} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} onSelectIndex={(id, name) => { setSelectedIndex({ id, name }); navigate('/indices'); }} />} />
                 <Route path="/dashboard" element={<DashboardPage stocks={stocks} onNewSignal={addToast} onSelectStock={(s) => setDrawerSymbol(s)} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} onSelectIndex={(id, name) => { setSelectedIndex({ id, name }); navigate('/indices'); }} />} />
-                <Route path="/top-rated" element={<TopRatedStocks onSelectStock={(s) => setDrawerSymbol(s)} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
+                <Route path="/alpha" element={<CommandCenterDashboard onSelectStock={(s) => { setDrawerSymbol(s); navigate('/trade-cockpit'); }} />} />
+              <Route path="/top-rated" element={<TopRatedStocks onSelectStock={(s) => setDrawerSymbol(s)} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
                 <Route path="/indices" element={<IndicesPage onSelectStock={(s) => setDrawerSymbol(s)} selectedIndex={selectedIndex} setSelectedIndex={setSelectedIndex} />} />
                 <Route path="/market-map" element={
                 <div className="p-6 space-y-6">

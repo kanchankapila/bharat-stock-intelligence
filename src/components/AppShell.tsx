@@ -17,6 +17,11 @@ import type { User as FirebaseUser } from 'firebase/auth';
 interface NavItem { icon: React.ElementType; label: string; id: string; }
 interface NavGroup { label: string; items: NavItem[]; }
 
+// Items that appear only when "Advanced" is expanded
+const ADVANCED_INTELLIGENCE_IDS = new Set([
+  'top-rated', 'signals', 'todays-picks', 'research',
+]);
+
 const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Markets',
@@ -29,7 +34,6 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Analysis',
     items: [
-      { icon: Trophy,  label: 'Top Rated',  id: 'top-rated'   },
       { icon: Filter,  label: 'Screener',   id: 'screener'    },
       { icon: Target,  label: 'F&O Intel',  id: 'fno-scanners'},
       { icon: TrendingUp, label: 'Options Intel', id: 'options' },
@@ -42,17 +46,20 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Intelligence',
     items: [
-      { icon: Zap,      label: "Today's Picks",       id: 'todays-picks'         },
+      { icon: Zap,      label: 'Alpha ⚡',             id: 'alpha'                },
       { icon: BarChart2, label: 'Screener Intel',      id: 'screener-intelligence' },
       { icon: Sparkles, label: 'Trade Cockpit',        id: 'trade-cockpit'        },
-      { icon: Radio,   label: 'Signals',    id: 'signals'     },
       { icon: Layers,  label: 'Signal Intel', id: 'signal-intelligence' },
-      { icon: FlaskConical, label: 'Research', id: 'research' },
       { icon: Star,    label: 'Strategy',   id: 'strategy'    },
       { icon: Target,  label: 'Builder',    id: 'strategy-builder' },
       { icon: Activity,label: 'Sentiment',  id: 'sentiment'   },
       { icon: History, label: 'Backtest',   id: 'backtest'    },
       { icon: Settings2, label: 'ML Builder', id: 'builder'   },
+      // Advanced (hidden by default):
+      { icon: Trophy,   label: 'Top Rated',     id: 'top-rated'    },
+      { icon: Radio,    label: 'Signals',        id: 'signals'      },
+      { icon: Zap,      label: "Today's Picks",  id: 'todays-picks' },
+      { icon: FlaskConical, label: 'Research',   id: 'research'     },
     ],
   },
   {
@@ -142,6 +149,7 @@ const SidebarInner: React.FC<{
   const [marketStatus, setMarketStatus] = useState(getMarketStatus());
   const [searchQuery, setSearchQuery]   = useState('');
   const [showSearch, setShowSearch]     = useState(false);
+  const [showAdvancedTabs, setShowAdvancedTabs] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -319,48 +327,59 @@ const SidebarInner: React.FC<{
             </AnimatePresence>
             {collapsed && <div className="my-1 mx-1 border-t border-slate-800/50" />}
 
-            {group.items.map(item => {
-              const active = activeTab === item.id;
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => handleNav(item.id)}
-                  title={collapsed ? item.label : undefined}
-                  className={cn(
-                    'relative w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left transition-all duration-100 group',
-                    active
-                      ? 'bg-indigo-500/10 text-amber-400 font-bold'
-                      : 'text-slate-400 hover:text-slate-900 hover:bg-slate-900/40',
-                    collapsed ? 'justify-center' : '',
-                  )}
-                >
-                  {active && (
-                    <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-4 bg-indigo-500 rounded-r-full" />
-                  )}
-                  <item.icon className={cn('w-4 h-4 shrink-0', active ? 'text-amber-400' : '')} />
-                  <AnimatePresence initial={false}>
-                    {!collapsed && (
-                      <motion.span
-                        key={`lbl-${item.id}`}
-                        initial={{ opacity: 0, width: 0 }}
-                        animate={{ opacity: 1, width: 'auto' }}
-                        exit={{ opacity: 0, width: 0 }}
-                        transition={{ duration: 0.15 }}
-                        className="text-[12px] font-semibold whitespace-nowrap overflow-hidden"
-                      >
-                        {item.label}
-                      </motion.span>
+            {group.items
+              .filter(item => !ADVANCED_INTELLIGENCE_IDS.has(item.id) || showAdvancedTabs)
+              .map(item => {
+                const active = activeTab === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => handleNav(item.id)}
+                    title={collapsed ? item.label : undefined}
+                    className={cn(
+                      'relative w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left transition-all duration-100 group',
+                      active
+                        ? 'bg-indigo-500/10 text-amber-400 font-bold'
+                        : 'text-slate-400 hover:text-slate-900 hover:bg-slate-900/40',
+                      collapsed ? 'justify-center' : '',
                     )}
-                  </AnimatePresence>
-                  {/* Tooltip when collapsed */}
-                  {collapsed && (
-                    <span className="absolute left-full ml-2 px-2 py-1 bg-slate-900 border border-slate-850/10 text-white text-[10px] font-bold rounded-md whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50 shadow-xl">
-                      {item.label}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
+                  >
+                    {active && (
+                      <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-4 bg-indigo-500 rounded-r-full" />
+                    )}
+                    <item.icon className={cn('w-4 h-4 shrink-0', active ? 'text-amber-400' : '')} />
+                    <AnimatePresence initial={false}>
+                      {!collapsed && (
+                        <motion.span
+                          key={`lbl-${item.id}`}
+                          initial={{ opacity: 0, width: 0 }}
+                          animate={{ opacity: 1, width: 'auto' }}
+                          exit={{ opacity: 0, width: 0 }}
+                          transition={{ duration: 0.15 }}
+                          className="text-[12px] font-semibold whitespace-nowrap overflow-hidden"
+                        >
+                          {item.label}
+                        </motion.span>
+                      )}
+                    </AnimatePresence>
+                    {/* Tooltip when collapsed */}
+                    {collapsed && (
+                      <span className="absolute left-full ml-2 px-2 py-1 bg-slate-900 border border-slate-850/10 text-white text-[10px] font-bold rounded-md whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50 shadow-xl">
+                        {item.label}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            {/* Advanced toggle — shown only in Intelligence group when not collapsed */}
+            {group.label === 'Intelligence' && !collapsed && (
+              <button
+                onClick={() => setShowAdvancedTabs(!showAdvancedTabs)}
+                className="flex items-center gap-1 px-2 py-1 text-[11px] text-slate-500 hover:text-slate-300 transition-colors w-full"
+              >
+                Advanced {showAdvancedTabs ? '‹' : '›'}
+              </button>
+            )}
           </div>
         ))}
       </nav>
