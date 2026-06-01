@@ -37,7 +37,7 @@ def make_db():
         );
         CREATE TABLE stock_scores (
             symbol TEXT NOT NULL, timeframe TEXT NOT NULL,
-            composite_score REAL, PRIMARY KEY (symbol, timeframe)
+            score REAL, PRIMARY KEY (symbol, timeframe)
         );
         CREATE TABLE market_regimes (
             date TEXT PRIMARY KEY, regime TEXT NOT NULL,
@@ -52,6 +52,10 @@ def make_db():
         CREATE TABLE technical_analysis_signals (
             id INTEGER PRIMARY KEY AUTOINCREMENT, symbol TEXT,
             date TEXT, win_probability REAL, signal_score REAL
+        );
+        CREATE TABLE technical_signals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, symbol TEXT,
+            date TEXT, win_probability REAL, signal_score INTEGER DEFAULT 0
         );
         CREATE TABLE unified_recommendations (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -203,20 +207,20 @@ class TestUnifiedRankerRun:
         # INFY: in bull1 + fund1 → strong score; good fundamental
         conn.execute("INSERT INTO trendlyne_screener_stocks VALUES ('bull1','INFY','INFY')")
         conn.execute("INSERT INTO trendlyne_screener_stocks VALUES ('fund1','INFY','INFY')")
-        conn.execute("INSERT INTO stock_scores VALUES ('INFY','medium',80)")
+        conn.execute("INSERT INTO stock_scores VALUES ('INFY','long_term',80)")
 
         # WEAK: in bull1 + bear1 → partially offset; weak fundamental
         conn.execute("INSERT INTO trendlyne_screener_stocks VALUES ('bull1','WEAK','WEAK')")
         conn.execute("INSERT INTO trendlyne_screener_stocks VALUES ('bear1','WEAK','WEAK')")
-        conn.execute("INSERT INTO stock_scores VALUES ('WEAK','medium',35)")
+        conn.execute("INSERT INTO stock_scores VALUES ('WEAK','long_term',35)")
 
         # Give INFY and WEAK a positive track record so they pass RL gate
         conn.execute("INSERT INTO recommendation_log (symbol, signal_date, actual_return_pct, generated_at) VALUES ('INFY','2026-05-01',5.0,date('now','-10 days'))")
         conn.execute("INSERT INTO recommendation_log (symbol, signal_date, actual_return_pct, generated_at) VALUES ('WEAK','2026-05-01',1.0,date('now','-10 days'))")
 
         # ml scores
-        conn.execute("INSERT INTO technical_analysis_signals (symbol, date, win_probability, signal_score) VALUES ('INFY', date('now'), 0.75, 70)")
-        conn.execute("INSERT INTO technical_analysis_signals (symbol, date, win_probability, signal_score) VALUES ('WEAK', date('now'), 0.45, 40)")
+        conn.execute("INSERT INTO technical_signals (symbol, date, win_probability, signal_score) VALUES ('INFY', date('now'), 0.75, 70)")
+        conn.execute("INSERT INTO technical_signals (symbol, date, win_probability, signal_score) VALUES ('WEAK', date('now'), 0.45, 40)")
 
         # Market regime
         conn.execute("INSERT INTO market_regimes (date, regime, regime_prob) VALUES (date('now'),'BULL',0.8)")
@@ -245,8 +249,8 @@ class TestUnifiedRankerRun:
         import os
         ranker, conn, csv_path = self._setup()
         conn.execute("INSERT INTO trendlyne_screener_stocks VALUES ('bull1','LOSER','LOSER')")
-        conn.execute("INSERT INTO stock_scores VALUES ('LOSER','medium',60)")
-        conn.execute("INSERT INTO technical_analysis_signals (symbol, date, win_probability, signal_score) VALUES ('LOSER', date('now'), 0.72, 68)")
+        conn.execute("INSERT INTO stock_scores VALUES ('LOSER','long_term',60)")
+        conn.execute("INSERT INTO technical_signals (symbol, date, win_probability, signal_score) VALUES ('LOSER', date('now'), 0.72, 68)")
         conn.execute("INSERT INTO recommendation_log (symbol, signal_date, actual_return_pct, generated_at) VALUES ('LOSER','2026-05-01',-8.0,date('now','-10 days'))")
         conn.commit()
         results = ranker.run()

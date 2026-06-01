@@ -226,9 +226,9 @@ class UnifiedRanker:
 
     def _get_fundamental_scores(self):
         rows = self.conn.execute(
-            "SELECT symbol, composite_score FROM stock_scores WHERE timeframe = 'medium'"
+            "SELECT symbol, score FROM stock_scores WHERE timeframe = 'long_term'"
         ).fetchall()
-        return {r['symbol']: float(r['composite_score'] or 50) for r in rows}
+        return {r['symbol']: float(r['score'] or 50) for r in rows}
 
     def _get_screener_membership(self):
         membership = {}
@@ -259,10 +259,13 @@ class UnifiedRanker:
         return membership
 
     def _get_ml_scores(self):
-        rows = self.conn.execute(
-            "SELECT symbol, AVG(win_probability) AS p FROM technical_analysis_signals WHERE date >= date('now', '-3 days') GROUP BY symbol"
-        ).fetchall()
-        return {r['symbol']: float(r['p'] or 0) * 100 for r in rows}
+        try:
+            rows = self.conn.execute(
+                "SELECT symbol, AVG(win_probability) AS p FROM technical_signals WHERE date >= date('now', '-3 days') GROUP BY symbol"
+            ).fetchall()
+            return {r['symbol']: float(r['p'] or 0) * 100 for r in rows}
+        except Exception:
+            return {}
 
     def _get_confluence_scores(self):
         try:
@@ -274,10 +277,13 @@ class UnifiedRanker:
             return {}
 
     def _get_technical_scores(self):
-        rows = self.conn.execute(
-            "SELECT symbol, AVG(signal_score) AS s FROM technical_analysis_signals WHERE date >= date('now', '-3 days') GROUP BY symbol"
-        ).fetchall()
-        return {r['symbol']: float(r['s'] or 0) for r in rows}
+        try:
+            rows = self.conn.execute(
+                "SELECT symbol, AVG(signal_score) AS s FROM technical_signals WHERE date >= date('now', '-3 days') GROUP BY symbol"
+            ).fetchall()
+            return {r['symbol']: float(r['s'] or 0) for r in rows}
+        except Exception:
+            return {}
 
     def _get_dl_scores(self):
         try:
