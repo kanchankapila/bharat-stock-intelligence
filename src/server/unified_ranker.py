@@ -387,6 +387,16 @@ class UnifiedRanker:
                 'bullish_screener_count':  bull_counts.get(sym, 0),
                 'bearish_screener_count':  bear_counts.get(sym, 0),
                 'fundamental_score':       fund_scores.get(sym),
+                'entry_zone_low':          None,
+                'entry_zone_high':         None,
+                'stop_loss':               None,
+                'target_1':                None,
+                'target_2':                None,
+                'target_3':                None,
+                'risk_reward':             None,
+                'timeframe':               None,
+                'trade_reasoning':         None,
+                'sector':                  None,
                 **et,
             })
 

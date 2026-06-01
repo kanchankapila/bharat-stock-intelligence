@@ -178,3 +178,97 @@ class TestScreenerStockScore:
         fund_scores = {'FEW_STRONG': 80.0, 'MANY_WEAK': 30.0}
         scores, _, _ = compute_screener_stock_scores(membership, fund_scores)
         assert scores['FEW_STRONG'] > scores['MANY_WEAK']
+
+
+class TestUnifiedRankerRun:
+    def _setup(self):
+        """Return a fully seeded ranker with controlled test data."""
+        import tempfile, os
+        conn = make_db()
+        csv_path = make_csv([
+            {'source':'trendlyne','screener_id':'bull1','screener_name':'Bull Breakout',
+             'category':'technical_breakout','subcategory':'price_breakout',
+             'signal_bias':'bullish','investment_horizon':'swing','confidence':'0.82'},
+            {'source':'trendlyne','screener_id':'fund1','screener_name':'High ROE',
+             'category':'fundamental_quality','subcategory':'capital_efficiency',
+             'signal_bias':'bullish','investment_horizon':'long_term','confidence':'0.82'},
+            {'source':'trendlyne','screener_id':'bear1','screener_name':'Death Cross',
+             'category':'technical_trend','subcategory':'trend_indicator',
+             'signal_bias':'bearish','investment_horizon':'swing','confidence':'0.74'},
+        ])
+        from unified_ranker import UnifiedRanker
+        ranker = UnifiedRanker(conn=conn, csv_path=csv_path)
+        ranker.seed_screener_catalog()
+
+        # INFY: in bull1 + fund1 → strong score; good fundamental
+        conn.execute("INSERT INTO trendlyne_screener_stocks VALUES ('bull1','INFY','INFY')")
+        conn.execute("INSERT INTO trendlyne_screener_stocks VALUES ('fund1','INFY','INFY')")
+        conn.execute("INSERT INTO stock_scores VALUES ('INFY','medium',80)")
+
+        # WEAK: in bull1 + bear1 → partially offset; weak fundamental
+        conn.execute("INSERT INTO trendlyne_screener_stocks VALUES ('bull1','WEAK','WEAK')")
+        conn.execute("INSERT INTO trendlyne_screener_stocks VALUES ('bear1','WEAK','WEAK')")
+        conn.execute("INSERT INTO stock_scores VALUES ('WEAK','medium',35)")
+
+        # Give INFY and WEAK a positive track record so they pass RL gate
+        conn.execute("INSERT INTO recommendation_log (symbol, signal_date, actual_return_pct, generated_at) VALUES ('INFY','2026-05-01',5.0,date('now','-10 days'))")
+        conn.execute("INSERT INTO recommendation_log (symbol, signal_date, actual_return_pct, generated_at) VALUES ('WEAK','2026-05-01',1.0,date('now','-10 days'))")
+
+        # ml scores
+        conn.execute("INSERT INTO technical_analysis_signals (symbol, date, win_probability, signal_score) VALUES ('INFY', date('now'), 0.75, 70)")
+        conn.execute("INSERT INTO technical_analysis_signals (symbol, date, win_probability, signal_score) VALUES ('WEAK', date('now'), 0.45, 40)")
+
+        # Market regime
+        conn.execute("INSERT INTO market_regimes (date, regime, regime_prob) VALUES (date('now'),'BULL',0.8)")
+        conn.commit()
+        return ranker, conn, csv_path
+
+    def test_run_writes_to_unified_recommendations(self):
+        import os
+        ranker, conn, csv_path = self._setup()
+        results = ranker.run()
+        assert len(results) > 0
+        rows = conn.execute('SELECT * FROM unified_recommendations').fetchall()
+        assert len(rows) > 0
+        os.unlink(csv_path)
+
+    def test_infy_scores_higher_than_weak(self):
+        import os
+        ranker, conn, csv_path = self._setup()
+        results = ranker.run()
+        scores = {r['symbol']: r['unified_score'] for r in results}
+        if 'INFY' in scores and 'WEAK' in scores:
+            assert scores['INFY'] > scores['WEAK']
+        os.unlink(csv_path)
+
+    def test_rl_gate_excludes_negative_track_record(self):
+        import os
+        ranker, conn, csv_path = self._setup()
+        conn.execute("INSERT INTO trendlyne_screener_stocks VALUES ('bull1','LOSER','LOSER')")
+        conn.execute("INSERT INTO stock_scores VALUES ('LOSER','medium',60)")
+        conn.execute("INSERT INTO technical_analysis_signals (symbol, date, win_probability, signal_score) VALUES ('LOSER', date('now'), 0.72, 68)")
+        conn.execute("INSERT INTO recommendation_log (symbol, signal_date, actual_return_pct, generated_at) VALUES ('LOSER','2026-05-01',-8.0,date('now','-10 days'))")
+        conn.commit()
+        results = ranker.run()
+        symbols = [r['symbol'] for r in results]
+        assert 'LOSER' not in symbols
+        os.unlink(csv_path)
+
+    def test_conviction_tiers_assigned_correctly(self):
+        from unified_ranker import _conviction
+        assert _conviction(90) == 'S_ELITE'
+        assert _conviction(80) == 'S_ELITE'
+        assert _conviction(70) == 'A_HIGH'
+        assert _conviction(65) == 'A_HIGH'
+        assert _conviction(50) == 'B_MEDIUM'
+        assert _conviction(45) == 'B_MEDIUM'
+        assert _conviction(30) == 'C_LOW'
+        assert _conviction(25) == 'C_LOW'
+        assert _conviction(10) == 'D_MARGINAL'
+
+    def test_regime_weights_sum_to_one(self):
+        from unified_ranker import REGIME_WEIGHTS
+        assert REGIME_WEIGHTS['BULL']['screener'] == 0.30
+        assert REGIME_WEIGHTS['CRASH']['screener'] == 0.40
+        for regime, weights in REGIME_WEIGHTS.items():
+            assert abs(sum(weights.values()) - 1.0) < 1e-9, f"{regime} weights don't sum to 1"
