@@ -84,6 +84,7 @@ export const QUEUE_AGENT_DATA_SCIENTIST = 'agent-data-scientist';
 export const QUEUE_AGENT_STRATEGIST     = 'agent-strategist';
 export const QUEUE_AGENT_AUDITOR        = 'agent-auditor';
 export const QUEUE_AGENT_OPTIMIZER      = 'agent-optimizer';
+export const QUEUE_UNIFIED_RANKER       = 'unified-ranker';
 
 const BULK_CACHE_KEY      = 'live-stocks-bulk';
 const BULK_TTL_SECONDS    = 5 * 60;
@@ -158,6 +159,8 @@ let agentDataScientistWorker: Worker | null = null;
 let agentStrategistWorker:    Worker | null = null;
 let agentAuditorWorker:       Worker | null = null;
 let agentOptimizerWorker:     Worker | null = null;
+export let unifiedRankerQueue: Queue | null = null;
+let unifiedRankerWorker: Worker | null = null;
 
 // Shared in-process mirror populated by the stock-refresh worker
 // (same reference as the one exported from liveStockData via the cache layer)
@@ -1323,6 +1326,35 @@ export async function initQueues(): Promise<boolean> {
     agentOptimizerWorker.on('completed', () => console.log('[QUEUE] agent-optimizer done'));
     agentOptimizerWorker.on('failed', (_, e) => console.error('[QUEUE] agent-optimizer failed:', e.message));
 
+    // ── Unified Ranker — daily at 15:45 IST (10:15 UTC) ─────────────────
+    unifiedRankerQueue = new Queue(QUEUE_UNIFIED_RANKER, { connection });
+    const unifiedRankerWorkerInstance = new Worker(
+      QUEUE_UNIFIED_RANKER,
+      async () => {
+        console.log('[QUEUE] unified-ranker starting...');
+        await runPython('unified_ranker.py', [], 5 * 60_000);
+      },
+      { connection, concurrency: 1 },
+    );
+    unifiedRankerWorker = unifiedRankerWorkerInstance;
+
+    const staleUR = await unifiedRankerQueue.getRepeatableJobs();
+    for (const r of staleUR) await unifiedRankerQueue.removeRepeatableByKey(r.key);
+    await unifiedRankerQueue.add(
+      'unified-ranker-daily',
+      {},
+      {
+        repeat:  { pattern: '15 10 * * 1-5' },
+        jobId:   'unified-ranker-daily-repeatable',
+        attempts: 2,
+        backoff:  { type: 'fixed', delay: 60_000 },
+      },
+    );
+    unifiedRankerWorkerInstance.on('completed', () =>
+      console.log('[QUEUE] unified-ranker done'));
+    unifiedRankerWorkerInstance.on('failed', (_, err) =>
+      console.error('[QUEUE] unified-ranker failed:', err.message));
+
     console.warn = _origWarn;
     console.log('[QUEUE] BullMQ initialised (stock-refresh + ai-signals)');
     return true;
@@ -1397,6 +1429,8 @@ export async function shutdownQueues(): Promise<void> {
     agentStrategistQueue?.close(),
     agentAuditorQueue?.close(),
     agentOptimizerQueue?.close(),
+    unifiedRankerWorker?.close(),
+    unifiedRankerQueue?.close(),
   ]);
 }
 
