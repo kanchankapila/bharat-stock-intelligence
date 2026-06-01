@@ -1,7 +1,14 @@
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 process.env.DATABASE_URL = ':memory:';
 const { default: db } = await import('../db');
+
+import { createCallerFactory } from '../trpc';
+
+// Import router after DB is set up
+const { appRouter } = await import('../router');
+const createCaller = createCallerFactory(appRouter);
+const caller = createCaller({} as any);
 
 describe('DB schema — unified_recommendations', () => {
   it('table exists with required columns', () => {
@@ -56,5 +63,41 @@ describe('DB schema — unified_recommendations', () => {
       "SELECT unified_score FROM unified_recommendations WHERE symbol='TEST'"
     ).get();
     expect(row.unified_score).toBe(80.0);
+  });
+});
+
+describe('getCommandCenter', () => {
+  beforeEach(() => {
+    db.exec(`DELETE FROM unified_recommendations`);
+    db.exec(`DELETE FROM market_regimes`);
+  });
+
+  it('returns empty eodPicks when no data', async () => {
+    const result = await caller.getCommandCenter({});
+    expect(result).toHaveProperty('eodPicks');
+    expect(result).toHaveProperty('intradaySignals');
+    expect(result).toHaveProperty('regime');
+    expect(Array.isArray(result.eodPicks)).toBe(true);
+  });
+
+  it('filters by conviction level', async () => {
+    db.prepare(`INSERT INTO market_regimes (date, regime, regime_prob) VALUES (date('now'),'BULL',0.8)`).run();
+    db.prepare(`INSERT INTO unified_recommendations
+      (symbol, computed_at, regime, unified_score, conviction_level)
+      VALUES ('ELITE_STOCK', date('now'), 'BULL', 90.0, 'S_ELITE')`).run();
+    db.prepare(`INSERT INTO unified_recommendations
+      (symbol, computed_at, regime, unified_score, conviction_level)
+      VALUES ('LOW_STOCK', date('now'), 'BULL', 30.0, 'C_LOW')`).run();
+
+    const elite = await caller.getCommandCenter({ conviction: 'S_ELITE' });
+    expect(elite.eodPicks.length).toBe(1);
+    expect(elite.eodPicks[0].symbol).toBe('ELITE_STOCK');
+  });
+
+  it('returns regime object with name and confidence', async () => {
+    db.prepare(`INSERT INTO market_regimes (date, regime, regime_prob) VALUES (date('now'),'BEAR',0.75)`).run();
+    const result = await caller.getCommandCenter({});
+    expect(result.regime.name).toBe('BEAR');
+    expect(result.regime.confidence).toBe(0.75);
   });
 });

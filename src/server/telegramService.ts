@@ -2,7 +2,8 @@ import axios from 'axios';
 import Database from 'better-sqlite3';
 import path from 'path';
 
-const dbPath = path.resolve(process.cwd(), process.env.DATABASE_URL || 'database.sqlite');
+const DATABASE_URL = process.env.DATABASE_URL || 'database.sqlite';
+const dbPath = DATABASE_URL === ':memory:' ? ':memory:' : path.resolve(process.cwd(), DATABASE_URL);
 const db = new Database(dbPath);
 
 export class TelegramNotificationService {

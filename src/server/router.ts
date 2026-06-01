@@ -21,7 +21,8 @@ import { dlRouter }           from "./routers/dl.router";
 import { telegramRouter }     from "./routers/telegram.router";
 import { confluenceRouter }   from "./routers/confluence.router";
 import { monitorRouter }      from "./routers/monitor.router";
-import { agentsRouter }       from "./routers/agents.router";
+import { agentsRouter }         from "./routers/agents.router";
+import { commandCenterRouter }  from "./routers/commandCenter.router";
 
 export const appRouter = mergeRouters(
   userRouter,
@@ -46,6 +47,7 @@ export const appRouter = mergeRouters(
   confluenceRouter,
   monitorRouter,
   agentsRouter,
+  commandCenterRouter,
 );
 
 export type AppRouter = typeof appRouter;
