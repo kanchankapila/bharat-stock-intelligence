@@ -15,7 +15,7 @@ def get_narrative(prompt: str) -> str:
             timeout=OLLAMA_TIMEOUT,
         )
         resp.raise_for_status()
-        return resp.json().get("response", "").strip()
+        return resp.json()["response"].strip()
     except Exception as exc:
         print(f"[OLLAMA] Narrative unavailable: {exc}")
         return f"[Narrative unavailable: {exc}]"
