@@ -15,7 +15,7 @@ const CONVICTION_COLOR: Record<string, string> = {
 
 export function AgentStrategistPage() {
   const [tf, setTf] = useState<Timeframe>('swing');
-  const { data, isLoading, refetch } = trpc.getStrategyPicks.useQuery({ timeframe: tf } as any);
+  const { data, isLoading, refetch } = trpc.getAgentStrategyPicks.useQuery({ timeframe: tf } as any);
   const runMutation = trpc.runStrategistAgent.useMutation({
     onSuccess: () => setTimeout(() => refetch(), 3000),
   });

@@ -32,10 +32,12 @@ mc_tl_explore.db
 
 # Redis binaries and data
 redis/
+redis_test/
 *.zip
 
 # Data files
 EQUITY_L.csv
+feature_store/
 
 # Python cache and tooling
 __pycache__/

@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { trpc } from '../lib/trpc';
 import { cn } from '../lib/utils';
+import { ScreenerRankingPanel } from './ScreenerRankingPanel';
 
 // ── Tier config ───────────────────────────────────────────────────────────────
 const TIER = {
@@ -60,6 +61,12 @@ function pct(n: number | null | undefined) {
 function fmtScore(n: number | null | undefined) {
   if (n == null) return '—';
   return n.toFixed(3);
+}
+
+function horizonToTimeframe(horizon: typeof HORIZONS[number]): 'intraday' | 'short' | 'medium' | 'long' {
+  if (horizon === '5d' || horizon === '10d') return 'short';
+  if (horizon === '20d' || horizon === '60d') return 'medium';
+  return 'long';
 }
 
 // ── Category stats card ───────────────────────────────────────────────────────
@@ -254,6 +261,9 @@ export function ScreenerIntelligencePage() {
 
   const rows = (leaderboard ?? []) as any[];
   const sorted = sortAsc ? [...rows].reverse() : rows;
+  const selectedTimeframe = horizonToTimeframe(horizon);
+
+  const { mutate: computeScores, isPending: scoringInProgress } = trpc.screeners.computeTimeframeScores.useMutation();
 
   // Unique categories in current results for filter pill
   const cats = categoryStats as any[] ?? [];
@@ -401,6 +411,18 @@ export function ScreenerIntelligencePage() {
           </div>
           <div className="flex-1 overflow-y-auto">
             <ScreenerDetail screenerId={selectedId} />
+            <div className="px-4 py-4 border-t border-slate-800/50">
+              <button
+                onClick={() => selectedId && computeScores({ screenerId: selectedId, timeframe: selectedTimeframe, topN: 50 })}
+                disabled={!selectedId || scoringInProgress}
+                className="w-full rounded-lg bg-indigo-600 px-3 py-2 text-[11px] font-semibold text-white hover:bg-indigo-500 disabled:opacity-50"
+              >
+                {scoringInProgress ? 'Computing rankings…' : `Compute ${selectedTimeframe} rankings`}
+              </button>
+            </div>
+            <div className="px-4 pb-4">
+              <ScreenerRankingPanel timeframe={selectedTimeframe} screenerId={selectedId ?? undefined} />
+            </div>
           </div>
         </div>
       )}

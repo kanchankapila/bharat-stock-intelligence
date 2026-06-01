@@ -1,0 +1,108 @@
+﻿{
+    "success":  true,
+    "strategy":  "composite",
+    "limit":  20,
+    "riskModel":  "risk_parity",
+    "picks":  [
+                  {
+                      "symbol":  "MCX",
+                      "weight":  0.06554584063873334,
+                      "volPct":  43.85597223249999
+                  },
+                  {
+                      "symbol":  "BAJAJCON",
+                      "weight":  0.000022751892812164327,
+                      "volPct":  59.12195931770625
+                  },
+                  {
+                      "symbol":  "TDPOWERSYS",
+                      "weight":  0.03323067244262827,
+                      "volPct":  47.97862293799432
+                  },
+                  {
+                      "symbol":  "OFSS",
+                      "weight":  0.10864202968270424,
+                      "volPct":  37.19239869823181
+                  },
+                  {
+                      "symbol":  "LLOYDSME",
+                      "weight":  0.02279998879987637,
+                      "volPct":  44.35899892803127
+                  },
+                  {
+                      "symbol":  "HINDZINC",
+                      "weight":  0.07763182377703638,
+                      "volPct":  44.66339599823175
+                  },
+                  {
+                      "symbol":  "SJS",
+                      "weight":  0.011967930823883435,
+                      "volPct":  43.43448867189165
+                  },
+                  {
+                      "symbol":  "RPTECH",
+                      "weight":  6.2761112143482738E-10,
+                      "volPct":  41.97942341771593
+                  },
+                  {
+                      "symbol":  "GESHIP",
+                      "weight":  0.048175496218021245,
+                      "volPct":  43.28920359620835
+                  },
+                  {
+                      "symbol":  "KIRLPNU",
+                      "weight":  0.048166216373344686,
+                      "volPct":  36.387230583500525
+                  },
+                  {
+                      "symbol":  "NATIONALUM",
+                      "weight":  0.011902563048013329,
+                      "volPct":  44.98427915815111
+                  },
+                  {
+                      "symbol":  "MAHABANK",
+                      "weight":  0.055049662877872135,
+                      "volPct":  40.36854854003139
+                  },
+                  {
+                      "symbol":  "SEAMECLTD",
+                      "weight":  0.18204721856100506,
+                      "volPct":  35.8435970413881
+                  },
+                  {
+                      "symbol":  "UNIPARTS",
+                      "weight":  0.023888543355169763,
+                      "volPct":  41.9062064756068
+                  },
+                  {
+                      "symbol":  "POLYCAB",
+                      "weight":  0.09993221310995644,
+                      "volPct":  36.99874671455029
+                  },
+                  {
+                      "symbol":  "WELCORP",
+                      "weight":  0.032651887502865566,
+                      "volPct":  40.38595010175496
+                  },
+                  {
+                      "symbol":  "MAYURUNIQ",
+                      "weight":  0.0000740445365487486,
+                      "volPct":  45.19433111367365
+                  },
+                  {
+                      "symbol":  "VENUSREM",
+                      "weight":  0.07006279303089985,
+                      "volPct":  55.482711351823475
+                  },
+                  {
+                      "symbol":  "OMAXAUTO",
+                      "weight":  4.0774812457867333E-52,
+                      "volPct":  77.11005315070591
+                  },
+                  {
+                      "symbol":  "SATIN",
+                      "weight":  0.10820832270101784,
+                      "volPct":  36.375984118019005
+                  }
+              ]
+}

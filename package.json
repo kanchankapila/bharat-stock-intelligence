@@ -4,13 +4,16 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "start": "concurrently \"npm run dev\" \"npm run api\"",
+    "start": "concurrently \"npm run dev\" \"npm run api\" \"npm run ml-api\"",
     "dev": "tsx watch server.ts",
     "api": "cd backend-python && node -e \"const{spawnSync:s}=require('child_process');const py=process.platform==='win32'?'venv/Scripts/python.exe':'venv/bin/python';const r=s(py,['-u','main.py'],{stdio:'inherit',env:{...process.env,PYTHONUNBUFFERED:'1'}});if(r.error)process.stderr.write('[api] spawn error: '+r.error.message+'\\n');process.exit(r.status??1);\"",
+    "ml-api": "node -e \"const{spawnSync:s}=require('child_process');const r=s('C:/Users/amit_/AppData/Local/Programs/Python/Python311/python.exe',['-u','src/server/python_api.py'],{stdio:'inherit',env:{...process.env,PYTHONUNBUFFERED:'1'}});if(r.error)process.stderr.write('[ml-api] spawn error: '+r.error.message+'\\n');process.exit(r.status??1);\"",
     "build": "vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "fetch:chart-patterns": "tsx scripts/fetchChartPatterns.ts",
     "sync:mappings": "tsx scripts/syncAllStockMappings.ts"
   },
@@ -58,6 +61,7 @@
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
-    "vite": "^6.2.3"
+    "vite": "^6.2.3",
+    "vitest": "^1.5.5"
   }
 }

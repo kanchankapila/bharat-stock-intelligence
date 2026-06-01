@@ -43,7 +43,7 @@ export const screenersRouter = router({
         return fetchETnowScreener(screenerId, queryCondition);
       }
       if (input.provider === 'custom') {
-        const { timeframes, minVolume = 0 } = input.params;
+        const { timeframes, minVolume = 0, minMktCap = 0, sector } = input.params;
         const allStocks = await getOrRefreshAllStocks();
         const parseVol = (v: string): number => {
           if (!v) return 0;
@@ -51,14 +51,33 @@ export const screenersRouter = router({
           if (v.endsWith('K')) return parseFloat(v) * 1_000;
           return parseFloat(v) || 0;
         };
+        const parseMarketCap = (value: any): number => {
+          if (value == null) return 0;
+          if (typeof value === 'number') return value;
+          const str = String(value).replace(/[,₹\s]/g, '').toUpperCase();
+          if (str.endsWith('M')) return parseFloat(str.slice(0, -1)) * 1_000_000;
+          if (str.endsWith('B')) return parseFloat(str.slice(0, -1)) * 1_000_000_000;
+          if (str.endsWith('K')) return parseFloat(str.slice(0, -1)) * 1_000;
+          return parseFloat(str) || 0;
+        };
+
+        const shouldMatchSector = (s: any) => {
+          if (!sector || sector === 'All') return true;
+          return String(s.sector || s.industry || '').toLowerCase() === String(sector).toLowerCase();
+        };
+
         const selected = allStocks
-          .filter((s: any) => s.changePct > 0 && parseVol(s.volume) > minVolume && s.price > 0)
+          .filter((s: any) => {
+            const vol = parseVol(s.volume);
+            const mcap = parseMarketCap(s.marketCap ?? s.mcap ?? s.market_cap ?? s.marketCapText ?? s.mcapText ?? '');
+            return s.changePct > 0 && vol > minVolume && s.price > 0 && shouldMatchSector(s) && mcap >= minMktCap;
+          })
           .sort((a: any, b: any) => b.changePct - a.changePct)
           .slice(0, 50)
           .map((s: any) => ({
             symbol: s.symbol, name: s.name, ltp: s.price,
             perChg: s.changePct.toFixed(2), volume: s.volume,
-            mktCap: '—', sector: s.sector || '—',
+            mktCap: s.marketCap ?? s.mcap ?? s.market_cap ?? '—', sector: s.sector || '—',
             timeframesMet: timeframes?.join(', ') || 'D, W',
             momentum: s.changePct > 2 ? 'Strong Bullish' : 'Bullish',
             pattern: s.high52w && (s.price / s.high52w) > 0.95 ? 'Near 52W High' : 'Uptrend',
@@ -317,5 +336,33 @@ export const screenersRouter = router({
       } catch (e: any) {
         return { queued: false, message: `Queue unavailable: ${e.message}` };
       }
+    }),
+
+  computeTimeframeScores: publicProcedure
+    .input(z.object({ runId: z.string().optional(), screenerId: z.string().optional(), timeframe: z.enum(['intraday','short','medium','long']).optional(), topN: z.number().optional() }))
+    .mutation(async ({ input }) => {
+      const scoring = await import('../scoringService');
+      const results = await scoring.default.computeTimeframeScores({ runId: input.runId, screenerId: input.screenerId, timeframe: input.timeframe as any, topN: input.topN });
+      return { success: true, results };
+    }),
+
+  getTimeframeRanking: publicProcedure
+    .input(z.object({ timeframe: z.enum(['intraday','short','medium','long']), runId: z.string().optional(), screenerId: z.string().optional(), limit: z.number().min(1).max(500).optional().default(100) }))
+    .query(({ input }) => {
+      const params: any[] = [input.timeframe];
+      let sql = `SELECT symbol, score, confidence, domains_json, reasons_json, suggested_holding_days FROM timeframe_scores WHERE timeframe = ?`;
+      if (input.runId) { sql += ` AND run_id = ?`; params.push(input.runId); }
+      if (input.screenerId) { sql += ` AND reasons_json LIKE ?`; params.push(`%${input.screenerId}%`); }
+      sql += ` ORDER BY score DESC LIMIT ?`;
+      params.push(input.limit);
+      return db.prepare(sql).all(...params);
+    }),
+
+  triggerBacktest: publicProcedure
+    .input(z.object({ runId: z.string().optional(), screenerId: z.string().optional(), timeframe: z.enum(['intraday','short','medium','long']).optional(), horizonDays: z.number().optional(), topN: z.number().optional() }))
+    .mutation(async ({ input }) => {
+      const bt = await import('../backtestRunner');
+      const res = await bt.runBacktest({ runId: input.runId, screenerId: input.screenerId, timeframe: input.timeframe as any, horizonDays: input.horizonDays, topN: input.topN });
+      return { success: true, result: res };
     }),
 });

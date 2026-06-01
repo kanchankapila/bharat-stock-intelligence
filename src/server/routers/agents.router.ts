@@ -20,7 +20,7 @@ export const agentsRouter = router({
       return { latest, history };
     }),
 
-  getStrategyPicks: publicProcedure
+  getAgentStrategyPicks: publicProcedure
     .input(z.object({
       date:      z.string().optional(),
       timeframe: z.enum(['intraday', 'swing', 'positional', 'investment']).optional(),
