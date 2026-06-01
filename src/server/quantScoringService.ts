@@ -44,6 +44,25 @@ let scoringProgress: QuantScoringProgress = {
   lastError: null,
 };
 
+function persistProgress(): void {
+  try {
+    db.prepare(
+      "INSERT INTO app_settings(key,value,updatedAt) VALUES(?,?,CURRENT_TIMESTAMP) " +
+      "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updatedAt=excluded.updatedAt"
+    ).run('quant_scoring_progress', JSON.stringify(scoringProgress));
+  } catch (err: unknown) {
+    console.warn('[QUANT] Could not persist progress:', (err as Error).message);
+  }
+}
+
+try {
+  const _row = db.prepare("SELECT value FROM app_settings WHERE key = 'quant_scoring_progress'").get() as { value: string } | undefined;
+  if (_row) {
+    const saved = JSON.parse(_row.value) as Partial<QuantScoringProgress>;
+    scoringProgress = { ...scoringProgress, ...saved, isRunning: false };
+  }
+} catch { /* no persisted state */ }
+
 export function getQuantScoringProgress(): QuantScoringProgress {
   return { ...scoringProgress };
 }
@@ -163,6 +182,16 @@ function loadFundamentals(): Map<string, any> {
   return new Map(rows.map(r => [r.symbol, r]));
 }
 
+// ─── Technical Composite lookup (one-shot) ───────────────────────────────────
+
+function loadTechnicalCompositeScores(): Map<string, any> {
+  const rows = db.prepare(`
+    SELECT symbol, composite_score
+    FROM technical_composite_scores
+  `).all() as any[];
+  return new Map(rows.map(r => [r.symbol, r]));
+}
+
 // ─── Main scorer ─────────────────────────────────────────────────────────────
 
 export async function runQuantScoring(): Promise<void> {
@@ -179,6 +208,7 @@ export async function runQuantScoring(): Promise<void> {
     completedAt: null,
     lastError: null,
   };
+  persistProgress();
 
   try {
     console.log('[QUANT] Loading OHLCV data...');
@@ -199,11 +229,13 @@ export async function runQuantScoring(): Promise<void> {
     // Filter to symbols with enough history
     const eligible = [...bySymbol.entries()].filter(([, rows]) => rows.length >= MIN_DAYS);
     scoringProgress.totalSymbols = eligible.length;
+    persistProgress();
     console.log(`[QUANT] ${eligible.length} eligible symbols`);
 
-    // Pre-load screener confluence and fundamentals
+    // Pre-load screener confluence, fundamentals, and technical composites
     const screenerMap  = loadScreenerConfluence();
     const fundMap      = loadFundamentals();
+    const techMap      = loadTechnicalCompositeScores();
 
     // ── Compute raw metrics per symbol ──────────────────────────────────────
 
@@ -221,6 +253,7 @@ export async function runQuantScoring(): Promise<void> {
       const maxDD  = maxDrawdown(rows, 252);
       const conf   = screenerMap.get(symbol);
       const fund   = fundMap.get(symbol);
+      const tech   = techMap.get(symbol);
 
       computed.push({
         symbol,
@@ -245,6 +278,7 @@ export async function runQuantScoring(): Promise<void> {
         bearish_screener_count:   conf?.bearish        ?? 0,
         screener_category_breadth: conf?.categoryBreadth ?? 0,
         screener_net_score:        conf?.netScore       ?? 0,
+        technical_composite:       tech?.composite_score ?? null,
         ohlcv_days: rows.length,
       });
     }
@@ -293,9 +327,12 @@ export async function runQuantScoring(): Promise<void> {
     );
     const qualityPct = percentileRanks(qualityRanks, true);
 
-    // Composite: momentum 30%, quality 25%, valuation 25%, confluence 20%
+    // Technical rank
+    const techRanks = percentileRanks(get('technical_composite'), true);
+
+    // Composite: 30% Screener, 20% Fundamentals, 15% Technical, 15% Momentum, 10% Institutional (50), 10% Historical (50)
     const compositeRanks = momentumPct.map((m, i) =>
-      0.30 * m + 0.25 * qualityPct[i] + 0.25 * valuationPct[i] + 0.20 * confluencePct[i]
+      0.30 * confluencePct[i] + 0.20 * valuationPct[i] + 0.15 * techRanks[i] + 0.15 * m + 0.10 * 50 + 0.10 * 50
     );
     const compositePct = percentileRanks(compositeRanks, true);
 
@@ -391,19 +428,23 @@ export async function runQuantScoring(): Promise<void> {
           c.ohlcv_days,
         );
         scoringProgress.processed++;
+        if (scoringProgress.processed % 50 === 0) persistProgress();
       }
     });
 
     insertAll();
     scoringProgress.completedAt = new Date().toISOString();
+    persistProgress();
     console.log(`[QUANT] Scoring complete — ${computed.length} symbols written to quant_scores`);
 
   } catch (err: any) {
     scoringProgress.lastError = err.message;
+    persistProgress();
     console.error('[QUANT] Scoring failed:', err.message);
     throw err;
   } finally {
-    scoringProgress.isRunning  = false;
+    scoringProgress.isRunning = false;
+    persistProgress();
   }
 }
 

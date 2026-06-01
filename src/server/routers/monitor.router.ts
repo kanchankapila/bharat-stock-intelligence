@@ -279,7 +279,8 @@ function getLastRunAt(scriptId: ScriptId): string | null {
         return null;
     }
     return (row as any)?.t ?? null;
-  } catch {
+  } catch (err: unknown) {
+    console.warn('[MONITOR] getLastRunAt failed:', (err as Error).message);
     return null;
   }
 }
@@ -372,7 +373,8 @@ function getScriptStats(scriptId: ScriptId): Record<string, number | string | nu
       default:
         return {};
     }
-  } catch {
+  } catch (err: unknown) {
+    console.warn('[MONITOR] getScriptStats failed:', (err as Error).message);
     return {};
   }
 }
@@ -383,7 +385,9 @@ export const monitorRouter = router({
     try {
       const rows = db.prepare("SELECT key, value FROM app_settings WHERE key LIKE 'monitor_%'").all() as any[];
       for (const r of rows) runStates[r.key] = r.value;
-    } catch { /* app_settings may not have monitor keys yet */ }
+    } catch (err: unknown) {
+      console.warn('[MONITOR] getSystemStatus failed:', (err as Error).message);
+    }
 
     return MONITOR_SCRIPTS.map(s => {
       const dbLastRunAt = getLastRunAt(s.id as ScriptId);
@@ -428,7 +432,9 @@ export const monitorRouter = router({
             db.prepare("INSERT INTO app_settings(key, value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
               .run(`${stateKey}_ran_at`, new Date().toISOString());
           }
-        } catch { /* ignore */ }
+        } catch (err: unknown) {
+          console.warn('[MONITOR] upsertState failed:', (err as Error).message);
+        }
       };
 
       upsertState('running');
@@ -462,7 +468,9 @@ export const monitorRouter = router({
             await q.add(`manual-${script.id}`, {}, { removeOnComplete: 3 });
             return { queued: true, message: `Queued ${script.label}` };
           }
-        } catch { /* queue unavailable */ }
+        } catch (err: unknown) {
+          console.warn('[MONITOR] queue trigger failed:', (err as Error).message);
+        }
         upsertState('success');
         return { queued: false, message: 'Queue unavailable — script is queue-only' };
       }
@@ -503,7 +511,9 @@ export const monitorRouter = router({
         if (val === 'success') {
           db.prepare("INSERT INTO app_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(`${key}_ran_at`, new Date().toISOString());
         }
-      } catch { /* */ }
+      } catch (err: unknown) {
+        console.warn('[MONITOR] upsert failed:', (err as Error).message);
+      }
     };
 
     for (const id of dailyScripts) {

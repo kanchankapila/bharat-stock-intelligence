@@ -366,7 +366,7 @@ export async function initQueues(): Promise<boolean> {
     await probe.quit();
     console.log('[QUEUE] Redis connection probe successful');
   } catch (err: any) {
-    try { probe.disconnect(true); } catch { /* ignore */ }
+    try { probe.disconnect(true); } catch (err: unknown) { console.warn('[QUEUE] probe disconnect failed:', (err as Error).message); }
     console.warn = _origWarn;
     console.warn('[QUEUE] Redis unavailable, disabling BullMQ:', err.message);
     return false;
