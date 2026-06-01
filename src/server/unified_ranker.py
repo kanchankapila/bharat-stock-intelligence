@@ -189,9 +189,10 @@ class UnifiedRanker:
         self.conn.executemany(
             '''INSERT OR REPLACE INTO screener_catalog
                (screener_id, source, screener_name, category, subcategory,
-                signal_bias, investment_horizon, confidence)
-               VALUES (?,?,?,?,?,?,?,?)''',
-            [(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7]) for r in rows],
+                signal_bias, investment_horizon, confidence,
+                score_0_100, tier, sub_mod, horiz_mult)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)''',
+            rows,
         )
 
         if self.corrections_path.exists():

@@ -19,6 +19,7 @@ def make_db():
             screener_name TEXT NOT NULL, category TEXT NOT NULL,
             subcategory TEXT, signal_bias TEXT NOT NULL,
             investment_horizon TEXT, confidence REAL NOT NULL,
+            score_0_100 REAL, tier TEXT, sub_mod REAL, horiz_mult REAL,
             PRIMARY KEY (screener_id, source)
         );
         CREATE TABLE trendlyne_screener_stocks (
@@ -130,8 +131,8 @@ class TestScreenerStockScore:
         from unified_ranker import compute_screener_stock_scores
 
         membership = {
-            'STRONG': [{'signal_bias':'bullish','confidence':0.74,'category':'technical_breakout','investment_horizon':'swing'}]*3,
-            'WEAK':   [{'signal_bias':'bullish','confidence':0.74,'category':'technical_breakout','investment_horizon':'swing'}]*3,
+            'STRONG': [{'signal_bias':'bullish','confidence':0.74,'category':'technical_breakout','subcategory':'price_breakout','investment_horizon':'swing'}]*3,
+            'WEAK':   [{'signal_bias':'bullish','confidence':0.74,'category':'technical_breakout','subcategory':'price_breakout','investment_horizon':'swing'}]*3,
         }
         fund_scores = {'STRONG': 80.0, 'WEAK': 30.0}
         scores, _, _ = compute_screener_stock_scores(membership, fund_scores)
@@ -141,8 +142,8 @@ class TestScreenerStockScore:
         from unified_ranker import compute_screener_stock_scores
 
         membership = {
-            'BULL_STOCK':  [{'signal_bias':'bullish','confidence':0.74,'category':'technical_breakout','investment_horizon':'swing'}]*5,
-            'BEAR_STOCK':  [{'signal_bias':'bearish','confidence':0.74,'category':'technical_breakout','investment_horizon':'swing'}]*5,
+            'BULL_STOCK':  [{'signal_bias':'bullish','confidence':0.74,'category':'technical_breakout','subcategory':'price_breakout','investment_horizon':'swing'}]*5,
+            'BEAR_STOCK':  [{'signal_bias':'bearish','confidence':0.74,'category':'technical_breakout','subcategory':'price_breakout','investment_horizon':'swing'}]*5,
         }
         fund_scores = {'BULL_STOCK': 50.0, 'BEAR_STOCK': 50.0}
         scores, _, _ = compute_screener_stock_scores(membership, fund_scores)
@@ -152,10 +153,10 @@ class TestScreenerStockScore:
         from unified_ranker import compute_screener_stock_scores
 
         membership = {
-            'CLEAN': [{'signal_bias':'bullish','confidence':0.74,'category':'fundamental_quality','investment_horizon':'long_term'}]*3,
+            'CLEAN': [{'signal_bias':'bullish','confidence':0.74,'category':'fundamental_quality','subcategory':'capital_efficiency','investment_horizon':'long_term'}]*3,
             'RISKY': [
-                {'signal_bias':'bullish','confidence':0.74,'category':'fundamental_quality','investment_horizon':'long_term'},
-                {'signal_bias':'neutral','confidence':0.74,'category':'risk_red_flags','investment_horizon':'long_term'},
+                {'signal_bias':'bullish','confidence':0.74,'category':'fundamental_quality','subcategory':'capital_efficiency','investment_horizon':'long_term'},
+                {'signal_bias':'neutral','confidence':0.74,'category':'risk_red_flags','subcategory':'financial_or_governance_risk','investment_horizon':'long_term'},
             ],
         }
         fund_scores = {'CLEAN': 75.0, 'RISKY': 75.0}
@@ -167,11 +168,11 @@ class TestScreenerStockScore:
 
         membership = {
             'FEW_STRONG': [
-                {'signal_bias':'bullish','confidence':0.82,'category':'fundamental_quality','investment_horizon':'long_term'},
-                {'signal_bias':'bullish','confidence':0.82,'category':'fundamental_growth','investment_horizon':'long_term'},
+                {'signal_bias':'bullish','confidence':0.82,'category':'fundamental_quality','subcategory':'capital_efficiency','investment_horizon':'long_term'},
+                {'signal_bias':'bullish','confidence':0.82,'category':'fundamental_growth','subcategory':'earnings_growth','investment_horizon':'long_term'},
             ]*3,
             'MANY_WEAK': [
-                {'signal_bias':'bullish','confidence':0.74,'category':'technical_trend','investment_horizon':'intraday'},
+                {'signal_bias':'bullish','confidence':0.74,'category':'technical_trend','subcategory':'trend_indicator','investment_horizon':'intraday'},
             ]*20,
         }
         fund_scores = {'FEW_STRONG': 80.0, 'MANY_WEAK': 30.0}
