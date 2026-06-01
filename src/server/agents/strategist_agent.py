@@ -40,7 +40,7 @@ def _regime_bonus(regime: str | None, sentiment: str | None) -> float:
         return 0.0
     if regime == "BULL" and sentiment == "bullish":
         return 15.0
-    if regime in ("BULL", "BEAR") and sentiment == "bearish":
+    if regime == "BULL" and sentiment == "bearish":
         return -15.0
     return 0.0
 

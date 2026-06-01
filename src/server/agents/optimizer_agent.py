@@ -58,15 +58,15 @@ def run() -> dict:
         avg_rates = {tf: sum(rates) / len(rates) for tf, rates in tf_rates.items()}
         overall_rate = sum(avg_rates.values()) / max(len(avg_rates), 1)
 
-        # Check consecutive underperformance (last 5 days overall)
-        recent_5 = conn.execute(text("""
+        # Check consecutive underperformance — fetch last 7 calendar days (covers 5 trading days)
+        recent_days = conn.execute(text("""
             SELECT AVG(hit_rate) FROM agent_audit_reports
-            WHERE run_date >= date('now', '-5 days')
+            WHERE run_date >= date('now', '-7 days')
             GROUP BY run_date ORDER BY run_date
         """)).fetchall()
-        consecutive_bad = sum(1 for r in recent_5 if r[0] and float(r[0]) < 50)
+        consecutive_bad = sum(1 for r in recent_days if r[0] and float(r[0]) < 50)
 
-        full_optimizer = consecutive_bad >= 5
+        full_optimizer = len(recent_days) >= 5 and consecutive_bad >= 5
 
         # Determine underperforming signal types
         changes: dict[str, dict] = {}
