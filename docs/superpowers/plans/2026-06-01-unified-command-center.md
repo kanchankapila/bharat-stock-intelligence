@@ -4,7 +4,7 @@
 
 **Goal:** Build an "Alpha" tab that fuses all scoring engines into one regime-gated unified recommendation dashboard with EOD swing picks and intraday live sections.
 
-**Architecture:** `unified_ranker.py` runs after market close, reads all engine outputs + screener membership (using `screener_names_categorized.csv` category/bias weights), applies regime-specific engine weights adjusted by 90-day realized-return track records, hard-gates via RL, and writes to `unified_recommendations`. `getCommandCenter` tRPC reads that table and overlays live prices. `CommandCenterDashboard.tsx` is the new "Alpha" nav tab; old recommendation tabs are hidden behind an "Advanced ›" toggle.
+**Architecture:** `unified_ranker.py` runs after market close, reads all engine outputs + screener membership. Screener scoring uses `screener_scoring_v2.csv` (from `screener_scoring_engine_v2.xlsx`) — research-backed category base weights + subcategory modifiers + horizon multipliers + 44 bias/subcategory corrections. Regime-specific engine weights adjusted by 90-day realized-return track records. Hard-gates via RL. Writes to `unified_recommendations`. `getCommandCenter` tRPC reads that table and overlays live prices. `CommandCenterDashboard.tsx` is the new "Alpha" nav tab; old recommendation tabs are hidden behind an "Advanced ›" toggle.
 
 **Tech Stack:** Python 3.11 + SQLite (better-sqlite3), scipy (softmax), TypeScript + tRPC + Zod, React 19 + TailwindCSS 4, BullMQ, Vitest, pytest
 
@@ -14,8 +14,10 @@
 
 | File | Action | Responsibility |
 |---|---|---|
+| `screener_scoring_v2.csv` | Already exists | 1534 screeners with xlsx-computed score_0_100, tier, sub_mod, horiz_mult |
+| `screener_corrections.csv` | Already exists | 44 bias/subcategory corrections from xlsx Corrections Log |
 | `src/server/db.ts` | Modify | Add `unified_recommendations` + `screener_catalog` migrations |
-| `src/server/unified_ranker.py` | Create | Full scoring pipeline — CSV seed, screener scoring, engine fusion, write DB |
+| `src/server/unified_ranker.py` | Create | Full scoring pipeline — CSV seed w/ corrections, xlsx formula, engine fusion, write DB |
 | `src/server/router.ts` | Modify | Add `getCommandCenter` query + `runUnifiedRanker` mutation |
 | `src/server/queues.ts` | Modify | Add `QUEUE_UNIFIED_RANKER` repeatable job at 15:45 IST |
 | `src/components/CommandCenterDashboard.tsx` | Create | "Alpha" tab UI — regime banner, EOD picks, intraday signals |
@@ -72,19 +74,24 @@ describe('DB schema — unified_recommendations', () => {
     expect(cols).toContain('source');
     expect(cols).toContain('screener_name');
     expect(cols).toContain('category');
+    expect(cols).toContain('subcategory');
     expect(cols).toContain('signal_bias');
     expect(cols).toContain('confidence');
     expect(cols).toContain('investment_horizon');
+    expect(cols).toContain('score_0_100');
+    expect(cols).toContain('tier');
+    expect(cols).toContain('sub_mod');
+    expect(cols).toContain('horiz_mult');
   });
 
   it('unique constraint on (symbol, computed_at)', () => {
     db.prepare(`INSERT INTO unified_recommendations
       (symbol, computed_at, regime, unified_score, conviction_level)
-      VALUES ('TEST', '2026-06-01', 'BULL', 75.0, 'STRONG')`).run();
+      VALUES ('TEST', '2026-06-01', 'BULL', 75.0, 'A_HIGH')`).run();
     // Second insert with same symbol+date should replace, not throw
     expect(() => db.prepare(`INSERT OR REPLACE INTO unified_recommendations
       (symbol, computed_at, regime, unified_score, conviction_level)
-      VALUES ('TEST', '2026-06-01', 'BULL', 80.0, 'STRONG')`).run()
+      VALUES ('TEST', '2026-06-01', 'BULL', 80.0, 'A_HIGH')`).run()
     ).not.toThrow();
     const row: any = db.prepare(
       "SELECT unified_score FROM unified_recommendations WHERE symbol='TEST'"
@@ -117,6 +124,10 @@ runMigration('020_screener_catalog', `
     signal_bias        TEXT NOT NULL,
     investment_horizon TEXT,
     confidence         REAL NOT NULL,
+    score_0_100        REAL,
+    tier               TEXT,
+    sub_mod            REAL,
+    horiz_mult         REAL,
     PRIMARY KEY (screener_id, source)
   );
 `);
@@ -397,31 +408,71 @@ from datetime import date, timedelta
 
 import numpy as np
 
-DB_PATH  = Path(__file__).parent.parent.parent / 'database.sqlite'
-CSV_PATH = Path(__file__).parent.parent.parent / 'screener_names_categorized.csv'
+DB_PATH      = Path(__file__).parent.parent.parent / 'database.sqlite'
+CSV_PATH     = Path(__file__).parent.parent.parent / 'screener_scoring_v2.csv'
+CORRECTIONS_PATH = Path(__file__).parent.parent.parent / 'screener_corrections.csv'
 
-BIAS_VALUE = {'bullish': 1.0, 'bearish': -1.0, 'neutral': 0.3}
+# User requirement: bearish screeners reduce score (sign=-1)
+BIAS_SIGN = {'bullish': 1.0, 'bearish': -1.0, 'neutral': 0.3}
 
-CAT_WEIGHT = {
-    'fundamental_quality':     1.5,
-    'fundamental_growth':      1.4,
-    'analyst_sentiment':       1.3,
-    'valuation':               1.2,
-    'composite_strategy':      1.2,
-    'ownership_institutional': 1.1,
-    'technical_breakout':      1.1,
-    'technical_momentum':      1.0,
-    'technical_reversal':      1.0,
-    'sector_theme':            0.9,
-    'technical_trend':         0.9,
-    'event_corporate_action':  0.8,
-    'income_dividend':         0.8,
-    'volatility':              0.7,
-    'volume_liquidity':        0.7,
-    'market_cap_style':        0.6,
-    'derivatives_positioning': 0.6,
-    'risk_red_flags':         -2.0,
-    'other':                   0.5,
+# Research-backed category base weights (from screener_scoring_engine_v2.xlsx)
+CAT_BASE_WT = {
+    'composite_strategy':      0.1287,
+    'fundamental_quality':     0.1188,
+    'fundamental_growth':      0.0990,
+    'valuation':               0.0792,
+    'technical_breakout':      0.0792,
+    'ownership_institutional': 0.0693,
+    'technical_momentum':      0.0693,
+    'technical_trend':         0.0594,
+    'analyst_sentiment':       0.0495,
+    'technical_reversal':      0.0396,
+    'event_corporate_action':  0.0396,
+    'derivatives_positioning': 0.0297,
+    'income_dividend':         0.0297,
+    'risk_red_flags':          0.0297,
+    'volume_liquidity':        0.0297,
+    'volatility':              0.0198,
+    'sector_theme':            0.0198,
+    'market_cap_style':        0.0099,
+    'other':                   0.0,
+}
+
+# Subcategory modifiers (from xlsx)
+SUBCAT_MOD = {
+    'multi_factor_strategy':        1.20,
+    'earnings_growth':              1.15,
+    'institutional_activity':       1.15,
+    'capital_efficiency':           1.10,
+    'revenue_growth':               1.10,
+    'price_leadership':             1.10,
+    'relative_strength':            1.10,
+    'balance_sheet_quality':        1.05,
+    'price_breakout':               1.05,
+    'volume_delivery':              1.05,
+    'moving_average_trend':         1.00,
+    'relative_or_absolute_value':   1.00,
+    'trend_indicator':              0.95,
+    'earnings_event':               0.95,
+    'oscillator_signal':            0.90,
+    'broker_forecast':              0.90,
+    'open_interest':                0.90,
+    'oscillator_reversal':          0.85,
+    'dividend_income':              0.85,
+    'candlestick_reversal':         0.80,
+    'volatility_range':             0.75,
+    'sector_or_theme':              0.70,
+    'corporate_action':             0.70,
+    'financial_or_governance_risk': 0.60,
+    'size_style':                   0.60,
+}
+
+# Horizon multipliers (from xlsx) — intraday 30% discounted
+HORIZON_MULT = {
+    'intraday':   0.70,
+    'swing':      0.95,
+    'positional': 1.05,
+    'long_term':  1.10,
 }
 
 REGIME_WEIGHTS = {
@@ -431,7 +482,14 @@ REGIME_WEIGHTS = {
     'CRASH':    {'screener': 0.40, 'ml': 0.25, 'confluence': 0.15, 'technical': 0.10, 'dl': 0.10},
 }
 
-CONVICTION_TIERS = [('ELITE', 85), ('STRONG', 70), ('MODERATE', 55), ('WATCH', 40)]
+# Tiers from xlsx Scoring Framework
+CONVICTION_TIERS = [
+    ('S_ELITE',    80),
+    ('A_HIGH',     65),
+    ('B_MEDIUM',   45),
+    ('C_LOW',      25),
+    ('D_MARGINAL',  1),
+]
 
 
 def _fund_mult(score: float | None) -> float:
@@ -460,7 +518,7 @@ def _conviction(score: float) -> str:
     for tier, threshold in CONVICTION_TIERS:
         if score >= threshold:
             return tier
-    return 'WATCH'
+    return 'D_MARGINAL'
 
 
 def compute_screener_stock_scores(
@@ -470,8 +528,11 @@ def compute_screener_stock_scores(
     """
     Step 1 of the pipeline. Pure function — no DB access.
 
-    membership: {symbol: [{signal_bias, confidence, category, investment_horizon}]}
+    membership: {symbol: [{signal_bias, confidence, category, subcategory, investment_horizon}]}
     fundamental_scores: {symbol: float 0-100}
+
+    Formula: Base Weight × Subcategory Modifier × Bias Sign × Horizon Multiplier × Confidence
+    (from screener_scoring_engine_v2.xlsx Scoring Framework)
 
     Returns: (normalized_scores, bullish_counts, bearish_counts)
     """
@@ -482,9 +543,11 @@ def compute_screener_stock_scores(
     for sym, screeners in membership.items():
         fm = _fund_mult(fundamental_scores.get(sym))
         contrib = sum(
-            BIAS_VALUE.get(s['signal_bias'], 0.0)
+            BIAS_SIGN.get(s['signal_bias'], 0.0)
+            * CAT_BASE_WT.get(s['category'], 0.0)
+            * SUBCAT_MOD.get(s.get('subcategory', ''), 1.0)
+            * HORIZON_MULT.get(s.get('investment_horizon', 'swing'), 0.95)
             * float(s.get('confidence', 0.74))
-            * CAT_WEIGHT.get(s['category'], 0.5)
             for s in screeners
         )
         raw[sym] = contrib * fm
@@ -496,38 +559,78 @@ def compute_screener_stock_scores(
 
 class UnifiedRanker:
     def __init__(self, conn: sqlite3.Connection | None = None,
-                 csv_path: str | Path | None = None):
+                 csv_path: str | Path | None = None,
+                 corrections_path: str | Path | None = None):
         self.conn = conn or sqlite3.connect(str(DB_PATH))
         self.conn.row_factory = sqlite3.Row
         self.csv_path = Path(csv_path) if csv_path else CSV_PATH
+        self.corrections_path = Path(corrections_path) if corrections_path else CORRECTIONS_PATH
 
     # ── Catalog ───────────────────────────────────────────────────────────────
 
     def seed_screener_catalog(self) -> int:
-        """Load CSV into screener_catalog. INSERT OR REPLACE — idempotent."""
+        """
+        Load screener_scoring_v2.csv into screener_catalog, then apply corrections
+        from screener_corrections.csv. INSERT OR REPLACE — idempotent.
+
+        CSV columns: screener_name, source, category, subcategory, signal_bias,
+                     investment_horizon, confidence, base_wt, sub_mod, bias_score,
+                     horiz_mult, score_0_100, tier
+        Note: screener_id derived as slugified screener_name (matches trendlyne/mc/etnow convention).
+        """
+        import re
+
+        def slugify(s: str) -> str:
+            return re.sub(r'[^a-z0-9]+', '-', s.lower().strip())[:120]
+
         rows = []
         with open(self.csv_path, newline='', encoding='utf-8') as f:
             for row in csv.DictReader(f):
                 try:
+                    name = row['screener_name'].strip()
                     rows.append((
-                        row['screener_id'].strip(),
+                        slugify(name),                            # screener_id
                         row['source'].strip(),
-                        row['screener_name'].strip(),
+                        name,
                         row['category'].strip(),
                         row.get('subcategory', '').strip(),
                         row['signal_bias'].strip(),
                         row.get('investment_horizon', '').strip(),
                         float(row['confidence']),
+                        float(row.get('score_0_100') or 0),
+                        row.get('tier', '').strip(),
+                        float(row.get('sub_mod') or 1.0),
+                        float(row.get('horiz_mult') or 0.95),
                     ))
                 except (KeyError, ValueError):
                     continue
+
         self.conn.executemany(
             '''INSERT OR REPLACE INTO screener_catalog
                (screener_id, source, screener_name, category, subcategory,
-                signal_bias, investment_horizon, confidence)
-               VALUES (?,?,?,?,?,?,?,?)''',
+                signal_bias, investment_horizon, confidence,
+                score_0_100, tier, sub_mod, horiz_mult)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)''',
             rows,
         )
+
+        # Apply bias/subcategory corrections from screener_corrections.csv
+        if self.corrections_path.exists():
+            with open(self.corrections_path, newline='', encoding='utf-8') as f:
+                for corr in csv.DictReader(f):
+                    name = corr.get('screener_name', '').strip()
+                    if not name:
+                        continue
+                    if corr['type'] == 'bias':
+                        self.conn.execute(
+                            'UPDATE screener_catalog SET signal_bias=? WHERE screener_name=?',
+                            (corr['corrected'], name),
+                        )
+                    elif corr['type'] == 'subcategory':
+                        self.conn.execute(
+                            'UPDATE screener_catalog SET subcategory=? WHERE screener_name=?',
+                            (corr['corrected'], name),
+                        )
         self.conn.commit()
         return len(rows)
 
@@ -898,10 +1001,11 @@ class TestUnifiedRankerRun:
 
     def test_conviction_tiers_assigned_correctly(self):
         from unified_ranker import _conviction
-        assert _conviction(90) == 'ELITE'
-        assert _conviction(85) == 'ELITE'
-        assert _conviction(75) == 'STRONG'
-        assert _conviction(60) == 'MODERATE'
+        assert _conviction(90) == 'S_ELITE'
+        assert _conviction(80) == 'S_ELITE'
+        assert _conviction(70) == 'A_HIGH'
+        assert _conviction(50) == 'B_MEDIUM'
+        assert _conviction(30) == 'C_LOW'
         assert _conviction(45) == 'WATCH'
         assert _conviction(30) == 'WATCH'
 
@@ -967,12 +1071,12 @@ describe('getCommandCenter', () => {
     db.prepare(`INSERT INTO market_regimes (date, regime, regime_prob) VALUES (date('now'),'BULL',0.8)`).run();
     db.prepare(`INSERT INTO unified_recommendations
       (symbol, computed_at, regime, unified_score, conviction_level)
-      VALUES ('ELITE_STOCK', date('now'), 'BULL', 90.0, 'ELITE')`).run();
+      VALUES ('ELITE_STOCK', date('now'), 'BULL', 90.0, 'S_ELITE')`).run();
     db.prepare(`INSERT INTO unified_recommendations
       (symbol, computed_at, regime, unified_score, conviction_level)
-      VALUES ('WATCH_STOCK', date('now'), 'BULL', 45.0, 'WATCH')`).run();
+      VALUES ('LOW_STOCK', date('now'), 'BULL', 30.0, 'C_LOW')`).run();
 
-    const elite = await caller.getCommandCenter({ conviction: 'ELITE' });
+    const elite = await caller.getCommandCenter({ conviction: 'S_ELITE' });
     expect(elite.eodPicks.length).toBe(1);
     expect(elite.eodPicks[0].symbol).toBe('ELITE_STOCK');
   });
@@ -1001,7 +1105,7 @@ Find the section near other ML procedures (around `runFullBacktest` or `optimize
 ```typescript
 getCommandCenter: publicProcedure
   .input(z.object({
-    conviction: z.enum(['ALL', 'ELITE', 'STRONG', 'MODERATE', 'WATCH']).default('ALL'),
+    conviction: z.enum(['ALL', 'S_ELITE', 'A_HIGH', 'B_MEDIUM', 'C_LOW', 'D_MARGINAL']).default('ALL'),
     horizon:    z.enum(['ALL', 'intraday', 'swing', 'long_term']).default('ALL'),
     limit:      z.number().min(1).max(100).default(30),
   }))
@@ -1223,14 +1327,15 @@ import { motion, AnimatePresence } from 'motion/react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type ConvictionFilter = 'ALL' | 'ELITE' | 'STRONG' | 'MODERATE' | 'WATCH';
+type ConvictionFilter = 'ALL' | 'S_ELITE' | 'A_HIGH' | 'B_MEDIUM' | 'C_LOW' | 'D_MARGINAL';
 type HorizonFilter    = 'ALL' | 'intraday' | 'swing' | 'long_term';
 
-const CONVICTION_STYLE: Record<string, { bg: string; border: string; text: string; dot: string }> = {
-  ELITE:    { bg: 'bg-emerald-500/15', border: 'border-emerald-500/40', text: 'text-emerald-400', dot: 'bg-emerald-400' },
-  STRONG:   { bg: 'bg-sky-500/15',     border: 'border-sky-500/40',     text: 'text-sky-400',     dot: 'bg-sky-400'     },
-  MODERATE: { bg: 'bg-amber-500/15',   border: 'border-amber-500/40',   text: 'text-amber-400',   dot: 'bg-amber-400'   },
-  WATCH:    { bg: 'bg-slate-700/40',   border: 'border-slate-600/40',   text: 'text-slate-400',   dot: 'bg-slate-400'   },
+const CONVICTION_STYLE: Record<string, { bg: string; border: string; text: string; dot: string; label: string }> = {
+  S_ELITE:    { bg: 'bg-emerald-500/15', border: 'border-emerald-500/40', text: 'text-emerald-400', dot: 'bg-emerald-400', label: 'S — Elite'    },
+  A_HIGH:     { bg: 'bg-sky-500/15',     border: 'border-sky-500/40',     text: 'text-sky-400',     dot: 'bg-sky-400',     label: 'A — High'     },
+  B_MEDIUM:   { bg: 'bg-amber-500/15',   border: 'border-amber-500/40',   text: 'text-amber-400',   dot: 'bg-amber-400',   label: 'B — Medium'   },
+  C_LOW:      { bg: 'bg-slate-700/40',   border: 'border-slate-600/40',   text: 'text-slate-400',   dot: 'bg-slate-400',   label: 'C — Low'      },
+  D_MARGINAL: { bg: 'bg-zinc-800/60',    border: 'border-zinc-700/40',    text: 'text-zinc-500',    dot: 'bg-zinc-500',    label: 'D — Marginal' },
 };
 
 const REGIME_STYLE: Record<string, { color: string; icon: string; bg: string }> = {
@@ -1436,7 +1541,7 @@ export function CommandCenterDashboard({ onSelectStock }: { onSelectStock: (sym:
   const regime   = data?.regime;
   const regStyle = REGIME_STYLE[regime?.name ?? 'BULL'] ?? REGIME_STYLE.BULL;
 
-  const CONVICTIONS: ConvictionFilter[] = ['ALL','ELITE','STRONG','MODERATE','WATCH'];
+  const CONVICTIONS: ConvictionFilter[] = ['ALL','S_ELITE','A_HIGH','B_MEDIUM','C_LOW','D_MARGINAL'];
   const HORIZONS: { val: HorizonFilter; label: string }[] = [
     { val: 'ALL',       label: 'All'       },
     { val: 'intraday',  label: 'Intraday'  },
@@ -1741,7 +1846,7 @@ Navigate to Alpha tab. Verify:
 - Regime badge shows (may say BULL with default if market_regimes is empty)
 - EOD Swing Picks section renders (may be empty if ranker hasn't run on live data)
 - Intraday Live section renders
-- Filter tabs (ALL / ELITE / STRONG / MODERATE / WATCH) change the display
+- Filter tabs (ALL / S_ELITE / A_HIGH / B_MEDIUM / C_LOW / D_MARGINAL) change the display
 - Re-run button triggers `runUnifiedRanker` mutation
 
 - [ ] **Step 4: Final commit**
