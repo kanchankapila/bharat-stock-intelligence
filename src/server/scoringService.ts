@@ -4,6 +4,7 @@ import db from './db';
 import { syncAllScreenerStocksToDB } from './trendlyneScreener';
 import { syncMoneyControlScreeners } from './moneycontrolScreener';
 import { initEtnowScreeners } from './etnow';
+import { alphaQuant } from './alphaQuantClient';
 
 export interface ScoredStock {
   symbol: string;
@@ -34,24 +35,12 @@ export interface FactorBreakdown {
  */
 export async function recalculateScores(): Promise<{ success: boolean; message: string }> {
   try {
-    console.log(`🚀 Running AlphaQuant Scoring Engine via FastAPI`);
-    const res = await fetch('http://127.0.0.1:8002/api/v1/score', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ rebuild: false })
-    });
-    
-    if (!res.ok) {
-      const errText = await res.text();
-      console.error(`❌ Scoring engine error: ${errText}`);
-      return { success: false, message: errText };
-    }
-    
-    const data = await res.json();
-    console.log(`✅ Scoring engine output: ${data.message}`);
+    console.log('[SCORING] Running AlphaQuant Scoring Engine via FastAPI');
+    const data = await alphaQuant.score({ rebuild: false });
+    console.log('[SCORING] Done:', data.message);
     return { success: true, message: data.message };
   } catch (error: any) {
-    console.error(`❌ Scoring engine fetch error: ${error.message}`);
+    console.error('[SCORING] Engine error:', error.message);
     return { success: false, message: error.message };
   }
 }

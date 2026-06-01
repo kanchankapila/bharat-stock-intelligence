@@ -1,13 +1,5 @@
 import db from './db';
-import { execFile } from 'child_process';
-import path from 'path';
-import { promisify } from 'util';
-
-const execFileAsync = promisify(execFile);
-const PYTHON = process.platform === 'win32'
-  ? (process.env.PYTHON_PATH || 'C:\\Users\\amit_\\AppData\\Local\\Programs\\Python\\Python311\\python.exe')
-  : (process.env.PYTHON_PATH || 'python3');
-const ENGINE_DIR = path.resolve(process.cwd(), 'src/server');
+import { runPython } from './pythonRunner';
 
 // ─── Screener Classification ────────────────────────────────────────────────
 
@@ -419,13 +411,7 @@ export async function computeConfluenceSignals(): Promise<{ computed: number; el
 
 export async function runMLProbabilityOverlay(): Promise<void> {
   try {
-    const pyPath = path.join(ENGINE_DIR, 'confluence_ml_engine.py');
-    const { stdout, stderr } = await execFileAsync(PYTHON, [pyPath, '--update-probabilities'], {
-      cwd: ENGINE_DIR,
-      timeout: 120000,
-    });
-    if (stdout) console.log('[CONFLUENCE-ML]', stdout.trim());
-    if (stderr) console.error('[CONFLUENCE-ML ERR]', stderr.trim());
+    await runPython('confluence_ml_engine.py', ['--update-probabilities'], 120_000);
   } catch (err: any) {
     console.error('[CONFLUENCE-ML] Python error:', err.message);
   }
@@ -460,4 +446,8 @@ export function getLatestConfluenceSignals(opts: {
     ORDER BY confluence_score DESC
     LIMIT ?
   `).all(...params) as any[];
+}
+
+export function getDailyGrowthPicks(limit: number = 20, minScore: number = 65): any[] {
+  return getLatestConfluenceSignals({ minScore, timeframe: 'INTRADAY', limit });
 }

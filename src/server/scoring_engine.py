@@ -13,24 +13,6 @@ from typing import Dict, Any, List
 DB_PATH      = Path(__file__).parent.parent.parent / "database.sqlite"
 DATABASE_URL = f"sqlite:///{DB_PATH}"
 
-# ETnow screeners (mirrors router.ts getMarketScanners — hardcoded because
-# they are not stored in etnow_screeners DB table yet).
-ETNOW_SCREENERS = [
-    { 'scan_id': '73',   'name': 'Cash Cows',             'is_positive': None },
-    { 'scan_id': '75',   'name': 'Elite Bluechips',        'is_positive': None },
-    { 'scan_id': '79',   'name': 'Zero Debt Quality',      'is_positive': None },
-    { 'scan_id': '91',   'name': 'Buy on Dips',            'is_positive': None },
-    { 'scan_id': '195',  'name': 'Potential Multibaggers', 'is_positive': None },
-    { 'scan_id': '118',  'name': 'Straight Flush',         'is_positive': None },
-    { 'scan_id': '362',  'name': 'RSI Oversold',           'is_positive': None },
-    { 'scan_id': '518',  'name': 'The Tata Empire',        'is_positive': None },
-    { 'scan_id': '520',  'name': 'Adani Universe',         'is_positive': None },
-    { 'scan_id': '514',  'name': 'PSU Gems',               'is_positive': None },
-    { 'scan_id': '515',  'name': 'Monopoly Biz',           'is_positive': None },
-    { 'scan_id': '1101', 'name': 'Defence Sector',         'is_positive': None },
-    { 'scan_id': '1100', 'name': 'Infra Boost',            'is_positive': None },
-]
-
 
 class AlphaQuantScoringEngine:
     """
@@ -59,6 +41,7 @@ class AlphaQuantScoringEngine:
         self.nlp = NLPScreenerInference()
         self.stock_stats = {}
         self._load_optimised_weights()
+        self.etnow_screeners = self._load_etnow_screeners()
 
     def _load_optimised_weights(self):
         """Override default weights with ML-optimised values from app_settings if available."""
@@ -79,6 +62,18 @@ class AlphaQuantScoringEngine:
                     self.SOURCE_WEIGHTS = {**self.SOURCE_WEIGHTS, **loaded2}
         except Exception:
             pass  # use defaults if app_settings not populated yet
+
+    def _load_etnow_screeners(self) -> list:
+        """Read ETnow screeners from the database (source of truth)."""
+        try:
+            with self.engine.connect() as conn:
+                rows = conn.execute(
+                    text("SELECT screener_id AS scan_id, screener_name AS name FROM etnow_screeners")
+                ).fetchall()
+                return [{'scan_id': r.scan_id, 'name': r.name, 'is_positive': None} for r in rows]
+        except Exception as e:
+            print(f"[SCORING] Warning: could not load ETnow screeners from DB: {e}")
+            return []
 
     # ------------------------------------------------------------------
     # Data Loading
@@ -111,16 +106,8 @@ class AlphaQuantScoringEngine:
                 conn,
             )
 
-            # ETnow (loaded from DB if available; fall back to hardcoded list)
-            et_db = pd.read_sql(
-                "SELECT screener_id AS scan_id, screener_name AS name FROM etnow_screeners",
-                conn,
-            )
-            if et_db.empty:
-                et_screeners = pd.DataFrame(ETNOW_SCREENERS)
-            else:
-                et_screeners = et_db
-                et_screeners['is_positive'] = None  # let NLP determine; no forced override
+            # ETnow (loaded from instance variable)
+            et_screeners = pd.DataFrame(self.etnow_screeners)
             et_screeners['source'] = 'ETnow'
             et_screeners['description'] = ""
 
@@ -386,6 +373,18 @@ class AlphaQuantScoringEngine:
         except Exception:
             pass
 
+        # Load Technical Composite Score
+        tech_composite_map: Dict[str, float] = {}
+        try:
+            with self.engine.connect() as conn:
+                tc_rows = conn.execute(text("""
+                    SELECT symbol, composite_score
+                    FROM technical_composite_scores
+                """)).fetchall()
+            tech_composite_map = {r[0]: float(r[1]) for r in tc_rows}
+        except Exception as e:
+            print(f"[SCORING] Failed to load technical_composite_scores: {e}")
+
         # Score per timeframe
         timeframes = ['long_term', 'intraday']
         all_timeframe_results = []
@@ -512,8 +511,19 @@ class AlphaQuantScoringEngine:
                 # Factor 4: screener volume (0–10 points) — secondary signal of conviction
                 vol_pts = min(10, screener_count * 2)
 
-                confidence = int(source_pts + cat_pts + ml_pts + vol_pts)
-                confidence = min(95, max(5, confidence))   # cap at 95 (never report 100% certainty)
+                # Factor 5: Technical Composite Score (0-20 points) — distinct technical pillar
+                tc_score = tech_composite_map.get(symbol, 0)
+                tc_pts = 0
+                if tc_score > 0:
+                    tc_pts = min(20, (tc_score / 100.0) * 20)
+                    # Inject into the technical factor to ensure it shows up alongside fundamental/momentum/valuation
+                    data['factors']['technical'] = data['factors'].get('technical', 0) + (tc_score / 10.0)
+                    # Also boost the raw final_score slightly based on technical strength
+                    final_score += (tc_score - 50) / 10.0
+
+                # Max total points: 40 + 30 + 20 + 10 + 20 = 120. Scale down to 100.
+                raw_confidence = source_pts + cat_pts + ml_pts + vol_pts + tc_pts
+                confidence = int(min(95, max(5, raw_confidence * (100/120))))   # cap at 95 (never report 100% certainty)
 
                 # Calibrated classification thresholds
                 if   final_score > 30:   classification = "Strong Buy"
