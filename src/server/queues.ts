@@ -80,6 +80,10 @@ export const QUEUE_OHLCV_BACKFILL       = 'ohlcv-backfill';
 export const QUEUE_CONFLUENCE_COMPUTE  = 'confluence-compute';
 export const QUEUE_CONFLUENCE_OUTCOMES = 'confluence-outcomes';
 export const QUEUE_SCREENER_PERFORMANCE = 'screener-performance';
+export const QUEUE_AGENT_DATA_SCIENTIST = 'agent-data-scientist';
+export const QUEUE_AGENT_STRATEGIST     = 'agent-strategist';
+export const QUEUE_AGENT_AUDITOR        = 'agent-auditor';
+export const QUEUE_AGENT_OPTIMIZER      = 'agent-optimizer';
 
 const BULK_CACHE_KEY      = 'live-stocks-bulk';
 const BULK_TTL_SECONDS    = 5 * 60;
@@ -146,6 +150,14 @@ let confluenceOutcomesWorker: Worker | null = null;
 
 export let screenerPerfQueue: Queue | null = null;
 let screenerPerfWorker: Worker | null = null;
+export let agentDataScientistQueue: Queue | null = null;
+export let agentStrategistQueue:    Queue | null = null;
+export let agentAuditorQueue:       Queue | null = null;
+export let agentOptimizerQueue:     Queue | null = null;
+let agentDataScientistWorker: Worker | null = null;
+let agentStrategistWorker:    Worker | null = null;
+let agentAuditorWorker:       Worker | null = null;
+let agentOptimizerWorker:     Worker | null = null;
 
 // Shared in-process mirror populated by the stock-refresh worker
 // (same reference as the one exported from liveStockData via the cache layer)
@@ -337,6 +349,77 @@ async function processScreenerPerf(_job: Job): Promise<void> {
   } catch (e: unknown) {
     console.error('[QUEUE] screener classification failed:', (e as Error).message);
   }
+}
+
+async function processAgentDataScientist(_job: Job): Promise<{ success: boolean; grade?: string }> {
+  await runPython('agents/data_scientist_agent.py', [], 10 * 60_000);
+  const row = db.prepare(
+    'SELECT quality_grade FROM agent_data_scientist_reports ORDER BY created_at DESC LIMIT 1'
+  ).get() as { quality_grade: string } | undefined;
+  return { success: true, grade: row?.quality_grade };
+}
+
+async function processAgentStrategist(_job: Job): Promise<{ success: boolean }> {
+  await runPython('agents/strategist_agent.py', [], 15 * 60_000);
+
+  const highPicks = db.prepare(`
+    SELECT symbol, timeframe, entry_zone_low, entry_zone_high,
+           stop_loss, target_1, target_2, target_3, composite_score, narrative
+    FROM agent_strategy_picks
+    WHERE run_date = date('now') AND conviction = 'HIGH'
+    ORDER BY composite_score DESC
+  `).all() as any[];
+
+  if (highPicks.length > 0) {
+    try {
+      const { TelegramNotificationService } = await import('./telegramService');
+      const tg = new TelegramNotificationService();
+      for (const p of highPicks) {
+        const firstSentence = (p.narrative as string || '').split('.')[0];
+        await tg.sendMarkdownMessage(
+          `🎯 *STRATEGY ALERT — ${(p.timeframe as string).toUpperCase()}*\n` +
+          `*${p.symbol}* | Entry: ₹${p.entry_zone_low}–${p.entry_zone_high} | SL: ₹${p.stop_loss}\n` +
+          `T1: ₹${p.target_1} | T2: ₹${p.target_2} | T3: ₹${p.target_3}\n` +
+          `Conviction: HIGH | Score: ${Number(p.composite_score).toFixed(0)}\n` +
+          `${firstSentence}.`
+        );
+      }
+    } catch (err: unknown) {
+      console.warn('[QUEUE] Strategist Telegram alert failed:', (err as Error).message);
+    }
+  }
+  return { success: true };
+}
+
+async function processAgentAuditor(_job: Job): Promise<{ success: boolean }> {
+  await runPython('agents/auditor_agent.py', [], 15 * 60_000);
+  return { success: true };
+}
+
+async function processAgentOptimizer(_job: Job): Promise<{ success: boolean }> {
+  await runPython('agents/optimizer_agent.py', [], 20 * 60_000);
+
+  const latest = db.prepare(
+    'SELECT weights_changed, full_optimizer_triggered, baseline_win_rate, new_win_rate, narrative ' +
+    'FROM agent_optimizer_reports ORDER BY created_at DESC LIMIT 1'
+  ).get() as any;
+
+  if (latest && (latest.weights_changed || latest.full_optimizer_triggered)) {
+    try {
+      const { TelegramNotificationService } = await import('./telegramService');
+      const tg = new TelegramNotificationService();
+      const firstSentence = (latest.narrative as string || '').split('.')[0];
+      await tg.sendMarkdownMessage(
+        `⚙️ *OPTIMIZER ALERT*\n` +
+        `Win rate: ${Number(latest.baseline_win_rate).toFixed(0)}% → ${Number(latest.new_win_rate).toFixed(0)}%\n` +
+        `Full optimizer: ${latest.full_optimizer_triggered ? 'YES 🔄' : 'NO'}\n` +
+        `${firstSentence}.`
+      );
+    } catch (err: unknown) {
+      console.warn('[QUEUE] Optimizer Telegram alert failed:', (err as Error).message);
+    }
+  }
+  return { success: true };
 }
 
 // â”€â”€â”€ Initialise queues & workers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -1184,6 +1267,62 @@ export async function initQueues(): Promise<boolean> {
 
     console.log('[QUEUE] screener-performance (daily 6PM IST weekdays) registered');
 
+    // ── Agent: Data Scientist (07:00 IST = 01:30 UTC, weekdays) ──────────────
+    agentDataScientistQueue = new Queue(QUEUE_AGENT_DATA_SCIENTIST, { connection });
+    const adsRep = await agentDataScientistQueue.getRepeatableJobs();
+    for (const r of adsRep) await agentDataScientistQueue.removeRepeatableByKey(r.key);
+    await agentDataScientistQueue.add('agent-ds-daily', {}, {
+      repeat: { pattern: '30 1 * * 1-5' },
+      jobId: 'agent-ds-daily',
+      removeOnComplete: 3, removeOnFail: 3,
+    });
+    agentDataScientistWorker = new Worker(QUEUE_AGENT_DATA_SCIENTIST,
+      processAgentDataScientist, { connection, concurrency: 1, lockDuration: 10 * 60_000 });
+    agentDataScientistWorker.on('completed', (_, r: any) => console.log('[QUEUE] agent-ds done, grade=', r?.grade));
+    agentDataScientistWorker.on('failed', (_, e) => console.error('[QUEUE] agent-ds failed:', e.message));
+
+    // ── Agent: Strategist (08:30 IST = 03:00 UTC, weekdays) ──────────────────
+    agentStrategistQueue = new Queue(QUEUE_AGENT_STRATEGIST, { connection });
+    const asRep = await agentStrategistQueue.getRepeatableJobs();
+    for (const r of asRep) await agentStrategistQueue.removeRepeatableByKey(r.key);
+    await agentStrategistQueue.add('agent-strat-daily', {}, {
+      repeat: { pattern: '0 3 * * 1-5' },
+      jobId: 'agent-strat-daily',
+      removeOnComplete: 3, removeOnFail: 3,
+    });
+    agentStrategistWorker = new Worker(QUEUE_AGENT_STRATEGIST,
+      processAgentStrategist, { connection, concurrency: 1, lockDuration: 15 * 60_000 });
+    agentStrategistWorker.on('completed', () => console.log('[QUEUE] agent-strategist done'));
+    agentStrategistWorker.on('failed', (_, e) => console.error('[QUEUE] agent-strategist failed:', e.message));
+
+    // ── Agent: Auditor (16:30 IST = 11:00 UTC, weekdays) ─────────────────────
+    agentAuditorQueue = new Queue(QUEUE_AGENT_AUDITOR, { connection });
+    const aaRep = await agentAuditorQueue.getRepeatableJobs();
+    for (const r of aaRep) await agentAuditorQueue.removeRepeatableByKey(r.key);
+    await agentAuditorQueue.add('agent-audit-daily', {}, {
+      repeat: { pattern: '0 11 * * 1-5' },
+      jobId: 'agent-audit-daily',
+      removeOnComplete: 3, removeOnFail: 3,
+    });
+    agentAuditorWorker = new Worker(QUEUE_AGENT_AUDITOR,
+      processAgentAuditor, { connection, concurrency: 1, lockDuration: 15 * 60_000 });
+    agentAuditorWorker.on('completed', () => console.log('[QUEUE] agent-auditor done'));
+    agentAuditorWorker.on('failed', (_, e) => console.error('[QUEUE] agent-auditor failed:', e.message));
+
+    // ── Agent: Optimizer (17:30 IST = 12:00 UTC, weekdays) ───────────────────
+    agentOptimizerQueue = new Queue(QUEUE_AGENT_OPTIMIZER, { connection });
+    const aoRep = await agentOptimizerQueue.getRepeatableJobs();
+    for (const r of aoRep) await agentOptimizerQueue.removeRepeatableByKey(r.key);
+    await agentOptimizerQueue.add('agent-optim-daily', {}, {
+      repeat: { pattern: '0 12 * * 1-5' },
+      jobId: 'agent-optim-daily',
+      removeOnComplete: 3, removeOnFail: 3,
+    });
+    agentOptimizerWorker = new Worker(QUEUE_AGENT_OPTIMIZER,
+      processAgentOptimizer, { connection, concurrency: 1, lockDuration: 20 * 60_000 });
+    agentOptimizerWorker.on('completed', () => console.log('[QUEUE] agent-optimizer done'));
+    agentOptimizerWorker.on('failed', (_, e) => console.error('[QUEUE] agent-optimizer failed:', e.message));
+
     console.warn = _origWarn;
     console.log('[QUEUE] BullMQ initialised (stock-refresh + ai-signals)');
     return true;
@@ -1250,6 +1389,14 @@ export async function shutdownQueues(): Promise<void> {
     confluenceOutcomesWorker?.close(),
     confluenceComputeQueue?.close(),
     confluenceOutcomesQueue?.close(),
+    agentDataScientistWorker?.close(),
+    agentStrategistWorker?.close(),
+    agentAuditorWorker?.close(),
+    agentOptimizerWorker?.close(),
+    agentDataScientistQueue?.close(),
+    agentStrategistQueue?.close(),
+    agentAuditorQueue?.close(),
+    agentOptimizerQueue?.close(),
   ]);
 }
 
