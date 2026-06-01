@@ -1,6 +1,7 @@
 import { z } from "zod";
 import db from "../db";
 import { router, publicProcedure } from "../trpc";
+import { runPython } from '../pythonRunner';
 
 export const MONITOR_SCRIPTS = [
   {
@@ -243,9 +244,19 @@ function getLastRunAt(scriptId: ScriptId): string | null {
       case 'regime-detector':
         row = db.prepare("SELECT MAX(computed_at) as t FROM market_regimes").get();
         break;
-      case 'feature-engineering':
-        row = db.prepare("SELECT MAX(computed_at) as t FROM feature_store").get();
+      case 'feature-engineering': {
+        const fs = require('fs');
+        const path = require('path');
+        const dir = path.join(process.cwd(), 'feature_store');
+        if (fs.existsSync(dir)) {
+            const files = fs.readdirSync(dir);
+            if (files.length > 0) {
+                const stat = fs.statSync(path.join(dir, files[0]));
+                row = { t: stat.mtime.toISOString() };
+            }
+        }
         break;
+      }
       case 'reward-engine':
         row = db.prepare("SELECT MAX(last_updated) as t FROM signal_type_weights").get();
         break;
@@ -315,11 +326,22 @@ function getScriptStats(scriptId: ScriptId): Record<string, number | string | nu
         const total = (db.prepare("SELECT COUNT(*) as n FROM market_regimes").get() as any)?.n ?? 0;
         return r ? { days: total, latest: r.regime } : { days: 0 };
       }
-      case 'feature-engineering':
+      case 'feature-engineering': {
+        const fs = require('fs');
+        const path = require('path');
+        const dir = path.join(process.cwd(), 'feature_store');
+        let symbols = 0;
+        let rows = 0;
+        if (fs.existsSync(dir)) {
+           const files = fs.readdirSync(dir);
+           symbols = files.filter((f: string) => f.endsWith('.parquet')).length;
+           rows = symbols * 500; // estimated
+        }
         return {
-          symbols: (db.prepare("SELECT COUNT(DISTINCT symbol) as n FROM feature_store").get() as any)?.n ?? 0,
-          rows: (db.prepare("SELECT COUNT(*) as n FROM feature_store").get() as any)?.n ?? 0,
+          symbols,
+          rows: `~${rows} (Parquet)`,
         };
+      }
       case 'reward-engine':
         return { types: (db.prepare("SELECT COUNT(*) as n FROM signal_type_weights").get() as any)?.n ?? 0 };
       case 'rl-agent-update':
@@ -411,14 +433,6 @@ export const monitorRouter = router({
 
       upsertState('running');
 
-      const { execFile } = await import('child_process');
-      const { resolve } = await import('path');
-      const pyDir = resolve(process.cwd(), 'src', 'server');
-
-      const PYTHON = process.platform === 'win32'
-        ? (process.env.PYTHON_PATH || 'C:\\Users\\amit_\\AppData\\Local\\Programs\\Python\\Python311\\python.exe')
-        : (process.env.PYTHON_PATH || 'python3');
-
       if (!script.pyScript) {
         // TypeScript function trigger (no Python, no queue)
         if ((script as any).tsFunction === 'computeSignalTypeStats') {
@@ -453,45 +467,36 @@ export const monitorRouter = router({
         return { queued: false, message: 'Queue unavailable — script is queue-only' };
       }
 
-      const [pyFile, ...pyArgs] = script.pyScript.split(' ');
-      const startMs = Date.now();
-
-      // Fire-and-forget: run in background, update state when done
-      execFile(PYTHON, [pyFile, ...pyArgs], { cwd: pyDir, timeout: 30 * 60 * 1000 }, async (err, stdout) => {
-        const dur = Date.now() - startMs;
-        if (err) {
+      void (async () => {
+        const [pyFile, ...pyArgs] = script.pyScript!.split(' ');
+        try {
+          const { stdout } = await runPython(pyFile, pyArgs, 30 * 60_000);
+          upsertState('success');
+          db.prepare("DELETE FROM app_settings WHERE key=?").run(`${stateKey}_error`);
+          if (stdout) console.log(`[MONITOR] ${script.id} stdout:`, stdout.slice(0, 300));
+          console.log(`[MONITOR] ${script.id} done`);
+        } catch (err: unknown) {
+          const msg = (err as Error).message;
           upsertState('failed');
-          try { db.prepare("INSERT INTO app_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(`${stateKey}_error`, err.message.slice(0, 500)); } catch { /* */ }
-          console.error(`[MONITOR] ${script.id} failed (${dur}ms):`, err.message);
+          db.prepare("INSERT INTO app_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+            .run(`${stateKey}_error`, msg.slice(0, 500));
+          console.error(`[MONITOR] ${script.id} failed:`, msg);
           if (script.critical) {
             try {
               const { TelegramNotificationService } = await import('../telegramService');
-              const tg = new TelegramNotificationService();
-              await tg.sendMarkdownMessage(
-                `🚨 *Critical script failed*: \`${script.label}\`\nError: ${err.message.slice(0, 300)}`
+              await new TelegramNotificationService().sendMarkdownMessage(
+                `🚨 *Critical script failed*: \`${script.label}\`\nError: ${msg.slice(0, 300)}`
               );
             } catch { /* telegram optional */ }
           }
-        } else {
-          upsertState('success');
-          try { db.prepare("DELETE FROM app_settings WHERE key=?").run(`${stateKey}_error`); } catch { /* */ }
-          console.log(`[MONITOR] ${script.id} done (${dur}ms)`);
         }
-        if (stdout) console.log(`[MONITOR] ${script.id} stdout:`, stdout.slice(0, 300));
-      });
+      })();
 
       return { queued: false, running: true, message: `Started ${script.label}` };
     }),
 
   triggerAllDaily: publicProcedure.mutation(async () => {
     const dailyScripts = ['fii-dii-fetcher', 'regime-detector', 'feature-engineering', 'outcome-resolver-5d', 'outcome-resolver-15d', 'performance-tracker', 'reward-engine', 'rl-agent-update', 'ml-ensemble-score', 'dl-engine-infer', 'signal-type-stats'];
-    const { execFile } = await import('child_process');
-    const { resolve } = await import('path');
-    const pyDir = resolve(process.cwd(), 'src', 'server');
-    const PYTHON = process.platform === 'win32'
-      ? (process.env.PYTHON_PATH || 'C:\\Users\\amit_\\AppData\\Local\\Programs\\Python\\Python311\\python.exe')
-      : (process.env.PYTHON_PATH || 'python3');
-
     const upsert = (key: string, val: string) => {
       try {
         db.prepare("INSERT INTO app_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(key, val);
@@ -515,9 +520,9 @@ export const monitorRouter = router({
       if (!s.pyScript) continue;
       upsert(`monitor_${id}`, 'running');
       const [pyFile, ...pyArgs] = s.pyScript.split(' ');
-      execFile(PYTHON, [pyFile, ...pyArgs], { cwd: pyDir, timeout: 20 * 60 * 1000 }, (err) => {
-        upsert(`monitor_${id}`, err ? 'failed' : 'success');
-      });
+      runPython(pyFile, pyArgs, 20 * 60_000)
+        .then(() => upsert(`monitor_${id}`, 'success'))
+        .catch(() => upsert(`monitor_${id}`, 'failed'));
     }
     return { started: dailyScripts.length };
   }),
