@@ -434,3 +434,22 @@ export function getFundamentalsCount(): { phase1: number; phase2: number; total:
   const total = (db.prepare('SELECT COUNT(*) as n FROM stock_fundamentals').get() as any).n;
   return { phase1: p1, phase2: p2, total };
 }
+
+export async function bootstrapFundamentals(bullmqReady: boolean): Promise<void> {
+  const counts = getFundamentalsCount();
+  if (counts.phase1 > 0) {
+    console.log(`[FUND] ${counts.phase1} Phase-1 rows — skipping bootstrap`);
+    return;
+  }
+  if (bullmqReady) {
+    const { fundamentalsSyncQueue } = await import('./queues');
+    if (fundamentalsSyncQueue) {
+      await fundamentalsSyncQueue.add('sync-fundamentals-first-run', { phase2Only: false }, { removeOnComplete: 3, removeOnFail: 3, attempts: 1, priority: 1 });
+      console.log('[FUND] First-run job enqueued via BullMQ');
+      return;
+    }
+  }
+  console.log('[FUND] No Redis — starting first-time fundamentals sync directly');
+  runFullFundamentalsSync(false).catch(err => console.error('[FUND] First-run error:', err.message));
+  setInterval(() => runFullFundamentalsSync(false).catch(console.error), 7 * 24 * 60 * 60 * 1000);
+}

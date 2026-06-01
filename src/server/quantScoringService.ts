@@ -71,6 +71,28 @@ export function getQuantScoreCount(): number {
   return (db.prepare('SELECT COUNT(*) as n FROM quant_scores').get() as any).n;
 }
 
+export async function bootstrapQuantScoring(bullmqReady: boolean): Promise<void> {
+  const count = getQuantScoreCount();
+  if (count > 0) {
+    console.log(`[QUANT] ${count} existing rows — skipping bootstrap`);
+    return;
+  }
+  if (bullmqReady) {
+    const { quantScoringQueue } = await import('./queues');
+    if (quantScoringQueue) {
+      await quantScoringQueue.add('quant-score-first-run', {}, { removeOnComplete: 3, removeOnFail: 3, attempts: 1, priority: 2 });
+      console.log('[QUANT] First-run job enqueued via BullMQ');
+      return;
+    }
+  }
+  console.log('[QUANT] No Redis — starting first-time quant scoring directly');
+  runQuantScoring().catch(err => console.error('[QUANT] First-run error:', err.message));
+  setInterval(() => {
+    console.log('[QUANT] Triggering daily quant strategy scoring (fallback)');
+    runQuantScoring().catch(console.error);
+  }, 24 * 60 * 60 * 1000);
+}
+
 // ─── Math helpers ─────────────────────────────────────────────────────────────
 
 function pctReturn(rows: OHLCVRow[], lookbackDays: number): number | null {

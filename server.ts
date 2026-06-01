@@ -42,68 +42,11 @@ async function startServer() {
   // Falls back to legacy setInterval if Redis is unavailable
   const bullmqReady = await initQueues();
 
-  // ── Quant strategy scoring: first-time trigger + daily scheduling ─────────
-  const { getQuantScoreCount, runQuantScoring } = await import('./src/server/quantScoringService');
-  const { quantScoringQueue } = await import('./src/server/queues');
-  const quantCount = getQuantScoreCount();
+  const { bootstrapQuantScoring } = await import('./src/server/quantScoringService');
+  await bootstrapQuantScoring(bullmqReady);
 
-  if (bullmqReady && quantScoringQueue) {
-    if (quantCount === 0) {
-      console.log('[SERVER] quant_scores is empty — triggering first-time scoring via BullMQ...');
-      await quantScoringQueue.add(
-        'quant-score-first-run',
-        {},
-        { removeOnComplete: 3, removeOnFail: 3, attempts: 1, priority: 2 },
-      );
-    } else {
-      console.log(`[SERVER] quant_scores has ${quantCount} rows — skipping first-run trigger`);
-    }
-  } else {
-    if (quantCount === 0) {
-      console.log('[SERVER] No Redis — starting first-time quant scoring directly...');
-      runQuantScoring().catch(err =>
-        console.error('[SERVER] First-time quant scoring error:', err.message)
-      );
-    }
-    setInterval(() => {
-      console.log('[FALLBACK] Triggering daily quant strategy scoring...');
-      runQuantScoring().catch(console.error);
-    }, 24 * 60 * 60 * 1000);
-  }
-  // ─────────────────────────────────────────────────────────────────────────
-
-  // ── Fundamentals sync: first-time trigger + scheduling ────────────────────
-  const { getFundamentalsCount, runFullFundamentalsSync } = await import('./src/server/fundamentalsSyncService');
-  const { fundamentalsSyncQueue } = await import('./src/server/queues');
-  const fundCounts = getFundamentalsCount();
-  const isFirstRun = fundCounts.phase1 === 0;
-
-  if (bullmqReady && fundamentalsSyncQueue) {
-    if (isFirstRun) {
-      console.log('[SERVER] stock_fundamentals is empty — triggering first-time sync via BullMQ...');
-      await fundamentalsSyncQueue.add(
-        'sync-fundamentals-first-run',
-        { phase2Only: false },
-        { removeOnComplete: 3, removeOnFail: 3, attempts: 1, priority: 1 },
-      );
-    } else {
-      console.log(`[SERVER] stock_fundamentals has ${fundCounts.phase1} Phase-1 rows — skipping first-run trigger`);
-    }
-  } else {
-    // No Redis — run directly in background (non-blocking)
-    if (isFirstRun) {
-      console.log('[SERVER] No Redis — starting first-time fundamentals sync directly...');
-      runFullFundamentalsSync(false).catch(err =>
-        console.error('[SERVER] First-time fundamentals sync error:', err.message)
-      );
-    }
-    // Schedule weekly re-sync via setInterval fallback
-    setInterval(() => {
-      console.log('[FALLBACK] Triggering weekly fundamentals sync...');
-      runFullFundamentalsSync(false).catch(console.error);
-    }, 7 * 24 * 60 * 60 * 1000);
-  }
-  // ─────────────────────────────────────────────────────────────────────────
+  const { bootstrapFundamentals } = await import('./src/server/fundamentalsSyncService');
+  await bootstrapFundamentals(bullmqReady);
 
   // ── Technical signals: schedule daily + fallback ──────────────────────────
   const { getTechnicalSignalCount, runTechnicalSignalScan } = await import('./src/server/technicalSignalsService');
@@ -272,6 +215,89 @@ async function startServer() {
       createContext,
     })
   );
+
+  // Export picks endpoint — returns portfolio JSON for a given strategy and can run backtest
+  app.post('/api/export-picks', async (req, res) => {
+    try {
+      const {
+        strategy = 'composite',
+        limit = 20,
+        riskModel = 'risk_parity',
+        start,
+        end,
+        horizon = 15,
+        minScore = 0,
+        runBacktest = false,
+      } = req.body || {};
+
+      const { getStrategyStocks } = await import('./src/server/quantScoringService');
+      const portfolioModule = await import('./src/server/portfolio');
+      const rows = await Promise.resolve(getStrategyStocks(strategy, limit, {}));
+      const symbols = rows.map((r: any) => r.symbol).slice(0, limit);
+      let picks: any;
+      if (riskModel === 'equal') {
+        const w = 1 / Math.max(1, symbols.length);
+        picks = symbols.map((s: string) => ({ symbol: s, weight: w }));
+      } else {
+        picks = await Promise.resolve(portfolioModule.default.buildRiskParityWeights(symbols, 90));
+      }
+
+      const result: any = { success: true, strategy, limit, riskModel, picks };
+
+      if (runBacktest) {
+        // Write symbols to temp file
+        const tmp = require('path').join(process.cwd(), 'picks_export_tmp.json');
+        const fs = require('fs');
+        fs.writeFileSync(tmp, JSON.stringify(symbols));
+
+        // Determine python executable
+        const isWin = process.platform === 'win32';
+        const py = isWin ? 'backend-python\\venv\\Scripts\\python.exe' : 'backend-python/venv/bin/python';
+        const { spawn } = require('child_process');
+        const args = ['scripts/run_portfolio_backtest.py', '--symbols-file', tmp, '--start', (start || ''), '--end', (end || ''), '--horizon', String(horizon), '--name', `export_run_${Date.now()}`];
+        // Filter out empty start/end
+        const cleanArgs = args.filter(a => a !== '');
+
+        const child = spawn(py, cleanArgs, { cwd: process.cwd() });
+        let stdout = '';
+        let stderr = '';
+        child.stdout.on('data', (d: Buffer) => { stdout += d.toString(); });
+        child.stderr.on('data', (d: Buffer) => { stderr += d.toString(); });
+
+        const exitCode: number = await new Promise((resolve) => {
+          child.on('close', (code: number) => resolve(code ?? 0));
+        });
+
+        // Attempt to extract the final JSON object from stdout
+        let btStats: any = null;
+        try {
+          const lastBrace = stdout.lastIndexOf('{');
+          if (lastBrace !== -1) {
+            const candidate = stdout.slice(lastBrace);
+            btStats = JSON.parse(candidate);
+          }
+        } catch (e) {
+          try {
+            // fallback: look for the last JSON-looking block
+            const match = stdout.match(/\{[\s\S]*\}$/);
+            if (match) btStats = JSON.parse(match[0]);
+          } catch (e2) {
+            btStats = { error: 'Failed to parse backtester output', stdout, stderr };
+          }
+        }
+
+        // Remove temp file
+        try { fs.unlinkSync(tmp); } catch (e) { /* ignore */ }
+
+        result.backtest = { exitCode, stdoutSnippet: stdout.slice(-2000), stderrSnippet: stderr.slice(-2000), stats: btStats };
+      }
+
+      res.json(result);
+    } catch (err: any) {
+      console.error('/api/export-picks error', err?.message || err);
+      res.status(500).json({ success: false, error: err?.message || String(err) });
+    }
+  });
 
   // Health check
   app.get("/api/health", (req, res) => {
