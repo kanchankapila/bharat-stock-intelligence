@@ -11,7 +11,6 @@ import os
 from pathlib import Path
 from datetime import date
 
-import numpy as np
 
 DB_PATH          = Path(__file__).parent.parent.parent / 'database.sqlite'
 CSV_PATH         = Path(__file__).parent.parent.parent / 'screener_scoring_v2.csv'
@@ -201,16 +200,19 @@ class UnifiedRanker:
                     name = corr.get('screener_name', '').strip()
                     if not name:
                         continue
-                    if corr['type'] == 'bias':
-                        self.conn.execute(
-                            'UPDATE screener_catalog SET signal_bias=? WHERE screener_name=?',
-                            (corr['corrected'], name),
-                        )
-                    elif corr['type'] == 'subcategory':
-                        self.conn.execute(
-                            'UPDATE screener_catalog SET subcategory=? WHERE screener_name=?',
-                            (corr['corrected'], name),
-                        )
+                    try:
+                        if corr.get('type') == 'bias':
+                            self.conn.execute(
+                                'UPDATE screener_catalog SET signal_bias=? WHERE screener_name=?',
+                                (corr['corrected'], name),
+                            )
+                        elif corr.get('type') == 'subcategory':
+                            self.conn.execute(
+                                'UPDATE screener_catalog SET subcategory=? WHERE screener_name=?',
+                                (corr['corrected'], name),
+                            )
+                    except (KeyError, sqlite3.Error):
+                        pass
         self.conn.commit()
         return len(rows)
 
@@ -351,7 +353,7 @@ class UnifiedRanker:
         dl_scores         = self._get_dl_scores()
         avg_track         = self._get_avg_track_record()
 
-        all_symbols = set(screener_scores) | set(ml_scores) | set(confluence_scores)
+        all_symbols = set(screener_scores) | set(ml_scores) | set(confluence_scores) | set(technical_scores) | set(dl_scores)
 
         results = []
         for sym in all_symbols:
