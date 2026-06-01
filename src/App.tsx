@@ -78,6 +78,10 @@ const SignalIntelligence      = React.lazy(() => import('./components/SignalInte
 const DLDashboard             = React.lazy(() => import('./components/DLDashboard'));
 const TodaysPicks             = React.lazy(() => import('./components/TodaysPicks').then(m => ({ default: m.TodaysPicks })));
 const ScreenerIntelligencePage = React.lazy(() => import('./components/ScreenerIntelligencePage').then(m => ({ default: m.ScreenerIntelligencePage })));
+const AgentDataScientistPage   = React.lazy(() => import('./components/AgentDataScientistPage').then(m => ({ default: m.AgentDataScientistPage })));
+const AgentStrategistPage      = React.lazy(() => import('./components/AgentStrategistPage').then(m => ({ default: m.AgentStrategistPage })));
+const AgentAuditorPage         = React.lazy(() => import('./components/AgentAuditorPage').then(m => ({ default: m.AgentAuditorPage })));
+const AgentOptimizerPage       = React.lazy(() => import('./components/AgentOptimizerPage').then(m => ({ default: m.AgentOptimizerPage })));
 // Named-export lazy wrappers
 const ToDoPage           = React.lazy(() => import('./components/ToDoPage').then(m => ({ default: m.ToDoPage })));
 const InvestmentStrategy = React.lazy(() => import('./components/InvestmentStrategy').then(m => ({ default: m.InvestmentStrategy })));
@@ -3709,6 +3713,10 @@ export default function App() {
             <Route path="/options" element={<div className="p-6"><OptionsIntelligence /></div>} />
             <Route path="/todays-picks" element={<TodaysPicks onSelectStock={(s) => setDrawerSymbol(s)} />} />
             <Route path="/screener-intelligence" element={<ScreenerIntelligencePage />} />
+            <Route path="/agent-data-scientist" element={<AgentDataScientistPage />} />
+            <Route path="/agent-strategist"     element={<AgentStrategistPage />} />
+            <Route path="/agent-auditor"        element={<AgentAuditorPage />} />
+            <Route path="/agent-optimizer"      element={<AgentOptimizerPage />} />
             <Route path="/trade-cockpit" element={<TradeDecisionCockpit onSelectStock={(s) => setDrawerSymbol(s)} />} />
             <Route path="/backtest" element={<Backtest stocks={stocks} />} />
             <Route path="/signals" element={<DailySignals onSelectStock={(s) => setDrawerSymbol(s)} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
@@ -3824,6 +3832,10 @@ export default function App() {
               <Route path="/options" element={<div className="p-6"><OptionsIntelligence /></div>} />
               <Route path="/todays-picks" element={<TodaysPicks onSelectStock={(s) => setDrawerSymbol(s)} />} />
               <Route path="/screener-intelligence" element={<ScreenerIntelligencePage />} />
+              <Route path="/agent-data-scientist" element={<AgentDataScientistPage />} />
+              <Route path="/agent-strategist"     element={<AgentStrategistPage />} />
+              <Route path="/agent-auditor"        element={<AgentAuditorPage />} />
+              <Route path="/agent-optimizer"      element={<AgentOptimizerPage />} />
               <Route path="/trade-cockpit" element={<TradeDecisionCockpit onSelectStock={(s) => setDrawerSymbol(s)} />} />
               <Route path="/details" element={selectedSymbol ? (
                 <StockDetails

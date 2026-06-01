@@ -65,6 +65,15 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
+    label: 'Agent Intelligence',
+    items: [
+      { icon: BarChart2,   label: 'Data Scientist', id: 'agent-data-scientist' },
+      { icon: Target,      label: 'Strategist',     id: 'agent-strategist'     },
+      { icon: Activity,    label: 'Auditor',        id: 'agent-auditor'        },
+      { icon: Settings2,   label: 'Optimizer',      id: 'agent-optimizer'      },
+    ],
+  },
+  {
     label: 'Tools',
     items: [
       { icon: Globe,       label: 'Economics', id: 'economics' },
