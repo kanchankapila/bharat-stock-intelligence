@@ -1,7 +1,8 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 
-const dbPath = path.resolve(process.cwd(), process.env.DATABASE_URL || 'database.sqlite');
+const DATABASE_URL = process.env.DATABASE_URL || 'database.sqlite';
+const dbPath = DATABASE_URL === ':memory:' ? ':memory:' : path.resolve(process.cwd(), DATABASE_URL);
 const db = new Database(dbPath, { timeout: 10000 });
 
 db.pragma('journal_mode = WAL');
@@ -21,18 +22,6 @@ function runMigration(name: string, sql: string): void {
   db.exec(sql);
   db.prepare('INSERT INTO _migrations (name) VALUES (?)').run(name);
 }
-
-runMigration(
-  '001_signal_source_weights_composite_pk',
-  'DROP TABLE IF EXISTS signal_source_weights'
-);
-
-runMigration(
-  '002_add_mapping_columns_to_nse_stocks',
-  `ALTER TABLE nse_stocks ADD COLUMN mcsymbol TEXT;
-   ALTER TABLE nse_stocks ADD COLUMN tlid TEXT;
-   ALTER TABLE nse_stocks ADD COLUMN tlname TEXT;`
-);
 
 db.exec(`
   -- 1. Users & Personalization
@@ -1194,6 +1183,19 @@ tryIndex(`CREATE INDEX IF NOT EXISTS idx_stock_scores_symbol ON stock_scores(sym
 tryIndex(`CREATE INDEX IF NOT EXISTS idx_stock_ohlcv_date ON stock_ohlcv(date DESC)`);
 tryIndex(`CREATE INDEX IF NOT EXISTS idx_unified_signals_date ON unified_signals(signal_date DESC)`);
 
+// ── Early migrations (moved after db.exec so ALTER TABLE runs after table creation) ─
+runMigration(
+  '001_signal_source_weights_composite_pk',
+  'DROP TABLE IF EXISTS signal_source_weights'
+);
+
+runMigration(
+  '002_add_mapping_columns_to_nse_stocks',
+  // Columns are in base schema; this migration is a no-op for new DBs.
+  // Existing DBs that ran this migration have it tracked and skip it.
+  'SELECT 1'
+);
+
 // ── Screener Intelligence Foundation (Sub-project A) ─────────────────────────
 runMigration('030_screener_appearances', `
   CREATE TABLE IF NOT EXISTS screener_appearances (
@@ -1247,6 +1249,58 @@ migrateColumn('screener_reliability', 'win_rate_10d',  'REAL');
 migrateColumn('screener_reliability', 'win_rate_20d',  'REAL');
 migrateColumn('screener_reliability', 'win_rate_60d',  'REAL');
 migrateColumn('screener_reliability', 'win_rate_120d', 'REAL');
+
+runMigration('020_screener_catalog', `
+  CREATE TABLE IF NOT EXISTS screener_catalog (
+    screener_id        TEXT NOT NULL,
+    source             TEXT NOT NULL,
+    screener_name      TEXT NOT NULL,
+    category           TEXT NOT NULL,
+    subcategory        TEXT,
+    signal_bias        TEXT NOT NULL,
+    investment_horizon TEXT,
+    confidence         REAL NOT NULL,
+    score_0_100        REAL,
+    tier               TEXT,
+    sub_mod            REAL,
+    horiz_mult         REAL,
+    PRIMARY KEY (screener_id, source)
+  );
+`);
+
+runMigration('021_unified_recommendations', `
+  CREATE TABLE IF NOT EXISTS unified_recommendations (
+    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol                  TEXT NOT NULL,
+    computed_at             TEXT NOT NULL,
+    regime                  TEXT NOT NULL,
+    unified_score           REAL NOT NULL,
+    conviction_level        TEXT NOT NULL,
+    screener_stock_score    REAL,
+    ml_score                REAL,
+    confluence_score        REAL,
+    technical_score         REAL,
+    dl_score                REAL,
+    avg_engine_track_record REAL,
+    bullish_screener_count  INTEGER,
+    bearish_screener_count  INTEGER,
+    screener_names_json     TEXT,
+    fundamental_score       REAL,
+    entry_zone_low          REAL,
+    entry_zone_high         REAL,
+    stop_loss               REAL,
+    target_1                REAL,
+    target_2                REAL,
+    target_3                REAL,
+    risk_reward             REAL,
+    timeframe               TEXT,
+    sector                  TEXT,
+    trade_reasoning         TEXT,
+    UNIQUE(symbol, computed_at)
+  );
+  CREATE INDEX IF NOT EXISTS idx_ur_date_score ON unified_recommendations(computed_at, unified_score DESC);
+  CREATE INDEX IF NOT EXISTS idx_ur_conviction  ON unified_recommendations(computed_at, conviction_level);
+`);
 
 // Keep startup diagnostics off stdout so stdio-based clients can parse JSON-RPC.
 console.error('[DB] Schema normalization complete (Phase 3.5)');
