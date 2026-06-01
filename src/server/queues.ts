@@ -1,4 +1,4 @@
-﻿/**
+/**
  * BullMQ queues & workers
  *
  * Two queues:
@@ -17,6 +17,8 @@ import db from './db';
 import { syncAndScore } from './scoringService';
 import Redis from 'ioredis';
 import { REDIS_BASE } from './redisConfig';
+import { runPython } from './pythonRunner';
+import { pythonApi } from './pythonApi';
 
 // â”€â”€â”€ Redis connection shared across all BullMQ objects â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -78,12 +80,6 @@ export const QUEUE_OHLCV_BACKFILL       = 'ohlcv-backfill';
 export const QUEUE_CONFLUENCE_COMPUTE  = 'confluence-compute';
 export const QUEUE_CONFLUENCE_OUTCOMES = 'confluence-outcomes';
 export const QUEUE_SCREENER_PERFORMANCE = 'screener-performance';
-
-const PYTHON_BIN = process.env.PYTHON_PATH || (
-  process.platform === 'win32'
-    ? 'C:\\Users\\amit_\\AppData\\Local\\Programs\\Python\\Python311\\python.exe'
-    : 'python3'
-);
 
 const BULK_CACHE_KEY      = 'live-stocks-bulk';
 const BULK_TTL_SECONDS    = 5 * 60;
@@ -167,16 +163,7 @@ async function processConfluenceCompute(_job: Job): Promise<{ computed: number; 
 }
 
 async function processConfluenceOutcomes(_job: Job): Promise<void> {
-  const { execFile } = await import('child_process');
-  const pathModule = await import('path');
-  const scriptPath = pathModule.default.resolve(process.cwd(), 'src/server/confluence_outcome_tracker.py');
-  await new Promise<void>((resolve, reject) => {
-    execFile(PYTHON_BIN, [scriptPath], { timeout: 120000 }, (err, stdout, stderr) => {
-      if (stdout) console.log('[OUTCOME-TRACKER]', stdout.trim());
-      if (stderr) console.error('[OUTCOME-TRACKER ERR]', stderr.trim());
-      err ? reject(err) : resolve();
-    });
-  });
+  await runPython('confluence_outcome_tracker.py', [], 120_000);
 }
 
 // â”€â”€â”€ Stock-refresh worker processor (PHASE 1: Now persists OHLCV) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -275,49 +262,37 @@ async function processQuantScoring(_job: Job): Promise<{ success: boolean }> {
   return { success: true };
 }
 
-// â”€â”€â”€ Outcome resolver worker processor â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
 async function processOutcomeResolver(_job: Job): Promise<{ success: boolean }> {
-  const { exec } = await import('child_process');
-  const { promisify } = await import('util');
-  const execAsync = promisify(exec);
-  const pyDir = process.cwd() + '/src/server';
-  // Refresh FII/DII so alpha computation has current benchmark data
-  await execAsync(`"${PYTHON_BIN}" fii_dii_fetcher.py`, { cwd: pyDir, timeout: 90_000 }).catch(() => {});
-  // Resolve outcomes for all horizons
-  await execAsync(`"${PYTHON_BIN}" outcome_resolver.py --horizon 1`, { cwd: pyDir });
-  await execAsync(`"${PYTHON_BIN}" outcome_resolver.py --horizon 5`, { cwd: pyDir });
-  await execAsync(`"${PYTHON_BIN}" outcome_resolver.py --horizon 15`, { cwd: pyDir });
-  // Recompute strategy performance (includes alpha_vs_nifty + signal_decay_halflife)
-  await execAsync(`"${PYTHON_BIN}" performance_tracker.py --horizon 5`, { cwd: pyDir });
-  await execAsync(`"${PYTHON_BIN}" performance_tracker.py --horizon 15`, { cwd: pyDir });
-  // Score all pending signals with ML model
-  await execAsync(`"${PYTHON_BIN}" ml_ensemble.py --score`, { cwd: pyDir, timeout: 300_000 }).catch(() => {});
+  await runPython('fii_dii_fetcher.py', [], 90_000).catch(() => {});
+
+  await pythonApi.resolveOutcomes(1).catch(e => console.warn('[API] resolve-outcomes(1):', (e as Error).message));
+  await pythonApi.resolveOutcomes(5).catch(e => console.warn('[API] resolve-outcomes(5):', (e as Error).message));
+  await pythonApi.resolveOutcomes(15).catch(e => console.warn('[API] resolve-outcomes(15):', (e as Error).message));
+
+  await runPython('performance_tracker.py', ['--horizon', '5']);
+  await runPython('performance_tracker.py', ['--horizon', '15']);
+
+  await pythonApi.scorePending().catch(e => console.warn('[API] score-pending:', (e as Error).message));
+
   return { success: true };
 }
 
 // â”€â”€â”€ ML daily ops worker processor â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
-  const { exec } = await import('child_process');
-  const { promisify } = await import('util');
-  const execAsync = promisify(exec);
-  const pyDir = process.cwd() + '/src/server';
-  // 1. Refresh FII/DII data (context feature for ML)
-  await execAsync(`"${PYTHON_BIN}" fii_dii_fetcher.py`, { cwd: pyDir, timeout: 90_000 }).catch(() => {});
-  // 2. Score today's news sentiment onto technical_signals rows
-  await execAsync(`"${PYTHON_BIN}" finbert_scorer.py --days 1`, { cwd: pyDir, timeout: 180_000 }).catch(() => {});
-  // 3. Resolve any newly-matured signal outcomes
-  await execAsync(`"${PYTHON_BIN}" outcome_resolver.py --horizon 5`, { cwd: pyDir });
-  await execAsync(`"${PYTHON_BIN}" outcome_resolver.py --horizon 15`, { cwd: pyDir });
-  // 4. Recompute strategy performance (alpha, decay, regime segments)
-  await execAsync(`"${PYTHON_BIN}" performance_tracker.py --horizon 5`, { cwd: pyDir });
-  await execAsync(`"${PYTHON_BIN}" performance_tracker.py --horizon 15`, { cwd: pyDir });
-  // 5. Score pending signals with the ensemble model
-  await execAsync(`"${PYTHON_BIN}" ml_ensemble.py --score`, { cwd: pyDir, timeout: 300_000 }).catch(() => {});
-  // 6. RL reward propagation
-  await execAsync(`"${PYTHON_BIN}" reward_engine.py`, { cwd: pyDir });
-  await execAsync(`"${PYTHON_BIN}" rl_agent.py --update`, { cwd: pyDir });
+  await runPython('fii_dii_fetcher.py', [], 90_000).catch(() => {});
+  await runPython('finbert_scorer.py', ['--days', '1'], 180_000).catch(() => {});
+
+  await pythonApi.resolveOutcomes(5).catch(e => console.warn('[API] resolve-outcomes(5):', (e as Error).message));
+  await pythonApi.resolveOutcomes(15).catch(e => console.warn('[API] resolve-outcomes(15):', (e as Error).message));
+
+  await runPython('performance_tracker.py', ['--horizon', '5']);
+  await runPython('performance_tracker.py', ['--horizon', '15']);
+
+  await pythonApi.scorePending().catch(e => console.warn('[API] score-pending:', (e as Error).message));
+
+  await runPython('reward_engine.py');
+  await runPython('rl_agent.py', ['--update']);
   return { success: true };
 }
 
@@ -339,15 +314,29 @@ async function processResearchPostclose(_job: Job): Promise<{ success: boolean }
 
 // â”€â”€â”€ DL Python runner â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-async function processDLPython(script: string, args: string = ''): Promise<{ success: boolean }> {
-  const { exec } = await import('child_process');
-  const { promisify } = await import('util');
-  const execAsync = promisify(exec);
-  const pyDir = process.cwd() + '/src/server';
-  const { stdout, stderr } = await execAsync(`"${PYTHON_BIN}" ${script} ${args}`, { cwd: pyDir, timeout: 6 * 60 * 60 * 1000 });
-  if (stdout) console.log(`[QUEUE] ${script}:`, stdout.slice(0, 200));
-  if (stderr) console.warn(`[QUEUE] ${script} stderr:`, stderr.slice(0, 200));
+async function processDLPython(script: string, args: string[] = [], timeoutMs = 6 * 60 * 60_000): Promise<{ success: boolean }> {
+  await runPython(script, args, timeoutMs);
   return { success: true };
+}
+
+async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean }> {
+  await runPython('outcome_resolver.py', ['--horizon', '5']);
+  await runPython('outcome_resolver.py', ['--horizon', '15']);
+  await runPython('ml_ensemble.py', ['--train', '--score'], 60 * 60_000);
+  await runPython('strategy_optimizer.py', [], 30 * 60_000).catch(() => {});
+  await runPython('performance_tracker.py', ['--horizon', '5']);
+  await runPython('performance_tracker.py', ['--horizon', '15']);
+  return { success: true };
+}
+
+async function processScreenerPerf(_job: Job): Promise<void> {
+  await runPython('screener_performance.py', [], 15 * 60_000);
+  try {
+    const { classifyAllScreeners } = await import('./screenerClassifier');
+    await classifyAllScreeners();
+  } catch (e: unknown) {
+    console.error('[QUEUE] screener classification failed:', (e as Error).message);
+  }
 }
 
 // â”€â”€â”€ Initialise queues & workers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -367,6 +356,13 @@ export async function initQueues(): Promise<boolean> {
 
   try {
     await probe.connect();
+    // Proactively fix the MISCONF RDB snapshot error to prevent BullMQ/Node from crashing
+    try {
+      await probe.config('SET', 'stop-writes-on-bgsave-error', 'no');
+      console.log('[QUEUE] Disabled stop-writes-on-bgsave-error in Redis to prevent MISCONF crashes.');
+    } catch (cfgErr: any) {
+      console.warn('[QUEUE] Could not update Redis config:', cfgErr.message);
+    }
     await probe.quit();
     console.log('[QUEUE] Redis connection probe successful');
   } catch (err: any) {
@@ -953,20 +949,7 @@ export async function initQueues(): Promise<boolean> {
       jobId: 'ml-weekly-retrain',
       removeOnComplete: 2, removeOnFail: 3,
     });
-    mlWeeklyRetrainWorker = new Worker(QUEUE_ML_WEEKLY_RETRAIN, async (_job: Job) => {
-      const { exec } = await import('child_process');
-      const { promisify } = await import('util');
-      const execAsync = promisify(exec);
-      const pyDir = process.cwd() + '/src/server';
-      // Full retrain from scratch on accumulated outcomes
-      await execAsync(`"${PYTHON_BIN}" outcome_resolver.py --horizon 5`, { cwd: pyDir });
-      await execAsync(`"${PYTHON_BIN}" outcome_resolver.py --horizon 15`, { cwd: pyDir });
-      await execAsync(`"${PYTHON_BIN}" ml_ensemble.py --train --score`, { cwd: pyDir, timeout: 60 * 60 * 1000 });
-      await execAsync(`"${PYTHON_BIN}" strategy_optimizer.py`, { cwd: pyDir, timeout: 30 * 60 * 1000 }).catch(() => {});
-      await execAsync(`"${PYTHON_BIN}" performance_tracker.py --horizon 5`, { cwd: pyDir });
-      await execAsync(`"${PYTHON_BIN}" performance_tracker.py --horizon 15`, { cwd: pyDir });
-      return { success: true };
-    }, { connection, concurrency: 1, lockDuration: 90 * 60 * 1000, lockRenewTime: 10 * 60 * 1000 });
+    mlWeeklyRetrainWorker = new Worker(QUEUE_ML_WEEKLY_RETRAIN, processMlWeeklyRetrain, { connection, concurrency: 1, lockDuration: 90 * 60 * 1000, lockRenewTime: 10 * 60 * 1000 });
     mlWeeklyRetrainWorker.on('completed', () => console.log('[QUEUE] ml-weekly-retrain done'));
     mlWeeklyRetrainWorker.on('failed', (_, err) => console.error('[QUEUE] ml-weekly-retrain failed:', err.message));
 
@@ -1043,7 +1026,7 @@ export async function initQueues(): Promise<boolean> {
       removeOnComplete: 3, removeOnFail: 3,
     });
     dlInferenceWorker = new Worker(QUEUE_DL_INFERENCE,
-      async () => processDLPython('dl_engine.py', '--mode infer'),
+      async () => processDLPython('dl_engine.py', ['--mode', 'infer']),
       { connection, concurrency: 1, lockDuration: 30 * 60 * 1000, lockRenewTime: 5 * 60 * 1000 });
     dlInferenceWorker.on('completed', () => console.log('[QUEUE] dl-inference done'));
     dlInferenceWorker.on('failed', (_, err) => console.error('[QUEUE] dl-inference failed:', err.message));
@@ -1058,7 +1041,7 @@ export async function initQueues(): Promise<boolean> {
       removeOnComplete: 3, removeOnFail: 3,
     });
     dlRegimeUpdateWorker = new Worker(QUEUE_DL_REGIME_UPDATE,
-      async () => processDLPython('regime_detector.py', '--mode update'),
+      async () => processDLPython('regime_detector.py', ['--mode', 'update']),
       { connection, concurrency: 1, lockDuration: 5 * 60 * 1000 });
     dlRegimeUpdateWorker.on('completed', () => console.log('[QUEUE] dl-regime-update done'));
     dlRegimeUpdateWorker.on('failed', (_, err) => console.error('[QUEUE] dl-regime-update failed:', err.message));
@@ -1075,7 +1058,7 @@ export async function initQueues(): Promise<boolean> {
     dlRetrainWeeklyWorker = new Worker(QUEUE_DL_RETRAIN_WEEKLY,
       async (_job: Job) => {
         const trigger = _job.data?.trigger || 'scheduled';
-        return processDLPython('dl_trainer.py', `--trigger ${trigger}`);
+        return processDLPython('dl_trainer.py', ['--trigger', trigger]);
       },
       { connection, concurrency: 1, lockDuration: 6 * 60 * 60 * 1000, lockRenewTime: 30 * 60 * 1000 });
     dlRetrainWeeklyWorker.on('completed', () => console.log('[QUEUE] dl-retrain-weekly done'));
@@ -1084,7 +1067,7 @@ export async function initQueues(): Promise<boolean> {
     // â”€â”€ DL Emergency Retrain (on-demand, triggered by drift detector) â”€â”€â”€â”€â”€â”€â”€â”€
     dlRetrainEmergencyQueue = new Queue(QUEUE_DL_RETRAIN_EMERGENCY, { connection });
     dlRetrainEmergencyWorker = new Worker(QUEUE_DL_RETRAIN_EMERGENCY,
-      async () => processDLPython('dl_trainer.py', '--trigger drift'),
+      async () => processDLPython('dl_trainer.py', ['--trigger', 'drift']),
       { connection, concurrency: 1, lockDuration: 6 * 60 * 60 * 1000, lockRenewTime: 30 * 60 * 1000 });
     dlRetrainEmergencyWorker.on('completed', () => console.log('[QUEUE] dl-retrain-emergency done'));
     dlRetrainEmergencyWorker.on('failed', (_, err) => console.error('[QUEUE] dl-retrain-emergency failed:', err.message));
@@ -1096,7 +1079,7 @@ export async function initQueues(): Promise<boolean> {
       async (job: Job) => {
         const mode = (job.data?.mode as string) || 'gap-fill';
         const lookback = (job.data?.lookback as number) || 30;
-        return processDLPython('backfill_ohlcv.py', `--mode ${mode} --lookback ${lookback}`);
+        return processDLPython('backfill_ohlcv.py', ['--mode', mode, '--lookback', String(lookback)]);
       },
       { connection, concurrency: 1, lockDuration: 3 * 60 * 60 * 1000, lockRenewTime: 15 * 60 * 1000 });
     ohlcvBackfillWorker.on('completed', (job) => console.log(`[QUEUE] ohlcv-backfill (${job.data?.mode}) done`));
@@ -1188,19 +1171,7 @@ export async function initQueues(): Promise<boolean> {
 
     screenerPerfWorker = new Worker(
       QUEUE_SCREENER_PERFORMANCE,
-      async (_job: Job) => {
-        const { promisify } = await import('util');
-        const { exec } = await import('child_process');
-        const _execAsync = promisify(exec);
-        const pyDir = process.cwd() + '/src/server';
-        await _execAsync(`"${PYTHON_BIN}" screener_performance.py`, { cwd: pyDir, timeout: 15 * 60 * 1000 });
-        try {
-          const { classifyAllScreeners } = await import('./screenerClassifier');
-          await classifyAllScreeners();
-        } catch (e: any) {
-          console.error('[QUEUE] screener classification failed:', e.message);
-        }
-      },
+      processScreenerPerf,
       { connection, concurrency: 1, lockDuration: 20 * 60 * 1000, lockRenewTime: 5 * 60 * 1000 },
     );
 
