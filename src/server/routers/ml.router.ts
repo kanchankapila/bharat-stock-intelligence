@@ -130,6 +130,126 @@ export const mlRouter = router({
       };
     }),
 
+  getSignalReportCard: publicProcedure
+    .input(z.object({
+      horizonDays: z.union([z.literal(5), z.literal(15)]).default(15),
+      activeLimit: z.number().min(1).max(200).default(50),
+      recentBacktests: z.number().min(1).max(20).default(10),
+    }).optional())
+    .query(({ input }) => {
+      const horizon = input?.horizonDays ?? 15;
+      const activeLimit = input?.activeLimit ?? 50;
+      const recentBacktests = input?.recentBacktests ?? 10;
+
+      const sourceSummary = db.prepare(`
+        SELECT signal_source,
+               COUNT(*) AS total_signals,
+               SUM(CASE WHEN status = 'ACTIVE' THEN 1 ELSE 0 END) AS active_signals,
+               SUM(CASE WHEN status = 'COMPLETED' THEN 1 ELSE 0 END) AS completed_signals,
+               AVG(confidence_score) AS avg_confidence_score,
+               AVG(technical_score) AS avg_technical_score,
+               AVG(quant_score) AS avg_quant_score,
+               AVG(entry_price) AS avg_entry_price,
+               AVG(julianday('now') - julianday(signal_generated_at)) AS avg_age_days
+        FROM unified_signals
+        GROUP BY signal_source
+        ORDER BY total_signals DESC
+      `).all();
+
+      const outcomeSummary = db.prepare(`
+        SELECT us.signal_source,
+               uso.horizon_days,
+               COUNT(*) AS total_outcomes,
+               SUM(CASE WHEN uso.outcome = 'WIN' THEN 1 ELSE 0 END) AS win_count,
+               SUM(CASE WHEN uso.outcome = 'LOSS' THEN 1 ELSE 0 END) AS loss_count,
+               SUM(CASE WHEN uso.outcome = 'NEUTRAL' THEN 1 ELSE 0 END) AS neutral_count,
+               AVG(uso.return_pct) AS avg_return_pct,
+               AVG(uso.intraday_max_return_pct) AS avg_max_return_pct,
+               AVG(uso.intraday_min_return_pct) AS avg_min_return_pct
+        FROM unified_signal_outcomes uso
+        JOIN unified_signals us ON us.id = uso.unified_signal_id
+        WHERE uso.horizon_days = ?
+        GROUP BY us.signal_source, uso.horizon_days
+        ORDER BY us.signal_source, win_count DESC
+      `).all(horizon);
+
+      const activeSignalGrowth = db.prepare(`
+        SELECT us.id,
+               us.symbol,
+               us.signal_date,
+               us.signal_source,
+               us.signal_type,
+               us.entry_price,
+               us.confidence_score,
+               us.status,
+               us.signal_generated_at,
+               (SELECT close FROM stock_ohlcv WHERE symbol = us.symbol ORDER BY date DESC LIMIT 1) AS latest_price,
+               ROUND(
+                 COALESCE(
+                   (SELECT return_pct FROM unified_signal_outcomes uso WHERE uso.unified_signal_id = us.id AND uso.horizon_days = ?),
+                   100.0 * ((SELECT close FROM stock_ohlcv WHERE symbol = us.symbol ORDER BY date DESC LIMIT 1) - us.entry_price) / NULLIF(us.entry_price, 0)
+                 ),
+                 4
+               ) AS growth_pct
+        FROM unified_signals us
+        WHERE us.status IN ('ACTIVE', 'COMPLETED')
+          AND us.entry_price IS NOT NULL
+        ORDER BY us.signal_generated_at DESC
+        LIMIT ?
+      `).all(horizon, activeLimit);
+
+      const recommendationSummary = db.prepare(`
+        SELECT COUNT(*) AS total_recommendations,
+               SUM(CASE WHEN outcome = 'WIN' THEN 1 ELSE 0 END) AS win_count,
+               SUM(CASE WHEN outcome = 'LOSS' THEN 1 ELSE 0 END) AS loss_count,
+               SUM(CASE WHEN outcome = 'NEUTRAL' THEN 1 ELSE 0 END) AS neutral_count,
+               AVG(actual_return_pct) AS avg_actual_return_pct,
+               MAX(actual_return_pct) AS best_actual_return_pct,
+               MIN(actual_return_pct) AS worst_actual_return_pct
+        FROM recommendation_log
+        WHERE actual_return_pct IS NOT NULL
+      `).get();
+
+      const recommendationSourceBreakdown = db.prepare(`
+        SELECT source,
+               COUNT(*) AS total_recs,
+               SUM(CASE WHEN outcome = 'WIN' THEN 1 ELSE 0 END) AS win_count,
+               AVG(actual_return_pct) AS avg_actual_return_pct,
+               AVG(confidence_score) AS avg_confidence_score
+        FROM recommendation_log
+        GROUP BY source
+        ORDER BY total_recs DESC
+      `).all();
+
+      const recentBacktestResults = db.prepare(`
+        SELECT run_name, start_date, end_date, win_rate, total_return_pct,
+               cagr_pct, sharpe_ratio, max_drawdown_pct, alpha_pct, profit_factor, run_at
+        FROM backtesting_runs
+        ORDER BY run_at DESC
+        LIMIT ?
+      `).all(recentBacktests);
+
+      const strategyPerformance = db.prepare(`
+        SELECT strategy_name, segment, segment_value, win_rate, avg_return_pct,
+               profit_factor, sharpe_ratio, max_drawdown_pct, alpha_vs_nifty,
+               total_signals, last_computed
+        FROM strategy_performance
+        WHERE segment = 'signal_type' AND horizon_days = ?
+        ORDER BY win_rate DESC
+        LIMIT 20
+      `).all(horizon);
+
+      return {
+        sourceSummary,
+        outcomeSummary,
+        activeSignalGrowth,
+        recommendationSummary,
+        recommendationSourceBreakdown,
+        recentBacktestResults,
+        strategyPerformance,
+      };
+    }),
+
   runFullBacktest: publicProcedure
     .input(z.object({
       start:          z.string().default('2023-01-01'),

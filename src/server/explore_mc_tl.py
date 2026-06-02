@@ -74,6 +74,7 @@ CREATE INDEX IF NOT EXISTS idx_domain_cat
 
 def create_db(path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(path)
+    conn.execute("DROP TABLE IF EXISTS api_responses")
     conn.execute(CREATE_TABLE)
     conn.execute(CREATE_IDX)
     conn.commit()
@@ -127,6 +128,24 @@ def extract_item_count(raw):
         return None
     except Exception:
         return None
+
+def make_analyzable_sample(raw):
+    """Truncates massive lists to keep the JSON schema clear and analyzable."""
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+        def truncate(obj):
+            if isinstance(obj, list):
+                if len(obj) > 2:
+                    return [truncate(obj[0]), truncate(obj[1]), f"... {len(obj)-2} more items"]
+                return [truncate(x) for x in obj]
+            elif isinstance(obj, dict):
+                return {k: truncate(v) for k, v in obj.items()}
+            return obj
+        return json.dumps(truncate(data), indent=2)
+    except Exception:
+        return raw[:1000] + "... (Invalid JSON)"
 
 # ─── MC Indices ───────────────────────────────────────────────────────────────
 
@@ -1199,7 +1218,7 @@ def fetch_one(session: requests.Session, spec: EndpointSpec) -> dict:
         row["latency_ms"] = int((time.monotonic() - t0) * 1000)
         row["http_status"] = resp.status_code
         if resp.status_code == 200 and resp.text.strip():
-            row["raw_json"] = resp.text
+            row["raw_json"] = make_analyzable_sample(resp.text)
             row["top_keys"] = extract_top_keys(resp.text)
             row["item_count"] = extract_item_count(resp.text)
         elif resp.status_code != 200:
@@ -1337,9 +1356,7 @@ def build_all_specs() -> list[EndpointSpec]:
     specs.extend(build_et_markets_urls())
     specs.extend(build_finology_urls())
     specs.extend(build_marketsmojo_urls())
-    specs.extend(build_niftytrader_urls())
     specs.extend(build_stockedge_urls())
-    specs.extend(build_trading80_urls())
     return specs
 
 

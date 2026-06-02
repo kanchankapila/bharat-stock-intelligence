@@ -8,6 +8,15 @@ export interface StockPick {
   xgboost_score: number;
   screener_net: number;
   news_boost: number;
+  unified_score?: number;
+  conviction_level?: string;
+  confluence_score?: number;
+  ml_score?: number;
+  technical_score?: number;
+  dl_score?: number;
+  screener_stock_score?: number;
+  avg_engine_track_record?: number;
+  fundamental_score?: number | null;
   rsi: number | null;
   adx: number | null;
   trailing_pe: number | null;
@@ -91,6 +100,8 @@ function scoreStocks(): { picks: StockPick[]; avoid: { symbol: string; reason: s
     WHERE composite_class IN ('Strong Buy','Buy') AND ohlcv_days >= 60
   `).all() as any[];
 
+  const quantMap = new Map<string, any>(quantRows.map((q: any) => [q.symbol, q]));
+
   const techMap = new Map<string, any>();
   (db.prepare(`
     SELECT ts.symbol, ts.signal_score, ts.win_probability, ts.rsi, ts.adx,
@@ -110,6 +121,36 @@ function scoreStocks(): { picks: StockPick[]; avoid: { symbol: string; reason: s
     `).all() as any[]).forEach(r => xgbMap.set(r.symbol, r));
   } catch { /* table may not exist */ }
 
+  const unifiedMap = new Map<string, any>();
+  try {
+    const unifiedRows = db.prepare(`
+      SELECT symbol, unified_score, conviction_level, screener_stock_score,
+             ml_score, confluence_score, technical_score, dl_score,
+             avg_engine_track_record, fundamental_score
+      FROM unified_recommendations
+      WHERE computed_at = (SELECT MAX(computed_at) FROM unified_recommendations)
+    `).all() as any[];
+    unifiedRows.forEach(r => unifiedMap.set(r.symbol, r));
+  } catch { /* unified engine may not have run yet */ }
+
+  const confluenceMap = new Map<string, number>();
+  try {
+    (db.prepare(`
+      SELECT symbol, confluence_score
+      FROM confluence_signals
+      WHERE computed_at = (SELECT MAX(computed_at) FROM confluence_signals)
+    `).all() as any[]).forEach(r => confluenceMap.set(r.symbol, r.confluence_score ?? 0));
+  } catch { /* confluence engine may not have run yet */ }
+
+  const dlMap = new Map<string, number>();
+  try {
+    (db.prepare(`
+      SELECT symbol, probability
+      FROM dl_predictions
+      WHERE predicted_at >= datetime('now', '-1 day')
+    `).all() as any[]).forEach(r => dlMap.set(r.symbol, (r.probability ?? 0) * 100));
+  } catch { /* DL predictions may not be available */ }
+
   const newsMap = new Map<string, number>();
   (db.prepare(`
     SELECT symbols_json, sentiment_score, impact
@@ -127,68 +168,102 @@ function scoreStocks(): { picks: StockPick[]; avoid: { symbol: string; reason: s
   const avoidList: { symbol: string; reason: string }[] = [];
   const scored: StockPick[] = [];
 
-  for (const q of quantRows) {
-    const tech = techMap.get(q.symbol);
-    const xgb  = xgbMap.get(q.symbol);
+  const allSymbols = new Set<string>();
+  quantRows.forEach(q => allSymbols.add(q.symbol));
+  techMap.forEach((_, symbol) => allSymbols.add(symbol));
+  xgbMap.forEach((_, symbol) => allSymbols.add(symbol));
+  unifiedMap.forEach((_, symbol) => allSymbols.add(symbol));
+  confluenceMap.forEach((_, symbol) => allSymbols.add(symbol));
+  dlMap.forEach((_, symbol) => allSymbols.add(symbol));
+  newsMap.forEach((_, symbol) => allSymbols.add(symbol));
+
+  for (const symbol of allSymbols) {
+    const q = quantMap.get(symbol);
+    const tech = techMap.get(symbol);
+    const xgb  = xgbMap.get(symbol);
+    const u = unifiedMap.get(symbol);
+    const newsScore = newsMap.get(symbol) || 0;
 
     const flags: string[] = [];
     if (tech?.rsi > 80) flags.push('RSI_OVERBOUGHT');
-    if ((q.debt_to_equity ?? 0) > 100) flags.push('HIGH_LEVERAGE');
-    if ((q.max_drawdown_1y ?? 0) > 40) flags.push('HIGH_DRAWDOWN');
-    if ((q.piotroski_f_score ?? 5) < 4) flags.push('WEAK_FUNDAMENTALS');
+    if ((q?.debt_to_equity ?? 0) > 100) flags.push('HIGH_LEVERAGE');
+    if ((q?.max_drawdown_1y ?? 0) > 40) flags.push('HIGH_DRAWDOWN');
+    if ((q?.piotroski_f_score ?? 5) < 4) flags.push('WEAK_FUNDAMENTALS');
 
-    if (flags.length >= 2) {
-      avoidList.push({ symbol: q.symbol, reason: flags.join(', ') });
+    if (flags.length >= 2 && !u) {
+      avoidList.push({ symbol, reason: flags.join(', ') });
       continue;
     }
 
-    let layers_confirmed = 1;
+    const confluenceScore = u?.confluence_score ?? confluenceMap.get(symbol) ?? 0;
+    const dlScore = u?.dl_score ?? dlMap.get(symbol) ?? 0;
+
+    let layers_confirmed = 0;
+    if (q) layers_confirmed++;
     if (tech) layers_confirmed++;
-    if (xgb)  layers_confirmed++;
-    if ((newsMap.get(q.symbol) ?? 0) > 0) layers_confirmed++;
+    if (xgb) layers_confirmed++;
+    if (newsScore > 0) layers_confirmed++;
+    if (u) layers_confirmed++;
+    if (!u && confluenceScore > 0) layers_confirmed++;
+    if (!u && dlScore > 0) layers_confirmed++;
 
-    if (layers_confirmed < 2) continue;
+    if (layers_confirmed < 2 && !u) continue;
 
-    const quant_component    = (q.rank_composite / 100) * 30;
-    const tech_component     = tech ? (tech.signal_score / 10) * 25 : 0;
-    const xgb_component      = xgb ? xgb.xgboost_score * 20 : 0;
-    const screener_component = Math.min((q.screener_net_score || 0) / 50, 1) * 15;
-    const news_component     = Math.min((newsMap.get(q.symbol) || 0) / 3, 1) * 10;
+    const unified_component    = u ? Math.min(u.unified_score / 100, 1) * 50 : 0;
+    const quant_component      = q ? (q.rank_composite / 100) * 20 : 0;
+    const tech_component       = tech ? (tech.signal_score / 10) * 15 : (u?.technical_score ? Math.min(u.technical_score / 10, 1) * 10 : 0);
+    const xgb_component        = xgb ? xgb.xgboost_score * 10 : 0;
+    const confluence_component = confluenceScore ? Math.min(confluenceScore / 100, 1) * 10 : 0;
+    const ml_component         = u?.ml_score ? Math.min(u.ml_score / 100, 1) * 10 : (tech?.win_probability ? Math.min(tech.win_probability, 1) * 10 : 0);
+    const screener_component   = u?.screener_stock_score ? Math.min(u.screener_stock_score / 100, 1) * 10 : Math.min((q?.screener_net_score || 0) / 50, 1) * 10;
+    const news_component       = Math.min(newsScore / 3, 1) * 10;
 
     let conviction_score =
-      quant_component + tech_component + xgb_component + screener_component + news_component;
+      unified_component + quant_component + tech_component + xgb_component + confluence_component + ml_component + screener_component + news_component;
+    conviction_score = Math.min(Math.max(conviction_score, 0), 100);
 
     if (flags.includes('RSI_OVERBOUGHT'))    conviction_score *= 0.75;
     if (flags.includes('HIGH_LEVERAGE'))     conviction_score *= 0.80;
     if (flags.includes('HIGH_DRAWDOWN'))     conviction_score *= 0.85;
     if (flags.includes('WEAK_FUNDAMENTALS')) conviction_score *= 0.70;
 
-    const vol          = q.annualized_vol || 30;
-    const stop_loss_pct  = Math.round(Math.max(6, Math.min(15, vol * 0.4)));
-    const target_1_pct   = stop_loss_pct * 2.5;
-    const target_2_pct   = stop_loss_pct * 4;
-    const risk_reward    = parseFloat((target_1_pct / stop_loss_pct).toFixed(1));
+    if (conviction_score < 25) continue;
+
+    const vol           = q?.annualized_vol || 30;
+    const stop_loss_pct = Math.round(Math.max(6, Math.min(15, vol * 0.4)));
+    const target_1_pct  = stop_loss_pct * 2.5;
+    const target_2_pct  = stop_loss_pct * 4;
+    const risk_reward   = parseFloat((target_1_pct / stop_loss_pct).toFixed(1));
 
     scored.push({
-      symbol:            q.symbol,
-      conviction_score:  parseFloat(conviction_score.toFixed(1)),
-      quant_rank:        q.rank_composite,
-      signal_score:      tech?.signal_score ?? 0,
-      xgboost_score:     xgb?.xgboost_score ?? 0,
-      screener_net:      q.screener_net_score ?? 0,
-      news_boost:        newsMap.get(q.symbol) ?? 0,
-      rsi:               tech?.rsi ?? null,
-      adx:               tech?.adx ?? null,
-      trailing_pe:       q.trailing_pe,
-      roe:               q.return_on_equity,
-      debt_to_equity:    q.debt_to_equity,
-      piotroski:         q.piotroski_f_score,
-      bullish_screeners: q.bullish_screener_count ?? 0,
-      return_1m:         q.return_1m,
-      return_3m:         q.return_3m,
-      above_sma200:      q.above_sma200 ?? 0,
-      entry_note:        tech?.rsi > 65 ? 'Wait for pullback' : 'CMP entry acceptable',
-      stop_loss_pct:     -stop_loss_pct,
+      symbol:               symbol,
+      conviction_score:     parseFloat(conviction_score.toFixed(1)),
+      quant_rank:           q?.rank_composite ?? 0,
+      signal_score:         tech?.signal_score ?? u?.technical_score ?? 0,
+      xgboost_score:        xgb?.xgboost_score ?? 0,
+      screener_net:         q?.screener_net_score ?? 0,
+      news_boost:           newsScore,
+      unified_score:        u?.unified_score,
+      conviction_level:     u?.conviction_level,
+      confluence_score:     confluenceScore,
+      ml_score:             u?.ml_score ?? (tech?.win_probability ? tech.win_probability * 100 : 0),
+      technical_score:      u?.technical_score ?? (tech?.signal_score ?? 0),
+      dl_score:             dlScore,
+      screener_stock_score: u?.screener_stock_score ?? Math.min((q?.screener_net_score || 0) / 50, 1) * 100,
+      avg_engine_track_record: u?.avg_engine_track_record,
+      fundamental_score:    u?.fundamental_score ?? q?.return_on_equity ?? null,
+      rsi:                  tech?.rsi ?? null,
+      adx:                  tech?.adx ?? null,
+      trailing_pe:          q?.trailing_pe,
+      roe:                  q?.return_on_equity,
+      debt_to_equity:       q?.debt_to_equity,
+      piotroski:            q?.piotroski_f_score,
+      bullish_screeners:    q?.bullish_screener_count ?? 0,
+      return_1m:            q?.return_1m,
+      return_3m:            q?.return_3m,
+      above_sma200:         q?.above_sma200 ?? 0,
+      entry_note:           tech?.rsi > 65 ? 'Wait for pullback' : 'CMP entry acceptable',
+      stop_loss_pct:        -stop_loss_pct,
       target_1_pct,
       target_2_pct,
       risk_reward,

@@ -305,7 +305,7 @@ def expire_stale_pending(conn: sqlite3.Connection, horizon_days: int, dry_run: b
           AND signal_date < ?
     """, (horizon_days, cutoff))
     conn.commit()
-    print(f"[OutcomeResolver] Expired {len(rows)} stale {horizon_days}D outcomes → NEUTRAL")
+    print(f"[OutcomeResolver] Expired {len(rows)} stale {horizon_days}D outcomes -> NEUTRAL")
     return len(rows)
 
 

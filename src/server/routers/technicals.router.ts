@@ -46,13 +46,19 @@ export const technicalsRouter = router({
 
   getTechnicalSignals: publicProcedure
     .input(z.object({
-      date:     z.string().optional(),
-      minScore: z.number().min(1).max(10).default(1),
-      limit:    z.number().min(1).max(200).default(100),
+      date:             z.string().optional(),
+      minScore:         z.number().min(1).max(10).default(1),
+      minWinProbability:z.number().min(0).max(1).default(0),
+      limit:            z.number().min(1).max(200).default(100),
     }))
     .query(async ({ input }) => {
       const { getTechnicalSignalsForDate } = await import('../technicalSignalsService');
-      const rows = getTechnicalSignalsForDate(input.date, input.minScore, input.limit);
+      const rows = getTechnicalSignalsForDate(
+        input.date,
+        input.minScore,
+        input.minWinProbability,
+        input.limit,
+      );
       return rows.map(r => ({
         ...r,
         signals: (() => { try { return JSON.parse((r.signals_json as string) ?? '[]'); } catch { return []; } })(),

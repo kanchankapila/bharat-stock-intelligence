@@ -298,6 +298,7 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await runPython('fii_dii_fetcher.py', [], 90_000).catch(() => {});
   await runPython('finbert_scorer.py', ['--days', '1'], 180_000).catch(() => {});
 
+  await pythonApi.resolveOutcomes(1).catch(e => console.warn('[API] resolve-outcomes(1):', (e as Error).message));
   await pythonApi.resolveOutcomes(5).catch(e => console.warn('[API] resolve-outcomes(5):', (e as Error).message));
   await pythonApi.resolveOutcomes(15).catch(e => console.warn('[API] resolve-outcomes(15):', (e as Error).message));
 
@@ -1172,12 +1173,18 @@ export async function initQueues(): Promise<boolean> {
     ohlcvBackfillWorker.on('failed', (_, err) => console.error('[QUEUE] ohlcv-backfill failed:', err.message));
 
     // Weekly gap-fill: Saturday 2:00 AM IST = Friday 20:30 UTC
+    // Daily gap-fill: weekdays 4:15 PM IST = 10:45 UTC (after market close, lookback 3 days)
     const ohlcvRep = await ohlcvBackfillQueue.getRepeatableJobs();
     for (const r of ohlcvRep) await ohlcvBackfillQueue.removeRepeatableByKey(r.key);
     await ohlcvBackfillQueue.add('ohlcv-gap-fill-weekly', { mode: 'gap-fill', lookback: 30 }, {
       repeat: { pattern: '30 20 * * 5' },
       jobId: 'ohlcv-gap-fill-weekly',
       removeOnComplete: 2, removeOnFail: 3,
+    });
+    await ohlcvBackfillQueue.add('ohlcv-gap-fill-daily', { mode: 'gap-fill', lookback: 3 }, {
+      repeat: { pattern: '45 10 * * 1-5' },
+      jobId: 'ohlcv-gap-fill-daily',
+      removeOnComplete: 3, removeOnFail: 3,
     });
 
     // Startup check: if stock_ohlcv has fewer than 1000 rows trigger full backfill once

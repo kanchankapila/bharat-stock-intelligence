@@ -75,6 +75,7 @@ const EarningsPage            = React.lazy(() => import('./components/EarningsPa
 const TradeDecisionCockpit    = React.lazy(() => import('./components/TradeDecisionCockpit'));
 const HedgeFundResearch       = React.lazy(() => import('./components/HedgeFundResearch'));
 const SignalIntelligence      = React.lazy(() => import('./components/SignalIntelligence'));
+const SignalReportCard        = React.lazy(() => import('./components/SignalReportCard').then(m => ({ default: m.SignalReportCard })));
 const DLDashboard             = React.lazy(() => import('./components/DLDashboard'));
 const TodaysPicks             = React.lazy(() => import('./components/TodaysPicks').then(m => ({ default: m.TodaysPicks })));
 const ScreenerIntelligencePage = React.lazy(() => import('./components/ScreenerIntelligencePage').then(m => ({ default: m.ScreenerIntelligencePage })));
@@ -3722,6 +3723,7 @@ export default function App() {
             <Route path="/backtest" element={<Backtest stocks={stocks} />} />
             <Route path="/signals" element={<DailySignals onSelectStock={(s) => setDrawerSymbol(s)} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
             <Route path="/signal-intelligence" element={<SignalIntelligence />} />
+            <Route path="/signal-report-card" element={<SignalReportCard />} />
             <Route path="/research" element={
               <div className="flex flex-col">
                 <div className="flex gap-2 px-4 py-2 border-b border-slate-800">
@@ -3853,6 +3855,7 @@ export default function App() {
               <Route path="/backtest" element={<Backtest stocks={stocks} />} />
               <Route path="/signals" element={<DailySignals onSelectStock={(s) => setDrawerSymbol(s)} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
               <Route path="/signal-intelligence" element={<SignalIntelligence />} />
+              <Route path="/signal-report-card" element={<SignalReportCard />} />
               <Route path="/research" element={
                 <div className="flex flex-col">
                   <div className="flex gap-2 px-4 py-2 border-b border-slate-800">

@@ -5,7 +5,7 @@ import {
   Search, History, PieChart, Bookmark, Users, Globe, CheckCircle2,
   Star, LogIn, TrendingUp, ArrowUpRight, ArrowDownRight, Menu,
   ChevronLeft, ChevronRight, Radio, Settings2, Briefcase, Calendar, Sparkles,
-  FlaskConical, Layers, MonitorDot,
+  FlaskConical, Layers, MonitorDot, ChartLine,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { nseStocksData } from '../data/nseStocks';
@@ -50,6 +50,7 @@ const NAV_GROUPS: NavGroup[] = [
       { icon: BarChart2, label: 'Screener Intel',      id: 'screener-intelligence' },
       { icon: Sparkles, label: 'Trade Cockpit',        id: 'trade-cockpit'        },
       { icon: Layers,  label: 'Signal Intel', id: 'signal-intelligence' },
+      { icon: ChartLine, label: 'Signal Report Card', id: 'signal-report-card' },
       { icon: Star,    label: 'Strategy',   id: 'strategy'    },
       { icon: Target,  label: 'Builder',    id: 'strategy-builder' },
       { icon: Activity,label: 'Sentiment',  id: 'sentiment'   },

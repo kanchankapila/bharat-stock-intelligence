@@ -221,4 +221,10 @@ Indices use a separate `indexData` array in `src/server/stockMapping.ts` with `{
 - Symbol mappings live in `src/data/stocklist.ts` (180 stocks) and `src/data/nseStocks.ts` (2000+ stocks).
 - Do not add comments unless the WHY is non-obvious.
 - Do not add error handling for impossible scenarios.
+
+## Recent session notes
+
+- Fixed a tRPC router merge conflict by renaming `agentsRouter.getStrategyPicks` to `agentsRouter.getAgentStrategyPicks` and updating `src/components/AgentStrategistPage.tsx`.
+- Enhanced custom screener filtering in `src/server/routers/screeners.router.ts` to honor `minMktCap`, `sector`, and normalized market cap parsing.
+- Verified the dev server starts successfully on `http://localhost:3000` after freeing a stale `node.exe` process using port 3000.
 - Do not refactor beyond what the task requires.

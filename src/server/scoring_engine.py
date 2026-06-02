@@ -358,14 +358,14 @@ class AlphaQuantScoringEngine:
             )).fetchall()
         screener_updated = {r[0]: r[1] for r in sm_rows}
 
-        # Load latest win_probability per symbol from ML ensemble
+        # Load latest win_probability per symbol from ML-scored technical signal rows
         win_prob_map: Dict[str, float] = {}
         try:
             with self.engine.connect() as conn:
                 wp_rows = conn.execute(text("""
                     SELECT symbol, MAX(win_probability) AS wp
-                    FROM technical_analysis_signals
-                    WHERE created_at >= datetime('now', '-1 day')
+                    FROM technical_signals
+                    WHERE date >= date('now', '-1 day')
                       AND win_probability IS NOT NULL
                     GROUP BY symbol
                 """)).fetchall()

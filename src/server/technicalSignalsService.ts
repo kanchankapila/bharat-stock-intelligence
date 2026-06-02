@@ -1221,6 +1221,7 @@ export async function runTechnicalSignalScan(options: {
 export function getTechnicalSignalsForDate(
   date?: string,
   minScore = 1,
+  minWinProbability = 0,
   limit = 100
 ): Record<string, unknown>[] {
   const d = date ?? new Date().toISOString().slice(0, 10);
@@ -1231,10 +1232,12 @@ export function getTechnicalSignalsForDate(
            ROUND(ts.signal_score * (0.5 + COALESCE(ts.win_probability, 0.5)), 2) AS effective_score
     FROM technical_signals ts
     LEFT JOIN nse_stocks ns ON ns.symbol = ts.symbol
-    WHERE ts.date = ? AND ts.signal_score >= ?
+    WHERE ts.date = ?
+      AND ts.signal_score >= ?
+      AND (ts.win_probability IS NULL OR ts.win_probability >= ?)
     ORDER BY effective_score DESC, ts.signal_score DESC
     LIMIT ?
-  `).all(d, minScore, limit) as Record<string, unknown>[];
+  `).all(d, minScore, minWinProbability, limit) as Record<string, unknown>[];
 }
 
 export function getSignalDates(): string[] {

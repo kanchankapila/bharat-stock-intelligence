@@ -136,15 +136,39 @@ export const agentsRouter = router({
   runFullAgentPipeline: publicProcedure.mutation(async () => {
     const queues = await import('../queues');
     const jobs = [
-      { q: queues.agentDataScientistQueue, name: 'pipeline-ds',    delay: 0 },
-      { q: queues.agentStrategistQueue,    name: 'pipeline-strat', delay: 5 * 60_000 },
-      { q: queues.agentAuditorQueue,       name: 'pipeline-audit', delay: 10 * 60_000 },
-      { q: queues.agentOptimizerQueue,     name: 'pipeline-optim', delay: 15 * 60_000 },
+      { q: queues.agentDataScientistQueue, name: 'pipeline-ds',    delay: 0,  script: 'agents/data_scientist_agent.py', timeout: 10 * 60_000 },
+      { q: queues.agentStrategistQueue,    name: 'pipeline-strat', delay: 5 * 60_000, script: 'agents/strategist_agent.py', timeout: 15 * 60_000 },
+      { q: queues.agentAuditorQueue,       name: 'pipeline-audit', delay: 10 * 60_000, script: 'agents/auditor_agent.py', timeout: 15 * 60_000 },
+      { q: queues.agentOptimizerQueue,     name: 'pipeline-optim', delay: 15 * 60_000, script: 'agents/optimizer_agent.py', timeout: 20 * 60_000 },
     ];
+
     let queued = 0;
-    for (const { q, name, delay } of jobs) {
-      if (q) { await q.add(name, {}, { delay, removeOnComplete: 1 }); queued++; }
+    const directAgents: Array<{ script: string; timeout: number }> = [];
+
+    for (const { q, name, delay, script, timeout } of jobs) {
+      if (q) {
+        await q.add(name, {}, { delay, removeOnComplete: 1 });
+        queued++;
+      } else {
+        directAgents.push({ script, timeout });
+      }
     }
-    return { queued, message: `Enqueued ${queued}/4 agents` };
+
+    if (directAgents.length > 0) {
+      const { runPython } = await import('../pythonRunner');
+      const runAgents = async () => {
+        for (const agent of directAgents) {
+          await runPython(agent.script, [], agent.timeout).catch(console.error);
+        }
+      };
+      void runAgents();
+    }
+
+    return {
+      queued,
+      message: directAgents.length === 0
+        ? `Enqueued ${queued}/4 agents`
+        : `Enqueued ${queued}/4 agents and started ${directAgents.length} agent(s) directly`,
+    };
   }),
 });
