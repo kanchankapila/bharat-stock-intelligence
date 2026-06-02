@@ -60,6 +60,8 @@ const _nseSymbolMap = new Map(nseStocksData.map(s => [s.symbol, s]));
 
 // ─── Lazy-loaded tab/page components (not needed until navigation) ─────────────
 const TrendlyneScreenerPanel = React.lazy(() => import('./components/TrendlyneScreenerPanel'));
+const LiveMarketScreener      = React.lazy(() => import('./components/LiveMarketScreener').then(m => ({ default: m.LiveMarketScreener })));
+const EODMarketScreener       = React.lazy(() => import('./components/EODMarketScreener').then(m => ({ default: m.EODMarketScreener })));
 const NSEStockDiscovery       = React.lazy(() => import('./components/NSEStockDiscovery'));
 const TopRatedStocks          = React.lazy(() => import('./components/TopRatedStocks'));
 const FnOIntelligenceCenter   = React.lazy(() => import('./components/FnOIntelligenceCenter'));
@@ -3708,6 +3710,8 @@ export default function App() {
             } />
             <Route path="/screener" element={<Screener stocks={stocks} onSelectStock={(s) => setDrawerSymbol(s)} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
             <Route path="/trendlyne" element={<TrendlyneScreenerPanel onSelectStock={(s) => setDrawerSymbol(s)} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
+            <Route path="/live-screener" element={<LiveMarketScreener />} />
+            <Route path="/eod-screener" element={<EODMarketScreener />} />
             <Route path="/discover" element={<div className="p-6"><NSEStockDiscovery onSelectStock={(s) => setDrawerSymbol(s)} /></div>} />
             <Route path="/smart-money" element={<SmartMoneyPage onSelectStock={(s) => setDrawerSymbol(s)} />} />
             <Route path="/earnings" element={<EarningsPage onSelectStock={(s) => setDrawerSymbol(s)} />} />
@@ -3825,6 +3829,8 @@ export default function App() {
               } />
               <Route path="/screener" element={<Screener stocks={stocks} onSelectStock={(s) => setDrawerSymbol(s)} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
               <Route path="/trendlyne" element={<TrendlyneScreenerPanel onSelectStock={(s) => setDrawerSymbol(s)} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
+              <Route path="/live-screener" element={<LiveMarketScreener />} />
+              <Route path="/eod-screener" element={<EODMarketScreener />} />
               <Route path="/discover" element={<div className="p-6"><NSEStockDiscovery onSelectStock={(s) => setDrawerSymbol(s)} /></div>} />
               <Route path="/smart-money" element={
                 <SmartMoneyPage onSelectStock={(s) => setDrawerSymbol(s)} />

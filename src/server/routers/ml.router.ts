@@ -142,61 +142,84 @@ export const mlRouter = router({
       const recentBacktests = input?.recentBacktests ?? 10;
 
       const sourceSummary = db.prepare(`
-        SELECT signal_source,
+        SELECT 'TECHNICAL' AS signal_source,
                COUNT(*) AS total_signals,
-               SUM(CASE WHEN status = 'ACTIVE' THEN 1 ELSE 0 END) AS active_signals,
-               SUM(CASE WHEN status = 'COMPLETED' THEN 1 ELSE 0 END) AS completed_signals,
-               AVG(confidence_score) AS avg_confidence_score,
-               AVG(technical_score) AS avg_technical_score,
-               AVG(quant_score) AS avg_quant_score,
-               AVG(entry_price) AS avg_entry_price,
-               AVG(julianday('now') - julianday(signal_generated_at)) AS avg_age_days
-        FROM unified_signals
+               SUM(CASE WHEN date >= date('now', '-7 days') THEN 1 ELSE 0 END) AS active_signals,
+               SUM(CASE WHEN date < date('now', '-7 days') THEN 1 ELSE 0 END) AS completed_signals,
+               AVG(signal_score) AS avg_confidence_score,
+               AVG(rsi) AS avg_technical_score,
+               AVG(adx) AS avg_quant_score,
+               AVG(cmp) AS avg_entry_price,
+               AVG(julianday('now') - julianday(date)) AS avg_age_days
+        FROM technical_signals
+        WHERE date >= date('now', '-30 days')
         GROUP BY signal_source
-        ORDER BY total_signals DESC
+        UNION ALL
+        SELECT 'CONFLUENCE' AS signal_source,
+               COUNT(*) AS total_signals,
+               SUM(CASE WHEN computed_at >= date('now', '-7 days') THEN 1 ELSE 0 END) AS active_signals,
+               SUM(CASE WHEN computed_at < date('now', '-7 days') THEN 1 ELSE 0 END) AS completed_signals,
+               AVG(confluence_score) AS avg_confidence_score,
+               NULL AS avg_technical_score,
+               NULL AS avg_quant_score,
+               NULL AS avg_entry_price,
+               AVG(julianday('now') - julianday(computed_at)) AS avg_age_days
+        FROM confluence_signals
+        WHERE computed_at >= date('now', '-30 days')
+        GROUP BY signal_source
       `).all();
 
       const outcomeSummary = db.prepare(`
-        SELECT us.signal_source,
-               uso.horizon_days,
+        SELECT 'TECHNICAL' AS signal_source,
+               15 AS horizon_days,
                COUNT(*) AS total_outcomes,
-               SUM(CASE WHEN uso.outcome = 'WIN' THEN 1 ELSE 0 END) AS win_count,
-               SUM(CASE WHEN uso.outcome = 'LOSS' THEN 1 ELSE 0 END) AS loss_count,
-               SUM(CASE WHEN uso.outcome = 'NEUTRAL' THEN 1 ELSE 0 END) AS neutral_count,
-               AVG(uso.return_pct) AS avg_return_pct,
-               AVG(uso.intraday_max_return_pct) AS avg_max_return_pct,
-               AVG(uso.intraday_min_return_pct) AS avg_min_return_pct
-        FROM unified_signal_outcomes uso
-        JOIN unified_signals us ON us.id = uso.unified_signal_id
-        WHERE uso.horizon_days = ?
-        GROUP BY us.signal_source, uso.horizon_days
-        ORDER BY us.signal_source, win_count DESC
-      `).all(horizon);
+               SUM(CASE WHEN outcome = 'WIN' THEN 1 ELSE 0 END) AS win_count,
+               SUM(CASE WHEN outcome = 'LOSS' THEN 1 ELSE 0 END) AS loss_count,
+               SUM(CASE WHEN outcome = 'NEUTRAL' THEN 1 ELSE 0 END) AS neutral_count,
+               AVG(return_pct) AS avg_return_pct,
+               AVG(max_return_pct) AS avg_max_return_pct,
+               NULL AS avg_min_return_pct
+        FROM signal_outcomes
+        WHERE outcome IS NOT NULL
+        UNION ALL
+        SELECT 'RECOMMENDATION' AS signal_source,
+               15 AS horizon_days,
+               COUNT(*) AS total_outcomes,
+               SUM(CASE WHEN outcome = 'WIN' THEN 1 ELSE 0 END) AS win_count,
+               SUM(CASE WHEN outcome = 'LOSS' THEN 1 ELSE 0 END) AS loss_count,
+               SUM(CASE WHEN outcome = 'NEUTRAL' THEN 1 ELSE 0 END) AS neutral_count,
+               AVG(actual_return_pct) AS avg_return_pct,
+               NULL AS avg_max_return_pct,
+               NULL AS avg_min_return_pct
+        FROM recommendation_log
+        WHERE outcome IS NOT NULL
+        ORDER BY signal_source, win_count DESC
+      `).all();
 
       const activeSignalGrowth = db.prepare(`
-        SELECT us.id,
-               us.symbol,
-               us.signal_date,
-               us.signal_source,
-               us.signal_type,
-               us.entry_price,
-               us.confidence_score,
-               us.status,
-               us.signal_generated_at,
-               (SELECT close FROM stock_ohlcv WHERE symbol = us.symbol ORDER BY date DESC LIMIT 1) AS latest_price,
+        SELECT ts.id,
+               ts.symbol,
+               ts.date AS signal_date,
+               'TECHNICAL' AS signal_source,
+               'BUY' AS signal_type,
+               ts.cmp AS entry_price,
+               ts.signal_score AS confidence_score,
+               'ACTIVE' AS status,
+               ts.date AS signal_generated_at,
+               (SELECT close FROM stock_ohlcv WHERE symbol = ts.symbol ORDER BY date DESC LIMIT 1) AS latest_price,
                ROUND(
                  COALESCE(
-                   (SELECT return_pct FROM unified_signal_outcomes uso WHERE uso.unified_signal_id = us.id AND uso.horizon_days = ?),
-                   100.0 * ((SELECT close FROM stock_ohlcv WHERE symbol = us.symbol ORDER BY date DESC LIMIT 1) - us.entry_price) / NULLIF(us.entry_price, 0)
+                   100.0 * ((SELECT close FROM stock_ohlcv WHERE symbol = ts.symbol ORDER BY date DESC LIMIT 1) - ts.cmp) / NULLIF(ts.cmp, 0),
+                   0.0
                  ),
                  4
                ) AS growth_pct
-        FROM unified_signals us
-        WHERE us.status IN ('ACTIVE', 'COMPLETED')
-          AND us.entry_price IS NOT NULL
-        ORDER BY us.signal_generated_at DESC
+        FROM technical_signals ts
+        WHERE ts.date >= date('now', '-30 days')
+          AND ts.signal_score >= 5
+        ORDER BY ts.date DESC
         LIMIT ?
-      `).all(horizon, activeLimit);
+      `).all(activeLimit);
 
       const recommendationSummary = db.prepare(`
         SELECT COUNT(*) AS total_recommendations,

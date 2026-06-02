@@ -2350,6 +2350,55 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                   </div>
                 </div>
 
+                {/* Open Interest (OI) Profile Chart */}
+                {slicedStrikes.length > 0 && (
+                  <div className="bg-slate-950/40 border border-slate-800/80 rounded-2xl p-4">
+                    <h4 className="text-[10px] font-black uppercase tracking-wider text-slate-400 mb-4 flex items-center gap-1.5">
+                      <BarChart3 className="w-3.5 h-3.5 text-blue-500" />
+                      Open Interest Profile (Call vs Put)
+                    </h4>
+                    <div className="h-48 w-full">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart
+                          data={slicedStrikes.map((r: any) => ({
+                            strike: r.strike,
+                            callOi: r.c?.open_interest ? r.c.open_interest / 1000 : 0,
+                            putOi: r.p?.open_interest ? r.p.open_interest / 1000 : 0
+                          }))}
+                          margin={{ top: 5, right: 0, left: -20, bottom: 5 }}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" stroke="#ffffff10" vertical={false} />
+                          <XAxis 
+                            dataKey="strike" 
+                            stroke="#ffffff40" 
+                            fontSize={9} 
+                            tickMargin={5}
+                            axisLine={false}
+                            tickLine={false}
+                          />
+                          <YAxis 
+                            stroke="#ffffff40" 
+                            fontSize={9}
+                            tickFormatter={(val) => `${val}k`}
+                            axisLine={false}
+                            tickLine={false}
+                          />
+                          <Tooltip
+                            contentStyle={{ backgroundColor: '#0f172a', borderColor: '#1e293b', borderRadius: '0.75rem', fontSize: '10px' }}
+                            itemStyle={{ fontWeight: 800 }}
+                            formatter={(value: number) => [`${value.toFixed(1)}k Lots`, undefined]}
+                            labelFormatter={(label) => `Strike: ₹${label}`}
+                            cursor={{ fill: '#ffffff05' }}
+                          />
+                          <Legend wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }} iconType="circle" />
+                          <Bar dataKey="callOi" name="Call OI" fill="#f43f5e" radius={[2, 2, 0, 0]} />
+                          <Bar dataKey="putOi" name="Put OI" fill="#10b981" radius={[2, 2, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                )}
+
                 {/* Support & Resistance Intelligence Card */}
                 {(supportStrike !== null || resistanceStrike !== null) && (
                   <div className="bg-slate-950/30 border border-slate-800/60 rounded-2xl p-4 space-y-2">

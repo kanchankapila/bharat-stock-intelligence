@@ -20,6 +20,8 @@ import { IntradayBreakouts } from './IntradayBreakouts';
 import { IndexOverview } from './MarketInsights';
 import { GlobalMarkets } from './GlobalMarkets';
 import { PremarketPanel } from './PremarketPanel';
+import { LiveMarketScreener } from './LiveMarketScreener';
+import { EODMarketScreener } from './EODMarketScreener';
 
 // ─── Fonts injected once ──────────────────────────────────────────────────────
 const FONT_FAMILY_DISPLAY = "'Rajdhani', sans-serif";
@@ -370,6 +372,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
   const [historySymbol, setHistorySymbol] = useState<string | null>(null);
 
   const { data: niftyOhlc } = trpc.getOHLCData.useQuery({ symbol: 'in;NSX', dur: '1M' });
+  const { data: vixData } = trpc.getIndiaVix.useQuery(undefined, { refetchInterval: 30000 });
   const graphData = useMemo(() => {
     const candles: any[] = niftyOhlc?.data ?? [];
     return candles.slice(-30).map((d: any, i: number) => ({
@@ -454,6 +457,23 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
     ? graphData[graphData.length - 1].value >= graphData[0].value
     : true;
   const chartColor = chartTrending ? emerald : rose;
+
+  // Process VIX data
+  const vixResult = (vixData as any)?.resultData;
+  const vixGraphData = useMemo(() => {
+    if (!vixResult?.chart_data) return [];
+    return vixResult.chart_data.split(',').map((v: string, i: number) => ({
+      time: i,
+      value: parseFloat(v),
+    }));
+  }, [vixResult]);
+
+  const vixTrending = (vixResult?.change_per ?? 0) >= 0;
+  // Falling VIX is bullish (emerald), Rising VIX is bearish (rose)
+  const vixColor = !vixTrending ? emerald : rose;
+
+  const vixMin = vixGraphData.length ? Math.min(...vixGraphData.map(d => d.value)) * 0.98 : 'auto';
+  const vixMax = vixGraphData.length ? Math.max(...vixGraphData.map(d => d.value)) * 1.02 : 'auto';
 
   return (
     <div style={{ padding: '12px 16px', background: 'transparent', minHeight: '100vh' }}>
@@ -644,6 +664,65 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
             </div>
           </div>
 
+          {/* VIX chart */}
+          {vixResult && (
+            <div className="glass border border-slate-800/50 border-t-2 shadow-[0_4px_20px_rgba(0,0,0,0.02)]" style={{
+              borderTopColor: vixColor,
+              borderRadius: 10,
+              padding: '14px 16px',
+            }}>
+              <div className="flex items-center justify-between" style={{ marginBottom: 12 }}>
+                <div>
+                  <SectionLabel>INDIA VIX</SectionLabel>
+                  <div style={{ fontFamily: FONT_FAMILY_MONO, fontSize: 22, fontWeight: 700, color: '#0f172a', lineHeight: 1 }}>
+                    {vixResult.last_trade_price?.toFixed(2)}
+                  </div>
+                </div>
+                <div style={{
+                  fontFamily: FONT_FAMILY_MONO, fontSize: 11,
+                  color: vixColor,
+                  display: 'flex', alignItems: 'center', gap: 4,
+                }}>
+                  {vixTrending ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}
+                  {fmtPct(vixResult.change_per)}
+                </div>
+              </div>
+
+              <div style={{ height: 100 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={vixGraphData} margin={{ top: 4, right: 0, bottom: 0, left: 0 }}>
+                    <defs>
+                      <linearGradient id="vixGradDash" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor={vixColor} stopOpacity={0.25} />
+                        <stop offset="95%" stopColor={vixColor} stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="2 4" stroke="rgba(0,0,0,0.04)" vertical={false} />
+                    <XAxis dataKey="time" hide />
+                    <YAxis hide domain={[vixMin, vixMax]} />
+                    <Tooltip
+                      contentStyle={{
+                        background: '#ffffff', border: '1px solid rgba(0,0,0,0.08)',
+                        borderRadius: 8, fontFamily: FONT_FAMILY_MONO, fontSize: 10, color: '#0f172a',
+                      }}
+                      formatter={(v: any) => [v.toFixed(2), 'VIX']}
+                      labelFormatter={() => ''}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="value"
+                      stroke={vixColor}
+                      strokeWidth={2}
+                      fill="url(#vixGradDash)"
+                      dot={false}
+                      activeDot={{ r: 4, fill: vixColor, strokeWidth: 0 }}
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )}
+
           {/* Sector Heatmap */}
           <div className="glass border border-slate-800/50 shadow-[0_4px_20px_rgba(0,0,0,0.02)]" style={{
             borderRadius: 10,
@@ -780,6 +859,16 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
       {/* Pre-Market Intelligence */}
       <div className="mt-6">
         <PremarketPanel onSelectStock={onSelectStock} />
+      </div>
+
+      {/* ── Row 7: Live Market Screener ──────────────────────────────────── */}
+      <div style={{ marginTop: 24, marginBottom: 12 }}>
+        <LiveMarketScreener />
+      </div>
+
+      {/* ── Row 8: EOD Market Screener ───────────────────────────────────── */}
+      <div style={{ marginTop: 24, marginBottom: 12 }}>
+        <EODMarketScreener />
       </div>
 
       {/* ── Modals ───────────────────────────────────────────────────────── */}

@@ -54,6 +54,43 @@ export const fnoRouter = router({
       return fetchIndexFnoAll(input.id as FnoIndexId);
     }),
 
+  getStockFno: publicProcedure
+    .input(z.object({ symbol: z.string(), expiry: z.string().optional() }))
+    .query(async ({ input }) => {
+      const { fetchStockFnoExpiry, fetchStockFnoFutures, fetchStockFnoOptions } = await import('../marketIntelService');
+      const { getStockMapping } = await import('../stockMapping');
+      const mapping = getStockMapping(input.symbol);
+      const scId = mapping?.mcsymbol || input.symbol;
+
+      let targetExpiry = input.expiry;
+      
+      // Auto-resolve nearest expiry if none provided
+      if (!targetExpiry) {
+        const expRes = await fetchStockFnoExpiry(scId);
+        if (expRes?.success === 1 && Array.isArray(expRes?.data) && expRes.data.length > 0) {
+          targetExpiry = expRes.data[0].expDate;
+        }
+      }
+
+      if (!targetExpiry) {
+        return { success: false, error: 'No expiry dates found' };
+      }
+
+      const [futures, optionsCE, optionsPE] = await Promise.all([
+        fetchStockFnoFutures(scId, targetExpiry),
+        fetchStockFnoOptions(scId, 'CE', targetExpiry),
+        fetchStockFnoOptions(scId, 'PE', targetExpiry),
+      ]);
+
+      return {
+        success: true,
+        expiry: targetExpiry,
+        futures,
+        optionsCE,
+        optionsPE
+      };
+    }),
+
   runPcrFetch: publicProcedure
     .input(z.object({ symbols: z.array(z.string()).optional() }))
     .mutation(async ({ input }) => {

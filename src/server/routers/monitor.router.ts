@@ -2,6 +2,7 @@ import { z } from "zod";
 import db from "../db";
 import { router, publicProcedure } from "../trpc";
 import { runPython } from '../pythonRunner';
+import { fetchIndexAdvanceDecline, fetchIndiaVix, fetchLiveMarketScreener, fetchEODMarketScreener } from '../marketIntelService';
 
 export const MONITOR_SCRIPTS = [
   {
@@ -416,6 +417,29 @@ export const monitorRouter = router({
       };
     });
   }),
+
+  getIndexAdvanceDecline: publicProcedure
+    .query(async () => {
+      return fetchIndexAdvanceDecline();
+    }),
+
+
+  getIndiaVix: publicProcedure
+    .query(async () => {
+      return fetchIndiaVix();
+    }),
+
+  getLiveMarketScreener: publicProcedure
+    .input(z.record(z.string(), z.boolean()).optional())
+    .query(async ({ input }) => {
+      return fetchLiveMarketScreener((input as Record<string, boolean>) || {});
+    }),
+
+  getEODMarketScreener: publicProcedure
+    .input(z.record(z.string(), z.boolean()).optional())
+    .query(async ({ input }) => {
+      return fetchEODMarketScreener((input as Record<string, boolean>) || {});
+    }),
 
   triggerScript: publicProcedure
     .input(z.object({ scriptId: z.string() }))

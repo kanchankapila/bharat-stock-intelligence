@@ -11,6 +11,7 @@ import {
   fetchEarningsCalendar,
   fetchEarningsRapidResults,
   fetchEarningsPriceShockers,
+  fetchStockEarningsSummary,
   type FnoIndexId,
 } from "../marketIntelService";
 import { router, publicProcedure } from "../trpc";
@@ -83,12 +84,20 @@ export const miscRouter = router({
     .input(z.object({ date: z.string().optional() }))
     .query(async ({ input }) => fetchEarningsCalendar(input.date)),
 
+  getEarningsPriceShockers: publicProcedure
+    .query(async () => fetchEarningsPriceShockers()),
+
+  getEarningsSummary: publicProcedure
+    .input(z.object({ scId: z.string() }))
+    .query(async ({ input }) => {
+      return fetchWithCache(`earnings_summary_${input.scId}`, async () => {
+        return fetchStockEarningsSummary(input.scId);
+      }, 300000);
+    }),
+
   getEarningsRapidResults: publicProcedure
     .input(z.object({ type: z.enum(['LR', 'BP']).optional().default('BP') }))
     .query(async ({ input }) => fetchEarningsRapidResults(input.type)),
-
-  getEarningsPriceShockers: publicProcedure
-    .query(async () => fetchEarningsPriceShockers()),
 
   getTradeDecisionCockpitData: publicProcedure
     .query(() => {

@@ -28,6 +28,8 @@ export const V2AppShell: React.FC<V2AppShellProps> = ({
     { label: 'Market Map', id: 'market-map', icon: Activity },
     { label: 'Top Rated', id: 'top-rated', icon: Trophy },
     { label: 'Screener', id: 'screener', icon: Filter },
+    { label: 'Live Screener', id: 'live-screener', icon: Filter },
+    { label: 'EOD Screener', id: 'eod-screener', icon: Filter },
     { label: 'F&O Intel', id: 'fno-scanners', icon: Target },
     { label: 'Options Intel', id: 'options', icon: TrendingUp },
     { label: 'Trendlyne', id: 'trendlyne', icon: Zap },

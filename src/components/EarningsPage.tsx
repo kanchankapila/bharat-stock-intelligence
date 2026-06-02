@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { trpc } from '../lib/trpc';
-import { TrendingUp, Calendar, Zap, BarChart2, RefreshCw } from 'lucide-react';
+import { TrendingUp, Calendar, Zap, BarChart2, RefreshCw, Search } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, ReferenceLine
 } from 'recharts';
@@ -23,6 +23,7 @@ const EARNINGS_TABS: { key: EarningsTab; label: string; icon: React.ElementType 
 export const EarningsPage: React.FC<EarningsPageProps> = ({ onSelectStock }) => {
   const [activeTab, setActiveTab] = useState<EarningsTab>('today');
   const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [searchSymbol, setSearchSymbol] = useState<string>('');
 
   const { data, isLoading, refetch } = trpc.getEarnings.useQuery(
     { date: selectedDate },
@@ -37,11 +38,11 @@ export const EarningsPage: React.FC<EarningsPageProps> = ({ onSelectStock }) => 
 
   const d = data as any;
   const dashboard = d?.dashboard?.data;
-  const calendarList: any[] = d?.calendar?.data?.resultCalendar || [];
-  const earningsList: any[] = d?.earningsData?.data?.earningsData || d?.earningsData?.data?.list || [];
-  const rapidBPList: any[] = d?.rapidBP?.data?.list || [];
-  const priceShockerList: any[] = d?.priceShockers?.data?.list || [];
-  const actualEstimateList: any[] = d?.actualEstimate?.data?.list || [];
+  const calendarList: any[] = (d?.calendar?.data?.resultCalendar || []).filter((item: any) => searchSymbol ? (item.symbol || '').toUpperCase().includes(searchSymbol.toUpperCase()) : true);
+  const earningsList: any[] = (d?.earningsData?.data?.earningsData || d?.earningsData?.data?.list || []).filter((item: any) => searchSymbol ? (item.symbol || '').toUpperCase().includes(searchSymbol.toUpperCase()) : true);
+  const rapidBPList: any[] = (d?.rapidBP?.data?.list || []).filter((item: any) => searchSymbol ? (item.symbol || '').toUpperCase().includes(searchSymbol.toUpperCase()) : true);
+  const priceShockerList: any[] = (d?.priceShockers?.data?.list || []).filter((item: any) => searchSymbol ? (item.symbol || '').toUpperCase().includes(searchSymbol.toUpperCase()) : true);
+  const actualEstimateList: any[] = (d?.actualEstimate?.data?.list || []).filter((item: any) => searchSymbol ? (item.symbol || '').toUpperCase().includes(searchSymbol.toUpperCase()) : true);
 
   const beatMissData = rapidBPList.slice(0, 12).map((item: any) => ({
     name: item.companyShortName || item.symbol || (item.companyName || '').slice(0, 8),
@@ -62,6 +63,16 @@ export const EarningsPage: React.FC<EarningsPageProps> = ({ onSelectStock }) => 
           <p className="text-sm text-slate-400 mt-0.5">Q-results, beat/miss analysis and price shockers</p>
         </div>
         <div className="flex items-center gap-2">
+          <div className="relative">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              placeholder="Filter Symbol..."
+              value={searchSymbol}
+              onChange={e => setSearchSymbol(e.target.value)}
+              className="pl-9 pr-3 py-1.5 rounded-lg bg-slate-700/50 border border-slate-600 text-slate-200 text-xs focus:outline-none focus:border-emerald-500 w-32"
+            />
+          </div>
           <input
             type="date"
             value={selectedDate}

@@ -431,3 +431,138 @@ export async function fetchIndexFnoAll(id: FnoIndexId) {
   ]);
   return { id, futures, optionsCE, optionsPE };
 }
+
+export async function fetchStockFnoExpiry(scId: string) {
+  return mcFetchJson(
+    `https://api.moneycontrol.com/mcapi/v1/fno/futures/getExpDts?id=${scId}`
+  );
+}
+
+export async function fetchStockFnoFutures(scId: string, expiry: string) {
+  return mcFetchJson(
+    `https://api.moneycontrol.com/mcapi/v1/fno/futures/getFuturesData?fut=FUTSTK&id=${scId}&expirydate=${expiry}`
+  );
+}
+
+export async function fetchStockFnoOptions(scId: string, optionType: 'CE' | 'PE', expiry: string) {
+  // Leaving strikeprice blank to fetch all or we can use the overview endpoint
+  // Actually, the overview endpoint works for stocks as well!
+  return mcFetchJson(
+    `https://appfeeds.moneycontrol.com/jsonapi/fno/overview&format=json&inst_type=Options&option_type=${optionType}&id=${scId}&ExpiryDate=${expiry}`
+  );
+}
+
+export async function fetchStockEarningsSummary(scId: string) {
+  return mcFetchJson(
+    `https://appfeeds.moneycontrol.com/jsonapi/market/market_action?format=json&type=earnings&sc_id=${scId}`
+  );
+}
+
+export async function fetchIndexAdvanceDecline() {
+  return mcFetchJson(
+    `https://api.moneycontrol.com/mcapi/v1/indices/chart/exchange-advdec?ex=N`
+  );
+}
+
+export async function fetchIndicesList() {
+  return mcFetchJson(
+    `https://api.moneycontrol.com/mcapi/v1/indices/get-indices-list`
+  );
+}
+
+export async function fetchIndiaVix() {
+  const url = `https://webapi.niftytrader.in/webapi/Symbol/other-stock-spot-data?symbol=INDIA+VIX`;
+  const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+  if (!res.ok) throw new Error('Vix fetch error');
+  return res.json();
+}
+
+export async function fetchLiveMarketScreener(filters: Record<string, boolean>) {
+  const defaultPayload = {
+    "todayNR7": false, "yesterdayNR7": false, "todayGapUP": false, "todayGapDown": false, "yesterdayGapUP": false, "yesterdayGapDown": false,
+    "todayStockOpenHigh": false, "todayStockOpenLow": false, "yesterdayStockOpenHigh": false, "yesterdayStockOpenLow": false,
+    "weeklyStockOpenHigh": false, "weeklyStockOpenLow": false, "orb5minHigh": false, "orb5minLow": false, "prevOrb5minLow": false, "prevOrb5minHigh": false,
+    "range20DayUP": false, "range50DayUP": false, "range200DayUP": false, "range52WeekHigh": false, "range20DayDown": false, "range50DayDown": false,
+    "range200DayDown": false, "range52WeekLow": false, "higherHighHigherLow": false, "lowerHighLowerLow": false, "insideDay": false, "outsideDay": false,
+    "range0To100": false, "range100To500": false, "range500To1000": false, "range1000To2000": false, "rangeAbove2000": false, "todayBullishHigh": false,
+    "todayBearishLow": false, "todayNetural": false, "yesterdayBullishHigh": false, "yesterdayBearishLow": false, "yesterdayNetural": false,
+    "todayAbove20SMA": false, "todayBelow20SMA": false, "todayAbove50SMA": false, "todayBelow50SMA": false, "todayAbove200SMA": false, "todayBelow200SMA": false,
+    "yesterdayAbove20SMA": false, "yesterdayBelow20SMA": false, "yesterdayAbove50SMA": false, "yesterdayBelow50SMA": false, "yesterdayAbove200SMA": false, "yesterdayBelow200SMA": false,
+    "todayHighVolumeDay": false, "vwapAbove": false, "vwapBelow": false, "marketCapBelow1000": false, "marketCap5000To20000": false, "marketCapAbove50000": false,
+    "marketCap1000To5000": false, "marketCap20000To50000": false, "stockPEBelow5": false, "stockPE10To20": false, "stockPE50To100": false, "stockPE5To10": false,
+    "stockPE20To50": false, "stockPEAbove100": false, "dividendYield0To1": false, "dividendYield2To5": false, "dividendYield1To2": false, "dividendYieldAbove5": false,
+    "roceBelow5": false, "roce10To20": false, "roce50To70": false, "roce5To10": false, "roce20To50": false, "roce70To100": false, "roeBelow0": false, "roe10To20": false,
+    "roeAbove50": false, "roe0To10": false, "roe20To50": false, "salesGrowthBelow0": false, "salesGrowth5To10": false, "salesGrowth15To20": false, "salesGrowth0To5": false,
+    "salesGrowth10To15": false, "salesGrowthAbove20": false, "piotroskiScore0To2": false, "piotroskiScore3To7": false, "piotroskiScore8To9": false, "nifty50Stocks": false,
+    "fnoStocks": false, "financial": false, "nonFinancial": false, "industry": "", "maxPainAbove": false, "maxPainBelow": false, "watchlistName": "",
+    "aboveCPR": false, "belowCPR": false, "insideCPR": false, "screenerGroupName": ""
+  };
+
+  const payload = { ...defaultPayload, ...filters };
+
+  const url = `https://webapi.niftytrader.in/webapi/Screener/live-market-filter-data`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'accept': 'application/json, text/plain, */*',
+      'authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1laWRlbnRpZmllciI6IjU0MzM4IiwiaHR0cDovL3NjaGVtYXMubWljcm9zb2Z0LmNvbS93cy8yMDA4LzA2L2lkZW50aXR5L2NsYWltcy9yb2xlIjoiMCIsIlNlc3Npb25JZCI6IjQ5NDQiLCJleHAiOjE3ODA2NzUyNTUsImlzcyI6InByb2QtbmlmdHl0cmFkZXIuaW4iLCJhdWQiOiJwcm9kLW5pZnR5dHJhZGVyLmluIn0.VaWV3jFHcpP4y7UOmWzVzVwBjzK1AfHx9Qgj8vZPQGs',
+      'content-type': 'application/json',
+      'platform_type': '1'
+    },
+    body: JSON.stringify(payload)
+  });
+
+  if (!res.ok) throw new Error('Live Market Screener fetch error');
+  return res.json();
+}
+
+export async function fetchEODMarketScreener(filters: Record<string, boolean>) {
+  const defaultPayload = {
+    "_20_day_sma_below": false, "_20_day_sma_above": false, "_50_day_sma_below": false, "_50_day_sma_above": false, "_100_day_sma_below": false, "_100_day_sma_above": false,
+    "_200_day_sma_below": false, "_200_day_sma_above": false, "_5_day_ema_below": false, "_5_day_ema_above": false, "_8_day_ema_below": false, "_8_day_ema_above": false,
+    "_20_day_ema_below": false, "_20_day_ema_above": false, "_26_day_ema_below": false, "_26_day_ema_above": false, "_50_day_ema_below": false, "_50_day_ema_above": false,
+    "_200_day_ema_below": false, "_200_day_ema_above": false, "_5_20_sma_crossover_below": false, "_5_20_sma_crossover_above": false, "_20_50_sma_crossover_below": false,
+    "_20_50_sma_crossover_above": false, "_20_100_sma_crossover_below": false, "_20_100_sma_crossover_above": false, "_50_100_sma_crossover_below": false, "_50_100_sma_crossover_above": false,
+    "_50_200_sma_crossover_below": false, "_50_200_sma_crossover_above": false, "_5_20_ema_crossover_below": false, "_5_20_ema_crossover_above": false, "_8_20_ema_crossover_below": false,
+    "_8_20_ema_crossover_above": false, "_12_26_ema_crossover_below": false, "_12_26_ema_crossover_above": false, "_9_30_ema_crossover_below": false, "_9_30_ema_crossover_above": false,
+    "_20_50_ema_crossover_below": false, "_20_50_ema_crossover_above": false, "_50_200_ema_crossover_below": false, "_50_200_ema_crossover_above": false, "ema5_sma20_cross_below": false,
+    "ema5_sma20_cross_above": false, "ema20_sma50_cross_below": false, "ema20_sma50_cross_above": false, "ema50_sma100_cross_below": false, "ema50_sma100_cross_above": false,
+    "nr4": false, "nr7": false, "_5_days_high_above": false, "_5_days_high_below": false, "_5_days_high_2_above": false, "_5_days_high_2_below": false, "new_5_days_high_above": false,
+    "new_5_days_low_below": false, "_20_days_high_above": false, "_20_days_high_below": false, "_20_days_high_2_above": false, "_20_days_high_2_below": false, "new_20_days_high_above": false,
+    "new_20_days_low_below": false, "_50_days_high_above": false, "_50_days_high_below": false, "_50_days_high_2_above": false, "_50_days_high_2_below": false, "new_50_days_high_above": false,
+    "new_50_days_low_below": false, "_100_days_high_above": false, "_100_days_high_below": false, "_100_days_high_2_above": false, "_100_days_high_2_below": false, "new_100_days_high_above": false,
+    "new_100_days_low_below": false, "_200_days_high_above": false, "_200_days_high_below": false, "_200_days_high_2_above": false, "_200_days_high_2_below": false, "new_200_days_high_above": false,
+    "new_200_days_low_below": false, "cci_100_above": false, "cci_100_below": false, "cci_200_above": false, "cci_200_below": false, "cci_cross_100_above": false, "cci_cross_100_below": false,
+    "cci_cross_neg_100_above": false, "cci_cross_neg_100_below": false, "rsi_cross_30_below": false, "rsi_cross_70_above": false, "rsi_cross_20_below": false, "rsi_cross_80_above": false,
+    "rsi_2_70_above": false, "rsi_2_70_below": false, "macd_cross_below": false, "macd_cross_above": false, "macd_cross_above_zero": false, "macd_cross_below_zero": false, "mfi_above_80": false,
+    "mfi_below_20": false, "mfi_above_90": false, "mfi_below_10": false, "up_adx_between_25_50": false, "strong_up_adx_above_50": false, "down_adx_between_25_50": false, "strong_down_adx_above_50": false,
+    "adx_below_50": false, "supr_buy": false, "supr_sell": false, "upper_bb_below": false, "upper_bb_above": false, "lower_bb_below": false, "lower_bb_above": false, "atr_inc_3": false,
+    "atr_dec_3": false, "atr_inc_5": false, "atr_dec_5": false, "close_gainers": false, "close_losers": false, "close_more_5_gain": false, "close_more_5_down": false, "same_open_high": false,
+    "same_open_low": false, "same_approx_open_high": false, "same_approx_open_low": false, "close_nearday_high": false, "close_nearday_low": false, "close_near_open": false, "higher_high": false,
+    "higher_low": false, "higher_high_higher_low": false, "lower_high": false, "lower_low": false, "lower_high_lower_low": false, "inside_day": false, "outside_day": false, "high_delivery_age": false,
+    "lower_high_delivery_qty": false, "high_delivery_age_qty": false, "high_trade_qty": false, "above_r2": false, "between_r1_r2": false, "above_pivot": false, "below_pivot": false, "between_s2_s1": false,
+    "s2_support": false, "gap_up_opening": false, "gap_up_opening_fill": false, "gap_up_opening_unfill": false, "gap_down_opening": false, "gap_down_opening_fill": false, "gap_down_opening_unfill": false,
+    "watchlist": false, "watchlist_id": 0, "watchlist_name": "", "doji_bullish": false, "doji_bearish": false, "doji_star_bullish": false, "doji_star_bearish": false, "engul_fing_bullish": false,
+    "engul_fing_bearish": false, "harami_bullish": false, "harami_bearish": false, "harami_cross_bullish": false, "harami_cross_bearish": false, "evening_star_bearish": false, "inverted_hammer_bullish": false,
+    "inverted_hammer_bearish": false, "hammer_bullish": false, "hammer_bearish": false, "marubozu_bullish": false, "marubozu_bearish": false, "morning_star_bullish": false, "dark_cloud_cover_bearish": false,
+    "tasuki_gap_bullish": false, "tasuki_gap_bearish": false, "dragon_fly_doji_bullish": false, "dragon_fly_doji_bearish": false, "piercing_line_bullish": false, "piercing_line_bearish": false,
+    "grave_stone_doji_bullish": false, "grave_stone_doji_bearish": false, "three_black_crows_bearish": false, "three_white_soldiers_bullish": false, "screener_group_id": 0, "screener_group_name": "",
+    "screener_group": false, "is_candle": false
+  };
+
+  const payload = { ...defaultPayload, ...filters };
+  const url = `https://webapi.niftytrader.in/webapi/Screener/advance-eod-screener-filter`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'accept': 'application/json, text/plain, */*',
+      'authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1laWRlbnRpZmllciI6IjU0MzM4IiwiaHR0cDovL3NjaGVtYXMubWljcm9zb2Z0LmNvbS93cy8yMDA4LzA2L2lkZW50aXR5L2NsYWltcy9yb2xlIjoiMCIsIlNlc3Npb25JZCI6IjQ5NDQiLCJleHAiOjE3ODA2NzUyNTUsImlzcyI6InByb2QtbmlmdHl0cmFkZXIuaW4iLCJhdWQiOiJwcm9kLW5pZnR5dHJhZGVyLmluIn0.VaWV3jFHcpP4y7UOmWzVzVwBjzK1AfHx9Qgj8vZPQGs',
+      'content-type': 'application/json',
+      'platform_type': '1'
+    },
+    body: JSON.stringify(payload)
+  });
+
+  if (!res.ok) throw new Error('EOD Market Screener fetch error');
+  return res.json();
+}
