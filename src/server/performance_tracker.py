@@ -85,8 +85,9 @@ class PerformanceTracker:
 
     def load_nifty_returns(self) -> pd.Series:
         """Daily Nifty returns indexed by date."""
-        q = f"SELECT date, close FROM stock_ohlcv WHERE symbol IN {NIFTY_SYMBOLS} ORDER BY date ASC"
-        df = pd.read_sql_query(q, self.conn)
+        placeholders = ','.join('?' * len(NIFTY_SYMBOLS))
+        q = f"SELECT date, close FROM stock_ohlcv WHERE symbol IN ({placeholders}) ORDER BY date ASC"
+        df = pd.read_sql_query(q, self.conn, params=list(NIFTY_SYMBOLS))
         if df.empty:
             return pd.Series(dtype=float)
         df['date']  = pd.to_datetime(df['date'])

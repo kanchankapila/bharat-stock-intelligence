@@ -90,7 +90,7 @@ class AlphaQuantScoringEngine:
             tl_screeners['source'] = 'Trendlyne'
             tl_screeners['is_positive'] = None  # let NLP determine; no forced default
             tl_mappings = pd.read_sql(
-                "SELECT screener_id AS scan_id, stock_id, symbol FROM trendlyne_screener_stocks",
+                "SELECT screener_id AS scan_id, stock_id, symbol, last_seen FROM trendlyne_screener_stocks",
                 conn,
             )
 
@@ -102,7 +102,7 @@ class AlphaQuantScoringEngine:
             mc_screeners['source'] = 'MoneyControl'
             mc_screeners['description'] = ""
             mc_mappings = pd.read_sql(
-                "SELECT scan_id, mcsymbol AS stock_id, symbol FROM moneycontrol_screener_stocks",
+                "SELECT scan_id, mcsymbol AS stock_id, symbol, last_seen FROM moneycontrol_screener_stocks",
                 conn,
             )
 
@@ -112,7 +112,7 @@ class AlphaQuantScoringEngine:
             et_screeners['description'] = ""
 
             et_mappings = pd.read_sql(
-                "SELECT screener_id AS scan_id, symbol, stock_name AS stock_id FROM etnow_screener_stocks",
+                "SELECT screener_id AS scan_id, symbol, stock_name AS stock_id, last_seen FROM etnow_screener_stocks",
                 conn,
             )
 
@@ -208,8 +208,108 @@ class AlphaQuantScoringEngine:
             # Persist version so next run skips rebuild
             self._set_stored_nlp_version(conn, NLP_VERSION)
 
+        # Apply CSV bias overrides — CSV is authoritative over NLP inference
+        self._apply_csv_bias_overrides()
+
         # Return full metadata from DB (includes previously-computed rows)
         return self._load_screener_metadata()
+
+    def _apply_csv_bias_overrides(self):
+        """Sync screener_master with curated values from screener_scoring_v2.csv.
+
+        CSV is authoritative for: sentiment, timeframe, category, subcategory,
+        confidence, and tier. NLP inference is a fallback only.
+        """
+        import csv as csv_mod, re
+        csv_path = Path(__file__).parent.parent.parent / 'screener_scoring_v2.csv'
+        if not csv_path.exists():
+            return
+
+        def slugify(s):
+            return re.sub(r'[^a-z0-9]+', '-', s.lower().strip())[:120]
+
+        # CSV investment_horizon → DB inferred_timeframe
+        HORIZON_MAP = {
+            'intraday':   'intraday',
+            'long_term':  'long_term',
+            'swing':      'long_term',
+            'positional': 'long_term',
+        }
+
+        # CSV tier → weight_override (scoring engine multiplier)
+        TIER_WEIGHT = {
+            'S — Elite':   1.5,
+            'A — High':    1.3,
+            'B — Medium':  1.0,
+            'C — Low':     0.7,
+            'D — Marginal': 0.4,
+            'F — Excluded': 0.0,
+        }
+
+        updates = []
+        with open(csv_path, newline='', encoding='utf-8') as f:
+            for row in csv_mod.DictReader(f):
+                name = row.get('screener_name', '').strip()
+                if not name:
+                    continue
+                sid = slugify(name)
+
+                bias      = row.get('signal_bias', '').strip()
+                horizon   = HORIZON_MAP.get(row.get('investment_horizon', '').strip())
+                category  = row.get('category', '').strip()
+                subcategory = row.get('subcategory', '').strip()
+                tier      = row.get('tier', '').strip()
+                try:
+                    confidence = float(row.get('confidence') or 0) or None
+                except ValueError:
+                    confidence = None
+
+                if bias not in ('bullish', 'bearish', 'neutral'):
+                    bias = None
+
+                weight = TIER_WEIGHT.get(tier) if tier else None
+
+                updates.append({
+                    'sid': sid,
+                    'bias': bias,
+                    'horizon': horizon,
+                    'category': category or None,
+                    'subcategory': subcategory or None,
+                    'tier': tier or None,
+                    'confidence': confidence,
+                    'weight': weight,
+                })
+
+        if not updates:
+            return
+
+        with self.engine.begin() as conn:
+            applied = 0
+            for u in updates:
+                fields, params = [], {'sid': u['sid']}
+                if u['bias']:
+                    fields.append('inferred_sentiment=:bias'); params['bias'] = u['bias']
+                if u['horizon']:
+                    fields.append('inferred_timeframe=:horizon'); params['horizon'] = u['horizon']
+                if u['category']:
+                    fields.append('inferred_category=:category'); params['category'] = u['category']
+                if u['subcategory']:
+                    fields.append('subcategory=:subcategory'); params['subcategory'] = u['subcategory']
+                if u['tier']:
+                    fields.append('tier=:tier'); params['tier'] = u['tier']
+                if u['confidence'] is not None:
+                    fields.append('confidence=:confidence'); params['confidence'] = u['confidence']
+                if u['weight'] is not None:
+                    fields.append('weight_override=:weight'); params['weight'] = u['weight']
+                if not fields:
+                    continue
+                result = conn.execute(
+                    text(f"UPDATE screener_master SET {', '.join(fields)} WHERE scan_id=:sid"),
+                    params
+                )
+                applied += result.rowcount
+
+        print(f"[ScoringEngine] CSV sync applied to {applied} screener_master rows.")
 
     def _load_screener_metadata(self) -> Dict[str, Any]:
         with self.engine.connect() as conn:
@@ -450,8 +550,12 @@ class AlphaQuantScoringEngine:
                 cat_weight  = self.CATEGORY_WEIGHTS.get(meta['category'], 0.5)
                 src_weight  = self.SOURCE_WEIGHTS.get(meta['source'], 0.9)
 
-                # Recency decay on screener itself
-                recency = self._recency_weight(screener_updated.get(scan_id) or '')
+                # Recency decay: prefer stock-level last_seen, fall back to screener last_updated
+                stock_last_seen = m.get('last_seen')
+                recency = self._recency_weight(
+                    stock_last_seen if (stock_last_seen and not pd.isna(stock_last_seen))
+                    else (screener_updated.get(scan_id) or '')
+                )
 
                 # Source-category deduplication
                 bucket = self._source_cat_key(meta)
@@ -562,9 +666,6 @@ class AlphaQuantScoringEngine:
     def save_results(self, results: list):
         print(f"Saving {len(results)} ranked stock-timeframe entries...")
         with self.engine.begin() as conn:
-            conn.execute(text("DELETE FROM stock_scores"))
-            conn.execute(text("DELETE FROM stock_factor_breakdown"))
-
             if results:
                 conn.execute(text("""
                     INSERT INTO stock_scores
@@ -573,6 +674,11 @@ class AlphaQuantScoringEngine:
                     VALUES
                         (:symbol, :timeframe, :score, :confidence, :classification, :top_domain,
                          :positive_count, :negative_count, :reasons, :last_updated)
+                    ON CONFLICT(symbol, timeframe) DO UPDATE SET
+                        score=excluded.score, confidence=excluded.confidence,
+                        classification=excluded.classification, top_domain=excluded.top_domain,
+                        positive_count=excluded.positive_count, negative_count=excluded.negative_count,
+                        reasons=excluded.reasons, last_updated=excluded.last_updated
                 """), results)
 
                 breakdowns = []
@@ -597,6 +703,11 @@ class AlphaQuantScoringEngine:
                     VALUES
                         (:symbol, :timeframe, :technical, :fundamental, :momentum,
                          :valuation, :delivery, :news, :last_updated)
+                    ON CONFLICT(symbol, timeframe) DO UPDATE SET
+                        technical=excluded.technical, fundamental=excluded.fundamental,
+                        momentum=excluded.momentum, valuation=excluded.valuation,
+                        delivery=excluded.delivery, news=excluded.news,
+                        last_updated=excluded.last_updated
                 """), breakdowns)
 
         print("Ranking and scoring complete!")
@@ -631,8 +742,13 @@ class AlphaQuantScoringEngine:
                 for row in rows:
                     keys   = ', '.join(row.keys())
                     places = ', '.join(f':{k}' for k in row.keys())
+                    updates = ', '.join(
+                        f'{k}=excluded.{k}' for k in row.keys()
+                        if k not in ('symbol', 'signal_date', 'timeframe', 'source')
+                    )
                     conn.execute(text(f"""
-                        INSERT OR IGNORE INTO recommendation_log ({keys}) VALUES ({places})
+                        INSERT INTO recommendation_log ({keys}) VALUES ({places})
+                        ON CONFLICT(symbol, signal_date, timeframe, source) DO UPDATE SET {updates}
                     """), row)
             print(f"[ScoringEngine] Logged {len(rows)} recommendations to recommendation_log.")
         except Exception as e:

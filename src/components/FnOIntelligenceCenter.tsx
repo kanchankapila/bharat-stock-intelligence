@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { Card } from './MCCommon';
 import FnOHeatmap from './FnOHeatmap';
+import { OptionChainView } from './OptionChainView';
 
 interface FnOScannerProps {
   onSelectStock: (symbol: string) => void;
@@ -292,7 +293,8 @@ const SentimentMeter: React.FC<{ pct: number; bull: number; bear: number; total:
 
 // ── Main Component ──────────────────────────────────────────────────────────
 const FnOIntelligenceCenter: React.FC<FnOScannerProps> = ({ onSelectStock }) => {
-  const [activeTab, setActiveTab] = useState<'options' | 'futures'>('futures');
+  const [masterView, setMasterView] = useState<'overview' | 'chain'>('overview');
+  const [activeTab, setActiveTab] = useState<'futures' | 'options'>('futures');
   const [activeScanner, setActiveScanner] = useState<string>('long-build-up');
   const [instType, setInstType] = useState<'all' | 'index' | 'stock'>('all');
 
@@ -395,31 +397,52 @@ const FnOIntelligenceCenter: React.FC<FnOScannerProps> = ({ onSelectStock }) => 
 
         <div className="flex flex-col gap-3 items-end">
           <div className="flex glass border border-slate-800/50 p-1 rounded-2xl">
-            <button onClick={() => { setActiveTab('futures'); setActiveScanner('long-build-up'); }}
+            <button onClick={() => setMasterView('overview')}
               className={cn("px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
-                activeTab === 'futures' ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20" : "text-slate-400 hover:text-slate-300")}>
-              Futures
+                masterView === 'overview' ? "bg-slate-700 text-white shadow-lg" : "text-slate-400 hover:text-slate-300")}>
+              Market Overview
             </button>
-            <button onClick={() => { setActiveTab('options'); setActiveScanner('oi-gainers-call'); }}
+            <button onClick={() => setMasterView('chain')}
               className={cn("px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
-                activeTab === 'options' ? "bg-indigo-600 text-white shadow-lg shadow-indigo-500/20" : "text-slate-400 hover:text-slate-300")}>
-              Options
+                masterView === 'chain' ? "bg-indigo-600 text-white shadow-lg shadow-indigo-500/20" : "text-slate-400 hover:text-slate-300")}>
+              Option Chain
             </button>
           </div>
-          <div className="flex glass border border-slate-800/50 p-1 rounded-xl gap-0.5">
-            {(['all', 'index', 'stock'] as const).map(t => (
-              <button key={t} onClick={() => setInstType(t)}
-                className={cn("px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all",
-                  instType === t ? "bg-slate-700 text-white" : "text-slate-400 hover:text-slate-400")}>
-                {t === 'all' ? 'All' : t === 'index' ? 'Indices' : 'Stocks'}
-              </button>
-            ))}
-          </div>
+          
+          {masterView === 'overview' && (
+            <div className="flex flex-col gap-3 items-end">
+              <div className="flex glass border border-slate-800/50 p-1 rounded-2xl">
+                <button onClick={() => { setActiveTab('futures'); setActiveScanner('long-build-up'); }}
+                  className={cn("px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
+                    activeTab === 'futures' ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20" : "text-slate-400 hover:text-slate-300")}>
+                  Futures Scanners
+                </button>
+                <button onClick={() => { setActiveTab('options'); setActiveScanner('oi-gainers-call'); }}
+                  className={cn("px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
+                    activeTab === 'options' ? "bg-indigo-600 text-white shadow-lg shadow-indigo-500/20" : "text-slate-400 hover:text-slate-300")}>
+                  Options Scanners
+                </button>
+              </div>
+              <div className="flex glass border border-slate-800/50 p-1 rounded-xl gap-0.5">
+                {(['all', 'index', 'stock'] as const).map(t => (
+                  <button key={t} onClick={() => setInstType(t)}
+                    className={cn("px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all",
+                      instType === t ? "bg-slate-700 text-white" : "text-slate-400 hover:text-slate-400")}>
+                    {t === 'all' ? 'All' : t === 'index' ? 'Indices' : 'Stocks'}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Heatmap */}
-      <FnOHeatmap onSelectStock={onSelectStock} />
+      {masterView === 'chain' ? (
+        <OptionChainView onSymbolSelect={onSelectStock} />
+      ) : (
+        <>
+          {/* Heatmap */}
+          <FnOHeatmap onSelectStock={onSelectStock} />
 
       {/* Market Intelligence Summary Strip */}
       {intel && intel.total > 0 && (
@@ -662,7 +685,9 @@ const FnOIntelligenceCenter: React.FC<FnOScannerProps> = ({ onSelectStock }) => 
           </div>
         </div>
       </div>
-    </div>
+    </>
+  )}
+</div>
   );
 };
 

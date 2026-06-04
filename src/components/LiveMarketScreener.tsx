@@ -38,12 +38,16 @@ const FILTER_GROUPS = [
   }
 ];
 
-export const LiveMarketScreener: React.FC = () => {
+interface Props {
+  onSelectStock?: (symbol: string) => void;
+}
+
+export const LiveMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
   const [filters, setFilters] = useState<Record<string, boolean>>({});
   const [showFilters, setShowFilters] = useState(false);
 
   const { data, isLoading } = trpc.getLiveMarketScreener.useQuery(filters, {
-    refetchInterval: 30000,
+    refetchInterval: 10000,
   });
 
   const toggleFilter = (key: string) => {
@@ -171,8 +175,9 @@ export const LiveMarketScreener: React.FC = () => {
               return (
                 <div 
                   key={stock.symbol_name} 
+                  onClick={() => onSelectStock?.(stock.symbol_name)}
                   className={cn(
-                    "rounded-xl border p-4 transition-all hover:shadow-[0_8px_30px_rgba(0,0,0,0.12)] backdrop-blur-sm",
+                    "rounded-xl border p-4 transition-all hover:shadow-[0_8px_30px_rgba(0,0,0,0.12)] backdrop-blur-sm cursor-pointer hover:scale-[1.01]",
                     borderColor, bgColor
                   )}
                 >

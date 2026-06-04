@@ -46,13 +46,12 @@ export async function syncETnowScreeners(timeframeFilter?: 'intraday' | 'long_te
 
   console.log(`📊 Fetching data for ${screeners.length} ETNow screeners...`);
 
-  const deleteStmt = db.prepare(`
-    DELETE FROM etnow_screener_stocks WHERE screener_id = ?
-  `);
-
-  const insertStmt = db.prepare(`
-    INSERT OR IGNORE INTO etnow_screener_stocks (screener_id, symbol, stock_name)
-    VALUES (?, ?, ?)
+  const upsertStmt = db.prepare(`
+    INSERT INTO etnow_screener_stocks (screener_id, symbol, stock_name, first_seen, last_seen)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(screener_id, symbol) DO UPDATE SET
+      stock_name = excluded.stock_name,
+      last_seen  = excluded.last_seen
   `);
 
   for (const screener of screeners) {
@@ -92,32 +91,48 @@ export async function syncETnowScreeners(timeframeFilter?: 'intraday' | 'long_te
           .map(r => r.symbol).filter(Boolean)
       );
 
-      // Clear existing stocks and re-insert
+      // Upsert stocks, remove exits
+      const today = new Date().toISOString().slice(0, 10);
       const currentSymbols = new Set<string>();
-      db.transaction(() => {
-        deleteStmt.run(screener.screener_id);
+      const incomingSymbols = new Set<string>();
 
+      for (const record of records) {
+        const stockName = record.assetName || record.name || record.companyName || record.stock_name || record.shortName || '';
+        const rawSymbol = record.assetSymbol || record.stkId || record.symbol || record.code || record.nseid || '';
+        if (rawSymbol) {
+          const nseSymbol = rawSymbol.replace(/-NSE$/i, '').replace(/EQ$/i, '').replace(/BE$/i, '').trim();
+          if (nseSymbol) incomingSymbols.add(nseSymbol);
+        }
+      }
+
+      db.transaction(() => {
+        // Remove exits
+        const existing = db.prepare(`SELECT symbol FROM etnow_screener_stocks WHERE screener_id = ?`)
+          .all(screener.screener_id) as Array<{ symbol: string }>;
+        const toRemove = existing.filter(r => !incomingSymbols.has(r.symbol));
+        if (toRemove.length) {
+          const del = db.prepare(`DELETE FROM etnow_screener_stocks WHERE screener_id = ? AND symbol = ?`);
+          for (const r of toRemove) del.run(screener.screener_id, r.symbol);
+        }
+        // Upsert current
         for (const record of records) {
           const stockName = record.assetName || record.name || record.companyName || record.stock_name || record.shortName || '';
           const rawSymbol = record.assetSymbol || record.stkId || record.symbol || record.code || record.nseid || '';
-
           if (rawSymbol) {
-            const nseSymbol = rawSymbol
-              .replace(/-NSE$/i, '')
-              .replace(/EQ$/i, '')
-              .replace(/BE$/i, '')
-              .trim();
-
+            const nseSymbol = rawSymbol.replace(/-NSE$/i, '').replace(/EQ$/i, '').replace(/BE$/i, '').trim();
             if (nseSymbol) {
-              insertStmt.run(screener.screener_id, nseSymbol, stockName);
+              upsertStmt.run(screener.screener_id, nseSymbol, stockName, today, today);
               currentSymbols.add(nseSymbol);
             }
           }
         }
       })();
 
+      // Update screener_master sync time
+      db.prepare(`UPDATE screener_master SET last_updated = ?, stocks_synced_at = ? WHERE scan_id = ?`)
+        .run(today, today, screener.screener_id);
+
       // Diff patch: record new appearances / exits
-      const today = new Date().toISOString().slice(0, 10);
       const entered = Array.from(currentSymbols).filter(s => !prevSymbols.has(s));
       const exited  = Array.from(prevSymbols).filter(s => !currentSymbols.has(s));
 

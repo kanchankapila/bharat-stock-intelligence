@@ -18,26 +18,25 @@ export interface OptionChainData {
 }
 
 export async function fetchFnoSymbols(): Promise<string[]> {
-  // Use a more comprehensive symbol list (Nifty includes most major F&O stocks in its discovery response)
-  const url = 'https://webapi.niftytrader.in/webapi/Symbol/symbol-expiry-all?symbol=nifty&exchange=nse';
+  const url = 'https://webapi.niftytrader.in/webapi/symbol/psymbol-list';
   try {
     const response = await fetch(url, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'application/json',
-        'Referer': 'https://www.niftytrader.in/'
+        'Referer': 'https://www.niftytrader.in/',
+        'authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1laWRlbnRpZmllciI6IjU0MzM4IiwiaHR0cDovL3NjaGVtYXMubWljcm9zb2Z0LmNvbS93cy8yMDA4LzA2L2lkZW50aXR5L2NsYWltcy9yb2xlIjoiMCIsIlNlc3Npb25JZCI6IjQ5NDQiLCJleHAiOjE3ODA2NzUyNTUsImlzcyI6InByb2QtbmlmdHl0cmFkZXIuaW4iLCJhdWQiOiJwcm9kLW5pZnR5dHJhZGVyLmluIn0.VaWV3jFHcpP4y7UOmWzVzVwBjzK1AfHx9Qgj8vZPQGs',
+        'platform_type': '1'
       },
       signal: AbortSignal.timeout(10000)
     });
     if (!response.ok) return [];
     const json = await response.json();
     
-    // NiftyTrader usually returns a list of symbols in resultData
+    // psymbol-list returns data in resultData array
     if (json.result === 1 && Array.isArray(json.resultData)) {
-      const symbols = json.resultData.map((d: any) => d.symbol_name.toUpperCase());
-      // Add common indices just in case
-      const allSymbols = [...symbols, 'NIFTY', 'BANKNIFTY', 'FINNIFTY'];
-      return [...new Set(allSymbols)];
+      const symbols = json.resultData.map((d: any) => String(d.symbol_name).toUpperCase());
+      return Array.from(new Set(symbols));
     }
     return [];
   } catch (error) {

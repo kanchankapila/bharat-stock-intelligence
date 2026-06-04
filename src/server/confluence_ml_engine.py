@@ -62,6 +62,8 @@ FEATURE_COLS = [
     'confluence_score',
 ]
 
+MIN_TRAINING_ROWS = 30
+
 def get_connection():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -70,6 +72,19 @@ def get_connection():
 
 def build_training_data(conn):
     rows = conn.execute("""
+        WITH daily_confluence AS (
+            SELECT *
+            FROM (
+                SELECT cs.*,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY cs.symbol, DATE(cs.computed_at)
+                        ORDER BY cs.computed_at DESC
+                    ) AS row_num
+                FROM confluence_signals cs
+                WHERE cs.confluence_score IS NOT NULL
+            )
+            WHERE row_num = 1
+        )
         SELECT
             cs.symbol,
             cs.bullish_screener_count,
@@ -89,7 +104,7 @@ def build_training_data(conn):
             COALESCE(sf.return_on_equity, 0)     AS return_on_equity,
             COALESCE(sf.piotroski_f_score, 4)    AS piotroski_f_score,
             so.outcome
-        FROM confluence_signals cs
+        FROM daily_confluence cs
         JOIN signal_outcomes so
           ON so.symbol = cs.symbol
           AND DATE(cs.computed_at) = so.signal_date
@@ -100,10 +115,9 @@ def build_training_data(conn):
           AND ts.date = DATE(cs.computed_at)
         LEFT JOIN quant_scores qs ON qs.symbol = cs.symbol
         LEFT JOIN stock_fundamentals sf ON sf.symbol = cs.symbol
-        WHERE cs.confluence_score IS NOT NULL
     """).fetchall()
 
-    if len(rows) < 30:
+    if len(rows) < MIN_TRAINING_ROWS:
         return None, None, len(rows)
 
     X, y = [], []
@@ -158,8 +172,14 @@ def build_model():
 def train(conn):
     X, y, n = build_training_data(conn)
     if X is None:
-        print(f'[ML] Insufficient training data (need >=30 rows with outcomes, have {n}). Skipping.')
-        return
+        print(f'[ML] Insufficient training data (need >={MIN_TRAINING_ROWS} rows with outcomes, have {n}). Skipping.')
+        return False
+
+    class_counts = np.bincount(y, minlength=2)
+    if class_counts.min() < 5:
+        print(f'[ML] Insufficient class balance for 5-fold calibration '
+              f'(need >=5 wins and losses, have {class_counts[1]} wins and {class_counts[0]} losses). Skipping.')
+        return False
 
     print(f'[ML] Training on {n} samples (win rate: {y.mean():.1%})')
     scaler = StandardScaler()
@@ -191,12 +211,15 @@ def train(conn):
         pass  # model_registry may not exist or have different schema
 
     print(f'[ML] Model saved to {MODEL_PATH}')
+    return True
 
 
 def update_probabilities(conn):
     if not os.path.exists(MODEL_PATH) or not os.path.exists(SCALER_PATH):
-        print('[ML] No trained model found. Run with --train first.')
-        return
+        print('[ML] No trained model found. Attempting initial training.')
+        if not train(conn):
+            print('[ML] Probability overlay deferred until enough 7-day outcomes are available.')
+            return
 
     with open(MODEL_PATH, 'rb') as f:
         model = pickle.load(f)

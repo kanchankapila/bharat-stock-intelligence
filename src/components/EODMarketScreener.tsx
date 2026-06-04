@@ -58,7 +58,11 @@ const FILTER_GROUPS = [
   }
 ];
 
-export const EODMarketScreener: React.FC = () => {
+interface Props {
+  onSelectStock?: (symbol: string) => void;
+}
+
+export const EODMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
   const [filters, setFilters] = useState<Record<string, boolean>>({});
   const [showFilters, setShowFilters] = useState(false);
 
@@ -191,8 +195,9 @@ export const EODMarketScreener: React.FC = () => {
               return (
                 <div 
                   key={stock.symbol} 
+                  onClick={() => onSelectStock?.(stock.symbol)}
                   className={cn(
-                    "rounded-xl border p-4 transition-all hover:shadow-[0_8px_30px_rgba(0,0,0,0.12)] backdrop-blur-sm",
+                    "rounded-xl border p-4 transition-all hover:shadow-[0_8px_30px_rgba(0,0,0,0.12)] backdrop-blur-sm cursor-pointer hover:scale-[1.01]",
                     borderColor, bgColor
                   )}
                 >

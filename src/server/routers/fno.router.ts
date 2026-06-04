@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { getFnOSignals } from "../fnoService";
 import { fetchOptionChain, fetchFnoSymbols } from "../optionChainService";
+import { fetchFNOSymbols } from "../marketIntelService";
 import { alphaQuant } from "../alphaQuantClient";
 import { fetchWithCache } from "../cacheService";
 import type { FnoIndexId } from "../marketIntelService";

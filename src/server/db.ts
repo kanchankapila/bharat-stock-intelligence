@@ -11,6 +11,12 @@ db.pragma('cache_size = -65536');     // 64 MB page cache
 db.pragma('mmap_size = 268435456');   // 256 MB memory-mapped I/O
 db.pragma('temp_store = MEMORY');     // temp tables in RAM
 db.pragma('busy_timeout = 5000');     // avoid SQLITE_BUSY under concurrent load
+db.pragma('wal_autocheckpoint = 1000');
+
+// Checkpoint WAL every 30 min to prevent it growing unbounded in memory
+setInterval(() => {
+  try { db.pragma('wal_checkpoint(PASSIVE)'); } catch {}
+}, 30 * 60 * 1000).unref();
 
 db.exec(`CREATE TABLE IF NOT EXISTS _migrations (
   name     TEXT PRIMARY KEY,
@@ -66,6 +72,17 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_nse_industry ON nse_stocks(industry);
 
   -- 3. Historical Data & Scans Cache
+  CREATE TABLE IF NOT EXISTS company_profiles (
+    symbol TEXT PRIMARY KEY,
+    company_name TEXT,
+    description TEXT,
+    high_growth_scope INTEGER DEFAULT 0,
+    in_news_for_growth INTEGER DEFAULT 0,
+    growth_score REAL DEFAULT 0,
+    ai_analysis TEXT,
+    last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
   CREATE TABLE IF NOT EXISTS historical_ohlc (
     symbol TEXT NOT NULL,
     duration TEXT NOT NULL, -- 'D', 'W', 'M', '15m', etc.
@@ -1300,6 +1317,37 @@ runMigration('033_unified_recommendations', `
   );
   CREATE INDEX IF NOT EXISTS idx_ur_date_score ON unified_recommendations(computed_at, unified_score DESC);
   CREATE INDEX IF NOT EXISTS idx_ur_conviction  ON unified_recommendations(computed_at, conviction_level);
+`);
+
+// ── recommendation_log unique constraint (prevent duplicate daily logs) ──────
+runMigration('034a_rec_log_unique', `
+  DELETE FROM recommendation_log
+  WHERE id NOT IN (
+    SELECT MAX(id) FROM recommendation_log
+    GROUP BY symbol, signal_date, timeframe, source
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_rec_log_uniq
+    ON recommendation_log(symbol, signal_date, timeframe, source);
+`);
+
+// ── stock_factor_breakdown unique constraint ──────────────────────────────────
+runMigration('034b_sfb_unique', `
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_sfb_uniq
+    ON stock_factor_breakdown(symbol, timeframe);
+`);
+
+// ── Screener stock freshness tracking ────────────────────────────────────────
+runMigration('034_screener_stock_timestamps', `
+  ALTER TABLE trendlyne_screener_stocks    ADD COLUMN first_seen TEXT;
+  ALTER TABLE trendlyne_screener_stocks    ADD COLUMN last_seen  TEXT;
+  ALTER TABLE moneycontrol_screener_stocks ADD COLUMN first_seen TEXT;
+  ALTER TABLE moneycontrol_screener_stocks ADD COLUMN last_seen  TEXT;
+  ALTER TABLE etnow_screener_stocks        ADD COLUMN first_seen TEXT;
+  ALTER TABLE etnow_screener_stocks        ADD COLUMN last_seen  TEXT;
+  ALTER TABLE screener_master              ADD COLUMN stocks_synced_at TEXT;
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_tl_stock_uniq  ON trendlyne_screener_stocks(screener_id, stock_id);
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_mc_stock_uniq  ON moneycontrol_screener_stocks(scan_id, mcsymbol);
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_et_stock_uniq  ON etnow_screener_stocks(screener_id, symbol);
 `);
 
 // Keep startup diagnostics off stdout so stdio-based clients can parse JSON-RPC.
