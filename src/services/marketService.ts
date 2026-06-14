@@ -42,8 +42,8 @@ export function useMarketData() {
       setIsLoading(false);
       setError(null);
     } else {
-      console.warn('[MARKET DATA] Live data fetch failed, using fallback dummy data');
-      setError('Using cached/dummy data - live fetch unavailable');
+      console.warn('[MARKET DATA] Live data fetch returned no results');
+      setError('Live market data unavailable');
       setIsLoading(false);
     }
   }, [liveStocks, isLoadingLive]);

@@ -1,5 +1,5 @@
 import db from './db';
-import scoringService from './scoringService';
+import { computeTimeframeScores } from './scoringService';
 
 interface BacktestOpts {
   runId?: string;
@@ -31,7 +31,7 @@ export async function runBacktest(opts: BacktestOpts) {
   const slippagePct = opts.slippagePct ?? 0.0015;
   const commissionPct = opts.commissionPct ?? 0.0003;
 
-  const scores = await scoringService.computeTimeframeScores({ runId: opts.runId, screenerId: opts.screenerId, timeframe: timeframe as any, topN });
+  const scores = await computeTimeframeScores({ runId: opts.runId, screenerId: opts.screenerId, timeframe: timeframe as any, topN });
 
   const runName = opts.runName || `bt:${opts.screenerId || opts.runId || 'manual'}:${timeframe}:${new Date().toISOString()}`;
   const tradeLog: any[] = [];
@@ -113,7 +113,7 @@ export async function runBacktest(opts: BacktestOpts) {
     sharpe_ratio: null,
     max_drawdown_pct: null,
     avg_trade_return_pct: Number(avgNetReturn.toFixed(4)),
-    profit_factor,
+    profit_factor: profitFactor,
     monthly_returns_json: JSON.stringify([]),
     equity_curve_json: JSON.stringify(equityCurve),
     trade_log_json: JSON.stringify(tradeLog)

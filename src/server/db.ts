@@ -11,6 +11,12 @@ db.pragma('cache_size = -65536');     // 64 MB page cache
 db.pragma('mmap_size = 268435456');   // 256 MB memory-mapped I/O
 db.pragma('temp_store = MEMORY');     // temp tables in RAM
 db.pragma('busy_timeout = 5000');     // avoid SQLITE_BUSY under concurrent load
+db.pragma('wal_autocheckpoint = 1000');
+
+// Checkpoint WAL every 30 min to prevent it growing unbounded in memory
+setInterval(() => {
+  try { db.pragma('wal_checkpoint(PASSIVE)'); } catch {}
+}, 30 * 60 * 1000).unref();
 
 db.exec(`CREATE TABLE IF NOT EXISTS _migrations (
   name     TEXT PRIMARY KEY,
@@ -66,6 +72,17 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_nse_industry ON nse_stocks(industry);
 
   -- 3. Historical Data & Scans Cache
+  CREATE TABLE IF NOT EXISTS company_profiles (
+    symbol TEXT PRIMARY KEY,
+    company_name TEXT,
+    description TEXT,
+    high_growth_scope INTEGER DEFAULT 0,
+    in_news_for_growth INTEGER DEFAULT 0,
+    growth_score REAL DEFAULT 0,
+    ai_analysis TEXT,
+    last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
   CREATE TABLE IF NOT EXISTS historical_ohlc (
     symbol TEXT NOT NULL,
     duration TEXT NOT NULL, -- 'D', 'W', 'M', '15m', etc.
@@ -1300,6 +1317,173 @@ runMigration('033_unified_recommendations', `
   );
   CREATE INDEX IF NOT EXISTS idx_ur_date_score ON unified_recommendations(computed_at, unified_score DESC);
   CREATE INDEX IF NOT EXISTS idx_ur_conviction  ON unified_recommendations(computed_at, conviction_level);
+`);
+
+// ── recommendation_log unique constraint (prevent duplicate daily logs) ──────
+runMigration('034a_rec_log_unique', `
+  DELETE FROM recommendation_log
+  WHERE id NOT IN (
+    SELECT MAX(id) FROM recommendation_log
+    GROUP BY symbol, signal_date, timeframe, source
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_rec_log_uniq
+    ON recommendation_log(symbol, signal_date, timeframe, source);
+`);
+
+// ── stock_factor_breakdown unique constraint ──────────────────────────────────
+runMigration('034b_sfb_unique', `
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_sfb_uniq
+    ON stock_factor_breakdown(symbol, timeframe);
+`);
+
+// ── Screener stock freshness tracking ────────────────────────────────────────
+runMigration('034_screener_stock_timestamps', `
+  ALTER TABLE trendlyne_screener_stocks    ADD COLUMN first_seen TEXT;
+  ALTER TABLE trendlyne_screener_stocks    ADD COLUMN last_seen  TEXT;
+  ALTER TABLE moneycontrol_screener_stocks ADD COLUMN first_seen TEXT;
+  ALTER TABLE moneycontrol_screener_stocks ADD COLUMN last_seen  TEXT;
+  ALTER TABLE etnow_screener_stocks        ADD COLUMN first_seen TEXT;
+  ALTER TABLE etnow_screener_stocks        ADD COLUMN last_seen  TEXT;
+  ALTER TABLE screener_master              ADD COLUMN stocks_synced_at TEXT;
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_tl_stock_uniq  ON trendlyne_screener_stocks(screener_id, stock_id);
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_mc_stock_uniq  ON moneycontrol_screener_stocks(scan_id, mcsymbol);
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_et_stock_uniq  ON etnow_screener_stocks(screener_id, symbol);
+`);
+
+// ── Timeframe scores (screener-aware ranking for backtest + UI) ───────────────
+runMigration('035_timeframe_scores', `
+  CREATE TABLE IF NOT EXISTS timeframe_scores (
+    symbol                TEXT NOT NULL,
+    timeframe             TEXT NOT NULL,
+    run_id                TEXT,
+    score                 REAL DEFAULT 0,
+    confidence            REAL DEFAULT 0,
+    domains_json          TEXT DEFAULT '{}',
+    reasons_json          TEXT DEFAULT '[]',
+    suggested_holding_days INTEGER DEFAULT 7,
+    updated_at            TEXT,
+    PRIMARY KEY (symbol, timeframe)
+  );
+  CREATE INDEX IF NOT EXISTS idx_ts_score ON timeframe_scores(timeframe, score DESC);
+`);
+
+// ── Technical composite scores (written by technicalIntelligenceService) ─────
+runMigration('036_technical_composite_scores', `
+  CREATE TABLE IF NOT EXISTS technical_composite_scores (
+    symbol                    TEXT PRIMARY KEY,
+    trend_score               REAL DEFAULT 0,
+    momentum_score            REAL DEFAULT 0,
+    oscillator_score          REAL DEFAULT 0,
+    volume_score              REAL DEFAULT 0,
+    trend_strength_score      REAL DEFAULT 0,
+    candlestick_score         REAL DEFAULT 0,
+    support_resistance_score  REAL DEFAULT 0,
+    risk_score                REAL DEFAULT 0,
+    composite_score           REAL DEFAULT 0,
+    bullish_flags             TEXT DEFAULT '[]',
+    bearish_flags             TEXT DEFAULT '[]',
+    ai_insight                TEXT,
+    last_updated              TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_tcs_composite ON technical_composite_scores(composite_score DESC);
+`);
+
+// ── Screener runs (created when a screener snapshot is taken for backtest) ───
+runMigration('037_screener_runs', `
+  CREATE TABLE IF NOT EXISTS screener_runs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id      TEXT NOT NULL UNIQUE,
+    screener_id TEXT NOT NULL,
+    run_ts      TEXT NOT NULL DEFAULT (datetime('now')),
+    records_json TEXT DEFAULT '[]',
+    symbol_count INTEGER DEFAULT 0,
+    triggered_by TEXT DEFAULT 'manual'
+  );
+  CREATE INDEX IF NOT EXISTS idx_sr_screener ON screener_runs(screener_id, run_ts DESC);
+  CREATE INDEX IF NOT EXISTS idx_sr_run_id   ON screener_runs(run_id);
+`);
+
+// ── Agent pipeline output tables ─────────────────────────────────────────────
+runMigration('038_agent_tables', `
+  CREATE TABLE IF NOT EXISTS agent_data_scientist_reports (
+    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_date                TEXT NOT NULL,
+    ohlcv_coverage_pct      REAL DEFAULT 0,
+    stale_symbols_count     INTEGER DEFAULT 0,
+    fundamentals_fresh_count INTEGER DEFAULT 0,
+    model_auc               REAL DEFAULT 0,
+    model_drift_detected    INTEGER DEFAULT 0,
+    signal_resolution_rate  REAL DEFAULT 0,
+    data_quality_score      REAL DEFAULT 0,
+    quality_grade           TEXT DEFAULT 'C',
+    issues_json             TEXT DEFAULT '[]',
+    narrative               TEXT,
+    created_at              TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_ads_run_date ON agent_data_scientist_reports(run_date DESC);
+
+  CREATE TABLE IF NOT EXISTS agent_strategy_picks (
+    id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_date                 TEXT NOT NULL,
+    timeframe                TEXT NOT NULL,
+    symbol                   TEXT NOT NULL,
+    rank                     INTEGER DEFAULT 1,
+    conviction               TEXT DEFAULT 'MEDIUM',
+    entry_zone_low           REAL,
+    entry_zone_high          REAL,
+    stop_loss                REAL,
+    target_1                 REAL,
+    target_2                 REAL,
+    target_3                 REAL,
+    composite_score          REAL DEFAULT 0,
+    quant_rank               INTEGER DEFAULT 0,
+    confluence_score         REAL DEFAULT 0,
+    regime_alignment         TEXT DEFAULT 'NEUTRAL',
+    supporting_signals_json  TEXT DEFAULT '[]',
+    narrative                TEXT,
+    created_at               TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_asp_run_date  ON agent_strategy_picks(run_date DESC);
+  CREATE INDEX IF NOT EXISTS idx_asp_timeframe ON agent_strategy_picks(timeframe, rank);
+
+  CREATE TABLE IF NOT EXISTS agent_audit_reports (
+    id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_date                 TEXT NOT NULL,
+    audit_for_date           TEXT NOT NULL,
+    timeframe                TEXT NOT NULL,
+    total_picks              INTEGER DEFAULT 0,
+    hits                     INTEGER DEFAULT 0,
+    misses                   INTEGER DEFAULT 0,
+    open_positions           INTEGER DEFAULT 0,
+    hit_rate                 REAL DEFAULT 0,
+    avg_return_pct           REAL DEFAULT 0,
+    profit_factor            REAL DEFAULT 0,
+    nifty_return_pct         REAL DEFAULT 0,
+    alpha_pct                REAL DEFAULT 0,
+    best_pick                TEXT,
+    worst_pick               TEXT,
+    signal_attribution_json  TEXT DEFAULT '{}',
+    narrative                TEXT,
+    created_at               TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_aar_run_date  ON agent_audit_reports(run_date DESC);
+  CREATE INDEX IF NOT EXISTS idx_aar_timeframe ON agent_audit_reports(timeframe);
+
+  CREATE TABLE IF NOT EXISTS agent_optimizer_reports (
+    id                             INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_date                       TEXT NOT NULL,
+    trigger                        TEXT DEFAULT 'scheduled',
+    baseline_win_rate              REAL DEFAULT 0,
+    new_win_rate                   REAL DEFAULT 0,
+    improvement_pct                REAL DEFAULT 0,
+    weights_changed                INTEGER DEFAULT 0,
+    full_optimizer_triggered       INTEGER DEFAULT 0,
+    changes_json                   TEXT DEFAULT '[]',
+    underperforming_segments_json  TEXT DEFAULT '[]',
+    narrative                      TEXT,
+    created_at                     TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_aor_run_date ON agent_optimizer_reports(run_date DESC);
 `);
 
 // Keep startup diagnostics off stdout so stdio-based clients can parse JSON-RPC.

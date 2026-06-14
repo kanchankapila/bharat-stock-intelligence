@@ -309,6 +309,116 @@ def expire_stale_pending(conn: sqlite3.Connection, horizon_days: int, dry_run: b
     return len(rows)
 
 
+def resolve_recommendation_log(
+    conn: sqlite3.Connection,
+    horizon_days: int = 15,
+    dry_run: bool = False,
+) -> dict[str, int]:
+    """Resolve recommendation_log.outcome by checking OHLCV data after the signal horizon."""
+    today = datetime.date.today()
+    cutoff = (today - datetime.timedelta(days=horizon_days)).isoformat()
+
+    pending = conn.execute("""
+        SELECT id, symbol, signal_date, entry_price, stop_loss,
+               COALESCE(horizon_days, ?) AS rl_horizon
+        FROM recommendation_log
+        WHERE outcome IS NULL
+          AND entry_price IS NOT NULL
+          AND signal_date <= ?
+        ORDER BY signal_date DESC
+        LIMIT 2000
+    """, (horizon_days, cutoff)).fetchall()
+
+    cols = ['id', 'symbol', 'signal_date', 'entry_price', 'stop_loss', 'rl_horizon']
+    rows = [dict(zip(cols, r)) for r in pending]
+
+    if not rows:
+        print("[OutcomeResolver] No pending recommendation_log entries to resolve.")
+        return {'processed': 0, 'resolved': 0}
+
+    print(f"[OutcomeResolver] {len(rows)} recommendation_log entries pending resolution.")
+    resolved = 0
+
+    for row in rows:
+        rec_id = row['id']
+        sym = row['symbol']
+        signal_date = row['signal_date']
+        entry = float(row['entry_price'] or 0)
+        stop_loss = float(row['stop_loss']) if row['stop_loss'] else None
+        h = int(row['rl_horizon'] or horizon_days)
+
+        if not entry:
+            continue
+
+        signal_date_str = signal_date[:10]
+        signal_date_obj = datetime.date.fromisoformat(signal_date_str)
+
+        next_row = conn.execute(
+            "SELECT date FROM stock_ohlcv WHERE symbol = ? AND date > ? ORDER BY date ASC LIMIT 1",
+            (sym, signal_date_str)
+        ).fetchone()
+        next_trading_day = next_row[0] if next_row else (signal_date_obj + datetime.timedelta(days=1)).isoformat()
+        exit_target_date = (signal_date_obj + datetime.timedelta(days=h)).isoformat()
+
+        outcome, exit_price, return_pct = None, None, None
+
+        if stop_loss and stop_loss > 0:
+            sl_hit = conn.execute("""
+                SELECT date, low FROM stock_ohlcv
+                WHERE symbol = ? AND date >= ? AND date <= ? AND low <= ?
+                ORDER BY date ASC LIMIT 1
+            """, (sym, next_trading_day, exit_target_date, stop_loss)).fetchone()
+
+            if sl_hit:
+                exit_price = float(stop_loss)
+                return_pct = (exit_price - entry) / entry * 100
+                outcome = 'LOSS'
+
+        if outcome is None:
+            exit_row = conn.execute("""
+                SELECT date, close FROM stock_ohlcv
+                WHERE symbol = ? AND date >= ?
+                ORDER BY date ASC LIMIT 1
+            """, (sym, exit_target_date)).fetchone()
+
+            if exit_row:
+                exit_price = float(exit_row[1])
+                return_pct = (exit_price - entry) / entry * 100
+                outcome = ('WIN'  if return_pct > WIN_THRESHOLD  else
+                           'LOSS' if return_pct < LOSS_THRESHOLD else
+                           'NEUTRAL')
+            else:
+                outcome = 'PENDING'
+
+        if dry_run:
+            msg = f"  [DRY] REC_LOG {sym} {signal_date} → {outcome}"
+            if return_pct is not None:
+                msg += f" ({return_pct:.2f}%)"
+            print(msg)
+            continue
+
+        conn.execute("""
+            UPDATE recommendation_log
+            SET outcome = ?,
+                actual_exit_price = ?,
+                actual_return_pct = ?,
+                status = CASE WHEN ? != 'PENDING' THEN 'RESOLVED' ELSE status END,
+                resolved_at = CASE WHEN ? != 'PENDING' THEN CURRENT_TIMESTAMP ELSE resolved_at END
+            WHERE id = ?
+        """, (outcome, exit_price,
+              round(return_pct, 4) if return_pct is not None else None,
+              outcome, outcome, rec_id))
+
+        if outcome != 'PENDING':
+            resolved += 1
+
+    if not dry_run:
+        conn.commit()
+
+    print(f"[OutcomeResolver] Resolved {resolved}/{len(rows)} recommendation_log entries.")
+    return {'processed': len(rows), 'resolved': resolved}
+
+
 def run(horizon_days: int = 1, dry_run: bool = False):
     if not os.path.exists(DB_PATH):
         raise FileNotFoundError(f"[OutcomeResolver] DB not found: {DB_PATH}. Run from project root.")
@@ -316,6 +426,7 @@ def run(horizon_days: int = 1, dry_run: bool = False):
     try:
         resolve_outcomes(conn, horizon_days=horizon_days, dry_run=dry_run)
         resolve_unified_outcomes(conn, horizon_days=horizon_days, dry_run=dry_run)
+        resolve_recommendation_log(conn, horizon_days=horizon_days, dry_run=dry_run)
         expire_stale_pending(conn, horizon_days=horizon_days, dry_run=dry_run)
     finally:
         conn.close()

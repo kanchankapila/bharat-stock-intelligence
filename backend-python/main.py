@@ -3,6 +3,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import sys
 import os
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+
+_executor = ThreadPoolExecutor(max_workers=4)
+
+async def run_in_thread(fn, *args, **kwargs):
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(_executor, lambda: fn(*args, **kwargs))
 
 _here = os.path.dirname(os.path.abspath(__file__))
 # Ensure app package is importable regardless of cwd
@@ -98,9 +106,9 @@ logger = logging.getLogger("PythonAPI")
 async def score_pending():
     """Triggers ML Ensemble Scoring"""
     try:
-        logger.info("Starting ml_ensemble.score_pending()")
-        ml_ensemble.score_pending()
-        logger.info("Finished ml_ensemble.score_pending()")
+        logger.info("Starting ml_ensemble.run(do_train=False, do_score=True)")
+        await run_in_thread(ml_ensemble.run, do_train=False, do_score=True)
+        logger.info("Finished ml_ensemble.run")
         return {"status": "success"}
     except Exception as e:
         logger.error(f"Error in score_pending: {e}")
@@ -111,7 +119,7 @@ async def train_dl():
     """Triggers DL Trainer"""
     try:
         logger.info("Starting dl_engine.train_lstm()")
-        dl_engine.train_lstm(version=1)
+        await run_in_thread(dl_engine.train_lstm, version=1)
         logger.info("Finished dl_engine.train_lstm()")
         return {"status": "success"}
     except Exception as e:
@@ -123,7 +131,7 @@ async def resolve_outcomes(horizon: int):
     """Triggers Outcome Resolver for a specific horizon"""
     try:
         logger.info(f"Starting outcome_resolver (horizon={horizon})")
-        outcome_resolver.run(horizon_days=horizon)
+        await run_in_thread(outcome_resolver.run, horizon_days=horizon)
         logger.info("Finished outcome_resolver")
         return {"status": "success"}
     except Exception as e:
@@ -135,7 +143,7 @@ async def infer_dl():
     """Triggers DL Inference"""
     try:
         logger.info("Starting dl_engine.run_inference()")
-        dl_engine.run_inference()
+        await run_in_thread(dl_engine.run_inference)
         logger.info("Finished dl_engine.run_inference()")
         return {"status": "success"}
     except Exception as e:

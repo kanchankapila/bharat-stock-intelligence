@@ -167,7 +167,7 @@ export const mlRouter = router({
         FROM confluence_signals
         WHERE computed_at >= date('now', '-30 days')
         GROUP BY signal_source
-      `).all();
+      `).all() as any[];
 
       const outcomeSummary = db.prepare(`
         SELECT 'TECHNICAL' AS signal_source,
@@ -194,7 +194,7 @@ export const mlRouter = router({
         FROM recommendation_log
         WHERE outcome IS NOT NULL
         ORDER BY signal_source, win_count DESC
-      `).all();
+      `).all() as any[];
 
       const activeSignalGrowth = db.prepare(`
         SELECT ts.id,
@@ -219,7 +219,7 @@ export const mlRouter = router({
           AND ts.signal_score >= 5
         ORDER BY ts.date DESC
         LIMIT ?
-      `).all(activeLimit);
+      `).all(activeLimit) as any[];
 
       const recommendationSummary = db.prepare(`
         SELECT COUNT(*) AS total_recommendations,
@@ -231,7 +231,7 @@ export const mlRouter = router({
                MIN(actual_return_pct) AS worst_actual_return_pct
         FROM recommendation_log
         WHERE actual_return_pct IS NOT NULL
-      `).get();
+      `).get() as any;
 
       const recommendationSourceBreakdown = db.prepare(`
         SELECT source,
@@ -242,7 +242,7 @@ export const mlRouter = router({
         FROM recommendation_log
         GROUP BY source
         ORDER BY total_recs DESC
-      `).all();
+      `).all() as any[];
 
       const recentBacktestResults = db.prepare(`
         SELECT run_name, start_date, end_date, win_rate, total_return_pct,
@@ -250,7 +250,7 @@ export const mlRouter = router({
         FROM backtesting_runs
         ORDER BY run_at DESC
         LIMIT ?
-      `).all(recentBacktests);
+      `).all(recentBacktests) as any[];
 
       const strategyPerformance = db.prepare(`
         SELECT strategy_name, segment, segment_value, win_rate, avg_return_pct,
@@ -260,7 +260,7 @@ export const mlRouter = router({
         WHERE segment = 'signal_type' AND horizon_days = ?
         ORDER BY win_rate DESC
         LIMIT 20
-      `).all(horizon);
+      `).all(horizon) as any[];
 
       return {
         sourceSummary,

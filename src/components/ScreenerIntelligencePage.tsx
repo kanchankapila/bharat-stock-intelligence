@@ -263,7 +263,7 @@ export function ScreenerIntelligencePage() {
   const sorted = sortAsc ? [...rows].reverse() : rows;
   const selectedTimeframe = horizonToTimeframe(horizon);
 
-  const { mutate: computeScores, isPending: scoringInProgress } = trpc.screeners.computeTimeframeScores.useMutation();
+  const { mutate: computeScores, isPending: scoringInProgress } = trpc.computeTimeframeScores.useMutation();
 
   // Unique categories in current results for filter pill
   const cats = categoryStats as any[] ?? [];

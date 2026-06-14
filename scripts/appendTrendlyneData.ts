@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
-const transcriptPath = 'C:\\Users\\amit_\\.gemini\\antigravity-ide\\brain\\5d736071-2c2b-456d-925c-57883f22debf\\.system_generated\\logs\\transcript.jsonl';
+const transcriptPath = 'C:\\Users\\amitk\\.gemini\\antigravity-ide\\brain\\5d736071-2c2b-456d-925c-57883f22debf\\.system_generated\\logs\\transcript.jsonl';
 const stocklistPath = path.resolve(import.meta.dirname, '../src/data/stocklist.ts');
 
 async function run() {

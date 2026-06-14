@@ -1,6 +1,5 @@
 import db from './db';
 import { fetchTrendlyneAdvTechnicalAnalysis } from './trendlyneService';
-import { generateTextResponse } from '../services/geminiService'; 
 
 export interface TechnicalCompositeScore {
   symbol: string;
@@ -248,24 +247,13 @@ async function generateTechnicalInsight(symbol: string, scores: any, bullishFlag
       Overall Probability: [X]%
     `;
 
-    // Wait, geminiService might not be imported correctly. I'll use ollamaManager if it's the primary one, or geminiService.
-    // Let's check what aiService exports later. I will use a simple placeholder for now or dynamic import.
-    
-    // We will use generateGeminiResponse if available, otherwise just format a string.
-    const { generateGeminiResponse } = await import('./geminiService').catch(() => ({ generateGeminiResponse: null }));
-    if (generateGeminiResponse) {
-      const response = await generateGeminiResponse(prompt, "You are a professional financial technical analyst.");
-      return response || "Insight generation failed.";
-    } else {
-      // Fallback
-      return `Why This Stock Is Recommended
+    return `Why This Stock Is Recommended
 1. Technical Score is ${scores.composite.toFixed(1)}/100
 2. ${bullishFlags.length} Bullish flags detected, including ${bullishFlags[0] || 'none'}.
 3. ${bearishFlags.length} Bearish flags detected.
 4. RSI is ${params.rsi?.value} and ADX is ${params.adx?.value}.
 
 Overall Probability: ${Math.min(100, Math.max(0, scores.composite)).toFixed(0)}%`;
-    }
   } catch (err) {
     console.error('Error generating AI insight:', err);
     return 'Could not generate technical insight.';

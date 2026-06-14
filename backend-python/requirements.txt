@@ -21,3 +21,4 @@ tradingview-ta==3.3.0
 tradingview-screener==3.2.0
 curl_cffi==0.15.0
 matplotlib==3.10.9
+hmmlearn==0.3.3

@@ -1,4 +1,6 @@
 import { z } from "zod";
+import * as fs from "fs";
+import * as path from "path";
 import db from "../db";
 import { router, publicProcedure } from "../trpc";
 import { runPython } from '../pythonRunner';
@@ -204,6 +206,17 @@ export const MONITOR_SCRIPTS = [
     queueName: 'screener-performance',
     staleLimitHours: 26,
   },
+  {
+    id: 'company-profiles-sync',
+    label: 'Company Profile & AI Sync',
+    category: 'Data',
+    critical: false,
+    description: 'Fetches Trendlyne company descriptions and scores high-growth potential via Ollama AI.',
+    schedule: 'Weekly Sunday',
+    pyScript: null,
+    queueName: 'company-profiles-sync',
+    staleLimitHours: 200,
+  },
 ] as const;
 
 type ScriptId = typeof MONITOR_SCRIPTS[number]['id'];
@@ -246,8 +259,6 @@ function getLastRunAt(scriptId: ScriptId): string | null {
         row = db.prepare("SELECT MAX(computed_at) as t FROM market_regimes").get();
         break;
       case 'feature-engineering': {
-        const fs = require('fs');
-        const path = require('path');
         const dir = path.join(process.cwd(), 'feature_store');
         if (fs.existsSync(dir)) {
             const files = fs.readdirSync(dir);
@@ -275,6 +286,9 @@ function getLastRunAt(scriptId: ScriptId): string | null {
         break;
       case 'screener-performance':
         row = db.prepare("SELECT MAX(last_computed) as t FROM screener_performance_v2").get();
+        break;
+      case 'company-profiles-sync':
+        row = db.prepare("SELECT MAX(last_updated) as t FROM company_profiles").get();
         break;
       default:
         return null;
@@ -329,8 +343,6 @@ function getScriptStats(scriptId: ScriptId): Record<string, number | string | nu
         return r ? { days: total, latest: r.regime } : { days: 0 };
       }
       case 'feature-engineering': {
-        const fs = require('fs');
-        const path = require('path');
         const dir = path.join(process.cwd(), 'feature_store');
         let symbols = 0;
         let rows = 0;
@@ -371,6 +383,11 @@ function getScriptStats(scriptId: ScriptId): Record<string, number | string | nu
         const tierStr = tiers.map((t: any) => `${t.tier}:${t.n}`).join(', ');
         return { screeners: total, tiers: tierStr };
       }
+      case 'company-profiles-sync':
+        return {
+          profiles: (db.prepare("SELECT COUNT(*) as n FROM company_profiles").get() as any)?.n ?? 0,
+          aiAnalyzed: (db.prepare("SELECT COUNT(*) as n FROM company_profiles WHERE ai_analysis IS NOT NULL AND ai_analysis != ''").get() as any)?.n ?? 0,
+        };
       default:
         return {};
     }
@@ -486,6 +503,7 @@ export const monitorRouter = router({
             'ml-daily-ops':      queueModule.mlDailyOpsQueue,
             'ml-weekly-retrain': queueModule.mlWeeklyRetrainQueue,
             'ohlcv-backfill':    queueModule.ohlcvBackfillQueue,
+            'company-profiles-sync': queueModule.companyProfilesSyncQueue,
           };
           const q = queueMap[script.queueName!];
           if (q) {

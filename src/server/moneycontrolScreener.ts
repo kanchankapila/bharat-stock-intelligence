@@ -215,27 +215,44 @@ export async function syncMoneyControlScreeners(timeframeFilter?: 'intraday' | '
           .map(r => r.symbol).filter(Boolean)
       );
 
-      db.prepare('DELETE FROM moneycontrol_screener_stocks WHERE scan_id = ?').run(config.scanId);
-
-      const insertStock = db.prepare(`
-        INSERT INTO moneycontrol_screener_stocks (scan_id, mcsymbol, stock_name, symbol)
-        VALUES (?, ?, ?, ?)
+      const upsertStock = db.prepare(`
+        INSERT INTO moneycontrol_screener_stocks (scan_id, mcsymbol, stock_name, symbol, first_seen, last_seen)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(scan_id, mcsymbol) DO UPDATE SET
+          stock_name = excluded.stock_name,
+          symbol     = excluded.symbol,
+          last_seen  = excluded.last_seen
       `);
       const currentSymbols = new Set<string>();
+      const today = new Date().toISOString().slice(0, 10);
+      const incomingMcSymbols = new Set<string>();
 
       for (const stock of stocks) {
         const mcsymbol = stock.stkId || stock.sc_id;
         const stkname = stock.stkname || stock.stock_name || stock.shortName;
         if (mcsymbol) {
           const nseSymbol = getSymbolFromMcsymbol(mcsymbol);
-          insertStock.run(config.scanId, mcsymbol, stkname, nseSymbol);
+          upsertStock.run(config.scanId, mcsymbol, stkname, nseSymbol, today, today);
+          incomingMcSymbols.add(mcsymbol);
           if (nseSymbol) currentSymbols.add(nseSymbol);
           if (stkname) mappingsToUpdate.set(stkname.toUpperCase().trim(), mcsymbol);
         }
       }
 
+      // Remove stocks no longer in screener
+      const existingRows = db.prepare(`SELECT mcsymbol FROM moneycontrol_screener_stocks WHERE scan_id = ?`)
+        .all(config.scanId) as Array<{ mcsymbol: string }>;
+      const toDelete = existingRows.filter(r => !incomingMcSymbols.has(r.mcsymbol));
+      if (toDelete.length) {
+        const del = db.prepare(`DELETE FROM moneycontrol_screener_stocks WHERE scan_id = ? AND mcsymbol = ?`);
+        db.transaction(() => { for (const r of toDelete) del.run(config.scanId, r.mcsymbol); })();
+      }
+
+      // Update screener_master sync time
+      db.prepare(`UPDATE screener_master SET last_updated = ?, stocks_synced_at = ? WHERE scan_id = ?`)
+        .run(today, today, config.scanId);
+
       // Diff patch
-      const today = new Date().toISOString().slice(0, 10);
       const entered = Array.from(currentSymbols).filter(s => !prevSymbols.has(s));
       const exited  = Array.from(prevSymbols).filter(s => !currentSymbols.has(s));
 

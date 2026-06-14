@@ -6,9 +6,10 @@ import { computeSignalTypeStats } from '../src/server/technicalSignalsService';
 
 async function forceRun() {
   const pyDir = resolve(process.cwd(), 'src', 'server');
-  const PYTHON = process.platform === 'win32'
-    ? (process.env.PYTHON_PATH || 'C:\\Users\\amit_\\AppData\\Local\\Programs\\Python\\Python311\\python.exe')
-    : (process.env.PYTHON_PATH || 'python3');
+  const venvPython = process.platform === 'win32'
+    ? resolve(process.cwd(), 'backend-python', 'venv', 'Scripts', 'python.exe')
+    : resolve(process.cwd(), 'backend-python', 'venv', 'bin', 'python');
+  const PYTHON = process.env.PYTHON_PATH || venvPython;
 
   const upsert = (key: string, val: string) => {
     try {
@@ -42,7 +43,7 @@ async function forceRun() {
       }
 
       const [pyFile, ...pyArgs] = s.pyScript.split(' ');
-      const result = execSync(`"${PYTHON}" ${pyFile} ${pyArgs.join(' ')}`, { cwd: pyDir, stdio: 'inherit' });
+      execSync(`"${PYTHON}" ${pyFile} ${pyArgs.join(' ')}`, { cwd: pyDir, stdio: 'inherit' });
       upsert(`monitor_${s.id}`, 'success');
       console.log(`[SUCCESS] ${s.label}`);
     } catch (e: any) {

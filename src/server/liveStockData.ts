@@ -36,46 +36,64 @@ let yfCookie: string | null = null;
 let yfCrumb: string | null = null;
 let lastHandshakeTime = 0;
 
+let yfHandshakeInFlight: Promise<{ cookie: string; crumb: string } | null> | null = null;
+
 async function ensureYahooFinanceSession(): Promise<{ cookie: string; crumb: string } | null> {
   const now = Date.now();
-  // Session is cached for 1 hour to prevent excessive calls
   if (yfCookie && yfCrumb && now - lastHandshakeTime < 3600000) {
     return { cookie: yfCookie, crumb: yfCrumb };
   }
+  // Deduplicate concurrent callers — only one handshake at a time
+  if (yfHandshakeInFlight) return yfHandshakeInFlight;
 
-  try {
+  yfHandshakeInFlight = (async () => {
     const headers = {
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
     };
 
-    const resCookie = await fetch("https://fc.yahoo.com", { headers });
-    const setCookieHeaders = resCookie.headers.getSetCookie();
-    const cookies = setCookieHeaders.map(c => c.split(';')[0]).join('; ');
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const resCookie = await fetchWithTimeout("https://fc.yahoo.com", { headers });
+        const setCookieHeaders = resCookie.headers.getSetCookie();
+        const cookies = setCookieHeaders.map((c: string) => c.split(';')[0]).join('; ');
 
-    if (!cookies) {
-      console.warn("[LIVE DATA] Yahoo Finance handshake: No cookies returned by fc.yahoo.com");
-      return null;
+        if (!cookies) {
+          console.warn(`[LIVE DATA] YF handshake attempt ${attempt}: no cookies from fc.yahoo.com`);
+          if (attempt < 3) await new Promise(r => setTimeout(r, 1000 * attempt));
+          continue;
+        }
+
+        const resCrumb = await fetchWithTimeout("https://query2.finance.yahoo.com/v1/test/getcrumb", {
+          headers: { ...headers, Cookie: cookies },
+        });
+        const crumb = (await resCrumb.text()).trim();
+
+        if (resCrumb.status !== 200 || !crumb) {
+          console.warn(`[LIVE DATA] YF handshake attempt ${attempt}: getcrumb status ${resCrumb.status}`);
+          if (attempt < 3) await new Promise(r => setTimeout(r, 1000 * attempt));
+          continue;
+        }
+
+        yfCookie = cookies;
+        yfCrumb = crumb;
+        lastHandshakeTime = Date.now();
+        console.log(`[LIVE DATA] Yahoo Finance handshake OK (attempt ${attempt})`);
+        return { cookie: yfCookie, crumb: yfCrumb };
+      } catch (err: any) {
+        console.error(`[LIVE DATA] YF handshake attempt ${attempt} error:`, err.message);
+        if (attempt < 3) await new Promise(r => setTimeout(r, 1000 * attempt));
+      }
     }
-
-    const crumbHeaders = { ...headers, "Cookie": cookies };
-    const resCrumb = await fetch("https://query2.finance.yahoo.com/v1/test/getcrumb", { headers: crumbHeaders });
-    const crumb = (await resCrumb.text()).trim();
-
-    if (resCrumb.status !== 200 || !crumb) {
-      console.warn(`[LIVE DATA] Yahoo Finance handshake: getcrumb failed with status ${resCrumb.status}`);
-      return null;
+    // Return stale session if we have one rather than null
+    if (yfCookie && yfCrumb) {
+      console.warn("[LIVE DATA] YF handshake failed — reusing stale session");
+      return { cookie: yfCookie, crumb: yfCrumb };
     }
-
-    yfCookie = cookies;
-    yfCrumb = crumb;
-    lastHandshakeTime = now;
-    console.log(`[LIVE DATA] Yahoo Finance handshake successful. Crumb: ${crumb}`);
-    return { cookie: yfCookie, crumb: yfCrumb };
-  } catch (err: any) {
-    console.error("[LIVE DATA] Yahoo Finance session handshake error:", err.message);
     return null;
-  }
+  })().finally(() => { yfHandshakeInFlight = null; });
+
+  return yfHandshakeInFlight;
 }
 
 // ─── Yahoo Finance batch fetch (v7) ──────────────────────────────────────────

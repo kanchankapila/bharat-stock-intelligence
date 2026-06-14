@@ -863,12 +863,12 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
 
       {/* ── Row 7: Live Market Screener ──────────────────────────────────── */}
       <div style={{ marginTop: 24, marginBottom: 12 }}>
-        <LiveMarketScreener />
+        <LiveMarketScreener onSelectStock={onSelectStock} />
       </div>
 
       {/* ── Row 8: EOD Market Screener ───────────────────────────────────── */}
       <div style={{ marginTop: 24, marginBottom: 12 }}>
-        <EODMarketScreener />
+        <EODMarketScreener onSelectStock={onSelectStock} />
       </div>
 
       {/* ── Modals ───────────────────────────────────────────────────────── */}

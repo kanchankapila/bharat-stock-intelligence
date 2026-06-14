@@ -4,8 +4,8 @@ import { trpc } from '../lib/trpc';
 import stockData from '../data/stocklist';
 import {
   TrendingUp, TrendingDown, Activity, Zap, Info, AlertCircle,
-  BarChart3, PieChart, Users, Filter,
-  CheckCircle2, BrainCircuit, Search
+  BarChart3, PieChart, Users, Filter, ArrowUpRight,
+  CheckCircle2, BrainCircuit, Search, Database, History
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import {
@@ -135,6 +135,17 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
   const { data: vwapData } = trpc.getMcVwapChart.useQuery(
     { symbol },
     { enabled: isVisible && (activeTab === 'overview' || activeTab === 'technical'), staleTime: 300000 }
+  );
+
+  const { data: _overviewData } = trpc.getCompanyOverview.useQuery(
+    { symbol },
+    { enabled: isVisible && activeTab === 'overview', staleTime: 300000 }
+  );
+  const overviewData = _overviewData as any;
+
+  const { data: profileAnalysis } = trpc.getCompanyProfileAnalysis.useQuery(
+    { symbol },
+    { enabled: isVisible && activeTab === 'overview', staleTime: 300000 }
   );
 
   const { data: nseStock } = trpc.getNSEStockBySymbol.useQuery(
@@ -513,6 +524,71 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
             })()}
           </div>
 
+          {/* Company Profile (Trendlyne) */}
+          {/* ── AI PROFILE ANALYSIS ── */}
+          {profileAnalysis && (
+            <div className="bg-slate-800/40 rounded-xl p-5 border border-slate-700/50 mb-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-emerald-400 font-semibold flex items-center gap-2">
+                  <BrainCircuit className="w-5 h-5" /> AI Profile Analysis
+                </h3>
+                <div className="flex gap-2">
+                  {(profileAnalysis as any).high_growth_scope === 1 && (
+                    <span className="text-xs bg-emerald-500/20 text-emerald-400 px-2 py-1 rounded-full border border-emerald-500/20 flex items-center gap-1">
+                      <ArrowUpRight className="w-3 h-3" /> High Growth Scope
+                    </span>
+                  )}
+                  {(profileAnalysis as any).in_news_for_growth === 1 && (
+                    <span className="text-xs bg-amber-500/20 text-amber-400 px-2 py-1 rounded-full border border-amber-500/20 flex items-center gap-1">
+                      <Zap className="w-3 h-3" /> In News for Growth
+                    </span>
+                  )}
+                </div>
+              </div>
+              <p className="text-slate-300 text-sm leading-relaxed mb-4">
+                {(profileAnalysis as any).ai_analysis}
+              </p>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-400 uppercase tracking-wide">Growth Score</span>
+                <div className="flex-1 bg-slate-900 rounded-full h-2 overflow-hidden">
+                  <div 
+                    className="bg-gradient-to-r from-emerald-600 to-emerald-400 h-full rounded-full transition-all duration-1000"
+                    style={{ width: `${(profileAnalysis as any).growth_score}%` }}
+                  />
+                </div>
+                <span className="text-xs font-mono text-emerald-400">{(profileAnalysis as any).growth_score}/100</span>
+              </div>
+            </div>
+          )}
+
+          {overviewData?.companyProfileData?.companyDescription && (
+            <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-4">
+              <h4 className="text-[10px] font-black text-emerald-400 uppercase tracking-widest mb-2 flex items-center gap-1.5">
+                <Database className="w-3.5 h-3.5" /> Company Profile
+              </h4>
+              <div className="text-[11px] text-slate-400 font-medium leading-relaxed whitespace-pre-wrap">
+                {overviewData.companyProfileData.companyDescription}
+              </div>
+            </div>
+          )}
+
+          {/* Market FAQs (Trendlyne) */}
+          {overviewData?.faq && overviewData.faq.length > 0 && (
+            <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-4">
+              <h4 className="text-[10px] font-black text-rose-400 uppercase tracking-widest mb-3 flex items-center gap-1.5">
+                <Activity className="w-3.5 h-3.5" /> Market FAQs
+              </h4>
+              <div className="space-y-3">
+                {overviewData.faq.slice(0, 3).map((f, i) => (
+                  <div key={i} className="p-3 bg-slate-900/50 rounded-xl border border-slate-800/50">
+                    <p className="text-[11px] font-black text-slate-200 mb-1">{f.question}</p>
+                    <p className="text-[10px] font-medium text-slate-400 leading-relaxed" dangerouslySetInnerHTML={{ __html: f.answer }} />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Qualitative Drivers: SWOT / Pros-Cons */}
           {(swot || tb?.insights) && (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -693,8 +769,51 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
       {/* ══════════════════════════════════════════════════════════════ */}
       {activeTab === 'financials' && (
         <div className="space-y-6">
-
           {/* High-Density Valuation & Key Metrics */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+            {/* Dividends (Trendlyne) */}
+            {overviewData?.eventsData?.dividendTableData && overviewData.eventsData.dividendTableData.length > 0 && (
+              <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-4">
+                <h4 className="text-[10px] font-black text-amber-400 uppercase tracking-widest mb-3 flex items-center gap-1.5">
+                  <TrendingUp className="w-3.5 h-3.5" /> Recent Dividends
+                </h4>
+                <div className="space-y-2 max-h-[160px] overflow-y-auto pr-1 terminal-scrollbar">
+                  {overviewData.eventsData.dividendTableData.map((d: any, i: number) => (
+                    <div key={i} className="flex justify-between items-center p-2.5 bg-slate-900/50 rounded-xl border border-slate-800/50">
+                      <div>
+                        <p className="text-[10px] font-black text-amber-400 uppercase tracking-widest">{d.dividendType || 'Dividend'}</p>
+                        <p className="text-[11px] font-bold text-slate-200 mt-0.5">₹{d.dividendAmount}</p>
+                      </div>
+                      <span className="text-[9px] font-black text-slate-400 bg-slate-950 border border-slate-800 px-2 py-1 rounded">
+                        {d.exDate}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Board Meetings (Trendlyne) */}
+            {overviewData?.eventsData?.boardMeetingTableData && overviewData.eventsData.boardMeetingTableData.length > 0 && (
+              <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-4">
+                <h4 className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-3 flex items-center gap-1.5">
+                  <History className="w-3.5 h-3.5" /> Board Meetings
+                </h4>
+                <div className="space-y-2 max-h-[160px] overflow-y-auto pr-1 terminal-scrollbar">
+                  {overviewData.eventsData.boardMeetingTableData.map((action: any, i: number) => (
+                    <div key={i} className="flex justify-between items-center p-2.5 bg-slate-900/50 rounded-xl border border-slate-800/50">
+                      <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest leading-tight w-40 truncate">
+                        {action.purpose || 'Meeting'}
+                      </p>
+                      <span className="text-[9px] font-black text-slate-400 bg-slate-950 border border-slate-800 px-2 py-1 rounded">
+                        {action.boardMeetDate}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
           {(fov || tb?.keyMetrics) && (
             <Card title="Valuation & Profitability Matrix" icon={BarChart3}>
               <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2 pt-2">

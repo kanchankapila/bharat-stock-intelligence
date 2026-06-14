@@ -342,7 +342,7 @@ export const screenersRouter = router({
     .input(z.object({ runId: z.string().optional(), screenerId: z.string().optional(), timeframe: z.enum(['intraday','short','medium','long']).optional(), topN: z.number().optional() }))
     .mutation(async ({ input }) => {
       const scoring = await import('../scoringService');
-      const results = await scoring.default.computeTimeframeScores({ runId: input.runId, screenerId: input.screenerId, timeframe: input.timeframe as any, topN: input.topN });
+      const results = await scoring.computeTimeframeScores({ runId: input.runId, screenerId: input.screenerId, timeframe: input.timeframe as any, topN: input.topN });
       return { success: true, results };
     }),
 
@@ -364,5 +364,41 @@ export const screenersRouter = router({
       const bt = await import('../backtestRunner');
       const res = await bt.runBacktest({ runId: input.runId, screenerId: input.screenerId, timeframe: input.timeframe as any, horizonDays: input.horizonDays, topN: input.topN });
       return { success: true, result: res };
+    }),
+
+  createScreenerRun: publicProcedure
+    .input(z.object({
+      screenerId: z.string(),
+      symbols: z.array(z.string()),
+      triggeredBy: z.string().optional(),
+    }))
+    .mutation(({ input }) => {
+      const runId = `run_${input.screenerId}_${Date.now()}`;
+      const records = input.symbols.map(s => ({ symbol: s }));
+      db.prepare(`
+        INSERT INTO screener_runs (run_id, screener_id, run_ts, records_json, symbol_count, triggered_by)
+        VALUES (?, ?, datetime('now'), ?, ?, ?)
+        ON CONFLICT(run_id) DO NOTHING
+      `).run(runId, input.screenerId, JSON.stringify(records), input.symbols.length, input.triggeredBy ?? 'manual');
+      return { runId, symbolCount: input.symbols.length };
+    }),
+
+  getScreenerRuns: publicProcedure
+    .input(z.object({
+      screenerId: z.string().optional(),
+      limit: z.number().min(1).max(100).default(20),
+    }))
+    .query(({ input }) => {
+      if (input.screenerId) {
+        return db.prepare(`
+          SELECT run_id, screener_id, run_ts, symbol_count, triggered_by
+          FROM screener_runs WHERE screener_id = ?
+          ORDER BY run_ts DESC LIMIT ?
+        `).all(input.screenerId, input.limit);
+      }
+      return db.prepare(`
+        SELECT run_id, screener_id, run_ts, symbol_count, triggered_by
+        FROM screener_runs ORDER BY run_ts DESC LIMIT ?
+      `).all(input.limit);
     }),
 });

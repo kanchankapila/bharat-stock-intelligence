@@ -5,8 +5,7 @@ const dbModule = await import('../db');
 const db = dbModule.default;
 const backtestModule = await import('../backtestRunner');
 const { runBacktest } = backtestModule;
-const scoringServiceModule = await import('../scoringService');
-const scoringService = scoringServiceModule.default;
+await import('../scoringService');
 
 beforeEach(() => {
   ['screener_runs', 'timeframe_scores', 'quant_scores', 'technical_composite_scores', 'stock_fundamentals', 'stock_ohlcv', 'backtesting_runs']
@@ -37,7 +36,7 @@ describe('backtestRunner', () => {
     expect(result.summary.avg_trade_return_pct).toBeGreaterThan(0);
     expect(result.summary.total_return_pct).toBeGreaterThan(0);
 
-    const inserted = db.prepare('SELECT * FROM backtesting_runs WHERE id = ?').get(result.insertedId);
+    const inserted = db.prepare('SELECT * FROM backtesting_runs WHERE id = ?').get(result.insertedId) as any;
     expect(inserted).toBeTruthy();
     expect(inserted.total_trades).toBe(1);
     expect(inserted.trades || inserted.total_trades).toBe(1);

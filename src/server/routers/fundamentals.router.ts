@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { fetchMCRatios, fetchETShareholding, fetchETCorporateActions, fetchMFInvestments } from "../marketData";
-import { fetchTrendlyneFundamentals } from "../trendlyneService";
+import { fetchTrendlyneFundamentals, fetchCompanyOverview } from "../trendlyneService";
 import { getMoneycontrolInsights } from "../moneycontrolService";
 import { getStockInsights } from "../insightService";
 import { router, publicProcedure } from "../trpc";
@@ -73,4 +73,20 @@ export const fundamentalsRouter = router({
   getTrendlyneFundamentals: publicProcedure
     .input(z.object({ symbol: z.string() }))
     .query(async ({ input }) => fetchTrendlyneFundamentals(input.symbol)),
+
+  getCompanyOverview: publicProcedure
+    .input(z.object({ symbol: z.string() }))
+    .query(async ({ input }) => fetchCompanyOverview(input.symbol)),
+
+  getCompanyProfileAnalysis: publicProcedure
+    .input(z.object({ symbol: z.string() }))
+    .query(async ({ input }) => {
+      const { default: db } = await import('../db');
+      const row = db.prepare(`
+        SELECT symbol, company_name, description, high_growth_scope, in_news_for_growth, growth_score, ai_analysis, last_updated
+        FROM company_profiles
+        WHERE symbol = ?
+      `).get(input.symbol) as any;
+      return row || null;
+    }),
 });

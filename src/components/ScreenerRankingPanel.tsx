@@ -2,7 +2,7 @@ import React from 'react';
 import { trpc } from '../lib/trpc';
 
 export function ScreenerRankingPanel({ timeframe = 'short', runId, screenerId }: { timeframe?: 'intraday'|'short'|'medium'|'long'; runId?: string; screenerId?: string }) {
-  const q = trpc.screeners.getTimeframeRanking.useQuery({ timeframe, runId, screenerId, limit: 50 });
+  const q = trpc.getTimeframeRanking.useQuery({ timeframe, runId, screenerId, limit: 50 });
 
   if (q.isLoading) return <div className="p-4 text-slate-500 text-sm">Loading rankings…</div>;
   if (q.error) return <div className="p-4 text-rose-400 text-sm">Error: {q.error.message}</div>;

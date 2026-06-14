@@ -6,8 +6,8 @@ const execFileAsync = promisify(execFile);
 
 export const PYTHON = process.env.PYTHON_PATH ?? (
   process.platform === 'win32'
-    ? 'C:\\Users\\amit_\\AppData\\Local\\Programs\\Python\\Python311\\python.exe'
-    : 'python3'
+    ? path.resolve(process.cwd(), 'backend-python', 'venv', 'Scripts', 'python.exe')
+    : path.resolve(process.cwd(), 'backend-python', 'venv', 'bin', 'python')
 );
 
 export const PY_DIR = path.resolve(process.cwd(), 'src', 'server');

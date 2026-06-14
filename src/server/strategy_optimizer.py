@@ -78,18 +78,17 @@ class StrategyOptimizer:
 
     def load_signal_outcomes_with_factors(self, horizon_days: int = 15) -> pd.DataFrame:
         """Load individual outcomes joined with factor breakdown for simulation."""
+        # sfb joined with timeframe='medium' — closest to typical signal horizons.
+        # screener_master join removed: signal_outcomes are from technical_signals,
+        # not screener sources (Trendlyne/MC/ETnow), so source was always NULL.
         q = """
             SELECT so.symbol, so.signal_date, so.horizon_days,
                    so.outcome, so.return_pct, so.signal_score,
                    sfb.technical, sfb.fundamental, sfb.momentum,
-                   sfb.valuation, sfb.delivery, sfb.news,
-                   ss.source
+                   sfb.valuation, sfb.delivery, sfb.news
             FROM signal_outcomes so
             LEFT JOIN stock_factor_breakdown sfb
-                   ON sfb.symbol = so.symbol
-            LEFT JOIN (
-                SELECT symbol, source FROM screener_master
-            ) ss ON ss.symbol = so.symbol
+                   ON sfb.symbol = so.symbol AND sfb.timeframe = 'medium'
             WHERE so.outcome IN ('WIN','LOSS','NEUTRAL')
               AND so.return_pct IS NOT NULL
               AND so.horizon_days = ?
@@ -110,12 +109,11 @@ class StrategyOptimizer:
         # Compute trial composite score for each outcome row
         cat_cols = [c for c in CATEGORIES if c in df.columns]
         weighted_score = sum(df[c] * cat_weights.get(c, 1.0) for c in cat_cols)
+        trial_score = weighted_score.clip(0, 100)
 
-        # Source weight modifier — default 1.0 if source unknown
-        src_modifier = df['source'].map(src_weights).fillna(1.0)
-        trial_score  = (weighted_score * src_modifier).clip(0, 100)
-
-        # Split into quartiles by trial score; evaluate top quartile performance
+        # Guard against degenerate score distributions
+        if trial_score.std() == 0:
+            return -1.0
         threshold = trial_score.quantile(0.75)
         top_signals = df[trial_score >= threshold]
 
@@ -126,10 +124,9 @@ class StrategyOptimizer:
         win_rate      = (top_signals['outcome'] == 'WIN').mean()
         avg_ret       = top_signals['return_pct'].mean()
         std_ret       = top_signals['return_pct'].std()
-        profit_factor = (
-            top_signals.loc[top_signals['return_pct'] > 0, 'return_pct'].sum() /
-            abs(top_signals.loc[top_signals['return_pct'] < 0, 'return_pct'].sum() + 1e-9)
-        )
+        wins_sum      = top_signals.loc[top_signals['return_pct'] > 0, 'return_pct'].sum()
+        loss_sum      = abs(top_signals.loc[top_signals['return_pct'] < 0, 'return_pct'].sum())
+        profit_factor = wins_sum / (loss_sum + 1e-9)
         sharpe = (avg_ret / std_ret) if std_ret > 0 else 0.0
 
         # Normalise profit_factor and Sharpe into [0, 1]

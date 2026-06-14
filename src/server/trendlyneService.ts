@@ -8,6 +8,20 @@ const HEADERS = {
   'Accept': 'application/json'
 };
 
+export interface TrendlyneOverviewData {
+  companyProfileData?: {
+    companyDescription?: string;
+  };
+  eventsData?: {
+    boardMeetingTableData?: any[];
+    dividendTableData?: any[];
+    bonusTableData?: any[];
+    splitTableData?: any[];
+    rightTableData?: any[];
+  };
+  faq?: { question: string; answer: string }[];
+}
+
 export async function fetchTrendlyneFundamentals(symbol: string) {
   const map = getStockMapping(symbol);
   if (!map) return null;
@@ -175,14 +189,43 @@ async function fetchTrendlyneAdvTechnicalAnalysisRaw(symbol: string, timeframe: 
     }
     return data;
   } catch (error) {
-    console.error(`[TRENDLYNE] Error fetching adv technical analysis for ${symbol}:`, error);
-    try {
-      const mockDir = typeof __dirname !== 'undefined' ? __dirname : path.resolve(process.cwd(), 'src/server');
-      const mockDataPath = path.join(mockDir, 'mockTrendlyneTa.json');
-      return JSON.parse(fs.readFileSync(mockDataPath, 'utf8'));
-    } catch (mockError) {
+    console.error(`Error fetching Adv Technical Analysis for ${symbol}:`, error);
+    return [];
+  }
+}
+
+export async function fetchCompanyOverview(symbol: string): Promise<TrendlyneOverviewData | null> {
+  const map = getStockMapping(symbol);
+  let tlid = map?.tlid;
+
+  if (!tlid) {
+    console.log(`[TRENDLYNE] No tlid found for overview: ${symbol}`);
+    return null;
+  }
+
+  console.log(`[TRENDLYNE] Fetching Company Overview for ${symbol} using tlid: ${tlid}`);
+  const url = `https://trendlyne.com/equity/overview-second-part/${tlid}/`;
+
+  try {
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/plain, */*',
+        'Referer': 'https://trendlyne.com/'
+      },
+      signal: AbortSignal.timeout(10000)
+    });
+
+    if (!response.ok) {
+      console.warn(`[TRENDLYNE] Overview fetch failed for ${symbol}: ${response.status}`);
       return null;
     }
+
+    const json = await response.json();
+    return json.body as TrendlyneOverviewData;
+  } catch (error) {
+    console.error(`[TRENDLYNE] Error fetching overview for ${symbol}:`, error);
+    return null;
   }
 }
 

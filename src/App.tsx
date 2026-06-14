@@ -3710,8 +3710,8 @@ export default function App() {
             } />
             <Route path="/screener" element={<Screener stocks={stocks} onSelectStock={(s) => setDrawerSymbol(s)} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
             <Route path="/trendlyne" element={<TrendlyneScreenerPanel onSelectStock={(s) => setDrawerSymbol(s)} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
-            <Route path="/live-screener" element={<LiveMarketScreener />} />
-            <Route path="/eod-screener" element={<EODMarketScreener />} />
+            <Route path="/live-screener" element={<LiveMarketScreener onSelectStock={(s) => setDrawerSymbol(s)} />} />
+            <Route path="/eod-screener" element={<EODMarketScreener onSelectStock={(s) => setDrawerSymbol(s)} />} />
             <Route path="/discover" element={<div className="p-6"><NSEStockDiscovery onSelectStock={(s) => setDrawerSymbol(s)} /></div>} />
             <Route path="/smart-money" element={<SmartMoneyPage onSelectStock={(s) => setDrawerSymbol(s)} />} />
             <Route path="/earnings" element={<EarningsPage onSelectStock={(s) => setDrawerSymbol(s)} />} />
@@ -3829,8 +3829,8 @@ export default function App() {
               } />
               <Route path="/screener" element={<Screener stocks={stocks} onSelectStock={(s) => setDrawerSymbol(s)} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
               <Route path="/trendlyne" element={<TrendlyneScreenerPanel onSelectStock={(s) => setDrawerSymbol(s)} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
-              <Route path="/live-screener" element={<LiveMarketScreener />} />
-              <Route path="/eod-screener" element={<EODMarketScreener />} />
+              <Route path="/live-screener" element={<LiveMarketScreener onSelectStock={(s) => setDrawerSymbol(s)} />} />
+              <Route path="/eod-screener" element={<EODMarketScreener onSelectStock={(s) => setDrawerSymbol(s)} />} />
               <Route path="/discover" element={<div className="p-6"><NSEStockDiscovery onSelectStock={(s) => setDrawerSymbol(s)} /></div>} />
               <Route path="/smart-money" element={
                 <SmartMoneyPage onSelectStock={(s) => setDrawerSymbol(s)} />

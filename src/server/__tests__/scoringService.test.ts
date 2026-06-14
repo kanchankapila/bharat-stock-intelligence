@@ -4,7 +4,7 @@ process.env.DATABASE_URL = ':memory:';
 const dbModule = await import('../db');
 const db = dbModule.default;
 const scoringServiceModule = await import('../scoringService');
-const scoringService = scoringServiceModule.default;
+const { computeTimeframeScores } = scoringServiceModule;
 
 beforeEach(() => {
   ['screener_runs', 'timeframe_scores', 'quant_scores', 'technical_composite_scores', 'stock_fundamentals', 'stock_ohlcv', 'backtesting_runs']
@@ -23,7 +23,7 @@ describe('scoringService', () => {
     db.prepare('INSERT INTO stock_fundamentals (symbol, trailing_pe, return_on_equity, avg_volume_3m, market_cap) VALUES (?, ?, ?, ?, ?)')
       .run('TEST', 18.5, 0.21, 600000, 18000000000);
 
-    const results = await scoringService.computeTimeframeScores({ runId: 'run1', timeframe: 'short', topN: 10 });
+    const results = await computeTimeframeScores({ runId: 'run1', timeframe: 'short', topN: 10 }) as any[];
 
     expect(results).toHaveLength(1);
     expect(results[0].symbol).toBe('TEST');
@@ -31,7 +31,7 @@ describe('scoringService', () => {
     expect(results[0].confidence).toBeGreaterThan(0);
     expect(results[0].domains.momentum).toBeGreaterThanOrEqual(0);
 
-    const row = db.prepare('SELECT * FROM timeframe_scores WHERE run_id = ? AND symbol = ?').get('run1', 'TEST');
+    const row = db.prepare('SELECT * FROM timeframe_scores WHERE run_id = ? AND symbol = ?').get('run1', 'TEST') as any;
     expect(row).toBeTruthy();
     expect(row.timeframe).toBe('short');
     expect(typeof row.domains_json).toBe('string');

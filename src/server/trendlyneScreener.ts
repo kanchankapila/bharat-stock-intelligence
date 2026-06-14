@@ -38,27 +38,21 @@ export function updateScreenerNamesInterval(intervalMs: number): void {
 
 export function isIntradayScreener(name: string, description: string = ''): boolean {
   const text = (name + ' ' + (description || '')).toLowerCase();
+  // Use word-boundary patterns for 'min' to avoid matching 'upcoming', 'performing' etc.
+  const hasTimedMin = /\b\d+[\s-]min\b/.test(text);
   return (
+    hasTimedMin ||
     text.includes('intraday') ||
     text.includes('15m') ||
+    text.includes('30m') ||
     text.includes('5m') ||
     text.includes('15-min') ||
+    text.includes('30-min') ||
     text.includes('5-min') ||
-    text.includes('hour') ||
     text.includes('hourly') ||
-    text.includes('1h') ||
     text.includes('day trade') ||
-    text.includes('min') ||
-    text.includes('circuit') ||
     text.includes('btst') ||
-    text.includes('stbt') ||
-    text.includes('breakout') ||
-    text.includes('breakdown') ||
-    text.includes('momentum') ||
-    text.includes('squeeze') ||
-    text.includes('rsi power') ||
-    text.includes('smart breakout') ||
-    text.includes('smart breakdown')
+    text.includes('stbt')
   );
 }
 
@@ -148,10 +142,12 @@ export function saveScreenerStocksToDB(
   stocks: Array<{ stockId: string; name: string }>
 ): void {
   try {
-    const deleteStmt = db.prepare(`DELETE FROM trendlyne_screener_stocks WHERE screener_id = ?`);
-    const insertStmt = db.prepare(`
-      INSERT INTO trendlyne_screener_stocks (screener_id, stock_id, symbol)
-      VALUES (?, ?, ?)
+    const upsertStmt = db.prepare(`
+      INSERT INTO trendlyne_screener_stocks (screener_id, stock_id, symbol, first_seen, last_seen)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(screener_id, stock_id) DO UPDATE SET
+        symbol    = excluded.symbol,
+        last_seen = excluded.last_seen
     `);
 
     // Snapshot previous active symbols BEFORE delete
@@ -162,14 +158,29 @@ export function saveScreenerStocksToDB(
         .filter(Boolean)
     );
 
+    const now = new Date().toISOString().slice(0, 10);
+    const incomingIds = new Set(stocks.map(s => s.stockId));
+
     db.transaction(() => {
-      deleteStmt.run(screenerId);
+      // Remove stocks no longer in screener
+      const existing = db.prepare(`SELECT stock_id FROM trendlyne_screener_stocks WHERE screener_id = ?`)
+        .all(screenerId) as Array<{ stock_id: string }>;
+      const removed = existing.filter(r => !incomingIds.has(r.stock_id));
+      if (removed.length) {
+        const del = db.prepare(`DELETE FROM trendlyne_screener_stocks WHERE screener_id = ? AND stock_id = ?`);
+        for (const r of removed) del.run(screenerId, r.stock_id);
+      }
+      // Upsert current stocks
       for (const stock of stocks) {
         const mapping = getStockMapping(stock.stockId);
         const symbol = mapping ? mapping.symbol : null;
-        insertStmt.run(screenerId, stock.stockId, symbol);
+        upsertStmt.run(screenerId, stock.stockId, symbol, now, now);
       }
     })();
+
+    // Update screener_master to reflect fresh sync time
+    db.prepare(`UPDATE screener_master SET last_updated = ?, stocks_synced_at = ? WHERE scan_id = ?`)
+      .run(now, now, screenerId);
 
     // Diff patch: record entries/exits in screener_appearances
     const today = new Date().toISOString().slice(0, 10);

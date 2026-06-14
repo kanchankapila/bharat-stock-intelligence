@@ -21,9 +21,9 @@ app = FastAPI(title="Bharat Stock Intelligence - ML Orchestration API")
 async def score_pending():
     """Triggers ML Ensemble Scoring"""
     try:
-        logger.info("Starting ml_ensemble.score_pending()")
-        ml_ensemble.score_pending()
-        logger.info("Finished ml_ensemble.score_pending()")
+        logger.info("Starting ml_ensemble.run(do_train=False, do_score=True)")
+        ml_ensemble.run(do_train=False, do_score=True)
+        logger.info("Finished ml_ensemble.run")
         return {"status": "success"}
     except Exception as e:
         logger.error(f"Error in score_pending: {e}")
@@ -66,6 +66,6 @@ async def infer_dl():
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8000))
+    port = int(os.environ.get("PYTHON_API_PORT", 8000))
     logger.info(f"Starting Python API on port {port}...")
     uvicorn.run("python_api:app", host="127.0.0.1", port=port, reload=False)
