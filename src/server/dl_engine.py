@@ -21,6 +21,7 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
+from torch.amp import autocast, GradScaler
 from sklearn.metrics import roc_auc_score, accuracy_score
 
 DB_PATH   = Path(__file__).parent.parent.parent / "database.sqlite"
@@ -242,6 +243,7 @@ def _train_one_fold(model: BiLSTMModel, X: np.ndarray, y5: np.ndarray,
     ce     = nn.CrossEntropyLoss()
     hub    = nn.HuberLoss(delta=0.02)
     is_cuda = DEVICE.type == "cuda"
+    scaler = GradScaler('cuda') if is_cuda else None
 
     # Convert to CPU tensors once — avoid per-batch numpy→tensor copies
     X_t   = torch.from_numpy(np.ascontiguousarray(X,   dtype=np.float32))
@@ -260,15 +262,23 @@ def _train_one_fold(model: BiLSTMModel, X: np.ndarray, y5: np.ndarray,
         perm = torch.randperm(n)
         for start in range(0, n, bs):
             idx = perm[start:start + bs]
-            xb  = X_t[idx].to(DEVICE, non_blocking=is_cuda)
-            yb  = y5_t[idx].to(DEVICE, non_blocking=is_cuda)
-            rb  = yr5_t[idx].to(DEVICE, non_blocking=is_cuda)
-            out  = model(xb)
-            loss = ce(out["dir_5d"], yb) * 0.5 + hub(out["ret_5d"], rb) * 0.5
-            if y15_t is not None:
-                yb15 = y15_t[idx].to(DEVICE, non_blocking=is_cuda)
-                loss = loss + ce(out["dir_15d"], yb15) * 0.5
-            opt.zero_grad(); loss.backward(); opt.step()
+            xb   = X_t[idx].to(DEVICE, non_blocking=is_cuda)
+            yb   = y5_t[idx].to(DEVICE, non_blocking=is_cuda)
+            rb   = yr5_t[idx].to(DEVICE, non_blocking=is_cuda)
+            yb15 = y15_t[idx].to(DEVICE, non_blocking=is_cuda) if y15_t is not None else None
+            opt.zero_grad()
+            with autocast('cuda', enabled=is_cuda):
+                out  = model(xb)
+                loss = ce(out["dir_5d"], yb) * 0.5 + hub(out["ret_5d"], rb) * 0.5
+                if yb15 is not None:
+                    loss = loss + ce(out["dir_15d"], yb15) * 0.5
+            if scaler is not None:
+                scaler.scale(loss).backward()
+                scaler.step(opt)
+                scaler.update()
+            else:
+                loss.backward()
+                opt.step()
         sch.step()
 
 
@@ -283,7 +293,8 @@ def _predict_batch(model: BiLSTMModel, X: np.ndarray, bs: int = 256) -> Dict[str
     with torch.no_grad():
         for start in range(0, len(X_t), bs):
             xb = X_t[start:start + bs].to(DEVICE, non_blocking=is_cuda)
-            out = model(xb)
+            with autocast('cuda', enabled=is_cuda):
+                out = model(xb)
             for k in results:
                 tensor = torch.softmax(out[k], dim=-1) if k in _DIR_KEYS else out[k]
                 results[k].append(tensor.cpu().numpy())
