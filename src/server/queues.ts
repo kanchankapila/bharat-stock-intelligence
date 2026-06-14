@@ -210,6 +210,8 @@ async function processAISignal(job: Job): Promise<void> {
 
   const analysis = await generateStockAnalysis(symbol, stockData);
 
+  const now = new Date().toISOString();
+
   // Persist to DB (same schema as the existing saveSignal procedure)
   db.prepare(`
     INSERT INTO signals (symbol, type, entry, target, stopLoss, confidence, reasoning, createdAt)
@@ -223,8 +225,56 @@ async function processAISignal(job: Job): Promise<void> {
     analysis.stopLoss,
     analysis.confidence,
     analysis.reasoning,
-    new Date().toISOString(),
+    now,
   );
+
+  // Write to unified_signals so outcome resolver and reward engine can track AI signal performance
+  db.prepare(`
+    INSERT INTO unified_signals
+      (symbol, signal_date, signal_source, signal_type,
+       entry_price, target_price, stop_loss, confidence_score,
+       reasoning, status, signal_generated_at)
+    VALUES (?, ?, 'AI', ?, ?, ?, ?, ?, ?, 'ACTIVE', ?)
+    ON CONFLICT(symbol, signal_date, signal_source) DO UPDATE SET
+      entry_price=excluded.entry_price,
+      target_price=excluded.target_price,
+      stop_loss=excluded.stop_loss,
+      confidence_score=excluded.confidence_score,
+      reasoning=excluded.reasoning,
+      signal_generated_at=excluded.signal_generated_at
+  `).run(
+    symbol,
+    now.split('T')[0],
+    analysis.signal ?? 'BUY',
+    analysis.entry ?? null,
+    analysis.target ?? null,
+    analysis.stopLoss ?? null,
+    analysis.confidence ?? null,
+    analysis.reasoning ?? null,
+    now,
+  );
+
+  // Broadcast via WebSocket so the frontend gets a real-time alert
+  try {
+    const { webSocketSignalService } = await import('./websocketService');
+    webSocketSignalService.broadcastNewSignal({
+      type: 'new_signal',
+      symbol,
+      timestamp: now,
+      source: 'AI',
+      generatedAt: now,
+      signal: {
+        signalType: analysis.signal,
+        entryPrice: analysis.entry,
+        targetPrice: analysis.target,
+        stopLoss: analysis.stopLoss,
+        confidence: analysis.confidence,
+        reasoning: analysis.reasoning,
+      },
+    });
+  } catch {
+    // WebSocket is best-effort
+  }
 
   // Update job progress so the frontend can display it
   await job.updateProgress(100);
