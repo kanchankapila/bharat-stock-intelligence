@@ -1,5 +1,16 @@
 import ollama from 'ollama';
 
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'mistral';
+
+export async function releaseOllamaModel(): Promise<void> {
+  try {
+    await ollama.generate({ model: OLLAMA_MODEL, prompt: '', keep_alive: 0 } as any);
+    console.log(`[OLLAMA] Model ${OLLAMA_MODEL} unloaded from memory`);
+  } catch {
+    // non-critical
+  }
+}
+
 export interface StockAnalysis {
   sentiment: string;
   signal: "BUY" | "SELL" | "HOLD";
@@ -39,28 +50,27 @@ export async function generateStockAnalysis(symbol: string, data: any): Promise<
     }
   `;
 
-  const model = process.env.OLLAMA_MODEL || 'mistral';
   let response;
 
   try {
     try {
       response = await ollama.chat({
-        model,
+        model: OLLAMA_MODEL,
         messages: [{ role: 'user', content: prompt }],
         format: 'json',
-      });
+        keep_alive: 0,
+      } as any);
     } catch (error: any) {
       const errorStr = String(error.message || error.error || "");
       if (errorStr.includes('CUDA') || errorStr.includes('allocate') || errorStr.includes('runner process has terminated')) {
         console.warn(`[AI] Ollama CUDA error detected for ${symbol}, retrying with CPU fallback...`);
         response = await ollama.chat({
-          model,
+          model: OLLAMA_MODEL,
           messages: [{ role: 'user', content: prompt }],
           format: 'json',
-          options: {
-            num_gpu: 0, // Force CPU
-          }
-        });
+          keep_alive: 0,
+          options: { num_gpu: 0 },
+        } as any);
       } else {
         throw error;
       }
@@ -109,13 +119,12 @@ export async function analyzeCompanyProfile(symbol: string, description: string)
     }
   `;
 
-  const model = process.env.OLLAMA_MODEL || 'mistral';
   let response;
 
   try {
     try {
       response = await ollama.chat({
-        model,
+        model: OLLAMA_MODEL,
         messages: [{ role: 'user', content: prompt }],
         format: 'json',
       });
@@ -124,12 +133,10 @@ export async function analyzeCompanyProfile(symbol: string, description: string)
       if (errorStr.includes('CUDA') || errorStr.includes('allocate') || errorStr.includes('runner process has terminated')) {
         console.warn(`[AI] Ollama CUDA error detected for ${symbol} profile analysis, retrying with CPU fallback...`);
         response = await ollama.chat({
-          model,
+          model: OLLAMA_MODEL,
           messages: [{ role: 'user', content: prompt }],
           format: 'json',
-          options: {
-            num_gpu: 0,
-          }
+          options: { num_gpu: 0 },
         });
       } else {
         throw error;

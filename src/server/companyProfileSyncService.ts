@@ -1,6 +1,6 @@
 import db from './db';
 import { fetchCompanyOverview } from './trendlyneService';
-import { analyzeCompanyProfile } from '../services/aiService';
+import { analyzeCompanyProfile, releaseOllamaModel } from '../services/aiService';
 
 export async function syncAndAnalyzeCompanyProfiles() {
   console.log('[PROFILE SYNC] Starting weekly company profile sync and AI analysis...');
@@ -76,5 +76,6 @@ export async function syncAndAnalyzeCompanyProfiles() {
   }
 
   console.log(`[PROFILE SYNC] Completed. Success: ${successCount}, Failed: ${failCount}`);
+  await releaseOllamaModel();
   return { success: true, processed: successCount, failed: failCount };
 }
