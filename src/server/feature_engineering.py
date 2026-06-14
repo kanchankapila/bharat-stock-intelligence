@@ -36,6 +36,8 @@ class FeatureEngineer:
     def _con(self) -> sqlite3.Connection:
         con = sqlite3.connect(self.db_path)
         con.row_factory = sqlite3.Row
+        con.execute("PRAGMA journal_mode=WAL")
+        con.execute("PRAGMA busy_timeout=5000")
         return con
 
     # ── Core OHLCV feature computation ──────────────────────────────────────
@@ -482,27 +484,40 @@ class FeatureEngineer:
             args_list = [(sym, lookback_days, self.db_path, only_date) for sym in symbols]
             num_workers = min(multiprocessing.cpu_count(), 8)
 
+            from itertools import islice
+            CHUNK_SIZE = num_workers * 4  # submit only 4 waves ahead of workers
+            it = iter(args_list)
+            i = 0
             written = 0
+            last_scaler = None
             with ProcessPoolExecutor(max_workers=num_workers) as executor:
-                futures = {executor.submit(_compute_symbol_unscaled, args): args[0] for args in args_list}
-                for i, future in enumerate(as_completed(futures), 1):
-                    symbol = futures[future]
-                    try:
-                        _, feat = future.result()
-                        if feat is not None:
-                            scaler = self._fit_scaler(feat)
-                            SCALER_PATH.parent.mkdir(parents=True, exist_ok=True)
-                            with open(SCALER_PATH, "wb") as f:
-                                pickle.dump(scaler, f)
-                            feat = self._apply_scaler(feat, scaler)
-                            n = self._write_symbol_features(symbol, feat, only_date, con)
-                            written += n
-                            if i % 100 == 0:
-                                print(f"[FE] {i}/{total} complete — {written} rows written")
-                    except Exception as e:
-                        print(f"[FE] ERROR processing {symbol}: {e}")
-                    if i % 200 == 0:
-                        con.commit()
+                while True:
+                    chunk = list(islice(it, CHUNK_SIZE))
+                    if not chunk:
+                        break
+                    fs = {executor.submit(_compute_symbol_unscaled, a): a[0] for a in chunk}
+                    for future in as_completed(fs):
+                        i += 1
+                        symbol = fs[future]
+                        try:
+                            _, feat = future.result()
+                            if feat is not None:
+                                scaler = self._fit_scaler(feat)
+                                feat = self._apply_scaler(feat, scaler)
+                                last_scaler = scaler
+                                n = self._write_symbol_features(symbol, feat, only_date, con)
+                                written += n
+                                if i % 100 == 0:
+                                    print(f"[FE] {i}/{total} complete — {written} rows written")
+                        except Exception as e:
+                            print(f"[FE] ERROR processing {symbol}: {e}")
+                        if i % 200 == 0:
+                            con.commit()
+
+            if last_scaler is not None:
+                SCALER_PATH.parent.mkdir(parents=True, exist_ok=True)
+                with open(SCALER_PATH, "wb") as f:
+                    pickle.dump(last_scaler, f)
 
             con.commit()
             print(f"[FE] Pipeline complete — {written} total rows written")
@@ -549,6 +564,7 @@ def _compute_symbol_unscaled(args: tuple):
 
 
 if __name__ == "__main__":
+    multiprocessing.freeze_support()
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--symbols", nargs="*", help="Specific symbols (default: all)")
