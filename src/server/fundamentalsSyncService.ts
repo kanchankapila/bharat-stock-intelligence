@@ -291,10 +291,21 @@ export async function runPhase1(): Promise<void> {
 
 // ─── Phase 2: per-symbol quoteSummary ────────────────────────────────────────
 
-async function fetchPhase2Symbol(
+interface Phase2Row {
+  symbol: string;
+  debtToEquity: number | null;
+  returnOnEquity: number | null;
+  revenueGrowth: number | null;
+  earningsGrowth: number | null;
+  operatingMargins: number | null;
+  currentRatio: number | null;
+  piotroski: number;
+}
+
+async function fetchPhase2Data(
   symbol: string,
   auth: YFAuth,
-): Promise<void> {
+): Promise<Phase2Row | null> {
   const url = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${symbol}.NS?modules=financialData,defaultKeyStatistics&crumb=${encodeURIComponent(auth.crumb)}`;
   const res = await fetch(url, {
     headers: { ...YF_HEADERS, Cookie: auth.cookie },
@@ -305,28 +316,41 @@ async function fetchPhase2Symbol(
     await invalidateCrumb();
     throw new Error('CRUMB_EXPIRED');
   }
-  if (!res.ok) return;
+  if (!res.ok) return null;
 
   const data = await res.json();
   const result = data?.quoteSummary?.result?.[0];
-  if (!result) return;
+  if (!result) return null;
 
   const fd = result.financialData  || {};
   const ks = result.defaultKeyStatistics || {};
 
-  const fscore = computePiotroski({ ...fd, ...ks });
-
-  upsertPhase2.run(
+  return {
     symbol,
-    fd.debtToEquity?.raw    ?? null,
-    fd.returnOnEquity?.raw  ?? null,
-    fd.revenueGrowth?.raw   ?? null,
-    fd.earningsGrowth?.raw  ?? null,
-    fd.operatingMargins?.raw ?? null,
-    fd.currentRatio?.raw    ?? null,
-    fscore,
-  );
+    debtToEquity:    fd.debtToEquity?.raw    ?? null,
+    returnOnEquity:  fd.returnOnEquity?.raw  ?? null,
+    revenueGrowth:   fd.revenueGrowth?.raw   ?? null,
+    earningsGrowth:  fd.earningsGrowth?.raw  ?? null,
+    operatingMargins: fd.operatingMargins?.raw ?? null,
+    currentRatio:    fd.currentRatio?.raw    ?? null,
+    piotroski:       computePiotroski({ ...fd, ...ks }),
+  };
 }
+
+const writePhase2Batch = db.transaction((rows: Phase2Row[]) => {
+  for (const row of rows) {
+    upsertPhase2.run(
+      row.symbol,
+      row.debtToEquity,
+      row.returnOnEquity,
+      row.revenueGrowth,
+      row.earningsGrowth,
+      row.operatingMargins,
+      row.currentRatio,
+      row.piotroski,
+    );
+  }
+});
 
 export async function runPhase2(symbolsOverride?: string[]): Promise<void> {
   // Only sync symbols that already have Phase 1 data
@@ -348,24 +372,32 @@ export async function runPhase2(symbolsOverride?: string[]): Promise<void> {
 
   for (let i = 0; i < eligible.length; i += PHASE2_CONCURRENCY) {
     const batch = eligible.slice(i, i + PHASE2_CONCURRENCY);
-    await Promise.allSettled(
+
+    const results = await Promise.allSettled(
       batch.map(async symbol => {
         try {
-          await fetchPhase2Symbol(symbol, auth);
-          syncProgress.phase2Done++;
+          return await fetchPhase2Data(symbol, auth);
         } catch (err: any) {
           if (err.message === 'CRUMB_EXPIRED') {
             auth = await getYFAuth();
-            try {
-              await fetchPhase2Symbol(symbol, auth);
-              syncProgress.phase2Done++;
-              return;
-            } catch { /* fall through to error count */ }
+            return await fetchPhase2Data(symbol, auth);
           }
-          syncProgress.phase2Errors++;
+          throw err;
         }
       }),
     );
+
+    const rows: Phase2Row[] = [];
+    for (const r of results) {
+      if (r.status === 'fulfilled' && r.value !== null) {
+        rows.push(r.value);
+        syncProgress.phase2Done++;
+      } else if (r.status === 'rejected') {
+        syncProgress.phase2Errors++;
+      }
+    }
+    if (rows.length > 0) writePhase2Batch(rows);
+
     // Polite delay between Phase 2 batches to avoid rate limiting
     if (i + PHASE2_CONCURRENCY < eligible.length) {
       await new Promise(r => setTimeout(r, PHASE2_DELAY_MS));
@@ -419,7 +451,8 @@ export async function runFullFundamentalsSync(phase2Only = false): Promise<void>
 export async function refreshSymbolFundamentals(symbol: string): Promise<void> {
   const auth = await getYFAuth();
   await fetchPhase1Batch([symbol], auth);
-  await fetchPhase2Symbol(symbol, auth);
+  const row = await fetchPhase2Data(symbol, auth);
+  if (row) writePhase2Batch([row]);
 }
 
 // ─── Query helpers ────────────────────────────────────────────────────────────
