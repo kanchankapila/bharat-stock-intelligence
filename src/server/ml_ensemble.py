@@ -6,7 +6,8 @@ Trains an ensemble of classifiers on historical signal_outcomes and uses the
 combined probability estimate as win_probability for new signals.
 
 Models:
-  - GradientBoostingClassifier  (primary)
+  - LGBMClassifier              (GPU-accelerated, replaces GradientBoostingClassifier)
+  - XGBClassifier               (GPU-accelerated, 5th base model)
   - RandomForestClassifier
   - ExtraTreesClassifier
   - LogisticRegression          (linear baseline)
@@ -23,7 +24,7 @@ Features:
   - score × regime interaction
 
 Requirements:
-    pip install scikit-learn pandas numpy
+    pip install scikit-learn pandas numpy lightgbm xgboost
 
 Run:  python ml_ensemble.py
       python ml_ensemble.py --train
@@ -151,15 +152,37 @@ def load_pending_signals(conn: sqlite3.Connection) -> pd.DataFrame:
 
 # ── Model Building ────────────────────────────────────────────────────────────
 
+def _gpu_device() -> str:
+    """Return 'cuda' if GPU is available, else 'cpu'."""
+    try:
+        import torch
+        return 'cuda' if torch.cuda.is_available() else 'cpu'
+    except ImportError:
+        return 'cpu'
+
+
 def _base_models():
-    from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier, ExtraTreesClassifier
+    from sklearn.ensemble import RandomForestClassifier, ExtraTreesClassifier
     from sklearn.linear_model import LogisticRegression
     from sklearn.calibration import CalibratedClassifierCV
+    from lightgbm import LGBMClassifier
+    from xgboost import XGBClassifier
 
-    gb = CalibratedClassifierCV(
-        GradientBoostingClassifier(
+    _dev = _gpu_device()
+
+    lgbm = CalibratedClassifierCV(
+        LGBMClassifier(
             n_estimators=300, max_depth=4, learning_rate=0.04,
-            subsample=0.8, min_samples_leaf=5, random_state=42,
+            subsample=0.8, min_child_samples=5, random_state=42,
+            device=_dev, verbose=-1,
+        ),
+        method='isotonic', cv=3,
+    )
+    xgb_model = CalibratedClassifierCV(
+        XGBClassifier(
+            n_estimators=300, max_depth=4, learning_rate=0.04,
+            subsample=0.8, random_state=42,
+            device=_dev, eval_metric='logloss', verbosity=0,
         ),
         method='isotonic', cv=3,
     )
@@ -181,7 +204,7 @@ def _base_models():
         LogisticRegression(C=1.0, max_iter=1000, random_state=42),
         method='sigmoid', cv=3,
     )
-    return [('gb', gb), ('rf', rf), ('et', et), ('lr', lr)]
+    return [('lgbm', lgbm), ('xgb', xgb_model), ('rf', rf), ('et', et), ('lr', lr)]
 
 
 def train_ensemble(X: pd.DataFrame, y: pd.Series, min_samples: int = 30):
