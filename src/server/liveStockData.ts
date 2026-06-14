@@ -630,7 +630,29 @@ export async function fetchAndPersistOHLCVData(): Promise<{ count: number; persi
     
     // PHASE 2.4 FIX: Detect significant price movements and trigger signal updates
     await detectAndQueueSignalUpdates(stocks);
-    
+
+    // Enqueue a technical signal re-scan for stocks that moved ≥5% intraday
+    try {
+      const { technicalSignalsQueue } = await import('./queues');
+      if (technicalSignalsQueue) {
+        const bigMovers = stocks
+          .filter(s => Math.abs(s.changePct) >= 5)
+          .map(s => s.symbol)
+          .filter(Boolean);
+
+        if (bigMovers.length > 0) {
+          await technicalSignalsQueue.add(
+            'scan-movers',
+            { symbols: bigMovers, reason: 'intraday-move-5pct' },
+            { removeOnComplete: { age: 3600 }, attempts: 2 },
+          );
+          console.log(`[OHLCV] Enqueued technical scan for ${bigMovers.length} big movers`);
+        }
+      }
+    } catch {
+      // queue trigger is best-effort
+    }
+
     return { count: stocks.length, persisted: result.inserted };
   } catch (err: any) {
     console.error('[OHLCV] Error in fetchAndPersistOHLCVData:', err.message);
