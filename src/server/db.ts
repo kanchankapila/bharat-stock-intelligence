@@ -1486,6 +1486,7 @@ runMigration('038_agent_tables', `
   CREATE INDEX IF NOT EXISTS idx_aor_run_date ON agent_optimizer_reports(run_date DESC);
 `);
 
+
 // Keep startup diagnostics off stdout so stdio-based clients can parse JSON-RPC.
 console.error('[DB] Schema normalization complete (Phase 3.5)');
 

@@ -6,6 +6,8 @@ import {
   TrendingUp, TrendingDown, Activity, Zap, Info, AlertCircle,
   BarChart3, PieChart, Users, Filter, ArrowUpRight,
   CheckCircle2, BrainCircuit, Search, Database, History
+  BarChart3, PieChart, Users, Filter,
+  CheckCircle2, BrainCircuit, Search, Database, History
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import {
