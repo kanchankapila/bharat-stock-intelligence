@@ -104,6 +104,45 @@ export function classifyScreener(scanId: string, name: string): ScreenerClass {
   return fallback;
 }
 
+// ─── Regime-Aware Weights ────────────────────────────────────────────────────
+
+interface RegimeWeights {
+  screenerMomentum: number;
+  trend: number;
+  vol: number;
+  sector: number;
+  fund: number;
+}
+
+export const REGIME_WEIGHTS: Record<string, RegimeWeights> = {
+  BULL:     { screenerMomentum: 1.0,  trend: 1.0, vol: 1.0, sector: 1.0, fund: 1.0 },
+  SIDEWAYS: { screenerMomentum: 0.9,  trend: 0.9, vol: 1.0, sector: 0.9, fund: 1.1 },
+  HIGH_VOL: { screenerMomentum: 0.7,  trend: 0.8, vol: 0.6, sector: 0.8, fund: 1.2 },
+  BEAR:     { screenerMomentum: 0.5,  trend: 0.7, vol: 0.5, sector: 0.7, fund: 1.5 },
+  CRASH:    { screenerMomentum: 0.25, trend: 0.5, vol: 0.3, sector: 0.5, fund: 1.8 },
+};
+
+let _regimeCache: { regime: string; fetchedAt: number } | null = null;
+
+export function getCurrentRegime(): string {
+  const now = Date.now();
+  if (_regimeCache && now - _regimeCache.fetchedAt < 30 * 60_000) {
+    return _regimeCache.regime;
+  }
+  try {
+    const row = db.prepare(
+      'SELECT regime FROM market_regimes ORDER BY date DESC LIMIT 1'
+    ).get() as { regime: string } | undefined;
+    const regime = row?.regime ?? 'SIDEWAYS';
+    _regimeCache = { regime, fetchedAt: now };
+    return regime;
+  } catch {
+    return 'SIDEWAYS';
+  }
+}
+
+export function _resetRegimeCache() { _regimeCache = null; }
+
 // ─── Presence Multiplier ────────────────────────────────────────────────────
 
 function presenceMultiplier(bullishCount: number): number {
@@ -174,6 +213,9 @@ function scoreStock(
   timeframe: string;
   reasoning: string;
 } {
+  const regime = getCurrentRegime();
+  const rw = REGIME_WEIGHTS[regime] ?? REGIME_WEIGHTS['SIDEWAYS'];
+
   // A. Screener weighted score
   let rawScreener = 0;
   let bullishCount = 0;
@@ -182,7 +224,9 @@ function scoreStock(
 
   for (const cls of data.screenerClasses) {
     if (cls.sentiment === 'bullish') {
-      rawScreener += cls.weight;
+      const isMomentumDriven = cls.category === 'momentum' || cls.timeframe === 'intraday';
+      const effectiveWeight = isMomentumDriven ? cls.weight * rw.screenerMomentum : cls.weight;
+      rawScreener += effectiveWeight;
       bullishCount++;
       bullishClasses.push(cls);
     } else if (cls.sentiment === 'bearish') {
@@ -206,6 +250,7 @@ function scoreStock(
     if (technical.above_sma200 === 1)    trendScore += 3;
   }
   trendScore = Math.min(15, trendScore);
+  trendScore = Math.round(trendScore * rw.trend * 100) / 100;
 
   // C. Volume confirmation (0–10)
   let volScore = 0;
@@ -214,11 +259,13 @@ function scoreStock(
   else if (volRatio > 2)   volScore = 7;
   else if (volRatio > 1.5) volScore = 5;
   else if (volRatio > 1.2) volScore = 2;
+  volScore = Math.round(volScore * rw.vol * 100) / 100;
 
   // D. Sector strength (0–8)
-  const sectorScore = quant
+  let sectorScore = quant
     ? Math.max(0, Math.min(8, (quant.momentum_score ?? 50) / 100 * 8))
     : 4;
+  sectorScore = Math.max(0, Math.min(8, sectorScore * rw.sector));
 
   // E. Fundamental overlay (0–12)
   let fundScore = 0;
@@ -232,6 +279,7 @@ function scoreStock(
     else if (fundamentals.revenue_growth > 0.05)   fundScore += 1;
   }
   fundScore = Math.min(12, fundScore);
+  fundScore = Math.min(12, Math.round(fundScore * rw.fund * 100) / 100);
 
   // Final score (max 105 → normalize to 100)
   const raw = screenerComponent + trendScore + volScore + sectorScore + fundScore;
