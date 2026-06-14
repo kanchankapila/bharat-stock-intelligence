@@ -269,12 +269,16 @@ class FeatureEngineer:
     # ── Per-symbol pipeline ──────────────────────────────────────────────────
 
     def process_symbol(self, symbol: str, lookback_days: int = 504,
-                       only_date: str = None) -> int:
+                       only_date: str = None, *, con: sqlite3.Connection = None) -> int:
         """Compute + persist features for one symbol. Returns row count written.
 
         only_date: if set, only write the row matching this date (fast daily mode).
+        con: shared connection from caller. If provided, the caller owns the transaction
+             and this method will NOT commit. If None, opens, commits, and closes its own.
         """
-        con = self._con()
+        owns_con = con is None
+        if owns_con:
+            con = self._con()
         cutoff = (datetime.today() - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
 
         try:
@@ -299,15 +303,8 @@ class FeatureEngineer:
                 pickle.dump(scaler, f)
             feat = self._apply_scaler(feat, scaler)
 
-            # Write to feature_store
-            cur = con.cursor()
-            written = 0
-            for date, row in feat.iterrows():
-                if only_date and date.strftime("%Y-%m-%d") < only_date:
-                    continue
-                d = row.to_dict()
-                cur.execute(
-                    """INSERT OR REPLACE INTO feature_store
+            # Collect all rows then write in one executemany call
+            SQL = """INSERT OR REPLACE INTO feature_store
                        (symbol, date, timeframe,
                         ret_1d, ret_5d, ret_15d, ret_21d, ret_63d, ret_126d, ret_252d,
                         sma20, sma50, sma200, ema8, ema21, dist_sma20_pct, dist_sma200_pct, above_sma200,
@@ -341,39 +338,47 @@ class FeatureEngineer:
                         ?,?,
                         ?,?,?,
                         ?,?,?,
-                        CURRENT_TIMESTAMP)""",
-                    (
-                        symbol, date.strftime("%Y-%m-%d"),
-                        d.get("ret_1d"), d.get("ret_5d"), d.get("ret_15d"), d.get("ret_21d"),
-                        d.get("ret_63d"), d.get("ret_126d"), d.get("ret_252d"),
-                        d.get("sma20"), d.get("sma50"), d.get("sma200"), d.get("ema8"), d.get("ema21"),
-                        d.get("dist_sma20_pct"), d.get("dist_sma200_pct"), d.get("above_sma200"),
-                        d.get("rsi_14"), d.get("rsi_28"),
-                        d.get("macd"), d.get("macd_signal"), d.get("macd_hist"),
-                        d.get("adx"), d.get("di_plus"), d.get("di_minus"),
-                        d.get("stoch_k"), d.get("stoch_d"), d.get("cci"), d.get("williams_r"),
-                        d.get("atr_14"), d.get("atr_pct"),
-                        d.get("bb_upper"), d.get("bb_lower"), d.get("bb_width"), d.get("bb_pct"),
-                        d.get("hist_vol_21d"), d.get("hist_vol_63d"), d.get("vol_regime"),
-                        d.get("volume_ratio_20d"), d.get("volume_ratio_5d"),
-                        d.get("obv"), d.get("obv_slope"), d.get("vwap"), d.get("vwap_dist_pct"),
-                        d.get("trend_1d"), d.get("trend_1w"), d.get("trend_1m"), d.get("mtf_alignment_score"),
-                        d.get("fii_3d_net"), d.get("fii_10d_net"), d.get("dii_3d_net"),
-                        d.get("trailing_pe"), d.get("roe"), d.get("debt_to_equity"),
-                        d.get("op_margins"), d.get("piotroski_f"), d.get("earnings_yield"),
-                        d.get("nifty_vix"), d.get("nifty_ret_5d"), d.get("nifty_ret_21d"),
-                        d.get("us_10y_yield"), d.get("dxy"),
-                        d.get("crude_ret_5d"), d.get("gold_ret_5d"), d.get("sp500_ret_5d"),
-                        d.get("news_sentiment_score"), d.get("news_impact_count"),
-                        d.get("target_ret_1d"), d.get("target_ret_5d"), d.get("target_ret_15d"),
-                        d.get("target_dir_1d"), d.get("target_dir_5d"), d.get("target_dir_15d"),
-                    ),
-                )
-                written += 1
-            con.commit()
-            return written
+                        CURRENT_TIMESTAMP)"""
+            rows_to_insert = []
+            for date, row in feat.iterrows():
+                if only_date and date.strftime("%Y-%m-%d") < only_date:
+                    continue
+                d = row.to_dict()
+                rows_to_insert.append((
+                    symbol, date.strftime("%Y-%m-%d"),
+                    d.get("ret_1d"), d.get("ret_5d"), d.get("ret_15d"), d.get("ret_21d"),
+                    d.get("ret_63d"), d.get("ret_126d"), d.get("ret_252d"),
+                    d.get("sma20"), d.get("sma50"), d.get("sma200"), d.get("ema8"), d.get("ema21"),
+                    d.get("dist_sma20_pct"), d.get("dist_sma200_pct"), d.get("above_sma200"),
+                    d.get("rsi_14"), d.get("rsi_28"),
+                    d.get("macd"), d.get("macd_signal"), d.get("macd_hist"),
+                    d.get("adx"), d.get("di_plus"), d.get("di_minus"),
+                    d.get("stoch_k"), d.get("stoch_d"), d.get("cci"), d.get("williams_r"),
+                    d.get("atr_14"), d.get("atr_pct"),
+                    d.get("bb_upper"), d.get("bb_lower"), d.get("bb_width"), d.get("bb_pct"),
+                    d.get("hist_vol_21d"), d.get("hist_vol_63d"), d.get("vol_regime"),
+                    d.get("volume_ratio_20d"), d.get("volume_ratio_5d"),
+                    d.get("obv"), d.get("obv_slope"), d.get("vwap"), d.get("vwap_dist_pct"),
+                    d.get("trend_1d"), d.get("trend_1w"), d.get("trend_1m"), d.get("mtf_alignment_score"),
+                    d.get("fii_3d_net"), d.get("fii_10d_net"), d.get("dii_3d_net"),
+                    d.get("trailing_pe"), d.get("roe"), d.get("debt_to_equity"),
+                    d.get("op_margins"), d.get("piotroski_f"), d.get("earnings_yield"),
+                    d.get("nifty_vix"), d.get("nifty_ret_5d"), d.get("nifty_ret_21d"),
+                    d.get("us_10y_yield"), d.get("dxy"),
+                    d.get("crude_ret_5d"), d.get("gold_ret_5d"), d.get("sp500_ret_5d"),
+                    d.get("news_sentiment_score"), d.get("news_impact_count"),
+                    d.get("target_ret_1d"), d.get("target_ret_5d"), d.get("target_ret_15d"),
+                    d.get("target_dir_1d"), d.get("target_dir_5d"), d.get("target_dir_15d"),
+                ))
+
+            if rows_to_insert:
+                con.cursor().executemany(SQL, rows_to_insert)
+            if owns_con:
+                con.commit()
+            return len(rows_to_insert)
         finally:
-            con.close()
+            if owns_con:
+                con.close()
 
     # ── Full pipeline ────────────────────────────────────────────────────────
 
@@ -385,29 +390,31 @@ class FeatureEngineer:
                      Still loads full lookback for accurate indicator computation.
         """
         con = self._con()
-        if symbols is None:
-            rows = con.execute(
-                "SELECT DISTINCT symbol FROM stock_ohlcv "
-                "GROUP BY symbol HAVING COUNT(*) >= 60"
-            ).fetchall()
-            symbols = [r["symbol"] for r in rows]
-        con.close()
+        try:
+            if symbols is None:
+                rows = con.execute(
+                    "SELECT DISTINCT symbol FROM stock_ohlcv "
+                    "GROUP BY symbol HAVING COUNT(*) >= 60"
+                ).fetchall()
+                symbols = [r["symbol"] for r in rows]
 
-        today = datetime.today().strftime("%Y-%m-%d") if date_filter == "today" else None
+            today = datetime.today().strftime("%Y-%m-%d") if date_filter == "today" else None
 
-        print(f"[FE] Processing {len(symbols)} symbols{' (today-only mode)' if today else ''}...")
-        for i, sym in enumerate(symbols, 1):
-            try:
-                if today:
-                    # Fast mode: compute full lookback but only write today's row
-                    n = self._process_symbol_date(sym, lookback_days, today)
-                else:
-                    n = self.process_symbol(sym, lookback_days)
-                if i % 100 == 0:
-                    print(f"[FE] {i}/{len(symbols)} — {sym}: {n} rows")
-            except Exception as e:
-                print(f"[FE] ERROR {sym}: {e}")
-        print("[FE] Pipeline complete")
+            print(f"[FE] Processing {len(symbols)} symbols{' (today-only mode)' if today else ''}...")
+            for i, sym in enumerate(symbols, 1):
+                try:
+                    n = self.process_symbol(sym, lookback_days, only_date=today, con=con)
+                    if i % 100 == 0:
+                        print(f"[FE] {i}/{len(symbols)} — {sym}: {n} rows")
+                except Exception as e:
+                    print(f"[FE] ERROR {sym}: {e}")
+                # Commit every 200 symbols to bound transaction size
+                if i % 200 == 0:
+                    con.commit()
+            con.commit()
+            print("[FE] Pipeline complete")
+        finally:
+            con.close()
 
     def _process_symbol_date(self, symbol: str, lookback_days: int, target_date: str) -> int:
         """Compute features for one symbol but only write the row for target_date."""
