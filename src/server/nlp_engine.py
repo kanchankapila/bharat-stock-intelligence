@@ -22,11 +22,11 @@ class FinBERTInference:
             try:
                 # model="ProsusAI/finbert" is ~440MB. It will be cached locally.
                 try:
-                    import torch as _torch
-                    _device = 0 if _torch.cuda.is_available() else -1
+                    import torch
+                    device = 0 if torch.cuda.is_available() else -1
                 except ImportError:
-                    _device = -1
-                self.classifier = pipeline("sentiment-analysis", model="ProsusAI/finbert", device=_device)
+                    device = -1
+                self.classifier = pipeline("sentiment-analysis", model="ProsusAI/finbert", device=device)
                 print("FinBERT model loaded successfully.")
             except Exception as e:
                 print(f"Warning: Failed to load FinBERT model: {e}. Falling back to regex.")
