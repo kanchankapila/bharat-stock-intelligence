@@ -95,7 +95,10 @@ class StrategyOptimizer:
         """
         df = pd.read_sql_query(q, self.conn, params=(horizon_days,))
         for col in CATEGORIES:
-            df[col] = pd.to_numeric(df.get(col, np.nan), errors='coerce').fillna(0)
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+            else:
+                df[col] = 0.0
         return df
 
     # ──────────────────────────────────────────────────────────────────────────
@@ -171,10 +174,12 @@ class StrategyOptimizer:
             return {}
 
         print(f"[Optimizer] Optimising on {len(df)} outcome rows  (horizon={horizon_days}d)...")
-        
-        # 80/20 train/test split based on time or random (time-based walk-forward proxy)
-        train_df = df.sample(frac=0.8, random_state=42)
-        test_df = df.drop(train_df.index)
+
+        # Chronological 80/20 train/test split (walk-forward validation)
+        df = df.sort_values('signal_date').reset_index(drop=True)
+        split_idx = int(len(df) * 0.8)
+        train_df = df.iloc[:split_idx]
+        test_df = df.iloc[split_idx:]
 
         baseline = -self._objective(
             list(DEFAULT_CATEGORY_WEIGHTS.values()) + list(DEFAULT_SOURCE_WEIGHTS.values()),
