@@ -1,13 +1,14 @@
 import sys
 import os
 import inspect
+from unittest.mock import patch, MagicMock
 import numpy as np
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 
 import torch
-from src.server.dl_engine import BiLSTMModel, N_FEATURES, _predict_batch
+from src.server.dl_engine import BiLSTMModel, N_FEATURES, _predict_batch, _train_one_fold
 
 
 class TestSoftmaxBug:
@@ -101,3 +102,74 @@ class TestTrainingCorpus:
             "_CHUNK_SIZE constant should be defined for chunked symbol streaming"
         )
         assert isinstance(mod._CHUNK_SIZE, int) and mod._CHUNK_SIZE > 0
+
+
+class TestDir15dTraining:
+    def test_train_one_fold_accepts_y15_parameter(self):
+        """_train_one_fold must accept a y15 keyword argument to train the dir_15d head."""
+        sig = inspect.signature(_train_one_fold)
+        assert "y15" in sig.parameters, (
+            "_train_one_fold must have a y15 parameter to train the dir_15d classification head"
+        )
+
+    def test_train_one_fold_trains_dir_15d_when_y15_provided(self):
+        """dir_15d head weights must change after _train_one_fold is called with y15."""
+        model = BiLSTMModel()
+        weights_before = model.head_dir_15d.weight.data.clone()
+
+        N = 200
+        X   = np.random.randn(N, 60, N_FEATURES).astype(np.float32)
+        y5  = np.random.randint(0, 2, N).astype(np.int64)
+        y15 = np.random.randint(0, 2, N).astype(np.int64)
+        yr5 = np.random.randn(N).astype(np.float32)
+
+        _train_one_fold(model, X, y5, yr5, epochs=2, y15=y15)
+
+        weights_after = model.head_dir_15d.weight.data
+        assert not torch.allclose(weights_before, weights_after), (
+            "dir_15d head weights did not change — y15 loss term is not updating it"
+        )
+
+    def test_train_one_fold_y15_none_does_not_crash(self):
+        """_train_one_fold must work normally when y15 is omitted (backward compat)."""
+        model = BiLSTMModel()
+        N = 150
+        X   = np.random.randn(N, 60, N_FEATURES).astype(np.float32)
+        y5  = np.random.randint(0, 2, N).astype(np.int64)
+        yr5 = np.random.randn(N).astype(np.float32)
+        # Should not raise
+        _train_one_fold(model, X, y5, yr5, epochs=1)
+
+
+class TestWalkForwardValidation:
+    def test_train_lstm_calls_walk_forward_validate(self):
+        """train_lstm must call walk_forward_validate (not return a hardcoded NaN stub)."""
+        import src.server.dl_engine as mod
+
+        fake_seqs = np.random.randn(400, 60, N_FEATURES).astype(np.float32)
+        fake_y5   = np.random.randint(0, 2, 400).astype(np.int64)
+        fake_y15  = np.random.randint(0, 2, 400).astype(np.int64)
+        fake_yr5  = np.random.randn(400).astype(np.float32)
+
+        def fake_load(sym, con, seq_len=60):
+            return fake_seqs, fake_y5, fake_y15, fake_yr5, ["2024-01-01"] * 400
+
+        sentinel = {"directional_accuracy": 0.55, "roc_auc": 0.58, "n_folds": 3}
+
+        with patch.object(mod, "load_symbol_sequences", side_effect=fake_load), \
+             patch("sqlite3.connect") as mock_connect, \
+             patch.object(mod, "walk_forward_validate", return_value=sentinel) as mock_wfv, \
+             patch.object(mod, "_train_one_fold"), \
+             patch("pathlib.Path.mkdir"), \
+             patch("torch.save"):
+
+            mock_conn = MagicMock()
+            mock_conn.execute.return_value.fetchall.return_value = [("SYM1",), ("SYM2",)]
+            mock_connect.return_value = mock_conn
+
+            result = mod.train_lstm(version=99)
+
+        mock_wfv.assert_called_once(), "walk_forward_validate was never called by train_lstm"
+        assert result == sentinel, (
+            f"train_lstm should return walk_forward_validate result, got {result}"
+        )

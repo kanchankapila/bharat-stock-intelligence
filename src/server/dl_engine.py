@@ -192,7 +192,8 @@ def load_inference_sequence(
 # ── Walk-Forward Validation ──────────────────────────────────────────────────
 
 def walk_forward_validate(model: BiLSTMModel, X: np.ndarray, y5: np.ndarray,
-                           y15: np.ndarray, yr5: np.ndarray, fold_size: int = 30) -> Dict:
+                           y15: np.ndarray, yr5: np.ndarray,
+                           fold_size: int = 30) -> Dict:
     """Expanding window walk-forward. Returns mean metrics across folds."""
     n = len(X)
     min_train = 300
@@ -213,7 +214,7 @@ def walk_forward_validate(model: BiLSTMModel, X: np.ndarray, y5: np.ndarray,
 
         model_copy = BiLSTMModel().to(DEVICE)
         model_copy.load_state_dict(model.state_dict())
-        _train_one_fold(model_copy, X_tr, y_tr, yr5[:train_end], epochs=30)
+        _train_one_fold(model_copy, X_tr, y_tr, yr5[:train_end], epochs=30, y15=y15[:train_end])
 
         preds = _predict_batch(model_copy, X_te)
         del model_copy
@@ -235,7 +236,7 @@ def walk_forward_validate(model: BiLSTMModel, X: np.ndarray, y5: np.ndarray,
 
 
 def _train_one_fold(model: BiLSTMModel, X: np.ndarray, y5: np.ndarray,
-                    yr5: np.ndarray, epochs: int = 100):
+                    yr5: np.ndarray, epochs: int = 100, y15: np.ndarray = None):
     opt    = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-4)
     sch    = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=epochs)
     ce     = nn.CrossEntropyLoss()
@@ -246,8 +247,11 @@ def _train_one_fold(model: BiLSTMModel, X: np.ndarray, y5: np.ndarray,
     X_t   = torch.from_numpy(np.ascontiguousarray(X,   dtype=np.float32))
     y5_t  = torch.from_numpy(np.ascontiguousarray(y5,  dtype=np.int64))
     yr5_t = torch.from_numpy(np.ascontiguousarray(yr5, dtype=np.float32))
+    y15_t = torch.from_numpy(np.ascontiguousarray(y15, dtype=np.int64)) if y15 is not None else None
     if is_cuda:
         X_t = X_t.pin_memory(); y5_t = y5_t.pin_memory(); yr5_t = yr5_t.pin_memory()
+        if y15_t is not None:
+            y15_t = y15_t.pin_memory()
 
     n = len(X_t)
     bs = 128  # smaller batches reduce cuDNN workspace + VRAM pressure
@@ -256,11 +260,14 @@ def _train_one_fold(model: BiLSTMModel, X: np.ndarray, y5: np.ndarray,
         perm = torch.randperm(n)
         for start in range(0, n, bs):
             idx = perm[start:start + bs]
-            xb = X_t[idx].to(DEVICE, non_blocking=is_cuda)
-            yb = y5_t[idx].to(DEVICE, non_blocking=is_cuda)
-            rb = yr5_t[idx].to(DEVICE, non_blocking=is_cuda)
+            xb  = X_t[idx].to(DEVICE, non_blocking=is_cuda)
+            yb  = y5_t[idx].to(DEVICE, non_blocking=is_cuda)
+            rb  = yr5_t[idx].to(DEVICE, non_blocking=is_cuda)
             out  = model(xb)
             loss = ce(out["dir_5d"], yb) * 0.5 + hub(out["ret_5d"], rb) * 0.5
+            if y15_t is not None:
+                yb15 = y15_t[idx].to(DEVICE, non_blocking=is_cuda)
+                loss = loss + ce(out["dir_15d"], yb15) * 0.5
             opt.zero_grad(); loss.backward(); opt.step()
         sch.step()
 
@@ -311,10 +318,11 @@ def train_lstm(version: int = 1) -> Dict:
             return
         X_c   = np.concatenate(chunk_X)
         y5_c  = np.concatenate(chunk_y5)
+        y15_c = np.concatenate(chunk_y15)
         yr5_c = np.concatenate(chunk_yr5)
         total_seqs += len(X_c)
         print(f"[DL]   chunk: {len(X_c)} seqs, {X_c.nbytes // 1024 // 1024} MB")
-        _train_one_fold(model, X_c, y5_c, yr5_c, epochs=30)
+        _train_one_fold(model, X_c, y5_c, yr5_c, epochs=30, y15=y15_c)
         chunk_X.clear(); chunk_y5.clear(); chunk_y15.clear(); chunk_yr5.clear()
 
     for i, sym in enumerate(symbols):
@@ -336,10 +344,28 @@ def train_lstm(version: int = 1) -> Dict:
 
     print(f"[DL] Total sequences trained: {total_seqs}")
 
-    # Walk-forward validation requires a contiguous array; load a validation sample
-    # from the last chunk that is still in memory — skip if all data was flushed.
-    metrics: Dict = {"directional_accuracy": float("nan"), "roc_auc": float("nan"),
-                     "note": "walk-forward skipped (chunked training)"}
+    # Walk-forward validation: load a held-out sample (up to 50 symbols) fresh from DB.
+    metrics: Dict = {"directional_accuracy": float("nan"), "roc_auc": float("nan")}
+    val_symbols = symbols[:min(50, len(symbols))]
+    val_X, val_y5, val_y15, val_yr5 = [], [], [], []
+    val_con = sqlite3.connect(DB_PATH)
+    for sym in val_symbols:
+        try:
+            Xv, y5v, y15v, yr5v, _ = load_symbol_sequences(sym, val_con)
+            if len(Xv) > 0:
+                val_X.append(Xv); val_y5.append(y5v)
+                val_y15.append(y15v); val_yr5.append(yr5v)
+        except Exception:
+            pass
+    val_con.close()
+    if val_X:
+        X_val   = np.concatenate(val_X)
+        y5_val  = np.concatenate(val_y5)
+        y15_val = np.concatenate(val_y15)
+        yr5_val = np.concatenate(val_yr5)
+        print(f"[DL] Running walk-forward validation on {len(X_val)} validation sequences...")
+        metrics = walk_forward_validate(model, X_val, y5_val, y15_val, yr5_val)
+        print(f"[DL] Walk-forward metrics: {metrics}")
 
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
     path = MODEL_DIR / f"lstm_v{version}.pt"
