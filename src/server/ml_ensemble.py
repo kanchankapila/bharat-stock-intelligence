@@ -251,10 +251,10 @@ def train_ensemble(X: pd.DataFrame, y: pd.Series, min_samples: int = 30):
     acc = ((meta_oof_proba > 0.5) == y).mean()
     print(f"[Ensemble]   Stacking OOF AUC={auc:.4f}  Accuracy={acc:.4f}")
 
-    # Feature importances from GB — unwrap CalibratedClassifierCV to get the fitted estimator
+    # Feature importances from first base model (LGBM) — unwrap CalibratedClassifierCV
     imp = None
     try:
-        gb_cal = fitted[0][1]  # CalibratedClassifierCV for GB
+        gb_cal = fitted[0][1]  # CalibratedClassifierCV for LGBM
         # calibrated_classifiers_ holds (fitted_base, calibrator) pairs from each CV fold
         if hasattr(gb_cal, 'calibrated_classifiers_') and gb_cal.calibrated_classifiers_:
             inner = gb_cal.calibrated_classifiers_[0].estimator
@@ -381,9 +381,9 @@ def score_pending(conn: sqlite3.Connection, ensemble: dict) -> int:
 def run(do_train: bool = True, do_score: bool = True,
         retrain_full: bool = False, min_samples: int = 30):
     try:
-        from sklearn.ensemble import GradientBoostingClassifier
+        from lightgbm import LGBMClassifier  # noqa: F401 — verify dependency at startup
     except ImportError:
-        print("[Ensemble] scikit-learn not installed. Run: pip install scikit-learn")
+        print("[Ensemble] lightgbm not installed. Run: pip install lightgbm")
         sys.exit(1)
 
     conn = sqlite3.connect(DB_PATH)
