@@ -1157,6 +1157,19 @@ export async function runTechnicalSignalScan(options: {
       VALUES (?, ?, ?, ?, 'PENDING')
     `);
 
+    const unifiedUpsert = db.prepare(`
+      INSERT INTO unified_signals
+        (symbol, signal_date, signal_source, signal_type,
+         entry_price, target_price, stop_loss, confidence_score,
+         reasoning, technical_score, status, signal_generated_at)
+      VALUES (?, date('now'), 'TECHNICAL', 'BUY', ?, ?, ?, ?, ?, ?, 'ACTIVE', ?)
+      ON CONFLICT(symbol, signal_date, signal_source) DO UPDATE SET
+        entry_price=excluded.entry_price,
+        technical_score=excluded.technical_score,
+        confidence_score=excluded.confidence_score,
+        signal_generated_at=excluded.signal_generated_at
+    `);
+
     db.transaction((rows: SignalResult[]) => {
       for (const r of rows) {
         upsert.run({
@@ -1179,6 +1192,24 @@ export async function runTechnicalSignalScan(options: {
           setup_quality: r.setupQuality ?? null,
           time_horizon:  r.timeHorizon  ?? null,
         });
+
+        // Mirror actionable signals to unified_signals for cross-source tracking
+        if (r.signalScore > 0) {
+          const signalTs = new Date().toISOString();
+          const slNumeric = r.stopLoss
+            ? (() => { const m = r.stopLoss!.match(/[\d,]+(?:\.\d+)?/); return m ? parseFloat(m[0].replace(/,/g, '')) : null; })()
+            : null;
+          unifiedUpsert.run(
+            r.symbol,
+            r.cmp ?? null,
+            null,                        // target_price — not computed by technical scanner
+            slNumeric,
+            r.signalScore / 10.0,        // normalise 0–10 score to 0–1 confidence
+            JSON.stringify(r.signals) ?? null,
+            r.signalScore,
+            signalTs,
+          );
+        }
 
         if (r.signalScore >= 4) {
           const sl = r.stopLoss ? parseFloat(r.stopLoss) : null;
