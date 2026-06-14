@@ -21,7 +21,10 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
-from torch.amp import autocast, GradScaler
+try:
+    from torch.amp import autocast, GradScaler        # PyTorch 2.3+
+except ImportError:
+    from torch.cuda.amp import autocast, GradScaler   # PyTorch 2.2.x fallback
 from sklearn.metrics import roc_auc_score, accuracy_score
 
 DB_PATH   = Path(__file__).parent.parent.parent / "database.sqlite"
@@ -237,13 +240,13 @@ def walk_forward_validate(model: BiLSTMModel, X: np.ndarray, y5: np.ndarray,
 
 
 def _train_one_fold(model: BiLSTMModel, X: np.ndarray, y5: np.ndarray,
-                    yr5: np.ndarray, epochs: int = 100, y15: np.ndarray = None):
+                    yr5: np.ndarray, epochs: int = 100, y15: np.ndarray = None,
+                    scaler=None):
     opt    = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-4)
     sch    = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=epochs)
     ce     = nn.CrossEntropyLoss()
     hub    = nn.HuberLoss(delta=0.02)
     is_cuda = DEVICE.type == "cuda"
-    scaler = GradScaler('cuda') if is_cuda else None
 
     # Convert to CPU tensors once — avoid per-batch numpy→tensor copies
     X_t   = torch.from_numpy(np.ascontiguousarray(X,   dtype=np.float32))
@@ -260,6 +263,7 @@ def _train_one_fold(model: BiLSTMModel, X: np.ndarray, y5: np.ndarray,
     for ep in range(epochs):
         model.train()
         perm = torch.randperm(n)
+        stepped = False
         for start in range(0, n, bs):
             idx = perm[start:start + bs]
             xb   = X_t[idx].to(DEVICE, non_blocking=is_cuda)
@@ -273,13 +277,18 @@ def _train_one_fold(model: BiLSTMModel, X: np.ndarray, y5: np.ndarray,
                 if yb15 is not None:
                     loss = loss + ce(out["dir_15d"], yb15) * 0.5
             if scaler is not None:
+                prev_scale = scaler.get_scale()
                 scaler.scale(loss).backward()
                 scaler.step(opt)
                 scaler.update()
+                if scaler.get_scale() >= prev_scale:  # step was not skipped
+                    stepped = True
             else:
                 loss.backward()
                 opt.step()
-        sch.step()
+                stepped = True
+        if stepped:
+            sch.step()
 
 
 def _predict_batch(model: BiLSTMModel, X: np.ndarray, bs: int = 256) -> Dict[str, np.ndarray]:
@@ -297,7 +306,7 @@ def _predict_batch(model: BiLSTMModel, X: np.ndarray, bs: int = 256) -> Dict[str
                 out = model(xb)
             for k in results:
                 tensor = torch.softmax(out[k], dim=-1) if k in _DIR_KEYS else out[k]
-                results[k].append(tensor.cpu().numpy())
+                results[k].append(tensor.float().cpu().numpy())
     return {k: np.concatenate(v) for k, v in results.items()}
 
 
@@ -317,6 +326,8 @@ def train_lstm(version: int = 1) -> Dict:
     print(f"[DL] Training BiLSTM on {len(symbols)} symbols (chunk size {_CHUNK_SIZE})...")
 
     model = BiLSTMModel().to(DEVICE)
+    # Single scaler shared across all chunks — preserves calibrated loss scale between chunks
+    amp_scaler = GradScaler('cuda') if DEVICE.type == "cuda" else None
 
     # Accumulate one chunk, train, then release before next chunk to bound peak RAM.
     # We do a single pass through all symbols; for production you can add outer epochs.
@@ -333,7 +344,7 @@ def train_lstm(version: int = 1) -> Dict:
         yr5_c = np.concatenate(chunk_yr5)
         total_seqs += len(X_c)
         print(f"[DL]   chunk: {len(X_c)} seqs, {X_c.nbytes // 1024 // 1024} MB")
-        _train_one_fold(model, X_c, y5_c, yr5_c, epochs=30, y15=y15_c)
+        _train_one_fold(model, X_c, y5_c, yr5_c, epochs=30, y15=y15_c, scaler=amp_scaler)
         chunk_X.clear(); chunk_y5.clear(); chunk_y15.clear(); chunk_yr5.clear()
 
     for i, sym in enumerate(symbols):

@@ -24,7 +24,7 @@ class FinBERTInference:
                 try:
                     import torch
                     device = 0 if torch.cuda.is_available() else -1
-                except ImportError:
+                except (ImportError, RuntimeError):
                     device = -1
                 self.classifier = pipeline("sentiment-analysis", model="ProsusAI/finbert", device=device)
                 print("FinBERT model loaded successfully.")
