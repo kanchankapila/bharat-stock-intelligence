@@ -75,6 +75,14 @@ interface YFAuth {
 }
 
 let yfAuth: YFAuth | null = null;
+let refreshInFlight: Promise<YFAuth> | null = null;
+
+async function refreshYFAuthOnce(): Promise<YFAuth> {
+  if (!refreshInFlight) {
+    refreshInFlight = getYFAuth().finally(() => { refreshInFlight = null; });
+  }
+  return refreshInFlight;
+}
 
 async function getYFAuth(): Promise<YFAuth> {
   if (yfAuth && Date.now() < yfAuth.expiresAt) return yfAuth;
@@ -316,7 +324,7 @@ async function fetchPhase2Data(
     await invalidateCrumb();
     throw new Error('CRUMB_EXPIRED');
   }
-  if (!res.ok) return null;
+  if (!res.ok) throw new Error(`[FUNDSYNC] HTTP ${res.status} for ${symbol}`);
 
   const data = await res.json();
   const result = data?.quoteSummary?.result?.[0];
@@ -379,7 +387,7 @@ export async function runPhase2(symbolsOverride?: string[]): Promise<void> {
           return await fetchPhase2Data(symbol, auth);
         } catch (err: any) {
           if (err.message === 'CRUMB_EXPIRED') {
-            auth = await getYFAuth();
+            auth = await refreshYFAuthOnce();
             return await fetchPhase2Data(symbol, auth);
           }
           throw err;
@@ -449,9 +457,13 @@ export async function runFullFundamentalsSync(phase2Only = false): Promise<void>
 // ─── Single-symbol refresh (for on-demand use in individual stock views) ─────
 
 export async function refreshSymbolFundamentals(symbol: string): Promise<void> {
-  const auth = await getYFAuth();
+  let auth = await getYFAuth();
   await fetchPhase1Batch([symbol], auth);
-  const row = await fetchPhase2Data(symbol, auth);
+  const row = await fetchPhase2Data(symbol, auth).catch(async (err: any) => {
+    if (err.message !== 'CRUMB_EXPIRED') throw err;
+    auth = await refreshYFAuthOnce();
+    return fetchPhase2Data(symbol, auth);
+  });
   if (row) writePhase2Batch([row]);
 }
 
