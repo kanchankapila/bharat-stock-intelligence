@@ -1,5 +1,21 @@
 import asyncio
 import sqlite3
+
+
+def _run_async(coro):
+    """Run a coroutine safely whether or not an event loop is already running."""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop and loop.is_running():
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(asyncio.run, coro)
+            return future.result()
+    else:
+        return asyncio.run(coro)
 import yfinance as yf
 import httpx
 import pandas as pd
@@ -384,7 +400,7 @@ def gap_fill(conn, lookback_days: int = 30) -> None:
             ).fetchall()
             existing[sym] = {r[0] for r in rows}
 
-        total_filled += asyncio.run(_gap_fill_async(conn, batch, tickers, existing, cutoff, today))
+        total_filled += _run_async(_gap_fill_async(conn, batch, tickers, existing, cutoff, today))
 
     # Also gap-fill indices
     for label, ticker in INDEX_TICKERS.items():
