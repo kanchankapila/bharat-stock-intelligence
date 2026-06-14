@@ -30,7 +30,9 @@ export const scoringRouter = router({
       const { quantScoringQueue } = await import('../queues');
       if (!quantScoringQueue) {
         const { runQuantScoring } = await import('../quantScoringService');
-        runQuantScoring().catch(console.error);
+        runQuantScoring().catch(err =>
+          console.error('[QUANT] Manual trigger error:', (err as Error).message)
+        );
         return { queued: false, message: 'Running directly (no Redis)' };
       }
       const [waiting, active] = await Promise.all([quantScoringQueue.getWaiting(), quantScoringQueue.getActive()]);

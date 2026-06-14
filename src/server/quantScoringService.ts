@@ -86,10 +86,15 @@ export async function bootstrapQuantScoring(bullmqReady: boolean): Promise<void>
     }
   }
   console.log('[QUANT] No Redis — starting first-time quant scoring directly');
-  runQuantScoring().catch(err => console.error('[QUANT] First-run error:', err.message));
+  runQuantScoring().catch(err => {
+    console.error('[QUANT] First-run error:', err.message);
+    // Don't rethrow — startup must not crash if quant scoring fails
+  });
   setInterval(() => {
     console.log('[QUANT] Triggering daily quant strategy scoring (fallback)');
-    runQuantScoring().catch(console.error);
+    runQuantScoring().catch(err =>
+      console.error('[QUANT] Scheduled fallback error:', (err as Error).message)
+    );
   }, 24 * 60 * 60 * 1000);
 }
 
