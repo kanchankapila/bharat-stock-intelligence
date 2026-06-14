@@ -17,6 +17,7 @@
  */
 
 import db from './db';
+import { wsSignalService } from './websocketService';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1209,6 +1210,18 @@ export async function runTechnicalSignalScan(options: {
             r.signalScore,
             signalTs,
           );
+          try {
+            wsSignalService.broadcastNewSignal({
+              type: 'new_signal',
+              symbol: r.symbol,
+              timestamp: signalTs,
+              price: r.cmp ?? undefined,
+              source: 'TECHNICAL',
+              generatedAt: signalTs,
+            });
+          } catch {
+            // broadcast is best-effort; never fail the scan
+          }
         }
 
         if (r.signalScore >= 4) {
