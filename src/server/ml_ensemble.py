@@ -95,13 +95,6 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     hi52_s     = pd.to_numeric(df.get('fifty_two_week_high', np.nan), errors='coerce')
     X['dist_52w_high'] = ((cmp_s - hi52_s) / hi52_s.replace(0, np.nan) * 100).fillna(0)
 
-    # Composite screener score (0–100 scale from scoring engine)
-    X['screener_score'] = pd.to_numeric(df.get('screener_score', 50), errors='coerce').fillna(50) / 100.0
-
-    # Max return pct during horizon (available in training data, not in pending)
-    if 'max_return_pct' in df.columns:
-        X['max_return_pct'] = pd.to_numeric(df['max_return_pct'], errors='coerce').fillna(0)
-
     # Signal type one-hot
     sig_col = df.get('signals_json', pd.Series(['[]'] * len(df), index=df.index))
     type_sets = sig_col.apply(_parse_signal_types)
@@ -123,16 +116,12 @@ def load_training_data(conn: sqlite3.Connection) -> pd.DataFrame:
                ts.rsi, ts.adx, ts.nifty_regime, ts.cmp, ts.sma200, ts.volume_ratio,
                ts.fii_3d_net,
                ts.above_sma200,
-               sf.fifty_two_week_high,
-               ss.score AS screener_score,
-               so.max_return_pct
+               sf.fifty_two_week_high
         FROM signal_outcomes so
         LEFT JOIN technical_signals ts
                ON ts.symbol = so.symbol AND ts.date = so.signal_date
         LEFT JOIN stock_fundamentals sf
                ON sf.symbol = so.symbol
-        LEFT JOIN stock_scores ss
-               ON ss.symbol = so.symbol AND ss.timeframe = 'long_term'
         WHERE so.outcome IN ('WIN','LOSS','NEUTRAL')
           AND so.return_pct IS NOT NULL
     """
@@ -147,11 +136,9 @@ def load_pending_signals(conn: sqlite3.Connection) -> pd.DataFrame:
                ts.rsi, ts.adx, ts.nifty_regime, ts.cmp, ts.sma200, ts.volume_ratio,
                ts.fii_3d_net,
                ts.above_sma200,
-               sf.fifty_two_week_high,
-               ss.score AS screener_score
+               sf.fifty_two_week_high
         FROM technical_signals ts
         LEFT JOIN stock_fundamentals sf ON sf.symbol = ts.symbol
-        LEFT JOIN stock_scores ss ON ss.symbol = ts.symbol AND ss.timeframe = 'long_term'
         WHERE ts.win_probability IS NULL
           AND ts.signals_json IS NOT NULL
         ORDER BY ts.date DESC
@@ -198,7 +185,8 @@ def _base_models():
 
 
 def train_ensemble(X: pd.DataFrame, y: pd.Series, min_samples: int = 30):
-    from sklearn.model_selection import StratifiedKFold, cross_val_score
+    from sklearn.model_selection import TimeSeriesSplit
+    from sklearn.base import clone as _sklearn_clone
     from sklearn.linear_model import LogisticRegression
     from sklearn.preprocessing import StandardScaler
     from sklearn.pipeline import Pipeline
@@ -208,7 +196,7 @@ def train_ensemble(X: pd.DataFrame, y: pd.Series, min_samples: int = 30):
     base = _base_models()
 
     # ── Out-of-fold stacking ─────────────────────────────────────────────────
-    skf    = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    skf    = TimeSeriesSplit(n_splits=5)
     oof    = np.zeros((len(X), len(base)))
     fitted = []
 
@@ -216,12 +204,13 @@ def train_ensemble(X: pd.DataFrame, y: pd.Series, min_samples: int = 30):
         print(f"[Ensemble]   Training base model: {name}...")
         oof_preds = np.zeros(len(X))
         for fold_i, (train_idx, val_idx) in enumerate(skf.split(X, y)):
-            m_clone = _base_models()[j][1]  # fresh clone
+            # Use raw (uncalibrated) base estimator for OOF — avoids inner-cv crash on small folds
+            m_clone = _sklearn_clone(_base_models()[j][1].estimator)
             m_clone.fit(X.iloc[train_idx], y.iloc[train_idx])
             oof_preds[val_idx] = m_clone.predict_proba(X.iloc[val_idx])[:, 1]
         oof[:, j] = oof_preds
 
-        # Full fit on all data for inference
+        # Full fit with calibration for inference
         model.fit(X, y)
         fitted.append((name, model))
 
@@ -383,6 +372,7 @@ def run(do_train: bool = True, do_score: bool = True,
                 print("[Ensemble] Retraining (incremental — same architecture)...")
 
             df = load_training_data(conn)
+            df = df.sort_values('signal_date').reset_index(drop=True)
             if len(df) < min_samples:
                 print(f"[Ensemble] Need {min_samples} samples, have {len(df)}. Skipping train.")
                 do_train = False
