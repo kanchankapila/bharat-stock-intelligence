@@ -1487,6 +1487,10 @@ runMigration('038_agent_tables', `
 `);
 
 
+runMigration('039_feature_store_index', `
+  CREATE INDEX IF NOT EXISTS idx_fs_sym_tf_date ON feature_store(symbol, timeframe, date);
+`);
+
 // Keep startup diagnostics off stdout so stdio-based clients can parse JSON-RPC.
 console.error('[DB] Schema normalization complete (Phase 3.5)');
 
