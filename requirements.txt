@@ -1,5 +1,4 @@
 pandas
-pandas-ta
 yfinance
 ta
 sqlalchemy
@@ -23,3 +22,4 @@ pytorch-lightning>=2.2.0
 hmmlearn>=0.3.0
 shap>=0.45.0
 scikit-learn>=1.4.0
+httpx

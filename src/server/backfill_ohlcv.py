@@ -1,11 +1,106 @@
+import asyncio
 import sqlite3
 import yfinance as yf
+import httpx
 import pandas as pd
 import os
 import time
 from tqdm import tqdm
 
 DB_PATH = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'database.sqlite'))
+
+_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0",
+    "Accept": "application/json",
+}
+_GAP_FILL_SEM = asyncio.Semaphore(20)  # max 20 concurrent requests
+
+
+def _date_to_unix(date_str: str) -> int:
+    """Convert YYYY-MM-DD string to Unix timestamp for YF API."""
+    from datetime import datetime
+    return int(datetime.strptime(date_str, "%Y-%m-%d").timestamp())
+
+
+async def _fetch_ohlcv_async(
+    client: httpx.AsyncClient,
+    symbol: str,
+    ticker: str,
+    cutoff: str,
+    today: str,
+) -> list:
+    """Fetch daily OHLCV for one NSE symbol between cutoff and today using YF v8 chart."""
+    async with _GAP_FILL_SEM:
+        url = (
+            f"https://query2.finance.yahoo.com/v8/finance/chart/{ticker}"
+            f"?interval=1d"
+            f"&period1={_date_to_unix(cutoff)}"
+            f"&period2={_date_to_unix(today)}"
+        )
+        try:
+            r = await client.get(url, timeout=15.0)
+            if r.status_code != 200:
+                return []
+            data = r.json()
+            result = data.get("chart", {}).get("result", [])
+            if not result:
+                return []
+            res = result[0]
+            timestamps = res.get("timestamp", [])
+            quotes = res.get("indicators", {}).get("quote", [{}])[0]
+            opens   = quotes.get("open",   [])
+            highs   = quotes.get("high",   [])
+            lows    = quotes.get("low",    [])
+            closes  = quotes.get("close",  [])
+            volumes = quotes.get("volume", [])
+            records = []
+            for i, ts in enumerate(timestamps):
+                try:
+                    from datetime import datetime, timezone
+                    date_str = datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d")
+                    c = float(closes[i]) if closes[i] is not None else None
+                    if c is None:
+                        continue
+                    records.append((
+                        symbol, date_str,
+                        float(opens[i])   if opens[i]   is not None else c,
+                        float(highs[i])   if highs[i]   is not None else c,
+                        float(lows[i])    if lows[i]    is not None else c,
+                        c,
+                        int(volumes[i])   if volumes[i] is not None else 0,
+                    ))
+                except (IndexError, TypeError, ValueError):
+                    continue
+            return records
+        except Exception:
+            return []
+
+
+async def _gap_fill_async(
+    conn: sqlite3.Connection,
+    symbols: list,
+    tickers: list,
+    existing: dict,
+    cutoff: str,
+    today: str,
+) -> int:
+    """Download OHLCV for all symbols concurrently and upsert missing rows."""
+    async with httpx.AsyncClient(headers=_HEADERS) as client:
+        tasks = [
+            _fetch_ohlcv_async(client, sym, tick, cutoff, today)
+            for sym, tick in zip(symbols, tickers)
+        ]
+        results = await asyncio.gather(*tasks)
+
+    all_records = []
+    for sym, records in zip(symbols, results):
+        existing_dates = existing.get(sym, set())
+        new_recs = [r for r in records if r[1] not in existing_dates]
+        all_records.extend(new_recs)
+
+    if all_records:
+        _upsert(conn, all_records)
+    return len(all_records)
 
 def init_db(conn):
     conn.execute("""
@@ -261,10 +356,10 @@ def fetch_indices(conn) -> None:
 
 def gap_fill(conn, lookback_days: int = 30) -> None:
     """Fetch only missing trading days for symbols already in stock_ohlcv."""
-    import pandas as pd
     from datetime import datetime, timedelta
 
     cutoff = (datetime.today() - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
+    today  = datetime.today().strftime("%Y-%m-%d")
     symbols = [r[0] for r in conn.execute(
         "SELECT DISTINCT symbol FROM stock_ohlcv"
     ).fetchall()]
@@ -289,22 +384,7 @@ def gap_fill(conn, lookback_days: int = 30) -> None:
             ).fetchall()
             existing[sym] = {r[0] for r in rows}
 
-        for symbol, ticker in zip(batch, tickers):
-            try:
-                df = yf.download(ticker, start=cutoff, progress=False, auto_adjust=True)
-                if df is None or df.empty:
-                    continue
-                if isinstance(df.columns, pd.MultiIndex):
-                    df.columns = df.columns.get_level_values(0)
-                recs = _extract_records(symbol, df)
-                new_recs = [r for r in recs if r[1] not in existing[symbol]]
-                if new_recs:
-                    _upsert(conn, new_recs)
-                    total_filled += len(new_recs)
-            except Exception as e:
-                tqdm.write(f"[GAP-FILL] ERROR {symbol}: {e}")
-
-        time.sleep(0.5)
+        total_filled += asyncio.run(_gap_fill_async(conn, batch, tickers, existing, cutoff, today))
 
     # Also gap-fill indices
     for label, ticker in INDEX_TICKERS.items():
