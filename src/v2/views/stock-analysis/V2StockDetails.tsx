@@ -2,12 +2,9 @@ import React, { useState } from 'react';
 import { trpc } from '../../../lib/trpc';
 import { V2LightweightChart } from '../../components/widgets/V2LightweightChart';
 import { OptionChainView } from '../../../components/OptionChainView';
-import { OptionChainView } from '../../../components/OptionChainView';
-import { 
+import {
   ArrowLeft, ArrowUpRight, Activity, TrendingUp, Filter, History, PieChart, Zap, LayoutDashboard, Database, BarChart3, Target, BrainCircuit
-  ArrowLeft, Activity, TrendingUp, Filter, History, PieChart, Zap, LayoutDashboard, Database, BarChart3, Target
 } from 'lucide-react';
-import { cn } from '../../../lib/utils';
 import { cn } from '../../../lib/utils';
 import type { MarketData } from '../../../services/marketService';
 

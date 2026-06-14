@@ -97,6 +97,8 @@ const V2AppShell         = React.lazy(() => import('./v2/components/layout/V2App
 const V2StockDetails     = React.lazy(() => import('./v2/views/stock-analysis/V2StockDetails').then(m => ({ default: m.V2StockDetails })));
 const V2Settings         = React.lazy(() => import('./v2/views/settings/V2Settings').then(m => ({ default: m.V2Settings })));
 const V2Dashboard        = React.lazy(() => import('./v2/views/dashboard/V2Dashboard').then(m => ({ default: m.V2Dashboard })));
+const SignalTracking     = React.lazy(() => import('./components/SignalTracking').then(m => ({ default: m.SignalTracking })));
+const V2SignalTracking   = React.lazy(() => import('./v2/views/signals/V2SignalTracking').then(m => ({ default: m.V2SignalTracking })));
 
 // Lazy Suspense fallback
 const PageFallback = () => (
@@ -2855,6 +2857,29 @@ const StockDetails: React.FC<{
     }
   });
 
+  const [aiAnalysis, setAiAnalysis] = useState<any>(null);
+  const aiAnalysisMutation = trpc.getAIAnalysis.useMutation({
+    onSuccess: (data) => setAiAnalysis(data),
+  });
+
+  // Auto-run AI analysis once stock data is available, run only once per symbol
+  React.useEffect(() => {
+    if (!stock || aiAnalysis || aiAnalysisMutation.isPending) return;
+    aiAnalysisMutation.mutate({
+      symbol,
+      data: {
+        price: stock.price,
+        change: stock.change,
+        changePct: stock.changePct,
+        volume: stock.volume,
+        high: stock.high,
+        low: stock.low,
+        name: stock.name,
+      },
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stock?.price, symbol]);
+
   // Synthetic high-fidelity candlestick data
   const [chartData] = useState(() => {
     const base = stock?.price || 1000;
@@ -3435,25 +3460,55 @@ const StockDetails: React.FC<{
                 </div>
 
                 <div className="pt-2">
-                  {report ? (
-                    <div className="p-4 glass-strong border border-blue-500/30 rounded-xl space-y-3">
-                      <h6 className="text-[10px] font-black text-blue-400 uppercase italic">Intelligence Report Ready</h6>
-                      <p className="text-[11px] text-white/80 leading-relaxed italic">"{report.summary}"</p>
-                      <div className="flex justify-between items-center bg-blue-500/10 p-2 rounded">
-                        <span className="text-[9px] font-black text-blue-400 uppercase">Outlook</span>
-                        <span className="text-xs font-bold text-white uppercase italic">{report.outlook}</span>
+                  {aiAnalysisMutation.isPending ? (
+                    <div className="p-4 glass-strong border border-blue-500/20 rounded-xl space-y-2 animate-pulse">
+                      <div className="flex items-center gap-2">
+                        <Activity className="w-4 h-4 text-blue-400 animate-spin" />
+                        <span className="text-[10px] font-black text-blue-400 uppercase tracking-widest">AI Analysing...</span>
                       </div>
+                      <div className="h-2 bg-slate-800 rounded w-3/4" />
+                      <div className="h-2 bg-slate-800 rounded w-1/2" />
+                    </div>
+                  ) : aiAnalysis && !aiAnalysis.error ? (
+                    <div className="p-4 glass-strong border border-blue-500/30 rounded-xl space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[9px] font-black text-blue-400 uppercase tracking-widest flex items-center gap-1">
+                          <BrainCircuit className="w-3 h-3" /> AI Signal
+                        </span>
+                        <span className={cn(
+                          "text-[10px] font-black uppercase px-2 py-0.5 rounded",
+                          aiAnalysis.signal === 'BUY' ? "bg-emerald-500/10 text-emerald-400" :
+                          aiAnalysis.signal === 'SELL' ? "bg-rose-500/10 text-rose-400" : "bg-amber-500/10 text-amber-400"
+                        )}>{aiAnalysis.signal}</span>
+                      </div>
+                      <div className="grid grid-cols-3 gap-1.5 text-center">
+                        {[
+                          { label: 'Entry', val: aiAnalysis.entry, color: 'text-blue-400' },
+                          { label: 'Target', val: aiAnalysis.target, color: 'text-emerald-400' },
+                          { label: 'SL', val: aiAnalysis.stopLoss, color: 'text-rose-400' },
+                        ].map(({ label, val, color }) => (
+                          <div key={label} className="p-1.5 bg-slate-900/60 rounded-lg">
+                            <p className="text-[8px] font-black text-slate-400 uppercase mb-0.5">{label}</p>
+                            <p className={cn("text-[10px] font-black tabular-nums", color)}>₹{val?.toFixed(1)}</p>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[8px] font-black text-slate-400 uppercase">Confidence</span>
+                        <div className="flex-1 bg-slate-900 rounded-full h-1.5 overflow-hidden">
+                          <div className="bg-blue-500 h-full rounded-full" style={{ width: `${aiAnalysis.confidence}%` }} />
+                        </div>
+                        <span className="text-[9px] font-black text-blue-400">{aiAnalysis.confidence}%</span>
+                      </div>
+                      <p className="text-[10px] text-slate-400 leading-relaxed italic line-clamp-3">{aiAnalysis.reasoning}</p>
                     </div>
                   ) : (
-                    <button 
-                      onClick={() => reportMutation.mutate({ symbol })}
-                      disabled={reportMutation.isPending}
-                      className={cn(
-                        "w-full py-3 rounded-xl border font-black text-[10px] uppercase tracking-widest transition-all",
-                        reportMutation.isPending ? "glass border-slate-800/50 text-slate-400" : "bg-blue-600 border-blue-600 text-white hover:bg-blue-700 shadow-[0_5px_15px_rgba(37,99,235,0.3)]"
-                      )}
+                    <button
+                      onClick={() => stock && aiAnalysisMutation.mutate({ symbol, data: { price: stock.price, change: stock.change, changePct: stock.changePct, volume: stock.volume, high: stock.high, low: stock.low, name: stock.name } })}
+                      disabled={!stock}
+                      className="w-full py-3 rounded-xl border font-black text-[10px] uppercase tracking-widest transition-all bg-blue-600 border-blue-600 text-white hover:bg-blue-700 shadow-[0_5px_15px_rgba(37,99,235,0.3)] disabled:opacity-40 disabled:cursor-not-allowed"
                     >
-                      {reportMutation.isPending ? 'Crunching Data...' : 'Generate Analyst Report'}
+                      Run AI Analysis
                     </button>
                   )}
                 </div>
@@ -3726,6 +3781,7 @@ export default function App() {
             <Route path="/trade-cockpit" element={<TradeDecisionCockpit onSelectStock={(s) => setDrawerSymbol(s)} />} />
             <Route path="/backtest" element={<Backtest stocks={stocks} />} />
             <Route path="/signals" element={<DailySignals onSelectStock={(s) => setDrawerSymbol(s)} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
+            <Route path="/signal-tracking" element={<V2SignalTracking />} />
             <Route path="/signal-intelligence" element={<SignalIntelligence />} />
             <Route path="/signal-report-card" element={<SignalReportCard />} />
             <Route path="/research" element={
@@ -3860,6 +3916,7 @@ export default function App() {
               ) : <div className="p-6">Select a stock to view details</div>} />
               <Route path="/backtest" element={<Backtest stocks={stocks} />} />
               <Route path="/signals" element={<DailySignals onSelectStock={(s) => setDrawerSymbol(s)} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
+              <Route path="/signal-tracking" element={<SignalTracking />} />
               <Route path="/signal-intelligence" element={<SignalIntelligence />} />
               <Route path="/signal-report-card" element={<SignalReportCard />} />
               <Route path="/research" element={
