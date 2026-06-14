@@ -256,8 +256,8 @@ async function processAISignal(job: Job): Promise<void> {
 
   // Broadcast via WebSocket so the frontend gets a real-time alert
   try {
-    const { webSocketSignalService } = await import('./websocketService');
-    webSocketSignalService.broadcastNewSignal({
+    const { wsSignalService } = await import('./websocketService');
+    wsSignalService.broadcastNewSignal({
       type: 'new_signal',
       symbol,
       timestamp: now,
@@ -265,11 +265,11 @@ async function processAISignal(job: Job): Promise<void> {
       generatedAt: now,
       signal: {
         signalType: analysis.signal,
-        entryPrice: analysis.entry,
-        targetPrice: analysis.target,
-        stopLoss: analysis.stopLoss,
-        confidence: analysis.confidence,
-        reasoning: analysis.reasoning,
+        entryPrice: analysis.entry ?? null,
+        targetPrice: analysis.target ?? null,
+        stopLoss: analysis.stopLoss ?? null,
+        confidence: analysis.confidence ?? null,
+        reasoning: analysis.reasoning ?? null,
       },
     });
   } catch {
