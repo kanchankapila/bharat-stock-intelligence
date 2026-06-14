@@ -100,19 +100,30 @@ def update_weights(
     days: Optional[int] = None,
     dry_run: bool = False,
 ) -> dict[str, int]:
-    query = """
+    cutoff_clause = ""
+    params: tuple = ()
+    if days:
+        cutoff = (datetime.datetime.now() - datetime.timedelta(days=days)).strftime('%Y-%m-%d')
+        cutoff_clause = "AND signal_date >= ?"
+        params = (cutoff,)
+
+    # Union technical signal outcomes with unified signal outcomes (AI, QUANT)
+    query = f"""
         SELECT symbol, signal_date, horizon_days, return_pct, outcome, signals_json
         FROM signal_outcomes
         WHERE outcome IN ('WIN','LOSS','NEUTRAL','STOP_LOSS')
           AND return_pct IS NOT NULL
+          {cutoff_clause}
+        UNION ALL
+        SELECT uso.symbol, uso.signal_date, uso.horizon_days, uso.return_pct, uso.outcome,
+               NULL AS signals_json
+        FROM unified_signal_outcomes uso
+        WHERE uso.outcome IN ('WIN','LOSS','NEUTRAL','STOP_LOSS')
+          AND uso.return_pct IS NOT NULL
+          AND uso.signal_source NOT IN ('TECHNICAL')
+          {cutoff_clause}
     """
-    params: tuple = ()
-    if days:
-        cutoff = (datetime.datetime.now() - datetime.timedelta(days=days)).strftime('%Y-%m-%d')
-        query += " AND signal_date >= ?"
-        params = (cutoff,)
-
-    rows = conn.execute(query, params).fetchall()
+    rows = conn.execute(query, params + params).fetchall()
     if not rows:
         print("[RewardEngine] No resolved outcomes found.")
         return {'processed': 0, 'updated': 0}
