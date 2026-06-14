@@ -11,7 +11,8 @@ Simulation rules:
   - Position sizing: equal-weight (1 / max_positions of portfolio capital)
   - Max simultaneous positions: 20 (configurable)
   - No short selling
-  - No slippage model (conservative — add slippage_bps if needed)
+  - Commission: 25 bps round-trip by default (configurable via --commission)
+  - Slippage: 10 bps default (configurable via --slippage)
 
 Writes results to backtesting_runs table.
 
@@ -112,6 +113,7 @@ class Backtester:
         initial_capital: float = INITIAL_CAPITAL,
         slippage_bps: float = 10,
         stop_loss_pct: float = 7.0,
+        commission_bps: float = 25,
     ) -> tuple[list[dict], pd.Series]:
         """
         Simulate trades from signals.  Returns (trade_log, equity_curve_daily).
@@ -154,11 +156,13 @@ class Backtester:
                 day_ohlcv = ohlcv_dict[sym][ohlcv_dict[sym]['date'] == date]
                 if day_ohlcv.empty:
                     continue
-                exit_price = float(day_ohlcv['close'].iloc[0])
-                ret_pct    = (exit_price - pos['entry_price']) / pos['entry_price'] * 100
-                pnl        = (exit_price - pos['entry_price']) * pos['shares']
-                cash      += exit_price * pos['shares']
-                outcome    = 'WIN' if ret_pct > 1.0 else 'LOSS' if ret_pct < -1.0 else 'NEUTRAL'
+                exit_price   = float(day_ohlcv['close'].iloc[0])
+                exit_comm    = exit_price * pos['shares'] * commission_bps / 10_000
+                net_proceeds = exit_price * pos['shares'] - exit_comm
+                pnl          = net_proceeds - pos['total_cost']
+                ret_pct      = pnl / pos['total_cost'] * 100
+                cash        += net_proceeds
+                outcome      = 'WIN' if ret_pct > 1.0 else 'LOSS' if ret_pct < -1.0 else 'NEUTRAL'
                 trade_log.append({
                     'symbol':       sym,
                     'entry_date':   pos['entry_date'].isoformat(),
@@ -170,6 +174,7 @@ class Backtester:
                     'outcome':      outcome,
                     'signal_score': pos['signal_score'],
                     'holding_days': days_held,
+                    'shares':       pos['shares'],
                 })
                 del open_positions[sym]
 
@@ -181,12 +186,16 @@ class Backtester:
                 day_ohlcv = ohlcv_dict[sym][ohlcv_dict[sym]['date'] == date]
                 if day_ohlcv.empty:
                     continue
-                day_low = float(day_ohlcv['low'].iloc[0])
+                day_low  = float(day_ohlcv['low'].iloc[0])
+                day_open = float(day_ohlcv['open'].iloc[0])
                 if day_low <= pos['stop_loss']:
-                    exit_price = pos['stop_loss']  # assume stops are honoured
-                    ret_pct    = (exit_price - pos['entry_price']) / pos['entry_price'] * 100
-                    pnl        = (exit_price - pos['entry_price']) * pos['shares']
-                    cash      += exit_price * pos['shares']
+                    # Gap-down: if open is already below stop, fill at open (worse than stop)
+                    exit_price   = min(day_open, pos['stop_loss'])
+                    exit_comm    = exit_price * pos['shares'] * commission_bps / 10_000
+                    net_proceeds = exit_price * pos['shares'] - exit_comm
+                    pnl          = net_proceeds - pos['total_cost']
+                    ret_pct      = pnl / pos['total_cost'] * 100
+                    cash        += net_proceeds
                     trade_log.append({
                         'symbol':       sym,
                         'entry_date':   pos['entry_date'].isoformat(),
@@ -198,6 +207,7 @@ class Backtester:
                         'outcome':      'STOP_LOSS',
                         'signal_score': pos['signal_score'],
                         'holding_days': (date - pos['entry_date']).days,
+                        'shares':       pos['shares'],
                     })
                     del open_positions[sym]
 
@@ -217,17 +227,18 @@ class Backtester:
                 if pd.isna(entry_price) or entry_price <= 0:
                     continue
 
-                # Equal-weight position size
-                position_capital = cash / max(max_positions - len(open_positions), 1)
-                position_capital = min(position_capital, cash * 0.1)  # max 10% per trade
+                # Fixed equal-weight: each slot = 1/max_positions of initial capital
+                position_capital = initial_capital / max_positions
+                position_capital = min(position_capital, cash * 0.95)  # cannot exceed available cash
                 if position_capital < 1000:
                     continue
                 shares = math.floor(position_capital / entry_price)
                 if shares < 1:
                     continue
 
-                cost = shares * entry_price
-                cash -= cost
+                entry_comm = shares * entry_price * commission_bps / 10_000
+                total_cost = shares * entry_price + entry_comm
+                cash -= total_cost
 
                 sl = float(row['stop_loss']) if pd.notna(row['stop_loss']) else entry_price * (1 - stop_loss_pct / 100)
                 open_positions[sym] = {
@@ -237,6 +248,7 @@ class Backtester:
                     'horizon_days': int(row['horizon_days']),
                     'shares':       shares,
                     'signal_score': int(row['signal_score']),
+                    'total_cost':   total_cost,
                 }
 
             # ── Mark-to-market portfolio value ───────────────────────────────
@@ -411,6 +423,7 @@ class Backtester:
         run_name: str = "",
         slippage_bps: float = 10,
         stop_loss_pct: float = 7.0,
+        commission_bps: float = 25,
     ) -> dict:
         print(f"[Backtester] {start} -> {end}  horizon={horizon_days}d  min_score={min_score}")
 
@@ -441,6 +454,7 @@ class Backtester:
             initial_capital=initial_capital,
             slippage_bps=slippage_bps,
             stop_loss_pct=stop_loss_pct,
+            commission_bps=commission_bps,
         )
 
         if not trade_log:
@@ -455,6 +469,7 @@ class Backtester:
             'initial_capital': initial_capital,
             'symbols_count': len(symbols),
             'slippage_bps': slippage_bps,
+            'commission_bps': commission_bps,
         }
 
         print(f"\n{'='*60}")
@@ -480,6 +495,7 @@ if __name__ == "__main__":
     parser.add_argument("--max-pos",  type=int, default=20)
     parser.add_argument("--capital",  type=float, default=INITIAL_CAPITAL)
     parser.add_argument("--slippage", type=float, default=10, help="Slippage in bps")
+    parser.add_argument("--commission", type=float, default=25, help="Round-trip commission in bps")
     parser.add_argument("--name",     type=str, default="")
     args = parser.parse_args()
 
@@ -494,6 +510,7 @@ if __name__ == "__main__":
             initial_capital=args.capital,
             run_name=args.name,
             slippage_bps=args.slippage,
+            commission_bps=args.commission,
         )
     finally:
         bt.close()
