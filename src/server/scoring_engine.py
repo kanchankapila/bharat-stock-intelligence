@@ -170,7 +170,13 @@ class AlphaQuantScoringEngine:
             for _, s in screeners_to_infer.iterrows():
                 inference = self.nlp.infer(s['name'], s.get('description', '') or '')
 
+                confidence = inference.get('confidence', 0.0)
                 sentiment = inference['sentiment']
+
+                # Skip NLP override if model is uncertain (< 80% confidence)
+                if confidence < 0.8:
+                    sentiment = 'neutral'
+
                 # For MoneyControl only: use the explicit is_positive flag to resolve neutral
                 if sentiment == 'neutral' and s['source'] == 'MoneyControl' and pd.notna(s.get('is_positive')):
                     sentiment = 'bullish' if int(s['is_positive']) == 1 else 'bearish'
@@ -182,7 +188,7 @@ class AlphaQuantScoringEngine:
                     'inferred_sentiment': sentiment,
                     'inferred_category':  inference['category'],
                     'inferred_timeframe': inference['timeframe'],
-                    'confidence':         inference['confidence'],
+                    'confidence':         confidence,
                     'signal_type_tag':    inference.get('signal_type_tag', 'OTHER'),
                     'last_updated':       datetime.datetime.now().isoformat(),
                 })
