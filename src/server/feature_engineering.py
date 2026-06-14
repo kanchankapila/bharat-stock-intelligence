@@ -8,6 +8,8 @@ import sys
 import json
 import sqlite3
 import pickle
+import multiprocessing
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
@@ -380,14 +382,89 @@ class FeatureEngineer:
             if owns_con:
                 con.close()
 
+    def _write_symbol_features(self, symbol: str, feat: pd.DataFrame,
+                               only_date: str | None, con: sqlite3.Connection) -> int:
+        """Write scaled feature rows for one symbol. Returns row count written."""
+        SQL = """INSERT OR REPLACE INTO feature_store
+                   (symbol, date, timeframe,
+                    ret_1d, ret_5d, ret_15d, ret_21d, ret_63d, ret_126d, ret_252d,
+                    sma20, sma50, sma200, ema8, ema21, dist_sma20_pct, dist_sma200_pct, above_sma200,
+                    rsi_14, rsi_28, macd, macd_signal, macd_hist, adx, di_plus, di_minus,
+                    stoch_k, stoch_d, cci, williams_r,
+                    atr_14, atr_pct, bb_upper, bb_lower, bb_width, bb_pct,
+                    hist_vol_21d, hist_vol_63d, vol_regime,
+                    volume_ratio_20d, volume_ratio_5d, obv, obv_slope, vwap, vwap_dist_pct,
+                    trend_1d, trend_1w, trend_1m, mtf_alignment_score,
+                    fii_3d_net, fii_10d_net, dii_3d_net,
+                    trailing_pe, roe, debt_to_equity, op_margins, piotroski_f, earnings_yield,
+                    nifty_vix, nifty_ret_5d, nifty_ret_21d,
+                    us_10y_yield, dxy, crude_ret_5d, gold_ret_5d, sp500_ret_5d,
+                    news_sentiment_score, news_impact_count,
+                    target_ret_1d, target_ret_5d, target_ret_15d,
+                    target_dir_1d, target_dir_5d, target_dir_15d,
+                    computed_at)
+                   VALUES (?, ?, 'D',
+                    ?,?,?,?,?,?,?,
+                    ?,?,?,?,?,?,?,?,
+                    ?,?,?,?,?,?,?,?,
+                    ?,?,?,?,
+                    ?,?,?,?,?,?,
+                    ?,?,?,
+                    ?,?,?,?,?,?,
+                    ?,?,?,?,
+                    ?,?,?,
+                    ?,?,?,?,?,?,
+                    ?,?,?,
+                    ?,?,?,?,?,
+                    ?,?,
+                    ?,?,?,
+                    ?,?,?,
+                    CURRENT_TIMESTAMP)"""
+        rows_to_insert = []
+        for date, row in feat.iterrows():
+            if only_date and date.strftime("%Y-%m-%d") < only_date:
+                continue
+            d = row.to_dict()
+            rows_to_insert.append((
+                symbol, date.strftime("%Y-%m-%d"),
+                d.get("ret_1d"), d.get("ret_5d"), d.get("ret_15d"), d.get("ret_21d"),
+                d.get("ret_63d"), d.get("ret_126d"), d.get("ret_252d"),
+                d.get("sma20"), d.get("sma50"), d.get("sma200"), d.get("ema8"), d.get("ema21"),
+                d.get("dist_sma20_pct"), d.get("dist_sma200_pct"), d.get("above_sma200"),
+                d.get("rsi_14"), d.get("rsi_28"),
+                d.get("macd"), d.get("macd_signal"), d.get("macd_hist"),
+                d.get("adx"), d.get("di_plus"), d.get("di_minus"),
+                d.get("stoch_k"), d.get("stoch_d"), d.get("cci"), d.get("williams_r"),
+                d.get("atr_14"), d.get("atr_pct"),
+                d.get("bb_upper"), d.get("bb_lower"), d.get("bb_width"), d.get("bb_pct"),
+                d.get("hist_vol_21d"), d.get("hist_vol_63d"), d.get("vol_regime"),
+                d.get("volume_ratio_20d"), d.get("volume_ratio_5d"),
+                d.get("obv"), d.get("obv_slope"), d.get("vwap"), d.get("vwap_dist_pct"),
+                d.get("trend_1d"), d.get("trend_1w"), d.get("trend_1m"), d.get("mtf_alignment_score"),
+                d.get("fii_3d_net"), d.get("fii_10d_net"), d.get("dii_3d_net"),
+                d.get("trailing_pe"), d.get("roe"), d.get("debt_to_equity"),
+                d.get("op_margins"), d.get("piotroski_f"), d.get("earnings_yield"),
+                d.get("nifty_vix"), d.get("nifty_ret_5d"), d.get("nifty_ret_21d"),
+                d.get("us_10y_yield"), d.get("dxy"),
+                d.get("crude_ret_5d"), d.get("gold_ret_5d"), d.get("sp500_ret_5d"),
+                d.get("news_sentiment_score"), d.get("news_impact_count"),
+                d.get("target_ret_1d"), d.get("target_ret_5d"), d.get("target_ret_15d"),
+                d.get("target_dir_1d"), d.get("target_dir_5d"), d.get("target_dir_15d"),
+            ))
+        if rows_to_insert:
+            con.executemany(SQL, rows_to_insert)
+        return len(rows_to_insert)
+
     # ── Full pipeline ────────────────────────────────────────────────────────
 
     def run_full_pipeline(self, symbols: list = None, lookback_days: int = 504,
                           date_filter: str = None) -> None:
-        """Run feature engineering for all symbols.
+        """Run feature engineering for all symbols in parallel using ProcessPoolExecutor.
 
         date_filter: if 'today', only write today's row per symbol (fast daily mode).
                      Still loads full lookback for accurate indicator computation.
+        Workers are read-only (no SQLite writes, no scaler saves). All writes happen
+        in the main process sequentially after each worker returns its feature DataFrame.
         """
         con = self._con()
         try:
@@ -398,31 +475,77 @@ class FeatureEngineer:
                 ).fetchall()
                 symbols = [r["symbol"] for r in rows]
 
-            today = datetime.today().strftime("%Y-%m-%d") if date_filter == "today" else None
+            only_date = datetime.today().strftime("%Y-%m-%d") if date_filter == "today" else None
+            total = len(symbols)
+            print(f"[FE] Processing {total} symbols in parallel{' (today-only mode)' if only_date else ''}...")
 
-            print(f"[FE] Processing {len(symbols)} symbols{' (today-only mode)' if today else ''}...")
-            for i, sym in enumerate(symbols, 1):
-                try:
-                    n = self.process_symbol(sym, lookback_days, only_date=today, con=con)
-                    if i % 100 == 0:
-                        print(f"[FE] {i}/{len(symbols)} — {sym}: {n} rows")
-                    # Commit every 200 symbols to bound transaction size
+            args_list = [(sym, lookback_days, self.db_path, only_date) for sym in symbols]
+            num_workers = min(multiprocessing.cpu_count(), 8)
+
+            written = 0
+            with ProcessPoolExecutor(max_workers=num_workers) as executor:
+                futures = {executor.submit(_compute_symbol_unscaled, args): args[0] for args in args_list}
+                for i, future in enumerate(as_completed(futures), 1):
+                    symbol = futures[future]
+                    try:
+                        _, feat = future.result()
+                        if feat is not None:
+                            scaler = self._fit_scaler(feat)
+                            SCALER_PATH.parent.mkdir(parents=True, exist_ok=True)
+                            with open(SCALER_PATH, "wb") as f:
+                                pickle.dump(scaler, f)
+                            feat = self._apply_scaler(feat, scaler)
+                            n = self._write_symbol_features(symbol, feat, only_date, con)
+                            written += n
+                            if i % 100 == 0:
+                                print(f"[FE] {i}/{total} complete — {written} rows written")
+                    except Exception as e:
+                        print(f"[FE] ERROR processing {symbol}: {e}")
                     if i % 200 == 0:
                         con.commit()
-                except Exception as e:
-                    print(f"[FE] ERROR {sym}: {e}")
-                    try:
-                        con.rollback()
-                    except Exception:
-                        pass
+
             con.commit()
-            print("[FE] Pipeline complete")
+            print(f"[FE] Pipeline complete — {written} total rows written")
         finally:
             con.close()
 
     def _process_symbol_date(self, symbol: str, lookback_days: int, target_date: str) -> int:
         """Compute features for one symbol but only write the row for target_date."""
         return self.process_symbol(symbol, lookback_days, only_date=target_date)
+
+
+def _compute_symbol_unscaled(args: tuple):
+    """Compute unscaled feature DataFrame for one symbol.
+
+    Module-level function required for Windows spawn multiprocessing.
+    Workers are read-only: no SQLite writes, no scaler saves.
+
+    Returns: (symbol, feat_df) or (symbol, None) on insufficient data/error.
+    """
+    symbol, lookback_days, db_path, only_date = args
+    try:
+        fe = FeatureEngineer(db_path=db_path)
+        con = fe._con()
+        try:
+            cutoff = (datetime.today() - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
+            ohlcv = pd.read_sql(
+                "SELECT date, open, high, low, close, volume FROM stock_ohlcv "
+                "WHERE symbol=? AND date>=? ORDER BY date",
+                con, params=(symbol, cutoff), parse_dates=["date"], index_col="date",
+            )
+            if len(ohlcv) < 60:
+                return (symbol, None)
+            feat = fe._compute_ohlcv_features(ohlcv)
+            feat = fe._merge_fii(feat, con)
+            feat = fe._merge_fundamentals(feat, symbol, con)
+            feat = fe._merge_macro(feat, con)
+            feat = fe._merge_sentiment(feat, symbol, con)
+            return (symbol, feat)
+        finally:
+            con.close()
+    except Exception as e:
+        print(f"[FE] ERROR {symbol}: {e}", flush=True)
+        return (symbol, None)
 
 
 if __name__ == "__main__":
