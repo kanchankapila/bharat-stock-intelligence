@@ -28,14 +28,16 @@ N_STATES   = 5
 DEFAULT_STATE_LABELS = {0: "BULL", 1: "SIDEWAYS", 2: "HIGH_VOL", 3: "BEAR", 4: "CRASH"}
 
 
-def _load_hmm_features(con: sqlite3.Connection, lookback_days: int = 756) -> pd.DataFrame:
+def _load_hmm_features(con: sqlite3.Connection, lookback_days: int = 756,
+                        as_of_date: str = None) -> pd.DataFrame:
     """Build 8-feature market-level matrix for HMM training/inference."""
-    cutoff = (datetime.today() - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
+    anchor = as_of_date or datetime.today().strftime("%Y-%m-%d")
+    cutoff = (datetime.strptime(anchor, "%Y-%m-%d") - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
 
     # Nifty returns + vol
     nifty = pd.read_sql(
-        "SELECT date, close FROM stock_ohlcv WHERE symbol='NIFTY50' AND date>=? ORDER BY date",
-        con, params=(cutoff,), parse_dates=["date"], index_col="date",
+        "SELECT date, close FROM stock_ohlcv WHERE symbol='NIFTY50' AND date>=? AND date<=? ORDER BY date",
+        con, params=(cutoff, anchor), parse_dates=["date"], index_col="date",
     )
 
     df = pd.DataFrame(index=nifty.index)
@@ -45,15 +47,15 @@ def _load_hmm_features(con: sqlite3.Connection, lookback_days: int = 756) -> pd.
 
     # VIX proxy from macro_asset_prices
     vix = pd.read_sql(
-        "SELECT date, close FROM macro_asset_prices WHERE symbol='NSEBANK' AND date>=? ORDER BY date",
-        con, params=(cutoff,), parse_dates=["date"], index_col="date",
+        "SELECT date, close FROM macro_asset_prices WHERE symbol='NSEBANK' AND date>=? AND date<=? ORDER BY date",
+        con, params=(cutoff, anchor), parse_dates=["date"], index_col="date",
     )
     df["nifty_vix"] = vix["close"].reindex(df.index, method="ffill")
 
     # FII 5d net normalized (sparse — fill 0 when no data)
     fii = pd.read_sql(
-        "SELECT date, fii_net FROM fii_dii_flow WHERE date>=? ORDER BY date",
-        con, params=(cutoff,), parse_dates=["date"], index_col="date",
+        "SELECT date, fii_net FROM fii_dii_flow WHERE date>=? AND date<=? ORDER BY date",
+        con, params=(cutoff, anchor), parse_dates=["date"], index_col="date",
     )
     if not fii.empty:
         fii5 = fii["fii_net"].rolling(5, min_periods=1).sum()
@@ -65,8 +67,8 @@ def _load_hmm_features(con: sqlite3.Connection, lookback_days: int = 756) -> pd.
     # Advance/decline ratio from market_sentiment_snapshots (group by date to avoid duplicates)
     ad = pd.read_sql(
         "SELECT DATE(snapshot_at) as date, AVG(overall_score) as overall_score FROM market_sentiment_snapshots "
-        "WHERE snapshot_at>=? GROUP BY DATE(snapshot_at) ORDER BY date",
-        con, params=(cutoff,), parse_dates=["date"], index_col="date",
+        "WHERE DATE(snapshot_at)>=? AND DATE(snapshot_at)<=? GROUP BY DATE(snapshot_at) ORDER BY date",
+        con, params=(cutoff, anchor), parse_dates=["date"], index_col="date",
     )
     if not ad.empty:
         df["advance_decline_ratio"] = ad["overall_score"].reindex(df.index, method="ffill").fillna(50.0)
@@ -76,13 +78,34 @@ def _load_hmm_features(con: sqlite3.Connection, lookback_days: int = 756) -> pd.
     # Global macro from macro_asset_prices
     for sym, col in [("US10Y", "us10y_chg5d"), ("DXY", "dxy_ret_5d"), ("SP500", "sp500_ret_5d")]:
         macro = pd.read_sql(
-            "SELECT date, ret_5d FROM macro_asset_prices WHERE symbol=? AND date>=? ORDER BY date",
-            con, params=(sym, cutoff), parse_dates=["date"], index_col="date",
+            "SELECT date, ret_5d FROM macro_asset_prices WHERE symbol=? AND date>=? AND date<=? ORDER BY date",
+            con, params=(sym, cutoff, anchor), parse_dates=["date"], index_col="date",
         )
         df[col] = macro["ret_5d"].reindex(df.index, method="ffill").fillna(0.0)
 
     # Drop only rows where core Nifty features are NaN (rolling window warmup)
     return df.dropna(subset=["nifty_ret_21d", "nifty_vol_21d"])
+
+
+def _assign_state_labels(model) -> dict[int, str]:
+    """
+    Assign human-readable labels to HMM states.
+    Sorts by mean nifty_ret_21d (dim 0) descending (best return = BULL).
+    Among the bottom 2 states, assigns CRASH to the higher-volatility one
+    (nifty_vol_21d, dim 1) for label-switching resilience across retrains.
+    """
+    means  = model.means_[:, 0]  # nifty_ret_21d per state
+    vols   = model.means_[:, 1]  # nifty_vol_21d per state
+    order  = list(np.argsort(means)[::-1])  # descending return
+
+    if len(order) >= 2:
+        bottom2 = order[-2:]  # two lowest-return state indices
+        # Ensure higher-vol state is last (CRASH), lower-vol is second-to-last (BEAR)
+        if vols[bottom2[0]] > vols[bottom2[1]]:
+            order[-2], order[-1] = bottom2[1], bottom2[0]
+
+    label_seq = ["BULL", "SIDEWAYS", "HIGH_VOL", "BEAR", "CRASH"]
+    return {int(state_idx): label_seq[rank] for rank, state_idx in enumerate(order)}
 
 
 def train_hmm(lookback_days: int = 1260) -> dict:
@@ -103,14 +126,7 @@ def train_hmm(lookback_days: int = 1260) -> dict:
     )
     model.fit(X)
 
-    # Assign state labels by inspecting emission means (Nifty return dim = index 0)
-    means = model.means_[:, 0]  # nifty_ret_21d mean per state
-    order = np.argsort(means)[::-1]  # descending: best return = BULL
-    state_labels = {}
-    label_seq = ["BULL", "SIDEWAYS", "HIGH_VOL", "BEAR", "CRASH"]
-    # Sort by vol (dim 1) within bottom 2 states for BEAR vs CRASH
-    for rank, state_idx in enumerate(order):
-        state_labels[int(state_idx)] = label_seq[rank]
+    state_labels = _assign_state_labels(model)
 
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
     with open(HMM_PATH, "wb") as f:
@@ -137,7 +153,7 @@ def update_regime(date: str = None) -> str:
 
     con = sqlite3.connect(DB_PATH)
     try:
-        df = _load_hmm_features(con, lookback_days=120)  # recent 6 months for inference
+        df = _load_hmm_features(con, lookback_days=120, as_of_date=date)  # recent 6 months for inference
 
         if df.empty:
             return "SIDEWAYS"
