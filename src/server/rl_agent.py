@@ -223,14 +223,64 @@ def _get_nifty_return(conn: sqlite3.Connection, date: str) -> float:
     return (float(row[0]) - float(prev[0])) / float(prev[0]) * 100
 
 
-def daily_update(conn: sqlite3.Connection, dry_run: bool = False) -> dict[str, int]:
-    today = datetime.date.today().isoformat()
+def _get_nifty_horizon_return(conn: sqlite3.Connection, sig_date: str,
+                               horizon_days: int = 15) -> float:
+    """Nifty % return from sig_date to sig_date + horizon_days (the live trade window)."""
+    end_date = (
+        datetime.date.fromisoformat(sig_date) + datetime.timedelta(days=horizon_days + 7)
+    ).isoformat()
+    rows = conn.execute("""
+        SELECT date, close FROM stock_ohlcv
+        WHERE symbol IN ('NIFTY50','NIFTY','^NSEI')
+          AND date BETWEEN ? AND ?
+        ORDER BY date ASC
+    """, (sig_date, end_date)).fetchall()
+    if len(rows) < 2:
+        return 0.0
+    start_close = float(rows[0][1])   # first available close at or after entry
+    target_end = (
+        datetime.date.fromisoformat(sig_date) + datetime.timedelta(days=horizon_days)
+    ).isoformat()
+    # find the last available close at or before the intended exit date
+    end_close = float(rows[-1][1])
+    for r_date, r_close in reversed(rows):
+        if r_date <= target_end:
+            end_close = float(r_close)
+            break
+    return (end_close - start_close) / start_close * 100
+
+
+def _get_next_state_key(conn: sqlite3.Connection, state_key: str,
+                         sig_date: str, horizon_days: int = 15) -> str:
+    """State at trade resolution (sig_date + horizon_days)."""
+    resolution = (
+        datetime.date.fromisoformat(sig_date) + datetime.timedelta(days=horizon_days)
+    ).isoformat()
+    row = conn.execute("""
+        SELECT regime FROM market_regimes WHERE date <= ? ORDER BY date DESC LIMIT 1
+    """, (resolution,)).fetchone()
+    if not row:
+        return state_key  # no regime data: keep current state
+    next_regime = row[0] if row[0] in REGIMES else 'SIDEWAYS'
+    parts = state_key.split('_')
+    if len(parts) != 3:
+        return state_key  # malformed key — return unchanged
+    parts[0] = next_regime
+    return '_'.join(parts)
+
+
+def daily_update(conn: sqlite3.Connection, dry_run: bool = False,
+                 horizon_days: int = 15) -> dict[str, int]:
+    # Episodes from `horizon_days` ago now have resolved signal_outcomes
+    target_date = (
+        datetime.date.today() - datetime.timedelta(days=horizon_days)
+    ).isoformat()
 
     episodes = conn.execute("""
         SELECT id, date, state_key, action_taken
         FROM rl_episodes
         WHERE date = ? AND reward IS NULL
-    """, (today,)).fetchall()
+    """, (target_date,)).fetchall()
 
     if not episodes:
         print("[RLAgent] No episodes to update today.")
@@ -255,11 +305,11 @@ def daily_update(conn: sqlite3.Connection, dry_run: bool = False) -> dict[str, i
         if not outcomes:
             continue
 
-        nifty_ret  = _get_nifty_return(conn, ep_date)
+        nifty_ret  = _get_nifty_horizon_return(conn, ep_date, horizon_days=horizon_days)
         avg_return = sum(float(r[0]) for r in outcomes) / len(outcomes)
         reward     = avg_return - nifty_ret
 
-        next_state = state_key
+        next_state = _get_next_state_key(conn, state_key, ep_date, horizon_days=horizon_days)
         next_max   = get_max_q(conn, next_state)
         old_q      = get_q(conn, state_key, action)
         new_q      = q_update(old_q, reward, next_max)
@@ -342,7 +392,7 @@ def backfill_episodes(conn: sqlite3.Connection, lookback_days: int = 180, dry_ru
         else:
             action = 'SECTOR_FOCUSED'
 
-        nifty_ret = _get_nifty_return(conn, sig_date)
+        nifty_ret = _get_nifty_horizon_return(conn, sig_date, horizon_days=15)
         reward    = float(ret_pct) - nifty_ret
         if outcome == 'STOP_LOSS':
             reward *= 1.5
@@ -356,9 +406,10 @@ def backfill_episodes(conn: sqlite3.Connection, lookback_days: int = 180, dry_ru
         except Exception:
             pass
 
-        next_max = get_max_q(conn, state_key)
-        old_q    = get_q(conn, state_key, action)
-        new_q    = q_update(old_q, reward, next_max)
+        next_state = _get_next_state_key(conn, state_key, sig_date, horizon_days=15)
+        next_max   = get_max_q(conn, next_state)
+        old_q      = get_q(conn, state_key, action)
+        new_q      = q_update(old_q, reward, next_max)
 
         if dry_run:
             print(f"  [DRY] {sig_date} {state_key} {action} r={reward:.3f} Q:{old_q:.4f}->{new_q:.4f}")
