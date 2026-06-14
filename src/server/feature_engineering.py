@@ -372,7 +372,7 @@ class FeatureEngineer:
                 ))
 
             if rows_to_insert:
-                con.cursor().executemany(SQL, rows_to_insert)
+                con.executemany(SQL, rows_to_insert)
             if owns_con:
                 con.commit()
             return len(rows_to_insert)
@@ -406,11 +406,15 @@ class FeatureEngineer:
                     n = self.process_symbol(sym, lookback_days, only_date=today, con=con)
                     if i % 100 == 0:
                         print(f"[FE] {i}/{len(symbols)} — {sym}: {n} rows")
+                    # Commit every 200 symbols to bound transaction size
+                    if i % 200 == 0:
+                        con.commit()
                 except Exception as e:
                     print(f"[FE] ERROR {sym}: {e}")
-                # Commit every 200 symbols to bound transaction size
-                if i % 200 == 0:
-                    con.commit()
+                    try:
+                        con.rollback()
+                    except Exception:
+                        pass
             con.commit()
             print("[FE] Pipeline complete")
         finally:

@@ -97,36 +97,15 @@ def _stub_fe(db_path: str = ":memory:") -> FeatureEngineer:
 class TestBatchWrites:
 
     def test_executemany_used(self):
-        """executemany is called; row-by-row execute is not used for INSERT."""
+        """con.executemany() is called directly; no throwaway cursor().executemany()."""
         feat_df = _make_feat_df(3)
         fe = _stub_fe()
 
         con = _make_in_memory_db()
 
-        # Wrap the connection in a MagicMock that delegates to the real connection
-        # but lets us spy on cursor().executemany calls.
-        executemany_calls = []
-        real_cursor_factory = con.cursor
-
-        class SpyCursor:
-            def __init__(self):
-                self._real = real_cursor_factory()
-
-            def executemany(self, sql, params):
-                executemany_calls.append(sql)
-                return self._real.executemany(sql, params)
-
-            def execute(self, sql, params=None):
-                return self._real.execute(sql, params) if params is not None else self._real.execute(sql)
-
-            def fetchone(self):
-                return self._real.fetchone()
-
-            def fetchall(self):
-                return self._real.fetchall()
-
+        # Wrap the real connection so MagicMock records calls to con.executemany()
+        # directly, while still delegating to the real implementation.
         mock_con = MagicMock(wraps=con)
-        mock_con.cursor = lambda: SpyCursor()
 
         # Stub out all the expensive private methods so no real DB reads happen
         fe._compute_ohlcv_features = lambda df: feat_df
@@ -151,13 +130,15 @@ class TestBatchWrites:
             with patch("pickle.dump"):  # avoid writing scaler to disk
                 result = fe.process_symbol("TEST", con=mock_con)
 
-        assert len(executemany_calls) >= 1, "executemany should have been called at least once"
+        # con.executemany() must have been called (not con.cursor().executemany())
+        assert mock_con.executemany.called, "con.executemany() should have been called at least once"
         assert result == 3, f"Expected 3 rows written, got {result}"
 
     def test_shared_connection(self):
-        """run_full_pipeline opens only ONE connection across all symbols."""
+        """run_full_pipeline opens only ONE connection; shared con is forwarded to process_symbol."""
         _real_connect = sqlite3.connect
         connect_calls = []
+        returned_cons = []
 
         def counting_connect(path, **kw):
             # Use the real sqlite3.connect (not the patched one) to avoid recursion
@@ -167,23 +148,43 @@ class TestBatchWrites:
             con.execute(_OHLCV_DDL)
             con.commit()
             connect_calls.append(path)
+            returned_cons.append(con)
             return con
 
         fe = _stub_fe()
 
-        # Stub process_symbol to avoid real computation; we only care about
-        # how many connections are opened.
-        def fast_process_symbol(symbol, lookback_days=504, only_date=None, *, con=None):
-            # Do nothing — just return 0. con is the shared connection from caller.
+        # Capture the con= kwarg forwarded to process_symbol for each symbol.
+        received_cons = []
+
+        def capturing_process_symbol(symbol, lookback_days=504, only_date=None, *, con=None):
+            received_cons.append((symbol, con))
             return 0
 
-        fe.process_symbol = fast_process_symbol
+        fe.process_symbol = capturing_process_symbol
 
         with patch("src.server.feature_engineering.sqlite3.connect", side_effect=counting_connect):
             fe.run_full_pipeline(symbols=["SYM1", "SYM2"])
 
+        # Exactly one DB connection must have been opened.
         assert len(connect_calls) == 1, (
             f"Expected exactly 1 sqlite3.connect() call, got {len(connect_calls)}"
+        )
+
+        # Both symbols must have received a con= argument (not None).
+        assert len(received_cons) == 2, f"Expected 2 process_symbol calls, got {len(received_cons)}"
+        sym1_con = received_cons[0][1]
+        sym2_con = received_cons[1][1]
+        assert sym1_con is not None, "SYM1 received con=None — shared connection not forwarded"
+        assert sym2_con is not None, "SYM2 received con=None — shared connection not forwarded"
+
+        # Both must be the exact same connection object (the shared one).
+        assert sym1_con is sym2_con, (
+            "SYM1 and SYM2 received different connection objects — shared con not reused"
+        )
+
+        # That shared con must be the one returned by sqlite3.connect.
+        assert sym1_con is returned_cons[0], (
+            "process_symbol received a different con than the one opened by run_full_pipeline"
         )
 
     def test_written_count_correct(self):
