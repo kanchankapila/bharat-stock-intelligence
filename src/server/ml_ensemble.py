@@ -145,11 +145,11 @@ def load_training_data(conn: sqlite3.Connection) -> pd.DataFrame:
                ON ts.symbol = so.symbol AND ts.date = so.signal_date
         LEFT JOIN stock_fundamentals sf
                ON sf.symbol = so.symbol
-        WHERE so.outcome IN ('WIN','LOSS','NEUTRAL')
+        WHERE so.outcome IN ('WIN','LOSS')
           AND so.return_pct IS NOT NULL
     """
     df = pd.read_sql_query(q, conn)
-    df['outcome'] = df['outcome'].map({'WIN': 1, 'LOSS': 0, 'NEUTRAL': 0})
+    df['outcome'] = df['outcome'].map({'WIN': 1, 'LOSS': 0})
     return df
 
 
@@ -197,7 +197,7 @@ def _gpu_device() -> str:
         return 'cpu'
 
 
-def _base_models():
+def _base_models(scale_pos_weight: float = 1.0):
     from sklearn.ensemble import RandomForestClassifier, ExtraTreesClassifier
     from sklearn.linear_model import LogisticRegression
     from sklearn.calibration import CalibratedClassifierCV
@@ -210,14 +210,14 @@ def _base_models():
         LGBMClassifier(
             n_estimators=300, max_depth=4, learning_rate=0.04,
             subsample=0.8, min_child_samples=5, random_state=42,
-            device=_dev, verbose=-1,
+            device=_dev, verbose=-1, class_weight='balanced',
         ),
         method='isotonic', cv=3,
     )
     xgb_model = CalibratedClassifierCV(
         XGBClassifier(
             n_estimators=300, max_depth=4, learning_rate=0.04,
-            subsample=0.8, random_state=42,
+            subsample=0.8, random_state=42, scale_pos_weight=scale_pos_weight,
             device=_dev, eval_metric='logloss', verbosity=0,
         ),
         method='isotonic', cv=3,
@@ -252,7 +252,8 @@ def train_ensemble(X: pd.DataFrame, y: pd.Series, min_samples: int = 30):
     from sklearn.metrics import roc_auc_score
 
     print(f"[Ensemble] Training on {len(X)} samples  (win_rate={y.mean():.1%})")
-    base = _base_models()
+    spw  = float((y == 0).sum()) / max(1, (y == 1).sum())
+    base = _base_models(scale_pos_weight=spw)
 
     # ── Out-of-fold stacking ─────────────────────────────────────────────────
     skf    = TimeSeriesSplit(n_splits=5)
@@ -264,7 +265,7 @@ def train_ensemble(X: pd.DataFrame, y: pd.Series, min_samples: int = 30):
         oof_preds = np.zeros(len(X))
         for fold_i, (train_idx, val_idx) in enumerate(skf.split(X, y)):
             # Use raw (uncalibrated) base estimator for OOF — avoids inner-cv crash on small folds
-            m_clone = _sklearn_clone(_base_models()[j][1].estimator)
+            m_clone = _sklearn_clone(_base_models(scale_pos_weight=spw)[j][1].estimator)
             m_clone.fit(X.iloc[train_idx], y.iloc[train_idx])
             oof_preds[val_idx] = m_clone.predict_proba(X.iloc[val_idx])[:, 1]
         oof[:, j] = oof_preds

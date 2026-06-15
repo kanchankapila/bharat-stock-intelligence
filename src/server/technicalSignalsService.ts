@@ -395,6 +395,14 @@ function loadFIIFlow3d(): number | null {
 
 // ─── Signal Scoring ───────────────────────────────────────────────────────────
 
+// Signal types with consistently negative historical returns (5d avg < 0, win rate < 30%)
+const BLOCKED_SIGNAL_TYPES = new Set<SignalType>([
+  'MACD_CROSSOVER',       // avg -1.01%, 21% win rate
+  'NR7_COMPRESSION',      // avg -0.57%, 25% win rate
+  'SUPERTREND_CROSS',     // avg -0.39%, 19% win rate
+  'CONSECUTIVE_STRENGTH', // avg -0.48%, 28% win rate
+]);
+
 const SIGNAL_SCORES: Record<SignalType, Record<SignalStrength, number>> = {
   RSI_DIVERGENCE:     { HIGH: 4, MEDIUM: 2, WATCH: 1 },
   HIDDEN_DIVERGENCE:  { HIGH: 5, MEDIUM: 3, WATCH: 1 },
@@ -857,7 +865,7 @@ function detectSignals(rows: OHLCVRow[], symbol = ''): {
   }
 
   return {
-    signals,
+    signals: signals.filter(s => !BLOCKED_SIGNAL_TYPES.has(s.type)),
     rsi: latestRSI,
     sma50: latestSMA50,
     sma200: latestSMA200,

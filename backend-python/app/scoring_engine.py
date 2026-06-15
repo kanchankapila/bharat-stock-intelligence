@@ -691,6 +691,42 @@ class AlphaQuantScoringEngine:
             candidates = [c for c in candidates if c.get('confidence', 0) >= 80]
             print(f"[ScoringEngine] BEAR regime: filtered {before_bear - len(candidates)} signals below confidence 80")
 
+        # Batch-fetch CMP (entry price) from technical_signals for today
+        syms_ep = ', '.join(f':ep{i}' for i in range(len(candidates)))
+        ep_params = {f'ep{i}': c['symbol'] for i, c in enumerate(candidates)}
+        ep_params['epd'] = today
+        with self.engine.connect() as ep_chk:
+            ep_rows = ep_chk.execute(
+                text(f"SELECT symbol, cmp FROM technical_signals WHERE symbol IN ({syms_ep}) AND date = :epd"),
+                ep_params
+            ).fetchall()
+        cmp_map = {r[0]: r[1] for r in ep_rows}
+        # Fallback: latest close from stock_ohlcv for symbols with no CMP today
+        missing = [c['symbol'] for c in candidates if cmp_map.get(c['symbol']) is None]
+        if missing:
+            syms_ohlcv = ', '.join(f':ohlcv{i}' for i in range(len(missing)))
+            ohlcv_params = {f'ohlcv{i}': s for i, s in enumerate(missing)}
+            with self.engine.connect() as ohlcv_chk:
+                ohlcv_rows = ohlcv_chk.execute(
+                    text(f"SELECT symbol, close FROM stock_ohlcv WHERE symbol IN ({syms_ohlcv}) ORDER BY date DESC"),
+                    ohlcv_params
+                ).fetchall()
+            seen_ohlcv: set = set()
+            for r in ohlcv_rows:
+                if r[0] not in seen_ohlcv:
+                    cmp_map[r[0]] = r[1]
+                    seen_ohlcv.add(r[0])
+
+        # Batch-fetch sector from nse_stocks
+        syms_sect = ', '.join(f':sect{i}' for i in range(len(candidates)))
+        sect_params = {f'sect{i}': c['symbol'] for i, c in enumerate(candidates)}
+        with self.engine.connect() as sect_chk:
+            sect_rows = sect_chk.execute(
+                text(f"SELECT symbol, sector FROM nse_stocks WHERE symbol IN ({syms_sect})"),
+                sect_params
+            ).fetchall()
+        sector_map = {r[0]: r[1] for r in sect_rows}
+
         rows = []
         for r in candidates:
             rows.append({
@@ -706,6 +742,8 @@ class AlphaQuantScoringEngine:
                 'source':         'scoring_engine',
                 'status':         'ACTIVE',
                 'horizon_days':   15,
+                'entry_price':    cmp_map.get(r['symbol']),
+                'sector':         sector_map.get(r['symbol'], 'Unknown'),
             })
 
         try:

@@ -360,6 +360,7 @@ async function processOutcomeResolver(_job: Job): Promise<{ success: boolean }> 
 
 async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await runPython('fii_dii_fetcher.py', [], 90_000).catch(() => {});
+  await runPython('pcr_fetcher.py', [], 90_000).catch(() => {});
   await runPython('finbert_scorer.py', ['--days', '1'], 180_000).catch(() => {});
 
   await pythonApi.resolveOutcomes(1).catch(e => console.warn('[API] resolve-outcomes(1):', (e as Error).message));
