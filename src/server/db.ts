@@ -1172,6 +1172,12 @@ migrateColumn('watchlist', 'updated_at', 'DATETIME');
 
 migrateColumn('technical_signals', 'created_at', 'DATETIME');
 migrateColumn('technical_signals', 'updated_at', 'DATETIME');
+migrateColumn('technical_signals', 'fii_10d_net',    'REAL');
+migrateColumn('technical_signals', 'dii_3d_net',     'REAL');
+migrateColumn('technical_signals', 'pcr_oi',         'REAL');
+migrateColumn('technical_signals', 'pcr_vol',        'REAL');
+migrateColumn('technical_signals', 'sector_ret_5d',  'REAL');
+migrateColumn('technical_signals', 'sector_ret_21d', 'REAL');
 
 migrateColumn('signals', 'created_at', 'DATETIME');
 migrateColumn('signals', 'updated_at', 'DATETIME');
