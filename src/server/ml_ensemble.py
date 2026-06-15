@@ -373,6 +373,34 @@ def score_pending(conn: sqlite3.Connection, ensemble: dict) -> int:
         )
         updated += 1
     conn.commit()
+
+    # Propagate win_probability to active recommendation_log entries
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(recommendation_log)").fetchall()]
+    if 'win_probability' in cols:
+        conn.execute("""
+            UPDATE recommendation_log
+            SET win_probability = (
+                SELECT ts.win_probability
+                FROM technical_signals ts
+                WHERE ts.symbol = recommendation_log.symbol
+                  AND ts.date = recommendation_log.signal_date
+                LIMIT 1
+            )
+            WHERE source = 'technical_scan'
+              AND status = 'ACTIVE'
+              AND signal_date >= date('now', '-14 days')
+        """)
+        # Deactivate entries where ML now says win < 55%
+        conn.execute("""
+            UPDATE recommendation_log
+            SET status = 'FILTERED'
+            WHERE win_probability IS NOT NULL
+              AND win_probability < 0.55
+              AND status = 'ACTIVE'
+        """)
+        conn.commit()
+        print("[Ensemble] Propagated win_probability to recommendation_log; low-confidence entries filtered.")
+
     return updated
 
 
