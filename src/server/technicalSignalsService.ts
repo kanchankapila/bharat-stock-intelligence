@@ -1200,6 +1200,15 @@ export async function runTechnicalSignalScan(options: {
       : [];
     const symbolSectorMap = new Map(sectorRows.map(r => [r.symbol, r.sector ?? null]));
 
+    // Pre-fetch market caps to filter micro-caps (< ₹500 Cr)
+    const mcRows = symbolsInScan.length
+      ? (db.prepare(
+          `SELECT symbol, market_cap FROM stock_fundamentals WHERE symbol IN (${symbolsInScan.map(() => '?').join(',')})`
+        ).all(...symbolsInScan) as { symbol: string; market_cap: number | null }[])
+      : [];
+    const marketCapMap = new Map(mcRows.map(r => [r.symbol, r.market_cap]));
+    const MIN_MARKET_CAP = 5e9; // ₹500 crore
+
     // Upsert all results into DB (including new accuracy-context columns)
     const upsert = db.prepare(`
       INSERT INTO technical_signals (
@@ -1267,8 +1276,19 @@ export async function runTechnicalSignalScan(options: {
         signal_generated_at=excluded.signal_generated_at
     `);
 
+    const checkActive = db.prepare(
+      `SELECT id FROM recommendation_log WHERE symbol = ? AND status = 'ACTIVE' AND source = 'technical_scan' LIMIT 1`
+    );
+
     db.transaction((rows: SignalResult[]) => {
       for (const r of rows) {
+        // Skip micro-caps
+        const mc = marketCapMap.get(r.symbol);
+        if (mc !== null && mc !== undefined && mc < MIN_MARKET_CAP) continue;
+
+        // Skip if stock already has an ACTIVE signal in recommendation_log
+        if (checkActive.get(r.symbol)) continue;
+
         const { pcr_oi, pcr_vol } = getPcrForSymbol(r.symbol, scanDate);
         const sector = symbolSectorMap.get(r.symbol) ?? null;
         const { sector_ret_5d, sector_ret_21d } = getSectorMomentum(sector, scanDate);
@@ -1330,7 +1350,10 @@ export async function runTechnicalSignalScan(options: {
           }
         }
 
-        if (r.signalScore >= 4) {
+        if (r.signalScore >= 5) {
+          // Fix 4: In BEAR regime, only log high-conviction signals (score >= 7)
+          if (r.niftyRegime === 'BEAR' && r.signalScore < 7) continue;
+
           const sl = r.stopLoss ? parseFloat(r.stopLoss) : null;
           const t1 = r.targets
             ? (() => {
