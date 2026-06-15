@@ -426,12 +426,12 @@ def score_pending(conn: sqlite3.Connection, ensemble: dict) -> int:
               AND status = 'ACTIVE'
               AND signal_date >= date('now', '-14 days')
         """)
-        # Deactivate entries where ML now says win < 55%
+        # Deactivate entries where ML now says win < 40%
         conn.execute("""
             UPDATE recommendation_log
             SET status = 'EXPIRED'
             WHERE win_probability IS NOT NULL
-              AND win_probability < 0.55
+              AND win_probability < 0.40
               AND status = 'ACTIVE'
               AND source = 'technical_scan'
         """)
