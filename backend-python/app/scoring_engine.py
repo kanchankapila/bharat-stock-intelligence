@@ -4,6 +4,7 @@ import os
 import datetime
 import pandas as pd
 import numpy as np
+import difflib
 from sqlalchemy import create_engine, text
 from app.nlp_engine import NLPScreenerInference, NLP_VERSION
 from typing import Dict, Any, List
@@ -297,6 +298,27 @@ class AlphaQuantScoringEngine:
         except Exception:
             return 1.0
 
+    @staticmethod
+    def _news_recency_weight(published_at_str: str) -> float:
+        try:
+            import math
+            published = datetime.datetime.fromisoformat(str(published_at_str))
+            now = datetime.datetime.now()
+            
+            weekend_days = 0
+            current = published.date()
+            while current <= now.date():
+                if current.weekday() >= 5:
+                    weekend_days += 1
+                current += datetime.timedelta(days=1)
+                
+            age_hours = max(0, (now - published).total_seconds() / 3600)
+            adjusted_age_hours = max(0, age_hours - (weekend_days * 24))
+            
+            return math.exp(-math.log(2) * adjusted_age_hours / 48)  # 2-day half-life
+        except Exception:
+            return 1.0
+
     def process_scoring(self, force_rebuild: bool = False):
         """
         PHASE 1 FIX: Reload ML weights before scoring to pick up optimization updates
@@ -319,7 +341,7 @@ class AlphaQuantScoringEngine:
         with self.engine.connect() as conn:
             try:
                 news_df = pd.read_sql(
-                    """SELECT symbols_json AS symbols, sentiment, title, source, published_at
+                    """SELECT symbols_json AS symbols, sentiment, sentiment_score, impact, title, source, published_at
                        FROM news_sentiment_items
                        WHERE published_at >= datetime('now', '-7 days')
                          AND sentiment != 'NEUTRAL'""",
@@ -336,6 +358,8 @@ class AlphaQuantScoringEngine:
                     conn,
                 )
                 news_df['sentiment'] = news_df['sentiment'].str.lower()
+                news_df['sentiment_score'] = 1.0
+                news_df['impact'] = 'MEDIUM'
                 news_df['is_json_symbols'] = False
 
         news_map: Dict[str, list] = {}
@@ -348,13 +372,15 @@ class AlphaQuantScoringEngine:
                 sym_list = json.loads(raw) if str(raw).startswith('[') else [s.strip() for s in str(raw).split(',')]
             except Exception:
                 sym_list = [s.strip() for s in str(raw).split(',')]
-            recency = self._recency_weight(n.get('published_at') or '')
+            recency = self._news_recency_weight(n.get('published_at') or '')
             for s in sym_list:
                 if not s or not isinstance(s, str) or pd.isna(s) or s.strip() == '' or s.upper() in ('NAN', 'NULL', '#N/A'):
                     continue
                 news_map.setdefault(s, []).append({
                     'name':      n['title'],
                     'sentiment': n['sentiment'],
+                    'sentiment_score': n.get('sentiment_score', 1.0),
+                    'impact':    n.get('impact', 'MEDIUM'),
                     'source':    n.get('source', 'news'),
                     'category':  'news',
                     'recency':   recency,
@@ -366,6 +392,18 @@ class AlphaQuantScoringEngine:
                 "SELECT scan_id, last_updated FROM screener_master"
             )).fetchall()
         screener_updated = {r[0]: r[1] for r in sm_rows}
+
+        market_global_score = 0.0
+        try:
+            with self.engine.connect() as conn:
+                g_row = conn.execute(text("""
+                    SELECT global_score FROM market_sentiment_snapshots 
+                    ORDER BY snapshot_at DESC LIMIT 1
+                """)).fetchone()
+                if g_row:
+                    market_global_score = float(g_row[0])
+        except Exception as e:
+            print(f"[SCORING] Failed to load market_global_score: {e}")
 
         # Score per timeframe
         timeframes = ['long_term', 'intraday']
@@ -390,21 +428,45 @@ class AlphaQuantScoringEngine:
             for symbol, news_items in news_map.items():
                 _init_stock(symbol)
                 news_src_counts: Dict[str, int] = {}
+                news_items = sorted(news_items, key=lambda x: x.get('recency', 0), reverse=True)
+                processed_titles = []
+                
                 for item in news_items:
+                    is_syndicated = False
+                    for p_title in processed_titles:
+                        if difflib.SequenceMatcher(None, str(item['name']).lower(), str(p_title).lower()).ratio() > 0.85:
+                            is_syndicated = True
+                            break
+                            
+                    if not is_syndicated:
+                        processed_titles.append(item['name'])
+
                     mult = 1 if item['sentiment'] == 'positive' else (-1 if item['sentiment'] == 'negative' else 0)
                     if mult == 0:
                         continue
+                        
+                    continuous_score = abs(float(item.get('sentiment_score', 1.0)))
+                    impact_val = item.get('impact', 'MEDIUM').upper()
+                    impact_mult = 1.5 if impact_val == 'HIGH' else (0.5 if impact_val == 'LOW' else 1.0)
+                    
                     bucket = f"news|news|{'bullish' if mult > 0 else 'bearish'}"
-                    cnt = news_src_counts.get(bucket, 0)
-                    # Dedup: first SOURCE_CAT_CAP news items count fully, rest at DECAY
-                    decay = 1.0 if cnt < self.SOURCE_CAT_CAP else self.SOURCE_CAT_DECAY
-                    news_src_counts[bucket] = cnt + 1
+                    
+                    if is_syndicated:
+                        decay = self.SOURCE_CAT_DECAY
+                    else:
+                        cnt = news_src_counts.get(bucket, 0)
+                        decay = 1.0 if cnt < self.SOURCE_CAT_CAP else self.SOURCE_CAT_DECAY
+                        news_src_counts[bucket] = cnt + 1
+                        
                     recency = item.get('recency', 1.0)
-                    # News base is 5.0 (same as screeners — was 7.0, reduced to prevent over-dominance)
-                    contrib = 5.0 * mult * decay * recency
+                    contrib = 5.0 * mult * continuous_score * impact_mult * decay * recency
+                    
                     stock_scores[symbol]['raw_sum'] += contrib
                     stock_scores[symbol]['factors']['news'] += contrib
-                    stock_scores[symbol]['sources'].add(item['source'])
+                    
+                    if not is_syndicated:
+                        stock_scores[symbol]['sources'].add(item['source'])
+                        
                     stock_scores[symbol]['categories'].add('news')
                     lst = stock_scores[symbol]['positive_screeners' if mult > 0 else 'negative_screeners']
                     lst.append({'name': item['name'], 'sentiment': item['sentiment'],
@@ -464,10 +526,33 @@ class AlphaQuantScoringEngine:
                 # Multi-category consensus bonus (capped at 3 categories → +20%)
                 consensus_mult = 1.0 + min(0.1 * (cat_count - 1), 0.20)
                 final_score = data['raw_sum'] * consensus_mult
+                
+                # True Alpha Market Beta Adjustment
+                if final_score > 0:
+                    if market_global_score > 0.3:
+                        final_score *= 0.90
+                    elif market_global_score < -0.3:
+                        final_score *= 1.10
+                elif final_score < 0:
+                    if market_global_score < -0.3:
+                        final_score *= 0.90
+                    elif market_global_score > 0.3:
+                        final_score *= 1.10
 
                 screener_count = len(data['positive_screeners']) + len(data['negative_screeners'])
                 source_count   = len(data['sources'])
-                confidence = min(100, screener_count * 10 * (1 + 0.2 * (source_count - 1)))
+                
+                raw_confidence = screener_count * 10 * (1 + 0.2 * (source_count - 1))
+                
+                pos_count = len(data['positive_screeners'])
+                neg_count = len(data['negative_screeners'])
+                if pos_count > 0 and neg_count > 0:
+                    ratio = min(pos_count, neg_count) / max(pos_count, neg_count)
+                    if ratio > 0.3 and (pos_count + neg_count) >= 4:
+                        penalty = 20 * ratio
+                        raw_confidence = max(0, raw_confidence - penalty)
+                        
+                confidence = min(100, int(raw_confidence))
 
                 # Calibrated classification thresholds
                 if   final_score > 30:   classification = "Strong Buy"
@@ -550,7 +635,18 @@ class AlphaQuantScoringEngine:
         """Write top BUY/STRONG BUY recommendations to recommendation_log for outcome tracking."""
         now        = datetime.datetime.now().isoformat()
         today      = datetime.date.today().isoformat()
+
+        # Fix 5: fetch current market regime from most recent technical_signals scan
+        with self.engine.connect() as regime_chk:
+            regime_row = regime_chk.execute(
+                text("SELECT nifty_regime FROM technical_signals WHERE nifty_regime IS NOT NULL ORDER BY date DESC LIMIT 1")
+            ).fetchone()
+        nifty_regime = regime_row[0] if regime_row else 'SIDEWAYS'
+        print(f"[ScoringEngine] Current nifty_regime: {nifty_regime}")
+
         candidates_raw = [r for r in results if r.get('classification') in ('Strong Buy', 'Buy')]
+        # Fix 1: minimum confidence threshold
+        candidates_raw = [r for r in candidates_raw if r.get('confidence', 0) >= 70]
 
         # Filter by ML win_probability — only log signals the ensemble is confident about
         symbols = [r['symbol'] for r in candidates_raw]
@@ -566,12 +662,34 @@ class AlphaQuantScoringEngine:
             wp_map = {r[0]: r[1] for r in rows}
         else:
             wp_map = {}
-        # Allow through if no ML score yet (new signal), gate if score exists and is low
-        candidates = [r for r in candidates_raw if wp_map.get(r['symbol']) is None or wp_map.get(r['symbol']) >= 0.55]
+        # Fix 2: lowered gate to 0.45 — the 0.5 bucket has the best observed performance
+        candidates = [r for r in candidates_raw if wp_map.get(r['symbol']) is None or wp_map.get(r['symbol']) >= 0.45]
 
         if not candidates:
-            print("[ScoringEngine] All candidates filtered by win_probability < 0.55")
+            print("[ScoringEngine] All candidates filtered by win_probability < 0.45")
             return
+
+        # Fix 3: minimum market cap ₹500 crore to exclude micro-cap blow-ups
+        if candidates:
+            syms_q = ', '.join(f':mc{i}' for i in range(len(candidates)))
+            mc_params = {f'mc{i}': c['symbol'] for i, c in enumerate(candidates)}
+            with self.engine.connect() as mc_chk:
+                mc_rows = mc_chk.execute(
+                    text(f"SELECT symbol, market_cap FROM stock_fundamentals WHERE symbol IN ({syms_q})"),
+                    mc_params
+                ).fetchall()
+            mc_map = {r[0]: r[1] for r in mc_rows}
+            before = len(candidates)
+            candidates = [c for c in candidates if mc_map.get(c['symbol']) is None or mc_map.get(c['symbol']) >= 5e9]
+            filtered = before - len(candidates)
+            if filtered:
+                print(f"[ScoringEngine] {filtered} candidates filtered by market_cap < ₹500 Cr")
+
+        # Fix 5b: In BEAR regime, only allow high-confidence signals (>= 80) to reduce noise
+        if nifty_regime == 'BEAR':
+            before_bear = len(candidates)
+            candidates = [c for c in candidates if c.get('confidence', 0) >= 80]
+            print(f"[ScoringEngine] BEAR regime: filtered {before_bear - len(candidates)} signals below confidence 80")
 
         rows = []
         for r in candidates:
@@ -584,6 +702,7 @@ class AlphaQuantScoringEngine:
                 'confidence_score': r.get('confidence'),
                 'screener_score': r.get('score'),
                 'reasoning':      r.get('reasons', ''),
+                'nifty_regime':   nifty_regime,
                 'source':         'scoring_engine',
                 'status':         'ACTIVE',
                 'horizon_days':   15,
@@ -591,14 +710,25 @@ class AlphaQuantScoringEngine:
 
         try:
             with self.engine.begin() as conn:
+                skipped_dup = 0
                 for row in rows:
+                    # Fix 4: skip if stock already has an ACTIVE signal (avoid stacking bets on a loser)
+                    existing = conn.execute(
+                        text("SELECT id FROM recommendation_log WHERE symbol = :s AND status = 'ACTIVE' LIMIT 1"),
+                        {'s': row['symbol']}
+                    ).fetchone()
+                    if existing:
+                        skipped_dup += 1
+                        continue
                     keys   = ', '.join(row.keys())
                     places = ', '.join(f':{k}' for k in row.keys())
                     conn.execute(text(f"""
                         INSERT OR IGNORE INTO recommendation_log ({keys}) VALUES ({places})
                     """), row)
+                if skipped_dup:
+                    print(f"[ScoringEngine] {skipped_dup} candidates skipped (already have ACTIVE signal).")
 
-            print(f"[ScoringEngine] Logged {len(rows)} recommendations to recommendation_log.")
+            print(f"[ScoringEngine] Logged {len(rows) - skipped_dup} recommendations to recommendation_log.")
         except Exception as e:
             print(f"[ScoringEngine] recommendation_log error: {e}")
 
