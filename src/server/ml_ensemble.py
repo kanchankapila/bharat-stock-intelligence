@@ -393,10 +393,11 @@ def score_pending(conn: sqlite3.Connection, ensemble: dict) -> int:
         # Deactivate entries where ML now says win < 55%
         conn.execute("""
             UPDATE recommendation_log
-            SET status = 'FILTERED'
+            SET status = 'EXPIRED'
             WHERE win_probability IS NOT NULL
               AND win_probability < 0.55
               AND status = 'ACTIVE'
+              AND source = 'technical_scan'
         """)
         conn.commit()
         print("[Ensemble] Propagated win_probability to recommendation_log; low-confidence entries filtered.")

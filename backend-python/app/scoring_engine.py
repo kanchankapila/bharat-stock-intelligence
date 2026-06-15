@@ -553,17 +553,21 @@ class AlphaQuantScoringEngine:
         candidates_raw = [r for r in results if r.get('classification') in ('Strong Buy', 'Buy')]
 
         # Filter by ML win_probability — only log signals the ensemble is confident about
-        candidates = []
-        with self.engine.connect() as chk:
-            for r in candidates_raw:
-                row = chk.execute(
-                    text("SELECT win_probability FROM technical_signals WHERE symbol = :s AND date = :d LIMIT 1"),
-                    {'s': r['symbol'], 'd': today}
-                ).fetchone()
-                wp = row[0] if row else None
-                # Allow through if no ML score yet (new signal), gate if score exists and is low
-                if wp is None or wp >= 0.55:
-                    candidates.append(r)
+        symbols = [r['symbol'] for r in candidates_raw]
+        if symbols:
+            placeholders = ', '.join(f':s{i}' for i in range(len(symbols)))
+            params = {f's{i}': s for i, s in enumerate(symbols)}
+            params['d'] = today
+            with self.engine.connect() as chk:
+                rows = chk.execute(
+                    text(f"SELECT symbol, win_probability FROM technical_signals WHERE symbol IN ({placeholders}) AND date = :d"),
+                    params
+                ).fetchall()
+            wp_map = {r[0]: r[1] for r in rows}
+        else:
+            wp_map = {}
+        # Allow through if no ML score yet (new signal), gate if score exists and is low
+        candidates = [r for r in candidates_raw if wp_map.get(r['symbol']) is None or wp_map.get(r['symbol']) >= 0.55]
 
         if not candidates:
             print("[ScoringEngine] All candidates filtered by win_probability < 0.55")
@@ -593,33 +597,8 @@ class AlphaQuantScoringEngine:
                     conn.execute(text(f"""
                         INSERT OR IGNORE INTO recommendation_log ({keys}) VALUES ({places})
                     """), row)
-                
-                # PHASE 1 FIX: Also write to unified_signals for unified outcome tracking
-                for r in candidates:
-                    unified_row = {
-                        'symbol': r['symbol'],
-                        'signal_date': today,
-                        'signal_source': 'QUANT',
-                        'signal_type': 'BUY' if r['classification'] == 'Buy' else 'STRONG_BUY',
-                        'confidence_score': r.get('confidence'),
-                        'reasoning': r.get('reasons', ''),
-                        'quant_score': r.get('score'),
-                        'status': 'ACTIVE',
-                        'signal_generated_at': now
-                    }
-                    keys = ', '.join(unified_row.keys())
-                    places = ', '.join(f':{k}' for k in unified_row.keys())
-                    conn.execute(text(f"""
-                        INSERT INTO unified_signals ({keys}) VALUES ({places})
-                        ON CONFLICT(symbol, signal_date, signal_source) DO UPDATE SET
-                            signal_type=excluded.signal_type,
-                            confidence_score=excluded.confidence_score,
-                            reasoning=excluded.reasoning,
-                            quant_score=excluded.quant_score,
-                            signal_generated_at=excluded.signal_generated_at
-                    """), unified_row)
 
-            print(f"[ScoringEngine] Logged {len(rows)} recommendations to recommendation_log and unified_signals.")
+            print(f"[ScoringEngine] Logged {len(rows)} recommendations to recommendation_log.")
         except Exception as e:
             print(f"[ScoringEngine] recommendation_log error: {e}")
 
