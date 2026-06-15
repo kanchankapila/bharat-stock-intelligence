@@ -361,6 +361,7 @@ async function processOutcomeResolver(_job: Job): Promise<{ success: boolean }> 
 async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await runPython('fii_dii_fetcher.py', [], 90_000).catch(() => {});
   await runPython('pcr_fetcher.py', [], 90_000).catch(() => {});
+  await runPython('institutional_quant_engine.py', [], 120_000).catch(() => {});
   await runPython('finbert_scorer.py', ['--days', '1'], 180_000).catch(() => {});
 
   await pythonApi.resolveOutcomes(1).catch(e => console.warn('[API] resolve-outcomes(1):', (e as Error).message));
@@ -369,6 +370,8 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
 
   await runPython('performance_tracker.py', ['--horizon', '5']);
   await runPython('performance_tracker.py', ['--horizon', '15']);
+
+  await runPython('online_learner.py', ['--window', '180'], 120_000).catch(() => {});
 
   await pythonApi.scorePending().catch(e => console.warn('[API] score-pending:', (e as Error).message));
 
@@ -405,6 +408,7 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean }> 
   await runPython('outcome_resolver.py', ['--horizon', '15']);
   await runPython('ml_ensemble.py', ['--train', '--score'], 60 * 60_000);
   await runPython('strategy_optimizer.py', [], 30 * 60_000).catch(() => {});
+  await runPython('backtester.py', ['--start', '2023-01-01'], 30 * 60_000).catch(() => {});
   await runPython('performance_tracker.py', ['--horizon', '5']);
   await runPython('performance_tracker.py', ['--horizon', '15']);
   return { success: true };
@@ -622,7 +626,7 @@ export async function initQueues(): Promise<boolean> {
       'score-all',
       {},
       {
-        repeat: { every: 24 * 60 * 60 * 1000 }, // 24 hours
+        repeat: { pattern: '0 13 * * 1-5' }, // 6:30 PM IST (13:00 UTC), Mon-Fri after market close
         jobId: 'score-all-repeatable',
         removeOnComplete: 5,
         removeOnFail: 3,
@@ -771,7 +775,7 @@ export async function initQueues(): Promise<boolean> {
       'sync-fundamentals-weekly',
       { phase2Only: false },
       {
-        repeat: { every: 7 * 24 * 60 * 60 * 1000 }, // 7 days
+        repeat: { pattern: '0 22 * * 0' }, // Sunday 3:30 AM IST (22:00 UTC Saturday night)
         jobId: 'fundamentals-sync-weekly',
         removeOnComplete: 3,
         removeOnFail: 3,
@@ -807,7 +811,7 @@ export async function initQueues(): Promise<boolean> {
       'quant-score-daily',
       {},
       {
-        repeat: { every: 24 * 60 * 60 * 1000 }, // every 24 hours
+        repeat: { pattern: '30 13 * * 1-5' }, // 7:00 PM IST (13:30 UTC), Mon-Fri after stock scoring
         jobId: 'quant-scoring-daily',
         removeOnComplete: 3,
         removeOnFail: 3,
