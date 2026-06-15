@@ -1111,12 +1111,47 @@ export async function runTechnicalSignalScan(options: {
       }
     }
 
+    // PCR lookup helper (stock-level pcr → pcr_oi, market_pcr → pcr_vol)
+    function getPcrForSymbol(symbol: string, date: string): { pcr_oi: number | null; pcr_vol: number | null } {
+      const row = db.prepare(`
+        SELECT pcr, market_pcr FROM stock_options_oi
+        WHERE symbol = ? AND date <= ?
+        ORDER BY date DESC LIMIT 1
+      `).get(symbol, date) as { pcr: number; market_pcr: number } | undefined;
+      return {
+        pcr_oi:  row?.pcr        ?? null,
+        pcr_vol: row?.market_pcr ?? null,
+      };
+    }
+
+    // FII/DII rolling helper — market-wide, computed once outside the transaction
+    function getFiiDiiRolling(date: string): { fii_10d_net: number | null; dii_3d_net: number | null } {
+      const fii10 = db.prepare(`
+        SELECT SUM(f.fii_net) AS total
+        FROM (SELECT fii_net FROM fii_dii_flow WHERE date <= ? ORDER BY date DESC LIMIT 10) f
+      `).get(date) as { total: number | null } | undefined;
+
+      const dii3 = db.prepare(`
+        SELECT SUM(f.dii_net) AS total
+        FROM (SELECT dii_net FROM fii_dii_flow WHERE date <= ? ORDER BY date DESC LIMIT 3) f
+      `).get(date) as { total: number | null } | undefined;
+
+      return {
+        fii_10d_net: fii10?.total ?? null,
+        dii_3d_net:  dii3?.total  ?? null,
+      };
+    }
+
+    // Compute FII/DII rolling values once before the transaction
+    const { fii_10d_net, dii_3d_net } = getFiiDiiRolling(scanDate);
+
     // Upsert all results into DB (including new accuracy-context columns)
     const upsert = db.prepare(`
       INSERT INTO technical_signals (
         symbol, date, signals_json, signal_score,
         rsi, sma50, sma200, macd, macd_signal, bb_width, volume_ratio, above_sma200,
         adx, nifty_regime, fii_3d_net, news_sentiment_score,
+        pcr_oi, pcr_vol, fii_10d_net, dii_3d_net,
         cmp, change_pct,
         ai_insight, entry_zone, stop_loss, targets, setup_quality, time_horizon,
         computed_at
@@ -1124,6 +1159,7 @@ export async function runTechnicalSignalScan(options: {
         @symbol, @date, @signals_json, @signal_score,
         @rsi, @sma50, @sma200, @macd, @macd_signal, @bb_width, @volume_ratio, @above_sma200,
         @adx, @nifty_regime, @fii_3d_net, @news_sentiment_score,
+        @pcr_oi, @pcr_vol, @fii_10d_net, @dii_3d_net,
         @cmp, @change_pct,
         @ai_insight, @entry_zone, @stop_loss, @targets, @setup_quality, @time_horizon,
         CURRENT_TIMESTAMP
@@ -1136,6 +1172,8 @@ export async function runTechnicalSignalScan(options: {
         above_sma200=excluded.above_sma200,
         adx=excluded.adx, nifty_regime=excluded.nifty_regime, fii_3d_net=excluded.fii_3d_net,
         news_sentiment_score=excluded.news_sentiment_score,
+        pcr_oi=excluded.pcr_oi, pcr_vol=excluded.pcr_vol,
+        fii_10d_net=excluded.fii_10d_net, dii_3d_net=excluded.dii_3d_net,
         cmp=excluded.cmp, change_pct=excluded.change_pct,
         ai_insight=excluded.ai_insight, entry_zone=excluded.entry_zone,
         stop_loss=excluded.stop_loss, targets=excluded.targets,
@@ -1173,6 +1211,7 @@ export async function runTechnicalSignalScan(options: {
 
     db.transaction((rows: SignalResult[]) => {
       for (const r of rows) {
+        const { pcr_oi, pcr_vol } = getPcrForSymbol(r.symbol, scanDate);
         upsert.run({
           symbol: r.symbol, date: scanDate,
           signals_json: JSON.stringify(r.signals),
@@ -1185,6 +1224,10 @@ export async function runTechnicalSignalScan(options: {
           nifty_regime: r.niftyRegime,
           fii_3d_net:   r.fii3dNet ?? null,
           news_sentiment_score: r.newsSentimentScore ?? 0,
+          pcr_oi,
+          pcr_vol,
+          fii_10d_net,
+          dii_3d_net,
           cmp: r.cmp, change_pct: r.changePct,
           ai_insight:    r.aiInsight    ?? null,
           entry_zone:    r.entryZone    ?? null,
