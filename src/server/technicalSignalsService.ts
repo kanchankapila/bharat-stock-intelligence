@@ -1143,9 +1143,62 @@ export async function runTechnicalSignalScan(options: {
       };
     }
 
+    // Sector relative momentum helper — cached per sector+date within one scan run
+    const sectorMomentumCache = new Map<string, { ret5: number | null; ret21: number | null }>();
+
+    function getSectorMomentum(sector: string | null, date: string): { sector_ret_5d: number | null; sector_ret_21d: number | null } {
+      if (!sector) return { sector_ret_5d: null, sector_ret_21d: null };
+      const key = `${sector}:${date}`;
+      const cached = sectorMomentumCache.get(key);
+      if (cached) return { sector_ret_5d: cached.ret5, sector_ret_21d: cached.ret21 };
+
+      const row5 = db.prepare(`
+        SELECT AVG((today.close - past.close) / past.close * 100.0) AS ret
+        FROM stock_ohlcv today
+        JOIN nse_stocks ns ON ns.symbol = today.symbol
+        JOIN (
+          SELECT o.symbol, o.close
+          FROM stock_ohlcv o
+          WHERE o.date = (
+            SELECT date FROM stock_ohlcv WHERE symbol = o.symbol AND date < ? ORDER BY date DESC LIMIT 1 OFFSET 4
+          )
+        ) past ON past.symbol = today.symbol
+        WHERE ns.sector = ?
+          AND today.date = ?
+      `).get(date, sector, date) as { ret: number | null } | undefined;
+
+      const row21 = db.prepare(`
+        SELECT AVG((today.close - past.close) / past.close * 100.0) AS ret
+        FROM stock_ohlcv today
+        JOIN nse_stocks ns ON ns.symbol = today.symbol
+        JOIN (
+          SELECT o.symbol, o.close
+          FROM stock_ohlcv o
+          WHERE o.date = (
+            SELECT date FROM stock_ohlcv WHERE symbol = o.symbol AND date < ? ORDER BY date DESC LIMIT 1 OFFSET 20
+          )
+        ) past ON past.symbol = today.symbol
+        WHERE ns.sector = ?
+          AND today.date = ?
+      `).get(date, sector, date) as { ret: number | null } | undefined;
+
+      const result = { ret5: row5?.ret ?? null, ret21: row21?.ret ?? null };
+      sectorMomentumCache.set(key, result);
+      return { sector_ret_5d: result.ret5, sector_ret_21d: result.ret21 };
+    }
+
     // Compute FII/DII rolling values once before the transaction
     const { fii_10d_net, dii_3d_net } = getFiiDiiRolling(scanDate);
     const deliveryMap = await fetchDeliveryMap(scanDate);
+
+    // Pre-fetch sector for each symbol in one query
+    const symbolsInScan = results.map(r => r.symbol);
+    const sectorRows = symbolsInScan.length
+      ? (db.prepare(
+          `SELECT symbol, sector FROM nse_stocks WHERE symbol IN (${symbolsInScan.map(() => '?').join(',')})`
+        ).all(...symbolsInScan) as { symbol: string; sector: string | null }[])
+      : [];
+    const symbolSectorMap = new Map(sectorRows.map(r => [r.symbol, r.sector ?? null]));
 
     // Upsert all results into DB (including new accuracy-context columns)
     const upsert = db.prepare(`
@@ -1155,6 +1208,7 @@ export async function runTechnicalSignalScan(options: {
         adx, nifty_regime, fii_3d_net, news_sentiment_score,
         pcr_oi, pcr_vol, fii_10d_net, dii_3d_net,
         cmp, change_pct, delivery_pct,
+        sector_ret_5d, sector_ret_21d,
         ai_insight, entry_zone, stop_loss, targets, setup_quality, time_horizon,
         computed_at
       ) VALUES (
@@ -1163,6 +1217,7 @@ export async function runTechnicalSignalScan(options: {
         @adx, @nifty_regime, @fii_3d_net, @news_sentiment_score,
         @pcr_oi, @pcr_vol, @fii_10d_net, @dii_3d_net,
         @cmp, @change_pct, @delivery_pct,
+        @sector_ret_5d, @sector_ret_21d,
         @ai_insight, @entry_zone, @stop_loss, @targets, @setup_quality, @time_horizon,
         CURRENT_TIMESTAMP
       )
@@ -1177,6 +1232,7 @@ export async function runTechnicalSignalScan(options: {
         pcr_oi=excluded.pcr_oi, pcr_vol=excluded.pcr_vol,
         fii_10d_net=excluded.fii_10d_net, dii_3d_net=excluded.dii_3d_net,
         cmp=excluded.cmp, change_pct=excluded.change_pct, delivery_pct=excluded.delivery_pct,
+        sector_ret_5d=excluded.sector_ret_5d, sector_ret_21d=excluded.sector_ret_21d,
         ai_insight=excluded.ai_insight, entry_zone=excluded.entry_zone,
         stop_loss=excluded.stop_loss, targets=excluded.targets,
         setup_quality=excluded.setup_quality, time_horizon=excluded.time_horizon,
@@ -1214,6 +1270,8 @@ export async function runTechnicalSignalScan(options: {
     db.transaction((rows: SignalResult[]) => {
       for (const r of rows) {
         const { pcr_oi, pcr_vol } = getPcrForSymbol(r.symbol, scanDate);
+        const sector = symbolSectorMap.get(r.symbol) ?? null;
+        const { sector_ret_5d, sector_ret_21d } = getSectorMomentum(sector, scanDate);
         upsert.run({
           symbol: r.symbol, date: scanDate,
           signals_json: JSON.stringify(r.signals),
@@ -1232,6 +1290,8 @@ export async function runTechnicalSignalScan(options: {
           dii_3d_net,
           cmp: r.cmp, change_pct: r.changePct,
           delivery_pct: deliveryMap.get(r.symbol) ?? null,
+          sector_ret_5d,
+          sector_ret_21d,
           ai_insight:    r.aiInsight    ?? null,
           entry_zone:    r.entryZone    ?? null,
           stop_loss:     r.stopLoss     ?? null,
