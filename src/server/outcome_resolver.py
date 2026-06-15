@@ -10,9 +10,23 @@ Run:  python outcome_resolver.py
       python outcome_resolver.py --dry-run
 """
 
-import os, sqlite3, datetime, argparse, math
+import os, sqlite3, datetime, argparse, math, re
 
 DB_PATH      = Path(__file__).parent.parent.parent / "database.sqlite"
+
+
+def parse_horizon(time_horizon_str, default_days: int) -> int:
+    """Parse '5 days', '15 days', 'intraday' etc. to integer days."""
+    if not time_horizon_str:
+        return default_days
+    s = str(time_horizon_str).lower().strip()
+    if 'intraday' in s or s == '1 day':
+        return 1
+    m = re.search(r'(\d+)', s)
+    if m:
+        return max(1, min(30, int(m.group(1))))
+    return default_days
+
 WIN_THRESHOLD  =  1.0   # Fallback thresholds
 LOSS_THRESHOLD = -1.0
 
@@ -60,27 +74,28 @@ def resolve_outcomes(
     - Horizon exit checked at close on exit_date
     """
     today     = datetime.date.today()
-    cutoff    = (today - datetime.timedelta(days=horizon_days)).isoformat()
+    # Use a wider cutoff (30 days) to catch signals of any horizon
+    cutoff    = (today - datetime.timedelta(days=30)).isoformat()
 
     # Signals old enough that horizon has passed, not yet resolved
     pending = conn.execute("""
         SELECT ts.symbol, ts.date AS signal_date, ts.cmp AS entry_price,
                ts.signal_score, ts.signals_json,
-               CAST(ts.stop_loss AS REAL) AS stop_loss
+               CAST(ts.stop_loss AS REAL) AS stop_loss,
+               ts.time_horizon
          FROM technical_signals ts
          WHERE ts.date <= ?
            AND NOT EXISTS (
                SELECT 1 FROM signal_outcomes so2
                WHERE so2.symbol = ts.symbol
                  AND so2.signal_date = ts.date
-                 AND so2.horizon_days = ?
                  AND so2.outcome IN ('WIN','LOSS','NEUTRAL','STOP_LOSS')
            )
          ORDER BY ts.date DESC
          LIMIT 2000
-    """, (cutoff, horizon_days)).fetchall()
+    """, (cutoff,)).fetchall()
 
-    cols = ['symbol', 'signal_date', 'entry_price', 'signal_score', 'signals_json', 'stop_loss']
+    cols = ['symbol', 'signal_date', 'entry_price', 'signal_score', 'signals_json', 'stop_loss', 'time_horizon']
     rows = [dict(zip(cols, r)) for r in pending]
 
     if not rows:
@@ -107,7 +122,15 @@ def resolve_outcomes(
         signal_date  = row['signal_date']
         entry        = float(row['entry_price'] or 0)
         stop_loss    = row['stop_loss']
-        
+        sig_horizon  = parse_horizon(row.get('time_horizon'), horizon_days)
+
+        # Skip if already resolved at this specific horizon
+        if conn.execute(
+            "SELECT 1 FROM signal_outcomes WHERE symbol=? AND signal_date=? AND horizon_days=? AND outcome != 'PENDING' LIMIT 1",
+            (sym, signal_date, sig_horizon)
+        ).fetchone():
+            continue
+
         if not entry:
             continue
 
@@ -127,8 +150,8 @@ def resolve_outcomes(
             entry = float(next_trading_day_row[1])
         else:
             next_trading_day = (signal_date_obj + datetime.timedelta(days=1)).isoformat()
-            
-        exit_target_date = (signal_date_obj + datetime.timedelta(days=horizon_days)).isoformat()
+
+        exit_target_date = (signal_date_obj + datetime.timedelta(days=sig_horizon)).isoformat()
 
         outcome      = None
         exit_price   = None
@@ -164,7 +187,7 @@ def resolve_outcomes(
                 return_pct = (exit_price - entry) / entry * 100
                 
                 # Dynamic volatility-adjusted threshold
-                threshold = get_volatility_threshold(conn, sym, signal_date, horizon_days)
+                threshold = get_volatility_threshold(conn, sym, signal_date, sig_horizon)
                 outcome    = ('WIN'  if return_pct > threshold  else
                               'LOSS' if return_pct < -threshold else
                               'NEUTRAL')
@@ -173,14 +196,14 @@ def resolve_outcomes(
                 return_pct = None
 
         if dry_run:
-            msg = f"  [DRY] {sym} {signal_date} (entry:{next_trading_day}) → {outcome}"
+            msg = f"  [DRY] {sym} {signal_date} h={sig_horizon}d (entry:{next_trading_day}) → {outcome}"
             if return_pct is not None:
                 msg += f" ({return_pct:.2f}%)"
             print(msg)
             continue
 
         conn.execute(upsert, (
-            sym, signal_date, horizon_days, entry,
+            sym, signal_date, sig_horizon, entry,
             check_date, exit_price,
             round(return_pct, 4) if return_pct is not None else None,
             outcome,
