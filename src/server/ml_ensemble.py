@@ -96,6 +96,24 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     hi52_s     = pd.to_numeric(df.get('fifty_two_week_high', np.nan), errors='coerce')
     X['dist_52w_high'] = ((cmp_s - hi52_s) / hi52_s.replace(0, np.nan) * 100).fillna(0)
 
+    # PCR — put/call ratio (stock level and market level)
+    X['pcr_oi']  = pd.to_numeric(df.get('pcr_oi',  1.0), errors='coerce').fillna(1.0)
+    X['pcr_vol'] = pd.to_numeric(df.get('pcr_vol', 1.0), errors='coerce').fillna(1.0)
+
+    # Extended FII/DII flows (normalized to 10K Cr scale)
+    X['fii_10d_net'] = pd.to_numeric(df.get('fii_10d_net', 0), errors='coerce').fillna(0) / 10000.0
+    X['dii_3d_net']  = pd.to_numeric(df.get('dii_3d_net',  0), errors='coerce').fillna(0) / 10000.0
+
+    # Delivery % (institutional conviction proxy, normalized to 0-1)
+    X['delivery_pct'] = pd.to_numeric(df.get('delivery_pct', 50), errors='coerce').fillna(50) / 100.0
+
+    # Sector relative momentum
+    X['sector_ret_5d']  = pd.to_numeric(df.get('sector_ret_5d',  0), errors='coerce').fillna(0)
+    X['sector_ret_21d'] = pd.to_numeric(df.get('sector_ret_21d', 0), errors='coerce').fillna(0)
+
+    # Interaction: delivery conviction × signal score
+    X['delivery_x_score'] = X['delivery_pct'] * X['signal_score']
+
     # Signal type one-hot
     sig_col = df.get('signals_json', pd.Series(['[]'] * len(df), index=df.index))
     type_sets = sig_col.apply(_parse_signal_types)
@@ -117,6 +135,10 @@ def load_training_data(conn: sqlite3.Connection) -> pd.DataFrame:
                ts.rsi, ts.adx, ts.nifty_regime, ts.cmp, ts.sma200, ts.volume_ratio,
                ts.fii_3d_net,
                ts.above_sma200,
+               ts.pcr_oi, ts.pcr_vol,
+               ts.fii_10d_net, ts.dii_3d_net,
+               ts.delivery_pct,
+               ts.sector_ret_5d, ts.sector_ret_21d,
                sf.fifty_two_week_high
         FROM signal_outcomes so
         LEFT JOIN technical_signals ts
@@ -137,6 +159,10 @@ def load_pending_signals(conn: sqlite3.Connection) -> pd.DataFrame:
                ts.rsi, ts.adx, ts.nifty_regime, ts.cmp, ts.sma200, ts.volume_ratio,
                ts.fii_3d_net,
                ts.above_sma200,
+               ts.pcr_oi, ts.pcr_vol,
+               ts.fii_10d_net, ts.dii_3d_net,
+               ts.delivery_pct,
+               ts.sector_ret_5d, ts.sector_ret_21d,
                sf.fifty_two_week_high
         FROM technical_signals ts
         LEFT JOIN stock_fundamentals sf ON sf.symbol = ts.symbol
@@ -153,11 +179,21 @@ def load_pending_signals(conn: sqlite3.Connection) -> pd.DataFrame:
 # ── Model Building ────────────────────────────────────────────────────────────
 
 def _gpu_device() -> str:
-    """Return 'cuda' if GPU is available, else 'cpu'."""
+    """Return 'cuda' if GPU is available AND LightGBM was built with CUDA, else 'cpu'."""
     try:
         import torch
-        return 'cuda' if torch.cuda.is_available() else 'cpu'
+        if not torch.cuda.is_available():
+            return 'cpu'
     except ImportError:
+        return 'cpu'
+    # Verify LightGBM CUDA support with a minimal probe
+    try:
+        from lightgbm import LGBMClassifier
+        import numpy as np
+        _probe = LGBMClassifier(n_estimators=1, device='cuda', verbose=-1)
+        _probe.fit(np.array([[0], [1]]), np.array([0, 1]))
+        return 'cuda'
+    except Exception:
         return 'cpu'
 
 
