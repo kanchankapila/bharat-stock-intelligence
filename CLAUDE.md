@@ -1,10 +1,32 @@
 # Bharat Stock Intelligence — Claude Instructions
 
+## Knowledge Graph (use this before reading files)
+
+A persistent graphify knowledge graph lives at `graphify-out/graph.json`. **Before reading any source file to answer a question about the codebase, query the graph first:**
+
+```powershell
+$PY = Get-Content "graphify-out/.graphify_python"
+& $PY -m graphify query "<your question here>"
+```
+
+Or for targeted lookups:
+```powershell
+& $PY -m graphify path "ComponentA" "ServiceB"   # shortest path between two concepts
+& $PY -m graphify explain "SymbolName"            # plain-language explanation of a node
+```
+
+The graph has **2,418 nodes** and **4,269 edges** across 159 labelled communities (TradingView Widgets, Cache Service, NSE Stocks Data Layer, ML Ensemble, RL Agent, Screener Intelligence, etc.). God nodes: `cn()` (121 edges), `trpc` (60), `mcFetchJson()` (57), `db` (52), `getStockMapping()` (39).
+
+**Update the graph when files change significantly:**
+```powershell
+& $PY -m graphify update .   # re-extracts only changed files
+```
+
 ## Memory
 
 At the start of every session, read the memory index before doing any work:
 
-**`C:\Users\amit_\.claude\projects\c--Github-bharat-stock-intelligence\memory\MEMORY.md`**
+**`C:\Users\amitk\.claude\projects\d--Github-bharat-stock-intelligence\memory\MEMORY.md`**
 
 Then load any memory files that are relevant to the current task. This prevents re-exploring the codebase from scratch and reduces token consumption.
 

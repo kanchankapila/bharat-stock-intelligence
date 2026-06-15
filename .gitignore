@@ -49,6 +49,13 @@ __pycache__/
 .coverage
 htmlcov/
 
+# Graphify knowledge graph (generated — large binary-like JSON + HTML)
+graphify-out/
+
+# ML model artifacts (generated at runtime by ml_ensemble.py / online_learner.py)
+src/server/ml_models/
+*.pkl
+
 # Scratch/temp directories
 scratch/
 .claude/worktrees/

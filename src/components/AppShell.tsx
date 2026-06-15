@@ -5,12 +5,13 @@ import {
   Search, History, PieChart, Bookmark, Users, Globe, CheckCircle2,
   Star, LogIn, TrendingUp, ArrowUpRight, ArrowDownRight, Menu,
   ChevronLeft, ChevronRight, Radio, Settings2, Briefcase, Calendar, Sparkles,
-  FlaskConical, Layers, MonitorDot, ChartLine,
+  FlaskConical, Layers, MonitorDot, ChartLine, X,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { nseStocksData } from '../data/nseStocks';
 import type { MarketData } from '../services/marketService';
 import type { User as FirebaseUser } from 'firebase/auth';
+import { useWebSocket } from '../v2/hooks/useWebSocket';
 
 // ─── Nav Config ───────────────────────────────────────────────────────────────
 
@@ -58,6 +59,7 @@ const NAV_GROUPS: NavGroup[] = [
       { icon: Settings2, label: 'ML Builder', id: 'builder'   },
       // Advanced (hidden by default):
       { icon: Trophy,   label: 'Top Rated',     id: 'top-rated'    },
+      { icon: Radio,    label: 'Signal Ledger',  id: 'signal-tracking' },
       { icon: Radio,    label: 'Signals',        id: 'signals'      },
       { icon: Zap,      label: "Today's Picks",  id: 'todays-picks' },
       { icon: FlaskConical, label: 'Research',   id: 'research'     },
@@ -481,6 +483,20 @@ export const AppShell: React.FC<AppShellProps> = ({
     user, onLogin, displayIndices, stocks, onSelectStock,
   };
 
+  const [toastMessage, setToastMessage] = useState<any>(null);
+  const wsUrl = import.meta.env.VITE_WS_URL || 'ws://localhost:3000/signals';
+  const { lastMessage, isConnected } = useWebSocket({ url: wsUrl });
+
+  useEffect(() => {
+    if (lastMessage) {
+      setToastMessage(lastMessage);
+      const timer = setTimeout(() => {
+        setToastMessage(null);
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [lastMessage]);
+
   return (
     <div className="flex h-screen overflow-hidden bg-transparent text-slate-200">
       {/* ── Desktop sidebar ── */}
@@ -598,6 +614,35 @@ export const AppShell: React.FC<AppShellProps> = ({
           {children}
         </main>
       </div>
+
+      {/* Global Floating Toast */}
+      {toastMessage && (
+        <div className="fixed bottom-6 right-6 z-50 animate-in slide-in-from-bottom-5 fade-in duration-300">
+          <div className="p-4 bg-indigo-900/90 border border-indigo-500/50 shadow-[0_0_20px_rgba(79,70,229,0.3)] backdrop-blur-md rounded-2xl flex items-center justify-between w-80">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-indigo-500/20 rounded-full">
+                <Radio className="w-5 h-5 text-indigo-400 animate-pulse" />
+              </div>
+              <div>
+                <h4 className="text-xs font-black text-slate-200 uppercase tracking-wider font-mono">
+                  Live Alert: {toastMessage.symbol}
+                </h4>
+                <p className="text-[10px] text-indigo-200 mt-0.5 leading-snug">
+                  {toastMessage.type === 'new_signal' 
+                    ? `New ${toastMessage.signal?.signalType || 'Signal'} generated (${toastMessage.source || 'AI'})` 
+                    : toastMessage.level || 'Status update'}
+                </p>
+              </div>
+            </div>
+            <button 
+              onClick={() => setToastMessage(null)}
+              className="p-1 hover:bg-white/10 rounded-full transition-colors self-start -mt-1 -mr-1"
+            >
+              <X className="w-3 h-3 text-slate-400" />
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

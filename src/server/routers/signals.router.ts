@@ -201,4 +201,35 @@ export const signalsRouter = router({
         },
       };
     }),
+
+  getSignalTracking: publicProcedure
+    .input(z.object({ days: z.number().default(30) }).optional())
+    .query(({ input }) => {
+      const days = input?.days ?? 30;
+      return db.prepare(`
+        SELECT 
+          us.id, 
+          us.symbol, 
+          us.signal_source, 
+          us.signal_type, 
+          us.entry_price, 
+          us.target_price, 
+          us.stop_loss,
+          us.confidence_score, 
+          us.status, 
+          us.signal_generated_at, 
+          us.reasoning,
+          (SELECT close FROM stock_ohlcv WHERE symbol = us.symbol ORDER BY date DESC LIMIT 1) AS current_price,
+          ROUND(
+            COALESCE(
+              100.0 * ((SELECT close FROM stock_ohlcv WHERE symbol = us.symbol ORDER BY date DESC LIMIT 1) - us.entry_price) / NULLIF(us.entry_price, 0),
+              0.0
+            ),
+            2
+          ) AS growth_pct
+        FROM unified_signals us
+        WHERE us.signal_generated_at >= date('now', '-' || ? || ' days')
+        ORDER BY us.signal_generated_at DESC
+      `).all(days);
+    }),
 });

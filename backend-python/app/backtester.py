@@ -107,15 +107,23 @@ class Backtester:
         start: str, end: str,
         min_score: int = 3,
         horizon_days: int = 15,
+        source: str = 'ALL',
     ) -> pd.DataFrame:
-        q = """
-            SELECT ts.symbol, ts.scan_date AS signal_date, ts.signal_score,
-                   ts.cmp AS entry_price_ref, ts.stop_loss, ts.signals_json,
-                   ts.nifty_regime, ts.adx
-            FROM technical_signals ts
-            WHERE ts.scan_date BETWEEN ? AND ?
-              AND ts.signal_score >= ?
-            ORDER BY ts.scan_date ASC
+        if source == 'ALL':
+            source_filter = "1=1"
+        else:
+            source_filter = f"us.signal_source = '{source}'"
+
+        q = f"""
+            SELECT us.symbol, us.signal_date, us.confidence_score AS signal_score,
+                   us.entry_price AS entry_price_ref, us.stop_loss, us.reasoning AS signals_json,
+                   'UNKNOWN' AS nifty_regime, 0 AS adx
+            FROM unified_signals us
+            WHERE us.signal_date BETWEEN ? AND ?
+              AND us.confidence_score >= ?
+              AND {source_filter}
+              AND us.signal_type IN ('BUY', 'STRONG_BUY')
+            ORDER BY us.signal_date ASC
         """
         df = pd.read_sql_query(q, self.conn, params=(start, end, min_score))
         df['signal_date']    = pd.to_datetime(df['signal_date'])
@@ -490,19 +498,19 @@ class Backtester:
 
     def run(
         self,
-        start: str,
-        end: str,
+        start: str, end: str,
         horizon_days: int = 15,
         min_score: int = 3,
         max_positions: int = 20,
         initial_capital: float = INITIAL_CAPITAL,
-        run_name: str = "",
         slippage_bps: float = 10,
-        stop_loss_pct: float = 7.0,
+        run_name: str = "",
+        source: str = 'ALL',
     ) -> dict:
-        print(f"[Backtester] {start} → {end}  horizon={horizon_days}d  min_score={min_score}")
+        print(f"\n[Backtester] Running backtest {start} to {end} (Horizon: {horizon_days}d, Source: {source})")
 
-        signals = self.load_signals(start, end, min_score, horizon_days)
+        # 1. Load signals
+        signals = self.load_signals(start, end, min_score, horizon_days, source)
         if signals.empty:
             print("[Backtester] No signals found for the given parameters.")
             return {}
@@ -571,6 +579,7 @@ class BacktestRequest(BaseModel):
     capital: float = 1_000_000
     slippage: float = 10
     name: str = ""
+    source: str = "ALL"
 
 def run_backtest(req: BacktestRequest):
     bt = Backtester()
@@ -584,6 +593,7 @@ def run_backtest(req: BacktestRequest):
             initial_capital=req.capital,
             run_name=req.name,
             slippage_bps=req.slippage,
+            source=req.source,
         )
     finally:
         bt.close()

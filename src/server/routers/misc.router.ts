@@ -19,7 +19,129 @@ import { router, publicProcedure } from "../trpc";
 export const miscRouter = router({
   getAIAnalysis: publicProcedure
     .input(z.object({ symbol: z.string(), data: z.record(z.string(), z.unknown()) }))
-    .mutation(async ({ input }) => generateStockAnalysis(input.symbol, input.data)),
+    .mutation(async ({ input }) => {
+      const { symbol, data } = input;
+      const enriched: Record<string, unknown> = { ...data };
+
+      // Technical signals (RSI, MACD, SMAs) — most recent scan row
+      const techSignal = db.prepare(`
+        SELECT rsi, sma50, sma200, macd, macd_signal, bb_width, volume_ratio,
+               above_sma200, signal_score, signals_json
+        FROM technical_signals WHERE symbol = ? ORDER BY date DESC LIMIT 1
+      `).get(symbol) as any;
+      if (techSignal) {
+        enriched.rsi              = techSignal.rsi;
+        enriched.macd             = techSignal.macd;
+        enriched.macd_signal      = techSignal.macd_signal;
+        enriched.sma50            = techSignal.sma50;
+        enriched.sma200           = techSignal.sma200;
+        enriched.above_sma200     = !!techSignal.above_sma200;
+        enriched.bb_width         = techSignal.bb_width;
+        enriched.volume_ratio     = techSignal.volume_ratio;
+        enriched.signal_score     = techSignal.signal_score;
+        if (techSignal.signals_json) {
+          try { enriched.detected_patterns = JSON.parse(techSignal.signals_json); } catch {}
+        }
+      }
+
+      // Fundamentals — PE, ROE, D/E, growth rates, Piotroski
+      const fund = db.prepare(`
+        SELECT trailing_pe, forward_pe, price_to_book, eps_ttm,
+               debt_to_equity, return_on_equity, revenue_growth, earnings_growth,
+               operating_margins, piotroski_f_score, dividend_yield, analyst_rating,
+               fifty_two_week_high, fifty_two_week_low
+        FROM stock_fundamentals WHERE symbol = ?
+      `).get(symbol) as any;
+      if (fund) {
+        enriched.pe_ratio             = fund.trailing_pe;
+        enriched.forward_pe           = fund.forward_pe;
+        enriched.price_to_book        = fund.price_to_book;
+        enriched.eps_ttm              = fund.eps_ttm;
+        enriched.debt_to_equity       = fund.debt_to_equity;
+        enriched.roe_pct              = fund.return_on_equity != null ? +(fund.return_on_equity * 100).toFixed(1) : null;
+        enriched.revenue_growth_pct   = fund.revenue_growth   != null ? +(fund.revenue_growth   * 100).toFixed(1) : null;
+        enriched.earnings_growth_pct  = fund.earnings_growth  != null ? +(fund.earnings_growth  * 100).toFixed(1) : null;
+        enriched.operating_margin_pct = fund.operating_margins != null ? +(fund.operating_margins * 100).toFixed(1) : null;
+        enriched.piotroski_f_score    = fund.piotroski_f_score;
+        enriched.dividend_yield       = fund.dividend_yield;
+        enriched.analyst_rating       = fund.analyst_rating;
+        enriched.week52_high          = fund.fifty_two_week_high;
+        enriched.week52_low           = fund.fifty_two_week_low;
+      }
+
+      // AI factor breakdown scores (0–100 each), including news sentiment score
+      const factors = db.prepare(`
+        SELECT technical, fundamental, momentum, valuation, delivery, news
+        FROM stock_factor_breakdown WHERE symbol = ? AND timeframe = 'long_term'
+      `).get(symbol) as any;
+      if (factors) {
+        enriched.factor_scores = {
+          technical: factors.technical,
+          fundamental: factors.fundamental,
+          momentum: factors.momentum,
+          valuation: factors.valuation,
+          delivery: factors.delivery,
+          news: factors.news,
+        };
+      }
+
+      // Quant classification + returns
+      const quant = db.prepare(`
+        SELECT composite_class, rank_composite, return_1m, return_3m, return_6m, annualized_vol
+        FROM quant_scores WHERE symbol = ?
+      `).get(symbol) as any;
+      if (quant) {
+        enriched.quant_class           = quant.composite_class;
+        enriched.quant_rank_pct        = quant.rank_composite;
+        enriched.return_1m_pct         = quant.return_1m;
+        enriched.return_3m_pct         = quant.return_3m;
+        enriched.annualized_vol_pct    = quant.annualized_vol;
+      }
+
+      // Recent news with NLP sentiment — try exact symbol match first,
+      // fall back to company-name match (news says "HDFC Bank" not "HDFCBANK")
+      const stockMeta = db.prepare(`SELECT name, sector FROM nse_stocks WHERE symbol = ?`).get(symbol) as any;
+      let news = db.prepare(`
+        SELECT title, sentiment, impact, category
+        FROM news_sentiment_items
+        WHERE symbols_json LIKE ? ORDER BY published_at DESC LIMIT 5
+      `).all(`%"${symbol}"%`) as any[];
+
+      if (news.length === 0 && stockMeta?.name) {
+        const nameKeyword = stockMeta.name.split(' ').slice(0, 2).join(' ');
+        news = db.prepare(`
+          SELECT title, sentiment, impact, category
+          FROM news_sentiment_items
+          WHERE title LIKE ? ORDER BY published_at DESC LIMIT 5
+        `).all(`%${nameKeyword}%`) as any[];
+      }
+
+      // If still nothing, pull top-impact sector news as market context
+      if (news.length === 0 && stockMeta?.sector) {
+        news = db.prepare(`
+          SELECT title, sentiment, impact, category
+          FROM news_sentiment_items
+          WHERE sector = ? AND impact IN ('HIGH', 'MEDIUM')
+          ORDER BY published_at DESC LIMIT 3
+        `).all(stockMeta.sector) as any[];
+      }
+
+      if (news.length > 0) {
+        enriched.recent_news = news.map(n => ({
+          title: n.title,
+          sentiment: n.sentiment,
+          impact: n.impact,
+          category: n.category,
+        }));
+      }
+
+      // Strip nulls so the prompt only contains meaningful data
+      const payload = Object.fromEntries(
+        Object.entries(enriched).filter(([, v]) => v !== null && v !== undefined)
+      );
+
+      return generateStockAnalysis(symbol, payload);
+    }),
 
   getSuperstarList: publicProcedure
     .query(async () =>

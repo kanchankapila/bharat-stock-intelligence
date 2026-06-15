@@ -1,14 +1,20 @@
 import ollama from 'ollama';
 
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'mistral';
+const OLLAMA_SIGNAL_MODEL  = process.env.OLLAMA_SIGNAL_MODEL  || process.env.OLLAMA_MODEL || 'mistral';
+const OLLAMA_PROFILE_MODEL = process.env.OLLAMA_PROFILE_MODEL || process.env.OLLAMA_MODEL || 'qwen3:30b';
 
 export async function releaseOllamaModel(): Promise<void> {
-  try {
-    await ollama.generate({ model: OLLAMA_MODEL, prompt: '', keep_alive: 0 } as any);
-    console.log(`[OLLAMA] Model ${OLLAMA_MODEL} unloaded from memory`);
-  } catch {
-    // non-critical
-  }
+  const models = [...new Set([OLLAMA_SIGNAL_MODEL, OLLAMA_PROFILE_MODEL])];
+  await Promise.allSettled(
+    models.map(async (model) => {
+      try {
+        await ollama.generate({ model, prompt: '', keep_alive: 0 } as any);
+        console.log(`[OLLAMA] Model ${model} unloaded from memory`);
+      } catch {
+        // non-critical
+      }
+    })
+  );
 }
 
 export interface StockAnalysis {
@@ -32,45 +38,69 @@ export interface ProfileAnalysis {
 
 export async function generateStockAnalysis(symbol: string, data: any): Promise<StockAnalysis> {
   const prompt = `
-    Analyze the following stock data for ${symbol}:
-    ${JSON.stringify(data, null, 2)}
+You are a senior Indian equity analyst. Analyze the following data for ${symbol} and produce a trading recommendation.
 
-    Provide a concise trading analysis including sentiment, trading signal (BUY/SELL/HOLD), entry, target, and stop-loss prices.
-    Include a detailed reasoning for the signal based on the technical data provided.
-    
-    Response MUST be in valid JSON format with the following structure:
-    {
-      "sentiment": "Bullish/Bearish/Neutral",
-      "signal": "BUY/SELL/HOLD",
-      "entry": number,
-      "target": number,
-      "stopLoss": number,
-      "reasoning": "string",
-      "confidence": number (0-100)
-    }
+DATA:
+${JSON.stringify(data, null, 2)}
+
+INTERPRETATION GUIDE (use fields present; skip absent ones):
+- rsi: >70 overbought, <30 oversold, 40-60 neutral
+- macd vs macd_signal: macd > signal = bullish momentum, macd < signal = bearish
+- above_sma200: true = long-term uptrend confirmed
+- volume_ratio: >1.5 = unusual volume (conviction), <0.7 = weak participation
+- pe_ratio / forward_pe: compare to sector average; lower forward PE = cheaper
+- price_to_book: <1 = undervalued relative to assets
+- debt_to_equity: >2 = high leverage risk
+- roe_pct: >15% = strong returns on equity
+- revenue_growth_pct / earnings_growth_pct: positive = growing business
+- piotroski_f_score: 7-9 = financially strong, 0-2 = financially weak
+- factor_scores (0-100): relative strength across technical/fundamental/momentum/valuation/news
+- quant_class: Strong Buy / Buy / Hold / Avoid / Sell (quant model classification)
+- recent_news: weight BULLISH + HIGH impact heavily; BEARISH + HIGH impact is a risk flag
+- week52_high / week52_low: price relative to annual range shows momentum context
+
+RULES:
+- entry, target, stopLoss MUST be realistic price levels near current price
+- target should imply a risk:reward ratio ≥ 1.5:1 vs stopLoss
+- confidence should reflect data quality and signal confluence (more confirming signals = higher)
+- reasoning must synthesise the key signals, not just list them
+
+Respond ONLY with valid JSON matching exactly this structure:
+{
+  "sentiment": "Bullish" | "Bearish" | "Neutral",
+  "signal": "BUY" | "SELL" | "HOLD",
+  "entry": number,
+  "target": number,
+  "stopLoss": number,
+  "reasoning": "string (2-4 sentences explaining the key confluence)",
+  "confidence": number (0-100)
+}
   `;
+
+  const FAST_OPTIONS = { temperature: 0.1, top_k: 20, num_predict: 500, num_ctx: 3072 };
 
   let response;
 
   try {
     try {
       response = await ollama.chat({
-        model: OLLAMA_MODEL,
+        model: OLLAMA_SIGNAL_MODEL,
         messages: [{ role: 'user', content: prompt }],
         format: 'json',
         keep_alive: 0,
-      } as any);
+        options: FAST_OPTIONS,
+      } as any) as any;
     } catch (error: any) {
       const errorStr = String(error.message || error.error || "");
       if (errorStr.includes('CUDA') || errorStr.includes('allocate') || errorStr.includes('runner process has terminated')) {
         console.warn(`[AI] Ollama CUDA error detected for ${symbol}, retrying with CPU fallback...`);
         response = await ollama.chat({
-          model: OLLAMA_MODEL,
+          model: OLLAMA_SIGNAL_MODEL,
           messages: [{ role: 'user', content: prompt }],
           format: 'json',
           keep_alive: 0,
-          options: { num_gpu: 0 },
-        } as any);
+          options: { ...FAST_OPTIONS, num_gpu: 0 },
+        } as any) as any;
       } else {
         throw error;
       }
@@ -104,40 +134,47 @@ export async function generateStockAnalysis(symbol: string, data: any): Promise<
 }
 
 export async function analyzeCompanyProfile(symbol: string, description: string): Promise<ProfileAnalysis> {
-  const prompt = `
-    Analyze the following company profile and description for ${symbol}:
-    "${description}"
+  const prompt = `Analyze the following company profile for ${symbol}:
+"${description}"
 
-    Determine if the company has a high scope of growth based on the provided text, and whether it is in the news or belongs to a sector in news for high growth.
-    
-    Response MUST be in valid JSON format with the following structure:
-    {
-      "high_growth_scope": boolean,
-      "in_news_for_growth": boolean,
-      "growth_score": number (0 to 100),
-      "reasoning": "Detailed 2-3 sentence explanation."
-    }
-  `;
+Determine if the company has high growth scope and whether it is in the news for growth.
+
+Respond ONLY with valid JSON:
+{
+  "high_growth_scope": boolean,
+  "in_news_for_growth": boolean,
+  "growth_score": number (0 to 100),
+  "reasoning": "2-3 sentence explanation."
+}`;
+
+  const PROFILE_OPTIONS = { temperature: 0.1, top_k: 20, num_predict: 600, num_ctx: 4096 };
+
+  const messages = [
+    { role: 'user' as const, content: prompt },
+  ];
 
   let response;
 
   try {
     try {
       response = await ollama.chat({
-        model: OLLAMA_MODEL,
-        messages: [{ role: 'user', content: prompt }],
+        model: OLLAMA_PROFILE_MODEL,
+        messages,
         format: 'json',
-      });
+        keep_alive: 0,
+        options: PROFILE_OPTIONS,
+      } as any) as any;
     } catch (error: any) {
       const errorStr = String(error.message || error.error || "");
       if (errorStr.includes('CUDA') || errorStr.includes('allocate') || errorStr.includes('runner process has terminated')) {
         console.warn(`[AI] Ollama CUDA error detected for ${symbol} profile analysis, retrying with CPU fallback...`);
         response = await ollama.chat({
-          model: OLLAMA_MODEL,
-          messages: [{ role: 'user', content: prompt }],
+          model: OLLAMA_PROFILE_MODEL,
+          messages,
           format: 'json',
-          options: { num_gpu: 0 },
-        });
+          keep_alive: 0,
+          options: { ...PROFILE_OPTIONS, num_gpu: 0 },
+        } as any) as any;
       } else {
         throw error;
       }

@@ -17,7 +17,8 @@
       "Bash(curl -s \"http://localhost:3000/api/health\")",
       "Bash(npx tsx *)",
       "Read(//tmp/**)",
-      "mcp__alphaquant-pro__query_stocks_db"
+      "mcp__alphaquant-pro__query_stocks_db",
+      "Bash(d:\\\\Github\\\\bharat-stock-intelligence\\\\.venv\\\\Scripts\\\\python -c \"import ast; ast.parse\\(open\\('src/server/dl_engine.py'\\).read\\(\\)\\); print\\('syntax OK'\\)\")"
     ]
   },
   "enabledPlugins": {}

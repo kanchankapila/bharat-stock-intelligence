@@ -1,9 +1,10 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
+import { useWebSocket } from '../../hooks/useWebSocket';
 import { 
   TrendingUp, LayoutDashboard, BarChart2, Activity, Trophy, Filter,
   Target, Zap, Search, Briefcase, Calendar, Sparkles, Radio, FlaskConical,
   Star, History, Settings2, PieChart, Bookmark, Users, Globe, CheckCircle2,
-  ToggleLeft, ToggleRight, Settings, MonitorDot,
+  ToggleLeft, ToggleRight, Settings, MonitorDot, X
 } from 'lucide-react';
 import { cn } from '../../../lib/utils';
 
@@ -22,6 +23,21 @@ export const V2AppShell: React.FC<V2AppShellProps> = ({
   setV2Enabled,
   children
 }) => {
+  const [toastMessage, setToastMessage] = useState<any>(null);
+  
+  const wsUrl = import.meta.env.VITE_WS_URL || 'ws://localhost:3000/signals';
+  const { lastMessage, isConnected } = useWebSocket({ url: wsUrl });
+
+  useEffect(() => {
+    if (lastMessage) {
+      setToastMessage(lastMessage);
+      const timer = setTimeout(() => {
+        setToastMessage(null);
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [lastMessage]);
+
   const tabs = [
     { label: 'Dashboard', id: 'dashboard', icon: LayoutDashboard },
     { label: 'Indices', id: 'indices', icon: BarChart2 },
@@ -38,6 +54,7 @@ export const V2AppShell: React.FC<V2AppShellProps> = ({
     { label: 'Earnings', id: 'earnings', icon: Calendar },
     { label: 'Trade Cockpit', id: 'trade-cockpit', icon: Sparkles },
     { label: 'Signals', id: 'signals', icon: Radio },
+    { label: 'Signal Ledger', id: 'signal-tracking', icon: Radio },
     { label: 'Research', id: 'research', icon: FlaskConical },
     { label: 'Strategy', id: 'strategy', icon: Star },
     { label: 'Backtest', id: 'backtest', icon: History },
@@ -119,9 +136,9 @@ export const V2AppShell: React.FC<V2AppShellProps> = ({
             </span>
             <span className="h-4 w-px bg-terminal-border" />
             <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`} />
               <span className="text-[9px] font-black uppercase text-slate-300 font-mono tracking-widest">
-                STREAMING CONNECTED
+                {isConnected ? 'STREAMING CONNECTED' : 'STREAMING DISCONNECTED'}
               </span>
             </div>
           </div>
@@ -138,6 +155,35 @@ export const V2AppShell: React.FC<V2AppShellProps> = ({
           {children}
         </main>
       </div>
+
+      {/* Global Floating Toast */}
+      {toastMessage && (
+        <div className="fixed bottom-6 right-6 z-50 animate-in slide-in-from-bottom-5 fade-in duration-300">
+          <div className="p-4 bg-indigo-900/90 border border-indigo-500/50 shadow-[0_0_20px_rgba(79,70,229,0.3)] backdrop-blur-md rounded-2xl flex items-center justify-between w-80">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-indigo-500/20 rounded-full">
+                <Radio className="w-5 h-5 text-indigo-400 animate-pulse" />
+              </div>
+              <div>
+                <h4 className="text-xs font-black text-slate-200 uppercase tracking-wider font-mono">
+                  Live Alert: {toastMessage.symbol}
+                </h4>
+                <p className="text-[10px] text-indigo-200 mt-0.5 leading-snug">
+                  {toastMessage.type === 'new_signal' 
+                    ? `New ${toastMessage.signal?.signalType || 'Signal'} generated (${toastMessage.source || 'AI'})` 
+                    : toastMessage.level || 'Status update'}
+                </p>
+              </div>
+            </div>
+            <button 
+              onClick={() => setToastMessage(null)}
+              className="p-1 hover:bg-white/10 rounded-full transition-colors self-start -mt-1 -mr-1"
+            >
+              <X className="w-3 h-3 text-slate-400" />
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

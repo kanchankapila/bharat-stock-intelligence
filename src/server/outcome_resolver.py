@@ -10,11 +10,42 @@ Run:  python outcome_resolver.py
       python outcome_resolver.py --dry-run
 """
 
-import os, sqlite3, datetime, argparse
+import os, sqlite3, datetime, argparse, math
 
 DB_PATH      = Path(__file__).parent.parent.parent / "database.sqlite"
-WIN_THRESHOLD  =  1.0   # > +1% = WIN
-LOSS_THRESHOLD = -1.0   # < -1% = LOSS
+WIN_THRESHOLD  =  1.0   # Fallback thresholds
+LOSS_THRESHOLD = -1.0
+
+
+def get_volatility_threshold(conn: sqlite3.Connection, symbol: str, signal_date: str, horizon_days: int) -> float:
+    """
+    Calculates a dynamic threshold based on the stock's rolling daily standard deviation.
+    Uses 20 trading days prior to signal_date. Scales threshold by sqrt(horizon_days).
+    """
+    rows = conn.execute("""
+        SELECT close FROM stock_ohlcv
+        WHERE symbol = ? AND date <= ?
+        ORDER BY date DESC LIMIT 21
+    """, (symbol, signal_date)).fetchall()
+    
+    if len(rows) < 10:
+        # Fallback if insufficient history: 1.0% per day scaled by sqrt(time)
+        return max(0.5, min(10.0, 1.0 * math.sqrt(horizon_days)))
+        
+    prices = [float(r[0]) for r in rows][::-1]
+    # Daily returns
+    returns = [(prices[i] - prices[i-1]) / prices[i-1] for i in range(1, len(prices))]
+    
+    # Calculate daily volatility
+    mean_ret = sum(returns) / len(returns)
+    variance = sum((r - mean_ret) ** 2 for r in returns) / (len(returns) - 1)
+    daily_vol = math.sqrt(variance) * 100 # percentage
+    
+    # 1.0 Standard deviation move over the holding horizon
+    threshold = daily_vol * math.sqrt(horizon_days)
+    
+    # Clamp between 0.5% and 15.0% to prevent extreme values
+    return max(0.5, min(15.0, threshold))
 
 
 def resolve_outcomes(
@@ -83,15 +114,20 @@ def resolve_outcomes(
         # PHASE 1 FIX: Entry at next trading day's open
         signal_date_obj = datetime.date.fromisoformat(signal_date)
         
-        # Get actual next trading day from DB
+        # Get actual next trading day and its open price from DB
         next_trading_day_row = conn.execute("""
-            SELECT date FROM stock_ohlcv 
+            SELECT date, open FROM stock_ohlcv 
             WHERE symbol = ? AND date > ? 
             ORDER BY date ASC LIMIT 1
         """, (sym, signal_date)).fetchone()
         
-        next_trading_day = next_trading_day_row[0] if next_trading_day_row else (signal_date_obj + datetime.timedelta(days=1)).isoformat()
-        
+        if next_trading_day_row:
+            next_trading_day = next_trading_day_row[0]
+            # Override original entry with the realistic next-day open price
+            entry = float(next_trading_day_row[1])
+        else:
+            next_trading_day = (signal_date_obj + datetime.timedelta(days=1)).isoformat()
+            
         exit_target_date = (signal_date_obj + datetime.timedelta(days=horizon_days)).isoformat()
 
         outcome      = None
@@ -126,8 +162,11 @@ def resolve_outcomes(
                 check_date = exit_row[0]
                 exit_price = float(exit_row[1])
                 return_pct = (exit_price - entry) / entry * 100
-                outcome    = ('WIN'  if return_pct > WIN_THRESHOLD  else
-                              'LOSS' if return_pct < LOSS_THRESHOLD else
+                
+                # Dynamic volatility-adjusted threshold
+                threshold = get_volatility_threshold(conn, sym, signal_date, horizon_days)
+                outcome    = ('WIN'  if return_pct > threshold  else
+                              'LOSS' if return_pct < -threshold else
                               'NEUTRAL')
             else:
                 outcome    = 'PENDING'
@@ -195,9 +234,10 @@ def resolve_unified_outcomes(
     upsert = """
         INSERT INTO unified_signal_outcomes
             (unified_signal_id, signal_source, symbol, signal_date, horizon_days,
-             entry_price, check_date, exit_price, outcome, return_pct, computed_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
+             entry_price, entry_time, check_date, exit_price, outcome, return_pct, computed_at)
+        VALUES (?,?,?,?,?,?,CURRENT_TIMESTAMP,?,?,?,?,CURRENT_TIMESTAMP)
         ON CONFLICT(unified_signal_id, horizon_days) DO UPDATE SET
+            entry_price=excluded.entry_price,
             check_date=excluded.check_date, exit_price=excluded.exit_price,
             outcome=excluded.outcome, return_pct=excluded.return_pct,
             computed_at=excluded.computed_at
@@ -216,12 +256,18 @@ def resolve_unified_outcomes(
 
         signal_date_obj = datetime.date.fromisoformat(signal_date[:10])
         next_trading_day_row = conn.execute("""
-            SELECT date FROM stock_ohlcv 
+            SELECT date, open FROM stock_ohlcv 
             WHERE symbol = ? AND date > ? 
             ORDER BY date ASC LIMIT 1
         """, (sym, signal_date[:10])).fetchone()
         
-        next_trading_day = next_trading_day_row[0] if next_trading_day_row else (signal_date_obj + datetime.timedelta(days=1)).isoformat()
+        if next_trading_day_row:
+            next_trading_day = next_trading_day_row[0]
+            # Override original entry with the realistic next-day open price
+            entry = float(next_trading_day_row[1])
+        else:
+            next_trading_day = (signal_date_obj + datetime.timedelta(days=1)).isoformat()
+            
         exit_target_date = (signal_date_obj + datetime.timedelta(days=horizon_days)).isoformat()
 
         outcome, exit_price, check_date, return_pct = None, None, None, None
@@ -250,8 +296,11 @@ def resolve_unified_outcomes(
                 check_date = exit_row[0]
                 exit_price = float(exit_row[1])
                 return_pct = (exit_price - entry) / entry * 100
-                outcome = ('WIN' if return_pct > WIN_THRESHOLD else
-                           'LOSS' if return_pct < LOSS_THRESHOLD else
+                
+                # Dynamic volatility-adjusted threshold
+                threshold = get_volatility_threshold(conn, sym, signal_date, horizon_days)
+                outcome = ('WIN' if return_pct > threshold else
+                           'LOSS' if return_pct < -threshold else
                            'NEUTRAL')
             else:
                 outcome = 'PENDING'
@@ -384,8 +433,11 @@ def resolve_recommendation_log(
             if exit_row:
                 exit_price = float(exit_row[1])
                 return_pct = (exit_price - entry) / entry * 100
-                outcome = ('WIN'  if return_pct > WIN_THRESHOLD  else
-                           'LOSS' if return_pct < LOSS_THRESHOLD else
+                
+                # Dynamic volatility-adjusted threshold
+                threshold = get_volatility_threshold(conn, sym, signal_date, h)
+                outcome = ('WIN'  if return_pct > threshold  else
+                           'LOSS' if return_pct < -threshold else
                            'NEUTRAL')
             else:
                 outcome = 'PENDING'

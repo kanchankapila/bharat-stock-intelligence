@@ -18,6 +18,7 @@
 
 import db from './db';
 import { wsSignalService } from './websocketService';
+import { fetchDeliveryMap } from './deliveryFetcher';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1144,6 +1145,7 @@ export async function runTechnicalSignalScan(options: {
 
     // Compute FII/DII rolling values once before the transaction
     const { fii_10d_net, dii_3d_net } = getFiiDiiRolling(scanDate);
+    const deliveryMap = await fetchDeliveryMap(scanDate);
 
     // Upsert all results into DB (including new accuracy-context columns)
     const upsert = db.prepare(`
@@ -1152,7 +1154,7 @@ export async function runTechnicalSignalScan(options: {
         rsi, sma50, sma200, macd, macd_signal, bb_width, volume_ratio, above_sma200,
         adx, nifty_regime, fii_3d_net, news_sentiment_score,
         pcr_oi, pcr_vol, fii_10d_net, dii_3d_net,
-        cmp, change_pct,
+        cmp, change_pct, delivery_pct,
         ai_insight, entry_zone, stop_loss, targets, setup_quality, time_horizon,
         computed_at
       ) VALUES (
@@ -1160,7 +1162,7 @@ export async function runTechnicalSignalScan(options: {
         @rsi, @sma50, @sma200, @macd, @macd_signal, @bb_width, @volume_ratio, @above_sma200,
         @adx, @nifty_regime, @fii_3d_net, @news_sentiment_score,
         @pcr_oi, @pcr_vol, @fii_10d_net, @dii_3d_net,
-        @cmp, @change_pct,
+        @cmp, @change_pct, @delivery_pct,
         @ai_insight, @entry_zone, @stop_loss, @targets, @setup_quality, @time_horizon,
         CURRENT_TIMESTAMP
       )
@@ -1174,7 +1176,7 @@ export async function runTechnicalSignalScan(options: {
         news_sentiment_score=excluded.news_sentiment_score,
         pcr_oi=excluded.pcr_oi, pcr_vol=excluded.pcr_vol,
         fii_10d_net=excluded.fii_10d_net, dii_3d_net=excluded.dii_3d_net,
-        cmp=excluded.cmp, change_pct=excluded.change_pct,
+        cmp=excluded.cmp, change_pct=excluded.change_pct, delivery_pct=excluded.delivery_pct,
         ai_insight=excluded.ai_insight, entry_zone=excluded.entry_zone,
         stop_loss=excluded.stop_loss, targets=excluded.targets,
         setup_quality=excluded.setup_quality, time_horizon=excluded.time_horizon,
@@ -1229,6 +1231,7 @@ export async function runTechnicalSignalScan(options: {
           fii_10d_net,
           dii_3d_net,
           cmp: r.cmp, change_pct: r.changePct,
+          delivery_pct: deliveryMap.get(r.symbol) ?? null,
           ai_insight:    r.aiInsight    ?? null,
           entry_zone:    r.entryZone    ?? null,
           stop_loss:     r.stopLoss     ?? null,

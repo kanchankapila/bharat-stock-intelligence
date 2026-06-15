@@ -72,17 +72,18 @@ export class TelegramNotificationService {
    */
   public async sendSignalNotification(symbol: string, type: 'BUY' | 'SELL' | 'HOLD', entry: number, target: number, stopLoss: number, confidence: number, reasoning: string): Promise<boolean> {
     const emoji = type === 'BUY' ? '🟢' : type === 'SELL' ? '🔴' : '🟡';
+    const confidenceStr = confidence != null && confidence > 0 ? `${confidence}%` : 'N/A';
     const text = `
 ${emoji} *NEW TRADING SIGNAL TRIGGERED*
 
-*Asset:* $${symbol}
+*Asset:* #${symbol}
 *Action:* ${type}
-*Confidence:* ${confidence}%
+*Confidence:* ${confidenceStr}
 
 📊 *Trade Parameters:*
-• *Entry Zone:* ₹${entry.toFixed(2)}
-• *AI Target:* ₹${target.toFixed(2)}
-• *Stop Loss:* ₹${stopLoss.toFixed(2)}
+• *Entry Zone:* ₹${entry?.toFixed(2) ?? 'N/A'}
+• *AI Target:* ₹${target?.toFixed(2) ?? 'N/A'}
+• *Stop Loss:* ₹${stopLoss?.toFixed(2) ?? 'N/A'}
 
 💡 *AI Analysis & Reasoning:*
 _${reasoning}_
@@ -98,8 +99,8 @@ _${reasoning}_
     const text = `
 ⚠️ *KEY LEVEL CROSSOVER DETECTED*
 
-*Asset:* $${symbol}
-*Current Price:* ₹${price.toFixed(2)}
+*Asset:* #${symbol}
+*Current Price:* ₹${price?.toFixed(2) ?? 'N/A'}
 *Crossed Level:* ${level}
     `.trim();
 
