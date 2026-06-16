@@ -97,7 +97,7 @@ export class WebSocketSignalService {
       timestamp: new Date().toISOString(),
     });
 
-    if (alert.signal && alert.signal.signalType === 'BUY' && (alert.signal.confidence ?? 0) > 85) {
+    if (alert.signal && alert.signal.signalType === 'BUY' && (alert.signal.confidence ?? 0) >= 85) {
       telegramService.sendSignalNotification(
         alert.symbol,
         'BUY',
