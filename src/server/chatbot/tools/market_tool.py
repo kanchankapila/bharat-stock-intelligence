@@ -661,3 +661,47 @@ def get_daily_briefing(db_path: str = DB_PATH) -> dict:
 
     db.close()
     return result
+
+
+# ─── Unified Recommendation ───────────────────────────────────────────────────
+
+def get_unified_recommendation(symbol: str, db_path: str = DB_PATH) -> dict | None:
+    """
+    Latest multi-engine consensus recommendation for a stock.
+    Source: unified_recommendations (updated daily by unified-ranker-daily-repeatable job).
+    Includes: unified_score, conviction_level, ML/DL/confluence/technical sub-scores,
+    entry/target/SL zones, risk_reward, trade_reasoning.
+    Falls back to None if the symbol has no entry.
+    """
+    db = _connect(db_path)
+    try:
+        row = db.execute(
+            """SELECT symbol, computed_at, regime, unified_score, conviction_level,
+                      screener_stock_score, ml_score, confluence_score,
+                      technical_score, dl_score, avg_engine_track_record,
+                      bullish_screener_count, bearish_screener_count,
+                      screener_names_json, fundamental_score,
+                      entry_zone_low, entry_zone_high, stop_loss,
+                      target_1, target_2, target_3, risk_reward,
+                      timeframe, sector, trade_reasoning
+               FROM unified_recommendations
+               WHERE symbol = ?
+               ORDER BY computed_at DESC LIMIT 1""",
+            (symbol.upper(),),
+        ).fetchone()
+
+        if not row:
+            db.close()
+            return None
+
+        d = dict(row)
+        try:
+            d["screener_names"] = json.loads(d.pop("screener_names_json") or "[]")[:8]
+        except Exception:
+            d.pop("screener_names_json", None)
+
+        db.close()
+        return d
+    except Exception:
+        db.close()
+        return None

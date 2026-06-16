@@ -20,7 +20,7 @@ from tools.screener_tool import search_screener
 from tools.market_tool import (
     get_market_pulse, get_top_confluence_stocks, get_stock_signals,
     get_fii_dii_sentiment, get_sector_momentum, get_signal_accuracy,
-    get_live_news_sentiment, get_daily_briefing,
+    get_live_news_sentiment, get_daily_briefing, get_unified_recommendation,
 )
 
 DB_PATH = os.getenv("DB_PATH", "database.sqlite")
@@ -32,6 +32,7 @@ Available data (all from local DB unless noted):
 - Live signals: unified_signals (today), confluence_signals (30-min updates), technical_signals (RSI/MACD/SMA, daily)
 - Fundamentals: PE, P/B, ROE, revenue growth, debt/equity, Piotroski F-score
 - AI composite scores (0–100): Strong Buy / Buy / Hold / Sell / Strong Sell
+- Unified multi-engine recommendations: unified_score (0–100), conviction_level, ML/DL/confluence/technical sub-scores, entry/target/SL zones, risk_reward — updated daily
 - Quant scores: 1W/1M/3M/6M returns, momentum rank, Sharpe ratio, max drawdown
 - Market regime: HMM-based (BULLISH/BEARISH/SIDEWAYS), sentiment score, macro asset moves
 - FII/DII net flows (last available data — may lag a few days)
@@ -173,6 +174,10 @@ def execute_tools(state: AgentState, db_path: str = DB_PATH) -> dict:
         quant = get_quant_scores(symbol=symbol, db_path=db_path)
         if quant:
             add("Quant Scores", quant[0], "sql:quant_scores")
+
+        unified = get_unified_recommendation(symbol, db_path=db_path)
+        if unified:
+            add("Unified Multi-Engine Recommendation (today)", unified, "sql:unified_recommendations")
 
         # Web only if stock missing from DB, news thin, or query is time-sensitive
         news_count = news.get("total", 0) if isinstance(news, dict) else 0
