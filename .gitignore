@@ -60,6 +60,8 @@ src/server/ml_models/
 scratch/
 .claude/worktrees/
 
+src/server/chatbot/chroma_store/
+
 # OS/editor files
 .DS_Store
 Thumbs.db
