@@ -111,11 +111,12 @@ def get_market_pulse(db_path: str = DB_PATH) -> dict:
         pass
 
     try:
-        row = db.execute(
-            "SELECT * FROM macro_asset_prices ORDER BY date DESC LIMIT 1"
-        ).fetchone()
-        if row:
-            result["macro"] = dict(row)
+        rows = db.execute(
+            "SELECT * FROM macro_asset_prices "
+            "WHERE date = (SELECT MAX(date) FROM macro_asset_prices)"
+        ).fetchall()
+        if rows:
+            result["macro"] = [dict(r) for r in rows]
     except Exception:
         pass
 

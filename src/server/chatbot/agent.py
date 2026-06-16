@@ -286,7 +286,7 @@ def execute_tools(state: AgentState, db_path: str = DB_PATH) -> dict:
     # ── daily_briefing ────────────────────────────────────────────────────────
     elif intent == "daily_briefing":
         briefing = get_daily_briefing(db_path=db_path)
-        if briefing and not briefing.get("error"):
+        if any(k != "error" for k in briefing):
             add("Today's Research Briefing (Pre-Market + Post-Close)", briefing, "sql:daily_research_reports")
         else:
             # Fall back to top confluence stocks when no report ready yet
