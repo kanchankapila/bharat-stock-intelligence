@@ -34,8 +34,8 @@ function isNSEMarketHours(): boolean {
 function makeConnection(isProbe = false): any {
   const base = {
     ...REDIS_BASE,
-    connectTimeout: isProbe ? 2000 : 5000,
-    keepAlive: 10000,
+    connectTimeout: isProbe ? 2000 : 30000,
+    keepAlive: 30000,
     showFriendlyErrorStack: false,
   };
 

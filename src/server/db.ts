@@ -3,14 +3,14 @@ import path from 'path';
 
 const DATABASE_URL = process.env.DATABASE_URL || 'database.sqlite';
 const dbPath = DATABASE_URL === ':memory:' ? ':memory:' : path.resolve(process.cwd(), DATABASE_URL);
-const db = new Database(dbPath, { timeout: 10000 });
+const db = new Database(dbPath, { timeout: 30000 });
 
 db.pragma('journal_mode = WAL');
 db.pragma('synchronous = NORMAL');
 db.pragma('cache_size = -65536');     // 64 MB page cache
 db.pragma('mmap_size = 268435456');   // 256 MB memory-mapped I/O
 db.pragma('temp_store = MEMORY');     // temp tables in RAM
-db.pragma('busy_timeout = 5000');     // avoid SQLITE_BUSY under concurrent load
+db.pragma('busy_timeout = 30000');    // allow 30s wait during heavy concurrent writes
 db.pragma('wal_autocheckpoint = 1000');
 
 // Checkpoint WAL every 30 min to prevent it growing unbounded in memory

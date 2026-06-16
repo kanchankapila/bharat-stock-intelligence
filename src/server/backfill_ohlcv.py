@@ -29,9 +29,6 @@ _HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0",
     "Accept": "application/json",
 }
-_GAP_FILL_SEM = asyncio.Semaphore(20)  # max 20 concurrent requests
-
-
 def _date_to_unix(date_str: str) -> int:
     """Convert YYYY-MM-DD string to Unix timestamp for YF API."""
     from datetime import datetime
@@ -44,9 +41,10 @@ async def _fetch_ohlcv_async(
     ticker: str,
     cutoff: str,
     today: str,
+    sem: asyncio.Semaphore,
 ) -> list:
     """Fetch daily OHLCV for one NSE symbol between cutoff and today using YF v8 chart."""
-    async with _GAP_FILL_SEM:
+    async with sem:
         url = (
             f"https://query2.finance.yahoo.com/v8/finance/chart/{ticker}"
             f"?interval=1d"
@@ -101,9 +99,10 @@ async def _gap_fill_async(
     today: str,
 ) -> int:
     """Download OHLCV for all symbols concurrently and upsert missing rows."""
+    sem = asyncio.Semaphore(20)
     async with httpx.AsyncClient(headers=_HEADERS) as client:
         tasks = [
-            _fetch_ohlcv_async(client, sym, tick, cutoff, today)
+            _fetch_ohlcv_async(client, sym, tick, cutoff, today, sem)
             for sym, tick in zip(symbols, tickers)
         ]
         results = await asyncio.gather(*tasks)
