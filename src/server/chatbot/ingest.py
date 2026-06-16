@@ -97,17 +97,19 @@ def ingest_screener_descriptions(client: chromadb.ClientAPI, db_path: str = DB_P
 
 
 def ingest_news_articles(client: chromadb.ClientAPI, db_path: str = DB_PATH) -> int:
-    """Recent news articles (last 30 days), chunked at 500 chars."""
+    """Recent news from news_sentiment_items (FinBERT-scored, live, updated ~30 min).
+    Upserts into the 'news_articles' ChromaDB collection to avoid a full re-embed on upgrade."""
     ef = get_embedding_fn()
     col = client.get_or_create_collection("news_articles", embedding_function=ef)
 
     conn = sqlite3.connect(db_path)
     try:
         rows = conn.execute("""
-            SELECT id, title, summary, source, sentiment, symbols
-            FROM news_articles
-            WHERE timestamp >= datetime('now', '-30 days')
-            ORDER BY timestamp DESC
+            SELECT id, title, summary, source, sentiment, sentiment_score,
+                   impact, category, sector, symbols_json
+            FROM news_sentiment_items
+            WHERE published_at >= datetime('now', '-30 days')
+            ORDER BY published_at DESC
             LIMIT 1000
         """).fetchall()
     except Exception:
@@ -115,7 +117,8 @@ def ingest_news_articles(client: chromadb.ClientAPI, db_path: str = DB_PATH) -> 
     conn.close()
 
     docs, ids, metas = [], [], []
-    for art_id, title, summary, source, sentiment, symbols in rows:
+    for row in rows:
+        art_id, title, summary, source, sentiment, score, impact, category, sector, symbols_json = row
         text = f"{title}. {summary or ''}".strip()
         if not text:
             continue
@@ -124,13 +127,17 @@ def ingest_news_articles(client: chromadb.ClientAPI, db_path: str = DB_PATH) -> 
         metas.append({
             "source": source or "",
             "sentiment": sentiment or "Neutral",
-            "symbols": symbols or "",
+            "sentiment_score": float(score) if score is not None else 0.0,
+            "impact": impact or "MEDIUM",
+            "category": category or "",
+            "sector": sector or "",
+            "symbols": symbols_json or "",
             "type": "news",
         })
 
     if docs:
         col.upsert(documents=docs, ids=ids, metadatas=metas)
-        logger.info(f"Upserted {len(docs)} news articles")
+        logger.info(f"Upserted {len(docs)} news items from news_sentiment_items")
     return len(docs)
 
 
