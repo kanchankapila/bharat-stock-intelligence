@@ -644,8 +644,8 @@ def get_daily_briefing(db_path: str = DB_PATH) -> dict:
                 report = json.loads(row["report_json"] or "{}")
                 entry["executive_summary"] = report.get("executive_summary", "")
                 entry["avoid_list"] = report.get("avoid_list", [])[:10]
-                entry["sector_rankings"] = report.get("sector_rankings", [])
-                entry["key_themes"] = report.get("key_themes", [])
+                entry["sector_rankings"] = report.get("sector_rankings", [])[:15]
+                entry["key_themes"] = report.get("key_themes", [])[:10]
             except Exception:
                 pass
 

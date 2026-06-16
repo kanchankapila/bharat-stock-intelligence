@@ -263,7 +263,7 @@ def execute_tools(state: AgentState, db_path: str = DB_PATH) -> dict:
     elif intent == "sector_analysis":
         momentum = get_sector_momentum(sector=sector, db_path=db_path)
         add(
-            f"{'Sector: ' + sector if sector else 'All Sector'} Momentum",
+            f"{'Sector: ' + sector if sector else 'All Sectors'} Momentum",
             momentum,
             "sql:quant_scores+nse_stocks",
         )
