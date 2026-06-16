@@ -119,7 +119,7 @@ def ingest_news_articles(client: chromadb.ClientAPI, db_path: str = DB_PATH) -> 
     docs, ids, metas = [], [], []
     for row in rows:
         art_id, title, summary, source, sentiment, score, impact, category, sector, symbols_json = row
-        text = f"{title}. {summary or ''}".strip()
+        text = f"{title or ''}. {summary or ''}".strip()
         if not text:
             continue
         docs.append(text[:500])
