@@ -967,13 +967,23 @@ const SIG_SHORT: Record<SignalType, string> = {
   QUALITY_OVERSOLD_SIGNAL: 'Quality Ovsld',
 };
 
+const BEARISH_SIGNAL_TYPES = new Set<SignalType>([
+  'DEATH_CROSS', 'RSI_BEARISH_DIVERGENCE', 'DISTRIBUTION_DAY',
+]);
+
 async function sendTelegramSignals(results: SignalResult[], date: string): Promise<void> {
   const token  = process.env.TELEGRAM_BOT_TOKEN;
   const chatId = process.env.TELEGRAM_CHAT_ID;
   if (!token || !chatId) return;
 
+  const buySignals = results.filter(r =>
+    (r.winProbability ?? 0) >= 0.85 &&
+    r.signals.every(s => !BEARISH_SIGNAL_TYPES.has(s.type))
+  );
+  if (buySignals.length === 0) return;
+
   let body = '';
-  for (const r of results.slice(0, 6)) {
+  for (const r of buySignals.slice(0, 6)) {
     const e   = r.changePct >= 0 ? '📈' : '📉';
     const sig = r.signals.map(s => `${STRENGTH_EMOJI[s.strength]} ${SIG_SHORT[s.type]}`).join('  ');
     body += `*${r.name ?? r.symbol}* (${r.symbol})\n`;
