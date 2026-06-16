@@ -7,7 +7,7 @@ import pytz
 import os
 
 # 1. Load the symbol mapping
-with open('scripts/stocklist.json', 'r', encoding='utf-8') as f:
+with open(r'd:\Github\bharat-stock-intelligence\scripts\stocklist.json', 'r', encoding='utf-8') as f:
     stock_list = json.load(f)
 
 # Create a mapping from mcsymbol to NSE symbol
@@ -55,7 +55,7 @@ def parse_timeframe(tf_str):
         return timedelta(days=7), '1d' 
 
 # 2. Connect to DB
-conn = sqlite3.connect('database.sqlite')
+conn = sqlite3.connect(r'd:\Github\bharat-stock-intelligence\database.sqlite')
 conn.row_factory = sqlite3.Row
 cursor = conn.cursor()
 
@@ -216,11 +216,11 @@ with open(artifact_path, 'w', encoding='utf-8') as f:
             tf_rate = (tf_hits / len(tf_items)) * 100 if len(tf_items) > 0 else 0
             f.write(f"| {tf} | {len(tf_items)} | {tf_hits} | {tf_rate:.2f}% |\n")
             
-        f.write("\n## Detailed Log (Top 25 by Return)\n")
+        f.write("\n## Detailed Log (All Analysed Items)\n")
         f.write("| Symbol | Pattern | Timeframe | Entry | Target | SL | Status | Max Return |\n")
         f.write("|--------|---------|-----------|-------|--------|----|--------|------------|\n")
         
-        sorted_res = sorted(results, key=lambda x: x['max_return'], reverse=True)[:25]
+        sorted_res = sorted(results, key=lambda x: x['max_return'], reverse=True)
         for r in sorted_res:
             sym = get_yf_symbol(r['meta_data_price_key'])
             f.write(f"| {sym} | {r['pattern_name']} | {r['time_frame']} | {r['entry_price']} | {r['target_price']} | {r['stoploss_price']} | {r['status']} | {r['max_return']:.2f}% |\n")

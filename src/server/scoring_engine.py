@@ -5,6 +5,7 @@ import os
 import datetime
 import pandas as pd
 import numpy as np
+import difflib
 from sqlalchemy import create_engine, text
 from nlp_engine import NLPScreenerInference, NLP_VERSION
 from typing import Dict, Any, List
@@ -396,8 +397,21 @@ class AlphaQuantScoringEngine:
         try:
             import math
             published = datetime.datetime.fromisoformat(str(published_at_str))
-            age_hours = max(0, (datetime.datetime.now() - published).total_seconds() / 3600)
-            return math.exp(-math.log(2) * age_hours / 48)  # 2-day half-life
+            now = datetime.datetime.now()
+            
+            # Count weekend days between published and now
+            weekend_days = 0
+            current = published.date()
+            while current <= now.date():
+                if current.weekday() >= 5:  # 5=Sat, 6=Sun
+                    weekend_days += 1
+                current += datetime.timedelta(days=1)
+                
+            age_hours = max(0, (now - published).total_seconds() / 3600)
+            # Subtract weekend hours (max subtracting age_hours to prevent negative)
+            adjusted_age_hours = max(0, age_hours - (weekend_days * 24))
+            
+            return math.exp(-math.log(2) * adjusted_age_hours / 48)  # 2-day half-life
         except Exception:
             return 1.0
 
@@ -416,7 +430,7 @@ class AlphaQuantScoringEngine:
         with self.engine.connect() as conn:
             try:
                 news_df = pd.read_sql(
-                    """SELECT symbols_json AS symbols, sentiment, title, source, published_at
+                    """SELECT symbols_json AS symbols, sentiment, sentiment_score, impact, title, source, published_at
                        FROM news_sentiment_items
                        WHERE published_at >= datetime('now', '-7 days')
                          AND sentiment != 'NEUTRAL'""",
@@ -433,6 +447,8 @@ class AlphaQuantScoringEngine:
                     conn,
                 )
                 news_df['sentiment'] = news_df['sentiment'].str.lower()
+                news_df['sentiment_score'] = 1.0  # Fallback
+                news_df['impact'] = 'MEDIUM'      # Fallback
                 news_df['is_json_symbols'] = False
 
         news_map: Dict[str, list] = {}
@@ -452,6 +468,8 @@ class AlphaQuantScoringEngine:
                 news_map.setdefault(s, []).append({
                     'name':      n['title'],
                     'sentiment': n['sentiment'],
+                    'sentiment_score': n.get('sentiment_score', 1.0),
+                    'impact':    n.get('impact', 'MEDIUM'),
                     'source':    n.get('source', 'news'),
                     'category':  'news',
                     'recency':   recency,
@@ -491,6 +509,19 @@ class AlphaQuantScoringEngine:
         except Exception as e:
             print(f"[SCORING] Failed to load technical_composite_scores: {e}")
 
+        # Load Global Market Score for True Alpha (Beta) adjustment
+        market_global_score = 0.0
+        try:
+            with self.engine.connect() as conn:
+                g_row = conn.execute(text("""
+                    SELECT global_score FROM market_sentiment_snapshots 
+                    ORDER BY snapshot_at DESC LIMIT 1
+                """)).fetchone()
+                if g_row:
+                    market_global_score = float(g_row[0])
+        except Exception as e:
+            print(f"[SCORING] Failed to load market_global_score: {e}")
+
         # Score per timeframe
         timeframes = ['long_term', 'intraday']
         all_timeframe_results = []
@@ -514,22 +545,55 @@ class AlphaQuantScoringEngine:
             for symbol, news_items in news_map.items():
                 _init_stock(symbol)
                 news_src_counts: Dict[str, int] = {}
+                
+                # Sort news by recency first to prioritize the most recent ones in deduplication
+                news_items = sorted(news_items, key=lambda x: x.get('recency', 0), reverse=True)
+                
+                processed_titles = []
+                
                 for item in news_items:
+                    # 1. Syndicate Spam Deduplication
+                    is_syndicated = False
+                    for p_title in processed_titles:
+                        if difflib.SequenceMatcher(None, str(item['name']).lower(), str(p_title).lower()).ratio() > 0.85:
+                            is_syndicated = True
+                            break
+                    
+                    if not is_syndicated:
+                        processed_titles.append(item['name'])
+                    
+                    # Sentiment direction
                     mult = 1 if item['sentiment'] == 'positive' else (-1 if item['sentiment'] == 'negative' else 0)
                     if mult == 0:
                         continue
+                        
+                    # Magnitude and Impact
+                    continuous_score = abs(float(item.get('sentiment_score', 1.0)))
+                    impact_val = item.get('impact', 'MEDIUM').upper()
+                    impact_mult = 1.5 if impact_val == 'HIGH' else (0.5 if impact_val == 'LOW' else 1.0)
+                    
                     bucket = f"news|news|{'bullish' if mult > 0 else 'bearish'}"
-                    cnt = news_src_counts.get(bucket, 0)
-                    # Dedup: first SOURCE_CAT_CAP news items count fully, rest at DECAY
-                    decay = 1.0 if cnt < self.SOURCE_CAT_CAP else self.SOURCE_CAT_DECAY
-                    news_src_counts[bucket] = cnt + 1
+                    
+                    # If syndicated, it doesn't count towards the source limit (treated as already hitting the decay cap)
+                    if is_syndicated:
+                        decay = self.SOURCE_CAT_DECAY
+                    else:
+                        cnt = news_src_counts.get(bucket, 0)
+                        decay = 1.0 if cnt < self.SOURCE_CAT_CAP else self.SOURCE_CAT_DECAY
+                        news_src_counts[bucket] = cnt + 1
+                        
                     recency = item.get('recency', 1.0)
-                    # News base is 5.0 (same as screeners — was 7.0, reduced to prevent over-dominance)
                     source_quality = self.NEWS_SOURCE_QUALITY.get(item.get('source', ''), 0.90)
-                    contrib = 5.0 * mult * decay * recency * source_quality
+                    
+                    # Calculate contribution using continuous score and impact multiplier
+                    contrib = 5.0 * mult * continuous_score * impact_mult * decay * recency * source_quality
+                    
                     stock_scores[symbol]['raw_sum'] += contrib
                     stock_scores[symbol]['factors']['news'] += contrib
-                    stock_scores[symbol]['sources'].add(item['source'])
+                    
+                    if not is_syndicated:
+                        stock_scores[symbol]['sources'].add(item['source'])
+                    
                     stock_scores[symbol]['categories'].add('news')
                     lst = stock_scores[symbol]['positive_screeners' if mult > 0 else 'negative_screeners']
                     lst.append({'name': item['name'], 'sentiment': item['sentiment'],
@@ -630,9 +694,35 @@ class AlphaQuantScoringEngine:
                     data['factors']['technical'] = data['factors'].get('technical', 0) + (tc_score / 10.0)
                     # Also boost the raw final_score slightly based on technical strength
                     final_score += (tc_score - 50) / 10.0
+                    
+                # True Alpha (Market Beta Adjustment)
+                # If market is green (>0.3) and stock is bullish, discount by 0.9x
+                # If market is red (<-0.3) and stock is bullish, premium by 1.1x
+                # (And vice versa for bearish signals)
+                if final_score > 0:
+                    if market_global_score > 0.3:
+                        final_score *= 0.90
+                    elif market_global_score < -0.3:
+                        final_score *= 1.10
+                elif final_score < 0:
+                    if market_global_score < -0.3:
+                        final_score *= 0.90
+                    elif market_global_score > 0.3:
+                        final_score *= 1.10
 
                 # Max total points: 40 + 30 + 20 + 10 + 20 = 120. Scale down to 100.
                 raw_confidence = source_pts + cat_pts + ml_pts + vol_pts + tc_pts
+                
+                # Divergence Penalty
+                pos_count = len(data['positive_screeners'])
+                neg_count = len(data['negative_screeners'])
+                if pos_count > 0 and neg_count > 0:
+                    ratio = min(pos_count, neg_count) / max(pos_count, neg_count)
+                    # If high divergence (ratio > 0.3) and meaningful volume, penalize confidence
+                    if ratio > 0.3 and (pos_count + neg_count) >= 4:
+                        penalty = 20 * ratio # Up to 20 points penalty for complete divergence (1.0 ratio)
+                        raw_confidence = max(0, raw_confidence - penalty)
+                
                 confidence = int(min(95, max(5, raw_confidence * (100/120))))   # cap at 95 (never report 100% certainty)
 
                 # Calibrated classification thresholds
