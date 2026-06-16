@@ -14,8 +14,9 @@ ipython
 markdown-it-py
 mdurl
 transformers
-# Install CUDA build: pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
-torch>=2.2.0
+# Install CUDA build (RTX 5050 / CUDA 13.x uses cu128 wheels):
+# python -m pip install "torch==2.9.1+cu128" torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+torch>=2.9.1
 torchvision>=0.17.0
 pytorch-forecasting>=1.0.0
 pytorch-lightning>=2.2.0
