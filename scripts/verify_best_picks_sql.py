@@ -2,8 +2,8 @@ import sqlite3, json, os, sys
 
 # Try the main DB paths
 DB_CANDIDATES = [
+    os.path.join(os.path.dirname(__file__), "..", "database.sqlite"),
     os.path.join(os.path.dirname(__file__), "..", "src", "server", "bharat_intelligence.db"),
-    os.path.join(os.path.dirname(__file__), "..", "src", "server", "stocks.db"),
 ]
 
 conn = None
