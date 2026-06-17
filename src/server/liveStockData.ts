@@ -672,21 +672,30 @@ const lastPriceCache = new Map<string, number>();  // Track previous prices
 async function detectAndQueueSignalUpdates(stocks: MarketData[]): Promise<void> {
   const symbelsToUpdate: string[] = [];
 
+  // Import once outside the loop — best-effort; silently skip if WS not ready
+  let wsSvc: { checkAndBroadcastPriceMove: (symbol: string, price: number) => void } | null = null;
+  try {
+    const { wsSignalService } = await import('./websocketService');
+    wsSvc = wsSignalService;
+  } catch { /* WS service unavailable */ }
+
   for (const stock of stocks) {
+    // Always notify WS service so it can check its own 2% threshold and broadcast
+    wsSvc?.checkAndBroadcastPriceMove(stock.symbol, stock.price);
+
     const lastPrice = lastPriceCache.get(stock.symbol);
     if (!lastPrice) {
-      // First time seeing this stock, just cache the price
       lastPriceCache.set(stock.symbol, stock.price);
       continue;
     }
 
     const priceChange = Math.abs((stock.price - lastPrice) / lastPrice * 100);
-    
+
     if (priceChange > PRICE_CHANGE_THRESHOLD) {
       console.log(`[SIGNAL-UPDATE] ${stock.symbol}: ${priceChange.toFixed(2)}% price move detected`);
       symbelsToUpdate.push(stock.symbol);
     }
-    
+
     lastPriceCache.set(stock.symbol, stock.price);
   }
 
