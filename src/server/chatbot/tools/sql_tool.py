@@ -1,5 +1,6 @@
 import sqlite3
 import os
+from datetime import datetime, timedelta
 
 DB_PATH = os.getenv("DB_PATH", "database.sqlite")
 
@@ -80,31 +81,67 @@ def filter_stocks_by_fundamentals(
 
 def get_buy_signals(
     symbol: str | None = None,
-    min_confidence: float = 0.70,
+    min_confidence: float = 0.65,
     limit: int = 20,
     db_path: str = DB_PATH,
 ) -> list[dict]:
-    """Active BUY signals, optionally filtered by symbol."""
-    conditions = ["type = 'BUY'", "status = 'ACTIVE'", "confidence >= ?"]
-    params: list = [min_confidence]
-
-    if symbol:
-        conditions.append("symbol = ?")
-        params.append(symbol.upper())
-
-    query = f"""
-        SELECT symbol, type, entry, target, stopLoss, confidence, reasoning, createdAt
-        FROM signals
-        WHERE {' AND '.join(conditions)}
-        ORDER BY confidence DESC, createdAt DESC
-        LIMIT ?
     """
-    params.append(limit)
-
+    Active BUY signals. Queries unified_signals (today's data) first,
+    falls back to the legacy signals table if unified_signals is empty.
+    """
     conn = _connect(db_path)
-    rows = conn.execute(query, params).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
+    cutoff = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+
+    # Primary: unified_signals (live, updated daily)
+    try:
+        conditions = [
+            "signal_type = 'BUY'",
+            "signal_date >= ?",
+            "confidence_score >= ?",
+        ]
+        params: list = [cutoff, min_confidence]
+
+        if symbol:
+            conditions.append("symbol = ?")
+            params.append(symbol.upper())
+
+        params.append(limit)
+        rows = conn.execute(
+            f"SELECT symbol, signal_date, signal_source, signal_type, "
+            f"entry_price AS entry, target_price AS target, stop_loss AS stopLoss, "
+            f"confidence_score AS confidence, reasoning "
+            f"FROM unified_signals "
+            f"WHERE {' AND '.join(conditions)} "
+            f"ORDER BY confidence_score DESC, signal_date DESC LIMIT ?",
+            params,
+        ).fetchall()
+
+        if rows:
+            conn.close()
+            return [dict(r) for r in rows]
+    except Exception:
+        pass
+
+    # Fallback: legacy signals table
+    try:
+        conditions = ["type = 'BUY'", "status = 'ACTIVE'", "confidence >= ?"]
+        params = [min_confidence]
+        if symbol:
+            conditions.append("symbol = ?")
+            params.append(symbol.upper())
+        params.append(limit)
+        rows = conn.execute(
+            f"SELECT symbol, createdAt AS signal_date, 'AI' AS signal_source, "
+            f"type AS signal_type, entry, target, stopLoss, confidence, reasoning "
+            f"FROM signals WHERE {' AND '.join(conditions)} "
+            f"ORDER BY confidence DESC, createdAt DESC LIMIT ?",
+            params,
+        ).fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+    except Exception:
+        conn.close()
+        return []
 
 
 def get_screener_membership(symbol: str, db_path: str = DB_PATH) -> list[dict]:

@@ -258,17 +258,9 @@ function getLastRunAt(scriptId: ScriptId): string | null {
       case 'regime-detector':
         row = db.prepare("SELECT MAX(computed_at) as t FROM market_regimes").get();
         break;
-      case 'feature-engineering': {
-        const dir = path.join(process.cwd(), 'feature_store');
-        if (fs.existsSync(dir)) {
-            const files = fs.readdirSync(dir);
-            if (files.length > 0) {
-                const stat = fs.statSync(path.join(dir, files[0]));
-                row = { t: stat.mtime.toISOString() };
-            }
-        }
+      case 'feature-engineering':
+        row = db.prepare("SELECT MAX(computed_at) as t FROM feature_store").get();
         break;
-      }
       case 'reward-engine':
         row = db.prepare("SELECT MAX(last_updated) as t FROM signal_type_weights").get();
         break;
@@ -343,17 +335,11 @@ function getScriptStats(scriptId: ScriptId): Record<string, number | string | nu
         return r ? { days: total, latest: r.regime } : { days: 0 };
       }
       case 'feature-engineering': {
-        const dir = path.join(process.cwd(), 'feature_store');
-        let symbols = 0;
-        let rows = 0;
-        if (fs.existsSync(dir)) {
-           const files = fs.readdirSync(dir);
-           symbols = files.filter((f: string) => f.endsWith('.parquet')).length;
-           rows = symbols * 500; // estimated
-        }
+        const sRow = db.prepare("SELECT COUNT(DISTINCT symbol) as n FROM feature_store").get() as any;
+        const rRow = db.prepare("SELECT COUNT(*) as n FROM feature_store").get() as any;
         return {
-          symbols,
-          rows: `~${rows} (Parquet)`,
+          symbols: sRow?.n ?? 0,
+          rows: rRow?.n ?? 0,
         };
       }
       case 'reward-engine':

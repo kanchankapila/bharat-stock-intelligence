@@ -316,27 +316,132 @@ class UnifiedRanker:
         return True
 
     def _get_entry_targets(self, symbol):
+        # Fallback 1: Query confluence_signals (best source with entry zones, atr, risk-reward, etc.)
         try:
             row = self.conn.execute(
-                "SELECT entry_price, stop_loss, target_1, target_2, target_3, risk_reward, timeframe, trade_reasoning, sector FROM signals WHERE symbol = ? ORDER BY created_at DESC LIMIT 1",
+                """SELECT entry_zone_low, entry_zone_high, stop_loss, target_1, target_2, target_3, 
+                          risk_reward, suggested_timeframe AS timeframe, trade_reasoning, sector 
+                   FROM confluence_signals 
+                   WHERE symbol = ? 
+                   ORDER BY computed_at DESC 
+                   LIMIT 1""",
                 (symbol,),
             ).fetchone()
+            if row and (row['entry_zone_low'] is not None or row['stop_loss'] is not None):
+                return {
+                    'entry_zone_low':  float(row['entry_zone_low'])  if row['entry_zone_low']  is not None else None,
+                    'entry_zone_high': float(row['entry_zone_high']) if row['entry_zone_high'] is not None else None,
+                    'stop_loss':       float(row['stop_loss'])       if row['stop_loss']       is not None else None,
+                    'target_1':        float(row['target_1'])        if row['target_1']        is not None else None,
+                    'target_2':        float(row['target_2'])        if row['target_2']        is not None else None,
+                    'target_3':        float(row['target_3'])        if row['target_3']        is not None else None,
+                    'risk_reward':     float(row['risk_reward'])     if row['risk_reward']     is not None else None,
+                    'timeframe':       row['timeframe'],
+                    'trade_reasoning': row['trade_reasoning'],
+                    'sector':          row['sector'],
+                }
         except Exception:
-            return {}
-        if not row:
-            return {}
-        ep = row['entry_price']
+            pass
+
+        # Fallback 2: Query recommendation_log
+        try:
+            row = self.conn.execute(
+                """SELECT entry_price, stop_loss, target_1, target_2, target_3, 
+                          timeframe, reasoning AS trade_reasoning, sector 
+                   FROM recommendation_log 
+                   WHERE symbol = ? 
+                   ORDER BY generated_at DESC 
+                   LIMIT 1""",
+                (symbol,),
+            ).fetchone()
+            if row and row['entry_price'] is not None:
+                ep = float(row['entry_price'])
+                sl = float(row['stop_loss']) if row['stop_loss'] is not None else None
+                t1 = float(row['target_1']) if row['target_1'] is not None else None
+                rr = None
+                if sl is not None and ep - sl > 0 and t1 is not None:
+                    rr = round((t1 - ep) / (ep - sl), 2)
+                return {
+                    'entry_zone_low':  round(ep * 0.99, 2),
+                    'entry_zone_high': round(ep * 1.01, 2),
+                    'stop_loss':       sl,
+                    'target_1':        t1,
+                    'target_2':        float(row['target_2']) if row['target_2'] is not None else None,
+                    'target_3':        float(row['target_3']) if row['target_3'] is not None else None,
+                    'risk_reward':     rr,
+                    'timeframe':       row['timeframe'],
+                    'trade_reasoning': row['trade_reasoning'],
+                    'sector':          row['sector'],
+                }
+        except Exception:
+            pass
+
+        # Fallback 3: Query signals
+        try:
+            row = self.conn.execute(
+                """SELECT entry, target, stopLoss, reasoning AS trade_reasoning 
+                   FROM signals 
+                   WHERE symbol = ? 
+                   ORDER BY createdAt DESC 
+                   LIMIT 1""",
+                (symbol,),
+            ).fetchone()
+            if row and row['entry'] is not None:
+                ep = float(row['entry'])
+                sl = float(row['stopLoss']) if row['stopLoss'] is not None else None
+                t1 = float(row['target']) if row['target'] is not None else None
+                rr = None
+                if sl is not None and ep - sl > 0 and t1 is not None:
+                    rr = round((t1 - ep) / (ep - sl), 2)
+                
+                # Fetch sector from nse_stocks
+                sec = None
+                try:
+                    sec_row = self.conn.execute(
+                        "SELECT sector FROM nse_stocks WHERE symbol = ? LIMIT 1", (symbol,)
+                    ).fetchone()
+                    if sec_row:
+                        sec = sec_row['sector']
+                except Exception:
+                    pass
+
+                return {
+                    'entry_zone_low':  round(ep * 0.99, 2),
+                    'entry_zone_high': round(ep * 1.01, 2),
+                    'stop_loss':       sl,
+                    'target_1':        t1,
+                    'target_2':        None,
+                    'target_3':        None,
+                    'risk_reward':     rr,
+                    'timeframe':       'SWING',
+                    'trade_reasoning': row['trade_reasoning'],
+                    'sector':          sec,
+                }
+        except Exception:
+            pass
+
+        # Fallback 4: Default fallback with sector only
+        sec = None
+        try:
+            sec_row = self.conn.execute(
+                "SELECT sector FROM nse_stocks WHERE symbol = ? LIMIT 1", (symbol,)
+            ).fetchone()
+            if sec_row:
+                sec = sec_row['sector']
+        except Exception:
+            pass
+
         return {
-            'entry_zone_low':  round(ep * 0.99, 2) if ep else None,
-            'entry_zone_high': round(ep * 1.01, 2) if ep else None,
-            'stop_loss':       float(row['stop_loss'])   if row['stop_loss']   else None,
-            'target_1':        float(row['target_1'])    if row['target_1']    else None,
-            'target_2':        float(row['target_2'])    if row['target_2']    else None,
-            'target_3':        float(row['target_3'])    if row['target_3']    else None,
-            'risk_reward':     float(row['risk_reward']) if row['risk_reward'] else None,
-            'timeframe':       row['timeframe'],
-            'trade_reasoning': row['trade_reasoning'],
-            'sector':          row['sector'],
+            'entry_zone_low':  None,
+            'entry_zone_high': None,
+            'stop_loss':       None,
+            'target_1':        None,
+            'target_2':        None,
+            'target_3':        None,
+            'risk_reward':     None,
+            'timeframe':       None,
+            'trade_reasoning': None,
+            'sector':          sec,
         }
 
     def run(self):

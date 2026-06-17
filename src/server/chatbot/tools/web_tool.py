@@ -1,4 +1,7 @@
-from duckduckgo_search import DDGS
+import warnings
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore", RuntimeWarning)
+    from duckduckgo_search import DDGS
 
 
 def web_search(query: str, max_results: int = 5) -> list[dict]:

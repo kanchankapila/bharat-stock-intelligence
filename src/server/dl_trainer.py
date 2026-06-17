@@ -75,27 +75,33 @@ def retrain_models(trigger: str = "scheduled") -> dict:
         metrics = dl.train_lstm(version=new_version)
         result["metrics"] = metrics
 
-        acc = metrics.get("directional_accuracy") or 0.0
-        auc = metrics.get("roc_auc") or 0.0
+        acc = metrics.get("directional_accuracy")
+        auc = metrics.get("roc_auc")
 
-        acc_valid = not math.isnan(acc)
-        auc_valid = not math.isnan(auc)
+        acc_valid = acc is not None and not math.isnan(acc)
+        auc_valid = auc is not None and not math.isnan(auc)
 
-        # Gate: accuracy must beat random (>0.50). AUC gate skipped if NaN (insufficient folds).
-        acc_ok = acc_valid and acc > QUALITY_MIN_ACC
-        auc_ok = (not auc_valid) or (auc > QUALITY_MIN_AUC)  # NaN = skip AUC gate
+        acc_val_for_gate = acc if acc_valid else 0.0
+        auc_val_for_gate = auc if auc_valid else 0.0
+
+        # Gate: accuracy must beat random (>=0.50). Skip gate if NaN/None (insufficient data).
+        acc_ok = (not acc_valid) or (acc_val_for_gate >= QUALITY_MIN_ACC)
+        auc_ok = (not auc_valid) or (auc_val_for_gate > QUALITY_MIN_AUC)  # NaN = skip AUC gate
+
+        acc_str = 'N/A' if not acc_valid else f'{acc:.3f}'
+        auc_str = 'N/A' if not auc_valid else f'{auc:.3f}'
 
         # Step 4: Quality gate
         if acc_ok and auc_ok:
             cfg["lstm_version"] = new_version
             cfg_path.write_text(json.dumps(cfg, indent=2))
-            print(f"[TRAINER] Quality gate PASSED (acc={acc:.3f}, auc={'N/A' if not auc_valid else f'{auc:.3f}'}) → promoted v{new_version}")
+            print(f"[TRAINER] Quality gate PASSED (acc={acc_str}, auc={auc_str}) -> promoted v{new_version}")
             result["promoted"] = True
         else:
             bad_path = MODEL_DIR / f"lstm_v{new_version}.pt"
             if bad_path.exists():
                 bad_path.unlink()
-            reason = f"acc={acc:.3f}<{QUALITY_MIN_ACC}" if not acc_ok else f"auc={auc:.3f}<{QUALITY_MIN_AUC}"
+            reason = f"acc={acc_str}<{QUALITY_MIN_ACC}" if not acc_ok else f"auc={auc_str}<{QUALITY_MIN_AUC}"
             print(f"[TRAINER] Quality gate FAILED ({reason}) — keeping v{cfg.get('lstm_version', 1)}")
             result["promoted"] = False
 

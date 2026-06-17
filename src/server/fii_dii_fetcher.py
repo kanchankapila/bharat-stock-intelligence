@@ -51,7 +51,12 @@ class FiiDiiFetcher:
             print(f"[FiiDii] Session prime warning: {e}")
 
     def fetch(self) -> list[dict]:
-        """Fetch FII/DII data from NSE. Returns list of daily records."""
+        """Fetch FII/DII data from NSE. Returns list of daily records.
+
+        NSE API (as of mid-2026) returns one row per category (FII/FPI, DII) per date
+        with fields: buyValue, sellValue, netValue, category, date.
+        We pivot these into one record per date with fii_* and dii_* columns.
+        """
         try:
             resp = self.session.get(NSE_FII_DII_URL, timeout=15)
             resp.raise_for_status()
@@ -60,43 +65,56 @@ class FiiDiiFetcher:
             print(f"[FiiDii] Fetch error: {e}")
             return []
 
-        records = []
+        # Group by date, then pivot FII/FPI and DII rows into one record per date
+        by_date: dict[str, dict] = {}
         for row in data:
             try:
                 date_str = self._parse_date(row.get("date", ""))
                 if not date_str:
                     continue
-
-                fii_buy  = self._parse_float(row.get("fiiBuy"))
-                fii_sell = self._parse_float(row.get("fiiSell"))
-                fii_net  = self._parse_float(row.get("fiiNet"))
-                dii_buy  = self._parse_float(row.get("diiBuy"))
-                dii_sell = self._parse_float(row.get("diiSell"))
-                dii_net  = self._parse_float(row.get("diiNet"))
-
-                # Fallback: compute net if not provided
-                if fii_net is None and fii_buy is not None and fii_sell is not None:
-                    fii_net = fii_buy - fii_sell
-                if dii_net is None and dii_buy is not None and dii_sell is not None:
-                    dii_net = dii_buy - dii_sell
-
-                # Skip rows where all financial values are null (non-trading days / placeholders)
-                if all(v is None for v in (fii_buy, fii_sell, fii_net, dii_buy, dii_sell, dii_net)):
-                    print(f"[FiiDii] Skipping {date_str} — all values null (non-trading day)")
-                    continue
-
-                records.append({
-                    "date":     date_str,
-                    "fii_buy":  fii_buy,
-                    "fii_sell": fii_sell,
-                    "fii_net":  fii_net,
-                    "dii_buy":  dii_buy,
-                    "dii_sell": dii_sell,
-                    "dii_net":  dii_net,
-                    "source":   "NSE",
-                })
+                cat = (row.get("category") or "").upper()
+                if date_str not in by_date:
+                    by_date[date_str] = {}
+                if "FII" in cat:
+                    by_date[date_str]["fii_buy"]  = self._parse_float(row.get("buyValue"))
+                    by_date[date_str]["fii_sell"] = self._parse_float(row.get("sellValue"))
+                    by_date[date_str]["fii_net"]  = self._parse_float(row.get("netValue"))
+                elif "DII" in cat:
+                    by_date[date_str]["dii_buy"]  = self._parse_float(row.get("buyValue"))
+                    by_date[date_str]["dii_sell"] = self._parse_float(row.get("sellValue"))
+                    by_date[date_str]["dii_net"]  = self._parse_float(row.get("netValue"))
             except Exception as e:
                 print(f"[FiiDii] Row parse error: {e} — row={row}")
+
+        records = []
+        for date_str, vals in by_date.items():
+            fii_buy  = vals.get("fii_buy")
+            fii_sell = vals.get("fii_sell")
+            fii_net  = vals.get("fii_net")
+            dii_buy  = vals.get("dii_buy")
+            dii_sell = vals.get("dii_sell")
+            dii_net  = vals.get("dii_net")
+
+            # Compute net if not provided
+            if fii_net is None and fii_buy is not None and fii_sell is not None:
+                fii_net = fii_buy - fii_sell
+            if dii_net is None and dii_buy is not None and dii_sell is not None:
+                dii_net = dii_buy - dii_sell
+
+            if all(v is None for v in (fii_buy, fii_sell, fii_net, dii_buy, dii_sell, dii_net)):
+                print(f"[FiiDii] Skipping {date_str} — all values null (non-trading day)")
+                continue
+
+            records.append({
+                "date":     date_str,
+                "fii_buy":  fii_buy,
+                "fii_sell": fii_sell,
+                "fii_net":  fii_net,
+                "dii_buy":  dii_buy,
+                "dii_sell": dii_sell,
+                "dii_net":  dii_net,
+                "source":   "NSE",
+            })
 
         return records
 

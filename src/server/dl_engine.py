@@ -385,8 +385,7 @@ def train_lstm(version: int = 1) -> Dict:
         y5_val  = np.concatenate(val_y5)
         y15_val = np.concatenate(val_y15)
         yr5_val = np.concatenate(val_yr5)
-        print(f"[DL] Running walk-forward validation on {len(X_val)} validation sequences...")
-        metrics = walk_forward_validate(model, X_val, y5_val, y15_val, yr5_val)
+        metrics = walk_forward_validate(model, X_val, y5_val, y15_val, yr5_val, fold_size=250)
         print(f"[DL] Walk-forward metrics: {metrics}")
 
     MODEL_DIR.mkdir(parents=True, exist_ok=True)

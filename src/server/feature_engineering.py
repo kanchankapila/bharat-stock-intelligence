@@ -168,6 +168,7 @@ class FeatureEngineer:
             "SELECT date, fii_net, dii_net FROM fii_dii_flow ORDER BY date",
             con, parse_dates=["date"], index_col="date",
         )
+        fii = fii[fii.index.notnull()]
         fii = fii.shift(FII_LAG_DAYS)  # lag 1 day
         feat["fii_3d_net"]  = fii["fii_net"].rolling(3).sum()
         feat["fii_10d_net"] = fii["fii_net"].rolling(10).sum()
@@ -208,6 +209,7 @@ class FeatureEngineer:
                 "SELECT date, ret_5d FROM macro_asset_prices WHERE symbol=? ORDER BY date",
                 con, params=(sym,), parse_dates=["date"], index_col="date",
             )
+            df = df[df.index.notnull()]
             if not df.empty:
                 feat[col] = df["ret_5d"].reindex(feat.index, method="ffill")
 
@@ -216,6 +218,7 @@ class FeatureEngineer:
             "SELECT date, close FROM stock_ohlcv WHERE symbol='NIFTY50' ORDER BY date",
             con, parse_dates=["date"], index_col="date",
         )
+        nifty = nifty[nifty.index.notnull()]
         if not nifty.empty:
             feat["nifty_ret_5d"]  = nifty["close"].pct_change(5).reindex(feat.index, method="ffill")
             feat["nifty_ret_21d"] = nifty["close"].pct_change(21).reindex(feat.index, method="ffill")
@@ -225,6 +228,7 @@ class FeatureEngineer:
             "SELECT date, close FROM macro_asset_prices WHERE symbol='NSEBANK' ORDER BY date",
             con, parse_dates=["date"], index_col="date",
         )
+        vix_df = vix_df[vix_df.index.notnull()]
         if not vix_df.empty:
             feat["nifty_vix"] = vix_df["close"].reindex(feat.index, method="ffill")
 
@@ -238,9 +242,11 @@ class FeatureEngineer:
                       AVG(CASE WHEN sentiment='BULLISH' THEN 1 WHEN sentiment='BEARISH' THEN -1 ELSE 0 END) as score,
                       SUM(CASE WHEN impact='HIGH' THEN 1 ELSE 0 END) as high_count
                FROM news_sentiment_items
-               WHERE symbols_json LIKE ? GROUP BY DATE(published_at) ORDER BY date""",
+               WHERE symbols_json LIKE ? AND published_at IS NOT NULL AND published_at != ''
+               GROUP BY DATE(published_at) ORDER BY date""",
             con, params=(f'%"{symbol}"%',), parse_dates=["date"], index_col="date",
         )
+        rows = rows[rows.index.notnull()]
         if not rows.empty:
             feat["news_sentiment_score"] = rows["score"].rolling(3).mean().reindex(
                 feat.index, method="ffill"

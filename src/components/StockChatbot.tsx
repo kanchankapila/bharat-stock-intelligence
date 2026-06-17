@@ -1,7 +1,65 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { Send, Bot, Wifi, WifiOff, Loader2, X } from 'lucide-react';
 import { cn } from '../lib/utils';
+
+const mdComponents: React.ComponentProps<typeof ReactMarkdown>['components'] = {
+  table: ({ children }) => (
+    <div className="overflow-x-auto rounded-xl border border-slate-700/60 my-3 shadow-sm">
+      <table className="min-w-full border-collapse text-xs">{children}</table>
+    </div>
+  ),
+  thead: ({ children }) => (
+    <thead className="bg-slate-700/70 text-slate-300 border-b border-slate-600/50">{children}</thead>
+  ),
+  tbody: ({ children }) => <tbody className="divide-y divide-slate-700/30">{children}</tbody>,
+  tr: ({ children }) => (
+    <tr className="hover:bg-indigo-950/30 transition-colors even:bg-slate-800/20">{children}</tr>
+  ),
+  th: ({ children }) => (
+    <th className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-widest text-slate-400 whitespace-nowrap">
+      {children}
+    </th>
+  ),
+  td: ({ children }) => (
+    <td className="px-3 py-2 text-slate-200 whitespace-nowrap align-middle">{children}</td>
+  ),
+  code: ({ children, className }) => {
+    const isBlock = className?.startsWith('language-');
+    return isBlock ? (
+      <pre className="bg-slate-900/80 border border-slate-700/50 rounded-lg p-3 overflow-x-auto my-2 text-[11px]">
+        <code className="font-mono text-emerald-300">{children}</code>
+      </pre>
+    ) : (
+      <code className="bg-slate-700/50 px-1.5 py-0.5 rounded text-indigo-300 text-[11px] font-mono">{children}</code>
+    );
+  },
+  strong: ({ children }) => <strong className="text-slate-100 font-semibold">{children}</strong>,
+  h1: ({ children }) => <h1 className="text-slate-100 font-bold text-base mt-4 mb-2 border-b border-slate-700/40 pb-1">{children}</h1>,
+  h2: ({ children }) => <h2 className="text-slate-100 font-bold text-sm mt-3 mb-1.5 border-b border-slate-700/30 pb-1">{children}</h2>,
+  h3: ({ children }) => <h3 className="text-indigo-300 font-semibold text-xs mt-3 mb-1 uppercase tracking-wide">{children}</h3>,
+  p: ({ children }) => <p className="text-slate-300 leading-relaxed mb-2 last:mb-0">{children}</p>,
+  ul: ({ children }) => <ul className="list-none space-y-1 my-2 text-sm">{children}</ul>,
+  ol: ({ children }) => <ol className="list-decimal list-inside space-y-1 my-2 text-sm text-slate-300">{children}</ol>,
+  li: ({ children }) => (
+    <li className="flex gap-2 text-slate-300">
+      <span className="text-indigo-400 mt-0.5 shrink-0">›</span>
+      <span>{children}</span>
+    </li>
+  ),
+  blockquote: ({ children }) => (
+    <blockquote className="border-l-2 border-indigo-500/60 pl-3 text-slate-400 italic my-2 bg-indigo-950/20 py-1 rounded-r">
+      {children}
+    </blockquote>
+  ),
+  hr: () => <hr className="border-slate-700/50 my-3" />,
+  a: ({ children, href }) => (
+    <a href={href} target="_blank" rel="noopener noreferrer" className="text-indigo-400 underline underline-offset-2 hover:text-indigo-300">
+      {children}
+    </a>
+  ),
+};
 
 const CHATBOT_BASE = 'http://localhost:8001';
 
@@ -268,16 +326,18 @@ export default function StockChatbot() {
             )}
             <div
               className={cn(
-                'max-w-[80%] rounded-2xl px-4 py-3 text-sm leading-relaxed',
+                'rounded-2xl px-4 py-3 text-sm leading-relaxed',
                 msg.role === 'user'
-                  ? 'bg-indigo-600 text-white rounded-br-sm'
-                  : 'bg-slate-800/80 text-slate-200 rounded-bl-sm border border-slate-700/50',
+                  ? 'max-w-[80%] bg-indigo-600 text-white rounded-br-sm'
+                  : 'max-w-[94%] bg-slate-800/80 text-slate-200 rounded-bl-sm border border-slate-700/50 min-w-0',
               )}
             >
               {msg.role === 'assistant' ? (
                 <>
-                  <div className="prose prose-sm prose-invert max-w-none prose-p:my-1 prose-ul:my-1 prose-li:my-0.5 prose-table:text-xs">
-                    <ReactMarkdown>{msg.content || ''}</ReactMarkdown>
+                  <div className="max-w-none min-w-0">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
+                      {msg.content || ''}
+                    </ReactMarkdown>
                   </div>
                   {msg.streaming && !msg.content && (
                     <span className="flex gap-1 mt-1">
