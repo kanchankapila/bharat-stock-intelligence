@@ -181,7 +181,7 @@ export const scoringRouter = router({
       const regime = regimeRow?.regime ?? 'UNKNOWN';
 
       if (!['BULL', 'SIDEWAYS'].includes(regime)) {
-        return { regime, reason: 'BEAR regime — gates closed', stocks: [] };
+        return { regime, reason: `${regime} regime — gates closed`, stocks: [] };
       }
 
       const urFilter = input.requireUnifiedRec
