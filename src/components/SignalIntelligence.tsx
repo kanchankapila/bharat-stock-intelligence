@@ -260,7 +260,10 @@ export function SignalIntelligence() {
     timeframe: timeframeFilter !== 'ALL' ? timeframeFilter as any : undefined,
     limit: 100,
   }, { refetchInterval: 5 * 60 * 1000 });
-  const { data: reliability } = trpc.getScreenerReliability.useQuery({ limit: 10, orderBy: 'reliability_score' });
+  const { data: reliability } = trpc.getScreenerReliability.useQuery(
+    { limit: 10, orderBy: 'reliability_score' },
+    { refetchInterval: 60 * 60_000, staleTime: 50 * 60_000, refetchOnWindowFocus: false }
+  );
   const { data: sectorMatrix } = trpc.getSectorMomentumMatrix.useQuery(undefined, { refetchInterval: 5 * 60 * 1000 });
   const refreshMutation = trpc.refreshConfluenceSignals.useMutation({
     onSuccess: () => { refetchSignals(); refetchStats(); },

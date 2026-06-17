@@ -189,7 +189,8 @@ export function StrategyIntelligence({ onSelectStock }: { onSelectStock: (symbol
 
   const { data: status } = trpc.getQuantScoringStatus.useQuery(undefined, { refetchInterval: 30_000 });
   const { data: raw, isLoading, error, refetch } = trpc.getStrategyStocks.useQuery(
-    { strategy, limit, filters: Object.keys(filters).length > 0 ? filters : undefined }
+    { strategy, limit, filters: Object.keys(filters).length > 0 ? filters : undefined },
+    { refetchInterval: 5 * 60_000, staleTime: 4 * 60_000, refetchOnWindowFocus: false }
   );
 
   const stocks: StrategyStock[] = (raw as StrategyStock[] | undefined) ?? [];

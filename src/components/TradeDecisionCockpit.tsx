@@ -21,25 +21,25 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
   const [selectedCand, setSelectedCand] = useState<any>(null);
 
   const { data: cockpitRes, isLoading: cockpitLoading, refetch } =
-    trpc.getTradeDecisionCockpitData.useQuery(undefined, { refetchInterval: 60000 });
+    trpc.getTradeDecisionCockpitData.useQuery(undefined, { refetchInterval: 60000, refetchOnWindowFocus: false });
 
   const { data: overviewRes } =
-    trpc.getMarketOverview.useQuery(undefined, { refetchInterval: 30000 });
+    trpc.getMarketOverview.useQuery(undefined, { refetchInterval: 30000, refetchOnWindowFocus: false });
 
   const { data: adRes } =
-    trpc.getAdvanceDecline.useQuery(undefined, { refetchInterval: 60000 });
+    trpc.getAdvanceDecline.useQuery(undefined, { refetchInterval: 60000, refetchOnWindowFocus: false });
 
   const { data: sectorRes } =
-    trpc.getSectorPerformance.useQuery(undefined, { refetchInterval: 300000 });
+    trpc.getSectorPerformance.useQuery(undefined, { refetchInterval: 300000, refetchOnWindowFocus: false });
 
   const { data: moversRes } =
-    trpc.getTopMovers.useQuery(undefined, { refetchInterval: 60000 });
+    trpc.getTopMovers.useQuery(undefined, { refetchInterval: 60000, refetchOnWindowFocus: false });
 
   const { data: fiiRes } =
-    trpc.getFiiDiiFlow.useQuery(undefined, { refetchInterval: 300000 });
+    trpc.getFiiDiiFlow.useQuery(undefined, { refetchInterval: 300000, refetchOnWindowFocus: false });
 
   const { data: sentimentRes } =
-    trpc.getMarketSentiment.useQuery(undefined, { refetchInterval: 120000 });
+    trpc.getMarketSentiment.useQuery(undefined, { refetchInterval: 120000, refetchOnWindowFocus: false });
 
   const cockpitData = cockpitRes?.success ? cockpitRes.data : null;
   const overview: any = cockpitData?.marketOverview || {};
