@@ -168,4 +168,98 @@ export const scoringRouter = router({
 
       return { investmentPicks, intradayPicks };
     }),
+
+  getBestComboSignals: publicProcedure
+    .input(z.object({
+      limit: z.number().min(1).max(50).default(20),
+      requireUnifiedRec: z.boolean().default(false),
+    }))
+    .query(({ input }) => {
+      const regimeRow = db.prepare(
+        'SELECT regime FROM market_regimes ORDER BY date DESC LIMIT 1'
+      ).get() as { regime: string } | undefined;
+      const regime = regimeRow?.regime ?? 'UNKNOWN';
+
+      if (!['BULL', 'SIDEWAYS'].includes(regime)) {
+        return { regime, reason: 'BEAR regime — gates closed', stocks: [] };
+      }
+
+      const urFilter = input.requireUnifiedRec
+        ? `AND ur.conviction_level IN ('A_HIGH','B_MEDIUM')`
+        : '';
+
+      const rows = db.prepare(`
+        WITH ranked AS (
+          SELECT *,
+            ROW_NUMBER() OVER (
+              PARTITION BY symbol ORDER BY signal_date DESC, signal_score DESC
+            ) AS rn
+          FROM signal_outcomes
+          WHERE outcome IN ('WIN','PENDING')
+            AND signal_score >= 7
+            AND signals_json LIKE '%RSI_DIVERGENCE%'
+            AND signals_json LIKE '%EMA_BULL_STACK%'
+        )
+        SELECT
+          r.symbol, ns.name, ns.sector,
+          r.signal_score, r.entry_price, r.signals_json,
+          qs.piotroski_f_score, qs.sharpe_ratio, qs.rank_composite,
+          qs.bullish_screener_count, qs.return_12m,
+          ur.conviction_level, ur.avg_engine_track_record,
+          COALESCE(ur.stop_loss, r.entry_price * 0.95) AS stop_loss,
+          COALESCE(ur.target_1,  r.entry_price * 1.12) AS target
+        FROM ranked r
+        JOIN quant_scores qs ON qs.symbol = r.symbol
+        JOIN nse_stocks ns ON ns.symbol = r.symbol
+        LEFT JOIN unified_recommendations ur
+          ON ur.symbol = r.symbol
+          AND ur.computed_at = (SELECT MAX(computed_at) FROM unified_recommendations)
+        WHERE r.rn = 1
+          AND qs.piotroski_f_score >= 7
+          AND qs.above_sma200 = 1
+          AND qs.sharpe_ratio > 1.0
+          AND ns.sector IN ('Financials','Healthcare','Industrials','Materials','Energy')
+          ${urFilter}
+        ORDER BY COALESCE(ur.avg_engine_track_record, 1.0) DESC, qs.rank_composite DESC
+        LIMIT ?
+      `).all(input.limit) as any[];
+
+      const stocks = rows.map(row => {
+        const signalTypes: string[] = [];
+        try {
+          (JSON.parse(row.signals_json ?? '[]') as any[])
+            .forEach(s => { if (s.type) signalTypes.push(s.type as string); });
+        } catch { /* malformed json — skip */ }
+
+        const entry  = (row.entry_price as number) ?? 0;
+        const stop   = (row.stop_loss as number)   ?? entry * 0.95;
+        const target = (row.target as number)       ?? entry * 1.12;
+        const rrRatio = entry > 0 && stop < entry
+          ? parseFloat(((target - entry) / (entry - stop)).toFixed(2))
+          : 0;
+
+        return {
+          symbol:               row.symbol as string,
+          name:                 (row.name as string) ?? row.symbol,
+          sector:               (row.sector as string) ?? 'Unknown',
+          signalScore:          (row.signal_score as number) ?? 0,
+          entryPrice:           parseFloat((entry).toFixed(2)),
+          signalTypes,
+          piotroski:            (row.piotroski_f_score as number) ?? 0,
+          sharpeRatio:          parseFloat(((row.sharpe_ratio as number) ?? 0).toFixed(2)),
+          rankComposite:        parseFloat(((row.rank_composite as number) ?? 0).toFixed(1)),
+          bullishScreenerCount: (row.bullish_screener_count as number) ?? 0,
+          return12m:            parseFloat(((row.return_12m as number) ?? 0).toFixed(1)),
+          convictionLevel:      (row.conviction_level as string) ?? null,
+          avgTrackRecord:       row.avg_engine_track_record != null
+                                  ? parseFloat((row.avg_engine_track_record as number).toFixed(3))
+                                  : null,
+          stopLoss:  parseFloat(stop.toFixed(2)),
+          target:    parseFloat(target.toFixed(2)),
+          rrRatio,
+        };
+      });
+
+      return { regime, reason: `${stocks.length} setups pass all 4 gates`, stocks };
+    }),
 });
