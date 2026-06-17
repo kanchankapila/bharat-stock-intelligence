@@ -86,13 +86,7 @@ db.exec(`
     last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
-  CREATE TABLE IF NOT EXISTS historical_ohlc (
-    symbol TEXT NOT NULL,
-    duration TEXT NOT NULL, -- 'D', 'W', 'M', '15m', etc.
-    data TEXT NOT NULL, -- JSON string
-    last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (symbol, duration)
-  );
+  -- (historical_ohlc removed in migration 042 — dead duplicate of stock_ohlcv)
 
   CREATE TABLE IF NOT EXISTS technical_scans (
     symbol TEXT PRIMARY KEY,
@@ -1113,18 +1107,7 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_sr_source   ON screener_reliability(source);
 
-  -- Confluence Alerts Log — audit trail for sent alerts
-  CREATE TABLE IF NOT EXISTS confluence_alerts_log (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    symbol          TEXT NOT NULL,
-    alert_type      TEXT NOT NULL,
-    confluence_score REAL,
-    message         TEXT,
-    channels_json   TEXT DEFAULT '[]',
-    sent_at         DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
-  CREATE INDEX IF NOT EXISTS idx_cal_symbol ON confluence_alerts_log(symbol);
-  CREATE INDEX IF NOT EXISTS idx_cal_sent   ON confluence_alerts_log(sent_at DESC);
+  -- (confluence_alerts_log removed in migration 042 — never written/read by any code)
 `);
 
 // --- Migrations & Upgrades ---
@@ -1513,6 +1496,17 @@ runMigration('040_rec_log_sector_backfill', `
 // leads with symbol, so a "all symbols for date range" scan could not use it).
 runMigration('041_feature_store_date_index', `
   CREATE INDEX IF NOT EXISTS idx_fs_date ON feature_store(date);
+`);
+
+// Phase 2 schema consolidation: drop confirmed-dead tables (0 rows AND 0 read/write
+// references anywhere in TS/Python — only their now-removed CREATE statements existed).
+//  - historical_ohlc       : dead duplicate of stock_ohlcv
+//  - confluence_alerts_log  : never written or read
+//  - watchlist_alerts       : orphan (no CREATE in code; left over from an old build)
+runMigration('042_drop_dead_phantom_tables', `
+  DROP TABLE IF EXISTS historical_ohlc;
+  DROP TABLE IF EXISTS confluence_alerts_log;
+  DROP TABLE IF EXISTS watchlist_alerts;
 `);
 
 // ── Retention: confluence_signals is an append-only firehose (~700k rows, the single

@@ -182,6 +182,31 @@ python backtester.py --start 2023-01-01
 
 **ML model artifacts:** `src/server/ml_models/ensemble.pkl`, `src/server/ml_models/online_sgd.pkl` — generated at runtime by `ml_ensemble.py` and `online_learner.py`; directory is created on first training run.
 
+## Scoring Authority & Signal Model (canonical — Phase 2 governance)
+
+**Scoring authority.** There are three score producers; do not invent a fourth. The canonical
+cross-source ranking is `unified_recommendations`, produced by `unified_ranker.py` (scheduled via
+`QUEUE_UNIFIED_RANKER`). It sits *downstream* of the component producers and is what new
+ranking/UI surfaces should read:
+
+| Producer | Writes | Role |
+|---|---|---|
+| `scoring_engine.py` | `stock_scores` + `stock_factor_breakdown` | screener/news composite (per timeframe) |
+| `quantScoringService` / quant engines | `quant_scores` | momentum/quality/value/composite ranks |
+| `unified_ranker.py` | **`unified_recommendations`** | **canonical** — merges the above + screener confluence |
+
+Legacy direct reads still exist (`getTopRatedStocks`→`stock_scores`, `getStrategyStocks`→`quant_scores`);
+**rerouting those UI reads onto `unified_recommendations` is deferred to Phase 3** (behavioral change,
+done with the frontend during the Postgres migration). Until then, treat `unified_recommendations`
+as authoritative and have any new engine write a *component* score that the ranker ingests — never a
+parallel "final" score.
+
+**Signal model.** Six overlapping signal tables exist today (`signals`, `unified_signals`,
+`technical_signals`, `technical_analysis_signals`, + outcomes `signal_outcomes` /
+`unified_signal_outcomes`). All are load-bearing (many consumers across `router.ts` + Python).
+**Phase 3 target:** collapse to `unified_signals` + one outcome table, performed *during* the
+Postgres/Timescale rewrite so each consumer is migrated exactly once. Do not add new signal tables.
+
 ## Ticker Resolution Strategy
 
 ### Canonical Identifier
