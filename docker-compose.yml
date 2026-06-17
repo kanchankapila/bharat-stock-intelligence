@@ -1,0 +1,32 @@
+# Local TimescaleDB (PostgreSQL 16) for the Phase 3 migration.
+#
+#   docker compose up -d timescaledb
+#   psql "postgresql://bharat:bharat@localhost:5433/bharat_intel" -f db/schema.postgres.sql
+#
+# Port 5433 (not 5432) to avoid clashing with any existing local Postgres.
+# Credentials are read from .env (POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB) with
+# dev-only fallbacks — set strong values in .env before any non-local use.
+services:
+  timescaledb:
+    image: timescale/timescaledb:2.17.2-pg16
+    container_name: bharat_timescaledb
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-bharat}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-bharat}
+      POSTGRES_DB: ${POSTGRES_DB:-bharat_intel}
+      # Tuned for a single-box analytics workload; adjust to host RAM.
+      TS_TUNE_MEMORY: 4GB
+      TS_TUNE_NUM_CPUS: "4"
+    ports:
+      - "${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - bharat_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-bharat} -d ${POSTGRES_DB:-bharat_intel}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  bharat_pgdata:
