@@ -196,9 +196,8 @@ export const scoringRouter = router({
             ) AS rn
           FROM signal_outcomes
           WHERE outcome IN ('WIN','PENDING')
-            AND signal_score >= 7
-            AND signals_json LIKE '%RSI_DIVERGENCE%'
-            AND signals_json LIKE '%EMA_BULL_STACK%'
+            AND signal_score >= 5
+            AND (signals_json LIKE '%RSI_DIVERGENCE%' OR signals_json LIKE '%EMA_BULL_STACK%')
         )
         SELECT
           r.symbol, ns.name, ns.sector,
@@ -218,7 +217,7 @@ export const scoringRouter = router({
           AND qs.piotroski_f_score >= 7
           AND qs.above_sma200 = 1
           AND qs.sharpe_ratio > 1.0
-          AND ns.sector IN ('Financials','Healthcare','Industrials','Materials','Energy')
+          AND (ns.sector IN ('Financials','Healthcare','Industrials','Materials','Energy') OR ns.sector = 'Unknown' OR ns.sector IS NULL OR ns.sector = '')
           ${urFilter}
         ORDER BY COALESCE(ur.avg_engine_track_record, 1.0) DESC, qs.rank_composite DESC
         LIMIT ?
