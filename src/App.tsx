@@ -91,6 +91,9 @@ const ToDoPage           = React.lazy(() => import('./components/ToDoPage').then
 const InvestmentStrategy = React.lazy(() => import('./components/InvestmentStrategy').then(m => ({ default: m.InvestmentStrategy })));
 const IndicesPage        = React.lazy(() => import('./components/IndicesPage').then(m => ({ default: m.IndicesPage })));
 const StrategyIntelligence = React.lazy(() => import('./components/StrategyIntelligence').then(m => ({ default: m.StrategyIntelligence })));
+const HighConvictionPage = React.lazy(() =>
+  import('./components/HighConvictionPage').then(m => ({ default: m.HighConvictionPage }))
+);
 const DailySignals       = React.lazy(() => import('./components/DailySignals').then(m => ({ default: m.DailySignals })));
 const SentimentIntelligence = React.lazy(() => import('./components/SentimentIntelligence').then(m => ({ default: m.SentimentIntelligence })));
 const V2AppShell         = React.lazy(() => import('./v2/components/layout/V2AppShell').then(m => ({ default: m.V2AppShell })));
@@ -99,6 +102,7 @@ const V2Settings         = React.lazy(() => import('./v2/views/settings/V2Settin
 const V2Dashboard        = React.lazy(() => import('./v2/views/dashboard/V2Dashboard').then(m => ({ default: m.V2Dashboard })));
 const SignalTracking     = React.lazy(() => import('./components/SignalTracking').then(m => ({ default: m.SignalTracking })));
 const V2SignalTracking   = React.lazy(() => import('./v2/views/signals/V2SignalTracking').then(m => ({ default: m.V2SignalTracking })));
+const StockChatbot       = React.lazy(() => import('./components/StockChatbot'));
 
 // Lazy Suspense fallback
 const PageFallback = () => (
@@ -3800,6 +3804,7 @@ export default function App() {
               </div>
             } />
             <Route path="/strategy" element={<StrategyIntelligence onSelectStock={(s) => setDrawerSymbol(s)} />} />
+            <Route path="/best-picks" element={<HighConvictionPage onSelectStock={(s) => setDrawerSymbol(s)} />} />
             <Route path="/strategy-builder" element={<InvestmentStrategy onSelectStock={(s) => setDrawerSymbol(s)} />} />
             <Route path="/sentiment" element={<SentimentIntelligence onSelectStock={(s) => setDrawerSymbol(s)} />} />
             <Route path="/superstars" element={<SuperstarPortfolio />} />
@@ -3809,6 +3814,7 @@ export default function App() {
             <Route path="/portfolio" element={<div className="p-6"><PortfolioAnalytics /></div>} />
             <Route path="/builder" element={<div className="p-6"><StrategyBuilder /></div>} />
             <Route path="/settings" element={<V2Settings />} />
+            <Route path="/chat" element={<div className="p-4 h-full"><StockChatbot /></div>} />
           </Routes>
           </SafeRoutes>
         </AnimatePresence>
@@ -3935,6 +3941,7 @@ export default function App() {
                 </div>
               } />
               <Route path="/strategy" element={<StrategyIntelligence onSelectStock={(s) => setDrawerSymbol(s)} />} />
+              <Route path="/best-picks" element={<HighConvictionPage onSelectStock={(s) => setDrawerSymbol(s)} />} />
               <Route path="/strategy-builder" element={<InvestmentStrategy onSelectStock={(s) => setDrawerSymbol(s)} />} />
               <Route path="/sentiment" element={<SentimentIntelligence onSelectStock={(s) => setDrawerSymbol(s)} />} />
               <Route path="/economics" element={
@@ -3959,6 +3966,7 @@ export default function App() {
               <Route path="/profile" element={<ProfilePage />} />
               <Route path="/portfolio" element={<div className="p-6"><PortfolioAnalytics /></div>} />
               <Route path="/builder" element={<div className="p-6"><StrategyBuilder /></div>} />
+              <Route path="/chat" element={<div className="p-4"><StockChatbot /></div>} />
               </Routes>
             </motion.div>
             } />

@@ -2,10 +2,11 @@ import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   LayoutDashboard, Trophy, BarChart2, Activity, Filter, Target, Zap,
+  Crosshair,
   Search, History, PieChart, Bookmark, Users, Globe, CheckCircle2,
   Star, LogIn, TrendingUp, ArrowUpRight, ArrowDownRight, Menu,
   ChevronLeft, ChevronRight, Radio, Settings2, Briefcase, Calendar, Sparkles,
-  FlaskConical, Layers, MonitorDot, ChartLine, X,
+  FlaskConical, Layers, MonitorDot, ChartLine, X, MessageSquare,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { nseStocksData } from '../data/nseStocks';
@@ -50,6 +51,7 @@ const NAV_GROUPS: NavGroup[] = [
       { icon: Zap,      label: 'Alpha ⚡',             id: 'alpha'                },
       { icon: BarChart2, label: 'Screener Intel',      id: 'screener-intelligence' },
       { icon: Sparkles, label: 'Trade Cockpit',        id: 'trade-cockpit'        },
+      { icon: Crosshair, label: 'Best Picks',          id: 'best-picks'           },
       { icon: Layers,  label: 'Signal Intel', id: 'signal-intelligence' },
       { icon: ChartLine, label: 'Signal Report Card', id: 'signal-report-card' },
       { icon: Star,    label: 'Strategy',   id: 'strategy'    },
@@ -86,9 +88,10 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Tools',
     items: [
-      { icon: Globe,       label: 'Economics', id: 'economics' },
-      { icon: CheckCircle2,label: 'ToDo',      id: 'todo'      },
-      { icon: MonitorDot,  label: 'Monitor',   id: 'monitor'   },
+      { icon: MessageSquare, label: 'AI Chat',    id: 'chat'      },
+      { icon: Globe,         label: 'Economics',  id: 'economics' },
+      { icon: CheckCircle2,  label: 'ToDo',       id: 'todo'      },
+      { icon: MonitorDot,    label: 'Monitor',    id: 'monitor'   },
     ],
   },
 ];
