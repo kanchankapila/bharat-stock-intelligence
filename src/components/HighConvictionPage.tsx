@@ -93,7 +93,9 @@ function HighConvictionCard({
   const retColor = stock.return12m >= 0 ? 'text-emerald-400' : 'text-rose-400';
 
   const oneLineReason = [
-    'RSI div + bull stack',
+    stock.signalTypes.length > 0
+      ? stock.signalTypes.map(t => t.replace(/_/g, ' ').toLowerCase()).join(' + ')
+      : 'signal match',
     `Piotroski ${stock.piotroski}/9`,
     `${stock.bullishScreenerCount} screeners`,
     `Sharpe ${fmt(stock.sharpeRatio)}`,
