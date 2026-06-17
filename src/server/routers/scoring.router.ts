@@ -3,6 +3,7 @@ import db from "../db";
 import { getTopRatedStocks, syncAndScore, recalculateScores, getStockScoreDetail } from "../scoringService";
 import { crossSourceFilter, regimeSectorFilter, qualityOversoldScanner } from "../strategySignalsService";
 import { router, publicProcedure } from "../trpc";
+import { cacheGet } from "../cacheService";
 
 export const scoringRouter = router({
   getTopRatedStocks: publicProcedure
@@ -92,7 +93,20 @@ export const scoringRouter = router({
     .query(({ input }) => qualityOversoldScanner(input.maxRsi, input.maxScore)),
 
   getStrategyPicks: publicProcedure
-    .query(() => {
+    .query(async () => {
+      let liveCache: Record<string, any> = {};
+      try {
+        const cached = await cacheGet('live-stocks-bulk');
+        if (cached) liveCache = JSON.parse(cached as string);
+      } catch { /* no cache — fall back to EOD price */ }
+
+      const resolvePriceAndSource = (symbol: string, eodClose: number | null): { price: number | null; priceSource: 'live' | 'eod' } => {
+        const live = liveCache[symbol];
+        const livePrice = live?.price ?? live?.lastPrice ?? null;
+        if (livePrice != null) return { price: parseFloat(livePrice.toFixed(2)), priceSource: 'live' };
+        return { price: eodClose, priceSource: 'eod' };
+      };
+
       const latestPriceCte = `
         WITH latest_prices AS (
           SELECT o.symbol, o.close
@@ -129,8 +143,9 @@ export const scoringRouter = router({
         if (etIds.includes('362')) { technicalScore  += 50; reasons.push('RSI Oversold'); }
         const mcIds: string[] = r.mc_screeners ? r.mc_screeners.split(',') : [];
         if (mcIds.length > 0) { fundamentalScore += 10; reasons.push('MC Pro Fundamental Pick'); }
+        const { price, priceSource } = resolvePriceAndSource(r.symbol, r.currentPrice);
         return {
-          symbol: r.symbol, name: r.companyName, sector: r.sector, price: r.currentPrice,
+          symbol: r.symbol, name: r.companyName, sector: r.sector, price, priceSource,
           score: Math.min(100, Math.round(fundamentalScore * 0.6 + technicalScore * 0.4)),
           reasons,
         };
@@ -156,8 +171,9 @@ export const scoringRouter = router({
       const intradayPicks = intradayRows.map(r => {
         const tlIds: string[] = r.tl_screeners ? r.tl_screeners.split(',') : [];
         const mcIds: string[] = r.mc_screeners ? r.mc_screeners.split(',') : [];
+        const { price, priceSource } = resolvePriceAndSource(r.symbol, r.currentPrice);
         return {
-          symbol: r.symbol, name: r.companyName, sector: r.sector, price: r.currentPrice,
+          symbol: r.symbol, name: r.companyName, sector: r.sector, price, priceSource,
           score: Math.min(100, 50 + tlIds.length * 15 + mcIds.length * 5),
           reasons: [
             ...tlIds.map(id => 'Trendlyne Intraday ID: ' + id),

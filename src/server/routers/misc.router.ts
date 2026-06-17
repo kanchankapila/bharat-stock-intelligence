@@ -237,11 +237,12 @@ export const miscRouter = router({
           LIMIT 200
         `).all() as Array<Record<string, unknown>>;
 
-        // Best signal levels from the signals table (entry/target/SL)
+        // Best signal levels from the signals table (entry/target/SL) — ignore stale signals >30 days
         const signalLevels = db.prepare(`
           SELECT symbol, entry, target, stopLoss, confidence
           FROM signals
           WHERE type = 'BUY' AND status = 'ACTIVE' AND entry IS NOT NULL AND entry > 0
+            AND createdAt >= datetime('now', '-30 days')
           ORDER BY confidence DESC, id DESC
         `).all() as Array<Record<string, unknown>>;
         const levelsMap = new Map<string, Record<string, unknown>>();
@@ -276,8 +277,8 @@ export const miscRouter = router({
           sentimentMap.get(sym)!.push(n.sentiment_score as number);
         }
 
-        // Compute win probability from technicals (RSI, MACD cross, SMA alignment, ADX)
-        const computeWinProb = (sig: Record<string, unknown>): number => {
+        // Heuristic fallback — only used when technical_signals.win_probability is NULL
+        const heuristicWinProb = (sig: Record<string, unknown>): number => {
           let score = 0.5;
           const rsi = sig.rsi as number | null;
           const macd = sig.macd as number | null;
@@ -286,22 +287,15 @@ export const miscRouter = router({
           const sma50 = sig.sma50 as number | null;
           const sma200 = sig.sma200 as number | null;
           const adx = sig.adx as number | null;
-
           if (rsi != null) {
-            if (rsi >= 50 && rsi < 70) score += 0.06;       // bullish momentum, not overbought
-            else if (rsi < 30) score += 0.04;                // oversold bounce
-            else if (rsi >= 70) score -= 0.05;               // overbought risk
+            if (rsi >= 50 && rsi < 70) score += 0.06;
+            else if (rsi < 30) score += 0.04;
+            else if (rsi >= 70) score -= 0.05;
           }
-          if (macd != null && macdSig != null) {
-            score += macd > macdSig ? 0.08 : -0.05;          // MACD bullish/bearish cross
-          }
-          if (cmp != null && sma50 != null) {
-            score += cmp > sma50 ? 0.06 : -0.04;             // above/below 50-DMA
-          }
-          if (cmp != null && sma200 != null) {
-            score += cmp > sma200 ? 0.05 : -0.03;            // above/below 200-DMA
-          }
-          if (adx != null && adx > 25) score += 0.04;        // strong trend
+          if (macd != null && macdSig != null) score += macd > macdSig ? 0.08 : -0.05;
+          if (cmp != null && sma50 != null)    score += cmp > sma50    ? 0.06 : -0.04;
+          if (cmp != null && sma200 != null)   score += cmp > sma200   ? 0.05 : -0.03;
+          if (adx != null && adx > 25)         score += 0.04;
           return Math.max(0.35, Math.min(0.85, score));
         };
 
@@ -317,12 +311,15 @@ export const miscRouter = router({
           const sym = sig.symbol as string;
           if (symbolMap.has(sym)) continue; // keep first (most recent)
           const scores = sentimentMap.get(sym) || [];
+          // Prefer ML-calibrated win_probability stored by the scoring engine; fall back to heuristic
+          const dbWinProb = sig.win_probability as number | null;
+          const winProb = dbWinProb != null ? Math.max(0.35, Math.min(0.95, dbWinProb)) : heuristicWinProb(sig);
           symbolMap.set(sym, {
             sig,
             quant: quantMap.get(sym),
             avgSentiment: scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : 0,
             sector: (sig.sector as string) || 'Unknown',
-            winProb: computeWinProb(sig),
+            winProb,
           });
         }
 
