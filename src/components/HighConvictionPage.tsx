@@ -188,7 +188,7 @@ export function HighConvictionPage({
   );
 
   const result = data as ComboResult | undefined;
-  const isBear  = result?.regime === 'BEAR';
+  const isBear  = result?.regime === 'BEAR' || result?.regime === 'UNKNOWN';
   const isEmpty = !isLoading && result && result.stocks.length === 0 && !isBear;
 
   return (
