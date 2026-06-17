@@ -230,7 +230,9 @@ def update_source_weights(
         if stats['total'] < MIN_SAMPLES:
             continue
 
-        win_rate = (stats['wins'] / stats['total'] * 100) if stats['total'] > 0 else 0
+        # win_rate stored as a 0-1 fraction (was incorrectly stored as 0-100 percentage,
+        # which made it incomparable with every other win_rate column in the schema).
+        win_rate = (stats['wins'] / stats['total']) if stats['total'] > 0 else 0
         avg_return = sum(stats['returns']) / len(stats['returns']) if stats['returns'] else 0
         avg_reward = sum(stats['rewards']) / len(stats['rewards']) if stats['rewards'] else 0
 
@@ -240,6 +242,11 @@ def update_source_weights(
             sharpe = avg_reward / (variance ** 0.5) if variance > 0 else 0
         else:
             sharpe = 0
+
+        # Target performance multiplier: reward sources that beat 50% win-rate and have
+        # positive risk-adjusted reward; penalise the rest. Centred at 1.0, clamped [0.3, 2.0].
+        # Previously this was `1.0 + sharpe*0.1` which sat at ~1.0 for everything (no learning).
+        target_multiplier = max(0.3, min(2.0, 1.0 + (win_rate - 0.5) * 1.5 + sharpe * 0.1))
 
         if not dry_run:
             now = datetime.datetime.now().isoformat()
@@ -256,26 +263,30 @@ def update_source_weights(
                     total_wins = excluded.total_wins,
                     total_losses = excluded.total_losses,
                     avg_sharpe_ratio = excluded.avg_sharpe_ratio,
-                    weight_multiplier = (weight_multiplier * 0.85 + 
-                        MAX(0.3, MIN(2.0, 1.0 + avg_sharpe_ratio * 0.1)) * 0.15),
+                    -- EMA-smooth toward the freshly computed target (excluded.weight_multiplier).
+                    -- Bare `weight_multiplier` is the existing stored value; previously this
+                    -- referenced the stale `avg_sharpe_ratio` column, so it never converged.
+                    weight_multiplier = ROUND(
+                        weight_multiplier * 0.85 + excluded.weight_multiplier * 0.15, 4),
                     last_updated = excluded.last_updated
             """, (
                 signal_source,
                 regime,
                 sector,
-                round(win_rate, 2),
+                round(win_rate, 4),
                 round(avg_return, 4),
                 stats['total'],
                 stats['wins'],
                 stats['losses'],
                 round(sharpe, 4),
-                round(1.0 + sharpe * 0.1, 4),
+                round(target_multiplier, 4),
                 now,
             ))
             updated += 1
         else:
             print(f"  [DRY] {signal_source}|{regime}|{sector}: "
-                  f"WinRate={win_rate:.1f}%, AvgReturn={avg_return:.2f}%, Sharpe={sharpe:.4f}")
+                  f"WinRate={win_rate*100:.1f}%, AvgReturn={avg_return:.2f}%, "
+                  f"Sharpe={sharpe:.4f}, Mult={target_multiplier:.3f}")
 
     if not dry_run:
         conn.commit()

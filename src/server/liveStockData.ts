@@ -103,6 +103,15 @@ const BATCH_CONCURRENCY = 8;
 const QUOTE_FETCH_TIMEOUT_MS = Number(process.env.QUOTE_FETCH_TIMEOUT_MS ?? 8000);
 const MAX_INDIVIDUAL_FALLBACKS = Number(process.env.MAX_INDIVIDUAL_FALLBACKS ?? 250);
 
+// ─── Pacing + circuit breaker (avoid Yahoo throttling / ban) ──────────────────
+const BATCH_GROUP_DELAY_MS = Number(process.env.YF_BATCH_GROUP_DELAY_MS ?? 250);
+const YF_CIRCUIT_COOLDOWN_MS = Number(process.env.YF_CIRCUIT_COOLDOWN_MS ?? 5 * 60_000);
+const YF_TRIP_FAIL_RATE = 0.5;   // trip if >50% of batches in a refresh fail
+let yfCircuitOpenUntil = 0;
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+/** base..2*base ms — spreads bursts so we don't hammer Yahoo on a fixed cadence. */
+const jitter = (base: number) => base + Math.floor(Math.random() * base);
+
 async function fetchWithTimeout(url: string, init: RequestInit = {}): Promise<Response> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), QUOTE_FETCH_TIMEOUT_MS);
@@ -303,6 +312,15 @@ export async function fetchStockQuoteFinnhub(
 
 export async function fetchAllLiveStocks(): Promise<MarketData[]> {
   const allSymbols = ALL_NSE_SYMBOLS;
+
+  // Circuit breaker: if Yahoo recently failed en masse, skip this refresh entirely so
+  // the caller keeps serving the existing cache/mirror instead of hammering a throttled host.
+  if (Date.now() < yfCircuitOpenUntil) {
+    const secs = Math.ceil((yfCircuitOpenUntil - Date.now()) / 1000);
+    console.warn(`[LIVE DATA] Yahoo circuit OPEN (${secs}s left) — skipping refresh, serving cache.`);
+    return [];
+  }
+
   console.log(
     `[LIVE DATA] Fetching ${allSymbols.length} NSE stocks via Yahoo Finance (parallel batches)...`,
   );
@@ -315,6 +333,7 @@ export async function fetchAllLiveStocks(): Promise<MarketData[]> {
     chunks.push(allSymbols.slice(i, i + BATCH_SIZE));
   }
 
+  let batchFailures = 0;
   for (let i = 0; i < chunks.length; i += BATCH_CONCURRENCY) {
     const group = chunks.slice(i, i + BATCH_CONCURRENCY);
     const groupResults = await Promise.allSettled(
@@ -324,12 +343,23 @@ export async function fetchAllLiveStocks(): Promise<MarketData[]> {
       if (r.status === "fulfilled") {
         r.value.forEach((v, k) => collected.set(k, v));
       } else {
+        batchFailures++;
         console.error(
           `[LIVE DATA] Batch group ${i / BATCH_CONCURRENCY + 1} had failure:`,
           r.reason,
         );
       }
     }
+    // Jittered pause between groups so we don't fire ~50 requests on a fixed cadence.
+    if (i + BATCH_CONCURRENCY < chunks.length) await sleep(jitter(BATCH_GROUP_DELAY_MS));
+  }
+
+  // Trip the breaker if a large fraction of batches failed (likely throttled/banned).
+  if (chunks.length > 0 && batchFailures / chunks.length > YF_TRIP_FAIL_RATE) {
+    yfCircuitOpenUntil = Date.now() + YF_CIRCUIT_COOLDOWN_MS;
+    console.warn(
+      `[LIVE DATA] ${batchFailures}/${chunks.length} batches failed — tripping Yahoo circuit for ${YF_CIRCUIT_COOLDOWN_MS / 1000}s.`,
+    );
   }
 
   // Per-symbol YF v8 fallback for symbols the batch missed

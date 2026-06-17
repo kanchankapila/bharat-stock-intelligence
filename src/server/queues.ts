@@ -19,6 +19,7 @@ import Redis from 'ioredis';
 import { REDIS_BASE } from './redisConfig';
 import { runPython } from './pythonRunner';
 import { pythonApi } from './pythonApi';
+import { recordHeartbeat, startHeartbeatMonitor } from './jobHeartbeat';
 
 // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Redis connection shared across all BullMQ objects ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 
@@ -317,6 +318,10 @@ async function processNSESync(_job: Job): Promise<{ success: boolean; stockCount
     const result = await syncNSEStocksToDatabase();
     const stockCount = (result?.inserted || 0) + (result?.updated || 0);
     console.log(`[QUEUE] NSE sync completed, ${stockCount} stocks updated`);
+    // Backfill canonical nse_stocks.sector from already-resolved confluence data, then
+    // propagate to historical signal tables. Keeps sector segmentation healthy over time.
+    await runPython('backfill_sectors.py', [], 120_000)
+      .catch(err => console.warn('[QUEUE] sector backfill failed (non-blocking):', (err as Error).message));
     return { success: true, stockCount };
   } catch (err: any) {
     console.error('[QUEUE] NSE sync failed:', err.message);
@@ -343,12 +348,28 @@ async function processQuantScoring(_job: Job): Promise<{ success: boolean }> {
   return { success: true };
 }
 
+/**
+ * Resolve outcomes at the given horizon. Prefer the in-process Python API (port 8002),
+ * but if it is unreachable fall back to spawning outcome_resolver.py directly — the
+ * resolver is self-contained (connects straight to SQLite), so resolution must NOT
+ * silently no-op just because the AlphaQuant service happens to be down.
+ */
+async function resolveOutcomesResilient(horizon: number): Promise<void> {
+  try {
+    await pythonApi.resolveOutcomes(horizon);
+  } catch (e) {
+    console.warn(`[API] resolve-outcomes(${horizon}) failed, falling back to runPython:`, (e as Error).message);
+    await runPython('outcome_resolver.py', ['--horizon', String(horizon)], 180_000)
+      .catch(err => console.error(`[QUEUE] outcome_resolver.py fallback(${horizon}) failed:`, (err as Error).message));
+  }
+}
+
 async function processOutcomeResolver(_job: Job): Promise<{ success: boolean }> {
   await runPython('fii_dii_fetcher.py', [], 90_000).catch(() => {});
 
-  await pythonApi.resolveOutcomes(1).catch(e => console.warn('[API] resolve-outcomes(1):', (e as Error).message));
-  await pythonApi.resolveOutcomes(5).catch(e => console.warn('[API] resolve-outcomes(5):', (e as Error).message));
-  await pythonApi.resolveOutcomes(15).catch(e => console.warn('[API] resolve-outcomes(15):', (e as Error).message));
+  await resolveOutcomesResilient(1);
+  await resolveOutcomesResilient(5);
+  await resolveOutcomesResilient(15);
 
   await runPython('performance_tracker.py', ['--horizon', '5']);
   await runPython('performance_tracker.py', ['--horizon', '15']);
@@ -366,9 +387,9 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await runPython('institutional_quant_engine.py', [], 120_000).catch(() => {});
   await runPython('finbert_scorer.py', ['--days', '1'], 180_000).catch(() => {});
 
-  await pythonApi.resolveOutcomes(1).catch(e => console.warn('[API] resolve-outcomes(1):', (e as Error).message));
-  await pythonApi.resolveOutcomes(5).catch(e => console.warn('[API] resolve-outcomes(5):', (e as Error).message));
-  await pythonApi.resolveOutcomes(15).catch(e => console.warn('[API] resolve-outcomes(15):', (e as Error).message));
+  await resolveOutcomesResilient(1);
+  await resolveOutcomesResilient(5);
+  await resolveOutcomesResilient(15);
 
   await runPython('performance_tracker.py', ['--horizon', '5']);
   await runPython('performance_tracker.py', ['--horizon', '15']);
@@ -570,9 +591,11 @@ export async function initQueues(): Promise<boolean> {
 
     stockWorker.on('completed', (job, result) => {
       console.log(`[QUEUE] stock-refresh completed: ${result.count} stocks`);
+      recordHeartbeat('stock-refresh', 'success');
     });
     stockWorker.on('failed', (job, err) => {
       console.error(`[QUEUE] stock-refresh failed:`, err.message);
+      recordHeartbeat('stock-refresh', 'failed', err?.message);
     });
     stockWorker.on('error', (err) => {
       if ((err as any).code === -2 || err.message?.includes('Missing lock')) return;
@@ -647,9 +670,11 @@ export async function initQueues(): Promise<boolean> {
 
     scoringWorker.on('completed', (job) => {
       console.log(`[QUEUE] stock-scoring completed`);
+      recordHeartbeat('stock-scoring', 'success');
     });
     scoringWorker.on('failed', (job, err) => {
       console.error(`[QUEUE] stock-scoring failed:`, err.message);
+      recordHeartbeat('stock-scoring', 'failed', err?.message);
     });
 
     // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ MC screener sync queue ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
@@ -955,9 +980,11 @@ export async function initQueues(): Promise<boolean> {
 
     newsSentimentWorker.on('completed', (_job) => {
       console.log('[QUEUE] news-sentiment completed');
+      recordHeartbeat('news-sentiment', 'success');
     });
     newsSentimentWorker.on('failed', (_job, err) => {
       console.error('[QUEUE] news-sentiment failed:', err.message);
+      recordHeartbeat('news-sentiment', 'failed', err?.message);
     });
     newsSentimentWorker.on('error', (err) => {
       if ((err as any).code === -2 || err.message?.includes('Missing lock')) return;
@@ -1061,9 +1088,11 @@ export async function initQueues(): Promise<boolean> {
 
     outcomeResolverWorker.on('completed', (_job) => {
       console.log('[QUEUE] outcome-resolver completed');
+      recordHeartbeat('outcome-resolver', 'success');
     });
     outcomeResolverWorker.on('failed', (_job, err) => {
       console.error('[QUEUE] outcome-resolver failed:', err.message);
+      recordHeartbeat('outcome-resolver', 'failed', err?.message);
     });
 
     // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ ML daily ops queue (5:00 PM IST = 11:30 UTC, weekdays) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
@@ -1097,9 +1126,11 @@ export async function initQueues(): Promise<boolean> {
 
     mlDailyOpsWorker.on('completed', (_job) => {
       console.log('[QUEUE] ml-daily-ops completed');
+      recordHeartbeat('ml-daily-ops', 'success');
     });
     mlDailyOpsWorker.on('failed', (_job, err) => {
       console.error('[QUEUE] ml-daily-ops failed:', err.message);
+      recordHeartbeat('ml-daily-ops', 'failed', err?.message);
     });
 
     // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ ML weekly retrain + optimize (Sunday 6 PM IST = 12:30 UTC) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
@@ -1477,6 +1508,7 @@ export async function initQueues(): Promise<boolean> {
       console.error('[QUEUE] unified-ranker failed:', err.message));
 
     console.warn = _origWarn;
+    startHeartbeatMonitor();
     console.log('[QUEUE] BullMQ initialised (stock-refresh + ai-signals)');
     return true;
   } catch (err: any) {

@@ -196,7 +196,7 @@ def resolve_outcomes(
                 return_pct = None
 
         if dry_run:
-            msg = f"  [DRY] {sym} {signal_date} h={sig_horizon}d (entry:{next_trading_day}) → {outcome}"
+            msg = f"  [DRY] {sym} {signal_date} h={sig_horizon}d (entry:{next_trading_day}) -> {outcome}"
             if return_pct is not None:
                 msg += f" ({return_pct:.2f}%)"
             print(msg)
@@ -230,6 +230,11 @@ def resolve_unified_outcomes(
     today = datetime.date.today()
     cutoff = (today - datetime.timedelta(days=horizon_days)).isoformat()
 
+    # NOTE: the dedup intentionally excludes only rows already RESOLVED at this horizon.
+    # Rows previously written as PENDING (horizon not yet elapsed / OHLCV missing at the
+    # time) MUST be re-selected so they get resolved once data is available. The previous
+    # version matched any existing row regardless of outcome, which permanently stranded
+    # PENDING signals (root cause of ~86% of AI signals never resolving).
     pending = conn.execute("""
         SELECT us.id, us.symbol, us.signal_date, us.entry_price, us.stop_loss, us.signal_source, us.confidence_score
         FROM unified_signals us
@@ -239,6 +244,7 @@ def resolve_unified_outcomes(
               SELECT 1 FROM unified_signal_outcomes uso
               WHERE uso.unified_signal_id = us.id
                 AND uso.horizon_days = ?
+                AND uso.outcome IN ('WIN','LOSS','NEUTRAL','STOP_LOSS')
           )
         ORDER BY us.signal_date DESC
         LIMIT 2000
@@ -329,7 +335,7 @@ def resolve_unified_outcomes(
                 outcome = 'PENDING'
 
         if dry_run:
-            msg = f"  [DRY] UNIFIED {sym} {signal_date} (entry:{next_trading_day}) → {outcome}"
+            msg = f"  [DRY] UNIFIED {sym} {signal_date} (entry:{next_trading_day}) -> {outcome}"
             if return_pct is not None: msg += f" ({return_pct:.2f}%)"
             print(msg)
             continue
@@ -351,8 +357,73 @@ def resolve_unified_outcomes(
     return {'processed': len(rows), 'resolved': resolved}
 
 
+def resolve_dl_predictions(conn: sqlite3.Connection, dry_run: bool = False) -> dict[str, int]:
+    """
+    Grade deep_learning_predictions whose horizon has elapsed.
+    Fills actual_ret_5d / actual_ret_15d and outcome_5d / outcome_15d ('UP'|'DOWN'|'FLAT')
+    using realistic next-trading-day entry and horizon-close exit from stock_ohlcv.
+    Nothing graded these before, so all rows sat NULL forever.
+    """
+    today = datetime.date.today()
+
+    def grade_for(col_ret: str, col_out: str, horizon: int) -> int:
+        cutoff = (today - datetime.timedelta(days=horizon)).isoformat()
+        pending = conn.execute(f"""
+            SELECT id, symbol, prediction_date
+            FROM deep_learning_predictions
+            WHERE {col_out} IS NULL
+              AND substr(prediction_date, 1, 10) <= ?
+            ORDER BY prediction_date DESC
+            LIMIT 5000
+        """, (cutoff,)).fetchall()
+
+        graded = 0
+        for pid, sym, pred_date in pending:
+            pd_str = str(pred_date)[:10]
+            try:
+                pd_obj = datetime.date.fromisoformat(pd_str)
+            except ValueError:
+                continue
+
+            entry_row = conn.execute(
+                "SELECT open FROM stock_ohlcv WHERE symbol=? AND date > ? ORDER BY date ASC LIMIT 1",
+                (sym, pd_str),
+            ).fetchone()
+            exit_target = (pd_obj + datetime.timedelta(days=horizon)).isoformat()
+            exit_row = conn.execute(
+                "SELECT close FROM stock_ohlcv WHERE symbol=? AND date >= ? ORDER BY date ASC LIMIT 1",
+                (sym, exit_target),
+            ).fetchone()
+
+            if not entry_row or not exit_row:
+                continue  # leave NULL; will retry next run once OHLCV lands
+            entry = float(entry_row[0] or 0)
+            if entry <= 0:
+                continue
+            ret = (float(exit_row[0]) - entry) / entry * 100
+            outcome = 'UP' if ret > 0.5 else 'DOWN' if ret < -0.5 else 'FLAT'
+
+            if dry_run:
+                continue
+            conn.execute(
+                f"UPDATE deep_learning_predictions SET {col_ret}=?, {col_out}=? WHERE id=?",
+                (round(ret, 4), outcome, pid),
+            )
+            graded += 1
+        return graded
+
+    g5 = grade_for('actual_ret_5d', 'outcome_5d', 5)
+    g15 = grade_for('actual_ret_15d', 'outcome_15d', 15)
+    if not dry_run:
+        conn.commit()
+    print(f"[OutcomeResolver] Graded DL predictions: 5d={g5}, 15d={g15}")
+    return {'graded_5d': g5, 'graded_15d': g15}
+
+
 def expire_stale_pending(conn: sqlite3.Connection, horizon_days: int, dry_run: bool = False) -> int:
-    """Mark PENDING outcomes older than 2×horizon as NEUTRAL (stock/data unavailable)."""
+    """Mark PENDING outcomes older than 2×horizon as NEUTRAL (stock/data unavailable).
+    Covers signal_outcomes, unified_signal_outcomes and recommendation_log so no table
+    accumulates permanently-stuck PENDING rows."""
     cutoff = (datetime.date.today() - datetime.timedelta(days=horizon_days * 2)).isoformat()
 
     rows = conn.execute("""
@@ -363,21 +434,40 @@ def expire_stale_pending(conn: sqlite3.Connection, horizon_days: int, dry_run: b
           AND signal_date < ?
     """, (horizon_days, cutoff)).fetchall()
 
+    # unified + rec_log stale PENDING counts (for logging)
+    uni_stale = conn.execute("""
+        SELECT COUNT(*) FROM unified_signal_outcomes
+        WHERE outcome = 'PENDING' AND horizon_days = ? AND substr(signal_date,1,10) < ?
+    """, (horizon_days, cutoff)).fetchone()[0]
+    rec_stale = conn.execute("""
+        SELECT COUNT(*) FROM recommendation_log
+        WHERE outcome = 'PENDING' AND COALESCE(horizon_days, 15) = ? AND substr(signal_date,1,10) < ?
+    """, (horizon_days, cutoff)).fetchone()[0]
+
     if dry_run:
-        print(f"[OutcomeResolver] Would expire {len(rows)} stale {horizon_days}D PENDING outcomes")
+        print(f"[OutcomeResolver] Would expire {len(rows)} signal_outcomes, "
+              f"{uni_stale} unified, {rec_stale} rec_log stale {horizon_days}D PENDING")
         return len(rows)
 
     conn.execute("""
         UPDATE signal_outcomes
-        SET outcome = 'NEUTRAL',
-            return_pct = 0.0,
-            computed_at = CURRENT_TIMESTAMP
-        WHERE outcome = 'PENDING'
-          AND horizon_days = ?
-          AND signal_date < ?
+        SET outcome = 'NEUTRAL', return_pct = 0.0, computed_at = CURRENT_TIMESTAMP
+        WHERE outcome = 'PENDING' AND horizon_days = ? AND signal_date < ?
+    """, (horizon_days, cutoff))
+    conn.execute("""
+        UPDATE unified_signal_outcomes
+        SET outcome = 'NEUTRAL', return_pct = 0.0, computed_at = CURRENT_TIMESTAMP
+        WHERE outcome = 'PENDING' AND horizon_days = ? AND substr(signal_date,1,10) < ?
+    """, (horizon_days, cutoff))
+    conn.execute("""
+        UPDATE recommendation_log
+        SET outcome = 'NEUTRAL', actual_return_pct = 0.0,
+            status = 'RESOLVED', resolved_at = CURRENT_TIMESTAMP
+        WHERE outcome = 'PENDING' AND COALESCE(horizon_days, 15) = ? AND substr(signal_date,1,10) < ?
     """, (horizon_days, cutoff))
     conn.commit()
-    print(f"[OutcomeResolver] Expired {len(rows)} stale {horizon_days}D outcomes -> NEUTRAL")
+    print(f"[OutcomeResolver] Expired stale {horizon_days}D PENDING -> NEUTRAL "
+          f"(signal_outcomes={len(rows)}, unified={uni_stale}, rec_log={rec_stale})")
     return len(rows)
 
 
@@ -394,7 +484,7 @@ def resolve_recommendation_log(
         SELECT id, symbol, signal_date, entry_price, stop_loss,
                COALESCE(horizon_days, ?) AS rl_horizon
         FROM recommendation_log
-        WHERE outcome IS NULL
+        WHERE (outcome IS NULL OR outcome = 'PENDING')
           AND entry_price IS NOT NULL
           AND signal_date <= ?
         ORDER BY signal_date DESC
@@ -466,7 +556,7 @@ def resolve_recommendation_log(
                 outcome = 'PENDING'
 
         if dry_run:
-            msg = f"  [DRY] REC_LOG {sym} {signal_date} → {outcome}"
+            msg = f"  [DRY] REC_LOG {sym} {signal_date} -> {outcome}"
             if return_pct is not None:
                 msg += f" ({return_pct:.2f}%)"
             print(msg)
@@ -502,6 +592,7 @@ def run(horizon_days: int = 1, dry_run: bool = False):
         resolve_outcomes(conn, horizon_days=horizon_days, dry_run=dry_run)
         resolve_unified_outcomes(conn, horizon_days=horizon_days, dry_run=dry_run)
         resolve_recommendation_log(conn, horizon_days=horizon_days, dry_run=dry_run)
+        resolve_dl_predictions(conn, dry_run=dry_run)
         expire_stale_pending(conn, horizon_days=horizon_days, dry_run=dry_run)
     finally:
         conn.close()

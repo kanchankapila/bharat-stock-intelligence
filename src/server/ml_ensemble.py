@@ -243,7 +243,13 @@ def _base_models(scale_pos_weight: float = 1.0):
     return [('lgbm', lgbm), ('xgb', xgb_model), ('rf', rf), ('et', et), ('lr', lr)]
 
 
-def train_ensemble(X: pd.DataFrame, y: pd.Series, min_samples: int = 30):
+def _fit_stack(X: pd.DataFrame, y: pd.Series, spw: float, embargo: int, n_splits: int = 5):
+    """
+    Fit OOF-stacked base models + meta-learner on (X, y), purging `embargo` samples
+    between each train/validation fold so overlapping forward-return windows cannot
+    leak across the boundary. Returns (fitted_base, meta, oof_auc, oof_acc, importances).
+    Assumes X is already sorted chronologically.
+    """
     from sklearn.model_selection import TimeSeriesSplit
     from sklearn.base import clone as _sklearn_clone
     from sklearn.linear_model import LogisticRegression
@@ -251,63 +257,111 @@ def train_ensemble(X: pd.DataFrame, y: pd.Series, min_samples: int = 30):
     from sklearn.pipeline import Pipeline
     from sklearn.metrics import roc_auc_score
 
-    print(f"[Ensemble] Training on {len(X)} samples  (win_rate={y.mean():.1%})")
-    spw  = float((y == 0).sum()) / max(1, (y == 1).sum())
     base = _base_models(scale_pos_weight=spw)
+    # Keep folds viable once the embargo gap is subtracted.
+    n_eff = n_splits
+    if embargo > 0:
+        n_eff = max(2, min(n_splits, len(X) // max(1, embargo + 1) - 1))
+    skf = TimeSeriesSplit(n_splits=n_eff, gap=embargo)
 
-    # ── Out-of-fold stacking ─────────────────────────────────────────────────
-    skf    = TimeSeriesSplit(n_splits=5)
-    oof    = np.zeros((len(X), len(base)))
-    fitted = []
+    oof     = np.zeros((len(X), len(base)))
+    covered = np.zeros(len(X), dtype=bool)
+    fitted  = []
 
     for j, (name, model) in enumerate(base):
         print(f"[Ensemble]   Training base model: {name}...")
         oof_preds = np.zeros(len(X))
-        for fold_i, (train_idx, val_idx) in enumerate(skf.split(X, y)):
-            # Use raw (uncalibrated) base estimator for OOF — avoids inner-cv crash on small folds
+        for train_idx, val_idx in skf.split(X, y):
             m_clone = _sklearn_clone(_base_models(scale_pos_weight=spw)[j][1].estimator)
             m_clone.fit(X.iloc[train_idx], y.iloc[train_idx])
             oof_preds[val_idx] = m_clone.predict_proba(X.iloc[val_idx])[:, 1]
+            covered[val_idx] = True
         oof[:, j] = oof_preds
-
-        # Full fit with calibration for inference
-        model.fit(X, y)
+        model.fit(X, y)   # full fit (calibrated) for inference
         fitted.append((name, model))
 
-    # ── Meta-learner ─────────────────────────────────────────────────────────
-    print("[Ensemble]   Training meta-learner...")
+    # Meta-learner — trained only on rows the walk-forward actually produced OOF preds for
+    # (TimeSeriesSplit never validates the initial training block).
     meta = Pipeline([
         ('scaler', StandardScaler()),
         ('lr', LogisticRegression(C=0.5, max_iter=500, random_state=42)),
     ])
-    meta.fit(oof, y)
+    yc = y[covered]
+    meta.fit(oof[covered], yc)
+    meta_proba = meta.predict_proba(oof[covered])[:, 1]
+    auc = roc_auc_score(yc, meta_proba) if yc.nunique() > 1 else 0.5
+    acc = float(((meta_proba > 0.5) == yc).mean())
 
-    # ── CV metrics ───────────────────────────────────────────────────────────
-    meta_oof_proba = meta.predict_proba(oof)[:, 1]
-    auc = roc_auc_score(y, meta_oof_proba)
-    acc = ((meta_oof_proba > 0.5) == y).mean()
-    print(f"[Ensemble]   Stacking OOF AUC={auc:.4f}  Accuracy={acc:.4f}")
-
-    # Feature importances from first base model (LGBM) — unwrap CalibratedClassifierCV
     imp = None
     try:
         gb_cal = fitted[0][1]  # CalibratedClassifierCV for LGBM
-        # calibrated_classifiers_ holds (fitted_base, calibrator) pairs from each CV fold
         if hasattr(gb_cal, 'calibrated_classifiers_') and gb_cal.calibrated_classifiers_:
             inner = gb_cal.calibrated_classifiers_[0].estimator
             imp = getattr(inner, 'feature_importances_', None)
     except Exception:
         pass
 
+    return fitted, meta, float(auc), acc, imp
+
+
+def train_ensemble(X: pd.DataFrame, y: pd.Series, dates: pd.Series | None = None,
+                   horizon_days: int = 15, min_samples: int = 30):
+    from sklearn.metrics import roc_auc_score, precision_score, recall_score, f1_score
+
+    print(f"[Ensemble] Training on {len(X)} samples  (win_rate={y.mean():.1%})")
+    spw = float((y == 0).sum()) / max(1, (y == 1).sum())
+
+    # Embargo in samples ≈ one horizon's worth of rows. Prevents overlapping forward
+    # windows leaking across train/val/test boundaries (purged walk-forward).
+    embargo = 0
+    if dates is not None and dates.nunique() > 1:
+        samples_per_day = max(1.0, len(X) / dates.nunique())
+        embargo = int(min(len(X) // 10, samples_per_day * horizon_days))
+
+    # ── Honest held-out test: last 20%, chronological, with an embargo purge gap ──
+    test = {'auc': None, 'precision': None, 'recall': None, 'f1': None, 'n': 0}
+    n_test = int(len(X) * 0.20)
+    if n_test >= 20 and (len(X) - n_test - embargo) >= max(min_samples, 100):
+        tr_end = len(X) - n_test - embargo
+        fb, mt, _, _, _ = _fit_stack(X.iloc[:tr_end], y.iloc[:tr_end], spw, embargo)
+        X_te, y_te = X.iloc[len(X) - n_test:], y.iloc[len(X) - n_test:]
+        te_proba = mt.predict_proba(
+            np.column_stack([m.predict_proba(X_te)[:, 1] for _, m in fb])
+        )[:, 1]
+        if y_te.nunique() > 1:
+            te_pred = (te_proba > 0.5).astype(int)
+            test = {
+                'auc':       float(roc_auc_score(y_te, te_proba)),
+                'precision': float(precision_score(y_te, te_pred, zero_division=0)),
+                'recall':    float(recall_score(y_te, te_pred, zero_division=0)),
+                'f1':        float(f1_score(y_te, te_pred, zero_division=0)),
+                'n':         int(n_test),
+            }
+            print(f"[Ensemble]   HELD-OUT TEST (last {n_test}, embargo={embargo}): "
+                  f"AUC={test['auc']:.4f} P={test['precision']:.3f} "
+                  f"R={test['recall']:.3f} F1={test['f1']:.3f}")
+    else:
+        print(f"[Ensemble]   Insufficient data for a held-out test (n={len(X)}); reporting CV only.")
+
+    # ── Production model: refit on ALL data; CV metric is the purged-OOF AUC ──
+    fitted, meta, auc, acc, imp = _fit_stack(X, y, spw, embargo)
+    print(f"[Ensemble]   Stacking purged-OOF AUC={auc:.4f}  Accuracy={acc:.4f}  (embargo={embargo})")
+
     return {
-        'base_models': fitted,
-        'meta':        meta,
+        'base_models':  fitted,
+        'meta':         meta,
         'feature_names': list(X.columns),
         'feature_importances': imp.tolist() if imp is not None else None,
-        'cv_auc':      float(auc),
-        'cv_accuracy': float(acc),
-        'n_samples':   len(X),
-        'trained_at':  datetime.datetime.now().isoformat(),
+        'cv_auc':       float(auc),
+        'cv_accuracy':  acc,
+        'test_auc':     test['auc'],
+        'test_precision': test['precision'],
+        'test_recall':  test['recall'],
+        'test_f1':      test['f1'],
+        'test_samples': test['n'],
+        'embargo':      embargo,
+        'n_samples':    len(X),
+        'trained_at':   datetime.datetime.now().isoformat(),
     }
 
 
@@ -339,14 +393,19 @@ def register_model(conn: sqlite3.Connection, ensemble: dict) -> int:
         INSERT INTO model_registry
             (model_name, model_version, model_type, trained_at,
              training_samples, cv_roc_auc, cv_accuracy,
+             test_roc_auc, precision_score, recall_score, f1_score,
              feature_count, top_features_json, model_path, is_active, horizon_days)
-        VALUES ('ensemble', ?, 'Stacking Ensemble', ?, ?, ?, ?, ?, ?, ?, 1, 15)
+        VALUES ('ensemble', ?, 'Stacking Ensemble', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 15)
     """, (
         version,
         ensemble['trained_at'],
         ensemble['n_samples'],
         ensemble['cv_auc'],
         ensemble['cv_accuracy'],
+        ensemble.get('test_auc'),
+        ensemble.get('test_precision'),
+        ensemble.get('test_recall'),
+        ensemble.get('test_f1'),
         len(ensemble['feature_names']),
         json.dumps(top_feats),
         ENSEMBLE_PATH,
@@ -468,7 +527,9 @@ def run(do_train: bool = True, do_score: bool = True,
             else:
                 X = build_features(df)
                 y = df['outcome'].astype(int)
-                ensemble = train_ensemble(X, y, min_samples)
+                _hz = int(pd.to_numeric(df['horizon_days'], errors='coerce').median() or 15)
+                ensemble = train_ensemble(X, y, dates=df['signal_date'],
+                                          horizon_days=_hz, min_samples=min_samples)
                 save_ensemble(ensemble)
                 register_model(conn, ensemble)
 

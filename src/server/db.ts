@@ -13,10 +13,13 @@ db.pragma('temp_store = MEMORY');     // temp tables in RAM
 db.pragma('busy_timeout = 30000');    // allow 30s wait during heavy concurrent writes
 db.pragma('wal_autocheckpoint = 1000');
 
-// Checkpoint WAL every 30 min to prevent it growing unbounded in memory
+// Checkpoint the WAL every 5 min using TRUNCATE (resets the -wal file to zero bytes).
+// PASSIVE could never advance past the always-present readers from the ~40 BullMQ
+// workers, so the WAL grew unbounded (observed ~300 MB). TRUNCATE forces a full
+// checkpoint + truncate when no writer holds the lock.
 setInterval(() => {
-  try { db.pragma('wal_checkpoint(PASSIVE)'); } catch {}
-}, 30 * 60 * 1000).unref();
+  try { db.pragma('wal_checkpoint(TRUNCATE)'); } catch {}
+}, 5 * 60 * 1000).unref();
 
 db.exec(`CREATE TABLE IF NOT EXISTS _migrations (
   name     TEXT PRIMARY KEY,
@@ -1505,6 +1508,41 @@ runMigration('040_rec_log_sector_backfill', `
   )
   WHERE sector IS NULL OR sector = 'Unknown';
 `);
+
+// Date-leading index for cross-symbol date-range scans (the composite idx_fs_sym_tf_date
+// leads with symbol, so a "all symbols for date range" scan could not use it).
+runMigration('041_feature_store_date_index', `
+  CREATE INDEX IF NOT EXISTS idx_fs_date ON feature_store(date);
+`);
+
+// ── Retention: confluence_signals is an append-only firehose (~700k rows, the single
+// largest contributor to DB bloat). expires_at exists but nothing pruned it. Delete
+// expired rows on boot and every 6h. Keeps the table bounded without losing live signals.
+const _pruneConfluenceBatch = db.prepare(
+  `DELETE FROM confluence_signals WHERE rowid IN (
+     SELECT rowid FROM confluence_signals
+     WHERE (expires_at IS NOT NULL AND expires_at < datetime('now'))
+        OR (expires_at IS NULL AND computed_at < datetime('now', '-90 days'))
+     LIMIT 20000
+   )`
+);
+function pruneConfluenceSignals(): void {
+  // Delete in bounded batches so a large first prune (the table can be >90% expired)
+  // never stalls the event loop in a single multi-hundred-thousand-row transaction.
+  try {
+    let total = 0, changes = 0;
+    do {
+      changes = _pruneConfluenceBatch.run().changes;
+      total += changes;
+    } while (changes >= 20000);
+    if (total > 0) console.error(`[DB] Pruned ${total} expired confluence_signals rows`);
+  } catch (err) {
+    console.error('[DB] confluence_signals prune failed:', (err as Error).message);
+  }
+}
+// Defer the first prune so server startup is never blocked by the initial cleanup.
+setTimeout(pruneConfluenceSignals, 30_000).unref();
+setInterval(pruneConfluenceSignals, 6 * 60 * 60 * 1000).unref();
 
 // Keep startup diagnostics off stdout so stdio-based clients can parse JSON-RPC.
 console.error('[DB] Schema normalization complete (Phase 3.5)');

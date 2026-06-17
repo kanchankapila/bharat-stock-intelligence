@@ -509,6 +509,38 @@ class AlphaQuantScoringEngine:
         except Exception as e:
             print(f"[SCORING] Failed to load technical_composite_scores: {e}")
 
+        # Load realized signal-type performance weights (EMA-smoothed reward multipliers)
+        # and map each symbol to the performance of its BEST currently-active setup.
+        # This makes the composite performance-AWARE: a stock carrying a historically
+        # high-accuracy setup (e.g. EMA_BULL_STACK, ~65% realized 5d win-rate) is no longer
+        # diluted down to the mean by a basket of weak screeners. We gate on the best setup
+        # (max) rather than averaging, to preserve the edge. Bounded to [0.7, 1.4] so it
+        # tilts the ranking without dominating it. Empty data => 1.0 (no behaviour change).
+        signal_quality_map: Dict[str, float] = {}
+        try:
+            with self.engine.connect() as conn:
+                stw = conn.execute(text(
+                    "SELECT signal_type, AVG(weight) FROM signal_type_weights GROUP BY signal_type"
+                )).fetchall()
+                type_weight = {r[0]: float(r[1]) for r in stw if r[0]}
+                sig_rows = conn.execute(text("""
+                    SELECT symbol, signals_json FROM technical_signals
+                    WHERE date >= date('now', '-3 day') AND signals_json IS NOT NULL
+                """)).fetchall()
+            for sym, sj in sig_rows:
+                try:
+                    types = [s.get('type') for s in json.loads(sj) if isinstance(s, dict)]
+                except Exception:
+                    continue
+                weights = [type_weight[t] for t in types if t in type_weight]
+                if weights:
+                    signal_quality_map[sym] = max(0.7, min(1.4, max(weights)))
+            if signal_quality_map:
+                print(f"[SCORING] Loaded signal-quality multipliers for {len(signal_quality_map)} symbols "
+                      f"({len(type_weight)} signal types).")
+        except Exception as e:
+            print(f"[SCORING] signal-quality map unavailable (defaulting to neutral): {e}")
+
         # Load Global Market Score for True Alpha (Beta) adjustment
         market_global_score = 0.0
         try:
@@ -709,6 +741,12 @@ class AlphaQuantScoringEngine:
                         final_score *= 0.90
                     elif market_global_score > 0.3:
                         final_score *= 1.10
+
+                # Signal-quality tilt: respect the realized performance of the stock's
+                # best active technical setup instead of letting the screener basket dilute it.
+                sq_mult = signal_quality_map.get(symbol, 1.0)
+                if sq_mult != 1.0:
+                    final_score *= sq_mult
 
                 # Max total points: 40 + 30 + 20 + 10 + 20 = 120. Scale down to 100.
                 raw_confidence = source_pts + cat_pts + ml_pts + vol_pts + tc_pts
