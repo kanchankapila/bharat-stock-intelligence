@@ -161,6 +161,7 @@ export let confluenceComputeQueue:  Queue | null = null;
 export let confluenceOutcomesQueue: Queue | null = null;
 let confluenceComputeWorker:  Worker | null = null;
 let confluenceOutcomesWorker: Worker | null = null;
+let confluenceFallbackTimer:  ReturnType<typeof setInterval> | null = null;
 
 export let screenerPerfQueue: Queue | null = null;
 let screenerPerfWorker: Worker | null = null;
@@ -1485,6 +1486,23 @@ export async function initQueues(): Promise<boolean> {
     aiSignalsQueue    = null;
     stockScoringQueue = null;
     trendlyneIntradayQueue = null;
+
+    // Confluence compute fallback: run every 30 min when Redis is unavailable
+    if (!confluenceFallbackTimer) {
+      const runConfluenceFallback = async () => {
+        try {
+          const { computeConfluenceSignals } = await import('./confluenceEngine');
+          await computeConfluenceSignals();
+          console.log('[QUEUE-FALLBACK] confluence-compute completed');
+        } catch (e: any) {
+          console.warn('[QUEUE-FALLBACK] confluence-compute failed:', e.message);
+        }
+      };
+      runConfluenceFallback(); // run immediately on startup
+      confluenceFallbackTimer = setInterval(runConfluenceFallback, 30 * 60 * 1000);
+      console.log('[QUEUE-FALLBACK] confluence-compute setInterval started (every 30 min)');
+    }
+
     return false;
   }
 }
@@ -1541,6 +1559,7 @@ export async function shutdownQueues(): Promise<void> {
     confluenceOutcomesWorker?.close(),
     confluenceComputeQueue?.close(),
     confluenceOutcomesQueue?.close(),
+    Promise.resolve(confluenceFallbackTimer ? clearInterval(confluenceFallbackTimer) : undefined),
     agentDataScientistWorker?.close(),
     agentStrategistWorker?.close(),
     agentAuditorWorker?.close(),
