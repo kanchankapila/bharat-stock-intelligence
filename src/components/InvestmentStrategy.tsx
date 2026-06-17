@@ -84,6 +84,14 @@ export function InvestmentStrategy({ onSelectStock }: { onSelectStock: (symbol: 
                         {pick.symbol}
                       </button>
                       <p className="text-[10px] text-slate-400 uppercase tracking-widest font-bold truncate max-w-[150px]">{pick.sector || 'Unknown Sector'}</p>
+                      {pick.price != null && (
+                        <p className="text-sm font-bold text-white mt-0.5">
+                          ₹{pick.price.toLocaleString('en-IN')}
+                          <span className={cn("ml-1.5 text-[10px] font-bold px-1.5 py-0.5 rounded", pick.priceSource === 'live' ? "bg-emerald-500/20 text-emerald-400" : "bg-slate-700/60 text-slate-400")}>
+                            {pick.priceSource === 'live' ? 'LIVE' : 'EOD'}
+                          </span>
+                        </p>
+                      )}
                     </div>
                     <div className="flex flex-col items-end">
                       <span className="text-2xl font-black text-emerald-400">{pick.score}</span>
@@ -138,6 +146,14 @@ export function InvestmentStrategy({ onSelectStock }: { onSelectStock: (symbol: 
                         {pick.symbol}
                       </button>
                       <p className="text-[10px] text-slate-400 uppercase tracking-widest font-bold truncate max-w-[150px]">{pick.sector || 'Unknown Sector'}</p>
+                      {pick.price != null && (
+                        <p className="text-sm font-bold text-white mt-0.5">
+                          ₹{pick.price.toLocaleString('en-IN')}
+                          <span className={cn("ml-1.5 text-[10px] font-bold px-1.5 py-0.5 rounded", pick.priceSource === 'live' ? "bg-emerald-500/20 text-emerald-400" : "bg-slate-700/60 text-slate-400")}>
+                            {pick.priceSource === 'live' ? 'LIVE' : 'EOD'}
+                          </span>
+                        </p>
+                      )}
                     </div>
                     <div className="flex flex-col items-end">
                       <span className="text-2xl font-black text-rose-400">{pick.score}</span>
