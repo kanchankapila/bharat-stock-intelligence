@@ -34,11 +34,14 @@ export interface SignalAlert {
   };
 }
 
+const PING_INTERVAL_MS = 25_000; // below typical NAT/firewall 30s idle timeout
+
 export class WebSocketSignalService {
   private wss: WebSocketServer | null = null;
   private clients: Set<WebSocket> = new Set();
   private priceThreshold = 0.02; // 2% price move threshold
   private lastPrices: Map<string, number> = new Map();
+  private pingTimer: ReturnType<typeof setInterval> | null = null;
 
   /**
    * Initialize WebSocket server attached to HTTP server
@@ -47,28 +50,43 @@ export class WebSocketSignalService {
     this.wss = new WebSocketServer({ server: httpServer });
 
     this.wss.on('connection', (ws: WebSocket) => {
-      console.log('[WebSocketService] New client connected');
       this.clients.add(ws);
 
-      ws.on('message', (data: string) => {
+      ws.on('message', (data: Buffer | string) => {
         try {
-          const msg = JSON.parse(data);
+          const msg = JSON.parse(data.toString());
           this.handleClientMessage(ws, msg);
-        } catch (err) {
-          console.error('[WebSocketService] Invalid message:', err);
+        } catch {
+          // ignore malformed frames
         }
       });
 
+      ws.on('pong', () => {
+        // client is alive — mark it so the ping sweep doesn't drop it
+        (ws as any).__alive = true;
+      });
+
       ws.on('close', () => {
-        console.log('[WebSocketService] Client disconnected');
         this.clients.delete(ws);
       });
 
-      ws.on('error', (err) => {
-        console.error('[WebSocketService] WebSocket error:', err);
+      ws.on('error', () => {
         this.clients.delete(ws);
       });
     });
+
+    // Heartbeat sweep: ping every client; drop any that didn't respond since last ping
+    this.pingTimer = setInterval(() => {
+      for (const ws of this.clients) {
+        if ((ws as any).__alive === false) {
+          this.clients.delete(ws);
+          ws.terminate();
+          continue;
+        }
+        (ws as any).__alive = false;
+        ws.ping();
+      }
+    }, PING_INTERVAL_MS);
 
     console.log('[WebSocketService] Initialized on ws://localhost:3000/signals');
   }
@@ -208,6 +226,10 @@ export class WebSocketSignalService {
    * Shutdown WebSocket server
    */
   public shutdown(): void {
+    if (this.pingTimer) {
+      clearInterval(this.pingTimer);
+      this.pingTimer = null;
+    }
     if (this.wss) {
       this.wss.close();
       console.log('[WebSocketService] Shutdown complete');
