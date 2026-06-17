@@ -5,6 +5,16 @@ import { crossSourceFilter, regimeSectorFilter, qualityOversoldScanner } from ".
 import { router, publicProcedure } from "../trpc";
 import { cacheGet } from "../cacheService";
 
+// ETNow screener IDs used by the investment picks strategy
+const ET_ZERO_DEBT        = '79';
+const ET_CASH_COW         = '73';
+const ET_ELITE_BLUECHIP   = '75';
+const ET_MULTIBAGGER      = '195';
+const ET_MONOPOLY         = '515';
+const ET_BUY_ON_DIPS      = '91';
+const ET_RSI_OVERSOLD     = '362';
+const ET_INVESTMENT_IDS   = [ET_ZERO_DEBT, ET_CASH_COW, ET_ELITE_BLUECHIP, ET_MULTIBAGGER, ET_MONOPOLY, ET_BUY_ON_DIPS, ET_RSI_OVERSOLD];
+
 export const scoringRouter = router({
   getTopRatedStocks: publicProcedure
     .input(z.object({
@@ -123,24 +133,24 @@ export const scoringRouter = router({
         JOIN etnow_screener_stocks es ON n.symbol = es.symbol
         LEFT JOIN moneycontrol_screener_stocks ms ON n.symbol = ms.symbol
         LEFT JOIN latest_prices lp ON lp.symbol = n.symbol
-        WHERE es.screener_id IN ('79', '73', '75', '195', '515', '91', '362')
+        WHERE es.screener_id IN (${ET_INVESTMENT_IDS.map(() => '?').join(',')})
         GROUP BY n.symbol
         HAVING COUNT(DISTINCT es.screener_id) >= 2
         ORDER BY COUNT(DISTINCT es.screener_id) DESC
         LIMIT 30
-      `).all() as any[];
+      `).all(...ET_INVESTMENT_IDS) as any[];
 
       const investmentPicks = invRows.map(r => {
         const etIds: string[] = r.et_screeners ? r.et_screeners.split(',') : [];
         let fundamentalScore = 0, technicalScore = 0;
         const reasons: string[] = [];
-        if (etIds.includes('79'))  { fundamentalScore += 30; reasons.push('Zero Debt'); }
-        if (etIds.includes('73'))  { fundamentalScore += 30; reasons.push('Cash Cow'); }
-        if (etIds.includes('75'))  { fundamentalScore += 20; reasons.push('Elite Bluechip'); }
-        if (etIds.includes('195')) { fundamentalScore += 20; reasons.push('Multibagger Potential'); }
-        if (etIds.includes('515')) { fundamentalScore += 20; reasons.push('Monopoly Biz'); }
-        if (etIds.includes('91'))  { technicalScore  += 50; reasons.push('Buy on Dips'); }
-        if (etIds.includes('362')) { technicalScore  += 50; reasons.push('RSI Oversold'); }
+        if (etIds.includes(ET_ZERO_DEBT))      { fundamentalScore += 30; reasons.push('Zero Debt'); }
+        if (etIds.includes(ET_CASH_COW))       { fundamentalScore += 30; reasons.push('Cash Cow'); }
+        if (etIds.includes(ET_ELITE_BLUECHIP)) { fundamentalScore += 20; reasons.push('Elite Bluechip'); }
+        if (etIds.includes(ET_MULTIBAGGER))    { fundamentalScore += 20; reasons.push('Multibagger Potential'); }
+        if (etIds.includes(ET_MONOPOLY))       { fundamentalScore += 20; reasons.push('Monopoly Biz'); }
+        if (etIds.includes(ET_BUY_ON_DIPS))    { technicalScore  += 50; reasons.push('Buy on Dips'); }
+        if (etIds.includes(ET_RSI_OVERSOLD))   { technicalScore  += 50; reasons.push('RSI Oversold'); }
         const mcIds: string[] = r.mc_screeners ? r.mc_screeners.split(',') : [];
         if (mcIds.length > 0) { fundamentalScore += 10; reasons.push('MC Pro Fundamental Pick'); }
         const { price, priceSource } = resolvePriceAndSource(r.symbol, r.currentPrice);
