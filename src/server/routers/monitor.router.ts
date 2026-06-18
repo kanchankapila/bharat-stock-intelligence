@@ -473,7 +473,7 @@ export const monitorRouter = router({
         if ((script as any).tsFunction === 'computeSignalTypeStats') {
           try {
             const { computeSignalTypeStats } = await import('../technicalSignalsService');
-            const result = computeSignalTypeStats();
+            const result = await computeSignalTypeStats();
             await upsertState('success');
             return { queued: false, message: `Signal type stats computed: ${result.updated} rows updated` };
           } catch (e: any) {
@@ -552,7 +552,7 @@ export const monitorRouter = router({
         await upsert(`monitor_${id}`, 'running');
         try {
           const { computeSignalTypeStats } = await import('../technicalSignalsService');
-          computeSignalTypeStats();
+          await computeSignalTypeStats();
           await upsert(`monitor_${id}`, 'success');
         } catch { await upsert(`monitor_${id}`, 'failed'); }
         continue;

@@ -41,7 +41,7 @@ export const technicalsRouter = router({
   getTechnicalSignalsStatus: publicProcedure
     .query(async () => {
       const { getTechnicalSignalsProgress, getSignalSummary } = await import('../technicalSignalsService');
-      return { progress: getTechnicalSignalsProgress(), summary: getSignalSummary() };
+      return { progress: getTechnicalSignalsProgress(), summary: await getSignalSummary() };
     }),
 
   getTechnicalSignals: publicProcedure
@@ -53,7 +53,7 @@ export const technicalsRouter = router({
     }))
     .query(async ({ input }) => {
       const { getTechnicalSignalsForDate } = await import('../technicalSignalsService');
-      const rows = getTechnicalSignalsForDate(
+      const rows = await getTechnicalSignalsForDate(
         input.date,
         input.minScore,
         input.minWinProbability,
@@ -108,14 +108,14 @@ export const technicalsRouter = router({
   getSignalDates: publicProcedure
     .query(async () => {
       const { getSignalDates } = await import('../technicalSignalsService');
-      return getSignalDates();
+      return await getSignalDates();
     }),
 
   getSectorSignalStats: publicProcedure
     .input(z.object({ date: z.string().optional() }).optional())
     .query(async ({ input }) => {
       const { getSectorSignalStats } = await import('../technicalSignalsService');
-      return getSectorSignalStats(input?.date);
+      return await getSectorSignalStats(input?.date);
     }),
 
   getSignalWinRates: publicProcedure
@@ -135,13 +135,13 @@ export const technicalsRouter = router({
     .input(z.object({ horizonDays: z.union([z.literal(5), z.literal(15)]).default(15) }).optional())
     .query(async ({ input }) => {
       const { getSignalTypeStats } = await import('../technicalSignalsService');
-      return getSignalTypeStats(input?.horizonDays ?? 15);
+      return await getSignalTypeStats(input?.horizonDays ?? 15);
     }),
 
   computeSignalTypeStats: publicProcedure
     .mutation(async () => {
       const { computeSignalTypeStats } = await import('../technicalSignalsService');
-      return computeSignalTypeStats();
+      return await computeSignalTypeStats();
     }),
 
   getTechnicalTrends: publicProcedure
@@ -166,7 +166,7 @@ export const technicalsRouter = router({
           };
         });
         const symbols = enrichedList.map((item: any) => item.symbol);
-        const rsiMap = getLatestRSIForSymbols(symbols);
+        const rsiMap = await getLatestRSIForSymbols(symbols);
         const finalData = await Promise.all(enrichedList.map(async (item: any) => {
           let rsi = rsiMap.get(item.symbol);
           if (rsi === undefined || rsi === 0) {

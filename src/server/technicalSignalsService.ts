@@ -16,7 +16,7 @@
  * Risk-free rate: 4% p.a. (Indian T-bill proxy)
  */
 
-import db from './db';
+import { dbGet, dbAll, dbRun, dbTransaction } from './dbAsync';
 import { wsSignalService } from './websocketService';
 import { fetchDeliveryMap } from './deliveryFetcher';
 
@@ -110,11 +110,11 @@ export function getTechnicalSignalsProgress(): TechnicalSignalsProgress {
   return { ...progress };
 }
 
-export function getTechnicalSignalCount(): number {
+export async function getTechnicalSignalCount(): Promise<number> {
   const today = new Date().toISOString().slice(0, 10);
-  return (db.prepare(
-    'SELECT COUNT(*) as n FROM technical_signals WHERE date = ?'
-  ).get(today) as { n: number }).n;
+  return ((await dbGet(
+    'SELECT COUNT(*) as n FROM technical_signals WHERE date = ?', [today]
+  )) as { n: number }).n;
 }
 
 // ─── Indicator Math ───────────────────────────────────────────────────────────
@@ -307,13 +307,13 @@ function computeADX(rows: OHLCVRow[], period = 14): number[] {
 }
 
 // Nifty50 regime — reads from stock_ohlcv; defaults to SIDEWAYS if Nifty data absent
-function computeNiftyRegime(): 'BULL' | 'BEAR' | 'SIDEWAYS' {
+async function computeNiftyRegime(): Promise<'BULL' | 'BEAR' | 'SIDEWAYS'> {
   try {
-    const rows = db.prepare(
+    const rows = await dbAll(
       `SELECT close FROM stock_ohlcv
        WHERE symbol IN ('NIFTY50','NIFTY','NIFTY 50','^NSEI','INDIA50')
        ORDER BY date DESC LIMIT 210`
-    ).all() as { close: number }[];
+    ) as { close: number }[];
     if (rows.length < 50) return 'SIDEWAYS';
 
     const closes = rows.map(r => r.close).reverse();
@@ -330,21 +330,21 @@ function computeNiftyRegime(): 'BULL' | 'BEAR' | 'SIDEWAYS' {
 }
 
 // Load per-signal win rates from signal_type_stats (populated by computeSignalTypeStats)
-function loadSignalWinRates(horizonDays = 15, regime: 'BULL' | 'BEAR' | 'SIDEWAYS' | 'ALL' = 'ALL'): Map<string, number> {
+async function loadSignalWinRates(horizonDays = 15, regime: 'BULL' | 'BEAR' | 'SIDEWAYS' | 'ALL' = 'ALL'): Promise<Map<string, number>> {
   const map = new Map<string, number>();
   try {
     // First try regime-specific rates (require ≥10 samples to be reliable)
-    const regimeRows = db.prepare(`
+    const regimeRows = await dbAll(`
       SELECT signal_type, win_rate FROM signal_type_stats
       WHERE horizon_days = ? AND market_regime = ? AND total_occurrences >= 10
-    `).all(horizonDays, regime) as { signal_type: string; win_rate: number }[];
+    `, [horizonDays, regime]) as { signal_type: string; win_rate: number }[];
     for (const r of regimeRows) map.set(r.signal_type, r.win_rate);
 
     // Fall back to 'ALL' for types not yet seen in this regime
-    const allRows = db.prepare(`
+    const allRows = await dbAll(`
       SELECT signal_type, win_rate FROM signal_type_stats
       WHERE horizon_days = ? AND market_regime = 'ALL' AND total_occurrences >= 20
-    `).all(horizonDays) as { signal_type: string; win_rate: number }[];
+    `, [horizonDays]) as { signal_type: string; win_rate: number }[];
     for (const r of allRows) {
       if (!map.has(r.signal_type)) map.set(r.signal_type, r.win_rate);
     }
@@ -352,40 +352,40 @@ function loadSignalWinRates(horizonDays = 15, regime: 'BULL' | 'BEAR' | 'SIDEWAY
   return map;
 }
 
-function loadLearnedWeights(regime: string): Map<string, number> {
-  const rows = db.prepare(`
+async function loadLearnedWeights(regime: string): Promise<Map<string, number>> {
+  const rows = await dbAll(`
     SELECT signal_type, weight
     FROM signal_type_weights
     WHERE (regime = ? OR regime = 'ALL') AND sector IN ('ALL', 'Unknown')
     ORDER BY regime DESC
-  `).all(regime) as { signal_type: string; weight: number }[];
+  `, [regime]) as { signal_type: string; weight: number }[];
   return new Map(rows.map(r => [r.signal_type, r.weight]));
 }
 
 // Returns symbol -> nearest upcoming earnings date (YYYY-MM-DD)
-function loadEarningsCalendar(): Map<string, string> {
+async function loadEarningsCalendar(): Promise<Map<string, string>> {
   const map = new Map<string, string>();
   try {
     const today = new Date().toISOString().slice(0, 10);
-    const rows = db.prepare(`
+    const rows = await dbAll(`
       SELECT symbol, MAX(event_date) as next_earnings
       FROM corporate_actions
       WHERE event_type IN ('Quarterly Results', 'Board Meeting', 'Earnings')
         AND event_date >= ?
         AND event_date <= date(?, '+30 days')
       GROUP BY symbol
-    `).all(today, today) as { symbol: string; next_earnings: string }[];
+    `, [today, today]) as { symbol: string; next_earnings: string }[];
     for (const r of rows) map.set(r.symbol, r.next_earnings);
   } catch { /* table may not exist or have no data */ }
   return map;
 }
 
 // Load 3-day FII net flow (negative = institutions selling)
-function loadFIIFlow3d(): number | null {
+async function loadFIIFlow3d(): Promise<number | null> {
   try {
-    const rows = db.prepare(
+    const rows = await dbAll(
       `SELECT fii_net FROM fii_dii_flow ORDER BY date DESC LIMIT 3`
-    ).all() as { fii_net: number }[];
+    ) as { fii_net: number }[];
     if (rows.length === 0) return null;
     return rows.reduce((a, r) => a + (r.fii_net ?? 0), 0);
   } catch {
@@ -429,15 +429,15 @@ const SIGNAL_SCORES: Record<SignalType, Record<SignalStrength, number>> = {
   QUALITY_OVERSOLD_SIGNAL: { HIGH: 4, MEDIUM: 3, WATCH: 2 },
 };
 
-function loadRecentNewsSentiment(days = 2): Map<string, number> {
+async function loadRecentNewsSentiment(days = 2): Promise<Map<string, number>> {
   const map = new Map<string, number>();
   try {
     const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
-    const rows = db.prepare(`
-      SELECT symbols_json, sentiment_score 
+    const rows = await dbAll(`
+      SELECT symbols_json, sentiment_score
       FROM news_sentiment_items
       WHERE fetched_at >= ? AND symbols_json IS NOT NULL AND symbols_json != '' AND symbols_json != '[]'
-    `).all(cutoff) as { symbols_json: string; sentiment_score: number }[];
+    `, [cutoff]) as { symbols_json: string; sentiment_score: number }[];
 
     const symbolScores = new Map<string, number[]>();
     for (const r of rows) {
@@ -503,7 +503,7 @@ function scoreSignals(
 
 // ─── Signal Detection ─────────────────────────────────────────────────────────
 
-function detectSignals(rows: OHLCVRow[], symbol = ''): {
+function detectSignals(rows: OHLCVRow[], symbol = '', latestPcr?: number | null): {
   signals: TechSignal[];
   rsi: number; sma50: number; sma200: number;
   macd: number; macdSignal: number; bbWidth: number;
@@ -792,13 +792,10 @@ function detectSignals(rows: OHLCVRow[], symbol = ''): {
   }
 
   // 16. PCR_EXTREME — extreme put/call ratio signals support or resistance
+  // (latestPcr is pre-loaded once per scan into a symbol->pcr map to avoid an N+1 query)
   if (symbol) {
-    const pcrRow = db.prepare(
-      `SELECT pcr FROM stock_options_oi WHERE symbol = ? ORDER BY date DESC LIMIT 1`
-    ).get(symbol) as { pcr: number } | undefined;
-
-    if (pcrRow) {
-      const pcr = pcrRow.pcr;
+    if (latestPcr != null) {
+      const pcr = latestPcr;
       if (pcr > 1.3) {
         // High PCR = excess puts = bearish sentiment peak = contrarian support
         signals.push({
@@ -1036,18 +1033,27 @@ export async function runTechnicalSignalScan(options: {
 
   try {
     // ── Pre-scan context (computed once, applied to all stocks) ──────────────
-    const niftyRegime      = computeNiftyRegime();
-    const winRates         = loadSignalWinRates(15, niftyRegime);
-    const learnedWeights   = loadLearnedWeights(niftyRegime);
-    const fii3dNet         = loadFIIFlow3d();
-    const earningsCalendar = loadEarningsCalendar();
-    const newsSentiment    = loadRecentNewsSentiment(2); // past 48 hours of news
+    const niftyRegime      = await computeNiftyRegime();
+    const winRates         = await loadSignalWinRates(15, niftyRegime);
+    const learnedWeights   = await loadLearnedWeights(niftyRegime);
+    const fii3dNet         = await loadFIIFlow3d();
+    const earningsCalendar = await loadEarningsCalendar();
+    const newsSentiment    = await loadRecentNewsSentiment(2); // past 48 hours of news
     console.log(`[SIGNALS] Regime: ${niftyRegime} | Win-rate records: ${winRates.size} | FII 3d: ${fii3dNet ?? 'N/A'} Cr | News Sentiment: ${newsSentiment.size} stocks | Earnings watchlist: ${earningsCalendar.size}`);
 
+    // Pre-load latest PCR per symbol once (was an N+1 query inside detectSignals)
+    const pcrLatestMap = new Map<string, number>();
+    (await dbAll(`
+      SELECT symbol, pcr FROM (
+        SELECT symbol, pcr, ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY date DESC) AS rn
+        FROM stock_options_oi
+      ) t WHERE rn = 1
+    `) as { symbol: string; pcr: number }[]).forEach(r => { if (r.pcr != null) pcrLatestMap.set(r.symbol, r.pcr); });
+
     console.log('[SIGNALS] Loading OHLCV data...');
-    const allRows = db.prepare(
+    const allRows = await dbAll(
       `SELECT symbol, date, open, high, low, close, volume FROM stock_ohlcv ORDER BY symbol, date ASC`
-    ).all() as (OHLCVRow & { symbol: string })[];
+    ) as (OHLCVRow & { symbol: string })[];
 
     // Group by symbol
     const bySymbol = new Map<string, OHLCVRow[]>();
@@ -1058,7 +1064,7 @@ export async function runTechnicalSignalScan(options: {
 
     // Load stock names + sectors
     const meta = new Map<string, { name: string; sector: string }>();
-    (db.prepare('SELECT symbol, name, sector FROM nse_stocks').all() as
+    (await dbAll('SELECT symbol, name, sector FROM nse_stocks') as
       { symbol: string; name: string; sector: string }[])
       .forEach(r => meta.set(r.symbol, { name: r.name, sector: r.sector }));
 
@@ -1071,7 +1077,7 @@ export async function runTechnicalSignalScan(options: {
 
     for (const [symbol, rows] of eligible) {
       try {
-        const { signals, ...indicators } = detectSignals(rows, symbol);
+        const { signals, ...indicators } = detectSignals(rows, symbol, pcrLatestMap.get(symbol) ?? null);
         progress.processed++;
 
         if (signals.length === 0) continue;
@@ -1131,12 +1137,12 @@ export async function runTechnicalSignalScan(options: {
     }
 
     // PCR lookup helper (stock-level pcr → pcr_oi, market_pcr → pcr_vol)
-    function getPcrForSymbol(symbol: string, date: string): { pcr_oi: number | null; pcr_vol: number | null } {
-      const row = db.prepare(`
+    async function getPcrForSymbol(symbol: string, date: string): Promise<{ pcr_oi: number | null; pcr_vol: number | null }> {
+      const row = await dbGet(`
         SELECT pcr, market_pcr FROM stock_options_oi
         WHERE symbol = ? AND date <= ?
         ORDER BY date DESC LIMIT 1
-      `).get(symbol, date) as { pcr: number; market_pcr: number } | undefined;
+      `, [symbol, date]) as { pcr: number; market_pcr: number } | undefined;
       return {
         pcr_oi:  row?.pcr        ?? null,
         pcr_vol: row?.market_pcr ?? null,
@@ -1144,16 +1150,16 @@ export async function runTechnicalSignalScan(options: {
     }
 
     // FII/DII rolling helper — market-wide, computed once outside the transaction
-    function getFiiDiiRolling(date: string): { fii_10d_net: number | null; dii_3d_net: number | null } {
-      const fii10 = db.prepare(`
+    async function getFiiDiiRolling(date: string): Promise<{ fii_10d_net: number | null; dii_3d_net: number | null }> {
+      const fii10 = await dbGet(`
         SELECT SUM(f.fii_net) AS total
         FROM (SELECT fii_net FROM fii_dii_flow WHERE date <= ? ORDER BY date DESC LIMIT 10) f
-      `).get(date) as { total: number | null } | undefined;
+      `, [date]) as { total: number | null } | undefined;
 
-      const dii3 = db.prepare(`
+      const dii3 = await dbGet(`
         SELECT SUM(f.dii_net) AS total
         FROM (SELECT dii_net FROM fii_dii_flow WHERE date <= ? ORDER BY date DESC LIMIT 3) f
-      `).get(date) as { total: number | null } | undefined;
+      `, [date]) as { total: number | null } | undefined;
 
       return {
         fii_10d_net: fii10?.total ?? null,
@@ -1164,13 +1170,13 @@ export async function runTechnicalSignalScan(options: {
     // Sector relative momentum helper — cached per sector+date within one scan run
     const sectorMomentumCache = new Map<string, { ret5: number | null; ret21: number | null }>();
 
-    function getSectorMomentum(sector: string | null, date: string): { sector_ret_5d: number | null; sector_ret_21d: number | null } {
+    async function getSectorMomentum(sector: string | null, date: string): Promise<{ sector_ret_5d: number | null; sector_ret_21d: number | null }> {
       if (!sector) return { sector_ret_5d: null, sector_ret_21d: null };
       const key = `${sector}:${date}`;
       const cached = sectorMomentumCache.get(key);
       if (cached) return { sector_ret_5d: cached.ret5, sector_ret_21d: cached.ret21 };
 
-      const row5 = db.prepare(`
+      const row5 = await dbGet(`
         SELECT AVG((today.close - past.close) / past.close * 100.0) AS ret
         FROM stock_ohlcv today
         JOIN nse_stocks ns ON ns.symbol = today.symbol
@@ -1183,9 +1189,9 @@ export async function runTechnicalSignalScan(options: {
         ) past ON past.symbol = today.symbol
         WHERE ns.sector = ?
           AND today.date = ?
-      `).get(date, sector, date) as { ret: number | null } | undefined;
+      `, [date, sector, date]) as { ret: number | null } | undefined;
 
-      const row21 = db.prepare(`
+      const row21 = await dbGet(`
         SELECT AVG((today.close - past.close) / past.close * 100.0) AS ret
         FROM stock_ohlcv today
         JOIN nse_stocks ns ON ns.symbol = today.symbol
@@ -1198,7 +1204,7 @@ export async function runTechnicalSignalScan(options: {
         ) past ON past.symbol = today.symbol
         WHERE ns.sector = ?
           AND today.date = ?
-      `).get(date, sector, date) as { ret: number | null } | undefined;
+      `, [date, sector, date]) as { ret: number | null } | undefined;
 
       const result = { ret5: row5?.ret ?? null, ret21: row21?.ret ?? null };
       sectorMomentumCache.set(key, result);
@@ -1206,29 +1212,31 @@ export async function runTechnicalSignalScan(options: {
     }
 
     // Compute FII/DII rolling values once before the transaction
-    const { fii_10d_net, dii_3d_net } = getFiiDiiRolling(scanDate);
+    const { fii_10d_net, dii_3d_net } = await getFiiDiiRolling(scanDate);
     const deliveryMap = await fetchDeliveryMap(scanDate);
 
     // Pre-fetch sector for each symbol in one query
     const symbolsInScan = results.map(r => r.symbol);
     const sectorRows = symbolsInScan.length
-      ? (db.prepare(
-          `SELECT symbol, sector FROM nse_stocks WHERE symbol IN (${symbolsInScan.map(() => '?').join(',')})`
-        ).all(...symbolsInScan) as { symbol: string; sector: string | null }[])
+      ? (await dbAll(
+          `SELECT symbol, sector FROM nse_stocks WHERE symbol IN (${symbolsInScan.map(() => '?').join(',')})`,
+          symbolsInScan
+        ) as { symbol: string; sector: string | null }[])
       : [];
     const symbolSectorMap = new Map(sectorRows.map(r => [r.symbol, r.sector ?? null]));
 
     // Pre-fetch market caps to filter micro-caps (< ₹500 Cr)
     const mcRows = symbolsInScan.length
-      ? (db.prepare(
-          `SELECT symbol, market_cap FROM stock_fundamentals WHERE symbol IN (${symbolsInScan.map(() => '?').join(',')})`
-        ).all(...symbolsInScan) as { symbol: string; market_cap: number | null }[])
+      ? (await dbAll(
+          `SELECT symbol, market_cap FROM stock_fundamentals WHERE symbol IN (${symbolsInScan.map(() => '?').join(',')})`,
+          symbolsInScan
+        ) as { symbol: string; market_cap: number | null }[])
       : [];
     const marketCapMap = new Map(mcRows.map(r => [r.symbol, r.market_cap]));
     const MIN_MARKET_CAP = 5e9; // ₹500 crore
 
     // Upsert all results into DB (including new accuracy-context columns)
-    const upsert = db.prepare(`
+    const upsertSql = `
       INSERT INTO technical_signals (
         symbol, date, signals_json, signal_score,
         rsi, sma50, sma200, macd, macd_signal, bb_width, volume_ratio, above_sma200,
@@ -1239,13 +1247,13 @@ export async function runTechnicalSignalScan(options: {
         ai_insight, entry_zone, stop_loss, targets, setup_quality, time_horizon,
         computed_at
       ) VALUES (
-        @symbol, @date, @signals_json, @signal_score,
-        @rsi, @sma50, @sma200, @macd, @macd_signal, @bb_width, @volume_ratio, @above_sma200,
-        @adx, @nifty_regime, @fii_3d_net, @news_sentiment_score,
-        @pcr_oi, @pcr_vol, @fii_10d_net, @dii_3d_net,
-        @cmp, @change_pct, @delivery_pct,
-        @sector_ret_5d, @sector_ret_21d,
-        @ai_insight, @entry_zone, @stop_loss, @targets, @setup_quality, @time_horizon,
+        ?, ?, ?, ?,
+        ?, ?, ?, ?, ?, ?, ?, ?,
+        ?, ?, ?, ?,
+        ?, ?, ?, ?,
+        ?, ?, ?,
+        ?, ?,
+        ?, ?, ?, ?, ?, ?,
         CURRENT_TIMESTAMP
       )
       ON CONFLICT(symbol, date) DO UPDATE SET
@@ -1264,24 +1272,24 @@ export async function runTechnicalSignalScan(options: {
         stop_loss=excluded.stop_loss, targets=excluded.targets,
         setup_quality=excluded.setup_quality, time_horizon=excluded.time_horizon,
         computed_at=excluded.computed_at
-    `);
+    `;
 
-    const recLogUpsert = db.prepare(`
+    const recLogUpsertSql = `
       INSERT INTO recommendation_log
         (symbol, rec_type, signal_date, generated_at, entry_price, stop_loss,
          target_1, confidence_score, signal_score, signals_json, nifty_regime,
          win_probability, source, status, horizon_days)
       VALUES (?, 'BUY', ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, 'technical_scan', 'ACTIVE', 5)
       ON CONFLICT DO NOTHING
-    `);
+    `;
 
-    const seedOutcome = db.prepare(`
+    const seedOutcomeSql = `
       INSERT OR IGNORE INTO signal_outcomes
         (symbol, signal_date, horizon_days, entry_price, outcome)
       VALUES (?, ?, ?, ?, 'PENDING')
-    `);
+    `;
 
-    const unifiedUpsert = db.prepare(`
+    const unifiedUpsertSql = `
       INSERT INTO unified_signals
         (symbol, signal_date, signal_source, signal_type,
          entry_price, target_price, stop_loss, confidence_score,
@@ -1292,51 +1300,58 @@ export async function runTechnicalSignalScan(options: {
         technical_score=excluded.technical_score,
         confidence_score=excluded.confidence_score,
         signal_generated_at=excluded.signal_generated_at
-    `);
+    `;
 
-    const checkActive = db.prepare(
-      `SELECT id FROM recommendation_log WHERE symbol = ? AND status = 'ACTIVE' AND source = 'technical_scan' LIMIT 1`
-    );
+    const checkActiveSql =
+      `SELECT id FROM recommendation_log WHERE symbol = ? AND status = 'ACTIVE' AND source = 'technical_scan' LIMIT 1`;
 
-    db.transaction((rows: SignalResult[]) => {
-      for (const r of rows) {
-        // Skip micro-caps
-        const mc = marketCapMap.get(r.symbol);
-        if (mc !== null && mc !== undefined && mc < MIN_MARKET_CAP) continue;
+    // Resolve per-symbol pcr/sector momentum BEFORE the write transaction so the tx body
+    // only writes (keeps the PG transaction short and avoids cross-connection reads mid-tx).
+    const enriched = [] as Array<{
+      r: SignalResult; pcr_oi: number | null; pcr_vol: number | null;
+      sector_ret_5d: number | null; sector_ret_21d: number | null;
+    }>;
+    for (const r of results) {
+      const mc = marketCapMap.get(r.symbol);
+      if (mc !== null && mc !== undefined && mc < MIN_MARKET_CAP) continue; // skip micro-caps
+      const { pcr_oi, pcr_vol } = await getPcrForSymbol(r.symbol, scanDate);
+      const sector = symbolSectorMap.get(r.symbol) ?? null;
+      const { sector_ret_5d, sector_ret_21d } = await getSectorMomentum(sector, scanDate);
+      enriched.push({ r, pcr_oi, pcr_vol, sector_ret_5d, sector_ret_21d });
+    }
 
+    await dbTransaction(async (tx) => {
+      for (const { r, pcr_oi, pcr_vol, sector_ret_5d, sector_ret_21d } of enriched) {
         // Skip if stock already has an ACTIVE signal in recommendation_log
-        if (checkActive.get(r.symbol)) continue;
+        if (await tx.get(checkActiveSql, [r.symbol])) continue;
 
-        const { pcr_oi, pcr_vol } = getPcrForSymbol(r.symbol, scanDate);
-        const sector = symbolSectorMap.get(r.symbol) ?? null;
-        const { sector_ret_5d, sector_ret_21d } = getSectorMomentum(sector, scanDate);
-        upsert.run({
-          symbol: r.symbol, date: scanDate,
-          signals_json: JSON.stringify(r.signals),
-          signal_score: r.signalScore,
-          rsi: r.rsi, sma50: r.sma50, sma200: r.sma200,
-          macd: r.macd, macd_signal: r.macdSignal,
-          bb_width: r.bbWidth, volume_ratio: r.volumeRatio,
-          above_sma200: r.aboveSma200 ? 1 : 0,
-          adx:          r.adx,
-          nifty_regime: r.niftyRegime,
-          fii_3d_net:   r.fii3dNet ?? null,
-          news_sentiment_score: r.newsSentimentScore ?? 0,
+        await tx.run(upsertSql, [
+          r.symbol, scanDate,
+          JSON.stringify(r.signals),
+          r.signalScore,
+          r.rsi, r.sma50, r.sma200,
+          r.macd, r.macdSignal,
+          r.bbWidth, r.volumeRatio,
+          r.aboveSma200 ? 1 : 0,
+          r.adx,
+          r.niftyRegime,
+          r.fii3dNet ?? null,
+          r.newsSentimentScore ?? 0,
           pcr_oi,
           pcr_vol,
           fii_10d_net,
           dii_3d_net,
-          cmp: r.cmp, change_pct: r.changePct,
-          delivery_pct: deliveryMap.get(r.symbol) ?? null,
+          r.cmp, r.changePct,
+          deliveryMap.get(r.symbol) ?? null,
           sector_ret_5d,
           sector_ret_21d,
-          ai_insight:    r.aiInsight    ?? null,
-          entry_zone:    r.entryZone    ?? null,
-          stop_loss:     r.stopLoss     ?? null,
-          targets:       r.targets      ?? null,
-          setup_quality: r.setupQuality ?? null,
-          time_horizon:  r.timeHorizon  ?? null,
-        });
+          r.aiInsight    ?? null,
+          r.entryZone    ?? null,
+          r.stopLoss     ?? null,
+          r.targets      ?? null,
+          r.setupQuality ?? null,
+          r.timeHorizon  ?? null,
+        ]);
 
         // Mirror actionable signals to unified_signals for cross-source tracking
         if (r.signalScore > 0) {
@@ -1344,7 +1359,7 @@ export async function runTechnicalSignalScan(options: {
           const slNumeric = r.stopLoss
             ? (() => { const m = r.stopLoss!.match(/[\d,]+(?:\.\d+)?/); return m ? parseFloat(m[0].replace(/,/g, '')) : null; })()
             : null;
-          unifiedUpsert.run(
+          await tx.run(unifiedUpsertSql, [
             r.symbol,
             r.cmp ?? null,
             null,                        // target_price — not computed by technical scanner
@@ -1353,7 +1368,7 @@ export async function runTechnicalSignalScan(options: {
             JSON.stringify(r.signals) ?? null,
             r.signalScore,
             signalTs,
-          );
+          ]);
           try {
             wsSignalService.broadcastNewSignal({
               type: 'new_signal',
@@ -1379,18 +1394,18 @@ export async function runTechnicalSignalScan(options: {
                 return m ? parseFloat(m[1].replace(/,/g, '')) : null;
               })()
             : null;
-          recLogUpsert.run(
+          await tx.run(recLogUpsertSql, [
             r.symbol, scanDate, r.cmp ?? null, sl, t1,
             r.signalScore, r.signalScore, JSON.stringify(r.signals),
             r.niftyRegime ?? null, (r as any).winProbability ?? null,
-          );
+          ]);
           if (r.cmp) {
-            seedOutcome.run(r.symbol, scanDate, 5,  r.cmp);
-            seedOutcome.run(r.symbol, scanDate, 15, r.cmp);
+            await tx.run(seedOutcomeSql, [r.symbol, scanDate, 5,  r.cmp]);
+            await tx.run(seedOutcomeSql, [r.symbol, scanDate, 15, r.cmp]);
           }
         }
       }
-    })(results);
+    });
 
     console.log(`[SIGNALS] Upserted ${results.length} records for ${scanDate}`);
 
@@ -1409,14 +1424,14 @@ export async function runTechnicalSignalScan(options: {
 
 // ─── Query Helpers ────────────────────────────────────────────────────────────
 
-export function getTechnicalSignalsForDate(
+export async function getTechnicalSignalsForDate(
   date?: string,
   minScore = 1,
   minWinProbability = 0,
   limit = 100
-): Record<string, unknown>[] {
+): Promise<Record<string, unknown>[]> {
   const d = date ?? new Date().toISOString().slice(0, 10);
-  return db.prepare(`
+  return await dbAll(`
     SELECT ts.*,
            ns.name,
            ns.sector,
@@ -1428,29 +1443,29 @@ export function getTechnicalSignalsForDate(
       AND (ts.win_probability IS NULL OR ts.win_probability >= ?)
     ORDER BY effective_score DESC, ts.signal_score DESC
     LIMIT ?
-  `).all(d, minScore, minWinProbability, limit) as Record<string, unknown>[];
+  `, [d, minScore, minWinProbability, limit]) as Record<string, unknown>[];
 }
 
-export function getSignalDates(): string[] {
-  return (db.prepare(
+export async function getSignalDates(): Promise<string[]> {
+  return ((await dbAll(
     `SELECT DISTINCT date FROM technical_signals ORDER BY date DESC LIMIT 30`
-  ).all() as { date: string }[]).map(r => r.date);
+  )) as { date: string }[]).map(r => r.date);
 }
 
-export function getSignalSummary(): {
+export async function getSignalSummary(): Promise<{
   totalToday: number;
   bySignalType: Record<string, number>;
   byScore: Record<string, number>;
   lastComputed: string | null;
-} {
+}> {
   const today = new Date().toISOString().slice(0, 10);
-  const totalToday = (db.prepare(
-    `SELECT COUNT(*) as n FROM technical_signals WHERE date = ?`
-  ).get(today) as { n: number }).n;
+  const totalToday = ((await dbGet(
+    `SELECT COUNT(*) as n FROM technical_signals WHERE date = ?`, [today]
+  )) as { n: number }).n;
 
-  const rows = db.prepare(
-    `SELECT signals_json, signal_score FROM technical_signals WHERE date = ?`
-  ).all(today) as { signals_json: string; signal_score: number }[];
+  const rows = await dbAll(
+    `SELECT signals_json, signal_score FROM technical_signals WHERE date = ?`, [today]
+  ) as { signals_json: string; signal_score: number }[];
 
   const bySignalType: Record<string, number> = {};
   const byScore: Record<string, number> = { '1-3': 0, '4-6': 0, '7-10': 0 };
@@ -1465,9 +1480,9 @@ export function getSignalSummary(): {
     else                            byScore['7-10']++;
   }
 
-  const lastComputed = (db.prepare(
-    `SELECT computed_at FROM technical_signals WHERE date = ? ORDER BY computed_at DESC LIMIT 1`
-  ).get(today) as { computed_at: string } | undefined)?.computed_at ?? null;
+  const lastComputed = ((await dbGet(
+    `SELECT computed_at FROM technical_signals WHERE date = ? ORDER BY computed_at DESC LIMIT 1`, [today]
+  )) as { computed_at: string } | undefined)?.computed_at ?? null;
 
   return { totalToday, bySignalType, byScore, lastComputed };
 }
@@ -1488,17 +1503,17 @@ export interface SectorSignalStat {
   hotFlag: boolean;         // sector has 5+ signal stocks today
 }
 
-export function getSectorSignalStats(date?: string): SectorSignalStat[] {
+export async function getSectorSignalStats(date?: string): Promise<SectorSignalStat[]> {
   const d = date ?? new Date().toISOString().slice(0, 10);
 
-  const rows = db.prepare(`
+  const rows = await dbAll(`
     SELECT ts.symbol, ts.signal_score, ts.signals_json, ts.cmp, ts.change_pct,
            ns.name, ns.sector
     FROM technical_signals ts
     LEFT JOIN nse_stocks ns ON ns.symbol = ts.symbol
     WHERE ts.date = ? AND ts.signal_score >= 2 AND ns.sector IS NOT NULL AND ns.sector != ''
     ORDER BY ts.signal_score DESC
-  `).all(d) as {
+  `, [d]) as {
     symbol: string; signal_score: number; signals_json: string;
     cmp: number; change_pct: number; name: string; sector: string;
   }[];
@@ -1544,14 +1559,14 @@ export function getSectorSignalStats(date?: string): SectorSignalStat[] {
 
 // ─── Signal Type Stats (accuracy backfill) ───────────────────────────────────
 
-export function computeSignalTypeStats(): { updated: number } {
-  const outcomes = db.prepare(`
+export async function computeSignalTypeStats(): Promise<{ updated: number }> {
+  const outcomes = await dbAll(`
     SELECT so.symbol, so.horizon_days, so.return_pct, so.outcome, so.signals_json,
            ts.nifty_regime
     FROM signal_outcomes so
     LEFT JOIN technical_signals ts ON ts.symbol = so.symbol AND ts.date = so.signal_date
     WHERE so.outcome IN ('WIN', 'LOSS', 'NEUTRAL')
-  `).all() as {
+  `) as {
     symbol: string; horizon_days: number; return_pct: number;
     outcome: string; signals_json: string; nifty_regime: string | null;
   }[];
@@ -1576,7 +1591,7 @@ export function computeSignalTypeStats(): { updated: number } {
     }
   }
 
-  const upsert = db.prepare(`
+  const upsertSql = `
     INSERT INTO signal_type_stats
       (signal_type, horizon_days, market_regime, total_occurrences, win_count,
        avg_return_pct, median_return_pct, win_rate, last_computed)
@@ -1585,10 +1600,10 @@ export function computeSignalTypeStats(): { updated: number } {
       total_occurrences=excluded.total_occurrences, win_count=excluded.win_count,
       avg_return_pct=excluded.avg_return_pct, median_return_pct=excluded.median_return_pct,
       win_rate=excluded.win_rate, last_computed=excluded.last_computed
-  `);
+  `;
 
   let updated = 0;
-  db.transaction(() => {
+  await dbTransaction(async (tx) => {
     for (const [key, acc] of statsMap) {
       if (acc.total < 5) continue;
       const [sigType, horizon, regime] = key.split('|');
@@ -1596,35 +1611,35 @@ export function computeSignalTypeStats(): { updated: number } {
       const median = sorted.length > 0 ? sorted[Math.floor(sorted.length / 2)] : 0;
       const avg    = acc.returns.length > 0
         ? acc.returns.reduce((a, b) => a + b, 0) / acc.returns.length : 0;
-      upsert.run(sigType, parseInt(horizon), regime, acc.total, acc.wins, avg, median, acc.wins / acc.total);
+      await tx.run(upsertSql, [sigType, parseInt(horizon), regime, acc.total, acc.wins, avg, median, acc.wins / acc.total]);
       updated++;
     }
-  })();
+  });
 
   return { updated };
 }
 
-export function getSignalTypeStats(horizonDays = 15): Record<string, unknown>[] {
-  return db.prepare(`
+export async function getSignalTypeStats(horizonDays = 15): Promise<Record<string, unknown>[]> {
+  return await dbAll(`
     SELECT * FROM signal_type_stats
     WHERE horizon_days = ? AND market_regime = 'ALL'
     ORDER BY win_rate DESC, total_occurrences DESC
-  `).all(horizonDays) as Record<string, unknown>[];
+  `, [horizonDays]) as Record<string, unknown>[];
 }
 
-export function getLatestRSIForSymbols(symbols: string[]): Map<string, number> {
+export async function getLatestRSIForSymbols(symbols: string[]): Promise<Map<string, number>> {
   if (symbols.length === 0) return new Map();
   const placeholders = symbols.map(() => '?').join(',');
-  
+
   // Get latest date available in the table
-  const latestDateRow = db.prepare('SELECT MAX(date) as d FROM technical_signals').get() as { d: string };
+  const latestDateRow = await dbGet('SELECT MAX(date) as d FROM technical_signals') as { d: string };
   if (!latestDateRow?.d) return new Map();
 
-  const rows = db.prepare(`
-    SELECT symbol, rsi 
-    FROM technical_signals 
+  const rows = await dbAll(`
+    SELECT symbol, rsi
+    FROM technical_signals
     WHERE date = ? AND symbol IN (${placeholders})
-  `).all(latestDateRow.d, ...symbols) as { symbol: string; rsi: number }[];
+  `, [latestDateRow.d, ...symbols]) as { symbol: string; rsi: number }[];
 
 
   const map = new Map<string, number>();
