@@ -1,5 +1,5 @@
 import { z } from "zod";
-import db from "../db";
+import { dbGet, dbAll, dbRun } from "../dbAsync";
 import { fetchMCScreener } from "../moneycontrol";
 import { fetchETnowScreener } from "../etnow";
 import { fetchTrendingScreeners, fetchETPennyStocks, fetchETStats } from "../marketData";
@@ -99,10 +99,10 @@ export const screenersRouter = router({
     .query(async ({ input }) => {
       if (input.screenpk.startsWith('MC_')) {
         const scanId = input.screenpk.replace('MC_', '');
-        const stocks = db.prepare(`
-          SELECT ss.symbol as stockId, ss.stock_name as name, ss.symbol
+        const stocks = await dbAll<any>(`
+          SELECT ss.symbol as "stockId", ss.stock_name as name, ss.symbol
           FROM moneycontrol_screener_stocks ss WHERE ss.scan_id = ?
-        `).all(scanId) as any[];
+        `, [scanId]);
         return {
           success: true,
           data: stocks.map(s => ({
@@ -115,8 +115,8 @@ export const screenersRouter = router({
       }
       if (input.screenpk.startsWith('ET_')) {
         const screenerId = input.screenpk.replace('ET_', '');
-        const etScreener = db.prepare('SELECT query_condition FROM etnow_screeners WHERE screener_id = ?')
-          .get(screenerId) as { query_condition: string } | undefined;
+        const etScreener = await dbGet<{ query_condition: string }>(
+          'SELECT query_condition FROM etnow_screeners WHERE screener_id = ?', [screenerId]);
         if (etScreener) {
           const result = await fetchETnowScreener(screenerId, etScreener.query_condition);
           const records = result?.searchResult?.searchData?.records || [];
@@ -188,7 +188,7 @@ export const screenersRouter = router({
       limit:       z.number().min(1).max(200).default(50),
       offset:      z.number().min(0).default(0),
     }))
-    .query(({ input }) => {
+    .query(async ({ input }) => {
       const validHorizonCols: Record<string, string> = {
         '5d': 'wr_5d', '10d': 'wr_10d', '20d': 'wr_20d', '60d': 'wr_60d', '120d': 'wr_120d',
       };
@@ -205,7 +205,7 @@ export const screenersRouter = router({
       const where = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : '';
       params.push(input.limit, input.offset);
 
-      return db.prepare(`
+      return dbAll(`
         SELECT
           spv.screener_id,
           sm.name,
@@ -227,22 +227,22 @@ export const screenersRouter = router({
         ${where}
         ORDER BY spv.bayesian_score DESC
         LIMIT ? OFFSET ?
-      `).all(...params);
+      `, params);
     }),
 
   getScreenerDetail: publicProcedure
     .input(z.object({ screener_id: z.string() }))
-    .query(({ input }) => {
-      const perf = db.prepare(`
+    .query(async ({ input }) => {
+      const perf = await dbGet(`
         SELECT spv.*, sm.name, sm.inferred_category AS category, sm.subcategory,
                sm.inferred_sentiment AS sentiment, sm.inferred_timeframe AS timeframe,
                sm.classified_by
         FROM screener_performance_v2 spv
         JOIN screener_master sm ON sm.scan_id = spv.screener_id
         WHERE spv.screener_id = ?
-      `).get(input.screener_id);
+      `, [input.screener_id]);
 
-      const recentAppearances = db.prepare(`
+      const recentAppearances = await dbAll(`
         SELECT symbol, appeared_date, exited_date,
                return_5d, return_10d, return_20d, return_60d, return_120d,
                nifty_ret_20d, outcome_20d
@@ -250,16 +250,16 @@ export const screenersRouter = router({
         WHERE screener_id = ?
         ORDER BY appeared_date DESC
         LIMIT 30
-      `).all(input.screener_id);
+      `, [input.screener_id]);
 
-      const topStocks = db.prepare(`
+      const topStocks = await dbAll(`
         SELECT symbol, COUNT(*) AS appearances
         FROM screener_appearances
         WHERE screener_id = ?
         GROUP BY symbol
         ORDER BY appearances DESC
         LIMIT 15
-      `).all(input.screener_id);
+      `, [input.screener_id]);
 
       return { perf, recentAppearances, topStocks };
     }),
@@ -268,13 +268,13 @@ export const screenersRouter = router({
     .input(z.object({
       horizon: z.enum(['5d', '10d', '20d', '60d', '120d']).default('20d'),
     }))
-    .query(({ input }) => {
+    .query(async ({ input }) => {
       const validHorizonCols: Record<string, string> = {
         '5d': 'wr_5d', '10d': 'wr_10d', '20d': 'wr_20d', '60d': 'wr_60d', '120d': 'wr_120d',
       };
       const wrCol = validHorizonCols[input.horizon] ?? 'wr_20d';
 
-      return db.prepare(`
+      return dbAll(`
         SELECT
           sm.inferred_category                                              AS category,
           sm.subcategory,
@@ -289,7 +289,7 @@ export const screenersRouter = router({
         WHERE sm.inferred_category IS NOT NULL
         GROUP BY sm.inferred_category, sm.subcategory
         ORDER BY avg_win_rate DESC
-      `).all();
+      `);
     }),
 
   getScreenerAppearanceHistory: publicProcedure
@@ -299,7 +299,7 @@ export const screenersRouter = router({
       from_date:   z.string().optional(),
       limit:       z.number().min(1).max(500).default(100),
     }).refine(d => d.symbol || d.screener_id, { message: 'Provide symbol or screener_id' }))
-    .query(({ input }) => {
+    .query(async ({ input }) => {
       const conditions: string[] = [];
       const params: unknown[] = [];
 
@@ -310,7 +310,7 @@ export const screenersRouter = router({
       const where = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : '';
       params.push(input.limit);
 
-      return db.prepare(`
+      return dbAll(`
         SELECT
           sa.screener_id, sm.name AS screener_name, sa.source,
           sa.symbol, sa.appeared_date, sa.exited_date,
@@ -322,7 +322,7 @@ export const screenersRouter = router({
         ${where}
         ORDER BY sa.appeared_date DESC
         LIMIT ?
-      `).all(...params);
+      `, params);
     }),
 
   triggerScreenerPerformanceRecompute: publicProcedure
@@ -348,14 +348,14 @@ export const screenersRouter = router({
 
   getTimeframeRanking: publicProcedure
     .input(z.object({ timeframe: z.enum(['intraday','short','medium','long']), runId: z.string().optional(), screenerId: z.string().optional(), limit: z.number().min(1).max(500).optional().default(100) }))
-    .query(({ input }) => {
+    .query(async ({ input }) => {
       const params: any[] = [input.timeframe];
       let sql = `SELECT symbol, score, confidence, domains_json, reasons_json, suggested_holding_days FROM timeframe_scores WHERE timeframe = ?`;
       if (input.runId) { sql += ` AND run_id = ?`; params.push(input.runId); }
       if (input.screenerId) { sql += ` AND reasons_json LIKE ?`; params.push(`%${input.screenerId}%`); }
       sql += ` ORDER BY score DESC LIMIT ?`;
       params.push(input.limit);
-      return db.prepare(sql).all(...params);
+      return dbAll(sql, params);
     }),
 
   triggerBacktest: publicProcedure
@@ -372,14 +372,14 @@ export const screenersRouter = router({
       symbols: z.array(z.string()),
       triggeredBy: z.string().optional(),
     }))
-    .mutation(({ input }) => {
+    .mutation(async ({ input }) => {
       const runId = `run_${input.screenerId}_${Date.now()}`;
       const records = input.symbols.map(s => ({ symbol: s }));
-      db.prepare(`
+      await dbRun(`
         INSERT INTO screener_runs (run_id, screener_id, run_ts, records_json, symbol_count, triggered_by)
         VALUES (?, ?, datetime('now'), ?, ?, ?)
         ON CONFLICT(run_id) DO NOTHING
-      `).run(runId, input.screenerId, JSON.stringify(records), input.symbols.length, input.triggeredBy ?? 'manual');
+      `, [runId, input.screenerId, JSON.stringify(records), input.symbols.length, input.triggeredBy ?? 'manual']);
       return { runId, symbolCount: input.symbols.length };
     }),
 
@@ -388,17 +388,17 @@ export const screenersRouter = router({
       screenerId: z.string().optional(),
       limit: z.number().min(1).max(100).default(20),
     }))
-    .query(({ input }) => {
+    .query(async ({ input }) => {
       if (input.screenerId) {
-        return db.prepare(`
+        return dbAll(`
           SELECT run_id, screener_id, run_ts, symbol_count, triggered_by
           FROM screener_runs WHERE screener_id = ?
           ORDER BY run_ts DESC LIMIT ?
-        `).all(input.screenerId, input.limit);
+        `, [input.screenerId, input.limit]);
       }
-      return db.prepare(`
+      return dbAll(`
         SELECT run_id, screener_id, run_ts, symbol_count, triggered_by
         FROM screener_runs ORDER BY run_ts DESC LIMIT ?
-      `).all(input.limit);
+      `, [input.limit]);
     }),
 });

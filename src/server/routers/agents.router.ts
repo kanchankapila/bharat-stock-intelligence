@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import db from '../db';
+import { dbGet, dbAll } from '../dbAsync';
 import { router, publicProcedure } from '../trpc';
 
 export const agentsRouter = router({
@@ -8,15 +8,16 @@ export const agentsRouter = router({
 
   getDataScientistReport: publicProcedure
     .input(z.object({ limit: z.number().min(1).max(90).default(30) }))
-    .query(({ input }) => {
-      const latest = db.prepare(
+    .query(async ({ input }) => {
+      const latest = await dbGet(
         'SELECT * FROM agent_data_scientist_reports ORDER BY created_at DESC LIMIT 1'
-      ).get();
-      const history = db.prepare(
+      );
+      const history = await dbAll(
         'SELECT run_date, data_quality_score, quality_grade, model_auc, ' +
         'ohlcv_coverage_pct, stale_symbols_count, signal_resolution_rate ' +
-        'FROM agent_data_scientist_reports ORDER BY run_date DESC LIMIT ?'
-      ).all(input.limit);
+        'FROM agent_data_scientist_reports ORDER BY run_date DESC LIMIT ?',
+        [input.limit]
+      );
       return { latest, history };
     }),
 
@@ -25,10 +26,10 @@ export const agentsRouter = router({
       date:      z.string().optional(),
       timeframe: z.enum(['intraday', 'swing', 'positional', 'investment']).optional(),
     }))
-    .query(({ input }) => {
-      const runDate = input.date ?? (db.prepare(
+    .query(async ({ input }) => {
+      const runDate = input.date ?? (await dbGet<any>(
         'SELECT MAX(run_date) AS d FROM agent_strategy_picks'
-      ).get() as any)?.d;
+      ))?.d;
       if (!runDate) return { picks: [], runDate: null };
 
       let sql = 'SELECT * FROM agent_strategy_picks WHERE run_date = ?';
@@ -36,7 +37,7 @@ export const agentsRouter = router({
       if (input.timeframe) { sql += ' AND timeframe = ?'; params.push(input.timeframe); }
       sql += ' ORDER BY timeframe, rank';
 
-      return { picks: db.prepare(sql).all(...params), runDate };
+      return { picks: await dbAll(sql, params), runDate };
     }),
 
   getAuditReport: publicProcedure
@@ -44,46 +45,47 @@ export const agentsRouter = router({
       date:      z.string().optional(),
       timeframe: z.enum(['intraday', 'swing', 'positional', 'investment']).optional(),
     }))
-    .query(({ input }) => {
-      const runDate = input.date ?? (db.prepare(
+    .query(async ({ input }) => {
+      const runDate = input.date ?? (await dbGet<any>(
         'SELECT MAX(run_date) AS d FROM agent_audit_reports'
-      ).get() as any)?.d;
+      ))?.d;
       if (!runDate) return { reports: [], runDate: null };
 
       let sql = 'SELECT * FROM agent_audit_reports WHERE run_date = ?';
       const params: any[] = [runDate];
       if (input.timeframe) { sql += ' AND timeframe = ?'; params.push(input.timeframe); }
 
-      return { reports: db.prepare(sql).all(...params), runDate };
+      return { reports: await dbAll(sql, params), runDate };
     }),
 
   getOptimizerReport: publicProcedure
     .input(z.object({ limit: z.number().min(1).max(90).default(30) }))
-    .query(({ input }) => {
-      const latest = db.prepare(
+    .query(async ({ input }) => {
+      const latest = await dbGet(
         'SELECT * FROM agent_optimizer_reports ORDER BY created_at DESC LIMIT 1'
-      ).get();
-      const history = db.prepare(
+      );
+      const history = await dbAll(
         'SELECT run_date, baseline_win_rate, new_win_rate, improvement_pct, ' +
         'weights_changed, full_optimizer_triggered ' +
-        'FROM agent_optimizer_reports ORDER BY run_date DESC LIMIT ?'
-      ).all(input.limit);
+        'FROM agent_optimizer_reports ORDER BY run_date DESC LIMIT ?',
+        [input.limit]
+      );
       return { latest, history };
     }),
 
-  getAgentStatus: publicProcedure.query(() => {
-    const ds = db.prepare(
+  getAgentStatus: publicProcedure.query(async () => {
+    const ds = await dbGet<any>(
       'SELECT run_date, quality_grade FROM agent_data_scientist_reports ORDER BY created_at DESC LIMIT 1'
-    ).get() as any;
-    const strat = db.prepare(
+    );
+    const strat = await dbGet<any>(
       'SELECT run_date, COUNT(*) AS pick_count FROM agent_strategy_picks WHERE run_date = (SELECT MAX(run_date) FROM agent_strategy_picks)'
-    ).get() as any;
-    const audit = db.prepare(
+    );
+    const audit = await dbGet<any>(
       'SELECT run_date, AVG(hit_rate) AS avg_hit_rate FROM agent_audit_reports WHERE run_date = (SELECT MAX(run_date) FROM agent_audit_reports)'
-    ).get() as any;
-    const optim = db.prepare(
+    );
+    const optim = await dbGet<any>(
       'SELECT run_date, weights_changed FROM agent_optimizer_reports ORDER BY created_at DESC LIMIT 1'
-    ).get() as any;
+    );
     return { ds, strat, audit, optim };
   }),
 
