@@ -8,7 +8,7 @@
  * - Risk concentration (high correlation with portfolio)
  */
 
-import db from './db';
+import { dbGet, dbAll, dbRun } from './dbAsync';
 
 export interface PortfolioHolding {
   symbol: string;
@@ -73,15 +73,16 @@ export class CorrelationService {
   /**
    * Get historical prices for a symbol (last 90 days)
    */
-  private getHistoricalPrices(symbol: string, days: number = 90): number[] {
+  private async getHistoricalPrices(symbol: string, days: number = 90): Promise<number[]> {
     try {
+      const cutoff = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
       const query = `
         SELECT close FROM stock_ohlcv
-        WHERE symbol = ? AND date >= date('now', '-' || ? || ' days')
+        WHERE symbol = ? AND date >= ?
         ORDER BY date ASC
         LIMIT ?
       `;
-      const result = db.prepare(query).all(symbol, days, 1000) as { close: number }[];
+      const result = await dbAll<{ close: number }>(query, [symbol, cutoff, 1000]);
       return result.map(r => r.close);
     } catch (err) {
       console.error(`[CorrelationService] Failed to fetch prices for ${symbol}:`, err);
@@ -99,7 +100,7 @@ export class CorrelationService {
     signalMomentum: number = 1,  // 1 for bullish, -1 for bearish
   ): Promise<SignalPortfolioCorrelation[]> {
     const correlations: SignalPortfolioCorrelation[] = [];
-    const signalPrices = this.getHistoricalPrices(signalSymbol);
+    const signalPrices = await this.getHistoricalPrices(signalSymbol);
 
     if (signalPrices.length < 30) {
       console.warn(`[CorrelationService] Insufficient data for ${signalSymbol}`);
@@ -107,7 +108,7 @@ export class CorrelationService {
     }
 
     for (const holding of portfolio) {
-      const holdingPrices = this.getHistoricalPrices(holding.symbol);
+      const holdingPrices = await this.getHistoricalPrices(holding.symbol);
 
       if (holdingPrices.length < 30) {
         continue;  // Skip holdings with insufficient data
@@ -137,7 +138,7 @@ export class CorrelationService {
       });
 
       // Store in database
-      this.storeCorrelation(
+      await this.storeCorrelation(
         signalId,
         holding.symbol,
         signalSymbol,
@@ -155,7 +156,7 @@ export class CorrelationService {
   /**
    * Store correlation results in database
    */
-  private storeCorrelation(
+  private async storeCorrelation(
     signalId: number,
     portfolioSymbol: string,
     signalSymbol: string,
@@ -164,15 +165,21 @@ export class CorrelationService {
     coMovementPct: number,
     hedgePotential: number,
     momentumAlignment: number,
-  ): void {
+  ): Promise<void> {
     try {
-      const stmt = db.prepare(`
-        INSERT OR REPLACE INTO signal_portfolio_correlation (
+      await dbRun(`
+        INSERT INTO signal_portfolio_correlation (
           signal_id, portfolio_symbol, signal_symbol, weight,
           correlation_score, co_movement_pct, hedge_potential, momentum_alignment
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `);
-      stmt.run([
+        ON CONFLICT(signal_id, portfolio_symbol) DO UPDATE SET
+          signal_symbol      = excluded.signal_symbol,
+          weight             = excluded.weight,
+          correlation_score  = excluded.correlation_score,
+          co_movement_pct    = excluded.co_movement_pct,
+          hedge_potential    = excluded.hedge_potential,
+          momentum_alignment = excluded.momentum_alignment
+      `, [
         signalId,
         portfolioSymbol,
         signalSymbol,
@@ -193,14 +200,14 @@ export class CorrelationService {
    */
   public async getPortfolioAlignmentScore(signalId: number): Promise<number> {
     try {
-      const result = db.prepare(`
-        SELECT 
+      const result = await dbGet<any>(`
+        SELECT
           AVG(ABS(correlation_score)) as avg_correlation,
           SUM(CASE WHEN momentum_alignment = 1 THEN 1 ELSE 0 END) as aligned_count,
           COUNT(*) as total_count
         FROM signal_portfolio_correlation
         WHERE signal_id = ?
-      `).get(signalId) as any;
+      `, [signalId]);
 
       if (!result || result.total_count === 0) return 50;  // Neutral if no portfolio
 
@@ -219,15 +226,15 @@ export class CorrelationService {
   /**
    * Get hedge recommendations from portfolio
    */
-  public getHedgeRecommendations(signalId: number, limit: number = 5) {
+  public async getHedgeRecommendations(signalId: number, limit: number = 5) {
     try {
-      const result = db.prepare(`
+      const result = await dbAll<any>(`
         SELECT portfolio_symbol, correlation_score, weight
         FROM signal_portfolio_correlation
         WHERE signal_id = ? AND hedge_potential = 1
         ORDER BY ABS(correlation_score) DESC
         LIMIT ?
-      `).all(signalId, limit) as any[];
+      `, [signalId, limit]);
 
       return result || [];
     } catch (err) {
@@ -239,13 +246,13 @@ export class CorrelationService {
   /**
    * Get concentration risk (similar symbols in portfolio + signal)
    */
-  public getConcentrationRisk(signalId: number): number {
+  public async getConcentrationRisk(signalId: number): Promise<number> {
     try {
-      const result = db.prepare(`
+      const result = await dbGet<any>(`
         SELECT COUNT(*) as high_correlation_count
         FROM signal_portfolio_correlation
         WHERE signal_id = ? AND correlation_score > 0.7
-      `).get(signalId) as any;
+      `, [signalId]);
 
       return result?.high_correlation_count || 0;
     } catch (err) {

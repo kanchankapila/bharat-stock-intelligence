@@ -179,8 +179,8 @@ export const signalsRouter = router({
         correlationService.analyzeSignalPortfolioAlignment(input.signalId, input.signalSymbol, input.portfolio),
         correlationService.getPortfolioAlignmentScore(input.signalId),
       ]);
-      const hedges = correlationService.getHedgeRecommendations(input.signalId);
-      const concentrationRisk = correlationService.getConcentrationRisk(input.signalId);
+      const hedges = await correlationService.getHedgeRecommendations(input.signalId);
+      const concentrationRisk = await correlationService.getConcentrationRisk(input.signalId);
       return {
         correlations, alignmentScore, hedges, concentrationRisk,
         recommendation: {
