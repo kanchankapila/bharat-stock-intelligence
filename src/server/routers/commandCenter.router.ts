@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import db from '../db';
+import { dbGet, dbAll } from '../dbAsync';
 import { router, publicProcedure } from '../trpc';
 import { runPython } from '../pythonRunner';
 import { cacheGet } from '../cacheService';
@@ -13,9 +13,9 @@ export const commandCenterRouter = router({
       limit:      z.number().min(1).max(100).default(30),
     }))
     .query(async ({ input }) => {
-      const regimeRow = db.prepare(
+      const regimeRow = await dbGet<{ regime: string; regime_prob: number }>(
         'SELECT regime, regime_prob FROM market_regimes ORDER BY date DESC LIMIT 1'
-      ).get() as { regime: string; regime_prob: number } | undefined;
+      );
       const regime = {
         name:       regimeRow?.regime ?? 'BULL',
         confidence: regimeRow?.regime_prob ?? 0.5,
@@ -38,7 +38,7 @@ export const commandCenterRouter = router({
       query += ` ORDER BY unified_score DESC LIMIT ?`;
       params.push(input.limit);
 
-      const eodRows = db.prepare(query).all(...params) as any[];
+      const eodRows = await dbAll<any>(query, params);
 
       let liveCache: Record<string, any> = {};
       try {
@@ -59,22 +59,22 @@ export const commandCenterRouter = router({
       if (regime.name !== 'CRASH') {
         try {
           const today = new Date().toISOString().slice(0, 10);
-          intradaySignals = db.prepare(`
+          intradaySignals = await dbAll<any>(`
             SELECT symbol, signal_type, signal_strength, win_probability,
                    signal_score, rsi, cmp, change_pct, ai_insight,
                    entry_zone, stop_loss, targets, time_horizon
             FROM technical_analysis_signals
             WHERE date = ? AND signal_strength = 'HIGH'
             ORDER BY win_probability DESC LIMIT 20
-          `).all(today) as any[];
+          `, [today]);
         } catch { /* table may differ in schema */ }
       }
 
-      const trackRow = db.prepare(
+      const trackRow = await dbGet<{ avg_engine_track_record: number }>(
         `SELECT avg_engine_track_record FROM unified_recommendations
          WHERE computed_at = (SELECT MAX(computed_at) FROM unified_recommendations)
          LIMIT 1`
-      ).get() as { avg_engine_track_record: number } | undefined;
+      );
 
       return {
         regime,

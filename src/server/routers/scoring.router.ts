@@ -1,5 +1,5 @@
 import { z } from "zod";
-import db from "../db";
+import { dbGet, dbAll } from "../dbAsync";
 import { getTopRatedStocks, syncAndScore, recalculateScores, getStockScoreDetail } from "../scoringService";
 import { crossSourceFilter, regimeSectorFilter, qualityOversoldScanner } from "../strategySignalsService";
 import { router, publicProcedure } from "../trpc";
@@ -125,8 +125,8 @@ export const scoringRouter = router({
             ON latest.symbol = o.symbol AND latest.max_date = o.date
         )
       `;
-      const invRows = db.prepare(`${latestPriceCte}
-        SELECT n.symbol, n.name as companyName, n.sector, lp.close as currentPrice,
+      const invRows = await dbAll<any>(`${latestPriceCte}
+        SELECT n.symbol, n.name as "companyName", n.sector, lp.close as "currentPrice",
                GROUP_CONCAT(DISTINCT es.screener_id) as et_screeners,
                GROUP_CONCAT(DISTINCT ms.scan_id) as mc_screeners
         FROM nse_stocks n
@@ -134,11 +134,11 @@ export const scoringRouter = router({
         LEFT JOIN moneycontrol_screener_stocks ms ON n.symbol = ms.symbol
         LEFT JOIN latest_prices lp ON lp.symbol = n.symbol
         WHERE es.screener_id IN (${ET_INVESTMENT_IDS.map(() => '?').join(',')})
-        GROUP BY n.symbol
+        GROUP BY n.symbol, n.name, n.sector, lp.close
         HAVING COUNT(DISTINCT es.screener_id) >= 2
         ORDER BY COUNT(DISTINCT es.screener_id) DESC
         LIMIT 30
-      `).all(...ET_INVESTMENT_IDS) as any[];
+      `, [...ET_INVESTMENT_IDS]);
 
       const investmentPicks = invRows.map(r => {
         const etIds: string[] = r.et_screeners ? r.et_screeners.split(',') : [];
@@ -161,8 +161,8 @@ export const scoringRouter = router({
         };
       }).filter(p => p.score > 30).sort((a, b) => b.score - a.score);
 
-      const intradayRows = db.prepare(`${latestPriceCte}
-        SELECT n.symbol, n.name as companyName, n.sector, lp.close as currentPrice,
+      const intradayRows = await dbAll<any>(`${latestPriceCte}
+        SELECT n.symbol, n.name as "companyName", n.sector, lp.close as "currentPrice",
                GROUP_CONCAT(DISTINCT ts.screener_id) as tl_screeners,
                GROUP_CONCAT(DISTINCT ms.scan_id) as mc_screeners
         FROM nse_stocks n
@@ -172,11 +172,11 @@ export const scoringRouter = router({
         LEFT JOIN moneycontrol_screener_stocks ms ON n.symbol = ms.symbol
         LEFT JOIN latest_prices lp ON lp.symbol = n.symbol
         WHERE tls.timeframe = 'intraday' OR sm.inferred_timeframe = 'intraday'
-        GROUP BY n.symbol
-        HAVING tl_screeners IS NOT NULL
+        GROUP BY n.symbol, n.name, n.sector, lp.close
+        HAVING GROUP_CONCAT(DISTINCT ts.screener_id) IS NOT NULL
         ORDER BY COUNT(DISTINCT ts.screener_id) DESC
         LIMIT 30
-      `).all() as any[];
+      `);
 
       const intradayPicks = intradayRows.map(r => {
         const tlIds: string[] = r.tl_screeners ? r.tl_screeners.split(',') : [];
@@ -200,10 +200,10 @@ export const scoringRouter = router({
       limit: z.number().min(1).max(50).default(20),
       requireUnifiedRec: z.boolean().default(false),
     }))
-    .query(({ input }) => {
-      const regimeRow = db.prepare(
+    .query(async ({ input }) => {
+      const regimeRow = await dbGet<{ regime: string }>(
         'SELECT regime FROM market_regimes ORDER BY date DESC LIMIT 1'
-      ).get() as { regime: string } | undefined;
+      );
       const regime = regimeRow?.regime ?? 'UNKNOWN';
 
       if (!['BULL', 'SIDEWAYS'].includes(regime)) {
@@ -214,7 +214,7 @@ export const scoringRouter = router({
         ? `AND ur.conviction_level IN ('A_HIGH','B_MEDIUM')`
         : '';
 
-      const rows = db.prepare(`
+      const rows = await dbAll<any>(`
         WITH ranked AS (
           SELECT *,
             ROW_NUMBER() OVER (
@@ -247,7 +247,7 @@ export const scoringRouter = router({
           ${urFilter}
         ORDER BY COALESCE(ur.avg_engine_track_record, 1.0) DESC, qs.rank_composite DESC
         LIMIT ?
-      `).all(input.limit) as any[];
+      `, [input.limit]);
 
       const stocks = rows.map(row => {
         const signalTypes: string[] = [];

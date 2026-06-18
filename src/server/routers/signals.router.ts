@@ -1,13 +1,17 @@
 import { z } from "zod";
-import db from "../db";
+import { dbGet, dbAll, dbRun } from "../dbAsync";
 import { enqueueAISignals, getAIQueueStats } from "../queues";
 import { router, publicProcedure } from "../trpc";
+
+/** ISO timestamp `days` ago — used instead of SQLite datetime('now','-N days') so the
+ *  same query runs on both SQLite and Postgres (a parameterised interval isn't portable). */
+const daysAgoIso = (days: number) => new Date(Date.now() - days * 86_400_000).toISOString();
 
 export const signalsRouter = router({
   getSignals: publicProcedure
     .input(z.object({ limit: z.number().optional().default(5) }))
-    .query(({ input }) => {
-      return db.prepare('SELECT * FROM signals ORDER BY createdAt DESC LIMIT ?').all(input.limit);
+    .query(async ({ input }) => {
+      return dbAll('SELECT * FROM signals ORDER BY "createdAt" DESC LIMIT ?', [input.limit]);
     }),
 
   saveSignal: publicProcedure
@@ -20,11 +24,11 @@ export const signalsRouter = router({
       confidence: z.number(),
       reasoning: z.string(),
     }))
-    .mutation(({ input }) => {
-      db.prepare(`
-        INSERT INTO signals (symbol, type, entry, target, stopLoss, confidence, reasoning, status)
+    .mutation(async ({ input }) => {
+      await dbRun(`
+        INSERT INTO signals (symbol, type, entry, target, "stopLoss", confidence, reasoning, status)
         VALUES (?, ?, ?, ?, ?, ?, ?, 'ACTIVE')
-      `).run(input.symbol, input.type, input.entry, input.target, input.stopLoss, input.confidence, input.reasoning);
+      `, [input.symbol, input.type, input.entry, input.target, input.stopLoss, input.confidence, input.reasoning]);
       return { success: true };
     }),
 
@@ -40,20 +44,20 @@ export const signalsRouter = router({
 
   getSignalHistory: publicProcedure
     .input(z.object({ symbol: z.string() }))
-    .query(({ input }) => {
-      return db.prepare('SELECT * FROM signals WHERE symbol = ? ORDER BY createdAt DESC').all(input.symbol);
+    .query(async ({ input }) => {
+      return dbAll('SELECT * FROM signals WHERE symbol = ? ORDER BY "createdAt" DESC', [input.symbol]);
     }),
 
   getAccuracyMetrics: publicProcedure
-    .query(() => {
-      const stats = db.prepare(`
+    .query(async () => {
+      const stats = (await dbGet<{ total: number; profit: number; loss: number; resolved: number }>(`
         SELECT
           COUNT(*) as total,
           SUM(CASE WHEN result = 'PROFIT' THEN 1 ELSE 0 END) as profit,
           SUM(CASE WHEN result = 'LOSS'   THEN 1 ELSE 0 END) as loss,
           SUM(CASE WHEN status IN ('COMPLETED', 'FAILED') THEN 1 ELSE 0 END) as resolved
         FROM signals
-      `).get() as { total: number; profit: number; loss: number; resolved: number };
+      `))!;
       return {
         precision:     stats.resolved > 0 ? (stats.profit / stats.resolved) * 100 : 0,
         profitHitRate: stats.resolved > 0 ? (stats.profit / stats.resolved) * 100 : 0,
@@ -78,14 +82,22 @@ export const signalsRouter = router({
       pnlPct: z.number().optional(),
       notes: z.string().optional(),
     }))
-    .mutation(({ input }) => {
-      db.prepare(`
-        INSERT OR REPLACE INTO signal_actions (
+    .mutation(async ({ input }) => {
+      // INSERT OR REPLACE -> explicit ON CONFLICT (unique key is signal_id, user_id).
+      await dbRun(`
+        INSERT INTO signal_actions (
           signal_id, signal_source, symbol, user_id, action_type,
           quantity, entry_price_rec, entry_actual, target_price_rec,
           exit_price_actual, exit_date, pnl, pnl_pct, notes, executed_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-      `).run([
+        ON CONFLICT(signal_id, user_id) DO UPDATE SET
+          signal_source = excluded.signal_source, symbol = excluded.symbol,
+          action_type = excluded.action_type, quantity = excluded.quantity,
+          entry_price_rec = excluded.entry_price_rec, entry_actual = excluded.entry_actual,
+          target_price_rec = excluded.target_price_rec, exit_price_actual = excluded.exit_price_actual,
+          exit_date = excluded.exit_date, pnl = excluded.pnl, pnl_pct = excluded.pnl_pct,
+          notes = excluded.notes, executed_at = CURRENT_TIMESTAMP
+      `, [
         input.signalId, input.signalSource, input.symbol, input.userId ?? null,
         input.actionType, input.quantity ?? null, input.entryPriceRec ?? null,
         input.entryActual ?? null, input.targetPriceRec ?? null,
@@ -103,7 +115,7 @@ export const signalsRouter = router({
       limit: z.number().default(50),
       offset: z.number().default(0),
     }))
-    .query(({ input }) => {
+    .query(async ({ input }) => {
       let query = `
         SELECT id, signal_id, signal_source, symbol, action_type,
                executed_at, quantity, entry_price_rec, entry_actual,
@@ -117,7 +129,7 @@ export const signalsRouter = router({
       query += ' ORDER BY executed_at DESC LIMIT ? OFFSET ?';
       params.push(input.limit, input.offset);
 
-      const actions = db.prepare(query).all(...params) as Array<Record<string, unknown>>;
+      const actions = await dbAll<Record<string, unknown>>(query, params);
       let totalPnl = 0, winCount = 0, totalCount = 0;
       for (const a of actions) {
         const pnl = a.pnl as number | null;
@@ -135,18 +147,18 @@ export const signalsRouter = router({
       signalSource: z.enum(['AI', 'technical', 'quant', 'news']).optional(),
       days: z.number().default(30),
     }))
-    .query(({ input }) => {
+    .query(async ({ input }) => {
       let query = `
         SELECT signal_source, action_type, COUNT(*) as count,
                AVG(pnl_pct) as avg_pnl_pct, SUM(pnl) as total_pnl
         FROM signal_actions
-        WHERE executed_at >= datetime('now', '-' || ? || ' days')
+        WHERE executed_at >= ?
       `;
-      const params: unknown[] = [input.days];
+      const params: unknown[] = [daysAgoIso(input.days)];
       if (input.userId)       { query += ' AND user_id = ?';       params.push(input.userId); }
       if (input.signalSource) { query += ' AND signal_source = ?'; params.push(input.signalSource); }
       query += ' GROUP BY signal_source, action_type';
-      return { metrics: db.prepare(query).all(...params) };
+      return { metrics: await dbAll(query, params) };
     }),
 
   getPortfolioSignalAlignment: publicProcedure
@@ -181,14 +193,14 @@ export const signalsRouter = router({
 
   getSignalCorrelationMetrics: publicProcedure
     .input(z.object({ signalId: z.number() }))
-    .query(({ input }) => {
-      const metrics = db.prepare(`
+    .query(async ({ input }) => {
+      const metrics = await dbAll<Record<string, unknown>>(`
         SELECT portfolio_symbol, correlation_score, co_movement_pct,
                hedge_potential, momentum_alignment, weight
         FROM signal_portfolio_correlation
         WHERE signal_id = ?
         ORDER BY ABS(correlation_score) DESC
-      `).all(input.signalId) as Array<Record<string, unknown>>;
+      `, [input.signalId]);
       const avgCorrelation = metrics.length
         ? metrics.reduce((s, m) => s + (m.correlation_score as number), 0) / metrics.length : 0;
       return {
@@ -204,11 +216,11 @@ export const signalsRouter = router({
 
   getSignalTracking: publicProcedure
     .input(z.object({ days: z.number().default(30) }).optional())
-    .query(({ input }) => {
+    .query(async ({ input }) => {
       const days = input?.days ?? 30;
-      return db.prepare(`
-        SELECT 
-          us.id, 
+      return dbAll(`
+        SELECT
+          us.id,
           us.symbol, 
           us.signal_source, 
           us.signal_type, 
@@ -228,8 +240,8 @@ export const signalsRouter = router({
             2
           ) AS growth_pct
         FROM unified_signals us
-        WHERE us.signal_generated_at >= date('now', '-' || ? || ' days')
+        WHERE us.signal_generated_at >= ?
         ORDER BY us.signal_generated_at DESC
-      `).all(days);
+      `, [daysAgoIso(days)]);
     }),
 });
