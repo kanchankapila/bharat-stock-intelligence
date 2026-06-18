@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import db from '../db';
+import { dbGet, dbAll } from '../dbAsync';
 import { router, publicProcedure } from '../trpc';
 import { computeConfluenceSignals, getLatestConfluenceSignals } from '../confluenceEngine';
 
@@ -27,23 +27,23 @@ export const confluenceRouter = router({
   // Full detail for a single symbol (latest record + screener reliability)
   getConfluenceDetail: publicProcedure
     .input(z.object({ symbol: z.string() }))
-    .query(({ input }) => {
-      const row = db.prepare(`
+    .query(async ({ input }) => {
+      const row = await dbGet<any>(`
         SELECT * FROM confluence_signals
         WHERE symbol = ?
         ORDER BY computed_at DESC
         LIMIT 1
-      `).get(input.symbol) as any ?? null;
+      `, [input.symbol]) ?? null;
 
       if (!row) return null;
 
       const screenerIds: string[] = JSON.parse(row.screener_ids_json ?? '[]');
       const reliability = screenerIds.length > 0
-        ? db.prepare(`
+        ? await dbAll(`
             SELECT scan_id, screener_name, reliability_score, win_rate_7d, win_rate_30d, avg_return_7d, total_signals
             FROM screener_reliability
             WHERE scan_id IN (${screenerIds.map(() => '?').join(',')})
-          `).all(...screenerIds)
+          `, [...screenerIds])
         : [];
 
       return { ...row, screenerReliability: reliability };
@@ -56,16 +56,16 @@ export const confluenceRouter = router({
       limit:   z.number().min(1).max(100).optional().default(20),
       orderBy: z.enum(['reliability_score', 'win_rate_7d', 'win_rate_30d', 'avg_return_7d']).optional().default('reliability_score'),
     }).optional())
-    .query(({ input }) => {
+    .query(async ({ input }) => {
       const { source = 'all', limit = 20, orderBy = 'reliability_score' } = input ?? {};
       const safe = ['reliability_score', 'win_rate_7d', 'win_rate_30d', 'avg_return_7d'].includes(orderBy)
         ? orderBy : 'reliability_score';
       if (source !== 'all') {
-        return db.prepare(`
+        return dbAll(`
           SELECT * FROM screener_reliability WHERE source = ? ORDER BY ${safe} DESC LIMIT ?
-        `).all(source, limit);
+        `, [source, limit]);
       }
-      return db.prepare(`SELECT * FROM screener_reliability ORDER BY ${safe} DESC LIMIT ?`).all(limit);
+      return dbAll(`SELECT * FROM screener_reliability ORDER BY ${safe} DESC LIMIT ?`, [limit]);
     }),
 
   // Trigger a fresh computation
@@ -77,10 +77,10 @@ export const confluenceRouter = router({
 
   // Sector momentum matrix
   getSectorMomentumMatrix: publicProcedure
-    .query(() => {
-      const latestBatch = (db.prepare('SELECT MAX(computed_at) as ts FROM confluence_signals').get() as any)?.ts;
+    .query(async () => {
+      const latestBatch = (await dbGet<any>('SELECT MAX(computed_at) as ts FROM confluence_signals'))?.ts;
       if (!latestBatch) return [];
-      return db.prepare(`
+      return dbAll(`
         SELECT
           sector,
           COUNT(*) as stock_count,
@@ -93,24 +93,24 @@ export const confluenceRouter = router({
         GROUP BY sector
         ORDER BY avg_score DESC
         LIMIT 30
-      `).all(latestBatch);
+      `, [latestBatch]);
     }),
 
   // Summary stats for the dashboard header
   getConfluenceStats: publicProcedure
-    .query(() => {
-      const latestBatch = (db.prepare('SELECT MAX(computed_at) as ts FROM confluence_signals').get() as any)?.ts;
+    .query(async () => {
+      const latestBatch = (await dbGet<any>('SELECT MAX(computed_at) as ts FROM confluence_signals'))?.ts;
       if (!latestBatch) return { total: 0, elite: 0, strong: 0, moderate: 0, avgScore: 0, lastComputed: null };
-      const row = db.prepare(`
+      const row = await dbGet<any>(`
         SELECT
           COUNT(*) as total,
           COUNT(CASE WHEN conviction_level = 'ELITE'    THEN 1 END) as elite,
           COUNT(CASE WHEN conviction_level = 'STRONG'   THEN 1 END) as strong,
           COUNT(CASE WHEN conviction_level = 'MODERATE' THEN 1 END) as moderate,
-          ROUND(AVG(confluence_score), 1) as avgScore
+          ROUND(AVG(confluence_score), 1) as "avgScore"
         FROM confluence_signals
         WHERE computed_at = ?
-      `).get(latestBatch) as any;
+      `, [latestBatch]);
       return { ...row, lastComputed: latestBatch };
     }),
 
@@ -120,11 +120,11 @@ export const confluenceRouter = router({
       symbol: z.string().optional(),
       limit:  z.number().optional().default(50),
     }).optional())
-    .query(({ input }) => {
+    .query(async ({ input }) => {
       const symbol = input?.symbol;
       const limit = input?.limit ?? 50;
       if (symbol) {
-        return db.prepare(`
+        return dbAll(`
           SELECT so.*, cs.conviction_level, cs.bullish_screener_count, cs.screener_names_json
           FROM signal_outcomes so
           LEFT JOIN confluence_signals cs ON cs.symbol = so.symbol
@@ -132,15 +132,15 @@ export const confluenceRouter = router({
           WHERE so.symbol = ?
           ORDER BY so.signal_date DESC
           LIMIT ?
-        `).all(symbol, limit);
+        `, [symbol, limit]);
       }
-      return db.prepare(`
+      return dbAll(`
         SELECT so.*, cs.conviction_level, cs.bullish_screener_count, cs.screener_names_json
         FROM signal_outcomes so
         LEFT JOIN confluence_signals cs ON cs.symbol = so.symbol
           AND DATE(cs.computed_at) = so.signal_date
         ORDER BY so.signal_date DESC
         LIMIT ?
-      `).all(limit);
+      `, [limit]);
     }),
 });

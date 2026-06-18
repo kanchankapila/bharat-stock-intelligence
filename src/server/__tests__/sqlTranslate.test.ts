@@ -41,6 +41,16 @@ describe('translateSql function mapping', () => {
     expect(translateSql("SELECT json_extract(meta, '$.a.b') FROM t"))
       .toBe("SELECT (meta::jsonb #>> '{a,b}') FROM t");
   });
+  it('casts ROUND(2-arg) value to numeric, paren-aware', () => {
+    expect(translateSql('SELECT ROUND(AVG(score), 1) FROM t'))
+      .toBe('SELECT round((AVG(score))::numeric, 1) FROM t');
+    // nested comma inside COALESCE must not be mistaken for the precision arg
+    expect(translateSql('SELECT ROUND(COALESCE(x, 0) + 0.2, 3) FROM t'))
+      .toBe('SELECT round((COALESCE(x, 0) + 0.2)::numeric, 3) FROM t');
+    // single-arg ROUND left untouched
+    expect(translateSql('SELECT ROUND(x) FROM t')).toBe('SELECT ROUND(x) FROM t');
+  });
+
   it('maps CAST REAL -> double precision and group_concat -> string_agg', () => {
     expect(translateSql('SELECT CAST(x AS REAL) FROM t')).toBe('SELECT CAST(x AS double precision) FROM t');
     expect(translateSql('SELECT GROUP_CONCAT(sym) FROM t')).toBe("SELECT string_agg(sym::text, ',') FROM t");

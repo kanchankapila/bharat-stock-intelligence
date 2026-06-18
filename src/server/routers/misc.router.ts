@@ -1,5 +1,5 @@
 import { z } from "zod";
-import db from "../db";
+import { dbGet, dbAll } from "../dbAsync";
 import { getStockMapping } from "../stockMapping";
 import { fetchWithCache } from "../cacheService";
 import { generateStockAnalysis } from "../../services/aiService";
@@ -24,11 +24,11 @@ export const miscRouter = router({
       const enriched: Record<string, unknown> = { ...data };
 
       // Technical signals (RSI, MACD, SMAs) — most recent scan row
-      const techSignal = db.prepare(`
+      const techSignal = await dbGet<any>(`
         SELECT rsi, sma50, sma200, macd, macd_signal, bb_width, volume_ratio,
                above_sma200, signal_score, signals_json
         FROM technical_signals WHERE symbol = ? ORDER BY date DESC LIMIT 1
-      `).get(symbol) as any;
+      `, [symbol]);
       if (techSignal) {
         enriched.rsi              = techSignal.rsi;
         enriched.macd             = techSignal.macd;
@@ -45,13 +45,13 @@ export const miscRouter = router({
       }
 
       // Fundamentals — PE, ROE, D/E, growth rates, Piotroski
-      const fund = db.prepare(`
+      const fund = await dbGet<any>(`
         SELECT trailing_pe, forward_pe, price_to_book, eps_ttm,
                debt_to_equity, return_on_equity, revenue_growth, earnings_growth,
                operating_margins, piotroski_f_score, dividend_yield, analyst_rating,
                fifty_two_week_high, fifty_two_week_low
         FROM stock_fundamentals WHERE symbol = ?
-      `).get(symbol) as any;
+      `, [symbol]);
       if (fund) {
         enriched.pe_ratio             = fund.trailing_pe;
         enriched.forward_pe           = fund.forward_pe;
@@ -70,10 +70,10 @@ export const miscRouter = router({
       }
 
       // AI factor breakdown scores (0–100 each), including news sentiment score
-      const factors = db.prepare(`
+      const factors = await dbGet<any>(`
         SELECT technical, fundamental, momentum, valuation, delivery, news
         FROM stock_factor_breakdown WHERE symbol = ? AND timeframe = 'long_term'
-      `).get(symbol) as any;
+      `, [symbol]);
       if (factors) {
         enriched.factor_scores = {
           technical: factors.technical,
@@ -86,10 +86,10 @@ export const miscRouter = router({
       }
 
       // Quant classification + returns
-      const quant = db.prepare(`
+      const quant = await dbGet<any>(`
         SELECT composite_class, rank_composite, return_1m, return_3m, return_6m, annualized_vol
         FROM quant_scores WHERE symbol = ?
-      `).get(symbol) as any;
+      `, [symbol]);
       if (quant) {
         enriched.quant_class           = quant.composite_class;
         enriched.quant_rank_pct        = quant.rank_composite;
@@ -100,30 +100,30 @@ export const miscRouter = router({
 
       // Recent news with NLP sentiment — try exact symbol match first,
       // fall back to company-name match (news says "HDFC Bank" not "HDFCBANK")
-      const stockMeta = db.prepare(`SELECT name, sector FROM nse_stocks WHERE symbol = ?`).get(symbol) as any;
-      let news = db.prepare(`
+      const stockMeta = await dbGet<any>(`SELECT name, sector FROM nse_stocks WHERE symbol = ?`, [symbol]);
+      let news = await dbAll<any>(`
         SELECT title, sentiment, impact, category
         FROM news_sentiment_items
         WHERE symbols_json LIKE ? ORDER BY published_at DESC LIMIT 5
-      `).all(`%"${symbol}"%`) as any[];
+      `, [`%"${symbol}"%`]);
 
       if (news.length === 0 && stockMeta?.name) {
         const nameKeyword = stockMeta.name.split(' ').slice(0, 2).join(' ');
-        news = db.prepare(`
+        news = await dbAll<any>(`
           SELECT title, sentiment, impact, category
           FROM news_sentiment_items
           WHERE title LIKE ? ORDER BY published_at DESC LIMIT 5
-        `).all(`%${nameKeyword}%`) as any[];
+        `, [`%${nameKeyword}%`]);
       }
 
       // If still nothing, pull top-impact sector news as market context
       if (news.length === 0 && stockMeta?.sector) {
-        news = db.prepare(`
+        news = await dbAll<any>(`
           SELECT title, sentiment, impact, category
           FROM news_sentiment_items
           WHERE sector = ? AND impact IN ('HIGH', 'MEDIUM')
           ORDER BY published_at DESC LIMIT 3
-        `).all(stockMeta.sector) as any[];
+        `, [stockMeta.sector]);
       }
 
       if (news.length > 0) {
@@ -222,10 +222,10 @@ export const miscRouter = router({
     .query(async ({ input }) => fetchEarningsRapidResults(input.type)),
 
   getTradeDecisionCockpitData: publicProcedure
-    .query(() => {
+    .query(async () => {
       try {
         // Pull latest technical snapshot per symbol (most recent date per symbol)
-        const signals = db.prepare(`
+        const signals = await dbAll<Record<string, unknown>>(`
           SELECT ts.*, ns.sector, ns.industry
           FROM technical_signals ts
           LEFT JOIN nse_stocks ns ON ns.symbol = ts.symbol
@@ -235,16 +235,16 @@ export const miscRouter = router({
           AND ts.cmp IS NOT NULL AND ts.cmp > 0
           ORDER BY ts.date DESC, ts.signal_score DESC
           LIMIT 200
-        `).all() as Array<Record<string, unknown>>;
+        `);
 
         // Best signal levels from the signals table (entry/target/SL) — ignore stale signals >30 days
-        const signalLevels = db.prepare(`
-          SELECT symbol, entry, target, stopLoss, confidence
+        const signalLevels = await dbAll<Record<string, unknown>>(`
+          SELECT symbol, entry, target, "stopLoss", confidence
           FROM signals
           WHERE type = 'BUY' AND status = 'ACTIVE' AND entry IS NOT NULL AND entry > 0
-            AND createdAt >= datetime('now', '-30 days')
+            AND "createdAt" >= datetime('now', '-30 days')
           ORDER BY confidence DESC, id DESC
-        `).all() as Array<Record<string, unknown>>;
+        `);
         const levelsMap = new Map<string, Record<string, unknown>>();
         for (const sl of signalLevels) {
           if (!levelsMap.has(sl.symbol as string)) levelsMap.set(sl.symbol as string, sl);
@@ -253,13 +253,13 @@ export const miscRouter = router({
         // stock_scores schema varies by scoring engine version — use try/catch to degrade gracefully
         let quantRows: Array<Record<string, unknown>> = [];
         try {
-          quantRows = db.prepare(`
+          quantRows = await dbAll<Record<string, unknown>>(`
             SELECT symbol, score AS composite_score, confidence AS technical_score,
                    score AS fundamental_score, score AS momentum_score,
                    0 AS sentiment_score, 0 AS risk_score, timeframe
             FROM stock_scores WHERE timeframe IN ('intraday','short','long_term')
             ORDER BY score DESC LIMIT 400
-          `).all() as Array<Record<string, unknown>>;
+          `);
         } catch { /* schema mismatch — quantMap stays empty, scoring uses technical fallback */ }
 
         const quantMap = new Map<string, Record<string, unknown>>();
@@ -267,7 +267,7 @@ export const miscRouter = router({
 
         let newsSentiment: Array<Record<string, unknown>> = [];
         try {
-          newsSentiment = db.prepare(`SELECT symbol, sentiment_score FROM news_sentiment_items WHERE published_at >= datetime('now', '-7 days') ORDER BY published_at DESC`).all() as any[];
+          newsSentiment = await dbAll<any>(`SELECT symbol, sentiment_score FROM news_sentiment_items WHERE published_at >= datetime('now', '-7 days') ORDER BY published_at DESC`);
         } catch { /* table may not exist */ }
 
         const sentimentMap = new Map<string, number[]>();

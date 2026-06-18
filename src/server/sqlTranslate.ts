@@ -32,8 +32,50 @@ export function convertPlaceholders(sql: string): string {
   return out;
 }
 
+/**
+ * Postgres has no ROUND(double precision, int) — only ROUND(numeric, int). SQLite's
+ * numeric columns are typeless so ROUND(AVG(x), 1) works there. Rewrite the 2-arg
+ * integer-precision form to ROUND((<value>)::numeric, n) for PG. Paren-aware so nested
+ * commas (e.g. COALESCE(x, 0)) don't confuse the split.
+ */
+function castRoundNumeric(sql: string): string {
+  const lower = sql.toLowerCase();
+  let out = '';
+  let i = 0;
+  while (i < sql.length) {
+    const idx = lower.indexOf('round(', i);
+    if (idx === -1) { out += sql.slice(i); break; }
+    const prev = idx > 0 ? sql[idx - 1] : ' ';
+    if (/[A-Za-z0-9_]/.test(prev)) { out += sql.slice(i, idx + 6); i = idx + 6; continue; }
+
+    out += sql.slice(i, idx);
+    const open = idx + 5;            // index of '('
+    let depth = 0, j = open;
+    const topCommas: number[] = [];
+    for (; j < sql.length; j++) {
+      const c = sql[j];
+      if (c === '(') depth++;
+      else if (c === ')') { depth--; if (depth === 0) break; }
+      else if (c === ',' && depth === 1) topCommas.push(j);
+    }
+    if (topCommas.length >= 1 && j < sql.length) {
+      const lastComma = topCommas[topCommas.length - 1];
+      const precision = sql.slice(lastComma + 1, j).trim();
+      if (/^\d+$/.test(precision)) {
+        const valueExpr = sql.slice(open + 1, lastComma);
+        out += `round((${valueExpr})::numeric, ${precision})`;
+        i = j + 1;
+        continue;
+      }
+    }
+    out += sql.slice(idx, j + 1);    // not a 2-arg integer round — leave as-is
+    i = j + 1;
+  }
+  return out;
+}
+
 function mapSqliteFunctions(sql: string): string {
-  let s = sql;
+  let s = castRoundNumeric(sql);
 
   // datetime('now' [, '<modifier>']) -> now()  /  (now() + interval '<modifier>')
   s = s.replace(/datetime\(\s*'now'\s*\)/gi, 'now()');
