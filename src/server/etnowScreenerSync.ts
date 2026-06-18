@@ -1,10 +1,10 @@
-import db from './db';
+import { dbGet, dbAll, dbRun, dbTransaction } from './dbAsync';
 import { fetchETnowScreener } from './etnow';
 import { getSymbolFromMcsymbol } from './stockMapping';
 
-export function getETnowStockCount(): number {
+export async function getETnowStockCount(): Promise<number> {
   try {
-    return (db.prepare('SELECT COUNT(*) as n FROM etnow_screener_stocks').get() as { n: number }).n;
+    return ((await dbGet<{ n: number }>('SELECT COUNT(*) as n FROM etnow_screener_stocks')) as { n: number }).n;
   } catch {
     return 0;
   }
@@ -18,17 +18,17 @@ export function getETnowStockCount(): number {
 export async function syncETnowScreeners(timeframeFilter?: 'intraday' | 'long_term'): Promise<void> {
   console.log(`🔄 Starting ETNow screener synchronization (filter: ${timeframeFilter || 'all'})...`);
 
-  let screeners = db.prepare(`
+  let screeners = await dbAll<{ screener_id: string; screener_name: string; query_condition: string | null }>(`
     SELECT screener_id, screener_name, query_condition FROM etnow_screeners
-  `).all() as Array<{ screener_id: string; screener_name: string; query_condition: string | null }>;
+  `);
 
   if (screeners.length === 0) {
     console.log('[SYNC] etnow_screeners is empty — seeding definitions with initEtnowScreeners()...');
     const { initEtnowScreeners } = await import('./etnow');
-    initEtnowScreeners();
-    screeners = db.prepare(`
+    await initEtnowScreeners();
+    screeners = await dbAll<{ screener_id: string; screener_name: string; query_condition: string | null }>(`
       SELECT screener_id, screener_name, query_condition FROM etnow_screeners
-    `).all() as Array<{ screener_id: string; screener_name: string; query_condition: string | null }>;
+    `);
   }
 
   if (timeframeFilter) {
@@ -46,13 +46,13 @@ export async function syncETnowScreeners(timeframeFilter?: 'intraday' | 'long_te
 
   console.log(`📊 Fetching data for ${screeners.length} ETNow screeners...`);
 
-  const upsertStmt = db.prepare(`
+  const upsertSql = `
     INSERT INTO etnow_screener_stocks (screener_id, symbol, stock_name, first_seen, last_seen)
     VALUES (?, ?, ?, ?, ?)
     ON CONFLICT(screener_id, symbol) DO UPDATE SET
       stock_name = excluded.stock_name,
       last_seen  = excluded.last_seen
-  `);
+  `;
 
   for (const screener of screeners) {
     try {
@@ -86,8 +86,8 @@ export async function syncETnowScreeners(timeframeFilter?: 'intraday' | 'long_te
 
       // Snapshot previous active symbols BEFORE delete
       const prevSymbols = new Set<string>(
-        (db.prepare(`SELECT symbol FROM screener_appearances WHERE screener_id = ? AND exited_date IS NULL`)
-          .all(screener.screener_id) as Array<{ symbol: string }>)
+        (await dbAll<{ symbol: string }>(`SELECT symbol FROM screener_appearances WHERE screener_id = ? AND exited_date IS NULL`,
+          [screener.screener_id]))
           .map(r => r.symbol).filter(Boolean)
       );
 
@@ -105,14 +105,14 @@ export async function syncETnowScreeners(timeframeFilter?: 'intraday' | 'long_te
         }
       }
 
-      db.transaction(() => {
+      await dbTransaction(async (tx) => {
         // Remove exits
-        const existing = db.prepare(`SELECT symbol FROM etnow_screener_stocks WHERE screener_id = ?`)
-          .all(screener.screener_id) as Array<{ symbol: string }>;
+        const existing = await tx.all<{ symbol: string }>(`SELECT symbol FROM etnow_screener_stocks WHERE screener_id = ?`,
+          [screener.screener_id]);
         const toRemove = existing.filter(r => !incomingSymbols.has(r.symbol));
         if (toRemove.length) {
-          const del = db.prepare(`DELETE FROM etnow_screener_stocks WHERE screener_id = ? AND symbol = ?`);
-          for (const r of toRemove) del.run(screener.screener_id, r.symbol);
+          const delSql = `DELETE FROM etnow_screener_stocks WHERE screener_id = ? AND symbol = ?`;
+          for (const r of toRemove) await tx.run(delSql, [screener.screener_id, r.symbol]);
         }
         // Upsert current
         for (const record of records) {
@@ -121,28 +121,28 @@ export async function syncETnowScreeners(timeframeFilter?: 'intraday' | 'long_te
           if (rawSymbol) {
             const nseSymbol = rawSymbol.replace(/-NSE$/i, '').replace(/EQ$/i, '').replace(/BE$/i, '').trim();
             if (nseSymbol) {
-              upsertStmt.run(screener.screener_id, nseSymbol, stockName, today, today);
+              await tx.run(upsertSql, [screener.screener_id, nseSymbol, stockName, today, today]);
               currentSymbols.add(nseSymbol);
             }
           }
         }
-      })();
+      });
 
       // Update screener_master sync time
-      db.prepare(`UPDATE screener_master SET last_updated = ?, stocks_synced_at = ? WHERE scan_id = ?`)
-        .run(today, today, screener.screener_id);
+      await dbRun(`UPDATE screener_master SET last_updated = ?, stocks_synced_at = ? WHERE scan_id = ?`,
+        [today, today, screener.screener_id]);
 
       // Diff patch: record new appearances / exits
       const entered = Array.from(currentSymbols).filter(s => !prevSymbols.has(s));
       const exited  = Array.from(prevSymbols).filter(s => !currentSymbols.has(s));
 
       if (entered.length > 0) {
-        const insertApp = db.prepare(`INSERT OR IGNORE INTO screener_appearances (screener_id, source, symbol, appeared_date) VALUES (?, 'etnow', ?, ?)`);
-        db.transaction(() => { for (const s of entered) insertApp.run(screener.screener_id, s, today); })();
+        const insertAppSql = `INSERT OR IGNORE INTO screener_appearances (screener_id, source, symbol, appeared_date) VALUES (?, 'etnow', ?, ?)`;
+        await dbTransaction(async (tx) => { for (const s of entered) await tx.run(insertAppSql, [screener.screener_id, s, today]); });
       }
       if (exited.length > 0) {
-        db.prepare(`UPDATE screener_appearances SET exited_date = ? WHERE screener_id = ? AND symbol IN (${exited.map(() => '?').join(',')}) AND exited_date IS NULL`)
-          .run(today, screener.screener_id, ...exited);
+        await dbRun(`UPDATE screener_appearances SET exited_date = ? WHERE screener_id = ? AND symbol IN (${exited.map(() => '?').join(',')}) AND exited_date IS NULL`,
+          [today, screener.screener_id, ...exited]);
       }
 
       // Small delay to avoid rate limiting
@@ -159,24 +159,22 @@ export async function syncETnowScreeners(timeframeFilter?: 'intraday' | 'long_te
 /**
  * Get all ETNow screeners containing a specific stock
  */
-export function findEtScreenersByStock(symbol: string): Array<{
+export async function findEtScreenersByStock(symbol: string): Promise<Array<{
   screener_id: string;
   screener_name: string;
-}> {
+}>> {
   try {
     if (!symbol) return [];
 
-    const stmt = db.prepare(`
+    return await dbAll<{
+      screener_id: string;
+      screener_name: string;
+    }>(`
       SELECT es.screener_id, es.screener_name
       FROM etnow_screeners es
       JOIN etnow_screener_stocks ess ON es.screener_id = ess.screener_id
       WHERE ess.symbol = ?
-    `);
-
-    return stmt.all(symbol) as Array<{
-      screener_id: string;
-      screener_name: string;
-    }>;
+    `, [symbol]);
   } catch (error) {
     console.error(`❌ Error finding ETNow screeners for ${symbol}:`, error);
     return [];
@@ -186,22 +184,20 @@ export function findEtScreenersByStock(symbol: string): Array<{
 /**
  * Get all stocks from a specific ETNow screener
  */
-export function getETnowScreenerStocks(screenerId: string): Array<{
+export async function getETnowScreenerStocks(screenerId: string): Promise<Array<{
   symbol: string;
   stock_name: string;
-}> {
+}>> {
   try {
-    const stmt = db.prepare(`
+    return await dbAll<{
+      symbol: string;
+      stock_name: string;
+    }>(`
       SELECT symbol, stock_name
       FROM etnow_screener_stocks
       WHERE screener_id = ?
       ORDER BY symbol
-    `);
-
-    return stmt.all(screenerId) as Array<{
-      symbol: string;
-      stock_name: string;
-    }>;
+    `, [screenerId]);
   } catch (error) {
     console.error(`❌ Error fetching stocks for ETNow screener ${screenerId}:`, error);
     return [];

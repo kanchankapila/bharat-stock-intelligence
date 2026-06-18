@@ -685,7 +685,7 @@ export async function getMcConsolidatedData(scId: string, symbol: string, timefr
   // 1. Local Screeners (Instant)
   const mcScreeners = findMcScreenersByStock(symbol);
   const tlScreeners = findScreenersByStock(symbol);
-  const etScreeners = findEtScreenersByStock(symbol);
+  const etScreeners = await findEtScreenersByStock(symbol);
 
   // 2. Fetch all data points in parallel
   const fetchWithCache = async (key: string, fetcher: () => Promise<any>) => {

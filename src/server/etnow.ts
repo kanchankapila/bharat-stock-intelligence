@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import db from './db';
+import { dbGet, dbAll, dbTransaction } from './dbAsync';
 
 // Fallback list of 13 canonical ETnow screeners used when et_screeners.json is absent.
 const ETNOW_SCREENER_DEFINITIONS = [
@@ -27,8 +27,8 @@ const ETNOW_SCREENER_DEFINITIONS = [
  *   3. Fall back to the hardcoded 13-screener list.
  * Safe to call on every server start.
  */
-export function initEtnowScreeners(): void {
-  const count = db.prepare('SELECT count(*) as count FROM etnow_screeners').get() as { count: number };
+export async function initEtnowScreeners(): Promise<void> {
+  const count = await dbGet<{ count: number }>('SELECT count(*) as count FROM etnow_screeners') as { count: number };
   if (count.count > 20) {
     console.log(`ℹ️ etnow_screeners already populated with ${count.count} items. Skipping seed.`);
     return;
@@ -41,18 +41,16 @@ export function initEtnowScreeners(): void {
       const data = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
       const requests: any[] = data.requests || [];
       if (requests.length > 0) {
-        const insert = db.prepare(
-          `INSERT OR IGNORE INTO etnow_screeners (screener_id, screener_name, query_condition) VALUES (?, ?, ?)`
-        );
-        db.transaction(() => {
+        const insertSql = `INSERT OR IGNORE INTO etnow_screeners (screener_id, screener_name, query_condition) VALUES (?, ?, ?)`;
+        await dbTransaction(async (tx) => {
           for (const req of requests) {
             const id: string = req.screenerId;
             const name: string = req.label;
             const postData = req.request?.postData;
             const query = typeof postData === 'string' ? postData : JSON.stringify(postData || {});
-            if (id && name) insert.run(id, name, query);
+            if (id && name) await tx.run(insertSql, [id, name, query]);
           }
-        })();
+        });
         console.log(`✅ Auto-imported ${requests.length} ETnow screeners from et_screeners.json`);
         return;
       }
@@ -62,10 +60,10 @@ export function initEtnowScreeners(): void {
   }
 
   // Hardcoded fallback
-  const insert = db.prepare(`INSERT OR IGNORE INTO etnow_screeners (screener_id, screener_name) VALUES (?, ?)`);
-  db.transaction(() => {
-    for (const s of ETNOW_SCREENER_DEFINITIONS) insert.run(s.id, s.name);
-  })();
+  const insertSql = `INSERT OR IGNORE INTO etnow_screeners (screener_id, screener_name) VALUES (?, ?)`;
+  await dbTransaction(async (tx) => {
+    for (const s of ETNOW_SCREENER_DEFINITIONS) await tx.run(insertSql, [s.id, s.name]);
+  });
   console.log(`ℹ️ Seeded ${ETNOW_SCREENER_DEFINITIONS.length} default ETnow screeners.`);
 }
 
@@ -112,30 +110,28 @@ export async function fetchETnowScreener(screenerId: string, queryCondition: str
 
   return response.json();
 }
-export function findEtScreenersByStock(symbol: string): Array<{
+export async function findEtScreenersByStock(symbol: string): Promise<Array<{
   id: string;
   name: string;
   sentiment: 'bullish' | 'bearish' | 'neutral';
   screenpk: string;
   source: string;
   description: string;
-}> {
+}>> {
   try {
     if (!symbol) return [];
 
-    const stmt = db.prepare(`
+    const matches = await dbAll<{
+      screener_id: string;
+      screener_name: string;
+      inferred_sentiment: string | null;
+    }>(`
       SELECT s.screener_id, s.screener_name, m.inferred_sentiment
       FROM etnow_screeners s
       JOIN etnow_screener_stocks ss ON s.screener_id = ss.screener_id
       LEFT JOIN screener_master m ON s.screener_id = m.scan_id
       WHERE ss.symbol = ?
-    `);
-
-    const matches = stmt.all(symbol) as Array<{
-      screener_id: string;
-      screener_name: string;
-      inferred_sentiment: string | null;
-    }>;
+    `, [symbol]);
 
     return matches.map(m => ({
       id: m.screener_id,

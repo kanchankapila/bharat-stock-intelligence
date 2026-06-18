@@ -52,7 +52,7 @@ export async function syncAndScore(): Promise<{ success: boolean; message: strin
   console.log('🔄 Initiating full sync and score process...');
 
   // Ensure ETnow screeners exist in DB (idempotent — safe to call every time)
-  initEtnowScreeners();
+  await initEtnowScreeners();
 
   const syncResult = await syncAllScreenerStocksToDB('long_term');
   if (!syncResult.success) {
