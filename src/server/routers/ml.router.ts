@@ -1,16 +1,16 @@
 import { z } from "zod";
-import db from "../db";
+import { dbGet, dbAll, dbRun } from "../dbAsync";
 import { alphaQuant } from "../alphaQuantClient";
 import { router, publicProcedure } from "../trpc";
 
 export const mlRouter = router({
   getFiiDiiFlow: publicProcedure
     .input(z.object({ days: z.number().min(1).max(90).default(30) }).optional())
-    .query(({ input }) => {
-      return db.prepare(`
+    .query(async ({ input }) => {
+      return dbAll(`
         SELECT date, fii_buy, fii_sell, fii_net, dii_buy, dii_sell, dii_net, source, fetched_at
         FROM fii_dii_flow ORDER BY date DESC LIMIT ?
-      `).all(input?.days ?? 30);
+      `, [input?.days ?? 30]);
     }),
 
   getStrategyPerformance: publicProcedure
@@ -19,12 +19,12 @@ export const mlRouter = router({
       segment:     z.enum(['signal_type', 'sector', 'nifty_regime', 'score_bucket', 'overall']).optional(),
       minSignals:  z.number().min(1).default(5),
     }).optional())
-    .query(({ input }) => {
+    .query(async ({ input }) => {
       const horizon = input?.horizonDays ?? 15;
       const seg     = input?.segment;
       const min     = input?.minSignals ?? 5;
       const where   = seg ? `AND segment = '${seg}'` : '';
-      return db.prepare(`
+      return dbAll(`
         SELECT perf_key, strategy_name, segment, segment_value, horizon_days,
                market_regime, total_signals, win_rate, avg_return_pct,
                profit_factor, sharpe_ratio, max_drawdown_pct, alpha_vs_nifty,
@@ -32,93 +32,93 @@ export const mlRouter = router({
         FROM strategy_performance
         WHERE horizon_days = ? AND total_signals >= ? ${where}
         ORDER BY win_rate DESC
-      `).all(horizon, min);
+      `, [horizon, min]);
     }),
 
   getPerformanceDashboard: publicProcedure
-    .query(() => {
+    .query(async () => {
       return {
-        overall: db.prepare(`
+        overall: await dbGet(`
           SELECT win_rate, avg_return_pct, sharpe_ratio, profit_factor, max_drawdown_pct,
                  alpha_vs_nifty, total_signals, last_computed
           FROM strategy_performance WHERE segment = 'overall' ORDER BY last_computed DESC LIMIT 1
-        `).get(),
-        topSignals: db.prepare(`
+        `),
+        topSignals: await dbAll(`
           SELECT strategy_name, win_rate, avg_return_pct, sharpe_ratio, total_signals
           FROM strategy_performance WHERE segment = 'signal_type' AND total_signals >= 10
           ORDER BY win_rate DESC LIMIT 5
-        `).all(),
-        byRegime: db.prepare(`
+        `),
+        byRegime: await dbAll(`
           SELECT market_regime, AVG(win_rate) AS avg_win_rate, SUM(total_signals) AS total_signals
           FROM strategy_performance WHERE segment = 'signal_type' AND market_regime != 'ALL'
           GROUP BY market_regime ORDER BY avg_win_rate DESC
-        `).all(),
-        latestModel: db.prepare(`
+        `),
+        latestModel: await dbAll(`
           SELECT model_name, model_type, cv_roc_auc, training_samples, trained_at
           FROM model_registry WHERE is_active = 1 ORDER BY trained_at DESC LIMIT 3
-        `).all(),
-        recentBacktest: db.prepare(`
+        `),
+        recentBacktest: await dbAll(`
           SELECT run_name, win_rate, total_return_pct, cagr_pct, sharpe_ratio,
                  max_drawdown_pct, alpha_pct, run_at
           FROM backtesting_runs ORDER BY run_at DESC LIMIT 5
-        `).all(),
-        weightHistory: db.prepare(`
+        `),
+        weightHistory: await dbAll(`
           SELECT optimization_method, baseline_win_rate, optimized_win_rate,
                  improvement_pct, snapshot_at
           FROM screener_weight_history ORDER BY snapshot_at DESC LIMIT 3
-        `).all(),
+        `),
       };
     }),
 
   getMLModelRegistry: publicProcedure
     .input(z.object({ limit: z.number().min(1).max(50).default(20) }).optional())
-    .query(({ input }) => {
-      return db.prepare(`
+    .query(async ({ input }) => {
+      return dbAll(`
         SELECT id, model_name, model_version, model_type, trained_at,
                training_samples, cv_roc_auc, cv_accuracy, precision_score,
                recall_score, f1_score, feature_count, is_active, horizon_days
         FROM model_registry ORDER BY trained_at DESC LIMIT ?
-      `).all(input?.limit ?? 20);
+      `, [input?.limit ?? 20]);
     }),
 
   getFeatureImportance: publicProcedure
     .input(z.object({ modelName: z.string().default('ensemble'), topN: z.number().default(20) }).optional())
-    .query(({ input }) => {
-      return db.prepare(`
+    .query(async ({ input }) => {
+      return dbAll(`
         SELECT fil.feature_name, fil.importance, fil.rank_position, fil.computed_at, mr.model_type
         FROM feature_importance_log fil
         LEFT JOIN model_registry mr ON mr.id = fil.model_id
         WHERE fil.model_name = ?
         ORDER BY fil.computed_at DESC, fil.rank_position ASC
         LIMIT ?
-      `).all(input?.modelName ?? 'ensemble', input?.topN ?? 20);
+      `, [input?.modelName ?? 'ensemble', input?.topN ?? 20]);
     }),
 
   getScreenerWeightHistory: publicProcedure
     .input(z.object({ limit: z.number().min(1).max(30).default(10) }).optional())
-    .query(({ input }) => {
-      return db.prepare(`
+    .query(async ({ input }) => {
+      return dbAll(`
         SELECT id, snapshot_at, optimization_method, category_weights_json,
                source_weights_json, baseline_win_rate, optimized_win_rate,
                improvement_pct, training_samples
         FROM screener_weight_history ORDER BY snapshot_at DESC LIMIT ?
-      `).all(input?.limit ?? 10);
+      `, [input?.limit ?? 10]);
     }),
 
   getSignalQualityReport: publicProcedure
     .input(z.object({ horizonDays: z.union([z.literal(5), z.literal(15)]).default(15) }).optional())
-    .query(({ input }) => {
+    .query(async ({ input }) => {
       const horizon = input?.horizonDays ?? 15;
       return {
-        bySignalType: db.prepare(`
+        bySignalType: await dbAll(`
           SELECT strategy_name AS signal_type, win_rate, avg_return_pct, profit_factor,
                  sharpe_ratio, total_signals, false_positive_rate, max_drawdown_pct,
                  alpha_vs_nifty, signal_decay_halflife_days, market_regime
           FROM strategy_performance
           WHERE segment = 'signal_type' AND horizon_days = ?
           ORDER BY win_rate DESC
-        `).all(horizon),
-        recommendationStats: db.prepare(`
+        `, [horizon]),
+        recommendationStats: await dbGet(`
           SELECT COUNT(*) AS total,
                  SUM(CASE WHEN outcome = 'WIN' THEN 1 ELSE 0 END) AS wins,
                  SUM(CASE WHEN outcome = 'LOSS' THEN 1 ELSE 0 END) AS losses,
@@ -126,7 +126,7 @@ export const mlRouter = router({
                  MAX(actual_return_pct) AS best_return,
                  MIN(actual_return_pct) AS worst_return
           FROM recommendation_log WHERE outcome IS NOT NULL
-        `).get(),
+        `),
       };
     }),
 
@@ -136,12 +136,12 @@ export const mlRouter = router({
       activeLimit: z.number().min(1).max(200).default(50),
       recentBacktests: z.number().min(1).max(20).default(10),
     }).optional())
-    .query(({ input }) => {
+    .query(async ({ input }) => {
       const horizon = input?.horizonDays ?? 15;
       const activeLimit = input?.activeLimit ?? 50;
       const recentBacktests = input?.recentBacktests ?? 10;
 
-      const sourceSummary = db.prepare(`
+      const sourceSummary = await dbAll<any>(`
         SELECT 'TECHNICAL' AS signal_source,
                COUNT(*) AS total_signals,
                SUM(CASE WHEN date >= date('now', '-7 days') THEN 1 ELSE 0 END) AS active_signals,
@@ -167,9 +167,9 @@ export const mlRouter = router({
         FROM confluence_signals
         WHERE computed_at >= date('now', '-30 days')
         GROUP BY signal_source
-      `).all() as any[];
+      `);
 
-      const outcomeSummary = db.prepare(`
+      const outcomeSummary = await dbAll<any>(`
         SELECT 'TECHNICAL' AS signal_source,
                15 AS horizon_days,
                COUNT(*) AS total_outcomes,
@@ -194,9 +194,9 @@ export const mlRouter = router({
         FROM recommendation_log
         WHERE outcome IS NOT NULL
         ORDER BY signal_source, win_count DESC
-      `).all() as any[];
+      `);
 
-      const activeSignalGrowth = db.prepare(`
+      const activeSignalGrowth = await dbAll<any>(`
         SELECT ts.id,
                ts.symbol,
                ts.date AS signal_date,
@@ -219,9 +219,9 @@ export const mlRouter = router({
           AND ts.signal_score >= 5
         ORDER BY ts.date DESC
         LIMIT ?
-      `).all(activeLimit) as any[];
+      `, [activeLimit]);
 
-      const recommendationSummary = db.prepare(`
+      const recommendationSummary = await dbGet<any>(`
         SELECT COUNT(*) AS total_recommendations,
                SUM(CASE WHEN outcome = 'WIN' THEN 1 ELSE 0 END) AS win_count,
                SUM(CASE WHEN outcome = 'LOSS' THEN 1 ELSE 0 END) AS loss_count,
@@ -231,9 +231,9 @@ export const mlRouter = router({
                MIN(actual_return_pct) AS worst_actual_return_pct
         FROM recommendation_log
         WHERE actual_return_pct IS NOT NULL
-      `).get() as any;
+      `);
 
-      const recommendationSourceBreakdown = db.prepare(`
+      const recommendationSourceBreakdown = await dbAll<any>(`
         SELECT source,
                COUNT(*) AS total_recs,
                SUM(CASE WHEN outcome = 'WIN' THEN 1 ELSE 0 END) AS win_count,
@@ -242,17 +242,17 @@ export const mlRouter = router({
         FROM recommendation_log
         GROUP BY source
         ORDER BY total_recs DESC
-      `).all() as any[];
+      `);
 
-      const recentBacktestResults = db.prepare(`
+      const recentBacktestResults = await dbAll<any>(`
         SELECT run_name, start_date, end_date, win_rate, total_return_pct,
                cagr_pct, sharpe_ratio, max_drawdown_pct, alpha_pct, profit_factor, run_at
         FROM backtesting_runs
         ORDER BY run_at DESC
         LIMIT ?
-      `).all(recentBacktests) as any[];
+      `, [recentBacktests]);
 
-      const strategyPerformance = db.prepare(`
+      const strategyPerformance = await dbAll<any>(`
         SELECT strategy_name, segment, segment_value, win_rate, avg_return_pct,
                profit_factor, sharpe_ratio, max_drawdown_pct, alpha_vs_nifty,
                total_signals, last_computed
@@ -260,7 +260,7 @@ export const mlRouter = router({
         WHERE segment = 'signal_type' AND horizon_days = ?
         ORDER BY win_rate DESC
         LIMIT 20
-      `).all(horizon) as any[];
+      `, [horizon]);
 
       return {
         sourceSummary,
@@ -331,15 +331,15 @@ export const mlRouter = router({
         emaLong:  z.number(),
       }),
     }))
-    .mutation(({ input }) => {
-      db.prepare('INSERT INTO backtest_strategies (name, symbol, timeframe, params) VALUES (?, ?, ?, ?)')
-        .run(input.name, input.symbol, input.timeframe, JSON.stringify(input.params));
+    .mutation(async ({ input }) => {
+      await dbRun('INSERT INTO backtest_strategies (name, symbol, timeframe, params) VALUES (?, ?, ?, ?)',
+        [input.name, input.symbol, input.timeframe, JSON.stringify(input.params)]);
       return { success: true };
     }),
 
   getBacktestStrategies: publicProcedure
-    .query(() => {
-      return (db.prepare('SELECT * FROM backtest_strategies ORDER BY createdAt DESC').all() as any[])
+    .query(async () => {
+      return (await dbAll<any>('SELECT * FROM backtest_strategies ORDER BY "createdAt" DESC'))
         .map(r => ({ ...r, params: JSON.parse(r.params) }));
     }),
 
@@ -355,11 +355,11 @@ export const mlRouter = router({
         emaLong:  z.number().optional(),
       }).optional(),
     }))
-    .mutation(({ input }) => {
+    .mutation(async ({ input }) => {
       const rsiUpper = input.params?.rsiUpper ?? 70;
       const rsiLower = input.params?.rsiLower ?? 30;
 
-      const outcomes = db.prepare(`
+      const outcomes = await dbAll<any>(`
         SELECT so.return_pct, so.outcome, so.entry_price, so.exit_price,
                so.signal_date, ts.rsi
         FROM signal_outcomes so
@@ -367,7 +367,7 @@ export const mlRouter = router({
         WHERE so.symbol = ?
           AND so.outcome IN ('WIN', 'LOSS', 'NEUTRAL')
         ORDER BY so.signal_date ASC
-      `).all(input.symbol) as any[];
+      `, [input.symbol]);
 
       if (!outcomes.length) return null;
 

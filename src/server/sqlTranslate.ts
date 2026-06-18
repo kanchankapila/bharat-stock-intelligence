@@ -87,6 +87,12 @@ function mapSqliteFunctions(sql: string): string {
   // date(<column/expr>) -> (<expr>)::date  (must run AFTER the 'now' forms; skip quoted args)
   s = s.replace(/\bdate\(\s*([^'")][^)]*?)\s*\)/gi, '($1)::date');
 
+  // julianday: SQLite-only. julianday('now') - julianday(col) is a day difference.
+  // Map julianday('now') -> current_date and julianday(col) -> (col)::date, so the
+  // surrounding subtraction becomes Postgres date arithmetic (integer days).
+  s = s.replace(/\bjulianday\(\s*'now'\s*\)/gi, 'current_date');
+  s = s.replace(/\bjulianday\(\s*([^'")][^)]*?)\s*\)/gi, '($1)::date');
+
   // IFNULL -> COALESCE
   s = s.replace(/\bIFNULL\s*\(/gi, 'COALESCE(');
 

@@ -28,6 +28,10 @@ describe('translateSql function mapping', () => {
   it('maps date(column) to ::date cast', () => {
     expect(translateSql('WHERE date(cs.computed_at) = ?')).toBe('WHERE (cs.computed_at)::date = $1');
   });
+  it('maps julianday day-difference to date arithmetic', () => {
+    expect(translateSql("AVG(julianday('now') - julianday(date))"))
+      .toBe('AVG(current_date - (date)::date)');
+  });
   it('maps IFNULL -> COALESCE', () => {
     expect(translateSql('SELECT IFNULL(a, 0) FROM t')).toBe('SELECT COALESCE(a, 0) FROM t');
   });
