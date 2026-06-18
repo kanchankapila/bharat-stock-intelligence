@@ -1,4 +1,4 @@
-import db from './db';
+import { dbGet, dbAll, dbRun, dbTransaction } from './dbAsync';
 import { getStockMapping, getSymbolFromMcsymbol } from './stockMapping';
 import { mcFetchJson } from './mcApiService';
 import fs from 'fs';
@@ -179,7 +179,7 @@ export async function syncMoneyControlScreeners(timeframeFilter?: 'intraday' | '
 
   for (const config of MC_SCREENERS) {
     // Determine screener name from DB or use fallback to check timeframe
-    const row = db.prepare('SELECT screener_name FROM moneycontrol_screeners WHERE scan_id = ?').get(config.scanId) as { screener_name: string } | undefined;
+    const row = await dbGet<{ screener_name: string }>('SELECT screener_name FROM moneycontrol_screeners WHERE scan_id = ?', [config.scanId]);
     const name = row?.screener_name || `MC Screener ${config.scanId}`;
     const isIntraday = isIntradayScreener(name);
     
@@ -197,32 +197,32 @@ export async function syncMoneyControlScreeners(timeframeFilter?: 'intraday' | '
       const screenerName = response.data.list?.scannerName || response.data.scanName || response.data.scanname || `MC Screener ${config.scanId}`;
 
       // Upsert screener
-      db.prepare(`
+      await dbRun(`
         INSERT INTO moneycontrol_screeners (scan_id, cat_id, screener_name, type, is_positive)
         VALUES (?, ?, ?, ?, ?)
         ON CONFLICT(scan_id) DO UPDATE SET
           screener_name = excluded.screener_name,
           last_updated = CURRENT_TIMESTAMP
-      `).run(config.scanId, config.catId, screenerName, config.type, config.is_positive ? 1 : 0);
+      `, [config.scanId, config.catId, screenerName, config.type, config.is_positive ? 1 : 0]);
 
       const stocks = response.data.list?.scannerDetails || response.data.stock || response.data.stocks || [];
       console.log(`✅ Fetched ${stocks.length} stocks for MC: ${screenerName}`);
 
       // Snapshot previous active symbols BEFORE delete
       const prevSymbols = new Set<string>(
-        (db.prepare(`SELECT symbol FROM screener_appearances WHERE screener_id = ? AND exited_date IS NULL`)
-          .all(config.scanId) as Array<{ symbol: string }>)
+        (await dbAll<{ symbol: string }>(`SELECT symbol FROM screener_appearances WHERE screener_id = ? AND exited_date IS NULL`,
+          [config.scanId]))
           .map(r => r.symbol).filter(Boolean)
       );
 
-      const upsertStock = db.prepare(`
+      const upsertStockSql = `
         INSERT INTO moneycontrol_screener_stocks (scan_id, mcsymbol, stock_name, symbol, first_seen, last_seen)
         VALUES (?, ?, ?, ?, ?, ?)
         ON CONFLICT(scan_id, mcsymbol) DO UPDATE SET
           stock_name = excluded.stock_name,
           symbol     = excluded.symbol,
           last_seen  = excluded.last_seen
-      `);
+      `;
       const currentSymbols = new Set<string>();
       const today = new Date().toISOString().slice(0, 10);
       const incomingMcSymbols = new Set<string>();
@@ -232,7 +232,7 @@ export async function syncMoneyControlScreeners(timeframeFilter?: 'intraday' | '
         const stkname = stock.stkname || stock.stock_name || stock.shortName;
         if (mcsymbol) {
           const nseSymbol = getSymbolFromMcsymbol(mcsymbol);
-          upsertStock.run(config.scanId, mcsymbol, stkname, nseSymbol, today, today);
+          await dbRun(upsertStockSql, [config.scanId, mcsymbol, stkname, nseSymbol, today, today]);
           incomingMcSymbols.add(mcsymbol);
           if (nseSymbol) currentSymbols.add(nseSymbol);
           if (stkname) mappingsToUpdate.set(stkname.toUpperCase().trim(), mcsymbol);
@@ -240,29 +240,29 @@ export async function syncMoneyControlScreeners(timeframeFilter?: 'intraday' | '
       }
 
       // Remove stocks no longer in screener
-      const existingRows = db.prepare(`SELECT mcsymbol FROM moneycontrol_screener_stocks WHERE scan_id = ?`)
-        .all(config.scanId) as Array<{ mcsymbol: string }>;
+      const existingRows = await dbAll<{ mcsymbol: string }>(`SELECT mcsymbol FROM moneycontrol_screener_stocks WHERE scan_id = ?`,
+        [config.scanId]);
       const toDelete = existingRows.filter(r => !incomingMcSymbols.has(r.mcsymbol));
       if (toDelete.length) {
-        const del = db.prepare(`DELETE FROM moneycontrol_screener_stocks WHERE scan_id = ? AND mcsymbol = ?`);
-        db.transaction(() => { for (const r of toDelete) del.run(config.scanId, r.mcsymbol); })();
+        const delSql = `DELETE FROM moneycontrol_screener_stocks WHERE scan_id = ? AND mcsymbol = ?`;
+        await dbTransaction(async (tx) => { for (const r of toDelete) await tx.run(delSql, [config.scanId, r.mcsymbol]); });
       }
 
       // Update screener_master sync time
-      db.prepare(`UPDATE screener_master SET last_updated = ?, stocks_synced_at = ? WHERE scan_id = ?`)
-        .run(today, today, config.scanId);
+      await dbRun(`UPDATE screener_master SET last_updated = ?, stocks_synced_at = ? WHERE scan_id = ?`,
+        [today, today, config.scanId]);
 
       // Diff patch
       const entered = Array.from(currentSymbols).filter(s => !prevSymbols.has(s));
       const exited  = Array.from(prevSymbols).filter(s => !currentSymbols.has(s));
 
       if (entered.length > 0) {
-        const insertApp = db.prepare(`INSERT OR IGNORE INTO screener_appearances (screener_id, source, symbol, appeared_date) VALUES (?, 'moneycontrol', ?, ?)`);
-        db.transaction(() => { for (const s of entered) insertApp.run(config.scanId, s, today); })();
+        const insertAppSql = `INSERT OR IGNORE INTO screener_appearances (screener_id, source, symbol, appeared_date) VALUES (?, 'moneycontrol', ?, ?)`;
+        await dbTransaction(async (tx) => { for (const s of entered) await tx.run(insertAppSql, [config.scanId, s, today]); });
       }
       if (exited.length > 0) {
-        db.prepare(`UPDATE screener_appearances SET exited_date = ? WHERE screener_id = ? AND symbol IN (${exited.map(() => '?').join(',')}) AND exited_date IS NULL`)
-          .run(today, config.scanId, ...exited);
+        await dbRun(`UPDATE screener_appearances SET exited_date = ? WHERE screener_id = ? AND symbol IN (${exited.map(() => '?').join(',')}) AND exited_date IS NULL`,
+          [today, config.scanId, ...exited]);
       }
     }
 
@@ -283,32 +283,30 @@ export async function syncMoneyControlScreeners(timeframeFilter?: 'intraday' | '
  * @param symbol - The NSE symbol to search for
  * @returns Array of screeners containing the stock with sentiment info
  */
-export function findMcScreenersByStock(symbol: string): Array<{
+export async function findMcScreenersByStock(symbol: string): Promise<Array<{
   id: string;
   name: string;
   sentiment: 'bullish' | 'bearish' | 'neutral';
   screenpk: string;
   source: string;
   description: string;
-}> {
+}>> {
   try {
     if (!symbol) return [];
 
-    const stmt = db.prepare(`
+    const matches = await dbAll<{
+      scan_id: string;
+      screener_name: string;
+      inferred_sentiment: string | null;
+      is_positive: number;
+      type: string;
+    }>(`
       SELECT s.scan_id, s.screener_name, m.inferred_sentiment, s.is_positive, s.type
       FROM moneycontrol_screeners s
       JOIN moneycontrol_screener_stocks ss ON s.scan_id = ss.scan_id
       LEFT JOIN screener_master m ON s.scan_id = m.scan_id
       WHERE ss.symbol = ?
-    `);
-    
-    const matches = stmt.all(symbol) as Array<{ 
-      scan_id: string; 
-      screener_name: string; 
-      inferred_sentiment: string | null;
-      is_positive: number;
-      type: string;
-    }>;
+    `, [symbol]);
 
     return matches.map(m => ({
       id: m.scan_id,

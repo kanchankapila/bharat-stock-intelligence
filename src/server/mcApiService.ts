@@ -683,7 +683,7 @@ export async function getMcConsolidatedData(scId: string, symbol: string, timefr
   const effectiveScId = mapping?.mcsymbol || scId;
 
   // 1. Local Screeners (Instant)
-  const mcScreeners = findMcScreenersByStock(symbol);
+  const mcScreeners = await findMcScreenersByStock(symbol);
   const tlScreeners = findScreenersByStock(symbol);
   const etScreeners = await findEtScreenersByStock(symbol);
 
