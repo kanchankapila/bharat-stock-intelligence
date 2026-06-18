@@ -1,7 +1,7 @@
 import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
-import db from "../db";
+import { dbGet, dbAll, dbRun } from "../dbAsync";
 import { router, publicProcedure } from "../trpc";
 import { runPython } from '../pythonRunner';
 import { fetchIndexAdvanceDecline, fetchIndiaVix, fetchLiveMarketScreener, fetchEODMarketScreener } from '../marketIntelService';
@@ -221,66 +221,66 @@ export const MONITOR_SCRIPTS = [
 
 type ScriptId = typeof MONITOR_SCRIPTS[number]['id'];
 
-function getLastRunAt(scriptId: ScriptId): string | null {
+async function getLastRunAt(scriptId: ScriptId): Promise<string | null> {
   try {
     let row: any;
     switch (scriptId) {
       case 'technical-scan':
-        row = db.prepare("SELECT MAX(computed_at) as t FROM technical_signals").get();
+        row = await dbGet("SELECT MAX(computed_at) as t FROM technical_signals");
         break;
       case 'outcome-resolver-5d':
-        row = db.prepare("SELECT MAX(computed_at) as t FROM signal_outcomes WHERE horizon_days=5 AND outcome!='PENDING'").get();
+        row = await dbGet("SELECT MAX(computed_at) as t FROM signal_outcomes WHERE horizon_days=5 AND outcome!='PENDING'");
         break;
       case 'outcome-resolver-15d':
-        row = db.prepare("SELECT MAX(computed_at) as t FROM signal_outcomes WHERE horizon_days=15 AND outcome!='PENDING'").get();
+        row = await dbGet("SELECT MAX(computed_at) as t FROM signal_outcomes WHERE horizon_days=15 AND outcome!='PENDING'");
         break;
       case 'performance-tracker':
-        row = db.prepare("SELECT MAX(last_computed) as t FROM strategy_performance").get();
+        row = await dbGet("SELECT MAX(last_computed) as t FROM strategy_performance");
         break;
       case 'fii-dii-fetcher':
-        row = db.prepare("SELECT MAX(fetched_at) as t FROM fii_dii_flow").get();
+        row = await dbGet("SELECT MAX(fetched_at) as t FROM fii_dii_flow");
         break;
       case 'finbert-scorer':
-        row = db.prepare("SELECT MAX(computed_at) as t FROM technical_signals WHERE news_sentiment_score IS NOT NULL").get();
+        row = await dbGet("SELECT MAX(computed_at) as t FROM technical_signals WHERE news_sentiment_score IS NOT NULL");
         break;
       case 'ml-ensemble-score':
-        row = db.prepare("SELECT MAX(computed_at) as t FROM technical_signals WHERE win_probability IS NOT NULL").get();
+        row = await dbGet("SELECT MAX(computed_at) as t FROM technical_signals WHERE win_probability IS NOT NULL");
         break;
       case 'ml-ensemble-train':
-        row = db.prepare("SELECT MAX(trained_at) as t FROM model_registry WHERE model_name='ensemble'").get();
+        row = await dbGet("SELECT MAX(trained_at) as t FROM model_registry WHERE model_name='ensemble'");
         break;
       case 'strategy-optimizer':
-        row = db.prepare("SELECT MAX(snapshot_at) as t FROM screener_weight_history").get();
+        row = await dbGet("SELECT MAX(snapshot_at) as t FROM screener_weight_history");
         break;
       case 'ohlcv-backfill':
-        row = db.prepare("SELECT MAX(date) as t FROM stock_ohlcv").get();
+        row = await dbGet("SELECT MAX(date) as t FROM stock_ohlcv");
         break;
       case 'regime-detector':
-        row = db.prepare("SELECT MAX(computed_at) as t FROM market_regimes").get();
+        row = await dbGet("SELECT MAX(computed_at) as t FROM market_regimes");
         break;
       case 'feature-engineering':
-        row = db.prepare("SELECT MAX(computed_at) as t FROM feature_store").get();
+        row = await dbGet("SELECT MAX(computed_at) as t FROM feature_store");
         break;
       case 'reward-engine':
-        row = db.prepare("SELECT MAX(last_updated) as t FROM signal_type_weights").get();
+        row = await dbGet("SELECT MAX(last_updated) as t FROM signal_type_weights");
         break;
       case 'rl-agent-update':
-        row = db.prepare("SELECT MAX(last_updated) as t FROM rl_q_table").get();
+        row = await dbGet("SELECT MAX(last_updated) as t FROM rl_q_table");
         break;
       case 'dl-engine-infer':
-        row = db.prepare("SELECT MAX(created_at) as t FROM deep_learning_predictions").get();
+        row = await dbGet("SELECT MAX(created_at) as t FROM deep_learning_predictions");
         break;
       case 'dl-trainer':
-        row = db.prepare("SELECT MAX(trained_at) as t FROM model_registry WHERE model_name='BiLSTM'").get();
+        row = await dbGet("SELECT MAX(trained_at) as t FROM model_registry WHERE model_name='BiLSTM'");
         break;
       case 'signal-type-stats':
-        row = db.prepare("SELECT MAX(last_computed) as t FROM signal_type_stats").get();
+        row = await dbGet("SELECT MAX(last_computed) as t FROM signal_type_stats");
         break;
       case 'screener-performance':
-        row = db.prepare("SELECT MAX(last_computed) as t FROM screener_performance_v2").get();
+        row = await dbGet("SELECT MAX(last_computed) as t FROM screener_performance_v2");
         break;
       case 'company-profiles-sync':
-        row = db.prepare("SELECT MAX(last_updated) as t FROM company_profiles").get();
+        row = await dbGet("SELECT MAX(last_updated) as t FROM company_profiles");
         break;
       default:
         return null;
@@ -292,87 +292,89 @@ function getLastRunAt(scriptId: ScriptId): string | null {
   }
 }
 
-function getScriptStats(scriptId: ScriptId): Record<string, number | string | null> {
+async function getScriptStats(scriptId: ScriptId): Promise<Record<string, number | string | null>> {
   try {
     switch (scriptId) {
       case 'technical-scan':
-        return { total: (db.prepare("SELECT COUNT(*) as n FROM technical_signals").get() as any)?.n ?? 0 };
+        return { total: ((await dbGet("SELECT COUNT(*) as n FROM technical_signals")) as any)?.n ?? 0 };
       case 'outcome-resolver-5d':
-        return { resolved: (db.prepare("SELECT COUNT(*) as n FROM signal_outcomes WHERE horizon_days=5 AND outcome!='PENDING'").get() as any)?.n ?? 0 };
+        return { resolved: ((await dbGet("SELECT COUNT(*) as n FROM signal_outcomes WHERE horizon_days=5 AND outcome!='PENDING'")) as any)?.n ?? 0 };
       case 'outcome-resolver-15d':
-        return { resolved: (db.prepare("SELECT COUNT(*) as n FROM signal_outcomes WHERE horizon_days=15 AND outcome!='PENDING'").get() as any)?.n ?? 0 };
+        return { resolved: ((await dbGet("SELECT COUNT(*) as n FROM signal_outcomes WHERE horizon_days=15 AND outcome!='PENDING'")) as any)?.n ?? 0 };
       case 'performance-tracker':
         return {
-          strategies: (db.prepare("SELECT COUNT(*) as n FROM strategy_performance").get() as any)?.n ?? 0,
-          withAlpha: (db.prepare("SELECT COUNT(*) as n FROM strategy_performance WHERE alpha_vs_nifty IS NOT NULL").get() as any)?.n ?? 0,
+          strategies: ((await dbGet("SELECT COUNT(*) as n FROM strategy_performance")) as any)?.n ?? 0,
+          withAlpha: ((await dbGet("SELECT COUNT(*) as n FROM strategy_performance WHERE alpha_vs_nifty IS NOT NULL")) as any)?.n ?? 0,
         };
       case 'fii-dii-fetcher':
-        return { rows: (db.prepare("SELECT COUNT(*) as n FROM fii_dii_flow WHERE fii_net IS NOT NULL").get() as any)?.n ?? 0 };
-      case 'finbert-scorer':
-        const total = (db.prepare("SELECT COUNT(*) as n FROM technical_signals").get() as any)?.n ?? 1;
-        const scored = (db.prepare("SELECT COUNT(*) as n FROM technical_signals WHERE news_sentiment_score IS NOT NULL").get() as any)?.n ?? 0;
+        return { rows: ((await dbGet("SELECT COUNT(*) as n FROM fii_dii_flow WHERE fii_net IS NOT NULL")) as any)?.n ?? 0 };
+      case 'finbert-scorer': {
+        const total = ((await dbGet("SELECT COUNT(*) as n FROM technical_signals")) as any)?.n ?? 1;
+        const scored = ((await dbGet("SELECT COUNT(*) as n FROM technical_signals WHERE news_sentiment_score IS NOT NULL")) as any)?.n ?? 0;
         return { coverage: Math.round(scored / total * 100) + '%' };
-      case 'ml-ensemble-score':
-        const t2 = (db.prepare("SELECT COUNT(*) as n FROM technical_signals").get() as any)?.n ?? 1;
-        const s2 = (db.prepare("SELECT COUNT(*) as n FROM technical_signals WHERE win_probability IS NOT NULL").get() as any)?.n ?? 0;
+      }
+      case 'ml-ensemble-score': {
+        const t2 = ((await dbGet("SELECT COUNT(*) as n FROM technical_signals")) as any)?.n ?? 1;
+        const s2 = ((await dbGet("SELECT COUNT(*) as n FROM technical_signals WHERE win_probability IS NOT NULL")) as any)?.n ?? 0;
         return { coverage: Math.round(s2 / t2 * 100) + '%' };
+      }
       case 'ml-ensemble-train': {
-        const m = db.prepare("SELECT cv_roc_auc, training_samples FROM model_registry WHERE model_name='ensemble' ORDER BY trained_at DESC LIMIT 1").get() as any;
+        const m = await dbGet("SELECT cv_roc_auc, training_samples FROM model_registry WHERE model_name='ensemble' ORDER BY trained_at DESC LIMIT 1") as any;
         return m ? { auc: m.cv_roc_auc?.toFixed(4) ?? 'N/A', samples: m.training_samples } : {};
       }
       case 'strategy-optimizer': {
-        const w = db.prepare("SELECT optimized_win_rate, improvement_pct FROM screener_weight_history ORDER BY snapshot_at DESC LIMIT 1").get() as any;
+        const w = await dbGet("SELECT optimized_win_rate, improvement_pct FROM screener_weight_history ORDER BY snapshot_at DESC LIMIT 1") as any;
         return w ? { winRate: (w.optimized_win_rate * 100).toFixed(1) + '%', improvement: w.improvement_pct?.toFixed(2) + '%' } : {};
       }
       case 'ohlcv-backfill':
         return {
-          symbols: (db.prepare("SELECT COUNT(DISTINCT symbol) as n FROM stock_ohlcv").get() as any)?.n ?? 0,
-          rows: (db.prepare("SELECT COUNT(*) as n FROM stock_ohlcv").get() as any)?.n ?? 0,
+          symbols: ((await dbGet("SELECT COUNT(DISTINCT symbol) as n FROM stock_ohlcv")) as any)?.n ?? 0,
+          rows: ((await dbGet("SELECT COUNT(*) as n FROM stock_ohlcv")) as any)?.n ?? 0,
         };
       case 'regime-detector': {
-        const r = db.prepare("SELECT regime, COUNT(*) as n FROM market_regimes GROUP BY regime ORDER BY n DESC LIMIT 1").get() as any;
-        const total = (db.prepare("SELECT COUNT(*) as n FROM market_regimes").get() as any)?.n ?? 0;
+        const r = await dbGet("SELECT regime, COUNT(*) as n FROM market_regimes GROUP BY regime ORDER BY n DESC LIMIT 1") as any;
+        const total = ((await dbGet("SELECT COUNT(*) as n FROM market_regimes")) as any)?.n ?? 0;
         return r ? { days: total, latest: r.regime } : { days: 0 };
       }
       case 'feature-engineering': {
-        const sRow = db.prepare("SELECT COUNT(DISTINCT symbol) as n FROM feature_store").get() as any;
-        const rRow = db.prepare("SELECT COUNT(*) as n FROM feature_store").get() as any;
+        const sRow = await dbGet("SELECT COUNT(DISTINCT symbol) as n FROM feature_store") as any;
+        const rRow = await dbGet("SELECT COUNT(*) as n FROM feature_store") as any;
         return {
           symbols: sRow?.n ?? 0,
           rows: rRow?.n ?? 0,
         };
       }
       case 'reward-engine':
-        return { types: (db.prepare("SELECT COUNT(*) as n FROM signal_type_weights").get() as any)?.n ?? 0 };
+        return { types: ((await dbGet("SELECT COUNT(*) as n FROM signal_type_weights")) as any)?.n ?? 0 };
       case 'rl-agent-update':
         return {
-          states: (db.prepare("SELECT COUNT(DISTINCT state_key) as n FROM rl_q_table").get() as any)?.n ?? 0,
-          entries: (db.prepare("SELECT COUNT(*) as n FROM rl_q_table").get() as any)?.n ?? 0,
+          states: ((await dbGet("SELECT COUNT(DISTINCT state_key) as n FROM rl_q_table")) as any)?.n ?? 0,
+          entries: ((await dbGet("SELECT COUNT(*) as n FROM rl_q_table")) as any)?.n ?? 0,
         };
       case 'dl-engine-infer':
         return {
-          symbols: (db.prepare("SELECT COUNT(DISTINCT symbol) as n FROM deep_learning_predictions").get() as any)?.n ?? 0,
-          today: (db.prepare("SELECT COUNT(*) as n FROM deep_learning_predictions WHERE date(created_at)=date('now')").get() as any)?.n ?? 0,
+          symbols: ((await dbGet("SELECT COUNT(DISTINCT symbol) as n FROM deep_learning_predictions")) as any)?.n ?? 0,
+          today: ((await dbGet("SELECT COUNT(*) as n FROM deep_learning_predictions WHERE date(created_at)=date('now')")) as any)?.n ?? 0,
         };
       case 'dl-trainer': {
-        const m = db.prepare("SELECT cv_roc_auc, is_active FROM model_registry WHERE model_name='BiLSTM' ORDER BY trained_at DESC LIMIT 1").get() as any;
+        const m = await dbGet("SELECT cv_roc_auc, is_active FROM model_registry WHERE model_name='BiLSTM' ORDER BY trained_at DESC LIMIT 1") as any;
         return m ? { auc: m.cv_roc_auc?.toFixed(4) ?? 'N/A', active: m.is_active ? 'yes' : 'no' } : {};
       }
       case 'signal-type-stats':
         return {
-          types: (db.prepare("SELECT COUNT(DISTINCT signal_type) as n FROM signal_type_stats").get() as any)?.n ?? 0,
-          rows: (db.prepare("SELECT COUNT(*) as n FROM signal_type_stats").get() as any)?.n ?? 0,
+          types: ((await dbGet("SELECT COUNT(DISTINCT signal_type) as n FROM signal_type_stats")) as any)?.n ?? 0,
+          rows: ((await dbGet("SELECT COUNT(*) as n FROM signal_type_stats")) as any)?.n ?? 0,
         };
       case 'screener-performance': {
-        const total = (db.prepare("SELECT COUNT(*) as n FROM screener_performance_v2").get() as any)?.n ?? 0;
-        const tiers = db.prepare("SELECT tier, COUNT(*) as n FROM screener_performance_v2 GROUP BY tier ORDER BY tier").all() as any[];
+        const total = ((await dbGet("SELECT COUNT(*) as n FROM screener_performance_v2")) as any)?.n ?? 0;
+        const tiers = await dbAll("SELECT tier, COUNT(*) as n FROM screener_performance_v2 GROUP BY tier ORDER BY tier") as any[];
         const tierStr = tiers.map((t: any) => `${t.tier}:${t.n}`).join(', ');
         return { screeners: total, tiers: tierStr };
       }
       case 'company-profiles-sync':
         return {
-          profiles: (db.prepare("SELECT COUNT(*) as n FROM company_profiles").get() as any)?.n ?? 0,
-          aiAnalyzed: (db.prepare("SELECT COUNT(*) as n FROM company_profiles WHERE ai_analysis IS NOT NULL AND ai_analysis != ''").get() as any)?.n ?? 0,
+          profiles: ((await dbGet("SELECT COUNT(*) as n FROM company_profiles")) as any)?.n ?? 0,
+          aiAnalyzed: ((await dbGet("SELECT COUNT(*) as n FROM company_profiles WHERE ai_analysis IS NOT NULL AND ai_analysis != ''")) as any)?.n ?? 0,
         };
       default:
         return {};
@@ -384,17 +386,17 @@ function getScriptStats(scriptId: ScriptId): Record<string, number | string | nu
 }
 
 export const monitorRouter = router({
-  getSystemStatus: publicProcedure.query(() => {
+  getSystemStatus: publicProcedure.query(async () => {
     const runStates: Record<string, string> = {};
     try {
-      const rows = db.prepare("SELECT key, value FROM app_settings WHERE key LIKE 'monitor_%'").all() as any[];
+      const rows = await dbAll<any>("SELECT key, value FROM app_settings WHERE key LIKE 'monitor_%'");
       for (const r of rows) runStates[r.key] = r.value;
     } catch (err: unknown) {
       console.warn('[MONITOR] getSystemStatus failed:', (err as Error).message);
     }
 
-    return MONITOR_SCRIPTS.map(s => {
-      const dbLastRunAt = getLastRunAt(s.id as ScriptId);
+    return Promise.all(MONITOR_SCRIPTS.map(async s => {
+      const dbLastRunAt = await getLastRunAt(s.id as ScriptId);
       // Fall back to stored timestamp for scripts that ran but produced no DB rows
       const storedRanAt = runStates[`monitor_${s.id}_ran_at`] ?? null;
       const lastRunAt = dbLastRunAt ?? storedRanAt;
@@ -415,10 +417,10 @@ export const monitorRouter = router({
         ...s,
         lastRunAt,
         runState,
-        stats: getScriptStats(s.id as ScriptId),
+        stats: await getScriptStats(s.id as ScriptId),
         error: runStates[`monitor_${s.id}_error`] ?? null,
       };
-    });
+    }));
   }),
 
   getIndexAdvanceDecline: publicProcedure
@@ -451,20 +453,20 @@ export const monitorRouter = router({
       if (!script) throw new Error(`Unknown script: ${input.scriptId}`);
 
       const stateKey = `monitor_${script.id}`;
-      const upsertState = (val: string) => {
+      const upsertState = async (val: string) => {
         try {
-          db.prepare("INSERT INTO app_settings(key, value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
-            .run(stateKey, val);
+          await dbRun("INSERT INTO app_settings(key, value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            [stateKey, val]);
           if (val === 'success') {
-            db.prepare("INSERT INTO app_settings(key, value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
-              .run(`${stateKey}_ran_at`, new Date().toISOString());
+            await dbRun("INSERT INTO app_settings(key, value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+              [`${stateKey}_ran_at`, new Date().toISOString()]);
           }
         } catch (err: unknown) {
           console.warn('[MONITOR] upsertState failed:', (err as Error).message);
         }
       };
 
-      upsertState('running');
+      await upsertState('running');
 
       if (!script.pyScript) {
         // TypeScript function trigger (no Python, no queue)
@@ -472,10 +474,10 @@ export const monitorRouter = router({
           try {
             const { computeSignalTypeStats } = await import('../technicalSignalsService');
             const result = computeSignalTypeStats();
-            upsertState('success');
+            await upsertState('success');
             return { queued: false, message: `Signal type stats computed: ${result.updated} rows updated` };
           } catch (e: any) {
-            upsertState('failed');
+            await upsertState('failed');
             return { queued: false, message: `Failed: ${e.message}` };
           }
         }
@@ -499,7 +501,7 @@ export const monitorRouter = router({
         } catch (err: unknown) {
           console.warn('[MONITOR] queue trigger failed:', (err as Error).message);
         }
-        upsertState('success');
+        await upsertState('success');
         return { queued: false, message: 'Queue unavailable — script is queue-only' };
       }
 
@@ -507,15 +509,15 @@ export const monitorRouter = router({
         const [pyFile, ...pyArgs] = script.pyScript!.split(' ');
         try {
           const { stdout } = await runPython(pyFile, pyArgs, 30 * 60_000);
-          upsertState('success');
-          db.prepare("DELETE FROM app_settings WHERE key=?").run(`${stateKey}_error`);
+          await upsertState('success');
+          await dbRun("DELETE FROM app_settings WHERE key=?", [`${stateKey}_error`]);
           if (stdout) console.log(`[MONITOR] ${script.id} stdout:`, stdout.slice(0, 300));
           console.log(`[MONITOR] ${script.id} done`);
         } catch (err: unknown) {
           const msg = (err as Error).message;
-          upsertState('failed');
-          db.prepare("INSERT INTO app_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
-            .run(`${stateKey}_error`, msg.slice(0, 500));
+          await upsertState('failed');
+          await dbRun("INSERT INTO app_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            [`${stateKey}_error`, msg.slice(0, 500)]);
           console.error(`[MONITOR] ${script.id} failed:`, msg);
           if (script.critical) {
             try {
@@ -533,11 +535,11 @@ export const monitorRouter = router({
 
   triggerAllDaily: publicProcedure.mutation(async () => {
     const dailyScripts = ['fii-dii-fetcher', 'regime-detector', 'feature-engineering', 'outcome-resolver-5d', 'outcome-resolver-15d', 'performance-tracker', 'reward-engine', 'rl-agent-update', 'ml-ensemble-score', 'dl-engine-infer', 'signal-type-stats'];
-    const upsert = (key: string, val: string) => {
+    const upsert = async (key: string, val: string) => {
       try {
-        db.prepare("INSERT INTO app_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(key, val);
+        await dbRun("INSERT INTO app_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [key, val]);
         if (val === 'success') {
-          db.prepare("INSERT INTO app_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(`${key}_ran_at`, new Date().toISOString());
+          await dbRun("INSERT INTO app_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [`${key}_ran_at`, new Date().toISOString()]);
         }
       } catch (err: unknown) {
         console.warn('[MONITOR] upsert failed:', (err as Error).message);
@@ -547,16 +549,16 @@ export const monitorRouter = router({
     for (const id of dailyScripts) {
       const s = MONITOR_SCRIPTS.find(x => x.id === id)!;
       if ((s as any).tsFunction === 'computeSignalTypeStats') {
-        upsert(`monitor_${id}`, 'running');
+        await upsert(`monitor_${id}`, 'running');
         try {
           const { computeSignalTypeStats } = await import('../technicalSignalsService');
           computeSignalTypeStats();
-          upsert(`monitor_${id}`, 'success');
-        } catch { upsert(`monitor_${id}`, 'failed'); }
+          await upsert(`monitor_${id}`, 'success');
+        } catch { await upsert(`monitor_${id}`, 'failed'); }
         continue;
       }
       if (!s.pyScript) continue;
-      upsert(`monitor_${id}`, 'running');
+      await upsert(`monitor_${id}`, 'running');
       const [pyFile, ...pyArgs] = s.pyScript.split(' ');
       runPython(pyFile, pyArgs, 20 * 60_000)
         .then(() => upsert(`monitor_${id}`, 'success'))
