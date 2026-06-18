@@ -25,6 +25,9 @@ describe('translateSql function mapping', () => {
   it('maps date(now)', () => {
     expect(translateSql("WHERE d = date('now')")).toBe('WHERE d = current_date');
   });
+  it('maps date(column) to ::date cast', () => {
+    expect(translateSql('WHERE date(cs.computed_at) = ?')).toBe('WHERE (cs.computed_at)::date = $1');
+  });
   it('maps IFNULL -> COALESCE', () => {
     expect(translateSql('SELECT IFNULL(a, 0) FROM t')).toBe('SELECT COALESCE(a, 0) FROM t');
   });

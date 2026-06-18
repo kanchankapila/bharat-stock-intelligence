@@ -81,12 +81,12 @@ export const fundamentalsRouter = router({
   getCompanyProfileAnalysis: publicProcedure
     .input(z.object({ symbol: z.string() }))
     .query(async ({ input }) => {
-      const { default: db } = await import('../db');
-      const row = db.prepare(`
+      const { dbGet } = await import('../dbAsync');
+      const row = await dbGet<any>(`
         SELECT symbol, company_name, description, high_growth_scope, in_news_for_growth, growth_score, ai_analysis, last_updated
         FROM company_profiles
         WHERE symbol = ?
-      `).get(input.symbol) as any;
+      `, [input.symbol]);
       return row || null;
     }),
 });

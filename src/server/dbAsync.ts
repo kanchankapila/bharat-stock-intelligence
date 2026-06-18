@@ -49,10 +49,19 @@ export async function dbAll<T = any>(sql: string, params: unknown[] = []): Promi
 export async function dbRun(sql: string, params: unknown[] = []): Promise<RunResult> {
   if (usePg()) {
     const res = await pgExecute(translateSql(sql), params);
-    const lastId = (res.rows?.[0] as any)?.id ?? 0;
+    const lastId = (res.rows?.[res.rows.length - 1] as any)?.id ?? 0;
     return { changes: res.rowCount ?? 0, lastInsertRowid: lastId };
   }
-  const info = sqliteDb.prepare(sql).run(...params);
+  // better-sqlite3 throws if you .run() a statement that returns data (e.g. RETURNING),
+  // so branch on `.reader` and read the RETURNING row's id as lastInsertRowid — giving
+  // the same {changes,lastInsertRowid} contract on both engines.
+  const stmt = sqliteDb.prepare(sql);
+  if (stmt.reader) {
+    const rows = stmt.all(...params) as any[];
+    const last = rows.length ? (rows[rows.length - 1]?.id ?? 0) : 0;
+    return { changes: rows.length, lastInsertRowid: last };
+  }
+  const info = stmt.run(...params);
   return { changes: info.changes, lastInsertRowid: info.lastInsertRowid };
 }
 

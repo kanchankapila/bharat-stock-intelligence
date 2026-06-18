@@ -1,11 +1,11 @@
 import { z } from "zod";
-import db from "../db";
+import { dbAll, dbRun } from "../dbAsync";
 import { router, publicProcedure } from "../trpc";
 
 export const todoRouter = router({
   getTodos: publicProcedure
-    .query(() => {
-      return db.prepare('SELECT * FROM todos ORDER BY priority DESC, createdAt DESC').all() as any[];
+    .query(async () => {
+      return dbAll<any>('SELECT * FROM todos ORDER BY priority DESC, "createdAt" DESC');
     }),
 
   addTodo: publicProcedure
@@ -16,11 +16,12 @@ export const todoRouter = router({
       priority: z.enum(['LOW', 'MEDIUM', 'HIGH']).optional().default('MEDIUM'),
       category: z.string().optional().default('IDEAS'),
     }))
-    .mutation(({ input }) => {
-      const info = db.prepare(`
+    .mutation(async ({ input }) => {
+      const info = await dbRun(`
         INSERT INTO todos (title, description, status, priority, category)
         VALUES (?, ?, ?, ?, ?)
-      `).run(input.title, input.description ?? null, input.status, input.priority, input.category);
+        RETURNING id
+      `, [input.title, input.description ?? null, input.status, input.priority, input.category]);
       return { id: info.lastInsertRowid };
     }),
 
@@ -33,21 +34,21 @@ export const todoRouter = router({
       priority: z.enum(['LOW', 'MEDIUM', 'HIGH']).optional(),
       category: z.string().optional(),
     }))
-    .mutation(({ input }) => {
+    .mutation(async ({ input }) => {
       const { id, ...updates } = input;
       const keys = Object.keys(updates);
       if (keys.length === 0) return { success: true };
       const setClause = keys.map(k => `${k} = ?`).join(', ');
       const values = keys.map(k => (updates as Record<string, unknown>)[k]);
-      db.prepare(`UPDATE todos SET ${setClause}, updatedAt = CURRENT_TIMESTAMP WHERE id = ?`)
-        .run(...values, id);
+      await dbRun(`UPDATE todos SET ${setClause}, "updatedAt" = CURRENT_TIMESTAMP WHERE id = ?`,
+        [...values, id]);
       return { success: true };
     }),
 
   deleteTodo: publicProcedure
     .input(z.object({ id: z.number() }))
-    .mutation(({ input }) => {
-      db.prepare('DELETE FROM todos WHERE id = ?').run(input.id);
+    .mutation(async ({ input }) => {
+      await dbRun('DELETE FROM todos WHERE id = ?', [input.id]);
       return { success: true };
     }),
 });

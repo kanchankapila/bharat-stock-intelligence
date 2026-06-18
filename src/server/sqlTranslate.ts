@@ -42,6 +42,8 @@ function mapSqliteFunctions(sql: string): string {
   // date('now' [, '<modifier>']) -> current_date / ((current_date + interval '<mod>')::date)
   s = s.replace(/date\(\s*'now'\s*\)/gi, 'current_date');
   s = s.replace(/date\(\s*'now'\s*,\s*'([^']+)'\s*\)/gi, (_m, mod) => `((current_date + interval '${mod}')::date)`);
+  // date(<column/expr>) -> (<expr>)::date  (must run AFTER the 'now' forms; skip quoted args)
+  s = s.replace(/\bdate\(\s*([^'")][^)]*?)\s*\)/gi, '($1)::date');
 
   // IFNULL -> COALESCE
   s = s.replace(/\bIFNULL\s*\(/gi, 'COALESCE(');

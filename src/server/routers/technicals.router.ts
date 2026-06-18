@@ -1,5 +1,5 @@
 import { z } from "zod";
-import db from "../db";
+import { dbGet, dbAll } from "../dbAsync";
 import { fetchTechIndicators, fetchTechnicalTrends, fetchMCTechTrendsAllSegments } from "../marketData";
 import { getCachedScan, runTechnicalScan } from "../technicalScanner";
 import { getLatestRSIForSymbols } from "../technicalSignalsService";
@@ -24,8 +24,8 @@ export const technicalsRouter = router({
 
   getTechnicalPredictions: publicProcedure
     .input(z.object({ symbol: z.string() }))
-    .query(({ input }) => {
-      const row = db.prepare('SELECT * FROM technical_analysis_signals WHERE symbol = ?').get(input.symbol) as any;
+    .query(async ({ input }) => {
+      const row = await dbGet<any>('SELECT * FROM technical_analysis_signals WHERE symbol = ?', [input.symbol]);
       if (!row) return null;
       return { ...row, patterns: JSON.parse(row.patterns || '[]') };
     }),
@@ -72,9 +72,9 @@ export const technicalsRouter = router({
       minConfluence: z.number().min(0).max(100).default(40),
       limit:         z.number().min(1).max(100).default(50),
     }))
-    .query(({ input }) => {
+    .query(async ({ input }) => {
       const d = input.date ?? new Date().toISOString().slice(0, 10);
-      return db.prepare(`
+      return dbAll<any>(`
         SELECT
           ts.symbol, ns.name, ns.sector,
           ts.signal_score, ts.win_probability,
@@ -102,7 +102,7 @@ export const technicalsRouter = router({
           AND COALESCE(cs.confluence_score, 0) >= ?
         ORDER BY unified_score DESC
         LIMIT ?
-      `).all(d, d, input.minUnified, input.minConfluence, input.limit);
+      `, [d, d, input.minUnified, input.minConfluence, input.limit]);
     }),
 
   getSignalDates: publicProcedure

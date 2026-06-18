@@ -1,5 +1,5 @@
 import { z } from "zod";
-import db from "../db";
+import { dbAll } from "../dbAsync";
 import { router, publicProcedure } from "../trpc";
 
 export const sentimentRouter = router({
@@ -40,10 +40,10 @@ export const sentimentRouter = router({
 
   getInstitutionalFlows: publicProcedure
     .query(async () => {
-      const rows = db.prepare(
+      const rows = await dbAll<any>(
         `SELECT date, fii_buy, fii_sell, fii_net, dii_buy, dii_sell, dii_net
          FROM fii_dii_flow ORDER BY date DESC LIMIT 1`
-      ).all() as any[];
+      );
 
       const fmt = (n: number | null) => n != null ? Number(n).toFixed(2) : '0.00';
 
