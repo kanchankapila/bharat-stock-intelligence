@@ -1,4 +1,4 @@
-import db from './db';
+import { dbAll, dbGet, dbRun } from './dbAsync';
 
 export interface StockPick {
   symbol: string;
@@ -51,23 +51,23 @@ export interface ResearchReport {
   executive_summary: string;
 }
 
-function getMarketContext(): {
+async function getMarketContext(): Promise<{
   regime: string;
   sentiment_score: number;
   fii_net_5d: number;
   global_cue: string;
   hot_themes: string[];
-} {
-  const sentiment = db.prepare(`
+}> {
+  const sentiment = await dbGet(`
     SELECT overall_score, nifty_bias, global_cue, key_themes_json
     FROM market_sentiment_snapshots
     ORDER BY snapshot_at DESC LIMIT 1
-  `).get() as any;
+  `) as any;
 
-  const fiiRows = db.prepare(`
+  const fiiRows = await dbAll(`
     SELECT fii_net, dii_net FROM fii_dii_flow
     ORDER BY date DESC LIMIT 5
-  `).all() as any[];
+  `) as any[];
 
   const fii_net_5d = fiiRows.reduce((sum: number, r: any) => sum + (r.fii_net || 0), 0);
   const dii_net_5d = fiiRows.reduce((sum: number, r: any) => sum + (r.dii_net || 0), 0);
@@ -90,20 +90,20 @@ function getMarketContext(): {
   };
 }
 
-function scoreStocks(): { picks: StockPick[]; avoid: { symbol: string; reason: string }[] } {
-  const quantRows = db.prepare(`
+async function scoreStocks(): Promise<{ picks: StockPick[]; avoid: { symbol: string; reason: string }[] }> {
+  const quantRows = await dbAll(`
     SELECT symbol, rank_composite, rank_momentum, momentum_score, screener_net_score,
            bullish_screener_count, bearish_screener_count, trailing_pe, return_on_equity,
            debt_to_equity, piotroski_f_score, return_1m, return_3m, above_sma200,
            max_drawdown_1y, annualized_vol, sharpe_ratio
     FROM quant_scores
     WHERE composite_class IN ('Strong Buy','Buy') AND ohlcv_days >= 60
-  `).all() as any[];
+  `) as any[];
 
   const quantMap = new Map<string, any>(quantRows.map((q: any) => [q.symbol, q]));
 
   const techMap = new Map<string, any>();
-  (db.prepare(`
+  (await dbAll(`
     SELECT ts.symbol, ts.signal_score, ts.win_probability, ts.rsi, ts.adx,
            ts.volume_ratio, ts.above_sma200, ts.signals_json, ts.news_sentiment_score
     FROM technical_signals ts
@@ -111,54 +111,54 @@ function scoreStocks(): { picks: StockPick[]; avoid: { symbol: string; reason: s
       SELECT symbol, MAX(date) as max_date FROM technical_signals GROUP BY symbol
     ) latest ON ts.symbol = latest.symbol AND ts.date = latest.max_date
     WHERE ts.signal_score >= 5
-  `).all() as any[]).forEach(r => techMap.set(r.symbol, r));
+  `) as any[]).forEach(r => techMap.set(r.symbol, r));
 
   const xgbMap = new Map<string, any>();
   try {
-    (db.prepare(`
+    (await dbAll(`
       SELECT symbol, xgboost_score, signal, is_growth, is_breakout
       FROM xgboost_predictions WHERE signal = 'BUY'
-    `).all() as any[]).forEach(r => xgbMap.set(r.symbol, r));
+    `) as any[]).forEach(r => xgbMap.set(r.symbol, r));
   } catch { /* table may not exist */ }
 
   const unifiedMap = new Map<string, any>();
   try {
-    const unifiedRows = db.prepare(`
+    const unifiedRows = await dbAll(`
       SELECT symbol, unified_score, conviction_level, screener_stock_score,
              ml_score, confluence_score, technical_score, dl_score,
              avg_engine_track_record, fundamental_score
       FROM unified_recommendations
       WHERE computed_at = (SELECT MAX(computed_at) FROM unified_recommendations)
-    `).all() as any[];
+    `) as any[];
     unifiedRows.forEach(r => unifiedMap.set(r.symbol, r));
   } catch { /* unified engine may not have run yet */ }
 
   const confluenceMap = new Map<string, number>();
   try {
-    (db.prepare(`
+    (await dbAll(`
       SELECT symbol, confluence_score
       FROM confluence_signals
       WHERE computed_at = (SELECT MAX(computed_at) FROM confluence_signals)
-    `).all() as any[]).forEach(r => confluenceMap.set(r.symbol, r.confluence_score ?? 0));
+    `) as any[]).forEach(r => confluenceMap.set(r.symbol, r.confluence_score ?? 0));
   } catch { /* confluence engine may not have run yet */ }
 
   const dlMap = new Map<string, number>();
   try {
-    (db.prepare(`
+    (await dbAll(`
       SELECT symbol, probability
       FROM dl_predictions
       WHERE predicted_at >= datetime('now', '-1 day')
-    `).all() as any[]).forEach(r => dlMap.set(r.symbol, (r.probability ?? 0) * 100));
+    `) as any[]).forEach(r => dlMap.set(r.symbol, (r.probability ?? 0) * 100));
   } catch { /* DL predictions may not be available */ }
 
   const newsMap = new Map<string, number>();
-  (db.prepare(`
+  (await dbAll(`
     SELECT symbols_json, sentiment_score, impact
     FROM news_sentiment_items
     WHERE impact IN ('HIGH','MEDIUM')
       AND published_at >= datetime('now', '-2 days')
       AND sentiment IN ('BULLISH')
-  `).all() as any[]).forEach((r: any) => {
+  `) as any[]).forEach((r: any) => {
     try {
       const syms: string[] = JSON.parse(r.symbols_json || '[]');
       syms.forEach(s => newsMap.set(s, (newsMap.get(s) || 0) + (r.impact === 'HIGH' ? 1 : 0.5)));
@@ -328,8 +328,8 @@ async function generateBlurbs(
   return blurbs;
 }
 
-function getSectorRankings(): { sector: string; score: number; momentum: string }[] {
-  return (db.prepare(`
+async function getSectorRankings(): Promise<{ sector: string; score: number; momentum: string }[]> {
+  return (await dbAll(`
     SELECT n.sector,
            AVG(q.rank_composite) as score,
            AVG(q.return_1m) as avg_1m
@@ -341,7 +341,7 @@ function getSectorRankings(): { sector: string; score: number; momentum: string 
     HAVING COUNT(*) >= 3
     ORDER BY score DESC
     LIMIT 10
-  `).all() as any[]).map((r: any) => ({
+  `) as any[]).map((r: any) => ({
     sector:   r.sector,
     score:    parseFloat((r.score || 0).toFixed(1)),
     momentum: (r.avg_1m || 0) > 5 ? 'STRONG' : (r.avg_1m || 0) > 0 ? 'MODERATE' : 'WEAK',
@@ -367,22 +367,22 @@ export async function generateDailyReport(
   report_date: string,
   report_type: 'PRE_MARKET' | 'POST_CLOSE'
 ): Promise<void> {
-  db.prepare(`
+  await dbRun(`
     INSERT INTO daily_research_reports (report_date, report_type, status)
     VALUES (?, ?, 'GENERATING')
     ON CONFLICT(report_date, report_type) DO UPDATE SET status = 'GENERATING', error_message = NULL
-  `).run(report_date, report_type);
+  `, [report_date, report_type]);
 
   try {
-    const ctx    = getMarketContext();
-    const { picks, avoid } = scoreStocks();
+    const ctx    = await getMarketContext();
+    const { picks, avoid } = await scoreStocks();
     const top10  = picks.slice(0, 10);
     const watch10 = picks.slice(10, 20).map(p => ({
       symbol:           p.symbol,
       conviction_score: p.conviction_score,
       layers_confirmed: p.layers_confirmed,
     }));
-    const sectors = getSectorRankings();
+    const sectors = await getSectorRankings();
     const blurbs  = await generateBlurbs(top10, ctx.regime);
 
     const report: ResearchReport = {
@@ -400,7 +400,7 @@ export async function generateDailyReport(
       executive_summary: buildExecutiveSummary(ctx.regime, ctx.fii_net_5d, ctx.sentiment_score, top10[0], sectors[0]?.sector),
     };
 
-    db.prepare(`
+    await dbRun(`
       UPDATE daily_research_reports SET
         status          = 'READY',
         generated_at    = datetime('now'),
@@ -411,7 +411,7 @@ export async function generateDailyReport(
         report_json     = ?,
         ai_blurbs_json  = ?
       WHERE report_date = ? AND report_type = ?
-    `).run(
+    `, [
       ctx.regime,
       ctx.sentiment_score,
       ctx.fii_net_5d,
@@ -420,12 +420,12 @@ export async function generateDailyReport(
       JSON.stringify(blurbs),
       report_date,
       report_type,
-    );
+    ]);
   } catch (err: any) {
-    db.prepare(`
+    await dbRun(`
       UPDATE daily_research_reports SET status = 'FAILED', error_message = ?
       WHERE report_date = ? AND report_type = ?
-    `).run(String(err?.message ?? err), report_date, report_type);
+    `, [String(err?.message ?? err), report_date, report_type]);
     throw err;
   }
 }
