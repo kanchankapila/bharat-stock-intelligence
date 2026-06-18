@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import db from './db';
+import { dbTransaction } from './dbAsync';
 
 /**
  * Script to import ET screeners from the captured JSON.
@@ -22,29 +22,28 @@ async function importEtScreeners() {
 
     console.log(`🔍 Found ${requests.length} screener definitions in JSON.`);
 
-    const insert = db.prepare(`
-      INSERT OR REPLACE INTO etnow_screeners (screener_id, screener_name, query_condition)
+    const insertSql = `
+      INSERT INTO etnow_screeners (screener_id, screener_name, query_condition)
       VALUES (?, ?, ?)
-    `);
+      ON CONFLICT(screener_id) DO UPDATE SET
+        screener_name = excluded.screener_name,
+        query_condition = excluded.query_condition
+    `;
 
-    const cleanup = db.prepare(`DELETE FROM etnow_screeners`);
-    
     let count = 0;
-    const runImport = db.transaction(() => {
-      cleanup.run(); // Start fresh with the 438 definitions
+    await dbTransaction(async (tx) => {
+      await tx.run(`DELETE FROM etnow_screeners`); // Start fresh with the 438 definitions
       for (const req of requests) {
         const id = req.screenerId;
         const name = req.label;
         const query = req.request?.postData?.text || JSON.stringify(req.request?.postData || {});
-        
+
         if (id && name) {
-          insert.run(id, name, query);
+          await tx.run(insertSql, [id, name, query]);
           count++;
         }
       }
     });
-
-    runImport();
     console.log(`✅ Successfully imported ${count} ET screeners into the database.`);
     
   } catch (error) {
