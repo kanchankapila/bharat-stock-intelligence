@@ -1,6 +1,6 @@
 import { exec } from 'child_process';
 import path from 'path';
-import db from './db';
+import { dbGet, dbAll, dbRun } from './dbAsync';
 import { syncAllScreenerStocksToDB } from './trendlyneScreener';
 import { syncMoneyControlScreeners } from './moneycontrolScreener';
 import { initEtnowScreeners } from './etnow';
@@ -79,16 +79,15 @@ export async function syncAndScore(): Promise<{ success: boolean; message: strin
 /**
  * Get top rated stocks from the database
  */
-export function getTopRatedStocks(limit: number = 50, timeframe: string = 'long_term'): ScoredStock[] {
+export async function getTopRatedStocks(limit: number = 50, timeframe: string = 'long_term'): Promise<ScoredStock[]> {
   try {
-    const stmt = db.prepare(`
-      SELECT * FROM stock_scores 
+    const rows = await dbAll<any>(`
+      SELECT * FROM stock_scores
       WHERE timeframe = ?
-      ORDER BY score DESC 
+      ORDER BY score DESC
       LIMIT ?
-    `);
-    const rows = stmt.all(timeframe, limit) as any[];
-    
+    `, [timeframe, limit]);
+
     return rows.map(row => ({
       ...row,
       reasons: JSON.parse(row.reasons || '[]')
@@ -102,12 +101,12 @@ export function getTopRatedStocks(limit: number = 50, timeframe: string = 'long_
 /**
  * Get detailed score and factor breakdown for a specific stock
  */
-export function getStockScoreDetail(symbol: string, timeframe: string = 'long_term'): { score: ScoredStock; factors: FactorBreakdown } | null {
+export async function getStockScoreDetail(symbol: string, timeframe: string = 'long_term'): Promise<{ score: ScoredStock; factors: FactorBreakdown } | null> {
   try {
-    const scoreRow = db.prepare('SELECT * FROM stock_scores WHERE symbol = ? AND timeframe = ?').get(symbol, timeframe) as any;
+    const scoreRow = await dbGet<any>('SELECT * FROM stock_scores WHERE symbol = ? AND timeframe = ?', [symbol, timeframe]);
     if (!scoreRow) return null;
 
-    const factorRow = db.prepare('SELECT * FROM stock_factor_breakdown WHERE symbol = ? AND timeframe = ?').get(symbol, timeframe) as any;
+    const factorRow = await dbGet<any>('SELECT * FROM stock_factor_breakdown WHERE symbol = ? AND timeframe = ?', [symbol, timeframe]);
     
     return {
       score: {
@@ -141,18 +140,18 @@ export async function computeTimeframeScores(opts: {
   const topN = opts.topN ?? 100;
   const holdingDays = timeframe === 'intraday' ? 1 : timeframe === 'short' ? 7 : timeframe === 'medium' ? 30 : 180;
 
-  const upsertStmt = db.prepare(`
+  const upsertSql = `
     INSERT INTO timeframe_scores (symbol, timeframe, run_id, score, confidence, domains_json, reasons_json, suggested_holding_days, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(symbol, timeframe) DO UPDATE SET
       run_id = excluded.run_id, score = excluded.score, confidence = excluded.confidence,
       domains_json = excluded.domains_json, reasons_json = excluded.reasons_json,
       suggested_holding_days = excluded.suggested_holding_days, updated_at = excluded.updated_at
-  `);
+  `;
 
   // ── Path A: runId provided → load stocks from screener_runs, compute from component tables ──
   if (opts.runId) {
-    const run = db.prepare('SELECT records_json FROM screener_runs WHERE run_id = ?').get(opts.runId) as any;
+    const run = await dbGet<any>('SELECT records_json FROM screener_runs WHERE run_id = ?', [opts.runId]);
     let symbols: string[] = [];
     if (run?.records_json) {
       try { symbols = (JSON.parse(run.records_json) as any[]).map((r: any) => r.symbol).filter(Boolean).slice(0, topN); } catch {}
@@ -163,9 +162,9 @@ export async function computeTimeframeScores(opts: {
     const results: Array<{ symbol: string; score: number; confidence: number; domains: Record<string, number> }> = [];
 
     for (const sym of symbols) {
-      const qs  = db.prepare('SELECT momentum_score, return_1m FROM quant_scores WHERE symbol = ?').get(sym) as any;
-      const tcs = db.prepare('SELECT composite_score FROM technical_composite_scores WHERE symbol = ?').get(sym) as any;
-      const sf  = db.prepare('SELECT return_on_equity FROM stock_fundamentals WHERE symbol = ?').get(sym) as any;
+      const qs  = await dbGet<any>('SELECT momentum_score, return_1m FROM quant_scores WHERE symbol = ?', [sym]);
+      const tcs = await dbGet<any>('SELECT composite_score FROM technical_composite_scores WHERE symbol = ?', [sym]);
+      const sf  = await dbGet<any>('SELECT return_on_equity FROM stock_fundamentals WHERE symbol = ?', [sym]);
 
       const momentum   = Math.min(100, Math.max(0, qs?.momentum_score  ?? 0));
       const technical  = Math.min(100, Math.max(0, tcs?.composite_score ?? 0));
@@ -176,7 +175,7 @@ export async function computeTimeframeScores(opts: {
       const confidence = sourcesAvailable / 3;
       const domains    = { momentum, technical, fundamental };
 
-      upsertStmt.run(sym, timeframe, opts.runId, score, confidence, JSON.stringify(domains), '[]', holdingDays, now);
+      await dbRun(upsertSql, [sym, timeframe, opts.runId, score, confidence, JSON.stringify(domains), '[]', holdingDays, now]);
       results.push({ symbol: sym, score, confidence, domains });
     }
 
@@ -195,24 +194,24 @@ export async function computeTimeframeScores(opts: {
   sql += ` ORDER BY ss.score DESC LIMIT ?`;
   params.push(topN);
 
-  const rows = db.prepare(sql).all(...params) as any[];
+  const rows = await dbAll<any>(sql, params);
 
   // Auto-create a screener_runs entry when a screenerId is provided
   let resolvedRunId: string | null = null;
   if (opts.screenerId && rows.length > 0) {
     resolvedRunId = `run_${opts.screenerId}_${Date.now()}`;
     try {
-      db.prepare(`
+      await dbRun(`
         INSERT INTO screener_runs (run_id, screener_id, run_ts, records_json, symbol_count, triggered_by)
         VALUES (?, ?, datetime('now'), ?, ?, 'auto')
         ON CONFLICT(run_id) DO NOTHING
-      `).run(resolvedRunId, opts.screenerId, JSON.stringify(rows.map((r: any) => ({ symbol: r.symbol }))), rows.length);
+      `, [resolvedRunId, opts.screenerId, JSON.stringify(rows.map((r: any) => ({ symbol: r.symbol }))), rows.length]);
     } catch { /* non-fatal */ }
   }
 
   const now = new Date().toISOString();
   for (const row of rows) {
-    upsertStmt.run(row.symbol, timeframe, resolvedRunId, row.score ?? 0, row.confidence ?? 0, '{}', row.reasons_json ?? '[]', holdingDays, now);
+    await dbRun(upsertSql, [row.symbol, timeframe, resolvedRunId, row.score ?? 0, row.confidence ?? 0, '{}', row.reasons_json ?? '[]', holdingDays, now]);
   }
 
   return rows.map((r: any) => ({ symbol: r.symbol, score: r.score ?? 0 }));

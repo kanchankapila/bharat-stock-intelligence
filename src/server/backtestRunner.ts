@@ -1,4 +1,4 @@
-import db from './db';
+import { dbGet, dbRun } from './dbAsync';
 import { computeTimeframeScores } from './scoringService';
 
 interface BacktestOpts {
@@ -18,10 +18,11 @@ function dayAdd(dateStr: string, days: number) {
   return d.toISOString().slice(0,10);
 }
 
-function getOhlcvOnOrAfter(symbol: string, targetDate: string) {
-  return db.prepare(
-    'SELECT date, open, close FROM stock_ohlcv WHERE symbol = ? AND date >= ? ORDER BY date ASC LIMIT 1'
-  ).get(symbol, targetDate) as any;
+async function getOhlcvOnOrAfter(symbol: string, targetDate: string) {
+  return dbGet<any>(
+    'SELECT date, open, close FROM stock_ohlcv WHERE symbol = ? AND date >= ? ORDER BY date ASC LIMIT 1',
+    [symbol, targetDate]
+  );
 }
 
 export async function runBacktest(opts: BacktestOpts) {
@@ -39,7 +40,7 @@ export async function runBacktest(opts: BacktestOpts) {
 
   let runDate: string | null = null;
   if (opts.runId) {
-    const r = db.prepare('SELECT run_ts FROM screener_runs WHERE run_id = ?').get(opts.runId) as any;
+    const r = await dbGet<any>('SELECT run_ts FROM screener_runs WHERE run_id = ?', [opts.runId]);
     if (r) runDate = (r.run_ts || new Date().toISOString()).slice(0,10);
   }
   if (!runDate) runDate = new Date().toISOString().slice(0,10);
@@ -52,8 +53,8 @@ export async function runBacktest(opts: BacktestOpts) {
     const entryTarget = dayAdd(runDate, 1);
     const exitTarget = dayAdd(entryTarget, horizon);
 
-    const entryRow = getOhlcvOnOrAfter(symbol, entryTarget);
-    const exitRow = getOhlcvOnOrAfter(symbol, exitTarget);
+    const entryRow = await getOhlcvOnOrAfter(symbol, entryTarget);
+    const exitRow = await getOhlcvOnOrAfter(symbol, exitTarget);
     if (!entryRow || !exitRow) continue;
 
     const grossEntry = entryRow.open;
@@ -119,10 +120,9 @@ export async function runBacktest(opts: BacktestOpts) {
     trade_log_json: JSON.stringify(tradeLog)
   };
 
-  const insert = db.prepare(`INSERT INTO backtesting_runs (
+  const info = await dbRun(`INSERT INTO backtesting_runs (
     run_name, strategy_config_json, start_date, end_date, symbols_count, total_trades, win_rate, total_return_pct, avg_trade_return_pct, profit_factor, monthly_returns_json, equity_curve_json, trade_log_json
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
-  const info = insert.run(
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`, [
     summary.run_name,
     summary.strategy_config_json,
     summary.start_date,
@@ -136,7 +136,7 @@ export async function runBacktest(opts: BacktestOpts) {
     summary.monthly_returns_json,
     summary.equity_curve_json,
     summary.trade_log_json
-  );
+  ]);
 
   return { insertedId: info.lastInsertRowid, summary };
 }
