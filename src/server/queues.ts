@@ -13,7 +13,7 @@ import { Queue, Worker, QueueEvents, Job, ConnectionOptions } from 'bullmq';
 import { fetchAllLiveStocks } from './liveStockData';
 import { cacheSet } from './cacheService';
 import { generateStockAnalysis } from '../services/aiService';
-import db from './db';
+import { dbGet, dbAll, dbRun } from './dbAsync';
 import { syncAndScore } from './scoringService';
 import Redis from 'ioredis';
 import { REDIS_BASE } from './redisConfig';
@@ -215,11 +215,11 @@ async function processAISignal(job: Job): Promise<void> {
   const now = new Date().toISOString();
 
   // Persist to DB (same schema as the existing saveSignal procedure)
-  db.prepare(`
-    INSERT INTO signals (symbol, type, entry, target, stopLoss, confidence, reasoning, createdAt)
+  await dbRun(`
+    INSERT INTO signals (symbol, type, entry, target, "stopLoss", confidence, reasoning, "createdAt")
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT DO NOTHING
-  `).run(
+  `, [
     symbol,
     analysis.signal,
     analysis.entry,
@@ -228,10 +228,10 @@ async function processAISignal(job: Job): Promise<void> {
     analysis.confidence,
     analysis.reasoning,
     now,
-  );
+  ]);
 
   // Write to unified_signals so outcome resolver and reward engine can track AI signal performance
-  db.prepare(`
+  await dbRun(`
     INSERT INTO unified_signals
       (symbol, signal_date, signal_source, signal_type,
        entry_price, target_price, stop_loss, confidence_score,
@@ -244,7 +244,7 @@ async function processAISignal(job: Job): Promise<void> {
       confidence_score=excluded.confidence_score,
       reasoning=excluded.reasoning,
       signal_generated_at=excluded.signal_generated_at
-  `).run(
+  `, [
     symbol,
     now.split('T')[0],
     analysis.signal ?? 'BUY',
@@ -254,7 +254,7 @@ async function processAISignal(job: Job): Promise<void> {
     analysis.confidence ?? null,
     analysis.reasoning ?? null,
     now,
-  );
+  ]);
 
   // Broadcast via WebSocket so the frontend gets a real-time alert
   try {
@@ -449,22 +449,22 @@ async function processScreenerPerf(_job: Job): Promise<void> {
 
 async function processAgentDataScientist(_job: Job): Promise<{ success: boolean; grade?: string }> {
   await runPython('agents/data_scientist_agent.py', [], 10 * 60_000);
-  const row = db.prepare(
+  const row = await dbGet<{ quality_grade: string }>(
     'SELECT quality_grade FROM agent_data_scientist_reports ORDER BY created_at DESC LIMIT 1'
-  ).get() as { quality_grade: string } | undefined;
+  );
   return { success: true, grade: row?.quality_grade };
 }
 
 async function processAgentStrategist(_job: Job): Promise<{ success: boolean }> {
   await runPython('agents/strategist_agent.py', [], 15 * 60_000);
 
-  const highPicks = db.prepare(`
+  const highPicks = await dbAll<any>(`
     SELECT symbol, timeframe, entry_zone_low, entry_zone_high,
            stop_loss, target_1, target_2, target_3, composite_score, narrative
     FROM agent_strategy_picks
     WHERE run_date = date('now') AND conviction = 'HIGH'
     ORDER BY composite_score DESC
-  `).all() as any[];
+  `);
 
   if (highPicks.length > 0) {
     try {
@@ -495,10 +495,10 @@ async function processAgentAuditor(_job: Job): Promise<{ success: boolean }> {
 async function processAgentOptimizer(_job: Job): Promise<{ success: boolean }> {
   await runPython('agents/optimizer_agent.py', [], 20 * 60_000);
 
-  const latest = db.prepare(
+  const latest = await dbGet<any>(
     'SELECT weights_changed, full_optimizer_triggered, baseline_win_rate, new_win_rate, narrative ' +
     'FROM agent_optimizer_reports ORDER BY created_at DESC LIMIT 1'
-  ).get() as any;
+  );
 
   if (latest && (latest.weights_changed || latest.full_optimizer_triggered)) {
     try {
@@ -1294,7 +1294,7 @@ export async function initQueues(): Promise<boolean> {
     });
 
     // Startup check: if stock_ohlcv has fewer than 1000 rows trigger full backfill once
-    const ohlcvCount = (db.prepare('SELECT COUNT(*) as c FROM stock_ohlcv').get() as any)?.c ?? 0;
+    const ohlcvCount = ((await dbGet<any>('SELECT COUNT(*) as c FROM stock_ohlcv'))?.c) ?? 0;
     if (ohlcvCount < 1000) {
       console.log(`[QUEUE] stock_ohlcv sparse (${ohlcvCount} rows) ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â queuing full backfill`);
       await ohlcvBackfillQueue.add('ohlcv-full-backfill-startup', { mode: 'full' }, {
@@ -1303,7 +1303,7 @@ export async function initQueues(): Promise<boolean> {
       });
     } else {
       // Always ensure NIFTY50 index history is present
-      const niftyCount = (db.prepare("SELECT COUNT(*) as c FROM stock_ohlcv WHERE symbol='NIFTY50'").get() as any)?.c ?? 0;
+      const niftyCount = ((await dbGet<any>("SELECT COUNT(*) as c FROM stock_ohlcv WHERE symbol='NIFTY50'"))?.c) ?? 0;
       if (niftyCount === 0) {
         console.log('[QUEUE] NIFTY50 missing from stock_ohlcv ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â queuing index backfill');
         await ohlcvBackfillQueue.add('ohlcv-indices-startup', { mode: 'indices' }, {
