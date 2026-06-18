@@ -8,17 +8,30 @@
  *
  * Timestamps are stored as epoch-ms integers to avoid SQLite/JS timezone parsing pitfalls.
  */
-import db from './db';
+import { dbAll, dbRun, dbExec } from './dbAsync';
 
-db.exec(`CREATE TABLE IF NOT EXISTS job_heartbeat (
+// This module is the sole creator of job_heartbeat on both engines (it is not in db.ts
+// nor the generated PG schema). The CREATE runs once, memoized, and every public fn
+// awaits it before its first query — so there is no create-vs-query race now that the
+// data layer is async.
+// last_run_at / last_success_at hold epoch-ms (~1.7e12) which overflows Postgres'
+// 32-bit INTEGER — use BIGINT (SQLite treats BIGINT as 64-bit INTEGER affinity, so the
+// same DDL is correct on both engines).
+const HEARTBEAT_DDL = `CREATE TABLE IF NOT EXISTS job_heartbeat (
   job_name        TEXT PRIMARY KEY,
   last_status     TEXT,
-  last_run_at     INTEGER,
-  last_success_at INTEGER,
+  last_run_at     BIGINT,
+  last_success_at BIGINT,
   last_error      TEXT,
   run_count       INTEGER DEFAULT 0,
   fail_count      INTEGER DEFAULT 0
-)`);
+)`;
+
+let _tableReady: Promise<void> | null = null;
+function ensureTable(): Promise<void> {
+  if (!_tableReady) _tableReady = dbExec(HEARTBEAT_DDL).catch(() => { /* already exists / DB not ready */ });
+  return _tableReady;
+}
 
 // Expected max age (ms) between successful runs, per job. Anything not listed defaults
 // to 26h (covers daily jobs with slack). Tune as cadences change.
@@ -32,37 +45,37 @@ const STALE_THRESHOLD_MS: Record<string, number> = {
 };
 const DEFAULT_STALE_MS = 26 * 60 * 60 * 1000;
 
-const _upsert = db.prepare(`
+const UPSERT_SQL = `
   INSERT INTO job_heartbeat (job_name, last_status, last_run_at, last_success_at, last_error, run_count, fail_count)
-  VALUES (@name, @status, @now, @successAt, @error, 1, @failInc)
+  VALUES (?, ?, ?, ?, ?, 1, ?)
   ON CONFLICT(job_name) DO UPDATE SET
-    last_status     = @status,
-    last_run_at     = @now,
-    last_success_at = CASE WHEN @status = 'success' THEN @now ELSE job_heartbeat.last_success_at END,
-    last_error      = @error,
+    last_status     = ?,
+    last_run_at     = ?,
+    last_success_at = CASE WHEN ? = 'success' THEN ? ELSE job_heartbeat.last_success_at END,
+    last_error      = ?,
     run_count       = job_heartbeat.run_count + 1,
-    fail_count      = job_heartbeat.fail_count + @failInc
-`);
+    fail_count      = job_heartbeat.fail_count + ?
+`;
 
-export function recordHeartbeat(jobName: string, status: 'success' | 'failed', error?: string): void {
+export async function recordHeartbeat(jobName: string, status: 'success' | 'failed', error?: string): Promise<void> {
   try {
+    await ensureTable();
     const now = Date.now();
-    _upsert.run({
-      name: jobName,
-      status,
-      now,
-      successAt: status === 'success' ? now : null,
-      error: error ?? null,
-      failInc: status === 'failed' ? 1 : 0,
-    });
+    const successAt = status === 'success' ? now : null;
+    const err = error ?? null;
+    const failInc = status === 'failed' ? 1 : 0;
+    // params follow placeholder order: VALUES(name,status,now,successAt,err,failInc),
+    // then UPDATE(status, now, status, now, err, failInc)
+    await dbRun(UPSERT_SQL, [jobName, status, now, successAt, err, failInc, status, now, status, now, err, failInc]);
   } catch {
     // Heartbeat must never break a job.
   }
 }
 
-export function getStaleJobs(): Array<{ job: string; hoursStale: number }> {
+export async function getStaleJobs(): Promise<Array<{ job: string; hoursStale: number }>> {
+  await ensureTable();
   const now = Date.now();
-  const rows = db.prepare('SELECT job_name, last_success_at FROM job_heartbeat').all() as
+  const rows = await dbAll('SELECT job_name, last_success_at FROM job_heartbeat') as
     Array<{ job_name: string; last_success_at: number | null }>;
   const stale: Array<{ job: string; hoursStale: number }> = [];
   for (const r of rows) {
@@ -75,12 +88,12 @@ export function getStaleJobs(): Array<{ job: string; hoursStale: number }> {
 
 /** Periodically log stale jobs. Returns the timer so callers may unref it. */
 export function startHeartbeatMonitor(): void {
-  const check = () => {
-    const stale = getStaleJobs();
+  const check = async () => {
+    const stale = await getStaleJobs();
     for (const s of stale) {
       console.warn(`[HEARTBEAT] STALE: '${s.job}' has not succeeded in ~${s.hoursStale}h`);
     }
   };
-  setInterval(check, 60 * 60 * 1000).unref();
+  setInterval(() => { void check(); }, 60 * 60 * 1000).unref();
   console.error('[HEARTBEAT] Job staleness monitor started (hourly).');
 }
