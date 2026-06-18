@@ -164,7 +164,7 @@ export const screenersRouter = router({
     .query(async ({ input }) => {
       const { findScreenersByStock } = await import('../trendlyneScreener');
       const { findMcScreenersByStock } = await import('../moneycontrolScreener');
-      return [...findScreenersByStock(input.stockId), ...(await findMcScreenersByStock(input.stockId))];
+      return [...(await findScreenersByStock(input.stockId)), ...(await findMcScreenersByStock(input.stockId))];
     }),
 
   refreshTrendlyneScreenersDB: publicProcedure

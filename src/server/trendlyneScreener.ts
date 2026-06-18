@@ -8,7 +8,7 @@
  * - Batch processing for large stock lists
  */
 
-import db from './db';
+import { dbGet, dbAll, dbRun, dbTransaction } from './dbAsync';
 import { getStockMapping, getStockMappingByTLId, getStockMappingByName } from './stockMapping';
 
 const TRENDLYNE_BASE_URL = 'https://kayal.trendlyne.com/broker-webview/kayal/all-in-one-screener-data-get/';
@@ -108,52 +108,58 @@ export function categorizeScreener(name: string, description: string = ''): {
 }
 
 // Database operations for screener mappings
-export function saveScreenerToDB(
+export async function saveScreenerToDB(
   screenerId: string,
   screenerName: string,
   screenpk: string,
   description?: string
-): void {
+): Promise<void> {
   try {
     const { sentiment, category, timeframe } = categorizeScreener(screenerName, description);
-    const stmt = db.prepare(`
-      INSERT OR REPLACE INTO trendlyne_screeners (
-        screener_id, screener_name, screenpk, description, 
+    await dbRun(`
+      INSERT INTO trendlyne_screeners (
+        screener_id, screener_name, screenpk, description,
         sentiment, category, timeframe, last_updated
       )
       VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-    `);
-    stmt.run(
-      screenerId, 
-      screenerName, 
-      screenpk, 
+      ON CONFLICT(screener_id) DO UPDATE SET
+        screener_name = excluded.screener_name,
+        screenpk      = excluded.screenpk,
+        description   = excluded.description,
+        sentiment     = excluded.sentiment,
+        category      = excluded.category,
+        timeframe     = excluded.timeframe,
+        last_updated  = CURRENT_TIMESTAMP
+    `, [
+      screenerId,
+      screenerName,
+      screenpk,
       description || `${screenerName} from Trendlyne`,
       sentiment,
       category,
-      timeframe
-    );
+      timeframe,
+    ]);
   } catch (error) {
     console.error(`❌ Error saving screener to DB:`, error);
   }
 }
 
-export function saveScreenerStocksToDB(
+export async function saveScreenerStocksToDB(
   screenerId: string,
   stocks: Array<{ stockId: string; name: string }>
-): void {
+): Promise<void> {
   try {
-    const upsertStmt = db.prepare(`
+    const upsertSql = `
       INSERT INTO trendlyne_screener_stocks (screener_id, stock_id, symbol, first_seen, last_seen)
       VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(screener_id, stock_id) DO UPDATE SET
         symbol    = excluded.symbol,
         last_seen = excluded.last_seen
-    `);
+    `;
 
     // Snapshot previous active symbols BEFORE delete
     const prevSymbols = new Set<string>(
-      (db.prepare(`SELECT symbol FROM screener_appearances WHERE screener_id = ? AND exited_date IS NULL`)
-        .all(screenerId) as Array<{ symbol: string }>)
+      (await dbAll(`SELECT symbol FROM screener_appearances WHERE screener_id = ? AND exited_date IS NULL`, [screenerId]) as Array<{ symbol: string }>)
         .map(r => r.symbol)
         .filter(Boolean)
     );
@@ -161,26 +167,23 @@ export function saveScreenerStocksToDB(
     const now = new Date().toISOString().slice(0, 10);
     const incomingIds = new Set(stocks.map(s => s.stockId));
 
-    db.transaction(() => {
+    await dbTransaction(async (tx) => {
       // Remove stocks no longer in screener
-      const existing = db.prepare(`SELECT stock_id FROM trendlyne_screener_stocks WHERE screener_id = ?`)
-        .all(screenerId) as Array<{ stock_id: string }>;
+      const existing = await tx.all(`SELECT stock_id FROM trendlyne_screener_stocks WHERE screener_id = ?`, [screenerId]) as Array<{ stock_id: string }>;
       const removed = existing.filter(r => !incomingIds.has(r.stock_id));
-      if (removed.length) {
-        const del = db.prepare(`DELETE FROM trendlyne_screener_stocks WHERE screener_id = ? AND stock_id = ?`);
-        for (const r of removed) del.run(screenerId, r.stock_id);
+      for (const r of removed) {
+        await tx.run(`DELETE FROM trendlyne_screener_stocks WHERE screener_id = ? AND stock_id = ?`, [screenerId, r.stock_id]);
       }
       // Upsert current stocks
       for (const stock of stocks) {
         const mapping = getStockMapping(stock.stockId);
         const symbol = mapping ? mapping.symbol : null;
-        upsertStmt.run(screenerId, stock.stockId, symbol, now, now);
+        await tx.run(upsertSql, [screenerId, stock.stockId, symbol, now, now]);
       }
-    })();
+    });
 
     // Update screener_master to reflect fresh sync time
-    db.prepare(`UPDATE screener_master SET last_updated = ?, stocks_synced_at = ? WHERE scan_id = ?`)
-      .run(now, now, screenerId);
+    await dbRun(`UPDATE screener_master SET last_updated = ?, stocks_synced_at = ? WHERE scan_id = ?`, [now, now, screenerId]);
 
     // Diff patch: record entries/exits in screener_appearances
     const today = new Date().toISOString().slice(0, 10);
@@ -194,62 +197,59 @@ export function saveScreenerStocksToDB(
     const exited  = Array.from(prevSymbols).filter(s => !currentSymbols.has(s));
 
     if (entered.length > 0) {
-      const insertApp = db.prepare(
-        `INSERT OR IGNORE INTO screener_appearances (screener_id, source, symbol, appeared_date) VALUES (?, 'trendlyne', ?, ?)`
-      );
-      db.transaction(() => {
-        for (const sym of entered) insertApp.run(screenerId, sym, today);
-      })();
+      await dbTransaction(async (tx) => {
+        for (const sym of entered) {
+          await tx.run(`INSERT OR IGNORE INTO screener_appearances (screener_id, source, symbol, appeared_date) VALUES (?, 'trendlyne', ?, ?)`, [screenerId, sym, today]);
+        }
+      });
     }
 
     if (exited.length > 0) {
-      db.prepare(
-        `UPDATE screener_appearances SET exited_date = ? WHERE screener_id = ? AND symbol IN (${exited.map(() => '?').join(',')}) AND exited_date IS NULL`
-      ).run(today, screenerId, ...exited);
+      await dbRun(
+        `UPDATE screener_appearances SET exited_date = ? WHERE screener_id = ? AND symbol IN (${exited.map(() => '?').join(',')}) AND exited_date IS NULL`,
+        [today, screenerId, ...exited]
+      );
     }
   } catch (error) {
     console.error(`❌ Error saving screener stocks to DB:`, error);
   }
 }
 
-export function getScreenerFromDB(screenerId: string): { screener_name: string; screenpk: string } | null {
+export async function getScreenerFromDB(screenerId: string): Promise<{ screener_name: string; screenpk: string } | null> {
   try {
-    const stmt = db.prepare(`
+    return await dbGet(`
       SELECT screener_name, screenpk FROM trendlyne_screeners WHERE screener_id = ?
-    `);
-    return stmt.get(screenerId) as { screener_name: string; screenpk: string } | null;
+    `, [screenerId]) as { screener_name: string; screenpk: string } | null;
   } catch (error) {
     console.error(`❌ Error retrieving screener from DB:`, error);
     return null;
   }
 }
 
-export function getAllScreenersFromDB(): Array<{ 
-  screener_id: string; 
-  screener_name: string; 
-  screenpk: string; 
+export async function getAllScreenersFromDB(): Promise<Array<{
+  screener_id: string;
+  screener_name: string;
+  screenpk: string;
   description: string;
   sentiment: string;
   category: string;
   timeframe: string;
-}> {
+}>> {
   try {
-    const stmt = db.prepare(`
-      SELECT screener_id, screener_name, screenpk, description, sentiment, category, timeframe 
-      FROM trendlyne_screeners 
+    return await dbAll(`
+      SELECT screener_id, screener_name, screenpk, description, sentiment, category, timeframe
+      FROM trendlyne_screeners
       ORDER BY screener_name
-    `);
-    return stmt.all() as any[];
+    `) as any[];
   } catch (error) {
     console.error(`❌ Error retrieving all screeners from DB:`, error);
     return [];
   }
 }
 
-export function clearScreenersDB(): void {
+export async function clearScreenersDB(): Promise<void> {
   try {
-    const stmt = db.prepare(`DELETE FROM trendlyne_screeners`);
-    stmt.run();
+    await dbRun(`DELETE FROM trendlyne_screeners`);
     console.log(`🗑️ Cleared all screeners from database`);
   } catch (error) {
     console.error(`❌ Error clearing screeners from DB:`, error);
@@ -613,21 +613,21 @@ export async function fetchTrendlyneScreenerData(
         try {
           // 1. Fetch Quant Scores
           const placeholders = symbols.map(() => '?').join(',');
-          const qScores = db.prepare(`
+          const qScores = await dbAll(`
             SELECT symbol, rank_composite, return_1w, return_1m, composite_class
             FROM quant_scores
             WHERE symbol IN (${placeholders})
-          `).all(...symbols) as any[];
-          
+          `, symbols) as any[];
+
           const scoreMap = new Map(qScores.map(q => [q.symbol, q]));
-          
+
           // 2. Fetch Other Screeners
-          const otherScrs = db.prepare(`
+          const otherScrs = await dbAll(`
             SELECT ss.symbol, s.screener_name
             FROM trendlyne_screener_stocks ss
             JOIN trendlyne_screeners s ON s.screener_id = ss.screener_id
             WHERE ss.symbol IN (${placeholders})
-          `).all(...symbols) as any[];
+          `, symbols) as any[];
           
           const scrMap = new Map<string, string[]>();
           otherScrs.forEach(o => {
@@ -699,14 +699,14 @@ export async function fetchAllTrendlyneScreenerNames(forceRefresh = false): Prom
   try {
     // Return cached screeners unless a forced refresh is requested
     if (!forceRefresh) {
-      const existingScreeners = getAllScreenersFromDB();
+      const existingScreeners = await getAllScreenersFromDB();
       if (existingScreeners.length > 0) {
         console.log(`✅ Using ${existingScreeners.length} screeners from database (previously fetched)`);
         return new Set(existingScreeners.map(s => s.screener_name));
       }
     } else {
       // Clear existing screeners so the full discovery re-runs
-      db.prepare('DELETE FROM trendlyne_screeners').run();
+      await dbRun('DELETE FROM trendlyne_screeners');
       console.log('🔄 Force-refreshing Trendlyne screeners — cleared existing DB entries');
     }
 
@@ -797,14 +797,16 @@ export async function fetchAllTrendlyneScreenerNames(forceRefresh = false): Prom
     console.log(`\n💾 Saving ${screenerMappings.size} screener mappings to database...`);
     console.log(`📈 Statistics: ${successCount} successful | ${errorCount} errors | ${totalTime}s total time`);
 
+    const saveTasks: Promise<void>[] = [];
     screenerMappings.forEach((screenpk, screenerNameId) => {
       // Get the full name from screenerNames
       const screenerName = Array.from(screenerNames).find(
         name => name.toLowerCase().replace(/\s+/g, '-') === screenerNameId
       ) || screenerNameId;
 
-      saveScreenerToDB(screenerNameId, screenerName, screenpk);
+      saveTasks.push(saveScreenerToDB(screenerNameId, screenerName, screenpk));
     });
+    await Promise.all(saveTasks);
 
     console.log(`✅ Fetched and saved ${screenerNames.size} unique screeners to database`);
     console.log(`✅ Average time per stock: ${Math.round(totalTime / allStockIds.length * 1000)}ms`);
@@ -822,16 +824,15 @@ export async function fetchAllTrendlyneScreenerNames(forceRefresh = false): Prom
  */
 export async function getTrendlyneScreenerList() {
   // 1. Get raw screeners from their respective source tables
-  const trendlyneScreeners = getAllScreenersFromDB();
-  
+  const trendlyneScreeners = await getAllScreenersFromDB();
+
   let mcScreeners: any[] = [];
   try {
-    const stmt = db.prepare(`
+    mcScreeners = await dbAll(`
       SELECT scan_id, screener_name, type, is_positive
       FROM moneycontrol_screeners
       ORDER BY screener_name
-    `);
-    mcScreeners = stmt.all() as any[];
+    `) as any[];
   } catch (error) {
     console.error('❌ Error fetching MC screeners for list:', error);
   }
@@ -839,10 +840,10 @@ export async function getTrendlyneScreenerList() {
   // 2. Load the "New Analysis" metadata from screener_master
   const masterMeta = new Map<string, any>();
   try {
-    const rows = db.prepare(`
-      SELECT scan_id, inferred_sentiment, inferred_category, inferred_timeframe, confidence 
+    const rows = await dbAll(`
+      SELECT scan_id, inferred_sentiment, inferred_category, inferred_timeframe, confidence
       FROM screener_master
-    `).all() as any[];
+    `) as any[];
     for (const r of rows) {
       masterMeta.set(r.scan_id, r);
     }
@@ -855,7 +856,7 @@ export async function getTrendlyneScreenerList() {
     console.log(`📊 Database empty, triggering background fetch of screener names from Trendlyne API...`);
     fetchAllTrendlyneScreenerNames().catch(err => console.error('Background fetch error:', err));
     
-    return getTrendlyneScreenerCategories().map(c => {
+    return (await getTrendlyneScreenerCategories()).map(c => {
       const { sentiment, category, timeframe } = categorizeScreener(c.name, c.description);
       return {
         id: c.id,
@@ -907,11 +908,11 @@ export async function getTrendlyneScreenerList() {
 
   // 5. Process ETnow screeners
   try {
-    const etScreeners = db.prepare(`
+    const etScreeners = await dbAll(`
       SELECT screener_id, screener_name, query_condition
       FROM etnow_screeners
       ORDER BY screener_name
-    `).all() as any[];
+    `) as any[];
 
     for (const et of etScreeners) {
       const meta = masterMeta.get(et.screener_id);
@@ -971,33 +972,31 @@ function determineSentiment(screenerName: string): 'bullish' | 'bearish' | 'neut
  * @param stockId - The stock ID to search for
  * @returns Array of screeners containing the stock with sentiment info
  */
-export function findScreenersByStock(stockId: string): Array<{
+export async function findScreenersByStock(stockId: string): Promise<Array<{
   id: string;
   name: string;
   sentiment: 'bullish' | 'bearish' | 'neutral';
   screenpk: string;
   source: string;
   description: string;
-}> {
+}>> {
   try {
     if (!stockId || stockId === '#N/A' || stockId === 'undefined' || stockId === 'null') {
       return [];
     }
 
+    // Attempt to resolve symbol if stockId is passed as a symbol or mapping exists
+    const mapping = getStockMapping(stockId);
+    const symbol = mapping ? mapping.symbol : stockId;
+
     // Get matching screeners enriched with NLP metadata
-    const stmt = db.prepare(`
+    const matches = await dbAll(`
       SELECT s.screener_id, s.screener_name, s.screenpk, s.description, m.inferred_sentiment, s.sentiment as fallback_sentiment
       FROM trendlyne_screeners s
       JOIN trendlyne_screener_stocks ss ON s.screener_id = ss.screener_id
       LEFT JOIN screener_master m ON s.screener_id = m.scan_id
       WHERE ss.stock_id = ? OR ss.symbol = ?
-    `);
-    
-    // Attempt to resolve symbol if stockId is passed as a symbol or mapping exists
-    const mapping = getStockMapping(stockId);
-    const symbol = mapping ? mapping.symbol : stockId;
-    
-    const matches = stmt.all(stockId, symbol) as Array<{ 
+    `, [stockId, symbol]) as Array<{
       screener_id: string; 
       screener_name: string;
       screenpk: string;
@@ -1035,10 +1034,10 @@ export async function syncAllScreenerStocksToDB(timeframeFilter?: 'intraday' | '
     console.log(`🔄 Starting Trendlyne screener synchronization (filter: ${timeframeFilter || 'all'})...`);
     
     // 1. Ensure we have screeners in the DB
-    let screeners = getAllScreenersFromDB();
+    let screeners = await getAllScreenersFromDB();
     if (screeners.length === 0) {
       await fetchAllTrendlyneScreenerNames();
-      screeners = getAllScreenersFromDB();
+      screeners = await getAllScreenersFromDB();
     }
     
     if (timeframeFilter) {
@@ -1066,7 +1065,7 @@ export async function syncAllScreenerStocksToDB(timeframeFilter?: 'intraday' | '
             name: s.name
           }));
           
-          saveScreenerStocksToDB(screener.screener_id, stocksToSave);
+          await saveScreenerStocksToDB(screener.screener_id, stocksToSave);
           successCount++;
           console.log(`  ✅ Saved ${stocksToSave.length} stocks for ${screener.screener_name}`);
         }
@@ -1091,25 +1090,25 @@ export async function syncAllScreenerStocksToDB(timeframeFilter?: 'intraday' | '
  */
 export async function recategorizeAllScreeners() {
   try {
-    const screeners = getAllScreenersFromDB();
+    const screeners = await getAllScreenersFromDB();
     console.log(`🔄 Re-categorizing ${screeners.length} screeners...`);
-    
-    let updatedCount = 0;
-    const updateStmt = db.prepare(`
-      UPDATE trendlyne_screeners 
-      SET sentiment = ?, category = ?, timeframe = ? 
-      WHERE screener_id = ?
-    `);
 
-    db.transaction(() => {
+    let updatedCount = 0;
+    const updateSql = `
+      UPDATE trendlyne_screeners
+      SET sentiment = ?, category = ?, timeframe = ?
+      WHERE screener_id = ?
+    `;
+
+    await dbTransaction(async (tx) => {
       for (const s of screeners) {
         const { sentiment, category, timeframe } = categorizeScreener(s.screener_name, s.description);
         if (sentiment !== s.sentiment || category !== s.category || timeframe !== s.timeframe) {
-          updateStmt.run(sentiment, category, timeframe, s.screener_id);
+          await tx.run(updateSql, [sentiment, category, timeframe, s.screener_id]);
           updatedCount++;
         }
       }
-    })();
+    });
 
     console.log(`✅ Re-categorization complete. Updated ${updatedCount} screeners.`);
     return { success: true, updatedCount };
@@ -1285,12 +1284,12 @@ export async function runIntradayScreenerScan(): Promise<{
 
   try {
     // 1. Fetch all intraday screeners
-    const screeners = db.prepare(`
+    const screeners = await dbAll(`
       SELECT DISTINCT s.screener_id, s.screener_name, s.screenpk, s.sentiment, m.inferred_sentiment
       FROM trendlyne_screeners s
       LEFT JOIN screener_master m ON s.screener_id = m.scan_id
       WHERE s.timeframe = 'intraday' OR m.inferred_timeframe = 'intraday'
-    `).all() as any[];
+    `) as any[];
 
     console.log(`⚡ [INTRADAY SCAN] Found ${screeners.length} intraday screeners to process.`);
 
@@ -1326,11 +1325,11 @@ export async function runIntradayScreenerScan(): Promise<{
         // 3. Lookup stock score from quant_scores or stock_scores fallback
         let score: number | null = null;
         try {
-          const qScore = db.prepare('SELECT rank_composite FROM quant_scores WHERE symbol = ?').get(symbol) as any;
+          const qScore = await dbGet('SELECT rank_composite FROM quant_scores WHERE symbol = ?', [symbol]) as any;
           if (qScore?.rank_composite !== undefined && qScore?.rank_composite !== null) {
             score = qScore.rank_composite;
           } else {
-            const sScore = db.prepare("SELECT score FROM stock_scores WHERE symbol = ? AND timeframe = 'long_term'").get(symbol) as any;
+            const sScore = await dbGet("SELECT score FROM stock_scores WHERE symbol = ? AND timeframe = 'long_term'", [symbol]) as any;
             if (sScore?.score !== undefined && sScore?.score !== null) {
               score = sScore.score;
             }
@@ -1348,7 +1347,7 @@ export async function runIntradayScreenerScan(): Promise<{
         // 4. Deduplicate active signals
         let existingActive = 0;
         try {
-          const check = db.prepare("SELECT COUNT(*) as count FROM signals WHERE symbol = ? AND status = 'ACTIVE'").get(symbol) as any;
+          const check = await dbGet("SELECT COUNT(*) as count FROM signals WHERE symbol = ? AND status = 'ACTIVE'", [symbol]) as any;
           existingActive = check?.count || 0;
         } catch (err) {
           console.error(`❌ [INTRADAY SCAN] Error checking active signals for ${symbol}:`, err);
@@ -1368,10 +1367,10 @@ export async function runIntradayScreenerScan(): Promise<{
         const reasoning = `Strong quantitative score of ${score.toFixed(1)}% and active intraday breakout spotted in Trendlyne screener '${name}'.`;
 
         try {
-          db.prepare(`
-            INSERT INTO signals (symbol, type, entry, target, stopLoss, confidence, reasoning, status)
+          await dbRun(`
+            INSERT INTO signals (symbol, type, entry, target, "stopLoss", confidence, reasoning, status)
             VALUES (?, ?, ?, ?, ?, ?, ?, 'ACTIVE')
-          `).run(symbol, type, entry, target, stopLoss, confidence, reasoning);
+          `, [symbol, type, entry, target, stopLoss, confidence, reasoning]);
 
           newSignalsGenerated++;
           console.log(`🎯 [INTRADAY SCAN] GENERATED ${type} SIGNAL FOR ${symbol}! Score: ${score.toFixed(1)}% | Entry: ₹${entry} | Target: ₹${target} | SL: ₹${stopLoss}`);
