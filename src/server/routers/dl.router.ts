@@ -1,5 +1,5 @@
 import { z } from "zod";
-import db from "../db";
+import { dbGet, dbAll } from "../dbAsync";
 import { router, publicProcedure } from "../trpc";
 
 export const dlRouter = router({
@@ -8,7 +8,7 @@ export const dlRouter = router({
       symbols: z.array(z.string()).optional(),
       date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
     }).optional())
-    .query(({ input }) => {
+    .query(async ({ input }) => {
       const date = input?.date ?? new Date().toISOString().split("T")[0];
       const base = `
         SELECT d.symbol, d.prediction_date, d.model_name, d.model_version,
@@ -24,15 +24,15 @@ export const dlRouter = router({
       `;
       if (input?.symbols?.length) {
         const placeholders = input.symbols.map(() => "?").join(",");
-        return (db.prepare(`${base} AND d.symbol IN (${placeholders}) ORDER BY d.confidence DESC`)
-          .all(date, ...input.symbols) as any[])
+        return (await dbAll<any>(`${base} AND d.symbol IN (${placeholders}) ORDER BY d.confidence DESC`,
+          [date, ...input.symbols]))
           .map(r => ({
             ...r,
             topFeatures: r.top_features_json ? JSON.parse(r.top_features_json) : null,
             attention:   r.attention_json    ? JSON.parse(r.attention_json)    : null,
           }));
       }
-      return (db.prepare(`${base} ORDER BY d.confidence DESC LIMIT 200`).all(date) as any[])
+      return (await dbAll<any>(`${base} ORDER BY d.confidence DESC LIMIT 200`, [date]))
         .map(r => ({
           ...r,
           topFeatures: r.top_features_json ? JSON.parse(r.top_features_json) : null,
@@ -45,11 +45,11 @@ export const dlRouter = router({
       model: z.string().optional(),
       days:  z.number().min(7).max(365).default(30),
     }).optional())
-    .query(({ input }) => {
+    .query(async ({ input }) => {
       const days  = input?.days  ?? 30;
       const model = input?.model ?? "LSTM_TFT_ENSEMBLE";
       const cutoff = new Date(Date.now() - days * 86400000).toISOString().split("T")[0];
-      return db.prepare(`
+      return dbAll(`
         SELECT model_name, model_version, eval_date, horizon_days,
                directional_accuracy, roc_auc, precision_up, recall_up,
                f1_score, sharpe_ratio, profit_factor, sample_count,
@@ -57,17 +57,17 @@ export const dlRouter = router({
         FROM dl_model_performance
         WHERE model_name = ? AND eval_date >= ?
         ORDER BY eval_date DESC
-      `).all(model, cutoff);
+      `, [model, cutoff]);
     }),
 
   getMarketRegime: publicProcedure
     .input(z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }).optional())
-    .query(({ input }) => {
+    .query(async ({ input }) => {
       const date = input?.date ?? new Date().toISOString().split("T")[0];
-      const row = db.prepare(`
+      const row = await dbGet<any>(`
         SELECT date, regime, regime_prob, hmm_state, viterbi_path_json, features_json, computed_at
         FROM market_regimes WHERE date <= ? ORDER BY date DESC LIMIT 1
-      `).get(date) as any;
+      `, [date]);
       if (!row) return null;
       return {
         ...row,
@@ -82,10 +82,10 @@ export const dlRouter = router({
       horizon: z.union([z.literal(5), z.literal(15)]).default(5),
       days:    z.number().min(7).max(90).default(30),
     }))
-    .query(({ input }) => {
+    .query(async ({ input }) => {
       const cutoff = new Date(Date.now() - input.days * 86400000).toISOString().split("T")[0];
       const h = input.horizon as 5 | 15;
-      return db.prepare(`
+      return dbAll(`
         SELECT prediction_date,
                prob_up_${h}d AS prob_up,
                exp_ret_${h}d AS exp_ret,
@@ -95,6 +95,6 @@ export const dlRouter = router({
         FROM deep_learning_predictions
         WHERE symbol = ? AND prediction_date >= ? AND model_name = 'LSTM_TFT_ENSEMBLE'
         ORDER BY prediction_date DESC
-      `).all(input.symbol, cutoff);
+      `, [input.symbol, cutoff]);
     }),
 });

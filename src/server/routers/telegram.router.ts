@@ -1,15 +1,15 @@
 import { z } from "zod";
 import { router, publicProcedure } from "../trpc";
 import { telegramService } from "../telegramService";
-import db from "../db";
+import { dbGet } from "../dbAsync";
 
 export const telegramRouter = router({
   getTelegramSettings: publicProcedure
     .query(async () => {
       try {
-        const tokenRow = db.prepare("SELECT value FROM app_settings WHERE key = 'telegram_bot_token'").get() as { value: string } | undefined;
-        const chatRow = db.prepare("SELECT value FROM app_settings WHERE key = 'telegram_chat_id'").get() as { value: string } | undefined;
-        const enabledRow = db.prepare("SELECT value FROM app_settings WHERE key = 'telegram_enabled'").get() as { value: string } | undefined;
+        const tokenRow = await dbGet<{ value: string }>("SELECT value FROM app_settings WHERE key = 'telegram_bot_token'");
+        const chatRow = await dbGet<{ value: string }>("SELECT value FROM app_settings WHERE key = 'telegram_chat_id'");
+        const enabledRow = await dbGet<{ value: string }>("SELECT value FROM app_settings WHERE key = 'telegram_enabled'");
 
         // Mask token for security in settings UI
         const rawToken = tokenRow?.value || "";
@@ -37,7 +37,7 @@ export const telegramRouter = router({
         // If masked token is provided back, preserve the original value
         let actualToken = input.botToken;
         if (input.botToken.includes('...')) {
-          const tokenRow = db.prepare("SELECT value FROM app_settings WHERE key = 'telegram_bot_token'").get() as { value: string } | undefined;
+          const tokenRow = await dbGet<{ value: string }>("SELECT value FROM app_settings WHERE key = 'telegram_bot_token'");
           actualToken = tokenRow?.value || "";
         }
 
