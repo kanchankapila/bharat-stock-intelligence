@@ -55,7 +55,7 @@ export const scoringRouter = router({
   getQuantScoringStatus: publicProcedure
     .query(async () => {
       const { getQuantScoringProgress, getQuantScoreSummary } = await import('../quantScoringService');
-      return { progress: getQuantScoringProgress(), summary: getQuantScoreSummary() };
+      return { progress: getQuantScoringProgress(), summary: await getQuantScoreSummary() };
     }),
 
   getStrategyStocks: publicProcedure
@@ -76,14 +76,14 @@ export const scoringRouter = router({
     }))
     .query(async ({ input }) => {
       const { getStrategyStocks } = await import('../quantScoringService');
-      return getStrategyStocks(input.strategy, input.limit, input.filters ?? {});
+      return await getStrategyStocks(input.strategy, input.limit, input.filters ?? {});
     }),
 
   getQuantScore: publicProcedure
     .input(z.object({ symbol: z.string() }))
     .query(async ({ input }) => {
       const { getQuantScore } = await import('../quantScoringService');
-      return getQuantScore(input.symbol) ?? null;
+      return (await getQuantScore(input.symbol)) ?? null;
     }),
 
   getConvergenceSignals: publicProcedure

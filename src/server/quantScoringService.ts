@@ -14,7 +14,7 @@
  * Runs nightly via BullMQ (QUEUE_QUANT_SCORING). First run is triggered at startup.
  */
 
-import db from './db';
+import { dbGet, dbAll, dbRun, dbTransaction } from './dbAsync';
 
 const RISK_FREE = 0.04;
 const MIN_DAYS  = 240; // require ~1 full trading year
@@ -44,35 +44,38 @@ let scoringProgress: QuantScoringProgress = {
   lastError: null,
 };
 
-function persistProgress(): void {
+async function persistProgress(): Promise<void> {
   try {
-    db.prepare(
-      "INSERT INTO app_settings(key,value,updatedAt) VALUES(?,?,CURRENT_TIMESTAMP) " +
-      "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updatedAt=excluded.updatedAt"
-    ).run('quant_scoring_progress', JSON.stringify(scoringProgress));
+    await dbRun(
+      'INSERT INTO app_settings(key,value,"updatedAt") VALUES(?,?,CURRENT_TIMESTAMP) ' +
+      'ON CONFLICT(key) DO UPDATE SET value=excluded.value, "updatedAt"=excluded."updatedAt"',
+      ['quant_scoring_progress', JSON.stringify(scoringProgress)]
+    );
   } catch (err: unknown) {
     console.warn('[QUANT] Could not persist progress:', (err as Error).message);
   }
 }
 
-try {
-  const _row = db.prepare("SELECT value FROM app_settings WHERE key = 'quant_scoring_progress'").get() as { value: string } | undefined;
-  if (_row) {
-    const saved = JSON.parse(_row.value) as Partial<QuantScoringProgress>;
-    scoringProgress = { ...scoringProgress, ...saved, isRunning: false };
-  }
-} catch { /* no persisted state */ }
+void (async () => {
+  try {
+    const _row = await dbGet("SELECT value FROM app_settings WHERE key = 'quant_scoring_progress'") as { value: string } | undefined;
+    if (_row) {
+      const saved = JSON.parse(_row.value) as Partial<QuantScoringProgress>;
+      scoringProgress = { ...scoringProgress, ...saved, isRunning: false };
+    }
+  } catch { /* no persisted state */ }
+})();
 
 export function getQuantScoringProgress(): QuantScoringProgress {
   return { ...scoringProgress };
 }
 
-export function getQuantScoreCount(): number {
-  return (db.prepare('SELECT COUNT(*) as n FROM quant_scores').get() as any).n;
+export async function getQuantScoreCount(): Promise<number> {
+  return ((await dbGet('SELECT COUNT(*) as n FROM quant_scores')) as any).n;
 }
 
 export async function bootstrapQuantScoring(bullmqReady: boolean): Promise<void> {
-  const count = getQuantScoreCount();
+  const count = await getQuantScoreCount();
   if (count > 0) {
     console.log(`[QUANT] ${count} existing rows — skipping bootstrap`);
     return;
@@ -161,10 +164,10 @@ function percentileRanks(values: (number | null)[], higherIsBetter = true): numb
 
 // ─── Screener confluence (one-shot SQL) ──────────────────────────────────────
 
-function loadScreenerConfluence(): Map<string, {
+async function loadScreenerConfluence(): Promise<Map<string, {
   bullish: number; bearish: number; netScore: number; categoryBreadth: number;
-}> {
-  const rows = db.prepare(`
+}>> {
+  const rows = await dbAll(`
     SELECT
       symbol,
       COUNT(DISTINCT sm.inferred_category) AS category_breadth,
@@ -184,7 +187,7 @@ function loadScreenerConfluence(): Map<string, {
     JOIN screener_master sm ON sm.scan_id = stocks.sid
     WHERE sm.inferred_sentiment IN ('bullish', 'bearish')
     GROUP BY symbol
-  `).all() as any[];
+  `) as any[];
 
   const map = new Map<string, any>();
   for (const r of rows) {
@@ -200,22 +203,22 @@ function loadScreenerConfluence(): Map<string, {
 
 // ─── Fundamentals lookup (one-shot) ──────────────────────────────────────────
 
-function loadFundamentals(): Map<string, any> {
-  const rows = db.prepare(`
+async function loadFundamentals(): Promise<Map<string, any>> {
+  const rows = await dbAll(`
     SELECT symbol, trailing_pe, forward_pe, debt_to_equity, return_on_equity,
            operating_margins, revenue_growth, piotroski_f_score, earnings_growth
     FROM stock_fundamentals
-  `).all() as any[];
+  `) as any[];
   return new Map(rows.map(r => [r.symbol, r]));
 }
 
 // ─── Technical Composite lookup (one-shot) ───────────────────────────────────
 
-function loadTechnicalCompositeScores(): Map<string, any> {
-  const rows = db.prepare(`
+async function loadTechnicalCompositeScores(): Promise<Map<string, any>> {
+  const rows = await dbAll(`
     SELECT symbol, composite_score
     FROM technical_composite_scores
-  `).all() as any[];
+  `) as any[];
   return new Map(rows.map(r => [r.symbol, r]));
 }
 
@@ -235,16 +238,16 @@ export async function runQuantScoring(): Promise<void> {
     completedAt: null,
     lastError: null,
   };
-  persistProgress();
+  await persistProgress();
 
   try {
     console.log('[QUANT] Loading OHLCV data...');
 
     // Load all OHLCV rows ordered by symbol then date
-    const allRows = db.prepare(
+    const allRows = await dbAll(
       `SELECT symbol, date, close, volume FROM stock_ohlcv
        WHERE close > 0 ORDER BY symbol, date ASC`
-    ).all() as (OHLCVRow & { symbol: string })[];
+    ) as (OHLCVRow & { symbol: string })[];
 
     // Group by symbol
     const bySymbol = new Map<string, OHLCVRow[]>();
@@ -256,13 +259,13 @@ export async function runQuantScoring(): Promise<void> {
     // Filter to symbols with enough history
     const eligible = [...bySymbol.entries()].filter(([, rows]) => rows.length >= MIN_DAYS);
     scoringProgress.totalSymbols = eligible.length;
-    persistProgress();
+    await persistProgress();
     console.log(`[QUANT] ${eligible.length} eligible symbols`);
 
     // Pre-load screener confluence, fundamentals, and technical composites
-    const screenerMap  = loadScreenerConfluence();
-    const fundMap      = loadFundamentals();
-    const techMap      = loadTechnicalCompositeScores();
+    const screenerMap  = await loadScreenerConfluence();
+    const fundMap      = await loadFundamentals();
+    const techMap      = await loadTechnicalCompositeScores();
 
     // ── Compute raw metrics per symbol ──────────────────────────────────────
 
@@ -375,7 +378,7 @@ export async function runQuantScoring(): Promise<void> {
 
     // ── Batch upsert ────────────────────────────────────────────────────────
 
-    const upsert = db.prepare(`
+    const UPSERT_SQL = `
       INSERT INTO quant_scores (
         symbol,
         return_1w, return_1m, return_3m, return_6m, return_12m,
@@ -435,12 +438,12 @@ export async function runQuantScoring(): Promise<void> {
         composite_class = excluded.composite_class,
         ohlcv_days = excluded.ohlcv_days,
         last_computed = CURRENT_TIMESTAMP
-    `);
+    `;
 
-    const insertAll = db.transaction(() => {
+    await dbTransaction(async (tx) => {
       for (let i = 0; i < computed.length; i++) {
         const c = computed[i];
-        upsert.run(
+        await tx.run(UPSERT_SQL, [
           c.symbol,
           c.return_1w, c.return_1m, c.return_3m, c.return_6m, c.return_12m,
           c.above_sma200, c.sma200_distance_pct, momentumPct[i],
@@ -453,25 +456,22 @@ export async function runQuantScoring(): Promise<void> {
           momentumPct[i], qualityPct[i], valuationPct[i], compositePct[i],
           classify(compositePct[i]),
           c.ohlcv_days,
-        );
+        ]);
         scoringProgress.processed++;
-        if (scoringProgress.processed % 50 === 0) persistProgress();
       }
     });
-
-    insertAll();
     scoringProgress.completedAt = new Date().toISOString();
-    persistProgress();
+    await persistProgress();
     console.log(`[QUANT] Scoring complete — ${computed.length} symbols written to quant_scores`);
 
   } catch (err: any) {
     scoringProgress.lastError = err.message;
-    persistProgress();
+    await persistProgress();
     console.error('[QUANT] Scoring failed:', err.message);
     throw err;
   } finally {
     scoringProgress.isRunning = false;
-    persistProgress();
+    await persistProgress();
   }
 }
 
@@ -491,11 +491,11 @@ export interface StrategyFilters {
   minMarketCapCr?: number;     // market cap in crores
 }
 
-export function getStrategyStocks(
+export async function getStrategyStocks(
   strategy: Strategy = 'composite',
   limit = 25,
   filters: StrategyFilters = {},
-): any[] {
+): Promise<any[]> {
   let col = '';
   let customSelect = '';
   let customWhere = '';
@@ -569,7 +569,7 @@ export function getStrategyStocks(
   const where = conditions.join(' AND ');
   params.push(limit);
 
-  const rows = db.prepare(`
+  const rows = await dbAll(`
     SELECT
       qs.symbol,
       ns.name,
@@ -599,13 +599,13 @@ export function getStrategyStocks(
     WHERE ${where} ${customWhere}
     ORDER BY ${selectColName} DESC
     LIMIT ?
-  `).all(...params) as any[];
+  `, params) as any[];
 
   return rows;
 }
 
-export function getQuantScore(symbol: string): any | null {
-  return db.prepare(`
+export async function getQuantScore(symbol: string): Promise<any | null> {
+  return await dbGet(`
     SELECT qs.*, ns.name, ns.sector, sf.market_cap, sf.analyst_rating,
            sf.book_value, sf.eps_ttm, sf.eps_forward, sf.dividend_yield,
            sf.fifty_two_week_high, sf.fifty_two_week_low, sf.avg_volume_3m
@@ -613,22 +613,22 @@ export function getQuantScore(symbol: string): any | null {
     LEFT JOIN nse_stocks ns ON ns.symbol = qs.symbol
     LEFT JOIN stock_fundamentals sf ON sf.symbol = qs.symbol
     WHERE qs.symbol = ?
-  `).get(symbol) as any | null;
+  `, [symbol]) as any | null;
 }
 
-export function getQuantScoreSummary(): {
+export async function getQuantScoreSummary(): Promise<{
   totalScored: number;
   byClass: Record<string, number>;
   lastComputed: string | null;
-} {
-  const total = (db.prepare('SELECT COUNT(*) as n FROM quant_scores').get() as any).n;
-  const classes = db.prepare(
+}> {
+  const total = ((await dbGet('SELECT COUNT(*) as n FROM quant_scores')) as any).n;
+  const classes = await dbAll(
     `SELECT composite_class, COUNT(*) as n FROM quant_scores GROUP BY composite_class`
-  ).all() as any[];
+  ) as any[];
   const byClass: Record<string, number> = {};
   for (const r of classes) byClass[r.composite_class] = r.n;
-  const ts = (db.prepare(
+  const ts = ((await dbGet(
     `SELECT last_computed FROM quant_scores ORDER BY last_computed DESC LIMIT 1`
-  ).get() as any)?.last_computed ?? null;
+  )) as any)?.last_computed ?? null;
   return { totalScored: total, byClass, lastComputed: ts };
 }
