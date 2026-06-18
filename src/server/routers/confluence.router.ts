@@ -14,8 +14,8 @@ export const confluenceRouter = router({
       timeframe:       z.enum(['INTRADAY', 'SWING', 'POSITIONAL']).optional(),
       limit:           z.number().min(1).max(200).optional(),
     }).optional())
-    .query(({ input }) => {
-      return getLatestConfluenceSignals({
+    .query(async ({ input }) => {
+      return await getLatestConfluenceSignals({
         minScore:        input?.minScore ?? 30,
         convictionLevel: input?.convictionLevel,
         sector:          input?.sector,

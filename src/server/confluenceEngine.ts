@@ -1,4 +1,5 @@
-import db from './db';
+import { dbGet, dbAll, dbTransaction } from './dbAsync';
+import { rowGroups, bulkUpsert } from './dbBulk';
 import { runPython } from './pythonRunner';
 
 // ─── Screener Classification ────────────────────────────────────────────────
@@ -66,6 +67,18 @@ const SCREENER_PATTERNS: Array<{ patterns: string[] } & ScreenerClass> = [
 // Classification cache (populated from screener_master + pattern matching)
 const classCache = new Map<string, ScreenerClass>();
 
+// screener_master rows, bulk-loaded once via ensureScreenerMeta() so classifyScreener
+// stays synchronous (and avoids a per-scanId N+1 query during confluence computation).
+const screenerMetaCache = new Map<string, any>();
+
+export async function ensureScreenerMeta(): Promise<void> {
+  if (screenerMetaCache.size > 0) return;
+  const rows = await dbAll(
+    'SELECT scan_id, inferred_sentiment, inferred_category, inferred_timeframe, confidence, weight_override FROM screener_master'
+  ) as any[];
+  for (const r of rows) screenerMetaCache.set(r.scan_id, r);
+}
+
 export function classifyScreener(scanId: string, name: string): ScreenerClass {
   if (classCache.has(scanId)) return classCache.get(scanId)!;
 
@@ -83,10 +96,8 @@ export function classifyScreener(scanId: string, name: string): ScreenerClass {
     }
   }
 
-  // Fallback: check screener_master NLP fields
-  const meta = db.prepare(
-    'SELECT inferred_sentiment, inferred_category, inferred_timeframe, confidence, weight_override FROM screener_master WHERE scan_id = ?'
-  ).get(scanId) as any;
+  // Fallback: screener_master NLP fields (pre-loaded by ensureScreenerMeta)
+  const meta = screenerMetaCache.get(scanId);
 
   if (meta) {
     const result: ScreenerClass = {
@@ -124,21 +135,27 @@ export const REGIME_WEIGHTS: Record<string, RegimeWeights> = {
 
 let _regimeCache: { regime: string; fetchedAt: number } | null = null;
 
-export function getCurrentRegime(): string {
+// Refresh the cached market regime from the DB (≤30-min TTL). Call before any
+// scoreStock() pass so the synchronous getCurrentRegime() reads a warm value.
+export async function ensureRegime(): Promise<string> {
   const now = Date.now();
   if (_regimeCache && now - _regimeCache.fetchedAt < 30 * 60_000) {
     return _regimeCache.regime;
   }
   try {
-    const row = db.prepare(
+    const row = await dbGet(
       'SELECT regime FROM market_regimes ORDER BY date DESC LIMIT 1'
-    ).get() as { regime: string } | undefined;
+    ) as { regime: string } | undefined;
     const regime = row?.regime ?? 'SIDEWAYS';
     _regimeCache = { regime, fetchedAt: now };
     return regime;
   } catch {
     return 'SIDEWAYS';
   }
+}
+
+export function getCurrentRegime(): string {
+  return _regimeCache?.regime ?? 'SIDEWAYS';
 }
 
 export function _resetRegimeCache() { _regimeCache = null; }
@@ -317,6 +334,8 @@ function scoreStock(
 
 export async function computeConfluenceSignals(): Promise<{ computed: number; elite: number; strong: number }> {
   console.log('[CONFLUENCE] Starting confluence computation...');
+  await ensureScreenerMeta();
+  await ensureRegime();
 
   const screenerMap = new Map<string, { ids: string[]; names: string[]; classes: ScreenerClass[] }>();
 
@@ -333,30 +352,30 @@ export async function computeConfluenceSignals(): Promise<{ computed: number; el
   }
 
   // Trendlyne
-  const tlStocks = db.prepare(`
+  const tlStocks = await dbAll(`
     SELECT tss.symbol, tss.screener_id, ts.screener_name
     FROM trendlyne_screener_stocks tss
     JOIN trendlyne_screeners ts ON ts.screener_id = tss.screener_id
     WHERE tss.symbol IS NOT NULL AND tss.symbol != ''
-  `).all() as any[];
+  `) as any[];
   for (const r of tlStocks) addToMap(r.symbol, r.screener_id, r.screener_name);
 
   // MoneyControl
-  const mcStocks = db.prepare(`
+  const mcStocks = await dbAll(`
     SELECT mss.symbol, mss.scan_id, ms.screener_name
     FROM moneycontrol_screener_stocks mss
     JOIN moneycontrol_screeners ms ON ms.scan_id = mss.scan_id
     WHERE mss.symbol IS NOT NULL AND mss.symbol != ''
-  `).all() as any[];
+  `) as any[];
   for (const r of mcStocks) addToMap(r.symbol, r.scan_id, r.screener_name);
 
   // ETnow
-  const etStocks = db.prepare(`
+  const etStocks = await dbAll(`
     SELECT ess.symbol, ess.screener_id, es.screener_name
     FROM etnow_screener_stocks ess
     JOIN etnow_screeners es ON es.screener_id = ess.screener_id
     WHERE ess.symbol IS NOT NULL AND ess.symbol != ''
-  `).all() as any[];
+  `) as any[];
   for (const r of etStocks) addToMap(r.symbol, r.screener_id, r.screener_name);
 
   if (screenerMap.size === 0) {
@@ -366,23 +385,24 @@ export async function computeConfluenceSignals(): Promise<{ computed: number; el
 
   // Fetch supporting data
   const techMap = new Map<string, any>(
-    (db.prepare('SELECT * FROM technical_signals WHERE date = (SELECT MAX(date) FROM technical_signals ts2 WHERE ts2.symbol = technical_signals.symbol)').all() as any[])
+    (await dbAll('SELECT * FROM technical_signals WHERE date = (SELECT MAX(date) FROM technical_signals ts2 WHERE ts2.symbol = technical_signals.symbol)') as any[])
       .map((r: any) => [r.symbol, r])
   );
   const quantMap = new Map<string, any>(
-    (db.prepare('SELECT * FROM quant_scores').all() as any[]).map((r: any) => [r.symbol, r])
+    (await dbAll('SELECT * FROM quant_scores') as any[]).map((r: any) => [r.symbol, r])
   );
   const fundMap = new Map<string, any>(
-    (db.prepare('SELECT * FROM stock_fundamentals').all() as any[]).map((r: any) => [r.symbol, r])
+    (await dbAll('SELECT * FROM stock_fundamentals') as any[]).map((r: any) => [r.symbol, r])
   );
   const nseMap = new Map<string, any>(
-    (db.prepare('SELECT symbol, sector, market_cap FROM nse_stocks').all() as any[]).map((r: any) => [r.symbol, r])
+    (await dbAll('SELECT symbol, sector, market_cap FROM nse_stocks') as any[]).map((r: any) => [r.symbol, r])
   );
 
   const now = new Date().toISOString();
   const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
 
-  const upsert = db.prepare(`
+  const COLS = 29;
+  const buildUpsertSql = (n: number) => `
     INSERT INTO confluence_signals (
       symbol, computed_at, confluence_score, conviction_level,
       active_screener_count, bullish_screener_count, bearish_screener_count,
@@ -391,25 +411,13 @@ export async function computeConfluenceSignals(): Promise<{ computed: number; el
       suggested_timeframe, trade_reasoning,
       entry_zone_low, entry_zone_high, stop_loss, target_1, target_2, target_3, risk_reward,
       sector, market_cap, current_price, rsi, atr, expires_at
-    ) VALUES (
-      ?, ?, ?, ?,
-      ?, ?, ?,
-      ?, ?, ?,
-      ?, ?, ?, ?,
-      ?, ?,
-      ?, ?, ?, ?, ?, ?, ?,
-      ?, ?, ?, ?, ?, ?
-    )
+    ) VALUES ${rowGroups(n, COLS)}
     ON CONFLICT(symbol, computed_at) DO UPDATE SET
       confluence_score = excluded.confluence_score,
       conviction_level = excluded.conviction_level
-  `);
+  `;
 
-  const insertMany = db.transaction((rows: any[]) => {
-    for (const r of rows) upsert.run(...r);
-  });
-
-  const rows: any[] = [];
+  const rows: unknown[][] = [];
   let elite = 0, strong = 0;
 
   for (const [symbol, { ids, names, classes }] of screenerMap) {
@@ -446,7 +454,7 @@ export async function computeConfluenceSignals(): Promise<{ computed: number; el
   }
 
   try {
-    insertMany(rows);
+    await dbTransaction(tx => bulkUpsert(tx, rows, COLS, buildUpsertSql));
   } catch (err: any) {
     console.error('[CONFLUENCE] Transaction failed:', err.message);
     return { computed: 0, elite: 0, strong: 0 };
@@ -467,16 +475,16 @@ export async function runMLProbabilityOverlay(): Promise<void> {
 
 // ─── Latest signals query helper ─────────────────────────────────────────────
 
-export function getLatestConfluenceSignals(opts: {
+export async function getLatestConfluenceSignals(opts: {
   minScore?: number;
   convictionLevel?: string;
   sector?: string;
   timeframe?: string;
   limit?: number;
-}): any[] {
+}): Promise<any[]> {
   const { minScore = 0, convictionLevel, sector, timeframe, limit = 50 } = opts;
 
-  const latestBatch = (db.prepare('SELECT MAX(computed_at) as ts FROM confluence_signals').get() as any)?.ts;
+  const latestBatch = (await dbGet('SELECT MAX(computed_at) as ts FROM confluence_signals') as any)?.ts;
   if (!latestBatch) return [];
 
   const conditions: string[] = ['computed_at = ?', 'confluence_score >= ?'];
@@ -488,14 +496,14 @@ export function getLatestConfluenceSignals(opts: {
 
   params.push(limit);
 
-  return db.prepare(`
+  return await dbAll(`
     SELECT * FROM confluence_signals
     WHERE ${conditions.join(' AND ')}
     ORDER BY confluence_score DESC
     LIMIT ?
-  `).all(...params) as any[];
+  `, params) as any[];
 }
 
-export function getDailyGrowthPicks(limit: number = 20, minScore: number = 65): any[] {
-  return getLatestConfluenceSignals({ minScore, timeframe: 'INTRADAY', limit });
+export async function getDailyGrowthPicks(limit: number = 20, minScore: number = 65): Promise<any[]> {
+  return await getLatestConfluenceSignals({ minScore, timeframe: 'INTRADAY', limit });
 }

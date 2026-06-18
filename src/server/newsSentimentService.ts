@@ -10,32 +10,9 @@
  * Sources (Global): Reuters, Yahoo Finance (via globalMarketService)
  */
 
-import { dbGet, dbAll, dbRun, dbTransaction, type DbTx } from './dbAsync';
+import { dbGet, dbAll, dbRun, dbTransaction } from './dbAsync';
+import { rowGroups, bulkUpsert } from './dbBulk';
 import crypto from 'crypto';
-
-// ─── Bulk-insert helpers ──────────────────────────────────────────────────────
-// Build N placeholder groups "(?,?,…),(?,?,…)" for a multi-row INSERT; the SQL
-// translator rewrites ? -> $n positionally for Postgres.
-function rowGroups(rowCount: number, cols: number): string {
-  const group = `(${Array(cols).fill('?').join(',')})`;
-  return Array(rowCount).fill(group).join(',');
-}
-
-// Chunk rows so we stay well under Postgres' 65535-bind-parameter ceiling, then
-// run one multi-row upsert per chunk. buildSql receives the chunk's row count.
-async function bulkUpsert(
-  tx: DbTx,
-  rows: unknown[][],
-  cols: number,
-  buildSql: (rowCount: number) => string,
-): Promise<void> {
-  if (rows.length === 0) return;
-  const chunkSize = Math.max(1, Math.floor(60000 / cols));
-  for (let i = 0; i < rows.length; i += chunkSize) {
-    const slice = rows.slice(i, i + chunkSize);
-    await tx.run(buildSql(slice.length), slice.flat());
-  }
-}
 import { fetchGlobalMarketData } from './globalMarketService';
 
 function toSqliteDateTime(date: Date): string {
