@@ -1,7 +1,7 @@
 import { getStockMapping } from './stockMapping';
 import * as fs from 'fs';
 import * as path from 'path';
-import db from './db';
+import { dbGet } from './dbAsync';
 
 const HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -75,7 +75,7 @@ export async function fetchTrendlyneStockMetrics(symbol: string) {
 
   if (!tlid) {
     try {
-      const row = db.prepare('SELECT DISTINCT stock_id FROM trendlyne_screener_stocks WHERE symbol = ?').get(symbol) as { stock_id: string } | undefined;
+      const row = await dbGet('SELECT DISTINCT stock_id FROM trendlyne_screener_stocks WHERE symbol = ?', [symbol]) as { stock_id: string } | undefined;
       if (row?.stock_id) {
         tlid = row.stock_id;
         console.log(`[TRENDLYNE] Resolved tlid dynamically from database for metrics: ${symbol} -> ${tlid}`);
@@ -147,7 +147,7 @@ async function fetchTrendlyneAdvTechnicalAnalysisRaw(symbol: string, timeframe: 
 
   if (!tlid) {
     try {
-      const row = db.prepare('SELECT DISTINCT stock_id FROM trendlyne_screener_stocks WHERE symbol = ?').get(symbol) as { stock_id: string } | undefined;
+      const row = await dbGet('SELECT DISTINCT stock_id FROM trendlyne_screener_stocks WHERE symbol = ?', [symbol]) as { stock_id: string } | undefined;
       if (row?.stock_id) {
         tlid = row.stock_id;
         console.log(`[TRENDLYNE] Resolved tlid dynamically from database for TA: ${symbol} -> ${tlid}`);
