@@ -354,7 +354,7 @@ CREATE INDEX idx_feat_model ON feature_importance_log(model_name, computed_at DE
 -- ── feature_store ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "feature_store" (
   "symbol" TEXT NOT NULL,
-  "date" TEXT NOT NULL,
+  "date" DATE NOT NULL,
   "timeframe" TEXT NOT NULL DEFAULT 'D',
   "ret_1d" DOUBLE PRECISION,
   "ret_5d" DOUBLE PRECISION,
@@ -505,7 +505,7 @@ CREATE TABLE IF NOT EXISTS "institutional_rankings" (
 -- ── intraday_ohlcv ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "intraday_ohlcv" (
   "symbol" TEXT NOT NULL,
-  "datetime" TEXT NOT NULL,
+  "datetime" TIMESTAMPTZ NOT NULL,
   "open" DOUBLE PRECISION,
   "high" DOUBLE PRECISION,
   "low" DOUBLE PRECISION,
@@ -519,7 +519,7 @@ CREATE INDEX idx_intra_sym ON intraday_ohlcv(symbol, datetime DESC);
 
 -- ── macro_asset_prices ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "macro_asset_prices" (
-  "date" TEXT NOT NULL,
+  "date" DATE NOT NULL,
   "symbol" TEXT NOT NULL,
   "close" DOUBLE PRECISION,
   "ret_1d" DOUBLE PRECISION,
@@ -1156,7 +1156,7 @@ CREATE INDEX idx_sf_roe ON stock_fundamentals(return_on_equity);
 -- ── stock_ohlcv ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "stock_ohlcv" (
   "symbol" TEXT NOT NULL,
-  "date" TEXT NOT NULL,
+  "date" DATE NOT NULL,
   "open" DOUBLE PRECISION,
   "high" DOUBLE PRECISION,
   "low" DOUBLE PRECISION,
@@ -1386,9 +1386,9 @@ CREATE TABLE IF NOT EXISTS "trendlyne_screeners" (
   "screenpk" TEXT NOT NULL,
   "description" TEXT,
   "last_updated" TIMESTAMPTZ DEFAULT now(),
-  "sentiment" TEXT DEFAULT "neutral",
-  "category" TEXT DEFAULT "technical",
-  "timeframe" TEXT DEFAULT "long_term"
+  "sentiment" TEXT DEFAULT 'neutral',
+  "category" TEXT DEFAULT 'technical',
+  "timeframe" TEXT DEFAULT 'long_term'
 );
 CREATE INDEX idx_screener_id ON trendlyne_screeners(screener_id);
 CREATE INDEX idx_screenpk ON trendlyne_screeners(screenpk);
@@ -1510,7 +1510,7 @@ CREATE TABLE IF NOT EXISTS "watchlist" (
   PRIMARY KEY ("userId", "symbol")
 );
 CREATE INDEX idx_watchlist_created_at ON watchlist(created_at DESC);
-CREATE INDEX idx_watchlist_userId ON watchlist(userId);
+CREATE INDEX idx_watchlist_userId ON watchlist("userId");
 
 -- ── xgboost_predictions ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "xgboost_predictions" (

@@ -70,7 +70,19 @@ def map_default(dflt: str, pgtype: str) -> str | None:
     up = d.upper()
     if "CURRENT_TIMESTAMP" in up or "STRFTIME" in up or "DATETIME('NOW'" in up.replace(" ", ""):
         return "now()"
-    return d  # numeric / quoted-string / literal defaults pass through unchanged
+    # SQLite accepts double-quoted string literals (e.g. DEFAULT "neutral"); Postgres
+    # treats "neutral" as an identifier. Convert to a single-quoted string literal.
+    if len(d) >= 2 and d[0] == '"' and d[-1] == '"':
+        return "'" + d[1:-1].replace("'", "''") + "'"
+    return d  # numeric / single-quoted-string / literal defaults pass through unchanged
+
+
+def hypertable_time_type(table: str, col: str) -> str | None:
+    """Force a real time type for a hypertable's partitioning column (often TEXT in SQLite)."""
+    if table not in HYPERTABLES or HYPERTABLES[table][0] != col:
+        return None
+    # daily 'date' columns -> DATE; intraday datetime / tick_time -> TIMESTAMPTZ
+    return "DATE" if col == "date" else "TIMESTAMPTZ"
 
 
 def table_ddl(conn: sqlite3.Connection, table: str) -> str:
@@ -86,7 +98,7 @@ def table_ddl(conn: sqlite3.Connection, table: str) -> str:
     lines = []
     for _, name, decl, notnull, dflt, pk in cols:
         is_ai = single_int_pk and pk == 1 and "INT" in (decl or "").upper()
-        pgtype = map_type(decl, is_ai)
+        pgtype = hypertable_time_type(table, name) or map_type(decl, is_ai)
         parts = [f'  "{name}" {pgtype}']
         if notnull and not is_ai:
             parts.append("NOT NULL")
@@ -108,6 +120,11 @@ def table_ddl(conn: sqlite3.Connection, table: str) -> str:
 
 def index_ddls(conn: sqlite3.Connection, table: str) -> list[str]:
     out = []
+    # camelCase columns are quoted in CREATE TABLE to preserve case (Postgres folds
+    # unquoted identifiers to lowercase). Index DDL comes verbatim from SQLite with those
+    # columns UNQUOTED, so quote them here too or the index won't match the column.
+    camel = [name for _, name, *_ in conn.execute(f"PRAGMA table_info('{table}')").fetchall()
+             if re.search(r"[A-Z]", name)]
     idxs = conn.execute(
         "SELECT name, sql FROM sqlite_master WHERE type='index' AND tbl_name=? AND sql IS NOT NULL",
         (table,),
@@ -115,9 +132,10 @@ def index_ddls(conn: sqlite3.Connection, table: str) -> list[str]:
     for name, sql in idxs:
         if name.startswith("sqlite_autoindex"):
             continue
-        # SQLite and Postgres CREATE INDEX syntax overlap for these simple cases;
-        # just normalise identifier quoting (SQLite backticks/none -> Postgres double quotes optional).
-        out.append(sql.rstrip(";") + ";")
+        ddl = sql.rstrip(";")
+        for col in camel:
+            ddl = re.sub(rf'(?<!")\b{re.escape(col)}\b(?!")', f'"{col}"', ddl)
+        out.append(ddl + ";")
     return out
 
 
