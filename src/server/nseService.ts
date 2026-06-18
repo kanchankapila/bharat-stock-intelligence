@@ -1,4 +1,4 @@
-import db from './db';
+import { dbGet, dbAll, dbTransaction } from './dbAsync';
 import { getAllNSEStocks, getNSEStockBySymbol, searchNSEStocks, NSEStock } from '../data/nseStocks';
 
 export interface NSEStockRow {
@@ -23,13 +23,9 @@ export function syncNSEStocksToDatabase(): { success: boolean; message: string; 
     const stocks = getAllNSEStocks();
 
     // Run the sync asynchronously to avoid blocking the event loop during request handling
-    setTimeout(() => {
+    setTimeout(async () => {
       try {
-        const insertMany = db.transaction((stocksList) => {
-          let inserted = 0;
-          let updated = 0;
-
-          const insertStmt = db.prepare(`
+        const insertSql = `
             INSERT INTO nse_stocks (symbol, name, sector, industry, isin, listing_date, exchange, status, last_updated)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(symbol) DO UPDATE SET
@@ -39,10 +35,13 @@ export function syncNSEStocksToDatabase(): { success: boolean; message: string; 
               isin = excluded.isin,
               listing_date = excluded.listing_date,
               last_updated = CURRENT_TIMESTAMP
-          `);
+          `;
 
-          for (const stock of stocksList) {
-            const result = insertStmt.run(
+        const { inserted, updated } = await dbTransaction(async (tx) => {
+          let inserted = 0;
+          let updated = 0;
+          for (const stock of stocks) {
+            const result = await tx.run(insertSql, [
               stock.symbol,
               stock.name,
               stock.sector,
@@ -50,12 +49,12 @@ export function syncNSEStocksToDatabase(): { success: boolean; message: string; 
               stock.isin,
               stock.listing_date || null,
               'NSE',
-              'ACTIVE'
-            );
+              'ACTIVE',
+            ]);
 
             // If lastInsertRowid is 0, it was an update
-            if ((result as any).changes > 0) {
-              if ((result as any).lastInsertRowid && (result as any).lastInsertRowid > 0) {
+            if (result.changes > 0) {
+              if (result.lastInsertRowid && Number(result.lastInsertRowid) > 0) {
                 inserted++;
               } else {
                 updated++;
@@ -65,7 +64,6 @@ export function syncNSEStocksToDatabase(): { success: boolean; message: string; 
           return { inserted, updated };
         });
 
-        const { inserted, updated } = insertMany(stocks);
         console.log(`✅ NSE Stocks Sync: Inserted ${inserted}, Updated ${updated} from ${stocks.length} stocks`);
       } catch (error) {
         console.error('❌ Error in background NSE stocks sync:', error);
@@ -80,9 +78,9 @@ export function syncNSEStocksToDatabase(): { success: boolean; message: string; 
 }
 
 // Get all NSE stocks from database
-export function getAllNSEStocksFromDB(): NSEStockRow[] {
+export async function getAllNSEStocksFromDB(): Promise<NSEStockRow[]> {
   try {
-    const rows = db.prepare(`
+    const rows = await dbAll<NSEStockRow>(`
       SELECT 
         n.id, 
         n.symbol, 
@@ -99,9 +97,9 @@ export function getAllNSEStocksFromDB(): NSEStockRow[] {
         n.last_updated
       FROM nse_stocks n
       LEFT JOIN stock_fundamentals f ON n.symbol = f.symbol
-      WHERE n.status = 'ACTIVE' 
+      WHERE n.status = 'ACTIVE'
       ORDER BY n.symbol ASC
-    `).all() as NSEStockRow[];
+    `);
     return rows;
   } catch (error) {
     console.error('❌ Error fetching NSE stocks from DB:', error);
@@ -110,9 +108,9 @@ export function getAllNSEStocksFromDB(): NSEStockRow[] {
 }
 
 // Get NSE stock by symbol from database
-export function getNSEStockFromDB(symbol: string): NSEStockRow | undefined {
+export async function getNSEStockFromDB(symbol: string): Promise<NSEStockRow | undefined> {
   try {
-    const row = db.prepare(`
+    const row = await dbGet<NSEStockRow>(`
       SELECT 
         n.id, 
         n.symbol, 
@@ -130,7 +128,7 @@ export function getNSEStockFromDB(symbol: string): NSEStockRow | undefined {
       FROM nse_stocks n
       LEFT JOIN stock_fundamentals f ON n.symbol = f.symbol
       WHERE n.symbol = ? AND n.status = 'ACTIVE'
-    `).get(symbol) as NSEStockRow | undefined;
+    `, [symbol]);
     return row;
   } catch (error) {
     console.error(`❌ Error fetching NSE stock ${symbol} from DB:`, error);
@@ -139,10 +137,10 @@ export function getNSEStockFromDB(symbol: string): NSEStockRow | undefined {
 }
 
 // Search NSE stocks from database
-export function searchNSEStocksFromDB(query: string): NSEStockRow[] {
+export async function searchNSEStocksFromDB(query: string): Promise<NSEStockRow[]> {
   try {
     const q = `%${query}%`;
-    const rows = db.prepare(`
+    const rows = await dbAll<NSEStockRow>(`
       SELECT 
         n.id, 
         n.symbol, 
@@ -167,7 +165,7 @@ export function searchNSEStocksFromDB(query: string): NSEStockRow[] {
       )
       ORDER BY n.symbol ASC
       LIMIT 100
-    `).all(q, q, q, q) as NSEStockRow[];
+    `, [q, q, q, q]);
     return rows;
   } catch (error) {
     console.error(`❌ Error searching NSE stocks:`, error);
@@ -176,9 +174,9 @@ export function searchNSEStocksFromDB(query: string): NSEStockRow[] {
 }
 
 // Get stocks by sector from database
-export function getNSEStocksBySectorFromDB(sector: string): NSEStockRow[] {
+export async function getNSEStocksBySectorFromDB(sector: string): Promise<NSEStockRow[]> {
   try {
-    const rows = db.prepare(`
+    const rows = await dbAll<NSEStockRow>(`
       SELECT 
         n.id, 
         n.symbol, 
@@ -197,7 +195,7 @@ export function getNSEStocksBySectorFromDB(sector: string): NSEStockRow[] {
       LEFT JOIN stock_fundamentals f ON n.symbol = f.symbol
       WHERE n.status = 'ACTIVE' AND n.sector = ?
       ORDER BY market_cap DESC
-    `).all(sector) as NSEStockRow[];
+    `, [sector]);
     return rows;
   } catch (error) {
     console.error(`❌ Error fetching stocks for sector ${sector}:`, error);
@@ -206,9 +204,9 @@ export function getNSEStocksBySectorFromDB(sector: string): NSEStockRow[] {
 }
 
 // Get stocks by industry from database
-export function getNSEStocksByIndustryFromDB(industry: string): NSEStockRow[] {
+export async function getNSEStocksByIndustryFromDB(industry: string): Promise<NSEStockRow[]> {
   try {
-    const rows = db.prepare(`
+    const rows = await dbAll<NSEStockRow>(`
       SELECT 
         n.id, 
         n.symbol, 
@@ -227,7 +225,7 @@ export function getNSEStocksByIndustryFromDB(industry: string): NSEStockRow[] {
       LEFT JOIN stock_fundamentals f ON n.symbol = f.symbol
       WHERE n.status = 'ACTIVE' AND n.industry = ?
       ORDER BY market_cap DESC
-    `).all(industry) as NSEStockRow[];
+    `, [industry]);
     return rows;
   } catch (error) {
     console.error(`❌ Error fetching stocks for industry ${industry}:`, error);
@@ -236,13 +234,13 @@ export function getNSEStocksByIndustryFromDB(industry: string): NSEStockRow[] {
 }
 
 // Get all sectors
-export function getAllSectorsFromDB(): string[] {
+export async function getAllSectorsFromDB(): Promise<string[]> {
   try {
-    const rows = db.prepare(`
+    const rows = await dbAll<{ sector: string }>(`
       SELECT DISTINCT sector FROM nse_stocks
       WHERE status = 'ACTIVE'
       ORDER BY sector ASC
-    `).all() as { sector: string }[];
+    `);
     return rows.map(r => r.sector);
   } catch (error) {
     console.error('❌ Error fetching sectors:', error);
@@ -251,13 +249,13 @@ export function getAllSectorsFromDB(): string[] {
 }
 
 // Get all industries
-export function getAllIndustriesFromDB(): string[] {
+export async function getAllIndustriesFromDB(): Promise<string[]> {
   try {
-    const rows = db.prepare(`
+    const rows = await dbAll<{ industry: string }>(`
       SELECT DISTINCT industry FROM nse_stocks
       WHERE status = 'ACTIVE'
       ORDER BY industry ASC
-    `).all() as { industry: string }[];
+    `);
     return rows.map(r => r.industry);
   } catch (error) {
     console.error('❌ Error fetching industries:', error);
@@ -266,11 +264,11 @@ export function getAllIndustriesFromDB(): string[] {
 }
 
 // Get stock count
-export function getNSEStockCount(): number {
+export async function getNSEStockCount(): Promise<number> {
   try {
-    const result = db.prepare(`
+    const result = await dbGet<{ count: number }>(`
       SELECT COUNT(*) as count FROM nse_stocks WHERE status = 'ACTIVE'
-    `).get() as { count: number };
+    `) as { count: number };
     return result.count;
   } catch (error) {
     console.error('❌ Error getting stock count:', error);

@@ -25,36 +25,36 @@ export const stocksRouter = router({
     .mutation(async () => syncNSEStocksToDatabase()),
 
   getAllNSEStocks: publicProcedure
-    .query(() => {
-      const stocks = getAllNSEStocksFromDB();
+    .query(async () => {
+      const stocks = await getAllNSEStocksFromDB();
       return { stocks, count: stocks.length };
     }),
 
   searchNSEStocks: publicProcedure
     .input(z.object({ query: z.string().min(1) }))
-    .query(({ input }) => {
-      const stocks = searchNSEStocksFromDB(input.query);
+    .query(async ({ input }) => {
+      const stocks = await searchNSEStocksFromDB(input.query);
       return { stocks, count: stocks.length };
     }),
 
   getNSEStockBySymbol: publicProcedure
     .input(z.object({ symbol: z.string().min(1) }))
-    .query(({ input }) => {
-      const stock = getNSEStockFromDB(input.symbol.toUpperCase());
+    .query(async ({ input }) => {
+      const stock = await getNSEStockFromDB(input.symbol.toUpperCase());
       return stock ?? { error: 'Stock not found' };
     }),
 
   getNSEStocksBySector: publicProcedure
     .input(z.object({ sector: z.string().min(1) }))
-    .query(({ input }) => {
-      const stocks = getNSEStocksBySectorFromDB(input.sector);
+    .query(async ({ input }) => {
+      const stocks = await getNSEStocksBySectorFromDB(input.sector);
       return { stocks, count: stocks.length };
     }),
 
   getNSEStocksByIndustry: publicProcedure
     .input(z.object({ industry: z.string().min(1) }))
-    .query(({ input }) => {
-      const stocks = getNSEStocksByIndustryFromDB(input.industry);
+    .query(async ({ input }) => {
+      const stocks = await getNSEStocksByIndustryFromDB(input.industry);
       return { stocks, count: stocks.length };
     }),
 
