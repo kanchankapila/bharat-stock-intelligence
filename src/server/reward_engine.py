@@ -1,4 +1,3 @@
-from pathlib import Path
 """
 Reward Engine
 =============
@@ -21,10 +20,11 @@ Run:  python reward_engine.py
       python reward_engine.py --days 30
 """
 
-import os, json, sqlite3, datetime, argparse
+import json, datetime, argparse
 from typing import Optional
 
-DB_PATH      = Path(__file__).parent.parent.parent / "database.sqlite"
+from db_compat import connect, ConnWrapper
+
 EMA_ALPHA   = 0.15
 WEIGHT_MIN  = 0.3
 WEIGHT_MAX  = 2.0
@@ -54,14 +54,14 @@ def _parse_signal_types(signals_json: Optional[str]) -> list[str]:
         return []
 
 
-def _get_sector(conn: sqlite3.Connection, symbol: str) -> str:
+def _get_sector(conn: ConnWrapper, symbol: str) -> str:
     row = conn.execute(
         "SELECT sector FROM nse_stocks WHERE symbol = ?", (symbol,)
     ).fetchone()
     return (row[0] or 'OTHER') if row else 'OTHER'
 
 
-def _get_regime(conn: sqlite3.Connection, symbol: str, date: str) -> str:
+def _get_regime(conn: ConnWrapper, symbol: str, date: str) -> str:
     row = conn.execute(
         "SELECT nifty_regime FROM technical_signals WHERE symbol = ? AND date = ?",
         (symbol, date),
@@ -70,7 +70,7 @@ def _get_regime(conn: sqlite3.Connection, symbol: str, date: str) -> str:
 
 
 def _get_current_weight(
-    conn: sqlite3.Connection, signal_type: str, regime: str, sector: str
+    conn: ConnWrapper, signal_type: str, regime: str, sector: str
 ) -> tuple[float, int]:
     row = conn.execute("""
         SELECT weight, sample_count FROM signal_type_weights
@@ -80,7 +80,7 @@ def _get_current_weight(
 
 
 def _upsert_weight(
-    conn: sqlite3.Connection, signal_type: str, regime: str, sector: str,
+    conn: ConnWrapper, signal_type: str, regime: str, sector: str,
     new_weight: float, sample_count: int,
 ):
     now = datetime.datetime.now().isoformat()
@@ -96,7 +96,7 @@ def _upsert_weight(
 
 
 def update_weights(
-    conn: sqlite3.Connection,
+    conn: ConnWrapper,
     days: Optional[int] = None,
     dry_run: bool = False,
 ) -> dict[str, int]:
@@ -168,7 +168,7 @@ def update_weights(
 
 
 def update_source_weights(
-    conn: sqlite3.Connection,
+    conn: ConnWrapper,
     days: Optional[int] = None,
     dry_run: bool = False,
 ) -> dict[str, int]:
@@ -202,7 +202,9 @@ def update_source_weights(
     source_stats: dict[tuple, dict] = {}
 
     for signal_source, outcome, return_pct, horizon_days, signal_date, symbol in rows:
-        regime = _get_regime(conn, symbol, signal_date)
+        # us.signal_date is a timestamptz on Postgres (datetime) but technical_signals.date
+        # is a 'YYYY-MM-DD' string; normalise to the date portion for the regime lookup.
+        regime = _get_regime(conn, symbol, str(signal_date)[:10])
         sector = _get_sector(conn, symbol)
         key = (signal_source or 'unknown', regime, sector)
 
@@ -264,10 +266,13 @@ def update_source_weights(
                     total_losses = excluded.total_losses,
                     avg_sharpe_ratio = excluded.avg_sharpe_ratio,
                     -- EMA-smooth toward the freshly computed target (excluded.weight_multiplier).
-                    -- Bare `weight_multiplier` is the existing stored value; previously this
-                    -- referenced the stale `avg_sharpe_ratio` column, so it never converged.
+                    -- The table-qualified weight_multiplier is the existing stored value;
+                    -- Postgres requires the qualification (bare name is ambiguous against
+                    -- excluded) and SQLite accepts it too. Previously this referenced the
+                    -- stale avg_sharpe_ratio column, so it never converged.
                     weight_multiplier = ROUND(
-                        weight_multiplier * 0.85 + excluded.weight_multiplier * 0.15, 4),
+                        signal_source_weights.weight_multiplier * 0.85
+                        + excluded.weight_multiplier * 0.15, 4),
                     last_updated = excluded.last_updated
             """, (
                 signal_source,
@@ -296,9 +301,7 @@ def update_source_weights(
 
 
 def run(days: Optional[int] = None, dry_run: bool = False):
-    if not os.path.exists(DB_PATH):
-        raise FileNotFoundError(f"[RewardEngine] DB not found: {DB_PATH}. Run from project root.")
-    conn = sqlite3.connect(DB_PATH)
+    conn = connect()
     try:
         # Run traditional weight updates
         update_weights(conn, days=days, dry_run=dry_run)

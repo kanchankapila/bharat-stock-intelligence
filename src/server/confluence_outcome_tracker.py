@@ -12,17 +12,14 @@ Run daily after market close:
   python confluence_outcome_tracker.py
 """
 
-import os
-import sqlite3
 from datetime import datetime, timedelta
 
-DB_PATH = os.path.join(os.path.dirname(__file__), '..', '..', 'database.sqlite')
+from db_compat import connect
+
 HORIZONS = [1, 3, 7, 14, 30]
 
 def get_connection():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+    return connect()
 
 def get_ohlcv_close(conn, symbol: str, date_str: str):
     """Get closing price on or after date_str (up to 5 trading days forward)."""
@@ -49,7 +46,8 @@ def track_outcomes(conn):
     tracked = 0
     for row in signal_rows:
         symbol = row['symbol']
-        signal_date = row['signal_date']
+        # Postgres DATE(computed_at) yields a date object; SQLite yields a 'YYYY-MM-DD' string.
+        signal_date = str(row['signal_date'])
         entry_price = float(row['current_price'])
 
         for horizon in HORIZONS:

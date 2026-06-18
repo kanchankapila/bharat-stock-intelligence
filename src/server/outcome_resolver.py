@@ -1,4 +1,3 @@
-from pathlib import Path
 """
 Outcome Resolver
 ================
@@ -10,9 +9,9 @@ Run:  python outcome_resolver.py
       python outcome_resolver.py --dry-run
 """
 
-import os, sqlite3, datetime, argparse, math, re
+import datetime, argparse, math, re
 
-DB_PATH      = Path(__file__).parent.parent.parent / "database.sqlite"
+from db_compat import connect, ConnWrapper
 
 
 def parse_horizon(time_horizon_str, default_days: int) -> int:
@@ -31,7 +30,7 @@ WIN_THRESHOLD  =  1.0   # Fallback thresholds
 LOSS_THRESHOLD = -1.0
 
 
-def get_volatility_threshold(conn: sqlite3.Connection, symbol: str, signal_date: str, horizon_days: int) -> float:
+def get_volatility_threshold(conn: ConnWrapper, symbol: str, signal_date: str, horizon_days: int) -> float:
     """
     Calculates a dynamic threshold based on the stock's rolling daily standard deviation.
     Uses 20 trading days prior to signal_date. Scales threshold by sqrt(horizon_days).
@@ -63,7 +62,7 @@ def get_volatility_threshold(conn: sqlite3.Connection, symbol: str, signal_date:
 
 
 def resolve_outcomes(
-    conn: sqlite3.Connection,
+    conn: ConnWrapper,
     horizon_days: int = 1,
     dry_run: bool = False,
 ) -> dict[str, int]:
@@ -168,7 +167,7 @@ def resolve_outcomes(
             """, (sym, next_trading_day, exit_target_date, stop_loss)).fetchone()
 
             if sl_hit:
-                check_date = sl_hit[0]
+                check_date = str(sl_hit[0])
                 exit_price = float(stop_loss)
                 return_pct = (exit_price - entry) / entry * 100
                 outcome    = 'STOP_LOSS'
@@ -182,7 +181,7 @@ def resolve_outcomes(
             """, (sym, exit_target_date)).fetchone()
 
             if exit_row:
-                check_date = exit_row[0]
+                check_date = str(exit_row[0])
                 exit_price = float(exit_row[1])
                 return_pct = (exit_price - entry) / entry * 100
                 
@@ -220,7 +219,7 @@ def resolve_outcomes(
 
 
 def resolve_unified_outcomes(
-    conn: sqlite3.Connection,
+    conn: ConnWrapper,
     horizon_days: int = 1,
     dry_run: bool = False,
 ) -> dict[str, int]:
@@ -275,7 +274,7 @@ def resolve_unified_outcomes(
     for row in rows:
         uid = row['id']
         sym = row['symbol']
-        signal_date = row['signal_date']
+        signal_date = str(row['signal_date'])
         entry = float(row['entry_price'] or 0)
         stop_loss = float(row['stop_loss']) if row['stop_loss'] else None
         source = row['signal_source']
@@ -309,7 +308,7 @@ def resolve_unified_outcomes(
             """, (sym, next_trading_day, exit_target_date, stop_loss)).fetchone()
 
             if sl_hit:
-                check_date = sl_hit[0]
+                check_date = str(sl_hit[0])
                 exit_price = float(stop_loss)
                 return_pct = (exit_price - entry) / entry * 100
                 outcome = 'STOP_LOSS'
@@ -322,7 +321,7 @@ def resolve_unified_outcomes(
             """, (sym, exit_target_date)).fetchone()
 
             if exit_row:
-                check_date = exit_row[0]
+                check_date = str(exit_row[0])
                 exit_price = float(exit_row[1])
                 return_pct = (exit_price - entry) / entry * 100
                 
@@ -357,7 +356,7 @@ def resolve_unified_outcomes(
     return {'processed': len(rows), 'resolved': resolved}
 
 
-def resolve_dl_predictions(conn: sqlite3.Connection, dry_run: bool = False) -> dict[str, int]:
+def resolve_dl_predictions(conn: ConnWrapper, dry_run: bool = False) -> dict[str, int]:
     """
     Grade deep_learning_predictions whose horizon has elapsed.
     Fills actual_ret_5d / actual_ret_15d and outcome_5d / outcome_15d ('UP'|'DOWN'|'FLAT')
@@ -420,7 +419,7 @@ def resolve_dl_predictions(conn: sqlite3.Connection, dry_run: bool = False) -> d
     return {'graded_5d': g5, 'graded_15d': g15}
 
 
-def expire_stale_pending(conn: sqlite3.Connection, horizon_days: int, dry_run: bool = False) -> int:
+def expire_stale_pending(conn: ConnWrapper, horizon_days: int, dry_run: bool = False) -> int:
     """Mark PENDING outcomes older than 2×horizon as NEUTRAL (stock/data unavailable).
     Covers signal_outcomes, unified_signal_outcomes and recommendation_log so no table
     accumulates permanently-stuck PENDING rows."""
@@ -472,7 +471,7 @@ def expire_stale_pending(conn: sqlite3.Connection, horizon_days: int, dry_run: b
 
 
 def resolve_recommendation_log(
-    conn: sqlite3.Connection,
+    conn: ConnWrapper,
     horizon_days: int = 15,
     dry_run: bool = False,
 ) -> dict[str, int]:
@@ -504,7 +503,7 @@ def resolve_recommendation_log(
     for row in rows:
         rec_id = row['id']
         sym = row['symbol']
-        signal_date = row['signal_date']
+        signal_date = str(row['signal_date'])
         entry = float(row['entry_price'] or 0)
         stop_loss = float(row['stop_loss']) if row['stop_loss'] else None
         h = int(row['rl_horizon'] or horizon_days)
@@ -585,9 +584,7 @@ def resolve_recommendation_log(
 
 
 def run(horizon_days: int = 1, dry_run: bool = False):
-    if not os.path.exists(DB_PATH):
-        raise FileNotFoundError(f"[OutcomeResolver] DB not found: {DB_PATH}. Run from project root.")
-    conn = sqlite3.connect(DB_PATH)
+    conn = connect()
     try:
         resolve_outcomes(conn, horizon_days=horizon_days, dry_run=dry_run)
         resolve_unified_outcomes(conn, horizon_days=horizon_days, dry_run=dry_run)

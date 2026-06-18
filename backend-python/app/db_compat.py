@@ -77,7 +77,9 @@ def get_engine():
 # ─── Row: dual-access (name + positional) ──────────────────────────────────────
 
 class Row(dict):
-    """Ordered dict that also supports positional access: row['col'] AND row[0]."""
+    """Mapping + sequence, mirroring sqlite3.Row. Supports name access (row['col']),
+    positional access (row[0]), and iteration/tuple-unpacking over VALUES (the engines
+    rely on `for a, b in rows` and `list(row)` yielding column values, not keys)."""
 
     def __init__(self, columns, values):
         super().__init__(zip(columns, values))
@@ -87,6 +89,9 @@ class Row(dict):
         if isinstance(key, int):
             return self._values[key]
         return super().__getitem__(key)
+
+    def __iter__(self):
+        return iter(self._values)
 
 
 def _rows(result):
