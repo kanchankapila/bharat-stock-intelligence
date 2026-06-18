@@ -10,8 +10,32 @@
  * Sources (Global): Reuters, Yahoo Finance (via globalMarketService)
  */
 
-import db from './db';
+import { dbGet, dbAll, dbRun, dbTransaction, type DbTx } from './dbAsync';
 import crypto from 'crypto';
+
+// ─── Bulk-insert helpers ──────────────────────────────────────────────────────
+// Build N placeholder groups "(?,?,…),(?,?,…)" for a multi-row INSERT; the SQL
+// translator rewrites ? -> $n positionally for Postgres.
+function rowGroups(rowCount: number, cols: number): string {
+  const group = `(${Array(cols).fill('?').join(',')})`;
+  return Array(rowCount).fill(group).join(',');
+}
+
+// Chunk rows so we stay well under Postgres' 65535-bind-parameter ceiling, then
+// run one multi-row upsert per chunk. buildSql receives the chunk's row count.
+async function bulkUpsert(
+  tx: DbTx,
+  rows: unknown[][],
+  cols: number,
+  buildSql: (rowCount: number) => string,
+): Promise<void> {
+  if (rows.length === 0) return;
+  const chunkSize = Math.max(1, Math.floor(60000 / cols));
+  for (let i = 0; i < rows.length; i += chunkSize) {
+    const slice = rows.slice(i, i + chunkSize);
+    await tx.run(buildSql(slice.length), slice.flat());
+  }
+}
 import { fetchGlobalMarketData } from './globalMarketService';
 
 function toSqliteDateTime(date: Date): string {
@@ -238,8 +262,8 @@ function detectSector(text: string): string | null {
 
 function extractSymbols(text: string): string[] {
   const t = text.toUpperCase();
-  // Load NSE symbols from DB (cached on first call)
-  const symbols = getNSESymbols();
+  // Use NSE symbols pre-warmed into the cache before the fetch cycle.
+  const symbols = _nseSymbolCache ?? [];
   return symbols.filter(sym => {
     // Match whole-word NSE symbols (e.g. "RELIANCE" not inside "RELIANCEIND")
     const re = new RegExp(`\\b${sym}\\b`);
@@ -248,15 +272,14 @@ function extractSymbols(text: string): string[] {
 }
 
 let _nseSymbolCache: string[] | null = null;
-function getNSESymbols(): string[] {
-  if (_nseSymbolCache) return _nseSymbolCache;
+async function ensureNSESymbols(): Promise<void> {
+  if (_nseSymbolCache) return;
   try {
-    const rows = db.prepare('SELECT symbol FROM nse_stocks WHERE status = ? LIMIT 2000').all('ACTIVE') as { symbol: string }[];
+    const rows = await dbAll('SELECT symbol FROM nse_stocks WHERE status = ? LIMIT 2000', ['ACTIVE']) as { symbol: string }[];
     _nseSymbolCache = rows.map(r => r.symbol);
   } catch {
     _nseSymbolCache = [];
   }
-  return _nseSymbolCache;
 }
 
 // ─── Fetch Single Source ──────────────────────────────────────────────────────
@@ -284,29 +307,14 @@ export async function runNewsSentimentCycle(): Promise<{
   fetched: number; inserted: number; updated: number;
 }> {
   console.log('[SENTIMENT] Starting news fetch cycle...');
+  await ensureNSESymbols();
 
-  const upsert = db.prepare(`
-    INSERT INTO news_sentiment_items
-      (id, title, summary, source, source_type, url, published_at,
-       sentiment, sentiment_score, impact, category, symbols_json, sector)
-    VALUES
-      (@id, @title, @summary, @source, @source_type, @url, @published_at,
-       @sentiment, @sentiment_score, @impact, @category, @symbols_json, @sector)
-    ON CONFLICT(id) DO UPDATE SET
-      sentiment=excluded.sentiment, sentiment_score=excluded.sentiment_score,
-      impact=excluded.impact, category=excluded.category,
-      symbols_json=excluded.symbols_json, sector=excluded.sector
-  `);
-
-  // Also sync to the legacy news_articles table for scoring engine compatibility
-  const legacyUpsert = db.prepare(`
-    INSERT OR REPLACE INTO news_articles
-      (id, title, summary, source, sentiment, category, url, symbols, timestamp)
-    VALUES
-      (@id, @title, @summary, @source, @sentiment, @category, @url, @symbols, @timestamp)
-  `);
-
-  let fetched = 0, inserted = 0;
+  // Collect+dedupe by id, then bulk-upsert. Dedupe is required because the same
+  // article (same link) can appear across sources — a multi-row ON CONFLICT that
+  // touched a key twice would error on Postgres ("cannot affect row a second time").
+  const sentRows = new Map<string, unknown[]>();
+  const legacyRows = new Map<string, unknown[]>();
+  let fetched = 0;
 
   // Fetch all sources in parallel (max 4 concurrent)
   const batchSize = 4;
@@ -316,63 +324,83 @@ export async function runNewsSentimentCycle(): Promise<{
       fetchSource(src).then(items => ({ src, items }))
     ));
 
-    db.transaction(() => {
-      for (const { src, items } of results) {
-        fetched += items.length;
-        for (const raw of items.slice(0, 30)) {
-          const text = `${raw.title} ${raw.description}`;
-          const { sentiment, score } = scoreSentiment(text);
-          const category = classifyCategory(text);
-          const impact   = detectImpact(text, score);
-          const sector   = detectSector(text);
-          const symbols  = extractSymbols(text);
+    for (const { src, items } of results) {
+      fetched += items.length;
+      for (const raw of items.slice(0, 30)) {
+        const text = `${raw.title} ${raw.description}`;
+        const { sentiment, score } = scoreSentiment(text);
+        const category = classifyCategory(text);
+        const impact   = detectImpact(text, score);
+        const sector   = detectSector(text);
+        const symbols  = extractSymbols(text);
 
-          const id = crypto
-            .createHash('sha1')
-            .update(`${src.name}:${raw.link || raw.title}`)
-            .digest('hex');
+        const id = crypto
+          .createHash('sha1')
+          .update(`${src.name}:${raw.link || raw.title}`)
+          .digest('hex');
 
-          let pubAt: string | null = null;
-          try { pubAt = raw.pubDate ? new Date(raw.pubDate).toISOString() : null; } catch { /* skip */ }
+        let pubAt: string | null = null;
+        try { pubAt = raw.pubDate ? new Date(raw.pubDate).toISOString() : null; } catch { /* skip */ }
 
-          upsert.run({
-            id, title: raw.title.slice(0, 500),
-            summary: raw.description.slice(0, 1000),
-            source: src.name, source_type: src.type,
-            url: raw.link?.slice(0, 500) ?? null,
-            published_at: pubAt,
-            sentiment, sentiment_score: score,
-            impact, category,
-            symbols_json: JSON.stringify(symbols),
-            sector: sector ?? null,
-          });
+        sentRows.set(id, [
+          id, raw.title.slice(0, 500),
+          raw.description.slice(0, 1000),
+          src.name, src.type,
+          raw.link?.slice(0, 500) ?? null,
+          pubAt,
+          sentiment, score,
+          impact, category,
+          JSON.stringify(symbols),
+          sector ?? null,
+        ]);
 
-          // Legacy table (maps sentiment for Python scoring engine)
-          const legacySentiment =
-            sentiment === 'BULLISH' ? 'Positive' :
-            sentiment === 'BEARISH' ? 'Negative' : 'Neutral';
+        // Legacy table (maps sentiment for Python scoring engine)
+        const legacySentiment =
+          sentiment === 'BULLISH' ? 'Positive' :
+          sentiment === 'BEARISH' ? 'Negative' : 'Neutral';
 
-          legacyUpsert.run({
-            id, title: raw.title.slice(0, 500),
-            summary: raw.description.slice(0, 500),
-            source: src.name, sentiment: legacySentiment,
-            category, url: raw.link?.slice(0, 500) ?? null,
-            symbols: symbols.join(','),
-            timestamp: pubAt ?? new Date().toISOString(),
-          });
-
-          inserted++;
-        }
+        legacyRows.set(id, [
+          id, raw.title.slice(0, 500),
+          raw.description.slice(0, 500),
+          src.name, legacySentiment,
+          category, raw.link?.slice(0, 500) ?? null,
+          symbols.join(','),
+          pubAt ?? new Date().toISOString(),
+        ]);
       }
-    })();
+    }
   }
 
+  const inserted = sentRows.size;
+
+  await dbTransaction(async (tx) => {
+    await bulkUpsert(tx, [...sentRows.values()], 13,
+      n => `INSERT INTO news_sentiment_items
+        (id, title, summary, source, source_type, url, published_at,
+         sentiment, sentiment_score, impact, category, symbols_json, sector)
+        VALUES ${rowGroups(n, 13)}
+        ON CONFLICT(id) DO UPDATE SET
+          sentiment=excluded.sentiment, sentiment_score=excluded.sentiment_score,
+          impact=excluded.impact, category=excluded.category,
+          symbols_json=excluded.symbols_json, sector=excluded.sector`);
+
+    // Also sync to the legacy news_articles table for scoring engine compatibility
+    await bulkUpsert(tx, [...legacyRows.values()], 9,
+      n => `INSERT INTO news_articles
+        (id, title, summary, source, sentiment, category, url, symbols, timestamp)
+        VALUES ${rowGroups(n, 9)}
+        ON CONFLICT(id) DO UPDATE SET
+          title=excluded.title, summary=excluded.summary, source=excluded.source,
+          sentiment=excluded.sentiment, category=excluded.category, url=excluded.url,
+          symbols=excluded.symbols, timestamp=excluded.timestamp`);
+  });
+
   // AI enrichment for HIGH-impact items not yet AI-scored
-  const highImpact = db.prepare(`
+  const highImpact = await dbAll(`
     SELECT id, title, summary, category FROM news_sentiment_items
     WHERE impact = 'HIGH' AND ai_scored = 0
     ORDER BY fetched_at DESC LIMIT 10
-  `).all() as { id: string; title: string; summary: string; category: string }[];
+  `) as { id: string; title: string; summary: string; category: string }[];
 
   if (highImpact.length > 0 && process.env.ANTHROPIC_API_KEY) {
     await enrichWithAI(highImpact);
@@ -391,7 +419,7 @@ async function enrichWithAI(items: { id: string; title: string; summary: string;
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return;
 
-  const markDone = db.prepare(`UPDATE news_sentiment_items SET ai_scored=1, sentiment=@sentiment, sentiment_score=@score, impact=@impact WHERE id=@id`);
+  const markDoneSql = `UPDATE news_sentiment_items SET ai_scored=1, sentiment=?, sentiment_score=?, impact=? WHERE id=?`;
 
   for (const item of items) {
     try {
@@ -414,12 +442,12 @@ async function enrichWithAI(items: { id: string; title: string; summary: string;
       const data = await resp.json() as { content?: { text?: string }[] };
       const text = data?.content?.[0]?.text?.trim() ?? '';
       const parsed = JSON.parse(text);
-      markDone.run({
-        id: item.id,
-        sentiment: parsed.sentiment ?? 'NEUTRAL',
-        score:     parsed.score     ?? 0,
-        impact:    parsed.impact    ?? 'MEDIUM',
-      });
+      await dbRun(markDoneSql, [
+        parsed.sentiment ?? 'NEUTRAL',
+        parsed.score     ?? 0,
+        parsed.impact    ?? 'MEDIUM',
+        item.id,
+      ]);
       await new Promise(r => setTimeout(r, 200));
     } catch { /* skip on error */ }
   }
@@ -430,11 +458,11 @@ async function enrichWithAI(items: { id: string; title: string; summary: string;
 async function buildMarketSentimentSnapshot(): Promise<void> {
   // Last 4 hours of news
   const cutoff = toSqliteDateTime(new Date(Date.now() - 4 * 60 * 60 * 1000));
-  const recent = db.prepare(`
+  const recent = await dbAll(`
     SELECT sentiment, sentiment_score, impact, category, sector, title
     FROM news_sentiment_items
     WHERE fetched_at >= ? ORDER BY fetched_at DESC LIMIT 200
-  `).all(cutoff) as { sentiment: string; sentiment_score: number; impact: string; category: string; sector: string | null; title: string }[];
+  `, [cutoff]) as { sentiment: string; sentiment_score: number; impact: string; category: string; sector: string | null; title: string }[];
 
   if (recent.length === 0) return;
 
@@ -513,59 +541,56 @@ async function buildMarketSentimentSnapshot(): Promise<void> {
     .slice(0, 5)
     .map(([t]) => t);
 
-  db.prepare(`
+  await dbRun(`
     INSERT INTO market_sentiment_snapshots
       (overall_score, overall_label, bullish_count, bearish_count, neutral_count,
        high_impact_count, nifty_bias, nifty_support, nifty_resistance, nifty_last_close,
        global_cue, global_score, key_themes_json, source_count)
-    VALUES
-      (@overall_score, @overall_label, @bullish_count, @bearish_count, @neutral_count,
-       @high_impact_count, @nifty_bias, @nifty_support, @nifty_resistance, @nifty_last_close,
-       @global_cue, @global_score, @key_themes_json, @source_count)
-  `).run({
-    overall_score: Math.round(overallScore * 10) / 10,
-    overall_label: label,
-    bullish_count: bullish, bearish_count: bearish, neutral_count: neutral,
-    high_impact_count: highImpact,
-    nifty_bias: niftyBias,
-    nifty_support: niftySupport, nifty_resistance: niftyResistance,
-    nifty_last_close: niftyClose,
-    global_cue: globalCue, global_score: Math.round(globalScore * 100) / 100,
-    key_themes_json: JSON.stringify(topThemes),
-    source_count: recent.length,
-  });
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `, [
+    Math.round(overallScore * 10) / 10,
+    label,
+    bullish, bearish, neutral,
+    highImpact,
+    niftyBias,
+    niftySupport, niftyResistance,
+    niftyClose,
+    globalCue, Math.round(globalScore * 100) / 100,
+    JSON.stringify(topThemes),
+    recent.length,
+  ]);
 
   // Purge snapshots older than 7 days
-  db.prepare(`
+  await dbRun(`
     DELETE FROM market_sentiment_snapshots
     WHERE snapshot_at < datetime('now', '-7 days')
-  `).run();
+  `);
 }
 
 // ─── Query Helpers ────────────────────────────────────────────────────────────
 
-export function getLatestSentimentSnapshot(): MarketSentimentSnapshot | null {
-  return db.prepare(`
+export async function getLatestSentimentSnapshot(): Promise<MarketSentimentSnapshot | null> {
+  return await dbGet(`
     SELECT * FROM market_sentiment_snapshots ORDER BY snapshot_at DESC LIMIT 1
-  `).get() as MarketSentimentSnapshot | null;
+  `) as MarketSentimentSnapshot | null;
 }
 
-export function getSentimentHistory(hours = 24): MarketSentimentSnapshot[] {
+export async function getSentimentHistory(hours = 24): Promise<MarketSentimentSnapshot[]> {
   const cutoff = toSqliteDateTime(new Date(Date.now() - hours * 60 * 60 * 1000));
-  return db.prepare(`
+  return await dbAll(`
     SELECT * FROM market_sentiment_snapshots
     WHERE snapshot_at >= ?
     ORDER BY snapshot_at ASC
-  `).all(cutoff) as MarketSentimentSnapshot[];
+  `, [cutoff]) as MarketSentimentSnapshot[];
 }
 
-export function getNewsItems(opts: {
+export async function getNewsItems(opts: {
   limit?: number;
   category?: NewsCategory | 'ALL';
   sentiment?: NewsSentiment | 'ALL';
   sourceType?: 'INDIAN' | 'GLOBAL' | 'ALL';
   hours?: number;
-} = {}): NewsItem[] {
+} = {}): Promise<NewsItem[]> {
   const { limit = 60, category = 'ALL', sentiment = 'ALL', sourceType = 'ALL', hours = 8 } = opts;
   const cutoff = toSqliteDateTime(new Date(Date.now() - hours * 60 * 60 * 1000));
 
@@ -585,17 +610,17 @@ export function getNewsItems(opts: {
     LIMIT ?`;
   params.push(limit);
 
-  return db.prepare(query).all(...params) as NewsItem[];
+  return await dbAll(query, params) as NewsItem[];
 }
 
-export function getSectorSentiment(): { sector: string; bullish: number; bearish: number; neutral: number; netScore: number }[] {
+export async function getSectorSentiment(): Promise<{ sector: string; bullish: number; bearish: number; neutral: number; netScore: number }[]> {
   const cutoff = toSqliteDateTime(new Date(Date.now() - 8 * 60 * 60 * 1000));
-  const rows = db.prepare(`
+  const rows = await dbAll(`
     SELECT sector, sentiment, COUNT(*) as cnt
     FROM news_sentiment_items
     WHERE fetched_at >= ? AND sector IS NOT NULL AND sector != ''
     GROUP BY sector, sentiment
-  `).all(cutoff) as { sector: string; sentiment: string; cnt: number }[];
+  `, [cutoff]) as { sector: string; sentiment: string; cnt: number }[];
 
   const bySection = new Map<string, { bullish: number; bearish: number; neutral: number }>();
   for (const r of rows) {
@@ -615,9 +640,9 @@ export function getSectorSentiment(): { sector: string; bullish: number; bearish
     .sort((a, b) => Math.abs(b.netScore) - Math.abs(a.netScore));
 }
 
-export function getCorporateEventNews(): NewsItem[] {
+export async function getCorporateEventNews(): Promise<NewsItem[]> {
   const cutoff = toSqliteDateTime(new Date(Date.now() - 24 * 60 * 60 * 1000));
-  return db.prepare(`
+  return await dbAll(`
     SELECT * FROM news_sentiment_items
     WHERE fetched_at >= ?
       AND category IN ('EARNINGS', 'ORDER_WIN', 'BUYBACK', 'IPO')
@@ -625,5 +650,5 @@ export function getCorporateEventNews(): NewsItem[] {
       CASE impact WHEN 'HIGH' THEN 0 WHEN 'MEDIUM' THEN 1 ELSE 2 END,
       published_at DESC
     LIMIT 50
-  `).all(cutoff) as NewsItem[];
+  `, [cutoff]) as NewsItem[];
 }

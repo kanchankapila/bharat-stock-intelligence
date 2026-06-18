@@ -8,8 +8,8 @@ export const sentimentRouter = router({
     .query(async ({ input }) => {
       const { getLatestSentimentSnapshot, getSentimentHistory } = await import('../newsSentimentService');
       return {
-        latest:  getLatestSentimentSnapshot(),
-        history: getSentimentHistory(input?.historyHours ?? 24),
+        latest:  await getLatestSentimentSnapshot(),
+        history: await getSentimentHistory(input?.historyHours ?? 24),
       };
     }),
 
@@ -23,19 +23,19 @@ export const sentimentRouter = router({
     }).optional())
     .query(async ({ input }) => {
       const { getNewsItems } = await import('../newsSentimentService');
-      return getNewsItems(input ?? {});
+      return await getNewsItems(input ?? {});
     }),
 
   getSectorNewsSentiment: publicProcedure
     .query(async () => {
       const { getSectorSentiment } = await import('../newsSentimentService');
-      return getSectorSentiment();
+      return await getSectorSentiment();
     }),
 
   getCorporateEventNews: publicProcedure
     .query(async () => {
       const { getCorporateEventNews } = await import('../newsSentimentService');
-      return getCorporateEventNews();
+      return await getCorporateEventNews();
     }),
 
   getInstitutionalFlows: publicProcedure
