@@ -24,7 +24,16 @@ export function pgConnectionString(): string {
   return `postgresql://${user}:${encodeURIComponent(password)}@${host}:${port}/${database}`;
 }
 
-/** Whether a Postgres target is configured (used to gate the SQLite->PG cutover). */
+/**
+ * The cutover switch. STRICTLY gated on USE_POSTGRES === 'true' — NOT on the mere
+ * presence of POSTGRES_URL, which is set in .env for the migration tooling while the
+ * running app must stay on SQLite until the explicit cutover.
+ */
+export function usePostgres(): boolean {
+  return process.env.USE_POSTGRES === 'true';
+}
+
+/** Whether Postgres connection info exists (for tooling/health checks, not for routing). */
 export function isPostgresConfigured(): boolean {
-  return Boolean(process.env.POSTGRES_URL || process.env.POSTGRES_HOST || process.env.USE_POSTGRES === 'true');
+  return Boolean(process.env.POSTGRES_URL || process.env.POSTGRES_HOST);
 }
