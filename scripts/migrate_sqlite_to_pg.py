@@ -135,6 +135,24 @@ def main():
 
     sqlite_conn.close()
     pg.close()
+
+    # Post-load fixups (idempotent). Inserting surrogate ids does NOT advance the IDENTITY
+    # sequence, and the non-PK UNIQUE constraints aren't added to an already-created table —
+    # without both, app INSERTs and ON CONFLICT(<unique cols>) break after a fresh ETL.
+    if not only:
+        try:
+            import pg_reset_identity_sequences as seqfix
+            seqfix.main()
+        except Exception as e:  # noqa: BLE001
+            print(f"[ETL] sequence reset failed: {e}", file=sys.stderr)
+        try:
+            import pg_sync_unique_constraints as uqfix
+            uqfix.main()
+        except SystemExit:
+            pass
+        except Exception as e:  # noqa: BLE001
+            print(f"[ETL] unique-constraint sync failed: {e}", file=sys.stderr)
+
     print("\n[ETL] done." if not mismatches else f"\n[ETL] {len(mismatches)} tables need attention:")
     for m in mismatches:
         print("  ", m)

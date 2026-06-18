@@ -269,7 +269,8 @@ CREATE TABLE IF NOT EXISTS "daily_research_reports" (
   "top_picks_json" TEXT,
   "report_json" TEXT,
   "ai_blurbs_json" TEXT,
-  "error_message" TEXT
+  "error_message" TEXT,
+  UNIQUE ("report_date", "report_type")
 );
 
 -- ── deep_learning_predictions ─────────────────────────────────────────────
@@ -298,7 +299,8 @@ CREATE TABLE IF NOT EXISTS "deep_learning_predictions" (
   "actual_ret_15d" DOUBLE PRECISION,
   "outcome_5d" TEXT,
   "outcome_15d" TEXT,
-  "created_at" TIMESTAMPTZ DEFAULT now()
+  "created_at" TIMESTAMPTZ DEFAULT now(),
+  UNIQUE ("symbol", "prediction_date", "model_name")
 );
 
 -- ── dl_model_performance ─────────────────────────────────────────────
@@ -317,7 +319,8 @@ CREATE TABLE IF NOT EXISTS "dl_model_performance" (
   "profit_factor" DOUBLE PRECISION,
   "sample_count" BIGINT,
   "drift_score" DOUBLE PRECISION,
-  "retrain_triggered" BIGINT DEFAULT 0
+  "retrain_triggered" BIGINT DEFAULT 0,
+  UNIQUE ("model_name", "eval_date", "horizon_days")
 );
 
 -- ── etnow_screener_stocks ─────────────────────────────────────────────
@@ -336,7 +339,8 @@ CREATE TABLE IF NOT EXISTS "etnow_screeners" (
   "screener_id" TEXT NOT NULL,
   "screener_name" TEXT NOT NULL,
   "query_condition" TEXT,
-  "last_updated" TIMESTAMPTZ DEFAULT now()
+  "last_updated" TIMESTAMPTZ DEFAULT now(),
+  UNIQUE ("screener_id")
 );
 
 -- ── feature_importance_log ─────────────────────────────────────────────
@@ -441,6 +445,7 @@ CREATE TABLE IF NOT EXISTS "feature_store" (
   PRIMARY KEY ("symbol", "date", "timeframe")
 );
 CREATE INDEX idx_fs_sym_tf_date ON feature_store(symbol, timeframe, date);
+CREATE INDEX idx_fs_date ON feature_store(date);
 
 -- ── fii_dii_flow ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "fii_dii_flow" (
@@ -534,7 +539,8 @@ CREATE TABLE IF NOT EXISTS "macro_indicators" (
   "indicator_name" TEXT NOT NULL,
   "date" TEXT NOT NULL,
   "value" DOUBLE PRECISION,
-  "created_at" TIMESTAMPTZ DEFAULT now()
+  "created_at" TIMESTAMPTZ DEFAULT now(),
+  UNIQUE ("indicator_name", "date")
 );
 CREATE INDEX idx_macro_date ON macro_indicators(date DESC);
 
@@ -593,7 +599,8 @@ CREATE TABLE IF NOT EXISTS "mc_chart_patterns" (
   "end_date" TEXT,
   "analyst_name" TEXT,
   "analyst_image" TEXT,
-  "fetched_at" TIMESTAMPTZ DEFAULT now()
+  "fetched_at" TIMESTAMPTZ DEFAULT now(),
+  UNIQUE ("mcsymbol", "pattern_id")
 );
 CREATE INDEX idx_mcp_symbol ON mc_chart_patterns(mcsymbol);
 CREATE INDEX idx_mcp_nse_symbol ON mc_chart_patterns(symbol);
@@ -643,7 +650,8 @@ CREATE TABLE IF NOT EXISTS "moneycontrol_screeners" (
   "screener_name" TEXT NOT NULL,
   "type" TEXT NOT NULL,
   "is_positive" BIGINT DEFAULT 1,
-  "last_updated" TIMESTAMPTZ DEFAULT now()
+  "last_updated" TIMESTAMPTZ DEFAULT now(),
+  UNIQUE ("scan_id")
 );
 CREATE INDEX idx_mc_scan_id ON moneycontrol_screeners(scan_id);
 
@@ -702,7 +710,8 @@ CREATE TABLE IF NOT EXISTS "nse_stocks" (
   "last_updated" TIMESTAMPTZ DEFAULT now(),
   "mcsymbol" TEXT,
   "tlid" TEXT,
-  "tlname" TEXT
+  "tlname" TEXT,
+  UNIQUE ("symbol")
 );
 CREATE INDEX idx_nse_symbol ON nse_stocks(symbol);
 CREATE INDEX idx_nse_sector ON nse_stocks(sector);
@@ -992,7 +1001,8 @@ CREATE TABLE IF NOT EXISTS "signal_actions" (
   "pnl_pct" DOUBLE PRECISION,
   "notes" TEXT,
   "created_at" TIMESTAMPTZ DEFAULT now(),
-  "updated_at" TIMESTAMPTZ DEFAULT now()
+  "updated_at" TIMESTAMPTZ DEFAULT now(),
+  UNIQUE ("signal_id", "user_id")
 );
 CREATE INDEX idx_sa_user_id ON signal_actions(user_id);
 CREATE INDEX idx_sa_symbol ON signal_actions(symbol);
@@ -1030,7 +1040,8 @@ CREATE TABLE IF NOT EXISTS "signal_portfolio_correlation" (
   "co_movement_pct" DOUBLE PRECISION,
   "hedge_potential" BIGINT,
   "momentum_alignment" BIGINT,
-  "computed_at" TIMESTAMPTZ DEFAULT now()
+  "computed_at" TIMESTAMPTZ DEFAULT now(),
+  UNIQUE ("signal_id", "portfolio_symbol")
 );
 CREATE INDEX idx_spc_portfolio_symbol ON signal_portfolio_correlation(portfolio_symbol);
 CREATE INDEX idx_spc_correlation_score ON signal_portfolio_correlation(correlation_score DESC);
@@ -1076,7 +1087,8 @@ CREATE TABLE IF NOT EXISTS "signal_type_weights" (
   "sector" TEXT NOT NULL DEFAULT 'ALL',
   "weight" DOUBLE PRECISION NOT NULL DEFAULT 1.0,
   "sample_count" BIGINT NOT NULL DEFAULT 0,
-  "last_updated" TEXT NOT NULL
+  "last_updated" TEXT NOT NULL,
+  UNIQUE ("signal_type", "regime", "sector")
 );
 CREATE INDEX idx_stw_key ON signal_type_weights(signal_type, regime, sector);
 
@@ -1388,7 +1400,8 @@ CREATE TABLE IF NOT EXISTS "trendlyne_screeners" (
   "last_updated" TIMESTAMPTZ DEFAULT now(),
   "sentiment" TEXT DEFAULT 'neutral',
   "category" TEXT DEFAULT 'technical',
-  "timeframe" TEXT DEFAULT 'long_term'
+  "timeframe" TEXT DEFAULT 'long_term',
+  UNIQUE ("screener_id")
 );
 CREATE INDEX idx_screener_id ON trendlyne_screeners(screener_id);
 CREATE INDEX idx_screenpk ON trendlyne_screeners(screenpk);
@@ -1429,7 +1442,8 @@ CREATE TABLE IF NOT EXISTS "unified_recommendations" (
   "risk_reward" DOUBLE PRECISION,
   "timeframe" TEXT,
   "sector" TEXT,
-  "trade_reasoning" TEXT
+  "trade_reasoning" TEXT,
+  UNIQUE ("symbol", "computed_at")
 );
 CREATE INDEX idx_ur_date_score ON unified_recommendations(computed_at, unified_score DESC);
 CREATE INDEX idx_ur_conviction  ON unified_recommendations(computed_at, conviction_level);
@@ -1453,7 +1467,8 @@ CREATE TABLE IF NOT EXISTS "unified_signal_outcomes" (
   "outcome" TEXT,
   "exit_reason" TEXT,
   "signal_score" BIGINT,
-  "computed_at" TIMESTAMPTZ DEFAULT now()
+  "computed_at" TIMESTAMPTZ DEFAULT now(),
+  UNIQUE ("unified_signal_id", "horizon_days")
 );
 CREATE INDEX idx_uso_symbol_date ON unified_signal_outcomes(symbol, signal_date);
 CREATE INDEX idx_uso_outcome ON unified_signal_outcomes(outcome);
@@ -1476,7 +1491,8 @@ CREATE TABLE IF NOT EXISTS "unified_signals" (
   "ai_reasoning" TEXT,
   "status" TEXT DEFAULT 'ACTIVE',
   "signal_generated_at" TIMESTAMPTZ NOT NULL,
-  "created_at" TIMESTAMPTZ DEFAULT now()
+  "created_at" TIMESTAMPTZ DEFAULT now(),
+  UNIQUE ("symbol", "signal_date", "signal_source")
 );
 CREATE INDEX idx_us_symbol_date ON unified_signals(symbol, signal_date DESC);
 CREATE INDEX idx_us_source ON unified_signals(signal_source);

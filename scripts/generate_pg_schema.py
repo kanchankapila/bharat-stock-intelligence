@@ -115,6 +115,19 @@ def table_ddl(conn: sqlite3.Connection, table: str) -> str:
             quoted = ", ".join(f'"{c}"' for c in pk_cols)
             lines.append(f"  PRIMARY KEY ({quoted})")
 
+    # UNIQUE constraints (column-level + table-level). PRAGMA table_info omits these and
+    # their backing sqlite_autoindex is skipped by index_ddls, so without re-emitting them
+    # every ON CONFLICT(<those cols>) breaks on Postgres. origin='u' = a UNIQUE constraint
+    # (origin 'pk' is the PK above; 'c' is a CREATE [UNIQUE] INDEX handled by index_ddls).
+    for _seq, idx_name, is_uniq, origin, *_rest in conn.execute(f"PRAGMA index_list('{table}')"):
+        if not is_uniq or origin != "u":
+            continue
+        ucols = [r[2] for r in conn.execute(f"PRAGMA index_info('{idx_name}')")]
+        if ucols == pk_cols:
+            continue  # already enforced by the PRIMARY KEY
+        quoted = ", ".join(f'"{c}"' for c in ucols)
+        lines.append(f"  UNIQUE ({quoted})")
+
     return f'CREATE TABLE IF NOT EXISTS "{table}" (\n' + ",\n".join(lines) + "\n);"
 
 
