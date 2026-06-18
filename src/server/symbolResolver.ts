@@ -16,7 +16,7 @@
  *   const tlId = resolver.resolveTrendlyneId('TCS');  // → Trendlyne ID
  */
 
-import db from './db';
+import { dbAll } from './dbAsync';
 import stockData, { StockMapping } from '../data/stocklist';
 import { resolveMoneycontrolSymbol, getStockMapping } from './stockMapping';
 
@@ -87,15 +87,15 @@ export class SymbolResolver {
 
     // 2. Load from NSE master list in DB (extends coverage)
     try {
-      const nseStocks = db.prepare(`
-        SELECT DISTINCT 
-          symbol AS nseSymbol, 
-          company_name AS companyName,
+      const nseStocks = await dbAll<any>(`
+        SELECT DISTINCT
+          symbol AS "nseSymbol",
+          company_name AS "companyName",
           sector,
           industry
         FROM nse_stocks
         LIMIT 2000
-      `).all() as any[];
+      `);
 
       for (const stock of nseStocks) {
         const key = stock.nseSymbol.toUpperCase();

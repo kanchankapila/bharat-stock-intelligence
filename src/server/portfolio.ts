@@ -1,9 +1,10 @@
-import db from './db';
+import { dbAll } from './dbAsync';
 
-function getRecentCloses(symbol: string, days: number = 90): number[] {
-  const rows = db.prepare(
-    `SELECT close FROM stock_ohlcv WHERE symbol = ? AND close > 0 ORDER BY date DESC LIMIT ?`
-  ).all(symbol, days) as any[];
+async function getRecentCloses(symbol: string, days: number = 90): Promise<number[]> {
+  const rows = await dbAll<any>(
+    `SELECT close FROM stock_ohlcv WHERE symbol = ? AND close > 0 ORDER BY date DESC LIMIT ?`,
+    [symbol, days]
+  );
   // rows come newest-first; reverse to chronological
   return rows.map(r => r.close).reverse();
 }
@@ -25,12 +26,12 @@ function std(arr: number[]): number {
   return Math.sqrt(v);
 }
 
-export function buildRiskParityWeights(symbols: string[], lookbackDays = 90): Array<{ symbol: string; weight: number; volPct: number }> {
+export async function buildRiskParityWeights(symbols: string[], lookbackDays = 90): Promise<Array<{ symbol: string; weight: number; volPct: number }>> {
   const vols: number[] = [];
   const volsMap = new Map<string, number>();
   const retsMap = new Map<string, number[]>();
   for (const s of symbols) {
-    const closes = getRecentCloses(s, lookbackDays + 5);
+    const closes = await getRecentCloses(s, lookbackDays + 5);
     const rets = returnsFromCloses(closes);
     retsMap.set(s, rets);
     const dstd = std(rets);
