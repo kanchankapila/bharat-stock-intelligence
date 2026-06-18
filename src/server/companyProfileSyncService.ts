@@ -1,4 +1,4 @@
-import db from './db';
+import { dbAll, dbRun } from './dbAsync';
 import { fetchCompanyOverview } from './trendlyneService';
 import { analyzeCompanyProfile, releaseOllamaModel } from '../services/aiService';
 
@@ -6,11 +6,11 @@ export async function syncAndAnalyzeCompanyProfiles() {
   console.log('[PROFILE SYNC] Starting weekly company profile sync and AI analysis...');
 
   // Fetch all stocks with a mapped TLID
-  const stocks = db.prepare(`
+  const stocks = await dbAll<{ symbol: string; name: string; tlid: string }>(`
     SELECT symbol, name, tlid
     FROM nse_stocks
     WHERE tlid IS NOT NULL AND tlid != ''
-  `).all() as { symbol: string; name: string; tlid: string }[];
+  `);
 
   console.log(`[PROFILE SYNC] Found ${stocks.length} stocks to process.`);
 
@@ -40,7 +40,7 @@ export async function syncAndAnalyzeCompanyProfiles() {
       }
 
       // 3. Upsert into database
-      db.prepare(`
+      await dbRun(`
         INSERT INTO company_profiles (
           symbol, company_name, description, high_growth_scope,
           in_news_for_growth, growth_score, ai_analysis, last_updated
@@ -55,7 +55,7 @@ export async function syncAndAnalyzeCompanyProfiles() {
           growth_score = excluded.growth_score,
           ai_analysis = excluded.ai_analysis,
           last_updated = CURRENT_TIMESTAMP
-      `).run(
+      `, [
         stock.symbol,
         stock.name,
         description,
@@ -63,7 +63,7 @@ export async function syncAndAnalyzeCompanyProfiles() {
         analysis.in_news_for_growth ? 1 : 0,
         analysis.growth_score || 0,
         analysis.reasoning || ''
-      );
+      ]);
 
       successCount++;
       

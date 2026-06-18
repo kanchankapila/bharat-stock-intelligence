@@ -1,4 +1,4 @@
-import db from './db';
+import { dbAll, dbRun } from './dbAsync';
 
 export type ScreenerCategory =
   | 'technical_trend' | 'technical_reversal' | 'technical_breakout' | 'technical_momentum'
@@ -118,11 +118,11 @@ export async function classifyAllScreeners(): Promise<{
   classified: number;
   remaining_other: number;
 }> {
-  const rows = db.prepare(`
+  const rows = await dbAll<{ scan_id: string; name: string }>(`
     SELECT scan_id, name FROM screener_master
     WHERE subcategory IS NULL OR classified_by IS NULL
     ORDER BY name
-  `).all() as Array<{ scan_id: string; name: string }>;
+  `);
 
   if (rows.length === 0) {
     console.log('[Classifier] All screeners already classified.');
@@ -131,12 +131,12 @@ export async function classifyAllScreeners(): Promise<{
 
   console.log(`[Classifier] Classifying ${rows.length} screeners...`);
 
-  const stmt = db.prepare(`
+  const updateSql = `
     UPDATE screener_master
     SET subcategory = ?, inferred_category = ?, inferred_sentiment = ?,
         inferred_timeframe = ?, category_confidence = ?, classified_by = ?
     WHERE scan_id = ?
-  `);
+  `;
 
   let classified = 0;
   let remaining_other = 0;
@@ -144,7 +144,7 @@ export async function classifyAllScreeners(): Promise<{
   for (const row of rows) {
     const r = classifyByKeyword(row.name);
     const timeframe = r.investment_horizon === 'intraday' ? 'intraday' : 'long_term';
-    stmt.run(r.subcategory, r.category, r.signal_bias, timeframe, r.confidence, 'keyword', row.scan_id);
+    await dbRun(updateSql, [r.subcategory, r.category, r.signal_bias, timeframe, r.confidence, 'keyword', row.scan_id]);
     if (r.category === 'other') remaining_other++;
     else classified++;
   }

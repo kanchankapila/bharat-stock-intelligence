@@ -1,6 +1,6 @@
 import { fetchTechIndicators, fetchHistoricalOHLC } from './marketData';
 import { fetchStockDataWithCache } from './liveStockData';
-import db from './db';
+import { dbGet, dbRun } from './dbAsync';
 
 export interface ScanResult {
   symbol: string;
@@ -24,7 +24,7 @@ export interface ScanResult {
 
 export async function getCachedScan(symbol: string): Promise<ScanResult | null> {
   try {
-    const row = db.prepare('SELECT * FROM technical_scans WHERE symbol = ?').get(symbol) as any;
+    const row = await dbGet<any>('SELECT * FROM technical_scans WHERE symbol = ?', [symbol]);
     if (row) {
       const data = JSON.parse(row.data) as ScanResult;
       const lastScan = new Date(row.timestamp).getTime();
@@ -122,8 +122,10 @@ export async function runTechnicalScan(symbol: string): Promise<ScanResult> {
 
   // Cache result
   try {
-    const stmt = db.prepare('INSERT OR REPLACE INTO technical_scans (symbol, data, timestamp) VALUES (?, ?, CURRENT_TIMESTAMP)');
-    stmt.run(symbol, JSON.stringify(result));
+    await dbRun(`
+      INSERT INTO technical_scans (symbol, data, timestamp) VALUES (?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(symbol) DO UPDATE SET data = excluded.data, timestamp = CURRENT_TIMESTAMP
+    `, [symbol, JSON.stringify(result)]);
   } catch (e) {
     console.error("Error caching scan", e);
   }

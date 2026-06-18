@@ -1,4 +1,4 @@
-import db from './db';
+import { dbRun } from './dbAsync';
 import { fetchTrendlyneAdvTechnicalAnalysis } from './trendlyneService';
 
 export interface TechnicalCompositeScore {
@@ -28,14 +28,13 @@ export async function fetchAndProcessTechnicalData(symbol: string, timeframe: 'D
   }
 
   // 1. Store raw snapshot
-  const upsertSnapshot = db.prepare(`
+  await dbRun(`
     INSERT INTO trendlyne_technical_snapshots (symbol, timeframe, data_json, last_updated)
     VALUES (?, ?, ?, CURRENT_TIMESTAMP)
     ON CONFLICT(symbol, timeframe) DO UPDATE SET
       data_json = excluded.data_json,
       last_updated = CURRENT_TIMESTAMP
-  `);
-  upsertSnapshot.run(symbol, timeframe, JSON.stringify(rawData));
+  `, [symbol, timeframe, JSON.stringify(rawData)]);
 
   // 2. Compute composite score
   const params = rawData.body.parameters;
@@ -45,7 +44,7 @@ export async function fetchAndProcessTechnicalData(symbol: string, timeframe: 'D
   const aiInsight = await generateTechnicalInsight(symbol, scores, bullishFlags, bearishFlags, params);
 
   // 4. Save to DB
-  const upsertScores = db.prepare(`
+  await dbRun(`
     INSERT INTO technical_composite_scores (
       symbol, trend_score, momentum_score, oscillator_score, volume_score,
       trend_strength_score, candlestick_score, support_resistance_score, risk_score,
@@ -65,9 +64,7 @@ export async function fetchAndProcessTechnicalData(symbol: string, timeframe: 'D
       bearish_flags = excluded.bearish_flags,
       ai_insight = excluded.ai_insight,
       last_updated = CURRENT_TIMESTAMP
-  `);
-
-  upsertScores.run(
+  `, [
     symbol,
     scores.trend,
     scores.momentum,
@@ -81,7 +78,7 @@ export async function fetchAndProcessTechnicalData(symbol: string, timeframe: 'D
     JSON.stringify(bullishFlags),
     JSON.stringify(bearishFlags),
     aiInsight
-  );
+  ]);
 
   console.log(`[TECH INTEL] Successfully processed technical data for ${symbol}. Score: ${scores.composite.toFixed(2)}`);
   
