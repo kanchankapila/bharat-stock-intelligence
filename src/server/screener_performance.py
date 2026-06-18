@@ -10,20 +10,19 @@ Phases:
   D - Sync tier back to screener_master + screener_reliability
 """
 
-import sqlite3
 import json
 import statistics
 import datetime
-from pathlib import Path
 from collections import defaultdict
 
-DB_PATH = Path(__file__).parent.parent.parent / "database.sqlite"
+from db_compat import connect, ConnWrapper
+
 NIFTY_SYMBOL = "NIFTY50"
 K_PRIOR = 20               # Bayesian prior weight (20 signals to trust own win rate)
 MIN_SIGNALS_FOR_TIER = 5   # below this = Unranked
 
 
-def get_trading_days_after(conn: sqlite3.Connection, symbol: str, start_date: str, n: int):
+def get_trading_days_after(conn: ConnWrapper, symbol: str, start_date: str, n: int):
     """Return (price, actual_date) n trading days after start_date from stock_ohlcv."""
     rows = conn.execute("""
         SELECT close, date FROM stock_ohlcv
@@ -36,7 +35,7 @@ def get_trading_days_after(conn: sqlite3.Connection, symbol: str, start_date: st
     return rows[n - 1][0], rows[n - 1][1]
 
 
-def get_price_on_or_after(conn: sqlite3.Connection, symbol: str, date: str):
+def get_price_on_or_after(conn: ConnWrapper, symbol: str, date: str):
     """Return close price on date or next available trading day."""
     row = conn.execute("""
         SELECT close FROM stock_ohlcv
@@ -54,7 +53,7 @@ def compute_return(entry, exit_p):
 
 # -- Phase A: Bootstrap proxy -------------------------------------------------
 
-def phase_a_bootstrap(conn: sqlite3.Connection) -> dict:
+def phase_a_bootstrap(conn: ConnWrapper) -> dict:
     """
     Build screener_id -> [(return_pct, outcome)] mapping from:
       confluence_signals.screener_ids_json (which screeners were active for a symbol)
@@ -89,7 +88,8 @@ def phase_a_bootstrap(conn: sqlite3.Connection) -> dict:
         try:
             ids = json.loads(ids_json) if ids_json else []
             if ids:
-                conf_by_symbol[sym].append((computed_at[:10], ids))
+                # computed_at is a timestamptz (datetime) on Postgres, a string on SQLite.
+                conf_by_symbol[sym].append((str(computed_at)[:10], ids))
         except (json.JSONDecodeError, TypeError):
             pass
 
@@ -125,7 +125,7 @@ def phase_a_bootstrap(conn: sqlite3.Connection) -> dict:
 
 # -- Phase B: Fill screener_appearances returns --------------------------------
 
-def phase_b_fill_returns(conn: sqlite3.Connection) -> int:
+def phase_b_fill_returns(conn: ConnWrapper) -> int:
     """Fill return columns for screener_appearances rows where return_20d IS NULL."""
     print("[PhaseB] Filling screener_appearances returns from stock_ohlcv...")
 
@@ -148,17 +148,20 @@ def phase_b_fill_returns(conn: sqlite3.Connection) -> int:
     filled = 0
 
     for screener_id, symbol, appeared_date in pending:
-        entry_price = get_price_on_or_after(conn, symbol, appeared_date)
+        # appeared_date is a timestamptz (datetime) on Postgres; use its date portion for
+        # the OHLCV lookups but keep the original value for the UPDATE WHERE row match.
+        lookup_date = str(appeared_date)[:10]
+        entry_price = get_price_on_or_after(conn, symbol, lookup_date)
         if entry_price is None:
             continue
 
         returns = {}
         for n, col in [(5, 'return_5d'), (10, 'return_10d'), (20, 'return_20d'), (60, 'return_60d'), (120, 'return_120d')]:
-            exit_price, _ = get_trading_days_after(conn, symbol, appeared_date, n)
+            exit_price, _ = get_trading_days_after(conn, symbol, lookup_date, n)
             returns[col] = compute_return(entry_price, exit_price)
 
-        nifty_exit, _ = get_trading_days_after(conn, NIFTY_SYMBOL, appeared_date, 20)
-        nifty_entry = get_price_on_or_after(conn, NIFTY_SYMBOL, appeared_date)
+        nifty_exit, _ = get_trading_days_after(conn, NIFTY_SYMBOL, lookup_date, 20)
+        nifty_entry = get_price_on_or_after(conn, NIFTY_SYMBOL, lookup_date)
         nifty_ret_20d = compute_return(nifty_entry, nifty_exit)
 
         r20 = returns.get('return_20d')
@@ -224,7 +227,7 @@ def _metrics_from_list(returns, nifty_rets):
     }
 
 
-def phase_c_bayesian(conn: sqlite3.Connection, proxy_outcomes: dict) -> int:
+def phase_c_bayesian(conn: ConnWrapper, proxy_outcomes: dict) -> int:
     """Compute Bayesian scores + tiers. Write to screener_performance_v2."""
     print("[PhaseC] Computing Bayesian scores + tiers...")
 
@@ -238,7 +241,7 @@ def phase_c_bayesian(conn: sqlite3.Connection, proxy_outcomes: dict) -> int:
         FROM screener_appearances
         WHERE outcome_20d IN ('WIN','LOSS','NEUTRAL')
         GROUP BY screener_id
-        HAVING n >= 10
+        HAVING COUNT(*) >= 10
     """).fetchall()
 
     if qualified:
@@ -373,7 +376,7 @@ def phase_c_bayesian(conn: sqlite3.Connection, proxy_outcomes: dict) -> int:
 
 # -- Phase D: Sync back -------------------------------------------------------
 
-def phase_d_sync_back(conn: sqlite3.Connection) -> None:
+def phase_d_sync_back(conn: ConnWrapper) -> None:
     """Sync tier to screener_master and win_rate_* columns to screener_reliability."""
     print("[PhaseD] Syncing tiers to screener_master...")
 
@@ -409,13 +412,7 @@ def phase_d_sync_back(conn: sqlite3.Connection) -> None:
 # -- Entry point --------------------------------------------------------------
 
 def run():
-    if not DB_PATH.exists():
-        raise FileNotFoundError(f"[ScreenerPerf] DB not found: {DB_PATH}. Run from project root.")
-
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=NORMAL")
-
+    conn = connect()
     try:
         proxy = phase_a_bootstrap(conn)
         phase_b_fill_returns(conn)

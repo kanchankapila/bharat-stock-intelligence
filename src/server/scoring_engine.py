@@ -1,18 +1,13 @@
 from pathlib import Path
-import sqlite3
 import json
-import os
 import datetime
 import pandas as pd
-import numpy as np
 import difflib
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 from nlp_engine import NLPScreenerInference, NLP_VERSION
 from typing import Dict, Any, List
 
-# Configuration
-DB_PATH      = Path(__file__).parent.parent.parent / "database.sqlite"
-DATABASE_URL = f"sqlite:///{DB_PATH}"
+from db_compat import get_engine
 
 
 class AlphaQuantScoringEngine:
@@ -38,7 +33,7 @@ class AlphaQuantScoringEngine:
     }
 
     def __init__(self):
-        self.engine = create_engine(DATABASE_URL)
+        self.engine = get_engine()
         self.nlp = NLPScreenerInference()
         self.stock_stats = {}
         self._load_optimised_weights()
@@ -133,9 +128,9 @@ class AlphaQuantScoringEngine:
 
     def _set_stored_nlp_version(self, conn, version: str):
         conn.execute(text("""
-            INSERT INTO app_settings (key, value, updatedAt)
+            INSERT INTO app_settings (key, value, "updatedAt")
             VALUES ('screener_nlp_version', :v, CURRENT_TIMESTAMP)
-            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updatedAt = CURRENT_TIMESTAMP
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value, "updatedAt" = CURRENT_TIMESTAMP
         """), {"v": version})
 
     def build_screener_metadata(self, screeners: pd.DataFrame, force_rebuild: bool = False) -> Dict[str, Any]:
@@ -429,12 +424,16 @@ class AlphaQuantScoringEngine:
         print("Loading news sentiment data...")
         with self.engine.connect() as conn:
             try:
+                # cutoff computed in Python — datetime('now',...) is SQLite-only and these
+                # text() / read_sql strings bypass the translator (raw SQLAlchemy engine).
+                news_cutoff = (datetime.datetime.now() - datetime.timedelta(days=7)).isoformat()
                 news_df = pd.read_sql(
-                    """SELECT symbols_json AS symbols, sentiment, sentiment_score, impact, title, source, published_at
+                    text("""SELECT symbols_json AS symbols, sentiment, sentiment_score, impact, title, source, published_at
                        FROM news_sentiment_items
-                       WHERE published_at >= datetime('now', '-7 days')
-                         AND sentiment != 'NEUTRAL'""",
+                       WHERE published_at >= :cutoff
+                         AND sentiment != 'NEUTRAL'"""),
                     conn,
+                    params={"cutoff": news_cutoff},
                 )
                 # Normalise: BULLISH→positive, BEARISH→negative
                 news_df['sentiment'] = news_df['sentiment'].str.lower().map(
@@ -485,14 +484,15 @@ class AlphaQuantScoringEngine:
         # Load latest win_probability per symbol from ML-scored technical signal rows
         win_prob_map: Dict[str, float] = {}
         try:
+            wp_cutoff = (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
             with self.engine.connect() as conn:
                 wp_rows = conn.execute(text("""
                     SELECT symbol, MAX(win_probability) AS wp
                     FROM technical_signals
-                    WHERE date >= date('now', '-1 day')
+                    WHERE date >= :cutoff
                       AND win_probability IS NOT NULL
                     GROUP BY symbol
-                """)).fetchall()
+                """), {"cutoff": wp_cutoff}).fetchall()
             win_prob_map = {r[0]: float(r[1]) for r in wp_rows}
         except Exception:
             pass
@@ -523,10 +523,11 @@ class AlphaQuantScoringEngine:
                     "SELECT signal_type, AVG(weight) FROM signal_type_weights GROUP BY signal_type"
                 )).fetchall()
                 type_weight = {r[0]: float(r[1]) for r in stw if r[0]}
+                sig_cutoff = (datetime.date.today() - datetime.timedelta(days=3)).isoformat()
                 sig_rows = conn.execute(text("""
                     SELECT symbol, signals_json FROM technical_signals
-                    WHERE date >= date('now', '-3 day') AND signals_json IS NOT NULL
-                """)).fetchall()
+                    WHERE date >= :cutoff AND signals_json IS NOT NULL
+                """), {"cutoff": sig_cutoff}).fetchall()
             for sym, sj in sig_rows:
                 try:
                     types = [s.get('type') for s in json.loads(sj) if isinstance(s, dict)]

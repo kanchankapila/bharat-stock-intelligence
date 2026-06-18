@@ -3,16 +3,13 @@ unified_ranker.py — Regime-gated unified stock recommendation engine.
 
 Run after market close: python unified_ranker.py
 """
-import sqlite3
 import json
 import csv
-import sys
-import os
 from pathlib import Path
-from datetime import date
+from datetime import date, timedelta
 
+from db_compat import connect
 
-DB_PATH          = Path(__file__).parent.parent.parent / 'database.sqlite'
 CSV_PATH         = Path(__file__).parent.parent.parent / 'screener_scoring_v2.csv'
 CORRECTIONS_PATH = Path(__file__).parent.parent.parent / 'screener_corrections.csv'
 
@@ -148,8 +145,7 @@ def compute_screener_stock_scores(membership, fundamental_scores):
 
 class UnifiedRanker:
     def __init__(self, conn=None, csv_path=None, corrections_path=None):
-        self.conn = conn or sqlite3.connect(str(DB_PATH))
-        self.conn.row_factory = sqlite3.Row
+        self.conn = conn or connect()
         self.csv_path = Path(csv_path) if csv_path else CSV_PATH
         self.corrections_path = Path(corrections_path) if corrections_path else CORRECTIONS_PATH
 
@@ -186,11 +182,17 @@ class UnifiedRanker:
                     continue
 
         self.conn.executemany(
-            '''INSERT OR REPLACE INTO screener_catalog
+            '''INSERT INTO screener_catalog
                (screener_id, source, screener_name, category, subcategory,
                 signal_bias, investment_horizon, confidence,
                 score_0_100, tier, sub_mod, horiz_mult)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)''',
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+               ON CONFLICT(screener_id, source) DO UPDATE SET
+                 screener_name=excluded.screener_name, category=excluded.category,
+                 subcategory=excluded.subcategory, signal_bias=excluded.signal_bias,
+                 investment_horizon=excluded.investment_horizon, confidence=excluded.confidence,
+                 score_0_100=excluded.score_0_100, tier=excluded.tier,
+                 sub_mod=excluded.sub_mod, horiz_mult=excluded.horiz_mult''',
             rows,
         )
 
@@ -211,7 +213,7 @@ class UnifiedRanker:
                                 'UPDATE screener_catalog SET subcategory=? WHERE screener_name=?',
                                 (corr['corrected'], name),
                             )
-                    except (KeyError, sqlite3.Error):
+                    except Exception:
                         pass
         self.conn.commit()
         return len(rows)
@@ -254,65 +256,83 @@ class UnifiedRanker:
                     _add(r['symbol'], r['signal_bias'], r['confidence'],
                          r['category'], r['subcategory'], r['investment_horizon'])
             except Exception:
-                pass
+                self.conn.rollback()
 
         return membership
 
     def _get_ml_scores(self):
+        # technical_signals.date is a text column; compare against a Python-computed cutoff
+        # string (date('now',...) translates to a real date on Postgres -> text>=date error).
+        cutoff = (date.today() - timedelta(days=3)).isoformat()
         try:
             rows = self.conn.execute(
-                "SELECT symbol, AVG(win_probability) AS p FROM technical_signals WHERE date >= date('now', '-3 days') GROUP BY symbol"
+                "SELECT symbol, AVG(win_probability) AS p FROM technical_signals WHERE date >= ? GROUP BY symbol",
+                (cutoff,),
             ).fetchall()
             return {r['symbol']: float(r['p'] or 0) * 100 for r in rows}
         except Exception:
+            self.conn.rollback()
             return {}
 
     def _get_confluence_scores(self):
+        cutoff = (date.today() - timedelta(days=1)).isoformat()
         try:
             rows = self.conn.execute(
-                "SELECT symbol, confluence_score FROM confluence_signals WHERE computed_at >= date('now', '-1 day')"
+                "SELECT symbol, confluence_score FROM confluence_signals WHERE computed_at >= ?",
+                (cutoff,),
             ).fetchall()
             return {r['symbol']: float(r['confluence_score'] or 0) for r in rows}
         except Exception:
+            self.conn.rollback()
             return {}
 
     def _get_technical_scores(self):
+        cutoff = (date.today() - timedelta(days=3)).isoformat()
         try:
             rows = self.conn.execute(
-                "SELECT symbol, AVG(signal_score) AS s FROM technical_signals WHERE date >= date('now', '-3 days') GROUP BY symbol"
+                "SELECT symbol, AVG(signal_score) AS s FROM technical_signals WHERE date >= ? GROUP BY symbol",
+                (cutoff,),
             ).fetchall()
             return {r['symbol']: float(r['s'] or 0) for r in rows}
         except Exception:
+            self.conn.rollback()
             return {}
 
     def _get_dl_scores(self):
+        cutoff = (date.today() - timedelta(days=1)).isoformat()
         try:
             rows = self.conn.execute(
-                "SELECT symbol, probability FROM dl_predictions WHERE predicted_at >= date('now', '-1 day')"
+                "SELECT symbol, probability FROM dl_predictions WHERE predicted_at >= ?",
+                (cutoff,),
             ).fetchall()
             return {r['symbol']: float(r['probability'] or 0) * 100 for r in rows}
         except Exception:
+            self.conn.rollback()
             return {}
 
     def _get_avg_track_record(self):
+        cutoff = (date.today() - timedelta(days=90)).isoformat()
         try:
             row = self.conn.execute(
-                "SELECT AVG(actual_return_pct) AS avg_r FROM recommendation_log WHERE generated_at >= date('now', '-90 days') AND actual_return_pct IS NOT NULL"
+                "SELECT AVG(actual_return_pct) AS avg_r FROM recommendation_log WHERE generated_at >= ? AND actual_return_pct IS NOT NULL",
+                (cutoff,),
             ).fetchone()
             return float(row['avg_r'] or 0)
         except Exception:
+            self.conn.rollback()
             return 0.0
 
     def _passes_rl_gate(self, symbol):
+        cutoff = (date.today() - timedelta(days=90)).isoformat()
         try:
             row = self.conn.execute(
-                "SELECT AVG(actual_return_pct) AS avg_r, COUNT(*) AS cnt FROM recommendation_log WHERE symbol = ? AND generated_at >= date('now', '-90 days') AND actual_return_pct IS NOT NULL",
-                (symbol,),
+                "SELECT AVG(actual_return_pct) AS avg_r, COUNT(*) AS cnt FROM recommendation_log WHERE symbol = ? AND generated_at >= ? AND actual_return_pct IS NOT NULL",
+                (symbol, cutoff),
             ).fetchone()
             if row and row['cnt'] and row['cnt'] > 0:
                 return float(row['avg_r'] or 0) >= 0
         except Exception:
-            pass
+            self.conn.rollback()
         return True
 
     def _get_entry_targets(self, symbol):
@@ -341,7 +361,7 @@ class UnifiedRanker:
                     'sector':          row['sector'],
                 }
         except Exception:
-            pass
+            self.conn.rollback()
 
         # Fallback 2: Query recommendation_log
         try:
@@ -374,15 +394,15 @@ class UnifiedRanker:
                     'sector':          row['sector'],
                 }
         except Exception:
-            pass
+            self.conn.rollback()
 
         # Fallback 3: Query signals
         try:
             row = self.conn.execute(
-                """SELECT entry, target, stopLoss, reasoning AS trade_reasoning 
-                   FROM signals 
-                   WHERE symbol = ? 
-                   ORDER BY createdAt DESC 
+                """SELECT entry, target, "stopLoss", reasoning AS trade_reasoning
+                   FROM signals
+                   WHERE symbol = ?
+                   ORDER BY "createdAt" DESC
                    LIMIT 1""",
                 (symbol,),
             ).fetchone()
@@ -418,7 +438,7 @@ class UnifiedRanker:
                     'sector':          sec,
                 }
         except Exception:
-            pass
+            self.conn.rollback()
 
         # Fallback 4: Default fallback with sector only
         sec = None
@@ -429,7 +449,7 @@ class UnifiedRanker:
             if sec_row:
                 sec = sec_row['sector']
         except Exception:
-            pass
+            self.conn.rollback()
 
         return {
             'entry_zone_low':  None,
@@ -514,7 +534,7 @@ class UnifiedRanker:
         cur = self.conn.cursor()
         for r in results:
             cur.execute('''
-                INSERT OR REPLACE INTO unified_recommendations
+                INSERT INTO unified_recommendations
                 (symbol, computed_at, regime, unified_score, conviction_level,
                  screener_stock_score, ml_score, confluence_score, technical_score, dl_score,
                  avg_engine_track_record, bullish_screener_count, bearish_screener_count,
@@ -526,6 +546,20 @@ class UnifiedRanker:
                         :bearish_screener_count, :fundamental_score, :entry_zone_low,
                         :entry_zone_high, :stop_loss, :target_1, :target_2, :target_3,
                         :risk_reward, :timeframe, :trade_reasoning, :sector)
+                ON CONFLICT(symbol, computed_at) DO UPDATE SET
+                    regime=excluded.regime, unified_score=excluded.unified_score,
+                    conviction_level=excluded.conviction_level,
+                    screener_stock_score=excluded.screener_stock_score, ml_score=excluded.ml_score,
+                    confluence_score=excluded.confluence_score, technical_score=excluded.technical_score,
+                    dl_score=excluded.dl_score, avg_engine_track_record=excluded.avg_engine_track_record,
+                    bullish_screener_count=excluded.bullish_screener_count,
+                    bearish_screener_count=excluded.bearish_screener_count,
+                    fundamental_score=excluded.fundamental_score,
+                    entry_zone_low=excluded.entry_zone_low, entry_zone_high=excluded.entry_zone_high,
+                    stop_loss=excluded.stop_loss, target_1=excluded.target_1,
+                    target_2=excluded.target_2, target_3=excluded.target_3,
+                    risk_reward=excluded.risk_reward, timeframe=excluded.timeframe,
+                    trade_reasoning=excluded.trade_reasoning, sector=excluded.sector
             ''', r)
         self.conn.commit()
 
