@@ -1,0 +1,105 @@
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+from sql_translate import (  # noqa: E402
+    convert_placeholders,
+    translate,
+    build_params,
+)
+
+
+# ─── convert_placeholders ──────────────────────────────────────────────────────
+
+def test_numbers_positional_placeholders():
+    assert convert_placeholders("SELECT * FROM t WHERE a=? AND b=?") == \
+        "SELECT * FROM t WHERE a=:p0 AND b=:p1"
+
+
+def test_ignores_question_mark_in_string_literal():
+    assert convert_placeholders("SELECT '?' AS q, a=? FROM t") == \
+        "SELECT '?' AS q, a=:p0 FROM t"
+
+
+def test_ignores_question_mark_in_double_quoted_identifier():
+    assert convert_placeholders('SELECT "we?rd" FROM t WHERE a=?') == \
+        'SELECT "we?rd" FROM t WHERE a=:p0'
+
+
+# ─── function mapping (Postgres path) ──────────────────────────────────────────
+
+def _pg(sql):
+    return translate(sql, use_pg=True)
+
+
+def test_maps_datetime_now_and_modifiers():
+    assert _pg("SELECT datetime('now')") == "SELECT now()"
+    assert _pg("WHERE d < datetime('now', '-30 days')") == \
+        "WHERE d < (now() + interval '-30 days')"
+
+
+def test_maps_date_now():
+    assert _pg("WHERE d = date('now')") == "WHERE d = current_date"
+
+
+def test_maps_date_column_to_cast():
+    assert _pg("WHERE date(cs.computed_at) = ?") == \
+        "WHERE (cs.computed_at)::date = :p0"
+
+
+def test_maps_julianday_difference():
+    assert _pg("AVG(julianday('now') - julianday(date))") == \
+        "AVG(current_date - (date)::date)"
+
+
+def test_maps_ifnull_to_coalesce():
+    assert _pg("SELECT IFNULL(a, 0) FROM t") == "SELECT COALESCE(a, 0) FROM t"
+
+
+def test_maps_insert_or_ignore():
+    assert _pg("INSERT OR IGNORE INTO t (a) VALUES (?)") == \
+        "INSERT INTO t (a) VALUES (:p0) ON CONFLICT DO NOTHING"
+
+
+def test_maps_json_extract_single_and_nested():
+    assert _pg("SELECT json_extract(meta, '$.k') FROM t") == \
+        "SELECT (meta::jsonb ->> 'k') FROM t"
+    assert _pg("SELECT json_extract(meta, '$.a.b') FROM t") == \
+        "SELECT (meta::jsonb #>> '{a,b}') FROM t"
+
+
+def test_casts_round_two_arg_to_numeric_paren_aware():
+    assert _pg("SELECT ROUND(AVG(score), 1) FROM t") == \
+        "SELECT round((AVG(score))::numeric, 1) FROM t"
+    assert _pg("SELECT ROUND(COALESCE(x, 0) + 0.2, 3) FROM t") == \
+        "SELECT round((COALESCE(x, 0) + 0.2)::numeric, 3) FROM t"
+    assert _pg("SELECT ROUND(x) FROM t") == "SELECT ROUND(x) FROM t"
+
+
+def test_maps_cast_real_and_group_concat():
+    assert _pg("SELECT CAST(x AS REAL) FROM t") == \
+        "SELECT CAST(x AS double precision) FROM t"
+    assert _pg("SELECT GROUP_CONCAT(sym) FROM t") == \
+        "SELECT string_agg(sym::text, ',') FROM t"
+
+
+# ─── SQLite path is a function-mapping no-op (placeholders still convert) ───────
+
+def test_sqlite_path_leaves_functions_unchanged():
+    sql = "SELECT IFNULL(a, 0), datetime('now', '-1 day') FROM t WHERE b = ?"
+    assert translate(sql, use_pg=False) == \
+        "SELECT IFNULL(a, 0), datetime('now', '-1 day') FROM t WHERE b = :p0"
+
+
+# ─── build_params ──────────────────────────────────────────────────────────────
+
+def test_build_params_positional_to_named():
+    assert build_params(("AAA", 5)) == {"p0": "AAA", "p1": 5}
+    assert build_params([1, 2, 3]) == {"p0": 1, "p1": 2, "p2": 3}
+
+
+def test_build_params_dict_passthrough_and_empty():
+    assert build_params({"x": 1}) == {"x": 1}
+    assert build_params(()) == {}
+    assert build_params(None) == {}

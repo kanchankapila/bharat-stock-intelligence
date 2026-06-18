@@ -1,0 +1,267 @@
+"""
+Dual-mode data-access layer for the Python engines (Phase 3 / P3f).
+
+The Python analog of the TypeScript `dbAsync` facade. Exposes a small synchronous API
+(connect / query_all / query_one / query_scalar / execute / executemany / transaction /
+read_df / get_engine) that routes to either SQLite or PostgreSQL, selected by the
+USE_POSTGRES env var. Engines converted to this API keep running on SQLite today; the
+SQLite->Postgres cutover is then a single env flip — no further code change.
+
+Everything executes through a SQLAlchemy `text()` connection so dialect/paramstyle
+differences are handled by SQLAlchemy and the sql_translate translator. Rows are returned
+as a `Row` (a dict subclass) that supports BOTH name access (row['col']) and positional
+access (row[0]), matching the sqlite3.Row surface the engines already rely on.
+
+Conversion notes for P3f:
+  - Pass parameters as a positional tuple/list: query_all(sql, [a, b]).
+  - For an inserted id on Postgres, add `RETURNING id` and read it (lastrowid is SQLite-only).
+  - `conn.row_factory = sqlite3.Row` lines become unnecessary — remove them.
+  - SQLite-only SQL (INSERT OR REPLACE, strftime, PRAGMA table_info) must be hand-converted.
+"""
+import os
+from pathlib import Path
+from urllib.parse import quote_plus
+
+import pandas as pd
+from sqlalchemy import create_engine, text
+
+try:  # works whether run as a script (src/server on sys.path) or imported as a package
+    from sql_translate import translate, build_params, use_postgres
+except ImportError:  # pragma: no cover
+    from .sql_translate import translate, build_params, use_postgres
+
+
+# ─── Connection URL / engine ───────────────────────────────────────────────────
+
+def _sqlite_url() -> str:
+    env = os.environ.get("DATABASE_URL")
+    if env and env.startswith("sqlite"):
+        return env
+    db_path = Path(__file__).resolve().parent.parent.parent / "database.sqlite"
+    return f"sqlite:///{db_path}"
+
+
+def _pg_url() -> str:
+    url = os.environ.get("POSTGRES_URL")
+    if url:
+        if url.startswith("postgresql://"):
+            url = url.replace("postgresql://", "postgresql+psycopg2://", 1)
+        elif url.startswith("postgres://"):
+            url = url.replace("postgres://", "postgresql+psycopg2://", 1)
+        return url
+    user = os.environ.get("POSTGRES_USER", "bharat")
+    pw = os.environ.get("POSTGRES_PASSWORD", "bharat")
+    host = os.environ.get("POSTGRES_HOST", "localhost")
+    port = os.environ.get("POSTGRES_PORT", "5433")
+    db = os.environ.get("POSTGRES_DB", "bharat_intel")
+    return f"postgresql+psycopg2://{user}:{quote_plus(pw)}@{host}:{port}/{db}"
+
+
+def database_url() -> str:
+    return _pg_url() if use_postgres() else _sqlite_url()
+
+
+_engines: dict = {}
+
+
+def get_engine():
+    """Cached SQLAlchemy Engine for the active dialect (one per resolved URL/process)."""
+    url = database_url()
+    eng = _engines.get(url)
+    if eng is None:
+        eng = create_engine(url, pool_pre_ping=True, future=True)
+        _engines[url] = eng
+    return eng
+
+
+# ─── Row: dual-access (name + positional) ──────────────────────────────────────
+
+class Row(dict):
+    """Ordered dict that also supports positional access: row['col'] AND row[0]."""
+
+    def __init__(self, columns, values):
+        super().__init__(zip(columns, values))
+        self._values = tuple(values)
+
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            return self._values[key]
+        return super().__getitem__(key)
+
+
+def _rows(result):
+    cols = list(result.keys())
+    return [Row(cols, tuple(r)) for r in result.fetchall()]
+
+
+def _one(result):
+    cols = list(result.keys())
+    r = result.fetchone()
+    return Row(cols, tuple(r)) if r is not None else None
+
+
+# ─── Cursor / connection wrappers (legacy sqlite3 surface) ─────────────────────
+
+class CursorWrapper:
+    """Mimics the subset of sqlite3.Cursor the engines use: execute/executemany +
+    fetchone/fetchall + rowcount/lastrowid."""
+
+    def __init__(self, conn):
+        self._conn = conn
+        self._result = None
+
+    def execute(self, sql, params=()):
+        self._result = self._conn.execute(text(translate(sql)), build_params(params))
+        return self
+
+    def executemany(self, sql, seq_of_params):
+        self._result = self._conn.execute(
+            text(translate(sql)), [build_params(p) for p in seq_of_params]
+        )
+        return self
+
+    def fetchone(self):
+        return _one(self._result) if self._result is not None else None
+
+    def fetchall(self):
+        return _rows(self._result) if self._result is not None else []
+
+    @property
+    def rowcount(self):
+        return self._result.rowcount if self._result is not None else -1
+
+    @property
+    def lastrowid(self):
+        # SQLite-only. On Postgres use `RETURNING id` instead.
+        return getattr(self._result, "lastrowid", None) if self._result is not None else None
+
+    def close(self):
+        pass
+
+
+class ConnWrapper:
+    """Mimics sqlite3.Connection: execute/executemany/cursor/commit/rollback/close, and
+    works as a context manager (commit on clean exit, rollback on exception)."""
+
+    def __init__(self, conn):
+        self._conn = conn
+
+    def execute(self, sql, params=()):
+        return CursorWrapper(self._conn).execute(sql, params)
+
+    def executemany(self, sql, seq_of_params):
+        return CursorWrapper(self._conn).executemany(sql, seq_of_params)
+
+    def cursor(self):
+        return CursorWrapper(self._conn)
+
+    def commit(self):
+        self._conn.commit()
+
+    def rollback(self):
+        self._conn.rollback()
+
+    def close(self):
+        self._conn.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        try:
+            if exc_type is not None:
+                self._conn.rollback()
+            else:
+                self._conn.commit()
+        finally:
+            self._conn.close()
+
+
+def connect() -> ConnWrapper:
+    """Open a connection with the sqlite3-style surface. Caller commits and closes
+    (or use it as a `with` block)."""
+    return ConnWrapper(get_engine().connect())
+
+
+# ─── Convenience helpers (open + use + close internally) ───────────────────────
+
+def query_all(sql, params=()):
+    with get_engine().connect() as conn:
+        return _rows(conn.execute(text(translate(sql)), build_params(params)))
+
+
+def query_one(sql, params=()):
+    with get_engine().connect() as conn:
+        return _one(conn.execute(text(translate(sql)), build_params(params)))
+
+
+def query_scalar(sql, params=(), default=None):
+    row = query_one(sql, params)
+    return row[0] if row is not None else default
+
+
+def execute(sql, params=()):
+    """Run a write and commit; returns affected rowcount."""
+    with get_engine().begin() as conn:
+        return conn.execute(text(translate(sql)), build_params(params)).rowcount
+
+
+def execute_returning(sql, params=()):
+    """Run an INSERT/UPDATE ... RETURNING and commit; returns the first Row (or None)."""
+    with get_engine().begin() as conn:
+        return _one(conn.execute(text(translate(sql)), build_params(params)))
+
+
+def executemany(sql, seq_of_params):
+    with get_engine().begin() as conn:
+        return conn.execute(
+            text(translate(sql)), [build_params(p) for p in seq_of_params]
+        ).rowcount
+
+
+def read_df(sql, params=()):
+    """pandas.read_sql wrapper using the active engine + translator."""
+    with get_engine().connect() as conn:
+        return pd.read_sql(text(translate(sql)), conn, params=build_params(params))
+
+
+# ─── Transactions ──────────────────────────────────────────────────────────────
+
+class _Tx:
+    def __init__(self, conn):
+        self._conn = conn
+
+    def execute(self, sql, params=()):
+        return CursorWrapper(self._conn).execute(sql, params)
+
+    def executemany(self, sql, seq_of_params):
+        return CursorWrapper(self._conn).executemany(sql, seq_of_params)
+
+    def query_all(self, sql, params=()):
+        return _rows(self._conn.execute(text(translate(sql)), build_params(params)))
+
+    def query_one(self, sql, params=()):
+        return _one(self._conn.execute(text(translate(sql)), build_params(params)))
+
+
+class _TxCtx:
+    """Context manager yielding a _Tx; commits on clean exit, rolls back on exception."""
+
+    def __enter__(self):
+        self._conn = get_engine().connect()
+        self._conn.begin()
+        return _Tx(self._conn)
+
+    def __exit__(self, exc_type, exc, tb):
+        try:
+            if exc_type is not None:
+                self._conn.rollback()
+            else:
+                self._conn.commit()
+        finally:
+            self._conn.close()
+        return False
+
+
+def transaction():
+    return _TxCtx()
