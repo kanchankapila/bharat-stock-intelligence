@@ -3,7 +3,8 @@ import "./stdioSafeConsole.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import db from "./db.js";
+import { dbGet, dbAll } from "./dbAsync.js";
+import { usePostgres } from "./pgConfig.js";
 import path from "path";
 import fs from "fs";
 import { execFile } from "child_process";
@@ -26,19 +27,38 @@ server.tool(
   {},
   async () => {
     try {
-      const tables = db.prepare(`
-        SELECT name, sql 
-        FROM sqlite_master 
-        WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
-        ORDER BY name ASC
-      `).all() as Array<{ name: string; sql: string }>;
-
       let markdown = "# AlphaQuant Pro Database Schema\n\n";
-      markdown += "This SQLite database contains the following tables:\n\n";
 
-      for (const table of tables) {
-        markdown += `### Table: \`${table.name}\`\n`;
-        markdown += "```sql\n" + table.sql + "\n```\n\n";
+      if (usePostgres()) {
+        // Postgres has no sqlite_master — list tables with their columns/types from
+        // information_schema instead.
+        const cols = await dbAll(`
+          SELECT table_name, column_name, data_type
+          FROM information_schema.columns
+          WHERE table_schema = 'public'
+          ORDER BY table_name ASC, ordinal_position ASC
+        `) as Array<{ table_name: string; column_name: string; data_type: string }>;
+        markdown += "This PostgreSQL database contains the following tables:\n\n";
+        let current = "";
+        for (const c of cols) {
+          if (c.table_name !== current) {
+            current = c.table_name;
+            markdown += `\n### Table: \`${current}\`\n`;
+          }
+          markdown += `- \`${c.column_name}\` ${c.data_type}\n`;
+        }
+      } else {
+        const tables = await dbAll(`
+          SELECT name, sql
+          FROM sqlite_master
+          WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+          ORDER BY name ASC
+        `) as Array<{ name: string; sql: string }>;
+        markdown += "This SQLite database contains the following tables:\n\n";
+        for (const table of tables) {
+          markdown += `### Table: \`${table.name}\`\n`;
+          markdown += "```sql\n" + table.sql + "\n```\n\n";
+        }
       }
 
       return {
@@ -89,7 +109,7 @@ server.tool(
         executeSql = `${cleanSql} LIMIT 100`;
       }
 
-      const rows = db.prepare(executeSql).all();
+      const rows = await dbAll(executeSql);
 
       if (rows.length === 0) {
         return {
@@ -128,7 +148,7 @@ server.tool(
       const sym = symbol.toUpperCase().trim();
 
       // 1. Core info
-      const stockInfo = db.prepare("SELECT * FROM nse_stocks WHERE symbol = ?").get(sym) as any;
+      const stockInfo = await dbGet("SELECT * FROM nse_stocks WHERE symbol = ?", [sym]) as any;
       if (!stockInfo) {
         return {
           content: [{ type: "text", text: `Stock symbol '${sym}' not found in the nse_stocks master database.` }],
@@ -137,26 +157,26 @@ server.tool(
       }
 
       // 2. Quantitative / Strategy Scoring (both horizons)
-      const scores = db.prepare("SELECT * FROM stock_scores WHERE symbol = ?").all(sym) as any[];
-      const factorBreakdowns = db.prepare("SELECT * FROM stock_factor_breakdown WHERE symbol = ?").all(sym) as any[];
-      const quantScores = db.prepare("SELECT * FROM quant_scores WHERE symbol = ?").get(sym) as any;
+      const scores = await dbAll("SELECT * FROM stock_scores WHERE symbol = ?", [sym]) as any[];
+      const factorBreakdowns = await dbAll("SELECT * FROM stock_factor_breakdown WHERE symbol = ?", [sym]) as any[];
+      const quantScores = await dbGet("SELECT * FROM quant_scores WHERE symbol = ?", [sym]) as any;
 
       // 3. Technical analysis signals
-      const techSignals = db.prepare("SELECT * FROM technical_analysis_signals WHERE symbol = ?").get(sym) as any;
-      const dailyTech = db.prepare("SELECT * FROM technical_signals WHERE symbol = ? ORDER BY date DESC LIMIT 1").get(sym) as any;
+      const techSignals = await dbGet("SELECT * FROM technical_analysis_signals WHERE symbol = ?", [sym]) as any;
+      const dailyTech = await dbGet("SELECT * FROM technical_signals WHERE symbol = ? ORDER BY date DESC LIMIT 1", [sym]) as any;
 
       // 4. Fundamentals (Yahoo bulk sync data)
-      const fundamentals = db.prepare("SELECT * FROM stock_fundamentals WHERE symbol = ?").get(sym) as any;
+      const fundamentals = await dbGet("SELECT * FROM stock_fundamentals WHERE symbol = ?", [sym]) as any;
 
       // 5. News articles & Sentiment
       // Search news_sentiment_items where symbol is in symbols_json
-      const newsItems = db.prepare(`
-        SELECT title, source, sentiment, sentiment_score, impact, published_at, category 
-        FROM news_sentiment_items 
-        WHERE symbols_json LIKE ? 
-        ORDER BY published_at DESC 
+      const newsItems = await dbAll(`
+        SELECT title, source, sentiment, sentiment_score, impact, published_at, category
+        FROM news_sentiment_items
+        WHERE symbols_json LIKE ?
+        ORDER BY published_at DESC
         LIMIT 5
-      `).all(`%"${sym}"%`) as any[];
+      `, [`%"${sym}"%`]) as any[];
 
       // Construct high-density Markdown response
       let markdown = `# Quantitative Stock Profile: ${sym} (${stockInfo.name})\n`;
@@ -262,26 +282,26 @@ server.tool(
   async () => {
     try {
       // 1. Sentiment Snapshot
-      const latestSnapshot = db.prepare(`
-        SELECT * FROM market_sentiment_snapshots 
-        ORDER BY snapshot_at DESC 
+      const latestSnapshot = await dbGet(`
+        SELECT * FROM market_sentiment_snapshots
+        ORDER BY snapshot_at DESC
         LIMIT 1
-      `).get() as any;
+      `) as any;
 
       // 2. Daily flows
-      const flows = db.prepare(`
-        SELECT date, fii_net, dii_net, source 
-        FROM fii_dii_flow 
-        ORDER BY date DESC 
+      const flows = await dbAll(`
+        SELECT date, fii_net, dii_net, source
+        FROM fii_dii_flow
+        ORDER BY date DESC
         LIMIT 5
-      `).all() as any[];
+      `) as any[];
 
       // 3. Composite strategy classes
-      const compositeSummary = db.prepare(`
-        SELECT composite_class, COUNT(*) as count 
-        FROM quant_scores 
+      const compositeSummary = await dbAll(`
+        SELECT composite_class, COUNT(*) as count
+        FROM quant_scores
         GROUP BY composite_class
-      `).all() as Array<{ composite_class: string; count: number }>;
+      `) as Array<{ composite_class: string; count: number }>;
 
       let markdown = "# AlphaQuant Pro: Market Macro Dashboard\n\n";
 
