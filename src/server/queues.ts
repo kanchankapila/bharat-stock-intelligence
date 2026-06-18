@@ -928,8 +928,8 @@ export async function initQueues(): Promise<boolean> {
       QUEUE_SIGNAL_OUTCOMES,
       async (_job: Job) => {
         const { computeSignalOutcomes } = await import('./signalOutcomesService');
-        computeSignalOutcomes(5);
-        computeSignalOutcomes(15);
+        await computeSignalOutcomes(5);
+        await computeSignalOutcomes(15);
       },
       {
         connection,

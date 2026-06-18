@@ -41,7 +41,7 @@ export const telegramRouter = router({
           actualToken = tokenRow?.value || "";
         }
 
-        telegramService.saveSettings(actualToken, input.chatId, input.enabled);
+        await telegramService.saveSettings(actualToken, input.chatId, input.enabled);
         return { success: true };
       } catch (err: any) {
         return { success: false, error: err.message };

@@ -1,17 +1,12 @@
 import axios from 'axios';
-import Database from 'better-sqlite3';
-import path from 'path';
-
-const DATABASE_URL = process.env.DATABASE_URL || 'database.sqlite';
-const dbPath = DATABASE_URL === ':memory:' ? ':memory:' : path.resolve(process.cwd(), DATABASE_URL);
-const db = new Database(dbPath);
+import { dbGet, dbRun } from './dbAsync';
 
 export class TelegramNotificationService {
-  private getSettings(): { botToken: string; chatId: string; enabled: boolean } {
+  private async getSettings(): Promise<{ botToken: string; chatId: string; enabled: boolean }> {
     try {
-      const tokenRow = db.prepare("SELECT value FROM app_settings WHERE key = 'telegram_bot_token'").get() as { value: string } | undefined;
-      const chatRow = db.prepare("SELECT value FROM app_settings WHERE key = 'telegram_chat_id'").get() as { value: string } | undefined;
-      const enabledRow = db.prepare("SELECT value FROM app_settings WHERE key = 'telegram_enabled'").get() as { value: string } | undefined;
+      const tokenRow = await dbGet("SELECT value FROM app_settings WHERE key = 'telegram_bot_token'") as { value: string } | undefined;
+      const chatRow = await dbGet("SELECT value FROM app_settings WHERE key = 'telegram_chat_id'") as { value: string } | undefined;
+      const enabledRow = await dbGet("SELECT value FROM app_settings WHERE key = 'telegram_enabled'") as { value: string } | undefined;
 
       return {
         botToken: tokenRow?.value || process.env.TELEGRAM_BOT_TOKEN || '',
@@ -31,14 +26,15 @@ export class TelegramNotificationService {
   /**
    * Save Telegram Bot Token and Chat ID to SQLite Database
    */
-  public saveSettings(botToken: string, chatId: string, enabled: boolean): void {
+  public async saveSettings(botToken: string, chatId: string, enabled: boolean): Promise<void> {
     const ts = new Date().toISOString();
-    db.prepare(`
-      INSERT OR REPLACE INTO app_settings (key, value, updatedAt)
+    await dbRun(`
+      INSERT INTO app_settings (key, value, "updatedAt")
       VALUES ('telegram_bot_token', ?, ?),
              ('telegram_chat_id', ?, ?),
              ('telegram_enabled', ?, ?)
-    `).run(botToken, ts, chatId, ts, enabled ? 'true' : 'false', ts);
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value, "updatedAt" = excluded."updatedAt"
+    `, [botToken, ts, chatId, ts, enabled ? 'true' : 'false', ts]);
     console.log('[TelegramService] Settings updated successfully in database');
   }
 
@@ -46,7 +42,7 @@ export class TelegramNotificationService {
    * Send custom Markdown message to Telegram Chat
    */
   public async sendMarkdownMessage(text: string): Promise<boolean> {
-    const { botToken, chatId, enabled } = this.getSettings();
+    const { botToken, chatId, enabled } = await this.getSettings();
     if (!enabled || !botToken || !chatId) {
       console.warn('[TelegramService] Dispatched but botToken/chatId is missing or disabled');
       return false;

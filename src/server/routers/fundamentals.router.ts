@@ -31,17 +31,17 @@ export const fundamentalsRouter = router({
   getFundamentalsStatus: publicProcedure
     .query(async () => {
       const { getSyncProgress, getFundamentalsCount } = await import('../fundamentalsSyncService');
-      return { progress: getSyncProgress(), dbCounts: getFundamentalsCount() };
+      return { progress: getSyncProgress(), dbCounts: await getFundamentalsCount() };
     }),
 
   getStockFundamentals: publicProcedure
     .input(z.object({ symbol: z.string() }))
     .query(async ({ input }) => {
       const { getStoredFundamentals, refreshSymbolFundamentals } = await import('../fundamentalsSyncService');
-      let row = getStoredFundamentals(input.symbol);
+      let row = await getStoredFundamentals(input.symbol);
       if (!row) {
         await refreshSymbolFundamentals(input.symbol).catch(() => null);
-        row = getStoredFundamentals(input.symbol);
+        row = await getStoredFundamentals(input.symbol);
       }
       return row ?? null;
     }),

@@ -121,14 +121,14 @@ export const technicalsRouter = router({
   getSignalWinRates: publicProcedure
     .query(async () => {
       const { getWinRateStats } = await import('../signalOutcomesService');
-      return getWinRateStats();
+      return await getWinRateStats();
     }),
 
   computeSignalOutcomes: publicProcedure
     .input(z.object({ horizonDays: z.union([z.literal(5), z.literal(15)]).default(5) }))
     .mutation(async ({ input }) => {
       const { computeSignalOutcomes } = await import('../signalOutcomesService');
-      return computeSignalOutcomes(input.horizonDays);
+      return await computeSignalOutcomes(input.horizonDays);
     }),
 
   getSignalTypeStats: publicProcedure

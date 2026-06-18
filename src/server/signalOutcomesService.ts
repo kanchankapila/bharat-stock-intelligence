@@ -1,4 +1,4 @@
-import db from './db';
+import { dbAll, dbTransaction } from './dbAsync';
 
 export type OutcomeResult = 'WIN' | 'LOSS' | 'NEUTRAL' | 'PENDING';
 export type HorizonDays = 5 | 15;
@@ -33,16 +33,28 @@ export interface WinRateStats {
   recentOutcomes: OutcomeRow[];
 }
 
-export function computeSignalOutcomes(horizonDays: HorizonDays = 5): {
+const UPSERT_OUTCOME_SQL = `
+  INSERT INTO signal_outcomes (
+    symbol, signal_date, horizon_days, entry_price,
+    check_date, exit_price, return_pct, max_return_pct, outcome,
+    signal_score, signals_json, computed_at
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+  ON CONFLICT(symbol, signal_date, horizon_days) DO UPDATE SET
+    check_date=excluded.check_date, exit_price=excluded.exit_price,
+    return_pct=excluded.return_pct, max_return_pct=excluded.max_return_pct,
+    outcome=excluded.outcome, computed_at=excluded.computed_at
+`;
+
+export async function computeSignalOutcomes(horizonDays: HorizonDays = 5): Promise<{
   processed: number;
   resolved: number;
-} {
+}> {
   const cutoffDate = new Date();
   cutoffDate.setDate(cutoffDate.getDate() - horizonDays);
   const cutoff = cutoffDate.toISOString().slice(0, 10);
 
   // Find signals from `horizonDays` ago that haven't been resolved yet
-  const pending = db.prepare(`
+  const pending = await dbAll(`
     SELECT ts.symbol, ts.date as signal_date, ts.cmp as entry_price,
            ts.signal_score, ts.signals_json, ts.stop_loss
     FROM technical_signals ts
@@ -56,32 +68,16 @@ export function computeSignalOutcomes(horizonDays: HorizonDays = 5): {
       )
     ORDER BY ts.date DESC
     LIMIT 500
-  `).all(cutoff, horizonDays) as {
+  `, [cutoff, horizonDays]) as {
     symbol: string; signal_date: string; entry_price: number;
     signal_score: number; signals_json: string; stop_loss: number | null;
   }[];
 
   if (pending.length === 0) return { processed: 0, resolved: 0 };
 
-  const upsert = db.prepare(`
-    INSERT INTO signal_outcomes (
-      symbol, signal_date, horizon_days, entry_price,
-      check_date, exit_price, return_pct, max_return_pct, outcome,
-      signal_score, signals_json, computed_at
-    ) VALUES (
-      @symbol, @signal_date, @horizon_days, @entry_price,
-      @check_date, @exit_price, @return_pct, @max_return_pct, @outcome,
-      @signal_score, @signals_json, CURRENT_TIMESTAMP
-    )
-    ON CONFLICT(symbol, signal_date, horizon_days) DO UPDATE SET
-      check_date=excluded.check_date, exit_price=excluded.exit_price,
-      return_pct=excluded.return_pct, max_return_pct=excluded.max_return_pct,
-      outcome=excluded.outcome, computed_at=excluded.computed_at
-  `);
-
   let resolved = 0;
 
-  db.transaction(() => {
+  await dbTransaction(async (tx) => {
     for (const row of pending) {
       // Find the closest trading day at or after the target exit date
       const targetDate = new Date(row.signal_date);
@@ -89,31 +85,29 @@ export function computeSignalOutcomes(horizonDays: HorizonDays = 5): {
       const targetStr = targetDate.toISOString().slice(0, 10);
 
       // Check for stop-loss hit before target exit date
-      const stopLossRow = db.prepare(`
+      const stopLossRow = await tx.get(`
         SELECT date FROM stock_ohlcv
         WHERE symbol = ? AND date > ? AND date <= ?
           AND low <= ?
         ORDER BY date ASC LIMIT 1
-      `).get(row.symbol, row.signal_date, targetStr, row.stop_loss) as { date: string } | undefined;
+      `, [row.symbol, row.signal_date, targetStr, row.stop_loss]) as { date: string } | undefined;
 
       if (stopLossRow) {
         const stopReturnPct = ((row.stop_loss! - row.entry_price) / row.entry_price) * 100;
-        upsert.run({
-          symbol: row.symbol, signal_date: row.signal_date,
-          horizon_days: horizonDays, entry_price: row.entry_price,
-          check_date: stopLossRow.date, exit_price: row.stop_loss,
-          return_pct: stopReturnPct, max_return_pct: null, outcome: 'LOSS',
-          signal_score: row.signal_score, signals_json: row.signals_json,
-        });
+        await tx.run(UPSERT_OUTCOME_SQL, [
+          row.symbol, row.signal_date, horizonDays, row.entry_price,
+          stopLossRow.date, row.stop_loss, stopReturnPct, null, 'LOSS',
+          row.signal_score, row.signals_json,
+        ]);
         resolved++;
         continue;
       }
 
       // Check MAX(high) over the full horizon for WIN detection
-      const maxHighRow = db.prepare(`
+      const maxHighRow = await tx.get(`
         SELECT MAX(high) as max_high FROM stock_ohlcv
         WHERE symbol = ? AND date > ? AND date <= ?
-      `).get(row.symbol, row.signal_date, targetStr) as { max_high: number | null } | undefined;
+      `, [row.symbol, row.signal_date, targetStr]) as { max_high: number | null } | undefined;
 
       const maxHigh = maxHighRow?.max_high ?? null;
       const maxReturnPct = maxHigh != null
@@ -122,59 +116,53 @@ export function computeSignalOutcomes(horizonDays: HorizonDays = 5): {
 
       if (maxReturnPct != null && maxReturnPct > 2.0) {
         // Hit target intraday at some point during the horizon — WIN
-        upsert.run({
-          symbol: row.symbol, signal_date: row.signal_date,
-          horizon_days: horizonDays, entry_price: row.entry_price,
-          check_date: targetStr, exit_price: maxHigh,
-          return_pct: maxReturnPct, max_return_pct: maxReturnPct, outcome: 'WIN',
-          signal_score: row.signal_score, signals_json: row.signals_json,
-        });
+        await tx.run(UPSERT_OUTCOME_SQL, [
+          row.symbol, row.signal_date, horizonDays, row.entry_price,
+          targetStr, maxHigh, maxReturnPct, maxReturnPct, 'WIN',
+          row.signal_score, row.signals_json,
+        ]);
         resolved++;
         continue;
       }
 
       // No WIN from max high — fall back to terminal close for LOSS/NEUTRAL
-      const exitRow = db.prepare(`
+      const exitRow = await tx.get(`
         SELECT date, close FROM stock_ohlcv
         WHERE symbol = ? AND date >= ?
         ORDER BY date ASC LIMIT 1
-      `).get(row.symbol, targetStr) as { date: string; close: number } | undefined;
+      `, [row.symbol, targetStr]) as { date: string; close: number } | undefined;
 
       if (!exitRow) {
         // No exit data yet — record as PENDING
-        upsert.run({
-          symbol: row.symbol, signal_date: row.signal_date,
-          horizon_days: horizonDays, entry_price: row.entry_price,
-          check_date: null, exit_price: null, return_pct: null,
-          max_return_pct: maxReturnPct, outcome: 'PENDING',
-          signal_score: row.signal_score, signals_json: row.signals_json,
-        });
+        await tx.run(UPSERT_OUTCOME_SQL, [
+          row.symbol, row.signal_date, horizonDays, row.entry_price,
+          null, null, null, maxReturnPct, 'PENDING',
+          row.signal_score, row.signals_json,
+        ]);
         continue;
       }
 
       const returnPct = ((exitRow.close - row.entry_price) / row.entry_price) * 100;
       const outcome: OutcomeResult = returnPct < -1.0 ? 'LOSS' : 'NEUTRAL';
 
-      upsert.run({
-        symbol: row.symbol, signal_date: row.signal_date,
-        horizon_days: horizonDays, entry_price: row.entry_price,
-        check_date: exitRow.date, exit_price: exitRow.close,
-        return_pct: returnPct, max_return_pct: maxReturnPct, outcome,
-        signal_score: row.signal_score, signals_json: row.signals_json,
-      });
+      await tx.run(UPSERT_OUTCOME_SQL, [
+        row.symbol, row.signal_date, horizonDays, row.entry_price,
+        exitRow.date, exitRow.close, returnPct, maxReturnPct, outcome,
+        row.signal_score, row.signals_json,
+      ]);
       resolved++;
     }
-  })();
+  });
 
   console.log(`[OUTCOMES] horizon=${horizonDays}d: checked ${pending.length}, resolved ${resolved}`);
   return { processed: pending.length, resolved };
 }
 
-export function getWinRateStats(): WinRateStats {
-  const rows = db.prepare(`
+export async function getWinRateStats(): Promise<WinRateStats> {
+  const rows = await dbAll(`
     SELECT * FROM signal_outcomes WHERE outcome != 'PENDING'
     ORDER BY signal_date DESC LIMIT 2000
-  `).all() as OutcomeRow[];
+  `) as OutcomeRow[];
 
   const empty = { total: 0, wins: 0, winRate: 0, avgReturn: 0 };
 
@@ -257,8 +245,8 @@ export function getWinRateStats(): WinRateStats {
   };
 }
 
-export function getOutcomesForSignalDate(signalDate: string): OutcomeRow[] {
-  return db.prepare(`
+export async function getOutcomesForSignalDate(signalDate: string): Promise<OutcomeRow[]> {
+  return await dbAll(`
     SELECT * FROM signal_outcomes WHERE signal_date = ? ORDER BY return_pct DESC
-  `).all(signalDate) as OutcomeRow[];
+  `, [signalDate]) as OutcomeRow[];
 }

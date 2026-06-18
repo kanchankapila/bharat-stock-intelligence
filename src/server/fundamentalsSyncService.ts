@@ -12,7 +12,7 @@
  * Crumb authentication is managed internally with auto-refresh on 401.
  */
 
-import db from './db';
+import { dbGet, dbAll, dbTransaction, type DbTx } from './dbAsync';
 import { nseStocksData } from '../data/nseStocks';
 import { getAllStocks } from './stockMapping';
 
@@ -124,7 +124,7 @@ function getAllSymbols(): string[] {
 
 // ─── DB upserts ──────────────────────────────────────────────────────────────
 
-const upsertPhase1 = db.prepare(`
+const UPSERT_PHASE1_SQL = `
   INSERT INTO stock_fundamentals (
     symbol, trailing_pe, forward_pe, price_to_book, book_value, earnings_yield,
     eps_ttm, eps_forward, market_cap, shares_outstanding,
@@ -158,9 +158,9 @@ const upsertPhase1 = db.prepare(`
     analyst_rating          = excluded.analyst_rating,
     phase1_synced_at        = CURRENT_TIMESTAMP,
     last_updated            = CURRENT_TIMESTAMP
-`);
+`;
 
-const upsertPhase2 = db.prepare(`
+const UPSERT_PHASE2_SQL = `
   INSERT INTO stock_fundamentals (symbol, debt_to_equity, return_on_equity,
     revenue_growth, earnings_growth, operating_margins, current_ratio,
     piotroski_f_score, phase2_synced_at, last_updated)
@@ -175,7 +175,7 @@ const upsertPhase2 = db.prepare(`
     piotroski_f_score = excluded.piotroski_f_score,
     phase2_synced_at  = CURRENT_TIMESTAMP,
     last_updated      = CURRENT_TIMESTAMP
-`);
+`;
 
 // ─── Piotroski F-Score (9-point) ─────────────────────────────────────────────
 
@@ -227,8 +227,8 @@ async function fetchPhase1Batch(
   const data = await res.json();
   const quotes: any[] = data?.quoteResponse?.result || [];
 
-  const insertMany = db.transaction((rows: any[]) => {
-    for (const q of rows) {
+  await dbTransaction(async (tx) => {
+    for (const q of quotes) {
       const symbol = q.symbol?.replace('.NS', '');
       if (!symbol) continue;
       const price    = q.regularMarketPrice ?? null;
@@ -237,7 +237,7 @@ async function fetchPhase1Batch(
       const trailingPE    = q.trailingPE ?? null;
       const earningsYield = (trailingPE && trailingPE > 0) ? (1 / trailingPE * 100) : null;
 
-      upsertPhase1.run(
+      await tx.run(UPSERT_PHASE1_SQL, [
         symbol,
         trailingPE,
         q.forwardPE              ?? null,
@@ -256,11 +256,9 @@ async function fetchPhase1Batch(
         q.averageDailyVolume3Month ?? null,
         q.dividendYield          ?? null,
         q.averageAnalystRating   ?? null,
-      );
+      ]);
     }
   });
-
-  insertMany(quotes);
   syncProgress.phase1Done += quotes.length;
 }
 
@@ -345,27 +343,29 @@ async function fetchPhase2Data(
   };
 }
 
-const writePhase2Batch = db.transaction((rows: Phase2Row[]) => {
-  for (const row of rows) {
-    upsertPhase2.run(
-      row.symbol,
-      row.debtToEquity,
-      row.returnOnEquity,
-      row.revenueGrowth,
-      row.earningsGrowth,
-      row.operatingMargins,
-      row.currentRatio,
-      row.piotroski,
-    );
-  }
-});
+async function writePhase2Batch(rows: Phase2Row[]): Promise<void> {
+  await dbTransaction(async (tx: DbTx) => {
+    for (const row of rows) {
+      await tx.run(UPSERT_PHASE2_SQL, [
+        row.symbol,
+        row.debtToEquity,
+        row.returnOnEquity,
+        row.revenueGrowth,
+        row.earningsGrowth,
+        row.operatingMargins,
+        row.currentRatio,
+        row.piotroski,
+      ]);
+    }
+  });
+}
 
 export async function runPhase2(symbolsOverride?: string[]): Promise<void> {
   // Only sync symbols that already have Phase 1 data
-  const eligible: string[] = symbolsOverride ?? (() => {
-    const rows = db.prepare(
+  const eligible: string[] = symbolsOverride ?? await (async () => {
+    const rows = await dbAll(
       `SELECT symbol FROM stock_fundamentals WHERE phase1_synced_at IS NOT NULL`
-    ).all() as { symbol: string }[];
+    ) as { symbol: string }[];
     return rows.map(r => r.symbol);
   })();
 
@@ -404,7 +404,7 @@ export async function runPhase2(symbolsOverride?: string[]): Promise<void> {
         syncProgress.phase2Errors++;
       }
     }
-    if (rows.length > 0) writePhase2Batch(rows);
+    if (rows.length > 0) await writePhase2Batch(rows);
 
     // Polite delay between Phase 2 batches to avoid rate limiting
     if (i + PHASE2_CONCURRENCY < eligible.length) {
@@ -464,24 +464,24 @@ export async function refreshSymbolFundamentals(symbol: string): Promise<void> {
     auth = await refreshYFAuthOnce();
     return fetchPhase2Data(symbol, auth);
   });
-  if (row) writePhase2Batch([row]);
+  if (row) await writePhase2Batch([row]);
 }
 
 // ─── Query helpers ────────────────────────────────────────────────────────────
 
-export function getStoredFundamentals(symbol: string) {
-  return db.prepare('SELECT * FROM stock_fundamentals WHERE symbol = ?').get(symbol) as any | null;
+export async function getStoredFundamentals(symbol: string) {
+  return await dbGet('SELECT * FROM stock_fundamentals WHERE symbol = ?', [symbol]) as any | null;
 }
 
-export function getFundamentalsCount(): { phase1: number; phase2: number; total: number } {
-  const p1 = (db.prepare('SELECT COUNT(*) as n FROM stock_fundamentals WHERE phase1_synced_at IS NOT NULL').get() as any).n;
-  const p2 = (db.prepare('SELECT COUNT(*) as n FROM stock_fundamentals WHERE phase2_synced_at IS NOT NULL').get() as any).n;
-  const total = (db.prepare('SELECT COUNT(*) as n FROM stock_fundamentals').get() as any).n;
+export async function getFundamentalsCount(): Promise<{ phase1: number; phase2: number; total: number }> {
+  const p1 = ((await dbGet('SELECT COUNT(*) as n FROM stock_fundamentals WHERE phase1_synced_at IS NOT NULL')) as any).n;
+  const p2 = ((await dbGet('SELECT COUNT(*) as n FROM stock_fundamentals WHERE phase2_synced_at IS NOT NULL')) as any).n;
+  const total = ((await dbGet('SELECT COUNT(*) as n FROM stock_fundamentals')) as any).n;
   return { phase1: p1, phase2: p2, total };
 }
 
 export async function bootstrapFundamentals(bullmqReady: boolean): Promise<void> {
-  const counts = getFundamentalsCount();
+  const counts = await getFundamentalsCount();
   if (counts.phase1 > 0) {
     console.log(`[FUND] ${counts.phase1} Phase-1 rows — skipping bootstrap`);
     return;
