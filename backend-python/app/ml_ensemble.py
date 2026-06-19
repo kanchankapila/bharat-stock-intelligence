@@ -31,13 +31,14 @@ Run:  python ml_ensemble.py
       python ml_ensemble.py --min-samples 30
 """
 
-import os, sys, json, math, datetime, argparse, pickle, sqlite3, warnings
+import os, sys, json, math, datetime, argparse, pickle, warnings
 warnings.filterwarnings('ignore')
 
 import numpy as np
 import pandas as pd
 
 DB_PATH     = os.path.join(os.getcwd(), 'database.sqlite')
+from db_compat import connect, read_df, query_one, execute, use_postgres, ConnWrapper
 MODELS_DIR  = os.path.join(os.getcwd(), 'src', 'server', 'ml_models')
 ENSEMBLE_PATH = os.path.join(MODELS_DIR, 'ensemble.pkl')
 
@@ -95,7 +96,7 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
 
 # ── Data Loading ─────────────────────────────────────────────────────────────
 
-def load_training_data(conn: sqlite3.Connection) -> pd.DataFrame:
+def load_training_data(conn: ConnWrapper) -> pd.DataFrame:
     q = """
         SELECT so.symbol, so.signal_date, so.horizon_days, so.outcome,
                so.signal_score, so.signals_json, so.return_pct,
@@ -106,12 +107,12 @@ def load_training_data(conn: sqlite3.Connection) -> pd.DataFrame:
         WHERE so.outcome IN ('WIN','LOSS','NEUTRAL')
           AND so.return_pct IS NOT NULL
     """
-    df = pd.read_sql_query(q, conn)
+    df = read_df(q)
     df['outcome'] = df['outcome'].map({'WIN': 1, 'LOSS': 0, 'NEUTRAL': 0})
     return df
 
 
-def load_pending_signals(conn: sqlite3.Connection) -> pd.DataFrame:
+def load_pending_signals(conn: ConnWrapper) -> pd.DataFrame:
     q = """
         SELECT symbol, scan_date AS signal_date, signal_score, signals_json,
                rsi, adx, nifty_regime, cmp, sma200, volume_ratio
@@ -121,7 +122,7 @@ def load_pending_signals(conn: sqlite3.Connection) -> pd.DataFrame:
         ORDER BY scan_date DESC
         LIMIT 10000
     """
-    df = pd.read_sql_query(q, conn)
+    df = read_df(q)
     df['horizon_days'] = 15
     return df
 
@@ -238,7 +239,7 @@ def predict_proba_ensemble(ensemble: dict, X: pd.DataFrame) -> np.ndarray:
 
 # ── Model Registry ────────────────────────────────────────────────────────────
 
-def register_model(conn: sqlite3.Connection, ensemble: dict) -> int:
+def register_model(conn: ConnWrapper, ensemble: dict) -> int:
     version = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
     top_feats = []
     if ensemble.get('feature_importances') and ensemble.get('feature_names'):
@@ -259,6 +260,7 @@ def register_model(conn: sqlite3.Connection, ensemble: dict) -> int:
              training_samples, cv_roc_auc, cv_accuracy,
              feature_count, top_features_json, model_path, is_active, horizon_days)
         VALUES ('ensemble', ?, 'Stacking Ensemble', ?, ?, ?, ?, ?, ?, ?, 1, 15)
+        RETURNING id
     """, (
         version,
         ensemble['trained_at'],
@@ -269,7 +271,7 @@ def register_model(conn: sqlite3.Connection, ensemble: dict) -> int:
         json.dumps(top_feats),
         ENSEMBLE_PATH,
     ))
-    model_id = cur.lastrowid
+    model_id = cur.fetchone()[0]
 
     # Feature importance log
     if top_feats:
@@ -302,7 +304,7 @@ def load_ensemble() -> dict | None:
 
 # ── Score Pending Signals ─────────────────────────────────────────────────────
 
-def score_pending(conn: sqlite3.Connection, ensemble: dict) -> int:
+def score_pending(conn: ConnWrapper, ensemble: dict) -> int:
     df = load_pending_signals(conn)
     if df.empty:
         print("[Ensemble] No pending signals to score.")
@@ -341,7 +343,7 @@ def run(do_train: bool = True, do_score: bool = True,
         print("[Ensemble] scikit-learn not installed. Run: pip install scikit-learn")
         sys.exit(1)
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = connect()
     try:
         if do_train:
             if retrain_full or not os.path.exists(ENSEMBLE_PATH):

@@ -14,7 +14,8 @@ import argparse
 import time
 import requests
 import pandas as pd
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
+from db_compat import get_engine
 
 DB_PATH      = os.path.join(os.getcwd(), 'database.sqlite')
 DATABASE_URL = f"sqlite:///{DB_PATH}"
@@ -36,7 +37,7 @@ HEADERS = {
 
 class FiiDiiFetcher:
     def __init__(self):
-        self.engine  = create_engine(DATABASE_URL)
+        self.engine  = get_engine()
         self.session = requests.Session()
         self.session.headers.update(HEADERS)
         self._prime_session()

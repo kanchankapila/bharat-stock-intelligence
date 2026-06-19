@@ -24,11 +24,12 @@ Run:  python backtester.py
       python backtester.py --strategies momentum,value,quality
 """
 
-import os, json, math, datetime, argparse, sqlite3
+import os, json, math, datetime, argparse
 import numpy as np
 import pandas as pd
 
 DB_PATH = os.path.join(os.getcwd(), os.environ.get('DATABASE_URL', 'database.sqlite'))
+from db_compat import connect, read_df, query_one, execute, use_postgres, ConnWrapper
 
 NIFTY_SYMBOLS  = ('NIFTY50', 'NIFTY', '^NSEI')
 INITIAL_CAPITAL = 1_000_000   # ₹10L default
@@ -93,7 +94,7 @@ def is_market_open(date: datetime.date) -> bool:
 
 class Backtester:
     def __init__(self, db_path: str = DB_PATH):
-        self.conn = sqlite3.connect(db_path)
+        self.conn = connect()
 
     def close(self):
         self.conn.close()
@@ -125,7 +126,8 @@ class Backtester:
               AND us.signal_type IN ('BUY', 'STRONG_BUY')
             ORDER BY us.signal_date ASC
         """
-        df = pd.read_sql_query(q, self.conn, params=(start, end, min_score))
+        # unified_signals.signal_date is TIMESTAMPTZ on PG -> bind date objects (rule #6).
+        df = read_df(q, (datetime.date.fromisoformat(start), datetime.date.fromisoformat(end), min_score))
         df['signal_date']    = pd.to_datetime(df['signal_date'])
         df['horizon_days']   = horizon_days
         df['entry_price_ref'] = pd.to_numeric(df['entry_price_ref'], errors='coerce')
@@ -143,7 +145,7 @@ class Backtester:
               AND date BETWEEN '{start}' AND '{end}'
             ORDER BY symbol, date
         """
-        df = pd.read_sql_query(q, self.conn)
+        df = read_df(q)
         df['date']  = pd.to_datetime(df['date'])
         for col in ['open', 'high', 'low', 'close']:
             df[col] = pd.to_numeric(df[col], errors='coerce')
@@ -157,7 +159,7 @@ class Backtester:
               AND date BETWEEN '{start}' AND '{end}'
             ORDER BY date
         """
-        df = pd.read_sql_query(q, self.conn)
+        df = read_df(q)
         if df.empty:
             return pd.Series(dtype=float)
         df['date']  = pd.to_datetime(df['date'])
@@ -464,6 +466,7 @@ class Backtester:
                  avg_trade_return_pct, profit_factor, avg_holding_days,
                  monthly_returns_json, equity_curve_json, trade_log_json)
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            RETURNING id
         """, (
             run_name,
             json.dumps(config),
@@ -487,8 +490,8 @@ class Backtester:
             ec_json,
             tl_json,
         ))
+        run_id = cur.fetchone()[0]
         self.conn.commit()
-        run_id = cur.lastrowid
         print(f"[Backtester] Saved run id={run_id} to backtesting_runs.")
         return run_id
 

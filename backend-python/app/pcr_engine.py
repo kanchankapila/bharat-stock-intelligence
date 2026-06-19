@@ -3,7 +3,8 @@ import time
 import datetime
 import requests
 import pandas as pd
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
+from db_compat import get_engine
 from pydantic import BaseModel
 from typing import List, Optional
 
@@ -34,7 +35,7 @@ DEFAULT_SYMBOLS = [
 
 class PCRFetcher:
     def __init__(self):
-        self.engine  = create_engine(DATABASE_URL)
+        self.engine  = get_engine()
         self.session = requests.Session()
         self.session.headers.update(HEADERS)
         self._prime_session()
@@ -145,7 +146,7 @@ def run_pcr_fetch(req: PcrRequest):
     return res
 
 def get_latest_pcr():
-    engine = create_engine(DATABASE_URL)
+    engine = get_engine()
     with engine.connect() as conn:
         query = text("""
             SELECT symbol, date, expiry, pcr, market_pcr, total_call_oi, total_put_oi

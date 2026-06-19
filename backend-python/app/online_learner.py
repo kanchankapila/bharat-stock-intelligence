@@ -19,13 +19,14 @@ Run:  python online_learner.py
       python online_learner.py --dry-run
 """
 
-import os, sys, json, datetime, argparse, pickle, sqlite3, warnings
+import os, sys, json, datetime, argparse, pickle, warnings
 warnings.filterwarnings('ignore')
 
 import numpy as np
 import pandas as pd
 
 DB_PATH        = os.path.join(os.getcwd(), 'database.sqlite')
+from db_compat import connect, read_df, query_one, execute, use_postgres, ConnWrapper
 MODELS_DIR     = os.path.join(os.getcwd(), 'src', 'server', 'ml_models')
 ONLINE_PATH    = os.path.join(MODELS_DIR, 'online_sgd.pkl')
 ENSEMBLE_PATH  = os.path.join(MODELS_DIR, 'ensemble.pkl')
@@ -86,7 +87,7 @@ def build_features(df: pd.DataFrame) -> np.ndarray:
 
 # ── Data Loading ─────────────────────────────────────────────────────────────
 
-def load_recent_outcomes(conn: sqlite3.Connection, window_days: int, min_new: int) -> pd.DataFrame:
+def load_recent_outcomes(conn: ConnWrapper, window_days: int, min_new: int) -> pd.DataFrame:
     cutoff = (datetime.datetime.now() - datetime.timedelta(days=window_days)).strftime('%Y-%m-%d')
     q = """
         SELECT so.symbol, so.signal_date, so.horizon_days, so.outcome,
@@ -99,11 +100,11 @@ def load_recent_outcomes(conn: sqlite3.Connection, window_days: int, min_new: in
           AND so.signal_date >= ?
         ORDER BY so.signal_date DESC
     """
-    df = pd.read_sql_query(q, conn, params=(cutoff,))
+    df = read_df(q, (cutoff,))
     return df
 
 
-def load_pending_signals(conn: sqlite3.Connection) -> pd.DataFrame:
+def load_pending_signals(conn: ConnWrapper) -> pd.DataFrame:
     q = """
         SELECT symbol, scan_date AS signal_date, signal_score, signals_json,
                rsi, adx, nifty_regime, cmp, sma200, volume_ratio
@@ -112,7 +113,7 @@ def load_pending_signals(conn: sqlite3.Connection) -> pd.DataFrame:
         ORDER BY scan_date DESC
         LIMIT 10000
     """
-    df = pd.read_sql_query(q, conn)
+    df = read_df(q)
     df['horizon_days'] = 15
     return df
 
@@ -173,7 +174,7 @@ def predict_sgd(state: dict, X: np.ndarray) -> np.ndarray:
 
 # ── Register update ───────────────────────────────────────────────────────────
 
-def register_update(conn: sqlite3.Connection, state: dict, n_new: int, cv_auc: float):
+def register_update(conn: ConnWrapper, state: dict, n_new: int, cv_auc: float):
     version = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
     cur = conn.cursor()
     cur.execute("""
@@ -194,7 +195,7 @@ def register_update(conn: sqlite3.Connection, state: dict, n_new: int, cv_auc: f
 # ── Score pending signals ─────────────────────────────────────────────────────
 
 def score_pending_with_ensemble_blend(
-    conn: sqlite3.Connection,
+    conn: ConnWrapper,
     sgd_state: dict,
     ensemble: dict | None,
     df: pd.DataFrame,
@@ -247,7 +248,7 @@ def run(window_days: int = 180, min_new: int = 5, dry_run: bool = False):
         sys.exit(1)
 
     print(f"[OnlineLearner] Starting at {datetime.datetime.now()}")
-    conn = sqlite3.connect(DB_PATH)
+    conn = connect()
 
     try:
         df = load_recent_outcomes(conn, window_days, min_new)

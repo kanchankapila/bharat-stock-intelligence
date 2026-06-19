@@ -3,7 +3,8 @@ import datetime
 import numpy as np
 import pandas as pd
 import yfinance as yf
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
+from db_compat import get_engine
 from pydantic import BaseModel
 from typing import List, Dict
 
@@ -31,7 +32,7 @@ def get_nifty50_data(start_date: str, end_date: str) -> pd.DataFrame:
         return pd.DataFrame()
 
 def analyze_portfolio(req: PortfolioRequest):
-    engine = create_engine(DATABASE_URL)
+    engine = get_engine()
     symbols = req.symbols
     weights = np.array(req.weights)
     weights = weights / np.sum(weights) # normalize

@@ -19,7 +19,8 @@ import datetime
 import argparse
 import numpy as np
 import pandas as pd
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
+from db_compat import get_engine
 
 DB_PATH      = os.path.join(os.getcwd(), 'database.sqlite')
 DATABASE_URL = f"sqlite:///{DB_PATH}"
@@ -28,7 +29,7 @@ RISK_FREE    = 0.07   # 7% p.a. — Indian 10Y Gsec proxy
 
 class InstitutionalQuantEngine:
     def __init__(self):
-        self.engine = create_engine(DATABASE_URL)
+        self.engine = get_engine()
 
     # ------------------------------------------------------------------
     # Data loading

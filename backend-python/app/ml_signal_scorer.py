@@ -26,13 +26,14 @@ import json
 import math
 import datetime
 import argparse
-import sqlite3
+
 import pickle
 
 import numpy as np
 import pandas as pd
 
 DB_PATH    = os.path.join(os.getcwd(), 'database.sqlite')
+from db_compat import connect, read_df, query_one, execute, use_postgres, ConnWrapper
 MODEL_PATH = os.path.join(os.getcwd(), 'src', 'server', 'ml_signal_model.pkl')
 
 REGIME_MAP   = {'BULL': 1.0, 'SIDEWAYS': 0.0, 'BEAR': -1.0}
@@ -46,7 +47,7 @@ SIGNAL_TYPES = [
 ]
 
 
-def load_training_data(conn: sqlite3.Connection) -> pd.DataFrame:
+def load_training_data(conn: ConnWrapper) -> pd.DataFrame:
     """Join signal_outcomes with technical_signals for feature extraction."""
     query = """
         SELECT
@@ -69,7 +70,7 @@ def load_training_data(conn: sqlite3.Connection) -> pd.DataFrame:
         WHERE so.outcome IN ('WIN', 'LOSS', 'NEUTRAL')
           AND so.return_pct IS NOT NULL
     """
-    df = pd.read_sql_query(query, conn)
+    df = read_df(query)
     return df
 
 
@@ -116,7 +117,7 @@ def build_label(df: pd.DataFrame) -> pd.Series:
     return (df['outcome'] == 'WIN').astype(int)
 
 
-def train(conn: sqlite3.Connection, min_samples: int = 30) -> object | None:
+def train(conn: ConnWrapper, min_samples: int = 30) -> object | None:
     """Train GradientBoostingClassifier. Returns fitted model or None if insufficient data."""
     try:
         from sklearn.ensemble import GradientBoostingClassifier
@@ -169,7 +170,7 @@ def train(conn: sqlite3.Connection, min_samples: int = 30) -> object | None:
     return model
 
 
-def score_pending(conn: sqlite3.Connection, model) -> int:
+def score_pending(conn: ConnWrapper, model) -> int:
     """Score technical_signals rows with no win_probability yet. Returns count updated."""
     query = """
         SELECT symbol, scan_date, signal_score, signals_json,
@@ -180,7 +181,7 @@ def score_pending(conn: sqlite3.Connection, model) -> int:
         ORDER BY scan_date DESC
         LIMIT 5000
     """
-    df = pd.read_sql_query(query, conn)
+    df = read_df(query)
     if df.empty:
         print("[ML] No pending signals to score.")
         return 0
@@ -225,7 +226,7 @@ def load_model_from_disk():
 
 def run(train_only: bool = False, score_only: bool = False, min_samples: int = 30):
     print(f"[ML] Starting at {datetime.datetime.now()}")
-    conn = sqlite3.connect(DB_PATH)
+    conn = connect()
 
     try:
         if score_only:

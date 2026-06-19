@@ -1,11 +1,11 @@
-import sqlite3
 import json
 import os
 import datetime
 import pandas as pd
 import numpy as np
 import difflib
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
+from db_compat import get_engine, use_postgres
 from app.nlp_engine import NLPScreenerInference, NLP_VERSION
 from typing import Dict, Any, List
 
@@ -55,7 +55,7 @@ class AlphaQuantScoringEngine:
     }
 
     def __init__(self):
-        self.engine = create_engine(DATABASE_URL)
+        self.engine = get_engine()
         self.nlp = NLPScreenerInference()
         self.stock_stats = {}
         self._load_optimised_weights()
@@ -340,12 +340,16 @@ class AlphaQuantScoringEngine:
         print("Loading news sentiment data...")
         with self.engine.connect() as conn:
             try:
+                # news_sentiment_items.published_at is TIMESTAMPTZ on PG -> bind a datetime
+                # cutoff (datetime('now',…) is SQLite-only and bypasses the translator here);
+                # keep the isoformat string on SQLite (TEXT column) to preserve behavior.
+                _cut = datetime.datetime.now() - datetime.timedelta(days=7)
                 news_df = pd.read_sql(
-                    """SELECT symbols_json AS symbols, sentiment, sentiment_score, impact, title, source, published_at
+                    text("""SELECT symbols_json AS symbols, sentiment, sentiment_score, impact, title, source, published_at
                        FROM news_sentiment_items
-                       WHERE published_at >= datetime('now', '-7 days')
-                         AND sentiment != 'NEUTRAL'""",
-                    conn,
+                       WHERE published_at >= :cutoff
+                         AND sentiment != 'NEUTRAL'"""),
+                    conn, params={"cutoff": _cut if use_postgres() else _cut.isoformat()},
                 )
                 # Normalise: BULLISH→positive, BEARISH→negative
                 news_df['sentiment'] = news_df['sentiment'].str.lower().map(
@@ -761,7 +765,8 @@ class AlphaQuantScoringEngine:
                     keys   = ', '.join(row.keys())
                     places = ', '.join(f':{k}' for k in row.keys())
                     conn.execute(text(f"""
-                        INSERT OR IGNORE INTO recommendation_log ({keys}) VALUES ({places})
+                        INSERT INTO recommendation_log ({keys}) VALUES ({places})
+                        ON CONFLICT DO NOTHING
                     """), row)
                 if skipped_dup:
                     print(f"[ScoringEngine] {skipped_dup} candidates skipped (already have ACTIVE signal).")

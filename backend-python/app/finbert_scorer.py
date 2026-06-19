@@ -17,9 +17,10 @@ import sys
 import datetime
 import argparse
 import math
-import sqlite3
+
 
 DB_PATH = os.path.join(os.getcwd(), 'database.sqlite')
+from db_compat import connect, read_df, query_one, execute, use_postgres, ConnWrapper
 
 MODEL_NAME = "ProsusAI/finbert"
 BATCH_SIZE = 16
@@ -77,7 +78,7 @@ def score_batch(texts: list[str], tokenizer, model, device) -> list[dict]:
     return results
 
 
-def load_unscored_articles(conn: sqlite3.Connection, limit: int, days: int) -> list[dict]:
+def load_unscored_articles(conn: ConnWrapper, limit: int, days: int) -> list[dict]:
     """Load news_articles rows that have no finbert score yet."""
     cur = conn.cursor()
 
@@ -87,9 +88,11 @@ def load_unscored_articles(conn: sqlite3.Connection, limit: int, days: int) -> l
     params: list = []
 
     if days > 0:
-        cutoff = (datetime.datetime.now() - datetime.timedelta(days=days)).isoformat()
+        # published_at is TIMESTAMPTZ on PG -> bind a datetime (rule #6); keep the isoformat
+        # string on SQLite (TEXT column) to preserve behavior.
+        _cut = datetime.datetime.now() - datetime.timedelta(days=days)
         where_clauses.append("a.published_at >= ?")
-        params.append(cutoff)
+        params.append(_cut if use_postgres() else _cut.isoformat())
 
     where = " AND ".join(where_clauses)
     limit_clause = f"LIMIT {limit}" if limit > 0 else ""
@@ -105,12 +108,12 @@ def load_unscored_articles(conn: sqlite3.Connection, limit: int, days: int) -> l
     rows = cur.fetchall()
     return [
         {"id": r[0], "title": r[1] or "", "description": r[2] or "",
-         "symbol": r[3] or "", "published_at": r[4] or ""}
+         "symbol": r[3] or "", "published_at": r[4]}  # keep None; "" can't cast to timestamptz on PG
         for r in rows
     ]
 
 
-def upsert_sentiment(conn: sqlite3.Connection, records: list[dict]):
+def upsert_sentiment(conn: ConnWrapper, records: list[dict]):
     """Write FinBERT scores to news_sentiment_items."""
     now = datetime.datetime.now().isoformat()
     cur = conn.cursor()
@@ -146,7 +149,7 @@ def run(limit: int = 500, days: int = 7, dry_run: bool = False):
 
     tokenizer, model, device = load_model()
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = connect()
     try:
         articles = load_unscored_articles(conn, limit=limit, days=days)
         print(f"[FinBERT] {len(articles)} unscored articles found")

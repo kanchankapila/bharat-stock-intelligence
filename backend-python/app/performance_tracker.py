@@ -22,13 +22,14 @@ import math
 import json
 import datetime
 import argparse
-import sqlite3
+
 
 import numpy as np
 import pandas as pd
 from scipy.stats import spearmanr
 
 DB_PATH = os.path.join(os.getcwd(), 'database.sqlite')
+from db_compat import connect, read_df, query_one, execute, use_postgres, ConnWrapper
 
 # WIN threshold: > +1% within horizon = WIN, < -1% = LOSS, else NEUTRAL
 WIN_THRESHOLD  =  1.0
@@ -39,8 +40,7 @@ NIFTY_SYMBOLS = ('NIFTY50', 'NIFTY', '^NSEI', 'NIFTY_50')
 
 class PerformanceTracker:
     def __init__(self, db_path: str = DB_PATH):
-        self.conn = sqlite3.connect(db_path)
-        self.conn.row_factory = sqlite3.Row
+        self.conn = connect()
 
     def close(self):
         self.conn.close()
@@ -75,7 +75,7 @@ class PerformanceTracker:
         """
         if horizon_days:
             base_q += f" AND so.horizon_days = {horizon_days}"
-        df = pd.read_sql_query(base_q, self.conn)
+        df = read_df(base_q)
         df['return_pct'] = pd.to_numeric(df['return_pct'], errors='coerce')
         df['signal_score'] = pd.to_numeric(df['signal_score'], errors='coerce').fillna(5)
         df['nifty_regime'] = df['nifty_regime'].fillna('UNKNOWN')
@@ -84,7 +84,7 @@ class PerformanceTracker:
     def load_nifty_returns(self) -> pd.Series:
         """Daily Nifty returns indexed by date."""
         q = f"SELECT date, close FROM stock_ohlcv WHERE symbol IN {NIFTY_SYMBOLS} ORDER BY date ASC"
-        df = pd.read_sql_query(q, self.conn)
+        df = read_df(q)
         if df.empty:
             return pd.Series(dtype=float)
         df['date']  = pd.to_datetime(df['date'])

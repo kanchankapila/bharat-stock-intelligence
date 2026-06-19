@@ -9,16 +9,17 @@ Run:  python outcome_resolver.py
       python outcome_resolver.py --dry-run
 """
 
-import os, sqlite3, datetime, argparse
+import os, datetime, argparse
 
 DB_PATH = os.path.join(os.getcwd(), 'database.sqlite')
+from db_compat import connect, read_df, query_one, execute, use_postgres, ConnWrapper
 
 WIN_THRESHOLD  =  1.0   # > +1% = WIN
 LOSS_THRESHOLD = -1.0   # < -1% = LOSS
 
 
 def resolve_outcomes(
-    conn: sqlite3.Connection,
+    conn: ConnWrapper,
     horizon_days: int = 1,
     dry_run: bool = False,
 ) -> dict[str, int]:
@@ -83,12 +84,12 @@ def resolve_outcomes(
         # PHASE 1 FIX: Entry at next trading day's open
         signal_date_obj = datetime.date.fromisoformat(signal_date)
         
-        # Get actual next trading day from DB
+        # Get actual next trading day from DB (stock_ohlcv.date is DATE on PG -> bind date obj)
         next_trading_day_row = conn.execute("""
-            SELECT date FROM stock_ohlcv 
-            WHERE symbol = ? AND date > ? 
+            SELECT date FROM stock_ohlcv
+            WHERE symbol = ? AND date > ?
             ORDER BY date ASC LIMIT 1
-        """, (sym, signal_date)).fetchone()
+        """, (sym, signal_date_obj)).fetchone()
         
         next_trading_day = next_trading_day_row[0] if next_trading_day_row else (signal_date_obj + datetime.timedelta(days=1)).isoformat()
         
@@ -99,6 +100,10 @@ def resolve_outcomes(
         check_date   = None
         return_pct   = None
 
+        # stock_ohlcv.date is a DATE column on PG -> bind date objects, not strings (rule #6).
+        next_trading_day_d = datetime.date.fromisoformat(str(next_trading_day)[:10])
+        exit_target_date_d = datetime.date.fromisoformat(str(exit_target_date)[:10])
+
         # PHASE 1 FIX: Check SL on next trading day first (it has priority in intraday)
         if stop_loss and stop_loss > 0:
             sl_hit = conn.execute("""
@@ -106,7 +111,7 @@ def resolve_outcomes(
                 WHERE symbol = ? AND date >= ? AND date <= ?
                   AND low <= ?
                 ORDER BY date ASC, low ASC LIMIT 1
-            """, (sym, next_trading_day, exit_target_date, stop_loss)).fetchone()
+            """, (sym, next_trading_day_d, exit_target_date_d, stop_loss)).fetchone()
 
             if sl_hit:
                 check_date = sl_hit[0]
@@ -120,7 +125,7 @@ def resolve_outcomes(
                 SELECT date, close FROM stock_ohlcv
                 WHERE symbol = ? AND date >= ?
                 ORDER BY date ASC LIMIT 1
-            """, (sym, exit_target_date)).fetchone()
+            """, (sym, exit_target_date_d)).fetchone()
 
             if exit_row:
                 check_date = exit_row[0]
@@ -158,7 +163,7 @@ def resolve_outcomes(
 
 
 def resolve_unified_outcomes(
-    conn: sqlite3.Connection,
+    conn: ConnWrapper,
     horizon_days: int = 1,
     dry_run: bool = False,
 ) -> dict[str, int]:
@@ -166,7 +171,8 @@ def resolve_unified_outcomes(
     Resolve outcomes for all signal sources (AI, Quant, Technical) from unified_signals.
     """
     today = datetime.date.today()
-    cutoff = (today - datetime.timedelta(days=horizon_days)).isoformat()
+    # unified_signals.signal_date is TIMESTAMPTZ on PG -> bind a date object, not a string (rule #6).
+    cutoff = today - datetime.timedelta(days=horizon_days)
 
     pending = conn.execute("""
         SELECT us.id, us.symbol, us.signal_date, us.entry_price, us.stop_loss, us.signal_source, us.confidence_score
@@ -215,14 +221,18 @@ def resolve_unified_outcomes(
             continue
 
         signal_date_obj = datetime.date.fromisoformat(signal_date[:10])
+        # stock_ohlcv.date is a DATE column on PG -> bind date objects, not strings (rule #6).
         next_trading_day_row = conn.execute("""
-            SELECT date FROM stock_ohlcv 
-            WHERE symbol = ? AND date > ? 
+            SELECT date FROM stock_ohlcv
+            WHERE symbol = ? AND date > ?
             ORDER BY date ASC LIMIT 1
-        """, (sym, signal_date[:10])).fetchone()
-        
+        """, (sym, signal_date_obj)).fetchone()
+
         next_trading_day = next_trading_day_row[0] if next_trading_day_row else (signal_date_obj + datetime.timedelta(days=1)).isoformat()
         exit_target_date = (signal_date_obj + datetime.timedelta(days=horizon_days)).isoformat()
+        # normalize to date objects (DB returns date on PG / text on SQLite; fallback is a str)
+        next_trading_day_d = datetime.date.fromisoformat(str(next_trading_day)[:10])
+        exit_target_date_d = datetime.date.fromisoformat(str(exit_target_date)[:10])
 
         outcome, exit_price, check_date, return_pct = None, None, None, None
 
@@ -231,7 +241,7 @@ def resolve_unified_outcomes(
                 SELECT date, low FROM stock_ohlcv
                 WHERE symbol = ? AND date >= ? AND date <= ? AND low <= ?
                 ORDER BY date ASC, low ASC LIMIT 1
-            """, (sym, next_trading_day, exit_target_date, stop_loss)).fetchone()
+            """, (sym, next_trading_day_d, exit_target_date_d, stop_loss)).fetchone()
 
             if sl_hit:
                 check_date = sl_hit[0]
@@ -244,7 +254,7 @@ def resolve_unified_outcomes(
                 SELECT date, close FROM stock_ohlcv
                 WHERE symbol = ? AND date >= ?
                 ORDER BY date ASC LIMIT 1
-            """, (sym, exit_target_date)).fetchone()
+            """, (sym, exit_target_date_d)).fetchone()
 
             if exit_row:
                 check_date = exit_row[0]
@@ -282,7 +292,7 @@ def resolve_unified_outcomes(
 def run(horizon_days: int = 1, dry_run: bool = False):
     if not os.path.exists(DB_PATH):
         raise FileNotFoundError(f"[OutcomeResolver] DB not found: {DB_PATH}. Run from project root.")
-    conn = sqlite3.connect(DB_PATH)
+    conn = connect()
     try:
         resolve_outcomes(conn, horizon_days=horizon_days, dry_run=dry_run)
         resolve_unified_outcomes(conn, horizon_days=horizon_days, dry_run=dry_run)

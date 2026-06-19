@@ -15,10 +15,11 @@ Run:  python backtest_optimizer.py
       python backtest_optimizer.py --window 365 --dry-run
 """
 
-import os, sys, sqlite3, datetime, argparse, itertools
+import os, sys, datetime, argparse, itertools
 from typing import Optional
 
 DB_PATH = os.path.join(os.getcwd(), 'database.sqlite')
+from db_compat import connect, read_df, query_one, execute, use_postgres, ConnWrapper
 
 PARAM_GRID = {
     'min_score':     [3, 4, 5, 6, 7],
@@ -55,14 +56,14 @@ def should_update(current_sharpe: float, new_sharpe: float) -> bool:
     return new_sharpe >= current_sharpe * UPDATE_THRESHOLD
 
 
-def _get_current_sharpe(conn: sqlite3.Connection) -> float:
+def _get_current_sharpe(conn: ConnWrapper) -> float:
     row = conn.execute(
         "SELECT value FROM app_settings WHERE key='optimal_sharpe'"
     ).fetchone()
     return float(row[0]) if row else 0.0
 
 
-def _write_optimal_params(conn: sqlite3.Connection, config: dict, sharpe: float):
+def _write_optimal_params(conn: ConnWrapper, config: dict, sharpe: float):
     now = datetime.datetime.now().isoformat()
     pairs = [
         ('optimal_min_score',     str(config['min_score'])),
@@ -73,15 +74,15 @@ def _write_optimal_params(conn: sqlite3.Connection, config: dict, sharpe: float)
     ]
     for key, value in pairs:
         conn.execute("""
-            INSERT INTO app_settings (key, value, updatedAt)
+            INSERT INTO app_settings (key, value, "updatedAt")
             VALUES (?,?,?)
-            ON CONFLICT(key) DO UPDATE SET value=excluded.value, updatedAt=excluded.updatedAt
+            ON CONFLICT(key) DO UPDATE SET value=excluded.value, "updatedAt"=excluded."updatedAt"
         """, (key, value, now))
     conn.commit()
 
 
 def run_grid_search(
-    conn: sqlite3.Connection,
+    conn: ConnWrapper,
     window_days: int = 365,
     dry_run: bool = False,
 ) -> Optional[dict]:
@@ -170,7 +171,7 @@ def run_grid_search(
 def run(window_days: int = 365, dry_run: bool = False):
     if not os.path.exists(DB_PATH):
         raise FileNotFoundError(f"Database not found: {DB_PATH}. Run from project root.")
-    conn = sqlite3.connect(DB_PATH)
+    conn = connect()
     try:
         run_grid_search(conn, window_days=window_days, dry_run=dry_run)
     finally:

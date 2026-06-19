@@ -1,9 +1,9 @@
 import pandas as pd
-import sqlite3
 import os
 import json
 import datetime
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
+from db_compat import get_engine
 from ta.momentum import RSIIndicator
 from ta.trend import MACD, EMAIndicator
 from ta.volatility import BollingerBands
@@ -15,7 +15,7 @@ DATABASE_URL = DB_PATH if DB_PATH.startswith("sqlite:///") else f"sqlite:///{DB_
 
 class TechnicalAnalysisEngine:
     def __init__(self):
-        self.engine = create_engine(DATABASE_URL)
+        self.engine = get_engine()
 
     def load_ohlcv(self, symbol):
         with self.engine.connect() as conn:
@@ -118,9 +118,14 @@ class TechnicalAnalysisEngine:
         if results:
             with self.engine.begin() as conn:
                 conn.execute(text("""
-                    INSERT OR REPLACE INTO technical_analysis_signals 
+                    INSERT INTO technical_analysis_signals
                     (symbol, trend, rsi, macd, bollinger, patterns, entry_price, target_price, stop_loss, last_updated)
                     VALUES (:symbol, :trend, :rsi, :macd, :bollinger, :patterns, :entry_price, :target_price, :stop_loss, :last_updated)
+                    ON CONFLICT(symbol) DO UPDATE SET
+                        trend=excluded.trend, rsi=excluded.rsi, macd=excluded.macd,
+                        bollinger=excluded.bollinger, patterns=excluded.patterns,
+                        entry_price=excluded.entry_price, target_price=excluded.target_price,
+                        stop_loss=excluded.stop_loss, last_updated=excluded.last_updated
                 """), results)
             print(f"Analysis complete. {len(results)} signals saved.")
 

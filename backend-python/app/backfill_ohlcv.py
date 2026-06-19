@@ -1,4 +1,4 @@
-import sqlite3
+
 import yfinance as yf
 import pandas as pd
 import os
@@ -6,6 +6,7 @@ import time
 from tqdm import tqdm
 
 DB_PATH = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'database.sqlite'))
+from db_compat import connect, read_df, query_one, execute, use_postgres, ConnWrapper
 
 def init_db(conn):
     conn.execute("""
@@ -30,7 +31,7 @@ def get_all_nse_symbols(conn):
             print("⚠️  No active stocks in nse_stocks — run syncNSEStocks first.")
             return []
         return [r[0] for r in rows]
-    except sqlite3.OperationalError:
+    except Exception:
         print("❌  Table nse_stocks not found — start the app to trigger NSE sync.")
         return []
 
@@ -148,8 +149,11 @@ def _download_one(symbol: str) -> pd.DataFrame | None:
 
 def _upsert(conn, records: list):
     conn.executemany(
-        "INSERT OR REPLACE INTO stock_ohlcv (symbol, date, open, high, low, close, volume) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO stock_ohlcv (symbol, date, open, high, low, close, volume) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT(symbol, date) DO UPDATE SET "
+        "open=excluded.open, high=excluded.high, low=excluded.low, "
+        "close=excluded.close, volume=excluded.volume",
         records,
     )
     conn.commit()
@@ -210,7 +214,7 @@ def fetch_and_store(conn, symbols: list, batch_size: int = 50):
         print("\n✓  All symbols backfilled successfully!")
 
 if __name__ == "__main__":
-    with sqlite3.connect(DB_PATH) as conn:
+    with connect() as conn:
         init_db(conn)
         symbols = get_all_nse_symbols(conn)
         if symbols:

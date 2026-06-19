@@ -16,10 +16,11 @@ Used by scoring_engine.py: call get_policy(conn, state_key) to get action,
 then get_multipliers(action) to get per-signal-type score multipliers.
 """
 
-import os, sqlite3, datetime, argparse, random
+import os, datetime, argparse, random
 from typing import Optional
 
 DB_PATH   = os.path.join(os.getcwd(), 'database.sqlite')
+from db_compat import connect, read_df, query_one, execute, use_postgres, ConnWrapper
 
 ALPHA        = 0.10
 GAMMA        = 0.85
@@ -114,7 +115,7 @@ def get_state_key(regime: str, sector_or_bucket: str, score: int) -> str:
     return f"{regime_clean}_{sector_bucket}_{get_score_bucket(score)}"
 
 
-def get_q(conn: sqlite3.Connection, state_key: str, action: str) -> float:
+def get_q(conn: ConnWrapper, state_key: str, action: str) -> float:
     row = conn.execute(
         "SELECT q_value FROM rl_q_table WHERE state_key=? AND action=?",
         (state_key, action),
@@ -122,19 +123,19 @@ def get_q(conn: sqlite3.Connection, state_key: str, action: str) -> float:
     return float(row[0]) if row else 0.0
 
 
-def set_q(conn: sqlite3.Connection, state_key: str, action: str, value: float):
+def set_q(conn: ConnWrapper, state_key: str, action: str, value: float):
     now = datetime.datetime.now().isoformat()
     conn.execute("""
         INSERT INTO rl_q_table (state_key, action, q_value, visit_count, last_updated)
         VALUES (?,?,?,1,?)
         ON CONFLICT(state_key, action) DO UPDATE SET
             q_value=excluded.q_value,
-            visit_count=visit_count+1,
+            visit_count=rl_q_table.visit_count+1,
             last_updated=excluded.last_updated
     """, (state_key, action, round(value, 6), now))
 
 
-def get_max_q(conn: sqlite3.Connection, state_key: str) -> float:
+def get_max_q(conn: ConnWrapper, state_key: str) -> float:
     rows = conn.execute(
         "SELECT q_value FROM rl_q_table WHERE state_key=?", (state_key,)
     ).fetchall()
@@ -146,7 +147,7 @@ def q_update(old_q: float, reward: float, next_max_q: float,
     return old_q + alpha * (reward + gamma * next_max_q - old_q)
 
 
-def get_policy(conn: sqlite3.Connection, state_key: str,
+def get_policy(conn: ConnWrapper, state_key: str,
                epsilon: float = 0.0) -> str:
     if random.random() < epsilon:
         return random.choice(ACTIONS)
@@ -158,7 +159,7 @@ def get_multipliers(action: str) -> dict[str, float]:
     return dict(_MULTIPLIERS.get(action, {}))
 
 
-def log_episode(conn: sqlite3.Connection, date: str, state_key: str,
+def log_episode(conn: ConnWrapper, date: str, state_key: str,
                 action: str, epsilon: float):
     conn.execute("""
         INSERT INTO rl_episodes (date, state_key, action_taken, epsilon)
@@ -167,40 +168,42 @@ def log_episode(conn: sqlite3.Connection, date: str, state_key: str,
     conn.commit()
 
 
-def _load_epsilon(conn: sqlite3.Connection) -> float:
+def _load_epsilon(conn: ConnWrapper) -> float:
     row = conn.execute(
         "SELECT value FROM app_settings WHERE key='rl_epsilon'"
     ).fetchone()
     return float(row[0]) if row else EPSILON_INIT
 
 
-def _save_epsilon(conn: sqlite3.Connection, epsilon: float):
+def _save_epsilon(conn: ConnWrapper, epsilon: float):
     conn.execute("""
-        INSERT INTO app_settings (key, value, updatedAt)
+        INSERT INTO app_settings (key, value, "updatedAt")
         VALUES ('rl_epsilon', ?, CURRENT_TIMESTAMP)
-        ON CONFLICT(key) DO UPDATE SET value=excluded.value, updatedAt=CURRENT_TIMESTAMP
+        ON CONFLICT(key) DO UPDATE SET value=excluded.value, "updatedAt"=CURRENT_TIMESTAMP
     """, (str(round(epsilon, 6)),))
 
 
-def _get_nifty_return(conn: sqlite3.Connection, date: str) -> float:
+def _get_nifty_return(conn: ConnWrapper, date: str) -> float:
+    # stock_ohlcv.date is a DATE column on PG -> bind a date object, not a string (rule #6).
+    date_d = datetime.date.fromisoformat(date)
     row = conn.execute("""
         SELECT close FROM stock_ohlcv
         WHERE symbol IN ('NIFTY50','NIFTY','^NSEI')
           AND date = ?
         ORDER BY date DESC LIMIT 1
-    """, (date,)).fetchone()
+    """, (date_d,)).fetchone()
     prev = conn.execute("""
         SELECT close FROM stock_ohlcv
         WHERE symbol IN ('NIFTY50','NIFTY','^NSEI')
           AND date < ?
         ORDER BY date DESC LIMIT 1
-    """, (date,)).fetchone()
+    """, (date_d,)).fetchone()
     if not row or not prev:
         return 0.0
     return (float(row[0]) - float(prev[0])) / float(prev[0]) * 100
 
 
-def daily_update(conn: sqlite3.Connection, dry_run: bool = False) -> dict[str, int]:
+def daily_update(conn: ConnWrapper, dry_run: bool = False) -> dict[str, int]:
     today = datetime.date.today().isoformat()
 
     episodes = conn.execute("""
@@ -266,7 +269,7 @@ def daily_update(conn: sqlite3.Connection, dry_run: bool = False) -> dict[str, i
     return {'episodes': len(episodes), 'updated': updated}
 
 
-def inspect_policy(conn: sqlite3.Connection):
+def inspect_policy(conn: ConnWrapper):
     print("\nCurrent RL Policy (best action per state):\n")
     print(f"{'State':<30} {'Action':<18} {'Q-value':>8}")
     print("-" * 60)
@@ -282,7 +285,7 @@ def inspect_policy(conn: sqlite3.Connection):
 def run(mode: str = 'update', dry_run: bool = False):
     if not os.path.exists(DB_PATH):
         raise FileNotFoundError(f"[RLAgent] DB not found: {DB_PATH}. Run from project root.")
-    conn = sqlite3.connect(DB_PATH)
+    conn = connect()
     try:
         if mode == 'inspect':
             inspect_policy(conn)
