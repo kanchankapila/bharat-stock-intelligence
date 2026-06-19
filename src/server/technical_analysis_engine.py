@@ -114,33 +114,18 @@ class TechnicalAnalysisEngine:
                 print(f"Error analyzing {symbol}: {e}")
 
         if results:
-            today = datetime.date.today().isoformat()
-            now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
-            unified_results = [{
-                'symbol': r['symbol'],
-                'signal_date': today,
-                'signal_type': r['trend'],
-                'entry_price': r['entry_price'],
-                'target_price': r['target_price'],
-                'stop_loss': r['stop_loss'],
-                'reasoning': f"RSI={r['rsi']} MACD={r['macd']} BB={r['bollinger']} patterns={r['patterns']}",
-                'signal_generated_at': now_iso,
-            } for r in results]
             with self.engine.begin() as conn:
                 conn.execute(text("""
-                    INSERT INTO unified_signals
-                      (symbol, signal_date, signal_source, signal_type,
-                       entry_price, target_price, stop_loss, reasoning,
-                       status, signal_generated_at)
-                    VALUES (:symbol, :signal_date, 'technical', :signal_type,
-                            :entry_price, :target_price, :stop_loss, :reasoning,
-                            'ACTIVE', :signal_generated_at)
-                    ON CONFLICT(symbol, signal_source, signal_type, signal_date) DO UPDATE SET
+                    INSERT INTO technical_analysis_signals
+                    (symbol, trend, rsi, macd, bollinger, patterns, entry_price, target_price, stop_loss, last_updated)
+                    VALUES (:symbol, :trend, :rsi, :macd, :bollinger, :patterns, :entry_price, :target_price, :stop_loss, :last_updated)
+                    ON CONFLICT(symbol) DO UPDATE SET
+                        trend=excluded.trend, rsi=excluded.rsi, macd=excluded.macd,
+                        bollinger=excluded.bollinger, patterns=excluded.patterns,
                         entry_price=excluded.entry_price, target_price=excluded.target_price,
-                        stop_loss=excluded.stop_loss, reasoning=excluded.reasoning,
-                        signal_generated_at=excluded.signal_generated_at
-                """), unified_results)
-            print(f"Analysis complete. {len(unified_results)} signals saved.")
+                        stop_loss=excluded.stop_loss, last_updated=excluded.last_updated
+                """), results)
+            print(f"Analysis complete. {len(results)} signals saved.")
 
 if __name__ == "__main__":
     engine = TechnicalAnalysisEngine()
