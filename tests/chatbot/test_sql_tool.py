@@ -1,6 +1,7 @@
 import sqlite3
 import pytest
 import sys, os
+from datetime import datetime, timedelta
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src', 'server', 'chatbot'))
 
 from tools.sql_tool import (
@@ -36,10 +37,12 @@ def test_db(tmp_path):
             technical REAL, fundamental REAL, momentum REAL, valuation REAL,
             PRIMARY KEY (symbol, timeframe)
         );
-        CREATE TABLE signals (
+        CREATE TABLE unified_signals (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            symbol TEXT, type TEXT, entry REAL, target REAL, stopLoss REAL,
-            confidence REAL, reasoning TEXT, status TEXT, createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
+            symbol TEXT, signal_date TEXT, signal_source TEXT, signal_type TEXT,
+            entry_price REAL, target_price REAL, stop_loss REAL,
+            confidence_score REAL, reasoning TEXT,
+            signal_generated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE screener_master (
             scan_id TEXT PRIMARY KEY, name TEXT, source TEXT,
@@ -74,8 +77,12 @@ def test_db(tmp_path):
         ("INFY", "long_term", 75.0, 88.0, 70.0, 80.0),
         ("HDFCBANK", "long_term", 80.0, 72.0, 65.0, 68.0),
     ])
-    conn.execute("INSERT INTO signals VALUES (?,?,?,?,?,?,?,?,?,?)",
-                 (None, "INFY", "BUY", 1450.0, 1600.0, 1380.0, 0.88, "Strong momentum", "ACTIVE", "2026-06-15 10:00:00"))
+    recent_date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    conn.execute(
+        "INSERT INTO unified_signals (symbol, signal_date, signal_source, signal_type, "
+        "entry_price, target_price, stop_loss, confidence_score, reasoning) VALUES (?,?,?,?,?,?,?,?,?)",
+        ("INFY", recent_date, "AI", "BUY", 1450.0, 1600.0, 1380.0, 0.88, "Strong momentum"),
+    )
     conn.execute("INSERT INTO screener_master VALUES (?,?,?,?,?)",
                  ("TL_001", "Low PE High ROE", "trendlyne", "bullish", "fundamental"))
     conn.execute("INSERT INTO trendlyne_screener_stocks VALUES (?,?)", ("TL_001", "INFY"))
@@ -131,7 +138,7 @@ def test_get_buy_signals_all(test_db):
     results = get_buy_signals(db_path=test_db)
     assert len(results) == 1
     assert results[0]["symbol"] == "INFY"
-    assert results[0]["type"] == "BUY"
+    assert results[0]["signal_type"] == "BUY"
 
 
 def test_get_buy_signals_by_symbol(test_db):

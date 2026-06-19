@@ -20,9 +20,6 @@ def agent_db(tmp_path):
             classification TEXT, top_domain TEXT, PRIMARY KEY(symbol, timeframe));
         CREATE TABLE stock_factor_breakdown(symbol TEXT, timeframe TEXT, technical REAL,
             fundamental REAL, momentum REAL, valuation REAL, PRIMARY KEY(symbol, timeframe));
-        CREATE TABLE signals(id INTEGER PRIMARY KEY, symbol TEXT, type TEXT, entry REAL, target REAL,
-            stopLoss REAL, confidence REAL, reasoning TEXT, status TEXT,
-            createdAt DATETIME DEFAULT CURRENT_TIMESTAMP);
         CREATE TABLE screener_master(scan_id TEXT PRIMARY KEY, name TEXT, source TEXT,
             inferred_sentiment TEXT, inferred_category TEXT);
         CREATE TABLE trendlyne_screener_stocks(screener_id TEXT, symbol TEXT,
