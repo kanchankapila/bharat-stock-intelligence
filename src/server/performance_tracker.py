@@ -1,4 +1,3 @@
-from pathlib import Path
 """
 Performance Feedback Engine
 ==============================
@@ -23,13 +22,13 @@ import math
 import json
 import datetime
 import argparse
-import sqlite3
 
 import numpy as np
 import pandas as pd
 from scipy.stats import spearmanr
 
-DB_PATH      = Path(__file__).parent.parent.parent / "database.sqlite"
+from db_compat import connect, read_df
+
 # WIN threshold: > +1% within horizon = WIN, < -1% = LOSS, else NEUTRAL
 WIN_THRESHOLD  =  1.0
 LOSS_THRESHOLD = -1.0
@@ -38,9 +37,8 @@ NIFTY_SYMBOLS = ('NIFTY50', 'NIFTY', '^NSEI', 'NIFTY_50')
 
 
 class PerformanceTracker:
-    def __init__(self, db_path: str = DB_PATH):
-        self.conn = sqlite3.connect(db_path)
-        self.conn.row_factory = sqlite3.Row
+    def __init__(self):
+        self.conn = connect()
 
     def close(self):
         self.conn.close()
@@ -77,7 +75,7 @@ class PerformanceTracker:
         if horizon_days:
             base_q += " AND so.horizon_days = ?"
             params.append(horizon_days)
-        df = pd.read_sql_query(base_q, self.conn, params=params if params else None)
+        df = read_df(base_q, params)
         df['return_pct'] = pd.to_numeric(df['return_pct'], errors='coerce')
         df['signal_score'] = pd.to_numeric(df['signal_score'], errors='coerce').fillna(5)
         df['nifty_regime'] = df['nifty_regime'].fillna('UNKNOWN')
@@ -87,7 +85,7 @@ class PerformanceTracker:
         """Daily Nifty returns indexed by date."""
         placeholders = ','.join('?' * len(NIFTY_SYMBOLS))
         q = f"SELECT date, close FROM stock_ohlcv WHERE symbol IN ({placeholders}) ORDER BY date ASC"
-        df = pd.read_sql_query(q, self.conn, params=list(NIFTY_SYMBOLS))
+        df = read_df(q, list(NIFTY_SYMBOLS))
         if df.empty:
             return pd.Series(dtype=float)
         df['date']  = pd.to_datetime(df['date'])

@@ -1,4 +1,3 @@
-from pathlib import Path
 """
 Strategy Weight Optimizer
 ===========================
@@ -23,13 +22,14 @@ Run:  python strategy_optimizer.py
       python strategy_optimizer.py --apply         # also writes to screener_master
 """
 
-import os, sys, json, datetime, argparse, sqlite3, warnings
+import os, sys, json, datetime, argparse, warnings
 warnings.filterwarnings('ignore')
 
 import numpy as np
 import pandas as pd
 
-DB_PATH      = Path(__file__).parent.parent.parent / "database.sqlite"
+from db_compat import connect, read_df
+
 # Default weights — mirrors scoring_engine.py defaults
 DEFAULT_CATEGORY_WEIGHTS = {
     'fundamental': 1.0,
@@ -51,8 +51,8 @@ SOURCES    = list(DEFAULT_SOURCE_WEIGHTS.keys())
 
 
 class StrategyOptimizer:
-    def __init__(self, db_path: str = DB_PATH):
-        self.conn = sqlite3.connect(db_path)
+    def __init__(self):
+        self.conn = connect()
         self.perf_df = None
 
     def close(self):
@@ -73,7 +73,7 @@ class StrategyOptimizer:
             WHERE sp.horizon_days = ?
               AND sp.total_signals >= 5
         """
-        df = pd.read_sql_query(q, self.conn, params=(horizon_days,))
+        df = read_df(q, (horizon_days,))
         return df
 
     def load_signal_outcomes_with_factors(self, horizon_days: int = 15) -> pd.DataFrame:
@@ -93,7 +93,7 @@ class StrategyOptimizer:
               AND so.return_pct IS NOT NULL
               AND so.horizon_days = ?
         """
-        df = pd.read_sql_query(q, self.conn, params=(horizon_days,))
+        df = read_df(q, (horizon_days,))
         for col in CATEGORIES:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
@@ -255,9 +255,9 @@ class StrategyOptimizer:
             JOIN signal_outcomes so ON so.symbol = tss.symbol
             WHERE so.outcome IN ('WIN','LOSS','NEUTRAL')
             GROUP BY sm.scan_id, sm.name
-            HAVING appearances >= 10
+            HAVING COUNT(so.symbol) >= 10
         """
-        df = pd.read_sql_query(q, self.conn)
+        df = read_df(q)
         if df.empty:
             return {}
 
@@ -284,6 +284,7 @@ class StrategyOptimizer:
                  source_weights_json, screener_overrides_json,
                  baseline_win_rate, optimized_win_rate, improvement_pct, training_samples)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            RETURNING id
         """, (
             datetime.datetime.now().isoformat(),
             method,
@@ -295,8 +296,9 @@ class StrategyOptimizer:
             result.get('improvement_pct'),
             result.get('training_samples'),
         ))
+        new_id = cur.fetchone()[0]
         self.conn.commit()
-        print(f"[Optimizer] Saved to screener_weight_history (id={cur.lastrowid})")
+        print(f"[Optimizer] Saved to screener_weight_history (id={new_id})")
 
     def apply_screener_overrides(self, overrides: dict[str, float]):
         """Write per-screener weight_override values to screener_master."""
@@ -335,9 +337,9 @@ class StrategyOptimizer:
             ('optimal_source_weights',   json.dumps(result.get('source_weights', {}))),
         ]:
             cur.execute("""
-                INSERT INTO app_settings (key, value, updatedAt)
+                INSERT INTO app_settings (key, value, "updatedAt")
                 VALUES (?, ?, ?)
-                ON CONFLICT(key) DO UPDATE SET value = excluded.value, updatedAt = excluded.updatedAt
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value, "updatedAt" = excluded."updatedAt"
             """, (key, val, now))
         self.conn.commit()
         print("[Optimizer] Optimal weights saved to app_settings for scoring_engine.py.")
