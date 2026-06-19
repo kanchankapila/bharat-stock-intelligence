@@ -7,12 +7,13 @@ Reads from feature_store, writes to deep_learning_predictions.
 import os
 import sys
 import json
-import sqlite3
 import pickle
 import argparse
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Tuple
+
+from db_compat import connect, read_df
 
 # Must be set before torch/cuBLAS initialises — fixes CUDNN_STATUS_INTERNAL_ERROR on Windows
 os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
@@ -27,7 +28,6 @@ except ImportError:
     from torch.cuda.amp import autocast, GradScaler   # PyTorch 2.2.x fallback
 from sklearn.metrics import roc_auc_score, accuracy_score
 
-DB_PATH   = Path(__file__).parent.parent.parent / "database.sqlite"
 MODEL_DIR = Path(__file__).parent / "ml_models"
 CONFIG_PATH = MODEL_DIR / "dl_model_config.json"
 
@@ -127,7 +127,7 @@ def _onehot_vol_regime(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def load_symbol_sequences(
-    symbol: str, con: sqlite3.Connection, seq_len: int = SEQUENCE_LEN
+    symbol: str, seq_len: int = SEQUENCE_LEN
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, List[str]]:
     """
     Returns: X (N, seq_len, n_feat), y_dir5 (N,), y_dir15 (N,), y_ret5 (N,), dates list
@@ -136,13 +136,14 @@ def load_symbol_sequences(
     feat_cols = FEATURE_COLS[:N_FEATURES]
     numeric_cols = [c for c in feat_cols if c not in _VOL_ONEHOT]
     cols_sql = ", ".join(f'COALESCE("{c}", 0) as "{c}"' for c in numeric_cols)
-    df = pd.read_sql(
+    df = read_df(
         f"""SELECT date, {cols_sql}, vol_regime,
                target_dir_5d, target_dir_15d, target_ret_5d, target_ret_15d
             FROM feature_store WHERE symbol=? AND timeframe='D'
             ORDER BY date""",
-        con, params=(symbol,), parse_dates=["date"],
+        (symbol,),
     )
+    df["date"] = pd.to_datetime(df["date"])
     df = _onehot_vol_regime(df)
     df = df.dropna(subset=["target_dir_5d", "target_dir_15d"])
     df = df[(df["target_dir_5d"] >= 0) & (df["target_dir_15d"] >= 0)]
@@ -173,17 +174,17 @@ def load_symbol_sequences(
 
 
 def load_inference_sequence(
-    symbol: str, con: sqlite3.Connection, seq_len: int = SEQUENCE_LEN
+    symbol: str, seq_len: int = SEQUENCE_LEN
 ) -> Tuple[np.ndarray, str]:
     """Load last seq_len rows for inference. Returns (1, seq_len, n_feat) and latest date."""
     feat_cols = FEATURE_COLS[:N_FEATURES]
     numeric_cols = [c for c in feat_cols if c not in _VOL_ONEHOT]
     cols_sql = ", ".join(f'COALESCE("{c}", 0) as "{c}"' for c in numeric_cols)
-    df = pd.read_sql(
+    df = read_df(
         f"""SELECT date, {cols_sql}, vol_regime
             FROM feature_store WHERE symbol=? AND timeframe='D'
             ORDER BY date DESC LIMIT {int(seq_len)}""",
-        con, params=(symbol,),
+        (symbol,),
     )
     if len(df) < seq_len:
         return None, None
@@ -317,7 +318,7 @@ _CHUNK_SIZE = 100  # symbols per gradient-update chunk — bounds peak RAM
 
 def train_lstm(version: int = 1) -> Dict:
     """Train BiLSTM on all symbols with >= 252 days, streaming in chunks to bound RAM."""
-    con = sqlite3.connect(DB_PATH)
+    con = connect()
     symbols = [r[0] for r in con.execute(
         "SELECT DISTINCT symbol FROM feature_store "
         "GROUP BY symbol HAVING COUNT(*) >= 252"
@@ -349,7 +350,7 @@ def train_lstm(version: int = 1) -> Dict:
 
     for i, sym in enumerate(symbols):
         try:
-            X, y5, y15, yr5, _ = load_symbol_sequences(sym, con)
+            X, y5, y15, yr5, _ = load_symbol_sequences(sym)
             if len(X) > 0:
                 chunk_X.append(X); chunk_y5.append(y5)
                 chunk_y15.append(y15); chunk_yr5.append(yr5)
@@ -370,16 +371,14 @@ def train_lstm(version: int = 1) -> Dict:
     metrics: Dict = {"directional_accuracy": float("nan"), "roc_auc": float("nan")}
     val_symbols = symbols[:min(50, len(symbols))]
     val_X, val_y5, val_y15, val_yr5 = [], [], [], []
-    val_con = sqlite3.connect(DB_PATH)
     for sym in val_symbols:
         try:
-            Xv, y5v, y15v, yr5v, _ = load_symbol_sequences(sym, val_con)
+            Xv, y5v, y15v, yr5v, _ = load_symbol_sequences(sym)
             if len(Xv) > 0:
                 val_X.append(Xv); val_y5.append(y5v)
                 val_y15.append(y15v); val_yr5.append(yr5v)
         except Exception:
             pass
-    val_con.close()
     if val_X:
         X_val   = np.concatenate(val_X)
         y5_val  = np.concatenate(val_y5)
@@ -414,7 +413,7 @@ def run_inference(prediction_date: str = None) -> None:
     model.load_state_dict(torch.load(model_path, map_location=DEVICE, weights_only=True))
     model.eval()
 
-    con = sqlite3.connect(DB_PATH)
+    con = connect()
     symbols = [r[0] for r in con.execute(
         "SELECT DISTINCT symbol FROM feature_store WHERE timeframe='D'"
     ).fetchall()]
@@ -444,13 +443,22 @@ def run_inference(prediction_date: str = None) -> None:
             conf   = float(np.mean([pu_1d, pu_5d, pu_15d])) * conf_modifier
             unc    = float(np.std([pu_1d, pu_5d, pu_15d]))
             cur.execute(
-                """INSERT OR REPLACE INTO deep_learning_predictions
+                """INSERT INTO deep_learning_predictions
                    (symbol, prediction_date, model_name, model_version,
                     prob_up_1d, prob_up_5d, prob_up_15d,
                     prob_dn_1d, prob_dn_5d, prob_dn_15d,
                     exp_ret_5d, exp_ret_15d,
                     confidence, uncertainty, regime, regime_confidence)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                   ON CONFLICT(symbol, prediction_date, model_name) DO UPDATE SET
+                     model_version=excluded.model_version,
+                     prob_up_1d=excluded.prob_up_1d, prob_up_5d=excluded.prob_up_5d,
+                     prob_up_15d=excluded.prob_up_15d,
+                     prob_dn_1d=excluded.prob_dn_1d, prob_dn_5d=excluded.prob_dn_5d,
+                     prob_dn_15d=excluded.prob_dn_15d,
+                     exp_ret_5d=excluded.exp_ret_5d, exp_ret_15d=excluded.exp_ret_15d,
+                     confidence=excluded.confidence, uncertainty=excluded.uncertainty,
+                     regime=excluded.regime, regime_confidence=excluded.regime_confidence""",
                 (sym, prediction_date, "LSTM_TFT_ENSEMBLE", str(model_version),
                  pu_1d, pu_5d, pu_15d,
                  1 - pu_1d, 1 - pu_5d, 1 - pu_15d,
@@ -461,7 +469,7 @@ def run_inference(prediction_date: str = None) -> None:
         con.commit()
 
     for sym in symbols:
-        X, d = load_inference_sequence(sym, con)
+        X, d = load_inference_sequence(sym)
         if X is None:
             continue
         batch_X.append(X); batch_syms.append(sym)

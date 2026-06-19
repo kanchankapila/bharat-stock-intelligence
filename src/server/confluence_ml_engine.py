@@ -13,9 +13,10 @@ import os
 import sys
 import json
 import pickle
-import sqlite3
 import numpy as np
 from datetime import datetime, timedelta
+
+from db_compat import connect, use_postgres, ConnWrapper
 
 # ── Optional imports (graceful fallback) ──────────────────────────────────────
 try:
@@ -38,7 +39,6 @@ from sklearn.metrics import roc_auc_score, accuracy_score
 from sklearn.pipeline import Pipeline
 from sklearn.calibration import CalibratedClassifierCV
 
-DB_PATH = os.path.join(os.path.dirname(__file__), '..', '..', 'database.sqlite')
 MODEL_DIR = os.path.join(os.path.dirname(__file__), 'ml_models')
 MODEL_PATH = os.path.join(MODEL_DIR, 'confluence_ml.pkl')
 SCALER_PATH = os.path.join(MODEL_DIR, 'confluence_scaler.pkl')
@@ -64,20 +64,24 @@ FEATURE_COLS = [
 
 MIN_TRAINING_ROWS = 30
 
-def get_connection():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+# computed_at is TIMESTAMPTZ on Postgres / TEXT day-string on SQLite. Normalize to a
+# 'YYYY-MM-DD' text day-key so it joins against the TEXT signal_date / technical_signals.date
+# columns (a bare (computed_at)::date on PG can't be compared to a text column).
+_CS_DAY = "to_char(cs.computed_at, 'YYYY-MM-DD')" if use_postgres() else "DATE(cs.computed_at)"
+
+
+def get_connection() -> ConnWrapper:
+    return connect()
 
 
 def build_training_data(conn):
-    rows = conn.execute("""
+    rows = conn.execute(f"""
         WITH daily_confluence AS (
             SELECT *
             FROM (
                 SELECT cs.*,
                     ROW_NUMBER() OVER (
-                        PARTITION BY cs.symbol, DATE(cs.computed_at)
+                        PARTITION BY cs.symbol, {_CS_DAY}
                         ORDER BY cs.computed_at DESC
                     ) AS row_num
                 FROM confluence_signals cs
@@ -107,12 +111,12 @@ def build_training_data(conn):
         FROM daily_confluence cs
         JOIN signal_outcomes so
           ON so.symbol = cs.symbol
-          AND DATE(cs.computed_at) = so.signal_date
+          AND {_CS_DAY} = so.signal_date
           AND so.horizon_days = 7
           AND so.outcome IN ('WIN', 'LOSS')
         LEFT JOIN technical_signals ts
           ON ts.symbol = cs.symbol
-          AND ts.date = DATE(cs.computed_at)
+          AND ts.date = {_CS_DAY}
         LEFT JOIN quant_scores qs ON qs.symbol = cs.symbol
         LEFT JOIN stock_fundamentals sf ON sf.symbol = cs.symbol
     """).fetchall()
@@ -199,16 +203,20 @@ def train(conn):
     with open(SCALER_PATH, 'wb') as f:
         pickle.dump(scaler, f)
 
-    # Register in model_registry if table exists
+    # Register in model_registry (best-effort). NOTE: the prior code wrote a non-existent
+    # `auc_score` column (correct column is cv_roc_auc) and omitted the NOT NULL model_version,
+    # so the insert silently failed on every run — fixed here. rollback() keeps a failed
+    # best-effort write from poisoning the shared Postgres transaction.
     try:
         conn.execute("""
-            INSERT OR REPLACE INTO model_registry (model_name, model_type, auc_score,
+            INSERT INTO model_registry (model_name, model_version, model_type, cv_roc_auc,
               feature_count, is_active, trained_at)
-            VALUES (?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
-        """, ('confluence_ml', 'breakout_probability', float(auc_scores.mean()), len(FEATURE_COLS)))
+            VALUES (?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
+        """, ('confluence_ml', datetime.now().strftime('%Y%m%d_%H%M%S'),
+              'breakout_probability', float(auc_scores.mean()), len(FEATURE_COLS)))
         conn.commit()
     except Exception:
-        pass  # model_registry may not exist or have different schema
+        conn.rollback()
 
     print(f'[ML] Model saved to {MODEL_PATH}')
     return True
@@ -233,7 +241,7 @@ def update_probabilities(conn):
         print('[ML] No confluence_signals found.')
         return
 
-    rows = conn.execute("""
+    rows = conn.execute(f"""
         SELECT cs.symbol, cs.computed_at,
             COALESCE(cs.bullish_screener_count, 0)  AS bullish_screener_count,
             COALESCE(cs.bearish_screener_count, 0)  AS bearish_screener_count,
@@ -253,7 +261,7 @@ def update_probabilities(conn):
             COALESCE(sf.piotroski_f_score, 4)       AS piotroski_f_score
         FROM confluence_signals cs
         LEFT JOIN technical_signals ts
-          ON ts.symbol = cs.symbol AND ts.date = DATE(cs.computed_at)
+          ON ts.symbol = cs.symbol AND ts.date = {_CS_DAY}
         LEFT JOIN quant_scores qs ON qs.symbol = cs.symbol
         LEFT JOIN stock_fundamentals sf ON sf.symbol = cs.symbol
         WHERE cs.computed_at = ?
@@ -274,12 +282,12 @@ def update_probabilities(conn):
     X_scaled = scaler.transform(X)
     probs = model.predict_proba(X_scaled)[:, 1]
 
-    for row, prob in zip(rows, probs):
-        conn.execute("""
-            UPDATE confluence_signals
-            SET ml_breakout_probability = ?
-            WHERE symbol = ? AND computed_at = ?
-        """, (float(round(prob, 4)), row['symbol'], row['computed_at']))
+    conn.executemany("""
+        UPDATE confluence_signals
+        SET ml_breakout_probability = ?
+        WHERE symbol = ? AND computed_at = ?
+    """, [(float(round(prob, 4)), row['symbol'], row['computed_at'])
+          for row, prob in zip(rows, probs)])
 
     conn.commit()
     print(f'[ML] Updated ml_breakout_probability for {len(rows)} signals (batch: {latest_batch})')

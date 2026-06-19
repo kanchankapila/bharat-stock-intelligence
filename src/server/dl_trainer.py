@@ -8,13 +8,13 @@ Quality gate: directional_accuracy > 0.50 AND roc_auc > 0.52
 import subprocess
 import sys
 import math
-import sqlite3
 import json
 import argparse
 from datetime import datetime
 from pathlib import Path
 
-DB_PATH   = Path(__file__).parent.parent.parent / "database.sqlite"
+from db_compat import connect, ConnWrapper
+
 MODEL_DIR = Path(__file__).parent / "ml_models"
 LOCK_KEY  = "dl_retrain_running"
 PYDIR     = str(Path(__file__).parent)
@@ -23,13 +23,17 @@ QUALITY_MIN_ACC = 0.50
 QUALITY_MIN_AUC = 0.52
 
 
-def _get_setting(con: sqlite3.Connection, key: str, default=None):
+def _get_setting(con: ConnWrapper, key: str, default=None):
     row = con.execute("SELECT value FROM app_settings WHERE key=?", (key,)).fetchone()
     return row[0] if row else default
 
 
-def _set_setting(con: sqlite3.Connection, key: str, value: str):
-    con.execute("INSERT OR REPLACE INTO app_settings (key, value) VALUES (?,?)", (key, value))
+def _set_setting(con: ConnWrapper, key: str, value: str):
+    con.execute(
+        "INSERT INTO app_settings (key, value) VALUES (?,?) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        (key, value),
+    )
     con.commit()
 
 
@@ -41,7 +45,7 @@ def _run(cmd: str) -> int:
 
 
 def retrain_models(trigger: str = "scheduled") -> dict:
-    con = sqlite3.connect(DB_PATH)
+    con = connect()
 
     # Lock check — prevent concurrent retrains
     if _get_setting(con, LOCK_KEY) == "1":
@@ -106,7 +110,7 @@ def retrain_models(trigger: str = "scheduled") -> dict:
             result["promoted"] = False
 
         # Step 5: Write model_registry entry
-        con2 = sqlite3.connect(DB_PATH)
+        con2 = connect()
         try:
             con2.execute(
                 """INSERT INTO model_registry
@@ -128,7 +132,7 @@ def retrain_models(trigger: str = "scheduled") -> dict:
             con2.close()
 
     except Exception as e:
-        con3 = sqlite3.connect(DB_PATH)
+        con3 = connect()
         try:
             _set_setting(con3, LOCK_KEY, "0")
         finally:

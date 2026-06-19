@@ -6,16 +6,14 @@ Two-layer drift detection:
 Writes drift_score to dl_model_performance.
 """
 
-import sqlite3
 import json
 import argparse
 from datetime import datetime, timedelta
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-DB_PATH = Path(__file__).parent.parent.parent / "database.sqlite"
+from db_compat import read_df, query_one, execute
 
 PSI_WARN    = 0.20
 PSI_CRIT    = 0.25
@@ -41,14 +39,7 @@ def _psi(expected: np.ndarray, actual: np.ndarray, bins: int = 10) -> float:
 
 def check_feature_drift(model_name: str = "LSTM_TFT_ENSEMBLE") -> dict:
     """Compare recent 30-day feature distribution vs training-window baseline."""
-    con = sqlite3.connect(DB_PATH)
-    try:
-        df = pd.read_sql(
-            "SELECT * FROM feature_store WHERE timeframe='D' ORDER BY date",
-            con,
-        )
-    finally:
-        con.close()
+    df = read_df("SELECT * FROM feature_store WHERE timeframe='D' ORDER BY date")
 
     numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
     numeric_cols = [c for c in numeric_cols if not c.startswith("target_")]
@@ -82,18 +73,15 @@ def check_feature_drift(model_name: str = "LSTM_TFT_ENSEMBLE") -> dict:
     elif max_psi > PSI_WARN:
         status = "WARNING"
 
-    con = sqlite3.connect(DB_PATH)
-    try:
-        today = datetime.today().strftime("%Y-%m-%d")
-        con.execute(
-            """INSERT OR REPLACE INTO dl_model_performance
-               (model_name, model_version, eval_date, horizon_days, drift_score)
-               VALUES (?, 'current', ?, 5, ?)""",
-            (model_name, today, avg_psi),
-        )
-        con.commit()
-    finally:
-        con.close()
+    today = datetime.today().strftime("%Y-%m-%d")
+    execute(
+        """INSERT INTO dl_model_performance
+           (model_name, model_version, eval_date, horizon_days, drift_score)
+           VALUES (?, 'current', ?, 5, ?)
+           ON CONFLICT(model_name, eval_date, horizon_days) DO UPDATE SET
+             model_version=excluded.model_version, drift_score=excluded.drift_score""",
+        (model_name, today, avg_psi),
+    )
 
     print(f"[DRIFT] Feature drift: max_psi={max_psi:.3f} avg={avg_psi:.3f} "
           f"crit_frac={crit_frac:.2%} → {status}")
@@ -102,28 +90,24 @@ def check_feature_drift(model_name: str = "LSTM_TFT_ENSEMBLE") -> dict:
 
 def check_accuracy_drift(model_name: str = "LSTM_TFT_ENSEMBLE", horizon: int = 5) -> dict:
     """Compare rolling 30-day accuracy vs baseline stored in dl_model_performance."""
-    con = sqlite3.connect(DB_PATH)
-    try:
-        baseline_row = con.execute(
-            """SELECT directional_accuracy FROM dl_model_performance
-               WHERE model_name=? AND horizon_days=? AND retrain_triggered=0
-               ORDER BY eval_date ASC LIMIT 1""",
-            (model_name, horizon),
-        ).fetchone()
-        if not baseline_row or baseline_row[0] is None:
-            return {"status": "NO_BASELINE"}
+    baseline_row = query_one(
+        """SELECT directional_accuracy FROM dl_model_performance
+           WHERE model_name=? AND horizon_days=? AND retrain_triggered=0
+           ORDER BY eval_date ASC LIMIT 1""",
+        (model_name, horizon),
+    )
+    if not baseline_row or baseline_row[0] is None:
+        return {"status": "NO_BASELINE"}
 
-        baseline_acc = baseline_row[0]
+    baseline_acc = baseline_row[0]
 
-        cutoff = (datetime.today() - timedelta(days=30)).strftime("%Y-%m-%d")
-        h = int(horizon)
-        rows = pd.read_sql(
-            f"""SELECT prob_up_{h}d, outcome_{h}d FROM deep_learning_predictions
-                WHERE model_name=? AND prediction_date>=? AND outcome_{h}d IS NOT NULL""",
-            con, params=(model_name, cutoff),
-        )
-    finally:
-        con.close()
+    cutoff = (datetime.today() - timedelta(days=30)).strftime("%Y-%m-%d")
+    h = int(horizon)
+    rows = read_df(
+        f"""SELECT prob_up_{h}d, outcome_{h}d FROM deep_learning_predictions
+            WHERE model_name=? AND prediction_date>=? AND outcome_{h}d IS NOT NULL""",
+        (model_name, cutoff),
+    )
 
     if len(rows) < 20:
         return {"status": "INSUFFICIENT_OUTCOMES", "n_resolved": len(rows)}

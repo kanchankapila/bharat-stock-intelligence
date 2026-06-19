@@ -6,7 +6,6 @@ and writes to feature_store. Enforces strict leakage prevention rules.
 
 import sys
 import json
-import sqlite3
 import pickle
 import multiprocessing
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -19,8 +18,31 @@ import pandas as pd
 from sklearn.preprocessing import RobustScaler
 import ta
 
-DB_PATH = Path(__file__).parent.parent.parent / "database.sqlite"
+from db_compat import connect, read_df, query_one, use_postgres, ConnWrapper
+
 SCALER_PATH = Path(__file__).parent / "ml_models" / "feature_scaler_v1.pkl"
+
+# INSERT OR REPLACE → portable ON CONFLICT for feature_store (PK: symbol, date, timeframe).
+_FEATURE_STORE_CONFLICT = (
+    " ON CONFLICT(symbol, date, timeframe) DO UPDATE SET " +
+    ", ".join(
+        f"{c}=excluded.{c}" for c in (
+            "ret_1d", "ret_5d", "ret_15d", "ret_21d", "ret_63d", "ret_126d", "ret_252d",
+            "sma20", "sma50", "sma200", "ema8", "ema21", "dist_sma20_pct", "dist_sma200_pct",
+            "above_sma200", "rsi_14", "rsi_28", "macd", "macd_signal", "macd_hist", "adx",
+            "di_plus", "di_minus", "stoch_k", "stoch_d", "cci", "williams_r", "atr_14",
+            "atr_pct", "bb_upper", "bb_lower", "bb_width", "bb_pct", "hist_vol_21d",
+            "hist_vol_63d", "vol_regime", "volume_ratio_20d", "volume_ratio_5d", "obv",
+            "obv_slope", "vwap", "vwap_dist_pct", "trend_1d", "trend_1w", "trend_1m",
+            "mtf_alignment_score", "fii_3d_net", "fii_10d_net", "dii_3d_net", "trailing_pe",
+            "roe", "debt_to_equity", "op_margins", "piotroski_f", "earnings_yield",
+            "nifty_vix", "nifty_ret_5d", "nifty_ret_21d", "us_10y_yield", "dxy",
+            "crude_ret_5d", "gold_ret_5d", "sp500_ret_5d", "news_sentiment_score",
+            "news_impact_count", "target_ret_1d", "target_ret_5d", "target_ret_15d",
+            "target_dir_1d", "target_dir_5d", "target_dir_15d",
+        )
+    ) + ", computed_at=CURRENT_TIMESTAMP"
+)
 
 # Fundamentals lag: data published ~45 days after quarter end
 FUND_LAG_DAYS = 45
@@ -29,15 +51,14 @@ FII_LAG_DAYS = 1
 
 
 class FeatureEngineer:
-    def __init__(self, db_path: str = str(DB_PATH)):
-        self.db_path = db_path
+    def __init__(self):
         self.scaler: Optional[RobustScaler] = None
 
-    def _con(self) -> sqlite3.Connection:
-        con = sqlite3.connect(self.db_path)
-        con.row_factory = sqlite3.Row
-        con.execute("PRAGMA journal_mode=WAL")
-        con.execute("PRAGMA busy_timeout=5000")
+    def _con(self) -> ConnWrapper:
+        con = connect()
+        if not use_postgres():
+            con.execute("PRAGMA journal_mode=WAL")
+            con.execute("PRAGMA busy_timeout=5000")
         return con
 
     # ── Core OHLCV feature computation ──────────────────────────────────────
@@ -162,12 +183,11 @@ class FeatureEngineer:
 
     # ── Merge exogenous features ─────────────────────────────────────────────
 
-    def _merge_fii(self, feat: pd.DataFrame, con: sqlite3.Connection) -> pd.DataFrame:
+    def _merge_fii(self, feat: pd.DataFrame) -> pd.DataFrame:
         """FII/DII flows — lagged 1 day (published next morning)."""
-        fii = pd.read_sql(
-            "SELECT date, fii_net, dii_net FROM fii_dii_flow ORDER BY date",
-            con, parse_dates=["date"], index_col="date",
-        )
+        fii = read_df("SELECT date, fii_net, dii_net FROM fii_dii_flow ORDER BY date")
+        fii["date"] = pd.to_datetime(fii["date"])
+        fii = fii.set_index("date")
         fii = fii[fii.index.notnull()]
         fii = fii.shift(FII_LAG_DAYS)  # lag 1 day
         feat["fii_3d_net"]  = fii["fii_net"].rolling(3).sum()
@@ -175,16 +195,15 @@ class FeatureEngineer:
         feat["dii_3d_net"]  = fii["dii_net"].rolling(3).sum()
         return feat
 
-    def _merge_fundamentals(self, feat: pd.DataFrame, symbol: str,
-                             con: sqlite3.Connection) -> pd.DataFrame:
+    def _merge_fundamentals(self, feat: pd.DataFrame, symbol: str) -> pd.DataFrame:
         """Fundamentals — lagged 45 days (earnings reporting delay)."""
-        row = con.execute(
+        row = query_one(
             """SELECT trailing_pe, return_on_equity, debt_to_equity,
                       operating_margins, piotroski_f_score, last_updated
                FROM stock_fundamentals WHERE symbol = ?
                ORDER BY last_updated DESC LIMIT 1""",
             (symbol,),
-        ).fetchone()
+        )
         if row:
             fetched = pd.to_datetime(row["last_updated"])
             cutoff  = pd.Timestamp.today() - pd.Timedelta(days=FUND_LAG_DAYS)
@@ -198,54 +217,60 @@ class FeatureEngineer:
                 feat["earnings_yield"] = (1.0 / pe) if pe and pe > 0 else None
         return feat
 
-    def _merge_macro(self, feat: pd.DataFrame, con: sqlite3.Connection) -> pd.DataFrame:
+    def _merge_macro(self, feat: pd.DataFrame) -> pd.DataFrame:
         """India macro + global macro from macro_asset_prices."""
         macro_syms = {
             "US10Y": "us_10y_yield", "DXY": "dxy",
             "CRUDE": "crude_ret_5d", "GOLD": "gold_ret_5d", "SP500": "sp500_ret_5d",
         }
         for sym, col in macro_syms.items():
-            df = pd.read_sql(
+            df = read_df(
                 "SELECT date, ret_5d FROM macro_asset_prices WHERE symbol=? ORDER BY date",
-                con, params=(sym,), parse_dates=["date"], index_col="date",
+                (sym,),
             )
+            df["date"] = pd.to_datetime(df["date"])
+            df = df.set_index("date")
             df = df[df.index.notnull()]
             if not df.empty:
                 feat[col] = df["ret_5d"].reindex(feat.index, method="ffill")
 
         # Nifty metrics
-        nifty = pd.read_sql(
-            "SELECT date, close FROM stock_ohlcv WHERE symbol='NIFTY50' ORDER BY date",
-            con, parse_dates=["date"], index_col="date",
-        )
+        nifty = read_df("SELECT date, close FROM stock_ohlcv WHERE symbol='NIFTY50' ORDER BY date")
+        nifty["date"] = pd.to_datetime(nifty["date"])
+        nifty = nifty.set_index("date")
         nifty = nifty[nifty.index.notnull()]
         if not nifty.empty:
             feat["nifty_ret_5d"]  = nifty["close"].pct_change(5).reindex(feat.index, method="ffill")
             feat["nifty_ret_21d"] = nifty["close"].pct_change(21).reindex(feat.index, method="ffill")
 
         # VIX proxy from NSEBANK in macro_asset_prices
-        vix_df = pd.read_sql(
-            "SELECT date, close FROM macro_asset_prices WHERE symbol='NSEBANK' ORDER BY date",
-            con, parse_dates=["date"], index_col="date",
-        )
+        vix_df = read_df("SELECT date, close FROM macro_asset_prices WHERE symbol='NSEBANK' ORDER BY date")
+        vix_df["date"] = pd.to_datetime(vix_df["date"])
+        vix_df = vix_df.set_index("date")
         vix_df = vix_df[vix_df.index.notnull()]
         if not vix_df.empty:
             feat["nifty_vix"] = vix_df["close"].reindex(feat.index, method="ffill")
 
         return feat
 
-    def _merge_sentiment(self, feat: pd.DataFrame, symbol: str,
-                          con: sqlite3.Connection) -> pd.DataFrame:
+    def _merge_sentiment(self, feat: pd.DataFrame, symbol: str) -> pd.DataFrame:
         """News sentiment: 3-day avg score + 5-day HIGH-impact article count."""
-        rows = pd.read_sql(
-            """SELECT DATE(published_at) as date,
+        # published_at is TIMESTAMPTZ on Postgres / TEXT on SQLite. The `!= ''` empty-string
+        # guard is needed (and valid) only on the TEXT/SQLite side — on Postgres comparing a
+        # timestamptz to '' raises InvalidDatetimeFormat. DATE() maps to ::date on PG via the
+        # translator, which is valid for timestamptz.
+        empty_guard = "" if use_postgres() else "AND published_at != ''"
+        rows = read_df(
+            f"""SELECT DATE(published_at) as date,
                       AVG(CASE WHEN sentiment='BULLISH' THEN 1 WHEN sentiment='BEARISH' THEN -1 ELSE 0 END) as score,
                       SUM(CASE WHEN impact='HIGH' THEN 1 ELSE 0 END) as high_count
                FROM news_sentiment_items
-               WHERE symbols_json LIKE ? AND published_at IS NOT NULL AND published_at != ''
-               GROUP BY DATE(published_at) ORDER BY date""",
-            con, params=(f'%"{symbol}"%',), parse_dates=["date"], index_col="date",
+               WHERE symbols_json LIKE ? AND published_at IS NOT NULL {empty_guard}
+               GROUP BY DATE(published_at) ORDER BY DATE(published_at)""",
+            (f'%"{symbol}"%',),
         )
+        rows["date"] = pd.to_datetime(rows["date"], errors="coerce")
+        rows = rows.set_index("date")
         rows = rows[rows.index.notnull()]
         if not rows.empty:
             feat["news_sentiment_score"] = rows["score"].rolling(3).mean().reindex(
@@ -279,7 +304,7 @@ class FeatureEngineer:
     # ── Per-symbol pipeline ──────────────────────────────────────────────────
 
     def process_symbol(self, symbol: str, lookback_days: int = 504,
-                       only_date: str = None, *, con: sqlite3.Connection = None) -> int:
+                       only_date: str = None, *, con: ConnWrapper = None) -> int:
         """Compute + persist features for one symbol. Returns row count written.
 
         only_date: if set, only write the row matching this date (fast daily mode).
@@ -289,22 +314,24 @@ class FeatureEngineer:
         owns_con = con is None
         if owns_con:
             con = self._con()
-        cutoff = (datetime.today() - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
+        cutoff = (datetime.today() - timedelta(days=lookback_days)).date()
 
         try:
-            ohlcv = pd.read_sql(
+            ohlcv = read_df(
                 "SELECT date, open, high, low, close, volume FROM stock_ohlcv "
                 "WHERE symbol=? AND date>=? ORDER BY date",
-                con, params=(symbol, cutoff), parse_dates=["date"], index_col="date",
+                (symbol, cutoff),
             )
             if len(ohlcv) < 60:
                 return 0
+            ohlcv["date"] = pd.to_datetime(ohlcv["date"])
+            ohlcv = ohlcv.set_index("date")
 
             feat = self._compute_ohlcv_features(ohlcv)
-            feat = self._merge_fii(feat, con)
-            feat = self._merge_fundamentals(feat, symbol, con)
-            feat = self._merge_macro(feat, con)
-            feat = self._merge_sentiment(feat, symbol, con)
+            feat = self._merge_fii(feat)
+            feat = self._merge_fundamentals(feat, symbol)
+            feat = self._merge_macro(feat)
+            feat = self._merge_sentiment(feat, symbol)
 
             # Fit scaler on training window, apply to all
             scaler = self._fit_scaler(feat)
@@ -314,7 +341,7 @@ class FeatureEngineer:
             feat = self._apply_scaler(feat, scaler)
 
             # Collect all rows then write in one executemany call
-            SQL = """INSERT OR REPLACE INTO feature_store
+            SQL = """INSERT INTO feature_store
                        (symbol, date, timeframe,
                         ret_1d, ret_5d, ret_15d, ret_21d, ret_63d, ret_126d, ret_252d,
                         sma20, sma50, sma200, ema8, ema21, dist_sma20_pct, dist_sma200_pct, above_sma200,
@@ -348,7 +375,7 @@ class FeatureEngineer:
                         ?,?,
                         ?,?,?,
                         ?,?,?,
-                        CURRENT_TIMESTAMP)"""
+                        CURRENT_TIMESTAMP)""" + _FEATURE_STORE_CONFLICT
             rows_to_insert = []
             for date, row in feat.iterrows():
                 if only_date and date.strftime("%Y-%m-%d") < only_date:
@@ -391,9 +418,9 @@ class FeatureEngineer:
                 con.close()
 
     def _write_symbol_features(self, symbol: str, feat: pd.DataFrame,
-                               only_date: str | None, con: sqlite3.Connection) -> int:
+                               only_date: str | None, con: ConnWrapper) -> int:
         """Write scaled feature rows for one symbol. Returns row count written."""
-        SQL = """INSERT OR REPLACE INTO feature_store
+        SQL = """INSERT INTO feature_store
                    (symbol, date, timeframe,
                     ret_1d, ret_5d, ret_15d, ret_21d, ret_63d, ret_126d, ret_252d,
                     sma20, sma50, sma200, ema8, ema21, dist_sma20_pct, dist_sma200_pct, above_sma200,
@@ -427,7 +454,7 @@ class FeatureEngineer:
                     ?,?,
                     ?,?,?,
                     ?,?,?,
-                    CURRENT_TIMESTAMP)"""
+                    CURRENT_TIMESTAMP)""" + _FEATURE_STORE_CONFLICT
         rows_to_insert = []
         for date, row in feat.iterrows():
             if only_date and date.strftime("%Y-%m-%d") < only_date:
@@ -487,7 +514,7 @@ class FeatureEngineer:
             total = len(symbols)
             print(f"[FE] Processing {total} symbols in parallel{' (today-only mode)' if only_date else ''}...")
 
-            args_list = [(sym, lookback_days, self.db_path, only_date) for sym in symbols]
+            args_list = [(sym, lookback_days, only_date) for sym in symbols]
             num_workers = min(multiprocessing.cpu_count(), 8)
 
             from itertools import islice
@@ -543,27 +570,25 @@ def _compute_symbol_unscaled(args: tuple):
 
     Returns: (symbol, feat_df) or (symbol, None) on insufficient data/error.
     """
-    symbol, lookback_days, db_path, only_date = args
+    symbol, lookback_days, only_date = args
     try:
-        fe = FeatureEngineer(db_path=db_path)
-        con = fe._con()
-        try:
-            cutoff = (datetime.today() - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
-            ohlcv = pd.read_sql(
-                "SELECT date, open, high, low, close, volume FROM stock_ohlcv "
-                "WHERE symbol=? AND date>=? ORDER BY date",
-                con, params=(symbol, cutoff), parse_dates=["date"], index_col="date",
-            )
-            if len(ohlcv) < 60:
-                return (symbol, None)
-            feat = fe._compute_ohlcv_features(ohlcv)
-            feat = fe._merge_fii(feat, con)
-            feat = fe._merge_fundamentals(feat, symbol, con)
-            feat = fe._merge_macro(feat, con)
-            feat = fe._merge_sentiment(feat, symbol, con)
-            return (symbol, feat)
-        finally:
-            con.close()
+        fe = FeatureEngineer()
+        cutoff = (datetime.today() - timedelta(days=lookback_days)).date()
+        ohlcv = read_df(
+            "SELECT date, open, high, low, close, volume FROM stock_ohlcv "
+            "WHERE symbol=? AND date>=? ORDER BY date",
+            (symbol, cutoff),
+        )
+        if len(ohlcv) < 60:
+            return (symbol, None)
+        ohlcv["date"] = pd.to_datetime(ohlcv["date"])
+        ohlcv = ohlcv.set_index("date")
+        feat = fe._compute_ohlcv_features(ohlcv)
+        feat = fe._merge_fii(feat)
+        feat = fe._merge_fundamentals(feat, symbol)
+        feat = fe._merge_macro(feat)
+        feat = fe._merge_sentiment(feat, symbol)
+        return (symbol, feat)
     except Exception as e:
         print(f"[FE] ERROR {symbol}: {e}", flush=True)
         return (symbol, None)

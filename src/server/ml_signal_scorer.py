@@ -1,4 +1,3 @@
-from pathlib import Path
 """
 ML Signal Confidence Scorer
 ================================
@@ -27,13 +26,13 @@ import json
 import math
 import datetime
 import argparse
-import sqlite3
 import pickle
 
 import numpy as np
 import pandas as pd
 
-DB_PATH      = Path(__file__).parent.parent.parent / "database.sqlite"
+from db_compat import connect, read_df, ConnWrapper
+
 MODEL_PATH = os.path.join(os.getcwd(), 'src', 'server', 'ml_signal_model.pkl')
 
 REGIME_MAP   = {'BULL': 1.0, 'SIDEWAYS': 0.0, 'BEAR': -1.0}
@@ -47,7 +46,7 @@ SIGNAL_TYPES = [
 ]
 
 
-def load_training_data(conn: sqlite3.Connection) -> pd.DataFrame:
+def load_training_data() -> pd.DataFrame:
     """Join signal_outcomes with technical_signals for feature extraction."""
     query = """
         SELECT
@@ -70,7 +69,7 @@ def load_training_data(conn: sqlite3.Connection) -> pd.DataFrame:
         WHERE so.outcome IN ('WIN', 'LOSS', 'NEUTRAL')
           AND so.return_pct IS NOT NULL
     """
-    df = pd.read_sql_query(query, conn)
+    df = read_df(query)
     return df
 
 
@@ -117,7 +116,7 @@ def build_label(df: pd.DataFrame) -> pd.Series:
     return (df['outcome'] == 'WIN').astype(int)
 
 
-def train(conn: sqlite3.Connection, min_samples: int = 30) -> object | None:
+def train(min_samples: int = 30) -> object | None:
     """Train GradientBoostingClassifier. Returns fitted model or None if insufficient data."""
     try:
         from sklearn.ensemble import GradientBoostingClassifier
@@ -129,7 +128,7 @@ def train(conn: sqlite3.Connection, min_samples: int = 30) -> object | None:
         sys.exit(1)
 
     print("[ML] Loading training data...")
-    df = load_training_data(conn)
+    df = load_training_data()
     print(f"[ML] {len(df)} labelled outcomes loaded.")
 
     if len(df) < min_samples:
@@ -170,7 +169,7 @@ def train(conn: sqlite3.Connection, min_samples: int = 30) -> object | None:
     return model
 
 
-def score_pending(conn: sqlite3.Connection, model) -> int:
+def score_pending(conn: ConnWrapper, model) -> int:
     """Score technical_signals rows with no win_probability yet. Returns count updated."""
     query = """
         SELECT symbol, scan_date, signal_score, signals_json,
@@ -181,7 +180,7 @@ def score_pending(conn: sqlite3.Connection, model) -> int:
         ORDER BY scan_date DESC
         LIMIT 5000
     """
-    df = pd.read_sql_query(query, conn)
+    df = read_df(query)
     if df.empty:
         print("[ML] No pending signals to score.")
         return 0
@@ -195,14 +194,12 @@ def score_pending(conn: sqlite3.Connection, model) -> int:
     probs = model.predict_proba(X)[:, 1]
 
     cur = conn.cursor()
-    updated = 0
-    for (_, row), prob in zip(df.iterrows(), probs):
-        win_prob = round(float(prob), 4)
-        cur.execute(
-            "UPDATE technical_signals SET win_probability = ? WHERE symbol = ? AND scan_date = ?",
-            (win_prob, row['symbol'], row['scan_date'])
-        )
-        updated += 1
+    cur.executemany(
+        "UPDATE technical_signals SET win_probability = ? WHERE symbol = ? AND scan_date = ?",
+        [(round(float(prob), 4), row['symbol'], row['scan_date'])
+         for (_, row), prob in zip(df.iterrows(), probs)],
+    )
+    updated = len(df)
 
     conn.commit()
     return updated
@@ -226,7 +223,7 @@ def load_model_from_disk():
 
 def run(train_only: bool = False, score_only: bool = False, min_samples: int = 30):
     print(f"[ML] Starting at {datetime.datetime.now()}")
-    conn = sqlite3.connect(DB_PATH)
+    conn = connect()
 
     try:
         if score_only:
@@ -235,7 +232,7 @@ def run(train_only: bool = False, score_only: bool = False, min_samples: int = 3
                 print("[ML] No saved model found. Run without --score-only to train first.")
                 return
         else:
-            model = train(conn, min_samples=min_samples)
+            model = train(min_samples=min_samples)
             if model is None:
                 return
             save_model(model)

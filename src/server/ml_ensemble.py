@@ -1,4 +1,3 @@
-from pathlib import Path
 """
 ML Ensemble Signal Confidence Scorer
 ======================================
@@ -33,13 +32,14 @@ Run:  python ml_ensemble.py
       python ml_ensemble.py --min-samples 30
 """
 
-import os, sys, json, math, datetime, argparse, pickle, sqlite3, warnings
+import os, sys, json, math, datetime, argparse, pickle, warnings
 warnings.filterwarnings('ignore')
 
 import numpy as np
 import pandas as pd
 
-DB_PATH      = Path(__file__).parent.parent.parent / "database.sqlite"
+from db_compat import connect, read_df, use_postgres, ConnWrapper
+
 MODELS_DIR  = os.path.join(os.getcwd(), 'src', 'server', 'ml_models')
 ENSEMBLE_PATH = os.path.join(MODELS_DIR, 'ensemble.pkl')
 
@@ -128,7 +128,19 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
 
 # ── Data Loading ─────────────────────────────────────────────────────────────
 
-def load_training_data(conn: sqlite3.Connection) -> pd.DataFrame:
+def _table_columns(conn: ConnWrapper, table: str) -> list:
+    """Engine-aware column list (replaces sqlite-only PRAGMA table_info)."""
+    if use_postgres():
+        rows = conn.execute(
+            "SELECT column_name FROM information_schema.columns WHERE table_name = ?",
+            (table,),
+        ).fetchall()
+        return [r[0] for r in rows]
+    rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    return [r[1] for r in rows]
+
+
+def load_training_data() -> pd.DataFrame:
     q = """
         SELECT so.symbol, so.signal_date, so.horizon_days, so.outcome,
                so.signal_score, so.signals_json, so.return_pct,
@@ -148,12 +160,12 @@ def load_training_data(conn: sqlite3.Connection) -> pd.DataFrame:
         WHERE so.outcome IN ('WIN','LOSS')
           AND so.return_pct IS NOT NULL
     """
-    df = pd.read_sql_query(q, conn)
+    df = read_df(q)
     df['outcome'] = df['outcome'].map({'WIN': 1, 'LOSS': 0})
     return df
 
 
-def load_pending_signals(conn: sqlite3.Connection) -> pd.DataFrame:
+def load_pending_signals() -> pd.DataFrame:
     q = """
         SELECT ts.symbol, ts.date AS signal_date, ts.signal_score, ts.signals_json,
                ts.rsi, ts.adx, ts.nifty_regime, ts.cmp, ts.sma200, ts.volume_ratio,
@@ -171,7 +183,7 @@ def load_pending_signals(conn: sqlite3.Connection) -> pd.DataFrame:
         ORDER BY ts.date DESC
         LIMIT 10000
     """
-    df = pd.read_sql_query(q, conn)
+    df = read_df(q)
     df['horizon_days'] = 15
     return df
 
@@ -374,7 +386,7 @@ def predict_proba_ensemble(ensemble: dict, X: pd.DataFrame) -> np.ndarray:
 
 # ── Model Registry ────────────────────────────────────────────────────────────
 
-def register_model(conn: sqlite3.Connection, ensemble: dict) -> int:
+def register_model(conn: ConnWrapper, ensemble: dict) -> int:
     version = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
     top_feats = []
     if ensemble.get('feature_importances') and ensemble.get('feature_names'):
@@ -396,6 +408,7 @@ def register_model(conn: sqlite3.Connection, ensemble: dict) -> int:
              test_roc_auc, precision_score, recall_score, f1_score,
              feature_count, top_features_json, model_path, is_active, horizon_days)
         VALUES ('ensemble', ?, 'Stacking Ensemble', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 15)
+        RETURNING id
     """, (
         version,
         ensemble['trained_at'],
@@ -410,7 +423,7 @@ def register_model(conn: sqlite3.Connection, ensemble: dict) -> int:
         json.dumps(top_feats),
         ENSEMBLE_PATH,
     ))
-    model_id = cur.lastrowid
+    model_id = cur.fetchone()[0]
 
     # Feature importance log
     if top_feats:
@@ -443,8 +456,8 @@ def load_ensemble() -> dict | None:
 
 # ── Score Pending Signals ─────────────────────────────────────────────────────
 
-def score_pending(conn: sqlite3.Connection, ensemble: dict) -> int:
-    df = load_pending_signals(conn)
+def score_pending(conn: ConnWrapper, ensemble: dict) -> int:
+    df = load_pending_signals()
     if df.empty:
         print("[Ensemble] No pending signals to score.")
         return 0
@@ -461,17 +474,16 @@ def score_pending(conn: sqlite3.Connection, ensemble: dict) -> int:
     probs = predict_proba_ensemble(ensemble, X)
 
     cur = conn.cursor()
-    updated = 0
-    for (_, row), prob in zip(df.iterrows(), probs):
-        cur.execute(
-            "UPDATE technical_signals SET win_probability = ? WHERE symbol = ? AND date = ?",
-            (round(float(prob), 4), row['symbol'], row['signal_date']),
-        )
-        updated += 1
+    cur.executemany(
+        "UPDATE technical_signals SET win_probability = ? WHERE symbol = ? AND date = ?",
+        [(round(float(prob), 4), row['symbol'], row['signal_date'])
+         for (_, row), prob in zip(df.iterrows(), probs)],
+    )
+    updated = len(df)
     conn.commit()
 
     # Propagate win_probability to active recommendation_log entries
-    cols = [r[1] for r in conn.execute("PRAGMA table_info(recommendation_log)").fetchall()]
+    cols = _table_columns(conn, 'recommendation_log')
     if 'win_probability' in cols:
         conn.execute("""
             UPDATE recommendation_log
@@ -511,7 +523,7 @@ def run(do_train: bool = True, do_score: bool = True,
         print("[Ensemble] lightgbm not installed. Run: pip install lightgbm")
         sys.exit(1)
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = connect()
     try:
         if do_train:
             if retrain_full or not os.path.exists(ENSEMBLE_PATH):
@@ -519,7 +531,7 @@ def run(do_train: bool = True, do_score: bool = True,
             else:
                 print("[Ensemble] Retraining (incremental — same architecture)...")
 
-            df = load_training_data(conn)
+            df = load_training_data()
             df = df.sort_values('signal_date').reset_index(drop=True)
             if len(df) < min_samples:
                 print(f"[Ensemble] Need {min_samples} samples, have {len(df)}. Skipping train.")
