@@ -86,13 +86,12 @@ def get_buy_signals(
     db_path: str = DB_PATH,
 ) -> list[dict]:
     """
-    Active BUY signals. Queries unified_signals (today's data) first,
-    falls back to the legacy signals table if unified_signals is empty.
+    Active BUY signals. Queries unified_signals (live, updated daily).
     """
     conn = _connect(db_path)
     cutoff = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
 
-    # Primary: unified_signals (live, updated daily)
+    # unified_signals (live, updated daily)
     try:
         conditions = [
             "signal_type = 'BUY'",
@@ -100,11 +99,9 @@ def get_buy_signals(
             "confidence_score >= ?",
         ]
         params: list = [cutoff, min_confidence]
-
         if symbol:
             conditions.append("symbol = ?")
             params.append(symbol.upper())
-
         params.append(limit)
         rows = conn.execute(
             f"SELECT symbol, signal_date, signal_source, signal_type, "
@@ -113,28 +110,6 @@ def get_buy_signals(
             f"FROM unified_signals "
             f"WHERE {' AND '.join(conditions)} "
             f"ORDER BY confidence_score DESC, signal_date DESC LIMIT ?",
-            params,
-        ).fetchall()
-
-        if rows:
-            conn.close()
-            return [dict(r) for r in rows]
-    except Exception:
-        pass
-
-    # Fallback: legacy signals table
-    try:
-        conditions = ["type = 'BUY'", "status = 'ACTIVE'", "confidence >= ?"]
-        params = [min_confidence]
-        if symbol:
-            conditions.append("symbol = ?")
-            params.append(symbol.upper())
-        params.append(limit)
-        rows = conn.execute(
-            f"SELECT symbol, createdAt AS signal_date, 'AI' AS signal_source, "
-            f"type AS signal_type, entry, target, stopLoss, confidence, reasoning "
-            f"FROM signals WHERE {' AND '.join(conditions)} "
-            f"ORDER BY confidence DESC, createdAt DESC LIMIT ?",
             params,
         ).fetchall()
         conn.close()

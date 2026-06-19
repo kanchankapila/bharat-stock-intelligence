@@ -396,13 +396,14 @@ class UnifiedRanker:
         except Exception:
             self.conn.rollback()
 
-        # Fallback 3: Query signals
+        # Fallback 3: Query unified_signals
         try:
             row = self.conn.execute(
-                """SELECT entry, target, "stopLoss", reasoning AS trade_reasoning
-                   FROM signals
+                """SELECT entry_price AS entry, target_price AS target,
+                          stop_loss AS "stopLoss", reasoning AS trade_reasoning
+                   FROM unified_signals
                    WHERE symbol = ?
-                   ORDER BY "createdAt" DESC
+                   ORDER BY signal_generated_at DESC
                    LIMIT 1""",
                 (symbol,),
             ).fetchone()

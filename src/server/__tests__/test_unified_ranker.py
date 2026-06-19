@@ -71,12 +71,12 @@ def make_db():
             risk_reward REAL, timeframe TEXT, sector TEXT,
             trade_reasoning TEXT, UNIQUE(symbol, computed_at)
         );
-        CREATE TABLE signals (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, symbol TEXT,
-            entry_price REAL, stop_loss REAL,
-            target_1 REAL, target_2 REAL, target_3 REAL,
-            risk_reward REAL, timeframe TEXT, trade_reasoning TEXT,
-            sector TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        CREATE TABLE unified_signals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            symbol TEXT, signal_date TEXT, signal_source TEXT, signal_type TEXT,
+            entry_price REAL, target_price REAL, stop_loss REAL,
+            confidence_score REAL, reasoning TEXT,
+            signal_generated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
     ''')
     return conn

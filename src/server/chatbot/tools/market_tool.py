@@ -216,7 +216,6 @@ def get_stock_signals(symbol: str, days: int = 7, db_path: str = DB_PATH) -> dic
       unified_signals (today's cross-source signals),
       technical_signals (RSI, MACD, SMA status),
       confluence_signals (screener conviction score).
-    Falls back to the legacy 'signals' table if unified_signals has no rows.
     """
     db = _connect(db_path)
     sym = symbol.upper()
@@ -236,22 +235,6 @@ def get_stock_signals(symbol: str, days: int = 7, db_path: str = DB_PATH) -> dic
         result["unified_signals"] = [dict(r) for r in rows]
     except Exception:
         result["unified_signals"] = []
-
-    # fall back to legacy signals table if unified has nothing
-    if not result["unified_signals"]:
-        try:
-            rows = db.execute(
-                "SELECT createdAt AS signal_date, 'AI' AS signal_source, type AS signal_type, "
-                "entry AS entry_price, target AS target_price, stopLoss AS stop_loss, "
-                "confidence AS confidence_score, reasoning "
-                "FROM signals "
-                "WHERE symbol = ? AND status = 'ACTIVE' "
-                "ORDER BY createdAt DESC LIMIT 5",
-                (sym,),
-            ).fetchall()
-            result["unified_signals"] = [dict(r) for r in rows]
-        except Exception:
-            pass
 
     # technical_signals (RSI, MACD, SMA)
     try:
