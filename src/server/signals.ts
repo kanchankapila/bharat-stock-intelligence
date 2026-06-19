@@ -18,10 +18,16 @@ export interface Signal {
 export async function createSignal(signal: Omit<Signal, "id" | "createdAt" | "updatedAt" | "status">) {
   const today = new Date().toISOString().split('T')[0];
 
-  await dbRun(`
-    INSERT INTO signals (symbol, type, entry, target, "stopLoss", confidence, reasoning, status)
-    VALUES (?, ?, ?, ?, ?, ?, ?, 'ACTIVE')
-  `, [signal.symbol, signal.type, signal.entry, signal.target, signal.stopLoss, signal.confidence, signal.reasoning]);
+  await upsertUnifiedSignal('platform', {
+    symbol: signal.symbol,
+    signalDate: today,
+    signalType: signal.type,
+    entryPrice: signal.entry,
+    targetPrice: signal.target,
+    stopLoss: signal.stopLoss,
+    confidenceScore: signal.confidence,
+    reasoning: signal.reasoning,
+  });
 
   await dbRun(`
     INSERT INTO recommendation_log

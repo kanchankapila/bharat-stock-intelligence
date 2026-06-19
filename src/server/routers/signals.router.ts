@@ -25,10 +25,17 @@ export const signalsRouter = router({
       reasoning: z.string(),
     }))
     .mutation(async ({ input }) => {
-      await dbRun(`
-        INSERT INTO signals (symbol, type, entry, target, "stopLoss", confidence, reasoning, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'ACTIVE')
-      `, [input.symbol, input.type, input.entry, input.target, input.stopLoss, input.confidence, input.reasoning]);
+      const { upsertUnifiedSignal } = await import('../signals');
+      await upsertUnifiedSignal('platform', {
+        symbol: input.symbol,
+        signalDate: new Date().toISOString().split('T')[0],
+        signalType: input.type,
+        entryPrice: input.entry,
+        targetPrice: input.target,
+        stopLoss: input.stopLoss,
+        confidenceScore: input.confidence,
+        reasoning: input.reasoning,
+      });
       return { success: true };
     }),
 
