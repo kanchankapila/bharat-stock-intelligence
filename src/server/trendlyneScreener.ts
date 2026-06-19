@@ -1347,7 +1347,7 @@ export async function runIntradayScreenerScan(): Promise<{
         // 4. Deduplicate active signals
         let existingActive = 0;
         try {
-          const check = await dbGet("SELECT COUNT(*) as count FROM signals WHERE symbol = ? AND status = 'ACTIVE'", [symbol]) as any;
+          const check = await dbGet("SELECT COUNT(*) as count FROM unified_signals WHERE symbol = ? AND status = 'ACTIVE' AND signal_source = 'screener'", [symbol]) as any;
           existingActive = check?.count || 0;
         } catch (err) {
           console.error(`❌ [INTRADAY SCAN] Error checking active signals for ${symbol}:`, err);
@@ -1367,10 +1367,17 @@ export async function runIntradayScreenerScan(): Promise<{
         const reasoning = `Strong quantitative score of ${score.toFixed(1)}% and active intraday breakout spotted in Trendlyne screener '${name}'.`;
 
         try {
-          await dbRun(`
-            INSERT INTO signals (symbol, type, entry, target, "stopLoss", confidence, reasoning, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 'ACTIVE')
-          `, [symbol, type, entry, target, stopLoss, confidence, reasoning]);
+          const { upsertUnifiedSignal } = await import('./signals');
+          await upsertUnifiedSignal('screener', {
+            symbol,
+            signalDate: new Date().toISOString().split('T')[0],
+            signalType: type,
+            entryPrice: entry,
+            targetPrice: target,
+            stopLoss,
+            confidenceScore: confidence / 100,
+            reasoning,
+          });
 
           newSignalsGenerated++;
           console.log(`🎯 [INTRADAY SCAN] GENERATED ${type} SIGNAL FOR ${symbol}! Score: ${score.toFixed(1)}% | Entry: ₹${entry} | Target: ₹${target} | SL: ₹${stopLoss}`);
