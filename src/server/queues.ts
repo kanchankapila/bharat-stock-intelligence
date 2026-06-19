@@ -214,47 +214,19 @@ async function processAISignal(job: Job): Promise<void> {
 
   const now = new Date().toISOString();
 
-  // Persist to DB (same schema as the existing saveSignal procedure)
-  await dbRun(`
-    INSERT INTO signals (symbol, type, entry, target, "stopLoss", confidence, reasoning, "createdAt")
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT DO NOTHING
-  `, [
-    symbol,
-    analysis.signal,
-    analysis.entry,
-    analysis.target,
-    analysis.stopLoss,
-    analysis.confidence,
-    analysis.reasoning,
-    now,
-  ]);
-
   // Write to unified_signals so outcome resolver and reward engine can track AI signal performance
-  await dbRun(`
-    INSERT INTO unified_signals
-      (symbol, signal_date, signal_source, signal_type,
-       entry_price, target_price, stop_loss, confidence_score,
-       reasoning, status, signal_generated_at)
-    VALUES (?, ?, 'AI', ?, ?, ?, ?, ?, ?, 'ACTIVE', ?)
-    ON CONFLICT(symbol, signal_date, signal_source) DO UPDATE SET
-      entry_price=excluded.entry_price,
-      target_price=excluded.target_price,
-      stop_loss=excluded.stop_loss,
-      confidence_score=excluded.confidence_score,
-      reasoning=excluded.reasoning,
-      signal_generated_at=excluded.signal_generated_at
-  `, [
+  const { upsertUnifiedSignal } = await import('./signals');
+  await upsertUnifiedSignal('AI', {
     symbol,
-    now.split('T')[0],
-    analysis.signal ?? 'BUY',
-    analysis.entry ?? null,
-    analysis.target ?? null,
-    analysis.stopLoss ?? null,
-    analysis.confidence ?? null,
-    analysis.reasoning ?? null,
-    now,
-  ]);
+    signalDate: now.split('T')[0],
+    signalType: analysis.signal ?? 'BUY',
+    entryPrice: analysis.entry ?? null,
+    targetPrice: analysis.target ?? null,
+    stopLoss: analysis.stopLoss ?? null,
+    confidenceScore: analysis.confidence ?? null,
+    reasoning: analysis.reasoning ?? null,
+    generatedAt: now,
+  });
 
   // Broadcast via WebSocket so the frontend gets a real-time alert
   try {

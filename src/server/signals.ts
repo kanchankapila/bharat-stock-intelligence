@@ -69,3 +69,38 @@ export async function updateSignalAccuracy(symbol: string, currentPrice: number)
   });
 }
 
+export interface UnifiedSignalInput {
+  symbol: string;
+  signalDate: string;
+  signalType: string;
+  entryPrice?: number | null;
+  targetPrice?: number | null;
+  stopLoss?: number | null;
+  confidenceScore?: number | null;
+  reasoning?: string | null;
+  technicalScore?: number | null;
+  quantScore?: number | null;
+  aiReasoning?: string | null;
+  generatedAt?: string;
+}
+
+export async function upsertUnifiedSignal(source: string, s: UnifiedSignalInput): Promise<void> {
+  const generatedAt = s.generatedAt ?? new Date().toISOString();
+  await dbRun(`
+    INSERT INTO unified_signals
+      (symbol, signal_date, signal_source, signal_type,
+       entry_price, target_price, stop_loss, confidence_score,
+       reasoning, technical_score, quant_score, ai_reasoning,
+       status, signal_generated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?)
+    ON CONFLICT(symbol, signal_source, signal_type, signal_date) DO UPDATE SET
+      entry_price=excluded.entry_price, target_price=excluded.target_price,
+      stop_loss=excluded.stop_loss, confidence_score=excluded.confidence_score,
+      reasoning=excluded.reasoning, technical_score=excluded.technical_score,
+      quant_score=excluded.quant_score, ai_reasoning=excluded.ai_reasoning,
+      signal_generated_at=excluded.signal_generated_at
+  `, [s.symbol, s.signalDate, source, s.signalType,
+      s.entryPrice ?? null, s.targetPrice ?? null, s.stopLoss ?? null, s.confidenceScore ?? null,
+      s.reasoning ?? null, s.technicalScore ?? null, s.quantScore ?? null, s.aiReasoning ?? null,
+      generatedAt]);
+}
