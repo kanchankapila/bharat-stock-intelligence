@@ -109,81 +109,148 @@ git commit -m "feat(signals): widen unified_signals uniqueness to include signal
 
 ---
 
-### Task 2: Route the AI-signal worker to `unified_signals` only
+### Task 2: Add `upsertUnifiedSignal()` helper and route the AI-signal worker through it
 
-`processAISignal` in `queues.ts` currently dual-writes legacy `signals` AND `unified_signals`.
-Drop the legacy `signals` write; keep the `unified_signals` write (upgraded to the 4-col key) and
-the `recommendation_log` audit write that already exists elsewhere in the worker.
+Introduce ONE shared helper that every TypeScript trade-signal producer calls, so the
+`unified_signals` upsert SQL and conflict key live in exactly one place. Then make
+`processAISignal` in `queues.ts` (which currently dual-writes legacy `signals` AND
+`unified_signals`) use the helper and drop the legacy `signals` write. The
+`recommendation_log` audit write elsewhere in the worker is unchanged.
 
 **Files:**
-- Modify: `src/server/queues.ts:218-257` (remove the `INSERT INTO signals` block; update the `unified_signals` `ON CONFLICT`)
-- Test: `src/server/__tests__/aiSignalProducer.test.ts` (create)
+- Modify: `src/server/signals.ts` (add `UnifiedSignalInput` + `upsertUnifiedSignal`)
+- Modify: `src/server/queues.ts:217-257` (remove the `INSERT INTO signals` block; replace the inline `unified_signals` insert with a helper call)
+- Test: `src/server/__tests__/upsertUnifiedSignal.test.ts` (create)
 
 **Interfaces:**
 - Consumes: `unified_signals` 4-col key (Task 1).
-- Produces: AI signals land in `unified_signals` with `signal_source='AI'`.
+- Produces: **`upsertUnifiedSignal(source: string, s: UnifiedSignalInput): Promise<void>`** exported from `src/server/signals.ts`, where
+  ```typescript
+  export interface UnifiedSignalInput {
+    symbol: string;
+    signalDate: string;        // 'YYYY-MM-DD'
+    signalType: string;
+    entryPrice?: number | null;
+    targetPrice?: number | null;
+    stopLoss?: number | null;
+    confidenceScore?: number | null;
+    reasoning?: string | null;
+    technicalScore?: number | null;
+    quantScore?: number | null;
+    aiReasoning?: string | null;
+    generatedAt?: string;      // ISO 8601; defaults to new Date().toISOString()
+  }
+  ```
+  Tasks 3 and 4 call this helper. (Task 5 is Python and intentionally does not.)
 
 - [ ] **Step 1: Write the failing test**
 
 ```typescript
-// src/server/__tests__/aiSignalProducer.test.ts
+// src/server/__tests__/upsertUnifiedSignal.test.ts
 import { describe, it, expect, beforeEach } from 'vitest';
 import { dbRun, dbGet } from '../dbAsync';
+import { upsertUnifiedSignal } from '../signals';
 
-// Mirrors the exact upsert processAISignal performs, to lock the contract.
-async function writeAiSignal(symbol: string, now: string) {
-  await dbRun(`
-    INSERT INTO unified_signals
-      (symbol, signal_date, signal_source, signal_type,
-       entry_price, target_price, stop_loss, confidence_score,
-       reasoning, status, signal_generated_at)
-    VALUES (?, ?, 'AI', ?, ?, ?, ?, ?, ?, 'ACTIVE', ?)
-    ON CONFLICT(symbol, signal_source, signal_type, signal_date) DO UPDATE SET
-      entry_price=excluded.entry_price, target_price=excluded.target_price,
-      stop_loss=excluded.stop_loss, confidence_score=excluded.confidence_score,
-      reasoning=excluded.reasoning, signal_generated_at=excluded.signal_generated_at
-  `, [symbol, now.split('T')[0], 'BUY', 100, 110, 95, 0.7, 'test', now]);
-}
+describe('upsertUnifiedSignal', () => {
+  beforeEach(async () => { await dbRun('DELETE FROM unified_signals WHERE symbol = ?', ['TESTUP']); });
 
-describe('AI signal producer', () => {
-  beforeEach(async () => { await dbRun('DELETE FROM unified_signals WHERE symbol = ?', ['TESTAI']); });
-
-  it('writes an AI signal into unified_signals', async () => {
-    await writeAiSignal('TESTAI', '2026-06-19T10:00:00.000Z');
-    const row = await dbGet<{ signal_source: string; signal_type: string }>(
-      'SELECT signal_source, signal_type FROM unified_signals WHERE symbol = ?', ['TESTAI']);
-    expect(row?.signal_source).toBe('AI');
-    expect(row?.signal_type).toBe('BUY');
+  it('inserts a signal with the given source and upserts on the 4-col key', async () => {
+    const base = { symbol: 'TESTUP', signalDate: '2026-06-19', signalType: 'BUY',
+                   entryPrice: 100, targetPrice: 110, stopLoss: 95, confidenceScore: 0.7,
+                   generatedAt: '2026-06-19T10:00:00.000Z' };
+    await upsertUnifiedSignal('AI', base);
+    await upsertUnifiedSignal('AI', { ...base, entryPrice: 101 }); // same key → update, not duplicate
+    const rows = await dbGet<{ n: number; entry_price: number; signal_source: string }>(
+      'SELECT COUNT(*) AS n, MAX(entry_price) AS entry_price, MAX(signal_source) AS signal_source FROM unified_signals WHERE symbol = ?',
+      ['TESTUP']);
+    expect(rows?.n).toBe(1);
+    expect(rows?.entry_price).toBe(101);
+    expect(rows?.signal_source).toBe('AI');
   });
 });
 ```
 
-- [ ] **Step 2: Run test to verify it passes against the schema (red on legacy assumptions)**
+- [ ] **Step 2: Run test to verify it fails**
 
-Run: `npx vitest run src/server/__tests__/aiSignalProducer.test.ts`
-Expected: PASS (this test asserts the target contract; it guards Step 3's edit from regressing the upsert).
+Run: `npx vitest run src/server/__tests__/upsertUnifiedSignal.test.ts`
+Expected: FAIL — `upsertUnifiedSignal` is not exported from `../signals` (import error).
 
-- [ ] **Step 3: Remove the legacy `signals` write and update the conflict key**
+- [ ] **Step 3: Implement the helper in `src/server/signals.ts`**
 
-In `src/server/queues.ts`, delete the block at lines 217–231 (the `// Persist to DB (same schema as the existing saveSignal procedure)` comment through the `signals` insert's closing `]);`). In the remaining `unified_signals` insert, change:
-```
-    ON CONFLICT(symbol, signal_date, signal_source) DO UPDATE SET
-```
-to:
-```
+Add to `src/server/signals.ts` (the file already imports `dbRun` from `./dbAsync`):
+```typescript
+export interface UnifiedSignalInput {
+  symbol: string;
+  signalDate: string;
+  signalType: string;
+  entryPrice?: number | null;
+  targetPrice?: number | null;
+  stopLoss?: number | null;
+  confidenceScore?: number | null;
+  reasoning?: string | null;
+  technicalScore?: number | null;
+  quantScore?: number | null;
+  aiReasoning?: string | null;
+  generatedAt?: string;
+}
+
+export async function upsertUnifiedSignal(source: string, s: UnifiedSignalInput): Promise<void> {
+  const generatedAt = s.generatedAt ?? new Date().toISOString();
+  await dbRun(`
+    INSERT INTO unified_signals
+      (symbol, signal_date, signal_source, signal_type,
+       entry_price, target_price, stop_loss, confidence_score,
+       reasoning, technical_score, quant_score, ai_reasoning,
+       status, signal_generated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?)
     ON CONFLICT(symbol, signal_source, signal_type, signal_date) DO UPDATE SET
+      entry_price=excluded.entry_price, target_price=excluded.target_price,
+      stop_loss=excluded.stop_loss, confidence_score=excluded.confidence_score,
+      reasoning=excluded.reasoning, technical_score=excluded.technical_score,
+      quant_score=excluded.quant_score, ai_reasoning=excluded.ai_reasoning,
+      signal_generated_at=excluded.signal_generated_at
+  `, [s.symbol, s.signalDate, source, s.signalType,
+      s.entryPrice ?? null, s.targetPrice ?? null, s.stopLoss ?? null, s.confidenceScore ?? null,
+      s.reasoning ?? null, s.technicalScore ?? null, s.quantScore ?? null, s.aiReasoning ?? null,
+      generatedAt]);
+}
 ```
 
-- [ ] **Step 4: Verify build + tests**
+- [ ] **Step 4: Run the test to verify it passes**
+
+Run: `npx vitest run src/server/__tests__/upsertUnifiedSignal.test.ts`
+Expected: PASS (`n=1`, `entry_price=101`, `signal_source='AI'`).
+
+- [ ] **Step 5: Route `processAISignal` through the helper**
+
+In `src/server/queues.ts`, delete the block at lines 217–231 (the `// Persist to DB (same schema as the existing saveSignal procedure)` comment through the legacy `signals` insert's closing `]);`). Replace the inline `unified_signals` insert (the `// Write to unified_signals ...` block, ~233–257) with:
+```typescript
+  // Write to unified_signals so outcome resolver and reward engine can track AI signal performance
+  const { upsertUnifiedSignal } = await import('./signals');
+  await upsertUnifiedSignal('AI', {
+    symbol,
+    signalDate: now.split('T')[0],
+    signalType: analysis.signal ?? 'BUY',
+    entryPrice: analysis.entry ?? null,
+    targetPrice: analysis.target ?? null,
+    stopLoss: analysis.stopLoss ?? null,
+    confidenceScore: analysis.confidence ?? null,
+    reasoning: analysis.reasoning ?? null,
+    generatedAt: now,
+  });
+```
+(`now` is already declared above in `processAISignal`; leave the WebSocket broadcast block that follows unchanged.)
+
+- [ ] **Step 6: Verify build + tests**
 
 Run: `npx tsc --noEmit && npx vitest run`
 Expected: 0 tsc errors; all tests pass.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add src/server/queues.ts src/server/__tests__/aiSignalProducer.test.ts
-git commit -m "refactor(signals): AI worker writes unified_signals only (drop legacy signals)"
+git add src/server/signals.ts src/server/queues.ts src/server/__tests__/upsertUnifiedSignal.test.ts
+git commit -m "feat(signals): add upsertUnifiedSignal helper; AI worker writes unified_signals only"
 ```
 
 ---
@@ -200,8 +267,8 @@ Repoint them to `unified_signals` (`signal_source='platform'`). `createSignal` k
 - Test: `src/server/__tests__/createSignal.test.ts` (create)
 
 **Interfaces:**
-- Consumes: `unified_signals` 4-col key (Task 1).
-- Produces: `createSignal(signal)` and the `saveSignal` mutation persist to `unified_signals` with `signal_source='platform'`, mapping `type→signal_type`, `entry→entry_price`, `target→target_price`, `stopLoss→stop_loss`, `confidence→confidence_score`.
+- Consumes: `upsertUnifiedSignal(source, UnifiedSignalInput)` from Task 2.
+- Produces: `createSignal(signal)` and the `saveSignal` mutation persist to `unified_signals` with `signal_source='platform'`, mapping `type→signalType`, `entry→entryPrice`, `target→targetPrice`, `stopLoss→stopLoss`, `confidence→confidenceScore`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -235,46 +302,41 @@ describe('createSignal', () => {
 Run: `npx vitest run src/server/__tests__/createSignal.test.ts`
 Expected: FAIL — `createSignal` writes legacy `signals`, so `unified_signals` has no `TESTCS` row (`row` is undefined).
 
-- [ ] **Step 3: Rewrite `createSignal`'s signal insert**
+- [ ] **Step 3: Rewrite `createSignal`'s signal insert to use the helper**
 
-In `src/server/signals.ts`, replace the first `dbRun` (the `INSERT INTO signals ...`) with:
+In `src/server/signals.ts`, replace the first `dbRun` (the `INSERT INTO signals ...`) with a call to the Task 2 helper (defined in the same file):
 ```typescript
-  const now = new Date().toISOString();
-  await dbRun(`
-    INSERT INTO unified_signals
-      (symbol, signal_date, signal_source, signal_type,
-       entry_price, target_price, stop_loss, confidence_score,
-       reasoning, status, signal_generated_at)
-    VALUES (?, ?, 'platform', ?, ?, ?, ?, ?, ?, 'ACTIVE', ?)
-    ON CONFLICT(symbol, signal_source, signal_type, signal_date) DO UPDATE SET
-      entry_price=excluded.entry_price, target_price=excluded.target_price,
-      stop_loss=excluded.stop_loss, confidence_score=excluded.confidence_score,
-      reasoning=excluded.reasoning, signal_generated_at=excluded.signal_generated_at
-  `, [signal.symbol, today, signal.type, signal.entry, signal.target,
-      signal.stopLoss, signal.confidence, signal.reasoning, now]);
+  await upsertUnifiedSignal('platform', {
+    symbol: signal.symbol,
+    signalDate: today,
+    signalType: signal.type,
+    entryPrice: signal.entry,
+    targetPrice: signal.target,
+    stopLoss: signal.stopLoss,
+    confidenceScore: signal.confidence,
+    reasoning: signal.reasoning,
+  });
 ```
 (`today` is already computed at the top of `createSignal`; keep the existing `recommendation_log` insert below unchanged.)
 
-- [ ] **Step 4: Repoint `saveSignal` mutation**
+- [ ] **Step 4: Repoint `saveSignal` mutation to use the helper**
 
 In `src/server/routers/signals.router.ts`, replace the `saveSignal` mutation's `dbRun` body with:
 ```typescript
-      const today = new Date().toISOString().split('T')[0];
-      const now = new Date().toISOString();
-      await dbRun(`
-        INSERT INTO unified_signals
-          (symbol, signal_date, signal_source, signal_type,
-           entry_price, target_price, stop_loss, confidence_score,
-           reasoning, status, signal_generated_at)
-        VALUES (?, ?, 'platform', ?, ?, ?, ?, ?, ?, 'ACTIVE', ?)
-        ON CONFLICT(symbol, signal_source, signal_type, signal_date) DO UPDATE SET
-          entry_price=excluded.entry_price, target_price=excluded.target_price,
-          stop_loss=excluded.stop_loss, confidence_score=excluded.confidence_score,
-          reasoning=excluded.reasoning, signal_generated_at=excluded.signal_generated_at
-      `, [input.symbol, today, input.type, input.entry, input.target,
-          input.stopLoss, input.confidence, input.reasoning, now]);
+      const { upsertUnifiedSignal } = await import('../signals');
+      await upsertUnifiedSignal('platform', {
+        symbol: input.symbol,
+        signalDate: new Date().toISOString().split('T')[0],
+        signalType: input.type,
+        entryPrice: input.entry,
+        targetPrice: input.target,
+        stopLoss: input.stopLoss,
+        confidenceScore: input.confidence,
+        reasoning: input.reasoning,
+      });
       return { success: true };
 ```
+(Remove the now-unused `dbRun` import from `signals.router.ts` only if no other procedure in the file uses it — `getAccuracyMetrics` and others still do, so leave the import.)
 
 - [ ] **Step 5: Verify and commit**
 
@@ -297,27 +359,26 @@ Expected: target test PASS, 0 tsc errors, all tests pass.
 - Modify: `src/server/trendlyneScreener.ts:1370-1373`
 
 **Interfaces:**
-- Consumes: `unified_signals` 4-col key (Task 1).
+- Consumes: `upsertUnifiedSignal(source, UnifiedSignalInput)` from Task 2.
 - Produces: intraday screener signals land in `unified_signals` with `signal_source='screener'`.
 
-- [ ] **Step 1: Replace the insert**
+- [ ] **Step 1: Replace the insert with a helper call**
 
-In `src/server/trendlyneScreener.ts`, replace the `dbRun` at ~1370 with:
+In `src/server/trendlyneScreener.ts`, replace the `dbRun(\`INSERT INTO signals ...\`)` at ~1370 with:
 ```typescript
-          const nowIso = new Date().toISOString();
-          await dbRun(`
-            INSERT INTO unified_signals
-              (symbol, signal_date, signal_source, signal_type,
-               entry_price, target_price, stop_loss, confidence_score,
-               reasoning, status, signal_generated_at)
-            VALUES (?, ?, 'screener', ?, ?, ?, ?, ?, ?, 'ACTIVE', ?)
-            ON CONFLICT(symbol, signal_source, signal_type, signal_date) DO UPDATE SET
-              entry_price=excluded.entry_price, target_price=excluded.target_price,
-              stop_loss=excluded.stop_loss, confidence_score=excluded.confidence_score,
-              reasoning=excluded.reasoning, signal_generated_at=excluded.signal_generated_at
-          `, [symbol, nowIso.split('T')[0], type, entry, target, stopLoss, confidence, reasoning, nowIso]);
+          const { upsertUnifiedSignal } = await import('./signals');
+          await upsertUnifiedSignal('screener', {
+            symbol,
+            signalDate: new Date().toISOString().split('T')[0],
+            signalType: type,
+            entryPrice: entry,
+            targetPrice: target,
+            stopLoss,
+            confidenceScore: confidence,
+            reasoning,
+          });
 ```
-(`confidence` here is the screener score; if it is on a 0–100 scale in this scope, divide by 100 to store a 0–1 fraction consistent with the other producers. Check the surrounding code for the `confidence`/`score` variable's scale and normalize if needed.)
+(`confidence` here is the screener score; if it is on a 0–100 scale in this scope, divide by 100 to store a 0–1 fraction consistent with the other producers. Check the surrounding code for the `confidence`/`score` variable's scale and pass `confidenceScore: confidence / 100` if needed.)
 
 - [ ] **Step 2: Verify build + tests**
 
@@ -359,7 +420,9 @@ git commit -m "refactor(signals): intraday screener writes unified_signals (sour
 
 `technical_analysis_engine.py:119` upserts into `technical_analysis_signals`. Repoint to
 `unified_signals` (`signal_source='technical'`, `signal_type` from `trend`), folding the
-indicator snapshot into `reasoning`.
+indicator snapshot into `reasoning`. This producer is Python and intentionally does **not** use
+the TS `upsertUnifiedSignal` helper — it writes the same `unified_signals` shape inline via
+SQLAlchemy `text()`, keeping the four-column conflict key identical.
 
 **Files:**
 - Modify: `src/server/technical_analysis_engine.py:117-127`
