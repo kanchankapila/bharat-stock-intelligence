@@ -20,6 +20,31 @@
 
 ---
 
+## SCOPE AMENDMENT (2026-06-20, during execution)
+
+Mid-execution discovery: Tasks 6–7 were under-scoped. The two legacy tables have **different
+shapes** and cannot both collapse into `unified_signals`:
+
+- **`signals`** is a true trade-signal table (`type/entry/target/stopLoss/confidence/reasoning/status`)
+  → maps cleanly to `unified_signals`. Real readers: `signals.router` ×3, `signals.ts:updateSignalAccuracy`,
+  `misc.router:243`, `unified_ranker.py:403`, chatbot `market_tool.py` + `sql_tool.py`.
+- **`technical_analysis_signals`** is really an **indicator** table (`trend/rsi/macd/bollinger/patterns`).
+  Its live readers (`technicals.router:28` `patterns`, `strategySignalsService:210` numeric `rsi <= ?`,
+  `price_tool.py:46` `trend/rsi`, `commandCenter:66`) need columns `unified_signals` does not have, so
+  repointing them would lose data. It belongs with Cluster B's indicator-table work.
+
+**Decision (Option A):** re-scope Cluster A to the **`signals` table only**.
+- **Task 5 reverted** (the technical engine keeps writing `technical_analysis_signals`; no stale
+  indicator readers). All `technical_analysis_signals` consolidation moves to **Cluster B**.
+- **Task 6 → 6a (TS `signals` readers) + 6b (Python `signals` readers + `test_unified_ranker.py` fixture)**,
+  computing `getAccuracyMetrics` from `unified_signal_outcomes.outcome`.
+- **Task 7** drops **only `signals`** (keep `technical_analysis_signals`).
+- **Task 8** verifies only `signals` is dropped; `unified_signals` sources = AI/platform/screener.
+
+The original Tasks 5–8 text below is superseded by this amendment where they conflict.
+
+---
+
 ### Task 1: Tighten `unified_signals` uniqueness key to include `signal_type` (both engines)
 
 The current UNIQUE key `(symbol, signal_date, signal_source)` allows only one signal per
