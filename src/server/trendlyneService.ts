@@ -8,6 +8,22 @@ const HEADERS = {
   'Accept': 'application/json'
 };
 
+const WIDGET_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+  'Referer': 'https://trendlyne.com/'
+};
+
+function decodeHtmlEntities(str: string): string {
+  return str
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, ' ');
+}
+
 export interface TrendlyneOverviewData {
   companyProfileData?: {
     companyDescription?: string;
@@ -25,48 +41,180 @@ export interface TrendlyneOverviewData {
 export async function fetchTrendlyneFundamentals(symbol: string) {
   const map = getStockMapping(symbol);
   if (!map) return null;
-
-  console.log(`[TRENDLYNE] Fetching fundamentals for ${symbol} using tlid: ${map.tlid}`);
-  const url = `https://trendlyne.com/fundamentals/get-fundamental_results/${map.tlid}/`;
-  const response = await fetch(url, { headers: HEADERS });
-  if (!response.ok) return null;
-  return response.json();
+  console.log(`[TRENDLYNE] Fundamentals JSON API is disabled (404). Returning empty fallback for ${symbol}`);
+  return {};
 }
 
 export async function fetchTrendlyneSwot(symbol: string) {
   const map = getStockMapping(symbol);
   if (!map) return null;
 
-  console.log(`[TRENDLYNE] Fetching SWOT for ${symbol} using tlid: ${map.tlid}`);
-  // https://trendlyne.com/swot-analysis/get-swot-data/140/
-  const url = `https://trendlyne.com/swot-analysis/get-swot-data/${map.tlid}/`;
-  const response = await fetch(url, { headers: HEADERS });
-  if (!response.ok) return null;
-  return response.json();
+  console.log(`[TRENDLYNE] Fetching SWOT HTML for ${symbol} using tlid: ${map.tlid}`);
+  const url = `https://trendlyne.com/web-widget/swot-widget/${map.tlid}/${symbol.toUpperCase()}/`;
+  try {
+    const response = await fetch(url, { headers: WIDGET_HEADERS });
+    if (!response.ok) {
+      console.warn(`[TRENDLYNE] SWOT HTML fetch failed with status: ${response.status}`);
+      return null;
+    }
+    const html = await response.text();
+
+    const bulletsRegex = /<ul[^>]+class=["']text_bullets[^"']*["'][^>]*>([\s\S]*?)<\/ul>/g;
+    const liRegex = /<li>([\s\S]*?)<\/li>/g;
+
+    const uls: string[] = [];
+    let match;
+    while ((match = bulletsRegex.exec(html)) !== null) {
+      uls.push(match[1]);
+    }
+
+    const categories = ['strengths', 'weaknesses', 'opportunities', 'threats'];
+    const swot: Record<string, string[]> = {
+      strengths: [],
+      weaknesses: [],
+      opportunities: [],
+      threats: []
+    };
+
+    for (let i = 0; i < uls.length && i < categories.length; i++) {
+      const category = categories[i];
+      const ulContent = uls[i];
+      
+      // Reset regex index for safety
+      liRegex.lastIndex = 0;
+      
+      let liMatch;
+      while ((liMatch = liRegex.exec(ulContent)) !== null) {
+        const cleanText = liMatch[1].replace(/<[^>]*>/g, '').trim();
+        if (cleanText) {
+          swot[category].push(cleanText);
+        }
+      }
+    }
+
+    return swot;
+  } catch (err: any) {
+    console.error(`[TRENDLYNE] SWOT HTML parse error for ${symbol}:`, err.message);
+    return null;
+  }
 }
 
 export async function fetchTrendlyneChecklist(symbol: string) {
   const map = getStockMapping(symbol);
   if (!map) return null;
 
-  console.log(`[TRENDLYNE] Fetching checklist for ${symbol} using tlid: ${map.tlid}`);
-  // https://trendlyne.com/checklist/get-checklist-data/140/
-  const url = `https://trendlyne.com/checklist/get-checklist-data/${map.tlid}/`;
-  const response = await fetch(url, { headers: HEADERS });
-  if (!response.ok) return null;
-  return response.json();
+  console.log(`[TRENDLYNE] Fetching checklist HTML for ${symbol} using tlid: ${map.tlid}`);
+  const url = `https://trendlyne.com/web-widget/checklist-widget/${map.tlid}/${symbol.toUpperCase()}/`;
+  try {
+    const response = await fetch(url, { headers: WIDGET_HEADERS });
+    if (!response.ok) {
+      console.warn(`[TRENDLYNE] Checklist HTML fetch failed with status: ${response.status}`);
+      return null;
+    }
+    const htmlText = await response.text();
+
+    const divRegex = /data-checklist-data\s*=\s*["']([\s\S]*?)["']/;
+    const countRegex = /data-total-count\s*=\s*["']([\s\S]*?)["']/;
+
+    const dataMatch = htmlText.match(divRegex);
+    const countMatch = htmlText.match(countRegex);
+
+    let checklistP = 0;
+    let yesCount = 0;
+    let noCount = 0;
+    let total = 0;
+    let insight = '';
+    let checklistData = {};
+
+    if (countMatch) {
+      try {
+        const countJson = JSON.parse(decodeHtmlEntities(countMatch[1]));
+        yesCount = countJson.Yes || 0;
+        noCount = countJson.No || 0;
+        total = countJson.total || 0;
+        checklistP = countJson.checklistP || 0;
+        insight = countJson.insight || '';
+      } catch (e) {
+        console.warn('[TRENDLYNE] Error parsing checklist count metadata:', e);
+      }
+    }
+
+    if (dataMatch) {
+      try {
+        const rawJson = decodeHtmlEntities(dataMatch[1]);
+        const decoded = JSON.parse(rawJson);
+        checklistData = decoded.trendlyneChecklist || {};
+      } catch (e) {
+        console.warn('[TRENDLYNE] Error parsing checklist data payload:', e);
+      }
+    }
+
+    return {
+      score: checklistP,
+      yesCount,
+      noCount,
+      total,
+      insight,
+      checklistData
+    };
+  } catch (err: any) {
+    console.error(`[TRENDLYNE] Checklist HTML parse error for ${symbol}:`, err.message);
+    return null;
+  }
 }
 
 export async function fetchTrendlyneDVM(symbol: string) {
   const map = getStockMapping(symbol);
   if (!map) return null;
 
-  console.log(`[TRENDLYNE] Fetching DVM for ${symbol} using tlid: ${map.tlid}`);
-  // https://trendlyne.com/fundamentals/get-dvm-data/140/
-  const url = `https://trendlyne.com/fundamentals/get-dvm-data/${map.tlid}/`;
-  const response = await fetch(url, { headers: HEADERS });
-  if (!response.ok) return null;
-  return response.json();
+  console.log(`[TRENDLYNE] Fetching DVM HTML for ${symbol} using tlid: ${map.tlid}`);
+  const url = `https://trendlyne.com/web-widget/qvt-widget/${map.tlid}/${symbol.toUpperCase()}/`;
+  try {
+    const response = await fetch(url, { headers: WIDGET_HEADERS });
+    if (!response.ok) {
+      console.warn(`[TRENDLYNE] DVM HTML fetch failed with status: ${response.status}`);
+      return null;
+    }
+    const html = await response.text();
+
+    const wrapperRegex = /class=["'][^"']*param-wrapper[^"']*["'][\s\S]*?<\/div>\s*<\/div>/g;
+    const nameRegex = /class=["']name_text["'][^>]*>([\s\S]*?)<\/span>/;
+    const scoreRegex = /class=["']percent_number["'][^>]*>([\s\S]*?)<\/span>/;
+    const insightRegex = /class=["']insight_text["'][^>]*>([\s\S]*?)<\/span>/;
+
+    const dvm: Record<string, { score: number, insight: string }> = {};
+
+    let match;
+    while ((match = wrapperRegex.exec(html)) !== null) {
+      const wrapperContent = match[0];
+      const nameMatch = wrapperContent.match(nameRegex);
+      const scoreMatch = wrapperContent.match(scoreRegex);
+      const insightMatch = wrapperContent.match(insightRegex);
+
+      if (nameMatch && scoreMatch) {
+        const rawName = nameMatch[1].replace(/<[^>]*>/g, '').trim().toLowerCase();
+        const score = parseInt(scoreMatch[1].replace(/<[^>]*>/g, '').trim(), 10) || 0;
+        const insight = insightMatch ? insightMatch[1].replace(/<[^>]*>/g, '').trim() : '';
+
+        if (rawName === 'quality') {
+          dvm['quality'] = { score, insight };
+          dvm['durability'] = { score, insight };
+        } else if (rawName === 'technicals') {
+          dvm['technicals'] = { score, insight };
+          dvm['momentum'] = { score, insight };
+        } else if (rawName === 'valuation') {
+          dvm['valuation'] = { score, insight };
+        } else {
+          dvm[rawName] = { score, insight };
+        }
+      }
+    }
+
+    return dvm;
+  } catch (err: any) {
+    console.error(`[TRENDLYNE] DVM HTML parse error for ${symbol}:`, err.message);
+    return null;
+  }
 }
 
 export async function fetchTrendlyneStockMetrics(symbol: string) {

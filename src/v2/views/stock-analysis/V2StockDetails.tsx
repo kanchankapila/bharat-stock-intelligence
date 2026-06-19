@@ -18,7 +18,7 @@ export const V2StockDetails: React.FC<V2StockDetailsProps> = ({ symbol, stock, o
   const [activeTab, setActiveTab] = useState<'Technicals' | 'Fundamentals' | 'F&O'>('Technicals');
 
   const { data: unifiedData } = trpc.getAlphaQuantDetail.useQuery({ symbol });
-  const { data: funds } = trpc.getTrendlyneFundamentals.useQuery({ symbol });
+  const { data: trendlyneOverview } = trpc.getTrendlyneOverview.useQuery({ symbol });
   const { data: actions } = trpc.getCorporateActions.useQuery({ symbol });
   const { data: fno } = trpc.getFnOSignals.useQuery({ symbol });
   const { data: overview } = trpc.getCompanyOverview.useQuery({ symbol });
@@ -169,6 +169,119 @@ export const V2StockDetails: React.FC<V2StockDetailsProps> = ({ symbol, stock, o
               </div>
             </div>
 
+            {/* Trendlyne SWOT Analysis */}
+            {trendlyneOverview?.swot && (() => {
+              const swot = trendlyneOverview.swot;
+              const categories = [
+                { key: 'strengths', label: 'Strengths', badgeColor: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/20', iconColor: 'text-emerald-400' },
+                { key: 'weaknesses', label: 'Weaknesses', badgeColor: 'bg-rose-500/20 text-rose-400 border-rose-500/20', iconColor: 'text-rose-400' },
+                { key: 'opportunities', label: 'Opportunities', badgeColor: 'bg-blue-500/20 text-blue-400 border-blue-500/20', iconColor: 'text-blue-400' },
+                { key: 'threats', label: 'Threats', badgeColor: 'bg-amber-500/20 text-amber-400 border-amber-500/20', iconColor: 'text-amber-400' },
+              ];
+
+              const hasAnySwot = categories.some(cat => Array.isArray(swot[cat.key]) && swot[cat.key].length > 0);
+              if (!hasAnySwot) return null;
+
+              return (
+                <div className="p-6 bg-terminal-panel border border-terminal-border rounded-2xl">
+                  <h3 className="text-xs font-black text-slate-300 uppercase tracking-widest mb-4 font-mono flex items-center gap-2">
+                    <BrainCircuit className="w-4 h-4 text-indigo-400" /> Trendlyne SWOT Analysis
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {categories.map(cat => {
+                      const items = swot[cat.key];
+                      if (!Array.isArray(items) || items.length === 0) return null;
+                      return (
+                        <div key={cat.key} className="space-y-3">
+                          <div className="flex items-center">
+                            <span className={cn("text-[9px] font-black px-2.5 py-1 rounded-lg border uppercase tracking-widest font-mono", cat.badgeColor)}>
+                              {cat.label} ({items.length})
+                            </span>
+                          </div>
+                          <div className="space-y-2">
+                            {items.map((item: string, idx: number) => (
+                              <div key={idx} className="flex items-start gap-2 text-[10px] text-slate-400 leading-relaxed bg-terminal-panel-header/30 p-2.5 rounded-xl border border-terminal-border hover:border-slate-700 transition-colors">
+                                <span className={cn("font-black shrink-0", cat.iconColor)}>•</span>
+                                <span>{item}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Trendlyne Checklist Widget */}
+            {trendlyneOverview?.checklist && (() => {
+              const checklist = trendlyneOverview.checklist;
+              const cdata: Record<string, any> = checklist.checklistData || {};
+              const sections = Object.keys(cdata);
+              const score = checklist.score || 0;
+              const yesCount = checklist.yesCount || 0;
+              const total = checklist.total || 0;
+              
+              return (
+                <div className="p-6 bg-terminal-panel border border-terminal-border rounded-2xl">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4 border-b border-terminal-border pb-4">
+                    <h3 className="text-xs font-black text-slate-300 uppercase tracking-widest font-mono flex items-center gap-2">
+                      <Database className="w-4 h-4 text-emerald-400" /> Trendlyne Checklist
+                    </h3>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Pass Rate:</span>
+                      <span className={cn("text-xs font-black px-2.5 py-1 rounded-lg border uppercase tracking-wider font-mono",
+                        score >= 60 ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/20" :
+                        score >= 35 ? "bg-amber-500/20 text-amber-400 border-amber-500/20" :
+                        "bg-rose-500/20 text-rose-400 border-rose-500/20"
+                      )}>
+                        {score.toFixed(1)}% ({yesCount}/{total} Passed)
+                      </span>
+                    </div>
+                  </div>
+                  
+                  {checklist.insight && (
+                    <p className="text-[10px] text-slate-400 italic mb-4 leading-relaxed font-medium bg-terminal-panel-header/35 p-3 rounded-xl border border-terminal-border">
+                      {checklist.insight}
+                    </p>
+                  )}
+
+                  {sections.length > 0 ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {sections.map(sectionName => {
+                        const items = cdata[sectionName];
+                        if (!Array.isArray(items) || items.length === 0) return null;
+                        return (
+                          <div key={sectionName} className="p-4 bg-terminal-panel-header/20 border border-terminal-border rounded-xl">
+                            <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-2.5 border-b border-terminal-border pb-1 font-mono">
+                              {sectionName.toUpperCase()}
+                            </p>
+                            <div className="space-y-2">
+                              {items.map((item: any, idx: number) => (
+                                <div key={idx} className="flex items-center justify-between p-2 bg-slate-950/40 rounded-lg border border-terminal-border">
+                                  <span className="text-[10px] text-slate-400 font-bold leading-tight truncate mr-2" title={item.question}>
+                                    {item.question}
+                                  </span>
+                                  <span className={cn("text-[9px] font-black shrink-0 font-mono", 
+                                    item.answer ? "text-emerald-400" : "text-rose-400"
+                                  )}>
+                                    {item.answer ? "PASS" : "FAIL"}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="text-center py-6 text-slate-500 text-[10px] font-bold">No checklist data found.</p>
+                  )}
+                </div>
+              );
+            })()}
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {/* Dividends */}
               <div className="p-6 bg-terminal-panel border border-terminal-border rounded-2xl">
@@ -237,7 +350,47 @@ export const V2StockDetails: React.FC<V2StockDetailsProps> = ({ symbol, stock, o
           </div>
 
           <div className="lg:col-span-4 space-y-6">
-            <div className="p-6 bg-terminal-panel border border-terminal-border rounded-2xl h-full">
+            {trendlyneOverview?.dvm && (() => {
+              const dvm = trendlyneOverview.dvm;
+              const qVal = dvm.quality?.score ?? dvm.durability?.score ?? null;
+              const qInsight = dvm.quality?.insight ?? dvm.durability?.insight ?? '';
+              const vVal = dvm.valuation?.score ?? null;
+              const vInsight = dvm.valuation?.insight ?? '';
+              const tVal = dvm.technicals?.score ?? dvm.momentum?.score ?? null;
+              const tInsight = dvm.technicals?.insight ?? dvm.momentum?.insight ?? '';
+              
+              const params = [
+                { label: 'Quality / Durability', val: qVal, insight: qInsight, textClass: 'text-emerald-400', progressClass: 'from-emerald-600 to-emerald-400' },
+                { label: 'Valuation', val: vVal, insight: vInsight, textClass: 'text-amber-400', progressClass: 'from-amber-600 to-amber-400' },
+                { label: 'Technicals / Momentum', val: tVal, insight: tInsight, textClass: 'text-blue-400', progressClass: 'from-blue-600 to-blue-400' },
+              ].filter(p => p.val !== null);
+
+              if (params.length === 0) return null;
+
+              return (
+                <div className="p-6 bg-terminal-panel border border-terminal-border rounded-2xl">
+                  <h3 className="text-xs font-black text-slate-300 uppercase tracking-widest mb-4 font-mono flex items-center gap-2">
+                    <Zap className="w-4 h-4 text-indigo-400" /> Trendlyne DVM
+                  </h3>
+                  <div className="space-y-4">
+                    {params.map(p => (
+                      <div key={p.label} className="space-y-1.5">
+                        <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-widest">
+                          <span className="text-slate-400">{p.label}</span>
+                          <span className={cn("font-mono", p.textClass)}>{p.val}/100</span>
+                        </div>
+                        <div className="h-1.5 bg-slate-900 rounded-full overflow-hidden border border-slate-800/50">
+                          <div className={cn("h-full bg-gradient-to-r transition-all duration-1000", p.progressClass)} style={{ width: `${p.val}%` }} />
+                        </div>
+                        <p className="text-[9px] text-slate-400 font-bold uppercase tracking-tight">{p.insight}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+
+            <div className="p-6 bg-terminal-panel border border-terminal-border rounded-2xl">
               <h3 className="text-xs font-black text-slate-300 uppercase tracking-widest mb-4 font-mono flex items-center gap-2">
                 <Filter className="w-4 h-4 text-indigo-400" /> Fundamental Ratios
               </h3>

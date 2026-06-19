@@ -38,6 +38,149 @@ const Candlestick = (props: any) => {
 import { Card, SentimentBadge, ValueDisplay, IndicatorRow, CompactMetricCard } from './MCCommon';
 import ScreenerDetailsModal from './ScreenerDetailsModal';
 
+const TrendlyneDVMCards: React.FC<{ dvm: any }> = ({ dvm }) => {
+  if (!dvm) return null;
+  const params = [
+    { label: 'Quality / Durability', val: dvm.quality?.score ?? dvm.durability?.score, insight: dvm.quality?.insight ?? dvm.durability?.insight, color: 'text-emerald-400', barColor: 'bg-emerald-500' },
+    { label: 'Valuation', val: dvm.valuation?.score, insight: dvm.valuation?.insight, color: 'text-amber-400', barColor: 'bg-amber-500' },
+    { label: 'Technicals / Momentum', val: dvm.technicals?.score ?? dvm.momentum?.score, insight: dvm.technicals?.insight ?? dvm.momentum?.insight, color: 'text-blue-400', barColor: 'bg-blue-500' },
+  ].filter(p => p.val !== undefined && p.val !== null);
+
+  if (params.length === 0) return null;
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+      {params.map((p) => (
+        <div key={p.label} className="p-3.5 bg-slate-950/60 border border-slate-800 rounded-2xl flex flex-col justify-between hover:border-slate-700 transition-colors">
+          <div>
+            <div className="flex justify-between items-center mb-1">
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{p.label}</span>
+              <span className={cn("text-xs font-black italic", p.color)}>{p.val}/100</span>
+            </div>
+            <p className="text-[10px] font-bold text-slate-200 leading-tight">{p.insight}</p>
+          </div>
+          <div className="mt-3">
+            <div className="h-1 w-full bg-slate-900 rounded-full overflow-hidden">
+              <div className={cn("h-full rounded-full", p.barColor)} style={{ width: `${p.val}%` }} />
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+const TrendlyneSWOTCard: React.FC<{ swot: any }> = ({ swot }) => {
+  if (!swot) return null;
+  const categories = [
+    { key: 'strengths', label: 'Strengths', badgeColor: 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20', iconColor: 'text-emerald-400' },
+    { key: 'weaknesses', label: 'Weaknesses', badgeColor: 'bg-rose-500/10 text-rose-400 border border-rose-500/20', iconColor: 'text-rose-400' },
+    { key: 'opportunities', label: 'Opportunities', badgeColor: 'bg-blue-500/10 text-blue-400 border border-blue-500/20', iconColor: 'text-blue-400' },
+    { key: 'threats', label: 'Threats', badgeColor: 'bg-amber-500/10 text-amber-400 border border-amber-500/20', iconColor: 'text-amber-400' },
+  ];
+
+  const hasAnySwot = categories.some(cat => Array.isArray(swot[cat.key]) && swot[cat.key].length > 0);
+  if (!hasAnySwot) return null;
+
+  return (
+    <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-4">
+      <h4 className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-4 flex items-center gap-1.5 border-l-2 border-indigo-500 pl-2">
+        Trendlyne SWOT Analysis
+      </h4>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {categories.map(cat => {
+          const items = swot[cat.key];
+          if (!Array.isArray(items) || items.length === 0) return null;
+          return (
+            <div key={cat.key} className="space-y-2">
+              <div className="flex items-center">
+                <span className={cn("text-[9px] font-black px-2 py-0.5 rounded border uppercase tracking-wider", cat.badgeColor)}>
+                  {cat.label} ({items.length})
+                </span>
+              </div>
+              <div className="space-y-1.5">
+                {items.map((item: string, idx: number) => (
+                  <div key={idx} className="flex items-start gap-2 text-[10px] text-slate-400 leading-relaxed bg-slate-900/35 p-2 rounded-lg border border-slate-800/40 hover:border-slate-800 transition-colors">
+                    <span className={cn("font-black shrink-0", cat.iconColor)}>•</span>
+                    <span>{item}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+const TrendlyneChecklistCard: React.FC<{ checklist: any }> = ({ checklist }) => {
+  if (!checklist) return null;
+  const cdata = checklist.checklistData || {};
+  const sections = Object.keys(cdata);
+  const score = checklist.score || 0;
+  const total = checklist.total || 0;
+  const yesCount = checklist.yesCount || 0;
+  
+  return (
+    <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 border-b border-slate-800/50 pb-3">
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Trendlyne Checklist</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-[9px] font-black text-slate-500 uppercase">Pass Rate:</span>
+          <span className={cn("text-xs font-black px-2 py-0.5 rounded border uppercase tracking-wider",
+            score >= 60 ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" :
+            score >= 35 ? "bg-amber-500/10 text-amber-400 border-amber-500/20" :
+            "bg-rose-500/10 text-rose-400 border-rose-500/20"
+          )}>
+            {score.toFixed(1)}% ({yesCount}/{total})
+          </span>
+        </div>
+      </div>
+      
+      {checklist.insight && (
+        <p className="text-[10px] text-slate-400 italic mb-4 leading-relaxed font-medium bg-slate-900/40 p-2.5 rounded-xl border border-slate-800/60">
+          Insight: {checklist.insight}
+        </p>
+      )}
+
+      {sections.length > 0 ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {sections.map(sectionName => {
+            const items = cdata[sectionName];
+            if (!Array.isArray(items) || items.length === 0) return null;
+            return (
+              <div key={sectionName} className="p-3 bg-slate-900/20 border border-slate-800/40 rounded-xl">
+                <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-2 border-b border-slate-800/60 pb-1">
+                  {sectionName.toUpperCase()}
+                </p>
+                <div className="space-y-1.5">
+                  {items.map((item: any, idx: number) => (
+                    <div key={idx} className="flex items-center justify-between p-1.5 bg-slate-950/30 rounded border border-slate-800/30">
+                      <span className="text-[9px] text-slate-400 font-bold leading-tight truncate mr-2" title={item.question}>
+                        {item.question}
+                      </span>
+                      <span className={cn("text-[9px] font-black shrink-0", 
+                        item.answer ? "text-emerald-400" : "text-rose-400"
+                      )}>
+                        {item.answer ? "PASS" : "FAIL"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <p className="text-center py-4 text-slate-500 text-[10px] font-bold">No checklist questions available.</p>
+      )}
+    </div>
+  );
+};
+
 interface MCStockInfoPanelProps {
   symbol: string;
   scId: string;
@@ -130,6 +273,11 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
   const { data: trendlyneTa, isLoading: loadingTlTa } = trpc.getTrendlyneAdvTechnicalAnalysis.useQuery(
     { symbol, timeframe },
     { enabled: isVisible, staleTime: 60000 }
+  );
+
+  const { data: trendlyneOverview, isLoading: loadingTlOverview } = trpc.getTrendlyneOverview.useQuery(
+    { symbol },
+    { enabled: isVisible && (activeTab === 'trendlyne' || activeTab === 'overview'), staleTime: 60000 }
   );
 
   const { data: vwapData } = trpc.getMcVwapChart.useQuery(
@@ -436,17 +584,40 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
       )}
 
       {/* ── KEY STATS (Show in 'all' or 'overview') ── */}
-      {(!section || section === 'all' || activeTab === 'overview') && (
-        <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
-          <CompactMetricCard label="Price" value={`₹${currentPrice}`} sub={changePct ? `${parseFloat(String(changePct)) >= 0 ? '+' : ''}${changePct}%` : undefined}
-            color={parseFloat(String(changePct || 0)) >= 0 ? 'text-emerald-400' : 'text-rose-400'} icon={Activity} />
-          <CompactMetricCard label="P/E (TTM)" value={eq?.PE || sp?.scTtm || essentials?.pe || tb?.keyMetrics?.pe || '—'} sub={`Sec: ${essentials?.sectorPe || eq?.IND_PE || tb?.keyMetrics?.industry_pe || '—'}`} icon={BarChart3} />
-          <CompactMetricCard label="P/B Ratio" value={eq?.PB || essentials?.pb || sp?.priceBook || '—'} icon={PieChart} />
-          <CompactMetricCard label="ROE %" value={tb?.keyMetrics?.roe != null ? `${Number(tb.keyMetrics.roe).toFixed(1)}%` : '—'} color="text-emerald-400" icon={TrendingUp} />
-          <CompactMetricCard label="Market Cap" value={essentials?.marketCap || eq?.MKTCAP ? `₹${String(eq?.MKTCAP || essentials?.marketCap || '0').replace(/[^\d.]/g, '')}Cr` : '—'} color="text-blue-400" icon={Users} />
-          <CompactMetricCard label="Div Yield" value={essentials?.dividendYield ? `${essentials.dividendYield}%` : eq?.DY ? `${eq.DY}%` : tb?.keyMetrics?.divyield ? `${tb.keyMetrics.divyield}%` : '—'} color="text-amber-400" icon={Zap} />
-        </div>
-      )}
+      {(!section || section === 'all' || activeTab === 'overview') && (() => {
+        const qVal = trendlyneOverview?.dvm?.quality?.score ?? trendlyneOverview?.dvm?.durability?.score ?? null;
+        const vVal = trendlyneOverview?.dvm?.valuation?.score ?? null;
+        const tVal = trendlyneOverview?.dvm?.technicals?.score ?? trendlyneOverview?.dvm?.momentum?.score ?? null;
+        return (
+          <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-8 gap-2">
+            <CompactMetricCard label="Price" value={`₹${currentPrice}`} sub={changePct ? `${parseFloat(String(changePct)) >= 0 ? '+' : ''}${changePct}%` : undefined}
+              color={parseFloat(String(changePct || 0)) >= 0 ? 'text-emerald-400' : 'text-rose-400'} icon={Activity} />
+            <CompactMetricCard label="P/E (TTM)" value={eq?.PE || sp?.scTtm || essentials?.pe || tb?.keyMetrics?.pe || '—'} sub={`Sec: ${essentials?.sectorPe || eq?.IND_PE || tb?.keyMetrics?.industry_pe || '—'}`} icon={BarChart3} />
+            <CompactMetricCard label="P/B Ratio" value={eq?.PB || essentials?.pb || sp?.priceBook || '—'} icon={PieChart} />
+            <CompactMetricCard label="ROE %" value={tb?.keyMetrics?.roe != null ? `${Number(tb.keyMetrics.roe).toFixed(1)}%` : '—'} color="text-emerald-400" icon={TrendingUp} />
+            <CompactMetricCard label="Market Cap" value={essentials?.marketCap || eq?.MKTCAP ? `₹${String(eq?.MKTCAP || essentials?.marketCap || '0').replace(/[^\d.]/g, '')}Cr` : '—'} color="text-blue-400" icon={Users} />
+            <CompactMetricCard label="Div Yield" value={essentials?.dividendYield ? `${essentials.dividendYield}%` : eq?.DY ? `${eq.DY}%` : tb?.keyMetrics?.divyield ? `${tb.keyMetrics.divyield}%` : '—'} color="text-amber-400" icon={Zap} />
+            {trendlyneOverview?.dvm && (
+              <CompactMetricCard 
+                label="Trendlyne DVM" 
+                value={qVal !== null && vVal !== null && tVal !== null ? `${qVal} | ${vVal} | ${tVal}` : '—'} 
+                sub="Qual | Val | Tech" 
+                icon={TrendingUp} 
+                color="text-indigo-400"
+              />
+            )}
+            {trendlyneOverview?.checklist && (
+              <CompactMetricCard 
+                label="TL Checklist" 
+                value={`${trendlyneOverview.checklist.score.toFixed(0)}%`} 
+                sub={`${trendlyneOverview.checklist.yesCount}/${trendlyneOverview.checklist.total} Pass`} 
+                icon={CheckCircle2} 
+                color={trendlyneOverview.checklist.score >= 60 ? 'text-emerald-400' : trendlyneOverview.checklist.score >= 35 ? 'text-amber-400' : 'text-rose-400'} 
+              />
+            )}
+          </div>
+        );
+      })()}
 
       {activeTab === 'overview' && (
         <div className="space-y-4">
@@ -2243,12 +2414,21 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
       {/* ══════════════════════════════════════════════════════════════ */}
       {activeTab === 'trendlyne' && (
         <div className="space-y-6">
-          {loadingTlMetrics || loadingTlTa ? (
+          {loadingTlMetrics || loadingTlTa || loadingTlOverview ? (
             <div className="flex items-center justify-center p-8 bg-slate-900/10 border border-slate-800 border-dashed rounded-2xl">
               <span className="text-[10px] font-black uppercase tracking-widest text-slate-500 animate-pulse">Loading Trendlyne Data...</span>
             </div>
           ) : (
             <>
+              {trendlyneOverview && (
+                <>
+                  <TrendlyneDVMCards dvm={trendlyneOverview.dvm} />
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <TrendlyneSWOTCard swot={trendlyneOverview.swot} />
+                    <TrendlyneChecklistCard checklist={trendlyneOverview.checklist} />
+                  </div>
+                </>
+              )}
               {trendlyneMetrics?.body && (
                 <Card title="Stock Metrics (Trendlyne)" icon={BarChart3}>
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-2">
