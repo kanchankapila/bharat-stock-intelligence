@@ -39,37 +39,28 @@ export async function createSignal(signal: Omit<Signal, "id" | "createdAt" | "up
 }
 
 export async function updateSignalAccuracy(symbol: string, currentPrice: number) {
-  const signals = await dbAll<Signal>('SELECT * FROM signals WHERE symbol = ? AND status = ?', [symbol, 'ACTIVE']);
+  const rows = await dbAll<any>('SELECT id, signal_type, target_price, stop_loss, status FROM unified_signals WHERE symbol = ? AND status = ?', [symbol, 'ACTIVE']);
 
   await dbTransaction(async (tx) => {
-    for (const signal of signals) {
-      let newStatus = signal.status;
-      let result = signal.result;
+    for (const row of rows) {
+      let newStatus = row.status;
 
-      if (signal.type === "BUY") {
-        if (currentPrice >= signal.target) {
+      if (row.signal_type === "BUY") {
+        if (currentPrice >= row.target_price) {
           newStatus = "COMPLETED";
-          result = "PROFIT";
-        } else if (currentPrice <= signal.stopLoss) {
+        } else if (currentPrice <= row.stop_loss) {
           newStatus = "FAILED";
-          result = "LOSS";
         }
-      } else if (signal.type === "SELL") {
-        if (currentPrice <= signal.target) {
+      } else if (row.signal_type === "SELL") {
+        if (currentPrice <= row.target_price) {
           newStatus = "COMPLETED";
-          result = "PROFIT";
-        } else if (currentPrice >= signal.stopLoss) {
+        } else if (currentPrice >= row.stop_loss) {
           newStatus = "FAILED";
-          result = "LOSS";
         }
       }
 
       if (newStatus !== "ACTIVE") {
-        await tx.run(`
-          UPDATE signals
-          SET status = ?, result = ?, "updatedAt" = CURRENT_TIMESTAMP
-          WHERE id = ?
-        `, [newStatus, result, signal.id]);
+        await tx.run(`UPDATE unified_signals SET status = ? WHERE id = ?`, [newStatus, row.id]);
       }
     }
   });

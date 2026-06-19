@@ -237,14 +237,16 @@ export const miscRouter = router({
           LIMIT 200
         `);
 
-        // Best signal levels from the signals table (entry/target/SL) — ignore stale signals >30 days
+        // Best signal levels from unified_signals (entry/target/SL) — ignore stale signals >30 days
+        const thirtyDaysAgoIso = new Date(Date.now() - 30 * 86_400_000).toISOString();
         const signalLevels = await dbAll<Record<string, unknown>>(`
-          SELECT symbol, entry, target, "stopLoss", confidence
-          FROM signals
-          WHERE type = 'BUY' AND status = 'ACTIVE' AND entry IS NOT NULL AND entry > 0
-            AND "createdAt" >= datetime('now', '-30 days')
-          ORDER BY confidence DESC, id DESC
-        `);
+          SELECT symbol, entry_price AS entry, target_price AS target,
+                 stop_loss AS "stopLoss", confidence_score AS confidence
+          FROM unified_signals
+          WHERE signal_type = 'BUY' AND status = 'ACTIVE' AND entry_price IS NOT NULL AND entry_price > 0
+            AND signal_generated_at >= ?
+          ORDER BY confidence_score DESC, id DESC
+        `, [thirtyDaysAgoIso]);
         const levelsMap = new Map<string, Record<string, unknown>>();
         for (const sl of signalLevels) {
           if (!levelsMap.has(sl.symbol as string)) levelsMap.set(sl.symbol as string, sl);

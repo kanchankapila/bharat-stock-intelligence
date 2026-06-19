@@ -11,7 +11,7 @@ export const signalsRouter = router({
   getSignals: publicProcedure
     .input(z.object({ limit: z.number().optional().default(5) }))
     .query(async ({ input }) => {
-      return dbAll('SELECT * FROM signals ORDER BY "createdAt" DESC LIMIT ?', [input.limit]);
+      return dbAll('SELECT * FROM unified_signals ORDER BY signal_generated_at DESC LIMIT ?', [input.limit]);
     }),
 
   saveSignal: publicProcedure
@@ -52,18 +52,17 @@ export const signalsRouter = router({
   getSignalHistory: publicProcedure
     .input(z.object({ symbol: z.string() }))
     .query(async ({ input }) => {
-      return dbAll('SELECT * FROM signals WHERE symbol = ? ORDER BY "createdAt" DESC', [input.symbol]);
+      return dbAll('SELECT * FROM unified_signals WHERE symbol = ? ORDER BY signal_generated_at DESC', [input.symbol]);
     }),
 
   getAccuracyMetrics: publicProcedure
     .query(async () => {
-      const stats = (await dbGet<{ total: number; profit: number; loss: number; resolved: number }>(`
+      const stats = (await dbGet<{ total: number; profit: number; resolved: number }>(`
         SELECT
-          COUNT(*) as total,
-          SUM(CASE WHEN result = 'PROFIT' THEN 1 ELSE 0 END) as profit,
-          SUM(CASE WHEN result = 'LOSS'   THEN 1 ELSE 0 END) as loss,
-          SUM(CASE WHEN status IN ('COMPLETED', 'FAILED') THEN 1 ELSE 0 END) as resolved
-        FROM signals
+          COUNT(*) AS total,
+          SUM(CASE WHEN outcome = 'WIN' THEN 1 ELSE 0 END) AS profit,
+          SUM(CASE WHEN outcome IN ('WIN','LOSS','STOP_LOSS','NEUTRAL') THEN 1 ELSE 0 END) AS resolved
+        FROM unified_signal_outcomes
       `))!;
       return {
         precision:     stats.resolved > 0 ? (stats.profit / stats.resolved) * 100 : 0,
