@@ -13,30 +13,39 @@ Run:  python backfill_sectors.py
       python backfill_sectors.py --dry-run
 """
 
-from pathlib import Path
-import sqlite3, argparse
+import argparse
 
-DB_PATH = Path(__file__).parent.parent.parent / "database.sqlite"
+from db_compat import connect, use_postgres, ConnWrapper
+
 MISSING = ('', 'Unknown', 'OTHER', 'NA', 'NaN')
 
 
-def _has_column(conn: sqlite3.Connection, table: str, col: str) -> bool:
+def _has_column(conn: ConnWrapper, table: str, col: str) -> bool:
+    if use_postgres():
+        rows = conn.execute(
+            "SELECT column_name FROM information_schema.columns WHERE table_name = ?",
+            (table,),
+        ).fetchall()
+        return any(r[0] == col for r in rows)
     return any(r[1] == col for r in conn.execute(f"PRAGMA table_info({table})").fetchall())
 
 
-def backfill(conn: sqlite3.Connection, dry_run: bool = False) -> dict:
+def backfill(conn: ConnWrapper, dry_run: bool = False) -> dict:
     ph = ",".join("?" * len(MISSING))
 
     # 1. Best (latest) non-empty sector per symbol from confluence_signals.
-    #    SQLite returns the `sector` from the row holding MAX(computed_at) (bare-column
-    #    + aggregate special case), giving us the most recent resolved sector.
+    #    A window function picks the row holding MAX(computed_at) per symbol on both engines
+    #    (the old bare-column + MAX() GROUP BY relied on SQLite-only semantics PG rejects).
     rows = conn.execute(f"""
-        SELECT symbol, sector, MAX(computed_at)
-        FROM confluence_signals
-        WHERE sector IS NOT NULL AND sector NOT IN ({ph})
-        GROUP BY symbol
+        SELECT symbol, sector FROM (
+            SELECT symbol, sector,
+                   ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY computed_at DESC) AS rn
+            FROM confluence_signals
+            WHERE sector IS NOT NULL AND sector NOT IN ({ph})
+        ) t
+        WHERE rn = 1
     """, MISSING).fetchall()
-    sector_map = {sym: sec for sym, sec, _ in rows if sym and sec}
+    sector_map = {sym: sec for sym, sec in rows if sym and sec}
     print(f"[Sectors] Resolved {len(sector_map)} symbol->sector pairs from confluence_signals.")
 
     # 2. Fill nse_stocks where sector is missing.
@@ -87,7 +96,7 @@ def backfill(conn: sqlite3.Connection, dry_run: bool = False) -> dict:
 
 
 def run(dry_run: bool = False):
-    conn = sqlite3.connect(DB_PATH)
+    conn = connect()
     try:
         return backfill(conn, dry_run=dry_run)
     finally:

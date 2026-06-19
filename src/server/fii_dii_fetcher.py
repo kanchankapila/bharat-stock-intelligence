@@ -1,4 +1,3 @@
-from pathlib import Path
 """
 FII/DII Daily Flow Fetcher
 ===========================
@@ -15,10 +14,9 @@ import argparse
 import time
 import requests
 import pandas as pd
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 
-DB_PATH      = Path(__file__).parent.parent.parent / "database.sqlite"
-DATABASE_URL = f"sqlite:///{DB_PATH}"
+from db_compat import get_engine
 
 NSE_FII_DII_URL = "https://www.nseindia.com/api/fiidiiTradeReact"
 
@@ -37,7 +35,7 @@ HEADERS = {
 
 class FiiDiiFetcher:
     def __init__(self):
-        self.engine  = create_engine(DATABASE_URL)
+        self.engine  = get_engine()
         self.session = requests.Session()
         self.session.headers.update(HEADERS)
         self._prime_session()

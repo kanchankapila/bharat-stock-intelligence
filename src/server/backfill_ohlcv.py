@@ -1,5 +1,6 @@
 import asyncio
-import sqlite3
+
+from db_compat import connect
 
 
 def _run_async(coro):
@@ -91,7 +92,7 @@ async def _fetch_ohlcv_async(
 
 
 async def _gap_fill_async(
-    conn: sqlite3.Connection,
+    conn,
     symbols: list,
     tickers: list,
     existing: dict,
@@ -140,7 +141,7 @@ def get_all_nse_symbols(conn):
             print("[WARN] No active stocks in nse_stocks - run syncNSEStocks first.")
             return []
         return [r[0] for r in rows]
-    except sqlite3.OperationalError:
+    except Exception:
         print("[ERROR] Table nse_stocks not found - start the app to trigger NSE sync.")
         return []
 
@@ -279,8 +280,11 @@ def _download_one(symbol: str) -> pd.DataFrame | None:
 
 def _upsert(conn, records: list):
     conn.executemany(
-        "INSERT OR REPLACE INTO stock_ohlcv (symbol, date, open, high, low, close, volume) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO stock_ohlcv (symbol, date, open, high, low, close, volume) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT(symbol, date) DO UPDATE SET "
+        "open=excluded.open, high=excluded.high, low=excluded.low, "
+        "close=excluded.close, volume=excluded.volume",
         records,
     )
     conn.commit()
@@ -375,6 +379,8 @@ def gap_fill(conn, lookback_days: int = 30) -> None:
 
     cutoff = (datetime.today() - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
     today  = datetime.today().strftime("%Y-%m-%d")
+    # stock_ohlcv.date is DATE on PG -> bind a date object for `date>=?` comparisons (rule #6).
+    cutoff_d = (datetime.today() - timedelta(days=lookback_days)).date()
     symbols = [r[0] for r in conn.execute(
         "SELECT DISTINCT symbol FROM stock_ohlcv"
     ).fetchall()]
@@ -395,17 +401,19 @@ def gap_fill(conn, lookback_days: int = 30) -> None:
         for sym in batch:
             rows = conn.execute(
                 "SELECT date FROM stock_ohlcv WHERE symbol=? AND date>=? ORDER BY date",
-                (sym, cutoff),
+                (sym, cutoff_d),
             ).fetchall()
-            existing[sym] = {r[0] for r in rows}
+            # date comes back as a date object on PG / 'YYYY-MM-DD' text on SQLite; normalize
+            # to str so membership tests against record date-strings work on both engines.
+            existing[sym] = {str(r[0])[:10] for r in rows}
 
         total_filled += _run_async(_gap_fill_async(conn, batch, tickers, existing, cutoff, today))
 
     # Also gap-fill indices
     for label, ticker in INDEX_TICKERS.items():
         try:
-            existing = {r[0] for r in conn.execute(
-                "SELECT date FROM stock_ohlcv WHERE symbol=? AND date>=?", (label, cutoff)
+            existing = {str(r[0])[:10] for r in conn.execute(
+                "SELECT date FROM stock_ohlcv WHERE symbol=? AND date>=?", (label, cutoff_d)
             ).fetchall()}
             df = yf.download(ticker, start=cutoff, progress=False, auto_adjust=True)
             if df is not None and not df.empty:
@@ -436,7 +444,7 @@ if __name__ == "__main__":
                         help="Days to look back in gap-fill mode (default 30)")
     args = parser.parse_args()
 
-    with sqlite3.connect(DB_PATH) as conn:
+    with connect() as conn:
         init_db(conn)
 
         if args.mode == "full":

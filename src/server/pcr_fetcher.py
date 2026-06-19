@@ -1,4 +1,3 @@
-from pathlib import Path
 """
 PCR (Put-Call Ratio) Fetcher
 ==============================
@@ -18,10 +17,9 @@ import datetime
 import argparse
 import requests
 import pandas as pd
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 
-DB_PATH      = Path(__file__).parent.parent.parent / "database.sqlite"
-DATABASE_URL = f"sqlite:///{DB_PATH}"
+from db_compat import get_engine
 
 NSE_OPTION_CHAIN_URL = "https://www.nseindia.com/api/option-chain-equities?symbol={symbol}"
 NSE_INDEX_CHAIN_URL  = "https://www.nseindia.com/api/option-chain-indices?symbol={symbol}"
@@ -49,7 +47,7 @@ DEFAULT_SYMBOLS = [
 
 class PCRFetcher:
     def __init__(self):
-        self.engine  = create_engine(DATABASE_URL)
+        self.engine  = get_engine()
         self.session = requests.Session()
         self.session.headers.update(HEADERS)
         self._prime_session()

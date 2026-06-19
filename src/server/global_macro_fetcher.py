@@ -2,14 +2,12 @@
 """Fetch global macro indicators via yfinance and persist to macro_asset_prices table."""
 
 import sys
-import sqlite3
 from datetime import datetime, timedelta
-from pathlib import Path
 
 import yfinance as yf
 import pandas as pd
 
-DB_PATH = Path(__file__).parent.parent.parent / "database.sqlite"
+from db_compat import connect
 
 TICKERS = {
     "^TNX":      "US10Y",
@@ -29,7 +27,7 @@ def fetch_macro(days: int = 30) -> None:
     end = datetime.today()
     start = end - timedelta(days=days + 10)  # buffer for weekends
 
-    con = sqlite3.connect(DB_PATH)
+    con = connect()
     cur = con.cursor()
 
     for ticker, label in TICKERS.items():
@@ -64,9 +62,12 @@ def fetch_macro(days: int = 30) -> None:
                 ))
 
             cur.executemany(
-                """INSERT OR REPLACE INTO macro_asset_prices
+                """INSERT INTO macro_asset_prices
                    (date, symbol, close, ret_1d, ret_5d, fetched_at)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
+                   VALUES (?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(date, symbol) DO UPDATE SET
+                     close=excluded.close, ret_1d=excluded.ret_1d,
+                     ret_5d=excluded.ret_5d, fetched_at=excluded.fetched_at""",
                 macro_rows,
             )
             con.commit()
@@ -93,9 +94,12 @@ def fetch_macro(days: int = 30) -> None:
 
                 if ohlcv_rows:
                     cur.executemany(
-                        """INSERT OR REPLACE INTO stock_ohlcv
+                        """INSERT INTO stock_ohlcv
                            (symbol, date, open, high, low, close, volume)
-                           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                           VALUES (?, ?, ?, ?, ?, ?, ?)
+                           ON CONFLICT(symbol, date) DO UPDATE SET
+                             open=excluded.open, high=excluded.high, low=excluded.low,
+                             close=excluded.close, volume=excluded.volume""",
                         ohlcv_rows,
                     )
                     con.commit()
