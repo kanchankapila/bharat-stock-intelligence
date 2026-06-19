@@ -241,22 +241,6 @@ db.exec(`
     last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
-  -- 10. Signals
-  CREATE TABLE IF NOT EXISTS signals (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    symbol TEXT NOT NULL,
-    type TEXT CHECK(type IN ('BUY', 'SELL', 'HOLD')) NOT NULL,
-    entry REAL,
-    target REAL,
-    stopLoss REAL,
-    confidence REAL,
-    reasoning TEXT,
-    status TEXT CHECK(status IN ('ACTIVE', 'COMPLETED', 'EXPIRED', 'FAILED')) DEFAULT 'ACTIVE',
-    result TEXT CHECK(result IN ('PROFIT', 'LOSS', 'NEUTRAL')),
-    createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
-
   -- 8. Strategies & Settings
   CREATE TABLE IF NOT EXISTS backtest_strategies (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1165,9 +1149,6 @@ migrateColumn('technical_signals', 'pcr_vol',        'REAL');
 migrateColumn('technical_signals', 'sector_ret_5d',  'REAL');
 migrateColumn('technical_signals', 'sector_ret_21d', 'REAL');
 
-migrateColumn('signals', 'created_at', 'DATETIME');
-migrateColumn('signals', 'updated_at', 'DATETIME');
-
 migrateColumn('stock_fundamentals', 'created_at', 'DATETIME');
 migrateColumn('stock_fundamentals', 'updated_at', 'DATETIME');
 
@@ -1187,7 +1168,6 @@ tryIndex(`CREATE INDEX IF NOT EXISTS idx_stock_scores_created_at ON stock_scores
 tryIndex(`CREATE INDEX IF NOT EXISTS idx_screener_master_created_at ON screener_master(created_at DESC)`);
 tryIndex(`CREATE INDEX IF NOT EXISTS idx_watchlist_userId ON watchlist(userId)`);
 tryIndex(`CREATE INDEX IF NOT EXISTS idx_technical_signals_symbol ON technical_signals(symbol)`);
-tryIndex(`CREATE INDEX IF NOT EXISTS idx_signals_symbol ON signals(symbol)`);
 tryIndex(`CREATE INDEX IF NOT EXISTS idx_stock_scores_symbol ON stock_scores(symbol)`);
 tryIndex(`CREATE INDEX IF NOT EXISTS idx_stock_ohlcv_date ON stock_ohlcv(date DESC)`);
 tryIndex(`CREATE INDEX IF NOT EXISTS idx_unified_signals_date ON unified_signals(signal_date DESC)`);
@@ -1564,6 +1544,10 @@ runMigration('044_unified_signals_rebuild_4col_unique', `
     ON unified_signals(symbol, signal_source, signal_type, signal_date);
 
   PRAGMA foreign_keys=ON;
+`);
+
+runMigration('045_drop_legacy_signals', `
+  DROP TABLE IF EXISTS signals;
 `);
 
 // ── Retention: confluence_signals is an append-only firehose (~700k rows, the single
