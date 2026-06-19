@@ -1492,13 +1492,14 @@ CREATE TABLE IF NOT EXISTS "unified_signals" (
   "status" TEXT DEFAULT 'ACTIVE',
   "signal_generated_at" TIMESTAMPTZ NOT NULL,
   "created_at" TIMESTAMPTZ DEFAULT now(),
-  UNIQUE ("symbol", "signal_date", "signal_source")
+  UNIQUE ("symbol", "signal_source", "signal_type", "signal_date")
 );
 CREATE INDEX idx_us_symbol_date ON unified_signals(symbol, signal_date DESC);
 CREATE INDEX idx_us_source ON unified_signals(signal_source);
 CREATE INDEX idx_us_confidence ON unified_signals(confidence_score DESC);
 CREATE INDEX idx_us_status ON unified_signals(status);
 CREATE INDEX idx_unified_signals_date ON unified_signals(signal_date DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_us_unique_key ON unified_signals(symbol, signal_source, signal_type, signal_date);
 
 -- ── users ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "users" (

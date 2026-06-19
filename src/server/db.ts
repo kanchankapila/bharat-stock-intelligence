@@ -782,7 +782,7 @@ db.exec(`
     status             TEXT DEFAULT 'ACTIVE',  -- 'ACTIVE', 'COMPLETED', 'EXPIRED', 'FAILED'
     signal_generated_at DATETIME NOT NULL,  -- Exact time signal was generated (critical for outcome matching)
     created_at         DATETIME DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(symbol, signal_date, signal_source)
+    UNIQUE(symbol, signal_source, signal_type, signal_date)
   );
   CREATE INDEX IF NOT EXISTS idx_us_symbol_date ON unified_signals(symbol, signal_date DESC);
   CREATE INDEX IF NOT EXISTS idx_us_source ON unified_signals(signal_source);
@@ -1507,6 +1507,63 @@ runMigration('042_drop_dead_phantom_tables', `
   DROP TABLE IF EXISTS historical_ohlc;
   DROP TABLE IF EXISTS confluence_alerts_log;
   DROP TABLE IF EXISTS watchlist_alerts;
+`);
+
+// ── Widen unified_signals uniqueness key to include signal_type ───────────────
+// First pass (043): Added an explicit 4-col named index. But the old 3-col
+// autoindex from UNIQUE(symbol, signal_date, signal_source) still blocks inserts
+// — SQLite auto-indexes cannot be dropped independently. Migration 044 does the
+// full table-recreation to remove the old constraint entirely.
+runMigration('043_unified_signals_4col_key', `
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_us_unique_key
+    ON unified_signals(symbol, signal_source, signal_type, signal_date);
+`);
+
+// ── Rebuild unified_signals to remove the old 3-col UNIQUE constraint ─────────
+// The old inline UNIQUE(symbol, signal_date, signal_source) created
+// sqlite_autoindex_unified_signals_1 which cannot be dropped without recreating
+// the table. This migration does the standard SQLite rename→recreate→copy→drop
+// procedure so that only the 4-col UNIQUE survives. FK enforcement is off by
+// default in SQLite; child tables reference unified_signals(id) which is a stable
+// AUTOINCREMENT PK preserved through the copy so no FK rows are invalidated.
+runMigration('044_unified_signals_rebuild_4col_unique', `
+  PRAGMA foreign_keys=OFF;
+
+  ALTER TABLE unified_signals RENAME TO unified_signals_old;
+
+  CREATE TABLE unified_signals (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol             TEXT NOT NULL,
+    signal_date        DATETIME DEFAULT CURRENT_TIMESTAMP,
+    signal_source      TEXT NOT NULL,
+    signal_type        TEXT NOT NULL,
+    entry_price        REAL,
+    target_price       REAL,
+    stop_loss          REAL,
+    confidence_score   REAL,
+    reasoning          TEXT,
+    technical_score    REAL,
+    quant_score        REAL,
+    ai_reasoning       TEXT,
+    status             TEXT DEFAULT 'ACTIVE',
+    signal_generated_at DATETIME NOT NULL,
+    created_at         DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(symbol, signal_source, signal_type, signal_date)
+  );
+
+  INSERT INTO unified_signals SELECT * FROM unified_signals_old;
+
+  DROP TABLE unified_signals_old;
+
+  CREATE INDEX IF NOT EXISTS idx_us_symbol_date ON unified_signals(symbol, signal_date DESC);
+  CREATE INDEX IF NOT EXISTS idx_us_source ON unified_signals(signal_source);
+  CREATE INDEX IF NOT EXISTS idx_us_confidence ON unified_signals(confidence_score DESC);
+  CREATE INDEX IF NOT EXISTS idx_us_status ON unified_signals(status);
+  CREATE INDEX IF NOT EXISTS idx_unified_signals_date ON unified_signals(signal_date DESC);
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_us_unique_key
+    ON unified_signals(symbol, signal_source, signal_type, signal_date);
+
+  PRAGMA foreign_keys=ON;
 `);
 
 // ── Retention: confluence_signals is an append-only firehose (~700k rows, the single
