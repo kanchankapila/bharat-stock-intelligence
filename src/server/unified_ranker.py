@@ -125,6 +125,28 @@ def _blend(engine_scores, present_engines, weights):
     return sum(active[e] / wsum * engine_scores.get(e, 0.0) for e in active)
 
 
+# ── Quality gate (#4) ───────────────────────────────────────────────────────────
+# AMC overlay: a technical/screener breakout on a fundamentally rotten name is a value
+# trap. Demote the unified score by a balance-sheet-quality multiplier so weak names can't
+# rank as high-conviction buys. Uses the Piotroski F-score (the canonical cross-sector
+# fundamental-strength screen — it already folds in leverage/liquidity trend) plus a
+# negative-ROE flag. Missing data is neutral (financials/new listings legitimately lack it).
+QUALITY_GATE_FLOOR = 0.5
+
+
+def quality_gate(piotroski, roe, *, floor: float = QUALITY_GATE_FLOOR) -> float:
+    """Fundamental-quality multiplier in [floor, 1.0]. None inputs are treated as neutral."""
+    mult = 1.0
+    if piotroski is not None:
+        if piotroski <= 2:
+            mult *= 0.6
+        elif piotroski <= 4:
+            mult *= 0.85
+    if roe is not None and roe < 0:
+        mult *= 0.8
+    return max(floor, mult)
+
+
 def _classify(score, bull, bear):
     """Directional label (matches stock_scores taxonomy the Top Rated UI renders) from the
     net screener bias balance, with magnitude gating the 'Strong' tiers."""
@@ -263,6 +285,19 @@ class UnifiedRanker:
             "SELECT symbol, score FROM stock_scores WHERE timeframe = 'long_term'"
         ).fetchall()
         return {r['symbol']: float(r['score'] or 50) for r in rows}
+
+    def _get_quality_metrics(self):
+        """Balance-sheet quality per symbol for the #4 quality gate (Piotroski + ROE)."""
+        rows = self.conn.execute(
+            "SELECT symbol, piotroski_f_score, return_on_equity FROM quant_scores"
+        ).fetchall()
+        return {
+            r['symbol']: {
+                'piotroski': r['piotroski_f_score'],
+                'roe': float(r['return_on_equity']) if r['return_on_equity'] is not None else None,
+            }
+            for r in rows
+        }
 
     def _get_screener_membership(self):
         membership = {}
@@ -508,6 +543,7 @@ class UnifiedRanker:
         regime, _conf     = self._get_regime()
         base_weights      = REGIME_WEIGHTS.get(regime, REGIME_WEIGHTS['BULL'])
         fund_scores       = self._get_fundamental_scores()
+        quality_metrics   = self._get_quality_metrics()
         membership        = self._get_screener_membership()
 
         screener_scores, bull_counts, bear_counts = compute_screener_stock_scores(
@@ -539,6 +575,9 @@ class UnifiedRanker:
             # renormalize weights over engines that actually have data for this symbol, so
             # empty confluence/dl tables don't drag every score down to ~15.
             unified = _blend(engine_scores, present, base_weights)
+            qm = quality_metrics.get(sym)
+            if qm:
+                unified *= quality_gate(qm['piotroski'], qm['roe'])
             if unified < 1:
                 continue
 

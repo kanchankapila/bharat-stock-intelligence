@@ -78,6 +78,10 @@ def make_db():
             confidence_score REAL, reasoning TEXT,
             signal_generated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
+        CREATE TABLE quant_scores (
+            symbol TEXT PRIMARY KEY,
+            piotroski_f_score INTEGER, return_on_equity REAL
+        );
     ''')
     return conn
 
@@ -258,6 +262,29 @@ class TestUnifiedRankerRun:
         assert 'LOSER' not in symbols
         os.unlink(csv_path)
 
+    def test_quality_gate_demotes_weak_fundamentals(self):
+        import os
+        ranker, conn, csv_path = self._setup()
+        # Two names with identical screeners/scores/track-record/ML — differ only in
+        # balance-sheet quality (Piotroski). The weak one must rank materially lower.
+        for sym in ('GOODQ', 'BADQ'):
+            conn.execute("INSERT INTO trendlyne_screener_stocks VALUES ('bull1',?,?)", (sym, sym))
+            conn.execute("INSERT INTO trendlyne_screener_stocks VALUES ('fund1',?,?)", (sym, sym))
+            conn.execute("INSERT INTO stock_scores VALUES (?, 'long_term', 70)", (sym,))
+            conn.execute("INSERT INTO recommendation_log (symbol, signal_date, actual_return_pct, generated_at) "
+                         "VALUES (?, '2026-05-01', 5.0, date('now','-10 days'))", (sym,))
+            conn.execute("INSERT INTO technical_signals (symbol, date, win_probability, signal_score) "
+                         "VALUES (?, date('now'), 0.75, 70)", (sym,))
+        conn.execute("INSERT INTO quant_scores VALUES ('GOODQ', 8, 20.0)")
+        conn.execute("INSERT INTO quant_scores VALUES ('BADQ', 1, 5.0)")
+        conn.commit()
+
+        scores = {r['symbol']: r['unified_score'] for r in ranker.run()}
+        assert 'GOODQ' in scores and 'BADQ' in scores
+        assert scores['BADQ'] < scores['GOODQ']
+        assert scores['BADQ'] <= scores['GOODQ'] * 0.7   # ~0.6x Piotroski-≤2 demotion
+        os.unlink(csv_path)
+
     def test_run_emits_directional_classification(self):
         # INFY is in two bullish screeners (bull_count=2, bear_count=0) -> must classify as a Buy,
         # not be left without a directional label the Top Rated UI needs.
@@ -357,3 +384,43 @@ class TestUIGradeRanking:
         # the non-outlier cluster must remain well-spread, not all crushed below ~1
         assert out['d'] > 50.0
         assert out['a'] < out['b'] < out['c'] < out['d'] < out['OUTLIER']
+
+
+# ── quality gate (#4): demote fundamentally weak names in the canonical ranking ──
+
+def test_quality_gate_strong_fundamentals_no_penalty():
+    from unified_ranker import quality_gate
+    assert quality_gate(piotroski=7, roe=18.0) == 1.0
+
+
+def test_quality_gate_weak_piotroski_penalized():
+    from unified_ranker import quality_gate
+    assert quality_gate(piotroski=1, roe=10.0) == pytest.approx(0.6)
+
+
+def test_quality_gate_mid_piotroski_mild_penalty():
+    from unified_ranker import quality_gate
+    assert quality_gate(piotroski=4, roe=12.0) == pytest.approx(0.85)
+
+
+def test_quality_gate_missing_data_is_neutral():
+    # New listings / financials legitimately lack these — don't punish missing data.
+    from unified_ranker import quality_gate
+    assert quality_gate(piotroski=None, roe=None) == 1.0
+
+
+def test_quality_gate_negative_roe_compounds_then_floors():
+    from unified_ranker import quality_gate, QUALITY_GATE_FLOOR
+    # weak piotroski 0.6 * neg-roe 0.8 = 0.48 -> clamped to the floor
+    assert quality_gate(piotroski=1, roe=-5.0) == QUALITY_GATE_FLOOR
+
+
+def test_quality_gate_monotonic_non_decreasing_in_piotroski():
+    from unified_ranker import quality_gate
+    vals = [quality_gate(piotroski=p, roe=15.0) for p in range(0, 9)]
+    assert vals == sorted(vals)
+
+
+def test_quality_gate_never_below_floor():
+    from unified_ranker import quality_gate, QUALITY_GATE_FLOOR
+    assert quality_gate(piotroski=0, roe=-99.0) >= QUALITY_GATE_FLOOR
