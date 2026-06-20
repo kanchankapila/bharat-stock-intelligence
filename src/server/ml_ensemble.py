@@ -67,18 +67,25 @@ def _parse_signal_types(signals_json) -> set[str]:
 def build_features(df: pd.DataFrame) -> pd.DataFrame:
     X = pd.DataFrame(index=df.index)
 
-    X['signal_score']  = pd.to_numeric(df.get('signal_score', 5), errors='coerce').fillna(5)
-    X['rsi']           = pd.to_numeric(df.get('rsi', 50), errors='coerce').fillna(50)
-    X['adx']           = pd.to_numeric(df.get('adx', 20), errors='coerce').fillna(20)
-    X['volume_ratio']  = pd.to_numeric(df.get('volume_ratio', 1.0), errors='coerce').fillna(1.0)
-    X['horizon_days']  = pd.to_numeric(df.get('horizon_days', 15), errors='coerce').fillna(15)
+    def num(col, default):
+        """Numeric Series for `col`, robust to the column being absent entirely. Production SQL
+        always supplies it (Series); tests / partial joins may not, where df.get(col, scalar)
+        would yield a scalar and break .fillna()."""
+        s = df[col] if col in df.columns else pd.Series(default, index=df.index)
+        return pd.to_numeric(s, errors='coerce').fillna(default)
 
-    regime_raw  = df.get('nifty_regime', pd.Series(['UNKNOWN'] * len(df), index=df.index))
+    X['signal_score']  = num('signal_score', 5)
+    X['rsi']           = num('rsi', 50)
+    X['adx']           = num('adx', 20)
+    X['volume_ratio']  = num('volume_ratio', 1.0)
+    X['horizon_days']  = num('horizon_days', 15)
+
+    regime_raw  = df['nifty_regime'] if 'nifty_regime' in df.columns else pd.Series(['UNKNOWN'] * len(df), index=df.index)
     X['regime'] = regime_raw.map(REGIME_MAP).fillna(0.0)
 
-    cmp    = pd.to_numeric(df.get('cmp',    np.nan), errors='coerce')
-    sma200 = pd.to_numeric(df.get('sma200', np.nan), errors='coerce')
-    X['sma200_dist'] = ((cmp - sma200) / sma200.replace(0, np.nan) * 100).fillna(0)
+    cmp_   = num('cmp', np.nan)
+    sma200 = num('sma200', np.nan)
+    X['sma200_dist'] = ((cmp_ - sma200) / sma200.replace(0, np.nan) * 100).fillna(0)
 
     # Interaction: score strength in current regime
     X['score_x_regime'] = X['signal_score'] * X['regime']
@@ -86,36 +93,50 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     X['rsi_deviation']  = (X['rsi'] - 50).abs()
 
     # FII flow — normalized (Cr), negative = selling pressure
-    X['fii_3d_net'] = pd.to_numeric(df.get('fii_3d_net', 0), errors='coerce').fillna(0) / 10000.0
+    X['fii_3d_net'] = num('fii_3d_net', 0) / 10000.0
 
     # Above SMA200 binary flag
-    X['above_sma200'] = pd.to_numeric(df.get('above_sma200', 0), errors='coerce').fillna(0).clip(0, 1)
+    X['above_sma200'] = num('above_sma200', 0).clip(0, 1)
 
     # Distance from 52-week high (as % — negative means below the high)
-    cmp_s      = pd.to_numeric(df.get('cmp', np.nan), errors='coerce')
-    hi52_s     = pd.to_numeric(df.get('fifty_two_week_high', np.nan), errors='coerce')
-    X['dist_52w_high'] = ((cmp_s - hi52_s) / hi52_s.replace(0, np.nan) * 100).fillna(0)
+    hi52 = num('fifty_two_week_high', np.nan)
+    X['dist_52w_high'] = ((cmp_ - hi52) / hi52.replace(0, np.nan) * 100).fillna(0)
 
     # PCR — put/call ratio (stock level and market level)
-    X['pcr_oi']  = pd.to_numeric(df.get('pcr_oi',  1.0), errors='coerce').fillna(1.0)
-    X['pcr_vol'] = pd.to_numeric(df.get('pcr_vol', 1.0), errors='coerce').fillna(1.0)
+    X['pcr_oi']  = num('pcr_oi', 1.0)
+    X['pcr_vol'] = num('pcr_vol', 1.0)
 
     # Extended FII/DII flows (normalized to 10K Cr scale)
-    X['fii_10d_net'] = pd.to_numeric(df.get('fii_10d_net', 0), errors='coerce').fillna(0) / 10000.0
-    X['dii_3d_net']  = pd.to_numeric(df.get('dii_3d_net',  0), errors='coerce').fillna(0) / 10000.0
+    X['fii_10d_net'] = num('fii_10d_net', 0) / 10000.0
+    X['dii_3d_net']  = num('dii_3d_net', 0) / 10000.0
 
     # Delivery % (institutional conviction proxy, normalized to 0-1)
-    X['delivery_pct'] = pd.to_numeric(df.get('delivery_pct', 50), errors='coerce').fillna(50) / 100.0
+    X['delivery_pct'] = num('delivery_pct', 50) / 100.0
 
     # Sector relative momentum
-    X['sector_ret_5d']  = pd.to_numeric(df.get('sector_ret_5d',  0), errors='coerce').fillna(0)
-    X['sector_ret_21d'] = pd.to_numeric(df.get('sector_ret_21d', 0), errors='coerce').fillna(0)
+    X['sector_ret_5d']  = num('sector_ret_5d', 0)
+    X['sector_ret_21d'] = num('sector_ret_21d', 0)
+
+    # ── Fundamental factors: Quality / Value / Growth / Size (from stock_fundamentals) ──
+    # Point-in-time caveat: stock_fundamentals is a current snapshot keyed by symbol (same
+    # join as fifty_two_week_high above), so historical training rows see latest fundamentals
+    # — mild look-ahead for slow quarterly metrics, fully leak-free at predict time. Price-
+    # derived/fast fields are deliberately excluded (those would be real leakage).
+    X['piotroski']         = num('piotroski_f_score', 4)
+    X['debt_to_equity']    = num('debt_to_equity', 0.5).clip(0, 10)
+    X['operating_margins'] = num('operating_margins', 0)
+    X['return_on_equity']  = num('return_on_equity', 0)
+    X['revenue_growth']    = num('revenue_growth', 0)
+    X['earnings_growth']   = num('earnings_growth', 0)
+    X['earnings_yield']    = num('earnings_yield', 0)
+    X['price_to_book']     = num('price_to_book', 3).clip(0, 50)
+    X['log_market_cap']    = np.log1p(num('market_cap', 0).clip(lower=0))
 
     # Interaction: delivery conviction × signal score
     X['delivery_x_score'] = X['delivery_pct'] * X['signal_score']
 
     # Signal type one-hot
-    sig_col = df.get('signals_json', pd.Series(['[]'] * len(df), index=df.index))
+    sig_col = df['signals_json'] if 'signals_json' in df.columns else pd.Series(['[]'] * len(df), index=df.index)
     type_sets = sig_col.apply(_parse_signal_types)
     for t in SIGNAL_TYPES:
         X[f'sig_{t}'] = type_sets.apply(lambda s: 1 if t in s else 0).astype(np.int8)
@@ -151,7 +172,10 @@ def load_training_data() -> pd.DataFrame:
                ts.fii_10d_net, ts.dii_3d_net,
                ts.delivery_pct,
                ts.sector_ret_5d, ts.sector_ret_21d,
-               sf.fifty_two_week_high
+               sf.fifty_two_week_high,
+               sf.piotroski_f_score, sf.debt_to_equity, sf.operating_margins,
+               sf.return_on_equity, sf.revenue_growth, sf.earnings_growth,
+               sf.earnings_yield, sf.price_to_book, sf.market_cap
         FROM signal_outcomes so
         LEFT JOIN technical_signals ts
                ON ts.symbol = so.symbol AND ts.date = so.signal_date
@@ -175,7 +199,10 @@ def load_pending_signals() -> pd.DataFrame:
                ts.fii_10d_net, ts.dii_3d_net,
                ts.delivery_pct,
                ts.sector_ret_5d, ts.sector_ret_21d,
-               sf.fifty_two_week_high
+               sf.fifty_two_week_high,
+               sf.piotroski_f_score, sf.debt_to_equity, sf.operating_margins,
+               sf.return_on_equity, sf.revenue_growth, sf.earnings_growth,
+               sf.earnings_yield, sf.price_to_book, sf.market_cap
         FROM technical_signals ts
         LEFT JOIN stock_fundamentals sf ON sf.symbol = ts.symbol
         WHERE ts.win_probability IS NULL
@@ -496,7 +523,7 @@ def score_pending(conn: ConnWrapper, ensemble: dict) -> int:
             )
             WHERE source = 'technical_scan'
               AND status = 'ACTIVE'
-              AND signal_date >= date('now', '-14 days')
+              AND date(signal_date) >= date('now', '-14 days')
         """)
         # Deactivate entries where ML now says win < 40%
         conn.execute("""

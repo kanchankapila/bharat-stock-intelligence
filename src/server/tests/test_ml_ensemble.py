@@ -45,6 +45,37 @@ class TestNoLookAheadFeatures:
         )
 
 
+class TestFundamentalFactors:
+    """Quality/Value/Growth/Size factors from stock_fundamentals must enter the model."""
+    FUND_COLS = ['piotroski', 'debt_to_equity', 'operating_margins', 'return_on_equity',
+                 'revenue_growth', 'earnings_growth', 'earnings_yield', 'price_to_book',
+                 'log_market_cap']
+
+    def test_fundamental_features_present(self):
+        X = build_features(_make_feature_df())
+        for c in self.FUND_COLS:
+            assert c in X.columns
+
+    def test_missing_fundamentals_fall_back_without_nan(self):
+        X = build_features(_make_feature_df())  # df lacks the fundamental columns
+        for c in self.FUND_COLS:
+            assert not X[c].isna().any()
+
+    def test_fundamental_values_pass_through(self):
+        df = _make_feature_df(3)
+        df['return_on_equity'] = [15.0, 20.0, 25.0]
+        df['debt_to_equity'] = [0.2, 1.0, 2.0]
+        X = build_features(df)
+        assert list(X['return_on_equity']) == pytest.approx([15.0, 20.0, 25.0])
+        assert list(X['debt_to_equity']) == pytest.approx([0.2, 1.0, 2.0])
+
+    def test_market_cap_is_log_transformed(self):
+        df = _make_feature_df(1)
+        df['market_cap'] = [1_000_000_000.0]
+        X = build_features(df)
+        assert X['log_market_cap'].iloc[0] == pytest.approx(np.log1p(1e9), rel=1e-4)
+
+
 class TestTemporalCV:
     """TimeSeriesSplit must not allow future rows into earlier fold's training set."""
 
