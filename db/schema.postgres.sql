@@ -1174,9 +1174,22 @@ CREATE TABLE IF NOT EXISTS "stock_ohlcv" (
   "low" DOUBLE PRECISION,
   "close" DOUBLE PRECISION,
   "volume" BIGINT,
+  "is_suspect" INTEGER DEFAULT 0,
   PRIMARY KEY ("symbol", "date")
 );
 CREATE INDEX idx_stock_ohlcv_date ON stock_ohlcv(date DESC);
+
+-- ── corporate_actions (bad-print allowlist; prices are already auto_adjusted) ──
+CREATE TABLE IF NOT EXISTS "corporate_actions" (
+  "symbol" TEXT NOT NULL,
+  "ex_date" DATE NOT NULL,
+  "action_type" TEXT NOT NULL,
+  "ratio" DOUBLE PRECISION,
+  "amount" DOUBLE PRECISION,
+  "source" TEXT DEFAULT 'yfinance',
+  "ingested_at" TIMESTAMPTZ DEFAULT now(),
+  PRIMARY KEY ("symbol", "ex_date", "action_type")
+);
 
 -- ── stock_options_oi ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "stock_options_oi" (

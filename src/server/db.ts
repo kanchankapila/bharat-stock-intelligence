@@ -224,7 +224,21 @@ db.exec(`
     low REAL,
     close REAL,
     volume INTEGER,
+    is_suspect INTEGER DEFAULT 0,   -- bad-print flag (ohlcv_quality.flag_bad_prints)
     PRIMARY KEY (symbol, date)
+  );
+
+  -- Corporate-action ex-dates (yfinance) — the bad-print allowlist, NOT used to re-adjust
+  -- prices (stock_ohlcv is already auto_adjusted by backfill_ohlcv).
+  CREATE TABLE IF NOT EXISTS corporate_actions (
+    symbol TEXT NOT NULL,
+    ex_date TEXT NOT NULL,
+    action_type TEXT NOT NULL,
+    ratio REAL,
+    amount REAL,
+    source TEXT DEFAULT 'yfinance',
+    ingested_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (symbol, ex_date, action_type)
   );
 
   -- 9. Technical Analysis Signals & Predictions
@@ -1119,6 +1133,7 @@ migrateColumn('watchlist', 'name', 'TEXT');
 migrateColumn('watchlist', 'source', 'TEXT');
 
 // technical_signals — new accuracy context columns
+migrateColumn('stock_ohlcv', 'is_suspect', 'INTEGER DEFAULT 0');
 migrateColumn('technical_signals', 'adx',            'REAL');
 migrateColumn('technical_signals', 'nifty_regime',   'TEXT');
 migrateColumn('technical_signals', 'delivery_pct',   'REAL');

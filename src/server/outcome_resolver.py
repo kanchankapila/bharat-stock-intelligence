@@ -108,7 +108,7 @@ def get_atr(conn: ConnWrapper, symbol: str, signal_date: str, window: int = 14) 
     Drives the chandelier trailing stop; 0.0 (trailing disabled) when history is too short."""
     rows = conn.execute("""
         SELECT high, low, close FROM stock_ohlcv
-        WHERE symbol = ? AND date <= ?
+        WHERE symbol = ? AND date <= ? AND COALESCE(is_suspect, 0) = 0
         ORDER BY date DESC LIMIT ?
     """, (symbol, signal_date, window + 1)).fetchall()
     if len(rows) < 2:
@@ -380,8 +380,8 @@ def resolve_unified_outcomes(
 
         signal_date_obj = datetime.date.fromisoformat(signal_date[:10])
         next_trading_day_row = conn.execute("""
-            SELECT date, open FROM stock_ohlcv 
-            WHERE symbol = ? AND date > ? 
+            SELECT date, open FROM stock_ohlcv
+            WHERE symbol = ? AND date > ? AND COALESCE(is_suspect, 0) = 0
             ORDER BY date ASC LIMIT 1
         """, (sym, signal_date[:10])).fetchone()
         
@@ -400,7 +400,7 @@ def resolve_unified_outcomes(
         atr = get_atr(conn, sym, signal_date[:10])
         bar_rows = conn.execute("""
             SELECT date, high, low, close FROM stock_ohlcv
-            WHERE symbol = ? AND date >= ? AND date <= ?
+            WHERE symbol = ? AND date >= ? AND date <= ? AND COALESCE(is_suspect, 0) = 0
             ORDER BY date ASC
         """, (sym, next_trading_day, exit_target_date)).fetchall()
         bars = [(str(b[0]), float(b[1]), float(b[2]), float(b[3])) for b in bar_rows]
