@@ -78,3 +78,6 @@ Thumbs.db
 
 # Local DB backups (scripts/backup_pg.py) — never commit
 backups/
+
+# PM2 runtime logs
+logs/
