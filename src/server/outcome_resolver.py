@@ -570,7 +570,7 @@ def resolve_recommendation_log(
     cutoff = (today - datetime.timedelta(days=horizon_days)).isoformat()
 
     pending = conn.execute("""
-        SELECT id, symbol, signal_date, entry_price, stop_loss,
+        SELECT id, symbol, signal_date, entry_price, stop_loss, target_1,
                COALESCE(horizon_days, ?) AS rl_horizon
         FROM recommendation_log
         WHERE (outcome IS NULL OR outcome = 'PENDING')
@@ -580,7 +580,7 @@ def resolve_recommendation_log(
         LIMIT 2000
     """, (horizon_days, cutoff)).fetchall()
 
-    cols = ['id', 'symbol', 'signal_date', 'entry_price', 'stop_loss', 'rl_horizon']
+    cols = ['id', 'symbol', 'signal_date', 'entry_price', 'stop_loss', 'target_1', 'rl_horizon']
     rows = [dict(zip(cols, r)) for r in pending]
 
     if not rows:
@@ -611,38 +611,32 @@ def resolve_recommendation_log(
         next_trading_day = next_row[0] if next_row else (signal_date_obj + datetime.timedelta(days=1)).isoformat()
         exit_target_date = (signal_date_obj + datetime.timedelta(days=h)).isoformat()
 
+        # #2 exit policy: target-capture / scale-out / chandelier trailing over the bar window
+        # (entry stays the recommended price, unlike the next-day-open signal resolvers).
+        target = float(row['target_1']) if row.get('target_1') else None
+        atr = get_atr(conn, sym, signal_date_str)
+        bar_rows = conn.execute("""
+            SELECT date, high, low, close FROM stock_ohlcv
+            WHERE symbol = ? AND date >= ? AND date <= ? AND COALESCE(is_suspect,0)=0
+            ORDER BY date ASC
+        """, (sym, next_trading_day, exit_target_date)).fetchall()
+        bars = [(str(b[0]), float(b[1]), float(b[2]), float(b[3])) for b in bar_rows]
+
         outcome, exit_price, return_pct = None, None, None
-
-        if stop_loss and stop_loss > 0:
-            sl_hit = conn.execute("""
-                SELECT date, low FROM stock_ohlcv
-                WHERE symbol = ? AND date >= ? AND date <= ? AND low <= ? AND COALESCE(is_suspect,0)=0
-                ORDER BY date ASC LIMIT 1
-            """, (sym, next_trading_day, exit_target_date, stop_loss)).fetchone()
-
-            if sl_hit:
-                exit_price = float(stop_loss)
-                return_pct = net_return_pct((exit_price - entry) / entry * 100)
+        if not bars:
+            outcome = 'PENDING'
+        else:
+            initial_stop = stop_loss if (stop_loss and stop_loss > 0) else None
+            _, exit_price, exit_reason, gross = simulate_exit(
+                bars, entry=entry, initial_stop=initial_stop, target=target, atr=atr)
+            return_pct = net_return_pct(gross)
+            if exit_reason == 'STOP_LOSS':
                 outcome = 'LOSS'
-
-        if outcome is None:
-            exit_row = conn.execute("""
-                SELECT date, close FROM stock_ohlcv
-                WHERE symbol = ? AND date >= ? AND COALESCE(is_suspect,0)=0
-                ORDER BY date ASC LIMIT 1
-            """, (sym, exit_target_date)).fetchone()
-
-            if exit_row:
-                exit_price = float(exit_row[1])
-                return_pct = net_return_pct((exit_price - entry) / entry * 100)
-                
-                # Dynamic volatility-adjusted threshold
+            else:
                 threshold = get_volatility_threshold(conn, sym, signal_date, h)
                 outcome = ('WIN'  if return_pct > threshold  else
                            'LOSS' if return_pct < -threshold else
                            'NEUTRAL')
-            else:
-                outcome = 'PENDING'
 
         if dry_run:
             msg = f"  [DRY] REC_LOG {sym} {signal_date} -> {outcome}"

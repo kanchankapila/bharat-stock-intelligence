@@ -257,6 +257,48 @@ def test_unified_target_capture_beats_faded_horizon_close():
     assert row[2] in ('TIME_EXIT_PARTIAL', 'TRAILING_STOP', 'TARGET')
 
 
+def make_reclog_db():
+    conn = sqlite3.connect(':memory:')
+    conn.executescript("""
+        CREATE TABLE recommendation_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, symbol TEXT, signal_date TEXT,
+            entry_price REAL, stop_loss REAL, target_1 REAL, horizon_days INTEGER,
+            outcome TEXT, actual_exit_price REAL, actual_return_pct REAL,
+            status TEXT, resolved_at TEXT
+        );
+        CREATE TABLE stock_ohlcv (
+            symbol TEXT, date TEXT, open REAL, high REAL, low REAL, close REAL,
+            volume INTEGER, is_suspect INTEGER DEFAULT 0, PRIMARY KEY (symbol, date)
+        );
+    """)
+    return conn
+
+
+def test_reclog_target_capture_beats_faded_horizon_close():
+    from outcome_resolver import resolve_recommendation_log
+    conn = make_reclog_db()
+    sig_date = (datetime.date.today() - datetime.timedelta(days=20)).isoformat()
+    base = datetime.date.fromisoformat(sig_date)
+    for i in range(15, 0, -1):  # flat history -> ATR ~0, isolates target capture
+        d = (base - datetime.timedelta(days=i)).isoformat()
+        conn.execute("INSERT OR IGNORE INTO stock_ohlcv (symbol,date,open,high,low,close,volume) VALUES ('REC1',?,100,100,100,100,100000)", (d,))
+    conn.execute("INSERT INTO recommendation_log (symbol, signal_date, entry_price, stop_loss, target_1, horizon_days, outcome) "
+                 "VALUES ('REC1', ?, 100, 97, 105, 5, 'PENDING')", (sig_date,))
+    bars = [(1, 100, 106, 100, 104), (2, 102, 103, 100, 101), (3, 101, 102, 99, 100),
+            (4, 100, 101, 99, 100), (5, 100, 100, 99, 100)]  # spikes through 105 then fades to ~100
+    for off, o, h, l, c in bars:
+        d = (base + datetime.timedelta(days=off)).isoformat()
+        conn.execute("INSERT INTO stock_ohlcv (symbol,date,open,high,low,close,volume) VALUES ('REC1',?,?,?,?,?,100000)", (d, o, h, l, c))
+    conn.commit()
+
+    resolve_recommendation_log(conn, horizon_days=5, dry_run=False)
+    row = conn.execute("SELECT outcome, actual_return_pct FROM recommendation_log WHERE symbol='REC1'").fetchone()
+    assert row is not None
+    # old logic booked the faded close (~0% -> NEUTRAL); new captures 50% at +5% -> ~2.2% net WIN
+    assert row[1] == pytest.approx(2.5 - 0.30, abs=0.05)
+    assert row[0] == 'WIN'
+
+
 def test_unified_resolution_excludes_suspect_bars():
     from outcome_resolver import resolve_unified_outcomes
     conn = make_unified_db()
