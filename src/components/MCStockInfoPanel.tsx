@@ -335,6 +335,11 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
     { enabled: isVisible && activeTab === 'fno', staleTime: 30000 }
   );
 
+  const { data: niftyTraderData } = trpc.getNiftyTraderData.useQuery(
+    { symbol },
+    { enabled: isVisible, staleTime: 60000 }
+  );
+
   if (!isVisible && !unifiedData) {
     return (
       <div ref={containerRef} className="h-40 flex items-center justify-center bg-slate-900/10 border border-dashed border-slate-800 rounded-2xl">
@@ -484,6 +489,15 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                 </div>
               );
             })()}
+            {niftyTraderData?.analysisData?.symbolData?.created_at && (
+              <div className="flex items-center gap-2 pl-4 border-l border-slate-800">
+                <Activity className="w-4 h-4 text-indigo-500" />
+                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">NiftyTrader</span>
+                <span className="text-[9px] font-black px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400">
+                  Updated: {new Date(niftyTraderData.analysisData.symbolData.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+                </span>
+              </div>
+            )}
           </div>
           <div className="flex gap-1 bg-slate-900 rounded-lg p-0.5 border border-slate-800">
             {(['D', 'W', 'M'] as Timeframe[]).map(tf => (
@@ -1465,6 +1479,112 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
             </Card>
           )}
 
+          {/* NiftyTrader Financial Data */}
+          {niftyTraderData && (
+            <div className="space-y-6">
+              {/* NiftyTrader Financial Key Metrics */}
+              {niftyTraderData.financialData?.[0] && (() => {
+                const fin = niftyTraderData.financialData[0];
+                return (
+                  <Card title="NiftyTrader Key Financial Metrics" icon={Database}>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 pt-2">
+                      {[
+                        { label: 'Market Cap', val: `₹${fin.market_cap?.toLocaleString('en-IN')} Cr` },
+                        { label: 'Current Price', val: `₹${fin.current_price || '—'}` },
+                        { label: 'Stock P/E', val: fin.stock_pe },
+                        { label: 'Book Value', val: `₹${fin.book_value || '—'}` },
+                        { label: 'Dividend Yield', val: fin.dividend_yield ? `${fin.dividend_yield}%` : '—' },
+                        { label: 'ROCE %', val: fin.roce ? `${fin.roce}%` : '—' },
+                        { label: 'ROE %', val: fin.roe ? `${fin.roe}%` : '—' },
+                        { label: 'Sales Growth %', val: fin.sales_growth ? `${fin.sales_growth}%` : '—' },
+                        { label: 'Face Value', val: fin.face_value },
+                      ].map((m, i) => (
+                        <CompactMetricCard key={i} label={m.label} value={String(m.val ?? '—')} color="text-slate-300" />
+                      ))}
+                    </div>
+                  </Card>
+                );
+              })()}
+
+              {/* Historical Annual Performance */}
+              {niftyTraderData.industryData?.lstfutureprojectval && (() => {
+                const annuals = [...niftyTraderData.industryData.lstfutureprojectval].sort((a: any, b: any) => {
+                  const parseYear = (str: string) => parseInt(str.replace(/[^\d]/g, ''), 10) || 0;
+                  return parseYear(a.year) - parseYear(b.year);
+                });
+
+                if (annuals.length === 0) return null;
+
+                return (
+                  <Card title="Historical Annual Performance (NiftyTrader)" icon={History}>
+                    <div className="overflow-x-auto pt-2">
+                      <table className="w-full text-left text-[10px]">
+                        <thead>
+                          <tr className="text-slate-500 font-black uppercase tracking-widest border-b border-slate-800">
+                            <th className="pb-2">Year</th>
+                            <th className="pb-2 text-right">Sales Revenue (Cr)</th>
+                            <th className="pb-2 text-right">Net Profit (Cr)</th>
+                            <th className="pb-2 text-right">NPM %</th>
+                            <th className="pb-2 text-right">Actual EPS</th>
+                            <th className="pb-2 text-right">Reserves (Cr)</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-800/30">
+                          {annuals.map((row: any, idx: number) => {
+                            const marginPct = (row.npm * 100).toFixed(1);
+                            return (
+                              <tr key={idx} className="group hover:bg-slate-900/30 font-mono text-[10px] text-slate-350">
+                                <td className="py-2.5 font-bold text-slate-100">{row.year}</td>
+                                <td className="py-2.5 text-right">₹{row.sales_Revenue ? parseFloat(row.sales_Revenue).toLocaleString('en-IN') : '—'}</td>
+                                <td className={cn("py-2.5 text-right font-bold", 
+                                  parseFloat(row.netProfit) >= 0 ? "text-emerald-400" : parseFloat(row.netProfit) < 0 ? "text-rose-400" : "text-slate-400"
+                                )}>
+                                  ₹{row.netProfit ? parseFloat(row.netProfit).toLocaleString('en-IN') : '—'}
+                                </td>
+                                <td className="py-2.5 text-right">{row.npm != null ? `${marginPct}%` : '—'}</td>
+                                <td className="py-2.5 text-right">₹{row.actualEPS || row.epSinRs || '—'}</td>
+                                <td className="py-2.5 text-right">{row.reserves ? `₹${parseFloat(row.reserves).toLocaleString('en-IN')}` : '—'}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </Card>
+                );
+              })()}
+
+              {/* Recent Quarterly Performance */}
+              {niftyTraderData.industryData?.lastThreeQTRModel && (() => {
+                const quarters = niftyTraderData.industryData.lastThreeQTRModel;
+                if (quarters.length === 0) return null;
+                return (
+                  <Card title="Recent Quarterly Performance (NiftyTrader)" icon={BarChart3}>
+                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 pt-2">
+                      {quarters.map((q: any, idx: number) => (
+                        <div key={idx} className="p-3 bg-slate-950 rounded-xl border border-slate-800/50">
+                          <span className="text-[9px] font-black text-slate-500 uppercase tracking-wider block mb-1">{q.year}</span>
+                          <div className="space-y-1">
+                            <div className="flex justify-between items-center text-[10px]">
+                              <span className="text-slate-450 font-bold">Sales:</span>
+                              <span className="font-mono font-black text-slate-200">₹{parseFloat(q.sales_Revenue || '0').toLocaleString('en-IN')}Cr</span>
+                            </div>
+                            <div className="flex justify-between items-center text-[10px]">
+                              <span className="text-slate-455 font-bold">Profit:</span>
+                              <span className={cn("font-mono font-black", 
+                                parseFloat(q.netProfit || '0') >= 0 ? "text-emerald-400" : "text-rose-400"
+                              )}>₹{parseFloat(q.netProfit || '0').toLocaleString('en-IN')}Cr</span>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </Card>
+                );
+              })()}
+            </div>
+          )}
+
         </div>
       )}
 
@@ -1933,6 +2053,108 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
               </div>
             );
           })()}
+
+          {/* NiftyTrader Technical Data */}
+          {niftyTraderData && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-4">
+              {/* Gaps Analysis */}
+              <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-4">
+                <h4 className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-3 flex items-center gap-1.5 border-l-2 border-indigo-500 pl-2">
+                  NiftyTrader Gap Analysis
+                </h4>
+                <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1 terminal-scrollbar">
+                  {niftyTraderData.analysisData?.msg_data?.length ? (
+                    niftyTraderData.analysisData.msg_data.map((msg: string, idx: number) => {
+                      const isSupport = msg.toLowerCase().includes('support');
+                      return (
+                        <div key={idx} className={cn("p-2.5 rounded-xl border text-[10px] leading-relaxed font-mono flex items-start gap-2",
+                          isSupport ? "bg-emerald-950/20 border-emerald-900/40 text-emerald-450" : "bg-rose-950/20 border-rose-900/40 text-rose-455"
+                        )}>
+                          <span className="font-black shrink-0">{isSupport ? "▲" : "▼"}</span>
+                          <span>{msg}</span>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <p className="text-center py-6 text-slate-500 text-[10px] font-mono">NO UNFILLED GAPS FOUND</p>
+                  )}
+                </div>
+              </div>
+
+              {/* MA Comparison and Delivery Pattern */}
+              <div className="space-y-4">
+                <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-4">
+                  <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Delivery & Patterns</h4>
+                  <div className="grid grid-cols-2 gap-3">
+                    {niftyTraderData.analysisData?.priceTable?.[0] && (() => {
+                      const latest = niftyTraderData.analysisData.priceTable[0];
+                      return (
+                        <div className="p-3 bg-slate-900/45 border border-slate-800 rounded-xl">
+                          <span className="text-[8px] font-black text-slate-500 uppercase tracking-wider block mb-1">Delivery %</span>
+                          <span className="text-base font-black text-slate-100 font-mono">
+                            {latest.delivery_percentage ? `${latest.delivery_percentage}%` : "N/A"}
+                          </span>
+                          <span className="text-[8px] font-bold text-slate-500 block mt-0.5">
+                            Vol: {latest.volume?.toLocaleString('en-IN')}
+                          </span>
+                        </div>
+                      );
+                    })()}
+                    {niftyTraderData.analysisData?.stocktrend && (() => {
+                      const trend = niftyTraderData.analysisData.stocktrend;
+                      const hasNr7 = trend.nr7_today?.toLowerCase() === 'yes';
+                      return (
+                        <div className={cn("p-3 border rounded-xl",
+                          hasNr7 ? "bg-blue-950/20 border-blue-900/40" : "bg-slate-900/45 border-slate-800"
+                        )}>
+                          <span className="text-[8px] font-black text-slate-500 uppercase tracking-wider block mb-1">NR7 Pattern</span>
+                          <span className={cn("text-base font-black font-mono", hasNr7 ? "text-blue-400 animate-pulse" : "text-slate-400")}>
+                            {trend.nr7_today || "NO"}
+                          </span>
+                          <span className="text-[8px] font-bold text-slate-500 block mt-0.5">
+                            Narrow Range 7
+                          </span>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
+
+                {niftyTraderData.analysisData?.stocktrend && (() => {
+                  const trend = niftyTraderData.analysisData.stocktrend;
+                  const currentPrice = niftyTraderData.analysisData.symbolData?.last_trade_price || 0;
+                  const smas = [
+                    { label: '10 SMA', val: trend.sma_10_days },
+                    { label: '20 SMA', val: trend.sma_20_days },
+                    { label: '50 SMA', val: trend.sma_50_days },
+                    { label: '100 SMA', val: trend.sma_100_days },
+                    { label: '200 SMA', val: trend.sma_200_days },
+                  ];
+                  return (
+                    <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-4">
+                      <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Simple Moving Averages</h4>
+                      <div className="grid grid-cols-5 gap-2">
+                        {smas.map((sma) => {
+                          const isAbove = currentPrice >= (sma.val || 0);
+                          return (
+                            <div key={sma.label} className="p-2 bg-slate-900/45 border border-slate-800/60 rounded-xl text-center">
+                              <span className="text-[8px] font-black text-slate-500 uppercase block mb-1">{sma.label.split(' ')[0]}</span>
+                              <span className="text-[10px] font-black text-slate-200 font-mono block">₹{Math.round(sma.val || 0)}</span>
+                              <span className={cn("text-[7px] font-black font-mono px-1 py-0.5 rounded uppercase mt-1 inline-block",
+                                isAbove ? "bg-emerald-500/10 text-emerald-400" : "bg-rose-500/10 text-rose-400"
+                              )}>
+                                {isAbove ? "ABOVE" : "BELOW"}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -2049,6 +2271,48 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                   </table>
                 </div>
               </Card>
+
+              {/* NiftyTrader Peer Comparison Table */}
+              {niftyTraderData?.industryData?.lstFinancires && (() => {
+                const peers = niftyTraderData.industryData.lstFinancires;
+                return (
+                  <Card title="NiftyTrader Industry Peer Comparison" icon={PieChart}>
+                    <div className="overflow-x-auto pt-2">
+                      <table className="w-full text-left text-[10px]">
+                        <thead>
+                          <tr className="text-slate-500 font-black uppercase tracking-widest border-b border-slate-800">
+                            <th className="pb-2">Symbol</th>
+                            <th className="pb-2">Company Name</th>
+                            <th className="pb-2 text-right">Market Cap (Cr)</th>
+                            <th className="pb-2 text-right">CMP</th>
+                            <th className="pb-2 text-right">P/E Ratio</th>
+                            <th className="pb-2 text-right">Sales Growth %</th>
+                            <th className="pb-2 text-right">Book Value</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-800/30 font-mono">
+                          {peers.map((peer: any, idx: number) => {
+                            const isCurrent = peer.symbol?.toUpperCase() === symbol.toUpperCase();
+                            return (
+                              <tr key={idx} className={cn("hover:bg-slate-900/30 text-slate-300 transition-colors", isCurrent && "bg-blue-950/20 text-blue-400")}>
+                                <td className="py-2.5 font-black uppercase tracking-widest">{peer.symbol}</td>
+                                <td className="py-2.5 font-sans font-bold text-slate-350 truncate max-w-[150px]" title={peer.company_Name}>{peer.company_Name}</td>
+                                <td className="py-2.5 text-right font-bold tabular-nums">{peer.market_Cap ? parseFloat(peer.market_Cap).toLocaleString('en-IN') : '—'}</td>
+                                <td className="py-2.5 text-right font-bold tabular-nums">₹{peer.current_price || peer.cmp || '—'}</td>
+                                <td className="py-2.5 text-right font-bold tabular-nums">{peer.stock_PE || '—'}</td>
+                                <td className={cn("py-2.5 text-right font-bold tabular-nums",
+                                  parseFloat(peer.sales_Growth) >= 0 ? "text-emerald-400" : parseFloat(peer.sales_Growth) < 0 ? "text-rose-400" : "text-slate-400"
+                                )}>{peer.sales_Growth ? `${peer.sales_Growth}%` : '—'}</td>
+                                <td className="py-2.5 text-right font-bold tabular-nums">₹{peer.book_Value || '—'}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </Card>
+                );
+              })()}
             </>
           )}
         </div>

@@ -91,4 +91,11 @@ export const stocksRouter = router({
         tradebrains: tbData ?? null,
       };
     }),
+
+  getNiftyTraderData: publicProcedure
+    .input(z.object({ symbol: z.string() }))
+    .query(async ({ input }) => {
+      const { fetchNiftyTraderStockData } = await import('../niftytraderService');
+      return fetchNiftyTraderStockData(input.symbol);
+    }),
 });

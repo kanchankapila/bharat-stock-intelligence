@@ -23,6 +23,7 @@ export const V2StockDetails: React.FC<V2StockDetailsProps> = ({ symbol, stock, o
   const { data: fno } = trpc.getFnOSignals.useQuery({ symbol });
   const { data: overview } = trpc.getCompanyOverview.useQuery({ symbol });
   const { data: profileAnalysis } = trpc.getCompanyProfileAnalysis.useQuery({ symbol });
+  const { data: niftyTraderData } = trpc.getNiftyTraderData.useQuery({ symbol });
 
   // Generate synthetic high-fidelity candlestick data for Lightweight Chart
   const [chartData] = useState(() => {
@@ -71,7 +72,15 @@ export const V2StockDetails: React.FC<V2StockDetailsProps> = ({ symbol, stock, o
           </button>
           <div>
             <h2 className="text-2xl font-black text-slate-100 italic tracking-tighter uppercase font-mono">{symbol} DETAILS</h2>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">V2 Core Workspace</p>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5 flex flex-wrap items-center gap-2">
+              <span>V2 Core Workspace</span>
+              {niftyTraderData?.analysisData?.symbolData?.created_at && (
+                <>
+                  <span className="text-slate-600">•</span>
+                  <span className="text-indigo-400">NT Updated: {new Date(niftyTraderData.analysisData.symbolData.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+                </>
+              )}
+            </p>
           </div>
         </div>
 
@@ -115,6 +124,114 @@ export const V2StockDetails: React.FC<V2StockDetailsProps> = ({ symbol, stock, o
               ))}
             </div>
           </div>
+
+          {/* NiftyTrader Technical Signals */}
+          {niftyTraderData && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Column A: Gaps Analysis */}
+              <div className="p-6 bg-terminal-panel border border-terminal-border rounded-2xl">
+                <h3 className="text-xs font-black text-slate-300 uppercase tracking-widest mb-4 font-mono flex items-center gap-2">
+                  <TrendingUp className="w-4 h-4 text-indigo-400" /> NiftyTrader Gap Analysis
+                </h3>
+                <div className="space-y-3 max-h-[300px] overflow-y-auto pr-1 terminal-scrollbar">
+                  {niftyTraderData.analysisData?.msg_data?.length ? (
+                    niftyTraderData.analysisData.msg_data.map((msg: string, idx: number) => {
+                      const isSupport = msg.toLowerCase().includes('support');
+                      return (
+                        <div key={idx} className={cn("p-3 rounded-xl border text-[11px] leading-relaxed font-mono flex items-start gap-2",
+                          isSupport ? "bg-emerald-950/20 border-emerald-900/50 text-emerald-400" : "bg-rose-950/20 border-rose-900/50 text-rose-400"
+                        )}>
+                          <span className="font-black shrink-0">{isSupport ? "▲" : "▼"}</span>
+                          <span>{msg}</span>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <p className="text-center py-6 text-slate-500 text-[10px] font-mono">NO UNFILLED GAPS FOUND</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Column B: Moving Averages & Delivery */}
+              <div className="space-y-6">
+                {/* Delivery and NR7 Card */}
+                <div className="p-6 bg-terminal-panel border border-terminal-border rounded-2xl">
+                  <h3 className="text-xs font-black text-slate-300 uppercase tracking-widest mb-4 font-mono">Delivery & Patterns</h3>
+                  <div className="grid grid-cols-2 gap-4">
+                    {niftyTraderData.analysisData?.priceTable?.[0] && (() => {
+                      const latest = niftyTraderData.analysisData.priceTable[0];
+                      return (
+                        <div className="p-4 bg-terminal-panel-header/50 border border-terminal-border rounded-xl">
+                          <span className="text-[9px] font-black text-slate-500 uppercase tracking-wider block mb-1">Delivery %</span>
+                          <span className="text-lg font-black text-slate-100 font-mono">
+                            {latest.delivery_percentage ? `${latest.delivery_percentage}%` : "N/A"}
+                          </span>
+                          <span className="text-[8px] font-bold text-slate-500 block mt-1">
+                            Vol: {latest.volume?.toLocaleString('en-IN')}
+                          </span>
+                        </div>
+                      );
+                    })()}
+                    {niftyTraderData.analysisData?.stocktrend && (() => {
+                      const trend = niftyTraderData.analysisData.stocktrend;
+                      const hasNr7 = trend.nr7_today?.toLowerCase() === 'yes';
+                      return (
+                        <div className={cn("p-4 border rounded-xl",
+                          hasNr7 ? "bg-blue-950/20 border-blue-900/50" : "bg-terminal-panel-header/50 border-terminal-border"
+                        )}>
+                          <span className="text-[9px] font-black text-slate-500 uppercase tracking-wider block mb-1">NR7 Pattern</span>
+                          <span className={cn("text-lg font-black font-mono", hasNr7 ? "text-blue-400 animate-pulse" : "text-slate-400")}>
+                            {trend.nr7_today || "NO"}
+                          </span>
+                          <span className="text-[8px] font-bold text-slate-500 block mt-1">
+                            Narrow Range 7
+                          </span>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
+
+                {/* SMAs Comparison Table */}
+                {niftyTraderData.analysisData?.stocktrend && (() => {
+                  const trend = niftyTraderData.analysisData.stocktrend;
+                  const currentPrice = niftyTraderData.analysisData.symbolData?.last_trade_price || 0;
+                  const smas = [
+                    { label: '10 SMA', val: trend.sma_10_days },
+                    { label: '20 SMA', val: trend.sma_20_days },
+                    { label: '50 SMA', val: trend.sma_50_days },
+                    { label: '100 SMA', val: trend.sma_100_days },
+                    { label: '200 SMA', val: trend.sma_200_days },
+                  ];
+                  return (
+                    <div className="p-6 bg-terminal-panel border border-terminal-border rounded-2xl">
+                      <h3 className="text-xs font-black text-slate-300 uppercase tracking-widest mb-4 font-mono">Simple Moving Averages</h3>
+                      <div className="space-y-2">
+                        {smas.map((sma) => {
+                          const isAbove = currentPrice >= (sma.val || 0);
+                          return (
+                            <div key={sma.label} className="flex justify-between items-center py-2 border-b border-terminal-border/40 last:border-0">
+                              <span className="text-[10px] font-bold text-slate-400">{sma.label}</span>
+                              <div className="flex items-center gap-3">
+                                <span className="text-xs font-black text-slate-200 font-mono">₹{sma.val?.toFixed(2) || '—'}</span>
+                                {sma.val && (
+                                  <span className={cn("text-[9px] font-black font-mono px-2 py-0.5 rounded uppercase",
+                                    isAbove ? "bg-emerald-500/10 text-emerald-400" : "bg-rose-500/10 text-rose-400"
+                                  )}>
+                                    {isAbove ? "ABOVE" : "BELOW"}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -347,6 +464,135 @@ export const V2StockDetails: React.FC<V2StockDetailsProps> = ({ symbol, stock, o
                 </div>
               </div>
             )}
+            {/* Peer Comparison (NiftyTrader) */}
+            {niftyTraderData?.industryData?.lstFinancires && (() => {
+              const peers = niftyTraderData.industryData.lstFinancires;
+              return (
+                <div className="p-6 bg-terminal-panel border border-terminal-border rounded-2xl">
+                  <h3 className="text-xs font-black text-slate-300 uppercase tracking-widest mb-4 font-mono flex items-center gap-2">
+                    <PieChart className="w-4 h-4 text-blue-400" /> Industry Peer Comparison (NiftyTrader)
+                  </h3>
+                  <div className="overflow-x-auto terminal-scrollbar">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="border-b border-terminal-border/60">
+                          <th className="py-2.5 text-[9px] font-black text-slate-500 uppercase tracking-wider">Symbol</th>
+                          <th className="py-2.5 text-[9px] font-black text-slate-500 uppercase tracking-wider">Company Name</th>
+                          <th className="py-2.5 text-[9px] font-black text-slate-500 uppercase tracking-wider text-right">Mkt Cap (Cr)</th>
+                          <th className="py-2.5 text-[9px] font-black text-slate-500 uppercase tracking-wider text-right">CMP</th>
+                          <th className="py-2.5 text-[9px] font-black text-slate-500 uppercase tracking-wider text-right">P/E</th>
+                          <th className="py-2.5 text-[9px] font-black text-slate-500 uppercase tracking-wider text-right">Sales Gr %</th>
+                          <th className="py-2.5 text-[9px] font-black text-slate-500 uppercase tracking-wider text-right">Book Value</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-terminal-border/30">
+                        {peers.map((peer: any, idx: number) => {
+                          const isCurrent = peer.symbol?.toUpperCase() === symbol.toUpperCase();
+                          return (
+                            <tr key={idx} className={cn("hover:bg-slate-900/30 font-mono text-[10px]", isCurrent && "bg-blue-950/20 text-blue-300")}>
+                              <td className="py-3 font-bold">{peer.symbol}</td>
+                              <td className="py-3 text-[9px] font-sans text-slate-400 max-w-[150px] truncate" title={peer.company_Name}>{peer.company_Name}</td>
+                              <td className="py-3 text-right">{peer.market_Cap ? parseFloat(peer.market_Cap).toLocaleString('en-IN') : '—'}</td>
+                              <td className="py-3 text-right">₹{peer.current_price || peer.cmp || '—'}</td>
+                              <td className="py-3 text-right">{peer.stock_PE || '—'}</td>
+                              <td className={cn("py-3 text-right font-bold", 
+                                parseFloat(peer.sales_Growth) >= 0 ? "text-emerald-400" : parseFloat(peer.sales_Growth) < 0 ? "text-rose-400" : "text-slate-400"
+                              )}>
+                                {peer.sales_Growth ? `${peer.sales_Growth}%` : '—'}
+                              </td>
+                              <td className="py-3 text-right">₹{peer.book_Value || '—'}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Historical Annual Financials (NiftyTrader) */}
+            {niftyTraderData?.industryData?.lstfutureprojectval && (() => {
+              const annuals = [...niftyTraderData.industryData.lstfutureprojectval].sort((a: any, b: any) => {
+                const parseYear = (str: string) => parseInt(str.replace(/[^\d]/g, ''), 10) || 0;
+                return parseYear(a.year) - parseYear(b.year);
+              });
+
+              if (annuals.length === 0) return null;
+
+              return (
+                <div className="p-6 bg-terminal-panel border border-terminal-border rounded-2xl">
+                  <h3 className="text-xs font-black text-slate-300 uppercase tracking-widest mb-4 font-mono flex items-center gap-2">
+                    <History className="w-4 h-4 text-emerald-400" /> Historical Annual Performance (NiftyTrader)
+                  </h3>
+                  <div className="overflow-x-auto terminal-scrollbar">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="border-b border-terminal-border/60">
+                          <th className="py-2.5 text-[9px] font-black text-slate-500 uppercase tracking-wider">Year</th>
+                          <th className="py-2.5 text-[9px] font-black text-slate-500 uppercase tracking-wider text-right">Sales Revenue (Cr)</th>
+                          <th className="py-2.5 text-[9px] font-black text-slate-500 uppercase tracking-wider text-right">Net Profit (Cr)</th>
+                          <th className="py-2.5 text-[9px] font-black text-slate-500 uppercase tracking-wider text-right">Net Profit Margin %</th>
+                          <th className="py-2.5 text-[9px] font-black text-slate-500 uppercase tracking-wider text-right">Actual EPS</th>
+                          <th className="py-2.5 text-[9px] font-black text-slate-500 uppercase tracking-wider text-right">Reserves (Cr)</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-terminal-border/30">
+                        {annuals.map((row: any, idx: number) => {
+                          const marginPct = (row.npm * 100).toFixed(1);
+                          return (
+                            <tr key={idx} className="hover:bg-slate-900/30 font-mono text-[10px] text-slate-300">
+                              <td className="py-3 font-bold text-slate-100">{row.year}</td>
+                              <td className="py-3 text-right">₹{row.sales_Revenue ? parseFloat(row.sales_Revenue).toLocaleString('en-IN') : '—'}</td>
+                              <td className={cn("py-3 text-right font-bold", 
+                                parseFloat(row.netProfit) >= 0 ? "text-emerald-400" : parseFloat(row.netProfit) < 0 ? "text-rose-400" : "text-slate-400"
+                              )}>
+                                ₹{row.netProfit ? parseFloat(row.netProfit).toLocaleString('en-IN') : '—'}
+                              </td>
+                              <td className="py-3 text-right">{row.npm != null ? `${marginPct}%` : '—'}</td>
+                              <td className="py-3 text-right">₹{row.actualEPS || row.epSinRs || '—'}</td>
+                              <td className="py-3 text-right">{row.reserves ? `₹${parseFloat(row.reserves).toLocaleString('en-IN')}` : '—'}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Recent Quarterly Performance (NiftyTrader) */}
+            {niftyTraderData?.industryData?.lastThreeQTRModel && (() => {
+              const quarters = niftyTraderData.industryData.lastThreeQTRModel;
+              if (quarters.length === 0) return null;
+              return (
+                <div className="p-6 bg-terminal-panel border border-terminal-border rounded-2xl">
+                  <h3 className="text-xs font-black text-slate-300 uppercase tracking-widest mb-4 font-mono flex items-center gap-2">
+                    <BarChart3 className="w-4 h-4 text-violet-400" /> Recent Quarterly Performance (NiftyTrader)
+                  </h3>
+                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                    {quarters.map((q: any, idx: number) => (
+                      <div key={idx} className="p-4 bg-terminal-panel-header/50 border border-terminal-border rounded-xl">
+                        <span className="text-[9px] font-black text-slate-500 uppercase tracking-wider block mb-1">{q.year}</span>
+                        <div className="space-y-1">
+                          <div className="flex justify-between items-center text-[10px]">
+                            <span className="text-slate-400">Sales:</span>
+                            <span className="font-mono font-black text-slate-200">₹{parseFloat(q.sales_Revenue || '0').toLocaleString('en-IN')}Cr</span>
+                          </div>
+                          <div className="flex justify-between items-center text-[10px]">
+                            <span className="text-slate-400">Profit:</span>
+                            <span className={cn("font-mono font-black", 
+                              parseFloat(q.netProfit || '0') >= 0 ? "text-emerald-400" : "text-rose-400"
+                            )}>₹{parseFloat(q.netProfit || '0').toLocaleString('en-IN')}Cr</span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
 
           <div className="lg:col-span-4 space-y-6">
@@ -411,6 +657,36 @@ export const V2StockDetails: React.FC<V2StockDetailsProps> = ({ symbol, stock, o
                 ))}
               </div>
             </div>
+
+            {/* NiftyTrader Financial Ratios */}
+            {niftyTraderData?.financialData?.[0] && (() => {
+              const fin = niftyTraderData.financialData[0];
+              return (
+                <div className="p-6 bg-terminal-panel border border-terminal-border rounded-2xl">
+                  <h3 className="text-xs font-black text-slate-300 uppercase tracking-widest mb-4 font-mono flex items-center gap-2">
+                    <Database className="w-4 h-4 text-emerald-400" /> NiftyTrader Key Metrics
+                  </h3>
+                  <div className="space-y-3">
+                    {[
+                      { label: 'Market Cap', val: `₹${fin.market_cap?.toLocaleString('en-IN')} Cr` },
+                      { label: 'Current Price', val: `₹${fin.current_price || '—'}` },
+                      { label: 'Stock P/E', val: fin.stock_pe },
+                      { label: 'Book Value', val: `₹${fin.book_value || '—'}` },
+                      { label: 'Dividend Yield', val: fin.dividend_yield ? `${fin.dividend_yield}%` : '—' },
+                      { label: 'ROCE %', val: fin.roce ? `${fin.roce}%` : '—' },
+                      { label: 'ROE %', val: fin.roe ? `${fin.roe}%` : '—' },
+                      { label: 'Sales Growth %', val: fin.sales_growth ? `${fin.sales_growth}%` : '—' },
+                      { label: 'Face Value', val: fin.face_value },
+                    ].map((metric) => (
+                      <div key={metric.label} className="flex justify-between items-center py-3 border-b border-terminal-border/40 last:border-0">
+                        <span className="text-xs font-medium text-slate-400">{metric.label}</span>
+                        <span className="text-xs font-black text-slate-200 font-mono">{metric.val ?? '—'}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}

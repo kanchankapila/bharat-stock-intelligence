@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git commit *)",
+      "Bash(bash C:/Users/amitk/.claude/plugins/cache/claude-plugins-official/superpowers/6.0.3/skills/subagent-driven-development/scripts/review-package aad9784 47c74ad)",
+      "Bash(bash C:/Users/amitk/.claude/plugins/cache/claude-plugins-official/superpowers/6.0.3/skills/subagent-driven-development/scripts/task-brief docs/superpowers/plans/2026-06-19-signal-model-rationalization-cluster-a.md 3)"
+    ]
+  }
+}

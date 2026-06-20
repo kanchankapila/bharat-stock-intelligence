@@ -18,7 +18,13 @@
       "Bash(npx tsx *)",
       "Read(//tmp/**)",
       "mcp__alphaquant-pro__query_stocks_db",
-      "Bash(d:\\\\Github\\\\bharat-stock-intelligence\\\\.venv\\\\Scripts\\\\python -c \"import ast; ast.parse\\(open\\('src/server/dl_engine.py'\\).read\\(\\)\\); print\\('syntax OK'\\)\")"
+      "Bash(d:\\\\Github\\\\bharat-stock-intelligence\\\\.venv\\\\Scripts\\\\python -c \"import ast; ast.parse\\(open\\('src/server/dl_engine.py'\\).read\\(\\)\\); print\\('syntax OK'\\)\")",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(npx vitest *)",
+      "Bash(git commit -q -m ' *)",
+      "Bash(sed -i 's/except sqlite3\\\\.OperationalError:/except Exception:/' backfill_ohlcv.py)",
+      "Bash(sed -i '/self\\\\.conn\\\\.row_factory = sqlite3\\\\.Row/d' performance_tracker.py)"
     ]
   },
   "enabledPlugins": {}
