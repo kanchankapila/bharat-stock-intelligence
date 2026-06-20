@@ -1,4 +1,4 @@
-﻿/**
+/**
  * BullMQ queues & workers
  *
  * Two queues:
@@ -339,6 +339,10 @@ async function resolveOutcomesResilient(horizon: number): Promise<void> {
 async function processOutcomeResolver(_job: Job): Promise<{ success: boolean }> {
   await runPython('fii_dii_fetcher.py', [], 90_000).catch(() => {});
 
+  // Flag bad-print OHLCV bars first so outcome labels skip them (ohlcv_quality.is_suspect).
+  await runPython('ohlcv_quality.py', ['--no-ingest'], 180_000)
+    .catch(e => console.warn('[QUEUE] ohlcv_quality flag failed:', (e as Error).message));
+
   await resolveOutcomesResilient(1);
   await resolveOutcomesResilient(5);
   await resolveOutcomesResilient(15);
@@ -358,6 +362,10 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await runPython('pcr_fetcher.py', [], 90_000).catch(() => {});
   await runPython('institutional_quant_engine.py', [], 120_000).catch(() => {});
   await runPython('finbert_scorer.py', ['--days', '1'], 180_000).catch(() => {});
+
+  // Flag bad-print OHLCV bars first so outcome labels skip them (ohlcv_quality.is_suspect).
+  await runPython('ohlcv_quality.py', ['--no-ingest'], 180_000)
+    .catch(e => console.warn('[QUEUE] ohlcv_quality flag failed:', (e as Error).message));
 
   await resolveOutcomesResilient(1);
   await resolveOutcomesResilient(5);
@@ -434,7 +442,7 @@ async function processAgentStrategist(_job: Job): Promise<{ success: boolean }> 
     SELECT symbol, timeframe, entry_zone_low, entry_zone_high,
            stop_loss, target_1, target_2, target_3, composite_score, narrative
     FROM agent_strategy_picks
-    WHERE run_date = date('now') AND conviction = 'HIGH'
+    WHERE date(run_date) = date('now') AND conviction = 'HIGH'
     ORDER BY composite_score DESC
   `);
 

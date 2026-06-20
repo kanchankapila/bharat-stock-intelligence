@@ -17,7 +17,7 @@ def make_db():
         );
         CREATE TABLE stock_ohlcv (
             symbol TEXT, date TEXT, open REAL, high REAL,
-            low REAL, close REAL, volume INTEGER,
+            low REAL, close REAL, volume INTEGER, is_suspect INTEGER DEFAULT 0,
             PRIMARY KEY (symbol, date)
         );
         CREATE TABLE signal_outcomes (
@@ -37,7 +37,7 @@ def seed_flat_history(conn, symbol, price=100.0, n=15):
     d = datetime.date.fromisoformat(SIGNAL_DATE)
     for i in range(n, 0, -1):
         day = (d - datetime.timedelta(days=i)).isoformat()
-        conn.execute("INSERT OR IGNORE INTO stock_ohlcv VALUES (?,?,?,?,?,?,?)",
+        conn.execute("INSERT OR IGNORE INTO stock_ohlcv (symbol,date,open,high,low,close,volume) VALUES (?,?,?,?,?,?,?)",
                      (symbol, day, price, price, price, price, 100000))
 
 
@@ -50,7 +50,7 @@ def add_signal(conn, symbol, *, stop_loss=None, score=6):
 
 
 def add_exit_bar(conn, symbol, *, open_=100.0, high=100.0, low=100.0, close=100.0):
-    conn.execute("INSERT INTO stock_ohlcv VALUES (?,?,?,?,?,?,?)",
+    conn.execute("INSERT INTO stock_ohlcv (symbol,date,open,high,low,close,volume) VALUES (?,?,?,?,?,?,?)",
                  (symbol, EXIT_DATE, open_, high, low, close, 100000))
 
 
@@ -114,6 +114,35 @@ def test_pending_when_no_ohlcv():
     conn.commit()
     assert resolve(conn)['resolved'] == 0
     assert get_row(conn, 'WIPRO')[0] == 'PENDING'
+
+
+def test_resolve_outcomes_excludes_suspect_bars():
+    conn = make_db()
+    seed_flat_history(conn, 'SUSP')
+    add_signal(conn, 'SUSP')
+    # the only post-signal bar is a flagged bad print that would otherwise be a +100% WIN
+    conn.execute("INSERT INTO stock_ohlcv (symbol,date,open,high,low,close,volume,is_suspect) "
+                 "VALUES ('SUSP',?,100,200,100,200,100000,1)", (EXIT_DATE,))
+    conn.commit()
+    resolve(conn)
+    row = get_row(conn, 'SUSP')
+    assert row is not None
+    assert row[0] == 'PENDING'   # nothing clean to resolve against
+
+
+def test_volatility_threshold_ignores_suspect_bars():
+    from outcome_resolver import get_volatility_threshold
+    conn = make_db()
+    base = datetime.date.fromisoformat(SIGNAL_DATE)
+    for i in range(12, 0, -1):
+        d = (base - datetime.timedelta(days=i)).isoformat()
+        if i == 6:   # a suspect spike that would blow up the vol estimate if counted
+            conn.execute("INSERT INTO stock_ohlcv (symbol,date,close,is_suspect) VALUES ('V',?,5000,1)", (d,))
+        else:
+            conn.execute("INSERT INTO stock_ohlcv (symbol,date,close,is_suspect) VALUES ('V',?,100,0)", (d,))
+    conn.commit()
+    thr = get_volatility_threshold(conn, 'V', SIGNAL_DATE, 5)
+    assert thr == pytest.approx(0.5, abs=0.01)   # flat history -> floor; spike excluded
 
 
 def test_dry_run_writes_nothing():

@@ -62,7 +62,8 @@ CREATE TABLE IF NOT EXISTS feature_store (
 
 _OHLCV_DDL = """
 CREATE TABLE IF NOT EXISTS stock_ohlcv (
-    symbol TEXT, date TEXT, open REAL, high REAL, low REAL, close REAL, volume REAL
+    symbol TEXT, date TEXT, open REAL, high REAL, low REAL, close REAL, volume REAL,
+    is_suspect INTEGER DEFAULT 0
 )
 """
 

@@ -319,7 +319,7 @@ class FeatureEngineer:
         try:
             ohlcv = read_df(
                 "SELECT date, open, high, low, close, volume FROM stock_ohlcv "
-                "WHERE symbol=? AND date>=? ORDER BY date",
+                "WHERE symbol=? AND date>=? AND COALESCE(is_suspect,0)=0 ORDER BY date",
                 (symbol, cutoff),
             )
             if len(ohlcv) < 60:
@@ -576,7 +576,7 @@ def _compute_symbol_unscaled(args: tuple):
         cutoff = (datetime.today() - timedelta(days=lookback_days)).date()
         ohlcv = read_df(
             "SELECT date, open, high, low, close, volume FROM stock_ohlcv "
-            "WHERE symbol=? AND date>=? ORDER BY date",
+            "WHERE symbol=? AND date>=? AND COALESCE(is_suspect,0)=0 ORDER BY date",
             (symbol, cutoff),
         )
         if len(ohlcv) < 60:

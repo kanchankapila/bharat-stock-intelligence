@@ -130,7 +130,7 @@ def get_volatility_threshold(conn: ConnWrapper, symbol: str, signal_date: str, h
     """
     rows = conn.execute("""
         SELECT close FROM stock_ohlcv
-        WHERE symbol = ? AND date <= ?
+        WHERE symbol = ? AND date <= ? AND COALESCE(is_suspect, 0) = 0
         ORDER BY date DESC LIMIT 21
     """, (symbol, signal_date)).fetchall()
     
@@ -231,8 +231,8 @@ def resolve_outcomes(
         
         # Get actual next trading day and its open price from DB
         next_trading_day_row = conn.execute("""
-            SELECT date, open FROM stock_ohlcv 
-            WHERE symbol = ? AND date > ? 
+            SELECT date, open FROM stock_ohlcv
+            WHERE symbol = ? AND date > ? AND COALESCE(is_suspect, 0) = 0
             ORDER BY date ASC LIMIT 1
         """, (sym, signal_date)).fetchone()
         
@@ -255,7 +255,7 @@ def resolve_outcomes(
             sl_hit = conn.execute("""
                 SELECT date, low FROM stock_ohlcv
                 WHERE symbol = ? AND date >= ? AND date <= ?
-                  AND low <= ?
+                  AND low <= ? AND COALESCE(is_suspect, 0) = 0
                 ORDER BY date ASC, low ASC LIMIT 1
             """, (sym, next_trading_day, exit_target_date, stop_loss)).fetchone()
 
@@ -269,7 +269,7 @@ def resolve_outcomes(
         if outcome is None:
             exit_row = conn.execute("""
                 SELECT date, close FROM stock_ohlcv
-                WHERE symbol = ? AND date >= ?
+                WHERE symbol = ? AND date >= ? AND COALESCE(is_suspect, 0) = 0
                 ORDER BY date ASC LIMIT 1
             """, (sym, exit_target_date)).fetchone()
 
@@ -475,12 +475,12 @@ def resolve_dl_predictions(conn: ConnWrapper, dry_run: bool = False) -> dict[str
                 continue
 
             entry_row = conn.execute(
-                "SELECT open FROM stock_ohlcv WHERE symbol=? AND date > ? ORDER BY date ASC LIMIT 1",
+                "SELECT open FROM stock_ohlcv WHERE symbol=? AND date > ? AND COALESCE(is_suspect,0)=0 ORDER BY date ASC LIMIT 1",
                 (sym, pd_str),
             ).fetchone()
             exit_target = (pd_obj + datetime.timedelta(days=horizon)).isoformat()
             exit_row = conn.execute(
-                "SELECT close FROM stock_ohlcv WHERE symbol=? AND date >= ? ORDER BY date ASC LIMIT 1",
+                "SELECT close FROM stock_ohlcv WHERE symbol=? AND date >= ? AND COALESCE(is_suspect,0)=0 ORDER BY date ASC LIMIT 1",
                 (sym, exit_target),
             ).fetchone()
 
@@ -605,7 +605,7 @@ def resolve_recommendation_log(
         signal_date_obj = datetime.date.fromisoformat(signal_date_str)
 
         next_row = conn.execute(
-            "SELECT date FROM stock_ohlcv WHERE symbol = ? AND date > ? ORDER BY date ASC LIMIT 1",
+            "SELECT date FROM stock_ohlcv WHERE symbol = ? AND date > ? AND COALESCE(is_suspect,0)=0 ORDER BY date ASC LIMIT 1",
             (sym, signal_date_str)
         ).fetchone()
         next_trading_day = next_row[0] if next_row else (signal_date_obj + datetime.timedelta(days=1)).isoformat()
@@ -616,7 +616,7 @@ def resolve_recommendation_log(
         if stop_loss and stop_loss > 0:
             sl_hit = conn.execute("""
                 SELECT date, low FROM stock_ohlcv
-                WHERE symbol = ? AND date >= ? AND date <= ? AND low <= ?
+                WHERE symbol = ? AND date >= ? AND date <= ? AND low <= ? AND COALESCE(is_suspect,0)=0
                 ORDER BY date ASC LIMIT 1
             """, (sym, next_trading_day, exit_target_date, stop_loss)).fetchone()
 
@@ -628,7 +628,7 @@ def resolve_recommendation_log(
         if outcome is None:
             exit_row = conn.execute("""
                 SELECT date, close FROM stock_ohlcv
-                WHERE symbol = ? AND date >= ?
+                WHERE symbol = ? AND date >= ? AND COALESCE(is_suspect,0)=0
                 ORDER BY date ASC LIMIT 1
             """, (sym, exit_target_date)).fetchone()
 
