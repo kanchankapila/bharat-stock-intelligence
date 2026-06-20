@@ -1423,6 +1423,7 @@ CREATE TABLE IF NOT EXISTS "unified_recommendations" (
   "regime" TEXT NOT NULL,
   "unified_score" DOUBLE PRECISION NOT NULL,
   "conviction_level" TEXT NOT NULL,
+  "classification" TEXT,
   "screener_stock_score" DOUBLE PRECISION,
   "ml_score" DOUBLE PRECISION,
   "confluence_score" DOUBLE PRECISION,

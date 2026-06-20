@@ -99,14 +99,46 @@ def _fund_mult(score):
 
 
 def _normalize_to_100(raw):
+    """Percentile-rank normalization (0-100). Robust to outliers, unlike min-max which
+    collapses the whole cluster toward 0 when a single extreme value sets the max."""
     if not raw:
         return {}
-    values = list(raw.values())
-    lo, hi = min(values), max(values)
-    span = hi - lo
-    if span == 0:
+    n = len(raw)
+    if n == 1:
         return {k: 50.0 for k in raw}
-    return {k: (v - lo) / span * 100 for k, v in raw.items()}
+    values = list(raw.values())
+    out = {}
+    for k, v in raw.items():
+        less = sum(1 for x in values if x < v)
+        equal = sum(1 for x in values if x == v)
+        out[k] = (less + 0.5 * equal) / n * 100.0
+    return out
+
+
+def _blend(engine_scores, present_engines, weights):
+    """Weighted blend that renormalizes weights over the engines that actually have data
+    for this symbol, so missing engines (empty confluence/dl tables) don't deflate the score."""
+    active = {e: weights[e] for e in weights if e in present_engines}
+    wsum = sum(active.values())
+    if wsum <= 0:
+        return 0.0
+    return sum(active[e] / wsum * engine_scores.get(e, 0.0) for e in active)
+
+
+def _classify(score, bull, bear):
+    """Directional label (matches stock_scores taxonomy the Top Rated UI renders) from the
+    net screener bias balance, with magnitude gating the 'Strong' tiers."""
+    bull = bull or 0
+    bear = bear or 0
+    total = bull + bear
+    if total == 0:
+        return 'Hold'
+    r = (bull - bear) / total
+    if r > 0:
+        return 'Strong Buy' if (r >= 0.5 and score >= 66.0) else 'Buy'
+    if r < 0:
+        return 'Strong Sell' if (r <= -0.5 and score <= 34.0) else 'Sell'
+    return 'Hold'
 
 
 def _conviction(score):
@@ -293,7 +325,9 @@ class UnifiedRanker:
                 "SELECT symbol, AVG(signal_score) AS s FROM technical_signals WHERE date >= ? GROUP BY symbol",
                 (cutoff,),
             ).fetchall()
-            return {r['symbol']: float(r['s'] or 0) for r in rows}
+            # signal_score is a 0-10 composite; percentile-normalize to 0-100 so it is on the
+            # same scale as the other engines before blending.
+            return _normalize_to_100({r['symbol']: float(r['s'] or 0) for r in rows})
         except Exception:
             self.conn.rollback()
             return {}
@@ -487,29 +521,48 @@ class UnifiedRanker:
 
         all_symbols = set(screener_scores) | set(ml_scores) | set(confluence_scores) | set(technical_scores) | set(dl_scores)
 
+        engine_maps = {
+            'screener':   screener_scores,
+            'ml':         ml_scores,
+            'confluence': confluence_scores,
+            'technical':  technical_scores,
+            'dl':         dl_scores,
+        }
+
         results = []
         for sym in all_symbols:
             if not self._passes_rl_gate(sym):
                 continue
 
-            engine_scores = {
-                'screener':   screener_scores.get(sym, 0.0),
-                'ml':         ml_scores.get(sym, 0.0),
-                'confluence': confluence_scores.get(sym, 0.0),
-                'technical':  technical_scores.get(sym, 0.0),
-                'dl':         dl_scores.get(sym, 0.0),
-            }
-            unified = sum(base_weights[e] * engine_scores[e] for e in base_weights)
+            engine_scores = {e: m.get(sym, 0.0) for e, m in engine_maps.items()}
+            present = {e for e, m in engine_maps.items() if sym in m}
+            # renormalize weights over engines that actually have data for this symbol, so
+            # empty confluence/dl tables don't drag every score down to ~15.
+            unified = _blend(engine_scores, present, base_weights)
             if unified < 1:
                 continue
 
+            bull = bull_counts.get(sym, 0)
+            bear = bear_counts.get(sym, 0)
+            classification = _classify(unified, bull, bear)
+            cats = sorted({s.get('category', 'other') for s in membership.get(sym, [])} - {'other', ''})
+            screener_summary = (
+                f"{bull} bullish / {bear} bearish screener signals ({classification}); "
+                f"regime {regime}" + (f"; drivers: {', '.join(cats[:4])}" if cats else "")
+            )
+
             et = self._get_entry_targets(sym)
+            if not et.get('trade_reasoning'):
+                et['trade_reasoning'] = screener_summary
+
             results.append({
                 'symbol':                  sym,
                 'computed_at':             today,
                 'regime':                  regime,
                 'unified_score':           round(unified, 2),
                 'conviction_level':        _conviction(unified),
+                'classification':          classification,
+                'screener_names_json':     json.dumps(cats),
                 'screener_stock_score':    round(engine_scores['screener'], 2),
                 'ml_score':                round(engine_scores['ml'], 2),
                 'confluence_score':        round(engine_scores['confluence'], 2),
@@ -536,12 +589,14 @@ class UnifiedRanker:
         for r in results:
             cur.execute('''
                 INSERT INTO unified_recommendations
-                (symbol, computed_at, regime, unified_score, conviction_level,
+                (symbol, computed_at, regime, unified_score, conviction_level, classification,
+                 screener_names_json,
                  screener_stock_score, ml_score, confluence_score, technical_score, dl_score,
                  avg_engine_track_record, bullish_screener_count, bearish_screener_count,
                  fundamental_score, entry_zone_low, entry_zone_high, stop_loss,
                  target_1, target_2, target_3, risk_reward, timeframe, trade_reasoning, sector)
-                VALUES (:symbol, :computed_at, :regime, :unified_score, :conviction_level,
+                VALUES (:symbol, :computed_at, :regime, :unified_score, :conviction_level, :classification,
+                        :screener_names_json,
                         :screener_stock_score, :ml_score, :confluence_score, :technical_score,
                         :dl_score, :avg_engine_track_record, :bullish_screener_count,
                         :bearish_screener_count, :fundamental_score, :entry_zone_low,
@@ -549,7 +604,8 @@ class UnifiedRanker:
                         :risk_reward, :timeframe, :trade_reasoning, :sector)
                 ON CONFLICT(symbol, computed_at) DO UPDATE SET
                     regime=excluded.regime, unified_score=excluded.unified_score,
-                    conviction_level=excluded.conviction_level,
+                    conviction_level=excluded.conviction_level, classification=excluded.classification,
+                    screener_names_json=excluded.screener_names_json,
                     screener_stock_score=excluded.screener_stock_score, ml_score=excluded.ml_score,
                     confluence_score=excluded.confluence_score, technical_score=excluded.technical_score,
                     dl_score=excluded.dl_score, avg_engine_track_record=excluded.avg_engine_track_record,

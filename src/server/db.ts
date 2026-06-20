@@ -1265,6 +1265,7 @@ runMigration('033_unified_recommendations', `
     regime                  TEXT NOT NULL,
     unified_score           REAL NOT NULL,
     conviction_level        TEXT NOT NULL,
+    classification          TEXT,
     screener_stock_score    REAL,
     ml_score                REAL,
     confluence_score        REAL,
@@ -1549,6 +1550,9 @@ runMigration('044_unified_signals_rebuild_4col_unique', `
 runMigration('045_drop_legacy_signals', `
   DROP TABLE IF EXISTS signals;
 `);
+
+// Directional Buy/Sell label for the Top Rated UI reroute (unified_ranker._classify).
+migrateColumn('unified_recommendations', 'classification', 'TEXT');
 
 // ── Retention: confluence_signals is an append-only firehose (~700k rows, the single
 // largest contributor to DB bloat). expires_at exists but nothing pruned it. Delete

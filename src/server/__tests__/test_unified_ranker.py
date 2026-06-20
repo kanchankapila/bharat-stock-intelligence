@@ -61,7 +61,7 @@ def make_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             symbol TEXT NOT NULL, computed_at TEXT NOT NULL,
             regime TEXT NOT NULL, unified_score REAL NOT NULL,
-            conviction_level TEXT NOT NULL, screener_stock_score REAL,
+            conviction_level TEXT NOT NULL, classification TEXT, screener_stock_score REAL,
             ml_score REAL, confluence_score REAL, technical_score REAL,
             dl_score REAL, avg_engine_track_record REAL,
             bullish_screener_count INTEGER, bearish_screener_count INTEGER,
@@ -258,6 +258,29 @@ class TestUnifiedRankerRun:
         assert 'LOSER' not in symbols
         os.unlink(csv_path)
 
+    def test_run_emits_directional_classification(self):
+        # INFY is in two bullish screeners (bull_count=2, bear_count=0) -> must classify as a Buy,
+        # not be left without a directional label the Top Rated UI needs.
+        import os
+        ranker, conn, csv_path = self._setup()
+        results = ranker.run()
+        by_sym = {r['symbol']: r for r in results}
+        assert 'classification' in by_sym['INFY']
+        assert by_sym['INFY']['classification'] in ('Buy', 'Strong Buy')
+        # persisted to the table too
+        row = conn.execute("SELECT classification FROM unified_recommendations WHERE symbol='INFY'").fetchone()
+        assert row['classification'] in ('Buy', 'Strong Buy')
+        os.unlink(csv_path)
+
+    def test_run_populates_reasoning_from_screeners(self):
+        import os
+        ranker, conn, csv_path = self._setup()
+        results = ranker.run()
+        infy = next(r for r in results if r['symbol'] == 'INFY')
+        # reasoning must be non-empty even without an entry/target fallback source
+        assert infy['trade_reasoning'] and len(infy['trade_reasoning']) > 0
+        os.unlink(csv_path)
+
     def test_conviction_tiers_assigned_correctly(self):
         from unified_ranker import _conviction
         assert _conviction(90) == 'S_ELITE'
@@ -276,3 +299,61 @@ class TestUnifiedRankerRun:
         assert REGIME_WEIGHTS['CRASH']['screener'] == 0.40
         for regime, weights in REGIME_WEIGHTS.items():
             assert abs(sum(weights.values()) - 1.0) < 1e-9, f"{regime} weights don't sum to 1"
+
+
+class TestUIGradeRanking:
+    """Calibration + UI-grade output fixes so unified_recommendations can back the Top Rated tab."""
+
+    def test_blend_renormalizes_over_present_engines(self):
+        # confluence/dl/technical absent -> their weight must not deflate the score.
+        # A stock strong on the two engines it HAS data for should score high, not be dragged to ~15.
+        from unified_ranker import _blend
+        weights = {'screener': 0.30, 'ml': 0.20, 'confluence': 0.20, 'technical': 0.20, 'dl': 0.10}
+        engine_scores = {'screener': 50.0, 'ml': 60.0, 'confluence': 0.0, 'technical': 0.0, 'dl': 0.0}
+        present = {'screener', 'ml'}
+        score = _blend(engine_scores, present, weights)
+        # weights renormalize to screener .30/.50=.6, ml .20/.50=.4 -> .6*50 + .4*60 = 54
+        assert abs(score - 54.0) < 1e-6
+
+    def test_blend_returns_zero_when_no_engine_present(self):
+        from unified_ranker import _blend
+        weights = {'screener': 0.30, 'ml': 0.20, 'confluence': 0.20, 'technical': 0.20, 'dl': 0.10}
+        assert _blend({'screener': 0.0, 'ml': 0.0, 'confluence': 0.0, 'technical': 0.0, 'dl': 0.0},
+                      set(), weights) == 0.0
+
+    def test_blend_all_engines_present_matches_plain_weighted_sum(self):
+        from unified_ranker import _blend
+        weights = {'screener': 0.30, 'ml': 0.20, 'confluence': 0.20, 'technical': 0.20, 'dl': 0.10}
+        es = {'screener': 80.0, 'ml': 80.0, 'confluence': 80.0, 'technical': 80.0, 'dl': 80.0}
+        # all present, all 80 -> 80 regardless of weights
+        assert abs(_blend(es, set(es), weights) - 80.0) < 1e-6
+
+    def test_classify_strong_buy_on_dominant_bullish_and_high_score(self):
+        from unified_ranker import _classify
+        assert _classify(80.0, bull=8, bear=0) == 'Strong Buy'
+
+    def test_classify_buy_on_net_bullish(self):
+        from unified_ranker import _classify
+        assert _classify(55.0, bull=5, bear=3) == 'Buy'
+
+    def test_classify_strong_sell_on_dominant_bearish_and_low_score(self):
+        from unified_ranker import _classify
+        assert _classify(20.0, bull=0, bear=8) == 'Strong Sell'
+
+    def test_classify_sell_on_net_bearish(self):
+        from unified_ranker import _classify
+        assert _classify(45.0, bull=2, bear=4) == 'Sell'
+
+    def test_classify_hold_when_balanced_or_no_evidence(self):
+        from unified_ranker import _classify
+        assert _classify(50.0, bull=3, bear=3) == 'Hold'
+        assert _classify(50.0, bull=0, bear=0) == 'Hold'
+
+    def test_normalize_is_robust_to_a_single_outlier(self):
+        # min-max collapses the cluster near 0 when one outlier sets the max; percentile rank does not.
+        from unified_ranker import _normalize_to_100
+        raw = {'a': 1.0, 'b': 2.0, 'c': 3.0, 'd': 4.0, 'OUTLIER': 1000.0}
+        out = _normalize_to_100(raw)
+        # the non-outlier cluster must remain well-spread, not all crushed below ~1
+        assert out['d'] > 50.0
+        assert out['a'] < out['b'] < out['c'] < out['d'] < out['OUTLIER']
