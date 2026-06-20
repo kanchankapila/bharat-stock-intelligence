@@ -75,3 +75,6 @@ src/server/chatbot/chroma_store/
 Thumbs.db
 .vscode/
 .idea/
+
+# Local DB backups (scripts/backup_pg.py) — never commit
+backups/
