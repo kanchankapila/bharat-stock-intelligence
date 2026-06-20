@@ -69,7 +69,7 @@ def make_db():
             entry_zone_low REAL, entry_zone_high REAL, stop_loss REAL,
             target_1 REAL, target_2 REAL, target_3 REAL,
             risk_reward REAL, timeframe TEXT, sector TEXT,
-            trade_reasoning TEXT, UNIQUE(symbol, computed_at)
+            trade_reasoning TEXT, position_size_pct REAL, UNIQUE(symbol, computed_at)
         );
         CREATE TABLE unified_signals (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -80,7 +80,7 @@ def make_db():
         );
         CREATE TABLE quant_scores (
             symbol TEXT PRIMARY KEY,
-            piotroski_f_score INTEGER, return_on_equity REAL
+            piotroski_f_score INTEGER, return_on_equity REAL, annualized_vol REAL
         );
     ''')
     return conn
@@ -275,14 +275,35 @@ class TestUnifiedRankerRun:
                          "VALUES (?, '2026-05-01', 5.0, date('now','-10 days'))", (sym,))
             conn.execute("INSERT INTO technical_signals (symbol, date, win_probability, signal_score) "
                          "VALUES (?, date('now'), 0.75, 70)", (sym,))
-        conn.execute("INSERT INTO quant_scores VALUES ('GOODQ', 8, 20.0)")
-        conn.execute("INSERT INTO quant_scores VALUES ('BADQ', 1, 5.0)")
+        conn.execute("INSERT INTO quant_scores (symbol,piotroski_f_score,return_on_equity,annualized_vol) VALUES ('GOODQ', 8, 20.0, 30.0)")
+        conn.execute("INSERT INTO quant_scores (symbol,piotroski_f_score,return_on_equity,annualized_vol) VALUES ('BADQ', 1, 5.0, 30.0)")
         conn.commit()
 
         scores = {r['symbol']: r['unified_score'] for r in ranker.run()}
         assert 'GOODQ' in scores and 'BADQ' in scores
         assert scores['BADQ'] < scores['GOODQ']
         assert scores['BADQ'] <= scores['GOODQ'] * 0.7   # ~0.6x Piotroski-≤2 demotion
+        os.unlink(csv_path)
+
+    def test_position_sizing_favors_high_conviction_low_vol(self):
+        import os
+        ranker, conn, csv_path = self._setup()
+        # two buy candidates, identical screeners/scores; differ in win_prob + vol
+        for sym, wp, vol in [('HICONV', 0.80, 20.0), ('LOCONV', 0.55, 60.0)]:
+            conn.execute("INSERT INTO trendlyne_screener_stocks VALUES ('bull1',?,?)", (sym, sym))
+            conn.execute("INSERT INTO trendlyne_screener_stocks VALUES ('fund1',?,?)", (sym, sym))
+            conn.execute("INSERT INTO stock_scores VALUES (?, 'long_term', 75)", (sym,))
+            conn.execute("INSERT INTO recommendation_log (symbol, signal_date, actual_return_pct, generated_at) "
+                         "VALUES (?, '2026-05-01', 5.0, date('now','-10 days'))", (sym,))
+            conn.execute("INSERT INTO technical_signals (symbol, date, win_probability, signal_score) "
+                         "VALUES (?, date('now'), ?, 70)", (sym, wp))
+            conn.execute("INSERT INTO quant_scores VALUES (?, 7, 15.0, ?)", (sym, vol))
+        conn.commit()
+
+        results = ranker.run()
+        sizes = {r['symbol']: r['position_size_pct'] for r in results}
+        assert sizes.get('HICONV', 0) > sizes.get('LOCONV', 0)            # conviction×low-vol wins
+        assert all(0 <= (r['position_size_pct'] or 0) <= 10.0 for r in results)  # per-name cap
         os.unlink(csv_path)
 
     def test_run_emits_directional_classification(self):
@@ -424,3 +445,44 @@ def test_quality_gate_monotonic_non_decreasing_in_piotroski():
 def test_quality_gate_never_below_floor():
     from unified_ranker import quality_gate, QUALITY_GATE_FLOOR
     assert quality_gate(piotroski=0, roe=-99.0) >= QUALITY_GATE_FLOOR
+
+
+# ── #6 meta-labeling -> position sizing (Lopez de Prado bet size x inverse-vol) ──
+
+def test_bet_size_zero_at_or_below_neutral():
+    from unified_ranker import bet_size_from_probability
+    assert bet_size_from_probability(0.5) == 0.0
+    assert bet_size_from_probability(0.40) == 0.0
+    assert bet_size_from_probability(None) == 0.0
+
+
+def test_bet_size_grows_with_probability():
+    from unified_ranker import bet_size_from_probability
+    b60 = bet_size_from_probability(0.60)
+    b75 = bet_size_from_probability(0.75)
+    assert 0.0 < b60 < b75 <= 1.0
+
+
+def test_bet_size_high_conviction_near_one():
+    from unified_ranker import bet_size_from_probability
+    assert bet_size_from_probability(0.99) > 0.9
+
+
+def test_normalize_sizes_proportional_below_cap():
+    from unified_ranker import normalize_position_sizes
+    out = normalize_position_sizes({'a': 1.0, 'b': 3.0}, gross=1.0, cap=1.0)
+    assert out['a'] == pytest.approx(0.25)
+    assert out['b'] == pytest.approx(0.75)
+
+
+def test_normalize_sizes_respects_cap_and_gross():
+    from unified_ranker import normalize_position_sizes
+    out = normalize_position_sizes({'a': 100.0, 'b': 1.0, 'c': 1.0}, gross=1.0, cap=0.10)
+    assert out['a'] == pytest.approx(0.10)          # capped
+    assert all(0 <= v <= 0.10 for v in out.values())
+    assert sum(out.values()) <= 1.0 + 1e-9
+
+
+def test_normalize_sizes_all_zero():
+    from unified_ranker import normalize_position_sizes
+    assert normalize_position_sizes({'a': 0.0, 'b': 0.0}) == {'a': 0.0, 'b': 0.0}

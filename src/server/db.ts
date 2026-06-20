@@ -1568,6 +1568,7 @@ runMigration('045_drop_legacy_signals', `
 
 // Directional Buy/Sell label for the Top Rated UI reroute (unified_ranker._classify).
 migrateColumn('unified_recommendations', 'classification', 'TEXT');
+migrateColumn('unified_recommendations', 'position_size_pct', 'REAL');
 
 // ── Retention: confluence_signals is an append-only firehose (~700k rows, the single
 // largest contributor to DB bloat). expires_at exists but nothing pruned it. Delete

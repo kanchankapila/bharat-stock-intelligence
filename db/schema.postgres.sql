@@ -1457,6 +1457,7 @@ CREATE TABLE IF NOT EXISTS "unified_recommendations" (
   "timeframe" TEXT,
   "sector" TEXT,
   "trade_reasoning" TEXT,
+  "position_size_pct" DOUBLE PRECISION,
   UNIQUE ("symbol", "computed_at")
 );
 CREATE INDEX idx_ur_date_score ON unified_recommendations(computed_at, unified_score DESC);

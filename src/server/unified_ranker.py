@@ -5,6 +5,7 @@ Run after market close: python unified_ranker.py
 """
 import json
 import csv
+import math
 from pathlib import Path
 from datetime import date, timedelta
 
@@ -147,6 +148,38 @@ def quality_gate(piotroski, roe, *, floor: float = QUALITY_GATE_FLOOR) -> float:
     return max(floor, mult)
 
 
+# ── Position sizing (#6) ────────────────────────────────────────────────────────
+# Meta-labeling -> sizing: the ML ensemble's win_probability is a meta-label (P the long
+# signal is correct). Instead of only gating it at 0.40, turn it into a bet size (López de
+# Prado: z=(p-0.5)/sqrt(p(1-p)), size=2*Phi(z)-1) and weight by inverse volatility
+# (vol-target), so high-conviction low-vol names get more capital. Normalized + per-name
+# capped into suggested portfolio weights.
+GROSS_EXPOSURE = 1.0     # weights sum to at most 100% of the long book
+MAX_POSITION = 0.10      # per-name cap
+VOL_FLOOR_PCT = 10.0     # don't let an ultra-low-vol name dominate
+DEFAULT_VOL_PCT = 30.0   # when annualized_vol is missing
+
+
+def bet_size_from_probability(p, neutral: float = 0.5) -> float:
+    """López de Prado bet size in [0,1] from a win probability (long-only: 0 at/below neutral)."""
+    if p is None or p <= neutral:
+        return 0.0
+    denom = math.sqrt(p * (1.0 - p))
+    if denom <= 0:
+        return 1.0
+    z = (p - neutral) / denom
+    cdf = 0.5 * (1.0 + math.erf(z / math.sqrt(2.0)))
+    return max(0.0, min(1.0, 2.0 * cdf - 1.0))
+
+
+def normalize_position_sizes(raw: dict, gross: float = GROSS_EXPOSURE, cap: float = MAX_POSITION) -> dict:
+    """Normalize raw conviction×inverse-vol sizes to portfolio weights (sum ≤ gross, each ≤ cap)."""
+    total = sum(v for v in raw.values() if v and v > 0)
+    if total <= 0:
+        return {k: 0.0 for k in raw}
+    return {k: round(min(cap, gross * max(0.0, (v or 0.0)) / total), 4) for k, v in raw.items()}
+
+
 def _classify(score, bull, bear):
     """Directional label (matches stock_scores taxonomy the Top Rated UI renders) from the
     net screener bias balance, with magnitude gating the 'Strong' tiers."""
@@ -287,17 +320,28 @@ class UnifiedRanker:
         return {r['symbol']: float(r['score'] or 50) for r in rows}
 
     def _get_quality_metrics(self):
-        """Balance-sheet quality per symbol for the #4 quality gate (Piotroski + ROE)."""
+        """Per-symbol quant metrics: balance-sheet quality (#4 gate) + annualized vol (#6 sizing)."""
         rows = self.conn.execute(
-            "SELECT symbol, piotroski_f_score, return_on_equity FROM quant_scores"
+            "SELECT symbol, piotroski_f_score, return_on_equity, annualized_vol FROM quant_scores"
         ).fetchall()
         return {
             r['symbol']: {
                 'piotroski': r['piotroski_f_score'],
                 'roe': float(r['return_on_equity']) if r['return_on_equity'] is not None else None,
+                'vol': float(r['annualized_vol']) if r['annualized_vol'] is not None else None,
             }
             for r in rows
         }
+
+    def _get_win_probabilities(self):
+        """Raw ML meta-label per symbol: avg win_probability over recent technical signals."""
+        cutoff = (date.today() - timedelta(days=30)).isoformat()
+        rows = self.conn.execute(
+            "SELECT symbol, AVG(win_probability) AS p FROM technical_signals "
+            "WHERE date >= ? AND win_probability IS NOT NULL GROUP BY symbol",
+            (cutoff,)
+        ).fetchall()
+        return {r['symbol']: float(r['p']) for r in rows if r['p'] is not None}
 
     def _get_screener_membership(self):
         membership = {}
@@ -544,6 +588,7 @@ class UnifiedRanker:
         base_weights      = REGIME_WEIGHTS.get(regime, REGIME_WEIGHTS['BULL'])
         fund_scores       = self._get_fundamental_scores()
         quality_metrics   = self._get_quality_metrics()
+        win_probs         = self._get_win_probabilities()
         membership        = self._get_screener_membership()
 
         screener_scores, bull_counts, bear_counts = compute_screener_stock_scores(
@@ -566,6 +611,7 @@ class UnifiedRanker:
         }
 
         results = []
+        raw_sizes = {}   # symbol -> conviction×inverse-vol (normalized into weights after the loop)
         for sym in all_symbols:
             if not self._passes_rl_gate(sym):
                 continue
@@ -584,6 +630,11 @@ class UnifiedRanker:
             bull = bull_counts.get(sym, 0)
             bear = bear_counts.get(sym, 0)
             classification = _classify(unified, bull, bear)
+
+            # #6 position size: bet on the ML meta-label, inverse-vol weighted, longs only.
+            bet = bet_size_from_probability(win_probs.get(sym))
+            vol = max(VOL_FLOOR_PCT, (qm or {}).get('vol') or DEFAULT_VOL_PCT)
+            raw_sizes[sym] = (bet / vol) if classification in ('Strong Buy', 'Buy') else 0.0
             cats = sorted({s.get('category', 'other') for s in membership.get(sym, [])} - {'other', ''})
             screener_summary = (
                 f"{bull} bullish / {bear} bearish screener signals ({classification}); "
@@ -621,8 +672,14 @@ class UnifiedRanker:
                 'timeframe':               None,
                 'trade_reasoning':         None,
                 'sector':                  None,
+                'position_size_pct':       0.0,
                 **et,
             })
+
+        # Normalize conviction×inverse-vol into capped portfolio weights (# 6).
+        position_sizes = normalize_position_sizes(raw_sizes)
+        for r in results:
+            r['position_size_pct'] = round(position_sizes.get(r['symbol'], 0.0) * 100, 2)
 
         cur = self.conn.cursor()
         for r in results:
@@ -633,14 +690,16 @@ class UnifiedRanker:
                  screener_stock_score, ml_score, confluence_score, technical_score, dl_score,
                  avg_engine_track_record, bullish_screener_count, bearish_screener_count,
                  fundamental_score, entry_zone_low, entry_zone_high, stop_loss,
-                 target_1, target_2, target_3, risk_reward, timeframe, trade_reasoning, sector)
+                 target_1, target_2, target_3, risk_reward, timeframe, trade_reasoning, sector,
+                 position_size_pct)
                 VALUES (:symbol, :computed_at, :regime, :unified_score, :conviction_level, :classification,
                         :screener_names_json,
                         :screener_stock_score, :ml_score, :confluence_score, :technical_score,
                         :dl_score, :avg_engine_track_record, :bullish_screener_count,
                         :bearish_screener_count, :fundamental_score, :entry_zone_low,
                         :entry_zone_high, :stop_loss, :target_1, :target_2, :target_3,
-                        :risk_reward, :timeframe, :trade_reasoning, :sector)
+                        :risk_reward, :timeframe, :trade_reasoning, :sector,
+                        :position_size_pct)
                 ON CONFLICT(symbol, computed_at) DO UPDATE SET
                     regime=excluded.regime, unified_score=excluded.unified_score,
                     conviction_level=excluded.conviction_level, classification=excluded.classification,
@@ -655,7 +714,8 @@ class UnifiedRanker:
                     stop_loss=excluded.stop_loss, target_1=excluded.target_1,
                     target_2=excluded.target_2, target_3=excluded.target_3,
                     risk_reward=excluded.risk_reward, timeframe=excluded.timeframe,
-                    trade_reasoning=excluded.trade_reasoning, sector=excluded.sector
+                    trade_reasoning=excluded.trade_reasoning, sector=excluded.sector,
+                    position_size_pct=excluded.position_size_pct
             ''', r)
         self.conn.commit()
 
