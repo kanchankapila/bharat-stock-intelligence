@@ -76,11 +76,49 @@ export async function syncAndScore(): Promise<{ success: boolean; message: strin
   return scoreResult;
 }
 
+/** Map a unified_recommendations row to the ScoredStock shape the Top Rated UI renders. */
+function mapRecToScoredStock(rec: any): ScoredStock {
+  const sentiment = String(rec.classification || '').includes('Sell') ? 'bearish'
+                  : String(rec.classification || '').includes('Buy')  ? 'bullish' : 'neutral';
+  let reasons: Array<{ name: string; sentiment: string; source: string }> = [];
+  try {
+    reasons = (JSON.parse(rec.screener_names_json || '[]') as string[])
+      .map(name => ({ name, sentiment, source: 'unified' }));
+  } catch { /* leave empty */ }
+  if (reasons.length === 0 && rec.trade_reasoning) {
+    reasons = [{ name: rec.trade_reasoning, sentiment, source: 'unified' }];
+  }
+  return {
+    symbol:         rec.symbol,
+    timeframe:      'long_term',
+    stock_id:       rec.symbol,
+    score:          rec.unified_score,
+    confidence:     rec.unified_score != null ? rec.unified_score / 100 : 0,
+    classification: rec.classification ?? 'Hold',
+    positive_count: rec.bullish_screener_count ?? 0,
+    negative_count: rec.bearish_screener_count ?? 0,
+    reasons,
+    last_updated:   rec.computed_at,
+  };
+}
+
 /**
- * Get top rated stocks from the database
+ * Get top rated stocks. Long-term reads the canonical cross-source ranking
+ * (unified_recommendations); intraday stays on stock_scores (the ranker has negligible
+ * intraday coverage). Falls back to stock_scores if the ranker has produced no rows yet.
  */
 export async function getTopRatedStocks(limit: number = 50, timeframe: string = 'long_term'): Promise<ScoredStock[]> {
   try {
+    if (timeframe === 'long_term') {
+      const recs = await dbAll<any>(`
+        SELECT * FROM unified_recommendations
+        WHERE computed_at = (SELECT MAX(computed_at) FROM unified_recommendations)
+        ORDER BY unified_score DESC
+        LIMIT ?
+      `, [limit]);
+      if (recs.length > 0) return recs.map(mapRecToScoredStock);
+    }
+
     const rows = await dbAll<any>(`
       SELECT * FROM stock_scores
       WHERE timeframe = ?
