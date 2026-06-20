@@ -882,9 +882,11 @@ export async function initQueues(): Promise<boolean> {
 
     technicalSignalsWorker.on('completed', (_job) => {
       console.log('[QUEUE] technical-signals completed');
+      updateMonitorState('technical-scan', 'success');
     });
     technicalSignalsWorker.on('failed', (_job, err) => {
       console.error('[QUEUE] technical-signals failed:', err.message);
+      updateMonitorState('technical-scan', 'failed', err.message);
     });
     technicalSignalsWorker.on('error', (err) => {
       if ((err as any).code === -2 || err.message?.includes('Missing lock')) return;
@@ -1074,10 +1076,16 @@ export async function initQueues(): Promise<boolean> {
     outcomeResolverWorker.on('completed', (_job) => {
       console.log('[QUEUE] outcome-resolver completed');
       recordHeartbeat('outcome-resolver', 'success');
+      updateMonitorState('outcome-resolver-5d', 'success');
+      updateMonitorState('outcome-resolver-15d', 'success');
+      updateMonitorState('performance-tracker', 'success');
     });
     outcomeResolverWorker.on('failed', (_job, err) => {
       console.error('[QUEUE] outcome-resolver failed:', err.message);
       recordHeartbeat('outcome-resolver', 'failed', err?.message);
+      updateMonitorState('outcome-resolver-5d', 'failed', err.message);
+      updateMonitorState('outcome-resolver-15d', 'failed', err.message);
+      updateMonitorState('performance-tracker', 'failed', err.message);
     });
 
     // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ ML daily ops queue (5:00 PM IST = 11:30 UTC, weekdays) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
@@ -1112,10 +1120,19 @@ export async function initQueues(): Promise<boolean> {
     mlDailyOpsWorker.on('completed', (_job) => {
       console.log('[QUEUE] ml-daily-ops completed');
       recordHeartbeat('ml-daily-ops', 'success');
+      updateMonitorState('fii-dii-fetcher', 'success');
+      updateMonitorState('finbert-scorer', 'success');
+      updateMonitorState('outcome-resolver-5d', 'success');
+      updateMonitorState('outcome-resolver-15d', 'success');
+      updateMonitorState('performance-tracker', 'success');
+      updateMonitorState('ml-ensemble-score', 'success');
+      updateMonitorState('reward-engine', 'success');
+      updateMonitorState('rl-agent-update', 'success');
     });
     mlDailyOpsWorker.on('failed', (_job, err) => {
       console.error('[QUEUE] ml-daily-ops failed:', err.message);
       recordHeartbeat('ml-daily-ops', 'failed', err?.message);
+      updateMonitorState('ml-ensemble-score', 'failed', err.message);
     });
 
     // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ ML weekly retrain + optimize (Sunday 6 PM IST = 12:30 UTC) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
@@ -1128,8 +1145,16 @@ export async function initQueues(): Promise<boolean> {
       removeOnComplete: 2, removeOnFail: 3,
     });
     mlWeeklyRetrainWorker = new Worker(QUEUE_ML_WEEKLY_RETRAIN, processMlWeeklyRetrain, { connection, concurrency: 1, lockDuration: 90 * 60 * 1000, lockRenewTime: 10 * 60 * 1000 });
-    mlWeeklyRetrainWorker.on('completed', () => console.log('[QUEUE] ml-weekly-retrain done'));
-    mlWeeklyRetrainWorker.on('failed', (_, err) => console.error('[QUEUE] ml-weekly-retrain failed:', err.message));
+    mlWeeklyRetrainWorker.on('completed', () => {
+      console.log('[QUEUE] ml-weekly-retrain done');
+      updateMonitorState('ml-ensemble-train', 'success');
+      updateMonitorState('strategy-optimizer', 'success');
+    });
+    mlWeeklyRetrainWorker.on('failed', (_, err) => {
+      console.error('[QUEUE] ml-weekly-retrain failed:', err.message);
+      updateMonitorState('ml-ensemble-train', 'failed', err.message);
+      updateMonitorState('strategy-optimizer', 'failed', err.message);
+    });
 
     // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Research report queues ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
     researchPremarketQueue = new Queue(QUEUE_RESEARCH_PREMARKET, { connection });
@@ -1206,8 +1231,14 @@ export async function initQueues(): Promise<boolean> {
     dlInferenceWorker = new Worker(QUEUE_DL_INFERENCE,
       async () => processDLPython('dl_engine.py', ['--mode', 'infer']),
       { connection, concurrency: 1, lockDuration: 30 * 60 * 1000, lockRenewTime: 5 * 60 * 1000 });
-    dlInferenceWorker.on('completed', () => console.log('[QUEUE] dl-inference done'));
-    dlInferenceWorker.on('failed', (_, err) => console.error('[QUEUE] dl-inference failed:', err.message));
+    dlInferenceWorker.on('completed', () => {
+      console.log('[QUEUE] dl-inference done');
+      updateMonitorState('dl-engine-infer', 'success');
+    });
+    dlInferenceWorker.on('failed', (_, err) => {
+      console.error('[QUEUE] dl-inference failed:', err.message);
+      updateMonitorState('dl-engine-infer', 'failed', err.message);
+    });
 
     // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ DL Regime Update (4:45 PM IST = 11:15 AM UTC, weekdays) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
     dlRegimeUpdateQueue = new Queue(QUEUE_DL_REGIME_UPDATE, { connection });
@@ -1221,8 +1252,14 @@ export async function initQueues(): Promise<boolean> {
     dlRegimeUpdateWorker = new Worker(QUEUE_DL_REGIME_UPDATE,
       async () => processDLPython('regime_detector.py', ['--mode', 'update']),
       { connection, concurrency: 1, lockDuration: 5 * 60 * 1000 });
-    dlRegimeUpdateWorker.on('completed', () => console.log('[QUEUE] dl-regime-update done'));
-    dlRegimeUpdateWorker.on('failed', (_, err) => console.error('[QUEUE] dl-regime-update failed:', err.message));
+    dlRegimeUpdateWorker.on('completed', () => {
+      console.log('[QUEUE] dl-regime-update done');
+      updateMonitorState('regime-detector', 'success');
+    });
+    dlRegimeUpdateWorker.on('failed', (_, err) => {
+      console.error('[QUEUE] dl-regime-update failed:', err.message);
+      updateMonitorState('regime-detector', 'failed', err.message);
+    });
 
     // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ DL Weekly Retrain (Sunday 11:00 PM IST = Sun 17:30 UTC) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
     dlRetrainWeeklyQueue = new Queue(QUEUE_DL_RETRAIN_WEEKLY, { connection });
@@ -1239,8 +1276,14 @@ export async function initQueues(): Promise<boolean> {
         return processDLPython('dl_trainer.py', ['--trigger', trigger]);
       },
       { connection, concurrency: 1, lockDuration: 6 * 60 * 60 * 1000, lockRenewTime: 30 * 60 * 1000 });
-    dlRetrainWeeklyWorker.on('completed', () => console.log('[QUEUE] dl-retrain-weekly done'));
-    dlRetrainWeeklyWorker.on('failed', (_, err) => console.error('[QUEUE] dl-retrain-weekly failed:', err.message));
+    dlRetrainWeeklyWorker.on('completed', () => {
+      console.log('[QUEUE] dl-retrain-weekly done');
+      updateMonitorState('dl-trainer', 'success');
+    });
+    dlRetrainWeeklyWorker.on('failed', (_, err) => {
+      console.error('[QUEUE] dl-retrain-weekly failed:', err.message);
+      updateMonitorState('dl-trainer', 'failed', err.message);
+    });
 
     // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ DL Emergency Retrain (on-demand, triggered by drift detector) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
     dlRetrainEmergencyQueue = new Queue(QUEUE_DL_RETRAIN_EMERGENCY, { connection });
@@ -1260,8 +1303,14 @@ export async function initQueues(): Promise<boolean> {
         return processDLPython('backfill_ohlcv.py', ['--mode', mode, '--lookback', String(lookback)]);
       },
       { connection, concurrency: 1, lockDuration: 3 * 60 * 60 * 1000, lockRenewTime: 15 * 60 * 1000 });
-    ohlcvBackfillWorker.on('completed', (job) => console.log(`[QUEUE] ohlcv-backfill (${job.data?.mode}) done`));
-    ohlcvBackfillWorker.on('failed', (_, err) => console.error('[QUEUE] ohlcv-backfill failed:', err.message));
+    ohlcvBackfillWorker.on('completed', (job) => {
+      console.log(`[QUEUE] ohlcv-backfill (${job.data?.mode}) done`);
+      updateMonitorState('ohlcv-backfill', 'success');
+    });
+    ohlcvBackfillWorker.on('failed', (_, err) => {
+      console.error('[QUEUE] ohlcv-backfill failed:', err.message);
+      updateMonitorState('ohlcv-backfill', 'failed', err.message);
+    });
 
     // Weekly gap-fill: Saturday 2:00 AM IST = Friday 20:30 UTC
     // Daily gap-fill: weekdays 4:15 PM IST = 10:45 UTC (after market close, lookback 3 days)
@@ -1359,8 +1408,14 @@ export async function initQueues(): Promise<boolean> {
       { connection, concurrency: 1, lockDuration: 20 * 60 * 1000, lockRenewTime: 5 * 60 * 1000 },
     );
 
-    screenerPerfWorker.on('completed', () => console.log('[QUEUE] screener-performance completed'));
-    screenerPerfWorker.on('failed', (_job, err) => console.error('[QUEUE] screener-performance failed:', err.message));
+    screenerPerfWorker.on('completed', () => {
+      console.log('[QUEUE] screener-performance completed');
+      updateMonitorState('screener-performance', 'success');
+    });
+    screenerPerfWorker.on('failed', (_job, err) => {
+      console.error('[QUEUE] screener-performance failed:', err.message);
+      updateMonitorState('screener-performance', 'failed', err.message);
+    });
     screenerPerfWorker.on('error', (err) => {
       if ((err as any).code === -2 || err.message?.includes('Missing lock')) return;
       console.error('[QUEUE] screener-performance error:', err.message);
@@ -1430,9 +1485,11 @@ export async function initQueues(): Promise<boolean> {
 
     companyProfilesSyncWorker.on('completed', (_job) => {
       console.log('[QUEUE] company-profiles-sync completed');
+      updateMonitorState('company-profiles-sync', 'success');
     });
     companyProfilesSyncWorker.on('failed', (_job, err) => {
       console.error('[QUEUE] company-profiles-sync failed:', err.message);
+      updateMonitorState('company-profiles-sync', 'failed', err.message);
     });
 
     // Ã¢â€â‚¬Ã¢â€â‚¬ Agent: Auditor (16:30 IST = 11:00 UTC, weekdays) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬

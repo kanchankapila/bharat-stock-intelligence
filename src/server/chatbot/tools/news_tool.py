@@ -3,16 +3,19 @@ News sentiment tool — queries news_sentiment_items (FinBERT-scored, updated ~3
 as the primary source. Falls back to the legacy news_articles table.
 """
 import os
-import sqlite3
+import sys
 from datetime import datetime, timedelta
+from pathlib import Path
+
+# Add src/server to import path for db_compat
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+from db_compat import connect as db_connect
 
 DB_PATH = os.getenv("DB_PATH", "database.sqlite")
 
 
-def _connect(db_path: str):
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    return conn
+def _connect(db_path: str = None):
+    return db_connect()
 
 
 def get_news_sentiment(

@@ -10,14 +10,15 @@ from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
-import requests
-from sqlalchemy import create_engine, text
-
 sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+import requests
+from sqlalchemy import text
+from db_compat import get_engine, translate
 from ollama_client import get_narrative
 
-DB_PATH = Path(__file__).parent.parent.parent.parent / "database.sqlite"
-ENGINE = create_engine(f"sqlite:///{DB_PATH}")
+ENGINE = get_engine()
 ALPHAQUANT_URL = "http://127.0.0.1:8002/api/v1/optimize"
 WEIGHT_MIN, WEIGHT_MAX = 0.3, 2.0
 
@@ -31,12 +32,12 @@ def run() -> dict:
 
     with ENGINE.connect() as conn:
         # 30-day audit rows
-        rows = conn.execute(text("""
+        rows = conn.execute(text(translate("""
             SELECT timeframe, hit_rate, avg_return_pct,
                    signal_attribution_json, run_date
             FROM agent_audit_reports
             ORDER BY run_date DESC LIMIT 120
-        """)).fetchall()
+        """))).fetchall()
 
         if not rows:
             print("[OPTIMIZER] No audit data yet — skipping")
@@ -59,11 +60,11 @@ def run() -> dict:
         overall_rate = sum(avg_rates.values()) / max(len(avg_rates), 1)
 
         # Check consecutive underperformance — fetch last 7 calendar days (covers 5 trading days)
-        recent_days = conn.execute(text("""
+        recent_days = conn.execute(text(translate("""
             SELECT AVG(hit_rate) FROM agent_audit_reports
-            WHERE run_date >= date('now', '-7 days')
+            WHERE date(run_date) >= date('now', '-7 days')
             GROUP BY run_date ORDER BY run_date
-        """)).fetchall()
+        """))).fetchall()
         consecutive_bad = sum(1 for r in recent_days if r[0] and float(r[0]) < 50)
 
         full_optimizer = len(recent_days) >= 5 and consecutive_bad >= 5
@@ -72,10 +73,10 @@ def run() -> dict:
         changes: dict[str, dict] = {}
         for sig_type, rates in signal_wins.items():
             avg = sum(rates) / len(rates)
-            cur_row = conn.execute(text("""
+            cur_row = conn.execute(text(translate("""
                 SELECT weight_override FROM screener_master
                 WHERE name LIKE :pattern LIMIT 1
-            """), {"pattern": f"%{sig_type}%"}).fetchone()
+            """)), {"pattern": f"%{sig_type}%"}).fetchone()
             if cur_row and cur_row[0] is not None:
                 before = float(cur_row[0])
                 if avg < 45:
@@ -85,10 +86,10 @@ def run() -> dict:
                 else:
                     continue
                 if abs(after - before) >= 0.01:
-                    conn.execute(text("""
+                    conn.execute(text(translate("""
                         UPDATE screener_master SET weight_override = :w
                         WHERE name LIKE :pattern
-                    """), {"w": after, "pattern": f"%{sig_type}%"})
+                    """)), {"w": after, "pattern": f"%{sig_type}%"})
                     changes[sig_type] = {"before": before, "after": after}
 
         weights_changed = len(changes) > 0
@@ -97,8 +98,8 @@ def run() -> dict:
         if full_optimizer:
             try:
                 requests.post(ALPHAQUANT_URL,
-                              json={"horizon_days": 15, "iterations": 200, "apply": True},
-                              timeout=30 * 60)
+                               json={"horizon_days": 15, "iterations": 200, "apply": True},
+                               timeout=30 * 60)
                 print("[OPTIMIZER] Full optimizer triggered via AlphaQuant API")
             except Exception as exc:
                 print(f"[OPTIMIZER] Full optimizer call failed: {exc}")
@@ -119,7 +120,7 @@ def run() -> dict:
         )
         narrative = get_narrative(prompt)
 
-        conn.execute(text("""
+        conn.execute(text(translate("""
             INSERT INTO agent_optimizer_reports
               (run_date, trigger, baseline_win_rate, new_win_rate,
                improvement_pct, weights_changed, full_optimizer_triggered,
@@ -127,7 +128,7 @@ def run() -> dict:
             VALUES
               (:rd, :trig, :base, :new, :imp,
                :wc, :fo, :changes, :under, :narr)
-        """), {
+        """)), {
             "rd": today,
             "trig": "performance_drop" if full_optimizer else "scheduled",
             "base": round(overall_rate, 2),

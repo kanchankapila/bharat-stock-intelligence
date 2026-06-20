@@ -1,14 +1,17 @@
-import sqlite3
 import os
+import sys
 from datetime import datetime, timedelta
+from pathlib import Path
+
+# Add src/server to import path for db_compat
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+from db_compat import connect as db_connect
 
 DB_PATH = os.getenv("DB_PATH", "database.sqlite")
 
 
-def _connect(db_path: str):
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    return conn
+def _connect(db_path: str = None):
+    return db_connect()
 
 
 def get_stock_fundamentals(symbol: str, db_path: str = DB_PATH) -> dict | None:

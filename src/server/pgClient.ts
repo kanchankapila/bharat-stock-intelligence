@@ -5,8 +5,11 @@
  * the dbAsync facade routes here. Kept separate from the facade so the pool lifecycle
  * (and a health probe) lives in one place.
  */
-import { Pool, type PoolClient, type QueryResultRow } from 'pg';
+import { Pool, types, type PoolClient, type QueryResultRow } from 'pg';
 import { pgConnectionString } from './pgConfig';
+
+// Parse Postgres BIGINT (INT8) as JavaScript numbers (safe up to 2^53 - 1)
+types.setTypeParser(types.builtins.INT8, (val) => parseInt(val, 10));
 
 let pool: Pool | null = null;
 

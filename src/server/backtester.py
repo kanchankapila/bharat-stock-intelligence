@@ -42,11 +42,7 @@ class Backtester:
     def close(self):
         self.conn.close()
 
-    # ──────────────────────────────────────────────────────────────────────────
-    # Data loading
-    # ──────────────────────────────────────────────────────────────────────────
-
-    def load_signals(
+    # ───────────────────────────────────────────────────────────�    def load_signals(
         self,
         start: str, end: str,
         min_score: int = 3,
@@ -54,7 +50,7 @@ class Backtester:
     ) -> pd.DataFrame:
         q = """
             SELECT ts.symbol, ts.date AS signal_date, ts.signal_score,
-                   ts.cmp AS entry_price_ref, ts.stop_loss, ts.signals_json,
+                   ts.cmp AS entry_price_ref, ts.stop_loss, ts.targets, ts.signals_json,
                    ts.nifty_regime, ts.adx
             FROM technical_signals ts
             WHERE ts.date BETWEEN ? AND ?
@@ -65,7 +61,23 @@ class Backtester:
         df['signal_date']    = pd.to_datetime(df['signal_date'])
         df['horizon_days']   = horizon_days
         df['entry_price_ref'] = pd.to_numeric(df['entry_price_ref'], errors='coerce')
-        df['stop_loss']       = pd.to_numeric(df['stop_loss'],        errors='coerce')
+
+        # Robust string cleaning/parsing for stop_loss and targets
+        def parse_price_str(val):
+            if pd.isna(val) or val is None:
+                return None
+            val_str = str(val).replace(',', '').strip()
+            import re
+            m = re.search(r'₹\s*([\d\.]+)', val_str)
+            if m:
+                return float(m.group(1))
+            m2 = re.search(r'([\d\.]+)', val_str)
+            if m2:
+                return float(m2.group(1))
+            return None
+
+        df['stop_loss'] = df['stop_loss'].apply(parse_price_str)
+        df['target_price'] = df['targets'].apply(parse_price_str)
         return df
 
     def load_ohlcv(self, symbols: list[str], start: str, end: str) -> pd.DataFrame:
@@ -101,6 +113,30 @@ class Backtester:
         df = df.dropna().sort_values('date').drop_duplicates('date').set_index('date')
         return df['close']
 
+    def compute_atr_from_df(self, df: pd.DataFrame, signal_date: pd.Timestamp, window: int = 14) -> float:
+        """Calculate Wilders ATR(14) from historical stock dataframe up to signal_date."""
+        prior_df = df[df['date'] <= signal_date]
+        if len(prior_df) < window + 1:
+            return 0.0
+        prior_df = prior_df.tail(window + 1)
+        
+        highs = prior_df['high'].values
+        lows = prior_df['low'].values
+        closes = prior_df['close'].values
+        
+        trs = []
+        prev_close = closes[0]
+        for i in range(1, len(prior_df)):
+            h = float(highs[i])
+            l = float(lows[i])
+            c = float(closes[i])
+            prev_c = float(prev_close)
+            tr = max(h - l, abs(h - prev_c), abs(l - prev_c))
+            trs.append(tr)
+            prev_close = c
+            
+        return sum(trs) / len(trs) if trs else 0.0
+
     # ──────────────────────────────────────────────────────────────────────────
     # Trade simulation
     # ──────────────────────────────────────────────────────────────────────────
@@ -120,7 +156,7 @@ class Backtester:
         equity_curve_daily: pd.Series indexed by date.
         """
         trade_log: list[dict] = []
-        # Position state: symbol -> {entry_date, entry_price, sl, horizon_days, shares}
+        # Position state: symbol -> {entry_date, entry_price, stop_loss, target_price, horizon_days, ...}
         open_positions: dict[str, dict] = {}
         all_dates = sorted(
             pd.to_datetime(list({
@@ -145,57 +181,47 @@ class Backtester:
         for date in all_dates:
             d = date.date()
 
-            # ── Close positions that have reached their horizon ──────────────
+            # ── check and update open positions day-by-day ──────────────
             for sym in list(open_positions.keys()):
-                pos   = open_positions[sym]
+                pos = open_positions[sym]
                 days_held = (date - pos['entry_date']).days
-                if days_held < pos['horizon_days']:
-                    continue
                 if sym not in ohlcv_dict:
                     continue
                 day_ohlcv = ohlcv_dict[sym][ohlcv_dict[sym]['date'] == date]
                 if day_ohlcv.empty:
                     continue
-                exit_price   = float(day_ohlcv['close'].iloc[0])
-                exit_comm    = exit_price * pos['shares'] * commission_bps / 10_000
-                net_proceeds = exit_price * pos['shares'] - exit_comm
-                pnl          = net_proceeds - pos['total_cost']
-                ret_pct      = pnl / pos['total_cost'] * 100
-                cash        += net_proceeds
-                outcome      = 'WIN' if ret_pct > 1.0 else 'LOSS' if ret_pct < -1.0 else 'NEUTRAL'
-                trade_log.append({
-                    'symbol':       sym,
-                    'entry_date':   pos['entry_date'].isoformat(),
-                    'exit_date':    date.isoformat(),
-                    'entry_price':  round(pos['entry_price'], 2),
-                    'exit_price':   round(exit_price, 2),
-                    'return_pct':   round(ret_pct, 4),
-                    'pnl':          round(pnl, 2),
-                    'outcome':      outcome,
-                    'signal_score': pos['signal_score'],
-                    'holding_days': days_held,
-                    'shares':       pos['shares'],
-                })
-                del open_positions[sym]
 
-            # ── Stop-loss check (intraday low) ───────────────────────────────
-            for sym in list(open_positions.keys()):
-                pos = open_positions[sym]
-                if not pos.get('stop_loss') or sym not in ohlcv_dict:
-                    continue
-                day_ohlcv = ohlcv_dict[sym][ohlcv_dict[sym]['date'] == date]
-                if day_ohlcv.empty:
-                    continue
-                day_low  = float(day_ohlcv['low'].iloc[0])
-                day_open = float(day_ohlcv['open'].iloc[0])
-                if day_low <= pos['stop_loss']:
-                    # Gap-down: if open is already below stop, fill at open (worse than stop)
-                    exit_price   = min(day_open, pos['stop_loss'])
-                    exit_comm    = exit_price * pos['shares'] * commission_bps / 10_000
+                open_price  = float(day_ohlcv['open'].iloc[0])
+                high_price  = float(day_ohlcv['high'].iloc[0])
+                low_price   = float(day_ohlcv['low'].iloc[0])
+                close_price = float(day_ohlcv['close'].iloc[0])
+
+                # Calculate dynamic Chandelier trailing stop (using ATR at entry)
+                eff_stop = pos['stop_loss']
+                if pos['atr'] and pos['atr'] > 0 and pos['stop_loss'] is not None:
+                    # trailing stop is highest-high-since-entry - 3*ATR, bounded by initial stop loss floor
+                    eff_stop = max(pos['stop_loss'], pos['highest_high'] - 3.0 * pos['atr'])
+                elif pos['atr'] and pos['atr'] > 0:
+                    eff_stop = pos['highest_high'] - 3.0 * pos['atr']
+
+                # 1. Trailing Stop / Stop-Loss check (adverse move first)
+                if eff_stop is not None and low_price <= eff_stop:
+                    exit_price = min(open_price, eff_stop) if open_price < eff_stop else eff_stop
+                    exit_comm = exit_price * pos['shares'] * commission_bps / 10_000
                     net_proceeds = exit_price * pos['shares'] - exit_comm
-                    pnl          = net_proceeds - pos['total_cost']
-                    ret_pct      = pnl / pos['total_cost'] * 100
-                    cash        += net_proceeds
+                    
+                    # P&L combines any partial scale-out proceeds already booked
+                    total_proceeds = pos['partial_proceeds'] + net_proceeds
+                    pnl = total_proceeds - pos['total_cost']
+                    ret_pct = pnl / pos['total_cost'] * 100
+                    cash += net_proceeds
+
+                    # Outcome classification matching resolver logic
+                    if eff_stop == pos['stop_loss'] and not pos['partial_taken']:
+                        outcome = 'STOP_LOSS'
+                    else:
+                        outcome = 'WIN' if ret_pct > 1.0 else 'LOSS' if ret_pct < -1.0 else 'NEUTRAL'
+
                     trade_log.append({
                         'symbol':       sym,
                         'entry_date':   pos['entry_date'].isoformat(),
@@ -204,12 +230,56 @@ class Backtester:
                         'exit_price':   round(exit_price, 2),
                         'return_pct':   round(ret_pct, 4),
                         'pnl':          round(pnl, 2),
-                        'outcome':      'STOP_LOSS',
+                        'outcome':      outcome,
                         'signal_score': pos['signal_score'],
-                        'holding_days': (date - pos['entry_date']).days,
-                        'shares':       pos['shares'],
+                        'holding_days': days_held,
+                        'shares':       pos['initial_shares'],
                     })
                     del open_positions[sym]
+                    continue
+
+                # 2. Target check / partial profit scale-out (50% target book)
+                if pos['target_price'] is not None and not pos['partial_taken'] and high_price >= pos['target_price']:
+                    pos['partial_taken'] = True
+                    sold_shares = pos['shares'] * 0.5
+                    target_proceeds = sold_shares * pos['target_price']
+                    target_comm = target_proceeds * commission_bps / 10_000
+                    net_target_proceeds = target_proceeds - target_comm
+                    
+                    cash += net_target_proceeds
+                    pos['shares'] -= sold_shares
+                    pos['partial_proceeds'] = net_target_proceeds
+
+                # 3. Horizon exit check (exit remaining shares at time close)
+                if days_held >= pos['horizon_days']:
+                    exit_price = close_price
+                    exit_comm = exit_price * pos['shares'] * commission_bps / 10_000
+                    net_proceeds = exit_price * pos['shares'] - exit_comm
+                    
+                    total_proceeds = pos['partial_proceeds'] + net_proceeds
+                    pnl = total_proceeds - pos['total_cost']
+                    ret_pct = pnl / pos['total_cost'] * 100
+                    cash += net_proceeds
+
+                    outcome = 'WIN' if ret_pct > 1.0 else 'LOSS' if ret_pct < -1.0 else 'NEUTRAL'
+                    trade_log.append({
+                        'symbol':       sym,
+                        'entry_date':   pos['entry_date'].isoformat(),
+                        'exit_date':    date.isoformat(),
+                        'entry_price':  round(pos['entry_price'], 2),
+                        'exit_price':   round(exit_price, 2),
+                        'return_pct':   round(ret_pct, 4),
+                        'pnl':          round(pnl, 2),
+                        'outcome':      outcome,
+                        'signal_score': pos['signal_score'],
+                        'holding_days': days_held,
+                        'shares':       pos['initial_shares'],
+                    })
+                    del open_positions[sym]
+                    continue
+
+                # 4. Update highest high since entry for trailing stop calculation
+                pos['highest_high'] = max(pos['highest_high'], high_price)
 
             # ── Open new positions from today's signals ───────────────────────
             today_sigs = signals_by_date.get(d, [])
@@ -241,13 +311,38 @@ class Backtester:
                 cash -= total_cost
 
                 sl = float(row['stop_loss']) if pd.notna(row['stop_loss']) else entry_price * (1 - stop_loss_pct / 100)
+                tp = float(row['target_price']) if pd.notna(row['target_price']) else None
+                atr = self.compute_atr_from_df(ohlcv_dict[sym], date)
+
                 open_positions[sym] = {
                     'entry_date':   date,
                     'entry_price':  entry_price,
                     'stop_loss':    sl,
+                    'target_price': tp,
                     'horizon_days': int(row['horizon_days']),
+                    'initial_shares': shares,
                     'shares':       shares,
                     'signal_score': int(row['signal_score']),
+                    'total_cost':   total_cost,
+                    'atr':          atr,
+                    'highest_high': entry_price,
+                    'partial_taken': False,
+                    'partial_proceeds': 0.0,
+                }
+
+            # ── Mark-to-market portfolio value ───────────────────────────────
+            mtm = cash
+            for sym, pos in open_positions.items():
+                if sym in ohlcv_dict:
+                    day_ohlcv = ohlcv_dict[sym][ohlcv_dict[sym]['date'] == date]
+                    if not day_ohlcv.empty:
+                        mtm += float(day_ohlcv['close'].iloc[0]) * pos['shares']
+                    else:
+                        mtm += pos['entry_price'] * pos['shares']  # last known
+            equity[date] = round(mtm, 2)
+
+        equity_series = pd.Series(equity)
+        return trade_log, equity_seriescore': int(row['signal_score']),
                     'total_cost':   total_cost,
                 }
 

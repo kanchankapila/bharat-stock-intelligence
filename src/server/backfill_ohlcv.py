@@ -378,7 +378,6 @@ def gap_fill(conn, lookback_days: int = 30) -> None:
     from datetime import datetime, timedelta
 
     cutoff = (datetime.today() - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
-    today  = datetime.today().strftime("%Y-%m-%d")
     # stock_ohlcv.date is DATE on PG -> bind a date object for `date>=?` comparisons (rule #6).
     cutoff_d = (datetime.today() - timedelta(days=lookback_days)).date()
     symbols = [r[0] for r in conn.execute(
@@ -392,8 +391,9 @@ def gap_fill(conn, lookback_days: int = 30) -> None:
     print(f"[GAP-FILL] Checking {len(symbols)} symbols for gaps since {cutoff}...")
     total_filled = 0
 
-    for i in range(0, len(symbols), 50):
-        batch = symbols[i:i + 50]
+    batch_size = 50
+    for i in range(0, len(symbols), batch_size):
+        batch = symbols[i:i + batch_size]
         tickers = [f"{YAHOO_SYMBOL_MAP.get(s, s)}.NS" if s not in INDEX_TICKERS else INDEX_TICKERS.get(s, s)
                    for s in batch]
 
@@ -403,16 +403,32 @@ def gap_fill(conn, lookback_days: int = 30) -> None:
                 "SELECT date FROM stock_ohlcv WHERE symbol=? AND date>=? ORDER BY date",
                 (sym, cutoff_d),
             ).fetchall()
-            # date comes back as a date object on PG / 'YYYY-MM-DD' text on SQLite; normalize
-            # to str so membership tests against record date-strings work on both engines.
             existing[sym] = {str(r[0])[:10] for r in rows}
 
-        total_filled += _run_async(_gap_fill_async(conn, batch, tickers, existing, cutoff, today))
+        try:
+            data = yf.download(
+                tickers, start=cutoff, group_by="ticker",
+                threads=True, progress=False, auto_adjust=True,
+            )
+            records = []
+            for symbol, ticker in zip(batch, tickers):
+                df = _get_ticker_df(data, ticker) if len(batch) > 1 else data
+                recs = _extract_records(symbol, df)
+                if recs:
+                    new_recs = [r for r in recs if r[1] not in existing.get(symbol, set())]
+                    records.extend(new_recs)
+
+            if records:
+                _upsert(conn, records)
+                total_filled += len(records)
+            time.sleep(0.5)
+        except Exception as e:
+            print(f"[GAP-FILL] Error in batch {i//batch_size + 1}: {e}")
 
     # Also gap-fill indices
     for label, ticker in INDEX_TICKERS.items():
         try:
-            existing = {str(r[0])[:10] for r in conn.execute(
+            existing_dates = {str(r[0])[:10] for r in conn.execute(
                 "SELECT date FROM stock_ohlcv WHERE symbol=? AND date>=?", (label, cutoff_d)
             ).fetchall()}
             df = yf.download(ticker, start=cutoff, progress=False, auto_adjust=True)
@@ -420,7 +436,7 @@ def gap_fill(conn, lookback_days: int = 30) -> None:
                 if isinstance(df.columns, pd.MultiIndex):
                     df.columns = df.columns.get_level_values(0)
                 recs = _extract_records(label, df)
-                new_recs = [r for r in recs if r[1] not in existing]
+                new_recs = [r for r in recs if r[1] not in existing_dates]
                 if new_recs:
                     _upsert(conn, new_recs)
                     total_filled += len(new_recs)

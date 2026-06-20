@@ -29,7 +29,7 @@ export async function runPython(
   const { stdout, stderr } = await execFileAsync(
     PYTHON,
     [path.join(PY_DIR, script), ...args],
-    { timeout: timeoutMs },
+    { timeout: timeoutMs, maxBuffer: 100 * 1024 * 1024 },
   );
   if (stdout) console.log(`[PY] ${script}:`, stdout.slice(0, 300));
   if (stderr) console.warn(`[PY] ${script} stderr:`, stderr.slice(0, 300));

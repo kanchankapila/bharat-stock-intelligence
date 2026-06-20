@@ -225,13 +225,13 @@ class StrategyOptimizer:
         base_wr  = (base_top['outcome'] == 'WIN').mean() if len(base_top) > 0 else 0.0
 
         return {
-            'category_weights': {k: round(v, 4) for k, v in opt_cat.items()},
-            'source_weights':   {k: round(v, 4) for k, v in opt_src.items()},
-            'optimised_objective': round(optimised_obj, 6),
-            'baseline_objective':  round(baseline, 6),
+            'category_weights': {k: round(float(v), 4) for k, v in opt_cat.items()},
+            'source_weights':   {k: round(float(v), 4) for k, v in opt_src.items()},
+            'optimised_objective': round(float(optimised_obj), 6),
+            'baseline_objective':  round(float(baseline), 6),
             'baseline_win_rate':   round(float(base_wr), 4),
             'optimised_win_rate':  round(float(opt_wr), 4),
-            'improvement_pct':     round((optimised_obj / baseline - 1) * 100, 2),
+            'improvement_pct':     round(float((optimised_obj / baseline - 1) * 100), 2),
             'training_samples':    len(df),
             'horizon_days':        horizon_days,
         }

@@ -135,7 +135,11 @@ def load_symbol_sequences(
     """
     feat_cols = FEATURE_COLS[:N_FEATURES]
     numeric_cols = [c for c in feat_cols if c not in _VOL_ONEHOT]
-    cols_sql = ", ".join(f'COALESCE("{c}", 0) as "{c}"' for c in numeric_cols)
+    cols_sql = ", ".join(
+        f'COALESCE(CAST("{c}" AS REAL), 0.0) as "{c}"' if c in ("trend_1d", "trend_1w", "trend_1m")
+        else f'COALESCE("{c}", 0) as "{c}"'
+        for c in numeric_cols
+    )
     df = read_df(
         f"""SELECT date, {cols_sql}, vol_regime,
                target_dir_5d, target_dir_15d, target_ret_5d, target_ret_15d
@@ -179,7 +183,11 @@ def load_inference_sequence(
     """Load last seq_len rows for inference. Returns (1, seq_len, n_feat) and latest date."""
     feat_cols = FEATURE_COLS[:N_FEATURES]
     numeric_cols = [c for c in feat_cols if c not in _VOL_ONEHOT]
-    cols_sql = ", ".join(f'COALESCE("{c}", 0) as "{c}"' for c in numeric_cols)
+    cols_sql = ", ".join(
+        f'COALESCE(CAST("{c}" AS REAL), 0.0) as "{c}"' if c in ("trend_1d", "trend_1w", "trend_1m")
+        else f'COALESCE("{c}", 0) as "{c}"'
+        for c in numeric_cols
+    )
     df = read_df(
         f"""SELECT date, {cols_sql}, vol_regime
             FROM feature_store WHERE symbol=? AND timeframe='D'

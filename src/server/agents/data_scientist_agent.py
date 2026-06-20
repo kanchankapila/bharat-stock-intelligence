@@ -9,17 +9,18 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from sqlalchemy import create_engine, text
-
 sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from sqlalchemy import text
+from db_compat import get_engine, translate
 from ollama_client import get_narrative
 
-DB_PATH = Path(__file__).parent.parent.parent.parent / "database.sqlite"
-ENGINE = create_engine(f"sqlite:///{DB_PATH}")
+ENGINE = get_engine()
 
 
 def _scalar(conn, sql: str, params: dict | None = None) -> float:
-    row = conn.execute(text(sql), params or {}).fetchone()
+    row = conn.execute(text(translate(sql)), params or {}).fetchone()
     return float(row[0]) if row and row[0] is not None else 0.0
 
 
@@ -52,16 +53,16 @@ def run() -> dict:
             {"c": fund_cutoff}))
 
         # ── Model AUC + drift ─────────────────────────────────────────────────
-        model_row = conn.execute(text("""
+        model_row = conn.execute(text(translate("""
             SELECT cv_roc_auc FROM model_registry
             WHERE is_active = 1 ORDER BY trained_at DESC LIMIT 1
-        """)).fetchone()
+        """))).fetchone()
         model_auc = float(model_row[0]) if model_row and model_row[0] else 0.0
 
-        prev_row = conn.execute(text("""
+        prev_row = conn.execute(text(translate("""
             SELECT model_auc FROM agent_data_scientist_reports
             ORDER BY created_at DESC LIMIT 1
-        """)).fetchone()
+        """))).fetchone()
         prev_auc = float(prev_row[0]) if prev_row and prev_row[0] else model_auc
         drift = 1 if (model_auc - prev_auc) < -0.03 else 0
 
@@ -111,7 +112,7 @@ def run() -> dict:
         narrative = get_narrative(prompt)
 
         # ── Persist ───────────────────────────────────────────────────────────
-        conn.execute(text("""
+        conn.execute(text(translate("""
             INSERT INTO agent_data_scientist_reports
               (run_date, ohlcv_coverage_pct, stale_symbols_count,
                fundamentals_fresh_count, model_auc, model_drift_detected,
@@ -120,7 +121,7 @@ def run() -> dict:
             VALUES
               (:run_date, :ohlcv, :stale, :fund, :auc, :drift,
                :res, :score, :grade, :issues, :narrative)
-        """), {
+        """)), {
             "run_date": today, "ohlcv": round(ohlcv_coverage_pct, 2),
             "stale": stale_count, "fund": fund_fresh,
             "auc": round(model_auc, 4), "drift": drift,

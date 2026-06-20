@@ -6,8 +6,13 @@ Market-level tools for the chatbot — covering live DB tables:
 """
 import json
 import os
-import sqlite3
+import sys
 from datetime import datetime, timedelta
+from pathlib import Path
+
+# Add src/server to import path for db_compat
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+from db_compat import connect as db_connect
 
 DB_PATH = os.getenv("DB_PATH", "database.sqlite")
 
@@ -43,10 +48,8 @@ def _sector_patterns(sector: str) -> tuple[str, str]:
     return (sector, sector)
 
 
-def _connect(db_path: str):
-    db = sqlite3.connect(db_path)
-    db.row_factory = sqlite3.Row
-    return db
+def _connect(db_path: str = None):
+    return db_connect()
 
 
 # ─── Market Pulse ─────────────────────────────────────────────────────────────

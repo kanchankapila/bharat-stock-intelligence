@@ -1295,7 +1295,7 @@ export async function runTechnicalSignalScan(options: {
          entry_price, target_price, stop_loss, confidence_score,
          reasoning, technical_score, status, signal_generated_at)
       VALUES (?, date('now'), 'TECHNICAL', 'BUY', ?, ?, ?, ?, ?, ?, 'ACTIVE', ?)
-      ON CONFLICT(symbol, signal_date, signal_source) DO UPDATE SET
+      ON CONFLICT(symbol, signal_source, signal_type, signal_date) DO UPDATE SET
         entry_price=excluded.entry_price,
         technical_score=excluded.technical_score,
         confidence_score=excluded.confidence_score,

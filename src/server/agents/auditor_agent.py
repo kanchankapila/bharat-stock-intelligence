@@ -9,24 +9,25 @@ from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
-from sqlalchemy import create_engine, text
-
 sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from sqlalchemy import text
+from db_compat import get_engine, translate
 from ollama_client import get_narrative
 
-DB_PATH = Path(__file__).parent.parent.parent.parent / "database.sqlite"
-ENGINE = create_engine(f"sqlite:///{DB_PATH}")
+ENGINE = get_engine()
 
 
 def _get_price(conn, symbol: str, as_of: str | None = None) -> float | None:
     if as_of:
-        row = conn.execute(text(
+        row = conn.execute(text(translate(
             "SELECT close FROM stock_ohlcv WHERE symbol=:s AND date<=:d ORDER BY date DESC LIMIT 1"
-        ), {"s": symbol, "d": as_of}).fetchone()
+        )), {"s": symbol, "d": as_of}).fetchone()
     else:
-        row = conn.execute(text(
+        row = conn.execute(text(translate(
             "SELECT close FROM stock_ohlcv WHERE symbol=:s ORDER BY date DESC LIMIT 1"
-        ), {"s": symbol}).fetchone()
+        )), {"s": symbol}).fetchone()
     return float(row[0]) if row and row[0] else None
 
 
@@ -35,10 +36,10 @@ def run() -> dict:
 
     with ENGINE.connect() as conn:
         # Most recent previous strategy run
-        prev_row = conn.execute(text("""
+        prev_row = conn.execute(text(translate("""
             SELECT DISTINCT run_date FROM agent_strategy_picks
             WHERE run_date < :today ORDER BY run_date DESC LIMIT 1
-        """), {"today": today}).fetchone()
+        """)), {"today": today}).fetchone()
         if not prev_row:
             print("[AUDITOR] No previous picks to audit")
             return {"skipped": True}
@@ -50,11 +51,11 @@ def run() -> dict:
         nifty_return = ((nifty_now - nifty_entry) / nifty_entry * 100) \
             if nifty_entry and nifty_now and nifty_entry > 0 else 0.0
 
-        picks = conn.execute(text("""
+        picks = conn.execute(text(translate("""
             SELECT symbol, timeframe, conviction, entry_zone_low, entry_zone_high,
                    stop_loss, target_1, supporting_signals_json
             FROM agent_strategy_picks WHERE run_date = :d
-        """), {"d": audit_date}).fetchall()
+        """)), {"d": audit_date}).fetchall()
 
         by_tf: dict[str, list] = defaultdict(list)
         for p in picks:
@@ -133,7 +134,7 @@ def run() -> dict:
             )
             narrative = get_narrative(prompt)
 
-            conn.execute(text("""
+            conn.execute(text(translate("""
                 INSERT INTO agent_audit_reports
                   (run_date, audit_for_date, timeframe, total_picks,
                    hits, misses, open_positions, hit_rate, avg_return_pct,
@@ -142,7 +143,7 @@ def run() -> dict:
                 VALUES
                   (:rd, :afd, :tf, :total, :hits, :misses, :opens,
                    :hr, :avg, :pf, :nifty, :alpha, :best, :worst, :attr, :narr)
-            """), {
+            """)), {
                 "rd": today, "afd": audit_date, "tf": tf, "total": total,
                 "hits": hits, "misses": misses, "opens": opens,
                 "hr": round(hit_rate, 2), "avg": round(avg_ret, 3),

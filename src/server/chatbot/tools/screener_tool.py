@@ -1,5 +1,10 @@
 import os
-import sqlite3
+import sys
+from pathlib import Path
+
+# Add src/server to import path for db_compat
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+from db_compat import connect
 
 DB_PATH = os.getenv("DB_PATH", "database.sqlite")
 CHROMA_DIR = os.getenv("CHROMA_PERSIST_DIR", "src/server/chatbot/chroma_store")
@@ -17,8 +22,7 @@ def get_embedding_fn():
 
 def get_screener_stocks(scan_id: str, db_path: str = DB_PATH) -> list[dict]:
     """Fetch constituent stocks for a screener id, enriched with AI scores."""
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
+    conn = connect()
 
     rows = conn.execute("""
         SELECT tss.symbol, ns.name, ns.sector,
@@ -52,8 +56,7 @@ def search_screener(query: str, top_k: int = 3, db_path: str = DB_PATH) -> list[
     col = client.get_or_create_collection("screener_descriptions", embedding_function=ef)
 
     if col.count() == 0:
-        conn = sqlite3.connect(db_path)
-        conn.row_factory = sqlite3.Row
+        conn = connect()
         term = f"%{query}%"
         screeners = conn.execute(
             "SELECT scan_id, name, source, inferred_sentiment FROM screener_master WHERE name LIKE ? LIMIT ?",

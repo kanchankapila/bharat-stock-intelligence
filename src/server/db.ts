@@ -440,6 +440,29 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_sout_outcome ON signal_outcomes(outcome);
   CREATE INDEX IF NOT EXISTS idx_sout_sym     ON signal_outcomes(symbol);
 
+  -- 15b. Signal Excursions — path-based exit labels (computed by exit_labeler.py from
+  -- stock_ohlcv). signal_outcomes answers "was it a win at the horizon?"; this answers
+  -- "how should we have EXITED?" — the targets an exit-policy model needs to learn from.
+  CREATE TABLE IF NOT EXISTS signal_excursions (
+    symbol          TEXT NOT NULL,
+    signal_date     TEXT NOT NULL,
+    horizon_days    INTEGER NOT NULL,
+    entry_price     REAL NOT NULL,
+    mfe_pct         REAL,    -- max favorable excursion: best unrealised gain in the window (%)
+    mae_pct         REAL,    -- max adverse excursion: worst unrealised drawdown in the window (%)
+    days_to_mfe     INTEGER, -- trading days from entry to the MFE peak
+    days_to_mae     INTEGER, -- trading days from entry to the MAE trough
+    mfe_before_mae  INTEGER, -- 1 if the favorable peak occurred before the adverse trough
+    trail_exit_pct  REAL,    -- return of a chandelier-trailed exit (highest-high − 3×ATR)
+    trail_exit_day  INTEGER, -- trading day the trailing stop fired (NULL = held to horizon)
+    horizon_close_pct REAL,  -- return if simply held to the horizon close (baseline)
+    computed_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (symbol, signal_date, horizon_days)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_sexc_date ON signal_excursions(signal_date DESC);
+  CREATE INDEX IF NOT EXISTS idx_sexc_sym  ON signal_excursions(symbol);
+
   -- 16. News Sentiment Items — enriched news from multiple sources (replaces basic news_articles)
   CREATE TABLE IF NOT EXISTS news_sentiment_items (
     id            TEXT PRIMARY KEY,
@@ -1164,6 +1187,13 @@ migrateColumn('technical_signals', 'pcr_oi',         'REAL');
 migrateColumn('technical_signals', 'pcr_vol',        'REAL');
 migrateColumn('technical_signals', 'sector_ret_5d',  'REAL');
 migrateColumn('technical_signals', 'sector_ret_21d', 'REAL');
+// Options-implied vol features (computed by iv_features.py from stock_options_oi)
+migrateColumn('technical_signals', 'iv_rank',         'REAL');
+migrateColumn('technical_signals', 'iv_skew',         'REAL');
+
+// ATM implied vol + skew snapshot (captured by pcr_fetcher.py from the NSE option chain)
+migrateColumn('stock_options_oi', 'atm_iv',   'REAL');
+migrateColumn('stock_options_oi', 'iv_skew',  'REAL');
 
 migrateColumn('stock_fundamentals', 'created_at', 'DATETIME');
 migrateColumn('stock_fundamentals', 'updated_at', 'DATETIME');

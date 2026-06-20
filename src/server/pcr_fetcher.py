@@ -45,6 +45,31 @@ DEFAULT_SYMBOLS = [
 ]
 
 
+def compute_atm_iv_skew(strikes: list, underlying: float) -> tuple:
+    """ATM implied vol and put-call IV skew from a nearest-expiry chain.
+
+    `strikes`: list of (strike_price, call_iv, pe_iv). `underlying`: spot.
+    atm_iv  = mean(call_iv, put_iv) at the strike nearest spot (ignoring zero IVs).
+    iv_skew = OTM-put IV − OTM-call IV, using the strikes nearest ±5% from spot — a model-
+              free proxy for 25-delta skew (positive = downside crash bid). Returns
+              (None, None) when the chain has no usable IVs."""
+    usable = [(s, c, p) for (s, c, p) in strikes if s and (c or p)]
+    if not usable or not underlying:
+        return None, None
+
+    atm = min(usable, key=lambda r: abs(r[0] - underlying))
+    atm_ivs = [v for v in (atm[1], atm[2]) if v]
+    atm_iv = sum(atm_ivs) / len(atm_ivs) if atm_ivs else None
+
+    put_strike  = min(usable, key=lambda r: abs(r[0] - underlying * 0.95))
+    call_strike = min(usable, key=lambda r: abs(r[0] - underlying * 1.05))
+    iv_skew = None
+    if put_strike[2] and call_strike[1]:
+        iv_skew = put_strike[2] - call_strike[1]
+
+    return atm_iv, iv_skew
+
+
 class PCRFetcher:
     def __init__(self):
         self.engine  = get_engine()
@@ -80,11 +105,13 @@ class PCRFetcher:
 
             nearest_expiry = expiry_dates[0]
             chain_data     = records.get("data", [])
+            underlying     = records.get("underlyingValue") or 0
 
             total_call_oi = 0
             total_put_oi  = 0
             near_call_oi  = 0
             near_put_oi   = 0
+            near_strikes  = []   # (strike, ce_iv, pe_iv) for nearest expiry — IV features
 
             for strike in chain_data:
                 ce = strike.get("CE", {})
@@ -99,9 +126,18 @@ class PCRFetcher:
                 if pe.get("expiryDate") == nearest_expiry:
                     near_put_oi  += p_oi
 
+                if ce.get("expiryDate") == nearest_expiry or pe.get("expiryDate") == nearest_expiry:
+                    sp = strike.get("strikePrice")
+                    if sp is not None:
+                        near_strikes.append((
+                            sp, ce.get("impliedVolatility") or 0, pe.get("impliedVolatility") or 0
+                        ))
+
             # PCR = put OI / call OI (nearest expiry)
             near_pcr  = near_put_oi  / near_call_oi  if near_call_oi  > 0 else None
             total_pcr = total_put_oi / total_call_oi if total_call_oi > 0 else None
+
+            atm_iv, iv_skew = compute_atm_iv_skew(near_strikes, underlying)
 
             return {
                 "symbol":        symbol,
@@ -112,6 +148,8 @@ class PCRFetcher:
                 "total_call_oi": total_call_oi,
                 "total_put_oi":  total_put_oi,
                 "market_pcr":    total_pcr,
+                "atm_iv":        atm_iv,
+                "iv_skew":       iv_skew,
             }
         except Exception as e:
             print(f"[PCR] {symbol}: parse error — {e}")

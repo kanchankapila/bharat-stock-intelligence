@@ -64,6 +64,40 @@ def _parse_signal_types(signals_json) -> set[str]:
         return set()
 
 
+def _days_to_fno_expiry(dates: pd.Series) -> pd.Series:
+    """Calendar days from each date to the NSE monthly F&O expiry (last Thursday of the
+    month). If the date is past this month's last Thursday, roll to next month's. Expiry
+    week pins price to max-pain and inflates gamma — a real, leak-free timing feature."""
+    def _last_thursday(year: int, month: int):
+        if month == 12:
+            nxt = datetime.date(year + 1, 1, 1)
+        else:
+            nxt = datetime.date(year, month + 1, 1)
+        last = nxt - datetime.timedelta(days=1)
+        # Thursday == weekday 3
+        last -= datetime.timedelta(days=(last.weekday() - 3) % 7)
+        return last
+
+    def _dte(ts):
+        if pd.isna(ts):
+            return np.nan
+        d = ts.date()
+        exp = _last_thursday(d.year, d.month)
+        if d > exp:
+            ny, nm = (d.year + 1, 1) if d.month == 12 else (d.year, d.month + 1)
+            exp = _last_thursday(ny, nm)
+        return (exp - d).days
+
+    return dates.apply(_dte)
+
+
+def _results_season_flag(dates: pd.Series) -> pd.Series:
+    """1 during Indian quarterly earnings season (results cluster in Jan/Apr/Jul/Oct), else 0.
+    An entry inside results season carries idiosyncratic earnings-gap risk the price features
+    can't see."""
+    return dates.apply(lambda ts: 0.0 if pd.isna(ts) else (1.0 if ts.month in (1, 4, 7, 10) else 0.0))
+
+
 def build_features(df: pd.DataFrame) -> pd.DataFrame:
     X = pd.DataFrame(index=df.index)
 
@@ -135,6 +169,21 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     # Interaction: delivery conviction × signal score
     X['delivery_x_score'] = X['delivery_pct'] * X['signal_score']
 
+    # ── Options-implied volatility (from stock_options_oi → iv_features.py) ──
+    # iv_rank: where today's ATM IV sits in its trailing 252d range (0-1). Low IV-rank on a
+    # breakout = cheap optionality / coiled move; high IV-rank = priced-in / fade risk.
+    # iv_skew: put_iv − call_iv at ~25-delta. Positive = downside fear (crash hedging bid).
+    X['iv_rank'] = num('iv_rank', 0.5).clip(0, 1)
+    X['iv_skew'] = num('iv_skew', 0.0)
+    # Interaction: a strong signal into cheap IV is the highest-quality entry
+    X['score_x_low_iv'] = X['signal_score'] * (1.0 - X['iv_rank'])
+
+    # ── Event-proximity calendar features (pure functions of signal_date, leak-free) ──
+    sd = pd.to_datetime(df['signal_date'], errors='coerce') if 'signal_date' in df.columns else \
+        pd.Series(pd.NaT, index=df.index)
+    X['days_to_fno_expiry'] = _days_to_fno_expiry(sd).fillna(15) / 30.0
+    X['results_season']     = _results_season_flag(sd).fillna(0)
+
     # Signal type one-hot
     sig_col = df['signals_json'] if 'signals_json' in df.columns else pd.Series(['[]'] * len(df), index=df.index)
     type_sets = sig_col.apply(_parse_signal_types)
@@ -172,6 +221,7 @@ def load_training_data() -> pd.DataFrame:
                ts.fii_10d_net, ts.dii_3d_net,
                ts.delivery_pct,
                ts.sector_ret_5d, ts.sector_ret_21d,
+               ts.iv_rank, ts.iv_skew,
                sf.fifty_two_week_high,
                sf.piotroski_f_score, sf.debt_to_equity, sf.operating_margins,
                sf.return_on_equity, sf.revenue_growth, sf.earnings_growth,
@@ -199,6 +249,7 @@ def load_pending_signals() -> pd.DataFrame:
                ts.fii_10d_net, ts.dii_3d_net,
                ts.delivery_pct,
                ts.sector_ret_5d, ts.sector_ret_21d,
+               ts.iv_rank, ts.iv_skew,
                sf.fifty_two_week_high,
                sf.piotroski_f_score, sf.debt_to_equity, sf.operating_margins,
                sf.return_on_equity, sf.revenue_growth, sf.earnings_growth,

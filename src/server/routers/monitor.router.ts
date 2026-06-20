@@ -535,11 +535,14 @@ export const monitorRouter = router({
 
   triggerAllDaily: publicProcedure.mutation(async () => {
     const dailyScripts = ['fii-dii-fetcher', 'regime-detector', 'feature-engineering', 'outcome-resolver-5d', 'outcome-resolver-15d', 'performance-tracker', 'reward-engine', 'rl-agent-update', 'ml-ensemble-score', 'dl-engine-infer', 'signal-type-stats'];
-    const upsert = async (key: string, val: string) => {
+    const upsert = async (key: string, val: string, errorMsg?: string) => {
       try {
         await dbRun("INSERT INTO app_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [key, val]);
         if (val === 'success') {
           await dbRun("INSERT INTO app_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [`${key}_ran_at`, new Date().toISOString()]);
+          await dbRun("DELETE FROM app_settings WHERE key=?", [`${key}_error`]);
+        } else if (val === 'failed' && errorMsg) {
+          await dbRun("INSERT INTO app_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [`${key}_error`, errorMsg.slice(0, 500)]);
         }
       } catch (err: unknown) {
         console.warn('[MONITOR] upsert failed:', (err as Error).message);
@@ -554,7 +557,7 @@ export const monitorRouter = router({
           const { computeSignalTypeStats } = await import('../technicalSignalsService');
           await computeSignalTypeStats();
           await upsert(`monitor_${id}`, 'success');
-        } catch { await upsert(`monitor_${id}`, 'failed'); }
+        } catch (e: any) { await upsert(`monitor_${id}`, 'failed', e.message); }
         continue;
       }
       if (!s.pyScript) continue;
@@ -562,7 +565,7 @@ export const monitorRouter = router({
       const [pyFile, ...pyArgs] = s.pyScript.split(' ');
       runPython(pyFile, pyArgs, 20 * 60_000)
         .then(() => upsert(`monitor_${id}`, 'success'))
-        .catch(() => upsert(`monitor_${id}`, 'failed'));
+        .catch((e: any) => upsert(`monitor_${id}`, 'failed', e.message));
     }
     return { started: dailyScripts.length };
   }),

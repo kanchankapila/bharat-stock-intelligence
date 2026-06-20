@@ -1,6 +1,11 @@
 import os
-import sqlite3
+import sys
 from datetime import datetime
+from pathlib import Path
+
+# Add src/server to import path for db_compat
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+from db_compat import connect
 
 import yfinance as yf
 from tools.web_tool import web_search
@@ -38,8 +43,7 @@ def get_earnings_calendar(days_ahead: int = 14, db_path: str = DB_PATH) -> dict:
     query = f"NSE BSE quarterly results announcement upcoming {month_year} earnings calendar"
     web_results = web_search(query, max_results=5)
 
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
+    conn = connect()
     bullish = conn.execute("""
         SELECT tas.symbol, ns.name, ns.sector, tas.trend, tas.rsi,
                ss.score, ss.classification

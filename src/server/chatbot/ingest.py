@@ -6,8 +6,13 @@ Usage:
     python src/server/chatbot/ingest.py
 """
 import os
-import sqlite3
+import sys
 import logging
+from pathlib import Path
+
+# Add src/server to import path for db_compat
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from db_compat import connect
 
 import chromadb
 from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
@@ -32,7 +37,7 @@ def ingest_stock_profiles(client: chromadb.ClientAPI, db_path: str = DB_PATH) ->
     ef = get_embedding_fn()
     col = client.get_or_create_collection("stock_profiles", embedding_function=ef)
 
-    conn = sqlite3.connect(db_path)
+    conn = connect()
     try:
         rows = conn.execute("""
             SELECT ns.symbol, ns.name, ns.sector, ns.industry,
@@ -72,7 +77,7 @@ def ingest_screener_descriptions(client: chromadb.ClientAPI, db_path: str = DB_P
     ef = get_embedding_fn()
     col = client.get_or_create_collection("screener_descriptions", embedding_function=ef)
 
-    conn = sqlite3.connect(db_path)
+    conn = connect()
     try:
         rows = conn.execute("""
             SELECT scan_id, name, source, inferred_sentiment, inferred_category
@@ -102,7 +107,7 @@ def ingest_news_articles(client: chromadb.ClientAPI, db_path: str = DB_PATH) -> 
     ef = get_embedding_fn()
     col = client.get_or_create_collection("news_articles", embedding_function=ef)
 
-    conn = sqlite3.connect(db_path)
+    conn = connect()
     try:
         rows = conn.execute("""
             SELECT id, title, summary, source, sentiment, sentiment_score,
