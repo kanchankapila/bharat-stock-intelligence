@@ -378,6 +378,11 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
 
   await pythonApi.scorePending().catch(e => console.warn('[API] score-pending:', (e as Error).message));
 
+  // Isotonic-recalibrate win_probability against realized WIN/LOSS so sizing/gating use
+  // honest probabilities (the ensemble stack is overconfident). Runs after outcomes resolve.
+  await runPython('ml_calibration.py', [], 120_000)
+    .catch(e => console.warn('[QUEUE] ml_calibration failed:', (e as Error).message));
+
   await runPython('reward_engine.py');
   await runPython('rl_agent.py', ['--update']);
   return { success: true };

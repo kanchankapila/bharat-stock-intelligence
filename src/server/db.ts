@@ -1135,6 +1135,7 @@ migrateColumn('watchlist', 'source', 'TEXT');
 // technical_signals — new accuracy context columns
 migrateColumn('stock_ohlcv', 'is_suspect', 'INTEGER DEFAULT 0');
 migrateColumn('technical_signals', 'adx',            'REAL');
+migrateColumn('technical_signals', 'calibrated_win_probability', 'REAL');
 migrateColumn('technical_signals', 'nifty_regime',   'TEXT');
 migrateColumn('technical_signals', 'delivery_pct',   'REAL');
 migrateColumn('technical_signals', 'fii_3d_net',     'REAL');

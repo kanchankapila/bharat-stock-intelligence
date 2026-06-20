@@ -55,7 +55,8 @@ def make_db():
         );
         CREATE TABLE technical_signals (
             id INTEGER PRIMARY KEY AUTOINCREMENT, symbol TEXT,
-            date TEXT, win_probability REAL, signal_score INTEGER DEFAULT 0
+            date TEXT, win_probability REAL, calibrated_win_probability REAL,
+            signal_score INTEGER DEFAULT 0
         );
         CREATE TABLE unified_recommendations (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

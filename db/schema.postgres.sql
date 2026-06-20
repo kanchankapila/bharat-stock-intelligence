@@ -1330,6 +1330,7 @@ CREATE TABLE IF NOT EXISTS "technical_signals" (
   "delivery_pct" DOUBLE PRECISION,
   "fii_3d_net" DOUBLE PRECISION,
   "win_probability" DOUBLE PRECISION,
+  "calibrated_win_probability" DOUBLE PRECISION,
   "created_at" TIMESTAMPTZ,
   "updated_at" TIMESTAMPTZ,
   "news_sentiment_score" DOUBLE PRECISION,

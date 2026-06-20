@@ -334,11 +334,12 @@ class UnifiedRanker:
         }
 
     def _get_win_probabilities(self):
-        """Raw ML meta-label per symbol: avg win_probability over recent technical signals."""
+        """ML meta-label per symbol: avg isotonic-calibrated win prob (fallback to raw) over
+        recent technical signals. Calibrated value is honest, so sizing only backs real edge."""
         cutoff = (date.today() - timedelta(days=30)).isoformat()
         rows = self.conn.execute(
-            "SELECT symbol, AVG(win_probability) AS p FROM technical_signals "
-            "WHERE date >= ? AND win_probability IS NOT NULL GROUP BY symbol",
+            "SELECT symbol, AVG(COALESCE(calibrated_win_probability, win_probability)) AS p "
+            "FROM technical_signals WHERE date >= ? AND win_probability IS NOT NULL GROUP BY symbol",
             (cutoff,)
         ).fetchall()
         return {r['symbol']: float(r['p']) for r in rows if r['p'] is not None}
