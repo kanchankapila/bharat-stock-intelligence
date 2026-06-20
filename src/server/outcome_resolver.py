@@ -42,6 +42,87 @@ def net_return_pct(gross_return_pct: float, cost_pct: float = ROUND_TRIP_COST_PC
     return gross_return_pct - cost_pct
 
 
+# ── Exit policy (#2) ────────────────────────────────────────────────────────────
+# The old resolver exited every trade at the horizon CLOSE: a name that ran to +8% on
+# day 2 and faded to +1% booked +1%. A disciplined desk books a partial at the target and
+# trails the rest with a chandelier stop so winners run but gains are locked. simulate_exit
+# replays the daily bars and applies that policy (long-only — matches the resolver's math).
+SCALE_OUT_FRAC = 0.5        # book half the position at the target, trail the rest
+CHANDELIER_ATR_MULT = 3.0   # trailing stop = highest-high-since-entry − 3×ATR
+
+
+def simulate_exit(bars, entry, initial_stop, target, atr,
+                  scale_frac: float = SCALE_OUT_FRAC,
+                  chandelier_mult: float = CHANDELIER_ATR_MULT):
+    """Bar-by-bar long-trade exit simulation over the holding window.
+
+    `bars`: list of (date, high, low, close) ascending, position already open at `entry`.
+    Returns (exit_date, exit_price, exit_reason, gross_return_pct) where the return blends
+    a `scale_frac` partial booked at `target` with the remainder's exit. Net-of-cost is the
+    caller's job. Policy:
+      - Hard `initial_stop` always applies. Once price advances, a chandelier trailing stop
+        (highest_high − mult×ATR) ratchets the stop up — never below the initial stop, and
+        computed from bars *before* the current one (no intra-bar look-ahead).
+      - First bar whose high ≥ `target` books `scale_frac` at the target; the rest trails.
+      - Stop is tested before target within a bar (conservative: assume the adverse move
+        first). `atr` ≤ 0 or `initial_stop` None disables the respective leg gracefully.
+      - If nothing exits the remainder by the last bar, it exits at the last close (time).
+    """
+    if not bars:
+        return None, None, 'PENDING', None
+
+    highest = entry
+    partial_taken = False
+    partial_return = 0.0
+    has_target = target is not None and target > entry
+
+    for d, high, low, close in bars:
+        # Effective stop for THIS bar uses only prior bars' highs (no look-ahead).
+        eff_stop = initial_stop
+        if atr and atr > 0 and initial_stop is not None:
+            eff_stop = max(initial_stop, highest - chandelier_mult * atr)
+        elif atr and atr > 0:
+            eff_stop = highest - chandelier_mult * atr
+
+        if eff_stop is not None and low <= eff_stop:
+            reason = 'STOP_LOSS' if (initial_stop is not None and eff_stop == initial_stop) else 'TRAILING_STOP'
+            leg = (eff_stop - entry) / entry * 100
+            gross = scale_frac * partial_return + (1 - scale_frac) * leg if partial_taken else leg
+            return d, eff_stop, reason, gross
+
+        if has_target and not partial_taken and high >= target:
+            partial_taken = True
+            partial_return = (target - entry) / entry * 100
+
+        highest = max(highest, high)
+
+    last_d, _, _, last_close = bars[-1]
+    leg = (last_close - entry) / entry * 100
+    if partial_taken:
+        return last_d, last_close, 'TIME_EXIT_PARTIAL', scale_frac * partial_return + (1 - scale_frac) * leg
+    return last_d, last_close, 'TIME_EXIT', leg
+
+
+def get_atr(conn: ConnWrapper, symbol: str, signal_date: str, window: int = 14) -> float:
+    """Average True Range (absolute price units) from the `window`+1 bars up to signal_date.
+    Drives the chandelier trailing stop; 0.0 (trailing disabled) when history is too short."""
+    rows = conn.execute("""
+        SELECT high, low, close FROM stock_ohlcv
+        WHERE symbol = ? AND date <= ?
+        ORDER BY date DESC LIMIT ?
+    """, (symbol, signal_date, window + 1)).fetchall()
+    if len(rows) < 2:
+        return 0.0
+    rows = rows[::-1]
+    prev_close = float(rows[0][2])
+    trs = []
+    for h, l, c in rows[1:]:
+        h, l, c = float(h), float(l), float(c)
+        trs.append(max(h - l, abs(h - prev_close), abs(l - prev_close)))
+        prev_close = c
+    return sum(trs) / len(trs) if trs else 0.0
+
+
 def get_volatility_threshold(conn: ConnWrapper, symbol: str, signal_date: str, horizon_days: int) -> float:
     """
     Calculates a dynamic threshold based on the stock's rolling daily standard deviation.
@@ -247,7 +328,8 @@ def resolve_unified_outcomes(
     # version matched any existing row regardless of outcome, which permanently stranded
     # PENDING signals (root cause of ~86% of AI signals never resolving).
     pending = conn.execute("""
-        SELECT us.id, us.symbol, us.signal_date, us.entry_price, us.stop_loss, us.signal_source, us.confidence_score
+        SELECT us.id, us.symbol, us.signal_date, us.entry_price, us.stop_loss, us.signal_source,
+               us.confidence_score, us.target_price
         FROM unified_signals us
         WHERE us.signal_date <= ?
           AND us.status != 'COMPLETED'
@@ -261,7 +343,8 @@ def resolve_unified_outcomes(
         LIMIT 2000
     """, (cutoff, horizon_days)).fetchall()
 
-    cols = ['id', 'symbol', 'signal_date', 'entry_price', 'stop_loss', 'signal_source', 'confidence_score']
+    cols = ['id', 'symbol', 'signal_date', 'entry_price', 'stop_loss', 'signal_source',
+            'confidence_score', 'target_price']
     rows = [dict(zip(cols, r)) for r in pending]
 
     if not rows:
@@ -274,13 +357,14 @@ def resolve_unified_outcomes(
     upsert = """
         INSERT INTO unified_signal_outcomes
             (unified_signal_id, signal_source, symbol, signal_date, horizon_days,
-             entry_price, entry_time, check_date, exit_price, outcome, return_pct, computed_at)
-        VALUES (?,?,?,?,?,?,CURRENT_TIMESTAMP,?,?,?,?,CURRENT_TIMESTAMP)
+             entry_price, entry_time, check_date, exit_price, outcome, return_pct,
+             exit_reason, computed_at)
+        VALUES (?,?,?,?,?,?,CURRENT_TIMESTAMP,?,?,?,?,?,CURRENT_TIMESTAMP)
         ON CONFLICT(unified_signal_id, horizon_days) DO UPDATE SET
             entry_price=excluded.entry_price,
             check_date=excluded.check_date, exit_price=excluded.exit_price,
             outcome=excluded.outcome, return_pct=excluded.return_pct,
-            computed_at=excluded.computed_at
+            exit_reason=excluded.exit_reason, computed_at=excluded.computed_at
     """
 
     for row in rows:
@@ -310,44 +394,37 @@ def resolve_unified_outcomes(
             
         exit_target_date = (signal_date_obj + datetime.timedelta(days=horizon_days)).isoformat()
 
-        outcome, exit_price, check_date, return_pct = None, None, None, None
+        # #2 exit policy: replay daily bars through target-capture / scale-out / chandelier
+        # trailing / time exit instead of just booking the horizon close.
+        target = float(row['target_price']) if row.get('target_price') else None
+        atr = get_atr(conn, sym, signal_date[:10])
+        bar_rows = conn.execute("""
+            SELECT date, high, low, close FROM stock_ohlcv
+            WHERE symbol = ? AND date >= ? AND date <= ?
+            ORDER BY date ASC
+        """, (sym, next_trading_day, exit_target_date)).fetchall()
+        bars = [(str(b[0]), float(b[1]), float(b[2]), float(b[3])) for b in bar_rows]
 
-        if stop_loss and stop_loss > 0:
-            sl_hit = conn.execute("""
-                SELECT date, low FROM stock_ohlcv
-                WHERE symbol = ? AND date >= ? AND date <= ? AND low <= ?
-                ORDER BY date ASC, low ASC LIMIT 1
-            """, (sym, next_trading_day, exit_target_date, stop_loss)).fetchone()
+        outcome, exit_price, check_date, return_pct, exit_reason = None, None, None, None, None
 
-            if sl_hit:
-                check_date = str(sl_hit[0])
-                exit_price = float(stop_loss)
-                return_pct = net_return_pct((exit_price - entry) / entry * 100)
+        if not bars:
+            outcome = 'PENDING'
+        else:
+            initial_stop = stop_loss if (stop_loss and stop_loss > 0) else None
+            check_date, exit_price, exit_reason, gross = simulate_exit(
+                bars, entry=entry, initial_stop=initial_stop, target=target, atr=atr)
+            return_pct = net_return_pct(gross)
+            if exit_reason == 'STOP_LOSS':
                 outcome = 'STOP_LOSS'
-
-        if outcome is None:
-            exit_row = conn.execute("""
-                SELECT date, close FROM stock_ohlcv
-                WHERE symbol = ? AND date >= ?
-                ORDER BY date ASC LIMIT 1
-            """, (sym, exit_target_date)).fetchone()
-
-            if exit_row:
-                check_date = str(exit_row[0])
-                exit_price = float(exit_row[1])
-                return_pct = net_return_pct((exit_price - entry) / entry * 100)
-                
-                # Dynamic volatility-adjusted threshold
+            else:
                 threshold = get_volatility_threshold(conn, sym, signal_date, horizon_days)
                 outcome = ('WIN' if return_pct > threshold else
                            'LOSS' if return_pct < -threshold else
                            'NEUTRAL')
-            else:
-                outcome = 'PENDING'
 
         if dry_run:
             msg = f"  [DRY] UNIFIED {sym} {signal_date} (entry:{next_trading_day}) -> {outcome}"
-            if return_pct is not None: msg += f" ({return_pct:.2f}%)"
+            if return_pct is not None: msg += f" ({return_pct:.2f}% via {exit_reason})"
             print(msg)
             continue
 
@@ -355,6 +432,7 @@ def resolve_unified_outcomes(
             uid, source, sym, signal_date, horizon_days, entry,
             check_date, exit_price, outcome,
             round(return_pct, 4) if return_pct is not None else None,
+            exit_reason,
         ))
         
         if outcome != 'PENDING':

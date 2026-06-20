@@ -166,3 +166,63 @@ def test_stop_loss_return_also_net_of_costs():
     resolve(conn)
     _, return_pct = get_row(conn, 'TCS')
     assert return_pct == pytest.approx(-5.0 - ROUND_TRIP_COST_PCT, abs=0.01)
+
+
+# ─── unified resolver exit policy (#2): target capture + trailing instead of horizon-close ──
+
+def make_unified_db():
+    conn = sqlite3.connect(':memory:')
+    conn.executescript("""
+        CREATE TABLE unified_signals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, symbol TEXT, signal_date TEXT,
+            entry_price REAL, target_price REAL, stop_loss REAL, signal_source TEXT,
+            confidence_score REAL, status TEXT DEFAULT 'ACTIVE'
+        );
+        CREATE TABLE unified_signal_outcomes (
+            unified_signal_id INTEGER, signal_source TEXT, symbol TEXT, signal_date TEXT,
+            horizon_days INTEGER, entry_price REAL, entry_time TEXT, check_date TEXT,
+            exit_price REAL, outcome TEXT, return_pct REAL, exit_reason TEXT, computed_at TEXT,
+            PRIMARY KEY (unified_signal_id, horizon_days)
+        );
+        CREATE TABLE stock_ohlcv (
+            symbol TEXT, date TEXT, open REAL, high REAL, low REAL, close REAL,
+            volume INTEGER, PRIMARY KEY (symbol, date)
+        );
+    """)
+    return conn
+
+
+def test_unified_target_capture_beats_faded_horizon_close():
+    from outcome_resolver import resolve_unified_outcomes
+    conn = make_unified_db()
+    sig_date = (datetime.date.today() - datetime.timedelta(days=20)).isoformat()
+    base = datetime.date.fromisoformat(sig_date)
+    # flat history before signal -> ATR ~0 (trailing disabled, isolates target capture)
+    for i in range(15, 0, -1):
+        d = (base - datetime.timedelta(days=i)).isoformat()
+        conn.execute("INSERT OR IGNORE INTO stock_ohlcv VALUES (?,?,100,100,100,100,100000)", ('ZED', d))
+    conn.execute("INSERT INTO unified_signals (symbol, signal_date, entry_price, target_price, stop_loss, signal_source, confidence_score) "
+                 "VALUES ('ZED', ?, 100, 105, 97, 'AI', 70)", (sig_date,))
+    # day+1 spikes through the 105 target, then fades back to ~100 by horizon (5d)
+    bars = [
+        (1, 100, 106, 100, 104),   # entry open 100, high 106 captures target
+        (2, 102, 103, 100, 101),
+        (3, 101, 102,  99, 100),
+        (4, 100, 101,  99, 100),
+        (5, 100, 100,  99, 100),   # horizon close ~100
+    ]
+    for off, o, h, l, c in bars:
+        d = (base + datetime.timedelta(days=off)).isoformat()
+        conn.execute("INSERT INTO stock_ohlcv VALUES (?,?,?,?,?,?,100000)", ('ZED', d, o, h, l, c))
+    conn.commit()
+
+    resolve_unified_outcomes(conn, horizon_days=5, dry_run=False)
+    row = conn.execute(
+        "SELECT outcome, return_pct, exit_reason FROM unified_signal_outcomes WHERE symbol='ZED'"
+    ).fetchone()
+    assert row is not None
+    # Old logic booked the faded horizon close (~0% -> NEUTRAL). New: 50% at +5%, rest to
+    # time-exit ~0% => ~2.5% gross, ~2.2% net => a WIN.
+    assert row[1] == pytest.approx(2.5 - 0.30, abs=0.05)
+    assert row[0] == 'WIN'
+    assert row[2] in ('TIME_EXIT_PARTIAL', 'TRAILING_STOP', 'TARGET')
