@@ -282,7 +282,28 @@ def _base_models(scale_pos_weight: float = 1.0):
     return [('lgbm', lgbm), ('xgb', xgb_model), ('rf', rf), ('et', et), ('lr', lr)]
 
 
-def _fit_stack(X: pd.DataFrame, y: pd.Series, spw: float, embargo: int, n_splits: int = 5):
+def average_uniqueness(start_days, horizons) -> list:
+    """López de Prado average uniqueness per label. A label spans [start, start+horizon)
+    days; concurrency at a day = number of spans covering it; uniqueness = mean(1/concurrency)
+    over the span. Overlapping (crowded) periods — where outcomes share the same forward
+    market window and are thus correlated — get lower weight, so the non-IID overcounting
+    that inflates CV-vs-holdout is corrected. Returns weights aligned to input order."""
+    n = len(start_days)
+    starts = [int(s) for s in start_days]
+    ends = [starts[i] + max(1, int(horizons[i])) for i in range(n)]
+    conc: dict[int, int] = {}
+    for i in range(n):
+        for d in range(starts[i], ends[i]):
+            conc[d] = conc.get(d, 0) + 1
+    out = []
+    for i in range(n):
+        span = ends[i] - starts[i]
+        out.append(sum(1.0 / conc[d] for d in range(starts[i], ends[i])) / span)
+    return out
+
+
+def _fit_stack(X: pd.DataFrame, y: pd.Series, spw: float, embargo: int, n_splits: int = 5,
+               sample_weight=None):
     """
     Fit OOF-stacked base models + meta-learner on (X, y), purging `embargo` samples
     between each train/validation fold so overlapping forward-return windows cannot
@@ -297,6 +318,7 @@ def _fit_stack(X: pd.DataFrame, y: pd.Series, spw: float, embargo: int, n_splits
     from sklearn.metrics import roc_auc_score
 
     base = _base_models(scale_pos_weight=spw)
+    sw = np.asarray(sample_weight, dtype=float) if sample_weight is not None else None
     # Keep folds viable once the embargo gap is subtracted.
     n_eff = n_splits
     if embargo > 0:
@@ -312,11 +334,12 @@ def _fit_stack(X: pd.DataFrame, y: pd.Series, spw: float, embargo: int, n_splits
         oof_preds = np.zeros(len(X))
         for train_idx, val_idx in skf.split(X, y):
             m_clone = _sklearn_clone(_base_models(scale_pos_weight=spw)[j][1].estimator)
-            m_clone.fit(X.iloc[train_idx], y.iloc[train_idx])
+            m_clone.fit(X.iloc[train_idx], y.iloc[train_idx],
+                        **({'sample_weight': sw[train_idx]} if sw is not None else {}))
             oof_preds[val_idx] = m_clone.predict_proba(X.iloc[val_idx])[:, 1]
             covered[val_idx] = True
         oof[:, j] = oof_preds
-        model.fit(X, y)   # full fit (calibrated) for inference
+        model.fit(X, y, **({'sample_weight': sw} if sw is not None else {}))   # full calibrated fit
         fitted.append((name, model))
 
     # Meta-learner — trained only on rows the walk-forward actually produced OOF preds for
@@ -326,7 +349,8 @@ def _fit_stack(X: pd.DataFrame, y: pd.Series, spw: float, embargo: int, n_splits
         ('lr', LogisticRegression(C=0.5, max_iter=500, random_state=42)),
     ])
     yc = y[covered]
-    meta.fit(oof[covered], yc)
+    meta.fit(oof[covered], yc,
+             **({'lr__sample_weight': sw[covered]} if sw is not None else {}))
     meta_proba = meta.predict_proba(oof[covered])[:, 1]
     auc = roc_auc_score(yc, meta_proba) if yc.nunique() > 1 else 0.5
     acc = float(((meta_proba > 0.5) == yc).mean())
@@ -357,12 +381,23 @@ def train_ensemble(X: pd.DataFrame, y: pd.Series, dates: pd.Series | None = None
         samples_per_day = max(1.0, len(X) / dates.nunique())
         embargo = int(min(len(X) // 10, samples_per_day * horizon_days))
 
+    # Sample weights: López de Prado average uniqueness — down-weight overlapping/crowded
+    # label windows (correlated outcomes) so they aren't overcounted as independent. Directly
+    # targets the CV-vs-holdout overfit gap. Weights align row-for-row with the sorted X.
+    weights = None
+    if dates is not None and len(dates) == len(X):
+        starts = pd.to_datetime(pd.Series(list(dates)), errors='coerce')
+        starts = starts.map(lambda d: d.toordinal() if pd.notna(d) else 0).to_numpy()
+        horizons = pd.to_numeric(X['horizon_days'], errors='coerce').fillna(horizon_days).astype(int).to_numpy()
+        weights = np.asarray(average_uniqueness(starts, horizons), dtype=float)
+
     # ── Honest held-out test: last 20%, chronological, with an embargo purge gap ──
     test = {'auc': None, 'precision': None, 'recall': None, 'f1': None, 'n': 0}
     n_test = int(len(X) * 0.20)
     if n_test >= 20 and (len(X) - n_test - embargo) >= max(min_samples, 100):
         tr_end = len(X) - n_test - embargo
-        fb, mt, _, _, _ = _fit_stack(X.iloc[:tr_end], y.iloc[:tr_end], spw, embargo)
+        fb, mt, _, _, _ = _fit_stack(X.iloc[:tr_end], y.iloc[:tr_end], spw, embargo,
+                                     sample_weight=(weights[:tr_end] if weights is not None else None))
         X_te, y_te = X.iloc[len(X) - n_test:], y.iloc[len(X) - n_test:]
         te_proba = mt.predict_proba(
             np.column_stack([m.predict_proba(X_te)[:, 1] for _, m in fb])
@@ -383,7 +418,7 @@ def train_ensemble(X: pd.DataFrame, y: pd.Series, dates: pd.Series | None = None
         print(f"[Ensemble]   Insufficient data for a held-out test (n={len(X)}); reporting CV only.")
 
     # ── Production model: refit on ALL data; CV metric is the purged-OOF AUC ──
-    fitted, meta, auc, acc, imp = _fit_stack(X, y, spw, embargo)
+    fitted, meta, auc, acc, imp = _fit_stack(X, y, spw, embargo, sample_weight=weights)
     print(f"[Ensemble]   Stacking purged-OOF AUC={auc:.4f}  Accuracy={acc:.4f}  (embargo={embargo})")
 
     return {

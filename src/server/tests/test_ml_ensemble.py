@@ -76,6 +76,31 @@ class TestFundamentalFactors:
         assert X['log_market_cap'].iloc[0] == pytest.approx(np.log1p(1e9), rel=1e-4)
 
 
+class TestSampleUniqueness:
+    """Overlapping forward-return labels aren't IID — average uniqueness down-weights
+    crowded periods so the model doesn't overcount correlated outcomes (overfit fix)."""
+
+    def test_isolated_labels_are_fully_unique(self):
+        from src.server.ml_ensemble import average_uniqueness
+        u = average_uniqueness([0, 10, 20], [5, 5, 5])  # no overlap
+        assert u == pytest.approx([1.0, 1.0, 1.0])
+
+    def test_identical_labels_split_uniqueness(self):
+        from src.server.ml_ensemble import average_uniqueness
+        u = average_uniqueness([0, 0], [5, 5])  # fully concurrent
+        assert u == pytest.approx([0.5, 0.5])
+
+    def test_partial_overlap(self):
+        from src.server.ml_ensemble import average_uniqueness
+        u = average_uniqueness([0, 2], [4, 4])  # spans [0,4) and [2,6) overlap on days 2,3
+        assert u == pytest.approx([0.75, 0.75])
+
+    def test_weights_bounded_0_1(self):
+        from src.server.ml_ensemble import average_uniqueness
+        u = average_uniqueness([0, 0, 0, 1, 5], [10, 10, 3, 2, 1])
+        assert all(0.0 < w <= 1.0 for w in u)
+
+
 class TestTemporalCV:
     """TimeSeriesSplit must not allow future rows into earlier fold's training set."""
 
