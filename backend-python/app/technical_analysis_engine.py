@@ -6,8 +6,35 @@ from sqlalchemy import text
 from db_compat import get_engine
 from ta.momentum import RSIIndicator
 from ta.trend import MACD, EMAIndicator
-from ta.volatility import BollingerBands
+from ta.volatility import BollingerBands, AverageTrueRange
 import numpy as np
+
+
+# ── ATR-based barriers ──────────────────────────────────────────────────────────
+# Replaces the old fixed +8%/-5% targets, which ignored that a 5% stop is sub-1σ noise
+# on a high-vol smallcap (random stop-outs) and 3σ-untouchable on an FMCG name (no
+# protection). Barriers are ATR multiples, clamped to sane % guardrails so a single
+# gappy day can't produce an absurd level. (Kept byte-identical to src/server copy.)
+STOP_ATR_MULT, TARGET_ATR_MULT = 1.5, 2.5
+STOP_PCT_FLOOR, STOP_PCT_CAP = 0.02, 0.08      # 2%–8%
+TARGET_PCT_FLOOR, TARGET_PCT_CAP = 0.03, 0.15  # 3%–15%
+
+
+def compute_atr_barriers(price, atr, direction,
+                         stop_mult=STOP_ATR_MULT, target_mult=TARGET_ATR_MULT):
+    """ATR-multiple target/stop as (target_price, stop_loss), clamped to % guardrails.
+
+    direction: 'long' (target above, stop below) or 'short' (inverted). Missing/zero ATR
+    falls back to the floor % so barriers are never degenerate.
+    """
+    if price <= 0:
+        return 0.0, 0.0
+    atr_frac = (atr / price) if atr and atr > 0 else 0.0
+    stop_frac = min(max(stop_mult * atr_frac, STOP_PCT_FLOOR), STOP_PCT_CAP)
+    target_frac = min(max(target_mult * atr_frac, TARGET_PCT_FLOOR), TARGET_PCT_CAP)
+    if direction == 'long':
+        return round(price * (1 + target_frac), 2), round(price * (1 - stop_frac), 2)
+    return round(price * (1 - target_frac), 2), round(price * (1 + stop_frac), 2)
 
 # Configuration
 DB_PATH = os.environ.get('DATABASE_URL', os.path.join(os.getcwd(), 'database.sqlite'))
@@ -46,6 +73,9 @@ class TechnicalAnalysisEngine:
         df['bb_high'] = bb.bollinger_hband()
         df['bb_low'] = bb.bollinger_lband()
 
+        atr = AverageTrueRange(high=df['high'], low=df['low'], close=df['close'], window=14)
+        df['atr'] = atr.average_true_range()
+
         # Latest values
         latest = df.iloc[-1]
         prev = df.iloc[-2]
@@ -76,16 +106,15 @@ class TechnicalAnalysisEngine:
         if abs(latest['close'] - latest['open']) <= (latest['high'] - latest['low']) * 0.1:
             patterns.append("Doji")
 
-        # Predictions
+        # Predictions — barriers scaled to the stock's own ATR, not a fixed % everywhere
+        latest_atr = float(latest['atr']) if not pd.isna(latest['atr']) else 0.0
         if trend == "Bullish" or latest['rsi'] < 35:
             entry_price = round(current_price * 1.005, 2)
-            target_price = round(current_price * 1.08, 2) # 8% target
-            stop_loss = round(current_price * 0.95, 2) # 5% SL
+            target_price, stop_loss = compute_atr_barriers(current_price, latest_atr, 'long')
         elif trend == "Bearish" or latest['rsi'] > 65:
             # For shorting or exit
             entry_price = round(current_price * 0.995, 2)
-            target_price = round(current_price * 0.92, 2)
-            stop_loss = round(current_price * 1.05, 2)
+            target_price, stop_loss = compute_atr_barriers(current_price, latest_atr, 'short')
 
         return {
             'symbol': symbol,

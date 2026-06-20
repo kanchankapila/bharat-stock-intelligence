@@ -29,6 +29,18 @@ def parse_horizon(time_horizon_str, default_days: int) -> int:
 WIN_THRESHOLD  =  1.0   # Fallback thresholds
 LOSS_THRESHOLD = -1.0
 
+# Round-trip transaction cost (entry + exit), as a % of notional, for Indian delivery
+# equity: STT ~0.2% + exchange/SEBI/stamp/GST ~0.05% + slippage ~0.05% ≈ 0.30%. A signal
+# is only "right" if it clears costs — win rates measured gross silently mint break-even
+# trades as wins, which then mis-train the learned signal weights. Mirrors backtester.py
+# (25 bps commission + 10 bps slippage round trip).
+ROUND_TRIP_COST_PCT = 0.30
+
+
+def net_return_pct(gross_return_pct: float, cost_pct: float = ROUND_TRIP_COST_PCT) -> float:
+    """Gross % return minus round-trip transaction costs — what the strategy actually keeps."""
+    return gross_return_pct - cost_pct
+
 
 def get_volatility_threshold(conn: ConnWrapper, symbol: str, signal_date: str, horizon_days: int) -> float:
     """
@@ -169,7 +181,7 @@ def resolve_outcomes(
             if sl_hit:
                 check_date = str(sl_hit[0])
                 exit_price = float(stop_loss)
-                return_pct = (exit_price - entry) / entry * 100
+                return_pct = net_return_pct((exit_price - entry) / entry * 100)
                 outcome    = 'STOP_LOSS'
 
         # If SL not hit, check exit at horizon date (using close price)
@@ -183,7 +195,7 @@ def resolve_outcomes(
             if exit_row:
                 check_date = str(exit_row[0])
                 exit_price = float(exit_row[1])
-                return_pct = (exit_price - entry) / entry * 100
+                return_pct = net_return_pct((exit_price - entry) / entry * 100)
                 
                 # Dynamic volatility-adjusted threshold
                 threshold = get_volatility_threshold(conn, sym, signal_date, sig_horizon)
@@ -310,7 +322,7 @@ def resolve_unified_outcomes(
             if sl_hit:
                 check_date = str(sl_hit[0])
                 exit_price = float(stop_loss)
-                return_pct = (exit_price - entry) / entry * 100
+                return_pct = net_return_pct((exit_price - entry) / entry * 100)
                 outcome = 'STOP_LOSS'
 
         if outcome is None:
@@ -323,7 +335,7 @@ def resolve_unified_outcomes(
             if exit_row:
                 check_date = str(exit_row[0])
                 exit_price = float(exit_row[1])
-                return_pct = (exit_price - entry) / entry * 100
+                return_pct = net_return_pct((exit_price - entry) / entry * 100)
                 
                 # Dynamic volatility-adjusted threshold
                 threshold = get_volatility_threshold(conn, sym, signal_date, horizon_days)
@@ -532,7 +544,7 @@ def resolve_recommendation_log(
 
             if sl_hit:
                 exit_price = float(stop_loss)
-                return_pct = (exit_price - entry) / entry * 100
+                return_pct = net_return_pct((exit_price - entry) / entry * 100)
                 outcome = 'LOSS'
 
         if outcome is None:
@@ -544,7 +556,7 @@ def resolve_recommendation_log(
 
             if exit_row:
                 exit_price = float(exit_row[1])
-                return_pct = (exit_price - entry) / entry * 100
+                return_pct = net_return_pct((exit_price - entry) / entry * 100)
                 
                 # Dynamic volatility-adjusted threshold
                 threshold = get_volatility_threshold(conn, sym, signal_date, h)
