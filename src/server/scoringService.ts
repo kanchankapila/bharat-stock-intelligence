@@ -18,6 +18,7 @@ export interface ScoredStock {
   reasons: Array<{ name: string; sentiment: string; source: string }>;
   last_updated: string;
   top_domain?: string;
+  position_size_pct?: number;   // #6 suggested portfolio weight (0 for non-buys)
 }
 
 export interface FactorBreakdown {
@@ -109,6 +110,7 @@ function mapRecToScoredStock(rec: any): ScoredStock {
     reasons,
     last_updated:   rec.computed_at,
     top_domain,
+    position_size_pct: rec.position_size_pct ?? 0,
   };
 }
 

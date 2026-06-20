@@ -17,6 +17,7 @@ interface ScoredStock {
   confidence?: number;
   classification?: string;
   top_domain?: string;
+  position_size_pct?: number;
   positive_count?: number;
   negative_count?: number;
   reasons?: Array<{ name?: string; sentiment?: string; source?: string }>;
@@ -103,6 +104,9 @@ const RankingList: React.FC<{
                     <span className="text-[10px] font-black text-slate-400 uppercase">Score <span className="text-white">{stock.score.toFixed(1)}</span></span>
                     <span className="text-[10px] font-black text-slate-400 uppercase">Conf <span className="text-blue-400">{stock.confidence.toFixed(0)}%</span></span>
                     <span className="text-[10px] font-black text-blue-500/80 uppercase tracking-tighter bg-blue-500/5 px-1.5 py-0.5 rounded italic">Driver: {stock.top_domain}</span>
+                    {(stock.position_size_pct ?? 0) > 0 && (
+                      <span className="text-[10px] font-black text-emerald-400 uppercase tracking-tighter bg-emerald-500/10 px-1.5 py-0.5 rounded italic">Weight: {stock.position_size_pct!.toFixed(1)}%</span>
+                    )}
                   </div>
                 </div>
               </div>

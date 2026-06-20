@@ -11,27 +11,29 @@ beforeEach(() => {
     .forEach(table => db.exec(`DELETE FROM ${table}`));
 });
 
-const insertRec = (symbol: string, score: number, klass: string, bull: number, bear: number, computedAt: string) =>
+const insertRec = (symbol: string, score: number, klass: string, bull: number, bear: number, computedAt: string, sizePct = 0) =>
   db.prepare(`INSERT INTO unified_recommendations
     (symbol, computed_at, regime, unified_score, conviction_level, classification,
      bullish_screener_count, bearish_screener_count, screener_names_json, trade_reasoning,
-     screener_stock_score, ml_score, confluence_score, technical_score, dl_score)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+     screener_stock_score, ml_score, confluence_score, technical_score, dl_score, position_size_pct)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
     .run(symbol, computedAt, 'BULL', score, 'B_MEDIUM', klass, bull, bear,
          JSON.stringify(['technical_breakout', 'fundamental_quality']), `reason for ${symbol}`,
-         20, 30, 10, 95, 15); // technical_score is the max -> top_domain = 'Technical'
+         20, 30, 10, 95, 15, sizePct); // technical_score is the max -> top_domain = 'Technical'
 
 describe('getTopRatedStocks reroute to unified_recommendations', () => {
   it('returns the canonical ranking (latest day, by score desc) mapped to the ScoredStock shape', async () => {
     const today = new Date().toISOString().split('T')[0];
     const older = '2026-01-01';
-    insertRec('AAA', 90, 'Strong Buy', 10, 1, today);
+    insertRec('AAA', 90, 'Strong Buy', 10, 1, today, 4.2);
     insertRec('BBB', 60, 'Buy', 5, 2, today);
     insertRec('STALE', 99, 'Strong Buy', 9, 0, older); // newer-day filter must exclude this
 
     const rows = await getTopRatedStocks(10, 'long_term') as any[];
 
     expect(rows.map(r => r.symbol)).toEqual(['AAA', 'BBB']);
+    // suggested portfolio weight (#6) must surface to the UI
+    expect(rows[0].position_size_pct).toBe(4.2);
     expect(rows[0].score).toBe(90);
     expect(rows[0].classification).toBe('Strong Buy');
     expect(rows[0].positive_count).toBe(10);
