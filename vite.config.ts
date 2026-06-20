@@ -23,5 +23,12 @@ export default defineConfig(({mode}) => {
         ignored: ['**/database.sqlite*', '**/redis/**'],
       },
     },
+    test: {
+      // Single forked process: the test suites share one SQLite migration table, and
+      // parallel workers race on `UNIQUE _migrations.name`. Serialising avoids it without
+      // each run needing `--pool=forks --poolOptions.forks.singleFork` on the CLI.
+      pool: 'forks',
+      poolOptions: { forks: { singleFork: true } },
+    },
   };
 });

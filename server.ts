@@ -21,6 +21,9 @@ const __dirname = path.dirname(__filename);
 import { updateSignalAccuracy } from "./src/server/signals";
 
 async function startServer() {
+  const { validateEnv } = await import('./src/server/envConfig');
+  validateEnv();
+
   const app = express();
   const PORT = parseInt(process.env.PORT || '3000', 10);
 
