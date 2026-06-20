@@ -17,6 +17,7 @@ export interface ScoredStock {
   negative_count: number;
   reasons: Array<{ name: string; sentiment: string; source: string }>;
   last_updated: string;
+  top_domain?: string;
 }
 
 export interface FactorBreakdown {
@@ -88,17 +89,26 @@ function mapRecToScoredStock(rec: any): ScoredStock {
   if (reasons.length === 0 && rec.trade_reasoning) {
     reasons = [{ name: rec.trade_reasoning, sentiment, source: 'unified' }];
   }
+  const domains: Array<[string, number]> = [
+    ['Screener',   rec.screener_stock_score ?? 0],
+    ['ML',         rec.ml_score ?? 0],
+    ['Confluence', rec.confluence_score ?? 0],
+    ['Technical',  rec.technical_score ?? 0],
+    ['DL',         rec.dl_score ?? 0],
+  ];
+  const top_domain = domains.reduce((a, b) => (b[1] > a[1] ? b : a))[0];
   return {
     symbol:         rec.symbol,
     timeframe:      'long_term',
     stock_id:       rec.symbol,
     score:          rec.unified_score,
-    confidence:     rec.unified_score != null ? rec.unified_score / 100 : 0,
+    confidence:     rec.unified_score ?? 0,   // 0-100; the UI renders confidence.toFixed(0) + '%'
     classification: rec.classification ?? 'Hold',
     positive_count: rec.bullish_screener_count ?? 0,
     negative_count: rec.bearish_screener_count ?? 0,
     reasons,
     last_updated:   rec.computed_at,
+    top_domain,
   };
 }
 

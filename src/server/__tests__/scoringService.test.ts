@@ -14,10 +14,12 @@ beforeEach(() => {
 const insertRec = (symbol: string, score: number, klass: string, bull: number, bear: number, computedAt: string) =>
   db.prepare(`INSERT INTO unified_recommendations
     (symbol, computed_at, regime, unified_score, conviction_level, classification,
-     bullish_screener_count, bearish_screener_count, screener_names_json, trade_reasoning)
-    VALUES (?,?,?,?,?,?,?,?,?,?)`)
+     bullish_screener_count, bearish_screener_count, screener_names_json, trade_reasoning,
+     screener_stock_score, ml_score, confluence_score, technical_score, dl_score)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
     .run(symbol, computedAt, 'BULL', score, 'B_MEDIUM', klass, bull, bear,
-         JSON.stringify(['technical_breakout', 'fundamental_quality']), `reason for ${symbol}`);
+         JSON.stringify(['technical_breakout', 'fundamental_quality']), `reason for ${symbol}`,
+         20, 30, 10, 95, 15); // technical_score is the max -> top_domain = 'Technical'
 
 describe('getTopRatedStocks reroute to unified_recommendations', () => {
   it('returns the canonical ranking (latest day, by score desc) mapped to the ScoredStock shape', async () => {
@@ -36,6 +38,10 @@ describe('getTopRatedStocks reroute to unified_recommendations', () => {
     expect(rows[0].negative_count).toBe(1);
     expect(Array.isArray(rows[0].reasons)).toBe(true);
     expect(rows[0].reasons.length).toBeGreaterThan(0);
+    // confidence renders as "{confidence.toFixed(0)}%" -> must be 0-100, not 0-1
+    expect(rows[0].confidence).toBe(90);
+    // "Driver: {top_domain}" must not render undefined; highest engine component wins
+    expect(rows[0].top_domain).toBe('Technical');
   });
 
   it('falls back to stock_scores when there are no unified_recommendations', async () => {
