@@ -17,6 +17,13 @@ describe('signal readers on unified_signals', () => {
       ['TESTRD', now.split('T')[0], now]);
     const rows = await caller.getSignalHistory({ symbol: 'TESTRD' });
     expect(Array.isArray(rows)).toBe(true);
-    expect((rows as any[]).some(r => r.symbol === 'TESTRD')).toBe(true);
+    const row = (rows as any[]).find(r => r.symbol === 'TESTRD');
+    expect(row).toBeTruthy();
+    // back-compat contract the signal UI reads (aliased from unified_signals snake_case)
+    expect(row.type).toBe('BUY');
+    expect(row.entry).toBe(101);
+    expect(row.createdAt).toBeTruthy();
+    expect('stopLoss' in row).toBe(true);
+    expect('confidence' in row).toBe(true);
   });
 });

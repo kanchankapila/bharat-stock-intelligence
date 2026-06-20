@@ -7,11 +7,22 @@ import { router, publicProcedure } from "../trpc";
  *  same query runs on both SQLite and Postgres (a parameterised interval isn't portable). */
 const daysAgoIso = (days: number) => new Date(Date.now() - days * 86_400_000).toISOString();
 
+/** Cluster A collapsed the legacy `signals` table into `unified_signals` (snake_case columns).
+ *  The signal UI still reads the old contract (type/entry/target/stopLoss/confidence/createdAt),
+ *  so alias the unified columns back to it at the boundary instead of churning every consumer.
+ *  camelCase aliases are double-quoted so PG preserves the casing (portability rule #1). */
+const UNIFIED_SIGNAL_SELECT = `
+  SELECT id, symbol, signal_source AS source,
+         signal_type AS type, entry_price AS entry, target_price AS target,
+         stop_loss AS "stopLoss", confidence_score AS confidence,
+         reasoning, status, signal_generated_at AS "createdAt"
+  FROM unified_signals`;
+
 export const signalsRouter = router({
   getSignals: publicProcedure
     .input(z.object({ limit: z.number().optional().default(5) }))
     .query(async ({ input }) => {
-      return dbAll('SELECT * FROM unified_signals ORDER BY signal_generated_at DESC LIMIT ?', [input.limit]);
+      return dbAll(`${UNIFIED_SIGNAL_SELECT} ORDER BY signal_generated_at DESC LIMIT ?`, [input.limit]);
     }),
 
   saveSignal: publicProcedure
@@ -52,7 +63,7 @@ export const signalsRouter = router({
   getSignalHistory: publicProcedure
     .input(z.object({ symbol: z.string() }))
     .query(async ({ input }) => {
-      return dbAll('SELECT * FROM unified_signals WHERE symbol = ? ORDER BY signal_generated_at DESC', [input.symbol]);
+      return dbAll(`${UNIFIED_SIGNAL_SELECT} WHERE symbol = ? ORDER BY signal_generated_at DESC`, [input.symbol]);
     }),
 
   getAccuracyMetrics: publicProcedure
