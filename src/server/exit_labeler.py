@@ -1,0 +1,185 @@
+"""
+Exit Labeler — path-based excursion labels for exit-policy learning
+====================================================================
+signal_outcomes records *whether* a signal won by the horizon. It cannot teach an EXIT
+policy, because its only target is the horizon-close return — a name that ran +8% on day 2
+and faded to +1% is labelled "+1% win", erasing the exit decision entirely.
+
+This module replays the daily bars after each entry and records the excursion targets an
+exit model actually needs:
+
+  mfe_pct / mae_pct      — max favorable / adverse excursion over the holding window
+  days_to_mfe / _mae     — when those extremes occurred (timing of the optimal exit)
+  mfe_before_mae         — did the gain come before the pain? (trailing-stop viability)
+  trail_exit_pct / _day  — return & day of a chandelier-trailed exit (highest-high − k·ATR)
+  horizon_close_pct      — buy-and-hold-to-horizon baseline to beat
+
+Writes signal_excursions(symbol, signal_date, horizon_days). Long-only, matching the
+resolver's convention. ATR is measured from the 14 bars preceding entry (leak-free).
+
+Run:  python exit_labeler.py
+      python exit_labeler.py --horizon 15
+      python exit_labeler.py --limit 500
+"""
+
+import argparse
+import datetime
+
+from db_compat import read_df, executemany, query_all
+
+CHANDELIER_ATR_MULT = 3.0   # trailing stop = highest-high-since-entry − 3×ATR (mirrors resolver)
+ATR_WINDOW = 14
+
+
+def compute_atr(prior_bars: list, window: int = ATR_WINDOW) -> float:
+    """Wilder-style ATR over the bars immediately preceding entry.
+    `prior_bars`: list of (high, low, close) ascending. Returns a positive float, or 0.0 if
+    fewer than 2 bars are available."""
+    if len(prior_bars) < 2:
+        return 0.0
+    trs = []
+    prev_close = prior_bars[0][2]
+    for high, low, close in prior_bars[1:]:
+        tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
+        trs.append(tr)
+        prev_close = close
+    if not trs:
+        return 0.0
+    tail = trs[-window:]
+    return sum(tail) / len(tail)
+
+
+def compute_excursions(entry: float, bars: list, atr: float,
+                       chandelier_mult: float = CHANDELIER_ATR_MULT) -> dict:
+    """Replay the holding window and return excursion + trailing-exit labels.
+
+    `entry`: fill price. `bars`: list of (high, low, close) ascending, position open at entry.
+    `atr`: ATR at entry for the chandelier stop. Day numbering is 1-based (day 1 = first bar
+    after entry). Returns a dict of the signal_excursions value columns (entry-relative %)."""
+    if entry <= 0 or not bars:
+        return {}
+
+    mfe_pct = mae_pct = 0.0
+    days_to_mfe = days_to_mae = 0
+    highest_high = entry
+    trail_exit_pct = None
+    trail_exit_day = None
+
+    for i, (high, low, close) in enumerate(bars, start=1):
+        up = (high - entry) / entry * 100.0
+        dn = (low - entry) / entry * 100.0
+        if up > mfe_pct:
+            mfe_pct, days_to_mfe = up, i
+        if dn < mae_pct:
+            mae_pct, days_to_mae = dn, i
+
+        # Chandelier trailing stop — only after ATR is known and the stop has been armed
+        if atr > 0 and trail_exit_day is None:
+            stop = highest_high - chandelier_mult * atr
+            if low <= stop:
+                exit_price = min(stop, high)            # gap-throughs fill at the stop, not below
+                trail_exit_pct = (exit_price - entry) / entry * 100.0
+                trail_exit_day = i
+            highest_high = max(highest_high, high)
+
+    horizon_close_pct = (bars[-1][2] - entry) / entry * 100.0
+    if trail_exit_pct is None:
+        trail_exit_pct = horizon_close_pct              # never stopped → held to horizon close
+
+    return {
+        "mfe_pct": round(mfe_pct, 4),
+        "mae_pct": round(mae_pct, 4),
+        "days_to_mfe": days_to_mfe,
+        "days_to_mae": days_to_mae,
+        "mfe_before_mae": 1 if (days_to_mfe and (days_to_mae == 0 or days_to_mfe <= days_to_mae)) else 0,
+        "trail_exit_pct": round(trail_exit_pct, 4),
+        "trail_exit_day": trail_exit_day,
+        "horizon_close_pct": round(horizon_close_pct, 4),
+    }
+
+
+def _entries(horizon: int | None, limit: int | None) -> list:
+    sql = (
+        "SELECT symbol, signal_date, horizon_days, entry_price "
+        "FROM signal_outcomes WHERE entry_price IS NOT NULL"
+    )
+    params = []
+    if horizon is not None:
+        sql += " AND horizon_days = ?"
+        params.append(horizon)
+    sql += " ORDER BY signal_date DESC"
+    if limit:
+        sql += f" LIMIT {int(limit)}"
+    return query_all(sql, tuple(params))
+
+
+def run(horizon: int | None = None, limit: int | None = None) -> int:
+    """Compute excursion labels for signal_outcomes entries and upsert signal_excursions.
+    Returns rows written."""
+    entries = _entries(horizon, limit)
+    if not entries:
+        print("[EXIT] No entries to label.")
+        return 0
+
+    rows = []
+    for e in entries:
+        symbol, signal_date, hd, entry = e["symbol"], e["signal_date"], e["horizon_days"], e["entry_price"]
+        ohlcv = read_df(
+            "SELECT date, high, low, close FROM stock_ohlcv "
+            "WHERE symbol = ? AND date > ? AND COALESCE(is_suspect,0) = 0 "
+            "ORDER BY date LIMIT ?",
+            (symbol, signal_date, int(hd)),
+        )
+        if ohlcv.empty:
+            continue
+        prior = read_df(
+            "SELECT high, low, close FROM stock_ohlcv "
+            "WHERE symbol = ? AND date <= ? AND COALESCE(is_suspect,0) = 0 "
+            "ORDER BY date DESC LIMIT ?",
+            (symbol, signal_date, ATR_WINDOW + 1),
+        )
+        atr = compute_atr(list(prior[["high", "low", "close"]].itertuples(index=False, name=None))[::-1])
+        bars = list(ohlcv[["high", "low", "close"]].itertuples(index=False, name=None))
+        exc = compute_excursions(float(entry), bars, atr)
+        if not exc:
+            continue
+        rows.append((
+            symbol, signal_date, int(hd), float(entry),
+            exc["mfe_pct"], exc["mae_pct"], exc["days_to_mfe"], exc["days_to_mae"],
+            exc["mfe_before_mae"], exc["trail_exit_pct"], exc["trail_exit_day"],
+            exc["horizon_close_pct"], datetime.datetime.now().isoformat(),
+        ))
+
+    if not rows:
+        print("[EXIT] No OHLCV coverage for the selected entries.")
+        return 0
+
+    n = executemany(
+        """INSERT INTO signal_excursions
+             (symbol, signal_date, horizon_days, entry_price,
+              mfe_pct, mae_pct, days_to_mfe, days_to_mae, mfe_before_mae,
+              trail_exit_pct, trail_exit_day, horizon_close_pct, computed_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(symbol, signal_date, horizon_days) DO UPDATE SET
+             entry_price       = excluded.entry_price,
+             mfe_pct           = excluded.mfe_pct,
+             mae_pct           = excluded.mae_pct,
+             days_to_mfe       = excluded.days_to_mfe,
+             days_to_mae       = excluded.days_to_mae,
+             mfe_before_mae    = excluded.mfe_before_mae,
+             trail_exit_pct    = excluded.trail_exit_pct,
+             trail_exit_day    = excluded.trail_exit_day,
+             horizon_close_pct = excluded.horizon_close_pct,
+             computed_at       = excluded.computed_at""",
+        rows,
+    )
+    print(f"[EXIT] Wrote {len(rows)} excursion labels to signal_excursions.")
+    return n
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Path-based exit labeler")
+    parser.add_argument("--horizon", type=int, help="Only label this horizon (e.g. 5, 15)")
+    parser.add_argument("--limit", type=int, help="Cap number of entries (newest first)")
+    args = parser.parse_args()
+    run(horizon=args.horizon, limit=args.limit)
