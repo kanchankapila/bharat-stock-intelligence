@@ -71,17 +71,23 @@ The 5-week derived-data window is the binding constraint, but we hold **550 trad
 `stock_ohlcv` + India VIX + global macro. The work is sequenced so the clean, high-value backfill
 lands first and the leaky part is isolated and optional.
 
-**Phase 1 — Historical regime + breadth + macro backfill (first; clean, leak-free).**
+**Phase 1 — Historical regime + breadth + macro + FII/DII backfill (first; clean, leak-free).**
 Run the *market-level* engines over the full 550-day OHLCV window:
 - `global_macro_fetcher.py` (days≈800) → `macro_asset_prices` full history (US10Y/DXY/SP500/NSEBANK/
   INDIAVIX) — mostly already present.
 - `market_breadth.py` (full backfill) → `market_breadth` over 550 days.
+- **FII/DII history backfill (NEW source):** the TradeBrains portal serves daily FII/DII flow back to
+  late-2023 — `…/fii-investments/` (596 records to 2023-12-21; field `equity_net_investment` → our
+  `fii_net`, plus debt/gross/cumulative available) and `…/dii-investments/` (654 records to
+  2023-11-01; field `net_value` → our `dii_net`). Both paginate (`per_page=100`, follow `next` until
+  null) and use `DD-MM-YYYY` dates → parse to `YYYY-MM-DD`. A backfill routine pages both, maps the
+  fields, and upserts `fii_dii_flow` over the whole window. It is published EOD data → point-in-time
+  correct. This **removes FII flow from the neutral-feature caveat** for the historical regime labels.
 - `regime_detector.py` over history → `market_regimes(date, regime)` for every trading day, using
-  `as_of_date` for point-in-time labels.
-- **Caveat (documented):** FII-flow and advance/decline have no history before ~late-May/Jun-2026, so
-  historical regime labels are driven by NIFTY return/vol + VIX + global macro (the dominant signals);
-  FII/AD enter neutral. Validate that labels track known 2024–2026 market moves and report
-  distinct-days/episodes per regime (this is what makes the calibration floor reachable).
+  `as_of_date` for point-in-time labels (now with real FII over history).
+- **Caveat (reduced):** only **advance/decline** lacks history before ~Jun-2026 and enters neutral;
+  NIFTY return/vol + VIX + global macro + FII (all now backfilled) drive the historical labels.
+  Validate that labels track known 2024–2026 moves and report distinct-days/episodes per regime.
 - Phase 1 improves **regime detection** and gives a **multi-episode regime history**, but does NOT by
   itself enlarge the *calibration* training set (that needs historical signals+outcomes → Phase 2).
 
