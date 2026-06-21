@@ -111,6 +111,8 @@ class PCRFetcher:
             total_put_oi  = 0
             near_call_oi  = 0
             near_put_oi   = 0
+            near_call_vol = 0
+            near_put_vol  = 0
             near_strikes  = []   # (strike, ce_iv, pe_iv) for nearest expiry — IV features
 
             for strike in chain_data:
@@ -118,13 +120,17 @@ class PCRFetcher:
                 pe = strike.get("PE", {})
                 c_oi = ce.get("openInterest", 0) or 0
                 p_oi = pe.get("openInterest", 0) or 0
+                c_vol = ce.get("totalTradedVolume", 0) or 0
+                p_vol = pe.get("totalTradedVolume", 0) or 0
                 total_call_oi += c_oi
                 total_put_oi  += p_oi
 
                 if ce.get("expiryDate") == nearest_expiry:
                     near_call_oi += c_oi
+                    near_call_vol += c_vol
                 if pe.get("expiryDate") == nearest_expiry:
                     near_put_oi  += p_oi
+                    near_put_vol += p_vol
 
                 if ce.get("expiryDate") == nearest_expiry or pe.get("expiryDate") == nearest_expiry:
                     sp = strike.get("strikePrice")
@@ -136,8 +142,29 @@ class PCRFetcher:
             # PCR = put OI / call OI (nearest expiry)
             near_pcr  = near_put_oi  / near_call_oi  if near_call_oi  > 0 else None
             total_pcr = total_put_oi / total_call_oi if total_call_oi > 0 else None
+            near_pcr_vol = near_put_vol / near_call_vol if near_call_vol > 0 else None
 
             atm_iv, iv_skew = compute_atm_iv_skew(near_strikes, underlying)
+
+            # Max Pain
+            max_pain = underlying
+            if near_strikes:
+                min_pain_val = float('inf')
+                for strike_info in near_strikes:
+                    sp = strike_info[0]
+                    total_pain = 0
+                    for row in chain_data:
+                        if row.get("expiryDate") != nearest_expiry and row.get("CE", {}).get("expiryDate") != nearest_expiry and row.get("PE", {}).get("expiryDate") != nearest_expiry: 
+                            continue
+                        s = row.get("strikePrice")
+                        if s is None: continue
+                        ce_oi = row.get("CE", {}).get("openInterest", 0) or 0
+                        pe_oi = row.get("PE", {}).get("openInterest", 0) or 0
+                        if sp > s: total_pain += ce_oi * (sp - s)
+                        if sp < s: total_pain += pe_oi * (s - sp)
+                    if total_pain < min_pain_val:
+                        min_pain_val = total_pain
+                        max_pain = sp
 
             return {
                 "symbol":        symbol,
@@ -145,11 +172,13 @@ class PCRFetcher:
                 "call_oi":       near_call_oi,
                 "put_oi":        near_put_oi,
                 "pcr":           near_pcr,
+                "pcr_vol":       near_pcr_vol,
                 "total_call_oi": total_call_oi,
                 "total_put_oi":  total_put_oi,
                 "market_pcr":    total_pcr,
                 "atm_iv":        atm_iv,
                 "iv_skew":       iv_skew,
+                "max_pain":      max_pain,
             }
         except Exception as e:
             print(f"[PCR] {symbol}: parse error — {e}")
@@ -168,10 +197,10 @@ class PCRFetcher:
                 conn.execute(text("""
                     INSERT INTO stock_options_oi
                         (symbol, date, expiry, call_oi, put_oi, pcr,
-                         total_call_oi, total_put_oi, market_pcr, fetched_at)
+                         total_call_oi, total_put_oi, market_pcr, atm_iv, iv_skew, fetched_at)
                     VALUES
                         (:symbol, :date, :expiry, :call_oi, :put_oi, :pcr,
-                         :total_call_oi, :total_put_oi, :market_pcr, :fetched_at)
+                         :total_call_oi, :total_put_oi, :market_pcr, :atm_iv, :iv_skew, :fetched_at)
                     ON CONFLICT(symbol, date, expiry) DO UPDATE SET
                         call_oi       = excluded.call_oi,
                         put_oi        = excluded.put_oi,
@@ -179,8 +208,39 @@ class PCRFetcher:
                         total_call_oi = excluded.total_call_oi,
                         total_put_oi  = excluded.total_put_oi,
                         market_pcr    = excluded.market_pcr,
+                        atm_iv        = excluded.atm_iv,
+                        iv_skew       = excluded.iv_skew,
                         fetched_at    = excluded.fetched_at
-                """), {**r, "date": today, "fetched_at": now})
+                """), {"atm_iv": None, "iv_skew": None, **r, "date": today, "fetched_at": now})
+
+                conn.execute(text("""
+                    INSERT INTO historical_fno_sentiment
+                        (symbol, date, pcr_oi, pcr_vol, max_pain, atm_iv, iv_skew,
+                         total_ce_oi, total_pe_oi, updated_at)
+                    VALUES
+                        (:symbol, :date, :pcr_oi, :pcr_vol, :max_pain, :atm_iv, :iv_skew,
+                         :total_ce_oi, :total_pe_oi, :fetched_at)
+                    ON CONFLICT(symbol, date) DO UPDATE SET
+                        pcr_oi      = excluded.pcr_oi,
+                        pcr_vol     = excluded.pcr_vol,
+                        max_pain    = excluded.max_pain,
+                        atm_iv      = excluded.atm_iv,
+                        iv_skew     = excluded.iv_skew,
+                        total_ce_oi = excluded.total_ce_oi,
+                        total_pe_oi = excluded.total_pe_oi,
+                        updated_at  = excluded.updated_at
+                """), {
+                    "symbol": r["symbol"],
+                    "date": today,
+                    "pcr_oi": r["pcr"],
+                    "pcr_vol": r.get("pcr_vol"),
+                    "max_pain": r.get("max_pain"),
+                    "atm_iv": r.get("atm_iv"),
+                    "iv_skew": r.get("iv_skew"),
+                    "total_ce_oi": r["total_call_oi"],
+                    "total_pe_oi": r["total_put_oi"],
+                    "fetched_at": now
+                })
                 saved += 1
 
         return saved

@@ -177,6 +177,41 @@ const UPSERT_PHASE2_SQL = `
     last_updated      = CURRENT_TIMESTAMP
 `;
 
+const UPSERT_HISTORICAL_PHASE1_SQL = `
+  INSERT INTO historical_fundamentals (
+    symbol, date, trailing_pe, forward_pe, price_to_book, book_value,
+    earnings_yield, eps_ttm, eps_forward, updated_at
+  ) VALUES (
+    ?, ?, ?, ?, ?, ?,
+    ?, ?, ?, CURRENT_TIMESTAMP
+  )
+  ON CONFLICT(symbol, date) DO UPDATE SET
+    trailing_pe       = excluded.trailing_pe,
+    forward_pe        = excluded.forward_pe,
+    price_to_book     = excluded.price_to_book,
+    book_value        = excluded.book_value,
+    earnings_yield    = excluded.earnings_yield,
+    eps_ttm           = excluded.eps_ttm,
+    eps_forward       = excluded.eps_forward,
+    updated_at        = CURRENT_TIMESTAMP
+`;
+
+const UPSERT_HISTORICAL_PHASE2_SQL = `
+  INSERT INTO historical_fundamentals (
+    symbol, date, debt_to_equity, roe, revenue_growth,
+    operating_margin, piotroski_score, updated_at
+  ) VALUES (
+    ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP
+  )
+  ON CONFLICT(symbol, date) DO UPDATE SET
+    debt_to_equity    = excluded.debt_to_equity,
+    roe               = excluded.roe,
+    revenue_growth    = excluded.revenue_growth,
+    operating_margin  = excluded.operating_margin,
+    piotroski_score   = excluded.piotroski_score,
+    updated_at        = CURRENT_TIMESTAMP
+`;
+
 // ─── Piotroski F-Score (9-point) ─────────────────────────────────────────────
 
 function computePiotroski(fd: any): number {
@@ -256,6 +291,19 @@ async function fetchPhase1Batch(
         q.averageDailyVolume3Month ?? null,
         q.dividendYield          ?? null,
         q.averageAnalystRating   ?? null,
+      ]);
+
+      const dateStr = new Date().toISOString().split('T')[0];
+      await tx.run(UPSERT_HISTORICAL_PHASE1_SQL, [
+        symbol,
+        dateStr,
+        trailingPE,
+        q.forwardPE              ?? null,
+        q.priceToBook            ?? null,
+        q.bookValue              ?? null,
+        earningsYield,
+        q.epsTrailingTwelveMonths ?? null,
+        q.epsForward             ?? null,
       ]);
     }
   });
@@ -354,6 +402,17 @@ async function writePhase2Batch(rows: Phase2Row[]): Promise<void> {
         row.earningsGrowth,
         row.operatingMargins,
         row.currentRatio,
+        row.piotroski,
+      ]);
+
+      const dateStr = new Date().toISOString().split('T')[0];
+      await tx.run(UPSERT_HISTORICAL_PHASE2_SQL, [
+        row.symbol,
+        dateStr,
+        row.debtToEquity,
+        row.returnOnEquity,
+        row.revenueGrowth,
+        row.operatingMargins,
         row.piotroski,
       ]);
     }

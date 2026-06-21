@@ -26,20 +26,56 @@ export async function fetchDeliveryMap(scanDate: string): Promise<Map<string, nu
     if (symIdx < 0 || trdIdx < 0 || delIdx < 0) return new Map();
 
     const map = new Map<string, number>();
+    const rowsToInsert: any[][] = [];
+
     for (let i = 1; i < lines.length; i++) {
       const cols = lines[i].split(',').map(c => c.trim().replace(/^"|"$/g, ''));
       if (cols[seriesIdx] !== 'EQ') continue;
       const sym    = cols[symIdx];
       const traded = parseFloat(cols[trdIdx]);
+      const tradesCount = parseFloat(cols[cols.length - 2]); // Usually NO_OF_TRADES is second to last
       const deliv  = parseFloat(cols[delIdx]);
+      
       if (traded > 0 && !isNaN(deliv)) {
-        map.set(sym, parseFloat(((deliv / traded) * 100).toFixed(2)));
+        const pct = parseFloat(((deliv / traded) * 100).toFixed(2));
+        map.set(sym, pct);
+        rowsToInsert.push([
+          sym,
+          scanDate,
+          pct,
+          deliv,
+          traded,
+          isNaN(tradesCount) ? 0 : tradesCount
+        ]);
+      }
+    }
+
+    if (rowsToInsert.length > 0) {
+      try {
+        const { dbRun } = await import('./dbAsync');
+        const { bulkUpsert, rowGroups } = await import('./dbBulk');
+        
+        // Use a dummy object wrapping dbRun to satisfy DbTx interface since we don't need get/all here
+        const tx = { run: dbRun, get: async () => undefined, all: async () => [] };
+        
+        await bulkUpsert(tx, rowsToInsert, 6, (rowCount) => `
+          INSERT INTO stock_delivery_data (symbol, date, delivery_pct, delivery_qty, traded_qty, trades)
+          VALUES ${rowGroups(rowCount, 6)}
+          ON CONFLICT(symbol, date) DO UPDATE SET
+            delivery_pct = excluded.delivery_pct,
+            delivery_qty = excluded.delivery_qty,
+            traded_qty = excluded.traded_qty,
+            trades = excluded.trades,
+            updated_at = CURRENT_TIMESTAMP
+        `);
+      } catch (dbErr) {
+        console.error(`[Delivery] Failed to persist delivery data:`, dbErr);
       }
     }
 
     deliveryCache = map;
     deliveryCacheDate = scanDate;
-    console.log(`[Delivery] Loaded delivery% for ${map.size} symbols from NSE Bhavcopy (${scanDate})`);
+    console.log(`[Delivery] Loaded & persisted delivery% for ${map.size} symbols from NSE Bhavcopy (${scanDate})`);
     return map;
   } catch (err) {
     console.warn(`[Delivery] Failed to fetch Bhavcopy for ${scanDate}:`, (err as Error).message);
