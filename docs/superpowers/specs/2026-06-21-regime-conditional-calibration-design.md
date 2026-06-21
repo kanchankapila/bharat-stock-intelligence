@@ -24,10 +24,38 @@ help a per-stock cross-sectional classifier (it overfits the time axis). The rig
 context is **conditioning**, not features. The lowest-risk, most data-efficient form of conditioning
 that directly targets the measured effect (a base-rate shift) is **per-regime calibration**.
 
+## Data-sufficiency finding (critical — drives the gating rule)
+
+The row counts above are misleading. Each regime is, today, **one short contiguous episode** with
+very few independent observations:
+
+| regime | rows | **distinct trading days** | span |
+|---|---|---|---|
+| BEAR | 5,731 | **11** | 2026-05-26 → 06-14 |
+| SIDEWAYS | 2,079 | **5** | 2026-05-22 → 05-26 |
+| BULL | 1,523 | **4** | 2026-05-18 → 05-21 |
+| (null) | 1,000 | 2 | 2026-05-16 → 05-17 |
+
+`technical_signals` is a rolling ~5-week table, so we have lived through exactly **one** BULL→
+SIDEWAYS→BEAR cycle. The thousands of rows per regime are pure cross-sectional fan-out (hundreds of
+symbols on the same day, sharing the regime **and** highly correlated outcomes — market beta
+dominates any single day), so the **effective independent sample size per regime is ~4–11, not
+thousands** (the López-de-Prado concurrency problem, severe here). Fitting per-regime calibrators on
+this would encode single-episode flukes (e.g. "what mid-May did") into sizing/gating and could make
+them worse. We cannot yet separate a genuine regime effect from one month's path.
+
+**Consequence:** we build the per-regime mechanism now, but gate each regime calibrator on a
+**distinct-trading-days + episode-count floor**, not row count. With today's data every regime fails
+the floor, so calibration falls back to the existing **global** behaviour everywhere — a safe no-op.
+Each regime auto-activates only once it has accumulated enough *independent* history. A "regime data
+readiness" report and the per-regime AUC diagnostic ship now so we can see exactly when each regime
+becomes trustworthy.
+
 ## Decision (as quant, user-approved)
 
-Build **Option A — per-regime isotonic calibration + regime-fair gating + a per-regime AUC
-diagnostic.** Do NOT build separate per-regime ensembles (B) or a per-regime meta-learner (C) yet:
+Build **Option A — per-regime isotonic calibration (dormant behind a days/episode floor) + regime-fair
+gating + per-regime AUC & data-readiness diagnostics.** Do NOT build separate per-regime ensembles
+(B) or a per-regime meta-learner (C) yet:
 
 - The purged walk-forward embargo is ~1,351 samples; BULL (1,523) and SIDEWAYS (2,079) cannot
   support a per-regime meta-learner or ensemble after that embargo.
@@ -41,11 +69,11 @@ diagnostic.** Do NOT build separate per-regime ensembles (B) or a per-regime met
 
 ### 1. `ml_calibration.py` — per-regime calibration (modified)
 
-`recalibrate_win_probabilities(conn, min_samples=200, min_regime_samples=300)`:
+`recalibrate_win_probabilities(conn, min_samples=200, min_regime_days=20, min_regime_episodes=2)`:
 
-- Training query gains `ts.nifty_regime`:
+- Training query gains `ts.nifty_regime` **and `ts.date`** (date needed for the days/episode floor):
   ```sql
-  SELECT ts.nifty_regime AS regime,
+  SELECT ts.nifty_regime AS regime, ts.date AS d,
          ts.win_probability AS p,
          CASE WHEN so.outcome = 'WIN' THEN 1 ELSE 0 END AS y
   FROM signal_outcomes so
@@ -53,28 +81,49 @@ diagnostic.** Do NOT build separate per-regime ensembles (B) or a per-regime met
   WHERE so.outcome IN ('WIN','LOSS') AND ts.win_probability IS NOT NULL
   ```
 - Fit **one global** `IsotonicRegression` on all rows (existing behaviour, the fallback).
-- Fit **one calibrator per regime** that has `≥ min_regime_samples` rows **and ≥ 2 outcome classes**;
-  regimes failing either condition have **no** regime calibrator.
+- A regime qualifies for **its own** calibrator only if it clears the **independent-observation
+  floor**: `distinct_days(regime) ≥ min_regime_days` **AND** `episode_count(regime) ≥
+  min_regime_episodes` **AND** `≥ 2` outcome classes. An **episode** = a maximal run of the regime's
+  distinct trading days with no internal gap `> EPISODE_GAP_DAYS` (default 5 calendar days); the
+  episode floor ensures we never fit a calibrator to a single continuous block. Regimes failing any
+  condition have **no** regime calibrator (→ global).
 - Build the write set from
   `SELECT symbol, date, nifty_regime, win_probability FROM technical_signals WHERE win_probability IS NOT NULL`.
-  For each row pick `regime_calibrators.get(regime, global_calibrator)` (null/thin/unknown regime →
-  global) and write `calibrated_win_probability`. Idempotent (overwrites every run).
-- Return `{fit: bool, n, updated, regimes: {regime: {n, used: 'regime'|'global'}}}` and print a
-  one-line-per-regime summary.
+  For each row pick `regime_calibrators.get(regime, global_calibrator)` (null/thin/unknown/dormant
+  regime → global) and write `calibrated_win_probability`. Idempotent (overwrites every run).
+- Return `{fit, n, updated, regimes: {regime: {n, distinct_days, episodes, used: 'regime'|'global'}}}`
+  and print a one-line-per-regime summary including why each regime used global vs its own calibrator.
 
-Helpers `fit_calibrator(pred_probs, outcomes)` and `calibrate(ir, p)` are reused unchanged.
+Helpers `fit_calibrator(pred_probs, outcomes)` and `calibrate(ir, p)` are reused unchanged. A small
+pure helper `count_episodes(days, gap=EPISODE_GAP_DAYS)` (sorted distinct dates → episode count) is
+added and unit-tested.
+
+**Today's behaviour:** BEAR(11d)/SIDEWAYS(5d)/BULL(4d) all fail `min_regime_days=20`, so every row
+uses the global calibrator — identical to current production. The mechanism activates per regime only
+as real history accumulates.
 
 ### 2. `ml_calibration.py` — `per_regime_auc(conn)` (new)
 
 - Reads the same `regime, p (raw win_probability), y (WIN=1/LOSS=0)` rows.
-- For each regime with `≥ 2` classes and `≥ min_regime_samples` rows, computes
+- For each regime with `≥ 2` outcome classes and `≥ 50` rows, computes
   `sklearn.metrics.roc_auc_score(y, p)` on the **raw** `win_probability` (we want the shared model's
-  *ranking* quality within the regime, independent of calibration).
+  *ranking* quality within the regime, independent of calibration). Reported for **all** such regimes
+  — including ones still below the calibration floor — so we can watch ranking quality accrue.
 - Returns `{regime: {n, auc}}`, prints one line per regime.
 - Called at the end of `run()` after recalibration; result is logged (no new table in v1).
 - **Interpretation (documented in the function docstring):** regime AUC well above 0.5 → the shared
   model ranks fine there, calibration is sufficient. Regime AUC ≈ 0.5 → the shared model cannot
   rank there; that regime is the candidate for a future per-regime model (escalation to C/B).
+- **Caveat (logged alongside the AUC):** until a regime clears the days/episode floor its AUC is
+  computed on a single autocorrelated episode and is itself provisional — read it together with the
+  readiness report, not in isolation.
+
+### 2b. `ml_calibration.py` — `regime_readiness(conn)` (new)
+
+- For each regime: `n_rows`, `distinct_days`, `episode_count`, `first_day`, `last_day`, and a boolean
+  `ready` (clears `min_regime_days` + `min_regime_episodes`). Returns a dict, prints one line per
+  regime. This is the at-a-glance "when does per-regime calibration turn on" report; it runs every
+  calibration cycle so the activation is observable in the cron logs.
 
 ### 3. `scoring_engine.py` — regime-fair gate (modified)
 
@@ -108,18 +157,22 @@ is a drop-in upgrade of that step.
 
 Pure-function and DB-backed tests in `src/server/tests/test_ml_calibration.py` (extend existing):
 
-1. **Per-regime calibrators differ** — build two synthetic regimes whose raw-score→win-rate maps
-   differ (e.g. regime A: high scores win; regime B: flat 0.5); assert the same raw score calibrates
-   to different values under each regime's calibrator.
-2. **Thin regime falls back to global** — a regime with `< min_regime_samples` rows is calibrated by
-   the global calibrator (assert it gets the global mapping, not its own).
-3. **One-class regime falls back to global** — a regime whose resolved outcomes are all WIN (or all
-   LOSS) gets the global calibrator.
-4. **Null/unknown regime falls back to global** — rows with `nifty_regime IS NULL` are calibrated.
-5. **`per_regime_auc` distinguishes rankable vs random** — synthetic data where regime A is rankable
-   (raw prob correlates with outcome, AUC > 0.6) and regime B is random (AUC ≈ 0.5); assert the
-   returned dict reflects the difference.
-6. **Gate reads calibrated** — unit/integration check that the scoring gate consumes
+1. **`count_episodes`** (pure) — `[d, d+1, d+2]` → 1 episode; `[d, d+1, d+20, d+21]` → 2 episodes
+   (gap > 5); empty → 0. Locks the episode definition.
+2. **Per-regime calibrators differ when both qualify** — two synthetic regimes that each clear the
+   days/episode floor (≥20 distinct days across ≥2 episodes) with different score→win maps; assert
+   the same raw score calibrates to different values under each regime's calibrator.
+3. **Below days-floor → global fallback** — a regime with many rows but few distinct days (the
+   current real-world case) uses the global calibrator, not its own.
+4. **Single-episode (continuous block) → global fallback** — a regime with ≥20 distinct days but all
+   contiguous (1 episode) fails `min_regime_episodes` and uses global.
+5. **One-class regime → global fallback** — resolved outcomes all WIN (or all LOSS) → global.
+6. **Null/unknown regime → global fallback** — rows with `nifty_regime IS NULL` are calibrated via global.
+7. **`per_regime_auc` distinguishes rankable vs random** — synthetic where regime A is rankable
+   (AUC > 0.6) and regime B is random (AUC ≈ 0.5); assert the returned dict reflects the difference.
+8. **`regime_readiness` flags ready/not-ready** — synthetic regimes on either side of the floor;
+   assert `ready` booleans and the reported distinct_days/episode counts.
+9. **Gate reads calibrated** — unit/integration check that the scoring gate consumes
    `calibrated_win_probability` (a row whose raw `win_probability` is 0.6 but calibrated is 0.30 is
    gated out at the 0.40 threshold).
 
@@ -128,12 +181,18 @@ All DB-backed tests use an in-memory SQLite fixture mirroring the existing calib
 ## Verification
 
 - `npx vitest run` + full `pytest src/server/tests/` green.
-- Live-PG run of `ml_calibration.py` (USE_POSTGRES=true): per-regime summary printed, all
-  `calibrated_win_probability` rows updated, per-regime AUC reported for BEAR/SIDEWAYS/BULL.
-- Confirm reliability per regime: within each regime, `AVG(calibrated_win_probability) ≈` the
-  regime's empirical win rate (calibration sits on the diagonal per regime).
-- Re-run `unified_ranker.py` and confirm sizing shifts (BEAR names sized smaller via honest lower
-  calibrated probabilities).
+- Live-PG run of `ml_calibration.py` (USE_POSTGRES=true): readiness report shows BEAR/SIDEWAYS/BULL
+  all **not ready** (below the 20-day/2-episode floor), so every regime uses the **global**
+  calibrator — `calibrated_win_probability` values must be **identical to the pre-change global run**
+  (the safety check: the *per-regime* layer is dormant today). Per-regime AUC + readiness printed.
+- **One active change today:** the `scoring_engine` gate switches from raw `win_probability` to
+  `COALESCE(calibrated_win_probability, win_probability)`. Since global calibration is real, this
+  shifts which signals pass the 0.40 gate (intended improvement — gate on honest probability, the
+  same value sizing already uses). Verify: compare the count of gated-in signals before/after and
+  spot-check that rows whose calibrated value crosses 0.40 flip as expected.
+- The first real **per-regime** activation is verified later, when a regime crosses the floor (or via
+  a synthetic-data integration test that forces a regime over the floor and asserts its rows get its
+  own calibrator).
 
 ## Risks / notes
 
