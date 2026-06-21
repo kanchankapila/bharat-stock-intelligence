@@ -15,7 +15,24 @@ calibrated column.
 
   python ml_calibration.py
 """
+import datetime as _dt
+
 from db_compat import connect, ConnWrapper
+
+
+def count_episodes(days, gap_days: int = 5) -> int:
+    """Number of distinct episodes in a set of ISO dates: a gap > gap_days starts a new one."""
+    uniq = sorted(set(days))
+    if not uniq:
+        return 0
+    episodes = 1
+    prev = _dt.date.fromisoformat(uniq[0])
+    for d in uniq[1:]:
+        cur = _dt.date.fromisoformat(d)
+        if (cur - prev).days > gap_days:
+            episodes += 1
+        prev = cur
+    return episodes
 
 
 def fit_calibrator(pred_probs, outcomes):

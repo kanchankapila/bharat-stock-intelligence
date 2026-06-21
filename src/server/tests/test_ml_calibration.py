@@ -6,6 +6,7 @@ from ml_calibration import (  # noqa: E402
     fit_calibrator,
     calibrate,
     recalibrate_win_probabilities,
+    count_episodes,
 )
 
 
@@ -89,3 +90,12 @@ def test_recalibrate_skips_when_insufficient_data():
     conn.commit()
     res = recalibrate_win_probabilities(conn, min_samples=50)
     assert res['fit'] is False
+
+
+# ── per-regime calibration: episode counting ────────────────────────────────────
+
+def test_count_episodes():
+    assert count_episodes([]) == 0
+    assert count_episodes(["2024-01-01", "2024-01-02", "2024-01-03"]) == 1
+    assert count_episodes(["2024-01-01", "2024-01-02", "2024-02-01", "2024-02-02"]) == 2  # gap > 5
+    assert count_episodes(["2024-01-03", "2024-01-01", "2024-01-02"]) == 1                # unsorted ok
