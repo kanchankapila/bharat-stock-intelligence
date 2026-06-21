@@ -206,6 +206,10 @@ class FeatureEngineer:
         )
         if row:
             fetched = pd.to_datetime(row["last_updated"])
+            # PG returns timestamptz (tz-aware); the cutoff is tz-naive. Normalize so the
+            # comparison doesn't raise "Cannot compare tz-naive and tz-aware timestamps".
+            if getattr(fetched, "tzinfo", None) is not None:
+                fetched = fetched.tz_localize(None)
             cutoff  = pd.Timestamp.today() - pd.Timedelta(days=FUND_LAG_DAYS)
             if fetched < cutoff:
                 feat["trailing_pe"]    = row["trailing_pe"]
