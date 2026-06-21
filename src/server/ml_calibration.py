@@ -47,11 +47,15 @@ def calibrate(ir, p) -> float:
     return float(ir.predict([float(p)])[0])
 
 
-def recalibrate_win_probabilities(conn: ConnWrapper, min_samples: int = 200) -> dict:
-    """Fit isotonic on resolved WIN/LOSS signals, write calibrated_win_probability for all
-    technical_signals that have a raw win_probability. Idempotent."""
+def recalibrate_win_probabilities(conn: ConnWrapper, min_samples: int = 200,
+                                  min_regime_days: int = 20, min_regime_episodes: int = 2) -> dict:
+    """Fit isotonic on resolved WIN/LOSS signals and write calibrated_win_probability for all
+    technical_signals with a raw win_probability. A regime gets its OWN calibrator only when it
+    clears min_regime_days distinct days AND min_regime_episodes episodes AND has ≥2 classes;
+    otherwise it falls back to the global calibrator. Idempotent."""
     rows = conn.execute("""
-        SELECT ts.win_probability AS p,
+        SELECT ts.nifty_regime AS regime, ts.date AS d,
+               ts.win_probability AS p,
                CASE WHEN so.outcome = 'WIN' THEN 1 ELSE 0 END AS y
         FROM signal_outcomes so
         JOIN technical_signals ts ON ts.symbol = so.symbol AND ts.date = so.signal_date
@@ -62,28 +66,48 @@ def recalibrate_win_probabilities(conn: ConnWrapper, min_samples: int = 200) -> 
         print(f"[Calibration] insufficient data ({len(rows)} < {min_samples}); skipping.")
         return {'fit': False, 'reason': 'insufficient', 'n': len(rows)}
 
-    preds = [float(r['p']) for r in rows]
-    ys = [int(r['y']) for r in rows]
-    if len(set(ys)) < 2:
+    all_p = [float(r['p']) for r in rows]
+    all_y = [int(r['y']) for r in rows]
+    if len(set(all_y)) < 2:
         print("[Calibration] only one outcome class; skipping.")
         return {'fit': False, 'reason': 'one_class', 'n': len(rows)}
+    global_ir = fit_calibrator(all_p, all_y)
 
-    ir = fit_calibrator(preds, ys)
+    by_regime: dict = {}
+    for r in rows:
+        g = by_regime.setdefault(r['regime'], {'p': [], 'y': [], 'days': []})
+        g['p'].append(float(r['p']))
+        g['y'].append(int(r['y']))
+        g['days'].append(str(r['d']))
+
+    regime_cal: dict = {}
+    regimes_meta: dict = {}
+    for reg, g in by_regime.items():
+        dd = len(set(g['days']))
+        ep = count_episodes(g['days'])
+        qualifies = (reg is not None and dd >= min_regime_days and ep >= min_regime_episodes
+                     and len(set(g['y'])) >= 2)
+        if qualifies:
+            regime_cal[reg] = fit_calibrator(g['p'], g['y'])
+        regimes_meta[reg] = {'n': len(g['p']), 'distinct_days': dd, 'episodes': ep,
+                             'used': 'regime' if qualifies else 'global'}
 
     sigs = conn.execute(
-        "SELECT symbol, date, win_probability FROM technical_signals WHERE win_probability IS NOT NULL"
+        "SELECT symbol, date, nifty_regime, win_probability FROM technical_signals WHERE win_probability IS NOT NULL"
     ).fetchall()
-    cal_values = ir.predict([float(s['win_probability']) for s in sigs])
     updated = 0
-    for s, cal in zip(sigs, cal_values):
+    for s in sigs:
+        ir = regime_cal.get(s['nifty_regime'], global_ir)
         conn.execute(
             "UPDATE technical_signals SET calibrated_win_probability = ? WHERE symbol = ? AND date = ?",
-            (float(cal), s['symbol'], s['date']),
+            (calibrate(ir, float(s['win_probability'])), s['symbol'], s['date']),
         )
         updated += 1
     conn.commit()
+    for reg, m in regimes_meta.items():
+        print(f"[Calibration] regime={reg} n={m['n']} days={m['distinct_days']} ep={m['episodes']} -> {m['used']}")
     print(f"[Calibration] fit on {len(rows)} WIN/LOSS signals; recalibrated {updated} rows.")
-    return {'fit': True, 'n': len(rows), 'updated': updated}
+    return {'fit': True, 'n': len(rows), 'updated': updated, 'regimes': regimes_meta}
 
 
 def run():

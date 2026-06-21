@@ -52,6 +52,7 @@ def make_db():
     conn.executescript("""
         CREATE TABLE technical_signals (
             symbol TEXT, date TEXT, win_probability REAL, calibrated_win_probability REAL,
+            nifty_regime TEXT,
             PRIMARY KEY (symbol, date)
         );
         CREATE TABLE signal_outcomes (
@@ -99,3 +100,65 @@ def test_count_episodes():
     assert count_episodes(["2024-01-01", "2024-01-02", "2024-01-03"]) == 1
     assert count_episodes(["2024-01-01", "2024-01-02", "2024-02-01", "2024-02-02"]) == 2  # gap > 5
     assert count_episodes(["2024-01-03", "2024-01-01", "2024-01-02"]) == 1                # unsorted ok
+
+
+# ── per-regime calibration: floor gating ────────────────────────────────────────
+
+def _seed(conn, regime, p, win_count, dates):
+    """For each date insert 10 symbols at prob p; win_count of every 10 are WIN."""
+    i = 0
+    for d in dates:
+        for k in range(10):
+            sym = f"{regime}_{d}_{k}"
+            outcome = 'WIN' if (i % 10) < win_count else 'LOSS'
+            conn.execute("INSERT INTO technical_signals (symbol,date,win_probability,nifty_regime) VALUES (?,?,?,?)",
+                         (sym, d, p, regime))
+            conn.execute("INSERT INTO signal_outcomes (symbol,signal_date,horizon_days,outcome) VALUES (?,?,5,?)",
+                         (sym, d, outcome))
+            i += 1
+    conn.commit()
+
+
+def _spread_days(n, start="2026-01-01", gap_every=10):
+    """n distinct days across 2 episodes (a 40-day jump at the midpoint)."""
+    import datetime as dt
+    base = dt.date.fromisoformat(start)
+    out = []
+    for i in range(n):
+        off = i + (40 if i >= n // 2 else 0)
+        out.append((base + dt.timedelta(days=off)).isoformat())
+    return out
+
+
+def test_qualified_regime_gets_own_calibrator():
+    conn = make_db()
+    # BEAR: 22 days across 2 episodes, raw 0.8 only wins 40% -> own calibrator pulls 0.8 down hard
+    _seed(conn, 'BEAR', 0.8, 4, _spread_days(22))
+    # BULL elsewhere with the SAME raw prob winning 80% -> would calibrate 0.8 differently
+    _seed(conn, 'BULL', 0.8, 8, _spread_days(22, start="2025-06-01"))
+    res = recalibrate_win_probabilities(conn, min_samples=50, min_regime_days=20, min_regime_episodes=2)
+    assert res['regimes']['BEAR']['used'] == 'regime'
+    bear = conn.execute("SELECT calibrated_win_probability FROM technical_signals WHERE nifty_regime='BEAR' LIMIT 1").fetchone()[0]
+    bull = conn.execute("SELECT calibrated_win_probability FROM technical_signals WHERE nifty_regime='BULL' LIMIT 1").fetchone()[0]
+    assert bear == pytest.approx(0.4, abs=0.08) and bull == pytest.approx(0.8, abs=0.08)
+    assert bear < bull   # same raw 0.8 calibrates lower in BEAR
+
+
+def test_below_days_floor_uses_global():
+    conn = make_db()
+    # only 6 distinct days (lots of rows) -> below the 20-day floor -> global
+    _seed(conn, 'SIDEWAYS', 0.8, 6, ["2026-03-%02d" % d for d in range(1, 7)])
+    _seed(conn, 'BULL', 0.2, 2, ["2026-04-%02d" % d for d in range(1, 7)])
+    res = recalibrate_win_probabilities(conn, min_samples=50, min_regime_days=20, min_regime_episodes=2)
+    assert res['regimes']['SIDEWAYS']['used'] == 'global'
+
+
+def test_single_episode_uses_global():
+    conn = make_db()
+    # 25 distinct days but all contiguous (1 episode) -> fails episode floor -> global
+    import datetime as dt
+    days = [(dt.date(2026, 2, 1) + dt.timedelta(days=i)).isoformat() for i in range(25)]
+    _seed(conn, 'BEAR', 0.8, 4, days)
+    _seed(conn, 'BULL', 0.2, 2, [(dt.date(2025, 2, 1) + dt.timedelta(days=i)).isoformat() for i in range(25)])
+    res = recalibrate_win_probabilities(conn, min_samples=50, min_regime_days=20, min_regime_episodes=2)
+    assert res['regimes']['BEAR']['used'] == 'global'
