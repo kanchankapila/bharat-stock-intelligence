@@ -14,11 +14,21 @@
  * The four services mirror the `npm start` scripts exactly (same interpreters/paths).
  */
 const path = require('path');
+const fs = require('fs');
 
 const isWin = process.platform === 'win32';
 const VENV_PY = isWin
   ? path.join('backend-python', 'venv', 'Scripts', 'python.exe')
   : path.join('backend-python', 'venv', 'bin', 'python');
+
+// Inject .env into EVERY service. The Node app loads dotenv itself, but the three Python
+// services (AlphaQuant, ml-api, chatbot) only see what we hand them — without USE_POSTGRES
+// they default to SQLite and write/read the abandoned database.sqlite while the app is on
+// Postgres (the split-brain incident). Parsing .env here keeps all four on one DB engine.
+let dotenvVars = {};
+try {
+  dotenvVars = require('dotenv').parse(fs.readFileSync(path.join(__dirname, '.env')));
+} catch (_) { /* .env optional */ }
 
 // Shared restart policy: recover from crashes, but back off and cap to avoid a tight
 // restart storm if a service is fundamentally misconfigured (e.g. venv missing).
@@ -28,7 +38,7 @@ const common = {
   restart_delay: 3000,
   min_uptime: 10_000,
   kill_timeout: 10_000,
-  env: { PYTHONUNBUFFERED: '1' },
+  env: { ...dotenvVars, PYTHONUNBUFFERED: '1' },
   out_file: 'logs/pm2-out.log',
   error_file: 'logs/pm2-err.log',
   merge_logs: true,
