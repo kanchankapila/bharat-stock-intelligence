@@ -71,7 +71,17 @@ export const V2StockDetails: React.FC<V2StockDetailsProps> = ({ symbol, stock, o
             <ArrowLeft className="w-4 h-4" /> BACK
           </button>
           <div>
-            <h2 className="text-2xl font-black text-slate-100 italic tracking-tighter uppercase font-mono">{symbol} DETAILS</h2>
+            <h2 className="text-2xl font-black text-slate-100 italic tracking-tighter uppercase font-mono">
+              {symbol} <span className="text-slate-500 font-sans not-italic text-xl tracking-normal ml-2">
+                {(() => {
+                  if (stock?.name && stock.name !== symbol) return stock.name;
+                  const peers = niftyTraderData?.industryData?.lstFinancires || [];
+                  const currentPeer = peers.find((p: any) => p.symbol?.toUpperCase() === symbol.toUpperCase());
+                  if (currentPeer?.company_Name) return currentPeer.company_Name;
+                  return '';
+                })()}
+              </span>
+            </h2>
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5 flex flex-wrap items-center gap-2">
               <span>V2 Core Workspace</span>
               {niftyTraderData?.analysisData?.symbolData?.created_at && (
