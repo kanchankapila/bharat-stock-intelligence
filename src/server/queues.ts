@@ -17,6 +17,7 @@ import { dbGet, dbAll, dbRun } from './dbAsync';
 import { syncAndScore } from './scoringService';
 import Redis from 'ioredis';
 import { REDIS_BASE } from './redisConfig';
+import cronParser from 'cron-parser';
 import { runPython } from './pythonRunner';
 
 import { syncNiftyTraderScores } from './syncProprietaryScores';
@@ -560,6 +561,63 @@ async function processQuantEodSync(_job: Job): Promise<{ success: boolean }> {
   }
 }
 
+
+async function addJobWithCatchup(
+  queue: Queue,
+  jobName: string,
+  data: any,
+  opts: any = {}
+) {
+  const repeatables = await queue.getRepeatableJobs();
+  for (const r of repeatables) {
+    if (r.id === opts.jobId || r.name === jobName) {
+      await queue.removeRepeatableByKey(r.key);
+    }
+  }
+
+  await queue.add(jobName, data, opts);
+
+  if (!opts.repeat || (!opts.repeat.pattern && !opts.repeat.every && !opts.repeat.cron)) {
+    return;
+  }
+
+  try {
+    const jobs = await queue.getJobs(['completed', 'failed'], 0, 1, false);
+    const lastJob = jobs.length > 0 ? jobs[0] : null;
+    const lastRunTime = lastJob?.timestamp || null;
+
+    if (lastRunTime) {
+      const now = Date.now();
+      let missed = false;
+
+      if (opts.repeat.pattern || opts.repeat.cron) {
+        const pattern = opts.repeat.pattern || opts.repeat.cron;
+        // @ts-ignore
+        const interval = cronParser.parseExpression(pattern, { currentDate: new Date(now) });
+        const prevExpected = interval.prev().getTime();
+        
+        if (lastRunTime < prevExpected && prevExpected < now) {
+          missed = true;
+        }
+      } else if (opts.repeat.every) {
+        if (now - lastRunTime > opts.repeat.every) {
+          missed = true;
+        }
+      }
+
+      if (missed) {
+        console.log(`[QUEUE] Job ${jobName} in ${queue.name} missed its scheduled run. Executing catch-up...`);
+        const catchupOpts = { ...opts };
+        delete catchupOpts.repeat;
+        catchupOpts.jobId = `${opts.jobId || jobName}-catchup-${now}`;
+        await queue.add(jobName, { ...data, isCatchup: true }, catchupOpts);
+      }
+    }
+  } catch (err) {
+    console.warn(`[QUEUE] Failed to determine catch-up for ${jobName}:`, err);
+  }
+}
+
 export async function initQueues(): Promise<boolean> {
   // Suppress BullMQ's per-queue/worker Redis version warnings (Redis 5 works fine here)
   const _origWarn = console.warn.bind(console);
@@ -605,7 +663,7 @@ export async function initQueues(): Promise<boolean> {
     
     // Daily sync after market close (4 PM IST = 10:30 AM UTC)
     // This ensures OHLCV data is persisted for backtesting
-    await stockRefreshQueue.add(
+    await addJobWithCatchup(stockRefreshQueue, 
       'refresh-all-daily',
       {},
       {
@@ -643,7 +701,7 @@ export async function initQueues(): Promise<boolean> {
     });
 
     // Trigger an immediate first refresh (Paused)
-    // await stockRefreshQueue.add('refresh-all', {}, { removeOnComplete: 1 });
+    // await addJobWithCatchup(stockRefreshQueue, 'refresh-all', {}, { removeOnComplete: 1 });
 
     // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ AI signals queue ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
     aiSignalsQueue = new Queue(QUEUE_AI_SIGNALS, { connection });
@@ -687,7 +745,7 @@ export async function initQueues(): Promise<boolean> {
     for (const r of scoringRepeatables) {
       await stockScoringQueue.removeRepeatableByKey(r.key);
     }
-    await stockScoringQueue.add(
+    await addJobWithCatchup(stockScoringQueue, 
       'score-all',
       {},
       {
@@ -725,7 +783,7 @@ export async function initQueues(): Promise<boolean> {
     for (const r of mcRepeatables) {
       await mcScreenerSyncQueue.removeRepeatableByKey(r.key);
     }
-    await mcScreenerSyncQueue.add(
+    await addJobWithCatchup(mcScreenerSyncQueue, 
       'mc-sync',
       {},
       {
@@ -761,7 +819,7 @@ export async function initQueues(): Promise<boolean> {
     for (const r of etnowRepeatables) {
       await etnowScreenerSyncQueue.removeRepeatableByKey(r.key);
     }
-    await etnowScreenerSyncQueue.add(
+    await addJobWithCatchup(etnowScreenerSyncQueue, 
       'etnow-sync',
       {},
       {
@@ -799,7 +857,7 @@ export async function initQueues(): Promise<boolean> {
     }
 
     // Repeat weekly on Sunday at 2 AM UTC (7:30 AM IST) for low load time
-    await nseScreenerSyncQueue.add(
+    await addJobWithCatchup(nseScreenerSyncQueue, 
       'nse-sync-weekly',
       {},
       {
@@ -838,7 +896,7 @@ export async function initQueues(): Promise<boolean> {
     for (const r of fundRepeatables) {
       await fundamentalsSyncQueue.removeRepeatableByKey(r.key);
     }
-    await fundamentalsSyncQueue.add(
+    await addJobWithCatchup(fundamentalsSyncQueue, 
       'sync-fundamentals-weekly',
       { phase2Only: false },
       {
@@ -874,7 +932,7 @@ export async function initQueues(): Promise<boolean> {
     for (const r of quantRepeatables) {
       await quantScoringQueue.removeRepeatableByKey(r.key);
     }
-    await quantScoringQueue.add(
+    await addJobWithCatchup(quantScoringQueue, 
       'quant-score-daily',
       {},
       {
@@ -910,7 +968,7 @@ export async function initQueues(): Promise<boolean> {
     for (const r of tsRepeatables) {
       await technicalSignalsQueue.removeRepeatableByKey(r.key);
     }
-    await technicalSignalsQueue.add(
+    await addJobWithCatchup(technicalSignalsQueue, 
       'technical-signals-daily',
       {},
       {
@@ -955,7 +1013,7 @@ export async function initQueues(): Promise<boolean> {
     for (const r of outRepeatables) {
       await signalOutcomesQueue.removeRepeatableByKey(r.key);
     }
-    await signalOutcomesQueue.add(
+    await addJobWithCatchup(signalOutcomesQueue, 
       'signal-outcomes-daily',
       {},
       {
@@ -995,7 +1053,7 @@ export async function initQueues(): Promise<boolean> {
     for (const r of newsRepeatables) {
       await newsSentimentQueue.removeRepeatableByKey(r.key);
     }
-    await newsSentimentQueue.add(
+    await addJobWithCatchup(newsSentimentQueue, 
       'news-sentiment-refresh',
       {},
       {
@@ -1040,7 +1098,7 @@ export async function initQueues(): Promise<boolean> {
     for (const r of tlRepeatables) {
       await trendlyneIntradayQueue.removeRepeatableByKey(r.key);
     }
-    await trendlyneIntradayQueue.add(
+    await addJobWithCatchup(trendlyneIntradayQueue, 
       'trendlyne-intraday-scan',
       {},
       {
@@ -1106,7 +1164,7 @@ export async function initQueues(): Promise<boolean> {
     for (const r of orRepeatables) {
       await outcomeResolverQueue.removeRepeatableByKey(r.key);
     }
-    await outcomeResolverQueue.add(
+    await addJobWithCatchup(outcomeResolverQueue, 
       'outcome-resolver-daily',
       {},
       {
@@ -1150,7 +1208,7 @@ export async function initQueues(): Promise<boolean> {
     for (const r of mlRepeatables) {
       await mlDailyOpsQueue.removeRepeatableByKey(r.key);
     }
-    await mlDailyOpsQueue.add(
+    await addJobWithCatchup(mlDailyOpsQueue, 
       'ml-daily-ops',
       {},
       {
@@ -1194,7 +1252,7 @@ export async function initQueues(): Promise<boolean> {
     mlWeeklyRetrainQueue = new Queue(QUEUE_ML_WEEKLY_RETRAIN, { connection });
     const mlWkRep = await mlWeeklyRetrainQueue.getRepeatableJobs();
     for (const r of mlWkRep) await mlWeeklyRetrainQueue.removeRepeatableByKey(r.key);
-    await mlWeeklyRetrainQueue.add('ml-weekly-retrain', {}, {
+    await addJobWithCatchup(mlWeeklyRetrainQueue, 'ml-weekly-retrain', {}, {
       repeat: { pattern: '30 12 * * 0' },
       jobId: 'ml-weekly-retrain',
       removeOnComplete: 2, removeOnFail: 3,
@@ -1215,7 +1273,7 @@ export async function initQueues(): Promise<boolean> {
     researchPremarketQueue = new Queue(QUEUE_RESEARCH_PREMARKET, { connection });
     const premarketRep = await researchPremarketQueue.getRepeatableJobs();
     for (const r of premarketRep) await researchPremarketQueue.removeRepeatableByKey(r.key);
-    await researchPremarketQueue.add('research-premarket-daily', {}, {
+    await addJobWithCatchup(researchPremarketQueue, 'research-premarket-daily', {}, {
       repeat: { pattern: '0 3 * * 1-5' },
       jobId: 'research-premarket-repeatable',
       removeOnComplete: { age: 86400 },
@@ -1231,7 +1289,7 @@ export async function initQueues(): Promise<boolean> {
     researchPostcloseQueue = new Queue(QUEUE_RESEARCH_POSTCLOSE, { connection });
     const postcloseRep = await researchPostcloseQueue.getRepeatableJobs();
     for (const r of postcloseRep) await researchPostcloseQueue.removeRepeatableByKey(r.key);
-    await researchPostcloseQueue.add('research-postclose-daily', {}, {
+    await addJobWithCatchup(researchPostcloseQueue, 'research-postclose-daily', {}, {
       repeat: { pattern: '45 10 * * 1-5' },
       jobId: 'research-postclose-repeatable',
       removeOnComplete: { age: 86400 },
@@ -1248,7 +1306,7 @@ export async function initQueues(): Promise<boolean> {
     dlMacroFetchQueue = new Queue(QUEUE_DL_MACRO_FETCH, { connection });
     const dlMacroRep = await dlMacroFetchQueue.getRepeatableJobs();
     for (const r of dlMacroRep) await dlMacroFetchQueue.removeRepeatableByKey(r.key);
-    await dlMacroFetchQueue.add('dl-macro-daily', {}, {
+    await addJobWithCatchup(dlMacroFetchQueue, 'dl-macro-daily', {}, {
       repeat: { pattern: '30 2 * * 1-5' },
       jobId: 'dl-macro-daily',
       removeOnComplete: 3, removeOnFail: 3,
@@ -1263,7 +1321,7 @@ export async function initQueues(): Promise<boolean> {
     dlFeatureRefreshQueue = new Queue(QUEUE_DL_FEATURE_REFRESH, { connection });
     const dlFeatRep = await dlFeatureRefreshQueue.getRepeatableJobs();
     for (const r of dlFeatRep) await dlFeatureRefreshQueue.removeRepeatableByKey(r.key);
-    await dlFeatureRefreshQueue.add('dl-feature-daily', {}, {
+    await addJobWithCatchup(dlFeatureRefreshQueue, 'dl-feature-daily', {}, {
       repeat: { pattern: '0 10 * * 1-5' },
       jobId: 'dl-feature-daily',
       removeOnComplete: 3, removeOnFail: 3,
@@ -1278,7 +1336,7 @@ export async function initQueues(): Promise<boolean> {
     dlInferenceQueue = new Queue(QUEUE_DL_INFERENCE, { connection });
     const dlInfRep = await dlInferenceQueue.getRepeatableJobs();
     for (const r of dlInfRep) await dlInferenceQueue.removeRepeatableByKey(r.key);
-    await dlInferenceQueue.add('dl-infer-daily', {}, {
+    await addJobWithCatchup(dlInferenceQueue, 'dl-infer-daily', {}, {
       repeat: { pattern: '0 11 * * 1-5' },
       jobId: 'dl-infer-daily',
       removeOnComplete: 3, removeOnFail: 3,
@@ -1299,7 +1357,7 @@ export async function initQueues(): Promise<boolean> {
     dlRegimeUpdateQueue = new Queue(QUEUE_DL_REGIME_UPDATE, { connection });
     const dlRegRep = await dlRegimeUpdateQueue.getRepeatableJobs();
     for (const r of dlRegRep) await dlRegimeUpdateQueue.removeRepeatableByKey(r.key);
-    await dlRegimeUpdateQueue.add('dl-regime-daily', {}, {
+    await addJobWithCatchup(dlRegimeUpdateQueue, 'dl-regime-daily', {}, {
       repeat: { pattern: '15 11 * * 1-5' },
       jobId: 'dl-regime-daily',
       removeOnComplete: 3, removeOnFail: 3,
@@ -1320,7 +1378,7 @@ export async function initQueues(): Promise<boolean> {
     dlRetrainWeeklyQueue = new Queue(QUEUE_DL_RETRAIN_WEEKLY, { connection });
     const dlWkRep = await dlRetrainWeeklyQueue.getRepeatableJobs();
     for (const r of dlWkRep) await dlRetrainWeeklyQueue.removeRepeatableByKey(r.key);
-    await dlRetrainWeeklyQueue.add('dl-retrain-weekly', {}, {
+    await addJobWithCatchup(dlRetrainWeeklyQueue, 'dl-retrain-weekly', {}, {
       repeat: { pattern: '30 17 * * 0' },
       jobId: 'dl-retrain-weekly',
       removeOnComplete: 2, removeOnFail: 3,
@@ -1371,12 +1429,12 @@ export async function initQueues(): Promise<boolean> {
     // Daily gap-fill: weekdays 4:15 PM IST = 10:45 UTC (after market close, lookback 3 days)
     const ohlcvRep = await ohlcvBackfillQueue.getRepeatableJobs();
     for (const r of ohlcvRep) await ohlcvBackfillQueue.removeRepeatableByKey(r.key);
-    await ohlcvBackfillQueue.add('ohlcv-gap-fill-weekly', { mode: 'gap-fill', lookback: 30 }, {
+    await addJobWithCatchup(ohlcvBackfillQueue, 'ohlcv-gap-fill-weekly', { mode: 'gap-fill', lookback: 30 }, {
       repeat: { pattern: '30 20 * * 5' },
       jobId: 'ohlcv-gap-fill-weekly',
       removeOnComplete: 2, removeOnFail: 3,
     });
-    await ohlcvBackfillQueue.add('ohlcv-gap-fill-daily', { mode: 'gap-fill', lookback: 3 }, {
+    await addJobWithCatchup(ohlcvBackfillQueue, 'ohlcv-gap-fill-daily', { mode: 'gap-fill', lookback: 3 }, {
       repeat: { pattern: '45 10 * * 1-5' },
       jobId: 'ohlcv-gap-fill-daily',
       removeOnComplete: 3, removeOnFail: 3,
@@ -1386,7 +1444,7 @@ export async function initQueues(): Promise<boolean> {
     const ohlcvCount = ((await dbGet<any>('SELECT COUNT(*) as c FROM stock_ohlcv'))?.c) ?? 0;
     if (ohlcvCount < 1000) {
       console.log(`[QUEUE] stock_ohlcv sparse (${ohlcvCount} rows) ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â queuing full backfill`);
-      await ohlcvBackfillQueue.add('ohlcv-full-backfill-startup', { mode: 'full' }, {
+      await addJobWithCatchup(ohlcvBackfillQueue, 'ohlcv-full-backfill-startup', { mode: 'full' }, {
         jobId: 'ohlcv-full-backfill-startup',
         removeOnComplete: 1, removeOnFail: 3,
       });
@@ -1395,7 +1453,7 @@ export async function initQueues(): Promise<boolean> {
       const niftyCount = ((await dbGet<any>("SELECT COUNT(*) as c FROM stock_ohlcv WHERE symbol='NIFTY50'"))?.c) ?? 0;
       if (niftyCount === 0) {
         console.log('[QUEUE] NIFTY50 missing from stock_ohlcv ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â queuing index backfill');
-        await ohlcvBackfillQueue.add('ohlcv-indices-startup', { mode: 'indices' }, {
+        await addJobWithCatchup(ohlcvBackfillQueue, 'ohlcv-indices-startup', { mode: 'indices' }, {
           jobId: 'ohlcv-indices-startup',
           removeOnComplete: 1, removeOnFail: 3,
         });
@@ -1416,7 +1474,7 @@ export async function initQueues(): Promise<boolean> {
       if ((err as any).code === -2 || err.message?.includes('Missing lock')) return;
       console.error(`[QUEUE] ${QUEUE_CONFLUENCE_COMPUTE} error:`, err.message);
     });
-    await confluenceComputeQueue.add(
+    await addJobWithCatchup(confluenceComputeQueue, 
       'confluence-compute',
       {},
       { repeat: { every: 30 * 60 * 1000 }, removeOnComplete: 3, removeOnFail: 3 }
@@ -1432,7 +1490,7 @@ export async function initQueues(): Promise<boolean> {
     confluenceOutcomesWorker.on('failed', (job, err) =>
       console.error(`[QUEUE] ${QUEUE_CONFLUENCE_OUTCOMES} job failed:`, err.message)
     );
-    await confluenceOutcomesQueue.add(
+    await addJobWithCatchup(confluenceOutcomesQueue, 
       'confluence-outcomes-daily',
       {},
       { repeat: { every: 24 * 60 * 60 * 1000 }, removeOnComplete: 3, removeOnFail: 3 }
@@ -1446,7 +1504,7 @@ export async function initQueues(): Promise<boolean> {
     for (const r of screenerPerfRepeatables) {
       await screenerPerfQueue.removeRepeatableByKey(r.key);
     }
-    await screenerPerfQueue.add(
+    await addJobWithCatchup(screenerPerfQueue, 
       'screener-performance-daily',
       {},
       {
@@ -1482,7 +1540,7 @@ export async function initQueues(): Promise<boolean> {
     agentDataScientistQueue = new Queue(QUEUE_AGENT_DATA_SCIENTIST, { connection });
     const adsRep = await agentDataScientistQueue.getRepeatableJobs();
     for (const r of adsRep) await agentDataScientistQueue.removeRepeatableByKey(r.key);
-    await agentDataScientistQueue.add('agent-ds-daily', {}, {
+    await addJobWithCatchup(agentDataScientistQueue, 'agent-ds-daily', {}, {
       repeat: { pattern: '30 1 * * 1-5' },
       jobId: 'agent-ds-daily',
       removeOnComplete: 3, removeOnFail: 3,
@@ -1496,7 +1554,7 @@ export async function initQueues(): Promise<boolean> {
     agentStrategistQueue = new Queue(QUEUE_AGENT_STRATEGIST, { connection });
     const asRep = await agentStrategistQueue.getRepeatableJobs();
     for (const r of asRep) await agentStrategistQueue.removeRepeatableByKey(r.key);
-    await agentStrategistQueue.add('agent-strat-daily', {}, {
+    await addJobWithCatchup(agentStrategistQueue, 'agent-strat-daily', {}, {
       repeat: { pattern: '0 3 * * 1-5' },
       jobId: 'agent-strat-daily',
       removeOnComplete: 3, removeOnFail: 3,
@@ -1517,7 +1575,7 @@ export async function initQueues(): Promise<boolean> {
     for (const r of qeRepeatables) {
       await quantEodSyncQueue.removeRepeatableByKey(r.key);
     }
-    await quantEodSyncQueue.add(
+    await addJobWithCatchup(quantEodSyncQueue, 
       'sync-quant-eod',
       {},
       {
@@ -1542,7 +1600,7 @@ export async function initQueues(): Promise<boolean> {
     for (const r of cpRepeatables) {
       await companyProfilesSyncQueue.removeRepeatableByKey(r.key);
     }
-    await companyProfilesSyncQueue.add(
+    await addJobWithCatchup(companyProfilesSyncQueue, 
       'sync-company-profiles',
       {},
       {
@@ -1580,7 +1638,7 @@ export async function initQueues(): Promise<boolean> {
     agentAuditorQueue = new Queue(QUEUE_AGENT_AUDITOR, { connection });
     const aaRep = await agentAuditorQueue.getRepeatableJobs();
     for (const r of aaRep) await agentAuditorQueue.removeRepeatableByKey(r.key);
-    await agentAuditorQueue.add('agent-audit-daily', {}, {
+    await addJobWithCatchup(agentAuditorQueue, 'agent-audit-daily', {}, {
       repeat: { pattern: '0 11 * * 1-5' },
       jobId: 'agent-audit-daily',
       removeOnComplete: 3, removeOnFail: 3,
@@ -1594,7 +1652,7 @@ export async function initQueues(): Promise<boolean> {
     agentOptimizerQueue = new Queue(QUEUE_AGENT_OPTIMIZER, { connection });
     const aoRep = await agentOptimizerQueue.getRepeatableJobs();
     for (const r of aoRep) await agentOptimizerQueue.removeRepeatableByKey(r.key);
-    await agentOptimizerQueue.add('agent-optim-daily', {}, {
+    await addJobWithCatchup(agentOptimizerQueue, 'agent-optim-daily', {}, {
       repeat: { pattern: '0 12 * * 1-5' },
       jobId: 'agent-optim-daily',
       removeOnComplete: 3, removeOnFail: 3,
@@ -1618,7 +1676,7 @@ export async function initQueues(): Promise<boolean> {
 
     const staleUR = await unifiedRankerQueue.getRepeatableJobs();
     for (const r of staleUR) await unifiedRankerQueue.removeRepeatableByKey(r.key);
-    await unifiedRankerQueue.add(
+    await addJobWithCatchup(unifiedRankerQueue, 
       'unified-ranker-daily',
       {},
       {

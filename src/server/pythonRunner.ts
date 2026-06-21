@@ -16,6 +16,8 @@ export const PYTHON = process.env.PYTHON_PATH
 
 export const PY_DIR = path.resolve(process.cwd(), 'src', 'server');
 
+import log from './logger';
+
 export interface PythonResult {
   stdout: string;
   stderr: string;
@@ -26,12 +28,37 @@ export async function runPython(
   args: string[] = [],
   timeoutMs = 5 * 60_000,
 ): Promise<PythonResult> {
-  const { stdout, stderr } = await execFileAsync(
-    PYTHON,
-    [path.join(PY_DIR, script), ...args],
-    { timeout: timeoutMs, maxBuffer: 100 * 1024 * 1024 },
-  );
-  if (stdout) console.log(`[PY] ${script}:`, stdout.slice(0, 300));
-  if (stderr) console.warn(`[PY] ${script} stderr:`, stderr.slice(0, 300));
+  let stdout = '';
+  let stderr = '';
+  try {
+    const result = await execFileAsync(
+      PYTHON,
+      [path.join(PY_DIR, script), ...args],
+      { timeout: timeoutMs, maxBuffer: 100 * 1024 * 1024 },
+    );
+    stdout = result.stdout;
+    stderr = result.stderr;
+  } catch (error: any) {
+    stdout = error.stdout || '';
+    stderr = error.stderr || error.message || String(error);
+    // Throwing error but we've captured the stderr which will be logged below or by the caller
+    throw error;
+  } finally {
+    if (stdout) {
+      log.info(`[PY] ${script} execution completed`, { 
+        script, 
+        args, 
+        outputSnippet: stdout.slice(0, 300) 
+      });
+    }
+    if (stderr) {
+      log.error(`[PY] ${script} encountered an error or stderr output`, { 
+        script, 
+        args, 
+        stderrSnippet: stderr.slice(0, 300),
+        fullStderr: stderr 
+      });
+    }
+  }
   return { stdout, stderr };
 }

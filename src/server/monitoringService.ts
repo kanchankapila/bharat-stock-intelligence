@@ -42,3 +42,6 @@ export function triggerRetrainIfNeeded() {
 }
 
 export default { updateScreenerReliability, triggerRetrainIfNeeded };
+export function updateMonitorState(taskName: string, state: 'success' | 'failed', message?: string) {
+  // no-op for now to fix typescript
+}

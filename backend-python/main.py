@@ -95,12 +95,45 @@ def api_tv_screener():
 
 # --- ML Orchestration Endpoints ---
 import logging
-from fastapi import HTTPException
+from logging.handlers import TimedRotatingFileHandler
+from fastapi import HTTPException, Request
+from fastapi.responses import JSONResponse
 import ml_ensemble
 import dl_engine
 import outcome_resolver
 
+# Ensure logs directory exists
+log_dir = os.path.abspath(os.path.join(_here, "..", "logs"))
+if not os.path.exists(log_dir):
+    os.makedirs(log_dir)
+
+# Configure logger
 logger = logging.getLogger("PythonAPI")
+logger.setLevel(logging.INFO)
+
+if not logger.handlers:
+    # Console handler
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.INFO)
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    ch.setFormatter(formatter)
+    logger.addHandler(ch)
+
+    # File handler
+    log_file = os.path.join(log_dir, "fastapi.log")
+    fh = TimedRotatingFileHandler(log_file, when="midnight", interval=1, backupCount=14)
+    fh.setLevel(logging.INFO)
+    fh.setFormatter(formatter)
+    logger.addHandler(fh)
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.error(f"Unhandled exception on {request.url}: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={"message": "Internal Server Error", "details": str(exc)},
+    )
+
 
 @app.post("/api/score-pending")
 async def score_pending():

@@ -14,6 +14,7 @@ import { initQueues, shutdownQueues } from "./src/server/queues";
 import { startRedis, stopRedis } from "./src/server/redisManager";
 import { startOllama, stopOllama } from "./src/server/ollamaManager";
 import { wsSignalService } from "./src/server/websocketService";  // PHASE 3.2: WebSocket
+import log from "./src/server/logger";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -342,7 +343,7 @@ async function startServer() {
 }
 
 startServer().catch((error) => {
-  console.error("Failed to start server:", error);
+  log.error("Failed to start server", { error: error?.message || String(error), stack: error?.stack });
   process.exit(1);
 });
 
