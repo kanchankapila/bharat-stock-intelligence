@@ -145,9 +145,9 @@ class AlphaQuantScoringEngine:
 
     def _set_stored_nlp_version(self, conn, version: str):
         conn.execute(text("""
-            INSERT INTO app_settings (key, value, updatedAt)
+            INSERT INTO app_settings (key, value, "updatedAt")
             VALUES ('screener_nlp_version', :v, CURRENT_TIMESTAMP)
-            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updatedAt = CURRENT_TIMESTAMP
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value, "updatedAt" = CURRENT_TIMESTAMP
         """), {"v": version})
 
     def build_screener_metadata(self, screeners: pd.DataFrame, force_rebuild: bool = False) -> Dict[str, Any]:

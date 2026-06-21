@@ -23,6 +23,28 @@ if src_server_path not in sys.path:
 # Resolve database.sqlite relative to project root, not launch dir
 os.chdir(os.path.join(_here, ".."))
 
+# Load .env (USE_POSTGRES, POSTGRES_* etc.) BEFORE any db_compat import so this standalone
+# service uses the same database engine as the Node app. Without it, db_compat defaults to
+# SQLite and AlphaQuant silently writes to the abandoned database.sqlite while the app reads
+# Postgres (a split-brain). Dependency-free; an already-exported env var still wins.
+_env_path = os.path.join(_here, "..", ".env")
+if os.path.exists(_env_path):
+    with open(_env_path, "r", encoding="utf-8") as _ef:
+        for _line in _ef:
+            _line = _line.strip()
+            if not _line or _line.startswith("#") or "=" not in _line:
+                continue
+            _k, _, _v = _line.partition("=")
+            os.environ.setdefault(_k.strip(), _v.strip().strip('"').strip("'"))
+
+# Windows console defaults to cp1252; engines print unicode (₹, →) which raises
+# UnicodeEncodeError and 500s an endpoint AFTER its DB write already succeeded. Force UTF-8.
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 app = FastAPI(title="Bharat Stock Intelligence - AI & Quant Engine")
 
 # Configure CORS
