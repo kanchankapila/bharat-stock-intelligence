@@ -91,7 +91,12 @@ src/server/
   rl_agent.py                  ← Q-learning meta-controller (win_probability gating ≥ 0.40)
   ml_signal_scorer.py          ← Standalone signal probability scorer
   fii_dii_fetcher.py           ← FII/DII flow data fetcher
-  pcr_fetcher.py               ← Put/Call ratio fetcher
+  pcr_fetcher.py               ← Put/Call ratio fetcher (also captures ATM IV + skew → stock_options_oi)
+  iv_features.py               ← IV-rank/skew feature engine (stock_options_oi → technical_signals)
+  exit_labeler.py              ← Path-based exit labels: MFE/MAE/trailing-exit → signal_excursions
+  fundamentals_snapshot.py     ← Daily point-in-time snapshot of stock_fundamentals → fundamentals_history
+  relative_strength.py         ← Cross-sectional RS-rank engine (stock_ohlcv → technical_signals)
+  exit_policy.py               ← Exit-policy head: MFE/MAE regressors on signal_excursions → target/stop levels
   finbert_scorer.py            ← FinBERT NLP sentiment scoring
   institutional_quant_engine.py← Institutional flow quant analysis
   nlp_engine.py                ← NLP pipeline for news/events
@@ -163,17 +168,22 @@ The platform has a full self-improving feedback loop:
 
 **Daily ops** (run after market close):
 ```
+python fundamentals_snapshot.py        # point-in-time fundamentals → fundamentals_history
 python fii_dii_fetcher.py
 python pcr_fetcher.py
+python iv_features.py                  # ATM IV → iv_rank/iv_skew (after pcr_fetcher)
+python relative_strength.py            # cross-sectional RS ranks → technical_signals
 python finbert_scorer.py --days 1
 python institutional_quant_engine.py
 python performance_tracker.py --horizon 15
+python exit_labeler.py                 # MFE/MAE/trailing-exit labels → signal_excursions
 python online_learner.py --window 180
 ```
 
 **Weekly/Monthly:**
 ```
 python ml_ensemble.py --train         # retrain stacking ensemble
+python exit_policy.py --train         # retrain MFE/MAE exit-policy regressors (signal_excursions)
 python strategy_optimizer.py          # reoptimize CATEGORY/SOURCE weights
 python backtester.py --start 2023-01-01
 ```
