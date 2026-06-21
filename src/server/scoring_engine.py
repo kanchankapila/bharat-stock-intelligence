@@ -487,7 +487,7 @@ class AlphaQuantScoringEngine:
             wp_cutoff = (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
             with self.engine.connect() as conn:
                 wp_rows = conn.execute(text("""
-                    SELECT symbol, MAX(win_probability) AS wp
+                    SELECT symbol, MAX(COALESCE(calibrated_win_probability, win_probability)) AS wp
                     FROM technical_signals
                     WHERE date >= :cutoff
                       AND win_probability IS NOT NULL
