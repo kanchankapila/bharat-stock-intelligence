@@ -328,6 +328,29 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_sf_mktcap ON stock_fundamentals(market_cap);
   CREATE INDEX IF NOT EXISTS idx_sf_roe ON stock_fundamentals(return_on_equity);
 
+  -- 12b. Point-in-time fundamentals snapshots (written daily by fundamentals_snapshot.py).
+  -- stock_fundamentals is a *current* snapshot; joining it onto historical signal rows leaks
+  -- future fundamentals into training. This table accumulates an as-of trail so ml_ensemble
+  -- can join the fundamentals that were actually knowable on each signal_date.
+  CREATE TABLE IF NOT EXISTS fundamentals_history (
+    symbol              TEXT NOT NULL,
+    as_of_date          TEXT NOT NULL,   -- date the snapshot was taken (YYYY-MM-DD)
+    fifty_two_week_high REAL,
+    piotroski_f_score   INTEGER,
+    debt_to_equity      REAL,
+    operating_margins   REAL,
+    return_on_equity    REAL,
+    revenue_growth      REAL,
+    earnings_growth     REAL,
+    earnings_yield      REAL,
+    price_to_book       REAL,
+    market_cap          REAL,
+    captured_at         DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (symbol, as_of_date)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_fh_sym_date ON fundamentals_history(symbol, as_of_date DESC);
+
   -- 13. Quantitative Strategy Scores (computed nightly from OHLCV + fundamentals + screeners)
   CREATE TABLE IF NOT EXISTS quant_scores (
     symbol TEXT PRIMARY KEY,
@@ -973,6 +996,16 @@ db.exec(`
     PRIMARY KEY (date, symbol)
   );
 
+  -- Market breadth / internals computed from our own stock_ohlcv universe (market_breadth.py).
+  CREATE TABLE IF NOT EXISTS market_breadth (
+    date               TEXT PRIMARY KEY,
+    pct_above_200dma   REAL,
+    adv_decline_ratio  REAL,
+    pct_at_20d_high    REAL,
+    net_highs_lows     REAL,
+    computed_at        TEXT
+  );
+
   CREATE TABLE IF NOT EXISTS feature_store (
     symbol          TEXT NOT NULL,
     date            TEXT NOT NULL,
@@ -1190,6 +1223,9 @@ migrateColumn('technical_signals', 'sector_ret_21d', 'REAL');
 // Options-implied vol features (computed by iv_features.py from stock_options_oi)
 migrateColumn('technical_signals', 'iv_rank',         'REAL');
 migrateColumn('technical_signals', 'iv_skew',         'REAL');
+// Cross-sectional relative-strength ranks (computed by relative_strength.py from stock_ohlcv)
+migrateColumn('technical_signals', 'rs_rank_21d',     'REAL');
+migrateColumn('technical_signals', 'rs_rank_63d',     'REAL');
 
 // ATM implied vol + skew snapshot (captured by pcr_fetcher.py from the NSE option chain)
 migrateColumn('stock_options_oi', 'atm_iv',   'REAL');
@@ -1600,6 +1636,76 @@ runMigration('045_drop_legacy_signals', `
 // Directional Buy/Sell label for the Top Rated UI reroute (unified_ranker._classify).
 migrateColumn('unified_recommendations', 'classification', 'TEXT');
 migrateColumn('unified_recommendations', 'position_size_pct', 'REAL');
+
+// ── Quant Data Persistence (Historical Data for ML/RL Models) ─────────────────
+runMigration('046_quant_data_persistence', `
+  CREATE TABLE IF NOT EXISTS historical_fundamentals (
+    symbol            TEXT NOT NULL,
+    date              TEXT NOT NULL,
+    trailing_pe       REAL,
+    forward_pe        REAL,
+    price_to_book     REAL,
+    book_value        REAL,
+    earnings_yield    REAL,
+    eps_ttm           REAL,
+    eps_forward       REAL,
+    revenue_growth    REAL,
+    debt_to_equity    REAL,
+    roe               REAL,
+    roce              REAL,
+    operating_margin  REAL,
+    net_margin        REAL,
+    piotroski_score   INTEGER,
+    updated_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (symbol, date)
+  );
+
+  CREATE TABLE IF NOT EXISTS stock_delivery_data (
+    symbol            TEXT NOT NULL,
+    date              TEXT NOT NULL,
+    delivery_pct      REAL,
+    delivery_qty      INTEGER,
+    traded_qty        INTEGER,
+    trades            INTEGER,
+    updated_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (symbol, date)
+  );
+
+  CREATE TABLE IF NOT EXISTS historical_fno_sentiment (
+    symbol            TEXT NOT NULL,
+    date              TEXT NOT NULL,
+    pcr_oi            REAL,
+    pcr_vol           REAL,
+    max_pain          REAL,
+    atm_iv            REAL,
+    iv_skew           REAL,
+    total_ce_oi       INTEGER,
+    total_pe_oi       INTEGER,
+    updated_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (symbol, date)
+  );
+
+  CREATE TABLE IF NOT EXISTS screener_history_log (
+    symbol            TEXT NOT NULL,
+    screener_id       TEXT NOT NULL,
+    entry_date        TEXT NOT NULL,
+    exit_date         TEXT,
+    source            TEXT NOT NULL, -- e.g., 'trendlyne', 'moneycontrol', 'niftytrader'
+    updated_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (symbol, screener_id, entry_date)
+  );
+
+  CREATE TABLE IF NOT EXISTS proprietary_scores_history (
+    symbol            TEXT NOT NULL,
+    date              TEXT NOT NULL,
+    source            TEXT NOT NULL, -- e.g., 'niftytrader', 'moneycontrol'
+    score_type        TEXT NOT NULL, -- e.g., 'technical_rating', 'financial_score', 'community_sentiment'
+    score_value       REAL,
+    score_label       TEXT,
+    updated_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (symbol, date, source, score_type)
+  );
+`);
 
 // ── Retention: confluence_signals is an append-only firehose (~700k rows, the single
 // largest contributor to DB bloat). expires_at exists but nothing pruned it. Delete

@@ -2,11 +2,13 @@ import sys
 import os
 import sqlite3
 import numpy as np
+import pandas as pd
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 from datetime import datetime, timedelta
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+import src.server.regime_detector as regime_detector
 from src.server.regime_detector import _assign_state_labels, _load_hmm_features
 
 
@@ -95,14 +97,25 @@ class TestDateAnchoredFeatures:
         conn.commit()
         return conn
 
+    def _patched_read_df(self, conn):
+        """Route regime_detector.read_df through the in-memory test conn.
+
+        _load_hmm_features no longer takes a conn (P3f routed it through the
+        db_compat.read_df global); we inject the test data by patching that global.
+        """
+        def _read(sql, params=()):
+            return pd.read_sql_query(sql, conn, params=tuple(params))
+        return _read
+
     def test_features_contain_no_data_after_as_of_date(self):
         """With as_of_date='2024-06-01', feature rows must all be <= that date."""
         from datetime import date, timedelta
-        # 40 consecutive daily rows: 2024-04-22 through 2024-05-31 (before cutoff), then some after
+        # 50 consecutive daily rows spanning before and after the 2024-06-01 cutoff
         all_dates = [(date(2024, 4, 22) + timedelta(days=i)).isoformat() for i in range(50)]
         conn = self._make_nifty_conn(all_dates)
 
-        df = _load_hmm_features(conn, lookback_days=90, as_of_date='2024-06-01')
+        with patch.object(regime_detector, 'read_df', self._patched_read_df(conn)):
+            df = _load_hmm_features(lookback_days=90, as_of_date='2024-06-01')
 
         # Rolling window needs 21 rows, so df should NOT be empty
         assert not df.empty, (
@@ -117,6 +130,7 @@ class TestDateAnchoredFeatures:
         """_load_hmm_features without as_of_date should not raise."""
         conn = self._make_nifty_conn([])
         try:
-            _load_hmm_features(conn, lookback_days=30)
+            with patch.object(regime_detector, 'read_df', self._patched_read_df(conn)):
+                _load_hmm_features(lookback_days=30)
         except Exception as e:
             pytest.fail(f"_load_hmm_features without as_of_date raised: {e}")

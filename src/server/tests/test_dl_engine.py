@@ -125,7 +125,8 @@ class TestDir15dTraining:
 
         _train_one_fold(model, X, y5, yr5, epochs=2, y15=y15)
 
-        weights_after = model.head_dir_15d.weight.data
+        # _train_one_fold moves the model to DEVICE in-place; compare on CPU.
+        weights_after = model.head_dir_15d.weight.data.cpu()
         assert not torch.allclose(weights_before, weights_after), (
             "dir_15d head weights did not change — y15 loss term is not updating it"
         )
@@ -151,13 +152,13 @@ class TestWalkForwardValidation:
         fake_y15  = np.random.randint(0, 2, 400).astype(np.int64)
         fake_yr5  = np.random.randn(400).astype(np.float32)
 
-        def fake_load(sym, con, seq_len=60):
+        def fake_load(sym, seq_len=60):
             return fake_seqs, fake_y5, fake_y15, fake_yr5, ["2024-01-01"] * 400
 
         sentinel = {"directional_accuracy": 0.55, "roc_auc": 0.58, "n_folds": 3}
 
         with patch.object(mod, "load_symbol_sequences", side_effect=fake_load), \
-             patch("sqlite3.connect") as mock_connect, \
+             patch.object(mod, "connect") as mock_connect, \
              patch.object(mod, "walk_forward_validate", return_value=sentinel) as mock_wfv, \
              patch.object(mod, "_train_one_fold"), \
              patch("pathlib.Path.mkdir"), \

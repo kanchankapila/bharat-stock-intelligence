@@ -178,11 +178,30 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     # Interaction: a strong signal into cheap IV is the highest-quality entry
     X['score_x_low_iv'] = X['signal_score'] * (1.0 - X['iv_rank'])
 
+    # ── Cross-sectional relative strength (from relative_strength.py) ──
+    # Universe percentile of trailing return (0=worst, 1=best). Absolute momentum (sector_ret)
+    # can't tell a stock leading the tape from one merely floating up with it; rank can.
+    X['rs_rank_21d'] = num('rs_rank_21d', 0.5).clip(0, 1)
+    X['rs_rank_63d'] = num('rs_rank_63d', 0.5).clip(0, 1)
+
+    # NOTE: market-level India VIX + breadth were tested as ensemble features (raw and as
+    # cross-sectional interactions) and BOTH hurt held-out AUC vs omitting them entirely
+    # (baseline cv 0.651/held-out 0.543; interactions 0.640/0.531; raw 0.606/0.493). They add
+    # no cross-sectional signal to this per-stock classifier, so they are deliberately NOT fed
+    # here. The INDIAVIX series still feeds regime_detector (a separate model) and market_breadth
+    # remains available for a future regime-conditional model.
+
     # ── Event-proximity calendar features (pure functions of signal_date, leak-free) ──
-    sd = pd.to_datetime(df['signal_date'], errors='coerce') if 'signal_date' in df.columns else \
-        pd.Series(pd.NaT, index=df.index)
-    X['days_to_fno_expiry'] = _days_to_fno_expiry(sd).fillna(15) / 30.0
-    X['results_season']     = _results_season_flag(sd).fillna(0)
+    if len(df) == 0:
+        # Empty input (e.g. zero pending signals): the calendar helpers below divide an
+        # empty datetime-typed Series, which raises. Emit empty float columns instead.
+        X['days_to_fno_expiry'] = pd.Series(dtype='float64')
+        X['results_season']     = pd.Series(dtype='float64')
+    else:
+        sd = pd.to_datetime(df['signal_date'], errors='coerce') if 'signal_date' in df.columns else \
+            pd.Series(pd.NaT, index=df.index)
+        X['days_to_fno_expiry'] = _days_to_fno_expiry(sd).fillna(15) / 30.0
+        X['results_season']     = _results_season_flag(sd).fillna(0)
 
     # Signal type one-hot
     sig_col = df['signals_json'] if 'signals_json' in df.columns else pd.Series(['[]'] * len(df), index=df.index)
@@ -222,13 +241,29 @@ def load_training_data() -> pd.DataFrame:
                ts.delivery_pct,
                ts.sector_ret_5d, ts.sector_ret_21d,
                ts.iv_rank, ts.iv_skew,
-               sf.fifty_two_week_high,
-               sf.piotroski_f_score, sf.debt_to_equity, sf.operating_margins,
-               sf.return_on_equity, sf.revenue_growth, sf.earnings_growth,
-               sf.earnings_yield, sf.price_to_book, sf.market_cap
+               ts.rs_rank_21d, ts.rs_rank_63d,
+               COALESCE(fh.fifty_two_week_high, sf.fifty_two_week_high) AS fifty_two_week_high,
+               COALESCE(fh.piotroski_f_score, sf.piotroski_f_score)     AS piotroski_f_score,
+               COALESCE(fh.debt_to_equity, sf.debt_to_equity)           AS debt_to_equity,
+               COALESCE(fh.operating_margins, sf.operating_margins)     AS operating_margins,
+               COALESCE(fh.return_on_equity, sf.return_on_equity)       AS return_on_equity,
+               COALESCE(fh.revenue_growth, sf.revenue_growth)           AS revenue_growth,
+               COALESCE(fh.earnings_growth, sf.earnings_growth)         AS earnings_growth,
+               COALESCE(fh.earnings_yield, sf.earnings_yield)           AS earnings_yield,
+               COALESCE(fh.price_to_book, sf.price_to_book)             AS price_to_book,
+               COALESCE(fh.market_cap, sf.market_cap)                   AS market_cap
         FROM signal_outcomes so
         LEFT JOIN technical_signals ts
                ON ts.symbol = so.symbol AND ts.date = so.signal_date
+        -- Point-in-time fundamentals: the latest snapshot taken on/before the signal date
+        -- (leak-free). Falls back to the current stock_fundamentals snapshot when no history
+        -- has accumulated yet — same mild look-ahead as before, never worse.
+        LEFT JOIN fundamentals_history fh
+               ON fh.symbol = so.symbol
+              AND fh.as_of_date = (
+                  SELECT MAX(fh2.as_of_date) FROM fundamentals_history fh2
+                  WHERE fh2.symbol = so.symbol AND fh2.as_of_date <= so.signal_date
+              )
         LEFT JOIN stock_fundamentals sf
                ON sf.symbol = so.symbol
         WHERE so.outcome IN ('WIN','LOSS')
@@ -250,6 +285,7 @@ def load_pending_signals() -> pd.DataFrame:
                ts.delivery_pct,
                ts.sector_ret_5d, ts.sector_ret_21d,
                ts.iv_rank, ts.iv_skew,
+               ts.rs_rank_21d, ts.rs_rank_63d,
                sf.fifty_two_week_high,
                sf.piotroski_f_score, sf.debt_to_equity, sf.operating_margins,
                sf.return_on_equity, sf.revenue_growth, sf.earnings_growth,

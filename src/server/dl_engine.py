@@ -251,6 +251,7 @@ def walk_forward_validate(model: BiLSTMModel, X: np.ndarray, y5: np.ndarray,
 def _train_one_fold(model: BiLSTMModel, X: np.ndarray, y5: np.ndarray,
                     yr5: np.ndarray, epochs: int = 100, y15: np.ndarray = None,
                     scaler=None):
+    model  = model.to(DEVICE)
     opt    = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-4)
     sch    = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=epochs)
     ce     = nn.CrossEntropyLoss()
@@ -301,6 +302,7 @@ def _train_one_fold(model: BiLSTMModel, X: np.ndarray, y5: np.ndarray,
 
 
 def _predict_batch(model: BiLSTMModel, X: np.ndarray, bs: int = 256) -> Dict[str, np.ndarray]:
+    model = model.to(DEVICE)
     model.eval()
     is_cuda = DEVICE.type == "cuda"
     X_t = torch.from_numpy(np.ascontiguousarray(X, dtype=np.float32))

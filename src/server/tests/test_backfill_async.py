@@ -58,7 +58,8 @@ class TestGapFillAsync:
             mock_client = AsyncMock()
             mock_client.get = AsyncMock(return_value=mock_response)
             return await mod._fetch_ohlcv_async(
-                mock_client, "INFY", "INFY.NS", "2024-01-01", "2024-01-31"
+                mock_client, "INFY", "INFY.NS", "2024-01-01", "2024-01-31",
+                asyncio.Semaphore(1),
             )
 
         result = asyncio.run(run())
@@ -85,7 +86,8 @@ class TestGapFillAsync:
             mock_client = AsyncMock()
             mock_client.get = AsyncMock(return_value=mock_response)
             return await mod._fetch_ohlcv_async(
-                mock_client, "INFY", "INFY.NS", "2024-01-01", "2024-01-31"
+                mock_client, "INFY", "INFY.NS", "2024-01-01", "2024-01-31",
+                asyncio.Semaphore(1),
             )
 
         result = asyncio.run(run())
@@ -148,5 +150,5 @@ class TestGapFillAsync:
         conn.close()
 
     def test_semaphore_limit(self):
-        """_GAP_FILL_SEM limits concurrency to 20."""
-        assert mod._GAP_FILL_SEM._value == 20
+        """Gap-fill concurrency is capped at 20."""
+        assert mod._GAP_FILL_CONCURRENCY == 20

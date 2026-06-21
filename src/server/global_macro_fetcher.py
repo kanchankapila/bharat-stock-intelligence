@@ -17,6 +17,7 @@ TICKERS = {
     "^GSPC":     "SP500",
     "^NSEBANK":  "NSEBANK",
     "^NSEI":     "NIFTY50",
+    "^INDIAVIX": "INDIAVIX",
 }
 
 # Labels that feature_engineering reads from stock_ohlcv (not just macro_asset_prices)

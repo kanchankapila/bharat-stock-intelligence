@@ -18,6 +18,14 @@ import { syncAndScore } from './scoringService';
 import Redis from 'ioredis';
 import { REDIS_BASE } from './redisConfig';
 import { runPython } from './pythonRunner';
+
+import { syncNiftyTraderScores } from './syncProprietaryScores';
+import { syncAllScreenerStocksToDB } from './trendlyneScreener';
+import { syncMoneyControlScreeners } from './moneycontrolScreener';
+import { runFullFundamentalsSync } from './fundamentalsSyncService';
+import { fetchDeliveryMap } from './deliveryFetcher';
+import { updateMonitorState } from './monitoringService';
+
 import { pythonApi } from './pythonApi';
 import { recordHeartbeat, startHeartbeatMonitor } from './jobHeartbeat';
 
@@ -97,6 +105,7 @@ export const QUEUE_AGENT_AUDITOR        = 'agent-auditor';
 export const QUEUE_AGENT_OPTIMIZER      = 'agent-optimizer';
 export const QUEUE_UNIFIED_RANKER       = 'unified-ranker';
 export const QUEUE_COMPANY_PROFILES_SYNC = 'company-profiles-sync';
+export const QUEUE_QUANT_EOD_SYNC = 'quant-eod-sync';
 
 const BULK_CACHE_KEY      = 'live-stocks-bulk';
 const BULK_TTL_SECONDS    = 5 * 60;
@@ -130,6 +139,8 @@ let signalOutcomesWorker:     Worker | null = null;
 let newsSentimentWorker:      Worker | null = null;
 let trendlyneIntradayWorker:  Worker | null = null;
 export let companyProfilesSyncQueue: Queue | null = null;
+export let quantEodSyncQueue: Queue | null = null;
+export let quantEodSyncWorker: Worker | null = null;
 let companyProfilesSyncWorker: Worker | null = null;
 export let outcomeResolverQueue: Queue | null = null;
 let outcomeResolverWorker: Worker | null = null;
@@ -358,14 +369,25 @@ async function processOutcomeResolver(_job: Job): Promise<{ success: boolean }> 
 // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ ML daily ops worker processor ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 
 async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
+  // Point-in-time fundamentals snapshot first — builds the as-of trail load_training_data joins.
+  await runPython('fundamentals_snapshot.py', [], 90_000)
+    .catch(e => console.warn('[QUEUE] fundamentals_snapshot failed:', (e as Error).message));
+
   await runPython('fii_dii_fetcher.py', [], 90_000).catch(() => {});
   await runPython('pcr_fetcher.py', [], 90_000).catch(() => {});
+  // iv_features reads the ATM IV that pcr_fetcher just wrote to stock_options_oi → technical_signals.iv_rank.
+  await runPython('iv_features.py', [], 90_000)
+    .catch(e => console.warn('[QUEUE] iv_features failed:', (e as Error).message));
   await runPython('institutional_quant_engine.py', [], 120_000).catch(() => {});
   await runPython('finbert_scorer.py', ['--days', '1'], 180_000).catch(() => {});
 
   // Flag bad-print OHLCV bars first so outcome labels skip them (ohlcv_quality.is_suspect).
   await runPython('ohlcv_quality.py', ['--no-ingest'], 180_000)
     .catch(e => console.warn('[QUEUE] ohlcv_quality flag failed:', (e as Error).message));
+
+  // Cross-sectional relative strength from (cleaned) OHLCV → technical_signals.rs_rank_21d/63d.
+  await runPython('relative_strength.py', [], 180_000)
+    .catch(e => console.warn('[QUEUE] relative_strength failed:', (e as Error).message));
 
   await resolveOutcomesResilient(1);
   await resolveOutcomesResilient(5);
@@ -504,6 +526,39 @@ async function processAgentOptimizer(_job: Job): Promise<{ success: boolean }> {
 }
 
 // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Initialise queues & workers ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
+
+
+async function processQuantEodSync(_job: Job): Promise<{ success: boolean }> {
+  console.log('[QUEUE] quant-eod-sync starting...');
+  try {
+    console.log('[QUANT EOD] 1. Syncing NiftyTrader Scores');
+    await syncNiftyTraderScores();
+    
+    console.log('[QUANT EOD] 2. Syncing Trendlyne Screeners');
+    await syncAllScreenerStocksToDB();
+    
+    console.log('[QUANT EOD] 3. Syncing MoneyControl Screeners');
+    await syncMoneyControlScreeners();
+    
+    console.log('[QUANT EOD] 4. Syncing Point-in-time Fundamentals');
+    await runFullFundamentalsSync();
+    
+    console.log('[QUANT EOD] 5. Syncing Delivery Data for Today');
+    const today = new Date().toISOString().split('T')[0];
+    await fetchDeliveryMap(today);
+    
+    console.log('[QUANT EOD] 6. Fetching PCR & Max Pain');
+    await runPython('pcr_fetcher.py', [], 90_000).catch(() => {});
+    
+    updateMonitorState('quant-eod-sync', 'success');
+    console.log('[QUEUE] quant-eod-sync completed successfully');
+    return { success: true };
+  } catch (err: any) {
+    updateMonitorState('quant-eod-sync', 'failed', err.message);
+    console.error('[QUEUE] quant-eod-sync failed:', err.message);
+    throw err;
+  }
+}
 
 export async function initQueues(): Promise<boolean> {
   // Suppress BullMQ's per-queue/worker Redis version warnings (Redis 5 works fine here)
@@ -1452,6 +1507,35 @@ export async function initQueues(): Promise<boolean> {
     agentStrategistWorker.on('failed', (_, e) => console.error('[QUEUE] agent-strategist failed:', e.message));
 
     // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Company Profiles & AI Analysis Sync queue (Weekly) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+
+    // ----------------------------------------------------
+    // End Of Day Quant Sync queue (Daily 12:30 UTC / 18:00 IST)
+    // ----------------------------------------------------
+    quantEodSyncQueue = new Queue(QUEUE_QUANT_EOD_SYNC, { connection });
+
+    const qeRepeatables = await quantEodSyncQueue.getRepeatableJobs();
+    for (const r of qeRepeatables) {
+      await quantEodSyncQueue.removeRepeatableByKey(r.key);
+    }
+    await quantEodSyncQueue.add(
+      'sync-quant-eod',
+      {},
+      {
+        repeat: { pattern: '30 12 * * 1-5' },
+        jobId: 'quant-eod-sync-daily',
+        removeOnComplete: 3,
+        removeOnFail: 3,
+      },
+    );
+
+    quantEodSyncWorker = new Worker(
+      QUEUE_QUANT_EOD_SYNC,
+      processQuantEodSync,
+      { connection, concurrency: 1, lockDuration: 30 * 60_000 }
+    );
+    quantEodSyncWorker.on('completed', () => console.log('[QUEUE] quant-eod-sync done'));
+    quantEodSyncWorker.on('failed', (_, e) => console.error('[QUEUE] quant-eod-sync failed:', e.message));
+
     companyProfilesSyncQueue = new Queue(QUEUE_COMPANY_PROFILES_SYNC, { connection });
 
     const cpRepeatables = await companyProfilesSyncQueue.getRepeatableJobs();

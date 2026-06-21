@@ -30,6 +30,11 @@ def make_db():
             model_name TEXT, computed_at TEXT,
             feature_name TEXT, importance REAL, rank_position INTEGER
         );
+        CREATE TABLE unified_signal_outcomes (
+            id INTEGER PRIMARY KEY, unified_signal_id INTEGER,
+            symbol TEXT, signal_date TEXT, signal_source TEXT,
+            horizon_days INTEGER, return_pct REAL, outcome TEXT
+        );
     """)
     return conn
 

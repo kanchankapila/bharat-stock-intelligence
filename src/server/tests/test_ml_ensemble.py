@@ -76,6 +76,106 @@ class TestFundamentalFactors:
         assert X['log_market_cap'].iloc[0] == pytest.approx(np.log1p(1e9), rel=1e-4)
 
 
+class TestImpliedVolFeatures:
+    """ATM IV-rank + put/call skew (orthogonal to every price feature) must enter the model
+    and fall back to neutral when the options feed has no coverage."""
+
+    def test_iv_features_present(self):
+        X = build_features(_make_feature_df())
+        for c in ('iv_rank', 'iv_skew', 'score_x_low_iv'):
+            assert c in X.columns
+
+    def test_missing_iv_falls_back_to_neutral(self):
+        X = build_features(_make_feature_df())  # no iv columns supplied
+        assert (X['iv_rank'] == 0.5).all()
+        assert (X['iv_skew'] == 0.0).all()
+
+    def test_iv_rank_clipped_and_interaction(self):
+        df = _make_feature_df(3)
+        df['signal_score'] = [8, 8, 8]
+        df['iv_rank'] = [-0.2, 0.25, 1.5]          # out-of-range values must clip to [0,1]
+        X = build_features(df)
+        assert list(X['iv_rank']) == pytest.approx([0.0, 0.25, 1.0])
+        # strong signal into cheap IV scores highest: score × (1 − iv_rank)
+        assert list(X['score_x_low_iv']) == pytest.approx([8.0, 6.0, 0.0])
+
+
+class TestRelativeStrengthFeatures:
+    """Cross-sectional RS ranks must enter the model and fall back to neutral mid-rank."""
+
+    def test_rs_features_present(self):
+        X = build_features(_make_feature_df())
+        assert 'rs_rank_21d' in X.columns and 'rs_rank_63d' in X.columns
+
+    def test_missing_rs_falls_back_to_mid_rank(self):
+        X = build_features(_make_feature_df())
+        assert (X['rs_rank_21d'] == 0.5).all() and (X['rs_rank_63d'] == 0.5).all()
+
+    def test_rs_clipped_to_unit_interval(self):
+        df = _make_feature_df(3)
+        df['rs_rank_21d'] = [-0.3, 0.4, 1.7]
+        X = build_features(df)
+        assert list(X['rs_rank_21d']) == pytest.approx([0.0, 0.4, 1.0])
+
+
+class TestEmptyInput:
+    """build_features must not crash when load_pending_signals returns zero rows (the calendar
+    block divided an empty datetime-typed Series)."""
+
+    def test_empty_with_signal_date_does_not_crash(self):
+        df = pd.DataFrame(columns=['symbol', 'signal_date', 'signal_score', 'signals_json'])
+        X = build_features(df)            # must not raise
+        assert len(X) == 0
+        assert 'days_to_fno_expiry' in X.columns and 'results_season' in X.columns
+
+    def test_empty_without_signal_date_does_not_crash(self):
+        X = build_features(pd.DataFrame(columns=['signal_score']))
+        assert len(X) == 0
+
+
+class TestMarketLevelFeaturesExcluded:
+    """India-VIX and breadth are market-LEVEL (identical per date) and were measured to add no
+    cross-sectional signal to this per-stock classifier (raw and interaction forms both hurt
+    held-out AUC vs omitting them). Lock them out of the feature matrix."""
+
+    def test_no_market_level_features(self):
+        X = build_features(_make_feature_df())
+        for col in ('india_vix', 'vix_change_5d', 'pct_above_200dma', 'adv_decline_ratio',
+                    'pct_at_20d_high', 'net_highs_lows', 'rs_x_breadth', 'lead_in_weak_tape',
+                    'vix_chg_x_score'):
+            assert col not in X.columns, f"{col} should not be an ensemble feature (no cross-sectional signal)"
+
+
+class TestCalendarFeatures:
+    """Event-proximity features are pure functions of signal_date — leak-free timing edge."""
+
+    def _df(self, dates):
+        n = len(dates)
+        df = _make_feature_df(n)
+        df['signal_date'] = dates
+        return df
+
+    def test_features_present_and_safe_without_date(self):
+        X = build_features(_make_feature_df())   # no signal_date column
+        assert 'days_to_fno_expiry' in X.columns and 'results_season' in X.columns
+        assert not X['days_to_fno_expiry'].isna().any()
+        assert not X['results_season'].isna().any()
+
+    def test_days_to_monthly_expiry(self):
+        # Last Thursday of Apr-2024 is the 25th; from the 15th that is 10 calendar days.
+        X = build_features(self._df(['2024-04-15']))
+        assert X['days_to_fno_expiry'].iloc[0] == pytest.approx(10 / 30.0)
+
+    def test_expiry_rolls_to_next_month_after_expiry(self):
+        # After Apr-25 expiry, the 28th rolls to May-2024's last Thursday (the 30th) → 32 days.
+        X = build_features(self._df(['2024-04-28']))
+        assert X['days_to_fno_expiry'].iloc[0] == pytest.approx(32 / 30.0)
+
+    def test_results_season_flag(self):
+        X = build_features(self._df(['2024-04-10', '2024-06-10']))
+        assert list(X['results_season']) == [1.0, 0.0]   # Apr in season, Jun not
+
+
 class TestSampleUniqueness:
     """Overlapping forward-return labels aren't IID — average uniqueness down-weights
     crowded periods so the model doesn't overcount correlated outcomes (overfit fix)."""

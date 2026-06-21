@@ -30,6 +30,11 @@ _HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0",
     "Accept": "application/json",
 }
+
+# Max concurrent YF chart requests during gap-fill. The Semaphore itself is created
+# inside _gap_fill_async (within the running loop) — a module-level Semaphore binds to
+# the import-time loop and breaks across asyncio.run() calls.
+_GAP_FILL_CONCURRENCY = 20
 def _date_to_unix(date_str: str) -> int:
     """Convert YYYY-MM-DD string to Unix timestamp for YF API."""
     from datetime import datetime
@@ -100,7 +105,7 @@ async def _gap_fill_async(
     today: str,
 ) -> int:
     """Download OHLCV for all symbols concurrently and upsert missing rows."""
-    sem = asyncio.Semaphore(20)
+    sem = asyncio.Semaphore(_GAP_FILL_CONCURRENCY)
     async with httpx.AsyncClient(headers=_HEADERS) as client:
         tasks = [
             _fetch_ohlcv_async(client, sym, tick, cutoff, today, sem)

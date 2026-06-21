@@ -243,8 +243,8 @@ class FeatureEngineer:
             feat["nifty_ret_5d"]  = nifty["close"].pct_change(5).reindex(feat.index, method="ffill")
             feat["nifty_ret_21d"] = nifty["close"].pct_change(21).reindex(feat.index, method="ffill")
 
-        # VIX proxy from NSEBANK in macro_asset_prices
-        vix_df = read_df("SELECT date, close FROM macro_asset_prices WHERE symbol='NSEBANK' ORDER BY date")
+        # India VIX from macro_asset_prices (true implied-vol index; was a weak NSEBANK proxy)
+        vix_df = read_df("SELECT date, close FROM macro_asset_prices WHERE symbol='INDIAVIX' ORDER BY date")
         vix_df["date"] = pd.to_datetime(vix_df["date"])
         vix_df = vix_df.set_index("date")
         vix_df = vix_df[vix_df.index.notnull()]

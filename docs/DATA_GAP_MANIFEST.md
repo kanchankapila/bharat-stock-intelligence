@@ -1,0 +1,196 @@
+# Data-Gap Manifest — Entry/Exit Accuracy Program
+
+_Quant view of what was implemented from data we already hold, and what new feeds are
+required to unlock the rest. Written 2026-06-21 (branch `prod-readiness-phase1`)._
+
+The ensemble (`ml_ensemble.py`) had a held-out AUC ~0.62 — near the ceiling of what
+**daily, point-feature** data can give. The remaining accuracy lives in **orthogonal data**
+and **better labels**, not more daily indicators. This manifest tracks both.
+
+---
+
+## A. Shipped this pass (no new feed — computed from data we already hold)
+
+| Feature | Where | Source data (already in DB) |
+|---|---|---|
+| `iv_rank`, `iv_skew` | `iv_features.py` → `technical_signals`; consumed by `ml_ensemble.build_features` | ATM IV + 25Δ-proxy skew now captured by `pcr_fetcher.py` from the **NSE option chain** (`impliedVolatility` per strike) into `stock_options_oi.atm_iv/iv_skew` |
+| `score_x_low_iv` interaction | `build_features` | derived (signal_score × (1−iv_rank)) |
+| `days_to_fno_expiry` | `build_features` | pure calendar math on `signal_date` (last-Thursday expiry) |
+| `results_season` | `build_features` | pure calendar math (Jan/Apr/Jul/Oct earnings clustering) |
+| MFE / MAE / `days_to_mfe` / `mfe_before_mae` / `trail_exit_pct` / `horizon_close_pct` | `exit_labeler.py` → `signal_excursions` | `stock_ohlcv` (bar replay) + entries from `signal_outcomes` |
+| `rs_rank_21d`, `rs_rank_63d` (cross-sectional relative strength) | `relative_strength.py` → `technical_signals`; consumed by `build_features` | `stock_ohlcv` (universe percentile of trailing return) |
+| Point-in-time fundamentals (as-of join, fixes look-ahead) | `fundamentals_snapshot.py` → `fundamentals_history`; as-of join in `ml_ensemble.load_training_data` | daily snapshots of `stock_fundamentals` |
+| **Exit-policy head** (predicted MFE/MAE → target/stop) | `exit_policy.py` → `ml_models/exit_policy.pkl` | `signal_excursions` (trains once enough labels accumulate) |
+
+**Note on `iv_rank` history:** it ranks within a trailing 252-day window per symbol. It is
+leak-free *today*, but the trailing range only deepens as `stock_options_oi` accumulates
+daily snapshots — back-history is **not** available retroactively (NSE serves only the live
+chain). Expect iv_rank to be neutral (0.5) for the first ~20 trading days of capture, then
+to become informative. **Action: let `pcr_fetcher.py` run daily and the window fills itself.**
+
+**Note on exit labels:** `signal_excursions` is the training target for a *future* exit head
+(time-to-target / trailing-stop regression). It is populated now; the exit model that
+consumes it is the next build (see §D).
+
+---
+
+## B. Blocked on a NEW external feed (highest value first)
+
+### B1. Intraday microstructure — the hard ceiling on entry/exit precision  ★ top lever
+The model predicts on **daily bars**, so entry/exit precision is structurally capped at
+~1-day granularity. `intraday_ohlcv` (15m) exists in the schema but is **not populated**.
+
+- **Data needed:** intraday bars (1m–15m) with volume; ideally L1 quote (bid/ask, depth).
+- **Derived features it unlocks:** opening-range break, first-hour volume profile, VWAP
+  deviation at entry, bid-ask spread, closing-auction imbalance.
+- **Sources (NSE):** broker APIs with historical intraday — Zerodha Kite, Upstox, Dhan,
+  Fyers (1m history); Global Datafeeds / TrueData (tick + L1) for depth. Yahoo gives 1m for
+  ~last 7 days only (insufficient for training history).
+- **Cost/effort:** high (storage + a populated `intraday_ohlcv` pipeline). Biggest single
+  accuracy lever for the literal "entry/exit" question.
+
+### B2. Exact earnings calendar (upgrade `results_season` → `days_to_earnings`)
+We ship a coarse season flag; the real signal is **distance to the specific stock's results
+date**.
+
+- **Data needed:** per-symbol next/last earnings date (board-meeting + result dates).
+- **Sources:** NSE corporate-announcements API (`/api/corporate-board-meetings`), BSE
+  announcements, Tickertape/Trendlyne event calendars, screener.in.
+- **Effort:** low–medium. New `earnings_calendar(symbol, event_date, type)` table + an
+  `_days_to_earnings(signal_date, symbol)` feature in `build_features`.
+
+### B3. Promoter pledge / bulk & block deals / insider (SAST) / MF holding deltas
+India-specific edges, completely absent today. Promoter-pledge **increase** is one of the
+strongest negative signals on the street.
+
+- **Data needed:** pledge % change, bulk/block deal prints, SAST/insider disclosures, MF
+  holding deltas.
+- **Sources:** NSE/BSE corporate filings (`/api/corporate-pledgedata`, bulk-deals,
+  insider-trading), Trendlyne (already integrated as a provider — likely the cheapest route).
+- **Effort:** medium. New `corporate_signals` table + as-of join into `build_features`.
+
+### B4. India VIX series (regime-level implied vol)
+Per-stock ATM IV is now captured (§A), but the **index VIX time series** as a market-regime
+feature is not.
+
+- **Data needed:** daily India VIX close.
+- **Sources:** NSE (`/api/allIndices` includes INDIA VIX), or store it as a symbol in the
+  existing `macro_asset_prices` table (the `feature_engineering.py` pipeline already has a
+  `nifty_vix` slot wired to a NSEBANK proxy — replace with true VIX).
+- **Effort:** low. One fetcher row + repoint the existing `nifty_vix` feature.
+
+---
+
+## C. Computable from data we already hold (no new feed)
+
+### C1. Cross-sectional relative strength — ✅ SHIPPED
+`relative_strength.py` writes universe-percentile ranks of the 21d/63d return
+(`rs_rank_21d/63d`) onto `technical_signals`; consumed by `build_features`. Beta-adjusted RS
+vs NIFTY is a possible future refinement but the cross-sectional rank captures most of the edge.
+
+### C2. Market breadth / internals — ⏳ remaining (lowest priority)
+`regime` is a 3-class label. Continuous breadth (advance-decline, % above 200DMA,
+new-high/new-low) predicts regime turns the label can't — computable from our own universe
+in `stock_ohlcv`.
+
+- **Build:** a daily `market_breadth(date, …)` table + merge into `build_features`.
+
+### C3. Point-in-time fundamentals (correctness) — ✅ SHIPPED
+`fundamentals_snapshot.py` accumulates a daily `fundamentals_history(symbol, as_of_date, …)`
+trail; `ml_ensemble.load_training_data` now joins fundamentals **as-of** each signal_date
+(latest snapshot ≤ signal_date), falling back to the current snapshot only until history
+accumulates (zero regression in the interim). Reported AUC will drift down toward honest as
+the trail fills — that drop is the leak being removed, not a real loss.
+
+---
+
+## D. Label/model work (data already present)
+
+### Exit head — ✅ SHIPPED
+`exit_policy.py` trains two regressors on `signal_excursions` (predict expected MFE and MAE
+from entry-time features); `suggest_levels()` converts them into concrete target/stop prices
+(capture a fraction of expected upside, buffer the stop beyond expected drawdown). Retrains
+weekly once enough excursions accumulate — the lever for the *exit* half of accuracy.
+
+---
+
+## Priority order (quant recommendation)
+
+**Done (no new feed):** C3 point-in-time fundamentals, §A IV capture, §A exit labels,
+D exit head, C1 relative strength, calendar features. These compound on the **next ensemble
+retrain** (`ml_ensemble.py --train` + `exit_policy.py --train`); the IV window needs ~20
+daily `pcr_fetcher.py` runs to become informative.
+
+**Remaining, in order:**
+1. **B1 intraday microstructure** — biggest entry/exit lever, but the heaviest feed (broker
+   intraday history into the empty `intraday_ohlcv`).
+2. **B2 earnings calendar** — exact `days_to_earnings` (upgrade the coarse `results_season`).
+3. **B4 India VIX series** — repoint the existing `nifty_vix` proxy to true VIX (low effort).
+4. **C2 market breadth** — adv-decline / % above 200DMA from our own universe (no new feed).
+5. **B3 corporate signals** — promoter pledge / bulk deals via the existing Trendlyne feed.
+
+---
+
+## Implementation Plan (remaining items)
+
+Each follows the **pattern already established** by the shipped work: a fetcher/enricher writes
+a feature onto `technical_signals` (or a small new table joined by symbol/date), it's added to
+both `ml_ensemble.load_*` queries + `build_features` with a neutral `num()` fallback, the
+column is migrated in `db.ts` **and** `db/schema.postgres.sql`, the engine is wired into the
+daily/weekly job in `queues.ts`, and pure logic gets a TDD test. Order = best effort/value first.
+
+### Sprint 1 — quick wins, no new external feed (do first)
+
+**B4. India VIX as a regime feature** *(effort: S, ~half day)*
+- Source: NSE `/api/allIndices` (already reachable) → `INDIA VIX` close. Or yfinance `^INDIAVIX`.
+- Store as a row in the existing `macro_asset_prices` table (symbol `INDIAVIX`); a tiny fetcher
+  alongside `fii_dii_fetcher.py`. `feature_engineering.py` already has a `nifty_vix` slot wired
+  to a weak NSEBANK proxy — repoint it; add `india_vix` + `vix_change_5d` to `build_features`.
+- Wire: append to `processMlDailyOps` in `queues.ts`. Test: fetch parser + feature passthrough.
+
+**C2. Market breadth / internals** *(effort: M, ~1 day)*
+- Source: **none** — computed from our own `stock_ohlcv` universe.
+- New `market_breadth.py` → new table `market_breadth(date, pct_above_200dma, adv_decline_ratio,
+  pct_at_20d_high, net_highs_lows)`. Pure core `compute_breadth(closes_wide)` (TDD).
+- Join into `ml_ensemble.load_*` **by date** (like `nifty_regime`), add the 4 cols to
+  `build_features`. Wire after `relative_strength.py` in `processMlDailyOps`.
+
+### Sprint 2 — needs a new (but cheap) external feed
+
+**B2. Earnings calendar → `days_to_earnings`** *(effort: M, ~1–2 days)*
+- Source: NSE `/api/corporate-board-meetings` + `/api/event-calendar`; Trendlyne (already an
+  integrated provider) is the lower-maintenance route. Resolve symbols via `stockMapping.ts`.
+- New table `earnings_calendar(symbol, event_date, event_type, fetched_at)`; fetcher
+  `earnings_fetcher.py` (daily). Replace the coarse `results_season` in `build_features` with
+  `_days_to_earnings(signal_date, symbol)` (signed: negative = just reported) + an
+  `in_earnings_blackout` flag (≤2 trading days pre-event). Test the date math.
+- Risk: NSE rate-limits; reuse the `pcr_fetcher.py` session-priming pattern.
+
+**B3. Corporate signals (promoter pledge / bulk-block deals)** *(effort: M–L, ~2–3 days)*
+- Source: Trendlyne (preferred — already wired) or NSE `/api/corporate-pledgedata`,
+  bulk-deals, SAST disclosures. India-specific, high orthogonal value (pledge ↑ = strong −).
+- New table `corporate_signals(symbol, as_of_date, pledge_pct, pledge_pct_chg, bulk_deal_net,
+  …)`; fetcher `corporate_signals_fetcher.py`. **As-of join** (like `fundamentals_history`) so
+  historical rows see only what was knowable. Add `pledge_pct_chg`, `bulk_deal_net` to the
+  ensemble. Test the as-of selection.
+
+### Sprint 3 — heaviest, highest ceiling
+
+**B1. Intraday microstructure** *(effort: L, ~1–2 weeks incl. backfill)*
+- Source: broker historical intraday (Zerodha Kite / Upstox / Dhan / Fyers 1-min; TrueData /
+  GDFL for tick + L1 depth). Populate the **already-defined but empty** `intraday_ohlcv` table.
+- Phase 1 (bars only): `intraday_backfill.py` + daily top-up; derive opening-range break,
+  first-hour volume share, VWAP-deviation-at-entry, close-auction imbalance → `technical_signals`.
+- Phase 2 (L1 depth, optional): bid-ask spread, order-book imbalance at signal time.
+- This is the structural cap on *intraday* entry/exit precision; sequence the bar feed first,
+  prove lift, then decide on the depth feed. Highest storage + ops cost of the set.
+
+### Cross-cutting
+
+- **Retrain to realize value:** every shipped/added feature only affects predictions after
+  `ml_ensemble.py --train` (+ `exit_policy.py --train`). Schedule a retrain once Sprint 1 lands.
+- **Watch for AUC drift down** as point-in-time fundamentals + earnings blackout remove
+  leakage — that is correctness, not regression. Compare *live* hit-rate, not just held-out AUC.
+- **Backfill vs forward-fill:** IV-rank, fundamentals_history, corporate_signals only accumulate
+  going forward (vendors serve current snapshots). Breadth/relative-strength/VIX can be fully
+  backfilled from `stock_ohlcv` + history. Prioritize backfillable features for immediate lift.
