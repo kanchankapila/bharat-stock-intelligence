@@ -7,6 +7,8 @@ from ml_calibration import (  # noqa: E402
     calibrate,
     recalibrate_win_probabilities,
     count_episodes,
+    per_regime_auc,
+    regime_readiness,
 )
 
 
@@ -162,3 +164,45 @@ def test_single_episode_uses_global():
     _seed(conn, 'BULL', 0.2, 2, [(dt.date(2025, 2, 1) + dt.timedelta(days=i)).isoformat() for i in range(25)])
     res = recalibrate_win_probabilities(conn, min_samples=50, min_regime_days=20, min_regime_episodes=2)
     assert res['regimes']['BEAR']['used'] == 'global'
+
+
+# ── per-regime diagnostics ──────────────────────────────────────────────────────
+
+def test_per_regime_auc_distinguishes_rankable_vs_random():
+    conn = make_db()
+    # RANKABLE: high prob -> win, low prob -> loss
+    for i in range(100):
+        p = 0.9 if i % 2 == 0 else 0.1
+        y = 'WIN' if i % 2 == 0 else 'LOSS'
+        conn.execute("INSERT INTO technical_signals (symbol,date,win_probability,nifty_regime) VALUES (?,?,?,?)",
+                     (f"R{i}", f"2026-01-{i % 28 + 1:02d}", p, 'BULL'))
+        conn.execute("INSERT INTO signal_outcomes (symbol,signal_date,horizon_days,outcome) VALUES (?,?,5,?)",
+                     (f"R{i}", f"2026-01-{i % 28 + 1:02d}", y))
+    # RANDOM: prob unrelated to outcome
+    for i in range(100):
+        conn.execute("INSERT INTO technical_signals (symbol,date,win_probability,nifty_regime) VALUES (?,?,?,?)",
+                     (f"X{i}", f"2026-02-{i % 28 + 1:02d}", 0.5, 'BEAR'))
+        conn.execute("INSERT INTO signal_outcomes (symbol,signal_date,horizon_days,outcome) VALUES (?,?,5,?)",
+                     (f"X{i}", f"2026-02-{i % 28 + 1:02d}", 'WIN' if i < 50 else 'LOSS'))
+    conn.commit()
+    auc = per_regime_auc(conn, min_n=50)
+    assert auc['BULL']['auc'] > 0.9
+    assert 0.4 <= auc['BEAR']['auc'] <= 0.6
+
+
+def test_regime_readiness_flags():
+    conn = make_db()
+    import datetime as dt
+    ready_days = _spread_days(22)            # 22 days, 2 episodes -> ready
+    not_days = [(dt.date(2026, 3, 1) + dt.timedelta(days=i)).isoformat() for i in range(5)]  # 5 days -> not
+    for d in ready_days:
+        conn.execute("INSERT INTO technical_signals (symbol,date,win_probability,nifty_regime) VALUES (?,?,?,?)",
+                     (f"a{d}", d, 0.5, 'BEAR'))
+        conn.execute("INSERT INTO signal_outcomes (symbol,signal_date,horizon_days,outcome) VALUES (?,?,5,'WIN')", (f"a{d}", d))
+    for d in not_days:
+        conn.execute("INSERT INTO technical_signals (symbol,date,win_probability,nifty_regime) VALUES (?,?,?,?)",
+                     (f"b{d}", d, 0.5, 'BULL'))
+        conn.execute("INSERT INTO signal_outcomes (symbol,signal_date,horizon_days,outcome) VALUES (?,?,5,'WIN')", (f"b{d}", d))
+    conn.commit()
+    rr = regime_readiness(conn)
+    assert rr['BEAR']['ready'] is True and rr['BULL']['ready'] is False

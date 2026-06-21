@@ -110,10 +110,57 @@ def recalibrate_win_probabilities(conn: ConnWrapper, min_samples: int = 200,
     return {'fit': True, 'n': len(rows), 'updated': updated, 'regimes': regimes_meta}
 
 
+def per_regime_auc(conn: ConnWrapper, min_n: int = 50) -> dict:
+    """Raw win_probability vs WIN/LOSS AUC per regime (≥2 classes, ≥min_n rows)."""
+    from sklearn.metrics import roc_auc_score
+    rows = conn.execute("""
+        SELECT ts.nifty_regime AS regime, ts.win_probability AS p,
+               CASE WHEN so.outcome = 'WIN' THEN 1 ELSE 0 END AS y
+        FROM signal_outcomes so JOIN technical_signals ts
+          ON ts.symbol = so.symbol AND ts.date = so.signal_date
+        WHERE so.outcome IN ('WIN', 'LOSS') AND ts.win_probability IS NOT NULL
+    """).fetchall()
+    g: dict = {}
+    for r in rows:
+        d = g.setdefault(r['regime'], {'p': [], 'y': []})
+        d['p'].append(float(r['p']))
+        d['y'].append(int(r['y']))
+    out: dict = {}
+    for reg, d in g.items():
+        if len(d['p']) >= min_n and len(set(d['y'])) >= 2:
+            out[reg] = {'n': len(d['p']), 'auc': float(roc_auc_score(d['y'], d['p']))}
+            print(f"[Calibration] per-regime AUC {reg}: {out[reg]['auc']:.3f} (n={out[reg]['n']})")
+    return out
+
+
+def regime_readiness(conn: ConnWrapper, min_regime_days: int = 20, min_regime_episodes: int = 2) -> dict:
+    """Per-regime distinct-days/episodes coverage + ready flag (whether it clears the floor)."""
+    rows = conn.execute("""
+        SELECT ts.nifty_regime AS regime, ts.date AS d
+        FROM signal_outcomes so JOIN technical_signals ts
+          ON ts.symbol = so.symbol AND ts.date = so.signal_date
+        WHERE so.outcome IN ('WIN', 'LOSS') AND ts.win_probability IS NOT NULL
+    """).fetchall()
+    g: dict = {}
+    for r in rows:
+        g.setdefault(r['regime'], []).append(str(r['d']))
+    out: dict = {}
+    for reg, days in g.items():
+        dd = len(set(days))
+        ep = count_episodes(days)
+        out[reg] = {'n': len(days), 'distinct_days': dd, 'episodes': ep,
+                    'first_day': min(days), 'last_day': max(days),
+                    'ready': dd >= min_regime_days and ep >= min_regime_episodes}
+        print(f"[Calibration] readiness {reg}: days={dd} ep={ep} ready={out[reg]['ready']}")
+    return out
+
+
 def run():
     conn = connect()
     try:
         recalibrate_win_probabilities(conn)
+        regime_readiness(conn)
+        per_regime_auc(conn)
     finally:
         conn.close()
 
