@@ -83,11 +83,16 @@ Run the *market-level* engines over the full 550-day OHLCV window:
   null) and use `DD-MM-YYYY` dates → parse to `YYYY-MM-DD`. A backfill routine pages both, maps the
   fields, and upserts `fii_dii_flow` over the whole window. It is published EOD data → point-in-time
   correct. This **removes FII flow from the neutral-feature caveat** for the historical regime labels.
+- **Advance/decline repoint:** `regime_detector` currently reads its advance/decline feature from
+  `market_sentiment_snapshots.overall_score` (a thin sentiment proxy, history only since ~Jun-2026).
+  Repoint it to `market_breadth.adv_decline_ratio` — literal breadth computed from our own
+  `stock_ohlcv`, fully backfilled in this same phase. (HMM standardizes features, so the 0–1 vs
+  0–100 scale change is a non-issue.) This removes the **last** neutral-feature caveat.
 - `regime_detector.py` over history → `market_regimes(date, regime)` for every trading day, using
-  `as_of_date` for point-in-time labels (now with real FII over history).
-- **Caveat (reduced):** only **advance/decline** lacks history before ~Jun-2026 and enters neutral;
-  NIFTY return/vol + VIX + global macro + FII (all now backfilled) drive the historical labels.
-  Validate that labels track known 2024–2026 moves and report distinct-days/episodes per regime.
+  `as_of_date` for point-in-time labels (now with real FII **and** breadth over history).
+- **No neutral features:** all 8 regime inputs (NIFTY return/vol, VIX, FII, advance/decline, US10Y,
+  DXY, SP500) are backfilled over the full 550-day window. Validate that labels track known 2024–2026
+  moves and report distinct-days/episodes per regime.
 - Phase 1 improves **regime detection** and gives a **multi-episode regime history**, but does NOT by
   itself enlarge the *calibration* training set (that needs historical signals+outcomes → Phase 2).
 

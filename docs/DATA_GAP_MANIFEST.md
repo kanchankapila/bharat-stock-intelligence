@@ -114,6 +114,42 @@ weekly once enough excursions accumulate — the lever for the *exit* half of ac
 
 ---
 
+## E. Fetched-but-not-stored — capture targets (no new vendor; the app already pulls these)
+
+_Audit 2026-06-21 (live PG row counts). The V1/V2 dashboards, MC/Trendlyne deep-dives, screeners and
+indices tabs already **fetch** a lot of stock- and market-level data that is rendered and then
+discarded. Persisting it builds the point-in-time trail the model needs — these factors are
+**cross-sectional per-stock** (unlike market-level VIX/breadth, which a prior ablation showed don't
+help), so they are exactly where orthogonal edge should live._
+
+**Capture state today:** stored = `stock_delivery_data` (2,415), `stock_fundamentals` /
+`fundamentals_history` (2,210 each), `corporate_actions` (90). **Empty scaffolding** (table exists,
+nothing writes it) = `stock_options_oi`, `bulk_deals`, `insider_trades`, `institutional_rankings`,
+`proprietary_scores_history`, `trendlyne_technical_snapshots`. **No table at all** = analyst
+estimates/targets, earnings calendar, shareholding/promoter-pledge.
+
+| # | Data (already fetched by) | Storage status | Model gap it fills | Back-history |
+|---|---|---|---|---|
+| E1 | **Analyst consensus / target price / EPS & revenue estimates / # analysts** (`getMcAnalystRating`, `getMcConsensus`, `getMcPriceForecast`, `getMcEarningsForecast`) | no table | target-price upside + **estimate-revision momentum** — strong, orthogonal to price/technicals | partial (consensus snapshot) |
+| E2 | **Shareholding / promoter pledge / FII-DII-MF stake + QoQ deltas** (`getShareholding`) | no table | **B3** — promoter pledge ↑ is one of the strongest negative signals on the street | quarterly history usually available |
+| E3 | **ATM IV / IV skew / PCR** (`pcr_fetcher` → `stock_options_oi`) | table **empty on PG** | `iv_rank`/`iv_skew` — already wired into `build_features` but all-null → neutral; just needs the fetcher actually writing on PG | forward-only |
+| E4 | **Bulk / block deals + insider (SAST)** (MC insights / Trendlyne) | empty scaffolding | **B3** — India-specific institutional footprints | some |
+| E5 | **Trendlyne DVM / SWOT / checklist scores** (`getTrendlyneDVM`, `getTrendlyneChecklist`, `getTrendlyneStockMetrics`) | empty scaffolding (`proprietary_scores_history`, WIP `syncProprietaryScores.ts`) | orthogonal quality / valuation / momentum scores | forward-only |
+| E6 | **Earnings dates** (`getCorporateActions` / MC / Trendlyne event calendars) | no table | **B2** — `days_to_earnings` + earnings-blackout flag (upgrade the coarse `results_season`) | forward + next-date |
+
+**Pattern for each (same as the shipped `fundamentals_history`):** a daily/periodic snapshotter writes
+a `*_history(symbol, as_of_date, …)` table → `ml_ensemble.load_training_data`/`load_pending_signals`
+join it **as-of** each `signal_date` → a `build_features` factor with a neutral `num()` fallback →
+migrate the column in `db.ts` + `db/schema.postgres.sql` → wire the snapshotter into `processMlDailyOps`.
+
+**Priority (quant):** **E1 analyst estimates** (likely the single best unused signal) and **E3 IV/PCR**
+(already wired — just turn on capture) first; then **E2 shareholding/pledge** and **E6 earnings dates**;
+**E4/E5** activate the existing empty scaffolding as a fast-follow. Most are forward-only, so the value
+is "start the trail now" — AUC won't move until enough as-of history accumulates (same caveat as IV-rank
+and PIT fundamentals).
+
+---
+
 ## Priority order (quant recommendation)
 
 **Done (no new feed):** C3 point-in-time fundamentals, §A IV capture, §A exit labels,
