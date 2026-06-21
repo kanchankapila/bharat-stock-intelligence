@@ -61,9 +61,14 @@ src/server/ml_models/
 # Scratch/temp directories and one-off scripts
 scratch/
 .claude/worktrees/
+.claude/settings.local.json
 scripts/diagnose_db*.py
 scripts/winrate_check*.py
 scripts/winrate_real.py
+/scratch_*.ts
+/scratch_*.py
+/refactor_queues.py
+/test_nt.ts
 
 # Version bump artifacts
 [0-9]*.[0-9]*.[0-9]*
