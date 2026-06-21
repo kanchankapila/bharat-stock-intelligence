@@ -42,7 +42,8 @@ class Backtester:
     def close(self):
         self.conn.close()
 
-    # ───────────────────────────────────────────────────────────�    def load_signals(
+    # ───────────────────────────────────────────────────────────
+    def load_signals(
         self,
         start: str, end: str,
         min_score: int = 3,
@@ -328,22 +329,6 @@ class Backtester:
                     'highest_high': entry_price,
                     'partial_taken': False,
                     'partial_proceeds': 0.0,
-                }
-
-            # ── Mark-to-market portfolio value ───────────────────────────────
-            mtm = cash
-            for sym, pos in open_positions.items():
-                if sym in ohlcv_dict:
-                    day_ohlcv = ohlcv_dict[sym][ohlcv_dict[sym]['date'] == date]
-                    if not day_ohlcv.empty:
-                        mtm += float(day_ohlcv['close'].iloc[0]) * pos['shares']
-                    else:
-                        mtm += pos['entry_price'] * pos['shares']  # last known
-            equity[date] = round(mtm, 2)
-
-        equity_series = pd.Series(equity)
-        return trade_log, equity_seriescore': int(row['signal_score']),
-                    'total_cost':   total_cost,
                 }
 
             # ── Mark-to-market portfolio value ───────────────────────────────

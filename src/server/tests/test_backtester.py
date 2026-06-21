@@ -8,13 +8,21 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 from src.server.backtester import Backtester, INITIAL_CAPITAL
 
 
-def _make_signals(symbol='AAPL', signal_date='2024-01-01', stop_loss=90.0):
+def _bt() -> Backtester:
+    """Construct a Backtester without opening a DB connection. simulate_trades / compute_atr
+    are pure and never touch self.conn; the db_compat migration removed the old db_path
+    constructor arg, so we skip __init__ rather than connect to a real database."""
+    return Backtester.__new__(Backtester)
+
+
+def _make_signals(symbol='AAPL', signal_date='2024-01-01', stop_loss=90.0, target_price=None):
     return pd.DataFrame([{
         'symbol': symbol,
         'signal_date': pd.Timestamp(signal_date),
         'signal_score': 5,
         'entry_price_ref': 100.0,
         'stop_loss': stop_loss,
+        'target_price': target_price,
         'signals_json': '[]',
         'nifty_regime': 'BULL',
         'adx': 25.0,
@@ -44,7 +52,7 @@ class TestPositionSizing:
     """Position size must be initial_capital / max_positions, not cash / remaining_slots."""
 
     def test_fixed_fraction_of_initial_capital(self):
-        bt = Backtester(db_path=':memory:')
+        bt = _bt()
         signals = _make_signals()
         ohlcv = _make_ohlcv()
         max_pos = 10
@@ -76,6 +84,7 @@ class TestPositionSizing:
                 'signal_score': 5,
                 'entry_price_ref': 100.0,
                 'stop_loss': 90.0,
+                'target_price': None,
                 'signals_json': '[]',
                 'nifty_regime': 'BULL',
                 'adx': 25.0,
@@ -92,7 +101,7 @@ class TestPositionSizing:
             })
 
         signals = pd.DataFrame(signals_rows)
-        bt = Backtester(db_path=':memory:')
+        bt = _bt()
         trade_log, _ = bt.simulate_trades(
             signals, ohlcv_dict, max_positions=max_pos, initial_capital=capital,
             slippage_bps=0, stop_loss_pct=7.0, commission_bps=0,
@@ -107,7 +116,7 @@ class TestGapDownStop:
 
     def test_stop_triggered_at_exact_sl(self):
         """Intraday low hits SL but open is above SL — fill at SL."""
-        bt = Backtester(db_path=':memory:')
+        bt = _bt()
         signals = _make_signals(stop_loss=95.0)
         ohlcv = _make_ohlcv(
             dates=['2024-01-01', '2024-01-02', '2024-01-03'],
@@ -126,7 +135,7 @@ class TestGapDownStop:
 
     def test_gap_down_stop_fills_at_open(self):
         """Stock gaps down below SL overnight — fill at open, not SL price."""
-        bt = Backtester(db_path=':memory:')
+        bt = _bt()
         signals = _make_signals(stop_loss=95.0)
         ohlcv = _make_ohlcv(
             dates=['2024-01-01', '2024-01-02', '2024-01-03'],
@@ -149,8 +158,8 @@ class TestCommission:
     """Commission is deducted on both entry and exit; PnL reflects it."""
 
     def test_commission_reduces_net_pnl(self):
-        bt_no_comm  = Backtester(db_path=':memory:')
-        bt_with_comm = Backtester(db_path=':memory:')
+        bt_no_comm  = _bt()
+        bt_with_comm = _bt()
         signals  = _make_signals()
         ohlcv    = _make_ohlcv()
 

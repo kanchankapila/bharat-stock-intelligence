@@ -21,15 +21,16 @@ HORIZONS = [1, 3, 7, 14, 30]
 def get_connection():
     return connect()
 
-def get_ohlcv_close(conn, symbol: str, date_str: str):
-    """Get closing price on or after date_str (up to 5 trading days forward)."""
+def get_ohlcv_close_cached(ohlcv_cache, symbol: str, date_str: str):
+    """Get closing price on or after date_str (up to 5 trading/calendar days forward) from in-memory cache."""
+    sym_cache = ohlcv_cache.get(symbol)
+    if not sym_cache:
+        return None, None
     for offset in range(5):
         target = (datetime.strptime(date_str, '%Y-%m-%d') + timedelta(days=offset)).strftime('%Y-%m-%d')
-        row = conn.execute(
-            'SELECT close FROM stock_ohlcv WHERE symbol = ? AND date = ?', (symbol, target)
-        ).fetchone()
-        if row and row['close']:
-            return float(row['close']), target
+        close = sym_cache.get(target)
+        if close is not None:
+            return close, target
     return None, None
 
 def track_outcomes(conn):
@@ -43,6 +44,38 @@ def track_outcomes(conn):
         AND DATE(computed_at) <= DATE('now', '-1 day')
     """).fetchall()
 
+    # Load all OHLCV closing prices in memory to avoid N+1 queries
+    ohlcv_cache = {}
+    print("[OUTCOME-TRACKER] Loading OHLCV cache into memory...")
+    ohlcv_rows = conn.execute("SELECT symbol, date, close FROM stock_ohlcv WHERE close IS NOT NULL AND close > 0").fetchall()
+    for row in ohlcv_rows:
+        sym = row['symbol']
+        dt = str(row['date'])
+        close = float(row['close'])
+        if sym not in ohlcv_cache:
+            ohlcv_cache[sym] = {}
+        ohlcv_cache[sym][dt] = close
+    print(f"[OUTCOME-TRACKER] Loaded {len(ohlcv_rows)} closing prices for {len(ohlcv_cache)} symbols")
+
+    # Load existing outcomes to skip already-resolved ones
+    existing_outcomes = set()
+    existing_rows = conn.execute("SELECT symbol, signal_date, horizon_days FROM signal_outcomes").fetchall()
+    for row in existing_rows:
+        sig_date_str = str(row['signal_date'])
+        existing_outcomes.add((row['symbol'], sig_date_str, int(row['horizon_days'])))
+
+    insert_sql = """
+        INSERT INTO signal_outcomes (symbol, signal_date, horizon_days, entry_price,
+          check_date, exit_price, return_pct, outcome)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(symbol, signal_date, horizon_days) DO UPDATE SET
+          exit_price = excluded.exit_price,
+          return_pct = excluded.return_pct,
+          outcome    = excluded.outcome,
+          check_date = excluded.check_date
+    """
+
+    params_list = []
     tracked = 0
     for row in signal_rows:
         symbol = row['symbol']
@@ -51,28 +84,29 @@ def track_outcomes(conn):
         entry_price = float(row['current_price'])
 
         for horizon in HORIZONS:
+            if (symbol, signal_date, horizon) in existing_outcomes:
+                continue
+
             exit_date = (datetime.strptime(signal_date, '%Y-%m-%d') + timedelta(days=horizon)).strftime('%Y-%m-%d')
             if exit_date > today:
                 continue  # not yet
 
-            exit_price, actual_exit_date = get_ohlcv_close(conn, symbol, exit_date)
+            exit_price, actual_exit_date = get_ohlcv_close_cached(ohlcv_cache, symbol, exit_date)
             if exit_price is None or entry_price <= 0:
                 continue
 
             return_pct = (exit_price - entry_price) / entry_price * 100
             outcome = 'WIN' if return_pct > 2.0 else ('LOSS' if return_pct < -2.0 else 'NEUTRAL')
 
-            conn.execute("""
-                INSERT INTO signal_outcomes (symbol, signal_date, horizon_days, entry_price,
-                  check_date, exit_price, return_pct, outcome)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(symbol, signal_date, horizon_days) DO UPDATE SET
-                  exit_price = excluded.exit_price,
-                  return_pct = excluded.return_pct,
-                  outcome    = excluded.outcome,
-                  check_date = excluded.check_date
-            """, (symbol, signal_date, horizon, entry_price, actual_exit_date, exit_price, return_pct, outcome))
+            params_list.append((symbol, signal_date, horizon, entry_price, actual_exit_date, exit_price, return_pct, outcome))
             tracked += 1
+
+            if len(params_list) >= 5000:
+                conn.executemany(insert_sql, params_list)
+                params_list = []
+
+    if params_list:
+        conn.executemany(insert_sql, params_list)
 
     conn.commit()
     print(f'[OUTCOME-TRACKER] Tracked {tracked} outcomes')

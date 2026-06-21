@@ -5,11 +5,17 @@ Tests for executemany + single-connection batch writes in FeatureEngineer.
 import sys
 import os
 import sqlite3
+import tempfile
 import types
+from pathlib import Path
 from unittest.mock import patch, MagicMock, call
 import pandas as pd
 import numpy as np
 import pytest
+
+# process_symbol writes the fitted scaler to SCALER_PATH; point it at a throwaway temp file
+# so the real ml_models/feature_scaler_v1.pkl is never truncated by these mock-driven tests.
+_TMP_SCALER = Path(tempfile.gettempdir()) / "test_feature_scaler_v1.pkl"
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 from src.server.feature_engineering import FeatureEngineer
@@ -87,9 +93,10 @@ def _make_in_memory_db() -> sqlite3.Connection:
     return con
 
 
-def _stub_fe(db_path: str = ":memory:") -> FeatureEngineer:
-    fe = FeatureEngineer(db_path=db_path)
-    return fe
+def _stub_fe() -> FeatureEngineer:
+    # FeatureEngineer.__init__ takes no args and opens no connection (db_compat migration);
+    # the test injects its own mock connection into the method under test.
+    return FeatureEngineer()
 
 
 # ── Tests ────────────────────────────────────────────────────────────────────
@@ -110,10 +117,10 @@ class TestBatchWrites:
 
         # Stub out all the expensive private methods so no real DB reads happen
         fe._compute_ohlcv_features = lambda df: feat_df
-        fe._merge_fii = lambda feat, c: feat
-        fe._merge_fundamentals = lambda feat, sym, c: feat
-        fe._merge_macro = lambda feat, c: feat
-        fe._merge_sentiment = lambda feat, sym, c: feat
+        fe._merge_fii = lambda feat: feat
+        fe._merge_fundamentals = lambda feat, sym: feat
+        fe._merge_macro = lambda feat: feat
+        fe._merge_sentiment = lambda feat, sym: feat
         fe._fit_scaler = lambda feat, **kw: MagicMock(
             transform=lambda X: X.values
         )
@@ -123,70 +130,59 @@ class TestBatchWrites:
         # _compute_ohlcv_features so the raw df size doesn't matter — we just need
         # pd.read_sql to return something with len >= 60 to pass the guard)
         ohlcv_df = pd.DataFrame(
-            {"open": [100.0] * 60, "high": [105.0] * 60,
+            {"date": pd.date_range("2023-01-01", periods=60, freq="D"),
+             "open": [100.0] * 60, "high": [105.0] * 60,
              "low": [95.0] * 60, "close": [100.0] * 60, "volume": [1e6] * 60},
-            index=pd.date_range("2023-01-01", periods=60, freq="D"),
         )
-        with patch("pandas.read_sql", return_value=ohlcv_df):
-            with patch("pickle.dump"):  # avoid writing scaler to disk
-                result = fe.process_symbol("TEST", con=mock_con)
+        with patch("pandas.read_sql", return_value=ohlcv_df), \
+             patch("src.server.feature_engineering.SCALER_PATH", _TMP_SCALER), \
+             patch("pickle.dump"):  # avoid writing scaler to disk
+            result = fe.process_symbol("TEST", con=mock_con)
 
         # con.executemany() must have been called (not con.cursor().executemany())
         assert mock_con.executemany.called, "con.executemany() should have been called at least once"
         assert result == 3, f"Expected 3 rows written, got {result}"
 
     def test_shared_connection(self):
-        """run_full_pipeline opens only ONE connection; shared con is forwarded to process_symbol."""
-        _real_connect = sqlite3.connect
-        connect_calls = []
-        returned_cons = []
-
-        def counting_connect(path, **kw):
-            # Use the real sqlite3.connect (not the patched one) to avoid recursion
-            con = _real_connect(":memory:")
-            con.row_factory = sqlite3.Row
-            con.execute(_FEATURE_STORE_DDL)
-            con.execute(_OHLCV_DDL)
-            con.commit()
-            connect_calls.append(path)
-            returned_cons.append(con)
-            return con
-
+        """run_full_pipeline opens exactly ONE write connection (self._con) for the whole run.
+        Workers compute features in a process pool; all writes flow through the single shared
+        main-process connection, which is committed and closed once."""
         fe = _stub_fe()
+        mock_con = MagicMock()
+        fe._con = MagicMock(return_value=mock_con)
 
-        # Capture the con= kwarg forwarded to process_symbol for each symbol.
-        received_cons = []
+        submitted = []
 
-        def capturing_process_symbol(symbol, lookback_days=504, only_date=None, *, con=None):
-            received_cons.append((symbol, con))
-            return 0
+        class _FakeExecutor:
+            """Synchronous stand-in for ProcessPoolExecutor — no subprocesses. Each submit
+            returns a future whose result is (symbol, None) so no real feature write occurs."""
+            def __init__(self, *a, **k):
+                pass
 
-        fe.process_symbol = capturing_process_symbol
+            def __enter__(self):
+                return self
 
-        with patch("src.server.feature_engineering.sqlite3.connect", side_effect=counting_connect):
+            def __exit__(self, *a):
+                return False
+
+            def submit(self, fn, arg):
+                submitted.append(arg[0])
+                fut = MagicMock()
+                fut.result = lambda: (arg[0], None)
+                return fut
+
+        with patch("src.server.feature_engineering.ProcessPoolExecutor", _FakeExecutor), \
+             patch("src.server.feature_engineering.as_completed", lambda fs: list(fs)):
             fe.run_full_pipeline(symbols=["SYM1", "SYM2"])
 
-        # Exactly one DB connection must have been opened.
-        assert len(connect_calls) == 1, (
-            f"Expected exactly 1 sqlite3.connect() call, got {len(connect_calls)}"
+        # Exactly one write connection opened for the whole run.
+        assert fe._con.call_count == 1, (
+            f"Expected exactly 1 self._con() call, got {fe._con.call_count}"
         )
-
-        # Both symbols must have received a con= argument (not None).
-        assert len(received_cons) == 2, f"Expected 2 process_symbol calls, got {len(received_cons)}"
-        sym1_con = received_cons[0][1]
-        sym2_con = received_cons[1][1]
-        assert sym1_con is not None, "SYM1 received con=None — shared connection not forwarded"
-        assert sym2_con is not None, "SYM2 received con=None — shared connection not forwarded"
-
-        # Both must be the exact same connection object (the shared one).
-        assert sym1_con is sym2_con, (
-            "SYM1 and SYM2 received different connection objects — shared con not reused"
-        )
-
-        # That shared con must be the one returned by sqlite3.connect.
-        assert sym1_con is returned_cons[0], (
-            "process_symbol received a different con than the one opened by run_full_pipeline"
-        )
+        # Both symbols were dispatched to the pool.
+        assert set(submitted) == {"SYM1", "SYM2"}, f"Symbols dispatched: {submitted}"
+        # The single shared connection is closed once at the end.
+        mock_con.close.assert_called_once()
 
     def test_written_count_correct(self):
         """Return value matches the number of rows actually inserted."""
@@ -196,23 +192,24 @@ class TestBatchWrites:
         con = _make_in_memory_db()
 
         fe._compute_ohlcv_features = lambda df: feat_df
-        fe._merge_fii = lambda feat, c: feat
-        fe._merge_fundamentals = lambda feat, sym, c: feat
-        fe._merge_macro = lambda feat, c: feat
-        fe._merge_sentiment = lambda feat, sym, c: feat
+        fe._merge_fii = lambda feat: feat
+        fe._merge_fundamentals = lambda feat, sym: feat
+        fe._merge_macro = lambda feat: feat
+        fe._merge_sentiment = lambda feat, sym: feat
         fe._fit_scaler = lambda feat, **kw: MagicMock(
             transform=lambda X: X.values
         )
         fe._apply_scaler = lambda feat, scaler: feat
 
         ohlcv_df = pd.DataFrame(
-            {"open": [100.0] * 60, "high": [105.0] * 60,
+            {"date": pd.date_range("2023-01-01", periods=60, freq="D"),
+             "open": [100.0] * 60, "high": [105.0] * 60,
              "low": [95.0] * 60, "close": [100.0] * 60, "volume": [1e6] * 60},
-            index=pd.date_range("2023-01-01", periods=60, freq="D"),
         )
-        with patch("pandas.read_sql", return_value=ohlcv_df):
-            with patch("pickle.dump"):
-                result = fe.process_symbol("TATA", con=con)
+        with patch("pandas.read_sql", return_value=ohlcv_df), \
+             patch("src.server.feature_engineering.SCALER_PATH", _TMP_SCALER), \
+             patch("pickle.dump"):
+            result = fe.process_symbol("TATA", con=con)
 
         assert result == n_rows, f"Expected {n_rows} rows written, got {result}"
 
