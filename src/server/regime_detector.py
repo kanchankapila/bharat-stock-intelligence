@@ -194,15 +194,57 @@ def update_regime(date: str = None) -> str:
     return today_regime
 
 
+def backfill_regimes(start_date: str, end_date: str) -> int:
+    """Label every trading day in [start_date, end_date] in one Viterbi pass and upsert market_regimes."""
+    if not HMM_PATH.exists():
+        print("[HMM] No model — run --mode train first")
+        return 0
+    with open(HMM_PATH, "rb") as f:
+        bundle = pickle.load(f)
+    model: hmm.GaussianHMM = bundle["model"]
+    scaler: StandardScaler = bundle["scaler"]
+    state_labels: dict      = bundle["state_labels"]
+
+    df = _load_hmm_features(lookback_days=2000, as_of_date=end_date)
+    df = df[df.index >= pd.to_datetime(start_date)]
+    if df.empty:
+        print("[HMM] no features in range")
+        return 0
+
+    X = scaler.transform(df.fillna(0))
+    states    = model.predict(X)
+    fwd_probs = model.predict_proba(X)
+    n = 0
+    for ts, st, probs in zip(df.index, states, fwd_probs):
+        d = ts.strftime("%Y-%m-%d")
+        st = int(st)
+        regime = state_labels.get(st, "SIDEWAYS")
+        execute(
+            """INSERT INTO market_regimes (date, regime, regime_prob, hmm_state, computed_at)
+               VALUES (?,?,?,?,CURRENT_TIMESTAMP)
+               ON CONFLICT(date) DO UPDATE SET
+                 regime=excluded.regime, regime_prob=excluded.regime_prob,
+                 hmm_state=excluded.hmm_state, computed_at=CURRENT_TIMESTAMP""",
+            (d, regime, float(probs[st]), st))
+        n += 1
+    print(f"[HMM] backfilled {n} regime days {start_date}..{end_date}")
+    return n
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", choices=["train", "update"], default="update")
+    parser.add_argument("--mode", choices=["train", "update", "backfill"], default="update")
     parser.add_argument("--date", help="Date to classify (default: today)")
+    parser.add_argument("--start", help="Backfill start date (YYYY-MM-DD)")
+    parser.add_argument("--end", help="Backfill end date (YYYY-MM-DD)")
     args = parser.parse_args()
 
     if args.mode == "train":
         result = train_hmm()
         print(f"[HMM] Train result: {result}")
+    elif args.mode == "backfill":
+        rows = backfill_regimes(args.start, args.end)
+        print(f"[HMM] Done: backfilled {rows} days")
     else:
         regime = update_regime(args.date)
         print(f"[HMM] Done: {regime}")
