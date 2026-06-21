@@ -65,6 +65,43 @@ gating + per-regime AUC & data-readiness diagnostics.** Do NOT build separate pe
 - The per-regime AUC diagnostic (below) is exactly the evidence that would justify escalating to
   C/B later — escalate only with proof, not on assumption.
 
+## Implementation phases
+
+The 5-week derived-data window is the binding constraint, but we hold **550 trading days (~2.2y)** of
+`stock_ohlcv` + India VIX + global macro. The work is sequenced so the clean, high-value backfill
+lands first and the leaky part is isolated and optional.
+
+**Phase 1 — Historical regime + breadth + macro backfill (first; clean, leak-free).**
+Run the *market-level* engines over the full 550-day OHLCV window:
+- `global_macro_fetcher.py` (days≈800) → `macro_asset_prices` full history (US10Y/DXY/SP500/NSEBANK/
+  INDIAVIX) — mostly already present.
+- `market_breadth.py` (full backfill) → `market_breadth` over 550 days.
+- `regime_detector.py` over history → `market_regimes(date, regime)` for every trading day, using
+  `as_of_date` for point-in-time labels.
+- **Caveat (documented):** FII-flow and advance/decline have no history before ~late-May/Jun-2026, so
+  historical regime labels are driven by NIFTY return/vol + VIX + global macro (the dominant signals);
+  FII/AD enter neutral. Validate that labels track known 2024–2026 market moves and report
+  distinct-days/episodes per regime (this is what makes the calibration floor reachable).
+- Phase 1 improves **regime detection** and gives a **multi-episode regime history**, but does NOT by
+  itself enlarge the *calibration* training set (that needs historical signals+outcomes → Phase 2).
+
+**Phase 2 — Signal/outcome replay (second; CAVEATED, optional gate).**
+Replay the derived signal pipeline over history to populate the calibration training data:
+- Replay `feature_engineering` + technical scanners over `stock_ohlcv` → historical
+  `technical_signals` (OHLCV-derived features only; IV/delivery/PCR/point-in-time-fundamentals/FII
+  enter neutral — vendor/forward-only, not backfillable).
+- Bar-replay `outcome_resolver` over `stock_ohlcv` → historical `signal_outcomes` (clean).
+- Score historical signals with the current model → historical `win_probability`.
+- **Caveats:** (a) the historical feature set is partial → `win_probability` distribution differs from
+  live; (b) scoring old signals with a model trained on all data is mild look-ahead for calibration.
+  Treat any per-regime calibration it activates as **provisional**, validated against live behaviour.
+- This is the stage that supplies historical `(regime, win_probability, outcome)` tuples and lets the
+  per-regime calibrators clear the days/episode floor.
+
+**Phase 3 — The calibration mechanism (below).** Ships independent of the backfills: per-regime
+calibration gated on the days/episode floor (global fallback until met), diagnostics, and the gate
+switch. It is dormant today and auto-activates per regime once Phase 2 data clears the floor.
+
 ## Components & data flow
 
 ### 1. `ml_calibration.py` — per-regime calibration (modified)
@@ -180,6 +217,13 @@ All DB-backed tests use an in-memory SQLite fixture mirroring the existing calib
 
 ## Verification
 
+- **Phase 1:** after the backfill, `market_regimes` covers ~550 days; print distinct-days +
+  episode-count per regime and confirm multiple regimes now clear the 20-day/2-episode floor.
+  Sanity-check labels against known moves (e.g. drawdowns show BEAR/HIGH_VOL); confirm FII/AD were
+  neutral pre-mid-2026 but return/vol/VIX produced sensible labels.
+- **Phase 2 (when run):** historical `technical_signals`/`signal_outcomes` row counts over the 550-day
+  window; confirm the calibration training join now spans many regime days; flag the partial-feature
+  caveat in the run log.
 - `npx vitest run` + full `pytest src/server/tests/` green.
 - Live-PG run of `ml_calibration.py` (USE_POSTGRES=true): readiness report shows BEAR/SIDEWAYS/BULL
   all **not ready** (below the 20-day/2-episode floor), so every regime uses the **global**
