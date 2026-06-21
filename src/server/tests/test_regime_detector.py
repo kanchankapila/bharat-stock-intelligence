@@ -91,9 +91,11 @@ class TestDateAnchoredFeatures:
             )
         """)
         conn.execute("CREATE TABLE macro_asset_prices (symbol TEXT, date TEXT, close REAL, ret_5d REAL)")
+        conn.execute("CREATE TABLE market_breadth (date TEXT PRIMARY KEY, adv_decline_ratio REAL)")
         for d in dates:
             conn.execute("INSERT INTO stock_ohlcv VALUES (?,?,?,?,?,?,?)",
                          ('NIFTY50', d, 21000.0, 21100.0, 20900.0, 21050.0, 1_000_000))
+            conn.execute("INSERT INTO market_breadth (date, adv_decline_ratio) VALUES (?,?)", (d, 0.55))
         conn.commit()
         return conn
 
@@ -134,3 +136,11 @@ class TestDateAnchoredFeatures:
                 _load_hmm_features(lookback_days=30)
         except Exception as e:
             pytest.fail(f"_load_hmm_features without as_of_date raised: {e}")
+
+    def test_advance_decline_sourced_from_market_breadth(self):
+        from datetime import date, timedelta
+        all_dates = [(date(2024, 4, 22) + timedelta(days=i)).isoformat() for i in range(50)]
+        conn = self._make_nifty_conn(all_dates)
+        with patch.object(regime_detector, 'read_df', self._patched_read_df(conn)):
+            df = _load_hmm_features(lookback_days=90, as_of_date='2024-06-01')
+        assert (df['advance_decline_ratio'] == 0.55).all()

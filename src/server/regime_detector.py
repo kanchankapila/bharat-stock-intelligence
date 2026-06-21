@@ -76,16 +76,15 @@ def _load_hmm_features(lookback_days: int = 756,
     else:
         df["fii_5d_net_norm"] = 0.0
 
-    # Advance/decline ratio from market_sentiment_snapshots (group by date to avoid duplicates)
+    # Advance/decline breadth from our own universe (market_breadth.adv_decline_ratio, 0-1).
     ad = _read_dated(
-        "SELECT DATE(snapshot_at) as date, AVG(overall_score) as overall_score FROM market_sentiment_snapshots "
-        "WHERE DATE(snapshot_at)>=? AND DATE(snapshot_at)<=? GROUP BY DATE(snapshot_at) ORDER BY DATE(snapshot_at)",
-        (cutoff_d, anchor_d),
+        "SELECT date, adv_decline_ratio FROM market_breadth WHERE date>=? AND date<=? ORDER BY date",
+        (cutoff_s, anchor_s),
     )
     if not ad.empty:
-        df["advance_decline_ratio"] = ad["overall_score"].reindex(df.index, method="ffill").fillna(50.0)
+        df["advance_decline_ratio"] = ad["adv_decline_ratio"].reindex(df.index, method="ffill").fillna(0.5)
     else:
-        df["advance_decline_ratio"] = 50.0
+        df["advance_decline_ratio"] = 0.5
 
     # Global macro from macro_asset_prices
     for sym, col in [("US10Y", "us10y_chg5d"), ("DXY", "dxy_ret_5d"), ("SP500", "sp500_ret_5d")]:
