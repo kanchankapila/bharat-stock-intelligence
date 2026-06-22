@@ -386,6 +386,79 @@ export async function runCompanyNewsCycle(limit = 150): Promise<{ companies: num
   return { companies: universe.length, inserted: sentRows.size };
 }
 
+// ─── BSE Corporate Announcements (free, per-stock, structured, historical) ────
+
+interface BseAnnouncement {
+  NEWSID: string; SLONGNAME: string; HEADLINE: string; NEWSSUB: string;
+  CATEGORYNAME: string; SUBCATNAME: string; CRITICALNEWS: number;
+  NEWS_DT: string; NSURL: string; ATTACHMENTNAME: string;
+}
+
+// BSE returns results only when strPrevDate == strToDate (single-day query).
+async function fetchBseDay(ymd: string, maxPages = 5): Promise<BseAnnouncement[]> {
+  const out: BseAnnouncement[] = [];
+  for (let pg = 1; pg <= maxPages; pg++) {
+    const url = `https://api.bseindia.com/BseIndiaAPI/api/AnnSubCategoryGetData/w?pageno=${pg}`
+      + `&strCat=-1&strPrevDate=${ymd}&strScrip=&strSearch=P&strToDate=${ymd}&strType=C`;
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 12000);
+      const res = await fetch(url, {
+        signal: ctrl.signal,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+          'Referer': 'https://www.bseindia.com/', 'Accept': 'application/json',
+        },
+      });
+      clearTimeout(timer);
+      if (!res.ok) break;
+      const j = await res.json() as { Table?: BseAnnouncement[] };
+      const t = j.Table ?? [];
+      out.push(...t);
+      if (t.length === 0) break;
+    } catch { break; }
+    await new Promise(r => setTimeout(r, 200));
+  }
+  return out;
+}
+
+/**
+ * Ingest BSE corporate announcements (board meetings, results, orders, pledges,
+ * ratings) for the last 2 days. Inherently per-stock and high-signal; mapped to
+ * NSE symbols by company name. Schedule hourly.
+ */
+export async function runBseAnnouncementsCycle(): Promise<{ fetched: number; inserted: number }> {
+  await ensureNSESymbols();
+  const ymd = (d: Date) => d.toISOString().slice(0, 10).replace(/-/g, '');
+  const now = new Date();
+  // Query today + yesterday separately (BSE only accepts single-day windows).
+  const anns = [
+    ...await fetchBseDay(ymd(now)),
+    ...await fetchBseDay(ymd(new Date(now.getTime() - 864e5))),
+  ];
+  if (anns.length === 0) return { fetched: 0, inserted: 0 };
+
+  const sentRows = new Map<string, unknown[]>();
+  const legacyRows = new Map<string, unknown[]>();
+  for (const a of anns) {
+    const company = (a.SLONGNAME ?? '').trim();
+    const syms = extractSymbols(company);              // map company name → NSE symbol
+    if (syms.length === 0) continue;                   // BSE-only / unmapped name — skip
+    const cat = `${a.CATEGORYNAME ?? ''} ${a.SUBCATNAME ?? ''}`.trim();
+    const raw: RawNewsItem = {
+      title: `${company}: ${cat}`.slice(0, 300),
+      description: (a.HEADLINE || a.NEWSSUB || cat).slice(0, 1000),
+      link: a.NSURL || `https://www.bseindia.com/corporates/ann.html?newsid=${a.NEWSID}`,
+      pubDate: a.NEWS_DT,
+    };
+    processNewsItem(raw, 'BSE Announcements', 'INDIAN', sentRows, legacyRows, syms[0]);
+  }
+
+  if (sentRows.size > 0) await persistNewsRows(sentRows, legacyRows);
+  console.log(`[SENTIMENT] BSE announcements: ${anns.length} fetched → ${sentRows.size} mapped to NSE symbols`);
+  return { fetched: anns.length, inserted: sentRows.size };
+}
+
 // ─── Main Fetch + Score Cycle ─────────────────────────────────────────────────
 
 export async function runNewsSentimentCycle(): Promise<{

@@ -1096,7 +1096,9 @@ export async function initQueues(): Promise<boolean> {
       'news-sentiment-refresh',
       {},
       {
-        repeat: { every: 5 * 60 * 1000 }, // every 5 minutes
+        // 15 min: RSS feeds lag ~15-30 min, so a tighter cadence just re-fetches
+        // identical articles across 23 sources (wasted requests + block risk).
+        repeat: { every: 15 * 60 * 1000 },
         jobId: 'news-sentiment-repeatable',
         removeOnComplete: 5,
         removeOnFail: 3,
@@ -1115,12 +1117,27 @@ export async function initQueues(): Promise<boolean> {
       },
     );
 
+    // BSE corporate announcements (per-stock, high-signal events) — hourly captures
+    // intraday + after-close filings without hammering the endpoint.
+    await addJobWithCatchup(newsSentimentQueue,
+      'bse-announcements-refresh',
+      {},
+      {
+        repeat: { every: 60 * 60 * 1000 }, // every hour
+        jobId: 'bse-announcements-repeatable',
+        removeOnComplete: 3,
+        removeOnFail: 3,
+      },
+    );
+
     newsSentimentWorker = new Worker(
       QUEUE_NEWS_SENTIMENT,
       async (job: Job) => {
         const svc = await import('./newsSentimentService');
         if (job.name === 'company-news-refresh') {
           await svc.runCompanyNewsCycle();
+        } else if (job.name === 'bse-announcements-refresh') {
+          await svc.runBseAnnouncementsCycle();
         } else {
           await svc.runNewsSentimentCycle();
         }
