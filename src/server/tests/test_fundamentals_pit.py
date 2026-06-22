@@ -15,6 +15,11 @@ import pytest
 SERVER_DIR = os.path.join(os.path.dirname(__file__), "..")
 sys.path.insert(0, SERVER_DIR)
 
+# Ensure .env is loaded (sets USE_POSTGRES in os.environ) before any test pops it.
+# Without this, the first call to `import db_compat` inside _load() would load .env
+# AFTER the pop, re-setting USE_POSTGRES=true and defeating the SQLite redirect.
+import db_compat as _db_compat_preload  # noqa: F401, E402
+
 
 @pytest.fixture(autouse=True)
 def _restore_db_env():
@@ -47,6 +52,8 @@ def _make_db():
             pcr_oi REAL, pcr_vol REAL, fii_10d_net REAL, dii_3d_net REAL, delivery_pct REAL,
             sector_ret_5d REAL, sector_ret_21d REAL, iv_rank REAL, iv_skew REAL,
             rs_rank_21d REAL, rs_rank_63d REAL,
+            insider_buy_pct_90d REAL,
+            opening_range_break REAL, vwap_deviation_pct REAL, first_hour_vol_share REAL,
             PRIMARY KEY (symbol, date)
         );
         CREATE TABLE stock_fundamentals (
@@ -69,6 +76,28 @@ def _make_db():
         CREATE TABLE market_breadth (
             date TEXT PRIMARY KEY, pct_above_200dma REAL, adv_decline_ratio REAL,
             pct_at_20d_high REAL, net_highs_lows REAL, computed_at TEXT
+        );
+        CREATE TABLE analyst_estimates_history (
+            symbol TEXT NOT NULL, as_of_date TEXT NOT NULL, n_analysts INTEGER,
+            final_rating TEXT, buy_count INTEGER, hold_count INTEGER, sell_count INTEGER,
+            target_high REAL, target_mean REAL, target_low REAL,
+            eps_est_next REAL, revenue_est_next REAL, captured_at TEXT,
+            PRIMARY KEY (symbol, as_of_date)
+        );
+        CREATE TABLE proprietary_scores_history (
+            symbol TEXT NOT NULL, date TEXT NOT NULL, source TEXT NOT NULL,
+            score_type TEXT NOT NULL, score_value REAL,
+            PRIMARY KEY (symbol, date, source, score_type)
+        );
+        CREATE TABLE insider_trades (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            symbol TEXT, acquirerName TEXT, category TEXT,
+            typeOfTransaction TEXT, quantity BIGINT, valueInr REAL, date TEXT
+        );
+        CREATE TABLE intraday_ohlcv (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            symbol TEXT, datetime TEXT, open REAL, high REAL, low REAL,
+            close REAL, volume REAL, vwap REAL, interval TEXT
         );
     """)
     # One signal on 2024-06-01 (resolved WIN).

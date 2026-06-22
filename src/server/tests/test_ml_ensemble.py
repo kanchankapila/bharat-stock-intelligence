@@ -311,3 +311,26 @@ class TestInsiderActivityFeatures:
         X = build_features(df)
         assert X['insider_buy_pct_90d'].iloc[0] == pytest.approx(0.9, abs=0.01)
         assert X['insider_buy_pct_90d'].iloc[1] == pytest.approx(0.1, abs=0.01)
+
+
+class TestIntradayMicrostructureFeatures:
+    def test_intraday_features_present(self):
+        X = build_features(_make_feature_df())
+        for col in ['opening_range_break', 'vwap_deviation_pct', 'first_hour_vol_share']:
+            assert col in X.columns
+
+    def test_missing_intraday_falls_back_to_neutral(self):
+        X = build_features(_make_feature_df())
+        assert (X['opening_range_break'] == 0.0).all()
+        assert (X['vwap_deviation_pct']  == 0.0).all()
+        assert (X['first_hour_vol_share'] == 0.5).all()
+
+    def test_intraday_values_pass_through(self):
+        df = _make_feature_df(n=3)
+        df['opening_range_break']  = [1.0, -1.0, 0.0]
+        df['vwap_deviation_pct']   = [3.5, -2.1, 0.0]
+        df['first_hour_vol_share'] = [0.8,  0.2, 0.5]
+        X = build_features(df)
+        assert X['opening_range_break'].iloc[0]  == pytest.approx(1.0,  abs=0.01)
+        assert X['vwap_deviation_pct'].iloc[1]   == pytest.approx(-2.1, abs=0.01)
+        assert X['first_hour_vol_share'].iloc[2] == pytest.approx(0.5,  abs=0.01)
