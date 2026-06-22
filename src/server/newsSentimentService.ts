@@ -14,6 +14,9 @@ import { dbGet, dbAll, dbRun, dbTransaction } from './dbAsync';
 import { rowGroups, bulkUpsert } from './dbBulk';
 import crypto from 'crypto';
 import { fetchGlobalMarketData } from './globalMarketService';
+import {
+  buildAliasIndex, extractSymbolsByName, NEWS_ALIAS_OVERRIDES, type AliasEntry,
+} from './newsEntityTagger';
 
 function toSqliteDateTime(date: Date): string {
   return date.toISOString().replace('T', ' ').substring(0, 19);
@@ -238,24 +241,22 @@ function detectSector(text: string): string | null {
 }
 
 function extractSymbols(text: string): string[] {
-  const t = text.toUpperCase();
-  // Use NSE symbols pre-warmed into the cache before the fetch cycle.
-  const symbols = _nseSymbolCache ?? [];
-  return symbols.filter(sym => {
-    // Match whole-word NSE symbols (e.g. "RELIANCE" not inside "RELIANCEIND")
-    const re = new RegExp(`\\b${sym}\\b`);
-    return re.test(t);
-  }).slice(0, 5);
+  // Match company NAMES (+ curated short forms), not tickers — prose says "Infosys",
+  // never "INFY". See newsEntityTagger.
+  return extractSymbolsByName(text, _aliasIndex ?? []);
 }
 
-let _nseSymbolCache: string[] | null = null;
+let _aliasIndex: AliasEntry[] | null = null;
 async function ensureNSESymbols(): Promise<void> {
-  if (_nseSymbolCache) return;
+  if (_aliasIndex) return;
   try {
-    const rows = await dbAll('SELECT symbol FROM nse_stocks WHERE status = ? LIMIT 2000', ['ACTIVE']) as { symbol: string }[];
-    _nseSymbolCache = rows.map(r => r.symbol);
+    const rows = await dbAll(
+      'SELECT symbol, name FROM nse_stocks WHERE status = ? AND name IS NOT NULL LIMIT 2500',
+      ['ACTIVE'],
+    ) as { symbol: string; name: string }[];
+    _aliasIndex = buildAliasIndex(rows, NEWS_ALIAS_OVERRIDES);
   } catch {
-    _nseSymbolCache = [];
+    _aliasIndex = [];
   }
 }
 
