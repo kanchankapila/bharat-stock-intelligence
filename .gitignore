@@ -70,6 +70,14 @@ scripts/winrate_real.py
 /refactor_queues.py
 /test_nt.ts
 
+# Scratch API/exploration dumps (one-off diagnostics, never source)
+/api_response*.json
+/response*.json
+/picks*.json
+/test_tl.html
+mc_tlz_explore.db
+/screener_quant_analysis_report.md
+
 # Version bump artifacts
 [0-9]*.[0-9]*.[0-9]*
 
