@@ -293,3 +293,21 @@ class TestLoadTrainingDataNoLeakColumns:
         assert 'p2.date <= so.signal_date' in src, "Altman Z join must be AS-OF (no look-ahead)"
         assert 'altman_z_score' in src, "Must query for altman_z_score"
         assert 'ohlson_o_score' in src, "Must query for ohlson_o_score"
+
+
+class TestInsiderActivityFeatures:
+    def test_insider_features_present(self):
+        X = build_features(_make_feature_df())
+        assert 'insider_buy_pct_90d' in X.columns
+        assert 'insider_x_score' in X.columns
+
+    def test_missing_insider_falls_back_to_neutral(self):
+        X = build_features(_make_feature_df())
+        assert (X['insider_buy_pct_90d'] == 0.5).all()
+
+    def test_insider_values_pass_through(self):
+        df = _make_feature_df(n=2)
+        df['insider_buy_pct_90d'] = [0.9, 0.1]
+        X = build_features(df)
+        assert X['insider_buy_pct_90d'].iloc[0] == pytest.approx(0.9, abs=0.01)
+        assert X['insider_buy_pct_90d'].iloc[1] == pytest.approx(0.1, abs=0.01)

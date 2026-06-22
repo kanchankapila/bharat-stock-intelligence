@@ -139,6 +139,115 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_mss_symbol ON moneycontrol_screener_stocks(symbol);
 
+  -- 5a. MoneyControl Data-Gap Resolution tables
+  CREATE TABLE IF NOT EXISTS insider_trades (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT NOT NULL,
+    acquirerName TEXT NOT NULL,
+    category TEXT NOT NULL,
+    typeOfTransaction TEXT NOT NULL,
+    quantity INTEGER NOT NULL,
+    valueInr REAL NOT NULL,
+    date TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_insider_sym ON insider_trades(symbol, date DESC);
+
+  CREATE TABLE IF NOT EXISTS bulk_deals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    date TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    clientName TEXT NOT NULL,
+    dealType TEXT NOT NULL,
+    quantity INTEGER NOT NULL,
+    price REAL NOT NULL,
+    valueCr REAL NOT NULL,
+    source TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_bulk_sym_date ON bulk_deals(symbol, date DESC);
+
+  CREATE TABLE IF NOT EXISTS mc_analyst_ratings (
+    symbol TEXT NOT NULL,
+    final_rating TEXT,
+    analyst_count INTEGER,
+    buy_count INTEGER,
+    outperform_count INTEGER,
+    hold_count INTEGER,
+    underperform_count INTEGER,
+    sell_count INTEGER,
+    fetched_at TEXT NOT NULL,
+    PRIMARY KEY (symbol, fetched_at)
+  );
+
+  CREATE TABLE IF NOT EXISTS mc_price_forecast (
+    symbol TEXT NOT NULL,
+    high REAL,
+    mean REAL,
+    low REAL,
+    fetched_at TEXT NOT NULL,
+    PRIMARY KEY (symbol, fetched_at)
+  );
+
+  CREATE TABLE IF NOT EXISTS mc_earnings_forecast (
+    symbol TEXT NOT NULL,
+    date TEXT NOT NULL,
+    metric_type TEXT NOT NULL,
+    high REAL,
+    low REAL,
+    avg REAL,
+    actual REAL,
+    PRIMARY KEY (symbol, date, metric_type)
+  );
+
+  CREATE TABLE IF NOT EXISTS mc_estimates_hits_misses (
+    symbol TEXT NOT NULL,
+    quarter TEXT NOT NULL,
+    actual REAL,
+    estimates REAL,
+    surprise REAL,
+    type TEXT,
+    PRIMARY KEY (symbol, quarter)
+  );
+
+  CREATE TABLE IF NOT EXISTS mc_seasonality_best_stocks (
+    tab_type TEXT NOT NULL,
+    sc_id TEXT NOT NULL,
+    sc_fullname TEXT,
+    year INTEGER NOT NULL,
+    month INTEGER NOT NULL,
+    avg_pct REAL,
+    max_pct REAL,
+    min_pct REAL,
+    total_yr REAL,
+    tot_yr REAL,
+    PRIMARY KEY (tab_type, sc_id, year, month)
+  );
+
+  CREATE TABLE IF NOT EXISTS mc_stock_vitals (
+    symbol TEXT NOT NULL,
+    metric_name TEXT NOT NULL,
+    score TEXT,
+    description TEXT,
+    PRIMARY KEY (symbol, metric_name)
+  );
+
+  CREATE TABLE IF NOT EXISTS mc_stock_scans (
+    symbol TEXT NOT NULL,
+    scan_name TEXT NOT NULL,
+    description TEXT,
+    PRIMARY KEY (symbol, scan_name)
+  );
+
+  CREATE TABLE IF NOT EXISTS mc_general_metrics (
+    symbol TEXT NOT NULL,
+    source_api TEXT NOT NULL,
+    metric_group TEXT NOT NULL,
+    metric_name TEXT NOT NULL,
+    metric_value_num REAL,
+    metric_value_text TEXT,
+    fetched_at TEXT NOT NULL,
+    PRIMARY KEY (symbol, source_api, metric_group, metric_name, fetched_at)
+  );
+
   -- 5b. Unified Screener Metadata (NLP Inferred)
   CREATE TABLE IF NOT EXISTS screener_master (
     scan_id TEXT PRIMARY KEY,
@@ -350,6 +459,26 @@ db.exec(`
   );
 
   CREATE INDEX IF NOT EXISTS idx_fh_sym_date ON fundamentals_history(symbol, as_of_date DESC);
+
+  -- Analyst consensus + price targets — as-of trail for ML (no look-ahead bias)
+  CREATE TABLE IF NOT EXISTS analyst_estimates_history (
+    symbol           TEXT NOT NULL,
+    as_of_date       TEXT NOT NULL,
+    n_analysts       INTEGER,
+    final_rating     TEXT,
+    buy_count        INTEGER,
+    hold_count       INTEGER,
+    sell_count       INTEGER,
+    target_high      REAL,
+    target_mean      REAL,
+    target_low       REAL,
+    eps_est_next     REAL,
+    revenue_est_next REAL,
+    captured_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (symbol, as_of_date)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_aeh_sym_date ON analyst_estimates_history(symbol, as_of_date DESC);
 
   -- 13. Quantitative Strategy Scores (computed nightly from OHLCV + fundamentals + screeners)
   CREATE TABLE IF NOT EXISTS quant_scores (
@@ -1226,6 +1355,8 @@ migrateColumn('technical_signals', 'iv_skew',         'REAL');
 // Cross-sectional relative-strength ranks (computed by relative_strength.py from stock_ohlcv)
 migrateColumn('technical_signals', 'rs_rank_21d',     'REAL');
 migrateColumn('technical_signals', 'rs_rank_63d',     'REAL');
+// Insider activity (computed by insider_features.py from insider_trades rolling 90d)
+migrateColumn('technical_signals', 'insider_buy_pct_90d', 'REAL');
 
 // ATM implied vol + skew snapshot (captured by pcr_fetcher.py from the NSE option chain)
 migrateColumn('stock_options_oi', 'atm_iv',   'REAL');

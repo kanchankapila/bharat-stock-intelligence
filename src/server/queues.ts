@@ -20,7 +20,8 @@ import { REDIS_BASE } from './redisConfig';
 import cronParser from 'cron-parser';
 import { runPython } from './pythonRunner';
 
-import { syncNiftyTraderScores } from './syncProprietaryScores';
+import { syncNiftyTraderScores, syncTrendlyneScores } from './syncProprietaryScores';
+import { syncTrendlyneTechnicals } from './technicalIntelligenceService';
 import { syncAllScreenerStocksToDB } from './trendlyneScreener';
 import { syncMoneyControlScreeners } from './moneycontrolScreener';
 import { runFullFundamentalsSync } from './fundamentalsSyncService';
@@ -88,6 +89,7 @@ export const QUEUE_TRENDLYNE_INTRADAY   = 'trendlyne-intraday';
 export const QUEUE_OUTCOME_RESOLVER     = 'outcome-resolver';
 export const QUEUE_ML_DAILY_OPS        = 'ml-daily-ops';
 export const QUEUE_ML_WEEKLY_RETRAIN   = 'ml-weekly-retrain';
+export const QUEUE_INTRADAY_FETCHER    = 'intraday-fetcher';
 export const QUEUE_RESEARCH_PREMARKET  = 'research-premarket';
 export const QUEUE_RESEARCH_POSTCLOSE  = 'research-postclose';
 export const QUEUE_DL_MACRO_FETCH       = 'dl-macro-fetch';
@@ -149,6 +151,8 @@ export let mlDailyOpsQueue: Queue | null = null;
 let mlDailyOpsWorker: Worker | null = null;
 export let mlWeeklyRetrainQueue: Queue | null = null;
 let mlWeeklyRetrainWorker: Worker | null = null;
+export let intradayFetcherQueue: Queue | null = null;
+let intradayFetcherWorker: Worker | null = null;
 export let researchPremarketQueue: Queue | null = null;
 export let researchPostcloseQueue: Queue | null = null;
 let researchPremarketWorker: Worker | null = null;
@@ -369,13 +373,26 @@ async function processOutcomeResolver(_job: Job): Promise<{ success: boolean }> 
 
 // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ ML daily ops worker processor ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 
+async function processIntradayFetcher(_job: Job): Promise<void> {
+  // Fetches 15m bars for all 2328 NSE stocks (last 24h) — ~4 min per run.
+  await runPython('intraday_fetcher.py', ['--lookback-days', '1'], 600_000)
+    .catch(e => console.warn('[QUEUE] intraday_fetcher failed:', (e as Error).message));
+}
+
 async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   // Point-in-time fundamentals snapshot first — builds the as-of trail load_training_data joins.
   await runPython('fundamentals_snapshot.py', [], 90_000)
     .catch(e => console.warn('[QUEUE] fundamentals_snapshot failed:', (e as Error).message));
 
+  // Analyst consensus + price targets snapshot — feeds analyst_buy_pct / target_upside_pct in ml_ensemble.
+  await runPython('analyst_estimates_snapshot.py', [], 600_000)
+    .catch(e => console.warn('[QUEUE] analyst_estimates_snapshot failed:', (e as Error).message));
+
   await runPython('fii_dii_fetcher.py', [], 90_000).catch(() => {});
   await runPython('pcr_fetcher.py', [], 90_000).catch(() => {});
+  await runPython('moneycontrol_fetcher.py', [], 300_000).catch(e => {
+    console.warn('[QUEUE] moneycontrol_fetcher failed:', (e as Error).message);
+  });
   // iv_features reads the ATM IV that pcr_fetcher just wrote to stock_options_oi → technical_signals.iv_rank.
   await runPython('iv_features.py', [], 90_000)
     .catch(e => console.warn('[QUEUE] iv_features failed:', (e as Error).message));
@@ -389,6 +406,10 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   // Cross-sectional relative strength from (cleaned) OHLCV → technical_signals.rs_rank_21d/63d.
   await runPython('relative_strength.py', [], 180_000)
     .catch(e => console.warn('[QUEUE] relative_strength failed:', (e as Error).message));
+
+  // Rolling 90d insider buy/sell ratio from insider_trades → technical_signals.insider_buy_pct_90d.
+  await runPython('insider_features.py', [], 60_000)
+    .catch(e => console.warn('[QUEUE] insider_features failed:', (e as Error).message));
 
   await resolveOutcomesResilient(1);
   await resolveOutcomesResilient(5);
@@ -532,8 +553,12 @@ async function processAgentOptimizer(_job: Job): Promise<{ success: boolean }> {
 async function processQuantEodSync(_job: Job): Promise<{ success: boolean }> {
   console.log('[QUEUE] quant-eod-sync starting...');
   try {
-    console.log('[QUANT EOD] 1. Syncing NiftyTrader Scores');
+    console.log('[QUANT EOD] 1. Syncing NiftyTrader & Trendlyne Scores');
     await syncNiftyTraderScores();
+    await syncTrendlyneScores();
+    
+    console.log('[QUANT EOD] 1.5. Syncing Trendlyne Technical Snapshots');
+    await syncTrendlyneTechnicals();
     
     console.log('[QUANT EOD] 2. Syncing Trendlyne Screeners');
     await syncAllScreenerStocksToDB();
@@ -1269,6 +1294,31 @@ export async function initQueues(): Promise<boolean> {
       updateMonitorState('strategy-optimizer', 'failed', err.message);
     });
 
+    // ── Intraday fetcher (every 30 min, 8:30 AM - 4:00 PM IST = 3:00-10:30 UTC, weekdays)
+    intradayFetcherQueue = new Queue(QUEUE_INTRADAY_FETCHER, { connection });
+    const intradayRep = await intradayFetcherQueue.getRepeatableJobs();
+    for (const r of intradayRep) await intradayFetcherQueue.removeRepeatableByKey(r.key);
+    await intradayFetcherQueue.add('intraday-fetcher', {}, {
+      repeat: { pattern: '*/30 3-10 * * 1-5' },
+      jobId: 'intraday-fetcher',
+      removeOnComplete: 5,
+      removeOnFail: 3,
+    });
+    intradayFetcherWorker = new Worker(
+      QUEUE_INTRADAY_FETCHER,
+      processIntradayFetcher,
+      { connection, concurrency: 1, lockDuration: 10 * 60 * 1000, lockRenewTime: 2 * 60 * 1000 },
+    );
+    intradayFetcherWorker.on('completed', () => {
+      console.log('[QUEUE] intraday-fetcher completed');
+      recordHeartbeat('intraday-fetcher', 'success');
+    });
+    intradayFetcherWorker.on('failed', (_, err) => {
+      console.error('[QUEUE] intraday-fetcher failed:', err.message);
+      recordHeartbeat('intraday-fetcher', 'failed', err?.message);
+    });
+
+
     // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Research report queues ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
     researchPremarketQueue = new Queue(QUEUE_RESEARCH_PREMARKET, { connection });
     const premarketRep = await researchPremarketQueue.getRepeatableJobs();
@@ -1337,7 +1387,7 @@ export async function initQueues(): Promise<boolean> {
     const dlInfRep = await dlInferenceQueue.getRepeatableJobs();
     for (const r of dlInfRep) await dlInferenceQueue.removeRepeatableByKey(r.key);
     await addJobWithCatchup(dlInferenceQueue, 'dl-infer-daily', {}, {
-      repeat: { pattern: '0 11 * * 1-5' },
+      repeat: { pattern: '0 17 * * 1-5' },  // 10:30 PM IST — low-load window after all market jobs
       jobId: 'dl-infer-daily',
       removeOnComplete: 3, removeOnFail: 3,
     });
@@ -1490,10 +1540,10 @@ export async function initQueues(): Promise<boolean> {
     confluenceOutcomesWorker.on('failed', (job, err) =>
       console.error(`[QUEUE] ${QUEUE_CONFLUENCE_OUTCOMES} job failed:`, err.message)
     );
-    await addJobWithCatchup(confluenceOutcomesQueue, 
+    await addJobWithCatchup(confluenceOutcomesQueue,
       'confluence-outcomes-daily',
       {},
-      { repeat: { every: 24 * 60 * 60 * 1000 }, removeOnComplete: 3, removeOnFail: 3 }
+      { repeat: { pattern: '30 17 * * 1-5' }, removeOnComplete: 3, removeOnFail: 3 }  // 11:00 PM IST — after dl-inference
     );
     console.log('[QUEUE] confluence-compute (every 30 min) + confluence-outcomes (daily) registered');
 
@@ -1589,7 +1639,7 @@ export async function initQueues(): Promise<boolean> {
     quantEodSyncWorker = new Worker(
       QUEUE_QUANT_EOD_SYNC,
       processQuantEodSync,
-      { connection, concurrency: 1, lockDuration: 30 * 60_000 }
+      { connection, concurrency: 1, lockDuration: 120 * 60_000 }
     );
     quantEodSyncWorker.on('completed', () => console.log('[QUEUE] quant-eod-sync done'));
     quantEodSyncWorker.on('failed', (_, e) => console.error('[QUEUE] quant-eod-sync failed:', e.message));

@@ -203,6 +203,12 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     # Neutral default -2.0 (moderate safety, representative of a typical listed company).
     X['ohlson_o']        = num('ohlson_o', -2.0).clip(-10, 5)
 
+    # ── Insider activity (from insider_features.py → technical_signals) ──
+    # > 0.5 = promoters/directors accumulating (strong India signal: insider buying rarely occurs
+    # without conviction). Neutral 0.5 = no data; never penalises uncovered stocks.
+    X['insider_buy_pct_90d'] = num('insider_buy_pct_90d', 0.5).clip(0, 1)
+    X['insider_x_score']     = X['insider_buy_pct_90d'] * X['signal_score']
+
     # NOTE: market-level India VIX + breadth were tested as ensemble features (raw and as
     # cross-sectional interactions) and BOTH hurt held-out AUC vs omitting them entirely
     # (baseline cv 0.651/held-out 0.543; interactions 0.640/0.531; raw 0.606/0.493). They add
@@ -261,6 +267,7 @@ def load_training_data() -> pd.DataFrame:
                ts.sector_ret_5d, ts.sector_ret_21d,
                ts.iv_rank, ts.iv_skew,
                ts.rs_rank_21d, ts.rs_rank_63d,
+               ts.insider_buy_pct_90d,
                COALESCE(fh.fifty_two_week_high, sf.fifty_two_week_high) AS fifty_two_week_high,
                COALESCE(fh.piotroski_f_score, sf.piotroski_f_score)     AS piotroski_f_score,
                COALESCE(fh.debt_to_equity, sf.debt_to_equity)           AS debt_to_equity,
@@ -337,6 +344,7 @@ def load_pending_signals() -> pd.DataFrame:
                ts.sector_ret_5d, ts.sector_ret_21d,
                ts.iv_rank, ts.iv_skew,
                ts.rs_rank_21d, ts.rs_rank_63d,
+               ts.insider_buy_pct_90d,
                sf.fifty_two_week_high,
                sf.piotroski_f_score, sf.debt_to_equity, sf.operating_margins,
                sf.return_on_equity, sf.revenue_growth, sf.earnings_growth,
