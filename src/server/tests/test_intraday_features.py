@@ -62,14 +62,20 @@ class TestOpeningRangeBreak:
 
 class TestVwapDeviation:
     def test_close_above_vwap_is_positive(self, monkeypatch):
-        bars = pd.DataFrame([_bar('SYM', 9, 15, 100, 105, 95, 110, 10_000, 100.0)])
+        bars = pd.DataFrame([
+            _bar('SYM', 9, 15, 100, 105, 95, 100, 10_000, 100.0),
+            _bar('SYM', 9, 30, 100, 105, 95, 110, 10_000, 100.0),
+        ])
         monkeypatch.setattr('src.server.intraday_features.read_df', lambda sql, params=(): bars)
         result = compute_intraday_features(_DATE)
         dev = result[result['symbol'] == 'SYM']['vwap_deviation_pct'].iloc[0]
         assert dev > 0.0
 
     def test_close_below_vwap_is_negative(self, monkeypatch):
-        bars = pd.DataFrame([_bar('SYM2', 9, 15, 100, 105, 95, 90, 10_000, 100.0)])
+        bars = pd.DataFrame([
+            _bar('SYM2', 9, 15, 100, 105, 95, 100, 10_000, 100.0),
+            _bar('SYM2', 9, 30, 100, 105, 95, 90, 10_000, 100.0),
+        ])
         monkeypatch.setattr('src.server.intraday_features.read_df', lambda sql, params=(): bars)
         result = compute_intraday_features(_DATE)
         dev = result[result['symbol'] == 'SYM2']['vwap_deviation_pct'].iloc[0]
@@ -102,7 +108,10 @@ class TestFirstHourVolShare:
         assert result.empty
 
     def test_output_columns(self, monkeypatch):
-        df = pd.DataFrame([_bar('A', 9, 15, 100, 105, 95, 100, 1000, 100.0)])
+        df = pd.DataFrame([
+            _bar('A', 9, 15, 100, 105, 95, 100, 1000, 100.0),
+            _bar('A', 9, 30, 100, 105, 95, 100, 1000, 100.0),
+        ])
         monkeypatch.setattr('src.server.intraday_features.read_df', lambda sql, params=(): df)
         result = compute_intraday_features(_DATE)
         for col in ['symbol', 'opening_range_break', 'vwap_deviation_pct', 'first_hour_vol_share']:
