@@ -30,6 +30,47 @@ from db_compat import read_df, executemany, query_all
 CHANDELIER_ATR_MULT = 3.0   # trailing stop = highest-high-since-entry − 3×ATR (mirrors resolver)
 ATR_WINDOW = 14
 
+# Triple-barrier defaults: vol-scaled, asymmetric (reward:risk 2:1).
+TB_K_UP   = 2.0     # upper barrier = +k_up · atr_pct
+TB_K_DN   = 1.0     # lower barrier = −k_dn · atr_pct
+TB_COST_PCT = 0.4   # round-trip cost band; |horizon close| inside it is NEUTRAL (excluded)
+
+
+def triple_barrier_label(mfe_pct, mae_pct, mfe_before_mae, horizon_close_pct,
+                         atr_pct, k_up: float = TB_K_UP, k_dn: float = TB_K_DN,
+                         cost_pct: float = TB_COST_PCT):
+    """López de Prado triple-barrier label from precomputed excursions.
+
+    Barriers are volatility-scaled and asymmetric: upper = +k_up·atr_pct,
+    lower = −k_dn·atr_pct. Returns 1 (win), 0 (loss), or None (neutral / undecidable,
+    excluded from training).
+
+      - If both barriers are touched, `mfe_before_mae` decides which came first.
+      - If only one is touched, it wins.
+      - If neither is touched (time barrier) — or atr_pct is missing/≤0 so barriers are
+        undefined — label by the net-of-cost sign of horizon_close_pct; inside the cost
+        band it is NEUTRAL (None).
+    """
+    if horizon_close_pct is None:
+        return None
+
+    if atr_pct and atr_pct > 0:
+        upper = k_up * atr_pct
+        lower = -k_dn * atr_pct
+        hit_up = mfe_pct is not None and mfe_pct >= upper
+        hit_dn = mae_pct is not None and mae_pct <= lower
+        if hit_up and hit_dn:
+            return 1 if mfe_before_mae else 0
+        if hit_up:
+            return 1
+        if hit_dn:
+            return 0
+        # neither barrier touched → fall through to the time-barrier rule
+
+    if abs(horizon_close_pct) < cost_pct:
+        return None
+    return 1 if horizon_close_pct > cost_pct else 0
+
 
 def compute_atr(prior_bars: list, window: int = ATR_WINDOW) -> float:
     """Wilder-style ATR over the bars immediately preceding entry.
@@ -86,15 +127,24 @@ def compute_excursions(entry: float, bars: list, atr: float,
     if trail_exit_pct is None:
         trail_exit_pct = horizon_close_pct              # never stopped → held to horizon close
 
+    mfe_before_mae = 1 if (days_to_mfe and (days_to_mae == 0 or days_to_mfe <= days_to_mae)) else 0
+    atr_pct = round(atr / entry * 100.0, 4) if atr and atr > 0 else 0.0
+    tb_label = triple_barrier_label(
+        round(mfe_pct, 4), round(mae_pct, 4), mfe_before_mae,
+        round(horizon_close_pct, 4), atr_pct,
+    )
+
     return {
         "mfe_pct": round(mfe_pct, 4),
         "mae_pct": round(mae_pct, 4),
         "days_to_mfe": days_to_mfe,
         "days_to_mae": days_to_mae,
-        "mfe_before_mae": 1 if (days_to_mfe and (days_to_mae == 0 or days_to_mfe <= days_to_mae)) else 0,
+        "mfe_before_mae": mfe_before_mae,
         "trail_exit_pct": round(trail_exit_pct, 4),
         "trail_exit_day": trail_exit_day,
         "horizon_close_pct": round(horizon_close_pct, 4),
+        "atr_pct": atr_pct,
+        "tb_label": tb_label,
     }
 
 
@@ -147,7 +197,8 @@ def run(horizon: int | None = None, limit: int | None = None) -> int:
             symbol, signal_date, int(hd), float(entry),
             exc["mfe_pct"], exc["mae_pct"], exc["days_to_mfe"], exc["days_to_mae"],
             exc["mfe_before_mae"], exc["trail_exit_pct"], exc["trail_exit_day"],
-            exc["horizon_close_pct"], datetime.datetime.now().isoformat(),
+            exc["horizon_close_pct"], exc["atr_pct"], exc["tb_label"],
+            datetime.datetime.now().isoformat(),
         ))
 
     if not rows:
@@ -158,8 +209,8 @@ def run(horizon: int | None = None, limit: int | None = None) -> int:
         """INSERT INTO signal_excursions
              (symbol, signal_date, horizon_days, entry_price,
               mfe_pct, mae_pct, days_to_mfe, days_to_mae, mfe_before_mae,
-              trail_exit_pct, trail_exit_day, horizon_close_pct, computed_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              trail_exit_pct, trail_exit_day, horizon_close_pct, atr_pct, tb_label, computed_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(symbol, signal_date, horizon_days) DO UPDATE SET
              entry_price       = excluded.entry_price,
              mfe_pct           = excluded.mfe_pct,
@@ -170,6 +221,8 @@ def run(horizon: int | None = None, limit: int | None = None) -> int:
              trail_exit_pct    = excluded.trail_exit_pct,
              trail_exit_day    = excluded.trail_exit_day,
              horizon_close_pct = excluded.horizon_close_pct,
+             atr_pct           = excluded.atr_pct,
+             tb_label          = excluded.tb_label,
              computed_at       = excluded.computed_at""",
         rows,
     )

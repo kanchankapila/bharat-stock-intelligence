@@ -263,9 +263,26 @@ def _table_columns(conn: ConnWrapper, table: str) -> list:
     return [r[1] for r in rows]
 
 
-def load_training_data() -> pd.DataFrame:
-    q = """
-        SELECT so.symbol, so.signal_date, so.horizon_days, so.outcome,
+def load_training_data(label: str = 'horizon') -> pd.DataFrame:
+    """Load labeled training rows. `label`:
+      - 'horizon'        → so.outcome ∈ {WIN,LOSS} thresholded at the horizon (default).
+      - 'triple_barrier' → se.tb_label (vol-scaled first-touch label from signal_excursions).
+    """
+    if label == 'triple_barrier':
+        label_select = "se.tb_label AS outcome"
+        label_join = (
+            "LEFT JOIN signal_excursions se "
+            "ON se.symbol = so.symbol AND se.signal_date = so.signal_date "
+            "AND se.horizon_days = so.horizon_days"
+        )
+        label_where = "se.tb_label IS NOT NULL"
+    else:
+        label_select = "so.outcome"
+        label_join = ""
+        label_where = "so.outcome IN ('WIN','LOSS')\n          AND so.return_pct IS NOT NULL"
+
+    q = f"""
+        SELECT so.symbol, so.signal_date, so.horizon_days, {label_select},
                so.signal_score, so.signals_json, so.return_pct,
                ts.rsi, ts.adx, ts.nifty_regime, ts.cmp, ts.sma200, ts.volume_ratio,
                ts.fii_3d_net,
@@ -336,11 +353,16 @@ def load_training_data() -> pd.DataFrame:
                     AND p2.score_type = 'ohlson_o_score'
                     AND p2.date <= so.signal_date
               )
-        WHERE so.outcome IN ('WIN','LOSS')
-          AND so.return_pct IS NOT NULL
+        {label_join}
+        WHERE {label_where}
     """
     df = read_df(q)
-    df['outcome'] = df['outcome'].map({'WIN': 1, 'LOSS': 0})
+    if label == 'triple_barrier':
+        df['outcome'] = pd.to_numeric(df['outcome'], errors='coerce').astype('Int64')
+        df = df[df['outcome'].notna()].copy()
+        df['outcome'] = df['outcome'].astype(int)
+    else:
+        df['outcome'] = df['outcome'].map({'WIN': 1, 'LOSS': 0})
     return df
 
 
@@ -659,8 +681,8 @@ def register_model(conn: ConnWrapper, ensemble: dict) -> int:
             (model_name, model_version, model_type, trained_at,
              training_samples, cv_roc_auc, cv_accuracy,
              test_roc_auc, precision_score, recall_score, f1_score,
-             feature_count, top_features_json, model_path, is_active, horizon_days)
-        VALUES ('ensemble', ?, 'Stacking Ensemble', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 15)
+             feature_count, top_features_json, model_path, is_active, horizon_days, notes)
+        VALUES ('ensemble', ?, 'Stacking Ensemble', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 15, ?)
         RETURNING id
     """, (
         version,
@@ -675,6 +697,7 @@ def register_model(conn: ConnWrapper, ensemble: dict) -> int:
         len(ensemble['feature_names']),
         json.dumps(top_feats),
         ENSEMBLE_PATH,
+        f"label={ensemble.get('label', 'horizon')}",
     ))
     model_id = cur.fetchone()[0]
 
@@ -769,7 +792,8 @@ def score_pending(conn: ConnWrapper, ensemble: dict) -> int:
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def run(do_train: bool = True, do_score: bool = True,
-        retrain_full: bool = False, min_samples: int = 30):
+        retrain_full: bool = False, min_samples: int = 30,
+        label: str = 'horizon'):
     try:
         from lightgbm import LGBMClassifier  # noqa: F401 — verify dependency at startup
     except ImportError:
@@ -784,7 +808,7 @@ def run(do_train: bool = True, do_score: bool = True,
             else:
                 print("[Ensemble] Retraining (incremental — same architecture)...")
 
-            df = load_training_data()
+            df = load_training_data(label=label)
             df = df.sort_values('signal_date').reset_index(drop=True)
             if len(df) < min_samples:
                 print(f"[Ensemble] Need {min_samples} samples, have {len(df)}. Skipping train.")
@@ -795,6 +819,7 @@ def run(do_train: bool = True, do_score: bool = True,
                 _hz = int(pd.to_numeric(df['horizon_days'], errors='coerce').median() or 15)
                 ensemble = train_ensemble(X, y, dates=df['signal_date'],
                                           horizon_days=_hz, min_samples=min_samples)
+                ensemble['label'] = label
                 save_ensemble(ensemble)
                 register_model(conn, ensemble)
 
@@ -818,10 +843,12 @@ if __name__ == "__main__":
     parser.add_argument("--score",       action="store_true", help="Score pending signals")
     parser.add_argument("--retrain-full",action="store_true", help="Discard saved model and retrain")
     parser.add_argument("--min-samples", type=int, default=30)
+    parser.add_argument("--label", choices=['horizon', 'triple_barrier'], default='horizon',
+                        help="Training label: fixed-horizon WIN/LOSS (default) or triple-barrier")
     args = parser.parse_args()
 
     do_train = args.train or args.retrain_full or (not args.score)
     do_score = args.score or (not args.train and not args.retrain_full)
 
     run(do_train=do_train, do_score=do_score,
-        retrain_full=args.retrain_full, min_samples=args.min_samples)
+        retrain_full=args.retrain_full, min_samples=args.min_samples, label=args.label)

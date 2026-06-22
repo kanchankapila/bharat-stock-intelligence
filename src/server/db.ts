@@ -1333,6 +1333,11 @@ migrateColumn('screener_master', 'signal_type_tag', "TEXT DEFAULT 'OTHER'");
 // signal_outcomes — max intraday high return over horizon for accurate WIN detection
 migrateColumn('signal_outcomes', 'max_return_pct', 'REAL');
 
+// signal_excursions — triple-barrier label (vol-scaled, asymmetric) + the ATR%% scale
+// it was computed against, written by exit_labeler.py. Consumed by ml_ensemble --label.
+migrateColumn('signal_excursions', 'atr_pct',  'REAL');
+migrateColumn('signal_excursions', 'tb_label', 'INTEGER');
+
 // PHASE 3.5: Schema Normalization — Ensure consistency across all tables
 // Standardize timestamp column naming: created_at, updated_at
 migrateColumn('users', 'created_at', 'DATETIME');

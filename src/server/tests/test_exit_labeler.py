@@ -65,3 +65,52 @@ class TestComputeExcursions:
         exc = compute_excursions(self.ENTRY, bars, atr=2)   # stop = 100 − 6 = 94
         assert exc["trail_exit_day"] == 1
         assert exc["trail_exit_pct"] == pytest.approx(-6.0)  # filled at 94, not at the 80 low
+
+
+# ── Triple-barrier label (López de Prado, vol-scaled, asymmetric) ──────────────
+from exit_labeler import triple_barrier_label
+
+
+class TestTripleBarrierLabel:
+    K_UP, K_DN = 2.0, 1.0  # upper = +2·atr%, lower = −1·atr%
+    COST = 0.4
+
+    def _lab(self, **kw):
+        base = dict(mfe_pct=0.0, mae_pct=0.0, mfe_before_mae=1,
+                    horizon_close_pct=0.0, atr_pct=1.0,
+                    k_up=self.K_UP, k_dn=self.K_DN, cost_pct=self.COST)
+        base.update(kw)
+        return triple_barrier_label(**base)
+
+    def test_upper_barrier_only_is_win(self):
+        # mfe 5 ≥ upper(2); mae -0.5 not ≤ lower(-1)
+        assert self._lab(mfe_pct=5.0, mae_pct=-0.5) == 1
+
+    def test_lower_barrier_only_is_loss(self):
+        # mae -3 ≤ lower(-1); mfe 0.5 not ≥ upper(2)
+        assert self._lab(mfe_pct=0.5, mae_pct=-3.0) == 0
+
+    def test_both_touched_mfe_first_is_win(self):
+        assert self._lab(mfe_pct=3.0, mae_pct=-2.0, mfe_before_mae=1) == 1
+
+    def test_both_touched_mae_first_is_loss(self):
+        assert self._lab(mfe_pct=3.0, mae_pct=-2.0, mfe_before_mae=0) == 0
+
+    def test_time_barrier_positive_close_is_win(self):
+        # neither barrier touched; horizon close +1.5 beats cost band
+        assert self._lab(mfe_pct=1.0, mae_pct=-0.5, horizon_close_pct=1.5) == 1
+
+    def test_time_barrier_within_cost_band_is_neutral(self):
+        assert self._lab(mfe_pct=0.3, mae_pct=-0.3, horizon_close_pct=0.2) is None
+
+    def test_missing_vol_falls_back_to_net_close_sign(self):
+        assert self._lab(atr_pct=0.0, horizon_close_pct=2.0) == 1
+        assert self._lab(atr_pct=0.0, horizon_close_pct=-2.0) == 0
+        assert self._lab(atr_pct=0.0, horizon_close_pct=0.1) is None
+
+    def test_none_horizon_close_is_neutral(self):
+        assert self._lab(horizon_close_pct=None, atr_pct=0.0) is None
+
+    def test_asymmetric_downside_barrier_is_tighter(self):
+        # mae -1.2 ≤ lower(-1) loses, even though upside barrier (+2) is untouched
+        assert self._lab(mfe_pct=1.5, mae_pct=-1.2) == 0
