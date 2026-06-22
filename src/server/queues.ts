@@ -228,14 +228,24 @@ async function processAISignal(job: Job): Promise<void> {
 
   const analysis = await generateStockAnalysis(symbol, stockData);
 
+  // Actionability gate: only persist conviction BUY/SELL signals above the confidence
+  // floor. Drops HOLD and sub-threshold noise so the DB matches what the UI surfaces and
+  // the backtester sees clean, actionable data. (See docs/.../ai-signal-gate-design.md)
+  const { gateAISignal, getAISignalMinConfidence, upsertUnifiedSignal } = await import('./signals');
+  const threshold = await getAISignalMinConfidence();
+  const gate = gateAISignal(analysis as any, threshold);
+  if (!gate.persist) {
+    await job.updateProgress(100);
+    return;
+  }
+
   const now = new Date().toISOString();
 
   // Write to unified_signals so outcome resolver and reward engine can track AI signal performance
-  const { upsertUnifiedSignal } = await import('./signals');
   await upsertUnifiedSignal('AI', {
     symbol,
     signalDate: now.split('T')[0],
-    signalType: analysis.signal ?? 'BUY',
+    signalType: gate.signalType,
     entryPrice: analysis.entry ?? null,
     targetPrice: analysis.target ?? null,
     stopLoss: analysis.stopLoss ?? null,
@@ -254,7 +264,7 @@ async function processAISignal(job: Job): Promise<void> {
       source: 'AI',
       generatedAt: now,
       signal: {
-        signalType: analysis.signal,
+        signalType: gate.signalType,
         entryPrice: analysis.entry ?? null,
         targetPrice: analysis.target ?? null,
         stopLoss: analysis.stopLoss ?? null,

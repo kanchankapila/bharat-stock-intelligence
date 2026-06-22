@@ -1,4 +1,42 @@
-import { dbAll, dbRun, dbTransaction } from './dbAsync';
+import { dbAll, dbGet, dbRun, dbTransaction } from './dbAsync';
+
+export const DEFAULT_AI_SIGNAL_MIN_CONFIDENCE = 65;
+
+export interface AISignalGateResult {
+  persist: boolean;
+  signalType: 'BUY' | 'SELL' | 'HOLD';
+  reason: 'ok' | 'hold' | 'low_confidence';
+}
+
+/**
+ * Actionability gate for the AI signal path. Pure (no DB/Ollama) so it is unit-testable.
+ * Drops HOLD and sub-threshold verdicts; a missing verdict normalizes to HOLD so a blank
+ * analysis can never become a phantom BUY. Confidence is the AI 0-100 scale.
+ */
+export function gateAISignal(
+  analysis: { signal?: string | null; confidence?: number | null },
+  threshold: number,
+): AISignalGateResult {
+  const raw = String(analysis.signal ?? 'HOLD').trim().toUpperCase();
+  const signalType: 'BUY' | 'SELL' | 'HOLD' =
+    raw === 'BUY' || raw === 'SELL' ? raw : 'HOLD';
+
+  if (signalType === 'HOLD') return { persist: false, signalType, reason: 'hold' };
+
+  const confidence = analysis.confidence ?? 0;
+  if (confidence < threshold) return { persist: false, signalType, reason: 'low_confidence' };
+
+  return { persist: true, signalType, reason: 'ok' };
+}
+
+/** Confidence floor for persisting AI signals (app_settings override, default 65). */
+export async function getAISignalMinConfidence(): Promise<number> {
+  const row = await dbGet<{ value: string }>(
+    "SELECT value FROM app_settings WHERE key = 'ai_signal_min_confidence'",
+  );
+  const parsed = row ? Number(row.value) : NaN;
+  return Number.isFinite(parsed) ? parsed : DEFAULT_AI_SIGNAL_MIN_CONFIDENCE;
+}
 
 export interface Signal {
   id?: number;
