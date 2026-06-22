@@ -1092,7 +1092,7 @@ export async function initQueues(): Promise<boolean> {
     for (const r of newsRepeatables) {
       await newsSentimentQueue.removeRepeatableByKey(r.key);
     }
-    await addJobWithCatchup(newsSentimentQueue, 
+    await addJobWithCatchup(newsSentimentQueue,
       'news-sentiment-refresh',
       {},
       {
@@ -1103,11 +1103,27 @@ export async function initQueues(): Promise<boolean> {
       },
     );
 
+    // Per-company Google News (free, per-stock density) — slower cadence, polite to Google.
+    await addJobWithCatchup(newsSentimentQueue,
+      'company-news-refresh',
+      {},
+      {
+        repeat: { every: 6 * 60 * 60 * 1000 }, // every 6 hours
+        jobId: 'company-news-repeatable',
+        removeOnComplete: 3,
+        removeOnFail: 3,
+      },
+    );
+
     newsSentimentWorker = new Worker(
       QUEUE_NEWS_SENTIMENT,
-      async (_job: Job) => {
-        const { runNewsSentimentCycle } = await import('./newsSentimentService');
-        await runNewsSentimentCycle();
+      async (job: Job) => {
+        const svc = await import('./newsSentimentService');
+        if (job.name === 'company-news-refresh') {
+          await svc.runCompanyNewsCycle();
+        } else {
+          await svc.runNewsSentimentCycle();
+        }
       },
       {
         connection,

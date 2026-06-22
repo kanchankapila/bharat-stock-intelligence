@@ -15,7 +15,7 @@ import { rowGroups, bulkUpsert } from './dbBulk';
 import crypto from 'crypto';
 import { fetchGlobalMarketData } from './globalMarketService';
 import {
-  buildAliasIndex, extractSymbolsByName, NEWS_ALIAS_OVERRIDES, type AliasEntry,
+  buildAliasIndex, extractSymbolsByName, companyAliases, NEWS_ALIAS_OVERRIDES, type AliasEntry,
 } from './newsEntityTagger';
 
 function toSqliteDateTime(date: Date): string {
@@ -279,6 +279,113 @@ async function fetchSource(source: NewsSource): Promise<RawNewsItem[]> {
   }
 }
 
+/** Score one raw article and stage its sentiment + legacy rows (deduped by id).
+ *  `forceSymbol` (company-targeted feeds) is unioned with name-tagged co-mentions. */
+function processNewsItem(
+  raw: RawNewsItem, srcName: string, srcType: string,
+  sentRows: Map<string, unknown[]>, legacyRows: Map<string, unknown[]>,
+  forceSymbol?: string,
+): void {
+  const text = `${raw.title} ${raw.description}`;
+  const { sentiment, score } = scoreSentiment(text);
+  const category = classifyCategory(text);
+  const impact   = detectImpact(text, score);
+  const sector   = detectSector(text);
+  const symbols  = forceSymbol
+    ? Array.from(new Set([forceSymbol, ...extractSymbols(text)])).slice(0, 5)
+    : extractSymbols(text);
+
+  const id = crypto.createHash('sha1').update(`${srcName}:${raw.link || raw.title}`).digest('hex');
+
+  let pubAt: string | null = null;
+  try { pubAt = raw.pubDate ? new Date(raw.pubDate).toISOString() : null; } catch { /* skip */ }
+
+  sentRows.set(id, [
+    id, raw.title.slice(0, 500), raw.description.slice(0, 1000),
+    srcName, srcType, raw.link?.slice(0, 500) ?? null, pubAt,
+    sentiment, score, impact, category, JSON.stringify(symbols), sector ?? null,
+  ]);
+
+  const legacySentiment =
+    sentiment === 'BULLISH' ? 'Positive' : sentiment === 'BEARISH' ? 'Negative' : 'Neutral';
+  legacyRows.set(id, [
+    id, raw.title.slice(0, 500), raw.description.slice(0, 500),
+    srcName, legacySentiment, category, raw.link?.slice(0, 500) ?? null,
+    symbols.join(','), pubAt ?? new Date().toISOString(),
+  ]);
+}
+
+/** Bulk-upsert staged sentiment + legacy rows in one transaction. */
+async function persistNewsRows(
+  sentRows: Map<string, unknown[]>, legacyRows: Map<string, unknown[]>,
+): Promise<void> {
+  await dbTransaction(async (tx) => {
+    await bulkUpsert(tx, [...sentRows.values()], 13,
+      n => `INSERT INTO news_sentiment_items
+        (id, title, summary, source, source_type, url, published_at,
+         sentiment, sentiment_score, impact, category, symbols_json, sector)
+        VALUES ${rowGroups(n, 13)}
+        ON CONFLICT(id) DO UPDATE SET
+          sentiment=excluded.sentiment, sentiment_score=excluded.sentiment_score,
+          impact=excluded.impact, category=excluded.category,
+          symbols_json=excluded.symbols_json, sector=excluded.sector`);
+
+    await bulkUpsert(tx, [...legacyRows.values()], 9,
+      n => `INSERT INTO news_articles
+        (id, title, summary, source, sentiment, category, url, symbols, timestamp)
+        VALUES ${rowGroups(n, 9)}
+        ON CONFLICT(id) DO UPDATE SET
+          title=excluded.title, summary=excluded.summary, source=excluded.source,
+          sentiment=excluded.sentiment, category=excluded.category, url=excluded.url,
+          symbols=excluded.symbols, timestamp=excluded.timestamp`);
+  });
+}
+
+// ─── Per-Company News (Google News RSS — free, no key, inherently per-stock) ───
+
+/** Google News RSS search scoped to one company (India edition, last ~7 days). */
+function googleNewsUrl(companyName: string): string {
+  const q = encodeURIComponent(`"${companyName}" when:7d`);
+  return `https://news.google.com/rss/search?q=${q}&hl=en-IN&gl=IN&ceid=IN:en`;
+}
+
+/**
+ * Fetch per-company news for the most liquid names — the universe that actually
+ * generates signals — giving dense, correctly-attributed per-stock coverage that
+ * market-wide RSS cannot. Each article is force-tagged to its query symbol.
+ * Slow cadence (schedule ~6-hourly); concurrency-limited to be polite to Google.
+ */
+export async function runCompanyNewsCycle(limit = 150): Promise<{ companies: number; inserted: number }> {
+  const universe = await dbAll(
+    `SELECT ns.symbol, ns.name FROM nse_stocks ns
+     JOIN stock_fundamentals sf ON sf.symbol = ns.symbol
+     WHERE ns.status = 'ACTIVE' AND ns.name IS NOT NULL AND sf.market_cap IS NOT NULL
+     ORDER BY sf.market_cap DESC LIMIT ?`, [limit],
+  ) as { symbol: string; name: string }[];
+  if (universe.length === 0) return { companies: 0, inserted: 0 };
+
+  await ensureNSESymbols();
+  const sentRows = new Map<string, unknown[]>();
+  const legacyRows = new Map<string, unknown[]>();
+
+  const BATCH = 4;
+  for (let i = 0; i < universe.length; i += BATCH) {
+    const batch = universe.slice(i, i + BATCH);
+    await Promise.all(batch.map(async ({ symbol, name }) => {
+      const cleaned = companyAliases(name)[0] ?? name;
+      const items = await fetchSource({ name: `GoogleNews:${symbol}`, url: googleNewsUrl(cleaned), type: 'INDIAN' });
+      for (const raw of items.slice(0, 8)) {
+        processNewsItem(raw, 'Google News', 'INDIAN', sentRows, legacyRows, symbol);
+      }
+    }));
+    await new Promise(r => setTimeout(r, 250)); // gentle pacing
+  }
+
+  if (sentRows.size > 0) await persistNewsRows(sentRows, legacyRows);
+  console.log(`[SENTIMENT] Company-news cycle: ${universe.length} companies → ${sentRows.size} articles`);
+  return { companies: universe.length, inserted: sentRows.size };
+}
+
 // ─── Main Fetch + Score Cycle ─────────────────────────────────────────────────
 
 export async function runNewsSentimentCycle(): Promise<{
@@ -305,73 +412,14 @@ export async function runNewsSentimentCycle(): Promise<{
     for (const { src, items } of results) {
       fetched += items.length;
       for (const raw of items.slice(0, 30)) {
-        const text = `${raw.title} ${raw.description}`;
-        const { sentiment, score } = scoreSentiment(text);
-        const category = classifyCategory(text);
-        const impact   = detectImpact(text, score);
-        const sector   = detectSector(text);
-        const symbols  = extractSymbols(text);
-
-        const id = crypto
-          .createHash('sha1')
-          .update(`${src.name}:${raw.link || raw.title}`)
-          .digest('hex');
-
-        let pubAt: string | null = null;
-        try { pubAt = raw.pubDate ? new Date(raw.pubDate).toISOString() : null; } catch { /* skip */ }
-
-        sentRows.set(id, [
-          id, raw.title.slice(0, 500),
-          raw.description.slice(0, 1000),
-          src.name, src.type,
-          raw.link?.slice(0, 500) ?? null,
-          pubAt,
-          sentiment, score,
-          impact, category,
-          JSON.stringify(symbols),
-          sector ?? null,
-        ]);
-
-        // Legacy table (maps sentiment for Python scoring engine)
-        const legacySentiment =
-          sentiment === 'BULLISH' ? 'Positive' :
-          sentiment === 'BEARISH' ? 'Negative' : 'Neutral';
-
-        legacyRows.set(id, [
-          id, raw.title.slice(0, 500),
-          raw.description.slice(0, 500),
-          src.name, legacySentiment,
-          category, raw.link?.slice(0, 500) ?? null,
-          symbols.join(','),
-          pubAt ?? new Date().toISOString(),
-        ]);
+        processNewsItem(raw, src.name, src.type, sentRows, legacyRows);
       }
     }
   }
 
   const inserted = sentRows.size;
 
-  await dbTransaction(async (tx) => {
-    await bulkUpsert(tx, [...sentRows.values()], 13,
-      n => `INSERT INTO news_sentiment_items
-        (id, title, summary, source, source_type, url, published_at,
-         sentiment, sentiment_score, impact, category, symbols_json, sector)
-        VALUES ${rowGroups(n, 13)}
-        ON CONFLICT(id) DO UPDATE SET
-          sentiment=excluded.sentiment, sentiment_score=excluded.sentiment_score,
-          impact=excluded.impact, category=excluded.category,
-          symbols_json=excluded.symbols_json, sector=excluded.sector`);
-
-    // Also sync to the legacy news_articles table for scoring engine compatibility
-    await bulkUpsert(tx, [...legacyRows.values()], 9,
-      n => `INSERT INTO news_articles
-        (id, title, summary, source, sentiment, category, url, symbols, timestamp)
-        VALUES ${rowGroups(n, 9)}
-        ON CONFLICT(id) DO UPDATE SET
-          title=excluded.title, summary=excluded.summary, source=excluded.source,
-          sentiment=excluded.sentiment, category=excluded.category, url=excluded.url,
-          symbols=excluded.symbols, timestamp=excluded.timestamp`);
-  });
+  await persistNewsRows(sentRows, legacyRows);
 
   // AI enrichment for HIGH-impact items not yet AI-scored
   const highImpact = await dbAll(`
