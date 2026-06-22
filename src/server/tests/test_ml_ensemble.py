@@ -118,6 +118,43 @@ class TestRelativeStrengthFeatures:
         assert list(X['rs_rank_21d']) == pytest.approx([0.0, 0.4, 1.0])
 
 
+class TestMCVitalsFeatures:
+    """Altman Z and Ohlson O-Score from proprietary_scores_history AS-OF pivot."""
+
+    def test_vitals_features_present(self):
+        X = build_features(_make_feature_df())
+        for col in ['altman_z', 'altman_distress', 'ohlson_o']:
+            assert col in X.columns, f"Expected {col} in build_features output"
+
+    def test_missing_vitals_no_nan(self):
+        X = build_features(_make_feature_df())
+        assert not X['altman_z'].isna().any()
+        assert not X['altman_distress'].isna().any()
+        assert not X['ohlson_o'].isna().any()
+
+    def test_altman_distress_fires_below_threshold(self):
+        df = _make_feature_df(n=3)
+        df['altman_z'] = [1.0, 2.0, 3.5]  # distress / grey / safe
+        X = build_features(df)
+        assert X['altman_distress'].iloc[0] == 1.0  # < 1.23 → distress flag
+        assert X['altman_distress'].iloc[1] == 0.0  # grey zone → no flag
+        assert X['altman_distress'].iloc[2] == 0.0  # safe zone → no flag
+
+    def test_altman_z_clipped(self):
+        df = _make_feature_df(n=2)
+        df['altman_z'] = [-99.0, 999.0]
+        X = build_features(df)
+        assert X['altman_z'].iloc[0] >= -5.0
+        assert X['altman_z'].iloc[1] <= 15.0
+
+    def test_ohlson_o_clipped(self):
+        df = _make_feature_df(n=2)
+        df['ohlson_o'] = [-99.0, 999.0]
+        X = build_features(df)
+        assert X['ohlson_o'].iloc[0] >= -10.0
+        assert X['ohlson_o'].iloc[1] <= 5.0
+
+
 class TestEmptyInput:
     """build_features must not crash when load_pending_signals returns zero rows (the calendar
     block divided an empty datetime-typed Series)."""
@@ -248,3 +285,11 @@ class TestLoadTrainingDataNoLeakColumns:
         assert 'max_return_pct' not in src_code, (
             "load_training_data selects max_return_pct — this is the maximum return DURING the horizon (future leak)"
         )
+
+    def test_vitals_query_uses_as_of_join(self):
+        import inspect
+        src = inspect.getsource(load_training_data)
+        assert 'proprietary_scores_history' in src
+        assert 'p2.date <= so.signal_date' in src, "Altman Z join must be AS-OF (no look-ahead)"
+        assert 'altman_z_score' in src, "Must query for altman_z_score"
+        assert 'ohlson_o_score' in src, "Must query for ohlson_o_score"

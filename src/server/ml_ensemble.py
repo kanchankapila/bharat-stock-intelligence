@@ -184,6 +184,25 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     X['rs_rank_21d'] = num('rs_rank_21d', 0.5).clip(0, 1)
     X['rs_rank_63d'] = num('rs_rank_63d', 0.5).clip(0, 1)
 
+    # ── Analyst consensus (from analyst_estimates_history, AS-OF join) ──
+    # analyst_buy_pct: fraction of bullish (BUY+OUTPERFORM) ratings — neutral default 0.5.
+    # n_analysts_log:  log-scale analyst coverage (more coverage = more liquid/followed).
+    # target_upside_pct: consensus price target vs current price — forward-return signal.
+    n_analysts = num('n_analysts', 0)
+    n_buy      = num('buy_count', 0)
+    X['n_analysts_log']    = np.log1p(n_analysts)
+    X['analyst_buy_pct']   = (n_buy / n_analysts.replace(0, np.nan)).fillna(0.5).clip(0, 1)
+    X['target_upside_pct'] = ((num('target_mean', np.nan) - cmp_) / cmp_.replace(0, np.nan) * 100).fillna(0)
+
+    # ── MC Vitals: financial distress scores (AS-OF from proprietary_scores_history) ──
+    # Altman Z-Score: > 2.99 = safe zone, 1.23–2.99 = grey zone, < 1.23 = distress zone.
+    # Neutral default 2.0 = mid-grey (avoids penalising stocks not yet in 150-stock batch).
+    X['altman_z']        = num('altman_z', 2.0).clip(-5, 15)
+    X['altman_distress'] = (num('altman_z', 2.0) < 1.23).astype(np.float32)
+    # Ohlson O-Score: log-odds of failure; negative = lower failure probability.
+    # Neutral default -2.0 (moderate safety, representative of a typical listed company).
+    X['ohlson_o']        = num('ohlson_o', -2.0).clip(-10, 5)
+
     # NOTE: market-level India VIX + breadth were tested as ensemble features (raw and as
     # cross-sectional interactions) and BOTH hurt held-out AUC vs omitting them entirely
     # (baseline cv 0.651/held-out 0.543; interactions 0.640/0.531; raw 0.606/0.493). They add
@@ -251,7 +270,10 @@ def load_training_data() -> pd.DataFrame:
                COALESCE(fh.earnings_growth, sf.earnings_growth)         AS earnings_growth,
                COALESCE(fh.earnings_yield, sf.earnings_yield)           AS earnings_yield,
                COALESCE(fh.price_to_book, sf.price_to_book)             AS price_to_book,
-               COALESCE(fh.market_cap, sf.market_cap)                   AS market_cap
+               COALESCE(fh.market_cap, sf.market_cap)                   AS market_cap,
+               aeh.n_analysts, aeh.buy_count, aeh.target_mean,
+               psh_az.score_value AS altman_z,
+               psh_oo.score_value AS ohlson_o
         FROM signal_outcomes so
         LEFT JOIN technical_signals ts
                ON ts.symbol = so.symbol AND ts.date = so.signal_date
@@ -266,6 +288,35 @@ def load_training_data() -> pd.DataFrame:
               )
         LEFT JOIN stock_fundamentals sf
                ON sf.symbol = so.symbol
+        -- AS-OF analyst consensus: latest snapshot on/before signal date (no look-ahead)
+        LEFT JOIN analyst_estimates_history aeh
+               ON aeh.symbol = so.symbol
+              AND aeh.as_of_date = (
+                  SELECT MAX(aeh2.as_of_date) FROM analyst_estimates_history aeh2
+                  WHERE aeh2.symbol = so.symbol AND aeh2.as_of_date <= so.signal_date
+              )
+        -- AS-OF Altman Z Score (financial distress indicator; > 2.99 safe, < 1.23 distress)
+        LEFT JOIN proprietary_scores_history psh_az
+               ON psh_az.symbol = so.symbol
+              AND psh_az.source = 'moneycontrol'
+              AND psh_az.score_type = 'altman_z_score'
+              AND psh_az.date = (
+                  SELECT MAX(p2.date) FROM proprietary_scores_history p2
+                  WHERE p2.symbol = so.symbol AND p2.source = 'moneycontrol'
+                    AND p2.score_type = 'altman_z_score'
+                    AND p2.date <= so.signal_date
+              )
+        -- AS-OF Ohlson O-Score (log-odds of failure; negative = safer)
+        LEFT JOIN proprietary_scores_history psh_oo
+               ON psh_oo.symbol = so.symbol
+              AND psh_oo.source = 'moneycontrol'
+              AND psh_oo.score_type = 'ohlson_o_score'
+              AND psh_oo.date = (
+                  SELECT MAX(p2.date) FROM proprietary_scores_history p2
+                  WHERE p2.symbol = so.symbol AND p2.source = 'moneycontrol'
+                    AND p2.score_type = 'ohlson_o_score'
+                    AND p2.date <= so.signal_date
+              )
         WHERE so.outcome IN ('WIN','LOSS')
           AND so.return_pct IS NOT NULL
     """
@@ -289,9 +340,39 @@ def load_pending_signals() -> pd.DataFrame:
                sf.fifty_two_week_high,
                sf.piotroski_f_score, sf.debt_to_equity, sf.operating_margins,
                sf.return_on_equity, sf.revenue_growth, sf.earnings_growth,
-               sf.earnings_yield, sf.price_to_book, sf.market_cap
+               sf.earnings_yield, sf.price_to_book, sf.market_cap,
+               aeh.n_analysts, aeh.buy_count, aeh.target_mean,
+               psh_az.score_value AS altman_z,
+               psh_oo.score_value AS ohlson_o
         FROM technical_signals ts
         LEFT JOIN stock_fundamentals sf ON sf.symbol = ts.symbol
+        -- Latest analyst snapshot on/before today
+        LEFT JOIN analyst_estimates_history aeh
+               ON aeh.symbol = ts.symbol
+              AND aeh.as_of_date = (
+                  SELECT MAX(aeh2.as_of_date) FROM analyst_estimates_history aeh2
+                  WHERE aeh2.symbol = ts.symbol AND aeh2.as_of_date <= ts.date
+              )
+        LEFT JOIN proprietary_scores_history psh_az
+               ON psh_az.symbol = ts.symbol
+              AND psh_az.source = 'moneycontrol'
+              AND psh_az.score_type = 'altman_z_score'
+              AND psh_az.date = (
+                  SELECT MAX(p2.date) FROM proprietary_scores_history p2
+                  WHERE p2.symbol = ts.symbol AND p2.source = 'moneycontrol'
+                    AND p2.score_type = 'altman_z_score'
+                    AND p2.date <= ts.date
+              )
+        LEFT JOIN proprietary_scores_history psh_oo
+               ON psh_oo.symbol = ts.symbol
+              AND psh_oo.source = 'moneycontrol'
+              AND psh_oo.score_type = 'ohlson_o_score'
+              AND psh_oo.date = (
+                  SELECT MAX(p2.date) FROM proprietary_scores_history p2
+                  WHERE p2.symbol = ts.symbol AND p2.source = 'moneycontrol'
+                    AND p2.score_type = 'ohlson_o_score'
+                    AND p2.date <= ts.date
+              )
         WHERE ts.win_probability IS NULL
           AND ts.signals_json IS NOT NULL
         ORDER BY ts.date DESC
