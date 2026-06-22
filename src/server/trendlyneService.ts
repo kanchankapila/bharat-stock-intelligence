@@ -320,9 +320,9 @@ async function fetchTrendlyneAdvTechnicalAnalysisRaw(symbol: string, timeframe: 
   const dur = durationMap[timeframe] || '24';
 
   console.log(`[TRENDLYNE] Fetching Adv Technical Analysis (${timeframe}) for ${symbol} using tlid: ${tlid}`);
-  const url = `https://trendlyne.com/equity/api/stock/adv-technical-analysis/${tlid}/${dur}/`;
+  const url = `https://trendlyne.com/equity/api/stock/adv-technical-analysis/${tlid}/${dur}/?format=json`;
   try {
-    const response = await fetch(url, { headers: HEADERS });
+    const response = await fetch(url, { headers: { ...HEADERS, 'Referer': 'https://trendlyne.com/' } });
     if (!response.ok) {
       console.warn(`[TRENDLYNE] TA API failed with status ${response.status} for ${symbol}. Returning mock.`);
       const mockDir = typeof __dirname !== 'undefined' ? __dirname : path.resolve(process.cwd(), 'src/server');

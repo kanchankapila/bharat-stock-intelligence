@@ -71,8 +71,19 @@ def fetch_macro(days: int = 30) -> None:
                      ret_5d=excluded.ret_5d, fetched_at=excluded.fetched_at""",
                 macro_rows,
             )
+
+            # Also write to macro_indicators (indicator_name, date, value)
+            indicator_rows = [(label, row[0], row[2]) for row in macro_rows if row[2] is not None]
+            cur.executemany(
+                """INSERT INTO macro_indicators
+                   (indicator_name, date, value)
+                   VALUES (?, ?, ?)
+                   ON CONFLICT(indicator_name, date) DO UPDATE SET
+                     value=excluded.value""",
+                indicator_rows,
+            )
             con.commit()
-            print(f"[MACRO] {label}: {len(macro_rows)} rows upserted")
+            print(f"[MACRO] {label}: {len(macro_rows)} rows upserted (and written to macro_indicators)")
 
             # ── Also write to stock_ohlcv for index symbols ──────────────────
             # feature_engineering.py reads NIFTY50 from stock_ohlcv for nifty_ret_5d/21d

@@ -18,8 +18,8 @@ const fs = require('fs');
 
 const isWin = process.platform === 'win32';
 const VENV_PY = isWin
-  ? path.join('backend-python', 'venv', 'Scripts', 'python.exe')
-  : path.join('backend-python', 'venv', 'bin', 'python');
+  ? path.resolve(__dirname, 'backend-python', 'venv', 'Scripts', 'python.exe')
+  : path.resolve(__dirname, 'backend-python', 'venv', 'bin', 'python');
 
 // Inject .env into EVERY service. The Node app loads dotenv itself, but the three Python
 // services (AlphaQuant, ml-api, chatbot) only see what we hand them — without USE_POSTGRES
@@ -27,7 +27,7 @@ const VENV_PY = isWin
 // Postgres (the split-brain incident). Parsing .env here keeps all four on one DB engine.
 let dotenvVars = {};
 try {
-  dotenvVars = require('dotenv').parse(fs.readFileSync(path.join(__dirname, '.env')));
+  dotenvVars = require('dotenv').parse(fs.readFileSync(path.resolve(__dirname, '.env')));
 } catch (_) { /* .env optional */ }
 
 // Shared restart policy: recover from crashes, but back off and cap to avoid a tight
@@ -39,8 +39,8 @@ const common = {
   min_uptime: 10_000,
   kill_timeout: 10_000,
   env: { ...dotenvVars, PYTHONUNBUFFERED: '1' },
-  out_file: 'logs/pm2-out.log',
-  error_file: 'logs/pm2-err.log',
+  out_file: path.resolve(__dirname, 'logs', 'pm2-out.log'),
+  error_file: path.resolve(__dirname, 'logs', 'pm2-err.log'),
   merge_logs: true,
   time: true,
 };
@@ -50,7 +50,7 @@ module.exports = {
     {
       ...common,
       name: 'bharat-server',
-      script: path.join('node_modules', 'tsx', 'dist', 'cli.mjs'),
+      script: path.resolve(__dirname, 'node_modules', 'tsx', 'dist', 'cli.mjs'),
       args: 'server.ts',
       interpreter: 'node',
       node_args: '--max-old-space-size=4096',
@@ -59,21 +59,21 @@ module.exports = {
       ...common,
       name: 'alphaquant-api',          // FastAPI on :8002 — the service that went silently down
       script: 'main.py',
-      cwd: 'backend-python',
+      cwd: path.resolve(__dirname, 'backend-python'),
       interpreter: isWin
-        ? path.join('venv', 'Scripts', 'python.exe')
-        : path.join('venv', 'bin', 'python'),
+        ? path.resolve(__dirname, 'backend-python', 'venv', 'Scripts', 'python.exe')
+        : path.resolve(__dirname, 'backend-python', 'venv', 'bin', 'python'),
     },
     {
       ...common,
       name: 'ml-api',
-      script: path.join('src', 'server', 'python_api.py'),
+      script: path.resolve(__dirname, 'src', 'server', 'python_api.py'),
       interpreter: VENV_PY,
     },
     {
       ...common,
       name: 'chatbot',                 // FastAPI on :8001
-      script: path.join('src', 'server', 'chatbot', 'app.py'),
+      script: path.resolve(__dirname, 'src', 'server', 'chatbot', 'app.py'),
       interpreter: VENV_PY,
     },
   ],

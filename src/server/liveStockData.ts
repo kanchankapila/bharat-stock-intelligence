@@ -602,10 +602,10 @@ function enrichMarketData(data: MarketData): MarketData {
  * Called daily after market close via BullMQ queue
  */
 function parseVolumeToNumber(v: string | number): number {
-  if (typeof v === 'number') return v;
-  if (v.endsWith('M')) return parseFloat(v) * 1_000_000;
-  if (v.endsWith('K')) return parseFloat(v) * 1_000;
-  return parseFloat(v) || 0;
+  if (typeof v === 'number') return Math.round(v);
+  if (v.endsWith('M')) return Math.round(parseFloat(v) * 1_000_000);
+  if (v.endsWith('K')) return Math.round(parseFloat(v) * 1_000);
+  return Math.round(parseFloat(v) || 0);
 }
 
 export async function persistTodayOHLCVData(stocks: MarketData[]): Promise<{ inserted: number; failed: number }> {

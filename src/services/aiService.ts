@@ -101,6 +101,16 @@ Respond ONLY with valid JSON matching exactly this structure:
           keep_alive: 0,
           options: { ...FAST_OPTIONS, num_gpu: 0 },
         } as any) as any;
+      } else if (errorStr.includes('does not support chat') || errorStr.includes('does not support')) {
+        // Model is a base/generate-only model (e.g. mistral) — fall back to generate API
+        const gen = await ollama.generate({
+          model: OLLAMA_SIGNAL_MODEL,
+          prompt,
+          format: 'json',
+          keep_alive: 0,
+          options: FAST_OPTIONS,
+        } as any) as any;
+        response = { message: { content: gen.response } };
       } else {
         throw error;
       }
@@ -175,6 +185,15 @@ Respond ONLY with valid JSON:
           keep_alive: 0,
           options: { ...PROFILE_OPTIONS, num_gpu: 0 },
         } as any) as any;
+      } else if (errorStr.includes('does not support chat') || errorStr.includes('does not support')) {
+        const gen = await ollama.generate({
+          model: OLLAMA_PROFILE_MODEL,
+          prompt,
+          format: 'json',
+          keep_alive: 0,
+          options: PROFILE_OPTIONS,
+        } as any) as any;
+        response = { message: { content: gen.response } };
       } else {
         throw error;
       }

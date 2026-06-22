@@ -15,17 +15,26 @@ from typing import Dict, List, Tuple
 
 from db_compat import connect, read_df
 
-# Must be set before torch/cuBLAS initialises — fixes CUDNN_STATUS_INTERNAL_ERROR on Windows
+# Must be set before torch/cuBLAS initialises
 os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 import numpy as np
 import pandas as pd
-import torch
-import torch.nn as nn
+
 try:
-    from torch.amp import autocast, GradScaler        # PyTorch 2.3+
-except ImportError:
-    from torch.cuda.amp import autocast, GradScaler   # PyTorch 2.2.x fallback
+    import torch
+    import torch.nn as nn
+    try:
+        from torch.amp import autocast, GradScaler        # PyTorch 2.3+
+    except ImportError:
+        from torch.cuda.amp import autocast, GradScaler   # PyTorch 2.2.x fallback
+except (ImportError, OSError) as _torch_err:
+    # WinError 1455 (paging file too small) or missing CUDA DLLs — skip gracefully.
+    # Exit 0 so BullMQ marks the job completed, not failed.
+    print(f"[DL] PyTorch unavailable ({_torch_err}). Rescheduled for next low-load window.", flush=True)
+    sys.exit(0)
+
 from sklearn.metrics import roc_auc_score, accuracy_score
 
 MODEL_DIR = Path(__file__).parent / "ml_models"

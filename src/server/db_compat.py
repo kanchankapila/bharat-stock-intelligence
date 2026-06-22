@@ -25,6 +25,19 @@ from urllib.parse import quote_plus
 import pandas as pd
 from sqlalchemy import create_engine, text
 
+# Auto-load .env once per process (not on every importlib.reload).
+# Uses override=False so tests that set DATABASE_URL/USE_POSTGRES before importing are unaffected.
+import sys as _sys
+if "db_compat:_dotenv_loaded" not in _sys.modules:
+    _sys.modules["db_compat:_dotenv_loaded"] = object()  # sentinel survives reload
+    try:
+        from dotenv import load_dotenv as _load_dotenv
+        _env_file = Path(__file__).resolve().parents[2] / ".env"
+        if _env_file.exists():
+            _load_dotenv(_env_file, override=False)
+    except ImportError:
+        pass
+
 try:  # works whether run as a script (src/server on sys.path) or imported as a package
     from sql_translate import translate, build_params, use_postgres
 except ImportError:  # pragma: no cover
