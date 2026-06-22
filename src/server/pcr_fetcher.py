@@ -1,10 +1,13 @@
 """
 PCR (Put-Call Ratio) Fetcher
 ==============================
-Fetches options OI data from NSE for Nifty 50 stocks and computes
-per-symbol PCR from the option chain API.
+Fetches nearest-expiry options OI from NiftyTrader for Nifty 50 stocks and computes
+per-symbol PCR. NiftyTrader is the source because NSE's own option-chain API is behind
+Akamai Bot Manager (returns {} to non-browser clients). NiftyTrader does NOT populate
+equity IV, so atm_iv/iv_skew stay None — a documented vendor limit (see ml-data-gaps).
+The legacy NSE `fetch_symbol` method is retained but unused.
 
-Stores results in stock_options_oi table for use by PCR_EXTREME signal detection.
+Stores results in stock_options_oi for use by PCR_EXTREME signal detection.
 
 Run:  python pcr_fetcher.py
       python pcr_fetcher.py --symbols RELIANCE,TCS,INFY
@@ -23,6 +26,24 @@ from db_compat import get_engine
 
 NSE_OPTION_CHAIN_URL = "https://www.nseindia.com/api/option-chain-equities?symbol={symbol}"
 NSE_INDEX_CHAIN_URL  = "https://www.nseindia.com/api/option-chain-indices?symbol={symbol}"
+
+# NiftyTrader webapi — the working source for equity OI/PCR. NSE's own option-chain
+# API is behind Akamai Bot Manager (returns {} to non-browser clients), so PCR/OI is
+# sourced here instead. NiftyTrader does NOT populate equity IV (calls_iv/puts_iv=0),
+# so atm_iv/iv_skew stay None for stocks — a documented vendor limit, not a bug.
+NIFTYTRADER_CHAIN_URL = (
+    "https://webapi.niftytrader.in/webapi/option/option-chain-data"
+    "?symbol={symbol}&exchange=nse&expiryDate=&atmBelow=0&atmAbove=0"
+)
+NIFTYTRADER_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    ),
+    "Accept":  "application/json, text/plain, */*",
+    "Referer": "https://www.niftytrader.in/",
+    "Origin":  "https://www.niftytrader.in",
+}
 
 HEADERS = {
     "User-Agent": (
@@ -70,19 +91,95 @@ def compute_atm_iv_skew(strikes: list, underlying: float) -> tuple:
     return atm_iv, iv_skew
 
 
+def parse_niftytrader_chain(result_data: dict, symbol: str) -> dict | None:
+    """Turn a NiftyTrader option-chain `resultData` payload into a stock_options_oi row.
+
+    NiftyTrader's default (empty expiryDate) call returns only the NEAREST expiry, so
+    near-expiry OI equals total OI. Equity IV is 0.0 → compute_atm_iv_skew yields
+    (None, None) (zero IVs are filtered). Returns None when the chain is empty."""
+    oc = result_data.get("opDatas") or result_data.get("optionChain") or []
+    if not oc:
+        return None
+
+    first = oc[0]
+    underlying = (
+        result_data.get("spotPrice")
+        or first.get("index_close")
+        or first.get("last_price")
+        or 0
+    )
+
+    total_call_oi = sum((r.get("calls_oi") or 0) for r in oc)
+    total_put_oi  = sum((r.get("puts_oi")  or 0) for r in oc)
+    call_vol      = sum((r.get("calls_volume") or 0) for r in oc)
+    put_vol       = sum((r.get("puts_volume")  or 0) for r in oc)
+
+    pcr     = total_put_oi / total_call_oi if total_call_oi > 0 else None
+    pcr_vol = put_vol / call_vol if call_vol > 0 else None
+
+    strikes = [
+        (r.get("strike_price"), r.get("calls_iv") or 0, r.get("puts_iv") or 0)
+        for r in oc if r.get("strike_price") is not None
+    ]
+    atm_iv, iv_skew = compute_atm_iv_skew(strikes, underlying)
+
+    # Max pain: strike minimizing total writer payout across the chain.
+    max_pain = underlying
+    min_pain = float("inf")
+    for sp, _, _ in strikes:
+        pain = 0.0
+        for r in oc:
+            s = r.get("strike_price")
+            if s is None:
+                continue
+            if sp > s:
+                pain += (r.get("calls_oi") or 0) * (sp - s)
+            elif sp < s:
+                pain += (r.get("puts_oi") or 0) * (s - sp)
+        if pain < min_pain:
+            min_pain = pain
+            max_pain = sp
+
+    expiry = str(first.get("expiry_date") or "")[:10]
+
+    return {
+        "symbol":        symbol,
+        "expiry":        expiry,
+        "call_oi":       total_call_oi,
+        "put_oi":        total_put_oi,
+        "pcr":           pcr,
+        "pcr_vol":       pcr_vol,
+        "total_call_oi": total_call_oi,
+        "total_put_oi":  total_put_oi,
+        "market_pcr":    pcr,
+        "atm_iv":        atm_iv,
+        "iv_skew":       iv_skew,
+        "max_pain":      max_pain,
+    }
+
+
 class PCRFetcher:
     def __init__(self):
         self.engine  = get_engine()
         self.session = requests.Session()
-        self.session.headers.update(HEADERS)
-        self._prime_session()
+        self.session.headers.update(NIFTYTRADER_HEADERS)
 
-    def _prime_session(self):
+    def fetch_symbol_niftytrader(self, symbol: str) -> dict | None:
+        """Fetch the nearest-expiry option chain from NiftyTrader and compute PCR/OI.
+
+        Primary source — NSE's own option-chain API is Akamai-walled. NiftyTrader does
+        NOT populate equity IV, so atm_iv/iv_skew come back None (vendor limit)."""
+        url = NIFTYTRADER_CHAIN_URL.format(symbol=symbol.upper())
         try:
-            self.session.get("https://www.nseindia.com", timeout=10)
-            time.sleep(1.5)
+            resp = self.session.get(url, timeout=15)
+            resp.raise_for_status()
+            data = resp.json()
         except Exception as e:
-            print(f"[PCR] Session prime warning: {e}")
+            print(f"[PCR] {symbol}: fetch error — {e}")
+            return None
+        if data.get("result") != 1 or not data.get("resultData"):
+            return None
+        return parse_niftytrader_chain(data["resultData"], symbol.upper())
 
     def fetch_symbol(self, symbol: str, is_index: bool = False) -> dict | None:
         """Fetch option chain for a symbol and compute PCR. Returns dict or None."""
@@ -251,7 +348,7 @@ class PCRFetcher:
 
         for i, sym in enumerate(symbols):
             print(f"[PCR] ({i+1}/{len(symbols)}) {sym}...")
-            rec = self.fetch_symbol(sym)
+            rec = self.fetch_symbol_niftytrader(sym)
             if rec:
                 results.append(rec)
                 pcr_str = f"{rec['pcr']:.3f}" if rec['pcr'] is not None else "N/A"
@@ -281,7 +378,7 @@ if __name__ == "__main__":
     fetcher = PCRFetcher()
 
     if args.index:
-        rec = fetcher.fetch_symbol(args.index, is_index=True)
+        rec = fetcher.fetch_symbol_niftytrader(args.index)
         if rec:
             fetcher.save([rec])
             print(f"Saved index PCR: {rec}")
