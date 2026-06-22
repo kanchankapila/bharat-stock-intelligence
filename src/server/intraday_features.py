@@ -18,7 +18,6 @@ import os
 import argparse
 import datetime
 
-import numpy as np
 import pandas as pd
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
@@ -58,7 +57,7 @@ def compute_intraday_features(date_str: str) -> pd.DataFrame:
     results = []
     for symbol, grp in df.groupby('symbol'):
         grp = grp.sort_values('datetime').reset_index(drop=True)
-        if len(grp) == 0:
+        if len(grp) < FIRST_BARS:
             continue
 
         # ── Opening Range Break ──────────────────────────────────────────────
