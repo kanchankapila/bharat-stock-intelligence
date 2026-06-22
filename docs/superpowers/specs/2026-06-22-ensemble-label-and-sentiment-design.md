@@ -2,7 +2,10 @@
 
 **Date:** 2026-06-22
 **Branch:** prod-readiness-phase1
-**Status:** Draft — awaiting approval
+**Status:** ⚠️ **OUTCOME (2026-06-23):** Part B (triple-barrier) was implemented + A/B-tested and
+**REJECTED** — held-out AUC 0.671 vs horizon 0.706; default label stays `horizon`, code kept
+behind the flag. Part A (news sentiment into the ensemble) **deferred** — news coverage too
+sparse until the GDELT/Google-News/BSE backfill lands. See [[ml-label-experiments]].
 **Baseline to beat:** active ensemble id 29 — held-out AUC **0.706**, CV 0.712, 65 features, 36.5k samples.
 
 ## Guiding principle

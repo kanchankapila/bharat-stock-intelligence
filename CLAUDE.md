@@ -37,7 +37,7 @@ Key memory files:
 
 ## Project Summary (quick reference)
 
-Real-time Indian stock market intelligence platform (NSE/BSE). Backend: Express + tRPC (`src/server/router.ts`, ~2770 lines, 130+ procedures). Frontend: React 19 + Vite (`src/App.tsx`, ~3704 lines). DB: SQLite (`src/server/db.ts`). Cache: Redis → in-memory fallback (`src/server/cacheService.ts`). Background jobs: BullMQ (`src/server/queues.ts`). AI: Ollama primary, Gemini fallback + 15 Python engines.
+Real-time Indian stock market intelligence platform (NSE/BSE). Backend: Express + tRPC (`src/server/router.ts`, ~2770 lines, 130+ procedures). Frontend: React 19 + Vite (`src/App.tsx`, ~3704 lines). DB: **PostgreSQL/TimescaleDB** live (`USE_POSTGRES=true`, :5433) via the `dbAsync`→`pgClient` facade; `src/server/db.ts` is the SQLite-flavored schema-of-record + dev fallback. Cache: Redis → in-memory fallback (`src/server/cacheService.ts`). Background jobs: BullMQ (`src/server/queues.ts`). AI: Ollama primary, Gemini fallback + 15 Python engines.
 
 ## Key File Locations
 

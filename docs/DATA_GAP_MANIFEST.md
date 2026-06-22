@@ -3,9 +3,11 @@
 _Quant view of what was implemented from data we already hold, and what new feeds are
 required to unlock the rest. Written 2026-06-21 (branch `prod-readiness-phase1`)._
 
-The ensemble (`ml_ensemble.py`) had a held-out AUC ~0.62 — near the ceiling of what
-**daily, point-feature** data can give. The remaining accuracy lives in **orthogonal data**
-and **better labels**, not more daily indicators. This manifest tracks both.
+The ensemble (`ml_ensemble.py`) held-out AUC is **~0.71** as of 2026-06-23 (was ~0.62 when
+this was written) — near the ceiling of what **daily, point-feature** data can give. The
+remaining accuracy lives in **orthogonal data** and **better labels**, not more daily
+indicators. This manifest tracks both. (Note: the triple-barrier label A/B was tested and
+**rejected** — 0.671 vs 0.706 held-out; see [[ml-label-experiments]] / the ensemble-label spec.)
 
 ---
 

@@ -15,7 +15,7 @@ A local-first quantitative intelligence platform for NSE/BSE equities. Synthesiz
                          │ fetch + cache (Redis / in-memory)
                          ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│  Backend  Express + tRPC (130+ procedures) · SQLite · BullMQ        │
+│  Backend  Express + tRPC (130+ procedures) · PostgreSQL/Timescale · BullMQ │
 │                                                                     │
 │  Signal Pipeline                                                    │
 │  technicalSignalsService → confluenceEngine → scoring_engine.py    │
@@ -174,7 +174,9 @@ cp .env .env.local   # or edit .env directly
 Minimum required to run (all others have safe defaults or are optional):
 
 ```env
-DATABASE_URL=database.sqlite          # SQLite path
+USE_POSTGRES=true                     # live DB engine (Phase 3); see docker-compose.yml
+POSTGRES_URL=postgresql://bharat:bharat@localhost:5433/bharat_intel
+DATABASE_URL=database.sqlite          # legacy SQLite path (schema-of-record / dev fallback)
 GEMINI_API_KEY=your_key               # or use Ollama locally
 PYTHON_PATH=/usr/bin/python3          # full path to Python binary
 ```
@@ -389,7 +391,7 @@ python src/server/feature_engineering.py --lookback 252
 |---|---|
 | Frontend | React 19, TypeScript, Vite 6, TailwindCSS 4, Recharts, Framer Motion, Lucide React |
 | Backend | Express.js, tRPC, SuperJSON, React Query |
-| Database | SQLite (better-sqlite3, WAL mode) |
+| Database | PostgreSQL + TimescaleDB (`USE_POSTGRES=true`, :5433); SQLite (better-sqlite3) legacy/dev fallback + schema-of-record (`db.ts`) |
 | Cache / Queue | Redis (ioredis) + BullMQ; in-memory + setInterval fallback |
 | Auth | Firebase (Google OAuth) |
 | AI — Local | Ollama (Mistral / Llama3) |
@@ -404,7 +406,9 @@ python src/server/feature_engineering.py --lookback 252
 |---|---|---|
 | `PORT` | `3000` | HTTP server port |
 | `NODE_ENV` | `development` | `development` or `production` |
-| `DATABASE_URL` | `database.sqlite` | SQLite file path (relative to project root) |
+| `USE_POSTGRES` | `true` | Use PostgreSQL/TimescaleDB (live engine) instead of SQLite |
+| `POSTGRES_URL` | `postgresql://bharat:bharat@localhost:5433/bharat_intel` | Postgres connection string |
+| `DATABASE_URL` | `database.sqlite` | Legacy SQLite path (schema-of-record / dev fallback) |
 | `REDIS_HOST` | `localhost` | Redis host |
 | `REDIS_PORT` | `6379` | Redis port |
 | `REDIS_PASSWORD` | — | Redis auth password |

@@ -1,3 +1,7 @@
+> ⚠️ **HISTORICAL SNAPSHOT (2026-05-21) — DO NOT read as current state.** Archived 2026-06-23.
+> The "CRITICAL/HIGH issues" listed below are largely resolved since May. Kept for history only;
+> **verify against the code, not this file.**
+
 # End-to-End Pipeline Review: Bharat Stock Intelligence
 
 **Date:** May 21, 2026  

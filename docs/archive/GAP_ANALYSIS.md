@@ -1,3 +1,8 @@
+> ⚠️ **HISTORICAL SNAPSHOT (2026-06-14) — DO NOT read as current state.** Archived 2026-06-23.
+> Many items are resolved and some describe Phase-3 *targets* (e.g. collapsing signal/outcome
+> tables) that are NOT done — this doc misled a cleanup into treating live tables
+> (`signal_outcomes`, `news_articles`) as obsolete. **Verify against the code, not this file.**
+
 # Bharat Stock Intelligence — Full Gap Analysis & Resolution Tracker
 
 > Generated: 2026-06-14  
