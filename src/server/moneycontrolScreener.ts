@@ -258,11 +258,11 @@ export async function syncMoneyControlScreeners(timeframeFilter?: 'intraday' | '
 
       if (entered.length > 0) {
         const insertAppSql = `INSERT OR IGNORE INTO screener_appearances (screener_id, source, symbol, appeared_date) VALUES (?, 'moneycontrol', ?, ?)`;
-        const insertLogSql = `INSERT OR IGNORE INTO screener_history_log (symbol, date, screener_id, source, action) VALUES (?, ?, ?, 'moneycontrol', 'ENTER')`;
-        await dbTransaction(async (tx) => { 
+        const insertLogSql = `INSERT OR IGNORE INTO screener_history_log (symbol, screener_id, entry_date, source) VALUES (?, ?, ?, 'moneycontrol')`;
+        await dbTransaction(async (tx) => {
           for (const s of entered) {
-            await tx.run(insertAppSql, [config.scanId, s, today]); 
-            await tx.run(insertLogSql, [s, today, config.scanId]);
+            await tx.run(insertAppSql, [config.scanId, s, today]);
+            await tx.run(insertLogSql, [s, config.scanId, today]);
           }
         });
       }
@@ -270,10 +270,9 @@ export async function syncMoneyControlScreeners(timeframeFilter?: 'intraday' | '
         await dbRun(`UPDATE screener_appearances SET exited_date = ? WHERE screener_id = ? AND symbol IN (${exited.map(() => '?').join(',')}) AND exited_date IS NULL`,
           [today, config.scanId, ...exited]);
         
-        const insertLogSql = `INSERT OR IGNORE INTO screener_history_log (symbol, date, screener_id, source, action) VALUES (?, ?, ?, 'moneycontrol', 'EXIT')`;
-        await dbTransaction(async (tx) => { 
+        await dbTransaction(async (tx) => {
           for (const s of exited) {
-            await tx.run(insertLogSql, [s, today, config.scanId]);
+            await tx.run(`UPDATE screener_history_log SET exit_date = ? WHERE symbol = ? AND screener_id = ? AND exit_date IS NULL`, [today, s, config.scanId]);
           }
         });
       }

@@ -36,18 +36,17 @@ consumes it is the next build (see §D).
 
 ## B. Blocked on a NEW external feed (highest value first)
 
-### B1. Intraday microstructure — the hard ceiling on entry/exit precision  ★ top lever
-The model predicts on **daily bars**, so entry/exit precision is structurally capped at
-~1-day granularity. `intraday_ohlcv` (15m) exists in the schema but is **not populated**.
+### B1. Intraday microstructure — ✅ FEED LIVE (limited back-history)
+`moneycontrol_fetcher.py` (`_fetch_intraday`) calls the MC TechCharts history API and writes
+15m bars into `intraday_ohlcv` for every stock in its rolling 150-stock daily batch. The API
+provides ~2–5 weeks of 15m history and ~2 months of 60m history. **Intraday feature
+engineering** (opening-range break, VWAP deviation, first-hour volume share) still needs a
+separate `intraday_features.py` engine that reads `intraday_ohlcv` and writes derived columns
+onto `technical_signals`. The feed itself is live and accumulating.
 
-- **Data needed:** intraday bars (1m–15m) with volume; ideally L1 quote (bid/ask, depth).
-- **Derived features it unlocks:** opening-range break, first-hour volume profile, VWAP
-  deviation at entry, bid-ask spread, closing-auction imbalance.
-- **Sources (NSE):** broker APIs with historical intraday — Zerodha Kite, Upstox, Dhan,
-  Fyers (1m history); Global Datafeeds / TrueData (tick + L1) for depth. Yahoo gives 1m for
-  ~last 7 days only (insufficient for training history).
-- **Cost/effort:** high (storage + a populated `intraday_ohlcv` pipeline). Biggest single
-  accuracy lever for the literal "entry/exit" question.
+- **Remaining work:** `intraday_features.py` (feature derivation engine) → wire to cron.
+- **History caveat:** back-history depth is ~5 weeks at 15m. Training lift only materialises
+  after ~90 trading days of daily accumulation (~4 months from first live run).
 
 ### B2. Exact earnings calendar (upgrade `results_season` → `days_to_earnings`)
 We ship a coarse season flag; the real signal is **distance to the specific stock's results
@@ -59,15 +58,16 @@ date**.
 - **Effort:** low–medium. New `earnings_calendar(symbol, event_date, type)` table + an
   `_days_to_earnings(signal_date, symbol)` feature in `build_features`.
 
-### B3. Promoter pledge / bulk & block deals / insider (SAST) / MF holding deltas
-India-specific edges, completely absent today. Promoter-pledge **increase** is one of the
-strongest negative signals on the street.
+### B3. Promoter pledge / bulk & block deals / insider (SAST) / MF holding deltas — ✅ INSIDER FEED LIVE
+`moneycontrol_fetcher.py` (`_parse_insider`) fetches the MC mcinsider widget HTML and writes
+insider trades (name, designation, action, qty, price, date) into `insider_trades` for the
+daily 150-stock batch. Promoter pledge and MF holding deltas still require separate fetchers.
 
-- **Data needed:** pledge % change, bulk/block deal prints, SAST/insider disclosures, MF
-  holding deltas.
-- **Sources:** NSE/BSE corporate filings (`/api/corporate-pledgedata`, bulk-deals,
-  insider-trading), Trendlyne (already integrated as a provider — likely the cheapest route).
-- **Effort:** medium. New `corporate_signals` table + as-of join into `build_features`.
+- **Insider captures:** acquirerName, category (Promoter / Director), typeOfTransaction
+  (BUY/SELL), quantity, valueInr, date. Already in the `insider_trades` schema.
+- **Remaining work for ML:** `insider_features.py` to compute net insider buy/sell delta over
+  rolling 90d → feature on `technical_signals`. Pledge % requires separate NSE/BSE fetch.
+- **Effort remaining:** medium (feature engine + pledge fetcher).
 
 ### B4. India VIX series (regime-level implied vol)
 Per-stock ATM IV is now captured (§A), but the **index VIX time series** as a market-regime
@@ -130,11 +130,11 @@ estimates/targets, earnings calendar, shareholding/promoter-pledge.
 
 | # | Data (already fetched by) | Storage status | Model gap it fills | Back-history |
 |---|---|---|---|---|
-| E1 | **Analyst consensus / target price / EPS & revenue estimates / # analysts** (`getMcAnalystRating`, `getMcConsensus`, `getMcPriceForecast`, `getMcEarningsForecast`) | no table | target-price upside + **estimate-revision momentum** — strong, orthogonal to price/technicals | partial (consensus snapshot) |
+| E1 | **Analyst consensus / target price / EPS & revenue estimates / # analysts** (`getMcAnalystRating`, `getMcConsensus`, `getMcPriceForecast`, `getMcEarningsForecast`) | ✅ **DONE** — `analyst_estimates_history` table + `analyst_estimates_snapshot.py` snapshotter + 3 ML features (`analyst_buy_pct`, `n_analysts_log`, `target_upside_pct`) wired into `build_features`. Runs in `processMlDailyOps`. 24/24 tests GREEN. | AS-OF join fixes look-ahead; accumulates a daily trail | partial (consensus snapshot) |
 | E2 | **Shareholding / promoter pledge / FII-DII-MF stake + QoQ deltas** (`getShareholding`) | no table | **B3** — promoter pledge ↑ is one of the strongest negative signals on the street | quarterly history usually available |
 | E3 | **ATM IV / IV skew / PCR** (`pcr_fetcher` → `stock_options_oi`) | table **empty on PG** | `iv_rank`/`iv_skew` — already wired into `build_features` but all-null → neutral; just needs the fetcher actually writing on PG | forward-only |
-| E4 | **Bulk / block deals + insider (SAST)** (MC insights / Trendlyne) | empty scaffolding | **B3** — India-specific institutional footprints | some |
-| E5 | **Trendlyne DVM / SWOT / checklist scores** (`getTrendlyneDVM`, `getTrendlyneChecklist`, `getTrendlyneStockMetrics`) | empty scaffolding (`proprietary_scores_history`, WIP `syncProprietaryScores.ts`) | orthogonal quality / valuation / momentum scores | forward-only |
+| E4 | **Bulk / block deals + insider (SAST)** (MC insights / Trendlyne) | ✅ **INSIDER FEED LIVE** — `moneycontrol_fetcher.py._parse_insider` writes to `insider_trades` daily (150-stock rolling batch). Bulk deals + ML feature engine pending. | **B3** — India-specific institutional footprints | some |
+| E5 | **MC Stock Vitals: Altman Z, DuPont ROE, Graham Number, Ohlson O-Score** (via `moneycontrol_fetcher.py`) | ✅ **FEED LIVE** — `_parse_vitals` writes to `mc_stock_vitals` + `proprietary_scores_history` daily (150-stock batch). ML feature wiring from EAV→`build_features` pending. | orthogonal quality / financial-health scores | forward-only |
 | E6 | **Earnings dates** (`getCorporateActions` / MC / Trendlyne event calendars) | no table | **B2** — `days_to_earnings` + earnings-blackout flag (upgrade the coarse `results_season`) | forward + next-date |
 
 **Pattern for each (same as the shipped `fundamentals_history`):** a daily/periodic snapshotter writes

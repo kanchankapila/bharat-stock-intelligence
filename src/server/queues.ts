@@ -17,7 +17,7 @@ import { dbGet, dbAll, dbRun } from './dbAsync';
 import { syncAndScore } from './scoringService';
 import Redis from 'ioredis';
 import { REDIS_BASE } from './redisConfig';
-import cronParser from 'cron-parser';
+import { CronExpressionParser } from 'cron-parser';
 import { runPython } from './pythonRunner';
 
 import { syncNiftyTraderScores, syncTrendlyneScores } from './syncProprietaryScores';
@@ -622,8 +622,7 @@ async function addJobWithCatchup(
 
       if (opts.repeat.pattern || opts.repeat.cron) {
         const pattern = opts.repeat.pattern || opts.repeat.cron;
-        // @ts-ignore
-        const interval = cronParser.parseExpression(pattern, { currentDate: new Date(now) });
+        const interval = CronExpressionParser.parse(pattern, { currentDate: new Date(now) });
         const prevExpected = interval.prev().getTime();
         
         if (lastRunTime < prevExpected && prevExpected < now) {

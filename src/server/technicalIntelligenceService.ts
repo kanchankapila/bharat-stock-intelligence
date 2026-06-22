@@ -256,3 +256,40 @@ Overall Probability: ${Math.min(100, Math.max(0, scores.composite)).toFixed(0)}%
     return 'Could not generate technical insight.';
   }
 }
+
+export async function syncTrendlyneTechnicals() {
+  const { getAllStocks } = await import('./stockMapping');
+  const stocks = getAllStocks(); // Sync all symbols
+  console.log(`[TRENDLYNE TECHNICALS] Starting sync for ${stocks.length} symbols...`);
+  
+  const baseDelay = Number(process.env.TRENDLYNE_BASE_DELAY_MS || '500');
+  const jitterPercent = Number(process.env.TRENDLYNE_JITTER_PERCENT || '15');
+
+  let count = 0;
+  let consecutiveFailures = 0;
+  for (const stock of stocks) {
+    try {
+      const result = await fetchAndProcessTechnicalData(stock.symbol, 'D');
+      if (!result) {
+        consecutiveFailures++;
+        if (consecutiveFailures >= 5) {
+          console.warn(`[TRENDLYNE TECHNICALS] 5 consecutive failures. Cool down for 30s...`);
+          await new Promise(r => setTimeout(r, 30000));
+          consecutiveFailures = 0;
+        }
+        continue;
+      }
+      consecutiveFailures = 0;
+      count++;
+    } catch (e: any) {
+      console.error(`[TRENDLYNE TECHNICALS] Error for ${stock.symbol}:`, e.message);
+    }
+
+    // Jittered sleep to evade rate limits
+    const min = baseDelay * (1 - jitterPercent / 100);
+    const max = baseDelay * (1 + jitterPercent / 100);
+    const ms = Math.random() * (max - min) + min;
+    await new Promise(r => setTimeout(r, ms));
+  }
+  console.log(`[TRENDLYNE TECHNICALS] Synced ${count} stocks.`);
+}

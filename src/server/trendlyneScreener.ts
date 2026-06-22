@@ -200,7 +200,7 @@ export async function saveScreenerStocksToDB(
       await dbTransaction(async (tx) => {
         for (const sym of entered) {
           await tx.run(`INSERT OR IGNORE INTO screener_appearances (screener_id, source, symbol, appeared_date) VALUES (?, 'trendlyne', ?, ?)`, [screenerId, sym, today]);
-          await tx.run(`INSERT OR IGNORE INTO screener_history_log (symbol, date, screener_id, source, action) VALUES (?, ?, ?, 'trendlyne', 'ENTER')`, [sym, today, screenerId]);
+          await tx.run(`INSERT OR IGNORE INTO screener_history_log (symbol, screener_id, entry_date, source) VALUES (?, ?, ?, 'trendlyne')`, [sym, screenerId, today]);
         }
       });
     }
@@ -212,7 +212,7 @@ export async function saveScreenerStocksToDB(
       );
       await dbTransaction(async (tx) => {
         for (const sym of exited) {
-          await tx.run(`INSERT OR IGNORE INTO screener_history_log (symbol, date, screener_id, source, action) VALUES (?, ?, ?, 'trendlyne', 'EXIT')`, [sym, today, screenerId]);
+          await tx.run(`UPDATE screener_history_log SET exit_date = ? WHERE symbol = ? AND screener_id = ? AND exit_date IS NULL`, [today, sym, screenerId]);
         }
       });
     }
