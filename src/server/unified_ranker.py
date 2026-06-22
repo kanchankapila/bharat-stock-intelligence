@@ -78,7 +78,42 @@ REGIME_WEIGHTS = {
     'BEAR':     {'screener': 0.35, 'ml': 0.25, 'confluence': 0.20, 'technical': 0.10, 'dl': 0.10},
     'HIGH_VOL': {'screener': 0.20, 'ml': 0.20, 'confluence': 0.15, 'technical': 0.30, 'dl': 0.15},
     'CRASH':    {'screener': 0.40, 'ml': 0.25, 'confluence': 0.15, 'technical': 0.10, 'dl': 0.10},
+    # SIDEWAYS was silently falling back to BULL; a balanced blend is more appropriate for
+    # a rangebound tape (lean slightly less on momentum/dl than BULL).
+    'SIDEWAYS': {'screener': 0.32, 'ml': 0.25, 'confluence': 0.20, 'technical': 0.13, 'dl': 0.10},
 }
+
+# Per-regime CATEGORY tilt (multipliers on CAT_BASE_WT). Rangebound/neutral = SIDEWAYS (no
+# tilt). In risk-off regimes (BEAR/CRASH) overweight valuation/quality/dividend and
+# underweight breakout/momentum to avoid chasing false breakouts into a falling tape; in
+# BULL do the reverse. Categories absent from a regime's map keep their base weight.
+REGIME_CAT_TILT = {
+    'BULL': {
+        'technical_breakout': 1.30, 'technical_momentum': 1.20, 'technical_trend': 1.10,
+        'valuation': 0.90, 'fundamental_quality': 0.90,
+    },
+    'BEAR': {
+        'valuation': 1.40, 'fundamental_quality': 1.30, 'income_dividend': 1.20,
+        'technical_reversal': 0.80,
+        'technical_breakout': 0.50, 'technical_momentum': 0.60,
+    },
+    'CRASH': {
+        'valuation': 1.50, 'fundamental_quality': 1.40, 'income_dividend': 1.30,
+        'technical_breakout': 0.30, 'technical_momentum': 0.40, 'technical_trend': 0.70,
+    },
+    'HIGH_VOL': {
+        'fundamental_quality': 1.20, 'valuation': 1.15, 'volatility': 1.10,
+        'technical_breakout': 0.70, 'technical_momentum': 0.80,
+    },
+    'SIDEWAYS': {},
+}
+
+
+def regime_cat_weights(regime):
+    """CAT_BASE_WT with the regime's category tilt applied (returns a fresh dict; an unknown
+    or SIDEWAYS regime yields a plain copy of CAT_BASE_WT)."""
+    tilt = REGIME_CAT_TILT.get(regime, {})
+    return {cat: base * tilt.get(cat, 1.0) for cat, base in CAT_BASE_WT.items()}
 
 CONVICTION_TIERS = [
     ('S_ELITE',    80),
@@ -203,12 +238,15 @@ def _conviction(score):
     return 'D_MARGINAL'
 
 
-def compute_screener_stock_scores(membership, fundamental_scores):
+def compute_screener_stock_scores(membership, fundamental_scores, cat_weights=None):
     """
     Pure function — no DB access.
     membership: {symbol: [{signal_bias, confidence, category, subcategory, investment_horizon}]}
+    cat_weights: per-category weight map (defaults to CAT_BASE_WT); pass regime_cat_weights(regime)
+                 to apply the regime-conditional tilt.
     Returns: (normalized_scores_0_100, bullish_counts, bearish_counts)
     """
+    weights = cat_weights if cat_weights is not None else CAT_BASE_WT
     raw = {}
     bullish_counts = {}
     bearish_counts = {}
@@ -217,7 +255,7 @@ def compute_screener_stock_scores(membership, fundamental_scores):
         fm = _fund_mult(fundamental_scores.get(sym))
         contrib = sum(
             BIAS_SIGN.get(s['signal_bias'], 0.0)
-            * CAT_BASE_WT.get(s['category'], 0.0)
+            * weights.get(s['category'], 0.0)
             * SUBCAT_MOD.get(s.get('subcategory', ''), 1.0)
             * HORIZON_MULT.get(s.get('investment_horizon', 'swing'), 0.95)
             * float(s.get('confidence', 0.74))
@@ -228,6 +266,28 @@ def compute_screener_stock_scores(membership, fundamental_scores):
         bearish_counts[sym] = sum(1 for s in screeners if s['signal_bias'] == 'bearish')
 
     return _normalize_to_100(raw), bullish_counts, bearish_counts
+
+
+# ── Red-flag hard veto ────────────────────────────────────────────────────────────
+# A bearish Risk-Red-Flag screener (debt trap, high promoter pledge, auditor warning,
+# ASM/GSM, wealth destroyer) is a SOLVENCY/governance veto — it must remove the name from
+# the buy pool regardless of how strong its technical/momentum score is. A roaring breakout
+# on a debt-trap microcap is exactly the trade that blows up an account. (A *bullish*
+# risk-category event, e.g. pledge reduced, is not a veto.) Distinct from quality_gate,
+# which only demotes weak fundamentals — this is a hard exclusion.
+RED_FLAG_VETO_MULT = 0.5  # demote the unified score so a vetoed name also ranks low
+
+
+def is_red_flagged(screeners) -> bool:
+    return any(
+        s.get('category') == 'risk_red_flags' and s.get('signal_bias') == 'bearish'
+        for s in screeners
+    )
+
+
+def veto_classification(classification):
+    """A vetoed name cannot be a Buy — collapse buy tiers to Hold, leave the rest."""
+    return 'Hold' if classification in ('Strong Buy', 'Buy') else classification
 
 
 class UnifiedRanker:
@@ -593,7 +653,7 @@ class UnifiedRanker:
         membership        = self._get_screener_membership()
 
         screener_scores, bull_counts, bear_counts = compute_screener_stock_scores(
-            membership, fund_scores
+            membership, fund_scores, cat_weights=regime_cat_weights(regime)
         )
         ml_scores         = self._get_ml_scores()
         confluence_scores = self._get_confluence_scores()
@@ -632,6 +692,13 @@ class UnifiedRanker:
             bear = bear_counts.get(sym, 0)
             classification = _classify(unified, bull, bear)
 
+            # Red-flag hard veto: a bearish solvency/governance screener removes the name from
+            # the buy pool no matter how strong its score is (then it also ranks low + unsized).
+            red_flagged = is_red_flagged(membership.get(sym, []))
+            if red_flagged:
+                unified *= RED_FLAG_VETO_MULT
+                classification = veto_classification(classification)
+
             # #6 position size: bet on the ML meta-label, inverse-vol weighted, longs only.
             bet = bet_size_from_probability(win_probs.get(sym))
             vol = max(VOL_FLOOR_PCT, (qm or {}).get('vol') or DEFAULT_VOL_PCT)
@@ -640,6 +707,7 @@ class UnifiedRanker:
             screener_summary = (
                 f"{bull} bullish / {bear} bearish screener signals ({classification}); "
                 f"regime {regime}" + (f"; drivers: {', '.join(cats[:4])}" if cats else "")
+                + ("; RED-FLAG VETO" if red_flagged else "")
             )
 
             et = self._get_entry_targets(sym)
