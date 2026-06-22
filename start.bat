@@ -48,8 +48,12 @@ echo ===================================================
 echo.
 call pm2 status
 echo.
-echo   Logs:   npm run pm2:logs          ( or: pm2 logs alphaquant-api )
 echo   Stop:   npm run pm2:stop
 echo   Start on reboot:  pm2 save ^&^& pm2 startup
 echo.
-pause
+echo ===================================================
+echo   Streaming live logs (last 50 lines + follow)...
+echo   Press Ctrl+C to stop viewing - services keep running under PM2.
+echo ===================================================
+echo.
+call pm2 logs --lines 50
