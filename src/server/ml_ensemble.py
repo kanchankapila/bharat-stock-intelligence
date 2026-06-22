@@ -209,6 +209,15 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     X['insider_buy_pct_90d'] = num('insider_buy_pct_90d', 0.5).clip(0, 1)
     X['insider_x_score']     = X['insider_buy_pct_90d'] * X['signal_score']
 
+    # ── Intraday microstructure (from intraday_features.py → technical_signals) ──
+    # opening_range_break: trend direction relative to first 30-min range.
+    # 1.0 = upside breakout; -1.0 = breakdown; 0.0 = no data or inside range.
+    X['opening_range_break']  = num('opening_range_break',  0.0).clip(-1, 1)
+    # vwap_deviation_pct: close vs session VWAP. Positive = institutional demand bid.
+    X['vwap_deviation_pct']   = num('vwap_deviation_pct',   0.0).clip(-10, 10)
+    # first_hour_vol_share: front-loaded volume (institutional activity at the open).
+    X['first_hour_vol_share'] = num('first_hour_vol_share', 0.5).clip(0, 1)
+
     # NOTE: market-level India VIX + breadth were tested as ensemble features (raw and as
     # cross-sectional interactions) and BOTH hurt held-out AUC vs omitting them entirely
     # (baseline cv 0.651/held-out 0.543; interactions 0.640/0.531; raw 0.606/0.493). They add
@@ -268,6 +277,9 @@ def load_training_data() -> pd.DataFrame:
                ts.iv_rank, ts.iv_skew,
                ts.rs_rank_21d, ts.rs_rank_63d,
                ts.insider_buy_pct_90d,
+               ts.opening_range_break,
+               ts.vwap_deviation_pct,
+               ts.first_hour_vol_share,
                COALESCE(fh.fifty_two_week_high, sf.fifty_two_week_high) AS fifty_two_week_high,
                COALESCE(fh.piotroski_f_score, sf.piotroski_f_score)     AS piotroski_f_score,
                COALESCE(fh.debt_to_equity, sf.debt_to_equity)           AS debt_to_equity,
@@ -345,6 +357,9 @@ def load_pending_signals() -> pd.DataFrame:
                ts.iv_rank, ts.iv_skew,
                ts.rs_rank_21d, ts.rs_rank_63d,
                ts.insider_buy_pct_90d,
+               ts.opening_range_break,
+               ts.vwap_deviation_pct,
+               ts.first_hour_vol_share,
                sf.fifty_two_week_high,
                sf.piotroski_f_score, sf.debt_to_equity, sf.operating_margins,
                sf.return_on_equity, sf.revenue_growth, sf.earnings_growth,

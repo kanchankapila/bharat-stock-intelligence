@@ -411,6 +411,11 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await runPython('insider_features.py', [], 60_000)
     .catch(e => console.warn('[QUEUE] insider_features failed:', (e as Error).message));
 
+  // Intraday microstructure: opening-range break, VWAP deviation, first-hour vol share.
+  // Runs post-close so the full session (9:15–15:30 IST) is in intraday_ohlcv.
+  await runPython('intraday_features.py', [], 60_000)
+    .catch(e => console.warn('[QUEUE] intraday_features failed:', (e as Error).message));
+
   await resolveOutcomesResilient(1);
   await resolveOutcomesResilient(5);
   await resolveOutcomesResilient(15);

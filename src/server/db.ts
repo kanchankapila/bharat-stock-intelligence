@@ -1357,6 +1357,10 @@ migrateColumn('technical_signals', 'rs_rank_21d',     'REAL');
 migrateColumn('technical_signals', 'rs_rank_63d',     'REAL');
 // Insider activity (computed by insider_features.py from insider_trades rolling 90d)
 migrateColumn('technical_signals', 'insider_buy_pct_90d', 'REAL');
+// Intraday microstructure features (computed by intraday_features.py from intraday_ohlcv)
+migrateColumn('technical_signals', 'opening_range_break',  'REAL');
+migrateColumn('technical_signals', 'vwap_deviation_pct',   'REAL');
+migrateColumn('technical_signals', 'first_hour_vol_share', 'REAL');
 
 // ATM implied vol + skew snapshot (captured by pcr_fetcher.py from the NSE option chain)
 migrateColumn('stock_options_oi', 'atm_iv',   'REAL');
