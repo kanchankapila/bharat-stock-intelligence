@@ -311,6 +311,11 @@ export async function runQuantScoring(): Promise<void> {
         technical_composite:       tech?.composite_score ?? null,
         ohlcv_days: rows.length,
       });
+
+      // Yield the event loop every 50 symbols to prevent blocking tRPC requests.
+      if (computed.length % 50 === 0) {
+        await new Promise<void>(resolve => setImmediate(resolve));
+      }
     }
 
     // ── Percentile ranks ────────────────────────────────────────────────────
@@ -365,6 +370,9 @@ export async function runQuantScoring(): Promise<void> {
       0.30 * confluencePct[i] + 0.20 * valuationPct[i] + 0.15 * techRanks[i] + 0.15 * m + 0.10 * 50 + 0.10 * 50
     );
     const compositePct = percentileRanks(compositeRanks, true);
+
+    // Yield after all rank computation before hitting the DB
+    await new Promise<void>(resolve => setImmediate(resolve));
 
     // ── Classify ────────────────────────────────────────────────────────────
 
