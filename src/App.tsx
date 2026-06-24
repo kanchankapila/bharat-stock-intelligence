@@ -401,8 +401,9 @@ const Dashboard: React.FC<{
   const [selectedSignal, setSelectedSignal] = useState<any | null>(null);
   const [historySymbol, setHistorySymbol] = useState<string | null>(null);
   
-  const filteredNews = news.filter(item => 
-    newsFilter === 'All' ? true : item.category === newsFilter
+  const filteredNews = useMemo(
+    () => news.filter(item => newsFilter === 'All' ? true : item.category === newsFilter),
+    [news, newsFilter],
   );
 
   const { data: niftyOhlc } = trpc.getOHLCData.useQuery({ symbol: 'in;NSX', dur: '1M' });
@@ -2690,6 +2691,15 @@ const FnOSignals: React.FC<{ symbol: string }> = ({ symbol }) => {
   if (isLoading) return <div className="p-10 text-center animate-pulse text-slate-400">Scanning F&O Activity...</div>;
   if (!fno || !fno.success) return null;
 
+  const unusualSignals = useMemo(
+    () => (fno.signals ?? []).filter(s => s.type === 'UNUSUAL_VOLUME' || s.type === 'PCR_SIGNAL'),
+    [fno.signals],
+  );
+  const oiShiftSignals = useMemo(
+    () => (fno.signals ?? []).filter(s => s.type === 'OI_SPIKE' || s.type === 'BUILDUP'),
+    [fno.signals],
+  );
+
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -2721,7 +2731,7 @@ const FnOSignals: React.FC<{ symbol: string }> = ({ symbol }) => {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <Card title="Unusual Options Activity" icon={Zap}>
           <div className="space-y-3 pt-2">
-            {(fno.signals ?? []).filter(s => s.type === 'UNUSUAL_VOLUME' || s.type === 'PCR_SIGNAL').map((sig, idx) => (
+            {unusualSignals.map((sig, idx) => (
               <div key={idx} className="p-4 glass/50 border border-slate-800/80 rounded-2xl group hover:border-blue-500/30 transition-all">
                 <div className="flex justify-between items-start mb-2">
                   <div className="flex items-center gap-2">
@@ -2744,7 +2754,7 @@ const FnOSignals: React.FC<{ symbol: string }> = ({ symbol }) => {
 
         <Card title="Significant OI Shifts" icon={Activity}>
            <div className="space-y-3 pt-2">
-            {(fno.signals ?? []).filter(s => s.type === 'OI_SPIKE' || s.type === 'BUILDUP').map((sig, idx) => (
+            {oiShiftSignals.map((sig, idx) => (
               <div key={idx} className="p-4 glass/50 border border-slate-800/80 rounded-2xl group hover:border-purple-500/30 transition-all">
                 <div className="flex justify-between items-start mb-2">
                   <div className="flex items-center gap-2">
@@ -2770,7 +2780,10 @@ const FnOSignals: React.FC<{ symbol: string }> = ({ symbol }) => {
 
 const NewsTab: React.FC<{ symbol: string }> = ({ symbol }) => {
   const allNews = useNewsFeed();
-  const news = allNews.filter(n => n.relatedSymbols?.includes(symbol));
+  const news = useMemo(
+    () => allNews.filter(n => n.relatedSymbols?.includes(symbol)),
+    [allNews, symbol],
+  );
 
   if (news.length === 0) {
     return (
@@ -2834,7 +2847,11 @@ const StockDetails: React.FC<{
   onToggleWatchlist: (symbol: string, metadata?: { price?: number; name?: string; source?: string }) => void;
   onSelectStock: (symbol: string) => void;
 }> = ({ symbol, stock: initialStock, onBack, watchlist, onToggleWatchlist, onSelectStock }) => {
-  const news = useNewsFeed().filter(n => n.relatedSymbols?.includes(symbol));
+  const allNews = useNewsFeed();
+  const news = useMemo(
+    () => allNews.filter(n => n.relatedSymbols?.includes(symbol)),
+    [allNews, symbol],
+  );
   const [activeTab, setActiveTab] = useState('insights');
   const [report, setReport] = useState<any>(null);
   const { data: unifiedData } = trpc.getAlphaQuantDetail.useQuery({ symbol });
