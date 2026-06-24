@@ -1801,43 +1801,6 @@ CREATE TABLE IF NOT EXISTS "xgboost_predictions" (
 CREATE INDEX idx_xgb_score ON xgboost_predictions(xgboost_score DESC);
 
 
--- ── live_screener_runs ─────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS "live_screener_runs" (
-  "id" SERIAL PRIMARY KEY,
-  "timestamp" VARCHAR(50) NOT NULL,
-  "filters_completed" INTEGER NOT NULL,
-  "total_filters" INTEGER NOT NULL,
-  "status" VARCHAR(20) NOT NULL,
-  "error_log" TEXT,
-  "created_at" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
-
--- ── live_screener_appearances ─────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS "live_screener_appearances" (
-  "id" SERIAL PRIMARY KEY,
-  "run_id" INTEGER NOT NULL REFERENCES live_screener_runs(id) ON DELETE CASCADE,
-  "symbol" VARCHAR(20) NOT NULL,
-  "filter_key" VARCHAR(50) NOT NULL,
-  "price" DOUBLE PRECISION NOT NULL,
-  "change_per" DOUBLE PRECISION,
-  "volume" BIGINT
-);
-CREATE INDEX idx_lsa_run ON live_screener_appearances(run_id);
-CREATE INDEX idx_lsa_symbol_filter ON live_screener_appearances(symbol, filter_key);
-
--- ── live_screener_outcomes ─────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS "live_screener_outcomes" (
-  "appearance_id" INTEGER PRIMARY KEY REFERENCES live_screener_appearances(id) ON DELETE CASCADE,
-  "symbol" VARCHAR(20) NOT NULL,
-  "filter_key" VARCHAR(50) NOT NULL,
-  "appeared_at" VARCHAR(50) NOT NULL,
-  "entry_price" DOUBLE PRECISION NOT NULL,
-  "return_1d" DOUBLE PRECISION,
-  "return_3d" DOUBLE PRECISION,
-  "return_5d" DOUBLE PRECISION
-);
-
-
 -- ── Timescale hypertables / compression / retention ──────────────────────
 SELECT create_hypertable('confluence_signals', 'computed_at', chunk_time_interval => INTERVAL '7 days', if_not_exists => TRUE, migrate_data => TRUE);
 ALTER TABLE confluence_signals SET (timescaledb.compress, timescaledb.compress_segmentby = 'symbol');
