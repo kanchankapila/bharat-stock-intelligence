@@ -69,8 +69,11 @@ def run(only_date: str | None = None) -> int:
     updated."""
     cutoff = (datetime.date.today() - datetime.timedelta(days=LOOKBACK_DAYS)).isoformat()
     ohlcv = read_df(
-        "SELECT symbol, date, close FROM stock_ohlcv "
-        "WHERE date >= ? AND COALESCE(is_suspect,0) = 0 ORDER BY date",
+        "SELECT o.symbol, o.date, o.close "
+        "FROM stock_ohlcv o "
+        "JOIN nse_stocks ns ON ns.symbol = o.symbol "
+        "WHERE o.date >= ? AND COALESCE(o.is_suspect, 0) = 0 "
+        "ORDER BY o.date",
         (cutoff,),
     )
     feats = build_rs_features(ohlcv)
