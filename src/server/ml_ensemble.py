@@ -279,7 +279,7 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
     else:
         label_select = "so.outcome"
         label_join = ""
-        label_where = "so.outcome IN ('WIN','LOSS')\n          AND so.return_pct IS NOT NULL"
+        label_where = "so.outcome IN ('WIN','LOSS','STOP_LOSS')\n          AND so.return_pct IS NOT NULL"
 
     q = f"""
         SELECT so.symbol, so.signal_date, so.horizon_days, {label_select},
@@ -362,7 +362,7 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
         df = df[df['outcome'].notna()].copy()
         df['outcome'] = df['outcome'].astype(int)
     else:
-        df['outcome'] = df['outcome'].map({'WIN': 1, 'LOSS': 0})
+        df['outcome'] = df['outcome'].map({'WIN': 1, 'LOSS': 0, 'STOP_LOSS': 0})
     return df
 
 
