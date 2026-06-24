@@ -26,13 +26,35 @@ export function getPool(): Pool {
   return pool;
 }
 
-/** Run a parameterised query ($1,$2,...). Returns the full result rows. */
+/** True for transient pool/socket errors where the query never reached the server. */
+function isTransientConnError(err: unknown): boolean {
+  const msg = (err as { message?: string })?.message ?? '';
+  return /connection terminated|connection timeout|ECONNRESET|ETIMEDOUT|Client has encountered a connection error|server closed the connection/i.test(
+    msg,
+  );
+}
+
+/**
+ * Run a parameterised query ($1,$2,...). Returns the full result rows.
+ *
+ * Read-only path (backs dbGet/dbAll). At market-open bursts the shared Postgres
+ * (max_connections=50, split across all PM2 services + spawned Python) can briefly
+ * refuse a new connection, surfacing as "Connection terminated". Retry once on those
+ * transient errors only — safe here because SELECTs are idempotent.
+ */
 export async function pgQuery<T extends QueryResultRow = QueryResultRow>(
   text: string,
   params: unknown[] = [],
 ): Promise<T[]> {
-  const res = await getPool().query<T>(text, params as any[]);
-  return res.rows;
+  try {
+    const res = await getPool().query<T>(text, params as any[]);
+    return res.rows;
+  } catch (err) {
+    if (!isTransientConnError(err)) throw err;
+    await new Promise((r) => setTimeout(r, 250));
+    const res = await getPool().query<T>(text, params as any[]);
+    return res.rows;
+  }
 }
 
 /** Run a query and return the raw result (for rowCount / RETURNING handling). */
@@ -43,6 +65,19 @@ export async function pgExecute(text: string, params: unknown[] = []) {
 /** Acquire a client for an explicit transaction; caller MUST release. */
 export async function pgClient(): Promise<PoolClient> {
   return getPool().connect();
+}
+
+/**
+ * Acquire a client, run `fn`, and release unconditionally.
+ * Prefer this over the raw `pgClient()` export for all explicit transactions.
+ */
+export async function withClient<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
+  const client = await getPool().connect();
+  try {
+    return await fn(client);
+  } finally {
+    client.release();
+  }
 }
 
 export async function pgHealthy(): Promise<boolean> {
