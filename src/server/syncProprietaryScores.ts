@@ -79,10 +79,7 @@ export async function syncNiftyTraderScores() {
     }
 
     // Jittered sleep to evade rate limits
-    const min = baseDelay * (1 - jitterPercent / 100);
-    const max = baseDelay * (1 + jitterPercent / 100);
-    const ms = Math.random() * (max - min) + min;
-    await new Promise(r => setTimeout(r, ms));
+    await sleep(jittered(baseDelay, jitterPercent));
   }
   
   console.log(`[NIFTYTRADER SCORES] Synced ${count} scores.`);
