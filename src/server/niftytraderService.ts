@@ -1,20 +1,48 @@
 import { fetchWithCache } from './cacheService';
+import { dbGet } from './dbAsync';
 
-const NIFTYTRADER_HEADERS = {
-  "accept": "application/json, text/plain, */*",
-  "accept-language": "en-US,en;q=0.9,hi;q=0.8",
-  "authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1laWRlbnRpZmllciI6IjU0MzM4IiwiaHR0cDovL3NjaGVtYXMubWljcm9zb2Z0LmNvbS93cy8yMDA4LzA2L2lkZW50aXR5L2NsYWltcy9yb2xlIjoiMCIsIlNlc3Npb25JZCI6IjUwODkiLCJleHAiOjE3ODQ0OTAzNDEsImlzcyI6InByb2QtbmlmdHl0cmFkZXIuaW4iLCJhdWQiOiJwcm9kLW5pZnR5dHJhZGVyLmluIn0.pIFSPRIal82Wxd9tSs2YOr0ipJEjz0f7tow4NrXEwt0",
-  "content-type": "application/json",
-  "platform_type": "1",
-  "priority": "u=1, i",
-  "sec-ch-ua": "\"Google Chrome\";v=\"149\", \"Chromium\";v=\"149\", \"Not)A;Brand\";v=\"24\"",
-  "sec-ch-ua-mobile": "?0",
-  "sec-ch-ua-platform": "\"Windows\"",
-  "sec-fetch-dest": "empty",
-  "sec-fetch-mode": "cors",
-  "sec-fetch-site": "same-site",
-  "Referer": "https://www.niftytrader.in/"
-};
+let _cachedToken: string | null = null;
+
+export function invalidateNiftyTraderToken(): void {
+  _cachedToken = null;
+}
+
+export async function getNiftyTraderHeaders(): Promise<Record<string, string>> {
+  if (_cachedToken === null) {
+    try {
+      const row = await dbGet<{ value: string }>("SELECT value FROM app_settings WHERE key = 'niftytrader_auth_token'");
+      _cachedToken = row?.value ?? '';
+    } catch (err: any) {
+      console.error('[NIFTYTRADER] Failed to load token from DB:', err.message);
+      _cachedToken = '';
+    }
+  }
+
+  let token = _cachedToken;
+  if (!token) {
+    token = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1laWRlbnRpZmllciI6IjU0MzM4IiwiaHR0cDovL3NjaGVtYXMubWljcm9zb2Z0LmNvbS93cy8yMDA4LzA2L2lkZW50aXR5L2NsYWltcy9yb2xlIjoiMCIsIlNlc3Npb25JZCI6IjUwODkiLCJleHAiOjE3ODQ0OTAzNDEsImlzcyI6InByb2QtbmlmdHl0cmFkZXIuaW4iLCJhdWQiOiJwcm9kLW5pZnR5dHJhZGVyLmluIn0.pIFSPRIal82Wxd9tSs2YOr0ipJEjz0f7tow4NrXEwt0";
+  }
+
+  if (token && !token.startsWith('Bearer ')) {
+    token = `Bearer ${token}`;
+  }
+
+  return {
+    "accept": "application/json, text/plain, */*",
+    "accept-language": "en-US,en;q=0.9,hi;q=0.8",
+    "authorization": token,
+    "content-type": "application/json",
+    "platform_type": "1",
+    "priority": "u=1, i",
+    "sec-ch-ua": "\"Google Chrome\";v=\"149\", \"Chromium\";v=\"149\", \"Not)A;Brand\";v=\"24\"",
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": "\"Windows\"",
+    "sec-fetch-dest": "empty",
+    "sec-fetch-mode": "cors",
+    "sec-fetch-site": "same-site",
+    "Referer": "https://www.niftytrader.in/"
+  };
+}
 
 export interface NiftyTraderData {
   industryData: any;
@@ -29,20 +57,21 @@ export async function fetchNiftyTraderStockData(symbol: string): Promise<NiftyTr
     const data = await fetchWithCache(`nt_${normalizedSymbol}`, async () => {
       console.log(`[NIFTYTRADER] Fetching fresh data for ${normalizedSymbol}...`);
       const body = JSON.stringify({ symbol: normalizedSymbol });
+      const headers = await getNiftyTraderHeaders();
 
       const [industryRes, analysisRes, financialRes] = await Promise.all([
         fetch("https://webapi.niftytrader.in/webapi/Analysis/stock-industry-data", {
-          headers: NIFTYTRADER_HEADERS,
+          headers,
           body,
           method: "POST"
         }),
         fetch("https://webapi.niftytrader.in/webapi/Analysis/stock-analysis-data", {
-          headers: NIFTYTRADER_HEADERS,
+          headers,
           body,
           method: "POST"
         }),
         fetch("https://webapi.niftytrader.in/webapi/Analysis/stock-financial-data", {
-          headers: NIFTYTRADER_HEADERS,
+          headers,
           body,
           method: "POST"
         })

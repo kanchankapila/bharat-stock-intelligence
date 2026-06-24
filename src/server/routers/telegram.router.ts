@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { router, publicProcedure } from "../trpc";
 import { telegramService } from "../telegramService";
-import { dbGet } from "../dbAsync";
+import { dbGet, dbRun } from "../dbAsync";
+import { invalidateNiftyTraderToken } from "../niftytraderService";
 
 export const telegramRouter = router({
   getTelegramSettings: publicProcedure
@@ -55,6 +56,44 @@ export const telegramRouter = router({
           `🔔 *BHARAT STOCK INTELLIGENCE* \n\nConnection test successful! You are now subscribed to real-time institutional alerts.`
         );
         return { success: ok };
+      } catch (err: any) {
+        return { success: false, error: err.message };
+      }
+    }),
+
+  getNiftyTraderToken: publicProcedure
+    .query(async () => {
+      try {
+        const row = await dbGet<{ value: string }>("SELECT value FROM app_settings WHERE key = 'niftytrader_auth_token'");
+        const rawToken = row?.value || "";
+        const maskedToken = rawToken ? `${rawToken.substring(0, 10)}...${rawToken.substring(rawToken.length - 8)}` : "";
+        return {
+          token: maskedToken,
+          hasToken: !!rawToken,
+        };
+      } catch (err) {
+        return { token: "", hasToken: false };
+      }
+    }),
+
+  saveNiftyTraderToken: publicProcedure
+    .input(z.object({
+      token: z.string(),
+    }))
+    .mutation(async ({ input }) => {
+      try {
+        let actualToken = input.token.trim();
+        if (input.token.includes('...')) {
+          const row = await dbGet<{ value: string }>("SELECT value FROM app_settings WHERE key = 'niftytrader_auth_token'");
+          actualToken = row?.value || "";
+        }
+        await dbRun(
+          `INSERT INTO app_settings (key, value, updatedAt) VALUES (?, ?, datetime('now'))
+           ON CONFLICT(key) DO UPDATE SET value = excluded.value, updatedAt = excluded.updatedAt`,
+          ['niftytrader_auth_token', actualToken]
+        );
+        invalidateNiftyTraderToken();
+        return { success: true };
       } catch (err: any) {
         return { success: false, error: err.message };
       }

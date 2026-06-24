@@ -2,6 +2,12 @@ import { dbAll, dbGet, dbRun, dbTransaction } from './dbAsync';
 
 export const DEFAULT_AI_SIGNAL_MIN_CONFIDENCE = 65;
 
+let _cachedMinConfidence: number | null = null;
+
+export function invalidateAISignalCache(): void {
+  _cachedMinConfidence = null;
+}
+
 export interface AISignalGateResult {
   persist: boolean;
   signalType: 'BUY' | 'SELL' | 'HOLD';
@@ -31,11 +37,13 @@ export function gateAISignal(
 
 /** Confidence floor for persisting AI signals (app_settings override, default 65). */
 export async function getAISignalMinConfidence(): Promise<number> {
+  if (_cachedMinConfidence !== null) return _cachedMinConfidence;
   const row = await dbGet<{ value: string }>(
     "SELECT value FROM app_settings WHERE key = 'ai_signal_min_confidence'",
   );
   const parsed = row ? Number(row.value) : NaN;
-  return Number.isFinite(parsed) ? parsed : DEFAULT_AI_SIGNAL_MIN_CONFIDENCE;
+  _cachedMinConfidence = Number.isFinite(parsed) ? parsed : DEFAULT_AI_SIGNAL_MIN_CONFIDENCE;
+  return _cachedMinConfidence;
 }
 
 export interface Signal {

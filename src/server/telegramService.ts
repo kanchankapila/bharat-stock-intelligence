@@ -2,17 +2,21 @@ import axios from 'axios';
 import { dbGet, dbRun } from './dbAsync';
 
 export class TelegramNotificationService {
+  private _settingsCache: { botToken: string; chatId: string; enabled: boolean } | null = null;
+
   private async getSettings(): Promise<{ botToken: string; chatId: string; enabled: boolean }> {
+    if (this._settingsCache) return this._settingsCache;
     try {
       const tokenRow = await dbGet("SELECT value FROM app_settings WHERE key = 'telegram_bot_token'") as { value: string } | undefined;
       const chatRow = await dbGet("SELECT value FROM app_settings WHERE key = 'telegram_chat_id'") as { value: string } | undefined;
       const enabledRow = await dbGet("SELECT value FROM app_settings WHERE key = 'telegram_enabled'") as { value: string } | undefined;
 
-      return {
+      this._settingsCache = {
         botToken: tokenRow?.value || process.env.TELEGRAM_BOT_TOKEN || '',
         chatId: chatRow?.value || process.env.TELEGRAM_CHAT_ID || '',
         enabled: enabledRow ? enabledRow.value === 'true' : true,
       };
+      return this._settingsCache;
     } catch (err) {
       console.error('[TelegramService] Failed to read database configuration:', err);
       return {
@@ -27,6 +31,7 @@ export class TelegramNotificationService {
    * Save Telegram Bot Token and Chat ID to SQLite Database
    */
   public async saveSettings(botToken: string, chatId: string, enabled: boolean): Promise<void> {
+    this._settingsCache = null;  // invalidate before writing
     const ts = new Date().toISOString();
     await dbRun(`
       INSERT INTO app_settings (key, value, "updatedAt")
