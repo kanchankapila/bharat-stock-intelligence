@@ -167,9 +167,11 @@ def resolve_outcomes(
     """
     today     = datetime.date.today()
     # Use a wider cutoff (30 days) to catch signals of any horizon
-    cutoff    = (today - datetime.timedelta(days=30)).isoformat()
+    cutoff    = (today - datetime.timedelta(days=horizon_days)).isoformat()
 
-    # Signals old enough that horizon has passed, not yet resolved
+    # Signals old enough that horizon has passed, not yet resolved at THIS horizon.
+    # Scoped to horizon_days so each horizon is selected independently — without this
+    # the h1 pass would exclude signals from h5/h15 passes (starvation bug).
     pending = conn.execute("""
         SELECT ts.symbol, ts.date AS signal_date, ts.cmp AS entry_price,
                ts.signal_score, ts.signals_json,
@@ -181,11 +183,12 @@ def resolve_outcomes(
                SELECT 1 FROM signal_outcomes so2
                WHERE so2.symbol = ts.symbol
                  AND so2.signal_date = ts.date
+                 AND so2.horizon_days = ?
                  AND so2.outcome IN ('WIN','LOSS','NEUTRAL','STOP_LOSS')
            )
          ORDER BY ts.date DESC
          LIMIT 2000
-    """, (cutoff,)).fetchall()
+    """, (cutoff, horizon_days)).fetchall()
 
     cols = ['symbol', 'signal_date', 'entry_price', 'signal_score', 'signals_json', 'stop_loss', 'time_horizon']
     rows = [dict(zip(cols, r)) for r in pending]
@@ -223,25 +226,27 @@ def resolve_outcomes(
         ).fetchone():
             continue
 
-        if not entry:
-            continue
-
-        # PHASE 1 FIX: Entry at next trading day's open
+        # PHASE 1 FIX: Entry at next trading day's open (also handles NULL cmp —
+        # the next-day open overrides the original entry, so skip the null-entry
+        # guard until AFTER we've attempted to get it from OHLCV).
         signal_date_obj = datetime.date.fromisoformat(signal_date)
-        
+
         # Get actual next trading day and its open price from DB
         next_trading_day_row = conn.execute("""
             SELECT date, open FROM stock_ohlcv
             WHERE symbol = ? AND date > ? AND COALESCE(is_suspect, 0) = 0
             ORDER BY date ASC LIMIT 1
         """, (sym, signal_date)).fetchone()
-        
+
         if next_trading_day_row:
             next_trading_day = next_trading_day_row[0]
-            # Override original entry with the realistic next-day open price
+            # Override original entry (or fill in if cmp was NULL) with next-day open
             entry = float(next_trading_day_row[1])
         else:
             next_trading_day = (signal_date_obj + datetime.timedelta(days=1)).isoformat()
+
+        if not entry:
+            continue
 
         exit_target_date = (signal_date_obj + datetime.timedelta(days=sig_horizon)).isoformat()
 
@@ -327,12 +332,13 @@ def resolve_unified_outcomes(
     # time) MUST be re-selected so they get resolved once data is available. The previous
     # version matched any existing row regardless of outcome, which permanently stranded
     # PENDING signals (root cause of ~86% of AI signals never resolving).
+    # Do NOT filter on status='COMPLETED': the per-horizon NOT EXISTS below is the correct
+    # guard. Filtering on status caused h1 to mark signals COMPLETED, starving h5/h15 passes.
     pending = conn.execute("""
         SELECT us.id, us.symbol, us.signal_date, us.entry_price, us.stop_loss, us.signal_source,
                us.confidence_score, us.target_price
         FROM unified_signals us
         WHERE us.signal_date <= ?
-          AND us.status != 'COMPLETED'
           AND NOT EXISTS (
               SELECT 1 FROM unified_signal_outcomes uso
               WHERE uso.unified_signal_id = us.id
@@ -436,7 +442,6 @@ def resolve_unified_outcomes(
         ))
         
         if outcome != 'PENDING':
-            conn.execute("UPDATE unified_signals SET status = 'COMPLETED' WHERE id = ?", (uid,))
             resolved += 1
 
     if not dry_run:
