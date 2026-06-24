@@ -52,6 +52,14 @@ SIGNAL_TYPES = [
     'CONSECUTIVE_STRENGTH', 'ATR_CONTRACTION', 'PCR_EXTREME',
 ]
 
+_REGIME_THRESHOLDS: dict[str, float] = {
+    'BULL':     0.40,
+    'BEAR':     0.36,
+    'HIGH_VOL': 0.38,
+    'CRASH':    0.42,
+    'SIDEWAYS': 0.40,
+}
+
 
 # ── Feature Engineering ──────────────────────────────────────────────────────
 
@@ -247,6 +255,17 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     X['signal_count'] = type_sets.apply(len)
 
     return X.astype(np.float32)
+
+
+# ── Regime Thresholding ──────────────────────────────────────────────────────
+
+def regime_threshold(conn: ConnWrapper) -> float:
+    """Return the win_probability gate calibrated to the current Nifty regime."""
+    row = conn.execute(
+        "SELECT value FROM app_settings WHERE key = 'current_nifty_regime'"
+    ).fetchone()
+    regime = row[0] if row else 'BULL'
+    return _REGIME_THRESHOLDS.get(regime, 0.40)
 
 
 # ── Data Loading ─────────────────────────────────────────────────────────────
@@ -774,17 +793,18 @@ def score_pending(conn: ConnWrapper, ensemble: dict) -> int:
               AND status = 'ACTIVE'
               AND date(signal_date) >= date('now', '-14 days')
         """)
-        # Deactivate entries where ML now says win < 40%
+        # Deactivate entries where ML now says win < threshold (regime-adaptive)
+        threshold = regime_threshold(conn)
         conn.execute("""
             UPDATE recommendation_log
             SET status = 'EXPIRED'
             WHERE win_probability IS NOT NULL
-              AND win_probability < 0.40
+              AND win_probability < ?
               AND status = 'ACTIVE'
               AND source = 'technical_scan'
-        """)
+        """, (threshold,))
         conn.commit()
-        print("[Ensemble] Propagated win_probability to recommendation_log; low-confidence entries filtered.")
+        print(f"[Ensemble] win_probability gate applied at {threshold:.2f} (regime-adaptive).")
 
     return updated
 

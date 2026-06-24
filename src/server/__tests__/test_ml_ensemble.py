@@ -46,3 +46,19 @@ def test_load_training_data_includes_stop_loss(monkeypatch):
     # STOP_LOSS must be mapped to 0, not NaN
     assert df['outcome'].notna().all(), "STOP_LOSS must be mapped to 0, not NaN/dropped"
     assert df['outcome'].iloc[1] == 0, "STOP_LOSS must map to 0 (LOSS)"
+
+
+def test_regime_threshold_varies_by_regime(monkeypatch):
+    """Threshold must be lower in BEAR regime and higher in CRASH regime."""
+    from ml_ensemble import regime_threshold
+
+    class FakeConn:
+        def __init__(self, regime): self._regime = regime
+        def execute(self, sql, params=()): return self
+        def fetchone(self): return (self._regime,)
+
+    assert regime_threshold(FakeConn('BULL'))    == 0.40
+    assert regime_threshold(FakeConn('BEAR'))    == 0.36
+    assert regime_threshold(FakeConn('HIGH_VOL'))== 0.38
+    assert regime_threshold(FakeConn('CRASH'))   == 0.42
+    assert regime_threshold(FakeConn('SIDEWAYS'))== 0.40
