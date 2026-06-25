@@ -51,10 +51,15 @@ export function useMarketData() {
   useEffect(() => {
     if (!liveStocks || liveStocks.length === 0) return;
 
+    // Simulate micro-price moves for a "live" feel between real 5-min fetches.
+    // Cap at 300 stocks — mapping 2000+ objects every 5 s is wasteful and the
+    // tail stocks are rarely visible on screen anyway.
+    const MAX_SIMULATED = 300;
     const tick = () => {
       if (document.hidden) return; // skip updates when tab is not visible
       setStocks(prevStocks =>
-        prevStocks.map(stock => {
+        prevStocks.map((stock, idx) => {
+          if (idx >= MAX_SIMULATED) return stock;
           const volatility = 0.0005;
           const change = (Math.random() - 0.5) * 2 * volatility * stock.price;
           const newPrice = stock.price + change;

@@ -17,10 +17,16 @@ export interface NSEStockRow {
   last_updated: string;
 }
 
+let _nseSyncInProgress = false;
+
 // Initialize NSE stocks in database (run once or periodically)
 export function syncNSEStocksToDatabase(): { success: boolean; message: string; inserted: number; updated: number } {
+  if (_nseSyncInProgress) {
+    return { success: true, message: 'NSE stocks sync already in progress', inserted: 0, updated: 0 };
+  }
   try {
     const stocks = getAllNSEStocks();
+    _nseSyncInProgress = true;
 
     // Run the sync asynchronously to avoid blocking the event loop during request handling
     setTimeout(async () => {
@@ -63,11 +69,14 @@ export function syncNSEStocksToDatabase(): { success: boolean; message: string; 
         console.log(`✅ NSE Stocks Sync: Inserted ${inserted}, Updated ${updated} from ${stocks.length} stocks`);
       } catch (error) {
         console.error('❌ Error in background NSE stocks sync:', error);
+      } finally {
+        _nseSyncInProgress = false;
       }
     }, 0);
 
     return { success: true, message: `Syncing ${stocks.length} NSE stocks in background...`, inserted: 0, updated: 0 };
   } catch (error) {
+    _nseSyncInProgress = false;
     console.error('❌ Error initiating NSE stocks sync:', error);
     return { success: false, message: `Error initiating NSE stocks sync: ${error}`, inserted: 0, updated: 0 };
   }

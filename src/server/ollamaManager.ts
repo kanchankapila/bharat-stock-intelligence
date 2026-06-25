@@ -47,6 +47,7 @@ export async function startOllama(): Promise<boolean> {
 
       ollamaProcess.on('error', (err) => {
         console.error('[OLLAMA] Failed to start Ollama:', err.message);
+        clearInterval(checkInterval);
         resolve(false);
       });
 
