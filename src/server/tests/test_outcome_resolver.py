@@ -322,3 +322,139 @@ def test_unified_resolution_excludes_suspect_bars():
     assert row is not None
     assert row[0] != 'STOP_LOSS'    # the 0.00 print must not trigger the stop
     assert row[1] > -10
+
+
+# ─── multi-horizon regression tests (the starvation bugs) ───────────────────────
+#
+# Bug 1 (resolve_outcomes): the pending NOT EXISTS matched any resolved horizon,
+#   so h1 resolution caused h5/h15 passes to find nothing pending.
+# Bug 2 (resolve_unified_outcomes): setting status='COMPLETED' after h1 caused
+#   h5/h15 passes to skip the same signal (pending query excluded COMPLETED rows).
+
+def make_multi_horizon_db():
+    """Schema for both bugs: technical_signals + signal_outcomes + unified tables."""
+    conn = sqlite3.connect(':memory:')
+    conn.executescript("""
+        CREATE TABLE technical_signals (
+            symbol TEXT, date TEXT, cmp REAL, signal_score INTEGER,
+            signals_json TEXT, stop_loss TEXT, time_horizon TEXT,
+            PRIMARY KEY (symbol, date)
+        );
+        CREATE TABLE stock_ohlcv (
+            symbol TEXT, date TEXT, open REAL, high REAL,
+            low REAL, close REAL, volume INTEGER, is_suspect INTEGER DEFAULT 0,
+            PRIMARY KEY (symbol, date)
+        );
+        CREATE TABLE signal_outcomes (
+            symbol TEXT, signal_date TEXT, horizon_days INTEGER,
+            entry_price REAL, check_date TEXT, exit_price REAL,
+            return_pct REAL, outcome TEXT, signal_score INTEGER,
+            signals_json TEXT, computed_at TEXT,
+            PRIMARY KEY (symbol, signal_date, horizon_days)
+        );
+        CREATE TABLE unified_signals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, symbol TEXT, signal_date TEXT,
+            entry_price REAL, target_price REAL, stop_loss REAL, signal_source TEXT,
+            confidence_score REAL, status TEXT DEFAULT 'ACTIVE'
+        );
+        CREATE TABLE unified_signal_outcomes (
+            unified_signal_id INTEGER, signal_source TEXT, symbol TEXT, signal_date TEXT,
+            horizon_days INTEGER, entry_price REAL, entry_time TEXT, check_date TEXT,
+            exit_price REAL, outcome TEXT, return_pct REAL, exit_reason TEXT, computed_at TEXT,
+            PRIMARY KEY (unified_signal_id, horizon_days)
+        );
+    """)
+    return conn
+
+
+def _seed_ohlcv(conn, symbol, sig_date_str, n_pre=15, price=100.0, exit_price=110.0, n_post=20):
+    """Seed flat pre-signal history and rising post-signal bars for n_post days."""
+    base = datetime.date.fromisoformat(sig_date_str)
+    for i in range(n_pre, 0, -1):
+        d = (base - datetime.timedelta(days=i)).isoformat()
+        conn.execute(
+            "INSERT OR IGNORE INTO stock_ohlcv (symbol,date,open,high,low,close,volume) VALUES (?,?,?,?,?,?,100000)",
+            (symbol, d, price, price, price, price)
+        )
+    for i in range(1, n_post + 1):
+        d = (base + datetime.timedelta(days=i)).isoformat()
+        conn.execute(
+            "INSERT OR IGNORE INTO stock_ohlcv (symbol,date,open,high,low,close,volume) VALUES (?,?,?,?,?,?,100000)",
+            (symbol, d, exit_price, exit_price, exit_price, exit_price)
+        )
+
+
+def test_resolve_outcomes_resolves_signal_with_null_cmp_using_next_day_open():
+    """Signals with NULL cmp must resolve by using next-trading-day open as entry price."""
+    from outcome_resolver import resolve_outcomes
+    conn = make_multi_horizon_db()
+    sig_date = (datetime.date.today() - datetime.timedelta(days=40)).isoformat()
+    # Insert signal with NULL cmp (as happens when technical scanner doesn't capture live price)
+    conn.execute(
+        "INSERT INTO technical_signals (symbol,date,cmp,signal_score,signals_json,stop_loss,time_horizon) "
+        "VALUES ('NULLCMP',?,NULL,6,'[]',NULL,NULL)",
+        (sig_date,)
+    )
+    _seed_ohlcv(conn, 'NULLCMP', sig_date, price=100.0, exit_price=110.0, n_post=5)
+    conn.commit()
+
+    result = resolve_outcomes(conn, horizon_days=1)
+    assert result['resolved'] >= 1, "signal with null cmp must still resolve via next-day open"
+    row = conn.execute(
+        "SELECT outcome FROM signal_outcomes WHERE symbol='NULLCMP' AND horizon_days=1"
+    ).fetchone()
+    assert row is not None
+    assert row[0] in ('WIN', 'LOSS', 'NEUTRAL', 'STOP_LOSS')
+
+
+def test_resolve_outcomes_produces_all_three_horizons_independently():
+    """Bug 1: resolving h1 must not prevent h5 and h15 from being produced for the same signal."""
+    from outcome_resolver import resolve_outcomes
+    conn = make_multi_horizon_db()
+    # Signal old enough for all three horizons (1/5/15) to have elapsed
+    sig_date = (datetime.date.today() - datetime.timedelta(days=40)).isoformat()
+    conn.execute(
+        "INSERT INTO technical_signals (symbol,date,cmp,signal_score,signals_json,stop_loss,time_horizon) "
+        "VALUES ('MULTI1',?,100.0,6,'[]',NULL,NULL)",
+        (sig_date,)
+    )
+    _seed_ohlcv(conn, 'MULTI1', sig_date, exit_price=110.0, n_post=20)
+    conn.commit()
+
+    resolve_outcomes(conn, horizon_days=1)
+    resolve_outcomes(conn, horizon_days=5)
+    resolve_outcomes(conn, horizon_days=15)
+
+    rows = conn.execute(
+        "SELECT horizon_days, outcome FROM signal_outcomes WHERE symbol='MULTI1' ORDER BY horizon_days"
+    ).fetchall()
+    horizons_resolved = {r[0] for r in rows if r[1] not in ('PENDING', None)}
+    assert 1 in horizons_resolved, "h1 outcome missing"
+    assert 5 in horizons_resolved, "h5 outcome missing — Bug 1: h1 consumed the signal"
+    assert 15 in horizons_resolved, "h15 outcome missing — Bug 1: h1 consumed the signal"
+
+
+def test_resolve_unified_outcomes_produces_all_horizons_independently():
+    """Bug 2: resolving h1 must not mark signal COMPLETED and starve h5 and h15 passes."""
+    from outcome_resolver import resolve_unified_outcomes
+    conn = make_multi_horizon_db()
+    sig_date = (datetime.date.today() - datetime.timedelta(days=40)).isoformat()
+    conn.execute(
+        "INSERT INTO unified_signals (symbol,signal_date,entry_price,target_price,stop_loss,signal_source,confidence_score) "
+        "VALUES ('MULTI2',?,100.0,110.0,90.0,'AI',75)",
+        (sig_date,)
+    )
+    _seed_ohlcv(conn, 'MULTI2', sig_date, exit_price=110.0, n_post=20)
+    conn.commit()
+
+    resolve_unified_outcomes(conn, horizon_days=1)
+    resolve_unified_outcomes(conn, horizon_days=5)
+    resolve_unified_outcomes(conn, horizon_days=15)
+
+    rows = conn.execute(
+        "SELECT horizon_days, outcome FROM unified_signal_outcomes WHERE symbol='MULTI2' ORDER BY horizon_days"
+    ).fetchall()
+    horizons_resolved = {r[0] for r in rows if r[1] not in ('PENDING', None)}
+    assert 1 in horizons_resolved, "h1 outcome missing"
+    assert 5 in horizons_resolved, "h5 outcome missing — Bug 2: COMPLETED flag starved h5"
+    assert 15 in horizons_resolved, "h15 outcome missing — Bug 2: COMPLETED flag starved h15"
