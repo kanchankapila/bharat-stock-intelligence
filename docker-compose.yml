@@ -7,6 +7,29 @@
 # Credentials are read from .env (POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB) with
 # dev-only fallbacks — set strong values in .env before any non-local use.
 services:
+  redis:
+    image: redis:7-alpine
+    container_name: bharat_redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD:-bharatredis}
+      --maxclients 1000
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --save ""
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    ulimits:
+      nofile:
+        soft: 10032
+        hard: 10032
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-bharatredis}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   timescaledb:
     image: timescale/timescaledb:2.17.2-pg16
     container_name: bharat_timescaledb
