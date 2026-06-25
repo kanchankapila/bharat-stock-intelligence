@@ -387,14 +387,11 @@ def backfill_episodes(conn: ConnWrapper, lookback_days: int = 180, dry_run: bool
         sector    = sector or 'OTHER'
         state_key = get_state_key(regime, sector, sig_score)
 
-        if sig_score >= 7:
-            action = 'AGGRESSIVE'
-        elif sig_score >= 5:
-            action = 'BALANCED'
-        elif sig_score >= 3:
-            action = 'CONSERVATIVE'
-        else:
-            action = 'SECTOR_FOCUSED'
+        # Use the policy that had been learned up to this point (offline Q-learning):
+        # process rows chronologically so earlier backfill rows inform later ones.
+        # epsilon > 0 retains exploration so the early Q-table (all zeros) doesn't
+        # collapse everything to ACTIONS[0] — same epsilon decay as online updates.
+        action = get_policy(conn, state_key, epsilon=epsilon)
 
         nifty_ret = _get_nifty_horizon_return(conn, sig_date, horizon_days=15)
         reward    = float(ret_pct) - nifty_ret
