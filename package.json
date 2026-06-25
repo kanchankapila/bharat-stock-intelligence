@@ -21,6 +21,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "fetch:chart-patterns": "tsx scripts/fetchChartPatterns.ts",
+    "fetch:mc-market-stats": "tsx scripts/fetchMoneycontrolMarketStats.ts",
     "sync:mappings": "tsx scripts/syncAllStockMappings.ts",
     "update:sectors": "tsx scripts/updateSectors.ts"
   },
