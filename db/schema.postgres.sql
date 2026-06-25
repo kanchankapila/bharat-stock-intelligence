@@ -1581,6 +1581,7 @@ CREATE TABLE IF NOT EXISTS "technical_signals" (
   "opening_range_break" DOUBLE PRECISION,
   "vwap_deviation_pct" DOUBLE PRECISION,
   "first_hour_vol_share" DOUBLE PRECISION,
+  "cs_score" REAL,
   PRIMARY KEY ("symbol", "date")
 );
 CREATE INDEX idx_tsig_date  ON technical_signals(date DESC);
@@ -1588,6 +1589,7 @@ CREATE INDEX idx_tsig_score ON technical_signals(signal_score DESC);
 CREATE INDEX idx_tsig_sym   ON technical_signals(symbol);
 CREATE INDEX idx_technical_signals_created_at ON technical_signals(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_tsig_signals_json_gin ON technical_signals USING GIN (signals_json gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_ts_cs_score ON technical_signals(cs_score) WHERE cs_score IS NOT NULL;
 
 -- ── tick_data ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "tick_data" (

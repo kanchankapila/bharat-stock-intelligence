@@ -1885,6 +1885,12 @@ runMigration('047_live_screener_optimization', `
   );
 `);
 
+runMigration('048_cs_score_column', `
+  ALTER TABLE technical_signals ADD COLUMN cs_score REAL;
+  CREATE INDEX IF NOT EXISTS idx_ts_cs_score
+    ON technical_signals(cs_score) WHERE cs_score IS NOT NULL;
+`);
+
 // ── Retention: confluence_signals is an append-only firehose (~700k rows, the single
 // largest contributor to DB bloat). expires_at exists but nothing pruned it. Delete
 // expired rows on boot and every 6h. Keeps the table bounded without losing live signals.
