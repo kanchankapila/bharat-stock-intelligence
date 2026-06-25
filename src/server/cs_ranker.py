@@ -155,14 +155,9 @@ def load_cs_training_data() -> pd.DataFrame:
         return df
 
     # Rank alpha within each date → percentile 0-100
-    def _pct_rank(group):
-        n = len(group)
-        ranks = group['alpha'].rank(method='average')
-        group = group.copy()
-        group['cs_percentile'] = (ranks - 1) / max(1, n - 1) * 100
-        return group
-
-    df = df.groupby('signal_date', group_keys=False).apply(_pct_rank)
+    df['cs_percentile'] = df.groupby('signal_date')['alpha'].transform(
+        lambda x: (x.rank(method='average') - 1) / max(1, len(x) - 1) * 100
+    )
     df = df.sort_values('signal_date').reset_index(drop=True)
 
     print(f"[CSRanker] Training data: {len(df)} rows across {df['signal_date'].nunique()} dates "
@@ -210,9 +205,9 @@ def train_cs_ranker(df: pd.DataFrame, min_samples: int = 50) -> dict:
 
     preds_te = model.predict(X_te)
     rho, pval = spearmanr(y_te, preds_te)
-    print(f"[CSRanker] Held-out Spearman ρ={rho:.4f}  (p={pval:.3g}, n={len(y_te)})")
+    print(f"[CSRanker] Held-out Spearman rho={rho:.4f}  (p={pval:.3g}, n={len(y_te)})")
     if rho < 0.10:
-        print(f"[CSRanker] WARNING: ρ={rho:.4f} below acceptance threshold 0.10 — model saved anyway")
+        print(f"[CSRanker] WARNING: rho={rho:.4f} below acceptance threshold 0.10 — model saved anyway")
 
     # Retrain on full data
     model.fit(X, y)
@@ -358,7 +353,7 @@ def score_batch() -> int:
     conn  = connect()
     cur   = conn.cursor()
     updates = [
-        (round(float(cs_scores[idx]), 2), row['symbol'], row['signal_date'])
+        (round(float(cs_scores[idx]), 2), row.symbol, row.signal_date)
         for idx, row in enumerate(df.itertuples(index=False))
     ]
     cur.executemany(
