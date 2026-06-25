@@ -31,71 +31,82 @@ MODELS_DIR     = os.path.join(os.getcwd(), 'src', 'server', 'ml_models')
 ONLINE_PATH    = os.path.join(MODELS_DIR, 'online_sgd.pkl')
 ENSEMBLE_PATH  = os.path.join(MODELS_DIR, 'ensemble.pkl')
 
-SIGNAL_TYPES = [
-    'RSI_DIVERGENCE', 'HIDDEN_DIVERGENCE', 'RESISTANCE_BREAKOUT',
-    'MACD_CROSSOVER', 'BB_COMPRESSION', 'GOLDEN_CROSS', 'OVERSOLD_RECOVERY',
-    'EMA_BULL_STACK', 'WEEK_52_BREAKOUT', 'BULLISH_ENGULFING', 'SUPERTREND_CROSS',
-    'NR7_COMPRESSION', 'VOLUME_ACCUMULATION', 'NEAR_52W_HIGH',
-    'CONSECUTIVE_STRENGTH', 'ATR_CONTRACTION', 'PCR_EXTREME',
-]
-REGIME_MAP = {'BULL': 1.0, 'SIDEWAYS': 0.0, 'BEAR': -1.0}
-
-
-# ── Feature vector (same as ml_ensemble.py) ──────────────────────────────────
-
-def _parse_types(signals_json: str) -> set[str]:
-    try:
-        return {s.get('type', '') for s in json.loads(signals_json or '[]') if isinstance(s, dict)}
-    except Exception:
-        return set()
-
-
 def build_features(df: pd.DataFrame) -> np.ndarray:
-    """Return numpy feature matrix; same feature order every call for compatibility."""
-    X = []
-    for _, row in df.iterrows():
-        feats = [
-            float(row.get('signal_score', 5) or 5),
-            float(row.get('rsi',          50) or 50),
-            float(row.get('adx',          20) or 20),
-            float(row.get('volume_ratio',  1) or 1),
-            float(row.get('horizon_days',  15) or 15),
-            REGIME_MAP.get(str(row.get('nifty_regime', '')), 0.0),
-        ]
-        # SMA200 distance
-        try:
-            cmp    = float(row.get('cmp',    0) or 0)
-            sma200 = float(row.get('sma200', 0) or 0)
-            feats.append((cmp - sma200) / max(sma200, 1e-9) * 100)
-        except Exception:
-            feats.append(0.0)
+    """Delegate to ml_ensemble's canonical build_features so the SGD and the
+    stacking ensemble always operate on an identical feature vector.
 
-        # score × regime interaction
-        feats.append(feats[0] * feats[5])
-        # RSI deviation
-        feats.append(abs(feats[1] - 50))
-
-        # Signal type one-hot
-        types = _parse_types(str(row.get('signals_json', '[]')))
-        feats.extend([1.0 if t in types else 0.0 for t in SIGNAL_TYPES])
-        # Signal count
-        feats.append(float(len(types)))
-
-        X.append(feats)
-    return np.array(X, dtype=np.float32)
+    The import is deferred so loading online_learner does not pull in lightgbm /
+    xgboost at startup — they are only needed when ml_ensemble actually trains.
+    Returns a numpy float32 array (SGD / StandardScaler do not need DataFrame).
+    """
+    from ml_ensemble import build_features as _ens_build  # type: ignore
+    return _ens_build(df).astype(np.float32).values
 
 
 # ── Data Loading ─────────────────────────────────────────────────────────────
 
 def load_recent_outcomes(window_days: int, min_new: int) -> pd.DataFrame:
+    """Load resolved outcomes joined to the same rich feature columns as
+    ml_ensemble.load_training_data so build_features() receives every column
+    it expects (missing ones default safely inside the ensemble's num() helper).
+    """
     cutoff = (datetime.datetime.now() - datetime.timedelta(days=window_days)).strftime('%Y-%m-%d')
     q = """
         SELECT so.symbol, so.signal_date, so.horizon_days, so.outcome,
                so.signal_score, so.signals_json,
-               ts.rsi, ts.adx, ts.nifty_regime, ts.cmp, ts.sma200, ts.volume_ratio
+               ts.rsi, ts.adx, ts.nifty_regime, ts.cmp, ts.sma200, ts.volume_ratio,
+               ts.fii_3d_net, ts.above_sma200, ts.pcr_oi, ts.pcr_vol,
+               ts.fii_10d_net, ts.dii_3d_net, ts.delivery_pct,
+               ts.sector_ret_5d, ts.sector_ret_21d,
+               ts.iv_rank, ts.iv_skew,
+               ts.rs_rank_21d, ts.rs_rank_63d,
+               ts.insider_buy_pct_90d,
+               ts.opening_range_break, ts.vwap_deviation_pct, ts.first_hour_vol_share,
+               COALESCE(fh.fifty_two_week_high, sf.fifty_two_week_high) AS fifty_two_week_high,
+               COALESCE(fh.piotroski_f_score, sf.piotroski_f_score)     AS piotroski_f_score,
+               COALESCE(fh.debt_to_equity, sf.debt_to_equity)           AS debt_to_equity,
+               COALESCE(fh.operating_margins, sf.operating_margins)     AS operating_margins,
+               COALESCE(fh.return_on_equity, sf.return_on_equity)       AS return_on_equity,
+               COALESCE(fh.revenue_growth, sf.revenue_growth)           AS revenue_growth,
+               COALESCE(fh.earnings_growth, sf.earnings_growth)         AS earnings_growth,
+               COALESCE(fh.earnings_yield, sf.earnings_yield)           AS earnings_yield,
+               COALESCE(fh.price_to_book, sf.price_to_book)             AS price_to_book,
+               COALESCE(fh.market_cap, sf.market_cap)                   AS market_cap,
+               aeh.n_analysts, aeh.buy_count, aeh.target_mean,
+               psh_az.score_value AS altman_z,
+               psh_oo.score_value AS ohlson_o
         FROM signal_outcomes so
         LEFT JOIN technical_signals ts
                ON ts.symbol = so.symbol AND ts.date = so.signal_date
+        LEFT JOIN fundamentals_history fh
+               ON fh.symbol = so.symbol
+              AND fh.as_of_date = (
+                  SELECT MAX(fh2.as_of_date) FROM fundamentals_history fh2
+                  WHERE fh2.symbol = so.symbol AND fh2.as_of_date <= so.signal_date
+              )
+        LEFT JOIN stock_fundamentals sf ON sf.symbol = so.symbol
+        LEFT JOIN analyst_estimates_history aeh
+               ON aeh.symbol = so.symbol
+              AND aeh.as_of_date = (
+                  SELECT MAX(aeh2.as_of_date) FROM analyst_estimates_history aeh2
+                  WHERE aeh2.symbol = so.symbol AND aeh2.as_of_date <= so.signal_date
+              )
+        LEFT JOIN proprietary_scores_history psh_az
+               ON psh_az.symbol = so.symbol AND psh_az.source = 'moneycontrol'
+              AND psh_az.score_type = 'altman_z_score'
+              AND psh_az.date = (
+                  SELECT MAX(p2.date) FROM proprietary_scores_history p2
+                  WHERE p2.symbol = so.symbol AND p2.source = 'moneycontrol'
+                    AND p2.score_type = 'altman_z_score' AND p2.date <= so.signal_date
+              )
+        LEFT JOIN proprietary_scores_history psh_oo
+               ON psh_oo.symbol = so.symbol AND psh_oo.source = 'moneycontrol'
+              AND psh_oo.score_type = 'ohlson_o_score'
+              AND psh_oo.date = (
+                  SELECT MAX(p2.date) FROM proprietary_scores_history p2
+                  WHERE p2.symbol = so.symbol AND p2.source = 'moneycontrol'
+                    AND p2.score_type = 'ohlson_o_score' AND p2.date <= so.signal_date
+              )
         WHERE so.outcome IN ('WIN','LOSS','NEUTRAL')
           AND so.signal_date >= ?
         ORDER BY so.signal_date DESC
@@ -105,40 +116,48 @@ def load_recent_outcomes(window_days: int, min_new: int) -> pd.DataFrame:
 
 
 def load_pending_signals() -> pd.DataFrame:
-    q = """
-        SELECT symbol, date AS signal_date, signal_score, signals_json,
-               rsi, adx, nifty_regime, cmp, sma200, volume_ratio
-        FROM technical_signals
-        WHERE win_probability IS NULL
-        ORDER BY date DESC
-        LIMIT 10000
+    """Mirror ml_ensemble.load_pending_signals exactly so the feature vector
+    is identical at predict time to what build_features() produces at train time.
     """
-    df = read_df(q)
-    df['horizon_days'] = 15
-    return df
+    from ml_ensemble import load_pending_signals as _ens_load  # type: ignore
+    return _ens_load()
 
 
 # ── Online Model ──────────────────────────────────────────────────────────────
 
-def load_or_init_sgd() -> dict:
-    if os.path.exists(ONLINE_PATH):
-        with open(ONLINE_PATH, 'rb') as f:
-            return pickle.load(f)
-
+def _new_sgd_state() -> dict:
     from sklearn.linear_model import SGDClassifier
     from sklearn.preprocessing import StandardScaler
-    sgd = SGDClassifier(
-        loss='log_loss', penalty='l2', alpha=1e-4,
-        max_iter=1, warm_start=True, random_state=42,
-    )
-    scaler = StandardScaler()
     return {
-        'model':        sgd,
-        'scaler':       scaler,
-        'scaler_fitted': False,
+        'model':          SGDClassifier(loss='log_loss', penalty='l2', alpha=1e-4,
+                                        max_iter=1, warm_start=True, random_state=42),
+        'scaler':         StandardScaler(),
+        'scaler_fitted':  False,
         'n_samples_seen': 0,
         'last_updated':   None,
     }
+
+
+def load_or_init_sgd(expected_n_features: int | None = None) -> dict:
+    if os.path.exists(ONLINE_PATH):
+        try:
+            with open(ONLINE_PATH, 'rb') as f:
+                state = pickle.load(f)
+            # Detect feature-count mismatch (e.g. after build_features was expanded).
+            # n_features_in_ is set by sklearn after the first partial_fit.
+            if expected_n_features is not None and state.get('scaler_fitted'):
+                fitted_n = getattr(state['scaler'], 'n_features_in_', None)
+                if fitted_n is not None and fitted_n != expected_n_features:
+                    print(
+                        f"[OnlineLearner] Feature count changed "
+                        f"({fitted_n} → {expected_n_features}) — resetting SGD."
+                    )
+                    os.remove(ONLINE_PATH)
+                    return _new_sgd_state()
+            return state
+        except Exception as e:
+            print(f"[OnlineLearner] Could not load SGD state ({e}) — reinitialising.")
+    return _new_sgd_state()
 
 
 def save_sgd(state: dict):
@@ -203,27 +222,23 @@ def score_pending_with_ensemble_blend(
     df: pd.DataFrame,
 ) -> int:
     """Blend online SGD (40%) + ensemble (60%) if ensemble is available."""
-    X = build_features(df)
+    # build_features() now delegates to ml_ensemble.build_features, so X_named
+    # (DataFrame) and X (numpy) share the same column layout — no realignment needed.
+    from ml_ensemble import build_features as _ens_build, predict_proba_ensemble  # type: ignore
+    X_named = _ens_build(df)
+    X = X_named.astype(np.float32).values
 
     sgd_probs = predict_sgd(sgd_state, X)
 
     if ensemble:
-        # Align features to ensemble's expected columns
-        import pandas as pd
-        feat_df = pd.DataFrame(X)  # raw array — need named cols
-        # Use SGD as fallback for ensemble alignment
-        ens_probs = sgd_probs  # fallback if alignment fails
         try:
-            from ml_ensemble import build_features as ens_feats, predict_proba_ensemble
-            X_named = ens_feats(df)
-            for col in ensemble['feature_names']:
+            for col in ensemble.get('feature_names', []):
                 if col not in X_named.columns:
                     X_named[col] = 0.0
-            X_named = X_named[ensemble['feature_names']].astype(np.float32)
-            ens_probs = predict_proba_ensemble(ensemble, X_named)
+            X_ens = X_named[ensemble['feature_names']].astype(np.float32)
+            ens_probs = predict_proba_ensemble(ensemble, X_ens)
         except Exception:
-            pass
-
+            ens_probs = sgd_probs
         probs = 0.4 * sgd_probs + 0.6 * ens_probs
     else:
         probs = sgd_probs
@@ -267,8 +282,9 @@ def run(window_days: int = 180, min_new: int = 5, dry_run: bool = False):
         y  = (df['outcome'] == 'WIN').astype(int).values
         X  = build_features(df)
 
-        # Load existing SGD state
-        state = load_or_init_sgd()
+        # Load existing SGD state; pass feature count so a stale pkl is reset
+        # automatically rather than crashing on the first partial_fit call.
+        state = load_or_init_sgd(expected_n_features=X.shape[1])
 
         # Evaluate on last 20% before updating (rough held-out estimate)
         split = max(int(len(X) * 0.8), 5)
