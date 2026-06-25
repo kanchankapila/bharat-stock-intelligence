@@ -555,5 +555,9 @@ export async function bootstrapFundamentals(bullmqReady: boolean): Promise<void>
   }
   console.log('[FUND] No Redis — starting first-time fundamentals sync directly');
   runFullFundamentalsSync(false).catch(err => console.error('[FUND] First-run error:', err.message));
-  setInterval(() => runFullFundamentalsSync(false).catch(console.error), 7 * 24 * 60 * 60 * 1000);
+  const _fundFallbackTimer = setInterval(
+    () => runFullFundamentalsSync(false).catch(console.error),
+    7 * 24 * 60 * 60 * 1000,
+  );
+  _fundFallbackTimer.unref();
 }

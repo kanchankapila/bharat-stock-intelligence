@@ -2,9 +2,11 @@ import { fetchWithCache } from './cacheService';
 import { dbGet } from './dbAsync';
 
 let _cachedToken: string | null = null;
+let _tokenVersion = 0; // bump on invalidation so stale nt_* cache keys are never served
 
 export function invalidateNiftyTraderToken(): void {
   _cachedToken = null;
+  _tokenVersion++;
 }
 
 export async function getNiftyTraderHeaders(): Promise<Record<string, string>> {
@@ -54,7 +56,7 @@ export async function fetchNiftyTraderStockData(symbol: string): Promise<NiftyTr
   const normalizedSymbol = symbol.toLowerCase();
   
   try {
-    const data = await fetchWithCache(`nt_${normalizedSymbol}`, async () => {
+    const data = await fetchWithCache(`nt_v${_tokenVersion}_${normalizedSymbol}`, async () => {
       console.log(`[NIFTYTRADER] Fetching fresh data for ${normalizedSymbol}...`);
       const body = JSON.stringify({ symbol: normalizedSymbol });
       const headers = await getNiftyTraderHeaders();

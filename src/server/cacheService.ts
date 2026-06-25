@@ -87,15 +87,24 @@ memCacheEvictionInterval.unref?.();
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 export async function cacheGet<T>(key: string): Promise<T | null> {
+  // L1: in-process parsed object (no network, no JSON.parse on repeat reads)
+  const l1 = memGet<T>(key);
+  if (l1 !== null) return l1;
+
   if (redisAvailable && redis) {
     try {
       const raw = await redis.get(key);
-      return raw ? (JSON.parse(raw) as T) : null;
+      if (raw) {
+        const parsed = JSON.parse(raw) as T;
+        // Promote to L1 for 30 s to absorb burst re-reads from the same process
+        memSet(key, parsed, 30);
+        return parsed;
+      }
     } catch {
-      // fall through to memory
+      // Redis error — L1 already missed, fall through to null
     }
   }
-  return memGet<T>(key);
+  return null;
 }
 
 export async function cacheSet(key: string, value: unknown, ttlSeconds: number): Promise<void> {
