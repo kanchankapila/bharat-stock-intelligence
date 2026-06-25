@@ -258,15 +258,21 @@ def resolve_outcomes(
         # PHASE 1 FIX: Check SL on next trading day first (it has priority in intraday)
         if stop_loss and stop_loss > 0:
             sl_hit = conn.execute("""
-                SELECT date, low FROM stock_ohlcv
+                SELECT date, low, open FROM stock_ohlcv
                 WHERE symbol = ? AND date >= ? AND date <= ?
                   AND low <= ? AND COALESCE(is_suspect, 0) = 0
-                ORDER BY date ASC, low ASC LIMIT 1
+                ORDER BY date ASC LIMIT 1
             """, (sym, next_trading_day, exit_target_date, stop_loss)).fetchone()
 
             if sl_hit:
                 check_date = str(sl_hit[0])
-                exit_price = float(stop_loss)
+                day_open   = float(sl_hit[2]) if sl_hit[2] else None
+                # Gap-fill: if the day opened below the stop, we fill at open
+                # (can't fill at stop on a gap-down). Otherwise fill at stop.
+                if day_open and day_open < stop_loss:
+                    exit_price = day_open
+                else:
+                    exit_price = float(stop_loss)
                 return_pct = net_return_pct((exit_price - entry) / entry * 100)
                 outcome    = 'STOP_LOSS'
 

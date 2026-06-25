@@ -33,12 +33,15 @@ ATR_WINDOW = 14
 # Triple-barrier defaults: vol-scaled, asymmetric (reward:risk 2:1).
 TB_K_UP   = 2.0     # upper barrier = +k_up · atr_pct
 TB_K_DN   = 1.0     # lower barrier = −k_dn · atr_pct
-TB_COST_PCT = 0.4   # round-trip cost band; |horizon close| inside it is NEUTRAL (excluded)
+# Cost band as a fraction of ATR rather than a fixed %; this keeps the neutral
+# zone proportional to realized volatility (low-vol stocks had nearly all
+# horizon returns inside the old fixed 0.4% band, starving the model of labels).
+TB_COST_FRAC = 0.15  # neutral band = ±0.15 · atr_pct (≈0.3% at avg ATR 2%)
 
 
 def triple_barrier_label(mfe_pct, mae_pct, mfe_before_mae, horizon_close_pct,
                          atr_pct, k_up: float = TB_K_UP, k_dn: float = TB_K_DN,
-                         cost_pct: float = TB_COST_PCT):
+                         cost_frac: float = TB_COST_FRAC):
     """López de Prado triple-barrier label from precomputed excursions.
 
     Barriers are volatility-scaled and asymmetric: upper = +k_up·atr_pct,
@@ -48,8 +51,8 @@ def triple_barrier_label(mfe_pct, mae_pct, mfe_before_mae, horizon_close_pct,
       - If both barriers are touched, `mfe_before_mae` decides which came first.
       - If only one is touched, it wins.
       - If neither is touched (time barrier) — or atr_pct is missing/≤0 so barriers are
-        undefined — label by the net-of-cost sign of horizon_close_pct; inside the cost
-        band it is NEUTRAL (None).
+        undefined — label by the net-of-cost sign of horizon_close_pct; inside the
+        vol-scaled cost band it is NEUTRAL (None).
     """
     if horizon_close_pct is None:
         return None
@@ -66,6 +69,10 @@ def triple_barrier_label(mfe_pct, mae_pct, mfe_before_mae, horizon_close_pct,
         if hit_dn:
             return 0
         # neither barrier touched → fall through to the time-barrier rule
+        cost_pct = cost_frac * atr_pct
+    else:
+        # No ATR available: fall back to a fixed 0.4% minimum cost band
+        cost_pct = 0.4
 
     if abs(horizon_close_pct) < cost_pct:
         return None

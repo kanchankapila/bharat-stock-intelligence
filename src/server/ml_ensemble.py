@@ -501,14 +501,14 @@ def _base_models(scale_pos_weight: float = 1.0):
     rf = CalibratedClassifierCV(
         RandomForestClassifier(
             n_estimators=300, max_depth=6, min_samples_leaf=5,
-            n_jobs=-1, random_state=42,
+            n_jobs=-1, random_state=42, class_weight='balanced',
         ),
         method='isotonic', cv=3,
     )
     et = CalibratedClassifierCV(
         ExtraTreesClassifier(
             n_estimators=300, max_depth=6, min_samples_leaf=5,
-            n_jobs=-1, random_state=42,
+            n_jobs=-1, random_state=42, class_weight='balanced',
         ),
         method='isotonic', cv=3,
     )
