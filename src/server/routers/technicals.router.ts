@@ -165,16 +165,26 @@ export const technicalsRouter = router({
         });
         const symbols = enrichedList.map((item: any) => item.symbol);
         const rsiMap = await getLatestRSIForSymbols(symbols);
-        const finalData = await Promise.all(enrichedList.map(async (item: any) => {
-          let rsi = rsiMap.get(item.symbol);
-          if (rsi === undefined || rsi === 0) {
+
+        // Fetch RSI from MC API only for symbols missing from DB cache.
+        // Concurrency capped at 5 to avoid hammering MC (was unbounded Promise.all).
+        const missing = symbols.filter(s => !rsiMap.get(s));
+        const CONCURRENCY = 5;
+        for (let i = 0; i < missing.length; i += CONCURRENCY) {
+          await Promise.all(missing.slice(i, i + CONCURRENCY).map(async sym => {
             try {
-              const tech = await fetchTechIndicators(item.symbol);
-              const rsiInd = tech?.data?.indicators?.find((i: any) => i.displayName?.includes('RSI') || i.id === 'RSI');
-              if (rsiInd) rsi = parseFloat(String(rsiInd.value || '0'));
-            } catch { /* use 0 fallback */ }
-          }
-          return { ...item, rsi: rsi || 0 };
+              const tech = await fetchTechIndicators(sym);
+              const rsiInd = tech?.data?.indicators?.find(
+                (ind: any) => ind.displayName?.includes('RSI') || ind.id === 'RSI'
+              );
+              if (rsiInd) rsiMap.set(sym, parseFloat(String(rsiInd.value || '0')));
+            } catch { /* leave as 0 */ }
+          }));
+        }
+
+        const finalData = enrichedList.map((item: any) => ({
+          ...item,
+          rsi: rsiMap.get(item.symbol) || 0,
         }));
         if (result.data?.list) result.data.list = finalData;
         if (result.data?.tableDataList) result.data.tableDataList = finalData;

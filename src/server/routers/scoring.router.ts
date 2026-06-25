@@ -5,6 +5,17 @@ import { crossSourceFilter, regimeSectorFilter, qualityOversoldScanner } from ".
 import { router, publicProcedure } from "../trpc";
 import { cacheGet } from "../cacheService";
 
+// Cached latest computed_at for unified_recommendations — avoids MAX() scan on every strategy query.
+// Invalidated when unified_ranker writes new recommendations (via triggerStockScoring mutation).
+let _urLatestAt: string | null = null;
+async function urLatestAt(): Promise<string | null> {
+  if (!_urLatestAt) {
+    const row = await dbGet<{ ts: string }>('SELECT MAX(computed_at) AS ts FROM unified_recommendations');
+    _urLatestAt = row?.ts ?? null;
+  }
+  return _urLatestAt;
+}
+
 // ETNow screener IDs used by the investment picks strategy
 const ET_ZERO_DEBT        = '79';
 const ET_CASH_COW         = '73';
@@ -31,7 +42,10 @@ export const scoringRouter = router({
     .query(({ input }) => getStockScoreDetail(input.symbol, input.timeframe)),
 
   triggerStockScoring: publicProcedure
-    .mutation(async () => syncAndScore()),
+    .mutation(async () => {
+      _urLatestAt = null; // unified_ranker will write new rows
+      return syncAndScore();
+    }),
 
   recalculateScoresOnly: publicProcedure
     .mutation(async () => recalculateScores()),
@@ -214,6 +228,8 @@ export const scoringRouter = router({
         ? `AND ur.conviction_level IN ('A_HIGH','B_MEDIUM')`
         : '';
 
+      const urAt = await urLatestAt();
+
       const rows = await dbAll<any>(`
         WITH ranked AS (
           SELECT *,
@@ -238,7 +254,7 @@ export const scoringRouter = router({
         JOIN nse_stocks ns ON ns.symbol = r.symbol
         LEFT JOIN unified_recommendations ur
           ON ur.symbol = r.symbol
-          AND ur.computed_at = (SELECT MAX(computed_at) FROM unified_recommendations)
+          AND ur.computed_at = ?
         WHERE r.rn = 1
           AND qs.piotroski_f_score >= 7
           AND qs.above_sma200 = 1
@@ -247,7 +263,7 @@ export const scoringRouter = router({
           ${urFilter}
         ORDER BY COALESCE(ur.avg_engine_track_record, 1.0) DESC, qs.rank_composite DESC
         LIMIT ?
-      `, [input.limit]);
+      `, [urAt, input.limit]);
 
       const stocks = rows.map(row => {
         const signalTypes: string[] = [];

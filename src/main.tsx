@@ -14,7 +14,16 @@ import './index.css';
 const transformer = superjson as any;
 
 const Main = () => {
-  const [queryClient] = useState(() => new QueryClient());
+  const [queryClient] = useState(() => new QueryClient({
+    defaultOptions: {
+      queries: {
+        // Treat server data as fresh for 5 minutes — prevents refetch on every tab switch.
+        // Procedures with live data (prices, queue stats) override this with their own staleTime.
+        staleTime: 5 * 60 * 1000,
+        refetchOnWindowFocus: false,
+      },
+    },
+  }));
   const [trpcClient] = useState(() =>
     trpc.createClient({
       links: [

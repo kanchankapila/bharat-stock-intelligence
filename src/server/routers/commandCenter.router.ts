@@ -4,6 +4,17 @@ import { router, publicProcedure } from '../trpc';
 import { runPython } from '../pythonRunner';
 import { cacheGet } from '../cacheService';
 
+// Lazily cached MAX(computed_at) for unified_recommendations — avoids a scan every request.
+let _urLatestAtCC: string | null = null;
+async function urLatestAt(): Promise<string | null> {
+  if (!_urLatestAtCC) {
+    const row = await dbGet<{ ts: string }>('SELECT MAX(computed_at) AS ts FROM unified_recommendations');
+    _urLatestAtCC = row?.ts ?? null;
+  }
+  return _urLatestAtCC;
+}
+export function invalidateUrLatestAt() { _urLatestAtCC = null; }
+
 export const commandCenterRouter = router({
 
   getCommandCenter: publicProcedure
@@ -22,11 +33,15 @@ export const commandCenterRouter = router({
         updated_at: new Date().toISOString(),
       };
 
+      const latest = await urLatestAt();
       let query = `
-        SELECT * FROM unified_recommendations
-        WHERE computed_at = (SELECT MAX(computed_at) FROM unified_recommendations)
+        SELECT symbol, name, unified_score, conviction_level, timeframe, sector,
+               avg_engine_score, avg_engine_track_record, classification,
+               stop_loss, target_1, target_2, entry_price, computed_at
+        FROM unified_recommendations
+        WHERE computed_at = ?
       `;
-      const params: (string | number)[] = [];
+      const params: (string | number)[] = [latest ?? ''];
       if (input.conviction !== 'ALL') {
         query += ` AND conviction_level = ?`;
         params.push(input.conviction);

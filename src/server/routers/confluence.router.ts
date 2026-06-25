@@ -3,6 +3,18 @@ import { dbGet, dbAll } from '../dbAsync';
 import { router, publicProcedure } from '../trpc';
 import { computeConfluenceSignals, getLatestConfluenceSignals } from '../confluenceEngine';
 
+// Cached latest computed_at for confluence_signals — avoids a MAX() scan on every request.
+// Invalidated when refreshConfluenceSignals() runs.
+let _confluenceLatestAt: string | null = null;
+
+async function confluenceLatestAt(): Promise<string | null> {
+  if (!_confluenceLatestAt) {
+    const row = await dbGet<{ ts: string }>('SELECT MAX(computed_at) AS ts FROM confluence_signals');
+    _confluenceLatestAt = row?.ts ?? null;
+  }
+  return _confluenceLatestAt;
+}
+
 export const confluenceRouter = router({
 
   // Ranked list of high-conviction signals (latest batch)
@@ -29,7 +41,10 @@ export const confluenceRouter = router({
     .input(z.object({ symbol: z.string() }))
     .query(async ({ input }) => {
       const row = await dbGet<any>(`
-        SELECT * FROM confluence_signals
+        SELECT symbol, confluence_score, conviction_level, bullish_screener_count,
+               bearish_screener_count, screener_names_json, screener_ids_json,
+               sector, timeframe, computed_at, expires_at
+        FROM confluence_signals
         WHERE symbol = ?
         ORDER BY computed_at DESC
         LIMIT 1
@@ -62,22 +77,29 @@ export const confluenceRouter = router({
         ? orderBy : 'reliability_score';
       if (source !== 'all') {
         return dbAll(`
-          SELECT * FROM screener_reliability WHERE source = ? ORDER BY ${safe} DESC LIMIT ?
+          SELECT scan_id, screener_name, source, reliability_score, win_rate_7d, win_rate_30d, avg_return_7d, total_signals
+          FROM screener_reliability WHERE source = ? ORDER BY ${safe} DESC LIMIT ?
         `, [source, limit]);
       }
-      return dbAll(`SELECT * FROM screener_reliability ORDER BY ${safe} DESC LIMIT ?`, [limit]);
+      return dbAll(`
+        SELECT scan_id, screener_name, source, reliability_score, win_rate_7d, win_rate_30d, avg_return_7d, total_signals
+        FROM screener_reliability ORDER BY ${safe} DESC LIMIT ?
+      `, [limit]);
     }),
 
   // Trigger a fresh computation
   refreshConfluenceSignals: publicProcedure
     .mutation(async () => {
       const result = await computeConfluenceSignals();
+      _confluenceLatestAt = null; // invalidate cache so next read re-queries MAX()
       return { success: true, ...result };
     }),
 
   // Sector momentum matrix
   getSectorMomentumMatrix: publicProcedure
     .query(async () => {
+      const latest = await confluenceLatestAt();
+      if (!latest) return [];
       return dbAll(`
         SELECT
           sector,
@@ -87,17 +109,19 @@ export const confluenceRouter = router({
           MAX(confluence_score) as max_score,
           GROUP_CONCAT(CASE WHEN conviction_level = 'ELITE' THEN symbol END, ',') as elite_symbols
         FROM confluence_signals
-        WHERE computed_at = (SELECT MAX(computed_at) FROM confluence_signals)
+        WHERE computed_at = ?
           AND sector IS NOT NULL AND sector != ''
         GROUP BY sector
         ORDER BY avg_score DESC
         LIMIT 30
-      `);
+      `, [latest]);
     }),
 
   // Summary stats for the dashboard header
   getConfluenceStats: publicProcedure
     .query(async () => {
+      const latest = await confluenceLatestAt();
+      if (!latest) return { total: 0, elite: 0, strong: 0, moderate: 0, avgScore: 0, lastComputed: null };
       const row = await dbGet<any>(`
         SELECT
           COUNT(*) as total,
@@ -105,10 +129,10 @@ export const confluenceRouter = router({
           COUNT(CASE WHEN conviction_level = 'STRONG'   THEN 1 END) as strong,
           COUNT(CASE WHEN conviction_level = 'MODERATE' THEN 1 END) as moderate,
           ROUND(AVG(confluence_score), 1) as "avgScore",
-          MAX(computed_at) as lastComputed
+          ? as lastComputed
         FROM confluence_signals
-        WHERE computed_at = (SELECT MAX(computed_at) FROM confluence_signals)
-      `);
+        WHERE computed_at = ?
+      `, [latest, latest]);
       if (!row?.total) return { total: 0, elite: 0, strong: 0, moderate: 0, avgScore: 0, lastComputed: null };
       return row;
     }),

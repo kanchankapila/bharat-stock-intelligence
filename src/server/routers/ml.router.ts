@@ -109,8 +109,8 @@ export const mlRouter = router({
     .input(z.object({ horizonDays: z.union([z.literal(5), z.literal(15)]).default(15) }).optional())
     .query(async ({ input }) => {
       const horizon = input?.horizonDays ?? 15;
-      return {
-        bySignalType: await dbAll(`
+      const [bySignalType, recommendationStats] = await Promise.all([
+        dbAll(`
           SELECT strategy_name AS signal_type, win_rate, avg_return_pct, profit_factor,
                  sharpe_ratio, total_signals, false_positive_rate, max_drawdown_pct,
                  alpha_vs_nifty, signal_decay_halflife_days, market_regime
@@ -118,7 +118,7 @@ export const mlRouter = router({
           WHERE segment = 'signal_type' AND horizon_days = ?
           ORDER BY win_rate DESC
         `, [horizon]),
-        recommendationStats: await dbGet(`
+        dbGet(`
           SELECT COUNT(*) AS total,
                  SUM(CASE WHEN outcome = 'WIN' THEN 1 ELSE 0 END) AS wins,
                  SUM(CASE WHEN outcome = 'LOSS' THEN 1 ELSE 0 END) AS losses,
@@ -127,7 +127,8 @@ export const mlRouter = router({
                  MIN(actual_return_pct) AS worst_return
           FROM recommendation_log WHERE outcome IS NOT NULL
         `),
-      };
+      ]);
+      return { bySignalType, recommendationStats };
     }),
 
   getSignalReportCard: publicProcedure
@@ -197,6 +198,13 @@ export const mlRouter = router({
       `);
 
       const activeSignalGrowth = await dbAll<any>(`
+        WITH latest_price AS (
+          SELECT symbol, close
+          FROM stock_ohlcv
+          WHERE (symbol, date) IN (
+            SELECT symbol, MAX(date) FROM stock_ohlcv GROUP BY symbol
+          )
+        )
         SELECT ts.id,
                ts.symbol,
                ts.date AS signal_date,
@@ -206,15 +214,10 @@ export const mlRouter = router({
                ts.signal_score AS confidence_score,
                'ACTIVE' AS status,
                ts.date AS signal_generated_at,
-               (SELECT close FROM stock_ohlcv WHERE symbol = ts.symbol ORDER BY date DESC LIMIT 1) AS latest_price,
-               ROUND(
-                 COALESCE(
-                   100.0 * ((SELECT close FROM stock_ohlcv WHERE symbol = ts.symbol ORDER BY date DESC LIMIT 1) - ts.cmp) / NULLIF(ts.cmp, 0),
-                   0.0
-                 ),
-                 4
-               ) AS growth_pct
+               lp.close AS latest_price,
+               ROUND(COALESCE(100.0 * (lp.close - ts.cmp) / NULLIF(ts.cmp, 0), 0.0), 4) AS growth_pct
         FROM technical_signals ts
+        LEFT JOIN latest_price lp ON lp.symbol = ts.symbol
         WHERE ts.date >= date('now', '-30 days')
           AND ts.signal_score >= 5
         ORDER BY ts.date DESC

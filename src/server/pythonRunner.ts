@@ -34,7 +34,7 @@ export async function runPython(
     const result = await execFileAsync(
       PYTHON,
       [path.join(PY_DIR, script), ...args],
-      { timeout: timeoutMs, maxBuffer: 100 * 1024 * 1024 },
+      { timeout: timeoutMs, maxBuffer: 10 * 1024 * 1024 },
     );
     stdout = result.stdout;
     stderr = result.stderr;
