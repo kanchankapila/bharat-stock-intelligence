@@ -460,6 +460,24 @@ def resolve_dl_predictions(conn: ConnWrapper, dry_run: bool = False) -> dict[str
     """
     today = datetime.date.today()
 
+    def _symbol_vol_threshold(sym: str, as_of: str) -> float:
+        """Return a vol-scaled UP/DOWN threshold for a stock.
+        Uses 20-day RMS of daily returns; capped between 0.3% and 2.0%."""
+        rows = conn.execute(
+            "SELECT close FROM stock_ohlcv WHERE symbol=? AND date <= ? "
+            "AND COALESCE(is_suspect,0)=0 ORDER BY date DESC LIMIT 21",
+            (sym, as_of),
+        ).fetchall()
+        closes = [float(r[0]) for r in rows if r[0]]
+        if len(closes) < 5:
+            return 0.5  # fallback
+        daily_rets = [(closes[i] - closes[i + 1]) / closes[i + 1] * 100 for i in range(len(closes) - 1)]
+        rms = (sum(r ** 2 for r in daily_rets) / len(daily_rets)) ** 0.5
+        return max(0.3, min(2.0, rms * 0.5))
+
+    # Precompute per-symbol vol thresholds to avoid one query per prediction row
+    _vol_cache: dict[str, float] = {}
+
     def grade_for(col_ret: str, col_out: str, horizon: int) -> int:
         cutoff = (today - datetime.timedelta(days=horizon)).isoformat()
         pending = conn.execute(f"""
@@ -495,7 +513,12 @@ def resolve_dl_predictions(conn: ConnWrapper, dry_run: bool = False) -> dict[str
             if entry <= 0:
                 continue
             ret = (float(exit_row[0]) - entry) / entry * 100
-            outcome = 'UP' if ret > 0.5 else 'DOWN' if ret < -0.5 else 'FLAT'
+
+            # Vol-scaled threshold: large-caps rarely move 0.5% in a day, small-caps move 3%+
+            if sym not in _vol_cache:
+                _vol_cache[sym] = _symbol_vol_threshold(sym, pd_str)
+            threshold_pct = _vol_cache[sym]
+            outcome = 'UP' if ret > threshold_pct else 'DOWN' if ret < -threshold_pct else 'FLAT'
 
             if dry_run:
                 continue

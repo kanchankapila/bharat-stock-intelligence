@@ -172,6 +172,7 @@ def run(horizon: int | None = None, limit: int | None = None) -> int:
         return 0
 
     rows = []
+    missing_ohlcv: list[str] = []
     for e in entries:
         symbol, signal_date, hd, entry = e["symbol"], e["signal_date"], e["horizon_days"], e["entry_price"]
         ohlcv = read_df(
@@ -181,6 +182,7 @@ def run(horizon: int | None = None, limit: int | None = None) -> int:
             (symbol, signal_date, int(hd)),
         )
         if ohlcv.empty:
+            missing_ohlcv.append(f"{symbol}@{signal_date}")
             continue
         prior = read_df(
             "SELECT high, low, close FROM stock_ohlcv "
@@ -200,6 +202,12 @@ def run(horizon: int | None = None, limit: int | None = None) -> int:
             exc["horizon_close_pct"], exc["atr_pct"], exc["tb_label"],
             datetime.datetime.now().isoformat(),
         ))
+
+    if missing_ohlcv:
+        print(f"[EXIT] WARNING: {len(missing_ohlcv)}/{len(entries)} entries skipped — "
+              f"no OHLCV coverage (delisted/suspended stocks). "
+              f"These are excluded from excursion labels, introducing survivorship bias "
+              f"in exit_policy training. First 10: {missing_ohlcv[:10]}")
 
     if not rows:
         print("[EXIT] No OHLCV coverage for the selected entries.")

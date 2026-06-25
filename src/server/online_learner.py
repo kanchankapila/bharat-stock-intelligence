@@ -259,6 +259,11 @@ def run(window_days: int = 180, min_new: int = 5, dry_run: bool = False):
             print(f"[OnlineLearner] Need {min_new} new outcomes — skipping update.")
             return
 
+        # NEUTRAL is inconclusive — exclude it rather than silently mapping to LOSS (=0)
+        df = df[df['outcome'] != 'NEUTRAL'].reset_index(drop=True)
+        if len(df) < min_new:
+            print(f"[OnlineLearner] Only {len(df)} non-neutral outcomes — skipping update.")
+            return
         y  = (df['outcome'] == 'WIN').astype(int).values
         X  = build_features(df)
 

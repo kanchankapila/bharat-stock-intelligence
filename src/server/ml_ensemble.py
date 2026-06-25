@@ -803,13 +803,16 @@ def score_pending(conn: ConnWrapper, ensemble: dict) -> int:
         conn.execute("""
             UPDATE recommendation_log
             SET status = 'EXPIRED'
-            WHERE win_probability IS NOT NULL
-              AND win_probability < ?
+            WHERE (
+                (win_probability IS NOT NULL AND win_probability < ?)
+                OR (win_probability IS NULL AND signal_date < date('now', '-2 days'))
+            )
               AND status = 'ACTIVE'
               AND source = 'technical_scan'
         """, (threshold,))
         conn.commit()
-        print(f"[Ensemble] win_probability gate applied at {threshold:.2f} (regime-adaptive).")
+        print(f"[Ensemble] win_probability gate applied at {threshold:.2f} (regime-adaptive); "
+              f"NULL signals older than 2 days also expired.")
 
     return updated
 
