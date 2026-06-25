@@ -144,11 +144,12 @@ async function scoreStocks(): Promise<{ picks: StockPick[]; avoid: { symbol: str
 
   const dlMap = new Map<string, number>();
   try {
+    const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
     (await dbAll(`
-      SELECT symbol, probability
-      FROM dl_predictions
-      WHERE predicted_at >= datetime('now', '-1 day')
-    `) as any[]).forEach(r => dlMap.set(r.symbol, (r.probability ?? 0) * 100));
+      SELECT symbol, prob_up_5d as probability
+      FROM deep_learning_predictions
+      WHERE prediction_date >= ?
+    `, [yesterday]) as any[]).forEach(r => dlMap.set(r.symbol, (r.probability ?? 0) * 100));
   } catch { /* DL predictions may not be available */ }
 
   const newsMap = new Map<string, number>();

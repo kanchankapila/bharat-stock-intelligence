@@ -37,7 +37,7 @@ def compute_insider_features(cutoff_date: str) -> pd.DataFrame:
     ).isoformat()
 
     df = read_df(
-        "SELECT symbol, typeOfTransaction, quantity FROM insider_trades "
+        'SELECT symbol, "typeOfTransaction", quantity FROM insider_trades '
         "WHERE date >= ? AND date <= ?",
         (window_start, cutoff_date),
     )

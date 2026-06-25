@@ -367,14 +367,15 @@ async function loadEarningsCalendar(): Promise<Map<string, string>> {
   const map = new Map<string, string>();
   try {
     const today = new Date().toISOString().slice(0, 10);
+    const in30Days = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
     const rows = await dbAll(`
-      SELECT symbol, MAX(event_date) as next_earnings
+      SELECT symbol, MAX(ex_date) as next_earnings
       FROM corporate_actions
-      WHERE event_type IN ('Quarterly Results', 'Board Meeting', 'Earnings')
-        AND event_date >= ?
-        AND event_date <= date(?, '+30 days')
+      WHERE action_type IN ('Quarterly Results', 'Board Meeting', 'Earnings')
+        AND ex_date >= ?
+        AND ex_date <= ?
       GROUP BY symbol
-    `, [today, today]) as { symbol: string; next_earnings: string }[];
+    `, [today, in30Days]) as { symbol: string; next_earnings: string }[];
     for (const r of rows) map.set(r.symbol, r.next_earnings);
   } catch { /* table may not exist or have no data */ }
   return map;

@@ -476,7 +476,7 @@ class UnifiedRanker:
         cutoff = (date.today() - timedelta(days=1)).isoformat()
         try:
             rows = self.conn.execute(
-                "SELECT symbol, probability FROM dl_predictions WHERE predicted_at >= ?",
+                "SELECT symbol, prob_up_5d AS probability FROM deep_learning_predictions WHERE prediction_date >= ?",
                 (cutoff,),
             ).fetchall()
             return {r['symbol']: float(r['probability'] or 0) * 100 for r in rows}
