@@ -310,6 +310,30 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     X['block_deal_net_log']   = np.sign(block_raw) * np.log1p(block_raw.abs())
     X['block_deal_value_cr']  = num('block_deal_value_cr', 0.0).clip(0, 500) / 500.0
 
+    # ── Trendlyne EPS TTM + DVM (from trendlyne_fundamentals_fetcher.py → technical_signals) ──
+    # EPS growth is the single strongest fundamental momentum signal in literature.
+    # YoY: consistent improvement in earnings power; QoQ: short-term acceleration.
+    # Acceleration (delta-of-delta) captures inflection points missed by level/growth alone.
+    X['eps_ttm']          = num('eps_ttm',         5.0).clip(0, 500) / 500.0  # normalised level
+    X['eps_growth_yoy']   = num('eps_growth_yoy',  0.0).clip(-100, 200)       # %
+    X['eps_growth_qoq']   = num('eps_growth_qoq',  0.0).clip(-50, 100)        # %
+    X['eps_acceleration'] = num('eps_acceleration', 0.0).clip(-100, 100)       # Δ%YoY
+    # EPS momentum × signal conviction interaction
+    X['eps_yoy_x_score']  = X['eps_growth_yoy'].clip(-50, 100) * X['signal_score'] / 50.0
+
+    # Trendlyne DVM scores (0–100, higher = better on each dimension):
+    #   dvm_durability = business quality / consistency
+    #   dvm_valuation  = cheapness vs fair value (high = cheap)
+    #   dvm_momentum   = price + earnings momentum
+    X['dvm_durability'] = num('dvm_durability', 50.0).clip(0, 100) / 100.0
+    X['dvm_valuation']  = num('dvm_valuation',  50.0).clip(0, 100) / 100.0
+    X['dvm_momentum']   = num('dvm_momentum',   50.0).clip(0, 100) / 100.0
+    # High durability + high signal = confirmation from fundamentals
+    X['dvm_dur_x_score'] = X['dvm_durability'] * X['signal_score']
+
+    # PE TTM: valuation context — high P/E means market priced-in growth (risk of miss)
+    X['pe_ttm'] = num('pe_ttm', 25.0).clip(0, 100) / 100.0  # normalised; >100 capped
+
     # NOTE: market-level India VIX + breadth were tested as ensemble features (raw and as
     # cross-sectional interactions) and BOTH hurt held-out AUC vs omitting them entirely
     # (baseline cv 0.651/held-out 0.543; interactions 0.640/0.531; raw 0.606/0.493). They add
@@ -420,6 +444,8 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                ts.sector_global_corr_21d,
                ts.rollover_pct, ts.cost_of_carry_ann,
                ts.delivery_pct, ts.block_deal_net_qty, ts.block_deal_value_cr,
+               ts.eps_ttm, ts.eps_growth_yoy, ts.eps_growth_qoq, ts.eps_acceleration,
+               ts.pe_ttm, ts.dvm_durability, ts.dvm_valuation, ts.dvm_momentum,
                COALESCE(fh.fifty_two_week_high, sf.fifty_two_week_high) AS fifty_two_week_high,
                COALESCE(fh.piotroski_f_score, sf.piotroski_f_score)     AS piotroski_f_score,
                COALESCE(fh.debt_to_equity, sf.debt_to_equity)           AS debt_to_equity,
@@ -525,6 +551,8 @@ def load_pending_signals() -> pd.DataFrame:
                ts.sector_global_corr_21d,
                ts.rollover_pct, ts.cost_of_carry_ann,
                ts.delivery_pct, ts.block_deal_net_qty, ts.block_deal_value_cr,
+               ts.eps_ttm, ts.eps_growth_yoy, ts.eps_growth_qoq, ts.eps_acceleration,
+               ts.pe_ttm, ts.dvm_durability, ts.dvm_valuation, ts.dvm_momentum,
                sf.fifty_two_week_high,
                sf.piotroski_f_score, sf.debt_to_equity, sf.operating_margins,
                sf.return_on_equity, sf.revenue_growth, sf.earnings_growth,
