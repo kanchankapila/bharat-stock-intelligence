@@ -1582,6 +1582,8 @@ CREATE TABLE IF NOT EXISTS "technical_signals" (
   "vwap_deviation_pct" DOUBLE PRECISION,
   "first_hour_vol_share" DOUBLE PRECISION,
   "cs_score" REAL,
+  "avwap_deviation_pct" DOUBLE PRECISION,
+  "oi_net_change_pct"   DOUBLE PRECISION,
   PRIMARY KEY ("symbol", "date")
 );
 CREATE INDEX idx_tsig_date  ON technical_signals(date DESC);

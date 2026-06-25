@@ -1893,6 +1893,16 @@ runMigration('048_cs_score_column', `
     ON technical_signals(cs_score) WHERE cs_score IS NOT NULL;
 `);
 
+// 049 — two new ML features written by feature scripts and consumed by build_features():
+//   avwap_deviation_pct : (close − 20-day anchored VWAP) / avwap * 100
+//                         Anchored VWAP from rolling 20-day window using stock_ohlcv.
+//   oi_net_change_pct   : (today_total_oi − prev_total_oi) / prev_total_oi * 100
+//                         Day-over-day net OI change from stock_options_oi.
+runMigration('049_avwap_oi_features', `
+  ALTER TABLE technical_signals ADD COLUMN avwap_deviation_pct REAL;
+  ALTER TABLE technical_signals ADD COLUMN oi_net_change_pct   REAL;
+`);
+
 // ── Retention: confluence_signals is an append-only firehose (~700k rows, the single
 // largest contributor to DB bloat). expires_at exists but nothing pruned it. Delete
 // expired rows on boot and every 6h. Keeps the table bounded without losing live signals.

@@ -226,6 +226,21 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     # first_hour_vol_share: front-loaded volume (institutional activity at the open).
     X['first_hour_vol_share'] = num('first_hour_vol_share', 0.5).clip(0, 1)
 
+    # ── Anchored VWAP (from avwap_features.py) ──
+    # avwap_deviation_pct: (close − 20d rolling VWAP) / vwap * 100.
+    # Positive = price above multi-day supply/demand equilibrium (bullish structure).
+    # Neutral default 0.0 (at equilibrium); capped at ±15% (extreme overextension).
+    X['avwap_deviation_pct'] = num('avwap_deviation_pct', 0.0).clip(-15, 15)
+    # Interaction: strong signal with price already extended above AVWAP → mean-reversion risk
+    X['avwap_x_score'] = X['avwap_deviation_pct'] * X['signal_score'] / 10.0
+
+    # ── OI-change delta (from oi_delta_features.py) ──
+    # oi_net_change_pct: day-over-day % change in total open interest (calls + puts).
+    # > 0 = OI building (new directional positions) → confirms the current move.
+    # < 0 = OI unwinding (covering) → potential reversal / reduced conviction.
+    # Neutral default 0.0; capped at ±30% (1 SD ≈ 5%, rare spikes excluded).
+    X['oi_net_change_pct'] = num('oi_net_change_pct', 0.0).clip(-30, 30)
+
     # NOTE: market-level India VIX + breadth were tested as ensemble features (raw and as
     # cross-sectional interactions) and BOTH hurt held-out AUC vs omitting them entirely
     # (baseline cv 0.651/held-out 0.543; interactions 0.640/0.531; raw 0.606/0.493). They add
@@ -321,6 +336,8 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                ts.opening_range_break,
                ts.vwap_deviation_pct,
                ts.first_hour_vol_share,
+               ts.avwap_deviation_pct,
+               ts.oi_net_change_pct,
                COALESCE(fh.fifty_two_week_high, sf.fifty_two_week_high) AS fifty_two_week_high,
                COALESCE(fh.piotroski_f_score, sf.piotroski_f_score)     AS piotroski_f_score,
                COALESCE(fh.debt_to_equity, sf.debt_to_equity)           AS debt_to_equity,
@@ -406,6 +423,8 @@ def load_pending_signals() -> pd.DataFrame:
                ts.opening_range_break,
                ts.vwap_deviation_pct,
                ts.first_hour_vol_share,
+               ts.avwap_deviation_pct,
+               ts.oi_net_change_pct,
                sf.fifty_two_week_high,
                sf.piotroski_f_score, sf.debt_to_equity, sf.operating_margins,
                sf.return_on_equity, sf.revenue_growth, sf.earnings_growth,

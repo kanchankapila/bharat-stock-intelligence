@@ -444,6 +444,15 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await runPython('intraday_features.py', [], 60_000)
     .catch(e => console.warn('[QUEUE] intraday_features failed:', (e as Error).message));
 
+  // Anchored VWAP deviation (20-day rolling anchor from stock_ohlcv) → technical_signals.avwap_deviation_pct.
+  await runPython('avwap_features.py', [], 120_000)
+    .catch(e => console.warn('[QUEUE] avwap_features failed:', (e as Error).message));
+
+  // OI net-change delta (day-over-day total OI % change from stock_options_oi) → oi_net_change_pct.
+  // Depends on pcr_fetcher.py having run earlier in this same daily ops cycle.
+  await runPython('oi_delta_features.py', [], 60_000)
+    .catch(e => console.warn('[QUEUE] oi_delta_features failed:', (e as Error).message));
+
   await resolveOutcomesResilient(1);
   await resolveOutcomesResilient(5);
   await resolveOutcomesResilient(15);
