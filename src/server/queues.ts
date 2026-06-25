@@ -461,6 +461,9 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await runPython('ml_calibration.py', [], 120_000)
     .catch(e => console.warn('[QUEUE] ml_calibration failed:', (e as Error).message));
 
+  await runPython('cs_ranker.py', ['--score'], 120_000)
+    .catch(e => console.warn('[QUEUE] cs_ranker score failed:', (e as Error).message));
+
   await runPython('reward_engine.py');
   await runPython('rl_agent.py', ['--update']);
 
@@ -497,6 +500,8 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean }> 
   await runPython('outcome_resolver.py', ['--horizon', '5']);
   await runPython('outcome_resolver.py', ['--horizon', '15']);
   await runPython('ml_ensemble.py', ['--train', '--score'], 60 * 60_000);
+  await runPython('cs_ranker.py', ['--train', '--score'], 30 * 60_000)
+    .catch(e => console.warn('[QUEUE] cs_ranker retrain failed:', (e as Error).message));
   await runPython('strategy_optimizer.py', [], 30 * 60_000).catch(() => {});
   await runPython('backtester.py', ['--start', '2023-01-01'], 30 * 60_000).catch(() => {});
   await runPython('performance_tracker.py', ['--horizon', '5']);
