@@ -287,6 +287,15 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     # Neutral default 0.2 (typical mid-cap dispersion); capped at 1.0.
     X['eps_estimate_dispersion'] = num('eps_estimate_dispersion', 0.2).clip(0, 1)
 
+    # ── F&O Rollover (from fno_rollover_fetcher.py → technical_signals) ──
+    # rollover_pct: next_month_OI / (near + next) × 100.
+    # High rollover (>55%) near expiry = institutions staying long → bullish continuation.
+    # cost_of_carry_ann: annualised futures basis (%). Positive = contango; negative = backwardation.
+    X['rollover_pct']      = num('rollover_pct',      40.0).clip(0, 100) / 100.0
+    X['cost_of_carry_ann'] = num('cost_of_carry_ann',  0.0).clip(-30, 30)
+    # High rollover + strong upward carry → smart money positioned bullish
+    X['rollover_x_score']  = X['rollover_pct'] * X['signal_score']
+
     # NOTE: market-level India VIX + breadth were tested as ensemble features (raw and as
     # cross-sectional interactions) and BOTH hurt held-out AUC vs omitting them entirely
     # (baseline cv 0.651/held-out 0.543; interactions 0.640/0.531; raw 0.606/0.493). They add
@@ -395,6 +404,7 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                hfs.max_pain,
                ts.mf_holding_pct, ts.mf_fund_count, ts.mf_chg_vs_prev,
                ts.sector_global_corr_21d,
+               ts.rollover_pct, ts.cost_of_carry_ann,
                COALESCE(fh.fifty_two_week_high, sf.fifty_two_week_high) AS fifty_two_week_high,
                COALESCE(fh.piotroski_f_score, sf.piotroski_f_score)     AS piotroski_f_score,
                COALESCE(fh.debt_to_equity, sf.debt_to_equity)           AS debt_to_equity,
@@ -498,6 +508,7 @@ def load_pending_signals() -> pd.DataFrame:
                hfs.max_pain,
                ts.mf_holding_pct, ts.mf_fund_count, ts.mf_chg_vs_prev,
                ts.sector_global_corr_21d,
+               ts.rollover_pct, ts.cost_of_carry_ann,
                sf.fifty_two_week_high,
                sf.piotroski_f_score, sf.debt_to_equity, sf.operating_margins,
                sf.return_on_equity, sf.revenue_growth, sf.earnings_growth,

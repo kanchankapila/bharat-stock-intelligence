@@ -1938,6 +1938,11 @@ runMigration('051_feature_store_momentum', `
   ALTER TABLE feature_store ADD COLUMN ret_12m_ex1m REAL;
 `);
 
+runMigration('053_fno_rollover', `
+  ALTER TABLE technical_signals ADD COLUMN rollover_pct      REAL;
+  ALTER TABLE technical_signals ADD COLUMN cost_of_carry_ann REAL;
+`);
+
 runMigration('052_mf_holdings_signals', `
   ALTER TABLE nse_stocks ADD COLUMN is_asm INTEGER DEFAULT 0;
   ALTER TABLE nse_stocks ADD COLUMN gsm_stage INTEGER DEFAULT 0;

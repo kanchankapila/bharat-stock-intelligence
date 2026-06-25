@@ -465,6 +465,10 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await runPython('oi_delta_features.py', [], 60_000)
     .catch(e => console.warn('[QUEUE] oi_delta_features failed:', (e as Error).message));
 
+  // F&O rollover % and cost of carry from NSE bhavcopies → fno_rollover → technical_signals.
+  await runPython('fno_rollover_fetcher.py', ['--days', '1'], 3 * 60_000)
+    .catch(e => console.warn('[QUEUE] fno_rollover_fetcher failed:', (e as Error).message));
+
   // Earnings beat features (reads stock_earnings_beats, refreshed weekly by earnings_surprise_fetcher).
   // Writes eps_beat_last_q / eps_beat_streak_4q / eps_miss_streak_4q → technical_signals.
   await runPython('earnings_beat_features.py', [], 60_000)
