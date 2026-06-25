@@ -74,13 +74,13 @@ HORIZON_MULT = {
 }
 
 REGIME_WEIGHTS = {
-    'BULL':     {'screener': 0.30, 'ml': 0.25, 'confluence': 0.20, 'technical': 0.15, 'dl': 0.10},
-    'BEAR':     {'screener': 0.35, 'ml': 0.25, 'confluence': 0.20, 'technical': 0.10, 'dl': 0.10},
-    'HIGH_VOL': {'screener': 0.20, 'ml': 0.20, 'confluence': 0.15, 'technical': 0.30, 'dl': 0.15},
-    'CRASH':    {'screener': 0.40, 'ml': 0.25, 'confluence': 0.15, 'technical': 0.10, 'dl': 0.10},
+    'BULL':     {'screener': 0.30, 'ml': 0.20, 'cs': 0.05, 'confluence': 0.20, 'technical': 0.15, 'dl': 0.10},
+    'BEAR':     {'screener': 0.35, 'ml': 0.20, 'cs': 0.05, 'confluence': 0.20, 'technical': 0.10, 'dl': 0.10},
+    'HIGH_VOL': {'screener': 0.20, 'ml': 0.15, 'cs': 0.05, 'confluence': 0.15, 'technical': 0.30, 'dl': 0.15},
+    'CRASH':    {'screener': 0.40, 'ml': 0.20, 'cs': 0.05, 'confluence': 0.15, 'technical': 0.10, 'dl': 0.10},
     # SIDEWAYS was silently falling back to BULL; a balanced blend is more appropriate for
     # a rangebound tape (lean slightly less on momentum/dl than BULL).
-    'SIDEWAYS': {'screener': 0.32, 'ml': 0.25, 'confluence': 0.20, 'technical': 0.13, 'dl': 0.10},
+    'SIDEWAYS': {'screener': 0.32, 'ml': 0.20, 'cs': 0.05, 'confluence': 0.20, 'technical': 0.13, 'dl': 0.10},
 }
 
 # Per-regime CATEGORY tilt (multipliers on CAT_BASE_WT). Rangebound/neutral = SIDEWAYS (no
@@ -446,6 +446,19 @@ class UnifiedRanker:
             self.conn.rollback()
             return {}
 
+    def _get_cs_scores(self):
+        cutoff = (date.today() - timedelta(days=3)).isoformat()
+        try:
+            rows = self.conn.execute(
+                "SELECT symbol, AVG(cs_score) AS s FROM technical_signals "
+                "WHERE date >= ? AND cs_score IS NOT NULL GROUP BY symbol",
+                (cutoff,),
+            ).fetchall()
+            return _normalize_to_100({r['symbol']: float(r['s'] or 0) for r in rows})
+        except Exception:
+            self.conn.rollback()
+            return {}
+
     def _get_confluence_scores(self):
         cutoff = (date.today() - timedelta(days=1)).isoformat()
         try:
@@ -656,16 +669,18 @@ class UnifiedRanker:
             membership, fund_scores, cat_weights=regime_cat_weights(regime)
         )
         ml_scores         = self._get_ml_scores()
+        cs_scores         = self._get_cs_scores()
         confluence_scores = self._get_confluence_scores()
         technical_scores  = self._get_technical_scores()
         dl_scores         = self._get_dl_scores()
         avg_track         = self._get_avg_track_record()
 
-        all_symbols = set(screener_scores) | set(ml_scores) | set(confluence_scores) | set(technical_scores) | set(dl_scores)
+        all_symbols = set(screener_scores) | set(ml_scores) | set(cs_scores) | set(confluence_scores) | set(technical_scores) | set(dl_scores)
 
         engine_maps = {
             'screener':   screener_scores,
             'ml':         ml_scores,
+            'cs':         cs_scores,
             'confluence': confluence_scores,
             'technical':  technical_scores,
             'dl':         dl_scores,
