@@ -296,6 +296,20 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     # High rollover + strong upward carry → smart money positioned bullish
     X['rollover_x_score']  = X['rollover_pct'] * X['signal_score']
 
+    # ── Delivery Volume % (from delivery_volume_fetcher.py → technical_signals) ──
+    # delivery_pct: % of traded volume that resulted in actual delivery (not squared intraday).
+    # High delivery % = institutional / positional conviction; low = speculative noise.
+    # Default 50% (market mean for mid-cap liquid stocks); clipped 0–100.
+    X['delivery_pct']      = num('delivery_pct', 50.0).clip(0, 100) / 100.0
+    X['delivery_x_score']  = X['delivery_pct'] * X['signal_score']
+
+    # ── Block Deals (from block_deal_fetcher.py → technical_signals) ──
+    # block_deal_net_qty: buy_qty − sell_qty on NSE block-deal window.
+    # Positive = accumulation; negative = distribution. Log-scaled to handle outliers.
+    block_raw = df.get('block_deal_net_qty', pd.Series(0, index=df.index)).fillna(0).astype(float)
+    X['block_deal_net_log']   = np.sign(block_raw) * np.log1p(block_raw.abs())
+    X['block_deal_value_cr']  = num('block_deal_value_cr', 0.0).clip(0, 500) / 500.0
+
     # NOTE: market-level India VIX + breadth were tested as ensemble features (raw and as
     # cross-sectional interactions) and BOTH hurt held-out AUC vs omitting them entirely
     # (baseline cv 0.651/held-out 0.543; interactions 0.640/0.531; raw 0.606/0.493). They add
@@ -405,6 +419,7 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                ts.mf_holding_pct, ts.mf_fund_count, ts.mf_chg_vs_prev,
                ts.sector_global_corr_21d,
                ts.rollover_pct, ts.cost_of_carry_ann,
+               ts.delivery_pct, ts.block_deal_net_qty, ts.block_deal_value_cr,
                COALESCE(fh.fifty_two_week_high, sf.fifty_two_week_high) AS fifty_two_week_high,
                COALESCE(fh.piotroski_f_score, sf.piotroski_f_score)     AS piotroski_f_score,
                COALESCE(fh.debt_to_equity, sf.debt_to_equity)           AS debt_to_equity,
@@ -509,6 +524,7 @@ def load_pending_signals() -> pd.DataFrame:
                ts.mf_holding_pct, ts.mf_fund_count, ts.mf_chg_vs_prev,
                ts.sector_global_corr_21d,
                ts.rollover_pct, ts.cost_of_carry_ann,
+               ts.delivery_pct, ts.block_deal_net_qty, ts.block_deal_value_cr,
                sf.fifty_two_week_high,
                sf.piotroski_f_score, sf.debt_to_equity, sf.operating_margins,
                sf.return_on_equity, sf.revenue_growth, sf.earnings_growth,

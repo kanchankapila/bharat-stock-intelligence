@@ -469,6 +469,14 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await runPython('fno_rollover_fetcher.py', ['--days', '1'], 3 * 60_000)
     .catch(e => console.warn('[QUEUE] fno_rollover_fetcher failed:', (e as Error).message));
 
+  // Cash market delivery % from NSE MTO DAT → stock_delivery_volume → technical_signals.
+  await runPython('delivery_volume_fetcher.py', ['--days', '1'], 2 * 60_000)
+    .catch(e => console.warn('[QUEUE] delivery_volume_fetcher failed:', (e as Error).message));
+
+  // Block deals from NSE live API → stock_block_deal_daily → technical_signals.
+  await runPython('block_deal_fetcher.py', ['--days', '1'], 60_000)
+    .catch(e => console.warn('[QUEUE] block_deal_fetcher failed:', (e as Error).message));
+
   // Earnings beat features (reads stock_earnings_beats, refreshed weekly by earnings_surprise_fetcher).
   // Writes eps_beat_last_q / eps_beat_streak_4q / eps_miss_streak_4q → technical_signals.
   await runPython('earnings_beat_features.py', [], 60_000)
