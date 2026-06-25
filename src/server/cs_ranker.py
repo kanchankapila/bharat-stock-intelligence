@@ -61,7 +61,6 @@ def load_cs_training_data() -> pd.DataFrame:
     Alpha = return_pct - nifty_5d_return. Dates with fewer than MIN_DATE_SIGNALS
     signals are excluded (too sparse to rank meaningfully).
     """
-    conn = connect()
     nifty = _get_nifty_returns()
     if nifty.empty:
         print("[CSRanker] WARNING: No NIFTY50 data in stock_ohlcv — using raw return_pct as target")

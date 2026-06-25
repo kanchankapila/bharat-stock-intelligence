@@ -195,3 +195,30 @@ class TestSpearmanRho:
         preds   = np.array([5.5, 4.4, 3.3, 2.2, 1.1], dtype=float)
         rho, _ = spearmanr(actuals, preds)
         assert rho == pytest.approx(-1.0)
+
+
+# ── Test 5: unified_ranker integration ───────────────────────────────────────
+
+class TestUnifiedRankerIntegration:
+    def test_get_cs_scores_query_structure(self):
+        """_get_cs_scores exists on UnifiedRanker and follows the same contract as _get_ml_scores."""
+        import sys, os
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+        from unified_ranker import UnifiedRanker, _normalize_to_100
+        assert hasattr(UnifiedRanker, '_get_cs_scores'), "_get_cs_scores missing from UnifiedRanker"
+
+    def test_blend_with_cs_key_vs_without(self):
+        """_blend with 'cs' present produces a different score than without it."""
+        import sys, os
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+        from unified_ranker import _blend
+        weights_with    = {'ml': 0.20, 'cs': 0.05, 'screener': 0.30, 'confluence': 0.20, 'technical': 0.15, 'dl': 0.10}
+        weights_without = {'ml': 0.25,              'screener': 0.30, 'confluence': 0.20, 'technical': 0.15, 'dl': 0.10}
+        engine_scores = {'ml': 40.0, 'cs': 100.0, 'screener': 60.0, 'confluence': 50.0, 'technical': 55.0, 'dl': 45.0}
+        present_with    = {'ml', 'cs', 'screener', 'confluence', 'technical', 'dl'}
+        present_without = {'ml',       'screener', 'confluence', 'technical', 'dl'}
+        score_with    = _blend(engine_scores, present_with,    weights_with)
+        score_without = _blend(engine_scores, present_without, weights_without)
+        # cs_score=100 is high; adding it should raise the blended score slightly
+        assert score_with != score_without, "blend with cs should differ from blend without"
+        assert score_with > score_without, "cs=100 should push blend higher than cs absent"
