@@ -817,6 +817,57 @@ def score_pending(conn: ConnWrapper, ensemble: dict) -> int:
     return updated
 
 
+# ── Drift detection ───────────────────────────────────────────────────────────
+
+def check_drift(conn: ConnWrapper, auc_drop_threshold: float = 0.04,
+                window_days: int = 30) -> bool:
+    """Return True (and log a warning) when recent live accuracy has drifted
+    more than `auc_drop_threshold` below the trained CV AUC.
+
+    Uses signal_outcomes resolved in the last `window_days` days as a proxy for
+    live performance: fraction of WIN outcomes among resolved signals ≈ precision.
+    Compares against the active model's cv_roc_auc from model_registry.
+    """
+    row = conn.execute("""
+        SELECT cv_roc_auc FROM model_registry
+        WHERE model_name = 'ensemble' AND is_active = 1
+        ORDER BY trained_at DESC LIMIT 1
+    """).fetchone()
+    if not row:
+        return False
+    trained_auc = float(row[0])
+
+    live = conn.execute("""
+        SELECT
+            COUNT(*) as total,
+            SUM(CASE WHEN outcome = 'WIN' THEN 1 ELSE 0 END) as wins
+        FROM signal_outcomes
+        WHERE computed_at >= date('now', ?)
+          AND outcome IN ('WIN', 'LOSS', 'STOP_LOSS')
+    """, (f'-{window_days} days',)).fetchone()
+
+    if not live or not live[0] or live[0] < 20:
+        return False  # too few resolved signals to judge
+
+    live_win_rate = float(live[1]) / float(live[0])
+    # Calibrated AUC ≈ 0.5 + 0.5*precision at our operating point; a 4pt AUC
+    # drop is roughly a 4pt win-rate drop at this calibration.
+    estimated_auc = 0.5 + 0.5 * live_win_rate
+    drift = trained_auc - estimated_auc
+
+    if drift >= auc_drop_threshold:
+        print(
+            f"[Ensemble] DRIFT DETECTED: trained_auc={trained_auc:.3f} "
+            f"live_est_auc={estimated_auc:.3f} (drop={drift:.3f} over {window_days}d, "
+            f"n={live[0]}). Triggering retrain."
+        )
+        return True
+
+    print(f"[Ensemble] Drift check OK: trained={trained_auc:.3f} live_est={estimated_auc:.3f} "
+          f"(n={live[0]}, window={window_days}d)")
+    return False
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def run(do_train: bool = True, do_score: bool = True,
@@ -852,6 +903,21 @@ def run(do_train: bool = True, do_score: bool = True,
                 register_model(conn, ensemble)
 
         if do_score:
+            # Auto-retrain if live performance has drifted >4 AUC pts below trained value
+            if not do_train and check_drift(conn):
+                print("[Ensemble] Auto-retraining due to drift...")
+                df = load_training_data(label=label)
+                df = df.sort_values('signal_date').reset_index(drop=True)
+                if len(df) >= min_samples:
+                    X = build_features(df)
+                    y = df['outcome'].astype(int)
+                    _hz = int(pd.to_numeric(df['horizon_days'], errors='coerce').median() or 15)
+                    ensemble_new = train_ensemble(X, y, dates=df['signal_date'],
+                                                  horizon_days=_hz, min_samples=min_samples)
+                    ensemble_new['label'] = label
+                    save_ensemble(ensemble_new)
+                    register_model(conn, ensemble_new)
+
             ensemble = load_ensemble()
             if ensemble is None:
                 print("[Ensemble] No saved model — run with --train first.")
@@ -870,10 +936,19 @@ if __name__ == "__main__":
     parser.add_argument("--train",       action="store_true", help="Train ensemble model")
     parser.add_argument("--score",       action="store_true", help="Score pending signals")
     parser.add_argument("--retrain-full",action="store_true", help="Discard saved model and retrain")
+    parser.add_argument("--check-drift", action="store_true", help="Check live vs trained AUC drift only")
     parser.add_argument("--min-samples", type=int, default=30)
     parser.add_argument("--label", choices=['horizon', 'triple_barrier'], default='horizon',
                         help="Training label: fixed-horizon WIN/LOSS (default) or triple-barrier")
     args = parser.parse_args()
+
+    if args.check_drift:
+        conn = connect()
+        try:
+            check_drift(conn)
+        finally:
+            conn.close()
+        sys.exit(0)
 
     do_train = args.train or args.retrain_full or (not args.score)
     do_score = args.score or (not args.train and not args.retrain_full)
