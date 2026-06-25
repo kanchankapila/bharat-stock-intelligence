@@ -35,7 +35,7 @@ MIN_DATE_SIGNALS = 5   # minimum signals per date to include in training
 
 # ── Label Construction ────────────────────────────────────────────────────────
 
-def _get_nifty_returns(conn: ConnWrapper) -> pd.DataFrame:
+def _get_nifty_returns() -> pd.DataFrame:
     """5-day forward returns for NIFTY50 from stock_ohlcv, indexed by date string."""
     q = """
         SELECT date, close
@@ -62,7 +62,7 @@ def load_cs_training_data() -> pd.DataFrame:
     signals are excluded (too sparse to rank meaningfully).
     """
     conn = connect()
-    nifty = _get_nifty_returns(conn)
+    nifty = _get_nifty_returns()
     if nifty.empty:
         print("[CSRanker] WARNING: No NIFTY50 data in stock_ohlcv — using raw return_pct as target")
         nifty = None
@@ -339,7 +339,7 @@ def score_batch() -> int:
         print("[CSRanker] No pending signals to score.")
         return 0
 
-    df['horizon_days'] = 15
+    df['horizon_days'] = 5
     X = build_features(df)
 
     # Align to training feature set
@@ -357,14 +357,16 @@ def score_batch() -> int:
 
     conn  = connect()
     cur   = conn.cursor()
-    count = 0
-    for i, row in df.iterrows():
-        cur.execute(
-            "UPDATE technical_signals SET cs_score = ? WHERE symbol = ? AND date = ?",
-            (round(float(cs_scores[df.index.get_loc(i)]), 2), row['symbol'], row['signal_date']),
-        )
-        count += 1
+    updates = [
+        (round(float(cs_scores[idx]), 2), row['symbol'], row['signal_date'])
+        for idx, row in enumerate(df.itertuples(index=False))
+    ]
+    cur.executemany(
+        "UPDATE technical_signals SET cs_score = ? WHERE symbol = ? AND date = ?",
+        updates,
+    )
     conn.commit()
+    count = len(updates)
     print(f"[CSRanker] Scored and wrote cs_score for {count} signals.")
     return count
 
@@ -375,7 +377,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--train', action='store_true')
     parser.add_argument('--score', action='store_true')
-    parser.add_argument('--min-samples', type=int, default=50)
     args = parser.parse_args()
 
     if args.train:
@@ -383,7 +384,7 @@ if __name__ == '__main__':
         if df.empty:
             print("[CSRanker] No training data — aborting.")
             sys.exit(1)
-        m = train_cs_ranker(df, min_samples=args.min_samples)
+        m = train_cs_ranker(df)
         save_cs_model(m)
         conn = connect()
         _register_cs_model(conn, m)
