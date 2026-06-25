@@ -1,4 +1,5 @@
 import ollama from 'ollama';
+import { generateStockAnalysis as generateGeminiStockAnalysis } from './geminiService';
 
 const OLLAMA_SIGNAL_MODEL  = process.env.OLLAMA_SIGNAL_MODEL  || process.env.OLLAMA_MODEL || 'mistral';
 const OLLAMA_PROFILE_MODEL = process.env.OLLAMA_PROFILE_MODEL || process.env.OLLAMA_MODEL || 'qwen3:30b';
@@ -37,6 +38,11 @@ export interface ProfileAnalysis {
 }
 
 export async function generateStockAnalysis(symbol: string, data: any): Promise<StockAnalysis> {
+  if (process.env.GEMINI_API_KEY) {
+    console.log(`[AI] Routing stock analysis for ${symbol} to Google Gemini`);
+    return generateGeminiStockAnalysis(symbol, data) as any;
+  }
+
   const prompt = `
 You are a senior Indian equity analyst. Analyze the following data for ${symbol} and produce a trading recommendation.
 

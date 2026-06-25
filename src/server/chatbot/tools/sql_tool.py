@@ -21,7 +21,8 @@ def get_stock_fundamentals(symbol: str, db_path: str = DB_PATH) -> dict | None:
         SELECT ns.symbol, ns.name, ns.sector, ns.industry,
                sf.trailing_pe, sf.price_to_book, sf.return_on_equity,
                sf.revenue_growth, sf.earnings_growth, sf.debt_to_equity,
-               sf.market_cap, sf.piotroski_f_score, sf.dividend_yield,
+               ROUND(sf.market_cap / 10000000.0, 0) AS market_cap_cr,
+               sf.piotroski_f_score, sf.dividend_yield,
                ss.score, ss.confidence, ss.classification, ss.top_domain,
                fb.technical AS technical_score, fb.fundamental AS fundamental_score,
                fb.momentum AS momentum_score, fb.valuation AS valuation_score
@@ -64,7 +65,9 @@ def filter_stocks_by_fundamentals(
     query = f"""
         SELECT ns.symbol, ns.name, ns.sector,
                sf.trailing_pe, sf.price_to_book, sf.return_on_equity,
-               sf.revenue_growth, sf.market_cap, sf.piotroski_f_score,
+               sf.revenue_growth,
+               ROUND(sf.market_cap / 10000000.0, 0) AS market_cap_cr,
+               sf.piotroski_f_score,
                sf.debt_to_equity, sf.dividend_yield,
                ss.score, ss.classification
         FROM stock_fundamentals sf

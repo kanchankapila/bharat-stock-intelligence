@@ -192,6 +192,12 @@ def execute_tools(state: AgentState, db_path: str = DB_PATH) -> dict:
     elif intent == "fundamental_filter":
         resp = llm.invoke(FILTER_PARAMS_PROMPT.format(query=query))
         params = _safe_json(resp.content, {"pe_lt": 25, "pb_lt": 3, "roe_gt": 12, "min_score": 60})
+        # Guardrail: weaker models often return all-null params, which would run an
+        # UNFILTERED query and surface expensive stocks (PE 200x+) for an "undervalued"
+        # ask. If no valuation/quality constraint came back, apply sensible defaults.
+        if all(params.get(k) is None for k in ("pe_lt", "pb_lt", "roe_gt", "revenue_growth_gt")):
+            params.update({"pe_lt": 25, "pb_lt": 3, "roe_gt": 12})
+            params.setdefault("min_score", 60)
         stocks = filter_stocks_by_fundamentals(
             pe_lt=params.get("pe_lt"), pb_lt=params.get("pb_lt"),
             roe_gt=params.get("roe_gt"), revenue_growth_gt=params.get("revenue_growth_gt"),

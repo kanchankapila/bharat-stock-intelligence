@@ -24,6 +24,11 @@ export async function startOllama(): Promise<boolean> {
     return true;
   }
 
+  if (process.env.DISABLE_OLLAMA_AUTO_START === 'true') {
+    console.log('[OLLAMA] Auto-start is disabled (DISABLE_OLLAMA_AUTO_START=true). Skipping Ollama server auto-start.');
+    return false;
+  }
+
   return new Promise((resolve) => {
     console.log('[OLLAMA] Attempting to start Ollama server...');
 

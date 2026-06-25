@@ -1,6 +1,12 @@
 import { GoogleGenAI, Type } from "@google/genai";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
+let _ai: GoogleGenAI | null = null;
+function getAiClient() {
+  if (!_ai) {
+    _ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+  }
+  return _ai;
+}
 
 export async function generateStockAnalysis(symbol: string, data: any) {
   const prompt = `
@@ -12,6 +18,7 @@ export async function generateStockAnalysis(symbol: string, data: any) {
   `;
 
   try {
+    const ai = getAiClient();
     const response = await ai.models.generateContent({
       model: "gemini-2.0-flash",
       contents: prompt,
