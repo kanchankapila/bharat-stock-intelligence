@@ -1913,9 +1913,14 @@ runMigration('050_earnings_beats', `
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     symbol       TEXT NOT NULL,
     quarter_date TEXT NOT NULL,
+    period_type  TEXT NOT NULL DEFAULT 'quarterly',
     beat_type    TEXT NOT NULL,
     beat_score   INTEGER NOT NULL DEFAULT 0,
     eps_actual   REAL,
+    eps_avg      REAL,
+    eps_high     REAL,
+    eps_low      REAL,
+    surprise_pct REAL,
     fetched_at   TEXT DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(symbol, quarter_date)
   );
@@ -1924,6 +1929,8 @@ runMigration('050_earnings_beats', `
   ALTER TABLE technical_signals ADD COLUMN eps_beat_last_q    INTEGER;
   ALTER TABLE technical_signals ADD COLUMN eps_beat_streak_4q INTEGER;
   ALTER TABLE technical_signals ADD COLUMN eps_miss_streak_4q INTEGER;
+  ALTER TABLE technical_signals ADD COLUMN eps_surprise_last_yr REAL;
+  ALTER TABLE technical_signals ADD COLUMN eps_estimate_dispersion REAL;
 `);
 
 // ── Retention: confluence_signals is an append-only firehose (~700k rows, the single

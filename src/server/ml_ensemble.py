@@ -249,6 +249,14 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     X['eps_beat_streak_4q'] = num('eps_beat_streak_4q', 0.0).clip(0, 4)
     # eps_miss_streak_4q: consecutive misses over last 4 quarters (0-4).
     X['eps_miss_streak_4q'] = num('eps_miss_streak_4q', 0.0).clip(0, 4)
+    # eps_surprise_last_yr: actual EPS vs consensus for most recent annual period (%).
+    # Positive = beat; negative = miss. Neutral default 0 (no data / inline).
+    # Capped at ±30% (larger moves are typically data anomalies or tiny-cap stocks).
+    X['eps_surprise_last_yr'] = num('eps_surprise_last_yr', 0.0).clip(-30, 30)
+    # eps_estimate_dispersion: (high − low) / avg for most recent annual EPS estimate.
+    # Low = tight analyst consensus (high conviction); high = wide disagreement (uncertain).
+    # Neutral default 0.2 (typical mid-cap dispersion); capped at 1.0.
+    X['eps_estimate_dispersion'] = num('eps_estimate_dispersion', 0.2).clip(0, 1)
 
     # NOTE: market-level India VIX + breadth were tested as ensemble features (raw and as
     # cross-sectional interactions) and BOTH hurt held-out AUC vs omitting them entirely
@@ -350,6 +358,8 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                ts.eps_beat_last_q,
                ts.eps_beat_streak_4q,
                ts.eps_miss_streak_4q,
+               ts.eps_surprise_last_yr,
+               ts.eps_estimate_dispersion,
                COALESCE(fh.fifty_two_week_high, sf.fifty_two_week_high) AS fifty_two_week_high,
                COALESCE(fh.piotroski_f_score, sf.piotroski_f_score)     AS piotroski_f_score,
                COALESCE(fh.debt_to_equity, sf.debt_to_equity)           AS debt_to_equity,
@@ -440,6 +450,8 @@ def load_pending_signals() -> pd.DataFrame:
                ts.eps_beat_last_q,
                ts.eps_beat_streak_4q,
                ts.eps_miss_streak_4q,
+               ts.eps_surprise_last_yr,
+               ts.eps_estimate_dispersion,
                sf.fifty_two_week_high,
                sf.piotroski_f_score, sf.debt_to_equity, sf.operating_margins,
                sf.return_on_equity, sf.revenue_growth, sf.earnings_growth,

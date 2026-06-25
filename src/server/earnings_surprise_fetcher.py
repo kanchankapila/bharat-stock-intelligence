@@ -1,16 +1,28 @@
 #!/usr/bin/env python3
 """
-Earnings Beat/Miss Fetcher
+Earnings Surprise Fetcher
 ==========================
-Fetches quarterly EPS beat/miss/inline history from MoneyControl for all active
-stocks with a mcsymbol, and stores results in stock_earnings_beats.
+Fetches annual EPS actual vs consensus estimates from MoneyControl and computes
+real surprise percentages. Stores results in stock_earnings_beats.
 
-Source: https://api.moneycontrol.com/mcapi/v1/stock/estimates/hits-misses
-  - `type` field encodes beat/miss: "positive" | "negative" | "inline"
-  - `estimates` and `surprise` fields are locked behind auth; only `type` is free.
+Two endpoints used per stock:
+
+  1. earning-forecast (primary) — annual EPS: actual + analyst avg/high/low consensus.
+     Gives surprise_pct = (actual − avg) / avg × 100 for completed years.
+     URL: /mcapi/v1/stock/estimates/earning-forecast?scId={mcsymbol}&ex=N&deviceType=W&frequency=12&financialType=S
+
+  2. hits-misses (quarterly supplement) — quarterly beat/miss/inline classification.
+     No magnitude (estimates locked), but provides recency at quarterly cadence.
+     URL: /mcapi/v1/stock/estimates/hits-misses?deviceType=W&scId={mcsymbol}&ex=N&type=eps&financialType=S
+
+Beat scoring:
+  - Annual rows: beat_score derived from surprise_pct threshold (±2%).
+    > +2% → +1 (beat), < −2% → −1 (miss), else 0 (inline).
+  - Quarterly rows: beat_score from type field (+1/0/−1), surprise_pct NULL.
+  - period_type column: 'annual' | 'quarterly'
 
 Run: python earnings_surprise_fetcher.py
-     python earnings_surprise_fetcher.py --limit 10   # probe first 10 stocks
+     python earnings_surprise_fetcher.py --limit 10
      python earnings_surprise_fetcher.py --symbol INFY
 """
 
@@ -18,7 +30,6 @@ import os
 import sys
 import time
 import argparse
-import datetime
 
 from sqlalchemy import text
 from curl_cffi import requests
@@ -36,21 +47,27 @@ HEADERS = {
     "Sec-Fetch-Site": "same-site",
 }
 
-BASE_URL = (
+FORECAST_URL = (
+    "https://api.moneycontrol.com/mcapi/v1/stock/estimates/earning-forecast"
+    "?scId={scid}&ex=N&deviceType=W&frequency=12&financialType=S"
+)
+HITS_URL = (
     "https://api.moneycontrol.com/mcapi/v1/stock/estimates/hits-misses"
     "?deviceType=W&scId={scid}&ex=N&type=eps&financialType=S"
 )
 
-# beat = +1, inline = 0, miss = -1
+BEAT_THRESHOLD_PCT = 2.0   # |surprise| < 2% → inline; avoids noise from rounding
+
 TYPE_MAP = {"positive": 1, "inline": 0, "negative": -1}
 
-RATE_LIMIT_SEC = 0.8   # ~75 req/min, well within MC limits
+RATE_LIMIT_SEC = 0.5    # two requests per stock → effective ~0.25 req/s per URL
 RETRY_DELAY_SEC = 3
 MAX_RETRIES = 3
 
 
-def _fetch_beats(session, mcsymbol: str) -> list[dict] | None:
-    url = BASE_URL.format(scid=mcsymbol)
+# ── helpers ────────────────────────────────────────────────────────────────────
+
+def _get(session, url: str) -> dict | None:
     for attempt in range(MAX_RETRIES):
         try:
             r = session.get(url, headers=HEADERS, timeout=10, impersonate="chrome110")
@@ -60,69 +77,155 @@ def _fetch_beats(session, mcsymbol: str) -> list[dict] | None:
             if r.status_code != 200:
                 return None
             payload = r.json()
-            if payload.get("success") != 1:
-                return None
-            return payload.get("data", {}).get("list", [])
+            return payload if payload.get("success") == 1 else None
         except Exception as e:
             if attempt < MAX_RETRIES - 1:
                 time.sleep(RETRY_DELAY_SEC)
             else:
-                print(f"  [WARN] fetch failed for {mcsymbol}: {e}")
-                return None
+                print(f"  [WARN] fetch failed ({url[:60]}…): {e}")
     return None
 
 
-def _quarter_to_date(quarter_str: str) -> str | None:
-    """Convert 'Mar 2026' → '2026-03-31', 'Dec 2025' → '2025-12-31', etc."""
-    MONTH_END = {
-        "Mar": "03-31", "Jun": "06-30", "Sep": "09-30", "Dec": "12-31",
-    }
-    parts = quarter_str.strip().split()
+def _to_float(val) -> float | None:
+    if val in ("", None):
+        return None
+    try:
+        return float(str(val).replace(",", "").strip())
+    except (ValueError, TypeError):
+        return None
+
+
+def _period_to_date(period_str: str) -> str | None:
+    """'Mar 2026' → '2026-03-31', 'Dec 2025' → '2025-12-31'"""
+    MONTH_END = {"Mar": "03-31", "Jun": "06-30", "Sep": "09-30", "Dec": "12-31"}
+    parts = period_str.strip().split()
     if len(parts) != 2:
         return None
-    mon, yr = parts[0], parts[1]
+    mon, yr = parts
     suffix = MONTH_END.get(mon)
-    if not suffix:
-        return None
-    return f"{yr}-{suffix}"
+    return f"{yr}-{suffix}" if suffix else None
 
 
-def upsert_beats(conn, symbol: str, rows: list[dict]) -> int:
-    count = 0
-    for item in rows:
-        quarter_date = _quarter_to_date(item.get("quarter", ""))
-        if not quarter_date:
+# ── per-stock fetch ─────────────────────────────────────────────────────────────
+
+def _annual_rows(session, mcsymbol: str) -> list[dict]:
+    """
+    Returns list of dicts ready for upsert, derived from the earning-forecast endpoint.
+    Only includes rows where `actual` is non-empty (completed fiscal years).
+    """
+    payload = _get(session, FORECAST_URL.format(scid=mcsymbol))
+    if not payload:
+        return []
+
+    eps_list = payload.get("data", {}).get("eps", [])
+    rows = []
+    for item in eps_list:
+        actual = _to_float(item.get("actual"))
+        if actual is None:
+            continue   # future year — no surprise to compute
+        avg  = _to_float(item.get("avg"))
+        high = _to_float(item.get("high"))
+        low  = _to_float(item.get("low"))
+        period_date = _period_to_date(item.get("date", ""))
+        if not period_date:
             continue
-        beat_type_str = item.get("type", "inline")
-        beat_score = TYPE_MAP.get(beat_type_str, 0)
-        eps_actual_raw = item.get("actual", "")
-        try:
-            eps_actual = float(eps_actual_raw) if eps_actual_raw not in ("", None) else None
-        except (ValueError, TypeError):
-            eps_actual = None
 
+        if avg and avg != 0:
+            surprise_pct = round((actual - avg) / avg * 100, 2)
+        else:
+            surprise_pct = None
+
+        if surprise_pct is not None:
+            beat_score = 1 if surprise_pct > BEAT_THRESHOLD_PCT else (-1 if surprise_pct < -BEAT_THRESHOLD_PCT else 0)
+            beat_type  = "positive" if beat_score > 0 else ("negative" if beat_score < 0 else "inline")
+        else:
+            beat_score, beat_type = 0, "inline"
+
+        rows.append({
+            "period_date":   period_date,
+            "period_type":   "annual",
+            "beat_type":     beat_type,
+            "beat_score":    beat_score,
+            "eps_actual":    actual,
+            "eps_avg":       avg,
+            "eps_high":      high,
+            "eps_low":       low,
+            "surprise_pct":  surprise_pct,
+        })
+    return rows
+
+
+def _quarterly_rows(session, mcsymbol: str) -> list[dict]:
+    """
+    Returns list of dicts from the hits-misses endpoint (quarterly cadence).
+    Surprise % is not available (locked), but provides recent beat/miss classification.
+    """
+    payload = _get(session, HITS_URL.format(scid=mcsymbol))
+    if not payload:
+        return []
+
+    rows = []
+    for item in payload.get("data", {}).get("list", []):
+        period_date = _period_to_date(item.get("quarter", ""))
+        if not period_date:
+            continue
+        beat_type  = item.get("type", "inline")
+        beat_score = TYPE_MAP.get(beat_type, 0)
+        eps_actual = _to_float(item.get("actual"))
+        rows.append({
+            "period_date":  period_date,
+            "period_type":  "quarterly",
+            "beat_type":    beat_type,
+            "beat_score":   beat_score,
+            "eps_actual":   eps_actual,
+            "eps_avg":      None,
+            "eps_high":     None,
+            "eps_low":      None,
+            "surprise_pct": None,
+        })
+    return rows
+
+
+# ── db write ────────────────────────────────────────────────────────────────────
+
+def upsert_rows(conn, symbol: str, rows: list[dict]) -> int:
+    count = 0
+    for r in rows:
         if use_postgres:
             conn.execute(text("""
                 INSERT INTO stock_earnings_beats
-                    (symbol, quarter_date, beat_type, beat_score, eps_actual, fetched_at)
-                VALUES (:sym, :qd, :bt, :bs, :ea, now())
+                    (symbol, quarter_date, period_type, beat_type, beat_score,
+                     eps_actual, eps_avg, eps_high, eps_low, surprise_pct, fetched_at)
+                VALUES (:sym, :pd, :pt, :bt, :bs, :ea, :ag, :hi, :lo, :sp, now())
                 ON CONFLICT (symbol, quarter_date)
-                DO UPDATE SET beat_type = EXCLUDED.beat_type,
-                              beat_score = EXCLUDED.beat_score,
-                              eps_actual = EXCLUDED.eps_actual,
-                              fetched_at = now()
-            """), {"sym": symbol, "qd": quarter_date, "bt": beat_type_str,
-                   "bs": beat_score, "ea": eps_actual})
+                DO UPDATE SET period_type  = EXCLUDED.period_type,
+                              beat_type    = EXCLUDED.beat_type,
+                              beat_score   = EXCLUDED.beat_score,
+                              eps_actual   = COALESCE(EXCLUDED.eps_actual, stock_earnings_beats.eps_actual),
+                              eps_avg      = COALESCE(EXCLUDED.eps_avg,    stock_earnings_beats.eps_avg),
+                              eps_high     = COALESCE(EXCLUDED.eps_high,   stock_earnings_beats.eps_high),
+                              eps_low      = COALESCE(EXCLUDED.eps_low,    stock_earnings_beats.eps_low),
+                              surprise_pct = COALESCE(EXCLUDED.surprise_pct, stock_earnings_beats.surprise_pct),
+                              fetched_at   = now()
+            """), {"sym": symbol, "pd": r["period_date"], "pt": r["period_type"],
+                   "bt": r["beat_type"], "bs": r["beat_score"],
+                   "ea": r["eps_actual"], "ag": r["eps_avg"],
+                   "hi": r["eps_high"], "lo": r["eps_low"], "sp": r["surprise_pct"]})
         else:
             conn.execute(text("""
                 INSERT OR REPLACE INTO stock_earnings_beats
-                    (symbol, quarter_date, beat_type, beat_score, eps_actual, fetched_at)
-                VALUES (:sym, :qd, :bt, :bs, :ea, CURRENT_TIMESTAMP)
-            """), {"sym": symbol, "qd": quarter_date, "bt": beat_type_str,
-                   "bs": beat_score, "ea": eps_actual})
+                    (symbol, quarter_date, period_type, beat_type, beat_score,
+                     eps_actual, eps_avg, eps_high, eps_low, surprise_pct, fetched_at)
+                VALUES (:sym, :pd, :pt, :bt, :bs, :ea, :ag, :hi, :lo, :sp, CURRENT_TIMESTAMP)
+            """), {"sym": symbol, "pd": r["period_date"], "pt": r["period_type"],
+                   "bt": r["beat_type"], "bs": r["beat_score"],
+                   "ea": r["eps_actual"], "ag": r["eps_avg"],
+                   "hi": r["eps_high"], "lo": r["eps_low"], "sp": r["surprise_pct"]})
         count += 1
     return count
 
+
+# ── main ────────────────────────────────────────────────────────────────────────
 
 def run(limit: int | None = None, symbol_filter: str | None = None) -> None:
     engine = get_engine()
@@ -140,29 +243,43 @@ def run(limit: int | None = None, symbol_filter: str | None = None) -> None:
         if limit:
             stocks = stocks[:limit]
 
-        print(f"[EARNINGS] Fetching beat/miss history for {len(stocks)} stocks …")
+        print(f"[EARNINGS] Fetching EPS forecast + beat/miss for {len(stocks)} stocks …")
         session = requests.Session()
         total_rows = 0
 
         for i, (symbol, mcsymbol) in enumerate(stocks, 1):
-            rows = _fetch_beats(session, mcsymbol)
-            if rows is None:
-                print(f"  [{i}/{len(stocks)}] {symbol} ({mcsymbol}) — skip (fetch failed)")
-                time.sleep(RATE_LIMIT_SEC)
-                continue
-
-            n = upsert_beats(conn, symbol, rows)
-            conn.commit()
-            total_rows += n
-            if i % 20 == 0 or i == len(stocks):
-                print(f"  [{i}/{len(stocks)}] {symbol}: {n} quarters upserted (total={total_rows})")
+            annual = _annual_rows(session, mcsymbol)
+            time.sleep(RATE_LIMIT_SEC)
+            quarterly = _quarterly_rows(session, mcsymbol)
             time.sleep(RATE_LIMIT_SEC)
 
-        print(f"[EARNINGS] Done. {total_rows} quarter rows upserted for {len(stocks)} stocks.")
+            # Annual rows take precedence; quarterly fills in months with no annual data
+            # Deduplicate: if annual already has a row for a period_date, skip quarterly
+            annual_dates = {r["period_date"] for r in annual}
+            combined = annual + [r for r in quarterly if r["period_date"] not in annual_dates]
+
+            if not combined:
+                print(f"  [{i}/{len(stocks)}] {symbol} ({mcsymbol}) — no data")
+                continue
+
+            n = upsert_rows(conn, symbol, combined)
+            conn.commit()
+            total_rows += n
+
+            annual_with_surprise = [r for r in annual if r["surprise_pct"] is not None]
+            surprise_summary = ""
+            if annual_with_surprise:
+                spcts = [f"{r['surprise_pct']:+.1f}%" for r in sorted(annual_with_surprise, key=lambda x: x["period_date"])[-3:]]
+                surprise_summary = f" | surprise last 3yr: {', '.join(spcts)}"
+
+            if i % 10 == 0 or i == len(stocks):
+                print(f"  [{i}/{len(stocks)}] {symbol}: {n} periods upserted{surprise_summary} (total={total_rows})")
+
+        print(f"[EARNINGS] Done. {total_rows} period rows upserted for {len(stocks)} stocks.")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="MoneyControl earnings beat/miss fetcher")
+    parser = argparse.ArgumentParser(description="MoneyControl earnings surprise fetcher")
     parser.add_argument("--limit",  type=int, default=None, help="Fetch only first N stocks (for testing)")
     parser.add_argument("--symbol", default=None, help="Fetch a single NSE symbol")
     args = parser.parse_args()
