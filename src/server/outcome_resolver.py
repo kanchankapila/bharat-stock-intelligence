@@ -123,33 +123,52 @@ def get_atr(conn: ConnWrapper, symbol: str, signal_date: str, window: int = 14) 
     return sum(trs) / len(trs) if trs else 0.0
 
 
+_SPLIT_RETURN_PCT = 25.0  # daily returns beyond ±25% are almost certainly stock splits/bonuses
+
+
+def _clean_daily_returns(prices: list[float]) -> list[float]:
+    """Compute daily % returns from a chronological price list, excluding split/bonus days.
+    A split day shows as a ±25%+ move on unadjusted prices; including it inflates the
+    volatility estimate, biasing the UP/DOWN outcome threshold upward."""
+    rets = []
+    for i in range(1, len(prices)):
+        if prices[i - 1] <= 0:
+            continue
+        r = (prices[i] - prices[i - 1]) / prices[i - 1] * 100
+        if abs(r) < _SPLIT_RETURN_PCT:
+            rets.append(r)
+    return rets
+
+
 def get_volatility_threshold(conn: ConnWrapper, symbol: str, signal_date: str, horizon_days: int) -> float:
     """
     Calculates a dynamic threshold based on the stock's rolling daily standard deviation.
     Uses 20 trading days prior to signal_date. Scales threshold by sqrt(horizon_days).
+    Split/bonus days (|return| > 25%) are excluded to avoid biasing the estimate.
     """
     rows = conn.execute("""
         SELECT close FROM stock_ohlcv
         WHERE symbol = ? AND date <= ? AND COALESCE(is_suspect, 0) = 0
         ORDER BY date DESC LIMIT 21
     """, (symbol, signal_date)).fetchall()
-    
+
     if len(rows) < 10:
         # Fallback if insufficient history: 1.0% per day scaled by sqrt(time)
         return max(0.5, min(10.0, 1.0 * math.sqrt(horizon_days)))
-        
+
     prices = [float(r[0]) for r in rows][::-1]
-    # Daily returns
-    returns = [(prices[i] - prices[i-1]) / prices[i-1] for i in range(1, len(prices))]
-    
-    # Calculate daily volatility
+    returns = _clean_daily_returns(prices)
+
+    if len(returns) < 5:
+        return max(0.5, min(10.0, 1.0 * math.sqrt(horizon_days)))
+
     mean_ret = sum(returns) / len(returns)
     variance = sum((r - mean_ret) ** 2 for r in returns) / (len(returns) - 1)
-    daily_vol = math.sqrt(variance) * 100 # percentage
-    
+    daily_vol = math.sqrt(variance) * 100
+
     # 1.0 Standard deviation move over the holding horizon
     threshold = daily_vol * math.sqrt(horizon_days)
-    
+
     # Clamp between 0.5% and 15.0% to prevent extreme values
     return max(0.5, min(15.0, threshold))
 
@@ -468,7 +487,8 @@ def resolve_dl_predictions(conn: ConnWrapper, dry_run: bool = False) -> dict[str
 
     def _symbol_vol_threshold(sym: str, as_of: str) -> float:
         """Return a vol-scaled UP/DOWN threshold for a stock.
-        Uses 20-day RMS of daily returns; capped between 0.3% and 2.0%."""
+        Uses 20-day RMS of daily returns; split/bonus days excluded (|ret| > 25%);
+        result capped between 0.3% and 2.0%."""
         rows = conn.execute(
             "SELECT close FROM stock_ohlcv WHERE symbol=? AND date <= ? "
             "AND COALESCE(is_suspect,0)=0 ORDER BY date DESC LIMIT 21",
@@ -477,7 +497,10 @@ def resolve_dl_predictions(conn: ConnWrapper, dry_run: bool = False) -> dict[str
         closes = [float(r[0]) for r in rows if r[0]]
         if len(closes) < 5:
             return 0.5  # fallback
-        daily_rets = [(closes[i] - closes[i + 1]) / closes[i + 1] * 100 for i in range(len(closes) - 1)]
+        # Reverse to chronological order for _clean_daily_returns
+        daily_rets = _clean_daily_returns(list(reversed(closes)))
+        if not daily_rets:
+            return 0.5
         rms = (sum(r ** 2 for r in daily_rets) / len(daily_rets)) ** 0.5
         return max(0.3, min(2.0, rms * 0.5))
 
