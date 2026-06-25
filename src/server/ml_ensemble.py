@@ -134,6 +134,12 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     # Rsi deviation from neutral zone
     X['rsi_deviation']  = (X['rsi'] - 50).abs()
 
+    # Market breadth — used as interaction term only (standalone was noise, tested 2026-06)
+    X['breadth_x_score'] = (
+        num('pct_above_200dma', 0.5).clip(0, 1) * X['signal_score']
+    )
+    X['breadth_thrust'] = num('adv_decline_ratio', 0.5).clip(0, 1)
+
     # FII flow — normalized (Cr), negative = selling pressure
     X['fii_3d_net'] = num('fii_3d_net', 0) / 10000.0
 
@@ -155,9 +161,20 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     # Delivery % (institutional conviction proxy, normalized to 0-1)
     X['delivery_pct'] = num('delivery_pct', 50) / 100.0
 
+    # Mutual fund holding — AMFI monthly disclosures via ET Markets
+    # High MF ownership = institutional validation; rising MF holding = accumulation signal
+    X['mf_holding_pct']    = num('mf_holding_pct', 5.0).clip(0, 60) / 60.0
+    X['mf_fund_count_log'] = np.log1p(num('mf_fund_count', 0).clip(lower=0))
+    X['mf_chg_vs_prev']    = num('mf_chg_vs_prev', 0.0).clip(-5, 5)
+    X['mf_x_score']        = X['mf_holding_pct'] * X['signal_score']
+
     # Sector relative momentum
     X['sector_ret_5d']  = num('sector_ret_5d', 0)
     X['sector_ret_21d'] = num('sector_ret_21d', 0)
+
+    # Sector-global benchmark correlation (sector return vs SP500/GOLD/CRUDE/DXY rolling 21d)
+    X['sector_global_corr_21d'] = num('sector_global_corr_21d', 0.0).clip(-1, 1)
+    X['corr_x_sector_ret']      = X['sector_global_corr_21d'] * X['sector_ret_5d']
 
     # ── Fundamental factors: Quality / Value / Growth / Size (from stock_fundamentals) ──
     # Point-in-time caveat: stock_fundamentals is a current snapshot keyed by symbol (same
@@ -186,11 +203,23 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     # Interaction: a strong signal into cheap IV is the highest-quality entry
     X['score_x_low_iv'] = X['signal_score'] * (1.0 - X['iv_rank'])
 
+    # Max pain distance: how far spot is from max pain strike
+    # Negative = below max pain (put writers dominate → likely support)
+    # Positive = above max pain (call writers dominate → likely resistance)
+    cmp_vals = df['cmp'].where(df['cmp'] > 0, np.nan) if 'cmp' in df.columns else pd.Series(np.nan, index=df.index)
+    max_pain_vals = num('max_pain', np.nan)
+    X['max_pain_dist_pct'] = ((cmp_vals - max_pain_vals) / max_pain_vals.replace(0, np.nan) * 100).fillna(0).clip(-20, 20)
+    X['below_max_pain'] = (X['max_pain_dist_pct'] < 0).astype(np.float32)
+
     # ── Cross-sectional relative strength (from relative_strength.py) ──
     # Universe percentile of trailing return (0=worst, 1=best). Absolute momentum (sector_ret)
     # can't tell a stock leading the tape from one merely floating up with it; rank can.
     X['rs_rank_21d'] = num('rs_rank_21d', 0.5).clip(0, 1)
     X['rs_rank_63d'] = num('rs_rank_63d', 0.5).clip(0, 1)
+
+    # 12-1 momentum (12-month return minus last month — academia-validated factor)
+    X['ret_12m_ex1m']    = num('ret_12m_ex1m', 0.0).clip(-60, 60)
+    X['momentum_x_score'] = X['ret_12m_ex1m'].clip(-30, 30) * X['signal_score'] / 10.0
 
     # ── Analyst consensus (from analyst_estimates_history, AS-OF join) ──
     # analyst_buy_pct: fraction of bullish (BUY+OUTPERFORM) ratings — neutral default 0.5.
@@ -347,6 +376,7 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                ts.fii_10d_net, ts.dii_3d_net,
                ts.delivery_pct,
                ts.sector_ret_5d, ts.sector_ret_21d,
+               ts.sector_global_corr_21d,
                ts.iv_rank, ts.iv_skew,
                ts.rs_rank_21d, ts.rs_rank_63d,
                ts.insider_buy_pct_90d,
@@ -360,6 +390,11 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                ts.eps_miss_streak_4q,
                ts.eps_surprise_last_yr,
                ts.eps_estimate_dispersion,
+               fs.ret_12m_ex1m,
+               mb.pct_above_200dma, mb.adv_decline_ratio, mb.net_highs_lows,
+               hfs.max_pain,
+               ts.mf_holding_pct, ts.mf_fund_count, ts.mf_chg_vs_prev,
+               ts.sector_global_corr_21d,
                COALESCE(fh.fifty_two_week_high, sf.fifty_two_week_high) AS fifty_two_week_high,
                COALESCE(fh.piotroski_f_score, sf.piotroski_f_score)     AS piotroski_f_score,
                COALESCE(fh.debt_to_equity, sf.debt_to_equity)           AS debt_to_equity,
@@ -416,6 +451,11 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                     AND p2.score_type = 'ohlson_o_score'
                     AND p2.date <= so.signal_date
               )
+        LEFT JOIN feature_store fs
+               ON fs.symbol = so.symbol AND fs.date = so.signal_date AND fs.timeframe = 'D'
+        LEFT JOIN market_breadth mb ON mb.date = so.signal_date
+        LEFT JOIN historical_fno_sentiment hfs
+               ON hfs.symbol = so.symbol AND hfs.date = so.signal_date
         {label_join}
         WHERE {label_where}
     """
@@ -439,6 +479,7 @@ def load_pending_signals() -> pd.DataFrame:
                ts.fii_10d_net, ts.dii_3d_net,
                ts.delivery_pct,
                ts.sector_ret_5d, ts.sector_ret_21d,
+               ts.sector_global_corr_21d,
                ts.iv_rank, ts.iv_skew,
                ts.rs_rank_21d, ts.rs_rank_63d,
                ts.insider_buy_pct_90d,
@@ -452,6 +493,11 @@ def load_pending_signals() -> pd.DataFrame:
                ts.eps_miss_streak_4q,
                ts.eps_surprise_last_yr,
                ts.eps_estimate_dispersion,
+               fs.ret_12m_ex1m,
+               mb.pct_above_200dma, mb.adv_decline_ratio, mb.net_highs_lows,
+               hfs.max_pain,
+               ts.mf_holding_pct, ts.mf_fund_count, ts.mf_chg_vs_prev,
+               ts.sector_global_corr_21d,
                sf.fifty_two_week_high,
                sf.piotroski_f_score, sf.debt_to_equity, sf.operating_margins,
                sf.return_on_equity, sf.revenue_growth, sf.earnings_growth,
@@ -461,6 +507,11 @@ def load_pending_signals() -> pd.DataFrame:
                psh_oo.score_value AS ohlson_o
         FROM technical_signals ts
         LEFT JOIN stock_fundamentals sf ON sf.symbol = ts.symbol
+        LEFT JOIN feature_store fs
+               ON fs.symbol = ts.symbol AND fs.date = ts.date AND fs.timeframe = 'D'
+        LEFT JOIN market_breadth mb ON mb.date = ts.date
+        LEFT JOIN historical_fno_sentiment hfs
+               ON hfs.symbol = ts.symbol AND hfs.date = ts.date
         -- Latest analyst snapshot on/before today
         LEFT JOIN analyst_estimates_history aeh
                ON aeh.symbol = ts.symbol

@@ -27,7 +27,7 @@ _FEATURE_STORE_CONFLICT = (
     " ON CONFLICT(symbol, date, timeframe) DO UPDATE SET " +
     ", ".join(
         f"{c}=excluded.{c}" for c in (
-            "ret_1d", "ret_5d", "ret_15d", "ret_21d", "ret_63d", "ret_126d", "ret_252d",
+            "ret_1d", "ret_5d", "ret_15d", "ret_21d", "ret_63d", "ret_126d", "ret_252d", "ret_12m_ex1m",
             "sma20", "sma50", "sma200", "ema8", "ema21", "dist_sma20_pct", "dist_sma200_pct",
             "above_sma200", "rsi_14", "rsi_28", "macd", "macd_signal", "macd_hist", "adx",
             "di_plus", "di_minus", "stoch_k", "stoch_d", "cci", "williams_r", "atr_14",
@@ -75,6 +75,7 @@ class FeatureEngineer:
         # Returns
         for d in [1, 5, 15, 21, 63, 126, 252]:
             out[f"ret_{d}d"] = close.pct_change(d)
+        out["ret_12m_ex1m"] = close.pct_change(252) - close.pct_change(21)
 
         # Trend / moving averages
         out["sma20"]  = close.rolling(20).mean()
@@ -347,7 +348,7 @@ class FeatureEngineer:
             # Collect all rows then write in one executemany call
             SQL = """INSERT INTO feature_store
                        (symbol, date, timeframe,
-                        ret_1d, ret_5d, ret_15d, ret_21d, ret_63d, ret_126d, ret_252d,
+                        ret_1d, ret_5d, ret_15d, ret_21d, ret_63d, ret_126d, ret_252d, ret_12m_ex1m,
                         sma20, sma50, sma200, ema8, ema21, dist_sma20_pct, dist_sma200_pct, above_sma200,
                         rsi_14, rsi_28, macd, macd_signal, macd_hist, adx, di_plus, di_minus,
                         stoch_k, stoch_d, cci, williams_r,
@@ -364,7 +365,7 @@ class FeatureEngineer:
                         target_dir_1d, target_dir_5d, target_dir_15d,
                         computed_at)
                        VALUES (?, ?, 'D',
-                        ?,?,?,?,?,?,?,
+                        ?,?,?,?,?,?,?,?,
                         ?,?,?,?,?,?,?,?,
                         ?,?,?,?,?,?,?,?,
                         ?,?,?,?,
@@ -388,7 +389,7 @@ class FeatureEngineer:
                 rows_to_insert.append((
                     symbol, date.strftime("%Y-%m-%d"),
                     d.get("ret_1d"), d.get("ret_5d"), d.get("ret_15d"), d.get("ret_21d"),
-                    d.get("ret_63d"), d.get("ret_126d"), d.get("ret_252d"),
+                    d.get("ret_63d"), d.get("ret_126d"), d.get("ret_252d"), d.get("ret_12m_ex1m"),
                     d.get("sma20"), d.get("sma50"), d.get("sma200"), d.get("ema8"), d.get("ema21"),
                     d.get("dist_sma20_pct"), d.get("dist_sma200_pct"), d.get("above_sma200"),
                     d.get("rsi_14"), d.get("rsi_28"),
@@ -426,7 +427,7 @@ class FeatureEngineer:
         """Write scaled feature rows for one symbol. Returns row count written."""
         SQL = """INSERT INTO feature_store
                    (symbol, date, timeframe,
-                    ret_1d, ret_5d, ret_15d, ret_21d, ret_63d, ret_126d, ret_252d,
+                    ret_1d, ret_5d, ret_15d, ret_21d, ret_63d, ret_126d, ret_252d, ret_12m_ex1m,
                     sma20, sma50, sma200, ema8, ema21, dist_sma20_pct, dist_sma200_pct, above_sma200,
                     rsi_14, rsi_28, macd, macd_signal, macd_hist, adx, di_plus, di_minus,
                     stoch_k, stoch_d, cci, williams_r,
@@ -443,7 +444,7 @@ class FeatureEngineer:
                     target_dir_1d, target_dir_5d, target_dir_15d,
                     computed_at)
                    VALUES (?, ?, 'D',
-                    ?,?,?,?,?,?,?,
+                    ?,?,?,?,?,?,?,?,
                     ?,?,?,?,?,?,?,?,
                     ?,?,?,?,?,?,?,?,
                     ?,?,?,?,
@@ -467,7 +468,7 @@ class FeatureEngineer:
             rows_to_insert.append((
                 symbol, date.strftime("%Y-%m-%d"),
                 d.get("ret_1d"), d.get("ret_5d"), d.get("ret_15d"), d.get("ret_21d"),
-                d.get("ret_63d"), d.get("ret_126d"), d.get("ret_252d"),
+                d.get("ret_63d"), d.get("ret_126d"), d.get("ret_252d"), d.get("ret_12m_ex1m"),
                 d.get("sma20"), d.get("sma50"), d.get("sma200"), d.get("ema8"), d.get("ema21"),
                 d.get("dist_sma20_pct"), d.get("dist_sma200_pct"), d.get("above_sma200"),
                 d.get("rsi_14"), d.get("rsi_28"),

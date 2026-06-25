@@ -1933,6 +1933,22 @@ runMigration('050_earnings_beats', `
   ALTER TABLE technical_signals ADD COLUMN eps_estimate_dispersion REAL;
 `);
 
+// 051 — G6 12-1 momentum feature: 12-month return minus last month (academia-validated factor)
+runMigration('051_feature_store_momentum', `
+  ALTER TABLE feature_store ADD COLUMN ret_12m_ex1m REAL;
+`);
+
+runMigration('052_mf_holdings_signals', `
+  ALTER TABLE nse_stocks ADD COLUMN is_asm INTEGER DEFAULT 0;
+  ALTER TABLE nse_stocks ADD COLUMN gsm_stage INTEGER DEFAULT 0;
+  ALTER TABLE nse_stocks ADD COLUMN surveillance_updated_at TEXT;
+  ALTER TABLE technical_signals ADD COLUMN mf_holding_pct REAL;
+  ALTER TABLE technical_signals ADD COLUMN mf_fund_count INTEGER;
+  ALTER TABLE technical_signals ADD COLUMN mf_chg_vs_prev REAL;
+  ALTER TABLE technical_signals ADD COLUMN sector_global_corr_21d REAL;
+  ALTER TABLE technical_signals ADD COLUMN sector_benchmark TEXT;
+`);
+
 // ── Retention: confluence_signals is an append-only firehose (~700k rows, the single
 // largest contributor to DB bloat). expires_at exists but nothing pruned it. Delete
 // expired rows on boot and every 6h. Keeps the table bounded without losing live signals.

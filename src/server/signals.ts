@@ -35,6 +35,26 @@ export function gateAISignal(
   return { persist: true, signalType, reason: 'ok' };
 }
 
+export interface SurveillanceGateResult {
+  gated: true;
+  reason: string;
+}
+
+/**
+ * Checks if a symbol is under SEBI surveillance (ASM/GSM).
+ * Returns a gated result if signals should be suppressed, null if clear.
+ */
+export async function checkSurveillanceGate(symbol: string): Promise<SurveillanceGateResult | null> {
+  const surv = await dbGet<{ is_asm: number; gsm_stage: number }>(
+    'SELECT is_asm, gsm_stage FROM nse_stocks WHERE symbol = ?',
+    [symbol]
+  );
+  if (surv?.is_asm === 1 || (surv?.gsm_stage ?? 0) >= 2) {
+    return { gated: true, reason: `Surveillance: ASM=${surv?.is_asm} GSM stage=${surv?.gsm_stage}` };
+  }
+  return null;
+}
+
 /** Confidence floor for persisting AI signals (app_settings override, default 65). */
 export async function getAISignalMinConfidence(): Promise<number> {
   if (_cachedMinConfidence !== null) return _cachedMinConfidence;

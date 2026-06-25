@@ -237,10 +237,16 @@ async function processAISignal(job: Job): Promise<void> {
   // Actionability gate: only persist conviction BUY/SELL signals above the confidence
   // floor. Drops HOLD and sub-threshold noise so the DB matches what the UI surfaces and
   // the backtester sees clean, actionable data. (See docs/.../ai-signal-gate-design.md)
-  const { gateAISignal, getAISignalMinConfidence, upsertUnifiedSignal } = await import('./signals');
+  const { gateAISignal, getAISignalMinConfidence, upsertUnifiedSignal, checkSurveillanceGate } = await import('./signals');
   const threshold = await getAISignalMinConfidence();
   const gate = gateAISignal(analysis as any, threshold);
   if (!gate.persist) {
+    await job.updateProgress(100);
+    return;
+  }
+
+  const survGate = await checkSurveillanceGate(symbol);
+  if (survGate) {
     await job.updateProgress(100);
     return;
   }
@@ -416,6 +422,12 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await runPython('analyst_estimates_snapshot.py', [], 600_000)
     .catch(e => console.warn('[QUEUE] analyst_estimates_snapshot failed:', (e as Error).message));
 
+  // Surveillance gate: ASM/GSM stocks get is_asm/gsm_stage flags before signal scoring.
+  await runPython('asm_gsm_fetcher.py', [], 120_000)
+    .catch(e => console.warn('[QUEUE] asm_gsm_fetcher failed:', (e as Error).message));
+
+  await runPython('asm_gsm_fetcher.py', [], 2 * 60_000)
+    .catch(e => console.warn('[QUEUE] asm_gsm_fetcher failed:', (e as Error).message));
   await runPython('fii_dii_fetcher.py', [], 90_000).catch(() => {});
   await runPython('pcr_fetcher.py', [], 90_000).catch(() => {});
   await runPython('moneycontrol_fetcher.py', [], 300_000).catch(e => {
@@ -457,6 +469,10 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   // Writes eps_beat_last_q / eps_beat_streak_4q / eps_miss_streak_4q → technical_signals.
   await runPython('earnings_beat_features.py', [], 60_000)
     .catch(e => console.warn('[QUEUE] earnings_beat_features failed:', (e as Error).message));
+
+  // Sector-global benchmark correlation (requires macro_asset_prices from global_macro_fetcher).
+  await runPython('sector_global_corr.py', [], 3 * 60_000)
+    .catch(e => console.warn('[QUEUE] sector_global_corr failed:', (e as Error).message));
 
   await resolveOutcomesResilient(1);
   await resolveOutcomesResilient(5);
@@ -516,6 +532,9 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean }> 
   // Refresh earnings beat/miss history (quarterly data, no need to run daily).
   await runPython('earnings_surprise_fetcher.py', [], 20 * 60_000)
     .catch(e => console.warn('[QUEUE] earnings_surprise_fetcher failed:', (e as Error).message));
+  // MF holdings: AMFI monthly disclosures — weekly fetch is sufficient.
+  await runPython('mf_holdings_fetcher.py', [], 10 * 60_000)
+    .catch(e => console.warn('[QUEUE] mf_holdings_fetcher failed:', (e as Error).message));
   await runPython('outcome_resolver.py', ['--horizon', '5']);
   await runPython('outcome_resolver.py', ['--horizon', '15']);
   await runPython('ml_ensemble.py', ['--train', '--score'], 60 * 60_000);
@@ -1474,7 +1493,12 @@ export async function initQueues(): Promise<boolean> {
       removeOnComplete: 3, removeOnFail: 3,
     });
     dlMacroFetchWorker = new Worker(QUEUE_DL_MACRO_FETCH,
-      async () => processDLPython('global_macro_fetcher.py'),
+      async () => {
+        await processDLPython('global_macro_fetcher.py');
+        // Sector-global correlation depends on macro_asset_prices populated above.
+        await runPython('sector_global_corr.py', [], 3 * 60_000)
+          .catch(e => console.warn('[QUEUE] sector_global_corr failed:', (e as Error).message));
+      },
       { connection, concurrency: 1, lockDuration: 5 * 60 * 1000 });
     dlMacroFetchWorker.on('completed', () => console.log('[QUEUE] dl-macro-fetch done'));
     dlMacroFetchWorker.on('failed', (_, err) => console.error('[QUEUE] dl-macro-fetch failed:', err.message));
