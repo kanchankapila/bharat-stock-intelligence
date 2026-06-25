@@ -919,6 +919,10 @@ CREATE INDEX idx_nse_symbol ON nse_stocks(symbol);
 CREATE INDEX idx_nse_sector ON nse_stocks(sector);
 CREATE INDEX idx_nse_industry ON nse_stocks(industry);
 CREATE INDEX idx_nse_status ON nse_stocks(status);
+CREATE INDEX IF NOT EXISTS idx_nse_stocks_symbol_gin   ON nse_stocks USING GIN (symbol   gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_nse_stocks_name_gin     ON nse_stocks USING GIN (name     gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_nse_stocks_sector_gin   ON nse_stocks USING GIN (sector   gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_nse_stocks_industry_gin ON nse_stocks USING GIN (industry gin_trgm_ops);
 
 -- ── order_book_snapshots ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "order_book_snapshots" (

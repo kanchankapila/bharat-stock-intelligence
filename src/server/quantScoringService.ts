@@ -243,10 +243,16 @@ export async function runQuantScoring(): Promise<void> {
   try {
     console.log('[QUANT] Loading OHLCV data...');
 
-    // Load all OHLCV rows ordered by symbol then date
+    // Limit to 500 trading days (~2 years) — enough for 252-day return + vol metrics.
+    // Loading the full table (millions of rows) blocks the event loop during deserialization.
+    const ohlcvCutoff = new Date();
+    ohlcvCutoff.setDate(ohlcvCutoff.getDate() - 500);
+    const cutoffStr = ohlcvCutoff.toISOString().slice(0, 10);
+
     const allRows = await dbAll(
       `SELECT symbol, date, close, volume FROM stock_ohlcv
-       WHERE close > 0 ORDER BY symbol, date ASC`
+       WHERE close > 0 AND date >= ? ORDER BY symbol, date ASC`,
+      [cutoffStr]
     ) as (OHLCVRow & { symbol: string })[];
 
     // Group by symbol
@@ -448,24 +454,67 @@ export async function runQuantScoring(): Promise<void> {
         last_computed = CURRENT_TIMESTAMP
     `;
 
+    // Batch upsert in chunks of 50 rows — reduces 500 round-trips to ~10.
+    // translateSql converts ? → $N for Postgres; multi-row VALUES works on both engines.
+    const BATCH_SIZE = 50;
+    const ROW_PLACEHOLDER = `(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)`;
+    const BATCH_COLUMNS = `symbol,
+        return_1w, return_1m, return_3m, return_6m, return_12m,
+        above_sma200, sma200_distance_pct, momentum_score,
+        annualized_vol, sharpe_ratio, max_drawdown_1y,
+        vol_rank, sharpe_rank,
+        trailing_pe, forward_pe, debt_to_equity, return_on_equity,
+        operating_margins, revenue_growth, piotroski_f_score, valuation_score,
+        bullish_screener_count, bearish_screener_count,
+        screener_category_breadth, screener_net_score, confluence_rank,
+        rank_momentum, rank_quality, rank_value, rank_composite,
+        composite_class, ohlcv_days, last_computed`;
+    const CONFLICT_SET = `return_1w=excluded.return_1w, return_1m=excluded.return_1m,
+        return_3m=excluded.return_3m, return_6m=excluded.return_6m,
+        return_12m=excluded.return_12m, above_sma200=excluded.above_sma200,
+        sma200_distance_pct=excluded.sma200_distance_pct,
+        momentum_score=excluded.momentum_score, annualized_vol=excluded.annualized_vol,
+        sharpe_ratio=excluded.sharpe_ratio, max_drawdown_1y=excluded.max_drawdown_1y,
+        vol_rank=excluded.vol_rank, sharpe_rank=excluded.sharpe_rank,
+        trailing_pe=excluded.trailing_pe, forward_pe=excluded.forward_pe,
+        debt_to_equity=excluded.debt_to_equity, return_on_equity=excluded.return_on_equity,
+        operating_margins=excluded.operating_margins, revenue_growth=excluded.revenue_growth,
+        piotroski_f_score=excluded.piotroski_f_score, valuation_score=excluded.valuation_score,
+        bullish_screener_count=excluded.bullish_screener_count,
+        bearish_screener_count=excluded.bearish_screener_count,
+        screener_category_breadth=excluded.screener_category_breadth,
+        screener_net_score=excluded.screener_net_score, confluence_rank=excluded.confluence_rank,
+        rank_momentum=excluded.rank_momentum, rank_quality=excluded.rank_quality,
+        rank_value=excluded.rank_value, rank_composite=excluded.rank_composite,
+        composite_class=excluded.composite_class, ohlcv_days=excluded.ohlcv_days,
+        last_computed=CURRENT_TIMESTAMP`;
+
     await dbTransaction(async (tx) => {
-      for (let i = 0; i < computed.length; i++) {
-        const c = computed[i];
-        await tx.run(UPSERT_SQL, [
-          c.symbol,
-          c.return_1w, c.return_1m, c.return_3m, c.return_6m, c.return_12m,
-          c.above_sma200, c.sma200_distance_pct, momentumPct[i],
-          c.annualized_vol, c.sharpe_ratio, c.max_drawdown_1y,
-          volRanks[i], sharpeRanks[i],
-          c.trailing_pe, c.forward_pe, c.debt_to_equity, c.return_on_equity,
-          c.operating_margins, c.revenue_growth, c.piotroski_f_score, valuationPct[i],
-          c.bullish_screener_count, c.bearish_screener_count,
-          c.screener_category_breadth, c.screener_net_score, confluencePct[i],
-          momentumPct[i], qualityPct[i], valuationPct[i], compositePct[i],
-          classify(compositePct[i]),
-          c.ohlcv_days,
-        ]);
-        scoringProgress.processed++;
+      for (let batch = 0; batch < computed.length; batch += BATCH_SIZE) {
+        const chunk = computed.slice(batch, batch + BATCH_SIZE);
+        const batchSql = `INSERT INTO quant_scores (${BATCH_COLUMNS})
+          VALUES ${chunk.map(() => ROW_PLACEHOLDER).join(',')}
+          ON CONFLICT(symbol) DO UPDATE SET ${CONFLICT_SET}`;
+        const batchParams = chunk.flatMap((c, j) => {
+          const i = batch + j;
+          return [
+            c.symbol,
+            c.return_1w, c.return_1m, c.return_3m, c.return_6m, c.return_12m,
+            c.above_sma200, c.sma200_distance_pct, momentumPct[i],
+            c.annualized_vol, c.sharpe_ratio, c.max_drawdown_1y,
+            volRanks[i], sharpeRanks[i],
+            c.trailing_pe, c.forward_pe, c.debt_to_equity, c.return_on_equity,
+            c.operating_margins, c.revenue_growth, c.piotroski_f_score, valuationPct[i],
+            c.bullish_screener_count, c.bearish_screener_count,
+            c.screener_category_breadth, c.screener_net_score, confluencePct[i],
+            momentumPct[i], qualityPct[i], valuationPct[i], compositePct[i],
+            classify(compositePct[i]),
+            c.ohlcv_days,
+          ];
+        });
+        await tx.run(batchSql, batchParams);
+        scoringProgress.processed += chunk.length;
+        await new Promise<void>(resolve => setImmediate(resolve)); // yield between batches
       }
     });
     scoringProgress.completedAt = new Date().toISOString();
