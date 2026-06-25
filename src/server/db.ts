@@ -2032,6 +2032,23 @@ runMigration('057_mc_pricefeed_and_patterns', `
   ALTER TABLE technical_signals ADD COLUMN tl_dist_3m_low_pct   REAL;
 `);
 
+runMigration('058_mc_unique_fields', `
+  ALTER TABLE technical_signals ADD COLUMN mc_cagr_10y          REAL;
+  ALTER TABLE technical_signals ADD COLUMN mc_consensus_pb      REAL;
+  ALTER TABLE technical_signals ADD COLUMN mc_ma30_dist_pct     REAL;
+  ALTER TABLE technical_signals ADD COLUMN mc_ma150_dist_pct    REAL;
+  ALTER TABLE technical_signals ADD COLUMN mc_del_pct_3d        REAL;
+  ALTER TABLE technical_signals ADD COLUMN mc_del_pct_5d        REAL;
+  ALTER TABLE technical_signals ADD COLUMN mc_del_acceleration  REAL;
+  ALTER TABLE technical_signals ADD COLUMN mc_fno_eligible      INTEGER;
+  ALTER TABLE technical_signals ADD COLUMN mc_3d_return         REAL;
+  ALTER TABLE technical_signals ADD COLUMN mc_ytd_return        REAL;
+  ALTER TABLE technical_signals ADD COLUMN mc_price_cash        REAL;
+  ALTER TABLE technical_signals ADD COLUMN mc_consensus_eps     REAL;
+  ALTER TABLE technical_signals ADD COLUMN mc_eps_vs_cons       REAL;
+  ALTER TABLE technical_signals ADD COLUMN mc_pe_fwd_discount   REAL;
+`);
+
 // ── Retention: confluence_signals is an append-only firehose (~700k rows, the single
 // largest contributor to DB bloat). expires_at exists but nothing pruned it. Delete
 // expired rows on boot and every 6h. Keeps the table bounded without losing live signals.

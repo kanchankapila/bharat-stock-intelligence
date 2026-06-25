@@ -5,30 +5,28 @@ MoneyControl Pricefeed Fetcher (Daily)
 Fetches https://priceapi.moneycontrol.com/pricefeed/nse/equitycash/{mcsymbol}
 
 Unique data not available from Yahoo Finance or Trendlyne:
-  IND_PE           — Industry-average P/E (e.g., 46.9 for Aerospace/Defence)
-  cagr3Y / cagr5Y  — Compounded annual growth rate over 3/5 years
-  PECONS / PBCONS  — Consensus (analyst-mean) P/E and P/B
-  50DayAvg etc.    — Pre-computed 5/30/50/150/200 DMA values
-  AvgDelVolPer_*   — Delivery % averages at 3/5/8/20-day windows
-  52H / 52L + date — 52-week high/low with exact dates
-  upper/lower circuit limits — Risk signal (price near circuit = volatility spike risk)
-  MKT_LOT          — F&O lot size (useful for liquidity/size signal)
-  mc_vol_ratio     — Today's volume vs 20-day avg (relative activity)
+  IND_PE              — Industry-average P/E (e.g., 46.9 for Aerospace/Defence)
+  cagr3Y/5Y/10Y       — Compounded annual growth rate (distinct from simple % return)
+  PECONS/PBCONS/PCCONS— Analyst-consensus P/E, P/B, P/Cash earnings
+  sc_ttm_cons         — Consensus TTM EPS (vs SC_TTM = actual) → EPS surprise
+  P_C / PCCONS / CEPS — Price/Cash earnings and Cash EPS (pre-depreciation quality)
+  AvgDelVolPer_3d/20d — Delivery % at short windows (NSE-specific, absent from Yahoo)
+  cl3dPerChange       — 3-day price return (very recent micro-momentum)
+  clYtdPerChange      — Year-to-date return (calendar momentum)
+  30DayAvg/150DayAvg  — Pre-computed MAs not in Yahoo Finance
+  52H/52L + dates     — 52-week high/low with exact dates
+  upper/lower circuit — Price circuit limits (India-specific risk signal)
+  MKT_LOT             — F&O lot size (eligibility + liquidity proxy)
 
-ML features written to technical_signals:
-  mc_52w_high_dist_pct  = (price - 52H) / 52H * 100   (usually negative)
-  mc_52w_low_dist_pct   = (price - 52L) / 52L * 100   (usually positive)
-  mc_days_from_52wh     = days since 52-week high (momentum decay signal)
-  mc_cagr_3y            = 3-year compounded annual return %
-  mc_cagr_5y            = 5-year compounded annual return %
-  mc_ind_pe             = industry average P/E
-  mc_pe_vs_ind          = PE / IND_PE - 1  (premium/discount to industry)
-  mc_consensus_pe       = analyst-consensus P/E (forward-looking)
-  mc_ma50_dist_pct      = (price - 50DMA) / 50DMA * 100
-  mc_ma200_dist_pct     = (price - 200DMA) / 200DMA * 100
-  mc_del_pct_20d        = AvgDelVolPer_20day (delivery % 20-day avg from MC)
-  mc_vol_ratio          = today's volume / 20-day avg volume
-  mc_circuit_dist_pct   = (upper_circuit - price) / price * 100
+ML features written to technical_signals (13 existing + 14 new = 27 total):
+  mc_52w_high_dist_pct, mc_52w_low_dist_pct, mc_days_from_52wh
+  mc_cagr_3y, mc_cagr_5y, mc_cagr_10y  (CAGR at 3/5/10 year)
+  mc_ind_pe, mc_pe_vs_ind, mc_consensus_pe, mc_consensus_pb
+  mc_ma30_dist_pct, mc_ma50_dist_pct, mc_ma150_dist_pct, mc_ma200_dist_pct
+  mc_del_pct_3d, mc_del_pct_5d, mc_del_pct_20d, mc_del_acceleration
+  mc_vol_ratio, mc_circuit_dist_pct, mc_fno_eligible
+  mc_3d_return, mc_ytd_return
+  mc_price_cash, mc_consensus_pb, mc_eps_vs_cons, mc_pe_fwd_discount
 
 Run:
   python mc_pricefeed_fetcher.py             # all stocks with mcsymbol
@@ -85,9 +83,13 @@ def ensure_schema(con) -> None:
             dist_52w_high   REAL,
             dist_52w_low    REAL,
             days_from_52wh  INTEGER,
+            ma_30           REAL,
             ma_50           REAL,
+            ma_150          REAL,
             ma_200          REAL,
+            ma30_dist_pct   REAL,
             ma50_dist_pct   REAL,
+            ma150_dist_pct  REAL,
             ma200_dist_pct  REAL,
             del_pct_3d      REAL,
             del_pct_5d      REAL,
@@ -102,6 +104,13 @@ def ensure_schema(con) -> None:
             mktcap_cr       REAL,
             fno_lot_size    INTEGER,
             div_yield       REAL,
+            ret_3d          REAL,
+            ret_ytd         REAL,
+            price_cash      REAL,
+            consensus_price_cash REAL,
+            cash_eps        REAL,
+            eps_vs_cons     REAL,
+            pe_fwd_discount REAL,
             fetched_at      TEXT DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (symbol, date)
         )
@@ -109,20 +118,54 @@ def ensure_schema(con) -> None:
     cur.execute("CREATE INDEX IF NOT EXISTS idx_mcpf_sym ON mc_pricefeed_daily(symbol, date DESC)")
     con.commit()
 
+    # Backfill new columns on existing mc_pricefeed_daily tables (no-op if already present)
+    for ddl in [
+        "ALTER TABLE mc_pricefeed_daily ADD COLUMN ma_30           REAL",
+        "ALTER TABLE mc_pricefeed_daily ADD COLUMN ma_150          REAL",
+        "ALTER TABLE mc_pricefeed_daily ADD COLUMN ma30_dist_pct   REAL",
+        "ALTER TABLE mc_pricefeed_daily ADD COLUMN ma150_dist_pct  REAL",
+        "ALTER TABLE mc_pricefeed_daily ADD COLUMN ret_3d          REAL",
+        "ALTER TABLE mc_pricefeed_daily ADD COLUMN ret_ytd         REAL",
+        "ALTER TABLE mc_pricefeed_daily ADD COLUMN price_cash      REAL",
+        "ALTER TABLE mc_pricefeed_daily ADD COLUMN consensus_price_cash REAL",
+        "ALTER TABLE mc_pricefeed_daily ADD COLUMN cash_eps        REAL",
+        "ALTER TABLE mc_pricefeed_daily ADD COLUMN eps_vs_cons     REAL",
+        "ALTER TABLE mc_pricefeed_daily ADD COLUMN pe_fwd_discount REAL",
+    ]:
+        try:
+            cur.execute(ddl)
+            con.commit()
+        except Exception:
+            con.rollback()
+
     for ddl in [
         "ALTER TABLE technical_signals ADD COLUMN mc_52w_high_dist_pct REAL",
         "ALTER TABLE technical_signals ADD COLUMN mc_52w_low_dist_pct  REAL",
         "ALTER TABLE technical_signals ADD COLUMN mc_days_from_52wh    INTEGER",
         "ALTER TABLE technical_signals ADD COLUMN mc_cagr_3y           REAL",
         "ALTER TABLE technical_signals ADD COLUMN mc_cagr_5y           REAL",
+        "ALTER TABLE technical_signals ADD COLUMN mc_cagr_10y          REAL",
         "ALTER TABLE technical_signals ADD COLUMN mc_ind_pe            REAL",
         "ALTER TABLE technical_signals ADD COLUMN mc_pe_vs_ind         REAL",
         "ALTER TABLE technical_signals ADD COLUMN mc_consensus_pe      REAL",
+        "ALTER TABLE technical_signals ADD COLUMN mc_consensus_pb      REAL",
+        "ALTER TABLE technical_signals ADD COLUMN mc_ma30_dist_pct     REAL",
         "ALTER TABLE technical_signals ADD COLUMN mc_ma50_dist_pct     REAL",
+        "ALTER TABLE technical_signals ADD COLUMN mc_ma150_dist_pct    REAL",
         "ALTER TABLE technical_signals ADD COLUMN mc_ma200_dist_pct    REAL",
+        "ALTER TABLE technical_signals ADD COLUMN mc_del_pct_3d        REAL",
+        "ALTER TABLE technical_signals ADD COLUMN mc_del_pct_5d        REAL",
         "ALTER TABLE technical_signals ADD COLUMN mc_del_pct_20d       REAL",
+        "ALTER TABLE technical_signals ADD COLUMN mc_del_acceleration  REAL",
         "ALTER TABLE technical_signals ADD COLUMN mc_vol_ratio         REAL",
         "ALTER TABLE technical_signals ADD COLUMN mc_circuit_dist_pct  REAL",
+        "ALTER TABLE technical_signals ADD COLUMN mc_fno_eligible      INTEGER",
+        "ALTER TABLE technical_signals ADD COLUMN mc_3d_return         REAL",
+        "ALTER TABLE technical_signals ADD COLUMN mc_ytd_return        REAL",
+        "ALTER TABLE technical_signals ADD COLUMN mc_price_cash        REAL",
+        "ALTER TABLE technical_signals ADD COLUMN mc_consensus_eps     REAL",
+        "ALTER TABLE technical_signals ADD COLUMN mc_eps_vs_cons       REAL",
+        "ALTER TABLE technical_signals ADD COLUMN mc_pe_fwd_discount   REAL",
     ]:
         try:
             cur.execute(ddl)
@@ -175,63 +218,88 @@ def _days_since(date_str: str) -> int | None:
 
 
 def extract_features(d: dict) -> dict:
-    price    = _sf(d.get("pricecurrent") or d.get("LP"))
-    pe       = _sf(d.get("PE"))
-    ind_pe   = _sf(d.get("IND_PE"))
-    h52      = _sf(d.get("52H") or d.get("HP"))
-    l52      = _sf(d.get("52L"))
-    ma50     = _sf(d.get("50DayAvg"))
-    ma200    = _sf(d.get("200DayAvg"))
+    price     = _sf(d.get("pricecurrent") or d.get("LP"))
+    pe        = _sf(d.get("PE"))
+    ind_pe    = _sf(d.get("IND_PE"))
+    h52       = _sf(d.get("52H") or d.get("HP"))
+    l52       = _sf(d.get("52L"))
+    ma30      = _sf(d.get("30DayAvg"))
+    ma50      = _sf(d.get("50DayAvg"))
+    ma150     = _sf(d.get("150DayAvg"))
+    ma200     = _sf(d.get("200DayAvg"))
     vol_today = _si(d.get("VOL"))
     vol_avg   = _si(d.get("AvgVolQtyTraded_20day"))
 
-    pe_vs_ind = round(pe / ind_pe - 1, 4) if pe and ind_pe and ind_pe > 0 else None
-    dist_52h  = round((price - h52) / h52 * 100, 2) if price and h52 and h52 > 0 else None
-    dist_52l  = round((price - l52) / l52 * 100, 2) if price and l52 and l52 > 0 else None
-    ma50_dist = round((price - ma50) / ma50 * 100, 2) if price and ma50 and ma50 > 0 else None
-    ma200_dist = round((price - ma200) / ma200 * 100, 2) if price and ma200 and ma200 > 0 else None
-    vol_ratio  = round(vol_today / vol_avg, 3) if vol_today and vol_avg and vol_avg > 0 else None
+    consensus_pe  = _sf(d.get("PECONS"))
+    consensus_eps = _sf(d.get("sc_ttm_cons"))
+    actual_eps    = _sf(d.get("SC_TTM"))
+
+    pe_vs_ind      = round(pe / ind_pe - 1, 4) if pe and ind_pe and ind_pe > 0 else None
+    dist_52h       = round((price - h52) / h52 * 100, 2) if price and h52 and h52 > 0 else None
+    dist_52l       = round((price - l52) / l52 * 100, 2) if price and l52 and l52 > 0 else None
+    ma30_dist      = round((price - ma30) / ma30 * 100, 2) if price and ma30 and ma30 > 0 else None
+    ma50_dist      = round((price - ma50) / ma50 * 100, 2) if price and ma50 and ma50 > 0 else None
+    ma150_dist     = round((price - ma150) / ma150 * 100, 2) if price and ma150 and ma150 > 0 else None
+    ma200_dist     = round((price - ma200) / ma200 * 100, 2) if price and ma200 and ma200 > 0 else None
+    vol_ratio      = round(vol_today / vol_avg, 3) if vol_today and vol_avg and vol_avg > 0 else None
+    # positive = actual TTM EPS ahead of analyst consensus (beat), negative = miss
+    eps_vs_cons    = round((actual_eps - consensus_eps) / abs(consensus_eps) * 100, 2) \
+                     if actual_eps and consensus_eps and consensus_eps != 0 else None
+    # negative means analysts expect earnings growth (consensus forward PE < trailing PE = cheaper fwd)
+    pe_fwd_discount = round(consensus_pe / pe - 1, 4) \
+                      if consensus_pe and pe and pe > 0 else None
 
     ucirc = _sf(d.get("upper_circuit_limit"))
     circuit_dist = round((ucirc - price) / price * 100, 2) if ucirc and price and price > 0 else None
 
     return {
-        "price":          price,
-        "pe":             pe,
-        "pb":             _sf(d.get("PB")),
-        "ind_pe":         ind_pe,
-        "pe_vs_ind":      pe_vs_ind,
-        "consensus_pe":   _sf(d.get("PECONS")),
-        "consensus_pb":   _sf(d.get("PBCONS")),
-        "consensus_eps":  _sf(d.get("sc_ttm_cons")),
-        "cagr_1y":        _sf(d.get("cagr1Y")),
-        "cagr_3y":        _sf(d.get("cagr3Y")),
-        "cagr_5y":        _sf(d.get("cagr5Y")),
-        "cagr_10y":       _sf(d.get("cagr10Y")),
-        "high_52w":       h52,
-        "low_52w":        l52,
-        "high_52w_date":  d.get("52HDate"),
-        "low_52w_date":   d.get("52LDate"),
-        "dist_52w_high":  dist_52h,
-        "dist_52w_low":   dist_52l,
-        "days_from_52wh": _days_since(d.get("52HDate")),
-        "ma_50":          ma50,
-        "ma_200":         ma200,
-        "ma50_dist_pct":  ma50_dist,
-        "ma200_dist_pct": ma200_dist,
-        "del_pct_3d":     _sf(d.get("AvgDelVolPer_3day")),
-        "del_pct_5d":     _sf(d.get("AvgDelVolPer_5day")),
-        "del_pct_8d":     _sf(d.get("AvgDelVolPer_8day")),
-        "del_pct_20d":    _sf(d.get("AvgDelVolPer_20day")),
-        "vol_today":      vol_today,
-        "vol_avg_20d":    vol_avg,
-        "vol_ratio":      vol_ratio,
-        "upper_circuit":  ucirc,
-        "lower_circuit":  _sf(d.get("lower_circuit_limit")),
-        "circuit_dist_pct": circuit_dist,
-        "mktcap_cr":      _sf(d.get("MKTCAP")),
-        "fno_lot_size":   _si(d.get("MKT_LOT")),
-        "div_yield":      _sf(d.get("DY")),
+        "price":                price,
+        "pe":                   pe,
+        "pb":                   _sf(d.get("PB")),
+        "ind_pe":               ind_pe,
+        "pe_vs_ind":            pe_vs_ind,
+        "consensus_pe":         consensus_pe,
+        "consensus_pb":         _sf(d.get("PBCONS")),
+        "consensus_eps":        consensus_eps,
+        "eps_vs_cons":          eps_vs_cons,
+        "pe_fwd_discount":      pe_fwd_discount,
+        "cagr_1y":              _sf(d.get("cagr1Y")),
+        "cagr_3y":              _sf(d.get("cagr3Y")),
+        "cagr_5y":              _sf(d.get("cagr5Y")),
+        "cagr_10y":             _sf(d.get("cagr10Y")),
+        "ret_3d":               _sf(d.get("cl3dPerChange")),
+        "ret_ytd":              _sf(d.get("clYtdPerChange")),
+        "high_52w":             h52,
+        "low_52w":              l52,
+        "high_52w_date":        d.get("52HDate"),
+        "low_52w_date":         d.get("52LDate"),
+        "dist_52w_high":        dist_52h,
+        "dist_52w_low":         dist_52l,
+        "days_from_52wh":       _days_since(d.get("52HDate")),
+        "ma_30":                ma30,
+        "ma_50":                ma50,
+        "ma_150":               ma150,
+        "ma_200":               ma200,
+        "ma30_dist_pct":        ma30_dist,
+        "ma50_dist_pct":        ma50_dist,
+        "ma150_dist_pct":       ma150_dist,
+        "ma200_dist_pct":       ma200_dist,
+        "del_pct_3d":           _sf(d.get("AvgDelVolPer_3day")),
+        "del_pct_5d":           _sf(d.get("AvgDelVolPer_5day")),
+        "del_pct_8d":           _sf(d.get("AvgDelVolPer_8day")),
+        "del_pct_20d":          _sf(d.get("AvgDelVolPer_20day")),
+        "vol_today":            vol_today,
+        "vol_avg_20d":          vol_avg,
+        "vol_ratio":            vol_ratio,
+        "upper_circuit":        ucirc,
+        "lower_circuit":        _sf(d.get("lower_circuit_limit")),
+        "circuit_dist_pct":     circuit_dist,
+        "mktcap_cr":            _sf(d.get("MKTCAP")),
+        "fno_lot_size":         _si(d.get("MKT_LOT")),
+        "div_yield":            _sf(d.get("DY")),
+        "price_cash":           _sf(d.get("P_C")),
+        "consensus_price_cash": _sf(d.get("PCCONS")),
+        "cash_eps":             _sf(d.get("CEPS")),
     }
 
 
@@ -240,29 +308,36 @@ def upsert_row(symbol: str, today: str, f: dict, con) -> None:
     cur.execute("""
         INSERT INTO mc_pricefeed_daily (
             symbol, date, price, pe, pb, ind_pe, pe_vs_ind,
-            consensus_pe, consensus_pb, consensus_eps,
+            consensus_pe, consensus_pb, consensus_eps, eps_vs_cons, pe_fwd_discount,
             cagr_1y, cagr_3y, cagr_5y, cagr_10y,
+            ret_3d, ret_ytd,
             high_52w, low_52w, high_52w_date, low_52w_date,
             dist_52w_high, dist_52w_low, days_from_52wh,
-            ma_50, ma_200, ma50_dist_pct, ma200_dist_pct,
+            ma_30, ma_50, ma_150, ma_200,
+            ma30_dist_pct, ma50_dist_pct, ma150_dist_pct, ma200_dist_pct,
             del_pct_3d, del_pct_5d, del_pct_8d, del_pct_20d,
             vol_today, vol_avg_20d, vol_ratio,
             upper_circuit, lower_circuit, circuit_dist_pct,
-            mktcap_cr, fno_lot_size, div_yield
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            mktcap_cr, fno_lot_size, div_yield,
+            price_cash, consensus_price_cash, cash_eps
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(symbol, date) DO UPDATE SET
             price=excluded.price, pe=excluded.pe, pb=excluded.pb,
             ind_pe=excluded.ind_pe, pe_vs_ind=excluded.pe_vs_ind,
             consensus_pe=excluded.consensus_pe, consensus_pb=excluded.consensus_pb,
             consensus_eps=excluded.consensus_eps,
+            eps_vs_cons=excluded.eps_vs_cons, pe_fwd_discount=excluded.pe_fwd_discount,
             cagr_1y=excluded.cagr_1y, cagr_3y=excluded.cagr_3y,
             cagr_5y=excluded.cagr_5y, cagr_10y=excluded.cagr_10y,
+            ret_3d=excluded.ret_3d, ret_ytd=excluded.ret_ytd,
             high_52w=excluded.high_52w, low_52w=excluded.low_52w,
             high_52w_date=excluded.high_52w_date, low_52w_date=excluded.low_52w_date,
             dist_52w_high=excluded.dist_52w_high, dist_52w_low=excluded.dist_52w_low,
             days_from_52wh=excluded.days_from_52wh,
-            ma_50=excluded.ma_50, ma_200=excluded.ma_200,
-            ma50_dist_pct=excluded.ma50_dist_pct, ma200_dist_pct=excluded.ma200_dist_pct,
+            ma_30=excluded.ma_30, ma_50=excluded.ma_50,
+            ma_150=excluded.ma_150, ma_200=excluded.ma_200,
+            ma30_dist_pct=excluded.ma30_dist_pct, ma50_dist_pct=excluded.ma50_dist_pct,
+            ma150_dist_pct=excluded.ma150_dist_pct, ma200_dist_pct=excluded.ma200_dist_pct,
             del_pct_3d=excluded.del_pct_3d, del_pct_5d=excluded.del_pct_5d,
             del_pct_8d=excluded.del_pct_8d, del_pct_20d=excluded.del_pct_20d,
             vol_today=excluded.vol_today, vol_avg_20d=excluded.vol_avg_20d,
@@ -271,26 +346,40 @@ def upsert_row(symbol: str, today: str, f: dict, con) -> None:
             circuit_dist_pct=excluded.circuit_dist_pct,
             mktcap_cr=excluded.mktcap_cr, fno_lot_size=excluded.fno_lot_size,
             div_yield=excluded.div_yield,
+            price_cash=excluded.price_cash,
+            consensus_price_cash=excluded.consensus_price_cash,
+            cash_eps=excluded.cash_eps,
             fetched_at=CURRENT_TIMESTAMP
     """, (
         symbol, today,
         f.get("price"), f.get("pe"), f.get("pb"),
         f.get("ind_pe"), f.get("pe_vs_ind"),
         f.get("consensus_pe"), f.get("consensus_pb"), f.get("consensus_eps"),
+        f.get("eps_vs_cons"), f.get("pe_fwd_discount"),
         f.get("cagr_1y"), f.get("cagr_3y"), f.get("cagr_5y"), f.get("cagr_10y"),
+        f.get("ret_3d"), f.get("ret_ytd"),
         f.get("high_52w"), f.get("low_52w"), f.get("high_52w_date"), f.get("low_52w_date"),
         f.get("dist_52w_high"), f.get("dist_52w_low"), f.get("days_from_52wh"),
-        f.get("ma_50"), f.get("ma_200"), f.get("ma50_dist_pct"), f.get("ma200_dist_pct"),
+        f.get("ma_30"), f.get("ma_50"), f.get("ma_150"), f.get("ma_200"),
+        f.get("ma30_dist_pct"), f.get("ma50_dist_pct"),
+        f.get("ma150_dist_pct"), f.get("ma200_dist_pct"),
         f.get("del_pct_3d"), f.get("del_pct_5d"), f.get("del_pct_8d"), f.get("del_pct_20d"),
         f.get("vol_today"), f.get("vol_avg_20d"), f.get("vol_ratio"),
         f.get("upper_circuit"), f.get("lower_circuit"), f.get("circuit_dist_pct"),
         f.get("mktcap_cr"), f.get("fno_lot_size"), f.get("div_yield"),
+        f.get("price_cash"), f.get("consensus_price_cash"), f.get("cash_eps"),
     ))
     con.commit()
 
 
 def backfill_technical_signals(symbol: str, f: dict, con) -> None:
     cur = con.cursor()
+    # del_acceleration: 3-day delivery % relative to 20-day baseline (positive = rising institutional interest)
+    d3  = f.get("del_pct_3d")
+    d20 = f.get("del_pct_20d")
+    del_acc = round(d3 / d20 - 1, 4) if d3 and d20 and d20 > 0 else None
+    fno_elig = 1 if f.get("fno_lot_size") else 0
+
     cur.execute("""
         UPDATE technical_signals SET
             mc_52w_high_dist_pct = COALESCE(?, mc_52w_high_dist_pct),
@@ -298,21 +387,41 @@ def backfill_technical_signals(symbol: str, f: dict, con) -> None:
             mc_days_from_52wh    = COALESCE(?, mc_days_from_52wh),
             mc_cagr_3y           = COALESCE(?, mc_cagr_3y),
             mc_cagr_5y           = COALESCE(?, mc_cagr_5y),
+            mc_cagr_10y          = COALESCE(?, mc_cagr_10y),
             mc_ind_pe            = COALESCE(?, mc_ind_pe),
             mc_pe_vs_ind         = COALESCE(?, mc_pe_vs_ind),
             mc_consensus_pe      = COALESCE(?, mc_consensus_pe),
+            mc_consensus_pb      = COALESCE(?, mc_consensus_pb),
+            mc_ma30_dist_pct     = COALESCE(?, mc_ma30_dist_pct),
             mc_ma50_dist_pct     = COALESCE(?, mc_ma50_dist_pct),
+            mc_ma150_dist_pct    = COALESCE(?, mc_ma150_dist_pct),
             mc_ma200_dist_pct    = COALESCE(?, mc_ma200_dist_pct),
+            mc_del_pct_3d        = COALESCE(?, mc_del_pct_3d),
+            mc_del_pct_5d        = COALESCE(?, mc_del_pct_5d),
             mc_del_pct_20d       = COALESCE(?, mc_del_pct_20d),
+            mc_del_acceleration  = COALESCE(?, mc_del_acceleration),
             mc_vol_ratio         = COALESCE(?, mc_vol_ratio),
-            mc_circuit_dist_pct  = COALESCE(?, mc_circuit_dist_pct)
+            mc_circuit_dist_pct  = COALESCE(?, mc_circuit_dist_pct),
+            mc_fno_eligible      = COALESCE(?, mc_fno_eligible),
+            mc_3d_return         = COALESCE(?, mc_3d_return),
+            mc_ytd_return        = COALESCE(?, mc_ytd_return),
+            mc_price_cash        = COALESCE(?, mc_price_cash),
+            mc_consensus_eps     = COALESCE(?, mc_consensus_eps),
+            mc_eps_vs_cons       = COALESCE(?, mc_eps_vs_cons),
+            mc_pe_fwd_discount   = COALESCE(?, mc_pe_fwd_discount)
         WHERE symbol = ?
     """, (
         f.get("dist_52w_high"), f.get("dist_52w_low"), f.get("days_from_52wh"),
-        f.get("cagr_3y"), f.get("cagr_5y"),
-        f.get("ind_pe"), f.get("pe_vs_ind"), f.get("consensus_pe"),
-        f.get("ma50_dist_pct"), f.get("ma200_dist_pct"),
-        f.get("del_pct_20d"), f.get("vol_ratio"), f.get("circuit_dist_pct"),
+        f.get("cagr_3y"), f.get("cagr_5y"), f.get("cagr_10y"),
+        f.get("ind_pe"), f.get("pe_vs_ind"), f.get("consensus_pe"), f.get("consensus_pb"),
+        f.get("ma30_dist_pct"), f.get("ma50_dist_pct"),
+        f.get("ma150_dist_pct"), f.get("ma200_dist_pct"),
+        f.get("del_pct_3d"), f.get("del_pct_5d"), f.get("del_pct_20d"),
+        del_acc, f.get("vol_ratio"), f.get("circuit_dist_pct"),
+        fno_elig,
+        f.get("ret_3d"), f.get("ret_ytd"),
+        f.get("price_cash"), f.get("consensus_eps"),
+        f.get("eps_vs_cons"), f.get("pe_fwd_discount"),
         symbol,
     ))
     con.commit()

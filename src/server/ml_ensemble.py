@@ -413,6 +413,36 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     # MA golden/death cross indicator: both above 200DMA = uptrend confirmation
     X['mc_above_200dma']  = (X['mc_ma200_dist'] > 0).astype(float)
     X['mc_above_50dma']   = (X['mc_ma50_dist'] > 0).astype(float)
+    # 30DMA and 150DMA fill the gap between 50DMA and 200DMA (trend regime)
+    X['mc_ma30_dist']     = num('mc_ma30_dist_pct',  0.0).clip(-15, 15)
+    X['mc_ma150_dist']    = num('mc_ma150_dist_pct', 0.0).clip(-25, 25)
+    X['mc_above_150dma']  = (X['mc_ma150_dist'] > 0).astype(float)
+
+    # Delivery % at 3d vs 20d baseline: rising = institutional accumulation accelerating
+    X['mc_del_pct_3d']     = num('mc_del_pct_3d',    50.0).clip(0, 100) / 100.0
+    X['mc_del_acceleration']= num('mc_del_acceleration', 0.0).clip(-0.5, 1.0)  # (d3/d20-1)
+    # F&O eligibility proxy: indices/large-cap = higher liquidity + institutional tracking
+    X['mc_fno_eligible']   = num('mc_fno_eligible', 0).clip(0, 1)
+
+    # 3-day and YTD returns: very recent price action + calendar momentum
+    X['mc_3d_return']      = num('mc_3d_return',  0.0).clip(-15, 15)
+    X['mc_ytd_return']     = num('mc_ytd_return', 0.0).clip(-50, 100)
+
+    # Consensus earnings vs actual: positive = stock beating analyst consensus EPS (key signal)
+    X['mc_eps_vs_cons']    = num('mc_eps_vs_cons', 0.0).clip(-30, 30)       # % beat/miss
+    # Forward PE discount: negative = analysts expect earnings growth (price looks cheap fwd)
+    X['mc_pe_fwd_discount']= num('mc_pe_fwd_discount', 0.0).clip(-0.5, 0.5)
+    # Consensus P/B: analyst-mean book value ratio (smoother than trailing PB)
+    X['mc_consensus_pb']   = num('mc_consensus_pb', 3.0).clip(0, 20) / 20.0
+    # 10-year CAGR: very long-run quality signal (compound machines vs mean-reversion candidates)
+    X['mc_cagr_10y']       = num('mc_cagr_10y', 10.0).clip(-10, 50)
+    # P/Cash earnings: less distorted by depreciation than P/E (capex-heavy sector signal)
+    X['mc_price_cash']     = num('mc_price_cash', 25.0).clip(0, 100) / 100.0
+    # Interaction: EPS beat × signal score → conviction amplifier
+    X['mc_eps_x_score']    = X['mc_eps_vs_cons'].clip(0, 30) / 30.0 * X['signal_score']
+    # Consensus EPS (level): lower-than-market consensus = low bar to beat
+    X['mc_consensus_eps']  = num('mc_consensus_eps', 20.0).clip(0.1, 500)
+    X['mc_consensus_eps_log'] = np.log1p(X['mc_consensus_eps'])
 
     # ── MC Chart Patterns (from mc_chart_patterns_fetcher.py) ──
     # MC's professional pattern analysis: bullish/bearish count from technical charts.
@@ -561,9 +591,13 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                ts.rev_growth_yoy_q, ts.np_growth_yoy_q,
                ts.days_since_dividend, ts.last_dividend_amt,
                ts.mc_52w_high_dist_pct, ts.mc_52w_low_dist_pct, ts.mc_days_from_52wh,
-               ts.mc_cagr_3y, ts.mc_cagr_5y, ts.mc_ind_pe, ts.mc_pe_vs_ind,
-               ts.mc_consensus_pe, ts.mc_ma50_dist_pct, ts.mc_ma200_dist_pct,
-               ts.mc_del_pct_20d, ts.mc_vol_ratio, ts.mc_circuit_dist_pct,
+               ts.mc_cagr_3y, ts.mc_cagr_5y, ts.mc_cagr_10y, ts.mc_ind_pe, ts.mc_pe_vs_ind,
+               ts.mc_consensus_pe, ts.mc_consensus_pb,
+               ts.mc_ma30_dist_pct, ts.mc_ma50_dist_pct, ts.mc_ma150_dist_pct, ts.mc_ma200_dist_pct,
+               ts.mc_del_pct_3d, ts.mc_del_pct_5d, ts.mc_del_pct_20d, ts.mc_del_acceleration,
+               ts.mc_vol_ratio, ts.mc_circuit_dist_pct, ts.mc_fno_eligible,
+               ts.mc_3d_return, ts.mc_ytd_return,
+               ts.mc_price_cash, ts.mc_consensus_eps, ts.mc_eps_vs_cons, ts.mc_pe_fwd_discount,
                ts.mc_cp_bull_count, ts.mc_cp_bear_count, ts.mc_cp_net_score, ts.mc_cp_avg_target_pct,
                ts.tl_vs_nifty_1m, ts.tl_vs_nifty_3m, ts.tl_vs_nifty_6m,
                ts.tl_vs_ind_1m, ts.tl_vs_ind_3m,
@@ -684,6 +718,18 @@ def load_pending_signals() -> pd.DataFrame:
                ts.promoter_pct, ts.fii_pct, ts.pledge_pct,
                ts.rev_growth_yoy_q, ts.np_growth_yoy_q,
                ts.days_since_dividend, ts.last_dividend_amt,
+               ts.mc_52w_high_dist_pct, ts.mc_52w_low_dist_pct, ts.mc_days_from_52wh,
+               ts.mc_cagr_3y, ts.mc_cagr_5y, ts.mc_cagr_10y, ts.mc_ind_pe, ts.mc_pe_vs_ind,
+               ts.mc_consensus_pe, ts.mc_consensus_pb,
+               ts.mc_ma30_dist_pct, ts.mc_ma50_dist_pct, ts.mc_ma150_dist_pct, ts.mc_ma200_dist_pct,
+               ts.mc_del_pct_3d, ts.mc_del_pct_5d, ts.mc_del_pct_20d, ts.mc_del_acceleration,
+               ts.mc_vol_ratio, ts.mc_circuit_dist_pct, ts.mc_fno_eligible,
+               ts.mc_3d_return, ts.mc_ytd_return,
+               ts.mc_price_cash, ts.mc_consensus_eps, ts.mc_eps_vs_cons, ts.mc_pe_fwd_discount,
+               ts.mc_cp_bull_count, ts.mc_cp_bear_count, ts.mc_cp_net_score, ts.mc_cp_avg_target_pct,
+               ts.tl_vs_nifty_1m, ts.tl_vs_nifty_3m, ts.tl_vs_nifty_6m,
+               ts.tl_vs_ind_1m, ts.tl_vs_ind_3m,
+               ts.tl_seasonal_month_5y, ts.tl_dist_3m_high_pct, ts.tl_dist_3m_low_pct,
                sf.fifty_two_week_high,
                sf.piotroski_f_score, sf.debt_to_equity, sf.operating_margins,
                sf.return_on_equity, sf.revenue_growth, sf.earnings_growth,
