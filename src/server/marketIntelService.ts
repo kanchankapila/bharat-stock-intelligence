@@ -1,4 +1,5 @@
 import { mcFetchJson } from './mcApiService';
+import { getNiftyTraderHeaders } from './niftytraderService';
 
 // ─── Premarket ────────────────────────────────────────────────────────────────
 
@@ -526,14 +527,10 @@ export async function fetchLiveMarketScreener(filters: Record<string, boolean>) 
   const payload = { ...defaultPayload, ...filters };
 
   const url = `https://webapi.niftytrader.in/webapi/Screener/live-market-filter-data`;
+  const headers = await getNiftyTraderHeaders();
   const res = await fetch(url, {
     method: 'POST',
-    headers: {
-      'accept': 'application/json, text/plain, */*',
-      'authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1laWRlbnRpZmllciI6IjU0MzM4IiwiaHR0cDovL3NjaGVtYXMubWljcm9zb2Z0LmNvbS93cy8yMDA4LzA2L2lkZW50aXR5L2NsYWltcy9yb2xlIjoiMCIsIlNlc3Npb25JZCI6IjQ5NDQiLCJleHAiOjE3ODA2NzUyNTUsImlzcyI6InByb2QtbmlmdHl0cmFkZXIuaW4iLCJhdWQiOiJwcm9kLW5pZnR5dHJhZGVyLmluIn0.VaWV3jFHcpP4y7UOmWzVzVwBjzK1AfHx9Qgj8vZPQGs',
-      'content-type': 'application/json',
-      'platform_type': '1'
-    },
+    headers,
     body: JSON.stringify(payload)
   });
 
@@ -577,14 +574,10 @@ export async function fetchEODMarketScreener(filters: Record<string, boolean>) {
 
   const payload = { ...defaultPayload, ...filters };
   const url = `https://webapi.niftytrader.in/webapi/Screener/advance-eod-screener-filter`;
+  const headers = await getNiftyTraderHeaders();
   const res = await fetch(url, {
     method: 'POST',
-    headers: {
-      'accept': 'application/json, text/plain, */*',
-      'authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1laWRlbnRpZmllciI6IjU0MzM4IiwiaHR0cDovL3NjaGVtYXMubWljcm9zb2Z0LmNvbS93cy8yMDA4LzA2L2lkZW50aXR5L2NsYWltcy9yb2xlIjoiMCIsIlNlc3Npb25JZCI6IjQ5NDQiLCJleHAiOjE3ODA2NzUyNTUsImlzcyI6InByb2QtbmlmdHl0cmFkZXIuaW4iLCJhdWQiOiJwcm9kLW5pZnR5dHJhZGVyLmluIn0.VaWV3jFHcpP4y7UOmWzVzVwBjzK1AfHx9Qgj8vZPQGs',
-      'content-type': 'application/json',
-      'platform_type': '1'
-    },
+    headers,
     body: JSON.stringify(payload)
   });
 

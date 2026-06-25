@@ -1,3 +1,5 @@
+import { getNiftyTraderHeaders } from './niftytraderService';
+
 export interface OptionChainData {
   success: boolean;
   data: {
@@ -20,14 +22,9 @@ export interface OptionChainData {
 export async function fetchFnoSymbols(): Promise<string[]> {
   const url = 'https://webapi.niftytrader.in/webapi/symbol/psymbol-list';
   try {
+    const headers = await getNiftyTraderHeaders();
     const response = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'application/json',
-        'Referer': 'https://www.niftytrader.in/',
-        'authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1laWRlbnRpZmllciI6IjU0MzM4IiwiaHR0cDovL3NjaGVtYXMubWljcm9zb2Z0LmNvbS93cy8yMDA4LzA2L2lkZW50aXR5L2NsYWltcy9yb2xlIjoiMCIsIlNlc3Npb25JZCI6IjQ5NDQiLCJleHAiOjE3ODA2NzUyNTUsImlzcyI6InByb2QtbmlmdHl0cmFkZXIuaW4iLCJhdWQiOiJwcm9kLW5pZnR5dHJhZGVyLmluIn0.VaWV3jFHcpP4y7UOmWzVzVwBjzK1AfHx9Qgj8vZPQGs',
-        'platform_type': '1'
-      },
+      headers,
       signal: AbortSignal.timeout(10000)
     });
     if (!response.ok) return [];
