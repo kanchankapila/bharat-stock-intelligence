@@ -453,6 +453,11 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await runPython('oi_delta_features.py', [], 60_000)
     .catch(e => console.warn('[QUEUE] oi_delta_features failed:', (e as Error).message));
 
+  // Earnings beat features (reads stock_earnings_beats, refreshed weekly by earnings_surprise_fetcher).
+  // Writes eps_beat_last_q / eps_beat_streak_4q / eps_miss_streak_4q → technical_signals.
+  await runPython('earnings_beat_features.py', [], 60_000)
+    .catch(e => console.warn('[QUEUE] earnings_beat_features failed:', (e as Error).message));
+
   await resolveOutcomesResilient(1);
   await resolveOutcomesResilient(5);
   await resolveOutcomesResilient(15);
@@ -508,6 +513,9 @@ async function processDLPython(script: string, args: string[] = [], timeoutMs = 
 }
 
 async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean }> {
+  // Refresh earnings beat/miss history (quarterly data, no need to run daily).
+  await runPython('earnings_surprise_fetcher.py', [], 20 * 60_000)
+    .catch(e => console.warn('[QUEUE] earnings_surprise_fetcher failed:', (e as Error).message));
   await runPython('outcome_resolver.py', ['--horizon', '5']);
   await runPython('outcome_resolver.py', ['--horizon', '15']);
   await runPython('ml_ensemble.py', ['--train', '--score'], 60 * 60_000);

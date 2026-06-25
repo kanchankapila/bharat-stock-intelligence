@@ -1903,6 +1903,29 @@ runMigration('049_avwap_oi_features', `
   ALTER TABLE technical_signals ADD COLUMN oi_net_change_pct   REAL;
 `);
 
+// 050 — earnings beat/miss history + features (#47)
+//   stock_earnings_beats : per-symbol quarterly EPS beat/miss from MoneyControl
+//   eps_beat_last_q      : most recent quarter beat score (+1/0/-1)
+//   eps_beat_streak_4q   : consecutive beats in last 4 quarters
+//   eps_miss_streak_4q   : consecutive misses in last 4 quarters
+runMigration('050_earnings_beats', `
+  CREATE TABLE IF NOT EXISTS stock_earnings_beats (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol       TEXT NOT NULL,
+    quarter_date TEXT NOT NULL,
+    beat_type    TEXT NOT NULL,
+    beat_score   INTEGER NOT NULL DEFAULT 0,
+    eps_actual   REAL,
+    fetched_at   TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(symbol, quarter_date)
+  );
+  CREATE INDEX IF NOT EXISTS idx_seb_symbol ON stock_earnings_beats(symbol);
+  CREATE INDEX IF NOT EXISTS idx_seb_quarter ON stock_earnings_beats(quarter_date);
+  ALTER TABLE technical_signals ADD COLUMN eps_beat_last_q    INTEGER;
+  ALTER TABLE technical_signals ADD COLUMN eps_beat_streak_4q INTEGER;
+  ALTER TABLE technical_signals ADD COLUMN eps_miss_streak_4q INTEGER;
+`);
+
 // ── Retention: confluence_signals is an append-only firehose (~700k rows, the single
 // largest contributor to DB bloat). expires_at exists but nothing pruned it. Delete
 // expired rows on boot and every 6h. Keeps the table bounded without losing live signals.

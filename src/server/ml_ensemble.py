@@ -241,6 +241,15 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     # Neutral default 0.0; capped at ±30% (1 SD ≈ 5%, rare spikes excluded).
     X['oi_net_change_pct'] = num('oi_net_change_pct', 0.0).clip(-30, 30)
 
+    # ── Earnings beat/miss history (from earnings_beat_features.py) ──
+    # eps_beat_last_q: most recent quarter result vs consensus (+1 beat / 0 inline / -1 miss).
+    # Neutral default 0 (inline/unknown). Sustained beats signal management credibility.
+    X['eps_beat_last_q']    = num('eps_beat_last_q',    0.0).clip(-1, 1)
+    # eps_beat_streak_4q: consecutive beats over last 4 quarters (0-4).
+    X['eps_beat_streak_4q'] = num('eps_beat_streak_4q', 0.0).clip(0, 4)
+    # eps_miss_streak_4q: consecutive misses over last 4 quarters (0-4).
+    X['eps_miss_streak_4q'] = num('eps_miss_streak_4q', 0.0).clip(0, 4)
+
     # NOTE: market-level India VIX + breadth were tested as ensemble features (raw and as
     # cross-sectional interactions) and BOTH hurt held-out AUC vs omitting them entirely
     # (baseline cv 0.651/held-out 0.543; interactions 0.640/0.531; raw 0.606/0.493). They add
@@ -338,6 +347,9 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                ts.first_hour_vol_share,
                ts.avwap_deviation_pct,
                ts.oi_net_change_pct,
+               ts.eps_beat_last_q,
+               ts.eps_beat_streak_4q,
+               ts.eps_miss_streak_4q,
                COALESCE(fh.fifty_two_week_high, sf.fifty_two_week_high) AS fifty_two_week_high,
                COALESCE(fh.piotroski_f_score, sf.piotroski_f_score)     AS piotroski_f_score,
                COALESCE(fh.debt_to_equity, sf.debt_to_equity)           AS debt_to_equity,
@@ -425,6 +437,9 @@ def load_pending_signals() -> pd.DataFrame:
                ts.first_hour_vol_share,
                ts.avwap_deviation_pct,
                ts.oi_net_change_pct,
+               ts.eps_beat_last_q,
+               ts.eps_beat_streak_4q,
+               ts.eps_miss_streak_4q,
                sf.fifty_two_week_high,
                sf.piotroski_f_score, sf.debt_to_equity, sf.operating_margins,
                sf.return_on_equity, sf.revenue_growth, sf.earnings_growth,

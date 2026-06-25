@@ -1440,6 +1440,20 @@ CREATE TABLE IF NOT EXISTS "stock_options_oi" (
 );
 CREATE INDEX idx_options_sym_date ON stock_options_oi(symbol, date DESC);
 
+-- ── stock_earnings_beats ─────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "stock_earnings_beats" (
+  "id"           SERIAL PRIMARY KEY,
+  "symbol"       TEXT NOT NULL,
+  "quarter_date" TEXT NOT NULL,
+  "beat_type"    TEXT NOT NULL,
+  "beat_score"   SMALLINT NOT NULL DEFAULT 0,
+  "eps_actual"   DOUBLE PRECISION,
+  "fetched_at"   TIMESTAMPTZ DEFAULT now(),
+  UNIQUE ("symbol", "quarter_date")
+);
+CREATE INDEX idx_seb_symbol  ON stock_earnings_beats(symbol);
+CREATE INDEX idx_seb_quarter ON stock_earnings_beats(quarter_date DESC);
+
 -- ── stock_scores ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "stock_scores" (
   "symbol" TEXT NOT NULL,
@@ -1584,6 +1598,9 @@ CREATE TABLE IF NOT EXISTS "technical_signals" (
   "cs_score" REAL,
   "avwap_deviation_pct" DOUBLE PRECISION,
   "oi_net_change_pct"   DOUBLE PRECISION,
+  "eps_beat_last_q"     SMALLINT,
+  "eps_beat_streak_4q"  SMALLINT,
+  "eps_miss_streak_4q"  SMALLINT,
   PRIMARY KEY ("symbol", "date")
 );
 CREATE INDEX idx_tsig_date  ON technical_signals(date DESC);
