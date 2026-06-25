@@ -472,7 +472,8 @@ async function runBulkRefresh(): Promise<void> {
 export function startBackgroundRefresh(): void {
   // Kick off an immediate refresh, then repeat on interval.
   runBulkRefresh();
-  setInterval(runBulkRefresh, BULK_REFRESH_INTERVAL);
+  const _handle = setInterval(runBulkRefresh, BULK_REFRESH_INTERVAL);
+  _handle.unref?.(); // don't block process exit in test/shutdown scenarios
   console.log(
     `[LIVE DATA] Background refresh started (every ${BULK_TTL / 60} min)`,
   );

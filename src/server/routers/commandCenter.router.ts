@@ -63,25 +63,19 @@ export const commandCenterRouter = router({
             SELECT symbol, signal_type, signal_strength, win_probability,
                    signal_score, rsi, cmp, change_pct, ai_insight,
                    entry_zone, stop_loss, targets, time_horizon
-            FROM technical_analysis_signals
+            FROM technical_signals
             WHERE date = ? AND signal_strength = 'HIGH'
             ORDER BY win_probability DESC LIMIT 20
           `, [today]);
         } catch { /* table may differ in schema */ }
       }
 
-      const trackRow = await dbGet<{ avg_engine_track_record: number }>(
-        `SELECT avg_engine_track_record FROM unified_recommendations
-         WHERE computed_at = (SELECT MAX(computed_at) FROM unified_recommendations)
-         LIMIT 1`
-      );
-
       return {
         regime,
         eodPicks,
         intradaySignals,
         lastComputedAt: eodRows[0]?.computed_at ?? null,
-        avgEngineTrackRecord: trackRow?.avg_engine_track_record ?? null,
+        avgEngineTrackRecord: eodRows[0]?.avg_engine_track_record ?? null,
       };
     }),
 
