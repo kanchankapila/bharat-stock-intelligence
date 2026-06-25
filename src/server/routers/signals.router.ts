@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { dbGet, dbAll, dbRun } from "../dbAsync";
 import { enqueueAISignals, getAIQueueStats } from "../queues";
+import { invalidateAISignalCache } from "../signals";
 import { router, publicProcedure } from "../trpc";
 
 /** ISO timestamp `days` ago — used instead of SQLite datetime('now','-N days') so the
@@ -260,5 +261,17 @@ export const signalsRouter = router({
         WHERE us.signal_generated_at >= ?
         ORDER BY us.signal_generated_at DESC
       `, [daysAgoIso(days)]);
+    }),
+
+  setAISignalMinConfidence: publicProcedure
+    .input(z.object({ confidence: z.number().min(0).max(100) }))
+    .mutation(async ({ input }) => {
+      await dbRun(
+        `INSERT INTO app_settings (key, value, "updatedAt") VALUES (?, ?, CURRENT_TIMESTAMP)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, "updatedAt" = excluded."updatedAt"`,
+        ['ai_signal_min_confidence', String(input.confidence)],
+      );
+      invalidateAISignalCache();
+      return { success: true };
     }),
 });

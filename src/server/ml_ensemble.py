@@ -259,11 +259,16 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
 
 # ── Regime Thresholding ──────────────────────────────────────────────────────
 
+# Requires: app_settings key 'current_nifty_regime' to be written by the
+# technical-signals scan pipeline (e.g. technicalSignalsService). Until that
+# writer is wired, this function returns the BULL default (0.40).
 def regime_threshold(conn: ConnWrapper) -> float:
     """Return the win_probability gate calibrated to the current Nifty regime."""
     row = conn.execute(
         "SELECT value FROM app_settings WHERE key = 'current_nifty_regime'"
     ).fetchone()
+    if row is None:
+        print("[Ensemble] WARNING: 'current_nifty_regime' not set in app_settings — defaulting to BULL threshold (0.40). Wire a writer in the technical-signals scan to activate regime-adaptive gating.")
     regime = row[0] if row else 'BULL'
     return _REGIME_THRESHOLDS.get(regime, 0.40)
 

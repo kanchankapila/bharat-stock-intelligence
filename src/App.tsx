@@ -2688,17 +2688,17 @@ const MFAnalysis: React.FC<{ symbol: string }> = ({ symbol }) => {
 const FnOSignals: React.FC<{ symbol: string }> = ({ symbol }) => {
   const { data: fno, isLoading } = trpc.getFnOSignals.useQuery({ symbol });
 
-  if (isLoading) return <div className="p-10 text-center animate-pulse text-slate-400">Scanning F&O Activity...</div>;
-  if (!fno || !fno.success) return null;
-
   const unusualSignals = useMemo(
-    () => (fno.signals ?? []).filter(s => s.type === 'UNUSUAL_VOLUME' || s.type === 'PCR_SIGNAL'),
-    [fno.signals],
+    () => (fno?.signals ?? []).filter(s => s.type === 'UNUSUAL_VOLUME' || s.type === 'PCR_SIGNAL'),
+    [fno?.signals],
   );
   const oiShiftSignals = useMemo(
-    () => (fno.signals ?? []).filter(s => s.type === 'OI_SPIKE' || s.type === 'BUILDUP'),
-    [fno.signals],
+    () => (fno?.signals ?? []).filter(s => s.type === 'OI_SPIKE' || s.type === 'BUILDUP'),
+    [fno?.signals],
   );
+
+  if (isLoading) return <div className="p-10 text-center animate-pulse text-slate-400">Scanning F&O Activity...</div>;
+  if (!fno || !fno.success) return null;
 
   return (
     <div className="space-y-6">

@@ -88,8 +88,8 @@ export const telegramRouter = router({
           actualToken = row?.value || "";
         }
         await dbRun(
-          `INSERT INTO app_settings (key, value, updatedAt) VALUES (?, ?, datetime('now'))
-           ON CONFLICT(key) DO UPDATE SET value = excluded.value, updatedAt = excluded.updatedAt`,
+          `INSERT INTO app_settings (key, value, "updatedAt") VALUES (?, ?, CURRENT_TIMESTAMP)
+           ON CONFLICT(key) DO UPDATE SET value = excluded.value, "updatedAt" = excluded."updatedAt"`,
           ['niftytrader_auth_token', actualToken]
         );
         invalidateNiftyTraderToken();
