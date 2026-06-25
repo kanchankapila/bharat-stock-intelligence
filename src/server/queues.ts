@@ -547,10 +547,15 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean }> 
   // MF holdings: AMFI monthly disclosures — weekly fetch is sufficient.
   await runPython('mf_holdings_fetcher.py', [], 10 * 60_000)
     .catch(e => console.warn('[QUEUE] mf_holdings_fetcher failed:', (e as Error).message));
-  // Trendlyne EPS TTM history + DVM scores — quarterly data, weekly fetch sufficient.
-  // One call per stock fetches both EPS series and D/V/M scores.
-  await runPython('trendlyne_fundamentals_fetcher.py', [], 20 * 60_000)
+  // Trendlyne EPS/PE/PB/DivYield series + DVM scores — 4 calls/stock, weekly sufficient.
+  await runPython('trendlyne_fundamentals_fetcher.py', [], 40 * 60_000)
     .catch(e => console.warn('[QUEUE] trendlyne_fundamentals_fetcher failed:', (e as Error).message));
+  // Trendlyne advanced technical analysis: MA consensus, oscillators, pivot, delivery, beta.
+  await runPython('trendlyne_adv_tech_fetcher.py', [], 20 * 60_000)
+    .catch(e => console.warn('[QUEUE] trendlyne_adv_tech_fetcher failed:', (e as Error).message));
+  // Trendlyne overview: analyst targets, board meetings, dividends + fundamental profile.
+  await runPython('trendlyne_overview_fetcher.py', [], 30 * 60_000)
+    .catch(e => console.warn('[QUEUE] trendlyne_overview_fetcher failed:', (e as Error).message));
   await runPython('outcome_resolver.py', ['--horizon', '5']);
   await runPython('outcome_resolver.py', ['--horizon', '15']);
   await runPython('ml_ensemble.py', ['--train', '--score'], 60 * 60_000);

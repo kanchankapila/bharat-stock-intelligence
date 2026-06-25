@@ -1,40 +1,30 @@
 #!/usr/bin/env python3
 """
-Trendlyne Fundamentals Fetcher (EPS TTM + DVM Scores)
-======================================================
-Fetches EPS TTM time series and D/V/M scores from Trendlyne's chart-data API.
+Trendlyne Fundamentals Fetcher — Chart-Data Series
+===================================================
+Fetches 4 time-series params per stock from Trendlyne's chart-data API:
 
-API endpoint: https://trendlyne.com/mapp/v1/stock/chart-data/{tlid}/{param}/
-  EPS_TTM  → quarterly EPS trailing-12-month (8+ years history, ~31 data points)
-  PE_TTM   → daily P/E ratio (500+ data points)
-  DVM      → embedded in stockData on EVERY response (no extra call needed)
+  EPS_TTM          → quarterly EPS trailing-12-month (31 pts, 8+ years)
+  PE_TTM_SHARE_NOW → daily P/E ratio (1521 pts, 2016–now)
+  PBV_A_SHARE_NOW  → daily P/B ratio (1824 pts, 2016–now)
+  DIVIDEND_YIELD_TTM_Q → quarterly dividend yield (32 pts, 2019–now)
 
-Why EPS TTM matters for ML:
-  eps_growth_yoy  — fundamental momentum; most powerful EPS signal
-  eps_growth_qoq  — short-term acceleration
-  eps_acceleration — second derivative: growth getting better/worse
-  eps_ttm         — absolute level (for P/E and valuation features)
+DVM scores (D/V/M 0-100) are embedded in every response's stockData — no extra call.
 
-Why DVM matters:
-  dvm_durability (D) — Trendlyne's quality/consistency score (0–100)
-  dvm_valuation  (V) — cheapness vs fair value (0–100; high = cheap)
-  dvm_momentum   (M) — price + earnings momentum (0–100)
-  These are pre-computed proprietary signals unavailable elsewhere.
+Endpoint: https://trendlyne.com/mapp/v1/stock/chart-data/{tlid}/{param}/?format=json
+Key: ?format=json required — DRF returns HTML by default.
 
-What's NOT available without auth (returns "Not allowed"):
-  REVENUE_TTM, PAT_TTM, EPS_QUARTERLY, EBITDA_TTM
+ML features computed from stored history:
+  eps_ttm, eps_growth_yoy, eps_growth_qoq, eps_acceleration
+  pe_pct_rank_252d   (0-100: how expensive vs own 1-year history)
+  pe_vs_median_1yr   (% premium/discount to 1-yr median PE)
+  pb_pct_rank_252d   (0-100: same for P/B)
+  div_yield_ttm      (% dividend yield)
+  dvm_durability, dvm_valuation, dvm_momentum (0-100)
 
-Writes to:
-  trendlyne_eps_history (symbol, date, eps_ttm)
-  trendlyne_dvm_scores  (symbol, date, d_score, v_score, m_score, d_color, v_color, m_color)
-  technical_signals: eps_ttm, eps_growth_yoy, eps_growth_qoq, eps_acceleration,
-                     pe_ttm, dvm_durability, dvm_valuation, dvm_momentum
-
-Requires: stocklist.ts-derived tlid for each stock (via db_compat).
 Run:
-  python trendlyne_fundamentals_fetcher.py            # all 180 mapped stocks
+  python trendlyne_fundamentals_fetcher.py           # all stocks with tlid
   python trendlyne_fundamentals_fetcher.py --symbol BEL
-  python trendlyne_fundamentals_fetcher.py --pe       # also fetch PE_TTM daily series
 """
 
 import argparse
@@ -52,12 +42,11 @@ HEADERS = {
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
     ),
-    # DRF returns HTML by default; must request JSON explicitly.
     "Accept": "application/json",
     "Referer": "https://trendlyne.com/",
 }
 
-RATE_LIMIT_SEC = 0.5  # gentle — this is a free endpoint
+RATE_LIMIT_SEC = 0.5
 
 
 # ── Schema ─────────────────────────────────────────────────────────────────────
@@ -67,58 +56,64 @@ def ensure_schema(con) -> None:
 
     cur.execute("""
         CREATE TABLE IF NOT EXISTS trendlyne_eps_history (
-            symbol     TEXT NOT NULL,
-            date       TEXT NOT NULL,
-            eps_ttm    REAL,
-            fetched_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            symbol TEXT NOT NULL, date TEXT NOT NULL,
+            eps_ttm REAL, fetched_at TEXT DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (symbol, date)
         )
     """)
-    cur.execute("""
-        CREATE INDEX IF NOT EXISTS idx_tleps_symbol ON trendlyne_eps_history(symbol, date DESC)
-    """)
-    con.commit()
-
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS trendlyne_dvm_scores (
-            symbol     TEXT NOT NULL,
-            date       TEXT NOT NULL,
-            d_score    INTEGER,
-            v_score    INTEGER,
-            m_score    INTEGER,
-            d_color    TEXT,
-            v_color    TEXT,
-            m_color    TEXT,
-            fetched_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (symbol, date)
-        )
-    """)
-    cur.execute("""
-        CREATE INDEX IF NOT EXISTS idx_tldvm_symbol ON trendlyne_dvm_scores(symbol, date DESC)
-    """)
-    con.commit()
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_tleps_sym ON trendlyne_eps_history(symbol, date DESC)")
 
     cur.execute("""
         CREATE TABLE IF NOT EXISTS trendlyne_pe_history (
-            symbol     TEXT NOT NULL,
-            date       TEXT NOT NULL,
-            pe_ttm     REAL,
+            symbol TEXT NOT NULL, date TEXT NOT NULL,
+            pe_ttm REAL, fetched_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (symbol, date)
+        )
+    """)
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_tlpe_sym ON trendlyne_pe_history(symbol, date DESC)")
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS trendlyne_pb_history (
+            symbol TEXT NOT NULL, date TEXT NOT NULL,
+            pb_ratio REAL, fetched_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (symbol, date)
+        )
+    """)
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_tlpb_sym ON trendlyne_pb_history(symbol, date DESC)")
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS trendlyne_div_yield_history (
+            symbol TEXT NOT NULL, date TEXT NOT NULL,
+            div_yield_pct REAL, fetched_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (symbol, date)
+        )
+    """)
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_tldy_sym ON trendlyne_div_yield_history(symbol, date DESC)")
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS trendlyne_dvm_scores (
+            symbol TEXT NOT NULL, date TEXT NOT NULL,
+            d_score INTEGER, v_score INTEGER, m_score INTEGER,
+            d_color TEXT, v_color TEXT, m_color TEXT,
             fetched_at TEXT DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (symbol, date)
         )
     """)
     con.commit()
 
-    # technical_signals columns for ML
     for ddl in [
-        "ALTER TABLE technical_signals ADD COLUMN eps_ttm          REAL",
-        "ALTER TABLE technical_signals ADD COLUMN eps_growth_yoy   REAL",
-        "ALTER TABLE technical_signals ADD COLUMN eps_growth_qoq   REAL",
-        "ALTER TABLE technical_signals ADD COLUMN eps_acceleration  REAL",
-        "ALTER TABLE technical_signals ADD COLUMN pe_ttm            REAL",
-        "ALTER TABLE technical_signals ADD COLUMN dvm_durability    INTEGER",
-        "ALTER TABLE technical_signals ADD COLUMN dvm_valuation     INTEGER",
-        "ALTER TABLE technical_signals ADD COLUMN dvm_momentum      INTEGER",
+        "ALTER TABLE technical_signals ADD COLUMN eps_ttm REAL",
+        "ALTER TABLE technical_signals ADD COLUMN eps_growth_yoy REAL",
+        "ALTER TABLE technical_signals ADD COLUMN eps_growth_qoq REAL",
+        "ALTER TABLE technical_signals ADD COLUMN eps_acceleration REAL",
+        "ALTER TABLE technical_signals ADD COLUMN pe_ttm REAL",
+        "ALTER TABLE technical_signals ADD COLUMN pe_pct_rank_252d REAL",
+        "ALTER TABLE technical_signals ADD COLUMN pe_vs_median_1yr REAL",
+        "ALTER TABLE technical_signals ADD COLUMN pb_pct_rank_252d REAL",
+        "ALTER TABLE technical_signals ADD COLUMN div_yield_ttm REAL",
+        "ALTER TABLE technical_signals ADD COLUMN dvm_durability INTEGER",
+        "ALTER TABLE technical_signals ADD COLUMN dvm_valuation INTEGER",
+        "ALTER TABLE technical_signals ADD COLUMN dvm_momentum INTEGER",
     ]:
         try:
             cur.execute(ddl)
@@ -127,12 +122,11 @@ def ensure_schema(con) -> None:
             con.rollback()
 
 
-# ── Fetch ───────────────────────────────────────────────────────────────────────
+# ── Fetch helpers ───────────────────────────────────────────────────────────────
 
-def _fetch_param(tlid: str, param: str, session: requests.Session) -> dict | None:
+def _fetch(tlid: str, param: str, session: requests.Session) -> dict | None:
     url = BASE_URL.format(tlid=tlid, param=param)
     try:
-        # DRF returns HTML by default — ?format=json forces JSON response.
         r = session.get(url, params={"format": "json"}, timeout=15)
         if r.status_code != 200:
             return None
@@ -146,91 +140,118 @@ def _fetch_param(tlid: str, param: str, session: requests.Session) -> dict | Non
 
 
 def _ts_to_date(ts_ms: int) -> str:
-    """Convert millisecond timestamp to YYYY-MM-DD (UTC)."""
     return datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
 
 
+def _parse_eod(body: dict) -> list[tuple[str, float]]:
+    """Return [(date_str, value), ...] sorted most-recent first."""
+    series = []
+    for ts_ms, val in body.get("eodData", []):
+        try:
+            series.append((_ts_to_date(int(ts_ms)), float(val)))
+        except (TypeError, ValueError):
+            continue
+    return series
+
+
 def _extract_dvm(body: dict) -> dict | None:
-    """Extract DVM scores from the stockData + stockHeaders arrays."""
     headers = body.get("stockHeaders", [])
     values  = body.get("stockData",   [])
     if not headers or not values:
         return None
-
     idx = {h["unique_name"]: i for i, h in enumerate(headers)}
     def get(key):
         i = idx.get(key)
         return values[i] if i is not None and i < len(values) else None
-
-    d = get("d_value")
-    v = get("v_value")
-    m = get("m_value")
+    d, v, m = get("d_value"), get("v_value"), get("m_value")
     if d is None and v is None and m is None:
         return None
-
     return {
         "d_score": int(d) if d is not None else None,
         "v_score": int(v) if v is not None else None,
         "m_score": int(m) if m is not None else None,
-        "d_color": get("d_color"),
-        "v_color": get("v_color"),
-        "m_color": get("m_color"),
+        "d_color": get("d_color"), "v_color": get("v_color"), "m_color": get("m_color"),
     }
 
 
-# ── Compute EPS features ────────────────────────────────────────────────────────
+# ── EPS feature computation ─────────────────────────────────────────────────────
 
-def _compute_eps_features(eps_series: list[tuple[str, float]]) -> dict:
-    """
-    eps_series: [(date_str, eps_ttm), ...] sorted DESCENDING (most recent first).
-    Returns features for the latest data point.
-    """
-    if not eps_series:
+def _compute_eps_features(series: list[tuple[str, float]]) -> dict:
+    if not series:
         return {}
+    latest_eps = series[0][1]
+    prev_q  = series[1][1]  if len(series) > 1 else None
+    prev_y  = series[4][1]  if len(series) > 4 else None
+    prev_y2 = series[8][1]  if len(series) > 8 else None
 
-    latest_date, latest_eps = eps_series[0]
+    def pct(cur, base):
+        if base is None or base == 0: return None
+        return round((cur - base) / abs(base) * 100, 2)
 
-    # QoQ: previous quarter (index 1)
-    prev_q = eps_series[1][1] if len(eps_series) > 1 else None
-    # YoY: 4 quarters ago (index 4) — same quarter last year
-    prev_y = eps_series[4][1] if len(eps_series) > 4 else None
-    # For acceleration: growth rate one year ago (indices 4 vs 8)
-    prev_y2 = eps_series[8][1] if len(eps_series) > 8 else None
-
-    def pct_change(current, base):
-        if base is None or base == 0:
-            return None
-        return round((current - base) / abs(base) * 100, 2)
-
-    growth_qoq = pct_change(latest_eps, prev_q)
-    growth_yoy = pct_change(latest_eps, prev_y)
-
-    # Acceleration = current YoY growth − prior year's YoY growth
-    prior_yoy = pct_change(prev_y, prev_y2) if prev_y is not None else None
-    acceleration = None
-    if growth_yoy is not None and prior_yoy is not None:
-        acceleration = round(growth_yoy - prior_yoy, 2)
+    g_qoq = pct(latest_eps, prev_q)
+    g_yoy = pct(latest_eps, prev_y)
+    prior_yoy = pct(prev_y, prev_y2) if prev_y is not None else None
+    accel = round(g_yoy - prior_yoy, 2) if g_yoy is not None and prior_yoy is not None else None
 
     return {
-        "eps_ttm":         round(latest_eps, 4),
-        "eps_growth_qoq":  growth_qoq,
-        "eps_growth_yoy":  growth_yoy,
-        "eps_acceleration": acceleration,
+        "eps_ttm":          round(latest_eps, 4),
+        "eps_growth_qoq":   g_qoq,
+        "eps_growth_yoy":   g_yoy,
+        "eps_acceleration": accel,
     }
+
+
+# ── PE/PB percentile from stored history ───────────────────────────────────────
+
+def _pe_features_from_db(symbol: str, con) -> dict:
+    cur = con.cursor()
+    cur.execute("""
+        SELECT pe_ttm FROM trendlyne_pe_history
+        WHERE symbol = ? ORDER BY date DESC LIMIT 253
+    """, (symbol,))
+    vals = [r[0] for r in cur.fetchall() if r[0] is not None]
+    if len(vals) < 5:
+        return {}
+    current = vals[0]
+    hist    = vals[1:]   # exclude today for rank
+    pct_rank = round(sum(1 for v in hist if current > v) / len(hist) * 100, 1)
+    median   = sorted(vals)[ len(vals)//2 ]
+    vs_med   = round((current / median - 1) * 100, 2) if median else None
+    return {
+        "pe_ttm":           round(current, 2),
+        "pe_pct_rank_252d": pct_rank,
+        "pe_vs_median_1yr": vs_med,
+    }
+
+
+def _pb_features_from_db(symbol: str, con) -> dict:
+    cur = con.cursor()
+    cur.execute("""
+        SELECT pb_ratio FROM trendlyne_pb_history
+        WHERE symbol = ? ORDER BY date DESC LIMIT 253
+    """, (symbol,))
+    vals = [r[0] for r in cur.fetchall() if r[0] is not None]
+    if len(vals) < 5:
+        return {}
+    current = vals[0]
+    hist    = vals[1:]
+    pct_rank = round(sum(1 for v in hist if current > v) / len(hist) * 100, 1)
+    return {"pb_pct_rank_252d": pct_rank}
 
 
 # ── Persist ─────────────────────────────────────────────────────────────────────
 
-def _upsert_eps_history(symbol: str, series: list[tuple[str, float]], con) -> int:
+def _upsert_series(table: str, col: str, symbol: str,
+                   series: list[tuple[str, float]], con) -> int:
     cur = con.cursor()
-    for dt, eps in series:
-        cur.execute("""
-            INSERT INTO trendlyne_eps_history (symbol, date, eps_ttm)
+    for dt, val in series:
+        cur.execute(f"""
+            INSERT INTO {table} (symbol, date, {col})
             VALUES (?,?,?)
             ON CONFLICT(symbol, date) DO UPDATE SET
-                eps_ttm    = excluded.eps_ttm,
+                {col} = excluded.{col},
                 fetched_at = CURRENT_TIMESTAMP
-        """, (symbol, dt, round(float(eps), 4)))
+        """, (symbol, dt, round(float(val), 6)))
     con.commit()
     return len(series)
 
@@ -242,59 +263,41 @@ def _upsert_dvm(symbol: str, today: str, dvm: dict, con) -> None:
             (symbol, date, d_score, v_score, m_score, d_color, v_color, m_color)
         VALUES (?,?,?,?,?,?,?,?)
         ON CONFLICT(symbol, date) DO UPDATE SET
-            d_score    = excluded.d_score,
-            v_score    = excluded.v_score,
-            m_score    = excluded.m_score,
-            d_color    = excluded.d_color,
-            v_color    = excluded.v_color,
-            m_color    = excluded.m_color,
-            fetched_at = CURRENT_TIMESTAMP
-    """, (symbol, today,
-          dvm.get("d_score"), dvm.get("v_score"), dvm.get("m_score"),
+            d_score=excluded.d_score, v_score=excluded.v_score, m_score=excluded.m_score,
+            d_color=excluded.d_color, v_color=excluded.v_color, m_color=excluded.m_color,
+            fetched_at=CURRENT_TIMESTAMP
+    """, (symbol, today, dvm.get("d_score"), dvm.get("v_score"), dvm.get("m_score"),
           dvm.get("d_color"), dvm.get("v_color"), dvm.get("m_color")))
     con.commit()
 
 
-def _upsert_pe_history(symbol: str, series: list[tuple[str, float]], con) -> int:
-    cur = con.cursor()
-    for dt, pe in series:
-        cur.execute("""
-            INSERT INTO trendlyne_pe_history (symbol, date, pe_ttm)
-            VALUES (?,?,?)
-            ON CONFLICT(symbol, date) DO UPDATE SET
-                pe_ttm     = excluded.pe_ttm,
-                fetched_at = CURRENT_TIMESTAMP
-        """, (symbol, dt, round(float(pe), 4)))
-    con.commit()
-    return len(series)
-
-
-def _backfill_technical_signals(symbol: str, eps_features: dict, dvm: dict | None,
-                                 pe_ttm: float | None, con) -> None:
-    """Update technical_signals with latest computed values for this symbol."""
-    if not eps_features and not dvm and pe_ttm is None:
+def _backfill_technical_signals(symbol: str, features: dict, con) -> None:
+    if not features:
         return
     cur = con.cursor()
     cur.execute("""
-        UPDATE technical_signals
-        SET eps_ttm          = ?,
-            eps_growth_yoy   = ?,
-            eps_growth_qoq   = ?,
-            eps_acceleration  = ?,
+        UPDATE technical_signals SET
+            eps_ttm          = COALESCE(?, eps_ttm),
+            eps_growth_yoy   = COALESCE(?, eps_growth_yoy),
+            eps_growth_qoq   = COALESCE(?, eps_growth_qoq),
+            eps_acceleration  = COALESCE(?, eps_acceleration),
             pe_ttm            = COALESCE(?, pe_ttm),
-            dvm_durability    = ?,
-            dvm_valuation     = ?,
-            dvm_momentum      = ?
+            pe_pct_rank_252d  = COALESCE(?, pe_pct_rank_252d),
+            pe_vs_median_1yr  = COALESCE(?, pe_vs_median_1yr),
+            pb_pct_rank_252d  = COALESCE(?, pb_pct_rank_252d),
+            div_yield_ttm     = COALESCE(?, div_yield_ttm),
+            dvm_durability    = COALESCE(?, dvm_durability),
+            dvm_valuation     = COALESCE(?, dvm_valuation),
+            dvm_momentum      = COALESCE(?, dvm_momentum)
         WHERE symbol = ?
     """, (
-        eps_features.get("eps_ttm"),
-        eps_features.get("eps_growth_yoy"),
-        eps_features.get("eps_growth_qoq"),
-        eps_features.get("eps_acceleration"),
-        pe_ttm,
-        dvm.get("d_score") if dvm else None,
-        dvm.get("v_score") if dvm else None,
-        dvm.get("m_score") if dvm else None,
+        features.get("eps_ttm"),         features.get("eps_growth_yoy"),
+        features.get("eps_growth_qoq"),  features.get("eps_acceleration"),
+        features.get("pe_ttm"),          features.get("pe_pct_rank_252d"),
+        features.get("pe_vs_median_1yr"),features.get("pb_pct_rank_252d"),
+        features.get("div_yield_ttm"),
+        features.get("dvm_d"),           features.get("dvm_v"),
+        features.get("dvm_m"),
         symbol,
     ))
     con.commit()
@@ -303,31 +306,15 @@ def _backfill_technical_signals(symbol: str, eps_features: dict, dvm: dict | Non
 # ── Stock list ──────────────────────────────────────────────────────────────────
 
 def _load_stocks(symbol_filter: str | None, con) -> list[tuple[str, str]]:
-    """Return [(symbol, tlid)] for all stocks that have a tlid in the DB."""
     cur = con.cursor()
-    # trendlyne_screener_stocks has stock_id = tlid
     cur.execute("""
-        SELECT DISTINCT ns.symbol, tss.stock_id
-        FROM nse_stocks ns
-        JOIN trendlyne_screener_stocks tss ON tss.symbol = ns.symbol
-        WHERE tss.stock_id IS NOT NULL
-          AND tss.stock_id != ''
-        ORDER BY ns.symbol
+        SELECT symbol, stock_id FROM trendlyne_screener_stocks
+        WHERE stock_id IS NOT NULL AND stock_id != ''
+        GROUP BY symbol ORDER BY symbol
     """)
     rows = [(r[0], str(r[1])) for r in cur.fetchall()]
-
-    if not rows:
-        # Fall back: any symbol that has a tlid stored anywhere
-        cur.execute("""
-            SELECT symbol, stock_id FROM trendlyne_screener_stocks
-            WHERE stock_id IS NOT NULL AND stock_id != ''
-            GROUP BY symbol
-        """)
-        rows = [(r[0], str(r[1])) for r in cur.fetchall()]
-
     if symbol_filter:
         rows = [(s, t) for s, t in rows if s.upper() == symbol_filter.upper()]
-
     return rows
 
 
@@ -335,10 +322,7 @@ def _load_stocks(symbol_filter: str | None, con) -> list[tuple[str, str]]:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--symbol", type=str, default=None,
-                        help="Fetch only this NSE symbol (e.g. BEL)")
-    parser.add_argument("--pe", action="store_true",
-                        help="Also fetch PE_TTM daily series (heavier — 500+ rows/stock)")
+    parser.add_argument("--symbol", default=None)
     args = parser.parse_args()
 
     con = connect()
@@ -346,75 +330,68 @@ def main() -> None:
 
     stocks = _load_stocks(args.symbol, con)
     if not stocks:
-        print("[TLFund] No stocks with tlid found. Run syncNSEStocks first.")
+        print("[TLFund] No stocks with tlid found.")
         return
 
-    print(f"[TLFund] Processing {len(stocks)} stocks…")
+    print(f"[TLFund] Processing {len(stocks)} stocks — EPS/PE/PB/DivYield + DVM…")
     session = requests.Session()
     session.headers.update(HEADERS)
-
     today = date.today().isoformat()
     ok = 0
 
     for i, (symbol, tlid) in enumerate(stocks, 1):
-        # ── EPS TTM (also extracts DVM from same response) ──
-        body = _fetch_param(tlid, "EPS_TTM", session)
-        if body is None:
-            print(f"  [{i}/{len(stocks)}] {symbol}: EPS_TTM fetch failed")
-            time.sleep(RATE_LIMIT_SEC)
-            continue
+        features: dict = {}
 
-        # EPS series: [(date, eps), ...] most-recent first
-        raw_eps = body.get("eodData", [])
-        eps_series: list[tuple[str, float]] = []
-        for ts_ms, val in raw_eps:
-            try:
-                eps_series.append((_ts_to_date(int(ts_ms)), float(val)))
-            except (TypeError, ValueError):
-                continue
-
-        # DVM from same body
-        dvm = _extract_dvm(body)
-
-        # Persist EPS history
-        if eps_series:
-            _upsert_eps_history(symbol, eps_series, con)
-
-        # Persist DVM
-        if dvm:
-            _upsert_dvm(symbol, today, dvm, con)
-
-        # Compute EPS features
-        eps_features = _compute_eps_features(eps_series)
-
-        # ── PE TTM (optional, daily data) ──
-        pe_latest = None
-        if args.pe:
-            time.sleep(RATE_LIMIT_SEC)
-            pe_body = _fetch_param(tlid, "PE_TTM", session)
-            if pe_body:
-                raw_pe = pe_body.get("eodData", [])
-                pe_series: list[tuple[str, float]] = []
-                for ts_ms, val in raw_pe:
-                    try:
-                        pe_series.append((_ts_to_date(int(ts_ms)), float(val)))
-                    except (TypeError, ValueError):
-                        continue
-                if pe_series:
-                    _upsert_pe_history(symbol, pe_series, con)
-                    pe_latest = pe_series[0][1]  # most recent
-
-        # Back-fill technical_signals
-        _backfill_technical_signals(symbol, eps_features, dvm, pe_latest, con)
-
-        dvm_str = f"D={dvm['d_score']}/V={dvm['v_score']}/M={dvm['m_score']}" if dvm else "no DVM"
-        eps_str = (f"EPS={eps_features.get('eps_ttm','?')} "
-                   f"YoY={eps_features.get('eps_growth_yoy','?')}% "
-                   f"QoQ={eps_features.get('eps_growth_qoq','?')}%") if eps_features else "no EPS"
-        print(f"  [{i}/{len(stocks)}] {symbol}: {eps_str} | {dvm_str}")
-        ok += 1
-
+        # ── 1. EPS_TTM (also carries DVM scores) ──
+        body = _fetch(tlid, "EPS_TTM", session)
+        if body is not None:
+            eps_series = _parse_eod(body)
+            if eps_series:
+                _upsert_series("trendlyne_eps_history", "eps_ttm", symbol, eps_series, con)
+                features.update(_compute_eps_features(eps_series))
+            dvm = _extract_dvm(body)
+            if dvm:
+                _upsert_dvm(symbol, today, dvm, con)
+                features["dvm_d"] = dvm.get("d_score")
+                features["dvm_v"] = dvm.get("v_score")
+                features["dvm_m"] = dvm.get("m_score")
         time.sleep(RATE_LIMIT_SEC)
+
+        # ── 2. PE_TTM_SHARE_NOW (daily, 1521 pts) ──
+        body = _fetch(tlid, "PE_TTM_SHARE_NOW", session)
+        if body is not None:
+            pe_series = _parse_eod(body)
+            if pe_series:
+                _upsert_series("trendlyne_pe_history", "pe_ttm", symbol, pe_series, con)
+                features.update(_pe_features_from_db(symbol, con))
+        time.sleep(RATE_LIMIT_SEC)
+
+        # ── 3. PBV_A_SHARE_NOW (daily, 1824 pts) ──
+        body = _fetch(tlid, "PBV_A_SHARE_NOW", session)
+        if body is not None:
+            pb_series = _parse_eod(body)
+            if pb_series:
+                _upsert_series("trendlyne_pb_history", "pb_ratio", symbol, pb_series, con)
+                features.update(_pb_features_from_db(symbol, con))
+        time.sleep(RATE_LIMIT_SEC)
+
+        # ── 4. DIVIDEND_YIELD_TTM_Q (quarterly, 32 pts) ──
+        body = _fetch(tlid, "DIVIDEND_YIELD_TTM_Q", session)
+        if body is not None:
+            dy_series = _parse_eod(body)
+            if dy_series:
+                _upsert_series("trendlyne_div_yield_history", "div_yield_pct", symbol, dy_series, con)
+                features["div_yield_ttm"] = dy_series[0][1]  # latest
+        time.sleep(RATE_LIMIT_SEC)
+
+        # ── Back-fill technical_signals ──
+        _backfill_technical_signals(symbol, features, con)
+
+        pe_str  = f"PE={features.get('pe_ttm','?')} rank={features.get('pe_pct_rank_252d','?')}%"
+        dvm_str = (f"D={features.get('dvm_d','?')}/V={features.get('dvm_v','?')}/M={features.get('dvm_m','?')}")
+        eps_str = f"EPS={features.get('eps_ttm','?')} YoY={features.get('eps_growth_yoy','?')}%"
+        print(f"  [{i}/{len(stocks)}] {symbol}: {eps_str} | {pe_str} | DY={features.get('div_yield_ttm','?')}% | {dvm_str}")
+        ok += 1
 
     print(f"[TLFund] Done. {ok}/{len(stocks)} stocks processed.")
     con.close()

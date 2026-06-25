@@ -1971,6 +1971,39 @@ runMigration('055_trendlyne_fundamentals', `
   ALTER TABLE technical_signals ADD COLUMN dvm_momentum      INTEGER;
 `);
 
+runMigration('056_trendlyne_adv_tech_and_overview', `
+  ALTER TABLE technical_signals ADD COLUMN pe_pct_rank_252d   REAL;
+  ALTER TABLE technical_signals ADD COLUMN pe_vs_median_1yr   REAL;
+  ALTER TABLE technical_signals ADD COLUMN pb_pct_rank_252d   REAL;
+  ALTER TABLE technical_signals ADD COLUMN div_yield_ttm      REAL;
+  ALTER TABLE technical_signals ADD COLUMN ma_bull_frac        REAL;
+  ALTER TABLE technical_signals ADD COLUMN osc_bull_frac       REAL;
+  ALTER TABLE technical_signals ADD COLUMN adx_tl              REAL;
+  ALTER TABLE technical_signals ADD COLUMN atr_pct_tl          REAL;
+  ALTER TABLE technical_signals ADD COLUMN mfi_tl              REAL;
+  ALTER TABLE technical_signals ADD COLUMN pivot_dist_pct_tl   REAL;
+  ALTER TABLE technical_signals ADD COLUMN delivery_avg_1m_tl  REAL;
+  ALTER TABLE technical_signals ADD COLUMN beta_1y_tl          REAL;
+  ALTER TABLE technical_signals ADD COLUMN ret_1m_tl           REAL;
+  ALTER TABLE technical_signals ADD COLUMN ret_3m_tl           REAL;
+  ALTER TABLE technical_signals ADD COLUMN ret_6m_tl           REAL;
+  ALTER TABLE technical_signals ADD COLUMN ret_1y_tl           REAL;
+  ALTER TABLE technical_signals ADD COLUMN analyst_upside_pct  REAL;
+  ALTER TABLE technical_signals ADD COLUMN analyst_count       INTEGER;
+  ALTER TABLE technical_signals ADD COLUMN analyst_buy_pct     REAL;
+  ALTER TABLE technical_signals ADD COLUMN roe_annual          REAL;
+  ALTER TABLE technical_signals ADD COLUMN roce_annual         REAL;
+  ALTER TABLE technical_signals ADD COLUMN ebitda_margin       REAL;
+  ALTER TABLE technical_signals ADD COLUMN np_margin           REAL;
+  ALTER TABLE technical_signals ADD COLUMN promoter_pct        REAL;
+  ALTER TABLE technical_signals ADD COLUMN fii_pct             REAL;
+  ALTER TABLE technical_signals ADD COLUMN pledge_pct          REAL;
+  ALTER TABLE technical_signals ADD COLUMN rev_growth_yoy_q    REAL;
+  ALTER TABLE technical_signals ADD COLUMN np_growth_yoy_q     REAL;
+  ALTER TABLE technical_signals ADD COLUMN days_since_dividend INTEGER;
+  ALTER TABLE technical_signals ADD COLUMN last_dividend_amt   REAL;
+`);
+
 // ── Retention: confluence_signals is an append-only firehose (~700k rows, the single
 // largest contributor to DB bloat). expires_at exists but nothing pruned it. Delete
 // expired rows on boot and every 6h. Keeps the table bounded without losing live signals.

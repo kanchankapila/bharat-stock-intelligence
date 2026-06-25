@@ -334,6 +334,61 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     # PE TTM: valuation context — high P/E means market priced-in growth (risk of miss)
     X['pe_ttm'] = num('pe_ttm', 25.0).clip(0, 100) / 100.0  # normalised; >100 capped
 
+    # ── PE/PB percentile ranks (from trendlyne_fundamentals_fetcher.py) ──
+    # Percentile rank vs own 252d history is more predictive than raw P/E — it captures
+    # whether the stock is cheap/expensive relative to its own historical norm.
+    X['pe_pct_rank_252d']  = num('pe_pct_rank_252d', 50.0).clip(0, 100) / 100.0
+    X['pe_vs_median_1yr']  = num('pe_vs_median_1yr', 0.0).clip(-50, 100)
+    X['pb_pct_rank_252d']  = num('pb_pct_rank_252d', 50.0).clip(0, 100) / 100.0
+    X['div_yield_ttm']     = num('div_yield_ttm', 1.0).clip(0, 10)
+    # Valuation headroom × conviction: cheap PE percentile + strong signal = better odds
+    X['pe_rank_x_score']   = (1.0 - X['pe_pct_rank_252d']) * X['signal_score']
+
+    # ── Trendlyne Advanced Technical (from trendlyne_adv_tech_fetcher.py) ──
+    # MA and oscillator consensus from Trendlyne's computed signals (16 MAs, 9 oscillators).
+    X['ma_bull_frac']       = num('ma_bull_frac', 0.5).clip(0, 1)
+    X['osc_bull_frac']      = num('osc_bull_frac', 0.5).clip(0, 1)
+    X['adx_tl']             = num('adx_tl', 25.0).clip(0, 100) / 100.0
+    X['atr_pct_tl']         = num('atr_pct_tl', 2.0).clip(0, 10) / 10.0
+    X['mfi_tl']             = num('mfi_tl', 50.0).clip(0, 100) / 100.0
+    X['pivot_dist_pct_tl']  = num('pivot_dist_pct_tl', 0.0).clip(-10, 10)
+    X['delivery_avg_1m_tl'] = num('delivery_avg_1m_tl', 50.0).clip(0, 100) / 100.0
+    X['beta_1y_tl']         = num('beta_1y_tl', 1.0).clip(0, 3)
+    # Price momentum by horizon (Trendlyne computes vs Nifty-adjusted)
+    X['ret_1m_tl']          = num('ret_1m_tl', 0.0).clip(-30, 50)
+    X['ret_3m_tl']          = num('ret_3m_tl', 0.0).clip(-40, 80)
+    X['ret_6m_tl']          = num('ret_6m_tl', 0.0).clip(-50, 100)
+    X['ret_1y_tl']          = num('ret_1y_tl', 0.0).clip(-60, 150)
+    # Strong trend + high MA alignment = momentum confirmation
+    X['ma_x_adx']           = X['ma_bull_frac'] * X['adx_tl']
+
+    # ── Analyst Consensus (from trendlyne_overview_fetcher.py) ──
+    # Broker target upside is a direct measure of fundamental analyst conviction.
+    # analyst_upside_pct > 20% = strong buy zone; < 0 = overvalued per consensus.
+    X['analyst_upside_pct'] = num('analyst_upside_pct', 0.0).clip(-50, 100)
+    X['analyst_count_log']  = np.log1p(num('analyst_count', 0).clip(lower=0))
+    X['analyst_buy_pct']    = num('analyst_buy_pct', 50.0).clip(0, 100) / 100.0
+    # Upside × signal conviction: high analyst target + strong signal = high-confidence entry
+    X['analyst_x_score']    = X['analyst_upside_pct'].clip(0, 100) * X['signal_score'] / 100.0
+
+    # ── Fundamental Profile (from trendlyne_overview_fetcher.py) ──
+    # Quality factors: ROE/ROCE capture returns on capital; margins capture pricing power.
+    X['roe_annual']      = num('roe_annual', 15.0).clip(0, 100) / 100.0
+    X['roce_annual']     = num('roce_annual', 15.0).clip(0, 100) / 100.0
+    X['ebitda_margin']   = num('ebitda_margin', 15.0).clip(0, 60) / 60.0
+    X['np_margin']       = num('np_margin', 8.0).clip(-20, 40) / 40.0
+    X['promoter_pct']    = num('promoter_pct', 50.0).clip(0, 100) / 100.0
+    X['fii_pct_tl']      = num('fii_pct', 10.0).clip(0, 80) / 80.0
+    X['pledge_pct']      = num('pledge_pct', 5.0).clip(0, 100) / 100.0
+    # Revenue and profit growth (quarterly YoY)
+    X['rev_growth_yoy_q'] = num('rev_growth_yoy_q', 0.0).clip(-50, 100)
+    X['np_growth_yoy_q']  = num('np_growth_yoy_q', 0.0).clip(-100, 200)
+    # Quality × price: high-ROE stock with bullish signal = higher success probability
+    X['roe_x_score']     = X['roe_annual'] * X['signal_score']
+    # Days since last dividend (freshness of income signal)
+    X['div_recency']     = np.log1p(num('days_since_dividend', 90).clip(0, 365))
+    X['last_div_log']    = np.log1p(num('last_dividend_amt', 0.0).clip(lower=0))
+
     # NOTE: market-level India VIX + breadth were tested as ensemble features (raw and as
     # cross-sectional interactions) and BOTH hurt held-out AUC vs omitting them entirely
     # (baseline cv 0.651/held-out 0.543; interactions 0.640/0.531; raw 0.606/0.493). They add
@@ -446,6 +501,15 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                ts.delivery_pct, ts.block_deal_net_qty, ts.block_deal_value_cr,
                ts.eps_ttm, ts.eps_growth_yoy, ts.eps_growth_qoq, ts.eps_acceleration,
                ts.pe_ttm, ts.dvm_durability, ts.dvm_valuation, ts.dvm_momentum,
+               ts.pe_pct_rank_252d, ts.pe_vs_median_1yr, ts.pb_pct_rank_252d, ts.div_yield_ttm,
+               ts.ma_bull_frac, ts.osc_bull_frac, ts.adx_tl, ts.atr_pct_tl, ts.mfi_tl,
+               ts.pivot_dist_pct_tl, ts.delivery_avg_1m_tl, ts.beta_1y_tl,
+               ts.ret_1m_tl, ts.ret_3m_tl, ts.ret_6m_tl, ts.ret_1y_tl,
+               ts.analyst_upside_pct, ts.analyst_count, ts.analyst_buy_pct,
+               ts.roe_annual, ts.roce_annual, ts.ebitda_margin, ts.np_margin,
+               ts.promoter_pct, ts.fii_pct, ts.pledge_pct,
+               ts.rev_growth_yoy_q, ts.np_growth_yoy_q,
+               ts.days_since_dividend, ts.last_dividend_amt,
                COALESCE(fh.fifty_two_week_high, sf.fifty_two_week_high) AS fifty_two_week_high,
                COALESCE(fh.piotroski_f_score, sf.piotroski_f_score)     AS piotroski_f_score,
                COALESCE(fh.debt_to_equity, sf.debt_to_equity)           AS debt_to_equity,
@@ -553,6 +617,15 @@ def load_pending_signals() -> pd.DataFrame:
                ts.delivery_pct, ts.block_deal_net_qty, ts.block_deal_value_cr,
                ts.eps_ttm, ts.eps_growth_yoy, ts.eps_growth_qoq, ts.eps_acceleration,
                ts.pe_ttm, ts.dvm_durability, ts.dvm_valuation, ts.dvm_momentum,
+               ts.pe_pct_rank_252d, ts.pe_vs_median_1yr, ts.pb_pct_rank_252d, ts.div_yield_ttm,
+               ts.ma_bull_frac, ts.osc_bull_frac, ts.adx_tl, ts.atr_pct_tl, ts.mfi_tl,
+               ts.pivot_dist_pct_tl, ts.delivery_avg_1m_tl, ts.beta_1y_tl,
+               ts.ret_1m_tl, ts.ret_3m_tl, ts.ret_6m_tl, ts.ret_1y_tl,
+               ts.analyst_upside_pct, ts.analyst_count, ts.analyst_buy_pct,
+               ts.roe_annual, ts.roce_annual, ts.ebitda_margin, ts.np_margin,
+               ts.promoter_pct, ts.fii_pct, ts.pledge_pct,
+               ts.rev_growth_yoy_q, ts.np_growth_yoy_q,
+               ts.days_since_dividend, ts.last_dividend_amt,
                sf.fifty_two_week_high,
                sf.piotroski_f_score, sf.debt_to_equity, sf.operating_margins,
                sf.return_on_equity, sf.revenue_growth, sf.earnings_growth,
