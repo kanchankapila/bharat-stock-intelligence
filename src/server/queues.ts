@@ -109,6 +109,7 @@ export const QUEUE_AGENT_OPTIMIZER      = 'agent-optimizer';
 export const QUEUE_UNIFIED_RANKER       = 'unified-ranker';
 export const QUEUE_COMPANY_PROFILES_SYNC = 'company-profiles-sync';
 export const QUEUE_QUANT_EOD_SYNC = 'quant-eod-sync';
+export const QUEUE_LIVE_SCREENER_COLLECT = 'live-screener-collect';
 
 const BULK_CACHE_KEY      = 'live-stocks-bulk';
 const BULK_TTL_SECONDS    = 5 * 60;
@@ -179,6 +180,9 @@ export let confluenceOutcomesQueue: Queue | null = null;
 let confluenceComputeWorker:  Worker | null = null;
 let confluenceOutcomesWorker: Worker | null = null;
 let confluenceFallbackTimer:  ReturnType<typeof setInterval> | null = null;
+export let liveScreenerCollectQueue: Queue | null = null;
+let liveScreenerCollectWorker: Worker | null = null;
+let liveScreenerFallbackTimer: ReturnType<typeof setInterval> | null = null;
 
 export let screenerPerfQueue: Queue | null = null;
 let screenerPerfWorker: Worker | null = null;
@@ -373,6 +377,9 @@ async function processOutcomeResolver(_job: Job): Promise<{ success: boolean }> 
   await resolveOutcomesResilient(5);
   await resolveOutcomesResilient(15);
 
+  await runPython('live_screener_resolver.py', [], 180_000)
+    .catch(err => console.error('[QUEUE] live_screener_resolver.py failed:', err.message));
+
   await runPython('performance_tracker.py', ['--horizon', '5']);
   await runPython('performance_tracker.py', ['--horizon', '15']);
 
@@ -382,6 +389,15 @@ async function processOutcomeResolver(_job: Job): Promise<{ success: boolean }> 
 }
 
 // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ ML daily ops worker processor ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
+
+async function processLiveScreenerCollect(_job: Job): Promise<void> {
+  if (!isNSEMarketHours()) {
+    console.log('[QUEUE] live-screener-collect skipped — outside NSE market hours');
+    return;
+  }
+  const { runLiveScreenerCollection } = await import('./liveScreenerCollector');
+  await runLiveScreenerCollection();
+}
 
 async function processIntradayFetcher(_job: Job): Promise<void> {
   // Fetches 15m bars for all 2328 NSE stocks (last 24h) — ~4 min per run.
@@ -430,6 +446,9 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await resolveOutcomesResilient(5);
   await resolveOutcomesResilient(15);
 
+  await runPython('live_screener_resolver.py', [], 180_000)
+    .catch(err => console.error('[QUEUE] live_screener_resolver.py failed:', err.message));
+
   await runPython('performance_tracker.py', ['--horizon', '5']);
   await runPython('performance_tracker.py', ['--horizon', '15']);
 
@@ -444,6 +463,10 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
 
   await runPython('reward_engine.py');
   await runPython('rl_agent.py', ['--update']);
+
+  const { computeSignalTypeStats } = await import('./technicalSignalsService');
+  await computeSignalTypeStats().catch(e => console.warn('[QUEUE] computeSignalTypeStats failed:', (e as Error).message));
+
   return { success: true };
 }
 
@@ -580,7 +603,11 @@ async function processQuantEodSync(_job: Job): Promise<{ success: boolean }> {
     
     console.log('[QUANT EOD] 3. Syncing MoneyControl Screeners');
     await syncMoneyControlScreeners();
-    
+
+    console.log('[QUANT EOD] 3b. Syncing ETNow Screeners');
+    const { syncETnowScreeners } = await import('./etnowScreenerSync');
+    await syncETnowScreeners().catch((e: any) => console.error('[QUANT EOD] ETNow sync failed:', e.message));
+
     console.log('[QUANT EOD] 4. Syncing Point-in-time Fundamentals');
     await runFullFundamentalsSync();
     
@@ -608,6 +635,10 @@ async function addJobWithCatchup(
   data: any,
   opts: any = {}
 ) {
+  if (opts.repeat && (opts.repeat.pattern || opts.repeat.cron) && !opts.repeat.tz) {
+    opts.repeat.tz = 'Etc/UTC';
+  }
+
   const repeatables = await queue.getRepeatableJobs();
   for (const r of repeatables) {
     if (r.id === opts.jobId || r.name === jobName) {
@@ -632,7 +663,13 @@ async function addJobWithCatchup(
 
       if (opts.repeat.pattern || opts.repeat.cron) {
         const pattern = opts.repeat.pattern || opts.repeat.cron;
-        const interval = CronExpressionParser.parse(pattern, { currentDate: new Date(now) });
+        const parserOpts: any = { currentDate: new Date(now) };
+        if (opts.repeat.tz) {
+          parserOpts.tz = opts.repeat.tz;
+        } else {
+          parserOpts.utc = true;
+        }
+        const interval = CronExpressionParser.parse(pattern, parserOpts);
         const prevExpected = interval.prev().getTime();
         
         if (lastRunTime < prevExpected && prevExpected < now) {
@@ -817,16 +854,16 @@ export async function initQueues(): Promise<boolean> {
     // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ MC screener sync queue ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
     mcScreenerSyncQueue = new Queue(QUEUE_MC_SCREENER_SYNC, { connection });
 
-    // Repeat every 12 hours
+    // Once daily at 11 PM IST (17:30 UTC) on weekdays — after quant-eod-sync (6 PM IST)
     const mcRepeatables = await mcScreenerSyncQueue.getRepeatableJobs();
     for (const r of mcRepeatables) {
       await mcScreenerSyncQueue.removeRepeatableByKey(r.key);
     }
-    await addJobWithCatchup(mcScreenerSyncQueue, 
+    await addJobWithCatchup(mcScreenerSyncQueue,
       'mc-sync',
       {},
       {
-        repeat: { every: 12 * 60 * 60 * 1000 }, // 12 hours
+        repeat: { pattern: '30 17 * * 1-5' }, // 11 PM IST weekdays
         jobId: 'mc-sync-repeatable',
         removeOnComplete: 5,
         removeOnFail: 3,
@@ -853,16 +890,16 @@ export async function initQueues(): Promise<boolean> {
     // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ ETNow screener sync queue ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
     etnowScreenerSyncQueue = new Queue(QUEUE_ETNOW_SCREENER_SYNC, { connection });
 
-    // Repeat every 12 hours
+    // Once daily at 11:30 PM IST (18:00 UTC) on weekdays — staggered after mc-sync
     const etnowRepeatables = await etnowScreenerSyncQueue.getRepeatableJobs();
     for (const r of etnowRepeatables) {
       await etnowScreenerSyncQueue.removeRepeatableByKey(r.key);
     }
-    await addJobWithCatchup(etnowScreenerSyncQueue, 
+    await addJobWithCatchup(etnowScreenerSyncQueue,
       'etnow-sync',
       {},
       {
-        repeat: { every: 12 * 60 * 60 * 1000 }, // 12 hours
+        repeat: { pattern: '0 18 * * 1-5' }, // 11:30 PM IST weekdays
         jobId: 'etnow-sync-repeatable',
         removeOnComplete: 5,
         removeOnFail: 3,
@@ -1185,36 +1222,17 @@ export async function initQueues(): Promise<boolean> {
       QUEUE_TRENDLYNE_INTRADAY,
       async (_job: Job) => {
         if (!isNSEMarketHours()) {
-          console.log('[QUEUE] intraday-scan skipped Ã¢â‚¬â€ outside NSE market hours');
+          console.log('[QUEUE] intraday-scan skipped — outside NSE market hours');
           return;
         }
-        console.log('[QUEUE] Starting scheduled 15-min intraday screener sync & scan...');
-        const { syncAllScreenerStocksToDB, runIntradayScreenerScan } = await import('./trendlyneScreener');
-        const { syncMoneyControlScreeners } = await import('./moneycontrolScreener');
-        const { syncETnowScreeners } = await import('./etnowScreenerSync');
-        
-        try {
-          await syncAllScreenerStocksToDB('intraday');
-        } catch (e: any) {
-          console.error('[QUEUE] Trendlyne intraday sync failed:', e.message);
-        }
-        try {
-          await syncMoneyControlScreeners('intraday');
-        } catch (e: any) {
-          console.error('[QUEUE] MoneyControl intraday sync failed:', e.message);
-        }
-        try {
-          await syncETnowScreeners('intraday');
-        } catch (e: any) {
-          console.error('[QUEUE] ETNow intraday sync failed:', e.message);
-        }
-
+        console.log('[QUEUE] Starting scheduled 15-min intraday screener scan...');
+        const { runIntradayScreenerScan } = await import('./trendlyneScreener');
         await runIntradayScreenerScan();
       },
       {
         connection,
         concurrency: 1,
-        lockDuration: 8 * 60 * 1000, // 8 minutes (sufficient for 15-min sync and scan)
+        lockDuration: 8 * 60 * 1000,
       },
     );
 
@@ -1313,6 +1331,7 @@ export async function initQueues(): Promise<boolean> {
       updateMonitorState('ml-ensemble-score', 'success');
       updateMonitorState('reward-engine', 'success');
       updateMonitorState('rl-agent-update', 'success');
+      updateMonitorState('signal-type-stats', 'success');
     });
     mlDailyOpsWorker.on('failed', (_job, err) => {
       console.error('[QUEUE] ml-daily-ops failed:', err.message);
@@ -1346,7 +1365,7 @@ export async function initQueues(): Promise<boolean> {
     const intradayRep = await intradayFetcherQueue.getRepeatableJobs();
     for (const r of intradayRep) await intradayFetcherQueue.removeRepeatableByKey(r.key);
     await intradayFetcherQueue.add('intraday-fetcher', {}, {
-      repeat: { pattern: '*/30 3-10 * * 1-5' },
+      repeat: { pattern: '*/30 3-10 * * 1-5', tz: 'Etc/UTC' },
       jobId: 'intraday-fetcher',
       removeOnComplete: 5,
       removeOnFail: 3,
@@ -1363,6 +1382,28 @@ export async function initQueues(): Promise<boolean> {
     intradayFetcherWorker.on('failed', (_, err) => {
       console.error('[QUEUE] intraday-fetcher failed:', err.message);
       recordHeartbeat('intraday-fetcher', 'failed', err?.message);
+    });
+
+    // ── Live Screener paced collector (every 15 min during market hours: 3:30-10:00 UTC = 9:00-15:30 IST)
+    liveScreenerCollectQueue = new Queue(QUEUE_LIVE_SCREENER_COLLECT, { connection });
+    const lsRepeatables = await liveScreenerCollectQueue.getRepeatableJobs();
+    for (const r of lsRepeatables) await liveScreenerCollectQueue.removeRepeatableByKey(r.key);
+    await liveScreenerCollectQueue.add('live-screener-collect', {}, {
+      repeat: { pattern: '*/15 3-10 * * 1-5', tz: 'Etc/UTC' },
+      jobId: 'live-screener-collect-repeatable',
+      removeOnComplete: 5,
+      removeOnFail: 3,
+    });
+    liveScreenerCollectWorker = new Worker(
+      QUEUE_LIVE_SCREENER_COLLECT,
+      processLiveScreenerCollect,
+      { connection, concurrency: 1, lockDuration: 8 * 60 * 1000 }
+    );
+    liveScreenerCollectWorker.on('completed', () => {
+      console.log('[QUEUE] live-screener-collect completed');
+    });
+    liveScreenerCollectWorker.on('failed', (_, err) => {
+      console.error('[QUEUE] live-screener-collect failed:', err.message);
     });
 
 
@@ -1816,6 +1857,22 @@ export async function initQueues(): Promise<boolean> {
       console.log('[QUEUE-FALLBACK] confluence-compute setInterval started (every 30 min)');
     }
 
+    if (!liveScreenerFallbackTimer) {
+      const runLiveScreenerFallback = async () => {
+        try {
+          if (!isNSEMarketHours()) return;
+          const { runLiveScreenerCollection } = await import('./liveScreenerCollector');
+          await runLiveScreenerCollection();
+          console.log('[QUEUE-FALLBACK] live-screener-collect completed');
+        } catch (e: any) {
+          console.warn('[QUEUE-FALLBACK] live-screener-collect failed:', e.message);
+        }
+      };
+      runLiveScreenerFallback(); // run immediately on startup if appropriate
+      liveScreenerFallbackTimer = setInterval(runLiveScreenerFallback, 15 * 60 * 1000);
+      console.log('[QUEUE-FALLBACK] live-screener-collect setInterval started (every 15 min)');
+    }
+
     return false;
   }
 }
@@ -1883,6 +1940,9 @@ export async function shutdownQueues(): Promise<void> {
     agentOptimizerQueue?.close(),
     unifiedRankerWorker?.close(),
     unifiedRankerQueue?.close(),
+    liveScreenerCollectWorker?.close(),
+    liveScreenerCollectQueue?.close(),
+    Promise.resolve(liveScreenerFallbackTimer ? clearInterval(liveScreenerFallbackTimer) : undefined),
   ]);
 }
 

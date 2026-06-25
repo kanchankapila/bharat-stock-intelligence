@@ -1847,6 +1847,44 @@ runMigration('046_quant_data_persistence', `
   );
 `);
 
+runMigration('047_live_screener_optimization', `
+  CREATE TABLE IF NOT EXISTS live_screener_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT NOT NULL,
+    filters_completed INTEGER NOT NULL,
+    total_filters INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    error_log TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS live_screener_appearances (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL,
+    symbol TEXT NOT NULL,
+    filter_key TEXT NOT NULL,
+    price REAL NOT NULL,
+    change_per REAL,
+    volume INTEGER,
+    FOREIGN KEY(run_id) REFERENCES live_screener_runs(id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_lsa_run ON live_screener_appearances(run_id);
+  CREATE INDEX IF NOT EXISTS idx_lsa_symbol_filter ON live_screener_appearances(symbol, filter_key);
+
+  CREATE TABLE IF NOT EXISTS live_screener_outcomes (
+    appearance_id INTEGER PRIMARY KEY,
+    symbol TEXT NOT NULL,
+    filter_key TEXT NOT NULL,
+    appeared_at TEXT NOT NULL,
+    entry_price REAL NOT NULL,
+    return_1d REAL,
+    return_3d REAL,
+    return_5d REAL,
+    FOREIGN KEY(appearance_id) REFERENCES live_screener_appearances(id) ON DELETE CASCADE
+  );
+`);
+
 // ── Retention: confluence_signals is an append-only firehose (~700k rows, the single
 // largest contributor to DB bloat). expires_at exists but nothing pruned it. Delete
 // expired rows on boot and every 6h. Keeps the table bounded without losing live signals.

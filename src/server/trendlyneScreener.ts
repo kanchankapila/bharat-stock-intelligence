@@ -1289,17 +1289,43 @@ export async function runIntradayScreenerScan(): Promise<{
   let newSignalsGenerated = 0;
 
   try {
-    // 1. Fetch all intraday screeners
-    const screeners = await dbAll(`
+    // 1. Fetch intraday screeners that have produced at least one signal in the past 60 days,
+    //    or have never appeared in signals yet (new screeners get one trial run).
+    const cutoff = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const allScreeners = await dbAll(`
       SELECT DISTINCT s.screener_id, s.screener_name, s.screenpk, s.sentiment, m.inferred_sentiment
       FROM trendlyne_screeners s
       LEFT JOIN screener_master m ON s.screener_id = m.scan_id
       WHERE s.timeframe = 'intraday' OR m.inferred_timeframe = 'intraday'
     `) as any[];
 
-    console.log(`⚡ [INTRADAY SCAN] Found ${screeners.length} intraday screeners to process.`);
+    // Build set of screener names active in the last 60 days from unified_signals
+    const activeSignalRows = await dbAll(`
+      SELECT DISTINCT split_part(split_part(reasoning, 'screener ''', 2), '''', 1) as screener_name
+      FROM unified_signals
+      WHERE signal_source = 'screener'
+        AND signal_date >= ?
+        AND reasoning LIKE '%Trendlyne screener%'
+    `, [cutoff]) as { screener_name: string }[];
+    const activeNames = new Set(activeSignalRows.map(r => r.screener_name));
 
-    for (const screener of screeners) {
+    // Also collect names that have ANY historical signal (to distinguish new vs. cold)
+    const everSignaledRows = await dbAll(`
+      SELECT DISTINCT split_part(split_part(reasoning, 'screener ''', 2), '''', 1) as screener_name
+      FROM unified_signals
+      WHERE signal_source = 'screener'
+        AND reasoning LIKE '%Trendlyne screener%'
+    `) as { screener_name: string }[];
+    const everSignaled = new Set(everSignaledRows.map(r => r.screener_name));
+
+    const filtered = allScreeners.filter((s: any) => {
+      const name: string = s.screener_name;
+      return activeNames.has(name) || !everSignaled.has(name);
+    });
+
+    console.log(`⚡ [INTRADAY SCAN] ${filtered.length}/${allScreeners.length} intraday screeners active (${allScreeners.length - filtered.length} cold-dropped).`);
+
+    for (const screener of filtered) {
       screenersScanned++;
       const name = screener.screener_name;
       const screenpk = screener.screenpk;
