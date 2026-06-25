@@ -93,12 +93,13 @@ export async function bootstrapQuantScoring(bullmqReady: boolean): Promise<void>
     console.error('[QUANT] First-run error:', err.message);
     // Don't rethrow — startup must not crash if quant scoring fails
   });
-  setInterval(() => {
+  const _quantFallbackTimer = setInterval(() => {
     console.log('[QUANT] Triggering daily quant strategy scoring (fallback)');
     runQuantScoring().catch(err =>
       console.error('[QUANT] Scheduled fallback error:', (err as Error).message)
     );
   }, 24 * 60 * 60 * 1000);
+  _quantFallbackTimer.unref?.();
 }
 
 // ─── Math helpers ─────────────────────────────────────────────────────────────

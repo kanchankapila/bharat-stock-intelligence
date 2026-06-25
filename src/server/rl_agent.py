@@ -296,7 +296,7 @@ def daily_update(conn: ConnWrapper, dry_run: bool = False,
         regime = parts[0] if parts else 'SIDEWAYS'
 
         outcomes = conn.execute("""
-            SELECT so.return_pct FROM signal_outcomes so
+            SELECT so.return_pct, so.outcome FROM signal_outcomes so
             JOIN technical_signals ts ON ts.symbol=so.symbol AND ts.date=so.signal_date
             WHERE so.signal_date = ?
               AND so.outcome IN ('WIN','LOSS','NEUTRAL','STOP_LOSS')
@@ -307,7 +307,10 @@ def daily_update(conn: ConnWrapper, dry_run: bool = False,
             continue
 
         nifty_ret  = _get_nifty_horizon_return(conn, ep_date, horizon_days=horizon_days)
-        avg_return = sum(float(r[0]) for r in outcomes) / len(outcomes)
+        # Apply 1.5× penalty to STOP_LOSS returns so hitting a stop is penalised
+        # more heavily than a plain LOSS of similar magnitude (same logic as backfill).
+        weighted = [float(r) * (1.5 if o == 'STOP_LOSS' else 1.0) for r, o in outcomes]
+        avg_return = sum(weighted) / len(weighted)
         reward     = avg_return - nifty_ret
 
         next_state = _get_next_state_key(conn, state_key, ep_date, horizon_days=horizon_days)

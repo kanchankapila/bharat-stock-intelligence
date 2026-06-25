@@ -17,9 +17,11 @@ db.pragma('wal_autocheckpoint = 1000');
 // PASSIVE could never advance past the always-present readers from the ~40 BullMQ
 // workers, so the WAL grew unbounded (observed ~300 MB). TRUNCATE forces a full
 // checkpoint + truncate when no writer holds the lock.
-setInterval(() => {
-  try { db.pragma('wal_checkpoint(TRUNCATE)'); } catch {}
-}, 5 * 60 * 1000).unref();
+if (!process.env.USE_POSTGRES || process.env.USE_POSTGRES === 'false') {
+  setInterval(() => {
+    try { db.pragma('wal_checkpoint(TRUNCATE)'); } catch {}
+  }, 5 * 60 * 1000).unref();
+}
 
 db.exec(`CREATE TABLE IF NOT EXISTS _migrations (
   name     TEXT PRIMARY KEY,
@@ -1916,9 +1918,10 @@ function pruneConfluenceSignals(): void {
     console.error('[DB] confluence_signals prune failed:', (err as Error).message);
   }
 }
-// Defer the first prune so server startup is never blocked by the initial cleanup.
-setTimeout(pruneConfluenceSignals, 30_000).unref();
-setInterval(pruneConfluenceSignals, 6 * 60 * 60 * 1000).unref();
+if (!process.env.USE_POSTGRES || process.env.USE_POSTGRES === 'false') {
+  setTimeout(pruneConfluenceSignals, 30_000).unref();
+  setInterval(pruneConfluenceSignals, 6 * 60 * 60 * 1000).unref();
+}
 
 // Keep startup diagnostics off stdout so stdio-based clients can parse JSON-RPC.
 console.error('[DB] Schema normalization complete (Phase 3.5)');

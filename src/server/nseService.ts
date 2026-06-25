@@ -37,31 +37,27 @@ export function syncNSEStocksToDatabase(): { success: boolean; message: string; 
               last_updated = CURRENT_TIMESTAMP
           `;
 
-        const { inserted, updated } = await dbTransaction(async (tx) => {
-          let inserted = 0;
-          let updated = 0;
-          for (const stock of stocks) {
-            const result = await tx.run(insertSql, [
-              stock.symbol,
-              stock.name,
-              stock.sector,
-              stock.industry,
-              stock.isin,
-              stock.listing_date || null,
-              'NSE',
-              'ACTIVE',
-            ]);
+        const BATCH_SIZE = 100;
+        const ROW_PH = `(?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)`;
+        const COLS = `symbol,name,sector,industry,isin,listing_date,exchange,status,last_updated`;
+        const CONFLICT = `name=excluded.name,sector=excluded.sector,industry=excluded.industry,`
+          + `isin=excluded.isin,listing_date=excluded.listing_date,last_updated=CURRENT_TIMESTAMP`;
 
-            // If lastInsertRowid is 0, it was an update
-            if (result.changes > 0) {
-              if (result.lastInsertRowid && Number(result.lastInsertRowid) > 0) {
-                inserted++;
-              } else {
-                updated++;
-              }
-            }
+        let inserted = 0;
+        let updated = 0;
+        await dbTransaction(async (tx) => {
+          for (let i = 0; i < stocks.length; i += BATCH_SIZE) {
+            const chunk = stocks.slice(i, i + BATCH_SIZE);
+            const sql = `INSERT INTO nse_stocks (${COLS}) VALUES ${chunk.map(() => ROW_PH).join(',')}
+              ON CONFLICT(symbol) DO UPDATE SET ${CONFLICT}`;
+            const params = chunk.flatMap(s => [
+              s.symbol, s.name, s.sector, s.industry, s.isin,
+              s.listing_date || null, 'NSE', 'ACTIVE',
+            ]);
+            const result = await tx.run(sql, params);
+            inserted += result.changes ?? 0;
           }
-          return { inserted, updated };
+          updated = stocks.length - inserted;
         });
 
         console.log(`✅ NSE Stocks Sync: Inserted ${inserted}, Updated ${updated} from ${stocks.length} stocks`);
