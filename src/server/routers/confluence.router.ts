@@ -78,8 +78,6 @@ export const confluenceRouter = router({
   // Sector momentum matrix
   getSectorMomentumMatrix: publicProcedure
     .query(async () => {
-      const latestBatch = (await dbGet<any>('SELECT MAX(computed_at) as ts FROM confluence_signals'))?.ts;
-      if (!latestBatch) return [];
       return dbAll(`
         SELECT
           sector,
@@ -89,29 +87,30 @@ export const confluenceRouter = router({
           MAX(confluence_score) as max_score,
           GROUP_CONCAT(CASE WHEN conviction_level = 'ELITE' THEN symbol END, ',') as elite_symbols
         FROM confluence_signals
-        WHERE computed_at = ? AND sector IS NOT NULL AND sector != ''
+        WHERE computed_at = (SELECT MAX(computed_at) FROM confluence_signals)
+          AND sector IS NOT NULL AND sector != ''
         GROUP BY sector
         ORDER BY avg_score DESC
         LIMIT 30
-      `, [latestBatch]);
+      `);
     }),
 
   // Summary stats for the dashboard header
   getConfluenceStats: publicProcedure
     .query(async () => {
-      const latestBatch = (await dbGet<any>('SELECT MAX(computed_at) as ts FROM confluence_signals'))?.ts;
-      if (!latestBatch) return { total: 0, elite: 0, strong: 0, moderate: 0, avgScore: 0, lastComputed: null };
       const row = await dbGet<any>(`
         SELECT
           COUNT(*) as total,
           COUNT(CASE WHEN conviction_level = 'ELITE'    THEN 1 END) as elite,
           COUNT(CASE WHEN conviction_level = 'STRONG'   THEN 1 END) as strong,
           COUNT(CASE WHEN conviction_level = 'MODERATE' THEN 1 END) as moderate,
-          ROUND(AVG(confluence_score), 1) as "avgScore"
+          ROUND(AVG(confluence_score), 1) as "avgScore",
+          MAX(computed_at) as lastComputed
         FROM confluence_signals
-        WHERE computed_at = ?
-      `, [latestBatch]);
-      return { ...row, lastComputed: latestBatch };
+        WHERE computed_at = (SELECT MAX(computed_at) FROM confluence_signals)
+      `);
+      if (!row?.total) return { total: 0, elite: 0, strong: 0, moderate: 0, avgScore: 0, lastComputed: null };
+      return row;
     }),
 
   // Signal outcome analytics

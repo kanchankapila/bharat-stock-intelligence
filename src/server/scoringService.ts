@@ -114,13 +114,22 @@ function mapRecToScoredStock(rec: any): ScoredStock {
   };
 }
 
+const _topRatedCache = new Map<string, { data: ScoredStock[]; expires: number }>();
+const TOP_RATED_TTL_MS = 2 * 60 * 1000; // 2-minute in-process cache
+
 /**
  * Get top rated stocks. Long-term reads the canonical cross-source ranking
  * (unified_recommendations); intraday stays on stock_scores (the ranker has negligible
  * intraday coverage). Falls back to stock_scores if the ranker has produced no rows yet.
  */
 export async function getTopRatedStocks(limit: number = 50, timeframe: string = 'long_term'): Promise<ScoredStock[]> {
+  const cacheKey = `${timeframe}:${limit}`;
+  const cached = _topRatedCache.get(cacheKey);
+  if (cached && cached.expires > Date.now()) return cached.data;
+
   try {
+    let result: ScoredStock[];
+
     if (timeframe === 'long_term') {
       const recs = await dbAll<any>(`
         SELECT * FROM unified_recommendations
@@ -128,7 +137,11 @@ export async function getTopRatedStocks(limit: number = 50, timeframe: string = 
         ORDER BY unified_score DESC
         LIMIT ?
       `, [limit]);
-      if (recs.length > 0) return recs.map(mapRecToScoredStock);
+      if (recs.length > 0) {
+        result = recs.map(mapRecToScoredStock);
+        _topRatedCache.set(cacheKey, { data: result, expires: Date.now() + TOP_RATED_TTL_MS });
+        return result;
+      }
     }
 
     const rows = await dbAll<any>(`
@@ -138,10 +151,12 @@ export async function getTopRatedStocks(limit: number = 50, timeframe: string = 
       LIMIT ?
     `, [timeframe, limit]);
 
-    return rows.map(row => ({
+    result = rows.map(row => ({
       ...row,
-      reasons: JSON.parse(row.reasons || '[]')
+      reasons: (() => { try { return JSON.parse(row.reasons || '[]'); } catch { return []; } })(),
     }));
+    _topRatedCache.set(cacheKey, { data: result, expires: Date.now() + TOP_RATED_TTL_MS });
+    return result;
   } catch (error) {
     console.error('❌ Error fetching top rated stocks:', error);
     return [];
