@@ -2004,6 +2004,34 @@ runMigration('056_trendlyne_adv_tech_and_overview', `
   ALTER TABLE technical_signals ADD COLUMN last_dividend_amt   REAL;
 `);
 
+runMigration('057_mc_pricefeed_and_patterns', `
+  ALTER TABLE technical_signals ADD COLUMN mc_52w_high_dist_pct REAL;
+  ALTER TABLE technical_signals ADD COLUMN mc_52w_low_dist_pct  REAL;
+  ALTER TABLE technical_signals ADD COLUMN mc_days_from_52wh    INTEGER;
+  ALTER TABLE technical_signals ADD COLUMN mc_cagr_3y           REAL;
+  ALTER TABLE technical_signals ADD COLUMN mc_cagr_5y           REAL;
+  ALTER TABLE technical_signals ADD COLUMN mc_ind_pe            REAL;
+  ALTER TABLE technical_signals ADD COLUMN mc_pe_vs_ind         REAL;
+  ALTER TABLE technical_signals ADD COLUMN mc_consensus_pe      REAL;
+  ALTER TABLE technical_signals ADD COLUMN mc_ma50_dist_pct     REAL;
+  ALTER TABLE technical_signals ADD COLUMN mc_ma200_dist_pct    REAL;
+  ALTER TABLE technical_signals ADD COLUMN mc_del_pct_20d       REAL;
+  ALTER TABLE technical_signals ADD COLUMN mc_vol_ratio         REAL;
+  ALTER TABLE technical_signals ADD COLUMN mc_circuit_dist_pct  REAL;
+  ALTER TABLE technical_signals ADD COLUMN mc_cp_bull_count     INTEGER;
+  ALTER TABLE technical_signals ADD COLUMN mc_cp_bear_count     INTEGER;
+  ALTER TABLE technical_signals ADD COLUMN mc_cp_net_score      INTEGER;
+  ALTER TABLE technical_signals ADD COLUMN mc_cp_avg_target_pct REAL;
+  ALTER TABLE technical_signals ADD COLUMN tl_vs_nifty_1m       REAL;
+  ALTER TABLE technical_signals ADD COLUMN tl_vs_nifty_3m       REAL;
+  ALTER TABLE technical_signals ADD COLUMN tl_vs_nifty_6m       REAL;
+  ALTER TABLE technical_signals ADD COLUMN tl_vs_ind_1m         REAL;
+  ALTER TABLE technical_signals ADD COLUMN tl_vs_ind_3m         REAL;
+  ALTER TABLE technical_signals ADD COLUMN tl_seasonal_month_5y REAL;
+  ALTER TABLE technical_signals ADD COLUMN tl_dist_3m_high_pct  REAL;
+  ALTER TABLE technical_signals ADD COLUMN tl_dist_3m_low_pct   REAL;
+`);
+
 // ── Retention: confluence_signals is an append-only firehose (~700k rows, the single
 // largest contributor to DB bloat). expires_at exists but nothing pruned it. Delete
 // expired rows on boot and every 6h. Keeps the table bounded without losing live signals.

@@ -389,6 +389,56 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     X['div_recency']     = np.log1p(num('days_since_dividend', 90).clip(0, 365))
     X['last_div_log']    = np.log1p(num('last_dividend_amt', 0.0).clip(lower=0))
 
+    # ── MC Pricefeed (from mc_pricefeed_fetcher.py) ──
+    # 52-week position: near 52w high = momentum; near 52w low = reversal candidate
+    X['mc_52w_high_dist'] = num('mc_52w_high_dist_pct', -10.0).clip(-60, 0)      # dist from 52wH (≤0)
+    X['mc_52w_low_dist']  = num('mc_52w_low_dist_pct',  20.0).clip(0, 100)       # dist from 52wL (≥0)
+    X['mc_days_from_52wh']= np.log1p(num('mc_days_from_52wh', 90).clip(0, 365))  # log-days since peak
+    # CAGR: long-run price trend (quality of business compound growth)
+    X['mc_cagr_3y']       = num('mc_cagr_3y', 10.0).clip(-30, 100)
+    X['mc_cagr_5y']       = num('mc_cagr_5y', 10.0).clip(-30, 100)
+    # Industry P/E and relative valuation (IND_PE = avg PE of entire sector)
+    X['mc_ind_pe']        = num('mc_ind_pe', 30.0).clip(5, 100) / 100.0
+    X['mc_pe_vs_ind']     = num('mc_pe_vs_ind', 0.0).clip(-0.5, 1.0)   # PE/IND_PE - 1
+    X['mc_consensus_pe']  = num('mc_consensus_pe', 25.0).clip(0, 100) / 100.0
+    # MA distance: price above/below 50 and 200 DMA
+    X['mc_ma50_dist']     = num('mc_ma50_dist_pct', 0.0).clip(-20, 20)
+    X['mc_ma200_dist']    = num('mc_ma200_dist_pct', 0.0).clip(-30, 30)
+    # Delivery % 20-day average (institutional quality of trading)
+    X['mc_del_pct_20d']   = num('mc_del_pct_20d', 50.0).clip(0, 100) / 100.0
+    # Volume ratio (today vs 20d avg): >1 = unusual activity
+    X['mc_vol_ratio_log'] = np.log1p(num('mc_vol_ratio', 1.0).clip(lower=0))
+    # Distance to upper circuit limit: near circuit = high volatility risk
+    X['mc_circuit_dist']  = num('mc_circuit_dist_pct', 10.0).clip(0, 20)
+    # MA golden/death cross indicator: both above 200DMA = uptrend confirmation
+    X['mc_above_200dma']  = (X['mc_ma200_dist'] > 0).astype(float)
+    X['mc_above_50dma']   = (X['mc_ma50_dist'] > 0).astype(float)
+
+    # ── MC Chart Patterns (from mc_chart_patterns_fetcher.py) ──
+    # MC's professional pattern analysis: bullish/bearish count from technical charts.
+    # bull_count=3 means 3 active buy-side patterns; net_score=bull-bear.
+    X['mc_cp_bull_count'] = num('mc_cp_bull_count', 0).clip(0, 12) / 12.0    # normalised
+    X['mc_cp_bear_count'] = num('mc_cp_bear_count', 0).clip(0, 12) / 12.0
+    X['mc_cp_net_score']  = num('mc_cp_net_score', 0).clip(-12, 12) / 12.0
+    X['mc_cp_target_pct'] = num('mc_cp_avg_target_pct', 0.0).clip(0, 30)     # avg upside %
+    # Pattern conviction × signal conviction: overlapping bull signals
+    X['mc_cp_x_score']    = X['mc_cp_net_score'].clip(lower=0) * X['signal_score']
+
+    # ── Trendlyne Price Analysis (from trendlyne_price_analysis_fetcher.py) ──
+    # Cross-sectional alpha: outperforming Nifty suggests stock-specific momentum
+    X['tl_alpha_nifty_1m'] = num('tl_vs_nifty_1m', 0.0).clip(-20, 30)
+    X['tl_alpha_nifty_3m'] = num('tl_vs_nifty_3m', 0.0).clip(-30, 50)
+    X['tl_alpha_nifty_6m'] = num('tl_vs_nifty_6m', 0.0).clip(-40, 70)
+    X['tl_alpha_ind_1m']   = num('tl_vs_ind_1m',   0.0).clip(-20, 30)
+    X['tl_alpha_ind_3m']   = num('tl_vs_ind_3m',   0.0).clip(-30, 50)
+    # Monthly seasonality: 5-year avg return for current calendar month
+    X['tl_seasonality']   = num('tl_seasonal_month_5y', 0.0).clip(-10, 20)
+    # Distance from quarterly high/low
+    X['tl_3m_high_dist']  = num('tl_dist_3m_high_pct', -5.0).clip(-40, 0)   # ≤0
+    X['tl_3m_low_dist']   = num('tl_dist_3m_low_pct',  10.0).clip(0, 80)    # ≥0
+    # Alpha persistence: positive 3M alpha + positive seasonal = sustained momentum
+    X['tl_alpha_x_season'] = X['tl_alpha_nifty_3m'].clip(0, 50) * X['tl_seasonality'].clip(0, 20) / 50.0
+
     # NOTE: market-level India VIX + breadth were tested as ensemble features (raw and as
     # cross-sectional interactions) and BOTH hurt held-out AUC vs omitting them entirely
     # (baseline cv 0.651/held-out 0.543; interactions 0.640/0.531; raw 0.606/0.493). They add
@@ -510,6 +560,14 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                ts.promoter_pct, ts.fii_pct, ts.pledge_pct,
                ts.rev_growth_yoy_q, ts.np_growth_yoy_q,
                ts.days_since_dividend, ts.last_dividend_amt,
+               ts.mc_52w_high_dist_pct, ts.mc_52w_low_dist_pct, ts.mc_days_from_52wh,
+               ts.mc_cagr_3y, ts.mc_cagr_5y, ts.mc_ind_pe, ts.mc_pe_vs_ind,
+               ts.mc_consensus_pe, ts.mc_ma50_dist_pct, ts.mc_ma200_dist_pct,
+               ts.mc_del_pct_20d, ts.mc_vol_ratio, ts.mc_circuit_dist_pct,
+               ts.mc_cp_bull_count, ts.mc_cp_bear_count, ts.mc_cp_net_score, ts.mc_cp_avg_target_pct,
+               ts.tl_vs_nifty_1m, ts.tl_vs_nifty_3m, ts.tl_vs_nifty_6m,
+               ts.tl_vs_ind_1m, ts.tl_vs_ind_3m,
+               ts.tl_seasonal_month_5y, ts.tl_dist_3m_high_pct, ts.tl_dist_3m_low_pct,
                COALESCE(fh.fifty_two_week_high, sf.fifty_two_week_high) AS fifty_two_week_high,
                COALESCE(fh.piotroski_f_score, sf.piotroski_f_score)     AS piotroski_f_score,
                COALESCE(fh.debt_to_equity, sf.debt_to_equity)           AS debt_to_equity,

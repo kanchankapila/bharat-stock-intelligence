@@ -477,6 +477,14 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await runPython('block_deal_fetcher.py', ['--days', '1'], 60_000)
     .catch(e => console.warn('[QUEUE] block_deal_fetcher failed:', (e as Error).message));
 
+  // MC pricefeed: IND_PE, CAGR 3/5y, consensus PE/PB, 200DMA distance, delivery avg, 52w position.
+  await runPython('mc_pricefeed_fetcher.py', [], 5 * 60_000)
+    .catch(e => console.warn('[QUEUE] mc_pricefeed_fetcher failed:', (e as Error).message));
+
+  // MC chart patterns: professional pattern detection with target price, stop-loss, direction.
+  await runPython('mc_chart_patterns_fetcher.py', [], 5 * 60_000)
+    .catch(e => console.warn('[QUEUE] mc_chart_patterns_fetcher failed:', (e as Error).message));
+
   // Earnings beat features (reads stock_earnings_beats, refreshed weekly by earnings_surprise_fetcher).
   // Writes eps_beat_last_q / eps_beat_streak_4q / eps_miss_streak_4q → technical_signals.
   await runPython('earnings_beat_features.py', [], 60_000)
@@ -556,6 +564,9 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean }> 
   // Trendlyne overview: analyst targets, board meetings, dividends + fundamental profile.
   await runPython('trendlyne_overview_fetcher.py', [], 30 * 60_000)
     .catch(e => console.warn('[QUEUE] trendlyne_overview_fetcher failed:', (e as Error).message));
+  // Trendlyne price analysis: alpha vs Nifty/Industry, monthly seasonality per stock.
+  await runPython('trendlyne_price_analysis_fetcher.py', [], 20 * 60_000)
+    .catch(e => console.warn('[QUEUE] trendlyne_price_analysis_fetcher failed:', (e as Error).message));
   await runPython('outcome_resolver.py', ['--horizon', '5']);
   await runPython('outcome_resolver.py', ['--horizon', '15']);
   await runPython('ml_ensemble.py', ['--train', '--score'], 60 * 60_000);
