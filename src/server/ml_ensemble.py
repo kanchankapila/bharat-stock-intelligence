@@ -469,6 +469,21 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     # Alpha persistence: positive 3M alpha + positive seasonal = sustained momentum
     X['tl_alpha_x_season'] = X['tl_alpha_nifty_3m'].clip(0, 50) * X['tl_seasonality'].clip(0, 20) / 50.0
 
+    # ── NiftyTrader F&O Dashboard (from nt_dashboard_fetcher.py) ──
+    # Max pain: price gravitates toward max_pain near expiry (market-maker pinning effect).
+    # Negative dist = price below max pain = upward pull; large positive = sell pressure expected.
+    X['nt_max_pain_dist'] = num('nt_max_pain_dist_pct', 0.0).clip(-15, 15)
+    X['nt_near_max_pain'] = (X['nt_max_pain_dist'].abs() < 3.0).astype(float)  # within 3% = gravitational zone
+    # OI direction: (puts_Δoi - calls_Δoi) / total_oi. Positive = put side building (bearish).
+    # Negative = calls unwound faster than puts (bullish smart-money signal).
+    X['nt_oi_direction']  = num('nt_oi_direction', 0.0).clip(-0.3, 0.3)
+    # PCR: <1 = more call OI than put OI (often contrarian bullish when extreme)
+    X['nt_pcr']           = num('nt_pcr', 1.0).clip(0, 3)
+    # Option volume: log-scaled activity — high volume = event anticipation / institutional move
+    X['nt_option_vol']    = num('nt_option_volume_log', 0.0).clip(0, 25)
+    # Interaction: bearish OI direction weakening an already-low signal score = conviction short
+    X['nt_oi_x_score']    = X['nt_oi_direction'] * X['signal_score']  # negative = bearish pile-on
+
     # NOTE: market-level India VIX + breadth were tested as ensemble features (raw and as
     # cross-sectional interactions) and BOTH hurt held-out AUC vs omitting them entirely
     # (baseline cv 0.651/held-out 0.543; interactions 0.640/0.531; raw 0.606/0.493). They add
@@ -602,6 +617,7 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                ts.tl_vs_nifty_1m, ts.tl_vs_nifty_3m, ts.tl_vs_nifty_6m,
                ts.tl_vs_ind_1m, ts.tl_vs_ind_3m,
                ts.tl_seasonal_month_5y, ts.tl_dist_3m_high_pct, ts.tl_dist_3m_low_pct,
+               ts.nt_max_pain_dist_pct, ts.nt_oi_direction, ts.nt_pcr, ts.nt_option_volume_log,
                COALESCE(fh.fifty_two_week_high, sf.fifty_two_week_high) AS fifty_two_week_high,
                COALESCE(fh.piotroski_f_score, sf.piotroski_f_score)     AS piotroski_f_score,
                COALESCE(fh.debt_to_equity, sf.debt_to_equity)           AS debt_to_equity,
@@ -730,6 +746,7 @@ def load_pending_signals() -> pd.DataFrame:
                ts.tl_vs_nifty_1m, ts.tl_vs_nifty_3m, ts.tl_vs_nifty_6m,
                ts.tl_vs_ind_1m, ts.tl_vs_ind_3m,
                ts.tl_seasonal_month_5y, ts.tl_dist_3m_high_pct, ts.tl_dist_3m_low_pct,
+               ts.nt_max_pain_dist_pct, ts.nt_oi_direction, ts.nt_pcr, ts.nt_option_volume_log,
                sf.fifty_two_week_high,
                sf.piotroski_f_score, sf.debt_to_equity, sf.operating_margins,
                sf.return_on_equity, sf.revenue_growth, sf.earnings_growth,

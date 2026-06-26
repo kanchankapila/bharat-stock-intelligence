@@ -485,6 +485,11 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await runPython('mc_chart_patterns_fetcher.py', [], 5 * 60_000)
     .catch(e => console.warn('[QUEUE] mc_chart_patterns_fetcher failed:', (e as Error).message));
 
+  // NiftyTrader F&O dashboard: max_pain per stock + directional OI flow (calls vs puts Δoi)
+  // for all 147 F&O stocks in a single API call — daily because max pain shifts each session.
+  await runPython('nt_dashboard_fetcher.py', [], 2 * 60_000)
+    .catch(e => console.warn('[QUEUE] nt_dashboard_fetcher failed:', (e as Error).message));
+
   // Earnings beat features (reads stock_earnings_beats, refreshed weekly by earnings_surprise_fetcher).
   // Writes eps_beat_last_q / eps_beat_streak_4q / eps_miss_streak_4q → technical_signals.
   await runPython('earnings_beat_features.py', [], 60_000)

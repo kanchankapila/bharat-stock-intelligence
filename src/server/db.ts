@@ -2049,6 +2049,13 @@ runMigration('058_mc_unique_fields', `
   ALTER TABLE technical_signals ADD COLUMN mc_pe_fwd_discount   REAL;
 `);
 
+runMigration('059_nt_fno_dashboard', `
+  ALTER TABLE technical_signals ADD COLUMN nt_max_pain_dist_pct REAL;
+  ALTER TABLE technical_signals ADD COLUMN nt_oi_direction       REAL;
+  ALTER TABLE technical_signals ADD COLUMN nt_pcr                REAL;
+  ALTER TABLE technical_signals ADD COLUMN nt_option_volume_log  REAL;
+`);
+
 // ── Retention: confluence_signals is an append-only firehose (~700k rows, the single
 // largest contributor to DB bloat). expires_at exists but nothing pruned it. Delete
 // expired rows on boot and every 6h. Keeps the table bounded without losing live signals.
