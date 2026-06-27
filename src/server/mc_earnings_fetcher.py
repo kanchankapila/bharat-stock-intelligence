@@ -672,57 +672,70 @@ def fetch_market_dashboard(con) -> None:
 
 def fetch_actual_estimate_beats(con, max_pages: int = 25) -> None:
     """
-    Paginates the actual-estimate endpoint (25 pages × 21 = ~525 stocks).
-    Extracts:
+    Paginates actual-estimate across three types for maximum stock coverage:
+      type=all (25p, ~521 stocks), type=con (24p, ~466), type=std (23p, ~483)
+    Union gives ~650+ unique stocks vs 521 from type=all alone.
+
+    Preference: consolidated > standalone > all (when same scId appears in multiple types).
+
+    Writes:
       eps_beat_last_q  — 1=Beats, 0=Meets, -1=Missed Expectations
       mc_eps_vs_cons   — % vs analyst consensus (positive=beat, negative=miss)
-
-    Join: scId field = mcsymbol in nse_stocks → symbol.
     """
-    # Build scid→symbol map from nse_stocks
     cur = con.cursor()
     cur.execute("SELECT mcsymbol, symbol FROM nse_stocks WHERE mcsymbol IS NOT NULL AND mcsymbol != ''")
     scid_map = {row[0]: row[1] for row in cur.fetchall()}
 
-    rows_by_symbol: dict = {}  # symbol → (beat_label, beat_pct)
+    # symbol → (beat_label, beat_pct, type_priority)
+    # type_priority: con=3 > std=2 > all=1 (prefer consolidated)
+    rows_by_symbol: dict = {}
 
-    for page in range(1, max_pages + 1):
-        url = (
-            f"https://api.moneycontrol.com/mcapi/v1/earnings/actual-estimate"
-            f"?page={page}&sortBy=all&search=&indexId=N&sector=&type=all"
-        )
-        data = _get(url)
-        if not data:
-            break
-        items = data.get("list") or []
-        if not items:
-            break
+    TYPES = [
+        ("all", max_pages,   1),
+        ("con", max_pages,   3),
+        ("std", max_pages-2, 2),  # user noted std goes to page 23
+    ]
 
-        for item in items:
-            if len(item) < 9:
-                continue
-            sc_id        = str(item[0]).strip()
-            expectations = str(item[7]).strip()   # "Beats Expectations" / "Missed Expectations"
-            beat_pct     = _safe_float(item[8])   # % vs consensus
-
-            symbol = scid_map.get(sc_id)
-            if not symbol:
-                continue
-
-            label = (
-                1 if "Beats" in expectations
-                else -1 if "Missed" in expectations
-                else 0
+    for type_code, pages, priority in TYPES:
+        for page in range(1, pages + 1):
+            url = (
+                f"https://api.moneycontrol.com/mcapi/v1/earnings/actual-estimate"
+                f"?page={page}&sortBy=all&search=&indexId=N&sector=&type={type_code}"
             )
-            rows_by_symbol[symbol] = (label, beat_pct)
+            data = _get(url)
+            if not data:
+                break
+            items = data.get("list") or []
+            if not items:
+                break
 
-        time.sleep(RATE_LIMIT_SEC)
+            for item in items:
+                if len(item) < 9:
+                    continue
+                sc_id        = str(item[0]).strip()
+                expectations = str(item[7]).strip()
+                beat_pct     = _safe_float(item[8])
+
+                symbol = scid_map.get(sc_id)
+                if not symbol:
+                    continue
+
+                label = (
+                    1 if "Beats" in expectations
+                    else -1 if "Missed" in expectations
+                    else 0
+                )
+                existing = rows_by_symbol.get(symbol)
+                if existing is None or priority > existing[2]:
+                    rows_by_symbol[symbol] = (label, beat_pct, priority)
+
+            time.sleep(RATE_LIMIT_SEC)
 
     if not rows_by_symbol:
         print("[EarningsFetcher] actual-estimate: no matched symbols")
         return
 
-    # Stamp most-recent ts row per symbol
+    # Stamp most-recent ts row per symbol (strip priority from tuple)
     if use_postgres():
         cur.execute("""
             UPDATE technical_signals ts
@@ -734,11 +747,11 @@ def fetch_actual_estimate_beats(con, max_pages: int = 25) -> None:
         """.format(
             ", ".join(
                 f"('{sym}', {lbl}, {pct if pct is not None else 'NULL'})"
-                for sym, (lbl, pct) in rows_by_symbol.items()
+                for sym, (lbl, pct, _) in rows_by_symbol.items()
             )
         ))
     else:
-        for sym, (lbl, pct) in rows_by_symbol.items():
+        for sym, (lbl, pct, _) in rows_by_symbol.items():
             cur.execute(
                 "UPDATE technical_signals SET eps_beat_last_q = ?, mc_eps_vs_cons = ? "
                 "WHERE symbol = ? AND date = (SELECT MAX(date) FROM technical_signals t2 WHERE t2.symbol = ?)",
@@ -746,9 +759,9 @@ def fetch_actual_estimate_beats(con, max_pages: int = 25) -> None:
             )
     con.commit()
 
-    beats   = sum(1 for lbl, _ in rows_by_symbol.values() if lbl == 1)
-    misses  = sum(1 for lbl, _ in rows_by_symbol.values() if lbl == -1)
-    meets   = sum(1 for lbl, _ in rows_by_symbol.values() if lbl == 0)
+    beats  = sum(1 for lbl, _, _ in rows_by_symbol.values() if lbl == 1)
+    misses = sum(1 for lbl, _, _ in rows_by_symbol.values() if lbl == -1)
+    meets  = sum(1 for lbl, _, _ in rows_by_symbol.values() if lbl == 0)
     print(
         f"[EarningsFetcher] actual-estimate: {len(rows_by_symbol)} stocks stamped "
         f"(Beats={beats}, Meets={meets}, Missed={misses})"
