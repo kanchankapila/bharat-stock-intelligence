@@ -354,7 +354,7 @@ def fetch_rapid_results(con) -> None:
     mapped = _backfill_rapid_features(con)
 
     counts_str = ", ".join(f"{t}:{category_counts[t]}" for t in RAPID_TYPES)
-    print(f"[EarningsFetcher] Rapid: {total} total ({counts_str}) → {mapped} mapped to NSE symbols")
+    print(f"[EarningsFetcher] Rapid: {total} total ({counts_str}) -> {mapped} mapped to NSE symbols")
 
 
 def _backfill_rapid_features(con) -> int:
