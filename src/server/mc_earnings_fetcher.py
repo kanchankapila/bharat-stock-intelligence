@@ -39,7 +39,7 @@ RATE_LIMIT_SEC = 0.4
 
 RAPID_TYPES = ["BP", "WP", "PT", "NT", "LR"]
 RAPID_SUBTYPES = ["yoy", "qoq"]
-RAPID_PAGES = 5
+RAPID_PAGES = 1   # limit=10000 fetches all in one request
 
 CATEGORY_SCORE = {"BP": 2, "PT": 1, "LR": 0, "WP": -1, "NT": -2}
 
@@ -259,7 +259,7 @@ def fetch_rapid_results(con) -> None:
             for page in range(1, RAPID_PAGES + 1):
                 url = (
                     f"https://api.moneycontrol.com/mcapi/v1/earnings/rapid-results"
-                    f"?limit=50&page={page}&type={rtype}&subType={sub_type}"
+                    f"?limit=10000&page={page}&type={rtype}&subType={sub_type}"
                 )
                 data = _get(url)
                 if not data:
@@ -321,9 +321,7 @@ def fetch_rapid_results(con) -> None:
                         continue
 
                 time.sleep(RATE_LIMIT_SEC)
-
-                if len(items) < 50:
-                    break  # last page
+                break  # limit=10000 returns all in one request
 
     # Upsert all rows
     if all_rows:
@@ -435,7 +433,7 @@ def _backfill_rapid_features(con) -> int:
 # ── API 3: Price shockers ────────────────────────────────────────────────────────
 
 def fetch_price_shockers(con) -> None:
-    url = "https://api.moneycontrol.com/mcapi/v1/earnings/price-shockers?limit=50&page=1"
+    url = "https://api.moneycontrol.com/mcapi/v1/earnings/price-shockers?limit=10000&page=1"
     data = _get(url)
     if not data:
         print("[EarningsFetcher] Shockers: no data returned")
@@ -690,46 +688,40 @@ def fetch_actual_estimate_beats(con, max_pages: int = 25) -> None:
     # type_priority: con=3 > std=2 > all=1 (prefer consolidated)
     rows_by_symbol: dict = {}
 
-    TYPES = [
-        ("all", max_pages,   1),
-        ("con", max_pages,   3),
-        ("std", max_pages-2, 2),  # user noted std goes to page 23
-    ]
+    # limit=10000 returns all results in a single request per type
+    TYPES = [("all", 1), ("con", 3), ("std", 2)]  # (type_code, priority)
 
-    for type_code, pages, priority in TYPES:
-        for page in range(1, pages + 1):
-            url = (
-                f"https://api.moneycontrol.com/mcapi/v1/earnings/actual-estimate"
-                f"?page={page}&sortBy=all&search=&indexId=N&sector=&type={type_code}"
+    for type_code, priority in TYPES:
+        url = (
+            f"https://api.moneycontrol.com/mcapi/v1/earnings/actual-estimate"
+            f"?page=1&limit=10000&sortBy=all&search=&indexId=N&sector=&type={type_code}"
+        )
+        data = _get(url)
+        if not data:
+            continue
+        items = data.get("list") or []
+
+        for item in items:
+            if len(item) < 9:
+                continue
+            sc_id        = str(item[0]).strip()
+            expectations = str(item[7]).strip()
+            beat_pct     = _safe_float(item[8])
+
+            symbol = scid_map.get(sc_id)
+            if not symbol:
+                continue
+
+            label = (
+                1 if "Beats" in expectations
+                else -1 if "Missed" in expectations
+                else 0
             )
-            data = _get(url)
-            if not data:
-                break
-            items = data.get("list") or []
-            if not items:
-                break
+            existing = rows_by_symbol.get(symbol)
+            if existing is None or priority > existing[2]:
+                rows_by_symbol[symbol] = (label, beat_pct, priority)
 
-            for item in items:
-                if len(item) < 9:
-                    continue
-                sc_id        = str(item[0]).strip()
-                expectations = str(item[7]).strip()
-                beat_pct     = _safe_float(item[8])
-
-                symbol = scid_map.get(sc_id)
-                if not symbol:
-                    continue
-
-                label = (
-                    1 if "Beats" in expectations
-                    else -1 if "Missed" in expectations
-                    else 0
-                )
-                existing = rows_by_symbol.get(symbol)
-                if existing is None or priority > existing[2]:
-                    rows_by_symbol[symbol] = (label, beat_pct, priority)
-
-            time.sleep(RATE_LIMIT_SEC)
+        time.sleep(RATE_LIMIT_SEC)
 
     if not rows_by_symbol:
         print("[EarningsFetcher] actual-estimate: no matched symbols")
