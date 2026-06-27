@@ -488,6 +488,23 @@ def run(mode: str = "known", single_pk: int | None = None):
         ).fetchall()
         print("[Discovery] By category:", {r[0]: r[1] for r in rows})
 
+        # Log to screener_runs table (using existing schema: run_id/screener_id/run_ts/symbol_count)
+        try:
+            run_id = f"tl_discovery_{datetime.date.today().isoformat()}_{mode}"
+            con.execute("""
+                INSERT INTO screener_runs
+                (run_id, screener_id, run_ts, symbol_count, triggered_by)
+                VALUES (?, 'ALL_TRENDLYNE', NOW(), ?, ?)
+                ON CONFLICT(run_id) DO UPDATE SET
+                    symbol_count = excluded.symbol_count,
+                    run_ts = excluded.run_ts
+            """, (run_id, n_stocks, f"discovery_{mode}"))
+            con.commit()
+            print(f"[Discovery] Logged run to screener_runs: {run_id} ({n_stocks} distinct stocks)")
+        except Exception as e2:
+            con.execute("ROLLBACK")
+            print(f"[Discovery] Could not log to screener_runs: {e2}")
+
     finally:
         con.close()
 

@@ -524,6 +524,14 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await runPython('screener_features_fetcher.py', [], 5 * 60_000)
     .catch(e => console.warn('[QUEUE] screener_features_fetcher failed:', (e as Error).message));
 
+  // Sector screener rotation: aggregate bull/bear signals by sector
+  await runPython('screener_sector_rotation.py', [], 2 * 60_000)
+    .catch(e => console.warn('[QUEUE] screener_sector_rotation failed:', (e as Error).message));
+
+  // Screener surfacing alerts: new screener entries → unified_signals
+  await runPython('screener_signal_generator.py', [], 3 * 60_000)
+    .catch(e => console.warn('[QUEUE] screener_signal_generator failed:', (e as Error).message));
+
   // Per-stock option chain: expected move + GEX proxy + BS-derived ATM IV → stock_option_features + stock_options_oi + technical_signals.
   await runPython('stock_option_chain_fetcher.py', [], 3 * 60_000)
     .catch(e => console.warn('[QUEUE] stock_option_chain_fetcher failed:', (e as Error).message));
@@ -666,14 +674,26 @@ async function processScreenerPerf(_job: Job): Promise<void> {
   await runPython('trendlyne_screener_discovery.py', [], 10 * 60_000)
     .catch(e => console.warn('[QUEUE] trendlyne_screener_discovery failed:', (e as Error).message));
 
-  // 2. Compute performance metrics for all screeners
+  // 2. Bulk-enrich signal_keywords + screener_url for all catalog entries (fast, no API)
+  await runPython('screener_catalog_enricher.py', [], 3 * 60_000)
+    .catch(e => console.warn('[QUEUE] screener_catalog_enricher failed:', (e as Error).message));
+
+  // 3. Compute performance metrics for all screeners
   await runPython('screener_performance.py', [], 15 * 60_000);
 
-  // 3. Stamp per-stock screener ML features into technical_signals
+  // 4. Stamp per-stock screener ML features into technical_signals
   await runPython('screener_features_fetcher.py', [], 5 * 60_000)
     .catch(e => console.warn('[QUEUE] screener_features_fetcher failed:', (e as Error).message));
 
-  // 4. Resolve live screener outcomes (needs ohlcv data to be fresh first)
+  // 5. Aggregate sector screener rotation signals
+  await runPython('screener_sector_rotation.py', [], 2 * 60_000)
+    .catch(e => console.warn('[QUEUE] screener_sector_rotation failed:', (e as Error).message));
+
+  // 6. Generate screener surfacing alerts → unified_signals
+  await runPython('screener_signal_generator.py', [], 3 * 60_000)
+    .catch(e => console.warn('[QUEUE] screener_signal_generator failed:', (e as Error).message));
+
+  // 7. Resolve live screener outcomes (needs ohlcv data to be fresh first)
   await runPython('live_screener_resolver.py', [], 3 * 60_000)
     .catch(e => console.warn('[QUEUE] live_screener_resolver failed:', (e as Error).message));
 

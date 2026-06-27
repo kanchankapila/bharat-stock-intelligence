@@ -407,7 +407,7 @@ class UnifiedRanker:
     def _get_screener_membership(self):
         membership = {}
 
-        def _add(sym, bias, conf, cat, subcat, horizon):
+        def _add(sym, bias, conf, cat, subcat, horizon, name=None):
             if not sym:
                 return
             membership.setdefault(sym, []).append({
@@ -416,21 +416,45 @@ class UnifiedRanker:
                 'category': cat or 'other',
                 'subcategory': subcat or '',
                 'investment_horizon': horizon or 'swing',
+                'screener_name': name or '',
             })
 
         for source_query in [
-            ("SELECT ss.symbol, sc.signal_bias, sc.confidence, sc.category, sc.subcategory, sc.investment_horizon FROM trendlyne_screener_stocks ss JOIN screener_catalog sc ON sc.screener_id = ss.screener_id AND sc.source = 'trendlyne'", []),
-            ("SELECT ss.symbol, sc.signal_bias, sc.confidence, sc.category, sc.subcategory, sc.investment_horizon FROM moneycontrol_screener_stocks ss JOIN screener_catalog sc ON sc.screener_id = ss.scan_id AND sc.source = 'moneycontrol'", []),
-            ("SELECT ss.symbol, sc.signal_bias, sc.confidence, sc.category, sc.subcategory, sc.investment_horizon FROM etnow_screener_stocks ss JOIN screener_catalog sc ON sc.screener_id = ss.screener_id AND sc.source = 'etnow'", []),
+            ("SELECT ss.symbol, sc.signal_bias, sc.confidence, sc.category, sc.subcategory, sc.investment_horizon, COALESCE(ts.screener_name, sc.screener_name, sc.screener_id) AS sname FROM trendlyne_screener_stocks ss JOIN screener_catalog sc ON sc.screener_id = ss.screener_id AND sc.source = 'trendlyne' LEFT JOIN trendlyne_screeners ts ON ts.screener_id = sc.screener_id", []),
+            ("SELECT ss.symbol, sc.signal_bias, sc.confidence, sc.category, sc.subcategory, sc.investment_horizon, COALESCE(sc.screener_name, sc.screener_id) AS sname FROM moneycontrol_screener_stocks ss JOIN screener_catalog sc ON sc.screener_id = ss.scan_id AND sc.source = 'moneycontrol'", []),
+            ("SELECT ss.symbol, sc.signal_bias, sc.confidence, sc.category, sc.subcategory, sc.investment_horizon, COALESCE(sc.screener_name, sc.screener_id) AS sname FROM etnow_screener_stocks ss JOIN screener_catalog sc ON sc.screener_id = ss.screener_id AND sc.source = 'etnow'", []),
         ]:
             try:
                 for r in self.conn.execute(source_query[0]).fetchall():
                     _add(r['symbol'], r['signal_bias'], r['confidence'],
-                         r['category'], r['subcategory'], r['investment_horizon'])
+                         r['category'], r['subcategory'], r['investment_horizon'],
+                         name=r['sname'])
             except Exception:
                 self.conn.rollback()
 
         return membership
+
+    def _get_screener_momentum_scores(self):
+        """Load screener_momentum_score from technical_signals (stamped by screener_features_fetcher)."""
+        cutoff = (date.today() - timedelta(days=2)).isoformat()
+        try:
+            rows = self.conn.execute(
+                "SELECT symbol, screener_momentum_score FROM technical_signals "
+                "WHERE date >= ? AND screener_momentum_score IS NOT NULL "
+                "ORDER BY date DESC",
+                (cutoff,)
+            ).fetchall()
+            # Deduplicate: keep highest per symbol
+            result = {}
+            for r in rows:
+                sym = r['symbol']
+                val = float(r['screener_momentum_score'] or 0)
+                if sym not in result or val > result[sym]:
+                    result[sym] = val
+            return result
+        except Exception:
+            self.conn.rollback()
+            return {}
 
     def _get_ml_scores(self):
         # technical_signals.date is a text column; compare against a Python-computed cutoff
@@ -664,10 +688,20 @@ class UnifiedRanker:
         quality_metrics   = self._get_quality_metrics()
         win_probs         = self._get_win_probabilities()
         membership        = self._get_screener_membership()
+        screener_momentum = self._get_screener_momentum_scores()
 
         screener_scores, bull_counts, bear_counts = compute_screener_stock_scores(
             membership, fund_scores, cat_weights=regime_cat_weights(regime)
         )
+
+        # Blend pre-computed screener_momentum_score into the screener engine (10% boost cap).
+        # Normalise momentum scores to 0-100 range before blending.
+        if screener_momentum:
+            max_mom = max(screener_momentum.values()) or 1.0
+            for sym, mom in screener_momentum.items():
+                boost = (mom / max_mom) * 10.0
+                if sym in screener_scores:
+                    screener_scores[sym] = min(100.0, screener_scores[sym] + boost)
         ml_scores         = self._get_ml_scores()
         cs_scores         = self._get_cs_scores()
         confluence_scores = self._get_confluence_scores()
@@ -719,6 +753,21 @@ class UnifiedRanker:
             vol = max(VOL_FLOOR_PCT, (qm or {}).get('vol') or DEFAULT_VOL_PCT)
             raw_sizes[sym] = (bet / vol) if classification in ('Strong Buy', 'Buy') else 0.0
             cats = sorted({s.get('category', 'other') for s in membership.get(sym, [])} - {'other', ''})
+            # Store actual screener names (not just categories) for richer UI display
+            sym_screeners = membership.get(sym, [])
+            bull_names = sorted({
+                s.get('screener_name', '') for s in sym_screeners
+                if s.get('signal_bias') == 'bullish' and s.get('screener_name')
+            })
+            bear_names = sorted({
+                s.get('screener_name', '') for s in sym_screeners
+                if s.get('signal_bias') == 'bearish' and s.get('screener_name')
+            })
+            screener_names_payload = {
+                'categories': cats,
+                'bull_screeners': bull_names[:20],
+                'bear_screeners': bear_names[:10],
+            }
             screener_summary = (
                 f"{bull} bullish / {bear} bearish screener signals ({classification}); "
                 f"regime {regime}" + (f"; drivers: {', '.join(cats[:4])}" if cats else "")
@@ -736,7 +785,7 @@ class UnifiedRanker:
                 'unified_score':           round(unified, 2),
                 'conviction_level':        _conviction(unified),
                 'classification':          classification,
-                'screener_names_json':     json.dumps(cats),
+                'screener_names_json':     json.dumps(screener_names_payload),
                 'screener_stock_score':    round(engine_scores['screener'], 2),
                 'ml_score':                round(engine_scores['ml'], 2),
                 'confluence_score':        round(engine_scores['confluence'], 2),
@@ -802,6 +851,22 @@ class UnifiedRanker:
                     position_size_pct=excluded.position_size_pct
             ''', r)
         self.conn.commit()
+
+        # Backfill sector from nse_stocks for any row still NULL/Unknown
+        try:
+            self.conn.execute("""
+                UPDATE unified_recommendations ur
+                SET sector = ns.sector
+                FROM nse_stocks ns
+                WHERE ur.symbol = ns.symbol
+                  AND ur.computed_at = ?
+                  AND (ur.sector IS NULL OR ur.sector IN ('Unknown', '', 'OTHER', 'NA'))
+                  AND ns.sector IS NOT NULL
+                  AND ns.sector NOT IN ('Unknown', '', 'OTHER', 'NA')
+            """, (today,))
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
 
         breakdown = {}
         for r in results:

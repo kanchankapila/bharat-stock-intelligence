@@ -126,19 +126,20 @@ def phase_a_bootstrap(conn: ConnWrapper) -> dict:
 # -- Phase B: Fill screener_appearances returns --------------------------------
 
 def phase_b_fill_returns(conn: ConnWrapper) -> int:
-    """Fill return columns for screener_appearances rows where return_20d IS NULL."""
+    """Fill return columns for screener_appearances rows where any short-horizon return is NULL."""
     print("[PhaseB] Filling screener_appearances returns from stock_ohlcv...")
 
     today = datetime.date.today()
-    # Only fill rows old enough for 20 trading days to have elapsed (~30 calendar days)
-    cutoff_20d = (today - datetime.timedelta(days=30)).isoformat()
+    # Use the shortest horizon (5 trading days ≈ 7 calendar days) as the gating cutoff.
+    # Longer horizons (10d, 20d) will be NULL for recent rows and filled on later runs.
+    cutoff_5d = (today - datetime.timedelta(days=7)).isoformat()
 
     pending = conn.execute("""
         SELECT screener_id, symbol, appeared_date
         FROM screener_appearances
-        WHERE return_20d IS NULL
+        WHERE return_5d IS NULL
           AND appeared_date <= ?
-    """, (cutoff_20d,)).fetchall()
+    """, (cutoff_5d,)).fetchall()
 
     if not pending:
         print("[PhaseB] Nothing to fill.")

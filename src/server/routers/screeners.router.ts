@@ -401,4 +401,73 @@ export const screenersRouter = router({
         FROM screener_runs ORDER BY run_ts DESC LIMIT ?
       `, [input.limit]);
     }),
+
+  getScreenerSectorRotation: publicProcedure
+    .input(z.object({
+      days: z.number().min(1).max(90).default(7),
+      sector: z.string().optional(),
+    }))
+    .query(async ({ input }) => {
+      const params: any[] = [];
+      let where = 'WHERE date >= date(\'now\', ? || \' days\')';
+      params.push(-input.days);
+      if (input.sector) {
+        where += ' AND sector = ?';
+        params.push(input.sector);
+      }
+      return dbAll(`
+        SELECT sector, date, bull_count, bear_count, net_score, stock_count,
+               tier1_bull_count, breadth_score, momentum_change, top_stocks
+        FROM screener_sector_rotation
+        ${where}
+        ORDER BY date DESC, net_score DESC
+      `, params);
+    }),
+
+  getScreenerBasket: publicProcedure
+    .input(z.object({
+      topN: z.number().min(5).max(100).default(20),
+      minMomentum: z.number().default(5.0),
+    }))
+    .query(async ({ input }) => {
+      return dbAll(`
+        SELECT ts.symbol,
+               ts.screener_momentum_score,
+               ts.screener_bull_count,
+               ts.screener_bear_count,
+               ts.screener_tier1_count,
+               ts.screener_cat_breadth,
+               ts.screener_streak_days,
+               ts.screener_name_signal,
+               ts.screener_alpha_score,
+               ns.sector,
+               ns.company_name
+        FROM technical_signals ts
+        LEFT JOIN nse_stocks ns ON ns.symbol = ts.symbol
+        WHERE ts.date = (SELECT MAX(date) FROM technical_signals t2 WHERE t2.symbol = ts.symbol)
+          AND ts.screener_momentum_score >= ?
+          AND ts.screener_bull_count > ts.screener_bear_count
+        ORDER BY ts.screener_momentum_score DESC
+        LIMIT ?
+      `, [input.minMomentum, input.topN]);
+    }),
+
+  getScreenerSurfacingSignals: publicProcedure
+    .input(z.object({
+      days: z.number().min(1).max(30).default(3),
+      limit: z.number().min(1).max(200).default(50),
+    }))
+    .query(async ({ input }) => {
+      return dbAll(`
+        SELECT symbol, signal_date, signal_type, confidence_score,
+               entry_price, target_price, stop_loss,
+               screener_momentum_score, screener_tier1_count, screener_cat_breadth,
+               reasoning
+        FROM unified_signals
+        WHERE signal_source = 'SCREENER_SURFACING'
+          AND signal_date >= NOW() - (? || ' days')::interval
+        ORDER BY signal_date DESC, screener_momentum_score DESC
+        LIMIT ?
+      `, [input.days, input.limit]);
+    }),
 });
