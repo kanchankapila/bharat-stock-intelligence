@@ -381,6 +381,11 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     # Days since last dividend (freshness of income signal)
     X['div_recency']     = np.log1p(num('days_since_dividend', 90).clip(0, 365))
     X['last_div_log']    = np.log1p(num('last_dividend_amt', 0.0).clip(lower=0))
+    # Forward-looking: ex-div in <7 days → mechanical price drop risk; board meeting soon → pre-earnings drift.
+    X['near_ex_div']     = (num('days_to_ex_div', 999).clip(0, 30) < 3).astype(float)
+    X['days_to_ex_div']  = num('days_to_ex_div', 30).clip(0, 30) / 30.0     # 0=today, 1=30d+
+    X['upcoming_div_yield'] = num('upcoming_div_pct', 0.0).clip(0, 15)      # % yield (attractive if >2%)
+    X['near_board_mtg']  = (num('days_to_board_meeting', 999).clip(0, 30) <= 5).astype(float)
 
     # ── MC Pricefeed (from mc_pricefeed_fetcher.py) ──
     # 52-week position: near 52w high = momentum; near 52w low = reversal candidate
@@ -855,6 +860,7 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                ts.promoter_pct, ts.fii_pct, ts.pledge_pct,
                ts.rev_growth_yoy_q, ts.np_growth_yoy_q,
                ts.days_since_dividend, ts.last_dividend_amt,
+               ts.days_to_ex_div, ts.days_to_board_meeting, ts.upcoming_div_pct,
                ts.mc_52w_high_dist_pct, ts.mc_52w_low_dist_pct, ts.mc_days_from_52wh,
                ts.mc_cagr_3y, ts.mc_cagr_5y, ts.mc_cagr_10y, ts.mc_ind_pe, ts.mc_pe_vs_ind,
                ts.mc_consensus_pe, ts.mc_consensus_pb,
@@ -1054,6 +1060,7 @@ def load_pending_signals() -> pd.DataFrame:
                ts.promoter_pct, ts.fii_pct, ts.pledge_pct,
                ts.rev_growth_yoy_q, ts.np_growth_yoy_q,
                ts.days_since_dividend, ts.last_dividend_amt,
+               ts.days_to_ex_div, ts.days_to_board_meeting, ts.upcoming_div_pct,
                ts.mc_52w_high_dist_pct, ts.mc_52w_low_dist_pct, ts.mc_days_from_52wh,
                ts.mc_cagr_3y, ts.mc_cagr_5y, ts.mc_cagr_10y, ts.mc_ind_pe, ts.mc_pe_vs_ind,
                ts.mc_consensus_pe, ts.mc_consensus_pb,

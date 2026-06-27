@@ -514,6 +514,11 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await runPython('mc_eco_calendar_fetcher.py', [], 60_000)
     .catch(e => console.warn('[QUEUE] mc_eco_calendar_fetcher failed:', (e as Error).message));
 
+  // Corporate action calendar: ex-dividend dates + board meeting dates → corporate_actions + technical_signals.
+  // Prevents false STOP_LOSS signals on ex-div days; adds pre-earnings drift feature.
+  await runPython('mc_corporate_calendar_fetcher.py', [], 60_000)
+    .catch(e => console.warn('[QUEUE] mc_corporate_calendar_fetcher failed:', (e as Error).message));
+
   // Per-stock option chain: expected move + GEX proxy + BS-derived ATM IV → stock_option_features + stock_options_oi + technical_signals.
   await runPython('stock_option_chain_fetcher.py', [], 3 * 60_000)
     .catch(e => console.warn('[QUEUE] stock_option_chain_fetcher failed:', (e as Error).message));
