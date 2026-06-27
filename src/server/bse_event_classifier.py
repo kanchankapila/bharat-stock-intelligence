@@ -9,10 +9,15 @@ Event types have known directional implications:
 Writes:
   technical_signals.event_signal_score  — rolling 30d event score per stock
   technical_signals.event_type_flags    — JSON of recent event types
+
+Usage:
+  python bse_event_classifier.py              # today's 30-day window
+  python bse_event_classifier.py --backfill   # score every ts row historically
 """
-import sys, json, re
+import sys, json, re, argparse
 from pathlib import Path
 from datetime import datetime, timedelta
+from collections import defaultdict
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from db_compat import connect
@@ -28,76 +33,83 @@ EVENT_PATTERNS = [
     (r'\bqip\b|\bqualified\s+institutional\s+placement\b', +0.5, 'QIP'),
     (r'(?:merger|acquisition|acquir|takeover|amalgamat)', +1.0, 'MERGER_ACQUISITION'),
     (r'(?:dividend|dividend\s+announc|dividend\s+declar)', +0.8, 'DIVIDEND'),
-    (r'(?:debt|loan|borrow).{0,20}(?:raise|raise|increas|new)', -0.8, 'DEBT_RAISED'),
-    (r'(?:sebi\s+(?:action|order|penalty|notice|ban|suspend|investig|probe)|cbi\s+(?:raid|arrest|investig|probe)|enforcement\s+direct|money\s+launder|\bfraud\b|\bscam\b|ponzi|insider\s+trad(?:ing|er)|market\s+manipulat)', -2.0, 'REGULATORY'),
-    (r'(?:downgrad|rating\s+cut|negative\s+outlook)', -1.5, 'RATING_DOWNGRADE'),
-    (r'(?:upgrad|rating\s+improv|positive\s+outlook)', +1.2, 'RATING_UPGRADE'),
-    (r'(?:plant\s+expan|capex|capacity\s+expan|greenfield|brownfield)', +0.8, 'CAPEX_EXPANSION'),
-    (r'(?:block\s+deal|bulk\s+deal).{0,30}(?:buy|purchas)', +0.5, 'BLOCK_BUY'),
-    (r'(?:block\s+deal|bulk\s+deal).{0,30}(?:sell)', -0.5, 'BLOCK_SELL'),
-    (r'(?:ceo|md|cfo|managing\s+director).{0,20}(?:resign|quit|step\s+down)', -1.5, 'MGMT_EXIT'),
-    (r'(?:new\s+(?:ceo|md|cfo)|appoint.{0,20}(?:ceo|md|cfo))', +0.5, 'MGMT_APPOINT'),
+    (r'(?:debt|borrowing|loan|bond|ncd).{0,20}(?:rais|issu|taken)', -0.8, 'DEBT_RAISED'),
+    (r'\bsebi\b.{0,30}(?:action|order|penalt|fine|notice|ban|restrict)', -2.0, 'REGULATORY'),
+    (r'(?:fraud|scam|misappropriat|embezzl|forensic\s+audit)', -2.5, 'FRAUD'),
+    (r'(?:litigation|lawsuit|legal\s+notice|court\s+order|arbitration)', -1.0, 'LITIGATION'),
+    (r'(?:rating\s+upgrade|outlook\s+(?:positive|stable\s+to\s+positive))', +1.0, 'RATING_UPGRADE'),
+    (r'(?:rating\s+downgrade|outlook\s+(?:negative|stable\s+to\s+negative))', -1.0, 'RATING_DOWNGRADE'),
+    (r'(?:block\s+deal|bulk\s+deal).{0,30}(?:buy|purchas)', +0.8, 'BLOCK_BUY'),
+    (r'(?:block\s+deal|bulk\s+deal).{0,30}(?:sell|offload)', -0.8, 'BLOCK_SELL'),
+    (r'(?:expansion|capex|capacity\s+addition|new\s+plant|greenfield)', +1.0, 'EXPANSION'),
 ]
+
+_PAT_COMPILED = [(re.compile(p, re.I), s, t) for p, s, t in EVENT_PATTERNS]
+
 
 def classify_article(title: str, summary: str) -> list[tuple[str, float]]:
     text = f"{title} {summary}".lower()
-    events = []
-    for pattern, score, etype in EVENT_PATTERNS:
-        if re.search(pattern, text, re.I):
-            events.append((etype, score))
-    return events
+    return [(etype, score) for pat, score, etype in _PAT_COMPILED if pat.search(text)]
+
 
 def ensure_schema(con):
-    for col in ['event_signal_score DOUBLE PRECISION', 'event_type_flags TEXT']:
+    for sql in [
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS event_signal_score REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS event_type_flags TEXT",
+    ]:
         try:
-            con.execute(f'ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS {col}')
+            con.execute(sql)
             con.commit()
         except Exception:
             con.rollback()
 
-def run():
-    con = connect()
-    ensure_schema(con)
 
-    # Build valid NSE ticker set to avoid false symbols like 'OIL', 'GLOBAL', 'BSE'
-    valid_symbols: set[str] = set()
+def _load_valid_symbols(con) -> set:
     try:
         rows = con.execute("SELECT symbol FROM nse_stocks").fetchall()
-        valid_symbols = {r['symbol'].upper() for r in rows}
+        return {r['symbol'].upper() for r in rows}
     except Exception:
-        pass
+        return set()
 
-    cutoff = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+
+def _build_event_index(con, since: str) -> dict[str, list[tuple[str, float, str]]]:
+    """Returns {symbol: [(article_date, score, etype), ...]} for all articles since `since`."""
     articles = con.execute(
-        "SELECT id, title, summary, symbols, timestamp FROM news_articles WHERE timestamp >= ? ORDER BY timestamp DESC",
-        (cutoff,)
+        "SELECT title, summary, symbols, timestamp FROM news_articles WHERE timestamp >= ? ORDER BY timestamp ASC",
+        (since,)
     ).fetchall()
 
-    print(f"[EventClassifier] Processing {len(articles)} articles from last 30 days (valid tickers: {len(valid_symbols)})...")
-
-    # Accumulate per-symbol event scores
-    symbol_events: dict[str, list] = {}
+    valid = _load_valid_symbols(con)
+    idx: dict[str, list] = defaultdict(list)
     for art in articles:
         syms_raw = art['symbols'] or ''
         symbols = [s.strip().upper() for s in syms_raw.split(',') if s.strip()]
-        # Filter to valid NSE symbols only (skip generic words like 'OIL', 'GLOBAL', 'BSE')
-        if valid_symbols:
-            symbols = [s for s in symbols if s in valid_symbols]
+        if valid:
+            symbols = [s for s in symbols if s in valid]
         if not symbols:
             continue
         events = classify_article(art['title'] or '', art['summary'] or '')
         if not events:
             continue
+        # article date is the first 10 chars of timestamp (ISO format)
+        art_date = str(art['timestamp'])[:10]
         for sym in symbols:
-            if sym not in symbol_events:
-                symbol_events[sym] = []
-            symbol_events[sym].extend(events)
+            for etype, score in events:
+                idx[sym].append((art_date, score, etype))
+    return idx
 
-    # Write to technical_signals — latest row per symbol (rolling 30d event score is date-independent)
+
+def run_daily(con):
+    """Update latest ts row per symbol using last 30 days of news."""
+    ensure_schema(con)
+    since = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+    idx = _build_event_index(con, since)
+    print(f"[EventClassifier] {len(idx)} symbols with events in last 30 days")
+
     updated = 0
-    for symbol, events in symbol_events.items():
-        score = sum(s for _, s in events)
-        etypes = list(set(e for e, _ in events))
+    for symbol, events in idx.items():
+        score = sum(s for _, s, _ in events)
+        etypes = list(set(t for _, _, t in events))
         con.execute("""
             UPDATE technical_signals
             SET event_signal_score = ?, event_type_flags = ?
@@ -105,17 +117,81 @@ def run():
                 SELECT symbol, MAX(date) FROM technical_signals WHERE symbol = ? GROUP BY symbol
             )
         """, (round(score, 2), json.dumps(etypes), symbol))
-        if con.execute("SELECT 1", []).fetchone():  # always true — count via rowcount workaround
-            updated += 1
+        updated += 1
     con.commit()
-    print(f"[EventClassifier] Wrote event scores for {updated} valid symbols.")
+    print(f"[EventClassifier] Wrote event scores for {updated} symbols.")
 
-    # Print top events
-    top = sorted(symbol_events.items(), key=lambda x: abs(sum(s for _, s in x[1])), reverse=True)[:10]
+    top = sorted(idx.items(), key=lambda x: abs(sum(s for _, s, _ in x[1])), reverse=True)[:10]
     for sym, evs in top:
-        score = sum(s for _, s in evs)
-        etypes = [e for e, _ in evs]
+        score = sum(s for _, s, _ in evs)
+        etypes = list(set(t for _, _, t in evs))
         print(f"  {sym}: {score:+.1f} {etypes}")
 
+
+def run_backfill(con, lookback_days: int = 180):
+    """
+    For every (symbol, date) row in technical_signals, compute the rolling 30-day
+    event score from news_articles as of that date, then write it back.
+    This gives the ML training data accurate historical event features.
+    """
+    ensure_schema(con)
+    since = (datetime.now() - timedelta(days=lookback_days + 30)).strftime('%Y-%m-%d')
+    print(f"[EventClassifier] Backfill: loading articles since {since}...")
+    idx = _build_event_index(con, since)
+    print(f"[EventClassifier] {len(idx)} symbols with historical events")
+
+    # Get all (symbol, date) ts rows to backfill
+    ts_rows = con.execute(
+        "SELECT DISTINCT symbol, date FROM technical_signals ORDER BY symbol, date"
+    ).fetchall()
+    print(f"[EventClassifier] Backfilling {len(ts_rows)} ts rows...")
+
+    updated = 0
+    batch = []
+    for row in ts_rows:
+        symbol = row['symbol']
+        ts_date = row['date']
+        if symbol not in idx:
+            continue
+        # Rolling 30-day window up to ts_date
+        window_start = (datetime.strptime(ts_date, '%Y-%m-%d') - timedelta(days=30)).strftime('%Y-%m-%d')
+        events_in_window = [(s, t) for (d, s, t) in idx[symbol] if window_start <= d <= ts_date]
+        if not events_in_window:
+            continue
+        score = sum(s for s, _ in events_in_window)
+        etypes = list(set(t for _, t in events_in_window))
+        batch.append((round(score, 2), json.dumps(etypes), symbol, ts_date))
+
+        if len(batch) >= 500:
+            for args in batch:
+                con.execute(
+                    "UPDATE technical_signals SET event_signal_score=?, event_type_flags=? WHERE symbol=? AND date=?",
+                    args
+                )
+            con.commit()
+            updated += len(batch)
+            batch = []
+
+    if batch:
+        for args in batch:
+            con.execute(
+                "UPDATE technical_signals SET event_signal_score=?, event_type_flags=? WHERE symbol=? AND date=?",
+                args
+            )
+        con.commit()
+        updated += len(batch)
+
+    print(f"[EventClassifier] Backfill complete: updated {updated} ts rows.")
+
+
 if __name__ == '__main__':
-    run()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--backfill', action='store_true', help='Backfill event scores for all historical ts rows')
+    parser.add_argument('--lookback', type=int, default=180, help='Days of history to backfill (default 180)')
+    args = parser.parse_args()
+
+    con = connect()
+    if args.backfill:
+        run_backfill(con, lookback_days=args.lookback)
+    else:
+        run_daily(con)

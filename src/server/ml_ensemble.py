@@ -907,8 +907,16 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                psh_az.score_value AS altman_z,
                psh_oo.score_value AS ohlson_o
         FROM signal_outcomes so
-        LEFT JOIN technical_signals ts
-               ON ts.symbol = so.symbol AND ts.date = so.signal_date
+        -- Use nearest prior ts row within 3 days to recover ~26% more training rows
+        -- that had no exact-date ts entry (scanner runs on sparse schedule).
+        LEFT JOIN LATERAL (
+            SELECT * FROM technical_signals ts2
+            WHERE ts2.symbol = so.symbol
+              AND ts2.date <= so.signal_date
+              AND ts2.date >= (so.signal_date::date - interval '3 days')::text
+            ORDER BY ts2.date DESC
+            LIMIT 1
+        ) ts ON TRUE
         -- Point-in-time fundamentals: the latest snapshot taken on/before the signal date
         -- (leak-free). Falls back to the current stock_fundamentals snapshot when no history
         -- has accumulated yet — same mild look-ahead as before, never worse.
