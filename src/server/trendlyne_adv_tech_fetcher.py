@@ -523,8 +523,8 @@ def main() -> None:
         backfill_technical_signals(symbol, feat, con)
 
         # Summary line
-        ma_str  = f"MA {feat.get('ma_bull', '?')}↑/{feat.get('ma_bear', '?')}↓"
-        osc_str = f"OSC {feat.get('osc_bull', '?')}↑/{feat.get('osc_bear', '?')}↓"
+        ma_str  = f"MA {feat.get('ma_bull', '?')}up/{feat.get('ma_bear', '?')}dn"
+        osc_str = f"OSC {feat.get('osc_bull', '?')}up/{feat.get('osc_bear', '?')}dn"
         rsi_str = f"RSI={feat.get('rsi', '?')}"
         adx_str = f"ADX={feat.get('adx', '?')}"
         ret_str = f"1m={feat.get('ret_1m', '?')}% 3m={feat.get('ret_3m', '?')}%"
