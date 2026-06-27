@@ -35,7 +35,7 @@ from db_compat import connect
 
 PATTERNS_URL = (
     "https://api.moneycontrol.com/mcapi/technicalpicks/chart-patterns"
-    "?deviceType=W&version=174&start=0&limit=12&pattern_type=all&sc_id={scid}"
+    "?deviceType=W&version=174&start=0&limit=10000&pattern_type=all&sc_id={scid}"
 )
 
 MC_HEADERS = {

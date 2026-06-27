@@ -162,7 +162,7 @@ def fetch_earnings_dates(con) -> None:
     url = (
         f"https://api.moneycontrol.com/mcapi/v1/earnings/get-earnings-data"
         f"?indexId=All&page=1&startDate={TODAY}&endDate={TODAY_PLUS_14}"
-        f"&sector=&limit=50"
+        f"&sector=&limit=10000"
     )
     data = _get(url)
     if not data:
