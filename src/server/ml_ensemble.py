@@ -533,6 +533,15 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     X['risk_on']          = (X['global_risk'] > 0).astype(float)  # 1=global risk-on
     # Interaction: risk-on regime × bullish signal = higher conviction
     X['risk_x_score']     = X['global_risk'].clip(0, 3) / 3.0 * X['signal_score']
+    # Indian ADR overnight bullishness (0-100 → 0-1). >60 = institutional risk-on for India.
+    X['adrs_bullish']     = num('adrs_bullish_pct', 50.0).clip(0, 100) / 100.0
+    # USD/INR daily return — negative = INR strengthening (bullish for importers, bearish for IT).
+    X['usdinr_ret']       = num('usdinr_ret_1d', 0.0).clip(-2, 2)
+    # Leading Asian indices (close before India opens) — strongest same-day predictor.
+    X['nikkei_ret']       = num('nikkei_ret_1d', 0.0).clip(-8, 8)
+    X['hangseng_ret']     = num('hangseng_ret_1d', 0.0).clip(-8, 8)
+    # Composite Asia+ADR risk signal
+    X['asia_adr_risk']    = (X['asia_sentiment'] + X['adrs_bullish'] * 2 - 1).clip(-3, 3)
 
     # ── Earnings calendar & PEAD (from mc_earnings_fetcher.py) ──
     # Pre-earnings: stocks drift up avg 2-3% in 5 days before results (Jegadeesh-Livnat).
@@ -891,6 +900,8 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                macro_snap.fii_net_today,
                macro_snap.usdinr_chg_pct, macro_snap.nifty_basis_pct, macro_snap.nifty_contango,
                macro_snap.india_vix,
+               macro_snap.adrs_bullish_pct, macro_snap.usdinr_ret_1d,
+               macro_snap.nikkei_ret_1d, macro_snap.hangseng_ret_1d,
                mse.np_growth_yoy AS sector_np_growth_yoy, mse.np_growth_qoq AS sector_np_growth_qoq,
                mse.rev_growth_yoy AS sector_rev_growth_yoy,
                COALESCE(fh.fifty_two_week_high, sf.fifty_two_week_high) AS fifty_two_week_high,
@@ -972,6 +983,10 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                 MAX(CASE WHEN symbol='HIGH_IMPACT_EVENTS_3D' THEN close END) AS high_impact_3d,
                 MAX(CASE WHEN symbol='ASIA_SENTIMENT'        THEN close END) AS asia_sentiment,
                 MAX(CASE WHEN symbol='GLOBAL_RISK_SCORE'     THEN close END) AS global_risk,
+                MAX(CASE WHEN symbol='ADRS_BULLISH_PCT'      THEN close END) AS adrs_bullish_pct,
+                MAX(CASE WHEN symbol='USDINR'                THEN ret_1d  END) AS usdinr_ret_1d,
+                MAX(CASE WHEN symbol='NIKKEI'                THEN ret_1d  END) AS nikkei_ret_1d,
+                MAX(CASE WHEN symbol='HANGSENG'              THEN ret_1d  END) AS hangseng_ret_1d,
                 MAX(CASE WHEN symbol='MARKET_NP_GROWTH_YOY'  THEN close END) AS market_np_yoy,
                 MAX(CASE WHEN symbol='EARNINGS_BREADTH'       THEN close END) AS earnings_breadth_mkt,
                 MAX(CASE WHEN symbol='FII_NET_TODAY'           THEN close END) AS fii_net_today,
@@ -1084,6 +1099,8 @@ def load_pending_signals() -> pd.DataFrame:
                macro_snap.fii_net_today,
                macro_snap.usdinr_chg_pct, macro_snap.nifty_basis_pct, macro_snap.nifty_contango,
                macro_snap.india_vix,
+               macro_snap.adrs_bullish_pct, macro_snap.usdinr_ret_1d,
+               macro_snap.nikkei_ret_1d, macro_snap.hangseng_ret_1d,
                mse.np_growth_yoy AS sector_np_growth_yoy, mse.np_growth_qoq AS sector_np_growth_qoq,
                mse.rev_growth_yoy AS sector_rev_growth_yoy,
                sf.fifty_two_week_high,
@@ -1136,6 +1153,10 @@ def load_pending_signals() -> pd.DataFrame:
                 MAX(CASE WHEN symbol='HIGH_IMPACT_EVENTS_3D' THEN close END) AS high_impact_3d,
                 MAX(CASE WHEN symbol='ASIA_SENTIMENT'        THEN close END) AS asia_sentiment,
                 MAX(CASE WHEN symbol='GLOBAL_RISK_SCORE'     THEN close END) AS global_risk,
+                MAX(CASE WHEN symbol='ADRS_BULLISH_PCT'      THEN close END) AS adrs_bullish_pct,
+                MAX(CASE WHEN symbol='USDINR'                THEN ret_1d  END) AS usdinr_ret_1d,
+                MAX(CASE WHEN symbol='NIKKEI'                THEN ret_1d  END) AS nikkei_ret_1d,
+                MAX(CASE WHEN symbol='HANGSENG'              THEN ret_1d  END) AS hangseng_ret_1d,
                 MAX(CASE WHEN symbol='MARKET_NP_GROWTH_YOY'  THEN close END) AS market_np_yoy,
                 MAX(CASE WHEN symbol='EARNINGS_BREADTH'       THEN close END) AS earnings_breadth_mkt,
                 MAX(CASE WHEN symbol='FII_NET_TODAY'           THEN close END) AS fii_net_today,

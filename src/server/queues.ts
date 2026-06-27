@@ -1599,6 +1599,9 @@ export async function initQueues(): Promise<boolean> {
     dlMacroFetchWorker = new Worker(QUEUE_DL_MACRO_FETCH,
       async () => {
         await processDLPython('global_macro_fetcher.py');
+        // MC global: 15 indices (Nikkei/HangSeng/KOSPI/etc) + currencies + ADRs + commodities → mc_global_snapshot + macro_asset_prices.
+        await runPython('mc_global_macro_fetcher.py', [], 60_000)
+          .catch(e => console.warn('[QUEUE] mc_global_macro_fetcher failed:', (e as Error).message));
         // Sector-global correlation depends on macro_asset_prices populated above.
         await runPython('sector_global_corr.py', [], 3 * 60_000)
           .catch(e => console.warn('[QUEUE] sector_global_corr failed:', (e as Error).message));
