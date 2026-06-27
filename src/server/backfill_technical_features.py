@@ -210,7 +210,7 @@ def run(limit: int | None = None):
             skipped += len(dates)
             continue
 
-        ohlcv_list = [dict(r) for r in ohlcv]
+        ohlcv_list = [{**dict(r), 'date': str(r['date'])[:10]} for r in ohlcv]
         ohlcv_by_date = {r['date']: r for r in ohlcv_list}
         all_dates_sorted = [r['date'] for r in ohlcv_list]
 
