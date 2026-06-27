@@ -1,21 +1,21 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
-Working Capital Fetcher — Cash Conversion Cycle
+Working Capital Fetcher â€” Cash Conversion Cycle
 ================================================
 Computes the working capital cycle (cash conversion cycle) from Trendlyne's
 chart-data API. A deteriorating cycle is an early warning signal that shows up
 2-3 quarters before earnings impact; an improving cycle signals operational excellence.
 
 Metrics:
-  Receivables days = (Trade Receivables / Revenue) × 365
-  Inventory days   = (Inventory / COGS) × 365
-  Payables days    = (Trade Payables / COGS) × 365
+  Receivables days = (Trade Receivables / Revenue) Ã— 365
+  Inventory days   = (Inventory / COGS) Ã— 365
+  Payables days    = (Trade Payables / COGS) Ã— 365
   CCC              = Receivables days + Inventory days - Payables days
   CCC trend        = ccc_ttm - ccc 4 quarters ago (positive = deteriorating)
 
 Writes:
-  working_capital_history  (symbol, quarter) — per-quarter computed values
-  technical_signals        — receivables_days_ttm, ccc_ttm, ccc_trend,
+  working_capital_history  (symbol, quarter) â€” per-quarter computed values
+  technical_signals        â€” receivables_days_ttm, ccc_ttm, ccc_trend,
                              wc_deteriorating, wc_improving
 
 Run:
@@ -32,7 +32,7 @@ import requests
 
 from db_compat import connect
 
-# ── API config ──────────────────────────────────────────────────────────────────
+# â”€â”€ API config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 BASE_URL = "https://trendlyne.com/mapp/v1/stock/chart-data/{tlid}/{param}/"
 
@@ -45,7 +45,7 @@ HEADERS = {
     "Referer": "https://trendlyne.com/",
 }
 
-RATE_LIMIT_SEC = 0.4  # 5 calls per stock → 2s total per stock
+RATE_LIMIT_SEC = 0.4  # 5 calls per stock â†’ 2s total per stock
 
 # Trendlyne chart-data quarterly param names.
 # Primary names tried first; fallbacks used if primary returns no data.
@@ -55,7 +55,7 @@ PARAM_PAYABLES     = "TRADE_PAYABLE_Q"      # fallback: CREDITORS_Q
 PARAM_REVENUE      = "REVENUE_Q"
 PARAM_COGS         = "COGS_Q"               # fallback: RAW_MATERIAL_Q
 
-# ── Schema ──────────────────────────────────────────────────────────────────────
+# â”€â”€ Schema â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def ensure_schema(con) -> None:
     cur = con.cursor()
@@ -94,7 +94,7 @@ def ensure_schema(con) -> None:
             con.rollback()
 
 
-# ── Fetch helpers ────────────────────────────────────────────────────────────────
+# â”€â”€ Fetch helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _fetch(tlid: str, param: str, session: requests.Session) -> dict | None:
     url = BASE_URL.format(tlid=tlid, param=param)
@@ -170,7 +170,7 @@ def _align_quarters(
     """
     if not series_list:
         return []
-    # Build quarter → value maps
+    # Build quarter â†’ value maps
     maps = [{q: v for q, v in s} for s in series_list]
     # Quarters present in at least the first (primary) series
     quarters = [q for q, _ in series_list[0]]
@@ -181,7 +181,7 @@ def _align_quarters(
     return aligned
 
 
-# ── CCC computation ───────────────────────────────────────────────────────────────
+# â”€â”€ CCC computation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _compute_ccc_series(
     receivables: list[tuple[str, float]],
@@ -243,7 +243,7 @@ def _compute_ccc_series(
     return results
 
 
-# ── Persist ──────────────────────────────────────────────────────────────────────
+# â”€â”€ Persist â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _upsert_wc_history(symbol: str, rows: list, con) -> None:
     cur = con.cursor()
@@ -288,13 +288,13 @@ def _update_technical_signals(symbol: str, features: dict, con) -> None:
     con.commit()
 
 
-# ── Stock list ────────────────────────────────────────────────────────────────────
+# â”€â”€ Stock list â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _load_stocks(symbol_filter: str | None, limit: int | None, con) -> list[tuple[str, str]]:
     cur = con.cursor()
     cur.execute("""
         SELECT symbol, tlid::TEXT AS tlid FROM nse_stocks
-        WHERE tlid IS NOT NULL AND tlid::TEXT != ''
+        WHERE symbol IS NOT NULL AND tlid IS NOT NULL AND tlid::TEXT != ''
         UNION
         SELECT tss.symbol, MAX(tss.stock_id)::TEXT AS tlid
         FROM trendlyne_screener_stocks tss
@@ -303,7 +303,7 @@ def _load_stocks(symbol_filter: str | None, limit: int | None, con) -> list[tupl
         GROUP BY tss.symbol
         ORDER BY symbol
     """)
-    rows = [(r[0], str(r[1])) for r in cur.fetchall()]
+    rows = [(r[0], str(r[1])) for r in cur.fetchall() if r[0] is not None]
 
     if symbol_filter:
         rows = [(s, t) for s, t in rows if s.upper() == symbol_filter.upper()]
@@ -312,35 +312,35 @@ def _load_stocks(symbol_filter: str | None, limit: int | None, con) -> list[tupl
     return rows
 
 
-# ── Per-stock processing ──────────────────────────────────────────────────────────
+# â”€â”€ Per-stock processing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def process_stock(symbol: str, tlid: str,
                   session: requests.Session, con) -> dict:
     """Fetch working capital components, compute CCC, persist, return features."""
 
-    # ── 1. Trade receivables (primary: TRADE_RECEIVABLE_Q, fallback: DEBTORS_Q) ──
+    # â”€â”€ 1. Trade receivables (primary: TRADE_RECEIVABLE_Q, fallback: DEBTORS_Q) â”€â”€
     receivables = _fetch_with_fallback(tlid, PARAM_RECEIVABLES, "DEBTORS_Q", session)
 
-    # ── 2. Inventory ──
+    # â”€â”€ 2. Inventory â”€â”€
     body_inv = _fetch(tlid, PARAM_INVENTORY, session)
     time.sleep(RATE_LIMIT_SEC)
     inventory = _parse_eod(body_inv) if body_inv else []
 
-    # ── 3. Trade payables (primary: TRADE_PAYABLE_Q, fallback: CREDITORS_Q) ──
+    # â”€â”€ 3. Trade payables (primary: TRADE_PAYABLE_Q, fallback: CREDITORS_Q) â”€â”€
     payables = _fetch_with_fallback(tlid, PARAM_PAYABLES, "CREDITORS_Q", session)
 
-    # ── 4. Revenue ──
+    # â”€â”€ 4. Revenue â”€â”€
     body_rev = _fetch(tlid, PARAM_REVENUE, session)
     time.sleep(RATE_LIMIT_SEC)
     revenue = _parse_eod(body_rev) if body_rev else []
 
-    # ── 5. COGS (primary: COGS_Q, fallback: RAW_MATERIAL_Q) ──
+    # â”€â”€ 5. COGS (primary: COGS_Q, fallback: RAW_MATERIAL_Q) â”€â”€
     cogs = _fetch_with_fallback(tlid, PARAM_COGS, "RAW_MATERIAL_Q", session)
 
     if not receivables or not revenue:
         return {}
 
-    # ── Compute per-quarter CCC ──
+    # â”€â”€ Compute per-quarter CCC â”€â”€
     ccc_series = _compute_ccc_series(receivables, inventory, payables, revenue, cogs)
 
     if not ccc_series:
@@ -348,7 +348,7 @@ def process_stock(symbol: str, tlid: str,
 
     _upsert_wc_history(symbol, ccc_series, con)
 
-    # ── Derive TTM features from 4 most-recent quarters ──
+    # â”€â”€ Derive TTM features from 4 most-recent quarters â”€â”€
     # ccc_series rows: (quarter, rec_days, inv_days, pay_days, ccc, rev_qtr, cogs_qtr)
     rec_series_clean  = [(r[0], r[1]) for r in ccc_series if r[1] is not None]
     ccc_series_clean  = [(r[0], r[4]) for r in ccc_series if r[4] is not None]
@@ -376,7 +376,7 @@ def process_stock(symbol: str, tlid: str,
     return features
 
 
-# ── Main ──────────────────────────────────────────────────────────────────────────
+# â”€â”€ Main â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def main() -> None:
     parser = argparse.ArgumentParser(
@@ -395,7 +395,7 @@ def main() -> None:
         con.close()
         return
 
-    print(f"[WorkingCapital] Processing {len(stocks)} stocks — cash conversion cycle…")
+    print(f"[WorkingCapital] Processing {len(stocks)} stocks â€” cash conversion cycleâ€¦")
     session = requests.Session()
     session.headers.update(HEADERS)
 
@@ -435,7 +435,7 @@ def main() -> None:
             print(f"  [{i}/{len(stocks)}] {symbol}: {ccc_str} | {trend_str}{flag}")
 
         except Exception as e:
-            print(f"  [{i}/{len(stocks)}] {symbol}: ERROR — {e}")
+            print(f"  [{i}/{len(stocks)}] {symbol}: ERROR â€” {e}")
 
     ccc_avg = round(ccc_sum / ccc_count, 1) if ccc_count else 0
     print(

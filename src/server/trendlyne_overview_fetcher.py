@@ -1,11 +1,11 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
-Trendlyne Overview Fetcher — Events + Fundamental Profile
+Trendlyne Overview Fetcher â€” Events + Fundamental Profile
 =========================================================
 Two calls per stock (weekly):
 
-  overview-second-part  → analyst broker targets, board meetings, dividends
-  fundamental-profile   → annual financials, ratios, shareholding, quarterly data
+  overview-second-part  â†’ analyst broker targets, board meetings, dividends
+  fundamental-profile   â†’ annual financials, ratios, shareholding, quarterly data
 
 ML features produced:
   analyst_upside_pct    consensus target upside vs latest price (%)
@@ -21,12 +21,12 @@ ML features produced:
   rev_growth_yoy_q      Revenue YoY growth % (latest quarter, REV4Q_Q field)
   np_growth_yoy_q       Net profit YoY growth % (latest quarter)
   days_since_dividend   Calendar days since most recent ex-dividend date
-  last_dividend_amt     Most recent dividend per share (₹)
+  last_dividend_amt     Most recent dividend per share (â‚¹)
 
 Endpoints:
   https://trendlyne.com/equity/overview-second-part/{tlid}/?format=json
   https://trendlyne.com/equity/chart/fundamental-profile/{tlid}/?format=json
-  ?format=json required — DRF returns HTML without it.
+  ?format=json required â€” DRF returns HTML without it.
 
 Run:
   python trendlyne_overview_fetcher.py           # all stocks with tlid
@@ -56,7 +56,7 @@ HEADERS = {
 RATE_LIMIT_SEC = 0.5
 
 
-# ── Schema ──────────────────────────────────────────────────────────────────────
+# â”€â”€ Schema â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def ensure_schema(con) -> None:
     cur = con.cursor()
@@ -143,7 +143,7 @@ def ensure_schema(con) -> None:
             con.rollback()
 
 
-# ── Fetch helpers ────────────────────────────────────────────────────────────────
+# â”€â”€ Fetch helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _fetch(url: str, session: requests.Session) -> dict | None:
     try:
@@ -158,7 +158,7 @@ def _fetch(url: str, session: requests.Session) -> dict | None:
         return None
 
 
-# ── Extraction helpers ────────────────────────────────────────────────────────────
+# â”€â”€ Extraction helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _latest(chart_data: list, key: str = "value") -> float | None:
     for row in chart_data or []:
@@ -204,7 +204,7 @@ def _safe(v) -> float | None:
         return None
 
 
-# ── Extract analyst data from overview-second-part ────────────────────────────────
+# â”€â”€ Extract analyst data from overview-second-part â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def extract_analyst_data(body: dict, symbol: str, today: str, con) -> dict:
     reports = body.get("researchReports", {}).get("tableData", [])
@@ -288,7 +288,7 @@ def extract_event_data(body: dict) -> dict:
     }
 
 
-# ── Extract fundamental-profile data ─────────────────────────────────────────────
+# â”€â”€ Extract fundamental-profile data â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def extract_profile_data(body: dict) -> dict:
     try:
@@ -342,7 +342,7 @@ def extract_profile_data(body: dict) -> dict:
     }
 
 
-# ── Persist ──────────────────────────────────────────────────────────────────────
+# â”€â”€ Persist â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def upsert_profile(symbol: str, today: str, profile: dict, con) -> None:
     cur = con.cursor()
@@ -444,7 +444,7 @@ def backfill_technical_signals(symbol: str, profile: dict, con) -> None:
     con.commit()
 
 
-# ── Stock list ───────────────────────────────────────────────────────────────────
+# â”€â”€ Stock list â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _load_stocks(symbol_filter: str | None, con) -> list[tuple[str, str]]:
     """Return [(symbol, tlid), ...].
@@ -453,7 +453,7 @@ def _load_stocks(symbol_filter: str | None, con) -> list[tuple[str, str]]:
     cur = con.cursor()
     cur.execute("""
         SELECT symbol, tlid::TEXT AS tlid FROM nse_stocks
-        WHERE tlid IS NOT NULL AND tlid::TEXT != ''
+        WHERE symbol IS NOT NULL AND tlid IS NOT NULL AND tlid::TEXT != ''
         UNION
         SELECT tss.symbol, MAX(tss.stock_id)::TEXT AS tlid
         FROM trendlyne_screener_stocks tss
@@ -468,7 +468,7 @@ def _load_stocks(symbol_filter: str | None, con) -> list[tuple[str, str]]:
     return rows
 
 
-# ── Main ─────────────────────────────────────────────────────────────────────────
+# â”€â”€ Main â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def main() -> None:
     parser = argparse.ArgumentParser()
@@ -483,7 +483,7 @@ def main() -> None:
         print("[TLOverview] No stocks with tlid found.")
         return
 
-    print(f"[TLOverview] Processing {len(stocks)} stocks — analyst + fundamentals…")
+    print(f"[TLOverview] Processing {len(stocks)} stocks â€” analyst + fundamentalsâ€¦")
     session = requests.Session()
     session.headers.update(HEADERS)
     today = date.today().isoformat()
@@ -492,7 +492,7 @@ def main() -> None:
     for i, (symbol, tlid) in enumerate(stocks, 1):
         profile: dict = {}
 
-        # ── 1. overview-second-part (analyst targets + events) ──
+        # â”€â”€ 1. overview-second-part (analyst targets + events) â”€â”€
         overview_body = _fetch(OVERVIEW_URL.format(tlid=tlid), session)
         if overview_body is not None:
             analyst = extract_analyst_data(overview_body, symbol, today, con)
@@ -501,7 +501,7 @@ def main() -> None:
             profile.update(events)
         time.sleep(RATE_LIMIT_SEC)
 
-        # ── 2. fundamental-profile (financials + shareholding) ──
+        # â”€â”€ 2. fundamental-profile (financials + shareholding) â”€â”€
         fp_body = _fetch(PROFILE_URL.format(tlid=tlid), session)
         if fp_body is not None:
             fp = extract_profile_data(fp_body)

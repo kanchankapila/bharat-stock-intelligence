@@ -1,18 +1,18 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
-Trendlyne Fundamentals Fetcher — Chart-Data Series
+Trendlyne Fundamentals Fetcher â€” Chart-Data Series
 ===================================================
 Fetches 4 time-series params per stock from Trendlyne's chart-data API:
 
-  EPS_TTM          → quarterly EPS trailing-12-month (31 pts, 8+ years)
-  PE_TTM_SHARE_NOW → daily P/E ratio (1521 pts, 2016–now)
-  PBV_A_SHARE_NOW  → daily P/B ratio (1824 pts, 2016–now)
-  DIVIDEND_YIELD_TTM_Q → quarterly dividend yield (32 pts, 2019–now)
+  EPS_TTM          â†’ quarterly EPS trailing-12-month (31 pts, 8+ years)
+  PE_TTM_SHARE_NOW â†’ daily P/E ratio (1521 pts, 2016â€“now)
+  PBV_A_SHARE_NOW  â†’ daily P/B ratio (1824 pts, 2016â€“now)
+  DIVIDEND_YIELD_TTM_Q â†’ quarterly dividend yield (32 pts, 2019â€“now)
 
-DVM scores (D/V/M 0-100) are embedded in every response's stockData — no extra call.
+DVM scores (D/V/M 0-100) are embedded in every response's stockData â€” no extra call.
 
 Endpoint: https://trendlyne.com/mapp/v1/stock/chart-data/{tlid}/{param}/?format=json
-Key: ?format=json required — DRF returns HTML by default.
+Key: ?format=json required â€” DRF returns HTML by default.
 
 ML features computed from stored history:
   eps_ttm, eps_growth_yoy, eps_growth_qoq, eps_acceleration
@@ -49,7 +49,7 @@ HEADERS = {
 RATE_LIMIT_SEC = 0.5
 
 
-# ── Schema ─────────────────────────────────────────────────────────────────────
+# â”€â”€ Schema â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def ensure_schema(con) -> None:
     cur = con.cursor()
@@ -122,7 +122,7 @@ def ensure_schema(con) -> None:
             con.rollback()
 
 
-# ── Fetch helpers ───────────────────────────────────────────────────────────────
+# â”€â”€ Fetch helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _fetch(tlid: str, param: str, session: requests.Session) -> dict | None:
     url = BASE_URL.format(tlid=tlid, param=param)
@@ -174,7 +174,7 @@ def _extract_dvm(body: dict) -> dict | None:
     }
 
 
-# ── EPS feature computation ─────────────────────────────────────────────────────
+# â”€â”€ EPS feature computation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _compute_eps_features(series: list[tuple[str, float]]) -> dict:
     if not series:
@@ -201,7 +201,7 @@ def _compute_eps_features(series: list[tuple[str, float]]) -> dict:
     }
 
 
-# ── PE/PB percentile from stored history ───────────────────────────────────────
+# â”€â”€ PE/PB percentile from stored history â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _pe_features_from_db(symbol: str, con) -> dict:
     cur = con.cursor()
@@ -239,7 +239,7 @@ def _pb_features_from_db(symbol: str, con) -> dict:
     return {"pb_pct_rank_252d": pct_rank}
 
 
-# ── Persist ─────────────────────────────────────────────────────────────────────
+# â”€â”€ Persist â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _upsert_series(table: str, col: str, symbol: str,
                    series: list[tuple[str, float]], con) -> int:
@@ -303,7 +303,7 @@ def _backfill_technical_signals(symbol: str, features: dict, con) -> None:
     con.commit()
 
 
-# ── Stock list ──────────────────────────────────────────────────────────────────
+# â”€â”€ Stock list â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _load_stocks(symbol_filter: str | None, con) -> list[tuple[str, str]]:
     """Return [(symbol, tlid), ...].
@@ -313,7 +313,7 @@ def _load_stocks(symbol_filter: str | None, con) -> list[tuple[str, str]]:
     cur = con.cursor()
     cur.execute("""
         SELECT symbol, tlid::TEXT AS tlid FROM nse_stocks
-        WHERE tlid IS NOT NULL AND tlid::TEXT != ''
+        WHERE symbol IS NOT NULL AND tlid IS NOT NULL AND tlid::TEXT != ''
         UNION
         SELECT tss.symbol, MAX(tss.stock_id)::TEXT AS tlid
         FROM trendlyne_screener_stocks tss
@@ -322,13 +322,13 @@ def _load_stocks(symbol_filter: str | None, con) -> list[tuple[str, str]]:
         GROUP BY tss.symbol
         ORDER BY symbol
     """)
-    rows = [(r[0], str(r[1])) for r in cur.fetchall()]
+    rows = [(r[0], str(r[1])) for r in cur.fetchall() if r[0] is not None]
     if symbol_filter:
         rows = [(s, t) for s, t in rows if s.upper() == symbol_filter.upper()]
     return rows
 
 
-# ── Main ────────────────────────────────────────────────────────────────────────
+# â”€â”€ Main â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def main() -> None:
     parser = argparse.ArgumentParser()
@@ -343,7 +343,7 @@ def main() -> None:
         print("[TLFund] No stocks with tlid found.")
         return
 
-    print(f"[TLFund] Processing {len(stocks)} stocks — EPS/PE/PB/DivYield + DVM…")
+    print(f"[TLFund] Processing {len(stocks)} stocks â€” EPS/PE/PB/DivYield + DVMâ€¦")
     session = requests.Session()
     session.headers.update(HEADERS)
     today = date.today().isoformat()
@@ -352,7 +352,7 @@ def main() -> None:
     for i, (symbol, tlid) in enumerate(stocks, 1):
         features: dict = {}
 
-        # ── 1. EPS_TTM (also carries DVM scores) ──
+        # â”€â”€ 1. EPS_TTM (also carries DVM scores) â”€â”€
         body = _fetch(tlid, "EPS_TTM", session)
         if body is not None:
             eps_series = _parse_eod(body)
@@ -367,7 +367,7 @@ def main() -> None:
                 features["dvm_m"] = dvm.get("m_score")
         time.sleep(RATE_LIMIT_SEC)
 
-        # ── 2. PE_TTM_SHARE_NOW (daily, 1521 pts) ──
+        # â”€â”€ 2. PE_TTM_SHARE_NOW (daily, 1521 pts) â”€â”€
         body = _fetch(tlid, "PE_TTM_SHARE_NOW", session)
         if body is not None:
             pe_series = _parse_eod(body)
@@ -376,7 +376,7 @@ def main() -> None:
                 features.update(_pe_features_from_db(symbol, con))
         time.sleep(RATE_LIMIT_SEC)
 
-        # ── 3. PBV_A_SHARE_NOW (daily, 1824 pts) ──
+        # â”€â”€ 3. PBV_A_SHARE_NOW (daily, 1824 pts) â”€â”€
         body = _fetch(tlid, "PBV_A_SHARE_NOW", session)
         if body is not None:
             pb_series = _parse_eod(body)
@@ -385,7 +385,7 @@ def main() -> None:
                 features.update(_pb_features_from_db(symbol, con))
         time.sleep(RATE_LIMIT_SEC)
 
-        # ── 4. DIVIDEND_YIELD_TTM_Q (quarterly, 32 pts) ──
+        # â”€â”€ 4. DIVIDEND_YIELD_TTM_Q (quarterly, 32 pts) â”€â”€
         body = _fetch(tlid, "DIVIDEND_YIELD_TTM_Q", session)
         if body is not None:
             dy_series = _parse_eod(body)
@@ -394,7 +394,7 @@ def main() -> None:
                 features["div_yield_ttm"] = dy_series[0][1]  # latest
         time.sleep(RATE_LIMIT_SEC)
 
-        # ── Back-fill technical_signals ──
+        # â”€â”€ Back-fill technical_signals â”€â”€
         _backfill_technical_signals(symbol, features, con)
 
         pe_str  = f"PE={features.get('pe_ttm','?')} rank={features.get('pe_pct_rank_252d','?')}%"

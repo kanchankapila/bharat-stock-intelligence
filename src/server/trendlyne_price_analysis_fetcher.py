@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 Trendlyne Price Performance Analysis Fetcher (Weekly)
 ======================================================
@@ -12,14 +12,14 @@ Unique ML data:
   3. Distance from period highs/lows (quarterly, annual)
 
 ML features written to technical_signals:
-  tl_vs_nifty_1m      — alpha vs Nifty50 over 1 month (stock% - nifty%)
-  tl_vs_nifty_3m      — alpha vs Nifty50 over 3 months
-  tl_vs_nifty_6m      — alpha vs Nifty50 over 6 months
-  tl_vs_ind_1m        — alpha vs Industry over 1 month
-  tl_vs_ind_3m        — alpha vs Industry over 3 months
-  tl_seasonal_month_5y — 5-year avg return for current calendar month
-  tl_dist_3m_high_pct  — % distance from 3-month high (negative = below high)
-  tl_dist_3m_low_pct   — % distance from 3-month low (positive = above low)
+  tl_vs_nifty_1m      â€” alpha vs Nifty50 over 1 month (stock% - nifty%)
+  tl_vs_nifty_3m      â€” alpha vs Nifty50 over 3 months
+  tl_vs_nifty_6m      â€” alpha vs Nifty50 over 6 months
+  tl_vs_ind_1m        â€” alpha vs Industry over 1 month
+  tl_vs_ind_3m        â€” alpha vs Industry over 3 months
+  tl_seasonal_month_5y â€” 5-year avg return for current calendar month
+  tl_dist_3m_high_pct  â€” % distance from 3-month high (negative = below high)
+  tl_dist_3m_low_pct   â€” % distance from 3-month low (positive = above low)
 
 Run:
   python trendlyne_price_analysis_fetcher.py             # all stocks
@@ -81,7 +81,7 @@ PERIOD_DD_MAP = {
 }
 
 
-# ── Schema ──────────────────────────────────────────────────────────────────────
+# â”€â”€ Schema â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def ensure_schema(con) -> None:
     cur = con.cursor()
@@ -125,7 +125,7 @@ def ensure_schema(con) -> None:
             con.rollback()
 
 
-# ── Fetch ────────────────────────────────────────────────────────────────────────
+# â”€â”€ Fetch â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _fetch(tlid: str, session: requests.Session) -> dict | None:
     url = ANALYSIS_URL.format(tlid=tlid)
@@ -154,7 +154,7 @@ def _sf(v) -> float | None:
 def extract_features(body: dict, today: date) -> dict:
     feat: dict = {}
 
-    # ── Returns comparison vs benchmarks ──
+    # â”€â”€ Returns comparison vs benchmarks â”€â”€
     returns_cmp = body.get("returnsComparison", {})
     for row in returns_cmp.get("tableData", []):
         period_label = str(row[0]) if row else ""
@@ -172,7 +172,7 @@ def extract_features(body: dict, today: date) -> dict:
         if stock_ret is not None and ind_ret is not None:
             feat[f"alpha_ind_{key}"] = round(stock_ret - ind_ret, 2)
 
-    # ── Returns deep dive — distance from period high/low ──
+    # â”€â”€ Returns deep dive â€” distance from period high/low â”€â”€
     dd = body.get("returnsDeepDive", {})
     for row in dd.get("tableData", []):
         label = str(row[IDX_DD_PERIOD]) if len(row) > IDX_DD_PERIOD else ""
@@ -182,13 +182,13 @@ def extract_features(body: dict, today: date) -> dict:
             if len(row) > IDX_DD_LOW_DIST:
                 feat["dist_3m_low_pct"]  = _sf(row[IDX_DD_LOW_DIST])
 
-    # ── Monthly seasonality — 5-year avg returns ──
+    # â”€â”€ Monthly seasonality â€” 5-year avg returns â”€â”€
     MONTH_NAMES = ["jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec"]
     pattern_data = body.get("returnsPatternData", {})
     monthly = pattern_data.get("Monthly", {})
     five_yr = monthly.get("5Yr Avg", [])
     for entry in five_yr:
-        m = entry.get("m")  # 1–12
+        m = entry.get("m")  # 1â€“12
         v = _sf(entry.get("v"))
         if m is not None and v is not None:
             try:
@@ -283,7 +283,7 @@ def _load_stocks(symbol_filter: str | None, con) -> list[tuple[str, str]]:
     cur = con.cursor()
     cur.execute("""
         SELECT symbol, tlid::TEXT AS tlid FROM nse_stocks
-        WHERE tlid IS NOT NULL AND tlid::TEXT != ''
+        WHERE symbol IS NOT NULL AND tlid IS NOT NULL AND tlid::TEXT != ''
         UNION
         SELECT tss.symbol, MAX(tss.stock_id)::TEXT AS tlid
         FROM trendlyne_screener_stocks tss
@@ -292,7 +292,7 @@ def _load_stocks(symbol_filter: str | None, con) -> list[tuple[str, str]]:
         GROUP BY tss.symbol
         ORDER BY symbol
     """)
-    rows = [(r[0], str(r[1])) for r in cur.fetchall()]
+    rows = [(r[0], str(r[1])) for r in cur.fetchall() if r[0] is not None]
     if symbol_filter:
         rows = [(s, t) for s, t in rows if s.upper() == symbol_filter.upper()]
     return rows
@@ -311,7 +311,7 @@ def main() -> None:
         print("[TLPriceAnalysis] No stocks with tlid found.")
         return
 
-    print(f"[TLPriceAnalysis] Fetching price-performance-analysis for {len(stocks)} stocks…")
+    print(f"[TLPriceAnalysis] Fetching price-performance-analysis for {len(stocks)} stocksâ€¦")
     session = requests.Session()
     session.headers.update(HEADERS)
     today = date.today()
@@ -329,8 +329,8 @@ def main() -> None:
         upsert_row(symbol, today_str, f, con)
         backfill_technical_signals(symbol, f, con)
 
-        alpha_str    = f"αNifty1M={f.get('alpha_nifty_1m','?')}% αNifty3M={f.get('alpha_nifty_3m','?')}%"
-        ind_str      = f"αInd1M={f.get('alpha_ind_1m','?')}%"
+        alpha_str    = f"Î±Nifty1M={f.get('alpha_nifty_1m','?')}% Î±Nifty3M={f.get('alpha_nifty_3m','?')}%"
+        ind_str      = f"Î±Ind1M={f.get('alpha_ind_1m','?')}%"
         seasonal_str = f"season={f.get('tl_seasonal_month_5y','?')}%"
         print(f"  [{i}/{len(stocks)}] {symbol}: {alpha_str} | {ind_str} | {seasonal_str}")
         ok += 1

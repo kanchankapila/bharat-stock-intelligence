@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 Trendlyne Advanced Technical Analysis Fetcher (Daily)
 ======================================================
@@ -9,19 +9,19 @@ returns, delivery/volume averages, and beta.
 Endpoint:
   https://trendlyne.com/equity/api/stock/adv-technical-analysis/{tlid}/24/?format=json
   where 24 = daily frequency (available_frequency["1D"] = 24)
-  ?format=json is required — DRF returns HTML without it.
+  ?format=json is required â€” DRF returns HTML without it.
 
 Writes to:
-  trendlyne_adv_tech_daily  (symbol, date, PRIMARY KEY) — full daily snapshot
-  technical_signals         — back-filled with derived ML features
+  trendlyne_adv_tech_daily  (symbol, date, PRIMARY KEY) â€” full daily snapshot
+  technical_signals         â€” back-filled with derived ML features
 
 ML features written to technical_signals:
-  ma_bull_frac       = ma_bull / (ma_bull + ma_bear)   — fraction of MAs bullish
-  osc_bull_frac      = osc_bull / (osc_bull + osc_bear) — fraction of oscillators bullish
+  ma_bull_frac       = ma_bull / (ma_bull + ma_bear)   â€” fraction of MAs bullish
+  osc_bull_frac      = osc_bull / (osc_bull + osc_bear) â€” fraction of oscillators bullish
   adx_tl             = ADX value (trend strength)
-  atr_pct_tl         = ATR / current_price * 100        — normalised volatility
+  atr_pct_tl         = ATR / current_price * 100        â€” normalised volatility
   mfi_tl             = Money Flow Index
-  pivot_dist_pct_tl  = (price - pivot) / pivot * 100    — distance from pivot
+  pivot_dist_pct_tl  = (price - pivot) / pivot * 100    â€” distance from pivot
   delivery_avg_1m_tl = 1-month delivery %
   beta_1y_tl         = 1-year beta
   ret_1m_tl          = 1-month return %
@@ -63,7 +63,7 @@ MA_TOTAL = 16
 OSC_TOTAL = 9
 
 
-# ── Schema ─────────────────────────────────────────────────────────────────────
+# â”€â”€ Schema â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def ensure_schema(con) -> None:
     cur = con.cursor()
@@ -129,7 +129,7 @@ def ensure_schema(con) -> None:
         cur.execute(idx)
     con.commit()  # commit DDL before ALTER so Postgres doesn't abort the tx
 
-    # Back-fill columns on technical_signals — each ALTER in its own commit/rollback
+    # Back-fill columns on technical_signals â€” each ALTER in its own commit/rollback
     for ddl in [
         "ALTER TABLE technical_signals ADD COLUMN ma_bull_frac      REAL",
         "ALTER TABLE technical_signals ADD COLUMN osc_bull_frac     REAL",
@@ -151,7 +151,7 @@ def ensure_schema(con) -> None:
             con.rollback()
 
 
-# ── Fetch ───────────────────────────────────────────────────────────────────────
+# â”€â”€ Fetch â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def fetch_adv_tech(tlid: str, session: requests.Session) -> dict | None:
     """Fetch the raw advanced-technical JSON body for a given tlid.
@@ -166,7 +166,7 @@ def fetch_adv_tech(tlid: str, session: requests.Session) -> dict | None:
         body = data.get("body", {})
         params = body.get("parameters")
         if params is None:
-            # Some responses wrap differently — try top-level body as params
+            # Some responses wrap differently â€” try top-level body as params
             params = body if body else None
         return params
     except Exception as e:
@@ -174,7 +174,7 @@ def fetch_adv_tech(tlid: str, session: requests.Session) -> dict | None:
         return None
 
 
-# ── Extract ─────────────────────────────────────────────────────────────────────
+# â”€â”€ Extract â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _fval(d: dict, key: str) -> float | None:
     """Safely extract a float from a nested {"value": ...} dict."""
@@ -204,17 +204,17 @@ def extract_features(params: dict) -> dict:
     """
     feat: dict = {}
 
-    # ── MA signals ──
+    # â”€â”€ MA signals â”€â”€
     ma = params.get("ma_signal", {})
     feat["ma_bull"] = int(ma.get("bullish", 0))
     feat["ma_bear"] = int(ma.get("bearish", 0))
 
-    # ── Oscillator signals ──
+    # â”€â”€ Oscillator signals â”€â”€
     osc = params.get("oscillator_signal", {})
     feat["osc_bull"] = int(osc.get("bullish", 0))
     feat["osc_bear"] = int(osc.get("bearish", 0))
 
-    # ── Individual indicators ──
+    # â”€â”€ Individual indicators â”€â”€
     feat["rsi"]            = _fval(params, "rsi")
     feat["macd"]           = _fval(params, "macd")
     feat["macd_hist"]      = _fval(params, "macdhistogram")
@@ -229,7 +229,7 @@ def extract_features(params: dict) -> dict:
     feat["momentum_score"] = _fval(params, "momentum")
     feat["current_price"]  = _safe_float(params.get("current_price"))
 
-    # ── Pivot points ──
+    # â”€â”€ Pivot points â”€â”€
     pivot_lvl = params.get("pivot_level", {})
     feat["pivot"] = _fval(pivot_lvl, "pivot_point")
     feat["r1"]    = _fval(pivot_lvl, "R1")
@@ -243,8 +243,8 @@ def extract_features(params: dict) -> dict:
     else:
         feat["pivot_dist_pct"] = None
 
-    # ── Price returns ──
-    # Map period name → column key
+    # â”€â”€ Price returns â”€â”€
+    # Map period name â†’ column key
     ret_map = {
         "1 Day":    "ret_1d",
         "1 Week":   "ret_1w",
@@ -260,7 +260,7 @@ def extract_features(params: dict) -> dict:
         if col:
             feat[col] = _safe_float(entry.get("changePercent"))
 
-    # ── Volume / delivery analysis ──
+    # â”€â”€ Volume / delivery analysis â”€â”€
     # tableData rows: [period_label, avg_vol, delivery_pct, del_vol]
     vol_map = {
         "Day":     ("vol_avg_day",   "delivery_pct_day"),
@@ -286,7 +286,7 @@ def extract_features(params: dict) -> dict:
             if del_col:
                 feat[del_col] = _safe_float(row[2])
 
-    # ── Beta ──
+    # â”€â”€ Beta â”€â”€
     beta_map = {
         "1 Month": "beta_1m",
         "3 Month": "beta_3m",
@@ -298,7 +298,7 @@ def extract_features(params: dict) -> dict:
         if col:
             feat[col] = _safe_float(entry.get("data"))
 
-    # ── Derived ML fractions ──
+    # â”€â”€ Derived ML fractions â”€â”€
     ma_total = feat["ma_bull"] + feat["ma_bear"]
     feat["ma_bull_frac"] = (
         round(feat["ma_bull"] / ma_total, 4) if ma_total > 0 else 0.5
@@ -317,7 +317,7 @@ def extract_features(params: dict) -> dict:
     return feat
 
 
-# ── Persist ─────────────────────────────────────────────────────────────────────
+# â”€â”€ Persist â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def upsert_row(symbol: str, today: str, feat: dict, con) -> None:
     """Insert or replace the daily row for (symbol, today)."""
@@ -412,13 +412,13 @@ def upsert_row(symbol: str, today: str, feat: dict, con) -> None:
     con.commit()
 
 
-# ── Back-fill technical_signals ─────────────────────────────────────────────────
+# â”€â”€ Back-fill technical_signals â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def backfill_technical_signals(symbol: str, feat: dict, con) -> None:
     """Write ML features derived from the fetched data into technical_signals.
 
     Uses COALESCE so existing (non-NULL) values are not overwritten by a NULL.
-    Updates all rows for the symbol (no date filter) — technical_signals rows
+    Updates all rows for the symbol (no date filter) â€” technical_signals rows
     are rolling and contain only the latest state per symbol.
     """
     if not feat:
@@ -457,7 +457,7 @@ def backfill_technical_signals(symbol: str, feat: dict, con) -> None:
     con.commit()
 
 
-# ── Stock list ──────────────────────────────────────────────────────────────────
+# â”€â”€ Stock list â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _load_stocks(symbol_filter: str | None, con) -> list[tuple[str, str]]:
     """Return [(symbol, tlid), ...].
@@ -466,7 +466,7 @@ def _load_stocks(symbol_filter: str | None, con) -> list[tuple[str, str]]:
     cur = con.cursor()
     cur.execute("""
         SELECT symbol, tlid::TEXT AS tlid FROM nse_stocks
-        WHERE tlid IS NOT NULL AND tlid::TEXT != ''
+        WHERE symbol IS NOT NULL AND tlid IS NOT NULL AND tlid::TEXT != ''
         UNION
         SELECT tss.symbol, MAX(tss.stock_id)::TEXT AS tlid
         FROM trendlyne_screener_stocks tss
@@ -475,13 +475,13 @@ def _load_stocks(symbol_filter: str | None, con) -> list[tuple[str, str]]:
         GROUP BY tss.symbol
         ORDER BY symbol
     """)
-    rows = [(r[0], str(r[1])) for r in cur.fetchall()]
+    rows = [(r[0], str(r[1])) for r in cur.fetchall() if r[0] is not None]
     if symbol_filter:
         rows = [(s, t) for s, t in rows if s.upper() == symbol_filter.upper()]
     return rows
 
 
-# ── Main ────────────────────────────────────────────────────────────────────────
+# â”€â”€ Main â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def main() -> None:
     parser = argparse.ArgumentParser(
@@ -502,7 +502,7 @@ def main() -> None:
         con.close()
         return
 
-    print(f"[TLAdvTech] Processing {len(stocks)} stocks — daily adv-technical…")
+    print(f"[TLAdvTech] Processing {len(stocks)} stocks â€” daily adv-technicalâ€¦")
     session = requests.Session()
     session.headers.update(HEADERS)
     today = date.today().isoformat()
