@@ -197,9 +197,6 @@ let agentOptimizerWorker:     Worker | null = null;
 export let unifiedRankerQueue: Queue | null = null;
 export let unifiedRankerWorker: Worker | null = null;
 
-// Shared in-process mirror populated by the stock-refresh worker
-// (same reference as the one exported from liveStockData via the cache layer)
-let bulkMirror: Map<string, any> = new Map();
 
 // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Confluence compute processor ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 
@@ -332,6 +329,9 @@ async function processNSESync(_job: Job): Promise<{ success: boolean; stockCount
     // propagate to historical signal tables. Keeps sector segmentation healthy over time.
     await runPython('backfill_sectors.py', [], 120_000)
       .catch(err => console.warn('[QUEUE] sector backfill failed (non-blocking):', (err as Error).message));
+    // Index membership flags (Nifty50/100/200/Midcap150/Smallcap250) — passive ETF flow signal.
+    await runPython('index_membership_fetcher.py', [], 60_000)
+      .catch(err => console.warn('[QUEUE] index_membership_fetcher failed (non-blocking):', (err as Error).message));
     return { success: true, stockCount };
   } catch (err: any) {
     console.error('[QUEUE] NSE sync failed:', err.message);
@@ -375,8 +375,6 @@ async function resolveOutcomesResilient(horizon: number): Promise<void> {
 }
 
 async function processOutcomeResolver(_job: Job): Promise<{ success: boolean }> {
-  await runPython('fii_dii_fetcher.py', [], 90_000).catch(() => {});
-
   // Flag bad-print OHLCV bars first so outcome labels skip them (ohlcv_quality.is_suspect).
   await runPython('ohlcv_quality.py', ['--no-ingest'], 180_000)
     .catch(e => console.warn('[QUEUE] ohlcv_quality flag failed:', (e as Error).message));
@@ -387,11 +385,6 @@ async function processOutcomeResolver(_job: Job): Promise<{ success: boolean }> 
 
   await runPython('live_screener_resolver.py', [], 180_000)
     .catch(err => console.error('[QUEUE] live_screener_resolver.py failed:', err.message));
-
-  await runPython('performance_tracker.py', ['--horizon', '5']);
-  await runPython('performance_tracker.py', ['--horizon', '15']);
-
-  await pythonApi.scorePending().catch(e => console.warn('[API] score-pending:', (e as Error).message));
 
   return { success: true };
 }
@@ -422,14 +415,11 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await runPython('analyst_estimates_snapshot.py', [], 600_000)
     .catch(e => console.warn('[QUEUE] analyst_estimates_snapshot failed:', (e as Error).message));
 
-  // Surveillance gate: ASM/GSM stocks get is_asm/gsm_stage flags before signal scoring.
-  await runPython('asm_gsm_fetcher.py', [], 120_000)
-    .catch(e => console.warn('[QUEUE] asm_gsm_fetcher failed:', (e as Error).message));
-
+  // Surveillance gate: ASM/GSM flags → nse_stocks and technical_signals.asm_flag/gsm_stage.
   await runPython('asm_gsm_fetcher.py', [], 2 * 60_000)
     .catch(e => console.warn('[QUEUE] asm_gsm_fetcher failed:', (e as Error).message));
   await runPython('fii_dii_fetcher.py', [], 90_000).catch(() => {});
-  await runPython('pcr_fetcher.py', [], 90_000).catch(() => {});
+  await runPython('pcr_fetcher.py', ['--gex'], 90_000).catch(() => {});
   await runPython('moneycontrol_fetcher.py', [], 300_000).catch(e => {
     console.warn('[QUEUE] moneycontrol_fetcher failed:', (e as Error).message);
   });
@@ -498,6 +488,75 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   // Sector-global benchmark correlation (requires macro_asset_prices from global_macro_fetcher).
   await runPython('sector_global_corr.py', [], 3 * 60_000)
     .catch(e => console.warn('[QUEUE] sector_global_corr failed:', (e as Error).message));
+
+  // Historical Volatility (HV10/20/30/60d + IV-HV ratio) purely from stock_ohlcv — no new feed.
+  await runPython('hv_features.py', [], 3 * 60_000)
+    .catch(e => console.warn('[QUEUE] hv_features failed:', (e as Error).message));
+
+  // Analyst estimate revision drift (EPS + price-target 3m change) from analyst_estimates_history.
+  await runPython('analyst_revision.py', [], 2 * 60_000)
+    .catch(e => console.warn('[QUEUE] analyst_revision failed:', (e as Error).message));
+
+  // Commodity/FX sensitivity: 90d rolling corr of each stock vs CRUDE/GOLD/DXY/SP500.
+  // Requires macro_asset_prices to be populated (global_macro_fetcher runs at session start).
+  await runPython('commodity_sensitivity.py', [], 3 * 60_000)
+    .catch(e => console.warn('[QUEUE] commodity_sensitivity failed:', (e as Error).message));
+
+  // Earnings calendar + PEAD categories + price shockers + sector earnings + market breadth.
+  await runPython('mc_earnings_fetcher.py', [], 5 * 60_000)
+    .catch(e => console.warn('[QUEUE] mc_earnings_fetcher failed:', (e as Error).message));
+
+  // Broker research recommendations: named broker BUY/SELL events → mc_broker_reco + technical_signals.
+  await runPython('mc_broker_reco_fetcher.py', ['--days', '7'], 2 * 60_000)
+    .catch(e => console.warn('[QUEUE] mc_broker_reco_fetcher failed:', (e as Error).message));
+
+  // Economic calendar: upcoming high-impact macro events → eco_calendar + macro_asset_prices.
+  await runPython('mc_eco_calendar_fetcher.py', [], 60_000)
+    .catch(e => console.warn('[QUEUE] mc_eco_calendar_fetcher failed:', (e as Error).message));
+
+  // Per-stock option chain: expected move + GEX proxy for 147 F&O stocks → stock_option_features + technical_signals.
+  await runPython('stock_option_chain_fetcher.py', [], 3 * 60_000)
+    .catch(e => console.warn('[QUEUE] stock_option_chain_fetcher failed:', (e as Error).message));
+
+  // EPS surprise streak: beat/miss history from MC actual-estimate API → eps_surprise_history + technical_signals.
+  await runPython('eps_surprise_fetcher.py', [], 10 * 60_000)
+    .catch(e => console.warn('[QUEUE] eps_surprise_fetcher failed:', (e as Error).message));
+
+  // FCF yield + interest coverage from Trendlyne chart-data API → tl_financial_quality + technical_signals.
+  await runPython('financial_ratios_fetcher.py', [], 15 * 60_000)
+    .catch(e => console.warn('[QUEUE] financial_ratios_fetcher failed:', (e as Error).message));
+
+  // Working capital cycle (CCC trend) from Trendlyne balance sheet → working_capital_history + technical_signals.
+  await runPython('working_capital_fetcher.py', [], 15 * 60_000)
+    .catch(e => console.warn('[QUEUE] working_capital_fetcher failed:', (e as Error).message));
+
+  // Delivery % trend + bulk/block deals + short interest proxy → technical_signals.
+  await runPython('delivery_trend_fetcher.py', [], 5 * 60_000)
+    .catch(e => console.warn('[QUEUE] delivery_trend_fetcher failed:', (e as Error).message));
+
+  // Promoter insider transactions (90d rolling) from NSE → insider_transactions + technical_signals.
+  await runPython('insider_transactions_fetcher.py', [], 10 * 60_000)
+    .catch(e => console.warn('[QUEUE] insider_transactions_fetcher failed:', (e as Error).message));
+
+  // Credit rating events (upgrades/downgrades) from BSE → credit_rating_events + technical_signals.
+  await runPython('credit_rating_fetcher.py', [], 3 * 60_000)
+    .catch(e => console.warn('[QUEUE] credit_rating_fetcher failed:', (e as Error).message));
+
+  // MF sector AUM flow from AMFI monthly disclosures → mf_sector_allocation + technical_signals.
+  await runPython('mf_sector_flow_fetcher.py', [], 5 * 60_000)
+    .catch(e => console.warn('[QUEUE] mf_sector_flow_fetcher failed:', (e as Error).message));
+
+  // India macro indicators: PMI, GST, IIP, auto sales, RBI rate → macro_asset_prices.
+  await runPython('india_macro_fetcher.py', [], 3 * 60_000)
+    .catch(e => console.warn('[QUEUE] india_macro_fetcher failed:', (e as Error).message));
+
+  // BSE event classifier: news_articles → event_signal_score in technical_signals.
+  await runPython('bse_event_classifier.py', [], 60_000)
+    .catch(e => console.warn('[QUEUE] bse_event_classifier failed:', (e as Error).message));
+
+  // PEAD model: eps_growth_yoy + volume + RS → pead_score in technical_signals.
+  await runPython('pead_model.py', [], 60_000)
+    .catch(e => console.warn('[QUEUE] pead_model failed:', (e as Error).message));
 
   await resolveOutcomesResilient(1);
   await resolveOutcomesResilient(5);
@@ -696,7 +755,7 @@ async function processQuantEodSync(_job: Job): Promise<{ success: boolean }> {
     await fetchDeliveryMap(today);
     
     console.log('[QUANT EOD] 6. Fetching PCR & Max Pain');
-    await runPython('pcr_fetcher.py', [], 90_000).catch(() => {});
+    await runPython('pcr_fetcher.py', ['--gex'], 90_000).catch(() => {});
     
     updateMonitorState('quant-eod-sync', 'success');
     console.log('[QUEUE] quant-eod-sync completed successfully');
@@ -826,7 +885,7 @@ export async function initQueues(): Promise<boolean> {
         repeat: { pattern: '30 10 * * 1-5' },  // 10:30 AM UTC = 4:00 PM IST, weekdays only
         jobId: 'refresh-all-daily-repeatable',
         removeOnComplete: { age: 86400 },   // Keep completed jobs for 1 day
-        removeOnFail: { age: 604800 },      // Keep failed jobs for 7 days (for debugging)
+        removeOnFail: { age: 86400, count: 100 },  // Keep failed jobs for 1 day, max 100
         attempts: 3,
         backoff: { type: 'exponential', delay: 2000 },
       },
@@ -1209,43 +1268,43 @@ export async function initQueues(): Promise<boolean> {
     for (const r of newsRepeatables) {
       await newsSentimentQueue.removeRepeatableByKey(r.key);
     }
-    await addJobWithCatchup(newsSentimentQueue,
-      'news-sentiment-refresh',
-      {},
-      {
-        // 15 min: RSS feeds lag ~15-30 min, so a tighter cadence just re-fetches
-        // identical articles across 23 sources (wasted requests + block risk).
-        repeat: { every: 15 * 60 * 1000 },
-        jobId: 'news-sentiment-repeatable',
-        removeOnComplete: 5,
-        removeOnFail: 3,
-      },
-    );
-
-    // Per-company Google News (free, per-stock density) — slower cadence, polite to Google.
-    await addJobWithCatchup(newsSentimentQueue,
-      'company-news-refresh',
-      {},
-      {
-        repeat: { every: 6 * 60 * 60 * 1000 }, // every 6 hours
-        jobId: 'company-news-repeatable',
-        removeOnComplete: 3,
-        removeOnFail: 3,
-      },
-    );
-
-    // BSE corporate announcements (per-stock, high-signal events) — hourly captures
-    // intraday + after-close filings without hammering the endpoint.
-    await addJobWithCatchup(newsSentimentQueue,
-      'bse-announcements-refresh',
-      {},
-      {
-        repeat: { every: 60 * 60 * 1000 }, // every hour
-        jobId: 'bse-announcements-repeatable',
-        removeOnComplete: 3,
-        removeOnFail: 3,
-      },
-    );
+    await Promise.all([
+      addJobWithCatchup(newsSentimentQueue,
+        'news-sentiment-refresh',
+        {},
+        {
+          // 15 min: RSS feeds lag ~15-30 min, so a tighter cadence just re-fetches
+          // identical articles across 23 sources (wasted requests + block risk).
+          repeat: { every: 15 * 60 * 1000 },
+          jobId: 'news-sentiment-repeatable',
+          removeOnComplete: 5,
+          removeOnFail: 3,
+        },
+      ),
+      // Per-company Google News (free, per-stock density) — slower cadence, polite to Google.
+      addJobWithCatchup(newsSentimentQueue,
+        'company-news-refresh',
+        {},
+        {
+          repeat: { every: 6 * 60 * 60 * 1000 }, // every 6 hours
+          jobId: 'company-news-repeatable',
+          removeOnComplete: 3,
+          removeOnFail: 3,
+        },
+      ),
+      // BSE corporate announcements (per-stock, high-signal events) — hourly captures
+      // intraday + after-close filings without hammering the endpoint.
+      addJobWithCatchup(newsSentimentQueue,
+        'bse-announcements-refresh',
+        {},
+        {
+          repeat: { every: 60 * 60 * 1000 }, // every hour
+          jobId: 'bse-announcements-repeatable',
+          removeOnComplete: 3,
+          removeOnFail: 3,
+        },
+      ),
+    ]);
 
     newsSentimentWorker = new Worker(
       QUEUE_NEWS_SENTIMENT,
@@ -1535,10 +1594,48 @@ export async function initQueues(): Promise<boolean> {
         // Sector-global correlation depends on macro_asset_prices populated above.
         await runPython('sector_global_corr.py', [], 3 * 60_000)
           .catch(e => console.warn('[QUEUE] sector_global_corr failed:', (e as Error).message));
+        // Bond yields (India G-Sec + US/UK/DE 10yr) are now fetched inside global_macro_fetcher.py.
       },
       { connection, concurrency: 1, lockDuration: 5 * 60 * 1000 });
     dlMacroFetchWorker.on('completed', () => console.log('[QUEUE] dl-macro-fetch done'));
+
+    // ── Pre-open snapshot (3:40 AM UTC = 9:10 AM IST, weekdays) ──────────────────────────
+    // GIFT Nifty level + Asia sentiment + global risk score captured before Indian market opens.
+    const QUEUE_PREOPEN = 'preopen-snapshot';
+    const preopenQueue = new Queue(QUEUE_PREOPEN, { connection });
+    const preopenRep = await preopenQueue.getRepeatableJobs();
+    for (const r of preopenRep) await preopenQueue.removeRepeatableByKey(r.key);
+    await preopenQueue.add('preopen-daily', {}, {
+      repeat: { pattern: '40 3 * * 1-5' },
+      jobId: 'preopen-daily',
+      removeOnComplete: 3, removeOnFail: 3,
+    });
+    new Worker(QUEUE_PREOPEN,
+      async () => {
+        await runPython('preopen_fetcher.py', [], 60_000)
+          .catch(e => console.warn('[QUEUE] preopen_fetcher failed:', (e as Error).message));
+      },
+      { connection, concurrency: 1 });
+    console.log('[QUEUE] Pre-open snapshot scheduled at 9:10 AM IST (weekdays)');
     dlMacroFetchWorker.on('failed', (_, err) => console.error('[QUEUE] dl-macro-fetch failed:', err.message));
+
+    // ── Intraday regime refresh: VIX + USDINR + Nifty basis every 15 min (9:15–15:30 IST) ──
+    const QUEUE_REGIME = 'market-regime-refresh';
+    const regimeQueue = new Queue(QUEUE_REGIME, { connection });
+    const regimeRep = await regimeQueue.getRepeatableJobs();
+    for (const r of regimeRep) await regimeQueue.removeRepeatableByKey(r.key);
+    await regimeQueue.add('regime-intraday', {}, {
+      repeat: { pattern: '*/15 3-10 * * 1-5' },  // 3:45–10:00 UTC = 9:15–15:30 IST
+      jobId: 'regime-intraday',
+      removeOnComplete: 3, removeOnFail: 3,
+    });
+    new Worker(QUEUE_REGIME,
+      async () => {
+        await runPython('market_regime_fetcher.py', [], 60_000)
+          .catch(e => console.warn('[QUEUE] market_regime_fetcher failed:', (e as Error).message));
+      },
+      { connection, concurrency: 1 });
+    console.log('[QUEUE] Market regime refresh scheduled every 15 min during market hours');
 
     // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ DL Feature Refresh (3:30 PM IST = 10:00 AM UTC, weekdays) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
     dlFeatureRefreshQueue = new Queue(QUEUE_DL_FEATURE_REFRESH, { connection });

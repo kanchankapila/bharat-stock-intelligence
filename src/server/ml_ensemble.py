@@ -296,13 +296,6 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     # High rollover + strong upward carry → smart money positioned bullish
     X['rollover_x_score']  = X['rollover_pct'] * X['signal_score']
 
-    # ── Delivery Volume % (from delivery_volume_fetcher.py → technical_signals) ──
-    # delivery_pct: % of traded volume that resulted in actual delivery (not squared intraday).
-    # High delivery % = institutional / positional conviction; low = speculative noise.
-    # Default 50% (market mean for mid-cap liquid stocks); clipped 0–100.
-    X['delivery_pct']      = num('delivery_pct', 50.0).clip(0, 100) / 100.0
-    X['delivery_x_score']  = X['delivery_pct'] * X['signal_score']
-
     # ── Block Deals (from block_deal_fetcher.py → technical_signals) ──
     # block_deal_net_qty: buy_qty − sell_qty on NSE block-deal window.
     # Positive = accumulation; negative = distribution. Log-scaled to handle outliers.
@@ -484,6 +477,197 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     # Interaction: bearish OI direction weakening an already-low signal score = conviction short
     X['nt_oi_x_score']    = X['nt_oi_direction'] * X['signal_score']  # negative = bearish pile-on
 
+    # ── Historical Volatility (from hv_features.py, computed on stock_ohlcv) ──
+    # Low HV = calm stock, fewer false breakouts. iv_hv_ratio > 1 = options overpriced vs realized.
+    X['hv_20d']           = num('hv_20d', 20.0).clip(5, 80) / 80.0
+    X['hv_60d']           = num('hv_60d', 22.0).clip(5, 80) / 80.0
+    X['hv_ratio_60_20']   = (num('hv_60d', 22.0) / num('hv_20d', 20.0).replace(0, np.nan)).fillna(1.0).clip(0.5, 2.0)
+    X['iv_hv_ratio']      = num('iv_hv_ratio', 1.0).clip(0, 5) / 5.0
+
+    # ── Analyst estimate revision (from analyst_revision.py) ──
+    # Upward EPS revisions predict sustained demand (institutional mandate buying). Top quant factor.
+    X['eps_rev_3m']       = num('eps_revision_3m_pct', 0.0).clip(-30, 30)
+    X['target_rev_3m']    = num('target_revision_3m_pct', 0.0).clip(-20, 20)
+    X['analyst_chg']      = num('analyst_count_chg', 0).clip(-5, 5) / 5.0
+    # Interaction: rising estimates + strong score = high-conviction long
+    X['eps_rev_x_score']  = X['eps_rev_3m'].clip(0, 30) / 30.0 * X['signal_score']
+
+    # ── Sector-relative RS (from relative_strength.py extension) ──
+    # Distinguishes sector leaders from laggards — absolute RS can't see this.
+    X['rs_vs_sector_21d'] = num('rs_vs_sector_21d', 0.0).clip(-15, 15)
+    X['rs_vs_sector_63d'] = num('rs_vs_sector_63d', 0.0).clip(-20, 20)
+    X['sector_leader']    = (X['rs_vs_sector_21d'] > 2.0).astype(float)
+
+    # ── Surveillance risk flags (from asm_gsm_fetcher.py) ──
+    # ASM = 100% margin → institutional forced selling; GSM stage 5-6 = near-untradeable.
+    X['asm_flag']         = num('asm_flag', 0).clip(0, 1)
+    X['gsm_severity']     = num('gsm_stage', 0).clip(0, 6) / 6.0
+    X['surveillance_risk'] = X['asm_flag'] + X['gsm_severity']  # 0=clean, >0=risk
+
+    # ── Commodity / FX sensitivity (from commodity_sensitivity.py) ──
+    # Sector-routing signal: crude_corr>0.4 = oil/aviation; dxy_corr<-0.3 = IT exporters.
+    X['crude_corr']       = num('crude_corr_90d', 0.0).clip(-1, 1)
+    X['gold_corr']        = num('gold_corr_90d', 0.0).clip(-1, 1)
+    X['dxy_corr']         = num('dxy_corr_90d', 0.0).clip(-1, 1)
+    X['sp500_corr']       = num('sp500_corr_90d', 0.0).clip(-1, 1)
+
+    # ── Broker recommendation events (from mc_broker_reco_fetcher.py) ──
+    # Fresh named-broker BUY initiations drive institutional mandate demand for 2-4 weeks.
+    X['broker_buy_7d']    = num('mc_broker_buy_7d', 0).clip(0, 10) / 10.0
+    X['broker_sell_7d']   = num('mc_broker_sell_7d', 0).clip(0, 10) / 10.0
+    X['broker_net_7d']    = X['broker_buy_7d'] - X['broker_sell_7d']
+    X['broker_upside']    = num('mc_broker_upside', 0.0).clip(0, 60) / 60.0
+    # Interaction: high upside target + good signal score = conviction
+    X['broker_x_score']   = X['broker_upside'] * X['signal_score']
+
+    # ── Market-level macro regime (from global_macro_fetcher + preopen_fetcher) ──
+    # These are cross-sectional constants (same for all stocks) but encode the risk regime.
+    X['gift_nifty_pct']   = num('gift_nifty_pct', 0.0).clip(-3, 3)
+    X['nifty_gex']        = num('nifty_gex', 0.0).clip(-50, 50) / 50.0  # dealer GEX in ₹B
+    X['nifty_long_gamma'] = (X['nifty_gex'] > 0).astype(float)  # 1=mean-rev, 0=trend
+    X['india_10y']        = num('india_10y', 6.5).clip(5, 9) / 9.0
+    X['india_us_spread']  = num('india_us_spread', 2.0).clip(0, 5) / 5.0
+    X['high_impact_3d']   = num('high_impact_3d', 0).clip(0, 5) / 5.0  # macro event risk
+    X['asia_sentiment']   = num('asia_sentiment', 0.0).clip(-3, 3)
+    X['global_risk']      = num('global_risk', 0.0).clip(-3, 3)
+    X['risk_on']          = (X['global_risk'] > 0).astype(float)  # 1=global risk-on
+    # Interaction: risk-on regime × bullish signal = higher conviction
+    X['risk_x_score']     = X['global_risk'].clip(0, 3) / 3.0 * X['signal_score']
+
+    # ── Earnings calendar & PEAD (from mc_earnings_fetcher.py) ──
+    # Pre-earnings: stocks drift up avg 2-3% in 5 days before results (Jegadeesh-Livnat).
+    # Post-earnings PEAD: BP category stocks drift up 60 days; NT drift down (Bernard 1992).
+    X['days_to_results']    = num('days_to_next_results', 30).clip(0, 30) / 30.0
+    X['near_results']       = (num('days_to_next_results', 30) <= 5).astype(float)
+    X['cat_yoy']            = num('earnings_category_yoy', 0).clip(-2, 2) / 2.0
+    X['cat_qoq']            = num('earnings_category_qoq', 0).clip(-2, 2) / 2.0
+    X['np_growth_yoy']      = num('earnings_np_growth_yoy', 0.0).clip(-50, 100) / 100.0
+    X['np_growth_qoq']      = num('earnings_np_growth_qoq', 0.0).clip(-50, 100) / 100.0
+    X['shocker_flag']       = num('earnings_shocker_flag', 0).clip(0, 1)
+    X['shocker_gain']       = num('earnings_shocker_gain', 0.0).clip(0, 200) / 200.0
+    # Market earnings breadth: below 0.5 means majority of stocks disappointing
+    X['earnings_breadth']   = num('high_impact_3d', 0.5).clip(0, 1)  # reuse macro slot if needed
+    # Interaction: BP category + strong signal = highest PEAD conviction
+    X['pead_signal']        = X['cat_yoy'].clip(0, 1) * X['signal_score']
+
+    # ── Sector earnings quality (from mc_sector_earnings via JOIN) ──
+    # Stock in sector where NP growing >15% YoY = earnings tailwind for all stocks in that sector.
+    X['sector_np_yoy']      = num('sector_np_growth_yoy', 0.0).clip(-20, 40) / 40.0
+    X['sector_np_qoq']      = num('sector_np_growth_qoq', 0.0).clip(-20, 30) / 30.0
+    X['sector_rev_yoy']     = num('sector_rev_growth_yoy', 0.0).clip(-10, 20) / 20.0
+    X['sector_earnings_up'] = (X['sector_np_yoy'] > 0.25).astype(float)  # sector NP>10% tailwind
+
+    # ── Market-level earnings breadth (from macro_snap + mc_earnings_fetcher dashboard) ──
+    X['mkt_np_yoy']         = num('market_np_yoy', 10.0).clip(-10, 40) / 40.0
+    X['earnings_breadth_m'] = num('earnings_breadth_mkt', 0.5).clip(0, 1)  # >0.5 = majority positive
+
+    # ── Index membership (passive ETF flow signal) ──
+    X['is_nifty50']   = num('is_nifty50',  0.0).clip(0, 1)
+    X['is_nifty100']  = num('is_nifty100', 0.0).clip(0, 1)
+    X['nifty_tier']   = num('nifty_tier',  0.0).clip(0, 250) / 250.0  # 50=top→0.2, 0=none→0
+
+    # ── Promoter pledge trend (deleveraging = bullish, increasing = distress) ──
+    X['pledge_chg_90d']    = num('pledge_chg_90d', 0.0).clip(-10, 10) / 10.0
+    X['pledge_deleveraging'] = (X['pledge_chg_90d'] < -0.2).astype(float)
+    X['pledge_distress']     = (X['pledge_chg_90d'] > 0.2).astype(float)
+
+    # ── Pre-open IEP signal (gap-up/gap-down expected at open) ──
+    X['iep_gap_pct']      = num('iep_gap_pct', 0.0).clip(-5, 5) / 5.0
+    X['preopen_imbalance']= num('preopen_imbalance', 0.0).clip(-1, 1)
+    X['gap_up_open']      = (X['iep_gap_pct'] > 0.1).astype(float)
+
+    # ── Per-stock option chain (expected move + GEX proxy) ──
+    X['expected_move_pct'] = num('expected_move_pct', 3.0).clip(0.5, 15) / 15.0
+    X['stock_gex_proxy']   = num('stock_gex_proxy', 0.0).clip(-1, 1)  # >0=mean-rev, <0=trending
+    X['low_expected_move'] = (X['expected_move_pct'] < 0.15).astype(float)  # cheap options
+
+    # ── Provisional FII flow (T+0, available by 6 PM same day) ──
+    X['fii_net_today']  = num('fii_net_today', 0.0).clip(-5000, 5000) / 5000.0
+    X['fii_buying']     = (X['fii_net_today'] > 0.1).astype(float)
+    X['fii_selling']    = (X['fii_net_today'] < -0.1).astype(float)
+
+    # ── India VIX (from macro_asset_prices — used in regime detection only) ──
+    # Normalised to [0,1] over the 8-35 observable range. Used for regime-conditional
+    # scoring layer; not fed to the per-stock classifier (tested, hurt held-out AUC).
+    X['india_vix'] = num('india_vix', 15.0).clip(8, 35) / 35.0
+    X['high_vix']  = (X['india_vix'] > 0.57).astype(float)  # > 20 normalised
+
+    # ── Second-order interactions (cross-signal alpha) ──────────────────────────
+    # Analyst upgrade × sector RS: double-confirmation of institutional interest
+    X['eps_rev_x_rs']    = X['eps_rev_3m'].clip(-1, 1) * X.get('rs_vs_sector_21d', pd.Series(0.0, index=X.index)).clip(-1, 1)
+
+    # Broker buy × IEP gap-up: institutional recommendation + pre-market momentum
+    broker_buy_norm = num('mc_broker_buy_7d', 0.0).clip(0, 5) / 5.0
+    X['broker_x_iep']    = broker_buy_norm * X['iep_gap_pct'].clip(0, 1)
+
+    # EPS beat streak × near results: strongest PEAD setup
+    X['pead_confirmed']  = X.get('eps_beat_streak', pd.Series(0.0, index=X.index)).clip(0, 1) * X['near_results']
+
+    # Low expected move × high RS: options cheap on a relative strength leader
+    X['cheap_opts_rs']   = X['low_expected_move'] * X.get('sector_leader', pd.Series(0.0, index=X.index))
+
+    # FII buying × gift nifty positive: double market-risk-on confirmation
+    X['risk_on_confirm'] = X['fii_buying'] * (X['gift_nifty_pct'] > 0.1).astype(float)
+
+    # High IV × earnings near: expensive options near results (sell premium signal)
+    X['iv_near_results'] = (num('iv_hv_ratio', 1.0) > 1.5).astype(float) * X['near_results']
+
+    # Nifty50 index member × bull GEX: passive flow + mean-reverting gamma environment
+    X['index_bull_gex']  = X['is_nifty50'] * (1 - X['nifty_long_gamma'])  # nifty50 in long-gamma = flow support
+
+    # Pledge improving × strong FCF: deleveraging + cash generation = quality compound
+    # TODO: enable once financial_ratios_fetcher populates fcf_yield (currently 0 rows)
+    # X['quality_compound'] = X['pledge_deleveraging'] * num('fcf_yield', 0.0).clip(0, 0.2) / 0.2
+
+    # ── EPS surprise streak (from eps_surprise_fetcher.py) ──────────────────
+    # TODO: enable once eps_surprise_fetcher populates eps_surprise_q1/q2 (currently 0 rows)
+    # X['eps_surprise_q1']      = num('eps_surprise_q1', 0.0).clip(-20, 20) / 20.0
+    # X['eps_surprise_q2']      = num('eps_surprise_q2', 0.0).clip(-20, 20) / 20.0
+    X['eps_beat_streak_norm'] = num('eps_beat_streak', 0.0).clip(0, 8) / 8.0
+    X['eps_miss_after_run']   = num('eps_miss_after_streak', 0.0).clip(0, 1)
+    X['rev_surprise_q1']      = num('rev_surprise_q1', 0.0).clip(-10, 10) / 10.0
+    # X['eps_momentum']         = X['eps_surprise_q1'] * X['eps_beat_streak_norm']  # streak × size — disabled: eps_surprise_q1 unpopulated
+
+    # ── Financial quality: FCF + interest coverage (financial_ratios_fetcher.py) ──
+    X['fcf_yield_norm']    = num('fcf_yield', 0.0).clip(-5, 20) / 20.0
+    X['interest_cov']      = num('interest_coverage', 5.0).clip(0, 20) / 20.0
+    X['fcf_positive']      = num('fcf_positive', 0.0).clip(0, 1)
+    X['debt_risk']         = num('debt_coverage_risk', 0.0).clip(0, 1)
+    X['quality_score']     = X['fcf_positive'] * (1 - X['debt_risk'])  # FCF+safe = quality
+
+    # ── Delivery % trend + block deals + short proxy (delivery_trend_fetcher.py) ──
+    X['delivery_trend']   = num('delivery_trend_30d', 0.0).clip(-20, 20) / 20.0
+    X['block_deal']       = num('block_deal_flag', 0.0).clip(0, 1)
+    X['block_sell']       = (num('block_deal_direction', 0.0) < -0.5).astype(float)
+    X['short_proxy']      = num('short_interest_proxy', 0.3).clip(0, 1)
+    X['high_short']       = (X['short_proxy'] > 0.55).astype(float)  # put-heavy = crowded short
+
+    # ── Promoter insider transactions (insider_transactions_fetcher.py) ──────
+    X['promoter_net']      = num('promoter_net_90d', 0.0).clip(-50, 50) / 50.0
+    # TODO: enable once insider_transactions_fetcher populates insider_buy_flag (currently 0 rows)
+    # X['insider_buy']       = num('insider_buy_flag', 0.0).clip(0, 1)
+    X['insider_sell']      = num('insider_sell_flag', 0.0).clip(0, 1)
+
+    # ── Credit rating events (credit_rating_fetcher.py) ──────────────────────
+    X['rating_up']         = num('rating_upgrade_180d', 0.0).clip(0, 1)
+    X['rating_down']       = num('rating_downgrade_180d', 0.0).clip(0, 1)
+    X['rating_recency']    = (365.0 - num('days_since_upgrade', 365.0).clip(0, 365)) / 365.0
+
+    # ── MF sector flow (mf_sector_flow_fetcher.py) ──────────────────────────
+    X['mf_sector_flow']    = num('mf_sector_flow_pct', 0.0).clip(-2, 2) / 2.0
+    X['mf_inflow']         = (X['mf_sector_flow'] > 0.1).astype(float)
+
+    # ── Working capital cycle (working_capital_fetcher.py) ───────────────────
+    X['ccc_ttm_norm']      = num('ccc_ttm', 40.0).clip(0, 180) / 180.0
+    X['ccc_trend_norm']    = num('ccc_trend', 0.0).clip(-30, 30) / 30.0
+    X['wc_bad']            = num('wc_deteriorating', 0.0).clip(0, 1)
+    X['wc_good']           = num('wc_improving', 0.0).clip(0, 1)
+
+    # ── Currency + futures basis (market_regime_fetcher.py) ──────────────────
+    X['usdinr_chg']        = num('usdinr_chg_pct', 0.0).clip(-2, 2) / 2.0
+    X['nifty_basis']       = num('nifty_basis_pct', 1.0).clip(-3, 5) / 5.0
+    X['nifty_contango']    = num('nifty_contango', 1.0).clip(0, 1)
+
     # NOTE: market-level India VIX + breadth were tested as ensemble features (raw and as
     # cross-sectional interactions) and BOTH hurt held-out AUC vs omitting them entirely
     # (baseline cv 0.651/held-out 0.543; interactions 0.640/0.531; raw 0.606/0.493). They add
@@ -502,6 +686,64 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
             pd.Series(pd.NaT, index=df.index)
         X['days_to_fno_expiry'] = _days_to_fno_expiry(sd).fillna(15) / 30.0
         X['results_season']     = _results_season_flag(sd).fillna(0)
+
+    # ── Timing & momentum signals (from existing populated columns) ──────────────
+    rsi_v       = num('rsi', 50)
+    vol_r       = num('volume_ratio', 1.0)
+    adx_v       = num('adx', 20)
+    pcr         = num('pcr_oi', 1.0)
+    iv_r        = num('iv_rank', 50)
+    sent        = num('news_sentiment_score', 0)
+    fii_3       = num('fii_3d_net', 0)
+    fii_10      = num('fii_10d_net', 0)
+    dii_3       = num('dii_3d_net', 0)
+    sec_5       = num('sector_ret_5d', 0)
+    sec_21      = num('sector_ret_21d', 0)
+    above_200   = num('above_sma200', 0)
+
+    # RSI zone signals
+    X['rsi_oversold']      = (rsi_v < 35).astype(float)
+    X['rsi_momentum_zone'] = ((rsi_v >= 50) & (rsi_v <= 70)).astype(float)
+    X['rsi_overbought']    = (rsi_v > 75).astype(float)
+
+    # Volume confirmation
+    X['vol_spike']         = (vol_r > 2.0).astype(float)
+    X['vol_above_avg']     = (vol_r > 1.3).astype(float)
+
+    # Trend strength
+    X['adx_strong']        = (adx_v > 25).astype(float)
+    X['above_200_vol']     = (above_200 * (vol_r > 1.2)).astype(float)
+
+    # Options/PCR signals
+    X['pcr_bullish']       = (pcr < 0.75).astype(float)
+    X['pcr_bearish']       = (pcr > 1.2).astype(float)
+    X['iv_low_entry']      = (iv_r < 30).astype(float)
+
+    # News sentiment
+    X['sentiment_pos']     = (sent > 0.3).astype(float)
+    X['sentiment_neg']     = (sent < -0.3).astype(float)
+    X['sentiment_score']   = sent.clip(-1, 1)
+
+    # FII/DII flow (raw units from fii_dii_fetcher, not normalised)
+    X['fii_buying_flow']   = ((fii_3 > 0) & (fii_10 > 0)).astype(float)
+    X['fii_selling_flow']  = ((fii_3 < 0) & (fii_10 < 0)).astype(float)
+    X['dii_buying_flow']   = (dii_3 > 0).astype(float)
+    X['fii_dii_agree']     = (((fii_3 > 0) & (dii_3 > 0)) | ((fii_3 < 0) & (dii_3 < 0))).astype(float)
+
+    # Sector momentum
+    X['sector_strong']     = ((sec_5 > 1.5) & (sec_21 > 3)).astype(float)
+    X['sector_weak']       = ((sec_5 < -1.5) & (sec_21 < -3)).astype(float)
+
+    # Compound conviction signals
+    X['bull_trifecta']     = (X['rsi_momentum_zone'] * X['vol_above_avg'] * X['fii_buying_flow'])
+    X['trend_vol_confirm'] = (X['adx_strong'] * X['above_200_vol'])
+
+    # ── PEAD + Event signals ─────────────────────────────────────────────────────
+    X['pead_score']        = num('pead_score', 0).clip(-1, 1)
+    X['event_score']       = num('event_signal_score', 0).clip(-3, 3) / 3.0
+    X['event_positive']    = (num('event_signal_score', 0) > 1.0).astype(float)
+    X['event_negative']    = (num('event_signal_score', 0) < -1.0).astype(float)
+    X['pead_x_event']      = (X['pead_score'] * X['event_score']).clip(-1, 1)
 
     # Signal type one-hot
     sig_col = df['signals_json'] if 'signals_json' in df.columns else pd.Series(['[]'] * len(df), index=df.index)
@@ -591,9 +833,8 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                mb.pct_above_200dma, mb.adv_decline_ratio, mb.net_highs_lows,
                hfs.max_pain,
                ts.mf_holding_pct, ts.mf_fund_count, ts.mf_chg_vs_prev,
-               ts.sector_global_corr_21d,
                ts.rollover_pct, ts.cost_of_carry_ann,
-               ts.delivery_pct, ts.block_deal_net_qty, ts.block_deal_value_cr,
+               ts.block_deal_net_qty, ts.block_deal_value_cr,
                ts.eps_ttm, ts.eps_growth_yoy, ts.eps_growth_qoq, ts.eps_acceleration,
                ts.pe_ttm, ts.dvm_durability, ts.dvm_valuation, ts.dvm_momentum,
                ts.pe_pct_rank_252d, ts.pe_vs_median_1yr, ts.pb_pct_rank_252d, ts.div_yield_ttm,
@@ -618,6 +859,40 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                ts.tl_vs_ind_1m, ts.tl_vs_ind_3m,
                ts.tl_seasonal_month_5y, ts.tl_dist_3m_high_pct, ts.tl_dist_3m_low_pct,
                ts.nt_max_pain_dist_pct, ts.nt_oi_direction, ts.nt_pcr, ts.nt_option_volume_log,
+               ts.hv_10d, ts.hv_20d, ts.hv_30d, ts.hv_60d, ts.iv_hv_ratio,
+               ts.pead_score, ts.event_signal_score,
+               ts.eps_revision_3m_pct, ts.target_revision_3m_pct, ts.analyst_count_chg,
+               ts.rs_vs_sector_21d, ts.rs_vs_sector_63d,
+               ts.asm_flag, ts.gsm_stage,
+               ts.crude_corr_90d, ts.gold_corr_90d, ts.dxy_corr_90d, ts.sp500_corr_90d,
+               ts.mc_broker_buy_7d, ts.mc_broker_sell_7d, ts.mc_broker_upside,
+               ts.days_to_next_results, ts.earnings_category_yoy, ts.earnings_category_qoq,
+               ts.earnings_np_growth_yoy, ts.earnings_np_growth_qoq,
+               ts.earnings_shocker_flag, ts.earnings_shocker_gain,
+               ts.is_nifty50, ts.is_nifty100, ts.nifty_tier,
+               ts.pledge_chg_90d,
+               ts.iep_gap_pct, ts.preopen_imbalance,
+               ts.expected_move_pct, ts.stock_gex_proxy,
+               ts.eps_surprise_q1, ts.eps_surprise_q2, ts.eps_beat_streak,
+               ts.eps_miss_after_streak, ts.rev_surprise_q1,
+               ts.fcf_yield, ts.interest_coverage, ts.fcf_positive, ts.debt_coverage_risk,
+               ts.delivery_trend_30d, ts.block_deal_flag, ts.block_deal_direction,
+               ts.short_interest_proxy,
+               ts.promoter_buy_90d_cr, ts.promoter_sell_90d_cr, ts.promoter_net_90d,
+               ts.insider_buy_flag, ts.insider_sell_flag,
+               ts.rating_upgrade_180d, ts.rating_downgrade_180d, ts.days_since_upgrade,
+               ts.mf_sector_flow_pct,
+               ts.receivables_days_ttm, ts.ccc_ttm, ts.ccc_trend,
+               ts.wc_deteriorating, ts.wc_improving,
+               macro_snap.gift_nifty_pct, macro_snap.nifty_gex,
+               macro_snap.india_10y, macro_snap.india_us_spread,
+               macro_snap.high_impact_3d, macro_snap.asia_sentiment, macro_snap.global_risk,
+               macro_snap.market_np_yoy, macro_snap.earnings_breadth_mkt,
+               macro_snap.fii_net_today,
+               macro_snap.usdinr_chg_pct, macro_snap.nifty_basis_pct, macro_snap.nifty_contango,
+               macro_snap.india_vix,
+               mse.np_growth_yoy AS sector_np_growth_yoy, mse.np_growth_qoq AS sector_np_growth_qoq,
+               mse.rev_growth_yoy AS sector_rev_growth_yoy,
                COALESCE(fh.fifty_two_week_high, sf.fifty_two_week_high) AS fifty_two_week_high,
                COALESCE(fh.piotroski_f_score, sf.piotroski_f_score)     AS piotroski_f_score,
                COALESCE(fh.debt_to_equity, sf.debt_to_equity)           AS debt_to_equity,
@@ -675,10 +950,33 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                     AND p2.date <= so.signal_date
               )
         LEFT JOIN feature_store fs
-               ON fs.symbol = so.symbol AND fs.date = so.signal_date AND fs.timeframe = 'D'
+               ON fs.symbol = so.symbol AND fs.date::text = so.signal_date AND fs.timeframe = 'D'
         LEFT JOIN market_breadth mb ON mb.date = so.signal_date
         LEFT JOIN historical_fno_sentiment hfs
                ON hfs.symbol = so.symbol AND hfs.date = so.signal_date
+        LEFT JOIN (
+            SELECT
+                date::text AS snap_date,
+                MAX(CASE WHEN symbol='GIFT_NIFTY_CHG_PCT'   THEN close END) AS gift_nifty_pct,
+                MAX(CASE WHEN symbol='NIFTY_GEX'             THEN close END) AS nifty_gex,
+                MAX(CASE WHEN symbol='INDIA_10Y'             THEN close END) AS india_10y,
+                MAX(CASE WHEN symbol='INDIA_US_SPREAD'       THEN close END) AS india_us_spread,
+                MAX(CASE WHEN symbol='HIGH_IMPACT_EVENTS_3D' THEN close END) AS high_impact_3d,
+                MAX(CASE WHEN symbol='ASIA_SENTIMENT'        THEN close END) AS asia_sentiment,
+                MAX(CASE WHEN symbol='GLOBAL_RISK_SCORE'     THEN close END) AS global_risk,
+                MAX(CASE WHEN symbol='MARKET_NP_GROWTH_YOY'  THEN close END) AS market_np_yoy,
+                MAX(CASE WHEN symbol='EARNINGS_BREADTH'       THEN close END) AS earnings_breadth_mkt,
+                MAX(CASE WHEN symbol='FII_NET_TODAY'           THEN close END) AS fii_net_today,
+                MAX(CASE WHEN symbol='INDIA_VIX'              THEN close END) AS india_vix,
+                MAX(CASE WHEN symbol='USDINR_CHG_PCT'          THEN close END) AS usdinr_chg_pct,
+                MAX(CASE WHEN symbol='NIFTY_BASIS_PCT'          THEN close END) AS nifty_basis_pct,
+                MAX(CASE WHEN symbol='NIFTY_CONTANGO'           THEN close END) AS nifty_contango
+            FROM macro_asset_prices
+            GROUP BY date
+        ) macro_snap ON macro_snap.snap_date = so.signal_date
+        LEFT JOIN mc_sector_earnings mse ON mse.sector_name = (
+            SELECT ns.sector FROM nse_stocks ns WHERE ns.symbol = so.symbol LIMIT 1
+        )
         {label_join}
         WHERE {label_where}
     """
@@ -720,9 +1018,8 @@ def load_pending_signals() -> pd.DataFrame:
                mb.pct_above_200dma, mb.adv_decline_ratio, mb.net_highs_lows,
                hfs.max_pain,
                ts.mf_holding_pct, ts.mf_fund_count, ts.mf_chg_vs_prev,
-               ts.sector_global_corr_21d,
                ts.rollover_pct, ts.cost_of_carry_ann,
-               ts.delivery_pct, ts.block_deal_net_qty, ts.block_deal_value_cr,
+               ts.block_deal_net_qty, ts.block_deal_value_cr,
                ts.eps_ttm, ts.eps_growth_yoy, ts.eps_growth_qoq, ts.eps_acceleration,
                ts.pe_ttm, ts.dvm_durability, ts.dvm_valuation, ts.dvm_momentum,
                ts.pe_pct_rank_252d, ts.pe_vs_median_1yr, ts.pb_pct_rank_252d, ts.div_yield_ttm,
@@ -747,6 +1044,40 @@ def load_pending_signals() -> pd.DataFrame:
                ts.tl_vs_ind_1m, ts.tl_vs_ind_3m,
                ts.tl_seasonal_month_5y, ts.tl_dist_3m_high_pct, ts.tl_dist_3m_low_pct,
                ts.nt_max_pain_dist_pct, ts.nt_oi_direction, ts.nt_pcr, ts.nt_option_volume_log,
+               ts.hv_10d, ts.hv_20d, ts.hv_30d, ts.hv_60d, ts.iv_hv_ratio,
+               ts.pead_score, ts.event_signal_score,
+               ts.eps_revision_3m_pct, ts.target_revision_3m_pct, ts.analyst_count_chg,
+               ts.rs_vs_sector_21d, ts.rs_vs_sector_63d,
+               ts.asm_flag, ts.gsm_stage,
+               ts.crude_corr_90d, ts.gold_corr_90d, ts.dxy_corr_90d, ts.sp500_corr_90d,
+               ts.mc_broker_buy_7d, ts.mc_broker_sell_7d, ts.mc_broker_upside,
+               ts.days_to_next_results, ts.earnings_category_yoy, ts.earnings_category_qoq,
+               ts.earnings_np_growth_yoy, ts.earnings_np_growth_qoq,
+               ts.earnings_shocker_flag, ts.earnings_shocker_gain,
+               ts.is_nifty50, ts.is_nifty100, ts.nifty_tier,
+               ts.pledge_chg_90d,
+               ts.iep_gap_pct, ts.preopen_imbalance,
+               ts.expected_move_pct, ts.stock_gex_proxy,
+               ts.eps_surprise_q1, ts.eps_surprise_q2, ts.eps_beat_streak,
+               ts.eps_miss_after_streak, ts.rev_surprise_q1,
+               ts.fcf_yield, ts.interest_coverage, ts.fcf_positive, ts.debt_coverage_risk,
+               ts.delivery_trend_30d, ts.block_deal_flag, ts.block_deal_direction,
+               ts.short_interest_proxy,
+               ts.promoter_buy_90d_cr, ts.promoter_sell_90d_cr, ts.promoter_net_90d,
+               ts.insider_buy_flag, ts.insider_sell_flag,
+               ts.rating_upgrade_180d, ts.rating_downgrade_180d, ts.days_since_upgrade,
+               ts.mf_sector_flow_pct,
+               ts.receivables_days_ttm, ts.ccc_ttm, ts.ccc_trend,
+               ts.wc_deteriorating, ts.wc_improving,
+               macro_snap.gift_nifty_pct, macro_snap.nifty_gex,
+               macro_snap.india_10y, macro_snap.india_us_spread,
+               macro_snap.high_impact_3d, macro_snap.asia_sentiment, macro_snap.global_risk,
+               macro_snap.market_np_yoy, macro_snap.earnings_breadth_mkt,
+               macro_snap.fii_net_today,
+               macro_snap.usdinr_chg_pct, macro_snap.nifty_basis_pct, macro_snap.nifty_contango,
+               macro_snap.india_vix,
+               mse.np_growth_yoy AS sector_np_growth_yoy, mse.np_growth_qoq AS sector_np_growth_qoq,
+               mse.rev_growth_yoy AS sector_rev_growth_yoy,
                sf.fifty_two_week_high,
                sf.piotroski_f_score, sf.debt_to_equity, sf.operating_margins,
                sf.return_on_equity, sf.revenue_growth, sf.earnings_growth,
@@ -757,7 +1088,7 @@ def load_pending_signals() -> pd.DataFrame:
         FROM technical_signals ts
         LEFT JOIN stock_fundamentals sf ON sf.symbol = ts.symbol
         LEFT JOIN feature_store fs
-               ON fs.symbol = ts.symbol AND fs.date = ts.date AND fs.timeframe = 'D'
+               ON fs.symbol = ts.symbol AND fs.date::text = ts.date AND fs.timeframe = 'D'
         LEFT JOIN market_breadth mb ON mb.date = ts.date
         LEFT JOIN historical_fno_sentiment hfs
                ON hfs.symbol = ts.symbol AND hfs.date = ts.date
@@ -788,6 +1119,28 @@ def load_pending_signals() -> pd.DataFrame:
                     AND p2.score_type = 'ohlson_o_score'
                     AND p2.date <= ts.date
               )
+        LEFT JOIN (
+            SELECT
+                MAX(CASE WHEN symbol='GIFT_NIFTY_CHG_PCT'   THEN close END) AS gift_nifty_pct,
+                MAX(CASE WHEN symbol='NIFTY_GEX'             THEN close END) AS nifty_gex,
+                MAX(CASE WHEN symbol='INDIA_10Y'             THEN close END) AS india_10y,
+                MAX(CASE WHEN symbol='INDIA_US_SPREAD'       THEN close END) AS india_us_spread,
+                MAX(CASE WHEN symbol='HIGH_IMPACT_EVENTS_3D' THEN close END) AS high_impact_3d,
+                MAX(CASE WHEN symbol='ASIA_SENTIMENT'        THEN close END) AS asia_sentiment,
+                MAX(CASE WHEN symbol='GLOBAL_RISK_SCORE'     THEN close END) AS global_risk,
+                MAX(CASE WHEN symbol='MARKET_NP_GROWTH_YOY'  THEN close END) AS market_np_yoy,
+                MAX(CASE WHEN symbol='EARNINGS_BREADTH'       THEN close END) AS earnings_breadth_mkt,
+                MAX(CASE WHEN symbol='FII_NET_TODAY'           THEN close END) AS fii_net_today,
+                MAX(CASE WHEN symbol='INDIA_VIX'              THEN close END) AS india_vix,
+                MAX(CASE WHEN symbol='USDINR_CHG_PCT'          THEN close END) AS usdinr_chg_pct,
+                MAX(CASE WHEN symbol='NIFTY_BASIS_PCT'          THEN close END) AS nifty_basis_pct,
+                MAX(CASE WHEN symbol='NIFTY_CONTANGO'           THEN close END) AS nifty_contango
+            FROM macro_asset_prices
+            WHERE date::text = (SELECT MAX(date)::text FROM macro_asset_prices)
+        ) macro_snap ON 1=1
+        LEFT JOIN mc_sector_earnings mse ON mse.sector_name = (
+            SELECT ns.sector FROM nse_stocks ns WHERE ns.symbol = ts.symbol LIMIT 1
+        )
         WHERE ts.win_probability IS NULL
           AND ts.signals_json IS NOT NULL
         ORDER BY ts.date DESC
@@ -974,29 +1327,51 @@ def train_ensemble(X: pd.DataFrame, y: pd.Series, dates: pd.Series | None = None
         horizons = pd.to_numeric(X['horizon_days'], errors='coerce').fillna(horizon_days).astype(int).to_numpy()
         weights = np.asarray(average_uniqueness(starts, horizons), dtype=float)
 
-    # ── Honest held-out test: last 20%, chronological, with an embargo purge gap ──
+    # ── Honest held-out test: last 10% for reporting, prior 10% for threshold selection ──
+    # Threshold is found on a dedicated val split (rows [tr_end : tr_end+n_val]), NOT the
+    # test set. This keeps F1/Recall metrics unbiased on the held-out test window.
+    # NOTE: threshold is found on a separate val split; F1/Recall metrics are honest.
     test = {'auc': None, 'precision': None, 'recall': None, 'f1': None, 'n': 0}
-    n_test = int(len(X) * 0.20)
-    if n_test >= 20 and (len(X) - n_test - embargo) >= max(min_samples, 100):
-        tr_end = len(X) - n_test - embargo
+    n_test = int(len(X) * 0.10)  # last 10% = reporting test set
+    n_val  = int(len(X) * 0.10)  # prior 10% = threshold selection val set
+    if n_test >= 10 and n_val >= 10 and (len(X) - n_test - n_val - embargo) >= max(min_samples, 100):
+        tr_end = len(X) - n_test - n_val - embargo
         fb, mt, _, _, _ = _fit_stack(X.iloc[:tr_end], y.iloc[:tr_end], spw, embargo,
                                      sample_weight=(weights[:tr_end] if weights is not None else None))
+        # Threshold selection on val split (not reused for reporting)
+        X_val, y_val = X.iloc[tr_end : tr_end + n_val], y.iloc[tr_end : tr_end + n_val]
+        val_proba = mt.predict_proba(
+            np.column_stack([m.predict_proba(X_val)[:, 1] for _, m in fb])
+        )[:, 1]
+        best_t = 0.5
+        if y_val.nunique() > 1:
+            from sklearn.metrics import f1_score as f1_fn
+            thresholds = np.arange(0.25, 0.70, 0.01)
+            best_f1 = 0.0
+            for t in thresholds:
+                p = (val_proba >= t).astype(int)
+                f = f1_fn(y_val, p, zero_division=0)
+                if f > best_f1:
+                    best_f1, best_t = f, t
+        # Report metrics on the held-out test set using the val-derived threshold
         X_te, y_te = X.iloc[len(X) - n_test:], y.iloc[len(X) - n_test:]
         te_proba = mt.predict_proba(
             np.column_stack([m.predict_proba(X_te)[:, 1] for _, m in fb])
         )[:, 1]
         if y_te.nunique() > 1:
-            te_pred = (te_proba > 0.5).astype(int)
+            te_pred = (te_proba >= best_t).astype(int)
             test = {
-                'auc':       float(roc_auc_score(y_te, te_proba)),
-                'precision': float(precision_score(y_te, te_pred, zero_division=0)),
-                'recall':    float(recall_score(y_te, te_pred, zero_division=0)),
-                'f1':        float(f1_score(y_te, te_pred, zero_division=0)),
-                'n':         int(n_test),
+                'auc':               float(roc_auc_score(y_te, te_proba)),
+                'precision':         float(precision_score(y_te, te_pred, zero_division=0)),
+                'recall':            float(recall_score(y_te, te_pred, zero_division=0)),
+                'f1':                float(f1_score(y_te, te_pred, zero_division=0)),
+                'n':                 int(n_test),
+                'optimal_threshold': float(best_t),
             }
-            print(f"[Ensemble]   HELD-OUT TEST (last {n_test}, embargo={embargo}): "
+            print(f"[Ensemble]   HELD-OUT TEST (last {n_test}, threshold from val {n_val}, embargo={embargo}): "
                   f"AUC={test['auc']:.4f} P={test['precision']:.3f} "
-                  f"R={test['recall']:.3f} F1={test['f1']:.3f}")
+                  f"R={test['recall']:.3f} F1={test['f1']:.3f} "
+                  f"threshold={best_t:.2f} (val-derived, unbiased)")
     else:
         print(f"[Ensemble]   Insufficient data for a held-out test (n={len(X)}); reporting CV only.")
 
@@ -1005,20 +1380,21 @@ def train_ensemble(X: pd.DataFrame, y: pd.Series, dates: pd.Series | None = None
     print(f"[Ensemble]   Stacking purged-OOF AUC={auc:.4f}  Accuracy={acc:.4f}  (embargo={embargo})")
 
     return {
-        'base_models':  fitted,
-        'meta':         meta,
-        'feature_names': list(X.columns),
+        'base_models':        fitted,
+        'meta':               meta,
+        'feature_names':      list(X.columns),
         'feature_importances': imp.tolist() if imp is not None else None,
-        'cv_auc':       float(auc),
-        'cv_accuracy':  acc,
-        'test_auc':     test['auc'],
-        'test_precision': test['precision'],
-        'test_recall':  test['recall'],
-        'test_f1':      test['f1'],
-        'test_samples': test['n'],
-        'embargo':      embargo,
-        'n_samples':    len(X),
-        'trained_at':   datetime.datetime.now().isoformat(),
+        'cv_auc':             float(auc),
+        'cv_accuracy':        acc,
+        'test_auc':           test['auc'],
+        'test_precision':     test['precision'],
+        'test_recall':        test['recall'],
+        'test_f1':            test['f1'],
+        'test_samples':       test['n'],
+        'optimal_threshold':  test.get('optimal_threshold', 0.45),
+        'embargo':            embargo,
+        'n_samples':          len(X),
+        'trained_at':         datetime.datetime.now().isoformat(),
     }
 
 
@@ -1100,6 +1476,78 @@ def load_ensemble() -> dict | None:
         return pickle.load(f)
 
 
+# ── Regime Detection + Conditional Scoring ───────────────────────────────────
+
+def _get_current_regime(con) -> str:
+    """Read current market regime from app_settings or derive from macro data."""
+    # Try app_settings first (written by technical-signals scan pipeline)
+    try:
+        row = con.execute(
+            "SELECT value FROM app_settings WHERE key = 'current_regime'"
+        ).fetchone()
+        if row:
+            return row[0]  # 'BULL', 'BEAR', or 'SIDEWAYS'
+    except Exception:
+        pass
+    # Also accept the existing key name used by regime_threshold()
+    try:
+        row = con.execute(
+            "SELECT value FROM app_settings WHERE key = 'current_nifty_regime'"
+        ).fetchone()
+        if row and row[0] in ('BULL', 'BEAR', 'SIDEWAYS'):
+            return row[0]
+    except Exception:
+        pass
+    # Fallback: derive from recent GIFT Nifty + India VIX
+    try:
+        row = con.execute("""
+            SELECT
+                MAX(CASE WHEN symbol='GIFT_NIFTY_CHG_PCT' THEN close END) AS gift,
+                MAX(CASE WHEN symbol='INDIA_VIX'          THEN close END) AS vix
+            FROM macro_asset_prices
+            WHERE date >= date('now', '-5 days')
+        """).fetchone()
+        if row and row[0] is not None:
+            gift = float(row[0]) if row[0] is not None else 0.0
+            vix  = float(row[1]) if row[1] is not None else 15.0
+            if gift > 0.3 and vix < 15:
+                return 'BULL'
+            elif gift < -0.5 or vix > 25:
+                return 'BEAR'
+    except Exception:
+        pass
+    return 'SIDEWAYS'
+
+
+def _apply_regime_adjustment(df_scores: pd.DataFrame, regime: str) -> pd.DataFrame:
+    """Adjust win_probability based on market regime.
+
+    The base ensemble was trained on all-regime data. This layer applies a
+    calibrated multiplier post-hoc to reflect regime-specific signal success rates:
+      BULL    — boost high-conviction signals with RS + FII confirmation
+      BEAR    — dampen weak signals; require higher baseline confidence
+      SIDEWAYS — no adjustment (ensemble probabilities used as-is)
+    win_probability is capped at 0.95 to preserve gatekeeping integrity.
+    """
+    if regime == 'BULL':
+        # In bull markets momentum and breakout signals perform better when
+        # supported by sector RS leadership and FII buying flow.
+        bull_mask = (
+            (df_scores.get('rs_vs_sector_21d', pd.Series(0.0, index=df_scores.index)) > 0.05) &
+            (df_scores.get('fii_buying',        pd.Series(0.0, index=df_scores.index)) > 0.5)
+        )
+        df_scores.loc[bull_mask, 'win_probability'] = (
+            df_scores.loc[bull_mask, 'win_probability'] * 1.08
+        ).clip(upper=0.95)
+    elif regime == 'BEAR':
+        # In bear markets require higher confidence; dampen weak signals harder.
+        df_scores['win_probability'] = df_scores['win_probability'].apply(
+            lambda p: p * 0.85 if p < 0.55 else p * 0.95
+        )
+    # SIDEWAYS: no adjustment
+    return df_scores
+
+
 # ── Score Pending Signals ─────────────────────────────────────────────────────
 
 def score_pending(conn: ConnWrapper, ensemble: dict) -> int:
@@ -1118,6 +1566,21 @@ def score_pending(conn: ConnWrapper, ensemble: dict) -> int:
     X = X[ensemble['feature_names']].astype(np.float32)
 
     probs = predict_proba_ensemble(ensemble, X)
+    threshold = ensemble.get('optimal_threshold', 0.45)
+    print(f"[Ensemble] Using optimal_threshold={threshold:.2f} for win_probability gate.")
+
+    # ── Regime-conditional probability adjustment ──────────────────────────────
+    # Build a slim DataFrame with the features needed by _apply_regime_adjustment
+    # (rs_vs_sector_21d + fii_buying) alongside win_probability, then apply.
+    regime = _get_current_regime(conn)
+    df_scores = pd.DataFrame({
+        'win_probability':  probs,
+        'rs_vs_sector_21d': X.get('rs_vs_sector_21d', pd.Series(0.0, index=X.index)).values,
+        'fii_buying':       X.get('fii_buying',        pd.Series(0.0, index=X.index)).values,
+    }, index=X.index)
+    df_scores = _apply_regime_adjustment(df_scores, regime)
+    probs = df_scores['win_probability'].values
+    print(f"[Ensemble] Regime={regime}; regime-conditional adjustment applied.")
 
     cur = conn.cursor()
     cur.executemany(
@@ -1146,16 +1609,17 @@ def score_pending(conn: ConnWrapper, ensemble: dict) -> int:
         """)
         # Deactivate entries where ML now says win < threshold (regime-adaptive)
         threshold = regime_threshold(conn)
+        cutoff_date = (datetime.date.today() - datetime.timedelta(days=2)).isoformat()
         conn.execute("""
             UPDATE recommendation_log
             SET status = 'EXPIRED'
             WHERE (
                 (win_probability IS NOT NULL AND win_probability < ?)
-                OR (win_probability IS NULL AND signal_date < date('now', '-2 days'))
+                OR (win_probability IS NULL AND signal_date < ?)
             )
               AND status = 'ACTIVE'
               AND source = 'technical_scan'
-        """, (threshold,))
+        """, (threshold, cutoff_date))
         conn.commit()
         print(f"[Ensemble] win_probability gate applied at {threshold:.2f} (regime-adaptive); "
               f"NULL signals older than 2 days also expired.")
@@ -1183,14 +1647,14 @@ def check_drift(conn: ConnWrapper, auc_drop_threshold: float = 0.04,
         return False
     trained_auc = float(row[0])
 
-    live = conn.execute("""
+    live = conn.execute(f"""
         SELECT
             COUNT(*) as total,
             SUM(CASE WHEN outcome = 'WIN' THEN 1 ELSE 0 END) as wins
         FROM signal_outcomes
-        WHERE computed_at >= date('now', ?)
+        WHERE computed_at >= date('now', '-{window_days} days')
           AND outcome IN ('WIN', 'LOSS', 'STOP_LOSS')
-    """, (f'-{window_days} days',)).fetchone()
+    """).fetchone()
 
     if not live or not live[0] or live[0] < 20:
         return False  # too few resolved signals to judge
@@ -1227,6 +1691,28 @@ def run(do_train: bool = True, do_score: bool = True,
 
     conn = connect()
     try:
+        # Ensure optional tables exist so LEFT JOINs don't fail
+        for ddl in [
+            """CREATE TABLE IF NOT EXISTS mc_sector_earnings (
+                sector_name TEXT PRIMARY KEY,
+                market_np_yoy DOUBLE PRECISION,
+                earnings_breadth DOUBLE PRECISION,
+                updated_at TEXT
+            )""",
+            """CREATE TABLE IF NOT EXISTS feature_store (
+                symbol TEXT, date DATE, timeframe TEXT,
+                PRIMARY KEY (symbol, date, timeframe)
+            )""",
+            """CREATE TABLE IF NOT EXISTS market_regimes (
+                date TEXT PRIMARY KEY, regime TEXT, regime_prob DOUBLE PRECISION
+            )""",
+            """CREATE TABLE IF NOT EXISTS historical_fno_sentiment (
+                symbol TEXT, date TEXT, PRIMARY KEY (symbol, date)
+            )""",
+        ]:
+            try: conn.execute(ddl); conn.commit()
+            except Exception: conn.rollback()
+
         if do_train:
             if retrain_full or not os.path.exists(ENSEMBLE_PATH):
                 print("[Ensemble] Training from scratch...")

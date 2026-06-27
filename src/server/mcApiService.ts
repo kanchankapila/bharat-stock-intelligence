@@ -242,12 +242,22 @@ export interface McHistoricalRating {
 const fundamentalCache: Record<string, { data: any, timestamp: number }> = {};
 const CACHE_DURATION = 60 * 60 * 1000; // 1 hour
 
+setInterval(() => {
+  const now = Date.now();
+  for (const key of Object.keys(fundamentalCache)) {
+    if (now - fundamentalCache[key].timestamp > CACHE_DURATION) {
+      delete fundamentalCache[key];
+    }
+  }
+}, 30 * 60_000); // sweep every 30 min
+
 function getCachedFundamental(scId: string, key: string) {
   const cacheKey = `${scId}:${key}`;
   const entry = fundamentalCache[cacheKey];
   if (entry && (Date.now() - entry.timestamp < CACHE_DURATION)) {
     return entry.data;
   }
+  if (entry) delete fundamentalCache[cacheKey]; // evict stale entry
   return null;
 }
 

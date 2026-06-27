@@ -478,8 +478,9 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
   const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({ key: 'signal_score', dir: 'desc' });
   const [expanded, setExpanded] = useState<string | null>(null);
 
+  const [isScanning, setIsScanning] = React.useState(false);
   const { data: status, refetch: refetchStatus } = trpc.getTechnicalSignalsStatus.useQuery(
-    undefined, { refetchInterval: 15_000 }
+    undefined, { refetchInterval: isScanning ? 15_000 : 60_000 }
   );
   const { data: dates } = trpc.getSignalDates.useQuery();
   const { data: rawRows, isLoading, error, refetch } = trpc.getTechnicalSignals.useQuery(
@@ -489,7 +490,11 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
   const { data: sectorStats } = trpc.getSectorSignalStats.useQuery(
     { date: selectedDate }, { enabled: showSector }
   );
-  const rescan = trpc.runTechnicalSignalScan.useMutation({ onSuccess: () => { refetch(); refetchStatus(); } });
+  const rescan = trpc.runTechnicalSignalScan.useMutation({
+    onMutate: () => setIsScanning(true),
+    onSuccess: () => { refetch(); refetchStatus(); },
+    onSettled: () => setIsScanning(false),
+  });
 
   const rows = (rawRows as SignalRow[] | undefined) ?? [];
 

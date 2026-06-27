@@ -80,6 +80,142 @@ export async function withClient<T>(fn: (client: PoolClient) => Promise<T>): Pro
   }
 }
 
+let _columnsEnsured = false;
+
+/**
+ * Idempotent column guard: ensures columns added after the initial DB creation
+ * exist in the live Postgres instance. Safe to run on every startup (IF NOT EXISTS).
+ * Only called when USE_POSTGRES=true, after the pool is healthy.
+ */
+export async function pgEnsureColumns(): Promise<void> {
+  if (_columnsEnsured) return;
+  _columnsEnsured = true;
+
+  // Create tables that may not exist yet (idempotent)
+  const creates = [
+    `CREATE TABLE IF NOT EXISTS mc_sector_earnings (
+       sector_name TEXT PRIMARY KEY,
+       market_np_yoy DOUBLE PRECISION,
+       earnings_breadth DOUBLE PRECISION,
+       updated_at TEXT
+     )`,
+    `CREATE TABLE IF NOT EXISTS feature_store (
+       symbol TEXT, date DATE, timeframe TEXT,
+       PRIMARY KEY (symbol, date, timeframe)
+     )`,
+    `CREATE TABLE IF NOT EXISTS market_regimes (
+       date TEXT PRIMARY KEY,
+       regime TEXT,
+       regime_prob DOUBLE PRECISION
+     )`,
+  ];
+  const client = await getPool().connect();
+  try {
+  for (const sql of creates) {
+    try { await client.query(sql); } catch { /* ignore */ }
+  }
+
+  const alters = [
+    // nse_stocks surveillance flags (added in SQLite migration 052)
+    `ALTER TABLE nse_stocks ADD COLUMN IF NOT EXISTS is_asm              BIGINT DEFAULT 0`,
+    `ALTER TABLE nse_stocks ADD COLUMN IF NOT EXISTS gsm_stage           BIGINT DEFAULT 0`,
+    `ALTER TABLE nse_stocks ADD COLUMN IF NOT EXISTS surveillance_updated_at TEXT`,
+    // nse_stocks index membership flags (migration 063)
+    `ALTER TABLE nse_stocks ADD COLUMN IF NOT EXISTS is_nifty50          BIGINT DEFAULT 0`,
+    `ALTER TABLE nse_stocks ADD COLUMN IF NOT EXISTS is_nifty100         BIGINT DEFAULT 0`,
+    `ALTER TABLE nse_stocks ADD COLUMN IF NOT EXISTS is_nifty200         BIGINT DEFAULT 0`,
+    `ALTER TABLE nse_stocks ADD COLUMN IF NOT EXISTS is_midcap150        BIGINT DEFAULT 0`,
+    `ALTER TABLE nse_stocks ADD COLUMN IF NOT EXISTS is_smallcap250      BIGINT DEFAULT 0`,
+    `ALTER TABLE nse_stocks ADD COLUMN IF NOT EXISTS index_flags_updated_at TEXT`,
+    // fundamentals_history pledge snapshot (migration 063)
+    `ALTER TABLE fundamentals_history ADD COLUMN IF NOT EXISTS pledge_pct DOUBLE PRECISION`,
+    // technical_signals new feature columns (migrations 060, 061, 062, 063)
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS hv_10d               DOUBLE PRECISION`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS hv_20d               DOUBLE PRECISION`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS hv_30d               DOUBLE PRECISION`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS hv_60d               DOUBLE PRECISION`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS iv_hv_ratio          DOUBLE PRECISION`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS eps_revision_3m_pct  DOUBLE PRECISION`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS target_revision_3m_pct DOUBLE PRECISION`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS analyst_count_chg    BIGINT`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS rs_vs_sector_21d     DOUBLE PRECISION`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS rs_vs_sector_63d     DOUBLE PRECISION`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS asm_flag             BIGINT DEFAULT 0`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS gsm_stage            BIGINT DEFAULT 0`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS crude_corr_90d       DOUBLE PRECISION`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS gold_corr_90d        DOUBLE PRECISION`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS dxy_corr_90d         DOUBLE PRECISION`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS sp500_corr_90d       DOUBLE PRECISION`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mc_broker_buy_7d     BIGINT`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mc_broker_sell_7d    BIGINT`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mc_broker_upside     DOUBLE PRECISION`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS days_to_next_results BIGINT`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS earnings_category_yoy BIGINT`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS earnings_category_qoq BIGINT`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS earnings_np_growth_yoy DOUBLE PRECISION`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS earnings_np_growth_qoq DOUBLE PRECISION`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS earnings_shocker_flag BIGINT`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS earnings_shocker_gain DOUBLE PRECISION`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS is_nifty50           BIGINT DEFAULT 0`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS is_nifty100          BIGINT DEFAULT 0`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS is_nifty200          BIGINT DEFAULT 0`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS is_midcap150         BIGINT DEFAULT 0`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS is_smallcap250       BIGINT DEFAULT 0`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS nifty_tier           BIGINT DEFAULT 0`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS pledge_chg_90d       DOUBLE PRECISION`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS iep_gap_pct          DOUBLE PRECISION`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS preopen_imbalance    DOUBLE PRECISION`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS expected_move_pct    DOUBLE PRECISION`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS stock_gex_proxy      DOUBLE PRECISION`,
+    // migration 064 — earnings quality, insider, macro wave
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS eps_surprise_q1       DOUBLE PRECISION`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS eps_surprise_q2       DOUBLE PRECISION`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS eps_beat_streak       BIGINT`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS eps_miss_after_streak BIGINT DEFAULT 0`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS rev_surprise_q1       DOUBLE PRECISION`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS fcf_yield             DOUBLE PRECISION`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS interest_coverage     DOUBLE PRECISION`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS fcf_positive          BIGINT DEFAULT 0`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS debt_coverage_risk    BIGINT DEFAULT 0`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS delivery_trend_30d    DOUBLE PRECISION`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS block_deal_flag       BIGINT DEFAULT 0`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS block_deal_direction  BIGINT DEFAULT 0`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS short_interest_proxy  DOUBLE PRECISION`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS promoter_buy_90d_cr   DOUBLE PRECISION`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS promoter_sell_90d_cr  DOUBLE PRECISION`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS promoter_net_90d      DOUBLE PRECISION`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS insider_buy_flag      BIGINT DEFAULT 0`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS insider_sell_flag     BIGINT DEFAULT 0`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS rating_upgrade_180d   BIGINT DEFAULT 0`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS rating_downgrade_180d BIGINT DEFAULT 0`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS days_since_upgrade    BIGINT`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mf_sector_flow_pct   DOUBLE PRECISION`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS receivables_days_ttm  DOUBLE PRECISION`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS ccc_ttm               DOUBLE PRECISION`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS ccc_trend             DOUBLE PRECISION`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS wc_deteriorating      BIGINT DEFAULT 0`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS wc_improving          BIGINT DEFAULT 0`,
+    // migration 065 — PEAD + BSE event classifier scores
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS pead_score            DOUBLE PRECISION`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS event_signal_score    DOUBLE PRECISION`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS event_type_flags      TEXT`,
+  ];
+  // Run each ALTER individually — Postgres can't do multiple DDL in one statement
+  for (const sql of alters) {
+    try {
+      await client.query(sql);
+    } catch (err) {
+      // Column-already-exists (42701) is silently swallowed; real errors re-throw.
+      if ((err as { code?: string }).code !== '42701') {
+        console.error('[PG] pgEnsureColumns failed:', (err as Error).message, '|', sql);
+      }
+    }
+  }
+  } finally {
+    client.release();
+  }
+}
+
 export async function pgHealthy(): Promise<boolean> {
   try {
     await pgQuery('SELECT 1');

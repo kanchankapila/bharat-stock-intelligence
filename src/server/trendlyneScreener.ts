@@ -1084,6 +1084,13 @@ export async function syncAllScreenerStocksToDB(timeframeFilter?: 'intraday' | '
     }
     
     console.log(`✅ Completed synchronization of ${successCount}/${screeners.length} screeners`);
+
+    // Evict stale cache entries older than 2× the fetch interval
+    const cutoff = Date.now() - TRENDLYNE_CONFIG.FETCH_INTERVAL_MS * 2;
+    for (const [k, v] of cache) {
+      if (v.timestamp < cutoff) cache.delete(k);
+    }
+
     return { success: true, count: successCount };
   } catch (error) {
     console.error('❌ Error during full screener sync:', error);

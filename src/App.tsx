@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
@@ -86,6 +86,7 @@ const AgentStrategistPage      = React.lazy(() => import('./components/AgentStra
 const AgentAuditorPage         = React.lazy(() => import('./components/AgentAuditorPage').then(m => ({ default: m.AgentAuditorPage })));
 const AgentOptimizerPage       = React.lazy(() => import('./components/AgentOptimizerPage').then(m => ({ default: m.AgentOptimizerPage })));
 const CommandCenterDashboard   = React.lazy(() => import('./components/CommandCenterDashboard').then(m => ({ default: m.CommandCenterDashboard })));
+const BuyRecommendationsPage   = React.lazy(() => import('./components/BuyRecommendationsPage').then(m => ({ default: m.BuyRecommendationsPage })));
 // Named-export lazy wrappers
 const ToDoPage           = React.lazy(() => import('./components/ToDoPage').then(m => ({ default: m.ToDoPage })));
 const InvestmentStrategy = React.lazy(() => import('./components/InvestmentStrategy').then(m => ({ default: m.InvestmentStrategy })));
@@ -103,6 +104,7 @@ const V2Dashboard        = React.lazy(() => import('./v2/views/dashboard/V2Dashb
 const SignalTracking     = React.lazy(() => import('./components/SignalTracking').then(m => ({ default: m.SignalTracking })));
 const V2SignalTracking   = React.lazy(() => import('./v2/views/signals/V2SignalTracking').then(m => ({ default: m.V2SignalTracking })));
 const StockChatbot       = React.lazy(() => import('./components/StockChatbot'));
+const JobsDashboardPage   = React.lazy(() => import('./components/JobsDashboardPage'));
 
 // Lazy Suspense fallback
 const PageFallback = () => (
@@ -3559,6 +3561,12 @@ const StockDetails: React.FC<{
   );
 };
 
+const FALLBACK_INDICES = [
+  { name: 'Nifty 50', value: 22453.20, change: 0.84, isUp: true },
+  { name: 'Sensex', value: 73845.54, change: 0.72, isUp: true },
+  { name: 'Bank Nifty', value: 47285.30, change: 1.24, isUp: true },
+];
+
 export default function App() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -3619,26 +3627,24 @@ export default function App() {
     syncNSEStocksMutation.mutate();
   }, []);
 
-  const rawIndexData = realIndices?.data;
-  // MC API returns { indiceList: [{ name: "Key Indices", list: [...] }, ...] }
-  const indexGroups: any[] = rawIndexData?.indiceList ?? [];
-  const allIndices: any[] = indexGroups.flatMap((g: any) => Array.isArray(g.list) ? g.list : []);
-  const keyIndices = allIndices.filter((idx: any) =>
-    ['NIFTY 50', 'SENSEX', 'NIFTY BANK'].includes(idx.name)
-  );
+  const displayIndices = useMemo(() => {
+    const rawIndexData = realIndices?.data;
+    // MC API returns { indiceList: [{ name: "Key Indices", list: [...] }, ...] }
+    const indexGroups: any[] = rawIndexData?.indiceList ?? [];
+    const allIndices: any[] = indexGroups.flatMap((g: any) => Array.isArray(g.list) ? g.list : []);
+    const keyIndices = allIndices.filter((idx: any) =>
+      ['NIFTY 50', 'SENSEX', 'NIFTY BANK'].includes(idx.name)
+    );
+    if (keyIndices.length === 0) return FALLBACK_INDICES;
+    return keyIndices.map((idx: any) => ({
+      name: idx.name,
+      value: parseFloat(String(idx.value ?? '0').replace(/,/g, '')),
+      change: parseFloat(idx.changePer ?? '0'),
+      isUp: parseFloat(idx.changePer ?? '0') >= 0,
+    }));
+  }, [realIndices]);
 
-  const displayIndices = keyIndices.length > 0 ? keyIndices.map((idx: any) => ({
-    name: idx.name,
-    value: parseFloat(String(idx.value ?? '0').replace(/,/g, '')),
-    change: parseFloat(idx.changePer ?? '0'),
-    isUp: parseFloat(idx.changePer ?? '0') >= 0
-  })) : [
-    { name: 'Nifty 50', value: 22453.20, change: 0.84, isUp: true },
-    { name: 'Sensex', value: 73845.54, change: 0.72, isUp: true },
-    { name: 'Bank Nifty', value: 47285.30, change: 1.24, isUp: true }
-  ];
-
-  const addToast = (signal: any) => {
+  const addToast = useCallback((signal: any) => {
     const id = Math.random().toString(36).substring(2, 9);
     const newToast: Toast = {
       id,
@@ -3651,7 +3657,7 @@ export default function App() {
     setTimeout(() => {
       setToasts(prev => prev.filter(t => t.id !== id));
     }, 5000);
-  };
+  }, []);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (u) => {
@@ -3710,6 +3716,8 @@ export default function App() {
     }
   };
 
+  const handleSelectStock = useCallback((s: string) => setDrawerSymbol(s), []);
+
   const syncUserMutation = trpc.syncUser.useMutation();
 
   const handleLogin = async () => {
@@ -3757,7 +3765,7 @@ export default function App() {
                 watchlist={watchlist}
                 stocks={stocks}
                 watchlistDetails={watchlistDetails || []}
-                onSelectStock={(s) => setDrawerSymbol(s)}
+                onSelectStock={handleSelectStock}
                 onRemove={toggleWatchlist}
               />
             } />
@@ -3771,8 +3779,8 @@ export default function App() {
             ) : <div className="p-6">Select a stock to view details</div>} />
             <Route path="/" element={<V2Dashboard />} />
             <Route path="/dashboard" element={<V2Dashboard />} />
-            <Route path="/top-rated" element={<TopRatedStocks onSelectStock={(s) => setDrawerSymbol(s)} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
-            <Route path="/indices" element={<IndicesPage onSelectStock={(s) => setDrawerSymbol(s)} selectedIndex={selectedIndex} setSelectedIndex={setSelectedIndex} />} />
+            <Route path="/top-rated" element={<TopRatedStocks onSelectStock={handleSelectStock} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
+            <Route path="/indices" element={<IndicesPage onSelectStock={handleSelectStock} selectedIndex={selectedIndex} setSelectedIndex={setSelectedIndex} />} />
             <Route path="/market-map" element={
               <div className="p-6 space-y-6">
                 <Card title="NSE Market Heatmap" icon={Activity}>
@@ -3784,24 +3792,24 @@ export default function App() {
                 </div>
               </div>
             } />
-            <Route path="/screener" element={<Screener stocks={stocks} onSelectStock={(s) => setDrawerSymbol(s)} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
-            <Route path="/trendlyne" element={<TrendlyneScreenerPanel onSelectStock={(s) => setDrawerSymbol(s)} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
-            <Route path="/live-screener" element={<LiveMarketScreener onSelectStock={(s) => setDrawerSymbol(s)} />} />
-            <Route path="/eod-screener" element={<EODMarketScreener onSelectStock={(s) => setDrawerSymbol(s)} />} />
-            <Route path="/discover" element={<div className="p-6"><NSEStockDiscovery onSelectStock={(s) => setDrawerSymbol(s)} /></div>} />
-            <Route path="/smart-money" element={<SmartMoneyPage onSelectStock={(s) => setDrawerSymbol(s)} />} />
-            <Route path="/earnings" element={<EarningsPage onSelectStock={(s) => setDrawerSymbol(s)} />} />
-            <Route path="/fno-scanners" element={<FnOIntelligenceCenter onSelectStock={(s) => setDrawerSymbol(s)} />} />
+            <Route path="/screener" element={<Screener stocks={stocks} onSelectStock={handleSelectStock} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
+            <Route path="/trendlyne" element={<TrendlyneScreenerPanel onSelectStock={handleSelectStock} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
+            <Route path="/live-screener" element={<LiveMarketScreener onSelectStock={handleSelectStock} />} />
+            <Route path="/eod-screener" element={<EODMarketScreener onSelectStock={handleSelectStock} />} />
+            <Route path="/discover" element={<div className="p-6"><NSEStockDiscovery onSelectStock={handleSelectStock} /></div>} />
+            <Route path="/smart-money" element={<SmartMoneyPage onSelectStock={handleSelectStock} />} />
+            <Route path="/earnings" element={<EarningsPage onSelectStock={handleSelectStock} />} />
+            <Route path="/fno-scanners" element={<FnOIntelligenceCenter onSelectStock={handleSelectStock} />} />
             <Route path="/options" element={<div className="p-6"><OptionsIntelligence /></div>} />
-            <Route path="/todays-picks" element={<TodaysPicks onSelectStock={(s) => setDrawerSymbol(s)} />} />
+            <Route path="/todays-picks" element={<TodaysPicks onSelectStock={handleSelectStock} />} />
             <Route path="/screener-intelligence" element={<ScreenerIntelligencePage />} />
             <Route path="/agent-data-scientist" element={<AgentDataScientistPage />} />
             <Route path="/agent-strategist"     element={<AgentStrategistPage />} />
             <Route path="/agent-auditor"        element={<AgentAuditorPage />} />
             <Route path="/agent-optimizer"      element={<AgentOptimizerPage />} />
-            <Route path="/trade-cockpit" element={<TradeDecisionCockpit onSelectStock={(s) => setDrawerSymbol(s)} />} />
+            <Route path="/trade-cockpit" element={<TradeDecisionCockpit onSelectStock={handleSelectStock} />} />
             <Route path="/backtest" element={<Backtest stocks={stocks} />} />
-            <Route path="/signals" element={<DailySignals onSelectStock={(s) => setDrawerSymbol(s)} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
+            <Route path="/signals" element={<DailySignals onSelectStock={handleSelectStock} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
             <Route path="/signal-tracking" element={<V2SignalTracking />} />
             <Route path="/signal-intelligence" element={<SignalIntelligence />} />
             <Route path="/signal-report-card" element={<SignalReportCard />} />
@@ -3820,13 +3828,14 @@ export default function App() {
                 {researchSubTab === 'overview' ? <HedgeFundResearch onAddWatchlist={toggleWatchlist} /> : <DLDashboard />}
               </div>
             } />
-            <Route path="/strategy" element={<StrategyIntelligence onSelectStock={(s) => setDrawerSymbol(s)} />} />
-            <Route path="/best-picks" element={<HighConvictionPage onSelectStock={(s) => setDrawerSymbol(s)} />} />
-            <Route path="/strategy-builder" element={<InvestmentStrategy onSelectStock={(s) => setDrawerSymbol(s)} />} />
-            <Route path="/sentiment" element={<SentimentIntelligence onSelectStock={(s) => setDrawerSymbol(s)} />} />
+            <Route path="/strategy" element={<StrategyIntelligence onSelectStock={handleSelectStock} />} />
+            <Route path="/best-picks" element={<HighConvictionPage onSelectStock={handleSelectStock} />} />
+            <Route path="/strategy-builder" element={<InvestmentStrategy onSelectStock={handleSelectStock} />} />
+            <Route path="/sentiment" element={<SentimentIntelligence onSelectStock={handleSelectStock} />} />
             <Route path="/superstars" element={<SuperstarPortfolio />} />
             <Route path="/todo" element={<ToDoPage />} />
             <Route path="/monitor" element={<SystemMonitorPage />} />
+            <Route path="/jobs" element={<JobsDashboardPage />} />
             <Route path="/profile" element={<ProfilePage />} />
             <Route path="/portfolio" element={<div className="p-6"><PortfolioAnalytics /></div>} />
             <Route path="/builder" element={<div className="p-6"><StrategyBuilder /></div>} />
@@ -3857,7 +3866,7 @@ export default function App() {
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         stocks={stocks}
-        onSelectStock={(s) => setDrawerSymbol(s)}
+        onSelectStock={handleSelectStock}
         displayIndices={displayIndices}
         onSelectIndexByName={handleSelectIndexByName}
       >
@@ -3876,7 +3885,7 @@ export default function App() {
                 watchlist={watchlist}
                 stocks={stocks}
                 watchlistDetails={watchlistDetails || []}
-                onSelectStock={(s) => setDrawerSymbol(s)}
+                onSelectStock={handleSelectStock}
                 onRemove={toggleWatchlist}
               />
             </motion.div>
@@ -3890,11 +3899,12 @@ export default function App() {
               className="pb-10"
             >
               <Routes>
-                <Route path="/" element={<DashboardPage stocks={stocks} onNewSignal={addToast} onSelectStock={(s) => setDrawerSymbol(s)} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} onSelectIndex={(id, name) => { setSelectedIndex({ id, name }); navigate('/indices'); }} />} />
-                <Route path="/dashboard" element={<DashboardPage stocks={stocks} onNewSignal={addToast} onSelectStock={(s) => setDrawerSymbol(s)} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} onSelectIndex={(id, name) => { setSelectedIndex({ id, name }); navigate('/indices'); }} />} />
+                <Route path="/" element={<DashboardPage stocks={stocks} onNewSignal={addToast} onSelectStock={handleSelectStock} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} onSelectIndex={(id, name) => { setSelectedIndex({ id, name }); navigate('/indices'); }} />} />
+                <Route path="/dashboard" element={<DashboardPage stocks={stocks} onNewSignal={addToast} onSelectStock={handleSelectStock} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} onSelectIndex={(id, name) => { setSelectedIndex({ id, name }); navigate('/indices'); }} />} />
                 <Route path="/alpha" element={<CommandCenterDashboard onSelectStock={(s) => { setDrawerSymbol(s); navigate('/trade-cockpit'); }} />} />
-              <Route path="/top-rated" element={<TopRatedStocks onSelectStock={(s) => setDrawerSymbol(s)} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
-                <Route path="/indices" element={<IndicesPage onSelectStock={(s) => setDrawerSymbol(s)} selectedIndex={selectedIndex} setSelectedIndex={setSelectedIndex} />} />
+                <Route path="/buy-recs" element={<BuyRecommendationsPage onSelectStock={handleSelectStock} />} />
+              <Route path="/top-rated" element={<TopRatedStocks onSelectStock={handleSelectStock} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
+                <Route path="/indices" element={<IndicesPage onSelectStock={handleSelectStock} selectedIndex={selectedIndex} setSelectedIndex={setSelectedIndex} />} />
                 <Route path="/market-map" element={
                 <div className="p-6 space-y-6">
                   <Card title="NSE Market Heatmap" icon={Activity}>
@@ -3906,26 +3916,26 @@ export default function App() {
                   </div>
                 </div>
               } />
-              <Route path="/screener" element={<Screener stocks={stocks} onSelectStock={(s) => setDrawerSymbol(s)} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
-              <Route path="/trendlyne" element={<TrendlyneScreenerPanel onSelectStock={(s) => setDrawerSymbol(s)} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
-              <Route path="/live-screener" element={<LiveMarketScreener onSelectStock={(s) => setDrawerSymbol(s)} />} />
-              <Route path="/eod-screener" element={<EODMarketScreener onSelectStock={(s) => setDrawerSymbol(s)} />} />
-              <Route path="/discover" element={<div className="p-6"><NSEStockDiscovery onSelectStock={(s) => setDrawerSymbol(s)} /></div>} />
+              <Route path="/screener" element={<Screener stocks={stocks} onSelectStock={handleSelectStock} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
+              <Route path="/trendlyne" element={<TrendlyneScreenerPanel onSelectStock={handleSelectStock} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
+              <Route path="/live-screener" element={<LiveMarketScreener onSelectStock={handleSelectStock} />} />
+              <Route path="/eod-screener" element={<EODMarketScreener onSelectStock={handleSelectStock} />} />
+              <Route path="/discover" element={<div className="p-6"><NSEStockDiscovery onSelectStock={handleSelectStock} /></div>} />
               <Route path="/smart-money" element={
-                <SmartMoneyPage onSelectStock={(s) => setDrawerSymbol(s)} />
+                <SmartMoneyPage onSelectStock={handleSelectStock} />
               } />
               <Route path="/earnings" element={
-                <EarningsPage onSelectStock={(s) => setDrawerSymbol(s)} />
+                <EarningsPage onSelectStock={handleSelectStock} />
               } />
-              <Route path="/fno-scanners" element={<FnOIntelligenceCenter onSelectStock={(s) => setDrawerSymbol(s)} />} />
+              <Route path="/fno-scanners" element={<FnOIntelligenceCenter onSelectStock={handleSelectStock} />} />
               <Route path="/options" element={<div className="p-6"><OptionsIntelligence /></div>} />
-              <Route path="/todays-picks" element={<TodaysPicks onSelectStock={(s) => setDrawerSymbol(s)} />} />
+              <Route path="/todays-picks" element={<TodaysPicks onSelectStock={handleSelectStock} />} />
               <Route path="/screener-intelligence" element={<ScreenerIntelligencePage />} />
               <Route path="/agent-data-scientist" element={<AgentDataScientistPage />} />
               <Route path="/agent-strategist"     element={<AgentStrategistPage />} />
               <Route path="/agent-auditor"        element={<AgentAuditorPage />} />
               <Route path="/agent-optimizer"      element={<AgentOptimizerPage />} />
-              <Route path="/trade-cockpit" element={<TradeDecisionCockpit onSelectStock={(s) => setDrawerSymbol(s)} />} />
+              <Route path="/trade-cockpit" element={<TradeDecisionCockpit onSelectStock={handleSelectStock} />} />
               <Route path="/details" element={selectedSymbol ? (
                 <StockDetails
                   key={selectedSymbol}
@@ -3934,11 +3944,11 @@ export default function App() {
                   onBack={() => navigate('/dashboard')}
                   watchlist={watchlist}
                   onToggleWatchlist={toggleWatchlist}
-                  onSelectStock={(s) => setDrawerSymbol(s)}
+                  onSelectStock={handleSelectStock}
                 />
               ) : <div className="p-6">Select a stock to view details</div>} />
               <Route path="/backtest" element={<Backtest stocks={stocks} />} />
-              <Route path="/signals" element={<DailySignals onSelectStock={(s) => setDrawerSymbol(s)} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
+              <Route path="/signals" element={<DailySignals onSelectStock={handleSelectStock} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
               <Route path="/signal-tracking" element={<SignalTracking />} />
               <Route path="/signal-intelligence" element={<SignalIntelligence />} />
               <Route path="/signal-report-card" element={<SignalReportCard />} />
@@ -3957,10 +3967,10 @@ export default function App() {
                   {researchSubTab === 'overview' ? <HedgeFundResearch onAddWatchlist={toggleWatchlist} /> : <DLDashboard />}
                 </div>
               } />
-              <Route path="/strategy" element={<StrategyIntelligence onSelectStock={(s) => setDrawerSymbol(s)} />} />
-              <Route path="/best-picks" element={<HighConvictionPage onSelectStock={(s) => setDrawerSymbol(s)} />} />
-              <Route path="/strategy-builder" element={<InvestmentStrategy onSelectStock={(s) => setDrawerSymbol(s)} />} />
-              <Route path="/sentiment" element={<SentimentIntelligence onSelectStock={(s) => setDrawerSymbol(s)} />} />
+              <Route path="/strategy" element={<StrategyIntelligence onSelectStock={handleSelectStock} />} />
+              <Route path="/best-picks" element={<HighConvictionPage onSelectStock={handleSelectStock} />} />
+              <Route path="/strategy-builder" element={<InvestmentStrategy onSelectStock={handleSelectStock} />} />
+              <Route path="/sentiment" element={<SentimentIntelligence onSelectStock={handleSelectStock} />} />
               <Route path="/economics" element={
                 <div className="p-6 space-y-6">
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -3980,6 +3990,7 @@ export default function App() {
               <Route path="/superstars" element={<SuperstarPortfolio />} />
               <Route path="/todo" element={<ToDoPage />} />
               <Route path="/monitor" element={<SystemMonitorPage />} />
+              <Route path="/jobs" element={<JobsDashboardPage />} />
               <Route path="/profile" element={<ProfilePage />} />
               <Route path="/portfolio" element={<div className="p-6"><PortfolioAnalytics /></div>} />
               <Route path="/builder" element={<div className="p-6"><StrategyBuilder /></div>} />

@@ -66,21 +66,33 @@ const SCREENER_PATTERNS: Array<{ patterns: string[] } & ScreenerClass> = [
 
 // Classification cache (populated from screener_master + pattern matching)
 const classCache = new Map<string, ScreenerClass>();
+let classCacheFetchedAt = 0;
 
 // screener_master rows, bulk-loaded once via ensureScreenerMeta() so classifyScreener
 // stays synchronous (and avoids a per-scanId N+1 query during confluence computation).
 const screenerMetaCache = new Map<string, any>();
+let screenerMetaCacheFetchedAt = 0;
+
+const CONFLUENCE_CACHE_TTL = 6 * 60 * 60 * 1000; // 6 hours
+
+// Sweep both caches every 6 hours to prevent unbounded growth
+setInterval(() => {
+  const now = Date.now();
+  if (now - classCacheFetchedAt > CONFLUENCE_CACHE_TTL) classCache.clear();
+  if (now - screenerMetaCacheFetchedAt > CONFLUENCE_CACHE_TTL) screenerMetaCache.clear();
+}, CONFLUENCE_CACHE_TTL);
 
 export async function ensureScreenerMeta(): Promise<void> {
-  if (screenerMetaCache.size > 0) return;
+  if (screenerMetaCache.size > 0 && Date.now() - screenerMetaCacheFetchedAt < CONFLUENCE_CACHE_TTL) return;
   const rows = await dbAll(
     'SELECT scan_id, inferred_sentiment, inferred_category, inferred_timeframe, confidence, weight_override FROM screener_master'
   ) as any[];
   for (const r of rows) screenerMetaCache.set(r.scan_id, r);
+  screenerMetaCacheFetchedAt = Date.now();
 }
 
 export function classifyScreener(scanId: string, name: string): ScreenerClass {
-  if (classCache.has(scanId)) return classCache.get(scanId)!;
+  if (classCache.has(scanId) && Date.now() - classCacheFetchedAt < CONFLUENCE_CACHE_TTL) return classCache.get(scanId)!;
 
   const lname = name.toLowerCase();
   for (const entry of SCREENER_PATTERNS) {
@@ -92,6 +104,7 @@ export function classifyScreener(scanId: string, name: string): ScreenerClass {
         timeframe: entry.timeframe,
       };
       classCache.set(scanId, result);
+      if (!classCacheFetchedAt) classCacheFetchedAt = Date.now();
       return result;
     }
   }
@@ -107,11 +120,13 @@ export function classifyScreener(scanId: string, name: string): ScreenerClass {
       timeframe: meta.inferred_timeframe === 'intraday' ? 'intraday' : 'positional',
     };
     classCache.set(scanId, result);
+    if (!classCacheFetchedAt) classCacheFetchedAt = Date.now();
     return result;
   }
 
   const fallback: ScreenerClass = { weight: 5, sentiment: 'neutral', category: 'technical', timeframe: 'positional' };
   classCache.set(scanId, fallback);
+  if (!classCacheFetchedAt) classCacheFetchedAt = Date.now();
   return fallback;
 }
 

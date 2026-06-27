@@ -109,7 +109,7 @@ def load_recent_outcomes(window_days: int, min_new: int) -> pd.DataFrame:
               )
         WHERE so.outcome IN ('WIN','LOSS','NEUTRAL')
           AND so.signal_date >= ?
-        ORDER BY so.signal_date DESC
+        ORDER BY so.signal_date ASC
     """
     df = read_df(q, (cutoff,))
     return df

@@ -760,4 +760,16 @@ export function clearPriceCache(): void {
   console.log('[PRICE-CACHE] Cleared');
 }
 
+// Clear price cache daily at 15:35 IST (10:05 UTC) to remove delisted/renamed symbols
+function scheduleDailyPriceCacheClear() {
+  const now = new Date();
+  const utcH = now.getUTCHours(), utcM = now.getUTCMinutes();
+  const minutesUntilClear = ((10 * 60 + 5) - (utcH * 60 + utcM) + 1440) % 1440;
+  setTimeout(() => {
+    clearPriceCache();
+    setInterval(clearPriceCache, 24 * 60 * 60_000);
+  }, minutesUntilClear * 60_000);
+}
+scheduleDailyPriceCacheClear();
+
 

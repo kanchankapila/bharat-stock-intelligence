@@ -3,9 +3,11 @@ import { dbAll, dbGet, dbRun, dbTransaction } from './dbAsync';
 export const DEFAULT_AI_SIGNAL_MIN_CONFIDENCE = 65;
 
 let _cachedMinConfidence: number | null = null;
+let _cachedMinConfidenceExp = 0;
 
 export function invalidateAISignalCache(): void {
   _cachedMinConfidence = null;
+  _cachedMinConfidenceExp = 0;
 }
 
 export interface AISignalGateResult {
@@ -57,12 +59,13 @@ export async function checkSurveillanceGate(symbol: string): Promise<Surveillanc
 
 /** Confidence floor for persisting AI signals (app_settings override, default 65). */
 export async function getAISignalMinConfidence(): Promise<number> {
-  if (_cachedMinConfidence !== null) return _cachedMinConfidence;
+  if (_cachedMinConfidence !== null && Date.now() < _cachedMinConfidenceExp) return _cachedMinConfidence;
   const row = await dbGet<{ value: string }>(
     "SELECT value FROM app_settings WHERE key = 'ai_signal_min_confidence'",
   );
   const parsed = row ? Number(row.value) : NaN;
   _cachedMinConfidence = Number.isFinite(parsed) ? parsed : DEFAULT_AI_SIGNAL_MIN_CONFIDENCE;
+  _cachedMinConfidenceExp = Date.now() + 5 * 60_000;
   return _cachedMinConfidence;
 }
 

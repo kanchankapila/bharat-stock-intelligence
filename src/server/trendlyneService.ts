@@ -274,6 +274,12 @@ export async function fetchTrendlyneStockMetrics(symbol: string) {
 }
 
 const taCache = new Map<string, { data: any; timestamp: number }>();
+setInterval(() => {
+  const cutoff = Date.now() - 10 * 60_000;
+  for (const [k, v] of taCache) {
+    if (v.timestamp < cutoff) taCache.delete(k);
+  }
+}, 5 * 60_000); // sweep every 5 min
 
 export async function fetchTrendlyneAdvTechnicalAnalysis(symbol: string, timeframe: 'D' | 'W' | 'M' = 'D') {
   const cacheKey = `${symbol}_${timeframe}`;

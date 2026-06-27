@@ -400,8 +400,9 @@ def backfill_episodes(conn: ConnWrapper, lookback_days: int = 180, dry_run: bool
 
         try:
             conn.execute("""
-                INSERT OR IGNORE INTO rl_episodes (date, state_key, action_taken, reward, epsilon)
+                INSERT INTO rl_episodes (date, state_key, action_taken, reward, epsilon)
                 VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT DO NOTHING
             """, (sig_date, state_key, action, round(reward, 4), round(epsilon, 4)))
             episodes_created += 1
         except Exception:

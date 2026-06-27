@@ -117,6 +117,10 @@ function mapRecToScoredStock(rec: any): ScoredStock {
 const _topRatedCache = new Map<string, { data: ScoredStock[]; expires: number }>();
 const TOP_RATED_TTL_MS = 2 * 60 * 1000; // 2-minute in-process cache
 
+export function clearTopRatedCache(): void {
+  _topRatedCache.clear();
+}
+
 /**
  * Get top rated stocks. Long-term reads the canonical cross-source ranking
  * (unified_recommendations); intraday stays on stock_scores (the ranker has negligible
@@ -125,7 +129,10 @@ const TOP_RATED_TTL_MS = 2 * 60 * 1000; // 2-minute in-process cache
 export async function getTopRatedStocks(limit: number = 50, timeframe: string = 'long_term'): Promise<ScoredStock[]> {
   const cacheKey = `${timeframe}:${limit}`;
   const cached = _topRatedCache.get(cacheKey);
-  if (cached && cached.expires > Date.now()) return cached.data;
+  if (cached) {
+    if (cached.expires > Date.now()) return cached.data;
+    _topRatedCache.delete(cacheKey);
+  }
 
   try {
     let result: ScoredStock[];

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   LayoutDashboard, Trophy, BarChart2, Activity, Filter, Target, Zap,
@@ -48,6 +48,7 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Intelligence',
     items: [
+      { icon: TrendingUp, label: 'Buy Recs 🟢',          id: 'buy-recs'             },
       { icon: Zap,      label: 'Alpha ⚡',             id: 'alpha'                },
       { icon: BarChart2, label: 'Screener Intel',      id: 'screener-intelligence' },
       { icon: Sparkles, label: 'Trade Cockpit',        id: 'trade-cockpit'        },
@@ -92,6 +93,7 @@ const NAV_GROUPS: NavGroup[] = [
       { icon: Globe,         label: 'Economics',  id: 'economics' },
       { icon: CheckCircle2,  label: 'ToDo',       id: 'todo'      },
       { icon: MonitorDot,    label: 'Monitor',    id: 'monitor'   },
+      { icon: Calendar,      label: 'Jobs',       id: 'jobs'      },
     ],
   },
 ];
@@ -140,7 +142,7 @@ export interface AppShellProps {
 
 // ─── Sidebar inner ────────────────────────────────────────────────────────────
 
-const SidebarInner: React.FC<{
+const SidebarInner = React.memo(function SidebarInner({ collapsed, setCollapsed, activeTab, setActiveTab, user, onLogin, displayIndices, stocks, onSelectStock, closeMobile }: {
   collapsed: boolean;
   setCollapsed: (v: boolean) => void;
   activeTab: string;
@@ -151,7 +153,7 @@ const SidebarInner: React.FC<{
   stocks: MarketData[];
   onSelectStock: (s: string) => void;
   closeMobile?: () => void;
-}> = ({ collapsed, setCollapsed, activeTab, setActiveTab, user, onLogin, displayIndices, stocks, onSelectStock, closeMobile }) => {
+}) {
   const [marketStatus, setMarketStatus] = useState(getMarketStatus());
   const [searchQuery, setSearchQuery]   = useState('');
   const [showSearch, setShowSearch]     = useState(false);
@@ -177,19 +179,26 @@ const SidebarInner: React.FC<{
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
-  const searchResults = searchQuery.length >= 2
-    ? nseStocksData
-        .filter(s =>
-          s.symbol?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          s.name?.toLowerCase().includes(searchQuery.toLowerCase()),
-        )
-        .slice(0, 6)
-        .map(s => ({
-          symbol: s.symbol,
-          name: s.name,
-          changePct: stocks.find(ms => ms.symbol === s.symbol)?.changePct ?? 0,
-        }))
-    : [];
+  const stockPriceMap = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const s of stocks) m.set(s.symbol, s.changePct ?? 0);
+    return m;
+  }, [stocks]);
+
+  const searchResults = useMemo(() => {
+    if (searchQuery.length < 2) return [];
+    return nseStocksData
+      .filter(s =>
+        s.symbol?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        s.name?.toLowerCase().includes(searchQuery.toLowerCase()),
+      )
+      .slice(0, 6)
+      .map(s => ({
+        symbol: s.symbol,
+        name: s.name,
+        changePct: stockPriceMap.get(s.symbol) ?? 0,
+      }));
+  }, [searchQuery, stockPriceMap]);
 
   const handleNav = (id: string) => {
     setActiveTab(id);
@@ -466,7 +475,7 @@ const SidebarInner: React.FC<{
       </div>
     </div>
   );
-};
+});
 
 // ─── AppShell (exported) ──────────────────────────────────────────────────────
 

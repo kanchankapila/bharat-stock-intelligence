@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { trpc } from '../lib/trpc';
 import { Activity, Zap, TrendingUp, TrendingDown, Minus, Filter, X } from 'lucide-react';
@@ -45,9 +45,15 @@ interface Props {
 export const LiveMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
   const [filters, setFilters] = useState<Record<string, boolean>>({});
   const [showFilters, setShowFilters] = useState(false);
+  const [isVisible, setIsVisible] = useState(document.visibilityState === 'visible');
+  useEffect(() => {
+    const handler = () => setIsVisible(document.visibilityState === 'visible');
+    document.addEventListener('visibilitychange', handler);
+    return () => document.removeEventListener('visibilitychange', handler);
+  }, []);
 
   const { data, isLoading } = trpc.getLiveMarketScreener.useQuery(filters, {
-    refetchInterval: 10000,
+    refetchInterval: isVisible ? 10000 : false,
   });
 
   const toggleFilter = (key: string) => {

@@ -130,9 +130,12 @@ export function isCacheAvailable(): boolean {
   return redisAvailable;
 }
 
+const _inFlight = new Map<string, Promise<unknown>>();
+
 /**
  * Return cached value for `key` if present; otherwise call `fetcher`,
  * store the result with `ttlSeconds`, and return it.
+ * Deduplicates concurrent fetches for the same key to prevent cache stampedes.
  */
 export async function fetchWithCache<T>(
   key: string,
@@ -141,9 +144,21 @@ export async function fetchWithCache<T>(
 ): Promise<T> {
   const cached = await cacheGet<T>(key);
   if (cached !== null) return cached;
-  const value = await fetcher();
-  if (value !== null && value !== undefined) {
-    await cacheSet(key, value, ttlSeconds);
-  }
-  return value;
+
+  // Return existing in-flight promise if one is running for this key
+  const existing = _inFlight.get(key);
+  if (existing) return existing as Promise<T>;
+
+  const promise = fetcher().then(result => {
+    if (result !== null && result !== undefined) {
+      cacheSet(key, result, ttlSeconds);
+    }
+    _inFlight.delete(key);
+    return result;
+  }).catch(err => {
+    _inFlight.delete(key);
+    throw err;
+  });
+  _inFlight.set(key, promise);
+  return promise;
 }
