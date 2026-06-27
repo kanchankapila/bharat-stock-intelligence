@@ -449,13 +449,13 @@ def backfill_technical_signals(symbol: str, profile: dict, con) -> None:
 def _load_stocks(symbol_filter: str | None, con) -> list[tuple[str, str]]:
     cur = con.cursor()
     cur.execute("""
-        SELECT symbol, stock_id FROM trendlyne_screener_stocks
+        SELECT symbol, MAX(stock_id) AS stock_id FROM trendlyne_screener_stocks
         WHERE stock_id IS NOT NULL AND stock_id != ''
         GROUP BY symbol ORDER BY symbol
     """)
     rows = [(r[0], str(r[1])) for r in cur.fetchall()]
     if symbol_filter:
-        rows = [(s, t) for s, t in rows if s.upper() == symbol_filter.upper()]
+        rows = [(s, t) for s, t in rows if s and s.upper() == symbol_filter.upper()]
     return rows
 
 

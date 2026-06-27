@@ -91,13 +91,14 @@ def run(only_date: str | None = None) -> int:
         print("[IV] No IV features to write.")
         return 0
 
+    # Update the most-recent ts row per symbol (scanner rows lag by days; exact date match misses them).
     params = [
-        (float(r.iv_rank), float(r.iv_skew), r.symbol, r.date)
+        (float(r.iv_rank), float(r.iv_skew), r.symbol, r.symbol)
         for r in feats.itertuples(index=False)
     ]
     n = executemany(
         "UPDATE technical_signals SET iv_rank = ?, iv_skew = ? "
-        "WHERE symbol = ? AND date = ?",
+        "WHERE symbol = ? AND date = (SELECT MAX(date) FROM technical_signals t2 WHERE t2.symbol = ?)",
         params,
     )
     print(f"[IV] Updated iv_rank/iv_skew on {n} technical_signals rows "

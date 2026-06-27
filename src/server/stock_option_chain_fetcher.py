@@ -313,7 +313,7 @@ SET expected_move_pct = :expected_move_pct,
     stock_gex_proxy   = :gex_proxy,
     atm_iv            = :atm_iv
 WHERE symbol = :symbol
-  AND date   = :date
+  AND date = (SELECT MAX(date) FROM technical_signals t2 WHERE t2.symbol = :symbol)
 """
 
 _PATCH_TECHNICAL_SIGNALS_SL = _PATCH_TECHNICAL_SIGNALS_PG   # same syntax
