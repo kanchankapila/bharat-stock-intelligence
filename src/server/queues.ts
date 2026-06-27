@@ -514,9 +514,12 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await runPython('mc_eco_calendar_fetcher.py', [], 60_000)
     .catch(e => console.warn('[QUEUE] mc_eco_calendar_fetcher failed:', (e as Error).message));
 
-  // Per-stock option chain: expected move + GEX proxy for 147 F&O stocks → stock_option_features + technical_signals.
+  // Per-stock option chain: expected move + GEX proxy + BS-derived ATM IV → stock_option_features + stock_options_oi + technical_signals.
   await runPython('stock_option_chain_fetcher.py', [], 3 * 60_000)
     .catch(e => console.warn('[QUEUE] stock_option_chain_fetcher failed:', (e as Error).message));
+  // Re-run iv_features after stock chains so per-stock iv_rank reflects BS-computed ATM IV (not just index IV from pcr_fetcher).
+  await runPython('iv_features.py', [], 90_000)
+    .catch(e => console.warn('[QUEUE] iv_features (stock IV pass) failed:', (e as Error).message));
 
   // EPS surprise streak: beat/miss history from MC actual-estimate API → eps_surprise_history + technical_signals.
   await runPython('eps_surprise_fetcher.py', [], 10 * 60_000)
