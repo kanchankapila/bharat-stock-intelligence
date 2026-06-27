@@ -559,6 +559,13 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     X['np_growth_qoq']      = num('earnings_np_growth_qoq', 0.0).clip(-50, 100) / 100.0
     X['shocker_flag']       = num('earnings_shocker_flag', 0).clip(0, 1)
     X['shocker_gain']       = num('earnings_shocker_gain', 0.0).clip(0, 200) / 200.0
+    # beat_pct: % above/below analyst consensus. Positive=beat, negative=miss.
+    X['mc_beat_pct']        = num('mc_eps_vs_cons', 0.0).clip(-100, 200) / 100.0
+    X['beat_magnitude']     = X['mc_beat_pct'].clip(0, 2)  # how much beat (0 if miss)
+    X['miss_magnitude']     = (-X['mc_beat_pct']).clip(0, 1)  # how much miss (0 if beat)
+    # Turnaround stocks: high volatility + mean-reversion opportunity
+    X['positive_turnaround'] = num('positive_turnaround', 0).clip(0, 1)
+    X['negative_turnaround'] = num('negative_turnaround', 0).clip(0, 1)
     # Market earnings breadth: below 0.5 means majority of stocks disappointing
     X['earnings_breadth']   = num('high_impact_3d', 0.5).clip(0, 1)  # reuse macro slot if needed
     # Interaction: BP category + strong signal = highest PEAD conviction
@@ -883,6 +890,7 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                ts.mc_broker_buy_7d, ts.mc_broker_sell_7d, ts.mc_broker_upside,
                ts.days_to_next_results, ts.earnings_category_yoy, ts.earnings_category_qoq,
                ts.earnings_np_growth_yoy, ts.earnings_np_growth_qoq,
+               ts.mc_eps_vs_cons, ts.positive_turnaround, ts.negative_turnaround,
                ts.earnings_shocker_flag, ts.earnings_shocker_gain,
                ts.is_nifty50, ts.is_nifty100, ts.nifty_tier,
                ts.pledge_chg_90d,
@@ -1083,6 +1091,7 @@ def load_pending_signals() -> pd.DataFrame:
                ts.mc_broker_buy_7d, ts.mc_broker_sell_7d, ts.mc_broker_upside,
                ts.days_to_next_results, ts.earnings_category_yoy, ts.earnings_category_qoq,
                ts.earnings_np_growth_yoy, ts.earnings_np_growth_qoq,
+               ts.mc_eps_vs_cons, ts.positive_turnaround, ts.negative_turnaround,
                ts.earnings_shocker_flag, ts.earnings_shocker_gain,
                ts.is_nifty50, ts.is_nifty100, ts.nifty_tier,
                ts.pledge_chg_90d,
