@@ -411,10 +411,7 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await runPython('fundamentals_snapshot.py', [], 90_000)
     .catch(e => console.warn('[QUEUE] fundamentals_snapshot failed:', (e as Error).message));
 
-  // Analyst consensus + price targets snapshot — feeds analyst_buy_pct / target_upside_pct in ml_ensemble.
-  // 2328 stocks × 3 API calls × 0.4s = ~70 min
-  await runPython('analyst_estimates_snapshot.py', [], 90 * 60_000)
-    .catch(e => console.warn('[QUEUE] analyst_estimates_snapshot failed:', (e as Error).message));
+  // analyst_estimates_snapshot moved to weekly retrain (2328 stocks × 3 calls × 0.4s = ~47 min)
 
   // Surveillance gate: ASM/GSM flags → nse_stocks and technical_signals.asm_flag/gsm_stage.
   await runPython('asm_gsm_fetcher.py', [], 2 * 60_000)
@@ -546,15 +543,8 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await runPython('eps_surprise_fetcher.py', [], 10 * 60_000)
     .catch(e => console.warn('[QUEUE] eps_surprise_fetcher failed:', (e as Error).message));
 
-  // FCF yield + interest coverage from Trendlyne chart-data API → tl_financial_quality + technical_signals.
-  // 3058 stocks × 4 API calls × 0.3s = ~61 min
-  await runPython('financial_ratios_fetcher.py', [], 80 * 60_000)
-    .catch(e => console.warn('[QUEUE] financial_ratios_fetcher failed:', (e as Error).message));
-
-  // Working capital cycle (CCC trend) from Trendlyne balance sheet → working_capital_history + technical_signals.
-  // 3058 stocks × 5 API calls × 0.4s = ~102 min
-  await runPython('working_capital_fetcher.py', [], 130 * 60_000)
-    .catch(e => console.warn('[QUEUE] working_capital_fetcher failed:', (e as Error).message));
+  // financial_ratios_fetcher + working_capital_fetcher moved to weekly retrain
+  // (3058 stocks × 4-5 calls = 61-102 min each; data changes quarterly not daily)
 
   // Delivery % trend + bulk/block deals + short interest proxy → technical_signals.
   await runPython('delivery_trend_fetcher.py', [], 5 * 60_000)
@@ -666,6 +656,15 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean }> 
   // 3058 stocks × 0.5s = ~26 min
   await runPython('trendlyne_price_analysis_fetcher.py', [], 40 * 60_000)
     .catch(e => console.warn('[QUEUE] trendlyne_price_analysis_fetcher failed:', (e as Error).message));
+  // Analyst consensus + price targets — 2328 stocks × 3 calls × 0.4s = ~47 min (quarterly data)
+  await runPython('analyst_estimates_snapshot.py', [], 70 * 60_000)
+    .catch(e => console.warn('[QUEUE] analyst_estimates_snapshot failed:', (e as Error).message));
+  // FCF yield + interest coverage — 3058 stocks × 4 calls × 0.3s = ~61 min (quarterly data)
+  await runPython('financial_ratios_fetcher.py', [], 80 * 60_000)
+    .catch(e => console.warn('[QUEUE] financial_ratios_fetcher failed:', (e as Error).message));
+  // Working capital cycle — 3058 stocks × 5 calls × 0.4s = ~102 min (quarterly data)
+  await runPython('working_capital_fetcher.py', [], 130 * 60_000)
+    .catch(e => console.warn('[QUEUE] working_capital_fetcher failed:', (e as Error).message));
   await runPython('outcome_resolver.py', ['--horizon', '5']);
   await runPython('outcome_resolver.py', ['--horizon', '15']);
   await runPython('ml_ensemble.py', ['--train', '--score'], 60 * 60_000);
