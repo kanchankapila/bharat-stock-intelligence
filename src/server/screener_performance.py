@@ -259,7 +259,7 @@ def phase_c_bayesian(conn: ConnWrapper, proxy_outcomes: dict) -> int:
     """).fetchall()
 
     if qualified:
-        global_mean_wr = statistics.mean(r[2] for r in qualified)
+        global_mean_wr = float(statistics.mean(float(r[2]) for r in qualified))
     else:
         global_mean_wr = 0.52
 
@@ -290,12 +290,12 @@ def phase_c_bayesian(conn: ConnWrapper, proxy_outcomes: dict) -> int:
         for row in app_rows:
             r5, r10, r20, r60, r120, nifty20, _ = row
             if r20 is not None:
-                ret20_list.append(r20)
-                nifty20_list.append(nifty20)
-            if r5 is not None:   ret5_list.append(r5)
-            if r10 is not None:  ret10_list.append(r10)
-            if r60 is not None:  ret60_list.append(r60)
-            if r120 is not None: ret120_list.append(r120)
+                ret20_list.append(float(r20))
+                nifty20_list.append(float(nifty20) if nifty20 is not None else None)
+            if r5  is not None: ret5_list.append(float(r5))
+            if r10 is not None: ret10_list.append(float(r10))
+            if r60 is not None: ret60_list.append(float(r60))
+            if r120 is not None: ret120_list.append(float(r120))
 
         # Add proxy (20d only, no nifty benchmark available)
         for ret_pct, _ in proxy:
@@ -304,7 +304,7 @@ def phase_c_bayesian(conn: ConnWrapper, proxy_outcomes: dict) -> int:
 
         resolved_count = len(ret20_list)
         n = resolved_count
-        wr_20d = _wr_from_list(ret20_list) or 0.0
+        wr_20d = float(_wr_from_list(ret20_list) or 0.0)
 
         # Bayesian shrinkage
         shrunk_wr = (n * wr_20d + K_PRIOR * global_mean_wr) / (n + K_PRIOR)
