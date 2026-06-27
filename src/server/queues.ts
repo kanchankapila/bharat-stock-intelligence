@@ -554,6 +554,11 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await runPython('bse_event_classifier.py', [], 60_000)
     .catch(e => console.warn('[QUEUE] bse_event_classifier failed:', (e as Error).message));
 
+  // Backfill technical features (RSI/MACD/ADX from stock_ohlcv) for any outcome that
+  // still lacks a ts row — keeps ML training coverage high as new signals resolve.
+  await runPython('backfill_technical_features.py', [], 5 * 60_000)
+    .catch(e => console.warn('[QUEUE] backfill_technical_features failed:', (e as Error).message));
+
   // PEAD model: eps_growth_yoy + volume + RS → pead_score in technical_signals.
   await runPython('pead_model.py', [], 60_000)
     .catch(e => console.warn('[QUEUE] pead_model failed:', (e as Error).message));
