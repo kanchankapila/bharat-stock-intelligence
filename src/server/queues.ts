@@ -519,6 +519,11 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await runPython('mc_corporate_calendar_fetcher.py', [], 60_000)
     .catch(e => console.warn('[QUEUE] mc_corporate_calendar_fetcher failed:', (e as Error).message));
 
+  // Screener features: stamp per-stock screener ML features into technical_signals
+  // (runs after screener sync so appearances are current)
+  await runPython('screener_features_fetcher.py', [], 5 * 60_000)
+    .catch(e => console.warn('[QUEUE] screener_features_fetcher failed:', (e as Error).message));
+
   // Per-stock option chain: expected move + GEX proxy + BS-derived ATM IV → stock_option_features + stock_options_oi + technical_signals.
   await runPython('stock_option_chain_fetcher.py', [], 3 * 60_000)
     .catch(e => console.warn('[QUEUE] stock_option_chain_fetcher failed:', (e as Error).message));
@@ -657,7 +662,21 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean }> 
 }
 
 async function processScreenerPerf(_job: Job): Promise<void> {
+  // 1. Sync newly discovered Trendlyne screener PKs (fast — only new ones)
+  await runPython('trendlyne_screener_discovery.py', [], 10 * 60_000)
+    .catch(e => console.warn('[QUEUE] trendlyne_screener_discovery failed:', (e as Error).message));
+
+  // 2. Compute performance metrics for all screeners
   await runPython('screener_performance.py', [], 15 * 60_000);
+
+  // 3. Stamp per-stock screener ML features into technical_signals
+  await runPython('screener_features_fetcher.py', [], 5 * 60_000)
+    .catch(e => console.warn('[QUEUE] screener_features_fetcher failed:', (e as Error).message));
+
+  // 4. Resolve live screener outcomes (needs ohlcv data to be fresh first)
+  await runPython('live_screener_resolver.py', [], 3 * 60_000)
+    .catch(e => console.warn('[QUEUE] live_screener_resolver failed:', (e as Error).message));
+
   try {
     const { classifyAllScreeners } = await import('./screenerClassifier');
     await classifyAllScreeners();

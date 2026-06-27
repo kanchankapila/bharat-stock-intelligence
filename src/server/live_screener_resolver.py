@@ -1,98 +1,122 @@
 #!/usr/bin/env python3
 """
 Live Screener Outcome Resolver.
-Resolves EOD outcomes (1-day, 3-day, 5-day returns) for live screener appearances.
-Uses the db_compat layer to support both SQLite and PostgreSQL.
+Resolves EOD outcomes (1d, 3d, 5d returns) for live_screener_appearances.
 """
 
 import sys
 import datetime
-from db_compat import connect, ConnWrapper
+from db_compat import connect
 
-def get_trading_days_after(conn: ConnWrapper, symbol: str, start_date: str, n: int):
-    """Return (price, actual_date) n trading days after start_date from stock_ohlcv."""
-    rows = conn.execute("""
-        SELECT close, date FROM stock_ohlcv
-        WHERE symbol = ? AND date > ?
-        ORDER BY date ASC
-        LIMIT ?
-    """, (symbol, start_date, n + 5)).fetchall()
+NIFTY_SYMBOL = "NIFTY50"
+
+
+def _price_n_days_after(conn, symbol: str, start_date: str, n: int):
+    rows = conn.execute(
+        "SELECT close FROM stock_ohlcv WHERE symbol = ? AND date > ? ORDER BY date ASC LIMIT ?",
+        (symbol, start_date, n + 5)
+    ).fetchall()
     if len(rows) < n:
-        return None, None
-    return rows[n - 1][0], rows[n - 1][1]
+        return None
+    return rows[n - 1][0]
 
-def compute_return(entry, exit_p):
+
+def _price_on_or_after(conn, symbol: str, date: str):
+    row = conn.execute(
+        "SELECT close FROM stock_ohlcv WHERE symbol = ? AND date >= ? ORDER BY date ASC LIMIT 1",
+        (symbol, date)
+    ).fetchone()
+    return row[0] if row else None
+
+
+def _ret(entry, exit_p):
     if entry is None or exit_p is None or entry == 0:
         return None
     return round((exit_p - entry) / entry * 100, 4)
 
-def resolve_outcomes(dry_run = False):
+
+def resolve_outcomes(dry_run=False):
     conn = connect()
     try:
-        # Query appearances that are not fully resolved (where return_5d is still NULL)
-        q = """
-            SELECT a.id as appearance_id, a.symbol, a.filter_key, a.price as entry_price, r.timestamp
-            FROM live_screener_appearances a
-            JOIN live_screener_runs r ON a.run_id = r.id
-            LEFT JOIN live_screener_outcomes o ON a.id = o.appearance_id
-            WHERE o.appearance_id IS NULL OR o.return_5d IS NULL
-        """
-        pending = conn.execute(q).fetchall()
+        # live_screener_runs uses created_at (not timestamp)
+        pending = conn.execute("""
+            SELECT a.id          AS app_id,
+                   a.symbol,
+                   a.filter_key,
+                   a.price       AS entry_price,
+                   r.created_at  AS run_ts
+            FROM   live_screener_appearances a
+            JOIN   live_screener_runs r ON a.run_id = r.id
+            LEFT   JOIN live_screener_outcomes o ON a.id = o.appearance_id
+            WHERE  o.appearance_id IS NULL OR o.return_5d IS NULL
+        """).fetchall()
+
         if not pending:
             print("[LiveScreenerResolver] No pending appearances to resolve.")
             return
 
-        print(f"[LiveScreenerResolver] Found {len(pending)} pending appearances to process.")
-        resolved_count = 0
+        print(f"[LiveScreenerResolver] Resolving {len(pending)} pending appearances...")
+        resolved = 0
 
         for row in pending:
-            app_id = row['appearance_id']
-            symbol = row['symbol']
-            filter_key = row['filter_key']
-            entry_price = row['entry_price']
-            timestamp = row['timestamp']
-            
-            # The appeared date is the date portion of the run timestamp (e.g. YYYY-MM-DD)
-            appeared_date = timestamp[:10]
+            app_id     = row[0]
+            symbol     = row[1]
+            filter_key = row[2]
+            entry_price = row[3]
+            run_ts     = str(row[4])[:10]    # YYYY-MM-DD
 
-            # Fetch EOD close prices at 1d, 3d, 5d horizons
-            close_1d, _ = get_trading_days_after(conn, symbol, appeared_date, 1)
-            close_3d, _ = get_trading_days_after(conn, symbol, appeared_date, 3)
-            close_5d, _ = get_trading_days_after(conn, symbol, appeared_date, 5)
+            entry_close = _price_on_or_after(conn, symbol, run_ts)
+            if entry_close is None:
+                entry_close = entry_price      # use live price as fallback
 
-            ret_1d = compute_return(entry_price, close_1d)
-            ret_3d = compute_return(entry_price, close_3d)
-            ret_5d = compute_return(entry_price, close_5d)
+            c1  = _price_n_days_after(conn, symbol, run_ts, 1)
+            c3  = _price_n_days_after(conn, symbol, run_ts, 3)
+            c5  = _price_n_days_after(conn, symbol, run_ts, 5)
 
-            # Only proceed if we resolved at least some return data
-            if ret_1d is not None or ret_3d is not None or ret_5d is not None:
-                if dry_run:
-                    print(f"[DRY-RUN] ID {app_id} ({symbol}): Entry={entry_price}, 1d={ret_1d}%, 3d={ret_3d}%, 5d={ret_5d}%")
-                else:
-                    conn.execute("""
-                        INSERT INTO live_screener_outcomes (
-                            appearance_id, symbol, filter_key, appeared_at, entry_price, return_1d, return_3d, return_5d
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                        ON CONFLICT(appearance_id) DO UPDATE SET
-                            return_1d = excluded.return_1d,
-                            return_3d = excluded.return_3d,
-                            return_5d = excluded.return_5d
-                    """, (app_id, symbol, filter_key, appeared_date, entry_price, ret_1d, ret_3d, ret_5d))
-                resolved_count += 1
+            r1  = _ret(entry_close, c1)
+            r3  = _ret(entry_close, c3)
+            r5  = _ret(entry_close, c5)
+
+            if r1 is None and r3 is None and r5 is None:
+                continue
+
+            # compute alpha_3d vs Nifty50
+            n3   = _price_n_days_after(conn, NIFTY_SYMBOL, run_ts, 3)
+            n_e  = _price_on_or_after(conn, NIFTY_SYMBOL, run_ts)
+            alpha_3d = None
+            if r3 is not None and n_e and n3:
+                nifty_r3 = _ret(n_e, n3)
+                alpha_3d = round(r3 - nifty_r3, 4) if nifty_r3 is not None else None
+
+            if dry_run:
+                print(f"  [DRY] {app_id} {symbol}: 1d={r1}% 3d={r3}% 5d={r5}% alpha3d={alpha_3d}%")
+            else:
+                conn.execute("""
+                    INSERT INTO live_screener_outcomes
+                        (appearance_id, symbol, filter_key, appeared_at,
+                         entry_price, return_1d, return_3d, return_5d)
+                    VALUES (?,?,?,?,?,?,?,?)
+                    ON CONFLICT(appearance_id) DO UPDATE SET
+                        return_1d = excluded.return_1d,
+                        return_3d = excluded.return_3d,
+                        return_5d = excluded.return_5d
+                """, (app_id, symbol, filter_key, run_ts,
+                      entry_price, r1, r3, r5))
+            resolved += 1
 
         if not dry_run:
             conn.commit()
-            print(f"[LiveScreenerResolver] Successfully resolved and committed {resolved_count} outcomes.")
+            print(f"[LiveScreenerResolver] Resolved {resolved} outcomes.")
         else:
-            print(f"[LiveScreenerResolver] Dry-run: processed {resolved_count} outcomes (no commit).")
+            print(f"[LiveScreenerResolver] Dry-run: {resolved} would be resolved.")
 
     except Exception as e:
-        print(f"[LiveScreenerResolver] Error during outcome resolution: {e}")
+        print(f"[LiveScreenerResolver] Error: {e}")
         conn.rollback()
-        raise e
+        raise
     finally:
         conn.close()
 
-if __name__ == '__main__':
-    dry = "--dry-run" in sys.argv
-    resolve_outcomes(dry)
+
+if __name__ == "__main__":
+    resolve_outcomes("--dry-run" in sys.argv)

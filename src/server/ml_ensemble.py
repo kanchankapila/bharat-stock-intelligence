@@ -684,6 +684,23 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     X['wc_bad']            = num('wc_deteriorating', 0.0).clip(0, 1)
     X['wc_good']           = num('wc_improving', 0.0).clip(0, 1)
 
+    # ── Screener features (screener_features_fetcher.py) ─────────────────────
+    # Aggregated signal from 1521 screeners: how many bullish/bearish, quality-weighted momentum,
+    # category diversity, persistence (streak), and alpha of screeners that flag this stock.
+    X['screener_bull']     = num('screener_bull_count', 0).clip(0, 50) / 50.0
+    X['screener_bear']     = num('screener_bear_count', 0).clip(0, 20) / 20.0
+    X['screener_breadth']  = num('screener_cat_breadth', 0).clip(0, 19) / 19.0   # distinct categories
+    X['screener_tier1']    = num('screener_tier1_count', 0).clip(0, 20) / 20.0   # A/B tier only
+    X['screener_momentum'] = num('screener_momentum_score', 0).clip(0, 30) / 30.0  # bayesian-weighted
+    X['screener_streak']   = num('screener_streak_days', 0).clip(0, 60) / 60.0   # persistence days
+    X['screener_name_sig'] = num('screener_name_signal', 1.0).clip(0, 2) / 2.0   # 0=bear,1=neutral,2=bull
+    X['screener_alpha']    = num('screener_alpha_score', 0.0).clip(-10, 20) / 20.0
+    X['screener_net_bias'] = (X['screener_bull'] - X['screener_bear']).clip(-1, 1)  # directional
+    # Cross-signal: screener bull + good breadth + persistence = high conviction
+    X['screener_conviction'] = (
+        X['screener_momentum'] * X['screener_breadth'] * (1 + X['screener_streak'])
+    ).clip(0, 2)
+
     # ── Currency + futures basis (market_regime_fetcher.py) ──────────────────
     X['usdinr_chg']        = num('usdinr_chg_pct', 0.0).clip(-2, 2) / 2.0
     X['nifty_basis']       = num('nifty_basis_pct', 1.0).clip(-3, 5) / 5.0
@@ -907,6 +924,9 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                ts.mf_sector_flow_pct,
                ts.receivables_days_ttm, ts.ccc_ttm, ts.ccc_trend,
                ts.wc_deteriorating, ts.wc_improving,
+               ts.screener_bull_count, ts.screener_bear_count, ts.screener_cat_breadth,
+               ts.screener_tier1_count, ts.screener_momentum_score, ts.screener_streak_days,
+               ts.screener_name_signal, ts.screener_alpha_score,
                macro_snap.gift_nifty_pct, macro_snap.nifty_gex,
                macro_snap.india_10y, macro_snap.india_us_spread,
                macro_snap.high_impact_3d, macro_snap.asia_sentiment, macro_snap.global_risk,
@@ -1108,6 +1128,9 @@ def load_pending_signals() -> pd.DataFrame:
                ts.mf_sector_flow_pct,
                ts.receivables_days_ttm, ts.ccc_ttm, ts.ccc_trend,
                ts.wc_deteriorating, ts.wc_improving,
+               ts.screener_bull_count, ts.screener_bear_count, ts.screener_cat_breadth,
+               ts.screener_tier1_count, ts.screener_momentum_score, ts.screener_streak_days,
+               ts.screener_name_signal, ts.screener_alpha_score,
                macro_snap.gift_nifty_pct, macro_snap.nifty_gex,
                macro_snap.india_10y, macro_snap.india_us_spread,
                macro_snap.high_impact_3d, macro_snap.asia_sentiment, macro_snap.global_risk,
