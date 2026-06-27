@@ -447,15 +447,24 @@ def backfill_technical_signals(symbol: str, profile: dict, con) -> None:
 # ── Stock list ───────────────────────────────────────────────────────────────────
 
 def _load_stocks(symbol_filter: str | None, con) -> list[tuple[str, str]]:
+    """Return [(symbol, tlid), ...].
+    Primary: nse_stocks.tlid (canonical). Fallback: trendlyne_screener_stocks.stock_id.
+    """
     cur = con.cursor()
     cur.execute("""
-        SELECT symbol, MAX(stock_id) AS stock_id FROM trendlyne_screener_stocks
-        WHERE stock_id IS NOT NULL AND stock_id != ''
-        GROUP BY symbol ORDER BY symbol
+        SELECT symbol, tlid::TEXT AS tlid FROM nse_stocks
+        WHERE tlid IS NOT NULL AND tlid::TEXT != ''
+        UNION
+        SELECT tss.symbol, MAX(tss.stock_id)::TEXT AS tlid
+        FROM trendlyne_screener_stocks tss
+        WHERE tss.stock_id IS NOT NULL AND tss.stock_id::TEXT != ''
+          AND NOT EXISTS (SELECT 1 FROM nse_stocks ns WHERE ns.symbol = tss.symbol AND ns.tlid IS NOT NULL)
+        GROUP BY tss.symbol
+        ORDER BY symbol
     """)
-    rows = [(r[0], str(r[1])) for r in cur.fetchall()]
+    rows = [(r[0], str(r[1])) for r in cur.fetchall() if r[0]]
     if symbol_filter:
-        rows = [(s, t) for s, t in rows if s and s.upper() == symbol_filter.upper()]
+        rows = [(s, t) for s, t in rows if s.upper() == symbol_filter.upper()]
     return rows
 
 

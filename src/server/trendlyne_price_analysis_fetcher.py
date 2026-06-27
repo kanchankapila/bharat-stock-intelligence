@@ -277,11 +277,20 @@ def backfill_technical_signals(symbol: str, f: dict, con) -> None:
 
 
 def _load_stocks(symbol_filter: str | None, con) -> list[tuple[str, str]]:
+    """Return [(symbol, tlid), ...].
+    Primary: nse_stocks.tlid (canonical). Fallback: trendlyne_screener_stocks.stock_id.
+    """
     cur = con.cursor()
     cur.execute("""
-        SELECT symbol, stock_id FROM trendlyne_screener_stocks
-        WHERE stock_id IS NOT NULL AND stock_id != ''
-        GROUP BY symbol ORDER BY symbol
+        SELECT symbol, tlid::TEXT AS tlid FROM nse_stocks
+        WHERE tlid IS NOT NULL AND tlid::TEXT != ''
+        UNION
+        SELECT tss.symbol, MAX(tss.stock_id)::TEXT AS tlid
+        FROM trendlyne_screener_stocks tss
+        WHERE tss.stock_id IS NOT NULL AND tss.stock_id::TEXT != ''
+          AND NOT EXISTS (SELECT 1 FROM nse_stocks ns WHERE ns.symbol = tss.symbol AND ns.tlid IS NOT NULL)
+        GROUP BY tss.symbol
+        ORDER BY symbol
     """)
     rows = [(r[0], str(r[1])) for r in cur.fetchall()]
     if symbol_filter:
