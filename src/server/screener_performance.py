@@ -18,7 +18,8 @@ from collections import defaultdict
 from db_compat import connect, ConnWrapper
 
 NIFTY_SYMBOL = "NIFTY50"
-K_PRIOR = 20               # Bayesian prior weight (20 signals to trust own win rate)
+K_PRIOR_STARTUP = 8        # Bayesian prior when <90 days of screener history
+K_PRIOR_MATURE  = 20       # Bayesian prior when history is established (>90 days)
 MIN_SIGNALS_FOR_TIER = 5   # below this = Unranked
 
 
@@ -228,6 +229,18 @@ def _metrics_from_list(returns, nifty_rets):
     }
 
 
+def _adaptive_k_prior(conn: ConnWrapper) -> float:
+    """Return K_PRIOR based on how much screener history exists."""
+    row = conn.execute("""
+        SELECT MIN(appeared_date)::date FROM screener_appearances
+    """).fetchone()
+    if not row or not row[0]:
+        return K_PRIOR_STARTUP
+    oldest = str(row[0])[:10]
+    days_of_history = (datetime.date.today() - datetime.date.fromisoformat(oldest)).days
+    return K_PRIOR_STARTUP if days_of_history < 90 else K_PRIOR_MATURE
+
+
 def phase_c_bayesian(conn: ConnWrapper, proxy_outcomes: dict) -> int:
     """Compute Bayesian scores + tiers. Write to screener_performance_v2."""
     print("[PhaseC] Computing Bayesian scores + tiers...")
@@ -250,7 +263,8 @@ def phase_c_bayesian(conn: ConnWrapper, proxy_outcomes: dict) -> int:
     else:
         global_mean_wr = 0.52
 
-    print(f"[PhaseC] Global mean win rate: {global_mean_wr:.3f} ({len(qualified)} qualifying screeners)")
+    K_PRIOR = _adaptive_k_prior(conn)
+    print(f"[PhaseC] Global mean win rate: {global_mean_wr:.3f} ({len(qualified)} qualifying screeners), K_PRIOR={K_PRIOR}")
 
     updated = 0
 
@@ -410,6 +424,34 @@ def phase_d_sync_back(conn: ConnWrapper) -> None:
     print("[PhaseD] Sync complete.")
 
 
+# -- Phase E: Update screener_catalog confidence from bayesian_score -----------
+
+def phase_e_update_confidence(conn: ConnWrapper) -> None:
+    """Drive screener_catalog.confidence from the computed bayesian_score."""
+    print("[PhaseE] Updating screener_catalog confidence from bayesian_score...")
+
+    conn.execute("""
+        UPDATE screener_catalog sc
+        SET confidence = CASE
+            WHEN spv.bayesian_score >= 0.55 THEN 0.85
+            WHEN spv.bayesian_score >= 0.45 THEN 0.78
+            WHEN spv.bayesian_score >= 0.35 THEN 0.72
+            ELSE 0.60
+        END
+        FROM screener_performance_v2 spv
+        WHERE sc.screener_id = spv.screener_id
+          AND spv.bayesian_score IS NOT NULL
+    """)
+    conn.commit()
+
+    changed = conn.execute("""
+        SELECT COUNT(*) FROM screener_catalog sc
+        JOIN screener_performance_v2 spv ON spv.screener_id = sc.screener_id
+        WHERE spv.bayesian_score IS NOT NULL
+    """).fetchone()[0]
+    print(f"[PhaseE] Updated confidence for {changed} screeners in screener_catalog")
+
+
 # -- Entry point --------------------------------------------------------------
 
 def run():
@@ -419,6 +461,7 @@ def run():
         phase_b_fill_returns(conn)
         phase_c_bayesian(conn, proxy)
         phase_d_sync_back(conn)
+        phase_e_update_confidence(conn)
         print("[ScreenerPerf] All phases complete.")
 
         # Print quick summary

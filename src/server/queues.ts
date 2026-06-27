@@ -674,11 +674,15 @@ async function processScreenerPerf(_job: Job): Promise<void> {
   await runPython('trendlyne_screener_discovery.py', [], 10 * 60_000)
     .catch(e => console.warn('[QUEUE] trendlyne_screener_discovery failed:', (e as Error).message));
 
-  // 2. Bulk-enrich signal_keywords + screener_url for all catalog entries (fast, no API)
-  await runPython('screener_catalog_enricher.py', [], 3 * 60_000)
+  // 2. Bulk-enrich signal_keywords + screener_url; INSERT 858 missing catalog entries; fix sector_theme bias
+  await runPython('screener_catalog_enricher.py', [], 5 * 60_000)
     .catch(e => console.warn('[QUEUE] screener_catalog_enricher failed:', (e as Error).message));
 
-  // 3. Compute performance metrics for all screeners
+  // 2b. Backfill OHLCV for any symbols that appeared in screeners but are missing from stock_ohlcv
+  await runPython('screener_ohlcv_backfill.py', [], 20 * 60_000)
+    .catch(e => console.warn('[QUEUE] screener_ohlcv_backfill failed:', (e as Error).message));
+
+  // 3. Compute performance metrics for all screeners (K_PRIOR adaptive; phase_e updates confidence)
   await runPython('screener_performance.py', [], 15 * 60_000);
 
   // 4. Stamp per-stock screener ML features into technical_signals

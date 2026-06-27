@@ -175,14 +175,116 @@ def run():
     con.commit()
     print(f"[CatalogEnricher] screener_master: {sm_updated} signal_type_tag rows filled")
 
-    # ── Step 5: Summary ───────────────────────────────────────────────────────
+    # ── Step 5: INSERT missing screener_catalog entries from screener_master ────
+    # 858 screener_master rows have no catalog entry. Insert them with NLP-derived bias.
+    missing = con.execute("""
+        SELECT sm.scan_id, sm.name, sm.source, sm.inferred_sentiment, sm.inferred_category,
+               ts.screenpk, ts.screener_url AS ts_url
+        FROM screener_master sm
+        LEFT JOIN trendlyne_screeners ts ON ts.screener_id = sm.scan_id
+        WHERE NOT EXISTS (
+            SELECT 1 FROM screener_catalog sc WHERE sc.screener_id = sm.scan_id
+        )
+    """).fetchall()
+
+    print(f"[CatalogEnricher] {len(missing)} screener_master entries to INSERT into screener_catalog")
+
+    # Category → (signal_bias, investment_horizon, confidence)
+    CATEGORY_DEFAULTS = {
+        'momentum':          ('bullish',  'short_term',  0.72),
+        'breakout':          ('bullish',  'short_term',  0.72),
+        'breakdown':         ('bearish',  'short_term',  0.72),
+        'valuation':         ('bullish',  'long_term',   0.72),
+        'fundamental':       ('bullish',  'long_term',   0.72),
+        'quality':           ('bullish',  'long_term',   0.72),
+        'dividend':          ('bullish',  'long_term',   0.70),
+        'technical':         ('bullish',  'short_term',  0.70),
+        'sector_theme':      ('neutral',  'medium_term', 0.65),
+        'fno':               ('neutral',  'short_term',  0.68),
+        'institutional':     ('bullish',  'medium_term', 0.72),
+        'insider':           ('bullish',  'medium_term', 0.70),
+        'earnings':          ('bullish',  'short_term',  0.70),
+        'other':             ('neutral',  'medium_term', 0.65),
+    }
+
+    BEARISH_KEYWORDS = r"breakdown|sell|short|fall|decline|bearish|overbought|death.cross"
+
+    inserted = 0
+    for row in missing:
+        scan_id  = row[0]
+        name     = row[1] or scan_id
+        source   = row[2] or 'unknown'
+        sentiment = row[3]
+        category  = row[4] or 'other'
+        screenpk  = row[5]
+        ts_url    = row[6]
+
+        kw = extract_signal_keywords(name)
+
+        # Derive signal_bias: use existing sentiment if set, else NLP
+        if sentiment and sentiment in ('bullish', 'bearish', 'neutral'):
+            bias = sentiment
+        elif re.search(_safe_pattern(BEARISH_KEYWORDS), name.lower()):
+            bias = 'bearish'
+        elif category == 'sector_theme':
+            bias = 'neutral'
+        else:
+            bias = 'bullish'
+
+        cat_norm = category if category in CATEGORY_DEFAULTS else 'other'
+        _, horizon, confidence = CATEGORY_DEFAULTS.get(cat_norm, ('neutral', 'medium_term', 0.65))
+
+        url = ts_url or (tl_screener_url(screenpk) if source == 'trendlyne' and screenpk else None)
+
+        try:
+            con.execute("""
+                INSERT INTO screener_catalog
+                  (screener_id, screener_name, source, signal_bias, category,
+                   investment_horizon, confidence, signal_keywords, screener_url)
+                SELECT ?,?,?,?,?, ?,?,?,?
+                WHERE NOT EXISTS (SELECT 1 FROM screener_catalog WHERE screener_id = ?)
+            """, (scan_id, name, source, bias, cat_norm, horizon, confidence, kw, url, scan_id))
+            inserted += 1
+        except Exception as e:
+            print(f"  [WARN] Cannot insert {scan_id}: {e}")
+            con.execute("ROLLBACK")
+
+    con.commit()
+    print(f"[CatalogEnricher] screener_catalog: {inserted} new rows inserted from screener_master")
+
+    # ── Step 6: Fix sector_theme signal_bias — force neutral unless directional ─
+    # Screeners in the sector_theme category that have generic universe names
+    # (no directional keyword in the name) should be neutral, not bullish.
+    DIRECTIONAL_KW = r"rising|growing|improving|breakout|momentum|strong|profit|roe|bullish|outperform|beat"
+    sector_fixed = 0
+    sector_rows = con.execute("""
+        SELECT screener_id, screener_name FROM screener_catalog
+        WHERE category = 'sector_theme' AND signal_bias = 'bullish'
+    """).fetchall()
+
+    for sid, sname in sector_rows:
+        has_direction = re.search(_safe_pattern(DIRECTIONAL_KW), (sname or "").lower())
+        if not has_direction:
+            con.execute("""
+                UPDATE screener_catalog SET signal_bias = 'neutral' WHERE screener_id = ?
+            """, (sid,))
+            sector_fixed += 1
+
+    con.commit()
+    print(f"[CatalogEnricher] sector_theme: {sector_fixed} wrongly-bullish screeners corrected to neutral")
+
+    # ── Step 7: Summary ───────────────────────────────────────────────────────
     r = con.execute("""
         SELECT
           COUNT(*) FILTER(WHERE signal_keywords IS NOT NULL AND signal_keywords != '') AS kw_filled,
+          COUNT(*) FILTER(WHERE signal_bias = 'bullish') AS bull,
+          COUNT(*) FILTER(WHERE signal_bias = 'bearish') AS bear,
+          COUNT(*) FILTER(WHERE signal_bias = 'neutral') AS neutral,
           COUNT(*) AS total
         FROM screener_catalog
     """).fetchone()
-    print(f"[CatalogEnricher] Final: screener_catalog signal_keywords {r[0]}/{r[1]}")
+    print(f"[CatalogEnricher] Final: screener_catalog signal_keywords {r[0]}/{r[4]}")
+    print(f"[CatalogEnricher] Final: bias distribution — bull={r[1]}, bear={r[2]}, neutral={r[3]}")
 
     r2 = con.execute("""
         SELECT
