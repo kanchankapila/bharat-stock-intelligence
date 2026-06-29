@@ -4,11 +4,12 @@ process.env.DATABASE_URL = ':memory:';
 const dbModule = await import('../db');
 const db = dbModule.default;
 const scoringServiceModule = await import('../scoringService');
-const { computeTimeframeScores, getTopRatedStocks } = scoringServiceModule;
+const { computeTimeframeScores, getTopRatedStocks, clearTopRatedCache } = scoringServiceModule;
 
 beforeEach(() => {
   ['screener_runs', 'timeframe_scores', 'quant_scores', 'technical_composite_scores', 'stock_fundamentals', 'stock_ohlcv', 'backtesting_runs', 'unified_recommendations', 'stock_scores']
     .forEach(table => db.exec(`DELETE FROM ${table}`));
+  clearTopRatedCache();
 });
 
 const insertRec = (symbol: string, score: number, klass: string, bull: number, bear: number, computedAt: string, sizePct = 0) =>

@@ -26,6 +26,7 @@
     "update:sectors": "tsx scripts/updateSectors.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.1075.0",
     "@google/genai": "^2.0.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@tailwindcss/vite": "^4.1.14",

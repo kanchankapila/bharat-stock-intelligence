@@ -60,7 +60,13 @@ export async function runPython(
     const result = await execFileAsync(
       PYTHON,
       [path.join(PY_DIR, script), ...args],
-      { timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024 },
+      {
+        timeout: timeoutMs,
+        maxBuffer: 4 * 1024 * 1024,
+        // Force UTF-8 I/O so Python scripts printing non-ASCII (→ ≥ ₹ etc.)
+        // don't crash on Windows CP1252 console encoding
+        env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
+      },
     );
     stdout = result.stdout;
     stderr = result.stderr;

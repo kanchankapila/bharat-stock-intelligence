@@ -19,11 +19,29 @@ import datetime
 
 import pandas as pd
 
-from db_compat import read_df, executemany
+from db_compat import read_df, executemany, connect, translate
 
 LOOKBACK_DAYS = 420   # enough to cover a 63-day return plus buffer
 RET_WINDOWS = (21, 63)
 MIN_UNIVERSE = 20     # need a reasonable cross-section before a rank is meaningful
+MIN_SECTOR_SIZE = 5   # minimum stocks in a sector before computing sector avg
+
+
+def ensure_schema() -> None:
+    """Add rs_vs_sector_21d / rs_vs_sector_63d columns to technical_signals if missing."""
+    for col in ("rs_vs_sector_21d", "rs_vs_sector_63d"):
+        try:
+            conn = connect()
+            conn.execute(translate(f"ALTER TABLE technical_signals ADD COLUMN {col} REAL"))
+            conn.commit()
+            conn.close()
+            print(f"[RS] Added column technical_signals.{col}")
+        except Exception:
+            try:
+                conn.rollback()
+                conn.close()
+            except Exception:
+                pass
 
 
 def cross_sectional_rank(returns: pd.DataFrame, min_universe: int = MIN_UNIVERSE) -> pd.DataFrame:
@@ -36,11 +54,66 @@ def cross_sectional_rank(returns: pd.DataFrame, min_universe: int = MIN_UNIVERSE
     return ranked
 
 
+def build_sector_features(ohlcv: pd.DataFrame) -> pd.DataFrame:
+    """ohlcv: long frame (symbol, date, close, sector). Returns long frame with
+    rs_vs_sector_21d and rs_vs_sector_63d columns (stock return minus sector avg return)."""
+    if ohlcv.empty or "sector" not in ohlcv.columns:
+        return pd.DataFrame(columns=["symbol", "date", "rs_vs_sector_21d", "rs_vs_sector_63d"])
+
+    # Build wide close prices keyed by symbol
+    wide = ohlcv.pivot_table(index="date", columns="symbol", values="close").sort_index()
+
+    # Build symbol→sector map (drop nulls)
+    sector_map = (
+        ohlcv[["symbol", "sector"]]
+        .dropna(subset=["sector"])
+        .drop_duplicates("symbol")
+        .set_index("symbol")["sector"]
+    )
+
+    out = None
+    for w in RET_WINDOWS:
+        rets = wide.pct_change(w)  # dates × symbols, float returns
+
+        # For each date compute sector-avg returns (equal-weight, min MIN_SECTOR_SIZE stocks)
+        # Melt returns into long form so we can groupby sector
+        rets_long = (
+            rets.stack(future_stack=True)
+            .dropna()
+            .rename("ret")
+            .reset_index()
+        )
+        rets_long["sector"] = rets_long["symbol"].map(sector_map)
+        rets_long = rets_long.dropna(subset=["sector"])
+
+        sector_avg = (
+            rets_long.groupby(["date", "sector"])["ret"]
+            .agg(["mean", "count"])
+            .reset_index()
+            .rename(columns={"mean": "sector_avg", "count": "sector_n"})
+        )
+        # Require at least MIN_SECTOR_SIZE stocks in the sector
+        sector_avg = sector_avg[sector_avg["sector_n"] >= MIN_SECTOR_SIZE][
+            ["date", "sector", "sector_avg"]
+        ]
+
+        merged = rets_long.merge(sector_avg, on=["date", "sector"], how="left")
+        merged[f"rs_vs_sector_{w}d"] = merged["ret"] - merged["sector_avg"]
+
+        long = merged[["symbol", "date", f"rs_vs_sector_{w}d"]]
+        out = long if out is None else out.merge(long, on=["date", "symbol"], how="outer")
+
+    out = out[["symbol", "date", "rs_vs_sector_21d", "rs_vs_sector_63d"]]
+    return out.dropna(subset=["rs_vs_sector_21d", "rs_vs_sector_63d"], how="all")
+
+
 def build_rs_features(ohlcv: pd.DataFrame) -> pd.DataFrame:
-    """ohlcv: long frame (symbol, date, close). Returns long (symbol, date, rs_rank_21d,
-    rs_rank_63d) ready to upsert onto technical_signals."""
+    """ohlcv: long frame (symbol, date, close[, sector]). Returns long frame with
+    rs_rank_21d, rs_rank_63d, rs_vs_sector_21d, rs_vs_sector_63d ready for upsert."""
+    cols = ["symbol", "date", "rs_rank_21d", "rs_rank_63d",
+            "rs_vs_sector_21d", "rs_vs_sector_63d"]
     if ohlcv.empty:
-        return pd.DataFrame(columns=["symbol", "date", "rs_rank_21d", "rs_rank_63d"])
+        return pd.DataFrame(columns=cols)
 
     wide = ohlcv.pivot_table(index="date", columns="symbol", values="close").sort_index()
     out = None
@@ -51,7 +124,21 @@ def build_rs_features(ohlcv: pd.DataFrame) -> pd.DataFrame:
         out = long if out is None else out.merge(long, on=["date", "symbol"], how="outer")
 
     out = out[["symbol", "date", "rs_rank_21d", "rs_rank_63d"]]
-    return out.dropna(subset=["rs_rank_21d", "rs_rank_63d"], how="all")
+    out = out.dropna(subset=["rs_rank_21d", "rs_rank_63d"], how="all")
+
+    # Sector-relative features (independent pass, outer-merged)
+    if "sector" in ohlcv.columns:
+        sector_feats = build_sector_features(ohlcv)
+        if not sector_feats.empty:
+            out = out.merge(sector_feats, on=["symbol", "date"], how="left")
+        else:
+            out["rs_vs_sector_21d"] = None
+            out["rs_vs_sector_63d"] = None
+    else:
+        out["rs_vs_sector_21d"] = None
+        out["rs_vs_sector_63d"] = None
+
+    return out
 
 
 def filter_to_existing(feats: pd.DataFrame, existing_pairs: set) -> pd.DataFrame:
@@ -65,11 +152,13 @@ def filter_to_existing(feats: pd.DataFrame, existing_pairs: set) -> pd.DataFrame
 
 
 def run(only_date: str | None = None) -> int:
-    """Compute cross-sectional RS ranks and write them onto technical_signals. Returns rows
-    updated."""
+    """Compute cross-sectional RS ranks + sector-relative RS and write them onto
+    technical_signals. Returns rows updated."""
+    ensure_schema()
+
     cutoff = (datetime.date.today() - datetime.timedelta(days=LOOKBACK_DAYS)).isoformat()
     ohlcv = read_df(
-        "SELECT o.symbol, o.date, o.close "
+        "SELECT o.symbol, o.date, o.close, ns.sector "
         "FROM stock_ohlcv o "
         "JOIN nse_stocks ns ON ns.symbol = o.symbol "
         "WHERE o.date >= ? AND COALESCE(o.is_suspect, 0) = 0 "
@@ -98,18 +187,27 @@ def run(only_date: str | None = None) -> int:
         print("[RS] No matching technical_signals rows to update.")
         return 0
 
+    def _fval(v):
+        return None if pd.isna(v) else float(v)
+
     params = [
-        (None if pd.isna(r.rs_rank_21d) else float(r.rs_rank_21d),
-         None if pd.isna(r.rs_rank_63d) else float(r.rs_rank_63d),
+        (_fval(r.rs_rank_21d), _fval(r.rs_rank_63d),
+         _fval(r.rs_vs_sector_21d), _fval(r.rs_vs_sector_63d),
          r.symbol, r.date)
         for r in feats.itertuples(index=False)
     ]
     n = executemany(
-        "UPDATE technical_signals SET rs_rank_21d = ?, rs_rank_63d = ? "
+        "UPDATE technical_signals "
+        "SET rs_rank_21d = ?, rs_rank_63d = ?, "
+        "    rs_vs_sector_21d = ?, rs_vs_sector_63d = ? "
         "WHERE symbol = ? AND date = ?",
         params,
     )
-    print(f"[RS] Updated rs_rank on {n} technical_signals rows ({len(feats)} symbol-dates).")
+    sector_written = feats["rs_vs_sector_21d"].notna().sum()
+    print(
+        f"[RS] Updated rs_rank on {n} technical_signals rows ({len(feats)} symbol-dates); "
+        f"{sector_written} rows have sector-relative RS."
+    )
     return n
 
 

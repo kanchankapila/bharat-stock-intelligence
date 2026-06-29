@@ -283,3 +283,31 @@ class _TxCtx:
 
 def transaction():
     return _TxCtx()
+
+
+def load_index_map(provider: str) -> dict:
+    """Return {provider_id: index_name} for the given provider key.
+
+    Provider keys: 'yahoo', 'mc_ohlc', 'mc_pe', 'mc_oi', 'trendlyne'.
+    Falls back to an empty dict if the table doesn't exist yet.
+    """
+    try:
+        rows = query_all(
+            "SELECT index_name, provider_id FROM index_provider_map WHERE provider = ?",
+            (provider,),
+        )
+        return {r["provider_id"]: r["index_name"] for r in rows}
+    except Exception:
+        return {}
+
+
+def load_index_map_inv(provider: str) -> dict:
+    """Return {index_name: provider_id} (inverse of load_index_map)."""
+    try:
+        rows = query_all(
+            "SELECT index_name, provider_id FROM index_provider_map WHERE provider = ?",
+            (provider,),
+        )
+        return {r["index_name"]: r["provider_id"] for r in rows}
+    except Exception:
+        return {}

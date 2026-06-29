@@ -550,20 +550,28 @@ function formatVolume(volume: number): string {
 
 // ─── DB Mappings Cache ───────────────────────────────────────────────────────
 let dbMappingsCache: Map<string, { mcsymbol: string | null; tlid: string | null; tlname: string | null }> | null = null;
+let dbMappingsLoading: Promise<void> | null = null;  // singleton guard against concurrent init
 
 async function ensureDbMappings() {
   if (dbMappingsCache) return;
-  try {
-    const rows = await dbAll<any>('SELECT symbol, mcsymbol, tlid, tlname FROM nse_stocks WHERE mcsymbol IS NOT NULL OR tlid IS NOT NULL');
-    dbMappingsCache = new Map();
-    for (const row of rows) {
-      dbMappingsCache.set(row.symbol, { mcsymbol: row.mcsymbol, tlid: row.tlid, tlname: row.tlname });
+  // If a load is already in-flight, wait for it instead of firing another DB query
+  if (dbMappingsLoading) return dbMappingsLoading;
+  dbMappingsLoading = (async () => {
+    try {
+      const rows = await dbAll<any>('SELECT symbol, mcsymbol, tlid, tlname FROM nse_stocks WHERE mcsymbol IS NOT NULL OR tlid IS NOT NULL');
+      dbMappingsCache = new Map();
+      for (const row of rows) {
+        dbMappingsCache.set(row.symbol, { mcsymbol: row.mcsymbol, tlid: row.tlid, tlname: row.tlname });
+      }
+      console.log(`[LIVE DATA] Loaded ${dbMappingsCache.size} tertiary API mappings from database.`);
+    } catch (err: any) {
+      console.error('[LIVE DATA] Failed to load DB mappings:', err.message);
+      dbMappingsCache = new Map();
+    } finally {
+      dbMappingsLoading = null;
     }
-    console.log(`[LIVE DATA] Loaded ${dbMappingsCache.size} tertiary API mappings from database.`);
-  } catch (err: any) {
-    console.error('[LIVE DATA] Failed to load DB mappings:', err.message);
-    dbMappingsCache = new Map();
-  }
+  })();
+  return dbMappingsLoading;
 }
 
 /**

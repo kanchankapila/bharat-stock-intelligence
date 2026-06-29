@@ -214,7 +214,7 @@ def backfill_technical_signals(days: int) -> int:
 
     Returns the number of symbols updated.
     """
-    # Pull recs joined to NSE symbols via mc_pricefeed_daily
+    # Pull recs joined to NSE symbols via nse_stocks
     reco_sql = translate(f"""
         SELECT p.symbol,
                r.recommend_flag,
@@ -222,8 +222,8 @@ def backfill_technical_signals(days: int) -> int:
                r.target,
                r.entry_date
         FROM mc_broker_reco r
-        JOIN mc_pricefeed_daily p ON p.scid = r.scid
-        WHERE r.entry_date >= {_date_offset_expr(days)}
+        JOIN nse_stocks p ON p.mcsymbol = r.scid
+        WHERE r.entry_date >= CAST({_date_offset_expr(days)} AS TEXT)
     """)
     df = read_df(reco_sql)
     if df.empty:

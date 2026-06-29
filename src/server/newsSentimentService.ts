@@ -76,11 +76,8 @@ interface NewsSource {
 }
 
 const NEWS_SOURCES: NewsSource[] = [
-  // Indian sources
-  { name: 'Economic Times Markets', url: 'https://economictimes.indiatimes.com/markets/stocks/rss.cms', type: 'INDIAN' },
-  { name: 'Economic Times Economy', url: 'https://economictimes.indiatimes.com/news/economy/rss.cms', type: 'INDIAN' },
-  { name: 'Business Standard Markets', url: 'https://www.business-standard.com/rss/markets-106.rss', type: 'INDIAN' },
-  { name: 'Business Standard Companies', url: 'https://www.business-standard.com/rss/companies-101.rss', type: 'INDIAN' },
+  // Indian sources — verified working June 2026
+  { name: 'ET Viewandrecofeed', url: 'https://economictimes.indiatimes.com/viewandrecofeed.cms', type: 'INDIAN' },
   { name: 'LiveMint Markets', url: 'https://www.livemint.com/rss/markets', type: 'INDIAN' },
   { name: 'LiveMint Companies', url: 'https://www.livemint.com/rss/companies', type: 'INDIAN' },
   { name: 'MoneyControl Latest', url: 'https://www.moneycontrol.com/rss/latestnews.xml', type: 'INDIAN' },
@@ -88,18 +85,22 @@ const NEWS_SOURCES: NewsSource[] = [
   { name: 'MoneyControl Business', url: 'https://www.moneycontrol.com/rss/business.xml', type: 'INDIAN' },
   { name: 'MoneyControl Economy', url: 'https://www.moneycontrol.com/rss/economy.xml', type: 'INDIAN' },
   { name: 'MoneyControl Mutual Funds', url: 'https://www.moneycontrol.com/rss/mfnews.xml', type: 'INDIAN' },
-  { name: 'MoneyControl Broker Research', url: 'https://www.moneycontrol.com/rss/brokerageresearch.xml', type: 'INDIAN' },
   { name: 'Hindu BusinessLine', url: 'https://www.thehindubusinessline.com/markets/?service=rss', type: 'INDIAN' },
-  { name: 'NDTV Profit', url: 'https://feeds.feedburner.com/ndtvnews-business', type: 'INDIAN' },
-  { name: 'Financial Express Markets', url: 'https://www.financialexpress.com/market/feed/', type: 'INDIAN' },
   { name: 'Zee Business Markets', url: 'https://www.zeebiz.com/market-news/rss.xml', type: 'INDIAN' },
   { name: 'CNBC TV18 Markets', url: 'https://www.cnbctv18.com/commonfeeds/v1/cne/rss/market.xml', type: 'INDIAN' },
-  { name: 'Yahoo Finance India', url: 'https://in.finance.yahoo.com/news/rss', type: 'INDIAN' },
   { name: 'Tradebrains', url: 'https://tradebrains.in/feed/', type: 'INDIAN' },
-  // Global sources
-  { name: 'Reuters Business', url: 'https://feeds.reuters.com/reuters/businessNews', type: 'GLOBAL' },
-  { name: 'Reuters India', url: 'https://feeds.reuters.com/reuters/INbusinessNews', type: 'GLOBAL' },
+  { name: 'Google News India Markets', url: 'https://news.google.com/rss/search?q=Indian+stock+market+NSE+BSE&hl=en-IN&gl=IN&ceid=IN:en', type: 'INDIAN' },
+  { name: 'Google News NIFTY', url: 'https://news.google.com/rss/search?q=NIFTY+SENSEX+trading&hl=en-IN&gl=IN&ceid=IN:en', type: 'INDIAN' },
+  // Global sources — verified working June 2026
   { name: 'Financial Times', url: 'https://www.ft.com/rss/home/uk', type: 'GLOBAL', timeout: 8000 },
+  // Dead as of June 2026 — removed:
+  // Economic Times markets/economy RSS (return HTML not XML)
+  // Business Standard RSS (403 Forbidden)
+  // NDTV Profit feedburner (403 Forbidden)
+  // Financial Express markets feed (returns HTML)
+  // Yahoo Finance India RSS (500 Internal Server Error)
+  // Reuters RSS feeds.reuters.com (domain connection error)
+  // MoneyControl Broker Research (503)
 ];
 
 // ─── Keyword Classifiers ──────────────────────────────────────────────────────

@@ -47,6 +47,12 @@ export function validateEnv(): void {
     WARN.push('GEMINI_API_KEY not set — Gemini AI fallback is unavailable (Ollama-only).');
   }
 
+  if (process.env.AI_PROVIDER === 'bedrock') {
+    if (!process.env.AWS_ACCESS_KEY_ID || !process.env.AWS_SECRET_ACCESS_KEY) {
+      WARN.push('AI_PROVIDER is set to "bedrock" but AWS credentials (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY) are missing.');
+    }
+  }
+
   for (const w of WARN) console.warn(`[ENV] WARN: ${w}`);
 
   if (FATAL.length > 0) {

@@ -1,8 +1,18 @@
 import ollama from 'ollama';
 import { generateStockAnalysis as generateGeminiStockAnalysis } from './geminiService';
+import { 
+  generateStockAnalysis as generateBedrockStockAnalysis,
+  analyzeCompanyProfile as analyzeBedrockCompanyProfile
+} from './bedrockService';
 
 const OLLAMA_SIGNAL_MODEL  = process.env.OLLAMA_SIGNAL_MODEL  || process.env.OLLAMA_MODEL || 'mistral';
 const OLLAMA_PROFILE_MODEL = process.env.OLLAMA_PROFILE_MODEL || process.env.OLLAMA_MODEL || 'qwen3:30b';
+
+const AI_PROVIDER = process.env.AI_PROVIDER || (
+  (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) ? 'bedrock' : (
+    process.env.GEMINI_API_KEY ? 'gemini' : 'ollama'
+  )
+);
 
 export async function releaseOllamaModel(): Promise<void> {
   const models = [...new Set([OLLAMA_SIGNAL_MODEL, OLLAMA_PROFILE_MODEL])];
@@ -38,7 +48,11 @@ export interface ProfileAnalysis {
 }
 
 export async function generateStockAnalysis(symbol: string, data: any): Promise<StockAnalysis> {
-  if (process.env.GEMINI_API_KEY) {
+  if (AI_PROVIDER === 'bedrock') {
+    console.log(`[AI] Routing stock analysis for ${symbol} to Amazon Bedrock (Claude)`);
+    return generateBedrockStockAnalysis(symbol, data);
+  }
+  if (AI_PROVIDER === 'gemini') {
     console.log(`[AI] Routing stock analysis for ${symbol} to Google Gemini`);
     return generateGeminiStockAnalysis(symbol, data) as any;
   }
@@ -150,6 +164,11 @@ Respond ONLY with valid JSON matching exactly this structure:
 }
 
 export async function analyzeCompanyProfile(symbol: string, description: string): Promise<ProfileAnalysis> {
+  if (AI_PROVIDER === 'bedrock') {
+    console.log(`[AI] Routing profile analysis for ${symbol} to Amazon Bedrock (Claude)`);
+    return analyzeBedrockCompanyProfile(symbol, description);
+  }
+
   const prompt = `Analyze the following company profile for ${symbol}:
 "${description}"
 

@@ -1955,7 +1955,6 @@ runMigration('052_mf_holdings_signals', `
 `);
 
 runMigration('054_delivery_block_deals', `
-  ALTER TABLE technical_signals ADD COLUMN delivery_pct       REAL;
   ALTER TABLE technical_signals ADD COLUMN block_deal_net_qty BIGINT;
   ALTER TABLE technical_signals ADD COLUMN block_deal_value_cr REAL;
 `);
@@ -2056,6 +2055,311 @@ runMigration('059_nt_fno_dashboard', `
   ALTER TABLE technical_signals ADD COLUMN nt_option_volume_log  REAL;
 `);
 
+runMigration('060_nt_fno_eligibility', `
+  ALTER TABLE nse_stocks ADD COLUMN fno_eligible  INTEGER DEFAULT 0;
+  ALTER TABLE nse_stocks ADD COLUMN lot_size      REAL;
+  ALTER TABLE nse_stocks ADD COLUMN fno_lot_updated_at TEXT;
+`);
+
+runMigration('062_mc_earnings_data', `
+  CREATE TABLE IF NOT EXISTS stock_earnings_dates (
+    scid        TEXT NOT NULL,
+    result_date TEXT NOT NULL,
+    stock_name  TEXT,
+    result_type TEXT,
+    result_time TEXT,
+    market_cap  REAL,
+    exchange    TEXT,
+    fetched_at  TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (scid, result_date)
+  );
+  CREATE TABLE IF NOT EXISTS mc_earnings_rapid (
+    scid           TEXT NOT NULL,
+    sub_type       TEXT NOT NULL,
+    category       TEXT NOT NULL,
+    result_date    TEXT,
+    stock_name     TEXT,
+    ltp            REAL,
+    change_pct     REAL,
+    revenue_curr   REAL,
+    revenue_prev   REAL,
+    revenue_growth REAL,
+    np_curr        REAL,
+    np_prev        REAL,
+    np_growth      REAL,
+    category_score INTEGER,
+    fetched_at     TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (scid, sub_type, category)
+  );
+  CREATE TABLE IF NOT EXISTS mc_price_shockers (
+    scid              TEXT PRIMARY KEY,
+    stock_name        TEXT,
+    result_date       TEXT,
+    gain_since_result REAL,
+    ltp               REAL,
+    change_pct        REAL,
+    fetched_at        TEXT DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE TABLE IF NOT EXISTS mc_sector_earnings (
+    sector_name    TEXT PRIMARY KEY,
+    market_cap     REAL,
+    rev_growth_yoy REAL,
+    rev_growth_qoq REAL,
+    np_growth_yoy  REAL,
+    np_growth_qoq  REAL,
+    gp_growth_yoy  REAL,
+    gp_growth_qoq  REAL,
+    fetched_at     TEXT DEFAULT CURRENT_TIMESTAMP
+  );
+  ALTER TABLE technical_signals ADD COLUMN days_to_next_results  INTEGER;
+  ALTER TABLE technical_signals ADD COLUMN earnings_category_yoy INTEGER;
+  ALTER TABLE technical_signals ADD COLUMN earnings_category_qoq INTEGER;
+  ALTER TABLE technical_signals ADD COLUMN earnings_np_growth_yoy REAL;
+  ALTER TABLE technical_signals ADD COLUMN earnings_np_growth_qoq REAL;
+  ALTER TABLE technical_signals ADD COLUMN earnings_shocker_flag  INTEGER;
+  ALTER TABLE technical_signals ADD COLUMN earnings_shocker_gain  REAL;
+`);
+
+runMigration('061_mc_premarket_sources', `
+  CREATE TABLE IF NOT EXISTS eco_calendar (
+    calendar_id  TEXT PRIMARY KEY,
+    event_date   TEXT,
+    event_time   TEXT,
+    country      TEXT,
+    country_name TEXT,
+    event_name   TEXT,
+    category     TEXT,
+    impact       INTEGER,
+    actual       TEXT,
+    previous     TEXT,
+    consensus    TEXT,
+    reference    TEXT,
+    symbol       TEXT,
+    fetched_at   TEXT DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE TABLE IF NOT EXISTS mc_broker_reco (
+    scid              TEXT NOT NULL,
+    stock_name        TEXT,
+    organization      TEXT NOT NULL,
+    recommend_flag    TEXT,
+    recommended_price REAL,
+    target            REAL,
+    entry_date        TEXT,
+    recommend_date    TEXT,
+    fetched_at        TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (scid, organization, entry_date)
+  );
+  CREATE TABLE IF NOT EXISTS preopen_snapshot (
+    snapshot_date     TEXT PRIMARY KEY,
+    snapshot_time     TEXT,
+    gift_nifty        REAL,
+    gift_nifty_chg    REAL,
+    gift_nifty_pct    REAL,
+    dj_futures        REAL,
+    dj_futures_pct    REAL,
+    hang_seng_pct     REAL,
+    nikkei_pct        REAL,
+    nasdaq_pct        REAL,
+    asia_sentiment    REAL,
+    global_risk_score REAL,
+    fetched_at        TEXT DEFAULT CURRENT_TIMESTAMP
+  );
+  ALTER TABLE technical_signals ADD COLUMN mc_broker_buy_7d  INTEGER;
+  ALTER TABLE technical_signals ADD COLUMN mc_broker_sell_7d INTEGER;
+  ALTER TABLE technical_signals ADD COLUMN mc_broker_upside  REAL;
+`);
+
+runMigration('060_computed_ml_features', `
+  ALTER TABLE technical_signals ADD COLUMN hv_10d                REAL;
+  ALTER TABLE technical_signals ADD COLUMN hv_20d                REAL;
+  ALTER TABLE technical_signals ADD COLUMN hv_30d                REAL;
+  ALTER TABLE technical_signals ADD COLUMN hv_60d                REAL;
+  ALTER TABLE technical_signals ADD COLUMN iv_hv_ratio           REAL;
+  ALTER TABLE technical_signals ADD COLUMN eps_revision_3m_pct   REAL;
+  ALTER TABLE technical_signals ADD COLUMN target_revision_3m_pct REAL;
+  ALTER TABLE technical_signals ADD COLUMN analyst_count_chg     INTEGER;
+  ALTER TABLE technical_signals ADD COLUMN rs_vs_sector_21d      REAL;
+  ALTER TABLE technical_signals ADD COLUMN rs_vs_sector_63d      REAL;
+  ALTER TABLE technical_signals ADD COLUMN asm_flag              INTEGER DEFAULT 0;
+  ALTER TABLE technical_signals ADD COLUMN gsm_stage             INTEGER DEFAULT 0;
+  ALTER TABLE technical_signals ADD COLUMN crude_corr_90d        REAL;
+  ALTER TABLE technical_signals ADD COLUMN gold_corr_90d         REAL;
+  ALTER TABLE technical_signals ADD COLUMN dxy_corr_90d          REAL;
+  ALTER TABLE technical_signals ADD COLUMN sp500_corr_90d        REAL;
+`);
+
+runMigration('064_earnings_quality_insider_macro', `
+  CREATE TABLE IF NOT EXISTS eps_surprise_history (
+    scid          TEXT NOT NULL,
+    symbol        TEXT,
+    quarter       TEXT NOT NULL,
+    np_actual     REAL,
+    np_estimate   REAL,
+    np_surprise   REAL,
+    rev_actual    REAL,
+    rev_estimate  REAL,
+    rev_surprise  REAL,
+    eps_actual    REAL,
+    eps_estimate  REAL,
+    eps_surprise  REAL,
+    fetched_at    TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (scid, quarter)
+  );
+  CREATE TABLE IF NOT EXISTS tl_financial_quality (
+    symbol               TEXT NOT NULL,
+    as_of_date           TEXT NOT NULL,
+    cfo_ttm              REAL,
+    capex_ttm            REAL,
+    fcf_ttm              REAL,
+    ebit_ttm             REAL,
+    interest_expense_ttm REAL,
+    market_cap           REAL,
+    fcf_yield            REAL,
+    interest_coverage    REAL,
+    PRIMARY KEY (symbol, as_of_date)
+  );
+  CREATE TABLE IF NOT EXISTS working_capital_history (
+    symbol           TEXT NOT NULL,
+    quarter          TEXT NOT NULL,
+    receivables_days REAL,
+    inventory_days   REAL,
+    payables_days    REAL,
+    ccc              REAL,
+    revenue_qtr      REAL,
+    cogs_qtr         REAL,
+    PRIMARY KEY (symbol, quarter)
+  );
+  CREATE TABLE IF NOT EXISTS insider_transactions (
+    symbol           TEXT NOT NULL,
+    person_name      TEXT NOT NULL,
+    person_category  TEXT,
+    transaction_mode TEXT NOT NULL,
+    quantity         REAL,
+    value_cr         REAL,
+    before_pct       REAL,
+    after_pct        REAL,
+    transaction_date TEXT NOT NULL,
+    fetched_at       TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (symbol, person_name, transaction_date, transaction_mode)
+  );
+  CREATE TABLE IF NOT EXISTS bulk_block_deals (
+    symbol      TEXT NOT NULL,
+    deal_date   TEXT NOT NULL,
+    deal_type   TEXT NOT NULL,
+    client_name TEXT NOT NULL,
+    buy_sell    TEXT,
+    quantity    REAL,
+    price       REAL,
+    value_cr    REAL,
+    fetched_at  TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (symbol, deal_date, client_name, deal_type)
+  );
+  CREATE TABLE IF NOT EXISTS credit_rating_events (
+    bse_code          TEXT NOT NULL,
+    symbol            TEXT,
+    isin              TEXT,
+    announcement_date TEXT NOT NULL,
+    rating_agency     TEXT NOT NULL,
+    action            TEXT,
+    instrument_type   TEXT,
+    headline          TEXT,
+    fetched_at        TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (bse_code, announcement_date, rating_agency)
+  );
+  CREATE TABLE IF NOT EXISTS mf_sector_allocation (
+    month   TEXT NOT NULL,
+    sector  TEXT NOT NULL,
+    aum_cr  REAL,
+    aum_pct REAL,
+    PRIMARY KEY (month, sector)
+  );
+  ALTER TABLE technical_signals ADD COLUMN eps_surprise_q1       REAL;
+  ALTER TABLE technical_signals ADD COLUMN eps_surprise_q2       REAL;
+  ALTER TABLE technical_signals ADD COLUMN eps_beat_streak       INTEGER;
+  ALTER TABLE technical_signals ADD COLUMN eps_miss_after_streak INTEGER DEFAULT 0;
+  ALTER TABLE technical_signals ADD COLUMN rev_surprise_q1       REAL;
+  ALTER TABLE technical_signals ADD COLUMN fcf_yield             REAL;
+  ALTER TABLE technical_signals ADD COLUMN interest_coverage     REAL;
+  ALTER TABLE technical_signals ADD COLUMN fcf_positive          INTEGER DEFAULT 0;
+  ALTER TABLE technical_signals ADD COLUMN debt_coverage_risk    INTEGER DEFAULT 0;
+  ALTER TABLE technical_signals ADD COLUMN delivery_trend_30d    REAL;
+  ALTER TABLE technical_signals ADD COLUMN block_deal_flag       INTEGER DEFAULT 0;
+  ALTER TABLE technical_signals ADD COLUMN block_deal_direction  INTEGER DEFAULT 0;
+  ALTER TABLE technical_signals ADD COLUMN short_interest_proxy  REAL;
+  ALTER TABLE technical_signals ADD COLUMN promoter_buy_90d_cr   REAL;
+  ALTER TABLE technical_signals ADD COLUMN promoter_sell_90d_cr  REAL;
+  ALTER TABLE technical_signals ADD COLUMN promoter_net_90d      REAL;
+  ALTER TABLE technical_signals ADD COLUMN insider_buy_flag      INTEGER DEFAULT 0;
+  ALTER TABLE technical_signals ADD COLUMN insider_sell_flag     INTEGER DEFAULT 0;
+  ALTER TABLE technical_signals ADD COLUMN rating_upgrade_180d   INTEGER DEFAULT 0;
+  ALTER TABLE technical_signals ADD COLUMN rating_downgrade_180d INTEGER DEFAULT 0;
+  ALTER TABLE technical_signals ADD COLUMN days_since_upgrade    INTEGER;
+  ALTER TABLE technical_signals ADD COLUMN mf_sector_flow_pct   REAL;
+  ALTER TABLE technical_signals ADD COLUMN receivables_days_ttm  REAL;
+  ALTER TABLE technical_signals ADD COLUMN ccc_ttm               REAL;
+  ALTER TABLE technical_signals ADD COLUMN ccc_trend             REAL;
+  ALTER TABLE technical_signals ADD COLUMN wc_deteriorating      INTEGER DEFAULT 0;
+  ALTER TABLE technical_signals ADD COLUMN wc_improving          INTEGER DEFAULT 0;
+`);
+
+runMigration('063_index_membership_pledge_preopen_options', `
+  -- Index membership flags on nse_stocks
+  ALTER TABLE nse_stocks ADD COLUMN is_nifty50         INTEGER DEFAULT 0;
+  ALTER TABLE nse_stocks ADD COLUMN is_nifty100        INTEGER DEFAULT 0;
+  ALTER TABLE nse_stocks ADD COLUMN is_nifty200        INTEGER DEFAULT 0;
+  ALTER TABLE nse_stocks ADD COLUMN is_midcap150       INTEGER DEFAULT 0;
+  ALTER TABLE nse_stocks ADD COLUMN is_smallcap250     INTEGER DEFAULT 0;
+  ALTER TABLE nse_stocks ADD COLUMN index_flags_updated_at TEXT;
+
+  -- pledge_pct snapshot in fundamentals_history
+  ALTER TABLE fundamentals_history ADD COLUMN pledge_pct REAL;
+
+  -- Per-stock pre-open IEP snapshot
+  CREATE TABLE IF NOT EXISTS preopen_stock_snapshot (
+    symbol            TEXT NOT NULL,
+    snapshot_date     TEXT NOT NULL,
+    iep               REAL,
+    prev_close        REAL,
+    iep_gap_pct       REAL,
+    total_buy_qty     REAL,
+    total_sell_qty    REAL,
+    preopen_imbalance REAL,
+    last_price        REAL,
+    fetched_at        TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (symbol, snapshot_date)
+  );
+
+  -- Per-stock option chain features
+  CREATE TABLE IF NOT EXISTS stock_option_features (
+    symbol              TEXT NOT NULL,
+    date                TEXT NOT NULL,
+    expiry              TEXT,
+    spot                REAL,
+    atm_strike          REAL,
+    atm_call_ltp        REAL,
+    atm_put_ltp         REAL,
+    expected_move_pct   REAL,
+    total_call_oi       REAL,
+    total_put_oi        REAL,
+    gex_proxy           REAL,
+    fetched_at          TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (symbol, date)
+  );
+
+  -- technical_signals: new ML feature columns
+  ALTER TABLE technical_signals ADD COLUMN is_nifty50         INTEGER DEFAULT 0;
+  ALTER TABLE technical_signals ADD COLUMN is_nifty100        INTEGER DEFAULT 0;
+  ALTER TABLE technical_signals ADD COLUMN is_nifty200        INTEGER DEFAULT 0;
+  ALTER TABLE technical_signals ADD COLUMN is_midcap150       INTEGER DEFAULT 0;
+  ALTER TABLE technical_signals ADD COLUMN is_smallcap250     INTEGER DEFAULT 0;
+  ALTER TABLE technical_signals ADD COLUMN nifty_tier         INTEGER DEFAULT 0;
+  ALTER TABLE technical_signals ADD COLUMN pledge_chg_90d     REAL;
+  ALTER TABLE technical_signals ADD COLUMN iep_gap_pct        REAL;
+  ALTER TABLE technical_signals ADD COLUMN preopen_imbalance  REAL;
+  ALTER TABLE technical_signals ADD COLUMN expected_move_pct  REAL;
+  ALTER TABLE technical_signals ADD COLUMN stock_gex_proxy    REAL;
+`);
+
 // ── Retention: confluence_signals is an append-only firehose (~700k rows, the single
 // largest contributor to DB bloat). expires_at exists but nothing pruned it. Delete
 // expired rows on boot and every 6h. Keeps the table bounded without losing live signals.
@@ -2085,6 +2389,182 @@ if (!process.env.USE_POSTGRES || process.env.USE_POSTGRES === 'false') {
   setTimeout(pruneConfluenceSignals, 30_000).unref();
   setInterval(pruneConfluenceSignals, 6 * 60 * 60 * 1000).unref();
 }
+
+db.exec(`
+  -- Strike-wise index option OI (Nifty / BankNifty per expiry from MoneyControl)
+  CREATE TABLE IF NOT EXISTS index_option_oi (
+    index_name    TEXT NOT NULL,
+    date          TEXT NOT NULL,
+    expiry        TEXT NOT NULL,
+    strike        REAL NOT NULL,
+    ce_oi         INTEGER,
+    pe_oi         INTEGER,
+    ce_oi_change  INTEGER,
+    pe_oi_change  INTEGER,
+    ce_ltp        REAL,
+    pe_ltp        REAL,
+    fetched_at    TEXT NOT NULL,
+    PRIMARY KEY (index_name, date, expiry, strike)
+  );
+  CREATE TABLE IF NOT EXISTS index_max_pain (
+    index_name   TEXT NOT NULL,
+    date         TEXT NOT NULL,
+    expiry       TEXT NOT NULL,
+    max_pain     REAL,
+    pcr_oi       REAL,
+    total_ce_oi  INTEGER,
+    total_pe_oi  INTEGER,
+    fetched_at   TEXT NOT NULL,
+    PRIMARY KEY (index_name, date, expiry)
+  );
+  -- MoneyControl NSE/BSE advance-decline daily counts
+  CREATE TABLE IF NOT EXISTS mc_advance_decline (
+    date          TEXT NOT NULL,
+    exchange      TEXT NOT NULL DEFAULT 'NSE',
+    advances      INTEGER,
+    declines      INTEGER,
+    unchanged     INTEGER,
+    adv_dec_ratio REAL,
+    fetched_at    TEXT NOT NULL,
+    PRIMARY KEY (date, exchange)
+  );
+`);
+
+db.exec(`
+  -- Nifty index valuation time-series: PE, PB, Dividend Yield, EPS
+  CREATE TABLE IF NOT EXISTS index_valuation (
+    index_name  TEXT NOT NULL,
+    date        TEXT NOT NULL,
+    pe          REAL,
+    pb          REAL,
+    div_yield   REAL,
+    fetched_at  TEXT NOT NULL,
+    PRIMARY KEY (index_name, date)
+  );
+  CREATE INDEX IF NOT EXISTS idx_iv_name_date ON index_valuation(index_name, date DESC);
+`);
+
+db.exec(`
+  -- NSE market holiday calendar (populated by scripts/seed_market_holidays.py or migrations)
+  CREATE TABLE IF NOT EXISTS market_holidays (
+    date        TEXT NOT NULL,
+    exchange    TEXT NOT NULL DEFAULT 'NSE',
+    description TEXT,
+    PRIMARY KEY (date, exchange)
+  );
+`);
+
+db.exec(`
+  -- Provider-specific index identifiers (mc_ohlc, mc_pe, mc_oi, yahoo, trendlyne, nt_index)
+  CREATE TABLE IF NOT EXISTS index_provider_map (
+    index_name  TEXT NOT NULL,
+    provider    TEXT NOT NULL,
+    provider_id TEXT NOT NULL,
+    PRIMARY KEY (index_name, provider)
+  );
+`);
+
+db.exec(`
+  -- NiftyTrader intraday PCR time-series for indices (minute-level)
+  CREATE TABLE IF NOT EXISTS nt_index_pcr_ts (
+    index_name    TEXT NOT NULL,
+    ts            TEXT NOT NULL,  -- ISO datetime "2026-06-28T09:15:00"
+    expiry        TEXT NOT NULL,  -- "2026-06-30"
+    pcr           REAL,
+    volume_pcr    REAL,
+    change_oi_pcr REAL,
+    index_close   REAL,
+    fetched_at    TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (index_name, ts, expiry)
+  );
+  CREATE INDEX IF NOT EXISTS idx_nt_pcr_ts ON nt_index_pcr_ts(index_name, ts DESC);
+
+  -- NiftyTrader EOD strike-wise OI snapshot for indices
+  CREATE TABLE IF NOT EXISTS nt_index_oi_eod (
+    index_name      TEXT NOT NULL,
+    date            TEXT NOT NULL,
+    expiry          TEXT NOT NULL,
+    strike          REAL NOT NULL,
+    snap_time       TEXT NOT NULL,
+    index_close     REAL,
+    calls_oi        REAL,
+    puts_oi         REAL,
+    calls_change_oi REAL,
+    puts_change_oi  REAL,
+    calls_volume    REAL,
+    puts_volume     REAL,
+    calls_oi_value  REAL,
+    puts_oi_value   REAL,
+    fetched_at      TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (index_name, date, expiry, strike)
+  );
+  CREATE INDEX IF NOT EXISTS idx_nt_oi_eod ON nt_index_oi_eod(index_name, date DESC);
+`);
+
+db.exec(`
+  -- SmartOptions (Trendlyne) Greek-enriched option chain per stock per expiry
+  CREATE TABLE IF NOT EXISTS so_option_chain (
+    symbol        TEXT NOT NULL,
+    date          TEXT NOT NULL,
+    expiry        TEXT NOT NULL,
+    strike        REAL NOT NULL,
+    ce_price      REAL, ce_volume REAL, ce_oi REAL, ce_oi_chg_pct REAL,
+    ce_iv         REAL, ce_iv_chg REAL,
+    ce_delta      REAL, ce_gamma REAL, ce_theta REAL, ce_vega REAL, ce_rho REAL,
+    ce_buildup    TEXT,
+    pe_price      REAL, pe_volume REAL, pe_oi REAL, pe_oi_chg_pct REAL,
+    pe_iv         REAL, pe_iv_chg REAL,
+    pe_delta      REAL, pe_gamma REAL, pe_theta REAL, pe_vega REAL, pe_rho REAL,
+    pe_buildup    TEXT,
+    fetched_at    TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (symbol, date, expiry, strike)
+  );
+  CREATE INDEX IF NOT EXISTS idx_soc_sym_date ON so_option_chain(symbol, date DESC);
+
+  -- SmartOptions stock-level OI summary (maxPain, ATM, MWPL, IV, PCR, futures)
+  CREATE TABLE IF NOT EXISTS so_stock_oi_summary (
+    symbol        TEXT NOT NULL,
+    date          TEXT NOT NULL,
+    expiry        TEXT NOT NULL,
+    max_pain      REAL,
+    atm           REAL,
+    mwpl          REAL,
+    iv_call       REAL,
+    iv_put        REAL,
+    pcr           REAL,
+    fut_price     REAL,
+    fut_oi        REAL,
+    fut_oi_chg    REAL,
+    fetched_at    TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (symbol, date, expiry)
+  );
+
+  -- NiftyTrader per-strike OI change (buildup/unwinding) for index options
+  CREATE TABLE IF NOT EXISTS nt_index_change_oi (
+    index_name           TEXT NOT NULL,
+    date                 TEXT NOT NULL,
+    expiry               TEXT NOT NULL,
+    strike               REAL NOT NULL,
+    snap_time            TEXT NOT NULL,
+    index_close          REAL,
+    calls_change_oi      REAL,
+    calls_change_oi_val  REAL,
+    puts_change_oi       REAL,
+    puts_change_oi_val   REAL,
+    fetched_at           TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (index_name, date, expiry, strike)
+  );
+  CREATE INDEX IF NOT EXISTS idx_nt_chg_oi ON nt_index_change_oi(index_name, date DESC);
+
+  -- F&O expiry calendar per symbol (from NT symbol-expiry-all)
+  CREATE TABLE IF NOT EXISTS nt_fno_expiry (
+    symbol      TEXT NOT NULL,
+    exchange    TEXT NOT NULL DEFAULT 'NSE',
+    expiry      TEXT NOT NULL,
+    lot_size    INTEGER,
+    PRIMARY KEY (symbol, exchange, expiry)
+  );
+`);
 
 // Keep startup diagnostics off stdout so stdio-based clients can parse JSON-RPC.
 console.error('[DB] Schema normalization complete (Phase 3.5)');

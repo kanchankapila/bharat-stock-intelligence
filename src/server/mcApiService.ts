@@ -666,7 +666,7 @@ export async function fetchMcRatios(scId: string, symbol?: string): Promise<any 
 export async function fetchMcShareholdingPattern(scId: string, symbol?: string): Promise<any | null> {
   // Try v1 first
   const res = await mcFetchJson<any>(
-    `https://api.moneycontrol.com/mcapi/v1/stock/shareholding/pattern?scId=${scId}`,
+    `https://api.moneycontrol.com/mcapi/v1/shareholding/pattern?scId=${scId}`,
     3,
     symbol
   );

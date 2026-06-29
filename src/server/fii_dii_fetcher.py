@@ -172,6 +172,105 @@ class FiiDiiFetcher:
                 conn,
             )
 
+    def fetch_provisional(self) -> None:
+        """Fetch same-day (T+0) provisional FII/DII data from NSE and write to
+        macro_asset_prices (symbol-keyed) and upsert today's row into fii_dii_flow.
+
+        NSE publishes provisional figures around 6 PM IST at the same endpoint
+        used for historical data.  The most-recent row in the response is today's
+        provisional figure; we identify it by comparing its date to today's date.
+        """
+        today = datetime.date.today().strftime("%Y-%m-%d")
+
+        try:
+            resp = self.session.get(NSE_FII_DII_URL, timeout=15)
+            if resp.status_code in (403, 401, 429):
+                print("[FIIFetcher] Provisional data unavailable (NSE auth), skipping.")
+                return
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as e:
+            print(f"[FIIFetcher] Provisional fetch error: {e}")
+            return
+
+        # Find the row(s) whose date matches today
+        fii_row: dict = {}
+        dii_row: dict = {}
+        for row in data:
+            date_str = self._parse_date(row.get("date", ""))
+            if date_str != today:
+                continue
+            cat = (row.get("category") or "").upper()
+            if "FII" in cat:
+                fii_row = row
+            elif "DII" in cat:
+                dii_row = row
+
+        if not fii_row and not dii_row:
+            print(f"[FIIFetcher] No provisional data for {today} yet (market may still be open or data not published).")
+            return
+
+        fii_buy  = self._parse_float(fii_row.get("buyValue"))
+        fii_sell = self._parse_float(fii_row.get("sellValue"))
+        fii_net  = self._parse_float(fii_row.get("netValue"))
+        dii_buy  = self._parse_float(dii_row.get("buyValue"))
+        dii_sell = self._parse_float(dii_row.get("sellValue"))
+        dii_net  = self._parse_float(dii_row.get("netValue"))
+
+        if fii_net is None and fii_buy is not None and fii_sell is not None:
+            fii_net = fii_buy - fii_sell
+        if dii_net is None and dii_buy is not None and dii_sell is not None:
+            dii_net = dii_buy - dii_sell
+
+        now = datetime.datetime.now().isoformat()
+
+        # ── Write to macro_asset_prices (symbol, date, close) ─────────────────
+        macro_rows = [
+            r for r in [
+                ("FII_NET_TODAY",  today, fii_net),
+                ("DII_NET_TODAY",  today, dii_net),
+                ("FII_BUY_TODAY",  today, fii_buy),
+                ("FII_SELL_TODAY", today, fii_sell),
+            ] if r[2] is not None
+        ]
+
+        with self.engine.begin() as conn:
+            for symbol, date, close in macro_rows:
+                conn.execute(text("""
+                    INSERT INTO macro_asset_prices (date, symbol, close, fetched_at)
+                    VALUES (:date, :symbol, :close, :fetched_at)
+                    ON CONFLICT(date, symbol) DO UPDATE SET
+                        close=excluded.close,
+                        fetched_at=excluded.fetched_at
+                """), {"date": date, "symbol": symbol, "close": close, "fetched_at": now})
+
+            # ── Also upsert today's row into fii_dii_flow ─────────────────────
+            conn.execute(text("""
+                INSERT INTO fii_dii_flow
+                    (date, fii_buy, fii_sell, fii_net, dii_buy, dii_sell, dii_net, source, fetched_at)
+                VALUES
+                    (:date, :fii_buy, :fii_sell, :fii_net, :dii_buy, :dii_sell, :dii_net, :source, :fetched_at)
+                ON CONFLICT(date) DO UPDATE SET
+                    fii_buy    = excluded.fii_buy,
+                    fii_sell   = excluded.fii_sell,
+                    fii_net    = excluded.fii_net,
+                    dii_buy    = excluded.dii_buy,
+                    dii_sell   = excluded.dii_sell,
+                    dii_net    = excluded.dii_net,
+                    source     = excluded.source,
+                    fetched_at = excluded.fetched_at
+            """), {
+                "date": today, "fii_buy": fii_buy, "fii_sell": fii_sell, "fii_net": fii_net,
+                "dii_buy": dii_buy, "dii_sell": dii_sell, "dii_net": dii_net,
+                "source": "NSE_PROVISIONAL", "fetched_at": now,
+            })
+
+        print(
+            f"[FIIFetcher] Provisional {today}: "
+            f"FII net={fii_net} Cr  DII net={dii_net} Cr  "
+            f"({len(macro_rows)} rows → macro_asset_prices, 1 row → fii_dii_flow)"
+        )
+
     def run(self, days: int = 0):
         print(f"[FiiDii] Fetching from NSE at {datetime.datetime.now()}")
         records = self.fetch()
@@ -189,6 +288,9 @@ class FiiDiiFetcher:
         if not recent.empty:
             print("\nLast 5 days FII/DII flow (Cr):")
             print(recent[["date", "fii_net", "dii_net"]].to_string(index=False))
+
+        # Fetch same-day provisional figures (available ~6 PM IST)
+        self.fetch_provisional()
 
 
 if __name__ == "__main__":

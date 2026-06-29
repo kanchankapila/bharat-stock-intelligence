@@ -13,10 +13,18 @@
  */
 import sqliteDb from './db';
 import { usePostgres } from './pgConfig';
-import { pgQuery, pgExecute, pgClient } from './pgClient';
+import { pgQuery, pgExecute, pgClient, pgEnsureColumns } from './pgClient';
 import { translateSql } from './sqlTranslate';
 
 const usePg = () => usePostgres();
+
+// Run column guard once per process start when Postgres is active.
+// Idempotent — each ALTER uses IF NOT EXISTS.
+if (usePostgres()) {
+  pgEnsureColumns().catch(err =>
+    console.error('[DB] pgEnsureColumns error (non-fatal):', (err as Error).message)
+  );
+}
 
 export interface RunResult {
   changes: number;

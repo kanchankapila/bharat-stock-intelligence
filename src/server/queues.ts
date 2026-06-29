@@ -47,6 +47,7 @@ function makeConnection(isProbe = false): any {
     ...REDIS_BASE,
     connectTimeout: isProbe ? 2000 : 30000,
     keepAlive: 30000,
+    noDelay: true,            // disable Nagle — reduces EPIPE risk on burst writes
     showFriendlyErrorStack: false,
   };
 
@@ -65,9 +66,10 @@ function makeConnection(isProbe = false): any {
     maxRetriesPerRequest: null,
     enableOfflineQueue: true,
     autoResubscribe: true,
+    // Stagger reconnect attempts so all 88 connections don't pile on Redis at once
     retryStrategy: (times) => {
       if (times > 20) return null;
-      return Math.min(times * 100, 3000);
+      return Math.min(times * 200, 5000) + Math.floor(Math.random() * 200);
     },
   };
 }
@@ -435,6 +437,10 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await runPython('relative_strength.py', [], 180_000)
     .catch(e => console.warn('[QUEUE] relative_strength failed:', (e as Error).message));
 
+  // Market breadth internals (% above 200DMA, A/D ratio, 20d highs, 52w net highs/lows) from stock_ohlcv.
+  await runPython('market_breadth.py', ['--days', '420'], 120_000)
+    .catch(e => console.warn('[QUEUE] market_breadth failed:', (e as Error).message));
+
   // Rolling 90d insider buy/sell ratio from insider_trades → technical_signals.insider_buy_pct_90d.
   await runPython('insider_features.py', [], 60_000)
     .catch(e => console.warn('[QUEUE] insider_features failed:', (e as Error).message));
@@ -479,6 +485,26 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   // for all 147 F&O stocks in a single API call — daily because max pain shifts each session.
   await runPython('nt_dashboard_fetcher.py', [], 2 * 60_000)
     .catch(e => console.warn('[QUEUE] nt_dashboard_fetcher failed:', (e as Error).message));
+
+  // NiftyTrader intraday PCR time series for major indices (NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY).
+  await runPython('nt_pcr_ts_fetcher.py', [], 2 * 60_000)
+    .catch(e => console.warn('[QUEUE] nt_pcr_ts_fetcher failed:', (e as Error).message));
+
+  // NiftyTrader EOD strike-wise OI snapshot — feeds index_max_pain + nt_index_oi_eod.
+  await runPython('nt_oi_snapshot_fetcher.py', [], 2 * 60_000)
+    .catch(e => console.warn('[QUEUE] nt_oi_snapshot_fetcher failed:', (e as Error).message));
+
+  // India VIX + GIFT NIFTY intraday values + EOD close → macro_asset_prices + nt_index_pcr_ts.
+  await runPython('nt_vix_fetcher.py', [], 60_000)
+    .catch(e => console.warn('[QUEUE] nt_vix_fetcher failed:', (e as Error).message));
+
+  // NiftyTrader per-strike OI change (buildup/unwinding) for index options.
+  await runPython('nt_change_oi_fetcher.py', [], 2 * 60_000)
+    .catch(e => console.warn('[QUEUE] nt_change_oi_fetcher failed:', (e as Error).message));
+
+  // SmartOptions Greek-enriched option chain for all F&O stocks (Delta/Gamma/Theta/Vega/IV).
+  await runPython('so_option_chain_fetcher.py', ['--delay', '0.3'], 30 * 60_000)
+    .catch(e => console.warn('[QUEUE] so_option_chain_fetcher failed:', (e as Error).message));
 
   // Earnings beat features (reads stock_earnings_beats, refreshed weekly by earnings_surprise_fetcher).
   // Writes eps_beat_last_q / eps_beat_streak_4q / eps_miss_streak_4q → technical_signals.
@@ -566,6 +592,22 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await runPython('india_macro_fetcher.py', [], 3 * 60_000)
     .catch(e => console.warn('[QUEUE] india_macro_fetcher failed:', (e as Error).message));
 
+  // Index PE/PB/EPS → index_valuation (MoneyControl + Trendlyne, last 30 days).
+  await runPython('nifty_pe_fetcher.py', ['--days', '30'], 3 * 60_000)
+    .catch(e => console.warn('[QUEUE] nifty_pe_fetcher failed:', (e as Error).message));
+
+  // Index OHLC history from MoneyControl → stock_ohlcv (covers SENSEX + indices missing from Yahoo).
+  await runPython('mc_index_ohlc_fetcher.py', ['--range', '5d'], 3 * 60_000)
+    .catch(e => console.warn('[QUEUE] mc_index_ohlc_fetcher failed:', (e as Error).message));
+
+  // NSE/BSE advance-decline raw counts → mc_advance_decline + market_breadth.adv_decline_ratio.
+  await runPython('mc_advance_decline_fetcher.py', [], 60_000)
+    .catch(e => console.warn('[QUEUE] mc_advance_decline_fetcher failed:', (e as Error).message));
+
+  // Index options OI by strike → index_option_oi + index_max_pain (Nifty + BankNifty).
+  await runPython('mc_index_oi_fetcher.py', [], 3 * 60_000)
+    .catch(e => console.warn('[QUEUE] mc_index_oi_fetcher failed:', (e as Error).message));
+
   // BSE event classifier: news_articles → event_signal_score in technical_signals.
   await runPython('bse_event_classifier.py', [], 60_000)
     .catch(e => console.warn('[QUEUE] bse_event_classifier failed:', (e as Error).message));
@@ -634,6 +676,13 @@ async function processDLPython(script: string, args: string[] = [], timeoutMs = 
 }
 
 async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean }> {
+  // Keep index_provider_map in sync with live provider index lists.
+  await runPython('sync_mc_index_map.py', [], 60_000)
+    .catch(e => console.warn('[QUEUE] sync_mc_index_map failed:', (e as Error).message));
+  await runPython('sync_tl_index_map.py', [], 60_000)
+    .catch(e => console.warn('[QUEUE] sync_tl_index_map failed:', (e as Error).message));
+  await runPython('sync_nt_fno_symbols.py', [], 60_000)
+    .catch(e => console.warn('[QUEUE] sync_nt_fno_symbols failed:', (e as Error).message));
   // Refresh earnings beat/miss history (quarterly data, no need to run daily).
   await runPython('earnings_surprise_fetcher.py', [], 20 * 60_000)
     .catch(e => console.warn('[QUEUE] earnings_surprise_fetcher failed:', (e as Error).message));
@@ -1518,8 +1567,10 @@ export async function initQueues(): Promise<boolean> {
       {
         connection,
         concurrency: 1,
-        lockDuration: 6 * 60 * 60 * 1000,  // 6h — daily ops total ~4h with full ticker runs
-        lockRenewTime: 15 * 60 * 1000,
+        // lockDuration short so stalled jobs re-queue fast on server restart.
+        // Scripts use ON CONFLICT DO UPDATE so re-running from start is safe.
+        lockDuration: 30 * 60 * 1000,  // 30 min — stall detected quickly on PM2 restart
+        lockRenewTime: 5 * 60 * 1000,
       },
     );
 
@@ -1551,7 +1602,7 @@ export async function initQueues(): Promise<boolean> {
       jobId: 'ml-weekly-retrain',
       removeOnComplete: 2, removeOnFail: 3,
     });
-    mlWeeklyRetrainWorker = new Worker(QUEUE_ML_WEEKLY_RETRAIN, processMlWeeklyRetrain, { connection, concurrency: 1, lockDuration: 8 * 60 * 60 * 1000, lockRenewTime: 15 * 60 * 1000 });
+    mlWeeklyRetrainWorker = new Worker(QUEUE_ML_WEEKLY_RETRAIN, processMlWeeklyRetrain, { connection, concurrency: 1, lockDuration: 30 * 60 * 1000, lockRenewTime: 5 * 60 * 1000 });
     mlWeeklyRetrainWorker.on('completed', () => {
       console.log('[QUEUE] ml-weekly-retrain done');
       updateMonitorState('ml-ensemble-train', 'success');

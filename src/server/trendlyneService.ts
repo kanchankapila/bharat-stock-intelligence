@@ -404,7 +404,7 @@ export async function getTrendlyneOverview(symbol: string) {
 
 export async function fetchTrendlyneSectorRotation() {
   console.log(`[TRENDLYNE] Fetching sector rotation data`);
-  const url = `https://trendlyne.com/fundamentals/api/sector-rotation/sector/?format=json&metric=count`;
+  const url = `https://trendlyne.com/fundamentals/api/sector-rotation/sector/?format=json&metric=count&period=1M`;
   try {
     const response = await fetch(url, { headers: HEADERS });
     if (!response.ok) {
@@ -427,7 +427,7 @@ export async function fetchTrendlyneSectorRotation() {
 
 export async function fetchTrendlyneIndexRotation() {
   console.log(`[TRENDLYNE] Fetching index rotation data`);
-  const url = `https://trendlyne.com/fundamentals/api/sector-rotation/indices/?format=json&metric=count`;
+  const url = `https://trendlyne.com/fundamentals/api/sector-rotation/indices/?format=json&metric=count&period=1M`;
   try {
     const response = await fetch(url, { headers: HEADERS });
     if (!response.ok) {

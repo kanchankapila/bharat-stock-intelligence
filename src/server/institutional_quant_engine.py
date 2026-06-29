@@ -163,7 +163,7 @@ class InstitutionalQuantEngine:
         print(f"[QuantEngine] Starting at {datetime.datetime.now()}")
 
         ohlcv   = self.load_ohlcv(min_days=63)
-        print(f"[QuantEngine] {ohlcv['symbol'].nunique()} symbols with ≥63 days OHLCV")
+        print(f"[QuantEngine] {ohlcv['symbol'].nunique()} symbols with >=63 days OHLCV")
 
         mom     = self.compute_momentum_features(ohlcv)
         fund    = self.load_fundamentals()

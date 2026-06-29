@@ -15,6 +15,7 @@ Run:  python pcr_fetcher.py
 """
 
 import os
+import math
 import time
 import datetime
 import argparse
@@ -24,8 +25,32 @@ from sqlalchemy import text
 
 from db_compat import get_engine
 
+# MoneyControl Nifty index OI endpoints
+MC_EXPIRY_DATES_URL = (
+    "https://priceapi.moneycontrol.com/technicalCompanyData/oiData/"
+    "options-expiry-dates?scId=in;NSX&assetType=I&deviceType=W"
+)
+MC_OI_CHANGE_URL = (
+    "https://priceapi.moneycontrol.com/technicalCompanyData/oiData/"
+    "oi-change-chart?scId=in;NSX&expiryDate={expiry}&assetType=I&type=HIST&count=31&deviceType=W"
+)
+MC_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept":          "application/json, text/plain, */*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer":         "https://www.moneycontrol.com/",
+    "Origin":          "https://www.moneycontrol.com",
+    "DNT":             "1",
+}
+
+NIFTY_LOT_SIZE = 50          # Nifty 50 lot size (contracts × 50 shares)
+NIFTY_GEX_SIGMA = 0.15       # IV proxy used in Gaussian gamma kernel
+
 NSE_OPTION_CHAIN_URL = "https://www.nseindia.com/api/option-chain-equities?symbol={symbol}"
-NSE_INDEX_CHAIN_URL  = "https://www.nseindia.com/api/option-chain-indices?symbol={symbol}"
+NSE_INDEX_CHAIN_URL  = "https://www.nseindia.com/api/option-chain-equities?symbol={symbol}"
 
 # NiftyTrader webapi — the working source for equity OI/PCR. NSE's own option-chain
 # API is behind Akamai Bot Manager (returns {} to non-browser clients), so PCR/OI is
@@ -342,6 +367,163 @@ class PCRFetcher:
 
         return saved
 
+    # ------------------------------------------------------------------
+    # Nifty GEX (Gamma Exposure) — MoneyControl strike-level OI
+    # ------------------------------------------------------------------
+
+    def _mc_get(self, url: str) -> dict | None:
+        """GET from MoneyControl using MC_HEADERS; returns parsed JSON or None."""
+        try:
+            resp = self.session.get(url, headers=MC_HEADERS, timeout=15)
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as e:
+            print(f"[GEX] HTTP error fetching {url}: {e}")
+            return None
+
+    def _fetch_nearest_expiry(self) -> str | None:
+        """Return the nearest Nifty expiry date string (YYYY-MM-DD) from MC."""
+        data = self._mc_get(MC_EXPIRY_DATES_URL)
+        if not data or not data.get("success"):
+            print("[GEX] Could not fetch expiry dates from MoneyControl")
+            return None
+        dates = data.get("data") or []
+        if not dates:
+            print("[GEX] Empty expiry date list from MoneyControl")
+            return None
+        # dates are expected as strings; pick the first (nearest)
+        nearest = str(dates[0]).strip()
+        print(f"[GEX] Nearest Nifty expiry: {nearest}")
+        return nearest
+
+    def fetch_nifty_gex(self) -> dict | None:
+        """Fetch strike-level Nifty OI from MoneyControl and compute dealer GEX.
+
+        GEX formula (Gaussian-kernel weighted, dealer short-call / long-put):
+            for each strike k:
+                moneyness  = (k − spot) / spot
+                gamma_wt   = exp(−0.5 × (moneyness / σ)²)
+                dealer_gex += (−call_oi + put_oi) × gamma_wt × lot_size × spot / 1e9
+
+        Positive GEX → dealers long gamma (mean-reversion / dampening regime).
+        Negative GEX → dealers short gamma (trend / amplifying regime).
+
+        Also captures total-level PCR, callOiChange, putOiChange for macro context.
+        Returns a dict with keys: dealer_gex, pcr_oi, call_oi_change, put_oi_change,
+        total_call_oi, total_put_oi, spot, expiry. Returns None on any fetch/parse error.
+        """
+        expiry = self._fetch_nearest_expiry()
+        if not expiry:
+            return None
+
+        url  = MC_OI_CHANGE_URL.format(expiry=expiry)
+        data = self._mc_get(url)
+        if not data or not data.get("success"):
+            print("[GEX] Failed to fetch OI change data from MoneyControl")
+            return None
+
+        results: dict = (data.get("data") or {}).get("results") or {}
+        if not results:
+            print("[GEX] Empty results in OI change response")
+            return None
+
+        # Use the most recent date's data (first key when sorted descending)
+        latest_date = sorted(results.keys(), reverse=True)[0]
+        day_data    = results[latest_date]
+        print(f"[GEX] Using OI snapshot for date: {latest_date}")
+
+        total    = day_data.get("total") or {}
+        spot     = float(day_data.get("atm") or 0)
+        strikes  = day_data.get("list") or []
+
+        total_call_oi    = float(total.get("callOi")      or 0)
+        total_put_oi     = float(total.get("putOi")       or 0)
+        call_oi_change   = float(total.get("callOiChange") or 0)
+        put_oi_change    = float(total.get("putOiChange")  or 0)
+
+        pcr_oi = total_put_oi / total_call_oi if total_call_oi > 0 else None
+
+        if not spot or not strikes:
+            print("[GEX] Missing ATM price or strike list — cannot compute GEX")
+            return None
+
+        sigma   = NIFTY_GEX_SIGMA
+        lot     = NIFTY_LOT_SIZE
+        gex_sum = 0.0
+
+        for row in strikes:
+            k          = float(row.get("strikePrice") or 0)
+            call_oi    = float(row.get("callOi")      or 0)
+            put_oi     = float(row.get("putOi")       or 0)
+            if not k:
+                continue
+            moneyness  = (k - spot) / spot
+            gamma_wt   = math.exp(-0.5 * (moneyness / sigma) ** 2)
+            # Dealers are short calls (negative gamma) and long puts (positive gamma)
+            gex_sum   += (-call_oi + put_oi) * gamma_wt
+
+        dealer_gex = gex_sum * lot * spot / 1e9  # ₹ billions
+
+        print(
+            f"[GEX] spot={spot:,.0f}  PCR={pcr_oi:.3f if pcr_oi else 'N/A'}  "
+            f"dealer_gex={dealer_gex:+.2f}B  "
+            f"call_ΔOI={call_oi_change:+,.0f}  put_ΔOI={put_oi_change:+,.0f}"
+        )
+
+        return {
+            "dealer_gex":     dealer_gex,
+            "pcr_oi":         pcr_oi,
+            "call_oi_change": call_oi_change,
+            "put_oi_change":  put_oi_change,
+            "total_call_oi":  total_call_oi,
+            "total_put_oi":   total_put_oi,
+            "spot":           spot,
+            "expiry":         expiry,
+        }
+
+    def save_nifty_gex(self, gex: dict) -> None:
+        """Write Nifty GEX and related metrics to macro_asset_prices."""
+        today = datetime.date.today().isoformat()
+        now   = datetime.datetime.now().isoformat()
+
+        rows = [
+            ("NIFTY_GEX",              gex["dealer_gex"]),
+            ("NIFTY_PUT_CALL_OI_RATIO", gex["pcr_oi"]),
+            ("NIFTY_PUT_OI_CHANGE",     gex["put_oi_change"]),
+            ("NIFTY_CALL_OI_CHANGE",    gex["call_oi_change"]),
+        ]
+
+        with self.engine.begin() as conn:
+            for asset_name, value in rows:
+                if value is None:
+                    continue
+                conn.execute(text("""
+                    INSERT INTO macro_asset_prices
+                        (symbol, date, close, fetched_at)
+                    VALUES
+                        (:symbol, :date, :close, :fetched_at)
+                    ON CONFLICT(symbol, date) DO UPDATE SET
+                        close      = excluded.close,
+                        fetched_at = excluded.fetched_at
+                """), {
+                    "symbol": asset_name,
+                    "date":       today,
+                    "close":      value,
+                    "fetched_at": now,
+                })
+                print(f"[GEX] Saved {asset_name}={value:.4f} for {today}")
+
+    def run_nifty_gex(self) -> None:
+        """Fetch Nifty strike-level OI from MoneyControl, compute GEX, and persist."""
+        print(f"[GEX] Starting Nifty GEX fetch at {datetime.datetime.now()}")
+        gex = self.fetch_nifty_gex()
+        if gex:
+            self.save_nifty_gex(gex)
+            regime = "LONG GAMMA (mean-reversion)" if gex["dealer_gex"] > 0 else "SHORT GAMMA (trending)"
+            print(f"[GEX] Regime signal: {regime}")
+        else:
+            print("[GEX] GEX fetch failed — nothing saved")
+
     def run(self, symbols: list[str], delay: float = 1.5):
         print(f"[PCR] Fetching {len(symbols)} symbols at {datetime.datetime.now()}")
         results = []
@@ -373,11 +555,15 @@ if __name__ == "__main__":
                         help="Fetch index option chain (e.g. NIFTY, BANKNIFTY)")
     parser.add_argument("--delay", type=float, default=1.5,
                         help="Seconds between requests (default: 1.5)")
+    parser.add_argument("--gex", action="store_true",
+                        help="Fetch Nifty strike-level OI and compute dealer GEX → macro_asset_prices")
     args = parser.parse_args()
 
     fetcher = PCRFetcher()
 
-    if args.index:
+    if args.gex:
+        fetcher.run_nifty_gex()
+    elif args.index:
         rec = fetcher.fetch_symbol_niftytrader(args.index)
         if rec:
             fetcher.save([rec])

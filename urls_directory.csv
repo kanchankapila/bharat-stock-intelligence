@@ -1,0 +1,318 @@
+URL,HTTP Method,Provider / Domain,Code Sources / References
+https://api.bseindia.com/BseIndiaAPI/api/AnnSubCategoryGetData/w?pageno=${pg},GET,BSE India,newsSentimentService.ts:401
+https://www.bseindia.com/,GET,BSE India,newsSentimentService.ts:410
+https://www.bseindia.com/corporates/ann.html?newsid=${a.NEWSID},GET,BSE India,newsSentimentService.ts:451
+https://economictimes.indiatimes.com,GET,Economic Times / IndiaTimes,etnow.ts:101
+https://economictimes.indiatimes.com/,POST,Economic Times / IndiaTimes,etnow.ts:98
+https://economictimes.indiatimes.com/markets/stocks/rss.cms,GET,Economic Times / IndiaTimes,newsSentimentService.ts:80
+https://economictimes.indiatimes.com/news/economy/rss.cms,GET,Economic Times / IndiaTimes,newsSentimentService.ts:81
+https://economictimes.indiatimes.com/viewandrecofeed.cms,GET,Economic Times / IndiaTimes,explore_mc_tl.py:924
+https://etmarketsapis.indiatimes.com/ET_Stats/${type}?pagesize=25&marketcap=largecap%2Cmidcap%2Csmallcap&duration=${encodeURIComponent(duration)}&sort=intraday&sortby=percentchange&sortorder=desc,GET,Economic Times / IndiaTimes,marketData.ts:238
+https://etmarketsapis.indiatimes.com/ET_Stats/marketBand?exchange=NSE&flag=1,GET,Economic Times / IndiaTimes,explore_mc_tl.py:920
+https://etmarketsapis.indiatimes.com/ET_Stats/mostActiveByValue?exchange=NSE&count=20&flag=1,GET,Economic Times / IndiaTimes,explore_mc_tl.py:886
+https://etmarketsapis.indiatimes.com/ET_Stats/mostActiveByVolume?exchange=NSE&count=20&flag=1,GET,Economic Times / IndiaTimes,explore_mc_tl.py:888
+https://etmarketsapis.indiatimes.com/ET_Stats/pennyStocks?exchange=NSE&count=20&flag=1,GET,Economic Times / IndiaTimes,explore_mc_tl.py:890
+https://etmarketsapis.indiatimes.com/ET_Stats/sectorPerformance?exchange=NSE&flag=1,GET,Economic Times / IndiaTimes,explore_mc_tl.py:911
+https://etmarketsapis.indiatimes.com/ET_Stats/topGainers?exchange=NSE&count=20&flag=1&mktcap=0,GET,Economic Times / IndiaTimes,explore_mc_tl.py:882
+https://etmarketsapis.indiatimes.com/ET_Stats/topLosers?exchange=NSE&count=20&flag=1&mktcap=0,GET,Economic Times / IndiaTimes,explore_mc_tl.py:884
+https://etmarketsapis.indiatimes.com/ET_Stats/trendingStocks?mktcap=0&exchange=NSE&count=20&flag=1,GET,Economic Times / IndiaTimes,explore_mc_tl.py:876
+https://etmarketsapis.indiatimes.com/ET_Stats/weekHigh52?exchange=NSE&count=20&flag=1,GET,Economic Times / IndiaTimes,explore_mc_tl.py:878
+https://etmarketsapis.indiatimes.com/ET_Stats/weekLow52?exchange=NSE&count=20&flag=1,GET,Economic Times / IndiaTimes,explore_mc_tl.py:880
+https://etmarketsapis.indiatimes.com/ET_TechnicalScreeners/topTrendingScreeners?exchangeId=50&pageNumber=1&pageSize=6&innerPageSize=3,GET,Economic Times / IndiaTimes,marketData.ts:183
+https://json.bselivefeeds.indiatimes.com/ET_Community/companypagedata?companyid=${map.companyid}&companytype=,GET,Economic Times / IndiaTimes,"marketData.ts:23, marketData.ts:72"
+https://json.bselivefeeds.indiatimes.com/ET_Community/getIndexSummary.cms?indexId={_ET_INDEX_ID},GET,Economic Times / IndiaTimes,explore_mc_tl.py:872
+https://json.bselivefeeds.indiatimes.com/ET_Community/getcategorylist.cms?flag=industry&eid=12,GET,Economic Times / IndiaTimes,explore_mc_tl.py:868
+https://json.bselivefeeds.indiatimes.com/ET_Community/getcategorylist.cms?flag=sector,GET,Economic Times / IndiaTimes,explore_mc_tl.py:870
+https://marketservices.indiatimes.com/markets/api/companydetails/v4/companydetails.cms,GET,Economic Times / IndiaTimes,explore_mc_tl.py:915
+https://marketservices.indiatimes.com/markets/api/shareholding/v4/shareholding.cms,GET,Economic Times / IndiaTimes,explore_mc_tl.py:858
+https://marketservices.indiatimes.com/marketservices/mf_holding?companyid=${map.companyid},GET,Economic Times / IndiaTimes,marketData.ts:220
+https://marketservices.indiatimes.com/marketservices/shareholding?companyid=${map.companyid},GET,Economic Times / IndiaTimes,marketData.ts:60
+https://mfapps.indiatimes.com/ET_Mutual_Funds/pages/mftools/MFPortfolioHolding.cms,GET,Economic Times / IndiaTimes,explore_mc_tl.py:863
+https://sas.indiatimes.com/ET_Community/getBSEMarketJSON.cms?flag=1,GET,Economic Times / IndiaTimes,explore_mc_tl.py:894
+https://sas.indiatimes.com/ET_Community/getNSEMarketJSON.cms?flag=1,GET,Economic Times / IndiaTimes,explore_mc_tl.py:896
+https://sas.indiatimes.com/ET_Community/getTechScreenerJSON.cms,GET,Economic Times / IndiaTimes,"explore_mc_tl.py:900, explore_mc_tl.py:906"
+https://screener.indiatimes.com/screener/v2/screenerByScreenerIdForWeb,GET,Economic Times / IndiaTimes,etnow.ts:81
+https://api.gdeltproject.org/api/v2/doc/doc?query=${q},GET,GDELT Project,gdeltService.ts:39
+https://api.moneycontrol.com/mcapi/extdata/v2/mc-essentials?scId=${scId}&type=ed&deviceType=W,GET,MoneyControl,"insightService.ts:136, mcApiService.ts:398"
+https://api.moneycontrol.com/mcapi/extdata/v2/mc-essentials?scId={sc_id}&type=ed&deviceType=W,GET,MoneyControl,explore_mc_tl.py:389
+https://api.moneycontrol.com/mcapi/extdata/v2/mc-insights?scId=${scId}&type=c&deviceType=W&appVersion=185,GET,MoneyControl,"insightService.ts:137, mcApiService.ts:463, moneycontrolService.ts:73"
+https://api.moneycontrol.com/mcapi/extdata/v2/mc-insights?scId=${scId}&type=d&deviceType=W&appVersion=185,GET,MoneyControl,mcApiService.ts:491
+https://api.moneycontrol.com/mcapi/extdata/v2/mc-insights?scId={sc_id}&type=c&deviceType=W&appVersion=185,GET,MoneyControl,explore_mc_tl.py:390
+https://api.moneycontrol.com/mcapi/technicalpicks/chart-patterns?deviceType=W&version=174&start=0&limit=12&pattern_type=all&sc_id=${scId},GET,MoneyControl,mcApiService.ts:671
+https://api.moneycontrol.com/mcapi/technicals/v2/analysis?scId=${scId}&dur=${dur}&fields=all&deviceType=W&appVersion=189,GET,MoneyControl,mcApiService.ts:611
+https://api.moneycontrol.com/mcapi/technicals/v2/details?scId=${scId}&dur=${dur}&deviceType=W,GET,MoneyControl,mcApiService.ts:604
+https://api.moneycontrol.com/mcapi/technicals/v2/details?scId={sc_id}&dur={dur}&deviceType=W,GET,MoneyControl,explore_mc_tl.py:366
+https://api.moneycontrol.com/mcapi/v1/${type}/scanner-detail?catId=${catId}&scanId=${scanId},GET,MoneyControl,moneycontrol.ts:40
+https://api.moneycontrol.com/mcapi/v1/deals/get-stock-news,GET,MoneyControl,explore_mc_tl.py:472
+https://api.moneycontrol.com/mcapi/v1/deals/insight?start=0&limit=${limit}&value=value&range=1W&action=${action}&dealsType=${dealsType},GET,MoneyControl,marketIntelService.ts:128
+https://api.moneycontrol.com/mcapi/v1/deals/insight?start=0&limit=3&value=value&range=1W&action={action},GET,MoneyControl,explore_mc_tl.py:477
+https://api.moneycontrol.com/mcapi/v1/deals/insight?start=0&limit=9&value=value&range=1W&action={action}&dealsType=topDeal,GET,MoneyControl,explore_mc_tl.py:475
+https://api.moneycontrol.com/mcapi/v1/deals/insight?start=0&limit=9&value=value&range=1W&action={action}&dealsType=topInsider,GET,MoneyControl,explore_mc_tl.py:479
+https://api.moneycontrol.com/mcapi/v1/deals/insight?start=0&limit=9&value=value&range=1W&action={action}&dealsType=topInvestor,GET,MoneyControl,explore_mc_tl.py:481
+https://api.moneycontrol.com/mcapi/v1/deals/largedeals-insight?start=0&limit=3&orderBy=dealsValue&deviceType=W,GET,MoneyControl,explore_mc_tl.py:470
+https://api.moneycontrol.com/mcapi/v1/deals/largedeals-insight?start=0&limit=6&orderBy=dealsValue&deviceType=W,GET,MoneyControl,marketIntelService.ts:134
+https://api.moneycontrol.com/mcapi/v1/deals/list?start=0&limit=${limit}&orderBy=${orderBy}&sortBy=DESC&dealType=${dealType}&deviceType=W&apiVersion=177,GET,MoneyControl,marketIntelService.ts:118
+https://api.moneycontrol.com/mcapi/v1/deals/list?start=0&limit=${limit}&orderBy=deal_date&sortBy=DESC&deviceType=W,GET,MoneyControl,marketIntelService.ts:113
+https://api.moneycontrol.com/mcapi/v1/deals/list?start=0&limit=24&orderBy=deal_date&sortBy=DESC&dealType=large&deviceType=W&apiVersion=177,GET,MoneyControl,explore_mc_tl.py:462
+https://api.moneycontrol.com/mcapi/v1/deals/list?start=0&limit=24&orderBy=deal_date&sortBy=DESC&deviceType=W,GET,MoneyControl,explore_mc_tl.py:468
+https://api.moneycontrol.com/mcapi/v1/deals/list?start=0&limit=24&orderBy=dealsValue&sortBy=DESC&dealType=topStock&deviceType=W&apiVersion=177,GET,MoneyControl,explore_mc_tl.py:464
+https://api.moneycontrol.com/mcapi/v1/deals/list?start=0&limit=24&orderBy=dealsValue&sortBy=DESC&dealType=topStockSectorWise&deviceType=W&apiVersion=177,GET,MoneyControl,explore_mc_tl.py:466
+https://api.moneycontrol.com/mcapi/v1/earnings/actual-estimate?page=1&limit=${limit},GET,MoneyControl,marketIntelService.ts:324
+https://api.moneycontrol.com/mcapi/v1/earnings/actual-estimate?page=1&limit=6,GET,MoneyControl,explore_mc_tl.py:489
+https://api.moneycontrol.com/mcapi/v1/earnings/get-earnings-data?indexId=All&page=1&startDate=${d}&endDate=${d}&sector=&limit=${limit},GET,MoneyControl,marketIntelService.ts:301
+https://api.moneycontrol.com/mcapi/v1/earnings/get-earnings-data?indexId=All&page=1&startDate={today}&endDate={today}&sector=&limit=18,GET,MoneyControl,explore_mc_tl.py:497
+https://api.moneycontrol.com/mcapi/v1/earnings/inc-widget?indexId=all,GET,MoneyControl,explore_mc_tl.py:485
+https://api.moneycontrol.com/mcapi/v1/earnings/price-shockers?limit=${limit}&page=1,GET,MoneyControl,marketIntelService.ts:318
+https://api.moneycontrol.com/mcapi/v1/earnings/price-shockers?limit=8&page=1,GET,MoneyControl,explore_mc_tl.py:487
+https://api.moneycontrol.com/mcapi/v1/earnings/rapid-results?limit=21&page=1&type=BP&subType=yoy&category=all&sortBy=growth&indexId=N&sector=&search=&seq=desc,GET,MoneyControl,"explore_mc_tl.py:493, marketIntelService.ts:312"
+https://api.moneycontrol.com/mcapi/v1/earnings/rapid-results?limit=9&page=1&type=LR&subType=yoy,GET,MoneyControl,"explore_mc_tl.py:491, marketIntelService.ts:308"
+https://api.moneycontrol.com/mcapi/v1/earnings/result-calendar?indexId=All&fromDate={today}&toDate={today}&sector=,GET,MoneyControl,explore_mc_tl.py:495
+https://api.moneycontrol.com/mcapi/v1/earnings/result-dashboard,GET,MoneyControl,"explore_mc_tl.py:499, marketIntelService.ts:277"
+https://api.moneycontrol.com/mcapi/v1/ecalendar/get-upcoming-event-data?page=1&pageSize=7,GET,MoneyControl,"explore_mc_tl.py:508, marketIntelService.ts:20"
+https://api.moneycontrol.com/mcapi/v1/extdata/mc-essentials?scId=${scId}&type=all,GET,MoneyControl,mcApiService.ts:402
+https://api.moneycontrol.com/mcapi/v1/extdata/mc-essentials?scId=${scId}&type=ed,GET,MoneyControl,mcApiService.ts:394
+https://api.moneycontrol.com/mcapi/v1/extdata/mc-essentials?scId={sc_id}&type=all,GET,MoneyControl,explore_mc_tl.py:385
+https://api.moneycontrol.com/mcapi/v1/extdata/mc-essentials?scId={sc_id}&type=ed,GET,MoneyControl,explore_mc_tl.py:386
+https://api.moneycontrol.com/mcapi/v1/extdata/mc-insights?scId=${scId}&type=c,GET,MoneyControl,mcApiService.ts:458
+https://api.moneycontrol.com/mcapi/v1/extdata/mc-insights?scId=${scId}&type=d,GET,MoneyControl,mcApiService.ts:482
+https://api.moneycontrol.com/mcapi/v1/extdata/mc-insights?scId={sc_id}&type=c,GET,MoneyControl,explore_mc_tl.py:388
+https://api.moneycontrol.com/mcapi/v1/extdata/mc-insights?scId={sc_id}&type=d,GET,MoneyControl,explore_mc_tl.py:387
+https://api.moneycontrol.com/mcapi/v1/fno/futures/getExpDts?id=${scId},GET,MoneyControl,marketIntelService.ts:438
+https://api.moneycontrol.com/mcapi/v1/fno/futures/getExpDts?id={sc_id},GET,MoneyControl,explore_mc_tl.py:414
+https://api.moneycontrol.com/mcapi/v1/fno/futures/getFuturesData?fut=FUTSTK&id=${scId}&expirydate=${expiry},GET,MoneyControl,marketIntelService.ts:444
+https://api.moneycontrol.com/mcapi/v1/fno/futures/getFuturesData?fut=FUTSTK&id={sc_id}&expirydate={expiry},GET,MoneyControl,explore_mc_tl.py:416
+https://api.moneycontrol.com/mcapi/v1/fno/options/getOptionsData?opt=OPTSTK&id={sc_id}&expirydate={expiry}&optiontype=CE&strikeprice=405.00,GET,MoneyControl,explore_mc_tl.py:420
+https://api.moneycontrol.com/mcapi/v1/fno/options/getStrikePrice?id={sc_id}&expirydate={expiry}&optiontype=CE,GET,MoneyControl,explore_mc_tl.py:418
+https://api.moneycontrol.com/mcapi/v1/indices/chart/exchange-advdec?ex=${ex},GET,MoneyControl,indexApiService.ts:89
+https://api.moneycontrol.com/mcapi/v1/indices/chart/exchange-advdec?ex=N,GET,MoneyControl,"explore_mc_tl.py:233, marketIntelService.ts:489"
+https://api.moneycontrol.com/mcapi/v1/indices/fundamentals/epsdetail?indId={ind_id},GET,MoneyControl,explore_mc_tl.py:279
+https://api.moneycontrol.com/mcapi/v1/indices/fundamentals/graph/pb?indId=${indId}&duration=${duration},GET,MoneyControl,indexApiService.ts:110
+https://api.moneycontrol.com/mcapi/v1/indices/fundamentals/graph/pb?indId={ind_id}&duration=1Y,GET,MoneyControl,explore_mc_tl.py:285
+https://api.moneycontrol.com/mcapi/v1/indices/fundamentals/graph/pe?indId=${indId}&duration=${duration},GET,MoneyControl,indexApiService.ts:99
+https://api.moneycontrol.com/mcapi/v1/indices/fundamentals/graph/pe?indId={ind_id}&duration=1Y,GET,MoneyControl,explore_mc_tl.py:282
+https://api.moneycontrol.com/mcapi/v1/indices/fundamentals/overview?indId=${indId},GET,MoneyControl,indexApiService.ts:61
+https://api.moneycontrol.com/mcapi/v1/indices/fundamentals/overview?indId={ind_id},GET,MoneyControl,explore_mc_tl.py:276
+https://api.moneycontrol.com/mcapi/v1/indices/get-global-indices,GET,MoneyControl,marketData.ts:176
+https://api.moneycontrol.com/mcapi/v1/indices/get-indian-indices,GET,MoneyControl,"explore_mc_tl.py:224, indexApiService.ts:51, marketData.ts:38"
+https://api.moneycontrol.com/mcapi/v1/indices/get-indices-details?indexId=${indexId},GET,MoneyControl,insightService.ts:244
+https://api.moneycontrol.com/mcapi/v1/indices/get-indices-details?indexId={ind_id},GET,MoneyControl,explore_mc_tl.py:244
+https://api.moneycontrol.com/mcapi/v1/indices/get-indices-list,GET,MoneyControl,"explore_mc_tl.py:221, marketIntelService.ts:495"
+https://api.moneycontrol.com/mcapi/v1/indices/get-indices-list?appVersion={av},GET,MoneyControl,explore_mc_tl.py:229
+https://api.moneycontrol.com/mcapi/v1/premarket/article?slug=${slug}&limit=1,GET,MoneyControl,marketIntelService.ts:8
+https://api.moneycontrol.com/mcapi/v1/premarket/article?slug={slug}&limit=1,GET,MoneyControl,explore_mc_tl.py:504
+https://api.moneycontrol.com/mcapi/v1/premarket/get-global-marketdata?section=mi,GET,MoneyControl,"explore_mc_tl.py:506, marketIntelService.ts:14"
+https://api.moneycontrol.com/mcapi/v1/premarket/getBrokerResearchReco?sublevel=stocks&start=0&limit=12,GET,MoneyControl,marketIntelService.ts:50
+https://api.moneycontrol.com/mcapi/v1/premarket/getBrokerResearchReco?sublevel=stocks&start=0&limit=6,GET,MoneyControl,explore_mc_tl.py:518
+https://api.moneycontrol.com/mcapi/v1/premarket/getBrokerResearchReco?sublevel=stocks&start=8&limit=24,GET,MoneyControl,explore_mc_tl.py:520
+https://api.moneycontrol.com/mcapi/v1/premarket/getFllActivityData?type=cash,GET,MoneyControl,"explore_mc_tl.py:512, marketIntelService.ts:32"
+https://api.moneycontrol.com/mcapi/v1/premarket/getMarketNewsData?limit=6,GET,MoneyControl,explore_mc_tl.py:516
+https://api.moneycontrol.com/mcapi/v1/premarket/getMarketNewsData?limit=8,GET,MoneyControl,marketIntelService.ts:44
+https://api.moneycontrol.com/mcapi/v1/premarket/getMarketViewsData?cat=all&start=0&limit=9,GET,MoneyControl,"explore_mc_tl.py:510, marketIntelService.ts:26"
+https://api.moneycontrol.com/mcapi/v1/premarket/getStockToWatchData?start=0&limit=3&sortby=rank&sortorder=asc,GET,MoneyControl,explore_mc_tl.py:514
+https://api.moneycontrol.com/mcapi/v1/premarket/getStockToWatchData?start=0&limit=6&sortby=rank&sortorder=asc,GET,MoneyControl,marketIntelService.ts:38
+https://api.moneycontrol.com/mcapi/v1/proscanner/scanner-detail,GET,MoneyControl,moneycontrolScreener.ts:190
+https://api.moneycontrol.com/mcapi/v1/proscanner/scanner-detail?catId={cat_id}&scanId={scan_id},GET,MoneyControl,explore_mc_tl.py:587
+https://api.moneycontrol.com/mcapi/v1/sector/performance?dur=1d&type=top&section=sector,GET,MoneyControl,marketData.ts:170
+https://api.moneycontrol.com/mcapi/v1/stock/estimates/analyst-rating?deviceType=W&scId=${scId}&ex=N,GET,MoneyControl,"insightService.ts:140, mcApiService.ts:515"
+https://api.moneycontrol.com/mcapi/v1/stock/estimates/analyst-rating?deviceType=W&scId={mcsymbol}&ex=N,GET,MoneyControl,moneycontrol_fetcher.py:358
+https://api.moneycontrol.com/mcapi/v1/stock/estimates/analyst-rating?deviceType=W&scId={scId}&ex=N,GET,MoneyControl,analyst_estimates_snapshot.py:35
+https://api.moneycontrol.com/mcapi/v1/stock/estimates/analyst-rating?deviceType=W&scId={sc_id}&ex=N,GET,MoneyControl,explore_mc_tl.py:405
+https://api.moneycontrol.com/mcapi/v1/stock/estimates/consensus?scId=${scId}&ex=N&deviceType=W,GET,MoneyControl,mcApiService.ts:545
+https://api.moneycontrol.com/mcapi/v1/stock/estimates/consensus?scId={sc_id}&ex=N&deviceType=W,GET,MoneyControl,explore_mc_tl.py:403
+https://api.moneycontrol.com/mcapi/v1/stock/estimates/earning-forecast?scId=${scId}&ex=N&deviceType=W&frequency=12&financialType=C,GET,MoneyControl,"insightService.ts:141, mcApiService.ts:525"
+https://api.moneycontrol.com/mcapi/v1/stock/estimates/earning-forecast?scId={mcsymbol}&ex=N&deviceType=W&frequency=12&financialType=C,GET,MoneyControl,moneycontrol_fetcher.py:360
+https://api.moneycontrol.com/mcapi/v1/stock/estimates/earning-forecast?scId={scId}&ex=N&deviceType=W&frequency=12&financialType=C,GET,MoneyControl,analyst_estimates_snapshot.py:37
+https://api.moneycontrol.com/mcapi/v1/stock/estimates/earning-forecast?scId={sc_id}&ex=N&deviceType=W&frequency=12&financialType=C,GET,MoneyControl,explore_mc_tl.py:407
+https://api.moneycontrol.com/mcapi/v1/stock/estimates/hits-misses?deviceType=W&scId=${scId}&ex=N&type=eps&financialType=C,GET,MoneyControl,"insightService.ts:143, mcApiService.ts:555"
+https://api.moneycontrol.com/mcapi/v1/stock/estimates/hits-misses?deviceType=W&scId={mcsymbol}&ex=N&type=eps&financialType=C,GET,MoneyControl,moneycontrol_fetcher.py:361
+https://api.moneycontrol.com/mcapi/v1/stock/estimates/hits-misses?deviceType=W&scId={sc_id}&ex=N&type=eps&financialType=C,GET,MoneyControl,explore_mc_tl.py:411
+https://api.moneycontrol.com/mcapi/v1/stock/estimates/price-forecast?scId=${scId}&ex=N&deviceType=W,GET,MoneyControl,"insightService.ts:139, mcApiService.ts:535"
+https://api.moneycontrol.com/mcapi/v1/stock/estimates/price-forecast?scId={mcsymbol}&ex=N&deviceType=W,GET,MoneyControl,moneycontrol_fetcher.py:359
+https://api.moneycontrol.com/mcapi/v1/stock/estimates/price-forecast?scId={scId}&ex=N&deviceType=W,GET,MoneyControl,analyst_estimates_snapshot.py:36
+https://api.moneycontrol.com/mcapi/v1/stock/estimates/price-forecast?scId={sc_id}&ex=N&deviceType=W,GET,MoneyControl,explore_mc_tl.py:401
+https://api.moneycontrol.com/mcapi/v1/stock/estimates/valuation?deviceType=W&scId=${scId}&ex=N&financialType=C,GET,MoneyControl,"insightService.ts:144, mcApiService.ts:565"
+https://api.moneycontrol.com/mcapi/v1/stock/estimates/valuation?deviceType=W&scId={sc_id}&ex=N&financialType=C,GET,MoneyControl,explore_mc_tl.py:409
+https://api.moneycontrol.com/mcapi/v1/stock/extdata/v2/mc-essentials?deviceType=W&scId={mcsymbol}&ex=N,GET,MoneyControl,moneycontrol_fetcher.py:356
+https://api.moneycontrol.com/mcapi/v1/stock/extdata/v2/mc-insights?deviceType=W&scId={mcsymbol}&ex=N,GET,MoneyControl,moneycontrol_fetcher.py:357
+https://api.moneycontrol.com/mcapi/v1/stock/financial-historical/overview?scId=${scId}&ex=N,GET,MoneyControl,mcApiService.ts:575
+https://api.moneycontrol.com/mcapi/v1/stock/financial-historical/overview?scId={sc_id}&ex=N,GET,MoneyControl,explore_mc_tl.py:358
+https://api.moneycontrol.com/mcapi/v1/stock/get-stock-price?scIdList=${scId}&scId=${scId},GET,MoneyControl,mcApiService.ts:585
+https://api.moneycontrol.com/mcapi/v1/stock/get-stock-price?scIdList={sc_id}&scId={sc_id},GET,MoneyControl,explore_mc_tl.py:357
+https://api.moneycontrol.com/mcapi/v1/stock/price-volume?scId=${scId}&ex=&appVersion=175,GET,MoneyControl,"insightService.ts:142, mcApiService.ts:503"
+https://api.moneycontrol.com/mcapi/v1/stock/price-volume?scId={sc_id}&ex=&appVersion=175,GET,MoneyControl,explore_mc_tl.py:356
+https://api.moneycontrol.com/mcapi/v1/stock/shareholding/pattern?scId=${scId},GET,MoneyControl,mcApiService.ts:659
+https://api.moneycontrol.com/mcapi/v1/stock/technicals/v2/details?deviceType=W&scId={mcsymbol}&ex=N,GET,MoneyControl,moneycontrol_fetcher.py:355
+https://api.moneycontrol.com/mcapi/v1/swot/details?scId=${scId}&type=all,GET,MoneyControl,"insightService.ts:135, mcApiService.ts:376"
+https://api.moneycontrol.com/mcapi/v1/swot/details?scId={sc_id}&type=all,GET,MoneyControl,explore_mc_tl.py:382
+https://api.moneycontrol.com/mcapi/v1/technical-trends/${base}/${type}?ex=N&index=${index}&page=1&order=${order}&deviceType=W&sort=${sort}&appVersion=142,GET,MoneyControl,marketData.ts:407
+https://api.moneycontrol.com/mcapi/v1/technical-trends/${base}/${type}?ex=N&index=${index}&page=1&order=desc&deviceType=W&sort=performance&appVersion=142,GET,MoneyControl,marketData.ts:233
+https://api.moneycontrol.com/mcapi/v1/technical-trends/${catId}?ex=N&index=${scanId}&page=1&order=desc&deviceType=W&sort=performance&appVersion=142,GET,MoneyControl,moneycontrol.ts:38
+https://api.moneycontrol.com/mcapi/v1/technical-trends/{tdir}/{ttype}?ex=N&index={idx}&page=1&order={order}&deviceType=W&sort={sort}&appVersion=142,GET,MoneyControl,explore_mc_tl.py:459
+https://api.moneycontrol.com/mcapi/v1/techscanner/scanner-detail,GET,MoneyControl,moneycontrolScreener.ts:191
+https://api.moneycontrol.com/mcapi/v1/techscanner/scanner-detail?catId={cat_id}&scanId={scan_id},GET,MoneyControl,explore_mc_tl.py:595
+https://appfeeds.moneycontrol.com/jsonapi/fno/overview&format=json&inst_type=Futures&id=${id}&ExpiryDate=,GET,MoneyControl,marketIntelService.ts:417
+https://appfeeds.moneycontrol.com/jsonapi/fno/overview&format=json&inst_type=Futures&id={fid}&ExpiryDate=,GET,MoneyControl,explore_mc_tl.py:298
+https://appfeeds.moneycontrol.com/jsonapi/fno/overview&format=json&inst_type=Options&option_type=${optionType}&id=${id}&ExpiryDate=,GET,MoneyControl,marketIntelService.ts:423
+https://appfeeds.moneycontrol.com/jsonapi/fno/overview&format=json&inst_type=Options&option_type=${optionType}&id=${scId}&ExpiryDate=${expiry},GET,MoneyControl,marketIntelService.ts:452
+https://appfeeds.moneycontrol.com/jsonapi/fno/overview&format=json&inst_type=Options&option_type={opt_type}&id={fid}&ExpiryDate=,GET,MoneyControl,explore_mc_tl.py:303
+https://appfeeds.moneycontrol.com/jsonapi/fno/overview?format=json&inst_type=${instType}&id=${id}&ExpiryDate=,GET,MoneyControl,fnoService.ts:258
+https://appfeeds.moneycontrol.com/jsonapi/market/graph&format=json&ind_id=${indId}&range=${range}&type=${type},GET,MoneyControl,"indexApiService.ts:94, marketData.ts:276"
+https://appfeeds.moneycontrol.com/jsonapi/market/graph&format=json&ind_id={ind_id}&range={rng}&type={gtype},GET,MoneyControl,explore_mc_tl.py:266
+https://appfeeds.moneycontrol.com/jsonapi/market/graph&format=json&range=1d&type=line&ind_id=in%3Bgsx,GET,MoneyControl,explore_mc_tl.py:531
+https://appfeeds.moneycontrol.com/jsonapi/market/indices&format=json&ind_id=${indId},GET,MoneyControl,"indexApiService.ts:56, marketData.ts:251"
+https://appfeeds.moneycontrol.com/jsonapi/market/indices&format=json&ind_id={ind_id},GET,MoneyControl,explore_mc_tl.py:248
+https://appfeeds.moneycontrol.com/jsonapi/market/market_action?format=json&type=earnings&sc_id=${scId},GET,MoneyControl,marketIntelService.ts:458
+https://appfeeds.moneycontrol.com/jsonapi/market/marketmap&format=json&type=${type}&ind_id=${indId},GET,MoneyControl,"indexApiService.ts:78, marketData.ts:257"
+https://appfeeds.moneycontrol.com/jsonapi/market/marketmap&format=json&type={mtype}&ind_id={ind_id},GET,MoneyControl,explore_mc_tl.py:256
+https://appfeeds.moneycontrol.com/jsonapi/market/marketmap?format=json&type=1&ind_id=${indId},GET,MoneyControl,marketData.ts:31
+https://priceapi.moneycontrol.com/pricefeed/notapplicable/inidicesindia/${encoded},GET,MoneyControl,marketData.ts:264
+https://priceapi.moneycontrol.com/pricefeed/notapplicable/inidicesindia/{enc},GET,MoneyControl,explore_mc_tl.py:251
+https://priceapi.moneycontrol.com/pricefeed/nse/equitycash/${scId},GET,MoneyControl,mcApiService.ts:366
+https://priceapi.moneycontrol.com/pricefeed/nse/equitycash/{mc},GET,MoneyControl,backfill_sector_mc.py:38
+https://priceapi.moneycontrol.com/pricefeed/nse/equitycash/{sc_id},GET,MoneyControl,explore_mc_tl.py:355
+"https://priceapi.moneycontrol.com/pricefeed/techindicator/${dur}/${map.mcsymbol}?fields=sentiments,pivotLevels,sma,ema,indicators,crossover",GET,MoneyControl,marketData.ts:13
+"https://priceapi.moneycontrol.com/pricefeed/techindicator/${dur}/${scId}?fields=sentiments,pivotLevels,sma,ema,crossover,indicators",GET,MoneyControl,mcApiService.ts:354
+https://priceapi.moneycontrol.com/pricefeed/techindicator/${period}/${encoded},GET,MoneyControl,"indexApiService.ts:84, marketData.ts:271"
+"https://priceapi.moneycontrol.com/pricefeed/techindicator/D/${scId}?fields=sentiments,pivotLevels,sma,ema",GET,MoneyControl,insightService.ts:138
+https://priceapi.moneycontrol.com/pricefeed/techindicator/{period}/{enc},GET,MoneyControl,explore_mc_tl.py:271
+https://priceapi.moneycontrol.com/pricefeed/techindicator/{period}/{sc_id},GET,MoneyControl,explore_mc_tl.py:362
+https://priceapi.moneycontrol.com/techCharts/indianMarket/stock/history,GET,MoneyControl,"explore_mc_tl.py:351, intraday_fetcher.py:50"
+https://priceapi.moneycontrol.com/techCharts/indianMarket/stock/history?,GET,MoneyControl,moneycontrol_fetcher.py:411
+https://priceapi.moneycontrol.com/techCharts/indianMarket/stock/history?symbol=${encodeURIComponent(mcSymbol)}&resolution=${resolution}&from=${from}&to=${to}&countback=329&currencyCode=INR,GET,MoneyControl,marketData.ts:116
+https://priceapi.moneycontrol.com/techCharts/indianMarket/stock/history?symbol=${encodeURIComponent(mcSymbol)}&resolution=1D&from=543110400&to=${to}&countback=9869&currencyCode=INR,GET,MoneyControl,marketData.ts:118
+https://www.moneycontrol.com,GET,MoneyControl,"explore_mc_tl.py:36, moneycontrol_fetcher.py:31"
+https://www.moneycontrol.com/,GET,MoneyControl,"analyst_estimates_snapshot.py:32, backfill_sector_mc.py:81, intraday_fetcher.py:38, mcApiService.ts:312, moneycontrol_fetcher.py:32"
+https://www.moneycontrol.com/mc/widget/historicalrating/ratingPro?classic=true&type=gson&sc_did=${scId}&period=${period}&dur=6m,GET,MoneyControl,mcApiService.ts:597
+https://www.moneycontrol.com/mc/widget/historicalrating/ratingPro?classic=true&type=gson&sc_did={sc_id}&period={period}&dur=6m,GET,MoneyControl,explore_mc_tl.py:380
+https://www.moneycontrol.com/mc/widget/historicalrating?classic=true&type=gson&indice_id={sym}&period={period},GET,MoneyControl,explore_mc_tl.py:290
+https://www.moneycontrol.com/mc/widget/mcessentials?sc_did={sc_id}&sc_id={sc_id},GET,MoneyControl,explore_mc_tl.py:396
+https://www.moneycontrol.com/mc/widget/mcfinancials/getFinancialData?classic=true&referenceId=ratios&requestType=S&scId=${map.mcsymbol}&frequency=3,GET,MoneyControl,marketData.ts:50
+https://www.moneycontrol.com/mc/widget/mcfinancials/getFinancialData?classic=true&referenceId=ratios&requestType=S&scId=${scId}&frequency=3,GET,MoneyControl,mcApiService.ts:652
+https://www.moneycontrol.com/mc/widget/mcinsider?classic=true&sc_did={mcsymbol}&sc_id={mcsymbol},GET,MoneyControl,moneycontrol_fetcher.py:362
+https://www.moneycontrol.com/mc/widget/mcinsider?sc_did={sc_id}&sc_id={sc_id},GET,MoneyControl,explore_mc_tl.py:392
+https://www.moneycontrol.com/mc/widget/mcinsights?sc_did={sc_id}&sc_id={sc_id},GET,MoneyControl,explore_mc_tl.py:394
+https://www.moneycontrol.com/mc/widget/mcshareholding/getShareholdingPattern?classic=true&scId=${scId},GET,MoneyControl,mcApiService.ts:666
+https://www.moneycontrol.com/mc/widget/pricechart_technicals/moving_average?sc_did=${scId}&page=mc_technicals&classic=true&period=${period},GET,MoneyControl,mcApiService.ts:625
+https://www.moneycontrol.com/mc/widget/pricechart_technicals/moving_average_crossovers?sc_did=${scId}&page=mc_technicals&classic=true&period=${period},GET,MoneyControl,mcApiService.ts:639
+https://www.moneycontrol.com/mc/widget/pricechart_technicals/pivot_level?sc_did=${scId}&page=mc_technicals&classic=true&period=${period},GET,MoneyControl,mcApiService.ts:632
+https://www.moneycontrol.com/mc/widget/pricechart_technicals/pivot_level?sc_did={sc_id}&page=mc_technicals&classic=true&period={period},GET,MoneyControl,explore_mc_tl.py:376
+https://www.moneycontrol.com/mc/widget/pricechart_technicals/technical_indicator?sc_did=${scId}&page=mc_technicals&classic=true&period=${period},GET,MoneyControl,mcApiService.ts:646
+https://www.moneycontrol.com/mc/widget/pricechart_technicals/technical_rating_summary?sc_did=${scId}&page=mc_technicals&classic=true&period=${period},GET,MoneyControl,mcApiService.ts:618
+https://www.moneycontrol.com/mc/widget/pricechart_technicals/{widget}?sc_did={sc_id}&page=mc_technicals&period=D&classic=true&period={period},GET,MoneyControl,explore_mc_tl.py:372
+https://www.moneycontrol.com/mc/widget/stockscans?classic=true&sc_did={mcsymbol}&sc_id={mcsymbol},GET,MoneyControl,moneycontrol_fetcher.py:364
+https://www.moneycontrol.com/mc/widget/stockvitals?classic=true&sc_did={mcsymbol}&sc_id={mcsymbol}&slug={slug},GET,MoneyControl,moneycontrol_fetcher.py:363
+https://www.moneycontrol.com/mc/widget/swot/swotCount?scDid={sc_id}&device_type=desktop&scId={sc_id}&stkname=bharatelectronics,GET,MoneyControl,explore_mc_tl.py:384
+https://www.moneycontrol.com/mcapi/v1/quote/${stockMapping.mcsymbol},GET,MoneyControl,liveStockData.ts:247
+https://www.moneycontrol.com/mccode/common/autosuggestion_solr.php?query=${encodeURIComponent(upperQuery)}&type=1&format=json,GET,MoneyControl,stockMapping.ts:52
+https://www.moneycontrol.com/newsapi/mc_news.php?query=tags_slug:(,GET,MoneyControl,"explore_mc_tl.py:523, explore_mc_tl.py:525, explore_mc_tl.py:527"
+https://www.moneycontrol.com/rss/brokerageresearch.xml,GET,MoneyControl,newsSentimentService.ts:91
+https://www.moneycontrol.com/rss/business.xml,GET,MoneyControl,newsSentimentService.ts:88
+https://www.moneycontrol.com/rss/economy.xml,GET,MoneyControl,newsSentimentService.ts:89
+https://www.moneycontrol.com/rss/latestnews.xml,GET,MoneyControl,newsSentimentService.ts:86
+https://www.moneycontrol.com/rss/marketreports.xml,GET,MoneyControl,newsSentimentService.ts:87
+https://www.moneycontrol.com/rss/mfnews.xml,GET,MoneyControl,newsSentimentService.ts:90
+https://www.moneycontrol.com/stocks/company_info/get_vwap_chart_data.php?classic=true&sc_did=${scId},GET,MoneyControl,mcApiService.ts:818
+https://www.moneycontrol.com/stocks/company_info/get_vwap_chart_data.php?classic=true&sc_did={sc_id},GET,MoneyControl,explore_mc_tl.py:398
+https://archives.nseindia.com/products/content/sec_bhavdata_full_${ddmmyyyy}.csv,GET,NSE India,deliveryFetcher.ts:9
+https://www.nseindia.com,GET,NSE India,"fii_dii_fetcher.py:46, test_fii.py:18, fii_dii_fetcher.py:48"
+https://www.nseindia.com/api/fiidiiTradeReact,GET,NSE India,"fii_dii_fetcher.py:21, sentiment.router.ts:66, test_fii.py:19, fii_dii_fetcher.py:23"
+https://www.nseindia.com/api/option-chain-equities?symbol={symbol},GET,NSE India,"pcr_fetcher.py:27, pcr_engine.py:14, pcr_fetcher.py:26"
+https://www.nseindia.com/api/option-chain-indices?symbol={symbol},GET,NSE India,"pcr_fetcher.py:28, pcr_engine.py:15, pcr_fetcher.py:27"
+https://www.nseindia.com/market-data/fii-dii-activity,GET,NSE India,"fii_dii_fetcher.py:31, test_fii.py:11, fii_dii_fetcher.py:33"
+https://www.nseindia.com/option-chain,GET,NSE India,"pcr_fetcher.py:56, pcr_engine.py:25, pcr_fetcher.py:37"
+https://webapi.niftytrader.in/webapi/Analysis/stock-analysis-data,POST,NiftyTrader,niftytraderService.ts:59
+https://webapi.niftytrader.in/webapi/Analysis/stock-financial-data,POST,NiftyTrader,niftytraderService.ts:64
+https://webapi.niftytrader.in/webapi/Analysis/stock-industry-data,POST,NiftyTrader,niftytraderService.ts:54
+https://webapi.niftytrader.in/webapi/Resource/nse-break-out-data,GET,NiftyTrader,marketData.ts:281
+https://webapi.niftytrader.in/webapi/Screener/advance-eod-screener-filter,POST,NiftyTrader,marketIntelService.ts:576
+https://webapi.niftytrader.in/webapi/Screener/live-market-filter-data,POST,NiftyTrader,marketIntelService.ts:529
+https://webapi.niftytrader.in/webapi/Symbol/other-stock-spot-data?symbol=INDIA+VIX,GET,NiftyTrader,marketIntelService.ts:500
+https://webapi.niftytrader.in/webapi/Symbol/symbol-expiry-all?symbol=${symbol}&exchange=nse,GET,NiftyTrader,trendlyne.router.ts:43
+https://webapi.niftytrader.in/webapi/Symbol/symbol-expiry-all?symbol=nifty&exchange=nse,GET,NiftyTrader,"fnoService.ts:190, trendlyneService.ts:452"
+https://webapi.niftytrader.in/webapi/option/option-chain-data,GET,NiftyTrader,pcr_fetcher.py:35
+https://webapi.niftytrader.in/webapi/option/option-chain-data?symbol=${encodeURIComponent(symbol)}&exchange=nse&expiryDate=&atmBelow=0&atmAbove=0,GET,NiftyTrader,marketIntelService.ts:475
+https://webapi.niftytrader.in/webapi/option/option-chain-data?symbol=${normalizedSymbol}&exchange=nse&expiryDate=&atmBelow=0&atmAbove=0,GET,NiftyTrader,optionChainService.ts:52
+https://webapi.niftytrader.in/webapi/option/option-chain-data?symbol={symbol}&exchange=nse&expiryDate=&atmBelow=0&atmAbove=0,GET,NiftyTrader,"pcr_engine.py:48, pcr_fetcher.py:63"
+https://webapi.niftytrader.in/webapi/symbol/psymbol-list,GET,NiftyTrader,"marketIntelService.ts:463, optionChainService.ts:23"
+https://webapi.niftytrader.in/webapi/symbol/top-gainers-data?fno_stock=false,GET,NiftyTrader,topMoversService.ts:29
+https://webapi.niftytrader.in/webapi/usstock/global-market,GET,NiftyTrader,globalMarketService.ts:22
+https://www.niftytrader.in,GET,NiftyTrader,"optionChainService.ts:62, pcr_fetcher.py:45"
+https://www.niftytrader.in/,GET,NiftyTrader,"niftytraderService.ts:34, optionChainService.ts:61, pcr_fetcher.py:44"
+https://www.niftytrader.in/webapis,GET,NiftyTrader,explore_mc_tl.py:1040
+https://portal.tradebrains.in,GET,TradeBrains,"misc.router.ts:156, misc.router.ts:176"
+https://portal.tradebrains.in/_next/data/lfAyTpIj109Gy_zVNBBu_/stocks/${symbol}.json?symbol=${symbol},GET,TradeBrains,tradebrainsService.ts:20
+https://portal.tradebrains.in/api/prices/investments/dii-investments/,GET,TradeBrains,fii_dii_backfill.py:9
+https://portal.tradebrains.in/api/prices/investments/fii-investments/,GET,TradeBrains,fii_dii_backfill.py:8
+https://portal.tradebrains.in/api/prices/superstar/portfolio/star/view/?page_size=100&page=1&search=,GET,TradeBrains,misc.router.ts:150
+https://portal.tradebrains.in/api/prices/superstar/stocklist/${encodeURIComponent(input.slug)}/?quater=${input.quarter}&sort_by=total_quantity&is_ascending=false,GET,TradeBrains,misc.router.ts:170
+https://portal.tradebrains.in/superstar-portfolio,GET,TradeBrains,misc.router.ts:155
+https://portal.tradebrains.in/superstar-portfolio/${input.slug},GET,TradeBrains,misc.router.ts:175
+https://tradebrains.in/feed/,GET,TradeBrains,newsSentimentService.ts:98
+https://s3.tradingview.com/external-embedding/embed-widget-events.js,GET,TradingView,TradingViewWidgets.tsx:107
+https://s3.tradingview.com/external-embedding/embed-widget-market-overview.js,GET,TradingView,TradingViewWidgets.tsx:245
+https://s3.tradingview.com/external-embedding/embed-widget-stock-heatmap.js,GET,TradingView,TradingViewWidgets.tsx:143
+https://s3.tradingview.com/external-embedding/embed-widget-technical-analysis.js,GET,TradingView,TradingViewWidgets.tsx:70
+https://s3.tradingview.com/external-embedding/embed-widget-ticker-tape.js,GET,TradingView,TradingViewWidgets.tsx:17
+https://s3.tradingview.com/tv.js,GET,TradingView,TradingViewWidgets.tsx:216
+https://kayal.trendlyne.com/,GET,Trendlyne,"trendlyneScreener.ts:430, trendlyneScreener.ts:558, trendlyneScreener.ts:767"
+https://kayal.trendlyne.com/broker-webview/kayal/,GET,Trendlyne,explore_mc_tl.py:828
+https://kayal.trendlyne.com/broker-webview/kayal/all-in-one-screener-data-get/,GET,Trendlyne,trendlyneScreener.ts:14
+https://kayal.trendlyne.com/broker-webview/kayal/all-in-one-screener-data-get/?perPageCount=${perPageCount}&pageNumber=0&screenpk=${screenpk}&groupType=all&groupName=,GET,Trendlyne,mcApiService.ts:831
+https://kayal.trendlyne.com/broker-webview/kayal/all-in-one-screener-data-get/?perPageCount=200&pageNumber=0&screenpk={}&groupType=all&groupName=,GET,Trendlyne,test.py:1
+https://kayal.trendlyne.com/x/get/?perPageCount=200&pageNumber=0&screenpk=19814&groupType=all,GET,Trendlyne,test_url_explorer_normalizer.py:24
+https://kayal.trendlyne.com/x/get/?perPageCount=200&pageNumber=0&screenpk=3057&groupType=all,GET,Trendlyne,test_url_explorer_normalizer.py:25
+https://kayal.trendlyne.com/x/get/?perPageCount=200&pageNumber=0&screenpk=6211&groupType=all,GET,Trendlyne,test_url_explorer_normalizer.py:26
+https://smartoptions.trendlyne.com/dashboard/options/,GET,Trendlyne,fnoService.ts:233
+https://smartoptions.trendlyne.com/phoenix/api/fno/market/filter/?mtype=${mtype}&expDate=${dates.iso}&screenType=${screenType},GET,Trendlyne,fnoService.ts:223
+https://smartoptions.trendlyne.com/phoenix/api/fno/option/chain/?stockCode=${stockCode}&expDate=${expDate},GET,Trendlyne,trendlyneService.ts:476
+https://trendlyne.com/,GET,Trendlyne,"marketData.ts:314, marketData.ts:354, trendlyneService.ts:14, trendlyneService.ts:325, trendlyneService.ts:362"
+https://trendlyne.com/equity/api/stock/adv-technical-analysis/${tlid}/${dur}/?format=json,GET,Trendlyne,trendlyneService.ts:323
+https://trendlyne.com/equity/getStockMetricParameterList/${tlid}/,GET,Trendlyne,trendlyneService.ts:248
+https://trendlyne.com/equity/overview-second-part/${tlid}/,GET,Trendlyne,trendlyneService.ts:355
+https://trendlyne.com/fundamentals/all-in-one-screener-data-get/?perPageCount=25&pageNumber=0&query=FIIPCT1Q+%3E+1&columns=FIIPCT1Q%2Csholding_date%2CcurrentPrice%2Cday_changeP&groupType=all&groupName=&sortBy=FIIPCT1Q&order=DESC,GET,Trendlyne,explore_mc_tl.py:692
+https://trendlyne.com/fundamentals/all-in-one-screener-data-get/?perPageCount=25&pageNumber=0&query=vol_day+%3E%3D+1.5+*+vol_week&columns=vol_day%2Cvol_week%2CcurrentPrice%2Cday_changeP&groupType=all&groupName=&sortBy=vol_day&order=DESC,GET,Trendlyne,explore_mc_tl.py:695
+https://trendlyne.com/fundamentals/api/sector-rotation/indices/?format=json&metric=count,GET,Trendlyne,trendlyneService.ts:424
+https://trendlyne.com/fundamentals/api/sector-rotation/sector/?format=json&metric=count,GET,Trendlyne,trendlyneService.ts:401
+https://trendlyne.com/fundamentals/json-screener/${screenerId}/5/0/index/NIFTY500/nifty-500/,GET,Trendlyne,marketData.ts:309
+https://trendlyne.com/fundamentals/json-screener/{pk}/5/0/index/NIFTY500/nifty-500/,GET,Trendlyne,explore_mc_tl.py:677
+https://trendlyne.com/fundamentals/tl-all-in-one-screener-data-get/?screenpk=${screenpk}&perPageCount=${limit}&groupType=all&groupName=all,GET,Trendlyne,marketData.ts:349
+https://trendlyne.com/fundamentals/tl-all-in-one-screener-data-get/?screenpk=19814&perPageCount=25&groupType=index&groupName=NIFTY500&groupSlug=nifty-500,GET,Trendlyne,explore_mc_tl.py:701
+https://trendlyne.com/fundamentals/tl-all-in-one-screener-data-get/?screenpk=515760&perPageCount=25&groupType=all&groupName=all,GET,Trendlyne,explore_mc_tl.py:698
+https://trendlyne.com/fundamentals/tl-all-in-one-screener-data-get/?screenpk={pk}&perPageCount=25&groupType=all&groupName=all,GET,Trendlyne,"explore_mc_tl.py:682, explore_mc_tl.py:687"
+https://trendlyne.com/futures-options/api-filter/{inst}/{expiry_slug}-{tenor}/{filter_type}{path_suffix},GET,Trendlyne,explore_mc_tl.py:709
+https://trendlyne.com/futures-options/api/heatmap/${dates.trendlyne}-near/all/price/,GET,Trendlyne,fnoService.ts:279
+https://trendlyne.com/futures-options/heatmap/,GET,Trendlyne,fnoService.ts:286
+https://trendlyne.com/mutual-fund/getMFhome/?category={cat},GET,Trendlyne,explore_mc_tl.py:715
+https://trendlyne.com/web-widget/checklist-widget/${map.tlid}/${symbol.toUpperCase()}/,GET,Trendlyne,trendlyneService.ts:107
+https://trendlyne.com/web-widget/qvt-widget/${map.tlid}/${symbol.toUpperCase()}/,GET,Trendlyne,trendlyneService.ts:171
+https://trendlyne.com/web-widget/qvt-widget/1594/INFY/,GET,Trendlyne,test_url_explorer_normalizer.py:43
+https://trendlyne.com/web-widget/qvt-widget/533/HDFCBANK/,GET,Trendlyne,test_url_explorer_normalizer.py:42
+https://trendlyne.com/web-widget/swot-widget/${map.tlid}/${symbol.toUpperCase()}/,GET,Trendlyne,trendlyneService.ts:53
+https://fc.yahoo.com,GET,Yahoo Finance,"backfill_sector_industry.py:59, fundamentalsSyncService.ts:90, liveStockData.ts:57"
+https://in.finance.yahoo.com/news/rss,GET,Yahoo Finance,newsSentimentService.ts:97
+https://query1.finance.yahoo.com/v8/finance/chart/${symbol}.NS?interval=1d&range=1d,GET,Yahoo Finance,liveStockData.ts:196
+https://query2.finance.yahoo.com/v1/test/getcrumb,GET,Yahoo Finance,"backfill_sector_industry.py:61, fundamentalsSyncService.ts:99, liveStockData.ts:67"
+"https://query2.finance.yahoo.com/v10/finance/quoteSummary/${symbol}.NS?modules=financialData,defaultKeyStatistics&crumb=${encodeURIComponent(auth.crumb)}",GET,Yahoo Finance,fundamentalsSyncService.ts:363
+https://query2.finance.yahoo.com/v10/finance/quoteSummary/{symbol}.NS,GET,Yahoo Finance,backfill_sector_industry.py:74
+https://query2.finance.yahoo.com/v7/finance/quote?symbols=${yfSymbols}${crumbParam},GET,Yahoo Finance,liveStockData.ts:141
+https://query2.finance.yahoo.com/v7/finance/quote?symbols=${yfSymbols}&fields=${fields}&crumb=${encodeURIComponent(auth.crumb)},GET,Yahoo Finance,fundamentalsSyncService.ts:250
+https://query2.finance.yahoo.com/v8/finance/chart/{ticker},GET,Yahoo Finance,backfill_ohlcv.py:55
+https://api.stockedge.com/Api,GET,api.stockedge.com,explore_mc_tl.py:1109
+https://feeds.feedburner.com/ndtvnews-business,GET,feeds.feedburner.com,newsSentimentService.ts:93
+https://feeds.reuters.com/reuters/INbusinessNews,GET,feeds.reuters.com,newsSentimentService.ts:101
+https://feeds.reuters.com/reuters/businessNews,GET,feeds.reuters.com,newsSentimentService.ts:100
+https://finnhub.io/api/v1/quote?symbol=${symbol}.NS&token=${apiKey},GET,finnhub.io,liveStockData.ts:283
+https://frapi.marketsmojo.com,GET,frapi.marketsmojo.com,explore_mc_tl.py:987
+https://github.com),GET,github.com),newsSentimentService.ts:271
+https://news.google.com/rss/search?q=${q}&hl=en-IN&gl=IN&ceid=IN:en,GET,news.google.com,newsSentimentService.ts:349
+https://ticker.finology.in,GET,ticker.finology.in,explore_mc_tl.py:945
+https://trading80.com/api,GET,trading80.com,explore_mc_tl.py:1161
+https://www.business-standard.com/rss/companies-101.rss,GET,www.business-standard.com,newsSentimentService.ts:83
+https://www.business-standard.com/rss/markets-106.rss,GET,www.business-standard.com,newsSentimentService.ts:82
+https://www.cnbctv18.com/commonfeeds/v1/cne/rss/market.xml,GET,www.cnbctv18.com,newsSentimentService.ts:96
+https://www.financialexpress.com/market/feed/,GET,www.financialexpress.com,newsSentimentService.ts:94
+https://www.ft.com/rss/home/uk,GET,www.ft.com,newsSentimentService.ts:102
+https://www.livemint.com/rss/companies,GET,www.livemint.com,newsSentimentService.ts:85
+https://www.livemint.com/rss/markets,GET,www.livemint.com,newsSentimentService.ts:84
+https://www.thehindubusinessline.com/markets/?service=rss,GET,www.thehindubusinessline.com,newsSentimentService.ts:92
+https://www.zeebiz.com/market-news/rss.xml,GET,www.zeebiz.com,newsSentimentService.ts:95

@@ -62,6 +62,7 @@ export const V2AppShell: React.FC<V2AppShellProps> = ({
     { label: 'Watchlist', id: 'watchlist', icon: Bookmark },
     { label: 'Settings', id: 'settings', icon: Settings },
     { label: 'Monitor',  id: 'monitor',  icon: MonitorDot },
+    { label: 'Jobs',     id: 'jobs',     icon: Calendar },
   ];
 
   return (

@@ -1,4 +1,30 @@
 import "dotenv/config";
+
+// Suppress ioredis connection-time WARN about Redis 7 + requirepass ACL mismatch.
+// Every one of the 88 BullMQ connections logs this on startup — it's cosmetic;
+// auth still works (88 clients connected, zero rejections).
+const _origWarn = console.warn.bind(console);
+console.warn = (...args: unknown[]) => {
+  const msg = String(args[0] ?? '');
+  if (msg.includes('does not require a password')) return;
+  _origWarn(...args);
+};
+
+// EPIPE and ETIMEDOUT on startup are harmless ioredis reconnection noise caused by
+// TIME_WAIT sockets from the previous server instance. ioredis auto-reconnects.
+// Without this handler, Node.js escalates them to uncaughtException and PM2 logs the
+// full stack trace on every restart.
+process.on('uncaughtException', (err: any) => {
+  if (err.code === 'EPIPE' || err.code === 'ETIMEDOUT') return;
+  console.error('[UNCAUGHT EXCEPTION]', err);
+  process.exit(1);
+});
+process.on('unhandledRejection', (reason: any) => {
+  if (reason?.code === 'EPIPE' || reason?.code === 'ETIMEDOUT') return;
+  console.error('[UNHANDLED REJECTION]', reason);
+  process.exit(1);
+});
+
 import express from "express";
 import { createServer as createHttpServer } from "http";
 
@@ -33,12 +59,19 @@ async function startServer() {
   
   // Initialise Redis cache (gracefully falls back to in-memory if Redis is down)
   const cacheStarted = await initCache();
-  
+
   if (!cacheStarted) {
-    console.log('[SERVER] Redis not found. Attempting to start local Redis server...');
-    const redisLaunched = await startRedis();
-    if (redisLaunched) {
-      await initCache(); // Try connecting again
+    // Only spawn a local redis-server.exe when no external Redis is configured.
+    // If REDIS_PASSWORD is set the user has Docker/remote Redis — don't conflict with it.
+    const hasExternalRedis = !!process.env.REDIS_PASSWORD || !!process.env.REDIS_HOST;
+    if (!hasExternalRedis) {
+      console.log('[SERVER] Redis not found. Attempting to start local Redis server...');
+      const redisLaunched = await startRedis();
+      if (redisLaunched) {
+        await initCache(); // Try connecting again
+      }
+    } else {
+      console.log('[SERVER] External Redis configured — skipping local redis-server.exe spawn; will retry automatically.');
     }
   }
 
@@ -55,7 +88,7 @@ async function startServer() {
   // ── Technical signals: schedule daily + fallback ──────────────────────────
   const { getTechnicalSignalCount, runTechnicalSignalScan } = await import('./src/server/technicalSignalsService');
   const { technicalSignalsQueue } = await import('./src/server/queues');
-  const signalCount = getTechnicalSignalCount();
+  const signalCount = await getTechnicalSignalCount();
 
   if (bullmqReady && technicalSignalsQueue) {
     if (signalCount === 0) {
@@ -122,7 +155,7 @@ async function startServer() {
   // ─── ETnow screener stocks: first-time trigger ───────────────────────────
   const { getETnowStockCount, syncETnowScreeners } = await import('./src/server/etnowScreenerSync');
   const { etnowScreenerSyncQueue } = await import('./src/server/queues');
-  const etnowStockCount = getETnowStockCount();
+  const etnowStockCount = await getETnowStockCount();
 
   if (etnowStockCount === 0) {
     if (bullmqReady && etnowScreenerSyncQueue) {
@@ -210,6 +243,88 @@ async function startServer() {
   // JSON body parser with increased limit for large payloads (e.g. stock list sync)
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+  // MoneyControl API Proxy
+  app.all('/mcapi/*', async (req, res) => {
+    try {
+      let path = req.originalUrl;
+
+      // Normalize common variants of endpoints in the user request
+      // 1. Fundamentals/Get Indices Details
+      if (path.includes('/indices/fundamentals/get-indices-details')) {
+        path = path.replace('/indices/fundamentals/get-indices-details', '/indices/get-indices-details');
+      }
+      
+      // 2. Financial Historical Overview
+      if (path.includes('/financial-historical/overview') && !path.includes('/stock/financial-historical/overview')) {
+        path = path.replace('/financial-historical/overview', '/stock/financial-historical/overview');
+      }
+
+      // 3. Earning / Price / Consensus / Valuation Forecasts
+      if (path.includes('/earning-forecast') && !path.includes('/stock/estimates/earning-forecast')) {
+        path = path.replace('/earning-forecast', '/stock/estimates/earning-forecast');
+      }
+      if (path.includes('/price-forecast') && !path.includes('/stock/estimates/price-forecast')) {
+        path = path.replace('/price-forecast', '/stock/estimates/price-forecast');
+      }
+      if (path.includes('/consensus') && !path.includes('/stock/estimates/consensus')) {
+        path = path.replace('/consensus', '/stock/estimates/consensus');
+      }
+      if (path.includes('/valuation') && !path.includes('/stock/estimates/valuation')) {
+        path = path.replace('/valuation', '/stock/estimates/valuation');
+      }
+
+      // 4. SWOT and essentials/insights
+      if (path.includes('/mcapi/v1/mc-insights')) {
+        path = path.replace('/mcapi/v1/mc-insights', '/mcapi/v1/extdata/mc-insights');
+      }
+      if (path.includes('/mcapi/v1/mc-essentials')) {
+        path = path.replace('/mcapi/v1/mc-essentials', '/mcapi/v1/extdata/mc-essentials');
+      }
+
+      // 5. Normalize v1/stock/extdata/v2 -> extdata/v2 (newer, more stable API)
+      if (path.includes('/mcapi/v1/stock/extdata/v2/')) {
+        path = path.replace('/mcapi/v1/stock/extdata/v2/', '/mcapi/extdata/v2/');
+      }
+
+      // 6. Normalize mc-insights 422 error by rewriting /mcapi/v1/extdata/mc-insights with deviceType/appVersion to v2
+      // (MoneyControl's v1 insights endpoint returns 422 if deviceType/appVersion query params are present, but v2 supports them)
+      if (path.includes('/mcapi/v1/extdata/mc-insights') && (path.includes('deviceType') || path.includes('appVersion'))) {
+        path = path.replace('/mcapi/v1/extdata/mc-insights', '/mcapi/extdata/v2/mc-insights');
+      }
+
+      const targetUrl = `https://api.moneycontrol.com${path}`;
+      
+      const response = await fetch(targetUrl, {
+        method: req.method,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'application/json, text/plain, */*',
+          'Referer': 'https://www.moneycontrol.com/'
+        },
+        signal: AbortSignal.timeout(15000)
+      });
+
+      if (!response.ok) {
+        res.status(response.status).send(await response.text());
+        return;
+      }
+
+      const contentType = response.headers.get('content-type') || '';
+      res.setHeader('Content-Type', contentType);
+      
+      if (contentType.includes('application/json')) {
+        const json = await response.json();
+        res.json(json);
+      } else {
+        const text = await response.text();
+        res.send(text);
+      }
+    } catch (error: any) {
+      console.error(`Error proxying to MoneyControl API: ${req.originalUrl}`, error);
+      res.status(500).json({ error: error?.message || 'Failed to fetch from MoneyControl API' });
+    }
+  });
 
   // tRPC middleware
   app.use(

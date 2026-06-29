@@ -5,6 +5,7 @@ import { dbGet, dbAll, dbRun } from "../dbAsync";
 import { router, publicProcedure } from "../trpc";
 import { runPython } from '../pythonRunner';
 import { fetchIndexAdvanceDecline, fetchIndiaVix, fetchLiveMarketScreener, fetchEODMarketScreener } from '../marketIntelService';
+import * as queueModule from '../queues';
 
 export const MONITOR_SCRIPTS = [
   {
@@ -569,4 +570,191 @@ export const monitorRouter = router({
     }
     return { started: dailyScripts.length };
   }),
+
+  getBullMQJobsStatus: publicProcedure.query(async () => {
+    const queueList = [
+      { id: 'stock-refresh', q: queueModule.stockRefreshQueue, label: 'Stock Price Refresh', desc: 'Refreshes live NSE stock quotes (5-min intervals during market hours)', category: 'data-sync' },
+      { id: 'ai-signals', q: queueModule.aiSignalsQueue, label: 'AI Signal Analyzer', desc: 'Runs LLM stock scans and actionability gates', category: 'machine-learning' },
+      { id: 'stock-scoring', q: queueModule.stockScoringQueue, label: 'Stock Scoring Sync', desc: 'Aggregates screeners, technicals, and calculates composite scores', category: 'machine-learning' },
+      { id: 'mc-screener-sync', q: queueModule.mcScreenerSyncQueue, label: 'MoneyControl Sync', desc: 'Pulls positive and negative stock scans from MoneyControl', category: 'data-sync' },
+      { id: 'etnow-screener-sync', q: queueModule.etnowScreenerSyncQueue, label: 'ETNow Sync', desc: 'Synchronizes ETNow screener lists and breakouts', category: 'data-sync' },
+      { id: 'nse-sync', q: queueModule.nseScreenerSyncQueue, label: 'NSE Master Sync', desc: 'Weekly synchronization of the NSE master stock list', category: 'data-sync' },
+      { id: 'fundamentals-sync', q: queueModule.fundamentalsSyncQueue, label: 'Fundamentals Sync', desc: 'Fetches company financials and ratios', category: 'data-sync' },
+      { id: 'quant-scoring', q: queueModule.quantScoringQueue, label: 'Quant Score Engine', desc: 'Calculates momentum and volatility ranks', category: 'machine-learning' },
+      { id: 'technical-signals', q: queueModule.technicalSignalsQueue, label: 'Technical Signal Scan', desc: 'Scans technical indicators (EMA, RSI, MACD, BB)', category: 'signals-analysis' },
+      { id: 'signal-outcomes', q: queueModule.signalOutcomesQueue, label: 'Signal Outcome Tracker', desc: 'Resolves outcome targets (WIN/LOSS) over time horizons', category: 'signals-analysis' },
+      { id: 'news-sentiment', q: queueModule.newsSentimentQueue, label: 'FinBERT News Scorer', desc: 'Scores news headlines using deep learning NLP', category: 'machine-learning' },
+      { id: 'trendlyne-intraday', q: queueModule.trendlyneIntradayQueue, label: 'Trendlyne Intraday Scan', desc: 'Scans Trendlyne screener breakouts (15-min intervals)', category: 'signals-analysis' },
+      { id: 'outcome-resolver', q: queueModule.outcomeResolverQueue, label: 'Outcome Resolver', desc: 'Validates target payouts and exits', category: 'signals-analysis' },
+      { id: 'ml-daily-ops', q: queueModule.mlDailyOpsQueue, label: 'ML Inference Ops', desc: 'Scores pending signals with the stacking ensemble', category: 'machine-learning' },
+      { id: 'ml-weekly-retrain', q: queueModule.mlWeeklyRetrainQueue, label: 'ML Retraining Ops', desc: 'Retrains stacking classifier and runs strategy optimizer', category: 'machine-learning' },
+      { id: 'intraday-fetcher', q: queueModule.intradayFetcherQueue, label: 'Intraday Bar Fetcher', desc: 'Fetches 15-min OHLCV bars during market hours', category: 'data-sync' },
+      { id: 'live-screener-collect', q: queueModule.liveScreenerCollectQueue, label: 'Live Screener Poller', desc: 'Polls active screeners during market hours', category: 'data-sync' },
+      { id: 'research-premarket', q: queueModule.researchPremarketQueue, label: 'Premarket Intelligence', desc: 'Aggregates preopen indicators and macro reports', category: 'system-research' },
+      { id: 'research-postclose', q: queueModule.researchPostcloseQueue, label: 'Postclose Aggregator', desc: 'Compiles close-of-day analytics', category: 'system-research' },
+      { id: 'dl-macro-fetch', q: queueModule.dlMacroFetchQueue, label: 'DL Macro Fetcher', desc: 'Synchronizes macro indicators (US yields, Crude, Gold)', category: 'data-sync' },
+      { id: 'dl-feature-refresh', q: queueModule.dlFeatureRefreshQueue, label: 'DL Feature Refresh', desc: 'Calculates deep learning feature store rows', category: 'machine-learning' },
+      { id: 'dl-inference', q: queueModule.dlInferenceQueue, label: 'DL Model Inference', desc: 'Generates deep learning predictions (LSTM model)', category: 'machine-learning' },
+      { id: 'dl-regime-update', q: queueModule.dlRegimeUpdateQueue, label: 'HMM Regime Update', desc: 'Updates market regime HMM classifier states', category: 'machine-learning' },
+      { id: 'dl-retrain-weekly', q: queueModule.dlRetrainWeeklyQueue, label: 'DL Weekly Retrainer', desc: 'Retrains deep learning LSTM models', category: 'machine-learning' },
+      { id: 'ohlcv-backfill', q: queueModule.ohlcvBackfillQueue, label: 'OHLCV Gap Filler', desc: 'Fills historical data gaps from Yahoo Finance', category: 'data-sync' },
+      { id: 'confluence-compute', q: queueModule.confluenceComputeQueue, label: 'Confluence Engine', desc: 'Computes multi-indicator confluence scores', category: 'signals-analysis' },
+      { id: 'confluence-outcomes', q: queueModule.confluenceOutcomesQueue, label: 'Confluence Outcomes', desc: 'Tracks confluence signal outcomes', category: 'signals-analysis' },
+      { id: 'screener-performance', q: queueModule.screenerPerfQueue, label: 'Screener Perf Optimizer', desc: 'Runs Bayesian analysis on screener performance', category: 'machine-learning' },
+      { id: 'agent-data-scientist', q: queueModule.agentDataScientistQueue, label: 'Agent: Data Scientist', desc: 'Autonomous data inspection and reporting agent', category: 'agents' },
+      { id: 'agent-strategist', q: queueModule.agentStrategistQueue, label: 'Agent: Strategist', desc: 'Optimizes strategy allocation weights', category: 'agents' },
+      { id: 'agent-auditor', q: queueModule.agentAuditorQueue, label: 'Agent: Auditor', desc: 'Validates data integrity and logs anomalies', category: 'agents' },
+      { id: 'agent-optimizer', q: queueModule.agentOptimizerQueue, label: 'Agent: Optimizer', desc: 'Model tuning optimizer', category: 'agents' },
+      { id: 'unified-ranker', q: queueModule.unifiedRankerQueue, label: 'Unified Daily Ranker', desc: 'Generates daily top EOD picks', category: 'agents' },
+    ];
+
+    const results = await Promise.all(
+      queueList.map(async (item) => {
+        const q = item.q;
+        if (!q) {
+          return {
+            id: item.id,
+            label: item.label,
+            desc: item.desc,
+            category: item.category,
+            connected: false,
+            activeCount: 0,
+            waitingCount: 0,
+            completedCount: 0,
+            failedCount: 0,
+            delayedCount: 0,
+            repeatable: [] as any[],
+            recentJobs: [] as any[],
+          };
+        }
+
+        try {
+          const [active, waiting, completed, failed, delayed, repeatableJobs] = await Promise.all([
+            q.getActiveCount(),
+            q.getWaitingCount(),
+            q.getCompletedCount(),
+            q.getFailedCount(),
+            q.getDelayedCount(),
+            q.getRepeatableJobs(),
+          ]);
+
+          // Fetch recent completed/failed/active/waiting jobs
+          const [completedJobs, failedJobs, activeJobs, waitingJobs] = await Promise.all([
+            q.getJobs(['completed'], 0, 5, true),
+            q.getJobs(['failed'], 0, 5, true),
+            q.getJobs(['active'], 0, 5, true),
+            q.getJobs(['waiting'], 0, 5, true),
+          ]);
+
+          const formatJob = (job: any, state: string) => ({
+            id: job.id,
+            name: job.name,
+            progress: typeof job.progress === 'number' ? job.progress : 0,
+            failedReason: job.failedReason ?? null,
+            processedOn: job.processedOn ?? null,
+            finishedOn: job.finishedOn ?? null,
+            timestamp: job.timestamp,
+            state,
+          });
+
+          const jobs = [
+            ...activeJobs.map(j => formatJob(j, 'active')),
+            ...waitingJobs.map(j => formatJob(j, 'waiting')),
+            ...failedJobs.map(j => formatJob(j, 'failed')),
+            ...completedJobs.map(j => formatJob(j, 'completed')),
+          ].slice(0, 10); // Limit to top 10 overall recent jobs
+
+          return {
+            id: item.id,
+            label: item.label,
+            desc: item.desc,
+            category: item.category,
+            connected: true,
+            activeCount: active,
+            waitingCount: waiting,
+            completedCount: completed,
+            failedCount: failed,
+            delayedCount: delayed,
+            repeatable: repeatableJobs.map((r: any) => ({
+              key: r.key,
+              name: r.name,
+              cron: r.cron || (r.every ? `Every ${r.every / 1000}s` : 'unknown'),
+              next: r.next ? new Date(r.next).toISOString() : null,
+            })),
+            recentJobs: jobs,
+          };
+        } catch (err: any) {
+          return {
+            id: item.id,
+            label: item.label,
+            desc: item.desc,
+            category: item.category,
+            connected: false,
+            activeCount: 0,
+            waitingCount: 0,
+            completedCount: 0,
+            failedCount: 0,
+            delayedCount: 0,
+            repeatable: [] as any[],
+            recentJobs: [] as any[],
+            error: err.message,
+          };
+        }
+      })
+    );
+
+    return results;
+  }),
+
+  triggerBullMQJob: publicProcedure
+    .input(z.object({ queueId: z.string() }))
+    .mutation(async ({ input }) => {
+      const queueList = [
+        { id: 'stock-refresh', q: queueModule.stockRefreshQueue },
+        { id: 'ai-signals', q: queueModule.aiSignalsQueue },
+        { id: 'stock-scoring', q: queueModule.stockScoringQueue },
+        { id: 'mc-screener-sync', q: queueModule.mcScreenerSyncQueue },
+        { id: 'etnow-screener-sync', q: queueModule.etnowScreenerSyncQueue },
+        { id: 'nse-sync', q: queueModule.nseScreenerSyncQueue },
+        { id: 'fundamentals-sync', q: queueModule.fundamentalsSyncQueue },
+        { id: 'quant-scoring', q: queueModule.quantScoringQueue },
+        { id: 'technical-signals', q: queueModule.technicalSignalsQueue },
+        { id: 'signal-outcomes', q: queueModule.signalOutcomesQueue },
+        { id: 'news-sentiment', q: queueModule.newsSentimentQueue },
+        { id: 'trendlyne-intraday', q: queueModule.trendlyneIntradayQueue },
+        { id: 'outcome-resolver', q: queueModule.outcomeResolverQueue },
+        { id: 'ml-daily-ops', q: queueModule.mlDailyOpsQueue },
+        { id: 'ml-weekly-retrain', q: queueModule.mlWeeklyRetrainQueue },
+        { id: 'intraday-fetcher', q: queueModule.intradayFetcherQueue },
+        { id: 'live-screener-collect', q: queueModule.liveScreenerCollectQueue },
+        { id: 'research-premarket', q: queueModule.researchPremarketQueue },
+        { id: 'research-postclose', q: queueModule.researchPostcloseQueue },
+        { id: 'dl-macro-fetch', q: queueModule.dlMacroFetchQueue },
+        { id: 'dl-feature-refresh', q: queueModule.dlFeatureRefreshQueue },
+        { id: 'dl-inference', q: queueModule.dlInferenceQueue },
+        { id: 'dl-regime-update', q: queueModule.dlRegimeUpdateQueue },
+        { id: 'dl-retrain-weekly', q: queueModule.dlRetrainWeeklyQueue },
+        { id: 'ohlcv-backfill', q: queueModule.ohlcvBackfillQueue },
+        { id: 'confluence-compute', q: queueModule.confluenceComputeQueue },
+        { id: 'confluence-outcomes', q: queueModule.confluenceOutcomesQueue },
+        { id: 'screener-performance', q: queueModule.screenerPerfQueue },
+        { id: 'agent-data-scientist', q: queueModule.agentDataScientistQueue },
+        { id: 'agent-strategist', q: queueModule.agentStrategistQueue },
+        { id: 'agent-auditor', q: queueModule.agentAuditorQueue },
+        { id: 'agent-optimizer', q: queueModule.agentOptimizerQueue },
+        { id: 'unified-ranker', q: queueModule.unifiedRankerQueue },
+      ];
+
+      const match = queueList.find(x => x.id === input.queueId);
+      if (!match) throw new Error(`Unknown queue: ${input.queueId}`);
+      const q = match.q;
+      if (!q) throw new Error(`Queue ${input.queueId} is offline/disconnected`);
+
+      const job = await q.add(`manual-${input.queueId}-${Date.now()}`, {}, {
+        removeOnComplete: 10,
+        removeOnFail: 20,
+      });
+
+      return { success: true, jobId: job.id, message: `Successfully queued manual job in ${input.queueId}` };
+    }),
 });

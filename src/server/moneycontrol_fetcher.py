@@ -353,7 +353,7 @@ class MoneyControlFetcher:
         # Endpoints
         endpoints = {
             "technicals": f"https://api.moneycontrol.com/mcapi/v1/stock/technicals/v2/details?deviceType=W&scId={mcsymbol}&ex=N",
-            "essentials": f"https://api.moneycontrol.com/mcapi/v1/stock/extdata/v2/mc-essentials?deviceType=W&scId={mcsymbol}&ex=N",
+            "essentials": f"https://api.moneycontrol.com/mcapi/extdata/v2/mc-essentials?deviceType=W&scId={mcsymbol}&type=ed&ex=N",
             "insights": f"https://api.moneycontrol.com/mcapi/v1/stock/extdata/v2/mc-insights?deviceType=W&scId={mcsymbol}&ex=N",
             "analyst_rating": f"https://api.moneycontrol.com/mcapi/v1/stock/estimates/analyst-rating?deviceType=W&scId={mcsymbol}&ex=N",
             "price_forecast": f"https://api.moneycontrol.com/mcapi/v1/stock/estimates/price-forecast?scId={mcsymbol}&ex=N&deviceType=W",

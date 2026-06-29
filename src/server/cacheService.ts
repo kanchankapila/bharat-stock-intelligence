@@ -9,21 +9,30 @@ let redisAvailable = false;
 function createRedisClient(): Redis | null {
   const { host, port, password } = REDIS_BASE;
 
-  const client = new Redis({ 
-    host, 
-    port, 
-    password, 
-    lazyConnect: true, 
-    connectTimeout: 3000, 
+  const client = new Redis({
+    host,
+    port,
+    password,
+    lazyConnect: true,
+    connectTimeout: 5000,
     enableOfflineQueue: false,
-    autoResubscribe: false,
+    autoResubscribe: true,
     maxRetriesPerRequest: 0,
-    retryStrategy: () => null // Stop retrying immediately
+    // Reconnect with backoff: 200ms → 1s → 5s, give up after 10 attempts.
+    // This handles transient Docker networking blips without permanently losing Redis.
+    retryStrategy: (times) => {
+      if (times > 10) return null;
+      return Math.min(times * 200, 5000) + Math.floor(Math.random() * 100);
+    },
   });
 
   client.on('connect', () => {
     redisAvailable = true;
     console.log(`[CACHE] Redis connected at ${host}:${port}`);
+  });
+
+  client.on('ready', () => {
+    redisAvailable = true;
   });
 
   client.on('error', (err) => {
@@ -35,6 +44,10 @@ function createRedisClient(): Redis | null {
 
   client.on('close', () => {
     redisAvailable = false;
+  });
+
+  client.on('reconnecting', () => {
+    console.log('[CACHE] Redis reconnecting...');
   });
 
   return client;

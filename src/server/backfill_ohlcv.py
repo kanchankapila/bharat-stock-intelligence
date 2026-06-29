@@ -1,6 +1,41 @@
 import asyncio
 
 from db_compat import connect
+from datetime import date as _date_type
+
+
+# ── Market holiday helpers ────────────────────────────────────────────────────
+
+_holiday_cache: set[str] | None = None
+
+
+def _load_holidays(conn) -> set[str]:
+    """Load NSE market holidays from DB into a date-string set (YYYY-MM-DD)."""
+    global _holiday_cache
+    if _holiday_cache is not None:
+        return _holiday_cache
+    try:
+        rows = conn.execute(
+            "SELECT date FROM market_holidays WHERE exchange='NSE'"
+        ).fetchall()
+        _holiday_cache = {str(r[0])[:10] for r in rows}
+    except Exception:
+        _holiday_cache = set()
+    return _holiday_cache
+
+
+def is_market_holiday(date_str: str, conn) -> bool:
+    """Return True if date_str (YYYY-MM-DD) is a known NSE holiday."""
+    return date_str in _load_holidays(conn)
+
+
+def filter_holiday_records(records: list, conn) -> tuple[list, list]:
+    """Split records into (trading_day_records, holiday_records)."""
+    holidays = _load_holidays(conn)
+    trading, skipped = [], []
+    for rec in records:
+        (skipped if rec[1] in holidays else trading).append(rec)
+    return trading, skipped
 
 
 def _run_async(coro):
@@ -284,13 +319,19 @@ def _download_one(symbol: str) -> pd.DataFrame | None:
     return None
 
 def _upsert(conn, records: list):
+    trading, skipped = filter_holiday_records(records, conn)
+    if skipped:
+        holiday_dates = {r[1] for r in skipped}
+        print(f"[HOLIDAY] Skipping {len(skipped)} rows on market holidays: {sorted(holiday_dates)}")
+    if not trading:
+        return
     conn.executemany(
         "INSERT INTO stock_ohlcv (symbol, date, open, high, low, close, volume) "
         "VALUES (?, ?, ?, ?, ?, ?, ?) "
         "ON CONFLICT(symbol, date) DO UPDATE SET "
         "open=excluded.open, high=excluded.high, low=excluded.low, "
         "close=excluded.close, volume=excluded.volume",
-        records,
+        trading,
     )
     conn.commit()
 
@@ -349,16 +390,25 @@ def fetch_and_store(conn, symbols: list, batch_size: int = 50):
     else:
         print("\n[OK] All symbols backfilled successfully!")
 
-INDEX_TICKERS = {
-    "NIFTY50": "^NSEI",
+_INDEX_TICKERS_FALLBACK = {
+    "NIFTY50": "^NSEI", "NIFTYBANK": "^NSEBANK", "NIFTYIT": "^CNXIT",
+    "NIFTYPHARMA": "^CNXPHARMA", "NIFTYAUTO": "^CNXAUTO", "NIFTYFMCG": "^CNXFMCG",
+    "NIFTYMETAL": "^CNXMETAL", "NIFTYMIDCAP": "^NSEMDCP50", "NIFTYSMALLCAP": "^CNXSC",
+    "NIFTYREALTY": "^CNXREALTY", "NIFTYENERGY": "^CNXENERGY", "NIFTYINFRA": "^CNXINFRA",
 }
+
+def _get_index_tickers() -> dict[str, str]:
+    """Load {index_name: yahoo_ticker} from DB (provider='yahoo')."""
+    from db_compat import load_index_map_inv
+    m = load_index_map_inv("yahoo")
+    return m if m else _INDEX_TICKERS_FALLBACK
 
 
 def fetch_indices(conn) -> None:
     """Backfill index OHLCV data — not in nse_stocks, fetched separately."""
     import pandas as pd
 
-    for label, ticker in INDEX_TICKERS.items():
+    for label, ticker in _get_index_tickers().items():
         try:
             df = yf.download(ticker, period="2y", progress=False, auto_adjust=True)
             if df is None or df.empty:
@@ -399,7 +449,8 @@ def gap_fill(conn, lookback_days: int = 30) -> None:
     batch_size = 50
     for i in range(0, len(symbols), batch_size):
         batch = symbols[i:i + batch_size]
-        tickers = [f"{YAHOO_SYMBOL_MAP.get(s, s)}.NS" if s not in INDEX_TICKERS else INDEX_TICKERS.get(s, s)
+        _idx_map = _get_index_tickers()
+        tickers = [f"{YAHOO_SYMBOL_MAP.get(s, s)}.NS" if s not in _idx_map else _idx_map[s]
                    for s in batch]
 
         existing = {}
@@ -431,7 +482,7 @@ def gap_fill(conn, lookback_days: int = 30) -> None:
             print(f"[GAP-FILL] Error in batch {i//batch_size + 1}: {e}")
 
     # Also gap-fill indices
-    for label, ticker in INDEX_TICKERS.items():
+    for label, ticker in _get_index_tickers().items():
         try:
             existing_dates = {str(r[0])[:10] for r in conn.execute(
                 "SELECT date FROM stock_ohlcv WHERE symbol=? AND date>=?", (label, cutoff_d)

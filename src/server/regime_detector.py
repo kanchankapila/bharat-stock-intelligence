@@ -57,9 +57,9 @@ def _load_hmm_features(lookback_days: int = 756,
     log_ret = np.log(nifty["close"] / nifty["close"].shift(1))
     df["nifty_vol_21d"]       = log_ret.rolling(21).std() * np.sqrt(252)
 
-    # VIX proxy from macro_asset_prices
+    # India VIX from macro_asset_prices (written daily by global_macro_fetcher.py as 'INDIAVIX')
     vix = _read_dated(
-        "SELECT date, close FROM macro_asset_prices WHERE symbol='NSEBANK' AND date>=? AND date<=? ORDER BY date",
+        "SELECT date, close FROM macro_asset_prices WHERE symbol='INDIAVIX' AND date>=? AND date<=? ORDER BY date",
         (cutoff_d, anchor_d),
     )
     df["nifty_vix"] = vix["close"].reindex(df.index, method="ffill")

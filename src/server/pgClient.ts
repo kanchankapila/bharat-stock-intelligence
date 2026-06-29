@@ -17,9 +17,10 @@ export function getPool(): Pool {
   if (!pool) {
     pool = new Pool({
       connectionString: pgConnectionString(),
-      max: Number(process.env.PG_POOL_MAX ?? 10),
-      idleTimeoutMillis: 30_000,
-      connectionTimeoutMillis: 10_000,
+      // Budget: bharat-server 15 + alphaquant 5 + ml-api 5 + chatbot 3 + Python 10 = 38 / 60 max_connections
+      max: Number(process.env.PG_POOL_MAX ?? 15),
+      idleTimeoutMillis: 20_000,
+      connectionTimeoutMillis: 8_000,  // fail fast — pgQuery retries with backoff so total wait is still ~4s
     });
     pool.on('error', (err) => console.error('[PG] idle client error:', err.message));
   }
@@ -46,20 +47,35 @@ export async function pgQuery<T extends QueryResultRow = QueryResultRow>(
   text: string,
   params: unknown[] = [],
 ): Promise<T[]> {
-  try {
-    const res = await getPool().query<T>(text, params as any[]);
-    return res.rows;
-  } catch (err) {
-    if (!isTransientConnError(err)) throw err;
-    await new Promise((r) => setTimeout(r, 250));
-    const res = await getPool().query<T>(text, params as any[]);
-    return res.rows;
+  // Retry up to 3 times on transient connection errors (PG restart, ECONNRESET, pool timeout).
+  // Backoff: 300ms → 1s → 3s — gives PG container ~4s to come back after an OOM restart.
+  const delays = [300, 1000, 3000];
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= delays.length; attempt++) {
+    try {
+      const res = await getPool().query<T>(text, params as any[]);
+      return res.rows;
+    } catch (err) {
+      if (!isTransientConnError(err)) throw err;
+      lastErr = err;
+      if (attempt < delays.length) {
+        await new Promise((r) => setTimeout(r, delays[attempt]));
+      }
+    }
   }
+  throw lastErr;
 }
 
 /** Run a query and return the raw result (for rowCount / RETURNING handling). */
 export async function pgExecute(text: string, params: unknown[] = []) {
-  return getPool().query(text, params as any[]);
+  // Single retry for writes — safe only for idempotent INSERT/UPDATE; caller decides.
+  try {
+    return await getPool().query(text, params as any[]);
+  } catch (err) {
+    if (!isTransientConnError(err)) throw err;
+    await new Promise((r) => setTimeout(r, 500));
+    return getPool().query(text, params as any[]);
+  }
 }
 
 /** Acquire a client for an explicit transaction; caller MUST release. */

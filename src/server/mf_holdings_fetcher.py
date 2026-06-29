@@ -43,6 +43,11 @@ def _load_stock_map() -> list[dict]:
         """)
         rows = [{"symbol": r[0], "bse_code": r[1], "nse_code": r[2]} for r in cur.fetchall()]
     except Exception:
+        # Clear aborted Postgres transaction state before executing fallback query
+        try:
+            con.rollback()
+        except Exception:
+            pass
         # stock_mf_map doesn't exist yet — use nse_stocks symbol as nse_code
         cur = con.cursor()
         cur.execute("SELECT symbol FROM nse_stocks LIMIT 200")

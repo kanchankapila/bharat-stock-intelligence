@@ -114,6 +114,8 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
         always supplies it (Series); tests / partial joins may not, where df.get(col, scalar)
         would yield a scalar and break .fillna()."""
         s = df[col] if col in df.columns else pd.Series(default, index=df.index)
+        if isinstance(s, pd.DataFrame):
+            s = s.iloc[:, 0]
         return pd.to_numeric(s, errors='coerce').fillna(default)
 
     X['signal_score']  = num('signal_score', 5)

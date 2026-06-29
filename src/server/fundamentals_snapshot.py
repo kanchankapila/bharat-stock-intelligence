@@ -10,6 +10,12 @@ Idempotent per day: re-running overwrites today's snapshot. Run daily, after the
 fundamentals sync. The leakage fix improves with every day this accumulates; until enough
 history exists, the ensemble falls back to the current snapshot (no regression).
 
+pledge_pct (from trendlyne_stock_profile) is also snapshotted daily. After writing, the
+script computes pledge_chg_90d = current pledge_pct minus pledge_pct 90 days ago, and writes
+it to technical_signals so ML engines and the UI can consume the trend:
+  - pledge_chg_90d > +2 : promoter pledging more → financial distress → bearish
+  - pledge_chg_90d < -2 : promoter reducing pledges → deleveraging → bullish
+
 Run:  python fundamentals_snapshot.py
       python fundamentals_snapshot.py --as-of 2026-06-21
 """
@@ -17,7 +23,16 @@ Run:  python fundamentals_snapshot.py
 import argparse
 import datetime
 
-from db_compat import execute
+from db_compat import execute, query_all, use_postgres
+
+# ── Schema migrations (idempotent ADD COLUMN) ────────────────────────────────
+
+_SCHEMA_MIGRATIONS = [
+    "ALTER TABLE fundamentals_history ADD COLUMN pledge_pct REAL",
+    "ALTER TABLE technical_signals ADD COLUMN pledge_chg_90d REAL",
+]
+
+# ── Snapshot SQL ─────────────────────────────────────────────────────────────
 
 # SQLite cannot parse `INSERT ... SELECT ... ON CONFLICT` (parser ambiguity with the SELECT's
 # ON). Delete-then-insert-select is idempotent per day and portable to Postgres.
@@ -26,21 +41,112 @@ _INSERT_SQL = """
 INSERT INTO fundamentals_history
     (symbol, as_of_date, fifty_two_week_high, piotroski_f_score, debt_to_equity,
      operating_margins, return_on_equity, revenue_growth, earnings_growth,
-     earnings_yield, price_to_book, market_cap)
-SELECT symbol, ?, fifty_two_week_high, piotroski_f_score, debt_to_equity,
-       operating_margins, return_on_equity, revenue_growth, earnings_growth,
-       earnings_yield, price_to_book, market_cap
-FROM stock_fundamentals
+     earnings_yield, price_to_book, market_cap, pledge_pct)
+SELECT
+    sf.symbol,
+    ?,
+    sf.fifty_two_week_high,
+    sf.piotroski_f_score,
+    sf.debt_to_equity,
+    sf.operating_margins,
+    sf.return_on_equity,
+    sf.revenue_growth,
+    sf.earnings_growth,
+    sf.earnings_yield,
+    sf.price_to_book,
+    sf.market_cap,
+    tsp.pledge_pct
+FROM stock_fundamentals sf
+LEFT JOIN (
+    SELECT symbol, pledge_pct
+    FROM trendlyne_stock_profile
+    WHERE (symbol, date) IN (
+        SELECT symbol, MAX(date)
+        FROM trendlyne_stock_profile
+        GROUP BY symbol
+    )
+) tsp ON tsp.symbol = sf.symbol
+"""
+
+# ── pledge_chg_90d computation ────────────────────────────────────────────────
+
+# SQLite uses date(x, '-90 days'); Postgres uses x::date - INTERVAL '90 days'.
+# We build the query string at runtime after knowing which DB is in use.
+
+def _pledge_chg_sql(pg: bool) -> str:
+    if pg:
+        hist_cutoff = "cur.as_of_date::date - INTERVAL '90 days'"
+        cur_filter  = "cur.as_of_date = (SELECT MAX(as_of_date) FROM fundamentals_history WHERE symbol = cur.symbol)"
+    else:
+        hist_cutoff = "date(cur.as_of_date, '-90 days')"
+        cur_filter  = "cur.as_of_date = (SELECT MAX(as_of_date) FROM fundamentals_history WHERE symbol = cur.symbol)"
+    return f"""
+SELECT
+    cur.symbol,
+    cur.pledge_pct - hist.pledge_pct AS pledge_chg_90d
+FROM fundamentals_history cur
+JOIN fundamentals_history hist
+    ON hist.symbol = cur.symbol
+    AND hist.as_of_date = (
+        SELECT MAX(h2.as_of_date)
+        FROM fundamentals_history h2
+        WHERE h2.symbol = cur.symbol
+          AND h2.as_of_date <= {hist_cutoff}
+    )
+WHERE {cur_filter}
+  AND cur.pledge_pct  IS NOT NULL
+  AND hist.pledge_pct IS NOT NULL
+"""
+
+# COALESCE update: only overwrite if the computed value is not NULL, preserving
+# any value set by other engines (e.g. trendlyne_overview_fetcher).
+_UPDATE_TS_SQL = """
+UPDATE technical_signals
+SET    pledge_chg_90d = ?
+WHERE  symbol = ?
+  AND  (updated_at IS NULL OR updated_at = (
+           SELECT MAX(updated_at) FROM technical_signals WHERE symbol = ?
+       ))
 """
 
 
+def _ensure_schema() -> None:
+    """Add new columns to existing tables; silently ignore if already present."""
+    for ddl in _SCHEMA_MIGRATIONS:
+        try:
+            execute(ddl)
+        except Exception:
+            pass  # column already exists
+
+
+def _compute_and_write_pledge_trend(pg: bool) -> int:
+    """Compute pledge_chg_90d for all symbols with sufficient history and write to
+    technical_signals. Returns the number of symbols updated."""
+    rows = query_all(_pledge_chg_sql(pg))
+    if not rows:
+        return 0
+    for row in rows:
+        execute(_UPDATE_TS_SQL, (row["pledge_chg_90d"], row["symbol"], row["symbol"]))
+    return len(rows)
+
+
 def run(as_of: str | None = None) -> int:
-    """Snapshot current stock_fundamentals into fundamentals_history for `as_of` (default
-    today). Idempotent: re-running overwrites that day's snapshot. Returns rows written."""
+    """Snapshot current stock_fundamentals (+ pledge_pct from trendlyne_stock_profile) into
+    fundamentals_history for `as_of` (default today). Then computes pledge_chg_90d and writes
+    it to technical_signals. Idempotent: re-running overwrites that day's snapshot.
+    Returns rows written to fundamentals_history."""
     as_of = as_of or datetime.date.today().isoformat()
+    pg    = use_postgres()
+
+    _ensure_schema()
+
     execute(_DELETE_SQL, (as_of,))
     n = execute(_INSERT_SQL, (as_of,))
     print(f"[FUND-SNAP] Wrote {n} fundamentals snapshots as_of {as_of}.")
+
+    n_trend = _compute_and_write_pledge_trend(pg)
+    print(f"[FUND-SNAP] Wrote pledge_chg_90d for {n_trend} symbols → technical_signals.")
+
     return n
 
 
