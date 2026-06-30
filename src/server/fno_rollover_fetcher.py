@@ -34,7 +34,7 @@ from datetime import date, datetime, timedelta
 import pandas as pd
 import requests
 
-from db_compat import connect
+from db_compat import connect, safe_alter
 
 BHAVCOPY_URL = (
     "https://nsearchives.nseindia.com/content/fo/"
@@ -44,7 +44,7 @@ BHAVCOPY_URL = (
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/124.0.0.0"
     ),
     "Accept": "*/*",
     "Referer": "https://nseindia.com/",
@@ -89,10 +89,7 @@ def ensure_schema(con) -> None:
         "ALTER TABLE technical_signals ADD COLUMN rollover_pct      REAL",
         "ALTER TABLE technical_signals ADD COLUMN cost_of_carry_ann REAL",
     ]:
-        try:
-            cur.execute(ddl)
-        except Exception:
-            pass  # already exists
+        safe_alter(con, ddl)
 
     con.commit()
 

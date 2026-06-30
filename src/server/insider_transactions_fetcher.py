@@ -132,7 +132,7 @@ def fetch_nse_insider(
 def _parse_record(symbol: str, row: dict) -> dict | None:
     """Convert a raw NSE row into a normalised dict ready for DB insert."""
     try:
-        person_name = (row.get("personName") or row.get("name") or "").strip()
+        person_name = (row.get("personName") or row.get("acqName") or row.get("name") or "").strip()
         person_category = (row.get("personCategory") or row.get("category") or "").strip()
         acq_mode = (row.get("acqMode") or row.get("mode") or "").strip()
 
@@ -165,7 +165,7 @@ def _parse_record(symbol: str, row: dict) -> dict | None:
         before_pct = _pct(bef_shares)
         after_pct = _pct(aft_shares)
 
-        # Transaction date — NSE returns ISO or DD-MMM-YYYY formats
+        # Transaction date — NSE returns ISO or DD-MMM-YYYY formats, sometimes with time
         raw_date = row.get("date") or row.get("transactionDate") or ""
         txn_date = _parse_date(raw_date)
         if not txn_date:
@@ -192,6 +192,8 @@ def _parse_date(raw: str) -> str | None:
     raw = (raw or "").strip()
     if not raw:
         return None
+    # Strip time/sequence suffix (e.g. "13-Feb-2026 16:56" or "13-Feb-2026 1" -> "13-Feb-2026")
+    raw = raw.split()[0]
     for fmt in ("%Y-%m-%d", "%d-%b-%Y", "%d/%m/%Y", "%d-%m-%Y"):
         try:
             return datetime.strptime(raw, fmt).date().isoformat()
@@ -215,7 +217,7 @@ def upsert_transactions(con, rows: list[dict]) -> int:
             INSERT INTO insider_transactions
                 (symbol, person_name, person_category, transaction_mode,
                  quantity, value_cr, before_pct, after_pct, transaction_date)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (symbol, person_name, transaction_date, transaction_mode)
             DO UPDATE SET
                 person_category  = EXCLUDED.person_category,

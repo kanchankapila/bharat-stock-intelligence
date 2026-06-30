@@ -352,9 +352,9 @@ class MoneyControlFetcher:
 
         # Endpoints
         endpoints = {
-            "technicals": f"https://api.moneycontrol.com/mcapi/v1/stock/technicals/v2/details?deviceType=W&scId={mcsymbol}&ex=N",
-            "essentials": f"https://api.moneycontrol.com/mcapi/extdata/v2/mc-essentials?deviceType=W&scId={mcsymbol}&type=ed&ex=N",
-            "insights": f"https://api.moneycontrol.com/mcapi/v1/stock/extdata/v2/mc-insights?deviceType=W&scId={mcsymbol}&ex=N",
+            "technicals": f"https://api.moneycontrol.com/mcapi/technicals/v2/details?scId={mcsymbol}&dur=D&deviceType=W",
+            "essentials": f"https://api.moneycontrol.com/mcapi/extdata/v2/mc-essentials?deviceType=W&scId={mcsymbol}&type=ed",
+            "insights": f"https://api.moneycontrol.com/mcapi/extdata/v2/mc-insights?scId={mcsymbol}&type=c&deviceType=W&appVersion=185",
             "analyst_rating": f"https://api.moneycontrol.com/mcapi/v1/stock/estimates/analyst-rating?deviceType=W&scId={mcsymbol}&ex=N",
             "price_forecast": f"https://api.moneycontrol.com/mcapi/v1/stock/estimates/price-forecast?scId={mcsymbol}&ex=N&deviceType=W",
             "earning_forecast": f"https://api.moneycontrol.com/mcapi/v1/stock/estimates/earning-forecast?scId={mcsymbol}&ex=N&deviceType=W&frequency=12&financialType=C",
@@ -382,7 +382,14 @@ class MoneyControlFetcher:
                     self._parse_scans(symbol, resp.text)
                 else:
                     data = resp.json()
-                    if not data or data.get("status") != 200 or not data.get("data"):
+                    # MoneyControl APIs use either success=1, success=true, or status=200
+                    is_success = (
+                        data.get("success") == 1
+                        or data.get("success") is True
+                        or data.get("status") == 200
+                        or data.get("status") == "success"
+                    )
+                    if not data or not is_success or not data.get("data"):
                         continue
                     payload = data["data"]
                     

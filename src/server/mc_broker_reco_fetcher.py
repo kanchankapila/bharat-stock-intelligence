@@ -35,7 +35,7 @@ except ImportError:
 
 BASE_URL = (
     "https://api.moneycontrol.com/mcapi/v1/premarket/getBrokerResearchReco"
-    "?sublevel=stocks&start={start}&limit=10000"
+    "?sublevel=stocks&start={start}&limit=100"
 )
 
 HEADERS = {
@@ -45,8 +45,8 @@ HEADERS = {
     "Accept": "application/json",
 }
 
-MAX_PAGES = 1      # limit=10000 fetches all in one request
-PAGE_SIZE = 10000
+MAX_PAGES = 15      # Page through smaller limit batches to avoid timeouts
+PAGE_SIZE = 100
 FETCH_LOOKBACK_DAYS = 10   # stop paging once entry_date is older than this
 
 BUY_FLAGS  = {"BUY", "STRONG BUY", "OUTPERFORM", "ACCUMULATE", "ADD"}
@@ -121,7 +121,7 @@ def fetch_recos(lookback_days: int = FETCH_LOOKBACK_DAYS) -> list[dict]:
         start = page * PAGE_SIZE
         url = BASE_URL.format(start=start)
         try:
-            resp = cffi_req.get(url, headers=HEADERS, impersonate="chrome110", timeout=15)
+            resp = cffi_req.get(url, headers=HEADERS, impersonate="chrome120", timeout=30)
             resp.raise_for_status()
             payload = resp.json()
         except Exception as exc:

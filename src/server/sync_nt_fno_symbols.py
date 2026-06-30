@@ -146,12 +146,48 @@ def sync_fno_symbols(dry_run: bool = False) -> int:
     return len(rows)
 
 
+def sync_fno_expiries(dry_run: bool = False) -> int:
+    """Fetch active F&O expiries from NiftyTrader and upsert into nt_fno_expiry."""
+    url = "https://webapi.niftytrader.in/webapi/Symbol/symbol-expiry-all?symbol=nifty&exchange=nse"
+    data = _fetch(url)
+    if data is None:
+        return 0
+
+    rows: list[tuple] = []
+    for entry in data:
+        sym = (entry.get("symbol_name") or "").strip().upper()
+        expiry_raw = (entry.get("expiry_date") or "")[:10]
+        lot = entry.get("lot_size")
+        try:
+            lot = int(float(lot)) if lot else None
+        except (TypeError, ValueError):
+            lot = None
+
+        if sym and expiry_raw:
+            rows.append((sym, "NSE", expiry_raw, lot))
+
+    print(f"[sync_nt_fno] Found {len(rows)} symbol-expiry combinations from NT symbol-expiry-all.")
+
+    if not dry_run and rows:
+        from db_compat import executemany as _exec_many
+        _exec_many("""
+            INSERT INTO nt_fno_expiry (symbol, exchange, expiry, lot_size)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT (symbol, exchange, expiry) DO UPDATE SET
+                lot_size = EXCLUDED.lot_size
+        """, rows)
+        print(f"[sync_nt_fno] Upserted {len(rows)} rows into nt_fno_expiry.")
+
+    return len(rows)
+
+
 def sync(dry_run: bool = False) -> None:
     print("[sync_nt_fno_symbols] Syncing NT F&O universe ...")
     n_idx = sync_index_map(dry_run)
     n_sym = sync_fno_symbols(dry_run)
+    n_exp = sync_fno_expiries(dry_run)
     mode = "dry-run" if dry_run else "done"
-    print(f"[sync_nt_fno_symbols] {mode}. Indices={n_idx}  Stocks={n_sym}")
+    print(f"[sync_nt_fno_symbols] {mode}. Indices={n_idx}  Stocks={n_sym}  Expiries={n_exp}")
 
 
 if __name__ == "__main__":

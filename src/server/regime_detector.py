@@ -190,7 +190,17 @@ def update_regime(date: str = None) -> str:
                                                for k, v in features_dict.items()})),
     )
 
+    # ── Publish live regime to app_settings so ML ensemble, queues, and the
+    #    technical-signals scanner can gate dynamically without manual wiring. ──
+    execute(
+        """INSERT INTO app_settings (key, value)
+           VALUES ('current_nifty_regime', ?)
+           ON CONFLICT(key) DO UPDATE SET value = excluded.value""",
+        (today_regime,),
+    )
+
     print(f"[HMM] Regime for {date}: {today_regime} (prob={today_prob:.2f}, state={today_state})")
+    print(f"[HMM] Published current_nifty_regime={today_regime} to app_settings")
     return today_regime
 
 

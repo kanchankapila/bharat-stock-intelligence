@@ -31,7 +31,7 @@ from datetime import date, datetime, timedelta
 
 import requests
 
-from db_compat import connect
+from db_compat import connect, safe_alter
 
 MTO_URL = "https://nsearchives.nseindia.com/archives/equities/mto/MTO_{date}.DAT"
 
@@ -72,11 +72,7 @@ def ensure_schema(con) -> None:
     con.commit()  # commit DDL before ALTER (Postgres aborts tx on failed ALTER)
 
     # Add delivery_pct to technical_signals if not present
-    try:
-        cur.execute("ALTER TABLE technical_signals ADD COLUMN delivery_pct REAL")
-        con.commit()
-    except Exception:
-        con.rollback()  # must rollback aborted tx before next statement
+    safe_alter(None, "ALTER TABLE technical_signals ADD COLUMN delivery_pct REAL")
 
 
 def _trading_days_back(n: int) -> list[date]:

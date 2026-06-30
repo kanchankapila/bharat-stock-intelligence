@@ -148,10 +148,14 @@ class Backtester:
         ohlcv_dict: dict[str, pd.DataFrame],
         max_positions: int = 20,
         initial_capital: float = INITIAL_CAPITAL,
-        slippage_bps: float = 10,
+        slippage_bps: float = 15,
         stop_loss_pct: float = 7.0,
-        commission_bps: float = 25,
+        commission_bps: float = 40,
     ) -> tuple[list[dict], pd.Series]:
+        # commission_bps=40 covers realistic Indian round-trip friction:
+        #   STT buy+sell = 20 bps, Stamp duty ≈ 2 bps, GST on fees ≈ 3 bps,
+        #   SEBI charges + brokerage ≈ 15 bps. Total: ~40 bps.
+        # slippage_bps=15 covers typical market-impact on liquid NSE equities.
         """
         Simulate trades from signals.  Returns (trade_log, equity_curve_daily).
         equity_curve_daily: pd.Series indexed by date.
@@ -205,8 +209,17 @@ class Backtester:
                 elif pos['atr'] and pos['atr'] > 0:
                     eff_stop = pos['highest_high'] - 3.0 * pos['atr']
 
+                # ── Circuit-lock check: on lower-circuit days the stock is
+                #    frozen (open=high=low=close) — cannot exit at SL price.
+                #    Defer the SL to the next liquid trading day.
+                is_lower_circuit = (
+                    abs(open_price - day_ohlcv['high'].iloc[0]) < 0.01
+                    and abs(open_price - low_price) < 0.01
+                    and float(day_ohlcv['volume'].iloc[0]) == 0
+                )
+
                 # 1. Trailing Stop / Stop-Loss check (adverse move first)
-                if eff_stop is not None and low_price <= eff_stop:
+                if eff_stop is not None and low_price <= eff_stop and not is_lower_circuit:
                     exit_price = min(open_price, eff_stop) if open_price < eff_stop else eff_stop
                     exit_comm = exit_price * pos['shares'] * commission_bps / 10_000
                     net_proceeds = exit_price * pos['shares'] - exit_comm
@@ -294,13 +307,29 @@ class Backtester:
                 next_days = ohlcv_dict[sym][ohlcv_dict[sym]['date'] > date].head(1)
                 if next_days.empty:
                     continue
-                entry_price = float(next_days['open'].iloc[0]) * slippage
+
+                next_row = next_days.iloc[0]
+                raw_entry = float(next_row['open'])
+
+                # ── Upper-circuit detection: stock is locked limit-up
+                #    (open=high=low=close, or zero volume) — no sellers, skip entry.
+                is_upper_circuit = (
+                    abs(raw_entry - float(next_row['high'])) < 0.01
+                    and abs(raw_entry - float(next_row['low'])) < 0.01
+                    and float(next_row.get('volume', 1)) == 0
+                )
+                if is_upper_circuit:
+                    continue
+
+                entry_price = raw_entry * slippage
                 if pd.isna(entry_price) or entry_price <= 0:
                     continue
 
-                # Fixed equal-weight: each slot = 1/max_positions of initial capital
-                position_capital = initial_capital / max_positions
-                position_capital = min(position_capital, cash * 0.95)  # cannot exceed available cash
+                # ── Dynamic position sizing: deploy available cash evenly across
+                #    remaining free slots so capital is never left idle.
+                free_slots = max_positions - len(open_positions)
+                position_capital = cash / (free_slots + 1)  # +1 keeps a small cash buffer
+                position_capital = min(position_capital, cash * 0.95)  # hard cap at 95% of cash
                 if position_capital < 1000:
                     continue
                 shares = math.floor(position_capital / entry_price)
@@ -502,9 +531,9 @@ class Backtester:
         max_positions: int = 20,
         initial_capital: float = INITIAL_CAPITAL,
         run_name: str = "",
-        slippage_bps: float = 10,
+        slippage_bps: float = 15,
         stop_loss_pct: float = 7.0,
-        commission_bps: float = 25,
+        commission_bps: float = 40,
     ) -> dict:
         print(f"[Backtester] {start} -> {end}  horizon={horizon_days}d  min_score={min_score}")
 
@@ -575,8 +604,8 @@ if __name__ == "__main__":
     parser.add_argument("--min-score", type=int, default=3)
     parser.add_argument("--max-pos",  type=int, default=20)
     parser.add_argument("--capital",  type=float, default=INITIAL_CAPITAL)
-    parser.add_argument("--slippage", type=float, default=10, help="Slippage in bps")
-    parser.add_argument("--commission", type=float, default=25, help="Round-trip commission in bps")
+    parser.add_argument("--slippage", type=float, default=15, help="Slippage in bps (default 15 = ~NSE market impact)")
+    parser.add_argument("--commission", type=float, default=40, help="Round-trip commission in bps (default 40 = STT+stamp+GST+brokerage)")
     parser.add_argument("--name",     type=str, default="")
     args = parser.parse_args()
 

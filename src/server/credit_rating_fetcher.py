@@ -19,7 +19,7 @@ import time
 import requests
 import pandas as pd
 
-from db_compat import connect, translate, use_postgres, read_df, executemany
+from db_compat import connect, use_postgres, read_df, executemany, safe_alter, execute
 
 # ---------------------------------------------------------------------------
 # BSE API
@@ -87,7 +87,7 @@ def extract_instrument_type(headline: str) -> str | None:
 # Schema helpers
 # ---------------------------------------------------------------------------
 def ensure_credit_rating_table(conn) -> None:
-    conn.execute(translate("""
+    execute("""
         CREATE TABLE IF NOT EXISTS credit_rating_events (
             bse_code          TEXT,
             symbol            TEXT,
@@ -100,8 +100,7 @@ def ensure_credit_rating_table(conn) -> None:
             fetched_at        TEXT DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (bse_code, announcement_date, rating_agency)
         )
-    """))
-    conn.commit()
+    """)
 
 
 def ensure_technical_signals_columns(conn) -> None:
@@ -112,17 +111,7 @@ def ensure_technical_signals_columns(conn) -> None:
         ("days_since_upgrade",    "INTEGER"),
     ]
     for col, definition in new_cols:
-        try:
-            conn.execute(translate(
-                f"ALTER TABLE technical_signals ADD COLUMN {col} {definition}"
-            ))
-            conn.commit()
-            print(f"[CreditRating] Added column technical_signals.{col}")
-        except Exception:
-            try:
-                conn.rollback()
-            except Exception:
-                pass
+        safe_alter(None, f"ALTER TABLE technical_signals ADD COLUMN {col} {definition}")
 
 
 # ---------------------------------------------------------------------------
@@ -170,14 +159,13 @@ def fetch_bse_rating_announcements(from_date: str, to_date: str) -> list[dict]:
 def build_bse_to_nse_map(conn) -> dict[str, dict]:
     """
     Build a map of bse_code -> {symbol, isin} using nse_stocks table.
-    Falls back to mc_pricefeed_daily if the nse_stocks table has bse_code.
+    Falls back to isin-keyed lookup from nse_stocks if bse_code column absent.
     """
     mapping: dict[str, dict] = {}
 
-    # Try nse_stocks table (may have bse_code or isin columns)
+    # Primary: nse_stocks table keyed on bse_code
     try:
         df = read_df(
-            conn,
             "SELECT symbol, isin, bse_code FROM nse_stocks WHERE bse_code IS NOT NULL"
         )
         if not df.empty:
@@ -188,18 +176,18 @@ def build_bse_to_nse_map(conn) -> dict[str, dict]:
                         "symbol": row.get("symbol", ""),
                         "isin":   row.get("isin", ""),
                     }
-            print(f"[CreditRating] Loaded {len(mapping)} BSE→NSE mappings from nse_stocks")
-            return mapping
-    except Exception:
-        pass
+            print(f"[CreditRating] Loaded {len(mapping)} BSE->NSE mappings from nse_stocks")
+            if mapping:
+                return mapping
+    except Exception as e:
+        print(f"[CreditRating] nse_stocks bse_code lookup warning: {e}")
 
-    # Fallback: mc_pricefeed_daily (has symbol column keyed on NSE symbol + bse data)
+    # Fallback: isin-keyed map from nse_stocks (isin column confirmed present)
     try:
         df = read_df(
-            "SELECT DISTINCT symbol, isin FROM mc_pricefeed_daily WHERE isin IS NOT NULL"
+            "SELECT DISTINCT symbol, isin FROM nse_stocks WHERE isin IS NOT NULL"
         )
         if not df.empty:
-            # We don't have bse_code here, so build isin-keyed map only
             for _, row in df.iterrows():
                 isin = str(row.get("isin", "")).strip()
                 if isin:
@@ -207,9 +195,9 @@ def build_bse_to_nse_map(conn) -> dict[str, dict]:
                         "symbol": row.get("symbol", ""),
                         "isin":   isin,
                     }
-            print(f"[CreditRating] Loaded {len(mapping)} ISIN→NSE mappings from mc_pricefeed_daily")
+            print(f"[CreditRating] Loaded {len(mapping)} ISIN->NSE mappings from nse_stocks (fallback)")
     except Exception as e:
-        print(f"[CreditRating] mc_pricefeed_daily fallback warning: {e}")
+        print(f"[CreditRating] nse_stocks isin fallback warning: {e}")
 
     return mapping
 
@@ -410,7 +398,7 @@ def main():
     to_date   = today.strftime("%d/%m/%Y")
     from_date = from_dt.strftime("%d/%m/%Y")
 
-    print(f"[CreditRating] Fetching BSE rating announcements {from_date} → {to_date} ...")
+    print(f"[CreditRating] Fetching BSE rating announcements {from_date} -> {to_date} ...")
     raw_rows = fetch_bse_rating_announcements(from_date, to_date)
     print(f"[CreditRating] Raw announcements received: {len(raw_rows)}")
 

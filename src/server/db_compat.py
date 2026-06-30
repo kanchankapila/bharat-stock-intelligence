@@ -224,6 +224,58 @@ def execute(sql, params=()):
         return conn.execute(text(translate(sql)), build_params(params)).rowcount
 
 
+def safe_alter(conn_or_none, ddl: str) -> bool:
+    """
+    Execute a DDL statement (typically ALTER TABLE ... ADD COLUMN) without
+    aborting the surrounding transaction if the column already exists.
+
+    On PostgreSQL: rewrites the statement to use ``IF NOT EXISTS`` syntax,
+    e.g. ``ALTER TABLE t ADD COLUMN IF NOT EXISTS col TYPE``. This is a
+    completely silent no-op when the column is already present — no server-log
+    ERROR, no transaction abort.
+
+    On SQLite: uses a plain try/except (SQLite does not support IF NOT EXISTS
+    for ADD COLUMN, but its errors don't abort the transaction anyway).
+
+    Args:
+        conn_or_none: Accepted for API compatibility, ignored on Postgres path.
+        ddl:          The DDL string, e.g.
+                      ``"ALTER TABLE technical_signals ADD COLUMN foo REAL"``
+
+    Returns:
+        True  — column was added (or IF NOT EXISTS made it a no-op on PG).
+        False — column already existed on SQLite (error silenced).
+    """
+    if use_postgres():
+        # Inject "IF NOT EXISTS" between "ADD COLUMN" and the column name.
+        # Works for any case variant of "add column".
+        import re as _re
+        pg_ddl = _re.sub(
+            r"(?i)\bADD\s+COLUMN\b",
+            "ADD COLUMN IF NOT EXISTS",
+            ddl,
+            count=1,
+        )
+        try:
+            with get_engine().begin() as conn:
+                conn.execute(text(pg_ddl))
+            return True
+        except Exception as exc:
+            # Fallback: eat any remaining error (e.g., other DDL constraint)
+            print(f"[db_compat] safe_alter warning: {exc}")
+            return False
+    else:
+        # SQLite path — simple try/except
+        try:
+            if conn_or_none is not None:
+                conn_or_none.execute(ddl)
+            else:
+                execute(ddl)
+            return True
+        except Exception:
+            return False
+
+
 def execute_returning(sql, params=()):
     """Run an INSERT/UPDATE ... RETURNING and commit; returns the first Row (or None)."""
     with get_engine().begin() as conn:
