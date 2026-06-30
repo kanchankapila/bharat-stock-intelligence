@@ -174,19 +174,24 @@ def upsert_patterns(symbol: str, patterns: list[dict], con) -> None:
         cur.execute("""
             INSERT INTO mc_chart_patterns
                 (pattern_id, symbol, pattern_name, direction, time_frame,
-                 entry_price, target_price, sl_price, target_return_pct, sl_pct,
+                 entry_price, target_price, stoploss_price, target_return_pct, stoploss_pct,
                  comment, p_status, end_date, created_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            VALUES (:pid, :sym, :pname, :dir, :tf,
+                    :entry, :target, :sl, :tret, :slpct,
+                    :comment, :pstatus, :end_date, :created_at)
             ON CONFLICT(pattern_id) DO UPDATE SET
-                p_status=excluded.p_status, target_price=excluded.target_price,
-                sl_price=excluded.sl_price, target_return_pct=excluded.target_return_pct,
-                end_date=excluded.end_date, fetched_at=CURRENT_TIMESTAMP
-        """, (
-            p["pattern_id"], symbol, p.get("pattern_name"), p.get("direction"),
-            p.get("time_frame"), p.get("entry_price"), p.get("target_price"),
-            p.get("sl_price"), p.get("target_return_pct"), p.get("sl_pct"),
-            p.get("comment"), p.get("p_status"), p.get("end_date"), p.get("created_at"),
-        ))
+                p_status=EXCLUDED.p_status, target_price=EXCLUDED.target_price,
+                stoploss_price=EXCLUDED.stoploss_price, target_return_pct=EXCLUDED.target_return_pct,
+                end_date=EXCLUDED.end_date, fetched_at=CURRENT_TIMESTAMP
+        """, {
+            "pid": p["pattern_id"], "sym": symbol, "pname": p.get("pattern_name"),
+            "dir": p.get("direction"), "tf": p.get("time_frame"),
+            "entry": p.get("entry_price"), "target": p.get("target_price"),
+            "sl": p.get("sl_price"), "tret": p.get("target_return_pct"),
+            "slpct": p.get("sl_pct"), "comment": p.get("comment"),
+            "pstatus": p.get("p_status"), "end_date": p.get("end_date"),
+            "created_at": p.get("created_at"),
+        })
     con.commit()
 
 

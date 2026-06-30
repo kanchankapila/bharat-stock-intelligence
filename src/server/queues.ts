@@ -1129,6 +1129,7 @@ export async function initQueues(): Promise<boolean> {
         connection, 
         concurrency: 1,
         lockDuration: 60000,
+        lockRenewTime: 20000,
       },
     );
 
@@ -1165,6 +1166,7 @@ export async function initQueues(): Promise<boolean> {
         connection, 
         concurrency: 1,
         lockDuration: 60000,
+        lockRenewTime: 20000,
       },
     );
 

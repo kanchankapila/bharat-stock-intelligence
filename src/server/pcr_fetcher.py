@@ -391,7 +391,16 @@ class PCRFetcher:
         if not dates:
             print("[GEX] Empty expiry date list from MoneyControl")
             return None
-        # dates are expected as strings; pick the first (nearest)
+        # dates may be a list OR a dict keyed by something other than 0.
+        # Normalise to a flat list of values before picking the first entry.
+        if isinstance(dates, dict):
+            dates = list(dates.values())
+        elif not isinstance(dates, list):
+            dates = list(dates)
+        if not dates:
+            print("[GEX] Could not parse expiry date list from MoneyControl")
+            return None
+        # Pick the first (nearest) entry
         nearest = str(dates[0]).strip()
         print(f"[GEX] Nearest Nifty expiry: {nearest}")
         return nearest

@@ -130,14 +130,14 @@ def compute_delivery_trend(con) -> int:
                 JOIN (
                     SELECT symbol, AVG(delivery_pct) AS avg_pct
                     FROM stock_delivery_volume
-                    WHERE date >= ? AND date < ?
+                    WHERE date >= :cutoff AND date < :today
                     GROUP BY symbol
                 ) avg30 ON avg30.symbol = cur.symbol
-                WHERE cur.date = ?
+                WHERE cur.date = :today
             ) sub
             WHERE ts.symbol = sub.symbol
-              AND ts.date   = ?
-        """, (cutoff, today, today, today))
+              AND ts.date   = :today
+        """, {"cutoff": cutoff, "today": today})
     else:
         cur.execute("""
             UPDATE technical_signals
@@ -242,17 +242,19 @@ def upsert_deals(rows: list[dict], con) -> int:
             cur.execute("""
                 INSERT INTO bulk_block_deals
                     (symbol, deal_date, deal_type, client_name, buy_sell, quantity, price, value_cr)
-                VALUES (?,?,?,?,?,?,?,?)
+                VALUES (:symbol, :deal_date, :deal_type, :client_name, :buy_sell, :quantity, :price, :value_cr)
                 ON CONFLICT (symbol, deal_date, client_name, deal_type) DO UPDATE SET
                     buy_sell   = EXCLUDED.buy_sell,
                     quantity   = EXCLUDED.quantity,
                     price      = EXCLUDED.price,
                     value_cr   = EXCLUDED.value_cr,
                     fetched_at = CURRENT_TIMESTAMP
-            """, (
-                r["symbol"], r["deal_date"], r["deal_type"], r["client_name"],
-                r["buy_sell"], r["quantity"], r["price"], r["value_cr"],
-            ))
+            """, {
+                "symbol": r["symbol"], "deal_date": r["deal_date"],
+                "deal_type": r["deal_type"], "client_name": r["client_name"],
+                "buy_sell": r["buy_sell"], "quantity": r["quantity"],
+                "price": r["price"], "value_cr": r["value_cr"],
+            })
         else:
             cur.execute("""
                 INSERT INTO bulk_block_deals
@@ -304,12 +306,12 @@ def backfill_deal_flags(con) -> int:
                         ELSE 0
                     END AS direction
                 FROM bulk_block_deals
-                WHERE deal_date >= ?
+                WHERE deal_date >= :cutoff
                 GROUP BY symbol
             ) sub
             WHERE ts.symbol = sub.symbol
-              AND ts.date   = ?
-        """, (cutoff, today))
+              AND ts.date   = :today
+        """, {"cutoff": cutoff, "today": today})
     else:
         cur.execute("""
             UPDATE technical_signals
@@ -398,8 +400,8 @@ def compute_short_proxy(con) -> int:
                   AND total_puts_oi  IS NOT NULL
             ) sub
             WHERE ts.symbol = sub.symbol
-              AND ts.date   = ?
-        """, (today,))
+              AND ts.date   = :today
+        """, {"today": today})
     else:
         cur.execute("""
             UPDATE technical_signals

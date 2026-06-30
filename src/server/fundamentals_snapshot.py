@@ -76,7 +76,7 @@ LEFT JOIN (
 def _pledge_chg_sql(pg: bool) -> str:
     if pg:
         hist_cutoff = "cur.as_of_date::date - INTERVAL '90 days'"
-        cur_filter  = "cur.as_of_date = (SELECT MAX(as_of_date) FROM fundamentals_history WHERE symbol = cur.symbol)"
+        cur_filter  = "cur.as_of_date::date = (SELECT MAX(as_of_date::date) FROM fundamentals_history WHERE symbol = cur.symbol)"
     else:
         hist_cutoff = "date(cur.as_of_date, '-90 days')"
         cur_filter  = "cur.as_of_date = (SELECT MAX(as_of_date) FROM fundamentals_history WHERE symbol = cur.symbol)"
@@ -91,7 +91,7 @@ JOIN fundamentals_history hist
         SELECT MAX(h2.as_of_date)
         FROM fundamentals_history h2
         WHERE h2.symbol = cur.symbol
-          AND h2.as_of_date <= {hist_cutoff}
+          AND h2.as_of_date::date <= {hist_cutoff}
     )
 WHERE {cur_filter}
   AND cur.pledge_pct  IS NOT NULL
@@ -145,7 +145,7 @@ def run(as_of: str | None = None) -> int:
     print(f"[FUND-SNAP] Wrote {n} fundamentals snapshots as_of {as_of}.")
 
     n_trend = _compute_and_write_pledge_trend(pg)
-    print(f"[FUND-SNAP] Wrote pledge_chg_90d for {n_trend} symbols → technical_signals.")
+    print(f"[FUND-SNAP] Wrote pledge_chg_90d for {n_trend} symbols -> technical_signals.")
 
     return n
 
