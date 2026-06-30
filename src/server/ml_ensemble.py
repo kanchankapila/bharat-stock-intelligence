@@ -612,8 +612,8 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     # ── India VIX (from macro_asset_prices — used in regime detection only) ──
     # Normalised to [0,1] over the 8-35 observable range. Used for regime-conditional
     # scoring layer; not fed to the per-stock classifier (tested, hurt held-out AUC).
-    X['india_vix'] = num('india_vix', 15.0).clip(8, 35) / 35.0
-    X['high_vix']  = (X['india_vix'] > 0.57).astype(float)  # > 20 normalised
+    # X['india_vix'] = num('india_vix', 15.0).clip(8, 35) / 35.0
+    # X['high_vix']  = (X['india_vix'] > 0.57).astype(float)  # > 20 normalised
 
     # ── Second-order interactions (cross-signal alpha) ──────────────────────────
     # Analyst upgrade × sector RS: double-confirmation of institutional interest
