@@ -1242,31 +1242,38 @@ def _gpu_device() -> str:
         return 'cpu'
 
 
-def _base_models(scale_pos_weight: float = 1.0):
+def _base_models(scale_pos_weight: float = 1.0, tuned_params: dict | None = None):
     from sklearn.ensemble import RandomForestClassifier, ExtraTreesClassifier
     from sklearn.linear_model import LogisticRegression
     from sklearn.calibration import CalibratedClassifierCV
     from lightgbm import LGBMClassifier
     from xgboost import XGBClassifier
 
+    tp = tuned_params or {}
     _dev = _gpu_device()
 
+    lgbm_params = {
+        'n_estimators': 300, 'max_depth': 4, 'learning_rate': 0.04,
+        'subsample': 0.8, 'min_child_samples': 5, 'random_state': 42,
+        'device': _dev, 'verbose': -1, 'class_weight': 'balanced',
+    }
+    lgbm_params.update(tp.get('lgbm', {}))
     lgbm = CalibratedClassifierCV(
-        LGBMClassifier(
-            n_estimators=300, max_depth=4, learning_rate=0.04,
-            subsample=0.8, min_child_samples=5, random_state=42,
-            device=_dev, verbose=-1, class_weight='balanced',
-        ),
+        LGBMClassifier(**lgbm_params),
         method='isotonic', cv=3,
     )
+
+    xgb_params = {
+        'n_estimators': 300, 'max_depth': 4, 'learning_rate': 0.04,
+        'subsample': 0.8, 'random_state': 42, 'scale_pos_weight': scale_pos_weight,
+        'device': _dev, 'eval_metric': 'logloss', 'verbosity': 0,
+    }
+    xgb_params.update(tp.get('xgb', {}))
     xgb_model = CalibratedClassifierCV(
-        XGBClassifier(
-            n_estimators=300, max_depth=4, learning_rate=0.04,
-            subsample=0.8, random_state=42, scale_pos_weight=scale_pos_weight,
-            device=_dev, eval_metric='logloss', verbosity=0,
-        ),
+        XGBClassifier(**xgb_params),
         method='isotonic', cv=3,
     )
+
     rf = CalibratedClassifierCV(
         RandomForestClassifier(
             n_estimators=300, max_depth=6, min_samples_leaf=5,
@@ -1285,7 +1292,108 @@ def _base_models(scale_pos_weight: float = 1.0):
         LogisticRegression(C=1.0, max_iter=1000, random_state=42),
         method='sigmoid', cv=3,
     )
-    return [('lgbm', lgbm), ('xgb', xgb_model), ('rf', rf), ('et', et), ('lr', lr)]
+
+    models = [('lgbm', lgbm), ('xgb', xgb_model), ('rf', rf), ('et', et), ('lr', lr)]
+
+    try:
+        from catboost import CatBoostClassifier
+        cb_params = {
+            'iterations': 300, 'depth': 4, 'learning_rate': 0.04,
+            'subsample': 0.8, 'random_seed': 42, 'verbose': False,
+            'thread_count': -1, 'auto_class_weights': 'Balanced',
+        }
+        cb_params.update(tp.get('catboost', {}))
+        cb = CalibratedClassifierCV(
+            CatBoostClassifier(**cb_params),
+            method='isotonic', cv=3,
+        )
+        models.append(('catboost', cb))
+        print("[Ensemble] CatBoostClassifier successfully integrated into base model stack.")
+    except ImportError:
+        pass
+
+    return models
+
+
+def tune_hyperparameters(X: pd.DataFrame, y: pd.Series, weights: np.ndarray | None,
+                          spw: float, embargo: int, n_splits: int = 5, n_trials: int = 20) -> dict:
+    """Run Optuna Bayesian hyperparameter search to find best parameters for LightGBM, XGBoost, and CatBoost."""
+    import optuna
+    from sklearn.model_selection import TimeSeriesSplit
+    from sklearn.metrics import roc_auc_score
+    from lightgbm import LGBMClassifier
+    from xgboost import XGBClassifier
+
+    optuna.logging.set_verbosity(optuna.logging.WARNING)
+
+    n_eff = n_splits
+    if embargo > 0:
+        n_eff = max(2, min(n_splits, len(X) // max(1, embargo + 1) - 1))
+    skf = TimeSeriesSplit(n_splits=n_eff, gap=embargo)
+    sw = weights if weights is not None else None
+
+    def objective(trial):
+        lgbm_lr = trial.suggest_float('lgbm_lr', 0.01, 0.1, log=True)
+        lgbm_depth = trial.suggest_int('lgbm_depth', 3, 6)
+        lgbm_sub = trial.suggest_float('lgbm_sub', 0.6, 0.9)
+
+        xgb_lr = trial.suggest_float('xgb_lr', 0.01, 0.1, log=True)
+        xgb_depth = trial.suggest_int('xgb_depth', 3, 6)
+        xgb_sub = trial.suggest_float('xgb_sub', 0.6, 0.9)
+
+        scores = []
+        for train_idx, val_idx in skf.split(X, y):
+            X_tr, y_tr = X.iloc[train_idx], y.iloc[train_idx]
+            X_val, y_val = X.iloc[val_idx], y.iloc[val_idx]
+            sw_tr = sw[train_idx] if sw is not None else None
+
+            m_lgbm = LGBMClassifier(
+                n_estimators=100, max_depth=lgbm_depth, learning_rate=lgbm_lr,
+                subsample=lgbm_sub, random_state=42, verbose=-1, class_weight='balanced'
+            )
+            m_lgbm.fit(X_tr, y_tr, sample_weight=sw_tr)
+            p_lgbm = m_lgbm.predict_proba(X_val)[:, 1]
+
+            m_xgb = XGBClassifier(
+                n_estimators=100, max_depth=xgb_depth, learning_rate=xgb_lr,
+                subsample=xgb_sub, random_state=42, scale_pos_weight=spw,
+                eval_metric='logloss', verbosity=0
+            )
+            m_xgb.fit(X_tr, y_tr, sample_weight=sw_tr)
+            p_xgb = m_xgb.predict_proba(X_val)[:, 1]
+
+            p_blend = 0.5 * p_lgbm + 0.5 * p_xgb
+            if y_val.nunique() > 1:
+                scores.append(roc_auc_score(y_val, p_blend))
+            else:
+                scores.append(0.5)
+        return float(np.mean(scores))
+
+    print(f"[Ensemble] Running hyperparameter tuning with Optuna ({n_trials} trials)...")
+    study = optuna.create_study(direction='maximize')
+    study.optimize(objective, n_trials=n_trials)
+
+    best = study.best_params
+    print(f"[Ensemble] Best trial validation AUC: {study.best_value:.4f}")
+    print(f"[Ensemble] Best tuned params: {best}")
+
+    return {
+        'lgbm': {
+            'learning_rate': best['lgbm_lr'],
+            'max_depth': best['lgbm_depth'],
+            'subsample': best['lgbm_sub'],
+        },
+        'xgb': {
+            'learning_rate': best['xgb_lr'],
+            'max_depth': best['xgb_depth'],
+            'subsample': best['xgb_sub'],
+        },
+        'catboost': {
+            'learning_rate': best['lgbm_lr'],
+            'depth': best['lgbm_depth'],
+            'subsample': best['lgbm_sub'],
+        }
+    }
 
 
 def average_uniqueness(start_days, horizons) -> list:
@@ -1309,7 +1417,7 @@ def average_uniqueness(start_days, horizons) -> list:
 
 
 def _fit_stack(X: pd.DataFrame, y: pd.Series, spw: float, embargo: int, n_splits: int = 5,
-               sample_weight=None):
+               sample_weight=None, tuned_params: dict | None = None):
     """
     Fit OOF-stacked base models + meta-learner on (X, y), purging `embargo` samples
     between each train/validation fold so overlapping forward-return windows cannot
@@ -1323,9 +1431,8 @@ def _fit_stack(X: pd.DataFrame, y: pd.Series, spw: float, embargo: int, n_splits
     from sklearn.pipeline import Pipeline
     from sklearn.metrics import roc_auc_score
 
-    base = _base_models(scale_pos_weight=spw)
+    base = _base_models(scale_pos_weight=spw, tuned_params=tuned_params)
     sw = np.asarray(sample_weight, dtype=float) if sample_weight is not None else None
-    # Keep folds viable once the embargo gap is subtracted.
     n_eff = n_splits
     if embargo > 0:
         n_eff = max(2, min(n_splits, len(X) // max(1, embargo + 1) - 1))
@@ -1339,7 +1446,7 @@ def _fit_stack(X: pd.DataFrame, y: pd.Series, spw: float, embargo: int, n_splits
         print(f"[Ensemble]   Training base model: {name}...")
         oof_preds = np.zeros(len(X))
         for train_idx, val_idx in skf.split(X, y):
-            m_clone = _sklearn_clone(_base_models(scale_pos_weight=spw)[j][1].estimator)
+            m_clone = _sklearn_clone(base[j][1].estimator)
             m_clone.fit(X.iloc[train_idx], y.iloc[train_idx],
                         **({'sample_weight': sw[train_idx]} if sw is not None else {}))
             oof_preds[val_idx] = m_clone.predict_proba(X.iloc[val_idx])[:, 1]
@@ -1348,8 +1455,6 @@ def _fit_stack(X: pd.DataFrame, y: pd.Series, spw: float, embargo: int, n_splits
         model.fit(X, y, **({'sample_weight': sw} if sw is not None else {}))   # full calibrated fit
         fitted.append((name, model))
 
-    # Meta-learner — trained only on rows the walk-forward actually produced OOF preds for
-    # (TimeSeriesSplit never validates the initial training block).
     meta = Pipeline([
         ('scaler', StandardScaler()),
         ('lr', LogisticRegression(C=0.5, max_iter=500, random_state=42)),
@@ -1374,7 +1479,7 @@ def _fit_stack(X: pd.DataFrame, y: pd.Series, spw: float, embargo: int, n_splits
 
 
 def train_ensemble(X: pd.DataFrame, y: pd.Series, dates: pd.Series | None = None,
-                   horizon_days: int = 15, min_samples: int = 30):
+                   horizon_days: int = 15, min_samples: int = 30, tuned_params: dict | None = None):
     from sklearn.metrics import roc_auc_score, precision_score, recall_score, f1_score
 
     print(f"[Ensemble] Training on {len(X)} samples  (win_rate={y.mean():.1%})")
@@ -1407,7 +1512,8 @@ def train_ensemble(X: pd.DataFrame, y: pd.Series, dates: pd.Series | None = None
     if n_test >= 10 and n_val >= 10 and (len(X) - n_test - n_val - embargo) >= max(min_samples, 100):
         tr_end = len(X) - n_test - n_val - embargo
         fb, mt, _, _, _ = _fit_stack(X.iloc[:tr_end], y.iloc[:tr_end], spw, embargo,
-                                     sample_weight=(weights[:tr_end] if weights is not None else None))
+                                     sample_weight=(weights[:tr_end] if weights is not None else None),
+                                     tuned_params=tuned_params)
         # Threshold selection on val split (not reused for reporting)
         X_val, y_val = X.iloc[tr_end : tr_end + n_val], y.iloc[tr_end : tr_end + n_val]
         val_proba = mt.predict_proba(
@@ -1640,17 +1746,27 @@ def score_pending(conn: ConnWrapper, ensemble: dict) -> int:
     print(f"[Ensemble] Using optimal_threshold={threshold:.2f} for win_probability gate.")
 
     # ── Regime-conditional probability adjustment ──────────────────────────────
-    # Build a slim DataFrame with the features needed by _apply_regime_adjustment
-    # (rs_vs_sector_21d + fii_buying) alongside win_probability, then apply.
     regime = _get_current_regime(conn)
     df_scores = pd.DataFrame({
         'win_probability':  probs,
         'rs_vs_sector_21d': X.get('rs_vs_sector_21d', pd.Series(0.0, index=X.index)).values,
         'fii_buying':       X.get('fii_buying',        pd.Series(0.0, index=X.index)).values,
+        'date':             df['signal_date'].values,
     }, index=X.index)
     df_scores = _apply_regime_adjustment(df_scores, regime)
-    probs = df_scores['win_probability'].values
-    print(f"[Ensemble] Regime={regime}; regime-conditional adjustment applied.")
+
+    # ── Cross-sectional rank-scaling per day ──
+    # Apply a gentle boost/penalty of up to +/- 7.5% based on cross-sectional rank
+    def _rank_scale(group):
+        if len(group) <= 1:
+            return group['win_probability']
+        ranks = group['win_probability'].rank(pct=True)  # 0 to 1
+        median_prob = group['win_probability'].median()
+        return median_prob + (ranks - 0.5) * 0.15
+
+    df_scores['win_probability'] = df_scores.groupby('date', group_keys=False).apply(_rank_scale)
+    probs = df_scores['win_probability'].clip(0, 0.95).values
+    print(f"[Ensemble] Regime={regime}; regime-conditional and cross-sectional rank scaling applied.")
 
     cur = conn.cursor()
     cur.executemany(
@@ -1752,7 +1868,7 @@ def check_drift(conn: ConnWrapper, auc_drop_threshold: float = 0.04,
 
 def run(do_train: bool = True, do_score: bool = True,
         retrain_full: bool = False, min_samples: int = 30,
-        label: str = 'horizon'):
+        label: str = 'horizon', do_tune: bool = False):
     try:
         from lightgbm import LGBMClassifier  # noqa: F401 — verify dependency at startup
     except ImportError:
@@ -1798,8 +1914,29 @@ def run(do_train: bool = True, do_score: bool = True,
                 X = build_features(df)
                 y = df['outcome'].astype(int)
                 _hz = int(pd.to_numeric(df['horizon_days'], errors='coerce').median() or 15)
+
+                tuned_params = None
+                if do_tune:
+                    spw = float((y == 0).sum()) / max(1, (y == 1).sum())
+                    embargo = 0
+                    if df['signal_date'].nunique() > 1:
+                        samples_per_day = max(1.0, len(X) / df['signal_date'].nunique())
+                        embargo = int(min(len(X) // 10, samples_per_day * _hz))
+                    weights = None
+                    if len(df['signal_date']) == len(X):
+                        starts = pd.to_datetime(pd.Series(list(df['signal_date'])), errors='coerce')
+                        starts = starts.map(lambda d: d.toordinal() if pd.notna(d) else 0).to_numpy()
+                        horizons = pd.to_numeric(X['horizon_days'], errors='coerce').fillna(_hz).astype(int).to_numpy()
+                        weights = np.asarray(average_uniqueness(starts, horizons), dtype=float)
+
+                    try:
+                        tuned_params = tune_hyperparameters(X, y, weights, spw, embargo, n_trials=30)
+                    except Exception as e:
+                        print(f"[Ensemble] Tuning failed: {e}. Falling back to default parameters.")
+
                 ensemble = train_ensemble(X, y, dates=df['signal_date'],
-                                          horizon_days=_hz, min_samples=min_samples)
+                                          horizon_days=_hz, min_samples=min_samples,
+                                          tuned_params=tuned_params)
                 ensemble['label'] = label
                 save_ensemble(ensemble)
                 register_model(conn, ensemble)
@@ -1837,6 +1974,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="ML Ensemble Signal Confidence Scorer")
     parser.add_argument("--train",       action="store_true", help="Train ensemble model")
     parser.add_argument("--score",       action="store_true", help="Score pending signals")
+    parser.add_argument("--tune",        action="store_true", help="Tune model hyperparameters with Optuna")
     parser.add_argument("--retrain-full",action="store_true", help="Discard saved model and retrain")
     parser.add_argument("--check-drift", action="store_true", help="Check live vs trained AUC drift only")
     parser.add_argument("--min-samples", type=int, default=30)
@@ -1852,8 +1990,9 @@ if __name__ == "__main__":
             conn.close()
         sys.exit(0)
 
-    do_train = args.train or args.retrain_full or (not args.score)
-    do_score = args.score or (not args.train and not args.retrain_full)
+    do_train = args.train or args.retrain_full or args.tune or (not args.score)
+    do_score = args.score or (not args.train and not args.retrain_full and not args.tune)
 
     run(do_train=do_train, do_score=do_score,
-        retrain_full=args.retrain_full, min_samples=args.min_samples, label=args.label)
+        retrain_full=args.retrain_full, min_samples=args.min_samples, label=args.label,
+        do_tune=args.tune)
