@@ -1991,9 +1991,13 @@ export async function initQueues(): Promise<boolean> {
       processConfluenceCompute,
       { connection: makeConnection(), concurrency: 1 }
     );
-    confluenceComputeWorker.on('failed', (_job, err) =>
-      console.error(`[QUEUE] ${QUEUE_CONFLUENCE_COMPUTE} job failed:`, err.message)
-    );
+    confluenceComputeWorker.on('completed', () => {
+      recordHeartbeat('confluence-compute', 'success');
+    });
+    confluenceComputeWorker.on('failed', (_job, err) => {
+      console.error(`[QUEUE] ${QUEUE_CONFLUENCE_COMPUTE} job failed:`, err.message);
+      recordHeartbeat('confluence-compute', 'failed', err.message);
+    });
     confluenceComputeWorker.on('error', (err) => {
       if ((err as any).code === -2 || err.message?.includes('Missing lock')) return;
       console.error(`[QUEUE] ${QUEUE_CONFLUENCE_COMPUTE} error:`, err.message);
@@ -2011,9 +2015,13 @@ export async function initQueues(): Promise<boolean> {
       processConfluenceOutcomes,
       { connection: makeConnection(), concurrency: 1 }
     );
-    confluenceOutcomesWorker.on('failed', (job, err) =>
-      console.error(`[QUEUE] ${QUEUE_CONFLUENCE_OUTCOMES} job failed:`, err.message)
-    );
+    confluenceOutcomesWorker.on('completed', () => {
+      recordHeartbeat('confluence-outcomes', 'success');
+    });
+    confluenceOutcomesWorker.on('failed', (job, err) => {
+      console.error(`[QUEUE] ${QUEUE_CONFLUENCE_OUTCOMES} job failed:`, err.message);
+      recordHeartbeat('confluence-outcomes', 'failed', err.message);
+    });
     await addJobWithCatchup(confluenceOutcomesQueue,
       'confluence-outcomes-daily',
       {},
@@ -2071,8 +2079,14 @@ export async function initQueues(): Promise<boolean> {
     });
     agentDataScientistWorker = new Worker(QUEUE_AGENT_DATA_SCIENTIST,
       processAgentDataScientist, { connection, concurrency: 1, lockDuration: 10 * 60_000 });
-    agentDataScientistWorker.on('completed', (_, r: any) => console.log('[QUEUE] agent-ds done, grade=', r?.grade));
-    agentDataScientistWorker.on('failed', (_, e) => console.error('[QUEUE] agent-ds failed:', e.message));
+    agentDataScientistWorker.on('completed', (_, r: any) => {
+      console.log('[QUEUE] agent-ds done, grade=', r?.grade);
+      recordHeartbeat('agent-data-scientist', 'success');
+    });
+    agentDataScientistWorker.on('failed', (_, e) => {
+      console.error('[QUEUE] agent-ds failed:', e.message);
+      recordHeartbeat('agent-data-scientist', 'failed', e.message);
+    });
 
     // Ã¢â€â‚¬Ã¢â€â‚¬ Agent: Strategist (08:30 IST = 03:00 UTC, weekdays) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
     agentStrategistQueue = new Queue(QUEUE_AGENT_STRATEGIST, { connection });
@@ -2085,8 +2099,14 @@ export async function initQueues(): Promise<boolean> {
     });
     agentStrategistWorker = new Worker(QUEUE_AGENT_STRATEGIST,
       processAgentStrategist, { connection, concurrency: 1, lockDuration: 15 * 60_000 });
-    agentStrategistWorker.on('completed', () => console.log('[QUEUE] agent-strategist done'));
-    agentStrategistWorker.on('failed', (_, e) => console.error('[QUEUE] agent-strategist failed:', e.message));
+    agentStrategistWorker.on('completed', () => {
+      console.log('[QUEUE] agent-strategist done');
+      recordHeartbeat('agent-strategist', 'success');
+    });
+    agentStrategistWorker.on('failed', (_, e) => {
+      console.error('[QUEUE] agent-strategist failed:', e.message);
+      recordHeartbeat('agent-strategist', 'failed', e.message);
+    });
 
     // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Company Profiles & AI Analysis Sync queue (Weekly) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
@@ -2202,8 +2222,14 @@ export async function initQueues(): Promise<boolean> {
     });
     agentAuditorWorker = new Worker(QUEUE_AGENT_AUDITOR,
       processAgentAuditor, { connection, concurrency: 1, lockDuration: 15 * 60_000 });
-    agentAuditorWorker.on('completed', () => console.log('[QUEUE] agent-auditor done'));
-    agentAuditorWorker.on('failed', (_, e) => console.error('[QUEUE] agent-auditor failed:', e.message));
+    agentAuditorWorker.on('completed', () => {
+      console.log('[QUEUE] agent-auditor done');
+      recordHeartbeat('agent-auditor', 'success');
+    });
+    agentAuditorWorker.on('failed', (_, e) => {
+      console.error('[QUEUE] agent-auditor failed:', e.message);
+      recordHeartbeat('agent-auditor', 'failed', e.message);
+    });
 
     // Ã¢â€â‚¬Ã¢â€â‚¬ Agent: Optimizer (17:30 IST = 12:00 UTC, weekdays) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
     agentOptimizerQueue = new Queue(QUEUE_AGENT_OPTIMIZER, { connection });
@@ -2216,8 +2242,14 @@ export async function initQueues(): Promise<boolean> {
     });
     agentOptimizerWorker = new Worker(QUEUE_AGENT_OPTIMIZER,
       processAgentOptimizer, { connection, concurrency: 1, lockDuration: 20 * 60_000 });
-    agentOptimizerWorker.on('completed', () => console.log('[QUEUE] agent-optimizer done'));
-    agentOptimizerWorker.on('failed', (_, e) => console.error('[QUEUE] agent-optimizer failed:', e.message));
+    agentOptimizerWorker.on('completed', () => {
+      console.log('[QUEUE] agent-optimizer done');
+      recordHeartbeat('agent-optimizer', 'success');
+    });
+    agentOptimizerWorker.on('failed', (_, e) => {
+      console.error('[QUEUE] agent-optimizer failed:', e.message);
+      recordHeartbeat('agent-optimizer', 'failed', e.message);
+    });
 
     // Ã¢â€â‚¬Ã¢â€â‚¬ Unified Ranker Ã¢â‚¬â€ daily at 15:45 IST (10:15 UTC) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
     unifiedRankerQueue = new Queue(QUEUE_UNIFIED_RANKER, { connection });
