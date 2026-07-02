@@ -37,16 +37,54 @@ is exactly the class of bug that caused the multi-week `stock_scores` staleness 
 - `cron-parser@^5.6.0` is already a direct project dependency (BullMQ also vendors its own
   copy internally), so lateness math can use real cron evaluation instead of flat hour
   windows.
-- Remaining queues with **no instrumentation at all** (need `recordHeartbeat` added to their
-  worker `completed`/`failed` handlers): mc-screener-sync, etnow-screener-sync, nse-sync,
-  fundamentals-sync, quant-scoring, signal-outcomes, trendlyne-intraday, ml-weekly-retrain,
-  research-premarket, research-postclose, dl-macro-fetch, preopen-snapshot,
-  market-regime-refresh, dl-feature-refresh, dl-retrain-weekly, confluence-compute,
-  confluence-outcomes, agent-data-scientist, agent-strategist, agent-auditor,
-  agent-optimizer, unified-ranker, live-screener-collect, ai-signals (event-driven, no
-  cron — heartbeat only, no lateness check).
-- `dl-retrain-emergency` is drift-triggered, not scheduled — heartbeat only, excluded from
-  lateness checks, shown in digest as "event-triggered."
+- Remaining queues with **no instrumentation at all** (verified line-by-line against the live
+  file; need `recordHeartbeat` added to their worker `completed`/`failed` handlers):
+  mc-screener-sync, etnow-screener-sync, nse-sync, fundamentals-sync, quant-scoring,
+  signal-outcomes, trendlyne-intraday, research-premarket, research-postclose, dl-macro-fetch,
+  dl-feature-refresh, dl-retrain-emergency, confluence-compute (also missing a `completed`
+  handler entirely, not just unwired), confluence-outcomes (same), agent-data-scientist,
+  agent-strategist, agent-auditor, agent-optimizer, unified-ranker, live-screener-collect,
+  ai-signals (event-driven, no cron — heartbeat only, no lateness check). `preopen-snapshot`
+  and `market-regime-refresh` are anonymous `new Worker(...)` calls with internal `.catch()`
+  swallowing every error, so they never emit a BullMQ `failed` event — heartbeat calls go
+  inside their `.catch()` blocks directly, not via `.on('failed', ...)`.
+- `ml-weekly-retrain`, `dl-retrain-weekly`, `screener-performance`, `quant-eod-sync`, and
+  `company-profiles-sync` already call `updateMonitorState(...)` (some inside the `.on()`
+  handler, some inside the processor itself) — once that stub delegates to `recordHeartbeat`
+  (item 3 below) these are wired for free, no `queues.ts` edit needed.
+- `dl-retrain-emergency` is drift-triggered, not scheduled (confirmed: no `repeat` config) —
+  heartbeat only, excluded from lateness checks, shown in digest as "event-triggered."
+
+## Architecture revision (found during planning, before implementation started)
+
+Deeper investigation of `src/server/routers/monitor.router.ts` surfaced infrastructure this
+design initially missed:
+
+- `MONITOR_SCRIPTS` — a 20-entry registry (id/label/category/**critical**/schedule/pyScript/
+  queueName/**staleLimitHours**) for the Python ML/data engines, each with a real
+  `getLastRunAt()` DB-freshness check (queries the engine's actual output table — e.g.
+  `MAX(computed_at) FROM technical_signals` — not a self-reported heartbeat).
+- `getSystemStatus()` already turns that into `runState: never|running|success|failed|stale`
+  per script using `staleLimitHours`.
+- `triggerScript`'s failure branch **already sends a Telegram alert** for critical scripts
+  (`telegramService.sendMarkdownMessage`) — but only when a script is launched through
+  `triggerScript`/`triggerAllDaily` (the manual/UI trigger path). The scheduled BullMQ workers
+  in `queues.ts` invoke these same Python engines directly and call the dead
+  `updateMonitorState()` stub instead — so the Telegram wiring already exists but is
+  disconnected from the actual daily cron execution path.
+- `getBullMQJobsStatus` already exposes, per BullMQ queue, live repeatable-job cron/next-fire
+  info and recent completed/failed jobs straight from BullMQ's own Redis-backed history —
+  no separate heartbeat table needed for queues covered here.
+
+Building a second, parallel "registry + staleness" system (as originally drafted below) would
+duplicate `MONITOR_SCRIPTS` for the ~20 Python engines it already covers. **Revised approach:
+reuse `MONITOR_SCRIPTS`/`getSystemStatus` for those; only extend `job_heartbeat` for the
+remaining pure-BullMQ queues that have no DB-freshness check today** (screener syncs,
+quant-scoring, signal-outcomes, stock-refresh/scoring, news-sentiment, trendlyne-intraday,
+intraday-fetcher, live-screener-collect, research-premarket/postclose, dl-macro-fetch,
+dl-inference, dl-regime-update, confluence-compute/outcomes, agent-*, unified-ranker,
+ai-signals, dl-retrain-emergency, preopen-snapshot, market-regime-refresh). A single watchdog
+module then reads **both** sources and drives Telegram + the daily digest.
 
 ## Architecture
 
@@ -96,14 +134,22 @@ job have finished" — it replaces the flat `STALE_THRESHOLD_MS` map in `jobHear
 
 ### 4. `src/server/jobWatchdog.ts` (new)
 
+Reads **two** sources rather than reintroducing a third registry:
+- `getSystemStatus()` (exported as a plain async function from `monitor.router.ts`, not just
+  wrapped in the tRPC procedure, so it's callable from the watchdog directly) for the 20
+  `MONITOR_SCRIPTS` entries — already gives real DB-freshness `runState` per script.
+- `getLateJobs()` (jobHeartbeat.ts, per item 2) for the ~19 pure-BullMQ queues from
+  `jobRegistry.ts` that have no DB-freshness check.
+
 - **Late-job check**: `setInterval` every 15 minutes (same pattern as the existing
-  `startHeartbeatMonitor`), calls `getLateJobs()`, and for each newly-late **critical** job
-  sends one Telegram message via `telegramService.sendMarkdownMessage()`, then stamps
-  `last_alert_sent_at`. Message includes job label, expected time, hours late, last error if
-  any.
+  `startHeartbeatMonitor`), calls both sources, and for each newly-late/stale/failed
+  **critical** job sends one Telegram message via `telegramService.sendMarkdownMessage()`
+  (the exact same class `triggerScript` already uses), then stamps an alert-sent marker so it
+  fires once per occurrence, not every 15-minute poll. Message includes job label, expected
+  time, hours late/stale, last error if any.
 - **Daily digest**: a new BullMQ repeatable queue `QUEUE_JOB_DIGEST`, cron `30 15 * * *`
   (9:00 PM IST, every day — Sunday/weekly jobs like nse-sync and fundamentals-sync need
-  covering too). Builds one table across the full registry: ✅ OK / ⚠️ LATE / ❌ FAILED /
+  covering too). Builds one table spanning both sources: ✅ OK / ⚠️ LATE-STALE / ❌ FAILED /
   ⏳ not due yet, with last-success time, and sends it as a single Telegram message.
 
 ## Data flow
