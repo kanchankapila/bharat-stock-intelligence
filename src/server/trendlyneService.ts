@@ -38,11 +38,76 @@ export interface TrendlyneOverviewData {
   faq?: { question: string; answer: string }[];
 }
 
+async function loadFundamentalsFromDb(symbol: string) {
+  try {
+    const eps = await dbGet('SELECT eps_ttm, date FROM trendlyne_eps_history WHERE symbol = ? ORDER BY date DESC LIMIT 1', [symbol]) as any;
+    const pe = await dbGet('SELECT pe_ttm, date FROM trendlyne_pe_history WHERE symbol = ? ORDER BY date DESC LIMIT 1', [symbol]) as any;
+    const pb = await dbGet('SELECT pb_ratio, date FROM trendlyne_pb_history WHERE symbol = ? ORDER BY date DESC LIMIT 1', [symbol]) as any;
+    const div = await dbGet('SELECT div_yield_pct, date FROM trendlyne_div_yield_history WHERE symbol = ? ORDER BY date DESC LIMIT 1', [symbol]) as any;
+    
+    return {
+      EPS_TTM: eps ? { eodData: [[new Date(eps.date).getTime(), eps.eps_ttm]] } : null,
+      PE_TTM_SHARE_NOW: pe ? { eodData: [[new Date(pe.date).getTime(), pe.pe_ttm]] } : null,
+      PBV_A_SHARE_NOW: pb ? { eodData: [[new Date(pb.date).getTime(), pb.pb_ratio]] } : null,
+      DIVIDEND_YIELD_TTM_Q: div ? { eodData: [[new Date(div.date).getTime(), div.div_yield_pct]] } : null,
+    };
+  } catch (err: any) {
+    console.error('[TRENDLYNE] Database fallback error:', err.message);
+    return {};
+  }
+}
+
 export async function fetchTrendlyneFundamentals(symbol: string) {
   const map = getStockMapping(symbol);
-  if (!map) return null;
-  console.log(`[TRENDLYNE] Fundamentals JSON API is disabled (404). Returning empty fallback for ${symbol}`);
-  return {};
+  let tlid = map?.tlid;
+
+  if (!tlid) {
+    try {
+      const row = await dbGet('SELECT DISTINCT stock_id FROM trendlyne_screener_stocks WHERE symbol = ?', [symbol]) as { stock_id: string } | undefined;
+      if (row?.stock_id) {
+        tlid = row.stock_id;
+      }
+    } catch (dbErr) {
+      // ignore
+    }
+  }
+
+  if (!tlid) {
+    console.log(`[TRENDLYNE] No tlid found for fundamentals: ${symbol}`);
+    return {};
+  }
+
+  console.log(`[TRENDLYNE] Fetching Fundamentals live for ${symbol} using tlid: ${tlid}`);
+  const params = ['EPS_TTM', 'PE_TTM_SHARE_NOW', 'PBV_A_SHARE_NOW', 'DIVIDEND_YIELD_TTM_Q'];
+  const result: Record<string, any> = {};
+
+  try {
+    const fetches = params.map(async (param) => {
+      const url = `https://trendlyne.com/mapp/v1/stock/chart-data/${tlid}/${param}/?format=json`;
+      try {
+        const response = await fetch(url, { headers: HEADERS });
+        if (response.ok) {
+          const json = await response.json();
+          if (json.body) {
+            result[param] = json.body;
+          }
+        }
+      } catch (err: any) {
+        console.warn(`[TRENDLYNE] Failed to fetch fundamentals param ${param} for ${symbol}:`, err.message);
+      }
+    });
+    await Promise.all(fetches);
+
+    if (Object.keys(result).length === 0) {
+      console.log(`[TRENDLYNE] Live fetch empty for ${symbol}, trying database fallback...`);
+      return await loadFundamentalsFromDb(symbol);
+    }
+
+    return result;
+  } catch (error: any) {
+    console.error(`[TRENDLYNE] Error fetching fundamentals for ${symbol}:`, error.message);
+    return await loadFundamentalsFromDb(symbol);
+  }
 }
 
 export async function fetchTrendlyneSwot(symbol: string) {

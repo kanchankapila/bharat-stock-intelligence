@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { dbGet, dbAll } from "../dbAsync";
 import {
   fetchAllIndianIndices,
   fetchGlobalIndices,
@@ -6,6 +7,7 @@ import {
   fetchHistoricalOHLC,
   fetchMarketMap,
 } from "../marketData";
+import { fetchSectorTechnicalTrends } from "../sectorApiService";
 import { fetchStockDataWithCache, getOrRefreshAllStocks } from "../liveStockData";
 import { fetchTopMovers } from "../topMoversService";
 import { fetchNiftyTraderBreakouts } from "../marketData";
@@ -83,10 +85,48 @@ export const marketRouter = router({
   getBreakouts: publicProcedure
     .query(async () => fetchNiftyTraderBreakouts()),
 
-  getSectorPerformance: publicProcedure
-    .input(z.object({ indexId: z.string().optional() }).optional())
+  getEarlyHoursPredictions: publicProcedure
+    .input(z.object({ date: z.string().optional() }).optional())
     .query(async ({ input }) => {
-      const data = await fetchSectorPerformance(input?.indexId);
+      let targetDate = input?.date;
+      if (!targetDate) {
+        const row = await dbGet<{ date: string }>(
+          'SELECT MAX(date) as date FROM early_hours_predictions'
+        );
+        targetDate = row?.date;
+      }
+      if (!targetDate) return [];
+      
+      const rows = await dbAll<any>(
+        'SELECT * FROM early_hours_predictions WHERE date = ? ORDER BY score DESC',
+        [targetDate]
+      );
+      
+      return rows.map((r: any) => ({
+        symbol: r.symbol,
+        date: r.date,
+        score: r.score,
+        iepGapPct: r.iep_gap_pct,
+        preopenImbalance: r.preopen_imbalance,
+        deliverySpikePct: r.delivery_spike_pct,
+        hasCorporateAction: r.has_corporate_action === 1,
+        corporateActionTitle: r.corporate_action_title,
+        breakoutSignals: r.breakout_signals ? r.breakout_signals.split(',') : [],
+        reasons: JSON.parse(r.reasons_json || '[]'),
+        computedAt: r.computed_at,
+      }));
+    }),
+
+  getSectorPerformance: publicProcedure
+    .input(z.object({
+      indexId: z.string().optional(),
+      dur:     z.enum(['1d', '5d', '1m', '3m', '6m', '1y']).optional(),
+      type:    z.enum(['top', 'under']).optional(),
+      section: z.enum(['sector', 'industry']).optional(),
+      limit:   z.number().optional(),
+    }).optional())
+    .query(async ({ input }) => {
+      const data = await fetchSectorPerformance(input);
       if (data && data.success === 1 && data.data) {
         return data.data.map((s: any) => {
           const name = s.sectorName || s.sector || 'Unknown';
@@ -110,6 +150,12 @@ export const marketRouter = router({
           return { name, change: isNaN(avgChange) ? 0 : Number(avgChange.toFixed(2)), stocks: changes.length };
         })
         .sort((a, b) => b.change - a.change);
+    }),
+
+  getSectorTechnicalTrends: publicProcedure
+    .input(z.object({ sectorName: z.string() }))
+    .query(async ({ input }) => {
+      return await fetchSectorTechnicalTrends(input.sectorName);
     }),
 
   getOHLCData: publicProcedure

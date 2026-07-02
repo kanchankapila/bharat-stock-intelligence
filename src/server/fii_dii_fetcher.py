@@ -268,7 +268,7 @@ class FiiDiiFetcher:
         print(
             f"[FIIFetcher] Provisional {today}: "
             f"FII net={fii_net} Cr  DII net={dii_net} Cr  "
-            f"({len(macro_rows)} rows → macro_asset_prices, 1 row → fii_dii_flow)"
+            f"({len(macro_rows)} rows -> macro_asset_prices, 1 row -> fii_dii_flow)"
         )
 
     def run(self, days: int = 0):

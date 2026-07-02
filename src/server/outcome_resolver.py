@@ -436,6 +436,41 @@ def resolve_unified_outcomes(
         """, (sym, next_trading_day, exit_target_date)).fetchall()
         bars = [(str(b[0]), float(b[1]), float(b[2]), float(b[3])) for b in bar_rows]
 
+        # Check if we can use intraday bars for path resolution
+        use_intra = False
+        if next_trading_day and exit_target_date:
+            try:
+                start_d = datetime.date.fromisoformat(next_trading_day)
+                end_d = datetime.date.fromisoformat(exit_target_date)
+                _IST = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
+                session_start = datetime.datetime(start_d.year, start_d.month, start_d.day, 9, 15, tzinfo=_IST).isoformat()
+                session_end   = datetime.datetime(end_d.year, end_d.month, end_d.day, 15, 30, tzinfo=_IST).isoformat()
+                
+                intra_rows = conn.execute("""
+                    SELECT datetime, high, low, close FROM intraday_ohlcv
+                    WHERE symbol = ? AND datetime >= ? AND datetime <= ? AND interval = '15m'
+                    ORDER BY datetime ASC
+                """, (sym, session_start, session_end)).fetchall()
+                if len(intra_rows) >= 5:
+                    bars = [(str(b[0]), float(b[1]), float(b[2]), float(b[3])) for b in intra_rows]
+                    use_intra = True
+            except Exception:
+                pass
+
+        # Query total dividend paid during holding period
+        dividend_sum = 0.0
+        if next_trading_day and exit_target_date:
+            try:
+                div_row = conn.execute("""
+                    SELECT COALESCE(SUM(amount), 0.0) FROM corporate_actions
+                    WHERE symbol = ? AND action_type = 'DIVIDEND'
+                      AND ex_date >= ? AND ex_date <= ?
+                """, (sym, next_trading_day, exit_target_date)).fetchone()
+                if div_row:
+                    dividend_sum = float(div_row[0])
+            except Exception:
+                pass
+
         outcome, exit_price, check_date, return_pct, exit_reason = None, None, None, None, None
 
         if not bars:
@@ -444,6 +479,12 @@ def resolve_unified_outcomes(
             initial_stop = stop_loss if (stop_loss and stop_loss > 0) else None
             check_date, exit_price, exit_reason, gross = simulate_exit(
                 bars, entry=entry, initial_stop=initial_stop, target=target, atr=atr)
+            
+            # Incorporate dividend returns if any paid during the trade
+            if dividend_sum > 0:
+                dividend_pct = (dividend_sum / entry) * 100
+                gross += dividend_pct
+                
             return_pct = net_return_pct(gross)
             if exit_reason == 'STOP_LOSS':
                 outcome = 'STOP_LOSS'
@@ -679,6 +720,41 @@ def resolve_recommendation_log(
         """, (sym, next_trading_day, exit_target_date)).fetchall()
         bars = [(str(b[0]), float(b[1]), float(b[2]), float(b[3])) for b in bar_rows]
 
+        # Check if we can use intraday bars for path resolution
+        use_intra = False
+        if next_trading_day and exit_target_date:
+            try:
+                start_d = datetime.date.fromisoformat(next_trading_day)
+                end_d = datetime.date.fromisoformat(exit_target_date)
+                _IST = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
+                session_start = datetime.datetime(start_d.year, start_d.month, start_d.day, 9, 15, tzinfo=_IST).isoformat()
+                session_end   = datetime.datetime(end_d.year, end_d.month, end_d.day, 15, 30, tzinfo=_IST).isoformat()
+                
+                intra_rows = conn.execute("""
+                    SELECT datetime, high, low, close FROM intraday_ohlcv
+                    WHERE symbol = ? AND datetime >= ? AND datetime <= ? AND interval = '15m'
+                    ORDER BY datetime ASC
+                """, (sym, session_start, session_end)).fetchall()
+                if len(intra_rows) >= 5:
+                    bars = [(str(b[0]), float(b[1]), float(b[2]), float(b[3])) for b in intra_rows]
+                    use_intra = True
+            except Exception:
+                pass
+
+        # Query total dividend paid during holding period
+        dividend_sum = 0.0
+        if next_trading_day and exit_target_date:
+            try:
+                div_row = conn.execute("""
+                    SELECT COALESCE(SUM(amount), 0.0) FROM corporate_actions
+                    WHERE symbol = ? AND action_type = 'DIVIDEND'
+                      AND ex_date >= ? AND ex_date <= ?
+                """, (sym, next_trading_day, exit_target_date)).fetchone()
+                if div_row:
+                    dividend_sum = float(div_row[0])
+            except Exception:
+                pass
+
         outcome, exit_price, return_pct = None, None, None
         if not bars:
             outcome = 'PENDING'
@@ -686,6 +762,12 @@ def resolve_recommendation_log(
             initial_stop = stop_loss if (stop_loss and stop_loss > 0) else None
             _, exit_price, exit_reason, gross = simulate_exit(
                 bars, entry=entry, initial_stop=initial_stop, target=target, atr=atr)
+            
+            # Incorporate dividend returns if any paid during the trade
+            if dividend_sum > 0:
+                dividend_pct = (dividend_sum / entry) * 100
+                gross += dividend_pct
+                
             return_pct = net_return_pct(gross)
             if exit_reason == 'STOP_LOSS':
                 outcome = 'LOSS'

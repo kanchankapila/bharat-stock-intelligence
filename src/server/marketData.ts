@@ -152,7 +152,14 @@ export async function fetchHistoricalOHLC(symbol: string, dur: string = '1y') {
   }
 }
 
-export async function fetchSectorPerformance(indId?: string) {
+export async function fetchSectorPerformance(opts?: {
+  indId?: string;
+  dur?: '1d' | '5d' | '1m' | '3m' | '6m' | '1y';
+  type?: 'top' | 'under';
+  section?: 'sector' | 'industry';
+  limit?: number;
+}) {
+  const { indId, dur = '1d', type = 'top', section = 'sector', limit = 5 } = opts || {};
   if (indId) {
     const data = await fetchMarketMap(indId);
     if (!data || !data.item) return null;
@@ -165,9 +172,7 @@ export async function fetchSectorPerformance(indId?: string) {
       }))
     };
   }
-  // https://api.moneycontrol.com/mcapi/v1/sector/performance?dur=1d&type=top&section=sector
-  // https://api.moneycontrol.com/mcapi/v1/sector/performance?dur=1d&type=top&section=sector
-  const url = `https://api.moneycontrol.com/mcapi/v1/sector/performance?dur=1d&type=top&section=sector`;
+  const url = `https://api.moneycontrol.com/mcapi/v1/sector/performance?dur=${dur}&type=${type}&section=${section}&limit=${limit}`;
   return mcFetchJson(url);
 }
 

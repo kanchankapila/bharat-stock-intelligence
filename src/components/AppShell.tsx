@@ -52,6 +52,7 @@ const NAV_GROUPS: NavGroup[] = [
       { icon: Zap,      label: 'Alpha ⚡',             id: 'alpha'                },
       { icon: BarChart2, label: 'Screener Intel',      id: 'screener-intelligence' },
       { icon: Sparkles, label: 'Trade Cockpit',        id: 'trade-cockpit'        },
+      { icon: Zap,      label: 'Early Spotter ⚡', id: 'early-spotter'        },
       { icon: Crosshair, label: 'Best Picks',          id: 'best-picks'           },
       { icon: Layers,  label: 'Signal Intel', id: 'signal-intelligence' },
       { icon: ChartLine, label: 'Signal Report Card', id: 'signal-report-card' },

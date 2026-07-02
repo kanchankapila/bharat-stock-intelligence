@@ -73,7 +73,11 @@ export const technicalsRouter = router({
       limit:         z.number().min(1).max(100).default(50),
     }))
     .query(async ({ input }) => {
-      const d = input.date ?? new Date().toISOString().slice(0, 10);
+      let d = input.date;
+      if (!d) {
+        const maxRow = await dbGet<{ d: string }>('SELECT MAX(date) as d FROM technical_signals');
+        d = maxRow?.d ?? new Date().toISOString().slice(0, 10);
+      }
       return dbAll<any>(`
         WITH scored AS (
           SELECT

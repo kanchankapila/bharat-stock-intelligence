@@ -2566,7 +2566,27 @@ db.exec(`
   );
 `);
 
+db.exec(`
+  -- Early Hours Prediction candidates flagged at market open / pre-open
+  CREATE TABLE IF NOT EXISTS early_hours_predictions (
+    symbol                 TEXT NOT NULL,
+    date                   TEXT NOT NULL,
+    score                  REAL NOT NULL,
+    iep_gap_pct            REAL,
+    preopen_imbalance      REAL,
+    delivery_spike_pct     REAL,
+    has_corporate_action   INTEGER DEFAULT 0,
+    corporate_action_title TEXT,
+    breakout_signals       TEXT, -- comma-separated tags e.g. "SMA20 Breakout,Bullish Trend"
+    reasons_json           TEXT, -- details of triggers for UI tooltip
+    computed_at            DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (symbol, date)
+  );
+  CREATE INDEX IF NOT EXISTS idx_ehp_date ON early_hours_predictions(date DESC);
+`);
+
 // Keep startup diagnostics off stdout so stdio-based clients can parse JSON-RPC.
 console.error('[DB] Schema normalization complete (Phase 3.5)');
 
 export default db;
+

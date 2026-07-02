@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { dbAll } from "../dbAsync";
+import { dbGet, dbAll } from "../dbAsync";
 import { router, publicProcedure } from "../trpc";
 
 export const sentimentRouter = router({
@@ -7,8 +7,23 @@ export const sentimentRouter = router({
     .input(z.object({ historyHours: z.number().min(1).max(168).optional() }).optional())
     .query(async ({ input }) => {
       const { getLatestSentimentSnapshot, getSentimentHistory } = await import('../newsSentimentService');
+      const latest = await getLatestSentimentSnapshot();
+      
+      let pcr: number | null = null;
+      try {
+        const row = await dbGet<{ avg_pcr: number }>(`
+          SELECT AVG(pcr) as avg_pcr 
+          FROM stock_options_oi 
+          WHERE date = (SELECT MAX(date) FROM stock_options_oi)
+        `);
+        pcr = row?.avg_pcr ?? null;
+      } catch (err) {
+        console.error('[Sentiment Router] PCR query failed:', err);
+      }
+
       return {
-        latest:  await getLatestSentimentSnapshot(),
+        latest,
+        pcr,
         history: await getSentimentHistory(input?.historyHours ?? 24),
       };
     }),

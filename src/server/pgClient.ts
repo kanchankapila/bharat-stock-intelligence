@@ -124,6 +124,21 @@ export async function pgEnsureColumns(): Promise<void> {
        regime TEXT,
        regime_prob DOUBLE PRECISION
      )`,
+    `CREATE TABLE IF NOT EXISTS early_hours_predictions (
+       symbol TEXT NOT NULL,
+       date TEXT NOT NULL,
+       score DOUBLE PRECISION NOT NULL,
+       iep_gap_pct DOUBLE PRECISION,
+       preopen_imbalance DOUBLE PRECISION,
+       delivery_spike_pct DOUBLE PRECISION,
+       has_corporate_action INTEGER DEFAULT 0,
+       corporate_action_title TEXT,
+       breakout_signals TEXT,
+       reasons_json TEXT,
+       computed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+       PRIMARY KEY (symbol, date)
+     )`,
+    `CREATE INDEX IF NOT EXISTS idx_ehp_date ON early_hours_predictions(date DESC)`,
   ];
   const client = await getPool().connect();
   try {

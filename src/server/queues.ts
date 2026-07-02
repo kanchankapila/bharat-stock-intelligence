@@ -625,6 +625,10 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await resolveOutcomesResilient(5);
   await resolveOutcomesResilient(15);
 
+  // Compute excursion path labels for all resolved entries:
+  await runPython('exit_labeler.py', [], 5 * 60_000)
+    .catch(e => console.warn('[QUEUE] exit_labeler failed:', (e as Error).message));
+
   await runPython('live_screener_resolver.py', [], 180_000)
     .catch(err => console.error('[QUEUE] live_screener_resolver.py failed:', err.message));
 
@@ -716,6 +720,12 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean }> 
     .catch(e => console.warn('[QUEUE] working_capital_fetcher failed:', (e as Error).message));
   await runPython('outcome_resolver.py', ['--horizon', '5']);
   await runPython('outcome_resolver.py', ['--horizon', '15']);
+  // Run exit labeler to resolve excursions
+  await runPython('exit_labeler.py', [], 10 * 60_000)
+    .catch(e => console.warn('[QUEUE] exit_labeler failed:', (e as Error).message));
+  // Retrain the exit policy models
+  await runPython('exit_policy.py', ['--train'], 10 * 60_000)
+    .catch(e => console.warn('[QUEUE] exit_policy training failed:', (e as Error).message));
   await runPython('ml_ensemble.py', ['--train', '--score'], 60 * 60_000);
   await runPython('cs_ranker.py', ['--train', '--score'], 30 * 60_000)
     .catch(e => console.warn('[QUEUE] cs_ranker retrain failed:', (e as Error).message));
@@ -1734,6 +1744,10 @@ export async function initQueues(): Promise<boolean> {
       async () => {
         await runPython('preopen_fetcher.py', [], 60_000)
           .catch(e => console.warn('[QUEUE] preopen_fetcher failed:', (e as Error).message));
+
+        console.log('[QUEUE] Running early_hours_predictor...');
+        await runPython('early_hours_predictor.py', [], 60_000)
+          .catch(e => console.warn('[QUEUE] early_hours_predictor failed:', (e as Error).message));
       },
       { connection, concurrency: 1 });
     console.log('[QUEUE] Pre-open snapshot scheduled at 9:10 AM IST (weekdays)');

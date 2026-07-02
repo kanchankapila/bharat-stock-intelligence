@@ -1431,7 +1431,11 @@ export async function getTechnicalSignalsForDate(
   minWinProbability = 0,
   limit = 100
 ): Promise<Record<string, unknown>[]> {
-  const d = date ?? new Date().toISOString().slice(0, 10);
+  let d = date;
+  if (!d) {
+    const maxRow = await dbGet<{ d: string }>('SELECT MAX(date) as d FROM technical_signals');
+    d = maxRow?.d ?? new Date().toISOString().slice(0, 10);
+  }
   return await dbAll(`
     SELECT ts.*,
            ns.name,
@@ -1459,7 +1463,11 @@ export async function getSignalSummary(): Promise<{
   byScore: Record<string, number>;
   lastComputed: string | null;
 }> {
-  const today = new Date().toISOString().slice(0, 10);
+  let today = new Date().toISOString().slice(0, 10);
+  const maxRow = await dbGet<{ d: string }>('SELECT MAX(date) as d FROM technical_signals');
+  if (maxRow?.d) {
+    today = maxRow.d;
+  }
   const totalToday = ((await dbGet(
     `SELECT COUNT(*) as n FROM technical_signals WHERE date = ?`, [today]
   )) as { n: number }).n;
@@ -1505,7 +1513,11 @@ export interface SectorSignalStat {
 }
 
 export async function getSectorSignalStats(date?: string): Promise<SectorSignalStat[]> {
-  const d = date ?? new Date().toISOString().slice(0, 10);
+  let d = date;
+  if (!d) {
+    const maxRow = await dbGet<{ d: string }>('SELECT MAX(date) as d FROM technical_signals');
+    d = maxRow?.d ?? new Date().toISOString().slice(0, 10);
+  }
 
   const rows = await dbAll(`
     SELECT ts.symbol, ts.signal_score, ts.signals_json, ts.cmp, ts.change_pct,

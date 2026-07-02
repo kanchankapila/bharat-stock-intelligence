@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { dbAll } from "../dbAsync";
 import { getFnOSignals } from "../fnoService";
 import { fetchOptionChain, fetchFnoSymbols } from "../optionChainService";
 import { fetchFNOSymbols } from "../marketIntelService";
@@ -29,8 +30,15 @@ export const fnoRouter = router({
   getOptionsIntelligence: publicProcedure
     .query(async () => {
       try {
-        return await alphaQuant.getPcr({}, 10_000);
+        const rows = await dbAll<any>(`
+          SELECT symbol, date, expiry, pcr, market_pcr, total_call_oi, total_put_oi
+          FROM stock_options_oi
+          WHERE date = (SELECT MAX(date) FROM stock_options_oi)
+          ORDER BY pcr DESC
+        `);
+        return rows || [];
       } catch (e: any) {
+        console.error('[FnO Router] Error fetching options intelligence:', e);
         return [];
       }
     }),

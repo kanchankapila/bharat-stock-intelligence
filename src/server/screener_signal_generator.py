@@ -158,9 +158,23 @@ def generate_signals(con, qualifying: dict, entries: dict) -> int:
         categories     = {m["category"] for m in screeners_meta}
         top_names      = ", ".join(m["name"] for m in screeners_meta[:5])
 
-        # Scale targets: 5% target, 2.5% stop (2:1 RR)
-        target_price = round(price * 1.05, 2)
-        stop_loss    = round(price * 0.975, 2)
+        # Scale targets: use exit_policy dynamic levels if available, fallback to 5%/2.5%
+        target_price = None
+        stop_loss    = None
+        try:
+            from exit_policy import predict_levels_for_symbol
+            t_price, s_loss = predict_levels_for_symbol(symbol, price)
+            if t_price is not None and s_loss is not None:
+                target_price = t_price
+                stop_loss = s_loss
+                print(f"  [ExitPolicy] Dynamic levels for {symbol}: target={target_price}, stop={stop_loss}")
+        except Exception as e:
+            # print(f"  [ExitPolicy] Fallback: {e}")
+            pass
+
+        if not target_price or not stop_loss:
+            target_price = round(price * 1.05, 2)
+            stop_loss    = round(price * 0.975, 2)
 
         reasoning = (
             f"Screener surfacing: {len(screener_ids)} high-performing bullish screeners "

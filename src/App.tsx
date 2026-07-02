@@ -105,6 +105,7 @@ const SignalTracking     = React.lazy(() => import('./components/SignalTracking'
 const V2SignalTracking   = React.lazy(() => import('./v2/views/signals/V2SignalTracking').then(m => ({ default: m.V2SignalTracking })));
 const StockChatbot       = React.lazy(() => import('./components/StockChatbot'));
 const JobsDashboardPage   = React.lazy(() => import('./components/JobsDashboardPage'));
+const EarlyHoursSpotter   = React.lazy(() => import('./components/EarlyHoursSpotter'));
 
 // Lazy Suspense fallback
 const PageFallback = () => (
@@ -3802,6 +3803,7 @@ export default function App() {
             <Route path="/fno-scanners" element={<FnOIntelligenceCenter onSelectStock={handleSelectStock} />} />
             <Route path="/options" element={<div className="p-6"><OptionsIntelligence /></div>} />
             <Route path="/todays-picks" element={<TodaysPicks onSelectStock={handleSelectStock} />} />
+            <Route path="/early-spotter" element={<EarlyHoursSpotter onSelectStock={handleSelectStock} />} />
             <Route path="/screener-intelligence" element={<ScreenerIntelligencePage />} />
             <Route path="/agent-data-scientist" element={<AgentDataScientistPage />} />
             <Route path="/agent-strategist"     element={<AgentStrategistPage />} />
@@ -3930,6 +3932,7 @@ export default function App() {
               <Route path="/fno-scanners" element={<FnOIntelligenceCenter onSelectStock={handleSelectStock} />} />
               <Route path="/options" element={<div className="p-6"><OptionsIntelligence /></div>} />
               <Route path="/todays-picks" element={<TodaysPicks onSelectStock={handleSelectStock} />} />
+              <Route path="/early-spotter" element={<EarlyHoursSpotter onSelectStock={handleSelectStock} />} />
               <Route path="/screener-intelligence" element={<ScreenerIntelligencePage />} />
               <Route path="/agent-data-scientist" element={<AgentDataScientistPage />} />
               <Route path="/agent-strategist"     element={<AgentStrategistPage />} />

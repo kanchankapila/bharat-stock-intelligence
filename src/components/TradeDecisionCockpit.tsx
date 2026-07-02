@@ -24,7 +24,7 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
     trpc.getTradeDecisionCockpitData.useQuery(undefined, { refetchInterval: 60000, refetchOnWindowFocus: false });
 
   const { data: overviewRes } =
-    trpc.getMarketOverview.useQuery(undefined, { refetchInterval: 30000, refetchOnWindowFocus: false });
+    trpc.getAllIndices.useQuery(undefined, { refetchInterval: 30000, refetchOnWindowFocus: false });
 
   const { data: adRes } =
     trpc.getAdvanceDecline.useQuery(undefined, { refetchInterval: 60000, refetchOnWindowFocus: false });
@@ -48,7 +48,7 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
   const isTradeActive = overview.verdict === 'TRADE';
 
   // Market pulse data
-  const indices: any[] = (overviewRes as any)?.indices || (overviewRes as any)?.data || [];
+  const indices: any[] = (overviewRes as any)?.data?.indiceList?.flatMap((g: any) => g.list) ?? (overviewRes as any)?.indices ?? (overviewRes as any)?.data ?? [];
   const nifty    = indices.find((i: any) => /nifty\s*50/i.test(i.name) || i.symbol === 'NIFTY 50' || i.symbol === '^NSEI');
   const bankNifty = indices.find((i: any) => /bank.?nifty/i.test(i.name) || i.symbol === 'NIFTY BANK');
   const sensex   = indices.find((i: any) => /sensex/i.test(i.name) || i.symbol === 'BSE SENSEX');
@@ -61,8 +61,8 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
   const gainers: any[] = (moversRes as any)?.gainers || (moversRes as any)?.topGainers || [];
   const losers:  any[] = (moversRes as any)?.losers  || (moversRes as any)?.topLosers  || [];
   const fiiRows: any[] = (fiiRes   as any)?.data     || (fiiRes   as any)?.flows       || [];
-  const sentimentScore: number | null = (sentimentRes as any)?.score ?? (sentimentRes as any)?.overallScore ?? null;
-  const pcr: number | null = (sentimentRes as any)?.pcr ?? (sentimentRes as any)?.putCallRatio ?? null;
+  const sentimentScore: number | null = (sentimentRes as any)?.latest?.overall_score ?? (sentimentRes as any)?.score ?? (sentimentRes as any)?.overallScore ?? null;
+  const pcr: number | null = (sentimentRes as any)?.pcr ?? (sentimentRes as any)?.latest?.pcr ?? (sentimentRes as any)?.putCallRatio ?? null;
 
   const selectCand = (c: any) => {
     setSelectedCand(c);
@@ -360,7 +360,7 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
                   </p>
                   <div className="space-y-1.5">
                     {sectors.slice(0, 7).map((s: any, i: number) => {
-                      const chg = s.change ?? s.changePct ?? s.pChange ?? 0;
+                      const chg = s.change ?? s.changePct ?? s.pChange ?? s.mcapPerChange ?? 0;
                       const pct = Math.abs(chg);
                       return (
                         <div key={i} className="flex items-center gap-2">

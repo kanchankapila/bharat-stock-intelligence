@@ -183,10 +183,10 @@ def fetch_nse_preopen(con) -> int:
     # Merge, dedup by symbol (FO takes priority if duplicate)
     merged: dict[str, dict] = {}
     for item in (raw_nifty + raw_fo):
-        meta = item.get("metadata") or item
+        meta = item.get("metadata") or {}
         sym = (meta.get("symbol") or "").strip().upper()
         if sym:
-            merged[sym] = meta
+            merged[sym] = item
 
     if not merged:
         print("[NSE PreOpen] No data returned — skipping IEP backfill")
@@ -196,12 +196,16 @@ def fetch_nse_preopen(con) -> int:
     fetched_at    = datetime.datetime.now().isoformat()
 
     rows = []
-    for sym, meta in merged.items():
+    for sym, item in merged.items():
+        meta = item.get("metadata") or {}
+        detail = item.get("detail") or {}
+        preopen_mkt = detail.get("preOpenMarket") or {}
+
         iep        = _parse_float(meta.get("iep"))
         prev_close = _parse_float(meta.get("previousClose") or meta.get("prevClose"))
         last_price = _parse_float(meta.get("lastPrice") or meta.get("ltp"))
-        buy_qty    = _parse_float(meta.get("totalBuyQuantity") or meta.get("buyQuantity"))
-        sell_qty   = _parse_float(meta.get("totalSellQuantity") or meta.get("sellQuantity"))
+        buy_qty    = _parse_float(preopen_mkt.get("totalBuyQuantity") or meta.get("totalBuyQuantity") or meta.get("buyQuantity"))
+        sell_qty   = _parse_float(preopen_mkt.get("totalSellQuantity") or meta.get("totalSellQuantity") or meta.get("sellQuantity"))
 
         iep_gap_pct = None
         if iep is not None and prev_close and prev_close != 0:

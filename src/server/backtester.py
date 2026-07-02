@@ -171,6 +171,26 @@ class Backtester:
         if not all_dates:
             return [], pd.Series(dtype=float)
 
+        # Pre-fetch all dividends for symbols in the backtest to avoid DB queries in the loop
+        symbols_list = list(ohlcv_dict.keys())
+        dividends_dict = {}  # (symbol, date_str) -> amount
+        if symbols_list:
+            try:
+                chunk_size = 500
+                for i in range(0, len(symbols_list), chunk_size):
+                    chunk = symbols_list[i:i+chunk_size]
+                    placeholders = ",".join(["?"] * len(chunk))
+                    q_divs = f"""
+                        SELECT symbol, ex_date, amount FROM corporate_actions
+                        WHERE symbol IN ({placeholders}) AND action_type = 'DIVIDEND'
+                    """
+                    rows_div = self.conn.execute(q_divs, chunk).fetchall()
+                    for r in rows_div:
+                        sym_d, ex_d, amt = r['symbol'], r['ex_date'], float(r['amount'] or 0.0)
+                        dividends_dict[(sym_d, ex_d)] = amt
+            except Exception as e:
+                print(f"[Backtest] Dividend pre-fetch error: {e}")
+
         capital   = initial_capital
         cash      = capital
         portfolio_value = capital
@@ -185,6 +205,22 @@ class Backtester:
 
         for date in all_dates:
             d = date.date()
+
+            # Charge MTF interest on debit cash balance (12% p.a.)
+            if cash < 0:
+                daily_charge = abs(cash) * (0.12 / 365.0)
+                cash -= daily_charge
+
+            # Check dividend payouts for open positions on this day
+            date_str = date.strftime('%Y-%m-%d')
+            for sym in list(open_positions.keys()):
+                pos = open_positions[sym]
+                if (sym, date_str) in dividends_dict:
+                    div_amt = dividends_dict[(sym, date_str)]
+                    payout = div_amt * pos['shares']
+                    cash += payout
+                    pos['total_cost'] -= payout  # reduce cost basis of trade
+                    print(f"  [Dividend] {date_str}: {sym} paid ₹{div_amt} per share (Total: ₹{payout:,.2f})")
 
             # ── check and update open positions day-by-day ──────────────
             for sym in list(open_positions.keys()):
@@ -321,8 +357,7 @@ class Backtester:
                 if is_upper_circuit:
                     continue
 
-                entry_price = raw_entry * slippage
-                if pd.isna(entry_price) or entry_price <= 0:
+                if pd.isna(raw_entry) or raw_entry <= 0:
                     continue
 
                 # ── Dynamic position sizing: deploy available cash evenly across
@@ -332,9 +367,31 @@ class Backtester:
                 position_capital = min(position_capital, cash * 0.95)  # hard cap at 95% of cash
                 if position_capital < 1000:
                     continue
-                shares = math.floor(position_capital / entry_price)
-                if shares < 1:
+                
+                # 1. Estimate shares using raw entry and base slippage first
+                est_shares = math.floor(position_capital / (raw_entry * slippage))
+                if est_shares < 1:
                     continue
+                
+                # 2. Apply volume liquidity cap (max 2% participation of the day's volume)
+                day_volume = float(next_row.get('volume', 0.0))
+                if day_volume > 0:
+                    max_allowed_shares = int(day_volume * 0.02)
+                    if est_shares > max_allowed_shares:
+                        est_shares = max_allowed_shares
+                        if est_shares < 1:
+                            continue
+                
+                shares = est_shares
+                
+                # 3. Compute dynamic slippage based on volume participation (market impact)
+                market_participation = 0.0
+                if day_volume > 0:
+                    market_participation = shares / day_volume
+                
+                dynamic_slippage_bps = max(slippage_bps, min(150.0, slippage_bps + 30.0 * (market_participation * 100.0)))
+                dynamic_slippage = 1.0 + dynamic_slippage_bps / 10_000
+                entry_price = raw_entry * dynamic_slippage
 
                 entry_comm = shares * entry_price * commission_bps / 10_000
                 total_cost = shares * entry_price + entry_comm
@@ -447,17 +504,17 @@ class Backtester:
             'win_count':         int(wins.sum()),
             'loss_count':        int(losses.sum()),
             'win_rate':          round(float(wins.mean()), 4),
-            'total_return_pct':  round(total_ret, 4),
-            'cagr_pct':          round(cagr, 4),
+            'total_return_pct':  round(float(total_ret), 4),
+            'cagr_pct':          round(float(cagr), 4),
             'sharpe_ratio':      round(float(sharpe), 4),
             'sortino_ratio':     round(float(sortino), 4),
             'calmar_ratio':      round(float(calmar), 4),
-            'max_drawdown_pct':  round(max_dd, 4),
+            'max_drawdown_pct':  round(float(max_dd), 4),
             'profit_factor':     round(float(profit_factor), 4),
             'avg_return_pct':    round(float(rets.mean()), 4),
-            'avg_holding_days':  round(avg_hold, 2),
-            'nifty_return_pct':  round(nifty_ret, 4),
-            'alpha_pct':         round(alpha, 4),
+            'avg_holding_days':  round(float(avg_hold), 2),
+            'nifty_return_pct':  round(float(nifty_ret), 4),
+            'alpha_pct':         round(float(alpha), 4),
             'monthly_returns':   monthly_dict,
         }
 

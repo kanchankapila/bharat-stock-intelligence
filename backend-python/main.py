@@ -73,6 +73,20 @@ class TvTaRequest(BaseModel):
     symbol: str
     exchange: str = "NSE"
 
+class EarlySpotterRequest(BaseModel):
+    date: str = None
+
+import early_hours_predictor
+
+@app.post("/api/v1/early_spotter")
+def api_run_early_spotter(req: EarlySpotterRequest):
+    try:
+        candidates = early_hours_predictor.run_predictor(req.date)
+        return {"success": True, "date": req.date, "candidates": candidates}
+    except Exception as e:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail=str(e))
+
 from app.strategy_optimizer import run_optimizer, OptimizeRequest
 
 @app.post("/api/v1/optimize")
