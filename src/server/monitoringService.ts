@@ -1,4 +1,4 @@
-import { dbGet, dbAll, dbRun } from './dbAsync';
+import { dbAll, dbRun } from './dbAsync';
 
 /**
  * Compute simple screener reliability metrics using `screener_appearances` and `signal_outcomes`.
@@ -7,18 +7,41 @@ import { dbGet, dbAll, dbRun } from './dbAsync';
 export async function updateScreenerReliability(screenerId: string, horizonDays = 7) {
   try {
     // Get recent appearances for this screener
-    const appearances = await dbAll<{ symbol: string; appeared_date: string }>(`
+    const appearancesRaw = await dbAll<{ symbol: string; appeared_date: unknown }>(`
       SELECT symbol, appeared_date FROM screener_appearances WHERE screener_id = ? ORDER BY appeared_date DESC LIMIT 500
     `, [screenerId]);
 
-    if (!appearances || appearances.length === 0) return { updated: false, reason: 'no_appearances' };
+    if (!appearancesRaw || appearancesRaw.length === 0) return { updated: false, reason: 'no_appearances' };
+
+    // appeared_date is timestamptz on Postgres (comes back as a JS Date, local-midnight) while
+    // signal_outcomes.signal_date is TEXT — normalize via local date parts (NOT toISOString(),
+    // which shifts the calendar day for timezones ahead of UTC) so the join actually matches.
+    const toDateStr = (d: unknown): string => {
+      if (d instanceof Date) {
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+      }
+      return String(d).slice(0, 10);
+    };
+    const appearances = appearancesRaw.map(a => ({ symbol: a.symbol, appeared_date: toDateStr(a.appeared_date) }));
+
+    // Pre-load matching outcomes for the whole batch once (was one dbGet per appearance).
+    const symbols = [...new Set(appearances.map(a => a.symbol))];
+    const placeholders = symbols.map(() => '?').join(',');
+    const outcomeRows = await dbAll<{ symbol: string; signal_date: string; outcome: string }>(`
+      SELECT symbol, signal_date, outcome FROM signal_outcomes
+      WHERE symbol IN (${placeholders}) AND horizon_days = ?
+    `, [...symbols, horizonDays]);
+    const outcomeMap = new Map(outcomeRows.map(r => [`${r.symbol}|${r.signal_date}`, r.outcome]));
 
     let total = 0, wins = 0;
     for (const a of appearances) {
-      const outcome = await dbGet<any>(`SELECT outcome FROM signal_outcomes WHERE symbol = ? AND signal_date = ? AND horizon_days = ?`, [a.symbol, a.appeared_date, horizonDays]);
+      const outcome = outcomeMap.get(`${a.symbol}|${a.appeared_date}`);
       if (!outcome) continue;
       total += 1;
-      if (outcome.outcome === 'WIN' || outcome.outcome === 'PROFIT') wins += 1;
+      if (outcome === 'WIN' || outcome === 'PROFIT') wins += 1;
     }
 
     const winRate = total === 0 ? 0 : (wins / total);
