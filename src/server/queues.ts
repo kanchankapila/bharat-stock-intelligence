@@ -27,6 +27,7 @@ import { syncMoneyControlScreeners } from './moneycontrolScreener';
 import { runFullFundamentalsSync } from './fundamentalsSyncService';
 import { fetchDeliveryMap } from './deliveryFetcher';
 import { updateMonitorState } from './monitoringService';
+import { getTrendlyneMetricSymbols, enqueueTrendlyneMetricsFetchJobs, runTrendlyneMetricsFetch } from './trendlyneDailyFetchService';
 
 import { pythonApi } from './pythonApi';
 import { recordHeartbeat, startHeartbeatMonitor } from './jobHeartbeat';
@@ -111,6 +112,7 @@ export const QUEUE_AGENT_OPTIMIZER      = 'agent-optimizer';
 export const QUEUE_UNIFIED_RANKER       = 'unified-ranker';
 export const QUEUE_COMPANY_PROFILES_SYNC = 'company-profiles-sync';
 export const QUEUE_QUANT_EOD_SYNC = 'quant-eod-sync';
+export const QUEUE_TRENDLYNE_DAILY_FETCH = 'trendlyne-daily-fetch';
 export const QUEUE_LIVE_SCREENER_COLLECT = 'live-screener-collect';
 
 const BULK_CACHE_KEY      = 'live-stocks-bulk';
@@ -131,6 +133,7 @@ export let technicalSignalsQueue:  Queue | null = null;
 export let signalOutcomesQueue:    Queue | null = null;
 export let newsSentimentQueue:     Queue | null = null;
 export let trendlyneIntradayQueue: Queue | null = null;
+export let trendlyneDailyFetchQueue: Queue | null = null;
 
 let stockWorker:              Worker | null = null;
 let signalWorker:             Worker | null = null;
@@ -144,6 +147,7 @@ let technicalSignalsWorker:   Worker | null = null;
 let signalOutcomesWorker:     Worker | null = null;
 let newsSentimentWorker:      Worker | null = null;
 let trendlyneIntradayWorker:  Worker | null = null;
+let trendlyneDailyFetchWorker: Worker | null = null;
 export let companyProfilesSyncQueue: Queue | null = null;
 export let quantEodSyncQueue: Queue | null = null;
 export let quantEodSyncWorker: Worker | null = null;
@@ -385,7 +389,9 @@ async function processOutcomeResolver(_job: Job): Promise<{ success: boolean }> 
   await resolveOutcomesResilient(5);
   await resolveOutcomesResilient(15);
 
-  await runPython('live_screener_resolver.py', [], 180_000)
+  // Now a windowed batch-resolve (was per-row N+1, routinely blew the old 180s
+  // timeout on any real backlog) — give it real headroom.
+  await runPython('live_screener_resolver.py', [], 20 * 60_000)
     .catch(err => console.error('[QUEUE] live_screener_resolver.py failed:', err.message));
 
   return { success: true };
@@ -629,7 +635,9 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await runPython('exit_labeler.py', [], 5 * 60_000)
     .catch(e => console.warn('[QUEUE] exit_labeler failed:', (e as Error).message));
 
-  await runPython('live_screener_resolver.py', [], 180_000)
+  // Now a windowed batch-resolve (was per-row N+1, routinely blew the old 180s
+  // timeout on any real backlog) — give it real headroom.
+  await runPython('live_screener_resolver.py', [], 20 * 60_000)
     .catch(err => console.error('[QUEUE] live_screener_resolver.py failed:', err.message));
 
   await runPython('performance_tracker.py', ['--horizon', '5']);
@@ -726,7 +734,10 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean }> 
   // Retrain the exit policy models
   await runPython('exit_policy.py', ['--train'], 10 * 60_000)
     .catch(e => console.warn('[QUEUE] exit_policy training failed:', (e as Error).message));
-  await runPython('ml_ensemble.py', ['--train', '--score'], 60 * 60_000);
+  // --tune runs Optuna hyperparameter search (this is what took the model from AUC 0.70 to
+  // 0.757 in the first place) — without it, every scheduled retrain silently falls back to
+  // untuned defaults, which measured ~0.20 AUC worse on held-out test in one observed run.
+  await runPython('ml_ensemble.py', ['--train', '--tune', '--score'], 90 * 60_000);
   await runPython('cs_ranker.py', ['--train', '--score'], 30 * 60_000)
     .catch(e => console.warn('[QUEUE] cs_ranker retrain failed:', (e as Error).message));
   await runPython('strategy_optimizer.py', [], 30 * 60_000).catch(() => {});
@@ -765,7 +776,7 @@ async function processScreenerPerf(_job: Job): Promise<void> {
     .catch(e => console.warn('[QUEUE] screener_signal_generator failed:', (e as Error).message));
 
   // 7. Resolve live screener outcomes (needs ohlcv data to be fresh first)
-  await runPython('live_screener_resolver.py', [], 3 * 60_000)
+  await runPython('live_screener_resolver.py', [], 20 * 60_000)
     .catch(e => console.warn('[QUEUE] live_screener_resolver failed:', (e as Error).message));
 
   try {
@@ -1172,11 +1183,14 @@ export async function initQueues(): Promise<boolean> {
     etnowScreenerSyncWorker = new Worker(
       QUEUE_ETNOW_SCREENER_SYNC,
       processEtnowScreenerSync,
-      { 
-        connection, 
+      {
+        connection,
         concurrency: 1,
-        lockDuration: 60000,
-        lockRenewTime: 20000,
+        // Syncs ~1,300 screeners sequentially (fetch + 800ms rate-limit delay each) —
+        // real runtime is ~35-60 min. The old 60s lockDuration made BullMQ think the
+        // job died mid-run every cycle (repeated "could not renew lock" errors).
+        lockDuration: 90 * 60 * 1000,   // 90 min
+        lockRenewTime: 15 * 60 * 1000,  // 15 min
       },
     );
 
@@ -2048,6 +2062,39 @@ export async function initQueues(): Promise<boolean> {
     quantEodSyncWorker.on('completed', () => console.log('[QUEUE] quant-eod-sync done'));
     quantEodSyncWorker.on('failed', (_, e) => console.error('[QUEUE] quant-eod-sync failed:', e.message));
 
+    trendlyneDailyFetchQueue = new Queue(QUEUE_TRENDLYNE_DAILY_FETCH, { connection });
+
+    const dailyFetchRepeatables = await trendlyneDailyFetchQueue.getRepeatableJobs();
+    for (const r of dailyFetchRepeatables) {
+      await trendlyneDailyFetchQueue.removeRepeatableByKey(r.key);
+    }
+    await addJobWithCatchup(trendlyneDailyFetchQueue,
+      'trendlyne-daily-fetch',
+      {},
+      {
+        repeat: { pattern: '30 4 * * 1-5' },
+        jobId: 'trendlyne-daily-fetch-daily',
+        removeOnComplete: 5,
+        removeOnFail: 3,
+      },
+    );
+
+    trendlyneDailyFetchWorker = new Worker(
+      QUEUE_TRENDLYNE_DAILY_FETCH,
+      async (job: Job) => {
+        if (!job.data || !job.data.symbol) {
+          const symbols = getTrendlyneMetricSymbols();
+          await enqueueTrendlyneMetricsFetchJobs(trendlyneDailyFetchQueue!, symbols, 12);
+          return;
+        }
+        await runTrendlyneMetricsFetch(job.data.symbol);
+      },
+      { connection, concurrency: 2, lockDuration: 30 * 60_000 }
+    );
+
+    trendlyneDailyFetchWorker.on('completed', () => console.log('[QUEUE] trendlyne-daily-fetch completed'));
+    trendlyneDailyFetchWorker.on('failed', (_, e) => console.error('[QUEUE] trendlyne-daily-fetch failed:', e.message));
+
     companyProfilesSyncQueue = new Queue(QUEUE_COMPANY_PROFILES_SYNC, { connection });
 
     const cpRepeatables = await companyProfilesSyncQueue.getRepeatableJobs();
@@ -2219,6 +2266,8 @@ export async function shutdownQueues(): Promise<void> {
     newsSentimentQueue?.close(),
     trendlyneIntradayWorker?.close(),
     trendlyneIntradayQueue?.close(),
+    trendlyneDailyFetchWorker?.close(),
+    trendlyneDailyFetchQueue?.close(),
     outcomeResolverWorker?.close(),
     outcomeResolverQueue?.close(),
     mlDailyOpsWorker?.close(),

@@ -1,4 +1,4 @@
-import { dbAll, dbRun } from './dbAsync';
+import { dbAll, dbTransaction } from './dbAsync';
 
 export type ScreenerCategory =
   | 'technical_trend' | 'technical_reversal' | 'technical_breakout' | 'technical_momentum'
@@ -141,13 +141,17 @@ export async function classifyAllScreeners(): Promise<{
   let classified = 0;
   let remaining_other = 0;
 
-  for (const row of rows) {
-    const r = classifyByKeyword(row.name);
-    const timeframe = r.investment_horizon === 'intraday' ? 'intraday' : 'long_term';
-    await dbRun(updateSql, [r.subcategory, r.category, r.signal_bias, timeframe, r.confidence, 'keyword', row.scan_id]);
-    if (r.category === 'other') remaining_other++;
-    else classified++;
-  }
+  // Each row gets distinct computed values, so this stays a per-row UPDATE — but batched
+  // into one transaction (was one implicit commit per row) cuts round-trips substantially.
+  await dbTransaction(async (tx) => {
+    for (const row of rows) {
+      const r = classifyByKeyword(row.name);
+      const timeframe = r.investment_horizon === 'intraday' ? 'intraday' : 'long_term';
+      await tx.run(updateSql, [r.subcategory, r.category, r.signal_bias, timeframe, r.confidence, 'keyword', row.scan_id]);
+      if (r.category === 'other') remaining_other++;
+      else classified++;
+    }
+  });
 
   console.log(`[Classifier] Done: ${classified} classified, ${remaining_other} remain 'other'`);
   return { classified, remaining_other };

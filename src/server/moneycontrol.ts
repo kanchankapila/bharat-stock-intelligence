@@ -23,7 +23,16 @@ export interface MCScreenerResponse {
 
 // --- Simple In-Memory Cache for Screeners (30 mins) ---
 const screenerCache: Record<string, { data: MCScreenerResponse, timestamp: number }> = {};
-const CACHE_DURATION = 30 * 60 * 1000; 
+const CACHE_DURATION = 30 * 60 * 1000;
+
+setInterval(() => {
+  const now = Date.now();
+  for (const key of Object.keys(screenerCache)) {
+    if (now - screenerCache[key].timestamp > CACHE_DURATION) {
+      delete screenerCache[key];
+    }
+  }
+}, 30 * 60_000); // sweep every 30 min
 
 export async function fetchMCScreener(type: 'proscanner' | 'techscanner' | 'technical-trends', catId: string | number, scanId: string | number): Promise<MCScreenerResponse> {
   const cacheKey = `${type}:${catId}:${scanId}`;

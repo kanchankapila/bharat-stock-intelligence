@@ -75,6 +75,43 @@ export async function computeSignalOutcomes(horizonDays: HorizonDays = 5): Promi
 
   if (pending.length === 0) return { processed: 0, resolved: 0 };
 
+  // Pre-load stock_ohlcv for every symbol in this batch once, instead of up to 3
+  // sequential per-row queries x 500 rows. Window starts at the earliest signal_date
+  // in the batch (open-ended upper bound, same as the original unbounded exit-row scan).
+  const symbols = [...new Set(pending.map(r => r.symbol))];
+  const minSignalDate = pending.reduce(
+    (min, r) => (r.signal_date < min ? r.signal_date : min),
+    pending[0].signal_date,
+  );
+  const placeholders = symbols.map(() => '?').join(',');
+  const ohlcvRows = await dbAll(
+    `SELECT symbol, date, low, high, close FROM stock_ohlcv
+     WHERE symbol IN (${placeholders}) AND date > ?
+     ORDER BY symbol, date`,
+    [...symbols, minSignalDate],
+  ) as { symbol: string; date: unknown; low: number; high: number; close: number }[];
+
+  // Postgres returns DATE columns as JS Date objects (local midnight) — toISOString()
+  // converts to UTC and can shift the calendar day (e.g. IST midnight -> prior-day UTC).
+  // Local getFullYear/getMonth/getDate reconstruct the exact DB value instead.
+  const toDateStr = (d: unknown): string => {
+    if (d instanceof Date) {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    }
+    return String(d).slice(0, 10);
+  };
+
+  const bySymbol = new Map<string, { date: string; low: number; high: number; close: number }[]>();
+  for (const bar of ohlcvRows) {
+    let arr = bySymbol.get(bar.symbol);
+    if (!arr) { arr = []; bySymbol.set(bar.symbol, arr); }
+    arr.push({ date: toDateStr(bar.date), low: bar.low, high: bar.high, close: bar.close });
+  }
+  // Already ORDER BY symbol, date — each per-symbol array is ascending by date.
+
   let resolved = 0;
 
   await dbTransaction(async (tx) => {
@@ -84,13 +121,17 @@ export async function computeSignalOutcomes(horizonDays: HorizonDays = 5): Promi
       targetDate.setDate(targetDate.getDate() + horizonDays);
       const targetStr = targetDate.toISOString().slice(0, 10);
 
+      const series = bySymbol.get(row.symbol) ?? [];
+
       // Check for stop-loss hit before target exit date
-      const stopLossRow = await tx.get(`
-        SELECT date FROM stock_ohlcv
-        WHERE symbol = ? AND date > ? AND date <= ?
-          AND low <= ?
-        ORDER BY date ASC LIMIT 1
-      `, [row.symbol, row.signal_date, targetStr, row.stop_loss]) as { date: string } | undefined;
+      let stopLossRow: { date: string } | undefined;
+      if (row.stop_loss != null) {
+        for (const bar of series) {
+          if (bar.date <= row.signal_date) continue;
+          if (bar.date > targetStr) break;
+          if (bar.low <= row.stop_loss) { stopLossRow = { date: bar.date }; break; }
+        }
+      }
 
       if (stopLossRow) {
         const stopReturnPct = ((row.stop_loss! - row.entry_price) / row.entry_price) * 100;
@@ -104,12 +145,12 @@ export async function computeSignalOutcomes(horizonDays: HorizonDays = 5): Promi
       }
 
       // Check MAX(high) over the full horizon for WIN detection
-      const maxHighRow = await tx.get(`
-        SELECT MAX(high) as max_high FROM stock_ohlcv
-        WHERE symbol = ? AND date > ? AND date <= ?
-      `, [row.symbol, row.signal_date, targetStr]) as { max_high: number | null } | undefined;
-
-      const maxHigh = maxHighRow?.max_high ?? null;
+      let maxHigh: number | null = null;
+      for (const bar of series) {
+        if (bar.date <= row.signal_date) continue;
+        if (bar.date > targetStr) break;
+        if (maxHigh == null || bar.high > maxHigh) maxHigh = bar.high;
+      }
       const maxReturnPct = maxHigh != null
         ? ((maxHigh - row.entry_price) / row.entry_price) * 100
         : null;
@@ -126,11 +167,10 @@ export async function computeSignalOutcomes(horizonDays: HorizonDays = 5): Promi
       }
 
       // No WIN from max high — fall back to terminal close for LOSS/NEUTRAL
-      const exitRow = await tx.get(`
-        SELECT date, close FROM stock_ohlcv
-        WHERE symbol = ? AND date >= ?
-        ORDER BY date ASC LIMIT 1
-      `, [row.symbol, targetStr]) as { date: string; close: number } | undefined;
+      let exitRow: { date: string; close: number } | undefined;
+      for (const bar of series) {
+        if (bar.date >= targetStr) { exitRow = { date: bar.date, close: bar.close }; break; }
+      }
 
       if (!exitRow) {
         // No exit data yet — record as PENDING

@@ -1391,9 +1391,11 @@ tryIndex(`CREATE INDEX IF NOT EXISTS idx_technical_signals_created_at ON technic
 tryIndex(`CREATE INDEX IF NOT EXISTS idx_stock_scores_created_at ON stock_scores(created_at DESC)`);
 tryIndex(`CREATE INDEX IF NOT EXISTS idx_screener_master_created_at ON screener_master(created_at DESC)`);
 tryIndex(`CREATE INDEX IF NOT EXISTS idx_watchlist_userId ON watchlist(userId)`);
-tryIndex(`CREATE INDEX IF NOT EXISTS idx_technical_signals_symbol ON technical_signals(symbol)`);
+// idx_technical_signals_symbol intentionally NOT (re)created — duplicate of idx_tsig_sym
+// (same table/column); dropped from live Postgres via scripts/migrate_add_indexes.sql.
 tryIndex(`CREATE INDEX IF NOT EXISTS idx_stock_scores_symbol ON stock_scores(symbol)`);
 tryIndex(`CREATE INDEX IF NOT EXISTS idx_stock_ohlcv_date ON stock_ohlcv(date DESC)`);
+tryIndex(`CREATE INDEX IF NOT EXISTS idx_stock_ohlcv_sym_date ON stock_ohlcv(symbol, date DESC)`);
 tryIndex(`CREATE INDEX IF NOT EXISTS idx_unified_signals_date ON unified_signals(signal_date DESC)`);
 
 // ── Early migrations (moved after db.exec so ALTER TABLE runs after table creation) ─

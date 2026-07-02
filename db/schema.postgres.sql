@@ -1187,6 +1187,11 @@ CREATE INDEX idx_nse_symbol ON nse_stocks(symbol);
 CREATE INDEX idx_nse_sector ON nse_stocks(sector);
 CREATE INDEX idx_nse_industry ON nse_stocks(industry);
 CREATE INDEX idx_nse_status ON nse_stocks(status);
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE INDEX idx_nse_stocks_symbol_gin ON nse_stocks USING GIN (symbol gin_trgm_ops);
+CREATE INDEX idx_nse_stocks_name_gin ON nse_stocks USING GIN (name gin_trgm_ops);
+CREATE INDEX idx_nse_stocks_sector_gin ON nse_stocks USING GIN (sector gin_trgm_ops);
+CREATE INDEX idx_nse_stocks_industry_gin ON nse_stocks USING GIN (industry gin_trgm_ops);
 
 -- ── nt_fno_expiry ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "nt_fno_expiry" (
@@ -1865,6 +1870,7 @@ CREATE TABLE IF NOT EXISTS "stock_ohlcv" (
   PRIMARY KEY ("symbol", "date")
 );
 CREATE INDEX idx_stock_ohlcv_date ON stock_ohlcv(date DESC);
+CREATE INDEX idx_stock_ohlcv_sym_date ON stock_ohlcv(symbol, date DESC);
 
 -- ── stock_option_features ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "stock_option_features" (
@@ -2206,13 +2212,15 @@ CREATE TABLE IF NOT EXISTS "technical_signals" (
   "wc_improving" BIGINT DEFAULT 0,
   PRIMARY KEY ("symbol", "date")
 );
-CREATE INDEX idx_tsig_date  ON technical_signals(date DESC);
-CREATE INDEX idx_tsig_score ON technical_signals(signal_score DESC);
-CREATE INDEX idx_tsig_sym   ON technical_signals(symbol);
-CREATE INDEX idx_technical_signals_symbol ON technical_signals(symbol);
+CREATE INDEX idx_tsig_date     ON technical_signals(date DESC);
+CREATE INDEX idx_tsig_score    ON technical_signals(signal_score DESC);
+CREATE INDEX idx_tsig_sym      ON technical_signals(symbol);
+CREATE INDEX idx_tsig_sym_date ON technical_signals(symbol, date DESC);
 CREATE INDEX idx_technical_signals_created_at ON technical_signals(created_at DESC);
 CREATE INDEX idx_ts_cs_score
     ON technical_signals(cs_score) WHERE cs_score IS NOT NULL;
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE INDEX idx_tsig_signals_json_gin ON technical_signals USING GIN (signals_json gin_trgm_ops);
 
 -- ── tick_data ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "tick_data" (

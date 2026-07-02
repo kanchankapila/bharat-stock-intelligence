@@ -429,8 +429,17 @@ class UnifiedRanker:
                     _add(r['symbol'], r['signal_bias'], r['confidence'],
                          r['category'], r['subcategory'], r['investment_horizon'],
                          name=r['sname'])
-            except Exception:
+            except Exception as e:
+                # Do NOT swallow silently: a broken membership query means every symbol
+                # falls back to Hold/0-bull/0-bear with no error surfaced anywhere — the
+                # ranker looks like it's running fine while producing no directional signal
+                # at all. Log so a monitoring pass can catch it.
+                print(f"[UnifiedRanker] Screener membership query failed: {e}")
                 self.conn.rollback()
+
+        if not membership:
+            print("[UnifiedRanker] WARNING: screener membership is completely empty — "
+                  "every symbol will classify as Hold with 0 bull/bear counts.")
 
         return membership
 
@@ -533,136 +542,143 @@ class UnifiedRanker:
             self.conn.rollback()
             return 0.0
 
-    def _passes_rl_gate(self, symbol):
+    def _get_rl_gate_map(self):
+        """Pre-load per-symbol avg realized return over the trailing 90d, once for the
+        whole universe (was one query per symbol inside the run() loop)."""
         cutoff = (date.today() - timedelta(days=90)).isoformat()
         try:
-            row = self.conn.execute(
-                "SELECT AVG(actual_return_pct) AS avg_r, COUNT(*) AS cnt FROM recommendation_log WHERE symbol = ? AND generated_at >= ? AND actual_return_pct IS NOT NULL",
-                (symbol, cutoff),
-            ).fetchone()
-            if row and row['cnt'] and row['cnt'] > 0:
-                return float(row['avg_r'] or 0) >= 0
+            rows = self.conn.execute(
+                "SELECT symbol, AVG(actual_return_pct) AS avg_r, COUNT(*) AS cnt "
+                "FROM recommendation_log WHERE generated_at >= ? AND actual_return_pct IS NOT NULL "
+                "GROUP BY symbol",
+                (cutoff,),
+            ).fetchall()
+            return {r['symbol']: float(r['avg_r'] or 0) for r in rows if r['cnt'] and r['cnt'] > 0}
         except Exception:
             self.conn.rollback()
+            return {}
+
+    def _passes_rl_gate(self, symbol, rl_gate_map):
+        if symbol in rl_gate_map:
+            return rl_gate_map[symbol] >= 0
         return True
 
-    def _get_entry_targets(self, symbol):
-        # Fallback 1: Query confluence_signals (best source with entry zones, atr, risk-reward, etc.)
+    def _get_confluence_latest_map(self):
         try:
-            row = self.conn.execute(
-                """SELECT entry_zone_low, entry_zone_high, stop_loss, target_1, target_2, target_3, 
-                          risk_reward, suggested_timeframe AS timeframe, trade_reasoning, sector 
-                   FROM confluence_signals 
-                   WHERE symbol = ? 
-                   ORDER BY computed_at DESC 
-                   LIMIT 1""",
-                (symbol,),
-            ).fetchone()
-            if row and (row['entry_zone_low'] is not None or row['stop_loss'] is not None):
-                return {
-                    'entry_zone_low':  float(row['entry_zone_low'])  if row['entry_zone_low']  is not None else None,
-                    'entry_zone_high': float(row['entry_zone_high']) if row['entry_zone_high'] is not None else None,
-                    'stop_loss':       float(row['stop_loss'])       if row['stop_loss']       is not None else None,
-                    'target_1':        float(row['target_1'])        if row['target_1']        is not None else None,
-                    'target_2':        float(row['target_2'])        if row['target_2']        is not None else None,
-                    'target_3':        float(row['target_3'])        if row['target_3']        is not None else None,
-                    'risk_reward':     float(row['risk_reward'])     if row['risk_reward']     is not None else None,
-                    'timeframe':       row['timeframe'],
-                    'trade_reasoning': row['trade_reasoning'],
-                    'sector':          row['sector'],
-                }
+            rows = self.conn.execute("""
+                SELECT * FROM (
+                    SELECT symbol, entry_zone_low, entry_zone_high, stop_loss, target_1, target_2,
+                           target_3, risk_reward, suggested_timeframe AS timeframe, trade_reasoning,
+                           sector,
+                           ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY computed_at DESC) AS rn
+                    FROM confluence_signals
+                ) t WHERE rn = 1
+            """).fetchall()
+            return {r['symbol']: r for r in rows}
         except Exception:
             self.conn.rollback()
+            return {}
 
-        # Fallback 2: Query recommendation_log
+    def _get_rec_log_latest_map(self):
         try:
-            row = self.conn.execute(
-                """SELECT entry_price, stop_loss, target_1, target_2, target_3, 
-                          timeframe, reasoning AS trade_reasoning, sector 
-                   FROM recommendation_log 
-                   WHERE symbol = ? 
-                   ORDER BY generated_at DESC 
-                   LIMIT 1""",
-                (symbol,),
-            ).fetchone()
-            if row and row['entry_price'] is not None:
-                ep = float(row['entry_price'])
-                sl = float(row['stop_loss']) if row['stop_loss'] is not None else None
-                t1 = float(row['target_1']) if row['target_1'] is not None else None
-                rr = None
-                if sl is not None and ep - sl > 0 and t1 is not None:
-                    rr = round((t1 - ep) / (ep - sl), 2)
-                return {
-                    'entry_zone_low':  round(ep * 0.99, 2),
-                    'entry_zone_high': round(ep * 1.01, 2),
-                    'stop_loss':       sl,
-                    'target_1':        t1,
-                    'target_2':        float(row['target_2']) if row['target_2'] is not None else None,
-                    'target_3':        float(row['target_3']) if row['target_3'] is not None else None,
-                    'risk_reward':     rr,
-                    'timeframe':       row['timeframe'],
-                    'trade_reasoning': row['trade_reasoning'],
-                    'sector':          row['sector'],
-                }
+            rows = self.conn.execute("""
+                SELECT * FROM (
+                    SELECT symbol, entry_price, stop_loss, target_1, target_2, target_3, timeframe,
+                           reasoning AS trade_reasoning, sector,
+                           ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY generated_at DESC) AS rn
+                    FROM recommendation_log
+                ) t WHERE rn = 1
+            """).fetchall()
+            return {r['symbol']: r for r in rows}
         except Exception:
             self.conn.rollback()
+            return {}
 
-        # Fallback 3: Query unified_signals
+    def _get_unified_signals_latest_map(self):
         try:
-            row = self.conn.execute(
-                """SELECT entry_price AS entry, target_price AS target,
-                          stop_loss AS "stopLoss", reasoning AS trade_reasoning
-                   FROM unified_signals
-                   WHERE symbol = ?
-                   ORDER BY signal_generated_at DESC
-                   LIMIT 1""",
-                (symbol,),
-            ).fetchone()
-            if row and row['entry'] is not None:
-                ep = float(row['entry'])
-                sl = float(row['stopLoss']) if row['stopLoss'] is not None else None
-                t1 = float(row['target']) if row['target'] is not None else None
-                rr = None
-                if sl is not None and ep - sl > 0 and t1 is not None:
-                    rr = round((t1 - ep) / (ep - sl), 2)
-                
-                # Fetch sector from nse_stocks
-                sec = None
-                try:
-                    sec_row = self.conn.execute(
-                        "SELECT sector FROM nse_stocks WHERE symbol = ? LIMIT 1", (symbol,)
-                    ).fetchone()
-                    if sec_row:
-                        sec = sec_row['sector']
-                except Exception:
-                    pass
-
-                return {
-                    'entry_zone_low':  round(ep * 0.99, 2),
-                    'entry_zone_high': round(ep * 1.01, 2),
-                    'stop_loss':       sl,
-                    'target_1':        t1,
-                    'target_2':        None,
-                    'target_3':        None,
-                    'risk_reward':     rr,
-                    'timeframe':       'SWING',
-                    'trade_reasoning': row['trade_reasoning'],
-                    'sector':          sec,
-                }
+            rows = self.conn.execute("""
+                SELECT * FROM (
+                    SELECT symbol, entry_price AS entry, target_price AS target,
+                           stop_loss AS "stopLoss", reasoning AS trade_reasoning,
+                           ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY signal_generated_at DESC) AS rn
+                    FROM unified_signals
+                ) t WHERE rn = 1
+            """).fetchall()
+            return {r['symbol']: r for r in rows}
         except Exception:
             self.conn.rollback()
+            return {}
 
-        # Fallback 4: Default fallback with sector only
-        sec = None
+    def _get_sector_map(self):
         try:
-            sec_row = self.conn.execute(
-                "SELECT sector FROM nse_stocks WHERE symbol = ? LIMIT 1", (symbol,)
-            ).fetchone()
-            if sec_row:
-                sec = sec_row['sector']
+            rows = self.conn.execute("SELECT symbol, sector FROM nse_stocks").fetchall()
+            return {r['symbol']: r['sector'] for r in rows}
         except Exception:
             self.conn.rollback()
+            return {}
 
+    def _get_entry_targets(self, symbol, confluence_map, rec_log_map, unified_map, sector_map):
+        # Fallback 1: confluence_signals (best source with entry zones, atr, risk-reward, etc.)
+        row = confluence_map.get(symbol)
+        if row and (row['entry_zone_low'] is not None or row['stop_loss'] is not None):
+            return {
+                'entry_zone_low':  float(row['entry_zone_low'])  if row['entry_zone_low']  is not None else None,
+                'entry_zone_high': float(row['entry_zone_high']) if row['entry_zone_high'] is not None else None,
+                'stop_loss':       float(row['stop_loss'])       if row['stop_loss']       is not None else None,
+                'target_1':        float(row['target_1'])        if row['target_1']        is not None else None,
+                'target_2':        float(row['target_2'])        if row['target_2']        is not None else None,
+                'target_3':        float(row['target_3'])        if row['target_3']        is not None else None,
+                'risk_reward':     float(row['risk_reward'])     if row['risk_reward']     is not None else None,
+                'timeframe':       row['timeframe'],
+                'trade_reasoning': row['trade_reasoning'],
+                'sector':          row['sector'],
+            }
+
+        # Fallback 2: recommendation_log
+        row = rec_log_map.get(symbol)
+        if row and row['entry_price'] is not None:
+            ep = float(row['entry_price'])
+            sl = float(row['stop_loss']) if row['stop_loss'] is not None else None
+            t1 = float(row['target_1']) if row['target_1'] is not None else None
+            rr = None
+            if sl is not None and ep - sl > 0 and t1 is not None:
+                rr = round((t1 - ep) / (ep - sl), 2)
+            return {
+                'entry_zone_low':  round(ep * 0.99, 2),
+                'entry_zone_high': round(ep * 1.01, 2),
+                'stop_loss':       sl,
+                'target_1':        t1,
+                'target_2':        float(row['target_2']) if row['target_2'] is not None else None,
+                'target_3':        float(row['target_3']) if row['target_3'] is not None else None,
+                'risk_reward':     rr,
+                'timeframe':       row['timeframe'],
+                'trade_reasoning': row['trade_reasoning'],
+                'sector':          row['sector'],
+            }
+
+        # Fallback 3: unified_signals
+        row = unified_map.get(symbol)
+        if row and row['entry'] is not None:
+            ep = float(row['entry'])
+            sl = float(row['stopLoss']) if row['stopLoss'] is not None else None
+            t1 = float(row['target']) if row['target'] is not None else None
+            rr = None
+            if sl is not None and ep - sl > 0 and t1 is not None:
+                rr = round((t1 - ep) / (ep - sl), 2)
+            return {
+                'entry_zone_low':  round(ep * 0.99, 2),
+                'entry_zone_high': round(ep * 1.01, 2),
+                'stop_loss':       sl,
+                'target_1':        t1,
+                'target_2':        None,
+                'target_3':        None,
+                'risk_reward':     rr,
+                'timeframe':       'SWING',
+                'trade_reasoning': row['trade_reasoning'],
+                'sector':          sector_map.get(symbol),
+            }
+
+        # Fallback 4: default fallback with sector only
         return {
             'entry_zone_low':  None,
             'entry_zone_high': None,
@@ -673,7 +689,7 @@ class UnifiedRanker:
             'risk_reward':     None,
             'timeframe':       None,
             'trade_reasoning': None,
-            'sector':          sec,
+            'sector':          sector_map.get(symbol),
         }
 
     def run(self):
@@ -709,6 +725,14 @@ class UnifiedRanker:
         dl_scores         = self._get_dl_scores()
         avg_track         = self._get_avg_track_record()
 
+        # Pre-loaded once for the whole universe (was up to 5 queries PER symbol inside
+        # the loop below — _passes_rl_gate + the 4-tier _get_entry_targets fallback chain).
+        rl_gate_map    = self._get_rl_gate_map()
+        confluence_map = self._get_confluence_latest_map()
+        rec_log_map    = self._get_rec_log_latest_map()
+        unified_map    = self._get_unified_signals_latest_map()
+        sector_map     = self._get_sector_map()
+
         all_symbols = set(screener_scores) | set(ml_scores) | set(cs_scores) | set(confluence_scores) | set(technical_scores) | set(dl_scores)
 
         engine_maps = {
@@ -723,7 +747,7 @@ class UnifiedRanker:
         results = []
         raw_sizes = {}   # symbol -> conviction×inverse-vol (normalized into weights after the loop)
         for sym in all_symbols:
-            if not self._passes_rl_gate(sym):
+            if not self._passes_rl_gate(sym, rl_gate_map):
                 continue
 
             engine_scores = {e: m.get(sym, 0.0) for e, m in engine_maps.items()}
@@ -774,7 +798,7 @@ class UnifiedRanker:
                 + ("; RED-FLAG VETO" if red_flagged else "")
             )
 
-            et = self._get_entry_targets(sym)
+            et = self._get_entry_targets(sym, confluence_map, rec_log_map, unified_map, sector_map)
             if not et.get('trade_reasoning'):
                 et['trade_reasoning'] = screener_summary
 

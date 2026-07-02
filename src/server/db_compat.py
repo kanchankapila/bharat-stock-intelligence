@@ -337,6 +337,31 @@ def transaction():
     return _TxCtx()
 
 
+def try_advisory_lock(name: str) -> bool:
+    """Best-effort cross-process guard against overlapping cron-script runs.
+
+    Uses a Postgres session-level advisory lock keyed off a stable hash of
+    `name`; returns False immediately (non-blocking) if another process
+    already holds it. No-op (always True) on SQLite — advisory locks are a
+    Postgres-only primitive and the SQLite dev path is single-process.
+    """
+    if not use_postgres():
+        return True
+    row = query_one("SELECT pg_try_advisory_lock(?)", (_advisory_lock_key(name),))
+    return bool(row[0]) if row is not None else False
+
+
+def release_advisory_lock(name: str) -> None:
+    if not use_postgres():
+        return
+    execute("SELECT pg_advisory_unlock(?)", (_advisory_lock_key(name),))
+
+
+def _advisory_lock_key(name: str) -> int:
+    import zlib
+    return zlib.crc32(name.encode()) & 0x7FFFFFFF
+
+
 def load_index_map(provider: str) -> dict:
     """Return {provider_id: index_name} for the given provider key.
 

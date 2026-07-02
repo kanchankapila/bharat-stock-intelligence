@@ -71,23 +71,34 @@ export class CorrelationService {
   }
 
   /**
-   * Get historical prices for a symbol (last 90 days)
+   * Historical prices for many symbols at once — one query instead of one per symbol/holding
+   * (was the dominant cost in analyzeSignalPortfolioAlignment).
    */
-  private async getHistoricalPrices(symbol: string, days: number = 90): Promise<number[]> {
+  private async getHistoricalPricesBatch(symbols: string[], days: number = 90): Promise<Map<string, number[]>> {
+    const map = new Map<string, number[]>();
+    if (symbols.length === 0) return map;
     try {
       const cutoff = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
-      const query = `
-        SELECT close FROM stock_ohlcv
-        WHERE symbol = ? AND date >= ?
-        ORDER BY date ASC
-        LIMIT ?
-      `;
-      const result = await dbAll<{ close: number }>(query, [symbol, cutoff, 1000]);
-      return result.map(r => r.close);
+      const uniqueSymbols = [...new Set(symbols)];
+      const placeholders = uniqueSymbols.map(() => '?').join(',');
+      const rows = await dbAll<{ symbol: string; close: number }>(`
+        SELECT symbol, close FROM (
+          SELECT symbol, close, date,
+                 ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY date ASC) AS rn
+          FROM stock_ohlcv
+          WHERE symbol IN (${placeholders}) AND date >= ?
+        ) t WHERE rn <= 1000
+        ORDER BY symbol, date ASC
+      `, [...uniqueSymbols, cutoff]);
+      for (const r of rows) {
+        let arr = map.get(r.symbol);
+        if (!arr) { arr = []; map.set(r.symbol, arr); }
+        arr.push(r.close);
+      }
     } catch (err) {
-      console.error(`[CorrelationService] Failed to fetch prices for ${symbol}:`, err);
-      return [];
+      console.error('[CorrelationService] Failed to batch-fetch prices:', err);
     }
+    return map;
   }
 
   /**
@@ -100,7 +111,8 @@ export class CorrelationService {
     signalMomentum: number = 1,  // 1 for bullish, -1 for bearish
   ): Promise<SignalPortfolioCorrelation[]> {
     const correlations: SignalPortfolioCorrelation[] = [];
-    const signalPrices = await this.getHistoricalPrices(signalSymbol);
+    const pricesMap = await this.getHistoricalPricesBatch([signalSymbol, ...portfolio.map(h => h.symbol)]);
+    const signalPrices = pricesMap.get(signalSymbol) ?? [];
 
     if (signalPrices.length < 30) {
       console.warn(`[CorrelationService] Insufficient data for ${signalSymbol}`);
@@ -108,7 +120,7 @@ export class CorrelationService {
     }
 
     for (const holding of portfolio) {
-      const holdingPrices = await this.getHistoricalPrices(holding.symbol);
+      const holdingPrices = pricesMap.get(holding.symbol) ?? [];
 
       if (holdingPrices.length < 30) {
         continue;  // Skip holdings with insufficient data

@@ -36,7 +36,16 @@ export interface MoneycontrolInsightsResponse {
 
 // --- Simple In-Memory Cache for Insights (1 hour) ---
 const insightsCache: Record<string, { data: MoneycontrolInsightsResponse, timestamp: number }> = {};
-const CACHE_DURATION = 60 * 60 * 1000; 
+const CACHE_DURATION = 60 * 60 * 1000;
+
+setInterval(() => {
+  const now = Date.now();
+  for (const key of Object.keys(insightsCache)) {
+    if (now - insightsCache[key].timestamp > CACHE_DURATION) {
+      delete insightsCache[key];
+    }
+  }
+}, 30 * 60_000); // sweep every 30 min
 
 /**
  * Fetches stock insights from Moneycontrol API.
