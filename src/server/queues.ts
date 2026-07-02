@@ -1074,10 +1074,12 @@ export async function initQueues(): Promise<boolean> {
 
     signalWorker.on('completed', (job) => {
       console.log(`[QUEUE] ai-signals job ${job?.data?.symbol} completed successfully`);
+      recordHeartbeat('ai-signals', 'success');
     });
 
     signalWorker.on('failed', (job, err) => {
       console.warn(`[QUEUE] ai-signals job ${job?.data?.symbol} failed:`, err.message);
+      recordHeartbeat('ai-signals', 'failed', err.message);
     });
 
     signalWorker.on('stalled', (jobId) => {
@@ -1318,9 +1320,11 @@ export async function initQueues(): Promise<boolean> {
 
     quantScoringWorker.on('completed', (_job) => {
       console.log('[QUEUE] quant-scoring completed');
+      recordHeartbeat('quant-scoring', 'success');
     });
     quantScoringWorker.on('failed', (_job, err) => {
       console.error('[QUEUE] quant-scoring failed:', err.message);
+      recordHeartbeat('quant-scoring', 'failed', err.message);
     });
 
     // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Technical signals queue (every 30 minutes) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
@@ -1403,9 +1407,11 @@ export async function initQueues(): Promise<boolean> {
 
     signalOutcomesWorker.on('completed', (_job) => {
       console.log('[QUEUE] signal-outcomes completed');
+      recordHeartbeat('signal-outcomes', 'success');
     });
     signalOutcomesWorker.on('failed', (_job, err) => {
       console.error('[QUEUE] signal-outcomes failed:', err.message);
+      recordHeartbeat('signal-outcomes', 'failed', err.message);
     });
 
     // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ News sentiment queue (every 30 seconds) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
@@ -1524,9 +1530,11 @@ export async function initQueues(): Promise<boolean> {
 
     trendlyneIntradayWorker.on('completed', (_job) => {
       console.log('[QUEUE] trendlyne-intraday completed');
+      recordHeartbeat('trendlyne-intraday', 'success');
     });
     trendlyneIntradayWorker.on('failed', (_job, err) => {
       console.error('[QUEUE] trendlyne-intraday failed:', err.message);
+      recordHeartbeat('trendlyne-intraday', 'failed', err.message);
     });
     trendlyneIntradayWorker.on('error', (err) => {
       if ((err as any).code === -2 || err.message?.includes('Missing lock')) return;
@@ -2197,10 +2205,14 @@ export async function initQueues(): Promise<boolean> {
         backoff:  { type: 'fixed', delay: 60_000 },
       },
     );
-    unifiedRankerWorkerInstance.on('completed', () =>
-      console.log('[QUEUE] unified-ranker done'));
-    unifiedRankerWorkerInstance.on('failed', (_, err) =>
-      console.error('[QUEUE] unified-ranker failed:', err.message));
+    unifiedRankerWorkerInstance.on('completed', () => {
+      console.log('[QUEUE] unified-ranker done');
+      recordHeartbeat('unified-ranker', 'success');
+    });
+    unifiedRankerWorkerInstance.on('failed', (_, err) => {
+      console.error('[QUEUE] unified-ranker failed:', err.message);
+      recordHeartbeat('unified-ranker', 'failed', err.message);
+    });
 
     console.warn = _origWarn;
     startHeartbeatMonitor();
