@@ -1,4 +1,5 @@
 import { dbAll, dbRun } from './dbAsync';
+import { recordHeartbeat } from './jobHeartbeat';
 
 /**
  * Compute simple screener reliability metrics using `screener_appearances` and `signal_outcomes`.
@@ -66,5 +67,7 @@ export function triggerRetrainIfNeeded() {
 
 export default { updateScreenerReliability, triggerRetrainIfNeeded };
 export function updateMonitorState(taskName: string, state: 'success' | 'failed', message?: string) {
-  // no-op for now to fix typescript
+  // Fire-and-forget: recordHeartbeat already swallows its own errors and this function's
+  // callers (queues.ts worker event handlers) are synchronous void calls.
+  void recordHeartbeat(taskName, state, message);
 }
