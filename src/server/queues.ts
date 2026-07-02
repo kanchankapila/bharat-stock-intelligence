@@ -1719,8 +1719,14 @@ export async function initQueues(): Promise<boolean> {
     });
     researchPremarketWorker = new Worker(QUEUE_RESEARCH_PREMARKET, processResearchPremarket,
       { connection, concurrency: 1, lockDuration: 15 * 60 * 1000 });
-    researchPremarketWorker.on('completed', () => console.log('[QUEUE] research-premarket done'));
-    researchPremarketWorker.on('failed', (_, err) => console.error('[QUEUE] research-premarket failed:', err.message));
+    researchPremarketWorker.on('completed', () => {
+      console.log('[QUEUE] research-premarket done');
+      recordHeartbeat('research-premarket', 'success');
+    });
+    researchPremarketWorker.on('failed', (_, err) => {
+      console.error('[QUEUE] research-premarket failed:', err.message);
+      recordHeartbeat('research-premarket', 'failed', err.message);
+    });
 
     researchPostcloseQueue = new Queue(QUEUE_RESEARCH_POSTCLOSE, { connection });
     const postcloseRep = await researchPostcloseQueue.getRepeatableJobs();
@@ -1735,8 +1741,14 @@ export async function initQueues(): Promise<boolean> {
     });
     researchPostcloseWorker = new Worker(QUEUE_RESEARCH_POSTCLOSE, processResearchPostclose,
       { connection, concurrency: 1, lockDuration: 15 * 60 * 1000 });
-    researchPostcloseWorker.on('completed', () => console.log('[QUEUE] research-postclose done'));
-    researchPostcloseWorker.on('failed', (_, err) => console.error('[QUEUE] research-postclose failed:', err.message));
+    researchPostcloseWorker.on('completed', () => {
+      console.log('[QUEUE] research-postclose done');
+      recordHeartbeat('research-postclose', 'success');
+    });
+    researchPostcloseWorker.on('failed', (_, err) => {
+      console.error('[QUEUE] research-postclose failed:', err.message);
+      recordHeartbeat('research-postclose', 'failed', err.message);
+    });
 
     // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ DL Macro Fetch (8:00 AM IST = 2:30 AM UTC, weekdays) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
     dlMacroFetchQueue = new Queue(QUEUE_DL_MACRO_FETCH, { connection });
@@ -1759,7 +1771,10 @@ export async function initQueues(): Promise<boolean> {
         // Bond yields (India G-Sec + US/UK/DE 10yr) are now fetched inside global_macro_fetcher.py.
       },
       { connection, concurrency: 1, lockDuration: 5 * 60 * 1000 });
-    dlMacroFetchWorker.on('completed', () => console.log('[QUEUE] dl-macro-fetch done'));
+    dlMacroFetchWorker.on('completed', () => {
+      console.log('[QUEUE] dl-macro-fetch done');
+      recordHeartbeat('dl-macro-fetch', 'success');
+    });
 
     // ── Pre-open snapshot (3:40 AM UTC = 9:10 AM IST, weekdays) ──────────────────────────
     // GIFT Nifty level + Asia sentiment + global risk score captured before Indian market opens.
@@ -1775,7 +1790,11 @@ export async function initQueues(): Promise<boolean> {
     new Worker(QUEUE_PREOPEN,
       async () => {
         await runPython('preopen_fetcher.py', [], 60_000)
-          .catch(e => console.warn('[QUEUE] preopen_fetcher failed:', (e as Error).message));
+          .then(() => recordHeartbeat('preopen-snapshot', 'success'))
+          .catch(e => {
+            console.warn('[QUEUE] preopen_fetcher failed:', (e as Error).message);
+            recordHeartbeat('preopen-snapshot', 'failed', (e as Error).message);
+          });
 
         console.log('[QUEUE] Running early_hours_predictor...');
         await runPython('early_hours_predictor.py', [], 60_000)
@@ -1783,7 +1802,10 @@ export async function initQueues(): Promise<boolean> {
       },
       { connection, concurrency: 1 });
     console.log('[QUEUE] Pre-open snapshot scheduled at 9:10 AM IST (weekdays)');
-    dlMacroFetchWorker.on('failed', (_, err) => console.error('[QUEUE] dl-macro-fetch failed:', err.message));
+    dlMacroFetchWorker.on('failed', (_, err) => {
+      console.error('[QUEUE] dl-macro-fetch failed:', err.message);
+      recordHeartbeat('dl-macro-fetch', 'failed', err.message);
+    });
 
     // ── Intraday regime refresh: VIX + USDINR + Nifty basis every 15 min (9:15–15:30 IST) ──
     const QUEUE_REGIME = 'market-regime-refresh';
@@ -1798,7 +1820,11 @@ export async function initQueues(): Promise<boolean> {
     new Worker(QUEUE_REGIME,
       async () => {
         await runPython('market_regime_fetcher.py', [], 60_000)
-          .catch(e => console.warn('[QUEUE] market_regime_fetcher failed:', (e as Error).message));
+          .then(() => recordHeartbeat('market-regime-refresh', 'success'))
+          .catch(e => {
+            console.warn('[QUEUE] market_regime_fetcher failed:', (e as Error).message);
+            recordHeartbeat('market-regime-refresh', 'failed', (e as Error).message);
+          });
       },
       { connection, concurrency: 1 });
     console.log('[QUEUE] Market regime refresh scheduled every 15 min during market hours');
@@ -1815,8 +1841,14 @@ export async function initQueues(): Promise<boolean> {
     dlFeatureRefreshWorker = new Worker(QUEUE_DL_FEATURE_REFRESH,
       async () => processDLPython('feature_engineering.py'),
       { connection, concurrency: 1, lockDuration: 60 * 60 * 1000, lockRenewTime: 10 * 60 * 1000 });
-    dlFeatureRefreshWorker.on('completed', () => console.log('[QUEUE] dl-feature-refresh done'));
-    dlFeatureRefreshWorker.on('failed', (_, err) => console.error('[QUEUE] dl-feature-refresh failed:', err.message));
+    dlFeatureRefreshWorker.on('completed', () => {
+      console.log('[QUEUE] dl-feature-refresh done');
+      recordHeartbeat('dl-feature-refresh', 'success');
+    });
+    dlFeatureRefreshWorker.on('failed', (_, err) => {
+      console.error('[QUEUE] dl-feature-refresh failed:', err.message);
+      recordHeartbeat('dl-feature-refresh', 'failed', err.message);
+    });
 
     // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ DL Inference (4:30 PM IST = 11:00 AM UTC, weekdays) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
     dlInferenceQueue = new Queue(QUEUE_DL_INFERENCE, { connection });
@@ -1889,8 +1921,14 @@ export async function initQueues(): Promise<boolean> {
     dlRetrainEmergencyWorker = new Worker(QUEUE_DL_RETRAIN_EMERGENCY,
       async () => processDLPython('dl_trainer.py', ['--trigger', 'drift']),
       { connection, concurrency: 1, lockDuration: 6 * 60 * 60 * 1000, lockRenewTime: 30 * 60 * 1000 });
-    dlRetrainEmergencyWorker.on('completed', () => console.log('[QUEUE] dl-retrain-emergency done'));
-    dlRetrainEmergencyWorker.on('failed', (_, err) => console.error('[QUEUE] dl-retrain-emergency failed:', err.message));
+    dlRetrainEmergencyWorker.on('completed', () => {
+      console.log('[QUEUE] dl-retrain-emergency done');
+      recordHeartbeat('dl-retrain-emergency', 'success');
+    });
+    dlRetrainEmergencyWorker.on('failed', (_, err) => {
+      console.error('[QUEUE] dl-retrain-emergency failed:', err.message);
+      recordHeartbeat('dl-retrain-emergency', 'failed', err.message);
+    });
 
     // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ OHLCV Backfill ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
     // Worker handles both one-time full backfill and recurring weekly gap-fill
