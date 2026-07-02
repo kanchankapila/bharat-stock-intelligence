@@ -94,3 +94,5 @@ backups/
 
 # PM2 runtime logs
 logs/
+
+.superpowers/
