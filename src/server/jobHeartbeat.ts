@@ -93,41 +93,46 @@ export async function getStaleJobs(): Promise<Array<{ job: string; hoursStale: n
 export async function getLateJobs(now: Date = new Date()): Promise<Array<{
   job: string; label: string; expectedAt: Date; hoursLate: number; lastError: string | null;
 }>> {
-  await ensureTable();
-  const rows = await dbAll(
-    'SELECT job_name, last_success_at, last_error, last_alert_sent_at FROM job_heartbeat'
-  ) as Array<{ job_name: string; last_success_at: number | null; last_error: string | null; last_alert_sent_at: number | null }>;
-  const byName = new Map(rows.map(r => [r.job_name, r]));
+  try {
+    await ensureTable();
+    const rows = await dbAll(
+      'SELECT job_name, last_success_at, last_error, last_alert_sent_at FROM job_heartbeat'
+    ) as Array<{ job_name: string; last_success_at: number | null; last_error: string | null; last_alert_sent_at: number | null }>;
+    const byName = new Map(rows.map(r => [r.job_name, r]));
 
-  const late: Array<{ job: string; label: string; expectedAt: Date; hoursLate: number; lastError: string | null }> = [];
-  for (const entry of JOB_REGISTRY) {
-    let expectedAt: Date;
-    if (entry.cronPattern) {
-      const interval = CronExpressionParser.parse(entry.cronPattern, { currentDate: now, tz: 'Etc/UTC' });
-      expectedAt = interval.prev().toDate();
-    } else if (entry.everyMs) {
-      const boundary = Math.floor(now.getTime() / entry.everyMs) * entry.everyMs;
-      expectedAt = new Date(boundary);
-    } else {
-      continue; // event-driven, no schedule to be late against
+    const late: Array<{ job: string; label: string; expectedAt: Date; hoursLate: number; lastError: string | null }> = [];
+    for (const entry of JOB_REGISTRY) {
+      let expectedAt: Date;
+      if (entry.cronPattern) {
+        const interval = CronExpressionParser.parse(entry.cronPattern, { currentDate: now, tz: 'Etc/UTC' });
+        expectedAt = interval.prev().toDate();
+      } else if (entry.everyMs) {
+        const boundary = Math.floor(now.getTime() / entry.everyMs) * entry.everyMs;
+        expectedAt = new Date(boundary);
+      } else {
+        continue; // event-driven, no schedule to be late against
+      }
+
+      const deadline = expectedAt.getTime() + entry.graceMinutes * 60_000;
+      if (now.getTime() < deadline) continue; // not late yet
+
+      const row = byName.get(entry.jobName);
+      const lastSuccess = row?.last_success_at ?? 0;
+      if (lastSuccess >= expectedAt.getTime()) continue; // already succeeded for this occurrence
+
+      late.push({
+        job: entry.jobName,
+        label: entry.label,
+        expectedAt,
+        hoursLate: Math.round(((now.getTime() - expectedAt.getTime()) / 3_600_000) * 10) / 10,
+        lastError: row?.last_error ?? null,
+      });
     }
-
-    const deadline = expectedAt.getTime() + entry.graceMinutes * 60_000;
-    if (now.getTime() < deadline) continue; // not late yet
-
-    const row = byName.get(entry.jobName);
-    const lastSuccess = row?.last_success_at ?? 0;
-    if (lastSuccess >= expectedAt.getTime()) continue; // already succeeded for this occurrence
-
-    late.push({
-      job: entry.jobName,
-      label: entry.label,
-      expectedAt,
-      hoursLate: Math.round(((now.getTime() - expectedAt.getTime()) / 3_600_000) * 10) / 10,
-      lastError: row?.last_error ?? null,
-    });
+    return late;
+  } catch (error) {
+    console.error('[HEARTBEAT] getLateJobs failed:', error);
+    return [];
   }
-  return late;
 }
 
 /** Records that an alert was already sent for the given occurrence, so the 15-min
@@ -146,12 +151,17 @@ export async function markAlerted(jobName: string, occurrenceEpochMs: number): P
 }
 
 export async function wasAlreadyAlerted(jobName: string, expectedAt: Date): Promise<boolean> {
-  await ensureTable();
-  const row = await dbAll(
-    'SELECT last_alert_sent_at FROM job_heartbeat WHERE job_name = ?', [jobName]
-  ) as Array<{ last_alert_sent_at: number | null }>;
-  const sentAt = row[0]?.last_alert_sent_at ?? 0;
-  return sentAt >= expectedAt.getTime();
+  try {
+    await ensureTable();
+    const row = await dbAll(
+      'SELECT last_alert_sent_at FROM job_heartbeat WHERE job_name = ?', [jobName]
+    ) as Array<{ last_alert_sent_at: number | null }>;
+    const sentAt = row[0]?.last_alert_sent_at ?? 0;
+    return sentAt >= expectedAt.getTime();
+  } catch (error) {
+    console.error('[HEARTBEAT] wasAlreadyAlerted failed:', error);
+    return false;
+  }
 }
 
 /** Periodically log stale jobs (jobs NOT in JOB_REGISTRY — e.g. MONITOR_SCRIPTS-bridged
