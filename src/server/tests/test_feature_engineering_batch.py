@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS feature_store (
     news_sentiment_score REAL, news_impact_count REAL,
     target_ret_1d REAL, target_ret_5d REAL, target_ret_15d REAL,
     target_dir_1d REAL, target_dir_5d REAL, target_dir_15d REAL,
+    ret_12m_ex1m REAL,
     computed_at TEXT,
     PRIMARY KEY (symbol, date, timeframe)
 )

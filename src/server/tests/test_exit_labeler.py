@@ -78,7 +78,7 @@ class TestTripleBarrierLabel:
     def _lab(self, **kw):
         base = dict(mfe_pct=0.0, mae_pct=0.0, mfe_before_mae=1,
                     horizon_close_pct=0.0, atr_pct=1.0,
-                    k_up=self.K_UP, k_dn=self.K_DN, cost_pct=self.COST)
+                    k_up=self.K_UP, k_dn=self.K_DN, cost_frac=self.COST)
         base.update(kw)
         return triple_barrier_label(**base)
 

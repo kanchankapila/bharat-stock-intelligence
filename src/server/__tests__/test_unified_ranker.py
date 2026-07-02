@@ -26,6 +26,9 @@ def make_db():
             screener_id TEXT NOT NULL, stock_id TEXT NOT NULL, symbol TEXT,
             PRIMARY KEY (screener_id, stock_id)
         );
+        CREATE TABLE trendlyne_screeners (
+            screener_id TEXT NOT NULL, screener_name TEXT NOT NULL
+        );
         CREATE TABLE moneycontrol_screener_stocks (
             scan_id TEXT NOT NULL, mcsymbol TEXT NOT NULL,
             stock_name TEXT, symbol TEXT,

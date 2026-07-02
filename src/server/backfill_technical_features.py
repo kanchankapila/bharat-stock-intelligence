@@ -25,7 +25,7 @@ from datetime import datetime, timedelta
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from db_compat import connect
+from db_compat import connect, safe_alter
 
 # ── Technical indicator helpers ───────────────────────────────────────────────
 
@@ -145,6 +145,7 @@ def compute_indicators(ohlcv_rows: list[dict]) -> dict:
 
 def run(limit: int | None = None):
     con = connect()
+    safe_alter(None, "ALTER TABLE technical_signals ADD COLUMN signal_type TEXT")
 
     # Find all (symbol, signal_date) pairs needing backfill
     print("[Backfill] Finding coverage gaps...")

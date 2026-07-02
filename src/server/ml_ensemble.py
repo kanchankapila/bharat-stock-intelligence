@@ -362,7 +362,13 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     # analyst_upside_pct > 20% = strong buy zone; < 0 = overvalued per consensus.
     X['analyst_upside_pct'] = num('analyst_upside_pct', 0.0).clip(-50, 100)
     X['analyst_count_log']  = np.log1p(num('analyst_count', 0).clip(lower=0))
-    X['analyst_buy_pct']    = num('analyst_buy_pct', 50.0).clip(0, 100) / 100.0
+    # NOTE: distinct from analyst_buy_pct above (MC's analyst_estimates_history AS-OF join) —
+    # this is Trendlyne's own reported consensus, a different source. Was accidentally assigned
+    # the SAME column name as the MC feature, silently overwriting it (the MC value was computed
+    # then immediately discarded on every row, since Trendlyne coverage is close to universal and
+    # this line always ran last) — that bug meant the MC AS-OF analyst_buy_pct never reached the
+    # model despite the E1 data-gap program shipping it. Keep both as separate features.
+    X['analyst_buy_pct_tl'] = num('analyst_buy_pct', 50.0).clip(0, 100) / 100.0
     # Upside × signal conviction: high analyst target + strong signal = high-confidence entry
     X['analyst_x_score']    = X['analyst_upside_pct'].clip(0, 100) * X['signal_score'] / 100.0
 
@@ -1506,9 +1512,31 @@ def train_ensemble(X: pd.DataFrame, y: pd.Series, dates: pd.Series | None = None
     # Threshold is found on a dedicated val split (rows [tr_end : tr_end+n_val]), NOT the
     # test set. This keeps F1/Recall metrics unbiased on the held-out test window.
     # NOTE: threshold is found on a separate val split; F1/Recall metrics are honest.
+    #
+    # n_test/n_val are ROW counts fed to positional slicing below — but sized from unique
+    # TRADING DAYS, not raw row percentage. Cross-sectional data (many symbols/day) means a
+    # blind "last 10% of rows" split can collapse to almost no calendar coverage whenever
+    # row density varies across dates (confirmed live: a 10%-of-rows split landed on exactly
+    # 2 trading days out of ~40 in the full history, immediately after a multi-week gap in
+    # resolved outcomes — that measures single-day/regime noise, not true held-out
+    # generalization, and produced a held-out AUC ~0.20 below the CV/OOF estimate on the very
+    # same model). Falls back to the old row-based heuristic when there aren't enough
+    # distinct dates to form a meaningful date-based split.
     test = {'auc': None, 'precision': None, 'recall': None, 'f1': None, 'n': 0}
-    n_test = int(len(X) * 0.10)  # last 10% = reporting test set
-    n_val  = int(len(X) * 0.10)  # prior 10% = threshold selection val set
+    MIN_SPLIT_DAYS = 15
+    unique_dates = sorted(pd.Series(list(dates)).dropna().unique()) if dates is not None and len(dates) == len(X) else []
+    if len(unique_dates) >= (2 * MIN_SPLIT_DAYS + 5):
+        n_test_days = max(MIN_SPLIT_DAYS, int(len(unique_dates) * 0.10))
+        n_val_days  = max(MIN_SPLIT_DAYS, int(len(unique_dates) * 0.10))
+        test_start_date = unique_dates[-n_test_days]
+        val_start_date  = unique_dates[-(n_test_days + n_val_days)]
+        date_arr = pd.Series(list(dates)).reset_index(drop=True)
+        # X/dates are sorted ascending by date, so these counts are contiguous row spans.
+        n_test = int((date_arr >= test_start_date).sum())
+        n_val  = int(((date_arr >= val_start_date) & (date_arr < test_start_date)).sum())
+    else:
+        n_test = int(len(X) * 0.10)  # last 10% = reporting test set
+        n_val  = int(len(X) * 0.10)  # prior 10% = threshold selection val set
     if n_test >= 10 and n_val >= 10 and (len(X) - n_test - n_val - embargo) >= max(min_samples, 100):
         tr_end = len(X) - n_test - n_val - embargo
         fb, mt, _, _, _ = _fit_stack(X.iloc[:tr_end], y.iloc[:tr_end], spw, embargo,
@@ -1544,7 +1572,9 @@ def train_ensemble(X: pd.DataFrame, y: pd.Series, dates: pd.Series | None = None
                 'n':                 int(n_test),
                 'optimal_threshold': float(best_t),
             }
-            print(f"[Ensemble]   HELD-OUT TEST (last {n_test}, threshold from val {n_val}, embargo={embargo}): "
+            te_days = dates.iloc[len(X) - n_test:].nunique() if dates is not None else '?'
+            print(f"[Ensemble]   HELD-OUT TEST (last {n_test} rows / {te_days} trading days, "
+                  f"threshold from val {n_val}, embargo={embargo}): "
                   f"AUC={test['auc']:.4f} P={test['precision']:.3f} "
                   f"R={test['recall']:.3f} F1={test['f1']:.3f} "
                   f"threshold={best_t:.2f} (val-derived, unbiased)")
@@ -1645,11 +1675,23 @@ def save_ensemble(ensemble: dict):
     print(f"[Ensemble] Saved to {ENSEMBLE_PATH}")
 
 
+_ENSEMBLE_CACHE: dict | None = None
+_ENSEMBLE_MTIME: float = 0.0
+
+
 def load_ensemble() -> dict | None:
+    global _ENSEMBLE_CACHE, _ENSEMBLE_MTIME
     if not os.path.exists(ENSEMBLE_PATH):
+        _ENSEMBLE_CACHE = None
+        _ENSEMBLE_MTIME = 0.0
         return None
+    mtime = os.path.getmtime(ENSEMBLE_PATH)
+    if _ENSEMBLE_CACHE is not None and mtime == _ENSEMBLE_MTIME:
+        return _ENSEMBLE_CACHE
     with open(ENSEMBLE_PATH, 'rb') as f:
-        return pickle.load(f)
+        _ENSEMBLE_CACHE = pickle.load(f)
+    _ENSEMBLE_MTIME = mtime
+    return _ENSEMBLE_CACHE
 
 
 # ── Regime Detection + Conditional Scoring ───────────────────────────────────

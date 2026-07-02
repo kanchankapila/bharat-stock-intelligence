@@ -360,11 +360,13 @@ class Backtester:
                 if pd.isna(raw_entry) or raw_entry <= 0:
                     continue
 
-                # ── Dynamic position sizing: deploy available cash evenly across
-                #    remaining free slots so capital is never left idle.
-                free_slots = max_positions - len(open_positions)
-                position_capital = cash / (free_slots + 1)  # +1 keeps a small cash buffer
-                position_capital = min(position_capital, cash * 0.95)  # hard cap at 95% of cash
+                # Fixed equal-weight: each slot = 1/max_positions of initial capital. NOT
+                # cash / remaining_slots — that scheme makes allocation path/order-dependent
+                # (later signals get systematically different sizing depending on what happened
+                # to earlier positions in the same run), which biases backtest comparisons across
+                # strategies/runs. See TestPositionSizing in tests/test_backtester.py.
+                position_capital = initial_capital / max_positions
+                position_capital = min(position_capital, cash * 0.95)  # cannot exceed available cash
                 if position_capital < 1000:
                     continue
                 
