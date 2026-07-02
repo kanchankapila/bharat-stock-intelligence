@@ -386,43 +386,45 @@ async function getScriptStats(scriptId: ScriptId): Promise<Record<string, number
   }
 }
 
-export const monitorRouter = router({
-  getSystemStatus: publicProcedure.query(async () => {
-    const runStates: Record<string, string> = {};
-    try {
-      const rows = await dbAll<any>("SELECT key, value FROM app_settings WHERE key LIKE 'monitor_%'");
-      for (const r of rows) runStates[r.key] = r.value;
-    } catch (err: unknown) {
-      console.warn('[MONITOR] getSystemStatus failed:', (err as Error).message);
+export async function getSystemStatus() {
+  const runStates: Record<string, string> = {};
+  try {
+    const rows = await dbAll<any>("SELECT key, value FROM app_settings WHERE key LIKE 'monitor_%'");
+    for (const r of rows) runStates[r.key] = r.value;
+  } catch (err: unknown) {
+    console.warn('[MONITOR] getSystemStatus failed:', (err as Error).message);
+  }
+
+  return Promise.all(MONITOR_SCRIPTS.map(async s => {
+    const dbLastRunAt = await getLastRunAt(s.id as ScriptId);
+    // Fall back to stored timestamp for scripts that ran but produced no DB rows
+    const storedRanAt = runStates[`monitor_${s.id}_ran_at`] ?? null;
+    const lastRunAt = dbLastRunAt ?? storedRanAt;
+    const stateKey = `monitor_${s.id}`;
+    const rawState = runStates[stateKey];
+    let runState: 'never' | 'running' | 'success' | 'failed' | 'stale' = 'never';
+
+    if (rawState === 'running') {
+      runState = 'running';
+    } else if (lastRunAt) {
+      const ageHours = (Date.now() - new Date(lastRunAt).getTime()) / 3600000;
+      runState = ageHours > s.staleLimitHours ? 'stale' : (rawState === 'failed' ? 'failed' : 'success');
+    } else {
+      runState = rawState === 'failed' ? 'failed' : 'never';
     }
 
-    return Promise.all(MONITOR_SCRIPTS.map(async s => {
-      const dbLastRunAt = await getLastRunAt(s.id as ScriptId);
-      // Fall back to stored timestamp for scripts that ran but produced no DB rows
-      const storedRanAt = runStates[`monitor_${s.id}_ran_at`] ?? null;
-      const lastRunAt = dbLastRunAt ?? storedRanAt;
-      const stateKey = `monitor_${s.id}`;
-      const rawState = runStates[stateKey];
-      let runState: 'never' | 'running' | 'success' | 'failed' | 'stale' = 'never';
+    return {
+      ...s,
+      lastRunAt,
+      runState,
+      stats: await getScriptStats(s.id as ScriptId),
+      error: runStates[`monitor_${s.id}_error`] ?? null,
+    };
+  }));
+}
 
-      if (rawState === 'running') {
-        runState = 'running';
-      } else if (lastRunAt) {
-        const ageHours = (Date.now() - new Date(lastRunAt).getTime()) / 3600000;
-        runState = ageHours > s.staleLimitHours ? 'stale' : (rawState === 'failed' ? 'failed' : 'success');
-      } else {
-        runState = rawState === 'failed' ? 'failed' : 'never';
-      }
-
-      return {
-        ...s,
-        lastRunAt,
-        runState,
-        stats: await getScriptStats(s.id as ScriptId),
-        error: runStates[`monitor_${s.id}_error`] ?? null,
-      };
-    }));
-  }),
+export const monitorRouter = router({
+  getSystemStatus: publicProcedure.query(() => getSystemStatus()),
 
   getIndexAdvanceDecline: publicProcedure
     .query(async () => {
