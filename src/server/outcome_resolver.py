@@ -11,7 +11,7 @@ Run:  python outcome_resolver.py
 
 import datetime, argparse, math, re
 
-from db_compat import connect, ConnWrapper
+from db_compat import connect, ConnWrapper, query_all, query_one
 
 
 def parse_horizon(time_horizon_str, default_days: int) -> int:
@@ -436,7 +436,14 @@ def resolve_unified_outcomes(
         """, (sym, next_trading_day, exit_target_date)).fetchall()
         bars = [(str(b[0]), float(b[1]), float(b[2]), float(b[3])) for b in bar_rows]
 
-        # Check if we can use intraday bars for path resolution
+        # Check if we can use intraday bars for path resolution.
+        # NOTE: uses query_all() (its own isolated connection), not the shared `conn` — this
+        # function commits once at the end of the whole row loop, so if this ran on `conn` a
+        # failure here would (a) on Postgres, abort the shared transaction and poison every
+        # later query on `conn` for the rest of the loop (this exact bug hit production:
+        # InFailedSqlTransaction downstream in get_volatility_threshold for an unrelated
+        # symbol), and (b) a bare conn.rollback() to recover would discard every already-
+        # processed row's uncommitted UPSERT from earlier in this same loop.
         use_intra = False
         if next_trading_day and exit_target_date:
             try:
@@ -445,27 +452,27 @@ def resolve_unified_outcomes(
                 _IST = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
                 session_start = datetime.datetime(start_d.year, start_d.month, start_d.day, 9, 15, tzinfo=_IST).isoformat()
                 session_end   = datetime.datetime(end_d.year, end_d.month, end_d.day, 15, 30, tzinfo=_IST).isoformat()
-                
-                intra_rows = conn.execute("""
+
+                intra_rows = query_all("""
                     SELECT datetime, high, low, close FROM intraday_ohlcv
                     WHERE symbol = ? AND datetime >= ? AND datetime <= ? AND interval = '15m'
                     ORDER BY datetime ASC
-                """, (sym, session_start, session_end)).fetchall()
+                """, (sym, session_start, session_end))
                 if len(intra_rows) >= 5:
                     bars = [(str(b[0]), float(b[1]), float(b[2]), float(b[3])) for b in intra_rows]
                     use_intra = True
             except Exception:
                 pass
 
-        # Query total dividend paid during holding period
+        # Query total dividend paid during holding period (isolated connection — see above).
         dividend_sum = 0.0
         if next_trading_day and exit_target_date:
             try:
-                div_row = conn.execute("""
+                div_row = query_one("""
                     SELECT COALESCE(SUM(amount), 0.0) FROM corporate_actions
                     WHERE symbol = ? AND action_type = 'DIVIDEND'
                       AND ex_date >= ? AND ex_date <= ?
-                """, (sym, next_trading_day, exit_target_date)).fetchone()
+                """, (sym, next_trading_day, exit_target_date))
                 if div_row:
                     dividend_sum = float(div_row[0])
             except Exception:
@@ -720,7 +727,14 @@ def resolve_recommendation_log(
         """, (sym, next_trading_day, exit_target_date)).fetchall()
         bars = [(str(b[0]), float(b[1]), float(b[2]), float(b[3])) for b in bar_rows]
 
-        # Check if we can use intraday bars for path resolution
+        # Check if we can use intraday bars for path resolution.
+        # NOTE: uses query_all() (its own isolated connection), not the shared `conn` — this
+        # function commits once at the end of the whole row loop, so if this ran on `conn` a
+        # failure here would (a) on Postgres, abort the shared transaction and poison every
+        # later query on `conn` for the rest of the loop (this exact bug hit production:
+        # InFailedSqlTransaction downstream in get_volatility_threshold for an unrelated
+        # symbol), and (b) a bare conn.rollback() to recover would discard every already-
+        # processed row's uncommitted UPSERT from earlier in this same loop.
         use_intra = False
         if next_trading_day and exit_target_date:
             try:
@@ -729,27 +743,27 @@ def resolve_recommendation_log(
                 _IST = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
                 session_start = datetime.datetime(start_d.year, start_d.month, start_d.day, 9, 15, tzinfo=_IST).isoformat()
                 session_end   = datetime.datetime(end_d.year, end_d.month, end_d.day, 15, 30, tzinfo=_IST).isoformat()
-                
-                intra_rows = conn.execute("""
+
+                intra_rows = query_all("""
                     SELECT datetime, high, low, close FROM intraday_ohlcv
                     WHERE symbol = ? AND datetime >= ? AND datetime <= ? AND interval = '15m'
                     ORDER BY datetime ASC
-                """, (sym, session_start, session_end)).fetchall()
+                """, (sym, session_start, session_end))
                 if len(intra_rows) >= 5:
                     bars = [(str(b[0]), float(b[1]), float(b[2]), float(b[3])) for b in intra_rows]
                     use_intra = True
             except Exception:
                 pass
 
-        # Query total dividend paid during holding period
+        # Query total dividend paid during holding period (isolated connection — see above).
         dividend_sum = 0.0
         if next_trading_day and exit_target_date:
             try:
-                div_row = conn.execute("""
+                div_row = query_one("""
                     SELECT COALESCE(SUM(amount), 0.0) FROM corporate_actions
                     WHERE symbol = ? AND action_type = 'DIVIDEND'
                       AND ex_date >= ? AND ex_date <= ?
-                """, (sym, next_trading_day, exit_target_date)).fetchone()
+                """, (sym, next_trading_day, exit_target_date))
                 if div_row:
                     dividend_sum = float(div_row[0])
             except Exception:

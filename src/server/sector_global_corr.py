@@ -17,7 +17,7 @@ from datetime import date, timedelta
 import numpy as np
 import pandas as pd
 
-from db_compat import connect, read_df, use_postgres
+from db_compat import connect, read_df, use_postgres, safe_alter, try_advisory_lock, release_advisory_lock
 
 SECTOR_BENCHMARK_MAP = {
     "Information Technology": "SP500",
@@ -45,17 +45,26 @@ LOOKBACK = 90
 
 
 def main(days: int = 7):
+    if not try_advisory_lock("sector_global_corr"):
+        print("[SectorCorr] Another run is already in progress — skipping.")
+        return
+
     con = connect()
     cur = con.cursor()
 
-    for ddl in [
-        "ALTER TABLE technical_signals ADD COLUMN sector_global_corr_21d REAL",
-        "ALTER TABLE technical_signals ADD COLUMN sector_benchmark TEXT",
-    ]:
-        try:
-            cur.execute(ddl)
-        except Exception:
-            pass
+    try:
+        _run(con, cur, days)
+    finally:
+        con.close()
+        release_advisory_lock("sector_global_corr")
+
+
+def _run(con, cur, days: int):
+    # Each ALTER runs in its own auto-committed statement (safe_alter uses a
+    # fresh engine.begin() block on PG) so a "column already exists" no-op
+    # can never poison the transaction `con`/`cur` use for the rest of this run.
+    safe_alter(None, "ALTER TABLE technical_signals ADD COLUMN sector_global_corr_21d REAL")
+    safe_alter(None, "ALTER TABLE technical_signals ADD COLUMN sector_benchmark TEXT")
 
     end_date = date.today()
     start_date = end_date - timedelta(days=LOOKBACK + days + 10)
@@ -114,7 +123,7 @@ def main(days: int = 7):
             continue
         if benchmark not in macro_pivot.columns:
             continue
-        combined = pd.concat([sector_df[sector].rename("sector"), macro_pivot[benchmark].rename("bench")], axis=1).dropna()
+        combined = pd.concat([sector_df[sector].rename("sector"), macro_pivot[benchmark].rename("bench")], axis=1, sort=False).dropna()
         if len(combined) < 21:
             continue
         corr_21 = combined["sector"].rolling(21).corr(combined["bench"])
@@ -143,11 +152,10 @@ def main(days: int = 7):
         )
     """)
 
-    ph = "%s" if use_postgres() else "?"
     for r in rows:
-        cur.execute(f"""
+        cur.execute("""
             INSERT INTO sector_global_corr (date, sector, benchmark, corr_21d, corr_63d)
-            VALUES ({ph},{ph},{ph},{ph},{ph})
+            VALUES (?,?,?,?,?)
             ON CONFLICT(date, sector) DO UPDATE SET
                 benchmark = excluded.benchmark,
                 corr_21d  = excluded.corr_21d,
@@ -165,8 +173,8 @@ def main(days: int = 7):
             FROM sector_global_corr sgc
             JOIN nse_stocks ns ON ns.sector = sgc.sector
             WHERE ts.symbol = ns.symbol
-              AND sgc.date = %s
-              AND ts.signal_date = %s
+              AND sgc.date = ?
+              AND ts.date = ?
         """, (today, today))
     else:
         cur.execute("""
@@ -183,11 +191,10 @@ def main(days: int = 7):
                 WHERE sgc.date = ? AND ns.symbol = technical_signals.symbol
                 LIMIT 1
             )
-            WHERE signal_date = ?
+            WHERE date = ?
         """, (today, today, today))
 
     con.commit()
-    con.close()
     print(f"[SectorCorr] Wrote {len(rows)} sector-correlation rows, updated technical_signals")
 
 

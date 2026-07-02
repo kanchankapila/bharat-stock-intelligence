@@ -26,7 +26,7 @@ import datetime
 import argparse
 import requests
 
-from db_compat import connect
+from db_compat import connect, try_advisory_lock, release_advisory_lock
 
 KAYAL_URL = (
     "https://kayal.trendlyne.com/broker-webview/kayal/"
@@ -423,6 +423,10 @@ def sync_pks(pks: list[int], con, label: str = "known") -> set[int]:
 
 
 def run(mode: str = "known", single_pk: int | None = None):
+    if not try_advisory_lock("trendlyne_screener_discovery"):
+        print("[Discovery] Another discovery run is already in progress — skipping.")
+        return
+
     con = connect()
     try:
         ensure_schema(con)
@@ -507,6 +511,7 @@ def run(mode: str = "known", single_pk: int | None = None):
 
     finally:
         con.close()
+        release_advisory_lock("trendlyne_screener_discovery")
 
 
 if __name__ == "__main__":
