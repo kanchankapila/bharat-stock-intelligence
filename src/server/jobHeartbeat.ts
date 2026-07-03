@@ -32,7 +32,15 @@ const HEARTBEAT_DDL = `CREATE TABLE IF NOT EXISTS job_heartbeat (
 
 let _tableReady: Promise<void> | null = null;
 function ensureTable(): Promise<void> {
-  if (!_tableReady) _tableReady = dbExec(HEARTBEAT_DDL).catch(() => { /* already exists / DB not ready */ });
+  if (!_tableReady) {
+    _tableReady = dbExec(HEARTBEAT_DDL)
+      .catch(() => { /* already exists / DB not ready */ })
+      // Self-heal a pre-existing job_heartbeat table (created before last_alert_sent_at
+      // existed) — CREATE TABLE IF NOT EXISTS above is a no-op in that case, so add the
+      // column here and swallow "duplicate column" the same way as "already exists".
+      .then(() => dbExec('ALTER TABLE job_heartbeat ADD COLUMN last_alert_sent_at BIGINT'))
+      .catch(() => { /* column already exists */ });
+  }
   return _tableReady;
 }
 
