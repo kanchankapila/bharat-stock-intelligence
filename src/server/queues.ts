@@ -31,6 +31,8 @@ import { getTrendlyneMetricSymbols, enqueueTrendlyneMetricsFetchJobs, runTrendly
 
 import { pythonApi } from './pythonApi';
 import { recordHeartbeat, startHeartbeatMonitor } from './jobHeartbeat';
+import { startJobWatchdog, buildDailyDigest } from './jobWatchdog';
+import { telegramService } from './telegramService';
 
 // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Redis connection shared across all BullMQ objects ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 
@@ -2284,8 +2286,32 @@ export async function initQueues(): Promise<boolean> {
       recordHeartbeat('unified-ranker', 'failed', err.message);
     });
 
+    // ── Daily job-health digest — 9:00 PM IST (15:30 UTC), every day ──────────────
+    const QUEUE_JOB_DIGEST = 'job-digest';
+    const jobDigestQueue = new Queue(QUEUE_JOB_DIGEST, { connection });
+    const jobDigestWorker = new Worker(
+      QUEUE_JOB_DIGEST,
+      async () => {
+        const digest = await buildDailyDigest();
+        await telegramService.sendMarkdownMessage(digest);
+      },
+      { connection, concurrency: 1 },
+    );
+    jobDigestWorker.on('completed', () => console.log('[QUEUE] job-digest sent'));
+    jobDigestWorker.on('failed', (_, err) => console.error('[QUEUE] job-digest failed:', err.message));
+
+    const digestRepeatables = await jobDigestQueue.getRepeatableJobs();
+    for (const r of digestRepeatables) await jobDigestQueue.removeRepeatableByKey(r.key);
+    await addJobWithCatchup(jobDigestQueue, 'job-digest-daily', {}, {
+      repeat: { pattern: '30 15 * * *' }, // 9:00 PM IST daily, all 7 days
+      jobId: 'job-digest-daily-repeatable',
+      removeOnComplete: 3,
+      removeOnFail: 3,
+    });
+
     console.warn = _origWarn;
     startHeartbeatMonitor();
+    startJobWatchdog();
     console.log('[QUEUE] BullMQ initialised (stock-refresh + ai-signals)');
     return true;
   } catch (err: any) {
