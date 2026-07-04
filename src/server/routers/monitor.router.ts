@@ -331,7 +331,13 @@ async function getLastRunAt(scriptId: ScriptId): Promise<string | null> {
         row = await dbGet("SELECT MAX(date) as t FROM trendlyne_dvm_scores");
         break;
       case 'trendlyne-midweek':
-        row = await dbGet("SELECT MAX(fetched_at) as t FROM trendlyne_stock_profile");
+        row = await dbGet(`
+          SELECT MIN(t) as t FROM (
+            SELECT MAX(date) as t FROM trendlyne_adv_tech_daily
+            UNION ALL
+            SELECT MAX(date) as t FROM trendlyne_price_analysis
+          ) combined
+        `);
         break;
       case 'financial-ratios':
         row = await dbGet("SELECT MAX(as_of_date) as t FROM tl_financial_quality");
@@ -436,7 +442,10 @@ async function getScriptStats(scriptId: ScriptId): Promise<Record<string, number
       case 'trendlyne-fundamentals':
         return { rows: ((await dbGet("SELECT COUNT(*) as n FROM trendlyne_dvm_scores WHERE date = (SELECT MAX(date) FROM trendlyne_dvm_scores)")) as any)?.n ?? 0 };
       case 'trendlyne-midweek':
-        return { rows: ((await dbGet("SELECT COUNT(*) as n FROM trendlyne_stock_profile WHERE date = (SELECT MAX(date) FROM trendlyne_stock_profile)")) as any)?.n ?? 0 };
+        return {
+          advTechRows: ((await dbGet("SELECT COUNT(*) as n FROM trendlyne_adv_tech_daily WHERE date = (SELECT MAX(date) FROM trendlyne_adv_tech_daily)")) as any)?.n ?? 0,
+          priceAnalysisRows: ((await dbGet("SELECT COUNT(*) as n FROM trendlyne_price_analysis WHERE date = (SELECT MAX(date) FROM trendlyne_price_analysis)")) as any)?.n ?? 0,
+        };
       case 'financial-ratios':
         return { rows: ((await dbGet("SELECT COUNT(*) as n FROM tl_financial_quality WHERE as_of_date = (SELECT MAX(as_of_date) FROM tl_financial_quality)")) as any)?.n ?? 0 };
       case 'working-capital':
