@@ -2,14 +2,14 @@
 """
 Trendlyne Fundamentals Fetcher â€” Chart-Data Series
 ===================================================
-Fetches 4 time-series params per stock from Trendlyne's chart-data API:
+Fetches 2 time-series params per stock from Trendlyne's chart-data API, plus DVM:
 
-  EPS_TTM          â†’ quarterly EPS trailing-12-month (31 pts, 8+ years)
-  PE_TTM_SHARE_NOW â†’ daily P/E ratio (1521 pts, 2016â€“now)
-  PBV_A_SHARE_NOW  â†’ daily P/B ratio (1824 pts, 2016â€“now)
+  EPS_TTM          â†’ quarterly EPS trailing-12-month (31 pts, 8+ years); DVM scores embedded
   DIVIDEND_YIELD_TTM_Q â†’ quarterly dividend yield (32 pts, 2019â€“now)
 
-DVM scores (D/V/M 0-100) are embedded in every response's stockData â€” no extra call.
+PE_TTM_SHARE_NOW / PBV_A_SHARE_NOW are no longer fetched here â€” mc_pricefeed_fetcher.py
+already pulls each stock's own daily PE/PB and appends it into trendlyne_pe_history /
+trendlyne_pb_history directly, so the percentile-rank features below now update daily.
 
 Endpoint: https://trendlyne.com/mapp/v1/stock/chart-data/{tlid}/{param}/?format=json
 Key: ?format=json required â€” DRF returns HTML by default.
@@ -343,7 +343,7 @@ def main() -> None:
         print("[TLFund] No stocks with tlid found.")
         return
 
-    print(f"[TLFund] Processing {len(stocks)} stocks â€” EPS/PE/PB/DivYield + DVMâ€¦")
+    print(f"[TLFund] Processing {len(stocks)} stocks â€” EPS/DivYield + DVMâ€¦")
     session = requests.Session()
     session.headers.update(HEADERS)
     today = date.today().isoformat()
