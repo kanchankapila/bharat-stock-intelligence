@@ -2,7 +2,7 @@ import { z } from "zod";
 import {
   fetchTrendlyneSwot,
   fetchTrendlyneChecklist,
-  fetchTrendlyneDVM,
+  getTrendlyneDVMFromDb,
   fetchTrendlyneStockMetrics,
   fetchTrendlyneAdvTechnicalAnalysis,
   getTrendlyneOverview,
@@ -25,7 +25,7 @@ export const trendlyneRouter = router({
 
   getTrendlyneDVM: publicProcedure
     .input(z.object({ symbol: z.string() }))
-    .query(async ({ input }) => fetchTrendlyneDVM(input.symbol)),
+    .query(async ({ input }) => getTrendlyneDVMFromDb(input.symbol)),
 
   getTrendlyneStockMetrics: publicProcedure
     .input(z.object({ symbol: z.string() }))
