@@ -2221,14 +2221,15 @@ runMigration('064_earnings_quality_insider_macro', `
   );
   CREATE TABLE IF NOT EXISTS working_capital_history (
     symbol           TEXT NOT NULL,
-    quarter          TEXT NOT NULL,
+    fiscal_year      TEXT NOT NULL,
     receivables_days REAL,
     inventory_days   REAL,
     payables_days    REAL,
     ccc              REAL,
-    revenue_qtr      REAL,
-    cogs_qtr         REAL,
-    PRIMARY KEY (symbol, quarter)
+    revenue_fy       REAL,
+    cogs_proxy_fy    REAL,
+    fetched_at       TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (symbol, fiscal_year)
   );
   CREATE TABLE IF NOT EXISTS insider_transactions (
     symbol           TEXT NOT NULL,

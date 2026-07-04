@@ -2440,14 +2440,15 @@ CREATE INDEX idx_watchlist_userId ON watchlist("userId");
 -- ── working_capital_history ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "working_capital_history" (
   "symbol" TEXT NOT NULL,
-  "quarter" TEXT NOT NULL,
+  "fiscal_year" TEXT NOT NULL,
   "receivables_days" DOUBLE PRECISION,
   "inventory_days" DOUBLE PRECISION,
   "payables_days" DOUBLE PRECISION,
   "ccc" DOUBLE PRECISION,
-  "revenue_qtr" DOUBLE PRECISION,
-  "cogs_qtr" DOUBLE PRECISION,
-  PRIMARY KEY ("symbol", "quarter")
+  "revenue_fy" DOUBLE PRECISION,
+  "cogs_proxy_fy" DOUBLE PRECISION,
+  "fetched_at" TEXT DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY ("symbol", "fiscal_year")
 );
 
 -- ── xgboost_predictions ─────────────────────────────────────────────

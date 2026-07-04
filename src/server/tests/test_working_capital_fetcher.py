@@ -72,3 +72,26 @@ class TestComputeCcc:
     def test_empty_inputs_return_empty_list(self):
         assert wcf.compute_ccc([], []) == []
         assert wcf.compute_ccc(None, None) == []
+
+    def test_excludes_adjacent_fiscal_year_quarter_mixed_into_the_same_call(self):
+        """A genuine FY26 quarter set plus one out-of-window FY25 quarter in the
+        same quarterly list must still compute correctly for FY26 — the extra
+        row must not corrupt the 4-quarter average or leak into results."""
+        balance = [_balance_row("2026-03-31", inventories=10000.0, receivables=12000.0, payables=3500.0)]
+        quarterly = [
+            _quarterly_row("2026-03-31", 10000.0, 7000.0),
+            _quarterly_row("2025-12-31", 9500.0, 6800.0),
+            _quarterly_row("2025-09-30", 9000.0, 6500.0),
+            _quarterly_row("2025-06-30", 8500.0, 6200.0),
+            _quarterly_row("2025-03-31", 8000.0, 5900.0),  # FY25 — must be excluded from FY26's CCC
+        ]
+        result = wcf.compute_ccc(balance, quarterly)
+
+        assert len(result) == 1
+        row = result[0]
+        # Revenue/COGS must be computed from exactly the 4 genuine FY26 quarters,
+        # NOT including the FY25 8000.0/5900.0 values.
+        revenue_fy = 10000.0 + 9500.0 + 9000.0 + 8500.0
+        cogs_fy = 7000.0 + 6800.0 + 6500.0 + 6200.0
+        assert row["revenue_fy"] == revenue_fy
+        assert row["cogs_proxy_fy"] == cogs_fy
