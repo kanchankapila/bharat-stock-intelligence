@@ -213,10 +213,10 @@ export const MONITOR_SCRIPTS = [
     category: 'Data',
     critical: false,
     description: 'Fetches Trendlyne company descriptions and scores high-growth potential via Ollama AI.',
-    schedule: 'Weekly Sunday',
+    schedule: 'Bi-weekly Sunday',
     pyScript: null,
     queueName: 'company-profiles-sync',
-    staleLimitHours: 200,
+    staleLimitHours: 360,
   },
   {
     id: 'trendlyne-fundamentals',
@@ -354,7 +354,7 @@ async function getLastRunAt(scriptId: ScriptId): Promise<string | null> {
         row = await dbGet("SELECT MAX(as_of_date) as t FROM tl_financial_quality");
         break;
       case 'working-capital':
-        row = await dbGet("SELECT MAX(fiscal_year) as t FROM working_capital_history");
+        row = await dbGet("SELECT MAX(fetched_at) as t FROM working_capital_history");
         break;
       case 'tickertape-scorecard':
         row = await dbGet("SELECT MAX(date) as t FROM proprietary_scores_history WHERE source = 'tickertape'");
