@@ -2219,7 +2219,7 @@ export async function initQueues(): Promise<boolean> {
       updateMonitorState('company-profiles-sync', 'failed', err.message);
     });
 
-    // Ã¢â€â‚¬Ã¢â€â‚¬ Agent: Auditor (16:30 IST = 11:00 UTC, weekdays) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    // ── Trendlyne midweek batch ──
     // Trendlyne midweek batch: adv-tech + price analysis (moved off Sunday to
     // de-conflict from the main ml-weekly-retrain batch).
     trendlyneMidweekQueue = new Queue(QUEUE_TRENDLYNE_MIDWEEK, { connection });
@@ -2262,6 +2262,7 @@ export async function initQueues(): Promise<boolean> {
       updateMonitorState('trendlyne-midweek', 'failed', err.message);
     });
 
+    // ── Trendlyne ratios (monthly) ──
     // Trendlyne ratios (monthly): financial_ratios + working_capital, now via
     // ET_Stats (Trendlyne's own params for this are confirmed dead — see Tasks 5-6).
     // Fires the Sunday cron every week but only actually runs on the first Sunday of
@@ -2312,6 +2313,7 @@ export async function initQueues(): Promise<boolean> {
       updateMonitorState('trendlyne-ratios-monthly', 'failed', err.message);
     });
 
+    // ── Agent: Auditor (16:30 IST = 11:00 UTC, weekdays) ──
     agentAuditorQueue = new Queue(QUEUE_AGENT_AUDITOR, { connection });
     const aaRep = await agentAuditorQueue.getRepeatableJobs();
     for (const r of aaRep) await agentAuditorQueue.removeRepeatableByKey(r.key);
