@@ -910,6 +910,7 @@ CREATE TABLE IF NOT EXISTS "mc_chart_patterns" (
   "symbol" TEXT,
   "pattern_id" BIGINT NOT NULL,
   "pattern_name" TEXT NOT NULL,
+  "direction" TEXT,
   "comment" TEXT,
   "time_frame" TEXT,
   "exchange" TEXT DEFAULT 'nse',
@@ -923,6 +924,7 @@ CREATE TABLE IF NOT EXISTS "mc_chart_patterns" (
   "cmp" DOUBLE PRECISION,
   "metadata_json" TEXT,
   "end_date" TEXT,
+  "created_at" TEXT,
   "analyst_name" TEXT,
   "analyst_image" TEXT,
   "fetched_at" TIMESTAMPTZ DEFAULT now(),
@@ -2266,6 +2268,7 @@ CREATE TABLE IF NOT EXISTS "tl_financial_quality" (
   "market_cap" DOUBLE PRECISION,
   "fcf_yield" DOUBLE PRECISION,
   "interest_coverage" DOUBLE PRECISION,
+  "fetched_at" TEXT DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY ("symbol", "as_of_date")
 );
 

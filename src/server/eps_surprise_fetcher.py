@@ -160,7 +160,11 @@ def fetch_bulk(mc_to_symbol: dict[str, str]) -> tuple[dict[str, dict], list[tupl
         raise ImportError("curl_cffi is required: pip install curl-cffi")
 
     r = cffi_req.get(BULK_URL, headers=MC_HEADERS, impersonate="chrome110", timeout=30)
-    rows = r.json()["data"]["list"]
+    try:
+        rows = r.json()["data"]["list"]
+    except (ValueError, KeyError, TypeError) as e:
+        print(f"[EPSSurprise] Bulk endpoint returned no usable data (status={r.status_code}): {e}")
+        return {}, []
 
     features_by_symbol: dict[str, dict] = {}
     history_rows: list[tuple] = []

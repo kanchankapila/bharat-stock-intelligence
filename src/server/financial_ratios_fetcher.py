@@ -87,6 +87,7 @@ def ensure_schema(con) -> None:
     con.commit()
 
     for ddl in [
+        "ALTER TABLE tl_financial_quality ADD COLUMN fetched_at TEXT DEFAULT CURRENT_TIMESTAMP",
         "ALTER TABLE technical_signals ADD COLUMN fcf_yield         REAL",
         "ALTER TABLE technical_signals ADD COLUMN interest_coverage  REAL",
         "ALTER TABLE technical_signals ADD COLUMN fcf_positive       INTEGER",
@@ -387,6 +388,10 @@ def main() -> None:
             print(f"  [{i}/{len(stocks)}] {symbol}: {fcf_str} | {cov_str}{flag}")
 
         except Exception as e:
+            try:
+                con.rollback()
+            except Exception:
+                pass
             print(f"  [{i}/{len(stocks)}] {symbol}: ERROR — {e}")
 
     fcf_pct = round(fcf_positive_count / ok * 100) if ok else 0

@@ -59,9 +59,10 @@ NT_HEADERS_BASIS = {
 }
 NSE_HOME_URL     = "https://www.nseindia.com"
 
-# MoneyControl major currencies endpoint
+# MoneyControl major currencies endpoint (same one mc_global_macro_fetcher.py uses —
+# the old currency/get-currency-data path was retired by MC)
 MC_CURRENCY_URL  = (
-    "https://api.moneycontrol.com/mcapi/v1/currency/get-currency-data?section=major"
+    "https://api.moneycontrol.com/mcapi/v1/us-markets/getCurrencies"
 )
 MC_HEADERS = {
     "User-Agent": (
@@ -150,7 +151,7 @@ def fetch_vix(session: requests.Session) -> float | None:
 
     indices = data.get("data") or []
     for item in indices:
-        if item.get("index") == "India VIX":
+        if (item.get("index") or "").strip().upper() == "INDIA VIX":
             try:
                 vix_val = float(item["last"])
                 # Sanity guard: India VIX historically ranges 8–80. Values outside suggest
@@ -200,7 +201,7 @@ def fetch_usdinr() -> tuple[float | None, float | None]:
         if "USD" in pair and "INR" in pair:
             try:
                 rate    = float(item.get("price") or item.get("ltp") or item.get("last") or 0)
-                chg_pct = float(item.get("changePercent") or item.get("pChg") or item.get("change_pct") or 0)
+                chg_pct = float(item.get("changePercent") or item.get("pChg") or item.get("change_pct") or item.get("chgper") or 0)
                 if rate > 0:
                     return rate, chg_pct
             except (ValueError, TypeError):
@@ -227,23 +228,41 @@ def run_fx(engine) -> tuple[float | None, float | None]:
 # ---------------------------------------------------------------------------
 
 def _fetch_basis_from_nt() -> tuple[float | None, int | None]:
-    """Fallback: derive Nifty basis from NiftyTrader dashboard data."""
+    """Fallback: derive Nifty basis from NiftyTrader dashboard futures price,
+    paired with the latest NIFTY50 spot close already captured by
+    global_macro_fetcher.py into macro_indicators (dashboard-data has no
+    spot price of its own — only the futures last_trade_price)."""
     import requests as _req
     try:
         r = _req.get(NT_DASHBOARD_URL, headers=NT_HEADERS_BASIS, timeout=10)
         d = r.json()
         if d.get("result") != 1:
             return None, None
-        rd = d.get("resultData") or {}
-        # Look for NIFTY entry with spot and futures price
-        for entry in (rd if isinstance(rd, list) else rd.get("data", [])):
-            if str(entry.get("symbol", "")).upper() == "NIFTY":
-                spot = float(entry.get("spotPrice") or entry.get("spot") or 0)
-                fut  = float(entry.get("futPrice") or entry.get("futures") or 0)
-                days = int(entry.get("daysToExpiry") or entry.get("days") or 30)
-                if spot and fut and days:
-                    basis = (fut - spot) / spot * 100 * (365 / days)
-                    return round(basis, 4), 1 if basis > 0 else 0
+        indices = ((d.get("resultData") or {}).get("indices")) or []
+        entry = next((e for e in indices if str(e.get("symbol_name", "")).upper() == "NIFTY"), None)
+        if not entry:
+            return None, None
+
+        fut = float(entry.get("last_trade_price") or 0)
+        expiry_date = entry.get("expiry_date")
+        if not fut or not expiry_date:
+            return None, None
+        days = (datetime.datetime.fromisoformat(expiry_date.split("T")[0]).date()
+                - datetime.date.today()).days
+        if days <= 0:
+            return None, None
+
+        with get_engine().connect() as conn:
+            row = conn.execute(text(
+                "SELECT value FROM macro_indicators WHERE indicator_name = 'NIFTY50' "
+                "ORDER BY date DESC LIMIT 1"
+            )).fetchone()
+        spot = float(row[0]) if row and row[0] else 0
+        if not spot:
+            return None, None
+
+        basis = (fut - spot) / spot * 100 * (365 / days)
+        return round(basis, 4), 1 if basis > 0 else 0
     except Exception as e:
         print(f"[MarketRegime] NT dashboard fallback error: {e}")
     return None, None

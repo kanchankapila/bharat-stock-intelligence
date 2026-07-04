@@ -158,31 +158,11 @@ def fetch_bse_rating_announcements(from_date: str, to_date: str) -> list[dict]:
 # ---------------------------------------------------------------------------
 def build_bse_to_nse_map(conn) -> dict[str, dict]:
     """
-    Build a map of bse_code -> {symbol, isin} using nse_stocks table.
-    Falls back to isin-keyed lookup from nse_stocks if bse_code column absent.
+    Build a map of isin -> {symbol, isin} using nse_stocks table.
+    nse_stocks has no bse_code column, so BSE scrip codes are resolved via ISIN below.
     """
     mapping: dict[str, dict] = {}
 
-    # Primary: nse_stocks table keyed on bse_code
-    try:
-        df = read_df(
-            "SELECT symbol, isin, bse_code FROM nse_stocks WHERE bse_code IS NOT NULL"
-        )
-        if not df.empty:
-            for _, row in df.iterrows():
-                key = str(row.get("bse_code", "")).strip()
-                if key:
-                    mapping[key] = {
-                        "symbol": row.get("symbol", ""),
-                        "isin":   row.get("isin", ""),
-                    }
-            print(f"[CreditRating] Loaded {len(mapping)} BSE->NSE mappings from nse_stocks")
-            if mapping:
-                return mapping
-    except Exception as e:
-        print(f"[CreditRating] nse_stocks bse_code lookup warning: {e}")
-
-    # Fallback: isin-keyed map from nse_stocks (isin column confirmed present)
     try:
         df = read_df(
             "SELECT DISTINCT symbol, isin FROM nse_stocks WHERE isin IS NOT NULL"

@@ -32,11 +32,19 @@ def parse_tradebrains_rows(fii_results: list[dict], dii_results: list[dict]) -> 
     return list(by_date.values())
 
 
-def _fetch_all(url: str) -> list[dict]:
+def _fetch_all(url: str, max_retries: int = 3) -> list[dict]:
     out, page = [], 1
     while True:
-        resp = requests.get(url, params={"page": page, "per_page": 100}, headers=_HEADERS, timeout=30)
-        resp.raise_for_status()
+        resp = None
+        for attempt in range(1, max_retries + 1):
+            resp = requests.get(url, params={"page": page, "per_page": 100}, headers=_HEADERS, timeout=30)
+            if resp.status_code < 500:
+                break
+            print(f"[FII-DII-BACKFILL] {url} page {page}: HTTP {resp.status_code} (attempt {attempt}/{max_retries})")
+            time.sleep(2 * attempt)
+        if resp.status_code >= 400:
+            print(f"[FII-DII-BACKFILL] Giving up on {url} page {page} after {max_retries} attempts (HTTP {resp.status_code})")
+            break
         data = resp.json()
         out.extend(data.get("results", []))
         if not data.get("next"):
@@ -47,7 +55,12 @@ def _fetch_all(url: str) -> list[dict]:
 
 
 def run() -> int:
-    rows = parse_tradebrains_rows(_fetch_all(_FII_URL), _fetch_all(_DII_URL))
+    fii_rows = _fetch_all(_FII_URL)
+    dii_rows = _fetch_all(_DII_URL)
+    if not fii_rows and not dii_rows:
+        print("[FII-DII-BACKFILL] No data fetched from either endpoint — TradeBrains API may be down.")
+        return 0
+    rows = parse_tradebrains_rows(fii_rows, dii_rows)
     con = connect()
     try:
         n = 0
