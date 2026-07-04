@@ -36,6 +36,10 @@ import requests
 
 BASE_URL = "https://etmarketsapis.indiatimes.com/ET_Stats/mobile"
 
+# HEADERS: exported for caller to apply to their own requests.Session once at creation time
+# (e.g., session.headers.update(HEADERS)), then pass that session into fetch_et_stats().
+# This pattern allows reusing one session across multiple calls. fetch_et_stats() itself
+# does not apply headers — that is the caller's responsibility.
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
