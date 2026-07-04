@@ -81,6 +81,7 @@ def ensure_schema(con) -> None:
         CREATE TABLE IF NOT EXISTS trendlyne_stock_profile (
             symbol          TEXT NOT NULL,
             date            TEXT NOT NULL,
+            company_description TEXT,
             -- P&L annual
             np_annual       REAL,
             ebitda_annual   REAL,
@@ -135,6 +136,7 @@ def ensure_schema(con) -> None:
         "ALTER TABLE technical_signals ADD COLUMN np_growth_yoy_q REAL",
         "ALTER TABLE technical_signals ADD COLUMN days_since_dividend INTEGER",
         "ALTER TABLE technical_signals ADD COLUMN last_dividend_amt REAL",
+        "ALTER TABLE trendlyne_stock_profile ADD COLUMN company_description TEXT",
     ]:
         try:
             cur.execute(ddl)
@@ -288,6 +290,10 @@ def extract_event_data(body: dict) -> dict:
     }
 
 
+def extract_company_description(body: dict) -> str | None:
+    return body.get("companyProfileData", {}).get("companyDescription") or None
+
+
 # â”€â”€ Extract fundamental-profile data â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def extract_profile_data(body: dict) -> dict:
@@ -356,8 +362,8 @@ def upsert_profile(symbol: str, today: str, profile: dict, con) -> None:
             rev_cagr_5y, np_cagr_5y,
             rev_growth_yoy_q, np_growth_yoy_q,
             analyst_target_mean, analyst_count, analyst_buy_pct, analyst_upside_pct,
-            last_dividend_amt, last_ex_date, days_since_dividend
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            last_dividend_amt, last_ex_date, days_since_dividend, company_description
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(symbol, date) DO UPDATE SET
             np_annual           = excluded.np_annual,
             ebitda_annual       = excluded.ebitda_annual,
@@ -385,6 +391,7 @@ def upsert_profile(symbol: str, today: str, profile: dict, con) -> None:
             last_dividend_amt   = excluded.last_dividend_amt,
             last_ex_date        = excluded.last_ex_date,
             days_since_dividend = excluded.days_since_dividend,
+            company_description = excluded.company_description,
             fetched_at          = CURRENT_TIMESTAMP
     """, (
         symbol, today,
@@ -403,6 +410,7 @@ def upsert_profile(symbol: str, today: str, profile: dict, con) -> None:
         _safe(profile.get("analyst_buy_pct")), _safe(profile.get("analyst_upside_pct")),
         _safe(profile.get("last_dividend_amt")), profile.get("last_ex_date"),
         int(profile.get("days_since_dividend") or 0) if profile.get("days_since_dividend") is not None else None,
+        profile.get("company_description"),
     ))
     con.commit()
 
@@ -492,13 +500,16 @@ def main() -> None:
     for i, (symbol, tlid) in enumerate(stocks, 1):
         profile: dict = {}
 
-        # â”€â”€ 1. overview-second-part (analyst targets + events) â”€â”€
+        # â”€â”€ 1. overview-second-part (analyst targets + events + company description) â”€â”€
         overview_body = _fetch(OVERVIEW_URL.format(tlid=tlid), session)
         if overview_body is not None:
             analyst = extract_analyst_data(overview_body, symbol, today, con)
             events  = extract_event_data(overview_body)
+            description = extract_company_description(overview_body)
             profile.update(analyst)
             profile.update(events)
+            if description:
+                profile["company_description"] = description
         time.sleep(RATE_LIMIT_SEC)
 
         # â”€â”€ 2. fundamental-profile (financials + shareholding) â”€â”€
