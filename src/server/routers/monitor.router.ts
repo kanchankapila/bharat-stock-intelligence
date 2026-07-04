@@ -262,6 +262,17 @@ export const MONITOR_SCRIPTS = [
     queueName: 'trendlyne-ratios-monthly',
     staleLimitHours: 800,
   },
+  {
+    id: 'tickertape-scorecard',
+    label: 'Tickertape Scorecard (ordinal tags)',
+    category: 'Data',
+    critical: false,
+    description: 'Performance/Valuation/Growth/Profitability ordinal tags (numeric values are premium-gated)',
+    schedule: 'Weekly Saturday',
+    pyScript: 'tickertape_scorecard_fetcher.py',
+    queueName: 'tickertape-scorecard',
+    staleLimitHours: 200,
+  },
 ] as const;
 
 type ScriptId = typeof MONITOR_SCRIPTS[number]['id'];
@@ -344,6 +355,9 @@ async function getLastRunAt(scriptId: ScriptId): Promise<string | null> {
         break;
       case 'working-capital':
         row = await dbGet("SELECT MAX(fiscal_year) as t FROM working_capital_history");
+        break;
+      case 'tickertape-scorecard':
+        row = await dbGet("SELECT MAX(date) as t FROM proprietary_scores_history WHERE source = 'tickertape'");
         break;
       default:
         return null;
@@ -450,6 +464,8 @@ async function getScriptStats(scriptId: ScriptId): Promise<Record<string, number
         return { rows: ((await dbGet("SELECT COUNT(*) as n FROM tl_financial_quality WHERE as_of_date = (SELECT MAX(as_of_date) FROM tl_financial_quality)")) as any)?.n ?? 0 };
       case 'working-capital':
         return { rows: ((await dbGet("SELECT COUNT(*) as n FROM working_capital_history WHERE fiscal_year = (SELECT MAX(fiscal_year) FROM working_capital_history)")) as any)?.n ?? 0 };
+      case 'tickertape-scorecard':
+        return { rows: ((await dbGet("SELECT COUNT(*) as n FROM proprietary_scores_history WHERE source = 'tickertape' AND date = (SELECT MAX(date) FROM proprietary_scores_history WHERE source = 'tickertape')")) as any)?.n ?? 0 };
       default:
         return {};
     }

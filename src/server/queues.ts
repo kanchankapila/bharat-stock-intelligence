@@ -109,6 +109,7 @@ export const QUEUE_QUANT_EOD_SYNC = 'quant-eod-sync';
 export const QUEUE_TRENDLYNE_DAILY_FETCH = 'trendlyne-daily-fetch';
 export const QUEUE_TRENDLYNE_MIDWEEK = 'trendlyne-midweek';
 export const QUEUE_TRENDLYNE_RATIOS_MONTHLY = 'trendlyne-ratios-monthly';
+export const QUEUE_TICKERTAPE_SCORECARD = 'tickertape-scorecard';
 export const QUEUE_LIVE_SCREENER_COLLECT = 'live-screener-collect';
 
 const BULK_CACHE_KEY      = 'live-stocks-bulk';
@@ -132,6 +133,7 @@ export let trendlyneIntradayQueue: Queue | null = null;
 export let trendlyneDailyFetchQueue: Queue | null = null;
 export let trendlyneMidweekQueue: Queue | null = null;
 export let trendlyneRatiosMonthlyQueue: Queue | null = null;
+export let tickertapeScorecardQueue: Queue | null = null;
 
 let stockWorker:              Worker | null = null;
 let signalWorker:             Worker | null = null;
@@ -148,6 +150,7 @@ let trendlyneIntradayWorker:  Worker | null = null;
 let trendlyneDailyFetchWorker: Worker | null = null;
 let trendlyneMidweekWorker: Worker | null = null;
 let trendlyneRatiosMonthlyWorker: Worker | null = null;
+let tickertapeScorecardWorker: Worker | null = null;
 export let companyProfilesSyncQueue: Queue | null = null;
 export let quantEodSyncQueue: Queue | null = null;
 export let quantEodSyncWorker: Worker | null = null;
@@ -2311,6 +2314,46 @@ export async function initQueues(): Promise<boolean> {
     trendlyneRatiosMonthlyWorker.on('failed', (_job, err) => {
       console.error('[QUEUE] trendlyne-ratios-monthly failed:', err.message);
       updateMonitorState('trendlyne-ratios-monthly', 'failed', err.message);
+    });
+
+    // ── Tickertape scorecard: ordinal category tags (Performance/Valuation/
+    // Growth/Profitability) — supplementary signal, weekly is sufficient. ──
+    tickertapeScorecardQueue = new Queue(QUEUE_TICKERTAPE_SCORECARD, { connection });
+    const ttscRep = await tickertapeScorecardQueue.getRepeatableJobs();
+    for (const r of ttscRep) await tickertapeScorecardQueue.removeRepeatableByKey(r.key);
+    await addJobWithCatchup(tickertapeScorecardQueue,
+      'tickertape-scorecard-weekly',
+      {},
+      {
+        repeat: { pattern: '0 13 * * 6' }, // Saturday 1:00 PM UTC
+        jobId: 'tickertape-scorecard-weekly',
+        removeOnComplete: 3,
+        removeOnFail: 3,
+      },
+    );
+
+    tickertapeScorecardWorker = new Worker(
+      QUEUE_TICKERTAPE_SCORECARD,
+      async (_job: Job) => {
+        await runPython('tickertape_scorecard_fetcher.py', [], 60 * 60_000)
+          .catch(e => console.warn('[QUEUE] tickertape_scorecard_fetcher failed:', (e as Error).message));
+        return { success: true };
+      },
+      {
+        connection,
+        concurrency: 1,
+        lockDuration: 90 * 60 * 1000,
+        lockRenewTime: 10 * 60 * 1000,
+      },
+    );
+
+    tickertapeScorecardWorker.on('completed', () => {
+      console.log('[QUEUE] tickertape-scorecard completed');
+      updateMonitorState('tickertape-scorecard', 'success');
+    });
+    tickertapeScorecardWorker.on('failed', (_job, err) => {
+      console.error('[QUEUE] tickertape-scorecard failed:', err.message);
+      updateMonitorState('tickertape-scorecard', 'failed', err.message);
     });
 
     // ── Agent: Auditor (16:30 IST = 11:00 UTC, weekdays) ──
