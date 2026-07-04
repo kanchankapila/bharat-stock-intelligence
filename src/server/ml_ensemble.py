@@ -645,7 +645,8 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     X['index_bull_gex']  = X['is_nifty50'] * (1 - X['nifty_long_gamma'])  # nifty50 in long-gamma = flow support
 
     # Pledge improving × strong FCF: deleveraging + cash generation = quality compound
-    # TODO: enable once financial_ratios_fetcher populates fcf_yield (currently 0 rows)
+    # TODO: enable once there's enough live fcf_yield_approx history to validate this interaction
+    # (financial_ratios_fetcher.py now populates it via ET_Stats; was previously always 0 rows)
     # X['quality_compound'] = X['pledge_deleveraging'] * num('fcf_yield', 0.0).clip(0, 0.2) / 0.2
 
     # ── EPS surprise streak (from eps_surprise_fetcher.py) ──────────────────
@@ -923,7 +924,7 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                ts.expected_move_pct, ts.stock_gex_proxy,
                ts.eps_surprise_q1, ts.eps_surprise_q2, ts.eps_beat_streak,
                ts.eps_miss_after_streak, ts.rev_surprise_q1,
-               ts.fcf_yield, ts.interest_coverage, ts.fcf_positive, ts.debt_coverage_risk,
+               ts.fcf_yield_approx AS fcf_yield, ts.interest_coverage, ts.fcf_positive, ts.debt_coverage_risk,
                ts.delivery_trend_30d, ts.block_deal_flag, ts.block_deal_direction,
                ts.short_interest_proxy,
                ts.promoter_buy_90d_cr, ts.promoter_sell_90d_cr, ts.promoter_net_90d,
@@ -1127,7 +1128,7 @@ def load_pending_signals() -> pd.DataFrame:
                ts.expected_move_pct, ts.stock_gex_proxy,
                ts.eps_surprise_q1, ts.eps_surprise_q2, ts.eps_beat_streak,
                ts.eps_miss_after_streak, ts.rev_surprise_q1,
-               ts.fcf_yield, ts.interest_coverage, ts.fcf_positive, ts.debt_coverage_risk,
+               ts.fcf_yield_approx AS fcf_yield, ts.interest_coverage, ts.fcf_positive, ts.debt_coverage_risk,
                ts.delivery_trend_30d, ts.block_deal_flag, ts.block_deal_direction,
                ts.short_interest_proxy,
                ts.promoter_buy_90d_cr, ts.promoter_sell_90d_cr, ts.promoter_net_90d,
