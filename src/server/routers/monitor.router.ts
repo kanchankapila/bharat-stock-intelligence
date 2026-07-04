@@ -218,6 +218,50 @@ export const MONITOR_SCRIPTS = [
     queueName: 'company-profiles-sync',
     staleLimitHours: 200,
   },
+  {
+    id: 'trendlyne-fundamentals',
+    label: 'Trendlyne Fundamentals (EPS + DVM)',
+    category: 'Data',
+    critical: false,
+    description: 'EPS_TTM + DivYield series and DVM scores (PE/PB now fed by mc_pricefeed_fetcher.py)',
+    schedule: 'Weekly Sunday',
+    pyScript: 'trendlyne_fundamentals_fetcher.py',
+    queueName: 'ml-weekly-retrain',
+    staleLimitHours: 200,
+  },
+  {
+    id: 'trendlyne-midweek',
+    label: 'Trendlyne Midweek (Adv-Tech + Price Analysis)',
+    category: 'Data',
+    critical: false,
+    description: 'Advanced technical analysis + price-performance alpha, moved off Sunday',
+    schedule: 'Weekly Tuesday',
+    pyScript: null,
+    queueName: 'trendlyne-midweek',
+    staleLimitHours: 200,
+  },
+  {
+    id: 'financial-ratios',
+    label: 'Financial Ratios (ET_Stats)',
+    category: 'ML',
+    critical: false,
+    description: 'FCF yield (approx) + interest coverage, rewritten against ET_Stats after Trendlyne retired the params',
+    schedule: 'First Sunday of month',
+    pyScript: 'financial_ratios_fetcher.py',
+    queueName: 'trendlyne-ratios-monthly',
+    staleLimitHours: 800,
+  },
+  {
+    id: 'working-capital',
+    label: 'Working Capital Cycle (ET_Stats, annual)',
+    category: 'ML',
+    critical: false,
+    description: 'Cash conversion cycle per fiscal year, rewritten against ET_Stats after Trendlyne retired the params',
+    schedule: 'First Sunday of month',
+    pyScript: 'working_capital_fetcher.py',
+    queueName: 'trendlyne-ratios-monthly',
+    staleLimitHours: 800,
+  },
 ] as const;
 
 type ScriptId = typeof MONITOR_SCRIPTS[number]['id'];
@@ -282,6 +326,18 @@ async function getLastRunAt(scriptId: ScriptId): Promise<string | null> {
         break;
       case 'company-profiles-sync':
         row = await dbGet("SELECT MAX(last_updated) as t FROM company_profiles");
+        break;
+      case 'trendlyne-fundamentals':
+        row = await dbGet("SELECT MAX(date) as t FROM trendlyne_dvm_scores");
+        break;
+      case 'trendlyne-midweek':
+        row = await dbGet("SELECT MAX(fetched_at) as t FROM trendlyne_stock_profile");
+        break;
+      case 'financial-ratios':
+        row = await dbGet("SELECT MAX(as_of_date) as t FROM tl_financial_quality");
+        break;
+      case 'working-capital':
+        row = await dbGet("SELECT MAX(fiscal_year) as t FROM working_capital_history");
         break;
       default:
         return null;
@@ -377,6 +433,14 @@ async function getScriptStats(scriptId: ScriptId): Promise<Record<string, number
           profiles: ((await dbGet("SELECT COUNT(*) as n FROM company_profiles")) as any)?.n ?? 0,
           aiAnalyzed: ((await dbGet("SELECT COUNT(*) as n FROM company_profiles WHERE ai_analysis IS NOT NULL AND ai_analysis != ''")) as any)?.n ?? 0,
         };
+      case 'trendlyne-fundamentals':
+        return { rows: ((await dbGet("SELECT COUNT(*) as n FROM trendlyne_dvm_scores WHERE date = (SELECT MAX(date) FROM trendlyne_dvm_scores)")) as any)?.n ?? 0 };
+      case 'trendlyne-midweek':
+        return { rows: ((await dbGet("SELECT COUNT(*) as n FROM trendlyne_stock_profile WHERE date = (SELECT MAX(date) FROM trendlyne_stock_profile)")) as any)?.n ?? 0 };
+      case 'financial-ratios':
+        return { rows: ((await dbGet("SELECT COUNT(*) as n FROM tl_financial_quality WHERE as_of_date = (SELECT MAX(as_of_date) FROM tl_financial_quality)")) as any)?.n ?? 0 };
+      case 'working-capital':
+        return { rows: ((await dbGet("SELECT COUNT(*) as n FROM working_capital_history WHERE fiscal_year = (SELECT MAX(fiscal_year) FROM working_capital_history)")) as any)?.n ?? 0 };
       default:
         return {};
     }
