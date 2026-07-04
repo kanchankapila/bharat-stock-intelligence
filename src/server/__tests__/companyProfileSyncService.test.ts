@@ -34,6 +34,10 @@ test('runs trendlyne_overview_fetcher.py before reading descriptions from the DB
   expect(mockRunPython).toHaveBeenCalledWith('trendlyne_overview_fetcher.py', expect.anything(), expect.anything());
   expect(mockAnalyze).toHaveBeenCalledWith('BEL', 'BEL manufactures defence electronics.');
   expect(mockDbRun).toHaveBeenCalledTimes(1);
+
+  // Ordering: runPython must resolve before dbAll is invoked,
+  // otherwise the DB read could race ahead of the fresh Python fetch and see stale/no data.
+  expect(mockRunPython.mock.invocationCallOrder[0]).toBeLessThan(mockDbAll.mock.invocationCallOrder[0]);
 });
 
 test('skips stocks with no description without calling Ollama', async () => {
