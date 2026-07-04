@@ -2680,6 +2680,204 @@ Do not write this step's code as part of this plan document — it is intentiona
 
 ---
 
+## Task 11: Repoint `fcf_yield` consumers to `fcf_yield_approx`, sync schema-of-record
+
+Task 5's review surfaced a plan-level gap: the brief renamed `technical_signals.fcf_yield` → `fcf_yield_approx` (correctly — to label the CFO+CFI approximation) and rewrote `tl_financial_quality`'s column set (`capex_ttm`/`fcf_ttm`/`ebit_ttm`/`interest_expense_ttm` → `cfi_ttm`/`fcf_ttm_approx`, `interest_coverage`/`fcf_yield` → `fcf_yield_approx`), but three live consumers and the schema-of-record files still reference the old names — verified via live grep on this branch, 2026-07-04:
+
+- `src/server/routers/commandCenter.router.ts:149` — `SELECT ... ts.fcf_yield, ts.interest_coverage, ts.fcf_positive, ts.debt_coverage_risk ...` (feeds the `getBuyRecommendations` procedure)
+- `src/server/ml_ensemble.py:926` and `:1130` — two separate SQL `SELECT ... ts.fcf_yield ...` (feature-building queries)
+- `src/server/ml_ensemble.py:661` — `X['fcf_yield_norm'] = num('fcf_yield', 0.0).clip(-5, 20) / 20.0` (active ML feature keyed by the SQL result's column name)
+- `src/server/ml_ensemble.py:648-649` — a commented-out feature line and TODO note "once financial_ratios_fetcher populates fcf_yield (currently 0 rows)" — now stale, since it will populate
+- `src/server/db.ts:2210-2221` — `tl_financial_quality` `CREATE TABLE` still declares the OLD column set (`capex_ttm`, `fcf_ttm`, `ebit_ttm`, `interest_expense_ttm`, `fcf_yield`), out of sync with what `financial_ratios_fetcher.py::ensure_schema()` now creates. This is a live correctness risk, not just staleness: on a fresh dev DB where `db.ts` bootstraps the schema before any Python script runs, its `CREATE TABLE IF NOT EXISTS` would win, leaving the table without `cfi_ttm`/`fcf_ttm_approx`/`fcf_yield_approx` — and `financial_ratios_fetcher.py`'s own `INSERT` (which references those new column names) would then fail against that stale table.
+- `src/server/db.ts:2283` — `ALTER TABLE technical_signals ADD COLUMN fcf_yield REAL;` (old name only; no `fcf_yield_approx` entry)
+- `db/schema.postgres.sql:2193` and `:2269` — `"fcf_yield" DOUBLE PRECISION` in both the `technical_signals` and `tl_financial_quality` blocks
+- `db/schema.postgres.sql:2260-2272` — `tl_financial_quality` `CREATE TABLE` also has the old column set
+
+Confirmed via grep that `tl_financial_quality` has exactly one owner (`financial_ratios_fetcher.py`) and one schema-of-record declaration (`db.ts`) — no other file reads from it, so its `CREATE TABLE` block can be fully replaced rather than additively patched. `src/components/BuyRecommendationsPage.tsx` reads `p.fcf_yield`/`p.fcf_positive` but is fed entirely by `commandCenter.router.ts`'s `getBuyRecommendations` query — fixing the SQL alias in the router requires zero frontend changes.
+
+**Files:**
+- Modify: `src/server/routers/commandCenter.router.ts`
+- Modify: `src/server/ml_ensemble.py`
+- Modify: `src/server/db.ts`
+- Modify: `db/schema.postgres.sql`
+
+**Interfaces:**
+- No new functions. This task only changes SQL column references and schema declarations — the shape of every consumer's downstream code (JS object property access, pandas column access) stays `fcf_yield` via SQL aliasing, so no code beyond the SQL text itself needs to change.
+
+- [ ] **Step 1: Alias the new column back to the old property name in `commandCenter.router.ts`**
+
+In `src/server/routers/commandCenter.router.ts:149`, change:
+
+```typescript
+          ts.fcf_yield, ts.interest_coverage, ts.fcf_positive, ts.debt_coverage_risk,
+```
+
+to:
+
+```typescript
+          ts.fcf_yield_approx AS fcf_yield, ts.interest_coverage, ts.fcf_positive, ts.debt_coverage_risk,
+```
+
+This is the only change needed for `getBuyRecommendations` and, transitively, `BuyRecommendationsPage.tsx` — the frontend's `p.fcf_yield`/`p.fcf_positive` property accesses are unaffected since the SQL result still has a column literally named `fcf_yield`.
+
+- [ ] **Step 2: Alias the same way in both `ml_ensemble.py` SQL queries**
+
+In `src/server/ml_ensemble.py`, at both line 926 and line 1130, change:
+
+```python
+               ts.fcf_yield, ts.interest_coverage, ts.fcf_positive, ts.debt_coverage_risk,
+```
+
+to:
+
+```python
+               ts.fcf_yield_approx AS fcf_yield, ts.interest_coverage, ts.fcf_positive, ts.debt_coverage_risk,
+```
+
+at each of the two occurrences. This means line 661 (`X['fcf_yield_norm'] = num('fcf_yield', 0.0).clip(-5, 20) / 20.0`) needs **no change** — the pandas/dict lookup key `'fcf_yield'` still resolves correctly since the SQL result column is aliased back to that name.
+
+- [ ] **Step 3: Update the now-stale comment at `ml_ensemble.py:648-649`**
+
+Change:
+
+```python
+    # TODO: enable once financial_ratios_fetcher populates fcf_yield (currently 0 rows)
+    # X['quality_compound'] = X['pledge_deleveraging'] * num('fcf_yield', 0.0).clip(0, 0.2) / 0.2
+```
+
+to:
+
+```python
+    # TODO: enable once there's enough live fcf_yield_approx history to validate this interaction
+    # (financial_ratios_fetcher.py now populates it via ET_Stats; was previously always 0 rows)
+    # X['quality_compound'] = X['pledge_deleveraging'] * num('fcf_yield', 0.0).clip(0, 0.2) / 0.2
+```
+
+Leave the feature itself commented out — re-enabling it is a separate modeling decision outside this task's scope, this only corrects the stale rationale in the comment.
+
+- [ ] **Step 4: Sync `tl_financial_quality` and add `fcf_yield_approx` to `technical_signals` in `db.ts`**
+
+In `src/server/db.ts`, replace the `tl_financial_quality` `CREATE TABLE` block (currently lines ~2210-2221):
+
+```typescript
+  CREATE TABLE IF NOT EXISTS tl_financial_quality (
+    symbol               TEXT NOT NULL,
+    as_of_date           TEXT NOT NULL,
+    cfo_ttm              REAL,
+    capex_ttm            REAL,
+    fcf_ttm              REAL,
+    ebit_ttm             REAL,
+    interest_expense_ttm REAL,
+    market_cap           REAL,
+    fcf_yield            REAL,
+    interest_coverage    REAL,
+    PRIMARY KEY (symbol, as_of_date)
+  );
+```
+
+with the column set `financial_ratios_fetcher.py::ensure_schema()` now actually creates:
+
+```typescript
+  CREATE TABLE IF NOT EXISTS tl_financial_quality (
+    symbol               TEXT NOT NULL,
+    as_of_date           TEXT NOT NULL,
+    cfo_ttm              REAL,
+    cfi_ttm              REAL,
+    fcf_ttm_approx       REAL,
+    interest_coverage    REAL,
+    market_cap           REAL,
+    fcf_yield_approx     REAL,
+    fetched_at           TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (symbol, as_of_date)
+  );
+```
+
+Then in the `ALTER TABLE technical_signals` list (currently around line 2283):
+
+```typescript
+  ALTER TABLE technical_signals ADD COLUMN fcf_yield             REAL;
+```
+
+add a new line directly after it (keep the old line — do not remove `fcf_yield`, other historical rows/tooling may still reference it, this task only adds the new column):
+
+```typescript
+  ALTER TABLE technical_signals ADD COLUMN fcf_yield             REAL;
+  ALTER TABLE technical_signals ADD COLUMN fcf_yield_approx      REAL;
+```
+
+- [ ] **Step 5: Make the equivalent changes in `db/schema.postgres.sql`**
+
+In the `tl_financial_quality` block (currently lines ~2260-2272):
+
+```sql
+CREATE TABLE IF NOT EXISTS "tl_financial_quality" (
+  "symbol" TEXT NOT NULL,
+  "as_of_date" TEXT NOT NULL,
+  "cfo_ttm" DOUBLE PRECISION,
+  "capex_ttm" DOUBLE PRECISION,
+  "fcf_ttm" DOUBLE PRECISION,
+  "ebit_ttm" DOUBLE PRECISION,
+  "interest_expense_ttm" DOUBLE PRECISION,
+  "market_cap" DOUBLE PRECISION,
+  "fcf_yield" DOUBLE PRECISION,
+  "interest_coverage" DOUBLE PRECISION,
+  "fetched_at" TEXT DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY ("symbol", "as_of_date")
+);
+```
+
+replace with:
+
+```sql
+CREATE TABLE IF NOT EXISTS "tl_financial_quality" (
+  "symbol" TEXT NOT NULL,
+  "as_of_date" TEXT NOT NULL,
+  "cfo_ttm" DOUBLE PRECISION,
+  "cfi_ttm" DOUBLE PRECISION,
+  "fcf_ttm_approx" DOUBLE PRECISION,
+  "interest_coverage" DOUBLE PRECISION,
+  "market_cap" DOUBLE PRECISION,
+  "fcf_yield_approx" DOUBLE PRECISION,
+  "fetched_at" TEXT DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY ("symbol", "as_of_date")
+);
+```
+
+In the `technical_signals` block, at both line 2193 and line 2269 (`"fcf_yield" DOUBLE PRECISION,` appears twice — this file declares `technical_signals` in two places, verify both before editing), add a new line directly after each occurrence:
+
+```sql
+  "fcf_yield" DOUBLE PRECISION,
+  "fcf_yield_approx" DOUBLE PRECISION,
+```
+
+- [ ] **Step 6: Verify — typecheck, run the existing test suites, and confirm no stale references remain**
+
+Run: `npx tsc --noEmit`
+Expected: 0 errors.
+
+Run: `npx vitest run`
+Expected: all existing tests still pass (this task changes SQL text and schema declarations only, no test behavior should change).
+
+Run: `cd src/server && python -m pytest tests/test_financial_ratios_fetcher.py -v`
+Expected: still 8/8 passing (this task doesn't touch `financial_ratios_fetcher.py` itself).
+
+Run a final grep to confirm every `ts.fcf_yield` SQL reference (not `ts.fcf_yield_approx`) in the codebase is now either aliased with `AS fcf_yield` or doesn't need to be (i.e., there are no more bare, unaliased `ts.fcf_yield` reads left un-repointed):
+
+```bash
+grep -rn "\.fcf_yield\b" src/server/routers/commandCenter.router.ts src/server/ml_ensemble.py
+```
+
+Expected output: every match includes `fcf_yield_approx AS fcf_yield` or is the `num('fcf_yield', ...)` pandas lookup (unaffected by the alias).
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add src/server/routers/commandCenter.router.ts src/server/ml_ensemble.py src/server/db.ts db/schema.postgres.sql
+git commit -m "fix: repoint fcf_yield consumers to fcf_yield_approx, sync tl_financial_quality schema-of-record"
+```
+
+---
+
 ## Plan-level verification (after all tasks)
 
 - [ ] Run the full test suite: `npx tsc --noEmit && npx vitest run`
