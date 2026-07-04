@@ -168,23 +168,23 @@ def _parse_pattern(raw: dict) -> dict | None:
     }
 
 
-def upsert_patterns(symbol: str, patterns: list[dict], con) -> None:
+def upsert_patterns(symbol: str, mcsymbol: str, patterns: list[dict], con) -> None:
     cur = con.cursor()
     for p in patterns:
         cur.execute("""
             INSERT INTO mc_chart_patterns
-                (pattern_id, symbol, pattern_name, direction, time_frame,
+                (pattern_id, mcsymbol, symbol, pattern_name, direction, time_frame,
                  entry_price, target_price, stoploss_price, target_return_pct, stoploss_pct,
                  comment, p_status, end_date, created_at)
-            VALUES (:pid, :sym, :pname, :dir, :tf,
+            VALUES (:pid, :mcsym, :sym, :pname, :dir, :tf,
                     :entry, :target, :sl, :tret, :slpct,
                     :comment, :pstatus, :end_date, :created_at)
-            ON CONFLICT(pattern_id) DO UPDATE SET
+            ON CONFLICT(mcsymbol, pattern_id) DO UPDATE SET
                 p_status=EXCLUDED.p_status, target_price=EXCLUDED.target_price,
                 stoploss_price=EXCLUDED.stoploss_price, target_return_pct=EXCLUDED.target_return_pct,
                 end_date=EXCLUDED.end_date, fetched_at=CURRENT_TIMESTAMP
         """, {
-            "pid": p["pattern_id"], "sym": symbol, "pname": p.get("pattern_name"),
+            "pid": p["pattern_id"], "mcsym": mcsymbol, "sym": symbol, "pname": p.get("pattern_name"),
             "dir": p.get("direction"), "tf": p.get("time_frame"),
             "entry": p.get("entry_price"), "target": p.get("target_price"),
             "sl": p.get("sl_price"), "tret": p.get("target_return_pct"),
@@ -275,7 +275,7 @@ def main() -> None:
         raw_list = _fetch(mcsymbol, session)
         patterns = [p for p in (_parse_pattern(r) for r in raw_list) if p is not None]
 
-        upsert_patterns(symbol, patterns, con)
+        upsert_patterns(symbol, mcsymbol, patterns, con)
         sigs = compute_and_upsert_signals(symbol, today, patterns, con)
         backfill_technical_signals(symbol, sigs, con)
 

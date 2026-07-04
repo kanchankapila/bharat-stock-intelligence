@@ -87,6 +87,23 @@ export async function syncNiftyTraderScores() {
 
 export async function syncTrendlyneScores() {
   const stocks = getAllStocks(); // Sync all symbols
+
+  // fetchTrendlyneDVM/fetchTrendlyneChecklist have no JSON API on Trendlyne (HTML-widget-only,
+  // not implemented — see trendlyneService.ts) and always return null. Probe once with a real
+  // symbol before looping the whole universe: if both are still null, there is nothing this sync
+  // can produce, so skip entirely instead of burning cooldowns and misreporting the cause as
+  // Trendlyne rate-limiting. This self-heals if DVM/Checklist fetching is ever restored.
+  if (stocks.length > 0) {
+    const [probeDvm, probeChecklist] = await Promise.all([
+      fetchTrendlyneDVM(stocks[0].symbol),
+      fetchTrendlyneChecklist(stocks[0].symbol),
+    ]);
+    if (!probeDvm && !probeChecklist) {
+      console.warn('[TRENDLYNE SCORES] DVM/Checklist have no JSON API on Trendlyne right now — skipping sync entirely.');
+      return;
+    }
+  }
+
   const date = new Date().toISOString().split('T')[0];
   console.log(`[TRENDLYNE SCORES] Starting sync for ${stocks.length} symbols...`);
 

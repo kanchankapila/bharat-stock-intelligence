@@ -34,8 +34,14 @@ function runQuantWorker(workerData: unknown): Promise<{
   compositePct: number[];
 }> {
   return new Promise((resolve, reject) => {
-    const workerPath = path.join(__dirname, 'quantScoringWorker.js');
-    const worker = new Worker(workerPath, { workerData });
+    // .ts (not .js) — this repo runs from source via tsx, there is no compiled output.
+    // worker_threads spawns a fresh Node instance that doesn't inherit the parent's tsx
+    // ESM loader hook automatically, so it must be re-registered via execArgv.
+    const workerPath = path.join(__dirname, 'quantScoringWorker.ts');
+    const worker = new Worker(workerPath, {
+      workerData,
+      execArgv: [...process.execArgv, '--import', 'tsx/esm'],
+    });
     worker.once('message', resolve);
     worker.once('error',   reject);
     worker.once('exit', code => {

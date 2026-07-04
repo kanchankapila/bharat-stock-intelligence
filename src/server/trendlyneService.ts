@@ -1,28 +1,12 @@
 import { getStockMapping } from './stockMapping';
-import * as fs from 'fs';
-import * as path from 'path';
+import { cacheGet, cacheSet } from './cacheService';
+import { fetchTrendlyneWithAuth } from './trendlyneAuthService';
 import { dbGet } from './dbAsync';
 
 const HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
   'Accept': 'application/json'
 };
-
-const WIDGET_HEADERS = {
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-  'Referer': 'https://trendlyne.com/'
-};
-
-function decodeHtmlEntities(str: string): string {
-  return str
-    .replace(/&quot;/g, '"')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&#39;/g, "'")
-    .replace(/&nbsp;/g, ' ');
-}
 
 export interface TrendlyneOverviewData {
   companyProfileData?: {
@@ -111,175 +95,18 @@ export async function fetchTrendlyneFundamentals(symbol: string) {
 }
 
 export async function fetchTrendlyneSwot(symbol: string) {
-  const map = getStockMapping(symbol);
-  if (!map) return null;
-
-  console.log(`[TRENDLYNE] Fetching SWOT HTML for ${symbol} using tlid: ${map.tlid}`);
-  const url = `https://trendlyne.com/web-widget/swot-widget/${map.tlid}/${symbol.toUpperCase()}/`;
-  try {
-    const response = await fetch(url, { headers: WIDGET_HEADERS });
-    if (!response.ok) {
-      console.warn(`[TRENDLYNE] SWOT HTML fetch failed with status: ${response.status}`);
-      return null;
-    }
-    const html = await response.text();
-
-    const bulletsRegex = /<ul[^>]+class=["']text_bullets[^"']*["'][^>]*>([\s\S]*?)<\/ul>/g;
-    const liRegex = /<li>([\s\S]*?)<\/li>/g;
-
-    const uls: string[] = [];
-    let match;
-    while ((match = bulletsRegex.exec(html)) !== null) {
-      uls.push(match[1]);
-    }
-
-    const categories = ['strengths', 'weaknesses', 'opportunities', 'threats'];
-    const swot: Record<string, string[]> = {
-      strengths: [],
-      weaknesses: [],
-      opportunities: [],
-      threats: []
-    };
-
-    for (let i = 0; i < uls.length && i < categories.length; i++) {
-      const category = categories[i];
-      const ulContent = uls[i];
-      
-      // Reset regex index for safety
-      liRegex.lastIndex = 0;
-      
-      let liMatch;
-      while ((liMatch = liRegex.exec(ulContent)) !== null) {
-        const cleanText = liMatch[1].replace(/<[^>]*>/g, '').trim();
-        if (cleanText) {
-          swot[category].push(cleanText);
-        }
-      }
-    }
-
-    return swot;
-  } catch (err: any) {
-    console.error(`[TRENDLYNE] SWOT HTML parse error for ${symbol}:`, err.message);
-    return null;
-  }
+  console.warn(`[TRENDLYNE] SWOT has no JSON API on Trendlyne (only HTML widget scraping); returning null for ${symbol}`);
+  return null;
 }
 
 export async function fetchTrendlyneChecklist(symbol: string) {
-  const map = getStockMapping(symbol);
-  if (!map) return null;
-
-  console.log(`[TRENDLYNE] Fetching checklist HTML for ${symbol} using tlid: ${map.tlid}`);
-  const url = `https://trendlyne.com/web-widget/checklist-widget/${map.tlid}/${symbol.toUpperCase()}/`;
-  try {
-    const response = await fetch(url, { headers: WIDGET_HEADERS });
-    if (!response.ok) {
-      console.warn(`[TRENDLYNE] Checklist HTML fetch failed with status: ${response.status}`);
-      return null;
-    }
-    const htmlText = await response.text();
-
-    const divRegex = /data-checklist-data\s*=\s*["']([\s\S]*?)["']/;
-    const countRegex = /data-total-count\s*=\s*["']([\s\S]*?)["']/;
-
-    const dataMatch = htmlText.match(divRegex);
-    const countMatch = htmlText.match(countRegex);
-
-    let checklistP = 0;
-    let yesCount = 0;
-    let noCount = 0;
-    let total = 0;
-    let insight = '';
-    let checklistData = {};
-
-    if (countMatch) {
-      try {
-        const countJson = JSON.parse(decodeHtmlEntities(countMatch[1]));
-        yesCount = countJson.Yes || 0;
-        noCount = countJson.No || 0;
-        total = countJson.total || 0;
-        checklistP = countJson.checklistP || 0;
-        insight = countJson.insight || '';
-      } catch (e) {
-        console.warn('[TRENDLYNE] Error parsing checklist count metadata:', e);
-      }
-    }
-
-    if (dataMatch) {
-      try {
-        const rawJson = decodeHtmlEntities(dataMatch[1]);
-        const decoded = JSON.parse(rawJson);
-        checklistData = decoded.trendlyneChecklist || {};
-      } catch (e) {
-        console.warn('[TRENDLYNE] Error parsing checklist data payload:', e);
-      }
-    }
-
-    return {
-      score: checklistP,
-      yesCount,
-      noCount,
-      total,
-      insight,
-      checklistData
-    };
-  } catch (err: any) {
-    console.error(`[TRENDLYNE] Checklist HTML parse error for ${symbol}:`, err.message);
-    return null;
-  }
+  console.warn(`[TRENDLYNE] Checklist has no JSON API on Trendlyne (only HTML widget scraping); returning null for ${symbol}`);
+  return null;
 }
 
 export async function fetchTrendlyneDVM(symbol: string) {
-  const map = getStockMapping(symbol);
-  if (!map) return null;
-
-  console.log(`[TRENDLYNE] Fetching DVM HTML for ${symbol} using tlid: ${map.tlid}`);
-  const url = `https://trendlyne.com/web-widget/qvt-widget/${map.tlid}/${symbol.toUpperCase()}/`;
-  try {
-    const response = await fetch(url, { headers: WIDGET_HEADERS });
-    if (!response.ok) {
-      console.warn(`[TRENDLYNE] DVM HTML fetch failed with status: ${response.status}`);
-      return null;
-    }
-    const html = await response.text();
-
-    const wrapperRegex = /class=["'][^"']*param-wrapper[^"']*["'][\s\S]*?<\/div>\s*<\/div>/g;
-    const nameRegex = /class=["']name_text["'][^>]*>([\s\S]*?)<\/span>/;
-    const scoreRegex = /class=["']percent_number["'][^>]*>([\s\S]*?)<\/span>/;
-    const insightRegex = /class=["']insight_text["'][^>]*>([\s\S]*?)<\/span>/;
-
-    const dvm: Record<string, { score: number, insight: string }> = {};
-
-    let match;
-    while ((match = wrapperRegex.exec(html)) !== null) {
-      const wrapperContent = match[0];
-      const nameMatch = wrapperContent.match(nameRegex);
-      const scoreMatch = wrapperContent.match(scoreRegex);
-      const insightMatch = wrapperContent.match(insightRegex);
-
-      if (nameMatch && scoreMatch) {
-        const rawName = nameMatch[1].replace(/<[^>]*>/g, '').trim().toLowerCase();
-        const score = parseInt(scoreMatch[1].replace(/<[^>]*>/g, '').trim(), 10) || 0;
-        const insight = insightMatch ? insightMatch[1].replace(/<[^>]*>/g, '').trim() : '';
-
-        if (rawName === 'quality') {
-          dvm['quality'] = { score, insight };
-          dvm['durability'] = { score, insight };
-        } else if (rawName === 'technicals') {
-          dvm['technicals'] = { score, insight };
-          dvm['momentum'] = { score, insight };
-        } else if (rawName === 'valuation') {
-          dvm['valuation'] = { score, insight };
-        } else {
-          dvm[rawName] = { score, insight };
-        }
-      }
-    }
-
-    return dvm;
-  } catch (err: any) {
-    console.error(`[TRENDLYNE] DVM HTML parse error for ${symbol}:`, err.message);
-    return null;
-  }
+  console.warn(`[TRENDLYNE] DVM has no JSON API on Trendlyne (only HTML widget scraping); returning null for ${symbol}`);
+  return null;
 }
 
 export async function fetchTrendlyneStockMetrics(symbol: string) {
@@ -299,42 +126,36 @@ export async function fetchTrendlyneStockMetrics(symbol: string) {
   }
 
   if (!tlid) {
-    console.log(`[TRENDLYNE] No metrics tlid found for ${symbol}. Returning mock metrics.`);
-    try {
-      const mockDir = typeof __dirname !== 'undefined' ? __dirname : path.resolve(process.cwd(), 'src/server');
-      const mockDataPath = path.join(mockDir, 'mockTrendlyneMetrics.json');
-      return JSON.parse(fs.readFileSync(mockDataPath, 'utf8'));
-    } catch (mockError) {
-      return null;
-    }
+    console.log(`[TRENDLYNE] No metrics tlid found for ${symbol}.`);
+    return null;
   }
 
   console.log(`[TRENDLYNE] Fetching Stock Metrics for ${symbol} using tlid: ${tlid}`);
+  const cacheKey = `trendlyne:stock-metrics:${symbol}`;
+  const cached = await cacheGet<any>(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
   const url = `https://trendlyne.com/equity/getStockMetricParameterList/${tlid}/`;
   try {
-    const response = await fetch(url, { headers: HEADERS });
+    const response = await fetchTrendlyneWithAuth(url, { headers: HEADERS });
     if (!response.ok) {
-      console.warn(`[TRENDLYNE] Metrics API failed with status ${response.status} for ${symbol}. Returning mock.`);
-      const mockDir = typeof __dirname !== 'undefined' ? __dirname : path.resolve(process.cwd(), 'src/server');
-      const mockDataPath = path.join(mockDir, 'mockTrendlyneMetrics.json');
-      return JSON.parse(fs.readFileSync(mockDataPath, 'utf8'));
-    }
-    const data = await response.json();
-    if (data.html || !data.body) {
-      const mockDir = typeof __dirname !== 'undefined' ? __dirname : path.resolve(process.cwd(), 'src/server');
-      const mockDataPath = path.join(mockDir, 'mockTrendlyneMetrics.json');
-      return JSON.parse(fs.readFileSync(mockDataPath, 'utf8'));
-    }
-    return data;
-  } catch (error) {
-    console.error(`[TRENDLYNE] Error fetching stock metrics for ${symbol}:`, error);
-    try {
-      const mockDir = typeof __dirname !== 'undefined' ? __dirname : path.resolve(process.cwd(), 'src/server');
-      const mockDataPath = path.join(mockDir, 'mockTrendlyneMetrics.json');
-      return JSON.parse(fs.readFileSync(mockDataPath, 'utf8'));
-    } catch (mockError) {
+      console.warn(`[TRENDLYNE] Metrics API failed with status ${response.status} for ${symbol}.`);
       return null;
     }
+
+    const data = await response.json();
+    if (data.body && data.error !== true && !data.triggerloginmodal && data.head?.status !== '100') {
+      await cacheSet(cacheKey, data, 12 * 60 * 60);
+      return data;
+    }
+
+    console.warn(`[TRENDLYNE] Metrics API returned gated/invalid payload for ${symbol}.`);
+    return null;
+  } catch (error) {
+    console.warn(`[TRENDLYNE] Error fetching stock metrics for ${symbol}:`, error);
+    return null;
   }
 }
 
@@ -377,14 +198,8 @@ async function fetchTrendlyneAdvTechnicalAnalysisRaw(symbol: string, timeframe: 
   }
 
   if (!tlid) {
-    console.log(`[TRENDLYNE] No TA tlid found for ${symbol}. Returning mock TA data.`);
-    try {
-      const mockDir = typeof __dirname !== 'undefined' ? __dirname : path.resolve(process.cwd(), 'src/server');
-      const mockDataPath = path.join(mockDir, 'mockTrendlyneTa.json');
-      return JSON.parse(fs.readFileSync(mockDataPath, 'utf8'));
-    } catch (mockError) {
-      return null;
-    }
+    console.log(`[TRENDLYNE] No TA tlid found for ${symbol}.`);
+    return null;
   }
 
   const durationMap = { 'D': '24', 'W': '25', 'M': '26' };
@@ -393,23 +208,20 @@ async function fetchTrendlyneAdvTechnicalAnalysisRaw(symbol: string, timeframe: 
   console.log(`[TRENDLYNE] Fetching Adv Technical Analysis (${timeframe}) for ${symbol} using tlid: ${tlid}`);
   const url = `https://trendlyne.com/equity/api/stock/adv-technical-analysis/${tlid}/${dur}/?format=json`;
   try {
-    const response = await fetch(url, { headers: { ...HEADERS, 'Referer': 'https://trendlyne.com/' } });
+    const response = await fetchTrendlyneWithAuth(url, { headers: { ...HEADERS, 'Referer': 'https://trendlyne.com/' } });
     if (!response.ok) {
-      console.warn(`[TRENDLYNE] TA API failed with status ${response.status} for ${symbol}. Returning mock.`);
-      const mockDir = typeof __dirname !== 'undefined' ? __dirname : path.resolve(process.cwd(), 'src/server');
-      const mockDataPath = path.join(mockDir, 'mockTrendlyneTa.json');
-      return JSON.parse(fs.readFileSync(mockDataPath, 'utf8'));
+      console.warn(`[TRENDLYNE] TA API failed with status ${response.status} for ${symbol}.`);
+      return null;
     }
     const data = await response.json();
     if (data.html || !data.body) {
-      const mockDir = typeof __dirname !== 'undefined' ? __dirname : path.resolve(process.cwd(), 'src/server');
-      const mockDataPath = path.join(mockDir, 'mockTrendlyneTa.json');
-      return JSON.parse(fs.readFileSync(mockDataPath, 'utf8'));
+      console.warn(`[TRENDLYNE] TA API returned gated/invalid payload for ${symbol}.`);
+      return null;
     }
     return data;
   } catch (error) {
     console.error(`Error fetching Adv Technical Analysis for ${symbol}:`, error);
-    return [];
+    return null;
   }
 }
 
@@ -471,22 +283,17 @@ export async function fetchTrendlyneSectorRotation() {
   console.log(`[TRENDLYNE] Fetching sector rotation data`);
   const url = `https://trendlyne.com/fundamentals/api/sector-rotation/sector/?format=json&metric=count&period=1M`;
   try {
-    const response = await fetch(url, { headers: HEADERS });
+    // Routed through the auth service (like the other Trendlyne endpoints in this file) so this
+    // keeps working — instead of silently degrading forever with no fallback — if Trendlyne ever
+    // extends login-gating to this endpoint the way it already has for stock metrics/TA.
+    const response = await fetchTrendlyneWithAuth(url, { headers: HEADERS });
     if (!response.ok) {
       throw new Error(`Status: ${response.status}`);
     }
     return await response.json();
   } catch (error) {
     console.error(`[TRENDLYNE] Sector rotation fetch error:`, error);
-    console.log(`[TRENDLYNE] Falling back to mock data...`);
-    try {
-      const mockDataPath = path.join(__dirname, 'mockSectorRotation.json');
-      const mockData = JSON.parse(fs.readFileSync(mockDataPath, 'utf8'));
-      return mockData;
-    } catch (mockError) {
-      console.error(`[TRENDLYNE] Failed to load mock data:`, mockError);
-      return null;
-    }
+    return null;
   }
 }
 
@@ -494,22 +301,14 @@ export async function fetchTrendlyneIndexRotation() {
   console.log(`[TRENDLYNE] Fetching index rotation data`);
   const url = `https://trendlyne.com/fundamentals/api/sector-rotation/indices/?format=json&metric=count&period=1M`;
   try {
-    const response = await fetch(url, { headers: HEADERS });
+    const response = await fetchTrendlyneWithAuth(url, { headers: HEADERS });
     if (!response.ok) {
       throw new Error(`Status: ${response.status}`);
     }
     return await response.json();
   } catch (error) {
     console.error(`[TRENDLYNE] Index rotation fetch error:`, error);
-    console.log(`[TRENDLYNE] Falling back to mock index rotation data...`);
-    try {
-      const mockDataPath = path.join(__dirname, 'mockIndexRotation.json');
-      const mockData = JSON.parse(fs.readFileSync(mockDataPath, 'utf8'));
-      return mockData;
-    } catch (mockError) {
-      console.error(`[TRENDLYNE] Failed to load mock index rotation data:`, mockError);
-      return null;
-    }
+    return null;
   }
 }
 

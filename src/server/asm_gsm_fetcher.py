@@ -6,10 +6,10 @@ GSM = Graded Surveillance Measure (T+5 settlement + higher margins by stage)
 
 Run daily: python asm_gsm_fetcher.py
 """
+import re
 import sys
 from datetime import datetime, date
 import requests
-import pandas as pd
 from db_compat import connect, use_postgres
 
 HEADERS = {
@@ -18,23 +18,34 @@ HEADERS = {
     "Referer": "https://www.nseindia.com/",
 }
 
-# NSE moved surveillance endpoints; these paths are dead as of June 2026.
-# Primary source: Trendlyne screener IDs for ASM/GSM flags.
-# Fallback: NSE equity-master endpoint (no ASM/GSM field, but used for session warm-up).
-ASM_URL = "https://www.nseindia.com/api/asm-securities"         # 404 as of June 2026
-GSM_URL = "https://www.nseindia.com/api/gsm-securities"         # 404 as of June 2026
-ASM_CSV_URL = "https://nsearchives.nseindia.com/content/emerge/ASM_Securities.csv"   # 404
-GSM_CSV_URL = "https://nsearchives.nseindia.com/content/emerge/GradedSurveillanceMeasure.csv"  # 404
+# NSE's old asm-securities/gsm-securities paths (and the nsearchives CSVs) went 404 in
+# June 2026; these are the current endpoints that replaced them.
+ASM_URL = "https://www.nseindia.com/api/reportASM"
+GSM_URL = "https://www.nseindia.com/api/reportGSM"
 
-# Trendlyne screener IDs for ASM and GSM stocks
-TL_ASM_SCREENER_URL = "https://trendlyne.com/fundamentals/all-in-one-screener-data-get/?screenerid=26&format=json"
-TL_GSM_SCREENER_URL = "https://trendlyne.com/fundamentals/all-in-one-screener-data-get/?screenerid=27&format=json"
-TL_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-    "Accept": "application/json, text/javascript, */*",
-    "X-Requested-With": "XMLHttpRequest",
-    "Referer": "https://trendlyne.com/",
-}
+# Roman numeral (as used in NSE's stage descriptions, e.g. "Stage IV") -> int
+_ROMAN_STAGE = {"I": 1, "II": 2, "III": 3, "IV": 4, "V": 5, "VI": 6}
+
+
+def _parse_stage(text: str | None) -> int:
+    """Extract a 1-6 GSM/ASM stage from an NSE surveillance description.
+
+    reportGSM's own `gsmStage` field is an internal compound code (e.g. "LVIII")
+    that does not correspond to the 1-6 severity scale — the actual stage has to be
+    read out of `survDesc`, e.g. "Graded Surveillance Measure - Stage IV" -> 4,
+    "GSM stage II and ..." -> 2. Entries like "Shortlisted under Graded Surveillance
+    Measure" (or GSM/ASM stage folded into an IBC/encumbrance description as
+    "Stage 0") carry no stage severity yet -> 0.
+    """
+    if not text:
+        return 0
+    m = re.search(r"\bStage\s+([IVX]+|\d+)\b", text, re.IGNORECASE)
+    if not m:
+        return 0
+    token = m.group(1).upper()
+    if token.isdigit():
+        return int(token)
+    return _ROMAN_STAGE.get(token, 0)
 
 
 def _nse_session() -> requests.Session:
@@ -44,108 +55,58 @@ def _nse_session() -> requests.Session:
     return s
 
 
-def _tl_fetch_symbols(url: str, label: str) -> list[str]:
-    """Fetch symbol list from a Trendlyne screener URL."""
+def fetch_asm_symbols(sess: requests.Session) -> set[str] | None:
+    """Returns the set of symbols currently on ASM (long-term or short-term),
+    or None if the fetch itself failed (as opposed to a legitimate empty list)."""
     try:
-        r = requests.get(url, headers=TL_HEADERS, timeout=15)
+        r = sess.get(ASM_URL, timeout=15)
         if r.status_code != 200:
-            print(f"[{label}] TL screener HTTP {r.status_code}")
-            return []
+            print(f"[ASM] NSE reportASM HTTP {r.status_code}")
+            return None
         data = r.json()
-        if data.get("head", {}).get("status") != "0":
-            print(f"[{label}] TL screener API error: {data.get('head')}")
-            return []
-        body = data.get("body") or {}
-        rows = body.get("tableData") or []
-        # tableData is list of lists; symbol is typically first column
-        symbols = []
-        for row in rows:
-            if isinstance(row, list) and row:
-                sym = str(row[0]).upper().strip()
-            elif isinstance(row, dict):
-                sym = (row.get("symbol") or row.get("Symbol") or "").upper().strip()
-            else:
-                continue
-            if sym:
-                symbols.append(sym)
+        symbols = set()
+        for bucket in ("longterm", "shortterm"):
+            for item in (data.get(bucket) or {}).get("data") or []:
+                sym = (item.get("symbol") or "").upper().strip()
+                if sym:
+                    symbols.add(sym)
         return symbols
     except Exception as e:
-        print(f"[{label}] TL fetch error: {e}")
-        return []
+        print(f"[ASM] NSE reportASM fetch failed: {e}")
+        return None
 
 
-def fetch_asm_symbols(sess: requests.Session) -> set[str]:
-    # Try Trendlyne screener first (NSE ASM API is dead as of June 2026)
-    syms = _tl_fetch_symbols(TL_ASM_SCREENER_URL, "ASM")
-    if syms:
-        return set(syms)
-    # Legacy NSE JSON (may come back)
+def fetch_gsm_symbols(sess: requests.Session) -> dict[str, int] | None:
+    """Returns {symbol: gsm_stage} where stage is 0-6 (0 = shortlisted/no stage yet),
+    or None if the fetch itself failed (as opposed to a legitimate empty list)."""
     try:
-        r = sess.get(ASM_URL, timeout=10)
-        if r.status_code == 200:
-            data = r.json()
-            symbols = set()
-            for item in (data.get("data") or data if isinstance(data, list) else []):
-                sym = item.get("symbol") or item.get("Symbol") or item.get("SYMBOL") or ""
-                if sym:
-                    symbols.add(sym.upper().strip())
-            return symbols
-    except Exception as e:
-        print(f"[ASM] NSE JSON fetch failed: {e}")
-    # Legacy CSV (may come back)
-    try:
-        df = pd.read_csv(ASM_CSV_URL, engine="python", on_bad_lines="skip")
-        for col in df.columns:
-            if "symbol" in col.lower():
-                return set(df[col].dropna().str.upper().str.strip())
-    except Exception as e:
-        print(f"[ASM] NSE CSV fetch failed: {e}")
-    print("[ASM] All sources failed — returning empty set")
-    return set()
-
-
-def fetch_gsm_symbols(sess: requests.Session) -> dict[str, int]:
-    """Returns {symbol: gsm_stage} where stage 1-6."""
-    # Try Trendlyne screener first (NSE GSM API is dead as of June 2026)
-    syms = _tl_fetch_symbols(TL_GSM_SCREENER_URL, "GSM")
-    if syms:
-        # Trendlyne screener does not return stage; default stage 1
-        return {s: 1 for s in syms}
-    # Legacy NSE JSON
-    try:
-        r = sess.get(GSM_URL, timeout=10)
-        if r.status_code == 200:
-            data = r.json()
-            result = {}
-            for item in (data.get("data") or data if isinstance(data, list) else []):
-                sym = (item.get("symbol") or item.get("Symbol") or item.get("SYMBOL") or "").upper().strip()
-                stage = int(item.get("stage") or item.get("Stage") or 1)
-                if sym:
-                    result[sym] = stage
-            return result
-    except Exception as e:
-        print(f"[GSM] NSE JSON fetch failed: {e}")
-    # Legacy CSV
-    try:
-        df = pd.read_csv(GSM_CSV_URL, engine="python", on_bad_lines="skip")
+        r = sess.get(GSM_URL, timeout=15)
+        if r.status_code != 200:
+            print(f"[GSM] NSE reportGSM HTTP {r.status_code}")
+            return None
+        rows = r.json()
         result = {}
-        sym_col = next((c for c in df.columns if "symbol" in c.lower()), None)
-        stage_col = next((c for c in df.columns if "stage" in c.lower()), None)
-        if sym_col:
-            for _, row in df.iterrows():
-                sym = str(row[sym_col]).upper().strip()
-                stage = int(row[stage_col]) if stage_col and pd.notna(row.get(stage_col)) else 1
-                if sym and sym != "NAN":
-                    result[sym] = stage
+        for item in rows if isinstance(rows, list) else []:
+            sym = (item.get("symbol") or "").upper().strip()
+            if sym:
+                result[sym] = _parse_stage(item.get("survDesc"))
         return result
     except Exception as e:
-        print(f"[GSM] NSE CSV fetch failed: {e}")
-    print("[GSM] All sources failed — returning empty dict")
-    return {}
+        print(f"[GSM] NSE reportGSM fetch failed: {e}")
+        return None
 
 
-def upsert_flags(asm_symbols: set[str], gsm_map: dict[str, int]) -> int:
-    """Write is_asm / gsm_stage to nse_stocks. Returns count updated."""
+def upsert_flags(asm_symbols: set[str] | None, gsm_map: dict[str, int] | None) -> int:
+    """Write is_asm / gsm_stage to nse_stocks. Returns count updated.
+
+    Refuses to touch existing flags if either fetch failed (None) — a failed fetch
+    must never be indistinguishable from "genuinely zero stocks flagged today," or
+    a transient NSE outage silently wipes real surveillance data platform-wide.
+    """
+    if asm_symbols is None or gsm_map is None:
+        print("[ASM/GSM] Skipping flag update — at least one fetch failed, leaving existing flags untouched.")
+        return 0
+
     con = connect()
     cur = con.cursor()
     today = date.today().isoformat()
@@ -158,12 +119,12 @@ def upsert_flags(asm_symbols: set[str], gsm_map: dict[str, int]) -> int:
         try:
             cur.execute(ddl)
         except Exception:
-            pass
+            # Postgres aborts the whole transaction on a failed statement (e.g. duplicate
+            # column) — without this rollback every subsequent query in this connection
+            # would raise InFailedSqlTransaction.
+            con.rollback()
 
-    if use_postgres():
-        cur.execute("UPDATE nse_stocks SET is_asm = 0, gsm_stage = 0")
-    else:
-        cur.execute("UPDATE nse_stocks SET is_asm = 0, gsm_stage = 0")
+    cur.execute("UPDATE nse_stocks SET is_asm = 0, gsm_stage = 0")
 
     updated = 0
     all_flagged = {s: (1, 0) for s in asm_symbols}
@@ -172,16 +133,10 @@ def upsert_flags(asm_symbols: set[str], gsm_map: dict[str, int]) -> int:
         all_flagged[sym] = (is_asm, stage)
 
     for sym, (is_asm, gsm_stage) in all_flagged.items():
-        if use_postgres():
-            cur.execute(
-                "UPDATE nse_stocks SET is_asm = %s, gsm_stage = %s, surveillance_updated_at = %s WHERE symbol = %s",
-                (is_asm, gsm_stage, today, sym)
-            )
-        else:
-            cur.execute(
-                "UPDATE nse_stocks SET is_asm = ?, gsm_stage = ?, surveillance_updated_at = ? WHERE symbol = ?",
-                (is_asm, gsm_stage, today, sym)
-            )
+        cur.execute(
+            "UPDATE nse_stocks SET is_asm = ?, gsm_stage = ?, surveillance_updated_at = ? WHERE symbol = ?",
+            (is_asm, gsm_stage, today, sym)
+        )
         updated += cur.rowcount
 
     con.commit()
@@ -240,7 +195,8 @@ def main():
     sess = _nse_session()
     asm = fetch_asm_symbols(sess)
     gsm = fetch_gsm_symbols(sess)
-    print(f"[ASM/GSM] Found {len(asm)} ASM stocks, {len(gsm)} GSM stocks")
+    print(f"[ASM/GSM] Found {len(asm) if asm is not None else 'FETCH FAILED'} ASM stocks, "
+          f"{len(gsm) if gsm is not None else 'FETCH FAILED'} GSM stocks")
     updated = upsert_flags(asm, gsm)
     print(f"[ASM/GSM] Updated {updated} stocks in nse_stocks")
 

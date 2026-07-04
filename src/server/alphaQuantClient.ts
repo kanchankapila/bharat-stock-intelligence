@@ -27,7 +27,7 @@ async function aqGet<T>(path: string, timeoutMs = 10_000): Promise<T> {
 
 export const alphaQuant = {
   score: (body: { rebuild?: boolean }) =>
-    aqPost<{ message: string }>('/api/v1/score', body),
+    aqPost<{ message: string }>('/api/v1/score', body, 10 * 60_000),
 
   backtest: (body: {
     start: string; end: string; horizon: number; min_score: number;

@@ -55,8 +55,8 @@ class InstitutionalQuantEngine:
         with self.engine.connect() as conn:
             return pd.read_sql(
                 """SELECT symbol,
-                          SUM(positive_count) AS bullish_count,
-                          SUM(negative_count) AS bearish_count,
+                          SUM(positive_count) AS bullish_screener_count,
+                          SUM(negative_count) AS bearish_screener_count,
                           COUNT(*) AS timeframe_count
                    FROM stock_scores GROUP BY symbol""",
                 conn,
@@ -196,7 +196,7 @@ class InstitutionalQuantEngine:
         df['valuation_score'] = (val_pe * 0.30 + val_roe * 0.30 + val_de * 0.20 + val_piot * 0.20).fillna(50)
 
         # Screener confluence
-        df['screener_net_score'] = (df['bullish_count'].fillna(0) - df['bearish_count'].fillna(0))
+        df['screener_net_score'] = (df['bullish_screener_count'].fillna(0) - df['bearish_screener_count'].fillna(0))
         df['confluence_rank']    = self.pct_rank(df['screener_net_score'], higher_is_better=True)
 
         # ── Composite strategy ranks ───────────────────────────────────
@@ -243,7 +243,7 @@ class InstitutionalQuantEngine:
             'trailing_pe', 'forward_pe', 'debt_to_equity', 'return_on_equity',
             'operating_margins', 'revenue_growth', 'piotroski_f_score',
             'valuation_score',
-            'bullish_count', 'bearish_count',
+            'bullish_screener_count', 'bearish_screener_count',
             'screener_net_score', 'confluence_rank',
             'rank_momentum', 'rank_quality', 'rank_value', 'rank_composite',
             'composite_class', 'ohlcv_days',

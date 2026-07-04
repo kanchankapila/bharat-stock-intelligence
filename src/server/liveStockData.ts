@@ -4,6 +4,8 @@ import { mcFetchJson } from "./mcApiService";
 import { nseStocksData } from "../data/nseStocks";
 import { cacheGet, cacheSet } from "./cacheService";
 import { dbAll, dbRun } from "./dbAsync";
+import { bulkUpsert, rowGroups } from "./dbBulk";
+import { isMarketOpen } from "./marketStatusService";
 
 // ─── Symbol & name resolution ─────────────────────────────────────────────────
 
@@ -405,29 +407,6 @@ const BULK_REFRESH_INTERVAL = BULK_TTL * 1000;
 let bulkMirror: Map<string, MarketData> = new Map();
 let lastBulkFetchTime = 0;
 
-// ─── Indian Market Hours Utility ─────────────────────────────────────────────
-
-/** Checks if the current time is within Indian Market Hours (9:15 - 15:30 IST, Mon-Fri). */
-export function isIndianMarketOpen(): boolean {
-  const now = new Date();
-
-  // Convert UTC time to IST (UTC + 5:30)
-  const istOffset = 5.5 * 60 * 60 * 1000;
-  const istTime = new Date(now.getTime() + istOffset);
-
-  const day = istTime.getUTCDay(); // 0 is Sunday, 6 is Saturday
-  if (day === 0 || day === 6) return false; // Weekend
-
-  const hours = istTime.getUTCHours();
-  const minutes = istTime.getUTCMinutes();
-
-  const timeInMinutes = hours * 60 + minutes;
-  const marketOpen = 9 * 60 + 15; // 9:15 AM
-  const marketClose = 15 * 60 + 30; // 3:30 PM
-
-  return timeInMinutes >= marketOpen && timeInMinutes <= marketClose;
-}
-
 // ─── Background refresh task ─────────────────────────────────────────────────
 
 let refreshRunning = false;
@@ -436,8 +415,10 @@ let hasFetchedOnce = false;
 async function runBulkRefresh(): Promise<void> {
   if (refreshRunning) return;
 
+  const marketOpen = await isMarketOpen();
+
   // If market is closed and we already have data, skip fetching to reduce load
-  if (!isIndianMarketOpen() && hasFetchedOnce) {
+  if (!marketOpen && hasFetchedOnce) {
     console.log("[LIVE DATA] Market is closed. Skipping background refresh.");
     return;
   }
@@ -455,7 +436,7 @@ async function runBulkRefresh(): Promise<void> {
     hasFetchedOnce = true;
 
     // If market closed, cache for a long time (until next open approx), else standard TTL
-    const ttl = isIndianMarketOpen() ? BULK_TTL : 12 * 60 * 60; // 12 hours when closed
+    const ttl = marketOpen ? BULK_TTL : 12 * 60 * 60; // 12 hours when closed
     await cacheSet(BULK_CACHE_KEY, freshData, ttl);
 
     console.log(
@@ -634,24 +615,43 @@ export async function persistTodayOHLCVData(stocks: MarketData[]): Promise<{ ins
   let inserted = 0;
   let failed = 0;
 
-  // Per-row upserts (not a single transaction): the loop tolerates and counts
-  // per-row failures, which a Postgres transaction can't do — one failed
-  // statement aborts the whole tx until rollback.
-  for (const stock of stocks) {
-    try {
-      await dbRun(insertSql, [
-        stock.symbol,
-        today,
-        stock.open || stock.prevClose || stock.price,
-        stock.high || stock.price,
-        stock.low || stock.price,
-        stock.price,
-        parseVolumeToNumber(stock.volume),
-      ]);
-      inserted++;
-    } catch (err: any) {
-      console.error(`[OHLCV] Failed to persist ${stock.symbol}:`, err.message);
-      failed++;
+  // Dedupe by symbol — bulkUpsert errors if the same ON CONFLICT key appears twice in one batch.
+  const seen = new Set<string>();
+  const rows = stocks
+    .filter(s => { if (seen.has(s.symbol)) return false; seen.add(s.symbol); return true; })
+    .map(s => [
+      s.symbol,
+      today,
+      s.open || s.prevClose || s.price,
+      s.high || s.price,
+      s.low || s.price,
+      s.price,
+      parseVolumeToNumber(s.volume),
+    ]);
+
+  const buildSql = (rowCount: number) => `
+    INSERT INTO stock_ohlcv (symbol, date, open, high, low, close, volume)
+    VALUES ${rowGroups(rowCount, 7)}
+    ON CONFLICT(symbol, date) DO UPDATE SET
+      open=excluded.open, high=excluded.high, low=excluded.low,
+      close=excluded.close, volume=excluded.volume
+  `;
+
+  // Fake DbTx — no transaction needed, and dbBulk chunks rows to stay under PG's 65535-param limit.
+  const fakeTx = { run: dbRun, get: async () => undefined as any, all: async () => [] as any[] };
+  try {
+    await bulkUpsert(fakeTx, rows, 7, buildSql);
+    inserted = rows.length;
+  } catch (bulkErr: any) {
+    console.error('[OHLCV] Bulk upsert failed, falling back to per-row:', bulkErr.message);
+    for (const row of rows) {
+      try {
+        await dbRun(insertSql, row);
+        inserted++;
+      } catch (err: any) {
+        console.error(`[OHLCV] Failed to persist ${row[0]}:`, err.message);
+        failed++;
+      }
     }
   }
 

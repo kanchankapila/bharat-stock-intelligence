@@ -122,8 +122,10 @@ def retrain_models(trigger: str = "scheduled") -> dict:
             )
             con2.commit()
 
-            # Step 6: Regime retrain on monthly trigger
-            if trigger == "monthly":
+            # Step 6: Regime retrain — piggybacks on the weekly schedule since nothing
+            # fires trigger="monthly" (dead code path); without this the HMM model
+            # silently never gets (re)trained if ml_models/hmm_regime.pkl goes missing.
+            if trigger in ("scheduled", "monthly"):
                 _run("python regime_detector.py --mode train")
 
             _set_setting(con2, "dl_last_retrain", datetime.now().isoformat())

@@ -262,11 +262,11 @@ def _refresh_historical_div(con, symbols: set[str], today: date) -> int:
         """
         SELECT symbol, MAX(ex_date) as last_ex, MAX(amount) FILTER (WHERE ex_date = (
             SELECT MAX(ex_date) FROM corporate_actions ca2
-            WHERE ca2.symbol = ca.symbol AND action_type IN ('DIVIDEND','DIVIDEND_SPECIAL') AND ex_date <= NOW()
+            WHERE ca2.symbol = ca.symbol AND action_type IN ('DIVIDEND','DIVIDEND_SPECIAL') AND ex_date <= to_char(NOW(), 'YYYY-MM-DD')
         )) as last_amt
         FROM corporate_actions ca
         WHERE action_type IN ('DIVIDEND', 'DIVIDEND_SPECIAL')
-          AND ex_date <= NOW()
+          AND ex_date <= to_char(NOW(), 'YYYY-MM-DD')
           AND symbol = ANY(ARRAY[{}])
         GROUP BY symbol
         """.format(",".join(f"'{s}'" for s in symbols))
@@ -275,7 +275,15 @@ def _refresh_historical_div(con, symbols: set[str], today: date) -> int:
     for sym, last_ex, last_amt in rows:
         if last_ex is None:
             continue
-        days_since = (today - last_ex).days if isinstance(last_ex, date) else None
+        if isinstance(last_ex, date):
+            last_ex_date = last_ex
+        else:
+            try:
+                last_ex_date = date.fromisoformat(str(last_ex).strip().split()[0])
+            except (ValueError, IndexError) as e:
+                print(f"[CorpCalendar] Skipping {sym}: unparseable ex_date {last_ex!r} ({e})")
+                continue
+        days_since = (today - last_ex_date).days
         con.execute(
             "UPDATE technical_signals SET days_since_dividend = :ds, last_dividend_amt = :la "
             "WHERE symbol = :sym AND date = (SELECT MAX(date) FROM technical_signals t2 WHERE t2.symbol = :sym)",

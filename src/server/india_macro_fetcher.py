@@ -44,13 +44,12 @@ HEADERS = {
 }
 
 # Actual (historical) events — paginated
-_ACTUAL_URL = (
-    "https://api.moneycontrol.com/mcapi/v1/ecalendar/get-actual-event-data"
-    "?page={page}&pageSize=50"
-)
-
-# MC interest-rates premarket feed (already used by global_macro_fetcher for bonds)
-_IR_URL = "https://api.moneycontrol.com/mcapi/v1/premarket/get-global-marketdata?section=ir"
+# get-actual-event-data was retired by MC (404). Its replacement, get-event-data, only ever
+# returns *today's* events (no page/date-range params are accepted — verified live), so this
+# fetcher now captures each day's actuals incrementally into macro_asset_prices instead of
+# backfilling a historical window in one call. Since this script is scheduled to run daily,
+# that's sufficient — history accumulates naturally, one day at a time.
+_ACTUAL_URL = "https://api.moneycontrol.com/mcapi/v1/ecalendar/get-event-data?page=1"
 
 # ─── Event-name → asset_name mapping ─────────────────────────────────────────
 # Keys are lowercased substrings; first match wins for each event.
@@ -118,45 +117,26 @@ def _parse_numeric(raw: str | None) -> float | None:
 
 def _fetch_actual_events(days: int) -> list[dict]:
     """
-    Pull MC eco-calendar actual events for the past `days` days.
-    Returns a flat list of raw event dicts from the API.
+    Pull today's MC eco-calendar actual events (get-event-data has no page/date-range
+    support — it always returns just today, verified live). `days` is accepted for
+    signature compatibility but has no effect: there is nothing older to fetch from
+    this endpoint. Returns a flat list of raw event dicts from the API.
     """
-    cutoff = (datetime.today() - timedelta(days=days)).date()
     events: list[dict] = []
+    try:
+        resp = cffi_req.get(_ACTUAL_URL, headers=HEADERS, impersonate="chrome110", timeout=15)
+        resp.raise_for_status()
+        payload = resp.json()
+    except Exception as exc:
+        print(f"[IndiaMacro] WARN eco-calendar fetch error: {exc}")
+        return events
 
-    for page in range(1, 20):  # hard cap at 1000 events
-        url = _ACTUAL_URL.format(page=page)
-        try:
-            resp = cffi_req.get(url, headers=HEADERS, impersonate="chrome110", timeout=15)
-            resp.raise_for_status()
-            payload = resp.json()
-        except Exception as exc:
-            print(f"[IndiaMacro] WARN page {page} fetch error: {exc}")
-            break
+    if not payload.get("success"):
+        return events
 
-        if not payload.get("success"):
-            # API may return success=0 on empty pages — just stop
-            break
-
-        page_events: list[dict] = []
-        for day_block in payload.get("data", []):
-            for ev in day_block.get("eventList", []):
-                page_events.append(ev)
-
-        if not page_events:
-            break
-
-        # Check if we've gone past the cutoff window
-        oldest_on_page: str | None = None
-        for ev in page_events:
-            iso = _parse_event_date(ev.get("date", ""))
-            if iso and (oldest_on_page is None or iso < oldest_on_page):
-                oldest_on_page = iso
-
-        events.extend(page_events)
-
-        if oldest_on_page and oldest_on_page < cutoff.isoformat():
-            break  # All remaining pages are older than our window
+    for day_block in payload.get("data", []):
+        for ev in day_block.get("eventList", []):
+            events.append(ev)
 
     return events
 
@@ -199,7 +179,9 @@ def process_eco_calendar_actuals(days: int) -> dict[str, float]:
         if not asset_name:
             continue
 
-        iso = _parse_event_date(ev.get("date") or ev.get("eventDate") or "")
+        # get-event-data gives a clean ISO date per-event (fullDate); fall back to the
+        # fuzzy day-block "date" string (e.g. "Saturday, July 4, 2026") if that's missing.
+        iso = ev.get("fullDate") or _parse_event_date(ev.get("date") or ev.get("eventDate") or "")
         if not iso:
             continue
         if iso < cutoff.isoformat():
@@ -232,55 +214,19 @@ def process_eco_calendar_actuals(days: int) -> dict[str, float]:
     return latest
 
 
-# ─── Fetch RBI Repo Rate from MC interest-rates feed ──────────────────────────
-
-def _fetch_repo_rate() -> float | None:
-    """
-    Fetch the MC premarket interest-rates section and extract the RBI repo rate.
-    The same endpoint used by global_macro_fetcher for bond yields; the IR section
-    includes central bank policy rates.
-    """
-    try:
-        resp = cffi_req.get(_IR_URL, headers=HEADERS, impersonate="chrome110", timeout=15)
-        resp.raise_for_status()
-        payload = resp.json()
-    except Exception as exc:
-        print(f"[IndiaMacro] WARN repo rate fetch error: {exc}")
-        return None
-
-    if not payload.get("success") or not payload.get("data"):
-        return None
-
-    data = payload["data"]
-    # The data may be a list of rate items or a nested dict
-    items = data if isinstance(data, list) else []
-    if not items and isinstance(data, dict):
-        # Try common keys
-        for k in ("rateList", "rates", "interestRates", "globalRates"):
-            if isinstance(data.get(k), list):
-                items = data[k]
-                break
-
-    for item in items:
-        name = (item.get("name") or item.get("country") or "").lower()
-        if "india" in name or "rbi" in name or "repo" in name or "inr" in name:
-            try:
-                return float(item.get("ltp") or item.get("rate") or item.get("value"))
-            except (TypeError, ValueError):
-                continue
-
-    return None
-
 
 def process_repo_rate(india_10y: float | None) -> dict[str, float]:
     """
     Fetch RBI repo rate, compute yield-curve spread if India 10Y is available,
     and write both to macro_asset_prices. Returns {asset_name: value}.
+
+    MC's premarket interest-rates feed no longer has a section carrying RBI's policy
+    rate (`section=ir` was retired; the surviving sections — mi/ii/co/cu/bo/adr/all —
+    only cover market indices/commodities/currencies/bond *yields*, verified live), so
+    this goes straight to the eco_calendar-based fallback rather than always eating one
+    guaranteed-to-fail request first.
     """
-    repo = _fetch_repo_rate()
-    if repo is None:
-        # Fallback: check eco_calendar for RBI policy events
-        repo = _fetch_repo_from_eco_calendar()
+    repo = _fetch_repo_from_eco_calendar()
 
     if repo is None:
         print("[IndiaMacro] WARN: could not determine RBI repo rate from any source")

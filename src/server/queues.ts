@@ -28,6 +28,7 @@ import { runFullFundamentalsSync } from './fundamentalsSyncService';
 import { fetchDeliveryMap } from './deliveryFetcher';
 import { updateMonitorState } from './monitoringService';
 import { getTrendlyneMetricSymbols, enqueueTrendlyneMetricsFetchJobs, runTrendlyneMetricsFetch } from './trendlyneDailyFetchService';
+import { isMarketOpen } from './marketStatusService';
 
 import { pythonApi } from './pythonApi';
 import { recordHeartbeat, startHeartbeatMonitor } from './jobHeartbeat';
@@ -35,15 +36,6 @@ import { startJobWatchdog, buildDailyDigest } from './jobWatchdog';
 import { telegramService } from './telegramService';
 
 // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Redis connection shared across all BullMQ objects ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
-
-function isNSEMarketHours(): boolean {
-  const now = new Date();
-  const day = now.getUTCDay(); // 0=Sun, 6=Sat
-  if (day === 0 || day === 6) return false;
-  const utcMinutes = now.getUTCHours() * 60 + now.getUTCMinutes();
-  const istMinutes = (utcMinutes + 330) % 1440; // IST = UTC+5:30
-  return istMinutes >= 555 && istMinutes <= 930; // 9:15=555, 15:30=930
-}
 
 function makeConnection(isProbe = false): any {
   const base = {
@@ -402,7 +394,7 @@ async function processOutcomeResolver(_job: Job): Promise<{ success: boolean }> 
 // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ ML daily ops worker processor ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 
 async function processLiveScreenerCollect(_job: Job): Promise<void> {
-  if (!isNSEMarketHours()) {
+  if (!(await isMarketOpen())) {
     console.log('[QUEUE] live-screener-collect skipped — outside NSE market hours');
     return;
   }
@@ -601,7 +593,10 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
     .catch(e => console.warn('[QUEUE] india_macro_fetcher failed:', (e as Error).message));
 
   // Index PE/PB/EPS → index_valuation (MoneyControl + Trendlyne, last 30 days).
-  await runPython('nifty_pe_fetcher.py', ['--days', '30'], 3 * 60_000)
+  // ~35 of the ~91 indices now fall back to a second Trendlyne round-trip per index because
+  // MC's graph endpoint returns corrupted data for most sector sub-indices — a full run takes
+  // 6-7 minutes, well past the old 3-minute budget.
+  await runPython('nifty_pe_fetcher.py', ['--days', '30'], 10 * 60_000)
     .catch(e => console.warn('[QUEUE] nifty_pe_fetcher failed:', (e as Error).message));
 
   // Index OHLC history from MoneyControl → stock_ohlcv (covers SENSEX + indices missing from Yahoo).
@@ -1515,7 +1510,7 @@ export async function initQueues(): Promise<boolean> {
     trendlyneIntradayWorker = new Worker(
       QUEUE_TRENDLYNE_INTRADAY,
       async (_job: Job) => {
-        if (!isNSEMarketHours()) {
+        if (!(await isMarketOpen())) {
           console.log('[QUEUE] intraday-scan skipped — outside NSE market hours');
           return;
         }
@@ -1828,7 +1823,12 @@ export async function initQueues(): Promise<boolean> {
             recordHeartbeat('market-regime-refresh', 'failed', (e as Error).message);
           });
       },
-      { connection, concurrency: 1 });
+      // Default lockDuration (30s) is shorter than runPython's own 60s process timeout,
+      // and runPython can additionally block well past that waiting for a free slot in
+      // its shared 5-concurrent-subprocess semaphore during busy periods — causing BullMQ
+      // to consider the job stalled and repeatedly fail to renew a lock that's already
+      // been reassigned. Match the generous lockDuration convention used by sibling workers.
+      { connection, concurrency: 1, lockDuration: 5 * 60_000 });
     console.log('[QUEUE] Market regime refresh scheduled every 15 min during market hours');
 
     // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ DL Feature Refresh (3:30 PM IST = 10:00 AM UTC, weekdays) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
@@ -2341,7 +2341,7 @@ export async function initQueues(): Promise<boolean> {
     if (!liveScreenerFallbackTimer) {
       const runLiveScreenerFallback = async () => {
         try {
-          if (!isNSEMarketHours()) return;
+          if (!(await isMarketOpen())) return;
           const { runLiveScreenerCollection } = await import('./liveScreenerCollector');
           await runLiveScreenerCollection();
           console.log('[QUEUE-FALLBACK] live-screener-collect completed');

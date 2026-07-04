@@ -159,15 +159,15 @@ def fetch_mc_pe_pb(ind_id: int, days: int = 365) -> dict[str, dict]:
 
 def fetch_trendlyne(tlid: int, metric: str) -> list[tuple[str, float]]:
     """Fetch chart data from Trendlyne. metric = PE_TTM_SHARE_NOW / PBV_A_SHARE_NOW / EPS_TTM"""
-    url = f"{TL_CHART_BASE}/{tlid}/{metric}/"
+    url = f"{TL_CHART_BASE}/{tlid}/{metric}/?format=json"
     try:
         r = requests.get(url, headers=TL_HEADERS, timeout=20)
         r.raise_for_status()
         data = r.json()
-        # Trendlyne typically returns {"chart_data": [[timestamp_ms, value], ...]}
-        # or {"data": [[date_str, value], ...]}
-        points = (data.get("chart_data") or data.get("data") or
-                  data.get("chartData") or [])
+        if data.get("head", {}).get("status") != "0":
+            return []
+        # Actual Trendlyne chart-data shape: {"head": {...}, "body": {"eodData": [[ts_ms, value], ...]}}
+        points = data.get("body", {}).get("eodData") or []
         result = []
         for pt in points:
             try:
@@ -210,7 +210,31 @@ def run(days: int = 30, full: bool = False):
         else:
             # Recent history from MoneyControl
             combined = fetch_mc_pe_pb(ind_id, days=days)
-            print(f"[PE] {index_name}: MC {len(combined)} dates")
+
+            # MC's graph endpoint returns corrupted single-point junk (pe=0, wrong index
+            # level) for some sector sub-indices (confirmed for NIFTYIT/NIFTYPHARMA) instead
+            # of a real time series — a healthy response has many more than 1 date. Fall back
+            # to Trendlyne's chart-data (which has full multi-year history) for just the
+            # requested window in that case.
+            mc_looks_corrupted = len(combined) <= 1 or all(
+                not d.get("pe") for d in combined.values()
+            )
+            if mc_looks_corrupted and tlid:
+                print(f"[PE] {index_name}: MC data missing/corrupted, falling back to Trendlyne")
+                combined = {}
+                cutoff = (datetime.date.today() - datetime.timedelta(days=days)).isoformat()
+                for tl_metric, col in [
+                    ("PE_TTM_SHARE_NOW", "pe"),
+                    ("PBV_A_SHARE_NOW", "pb"),
+                    ("EPS_TTM", "eps"),
+                ]:
+                    for date_str, val in fetch_trendlyne(tlid, tl_metric):
+                        if date_str >= cutoff:
+                            combined.setdefault(date_str, {})[col] = val
+                    time.sleep(0.5)
+                print(f"[PE] {index_name}: Trendlyne {len(combined)} dates")
+            else:
+                print(f"[PE] {index_name}: MC {len(combined)} dates")
 
         if not combined:
             continue

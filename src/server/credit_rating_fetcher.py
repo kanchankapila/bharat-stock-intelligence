@@ -1,8 +1,8 @@
 """
 Credit Rating Event Fetcher
 ============================
-Fetches CRISIL/CARE/ICRA/India Ratings credit rating change announcements from BSE
-corporate announcements API and writes high-conviction upgrade/downgrade signals to
+Fetches CRISIL/CARE/ICRA/India Ratings credit rating change announcements from NSE's
+corporate-credit-rating API and writes high-conviction upgrade/downgrade signals to
 technical_signals.
 
 Rating upgrades predict 3-6 month positive drift; downgrades predict negative drift.
@@ -13,74 +13,44 @@ Run:  python credit_rating_fetcher.py
 
 import argparse
 import datetime
-import re
-import time
 
 import requests
 import pandas as pd
 
-from db_compat import connect, use_postgres, read_df, executemany, safe_alter, execute
+from db_compat import connect, read_df, executemany, safe_alter, execute
 
 # ---------------------------------------------------------------------------
-# BSE API
+# NSE API
 # ---------------------------------------------------------------------------
-BSE_CORP_URL = (
-    "https://api.bseindia.com/BseIndiaAPI/api/Corpfiling/w"
-    "?scripcode=&flagtype=C&Category=Rating&subcategory="
-    "&Fdate={from_date}&Tdate={to_date}&pageno=1&recordno=500"
+# BSE's Corpfiling API (the previous source) started returning an HTML bot-check page
+# instead of JSON. NSE's corporate-credit-rating feed gives the same information with a
+# cleaner structure — RatingAction/NameOfCRAgency/ISIN/Symbol are already structured
+# fields, no more free-text headline parsing needed — and supports real date-range
+# queries (from_date/to_date, DD-MM-YYYY, verified live against a 6-month window).
+NSE_CREDIT_RATING_URL = (
+    "https://www.nseindia.com/api/corporate-credit-rating"
+    "?from_date={from_date}&to_date={to_date}"
 )
+NSE_HOME_URL = "https://www.nseindia.com/"
 
-BSE_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+NSE_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Accept": "application/json, text/plain, */*",
-    "Origin": "https://www.bseindia.com",
-    "Referer": "https://www.bseindia.com/",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://www.nseindia.com/",
 }
 
-# ---------------------------------------------------------------------------
-# Rating classification
-# ---------------------------------------------------------------------------
-RATING_AGENCIES = ["CRISIL", "CARE", "ICRA", "India Ratings", "Brickwork", "SMERA"]
-UPGRADE_WORDS   = ["upgrade", "revised upward", "enhanced", "improved"]
-DOWNGRADE_WORDS = ["downgrade", "revised downward", "lowered", "reduced", "withdrawn"]
-REAFFIRM_WORDS  = ["reaffirm", "maintain", "affirm", "unchanged", "stable"]
+# NSE's own RatingAction values map straight onto our 4-bucket scheme.
+_ACTION_MAP = {
+    "upgrade": "UPGRADE",
+    "downgrade": "DOWNGRADE",
+    "reaffirm": "REAFFIRM",
+}
 
 
-def classify_rating_action(headline: str) -> str:
-    """Returns 'UPGRADE', 'DOWNGRADE', 'REAFFIRM', or 'UNKNOWN'."""
-    h = headline.lower()
-    if any(w in h for w in UPGRADE_WORDS):
-        return "UPGRADE"
-    if any(w in h for w in DOWNGRADE_WORDS):
-        return "DOWNGRADE"
-    if any(w in h for w in REAFFIRM_WORDS):
-        return "REAFFIRM"
-    return "UNKNOWN"
-
-
-def extract_agency(headline: str) -> str | None:
-    for agency in RATING_AGENCIES:
-        if agency.lower() in headline.lower():
-            return agency
-    return None
-
-
-def extract_instrument_type(headline: str) -> str | None:
-    """Heuristic extraction of instrument type from headline."""
-    patterns = [
-        r"\b(NCD|Non[- ]Convertible Debenture)\b",
-        r"\b(Bank Loan|Term Loan)\b",
-        r"\b(Issuer Rating)\b",
-        r"\b(Commercial Paper|CP)\b",
-        r"\b(Fixed Deposit|FD)\b",
-        r"\b(Subordinated Debt|Sub[- ]Debt)\b",
-        r"\b(Preference Share)\b",
-    ]
-    for pat in patterns:
-        m = re.search(pat, headline, re.IGNORECASE)
-        if m:
-            return m.group(0).strip()
-    return None
+def classify_rating_action(action: str) -> str:
+    """Returns 'UPGRADE', 'DOWNGRADE', 'REAFFIRM', or 'UNKNOWN' from NSE's RatingAction field."""
+    return _ACTION_MAP.get((action or "").strip().lower(), "UNKNOWN")
 
 
 # ---------------------------------------------------------------------------
@@ -101,6 +71,8 @@ def ensure_credit_rating_table(conn) -> None:
             PRIMARY KEY (bse_code, announcement_date, rating_agency)
         )
     """)
+    # Note: `bse_code` now holds NSE's per-filing AppID (source switched from BSE to NSE;
+    # column kept as-is to avoid a schema migration for a purely internal uniqueness key).
 
 
 def ensure_technical_signals_columns(conn) -> None:
@@ -115,51 +87,42 @@ def ensure_technical_signals_columns(conn) -> None:
 
 
 # ---------------------------------------------------------------------------
-# BSE fetch
+# NSE fetch
 # ---------------------------------------------------------------------------
-def fetch_bse_rating_announcements(from_date: str, to_date: str) -> list[dict]:
+def fetch_nse_rating_announcements(from_date: str, to_date: str) -> list[dict]:
     """
-    Fetch rating-category corporate announcements from BSE.
-    from_date / to_date format: 'DD/MM/YYYY'
-    Returns list of raw announcement dicts.
+    Fetch credit-rating events from NSE's corporate-credit-rating API.
+    from_date / to_date format: 'DD-MM-YYYY'
+    Returns list of raw event dicts.
     """
-    url = BSE_CORP_URL.format(from_date=from_date, to_date=to_date)
+    url = NSE_CREDIT_RATING_URL.format(from_date=from_date, to_date=to_date)
     session = requests.Session()
-    session.headers.update(BSE_HEADERS)
+    session.headers.update(NSE_HEADERS)
 
-    # Prime the BSE cookie
+    # Prime the NSE session cookie (same pattern used by other NSE-sourced fetchers).
     try:
-        session.get("https://www.bseindia.com", timeout=10)
-        time.sleep(1)
+        session.get(NSE_HOME_URL, timeout=10)
     except Exception as e:
-        print(f"[CreditRating] BSE session prime warning: {e}")
+        print(f"[CreditRating] NSE session prime warning: {e}")
 
     try:
         resp = session.get(url, timeout=20)
         resp.raise_for_status()
         data = resp.json()
     except Exception as e:
-        print(f"[CreditRating] BSE API error: {e}")
+        print(f"[CreditRating] NSE API error: {e}")
         return []
 
-    # BSE wraps results in Table key or directly as a list
-    if isinstance(data, dict):
-        rows = data.get("Table", data.get("data", []))
-    elif isinstance(data, list):
-        rows = data
-    else:
-        rows = []
-
-    return rows
+    return data if isinstance(data, list) else []
 
 
 # ---------------------------------------------------------------------------
-# Symbol bridge: BSE code → NSE symbol
+# Symbol bridge: ISIN → NSE symbol (fallback for events where NSE's own Symbol is blank)
 # ---------------------------------------------------------------------------
 def build_bse_to_nse_map(conn) -> dict[str, dict]:
     """
-    Build a map of isin -> {symbol, isin} using nse_stocks table.
-    nse_stocks has no bse_code column, so BSE scrip codes are resolved via ISIN below.
+    Build a map of isin -> {symbol, isin} using nse_stocks table, used as a fallback
+    when NSE's own event Symbol field is missing/"NOTLISTED" (debt-only issuers).
     """
     mapping: dict[str, dict] = {}
 
@@ -187,54 +150,44 @@ def build_bse_to_nse_map(conn) -> dict[str, dict]:
 # ---------------------------------------------------------------------------
 def parse_announcements(rows: list[dict], bse_nse_map: dict[str, dict]) -> list[dict]:
     """
-    Convert raw BSE announcement rows into structured credit_rating_events records.
+    Convert raw NSE corporate-credit-rating rows into structured credit_rating_events
+    records. NSE already gives structured fields (RatingAction/NameOfCRAgency/ISIN/
+    Symbol), so no more free-text headline parsing is needed.
     """
     events = []
     for row in rows:
-        # BSE field names vary; try common variants
-        headline = (
-            row.get("HEADLINE") or row.get("headline") or
-            row.get("Subject") or row.get("subject") or ""
-        ).strip()
-        if not headline:
+        app_id = str(row.get("AppID") or "").strip()
+        if not app_id:
             continue
 
-        bse_code = str(
-            row.get("SCRIP_CD") or row.get("scripcd") or row.get("ScripCode") or ""
-        ).strip()
+        ann_date = str(row.get("DateofCR") or "").strip()
+        try:
+            ann_date = datetime.datetime.strptime(ann_date, "%d-%m-%Y").strftime("%Y-%m-%d")
+        except ValueError:
+            continue
 
-        ann_date = (
-            row.get("DT_TM") or row.get("NewsDate") or row.get("DT") or ""
-        ).strip()
-        # Normalise date to YYYY-MM-DD
-        for fmt in ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
-            try:
-                ann_date = datetime.datetime.strptime(ann_date[:len(fmt) + 4], fmt).strftime("%Y-%m-%d")
-                break
-            except ValueError:
-                continue
+        action = classify_rating_action(row.get("RatingAction"))
+        agency = (row.get("NameOfCRAgency") or "").strip()
 
-        action          = classify_rating_action(headline)
-        agency          = extract_agency(headline)
-        instrument_type = extract_instrument_type(headline)
+        isin   = str(row.get("ISIN") or "").strip()
+        symbol = str(row.get("Symbol") or "").strip()
+        # NSE uses several different sentinel values for "no listed equity symbol"
+        # (verified live: '', 'NA', 'NOT LISTED', 'NOTLISTED', 'NOT APPLICABLE') —
+        # a single exact-match check misses most of them.
+        if not symbol or symbol.upper().replace(" ", "") in ("NA", "NOTLISTED", "NOTAPPLICABLE"):
+            resolved = bse_nse_map.get(isin)
+            symbol = resolved.get("symbol", "") if resolved else ""
 
-        # Resolve NSE symbol via bse_code, then ISIN
-        isin   = str(row.get("ISIN") or row.get("isin") or "").strip()
-        symbol = ""
-        resolved = bse_nse_map.get(bse_code) or bse_nse_map.get(isin)
-        if resolved:
-            symbol = resolved.get("symbol", "")
-            if not isin:
-                isin = resolved.get("isin", "")
+        headline = f"{row.get('CompanyName', '')} — {agency} {row.get('CreditRating', '')} ({row.get('RatingAction', '')})".strip()
 
         events.append({
-            "bse_code":         bse_code,
+            "bse_code":         app_id,
             "symbol":           symbol,
             "isin":             isin,
             "announcement_date": ann_date,
-            "rating_agency":    agency or "",
+            "rating_agency":    agency,
             "action":           action,
-            "instrument_type":  instrument_type or "",
+            "instrument_type":  "",
             "headline":         headline,
         })
 
@@ -248,26 +201,22 @@ def upsert_events(conn, events: list[dict]) -> None:
     if not events:
         return
 
-    if use_postgres():
-        sql = """
-            INSERT INTO credit_rating_events
-                (bse_code, symbol, isin, announcement_date, rating_agency,
-                 action, instrument_type, headline)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (bse_code, announcement_date, rating_agency) DO UPDATE SET
-                symbol          = EXCLUDED.symbol,
-                isin            = EXCLUDED.isin,
-                action          = EXCLUDED.action,
-                instrument_type = EXCLUDED.instrument_type,
-                headline        = EXCLUDED.headline
-        """
-    else:
-        sql = """
-            INSERT OR REPLACE INTO credit_rating_events
-                (bse_code, symbol, isin, announcement_date, rating_agency,
-                 action, instrument_type, headline)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """
+    # A single ?-placeholder SQL works for both backends via db_compat's translate() —
+    # ON CONFLICT/excluded is supported natively by both SQLite (3.24+) and Postgres, so
+    # no per-backend branch (and no raw %s, which db_compat's translator doesn't convert
+    # and Postgres rejects) is needed here.
+    sql = """
+        INSERT INTO credit_rating_events
+            (bse_code, symbol, isin, announcement_date, rating_agency,
+             action, instrument_type, headline)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (bse_code, announcement_date, rating_agency) DO UPDATE SET
+            symbol          = excluded.symbol,
+            isin            = excluded.isin,
+            action          = excluded.action,
+            instrument_type = excluded.instrument_type,
+            headline        = excluded.headline
+    """
 
     params = [
         (
@@ -276,8 +225,7 @@ def upsert_events(conn, events: list[dict]) -> None:
         )
         for e in events
     ]
-    executemany(conn, sql, params)
-    conn.commit()
+    executemany(sql, params)
 
 
 # ---------------------------------------------------------------------------
@@ -326,33 +274,20 @@ def update_technical_signals(conn, lookback_days: int = 180) -> int:
     if not updates:
         return 0
 
-    if use_postgres():
-        sql = """
-            UPDATE technical_signals
-            SET rating_upgrade_180d   = %s,
-                rating_downgrade_180d = %s,
-                days_since_upgrade    = %s
-            WHERE symbol = %s
-              AND date = (
-                  SELECT MAX(date) FROM technical_signals ts2 WHERE ts2.symbol = %s
-              )
-        """
-        params = [(u[0], u[1], u[2], u[3], u[3]) for u in updates]
-    else:
-        sql = """
-            UPDATE technical_signals
-            SET rating_upgrade_180d   = ?,
-                rating_downgrade_180d = ?,
-                days_since_upgrade    = ?
-            WHERE symbol = ?
-              AND date = (
-                  SELECT MAX(date) FROM technical_signals ts2 WHERE ts2.symbol = ?
-              )
-        """
-        params = [(u[0], u[1], u[2], u[3], u[3]) for u in updates]
+    # Single ?-placeholder SQL for both backends — see comment in upsert_events().
+    sql = """
+        UPDATE technical_signals
+        SET rating_upgrade_180d   = ?,
+            rating_downgrade_180d = ?,
+            days_since_upgrade    = ?
+        WHERE symbol = ?
+          AND date = (
+              SELECT MAX(date) FROM technical_signals ts2 WHERE ts2.symbol = ?
+          )
+    """
+    params = [(u[0], u[1], u[2], u[3], u[3]) for u in updates]
 
     executemany(sql, params)
-    conn.commit()
     return len(updates)
 
 
@@ -360,7 +295,7 @@ def update_technical_signals(conn, lookback_days: int = 180) -> int:
 # Main
 # ---------------------------------------------------------------------------
 def main():
-    parser = argparse.ArgumentParser(description="Fetch BSE credit rating events")
+    parser = argparse.ArgumentParser(description="Fetch NSE credit rating events")
     parser.add_argument("--days", type=int, default=180,
                         help="Lookback window in days (default: 180)")
     args = parser.parse_args()
@@ -369,17 +304,17 @@ def main():
     ensure_credit_rating_table(conn)
     ensure_technical_signals_columns(conn)
 
-    # Build BSE→NSE symbol map
+    # Build ISIN→NSE symbol fallback map
     bse_nse_map = build_bse_to_nse_map(conn)
 
-    # Date range for BSE API  (DD/MM/YYYY format)
+    # Date range for NSE API (DD-MM-YYYY format)
     today     = datetime.date.today()
     from_dt   = today - datetime.timedelta(days=args.days)
-    to_date   = today.strftime("%d/%m/%Y")
-    from_date = from_dt.strftime("%d/%m/%Y")
+    to_date   = today.strftime("%d-%m-%Y")
+    from_date = from_dt.strftime("%d-%m-%Y")
 
-    print(f"[CreditRating] Fetching BSE rating announcements {from_date} -> {to_date} ...")
-    raw_rows = fetch_bse_rating_announcements(from_date, to_date)
+    print(f"[CreditRating] Fetching NSE rating announcements {from_date} -> {to_date} ...")
+    raw_rows = fetch_nse_rating_announcements(from_date, to_date)
     print(f"[CreditRating] Raw announcements received: {len(raw_rows)}")
 
     events = parse_announcements(raw_rows, bse_nse_map)

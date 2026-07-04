@@ -12,6 +12,7 @@ import {
 } from "../trendlyneService";
 import { fetchTrendlyneJsonScreener, fetchTrendlyneAllInOneScreener } from "../marketData";
 import { router, publicProcedure } from "../trpc";
+import { ensureTrendlyneSession, fetchTrendlyneWithAuth } from '../trendlyneAuthService';
 
 export const trendlyneRouter = router({
   getTrendlyneSwot: publicProcedure
@@ -65,6 +66,27 @@ export const trendlyneRouter = router({
 
   getTrendlyneIndexRotation: publicProcedure
     .query(async () => fetchTrendlyneIndexRotation()),
+
+  getTrendlyneHealth: publicProcedure
+    .query(async () => {
+      try {
+        const auth = await ensureTrendlyneSession();
+        let fetchOk = false;
+        let status: number | null = null;
+        if (auth) {
+          try {
+            const res = await fetchTrendlyneWithAuth('https://trendlyne.com/', { method: 'GET' });
+            fetchOk = res.ok;
+            status = res.status;
+          } catch (e) {
+            fetchOk = false;
+          }
+        }
+        return { auth, fetchOk, status };
+      } catch (e) {
+        return { auth: false, fetchOk: false, status: null };
+      }
+    }),
 
   getTrendlyneJsonScreener: publicProcedure
     .input(z.object({ screenerId: z.string(), limit: z.number().optional().default(25) }))

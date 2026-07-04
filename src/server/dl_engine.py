@@ -415,8 +415,13 @@ def train_lstm(version: int = 1) -> Dict:
 
 # ── Daily Inference ──────────────────────────────────────────────────────────
 
+_DL_MODEL_CACHE: dict | None = None  # {'model': BiLSTMModel, 'path': str, 'mtime': float}
+
+
 def run_inference(prediction_date: str = None) -> None:
     """Run BiLSTM inference on all symbols, write to deep_learning_predictions."""
+    global _DL_MODEL_CACHE
+
     if prediction_date is None:
         prediction_date = datetime.today().strftime("%Y-%m-%d")
 
@@ -428,9 +433,18 @@ def run_inference(prediction_date: str = None) -> None:
         print(f"[DL] No model at {model_path}. Run --mode train first.")
         return
 
-    model = BiLSTMModel().to(DEVICE)
-    model.load_state_dict(torch.load(model_path, map_location=DEVICE, weights_only=True))
-    model.eval()
+    mtime = model_path.stat().st_mtime
+    if (
+        _DL_MODEL_CACHE is None
+        or _DL_MODEL_CACHE.get('path') != str(model_path)
+        or _DL_MODEL_CACHE.get('mtime') != mtime
+    ):
+        _m = BiLSTMModel().to(DEVICE)
+        _m.load_state_dict(torch.load(model_path, map_location=DEVICE, weights_only=True))
+        _m.eval()
+        _DL_MODEL_CACHE = {'model': _m, 'path': str(model_path), 'mtime': mtime}
+
+    model = _DL_MODEL_CACHE['model']
 
     con = connect()
     symbols = [r[0] for r in con.execute(

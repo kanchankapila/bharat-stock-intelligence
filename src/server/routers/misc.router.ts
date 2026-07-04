@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { dbGet, dbAll } from "../dbAsync";
+import { mcFetchJson } from "../mcApiService";
 import { getStockMapping } from "../stockMapping";
 import { fetchWithCache } from "../cacheService";
 import { generateStockAnalysis } from "../../services/aiService";
@@ -197,6 +198,14 @@ export const miscRouter = router({
 
   getDeals: publicProcedure
     .query(async () => fetchDealsAll()),
+
+  getSensibullEvents: publicProcedure
+    .query(async () => {
+      return fetchWithCache('sensibull_current_events', async () => {
+        const url = 'https://api.sensibull.com/v1/current_events';
+        return mcFetchJson<any>(url);
+      }, 300000);
+    }),
 
   getEarnings: publicProcedure
     .input(z.object({ date: z.string().optional() }))

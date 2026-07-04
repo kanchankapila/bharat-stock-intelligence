@@ -16,6 +16,7 @@ calibrated column.
   python ml_calibration.py
 """
 import datetime as _dt
+import math
 
 from db_compat import connect, ConnWrapper
 
@@ -61,6 +62,9 @@ def recalibrate_win_probabilities(conn: ConnWrapper, min_samples: int = 200,
         JOIN technical_signals ts ON ts.symbol = so.symbol AND ts.date = so.signal_date
         WHERE so.outcome IN ('WIN', 'LOSS') AND ts.win_probability IS NOT NULL
     """).fetchall()
+    # Postgres allows storing float('nan') in a NOT NULL-satisfying column — filter those
+    # out explicitly since IS NOT NULL doesn't catch NaN and isotonic regression rejects it.
+    rows = [r for r in rows if not math.isnan(float(r['p']))]
 
     if len(rows) < min_samples:
         print(f"[Calibration] insufficient data ({len(rows)} < {min_samples}); skipping.")
@@ -97,10 +101,13 @@ def recalibrate_win_probabilities(conn: ConnWrapper, min_samples: int = 200,
     ).fetchall()
     updated = 0
     for s in sigs:
+        p = float(s['win_probability'])
+        if math.isnan(p):
+            continue
         ir = regime_cal.get(s['nifty_regime'], global_ir)
         conn.execute(
             "UPDATE technical_signals SET calibrated_win_probability = ? WHERE symbol = ? AND date = ?",
-            (calibrate(ir, float(s['win_probability'])), s['symbol'], s['date']),
+            (calibrate(ir, p), s['symbol'], s['date']),
         )
         updated += 1
     conn.commit()
