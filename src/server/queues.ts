@@ -107,6 +107,8 @@ export const QUEUE_UNIFIED_RANKER       = 'unified-ranker';
 export const QUEUE_COMPANY_PROFILES_SYNC = 'company-profiles-sync';
 export const QUEUE_QUANT_EOD_SYNC = 'quant-eod-sync';
 export const QUEUE_TRENDLYNE_DAILY_FETCH = 'trendlyne-daily-fetch';
+export const QUEUE_TRENDLYNE_MIDWEEK = 'trendlyne-midweek';
+export const QUEUE_TRENDLYNE_RATIOS_MONTHLY = 'trendlyne-ratios-monthly';
 export const QUEUE_LIVE_SCREENER_COLLECT = 'live-screener-collect';
 
 const BULK_CACHE_KEY      = 'live-stocks-bulk';
@@ -128,6 +130,8 @@ export let signalOutcomesQueue:    Queue | null = null;
 export let newsSentimentQueue:     Queue | null = null;
 export let trendlyneIntradayQueue: Queue | null = null;
 export let trendlyneDailyFetchQueue: Queue | null = null;
+export let trendlyneMidweekQueue: Queue | null = null;
+export let trendlyneRatiosMonthlyQueue: Queue | null = null;
 
 let stockWorker:              Worker | null = null;
 let signalWorker:             Worker | null = null;
@@ -142,6 +146,8 @@ let signalOutcomesWorker:     Worker | null = null;
 let newsSentimentWorker:      Worker | null = null;
 let trendlyneIntradayWorker:  Worker | null = null;
 let trendlyneDailyFetchWorker: Worker | null = null;
+let trendlyneMidweekWorker: Worker | null = null;
+let trendlyneRatiosMonthlyWorker: Worker | null = null;
 export let companyProfilesSyncQueue: Queue | null = null;
 export let quantEodSyncQueue: Queue | null = null;
 export let quantEodSyncWorker: Worker | null = null;
@@ -703,27 +709,15 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean }> 
   // 3058 stocks × 2 API calls × 0.5s = ~51 min
   await runPython('trendlyne_fundamentals_fetcher.py', [], 70 * 60_000)
     .catch(e => console.warn('[QUEUE] trendlyne_fundamentals_fetcher failed:', (e as Error).message));
-  // Trendlyne advanced technical analysis: MA consensus, oscillators, pivot, delivery, beta.
-  // 3058 stocks × 0.5s = ~26 min
-  await runPython('trendlyne_adv_tech_fetcher.py', [], 40 * 60_000)
-    .catch(e => console.warn('[QUEUE] trendlyne_adv_tech_fetcher failed:', (e as Error).message));
-  // Trendlyne overview: analyst targets, board meetings, dividends + fundamental profile.
-  // 3058 stocks × 2 API calls × 0.5s = ~51 min
-  await runPython('trendlyne_overview_fetcher.py', [], 70 * 60_000)
-    .catch(e => console.warn('[QUEUE] trendlyne_overview_fetcher failed:', (e as Error).message));
-  // Trendlyne price analysis: alpha vs Nifty/Industry, monthly seasonality per stock.
-  // 3058 stocks × 0.5s = ~26 min
-  await runPython('trendlyne_price_analysis_fetcher.py', [], 40 * 60_000)
-    .catch(e => console.warn('[QUEUE] trendlyne_price_analysis_fetcher failed:', (e as Error).message));
   // Analyst consensus + price targets — 2328 stocks × 3 calls × 0.4s = ~47 min (quarterly data)
   await runPython('analyst_estimates_snapshot.py', [], 70 * 60_000)
     .catch(e => console.warn('[QUEUE] analyst_estimates_snapshot failed:', (e as Error).message));
-  // FCF yield + interest coverage — 3058 stocks × 4 calls × 0.3s = ~61 min (quarterly data)
-  await runPython('financial_ratios_fetcher.py', [], 80 * 60_000)
-    .catch(e => console.warn('[QUEUE] financial_ratios_fetcher failed:', (e as Error).message));
-  // Working capital cycle — 3058 stocks × 5 calls × 0.4s = ~102 min (quarterly data)
-  await runPython('working_capital_fetcher.py', [], 130 * 60_000)
-    .catch(e => console.warn('[QUEUE] working_capital_fetcher failed:', (e as Error).message));
+  // trendlyne_adv_tech_fetcher.py + trendlyne_price_analysis_fetcher.py moved to the
+  // trendlyne-midweek queue (Tuesday) to de-conflict from this Sunday batch.
+  // trendlyne_overview_fetcher.py moved into company-profiles-sync (dedupes the
+  // overview-second-part call both used to make independently).
+  // financial_ratios_fetcher.py + working_capital_fetcher.py moved to the
+  // trendlyne-ratios-monthly queue (rewritten against ET_Stats — see Tasks 5-6).
   await runPython('outcome_resolver.py', ['--horizon', '5']);
   await runPython('outcome_resolver.py', ['--horizon', '15']);
   // Run exit labeler to resolve excursions
@@ -2194,6 +2188,17 @@ export async function initQueues(): Promise<boolean> {
     companyProfilesSyncWorker = new Worker(
       QUEUE_COMPANY_PROFILES_SYNC,
       async (_job: Job) => {
+        // Bi-weekly: check job_heartbeat for the last successful run and skip if it was
+        // less than 12 days ago (company descriptions/financials barely change week to
+        // week — this used to run weekly for no benefit).
+        const last = await dbGet(
+          `SELECT last_success_at FROM job_heartbeat WHERE job_name = 'company-profiles-sync'`,
+        ) as { last_success_at: number | null } | undefined;
+        const twelveDaysMs = 12 * 24 * 60 * 60 * 1000;
+        if (last?.last_success_at && Date.now() - Number(last.last_success_at) < twelveDaysMs) {
+          console.log('[QUEUE] company-profiles-sync: ran within the last 12 days, skipping');
+          return;
+        }
         const { syncAndAnalyzeCompanyProfiles } = await import('./companyProfileSyncService');
         await syncAndAnalyzeCompanyProfiles();
       },
@@ -2215,6 +2220,98 @@ export async function initQueues(): Promise<boolean> {
     });
 
     // Ã¢â€â‚¬Ã¢â€â‚¬ Agent: Auditor (16:30 IST = 11:00 UTC, weekdays) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    // Trendlyne midweek batch: adv-tech + price analysis (moved off Sunday to
+    // de-conflict from the main ml-weekly-retrain batch).
+    trendlyneMidweekQueue = new Queue(QUEUE_TRENDLYNE_MIDWEEK, { connection });
+    const tmwRep = await trendlyneMidweekQueue.getRepeatableJobs();
+    for (const r of tmwRep) await trendlyneMidweekQueue.removeRepeatableByKey(r.key);
+    await addJobWithCatchup(trendlyneMidweekQueue,
+      'trendlyne-midweek-batch',
+      {},
+      {
+        repeat: { pattern: '30 12 * * 2' }, // Tuesday 12:30 UTC (6:00 PM IST)
+        jobId: 'trendlyne-midweek-weekly',
+        removeOnComplete: 3,
+        removeOnFail: 3,
+      },
+    );
+
+    trendlyneMidweekWorker = new Worker(
+      QUEUE_TRENDLYNE_MIDWEEK,
+      async (_job: Job) => {
+        await runPython('trendlyne_adv_tech_fetcher.py', [], 40 * 60_000)
+          .catch(e => console.warn('[QUEUE] trendlyne_adv_tech_fetcher failed:', (e as Error).message));
+        await runPython('trendlyne_price_analysis_fetcher.py', [], 40 * 60_000)
+          .catch(e => console.warn('[QUEUE] trendlyne_price_analysis_fetcher failed:', (e as Error).message));
+        return { success: true };
+      },
+      {
+        connection,
+        concurrency: 1,
+        lockDuration: 90 * 60 * 1000,
+        lockRenewTime: 10 * 60 * 1000,
+      },
+    );
+
+    trendlyneMidweekWorker.on('completed', () => {
+      console.log('[QUEUE] trendlyne-midweek completed');
+      updateMonitorState('trendlyne-midweek', 'success');
+    });
+    trendlyneMidweekWorker.on('failed', (_job, err) => {
+      console.error('[QUEUE] trendlyne-midweek failed:', err.message);
+      updateMonitorState('trendlyne-midweek', 'failed', err.message);
+    });
+
+    // Trendlyne ratios (monthly): financial_ratios + working_capital, now via
+    // ET_Stats (Trendlyne's own params for this are confirmed dead — see Tasks 5-6).
+    // Fires the Sunday cron every week but only actually runs on the first Sunday of
+    // the month (day-of-month <= 7) — cron's day-of-month/day-of-week fields are OR'd,
+    // not AND'd, by the underlying cron-parser, so "first Sunday" needs an in-handler
+    // guard rather than a single cron expression.
+    trendlyneRatiosMonthlyQueue = new Queue(QUEUE_TRENDLYNE_RATIOS_MONTHLY, { connection });
+    const trmRep = await trendlyneRatiosMonthlyQueue.getRepeatableJobs();
+    for (const r of trmRep) await trendlyneRatiosMonthlyQueue.removeRepeatableByKey(r.key);
+    await addJobWithCatchup(trendlyneRatiosMonthlyQueue,
+      'trendlyne-ratios-monthly-check',
+      {},
+      {
+        repeat: { pattern: '30 12 * * 0' }, // every Sunday 12:30 UTC; handler no-ops unless day <= 7
+        jobId: 'trendlyne-ratios-monthly-weekly-check',
+        removeOnComplete: 3,
+        removeOnFail: 3,
+      },
+    );
+
+    trendlyneRatiosMonthlyWorker = new Worker(
+      QUEUE_TRENDLYNE_RATIOS_MONTHLY,
+      async (_job: Job) => {
+        if (new Date().getUTCDate() > 7) {
+          console.log('[QUEUE] trendlyne-ratios-monthly: not the first Sunday of the month, skipping');
+          return { success: true, skipped: true };
+        }
+        await runPython('financial_ratios_fetcher.py', [], 30 * 60_000)
+          .catch(e => console.warn('[QUEUE] financial_ratios_fetcher failed:', (e as Error).message));
+        await runPython('working_capital_fetcher.py', [], 30 * 60_000)
+          .catch(e => console.warn('[QUEUE] working_capital_fetcher failed:', (e as Error).message));
+        return { success: true };
+      },
+      {
+        connection,
+        concurrency: 1,
+        lockDuration: 60 * 60 * 1000,
+        lockRenewTime: 10 * 60 * 1000,
+      },
+    );
+
+    trendlyneRatiosMonthlyWorker.on('completed', () => {
+      console.log('[QUEUE] trendlyne-ratios-monthly completed');
+      updateMonitorState('trendlyne-ratios-monthly', 'success');
+    });
+    trendlyneRatiosMonthlyWorker.on('failed', (_job, err) => {
+      console.error('[QUEUE] trendlyne-ratios-monthly failed:', err.message);
+      updateMonitorState('trendlyne-ratios-monthly', 'failed', err.message);
+    });
+
     agentAuditorQueue = new Queue(QUEUE_AGENT_AUDITOR, { connection });
     const aaRep = await agentAuditorQueue.getRepeatableJobs();
     for (const r of aaRep) await agentAuditorQueue.removeRepeatableByKey(r.key);
