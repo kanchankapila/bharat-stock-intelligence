@@ -367,25 +367,14 @@ def main() -> None:
                 features["dvm_m"] = dvm.get("m_score")
         time.sleep(RATE_LIMIT_SEC)
 
-        # â”€â”€ 2. PE_TTM_SHARE_NOW (daily, 1521 pts) â”€â”€
-        body = _fetch(tlid, "PE_TTM_SHARE_NOW", session)
-        if body is not None:
-            pe_series = _parse_eod(body)
-            if pe_series:
-                _upsert_series("trendlyne_pe_history", "pe_ttm", symbol, pe_series, con)
-                features.update(_pe_features_from_db(symbol, con))
-        time.sleep(RATE_LIMIT_SEC)
+        # PE/PB history is now appended daily by mc_pricefeed_fetcher.py (that endpoint
+        # already fetches each stock's own daily PE/PB — re-pulling Trendlyne's full
+        # multi-year history here every week was pure duplication). Still read the
+        # percentile-rank features from the same tables, now fresher (daily not weekly).
+        features.update(_pe_features_from_db(symbol, con))
+        features.update(_pb_features_from_db(symbol, con))
 
-        # â”€â”€ 3. PBV_A_SHARE_NOW (daily, 1824 pts) â”€â”€
-        body = _fetch(tlid, "PBV_A_SHARE_NOW", session)
-        if body is not None:
-            pb_series = _parse_eod(body)
-            if pb_series:
-                _upsert_series("trendlyne_pb_history", "pb_ratio", symbol, pb_series, con)
-                features.update(_pb_features_from_db(symbol, con))
-        time.sleep(RATE_LIMIT_SEC)
-
-        # â”€â”€ 4. DIVIDEND_YIELD_TTM_Q (quarterly, 32 pts) â”€â”€
+        # â”€â”€ 2. DIVIDEND_YIELD_TTM_Q (quarterly, 32 pts) â”€â”€
         body = _fetch(tlid, "DIVIDEND_YIELD_TTM_Q", session)
         if body is not None:
             dy_series = _parse_eod(body)

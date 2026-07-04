@@ -698,9 +698,10 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean }> 
   // MF holdings: AMFI monthly disclosures — weekly fetch is sufficient.
   await runPython('mf_holdings_fetcher.py', [], 10 * 60_000)
     .catch(e => console.warn('[QUEUE] mf_holdings_fetcher failed:', (e as Error).message));
-  // Trendlyne EPS/PE/PB/DivYield series + DVM scores — 4 calls/stock, weekly sufficient.
-  // 3058 stocks × 4 API calls × 0.5s = ~102 min
-  await runPython('trendlyne_fundamentals_fetcher.py', [], 130 * 60_000)
+  // Trendlyne EPS/DivYield series + DVM scores — 2 calls/stock (PE/PB dropped: MC's daily
+  // fetch already covers them, fed into the same history tables — see mc_pricefeed_fetcher.py).
+  // 3058 stocks × 2 API calls × 0.5s = ~51 min
+  await runPython('trendlyne_fundamentals_fetcher.py', [], 70 * 60_000)
     .catch(e => console.warn('[QUEUE] trendlyne_fundamentals_fetcher failed:', (e as Error).message));
   // Trendlyne advanced technical analysis: MA consensus, oscillators, pivot, delivery, beta.
   // 3058 stocks × 0.5s = ~26 min

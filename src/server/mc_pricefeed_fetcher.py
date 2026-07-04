@@ -174,6 +174,26 @@ def ensure_schema(con) -> None:
             con.rollback()
 
 
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS trendlyne_pe_history (
+            symbol TEXT NOT NULL, date TEXT NOT NULL,
+            pe_ttm REAL, fetched_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (symbol, date)
+        )
+    """)
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_tlpe_sym ON trendlyne_pe_history(symbol, date DESC)")
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS trendlyne_pb_history (
+            symbol TEXT NOT NULL, date TEXT NOT NULL,
+            pb_ratio REAL, fetched_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (symbol, date)
+        )
+    """)
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_tlpb_sym ON trendlyne_pb_history(symbol, date DESC)")
+    con.commit()
+
+
 # ── Fetch ────────────────────────────────────────────────────────────────────────
 
 def _fetch(mcsymbol: str, session) -> dict | None:
@@ -427,6 +447,31 @@ def backfill_technical_signals(symbol: str, f: dict, con) -> None:
     con.commit()
 
 
+
+def append_pe_pb_history(symbol: str, today: str, pe: float | None, pb: float | None, con) -> None:
+    """Append today's MC-sourced PE/PB into the same history tables
+    trendlyne_fundamentals_fetcher.py used to populate weekly from Trendlyne's dead
+    PE_TTM_SHARE_NOW/PBV_A_SHARE_NOW params. Keeps pe_pct_rank_252d/pb_pct_rank_252d
+    (computed from these tables) fresh daily instead of weekly."""
+    cur = con.cursor()
+    if pe is not None:
+        cur.execute("""
+            INSERT INTO trendlyne_pe_history (symbol, date, pe_ttm)
+            VALUES (?, ?, ?)
+            ON CONFLICT(symbol, date) DO UPDATE SET
+                pe_ttm = excluded.pe_ttm,
+                fetched_at = CURRENT_TIMESTAMP
+        """, (symbol, today, round(float(pe), 4)))
+    if pb is not None:
+        cur.execute("""
+            INSERT INTO trendlyne_pb_history (symbol, date, pb_ratio)
+            VALUES (?, ?, ?)
+            ON CONFLICT(symbol, date) DO UPDATE SET
+                pb_ratio = excluded.pb_ratio,
+                fetched_at = CURRENT_TIMESTAMP
+        """, (symbol, today, round(float(pb), 4)))
+    con.commit()
+
 def _load_stocks(symbol_filter: str | None, con) -> list[tuple[str, str]]:
     cur = con.cursor()
     cur.execute("""
@@ -468,6 +513,7 @@ def main() -> None:
         f = extract_features(data)
         upsert_row(symbol, today, f, con)
         backfill_technical_signals(symbol, f, con)
+        append_pe_pb_history(symbol, today, f.get("pe"), f.get("pb"), con)
 
         ind_pe_str = f"IND_PE={f.get('ind_pe','?')} vs_ind={f.get('pe_vs_ind','?')}"
         cagr_str   = f"CAGR3={f.get('cagr_3y','?')}% CAGR5={f.get('cagr_5y','?')}%"
