@@ -57,12 +57,16 @@ def backfill(conn: ConnWrapper, dry_run: bool = False) -> dict:
 
     if dry_run:
         print(f"[Sectors] [DRY] Would fill {len(updates)} nse_stocks rows.")
-    else:
+    elif updates:
+        # executemany([]) reaches SQLAlchemy as a single no-params execution rather than
+        # zero iterations, which raises "bind parameter required" — only call with rows.
         conn.executemany(
             "UPDATE nse_stocks SET sector = ?, last_updated = CURRENT_TIMESTAMP WHERE symbol = ?",
             updates,
         )
         print(f"[Sectors] Filled {len(updates)} nse_stocks rows.")
+    else:
+        print("[Sectors] Filled 0 nse_stocks rows.")
 
     # 3. Propagate to historical signal tables that carry their own sector column.
     propagated = {}

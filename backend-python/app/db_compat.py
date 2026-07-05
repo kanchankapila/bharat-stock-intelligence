@@ -107,6 +107,23 @@ def _one(result):
 
 # ─── Cursor / connection wrappers (legacy sqlite3 surface) ─────────────────────
 
+class _EmptyResult:
+    """Stand-in for a SQLAlchemy CursorResult when executemany() is called with zero
+    rows — sqlite3 treats that as a no-op, but passing an empty list to
+    Connection.execute() makes SQLAlchemy compile a single no-params execution instead
+    of "executemany with 0 iterations", raising a spurious missing-bind-parameter error."""
+    rowcount = 0
+
+    def fetchone(self):
+        return None
+
+    def fetchall(self):
+        return []
+
+    def keys(self):
+        return []
+
+
 class CursorWrapper:
     """Mimics the subset of sqlite3.Cursor the engines use: execute/executemany +
     fetchone/fetchall + rowcount/lastrowid."""
@@ -120,6 +137,9 @@ class CursorWrapper:
         return self
 
     def executemany(self, sql, seq_of_params):
+        if not seq_of_params:
+            self._result = _EmptyResult()
+            return self
         self._result = self._conn.execute(
             text(translate(sql)), [build_params(p) for p in seq_of_params]
         )
@@ -218,6 +238,8 @@ def execute_returning(sql, params=()):
 
 
 def executemany(sql, seq_of_params):
+    if not seq_of_params:
+        return 0
     with get_engine().begin() as conn:
         return conn.execute(
             text(translate(sql)), [build_params(p) for p in seq_of_params]

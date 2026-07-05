@@ -482,7 +482,11 @@ export async function computeConfluenceSignals(): Promise<{ computed: number; el
 
 export async function runMLProbabilityOverlay(): Promise<void> {
   try {
-    await runPython('confluence_ml_engine.py', ['--update-probabilities'], 120_000);
+    // 120s was too tight under startup contention (5 concurrent Python slots all busy) —
+    // a clean run takes ~70s, but queued behind other scripts it blew the timeout and
+    // execFile killed it with SIGTERM before any stderr was written (logged as an opaque
+    // "Command failed" with no detail). This only needs to finish within the 30-min cycle.
+    await runPython('confluence_ml_engine.py', ['--update-probabilities'], 5 * 60_000);
   } catch (err: any) {
     console.error('[CONFLUENCE-ML] Python error:', err.message);
   }

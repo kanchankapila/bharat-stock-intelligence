@@ -743,8 +743,11 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean }> 
 }
 
 async function processScreenerPerf(_job: Job): Promise<void> {
-  // 1. Sync newly discovered Trendlyne screener PKs (fast — only new ones)
-  await runPython('trendlyne_screener_discovery.py', [], 10 * 60_000)
+  // 1. Sync newly discovered Trendlyne screener PKs. "known" mode only re-fetches PKs
+  // missing from the DB, but with ~612 known PKs and a 0.4s rate limit that can still
+  // run 20+ minutes in practice — the old 10-min timeout routinely SIGTERM'd it mid-run
+  // (execFile kills before any stderr flushes, logged as an opaque "Command failed").
+  await runPython('trendlyne_screener_discovery.py', [], 30 * 60_000)
     .catch(e => console.warn('[QUEUE] trendlyne_screener_discovery failed:', (e as Error).message));
 
   // 2. Bulk-enrich signal_keywords + screener_url; INSERT 858 missing catalog entries; fix sector_theme bias

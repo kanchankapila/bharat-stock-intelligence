@@ -120,6 +120,23 @@ def _one(result):
 
 # ─── Cursor / connection wrappers (legacy sqlite3 surface) ─────────────────────
 
+class _EmptyResult:
+    """Stand-in for a SQLAlchemy CursorResult when executemany() is called with zero
+    rows — sqlite3 treats that as a no-op, but passing an empty list to
+    Connection.execute() makes SQLAlchemy compile a single no-params execution instead
+    of "executemany with 0 iterations", raising a spurious missing-bind-parameter error."""
+    rowcount = 0
+
+    def fetchone(self):
+        return None
+
+    def fetchall(self):
+        return []
+
+    def keys(self):
+        return []
+
+
 class CursorWrapper:
     """Mimics the subset of sqlite3.Cursor the engines use: execute/executemany +
     fetchone/fetchall + rowcount/lastrowid."""
@@ -133,6 +150,9 @@ class CursorWrapper:
         return self
 
     def executemany(self, sql, seq_of_params):
+        if not seq_of_params:
+            self._result = _EmptyResult()
+            return self
         self._result = self._conn.execute(
             text(translate(sql)), [build_params(p) for p in seq_of_params]
         )
@@ -283,6 +303,8 @@ def execute_returning(sql, params=()):
 
 
 def executemany(sql, seq_of_params):
+    if not seq_of_params:
+        return 0
     with get_engine().begin() as conn:
         return conn.execute(
             text(translate(sql)), [build_params(p) for p in seq_of_params]
@@ -337,6 +359,16 @@ def transaction():
     return _TxCtx()
 
 
+# pg_advisory_lock is session-scoped: the unlock MUST run on the exact same physical
+# backend connection that took the lock. query_one()/execute() each check a connection
+# out of the pool and return it immediately, so a naive acquire-via-query_one +
+# release-via-execute pair almost always runs on two different pooled connections —
+# the unlock then silently no-ops (that session never held the lock) and the lock stays
+# held by whatever connection acquired it, orphaned in the pool until it happens to be
+# reused for the same lock name. Pin one checked-out connection per held lock instead.
+_advisory_conns: dict = {}
+
+
 def try_advisory_lock(name: str) -> bool:
     """Best-effort cross-process guard against overlapping cron-script runs.
 
@@ -347,14 +379,31 @@ def try_advisory_lock(name: str) -> bool:
     """
     if not use_postgres():
         return True
-    row = query_one("SELECT pg_try_advisory_lock(?)", (_advisory_lock_key(name),))
-    return bool(row[0]) if row is not None else False
+    conn = get_engine().connect()
+    try:
+        row = conn.execute(text(translate("SELECT pg_try_advisory_lock(?)")), build_params((_advisory_lock_key(name),))).fetchone()
+        got = bool(row[0]) if row is not None else False
+    except Exception:
+        conn.close()
+        raise
+    if got:
+        _advisory_conns[name] = conn
+    else:
+        conn.close()
+    return got
 
 
 def release_advisory_lock(name: str) -> None:
     if not use_postgres():
         return
-    execute("SELECT pg_advisory_unlock(?)", (_advisory_lock_key(name),))
+    conn = _advisory_conns.pop(name, None)
+    if conn is None:
+        return
+    try:
+        conn.execute(text(translate("SELECT pg_advisory_unlock(?)")), build_params((_advisory_lock_key(name),)))
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def _advisory_lock_key(name: str) -> int:
