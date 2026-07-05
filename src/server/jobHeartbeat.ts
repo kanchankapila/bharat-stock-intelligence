@@ -11,6 +11,7 @@
 import { dbAll, dbRun, dbExec } from './dbAsync';
 import { CronExpressionParser } from 'cron-parser';
 import { JOB_REGISTRY } from './jobRegistry';
+import { MONITOR_SCRIPTS } from './monitorScripts';
 
 // This module is the sole creator of job_heartbeat on both engines (it is not in db.ts
 // nor the generated PG schema). The CREATE runs once, memoized, and every public fn
@@ -81,11 +82,20 @@ export async function getStaleJobs(): Promise<Array<{ job: string; hoursStale: n
   await ensureTable();
   const now = Date.now();
   const registryNames = new Set(JOB_REGISTRY.map(j => j.jobName));
+  // MONITOR_SCRIPTS ids already have their own real DB-freshness check (monitor.router.ts's
+  // getSystemStatus) plus dedicated stale/failed alerting (jobWatchdog.ts's
+  // checkAndAlertStaleScripts). Their job_heartbeat rows are frequently alert-bookkeeping
+  // only (markAlerted sets last_alert_sent_at but never last_success_at), which reads here
+  // as "never succeeded" (last_success_at ?? 0 -> ~epoch, i.e. tens of thousands of hours) —
+  // a false alarm on top of an already-duplicate check. Skip them the same way JOB_REGISTRY
+  // names already are.
+  const monitorScriptIds = new Set(MONITOR_SCRIPTS.map(s => s.id as string));
   const rows = await dbAll('SELECT job_name, last_success_at FROM job_heartbeat') as
     Array<{ job_name: string; last_success_at: number | null }>;
   const stale: Array<{ job: string; hoursStale: number }> = [];
   for (const r of rows) {
     if (registryNames.has(r.job_name)) continue; // covered by cron-aware getLateJobs() instead
+    if (monitorScriptIds.has(r.job_name)) continue; // covered by getSystemStatus() instead
     const last = r.last_success_at ?? 0;
     if (now - last > DEFAULT_STALE_MS) stale.push({ job: r.job_name, hoursStale: Math.floor((now - last) / 3_600_000) });
   }

@@ -6,274 +6,9 @@ import { router, publicProcedure } from "../trpc";
 import { runPython } from '../pythonRunner';
 import { fetchIndexAdvanceDecline, fetchIndiaVix, fetchLiveMarketScreener, fetchEODMarketScreener } from '../marketIntelService';
 import * as queueModule from '../queues';
+import { MONITOR_SCRIPTS } from '../monitorScripts';
 
-export const MONITOR_SCRIPTS = [
-  {
-    id: 'technical-scan',
-    label: 'Technical Signal Scan',
-    category: 'Signals',
-    critical: true,
-    description: 'Scans 2000+ stocks for EMA, RSI, BB, divergence patterns',
-    schedule: 'Every 30 min',
-    pyScript: null,          // queue-based
-    queueName: 'technical-signals',
-    staleLimitHours: 1,
-  },
-  {
-    id: 'outcome-resolver-5d',
-    label: 'Outcome Resolver (5D)',
-    category: 'ML',
-    critical: true,
-    description: 'Labels signal WIN/LOSS against OHLCV — 5-day horizon',
-    schedule: 'Daily 9:30 AM',
-    pyScript: 'outcome_resolver.py --horizon 5',
-    queueName: 'outcome-resolver',
-    staleLimitHours: 26,
-  },
-  {
-    id: 'outcome-resolver-15d',
-    label: 'Outcome Resolver (15D)',
-    category: 'ML',
-    critical: false,
-    description: 'Labels signal WIN/LOSS against OHLCV — 15-day horizon',
-    schedule: 'Daily 9:30 AM',
-    pyScript: 'outcome_resolver.py --horizon 15',
-    queueName: 'outcome-resolver',
-    staleLimitHours: 26,
-  },
-  {
-    id: 'performance-tracker',
-    label: 'Performance Tracker',
-    category: 'ML',
-    critical: true,
-    description: 'Computes win rate, alpha vs Nifty, Sharpe — segmented by signal type / regime / sector',
-    schedule: 'Daily 9:30 AM',
-    pyScript: 'performance_tracker.py --horizon 5',
-    queueName: null,
-    staleLimitHours: 26,
-  },
-  {
-    id: 'fii-dii-fetcher',
-    label: 'FII/DII Fetcher',
-    category: 'Data',
-    critical: true,
-    description: 'Fetches institutional flow data from NSE API',
-    schedule: 'Daily 5 PM',
-    pyScript: 'fii_dii_fetcher.py',
-    queueName: null,
-    staleLimitHours: 30,
-  },
-  {
-    id: 'finbert-scorer',
-    label: 'FinBERT Sentiment',
-    category: 'Data',
-    critical: false,
-    description: 'Scores news sentiment onto technical_signals rows',
-    schedule: 'Daily 5 PM',
-    pyScript: 'finbert_scorer.py --days 1',
-    queueName: null,
-    staleLimitHours: 30,
-  },
-  {
-    id: 'ml-ensemble-score',
-    label: 'ML Ensemble Score',
-    category: 'ML',
-    critical: true,
-    description: 'Scores pending signals with stacking ensemble win probability',
-    schedule: 'Daily 5 PM',
-    pyScript: 'ml_ensemble.py --score',
-    queueName: 'ml-daily-ops',
-    staleLimitHours: 26,
-  },
-  {
-    id: 'ml-ensemble-train',
-    label: 'ML Ensemble Train',
-    category: 'ML',
-    critical: false,
-    description: 'Retrains GB+RF+ET+LR stacking ensemble on accumulated outcomes',
-    schedule: 'Weekly Sunday',
-    pyScript: 'ml_ensemble.py --train --score',
-    queueName: 'ml-weekly-retrain',
-    staleLimitHours: 200,
-  },
-  {
-    id: 'strategy-optimizer',
-    label: 'Strategy Optimizer',
-    category: 'ML',
-    critical: false,
-    description: 'Optimizes category/source weights via differential evolution',
-    schedule: 'Weekly Sunday',
-    pyScript: 'strategy_optimizer.py',
-    queueName: 'ml-weekly-retrain',
-    staleLimitHours: 200,
-  },
-  {
-    id: 'ohlcv-backfill',
-    label: 'OHLCV Gap Fill',
-    category: 'Data',
-    critical: true,
-    description: 'Backfills missing daily OHLCV from Yahoo Finance (30-day lookback)',
-    schedule: 'Weekly Saturday',
-    pyScript: 'backfill_ohlcv.py --mode gap-fill --lookback 30',
-    queueName: 'ohlcv-backfill',
-    staleLimitHours: 200,
-  },
-  {
-    id: 'regime-detector',
-    label: 'Market Regime Detector',
-    category: 'ML',
-    critical: true,
-    description: '5-state HMM classifier: BULL / SIDEWAYS / HIGH_VOL / BEAR / CRASH. Writes daily regime to market_regimes.',
-    schedule: 'Daily 5 PM',
-    pyScript: 'regime_detector.py --mode update',
-    queueName: null,
-    staleLimitHours: 26,
-  },
-  {
-    id: 'feature-engineering',
-    label: 'Feature Engineering',
-    category: 'Data',
-    critical: true,
-    description: 'Computes 84 ML-ready features per symbol (OHLCV, macro, FII, fundamentals) into feature_store.',
-    schedule: 'Daily 5 PM',
-    pyScript: 'feature_engineering.py --date today',
-    queueName: null,
-    staleLimitHours: 26,
-  },
-  {
-    id: 'reward-engine',
-    label: 'Reward Engine',
-    category: 'ML',
-    critical: false,
-    description: 'EMA-smoothed reward propagation — updates signal_type_weights from resolved outcomes.',
-    schedule: 'Daily 5 PM',
-    pyScript: 'reward_engine.py',
-    queueName: null,
-    staleLimitHours: 26,
-  },
-  {
-    id: 'rl-agent-update',
-    label: 'RL Agent Update',
-    category: 'ML',
-    critical: false,
-    description: 'Q-learning meta-controller update — writes Q-values to rl_q_table from recent episodes.',
-    schedule: 'Daily 5 PM',
-    pyScript: 'rl_agent.py --update',
-    queueName: null,
-    staleLimitHours: 26,
-  },
-  {
-    id: 'dl-engine-infer',
-    label: 'DL Engine Inference',
-    category: 'ML',
-    critical: false,
-    description: 'Deep learning model inference — writes win probabilities to deep_learning_predictions.',
-    schedule: 'Daily 5 PM',
-    pyScript: 'dl_engine.py --mode infer',
-    queueName: null,
-    staleLimitHours: 26,
-  },
-  {
-    id: 'dl-trainer',
-    label: 'DL Model Trainer',
-    category: 'ML',
-    critical: false,
-    description: 'Trains / retrains deep learning model on feature_store. Writes metrics to dl_model_performance.',
-    schedule: 'Weekly Sunday',
-    pyScript: 'dl_trainer.py --trigger scheduled',
-    queueName: null,
-    staleLimitHours: 200,
-  },
-  {
-    id: 'signal-type-stats',
-    label: 'Signal Type Stats',
-    category: 'Signals',
-    critical: false,
-    description: 'Computes win rate / avg return per signal type × regime from resolved signal outcomes.',
-    schedule: 'Daily 5 PM',
-    pyScript: null,
-    queueName: null,
-    tsFunction: 'computeSignalTypeStats',
-    staleLimitHours: 26,
-  },
-  {
-    id: 'screener-performance',
-    label: 'Screener Performance Engine',
-    category: 'ML',
-    critical: false,
-    description: 'Fills screener_appearances returns, computes Bayesian tiers (A/B/C/D), classifies new screeners via Ollama',
-    schedule: 'Daily 6 PM',
-    pyScript: 'screener_performance.py',
-    queueName: 'screener-performance',
-    staleLimitHours: 26,
-  },
-  {
-    id: 'company-profiles-sync',
-    label: 'Company Profile & AI Sync',
-    category: 'Data',
-    critical: false,
-    description: 'Fetches Trendlyne company descriptions and scores high-growth potential via Ollama AI.',
-    schedule: 'Bi-weekly Sunday',
-    pyScript: null,
-    queueName: 'company-profiles-sync',
-    staleLimitHours: 360,
-  },
-  {
-    id: 'trendlyne-fundamentals',
-    label: 'Trendlyne Fundamentals (EPS + DVM)',
-    category: 'Data',
-    critical: false,
-    description: 'EPS_TTM + DivYield series and DVM scores (PE/PB now fed by mc_pricefeed_fetcher.py)',
-    schedule: 'Weekly Sunday',
-    pyScript: 'trendlyne_fundamentals_fetcher.py',
-    queueName: 'ml-weekly-retrain',
-    staleLimitHours: 200,
-  },
-  {
-    id: 'trendlyne-midweek',
-    label: 'Trendlyne Midweek (Adv-Tech + Price Analysis)',
-    category: 'Data',
-    critical: false,
-    description: 'Advanced technical analysis + price-performance alpha, moved off Sunday',
-    schedule: 'Weekly Tuesday',
-    pyScript: null,
-    queueName: 'trendlyne-midweek',
-    staleLimitHours: 200,
-  },
-  {
-    id: 'financial-ratios',
-    label: 'Financial Ratios (ET_Stats)',
-    category: 'ML',
-    critical: false,
-    description: 'FCF yield (approx) + interest coverage, rewritten against ET_Stats after Trendlyne retired the params',
-    schedule: 'First Sunday of month',
-    pyScript: 'financial_ratios_fetcher.py',
-    queueName: 'trendlyne-ratios-monthly',
-    staleLimitHours: 800,
-  },
-  {
-    id: 'working-capital',
-    label: 'Working Capital Cycle (ET_Stats, annual)',
-    category: 'ML',
-    critical: false,
-    description: 'Cash conversion cycle per fiscal year, rewritten against ET_Stats after Trendlyne retired the params',
-    schedule: 'First Sunday of month',
-    pyScript: 'working_capital_fetcher.py',
-    queueName: 'trendlyne-ratios-monthly',
-    staleLimitHours: 800,
-  },
-  {
-    id: 'tickertape-scorecard',
-    label: 'Tickertape Scorecard (ordinal tags)',
-    category: 'Data',
-    critical: false,
-    description: 'Performance/Valuation/Growth/Profitability ordinal tags (numeric values are premium-gated)',
-    schedule: 'Weekly Saturday',
-    pyScript: 'tickertape_scorecard_fetcher.py',
-    queueName: 'tickertape-scorecard',
-    staleLimitHours: 200,
-  },
-] as const;
+export { MONITOR_SCRIPTS };
 
 type ScriptId = typeof MONITOR_SCRIPTS[number]['id'];
 
@@ -493,13 +228,20 @@ export async function getSystemStatus() {
     const rawState = runStates[stateKey];
     let runState: 'never' | 'running' | 'success' | 'failed' | 'stale' = 'never';
 
-    if (rawState === 'running') {
-      runState = 'running';
-    } else if (lastRunAt) {
+    // Fresh DB-freshness evidence (dbLastRunAt/storedRanAt) wins over the app_settings
+    // 'running' flag: scripts driven by a BullMQ worker (e.g. technical-scan) never flip
+    // that flag back via triggerScript's upsertState, so a single stray 'running' write
+    // (manual trigger, crash mid-run) stuck it forever — masking weeks of otherwise-healthy
+    // runs behind a permanent "⏳ running" even though fresh output kept landing.
+    if (lastRunAt) {
       const ageHours = (Date.now() - new Date(lastRunAt).getTime()) / 3600000;
-      runState = ageHours > s.staleLimitHours ? 'stale' : (rawState === 'failed' ? 'failed' : 'success');
+      if (ageHours <= s.staleLimitHours) {
+        runState = 'success';
+      } else {
+        runState = rawState === 'running' ? 'running' : (rawState === 'failed' ? 'failed' : 'stale');
+      }
     } else {
-      runState = rawState === 'failed' ? 'failed' : 'never';
+      runState = rawState === 'running' ? 'running' : (rawState === 'failed' ? 'failed' : 'never');
     }
 
     return {
