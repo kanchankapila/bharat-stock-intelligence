@@ -651,12 +651,23 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
 
   await runPython('online_learner.py', ['--window', '180'], 120_000).catch(() => {});
 
+  // Warm-start LGBM ensemble on the last 3 days of newly-resolved outcomes (+20 boost rounds).
+  // Runs after online_learner so SGD priors are already updated; keeps ensemble fresh daily
+  // without the cost of a full weekly retrain.
+  await runPython('ml_ensemble.py', ['--incremental', '--incr-days', '3'], 5 * 60_000)
+    .catch(e => console.warn('[QUEUE] ml_ensemble incremental failed:', (e as Error).message));
+
   await pythonApi.scorePending().catch(e => console.warn('[API] score-pending:', (e as Error).message));
 
   // Isotonic-recalibrate win_probability against realized WIN/LOSS so sizing/gating use
   // honest probabilities (the ensemble stack is overconfident). Runs after outcomes resolve.
   await runPython('ml_calibration.py', [], 120_000)
     .catch(e => console.warn('[QUEUE] ml_calibration failed:', (e as Error).message));
+
+  // PSI-based feature drift check — writes drift_score to dl_model_performance so
+  // scoring_engine applies a win_probability haircut when distributions shift.
+  await runPython('drift_detector.py', [], 60_000)
+    .catch(e => console.warn('[QUEUE] drift_detector failed:', (e as Error).message));
 
   await runPython('cs_ranker.py', ['--score'], 120_000)
     .catch(e => console.warn('[QUEUE] cs_ranker score failed:', (e as Error).message));
@@ -1629,6 +1640,8 @@ export async function initQueues(): Promise<boolean> {
       updateMonitorState('outcome-resolver-15d', 'success');
       updateMonitorState('performance-tracker', 'success');
       updateMonitorState('ml-ensemble-score', 'success');
+      updateMonitorState('ml-ensemble-incremental', 'success');
+      updateMonitorState('drift-detector', 'success');
       updateMonitorState('reward-engine', 'success');
       updateMonitorState('rl-agent-update', 'success');
       updateMonitorState('signal-type-stats', 'success');
