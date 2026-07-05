@@ -37,6 +37,34 @@ LOSS_THRESHOLD = -1.0
 ROUND_TRIP_COST_PCT = 0.30
 
 
+def _fetch_atr_pct(conn: ConnWrapper, symbol: str, as_of_date, window: int = 14) -> float:
+    """Return ATR(14) as % of closing price on `as_of_date`, or 2.0 if unavailable."""
+    if isinstance(as_of_date, str):
+        as_of_d = datetime.date.fromisoformat(as_of_date[:10])
+    else:
+        as_of_d = as_of_date
+    raw = conn.execute(
+        "SELECT high, low, close FROM stock_ohlcv WHERE symbol=? AND date<=? ORDER BY date DESC LIMIT ?",
+        (symbol, as_of_d, window + 1),
+    ).fetchall()
+    if len(raw) < window + 1:
+        return 2.0
+    bars = list(reversed(raw))
+    trs = []
+    for i in range(1, len(bars)):
+        h, l, prev_c = float(bars[i][0]), float(bars[i][1]), float(bars[i-1][2])
+        trs.append(max(h - l, abs(h - prev_c), abs(l - prev_c)))
+    atr = sum(trs) / len(trs)
+    last_close = float(bars[-1][2])
+    return (atr / last_close * 100) if last_close > 0 else 2.0
+
+
+def _dynamic_thresholds(atr_pct: float) -> tuple[float, float]:
+    """Win = +0.5×ATR (min 1%), Loss = -0.5×ATR (min -1%)."""
+    half = max(1.0, 0.5 * atr_pct)
+    return half, -half
+
+
 def net_return_pct(gross_return_pct: float, cost_pct: float = ROUND_TRIP_COST_PCT) -> float:
     """Gross % return minus round-trip transaction costs — what the strategy actually keeps."""
     return gross_return_pct - cost_pct

@@ -33,6 +33,12 @@ from db_compat import connect, read_df
 WIN_THRESHOLD  =  1.0
 LOSS_THRESHOLD = -1.0
 
+
+def _atr_scaled_thresholds(atr_pct: float) -> tuple[float, float]:
+    half = max(1.0, 0.5 * atr_pct)
+    return half, -half
+
+
 NIFTY_SYMBOLS = ('NIFTY50', 'NIFTY', '^NSEI', 'NIFTY_50')
 
 
@@ -63,6 +69,7 @@ class PerformanceTracker:
                 ts.adx,
                 ts.rsi,
                 ts.signals_json,
+                ts.atr_pct_tl,
                 ns.sector
             FROM signal_outcomes so
             LEFT JOIN technical_signals ts
