@@ -662,6 +662,12 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
     .catch(e => console.warn('[QUEUE] cs_ranker score failed:', (e as Error).message));
 
   await runPython('reward_engine.py');
+  // --update only recomputes Q-values for existing rl_episodes rows; nothing creates NEW
+  // rows day-to-day (log_episode() is unused dead code) — --backfill is what actually
+  // inserts episodes from newly-resolved signal_outcomes. A short lookback keeps this a
+  // cheap daily top-up instead of re-scanning the full history (default 180d) every run.
+  await runPython('rl_agent.py', ['--backfill', '--lookback', '20'], 3 * 60_000)
+    .catch(e => console.warn('[QUEUE] rl_agent backfill failed:', (e as Error).message));
   await runPython('rl_agent.py', ['--update']);
 
   const { computeSignalTypeStats } = await import('./technicalSignalsService');
