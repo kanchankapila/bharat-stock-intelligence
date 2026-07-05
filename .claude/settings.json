@@ -7,7 +7,15 @@
       "Bash(npm test *)",
       "WebFetch(domain:trendlyne.com)",
       "WebFetch(domain:moneycontrol.com)",
-      "WebFetch(domain:webapi.niftytrader.in)"
+      "WebFetch(domain:webapi.niftytrader.in)",
+      "Bash(git check-ignore *)",
+      "Bash(npx vitest *)",
+      "Bash(npx tsc *)",
+      "Bash(git checkout *)",
+      "Bash(git add *)"
+    ],
+    "additionalDirectories": [
+      "D:\\Github\\bharat-stock-intelligence\\src\\server"
     ]
   }
 }

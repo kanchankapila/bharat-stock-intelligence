@@ -2658,25 +2658,835 @@ git commit -m "feat: add MONITOR_SCRIPTS entries for trendlyne-fundamentals, tre
 
 ---
 
-## Task 10: Tickertape scorecard (new signal) — STOP before writing code
+## Task 10: Enrich `scripts/stocklist.json` with Tickertape `sid` via the bulk stock-list endpoint
 
-**This task starts with a question to the user, not code.** The design (`docs/superpowers/specs/2026-07-04-trendlyne-fetch-rationalization-design.md`, §6) flagged that `api.tickertape.in/stocks/scorecard/{sid}` needs a `sid` per stock, and `sid` is a Tickertape-internal identifier not present anywhere in `StockMapping`/`scripts/stocklist.json`/`nse_stocks` today — unlike `tlid`/`companyid`, there is no existing export to reuse. The user explicitly asked to be consulted on the resolution approach before implementation, rather than have a mapping mechanism chosen unilaterally.
+Resolved live during execution (user-approved, 2026-07-05): `https://api.tickertape.in/stocks/list` is a single unauthenticated request returning **5,793 stocks** — `{"sid": "MICR", "name": "20 Microns Ltd", "ticker": "20MICRONS", "type": "stock", "slug": "...", "isin": "INE144J01027"}` — no pagination needed, far more coverage than the 2,005-stock `scripts/stocklist.json`. Every entry in `stocklist.json` already has an `isin` field (used for other providers per `CLAUDE.md`'s Resolution Order), so joining Tickertape's bulk list on `isin` (safer than symbol-string matching — immune to suffix/casing differences) resolves `sid` for the full existing universe in one pass, no per-stock API calls, no autocomplete/fuzzy-matching needed.
 
-- [ ] **Step 1: Ask the user which `sid`-resolution approach to use, before writing any code**
+**Files:**
+- Create: `scripts/enrich_stocklist_tickertape.py`
+- Modify (data, not code): `scripts/stocklist.json` — run the script once as part of this task to actually add the `tickertape_sid` field
+- Create: `src/server/tickertape_client.py` (mirrors `et_stats_client.py`'s shape from Task 4 — shared loader + fetch helper for Task 12)
+- Test: `src/server/tests/test_tickertape_client.py`
 
-Use `AskUserQuestion` (or the plain-text equivalent if running under `executing-plans` without that tool available) with substantially these options, informed by what's already been verified live:
+**Interfaces:**
+- Produces (`enrich_stocklist_tickertape.py`, standalone script, not imported elsewhere): reads `scripts/stocklist.json`, writes it back in place with a `tickertape_sid` field added to each matched entry (`None`/absent if no ISIN match found).
+- Produces (`tickertape_client.py`): `load_tickertape_sid_map() -> dict[str, str]` (symbol upper → sid, only for entries with a populated `tickertape_sid`), `fetch_scorecard(sid: str, session: requests.Session) -> list[dict] | None` (the `data` array from the scorecard response, or `None` on failure/empty).
 
-  - **Option A — Tickertape search/autocomplete API.** Tickertape almost certainly has a public autocomplete endpoint (its own site needs one for its search box) that accepts a company name/symbol and returns its `sid`. Not yet found/tested in this session — would need a quick live probe first (e.g. try `https://api.tickertape.in/search?text={query}` or inspect Tickertape's site network calls) before committing to it. Matches the codebase's established "Adding a New Provider" resolver pattern (`stockMapping.ts`'s `resolveMoneycontrolSymbol`-style hardcoded-map-first, cache, then autocomplete fallback).
-  - **Option B — ISIN-based lookup.** If Tickertape's API accepts ISIN (every stock in `StockMapping`/`stocklist.json` already has one), this could resolve `sid` without needing symbol-name fuzzy matching at all. Needs a quick live probe to confirm Tickertape exposes an ISIN→sid endpoint.
-  - **Option C — Manual seed list, expand later.** Hardcode `sid` for a small initial batch of stocks (e.g. the ones already used in this session's testing plus any watchlist/top-rated stocks) directly in a new `tickertape_sid` field, following the exact precedent of `StockMapping`'s 180-stock hardcoded table, and treat full-universe coverage as a follow-up once real usage data shows which stocks matter most.
+- [ ] **Step 1: Write the failing test for `enrich_stocklist_tickertape.py`'s pure join logic**
 
-Do not proceed past this point until the user has chosen (or specified a different approach).
+Create `src/server/tests/test_tickertape_client.py` (this single file covers both the enrichment script's pure join function and `tickertape_client.py`, since both are small and tightly related):
 
-- [ ] **Step 2 (blocked on Step 1's answer): Design and implement the chosen resolver**
+```python
+import json
+import os
+import sys
+from unittest.mock import MagicMock
 
-Once the user has answered, this step needs its own short design pass (which endpoint, which field on `StockMapping` or which new DB table, caching strategy) before code is written — follow the "Adding a New Provider" checklist in `CLAUDE.md` exactly: identify the ID type, add a field/table, populate for the 180-stock/2,005-stock universe as decided in Step 1, add a resolver function in `stockMapping.ts` (hardcoded map → cache → autocomplete fallback), then write the fetcher (`tickertape_scorecard_fetcher.py`, following the same `db_compat`/`ensure_schema`/`process_stock` shape as every other fetcher in this plan) that writes into `proprietary_scores_history` with `source='tickertape'`.
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "scripts"))
 
-Do not write this step's code as part of this plan document — it is intentionally left for a follow-up planning pass once Step 1 is answered, per the user's explicit instruction to ask before proceeding on this specific piece.
+import enrich_stocklist_tickertape as enrich
+import tickertape_client as tc
+
+
+class TestJoinByIsin:
+    def test_matches_stocklist_entries_by_isin(self):
+        stocklist = [
+            {"symbol": "BEL", "isin": "INE263A01024", "name": "Bharat Electronics"},
+            {"symbol": "AUBANK", "isin": "INE949L01017", "name": "AU Small Finance Bank"},
+        ]
+        tickertape_list = [
+            {"sid": "BHE", "isin": "INE263A01024", "ticker": "BEL"},
+            {"sid": "AUBANK", "isin": "INE949L01017", "ticker": "AUBANK"},
+            {"sid": "UNRELATED", "isin": "INE000X00000", "ticker": "XYZ"},
+        ]
+        result = enrich.join_by_isin(stocklist, tickertape_list)
+
+        assert result[0]["tickertape_sid"] == "BHE"
+        assert result[1]["tickertape_sid"] == "AUBANK"
+
+    def test_leaves_tickertape_sid_absent_when_no_isin_match(self):
+        stocklist = [{"symbol": "NOMATCH", "isin": "INE999Z99999", "name": "No Match Ltd"}]
+        tickertape_list = [{"sid": "OTHER", "isin": "INE111A11111", "ticker": "OTHER"}]
+        result = enrich.join_by_isin(stocklist, tickertape_list)
+
+        assert "tickertape_sid" not in result[0]
+
+    def test_handles_missing_isin_on_either_side_gracefully(self):
+        stocklist = [{"symbol": "NOISIN", "name": "No ISIN Ltd"}]
+        tickertape_list = [{"sid": "X", "ticker": "X"}]  # no isin key
+        result = enrich.join_by_isin(stocklist, tickertape_list)
+
+        assert "tickertape_sid" not in result[0]
+
+    def test_does_not_mutate_other_fields(self):
+        stocklist = [{"symbol": "BEL", "isin": "INE263A01024", "companyid": "11945", "tlid": "175"}]
+        tickertape_list = [{"sid": "BHE", "isin": "INE263A01024"}]
+        result = enrich.join_by_isin(stocklist, tickertape_list)
+
+        assert result[0]["companyid"] == "11945"
+        assert result[0]["tlid"] == "175"
+
+
+class TestTickertapeClient:
+    def test_load_tickertape_sid_map_reads_symbol_and_sid(self, tmp_path, monkeypatch):
+        fixture = tmp_path / "stocklist.json"
+        fixture.write_text(json.dumps([
+            {"symbol": "bel", "tickertape_sid": "BHE"},
+            {"symbol": "NOMATCH"},  # no tickertape_sid at all
+            {"symbol": "EMPTY", "tickertape_sid": ""},  # empty string, must be excluded
+        ]), encoding="utf-8")
+        monkeypatch.setattr(tc, "_STOCKLIST_PATH", fixture)
+        monkeypatch.setattr(tc, "_symbol_to_sid", None)
+
+        mapping = tc.load_tickertape_sid_map()
+
+        assert mapping["BEL"] == "BHE"
+        assert "NOMATCH" not in mapping
+        assert "EMPTY" not in mapping
+
+    def test_fetch_scorecard_returns_data_list_on_success(self):
+        fake_response = MagicMock()
+        fake_response.status_code = 200
+        fake_response.json.return_value = {"success": True, "data": [{"name": "Performance", "tag": "Low"}]}
+        fake_session = MagicMock()
+        fake_session.get.return_value = fake_response
+
+        result = tc.fetch_scorecard("BHE", fake_session)
+
+        assert result == [{"name": "Performance", "tag": "Low"}]
+
+    def test_fetch_scorecard_returns_none_on_empty_data(self):
+        fake_response = MagicMock()
+        fake_response.status_code = 200
+        fake_response.json.return_value = {"success": True, "data": []}
+        fake_session = MagicMock()
+        fake_session.get.return_value = fake_response
+
+        assert tc.fetch_scorecard("BHE", fake_session) is None
+
+    def test_fetch_scorecard_returns_none_on_non_200(self):
+        fake_response = MagicMock()
+        fake_response.status_code = 404
+        fake_session = MagicMock()
+        fake_session.get.return_value = fake_response
+
+        assert tc.fetch_scorecard("BHE", fake_session) is None
+```
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+Run: `cd src/server && python -m pytest tests/test_tickertape_client.py -v`
+Expected: FAIL — `ModuleNotFoundError` for both `enrich_stocklist_tickertape` and `tickertape_client` (neither exists yet).
+
+- [ ] **Step 3: Create `scripts/enrich_stocklist_tickertape.py`**
+
+```python
+#!/usr/bin/env python3
+"""
+One-time (re-runnable, idempotent) enrichment of scripts/stocklist.json with
+Tickertape's per-stock `sid`, resolved via Tickertape's bulk stock-list
+endpoint (https://api.tickertape.in/stocks/list — single unauthenticated
+request, ~5,793 stocks, no pagination) joined on ISIN against stocklist.json's
+existing isin field.
+
+ISIN is used as the join key (not symbol/ticker string matching) since it's
+the one universal identifier both sides already carry cleanly — avoids
+suffix/casing mismatches between NSE symbols and Tickertape's ticker field.
+
+Run:
+  python scripts/enrich_stocklist_tickertape.py
+"""
+
+import json
+from pathlib import Path
+
+import requests
+
+STOCKLIST_PATH = Path(__file__).resolve().parent / "stocklist.json"
+TICKERTAPE_LIST_URL = "https://api.tickertape.in/stocks/list"
+
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept": "application/json, text/plain, */*",
+}
+
+
+def fetch_tickertape_list() -> list[dict]:
+    r = requests.get(TICKERTAPE_LIST_URL, headers=HEADERS, timeout=30)
+    r.raise_for_status()
+    return r.json().get("data", [])
+
+
+def join_by_isin(stocklist: list[dict], tickertape_list: list[dict]) -> list[dict]:
+    """Pure function: does not mutate inputs, returns a new list of dicts.
+    Adds `tickertape_sid` only to entries where both sides have a matching,
+    non-empty ISIN — entries with no match are left untouched (no key added)."""
+    isin_to_sid = {
+        row["isin"]: row["sid"]
+        for row in tickertape_list
+        if row.get("isin") and row.get("sid")
+    }
+
+    result = []
+    for entry in stocklist:
+        updated = dict(entry)
+        isin = entry.get("isin")
+        if isin and isin in isin_to_sid:
+            updated["tickertape_sid"] = isin_to_sid[isin]
+        result.append(updated)
+    return result
+
+
+def main() -> None:
+    with open(STOCKLIST_PATH, encoding="utf-8") as f:
+        stocklist = json.load(f)
+
+    print(f"[EnrichTickertape] Fetching Tickertape bulk stock list...")
+    tickertape_list = fetch_tickertape_list()
+    print(f"[EnrichTickertape] Got {len(tickertape_list)} Tickertape entries.")
+
+    enriched = join_by_isin(stocklist, tickertape_list)
+    matched = sum(1 for e in enriched if "tickertape_sid" in e)
+    print(f"[EnrichTickertape] Matched {matched}/{len(enriched)} stocklist entries by ISIN.")
+
+    with open(STOCKLIST_PATH, "w", encoding="utf-8") as f:
+        json.dump(enriched, f, indent=2, ensure_ascii=False)
+    print(f"[EnrichTickertape] Wrote {STOCKLIST_PATH}")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+- [ ] **Step 4: Create `src/server/tickertape_client.py`**
+
+```python
+#!/usr/bin/env python3
+"""
+Tickertape scorecard client — shared by tickertape_scorecard_fetcher.py.
+
+Live-verified 2026-07-05: api.tickertape.in/stocks/scorecard/{sid} returns
+category objects (Performance/Valuation/Growth/Profitability among them,
+type="score") — but the numeric score.value is premium-gated and always
+null without a paid Tickertape login (confirmed across multiple stocks).
+What IS available unauthenticated is a categorical `tag` per category
+(observed values: "Low"/"Avg"/"High" for the type="score" categories) —
+real, per-stock-differentiated signal, just ordinal instead of numeric.
+tickertape_scorecard_fetcher.py stores the ordinal-encoded tag, not a
+numeric score.
+
+sid is resolved via scripts/stocklist.json's tickertape_sid field
+(populated by scripts/enrich_stocklist_tickertape.py), not live per-stock
+lookup — see that script for how sid is obtained.
+"""
+
+import json
+from pathlib import Path
+
+import requests
+
+SCORECARD_URL = "https://analyze.api.tickertape.in/stocks/scorecard/{sid}"
+
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept": "application/json, text/plain, */*",
+}
+# Exported for the caller to apply to their own requests.Session once at
+# creation time (e.g. session.headers.update(HEADERS)), then pass that
+# session into fetch_scorecard() — matches the et_stats_client.py pattern.
+
+RATE_LIMIT_SEC = 0.3
+
+_STOCKLIST_PATH = Path(__file__).resolve().parents[2] / "scripts" / "stocklist.json"
+_symbol_to_sid: dict[str, str] | None = None
+
+
+def load_tickertape_sid_map() -> dict[str, str]:
+    """symbol (uppercase) -> tickertape_sid, loaded once from scripts/stocklist.json.
+    Only includes entries with a non-empty tickertape_sid (most stocks won't
+    have one until scripts/enrich_stocklist_tickertape.py has been run)."""
+    global _symbol_to_sid
+    if _symbol_to_sid is not None:
+        return _symbol_to_sid
+
+    with open(_STOCKLIST_PATH, encoding="utf-8") as f:
+        rows = json.load(f)
+
+    _symbol_to_sid = {
+        row["symbol"].upper(): row["tickertape_sid"]
+        for row in rows
+        if row.get("symbol") and row.get("tickertape_sid")
+    }
+    return _symbol_to_sid
+
+
+def fetch_scorecard(sid: str, session: requests.Session) -> list[dict] | None:
+    """Fetch the scorecard `data` array for one stock. Returns None on
+    failure or an empty response."""
+    try:
+        r = session.get(SCORECARD_URL.format(sid=sid), timeout=15)
+        if r.status_code != 200:
+            return None
+        data = r.json().get("data", [])
+        return data if data else None
+    except Exception as e:
+        print(f"  [Tickertape scorecard] error for sid={sid}: {e}")
+        return None
+    finally:
+        import time
+        time.sleep(RATE_LIMIT_SEC)
+```
+
+- [ ] **Step 5: Run the tests to verify they pass**
+
+Run: `cd src/server && python -m pytest tests/test_tickertape_client.py -v`
+Expected: PASS (9/9).
+
+- [ ] **Step 6: Actually run the enrichment script once against the real, checked-in `scripts/stocklist.json`**
+
+Run: `python scripts/enrich_stocklist_tickertape.py`
+Expected: prints a match count (expect a high match rate — Tickertape's list covers 5,793 stocks vs. `stocklist.json`'s 2,005, so most ISINs should resolve); `scripts/stocklist.json` is rewritten in place with `tickertape_sid` added to matched entries. Spot-check a couple of well-known stocks (e.g. `grep -A1 '"symbol": "BEL"' scripts/stocklist.json` or equivalent) to confirm a real Tickertape sid landed on a real stock, not a placeholder.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add scripts/enrich_stocklist_tickertape.py src/server/tickertape_client.py src/server/tests/test_tickertape_client.py scripts/stocklist.json
+git commit -m "feat: add Tickertape sid resolution — bulk stock-list join by ISIN, enrich scripts/stocklist.json"
+```
+
+---
+
+## Task 12: `tickertape_scorecard_fetcher.py` — write ordinal category tags into `proprietary_scores_history`
+
+**Files:**
+- Create: `src/server/tickertape_scorecard_fetcher.py`
+- Test: `src/server/tests/test_tickertape_scorecard_fetcher.py`
+- Modify: `src/server/queues.ts` (new weekly queue)
+- Modify: `src/server/routers/monitor.router.ts` (new MONITOR_SCRIPTS entry)
+
+**Interfaces:**
+- Produces: `compute_ordinal_scores(scorecard_data: list[dict]) -> dict[str, dict]` — pure function, maps each `type=="score"` category to `{"score_value": int | None, "score_label": str}`.
+
+- [ ] **Step 1: Write the failing tests for the pure `compute_ordinal_scores` function**
+
+Create `src/server/tests/test_tickertape_scorecard_fetcher.py`:
+
+```python
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+import tickertape_scorecard_fetcher as tsf
+
+
+def _score_category(name, tag):
+    return {"name": name, "tag": tag, "type": "score", "score": {"value": None}}
+
+
+def _non_score_category(name, tag):
+    return {"name": name, "tag": tag, "type": "entryPoint"}
+
+
+class TestComputeOrdinalScores:
+    def test_maps_low_avg_high_to_0_1_2(self):
+        data = [_score_category("Performance", "Low"), _score_category("Valuation", "Avg"), _score_category("Growth", "High")]
+        result = tsf.compute_ordinal_scores(data)
+
+        assert result["performance"] == {"score_value": 0, "score_label": "Low"}
+        assert result["valuation"] == {"score_value": 1, "score_label": "Avg"}
+        assert result["growth"] == {"score_value": 2, "score_label": "High"}
+
+    def test_ignores_non_score_type_categories(self):
+        data = [_score_category("Performance", "Low"), _non_score_category("Entry point", "Good"), _non_score_category("Red flags", "Low")]
+        result = tsf.compute_ordinal_scores(data)
+
+        assert "entry point" not in result
+        assert "red flags" not in result
+        assert "performance" in result
+
+    def test_unrecognized_tag_gets_none_score_value_but_keeps_label(self):
+        data = [_score_category("Growth", "Unusual")]
+        result = tsf.compute_ordinal_scores(data)
+
+        assert result["growth"] == {"score_value": None, "score_label": "Unusual"}
+
+    def test_empty_input_returns_empty_dict(self):
+        assert tsf.compute_ordinal_scores([]) == {}
+        assert tsf.compute_ordinal_scores(None) == {}
+
+    def test_category_name_is_lowercased_for_score_type_key(self):
+        data = [_score_category("Profitability", "High")]
+        result = tsf.compute_ordinal_scores(data)
+        assert "profitability" in result
+        assert "Profitability" not in result
+```
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+Run: `cd src/server && python -m pytest tests/test_tickertape_scorecard_fetcher.py -v`
+Expected: FAIL — `ModuleNotFoundError: No module named 'tickertape_scorecard_fetcher'`.
+
+- [ ] **Step 3: Create `src/server/tickertape_scorecard_fetcher.py`**
+
+```python
+#!/usr/bin/env python3
+"""
+Tickertape Scorecard Fetcher — ordinal category tags
+======================================================
+Fetches api.tickertape.in/stocks/scorecard/{sid} (via tickertape_client.py)
+and writes each type="score" category's ORDINAL-ENCODED tag (numeric value
+is premium-gated, see tickertape_client.py docstring) into
+proprietary_scores_history, source='tickertape'.
+
+sid is resolved via scripts/stocklist.json's tickertape_sid field (populated
+by scripts/enrich_stocklist_tickertape.py) — stocks without a resolved sid
+are skipped.
+
+Cadence: weekly (this is a supplementary/secondary signal, categorical not
+numeric — no value in fetching more often; low priority relative to the
+platform's primary scoring pipelines).
+
+Run:
+  python tickertape_scorecard_fetcher.py              # all stocks with a tickertape_sid
+  python tickertape_scorecard_fetcher.py --symbol BEL
+  python tickertape_scorecard_fetcher.py --limit 50
+"""
+
+import argparse
+from datetime import date
+
+import requests
+
+from db_compat import connect
+from tickertape_client import HEADERS, fetch_scorecard, load_tickertape_sid_map
+
+ORDINAL_MAP = {"low": 0, "avg": 1, "high": 2}
+
+
+# ── Pure computation (fully unit-testable, no network/DB) ───────────────────────
+
+def compute_ordinal_scores(scorecard_data: list[dict] | None) -> dict[str, dict]:
+    """scorecard_data: the `data` array from the scorecard API response.
+    Returns {category_name_lowercased: {"score_value": int|None, "score_label": str}}
+    for every type="score" category. Non-"score" categories (entryPoint,
+    redFlag, etc.) are excluded — this fetcher only covers the four
+    Performance/Valuation/Growth/Profitability-style categories."""
+    if not scorecard_data:
+        return {}
+
+    result = {}
+    for category in scorecard_data:
+        if category.get("type") != "score":
+            continue
+        name = category.get("name", "")
+        tag = category.get("tag", "")
+        result[name.lower()] = {
+            "score_value": ORDINAL_MAP.get(tag.lower()),
+            "score_label": tag,
+        }
+    return result
+
+
+# ── Persist ──────────────────────────────────────────────────────────────────────
+
+def upsert_scores(symbol: str, today: str, scores: dict[str, dict], con) -> int:
+    if not scores:
+        return 0
+    cur = con.cursor()
+    count = 0
+    for score_type, values in scores.items():
+        cur.execute("""
+            INSERT INTO proprietary_scores_history (symbol, date, source, score_type, score_value, score_label)
+            VALUES (?, ?, 'tickertape', ?, ?, ?)
+            ON CONFLICT(symbol, date, source, score_type) DO UPDATE SET
+                score_value = excluded.score_value,
+                score_label = excluded.score_label,
+                updated_at  = CURRENT_TIMESTAMP
+        """, (symbol, today, score_type, values["score_value"], values["score_label"]))
+        count += 1
+    con.commit()
+    return count
+
+
+# ── Per-stock processing ──────────────────────────────────────────────────────────
+
+def process_stock(symbol: str, sid: str, today: str, session: requests.Session, con) -> int:
+    data = fetch_scorecard(sid, session)
+    scores = compute_ordinal_scores(data)
+    return upsert_scores(symbol, today, scores, con)
+
+
+# ── Stock list ────────────────────────────────────────────────────────────────────
+
+def load_stocks(symbol_filter: str | None, limit: int | None) -> list[tuple[str, str]]:
+    sid_map = load_tickertape_sid_map()
+    rows = sorted(sid_map.items())
+    if symbol_filter:
+        rows = [(s, sid) for s, sid in rows if s == symbol_filter.upper()]
+    if limit:
+        rows = rows[:limit]
+    return rows
+
+
+# ── Main ──────────────────────────────────────────────────────────────────────────
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Tickertape scorecard ordinal tags")
+    parser.add_argument("--symbol", default=None, help="Single stock NSE symbol")
+    parser.add_argument("--limit", type=int, default=None, help="Process first N stocks")
+    args = parser.parse_args()
+
+    con = connect()
+
+    stocks = load_stocks(args.symbol, args.limit)
+    if not stocks:
+        print("[TickertapeScorecard] No stocks with a tickertape_sid found.")
+        con.close()
+        return
+
+    print(f"[TickertapeScorecard] Processing {len(stocks)} stocks…")
+    session = requests.Session()
+    session.headers.update(HEADERS)
+    today = date.today().isoformat()
+
+    ok = 0
+    for i, (symbol, sid) in enumerate(stocks, 1):
+        try:
+            n = process_stock(symbol, sid, today, session, con)
+            if n:
+                ok += 1
+            print(f"  [{i}/{len(stocks)}] {symbol}: {n} categories written")
+        except Exception as e:
+            try:
+                con.rollback()
+            except Exception:
+                pass
+            print(f"  [{i}/{len(stocks)}] {symbol}: ERROR — {e}")
+
+    print(f"[TickertapeScorecard] Done. {ok}/{len(stocks)} stocks with scores written.")
+    con.close()
+
+
+if __name__ == "__main__":
+    main()
+```
+
+Note: `proprietary_scores_history` already exists (created in `db.ts`, used by `syncProprietaryScores.ts` for the `niftytrader`/`trendlyne` sources) — this script needs no `ensure_schema()` of its own, it writes into the existing table with a new `source='tickertape'` value.
+
+- [ ] **Step 4: Run the tests to verify they pass**
+
+Run: `cd src/server && python -m pytest tests/test_tickertape_scorecard_fetcher.py -v`
+Expected: PASS (5/5).
+
+- [ ] **Step 5: Wire a new weekly queue in `queues.ts`**
+
+Add a `QUEUE_TICKERTAPE_SCORECARD` constant near the other single-purpose weekly queues (e.g. next to `QUEUE_TRENDLYNE_MIDWEEK`/`QUEUE_TRENDLYNE_RATIOS_MONTHLY` from Task 8, already committed on this branch):
+
+```typescript
+export const QUEUE_TICKERTAPE_SCORECARD = 'tickertape-scorecard';
+```
+
+Declare the module-level `Queue`/`Worker` variables alongside the other Trendlyne-adjacent ones (mirror the exact declaration style Task 8 already used for `trendlyneMidweekQueue`/`trendlyneMidweekWorker`):
+
+```typescript
+let tickertapeScorecardQueue: Queue;
+let tickertapeScorecardWorker: Worker;
+```
+
+Register the queue (weekly, low-priority day/time — e.g. Saturday, well clear of the Sunday Trendlyne cluster and the Tuesday midweek batch):
+
+```typescript
+    // ── Tickertape scorecard: ordinal category tags (Performance/Valuation/
+    // Growth/Profitability) — supplementary signal, weekly is sufficient. ──
+    tickertapeScorecardQueue = new Queue(QUEUE_TICKERTAPE_SCORECARD, { connection });
+    const ttscRep = await tickertapeScorecardQueue.getRepeatableJobs();
+    for (const r of ttscRep) await tickertapeScorecardQueue.removeRepeatableByKey(r.key);
+    await addJobWithCatchup(tickertapeScorecardQueue,
+      'tickertape-scorecard-weekly',
+      {},
+      {
+        repeat: { pattern: '0 13 * * 6' }, // Saturday 1:00 PM UTC
+        jobId: 'tickertape-scorecard-weekly',
+        removeOnComplete: 3,
+        removeOnFail: 3,
+      },
+    );
+
+    tickertapeScorecardWorker = new Worker(
+      QUEUE_TICKERTAPE_SCORECARD,
+      async (_job: Job) => {
+        await runPython('tickertape_scorecard_fetcher.py', [], 60 * 60_000)
+          .catch(e => console.warn('[QUEUE] tickertape_scorecard_fetcher failed:', (e as Error).message));
+        return { success: true };
+      },
+      {
+        connection,
+        concurrency: 1,
+        lockDuration: 90 * 60 * 1000,
+        lockRenewTime: 10 * 60 * 1000,
+      },
+    );
+
+    tickertapeScorecardWorker.on('completed', () => {
+      console.log('[QUEUE] tickertape-scorecard completed');
+      updateMonitorState('tickertape-scorecard', 'success');
+    });
+    tickertapeScorecardWorker.on('failed', (_job, err) => {
+      console.error('[QUEUE] tickertape-scorecard failed:', err.message);
+      updateMonitorState('tickertape-scorecard', 'failed', err.message);
+    });
+```
+
+- [ ] **Step 6: Add a `MONITOR_SCRIPTS` entry in `monitor.router.ts`**
+
+Add to the `MONITOR_SCRIPTS` array:
+
+```typescript
+  {
+    id: 'tickertape-scorecard',
+    label: 'Tickertape Scorecard (ordinal tags)',
+    category: 'Data',
+    critical: false,
+    description: 'Performance/Valuation/Growth/Profitability ordinal tags (numeric values are premium-gated)',
+    schedule: 'Weekly Saturday',
+    pyScript: 'tickertape_scorecard_fetcher.py',
+    queueName: 'tickertape-scorecard',
+    staleLimitHours: 200,
+  },
+```
+
+Add to `getLastRunAt`:
+
+```typescript
+      case 'tickertape-scorecard':
+        row = await dbGet("SELECT MAX(date) as t FROM proprietary_scores_history WHERE source = 'tickertape'");
+        break;
+```
+
+Add to `getScriptStats`:
+
+```typescript
+      case 'tickertape-scorecard':
+        return { rows: ((await dbGet("SELECT COUNT(*) as n FROM proprietary_scores_history WHERE source = 'tickertape' AND date = (SELECT MAX(date) FROM proprietary_scores_history WHERE source = 'tickertape')")) as any)?.n ?? 0 };
+```
+
+- [ ] **Step 7: Verify**
+
+Run: `npx tsc --noEmit` (expect 0 errors)
+Run: `npx vitest run` (expect no regressions)
+Run: `cd src/server && python -m pytest tests/test_tickertape_scorecard_fetcher.py tests/test_tickertape_client.py -v` (expect all passing)
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add src/server/tickertape_scorecard_fetcher.py src/server/tests/test_tickertape_scorecard_fetcher.py src/server/queues.ts src/server/routers/monitor.router.ts
+git commit -m "feat: add tickertape_scorecard_fetcher.py — ordinal category tags into proprietary_scores_history, weekly Saturday queue + monitoring"
+```
+
+---
+
+## Task 11: Repoint `fcf_yield` consumers to `fcf_yield_approx`, sync schema-of-record
+
+Task 5's review surfaced a plan-level gap: the brief renamed `technical_signals.fcf_yield` → `fcf_yield_approx` (correctly — to label the CFO+CFI approximation) and rewrote `tl_financial_quality`'s column set (`capex_ttm`/`fcf_ttm`/`ebit_ttm`/`interest_expense_ttm` → `cfi_ttm`/`fcf_ttm_approx`, `interest_coverage`/`fcf_yield` → `fcf_yield_approx`), but three live consumers and the schema-of-record files still reference the old names — verified via live grep on this branch, 2026-07-04:
+
+- `src/server/routers/commandCenter.router.ts:149` — `SELECT ... ts.fcf_yield, ts.interest_coverage, ts.fcf_positive, ts.debt_coverage_risk ...` (feeds the `getBuyRecommendations` procedure)
+- `src/server/ml_ensemble.py:926` and `:1130` — two separate SQL `SELECT ... ts.fcf_yield ...` (feature-building queries)
+- `src/server/ml_ensemble.py:661` — `X['fcf_yield_norm'] = num('fcf_yield', 0.0).clip(-5, 20) / 20.0` (active ML feature keyed by the SQL result's column name)
+- `src/server/ml_ensemble.py:648-649` — a commented-out feature line and TODO note "once financial_ratios_fetcher populates fcf_yield (currently 0 rows)" — now stale, since it will populate
+- `src/server/db.ts:2210-2221` — `tl_financial_quality` `CREATE TABLE` still declares the OLD column set (`capex_ttm`, `fcf_ttm`, `ebit_ttm`, `interest_expense_ttm`, `fcf_yield`), out of sync with what `financial_ratios_fetcher.py::ensure_schema()` now creates. This is a live correctness risk, not just staleness: on a fresh dev DB where `db.ts` bootstraps the schema before any Python script runs, its `CREATE TABLE IF NOT EXISTS` would win, leaving the table without `cfi_ttm`/`fcf_ttm_approx`/`fcf_yield_approx` — and `financial_ratios_fetcher.py`'s own `INSERT` (which references those new column names) would then fail against that stale table.
+- `src/server/db.ts:2283` — `ALTER TABLE technical_signals ADD COLUMN fcf_yield REAL;` (old name only; no `fcf_yield_approx` entry)
+- `db/schema.postgres.sql:2193` and `:2269` — `"fcf_yield" DOUBLE PRECISION` in both the `technical_signals` and `tl_financial_quality` blocks
+- `db/schema.postgres.sql:2260-2272` — `tl_financial_quality` `CREATE TABLE` also has the old column set
+
+Confirmed via grep that `tl_financial_quality` has exactly one owner (`financial_ratios_fetcher.py`) and one schema-of-record declaration (`db.ts`) — no other file reads from it, so its `CREATE TABLE` block can be fully replaced rather than additively patched. `src/components/BuyRecommendationsPage.tsx` reads `p.fcf_yield`/`p.fcf_positive` but is fed entirely by `commandCenter.router.ts`'s `getBuyRecommendations` query — fixing the SQL alias in the router requires zero frontend changes.
+
+**Files:**
+- Modify: `src/server/routers/commandCenter.router.ts`
+- Modify: `src/server/ml_ensemble.py`
+- Modify: `src/server/db.ts`
+- Modify: `db/schema.postgres.sql`
+
+**Interfaces:**
+- No new functions. This task only changes SQL column references and schema declarations — the shape of every consumer's downstream code (JS object property access, pandas column access) stays `fcf_yield` via SQL aliasing, so no code beyond the SQL text itself needs to change.
+
+- [ ] **Step 1: Alias the new column back to the old property name in `commandCenter.router.ts`**
+
+In `src/server/routers/commandCenter.router.ts:149`, change:
+
+```typescript
+          ts.fcf_yield, ts.interest_coverage, ts.fcf_positive, ts.debt_coverage_risk,
+```
+
+to:
+
+```typescript
+          ts.fcf_yield_approx AS fcf_yield, ts.interest_coverage, ts.fcf_positive, ts.debt_coverage_risk,
+```
+
+This is the only change needed for `getBuyRecommendations` and, transitively, `BuyRecommendationsPage.tsx` — the frontend's `p.fcf_yield`/`p.fcf_positive` property accesses are unaffected since the SQL result still has a column literally named `fcf_yield`.
+
+- [ ] **Step 2: Alias the same way in both `ml_ensemble.py` SQL queries**
+
+In `src/server/ml_ensemble.py`, at both line 926 and line 1130, change:
+
+```python
+               ts.fcf_yield, ts.interest_coverage, ts.fcf_positive, ts.debt_coverage_risk,
+```
+
+to:
+
+```python
+               ts.fcf_yield_approx AS fcf_yield, ts.interest_coverage, ts.fcf_positive, ts.debt_coverage_risk,
+```
+
+at each of the two occurrences. This means line 661 (`X['fcf_yield_norm'] = num('fcf_yield', 0.0).clip(-5, 20) / 20.0`) needs **no change** — the pandas/dict lookup key `'fcf_yield'` still resolves correctly since the SQL result column is aliased back to that name.
+
+- [ ] **Step 3: Update the now-stale comment at `ml_ensemble.py:648-649`**
+
+Change:
+
+```python
+    # TODO: enable once financial_ratios_fetcher populates fcf_yield (currently 0 rows)
+    # X['quality_compound'] = X['pledge_deleveraging'] * num('fcf_yield', 0.0).clip(0, 0.2) / 0.2
+```
+
+to:
+
+```python
+    # TODO: enable once there's enough live fcf_yield_approx history to validate this interaction
+    # (financial_ratios_fetcher.py now populates it via ET_Stats; was previously always 0 rows)
+    # X['quality_compound'] = X['pledge_deleveraging'] * num('fcf_yield', 0.0).clip(0, 0.2) / 0.2
+```
+
+Leave the feature itself commented out — re-enabling it is a separate modeling decision outside this task's scope, this only corrects the stale rationale in the comment.
+
+- [ ] **Step 4: Sync `tl_financial_quality` and add `fcf_yield_approx` to `technical_signals` in `db.ts`**
+
+In `src/server/db.ts`, replace the `tl_financial_quality` `CREATE TABLE` block (currently lines ~2210-2221):
+
+```typescript
+  CREATE TABLE IF NOT EXISTS tl_financial_quality (
+    symbol               TEXT NOT NULL,
+    as_of_date           TEXT NOT NULL,
+    cfo_ttm              REAL,
+    capex_ttm            REAL,
+    fcf_ttm              REAL,
+    ebit_ttm             REAL,
+    interest_expense_ttm REAL,
+    market_cap           REAL,
+    fcf_yield            REAL,
+    interest_coverage    REAL,
+    PRIMARY KEY (symbol, as_of_date)
+  );
+```
+
+with the column set `financial_ratios_fetcher.py::ensure_schema()` now actually creates:
+
+```typescript
+  CREATE TABLE IF NOT EXISTS tl_financial_quality (
+    symbol               TEXT NOT NULL,
+    as_of_date           TEXT NOT NULL,
+    cfo_ttm              REAL,
+    cfi_ttm              REAL,
+    fcf_ttm_approx       REAL,
+    interest_coverage    REAL,
+    market_cap           REAL,
+    fcf_yield_approx     REAL,
+    fetched_at           TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (symbol, as_of_date)
+  );
+```
+
+Then in the `ALTER TABLE technical_signals` list (currently around line 2283):
+
+```typescript
+  ALTER TABLE technical_signals ADD COLUMN fcf_yield             REAL;
+```
+
+add a new line directly after it (keep the old line — do not remove `fcf_yield`, other historical rows/tooling may still reference it, this task only adds the new column):
+
+```typescript
+  ALTER TABLE technical_signals ADD COLUMN fcf_yield             REAL;
+  ALTER TABLE technical_signals ADD COLUMN fcf_yield_approx      REAL;
+```
+
+- [ ] **Step 5: Make the equivalent changes in `db/schema.postgres.sql`**
+
+In the `tl_financial_quality` block (currently lines ~2260-2272):
+
+```sql
+CREATE TABLE IF NOT EXISTS "tl_financial_quality" (
+  "symbol" TEXT NOT NULL,
+  "as_of_date" TEXT NOT NULL,
+  "cfo_ttm" DOUBLE PRECISION,
+  "capex_ttm" DOUBLE PRECISION,
+  "fcf_ttm" DOUBLE PRECISION,
+  "ebit_ttm" DOUBLE PRECISION,
+  "interest_expense_ttm" DOUBLE PRECISION,
+  "market_cap" DOUBLE PRECISION,
+  "fcf_yield" DOUBLE PRECISION,
+  "interest_coverage" DOUBLE PRECISION,
+  "fetched_at" TEXT DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY ("symbol", "as_of_date")
+);
+```
+
+replace with:
+
+```sql
+CREATE TABLE IF NOT EXISTS "tl_financial_quality" (
+  "symbol" TEXT NOT NULL,
+  "as_of_date" TEXT NOT NULL,
+  "cfo_ttm" DOUBLE PRECISION,
+  "cfi_ttm" DOUBLE PRECISION,
+  "fcf_ttm_approx" DOUBLE PRECISION,
+  "interest_coverage" DOUBLE PRECISION,
+  "market_cap" DOUBLE PRECISION,
+  "fcf_yield_approx" DOUBLE PRECISION,
+  "fetched_at" TEXT DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY ("symbol", "as_of_date")
+);
+```
+
+In the `technical_signals` block, at both line 2193 and line 2269 (`"fcf_yield" DOUBLE PRECISION,` appears twice — this file declares `technical_signals` in two places, verify both before editing), add a new line directly after each occurrence:
+
+```sql
+  "fcf_yield" DOUBLE PRECISION,
+  "fcf_yield_approx" DOUBLE PRECISION,
+```
+
+- [ ] **Step 6: Verify — typecheck, run the existing test suites, and confirm no stale references remain**
+
+Run: `npx tsc --noEmit`
+Expected: 0 errors.
+
+Run: `npx vitest run`
+Expected: all existing tests still pass (this task changes SQL text and schema declarations only, no test behavior should change).
+
+Run: `cd src/server && python -m pytest tests/test_financial_ratios_fetcher.py -v`
+Expected: still 8/8 passing (this task doesn't touch `financial_ratios_fetcher.py` itself).
+
+Run a final grep to confirm every `ts.fcf_yield` SQL reference (not `ts.fcf_yield_approx`) in the codebase is now either aliased with `AS fcf_yield` or doesn't need to be (i.e., there are no more bare, unaliased `ts.fcf_yield` reads left un-repointed):
+
+```bash
+grep -rn "\.fcf_yield\b" src/server/routers/commandCenter.router.ts src/server/ml_ensemble.py
+```
+
+Expected output: every match includes `fcf_yield_approx AS fcf_yield` or is the `num('fcf_yield', ...)` pandas lookup (unaffected by the alias).
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add src/server/routers/commandCenter.router.ts src/server/ml_ensemble.py src/server/db.ts db/schema.postgres.sql
+git commit -m "fix: repoint fcf_yield consumers to fcf_yield_approx, sync tl_financial_quality schema-of-record"
+```
 
 ---
 

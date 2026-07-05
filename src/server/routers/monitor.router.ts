@@ -213,9 +213,64 @@ export const MONITOR_SCRIPTS = [
     category: 'Data',
     critical: false,
     description: 'Fetches Trendlyne company descriptions and scores high-growth potential via Ollama AI.',
-    schedule: 'Weekly Sunday',
+    schedule: 'Bi-weekly Sunday',
     pyScript: null,
     queueName: 'company-profiles-sync',
+    staleLimitHours: 360,
+  },
+  {
+    id: 'trendlyne-fundamentals',
+    label: 'Trendlyne Fundamentals (EPS + DVM)',
+    category: 'Data',
+    critical: false,
+    description: 'EPS_TTM + DivYield series and DVM scores (PE/PB now fed by mc_pricefeed_fetcher.py)',
+    schedule: 'Weekly Sunday',
+    pyScript: 'trendlyne_fundamentals_fetcher.py',
+    queueName: 'ml-weekly-retrain',
+    staleLimitHours: 200,
+  },
+  {
+    id: 'trendlyne-midweek',
+    label: 'Trendlyne Midweek (Adv-Tech + Price Analysis)',
+    category: 'Data',
+    critical: false,
+    description: 'Advanced technical analysis + price-performance alpha, moved off Sunday',
+    schedule: 'Weekly Tuesday',
+    pyScript: null,
+    queueName: 'trendlyne-midweek',
+    staleLimitHours: 200,
+  },
+  {
+    id: 'financial-ratios',
+    label: 'Financial Ratios (ET_Stats)',
+    category: 'ML',
+    critical: false,
+    description: 'FCF yield (approx) + interest coverage, rewritten against ET_Stats after Trendlyne retired the params',
+    schedule: 'First Sunday of month',
+    pyScript: 'financial_ratios_fetcher.py',
+    queueName: 'trendlyne-ratios-monthly',
+    staleLimitHours: 800,
+  },
+  {
+    id: 'working-capital',
+    label: 'Working Capital Cycle (ET_Stats, annual)',
+    category: 'ML',
+    critical: false,
+    description: 'Cash conversion cycle per fiscal year, rewritten against ET_Stats after Trendlyne retired the params',
+    schedule: 'First Sunday of month',
+    pyScript: 'working_capital_fetcher.py',
+    queueName: 'trendlyne-ratios-monthly',
+    staleLimitHours: 800,
+  },
+  {
+    id: 'tickertape-scorecard',
+    label: 'Tickertape Scorecard (ordinal tags)',
+    category: 'Data',
+    critical: false,
+    description: 'Performance/Valuation/Growth/Profitability ordinal tags (numeric values are premium-gated)',
+    schedule: 'Weekly Saturday',
+    pyScript: 'tickertape_scorecard_fetcher.py',
+    queueName: 'tickertape-scorecard',
     staleLimitHours: 200,
   },
 ] as const;
@@ -282,6 +337,27 @@ async function getLastRunAt(scriptId: ScriptId): Promise<string | null> {
         break;
       case 'company-profiles-sync':
         row = await dbGet("SELECT MAX(last_updated) as t FROM company_profiles");
+        break;
+      case 'trendlyne-fundamentals':
+        row = await dbGet("SELECT MAX(date) as t FROM trendlyne_dvm_scores");
+        break;
+      case 'trendlyne-midweek':
+        row = await dbGet(`
+          SELECT MIN(t) as t FROM (
+            SELECT MAX(date) as t FROM trendlyne_adv_tech_daily
+            UNION ALL
+            SELECT MAX(date) as t FROM trendlyne_price_analysis
+          ) combined
+        `);
+        break;
+      case 'financial-ratios':
+        row = await dbGet("SELECT MAX(as_of_date) as t FROM tl_financial_quality");
+        break;
+      case 'working-capital':
+        row = await dbGet("SELECT MAX(fetched_at) as t FROM working_capital_history");
+        break;
+      case 'tickertape-scorecard':
+        row = await dbGet("SELECT MAX(date) as t FROM proprietary_scores_history WHERE source = 'tickertape'");
         break;
       default:
         return null;
@@ -377,6 +453,19 @@ async function getScriptStats(scriptId: ScriptId): Promise<Record<string, number
           profiles: ((await dbGet("SELECT COUNT(*) as n FROM company_profiles")) as any)?.n ?? 0,
           aiAnalyzed: ((await dbGet("SELECT COUNT(*) as n FROM company_profiles WHERE ai_analysis IS NOT NULL AND ai_analysis != ''")) as any)?.n ?? 0,
         };
+      case 'trendlyne-fundamentals':
+        return { rows: ((await dbGet("SELECT COUNT(*) as n FROM trendlyne_dvm_scores WHERE date = (SELECT MAX(date) FROM trendlyne_dvm_scores)")) as any)?.n ?? 0 };
+      case 'trendlyne-midweek':
+        return {
+          advTechRows: ((await dbGet("SELECT COUNT(*) as n FROM trendlyne_adv_tech_daily WHERE date = (SELECT MAX(date) FROM trendlyne_adv_tech_daily)")) as any)?.n ?? 0,
+          priceAnalysisRows: ((await dbGet("SELECT COUNT(*) as n FROM trendlyne_price_analysis WHERE date = (SELECT MAX(date) FROM trendlyne_price_analysis)")) as any)?.n ?? 0,
+        };
+      case 'financial-ratios':
+        return { rows: ((await dbGet("SELECT COUNT(*) as n FROM tl_financial_quality WHERE as_of_date = (SELECT MAX(as_of_date) FROM tl_financial_quality)")) as any)?.n ?? 0 };
+      case 'working-capital':
+        return { rows: ((await dbGet("SELECT COUNT(*) as n FROM working_capital_history WHERE fiscal_year = (SELECT MAX(fiscal_year) FROM working_capital_history)")) as any)?.n ?? 0 };
+      case 'tickertape-scorecard':
+        return { rows: ((await dbGet("SELECT COUNT(*) as n FROM proprietary_scores_history WHERE source = 'tickertape' AND date = (SELECT MAX(date) FROM proprietary_scores_history WHERE source = 'tickertape')")) as any)?.n ?? 0 };
       default:
         return {};
     }

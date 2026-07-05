@@ -2191,6 +2191,7 @@ CREATE TABLE IF NOT EXISTS "technical_signals" (
   "eps_miss_after_streak" BIGINT DEFAULT 0,
   "rev_surprise_q1" DOUBLE PRECISION,
   "fcf_yield" DOUBLE PRECISION,
+  "fcf_yield_approx" DOUBLE PRECISION,
   "interest_coverage" DOUBLE PRECISION,
   "fcf_positive" BIGINT DEFAULT 0,
   "debt_coverage_risk" BIGINT DEFAULT 0,
@@ -2261,13 +2262,11 @@ CREATE TABLE IF NOT EXISTS "tl_financial_quality" (
   "symbol" TEXT NOT NULL,
   "as_of_date" TEXT NOT NULL,
   "cfo_ttm" DOUBLE PRECISION,
-  "capex_ttm" DOUBLE PRECISION,
-  "fcf_ttm" DOUBLE PRECISION,
-  "ebit_ttm" DOUBLE PRECISION,
-  "interest_expense_ttm" DOUBLE PRECISION,
-  "market_cap" DOUBLE PRECISION,
-  "fcf_yield" DOUBLE PRECISION,
+  "cfi_ttm" DOUBLE PRECISION,
+  "fcf_ttm_approx" DOUBLE PRECISION,
   "interest_coverage" DOUBLE PRECISION,
+  "market_cap" DOUBLE PRECISION,
+  "fcf_yield_approx" DOUBLE PRECISION,
   "fetched_at" TEXT DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY ("symbol", "as_of_date")
 );
@@ -2441,14 +2440,15 @@ CREATE INDEX idx_watchlist_userId ON watchlist("userId");
 -- ── working_capital_history ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "working_capital_history" (
   "symbol" TEXT NOT NULL,
-  "quarter" TEXT NOT NULL,
+  "fiscal_year" TEXT NOT NULL,
   "receivables_days" DOUBLE PRECISION,
   "inventory_days" DOUBLE PRECISION,
   "payables_days" DOUBLE PRECISION,
   "ccc" DOUBLE PRECISION,
-  "revenue_qtr" DOUBLE PRECISION,
-  "cogs_qtr" DOUBLE PRECISION,
-  PRIMARY KEY ("symbol", "quarter")
+  "revenue_fy" DOUBLE PRECISION,
+  "cogs_proxy_fy" DOUBLE PRECISION,
+  "fetched_at" TEXT DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY ("symbol", "fiscal_year")
 );
 
 -- ── xgboost_predictions ─────────────────────────────────────────────

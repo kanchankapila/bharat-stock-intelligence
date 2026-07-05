@@ -24,7 +24,10 @@ export const TRENDLYNE_CONFIG = {
   // Maximum jitter percentage (10-20% is polite)
   JITTER_PERCENT: process.env.TRENDLYNE_JITTER_PERCENT ? parseInt(process.env.TRENDLYNE_JITTER_PERCENT, 10) : 15,
   // Request timeout
-  REQUEST_TIMEOUT_MS: process.env.TRENDLYNE_REQUEST_TIMEOUT_MS ? parseInt(process.env.TRENDLYNE_REQUEST_TIMEOUT_MS, 10) : 30000
+  REQUEST_TIMEOUT_MS: process.env.TRENDLYNE_REQUEST_TIMEOUT_MS ? parseInt(process.env.TRENDLYNE_REQUEST_TIMEOUT_MS, 10) : 30000,
+  // Short TTL just for the 15-min intraday scan — short enough to stay responsive to
+  // intraday moves, long enough to avoid re-fetching the same screener within one scan cycle.
+  INTRADAY_CACHE_TTL_MS: process.env.TRENDLYNE_INTRADAY_CACHE_TTL_MS ? parseInt(process.env.TRENDLYNE_INTRADAY_CACHE_TTL_MS, 10) : 180000, // 3 minutes
 };
 
 // Helper to update fetch intervals
@@ -307,22 +310,22 @@ function validateStockIdCount(stockIds: string): boolean {
 /**
  * Check if cached data is still fresh
  */
-function isCacheFresh(key: string): boolean {
+function isCacheFresh(key: string, maxAgeMs: number = TRENDLYNE_CONFIG.FETCH_INTERVAL_MS): boolean {
   if (!cache.has(key)) return false;
-  
+
   // If fetch interval is 0, cache is never fresh (always refetch)
-  if (TRENDLYNE_CONFIG.FETCH_INTERVAL_MS === 0) return false;
-  
+  if (maxAgeMs === 0) return false;
+
   const entry = cache.get(key)!;
   const age = Date.now() - entry.timestamp;
-  return age < TRENDLYNE_CONFIG.FETCH_INTERVAL_MS;
+  return age < maxAgeMs;
 }
 
 /**
  * Get cached data if available
  */
-function getCachedData(key: string): TrendlyneScreenerData | null {
-  if (isCacheFresh(key)) {
+function getCachedData(key: string, maxAgeMs?: number): TrendlyneScreenerData | null {
+  if (isCacheFresh(key, maxAgeMs)) {
     return cache.get(key)?.data || null;
   }
   return null;
@@ -502,13 +505,15 @@ const STOCK_IDS = [
  * @param screenerName - The name of the screener to fetch stocks for
  * @param pageNumber - Page number for pagination (default 0)
  * @param skipCache - Force bypass cache (default false)
+ * @param maxAgeMs - Maximum age of cached data in milliseconds (defaults to FETCH_INTERVAL_MS)
  * @returns Screener data with stocks
  */
 export async function fetchTrendlyneScreenerData(
   screenpk: string,
   screenerName: string,
   pageNumber: number = 0,
-  skipCache: boolean = false
+  skipCache: boolean = false,
+  maxAgeMs?: number
 ): Promise<TrendlyneScreenerData> {
   try {
     if (!screenpk || !screenerName) {
@@ -525,7 +530,7 @@ export async function fetchTrendlyneScreenerData(
 
     // Check cache if not skipping
     if (!skipCache) {
-      const cached = getCachedData(cacheKey);
+      const cached = getCachedData(cacheKey, maxAgeMs);
       if (cached) {
         console.log(`📦 Using cached data for screener: ${screenerName}`);
         return cached;
@@ -1340,8 +1345,9 @@ export async function runIntradayScreenerScan(): Promise<{
 
       console.log(`🔍 [INTRADAY SCAN] Scanning screener: ${name} (PK: ${screenpk}, Sentiment: ${sentiment})...`);
 
-      // 2. Fetch stock constituents bypassing cache
-      const result = await fetchTrendlyneScreenerData(screenpk, name, 0, true);
+      // 2. Fetch stock constituents — short-TTL cache instead of a hard bypass, so two
+      // overlapping scan cycles within the TTL window don't double-hit Trendlyne.
+      const result = await fetchTrendlyneScreenerData(screenpk, name, 0, false, TRENDLYNE_CONFIG.INTRADAY_CACHE_TTL_MS);
       if (!result.success || !result.data || result.data.length === 0) {
         console.log(`⚠️ [INTRADAY SCAN] No stocks found or scan failed for: ${name}`);
         continue;

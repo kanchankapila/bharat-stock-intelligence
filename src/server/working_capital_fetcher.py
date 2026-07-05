@@ -1,61 +1,57 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
-Working Capital Fetcher â€” Cash Conversion Cycle
-================================================
-Computes the working capital cycle (cash conversion cycle) from Trendlyne's
-chart-data API. A deteriorating cycle is an early warning signal that shows up
-2-3 quarters before earnings impact; an improving cycle signals operational excellence.
+Working Capital Fetcher — Cash Conversion Cycle (annual cadence)
+====================================================================
+Rewritten 2026-07-04: the Trendlyne chart-data params this used to depend on
+(TRADE_RECEIVABLE_Q, DEBTORS_Q, INVENTORIES_Q, TRADE_PAYABLE_Q, CREDITORS_Q,
+REVENUE_Q, COGS_Q, RAW_MATERIAL_Q) are confirmed dead (live-tested, with and
+without an authenticated Trendlyne session — Trendlyne retired this param
+family, not a rate limit). Replaced with etmarketsapis.indiatimes.com's
+ET_Stats mobile endpoint (see et_stats_client.py), keyed by ET `companyid`
+(from scripts/stocklist.json) instead of Trendlyne's `tlid`.
 
-Metrics:
-  Receivables days = (Trade Receivables / Revenue) Ã— 365
-  Inventory days   = (Inventory / COGS) Ã— 365
-  Payables days    = (Trade Payables / COGS) Ã— 365
+Cadence change: receivables/inventory/payables only exist at ANNUAL
+granularity in ET_Stats' Balance event — this matches Trendlyne's own true
+ceiling too, since Indian-listed companies only file balance sheets
+annually, not quarterly (only P&L is quarterly). This was always going to be
+annual-cadence data; the old quarterly framing was never achievable. Revenue
+and a COGS proxy for each fiscal year come from summing the 4 Quarterly
+P&L rows (totalIncome, totalExpenses) whose yearEnding falls in that year.
+
+Metrics (per fiscal year):
+  Receivables days = (Trade Receivables / FY Revenue) × 365
+  Inventory days   = (Inventory / FY COGS-proxy) × 365
+  Payables days    = (Trade Payables / FY COGS-proxy) × 365
   CCC              = Receivables days + Inventory days - Payables days
-  CCC trend        = ccc_ttm - ccc 4 quarters ago (positive = deteriorating)
 
 Writes:
-  working_capital_history  (symbol, quarter) â€” per-quarter computed values
-  technical_signals        â€” receivables_days_ttm, ccc_ttm, ccc_trend,
+  working_capital_history  (symbol, fiscal_year) — per-year computed values
+  technical_signals        — receivables_days_ttm, ccc_ttm, ccc_trend,
                              wc_deteriorating, wc_improving
+  (column names kept as *_ttm for compatibility with existing consumers —
+  "ttm" here means "most recent fiscal year", not a rolling 12 months.)
+
+Cadence: monthly (annual-refresh data — no value fetching more often).
 
 Run:
-  python working_capital_fetcher.py              # all stocks with tlid
+  python working_capital_fetcher.py              # all stocks with a companyid
   python working_capital_fetcher.py --symbol BEL
   python working_capital_fetcher.py --limit 50
 """
 
 import argparse
-import time
-from datetime import date, datetime, timezone
+from datetime import date, timedelta
 
 import requests
 
 from db_compat import connect
+from et_stats_client import HEADERS, fetch_et_stats, load_companyid_map
 
-# â”€â”€ API config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+DETERIORATING_THRESHOLD_DAYS = 5
+IMPROVING_THRESHOLD_DAYS = -5
 
-BASE_URL = "https://trendlyne.com/mapp/v1/stock/chart-data/{tlid}/{param}/"
 
-HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-    ),
-    "Accept": "application/json",
-    "Referer": "https://trendlyne.com/",
-}
-
-RATE_LIMIT_SEC = 0.4  # 5 calls per stock â†’ 2s total per stock
-
-# Trendlyne chart-data quarterly param names.
-# Primary names tried first; fallbacks used if primary returns no data.
-PARAM_RECEIVABLES  = "TRADE_RECEIVABLE_Q"   # fallback: DEBTORS_Q
-PARAM_INVENTORY    = "INVENTORIES_Q"
-PARAM_PAYABLES     = "TRADE_PAYABLE_Q"      # fallback: CREDITORS_Q
-PARAM_REVENUE      = "REVENUE_Q"
-PARAM_COGS         = "COGS_Q"               # fallback: RAW_MATERIAL_Q
-
-# â”€â”€ Schema â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Schema ──────────────────────────────────────────────────────────────────────
 
 def ensure_schema(con) -> None:
     cur = con.cursor()
@@ -63,20 +59,20 @@ def ensure_schema(con) -> None:
     cur.execute("""
         CREATE TABLE IF NOT EXISTS working_capital_history (
             symbol           TEXT NOT NULL,
-            quarter          TEXT NOT NULL,
+            fiscal_year      TEXT NOT NULL,
             receivables_days REAL,
             inventory_days   REAL,
             payables_days    REAL,
             ccc              REAL,
-            revenue_qtr      REAL,
-            cogs_qtr         REAL,
+            revenue_fy       REAL,
+            cogs_proxy_fy    REAL,
             fetched_at       TEXT DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (symbol, quarter)
+            PRIMARY KEY (symbol, fiscal_year)
         )
     """)
     cur.execute("""
         CREATE INDEX IF NOT EXISTS idx_wch_sym
-        ON working_capital_history(symbol, quarter DESC)
+        ON working_capital_history(symbol, fiscal_year DESC)
     """)
     con.commit()
 
@@ -94,178 +90,103 @@ def ensure_schema(con) -> None:
             con.rollback()
 
 
-# â”€â”€ Fetch helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Pure computation (fully unit-testable, no network/DB) ───────────────────────
 
-def _fetch(tlid: str, param: str, session: requests.Session) -> dict | None:
-    url = BASE_URL.format(tlid=tlid, param=param)
+def _parse_yearending(s: str | None) -> date | None:
+    if not s:
+        return None
     try:
-        r = session.get(url, params={"format": "json"}, timeout=15)
-        if r.status_code != 200:
-            return None
-        data = r.json()
-        if data.get("head", {}).get("status") != "0":
-            return None
-        return data.get("body", {})
-    except Exception as e:
-        print(f"  [{param}] error: {e}")
+        return date.fromisoformat(str(s)[:10])
+    except ValueError:
         return None
 
 
-def _fetch_with_fallback(tlid: str, primary: str, fallback: str,
-                          session: requests.Session) -> list[tuple[str, float]]:
-    """Fetch a quarterly series, trying fallback param if primary yields no data."""
-    body = _fetch(tlid, primary, session)
-    time.sleep(RATE_LIMIT_SEC)
-    series = _parse_eod(body) if body else []
-    if not series:
-        body = _fetch(tlid, fallback, session)
-        time.sleep(RATE_LIMIT_SEC)
-        series = _parse_eod(body) if body else []
-    return series
+def compute_ccc(balance: list[dict] | None, quarterly: list[dict] | None) -> list[dict]:
+    """balance: ET_Stats Balance.list (annual, most-recent-first).
+    quarterly: ET_Stats Quarterly.list (quarterly, most-recent-first, 8 back).
+    Returns one row per fiscal year that has both a balance-sheet snapshot
+    and exactly 4 matching quarterly P&L rows, most-recent fiscal year first.
 
-
-def _ts_to_quarter(ts_ms: int) -> str:
-    """Convert millisecond timestamp to quarter label like 'Q4FY26'."""
-    dt = datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc)
-    year = dt.year
-    month = dt.month
-    # Indian FY: Apr-Mar. FY26 = Apr 2025 - Mar 2026.
-    if month >= 4:
-        fy = year + 1
-    else:
-        fy = year
-    q_map = {4: 1, 5: 1, 6: 1, 7: 2, 8: 2, 9: 2, 10: 3, 11: 3, 12: 3,
-              1: 4, 2: 4, 3: 4}
-    q = q_map[month]
-    return f"Q{q}FY{str(fy)[2:]}"
-
-
-def _parse_eod(body: dict) -> list[tuple[str, float]]:
-    """Return [(quarter_label, value), ...] sorted most-recent first."""
-    series: list[tuple[str, float]] = []
-    for ts_ms, val in body.get("eodData", []):
-        try:
-            series.append((_ts_to_quarter(int(ts_ms)), float(val)))
-        except (TypeError, ValueError):
-            continue
-    # TL returns newest first; maintain that order
-    return series
-
-
-def _avg_n(series: list[tuple[str, float]], n: int = 4) -> float | None:
-    """Average of the n most-recent values (trailing n-quarter average)."""
-    vals = [v for _, v in series[:n] if v is not None]
-    if not vals:
-        return None
-    return sum(vals) / len(vals)
-
-
-def _align_quarters(
-    *series_list: list[tuple[str, float]],
-) -> list[tuple[str, list[float | None]]]:
+    A quarterly row belongs to a balance-sheet fiscal year if its yearEnding
+    falls in the 12 months up to and including the balance sheet's own
+    yearEnding — a plain "same calendar year" string match is wrong here
+    because India's fiscal year runs Apr-Mar, so FY26's quarters carry
+    yearEnding dates in both 2025 (Jun/Sep/Dec) and 2026 (Mar).
     """
-    Align multiple quarterly series by quarter label.
-    Returns [(quarter, [v1, v2, ...]), ...] for quarters present in all series,
-    sorted most-recent first.
-    """
-    if not series_list:
+    if not balance or not quarterly:
         return []
-    # Build quarter â†’ value maps
-    maps = [{q: v for q, v in s} for s in series_list]
-    # Quarters present in at least the first (primary) series
-    quarters = [q for q, _ in series_list[0]]
-    aligned = []
-    for q in quarters:
-        values = [m.get(q) for m in maps]
-        aligned.append((q, values))
-    return aligned
 
-
-# â”€â”€ CCC computation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
-def _compute_ccc_series(
-    receivables: list[tuple[str, float]],
-    inventory:   list[tuple[str, float]],
-    payables:    list[tuple[str, float]],
-    revenue:     list[tuple[str, float]],
-    cogs:        list[tuple[str, float]],
-) -> list[tuple[str, float, float, float, float, float, float]]:
-    """
-    For each quarter where all inputs are available, compute:
-      receivables_days, inventory_days, payables_days, ccc, revenue_qtr, cogs_qtr
-    Returns list of (quarter, rec_days, inv_days, pay_days, ccc, rev_qtr, cogs_qtr),
-    most-recent first.
-    """
-    rec_map  = {q: v for q, v in receivables}
-    inv_map  = {q: v for q, v in inventory}
-    pay_map  = {q: v for q, v in payables}
-    rev_map  = {q: v for q, v in revenue}
-    cog_map  = {q: v for q, v in cogs}
-
-    # Use quarters from the receivables series as the primary timeline
     results = []
-    for q, _ in receivables:
-        rec  = rec_map.get(q)
-        inv  = inv_map.get(q)
-        pay  = pay_map.get(q)
-        rev  = rev_map.get(q)
-        cog  = cog_map.get(q)
+    for b in balance:
+        fy_end = _parse_yearending(b.get("yearEnding"))
+        if fy_end is None:
+            continue
+        fy_start = fy_end.replace(year=fy_end.year - 1) + timedelta(days=1)
 
-        if rec is None or rev is None or rev == 0:
+        year_quarters = [
+            q for q in quarterly
+            if (q_end := _parse_yearending(q.get("yearEnding"))) is not None and fy_start <= q_end <= fy_end
+        ]
+        if len(year_quarters) < 4:
             continue
 
-        rec_days = rec / rev * 365
+        revenue_fy = sum(float(q.get("totalIncome") or 0) for q in year_quarters[:4])
+        cogs_fy = sum(float(q.get("totalExpenses") or 0) for q in year_quarters[:4])
 
-        inv_days: float | None = None
-        if inv is not None and cog is not None and cog != 0:
-            inv_days = inv / cog * 365
+        if revenue_fy == 0:
+            continue
 
-        pay_days: float | None = None
-        if pay is not None and cog is not None and cog != 0:
-            pay_days = pay / cog * 365
+        receivables = b.get("tradeReceivables")
+        inventories = b.get("inventories")
+        payables = b.get("tradePayables")
 
-        if inv_days is None or pay_days is None:
-            # CCC requires all three legs; still store partial
-            ccc = None
-        else:
-            ccc = rec_days + inv_days - pay_days
+        if receivables is None:
+            continue
 
-        results.append((
-            q,
-            round(rec_days, 2),
-            round(inv_days, 2) if inv_days is not None else None,
-            round(pay_days, 2) if pay_days is not None else None,
-            round(ccc, 2) if ccc is not None else None,
-            round(rev, 2) if rev is not None else None,
-            round(cog, 2) if cog is not None else None,
-        ))
+        receivables_days = round(float(receivables) / revenue_fy * 365, 2)
+        inventory_days = round(float(inventories) / cogs_fy * 365, 2) if inventories is not None and cogs_fy else None
+        payables_days = round(float(payables) / cogs_fy * 365, 2) if payables is not None and cogs_fy else None
+        ccc = round(receivables_days + inventory_days - payables_days, 2) if inventory_days is not None and payables_days is not None else None
+
+        results.append({
+            "fiscal_year": b.get("yearEnding"),
+            "receivables_days": receivables_days,
+            "inventory_days": inventory_days,
+            "payables_days": payables_days,
+            "ccc": ccc,
+            "revenue_fy": revenue_fy,
+            "cogs_proxy_fy": cogs_fy,
+        })
 
     return results
 
 
-# â”€â”€ Persist â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Persist ──────────────────────────────────────────────────────────────────────
 
-def _upsert_wc_history(symbol: str, rows: list, con) -> None:
+def upsert_wc_history(symbol: str, rows: list[dict], con) -> None:
     cur = con.cursor()
-    for (q, rec_days, inv_days, pay_days, ccc, rev_qtr, cogs_qtr) in rows:
+    for row in rows:
         cur.execute("""
             INSERT INTO working_capital_history
-                (symbol, quarter, receivables_days, inventory_days,
-                 payables_days, ccc, revenue_qtr, cogs_qtr)
+                (symbol, fiscal_year, receivables_days, inventory_days,
+                 payables_days, ccc, revenue_fy, cogs_proxy_fy)
             VALUES (?,?,?,?,?,?,?,?)
-            ON CONFLICT(symbol, quarter) DO UPDATE SET
+            ON CONFLICT(symbol, fiscal_year) DO UPDATE SET
                 receivables_days = excluded.receivables_days,
                 inventory_days   = excluded.inventory_days,
                 payables_days    = excluded.payables_days,
                 ccc              = excluded.ccc,
-                revenue_qtr      = excluded.revenue_qtr,
-                cogs_qtr         = excluded.cogs_qtr,
+                revenue_fy       = excluded.revenue_fy,
+                cogs_proxy_fy    = excluded.cogs_proxy_fy,
                 fetched_at       = CURRENT_TIMESTAMP
-        """, (symbol, q, rec_days, inv_days, pay_days, ccc, rev_qtr, cogs_qtr))
+        """, (
+            symbol, row["fiscal_year"], row["receivables_days"], row["inventory_days"],
+            row["payables_days"], row["ccc"], row["revenue_fy"], row["cogs_proxy_fy"],
+        ))
     con.commit()
 
 
-def _update_technical_signals(symbol: str, features: dict, con) -> None:
+def update_technical_signals(symbol: str, features: dict, con) -> None:
     if not features:
         return
     cur = con.cursor()
@@ -288,126 +209,78 @@ def _update_technical_signals(symbol: str, features: dict, con) -> None:
     con.commit()
 
 
-# â”€â”€ Stock list â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Per-stock processing ──────────────────────────────────────────────────────────
 
-def _load_stocks(symbol_filter: str | None, limit: int | None, con) -> list[tuple[str, str]]:
-    cur = con.cursor()
-    cur.execute("""
-        SELECT symbol, tlid::TEXT AS tlid FROM nse_stocks
-        WHERE symbol IS NOT NULL AND tlid IS NOT NULL AND tlid::TEXT != ''
-        UNION
-        SELECT tss.symbol, MAX(tss.stock_id)::TEXT AS tlid
-        FROM trendlyne_screener_stocks tss
-        WHERE tss.stock_id IS NOT NULL AND tss.stock_id::TEXT != ''
-          AND NOT EXISTS (SELECT 1 FROM nse_stocks ns WHERE ns.symbol = tss.symbol AND ns.tlid IS NOT NULL)
-        GROUP BY tss.symbol
-        ORDER BY symbol
-    """)
-    rows = [(r[0], str(r[1])) for r in cur.fetchall() if r[0] is not None]
+def process_stock(symbol: str, company_id: str, session: requests.Session, con) -> dict:
+    balance = fetch_et_stats(company_id, "Balance", session)
+    quarterly = fetch_et_stats(company_id, "Quarterly", session)
 
+    ccc_rows = compute_ccc(balance, quarterly)
+    if not ccc_rows:
+        return {}
+
+    upsert_wc_history(symbol, ccc_rows, con)
+
+    latest = ccc_rows[0]
+    prior = ccc_rows[1] if len(ccc_rows) > 1 else None
+
+    ccc_trend = round(latest["ccc"] - prior["ccc"], 2) if latest.get("ccc") is not None and prior and prior.get("ccc") is not None else None
+    wc_deteriorating = 1 if (ccc_trend is not None and ccc_trend > DETERIORATING_THRESHOLD_DAYS) else 0
+    wc_improving = 1 if (ccc_trend is not None and ccc_trend < IMPROVING_THRESHOLD_DAYS) else 0
+
+    features = {
+        "receivables_days_ttm": latest.get("receivables_days"),
+        "ccc_ttm": latest.get("ccc"),
+        "ccc_trend": ccc_trend,
+        "wc_deteriorating": wc_deteriorating,
+        "wc_improving": wc_improving,
+    }
+    update_technical_signals(symbol, features, con)
+    return features
+
+
+# ── Stock list ────────────────────────────────────────────────────────────────────
+
+def load_stocks(symbol_filter: str | None, limit: int | None) -> list[tuple[str, str]]:
+    company_map = load_companyid_map()
+    rows = sorted(company_map.items())
     if symbol_filter:
-        rows = [(s, t) for s, t in rows if s.upper() == symbol_filter.upper()]
+        rows = [(s, c) for s, c in rows if s == symbol_filter.upper()]
     if limit:
         rows = rows[:limit]
     return rows
 
 
-# â”€â”€ Per-stock processing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
-def process_stock(symbol: str, tlid: str,
-                  session: requests.Session, con) -> dict:
-    """Fetch working capital components, compute CCC, persist, return features."""
-
-    # â”€â”€ 1. Trade receivables (primary: TRADE_RECEIVABLE_Q, fallback: DEBTORS_Q) â”€â”€
-    receivables = _fetch_with_fallback(tlid, PARAM_RECEIVABLES, "DEBTORS_Q", session)
-
-    # â”€â”€ 2. Inventory â”€â”€
-    body_inv = _fetch(tlid, PARAM_INVENTORY, session)
-    time.sleep(RATE_LIMIT_SEC)
-    inventory = _parse_eod(body_inv) if body_inv else []
-
-    # â”€â”€ 3. Trade payables (primary: TRADE_PAYABLE_Q, fallback: CREDITORS_Q) â”€â”€
-    payables = _fetch_with_fallback(tlid, PARAM_PAYABLES, "CREDITORS_Q", session)
-
-    # â”€â”€ 4. Revenue â”€â”€
-    body_rev = _fetch(tlid, PARAM_REVENUE, session)
-    time.sleep(RATE_LIMIT_SEC)
-    revenue = _parse_eod(body_rev) if body_rev else []
-
-    # â”€â”€ 5. COGS (primary: COGS_Q, fallback: RAW_MATERIAL_Q) â”€â”€
-    cogs = _fetch_with_fallback(tlid, PARAM_COGS, "RAW_MATERIAL_Q", session)
-
-    if not receivables or not revenue:
-        return {}
-
-    # â”€â”€ Compute per-quarter CCC â”€â”€
-    ccc_series = _compute_ccc_series(receivables, inventory, payables, revenue, cogs)
-
-    if not ccc_series:
-        return {}
-
-    _upsert_wc_history(symbol, ccc_series, con)
-
-    # â”€â”€ Derive TTM features from 4 most-recent quarters â”€â”€
-    # ccc_series rows: (quarter, rec_days, inv_days, pay_days, ccc, rev_qtr, cogs_qtr)
-    rec_series_clean  = [(r[0], r[1]) for r in ccc_series if r[1] is not None]
-    ccc_series_clean  = [(r[0], r[4]) for r in ccc_series if r[4] is not None]
-
-    receivables_days_ttm = _avg_n(rec_series_clean, 4)
-    ccc_ttm              = _avg_n(ccc_series_clean, 4)
-
-    # CCC trend: recent 4Q avg vs prior 4Q avg (quarters 5-8)
-    ccc_trend: float | None = None
-    prior_ccc = _avg_n(ccc_series_clean[4:8], 4) if len(ccc_series_clean) >= 8 else None
-    if ccc_ttm is not None and prior_ccc is not None:
-        ccc_trend = round(ccc_ttm - prior_ccc, 2)
-
-    wc_deteriorating = 1 if (ccc_trend is not None and ccc_trend > 5)  else 0
-    wc_improving     = 1 if (ccc_trend is not None and ccc_trend < -5) else 0
-
-    features = {
-        "receivables_days_ttm": round(receivables_days_ttm, 2) if receivables_days_ttm is not None else None,
-        "ccc_ttm":              round(ccc_ttm, 2)              if ccc_ttm              is not None else None,
-        "ccc_trend":            ccc_trend,
-        "wc_deteriorating":     wc_deteriorating,
-        "wc_improving":         wc_improving,
-    }
-    _update_technical_signals(symbol, features, con)
-    return features
-
-
-# â”€â”€ Main â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Main ──────────────────────────────────────────────────────────────────────────
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Cash Conversion Cycle (working capital) from Trendlyne"
-    )
+    parser = argparse.ArgumentParser(description="Cash Conversion Cycle (annual) from ET_Stats")
     parser.add_argument("--symbol", default=None, help="Single stock NSE symbol")
-    parser.add_argument("--limit",  type=int, default=None, help="Process first N stocks")
+    parser.add_argument("--limit", type=int, default=None, help="Process first N stocks")
     args = parser.parse_args()
 
     con = connect()
     ensure_schema(con)
 
-    stocks = _load_stocks(args.symbol, args.limit, con)
+    stocks = load_stocks(args.symbol, args.limit)
     if not stocks:
-        print("[WorkingCapital] No stocks with tlid found.")
+        print("[WorkingCapital] No stocks with a companyid found.")
         con.close()
         return
 
-    print(f"[WorkingCapital] Processing {len(stocks)} stocks â€” cash conversion cycleâ€¦")
+    print(f"[WorkingCapital] Processing {len(stocks)} stocks — cash conversion cycle (annual)…")
     session = requests.Session()
     session.headers.update(HEADERS)
 
-    ok               = 0
-    ccc_sum          = 0.0
-    ccc_count        = 0
-    deteriorating    = 0
-    improving        = 0
+    ok = 0
+    ccc_sum = 0.0
+    ccc_count = 0
+    deteriorating = 0
+    improving = 0
 
-    for i, (symbol, tlid) in enumerate(stocks, 1):
+    for i, (symbol, company_id) in enumerate(stocks, 1):
         try:
-            features = process_stock(symbol, tlid, session, con)
+            features = process_stock(symbol, company_id, session, con)
             if not features:
                 print(f"  [{i}/{len(stocks)}] {symbol}: no data")
                 continue
@@ -417,31 +290,26 @@ def main() -> None:
             trend = features.get("ccc_trend")
 
             if ccc is not None:
-                ccc_sum   += ccc
+                ccc_sum += ccc
                 ccc_count += 1
-
             if features.get("wc_deteriorating"):
                 deteriorating += 1
             if features.get("wc_improving"):
                 improving += 1
 
-            ccc_str   = f"CCC={ccc:.1f}d"   if ccc   is not None else "CCC=n/a"
+            ccc_str = f"CCC={ccc:.1f}d" if ccc is not None else "CCC=n/a"
             trend_str = f"trend={trend:+.1f}d" if trend is not None else "trend=n/a"
-            flag = ""
-            if features.get("wc_deteriorating"):
-                flag = " [DETERIORATING]"
-            elif features.get("wc_improving"):
-                flag = " [IMPROVING]"
+            flag = " [DETERIORATING]" if features.get("wc_deteriorating") else (" [IMPROVING]" if features.get("wc_improving") else "")
             print(f"  [{i}/{len(stocks)}] {symbol}: {ccc_str} | {trend_str}{flag}")
 
         except Exception as e:
-            print(f"  [{i}/{len(stocks)}] {symbol}: ERROR â€” {e}")
+            print(f"  [{i}/{len(stocks)}] {symbol}: ERROR — {e}")
 
     ccc_avg = round(ccc_sum / ccc_count, 1) if ccc_count else 0
     print(
         f"[WorkingCapital] Done. {ok} stocks. "
         f"CCC avg: {ccc_avg} days. "
-        f"Deteriorating (>5d trend): {deteriorating} stocks. "
+        f"Deteriorating (>{DETERIORATING_THRESHOLD_DAYS}d trend): {deteriorating} stocks. "
         f"Improving: {improving} stocks."
     )
     con.close()

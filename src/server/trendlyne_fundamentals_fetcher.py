@@ -2,14 +2,14 @@
 """
 Trendlyne Fundamentals Fetcher â€” Chart-Data Series
 ===================================================
-Fetches 4 time-series params per stock from Trendlyne's chart-data API:
+Fetches 2 time-series params per stock from Trendlyne's chart-data API, plus DVM:
 
-  EPS_TTM          â†’ quarterly EPS trailing-12-month (31 pts, 8+ years)
-  PE_TTM_SHARE_NOW â†’ daily P/E ratio (1521 pts, 2016â€“now)
-  PBV_A_SHARE_NOW  â†’ daily P/B ratio (1824 pts, 2016â€“now)
+  EPS_TTM          â†’ quarterly EPS trailing-12-month (31 pts, 8+ years); DVM scores embedded
   DIVIDEND_YIELD_TTM_Q â†’ quarterly dividend yield (32 pts, 2019â€“now)
 
-DVM scores (D/V/M 0-100) are embedded in every response's stockData â€” no extra call.
+PE_TTM_SHARE_NOW / PBV_A_SHARE_NOW are no longer fetched here â€” mc_pricefeed_fetcher.py
+already pulls each stock's own daily PE/PB and appends it into trendlyne_pe_history /
+trendlyne_pb_history directly, so the percentile-rank features below now update daily.
 
 Endpoint: https://trendlyne.com/mapp/v1/stock/chart-data/{tlid}/{param}/?format=json
 Key: ?format=json required â€” DRF returns HTML by default.
@@ -343,7 +343,7 @@ def main() -> None:
         print("[TLFund] No stocks with tlid found.")
         return
 
-    print(f"[TLFund] Processing {len(stocks)} stocks â€” EPS/PE/PB/DivYield + DVMâ€¦")
+    print(f"[TLFund] Processing {len(stocks)} stocks â€” EPS/DivYield + DVMâ€¦")
     session = requests.Session()
     session.headers.update(HEADERS)
     today = date.today().isoformat()
@@ -367,25 +367,14 @@ def main() -> None:
                 features["dvm_m"] = dvm.get("m_score")
         time.sleep(RATE_LIMIT_SEC)
 
-        # â”€â”€ 2. PE_TTM_SHARE_NOW (daily, 1521 pts) â”€â”€
-        body = _fetch(tlid, "PE_TTM_SHARE_NOW", session)
-        if body is not None:
-            pe_series = _parse_eod(body)
-            if pe_series:
-                _upsert_series("trendlyne_pe_history", "pe_ttm", symbol, pe_series, con)
-                features.update(_pe_features_from_db(symbol, con))
-        time.sleep(RATE_LIMIT_SEC)
+        # PE/PB history is now appended daily by mc_pricefeed_fetcher.py (that endpoint
+        # already fetches each stock's own daily PE/PB — re-pulling Trendlyne's full
+        # multi-year history here every week was pure duplication). Still read the
+        # percentile-rank features from the same tables, now fresher (daily not weekly).
+        features.update(_pe_features_from_db(symbol, con))
+        features.update(_pb_features_from_db(symbol, con))
 
-        # â”€â”€ 3. PBV_A_SHARE_NOW (daily, 1824 pts) â”€â”€
-        body = _fetch(tlid, "PBV_A_SHARE_NOW", session)
-        if body is not None:
-            pb_series = _parse_eod(body)
-            if pb_series:
-                _upsert_series("trendlyne_pb_history", "pb_ratio", symbol, pb_series, con)
-                features.update(_pb_features_from_db(symbol, con))
-        time.sleep(RATE_LIMIT_SEC)
-
-        # â”€â”€ 4. DIVIDEND_YIELD_TTM_Q (quarterly, 32 pts) â”€â”€
+        # â”€â”€ 2. DIVIDEND_YIELD_TTM_Q (quarterly, 32 pts) â”€â”€
         body = _fetch(tlid, "DIVIDEND_YIELD_TTM_Q", session)
         if body is not None:
             dy_series = _parse_eod(body)

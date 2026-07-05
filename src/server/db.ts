@@ -2211,25 +2211,25 @@ runMigration('064_earnings_quality_insider_macro', `
     symbol               TEXT NOT NULL,
     as_of_date           TEXT NOT NULL,
     cfo_ttm              REAL,
-    capex_ttm            REAL,
-    fcf_ttm              REAL,
-    ebit_ttm             REAL,
-    interest_expense_ttm REAL,
-    market_cap           REAL,
-    fcf_yield            REAL,
+    cfi_ttm              REAL,
+    fcf_ttm_approx       REAL,
     interest_coverage    REAL,
+    market_cap           REAL,
+    fcf_yield_approx     REAL,
+    fetched_at           TEXT DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (symbol, as_of_date)
   );
   CREATE TABLE IF NOT EXISTS working_capital_history (
     symbol           TEXT NOT NULL,
-    quarter          TEXT NOT NULL,
+    fiscal_year      TEXT NOT NULL,
     receivables_days REAL,
     inventory_days   REAL,
     payables_days    REAL,
     ccc              REAL,
-    revenue_qtr      REAL,
-    cogs_qtr         REAL,
-    PRIMARY KEY (symbol, quarter)
+    revenue_fy       REAL,
+    cogs_proxy_fy    REAL,
+    fetched_at       TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (symbol, fiscal_year)
   );
   CREATE TABLE IF NOT EXISTS insider_transactions (
     symbol           TEXT NOT NULL,
@@ -2281,6 +2281,7 @@ runMigration('064_earnings_quality_insider_macro', `
   ALTER TABLE technical_signals ADD COLUMN eps_miss_after_streak INTEGER DEFAULT 0;
   ALTER TABLE technical_signals ADD COLUMN rev_surprise_q1       REAL;
   ALTER TABLE technical_signals ADD COLUMN fcf_yield             REAL;
+  ALTER TABLE technical_signals ADD COLUMN fcf_yield_approx      REAL;
   ALTER TABLE technical_signals ADD COLUMN interest_coverage     REAL;
   ALTER TABLE technical_signals ADD COLUMN fcf_positive          INTEGER DEFAULT 0;
   ALTER TABLE technical_signals ADD COLUMN debt_coverage_risk    INTEGER DEFAULT 0;

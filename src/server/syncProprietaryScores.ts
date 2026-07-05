@@ -1,7 +1,7 @@
 import { dbTransaction } from './dbAsync';
 import { fetchNiftyTraderStockData } from './niftytraderService';
 import { getAllStocks } from './stockMapping';
-import { fetchTrendlyneDVM, fetchTrendlyneChecklist } from './trendlyneService';
+import { fetchTrendlyneChecklist, getTrendlyneDVMFromDb } from './trendlyneService';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const jittered = (base: number, jitterPercent: number) => {
@@ -87,83 +87,34 @@ export async function syncNiftyTraderScores() {
 
 export async function syncTrendlyneScores() {
   const stocks = getAllStocks(); // Sync all symbols
-
-  // fetchTrendlyneDVM/fetchTrendlyneChecklist have no JSON API on Trendlyne (HTML-widget-only,
-  // not implemented — see trendlyneService.ts) and always return null. Probe once with a real
-  // symbol before looping the whole universe: if both are still null, there is nothing this sync
-  // can produce, so skip entirely instead of burning cooldowns and misreporting the cause as
-  // Trendlyne rate-limiting. This self-heals if DVM/Checklist fetching is ever restored.
-  if (stocks.length > 0) {
-    const [probeDvm, probeChecklist] = await Promise.all([
-      fetchTrendlyneDVM(stocks[0].symbol),
-      fetchTrendlyneChecklist(stocks[0].symbol),
-    ]);
-    if (!probeDvm && !probeChecklist) {
-      console.warn('[TRENDLYNE SCORES] DVM/Checklist have no JSON API on Trendlyne right now — skipping sync entirely.');
-      return;
-    }
-  }
-
   const date = new Date().toISOString().split('T')[0];
   console.log(`[TRENDLYNE SCORES] Starting sync for ${stocks.length} symbols...`);
 
-  const baseDelay = Number(process.env.TRENDLYNE_BASE_DELAY_MS || '500');
-  const jitterPercent = Number(process.env.TRENDLYNE_JITTER_PERCENT || '15');
-  const maxCooldowns = Number(process.env.TRENDLYNE_MAX_COOLDOWNS || '3');
-
   let count = 0;
-  let consecutiveFailures = 0;
-  let cooldowns = 0;
+
   for (const stock of stocks) {
-    if (!stock.tlid) {
-      continue;
-    }
-
     try {
-      // 1. Fetch DVM
-      const dvm = await fetchTrendlyneDVM(stock.symbol);
-
-      // Space the two same-host requests so a single stock doesn't fire a burst.
-      await sleep(jittered(baseDelay / 2, jitterPercent));
-
-      // 2. Fetch Checklist
-      const checklist = await fetchTrendlyneChecklist(stock.symbol);
+      // DVM comes from trendlyne_dvm_scores (no live request) — checklist still has no
+      // surviving data source, kept as a probe so this self-heals if it's ever restored.
+      const [dvm, checklist] = await Promise.all([
+        getTrendlyneDVMFromDb(stock.symbol),
+        fetchTrendlyneChecklist(stock.symbol),
+      ]);
 
       if (!dvm && !checklist) {
-        consecutiveFailures++;
-        if (consecutiveFailures >= 5) {
-          cooldowns++;
-          // Trendlyne's WAF returns 405 under sustained load and the rate stays
-          // blocked for the rest of the run; abort instead of flooding the log.
-          if (cooldowns > maxCooldowns) {
-            console.warn(
-              `[TRENDLYNE SCORES] Persistent rate-limiting after ${cooldowns} cooldowns — aborting run (synced ${count}).`,
-            );
-            return;
-          }
-          const cooldownMs = 30000 * cooldowns; // escalate: 30s, 60s, 90s
-          console.warn(
-            `[TRENDLYNE SCORES] 5 consecutive failures. Cool down for ${cooldownMs / 1000}s (cooldown ${cooldowns}/${maxCooldowns})...`,
-          );
-          await sleep(cooldownMs);
-          consecutiveFailures = 0;
-        }
         continue;
       }
-      consecutiveFailures = 0;
-      cooldowns = 0;
 
       const stockUpserts: Array<[string, string, string, number, string]> = [];
 
       if (dvm) {
-        for (const type of ['quality', 'valuation', 'momentum', 'durability'] as const) {
-          const d = (dvm as any)[type];
-          if (d) stockUpserts.push([stock.symbol, date, type, d.score, d.insight || '']);
+        for (const [type, leg] of Object.entries(dvm) as Array<[string, { score: number; color: string | null } | null]>) {
+          if (leg) stockUpserts.push([stock.symbol, date, type, leg.score, leg.color || '']);
         }
       }
 
-      if (checklist && checklist.score !== undefined) {
-        stockUpserts.push([stock.symbol, date, 'checklist', checklist.score, checklist.insight || '']);
+      if (checklist && (checklist as any).score !== undefined) {
+        stockUpserts.push([stock.symbol, date, 'checklist', (checklist as any).score, (checklist as any).insight || '']);
       }
 
       if (stockUpserts.length > 0) {
@@ -184,9 +135,6 @@ export async function syncTrendlyneScores() {
     } catch (e: any) {
       console.error(`[TRENDLYNE SCORES] Error for ${stock.symbol}:`, e.message);
     }
-
-    // Jittered sleep to evade rate limits
-    await sleep(jittered(baseDelay, jitterPercent));
   }
 
   console.log(`[TRENDLYNE SCORES] Synced ${count} stocks.`);

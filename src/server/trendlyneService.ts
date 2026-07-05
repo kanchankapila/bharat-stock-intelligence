@@ -109,6 +109,48 @@ export async function fetchTrendlyneDVM(symbol: string) {
   return null;
 }
 
+export interface TrendlyneDvmLeg {
+  score: number;
+  color: string | null;
+  insight?: string;  // Optional compat prop for V2StockDetails
+}
+
+export interface TrendlyneDvmScores {
+  durability: TrendlyneDvmLeg | null;
+  valuation: TrendlyneDvmLeg | null;
+  momentum: TrendlyneDvmLeg | null;
+  // Optional compat props for existing components (MCStockInfoPanel, V2StockDetails)
+  quality?: TrendlyneDvmLeg | null;
+  technicals?: TrendlyneDvmLeg | null;
+}
+
+/**
+ * DVM has no surviving live Trendlyne JSON API (see fetchTrendlyneDVM above), but the
+ * scores are already fetched weekly as a byproduct of the EPS_TTM chart-data call in
+ * trendlyne_fundamentals_fetcher.py and stored in trendlyne_dvm_scores. Read from there
+ * instead of live-scraping.
+ */
+export async function getTrendlyneDVMFromDb(symbol: string): Promise<TrendlyneDvmScores | null> {
+  const row = await dbGet(
+    `SELECT d_score, v_score, m_score, d_color, v_color, m_color
+     FROM trendlyne_dvm_scores
+     WHERE symbol = ?
+     ORDER BY date DESC LIMIT 1`,
+    [symbol.toUpperCase()],
+  ) as
+    | { d_score: number | null; v_score: number | null; m_score: number | null; d_color: string | null; v_color: string | null; m_color: string | null }
+    | undefined;
+
+  if (!row) return null;
+  if (row.d_score == null && row.v_score == null && row.m_score == null) return null;
+
+  return {
+    durability: row.d_score != null ? { score: row.d_score, color: row.d_color } : null,
+    valuation: row.v_score != null ? { score: row.v_score, color: row.v_color } : null,
+    momentum: row.m_score != null ? { score: row.m_score, color: row.m_color } : null,
+  };
+}
+
 export async function fetchTrendlyneStockMetrics(symbol: string) {
   const map = getStockMapping(symbol);
   let tlid = map?.tlid;
@@ -268,7 +310,7 @@ export async function getTrendlyneOverview(symbol: string) {
     fetchTrendlyneFundamentals(symbol),
     fetchTrendlyneSwot(symbol),
     fetchTrendlyneChecklist(symbol),
-    fetchTrendlyneDVM(symbol)
+    getTrendlyneDVMFromDb(symbol)
   ]);
 
   return {

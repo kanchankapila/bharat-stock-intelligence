@@ -146,7 +146,7 @@ export const commandCenterRouter = router({
           ts.rs_vs_sector_21d, ts.rs_vs_sector_63d,
           ts.eps_surprise_q1, ts.eps_surprise_q2, ts.eps_beat_streak,
           ts.eps_miss_after_streak, ts.rev_surprise_q1,
-          ts.fcf_yield, ts.interest_coverage, ts.fcf_positive, ts.debt_coverage_risk,
+          ts.fcf_yield_approx AS fcf_yield, ts.interest_coverage, ts.fcf_positive, ts.debt_coverage_risk,
           ts.delivery_trend_30d, ts.block_deal_flag, ts.block_deal_direction,
           ts.short_interest_proxy,
           ts.promoter_buy_90d_cr, ts.promoter_sell_90d_cr, ts.promoter_net_90d,
