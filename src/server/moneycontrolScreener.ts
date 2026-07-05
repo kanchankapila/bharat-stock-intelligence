@@ -5,6 +5,10 @@ import fs from 'fs';
 import path from 'path';
 import { isIntradayScreener } from './trendlyneScreener';
 
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 interface McScreenerConfig {
   catId: string;
   scanId: string;
@@ -150,12 +154,17 @@ async function updateStockMappingsFile(symbolMap: Map<string, string>) {
   let updated = false;
   symbolMap.forEach((mcsymbol, nseSymbol) => {
     // Look for exact symbol match and check if mcsymbol is different
-    const regex = new RegExp(`(symbol:\\s*'${nseSymbol}',\\s*stockid:.*})`, 'g');
+    // nseSymbol comes from live MC data and can contain regex metacharacters (parens,
+    // dots, etc. — e.g. company names used as fallback symbols) — must be escaped
+    // before interpolation, or an unbalanced '(' throws "Unterminated group" and
+    // aborts the whole sync.
+    const escapedSymbol = escapeRegExp(nseSymbol);
+    const regex = new RegExp(`(symbol:\\s*'${escapedSymbol}',\\s*stockid:.*})`, 'g');
     const match = content.match(regex);
-    
+
     if (match) {
       // Find the mcsymbol property in the same object
-      const objRegex = new RegExp(`({name:.*mcsymbol:\\s*')([^']*)('.*symbol:\\s*'${nseSymbol}'.*})`, 's');
+      const objRegex = new RegExp(`({name:.*mcsymbol:\\s*')([^']*)('.*symbol:\\s*'${escapedSymbol}'.*})`, 's');
       const objMatch = content.match(objRegex);
       
       if (objMatch && objMatch[2] !== mcsymbol) {
