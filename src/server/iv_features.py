@@ -24,10 +24,51 @@ import datetime
 import numpy as np
 import pandas as pd
 
-from db_compat import read_df, executemany
+from db_compat import read_df, executemany, connect
 
 IV_RANK_WINDOW = 252   # trading days (~1y) — standard IV-rank lookback
 IV_RANK_MIN_OBS = 20   # need at least this many prior obs before a rank is meaningful
+
+
+def compute_options_walls(conn, symbol: str, spot: float, as_of_date: str) -> dict:
+    """Compute call wall, put wall distance, and near-expiry gamma flag from option OI."""
+    result = {'call_wall_dist_pct': 0.0, 'put_wall_dist_pct': 0.0, 'near_expiry_gamma': 0.0}
+    if not spot or spot <= 0:
+        return result
+    try:
+        import datetime as _dt
+        today = _dt.date.fromisoformat(as_of_date[:10])
+        rows = conn.execute("""
+            SELECT strike, calls_oi, puts_oi, expiry
+            FROM so_option_chain
+            WHERE symbol = ? AND date = ?
+            ORDER BY expiry ASC, strike ASC
+        """, (symbol, as_of_date)).fetchall()
+        if not rows:
+            return result
+
+        def _get(r, i, key):
+            return r[key] if hasattr(r, 'keys') else r[i]
+
+        expiries = sorted(set(str(_get(r, 3, 'expiry'))[:10] for r in rows))
+        nearest = expiries[0]
+        days_to_exp = (_dt.date.fromisoformat(nearest) - today).days
+
+        filtered = [r for r in rows if str(_get(r, 3, 'expiry'))[:10] == nearest]
+        strikes = [float(_get(r, 0, 'strike')) for r in filtered]
+        oi_c = [float(_get(r, 1, 'calls_oi') or 0) for r in filtered]
+        oi_p = [float(_get(r, 2, 'puts_oi') or 0) for r in filtered]
+
+        if max(oi_c, default=0) > 0:
+            cw = strikes[oi_c.index(max(oi_c))]
+            result['call_wall_dist_pct'] = (cw - spot) / spot * 100
+        if max(oi_p, default=0) > 0:
+            pw = strikes[oi_p.index(max(oi_p))]
+            result['put_wall_dist_pct'] = (spot - pw) / spot * 100
+        result['near_expiry_gamma'] = 1.0 if days_to_exp <= 7 else 0.0
+    except Exception:
+        pass
+    return result
 
 
 def compute_iv_rank(iv: pd.Series, window: int = IV_RANK_WINDOW,
@@ -91,17 +132,50 @@ def run(only_date: str | None = None) -> int:
         print("[IV] No IV features to write.")
         return 0
 
+    conn = connect()
+    # Ensure new columns exist on technical_signals
+    for col_def in [
+        ("call_wall_dist_pct", "REAL DEFAULT 0"),
+        ("put_wall_dist_pct",  "REAL DEFAULT 0"),
+        ("near_expiry_gamma",  "REAL DEFAULT 0"),
+    ]:
+        try:
+            conn.execute(f"ALTER TABLE technical_signals ADD COLUMN {col_def[0]} {col_def[1]}")
+        except Exception:
+            pass
+
+    # Read spot prices needed for wall computation from stock_option_features
+    spot_rows = conn.execute(
+        "SELECT symbol, date, spot FROM stock_option_features ORDER BY symbol, date"
+    ).fetchall()
+    spot_map: dict = {}
+    for r in spot_rows:
+        sym = r[0] if isinstance(r, (list, tuple)) else r['symbol']
+        dt  = str(r[1] if isinstance(r, (list, tuple)) else r['date'])[:10]
+        sp  = float(r[2] if isinstance(r, (list, tuple)) else r['spot'] or 0)
+        spot_map[(sym, dt)] = sp
+
     # Update the most-recent ts row per symbol (scanner rows lag by days; exact date match misses them).
-    params = [
-        (float(r.iv_rank), float(r.iv_skew), r.symbol, r.symbol)
-        for r in feats.itertuples(index=False)
-    ]
+    params = []
+    for row in feats.itertuples(index=False):
+        date_str = str(row.date)[:10]
+        spot = spot_map.get((row.symbol, date_str), 0.0)
+        walls = compute_options_walls(conn, row.symbol, spot, date_str)
+        params.append((
+            float(row.iv_rank), float(row.iv_skew),
+            walls['call_wall_dist_pct'], walls['put_wall_dist_pct'], walls['near_expiry_gamma'],
+            row.symbol, row.symbol,
+        ))
+
+    conn.close()
+
     n = executemany(
-        "UPDATE technical_signals SET iv_rank = ?, iv_skew = ? "
+        "UPDATE technical_signals "
+        "SET iv_rank = ?, iv_skew = ?, call_wall_dist_pct = ?, put_wall_dist_pct = ?, near_expiry_gamma = ? "
         "WHERE symbol = ? AND date = (SELECT MAX(date) FROM technical_signals t2 WHERE t2.symbol = ?)",
         params,
     )
-    print(f"[IV] Updated iv_rank/iv_skew on {n} technical_signals rows "
+    print(f"[IV] Updated iv_rank/iv_skew/walls on {n} technical_signals rows "
           f"({len(feats)} symbol-dates computed).")
     return n
 

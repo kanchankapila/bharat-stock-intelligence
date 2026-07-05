@@ -128,13 +128,15 @@ def get_score_bucket(score: int) -> str:
     return 'HIGH'
 
 
-def get_state_key(regime: str, sector_or_bucket: str, score: int) -> str:
+def get_state_key(regime: str, sector_or_bucket: str, score: int,
+                  vix_bucket: str = 'LOW', fii_dir: str = 'BUY') -> str:
     regime_clean = regime if regime in REGIMES else 'SIDEWAYS'
-    if sector_or_bucket in ('IT', 'BANK', 'PHARMA', 'AUTO', 'ENERGY', 'INFRA', 'METALS', 'CONSUMER', 'TELECOM', 'REALTY', 'CHEMICALS', 'TEXTILES', 'MEDIA', 'OTHER'):
-        sector_bucket = sector_or_bucket
-    else:
-        sector_bucket = get_sector_bucket(sector_or_bucket)
-    return f"{regime_clean}_{sector_bucket}_{get_score_bucket(score)}"
+    known_buckets = {'IT', 'BANK', 'PHARMA', 'AUTO', 'ENERGY', 'INFRA', 'METALS',
+                     'CONSUMER', 'TELECOM', 'REALTY', 'CHEMICALS', 'TEXTILES', 'MEDIA', 'OTHER'}
+    sector_bucket = sector_or_bucket if sector_or_bucket in known_buckets else get_sector_bucket(sector_or_bucket)
+    vix_clean = vix_bucket if vix_bucket in ('HIGH', 'LOW') else 'LOW'
+    fii_clean = fii_dir    if fii_dir    in ('BUY', 'SELL') else 'BUY'
+    return f"{regime_clean}_{sector_bucket}_{get_score_bucket(score)}_{vix_clean}_{fii_clean}"
 
 
 def get_q(conn: ConnWrapper, state_key: str, action: str) -> float:
@@ -205,6 +207,39 @@ def _save_epsilon(conn: ConnWrapper, epsilon: float):
     """, (str(round(epsilon, 6)),))
 
 
+def _get_vix_bucket(conn: ConnWrapper, as_of_date: str) -> str:
+    """Returns 'HIGH' if India VIX > 18 on or near as_of_date, else 'LOW'."""
+    try:
+        d = datetime.date.fromisoformat(as_of_date[:10])
+        row = conn.execute("""
+            SELECT close FROM macro_asset_prices
+            WHERE symbol='INDIAVIX' AND date<=?
+            ORDER BY date DESC LIMIT 1
+        """, (d,)).fetchone()
+        if row and float(row[0] if isinstance(row, (list, tuple)) else row['close']) > 18:
+            return 'HIGH'
+    except Exception:
+        pass
+    return 'LOW'
+
+
+def _get_fii_direction(conn: ConnWrapper, as_of_date: str) -> str:
+    """Returns 'BUY' if 3-day FII net > 0 ending as_of_date, else 'SELL'."""
+    try:
+        d = datetime.date.fromisoformat(as_of_date[:10])
+        cutoff = d - datetime.timedelta(days=5)
+        row = conn.execute("""
+            SELECT SUM(fii_net) AS net FROM fii_dii_flow
+            WHERE date <= ? AND date > ?
+        """, (d, cutoff)).fetchone()
+        net = row[0] if isinstance(row, (list, tuple)) else (row['net'] if row else None)
+        if net is not None and float(net) > 0:
+            return 'BUY'
+    except Exception:
+        pass
+    return 'SELL'
+
+
 def _get_nifty_return(conn: ConnWrapper, date: str) -> float:
     # stock_ohlcv.date is a DATE column on Postgres -> bind a date object, not a string (rule #6).
     date_d = datetime.date.fromisoformat(date)
@@ -264,7 +299,7 @@ def _get_next_state_key(conn: ConnWrapper, state_key: str,
         return state_key  # no regime data: keep current state
     next_regime = row[0] if row[0] in REGIMES else 'SIDEWAYS'
     parts = state_key.split('_')
-    if len(parts) != 3:
+    if len(parts) < 3:
         return state_key  # malformed key — return unchanged
     parts[0] = next_regime
     return '_'.join(parts)
@@ -345,15 +380,17 @@ def daily_update(conn: ConnWrapper, dry_run: bool = False,
 
 def inspect_policy(conn: ConnWrapper):
     print("\nCurrent RL Policy (best action per state):\n")
-    print(f"{'State':<30} {'Action':<18} {'Q-value':>8}")
-    print("-" * 60)
+    print(f"{'State':<46} {'Action':<18} {'Q-value':>8}")
+    print("-" * 76)
     for regime in REGIMES:
         for sector in ['IT', 'BANK', 'PHARMA', 'AUTO', 'ENERGY', 'INFRA', 'METALS', 'CONSUMER', 'TELECOM', 'REALTY', 'CHEMICALS', 'TEXTILES', 'MEDIA', 'OTHER']:
             for bucket in SCORE_BUCKETS:
-                sk     = f"{regime}_{sector}_{bucket}"
-                action = get_policy(conn, sk, epsilon=0.0)
-                best_q = get_q(conn, sk, action)
-                print(f"{sk:<30} {action:<18} {best_q:>8.4f}")
+                for vix in ('LOW', 'HIGH'):
+                    for fii in ('BUY', 'SELL'):
+                        sk     = f"{regime}_{sector}_{bucket}_{vix}_{fii}"
+                        action = get_policy(conn, sk, epsilon=0.0)
+                        best_q = get_q(conn, sk, action)
+                        print(f"{sk:<46} {action:<18} {best_q:>8.4f}")
 
 
 def backfill_episodes(conn: ConnWrapper, lookback_days: int = 180, dry_run: bool = False) -> dict:
@@ -385,7 +422,9 @@ def backfill_episodes(conn: ConnWrapper, lookback_days: int = 180, dry_run: bool
         regime    = regime or 'SIDEWAYS'
         sig_score = sig_score or 5
         sector    = sector or 'OTHER'
-        state_key = get_state_key(regime, sector, sig_score)
+        vix_b = _get_vix_bucket(conn, sig_date)
+        fii_d = _get_fii_direction(conn, sig_date)
+        state_key = get_state_key(regime, sector, sig_score, vix_b, fii_d)
 
         # Use the policy that had been learned up to this point (offline Q-learning):
         # process rows chronologically so earlier backfill rows inform later ones.

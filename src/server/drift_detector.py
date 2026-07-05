@@ -123,6 +123,30 @@ def check_accuracy_drift(model_name: str = "LSTM_TFT_ENSEMBLE", horizon: int = 5
     return {"status": status, "baseline_acc": baseline_acc, "recent_acc": recent_acc, "drop": drop}
 
 
+def get_drift_multiplier(conn=None) -> float:
+    """Returns confidence multiplier (0.85–1.0) based on most recent drift score.
+    1.0 = no drift, 0.85 = critical drift (15% haircut on win_probability).
+    """
+    try:
+        from db_compat import connect as _connect, query_one as _query_one
+        _conn = conn or _connect()
+        row = _query_one(
+            _conn,
+            "SELECT drift_score FROM dl_model_performance ORDER BY eval_date DESC LIMIT 1",
+            (),
+        )
+        if not row:
+            return 1.0
+        ds = float(row[0] if isinstance(row, (list, tuple)) else row['drift_score'])
+        if ds > PSI_CRIT:
+            return 0.85
+        if ds > PSI_WARN:
+            return 0.93
+        return 1.0
+    except Exception:
+        return 1.0
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default="LSTM_TFT_ENSEMBLE")

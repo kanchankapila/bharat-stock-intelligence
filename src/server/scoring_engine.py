@@ -36,8 +36,23 @@ class AlphaQuantScoringEngine:
         self.engine = get_engine()
         self.nlp = NLPScreenerInference()
         self.stock_stats = {}
+        self._drift_multiplier: float = 1.0
+        self._drift_checked_ts: float = 0.0
         self._load_optimised_weights()
         self.etnow_screeners = self._load_etnow_screeners()
+
+    def _refresh_drift_multiplier(self) -> None:
+        import time
+        if time.time() - self._drift_checked_ts < 3600:
+            return
+        try:
+            from drift_detector import get_drift_multiplier
+            self._drift_multiplier = get_drift_multiplier()
+            self._drift_checked_ts = time.time()
+            if self._drift_multiplier < 1.0:
+                print(f"[Scoring] Drift haircut active: {self._drift_multiplier:.2f}x")
+        except Exception:
+            pass
 
     def _load_optimised_weights(self):
         """Override default weights with ML-optimised values from app_settings if available."""
@@ -496,6 +511,12 @@ class AlphaQuantScoringEngine:
             win_prob_map = {r[0]: float(r[1]) for r in wp_rows}
         except Exception:
             pass
+
+        # Apply drift multiplier to win_probability values (haircut when feature drift detected)
+        self._refresh_drift_multiplier()
+        if self._drift_multiplier < 1.0:
+            win_prob_map = {sym: round(wp * self._drift_multiplier, 4)
+                           for sym, wp in win_prob_map.items()}
 
         # Load Technical Composite Score
         tech_composite_map: Dict[str, float] = {}
