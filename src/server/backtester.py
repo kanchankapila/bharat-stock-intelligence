@@ -33,6 +33,20 @@ from db_compat import connect, read_df
 
 NIFTY_SYMBOLS  = ('NIFTY50', 'NIFTY', '^NSEI')
 INITIAL_CAPITAL = 1_000_000   # ₹10L default
+MAX_KELLY_FRAC = 0.25
+
+def _kelly_fraction(win_prob: float | None, target: float | None, entry: float, stop: float | None) -> float | None:
+    """Fractional Kelly size as fraction of capital. Returns None → fall back to equal-weight."""
+    if win_prob is None or not (0.01 < win_prob < 0.99):
+        return None
+    if target is None or stop is None or entry <= 0 or stop >= entry:
+        return None
+    b = (target - entry) / (entry - stop)
+    if b <= 0:
+        return None
+    p, q = win_prob, 1.0 - win_prob
+    f = (p * b - q) / b
+    return min(max(f, 0.0), MAX_KELLY_FRAC)
 
 
 class Backtester:
@@ -52,7 +66,7 @@ class Backtester:
         q = """
             SELECT ts.symbol, ts.date AS signal_date, ts.signal_score,
                    ts.cmp AS entry_price_ref, ts.stop_loss, ts.targets, ts.signals_json,
-                   ts.nifty_regime, ts.adx
+                   ts.nifty_regime, ts.adx, ts.win_probability
             FROM technical_signals ts
             WHERE ts.date BETWEEN ? AND ?
               AND ts.signal_score >= ?
@@ -160,6 +174,14 @@ class Backtester:
         Simulate trades from signals.  Returns (trade_log, equity_curve_daily).
         equity_curve_daily: pd.Series indexed by date.
         """
+        surveillance = self._load_surveillance_symbols()
+        if surveillance:
+            before = len(signals)
+            signals = signals[~signals['symbol'].isin(surveillance)].reset_index(drop=True)
+            dropped = before - len(signals)
+            if dropped:
+                print(f"[Backtester] Filtered {dropped} ASM/GSM signals")
+
         trade_log: list[dict] = []
         # Position state: symbol -> {entry_date, entry_price, stop_loss, target_price, horizon_days, ...}
         open_positions: dict[str, dict] = {}
@@ -360,12 +382,14 @@ class Backtester:
                 if pd.isna(raw_entry) or raw_entry <= 0:
                     continue
 
-                # Fixed equal-weight: each slot = 1/max_positions of initial capital. NOT
-                # cash / remaining_slots — that scheme makes allocation path/order-dependent
-                # (later signals get systematically different sizing depending on what happened
-                # to earlier positions in the same run), which biases backtest comparisons across
-                # strategies/runs. See TestPositionSizing in tests/test_backtester.py.
-                position_capital = initial_capital / max_positions
+                win_prob_val = float(row.get('win_probability') or 0) if hasattr(row, 'get') else float(getattr(row, 'win_probability', 0) or 0)
+                sl_price = float(row['stop_loss']) if pd.notna(row['stop_loss']) else None
+                target_p = float(row['target_price']) if pd.notna(row['target_price']) else None
+                kelly_f = _kelly_fraction(win_prob_val or None, target_p, raw_entry, sl_price)
+                if kelly_f is not None and kelly_f > 0:
+                    position_capital = capital * kelly_f
+                else:
+                    position_capital = initial_capital / max_positions
                 position_capital = min(position_capital, cash * 0.95)  # cannot exceed available cash
                 if position_capital < 1000:
                     continue
@@ -432,6 +456,73 @@ class Backtester:
 
         equity_series = pd.Series(equity)
         return trade_log, equity_series
+
+    def _load_surveillance_symbols(self) -> set:
+        try:
+            rows = self.conn.execute(
+                "SELECT DISTINCT symbol FROM asm_gsm_stocks WHERE stage IS NOT NULL"
+            ).fetchall()
+            return {r[0] if isinstance(r, (list, tuple)) else r['symbol'] for r in rows}
+        except Exception:
+            return set()
+
+    def run_walk_forward(
+        self,
+        start: str,
+        end: str,
+        n_folds: int = 4,
+        min_score: int = 3,
+        horizon_days: int = 15,
+        initial_capital: float = INITIAL_CAPITAL,
+        commission_bps: float = 40,
+        slippage_bps: float = 15,
+    ) -> list[dict]:
+        import datetime as _dt
+        s = _dt.date.fromisoformat(start)
+        e = _dt.date.fromisoformat(end)
+        total_days = (e - s).days
+        fold_days  = total_days // n_folds
+
+        results = []
+        for i in range(n_folds):
+            fold_start = s + _dt.timedelta(days=i * fold_days)
+            fold_end   = fold_start + _dt.timedelta(days=fold_days) if i < n_folds - 1 else e
+            oos_start  = fold_start + _dt.timedelta(days=int(fold_days * 0.75))
+
+            print(f"\n[WalkForward] Fold {i+1}/{n_folds}: OOS {oos_start}–{fold_end}")
+
+            signals = self.load_signals(oos_start.isoformat(), fold_end.isoformat(), min_score, horizon_days)
+            if signals.empty:
+                print("  No signals — skipping.")
+                continue
+
+            syms = signals['symbol'].unique().tolist()
+            ohlcv = self.load_ohlcv(syms, oos_start.isoformat(), fold_end.isoformat())
+            ohlcv_dict = {sym: g.reset_index(drop=True) for sym, g in ohlcv.groupby('symbol')}
+
+            trades, equity = self.simulate_trades(
+                signals, ohlcv_dict, initial_capital=initial_capital,
+                commission_bps=commission_bps, slippage_bps=slippage_bps,
+            )
+            if not trades:
+                print("  No trades.")
+                continue
+
+            wins  = sum(1 for t in trades if t.get('pnl', 0) > 0)
+            total = len(trades)
+            pnl   = sum(t.get('pnl', 0) for t in trades)
+            result = {
+                'fold': i + 1,
+                'oos_start': oos_start.isoformat(),
+                'oos_end': fold_end.isoformat(),
+                'n_trades': total,
+                'win_rate': round(wins / total, 4) if total else 0,
+                'total_pnl': round(pnl, 2),
+            }
+            results.append(result)
+            print(f"  Trades={total}  Win%={result['win_rate']*100:.1f}  PnL=₹{pnl:,.0f}")
+
+        return results
 
     # ──────────────────────────────────────────────────────────────────────────
     # Performance statistics
@@ -666,20 +757,34 @@ if __name__ == "__main__":
     parser.add_argument("--slippage", type=float, default=15, help="Slippage in bps (default 15 = ~NSE market impact)")
     parser.add_argument("--commission", type=float, default=40, help="Round-trip commission in bps (default 40 = STT+stamp+GST+brokerage)")
     parser.add_argument("--name",     type=str, default="")
+    parser.add_argument('--walk-forward', action='store_true')
+    parser.add_argument('--folds', type=int, default=4)
     args = parser.parse_args()
 
     bt = Backtester()
     try:
-        bt.run(
-            start=args.start,
-            end=args.end,
-            horizon_days=args.horizon,
-            min_score=args.min_score,
-            max_positions=args.max_pos,
-            initial_capital=args.capital,
-            run_name=args.name,
-            slippage_bps=args.slippage,
-            commission_bps=args.commission,
-        )
+        if args.walk_forward:
+            results = bt.run_walk_forward(
+                args.start, args.end,
+                n_folds=args.folds,
+                min_score=args.min_score,
+                horizon_days=args.horizon,
+                initial_capital=args.capital,
+                commission_bps=args.commission,
+                slippage_bps=args.slippage,
+            )
+            print(f"\nWalk-forward complete: {len(results)} folds")
+        else:
+            bt.run(
+                start=args.start,
+                end=args.end,
+                horizon_days=args.horizon,
+                min_score=args.min_score,
+                max_positions=args.max_pos,
+                initial_capital=args.capital,
+                run_name=args.name,
+                slippage_bps=args.slippage,
+                commission_bps=args.commission,
+            )
     finally:
         bt.close()
