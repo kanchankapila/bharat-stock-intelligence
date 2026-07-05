@@ -230,6 +230,15 @@ export async function pgEnsureColumns(): Promise<void> {
     `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS pead_score            DOUBLE PRECISION`,
     `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS event_signal_score    DOUBLE PRECISION`,
     `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS event_type_flags      TEXT`,
+    // migration 066 (2026-07-04 trendlyne-fetch-rationalization) — fcf_yield_approx
+    // superseded fcf_yield (Task 11) but this file wasn't updated when db.ts/
+    // schema.postgres.sql were, leaving live Postgres without the column for a day
+    // until ml_ensemble.py --score started throwing UndefinedColumn. Keep this file
+    // in sync with db.ts's ALTER block whenever a migration touches Postgres-backed tables.
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS fcf_yield_approx      DOUBLE PRECISION`,
+    `ALTER TABLE tl_financial_quality ADD COLUMN IF NOT EXISTS cfi_ttm            DOUBLE PRECISION`,
+    `ALTER TABLE tl_financial_quality ADD COLUMN IF NOT EXISTS fcf_ttm_approx     DOUBLE PRECISION`,
+    `ALTER TABLE tl_financial_quality ADD COLUMN IF NOT EXISTS fcf_yield_approx   DOUBLE PRECISION`,
   ];
   // Run each ALTER individually — Postgres can't do multiple DDL in one statement
   for (const sql of alters) {

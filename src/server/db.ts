@@ -2588,6 +2588,15 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_ehp_date ON early_hours_predictions(date DESC);
 `);
 
+// This file is the SQLite dev-fallback schema-of-record — adding a column/table here
+// does NOT reach live Postgres. USE_POSTGRES=true reads db/schema.postgres.sql for fresh
+// installs, but existing Postgres databases only pick up new columns via pgClient.ts's
+// pgEnsureColumns() ALTER list. Missing that step is exactly how technical_signals /
+// tl_financial_quality went 24h+ without fcf_yield_approx on 2026-07-05 (ml_ensemble.py
+// --score threw UndefinedColumn) while db.ts + schema.postgres.sql already had it.
+// Whenever you add a column/table here that Postgres-backed code will read, add the
+// matching entry to pgClient.ts's pgEnsureColumns() too.
+
 // Keep startup diagnostics off stdout so stdio-based clients can parse JSON-RPC.
 console.error('[DB] Schema normalization complete (Phase 3.5)');
 
