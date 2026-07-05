@@ -792,6 +792,20 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     X['event_negative']    = (num('event_signal_score', 0) < -1.0).astype(float)
     X['pead_x_event']      = (X['pead_score'] * X['event_score']).clip(-1, 1)
 
+    # Days to next earnings: signals near earnings have binary outcome risk
+    dte = num('days_to_next_earnings', 999).clip(0, 90)
+    X['days_to_earnings']  = dte / 90.0
+    X['pre_earnings_3d']   = (dte <= 3).astype(float)
+    X['pre_earnings_10d']  = (dte <= 10).astype(float)
+    X['earnings_x_score']  = X['pre_earnings_10d'] * X['signal_score']
+
+    # Credit rating trend: (upgrades - downgrades) / (total + 1) in past 12m
+    cr_up  = num('cr_upgrades',   0.0).clip(0, 10)
+    cr_dn  = num('cr_downgrades', 0.0).clip(0, 10)
+    X['credit_trend']    = ((cr_up - cr_dn) / (cr_up + cr_dn + 1.0)).clip(-1, 1)
+    X['credit_upgraded'] = (cr_up > cr_dn).astype(float)
+    X['credit_x_score']  = X['credit_trend'].clip(0, 1) * X['signal_score']
+
     # Signal type one-hot
     sig_col = df['signals_json'] if 'signals_json' in df.columns else pd.Series(['[]'] * len(df), index=df.index)
     type_sets = sig_col.apply(_parse_signal_types)
@@ -959,7 +973,17 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                COALESCE(fh.market_cap, sf.market_cap)                   AS market_cap,
                aeh.n_analysts, aeh.buy_count, aeh.target_mean,
                psh_az.score_value AS altman_z,
-               psh_oo.score_value AS ohlson_o
+               psh_oo.score_value AS ohlson_o,
+               (SELECT COUNT(*) FROM credit_rating_events cre
+                 WHERE cre.symbol = so.symbol
+                   AND UPPER(cre.action) LIKE '%UPGRADE%'
+                   AND cre.announcement_date >= date(so.signal_date, '-365 days')
+                   AND cre.announcement_date <= so.signal_date) AS cr_upgrades,
+               (SELECT COUNT(*) FROM credit_rating_events cre
+                 WHERE cre.symbol = so.symbol
+                   AND UPPER(cre.action) LIKE '%DOWNGRADE%'
+                   AND cre.announcement_date >= date(so.signal_date, '-365 days')
+                   AND cre.announcement_date <= so.signal_date) AS cr_downgrades
         FROM signal_outcomes so
         -- Use nearest prior ts row within 3 days to recover ~26% more training rows
         -- that had no exact-date ts entry (scanner runs on sparse schedule).
@@ -1053,6 +1077,15 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
         df['outcome'] = df['outcome'].astype(int)
     else:
         df['outcome'] = df['outcome'].map({'WIN': 1, 'LOSS': 0, 'STOP_LOSS': 0})
+    if 'days_to_next_earnings' not in df.columns:
+        if 'days_to_next_results' in df.columns:
+            df['days_to_next_earnings'] = df['days_to_next_results']
+        else:
+            df['days_to_next_earnings'] = 999
+    if 'cr_upgrades' not in df.columns:
+        df['cr_upgrades'] = 0
+    if 'cr_downgrades' not in df.columns:
+        df['cr_downgrades'] = 0
     return df
 
 
@@ -2013,6 +2046,86 @@ def run(do_train: bool = True, do_score: bool = True,
     print("[Ensemble] Done.")
 
 
+def incremental_update(n_days: int = 3, n_rounds: int = 20, dry_run: bool = False) -> bool:
+    """Warm-start LGBM on last `n_days` of new resolved outcomes. Returns True if applied."""
+    if not os.path.exists(ENSEMBLE_PATH):
+        print("[Ensemble] No saved model — run --train first.")
+        return False
+
+    try:
+        import lightgbm as lgb
+    except ImportError:
+        print("[Ensemble] lightgbm not installed.")
+        return False
+
+    cutoff = (datetime.datetime.now() - datetime.timedelta(days=n_days)).strftime('%Y-%m-%d')
+    q = """
+        SELECT so.symbol, so.signal_date, so.horizon_days, so.outcome,
+               so.signal_score, so.signals_json,
+               ts.rsi, ts.adx, ts.nifty_regime, ts.cmp, ts.sma200, ts.volume_ratio,
+               ts.fii_3d_net, ts.above_sma200, ts.pcr_oi, ts.pcr_vol,
+               ts.fii_10d_net, ts.dii_3d_net, ts.delivery_pct,
+               ts.sector_ret_5d, ts.sector_ret_21d,
+               ts.iv_rank, ts.iv_skew, ts.rs_rank_21d, ts.rs_rank_63d,
+               ts.insider_buy_pct_90d,
+               ts.opening_range_break, ts.vwap_deviation_pct, ts.first_hour_vol_share
+        FROM signal_outcomes so
+        LEFT JOIN technical_signals ts ON ts.symbol=so.symbol AND ts.date=so.signal_date
+        WHERE so.outcome IN ('WIN','LOSS')
+          AND so.signal_date >= ?
+        ORDER BY so.signal_date ASC
+    """
+    df = read_df(q, (cutoff,))
+    if len(df) < 5:
+        print(f"[Ensemble] Only {len(df)} new outcomes — skipping incremental.")
+        return False
+
+    print(f"[Ensemble] Incremental: {len(df)} outcomes from last {n_days}d")
+    y = (df['outcome'] == 'WIN').astype(int).values
+    X = build_features(df)
+
+    with open(ENSEMBLE_PATH, 'rb') as f:
+        ensemble = pickle.load(f)
+
+    lgbm_model = None
+    lgbm_name  = None
+    for est_name, est in ensemble.get('base_models', []):
+        inner = getattr(est, 'estimator', est)
+        if hasattr(inner, 'booster_'):
+            lgbm_model = inner
+            lgbm_name  = est_name
+            break
+
+    if lgbm_model is None:
+        print("[Ensemble] No LGBM model found in saved ensemble.")
+        return False
+
+    if dry_run:
+        print(f"[Ensemble] Dry-run: would run {n_rounds} rounds on {len(df)} samples.")
+        return True
+
+    feature_names = ensemble.get('feature_names', list(X.columns))
+    for col in feature_names:
+        if col not in X.columns:
+            X[col] = 0.0
+    X_aligned = X[feature_names].astype(np.float32)
+
+    ds = lgb.Dataset(X_aligned, label=y, free_raw_data=False)
+    lgbm_model.booster_ = lgb.train(
+        lgbm_model.get_params(),
+        ds,
+        num_boost_round=n_rounds,
+        init_model=lgbm_model.booster_,
+        callbacks=[lgb.log_evaluation(period=-1)],
+    )
+
+    with open(ENSEMBLE_PATH, 'wb') as f:
+        pickle.dump(ensemble, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+    print(f"[Ensemble] Incremental complete: +{n_rounds} rounds.")
+    return True
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="ML Ensemble Signal Confidence Scorer")
     parser.add_argument("--train",       action="store_true", help="Train ensemble model")
@@ -2020,10 +2133,18 @@ if __name__ == "__main__":
     parser.add_argument("--tune",        action="store_true", help="Tune model hyperparameters with Optuna")
     parser.add_argument("--retrain-full",action="store_true", help="Discard saved model and retrain")
     parser.add_argument("--check-drift", action="store_true", help="Check live vs trained AUC drift only")
+    parser.add_argument("--incremental", action="store_true", help="Warm-start LGBM on last 3d outcomes")
+    parser.add_argument("--incr-days",   type=int, default=3)
+    parser.add_argument("--incr-rounds", type=int, default=20)
+    parser.add_argument("--dry-run",     action="store_true")
     parser.add_argument("--min-samples", type=int, default=30)
     parser.add_argument("--label", choices=['horizon', 'triple_barrier'], default='horizon',
                         help="Training label: fixed-horizon WIN/LOSS (default) or triple-barrier")
     args = parser.parse_args()
+
+    if args.incremental:
+        incremental_update(n_days=args.incr_days, n_rounds=args.incr_rounds, dry_run=args.dry_run)
+        sys.exit(0)
 
     if args.check_drift:
         conn = connect()

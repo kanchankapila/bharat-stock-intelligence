@@ -215,6 +215,18 @@ def register_update(conn: ConnWrapper, state: dict, n_new: int, cv_auc: float):
 
 # ── Score pending signals ─────────────────────────────────────────────────────
 
+def _compute_blend_weights(ensemble_path: str) -> tuple[float, float]:
+    """Return (sgd_weight, ens_weight) based on ensemble freshness."""
+    if not os.path.exists(ensemble_path):
+        return 1.0, 0.0
+    age_days = (datetime.datetime.now().timestamp() - os.path.getmtime(ensemble_path)) / 86400
+    if age_days > 14:
+        return 0.75, 0.25
+    if age_days > 5:
+        return 0.60, 0.40
+    return 0.40, 0.60
+
+
 def score_pending_with_ensemble_blend(
     conn: ConnWrapper,
     sgd_state: dict,
@@ -239,7 +251,9 @@ def score_pending_with_ensemble_blend(
             ens_probs = predict_proba_ensemble(ensemble, X_ens)
         except Exception:
             ens_probs = sgd_probs
-        probs = 0.4 * sgd_probs + 0.6 * ens_probs
+        sgd_w, ens_w = _compute_blend_weights(ENSEMBLE_PATH)
+        probs = sgd_w * sgd_probs + ens_w * ens_probs
+        print(f"[OnlineLearner] Blend: SGD={sgd_w:.2f} ENS={ens_w:.2f}")
     else:
         probs = sgd_probs
 
@@ -312,6 +326,13 @@ def run(window_days: int = 180, min_new: int = 5, dry_run: bool = False):
               f"val_AUC={cv_auc:.4f}")
         save_sgd(state)
         register_update(conn, state, len(df), cv_auc)
+
+        try:
+            from signal_type_priors import update_priors_from_outcomes
+            update_priors_from_outcomes(conn, df[['signals_json', 'outcome']])
+            print(f"[OnlineLearner] Signal-type priors updated.")
+        except Exception as e:
+            print(f"[OnlineLearner] Prior update skipped: {e}")
 
         # Load ensemble for blended scoring
         ensemble = None
