@@ -118,6 +118,31 @@ export async function fetchTrendlyneChecklist(tlid: string): Promise<TrendlyneCh
   }
 }
 
+/**
+ * Reads checklist data written by the background cycle job (see Task 6) from
+ * trendlyne_checklist. Never live-fetches — on-demand callers (the router
+ * procedure and getTrendlyneOverview below) must go through this, not
+ * fetchTrendlyneChecklist, so checklist traffic stays confined to the paced
+ * cycle job.
+ */
+export async function getCachedTrendlyneChecklist(symbol: string): Promise<TrendlyneChecklistResult | null> {
+  const row = await dbGet<{
+    score: number; total: number; yes_count: number;
+    insight: string | null; checklist_data: string;
+  }>(
+    'SELECT score, total, yes_count, insight, checklist_data FROM trendlyne_checklist WHERE symbol = ?',
+    [symbol],
+  );
+  if (!row) return null;
+  return {
+    score: row.score,
+    total: row.total,
+    yesCount: row.yes_count,
+    insight: row.insight ?? undefined,
+    checklistData: JSON.parse(row.checklist_data),
+  };
+}
+
 export async function fetchTrendlyneDVM(symbol: string) {
   console.warn(`[TRENDLYNE] DVM has no JSON API on Trendlyne (only HTML widget scraping); returning null for ${symbol}`);
   return null;
@@ -323,7 +348,7 @@ export async function getTrendlyneOverview(symbol: string) {
   const [fundamentals, swot, checklist, dvm] = await Promise.all([
     fetchTrendlyneFundamentals(symbol),
     fetchTrendlyneSwot(symbol),
-    fetchTrendlyneChecklist(symbol),
+    getCachedTrendlyneChecklist(symbol),
     getTrendlyneDVMFromDb(symbol)
   ]);
 

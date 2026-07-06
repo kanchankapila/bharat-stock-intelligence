@@ -1,7 +1,7 @@
 import { z } from "zod";
 import {
   fetchTrendlyneSwot,
-  fetchTrendlyneChecklist,
+  getCachedTrendlyneChecklist,
   getTrendlyneDVMFromDb,
   fetchTrendlyneStockMetrics,
   fetchTrendlyneAdvTechnicalAnalysis,
@@ -21,7 +21,7 @@ export const trendlyneRouter = router({
 
   getTrendlyneChecklist: publicProcedure
     .input(z.object({ symbol: z.string() }))
-    .query(async ({ input }) => fetchTrendlyneChecklist(input.symbol)),
+    .query(async ({ input }) => getCachedTrendlyneChecklist(input.symbol)),
 
   getTrendlyneDVM: publicProcedure
     .input(z.object({ symbol: z.string() }))
