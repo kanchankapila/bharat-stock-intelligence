@@ -116,7 +116,14 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
         s = df[col] if col in df.columns else pd.Series(default, index=df.index)
         if isinstance(s, pd.DataFrame):
             s = s.iloc[:, 0]
-        return pd.to_numeric(s, errors='coerce').fillna(default)
+        try:
+            return pd.to_numeric(s, errors='coerce').fillna(default)
+        except TypeError:
+            # Bad join produced object cells (nested arrays, etc.) — flatten element-wise
+            return pd.to_numeric(
+                s.apply(lambda x: x.item() if hasattr(x, 'item') else (x[0] if hasattr(x, '__len__') else x)),
+                errors='coerce',
+            ).fillna(default)
 
     X['signal_score']  = num('signal_score', 5)
     X['rsi']           = num('rsi', 50)
@@ -204,6 +211,19 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     X['iv_skew'] = num('iv_skew', 0.0)
     # Interaction: a strong signal into cheap IV is the highest-quality entry
     X['score_x_low_iv'] = X['signal_score'] * (1.0 - X['iv_rank'])
+
+    # Options call/put walls (from iv_features.compute_options_walls → technical_signals)
+    # call_wall_dist_pct: % distance from spot to nearest peak call OI strike (resistance)
+    # put_wall_dist_pct:  % distance from spot to nearest peak put OI strike (support)
+    # near_expiry_gamma:  1.0 if ≤7 days to nearest expiry (gamma risk zone)
+    X['call_wall_dist_pct'] = num('call_wall_dist_pct', 5.0).clip(0, 20)
+    X['put_wall_dist_pct']  = num('put_wall_dist_pct',  5.0).clip(0, 20)
+    X['near_expiry_gamma']  = num('near_expiry_gamma',  0.0).clip(0, 1)
+    # Within 2% of call wall = resistance; within 2% = support zone
+    X['near_call_wall']     = (X['call_wall_dist_pct'] < 2.0).astype(np.float32)
+    X['near_put_wall']      = (X['put_wall_dist_pct']  < 2.0).astype(np.float32)
+    # Strong signal near put wall = support-confirmed entry (highest-quality setup)
+    X['wall_x_score']       = (1.0 / (X['call_wall_dist_pct'].clip(lower=0.5))) * X['signal_score'] / 2.0
 
     # Max pain distance: how far spot is from max pain strike
     # Negative = below max pain (put writers dominate → likely support)

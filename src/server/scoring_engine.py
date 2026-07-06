@@ -538,6 +538,7 @@ class AlphaQuantScoringEngine:
         # (max) rather than averaging, to preserve the edge. Bounded to [0.7, 1.4] so it
         # tilts the ranking without dominating it. Empty data => 1.0 (no behaviour change).
         signal_quality_map: Dict[str, float] = {}
+        sym_signal_types: Dict[str, list] = {}  # used later for prior blend
         try:
             with self.engine.connect() as conn:
                 stw = conn.execute(text(
@@ -554,6 +555,7 @@ class AlphaQuantScoringEngine:
                     types = [s.get('type') for s in json.loads(sj) if isinstance(s, dict)]
                 except Exception:
                     continue
+                sym_signal_types[sym] = types
                 weights = [type_weight[t] for t in types if t in type_weight]
                 if weights:
                     signal_quality_map[sym] = max(0.7, min(1.4, max(weights)))
@@ -562,6 +564,32 @@ class AlphaQuantScoringEngine:
                       f"({len(type_weight)} signal types).")
         except Exception as e:
             print(f"[SCORING] signal-quality map unavailable (defaulting to neutral): {e}")
+
+        # Blend win_probability with Beta-Bernoulli signal-type priors (15% prior weight)
+        # Priors encode each signal type's historical win-rate; prevents overconfidence on
+        # rare setups with few observations while preserving ensemble signal for common ones.
+        if win_prob_map and sym_signal_types:
+            try:
+                with self.engine.connect() as conn:
+                    pr_row = conn.execute(text(
+                        "SELECT value FROM app_settings WHERE key = 'signal_type_priors'"
+                    )).fetchone()
+                if pr_row:
+                    _priors = json.loads(pr_row[0])
+                    from signal_type_priors import get_posterior_mean
+                    prior_weight = 0.15
+                    blended = 0
+                    for sym, types in sym_signal_types.items():
+                        if sym not in win_prob_map or not types:
+                            continue
+                        post = get_posterior_mean(_priors, types[0])  # best (most recent) signal type
+                        wp = win_prob_map[sym]
+                        win_prob_map[sym] = round((1 - prior_weight) * wp + prior_weight * post, 4)
+                        blended += 1
+                    if blended:
+                        print(f"[SCORING] Signal-type prior blend applied to {blended} symbols.")
+            except Exception as e:
+                print(f"[SCORING] Prior blend skipped: {e}")
 
         # Load Global Market Score for True Alpha (Beta) adjustment
         market_global_score = 0.0
