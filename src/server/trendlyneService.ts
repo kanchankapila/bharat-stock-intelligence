@@ -135,6 +135,7 @@ export async function getCachedTrendlyneChecklist(symbol: string): Promise<Trend
       [symbol],
     );
     if (!row) return null;
+    if (row.total === 0) return null; // placeholder row from a failed attempt (markChecklistAttempted) — not real data
     return {
       score: row.score,
       total: row.total,
