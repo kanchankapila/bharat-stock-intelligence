@@ -737,7 +737,7 @@ async function processTrendlyneChecklistCycle(_job: Job): Promise<void> {
 
     console.log(`[TRENDLYNE-CHECKLIST] Processed ${batch.length} stocks this run.`);
   } finally {
-    await queue.add('checklist-cycle-tick', {}, { delay: nextDelayMs });
+    await queue.add('checklist-cycle-tick', {}, { delay: nextDelayMs, removeOnComplete: 3, removeOnFail: 3 });
   }
 }
 
@@ -2535,8 +2535,12 @@ export async function initQueues(): Promise<boolean> {
       processTrendlyneChecklistCycle,
       { connection, concurrency: 1, lockDuration: 5 * 60 * 1000 },
     );
+    trendlyneChecklistCycleWorker.on('completed', () => {
+      recordHeartbeat('trendlyne-checklist-cycle', 'success');
+    });
     trendlyneChecklistCycleWorker.on('failed', (_job, err) => {
       console.error('[QUEUE] trendlyne-checklist-cycle failed:', err.message);
+      recordHeartbeat('trendlyne-checklist-cycle', 'failed', err.message);
     });
 
     // Only kick off the self-rescheduling chain if one isn't already pending —
@@ -2546,7 +2550,7 @@ export async function initQueues(): Promise<boolean> {
       (await trendlyneChecklistCycleQueue.getDelayedCount()) +
       (await trendlyneChecklistCycleQueue.getActiveCount());
     if (pendingChecklistJobs === 0) {
-      await trendlyneChecklistCycleQueue.add('checklist-cycle-tick', {}, { delay: 60_000 });
+      await trendlyneChecklistCycleQueue.add('checklist-cycle-tick', {}, { delay: 60_000, removeOnComplete: 3, removeOnFail: 3 });
     }
     console.log('[QUEUE] Trendlyne checklist cycle scheduled (random 15-45 min intervals)');
 
