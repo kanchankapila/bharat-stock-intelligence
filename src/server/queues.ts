@@ -29,6 +29,12 @@ import { fetchDeliveryMap } from './deliveryFetcher';
 import { updateMonitorState } from './monitoringService';
 import { getTrendlyneMetricSymbols, enqueueTrendlyneMetricsFetchJobs, runTrendlyneMetricsFetch } from './trendlyneDailyFetchService';
 import { isMarketOpen } from './marketStatusService';
+import {
+  isDormant, shouldStartNewCycle, pickRandomBatch, randomDelayMs, DORMANT_RECHECK_MS,
+  getCycleState, startNewCycle, completeCycle, getPendingStocksForCycle, upsertChecklistResult,
+  markChecklistAttempted,
+} from './trendlyneChecklistCycle';
+import { fetchTrendlyneChecklist } from './trendlyneService';
 
 import { pythonApi } from './pythonApi';
 import { recordHeartbeat, startHeartbeatMonitor } from './jobHeartbeat';
@@ -111,6 +117,7 @@ export const QUEUE_TRENDLYNE_MIDWEEK = 'trendlyne-midweek';
 export const QUEUE_TRENDLYNE_RATIOS_MONTHLY = 'trendlyne-ratios-monthly';
 export const QUEUE_TICKERTAPE_SCORECARD = 'tickertape-scorecard';
 export const QUEUE_LIVE_SCREENER_COLLECT = 'live-screener-collect';
+export const QUEUE_TRENDLYNE_CHECKLIST_CYCLE = 'trendlyne-checklist-cycle';
 
 const BULK_CACHE_KEY      = 'live-stocks-bulk';
 const BULK_TTL_SECONDS    = 5 * 60;
@@ -205,6 +212,8 @@ let agentAuditorWorker:       Worker | null = null;
 let agentOptimizerWorker:     Worker | null = null;
 export let unifiedRankerQueue: Queue | null = null;
 export let unifiedRankerWorker: Worker | null = null;
+let trendlyneChecklistCycleQueue: Queue | null = null;
+let trendlyneChecklistCycleWorker: Worker | null = null;
 
 
 // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Confluence compute processor ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
@@ -690,6 +699,55 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await computeSignalTypeStats().catch(e => console.warn('[QUEUE] computeSignalTypeStats failed:', (e as Error).message));
 
   return { success: true };
+}
+
+// ── Trendlyne checklist cycle processor (self-rescheduling, random interval) ──
+
+async function processTrendlyneChecklistCycle(_job: Job): Promise<void> {
+  const queue = trendlyneChecklistCycleQueue!;
+  let nextDelayMs = randomDelayMs(15, 45);
+  try {
+    const now = Date.now();
+    let { cycleStartedAt, cycleCompletedAt } = await getCycleState();
+
+    if (isDormant(now, cycleCompletedAt)) {
+      nextDelayMs = DORMANT_RECHECK_MS;
+      return;
+    }
+
+    if (shouldStartNewCycle(cycleStartedAt, cycleCompletedAt, now)) {
+      await startNewCycle(now);
+      cycleStartedAt = now;
+    }
+
+    const pending = await getPendingStocksForCycle(cycleStartedAt!);
+
+    if (pending.length === 0) {
+      await completeCycle(now);
+      nextDelayMs = DORMANT_RECHECK_MS;
+      return;
+    }
+
+    const batch = pickRandomBatch(pending, 10, 15);
+    for (const stock of batch) {
+      try {
+        const result = await fetchTrendlyneChecklist(stock.tlid);
+        if (result) {
+          await upsertChecklistResult(stock.symbol, result, Date.now());
+        } else {
+          await markChecklistAttempted(stock.symbol, Date.now());
+        }
+      } catch (e: any) {
+        console.warn(`[TRENDLYNE-CHECKLIST] Failed for ${stock.symbol}:`, e.message);
+        await markChecklistAttempted(stock.symbol, Date.now());
+      }
+      await new Promise(r => setTimeout(r, 1000 + Math.random() * 1000));
+    }
+
+    console.log(`[TRENDLYNE-CHECKLIST] Processed ${batch.length} stocks this run.`);
+  } finally {
+    await queue.add('checklist-cycle-tick', {}, { delay: nextDelayMs, removeOnComplete: 3, removeOnFail: 3 });
+  }
 }
 
 // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Research report processor functions ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
@@ -2481,6 +2539,32 @@ export async function initQueues(): Promise<boolean> {
       removeOnFail: 3,
     });
 
+    // ── Trendlyne Checklist Cycle (self-rescheduling, random interval) ──────────
+    trendlyneChecklistCycleQueue = new Queue(QUEUE_TRENDLYNE_CHECKLIST_CYCLE, { connection });
+    trendlyneChecklistCycleWorker = new Worker(
+      QUEUE_TRENDLYNE_CHECKLIST_CYCLE,
+      processTrendlyneChecklistCycle,
+      { connection, concurrency: 1, lockDuration: 5 * 60 * 1000 },
+    );
+    trendlyneChecklistCycleWorker.on('completed', () => {
+      recordHeartbeat('trendlyne-checklist-cycle', 'success');
+    });
+    trendlyneChecklistCycleWorker.on('failed', (_job, err) => {
+      console.error('[QUEUE] trendlyne-checklist-cycle failed:', err.message);
+      recordHeartbeat('trendlyne-checklist-cycle', 'failed', err.message);
+    });
+
+    // Only kick off the self-rescheduling chain if one isn't already pending —
+    // otherwise every dev restart (tsx watch) spawns a duplicate chain.
+    const pendingChecklistJobs =
+      (await trendlyneChecklistCycleQueue.getWaitingCount()) +
+      (await trendlyneChecklistCycleQueue.getDelayedCount()) +
+      (await trendlyneChecklistCycleQueue.getActiveCount());
+    if (pendingChecklistJobs === 0) {
+      await trendlyneChecklistCycleQueue.add('checklist-cycle-tick', {}, { delay: 60_000, removeOnComplete: 3, removeOnFail: 3 });
+    }
+    console.log('[QUEUE] Trendlyne checklist cycle scheduled (random 15-45 min intervals)');
+
     console.warn = _origWarn;
     startHeartbeatMonitor();
     startJobWatchdog();
@@ -2597,6 +2681,8 @@ export async function shutdownQueues(): Promise<void> {
     unifiedRankerQueue?.close(),
     liveScreenerCollectWorker?.close(),
     liveScreenerCollectQueue?.close(),
+    trendlyneChecklistCycleWorker?.close(),
+    trendlyneChecklistCycleQueue?.close(),
     Promise.resolve(liveScreenerFallbackTimer ? clearInterval(liveScreenerFallbackTimer) : undefined),
   ]);
 }

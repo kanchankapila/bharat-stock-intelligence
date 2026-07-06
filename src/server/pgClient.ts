@@ -139,6 +139,15 @@ export async function pgEnsureColumns(): Promise<void> {
        PRIMARY KEY (symbol, date)
      )`,
     `CREATE INDEX IF NOT EXISTS idx_ehp_date ON early_hours_predictions(date DESC)`,
+    `CREATE TABLE IF NOT EXISTS trendlyne_checklist (
+       symbol TEXT PRIMARY KEY,
+       score DOUBLE PRECISION,
+       total BIGINT,
+       yes_count BIGINT,
+       insight TEXT,
+       checklist_data TEXT,
+       fetched_at TIMESTAMPTZ
+     )`,
   ];
   const client = await getPool().connect();
   try {

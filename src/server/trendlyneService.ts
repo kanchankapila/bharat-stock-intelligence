@@ -2,6 +2,7 @@ import { getStockMapping } from './stockMapping';
 import { cacheGet, cacheSet } from './cacheService';
 import { fetchTrendlyneWithAuth } from './trendlyneAuthService';
 import { dbGet } from './dbAsync';
+import { parseChecklistHtml, type TrendlyneChecklistResult } from './trendlyneChecklistParser';
 
 const HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -99,9 +100,53 @@ export async function fetchTrendlyneSwot(symbol: string) {
   return null;
 }
 
-export async function fetchTrendlyneChecklist(symbol: string) {
-  console.warn(`[TRENDLYNE] Checklist has no JSON API on Trendlyne (only HTML widget scraping); returning null for ${symbol}`);
-  return null;
+export async function fetchTrendlyneChecklist(tlid: string): Promise<TrendlyneChecklistResult | null> {
+  try {
+    const res = await fetch(`https://kayal.trendlyne.com/clientapi/kayal/content/checklist-bypk/${tlid}`, {
+      headers: {
+        ...HEADERS,
+        'Referer': 'https://trendlyne.com/',
+      },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!res.ok) return null;
+    const html = await res.text();
+    return parseChecklistHtml(html);
+  } catch (err: any) {
+    console.warn(`[TRENDLYNE] Checklist fetch failed for tlid=${tlid}:`, err.message);
+    return null;
+  }
+}
+
+/**
+ * Reads checklist data written by the background cycle job (see Task 6) from
+ * trendlyne_checklist. Never live-fetches — on-demand callers (the router
+ * procedure and getTrendlyneOverview below) must go through this, not
+ * fetchTrendlyneChecklist, so checklist traffic stays confined to the paced
+ * cycle job.
+ */
+export async function getCachedTrendlyneChecklist(symbol: string): Promise<TrendlyneChecklistResult | null> {
+  try {
+    const row = await dbGet<{
+      score: number; total: number; yes_count: number;
+      insight: string | null; checklist_data: string;
+    }>(
+      'SELECT score, total, yes_count, insight, checklist_data FROM trendlyne_checklist WHERE symbol = ?',
+      [symbol],
+    );
+    if (!row) return null;
+    if (row.total === 0) return null; // placeholder row from a failed attempt (markChecklistAttempted) — not real data
+    return {
+      score: row.score,
+      total: row.total,
+      yesCount: row.yes_count,
+      insight: row.insight ?? undefined,
+      checklistData: JSON.parse(row.checklist_data),
+    };
+  } catch (err: any) {
+    console.warn(`[TRENDLYNE] Cached checklist read failed for ${symbol}:`, err.message);
+    return null;
+  }
 }
 
 export async function fetchTrendlyneDVM(symbol: string) {
@@ -309,7 +354,7 @@ export async function getTrendlyneOverview(symbol: string) {
   const [fundamentals, swot, checklist, dvm] = await Promise.all([
     fetchTrendlyneFundamentals(symbol),
     fetchTrendlyneSwot(symbol),
-    fetchTrendlyneChecklist(symbol),
+    getCachedTrendlyneChecklist(symbol),
     getTrendlyneDVMFromDb(symbol)
   ]);
 

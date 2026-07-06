@@ -2588,6 +2588,18 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_ehp_date ON early_hours_predictions(date DESC);
 `);
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS trendlyne_checklist (
+    symbol         TEXT PRIMARY KEY,
+    score          REAL,
+    total          INTEGER,
+    yes_count      INTEGER,
+    insight        TEXT,
+    checklist_data TEXT,
+    fetched_at     DATETIME
+  );
+`);
+
 // This file is the SQLite dev-fallback schema-of-record — adding a column/table here
 // does NOT reach live Postgres. USE_POSTGRES=true reads db/schema.postgres.sql for fresh
 // installs, but existing Postgres databases only pick up new columns via pgClient.ts's
