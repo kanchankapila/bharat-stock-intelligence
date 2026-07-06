@@ -1,3 +1,6 @@
+import { dbGet, dbAll, dbRun } from './dbAsync';
+import type { TrendlyneChecklistResult } from './trendlyneChecklistParser';
+
 export const CYCLE_PAUSE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 export const DORMANT_RECHECK_MS = 24 * 60 * 60 * 1000;  // 1 day
 
@@ -33,4 +36,81 @@ export function pickRandomBatch<T>(items: T[], minSize: number, maxSize: number)
 export function randomDelayMs(minMinutes: number, maxMinutes: number): number {
   const minutes = minMinutes + Math.random() * (maxMinutes - minMinutes);
   return Math.round(minutes * 60 * 1000);
+}
+
+export interface CycleState {
+  cycleStartedAt: number | null;
+  cycleCompletedAt: number | null;
+}
+
+const STARTED_KEY = 'trendlyne_checklist_cycle_started_at';
+const COMPLETED_KEY = 'trendlyne_checklist_cycle_completed_at';
+
+export async function getCycleState(): Promise<CycleState> {
+  const startRow = await dbGet<{ value: string }>(
+    'SELECT value FROM app_settings WHERE key = ?', [STARTED_KEY],
+  );
+  const completeRow = await dbGet<{ value: string }>(
+    'SELECT value FROM app_settings WHERE key = ?', [COMPLETED_KEY],
+  );
+  return {
+    cycleStartedAt: startRow?.value ? Number(startRow.value) : null,
+    cycleCompletedAt: completeRow?.value ? Number(completeRow.value) : null,
+  };
+}
+
+async function upsertAppSetting(key: string, value: string): Promise<void> {
+  await dbRun(
+    'INSERT INTO app_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+    [key, value],
+  );
+}
+
+export async function startNewCycle(now: number): Promise<void> {
+  await upsertAppSetting(STARTED_KEY, String(now));
+  await upsertAppSetting(COMPLETED_KEY, '');
+}
+
+export async function completeCycle(now: number): Promise<void> {
+  await upsertAppSetting(COMPLETED_KEY, String(now));
+}
+
+export interface PendingStock {
+  symbol: string;
+  tlid: string;
+}
+
+export async function getPendingStocksForCycle(cycleStartedAt: number): Promise<PendingStock[]> {
+  return dbAll<PendingStock>(
+    `SELECT n.symbol, n.tlid FROM nse_stocks n
+     WHERE n.tlid IS NOT NULL
+       AND NOT EXISTS (
+         SELECT 1 FROM trendlyne_checklist c
+         WHERE c.symbol = n.symbol AND c.fetched_at >= ?
+       )`,
+    [new Date(cycleStartedAt).toISOString()],
+  );
+}
+
+export async function upsertChecklistResult(
+  symbol: string,
+  result: TrendlyneChecklistResult,
+  fetchedAt: number,
+): Promise<void> {
+  await dbRun(
+    `INSERT INTO trendlyne_checklist (symbol, score, total, yes_count, insight, checklist_data, fetched_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(symbol) DO UPDATE SET
+       score = excluded.score, total = excluded.total, yes_count = excluded.yes_count,
+       insight = excluded.insight, checklist_data = excluded.checklist_data, fetched_at = excluded.fetched_at`,
+    [
+      symbol,
+      result.score,
+      result.total,
+      result.yesCount,
+      result.insight ?? null,
+      JSON.stringify(result.checklistData),
+      new Date(fetchedAt).toISOString(),
+    ],
+  );
 }
