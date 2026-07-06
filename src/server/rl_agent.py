@@ -219,7 +219,7 @@ def _get_vix_bucket(conn: ConnWrapper, as_of_date: str) -> str:
         if row and float(row[0] if isinstance(row, (list, tuple)) else row['close']) > 18:
             return 'HIGH'
     except Exception:
-        pass
+        conn.rollback()  # clear aborted-txn state so next query isn't poisoned
     return 'LOW'
 
 
@@ -236,7 +236,7 @@ def _get_fii_direction(conn: ConnWrapper, as_of_date: str) -> str:
         if net is not None and float(net) > 0:
             return 'BUY'
     except Exception:
-        pass
+        conn.rollback()  # clear aborted-txn state so next query isn't poisoned
     return 'SELL'
 
 
@@ -419,44 +419,47 @@ def backfill_episodes(conn: ConnWrapper, lookback_days: int = 180, dry_run: bool
     q_updates = 0
 
     for sym, sig_date, ret_pct, outcome, sig_score, regime, sector in rows:
-        regime    = regime or 'SIDEWAYS'
-        sig_score = sig_score or 5
-        sector    = sector or 'OTHER'
-        vix_b = _get_vix_bucket(conn, sig_date)
-        fii_d = _get_fii_direction(conn, sig_date)
-        state_key = get_state_key(regime, sector, sig_score, vix_b, fii_d)
-
-        # Use the policy that had been learned up to this point (offline Q-learning):
-        # process rows chronologically so earlier backfill rows inform later ones.
-        # epsilon > 0 retains exploration so the early Q-table (all zeros) doesn't
-        # collapse everything to ACTIONS[0] — same epsilon decay as online updates.
-        action = get_policy(conn, state_key, epsilon=epsilon)
-
-        nifty_ret = _get_nifty_horizon_return(conn, sig_date, horizon_days=15)
-        reward    = float(ret_pct) - nifty_ret
-        if outcome == 'STOP_LOSS':
-            reward *= 1.5
-
         try:
-            conn.execute("""
-                INSERT INTO rl_episodes (date, state_key, action_taken, reward, epsilon)
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT DO NOTHING
-            """, (sig_date, state_key, action, round(reward, 4), round(epsilon, 4)))
-            episodes_created += 1
-        except Exception:
-            pass
+            regime    = regime or 'SIDEWAYS'
+            sig_score = sig_score or 5
+            sector    = sector or 'OTHER'
+            vix_b = _get_vix_bucket(conn, sig_date)
+            fii_d = _get_fii_direction(conn, sig_date)
+            state_key = get_state_key(regime, sector, sig_score, vix_b, fii_d)
 
-        next_state = _get_next_state_key(conn, state_key, sig_date, horizon_days=15)
-        next_max   = get_max_q(conn, next_state)
-        old_q      = get_q(conn, state_key, action)
-        new_q      = q_update(old_q, reward, next_max)
+            # Use the policy that had been learned up to this point (offline Q-learning):
+            # process rows chronologically so earlier backfill rows inform later ones.
+            # epsilon > 0 retains exploration so the early Q-table (all zeros) doesn't
+            # collapse everything to ACTIONS[0] — same epsilon decay as online updates.
+            action = get_policy(conn, state_key, epsilon=epsilon)
 
-        if dry_run:
-            print(f"  [DRY] {sig_date} {state_key} {action} r={reward:.3f} Q:{old_q:.4f}->{new_q:.4f}")
-        else:
-            set_q(conn, state_key, action, new_q)
-        q_updates += 1
+            nifty_ret = _get_nifty_horizon_return(conn, sig_date, horizon_days=15)
+            reward    = float(ret_pct) - nifty_ret
+            if outcome == 'STOP_LOSS':
+                reward *= 1.5
+
+            try:
+                conn.execute("""
+                    INSERT INTO rl_episodes (date, state_key, action_taken, reward, epsilon)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT DO NOTHING
+                """, (sig_date, state_key, action, round(reward, 4), round(epsilon, 4)))
+                episodes_created += 1
+            except Exception:
+                conn.rollback()
+
+            next_state = _get_next_state_key(conn, state_key, sig_date, horizon_days=15)
+            next_max   = get_max_q(conn, next_state)
+            old_q      = get_q(conn, state_key, action)
+            new_q      = q_update(old_q, reward, next_max)
+
+            if dry_run:
+                print(f"  [DRY] {sig_date} {state_key} {action} r={reward:.3f} Q:{old_q:.4f}->{new_q:.4f}")
+            else:
+                set_q(conn, state_key, action, new_q)
+            q_updates += 1
+        except Exception as _row_err:
+            conn.rollback()  # clear any failed-txn state before next row
 
     if not dry_run:
         conn.commit()
