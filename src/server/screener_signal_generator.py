@@ -39,7 +39,7 @@ def ensure_unified_signals_schema(con):
             con.execute(f"ALTER TABLE unified_signals ADD COLUMN IF NOT EXISTS {col_def}")
             con.commit()
         except Exception:
-            con.execute("ROLLBACK")
+            con.rollback()
 
 
 def load_high_performing_screeners(con) -> dict:
@@ -204,7 +204,7 @@ def generate_signals(con, qualifying: dict, entries: dict) -> int:
                 sector_signals[sector].append(symbol)
         except Exception as e:
             print(f"  [WARN] {symbol}: {e}")
-            con.execute("ROLLBACK")
+            con.rollback()
 
     con.commit()
     print(f"[ScreenerSignals] {generated} SCREENER_ENTRY signals generated")
@@ -228,7 +228,7 @@ def generate_signals(con, qualifying: dict, entries: dict) -> int:
             ))
             sector_generated += 1
         except Exception:
-            con.execute("ROLLBACK")
+            con.rollback()
 
     con.commit()
     print(f"[ScreenerSignals] {sector_generated} SECTOR_SCREENER_CONFLUENCE signals generated")

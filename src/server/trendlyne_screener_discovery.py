@@ -156,7 +156,7 @@ def ensure_schema(con):
             con.execute(stmt)
             con.commit()
         except Exception:
-            con.execute("ROLLBACK")
+            con.rollback()
 
     # screener_catalog: add signal_keywords column
     for stmt in [
@@ -167,7 +167,7 @@ def ensure_schema(con):
             con.execute(stmt)
             con.commit()
         except Exception:
-            con.execute("ROLLBACK")
+            con.rollback()
 
 
 # ── API fetch ─────────────────────────────────────────────────────────────────
@@ -509,7 +509,7 @@ def run(mode: str = "known", single_pk: int | None = None):
             con.commit()
             print(f"[Discovery] Logged run to screener_runs: {run_id} ({n_stocks} distinct stocks)")
         except Exception as e2:
-            con.execute("ROLLBACK")
+            con.rollback()
             print(f"[Discovery] Could not log to screener_runs: {e2}")
 
     finally:

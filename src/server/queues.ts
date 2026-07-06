@@ -1163,11 +1163,13 @@ export async function initQueues(): Promise<boolean> {
     mcScreenerSyncWorker = new Worker(
       QUEUE_MC_SCREENER_SYNC,
       processMcScreenerSync,
-      { 
-        connection, 
+      {
+        connection,
         concurrency: 1,
-        lockDuration: 60000,
-        lockRenewTime: 20000,
+        // MC screener sync fetches ~1,400 screeners sequentially — same problem as
+        // ETNow: 60s lockDuration caused "could not renew lock" every cycle.
+        lockDuration: 90 * 60 * 1000,   // 90 min
+        lockRenewTime: 15 * 60 * 1000,  // 15 min
       },
     );
 

@@ -82,7 +82,7 @@ def ensure_schema(con):
             con.execute(f"ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS {col_def}")
             con.commit()
         except Exception:
-            con.execute("ROLLBACK")
+            con.rollback()
 
 
 # ── Data loading ─────────────────────────────────────────────────────────────

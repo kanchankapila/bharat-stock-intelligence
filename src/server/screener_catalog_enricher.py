@@ -86,14 +86,14 @@ def run():
             con.execute(f"ALTER TABLE screener_catalog ADD COLUMN IF NOT EXISTS {col}")
             con.commit()
         except Exception:
-            con.execute("ROLLBACK")
+            con.rollback()
 
     for col in ["signal_type_tag TEXT", "screener_url TEXT"]:
         try:
             con.execute(f"ALTER TABLE screener_master ADD COLUMN IF NOT EXISTS {col}")
             con.commit()
         except Exception:
-            con.execute("ROLLBACK")
+            con.rollback()
 
     # ── Step 2: Load screener names from all sources ──────────────────────────
     # screener_catalog: join on screener_master or trendlyne_screeners for name
@@ -247,7 +247,7 @@ def run():
             inserted += 1
         except Exception as e:
             print(f"  [WARN] Cannot insert {scan_id}: {e}")
-            con.execute("ROLLBACK")
+            con.rollback()
 
     con.commit()
     print(f"[CatalogEnricher] screener_catalog: {inserted} new rows inserted from screener_master")
