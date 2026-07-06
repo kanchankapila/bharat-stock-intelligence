@@ -83,7 +83,7 @@ export interface PendingStock {
 export async function getPendingStocksForCycle(cycleStartedAt: number): Promise<PendingStock[]> {
   return dbAll<PendingStock>(
     `SELECT n.symbol, n.tlid FROM nse_stocks n
-     WHERE n.tlid IS NOT NULL
+     WHERE n.tlid IS NOT NULL AND trim(n.tlid) <> ''
        AND NOT EXISTS (
          SELECT 1 FROM trendlyne_checklist c
          WHERE c.symbol = n.symbol AND c.fetched_at >= ?
@@ -112,5 +112,18 @@ export async function upsertChecklistResult(
       JSON.stringify(result.checklistData),
       new Date(fetchedAt).toISOString(),
     ],
+  );
+}
+
+/** Records that a checklist fetch was attempted for `symbol`, regardless of
+ *  outcome, so it drops out of "pending" for the current cycle. Never
+ *  overwrites previously-fetched good data on a later transient failure. */
+export async function markChecklistAttempted(symbol: string, fetchedAt: number): Promise<void> {
+  await dbRun(
+    `INSERT INTO trendlyne_checklist (symbol, score, total, yes_count, insight, checklist_data, fetched_at)
+     VALUES (?, NULL, 0, 0, NULL, NULL, ?)
+     ON CONFLICT(symbol) DO UPDATE SET
+       fetched_at = excluded.fetched_at`,
+    [symbol, new Date(fetchedAt).toISOString()],
   );
 }

@@ -32,6 +32,7 @@ import { isMarketOpen } from './marketStatusService';
 import {
   isDormant, shouldStartNewCycle, pickRandomBatch, randomDelayMs, DORMANT_RECHECK_MS,
   getCycleState, startNewCycle, completeCycle, getPendingStocksForCycle, upsertChecklistResult,
+  markChecklistAttempted,
 } from './trendlyneChecklistCycle';
 import { fetchTrendlyneChecklist } from './trendlyneService';
 
@@ -728,9 +729,12 @@ async function processTrendlyneChecklistCycle(_job: Job): Promise<void> {
         const result = await fetchTrendlyneChecklist(stock.tlid);
         if (result) {
           await upsertChecklistResult(stock.symbol, result, Date.now());
+        } else {
+          await markChecklistAttempted(stock.symbol, Date.now());
         }
       } catch (e: any) {
         console.warn(`[TRENDLYNE-CHECKLIST] Failed for ${stock.symbol}:`, e.message);
+        await markChecklistAttempted(stock.symbol, Date.now());
       }
       await new Promise(r => setTimeout(r, 1000 + Math.random() * 1000));
     }
