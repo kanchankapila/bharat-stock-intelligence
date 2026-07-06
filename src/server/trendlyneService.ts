@@ -126,21 +126,26 @@ export async function fetchTrendlyneChecklist(tlid: string): Promise<TrendlyneCh
  * cycle job.
  */
 export async function getCachedTrendlyneChecklist(symbol: string): Promise<TrendlyneChecklistResult | null> {
-  const row = await dbGet<{
-    score: number; total: number; yes_count: number;
-    insight: string | null; checklist_data: string;
-  }>(
-    'SELECT score, total, yes_count, insight, checklist_data FROM trendlyne_checklist WHERE symbol = ?',
-    [symbol],
-  );
-  if (!row) return null;
-  return {
-    score: row.score,
-    total: row.total,
-    yesCount: row.yes_count,
-    insight: row.insight ?? undefined,
-    checklistData: JSON.parse(row.checklist_data),
-  };
+  try {
+    const row = await dbGet<{
+      score: number; total: number; yes_count: number;
+      insight: string | null; checklist_data: string;
+    }>(
+      'SELECT score, total, yes_count, insight, checklist_data FROM trendlyne_checklist WHERE symbol = ?',
+      [symbol],
+    );
+    if (!row) return null;
+    return {
+      score: row.score,
+      total: row.total,
+      yesCount: row.yes_count,
+      insight: row.insight ?? undefined,
+      checklistData: JSON.parse(row.checklist_data),
+    };
+  } catch (err: any) {
+    console.warn(`[TRENDLYNE] Cached checklist read failed for ${symbol}:`, err.message);
+    return null;
+  }
 }
 
 export async function fetchTrendlyneDVM(symbol: string) {
