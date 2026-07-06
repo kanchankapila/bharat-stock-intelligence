@@ -1,7 +1,7 @@
 import { dbTransaction } from './dbAsync';
 import { fetchNiftyTraderStockData } from './niftytraderService';
 import { getAllStocks } from './stockMapping';
-import { fetchTrendlyneChecklist, getTrendlyneDVMFromDb } from './trendlyneService';
+import { getTrendlyneDVMFromDb } from './trendlyneService';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const jittered = (base: number, jitterPercent: number) => {
@@ -94,14 +94,13 @@ export async function syncTrendlyneScores() {
 
   for (const stock of stocks) {
     try {
-      // DVM comes from trendlyne_dvm_scores (no live request) — checklist still has no
-      // surviving data source, kept as a probe so this self-heals if it's ever restored.
-      const [dvm, checklist] = await Promise.all([
-        getTrendlyneDVMFromDb(stock.symbol),
-        fetchTrendlyneChecklist(stock.symbol),
-      ]);
+      // DVM comes from trendlyne_dvm_scores (no live request). Checklist now has
+      // its own dedicated pipeline (trendlyne-checklist-cycle queue, see queues.ts) —
+      // running it here too would create a second, uncontrolled 3,000-request burst
+      // once a day, defeating the whole point of pacing it.
+      const dvm = await getTrendlyneDVMFromDb(stock.symbol);
 
-      if (!dvm && !checklist) {
+      if (!dvm) {
         continue;
       }
 
@@ -111,10 +110,6 @@ export async function syncTrendlyneScores() {
         for (const [type, leg] of Object.entries(dvm) as Array<[string, { score: number; color: string | null } | null]>) {
           if (leg) stockUpserts.push([stock.symbol, date, type, leg.score, leg.color || '']);
         }
-      }
-
-      if (checklist && (checklist as any).score !== undefined) {
-        stockUpserts.push([stock.symbol, date, 'checklist', (checklist as any).score, (checklist as any).insight || '']);
       }
 
       if (stockUpserts.length > 0) {
