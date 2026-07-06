@@ -606,6 +606,15 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     X['sector_rev_yoy']     = num('sector_rev_growth_yoy', 0.0).clip(-10, 20) / 20.0
     X['sector_earnings_up'] = (X['sector_np_yoy'] > 0.25).astype(float)  # sector NP>10% tailwind
 
+    # ── Sector F&O sentiment (from sector_fo_sentiment via AS-OF JOIN) ──
+    # sector_pcr > 1 = net put buying (bearish hedging); < 0.8 = call-heavy (bullish bias).
+    # Neutral default 1.0 = balanced. Log of sector OI captures flow volume intensity.
+    raw_pcr = num('sector_pcr', 1.0).clip(0.3, 3.0)
+    X['sector_pcr_norm']     = (raw_pcr - 1.0).clip(-1, 1)  # centred: negative = bullish flow
+    X['sector_oi_log']       = np.log1p(num('sector_call_oi', 0).clip(lower=0) +
+                                         num('sector_put_oi',  0).clip(lower=0))
+    X['sector_fo_bullish']   = (raw_pcr < 0.8).astype(np.float32)   # strong call OI dominance
+
     # ── Market-level earnings breadth (from macro_snap + mc_earnings_fetcher dashboard) ──
     X['mkt_np_yoy']         = num('market_np_yoy', 10.0).clip(-10, 40) / 40.0
     X['earnings_breadth_m'] = num('earnings_breadth_mkt', 0.5).clip(0, 1)  # >0.5 = majority positive
@@ -997,13 +1006,14 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                (SELECT COUNT(*) FROM credit_rating_events cre
                  WHERE cre.symbol = so.symbol
                    AND UPPER(cre.action) LIKE '%UPGRADE%'
-                   AND cre.announcement_date >= date(so.signal_date, '-365 days')
-                   AND cre.announcement_date <= so.signal_date) AS cr_upgrades,
+                   AND cre.announcement_date::date >= (so.signal_date::date - interval '365 days')
+                   AND cre.announcement_date::date <= so.signal_date::date) AS cr_upgrades,
                (SELECT COUNT(*) FROM credit_rating_events cre
                  WHERE cre.symbol = so.symbol
                    AND UPPER(cre.action) LIKE '%DOWNGRADE%'
-                   AND cre.announcement_date >= date(so.signal_date, '-365 days')
-                   AND cre.announcement_date <= so.signal_date) AS cr_downgrades
+                   AND cre.announcement_date::date >= (so.signal_date::date - interval '365 days')
+                   AND cre.announcement_date::date <= so.signal_date::date) AS cr_downgrades,
+               sfs.sector_pcr, sfs.total_call_oi AS sector_call_oi, sfs.total_put_oi AS sector_put_oi
         FROM signal_outcomes so
         -- Use nearest prior ts row within 3 days to recover ~26% more training rows
         -- that had no exact-date ts entry (scanner runs on sparse schedule).
@@ -1087,6 +1097,14 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
         LEFT JOIN mc_sector_earnings mse ON mse.sector_name = (
             SELECT ns.sector FROM nse_stocks ns WHERE ns.symbol = so.symbol LIMIT 1
         )
+        LEFT JOIN LATERAL (
+            SELECT sfs2.sector_pcr, sfs2.total_call_oi, sfs2.total_put_oi
+            FROM sector_fo_sentiment sfs2
+            JOIN nse_stocks ns2 ON ns2.sector = sfs2.sector AND ns2.symbol = so.symbol
+            WHERE sfs2.date <= so.signal_date::date
+            ORDER BY sfs2.date DESC
+            LIMIT 1
+        ) sfs ON true
         {label_join}
         WHERE {label_where}
     """
@@ -1210,7 +1228,8 @@ def load_pending_signals() -> pd.DataFrame:
                sf.earnings_yield, sf.price_to_book, sf.market_cap,
                aeh.n_analysts, aeh.buy_count, aeh.target_mean,
                psh_az.score_value AS altman_z,
-               psh_oo.score_value AS ohlson_o
+               psh_oo.score_value AS ohlson_o,
+               sfs.sector_pcr, sfs.total_call_oi AS sector_call_oi, sfs.total_put_oi AS sector_put_oi
         FROM technical_signals ts
         LEFT JOIN stock_fundamentals sf ON sf.symbol = ts.symbol
         LEFT JOIN feature_store fs
@@ -1271,6 +1290,13 @@ def load_pending_signals() -> pd.DataFrame:
         LEFT JOIN mc_sector_earnings mse ON mse.sector_name = (
             SELECT ns.sector FROM nse_stocks ns WHERE ns.symbol = ts.symbol LIMIT 1
         )
+        LEFT JOIN LATERAL (
+            SELECT sfs2.sector_pcr, sfs2.total_call_oi, sfs2.total_put_oi
+            FROM sector_fo_sentiment sfs2
+            JOIN nse_stocks ns2 ON ns2.sector = sfs2.sector AND ns2.symbol = ts.symbol
+            ORDER BY sfs2.date DESC
+            LIMIT 1
+        ) sfs ON true
         WHERE ts.win_probability IS NULL
           AND ts.signals_json IS NOT NULL
         ORDER BY ts.date DESC
@@ -1990,6 +2016,11 @@ def run(do_train: bool = True, do_score: bool = True,
             )""",
             """CREATE TABLE IF NOT EXISTS historical_fno_sentiment (
                 symbol TEXT, date TEXT, PRIMARY KEY (symbol, date)
+            )""",
+            """CREATE TABLE IF NOT EXISTS sector_fo_sentiment (
+                sector TEXT NOT NULL, date DATE NOT NULL,
+                sector_pcr REAL, total_call_oi BIGINT, total_put_oi BIGINT, symbol_count INTEGER,
+                PRIMARY KEY (sector, date)
             )""",
         ]:
             try: conn.execute(ddl); conn.commit()

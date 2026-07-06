@@ -468,6 +468,11 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await runPython('oi_delta_features.py', [], 60_000)
     .catch(e => console.warn('[QUEUE] oi_delta_features failed:', (e as Error).message));
 
+  // Sector-level F&O sentiment: aggregate stock_options_oi by sector → sector_fo_sentiment.
+  // Depends on pcr_fetcher.py (stock_options_oi) and iv_features (per-stock IV) having run.
+  await runPython('sector_fo_proxy.py', [], 60_000)
+    .catch(e => console.warn('[QUEUE] sector_fo_proxy failed:', (e as Error).message));
+
   // F&O rollover % and cost of carry from NSE bhavcopies → fno_rollover → technical_signals.
   await runPython('fno_rollover_fetcher.py', ['--days', '1'], 3 * 60_000)
     .catch(e => console.warn('[QUEUE] fno_rollover_fetcher failed:', (e as Error).message));

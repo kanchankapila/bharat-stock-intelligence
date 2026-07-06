@@ -131,8 +131,89 @@ def run(date_str: str | None = None):
     print(f"[Intraday Features] Updated {len(rows)} symbols for session {date_str}")
 
 
+def backfill(start_date: str | None = None, end_date: str | None = None, dry_run: bool = False):
+    """
+    Backfill intraday features for all signal_outcomes dates that have intraday bar data.
+    Uses a date-exact WHERE clause (not MAX) so historical technical_signals rows get the
+    right session's features rather than today's.
+    """
+    from db_compat import connect, query_all
+    conn = connect()
+
+    # Dates to process: intersection of signal_outcomes dates and intraday_ohlcv dates
+    cutoff_clause = ""
+    params: list = []
+    if start_date:
+        cutoff_clause += " AND so.signal_date >= ?"
+        params.append(start_date)
+    if end_date:
+        cutoff_clause += " AND so.signal_date <= ?"
+        params.append(end_date)
+
+    dates = conn.execute(f"""
+        SELECT DISTINCT so.signal_date
+        FROM signal_outcomes so
+        WHERE EXISTS (
+            SELECT 1 FROM intraday_ohlcv io
+            WHERE io.datetime::date = so.signal_date::date
+        )
+        {cutoff_clause}
+        ORDER BY so.signal_date
+    """, tuple(params)).fetchall()
+
+    if not dates:
+        print("[Intraday Backfill] No overlapping dates between signal_outcomes and intraday_ohlcv.")
+        conn.close()
+        return
+
+    date_strs = [str(r[0])[:10] for r in dates]
+    print(f"[Intraday Backfill] Processing {len(date_strs)} dates: {date_strs[0]} to {date_strs[-1]}")
+
+    total_updated = 0
+    for date_str in date_strs:
+        features = compute_intraday_features(date_str)
+        if features.empty:
+            print(f"  {date_str}: no bars — skip")
+            continue
+
+        rows = [
+            (
+                float(r['opening_range_break']),
+                float(r['vwap_deviation_pct']),
+                float(r['first_hour_vol_share']),
+                r['symbol'],
+                date_str,
+            )
+            for _, r in features.iterrows()
+        ]
+        if dry_run:
+            print(f"  {date_str}: [DRY] would update {len(rows)} symbols")
+            continue
+
+        conn.executemany(
+            "UPDATE technical_signals "
+            "SET opening_range_break = ?, vwap_deviation_pct = ?, first_hour_vol_share = ? "
+            "WHERE symbol = ? AND date::text = ?",
+            rows,
+        )
+        conn.commit()
+        total_updated += len(rows)
+        print(f"  {date_str}: updated {len(rows)} symbols")
+
+    conn.close()
+    print(f"[Intraday Backfill] Done — {total_updated} rows updated across {len(date_strs)} dates.")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--date', default=None, help='YYYY-MM-DD IST (default: today IST)')
+    parser.add_argument('--backfill', action='store_true', help='Backfill all signal_outcomes dates')
+    parser.add_argument('--start', default=None, help='Backfill start date (YYYY-MM-DD)')
+    parser.add_argument('--end',   default=None, help='Backfill end date (YYYY-MM-DD)')
+    parser.add_argument('--dry-run', action='store_true')
     args = parser.parse_args()
-    run(args.date)
+
+    if args.backfill:
+        backfill(start_date=args.start, end_date=args.end, dry_run=args.dry_run)
+    else:
+        run(args.date)
