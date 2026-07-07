@@ -77,9 +77,14 @@ def _pledge_chg_sql(pg: bool) -> str:
     if pg:
         hist_cutoff = "cur.as_of_date::date - INTERVAL '90 days'"
         cur_filter  = "cur.as_of_date::date = (SELECT MAX(as_of_date::date) FROM fundamentals_history WHERE symbol = cur.symbol)"
+        # Postgres: as_of_date is stored as text — cast both sides to ::date for all comparisons
+        hist_join_date = "h2.as_of_date::date"
+        hist_col_date  = "hist.as_of_date::date"
     else:
-        hist_cutoff = "date(cur.as_of_date, '-90 days')"
-        cur_filter  = "cur.as_of_date = (SELECT MAX(as_of_date) FROM fundamentals_history WHERE symbol = cur.symbol)"
+        hist_cutoff    = "date(cur.as_of_date, '-90 days')"
+        cur_filter     = "cur.as_of_date = (SELECT MAX(as_of_date) FROM fundamentals_history WHERE symbol = cur.symbol)"
+        hist_join_date = "h2.as_of_date"
+        hist_col_date  = "hist.as_of_date"
     return f"""
 SELECT
     cur.symbol,
@@ -87,11 +92,11 @@ SELECT
 FROM fundamentals_history cur
 JOIN fundamentals_history hist
     ON hist.symbol = cur.symbol
-    AND hist.as_of_date = (
-        SELECT MAX(h2.as_of_date)
+    AND {hist_col_date} = (
+        SELECT MAX({hist_join_date})
         FROM fundamentals_history h2
         WHERE h2.symbol = cur.symbol
-          AND h2.as_of_date::date <= {hist_cutoff}
+          AND {hist_join_date} <= {hist_cutoff}
     )
 WHERE {cur_filter}
   AND cur.pledge_pct  IS NOT NULL

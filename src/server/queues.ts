@@ -789,8 +789,8 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean }> 
     .catch(e => console.warn('[QUEUE] mf_holdings_fetcher failed:', (e as Error).message));
   // Trendlyne EPS/DivYield series + DVM scores — 2 calls/stock (PE/PB dropped: MC's daily
   // fetch already covers them, fed into the same history tables — see mc_pricefeed_fetcher.py).
-  // 3058 stocks × 2 API calls × 0.5s = ~51 min
-  await runPython('trendlyne_fundamentals_fetcher.py', [], 70 * 60_000)
+  // 7240 stocks × 2 API calls × 0.5s = ~121 min; 150 min timeout for headroom
+  await runPython('trendlyne_fundamentals_fetcher.py', [], 150 * 60_000)
     .catch(e => console.warn('[QUEUE] trendlyne_fundamentals_fetcher failed:', (e as Error).message));
   // Analyst consensus + price targets — 2328 stocks × 3 calls × 0.4s = ~47 min (quarterly data)
   await runPython('analyst_estimates_snapshot.py', [], 70 * 60_000)
@@ -1178,7 +1178,7 @@ export async function initQueues(): Promise<boolean> {
       'score-all',
       {},
       {
-        repeat: { pattern: '0 13 * * 1-5' }, // 6:30 PM IST (13:00 UTC), Mon-Fri after market close
+        repeat: { pattern: '0 17 * * 1-5' }, // 10:30 PM IST (17:00 UTC), Mon-Fri after daily ops
         jobId: 'score-all-repeatable',
         removeOnComplete: 5,
         removeOnFail: 3,
@@ -1380,7 +1380,7 @@ export async function initQueues(): Promise<boolean> {
       'quant-score-daily',
       {},
       {
-        repeat: { pattern: '30 13 * * 1-5' }, // 7:00 PM IST (13:30 UTC), Mon-Fri after stock scoring
+        repeat: { pattern: '30 17 * * 1-5' }, // 11:00 PM IST (17:30 UTC), Mon-Fri after stock scoring
         jobId: 'quant-scoring-daily',
         removeOnComplete: 3,
         removeOnFail: 3,
@@ -1676,7 +1676,7 @@ export async function initQueues(): Promise<boolean> {
       'ml-daily-ops',
       {},
       {
-        repeat: { pattern: '30 11 * * 1-5' },
+        repeat: { pattern: '0 14 * * 1-5' }, // 7:30 PM IST (14:00 UTC), Mon-Fri after EOD files are published
         jobId: 'ml-daily-ops',
         removeOnComplete: 3,
         removeOnFail: 3,
@@ -1689,10 +1689,11 @@ export async function initQueues(): Promise<boolean> {
       {
         connection,
         concurrency: 1,
-        // lockDuration short so stalled jobs re-queue fast on server restart.
-        // Scripts use ON CONFLICT DO UPDATE so re-running from start is safe.
-        lockDuration: 30 * 60 * 1000,  // 30 min — stall detected quickly on PM2 restart
-        lockRenewTime: 5 * 60 * 1000,
+        // Job runs 120+ scripts sequentially (~2-3h total). Lock must cover the full
+        // run or BullMQ marks it stalled and requeues it, creating a loop that blocks
+        // the next day's scheduled run. Scripts use ON CONFLICT so restart is safe.
+        lockDuration: 4 * 60 * 60 * 1000,  // 4h — covers the full daily ops run
+        lockRenewTime: 30 * 60 * 1000,
       },
     );
 
@@ -1726,7 +1727,7 @@ export async function initQueues(): Promise<boolean> {
       jobId: 'ml-weekly-retrain',
       removeOnComplete: 2, removeOnFail: 3,
     });
-    mlWeeklyRetrainWorker = new Worker(QUEUE_ML_WEEKLY_RETRAIN, processMlWeeklyRetrain, { connection, concurrency: 1, lockDuration: 30 * 60 * 1000, lockRenewTime: 5 * 60 * 1000 });
+    mlWeeklyRetrainWorker = new Worker(QUEUE_ML_WEEKLY_RETRAIN, processMlWeeklyRetrain, { connection, concurrency: 1, lockDuration: 6 * 60 * 60 * 1000, lockRenewTime: 30 * 60 * 1000 });
     mlWeeklyRetrainWorker.on('completed', () => {
       console.log('[QUEUE] ml-weekly-retrain done');
       updateMonitorState('ml-ensemble-train', 'success');
@@ -1894,7 +1895,7 @@ export async function initQueues(): Promise<boolean> {
     const regimeQueue = new Queue(QUEUE_REGIME, { connection });
     const regimeRep = await regimeQueue.getRepeatableJobs();
     for (const r of regimeRep) await regimeQueue.removeRepeatableByKey(r.key);
-    await regimeQueue.add('regime-intraday', {}, {
+    await addJobWithCatchup(regimeQueue, 'regime-intraday', {}, {
       repeat: { pattern: '*/15 3-10 * * 1-5' },  // 3:45–10:00 UTC = 9:15–15:30 IST
       jobId: 'regime-intraday',
       removeOnComplete: 3, removeOnFail: 3,
@@ -2210,7 +2211,7 @@ export async function initQueues(): Promise<boolean> {
       'sync-quant-eod',
       {},
       {
-        repeat: { pattern: '30 12 * * 1-5' },
+        repeat: { pattern: '30 16 * * 1-5' }, // 10:00 PM IST (16:30 UTC), Mon-Fri after daily ops
         jobId: 'quant-eod-sync-daily',
         removeOnComplete: 3,
         removeOnFail: 3,
@@ -2533,7 +2534,7 @@ export async function initQueues(): Promise<boolean> {
     const digestRepeatables = await jobDigestQueue.getRepeatableJobs();
     for (const r of digestRepeatables) await jobDigestQueue.removeRepeatableByKey(r.key);
     await addJobWithCatchup(jobDigestQueue, 'job-digest-daily', {}, {
-      repeat: { pattern: '30 15 * * *' }, // 9:00 PM IST daily, all 7 days
+      repeat: { pattern: '45 18 * * *' }, // 12:15 AM IST next day (18:45 UTC), covers late-night jobs
       jobId: 'job-digest-daily-repeatable',
       removeOnComplete: 3,
       removeOnFail: 3,
@@ -2544,7 +2545,7 @@ export async function initQueues(): Promise<boolean> {
     trendlyneChecklistCycleWorker = new Worker(
       QUEUE_TRENDLYNE_CHECKLIST_CYCLE,
       processTrendlyneChecklistCycle,
-      { connection, concurrency: 1, lockDuration: 5 * 60 * 1000 },
+      { connection, concurrency: 1, lockDuration: 20 * 60 * 1000, lockRenewTime: 3 * 60 * 1000 },
     );
     trendlyneChecklistCycleWorker.on('completed', () => {
       recordHeartbeat('trendlyne-checklist-cycle', 'success');

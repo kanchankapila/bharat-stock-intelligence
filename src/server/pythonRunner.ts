@@ -56,6 +56,7 @@ export async function runPython(
   await acquirePythonSlot();
   let stdout = '';
   let stderr = '';
+  let didThrow = false;
   try {
     const result = await execFileAsync(
       PYTHON,
@@ -65,7 +66,7 @@ export async function runPython(
         maxBuffer: 4 * 1024 * 1024,
         // Force UTF-8 I/O so Python scripts printing non-ASCII (→ ≥ ₹ etc.)
         // don't crash on Windows CP1252 console encoding
-        env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
+        env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUNBUFFERED: '1' },
       },
     );
     stdout = result.stdout;
@@ -73,6 +74,7 @@ export async function runPython(
   } catch (error: any) {
     stdout = error.stdout || '';
     stderr = error.stderr || error.message || String(error);
+    didThrow = true;
     throw error;
   } finally {
     releasePythonSlot();
@@ -84,12 +86,21 @@ export async function runPython(
       });
     }
     if (stderr) {
-      log.error(`[PY] ${script} encountered an error or stderr output`, {
-        script,
-        args,
-        stderrSnippet: stderr.slice(0, 300),
-        fullStderr: stderr,
-      });
+      if (didThrow) {
+        log.error(`[PY] ${script} encountered an error`, {
+          script,
+          args,
+          stderrSnippet: stderr.slice(0, 300),
+          fullStderr: stderr,
+        });
+      } else {
+        log.warn(`[PY] ${script} finished successfully with warnings/stderr output`, {
+          script,
+          args,
+          stderrSnippet: stderr.slice(0, 300),
+          fullStderr: stderr,
+        });
+      }
     }
   }
   return { stdout, stderr };

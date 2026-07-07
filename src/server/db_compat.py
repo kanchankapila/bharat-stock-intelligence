@@ -61,10 +61,15 @@ def _pg_url() -> str:
             url = url.replace("postgresql://", "postgresql+psycopg2://", 1)
         elif url.startswith("postgres://"):
             url = url.replace("postgres://", "postgresql+psycopg2://", 1)
+        # On Windows, 'localhost' resolves to ::1 (IPv6) which Docker resets;
+        # force IPv4 so psycopg2 connects to 127.0.0.1 instead.
+        url = url.replace("@localhost:", "@127.0.0.1:")
         return url
     user = os.environ.get("POSTGRES_USER", "bharat")
     pw = os.environ.get("POSTGRES_PASSWORD", "bharat")
     host = os.environ.get("POSTGRES_HOST", "localhost")
+    if host == "localhost":
+        host = "127.0.0.1"
     port = os.environ.get("POSTGRES_PORT", "5433")
     db = os.environ.get("POSTGRES_DB", "bharat_intel")
     return f"postgresql+psycopg2://{user}:{quote_plus(pw)}@{host}:{port}/{db}"
