@@ -2610,6 +2610,22 @@ db.exec(`
 // Whenever you add a column/table here that Postgres-backed code will read, add the
 // matching entry to pgClient.ts's pgEnsureColumns() too.
 
+// ── Migration: risk_metrics_engine + multi_factor_scorer columns ──────────────
+// Adds Beta (1Y+6M), Sortino, VaR95, and 5 multi-factor component score columns
+// to quant_scores. All computed by Python engines; TypeScript reads from same table.
+// Note: SQLite does not support ADD COLUMN IF NOT EXISTS — runMigration guards
+// idempotency by checking the _migrations table before executing.
+runMigration('053_qs_beta_1y',            `ALTER TABLE quant_scores ADD COLUMN beta_1y            REAL`);
+runMigration('053_qs_beta_6m',            `ALTER TABLE quant_scores ADD COLUMN beta_6m            REAL`);
+runMigration('053_qs_sortino_ratio',      `ALTER TABLE quant_scores ADD COLUMN sortino_ratio      REAL`);
+runMigration('053_qs_var_95',             `ALTER TABLE quant_scores ADD COLUMN var_95             REAL`);
+runMigration('053_qs_mf_quality_score',   `ALTER TABLE quant_scores ADD COLUMN mf_quality_score   REAL`);
+runMigration('053_qs_mf_momentum_score',  `ALTER TABLE quant_scores ADD COLUMN mf_momentum_score  REAL`);
+runMigration('053_qs_mf_value_score',     `ALTER TABLE quant_scores ADD COLUMN mf_value_score     REAL`);
+runMigration('053_qs_mf_risk_adj_score',  `ALTER TABLE quant_scores ADD COLUMN mf_risk_adj_score  REAL`);
+runMigration('053_qs_mf_macro_score',     `ALTER TABLE quant_scores ADD COLUMN mf_macro_score     REAL`);
+runMigration('053_qs_mf_composite_score', `ALTER TABLE quant_scores ADD COLUMN mf_composite_score REAL`);
+
 // Keep startup diagnostics off stdout so stdio-based clients can parse JSON-RPC.
 console.error('[DB] Schema normalization complete (Phase 3.5)');
 

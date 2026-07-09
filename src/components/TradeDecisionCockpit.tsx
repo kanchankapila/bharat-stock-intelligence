@@ -6,6 +6,7 @@ import {
   ArrowRight, ArrowUpRight, ArrowDownRight
 } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { RiskMetricsDashboard } from './RiskMetricsDashboard';
 
 const fmt = (n: number | null | undefined, dec = 2) =>
   n == null ? '—' : n.toLocaleString('en-IN', { minimumFractionDigits: dec, maximumFractionDigits: dec });
@@ -629,6 +630,9 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
           )}
         </div>
       </div>
+
+      {/* ── Risk & Multi-Factor Dashboard ────────────────────────── */}
+      <RiskMetricsDashboard focusSymbol={selectedCand?.symbol} collapsed={true} />
     </div>
   );
 };

@@ -248,6 +248,17 @@ export async function pgEnsureColumns(): Promise<void> {
     `ALTER TABLE tl_financial_quality ADD COLUMN IF NOT EXISTS cfi_ttm            DOUBLE PRECISION`,
     `ALTER TABLE tl_financial_quality ADD COLUMN IF NOT EXISTS fcf_ttm_approx     DOUBLE PRECISION`,
     `ALTER TABLE tl_financial_quality ADD COLUMN IF NOT EXISTS fcf_yield_approx   DOUBLE PRECISION`,
+    // New quant_scores risk and multi-factor columns (migration 053)
+    `ALTER TABLE quant_scores ADD COLUMN IF NOT EXISTS beta_1y            DOUBLE PRECISION`,
+    `ALTER TABLE quant_scores ADD COLUMN IF NOT EXISTS beta_6m            DOUBLE PRECISION`,
+    `ALTER TABLE quant_scores ADD COLUMN IF NOT EXISTS sortino_ratio      DOUBLE PRECISION`,
+    `ALTER TABLE quant_scores ADD COLUMN IF NOT EXISTS var_95             DOUBLE PRECISION`,
+    `ALTER TABLE quant_scores ADD COLUMN IF NOT EXISTS mf_quality_score   DOUBLE PRECISION`,
+    `ALTER TABLE quant_scores ADD COLUMN IF NOT EXISTS mf_momentum_score  DOUBLE PRECISION`,
+    `ALTER TABLE quant_scores ADD COLUMN IF NOT EXISTS mf_value_score     DOUBLE PRECISION`,
+    `ALTER TABLE quant_scores ADD COLUMN IF NOT EXISTS mf_risk_adj_score  DOUBLE PRECISION`,
+    `ALTER TABLE quant_scores ADD COLUMN IF NOT EXISTS mf_macro_score     DOUBLE PRECISION`,
+    `ALTER TABLE quant_scores ADD COLUMN IF NOT EXISTS mf_composite_score DOUBLE PRECISION`,
   ];
   // Run each ALTER individually — Postgres can't do multiple DDL in one statement
   for (const sql of alters) {
