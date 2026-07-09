@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { TRPCError } from "@trpc/server";
 import { dbGet, dbAll, dbRun } from "../dbAsync";
 import { alphaQuant } from "../alphaQuantClient";
 import { router, publicProcedure } from "../trpc";
@@ -299,7 +300,7 @@ export const mlRouter = router({
         });
         return { run_id: data.run_id, message: 'Backtest complete' };
       } catch (err: any) {
-        return { message: `Error: ${err.message}` };
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: err.message });
       }
     }),
 
@@ -318,7 +319,7 @@ export const mlRouter = router({
         });
         return { message: 'Optimization completed', improvement: data.improvement_pct };
       } catch (err: any) {
-        return { message: `Error: ${err.message}` };
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: err.message });
       }
     }),
 

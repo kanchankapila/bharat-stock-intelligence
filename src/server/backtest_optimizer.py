@@ -133,7 +133,16 @@ def run_grid_search(
     finally:
         bt.close()
 
-    # Clean up intermediate optimizer run rows (run_names like 'opt_%')
+    # Clean up intermediate optimizer run rows (run_names like 'opt_%'). This always runs,
+    # dry-run or not: Backtester.run() unconditionally persists each grid-search trial via
+    # save_run() (no persist flag exists on that shared method), so these opt_% rows are
+    # ephemeral scratch data created earlier in this same call, not pre-existing state a
+    # dry-run needs to protect. Leaving the cleanup gated on dry_run instead would strand
+    # ~len(combos) junk rows in backtesting_runs after every dry-run invocation.
+    if dry_run:
+        print(f"[BtOptimizer] [DRY] Cleaning up {len(combos)} intermediate trial rows "
+              f"from backtesting_runs (run_name LIKE 'opt_%') -- these are scratch rows "
+              f"from this grid search, not persisted config changes.")
     conn.execute("DELETE FROM backtesting_runs WHERE run_name LIKE 'opt_%'")
     conn.commit()
 

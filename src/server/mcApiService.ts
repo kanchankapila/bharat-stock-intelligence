@@ -341,19 +341,19 @@ export async function mcFetchJson<T = any>(url: string, retries: number = 3, sym
           return await res.json();
         }
         const text = await res.text();
-        try { return JSON.parse(text); } catch { return null; }
+        try { return JSON.parse(text); } catch { console.warn('[mcApiService] JSON parse failed:', text.slice(0, 200)); return null; }
       } catch (e) {
         lastError = e instanceof Error ? e : new Error(String(e));
         if (attempt < retries) {
           const delay = Math.min(1000 * Math.pow(2, attempt - 1), 10000) + Math.random() * 1000;
-          console.warn(`MoneyControl API error. Retrying in ${Math.round(delay)}ms (attempt ${attempt}/${retries})...`);
+          console.warn(`MoneyControl API error for ${symbol || url}: ${lastError.message}. Retrying in ${Math.round(delay)}ms (attempt ${attempt}/${retries})...`);
           await new Promise(resolve => setTimeout(resolve, delay));
         }
       }
     }
 
     if (lastError) {
-      console.error('MoneyControl API failed after retries:', lastError.message);
+      console.error(`MoneyControl API failed for ${symbol || url} after retries:`, lastError.message);
     }
     return null;
   });

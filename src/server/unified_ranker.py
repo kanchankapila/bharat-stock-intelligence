@@ -475,7 +475,8 @@ class UnifiedRanker:
                 (cutoff,),
             ).fetchall()
             return {r['symbol']: float(r['p'] or 0) * 100 for r in rows}
-        except Exception:
+        except Exception as e:
+            print(f"[UnifiedRanker] _get_ml_scores failed: {e}")
             self.conn.rollback()
             return {}
 
@@ -488,7 +489,8 @@ class UnifiedRanker:
                 (cutoff,),
             ).fetchall()
             return _normalize_to_100({r['symbol']: float(r['s'] or 0) for r in rows})
-        except Exception:
+        except Exception as e:
+            print(f"[UnifiedRanker] _get_cs_scores failed: {e}")
             self.conn.rollback()
             return {}
 
@@ -500,7 +502,8 @@ class UnifiedRanker:
                 (cutoff,),
             ).fetchall()
             return {r['symbol']: float(r['confluence_score'] or 0) for r in rows}
-        except Exception:
+        except Exception as e:
+            print(f"[UnifiedRanker] _get_confluence_scores failed: {e}")
             self.conn.rollback()
             return {}
 
@@ -514,7 +517,8 @@ class UnifiedRanker:
             # signal_score is a 0-10 composite; percentile-normalize to 0-100 so it is on the
             # same scale as the other engines before blending.
             return _normalize_to_100({r['symbol']: float(r['s'] or 0) for r in rows})
-        except Exception:
+        except Exception as e:
+            print(f"[UnifiedRanker] _get_technical_scores failed: {e}")
             self.conn.rollback()
             return {}
 
@@ -526,7 +530,8 @@ class UnifiedRanker:
                 (cutoff,),
             ).fetchall()
             return {r['symbol']: float(r['probability'] or 0) * 100 for r in rows}
-        except Exception:
+        except Exception as e:
+            print(f"[UnifiedRanker] _get_dl_scores failed: {e}")
             self.conn.rollback()
             return {}
 
@@ -554,7 +559,8 @@ class UnifiedRanker:
                 (cutoff,),
             ).fetchall()
             return {r['symbol']: float(r['avg_r'] or 0) for r in rows if r['cnt'] and r['cnt'] > 0}
-        except Exception:
+        except Exception as e:
+            print(f"[UnifiedRanker] _get_rl_gate_map failed: {e}")
             self.conn.rollback()
             return {}
 

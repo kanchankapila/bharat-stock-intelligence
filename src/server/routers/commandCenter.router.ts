@@ -86,7 +86,7 @@ export const commandCenterRouter = router({
             WHERE date = ? AND signal_strength = 'HIGH'
             ORDER BY win_probability DESC LIMIT 20
           `, [today]);
-        } catch { /* table may differ in schema */ }
+        } catch (e) { console.error(e); /* table may differ in schema */ }
       }
 
       return {

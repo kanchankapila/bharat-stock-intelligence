@@ -6,6 +6,7 @@ import { getLatestRSIForSymbols } from "../technicalSignalsService";
 import { getSymbolFromMcsymbol } from "../stockMapping";
 import { alphaQuant } from "../alphaQuantClient";
 import { router, publicProcedure } from "../trpc";
+import { TRPCError } from "@trpc/server";
 
 export const technicalsRouter = router({
   getTechnicalDetails: publicProcedure
@@ -223,7 +224,7 @@ export const technicalsRouter = router({
       try {
         return await alphaQuant.getTvTa({ symbol: input.symbol, exchange: input.exchange });
       } catch (err: any) {
-        return { error: err.message };
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: err.message });
       }
     }),
 
@@ -232,7 +233,7 @@ export const technicalsRouter = router({
       try {
         return await alphaQuant.getTvScreener();
       } catch (err: any) {
-        return { error: err.message };
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: err.message });
       }
     }),
 });

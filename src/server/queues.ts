@@ -436,16 +436,20 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   // Surveillance gate: ASM/GSM flags → nse_stocks and technical_signals.asm_flag/gsm_stage.
   await runPython('asm_gsm_fetcher.py', [], 2 * 60_000)
     .catch(e => console.warn('[QUEUE] asm_gsm_fetcher failed:', (e as Error).message));
-  await runPython('fii_dii_fetcher.py', [], 90_000).catch(() => {});
-  await runPython('pcr_fetcher.py', ['--gex'], 90_000).catch(() => {});
+  await runPython('fii_dii_fetcher.py', [], 90_000)
+    .catch(e => console.warn('[QUEUE] fii_dii_fetcher failed:', (e as Error).message));
+  await runPython('pcr_fetcher.py', ['--gex'], 90_000)
+    .catch(e => console.warn('[QUEUE] pcr_fetcher failed:', (e as Error).message));
   await runPython('moneycontrol_fetcher.py', [], 300_000).catch(e => {
     console.warn('[QUEUE] moneycontrol_fetcher failed:', (e as Error).message);
   });
   // iv_features reads the ATM IV that pcr_fetcher just wrote to stock_options_oi → technical_signals.iv_rank.
   await runPython('iv_features.py', [], 90_000)
     .catch(e => console.warn('[QUEUE] iv_features failed:', (e as Error).message));
-  await runPython('institutional_quant_engine.py', [], 120_000).catch(() => {});
-  await runPython('finbert_scorer.py', ['--days', '1'], 180_000).catch(() => {});
+  await runPython('institutional_quant_engine.py', [], 120_000)
+    .catch(e => console.warn('[QUEUE] institutional_quant_engine failed:', (e as Error).message));
+  await runPython('finbert_scorer.py', ['--days', '1'], 180_000)
+    .catch(e => console.warn('[QUEUE] finbert_scorer failed:', (e as Error).message));
 
   // Flag bad-print OHLCV bars first so outcome labels skip them (ohlcv_quality.is_suspect).
   await runPython('ohlcv_quality.py', ['--no-ingest'], 180_000)
@@ -663,7 +667,8 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await runPython('performance_tracker.py', ['--horizon', '5']);
   await runPython('performance_tracker.py', ['--horizon', '15']);
 
-  await runPython('online_learner.py', ['--window', '180'], 120_000).catch(() => {});
+  await runPython('online_learner.py', ['--window', '180'], 120_000)
+    .catch(e => console.warn('[QUEUE] online_learner failed:', (e as Error).message));
 
   // Warm-start LGBM ensemble on the last 3 days of newly-resolved outcomes (+20 boost rounds).
   // Runs after online_learner so SGD priors are already updated; keeps ensemble fresh daily
@@ -815,8 +820,10 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean }> 
   await runPython('ml_ensemble.py', ['--train', '--tune', '--score'], 90 * 60_000);
   await runPython('cs_ranker.py', ['--train', '--score'], 30 * 60_000)
     .catch(e => console.warn('[QUEUE] cs_ranker retrain failed:', (e as Error).message));
-  await runPython('strategy_optimizer.py', [], 30 * 60_000).catch(() => {});
-  await runPython('backtester.py', ['--start', '2023-01-01'], 30 * 60_000).catch(() => {});
+  await runPython('strategy_optimizer.py', [], 30 * 60_000)
+    .catch(e => console.warn('[QUEUE] strategy_optimizer failed:', (e as Error).message));
+  await runPython('backtester.py', ['--start', '2023-01-01'], 30 * 60_000)
+    .catch(e => console.warn('[QUEUE] backtester failed:', (e as Error).message));
   await runPython('performance_tracker.py', ['--horizon', '5']);
   await runPython('performance_tracker.py', ['--horizon', '15']);
   return { success: true };
@@ -967,7 +974,7 @@ async function processQuantEodSync(_job: Job): Promise<{ success: boolean }> {
     await fetchDeliveryMap(today);
     
     console.log('[QUANT EOD] 6. Fetching PCR & Max Pain');
-    await runPython('pcr_fetcher.py', ['--gex'], 90_000).catch(() => {});
+    await runPython('pcr_fetcher.py', ['--gex'], 90_000).catch((e: any) => console.error('[QUANT EOD] pcr_fetcher failed:', e.message));
     
     updateMonitorState('quant-eod-sync', 'success');
     console.log('[QUEUE] quant-eod-sync completed successfully');
@@ -2256,8 +2263,14 @@ export async function initQueues(): Promise<boolean> {
       { connection, concurrency: 2, lockDuration: 30 * 60_000 }
     );
 
-    trendlyneDailyFetchWorker.on('completed', () => console.log('[QUEUE] trendlyne-daily-fetch completed'));
-    trendlyneDailyFetchWorker.on('failed', (_, e) => console.error('[QUEUE] trendlyne-daily-fetch failed:', e.message));
+    trendlyneDailyFetchWorker.on('completed', () => {
+      console.log('[QUEUE] trendlyne-daily-fetch completed');
+      recordHeartbeat('trendlyne-daily-fetch', 'success');
+    });
+    trendlyneDailyFetchWorker.on('failed', (_, e) => {
+      console.error('[QUEUE] trendlyne-daily-fetch failed:', e.message);
+      recordHeartbeat('trendlyne-daily-fetch', 'failed', e?.message);
+    });
 
     companyProfilesSyncQueue = new Queue(QUEUE_COMPANY_PROFILES_SYNC, { connection });
 

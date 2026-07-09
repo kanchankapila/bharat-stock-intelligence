@@ -226,7 +226,7 @@ export async function computeTimeframeScores(opts: {
     const run = await dbGet<any>('SELECT records_json FROM screener_runs WHERE run_id = ?', [opts.runId]);
     let symbols: string[] = [];
     if (run?.records_json) {
-      try { symbols = (JSON.parse(run.records_json) as any[]).map((r: any) => r.symbol).filter(Boolean).slice(0, topN); } catch {}
+      try { symbols = (JSON.parse(run.records_json) as any[]).map((r: any) => r.symbol).filter(Boolean).slice(0, topN); } catch (e) { console.warn(e); }
     }
     if (!symbols.length) return [];
 

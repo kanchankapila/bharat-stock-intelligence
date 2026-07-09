@@ -78,13 +78,18 @@ export class WebSocketSignalService {
     // Heartbeat sweep: ping every client; drop any that didn't respond since last ping
     this.pingTimer = setInterval(() => {
       for (const ws of this.clients) {
-        if ((ws as any).__alive === false) {
+        try {
+          if ((ws as any).__alive === false) {
+            this.clients.delete(ws);
+            ws.terminate();
+            continue;
+          }
+          (ws as any).__alive = false;
+          ws.ping();
+        } catch (e) {
+          console.warn('[WebSocketService] ping sweep error on stale client, skipping', e);
           this.clients.delete(ws);
-          ws.terminate();
-          continue;
         }
-        (ws as any).__alive = false;
-        ws.ping();
       }
     }, PING_INTERVAL_MS);
 

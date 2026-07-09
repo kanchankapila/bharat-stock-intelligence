@@ -116,7 +116,7 @@ def fetch_mto(trade_date: date, session: requests.Session) -> list[dict] | None:
 
         rows.append({
             "symbol":          symbol,
-            "date":            trade_date.isoformat(),
+            "date":            trade_date,
             "series":          series,
             "qty_traded":      qty_traded,
             "deliverable_qty": deliverable_qty,

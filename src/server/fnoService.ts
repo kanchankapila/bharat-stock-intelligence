@@ -192,7 +192,8 @@ async function getNearExpiry() {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'application/json'
-      }
+      },
+      signal: AbortSignal.timeout(10000)
     });
     const json = await response.json();
     if (json.resultData && json.resultData.length > 0) {
@@ -284,7 +285,8 @@ export async function getTrendlyneFnoHeatmap() {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'application/json',
         'Referer': 'https://trendlyne.com/futures-options/heatmap/'
-      }
+      },
+      signal: AbortSignal.timeout(10000)
     });
 
     if (!response.ok) throw new Error(`Trendlyne API error: ${response.status}`);

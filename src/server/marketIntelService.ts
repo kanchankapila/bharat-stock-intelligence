@@ -465,7 +465,8 @@ export async function fetchFNOSymbols() {
       "accept": "application/json, text/plain, */*",
       "authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1laWRlbnRpZmllciI6IjU0MzM4IiwiaHR0cDovL3NjaGVtYXMubWljcm9zb2Z0LmNvbS93cy8yMDA4LzA2L2lkZW50aXR5L2NsYWltcy9yb2xlIjoiMCIsIlNlc3Npb25JZCI6IjQ5NDQiLCJleHAiOjE3ODA2NzUyNTUsImlzcyI6InByb2QtbmlmdHl0cmFkZXIuaW4iLCJhdWQiOiJwcm9kLW5pZnR5dHJhZGVyLmluIn0.VaWV3jFHcpP4y7UOmWzVzVwBjzK1AfHx9Qgj8vZPQGs",
       "platform_type": "1"
-    }
+    },
+    signal: AbortSignal.timeout(10000)
   });
   if (!res.ok) throw new Error('Failed to fetch FNO symbols');
   return res.json();
@@ -478,7 +479,8 @@ export async function fetchOptionChain(symbol: string) {
       "accept": "application/json, text/plain, */*",
       "authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1laWRlbnRpZmllciI6IjU0MzM4IiwiaHR0cDovL3NjaGVtYXMubWljcm9zb2Z0LmNvbS93cy8yMDA4LzA2L2lkZW50aXR5L2NsYWltcy9yb2xlIjoiMCIsIlNlc3Npb25JZCI6IjQ5NDQiLCJleHAiOjE3ODA2NzUyNTUsImlzcyI6InByb2QtbmlmdHl0cmFkZXIuaW4iLCJhdWQiOiJwcm9kLW5pZnR5dHJhZGVyLmluIn0.VaWV3jFHcpP4y7UOmWzVzVwBjzK1AfHx9Qgj8vZPQGs",
       "platform_type": "1"
-    }
+    },
+    signal: AbortSignal.timeout(10000)
   });
   if (!res.ok) throw new Error('Failed to fetch option chain');
   return res.json();
@@ -498,7 +500,7 @@ export async function fetchIndicesList() {
 
 export async function fetchIndiaVix() {
   const url = `https://webapi.niftytrader.in/webapi/Symbol/other-stock-spot-data?symbol=INDIA+VIX`;
-  const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+  const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(10000) });
   if (!res.ok) throw new Error('Vix fetch error');
   return res.json();
 }
@@ -531,7 +533,8 @@ export async function fetchLiveMarketScreener(filters: Record<string, boolean>) 
   const res = await fetch(url, {
     method: 'POST',
     headers,
-    body: JSON.stringify(payload)
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(10000)
   });
 
   if (!res.ok) throw new Error('Live Market Screener fetch error');
@@ -578,7 +581,8 @@ export async function fetchEODMarketScreener(filters: Record<string, boolean>) {
   const res = await fetch(url, {
     method: 'POST',
     headers,
-    body: JSON.stringify(payload)
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(10000)
   });
 
   if (!res.ok) throw new Error('EOD Market Screener fetch error');

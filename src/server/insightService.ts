@@ -241,7 +241,7 @@ export async function getStockInsights(query: string): Promise<StockInsight | nu
 
 export async function getIndexData(indexId: string) {
   try {
-      const response = await fetch(`https://api.moneycontrol.com/mcapi/v1/indices/get-indices-details?indexId=${indexId}`);
+      const response = await fetch(`https://api.moneycontrol.com/mcapi/v1/indices/get-indices-details?indexId=${indexId}`, { signal: AbortSignal.timeout(10000) });
       if (response.ok) {
           const json = await response.json();
           if (json.success === 1) return json.data;

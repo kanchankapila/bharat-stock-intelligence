@@ -65,17 +65,20 @@ export async function fetchNiftyTraderStockData(symbol: string): Promise<NiftyTr
         fetch("https://webapi.niftytrader.in/webapi/Analysis/stock-industry-data", {
           headers,
           body,
-          method: "POST"
+          method: "POST",
+          signal: AbortSignal.timeout(10000)
         }),
         fetch("https://webapi.niftytrader.in/webapi/Analysis/stock-analysis-data", {
           headers,
           body,
-          method: "POST"
+          method: "POST",
+          signal: AbortSignal.timeout(10000)
         }),
         fetch("https://webapi.niftytrader.in/webapi/Analysis/stock-financial-data", {
           headers,
           body,
-          method: "POST"
+          method: "POST",
+          signal: AbortSignal.timeout(10000)
         })
       ]);
 

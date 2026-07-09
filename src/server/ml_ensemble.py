@@ -1990,7 +1990,7 @@ def check_drift(conn: ConnWrapper, auc_drop_threshold: float = 0.04,
 
 def run(do_train: bool = True, do_score: bool = True,
         retrain_full: bool = False, min_samples: int = 30,
-        label: str = 'horizon', do_tune: bool = False):
+        label: str = 'horizon', do_tune: bool = False, dry_run: bool = False):
     try:
         from lightgbm import LGBMClassifier  # noqa: F401 — verify dependency at startup
     except ImportError:
@@ -2065,8 +2065,11 @@ def run(do_train: bool = True, do_score: bool = True,
                                           horizon_days=_hz, min_samples=min_samples,
                                           tuned_params=tuned_params)
                 ensemble['label'] = label
-                save_ensemble(ensemble)
-                register_model(conn, ensemble)
+                if dry_run:
+                    print(f"[Ensemble] Dry-run: would save trained ensemble to {ENSEMBLE_PATH} and register_model. Skipping write.")
+                else:
+                    save_ensemble(ensemble)
+                    register_model(conn, ensemble)
 
         if do_score:
             # Auto-retrain if live performance has drifted >4 AUC pts below trained value
@@ -2081,12 +2084,17 @@ def run(do_train: bool = True, do_score: bool = True,
                     ensemble_new = train_ensemble(X, y, dates=df['signal_date'],
                                                   horizon_days=_hz, min_samples=min_samples)
                     ensemble_new['label'] = label
-                    save_ensemble(ensemble_new)
-                    register_model(conn, ensemble_new)
+                    if dry_run:
+                        print(f"[Ensemble] Dry-run: would save drift-retrained ensemble to {ENSEMBLE_PATH} and register_model. Skipping write.")
+                    else:
+                        save_ensemble(ensemble_new)
+                        register_model(conn, ensemble_new)
 
             ensemble = load_ensemble()
             if ensemble is None:
                 print("[Ensemble] No saved model — run with --train first.")
+            elif dry_run:
+                print("[Ensemble] Dry-run: would score pending signals and update win_probability. Skipping write.")
             else:
                 n = score_pending(conn, ensemble)
                 print(f"[Ensemble] Scored {n} signals.")
@@ -2210,4 +2218,4 @@ if __name__ == "__main__":
 
     run(do_train=do_train, do_score=do_score,
         retrain_full=args.retrain_full, min_samples=args.min_samples, label=args.label,
-        do_tune=args.tune)
+        do_tune=args.tune, dry_run=args.dry_run)

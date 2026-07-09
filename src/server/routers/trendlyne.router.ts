@@ -84,6 +84,7 @@ export const trendlyneRouter = router({
         }
         return { auth, fetchOk, status };
       } catch (e) {
+        console.error(e);
         return { auth: false, fetchOk: false, status: null };
       }
     }),

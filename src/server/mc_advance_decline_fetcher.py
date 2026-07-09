@@ -76,6 +76,7 @@ def _parse_mc_date(raw: str) -> str:
         dt = datetime.datetime.strptime(raw.strip(), "%b %d, %Y")
         return dt.strftime("%Y-%m-%d")
     except Exception:
+        print(f"[A/D] WARN: unparseable date '{raw}', defaulting to today")
         return datetime.date.today().isoformat()
 
 

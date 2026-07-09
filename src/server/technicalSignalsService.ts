@@ -918,6 +918,7 @@ Respond in EXACTLY this JSON format (no markdown, no preamble):
         max_tokens: 400,
         messages: [{ role: 'user', content: prompt }],
       }),
+      signal: AbortSignal.timeout(10000),
     });
     const data = await resp.json() as { content?: { text?: string }[] };
     const text = data?.content?.[0]?.text?.trim() ?? '';
@@ -1000,6 +1001,7 @@ async function sendTelegramSignals(results: SignalResult[], date: string): Promi
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ chat_id: chatId, text: message, parse_mode: 'Markdown' }),
+      signal: AbortSignal.timeout(10000),
     });
     console.log('[SIGNALS] Telegram notification sent');
   } catch (e) {

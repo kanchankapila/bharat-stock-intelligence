@@ -68,8 +68,8 @@ def _get_nt_index_map() -> dict[str, tuple[str, str]]:
             )
             for r in rows:
                 result[r["index_name"]] = (r["provider_id"], req_type)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[nt_pcr_ts] WARN: index map lookup failed ({e}), using fallback")
     return result or _FALLBACK
 
 

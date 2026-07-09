@@ -7,7 +7,7 @@ let ollamaProcess: ChildProcess | null = null;
  */
 async function isOllamaRunning(): Promise<boolean> {
   try {
-    const response = await fetch('http://127.0.0.1:11434/api/tags');
+    const response = await fetch('http://127.0.0.1:11434/api/tags', { signal: AbortSignal.timeout(2000) });
     return response.ok;
   } catch {
     return false;

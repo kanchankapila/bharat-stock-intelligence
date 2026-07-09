@@ -23,6 +23,7 @@ export const telegramRouter = router({
           hasToken: !!rawToken,
         };
       } catch (err) {
+        console.error(err);
         return { botToken: "", chatId: "", enabled: false, hasToken: false };
       }
     }),
@@ -45,6 +46,7 @@ export const telegramRouter = router({
         await telegramService.saveSettings(actualToken, input.chatId, input.enabled);
         return { success: true };
       } catch (err: any) {
+        console.error(err);
         return { success: false, error: err.message };
       }
     }),
@@ -57,6 +59,7 @@ export const telegramRouter = router({
         );
         return { success: ok };
       } catch (err: any) {
+        console.error(err);
         return { success: false, error: err.message };
       }
     }),
@@ -72,6 +75,7 @@ export const telegramRouter = router({
           hasToken: !!rawToken,
         };
       } catch (err) {
+        console.error(err);
         return { token: "", hasToken: false };
       }
     }),
@@ -95,6 +99,7 @@ export const telegramRouter = router({
         invalidateNiftyTraderToken();
         return { success: true };
       } catch (err: any) {
+        console.error(err);
         return { success: false, error: err.message };
       }
     }),

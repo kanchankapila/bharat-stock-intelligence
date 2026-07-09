@@ -5,6 +5,7 @@ import { getStockMapping } from "../stockMapping";
 import { fetchWithCache } from "../cacheService";
 import { generateStockAnalysis } from "../../services/aiService";
 import { alphaQuant } from "../alphaQuantClient";
+import { TRPCError } from "@trpc/server";
 import {
   fetchPremarketAll,
   fetchDealsAll,
@@ -41,7 +42,7 @@ export const miscRouter = router({
         enriched.volume_ratio     = techSignal.volume_ratio;
         enriched.signal_score     = techSignal.signal_score;
         if (techSignal.signals_json) {
-          try { enriched.detected_patterns = JSON.parse(techSignal.signals_json); } catch {}
+          try { enriched.detected_patterns = JSON.parse(techSignal.signals_json); } catch (e) { console.warn('[misc] failed to parse detected_patterns', e); }
         }
       }
 
@@ -189,7 +190,7 @@ export const miscRouter = router({
       try {
         return await alphaQuant.analyzePortfolio(input);
       } catch (e: any) {
-        return { error: e.message };
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: e.message });
       }
     }),
 

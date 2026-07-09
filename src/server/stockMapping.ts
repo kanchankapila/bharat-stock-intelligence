@@ -52,7 +52,8 @@ export async function resolveMoneycontrolSymbol(query: string): Promise<string |
     const res = await fetch(`https://www.moneycontrol.com/mccode/common/autosuggestion_solr.php?query=${encodeURIComponent(upperQuery)}&type=1&format=json`, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
-      }
+      },
+      signal: AbortSignal.timeout(10000)
     });
     
     if (res.ok) {

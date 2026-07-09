@@ -1,5 +1,6 @@
 import Database from 'better-sqlite3';
 import path from 'path';
+import { usePostgres } from './pgConfig';
 
 const DATABASE_URL = process.env.DATABASE_URL || 'database.sqlite';
 const dbPath = DATABASE_URL === ':memory:' ? ':memory:' : path.resolve(process.cwd(), DATABASE_URL);
@@ -17,7 +18,7 @@ db.pragma('wal_autocheckpoint = 1000');
 // PASSIVE could never advance past the always-present readers from the ~40 BullMQ
 // workers, so the WAL grew unbounded (observed ~300 MB). TRUNCATE forces a full
 // checkpoint + truncate when no writer holds the lock.
-if (!process.env.USE_POSTGRES || process.env.USE_POSTGRES === 'false') {
+if (!usePostgres()) {
   setInterval(() => {
     try { db.pragma('wal_checkpoint(TRUNCATE)'); } catch {}
   }, 5 * 60 * 1000).unref();
@@ -2388,7 +2389,7 @@ function pruneConfluenceSignals(): void {
     console.error('[DB] confluence_signals prune failed:', (err as Error).message);
   }
 }
-if (!process.env.USE_POSTGRES || process.env.USE_POSTGRES === 'false') {
+if (!usePostgres()) {
   setTimeout(pruneConfluenceSignals, 30_000).unref();
   setInterval(pruneConfluenceSignals, 6 * 60 * 60 * 1000).unref();
 }

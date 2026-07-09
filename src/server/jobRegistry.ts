@@ -57,4 +57,5 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   { jobName: 'quant-eod-sync', label: 'Quant EOD Sync', cronPattern: '30 12 * * 1-5', graceMinutes: 45, critical: false },
   { jobName: 'outcome-resolver', label: 'Outcome Resolver', cronPattern: '0 4 * * 1-5', graceMinutes: 45, critical: true },
   { jobName: 'ml-daily-ops', label: 'ML Daily Ops', cronPattern: '30 11 * * 1-5', graceMinutes: 60, critical: true },
+  { jobName: 'trendlyne-daily-fetch', label: 'Trendlyne Daily Metrics Fetch', cronPattern: '30 4 * * 1-5', graceMinutes: 60, critical: false },
 ];

@@ -101,7 +101,8 @@ export async function fetchETnowScreener(screenerId: string, queryCondition: str
       "Origin": "https://economictimes.indiatimes.com",
       "Accept-Language": "en-US,en;q=0.9"
     },
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(10000)
   });
 
   if (!response.ok) {

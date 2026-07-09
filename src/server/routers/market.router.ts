@@ -71,7 +71,7 @@ export const marketRouter = router({
             };
           }
         }
-      } catch {}
+      } catch (e) { console.error(e); }
       return {
         nifty50:   { indId: '9',  value: null, change: null, changePct: null, stale: true },
         sensex:    { indId: '4',  value: null, change: null, changePct: null, stale: true },

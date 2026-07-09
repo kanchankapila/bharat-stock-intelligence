@@ -320,7 +320,7 @@ class StrategyOptimizer:
                 "title": "Optimization Complete",
                 "message": "Strategy Optimizer finished. Weight overrides applied."
             }, timeout=2)
-        except:
+        except requests.RequestException:
             pass
             
         print(f"[Optimizer] Applied weight_override to {n} screeners in screener_master.")

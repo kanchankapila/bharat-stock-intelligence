@@ -262,7 +262,7 @@ def upsert_transactions(con, rows: list[dict]) -> int:
 def compute_and_write_features(con, symbol: str, days: int = 90) -> None:
     """Aggregate insider_transactions for one symbol and write to technical_signals."""
     cur = con.cursor()
-    cutoff = (date.today() - timedelta(days=days)).isoformat()
+    cutoff = date.today() - timedelta(days=days)
 
     if use_postgres():
         cur.execute(

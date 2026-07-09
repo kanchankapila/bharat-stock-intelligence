@@ -21,7 +21,7 @@ export async function fetchETCompanyData(symbol: string) {
   console.log(`[ET] Fetching company data for ${symbol} using companyid: ${map.companyid}`);
   // https://json.bselivefeeds.indiatimes.com/ET_Community/companypagedata?companyid=8581&companytype=&callback=...
   const url = `https://json.bselivefeeds.indiatimes.com/ET_Community/companypagedata?companyid=${map.companyid}&companytype=`;
-  const response = await fetch(url);
+  const response = await fetch(url, { signal: AbortSignal.timeout(10000) });
   if (!response.ok) return null;
   return response.json();
 }
@@ -58,7 +58,7 @@ export async function fetchETShareholding(symbol: string) {
   console.log(`[ET] Fetching shareholding for ${symbol} using companyid: ${map.companyid}`);
   // https://marketservices.indiatimes.com/marketservices/shareholding?companyid=11945
   const url = `https://marketservices.indiatimes.com/marketservices/shareholding?companyid=${map.companyid}`;
-  const response = await fetch(url);
+  const response = await fetch(url, { signal: AbortSignal.timeout(10000) });
   if (!response.ok) return null;
   return response.json();
 }
@@ -70,7 +70,7 @@ export async function fetchETCorporateActions(symbol: string) {
   // https://json.bselivefeeds.indiatimes.com/ET_Community/companypagedata?companyid=8581&companytype=&callback=...
   // This often contains actions. Alternatively, using a more specific one if found.
   const url = `https://json.bselivefeeds.indiatimes.com/ET_Community/companypagedata?companyid=${map.companyid}&companytype=`;
-  const response = await fetch(url);
+  const response = await fetch(url, { signal: AbortSignal.timeout(10000) });
   if (!response.ok) return null;
   return response.json();
 }
@@ -186,7 +186,7 @@ export async function fetchGlobalIndices() {
 
 export async function fetchTrendingScreeners() {
   const url = `https://etmarketsapis.indiatimes.com/ET_TechnicalScreeners/topTrendingScreeners?exchangeId=50&pageNumber=1&pageSize=6&innerPageSize=3`;
-  const response = await fetch(url);
+  const response = await fetch(url, { signal: AbortSignal.timeout(10000) });
   if (!response.ok) return null;
   return response.json();
 }
@@ -241,7 +241,7 @@ export async function fetchTechnicalTrends(type: 'bullish' | 'bearish' | 'turnin
 
 export async function fetchETStats(type: 'gainers' | 'losers', duration: string = '1 day') {
   const url = `https://etmarketsapis.indiatimes.com/ET_Stats/${type}?pagesize=25&marketcap=largecap%2Cmidcap%2Csmallcap&duration=${encodeURIComponent(duration)}&sort=intraday&sortby=percentchange&sortorder=desc`;
-  const response = await fetch(url);
+  const response = await fetch(url, { signal: AbortSignal.timeout(10000) });
   if (!response.ok) return null;
   return response.json();
 }
@@ -290,6 +290,7 @@ export async function fetchNiftyTraderBreakouts() {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
         'Accept': 'application/json',
       },
+      signal: AbortSignal.timeout(10000),
     });
     if (!response.ok) return { success: false, data: [] };
     const data = await response.json();
