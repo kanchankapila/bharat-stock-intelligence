@@ -395,9 +395,12 @@ class AlphaQuantScoringEngine:
     @staticmethod
     def _recency_weight(last_updated_str: str) -> float:
         try:
-            last = datetime.datetime.fromisoformat(str(last_updated_str))
-            age_days = max(0, (datetime.datetime.now() - last).days)
             import math
+            last = datetime.datetime.fromisoformat(str(last_updated_str))
+            # Strip tzinfo so arithmetic works regardless of DB backend (SQLite naive vs Postgres aware)
+            if last.tzinfo is not None:
+                last = last.replace(tzinfo=None)
+            age_days = max(0, (datetime.datetime.utcnow() - last).days)
             return math.exp(-math.log(2) * age_days / AlphaQuantScoringEngine.DECAY_HALFLIFE_DAYS)
         except Exception:
             return 1.0
@@ -407,8 +410,11 @@ class AlphaQuantScoringEngine:
         try:
             import math
             published = datetime.datetime.fromisoformat(str(published_at_str))
-            now = datetime.datetime.now()
-            
+            # Normalise to naive UTC to avoid SQLite-naive vs Postgres-aware mismatches
+            if published.tzinfo is not None:
+                published = published.replace(tzinfo=None)
+            now = datetime.datetime.utcnow()
+
             # Count weekend days between published and now
             weekend_days = 0
             current = published.date()
@@ -416,11 +422,11 @@ class AlphaQuantScoringEngine:
                 if current.weekday() >= 5:  # 5=Sat, 6=Sun
                     weekend_days += 1
                 current += datetime.timedelta(days=1)
-                
+
             age_hours = max(0, (now - published).total_seconds() / 3600)
             # Subtract weekend hours (max subtracting age_hours to prevent negative)
             adjusted_age_hours = max(0, age_hours - (weekend_days * 24))
-            
+
             return math.exp(-math.log(2) * adjusted_age_hours / 48)  # 2-day half-life
         except Exception:
             return 1.0
@@ -778,19 +784,20 @@ class AlphaQuantScoringEngine:
                     final_score += (tc_score - 50) / 10.0
                     
                 # True Alpha (Market Beta Adjustment)
-                # If market is green (>0.3) and stock is bullish, discount by 0.9x
-                # If market is red (<-0.3) and stock is bullish, premium by 1.1x
-                # (And vice versa for bearish signals)
+                # Bullish stocks in a bull market: slight discount (beta-adjusted, not pure alpha).
+                # Bullish stocks in a bear market: amplify (stock fighting the tide = strong signal).
+                # Bearish stocks in a bear market: amplify (bear momentum confirmation).
+                # Bearish stocks in a bull market: discount (contrarian, less reliable).
                 if final_score > 0:
                     if market_global_score > 0.3:
-                        final_score *= 0.90
+                        final_score *= 0.90   # bullish stock, bullish market → trim beta
                     elif market_global_score < -0.3:
-                        final_score *= 1.10
+                        final_score *= 1.10   # bullish stock, bearish market → amplify alpha
                 elif final_score < 0:
                     if market_global_score < -0.3:
-                        final_score *= 0.90
+                        final_score *= 1.10   # bearish stock, bearish market → amplify (was 0.90 — BUG FIXED)
                     elif market_global_score > 0.3:
-                        final_score *= 1.10
+                        final_score *= 0.90   # bearish stock, bullish market → discount (was 1.10 — BUG FIXED)
 
                 # Signal-quality tilt: respect the realized performance of the stock's
                 # best active technical setup instead of letting the screener basket dilute it.

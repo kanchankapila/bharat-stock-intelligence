@@ -106,6 +106,10 @@ class TechnicalAnalysisEngine:
 
         # Predictions — barriers scaled to the stock's own ATR, not a fixed % everywhere
         latest_atr = float(latest['atr']) if not pd.isna(latest['atr']) else 0.0
+
+        # Bug-fix 5: always compute barriers so entry/target/stop_loss are never 0.
+        # Neutral trend gets symmetric ATR barriers (market-making style); the
+        # entry_price is the current mid to avoid any directional bias.
         if trend == "Bullish" or latest['rsi'] < 35:
             entry_price = round(current_price * 1.005, 2)
             target_price, stop_loss = compute_atr_barriers(current_price, latest_atr, 'long')
@@ -113,12 +117,27 @@ class TechnicalAnalysisEngine:
             # For shorting or exit
             entry_price = round(current_price * 0.995, 2)
             target_price, stop_loss = compute_atr_barriers(current_price, latest_atr, 'short')
+        else:
+            # Neutral: use current price as entry, compute symmetric long barriers as default
+            entry_price = current_price
+            target_price, stop_loss = compute_atr_barriers(current_price, latest_atr, 'long')
 
         return {
             'symbol': symbol,
             'trend': trend,
             'rsi': float(latest['rsi']),
-            'macd': "Bullish Crossover" if latest['macd'] > latest['macd_signal'] and prev['macd'] < prev['macd_signal'] else "Neutral",
+            # Bug-fix 3: 4-state MACD label.
+            # "*Crossover" = event happened yesterday→today (most actionable).
+            # "Bullish"/"Bearish" = sustained state, still tradeable.
+            # Previously "Neutral" was returned for the sustained state — the most
+            # common and tradeable condition — which caused it to be ignored downstream.
+            'macd': (
+                "Bullish Crossover" if (latest['macd'] > latest['macd_signal'] and prev['macd'] <= prev['macd_signal'])
+                else "Bearish Crossover" if (latest['macd'] < latest['macd_signal'] and prev['macd'] >= prev['macd_signal'])
+                else "Bullish" if latest['macd'] > latest['macd_signal']
+                else "Bearish" if latest['macd'] < latest['macd_signal']
+                else "Neutral"
+            ),
             'bollinger': "High" if latest['close'] > latest['bb_high'] else "Low" if latest['close'] < latest['bb_low'] else "Normal",
             'patterns': json.dumps(patterns),
             'entry_price': entry_price,

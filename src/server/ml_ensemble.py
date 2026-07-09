@@ -895,219 +895,418 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
         label_join = ""
         label_where = "so.outcome IN ('WIN','LOSS','STOP_LOSS')\n          AND so.return_pct IS NOT NULL"
 
-    q = f"""
-        SELECT so.symbol, so.signal_date, so.horizon_days, {label_select},
-               so.signal_score, so.signals_json, so.return_pct,
-               ts.rsi, ts.adx, ts.nifty_regime, ts.cmp, ts.sma200, ts.volume_ratio,
-               ts.fii_3d_net,
-               ts.above_sma200,
-               ts.pcr_oi, ts.pcr_vol,
-               ts.fii_10d_net, ts.dii_3d_net,
-               ts.delivery_pct,
-               ts.sector_ret_5d, ts.sector_ret_21d,
-               ts.sector_global_corr_21d,
-               ts.iv_rank, ts.iv_skew,
-               ts.rs_rank_21d, ts.rs_rank_63d,
-               ts.insider_buy_pct_90d,
-               ts.opening_range_break,
-               ts.vwap_deviation_pct,
-               ts.first_hour_vol_share,
-               ts.avwap_deviation_pct,
-               ts.oi_net_change_pct,
-               ts.eps_beat_last_q,
-               ts.eps_beat_streak_4q,
-               ts.eps_miss_streak_4q,
-               ts.eps_surprise_last_yr,
-               ts.eps_estimate_dispersion,
-               fs.ret_12m_ex1m,
-               mb.pct_above_200dma, mb.adv_decline_ratio, mb.net_highs_lows,
-               hfs.max_pain,
-               ts.mf_holding_pct, ts.mf_fund_count, ts.mf_chg_vs_prev,
-               ts.rollover_pct, ts.cost_of_carry_ann,
-               ts.block_deal_net_qty, ts.block_deal_value_cr,
-               ts.eps_ttm, ts.eps_growth_yoy, ts.eps_growth_qoq, ts.eps_acceleration,
-               ts.pe_ttm, ts.dvm_durability, ts.dvm_valuation, ts.dvm_momentum,
-               ts.pe_pct_rank_252d, ts.pe_vs_median_1yr, ts.pb_pct_rank_252d, ts.div_yield_ttm,
-               ts.ma_bull_frac, ts.osc_bull_frac, ts.adx_tl, ts.atr_pct_tl, ts.mfi_tl,
-               ts.pivot_dist_pct_tl, ts.delivery_avg_1m_tl, ts.beta_1y_tl,
-               ts.ret_1m_tl, ts.ret_3m_tl, ts.ret_6m_tl, ts.ret_1y_tl,
-               ts.analyst_upside_pct, ts.analyst_count, ts.analyst_buy_pct,
-               ts.roe_annual, ts.roce_annual, ts.ebitda_margin, ts.np_margin,
-               ts.promoter_pct, ts.fii_pct, ts.pledge_pct,
-               ts.rev_growth_yoy_q, ts.np_growth_yoy_q,
-               ts.days_since_dividend, ts.last_dividend_amt,
-               ts.days_to_ex_div, ts.days_to_board_meeting, ts.upcoming_div_pct,
-               ts.mc_52w_high_dist_pct, ts.mc_52w_low_dist_pct, ts.mc_days_from_52wh,
-               ts.mc_cagr_3y, ts.mc_cagr_5y, ts.mc_cagr_10y, ts.mc_ind_pe, ts.mc_pe_vs_ind,
-               ts.mc_consensus_pe, ts.mc_consensus_pb,
-               ts.mc_ma30_dist_pct, ts.mc_ma50_dist_pct, ts.mc_ma150_dist_pct, ts.mc_ma200_dist_pct,
-               ts.mc_del_pct_3d, ts.mc_del_pct_5d, ts.mc_del_pct_20d, ts.mc_del_acceleration,
-               ts.mc_vol_ratio, ts.mc_circuit_dist_pct, ts.mc_fno_eligible,
-               ts.mc_3d_return, ts.mc_ytd_return,
-               ts.mc_price_cash, ts.mc_consensus_eps, ts.mc_eps_vs_cons, ts.mc_pe_fwd_discount,
-               ts.mc_cp_bull_count, ts.mc_cp_bear_count, ts.mc_cp_net_score, ts.mc_cp_avg_target_pct,
-               ts.tl_vs_nifty_1m, ts.tl_vs_nifty_3m, ts.tl_vs_nifty_6m,
-               ts.tl_vs_ind_1m, ts.tl_vs_ind_3m,
-               ts.tl_seasonal_month_5y, ts.tl_dist_3m_high_pct, ts.tl_dist_3m_low_pct,
-               ts.nt_max_pain_dist_pct, ts.nt_oi_direction, ts.nt_pcr, ts.nt_option_volume_log,
-               ts.hv_10d, ts.hv_20d, ts.hv_30d, ts.hv_60d, ts.iv_hv_ratio,
-               ts.pead_score, ts.event_signal_score,
-               ts.eps_revision_3m_pct, ts.target_revision_3m_pct, ts.analyst_count_chg,
-               ts.rs_vs_sector_21d, ts.rs_vs_sector_63d,
-               ts.asm_flag, ts.gsm_stage,
-               ts.crude_corr_90d, ts.gold_corr_90d, ts.dxy_corr_90d, ts.sp500_corr_90d,
-               ts.mc_broker_buy_7d, ts.mc_broker_sell_7d, ts.mc_broker_upside,
-               ts.days_to_next_results, ts.earnings_category_yoy, ts.earnings_category_qoq,
-               ts.earnings_np_growth_yoy, ts.earnings_np_growth_qoq,
-               ts.mc_eps_vs_cons, ts.positive_turnaround, ts.negative_turnaround,
-               ts.earnings_shocker_flag, ts.earnings_shocker_gain,
-               ts.is_nifty50, ts.is_nifty100, ts.nifty_tier,
-               ts.pledge_chg_90d,
-               ts.iep_gap_pct, ts.preopen_imbalance,
-               ts.expected_move_pct, ts.stock_gex_proxy,
-               ts.eps_surprise_q1, ts.eps_surprise_q2, ts.eps_beat_streak,
-               ts.eps_miss_after_streak, ts.rev_surprise_q1,
-               ts.fcf_yield_approx AS fcf_yield, ts.interest_coverage, ts.fcf_positive, ts.debt_coverage_risk,
-               ts.delivery_trend_30d, ts.block_deal_flag, ts.block_deal_direction,
-               ts.short_interest_proxy,
-               ts.promoter_buy_90d_cr, ts.promoter_sell_90d_cr, ts.promoter_net_90d,
-               ts.insider_buy_flag, ts.insider_sell_flag,
-               ts.rating_upgrade_180d, ts.rating_downgrade_180d, ts.days_since_upgrade,
-               ts.mf_sector_flow_pct,
-               ts.receivables_days_ttm, ts.ccc_ttm, ts.ccc_trend,
-               ts.wc_deteriorating, ts.wc_improving,
-               ts.screener_bull_count, ts.screener_bear_count, ts.screener_cat_breadth,
-               ts.screener_tier1_count, ts.screener_momentum_score, ts.screener_streak_days,
-               ts.screener_name_signal, ts.screener_alpha_score,
-               macro_snap.gift_nifty_pct, macro_snap.nifty_gex,
-               macro_snap.india_10y, macro_snap.india_us_spread,
-               macro_snap.high_impact_3d, macro_snap.asia_sentiment, macro_snap.global_risk,
-               macro_snap.market_np_yoy, macro_snap.earnings_breadth_mkt,
-               macro_snap.fii_net_today,
-               macro_snap.usdinr_chg_pct, macro_snap.nifty_basis_pct, macro_snap.nifty_contango,
-               macro_snap.india_vix,
-               macro_snap.adrs_bullish_pct, macro_snap.usdinr_ret_1d,
-               macro_snap.nikkei_ret_1d, macro_snap.hangseng_ret_1d,
-               mse.np_growth_yoy AS sector_np_growth_yoy, mse.np_growth_qoq AS sector_np_growth_qoq,
-               mse.rev_growth_yoy AS sector_rev_growth_yoy,
-               COALESCE(fh.fifty_two_week_high, sf.fifty_two_week_high) AS fifty_two_week_high,
-               COALESCE(fh.piotroski_f_score, sf.piotroski_f_score)     AS piotroski_f_score,
-               COALESCE(fh.debt_to_equity, sf.debt_to_equity)           AS debt_to_equity,
-               COALESCE(fh.operating_margins, sf.operating_margins)     AS operating_margins,
-               COALESCE(fh.return_on_equity, sf.return_on_equity)       AS return_on_equity,
-               COALESCE(fh.revenue_growth, sf.revenue_growth)           AS revenue_growth,
-               COALESCE(fh.earnings_growth, sf.earnings_growth)         AS earnings_growth,
-               COALESCE(fh.earnings_yield, sf.earnings_yield)           AS earnings_yield,
-               COALESCE(fh.price_to_book, sf.price_to_book)             AS price_to_book,
-               COALESCE(fh.market_cap, sf.market_cap)                   AS market_cap,
-               aeh.n_analysts, aeh.buy_count, aeh.target_mean,
-               psh_az.score_value AS altman_z,
-               psh_oo.score_value AS ohlson_o,
-               (SELECT COUNT(*) FROM credit_rating_events cre
-                 WHERE cre.symbol = so.symbol
-                   AND UPPER(cre.action) LIKE '%UPGRADE%'
-                   AND cre.announcement_date::date >= (so.signal_date::date - interval '365 days')
-                   AND cre.announcement_date::date <= so.signal_date::date) AS cr_upgrades,
-               (SELECT COUNT(*) FROM credit_rating_events cre
-                 WHERE cre.symbol = so.symbol
-                   AND UPPER(cre.action) LIKE '%DOWNGRADE%'
-                   AND cre.announcement_date::date >= (so.signal_date::date - interval '365 days')
-                   AND cre.announcement_date::date <= so.signal_date::date) AS cr_downgrades,
-               sfs.sector_pcr, sfs.total_call_oi AS sector_call_oi, sfs.total_put_oi AS sector_put_oi
-        FROM signal_outcomes so
-        -- Use nearest prior ts row within 3 days to recover ~26% more training rows
-        -- that had no exact-date ts entry (scanner runs on sparse schedule).
-        LEFT JOIN LATERAL (
-            SELECT * FROM technical_signals ts2
-            WHERE ts2.symbol = so.symbol
-              AND ts2.date <= so.signal_date
-              AND ts2.date >= (so.signal_date::date - interval '3 days')::text
-            ORDER BY ts2.date DESC
-            LIMIT 1
-        ) ts ON TRUE
-        -- Point-in-time fundamentals: the latest snapshot taken on/before the signal date
-        -- (leak-free). Falls back to the current stock_fundamentals snapshot when no history
-        -- has accumulated yet — same mild look-ahead as before, never worse.
-        LEFT JOIN fundamentals_history fh
-               ON fh.symbol = so.symbol
-              AND fh.as_of_date = (
-                  SELECT MAX(fh2.as_of_date) FROM fundamentals_history fh2
-                  WHERE fh2.symbol = so.symbol AND fh2.as_of_date <= so.signal_date
-              )
-        LEFT JOIN stock_fundamentals sf
-               ON sf.symbol = so.symbol
-        -- AS-OF analyst consensus: latest snapshot on/before signal date (no look-ahead)
-        LEFT JOIN analyst_estimates_history aeh
-               ON aeh.symbol = so.symbol
-              AND aeh.as_of_date = (
-                  SELECT MAX(aeh2.as_of_date) FROM analyst_estimates_history aeh2
-                  WHERE aeh2.symbol = so.symbol AND aeh2.as_of_date <= so.signal_date
-              )
-        -- AS-OF Altman Z Score (financial distress indicator; > 2.99 safe, < 1.23 distress)
-        LEFT JOIN proprietary_scores_history psh_az
-               ON psh_az.symbol = so.symbol
-              AND psh_az.source = 'moneycontrol'
-              AND psh_az.score_type = 'altman_z_score'
-              AND psh_az.date = (
-                  SELECT MAX(p2.date) FROM proprietary_scores_history p2
-                  WHERE p2.symbol = so.symbol AND p2.source = 'moneycontrol'
-                    AND p2.score_type = 'altman_z_score'
-                    AND p2.date <= so.signal_date
-              )
-        -- AS-OF Ohlson O-Score (log-odds of failure; negative = safer)
-        LEFT JOIN proprietary_scores_history psh_oo
-               ON psh_oo.symbol = so.symbol
-              AND psh_oo.source = 'moneycontrol'
-              AND psh_oo.score_type = 'ohlson_o_score'
-              AND psh_oo.date = (
-                  SELECT MAX(p2.date) FROM proprietary_scores_history p2
-                  WHERE p2.symbol = so.symbol AND p2.source = 'moneycontrol'
-                    AND p2.score_type = 'ohlson_o_score'
-                    AND p2.date <= so.signal_date
-              )
-        LEFT JOIN feature_store fs
-               ON fs.symbol = so.symbol AND fs.date::text = so.signal_date AND fs.timeframe = 'D'
-        LEFT JOIN market_breadth mb ON mb.date = so.signal_date
-        LEFT JOIN historical_fno_sentiment hfs
-               ON hfs.symbol = so.symbol AND hfs.date = so.signal_date
-        LEFT JOIN (
-            SELECT
-                date::text AS snap_date,
-                MAX(CASE WHEN symbol='GIFT_NIFTY_CHG_PCT'   THEN close END) AS gift_nifty_pct,
-                MAX(CASE WHEN symbol='NIFTY_GEX'             THEN close END) AS nifty_gex,
-                MAX(CASE WHEN symbol='INDIA_10Y'             THEN close END) AS india_10y,
-                MAX(CASE WHEN symbol='INDIA_US_SPREAD'       THEN close END) AS india_us_spread,
-                MAX(CASE WHEN symbol='HIGH_IMPACT_EVENTS_3D' THEN close END) AS high_impact_3d,
-                MAX(CASE WHEN symbol='ASIA_SENTIMENT'        THEN close END) AS asia_sentiment,
-                MAX(CASE WHEN symbol='GLOBAL_RISK_SCORE'     THEN close END) AS global_risk,
-                MAX(CASE WHEN symbol='ADRS_BULLISH_PCT'      THEN close END) AS adrs_bullish_pct,
-                MAX(CASE WHEN symbol='USDINR'                THEN ret_1d  END) AS usdinr_ret_1d,
-                MAX(CASE WHEN symbol='NIKKEI'                THEN ret_1d  END) AS nikkei_ret_1d,
-                MAX(CASE WHEN symbol='HANGSENG'              THEN ret_1d  END) AS hangseng_ret_1d,
-                MAX(CASE WHEN symbol='MARKET_NP_GROWTH_YOY'  THEN close END) AS market_np_yoy,
-                MAX(CASE WHEN symbol='EARNINGS_BREADTH'       THEN close END) AS earnings_breadth_mkt,
-                MAX(CASE WHEN symbol='FII_NET_TODAY'           THEN close END) AS fii_net_today,
-                MAX(CASE WHEN symbol='INDIA_VIX'              THEN close END) AS india_vix,
-                MAX(CASE WHEN symbol='USDINR_CHG_PCT'          THEN close END) AS usdinr_chg_pct,
-                MAX(CASE WHEN symbol='NIFTY_BASIS_PCT'          THEN close END) AS nifty_basis_pct,
-                MAX(CASE WHEN symbol='NIFTY_CONTANGO'           THEN close END) AS nifty_contango
-            FROM macro_asset_prices
-            GROUP BY date
-        ) macro_snap ON macro_snap.snap_date = so.signal_date
-        LEFT JOIN mc_sector_earnings mse ON mse.sector_name = (
-            SELECT ns.sector FROM nse_stocks ns WHERE ns.symbol = so.symbol LIMIT 1
-        )
-        LEFT JOIN LATERAL (
-            SELECT sfs2.sector_pcr, sfs2.total_call_oi, sfs2.total_put_oi
-            FROM sector_fo_sentiment sfs2
-            JOIN nse_stocks ns2 ON ns2.sector = sfs2.sector AND ns2.symbol = so.symbol
-            WHERE sfs2.date <= so.signal_date::date
-            ORDER BY sfs2.date DESC
-            LIMIT 1
-        ) sfs ON true
-        {label_join}
-        WHERE {label_where}
-    """
+    if use_postgres():
+        q = f"""
+            SELECT so.symbol, so.signal_date, so.horizon_days, {label_select},
+                   so.signal_score, so.signals_json, so.return_pct,
+                   ts.rsi, ts.adx, ts.nifty_regime, ts.cmp, ts.sma200, ts.volume_ratio,
+                   ts.fii_3d_net,
+                   ts.above_sma200,
+                   ts.pcr_oi, ts.pcr_vol,
+                   ts.fii_10d_net, ts.dii_3d_net,
+                   ts.delivery_pct,
+                   ts.sector_ret_5d, ts.sector_ret_21d,
+                   ts.sector_global_corr_21d,
+                   ts.iv_rank, ts.iv_skew,
+                   ts.rs_rank_21d, ts.rs_rank_63d,
+                   ts.insider_buy_pct_90d,
+                   ts.opening_range_break,
+                   ts.vwap_deviation_pct,
+                   ts.first_hour_vol_share,
+                   ts.avwap_deviation_pct,
+                   ts.oi_net_change_pct,
+                   ts.eps_beat_last_q,
+                   ts.eps_beat_streak_4q,
+                   ts.eps_miss_streak_4q,
+                   ts.eps_surprise_last_yr,
+                   ts.eps_estimate_dispersion,
+                   fs.ret_12m_ex1m,
+                   mb.pct_above_200dma, mb.adv_decline_ratio, mb.net_highs_lows,
+                   hfs.max_pain,
+                   ts.mf_holding_pct, ts.mf_fund_count, ts.mf_chg_vs_prev,
+                   ts.rollover_pct, ts.cost_of_carry_ann,
+                   ts.block_deal_net_qty, ts.block_deal_value_cr,
+                   ts.eps_ttm, ts.eps_growth_yoy, ts.eps_growth_qoq, ts.eps_acceleration,
+                   ts.pe_ttm, ts.dvm_durability, ts.dvm_valuation, ts.dvm_momentum,
+                   ts.pe_pct_rank_252d, ts.pe_vs_median_1yr, ts.pb_pct_rank_252d, ts.div_yield_ttm,
+                   ts.ma_bull_frac, ts.osc_bull_frac, ts.adx_tl, ts.atr_pct_tl, ts.mfi_tl,
+                   ts.pivot_dist_pct_tl, ts.delivery_avg_1m_tl, ts.beta_1y_tl,
+                   ts.ret_1m_tl, ts.ret_3m_tl, ts.ret_6m_tl, ts.ret_1y_tl,
+                   ts.analyst_upside_pct, ts.analyst_count, ts.analyst_buy_pct,
+                   ts.roe_annual, ts.roce_annual, ts.ebitda_margin, ts.np_margin,
+                   ts.promoter_pct, ts.fii_pct, ts.pledge_pct,
+                   ts.rev_growth_yoy_q, ts.np_growth_yoy_q,
+                   ts.days_since_dividend, ts.last_dividend_amt,
+                   ts.days_to_ex_div, ts.days_to_board_meeting, ts.upcoming_div_pct,
+                   ts.mc_52w_high_dist_pct, ts.mc_52w_low_dist_pct, ts.mc_days_from_52wh,
+                   ts.mc_cagr_3y, ts.mc_cagr_5y, ts.mc_cagr_10y, ts.mc_ind_pe, ts.mc_pe_vs_ind,
+                   ts.mc_consensus_pe, ts.mc_consensus_pb,
+                   ts.mc_ma30_dist_pct, ts.mc_ma50_dist_pct, ts.mc_ma150_dist_pct, ts.mc_ma200_dist_pct,
+                   ts.mc_del_pct_3d, ts.mc_del_pct_5d, ts.mc_del_pct_20d, ts.mc_del_acceleration,
+                   ts.mc_vol_ratio, ts.mc_circuit_dist_pct, ts.mc_fno_eligible,
+                   ts.mc_3d_return, ts.mc_ytd_return,
+                   ts.mc_price_cash, ts.mc_consensus_eps, ts.mc_eps_vs_cons, ts.mc_pe_fwd_discount,
+                   ts.mc_cp_bull_count, ts.mc_cp_bear_count, ts.mc_cp_net_score, ts.mc_cp_avg_target_pct,
+                   ts.tl_vs_nifty_1m, ts.tl_vs_nifty_3m, ts.tl_vs_nifty_6m,
+                   ts.tl_vs_ind_1m, ts.tl_vs_ind_3m,
+                   ts.tl_seasonal_month_5y, ts.tl_dist_3m_high_pct, ts.tl_dist_3m_low_pct,
+                   ts.nt_max_pain_dist_pct, ts.nt_oi_direction, ts.nt_pcr, ts.nt_option_volume_log,
+                   ts.hv_10d, ts.hv_20d, ts.hv_30d, ts.hv_60d, ts.iv_hv_ratio,
+                   ts.pead_score, ts.event_signal_score,
+                   ts.eps_revision_3m_pct, ts.target_revision_3m_pct, ts.analyst_count_chg,
+                   ts.rs_vs_sector_21d, ts.rs_vs_sector_63d,
+                   ts.asm_flag, ts.gsm_stage,
+                   ts.crude_corr_90d, ts.gold_corr_90d, ts.dxy_corr_90d, ts.sp500_corr_90d,
+                   ts.mc_broker_buy_7d, ts.mc_broker_sell_7d, ts.mc_broker_upside,
+                   ts.days_to_next_results, ts.earnings_category_yoy, ts.earnings_category_qoq,
+                   ts.earnings_np_growth_yoy, ts.earnings_np_growth_qoq,
+                   ts.mc_eps_vs_cons, ts.positive_turnaround, ts.negative_turnaround,
+                   ts.earnings_shocker_flag, ts.earnings_shocker_gain,
+                   ts.is_nifty50, ts.is_nifty100, ts.nifty_tier,
+                   ts.pledge_chg_90d,
+                   ts.iep_gap_pct, ts.preopen_imbalance,
+                   ts.expected_move_pct, ts.stock_gex_proxy,
+                   ts.eps_surprise_q1, ts.eps_surprise_q2, ts.eps_beat_streak,
+                   ts.eps_miss_after_streak, ts.rev_surprise_q1,
+                   ts.fcf_yield_approx AS fcf_yield, ts.interest_coverage, ts.fcf_positive, ts.debt_coverage_risk,
+                   ts.delivery_trend_30d, ts.block_deal_flag, ts.block_deal_direction,
+                   ts.short_interest_proxy,
+                   ts.promoter_buy_90d_cr, ts.promoter_sell_90d_cr, ts.promoter_net_90d,
+                   ts.insider_buy_flag, ts.insider_sell_flag,
+                   ts.rating_upgrade_180d, ts.rating_downgrade_180d, ts.days_since_upgrade,
+                   ts.mf_sector_flow_pct,
+                   ts.receivables_days_ttm, ts.ccc_ttm, ts.ccc_trend,
+                   ts.wc_deteriorating, ts.wc_improving,
+                   ts.screener_bull_count, ts.screener_bear_count, ts.screener_cat_breadth,
+                   ts.screener_tier1_count, ts.screener_momentum_score, ts.screener_streak_days,
+                   ts.screener_name_signal, ts.screener_alpha_score,
+                   macro_snap.gift_nifty_pct, macro_snap.nifty_gex,
+                   macro_snap.india_10y, macro_snap.india_us_spread,
+                   macro_snap.high_impact_3d, macro_snap.asia_sentiment, macro_snap.global_risk,
+                   macro_snap.market_np_yoy, macro_snap.earnings_breadth_mkt,
+                   macro_snap.fii_net_today,
+                   macro_snap.usdinr_chg_pct, macro_snap.nifty_basis_pct, macro_snap.nifty_contango,
+                   macro_snap.india_vix,
+                   macro_snap.adrs_bullish_pct, macro_snap.usdinr_ret_1d,
+                   macro_snap.nikkei_ret_1d, macro_snap.hangseng_ret_1d,
+                   mse.np_growth_yoy AS sector_np_growth_yoy, mse.np_growth_qoq AS sector_np_growth_qoq,
+                   mse.rev_growth_yoy AS sector_rev_growth_yoy,
+                   COALESCE(fh.fifty_two_week_high, sf.fifty_two_week_high) AS fifty_two_week_high,
+                   COALESCE(fh.piotroski_f_score, sf.piotroski_f_score)     AS piotroski_f_score,
+                   COALESCE(fh.debt_to_equity, sf.debt_to_equity)           AS debt_to_equity,
+                   COALESCE(fh.operating_margins, sf.operating_margins)     AS operating_margins,
+                   COALESCE(fh.return_on_equity, sf.return_on_equity)       AS return_on_equity,
+                   COALESCE(fh.revenue_growth, sf.revenue_growth)           AS revenue_growth,
+                   COALESCE(fh.earnings_growth, sf.earnings_growth)         AS earnings_growth,
+                   COALESCE(fh.earnings_yield, sf.earnings_yield)           AS earnings_yield,
+                   COALESCE(fh.price_to_book, sf.price_to_book)             AS price_to_book,
+                   COALESCE(fh.market_cap, sf.market_cap)                   AS market_cap,
+                   aeh.n_analysts, aeh.buy_count, aeh.target_mean,
+                   psh_az.score_value AS altman_z,
+                   psh_oo.score_value AS ohlson_o,
+                   (SELECT COUNT(*) FROM credit_rating_events cre
+                     WHERE cre.symbol = so.symbol
+                       AND UPPER(cre.action) LIKE '%UPGRADE%'
+                       AND cre.announcement_date::date >= (so.signal_date::date - interval '365 days')
+                       AND cre.announcement_date::date <= so.signal_date::date) AS cr_upgrades,
+                   (SELECT COUNT(*) FROM credit_rating_events cre
+                     WHERE cre.symbol = so.symbol
+                       AND UPPER(cre.action) LIKE '%DOWNGRADE%'
+                       AND cre.announcement_date::date >= (so.signal_date::date - interval '365 days')
+                       AND cre.announcement_date::date <= so.signal_date::date) AS cr_downgrades,
+                   sfs.sector_pcr, sfs.total_call_oi AS sector_call_oi, sfs.total_put_oi AS sector_put_oi
+            FROM signal_outcomes so
+            LEFT JOIN LATERAL (
+                SELECT * FROM technical_signals ts2
+                WHERE ts2.symbol = so.symbol
+                  AND ts2.date <= so.signal_date
+                  AND ts2.date >= (so.signal_date::date - interval '3 days')::text
+                ORDER BY ts2.date DESC
+                LIMIT 1
+            ) ts ON TRUE
+            LEFT JOIN fundamentals_history fh
+                   ON fh.symbol = so.symbol
+                  AND fh.as_of_date = (
+                      SELECT MAX(fh2.as_of_date) FROM fundamentals_history fh2
+                      WHERE fh2.symbol = so.symbol AND fh2.as_of_date <= so.signal_date
+                  )
+            LEFT JOIN stock_fundamentals sf
+                   ON sf.symbol = so.symbol
+            LEFT JOIN analyst_estimates_history aeh
+                   ON aeh.symbol = so.symbol
+                  AND aeh.as_of_date = (
+                      SELECT MAX(aeh2.as_of_date) FROM analyst_estimates_history aeh2
+                      WHERE aeh2.symbol = so.symbol AND aeh2.as_of_date <= so.signal_date
+                  )
+            LEFT JOIN proprietary_scores_history psh_az
+                   ON psh_az.symbol = so.symbol
+                  AND psh_az.source = 'moneycontrol'
+                  AND psh_az.score_type = 'altman_z_score'
+                  AND psh_az.date = (
+                      SELECT MAX(p2.date) FROM proprietary_scores_history p2
+                      WHERE p2.symbol = so.symbol AND p2.source = 'moneycontrol'
+                        AND p2.score_type = 'altman_z_score'
+                        AND p2.date <= so.signal_date
+                  )
+            LEFT JOIN proprietary_scores_history psh_oo
+                   ON psh_oo.symbol = so.symbol
+                  AND psh_oo.source = 'moneycontrol'
+                  AND psh_oo.score_type = 'ohlson_o_score'
+                  AND psh_oo.date = (
+                      SELECT MAX(p2.date) FROM proprietary_scores_history p2
+                      WHERE p2.symbol = so.symbol AND p2.source = 'moneycontrol'
+                        AND p2.score_type = 'ohlson_o_score'
+                        AND p2.date <= so.signal_date
+                  )
+            LEFT JOIN feature_store fs
+                   ON fs.symbol = so.symbol AND fs.date::text = so.signal_date AND fs.timeframe = 'D'
+            LEFT JOIN market_breadth mb ON mb.date = so.signal_date
+            LEFT JOIN historical_fno_sentiment hfs
+                   ON hfs.symbol = so.symbol AND hfs.date = so.signal_date
+            LEFT JOIN (
+                SELECT
+                    date::text AS snap_date,
+                    MAX(CASE WHEN symbol='GIFT_NIFTY_CHG_PCT'   THEN close END) AS gift_nifty_pct,
+                    MAX(CASE WHEN symbol='NIFTY_GEX'             THEN close END) AS nifty_gex,
+                    MAX(CASE WHEN symbol='INDIA_10Y'             THEN close END) AS india_10y,
+                    MAX(CASE WHEN symbol='INDIA_US_SPREAD'       THEN close END) AS india_us_spread,
+                    MAX(CASE WHEN symbol='HIGH_IMPACT_EVENTS_3D' THEN close END) AS high_impact_3d,
+                    MAX(CASE WHEN symbol='ASIA_SENTIMENT'        THEN close END) AS asia_sentiment,
+                    MAX(CASE WHEN symbol='GLOBAL_RISK_SCORE'     THEN close END) AS global_risk,
+                    MAX(CASE WHEN symbol='ADRS_BULLISH_PCT'      THEN close END) AS adrs_bullish_pct,
+                    MAX(CASE WHEN symbol='USDINR'                THEN ret_1d  END) AS usdinr_ret_1d,
+                    MAX(CASE WHEN symbol='NIKKEI'                THEN ret_1d  END) AS nikkei_ret_1d,
+                    MAX(CASE WHEN symbol='HANGSENG'              THEN ret_1d  END) AS hangseng_ret_1d,
+                    MAX(CASE WHEN symbol='MARKET_NP_GROWTH_YOY'  THEN close END) AS market_np_yoy,
+                    MAX(CASE WHEN symbol='EARNINGS_BREADTH'       THEN close END) AS earnings_breadth_mkt,
+                    MAX(CASE WHEN symbol='FII_NET_TODAY'           THEN close END) AS fii_net_today,
+                    MAX(CASE WHEN symbol='INDIA_VIX'              THEN close END) AS india_vix,
+                    MAX(CASE WHEN symbol='USDINR_CHG_PCT'          THEN close END) AS usdinr_chg_pct,
+                    MAX(CASE WHEN symbol='NIFTY_BASIS_PCT'          THEN close END) AS nifty_basis_pct,
+                    MAX(CASE WHEN symbol='NIFTY_CONTANGO'           THEN close END) AS nifty_contango
+                FROM macro_asset_prices
+                GROUP BY date
+            ) macro_snap ON macro_snap.snap_date = so.signal_date
+            LEFT JOIN mc_sector_earnings mse ON mse.sector_name = (
+                SELECT ns.sector FROM nse_stocks ns WHERE ns.symbol = so.symbol LIMIT 1
+            )
+            LEFT JOIN LATERAL (
+                SELECT sfs2.sector_pcr, sfs2.total_call_oi, sfs2.total_put_oi
+                FROM sector_fo_sentiment sfs2
+                JOIN nse_stocks ns2 ON ns2.sector = sfs2.sector AND ns2.symbol = so.symbol
+                WHERE sfs2.date <= so.signal_date::date
+                ORDER BY sfs2.date DESC
+                LIMIT 1
+            ) sfs ON true
+            {label_join}
+            WHERE {label_where}
+        """
+    else:
+        # SQLite compatible version
+        q = f"""
+            SELECT so.symbol, so.signal_date, so.horizon_days, {label_select},
+                   so.signal_score, so.signals_json, so.return_pct,
+                   ts.rsi, ts.adx, ts.nifty_regime, ts.cmp, ts.sma200, ts.volume_ratio,
+                   ts.fii_3d_net,
+                   ts.above_sma200,
+                   ts.pcr_oi, ts.pcr_vol,
+                   ts.fii_10d_net, ts.dii_3d_net,
+                   ts.delivery_pct,
+                   ts.sector_ret_5d, ts.sector_ret_21d,
+                   ts.sector_global_corr_21d,
+                   ts.iv_rank, ts.iv_skew,
+                   ts.rs_rank_21d, ts.rs_rank_63d,
+                   ts.insider_buy_pct_90d,
+                   ts.opening_range_break,
+                   ts.vwap_deviation_pct,
+                   ts.first_hour_vol_share,
+                   ts.avwap_deviation_pct,
+                   ts.oi_net_change_pct,
+                   ts.eps_beat_last_q,
+                   ts.eps_beat_streak_4q,
+                   ts.eps_miss_streak_4q,
+                   ts.eps_surprise_last_yr,
+                   ts.eps_estimate_dispersion,
+                   fs.ret_12m_ex1m,
+                   mb.pct_above_200dma, mb.adv_decline_ratio, mb.net_highs_lows,
+                   hfs.max_pain,
+                   ts.mf_holding_pct, ts.mf_fund_count, ts.mf_chg_vs_prev,
+                   ts.rollover_pct, ts.cost_of_carry_ann,
+                   ts.block_deal_net_qty, ts.block_deal_value_cr,
+                   ts.eps_ttm, ts.eps_growth_yoy, ts.eps_growth_qoq, ts.eps_acceleration,
+                   ts.pe_ttm, ts.dvm_durability, ts.dvm_valuation, ts.dvm_momentum,
+                   ts.pe_pct_rank_252d, ts.pe_vs_median_1yr, ts.pb_pct_rank_252d, ts.div_yield_ttm,
+                   ts.ma_bull_frac, ts.osc_bull_frac, ts.adx_tl, ts.atr_pct_tl, ts.mfi_tl,
+                   ts.pivot_dist_pct_tl, ts.delivery_avg_1m_tl, ts.beta_1y_tl,
+                   ts.ret_1m_tl, ts.ret_3m_tl, ts.ret_6m_tl, ts.ret_1y_tl,
+                   ts.analyst_upside_pct, ts.analyst_count, ts.analyst_buy_pct,
+                   ts.roe_annual, ts.roce_annual, ts.ebitda_margin, ts.np_margin,
+                   ts.promoter_pct, ts.fii_pct, ts.pledge_pct,
+                   ts.rev_growth_yoy_q, ts.np_growth_yoy_q,
+                   ts.days_since_dividend, ts.last_dividend_amt,
+                   ts.days_to_ex_div, ts.days_to_board_meeting, ts.upcoming_div_pct,
+                   ts.mc_52w_high_dist_pct, ts.mc_52w_low_dist_pct, ts.mc_days_from_52wh,
+                   ts.mc_cagr_3y, ts.mc_cagr_5y, ts.mc_cagr_10y, ts.mc_ind_pe, ts.mc_pe_vs_ind,
+                   ts.mc_consensus_pe, ts.mc_consensus_pb,
+                   ts.mc_ma30_dist_pct, ts.mc_ma50_dist_pct, ts.mc_ma150_dist_pct, ts.mc_ma200_dist_pct,
+                   ts.mc_del_pct_3d, ts.mc_del_pct_5d, ts.mc_del_pct_20d, ts.mc_del_acceleration,
+                   ts.mc_vol_ratio, ts.mc_circuit_dist_pct, ts.mc_fno_eligible,
+                   ts.mc_3d_return, ts.mc_ytd_return,
+                   ts.mc_price_cash, ts.mc_consensus_eps, ts.mc_eps_vs_cons, ts.mc_pe_fwd_discount,
+                   ts.mc_cp_bull_count, ts.mc_cp_bear_count, ts.mc_cp_net_score, ts.mc_cp_avg_target_pct,
+                   ts.tl_vs_nifty_1m, ts.tl_vs_nifty_3m, ts.tl_vs_nifty_6m,
+                   ts.tl_vs_ind_1m, ts.tl_vs_ind_3m,
+                   ts.tl_seasonal_month_5y, ts.tl_dist_3m_high_pct, ts.tl_dist_3m_low_pct,
+                   ts.nt_max_pain_dist_pct, ts.nt_oi_direction, ts.nt_pcr, ts.nt_option_volume_log,
+                   ts.hv_10d, ts.hv_20d, ts.hv_30d, ts.hv_60d, ts.iv_hv_ratio,
+                   ts.pead_score, ts.event_signal_score,
+                   ts.eps_revision_3m_pct, ts.target_revision_3m_pct, ts.analyst_count_chg,
+                   ts.rs_vs_sector_21d, ts.rs_vs_sector_63d,
+                   ts.asm_flag, ts.gsm_stage,
+                   ts.crude_corr_90d, ts.gold_corr_90d, ts.dxy_corr_90d, ts.sp500_corr_90d,
+                   ts.mc_broker_buy_7d, ts.mc_broker_sell_7d, ts.mc_broker_upside,
+                   ts.days_to_next_results, ts.earnings_category_yoy, ts.earnings_category_qoq,
+                   ts.earnings_np_growth_yoy, ts.earnings_np_growth_qoq,
+                   ts.mc_eps_vs_cons, ts.positive_turnaround, ts.negative_turnaround,
+                   ts.earnings_shocker_flag, ts.earnings_shocker_gain,
+                   ts.is_nifty50, ts.is_nifty100, ts.nifty_tier,
+                   ts.pledge_chg_90d,
+                   ts.iep_gap_pct, ts.preopen_imbalance,
+                   ts.expected_move_pct, ts.stock_gex_proxy,
+                   ts.eps_surprise_q1, ts.eps_surprise_q2, ts.eps_beat_streak,
+                   ts.eps_miss_after_streak, ts.rev_surprise_q1,
+                   ts.fcf_yield_approx AS fcf_yield, ts.interest_coverage, ts.fcf_positive, ts.debt_coverage_risk,
+                   ts.delivery_trend_30d, ts.block_deal_flag, ts.block_deal_direction,
+                   ts.short_interest_proxy,
+                   ts.promoter_buy_90d_cr, ts.promoter_sell_90d_cr, ts.promoter_net_90d,
+                   ts.insider_buy_flag, ts.insider_sell_flag,
+                   ts.rating_upgrade_180d, ts.rating_downgrade_180d, ts.days_since_upgrade,
+                   ts.mf_sector_flow_pct,
+                   ts.receivables_days_ttm, ts.ccc_ttm, ts.ccc_trend,
+                   ts.wc_deteriorating, ts.wc_improving,
+                   ts.screener_bull_count, ts.screener_bear_count, ts.screener_cat_breadth,
+                   ts.screener_tier1_count, ts.screener_momentum_score, ts.screener_streak_days,
+                   ts.screener_name_signal, ts.screener_alpha_score,
+                   macro_snap.gift_nifty_pct, macro_snap.nifty_gex,
+                   macro_snap.india_10y, macro_snap.india_us_spread,
+                   macro_snap.high_impact_3d, macro_snap.asia_sentiment, macro_snap.global_risk,
+                   macro_snap.market_np_yoy, macro_snap.earnings_breadth_mkt,
+                   macro_snap.fii_net_today,
+                   macro_snap.usdinr_chg_pct, macro_snap.nifty_basis_pct, macro_snap.nifty_contango,
+                   macro_snap.india_vix,
+                   macro_snap.adrs_bullish_pct, macro_snap.usdinr_ret_1d,
+                   macro_snap.nikkei_ret_1d, macro_snap.hangseng_ret_1d,
+                   mse.np_growth_yoy AS sector_np_growth_yoy, mse.np_growth_qoq AS sector_np_growth_qoq,
+                   mse.rev_growth_yoy AS sector_rev_growth_yoy,
+                   COALESCE(fh.fifty_two_week_high, sf.fifty_two_week_high) AS fifty_two_week_high,
+                   COALESCE(fh.piotroski_f_score, sf.piotroski_f_score)     AS piotroski_f_score,
+                   COALESCE(fh.debt_to_equity, sf.debt_to_equity)           AS debt_to_equity,
+                   COALESCE(fh.operating_margins, sf.operating_margins)     AS operating_margins,
+                   COALESCE(fh.return_on_equity, sf.return_on_equity)       AS return_on_equity,
+                   COALESCE(fh.revenue_growth, sf.revenue_growth)           AS revenue_growth,
+                   COALESCE(fh.earnings_growth, sf.earnings_growth)         AS earnings_growth,
+                   COALESCE(fh.earnings_yield, sf.earnings_yield)           AS earnings_yield,
+                   COALESCE(fh.price_to_book, sf.price_to_book)             AS price_to_book,
+                   COALESCE(fh.market_cap, sf.market_cap)                   AS market_cap,
+                   aeh.n_analysts, aeh.buy_count, aeh.target_mean,
+                   psh_az.score_value AS altman_z,
+                   psh_oo.score_value AS ohlson_o,
+                   (SELECT COUNT(*) FROM credit_rating_events cre
+                     WHERE cre.symbol = so.symbol
+                       AND UPPER(cre.action) LIKE '%UPGRADE%'
+                       AND date(cre.announcement_date) >= date(so.signal_date, '-365 days')
+                       AND date(cre.announcement_date) <= date(so.signal_date)) AS cr_upgrades,
+                   (SELECT COUNT(*) FROM credit_rating_events cre
+                     WHERE cre.symbol = so.symbol
+                       AND UPPER(cre.action) LIKE '%DOWNGRADE%'
+                       AND date(cre.announcement_date) >= date(so.signal_date, '-365 days')
+                       AND date(cre.announcement_date) <= date(so.signal_date)) AS cr_downgrades,
+                   sfs.sector_pcr, sfs.total_call_oi AS sector_call_oi, sfs.total_put_oi AS sector_put_oi
+            FROM signal_outcomes so
+            LEFT JOIN technical_signals ts
+                   ON ts.symbol = so.symbol
+                  AND ts.date = (
+                      SELECT MAX(ts2.date) FROM technical_signals ts2
+                      WHERE ts2.symbol = so.symbol
+                        AND ts2.date <= so.signal_date
+                        AND ts2.date >= date(so.signal_date, '-3 days')
+                  )
+            LEFT JOIN fundamentals_history fh
+                   ON fh.symbol = so.symbol
+                  AND fh.as_of_date = (
+                      SELECT MAX(fh2.as_of_date) FROM fundamentals_history fh2
+                      WHERE fh2.symbol = so.symbol AND fh2.as_of_date <= so.signal_date
+                  )
+            LEFT JOIN stock_fundamentals sf
+                   ON sf.symbol = so.symbol
+            LEFT JOIN analyst_estimates_history aeh
+                   ON aeh.symbol = so.symbol
+                  AND aeh.as_of_date = (
+                      SELECT MAX(aeh2.as_of_date) FROM analyst_estimates_history aeh2
+                      WHERE aeh2.symbol = so.symbol AND aeh2.as_of_date <= so.signal_date
+                  )
+            LEFT JOIN proprietary_scores_history psh_az
+                   ON psh_az.symbol = so.symbol
+                  AND psh_az.source = 'moneycontrol'
+                  AND psh_az.score_type = 'altman_z_score'
+                  AND psh_az.date = (
+                      SELECT MAX(p2.date) FROM proprietary_scores_history p2
+                      WHERE p2.symbol = so.symbol AND p2.source = 'moneycontrol'
+                        AND p2.score_type = 'altman_z_score'
+                        AND p2.date <= so.signal_date
+                  )
+            LEFT JOIN proprietary_scores_history psh_oo
+                   ON psh_oo.symbol = so.symbol
+                  AND psh_oo.source = 'moneycontrol'
+                  AND psh_oo.score_type = 'ohlson_o_score'
+                  AND psh_oo.date = (
+                      SELECT MAX(p2.date) FROM proprietary_scores_history p2
+                      WHERE p2.symbol = so.symbol AND p2.source = 'moneycontrol'
+                        AND p2.score_type = 'ohlson_o_score'
+                        AND p2.date <= so.signal_date
+                  )
+            LEFT JOIN feature_store fs
+                   ON fs.symbol = so.symbol AND fs.date = so.signal_date AND fs.timeframe = 'D'
+            LEFT JOIN market_breadth mb ON mb.date = so.signal_date
+            LEFT JOIN historical_fno_sentiment hfs
+                   ON hfs.symbol = so.symbol AND hfs.date = so.signal_date
+            LEFT JOIN (
+                SELECT
+                    date AS snap_date,
+                    MAX(CASE WHEN symbol='GIFT_NIFTY_CHG_PCT'   THEN close END) AS gift_nifty_pct,
+                    MAX(CASE WHEN symbol='NIFTY_GEX'             THEN close END) AS nifty_gex,
+                    MAX(CASE WHEN symbol='INDIA_10Y'             THEN close END) AS india_10y,
+                    MAX(CASE WHEN symbol='INDIA_US_SPREAD'       THEN close END) AS india_us_spread,
+                    MAX(CASE WHEN symbol='HIGH_IMPACT_EVENTS_3D' THEN close END) AS high_impact_3d,
+                    MAX(CASE WHEN symbol='ASIA_SENTIMENT'        THEN close END) AS asia_sentiment,
+                    MAX(CASE WHEN symbol='GLOBAL_RISK_SCORE'     THEN close END) AS global_risk,
+                    MAX(CASE WHEN symbol='ADRS_BULLISH_PCT'      THEN close END) AS adrs_bullish_pct,
+                    MAX(CASE WHEN symbol='USDINR'                THEN ret_1d  END) AS usdinr_ret_1d,
+                    MAX(CASE WHEN symbol='NIKKEI'                THEN ret_1d  END) AS nikkei_ret_1d,
+                    MAX(CASE WHEN symbol='HANGSENG'              THEN ret_1d  END) AS hangseng_ret_1d,
+                    MAX(CASE WHEN symbol='MARKET_NP_GROWTH_YOY'  THEN close END) AS market_np_yoy,
+                    MAX(CASE WHEN symbol='EARNINGS_BREADTH'       THEN close END) AS earnings_breadth_mkt,
+                    MAX(CASE WHEN symbol='FII_NET_TODAY'           THEN close END) AS fii_net_today,
+                    MAX(CASE WHEN symbol='INDIA_VIX'              THEN close END) AS india_vix,
+                    MAX(CASE WHEN symbol='USDINR_CHG_PCT'          THEN close END) AS usdinr_chg_pct,
+                    MAX(CASE WHEN symbol='NIFTY_BASIS_PCT'          THEN close END) AS nifty_basis_pct,
+                    MAX(CASE WHEN symbol='NIFTY_CONTANGO'           THEN close END) AS nifty_contango
+                FROM macro_asset_prices
+                GROUP BY date
+            ) macro_snap ON macro_snap.snap_date = so.signal_date
+            LEFT JOIN mc_sector_earnings mse ON mse.sector_name = (
+                SELECT ns.sector FROM nse_stocks ns WHERE ns.symbol = so.symbol LIMIT 1
+            )
+            LEFT JOIN sector_fo_sentiment sfs
+                   ON sfs.sector = (SELECT ns.sector FROM nse_stocks ns WHERE ns.symbol = so.symbol LIMIT 1)
+                  AND sfs.date = (
+                      SELECT MAX(sfs2.date) FROM sector_fo_sentiment sfs2
+                      JOIN nse_stocks ns2 ON ns2.sector = sfs2.sector AND ns2.symbol = so.symbol
+                      WHERE sfs2.date <= so.signal_date
+                  )
+            {label_join}
+            WHERE {label_where}
+        """
     df = read_df(q)
     if label == 'triple_barrier':
         df['outcome'] = pd.to_numeric(df['outcome'], errors='coerce').astype('Int64')
@@ -1128,180 +1327,417 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
 
 
 def load_pending_signals() -> pd.DataFrame:
-    q = """
-        SELECT ts.symbol, ts.date AS signal_date, ts.signal_score, ts.signals_json,
-               ts.rsi, ts.adx, ts.nifty_regime, ts.cmp, ts.sma200, ts.volume_ratio,
-               ts.fii_3d_net,
-               ts.above_sma200,
-               ts.pcr_oi, ts.pcr_vol,
-               ts.fii_10d_net, ts.dii_3d_net,
-               ts.delivery_pct,
-               ts.sector_ret_5d, ts.sector_ret_21d,
-               ts.sector_global_corr_21d,
-               ts.iv_rank, ts.iv_skew,
-               ts.rs_rank_21d, ts.rs_rank_63d,
-               ts.insider_buy_pct_90d,
-               ts.opening_range_break,
-               ts.vwap_deviation_pct,
-               ts.first_hour_vol_share,
-               ts.avwap_deviation_pct,
-               ts.oi_net_change_pct,
-               ts.eps_beat_last_q,
-               ts.eps_beat_streak_4q,
-               ts.eps_miss_streak_4q,
-               ts.eps_surprise_last_yr,
-               ts.eps_estimate_dispersion,
-               fs.ret_12m_ex1m,
-               mb.pct_above_200dma, mb.adv_decline_ratio, mb.net_highs_lows,
-               hfs.max_pain,
-               ts.mf_holding_pct, ts.mf_fund_count, ts.mf_chg_vs_prev,
-               ts.rollover_pct, ts.cost_of_carry_ann,
-               ts.block_deal_net_qty, ts.block_deal_value_cr,
-               ts.eps_ttm, ts.eps_growth_yoy, ts.eps_growth_qoq, ts.eps_acceleration,
-               ts.pe_ttm, ts.dvm_durability, ts.dvm_valuation, ts.dvm_momentum,
-               ts.pe_pct_rank_252d, ts.pe_vs_median_1yr, ts.pb_pct_rank_252d, ts.div_yield_ttm,
-               ts.ma_bull_frac, ts.osc_bull_frac, ts.adx_tl, ts.atr_pct_tl, ts.mfi_tl,
-               ts.pivot_dist_pct_tl, ts.delivery_avg_1m_tl, ts.beta_1y_tl,
-               ts.ret_1m_tl, ts.ret_3m_tl, ts.ret_6m_tl, ts.ret_1y_tl,
-               ts.analyst_upside_pct, ts.analyst_count, ts.analyst_buy_pct,
-               ts.roe_annual, ts.roce_annual, ts.ebitda_margin, ts.np_margin,
-               ts.promoter_pct, ts.fii_pct, ts.pledge_pct,
-               ts.rev_growth_yoy_q, ts.np_growth_yoy_q,
-               ts.days_since_dividend, ts.last_dividend_amt,
-               ts.days_to_ex_div, ts.days_to_board_meeting, ts.upcoming_div_pct,
-               ts.mc_52w_high_dist_pct, ts.mc_52w_low_dist_pct, ts.mc_days_from_52wh,
-               ts.mc_cagr_3y, ts.mc_cagr_5y, ts.mc_cagr_10y, ts.mc_ind_pe, ts.mc_pe_vs_ind,
-               ts.mc_consensus_pe, ts.mc_consensus_pb,
-               ts.mc_ma30_dist_pct, ts.mc_ma50_dist_pct, ts.mc_ma150_dist_pct, ts.mc_ma200_dist_pct,
-               ts.mc_del_pct_3d, ts.mc_del_pct_5d, ts.mc_del_pct_20d, ts.mc_del_acceleration,
-               ts.mc_vol_ratio, ts.mc_circuit_dist_pct, ts.mc_fno_eligible,
-               ts.mc_3d_return, ts.mc_ytd_return,
-               ts.mc_price_cash, ts.mc_consensus_eps, ts.mc_eps_vs_cons, ts.mc_pe_fwd_discount,
-               ts.mc_cp_bull_count, ts.mc_cp_bear_count, ts.mc_cp_net_score, ts.mc_cp_avg_target_pct,
-               ts.tl_vs_nifty_1m, ts.tl_vs_nifty_3m, ts.tl_vs_nifty_6m,
-               ts.tl_vs_ind_1m, ts.tl_vs_ind_3m,
-               ts.tl_seasonal_month_5y, ts.tl_dist_3m_high_pct, ts.tl_dist_3m_low_pct,
-               ts.nt_max_pain_dist_pct, ts.nt_oi_direction, ts.nt_pcr, ts.nt_option_volume_log,
-               ts.hv_10d, ts.hv_20d, ts.hv_30d, ts.hv_60d, ts.iv_hv_ratio,
-               ts.pead_score, ts.event_signal_score,
-               ts.eps_revision_3m_pct, ts.target_revision_3m_pct, ts.analyst_count_chg,
-               ts.rs_vs_sector_21d, ts.rs_vs_sector_63d,
-               ts.asm_flag, ts.gsm_stage,
-               ts.crude_corr_90d, ts.gold_corr_90d, ts.dxy_corr_90d, ts.sp500_corr_90d,
-               ts.mc_broker_buy_7d, ts.mc_broker_sell_7d, ts.mc_broker_upside,
-               ts.days_to_next_results, ts.earnings_category_yoy, ts.earnings_category_qoq,
-               ts.earnings_np_growth_yoy, ts.earnings_np_growth_qoq,
-               ts.mc_eps_vs_cons, ts.positive_turnaround, ts.negative_turnaround,
-               ts.earnings_shocker_flag, ts.earnings_shocker_gain,
-               ts.is_nifty50, ts.is_nifty100, ts.nifty_tier,
-               ts.pledge_chg_90d,
-               ts.iep_gap_pct, ts.preopen_imbalance,
-               ts.expected_move_pct, ts.stock_gex_proxy,
-               ts.eps_surprise_q1, ts.eps_surprise_q2, ts.eps_beat_streak,
-               ts.eps_miss_after_streak, ts.rev_surprise_q1,
-               ts.fcf_yield_approx AS fcf_yield, ts.interest_coverage, ts.fcf_positive, ts.debt_coverage_risk,
-               ts.delivery_trend_30d, ts.block_deal_flag, ts.block_deal_direction,
-               ts.short_interest_proxy,
-               ts.promoter_buy_90d_cr, ts.promoter_sell_90d_cr, ts.promoter_net_90d,
-               ts.insider_buy_flag, ts.insider_sell_flag,
-               ts.rating_upgrade_180d, ts.rating_downgrade_180d, ts.days_since_upgrade,
-               ts.mf_sector_flow_pct,
-               ts.receivables_days_ttm, ts.ccc_ttm, ts.ccc_trend,
-               ts.wc_deteriorating, ts.wc_improving,
-               ts.screener_bull_count, ts.screener_bear_count, ts.screener_cat_breadth,
-               ts.screener_tier1_count, ts.screener_momentum_score, ts.screener_streak_days,
-               ts.screener_name_signal, ts.screener_alpha_score,
-               macro_snap.gift_nifty_pct, macro_snap.nifty_gex,
-               macro_snap.india_10y, macro_snap.india_us_spread,
-               macro_snap.high_impact_3d, macro_snap.asia_sentiment, macro_snap.global_risk,
-               macro_snap.market_np_yoy, macro_snap.earnings_breadth_mkt,
-               macro_snap.fii_net_today,
-               macro_snap.usdinr_chg_pct, macro_snap.nifty_basis_pct, macro_snap.nifty_contango,
-               macro_snap.india_vix,
-               macro_snap.adrs_bullish_pct, macro_snap.usdinr_ret_1d,
-               macro_snap.nikkei_ret_1d, macro_snap.hangseng_ret_1d,
-               mse.np_growth_yoy AS sector_np_growth_yoy, mse.np_growth_qoq AS sector_np_growth_qoq,
-               mse.rev_growth_yoy AS sector_rev_growth_yoy,
-               sf.fifty_two_week_high,
-               sf.piotroski_f_score, sf.debt_to_equity, sf.operating_margins,
-               sf.return_on_equity, sf.revenue_growth, sf.earnings_growth,
-               sf.earnings_yield, sf.price_to_book, sf.market_cap,
-               aeh.n_analysts, aeh.buy_count, aeh.target_mean,
-               psh_az.score_value AS altman_z,
-               psh_oo.score_value AS ohlson_o,
-               sfs.sector_pcr, sfs.total_call_oi AS sector_call_oi, sfs.total_put_oi AS sector_put_oi
-        FROM technical_signals ts
-        LEFT JOIN stock_fundamentals sf ON sf.symbol = ts.symbol
-        LEFT JOIN feature_store fs
-               ON fs.symbol = ts.symbol AND fs.date::text = ts.date AND fs.timeframe = 'D'
-        LEFT JOIN market_breadth mb ON mb.date = ts.date
-        LEFT JOIN historical_fno_sentiment hfs
-               ON hfs.symbol = ts.symbol AND hfs.date = ts.date
-        -- Latest analyst snapshot on/before today
-        LEFT JOIN analyst_estimates_history aeh
-               ON aeh.symbol = ts.symbol
-              AND aeh.as_of_date = (
-                  SELECT MAX(aeh2.as_of_date) FROM analyst_estimates_history aeh2
-                  WHERE aeh2.symbol = ts.symbol AND aeh2.as_of_date <= ts.date
-              )
-        LEFT JOIN proprietary_scores_history psh_az
-               ON psh_az.symbol = ts.symbol
-              AND psh_az.source = 'moneycontrol'
-              AND psh_az.score_type = 'altman_z_score'
-              AND psh_az.date = (
-                  SELECT MAX(p2.date) FROM proprietary_scores_history p2
-                  WHERE p2.symbol = ts.symbol AND p2.source = 'moneycontrol'
-                    AND p2.score_type = 'altman_z_score'
-                    AND p2.date <= ts.date
-              )
-        LEFT JOIN proprietary_scores_history psh_oo
-               ON psh_oo.symbol = ts.symbol
-              AND psh_oo.source = 'moneycontrol'
-              AND psh_oo.score_type = 'ohlson_o_score'
-              AND psh_oo.date = (
-                  SELECT MAX(p2.date) FROM proprietary_scores_history p2
-                  WHERE p2.symbol = ts.symbol AND p2.source = 'moneycontrol'
-                    AND p2.score_type = 'ohlson_o_score'
-                    AND p2.date <= ts.date
-              )
-        LEFT JOIN (
-            SELECT
-                MAX(CASE WHEN symbol='GIFT_NIFTY_CHG_PCT'   THEN close END) AS gift_nifty_pct,
-                MAX(CASE WHEN symbol='NIFTY_GEX'             THEN close END) AS nifty_gex,
-                MAX(CASE WHEN symbol='INDIA_10Y'             THEN close END) AS india_10y,
-                MAX(CASE WHEN symbol='INDIA_US_SPREAD'       THEN close END) AS india_us_spread,
-                MAX(CASE WHEN symbol='HIGH_IMPACT_EVENTS_3D' THEN close END) AS high_impact_3d,
-                MAX(CASE WHEN symbol='ASIA_SENTIMENT'        THEN close END) AS asia_sentiment,
-                MAX(CASE WHEN symbol='GLOBAL_RISK_SCORE'     THEN close END) AS global_risk,
-                MAX(CASE WHEN symbol='ADRS_BULLISH_PCT'      THEN close END) AS adrs_bullish_pct,
-                MAX(CASE WHEN symbol='USDINR'                THEN ret_1d  END) AS usdinr_ret_1d,
-                MAX(CASE WHEN symbol='NIKKEI'                THEN ret_1d  END) AS nikkei_ret_1d,
-                MAX(CASE WHEN symbol='HANGSENG'              THEN ret_1d  END) AS hangseng_ret_1d,
-                MAX(CASE WHEN symbol='MARKET_NP_GROWTH_YOY'  THEN close END) AS market_np_yoy,
-                MAX(CASE WHEN symbol='EARNINGS_BREADTH'       THEN close END) AS earnings_breadth_mkt,
-                MAX(CASE WHEN symbol='FII_NET_TODAY'           THEN close END) AS fii_net_today,
-                MAX(CASE WHEN symbol='INDIA_VIX'              THEN close END) AS india_vix,
-                MAX(CASE WHEN symbol='USDINR_CHG_PCT'          THEN close END) AS usdinr_chg_pct,
-                MAX(CASE WHEN symbol='NIFTY_BASIS_PCT'          THEN close END) AS nifty_basis_pct,
-                MAX(CASE WHEN symbol='NIFTY_CONTANGO'           THEN close END) AS nifty_contango
-            FROM macro_asset_prices
-            WHERE date::text = (SELECT MAX(date)::text FROM macro_asset_prices)
-        ) macro_snap ON 1=1
-        LEFT JOIN mc_sector_earnings mse ON mse.sector_name = (
-            SELECT ns.sector FROM nse_stocks ns WHERE ns.symbol = ts.symbol LIMIT 1
-        )
-        LEFT JOIN LATERAL (
-            SELECT sfs2.sector_pcr, sfs2.total_call_oi, sfs2.total_put_oi
-            FROM sector_fo_sentiment sfs2
-            JOIN nse_stocks ns2 ON ns2.sector = sfs2.sector AND ns2.symbol = ts.symbol
-            ORDER BY sfs2.date DESC
-            LIMIT 1
-        ) sfs ON true
-        WHERE ts.win_probability IS NULL
-          AND ts.signals_json IS NOT NULL
-        ORDER BY ts.date DESC
-        LIMIT 10000
-    """
+    if use_postgres():
+        q = """
+            SELECT ts.symbol, ts.date AS signal_date, ts.signal_score, ts.signals_json,
+                   ts.rsi, ts.adx, ts.nifty_regime, ts.cmp, ts.sma200, ts.volume_ratio,
+                   ts.fii_3d_net,
+                   ts.above_sma200,
+                   ts.pcr_oi, ts.pcr_vol,
+                   ts.fii_10d_net, ts.dii_3d_net,
+                   ts.delivery_pct,
+                   ts.sector_ret_5d, ts.sector_ret_21d,
+                   ts.sector_global_corr_21d,
+                   ts.iv_rank, ts.iv_skew,
+                   ts.rs_rank_21d, ts.rs_rank_63d,
+                   ts.insider_buy_pct_90d,
+                   ts.opening_range_break,
+                   ts.vwap_deviation_pct,
+                   ts.first_hour_vol_share,
+                   ts.avwap_deviation_pct,
+                   ts.oi_net_change_pct,
+                   ts.eps_beat_last_q,
+                   ts.eps_beat_streak_4q,
+                   ts.eps_miss_streak_4q,
+                   ts.eps_surprise_last_yr,
+                   ts.eps_estimate_dispersion,
+                   fs.ret_12m_ex1m,
+                   mb.pct_above_200dma, mb.adv_decline_ratio, mb.net_highs_lows,
+                   hfs.max_pain,
+                   ts.mf_holding_pct, ts.mf_fund_count, ts.mf_chg_vs_prev,
+                   ts.rollover_pct, ts.cost_of_carry_ann,
+                   ts.block_deal_net_qty, ts.block_deal_value_cr,
+                   ts.eps_ttm, ts.eps_growth_yoy, ts.eps_growth_qoq, ts.eps_acceleration,
+                   ts.pe_ttm, ts.dvm_durability, ts.dvm_valuation, ts.dvm_momentum,
+                   ts.pe_pct_rank_252d, ts.pe_vs_median_1yr, ts.pb_pct_rank_252d, ts.div_yield_ttm,
+                   ts.ma_bull_frac, ts.osc_bull_frac, ts.adx_tl, ts.atr_pct_tl, ts.mfi_tl,
+                   ts.pivot_dist_pct_tl, ts.delivery_avg_1m_tl, ts.beta_1y_tl,
+                   ts.ret_1m_tl, ts.ret_3m_tl, ts.ret_6m_tl, ts.ret_1y_tl,
+                   ts.analyst_upside_pct, ts.analyst_count, ts.analyst_buy_pct,
+                   ts.roe_annual, ts.roce_annual, ts.ebitda_margin, ts.np_margin,
+                   ts.promoter_pct, ts.fii_pct, ts.pledge_pct,
+                   ts.rev_growth_yoy_q, ts.np_growth_yoy_q,
+                   ts.days_since_dividend, ts.last_dividend_amt,
+                   ts.days_to_ex_div, ts.days_to_board_meeting, ts.upcoming_div_pct,
+                   ts.mc_52w_high_dist_pct, ts.mc_52w_low_dist_pct, ts.mc_days_from_52wh,
+                   ts.mc_cagr_3y, ts.mc_cagr_5y, ts.mc_cagr_10y, ts.mc_ind_pe, ts.mc_pe_vs_ind,
+                   ts.mc_consensus_pe, ts.mc_consensus_pb,
+                   ts.mc_ma30_dist_pct, ts.mc_ma50_dist_pct, ts.mc_ma150_dist_pct, ts.mc_ma200_dist_pct,
+                   ts.mc_del_pct_3d, ts.mc_del_pct_5d, ts.mc_del_pct_20d, ts.mc_del_acceleration,
+                   ts.mc_vol_ratio, ts.mc_circuit_dist_pct, ts.mc_fno_eligible,
+                   ts.mc_3d_return, ts.mc_ytd_return,
+                   ts.mc_price_cash, ts.mc_consensus_eps, ts.mc_eps_vs_cons, ts.mc_pe_fwd_discount,
+                   ts.mc_cp_bull_count, ts.mc_cp_bear_count, ts.mc_cp_net_score, ts.mc_cp_avg_target_pct,
+                   ts.tl_vs_nifty_1m, ts.tl_vs_nifty_3m, ts.tl_vs_nifty_6m,
+                   ts.tl_vs_ind_1m, ts.tl_vs_ind_3m,
+                   ts.tl_seasonal_month_5y, ts.tl_dist_3m_high_pct, ts.tl_dist_3m_low_pct,
+                   ts.nt_max_pain_dist_pct, ts.nt_oi_direction, ts.nt_pcr, ts.nt_option_volume_log,
+                   ts.hv_10d, ts.hv_20d, ts.hv_30d, ts.hv_60d, ts.iv_hv_ratio,
+                   ts.pead_score, ts.event_signal_score,
+                   ts.eps_revision_3m_pct, ts.target_revision_3m_pct, ts.analyst_count_chg,
+                   ts.rs_vs_sector_21d, ts.rs_vs_sector_63d,
+                   ts.asm_flag, ts.gsm_stage,
+                   ts.crude_corr_90d, ts.gold_corr_90d, ts.dxy_corr_90d, ts.sp500_corr_90d,
+                   ts.mc_broker_buy_7d, ts.mc_broker_sell_7d, ts.mc_broker_upside,
+                   ts.days_to_next_results, ts.earnings_category_yoy, ts.earnings_category_qoq,
+                   ts.earnings_np_growth_yoy, ts.earnings_np_growth_qoq,
+                   ts.mc_eps_vs_cons, ts.positive_turnaround, ts.negative_turnaround,
+                   ts.earnings_shocker_flag, ts.earnings_shocker_gain,
+                   ts.is_nifty50, ts.is_nifty100, ts.nifty_tier,
+                   ts.pledge_chg_90d,
+                   ts.iep_gap_pct, ts.preopen_imbalance,
+                   ts.expected_move_pct, ts.stock_gex_proxy,
+                   ts.eps_surprise_q1, ts.eps_surprise_q2, ts.eps_beat_streak,
+                   ts.eps_miss_after_streak, ts.rev_surprise_q1,
+                   ts.fcf_yield_approx AS fcf_yield, ts.interest_coverage, ts.fcf_positive, ts.debt_coverage_risk,
+                   ts.delivery_trend_30d, ts.block_deal_flag, ts.block_deal_direction,
+                   ts.short_interest_proxy,
+                   ts.promoter_buy_90d_cr, ts.promoter_sell_90d_cr, ts.promoter_net_90d,
+                   ts.insider_buy_flag, ts.insider_sell_flag,
+                   ts.rating_upgrade_180d, ts.rating_downgrade_180d, ts.days_since_upgrade,
+                   ts.mf_sector_flow_pct,
+                   ts.receivables_days_ttm, ts.ccc_ttm, ts.ccc_trend,
+                   ts.wc_deteriorating, ts.wc_improving,
+                   ts.screener_bull_count, ts.screener_bear_count, ts.screener_cat_breadth,
+                   ts.screener_tier1_count, ts.screener_momentum_score, ts.screener_streak_days,
+                   ts.screener_name_signal, ts.screener_alpha_score,
+                   macro_snap.gift_nifty_pct, macro_snap.nifty_gex,
+                   macro_snap.india_10y, macro_snap.india_us_spread,
+                   macro_snap.high_impact_3d, macro_snap.asia_sentiment, macro_snap.global_risk,
+                   macro_snap.market_np_yoy, macro_snap.earnings_breadth_mkt,
+                   macro_snap.fii_net_today,
+                   macro_snap.usdinr_chg_pct, macro_snap.nifty_basis_pct, macro_snap.nifty_contango,
+                   macro_snap.india_vix,
+                   macro_snap.adrs_bullish_pct, macro_snap.usdinr_ret_1d,
+                   macro_snap.nikkei_ret_1d, macro_snap.hangseng_ret_1d,
+                   mse.np_growth_yoy AS sector_np_growth_yoy, mse.np_growth_qoq AS sector_np_growth_qoq,
+                   mse.rev_growth_yoy AS sector_rev_growth_yoy,
+                   sf.fifty_two_week_high,
+                   sf.piotroski_f_score, sf.debt_to_equity, sf.operating_margins,
+                   sf.return_on_equity, sf.revenue_growth, sf.earnings_growth,
+                   sf.earnings_yield, sf.price_to_book, sf.market_cap,
+                   aeh.n_analysts, aeh.buy_count, aeh.target_mean,
+                   psh_az.score_value AS altman_z,
+                   psh_oo.score_value AS ohlson_o,
+                   sfs.sector_pcr, sfs.total_call_oi AS sector_call_oi, sfs.total_put_oi AS sector_put_oi
+            FROM technical_signals ts
+            LEFT JOIN stock_fundamentals sf ON sf.symbol = ts.symbol
+            LEFT JOIN feature_store fs
+                   ON fs.symbol = ts.symbol AND fs.date::text = ts.date AND fs.timeframe = 'D'
+            LEFT JOIN market_breadth mb ON mb.date = ts.date
+            LEFT JOIN historical_fno_sentiment hfs
+                   ON hfs.symbol = ts.symbol AND hfs.date = ts.date
+            -- Latest analyst snapshot on/before today
+            LEFT JOIN analyst_estimates_history aeh
+                   ON aeh.symbol = ts.symbol
+                  AND aeh.as_of_date = (
+                      SELECT MAX(aeh2.as_of_date) FROM analyst_estimates_history aeh2
+                      WHERE aeh2.symbol = ts.symbol AND aeh2.as_of_date <= ts.date
+                  )
+            LEFT JOIN proprietary_scores_history psh_az
+                   ON psh_az.symbol = ts.symbol
+                  AND psh_az.source = 'moneycontrol'
+                  AND psh_az.score_type = 'altman_z_score'
+                  AND psh_az.date = (
+                      SELECT MAX(p2.date) FROM proprietary_scores_history p2
+                      WHERE p2.symbol = ts.symbol AND p2.source = 'moneycontrol'
+                        AND p2.score_type = 'altman_z_score'
+                        AND p2.date <= ts.date
+                  )
+            LEFT JOIN proprietary_scores_history psh_oo
+                   ON psh_oo.symbol = ts.symbol
+                  AND psh_oo.source = 'moneycontrol'
+                  AND psh_oo.score_type = 'ohlson_o_score'
+                  AND psh_oo.date = (
+                      SELECT MAX(p2.date) FROM proprietary_scores_history p2
+                      WHERE p2.symbol = ts.symbol AND p2.source = 'moneycontrol'
+                        AND p2.score_type = 'ohlson_o_score'
+                        AND p2.date <= ts.date
+                  )
+            LEFT JOIN (
+                SELECT
+                    MAX(CASE WHEN symbol='GIFT_NIFTY_CHG_PCT'   THEN close END) AS gift_nifty_pct,
+                    MAX(CASE WHEN symbol='NIFTY_GEX'             THEN close END) AS nifty_gex,
+                    MAX(CASE WHEN symbol='INDIA_10Y'             THEN close END) AS india_10y,
+                    MAX(CASE WHEN symbol='INDIA_US_SPREAD'       THEN close END) AS india_us_spread,
+                    MAX(CASE WHEN symbol='HIGH_IMPACT_EVENTS_3D' THEN close END) AS high_impact_3d,
+                    MAX(CASE WHEN symbol='ASIA_SENTIMENT'        THEN close END) AS asia_sentiment,
+                    MAX(CASE WHEN symbol='GLOBAL_RISK_SCORE'     THEN close END) AS global_risk,
+                    MAX(CASE WHEN symbol='ADRS_BULLISH_PCT'      THEN close END) AS adrs_bullish_pct,
+                    MAX(CASE WHEN symbol='USDINR'                THEN ret_1d  END) AS usdinr_ret_1d,
+                    MAX(CASE WHEN symbol='NIKKEI'                THEN ret_1d  END) AS nikkei_ret_1d,
+                    MAX(CASE WHEN symbol='HANGSENG'              THEN ret_1d  END) AS hangseng_ret_1d,
+                    MAX(CASE WHEN symbol='MARKET_NP_GROWTH_YOY'  THEN close END) AS market_np_yoy,
+                    MAX(CASE WHEN symbol='EARNINGS_BREADTH'       THEN close END) AS earnings_breadth_mkt,
+                    MAX(CASE WHEN symbol='FII_NET_TODAY'           THEN close END) AS fii_net_today,
+                    MAX(CASE WHEN symbol='INDIA_VIX'              THEN close END) AS india_vix,
+                    MAX(CASE WHEN symbol='USDINR_CHG_PCT'          THEN close END) AS usdinr_chg_pct,
+                    MAX(CASE WHEN symbol='NIFTY_BASIS_PCT'          THEN close END) AS nifty_basis_pct,
+                    MAX(CASE WHEN symbol='NIFTY_CONTANGO'           THEN close END) AS nifty_contango
+                FROM macro_asset_prices
+                WHERE date::text = (SELECT MAX(date)::text FROM macro_asset_prices)
+            ) macro_snap ON 1=1
+            LEFT JOIN mc_sector_earnings mse ON mse.sector_name = (
+                SELECT ns.sector FROM nse_stocks ns WHERE ns.symbol = ts.symbol LIMIT 1
+            )
+            LEFT JOIN LATERAL (
+                SELECT sfs2.sector_pcr, sfs2.total_call_oi, sfs2.total_put_oi
+                FROM sector_fo_sentiment sfs2
+                JOIN nse_stocks ns2 ON ns2.sector = sfs2.sector AND ns2.symbol = ts.symbol
+                ORDER BY sfs2.date DESC
+                LIMIT 1
+            ) sfs ON true
+            WHERE ts.win_probability IS NULL
+              AND ts.signals_json IS NOT NULL
+            ORDER BY ts.date DESC
+            LIMIT 10000
+        """
+    else:
+        # SQLite compatible version
+        con = connect()
+        cur = con.cursor()
+        
+        def get_existing_columns(table):
+            try:
+                cur.execute(f"PRAGMA table_info({table})")
+                return {row[1].lower() for row in cur.fetchall()}
+            except Exception:
+                return set()
+        
+        ts_cols = get_existing_columns("technical_signals")
+        sf_cols = get_existing_columns("stock_fundamentals")
+        aeh_cols = get_existing_columns("analyst_estimates_history")
+        psh_cols = get_existing_columns("proprietary_scores_history")
+        fs_cols = get_existing_columns("feature_store")
+        mb_cols = get_existing_columns("market_breadth")
+        hfs_cols = get_existing_columns("historical_fno_sentiment")
+        sfs_cols = get_existing_columns("sector_fo_sentiment")
+        mse_cols = get_existing_columns("mc_sector_earnings")
+        con.close()
+
+        def ts_c(col, alias=None):
+            out_alias = alias if alias else col
+            return f"ts.{col}" if col.lower() in ts_cols else f"NULL AS {out_alias}"
+
+        def sf_c(col, alias=None):
+            out_alias = alias if alias else col
+            return f"sf.{col}" if col.lower() in sf_cols else f"NULL AS {out_alias}"
+
+        def aeh_c(col, alias=None):
+            out_alias = alias if alias else col
+            return f"aeh.{col}" if col.lower() in aeh_cols else f"NULL AS {out_alias}"
+
+        def psh_az_c(col, alias=None):
+            out_alias = alias if alias else col
+            return f"psh_az.{col}" if col.lower() in psh_cols else f"NULL AS {out_alias}"
+
+        def psh_oo_c(col, alias=None):
+            out_alias = alias if alias else col
+            return f"psh_oo.{col}" if col.lower() in psh_cols else f"NULL AS {out_alias}"
+
+        def fs_c(col, alias=None):
+            out_alias = alias if alias else col
+            return f"fs.{col}" if col.lower() in fs_cols else f"NULL AS {out_alias}"
+
+        def mb_c(col, alias=None):
+            out_alias = alias if alias else col
+            return f"mb.{col}" if col.lower() in mb_cols else f"NULL AS {out_alias}"
+
+        def hfs_c(col, alias=None):
+            out_alias = alias if alias else col
+            return f"hfs.{col}" if col.lower() in hfs_cols else f"NULL AS {out_alias}"
+
+        sfs_pcr_sel = "sfs.sector_pcr" if "sector_pcr" in sfs_cols else "NULL AS sector_pcr"
+        sfs_call_sel = "sfs.total_call_oi AS sector_call_oi" if "total_call_oi" in sfs_cols else "NULL AS sector_call_oi"
+        sfs_put_sel = "sfs.total_put_oi AS sector_put_oi" if "total_put_oi" in sfs_cols else "NULL AS sector_put_oi"
+
+        sector_np_yoy_sel = "mse.np_growth_yoy AS sector_np_growth_yoy" if "np_growth_yoy" in mse_cols else "NULL AS sector_np_growth_yoy"
+        sector_np_qoq_sel = "mse.np_growth_qoq AS sector_np_growth_qoq" if "np_growth_qoq" in mse_cols else "NULL AS sector_np_growth_qoq"
+        sector_rev_yoy_sel = "mse.rev_growth_yoy AS sector_rev_growth_yoy" if "rev_growth_yoy" in mse_cols else "NULL AS sector_rev_growth_yoy"
+
+        q = f"""
+            SELECT ts.symbol, ts.date AS signal_date, {ts_c('signal_score')}, {ts_c('signals_json')},
+                   {ts_c('rsi')}, {ts_c('adx')}, {ts_c('nifty_regime')}, {ts_c('cmp')}, {ts_c('sma200')}, {ts_c('volume_ratio')},
+                   {ts_c('fii_3d_net')},
+                   {ts_c('above_sma200')},
+                   {ts_c('pcr_oi')}, {ts_c('pcr_vol')},
+                   {ts_c('fii_10d_net')}, {ts_c('dii_3d_net')},
+                   {ts_c('delivery_pct')},
+                   {ts_c('sector_ret_5d')}, {ts_c('sector_ret_21d')},
+                   {ts_c('sector_global_corr_21d')},
+                   {ts_c('iv_rank')}, {ts_c('iv_skew')},
+                   {ts_c('rs_rank_21d')}, {ts_c('rs_rank_63d')},
+                   {ts_c('insider_buy_pct_90d')},
+                   {ts_c('opening_range_break')},
+                   {ts_c('vwap_deviation_pct')},
+                   {ts_c('first_hour_vol_share')},
+                   {ts_c('avwap_deviation_pct')},
+                   {ts_c('oi_net_change_pct')},
+                   {ts_c('eps_beat_last_q')},
+                   {ts_c('eps_beat_streak_4q')},
+                   {ts_c('eps_miss_streak_4q')},
+                   {ts_c('eps_surprise_last_yr')},
+                   {ts_c('eps_estimate_dispersion')},
+                   {fs_c('ret_12m_ex1m')},
+                   {mb_c('pct_above_200dma')}, {mb_c('adv_decline_ratio')}, {mb_c('net_highs_lows')},
+                   {hfs_c('max_pain')},
+                   {ts_c('mf_holding_pct')}, {ts_c('mf_fund_count')}, {ts_c('mf_chg_vs_prev')},
+                   {ts_c('rollover_pct')}, {ts_c('cost_of_carry_ann')},
+                   {ts_c('block_deal_net_qty')}, {ts_c('block_deal_value_cr')},
+                   {ts_c('eps_ttm')}, {ts_c('eps_growth_yoy')}, {ts_c('eps_growth_qoq')}, {ts_c('eps_acceleration')},
+                   {ts_c('pe_ttm')}, {ts_c('dvm_durability')}, {ts_c('dvm_valuation')}, {ts_c('dvm_momentum')},
+                   {ts_c('pe_pct_rank_252d')}, {ts_c('pe_vs_median_1yr')}, {ts_c('pb_pct_rank_252d')}, {ts_c('div_yield_ttm')},
+                   {ts_c('ma_bull_frac')}, {ts_c('osc_bull_frac')}, {ts_c('adx_tl')}, {ts_c('atr_pct_tl')}, {ts_c('mfi_tl')},
+                   {ts_c('pivot_dist_pct_tl')}, {ts_c('delivery_avg_1m_tl')}, {ts_c('beta_1y_tl')},
+                   {ts_c('ret_1m_tl')}, {ts_c('ret_3m_tl')}, {ts_c('ret_6m_tl')}, {ts_c('ret_1y_tl')},
+                   {ts_c('analyst_upside_pct')}, {ts_c('analyst_count')}, {ts_c('analyst_buy_pct')},
+                   {ts_c('roe_annual')}, {ts_c('roce_annual')}, {ts_c('ebitda_margin')}, {ts_c('np_margin')},
+                   {ts_c('promoter_pct')}, {ts_c('fii_pct')}, {ts_c('pledge_pct')},
+                   {ts_c('rev_growth_yoy_q')}, {ts_c('np_growth_yoy_q')},
+                   {ts_c('days_since_dividend')}, {ts_c('last_dividend_amt')},
+                   {ts_c('days_to_ex_div')}, {ts_c('days_to_board_meeting')}, {ts_c('upcoming_div_pct')},
+                   {ts_c('mc_52w_high_dist_pct')}, {ts_c('mc_52w_low_dist_pct')}, {ts_c('mc_days_from_52wh')},
+                   {ts_c('mc_cagr_3y')}, {ts_c('mc_cagr_5y')}, {ts_c('mc_cagr_10y')}, {ts_c('mc_ind_pe')}, {ts_c('mc_pe_vs_ind')},
+                   {ts_c('mc_consensus_pe')}, {ts_c('mc_consensus_pb')},
+                   {ts_c('mc_ma30_dist_pct')}, {ts_c('mc_ma50_dist_pct')}, {ts_c('mc_ma150_dist_pct')}, {ts_c('mc_ma200_dist_pct')},
+                   {ts_c('mc_del_pct_3d')}, {ts_c('mc_del_pct_5d')}, {ts_c('mc_del_pct_20d')}, {ts_c('mc_del_acceleration')},
+                   {ts_c('mc_vol_ratio')}, {ts_c('mc_circuit_dist_pct')}, {ts_c('mc_fno_eligible')},
+                   {ts_c('mc_3d_return')}, {ts_c('mc_ytd_return')},
+                   {ts_c('mc_price_cash')}, {ts_c('mc_consensus_eps')}, {ts_c('mc_eps_vs_cons')}, {ts_c('mc_pe_fwd_discount')},
+                   {ts_c('mc_cp_bull_count')}, {ts_c('mc_cp_bear_count')}, {ts_c('mc_cp_net_score')}, {ts_c('mc_cp_avg_target_pct')},
+                   {ts_c('tl_vs_nifty_1m')}, {ts_c('tl_vs_nifty_3m')}, {ts_c('tl_vs_nifty_6m')},
+                   {ts_c('tl_vs_ind_1m')}, {ts_c('tl_vs_ind_3m')},
+                   {ts_c('tl_seasonal_month_5y')}, {ts_c('tl_dist_3m_high_pct')}, {ts_c('tl_dist_3m_low_pct')},
+                   {ts_c('nt_max_pain_dist_pct')}, {ts_c('nt_oi_direction')}, {ts_c('nt_pcr')}, {ts_c('nt_option_volume_log')},
+                   {ts_c('hv_10d')}, {ts_c('hv_20d')}, {ts_c('hv_30d')}, {ts_c('hv_60d')}, {ts_c('iv_hv_ratio')},
+                   {ts_c('pead_score')}, {ts_c('event_signal_score')},
+                   {ts_c('eps_revision_3m_pct')}, {ts_c('target_revision_3m_pct')}, {ts_c('analyst_count_chg')},
+                   {ts_c('rs_vs_sector_21d')}, {ts_c('rs_vs_sector_63d')},
+                   {ts_c('asm_flag')}, {ts_c('gsm_stage')},
+                   {ts_c('crude_corr_90d')}, {ts_c('gold_corr_90d')}, {ts_c('dxy_corr_90d')}, {ts_c('sp500_corr_90d')},
+                   {ts_c('mc_broker_buy_7d')}, {ts_c('mc_broker_sell_7d')}, {ts_c('mc_broker_upside')},
+                   {ts_c('days_to_next_results')}, {ts_c('earnings_category_yoy')}, {ts_c('earnings_category_qoq')},
+                   {ts_c('earnings_np_growth_yoy')}, {ts_c('earnings_np_growth_qoq')},
+                   {ts_c('mc_eps_vs_cons')}, {ts_c('positive_turnaround')}, {ts_c('negative_turnaround')},
+                   {ts_c('earnings_shocker_flag')}, {ts_c('earnings_shocker_gain')},
+                   {ts_c('is_nifty50')}, {ts_c('is_nifty100')}, {ts_c('nifty_tier')},
+                   {ts_c('pledge_chg_90d')},
+                   {ts_c('iep_gap_pct')}, {ts_c('preopen_imbalance')},
+                   {ts_c('expected_move_pct')}, {ts_c('stock_gex_proxy')},
+                   {ts_c('eps_surprise_q1')}, {ts_c('eps_surprise_q2')}, {ts_c('eps_beat_streak')},
+                   {ts_c('eps_miss_after_streak')}, {ts_c('rev_surprise_q1')},
+                   {ts_c('fcf_yield_approx', 'fcf_yield')}, {ts_c('interest_coverage')}, {ts_c('fcf_positive')}, {ts_c('debt_coverage_risk')},
+                   {ts_c('delivery_trend_30d')}, {ts_c('block_deal_flag')}, {ts_c('block_deal_direction')},
+                   {ts_c('short_interest_proxy')},
+                   {ts_c('promoter_buy_90d_cr')}, {ts_c('promoter_sell_90d_cr')}, {ts_c('promoter_net_90d')},
+                   {ts_c('insider_buy_flag')}, {ts_c('insider_sell_flag')},
+                   {ts_c('rating_upgrade_180d')}, {ts_c('rating_downgrade_180d')}, {ts_c('days_since_upgrade')},
+                   {ts_c('mf_sector_flow_pct')},
+                   {ts_c('receivables_days_ttm')}, {ts_c('ccc_ttm')}, {ts_c('ccc_trend')},
+                   {ts_c('wc_deteriorating')}, {ts_c('wc_improving')},
+                   {ts_c('screener_bull_count')}, {ts_c('screener_bear_count')}, {ts_c('screener_cat_breadth')},
+                   {ts_c('screener_tier1_count')}, {ts_c('screener_momentum_score')}, {ts_c('screener_streak_days')},
+                   {ts_c('screener_name_signal')}, {ts_c('screener_alpha_score')},
+                   macro_snap.gift_nifty_pct, macro_snap.nifty_gex,
+                   macro_snap.india_10y, macro_snap.india_us_spread,
+                   macro_snap.high_impact_3d, macro_snap.asia_sentiment, macro_snap.global_risk,
+                   macro_snap.market_np_yoy, macro_snap.earnings_breadth_mkt,
+                   macro_snap.fii_net_today,
+                   macro_snap.usdinr_chg_pct, macro_snap.nifty_basis_pct, macro_snap.nifty_contango,
+                   macro_snap.india_vix,
+                   macro_snap.adrs_bullish_pct, macro_snap.usdinr_ret_1d,
+                   macro_snap.nikkei_ret_1d, macro_snap.hangseng_ret_1d,
+                   {sector_np_yoy_sel}, {sector_np_qoq_sel},
+                   {sector_rev_yoy_sel},
+                   {sf_c('fifty_two_week_high')},
+                   {sf_c('piotroski_f_score')}, {sf_c('debt_to_equity')}, {sf_c('operating_margins')},
+                   {sf_c('return_on_equity')}, {sf_c('revenue_growth')}, {sf_c('earnings_growth')},
+                   {sf_c('earnings_yield')}, {sf_c('price_to_book')}, {sf_c('market_cap')},
+                   {aeh_c('n_analysts')}, {aeh_c('buy_count')}, {aeh_c('target_mean')},
+                   {psh_az_c('score_value', 'altman_z')},
+                   {psh_oo_c('score_value', 'ohlson_o')},
+                   {sfs_pcr_sel}, {sfs_call_sel}, {sfs_put_sel}
+            FROM technical_signals ts
+            LEFT JOIN stock_fundamentals sf ON sf.symbol = ts.symbol
+            LEFT JOIN feature_store fs
+                   ON fs.symbol = ts.symbol AND fs.date = ts.date AND fs.timeframe = 'D'
+            LEFT JOIN market_breadth mb ON mb.date = ts.date
+            LEFT JOIN historical_fno_sentiment hfs
+                   ON hfs.symbol = ts.symbol AND hfs.date = ts.date
+            LEFT JOIN analyst_estimates_history aeh
+                   ON aeh.symbol = ts.symbol
+                  AND aeh.as_of_date = (
+                      SELECT MAX(aeh2.as_of_date) FROM analyst_estimates_history aeh2
+                      WHERE aeh2.symbol = ts.symbol AND aeh2.as_of_date <= ts.date
+                  )
+            LEFT JOIN proprietary_scores_history psh_az
+                   ON psh_az.symbol = ts.symbol
+                  AND psh_az.source = 'moneycontrol'
+                  AND psh_az.score_type = 'altman_z_score'
+                  AND psh_az.date = (
+                      SELECT MAX(p2.date) FROM proprietary_scores_history p2
+                      WHERE p2.symbol = ts.symbol AND p2.source = 'moneycontrol'
+                        AND p2.score_type = 'altman_z_score'
+                        AND p2.date <= ts.date
+                  )
+            LEFT JOIN proprietary_scores_history psh_oo
+                   ON psh_oo.symbol = ts.symbol
+                  AND psh_oo.source = 'moneycontrol'
+                  AND psh_oo.score_type = 'ohlson_o_score'
+                  AND psh_oo.date = (
+                      SELECT MAX(p2.date) FROM proprietary_scores_history p2
+                      WHERE p2.symbol = ts.symbol AND p2.source = 'moneycontrol'
+                        AND p2.score_type = 'ohlson_o_score'
+                        AND p2.date <= ts.date
+                  )
+            LEFT JOIN (
+                SELECT
+                    MAX(CASE WHEN symbol='GIFT_NIFTY_CHG_PCT'   THEN close END) AS gift_nifty_pct,
+                    MAX(CASE WHEN symbol='NIFTY_GEX'             THEN close END) AS nifty_gex,
+                    MAX(CASE WHEN symbol='INDIA_10Y'             THEN close END) AS india_10y,
+                    MAX(CASE WHEN symbol='INDIA_US_SPREAD'       THEN close END) AS india_us_spread,
+                    MAX(CASE WHEN symbol='HIGH_IMPACT_EVENTS_3D' THEN close END) AS high_impact_3d,
+                    MAX(CASE WHEN symbol='ASIA_SENTIMENT'        THEN close END) AS asia_sentiment,
+                    MAX(CASE WHEN symbol='GLOBAL_RISK_SCORE'     THEN close END) AS global_risk,
+                    MAX(CASE WHEN symbol='ADRS_BULLISH_PCT'      THEN close END) AS adrs_bullish_pct,
+                    MAX(CASE WHEN symbol='USDINR'                THEN ret_1d  END) AS usdinr_ret_1d,
+                    MAX(CASE WHEN symbol='NIKKEI'                THEN ret_1d  END) AS nikkei_ret_1d,
+                    MAX(CASE WHEN symbol='HANGSENG'              THEN ret_1d  END) AS hangseng_ret_1d,
+                    MAX(CASE WHEN symbol='MARKET_NP_GROWTH_YOY'  THEN close END) AS market_np_yoy,
+                    MAX(CASE WHEN symbol='EARNINGS_BREADTH'       THEN close END) AS earnings_breadth_mkt,
+                    MAX(CASE WHEN symbol='FII_NET_TODAY'           THEN close END) AS fii_net_today,
+                    MAX(CASE WHEN symbol='INDIA_VIX'              THEN close END) AS india_vix,
+                    MAX(CASE WHEN symbol='USDINR_CHG_PCT'          THEN close END) AS usdinr_chg_pct,
+                    MAX(CASE WHEN symbol='NIFTY_BASIS_PCT'          THEN close END) AS nifty_basis_pct,
+                    MAX(CASE WHEN symbol='NIFTY_CONTANGO'           THEN close END) AS nifty_contango
+                FROM macro_asset_prices
+                WHERE date = (SELECT MAX(date) FROM macro_asset_prices)
+            ) macro_snap ON 1=1
+            LEFT JOIN mc_sector_earnings mse ON mse.sector_name = (
+                SELECT ns.sector FROM nse_stocks ns WHERE ns.symbol = ts.symbol LIMIT 1
+            )
+            LEFT JOIN sector_fo_sentiment sfs
+                   ON sfs.sector = (SELECT ns.sector FROM nse_stocks ns WHERE ns.symbol = ts.symbol LIMIT 1)
+                  AND sfs.date = (
+                      SELECT MAX(sfs2.date) FROM sector_fo_sentiment sfs2
+                      JOIN nse_stocks ns2 ON ns2.sector = sfs2.sector AND ns2.symbol = ts.symbol
+                      WHERE sfs2.date <= ts.date
+                  )
+            WHERE ts.win_probability IS NULL
+              AND ts.signals_json IS NOT NULL
+            ORDER BY ts.date DESC
+            LIMIT 10000
+        """
     df = read_df(q)
     df['horizon_days'] = 15
     return df
@@ -2118,6 +2554,10 @@ def incremental_update(n_days: int = 3, n_rounds: int = 20, dry_run: bool = Fals
         return False
 
     cutoff = (datetime.datetime.now() - datetime.timedelta(days=n_days)).strftime('%Y-%m-%d')
+    # Bug-fix: join on ts.date <= so.signal_date (take latest available row on or before the
+    # signal date) to avoid look-ahead bias when the scanner writes same-day indicator rows.
+    # The Postgres path uses a LATERAL JOIN with the same semantics; this SQLite correlated
+    # subquery mirrors that behaviour for the SQLite training-data fallback.
     q = """
         SELECT so.symbol, so.signal_date, so.horizon_days, so.outcome,
                so.signal_score, so.signals_json,
@@ -2129,7 +2569,13 @@ def incremental_update(n_days: int = 3, n_rounds: int = 20, dry_run: bool = Fals
                ts.insider_buy_pct_90d,
                ts.opening_range_break, ts.vwap_deviation_pct, ts.first_hour_vol_share
         FROM signal_outcomes so
-        LEFT JOIN technical_signals ts ON ts.symbol=so.symbol AND ts.date=so.signal_date
+        LEFT JOIN technical_signals ts
+               ON ts.symbol = so.symbol
+              AND ts.date = (
+                  SELECT MAX(ts2.date) FROM technical_signals ts2
+                  WHERE ts2.symbol = so.symbol
+                    AND ts2.date <= so.signal_date
+              )
         WHERE so.outcome IN ('WIN','LOSS')
           AND so.signal_date >= ?
         ORDER BY so.signal_date ASC

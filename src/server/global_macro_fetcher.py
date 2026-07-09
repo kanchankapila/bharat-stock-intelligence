@@ -74,7 +74,14 @@ def fetch_macro(days: int = 30) -> None:
             )
 
             # Also write to macro_indicators (indicator_name, date, value)
-            indicator_rows = [(label, row[0], row[2]) for row in macro_rows if row[2] is not None]
+            # Bug-fix 8: use named tuple positions (date_str=0, label=1, close=2) explicitly
+            # instead of positional row[0]/row[2], which would silently use wrong values if
+            # the macro_rows tuple structure ever changes.
+            indicator_rows = [
+                (label, date_str, close_val)
+                for date_str, _lbl, close_val, _r1d, _r5d, _fetched in macro_rows
+                if close_val is not None
+            ]
             cur.executemany(
                 """INSERT INTO macro_indicators
                    (indicator_name, date, value)
