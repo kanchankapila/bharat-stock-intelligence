@@ -25,7 +25,9 @@ export function getStockTickers(query: string) {
     isin: mapping.isin,
     symbol: mapping.symbol,
     stockid: mapping.stockid,
-    companyid: mapping.companyid
+    companyid: mapping.companyid,
+    fincode: mapping.fincode,
+    scripcode: mapping.scripcode
   };
 }
 

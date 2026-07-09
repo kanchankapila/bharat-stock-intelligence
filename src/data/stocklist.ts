@@ -7,6 +7,9 @@ export interface StockMapping {
   symbol: string;
   stockid: string;
   companyid: string;
+  tickertape_sid?: string;
+  fincode?: number;
+  scripcode?: number;
 }
 
 const stockData: StockMapping[] = [
@@ -18,7 +21,10 @@ const stockData: StockMapping[] = [
     "isin": "INE949L01017",
     "symbol": "AUBANK",
     "stockid": "1002776",
-    "companyid": "66288"
+    "companyid": "66288",
+    "tickertape_sid": "AUFI",
+    "fincode": 286335,
+    "scripcode": 540611
   },
   {
     "name": "Adani Ports and Special Economic Zone",
@@ -28,7 +34,10 @@ const stockData: StockMapping[] = [
     "isin": "INE742F01042",
     "symbol": "ADANIPORTS",
     "stockid": "716033",
-    "companyid": "20316"
+    "companyid": "20316",
+    "tickertape_sid": "APSE",
+    "fincode": 132921,
+    "scripcode": 532921
   },
   {
     "name": "Bajaj Finserv",
@@ -38,7 +47,10 @@ const stockData: StockMapping[] = [
     "isin": "INE918I01026",
     "symbol": "BAJAJFINSV",
     "stockid": "822285",
-    "companyid": "21426"
+    "companyid": "21426",
+    "tickertape_sid": "BJFS",
+    "fincode": 205198,
+    "scripcode": 532978
   },
   {
     "name": "HCL Technologies",
@@ -48,7 +60,10 @@ const stockData: StockMapping[] = [
     "isin": "INE860A01027",
     "symbol": "HCLTECH",
     "stockid": "308453",
-    "companyid": "4291"
+    "companyid": "4291",
+    "tickertape_sid": "HCLT",
+    "fincode": 132281,
+    "scripcode": 532281
   },
   {
     "name": "Ashok Leyland",
@@ -58,7 +73,10 @@ const stockData: StockMapping[] = [
     "isin": "INE208A01029",
     "symbol": "ASHOKLEY",
     "stockid": "972470",
-    "companyid": "14041"
+    "companyid": "14041",
+    "tickertape_sid": "ASOK",
+    "fincode": 100477,
+    "scripcode": 500477
   },
   {
     "name": "Bajaj Auto",
@@ -68,7 +86,10 @@ const stockData: StockMapping[] = [
     "isin": "INE917I01010",
     "symbol": "BAJAJ-AUTO",
     "stockid": "992451",
-    "companyid": "21430"
+    "companyid": "21430",
+    "tickertape_sid": "BAJA",
+    "fincode": 200132,
+    "scripcode": 532977
   },
   {
     "name": "Bharat Forge",
@@ -78,7 +99,10 @@ const stockData: StockMapping[] = [
     "isin": "INE465A01025",
     "symbol": "BHARATFORG",
     "stockid": "880888",
-    "companyid": "13958"
+    "companyid": "13958",
+    "tickertape_sid": "BFRG",
+    "fincode": 100493,
+    "scripcode": 500493
   },
   {
     "name": "Dabur India",
@@ -88,7 +112,10 @@ const stockData: StockMapping[] = [
     "isin": "INE016A01026",
     "symbol": "DABUR",
     "stockid": "171892",
-    "companyid": "11796"
+    "companyid": "11796",
+    "tickertape_sid": "DABU",
+    "fincode": 100096,
+    "scripcode": 500096
   },
   {
     "name": "Colgate Palmolive (India)",
@@ -98,7 +125,10 @@ const stockData: StockMapping[] = [
     "isin": "INE259A01022",
     "symbol": "COLPAL",
     "stockid": "118611",
-    "companyid": "13873"
+    "companyid": "13873",
+    "tickertape_sid": "COLG",
+    "fincode": 100830,
+    "scripcode": 500830
   },
   {
     "name": "DLF",
@@ -108,7 +138,10 @@ const stockData: StockMapping[] = [
     "isin": "INE271C01023",
     "symbol": "DLF",
     "stockid": "348479",
-    "companyid": "12393"
+    "companyid": "12393",
+    "tickertape_sid": "DLF",
+    "fincode": 132868,
+    "scripcode": 532868
   },
   {
     "name": "GAIL India",
@@ -118,7 +151,10 @@ const stockData: StockMapping[] = [
     "isin": "INE129A01019",
     "symbol": "GAIL",
     "stockid": "667248",
-    "companyid": "4845"
+    "companyid": "4845",
+    "tickertape_sid": "GAIL",
+    "fincode": 132155,
+    "scripcode": 532155
   },
   {
     "name": "Bank Of Baroda",
@@ -128,7 +164,10 @@ const stockData: StockMapping[] = [
     "isin": "INE028A01039",
     "symbol": "BANKBARODA",
     "stockid": "824055",
-    "companyid": "12040"
+    "companyid": "12040",
+    "tickertape_sid": "BOB",
+    "fincode": 132134,
+    "scripcode": 532134
   },
   {
     "name": "Cummins India",
@@ -138,7 +177,10 @@ const stockData: StockMapping[] = [
     "isin": "INE298A01020",
     "symbol": "CUMMINSIND",
     "stockid": "284716",
-    "companyid": "13471"
+    "companyid": "13471",
+    "tickertape_sid": "CUMM",
+    "fincode": 100480,
+    "scripcode": 500480
   },
   {
     "name": "Interglobe Aviation",
@@ -148,7 +190,10 @@ const stockData: StockMapping[] = [
     "isin": "INE646L01027",
     "symbol": "INDIGO",
     "stockid": "455546",
-    "companyid": "60145"
+    "companyid": "60145",
+    "tickertape_sid": "INGL",
+    "fincode": 222055,
+    "scripcode": 539448
   },
   {
     "name": "HDFC Life Insurance Company",
@@ -158,7 +203,10 @@ const stockData: StockMapping[] = [
     "isin": "INE795G01014",
     "symbol": "HDFCLIFE",
     "stockid": "1002872",
-    "companyid": "3068"
+    "companyid": "3068",
+    "tickertape_sid": "HDFL",
+    "fincode": 217389,
+    "scripcode": 540777
   },
   {
     "name": "Divis Laboratories",
@@ -168,7 +216,10 @@ const stockData: StockMapping[] = [
     "isin": "INE361B01024",
     "symbol": "DIVISLAB",
     "stockid": "509760",
-    "companyid": "3635"
+    "companyid": "3635",
+    "tickertape_sid": "DIVI",
+    "fincode": 132488,
+    "scripcode": 532488
   },
   {
     "name": "Axis Bank",
@@ -178,7 +229,10 @@ const stockData: StockMapping[] = [
     "isin": "INE238A01034",
     "symbol": "AXISBANK",
     "stockid": "112501",
-    "companyid": "9175"
+    "companyid": "9175",
+    "tickertape_sid": "AXBK",
+    "fincode": 132215,
+    "scripcode": 532215
   },
   {
     "name": "Avenue Supermarts",
@@ -188,7 +242,10 @@ const stockData: StockMapping[] = [
     "isin": "INE192R01011",
     "symbol": "DMART",
     "stockid": "1002728",
-    "companyid": "45987"
+    "companyid": "45987",
+    "tickertape_sid": "AVEU",
+    "fincode": 223595,
+    "scripcode": 540376
   },
   {
     "name": "Bajaj Holdings & Investment",
@@ -198,7 +255,10 @@ const stockData: StockMapping[] = [
     "isin": "INE118A01012",
     "symbol": "BAJAJHLDNG",
     "stockid": "658168",
-    "companyid": "13977"
+    "companyid": "13977",
+    "tickertape_sid": "BJAT",
+    "fincode": 100490,
+    "scripcode": 500490
   },
   {
     "name": "Marico",
@@ -208,7 +268,10 @@ const stockData: StockMapping[] = [
     "isin": "INE196A01026",
     "symbol": "MARICO",
     "stockid": "441024",
-    "companyid": "5886"
+    "companyid": "5886",
+    "tickertape_sid": "MRCO",
+    "fincode": 131642,
+    "scripcode": 531642
   },
   {
     "name": "Hindustan Unilever",
@@ -218,7 +281,10 @@ const stockData: StockMapping[] = [
     "isin": "INE030A01027",
     "symbol": "HINDUNILVR",
     "stockid": "779011",
-    "companyid": "13616"
+    "companyid": "13616",
+    "tickertape_sid": "HLL",
+    "fincode": 100696,
+    "scripcode": 500696
   },
   {
     "name": "Eicher Motors",
@@ -228,7 +294,10 @@ const stockData: StockMapping[] = [
     "isin": "INE066A01021",
     "symbol": "EICHERMOT",
     "stockid": "501249",
-    "companyid": "13787"
+    "companyid": "13787",
+    "tickertape_sid": "EICH",
+    "fincode": 105200,
+    "scripcode": 505200
   },
   {
     "name": "ICICI Lombard General Insurance Company",
@@ -238,7 +307,10 @@ const stockData: StockMapping[] = [
     "isin": "INE765G01017",
     "symbol": "ICICIGI",
     "stockid": "1002823",
-    "companyid": "1883"
+    "companyid": "1883",
+    "tickertape_sid": "ICIL",
+    "fincode": 217379,
+    "scripcode": 540716
   },
   {
     "name": "Info Edge India",
@@ -248,7 +320,9 @@ const stockData: StockMapping[] = [
     "isin": "INE663F01024",
     "symbol": "NAUKRI",
     "stockid": "925707",
-    "companyid": "18352"
+    "companyid": "18352",
+    "fincode": 132777,
+    "scripcode": 532777
   },
   {
     "name": "Hero Motocorp",
@@ -258,7 +332,10 @@ const stockData: StockMapping[] = [
     "isin": "INE158A01026",
     "symbol": "HEROMOTOCO",
     "stockid": "191974",
-    "companyid": "13636"
+    "companyid": "13636",
+    "tickertape_sid": "HROM",
+    "fincode": 100182,
+    "scripcode": 500182
   },
   {
     "name": "Adani Enterprises",
@@ -268,7 +345,10 @@ const stockData: StockMapping[] = [
     "isin": "INE423A01024",
     "symbol": "ADANIENT",
     "stockid": "789039",
-    "companyid": "9074"
+    "companyid": "9074",
+    "tickertape_sid": "ADEL",
+    "fincode": 112599,
+    "scripcode": 512599
   },
   {
     "name": "ICICI Bank",
@@ -278,7 +358,10 @@ const stockData: StockMapping[] = [
     "isin": "INE090A01021",
     "symbol": "ICICIBANK",
     "stockid": "478299",
-    "companyid": "9194"
+    "companyid": "9194",
+    "tickertape_sid": "ICBK",
+    "fincode": 132174,
+    "scripcode": 532174
   },
   {
     "name": "IRCTC - Indian Railway Catering & Tourism Corp",
@@ -288,7 +371,10 @@ const stockData: StockMapping[] = [
     "isin": "INE335Y01020",
     "symbol": "IRCTC",
     "stockid": "1003280",
-    "companyid": "16705"
+    "companyid": "16705",
+    "tickertape_sid": "INIR",
+    "fincode": 208412,
+    "scripcode": 542830
   },
   {
     "name": "Bharat Electronics",
@@ -298,7 +384,10 @@ const stockData: StockMapping[] = [
     "isin": "INE263A01024",
     "symbol": "BEL",
     "stockid": "363433",
-    "companyid": "11945"
+    "companyid": "11945",
+    "tickertape_sid": "BAJE",
+    "fincode": 100049,
+    "scripcode": 500049
   },
   {
     "name": "Apollo Hospitals Enterprises",
@@ -308,7 +397,10 @@ const stockData: StockMapping[] = [
     "isin": "INE437A01024",
     "symbol": "APOLLOHOSP",
     "stockid": "423292",
-    "companyid": "62"
+    "companyid": "62",
+    "tickertape_sid": "APLH",
+    "fincode": 108869,
+    "scripcode": 508869
   },
   {
     "name": "Ambuja Cements",
@@ -318,7 +410,10 @@ const stockData: StockMapping[] = [
     "isin": "INE079A01024",
     "symbol": "AMBUJACEM",
     "stockid": "690246",
-    "companyid": "13643"
+    "companyid": "13643",
+    "tickertape_sid": "ABUJ",
+    "fincode": 100425,
+    "scripcode": 500425
   },
   {
     "name": "Hindalco Industries",
@@ -328,7 +423,10 @@ const stockData: StockMapping[] = [
     "isin": "INE038A01020",
     "symbol": "HINDALCO",
     "stockid": "557714",
-    "companyid": "13637"
+    "companyid": "13637",
+    "tickertape_sid": "HALC",
+    "fincode": 100440,
+    "scripcode": 500440
   },
   {
     "name": "Havells India",
@@ -338,7 +436,10 @@ const stockData: StockMapping[] = [
     "isin": "INE176B01034",
     "symbol": "HAVELLS",
     "stockid": "381936",
-    "companyid": "10507"
+    "companyid": "10507",
+    "tickertape_sid": "HVEL",
+    "fincode": 117354,
+    "scripcode": 517354
   },
   {
     "name": "Grasim Industries",
@@ -348,7 +449,10 @@ const stockData: StockMapping[] = [
     "isin": "INE047A01021",
     "symbol": "GRASIM",
     "stockid": "658016",
-    "companyid": "13696"
+    "companyid": "13696",
+    "tickertape_sid": "GRAS",
+    "fincode": 100300,
+    "scripcode": 500300
   },
   {
     "name": "Siemens",
@@ -358,7 +462,10 @@ const stockData: StockMapping[] = [
     "isin": "INE003A01024",
     "symbol": "SIEMENS",
     "stockid": "172368",
-    "companyid": "13102"
+    "companyid": "13102",
+    "tickertape_sid": "SIEM",
+    "fincode": 100550,
+    "scripcode": 500550
   },
   {
     "name": "Britannia Industries",
@@ -368,7 +475,10 @@ const stockData: StockMapping[] = [
     "isin": "INE216A01030",
     "symbol": "BRITANNIA",
     "stockid": "963994",
-    "companyid": "13934"
+    "companyid": "13934",
+    "tickertape_sid": "BRIT",
+    "fincode": 100825,
+    "scripcode": 500825
   },
   {
     "name": "Punjab National Bank",
@@ -378,7 +488,10 @@ const stockData: StockMapping[] = [
     "isin": "INE160A01022",
     "symbol": "PNB",
     "stockid": "616556",
-    "companyid": "11585"
+    "companyid": "11585",
+    "tickertape_sid": "PNBK",
+    "fincode": 132461,
+    "scripcode": 532461
   },
   {
     "name": "Bharti Airtel",
@@ -388,7 +501,10 @@ const stockData: StockMapping[] = [
     "isin": "INE397D01024",
     "symbol": "BHARTIARTL",
     "stockid": "468567",
-    "companyid": "2718"
+    "companyid": "2718",
+    "tickertape_sid": "BRTI",
+    "fincode": 132454,
+    "scripcode": 532454
   },
   {
     "name": "Indian Oil Corporation",
@@ -398,7 +514,10 @@ const stockData: StockMapping[] = [
     "isin": "INE242A01010",
     "symbol": "IOC",
     "stockid": "901145",
-    "companyid": "11924"
+    "companyid": "11924",
+    "tickertape_sid": "IOC",
+    "fincode": 130965,
+    "scripcode": 530965
   },
   {
     "name": "Sun Pharmaceutical Industries",
@@ -408,7 +527,10 @@ const stockData: StockMapping[] = [
     "isin": "INE044A01036",
     "symbol": "SUNPHARMA",
     "stockid": "948699",
-    "companyid": "9134"
+    "companyid": "9134",
+    "tickertape_sid": "SUN",
+    "fincode": 124715,
+    "scripcode": 524715
   },
   {
     "name": "Canara Bank",
@@ -418,7 +540,10 @@ const stockData: StockMapping[] = [
     "isin": "INE476A01022",
     "symbol": "CANBK",
     "stockid": "954692",
-    "companyid": "9218"
+    "companyid": "9218",
+    "tickertape_sid": "CNBK",
+    "fincode": 132483,
+    "scripcode": 532483
   },
   {
     "name": "LTIMindtree",
@@ -428,7 +553,8 @@ const stockData: StockMapping[] = [
     "isin": "INE214T01019",
     "symbol": "LTIM",
     "stockid": "1000372",
-    "companyid": "3318"
+    "companyid": "3318",
+    "tickertape_sid": "LRTI"
   },
   {
     "name": "United Spirits",
@@ -438,7 +564,10 @@ const stockData: StockMapping[] = [
     "isin": "INE854D01024",
     "symbol": "UNITDSPR",
     "stockid": "459218",
-    "companyid": "1714"
+    "companyid": "1714",
+    "tickertape_sid": "UNSP",
+    "fincode": 132432,
+    "scripcode": 532432
   },
   {
     "name": "Infosys",
@@ -448,7 +577,10 @@ const stockData: StockMapping[] = [
     "isin": "INE009A01021",
     "symbol": "INFY",
     "stockid": "399834",
-    "companyid": "10960"
+    "companyid": "10960",
+    "tickertape_sid": "INFY",
+    "fincode": 100209,
+    "scripcode": 500209
   },
   {
     "name": "Aurobindo Pharma",
@@ -458,7 +590,10 @@ const stockData: StockMapping[] = [
     "isin": "INE406A01037",
     "symbol": "AUROPHARMA",
     "stockid": "164981",
-    "companyid": "8279"
+    "companyid": "8279",
+    "tickertape_sid": "ARBN",
+    "fincode": 124804,
+    "scripcode": 524804
   },
   {
     "name": "Bank Of India",
@@ -468,7 +603,10 @@ const stockData: StockMapping[] = [
     "isin": "INE084A01016",
     "symbol": "BANKINDIA",
     "stockid": "793993",
-    "companyid": "11964"
+    "companyid": "11964",
+    "tickertape_sid": "BOI",
+    "fincode": 132149,
+    "scripcode": 532149
   },
   {
     "name": "Bandhan Bank",
@@ -478,7 +616,10 @@ const stockData: StockMapping[] = [
     "isin": "INE545U01014",
     "symbol": "BANDHANBNK",
     "stockid": "1000060",
-    "companyid": "67665"
+    "companyid": "67665",
+    "tickertape_sid": "BANH",
+    "fincode": 279527,
+    "scripcode": 541153
   },
   {
     "name": "Bharat Heavy Electricals",
@@ -488,7 +629,10 @@ const stockData: StockMapping[] = [
     "isin": "INE257A01026",
     "symbol": "BHEL",
     "stockid": "880342",
-    "companyid": "11831"
+    "companyid": "11831",
+    "tickertape_sid": "BHEL",
+    "fincode": 100103,
+    "scripcode": 500103
   },
   {
     "name": "ACC",
@@ -498,7 +642,10 @@ const stockData: StockMapping[] = [
     "isin": "INE012A01025",
     "symbol": "ACC",
     "stockid": "229887",
-    "companyid": "6"
+    "companyid": "6",
+    "tickertape_sid": "ACC",
+    "fincode": 100410,
+    "scripcode": 500410
   },
   {
     "name": "Alkem Laboratories",
@@ -508,7 +655,10 @@ const stockData: StockMapping[] = [
     "isin": "INE540L01014",
     "symbol": "ALKEM",
     "stockid": "1000019",
-    "companyid": "15059"
+    "companyid": "15059",
+    "tickertape_sid": "ALKE",
+    "fincode": 212427,
+    "scripcode": 539523
   },
   {
     "name": "Balkrishna Industries",
@@ -518,7 +668,10 @@ const stockData: StockMapping[] = [
     "isin": "INE787D01026",
     "symbol": "BALKRISIND",
     "stockid": "537216",
-    "companyid": "14013"
+    "companyid": "14013",
+    "tickertape_sid": "BLKI",
+    "fincode": 102355,
+    "scripcode": 502355
   },
   {
     "name": "Container Corporation of India",
@@ -528,7 +681,10 @@ const stockData: StockMapping[] = [
     "isin": "INE111A01025",
     "symbol": "CONCOR",
     "stockid": "336884",
-    "companyid": "4764"
+    "companyid": "4764",
+    "tickertape_sid": "CCRI",
+    "fincode": 131344,
+    "scripcode": 531344
   },
   {
     "name": "INDUS TOWERS",
@@ -538,7 +694,10 @@ const stockData: StockMapping[] = [
     "isin": "INE121J01017",
     "symbol": "INDUSTOWER",
     "stockid": "433635",
-    "companyid": "22411"
+    "companyid": "22411",
+    "tickertape_sid": "BHRI",
+    "fincode": 209967,
+    "scripcode": 534816
   },
   {
     "name": "Dalmia Bharat",
@@ -548,7 +707,10 @@ const stockData: StockMapping[] = [
     "isin": "INE00R701025",
     "symbol": "DALBHARAT",
     "stockid": "1003091",
-    "companyid": "1846307"
+    "companyid": "1846307",
+    "tickertape_sid": "DALB",
+    "fincode": 293380,
+    "scripcode": 542216
   },
   {
     "name": "Oracle Financial Services Software",
@@ -558,7 +720,10 @@ const stockData: StockMapping[] = [
     "isin": "INE881D01027",
     "symbol": "OFSS",
     "stockid": "580224",
-    "companyid": "3160"
+    "companyid": "3160",
+    "tickertape_sid": "ORCL",
+    "fincode": 132466,
+    "scripcode": 532466
   },
   {
     "name": "Kansai Nerolac Paints",
@@ -568,7 +733,10 @@ const stockData: StockMapping[] = [
     "isin": "INE531A01024",
     "symbol": "KANSAINER",
     "stockid": "634431",
-    "companyid": "13713"
+    "companyid": "13713",
+    "tickertape_sid": "KANE",
+    "fincode": 100165,
+    "scripcode": 500165
   },
   {
     "name": "Polycab India",
@@ -578,7 +746,10 @@ const stockData: StockMapping[] = [
     "isin": "INE455K01017",
     "symbol": "POLYCAB",
     "stockid": "1003131",
-    "companyid": "33820"
+    "companyid": "33820",
+    "tickertape_sid": "POLC",
+    "fincode": 211337,
+    "scripcode": 542652
   },
   {
     "name": "Gujarat Gas",
@@ -588,7 +759,8 @@ const stockData: StockMapping[] = [
     "isin": "INE844O01030",
     "symbol": "GUJGASLTD",
     "stockid": "678787",
-    "companyid": "59030"
+    "companyid": "59030",
+    "tickertape_sid": "GGAS"
   },
   {
     "name": "HDFC Bank",
@@ -598,7 +770,10 @@ const stockData: StockMapping[] = [
     "isin": "INE040A01034",
     "symbol": "HDFCBANK",
     "stockid": "592009",
-    "companyid": "9195"
+    "companyid": "9195",
+    "tickertape_sid": "HDBK",
+    "fincode": 100180,
+    "scripcode": 500180
   },
   {
     "name": "Biocon",
@@ -608,7 +783,10 @@ const stockData: StockMapping[] = [
     "isin": "INE376G01013",
     "symbol": "BIOCON",
     "stockid": "201791",
-    "companyid": "2082"
+    "companyid": "2082",
+    "tickertape_sid": "BION",
+    "fincode": 132523,
+    "scripcode": 532523
   },
   {
     "name": "CG Power and Industrial Solutions",
@@ -618,7 +796,10 @@ const stockData: StockMapping[] = [
     "isin": "INE067A01029",
     "symbol": "CGPOWER",
     "stockid": "383151",
-    "companyid": "13866"
+    "companyid": "13866",
+    "tickertape_sid": "CGPO",
+    "fincode": 100093,
+    "scripcode": 500093
   },
   {
     "name": "UNO Minda",
@@ -628,7 +809,10 @@ const stockData: StockMapping[] = [
     "isin": "INE405E01023",
     "symbol": "UNOMINDA",
     "stockid": "824163",
-    "companyid": "5459"
+    "companyid": "5459",
+    "tickertape_sid": "MNDA",
+    "fincode": 132539,
+    "scripcode": 532539
   },
   {
     "name": "Asian Paints",
@@ -638,7 +822,10 @@ const stockData: StockMapping[] = [
     "isin": "INE021A01026",
     "symbol": "ASIANPAINT",
     "stockid": "244442",
-    "companyid": "14034"
+    "companyid": "14034",
+    "tickertape_sid": "ASPN",
+    "fincode": 100820,
+    "scripcode": 500820
   },
   {
     "name": "Bosch",
@@ -648,7 +835,10 @@ const stockData: StockMapping[] = [
     "isin": "INE323A01026",
     "symbol": "BOSCHLTD",
     "stockid": "180260",
-    "companyid": "11911"
+    "companyid": "11911",
+    "tickertape_sid": "BOSH",
+    "fincode": 100530,
+    "scripcode": 500530
   },
   {
     "name": "Macrotech Developers",
@@ -658,7 +848,10 @@ const stockData: StockMapping[] = [
     "isin": "INE670K01029",
     "symbol": "LODHA",
     "stockid": "1003490",
-    "companyid": "20352"
+    "companyid": "20352",
+    "tickertape_sid": "LOD",
+    "fincode": 219442,
+    "scripcode": 543287
   },
   {
     "name": "Linde India",
@@ -668,7 +861,10 @@ const stockData: StockMapping[] = [
     "isin": "INE473A01011",
     "symbol": "LINDEINDIA",
     "stockid": "280557",
-    "companyid": "13590"
+    "companyid": "13590",
+    "tickertape_sid": "LIND",
+    "fincode": 123457,
+    "scripcode": 523457
   },
   {
     "name": "NHPC",
@@ -678,7 +874,10 @@ const stockData: StockMapping[] = [
     "isin": "INE848E01016",
     "symbol": "NHPC",
     "stockid": "424557",
-    "companyid": "12536"
+    "companyid": "12536",
+    "tickertape_sid": "NHPC",
+    "fincode": 216369,
+    "scripcode": 533098
   },
   {
     "name": "Hindustan Aeronautics",
@@ -688,7 +887,10 @@ const stockData: StockMapping[] = [
     "isin": "INE066F01020",
     "symbol": "HAL",
     "stockid": "1002939",
-    "companyid": "9206"
+    "companyid": "9206",
+    "tickertape_sid": "HIAE",
+    "fincode": 219494,
+    "scripcode": 541154
   },
   {
     "name": "Bajaj Finance",
@@ -698,7 +900,9 @@ const stockData: StockMapping[] = [
     "isin": "INE296A01024",
     "symbol": "BAJFINANCE",
     "stockid": "959222",
-    "companyid": "11260"
+    "companyid": "11260",
+    "fincode": 100034,
+    "scripcode": 500034
   },
   {
     "name": "Jubilant Foodworks",
@@ -708,7 +912,10 @@ const stockData: StockMapping[] = [
     "isin": "INE797F01020",
     "symbol": "JUBLFOOD",
     "stockid": "274240",
-    "companyid": "16224"
+    "companyid": "16224",
+    "tickertape_sid": "JUBI",
+    "fincode": 215367,
+    "scripcode": 533155
   },
   {
     "name": "Life Insurance Corporation of India",
@@ -718,7 +925,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0J1Y01017",
     "symbol": "LICI",
     "stockid": "1003648",
-    "companyid": "5050"
+    "companyid": "5050",
+    "tickertape_sid": "LIC",
+    "fincode": 217376,
+    "scripcode": 543526
   },
   {
     "name": "Honeywell Automation",
@@ -728,7 +938,10 @@ const stockData: StockMapping[] = [
     "isin": "INE671A01010",
     "symbol": "HONAUT",
     "stockid": "215539",
-    "companyid": "12915"
+    "companyid": "12915",
+    "tickertape_sid": "HONE",
+    "fincode": 117174,
+    "scripcode": 517174
   },
   {
     "name": "Tata Motors",
@@ -738,7 +951,8 @@ const stockData: StockMapping[] = [
     "isin": "INE155A01022",
     "symbol": "TATAMOTORS",
     "stockid": "949886",
-    "companyid": "12934"
+    "companyid": "12934",
+    "tickertape_sid": "TAMO"
   },
   {
     "name": "Zee Entertainment Enterprises",
@@ -748,7 +962,10 @@ const stockData: StockMapping[] = [
     "isin": "INE256A01028",
     "symbol": "ZEEL",
     "stockid": "643071",
-    "companyid": "11769"
+    "companyid": "11769",
+    "tickertape_sid": "ZEE",
+    "fincode": 105537,
+    "scripcode": 505537
   },
   {
     "name": "Union Bank of India",
@@ -758,7 +975,10 @@ const stockData: StockMapping[] = [
     "isin": "INE692A01016",
     "symbol": "UNIONBANK",
     "stockid": "998049",
-    "companyid": "12261"
+    "companyid": "12261",
+    "tickertape_sid": "UNBK",
+    "fincode": 132477,
+    "scripcode": 532477
   },
   {
     "name": "Dr Reddys Laboratories",
@@ -768,7 +988,9 @@ const stockData: StockMapping[] = [
     "isin": "INE089A01023",
     "symbol": "DRREDDY",
     "stockid": "734514",
-    "companyid": "13841"
+    "companyid": "13841",
+    "fincode": 100124,
+    "scripcode": 500124
   },
   {
     "name": "JSW Energy",
@@ -778,7 +1000,10 @@ const stockData: StockMapping[] = [
     "isin": "INE121E01018",
     "symbol": "JSWENERGY",
     "stockid": "980842",
-    "companyid": "19818"
+    "companyid": "19818",
+    "tickertape_sid": "JSWE",
+    "fincode": 208461,
+    "scripcode": 533148
   },
   {
     "name": "NMDC",
@@ -788,7 +1013,10 @@ const stockData: StockMapping[] = [
     "isin": "INE584A01023",
     "symbol": "NMDC",
     "stockid": "794998",
-    "companyid": "11633"
+    "companyid": "11633",
+    "tickertape_sid": "NMDC",
+    "fincode": 126371,
+    "scripcode": 526371
   },
   {
     "name": "UCO Bank",
@@ -798,7 +1026,10 @@ const stockData: StockMapping[] = [
     "isin": "INE691A01018",
     "symbol": "UCOBANK",
     "stockid": "767147",
-    "companyid": "9180"
+    "companyid": "9180",
+    "tickertape_sid": "UCBK",
+    "fincode": 132505,
+    "scripcode": 532505
   },
   {
     "name": "Adani Total Gas",
@@ -808,7 +1039,10 @@ const stockData: StockMapping[] = [
     "isin": "INE399L01023",
     "symbol": "ATGL",
     "stockid": "1003081",
-    "companyid": "32503"
+    "companyid": "32503",
+    "tickertape_sid": "ADAG",
+    "fincode": 228347,
+    "scripcode": 542066
   },
   {
     "name": "FSN E-Commerce Ventures Nykaa",
@@ -818,7 +1052,10 @@ const stockData: StockMapping[] = [
     "isin": "INE388Y01029",
     "symbol": "NYKAA",
     "stockid": "1003558",
-    "companyid": "2017563"
+    "companyid": "2017563",
+    "tickertape_sid": "NYK",
+    "fincode": 302988,
+    "scripcode": 543384
   },
   {
     "name": "Muthoot Finance",
@@ -828,7 +1065,10 @@ const stockData: StockMapping[] = [
     "isin": "INE414G01012",
     "symbol": "MUTHOOTFIN",
     "stockid": "896167",
-    "companyid": "33218"
+    "companyid": "33218",
+    "tickertape_sid": "MUTT",
+    "fincode": 221790,
+    "scripcode": 533398
   },
   {
     "name": "Patanjali Foods",
@@ -838,7 +1078,10 @@ const stockData: StockMapping[] = [
     "isin": "INE619A01035",
     "symbol": "PATANJALI",
     "stockid": "820800",
-    "companyid": "13169"
+    "companyid": "13169",
+    "tickertape_sid": "RCSY",
+    "fincode": 100368,
+    "scripcode": 500368
   },
   {
     "name": "Gujarat Fluorochemicals Limited",
@@ -848,7 +1091,10 @@ const stockData: StockMapping[] = [
     "isin": "INE09N301011",
     "symbol": "FLUOROCHEM",
     "stockid": "",
-    "companyid": "1944774"
+    "companyid": "1944774",
+    "tickertape_sid": "GUJL",
+    "fincode": 295872,
+    "scripcode": 542812
   },
   {
     "name": "Tube Investments of India Ltd",
@@ -858,7 +1104,10 @@ const stockData: StockMapping[] = [
     "isin": "INE974X01010",
     "symbol": "TIINDIA",
     "stockid": "1002874",
-    "companyid": "67230"
+    "companyid": "67230",
+    "tickertape_sid": "TBEI",
+    "fincode": 269404,
+    "scripcode": 540762
   },
   {
     "name": "IDFC First Bank ",
@@ -868,7 +1117,10 @@ const stockData: StockMapping[] = [
     "isin": "INE092T01019",
     "symbol": "IDFCFIRSTB",
     "stockid": "999987",
-    "companyid": "62245"
+    "companyid": "62245",
+    "tickertape_sid": "IDFB",
+    "fincode": 278580,
+    "scripcode": 539437
   },
   {
     "name": "Syngene International",
@@ -878,7 +1130,10 @@ const stockData: StockMapping[] = [
     "isin": "INE398R01022",
     "symbol": "SYNGENE",
     "stockid": "197397",
-    "companyid": "303"
+    "companyid": "303",
+    "tickertape_sid": "SYNN",
+    "fincode": 209373,
+    "scripcode": 539268
   },
   {
     "name": "Adani Green Energy Limited",
@@ -888,7 +1143,10 @@ const stockData: StockMapping[] = [
     "isin": "INE364U01010",
     "symbol": "ADANIGREEN",
     "stockid": "93115",
-    "companyid": "64847"
+    "companyid": "64847",
+    "tickertape_sid": "ADNA",
+    "fincode": 289554,
+    "scripcode": 541450
   },
   {
     "name": "Tata Elxsi",
@@ -898,7 +1156,10 @@ const stockData: StockMapping[] = [
     "isin": "INE670A01012",
     "symbol": "TATAELXSI",
     "stockid": "949649",
-    "companyid": "12207"
+    "companyid": "12207",
+    "tickertape_sid": "TTEX",
+    "fincode": 100408,
+    "scripcode": 500408
   },
   {
     "name": "Godrej Properties",
@@ -908,7 +1169,10 @@ const stockData: StockMapping[] = [
     "isin": "INE484J01027",
     "symbol": "GODREJPROP",
     "stockid": "608999",
-    "companyid": "5733"
+    "companyid": "5733",
+    "tickertape_sid": "GODR",
+    "fincode": 208238,
+    "scripcode": 533150
   },
   {
     "name": "Federal Bank",
@@ -918,7 +1182,10 @@ const stockData: StockMapping[] = [
     "isin": "INE171A01029",
     "symbol": "FEDERALBNK",
     "stockid": "533514",
-    "companyid": "9211"
+    "companyid": "9211",
+    "tickertape_sid": "FED",
+    "fincode": 100469,
+    "scripcode": 500469
   },
   {
     "name": "Bharat Petroleum Corporation",
@@ -928,7 +1195,10 @@ const stockData: StockMapping[] = [
     "isin": "INE029A01011",
     "symbol": "BPCL",
     "stockid": "159344",
-    "companyid": "11941"
+    "companyid": "11941",
+    "tickertape_sid": "BPCL",
+    "fincode": 100547,
+    "scripcode": 500547
   },
   {
     "name": "APL Apollo Tubes",
@@ -938,7 +1208,10 @@ const stockData: StockMapping[] = [
     "isin": "INE702C01027",
     "symbol": "APLAPOLLO",
     "stockid": "361277",
-    "companyid": "6683"
+    "companyid": "6683",
+    "tickertape_sid": "APLA",
+    "fincode": 190059,
+    "scripcode": 533758
   },
   {
     "name": "Cipla",
@@ -948,7 +1221,10 @@ const stockData: StockMapping[] = [
     "isin": "INE059A01026",
     "symbol": "CIPLA",
     "stockid": "597145",
-    "companyid": "13917"
+    "companyid": "13917",
+    "tickertape_sid": "CIPL",
+    "fincode": 100087,
+    "scripcode": 500087
   },
   {
     "name": "PI Industries",
@@ -958,7 +1234,10 @@ const stockData: StockMapping[] = [
     "isin": "INE603J01030",
     "symbol": "PIIND",
     "stockid": "927973",
-    "companyid": "10357"
+    "companyid": "10357",
+    "tickertape_sid": "PIIL",
+    "fincode": 123642,
+    "scripcode": 523642
   },
   {
     "name": "ITC",
@@ -968,7 +1247,10 @@ const stockData: StockMapping[] = [
     "isin": "INE154A01025",
     "symbol": "ITC",
     "stockid": "397071",
-    "companyid": "13554"
+    "companyid": "13554",
+    "tickertape_sid": "ITC",
+    "fincode": 100875,
+    "scripcode": 500875
   },
   {
     "name": "Persistent Systems",
@@ -978,7 +1260,10 @@ const stockData: StockMapping[] = [
     "isin": "INE262H01021",
     "symbol": "PERSISTENT",
     "stockid": "234277",
-    "companyid": "21519"
+    "companyid": "21519",
+    "tickertape_sid": "PERS",
+    "fincode": 210590,
+    "scripcode": 533179
   },
   {
     "name": "Oil and Natural Gas Corporation",
@@ -988,7 +1273,10 @@ const stockData: StockMapping[] = [
     "isin": "INE213A01029",
     "symbol": "ONGC",
     "stockid": "640830",
-    "companyid": "11599"
+    "companyid": "11599",
+    "tickertape_sid": "ONGC",
+    "fincode": 100312,
+    "scripcode": 500312
   },
   {
     "name": "Nestle India",
@@ -998,7 +1286,10 @@ const stockData: StockMapping[] = [
     "isin": "INE239A01024",
     "symbol": "NESTLEIND",
     "stockid": "226036",
-    "companyid": "13330"
+    "companyid": "13330",
+    "tickertape_sid": "NEST",
+    "fincode": 100790,
+    "scripcode": 500790
   },
   {
     "name": "Maruti Suzuki India",
@@ -1008,7 +1299,10 @@ const stockData: StockMapping[] = [
     "isin": "INE585B01010",
     "symbol": "MARUTI",
     "stockid": "984862",
-    "companyid": "11890"
+    "companyid": "11890",
+    "tickertape_sid": "MRTI",
+    "fincode": 132500,
+    "scripcode": 532500
   },
   {
     "name": "JSW Steel",
@@ -1018,7 +1312,10 @@ const stockData: StockMapping[] = [
     "isin": "INE019A01038",
     "symbol": "JSWSTEEL",
     "stockid": "891577",
-    "companyid": "8352"
+    "companyid": "8352",
+    "tickertape_sid": "JSTL",
+    "fincode": 100228,
+    "scripcode": 500228
   },
   {
     "name": "Max Healthcare Institute Limited",
@@ -1028,7 +1325,10 @@ const stockData: StockMapping[] = [
     "isin": "INE027H01010",
     "symbol": "MAXHEALTH",
     "stockid": "",
-    "companyid": "14582"
+    "companyid": "14582",
+    "tickertape_sid": "MAXE",
+    "fincode": 218071,
+    "scripcode": 543220
   },
   {
     "name": "Indian Hotels Company",
@@ -1038,7 +1338,10 @@ const stockData: StockMapping[] = [
     "isin": "INE053A01029",
     "symbol": "INDHOTEL",
     "stockid": "512481",
-    "companyid": "13586"
+    "companyid": "13586",
+    "tickertape_sid": "IHTL",
+    "fincode": 100850,
+    "scripcode": 500850
   },
   {
     "name": "Mahindra and Mahindra",
@@ -1048,7 +1351,10 @@ const stockData: StockMapping[] = [
     "isin": "INE101A01026",
     "symbol": "M&M",
     "stockid": "845805",
-    "companyid": "11898"
+    "companyid": "11898",
+    "tickertape_sid": "MAHM",
+    "fincode": 100520,
+    "scripcode": 500520
   },
   {
     "name": "Cholamandalam Investment and Finance Company",
@@ -1058,7 +1364,10 @@ const stockData: StockMapping[] = [
     "isin": "INE121A01024",
     "symbol": "CHOLAFIN",
     "stockid": "972395",
-    "companyid": "12159"
+    "companyid": "12159",
+    "tickertape_sid": "CHLA",
+    "fincode": 111243,
+    "scripcode": 511243
   },
   {
     "name": "Lupin",
@@ -1068,7 +1377,10 @@ const stockData: StockMapping[] = [
     "isin": "INE326A01037",
     "symbol": "LUPIN",
     "stockid": "641789",
-    "companyid": "10743"
+    "companyid": "10743",
+    "tickertape_sid": "LUPN",
+    "fincode": 100257,
+    "scripcode": 500257
   },
   {
     "name": "Reliance Industries",
@@ -1078,7 +1390,10 @@ const stockData: StockMapping[] = [
     "isin": "INE002A01018",
     "symbol": "RELIANCE",
     "stockid": "605152",
-    "companyid": "13215"
+    "companyid": "13215",
+    "tickertape_sid": "RELI",
+    "fincode": 100325,
+    "scripcode": 500325
   },
   {
     "name": "HDFC Asset Management Company ",
@@ -1088,7 +1403,10 @@ const stockData: StockMapping[] = [
     "isin": "INE127D01025",
     "symbol": "HDFCAMC",
     "stockid": "1003028",
-    "companyid": "14723"
+    "companyid": "14723",
+    "tickertape_sid": "HDFA",
+    "fincode": 208280,
+    "scripcode": 541729
   },
   {
     "name": "IndusInd Bank",
@@ -1098,7 +1416,10 @@ const stockData: StockMapping[] = [
     "isin": "INE095A01012",
     "symbol": "INDUSINDBK",
     "stockid": "250217",
-    "companyid": "9196"
+    "companyid": "9196",
+    "tickertape_sid": "INBK",
+    "fincode": 132187,
+    "scripcode": 532187
   },
   {
     "name": "Adani Wilmar",
@@ -1108,7 +1429,10 @@ const stockData: StockMapping[] = [
     "isin": "INE699H01024",
     "symbol": "AWL",
     "stockid": "1003604",
-    "companyid": "16234"
+    "companyid": "16234",
+    "tickertape_sid": "AWL",
+    "fincode": 207673,
+    "scripcode": 543458
   },
   {
     "name": "Godrej Consumer Products",
@@ -1118,7 +1442,10 @@ const stockData: StockMapping[] = [
     "isin": "INE102D01028",
     "symbol": "GODREJCP",
     "stockid": "597425",
-    "companyid": "1908"
+    "companyid": "1908",
+    "tickertape_sid": "GOCP",
+    "fincode": 132424,
+    "scripcode": 532424
   },
   {
     "name": "Tech Mahindra",
@@ -1128,7 +1455,10 @@ const stockData: StockMapping[] = [
     "isin": "INE669C01036",
     "symbol": "TECHM",
     "stockid": "779228",
-    "companyid": "11221"
+    "companyid": "11221",
+    "tickertape_sid": "TEML",
+    "fincode": 132755,
+    "scripcode": 532755
   },
   {
     "name": "ABB India",
@@ -1138,7 +1468,10 @@ const stockData: StockMapping[] = [
     "isin": "INE117A01022",
     "symbol": "ABB",
     "stockid": "968623",
-    "companyid": "14040"
+    "companyid": "14040",
+    "tickertape_sid": "ABB",
+    "fincode": 100002,
+    "scripcode": 500002
   },
   {
     "name": "Varun Beverages",
@@ -1148,7 +1481,10 @@ const stockData: StockMapping[] = [
     "isin": "INE200M01039",
     "symbol": "VBL",
     "stockid": "1002685",
-    "companyid": "18605"
+    "companyid": "18605",
+    "tickertape_sid": "VARB",
+    "fincode": 209550,
+    "scripcode": 540180
   },
   {
     "name": "Bayer CropScience",
@@ -1158,7 +1494,10 @@ const stockData: StockMapping[] = [
     "isin": "INE462A01022",
     "symbol": "BAYERCROP",
     "stockid": "491198",
-    "companyid": "13975"
+    "companyid": "13975",
+    "tickertape_sid": "BAYE",
+    "fincode": 106285,
+    "scripcode": 506285
   },
   {
     "name": "Coal India",
@@ -1168,7 +1507,10 @@ const stockData: StockMapping[] = [
     "isin": "INE522F01014",
     "symbol": "COALINDIA",
     "stockid": "421555",
-    "companyid": "11822"
+    "companyid": "11822",
+    "tickertape_sid": "COAL",
+    "fincode": 219300,
+    "scripcode": 533278
   },
   {
     "name": "Wipro",
@@ -1178,7 +1520,10 @@ const stockData: StockMapping[] = [
     "isin": "INE075A01022",
     "symbol": "WIPRO",
     "stockid": "531139",
-    "companyid": "12799"
+    "companyid": "12799",
+    "tickertape_sid": "WIPR",
+    "fincode": 107685,
+    "scripcode": 507685
   },
   {
     "name": "Abbott India",
@@ -1188,7 +1533,10 @@ const stockData: StockMapping[] = [
     "isin": "INE358A01014",
     "symbol": "ABBOTINDIA",
     "stockid": "919728",
-    "companyid": "13937"
+    "companyid": "13937",
+    "tickertape_sid": "ABOT",
+    "fincode": 100488,
+    "scripcode": 500488
   },
   {
     "name": "Aditya Birla Capital",
@@ -1198,7 +1546,10 @@ const stockData: StockMapping[] = [
     "isin": "INE674K01013",
     "symbol": "ABCAPITAL",
     "stockid": "1002814",
-    "companyid": "66696"
+    "companyid": "66696",
+    "tickertape_sid": "ADTB",
+    "fincode": 242461,
+    "scripcode": 540691
   },
   {
     "name": "GlaxoSmithKline Pharmaceuticals",
@@ -1208,7 +1559,10 @@ const stockData: StockMapping[] = [
     "isin": "INE159A01016",
     "symbol": "GLAXO",
     "stockid": "793005",
-    "companyid": "13715"
+    "companyid": "13715",
+    "tickertape_sid": "GLAX",
+    "fincode": 100660,
+    "scripcode": 500660
   },
   {
     "name": "Shriram Finance",
@@ -1218,7 +1572,9 @@ const stockData: StockMapping[] = [
     "isin": "INE721A01013",
     "symbol": "SHRIRAMFIN",
     "stockid": "397643",
-    "companyid": "13106"
+    "companyid": "13106",
+    "fincode": 111218,
+    "scripcode": 511218
   },
   {
     "name": "UPL",
@@ -1228,7 +1584,10 @@ const stockData: StockMapping[] = [
     "isin": "INE628A01036",
     "symbol": "UPL",
     "stockid": "947027",
-    "companyid": "6114"
+    "companyid": "6114",
+    "tickertape_sid": "UPLL",
+    "fincode": 112070,
+    "scripcode": 512070
   },
   {
     "name": "General Insurance Corporation of India",
@@ -1238,7 +1597,10 @@ const stockData: StockMapping[] = [
     "isin": "INE481Y01014",
     "symbol": "GICRE",
     "stockid": "1002851",
-    "companyid": "12266"
+    "companyid": "12266",
+    "tickertape_sid": "GENA",
+    "fincode": 210174,
+    "scripcode": 540755
   },
   {
     "name": "Titan Company",
@@ -1248,7 +1610,10 @@ const stockData: StockMapping[] = [
     "isin": "INE280A01028",
     "symbol": "TITAN",
     "stockid": "372338",
-    "companyid": "12903"
+    "companyid": "12903",
+    "tickertape_sid": "TITN",
+    "fincode": 100114,
+    "scripcode": 500114
   },
   {
     "name": "TATA Consumer Products",
@@ -1258,7 +1623,10 @@ const stockData: StockMapping[] = [
     "isin": "INE192A01025",
     "symbol": "TATACONSUM",
     "stockid": "272806",
-    "companyid": "12929"
+    "companyid": "12929",
+    "tickertape_sid": "TACN",
+    "fincode": 100800,
+    "scripcode": 500800
   },
   {
     "name": "Bata India",
@@ -1268,7 +1636,10 @@ const stockData: StockMapping[] = [
     "isin": "INE176A01028",
     "symbol": "BATAINDIA",
     "stockid": "919264",
-    "companyid": "13974"
+    "companyid": "13974",
+    "tickertape_sid": "BATA",
+    "fincode": 100043,
+    "scripcode": 500043
   },
   {
     "name": "Astral Limited",
@@ -1278,7 +1649,10 @@ const stockData: StockMapping[] = [
     "isin": "INE006I01046",
     "symbol": "ASTRAL",
     "stockid": "",
-    "companyid": "15686"
+    "companyid": "15686",
+    "tickertape_sid": "ASPT",
+    "fincode": 132830,
+    "scripcode": 532830
   },
   {
     "name": "UltraTech Cement",
@@ -1288,7 +1662,10 @@ const stockData: StockMapping[] = [
     "isin": "INE481G01011",
     "symbol": "ULTRACEMCO",
     "stockid": "504759",
-    "companyid": "3027"
+    "companyid": "3027",
+    "tickertape_sid": "ULTC",
+    "fincode": 132538,
+    "scripcode": 532538
   },
   {
     "name": "Yes Bank",
@@ -1298,7 +1675,10 @@ const stockData: StockMapping[] = [
     "isin": "INE528G01035",
     "symbol": "YESBANK",
     "stockid": "873791",
-    "companyid": "16552"
+    "companyid": "16552",
+    "tickertape_sid": "YESB",
+    "fincode": 132648,
+    "scripcode": 532648
   },
   {
     "name": "Adani Power",
@@ -1308,7 +1688,9 @@ const stockData: StockMapping[] = [
     "isin": "INE814H01011",
     "symbol": "ADANIPOWER",
     "stockid": "962209",
-    "companyid": "23479"
+    "companyid": "23479",
+    "fincode": 209867,
+    "scripcode": 533096
   },
   {
     "name": "Power Finance Corporation",
@@ -1318,7 +1700,10 @@ const stockData: StockMapping[] = [
     "isin": "INE134E01011",
     "symbol": "PFC",
     "stockid": "817865",
-    "companyid": "4519"
+    "companyid": "4519",
+    "tickertape_sid": "PWFC",
+    "fincode": 132810,
+    "scripcode": 532810
   },
   {
     "name": "SRF",
@@ -1328,7 +1713,10 @@ const stockData: StockMapping[] = [
     "isin": "INE647A01010",
     "symbol": "SRF",
     "stockid": "823938",
-    "companyid": "13155"
+    "companyid": "13155",
+    "tickertape_sid": "SRFL",
+    "fincode": 103806,
+    "scripcode": 503806
   },
   {
     "name": "Shree Cements",
@@ -1338,7 +1726,10 @@ const stockData: StockMapping[] = [
     "isin": "INE070A01015",
     "symbol": "SHREECEM",
     "stockid": "415346",
-    "companyid": "13129"
+    "companyid": "13129",
+    "tickertape_sid": "SHCM",
+    "fincode": 100387,
+    "scripcode": 500387
   },
   {
     "name": "The Tata Power Company",
@@ -1348,7 +1739,10 @@ const stockData: StockMapping[] = [
     "isin": "INE245A01021",
     "symbol": "TATAPOWER",
     "stockid": "",
-    "companyid": "12918"
+    "companyid": "12918",
+    "tickertape_sid": "TTPW",
+    "fincode": 100400,
+    "scripcode": 500400
   },
   {
     "name": "Tata Steel",
@@ -1358,7 +1752,10 @@ const stockData: StockMapping[] = [
     "isin": "INE081A01020",
     "symbol": "TATASTEEL",
     "stockid": "594470",
-    "companyid": "12902"
+    "companyid": "12902",
+    "tickertape_sid": "TISC",
+    "fincode": 100470,
+    "scripcode": 500470
   },
   {
     "name": "Vedanta",
@@ -1368,7 +1765,10 @@ const stockData: StockMapping[] = [
     "isin": "INE205A01025",
     "symbol": "VEDL",
     "stockid": "801588",
-    "companyid": "13111"
+    "companyid": "13111",
+    "tickertape_sid": "VDAN",
+    "fincode": 100295,
+    "scripcode": 500295
   },
   {
     "name": "Endurance Technologies",
@@ -1378,7 +1778,10 @@ const stockData: StockMapping[] = [
     "isin": "INE913H01037",
     "symbol": "ENDURANCE",
     "stockid": "426392",
-    "companyid": "38215"
+    "companyid": "38215",
+    "tickertape_sid": "ENDU",
+    "fincode": 215477,
+    "scripcode": 540153
   },
   {
     "name": "Indian Bank",
@@ -1388,7 +1791,10 @@ const stockData: StockMapping[] = [
     "isin": "INE562A01011",
     "symbol": "INDIANB",
     "stockid": "590845",
-    "companyid": "8614"
+    "companyid": "8614",
+    "tickertape_sid": "INBA",
+    "fincode": 132814,
+    "scripcode": 532814
   },
   {
     "name": "SBI Life Insurance Company",
@@ -1398,7 +1804,10 @@ const stockData: StockMapping[] = [
     "isin": "INE123W01016",
     "symbol": "SBILIFE",
     "stockid": "1002829",
-    "companyid": "2898"
+    "companyid": "2898",
+    "tickertape_sid": "SBIL",
+    "fincode": 211385,
+    "scripcode": 540719
   },
   {
     "name": "NTPC",
@@ -1408,7 +1817,10 @@ const stockData: StockMapping[] = [
     "isin": "INE733E01010",
     "symbol": "NTPC",
     "stockid": "166797",
-    "companyid": "12316"
+    "companyid": "12316",
+    "tickertape_sid": "NTPC",
+    "fincode": 132555,
+    "scripcode": 532555
   },
   {
     "name": "Larsen & Toubro",
@@ -1418,7 +1830,10 @@ const stockData: StockMapping[] = [
     "isin": "INE018A01030",
     "symbol": "LT",
     "stockid": "837957",
-    "companyid": "13447"
+    "companyid": "13447",
+    "tickertape_sid": "LART",
+    "fincode": 100510,
+    "scripcode": 500510
   },
   {
     "name": "Pidilite Industries",
@@ -1428,7 +1843,10 @@ const stockData: StockMapping[] = [
     "isin": "INE318A01026",
     "symbol": "PIDILITIND",
     "stockid": "619599",
-    "companyid": "10460"
+    "companyid": "10460",
+    "tickertape_sid": "PIDI",
+    "fincode": 100331,
+    "scripcode": 500331
   },
   {
     "name": "Berger Paints India",
@@ -1438,7 +1856,10 @@ const stockData: StockMapping[] = [
     "isin": "INE463A01038",
     "symbol": "BERGEPAINT",
     "stockid": "807018",
-    "companyid": "13971"
+    "companyid": "13971",
+    "tickertape_sid": "BRGR",
+    "fincode": 109480,
+    "scripcode": 509480
   },
   {
     "name": "COFORGE LIMITED",
@@ -1448,7 +1869,9 @@ const stockData: StockMapping[] = [
     "isin": "INE591G01017",
     "symbol": "COFORGE",
     "stockid": "",
-    "companyid": "858"
+    "companyid": "858",
+    "fincode": 132541,
+    "scripcode": 532541
   },
   {
     "name": "State Bank of India",
@@ -1458,7 +1881,10 @@ const stockData: StockMapping[] = [
     "isin": "INE062A01020",
     "symbol": "SBIN",
     "stockid": "347516",
-    "companyid": "11984"
+    "companyid": "11984",
+    "tickertape_sid": "SBI",
+    "fincode": 100112,
+    "scripcode": 500112
   },
   {
     "name": "REC",
@@ -1468,7 +1894,10 @@ const stockData: StockMapping[] = [
     "isin": "INE020B01018",
     "symbol": "RECLTD",
     "stockid": "431628",
-    "companyid": "4616"
+    "companyid": "4616",
+    "tickertape_sid": "RECM",
+    "fincode": 200055,
+    "scripcode": 532955
   },
   {
     "name": "Zomato",
@@ -1478,7 +1907,10 @@ const stockData: StockMapping[] = [
     "isin": "INE758T01015",
     "symbol": "ZOMATO",
     "stockid": "1003511",
-    "companyid": "57948"
+    "companyid": "57948",
+    "tickertape_sid": "ZOM",
+    "fincode": 252306,
+    "scripcode": 543320
   },
   {
     "name": "Kotak Mahindra Bank",
@@ -1488,7 +1920,9 @@ const stockData: StockMapping[] = [
     "isin": "INE237A01028",
     "symbol": "KOTAKBANK",
     "stockid": "621403",
-    "companyid": "12161"
+    "companyid": "12161",
+    "fincode": 100247,
+    "scripcode": 500247
   },
   {
     "name": "IDBI Bank",
@@ -1498,7 +1932,10 @@ const stockData: StockMapping[] = [
     "isin": "INE008A01015",
     "symbol": "IDBI",
     "stockid": "542329",
-    "companyid": "11689"
+    "companyid": "11689",
+    "tickertape_sid": "IDBI",
+    "fincode": 100116,
+    "scripcode": 500116
   },
   {
     "name": "United Breweries",
@@ -1508,7 +1945,10 @@ const stockData: StockMapping[] = [
     "isin": "INE686F01025",
     "symbol": "UBL",
     "stockid": "477933",
-    "companyid": "1367"
+    "companyid": "1367",
+    "tickertape_sid": "UBBW",
+    "fincode": 132478,
+    "scripcode": 532478
   },
   {
     "name": "Tata Consultancy Services",
@@ -1518,7 +1958,10 @@ const stockData: StockMapping[] = [
     "isin": "INE467B01029",
     "symbol": "TCS",
     "stockid": "513374",
-    "companyid": "8345"
+    "companyid": "8345",
+    "tickertape_sid": "TCS",
+    "fincode": 132540,
+    "scripcode": 532540
   },
   {
     "name": "Ipca Laboratories",
@@ -1528,7 +1971,10 @@ const stockData: StockMapping[] = [
     "isin": "INE571A01038",
     "symbol": "IPCALAB",
     "stockid": "950228",
-    "companyid": "10587"
+    "companyid": "10587",
+    "tickertape_sid": "IPCA",
+    "fincode": 124494,
+    "scripcode": 524494
   },
   {
     "name": "Page Industries",
@@ -1538,7 +1984,10 @@ const stockData: StockMapping[] = [
     "isin": "INE761H01022",
     "symbol": "PAGEIND",
     "stockid": "968443",
-    "companyid": "762"
+    "companyid": "762",
+    "tickertape_sid": "PAGE",
+    "fincode": 132827,
+    "scripcode": 532827
   },
   {
     "name": "Escorts Kubota",
@@ -1548,7 +1997,10 @@ const stockData: StockMapping[] = [
     "isin": "INE042A01014",
     "symbol": "ESCORTS",
     "stockid": "282332",
-    "companyid": "13761"
+    "companyid": "13761",
+    "tickertape_sid": "ESCO",
+    "fincode": 100495,
+    "scripcode": 500495
   },
   {
     "name": "Dixon Technologies",
@@ -1558,7 +2010,10 @@ const stockData: StockMapping[] = [
     "isin": "INE935N01020",
     "symbol": "DIXON",
     "stockid": "1002816",
-    "companyid": "61461"
+    "companyid": "61461",
+    "tickertape_sid": "DIXO",
+    "fincode": 210072,
+    "scripcode": 540699
   },
   {
     "name": "Indraprastha Gas",
@@ -1568,7 +2023,10 @@ const stockData: StockMapping[] = [
     "isin": "INE203G01027",
     "symbol": "IGL",
     "stockid": "616625",
-    "companyid": "751"
+    "companyid": "751",
+    "tickertape_sid": "IGAS",
+    "fincode": 132514,
+    "scripcode": 532514
   },
   {
     "name": "Hindustan Zinc",
@@ -1578,7 +2036,10 @@ const stockData: StockMapping[] = [
     "isin": "INE267A01025",
     "symbol": "HINDZINC",
     "stockid": "855995",
-    "companyid": "11982"
+    "companyid": "11982",
+    "tickertape_sid": "HZNC",
+    "fincode": 100188,
+    "scripcode": 500188
   },
   {
     "name": "Deepak Nitrite",
@@ -1588,7 +2049,10 @@ const stockData: StockMapping[] = [
     "isin": "INE288B01029",
     "symbol": "DEEPAKNTR",
     "stockid": "552665",
-    "companyid": "13838"
+    "companyid": "13838",
+    "tickertape_sid": "DPNT",
+    "fincode": 106401,
+    "scripcode": 506401
   },
   {
     "name": "TVS Motor Company",
@@ -1598,7 +2062,10 @@ const stockData: StockMapping[] = [
     "isin": "INE494B01023",
     "symbol": "TVSMOTOR",
     "stockid": "730070",
-    "companyid": "12940"
+    "companyid": "12940",
+    "tickertape_sid": "TVSM",
+    "fincode": 132343,
+    "scripcode": 532343
   },
   {
     "name": "Adani Energy Solutions",
@@ -1608,7 +2075,10 @@ const stockData: StockMapping[] = [
     "isin": "INE931S01010",
     "symbol": "ADANIENSOL",
     "stockid": "999961",
-    "companyid": "57724"
+    "companyid": "57724",
+    "tickertape_sid": "ADAI",
+    "fincode": 271875,
+    "scripcode": 539254
   },
   {
     "name": "Oberoi Realty",
@@ -1618,7 +2088,10 @@ const stockData: StockMapping[] = [
     "isin": "INE093I01010",
     "symbol": "OBEROIRLTY",
     "stockid": "373168",
-    "companyid": "32621"
+    "companyid": "32621",
+    "tickertape_sid": "OEBO",
+    "fincode": 220018,
+    "scripcode": 533273
   },
   {
     "name": "Indian Railway Finance Corporation",
@@ -1628,7 +2101,10 @@ const stockData: StockMapping[] = [
     "isin": "INE053F01010",
     "symbol": "IRFC",
     "stockid": "1003455",
-    "companyid": "12523"
+    "companyid": "12523",
+    "tickertape_sid": "IRF",
+    "fincode": 217280,
+    "scripcode": 543257
   },
   {
     "name": "Oil India",
@@ -1638,7 +2114,10 @@ const stockData: StockMapping[] = [
     "isin": "INE274J01014",
     "symbol": "OIL",
     "stockid": "166782",
-    "companyid": "4547"
+    "companyid": "4547",
+    "tickertape_sid": "OILI",
+    "fincode": 200091,
+    "scripcode": 533106
   },
   {
     "name": "Jindal Steel & Power",
@@ -1648,7 +2127,10 @@ const stockData: StockMapping[] = [
     "isin": "INE749A01030",
     "symbol": "JINDALSTEL",
     "stockid": "338854",
-    "companyid": "4355"
+    "companyid": "4355",
+    "tickertape_sid": "JNSP",
+    "fincode": 132286,
+    "scripcode": 532286
   },
   {
     "name": "Torrent Power",
@@ -1658,7 +2140,10 @@ const stockData: StockMapping[] = [
     "isin": "INE813H01021",
     "symbol": "TORNTPOWER",
     "stockid": "257504",
-    "companyid": "18767"
+    "companyid": "18767",
+    "tickertape_sid": "TOPO",
+    "fincode": 132779,
+    "scripcode": 532779
   },
   {
     "name": "ICICI Prudential Life Insurance Company",
@@ -1668,7 +2153,10 @@ const stockData: StockMapping[] = [
     "isin": "INE726G01019",
     "symbol": "ICICIPRULI",
     "stockid": "1002663",
-    "companyid": "1898"
+    "companyid": "1898",
+    "tickertape_sid": "ICIR",
+    "fincode": 210258,
+    "scripcode": 540133
   },
   {
     "name": "Gland Pharma",
@@ -1678,7 +2166,10 @@ const stockData: StockMapping[] = [
     "isin": "INE068V01023",
     "symbol": "GLAND",
     "stockid": "1003443",
-    "companyid": "1996493"
+    "companyid": "1996493",
+    "tickertape_sid": "GLAN",
+    "fincode": 235355,
+    "scripcode": 543245
   },
   {
     "name": "Star Health & Allied Insurance Company",
@@ -1688,7 +2179,10 @@ const stockData: StockMapping[] = [
     "isin": "INE575P01011",
     "symbol": "STARHEALTH",
     "stockid": "1003575",
-    "companyid": "24968"
+    "companyid": "24968",
+    "tickertape_sid": "STARH",
+    "fincode": 217400,
+    "scripcode": 543412
   },
   {
     "name": "Trent",
@@ -1698,7 +2192,10 @@ const stockData: StockMapping[] = [
     "isin": "INE849A01020",
     "symbol": "TRENT",
     "stockid": "242878",
-    "companyid": "13456"
+    "companyid": "13456",
+    "tickertape_sid": "TREN",
+    "fincode": 100251,
+    "scripcode": 500251
   },
   {
     "name": "L&T Technology Services",
@@ -1708,7 +2205,10 @@ const stockData: StockMapping[] = [
     "isin": "INE010V01017",
     "symbol": "LTTS",
     "stockid": "1002656",
-    "companyid": "64987"
+    "companyid": "64987",
+    "tickertape_sid": "LTEH",
+    "fincode": 268618,
+    "scripcode": 540115
   },
   {
     "name": "MphasiS",
@@ -1718,7 +2218,10 @@ const stockData: StockMapping[] = [
     "isin": "INE356A01018",
     "symbol": "MPHASIS",
     "stockid": "569237",
-    "companyid": "8684"
+    "companyid": "8684",
+    "tickertape_sid": "MBFL",
+    "fincode": 126299,
+    "scripcode": 526299
   },
   {
     "name": "Coromandel International",
@@ -1728,7 +2231,10 @@ const stockData: StockMapping[] = [
     "isin": "INE169A01031",
     "symbol": "COROMANDEL",
     "stockid": "187595",
-    "companyid": "13851"
+    "companyid": "13851",
+    "tickertape_sid": "CORF",
+    "fincode": 106395,
+    "scripcode": 506395
   },
   {
     "name": "Voltas",
@@ -1738,7 +2244,10 @@ const stockData: StockMapping[] = [
     "isin": "INE226A01021",
     "symbol": "VOLTAS",
     "stockid": "226565",
-    "companyid": "12815"
+    "companyid": "12815",
+    "tickertape_sid": "VOLT",
+    "fincode": 100575,
+    "scripcode": 500575
   },
   {
     "name": "Torrent Pharmaceuticals",
@@ -1748,7 +2257,10 @@ const stockData: StockMapping[] = [
     "isin": "INE685A01028",
     "symbol": "TORNTPHARM",
     "stockid": "317368",
-    "companyid": "8492"
+    "companyid": "8492",
+    "tickertape_sid": "TORP",
+    "fincode": 100420,
+    "scripcode": 500420
   },
   {
     "name": "Power Grid Corporation of India",
@@ -1758,7 +2270,10 @@ const stockData: StockMapping[] = [
     "isin": "INE752E01010",
     "symbol": "POWERGRID",
     "stockid": "417663",
-    "companyid": "4628"
+    "companyid": "4628",
+    "tickertape_sid": "PGRD",
+    "fincode": 132898,
+    "scripcode": 532898
   },
   {
     "name": "Supreme Industries",
@@ -1768,7 +2283,10 @@ const stockData: StockMapping[] = [
     "isin": "INE195A01028",
     "symbol": "SUPREMEIND",
     "stockid": "778316",
-    "companyid": "12969"
+    "companyid": "12969",
+    "tickertape_sid": "SUPI",
+    "fincode": 109930,
+    "scripcode": 509930
   },
   {
     "name": "Steel Authority of India",
@@ -1778,7 +2296,10 @@ const stockData: StockMapping[] = [
     "isin": "INE114A01011",
     "symbol": "SAIL",
     "stockid": "816180",
-    "companyid": "11974"
+    "companyid": "11974",
+    "tickertape_sid": "SAIL",
+    "fincode": 100113,
+    "scripcode": 500113
   },
   {
     "name": "Vodafone Idea",
@@ -1788,7 +2309,10 @@ const stockData: StockMapping[] = [
     "isin": "INE669E01016",
     "symbol": "IDEA",
     "stockid": "279400",
-    "companyid": "3154"
+    "companyid": "3154",
+    "tickertape_sid": "VODA",
+    "fincode": 132822,
+    "scripcode": 532822
   },
   {
     "name": "SBI Cards & Payment Services",
@@ -1798,7 +2322,10 @@ const stockData: StockMapping[] = [
     "isin": "INE018E01016",
     "symbol": "SBICARD",
     "stockid": "1003387",
-    "companyid": "21826"
+    "companyid": "21826",
+    "tickertape_sid": "SBIC",
+    "fincode": 225051,
+    "scripcode": 543066
   },
   {
     "name": "Indian Overseas Bank",
@@ -1808,7 +2335,10 @@ const stockData: StockMapping[] = [
     "isin": "INE565A01014",
     "symbol": "IOB",
     "stockid": "364261",
-    "companyid": "11713"
+    "companyid": "11713",
+    "tickertape_sid": "IOBK",
+    "fincode": 132388,
+    "scripcode": 532388
   },
   {
     "name": "Petronet LNG",
@@ -1818,7 +2348,10 @@ const stockData: StockMapping[] = [
     "isin": "INE347G01014",
     "symbol": "PETRONET",
     "stockid": "336744",
-    "companyid": "4495"
+    "companyid": "4495",
+    "tickertape_sid": "PLNG",
+    "fincode": 132522,
+    "scripcode": 532522
   },
   {
     "name": "3M India",
@@ -1828,7 +2361,10 @@ const stockData: StockMapping[] = [
     "isin": "INE470A01017",
     "symbol": "3MINDIA",
     "stockid": "657550",
-    "companyid": "12690"
+    "companyid": "12690",
+    "tickertape_sid": "TMIN",
+    "fincode": 123395,
+    "scripcode": 523395
   },
   {
     "name": "Relaxo Footwears",
@@ -1838,7 +2374,10 @@ const stockData: StockMapping[] = [
     "isin": "INE131B01039",
     "symbol": "RELAXO",
     "stockid": "250971",
-    "companyid": "7829"
+    "companyid": "7829",
+    "tickertape_sid": "RLXO",
+    "fincode": 130517,
+    "scripcode": 530517
   },
   {
     "name": "Delhivery",
@@ -1848,7 +2387,10 @@ const stockData: StockMapping[] = [
     "isin": "INE148O01028",
     "symbol": "DELHIVERY",
     "stockid": "1003650",
-    "companyid": "2041701"
+    "companyid": "2041701",
+    "tickertape_sid": "DELH",
+    "fincode": 289108,
+    "scripcode": 543529
   },
   {
     "name": "Vedant Fashions",
@@ -1858,7 +2400,10 @@ const stockData: StockMapping[] = [
     "isin": "INE825V01034",
     "symbol": "MANYAVAR",
     "stockid": "1003608",
-    "companyid": "2026520"
+    "companyid": "2026520",
+    "tickertape_sid": "MANY",
+    "fincode": 223430,
+    "scripcode": 543463
   },
   {
     "name": "MRF",
@@ -1868,7 +2413,10 @@ const stockData: StockMapping[] = [
     "isin": "INE883A01011",
     "symbol": "MRF",
     "stockid": "569141",
-    "companyid": "11381"
+    "companyid": "11381",
+    "tickertape_sid": "MRF",
+    "fincode": 100290,
+    "scripcode": 500290
   },
   {
     "name": "PB Fintech",
@@ -1878,7 +2426,10 @@ const stockData: StockMapping[] = [
     "isin": "INE417T01026",
     "symbol": "POLICYBZR",
     "stockid": "1003562",
-    "companyid": "2017710"
+    "companyid": "2017710",
+    "tickertape_sid": "POLI",
+    "fincode": 254493,
+    "scripcode": 543390
   },
   {
     "name": "Sona BLW Precision Forgings",
@@ -1888,7 +2439,10 @@ const stockData: StockMapping[] = [
     "isin": "INE073K01018",
     "symbol": "SONACOMS",
     "stockid": "1003498",
-    "companyid": "2011581"
+    "companyid": "2011581",
+    "tickertape_sid": "SONAC",
+    "fincode": 214179,
+    "scripcode": 543300
   },
   {
     "name": "Max Financial Services",
@@ -1898,7 +2452,10 @@ const stockData: StockMapping[] = [
     "isin": "INE180A01020",
     "symbol": "MFSL",
     "stockid": "743949",
-    "companyid": "13435"
+    "companyid": "13435",
+    "tickertape_sid": "MAXI",
+    "fincode": 100271,
+    "scripcode": 500271
   },
   {
     "name": "Tata Communications",
@@ -1908,7 +2465,10 @@ const stockData: StockMapping[] = [
     "isin": "INE151A01013",
     "symbol": "TATACOMM",
     "stockid": "952728",
-    "companyid": "11992"
+    "companyid": "11992",
+    "tickertape_sid": "TATA",
+    "fincode": 100483,
+    "scripcode": 500483
   },
   {
     "name": "Hindustan Petroleum Corporation",
@@ -1918,7 +2478,10 @@ const stockData: StockMapping[] = [
     "isin": "INE094A01015",
     "symbol": "HINDPETRO",
     "stockid": "313810",
-    "companyid": "12078"
+    "companyid": "12078",
+    "tickertape_sid": "HPCL",
+    "fincode": 100104,
+    "scripcode": 500104
   },
   {
     "name": "Procter and Gamble Hygiene and Health Care",
@@ -1928,7 +2491,10 @@ const stockData: StockMapping[] = [
     "isin": "INE179A01014",
     "symbol": "PGHH",
     "stockid": "927063",
-    "companyid": "13253"
+    "companyid": "13253",
+    "tickertape_sid": "PROC",
+    "fincode": 100459,
+    "scripcode": 500459
   },
   {
     "name": "Mahindra & Mahindra Financial Services",
@@ -1938,7 +2504,10 @@ const stockData: StockMapping[] = [
     "isin": "INE774D01024",
     "symbol": "M&MFIN",
     "stockid": "605836",
-    "companyid": "3540"
+    "companyid": "3540",
+    "tickertape_sid": "MMFS",
+    "fincode": 132720,
+    "scripcode": 532720
   },
   {
     "name": "LIC Housing Finance",
@@ -1948,7 +2517,10 @@ const stockData: StockMapping[] = [
     "isin": "INE115A01026",
     "symbol": "LICHSGFIN",
     "stockid": "141783",
-    "companyid": "10823"
+    "companyid": "10823",
+    "tickertape_sid": "LICH",
+    "fincode": 100253,
+    "scripcode": 500253
   },
   {
     "name": "Samvardhana Motherson International",
@@ -1958,7 +2530,10 @@ const stockData: StockMapping[] = [
     "isin": "INE775A01035",
     "symbol": "MOTHERSON",
     "stockid": "655900",
-    "companyid": "10878"
+    "companyid": "10878",
+    "tickertape_sid": "MOSS",
+    "fincode": 117334,
+    "scripcode": 517334
   },
   {
     "name": "Schaeffler India ",
@@ -1968,7 +2543,10 @@ const stockData: StockMapping[] = [
     "isin": "INE513A01022",
     "symbol": "SCHAEFFLER",
     "stockid": "699119",
-    "companyid": "13780"
+    "companyid": "13780",
+    "tickertape_sid": "SCHE",
+    "fincode": 105790,
+    "scripcode": 505790
   },
   {
     "name": "One 97 Communications Paytm",
@@ -1978,7 +2556,10 @@ const stockData: StockMapping[] = [
     "isin": "INE982J01020",
     "symbol": "PAYTM",
     "stockid": "",
-    "companyid": "2017785"
+    "companyid": "2017785",
+    "tickertape_sid": "PAY",
+    "fincode": 208883,
+    "scripcode": 543396
   },
   {
     "name": "Mankind Pharma",
@@ -1988,7 +2569,10 @@ const stockData: StockMapping[] = [
     "isin": "INE634S01028",
     "symbol": "MANKIND",
     "stockid": "1003845",
-    "companyid": "38548"
+    "companyid": "38548",
+    "tickertape_sid": "MANKI",
+    "fincode": 211840,
+    "scripcode": 543904
   },
   {
     "name": "Solar Industries India",
@@ -1998,7 +2582,10 @@ const stockData: StockMapping[] = [
     "isin": "INE343H01029",
     "symbol": "SOLARINDS",
     "stockid": "736279",
-    "companyid": "15283"
+    "companyid": "15283",
+    "tickertape_sid": "SLIN",
+    "fincode": 132725,
+    "scripcode": 532725
   },
   {
     "name": "Chambal Fertilisers and Chemicals",
@@ -2008,7 +2595,10 @@ const stockData: StockMapping[] = [
     "isin": "INE085A01013",
     "symbol": "CHAMBLFERT",
     "stockid": "513245",
-    "companyid": "10777"
+    "companyid": "10777",
+    "tickertape_sid": "CHMB",
+    "fincode": 100085,
+    "scripcode": 500085
   },
   {
     "name": "IDFC",
@@ -2018,7 +2608,9 @@ const stockData: StockMapping[] = [
     "isin": "INE043D01016",
     "symbol": "IDFC",
     "stockid": "724998",
-    "companyid": "4436"
+    "companyid": "4436",
+    "fincode": 278580,
+    "scripcode": 539437
   },
   {
     "name": "Exide Industries",
@@ -2028,7 +2620,10 @@ const stockData: StockMapping[] = [
     "isin": "INE302A01020",
     "symbol": "EXIDEIND",
     "stockid": "639617",
-    "companyid": "13895"
+    "companyid": "13895",
+    "tickertape_sid": "EXID",
+    "fincode": 100086,
+    "scripcode": 500086
   },
   {
     "name": "Godrej Industries",
@@ -2038,7 +2633,10 @@ const stockData: StockMapping[] = [
     "isin": "INE233A01035",
     "symbol": "GODREJIND",
     "stockid": "918007",
-    "companyid": "11764"
+    "companyid": "11764",
+    "tickertape_sid": "GODI",
+    "fincode": 100164,
+    "scripcode": 500164
   },
   {
     "name": "Jet Airways",
@@ -2058,7 +2656,10 @@ const stockData: StockMapping[] = [
     "isin": "INE821I01022",
     "symbol": "IRB",
     "stockid": "430474",
-    "companyid": "20738"
+    "companyid": "20738",
+    "tickertape_sid": "IRBI",
+    "fincode": 200048,
+    "scripcode": 532947
   },
   {
     "name": "Glenmark Pharma",
@@ -2068,7 +2669,10 @@ const stockData: StockMapping[] = [
     "isin": "INE935A01035",
     "symbol": "GLENMARK",
     "stockid": "780863",
-    "companyid": "4255"
+    "companyid": "4255",
+    "tickertape_sid": "GLEN",
+    "fincode": 132296,
+    "scripcode": 532296
   },
   {
     "name": "GMR Airports Infrastructure",
@@ -2078,7 +2682,8 @@ const stockData: StockMapping[] = [
     "isin": "INE776C01039",
     "symbol": "GMRINFRA",
     "stockid": "125372",
-    "companyid": "1428"
+    "companyid": "1428",
+    "tickertape_sid": "GMRI"
   },
   {
     "name": "Reliance Communications",
@@ -2088,7 +2693,10 @@ const stockData: StockMapping[] = [
     "isin": "INE330H01018",
     "symbol": "RCOM",
     "stockid": "819214",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "RLCM",
+    "fincode": 132712,
+    "scripcode": 532712
   },
   {
     "name": "IFCI",
@@ -2098,7 +2706,10 @@ const stockData: StockMapping[] = [
     "isin": "INE039A01010",
     "symbol": "IFCI",
     "stockid": "589145",
-    "companyid": "10625"
+    "companyid": "10625",
+    "tickertape_sid": "IFCI",
+    "fincode": 100106,
+    "scripcode": 500106
   },
   {
     "name": "Gujarat Heavy Chemicals",
@@ -2108,7 +2719,10 @@ const stockData: StockMapping[] = [
     "isin": "INE539A01019",
     "symbol": "GHCL",
     "stockid": "601113",
-    "companyid": "13683"
+    "companyid": "13683",
+    "tickertape_sid": "GHCH",
+    "fincode": 100171,
+    "scripcode": 500171
   },
   {
     "name": "Gujarat State Petronet",
@@ -2118,7 +2732,8 @@ const stockData: StockMapping[] = [
     "isin": "INE246F01010",
     "symbol": "GSPL",
     "stockid": "589529",
-    "companyid": "2101"
+    "companyid": "2101",
+    "tickertape_sid": "GSPT"
   },
   {
     "name": "BPL",
@@ -2128,7 +2743,10 @@ const stockData: StockMapping[] = [
     "isin": "INE110A01019",
     "symbol": "BPL",
     "stockid": "422311",
-    "companyid": "10579"
+    "companyid": "10579",
+    "tickertape_sid": "BPL",
+    "fincode": 100074,
+    "scripcode": 500074
   },
   {
     "name": "Sun TV Network",
@@ -2138,7 +2756,10 @@ const stockData: StockMapping[] = [
     "isin": "INE424H01027",
     "symbol": "SUNTV",
     "stockid": "758477",
-    "companyid": "17994"
+    "companyid": "17994",
+    "tickertape_sid": "SUTV",
+    "fincode": 132733,
+    "scripcode": 532733
   },
   {
     "name": "Castrol India",
@@ -2148,7 +2769,10 @@ const stockData: StockMapping[] = [
     "isin": "INE172A01027",
     "symbol": "CASTROLIND",
     "stockid": "177956",
-    "companyid": "13577"
+    "companyid": "13577",
+    "tickertape_sid": "CAST",
+    "fincode": 100870,
+    "scripcode": 500870
   },
   {
     "name": "Gujarat Alkalies and Chemicals",
@@ -2158,7 +2782,10 @@ const stockData: StockMapping[] = [
     "isin": "INE186A01019",
     "symbol": "GUJALKALI",
     "stockid": "808097",
-    "companyid": "13690"
+    "companyid": "13690",
+    "tickertape_sid": "GALK",
+    "fincode": 130001,
+    "scripcode": 530001
   },
   {
     "name": "Reliance Infrastructure",
@@ -2168,7 +2795,10 @@ const stockData: StockMapping[] = [
     "isin": "INE036A01016",
     "symbol": "RELINFRA",
     "stockid": "400868",
-    "companyid": "13922"
+    "companyid": "13922",
+    "tickertape_sid": "RLIN",
+    "fincode": 100390,
+    "scripcode": 500390
   },
   {
     "name": "Multi Commodity Exchange of India",
@@ -2178,7 +2808,9 @@ const stockData: StockMapping[] = [
     "isin": "INE745G01035",
     "symbol": "MCX",
     "stockid": "765677",
-    "companyid": "16571"
+    "companyid": "16571",
+    "fincode": 208766,
+    "scripcode": 534091
   },
   {
     "name": "Reliance Naval and Engineering",
@@ -2198,7 +2830,9 @@ const stockData: StockMapping[] = [
     "isin": "INE875A01025",
     "symbol": "HDIL",
     "stockid": "",
-    "companyid": ""
+    "companyid": "",
+    "fincode": 132873,
+    "scripcode": 532873
   },
   {
     "name": "Alok Industries",
@@ -2208,7 +2842,10 @@ const stockData: StockMapping[] = [
     "isin": "INE270A01029",
     "symbol": "ALOKINDS",
     "stockid": "661020",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "ALOK",
+    "fincode": 121070,
+    "scripcode": 521070
   },
   {
     "name": "EPL",
@@ -2218,7 +2855,10 @@ const stockData: StockMapping[] = [
     "isin": "INE255A01020",
     "symbol": "EPL",
     "stockid": "621045",
-    "companyid": "13764"
+    "companyid": "13764",
+    "tickertape_sid": "ESSL",
+    "fincode": 100135,
+    "scripcode": 500135
   },
   {
     "name": "Tata Chemicals",
@@ -2228,7 +2868,10 @@ const stockData: StockMapping[] = [
     "isin": "INE092A01019",
     "symbol": "TATACHEM",
     "stockid": "345147",
-    "companyid": "12913"
+    "companyid": "12913",
+    "tickertape_sid": "TTCH",
+    "fincode": 100770,
+    "scripcode": 500770
   },
   {
     "name": "Aftek",
@@ -2248,7 +2891,10 @@ const stockData: StockMapping[] = [
     "isin": "INE363A01022",
     "symbol": "ASIANHOTNR",
     "stockid": "915363",
-    "companyid": "14033"
+    "companyid": "14033",
+    "tickertape_sid": "ASHT",
+    "fincode": 100023,
+    "scripcode": 500023
   },
   {
     "name": "Suzlon Energy",
@@ -2258,7 +2904,10 @@ const stockData: StockMapping[] = [
     "isin": "INE040H01021",
     "symbol": "SUZLON",
     "stockid": "518262",
-    "companyid": "1209"
+    "companyid": "1209",
+    "tickertape_sid": "SUZL",
+    "fincode": 132667,
+    "scripcode": 532667
   },
   {
     "name": "Kirloskar Industries",
@@ -2268,7 +2917,10 @@ const stockData: StockMapping[] = [
     "isin": "INE250A01039",
     "symbol": "KIRLOSIND",
     "stockid": "810620",
-    "companyid": "12574"
+    "companyid": "12574",
+    "tickertape_sid": "KIRL",
+    "fincode": 100243,
+    "scripcode": 500243
   },
   {
     "name": "India Nippon Electricals",
@@ -2278,7 +2930,10 @@ const stockData: StockMapping[] = [
     "isin": "INE092B01025",
     "symbol": "INDNIPPON",
     "stockid": "556974",
-    "companyid": "11709"
+    "companyid": "11709",
+    "tickertape_sid": "INEL",
+    "fincode": 132240,
+    "scripcode": 532240
   },
   {
     "name": "Karnataka Bank",
@@ -2288,7 +2943,10 @@ const stockData: StockMapping[] = [
     "isin": "INE614B01018",
     "symbol": "KTKBANK",
     "stockid": "412939",
-    "companyid": "12259"
+    "companyid": "12259",
+    "tickertape_sid": "KBNK",
+    "fincode": 132652,
+    "scripcode": 532652
   },
   {
     "name": "Karur Vysya Bank",
@@ -2298,7 +2956,10 @@ const stockData: StockMapping[] = [
     "isin": "INE036D01028",
     "symbol": "KARURVYSYA",
     "stockid": "124359",
-    "companyid": "12258"
+    "companyid": "12258",
+    "tickertape_sid": "KARU",
+    "fincode": 190003,
+    "scripcode": 590003
   },
   {
     "name": "Blue Dart Express",
@@ -2308,7 +2969,10 @@ const stockData: StockMapping[] = [
     "isin": "INE233B01017",
     "symbol": "BLUEDART",
     "stockid": "572153",
-    "companyid": "8985"
+    "companyid": "8985",
+    "tickertape_sid": "BLDT",
+    "fincode": 126612,
+    "scripcode": 526612
   },
   {
     "name": "Dalmia Bharat Sugar and Industries",
@@ -2318,7 +2982,10 @@ const stockData: StockMapping[] = [
     "isin": "INE495A01022",
     "symbol": "DALMIASUG",
     "stockid": "213617",
-    "companyid": "13862"
+    "companyid": "13862",
+    "tickertape_sid": "DLMI",
+    "fincode": 100097,
+    "scripcode": 500097
   },
   {
     "name": "NAVA",
@@ -2328,7 +2995,9 @@ const stockData: StockMapping[] = [
     "isin": "INE725A01022",
     "symbol": "NAVA",
     "stockid": "239052",
-    "companyid": "12669"
+    "companyid": "12669",
+    "fincode": 113023,
+    "scripcode": 513023
   },
   {
     "name": "PTC India",
@@ -2338,7 +3007,10 @@ const stockData: StockMapping[] = [
     "isin": "INE877F01012",
     "symbol": "PTC",
     "stockid": "694642",
-    "companyid": "3145"
+    "companyid": "3145",
+    "tickertape_sid": "PTCI",
+    "fincode": 132524,
+    "scripcode": 532524
   },
   {
     "name": "Gitanjali Gems",
@@ -2358,7 +3030,10 @@ const stockData: StockMapping[] = [
     "isin": "INE485A01015",
     "symbol": "CENTENKA",
     "stockid": "984717",
-    "companyid": "13903"
+    "companyid": "13903",
+    "tickertape_sid": "CNTE",
+    "fincode": 100280,
+    "scripcode": 500280
   },
   {
     "name": "Cholamandalam Financial Holdings",
@@ -2368,7 +3043,10 @@ const stockData: StockMapping[] = [
     "isin": "INE149A01033",
     "symbol": "CHOLAHLDNG",
     "stockid": "843730",
-    "companyid": "12889"
+    "companyid": "12889",
+    "tickertape_sid": "CHOL",
+    "fincode": 104973,
+    "scripcode": 504973
   },
   {
     "name": "Graphite India",
@@ -2378,7 +3056,10 @@ const stockData: StockMapping[] = [
     "isin": "INE371A01025",
     "symbol": "GRAPHITE",
     "stockid": "114940",
-    "companyid": "13916"
+    "companyid": "13916",
+    "tickertape_sid": "GRPH",
+    "fincode": 109488,
+    "scripcode": 509488
   },
   {
     "name": "Omax Autos",
@@ -2388,7 +3069,10 @@ const stockData: StockMapping[] = [
     "isin": "INE090B01011",
     "symbol": "OMAXAUTO",
     "stockid": "778718",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "OMXA",
+    "fincode": 120021,
+    "scripcode": 520021
   },
   {
     "name": "Great Eastern Shipping Company",
@@ -2398,7 +3082,10 @@ const stockData: StockMapping[] = [
     "isin": "INE017A01032",
     "symbol": "GESHIP",
     "stockid": "180757",
-    "companyid": "13697"
+    "companyid": "13697",
+    "tickertape_sid": "GESC",
+    "fincode": 100620,
+    "scripcode": 500620
   },
   {
     "name": "Prism Johnson",
@@ -2408,7 +3095,10 @@ const stockData: StockMapping[] = [
     "isin": "INE010A01011",
     "symbol": "PRSMJOHNSN",
     "stockid": "807717",
-    "companyid": "8255"
+    "companyid": "8255",
+    "tickertape_sid": "PRIS",
+    "fincode": 100338,
+    "scripcode": 500338
   },
   {
     "name": "Hindustan Oil Exploration Company",
@@ -2418,7 +3108,10 @@ const stockData: StockMapping[] = [
     "isin": "INE345A01011",
     "symbol": "HINDOILEXP",
     "stockid": "227845",
-    "companyid": "12604"
+    "companyid": "12604",
+    "tickertape_sid": "HOEX",
+    "fincode": 100186,
+    "scripcode": 500186
   },
   {
     "name": "Akzo Nobel India",
@@ -2428,7 +3121,8 @@ const stockData: StockMapping[] = [
     "isin": "INE133A01011",
     "symbol": "AKZOINDIA",
     "stockid": "392418",
-    "companyid": "13601"
+    "companyid": "13601",
+    "tickertape_sid": "AKZO"
   },
   {
     "name": "Finolex Cables",
@@ -2438,7 +3132,10 @@ const stockData: StockMapping[] = [
     "isin": "INE235A01022",
     "symbol": "FINCABLES",
     "stockid": "577677",
-    "companyid": "13759"
+    "companyid": "13759",
+    "tickertape_sid": "FNXC",
+    "fincode": 100144,
+    "scripcode": 500144
   },
   {
     "name": "Nagarjuna Fertilisers and Chemicals",
@@ -2458,7 +3155,10 @@ const stockData: StockMapping[] = [
     "isin": "INE676A01027",
     "symbol": "BBOX",
     "stockid": "913012",
-    "companyid": "12930"
+    "companyid": "12930",
+    "tickertape_sid": "AGCN",
+    "fincode": 100463,
+    "scripcode": 500463
   },
   {
     "name": "Summit Securities",
@@ -2468,7 +3168,10 @@ const stockData: StockMapping[] = [
     "isin": "INE519C01017",
     "symbol": "SUMMITSEC",
     "stockid": "274022",
-    "companyid": "15701"
+    "companyid": "15701",
+    "tickertape_sid": "SUMM",
+    "fincode": 220531,
+    "scripcode": 533306
   },
   {
     "name": "Sterlite Technologies",
@@ -2478,7 +3181,10 @@ const stockData: StockMapping[] = [
     "isin": "INE089C01029",
     "symbol": "STLTECH",
     "stockid": "888193",
-    "companyid": "3370"
+    "companyid": "3370",
+    "tickertape_sid": "STTE",
+    "fincode": 132374,
+    "scripcode": 532374
   },
   {
     "name": "MMTC",
@@ -2488,7 +3194,10 @@ const stockData: StockMapping[] = [
     "isin": "INE123F01029",
     "symbol": "MMTC",
     "stockid": "658824",
-    "companyid": "11645"
+    "companyid": "11645",
+    "tickertape_sid": "MMTC",
+    "fincode": 113377,
+    "scripcode": 513377
   },
   {
     "name": "Gammon India",
@@ -2508,7 +3217,10 @@ const stockData: StockMapping[] = [
     "isin": "INE836F01026",
     "symbol": "DISHTV",
     "stockid": "639744",
-    "companyid": "20201"
+    "companyid": "20201",
+    "tickertape_sid": "DSTV",
+    "fincode": 132839,
+    "scripcode": 532839
   },
   {
     "name": "The Bombay Dyeing Co.",
@@ -2518,7 +3230,10 @@ const stockData: StockMapping[] = [
     "isin": "INE032A01023",
     "symbol": "BOMDYEING",
     "stockid": "",
-    "companyid": "13931"
+    "companyid": "13931",
+    "tickertape_sid": "BDYN",
+    "fincode": 100020,
+    "scripcode": 500020
   },
   {
     "name": "Housing Development and Infrastructure",
@@ -2528,7 +3243,10 @@ const stockData: StockMapping[] = [
     "isin": "INE191I01012",
     "symbol": "ANDREWYU",
     "stockid": "942265",
-    "companyid": "12526"
+    "companyid": "12526",
+    "tickertape_sid": "HDIL",
+    "fincode": 126173,
+    "scripcode": 526173
   },
   {
     "name": "Elgi Equipments",
@@ -2538,7 +3256,10 @@ const stockData: StockMapping[] = [
     "isin": "INE285A01027",
     "symbol": "ELGIEQUIP",
     "stockid": "563526",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "ELGE",
+    "fincode": 122074,
+    "scripcode": 522074
   },
   {
     "name": "Birla Corporation",
@@ -2548,7 +3269,10 @@ const stockData: StockMapping[] = [
     "isin": "INE340A01012",
     "symbol": "BIRLACORPN",
     "stockid": "410328",
-    "companyid": "13961"
+    "companyid": "13961",
+    "tickertape_sid": "BRLC",
+    "fincode": 100335,
+    "scripcode": 500335
   },
   {
     "name": "Apollo Tyres",
@@ -2558,7 +3282,10 @@ const stockData: StockMapping[] = [
     "isin": "INE438A01022",
     "symbol": "APOLLOTYRE",
     "stockid": "462367",
-    "companyid": "63"
+    "companyid": "63",
+    "tickertape_sid": "APLO",
+    "fincode": 100877,
+    "scripcode": 500877
   },
   {
     "name": "Punj Lloyd",
@@ -2568,7 +3295,9 @@ const stockData: StockMapping[] = [
     "isin": "INE701B01021",
     "symbol": "KOVAI",
     "stockid": "",
-    "companyid": "13465"
+    "companyid": "13465",
+    "fincode": 123323,
+    "scripcode": 523323
   },
   {
     "name": "BASF India",
@@ -2578,7 +3307,10 @@ const stockData: StockMapping[] = [
     "isin": "INE373A01013",
     "symbol": "BASF",
     "stockid": "264317",
-    "companyid": "13981"
+    "companyid": "13981",
+    "tickertape_sid": "BASF",
+    "fincode": 100042,
+    "scripcode": 500042
   },
   {
     "name": "Everest Industries",
@@ -2588,7 +3320,10 @@ const stockData: StockMapping[] = [
     "isin": "INE295A01018",
     "symbol": "EVERESTIND",
     "stockid": "530274",
-    "companyid": "13797"
+    "companyid": "13797",
+    "tickertape_sid": "EVRI",
+    "fincode": 108906,
+    "scripcode": 508906
   },
   {
     "name": "Polyplex Corporation",
@@ -2598,7 +3333,10 @@ const stockData: StockMapping[] = [
     "isin": "INE633B01018",
     "symbol": "POLYPLEX",
     "stockid": "775741",
-    "companyid": "13282"
+    "companyid": "13282",
+    "tickertape_sid": "PLYP",
+    "fincode": 124051,
+    "scripcode": 524051
   },
   {
     "name": "Rajesh Exports",
@@ -2608,7 +3346,10 @@ const stockData: StockMapping[] = [
     "isin": "INE343B01030",
     "symbol": "RAJESHEXPO",
     "stockid": "137053",
-    "companyid": "6650"
+    "companyid": "6650",
+    "tickertape_sid": "REXP",
+    "fincode": 131500,
+    "scripcode": 531500
   },
   {
     "name": "Hindustan Motors",
@@ -2618,7 +3359,10 @@ const stockData: StockMapping[] = [
     "isin": "INE253A01025",
     "symbol": "HINDMOTORS",
     "stockid": "622546",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "HMTR",
+    "fincode": 100500,
+    "scripcode": 500500
   },
   {
     "name": "Tamil Nadu Newsprint and Papers",
@@ -2628,7 +3372,10 @@ const stockData: StockMapping[] = [
     "isin": "INE107A01015",
     "symbol": "TNPL",
     "stockid": "159760",
-    "companyid": "11491"
+    "companyid": "11491",
+    "tickertape_sid": "TNNP",
+    "fincode": 131426,
+    "scripcode": 531426
   },
   {
     "name": "LML",
@@ -2638,7 +3385,9 @@ const stockData: StockMapping[] = [
     "isin": "INE862A01015",
     "symbol": "NOVARTIND",
     "stockid": "",
-    "companyid": "13653"
+    "companyid": "13653",
+    "fincode": 100672,
+    "scripcode": 500672
   },
   {
     "name": "CMC",
@@ -2648,7 +3397,9 @@ const stockData: StockMapping[] = [
     "isin": "INE314A01017",
     "symbol": "GRAUWEIL",
     "stockid": "",
-    "companyid": "12698"
+    "companyid": "12698",
+    "fincode": 105710,
+    "scripcode": 505710
   },
   {
     "name": "Jubilant Pharmova",
@@ -2658,7 +3409,10 @@ const stockData: StockMapping[] = [
     "isin": "INE700A01033",
     "symbol": "JUBLPHARMA",
     "stockid": "525933",
-    "companyid": "12828"
+    "companyid": "12828",
+    "tickertape_sid": "JULS",
+    "fincode": 130019,
+    "scripcode": 530019
   },
   {
     "name": "Hexaware Technologies",
@@ -2668,7 +3422,9 @@ const stockData: StockMapping[] = [
     "isin": "INE093A01033",
     "symbol": "GOODYEAR",
     "stockid": "",
-    "companyid": "13718"
+    "companyid": "13718",
+    "fincode": 100168,
+    "scripcode": 500168
   },
   {
     "name": "Opto Circuits India",
@@ -2678,7 +3434,9 @@ const stockData: StockMapping[] = [
     "isin": "INE808B01016",
     "symbol": "LANCER",
     "stockid": "",
-    "companyid": "64127"
+    "companyid": "64127",
+    "fincode": 254912,
+    "scripcode": 539841
   },
   {
     "name": "Kesoram Industries",
@@ -2688,7 +3446,10 @@ const stockData: StockMapping[] = [
     "isin": "INE087A01019",
     "symbol": "KESORAMIND",
     "stockid": "582879",
-    "companyid": "13474"
+    "companyid": "13474",
+    "tickertape_sid": "KSRM",
+    "fincode": 102937,
+    "scripcode": 502937
   },
   {
     "name": "Thermax",
@@ -2698,7 +3459,10 @@ const stockData: StockMapping[] = [
     "isin": "INE152A01029",
     "symbol": "THERMAX",
     "stockid": "685105",
-    "companyid": "8165"
+    "companyid": "8165",
+    "tickertape_sid": "THMX",
+    "fincode": 100411,
+    "scripcode": 500411
   },
   {
     "name": "Hikal",
@@ -2708,7 +3472,10 @@ const stockData: StockMapping[] = [
     "isin": "INE475B01022",
     "symbol": "HIKAL",
     "stockid": "175814",
-    "companyid": "8935"
+    "companyid": "8935",
+    "tickertape_sid": "HIKA",
+    "fincode": 124735,
+    "scripcode": 524735
   },
   {
     "name": "Jain Irrigation Systems",
@@ -2718,7 +3485,10 @@ const stockData: StockMapping[] = [
     "isin": "INE175A01038",
     "symbol": "JISLJALEQS",
     "stockid": "329828",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "JAIR",
+    "fincode": 100219,
+    "scripcode": 500219
   },
   {
     "name": "Engineers India",
@@ -2728,7 +3498,10 @@ const stockData: StockMapping[] = [
     "isin": "INE510A01028",
     "symbol": "ENGINERSIN",
     "stockid": "330885",
-    "companyid": "4582"
+    "companyid": "4582",
+    "tickertape_sid": "ENGI",
+    "fincode": 132178,
+    "scripcode": 532178
   },
   {
     "name": "Jindal Stainless",
@@ -2738,7 +3511,10 @@ const stockData: StockMapping[] = [
     "isin": "INE220G01021",
     "symbol": "JSL",
     "stockid": "492988",
-    "companyid": "750"
+    "companyid": "750",
+    "tickertape_sid": "JIST",
+    "fincode": 132508,
+    "scripcode": 532508
   },
   {
     "name": "Deepak Fertilisers And Petrochemicals Corporation",
@@ -2748,7 +3524,10 @@ const stockData: StockMapping[] = [
     "isin": "INE501A01019",
     "symbol": "DEEPAKFERT",
     "stockid": "",
-    "companyid": "13837"
+    "companyid": "13837",
+    "tickertape_sid": "DPFE",
+    "fincode": 100645,
+    "scripcode": 500645
   },
   {
     "name": "Dena Bank",
@@ -2758,7 +3537,9 @@ const stockData: StockMapping[] = [
     "isin": "INE077A01010",
     "symbol": "KENNAMET",
     "stockid": "",
-    "companyid": "12795"
+    "companyid": "12795",
+    "fincode": 105890,
+    "scripcode": 505890
   },
   {
     "name": "Thomas Cook (India)",
@@ -2768,7 +3549,10 @@ const stockData: StockMapping[] = [
     "isin": "INE332A01027",
     "symbol": "THOMASCOOK",
     "stockid": "950688",
-    "companyid": "12897"
+    "companyid": "12897",
+    "tickertape_sid": "THOM",
+    "fincode": 100413,
+    "scripcode": 500413
   },
   {
     "name": "Lakshmi Machine Works",
@@ -2778,7 +3562,8 @@ const stockData: StockMapping[] = [
     "isin": "INE269B01029",
     "symbol": "LAXMIMACH",
     "stockid": "723443",
-    "companyid": "13443"
+    "companyid": "13443",
+    "tickertape_sid": "LKMC"
   },
   {
     "name": "HEG",
@@ -2788,7 +3573,9 @@ const stockData: StockMapping[] = [
     "isin": "INE545A01016",
     "symbol": "HEG",
     "stockid": "212597",
-    "companyid": "13630"
+    "companyid": "13630",
+    "fincode": 109631,
+    "scripcode": 509631
   },
   {
     "name": "FDC",
@@ -2798,7 +3585,10 @@ const stockData: StockMapping[] = [
     "isin": "INE258B01022",
     "symbol": "FDC",
     "stockid": "248455",
-    "companyid": "11784"
+    "companyid": "11784",
+    "tickertape_sid": "FDC",
+    "fincode": 131599,
+    "scripcode": 531599
   },
   {
     "name": "Allahabad Bank",
@@ -2808,7 +3598,9 @@ const stockData: StockMapping[] = [
     "isin": "INE428A01015",
     "symbol": "KIRLFER",
     "stockid": "",
-    "companyid": "10413"
+    "companyid": "10413",
+    "fincode": 100245,
+    "scripcode": 500245
   },
   {
     "name": "Aban Offshore",
@@ -2818,7 +3610,10 @@ const stockData: StockMapping[] = [
     "isin": "INE421A01028",
     "symbol": "ABAN",
     "stockid": "179596",
-    "companyid": "11"
+    "companyid": "11",
+    "tickertape_sid": "ABAN",
+    "fincode": 123204,
+    "scripcode": 523204
   },
   {
     "name": "Reliance Capital",
@@ -2828,7 +3623,9 @@ const stockData: StockMapping[] = [
     "isin": "INE013A01015",
     "symbol": "SPICEJET",
     "stockid": "",
-    "companyid": "7876"
+    "companyid": "7876",
+    "fincode": 100285,
+    "scripcode": 500285
   },
   {
     "name": "Geometric",
@@ -2838,7 +3635,9 @@ const stockData: StockMapping[] = [
     "isin": "INE797A01021",
     "symbol": "VIKASWSP",
     "stockid": "",
-    "companyid": ""
+    "companyid": "",
+    "fincode": 119307,
+    "scripcode": 519307
   },
   {
     "name": "Kohinoor Foods",
@@ -2848,7 +3647,10 @@ const stockData: StockMapping[] = [
     "isin": "INE080B01012",
     "symbol": "KOHINOOR",
     "stockid": "324398",
-    "companyid": "10177"
+    "companyid": "10177",
+    "tickertape_sid": "KOFO",
+    "fincode": 112559,
+    "scripcode": 512559
   },
   {
     "name": "Asahi India Glass",
@@ -2858,7 +3660,10 @@ const stockData: StockMapping[] = [
     "isin": "INE439A01020",
     "symbol": "ASAHIINDIA",
     "stockid": "963427",
-    "companyid": "14039"
+    "companyid": "14039",
+    "tickertape_sid": "AISG",
+    "fincode": 115030,
+    "scripcode": 515030
   },
   {
     "name": "Ramco System",
@@ -2868,7 +3673,10 @@ const stockData: StockMapping[] = [
     "isin": "INE246B01019",
     "symbol": "RAMCOSYS",
     "stockid": "665690",
-    "companyid": "3616"
+    "companyid": "3616",
+    "tickertape_sid": "RMCS",
+    "fincode": 132370,
+    "scripcode": 532370
   },
   {
     "name": "Balaji Telefilms",
@@ -2878,7 +3686,10 @@ const stockData: StockMapping[] = [
     "isin": "INE794B01026",
     "symbol": "BALAJITELE",
     "stockid": "298128",
-    "companyid": "3376"
+    "companyid": "3376",
+    "tickertape_sid": "BLTE",
+    "fincode": 132382,
+    "scripcode": 532382
   },
   {
     "name": "Sundram Fasteners",
@@ -2888,7 +3699,10 @@ const stockData: StockMapping[] = [
     "isin": "INE387A01021",
     "symbol": "SUNDRMFAST",
     "stockid": "116280",
-    "companyid": "12962"
+    "companyid": "12962",
+    "tickertape_sid": "SNFS",
+    "fincode": 100403,
+    "scripcode": 500403
   },
   {
     "name": "Automotive Axles",
@@ -2898,7 +3712,10 @@ const stockData: StockMapping[] = [
     "isin": "INE449A01011",
     "symbol": "AUTOAXLES",
     "stockid": "541728",
-    "companyid": "13984"
+    "companyid": "13984",
+    "tickertape_sid": "ATOA",
+    "fincode": 105010,
+    "scripcode": 505010
   },
   {
     "name": "McDowell Holdings",
@@ -2908,7 +3725,9 @@ const stockData: StockMapping[] = [
     "isin": "INE836H01014",
     "symbol": "SBGLP",
     "stockid": "",
-    "companyid": ""
+    "companyid": "",
+    "fincode": 297503,
+    "scripcode": 543218
   },
   {
     "name": "Pricol",
@@ -2918,7 +3737,10 @@ const stockData: StockMapping[] = [
     "isin": "INE726V01018",
     "symbol": "PRICOLLTD",
     "stockid": "1002714",
-    "companyid": "53509"
+    "companyid": "53509",
+    "tickertape_sid": "PRCO",
+    "fincode": 284650,
+    "scripcode": 540293
   },
   {
     "name": "Mukta Arts",
@@ -2928,7 +3750,10 @@ const stockData: StockMapping[] = [
     "isin": "INE374B01019",
     "symbol": "MUKTAARTS",
     "stockid": "592409",
-    "companyid": "3557"
+    "companyid": "3557",
+    "tickertape_sid": "MUKR",
+    "fincode": 132357,
+    "scripcode": 532357
   },
   {
     "name": "Tata Investment Corporation",
@@ -2938,7 +3763,9 @@ const stockData: StockMapping[] = [
     "isin": "INE672A01018",
     "symbol": "TATAINVEST",
     "stockid": "371122",
-    "companyid": "13540"
+    "companyid": "13540",
+    "fincode": 101301,
+    "scripcode": 501301
   },
   {
     "name": "Mastek",
@@ -2948,7 +3775,10 @@ const stockData: StockMapping[] = [
     "isin": "INE759A01021",
     "symbol": "MASTEK",
     "stockid": "854419",
-    "companyid": "11047"
+    "companyid": "11047",
+    "tickertape_sid": "MAST",
+    "fincode": 123704,
+    "scripcode": 523704
   },
   {
     "name": "ITI",
@@ -2958,7 +3788,10 @@ const stockData: StockMapping[] = [
     "isin": "INE248A01017",
     "symbol": "ITI",
     "stockid": "219774",
-    "companyid": "11699"
+    "companyid": "11699",
+    "tickertape_sid": "ITEL",
+    "fincode": 123610,
+    "scripcode": 523610
   },
   {
     "name": "Himatsingka Seide",
@@ -2968,7 +3801,10 @@ const stockData: StockMapping[] = [
     "isin": "INE049A01027",
     "symbol": "HIMATSEIDE",
     "stockid": "306168",
-    "companyid": "13651"
+    "companyid": "13651",
+    "tickertape_sid": "HMSD",
+    "fincode": 114043,
+    "scripcode": 514043
   },
   {
     "name": "Hindustan Construction Company",
@@ -2978,7 +3814,10 @@ const stockData: StockMapping[] = [
     "isin": "INE549A01026",
     "symbol": "HCC",
     "stockid": "729412",
-    "companyid": "13654"
+    "companyid": "13654",
+    "tickertape_sid": "HCNS",
+    "fincode": 100185,
+    "scripcode": 500185
   },
   {
     "name": "JB Chemicals and Pharmaceuticals",
@@ -2988,7 +3827,10 @@ const stockData: StockMapping[] = [
     "isin": "INE572A01036",
     "symbol": "JBCHEPHARM",
     "stockid": "461857",
-    "companyid": "13536"
+    "companyid": "13536",
+    "tickertape_sid": "JBCH",
+    "fincode": 106943,
+    "scripcode": 506943
   },
   {
     "name": "Ramco Industries",
@@ -2998,7 +3840,10 @@ const stockData: StockMapping[] = [
     "isin": "INE614A01028",
     "symbol": "RAMCOIND",
     "stockid": "663124",
-    "companyid": "11557"
+    "companyid": "11557",
+    "tickertape_sid": "RAMC",
+    "fincode": 132369,
+    "scripcode": 532369
   },
   {
     "name": "Alembic",
@@ -3008,7 +3853,10 @@ const stockData: StockMapping[] = [
     "isin": "INE426A01027",
     "symbol": "ALEMBICLTD",
     "stockid": "919204",
-    "companyid": "31"
+    "companyid": "31",
+    "tickertape_sid": "ALMC",
+    "fincode": 106235,
+    "scripcode": 506235
   },
   {
     "name": "Shyam Telecom",
@@ -3018,7 +3866,10 @@ const stockData: StockMapping[] = [
     "isin": "INE635A01023",
     "symbol": "SHYAMTEL",
     "stockid": "231543",
-    "companyid": "10241"
+    "companyid": "10241",
+    "tickertape_sid": "SHMT",
+    "fincode": 117411,
+    "scripcode": 517411
   },
   {
     "name": "HFCL",
@@ -3028,7 +3879,10 @@ const stockData: StockMapping[] = [
     "isin": "INE548A01028",
     "symbol": "HFCL",
     "stockid": "650168",
-    "companyid": "13649"
+    "companyid": "13649",
+    "tickertape_sid": "HFCL",
+    "fincode": 100183,
+    "scripcode": 500183
   },
   {
     "name": "Central Bank of India",
@@ -3038,7 +3892,10 @@ const stockData: StockMapping[] = [
     "isin": "INE483A01010",
     "symbol": "CENTRALBK",
     "stockid": "721368",
-    "companyid": "11944"
+    "companyid": "11944",
+    "tickertape_sid": "CBI",
+    "fincode": 132885,
+    "scripcode": 532885
   },
   {
     "name": "Piramal Enterprises",
@@ -3048,7 +3905,9 @@ const stockData: StockMapping[] = [
     "isin": "INE140A01024",
     "symbol": "PEL",
     "stockid": "497388",
-    "companyid": "13332"
+    "companyid": "13332",
+    "fincode": 315858,
+    "scripcode": 0
   },
   {
     "name": "Seamec",
@@ -3058,7 +3917,10 @@ const stockData: StockMapping[] = [
     "isin": "INE497B01018",
     "symbol": "SEAMECLTD",
     "stockid": "395110",
-    "companyid": "8233"
+    "companyid": "8233",
+    "tickertape_sid": "SEAM",
+    "fincode": 126807,
+    "scripcode": 526807
   },
   {
     "name": "EIH",
@@ -3068,7 +3930,10 @@ const stockData: StockMapping[] = [
     "isin": "INE230A01023",
     "symbol": "EIHOTEL",
     "stockid": "324703",
-    "companyid": "13826"
+    "companyid": "13826",
+    "tickertape_sid": "EIHO",
+    "fincode": 100840,
+    "scripcode": 500840
   },
   {
     "name": "Sonata Software",
@@ -3078,7 +3943,10 @@ const stockData: StockMapping[] = [
     "isin": "INE269A01021",
     "symbol": "SONATSOFTW",
     "stockid": "457089",
-    "companyid": "4558"
+    "companyid": "4558",
+    "tickertape_sid": "SOFT",
+    "fincode": 132221,
+    "scripcode": 532221
   },
   {
     "name": "CESC",
@@ -3088,7 +3956,10 @@ const stockData: StockMapping[] = [
     "isin": "INE486A01021",
     "symbol": "CESC",
     "stockid": "687677",
-    "companyid": "13911"
+    "companyid": "13911",
+    "tickertape_sid": "CESC",
+    "fincode": 100084,
+    "scripcode": 500084
   },
   {
     "name": "Rane Engine Valves",
@@ -3108,7 +3979,10 @@ const stockData: StockMapping[] = [
     "isin": "INE640A01023",
     "symbol": "SKFINDIA",
     "stockid": "422062",
-    "companyid": "13139"
+    "companyid": "13139",
+    "tickertape_sid": "SKFB",
+    "fincode": 100472,
+    "scripcode": 500472
   },
   {
     "name": "Mirc Electronics",
@@ -3118,7 +3992,8 @@ const stockData: StockMapping[] = [
     "isin": "INE831A01028",
     "symbol": "MIRCELECTR",
     "stockid": "643793",
-    "companyid": "11124"
+    "companyid": "11124",
+    "tickertape_sid": "MIRC"
   },
   {
     "name": "PVP Ventures",
@@ -3128,7 +4003,10 @@ const stockData: StockMapping[] = [
     "isin": "INE362A01016",
     "symbol": "PVP",
     "stockid": "811665",
-    "companyid": "8443"
+    "companyid": "8443",
+    "tickertape_sid": "PVPV",
+    "fincode": 117556,
+    "scripcode": 517556
   },
   {
     "name": "Tamilnadu Petroproducts",
@@ -3138,7 +4016,10 @@ const stockData: StockMapping[] = [
     "isin": "INE148A01019",
     "symbol": "TNPETRO",
     "stockid": "990473",
-    "companyid": "12937"
+    "companyid": "12937",
+    "tickertape_sid": "TPL",
+    "fincode": 100777,
+    "scripcode": 500777
   },
   {
     "name": "PNB Gilts",
@@ -3148,7 +4029,10 @@ const stockData: StockMapping[] = [
     "isin": "INE859A01011",
     "symbol": "PNBGILTS",
     "stockid": "202962",
-    "companyid": "4156"
+    "companyid": "4156",
+    "tickertape_sid": "PNBG",
+    "fincode": 132366,
+    "scripcode": 532366
   },
   {
     "name": "MPS",
@@ -3158,7 +4042,10 @@ const stockData: StockMapping[] = [
     "isin": "INE943D01017",
     "symbol": "MPSLTD",
     "stockid": "555067",
-    "companyid": "12458"
+    "companyid": "12458",
+    "tickertape_sid": "MPSL",
+    "fincode": 132440,
+    "scripcode": 532440
   },
   {
     "name": "Shree Rama Newsprint",
@@ -3168,7 +4055,10 @@ const stockData: StockMapping[] = [
     "isin": "INE278B01020",
     "symbol": "RAMANEWS",
     "stockid": "581887",
-    "companyid": "11165"
+    "companyid": "11165",
+    "tickertape_sid": "SRNP",
+    "fincode": 100356,
+    "scripcode": 500356
   },
   {
     "name": "South Indian Bank",
@@ -3178,7 +4068,10 @@ const stockData: StockMapping[] = [
     "isin": "INE683A01023",
     "symbol": "SOUTHBANK",
     "stockid": "475365",
-    "companyid": "12249"
+    "companyid": "12249",
+    "tickertape_sid": "SIBK",
+    "fincode": 132218,
+    "scripcode": 532218
   },
   {
     "name": "Rico Auto",
@@ -3188,7 +4081,10 @@ const stockData: StockMapping[] = [
     "isin": "INE209B01025",
     "symbol": "RICOAUTO",
     "stockid": "905788",
-    "companyid": "13205"
+    "companyid": "13205",
+    "tickertape_sid": "RAUT",
+    "fincode": 120008,
+    "scripcode": 520008
   },
   {
     "name": "Zydus Lifesciences",
@@ -3198,7 +4094,10 @@ const stockData: StockMapping[] = [
     "isin": "INE010B01027",
     "symbol": "ZYDUSLIFE",
     "stockid": "290229",
-    "companyid": "3778"
+    "companyid": "3778",
+    "tickertape_sid": "CADI",
+    "fincode": 132321,
+    "scripcode": 532321
   },
   {
     "name": "Oriental Hotels",
@@ -3208,7 +4107,10 @@ const stockData: StockMapping[] = [
     "isin": "INE750A01020",
     "symbol": "ORIENTHOT",
     "stockid": "852895",
-    "companyid": "13321"
+    "companyid": "13321",
+    "tickertape_sid": "ORHT",
+    "fincode": 100314,
+    "scripcode": 500314
   },
   {
     "name": "Trident",
@@ -3218,7 +4120,10 @@ const stockData: StockMapping[] = [
     "isin": "INE064C01022",
     "symbol": "TRIDENT",
     "stockid": "328626",
-    "companyid": "11163"
+    "companyid": "11163",
+    "tickertape_sid": "TRIE",
+    "fincode": 121064,
+    "scripcode": 521064
   },
   {
     "name": "SML Isuzu",
@@ -3228,7 +4133,8 @@ const stockData: StockMapping[] = [
     "isin": "INE294B01019",
     "symbol": "SMLISUZU",
     "stockid": "560476",
-    "companyid": "12961"
+    "companyid": "12961",
+    "tickertape_sid": "SMLI"
   },
   {
     "name": "Sundaram Finance",
@@ -3238,7 +4144,10 @@ const stockData: StockMapping[] = [
     "isin": "INE660A01013",
     "symbol": "SUNDARMFIN",
     "stockid": "932267",
-    "companyid": "12963"
+    "companyid": "12963",
+    "tickertape_sid": "SNFN",
+    "fincode": 190071,
+    "scripcode": 590071
   },
   {
     "name": "Munjal Showa",
@@ -3248,7 +4157,10 @@ const stockData: StockMapping[] = [
     "isin": "INE577A01027",
     "symbol": "MUNJALSHOW",
     "stockid": "766429",
-    "companyid": "13385"
+    "companyid": "13385",
+    "tickertape_sid": "MNJL",
+    "fincode": 120043,
+    "scripcode": 520043
   },
   {
     "name": "Manappuram Finance",
@@ -3258,7 +4170,10 @@ const stockData: StockMapping[] = [
     "isin": "INE522D01027",
     "symbol": "MANAPPURAM",
     "stockid": "343801",
-    "companyid": "7134"
+    "companyid": "7134",
+    "tickertape_sid": "MNFL",
+    "fincode": 131213,
+    "scripcode": 531213
   },
   {
     "name": "CRISIL",
@@ -3268,7 +4183,10 @@ const stockData: StockMapping[] = [
     "isin": "INE007A01025",
     "symbol": "CRISIL",
     "stockid": "761462",
-    "companyid": "11303"
+    "companyid": "11303",
+    "tickertape_sid": "CRSL",
+    "fincode": 100092,
+    "scripcode": 500092
   },
   {
     "name": "63 Moons Technologies",
@@ -3278,7 +4196,10 @@ const stockData: StockMapping[] = [
     "isin": "INE111B01023",
     "symbol": "63MOONS",
     "stockid": "825938",
-    "companyid": "8164"
+    "companyid": "8164",
+    "tickertape_sid": "63MO",
+    "fincode": 126881,
+    "scripcode": 526881
   },
   {
     "name": "Equinox India Developments",
@@ -3288,7 +4209,10 @@ const stockData: StockMapping[] = [
     "isin": "INE069I01010",
     "symbol": "EMBDL",
     "stockid": "142544",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "INRL",
+    "fincode": 132832,
+    "scripcode": 532832
   },
   {
     "name": "Century Textiles and Industries",
@@ -3298,7 +4222,8 @@ const stockData: StockMapping[] = [
     "isin": "INE055A01016",
     "symbol": "CENTURYTEX",
     "stockid": "950641",
-    "companyid": "13905"
+    "companyid": "13905",
+    "tickertape_sid": "CNTY"
   },
   {
     "name": "Hindustan Copper",
@@ -3308,7 +4233,10 @@ const stockData: StockMapping[] = [
     "isin": "INE531E01026",
     "symbol": "HINDCOPPER",
     "stockid": "914349",
-    "companyid": "11733"
+    "companyid": "11733",
+    "tickertape_sid": "HCPR",
+    "fincode": 113599,
+    "scripcode": 513599
   },
   {
     "name": "Gujarat Industries Power Co.",
@@ -3318,7 +4246,10 @@ const stockData: StockMapping[] = [
     "isin": "INE162A01010",
     "symbol": "GIPCL",
     "stockid": "224136",
-    "companyid": "11956"
+    "companyid": "11956",
+    "tickertape_sid": "GJIP",
+    "fincode": 117300,
+    "scripcode": 517300
   },
   {
     "name": "Jaiprakash Power Ventures",
@@ -3328,7 +4259,10 @@ const stockData: StockMapping[] = [
     "isin": "INE351F01018",
     "symbol": "JPPOWER",
     "stockid": "302744",
-    "companyid": "1513"
+    "companyid": "1513",
+    "tickertape_sid": "JAPR",
+    "fincode": 132627,
+    "scripcode": 532627
   },
   {
     "name": "Gujarat Mineral Development Corporation",
@@ -3338,7 +4272,10 @@ const stockData: StockMapping[] = [
     "isin": "INE131A01031",
     "symbol": "GMDCLTD",
     "stockid": "579151",
-    "companyid": "4653"
+    "companyid": "4653",
+    "tickertape_sid": "GMDC",
+    "fincode": 132181,
+    "scripcode": 532181
   },
   {
     "name": "India Cements",
@@ -3348,7 +4285,10 @@ const stockData: StockMapping[] = [
     "isin": "INE383A01012",
     "symbol": "INDIACEM",
     "stockid": "467961",
-    "companyid": "13550"
+    "companyid": "13550",
+    "tickertape_sid": "ICMN",
+    "fincode": 130005,
+    "scripcode": 530005
   },
   {
     "name": "TTK Prestige",
@@ -3358,7 +4298,10 @@ const stockData: StockMapping[] = [
     "isin": "INE690A01028",
     "symbol": "TTKPRESTIG",
     "stockid": "867494",
-    "companyid": "8711"
+    "companyid": "8711",
+    "tickertape_sid": "TTKL",
+    "fincode": 117506,
+    "scripcode": 517506
   },
   {
     "name": "Mangalore Refinery and Petrochemicals",
@@ -3368,7 +4311,10 @@ const stockData: StockMapping[] = [
     "isin": "INE103A01014",
     "symbol": "MRPL",
     "stockid": "110452",
-    "companyid": "11391"
+    "companyid": "11391",
+    "tickertape_sid": "MRPL",
+    "fincode": 100109,
+    "scripcode": 500109
   },
   {
     "name": "Gujarat State Fertilizers & Chemicals",
@@ -3378,7 +4324,10 @@ const stockData: StockMapping[] = [
     "isin": "INE026A01025",
     "symbol": "GSFC",
     "stockid": "198275",
-    "companyid": "13678"
+    "companyid": "13678",
+    "tickertape_sid": "GSFC",
+    "fincode": 100690,
+    "scripcode": 500690
   },
   {
     "name": "National Aluminium Company",
@@ -3388,7 +4337,10 @@ const stockData: StockMapping[] = [
     "isin": "INE139A01034",
     "symbol": "NATIONALUM",
     "stockid": "359296",
-    "companyid": "11997"
+    "companyid": "11997",
+    "tickertape_sid": "NALU",
+    "fincode": 132234,
+    "scripcode": 532234
   },
   {
     "name": "Future Enterprises",
@@ -3398,7 +4350,10 @@ const stockData: StockMapping[] = [
     "isin": "INE623B01027",
     "symbol": "FEL",
     "stockid": "938013",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "FURE",
+    "fincode": 123574,
+    "scripcode": 523574
   },
   {
     "name": "Cyient",
@@ -3408,7 +4363,10 @@ const stockData: StockMapping[] = [
     "isin": "INE136B01020",
     "symbol": "CYIENT",
     "stockid": "506830",
-    "companyid": "4978"
+    "companyid": "4978",
+    "tickertape_sid": "CYIE",
+    "fincode": 132175,
+    "scripcode": 532175
   },
   {
     "name": "Nahar Spinning Mills",
@@ -3418,7 +4376,10 @@ const stockData: StockMapping[] = [
     "isin": "INE290A01027",
     "symbol": "NAHARSPING",
     "stockid": "464978",
-    "companyid": "13336"
+    "companyid": "13336",
+    "tickertape_sid": "NHRS",
+    "fincode": 100296,
+    "scripcode": 500296
   },
   {
     "name": "Unitech",
@@ -3428,7 +4389,10 @@ const stockData: StockMapping[] = [
     "isin": "INE694A01020",
     "symbol": "UNITECH",
     "stockid": "452317",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "UNTE",
+    "fincode": 107878,
+    "scripcode": 507878
   },
   {
     "name": "NLC India",
@@ -3438,7 +4402,10 @@ const stockData: StockMapping[] = [
     "isin": "INE589A01014",
     "symbol": "NLCINDIA",
     "stockid": "659194",
-    "companyid": "12317"
+    "companyid": "12317",
+    "tickertape_sid": "NLCI",
+    "fincode": 113683,
+    "scripcode": 513683
   },
   {
     "name": "Shree Renuka Sugars",
@@ -3448,7 +4415,10 @@ const stockData: StockMapping[] = [
     "isin": "INE087H01022",
     "symbol": "RENUKA",
     "stockid": "556898",
-    "companyid": "18608"
+    "companyid": "18608",
+    "tickertape_sid": "SRES",
+    "fincode": 132670,
+    "scripcode": 532670
   },
   {
     "name": "Carborundum Universal",
@@ -3458,7 +4428,10 @@ const stockData: StockMapping[] = [
     "isin": "INE120A01034",
     "symbol": "CARBORUNIV",
     "stockid": "553345",
-    "companyid": "13909"
+    "companyid": "13909",
+    "tickertape_sid": "CRBR",
+    "fincode": 113375,
+    "scripcode": 513375
   },
   {
     "name": "BEML",
@@ -3468,7 +4441,9 @@ const stockData: StockMapping[] = [
     "isin": "INE258A01016",
     "symbol": "BEML",
     "stockid": "608125",
-    "companyid": "11975"
+    "companyid": "11975",
+    "fincode": 100048,
+    "scripcode": 500048
   },
   {
     "name": "Balrampur Chini Mills",
@@ -3478,7 +4453,10 @@ const stockData: StockMapping[] = [
     "isin": "INE119A01028",
     "symbol": "BALRAMCHIN",
     "stockid": "887786",
-    "companyid": "12477"
+    "companyid": "12477",
+    "tickertape_sid": "BACH",
+    "fincode": 100038,
+    "scripcode": 500038
   },
   {
     "name": "Strides Pharma Science",
@@ -3488,7 +4466,10 @@ const stockData: StockMapping[] = [
     "isin": "INE939A01011",
     "symbol": "STAR",
     "stockid": "688428",
-    "companyid": "2118"
+    "companyid": "2118",
+    "tickertape_sid": "SRID",
+    "fincode": 132531,
+    "scripcode": 532531
   },
   {
     "name": "Maharashtra Seamless",
@@ -3498,7 +4479,10 @@ const stockData: StockMapping[] = [
     "isin": "INE271B01025",
     "symbol": "MAHSEAMLES",
     "stockid": "721234",
-    "companyid": "12199"
+    "companyid": "12199",
+    "tickertape_sid": "MHSM",
+    "fincode": 100265,
+    "scripcode": 500265
   },
   {
     "name": "Electrosteel Castings",
@@ -3508,7 +4492,10 @@ const stockData: StockMapping[] = [
     "isin": "INE086A01029",
     "symbol": "ELECTCAST",
     "stockid": "573496",
-    "companyid": "13811"
+    "companyid": "13811",
+    "tickertape_sid": "ELST",
+    "fincode": 100128,
+    "scripcode": 500128
   },
   {
     "name": "Finolex Industries",
@@ -3518,7 +4505,10 @@ const stockData: StockMapping[] = [
     "isin": "INE183A01024",
     "symbol": "FINPIPE",
     "stockid": "408500",
-    "companyid": "13760"
+    "companyid": "13760",
+    "tickertape_sid": "FINX",
+    "fincode": 100940,
+    "scripcode": 500940
   },
   {
     "name": "Aarti Industries",
@@ -3528,7 +4518,10 @@ const stockData: StockMapping[] = [
     "isin": "INE769A01020",
     "symbol": "AARTIIND",
     "stockid": "465419",
-    "companyid": "11400"
+    "companyid": "11400",
+    "tickertape_sid": "ARTI",
+    "fincode": 124208,
+    "scripcode": 524208
   },
   {
     "name": "City Union Bank",
@@ -3538,7 +4531,10 @@ const stockData: StockMapping[] = [
     "isin": "INE491A01021",
     "symbol": "CUB",
     "stockid": "119922",
-    "companyid": "7749"
+    "companyid": "7749",
+    "tickertape_sid": "CTBK",
+    "fincode": 132210,
+    "scripcode": 532210
   },
   {
     "name": "Heubach Colorants India",
@@ -3548,7 +4544,8 @@ const stockData: StockMapping[] = [
     "isin": "INE492A01029",
     "symbol": "HEUBACHIND",
     "stockid": "125774",
-    "companyid": "13874"
+    "companyid": "13874",
+    "tickertape_sid": "CLAC"
   },
   {
     "name": "Bannariamman Sugars",
@@ -3558,7 +4555,10 @@ const stockData: StockMapping[] = [
     "isin": "INE459A01010",
     "symbol": "BANARISUG",
     "stockid": "141796",
-    "companyid": "13995"
+    "companyid": "13995",
+    "tickertape_sid": "BANN",
+    "fincode": 100041,
+    "scripcode": 500041
   },
   {
     "name": "Mcleod Russel (India)",
@@ -3568,7 +4568,10 @@ const stockData: StockMapping[] = [
     "isin": "INE942G01012",
     "symbol": "MCLEODRUSS",
     "stockid": "834364",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "MCLE",
+    "fincode": 132654,
+    "scripcode": 532654
   },
   {
     "name": "Datamatics Global Services",
@@ -3578,7 +4581,10 @@ const stockData: StockMapping[] = [
     "isin": "INE365B01017",
     "symbol": "DATAMATICS",
     "stockid": "701197",
-    "companyid": "3601"
+    "companyid": "3601",
+    "tickertape_sid": "DATC",
+    "fincode": 132528,
+    "scripcode": 532528
   },
   {
     "name": "GFL",
@@ -3588,7 +4594,10 @@ const stockData: StockMapping[] = [
     "isin": "INE538A01037",
     "symbol": "GFLLIMITED",
     "stockid": "809565",
-    "companyid": "13641"
+    "companyid": "13641",
+    "tickertape_sid": "GFLL",
+    "fincode": 100173,
+    "scripcode": 500173
   },
   {
     "name": "EID Parry (India)",
@@ -3598,7 +4607,10 @@ const stockData: StockMapping[] = [
     "isin": "INE126A01031",
     "symbol": "EIDPARRY",
     "stockid": "209609",
-    "companyid": "13818"
+    "companyid": "13818",
+    "tickertape_sid": "EIDP",
+    "fincode": 100125,
+    "scripcode": 500125
   },
   {
     "name": "Bajaj Hindusthan Sugar",
@@ -3608,7 +4620,10 @@ const stockData: StockMapping[] = [
     "isin": "INE306A01021",
     "symbol": "BAJAJHIND",
     "stockid": "452063",
-    "companyid": "13998"
+    "companyid": "13998",
+    "tickertape_sid": "BJHN",
+    "fincode": 100032,
+    "scripcode": 500032
   },
   {
     "name": "LG Balakrishnan and Brothers",
@@ -3618,7 +4633,10 @@ const stockData: StockMapping[] = [
     "isin": "INE337A01034",
     "symbol": "LGBBROSLTD",
     "stockid": "921237",
-    "companyid": "11667"
+    "companyid": "11667",
+    "tickertape_sid": "LGB",
+    "fincode": 100250,
+    "scripcode": 500250
   },
   {
     "name": "Wockhardt",
@@ -3628,7 +4646,10 @@ const stockData: StockMapping[] = [
     "isin": "INE049B01025",
     "symbol": "WOCKPHARMA",
     "stockid": "256229",
-    "companyid": "3731"
+    "companyid": "3731",
+    "tickertape_sid": "WCKH",
+    "fincode": 132300,
+    "scripcode": 532300
   },
   {
     "name": "Rallis India",
@@ -3638,7 +4659,10 @@ const stockData: StockMapping[] = [
     "isin": "INE613A01020",
     "symbol": "RALLIS",
     "stockid": "303615",
-    "companyid": "13204"
+    "companyid": "13204",
+    "tickertape_sid": "RALL",
+    "fincode": 100355,
+    "scripcode": 500355
   },
   {
     "name": "Reliance Power",
@@ -3648,7 +4672,10 @@ const stockData: StockMapping[] = [
     "isin": "INE614G01033",
     "symbol": "RPOWER",
     "stockid": "617014",
-    "companyid": "4422"
+    "companyid": "4422",
+    "tickertape_sid": "RPOL",
+    "fincode": 200039,
+    "scripcode": 532939
   },
   {
     "name": "Procter & Gamble Health",
@@ -3658,7 +4685,10 @@ const stockData: StockMapping[] = [
     "isin": "INE199A01012",
     "symbol": "PGHL",
     "stockid": "346859",
-    "companyid": "13819"
+    "companyid": "13819",
+    "tickertape_sid": "PROR",
+    "fincode": 100126,
+    "scripcode": 500126
   },
   {
     "name": "Navneet Education",
@@ -3668,7 +4698,10 @@ const stockData: StockMapping[] = [
     "isin": "INE060A01024",
     "symbol": "NAVNETEDUL",
     "stockid": "936829",
-    "companyid": "12527"
+    "companyid": "12527",
+    "tickertape_sid": "NAVN",
+    "fincode": 108989,
+    "scripcode": 508989
   },
   {
     "name": "Infomedia Press",
@@ -3678,7 +4711,10 @@ const stockData: StockMapping[] = [
     "isin": "INE669A01022",
     "symbol": "INFOMEDIA",
     "stockid": "218739",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "INFO",
+    "fincode": 109069,
+    "scripcode": 509069
   },
   {
     "name": "GTL",
@@ -3688,7 +4724,10 @@ const stockData: StockMapping[] = [
     "isin": "INE043A01012",
     "symbol": "GTL",
     "stockid": "321642",
-    "companyid": "11399"
+    "companyid": "11399",
+    "tickertape_sid": "GTL",
+    "fincode": 100160,
+    "scripcode": 500160
   },
   {
     "name": "KSB ",
@@ -3698,7 +4737,10 @@ const stockData: StockMapping[] = [
     "isin": "INE999A01023",
     "symbol": "KSB",
     "stockid": "397159",
-    "companyid": "13500"
+    "companyid": "13500",
+    "tickertape_sid": "KSBL",
+    "fincode": 100249,
+    "scripcode": 500249
   },
   {
     "name": "Mukand",
@@ -3708,7 +4750,10 @@ const stockData: StockMapping[] = [
     "isin": "INE304A01026",
     "symbol": "MUKANDLTD",
     "stockid": "921067",
-    "companyid": "13382"
+    "companyid": "13382",
+    "tickertape_sid": "MUKA",
+    "fincode": 100460,
+    "scripcode": 500460
   },
   {
     "name": "Orchid Pharma",
@@ -3718,7 +4763,10 @@ const stockData: StockMapping[] = [
     "isin": "INE191A01027",
     "symbol": "ORCHPHARMA",
     "stockid": "653435",
-    "companyid": "10568"
+    "companyid": "10568",
+    "tickertape_sid": "ORCD",
+    "fincode": 124372,
+    "scripcode": 524372
   },
   {
     "name": "Godfrey Phillips India",
@@ -3728,7 +4776,10 @@ const stockData: StockMapping[] = [
     "isin": "INE260B01028",
     "symbol": "GODFRYPHLP",
     "stockid": "854537",
-    "companyid": "13707"
+    "companyid": "13707",
+    "tickertape_sid": "GDFR",
+    "fincode": 100163,
+    "scripcode": 500163
   },
   {
     "name": "Jindal Poly Films",
@@ -3738,7 +4789,10 @@ const stockData: StockMapping[] = [
     "isin": "INE197D01010",
     "symbol": "JINDALPOLY",
     "stockid": "864806",
-    "companyid": "8826"
+    "companyid": "8826",
+    "tickertape_sid": "JPLY",
+    "fincode": 100227,
+    "scripcode": 500227
   },
   {
     "name": "Hindustan Organic Chemicals",
@@ -3748,7 +4802,10 @@ const stockData: StockMapping[] = [
     "isin": "INE048A01011",
     "symbol": "HOCL",
     "stockid": "501399",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "HOCL",
+    "fincode": 100449,
+    "scripcode": 500449
   },
   {
     "name": "Smartlink Holdings      ",
@@ -3758,7 +4815,10 @@ const stockData: StockMapping[] = [
     "isin": "INE178C01020",
     "symbol": "SMARTLINK",
     "stockid": "328042",
-    "companyid": "3354"
+    "companyid": "3354",
+    "tickertape_sid": "SMAT",
+    "fincode": 132419,
+    "scripcode": 532419
   },
   {
     "name": "Affle India",
@@ -3768,7 +4828,10 @@ const stockData: StockMapping[] = [
     "isin": "INE00WC01027",
     "symbol": "AFFLE",
     "stockid": "1003159",
-    "companyid": "68656"
+    "companyid": "68656",
+    "tickertape_sid": "AFFL",
+    "fincode": 229238,
+    "scripcode": 542752
   },
   {
     "name": "Aegis Logistics",
@@ -3778,7 +4841,10 @@ const stockData: StockMapping[] = [
     "isin": "INE208C01025",
     "symbol": "AEGISLOG",
     "stockid": "732927",
-    "companyid": "23"
+    "companyid": "23",
+    "tickertape_sid": "AEGS",
+    "fincode": 100003,
+    "scripcode": 500003
   },
   {
     "name": "VST Industries",
@@ -3788,7 +4854,10 @@ const stockData: StockMapping[] = [
     "isin": "INE710A01016",
     "symbol": "VSTIND",
     "stockid": "493214",
-    "companyid": "12825"
+    "companyid": "12825",
+    "tickertape_sid": "VSTI",
+    "fincode": 109966,
+    "scripcode": 509966
   },
   {
     "name": "Wheels India",
@@ -3798,7 +4867,10 @@ const stockData: StockMapping[] = [
     "isin": "INE715A01015",
     "symbol": "WHEELS",
     "stockid": "563917",
-    "companyid": "12794"
+    "companyid": "12794",
+    "tickertape_sid": "WHEL",
+    "fincode": 190073,
+    "scripcode": 590073
   },
   {
     "name": "Angel One",
@@ -3808,7 +4880,9 @@ const stockData: StockMapping[] = [
     "isin": "INE732I01013",
     "symbol": "ANGELONE",
     "stockid": "1003425",
-    "companyid": "31183"
+    "companyid": "31183",
+    "fincode": 209902,
+    "scripcode": 543235
   },
   {
     "name": "Amara Raja Energy & Mobility",
@@ -3818,7 +4892,10 @@ const stockData: StockMapping[] = [
     "isin": "INE885A01032",
     "symbol": "ARE&M",
     "stockid": "869476",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "AMAR",
+    "fincode": 100008,
+    "scripcode": 500008
   },
   {
     "name": "Vardhman Textiles",
@@ -3828,7 +4905,10 @@ const stockData: StockMapping[] = [
     "isin": "INE825A01020",
     "symbol": "VTL",
     "stockid": "467166",
-    "companyid": "11897"
+    "companyid": "11897",
+    "tickertape_sid": "VART",
+    "fincode": 102986,
+    "scripcode": 502986
   },
   {
     "name": "Borosil Renewables Ltd.",
@@ -3838,7 +4918,10 @@ const stockData: StockMapping[] = [
     "isin": "INE666D01022",
     "symbol": "BORORENEW",
     "stockid": "370662",
-    "companyid": "13928"
+    "companyid": "13928",
+    "tickertape_sid": "BORO",
+    "fincode": 102219,
+    "scripcode": 502219
   },
   {
     "name": "Chemplast Sanmar",
@@ -3848,7 +4931,10 @@ const stockData: StockMapping[] = [
     "isin": "INE488A01050",
     "symbol": "CHEMPLASTS",
     "stockid": "401033",
-    "companyid": "12440"
+    "companyid": "12440",
+    "tickertape_sid": "CHEMP",
+    "fincode": 106355,
+    "scripcode": 543336
   },
   {
     "name": "AIA Engineering",
@@ -3858,7 +4944,10 @@ const stockData: StockMapping[] = [
     "isin": "INE212H01026",
     "symbol": "AIAENG",
     "stockid": "604881",
-    "companyid": "17637"
+    "companyid": "17637",
+    "tickertape_sid": "AIAE",
+    "fincode": 132683,
+    "scripcode": 532683
   },
   {
     "name": "Bharat Dynamics",
@@ -3868,7 +4957,10 @@ const stockData: StockMapping[] = [
     "isin": "INE171Z01026",
     "symbol": "BDL",
     "stockid": "1002948",
-    "companyid": "4722"
+    "companyid": "4722",
+    "tickertape_sid": "BARA",
+    "fincode": 212705,
+    "scripcode": 541143
   },
   {
     "name": "Chalet Hotels",
@@ -3878,7 +4970,10 @@ const stockData: StockMapping[] = [
     "isin": "INE427F01016",
     "symbol": "CHALET",
     "stockid": "1003103",
-    "companyid": "1850838"
+    "companyid": "1850838",
+    "tickertape_sid": "CHAL",
+    "fincode": 207959,
+    "scripcode": 542399
   },
   {
     "name": "Devyani International",
@@ -3888,7 +4983,10 @@ const stockData: StockMapping[] = [
     "isin": "INE872J01023",
     "symbol": "DEVYANI",
     "stockid": "1003518",
-    "companyid": "46078"
+    "companyid": "46078",
+    "tickertape_sid": "DEVY",
+    "fincode": 208045,
+    "scripcode": 543330
   },
   {
     "name": "Grindwell Norton",
@@ -3898,7 +4996,10 @@ const stockData: StockMapping[] = [
     "isin": "INE536A01023",
     "symbol": "GRINDWELL",
     "stockid": "119570",
-    "companyid": "13709"
+    "companyid": "13709",
+    "tickertape_sid": "GRNN",
+    "fincode": 106076,
+    "scripcode": 506076
   },
   {
     "name": "Crompton Greaves Consumer Electrical",
@@ -3908,7 +5009,10 @@ const stockData: StockMapping[] = [
     "isin": "INE299U01018",
     "symbol": "CROMPTON",
     "stockid": "1002584",
-    "companyid": "61335"
+    "companyid": "61335",
+    "tickertape_sid": "CROP",
+    "fincode": 280713,
+    "scripcode": 539876
   },
   {
     "name": "AstraZeneca Pharma",
@@ -3918,7 +5022,10 @@ const stockData: StockMapping[] = [
     "isin": "INE203A01020",
     "symbol": "ASTRAZEN",
     "stockid": "777011",
-    "companyid": "13987"
+    "companyid": "13987",
+    "tickertape_sid": "ASTR",
+    "fincode": 106820,
+    "scripcode": 506820
   },
   {
     "name": "KPR Mill",
@@ -3928,7 +5035,10 @@ const stockData: StockMapping[] = [
     "isin": "INE930H01031",
     "symbol": "KPRMILL",
     "stockid": "549544",
-    "companyid": "20138"
+    "companyid": "20138",
+    "tickertape_sid": "KPRM",
+    "fincode": 132889,
+    "scripcode": 532889
   },
   {
     "name": "Equitas Small Finance Bank",
@@ -3938,7 +5048,10 @@ const stockData: StockMapping[] = [
     "isin": "INE063P01018",
     "symbol": "EQUITASBNK",
     "stockid": "1003439",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "EQU",
+    "fincode": 273033,
+    "scripcode": 543243
   },
   {
     "name": "Zensar Technologies",
@@ -3948,7 +5061,10 @@ const stockData: StockMapping[] = [
     "isin": "INE520A01027",
     "symbol": "ZENSARTECH",
     "stockid": "713730",
-    "companyid": "13597"
+    "companyid": "13597",
+    "tickertape_sid": "ZENT",
+    "fincode": 104067,
+    "scripcode": 504067
   },
   {
     "name": "CCL Products India",
@@ -3958,7 +5074,10 @@ const stockData: StockMapping[] = [
     "isin": "INE421D01022",
     "symbol": "CCL",
     "stockid": "142849",
-    "companyid": "7770"
+    "companyid": "7770",
+    "tickertape_sid": "CCLP",
+    "fincode": 119600,
+    "scripcode": 519600
   },
   {
     "name": "Gujarat Narmada Valley Fert & Chem.",
@@ -3968,7 +5087,10 @@ const stockData: StockMapping[] = [
     "isin": "INE113A01013",
     "symbol": "GNFC",
     "stockid": "",
-    "companyid": "13673"
+    "companyid": "13673",
+    "tickertape_sid": "GNFC",
+    "fincode": 100670,
+    "scripcode": 500670
   },
   {
     "name": "Elecon Engineering Company",
@@ -3978,7 +5100,10 @@ const stockData: StockMapping[] = [
     "isin": "INE205B01031",
     "symbol": "ELECON",
     "stockid": "832143",
-    "companyid": "13802"
+    "companyid": "13802",
+    "tickertape_sid": "ELCN",
+    "fincode": 105700,
+    "scripcode": 505700
   },
   {
     "name": "Aditya Birla Fashion & Retail",
@@ -3988,7 +5113,10 @@ const stockData: StockMapping[] = [
     "isin": "INE647O01011",
     "symbol": "ABFRL",
     "stockid": "376799",
-    "companyid": "46091"
+    "companyid": "46091",
+    "tickertape_sid": "ADIA",
+    "fincode": 210591,
+    "scripcode": 535755
   },
   {
     "name": "Unichem Laboratories",
@@ -3998,7 +5126,10 @@ const stockData: StockMapping[] = [
     "isin": "INE351A01035",
     "symbol": "UNICHEMLAB",
     "stockid": "270205",
-    "companyid": "12882"
+    "companyid": "12882",
+    "tickertape_sid": "UNLB",
+    "fincode": 106690,
+    "scripcode": 506690
   },
   {
     "name": "Easy Trip Planners",
@@ -4008,7 +5139,10 @@ const stockData: StockMapping[] = [
     "isin": "INE07O001026",
     "symbol": "EASEMYTRIP",
     "stockid": "1003471",
-    "companyid": "2002229"
+    "companyid": "2002229",
+    "tickertape_sid": "EASE",
+    "fincode": 296479,
+    "scripcode": 543272
   },
   {
     "name": "Dr Lal PathLabs",
@@ -4018,7 +5152,10 @@ const stockData: StockMapping[] = [
     "isin": "INE600L01024",
     "symbol": "LALPATHLAB",
     "stockid": "1000163",
-    "companyid": "63225"
+    "companyid": "63225",
+    "tickertape_sid": "DLPA",
+    "fincode": 218763,
+    "scripcode": 539524
   },
   {
     "name": "Glenmark Life Sciences",
@@ -4028,7 +5165,8 @@ const stockData: StockMapping[] = [
     "isin": "INE03Q201024",
     "symbol": "GLS",
     "stockid": "1003513",
-    "companyid": "1958788"
+    "companyid": "1958788",
+    "tickertape_sid": "GLS"
   },
   {
     "name": "Jindal Saw",
@@ -4038,7 +5176,9 @@ const stockData: StockMapping[] = [
     "isin": "INE324A01024",
     "symbol": "JINDALSAW",
     "stockid": "472877",
-    "companyid": "13149"
+    "companyid": "13149",
+    "fincode": 100378,
+    "scripcode": 500378
   },
   {
     "name": "Indiamart Intermesh",
@@ -4048,7 +5188,10 @@ const stockData: StockMapping[] = [
     "isin": "INE933S01016",
     "symbol": "INDIAMART",
     "stockid": "1003150",
-    "companyid": "50224"
+    "companyid": "50224",
+    "tickertape_sid": "INMR",
+    "fincode": 290269,
+    "scripcode": 542726
   },
   {
     "name": "BLS International Services",
@@ -4058,7 +5201,10 @@ const stockData: StockMapping[] = [
     "isin": "INE153T01027",
     "symbol": "BLS",
     "stockid": "1002630",
-    "companyid": "64350"
+    "companyid": "64350",
+    "tickertape_sid": "BLSN",
+    "fincode": 281585,
+    "scripcode": 540073
   },
   {
     "name": "CreditAccess Grameen",
@@ -4068,7 +5214,10 @@ const stockData: StockMapping[] = [
     "isin": "INE741K01010",
     "symbol": "CREDITACC",
     "stockid": "1003037",
-    "companyid": "31253"
+    "companyid": "31253",
+    "tickertape_sid": "CRDE",
+    "fincode": 221842,
+    "scripcode": 541770
   },
   {
     "name": "CSB Bank",
@@ -4078,7 +5227,10 @@ const stockData: StockMapping[] = [
     "isin": "INE679A01013",
     "symbol": "CSBBANK",
     "stockid": "1003355",
-    "companyid": "12278"
+    "companyid": "12278",
+    "tickertape_sid": "CSBB",
+    "fincode": 295768,
+    "scripcode": 542867
   },
   {
     "name": "Birlasoft",
@@ -4088,7 +5240,10 @@ const stockData: StockMapping[] = [
     "isin": "INE836A01035",
     "symbol": "BSOFT",
     "stockid": "864957",
-    "companyid": "4471"
+    "companyid": "4471",
+    "tickertape_sid": "BIRS",
+    "fincode": 132400,
+    "scripcode": 532400
   },
   {
     "name": "Navin Fluorine International",
@@ -4098,7 +5253,10 @@ const stockData: StockMapping[] = [
     "isin": "INE048G01026",
     "symbol": "NAVINFLUOR",
     "stockid": "876431",
-    "companyid": "16681"
+    "companyid": "16681",
+    "tickertape_sid": "NAFL",
+    "fincode": 132504,
+    "scripcode": 532504
   },
   {
     "name": "Inox Wind",
@@ -4108,7 +5266,10 @@ const stockData: StockMapping[] = [
     "isin": "INE066P01011",
     "symbol": "INOXWIND",
     "stockid": "695610",
-    "companyid": "32069"
+    "companyid": "32069",
+    "tickertape_sid": "INWN",
+    "fincode": 221809,
+    "scripcode": 539083
   },
   {
     "name": "Godawari Power & Ispat",
@@ -4118,7 +5279,9 @@ const stockData: StockMapping[] = [
     "isin": "INE177H01021",
     "symbol": "GPIL",
     "stockid": "761113",
-    "companyid": "18027"
+    "companyid": "18027",
+    "fincode": 132734,
+    "scripcode": 532734
   },
   {
     "name": "Mazagon Dock Shipbuilders",
@@ -4128,7 +5291,9 @@ const stockData: StockMapping[] = [
     "isin": "INE249Z01012",
     "symbol": "MAZDOCK",
     "stockid": "1003428",
-    "companyid": "4689"
+    "companyid": "4689",
+    "fincode": 219700,
+    "scripcode": 543237
   },
   {
     "name": "Jubilant Ingrevia",
@@ -4138,7 +5303,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0BY001018",
     "symbol": "JUBLINGREA",
     "stockid": "1003473",
-    "companyid": "1999648"
+    "companyid": "1999648",
+    "tickertape_sid": "JUB",
+    "fincode": 301578,
+    "scripcode": 543271
   },
   {
     "name": "Chennai Petroleum Corporation",
@@ -4148,7 +5316,10 @@ const stockData: StockMapping[] = [
     "isin": "INE178A01016",
     "symbol": "CHENNPETRO",
     "stockid": "129013",
-    "companyid": "11661"
+    "companyid": "11661",
+    "tickertape_sid": "CHPC",
+    "fincode": 100110,
+    "scripcode": 500110
   },
   {
     "name": "Jai Balaji Industries",
@@ -4158,7 +5329,9 @@ const stockData: StockMapping[] = [
     "isin": "INE091G01018",
     "symbol": "JAIBALAJI",
     "stockid": "446711",
-    "companyid": "17929"
+    "companyid": "17929",
+    "fincode": 190064,
+    "scripcode": 532976
   },
   {
     "name": "Aptus Value Housing Finance India",
@@ -4168,7 +5341,10 @@ const stockData: StockMapping[] = [
     "isin": "INE852O01025",
     "symbol": "APTUS",
     "stockid": "1003526",
-    "companyid": "35851"
+    "companyid": "35851",
+    "tickertape_sid": "APTU",
+    "fincode": 251791,
+    "scripcode": 543335
   },
   {
     "name": "Intellect Design Arena",
@@ -4178,7 +5354,10 @@ const stockData: StockMapping[] = [
     "isin": "INE306R01017",
     "symbol": "INTELLECT",
     "stockid": "260365",
-    "companyid": "58859"
+    "companyid": "58859",
+    "tickertape_sid": "INEE",
+    "fincode": 271581,
+    "scripcode": 538835
   },
   {
     "name": "Amber Enterprises India Limited",
@@ -4188,7 +5367,10 @@ const stockData: StockMapping[] = [
     "isin": "INE371P01015",
     "symbol": "AMBER",
     "stockid": "",
-    "companyid": "67404"
+    "companyid": "67404",
+    "tickertape_sid": "AMBE",
+    "fincode": 225154,
+    "scripcode": 540902
   },
   {
     "name": "Anupam Rasayan India",
@@ -4198,7 +5380,10 @@ const stockData: StockMapping[] = [
     "isin": "INE930P01018",
     "symbol": "ANURAS",
     "stockid": "1003476",
-    "companyid": "45694"
+    "companyid": "45694",
+    "tickertape_sid": "ANUR",
+    "fincode": 226328,
+    "scripcode": 543275
   },
   {
     "name": "Latent View Analytics",
@@ -4208,7 +5393,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0I7C01011",
     "symbol": "LATENTVIEW",
     "stockid": "1003568",
-    "companyid": "2018256"
+    "companyid": "2018256",
+    "tickertape_sid": "LATE",
+    "fincode": 232592,
+    "scripcode": 543398
   },
   {
     "name": "Campus Activewear",
@@ -4218,7 +5406,10 @@ const stockData: StockMapping[] = [
     "isin": "INE278Y01022",
     "symbol": "CAMPUS",
     "stockid": "1003644",
-    "companyid": "1966674"
+    "companyid": "1966674",
+    "tickertape_sid": "CAMP",
+    "fincode": 304701,
+    "scripcode": 543523
   },
   {
     "name": "KPIT Technologies",
@@ -4228,7 +5419,10 @@ const stockData: StockMapping[] = [
     "isin": "INE04I401011",
     "symbol": "KPITTECH",
     "stockid": "1003132",
-    "companyid": "69000"
+    "companyid": "69000",
+    "tickertape_sid": "KPIE",
+    "fincode": 294320,
+    "scripcode": 542651
   },
   {
     "name": "Vesuvius India",
@@ -4238,7 +5432,9 @@ const stockData: StockMapping[] = [
     "isin": "INE386A01015",
     "symbol": "VESUVIUS",
     "stockid": "604782",
-    "companyid": "10677"
+    "companyid": "10677",
+    "fincode": 120113,
+    "scripcode": 520113
   },
   {
     "name": "Jio Financial Services",
@@ -4248,7 +5444,10 @@ const stockData: StockMapping[] = [
     "isin": "INE758E01017",
     "symbol": "JIOFIN",
     "stockid": "1003892",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "JIO",
+    "fincode": 229365,
+    "scripcode": 543940
   },
   {
     "name": "Fertilisers and Chemicals Travancore",
@@ -4258,7 +5457,10 @@ const stockData: StockMapping[] = [
     "isin": "INE188A01015",
     "symbol": "FACT",
     "stockid": "632923",
-    "companyid": "11995"
+    "companyid": "11995",
+    "tickertape_sid": "FCTL",
+    "fincode": 190024,
+    "scripcode": 590024
   },
   {
     "name": "Cochin Shipyard",
@@ -4268,7 +5470,10 @@ const stockData: StockMapping[] = [
     "isin": "INE704P01025",
     "symbol": "COCHINSHIP",
     "stockid": "1002795",
-    "companyid": "4529"
+    "companyid": "4529",
+    "tickertape_sid": "COCH",
+    "fincode": 219691,
+    "scripcode": 540678
   },
   {
     "name": "Craftsman Automation",
@@ -4278,7 +5483,10 @@ const stockData: StockMapping[] = [
     "isin": "INE00LO01017",
     "symbol": "CRAFTSMAN",
     "stockid": "1003477",
-    "companyid": "68377"
+    "companyid": "68377",
+    "tickertape_sid": "CRAF",
+    "fincode": 215216,
+    "scripcode": 543276
   },
   {
     "name": "Home First Finance Company India",
@@ -4288,7 +5496,10 @@ const stockData: StockMapping[] = [
     "isin": "INE481N01025",
     "symbol": "HOMEFIRST",
     "stockid": "1003457",
-    "companyid": "55367"
+    "companyid": "55367",
+    "tickertape_sid": "HOM",
+    "fincode": 235955,
+    "scripcode": 543259
   },
   {
     "name": "Firstsource Solutions",
@@ -4298,7 +5509,10 @@ const stockData: StockMapping[] = [
     "isin": "INE684F01012",
     "symbol": "FSL",
     "stockid": "884842",
-    "companyid": "99"
+    "companyid": "99",
+    "tickertape_sid": "FISO",
+    "fincode": 132809,
+    "scripcode": 532809
   },
   {
     "name": "Indigo Paints",
@@ -4308,7 +5522,10 @@ const stockData: StockMapping[] = [
     "isin": "INE09VQ01012",
     "symbol": "INDIGOPNTS",
     "stockid": "1003456",
-    "companyid": "1962470"
+    "companyid": "1962470",
+    "tickertape_sid": "INDIG",
+    "fincode": 296050,
+    "scripcode": 543258
   },
   {
     "name": "L&T Finance",
@@ -4318,7 +5535,10 @@ const stockData: StockMapping[] = [
     "isin": "INE498L01015",
     "symbol": "LTF",
     "stockid": "675291",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "LTFH",
+    "fincode": 220350,
+    "scripcode": 533519
   },
   {
     "name": "Motilal Oswal Financial Services",
@@ -4328,7 +5548,10 @@ const stockData: StockMapping[] = [
     "isin": "INE338I01027",
     "symbol": "MOTILALOFS",
     "stockid": "646799",
-    "companyid": "18715"
+    "companyid": "18715",
+    "tickertape_sid": "MOFS",
+    "fincode": 132892,
+    "scripcode": 532892
   },
   {
     "name": "Olectra Greentech",
@@ -4338,7 +5561,10 @@ const stockData: StockMapping[] = [
     "isin": "INE260D01016",
     "symbol": "OLECTRA",
     "stockid": "940678",
-    "companyid": "1510"
+    "companyid": "1510",
+    "tickertape_sid": "OLEC",
+    "fincode": 132439,
+    "scripcode": 532439
   },
   {
     "name": "Emami",
@@ -4348,7 +5574,10 @@ const stockData: StockMapping[] = [
     "isin": "INE548C01032",
     "symbol": "EMAMILTD",
     "stockid": "295527",
-    "companyid": "5619"
+    "companyid": "5619",
+    "tickertape_sid": "EMAM",
+    "fincode": 131162,
+    "scripcode": 531162
   },
   {
     "name": "Mahanagar Gas",
@@ -4358,7 +5587,10 @@ const stockData: StockMapping[] = [
     "isin": "INE002S01010",
     "symbol": "MGL",
     "stockid": "1000400",
-    "companyid": "4331"
+    "companyid": "4331",
+    "tickertape_sid": "MGAS",
+    "fincode": 208661,
+    "scripcode": 539957
   },
   {
     "name": "Fortis Healthcare ",
@@ -4368,7 +5600,10 @@ const stockData: StockMapping[] = [
     "isin": "INE061F01013",
     "symbol": "FORTIS",
     "stockid": "970940",
-    "companyid": "16648"
+    "companyid": "16648",
+    "tickertape_sid": "FOHE",
+    "fincode": 132843,
+    "scripcode": 532843
   },
   {
     "name": "PVR INOX",
@@ -4378,7 +5613,10 @@ const stockData: StockMapping[] = [
     "isin": "INE191H01014",
     "symbol": "PVRINOX",
     "stockid": "333539",
-    "companyid": "16320"
+    "companyid": "16320",
+    "tickertape_sid": "PVRL",
+    "fincode": 132689,
+    "scripcode": 532689
   },
   {
     "name": "KNR Constructions",
@@ -4388,7 +5626,10 @@ const stockData: StockMapping[] = [
     "isin": "INE634I01029",
     "symbol": "KNRCON",
     "stockid": "517351",
-    "companyid": "15274"
+    "companyid": "15274",
+    "tickertape_sid": "KNRL",
+    "fincode": 200046,
+    "scripcode": 532942
   },
   {
     "name": "Gujarat Pipavav Port",
@@ -4398,7 +5639,10 @@ const stockData: StockMapping[] = [
     "isin": "INE517F01014",
     "symbol": "GPPL",
     "stockid": "557740",
-    "companyid": "16230"
+    "companyid": "16230",
+    "tickertape_sid": "GPPL",
+    "fincode": 208264,
+    "scripcode": 533248
   },
   {
     "name": "Route Mobile",
@@ -4408,7 +5652,10 @@ const stockData: StockMapping[] = [
     "isin": "INE450U01017",
     "symbol": "ROUTE",
     "stockid": "1003417",
-    "companyid": "1991160"
+    "companyid": "1991160",
+    "tickertape_sid": "ROUT",
+    "fincode": 273198,
+    "scripcode": 543228
   },
   {
     "name": "AAVAS Financiers ",
@@ -4418,7 +5665,10 @@ const stockData: StockMapping[] = [
     "isin": "INE216P01012",
     "symbol": "AAVAS",
     "stockid": "1003057",
-    "companyid": "35834"
+    "companyid": "35834",
+    "tickertape_sid": "AVAS",
+    "fincode": 267615,
+    "scripcode": 541988
   },
   {
     "name": "Atul",
@@ -4428,7 +5678,10 @@ const stockData: StockMapping[] = [
     "isin": "INE100A01010",
     "symbol": "ATUL",
     "stockid": "248522",
-    "companyid": "14027"
+    "companyid": "14027",
+    "tickertape_sid": "ATLP",
+    "fincode": 100027,
+    "scripcode": 500027
   },
   {
     "name": "Mahindra Holidays and Resorts India",
@@ -4438,7 +5691,10 @@ const stockData: StockMapping[] = [
     "isin": "INE998I01010",
     "symbol": "MHRIL",
     "stockid": "836326",
-    "companyid": "16639"
+    "companyid": "16639",
+    "tickertape_sid": "MAHH",
+    "fincode": 200082,
+    "scripcode": 533088
   },
   {
     "name": "Sammaan Capital",
@@ -4448,7 +5704,10 @@ const stockData: StockMapping[] = [
     "isin": "INE148I01020",
     "symbol": "SAMMAANCAP",
     "stockid": "559955",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "INBF",
+    "fincode": 220741,
+    "scripcode": 535789
   },
   {
     "name": "Metropolis Healthcare",
@@ -4458,7 +5717,10 @@ const stockData: StockMapping[] = [
     "isin": "INE112L01020",
     "symbol": "METROPOLIS",
     "stockid": "1003129",
-    "companyid": "16325"
+    "companyid": "16325",
+    "tickertape_sid": "METP",
+    "fincode": 235506,
+    "scripcode": 542650
   },
   {
     "name": "Redington",
@@ -4468,7 +5730,10 @@ const stockData: StockMapping[] = [
     "isin": "INE891D01026",
     "symbol": "REDINGTON",
     "stockid": "166053",
-    "companyid": "18903"
+    "companyid": "18903",
+    "tickertape_sid": "REDI",
+    "fincode": 132805,
+    "scripcode": 532805
   },
   {
     "name": "IIFL Finance",
@@ -4478,7 +5743,10 @@ const stockData: StockMapping[] = [
     "isin": "INE530B01024",
     "symbol": "IIFL",
     "stockid": "623044",
-    "companyid": "13033"
+    "companyid": "13033",
+    "tickertape_sid": "IIFL",
+    "fincode": 132636,
+    "scripcode": 532636
   },
   {
     "name": "RBL Bank",
@@ -4488,7 +5756,10 @@ const stockData: StockMapping[] = [
     "isin": "INE976G01028",
     "symbol": "RBLBANK",
     "stockid": "1002649",
-    "companyid": "7750"
+    "companyid": "7750",
+    "tickertape_sid": "RATB",
+    "fincode": 209068,
+    "scripcode": 540065
   },
   {
     "name": "Rashtriya Chemicals and Fertilisers",
@@ -4498,7 +5769,10 @@ const stockData: StockMapping[] = [
     "isin": "INE027A01015",
     "symbol": "RCF",
     "stockid": "872482",
-    "companyid": "11948"
+    "companyid": "11948",
+    "tickertape_sid": "RSTC",
+    "fincode": 124230,
+    "scripcode": 524230
   },
   {
     "name": "Clean Science & Technology",
@@ -4508,7 +5782,10 @@ const stockData: StockMapping[] = [
     "isin": "INE227W01023",
     "symbol": "CLEAN",
     "stockid": "1003509",
-    "companyid": "40781"
+    "companyid": "40781",
+    "tickertape_sid": "CLE",
+    "fincode": 301912,
+    "scripcode": 543318
   },
   {
     "name": "Gillette India",
@@ -4518,7 +5795,10 @@ const stockData: StockMapping[] = [
     "isin": "INE322A01010",
     "symbol": "GILLETTE",
     "stockid": "526321",
-    "companyid": "13567"
+    "companyid": "13567",
+    "tickertape_sid": "GILE",
+    "fincode": 107815,
+    "scripcode": 507815
   },
   {
     "name": "Cera Sanitaryware",
@@ -4528,7 +5808,10 @@ const stockData: StockMapping[] = [
     "isin": "INE739E01017",
     "symbol": "CERA",
     "stockid": "106361",
-    "companyid": "2721"
+    "companyid": "2721",
+    "tickertape_sid": "CERA",
+    "fincode": 132443,
+    "scripcode": 532443
   },
   {
     "name": "JBM Auto",
@@ -4538,7 +5821,9 @@ const stockData: StockMapping[] = [
     "isin": "INE927D01044",
     "symbol": "JBMA",
     "stockid": "610517",
-    "companyid": "14081"
+    "companyid": "14081",
+    "fincode": 132605,
+    "scripcode": 532605
   },
   {
     "name": "Anand Rathi Wealth",
@@ -4548,7 +5833,10 @@ const stockData: StockMapping[] = [
     "isin": "INE463V01026",
     "symbol": "ANANDRATHI",
     "stockid": "1003577",
-    "companyid": "2020300"
+    "companyid": "2020300",
+    "tickertape_sid": "ANAND",
+    "fincode": 226156,
+    "scripcode": 543415
   },
   {
     "name": "Kajaria Ceramics",
@@ -4558,7 +5846,10 @@ const stockData: StockMapping[] = [
     "isin": "INE217B01036",
     "symbol": "KAJARIACER",
     "stockid": "482661",
-    "companyid": "13489"
+    "companyid": "13489",
+    "tickertape_sid": "KAJR",
+    "fincode": 100233,
+    "scripcode": 500233
   },
   {
     "name": "Caplin Point Laboratories",
@@ -4568,7 +5859,10 @@ const stockData: StockMapping[] = [
     "isin": "INE475E01026",
     "symbol": "CAPLIPOINT",
     "stockid": "640544",
-    "companyid": "8581"
+    "companyid": "8581",
+    "tickertape_sid": "CAPL",
+    "fincode": 124742,
+    "scripcode": 524742
   },
   {
     "name": "Cello World",
@@ -4578,7 +5872,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0LMW01024",
     "symbol": "CELLO",
     "stockid": "10039064",
-    "companyid": "2155287"
+    "companyid": "2155287",
+    "tickertape_sid": "CELLO",
+    "fincode": 311653,
+    "scripcode": 544012
   },
   {
     "name": "KEI Industries",
@@ -4588,7 +5885,10 @@ const stockData: StockMapping[] = [
     "isin": "INE878B01027",
     "symbol": "KEI",
     "stockid": "254021",
-    "companyid": "8311"
+    "companyid": "8311",
+    "tickertape_sid": "KEIN",
+    "fincode": 117569,
+    "scripcode": 517569
   },
   {
     "name": "JM Financial",
@@ -4598,7 +5898,10 @@ const stockData: StockMapping[] = [
     "isin": "INE780C01023",
     "symbol": "JMFINANCIL",
     "stockid": "187323",
-    "companyid": "12633"
+    "companyid": "12633",
+    "tickertape_sid": "JMSH",
+    "fincode": 123405,
+    "scripcode": 523405
   },
   {
     "name": "Jammu and Kashmir Bank",
@@ -4608,7 +5911,10 @@ const stockData: StockMapping[] = [
     "isin": "INE168A01041",
     "symbol": "J&KBANK",
     "stockid": "854942",
-    "companyid": "8611"
+    "companyid": "8611",
+    "tickertape_sid": "JKBK",
+    "fincode": 132209,
+    "scripcode": 532209
   },
   {
     "name": "Kalpataru Projects International",
@@ -4618,7 +5924,10 @@ const stockData: StockMapping[] = [
     "isin": "INE220B01022",
     "symbol": "KPIL",
     "stockid": "613539",
-    "companyid": "8534"
+    "companyid": "8534",
+    "tickertape_sid": "KAPT",
+    "fincode": 122287,
+    "scripcode": 522287
   },
   {
     "name": "Aether Industries",
@@ -4628,7 +5937,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0BWX01014",
     "symbol": "AETHER",
     "stockid": "1003658",
-    "companyid": "2043416"
+    "companyid": "2043416",
+    "tickertape_sid": "AET",
+    "fincode": 304714,
+    "scripcode": 543534
   },
   {
     "name": "Ceat",
@@ -4638,7 +5950,10 @@ const stockData: StockMapping[] = [
     "isin": "INE482A01020",
     "symbol": "CEATLTD",
     "stockid": "304521",
-    "companyid": "13914"
+    "companyid": "13914",
+    "tickertape_sid": "CEAT",
+    "fincode": 100878,
+    "scripcode": 500878
   },
   {
     "name": "Jyothy Labs",
@@ -4648,7 +5963,10 @@ const stockData: StockMapping[] = [
     "isin": "INE668F01031",
     "symbol": "JYOTHYLAB",
     "stockid": "973634",
-    "companyid": "16356"
+    "companyid": "16356",
+    "tickertape_sid": "JYOI",
+    "fincode": 200007,
+    "scripcode": 532926
   },
   {
     "name": "Data Patterns (India)",
@@ -4658,7 +5976,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0IX101010",
     "symbol": "DATAPATTNS",
     "stockid": "1003585",
-    "companyid": "48953"
+    "companyid": "48953",
+    "tickertape_sid": "DATAP",
+    "fincode": 222554,
+    "scripcode": 543428
   },
   {
     "name": "BSE Limited",
@@ -4668,7 +5989,10 @@ const stockData: StockMapping[] = [
     "isin": "INE118H01025",
     "symbol": "BSE",
     "stockid": "",
-    "companyid": "2809"
+    "companyid": "2809",
+    "tickertape_sid": "BSEL",
+    "fincode": 207901,
+    "scripcode": 0
   },
   {
     "name": "NCC",
@@ -4678,7 +6002,10 @@ const stockData: StockMapping[] = [
     "isin": "INE868B01028",
     "symbol": "NCC",
     "stockid": "545305",
-    "companyid": "11234"
+    "companyid": "11234",
+    "tickertape_sid": "NCCL",
+    "fincode": 100294,
+    "scripcode": 500294
   },
   {
     "name": "Allcargo Logistics",
@@ -4688,7 +6015,10 @@ const stockData: StockMapping[] = [
     "isin": "INE418H01029",
     "symbol": "ALLCARGO",
     "stockid": "968239",
-    "companyid": "17998"
+    "companyid": "17998",
+    "tickertape_sid": "ACLL",
+    "fincode": 132749,
+    "scripcode": 532749
   },
   {
     "name": "Schneider Electric Infrastructure",
@@ -4698,7 +6028,10 @@ const stockData: StockMapping[] = [
     "isin": "INE839M01018",
     "symbol": "SCHNEIDER",
     "stockid": "564860",
-    "companyid": "37311"
+    "companyid": "37311",
+    "tickertape_sid": "SEIN",
+    "fincode": 229820,
+    "scripcode": 534139
   },
   {
     "name": "DCM Shriram",
@@ -4708,7 +6041,10 @@ const stockData: StockMapping[] = [
     "isin": "INE499A01024",
     "symbol": "DCMSHRIRAM",
     "stockid": "179367",
-    "companyid": "12125"
+    "companyid": "12125",
+    "tickertape_sid": "DCMS",
+    "fincode": 123367,
+    "scripcode": 523367
   },
   {
     "name": "360 ONE WAM",
@@ -4718,7 +6054,10 @@ const stockData: StockMapping[] = [
     "isin": "INE466L01038",
     "symbol": "360ONE",
     "stockid": "1003277",
-    "companyid": "22217"
+    "companyid": "22217",
+    "tickertape_sid": "IIFW",
+    "fincode": 228974,
+    "scripcode": 542772
   },
   {
     "name": "Action Construction Equipment",
@@ -4728,7 +6067,10 @@ const stockData: StockMapping[] = [
     "isin": "INE731H01025",
     "symbol": "ACE",
     "stockid": "680359",
-    "companyid": "17664"
+    "companyid": "17664",
+    "tickertape_sid": "ACEL",
+    "fincode": 132762,
+    "scripcode": 532762
   },
   {
     "name": "JSW Infrastructure",
@@ -4738,7 +6080,10 @@ const stockData: StockMapping[] = [
     "isin": "INE880J01026",
     "symbol": "JSWINFRA",
     "stockid": "10039023",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "JSW",
+    "fincode": 237831,
+    "scripcode": 543994
   },
   {
     "name": "Century Plyboards",
@@ -4748,7 +6093,10 @@ const stockData: StockMapping[] = [
     "isin": "INE348B01021",
     "symbol": "CENTURYPLY",
     "stockid": "757264",
-    "companyid": "2122"
+    "companyid": "2122",
+    "tickertape_sid": "CNTP",
+    "fincode": 132548,
+    "scripcode": 532548
   },
   {
     "name": "Hitachi Energy India",
@@ -4758,7 +6106,10 @@ const stockData: StockMapping[] = [
     "isin": "INE07Y701011",
     "symbol": "POWERINDIA",
     "stockid": "1003393",
-    "companyid": "1942561"
+    "companyid": "1942561",
+    "tickertape_sid": "ABBW",
+    "fincode": 296765,
+    "scripcode": 543187
   },
   {
     "name": "R R Kabel",
@@ -4768,7 +6119,10 @@ const stockData: StockMapping[] = [
     "isin": "INE777K01022",
     "symbol": "RRKABEL",
     "stockid": "10039001",
-    "companyid": "49380"
+    "companyid": "49380",
+    "tickertape_sid": "RRK",
+    "fincode": 209024,
+    "scripcode": 543981
   },
   {
     "name": "Narayana Hrudayalaya",
@@ -4778,7 +6132,10 @@ const stockData: StockMapping[] = [
     "isin": "INE410P01011",
     "symbol": "NH",
     "stockid": "1000454",
-    "companyid": "47955"
+    "companyid": "47955",
+    "tickertape_sid": "NARY",
+    "fincode": 218533,
+    "scripcode": 539551
   },
   {
     "name": "Can Fin Homes",
@@ -4788,7 +6145,10 @@ const stockData: StockMapping[] = [
     "isin": "INE477A01020",
     "symbol": "CANFINHOME",
     "stockid": "395702",
-    "companyid": "13861"
+    "companyid": "13861",
+    "tickertape_sid": "CNFH",
+    "fincode": 111196,
+    "scripcode": 511196
   },
   {
     "name": "Eris Lifesciences",
@@ -4798,7 +6158,10 @@ const stockData: StockMapping[] = [
     "isin": "INE406M01024",
     "symbol": "ERIS",
     "stockid": "1002771",
-    "companyid": "55491"
+    "companyid": "55491",
+    "tickertape_sid": "ERIS",
+    "fincode": 222255,
+    "scripcode": 540596
   },
   {
     "name": "Piramal Pharma",
@@ -4808,7 +6171,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0DK501011",
     "symbol": "PPLPHARMA",
     "stockid": "1003728",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "PPL",
+    "fincode": 307332,
+    "scripcode": 543635
   },
   {
     "name": "Nippon Life India Asset Management",
@@ -4818,7 +6184,10 @@ const stockData: StockMapping[] = [
     "isin": "INE298J01013",
     "symbol": "NAM-INDIA",
     "stockid": "1002866",
-    "companyid": "5449"
+    "companyid": "5449",
+    "tickertape_sid": "NIPF",
+    "fincode": 209078,
+    "scripcode": 540767
   },
   {
     "name": "Natco Pharma",
@@ -4828,7 +6197,10 @@ const stockData: StockMapping[] = [
     "isin": "INE987B01026",
     "symbol": "NATCOPHARM",
     "stockid": "156274",
-    "companyid": "8305"
+    "companyid": "8305",
+    "tickertape_sid": "NATP",
+    "fincode": 124816,
+    "scripcode": 524816
   },
   {
     "name": "Gujarat Ambuja Exports",
@@ -4838,7 +6210,10 @@ const stockData: StockMapping[] = [
     "isin": "INE036B01030",
     "symbol": "GAEL",
     "stockid": "884883",
-    "companyid": "11435"
+    "companyid": "11435",
+    "tickertape_sid": "GAME",
+    "fincode": 124226,
+    "scripcode": 524226
   },
   {
     "name": "NMDC Steel",
@@ -4848,7 +6223,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0NNS01018",
     "symbol": "NSLNISP",
     "stockid": "1003791",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "NSLN",
+    "fincode": 308021,
+    "scripcode": 543768
   },
   {
     "name": "Rainbow Childrens Medicare",
@@ -4858,7 +6236,10 @@ const stockData: StockMapping[] = [
     "isin": "INE961O01016",
     "symbol": "RAINBOW",
     "stockid": "1003646",
-    "companyid": "42272"
+    "companyid": "42272",
+    "tickertape_sid": "RAINB",
+    "fincode": 274045,
+    "scripcode": 543524
   },
   {
     "name": "Just Dial",
@@ -4868,7 +6249,10 @@ const stockData: StockMapping[] = [
     "isin": "INE599M01018",
     "symbol": "JUSTDIAL",
     "stockid": "522321",
-    "companyid": "45529"
+    "companyid": "45529",
+    "tickertape_sid": "JUST",
+    "fincode": 211531,
+    "scripcode": 535648
   },
   {
     "name": "Lemon Tree Hotels",
@@ -4878,7 +6262,10 @@ const stockData: StockMapping[] = [
     "isin": "INE970X01018",
     "symbol": "LEMONTREE",
     "stockid": "1002964",
-    "companyid": "33652"
+    "companyid": "33652",
+    "tickertape_sid": "LEMO",
+    "fincode": 213429,
+    "scripcode": 541233
   },
   {
     "name": "Indian Energy Exchange",
@@ -4888,7 +6275,10 @@ const stockData: StockMapping[] = [
     "isin": "INE022Q01020",
     "symbol": "IEX",
     "stockid": "1002847",
-    "companyid": "20870"
+    "companyid": "20870",
+    "tickertape_sid": "IIAN",
+    "fincode": 224623,
+    "scripcode": 540750
   },
   {
     "name": "KRBL",
@@ -4898,7 +6288,10 @@ const stockData: StockMapping[] = [
     "isin": "INE001B01026",
     "symbol": "KRBL",
     "stockid": "685316",
-    "companyid": "7603"
+    "companyid": "7603",
+    "tickertape_sid": "KRBL",
+    "fincode": 130813,
+    "scripcode": 530813
   },
   {
     "name": "J. K. Cement",
@@ -4908,7 +6301,10 @@ const stockData: StockMapping[] = [
     "isin": "INE823G01014",
     "symbol": "JKCEMENT",
     "stockid": "915452",
-    "companyid": "16847"
+    "companyid": "16847",
+    "tickertape_sid": "JKCE",
+    "fincode": 132644,
+    "scripcode": 532644
   },
   {
     "name": "Minda Corporation",
@@ -4918,7 +6314,10 @@ const stockData: StockMapping[] = [
     "isin": "INE842C01021",
     "symbol": "MINDACORP",
     "stockid": "989109",
-    "companyid": "30624"
+    "companyid": "30624",
+    "tickertape_sid": "MINC",
+    "fincode": 213597,
+    "scripcode": 538962
   },
   {
     "name": "Laurus Labs",
@@ -4928,7 +6327,10 @@ const stockData: StockMapping[] = [
     "isin": "INE947Q01028",
     "symbol": "LAURUSLABS",
     "stockid": "1002699",
-    "companyid": "61545"
+    "companyid": "61545",
+    "tickertape_sid": "LAUL",
+    "fincode": 271867,
+    "scripcode": 540222
   },
   {
     "name": "Ratnamani Metals and Tubes",
@@ -4938,7 +6340,10 @@ const stockData: StockMapping[] = [
     "isin": "INE703B01027",
     "symbol": "RATNAMANI",
     "stockid": "493089",
-    "companyid": "10915"
+    "companyid": "10915",
+    "tickertape_sid": "RMT",
+    "fincode": 120111,
+    "scripcode": 520111
   },
   {
     "name": "NBCC (India)",
@@ -4948,7 +6353,10 @@ const stockData: StockMapping[] = [
     "isin": "INE095N01031",
     "symbol": "NBCC",
     "stockid": "754697",
-    "companyid": "4531"
+    "companyid": "4531",
+    "tickertape_sid": "NBCC",
+    "fincode": 208801,
+    "scripcode": 534309
   },
   {
     "name": "Nuvama Wealth Management Ltd",
@@ -4958,7 +6366,9 @@ const stockData: StockMapping[] = [
     "isin": "INE531F01015",
     "symbol": "NUVAMA",
     "stockid": "10039010",
-    "companyid": "22190"
+    "companyid": "22190",
+    "fincode": 208089,
+    "scripcode": 543988
   },
   {
     "name": "Happiest Minds Technologies",
@@ -4968,7 +6378,10 @@ const stockData: StockMapping[] = [
     "isin": "INE419U01012",
     "symbol": "HAPPSTMNDS",
     "stockid": "1003416",
-    "companyid": "1991065"
+    "companyid": "1991065",
+    "tickertape_sid": "HAPP",
+    "fincode": 284232,
+    "scripcode": 543227
   },
   {
     "name": "PNC Infratech",
@@ -4978,7 +6391,10 @@ const stockData: StockMapping[] = [
     "isin": "INE195J01029",
     "symbol": "PNCINFRA",
     "stockid": "299760",
-    "companyid": "33621"
+    "companyid": "33621",
+    "tickertape_sid": "PNCI",
+    "fincode": 200094,
+    "scripcode": 539150
   },
   {
     "name": "Krishna Institute of Medical Sciences",
@@ -4988,7 +6404,10 @@ const stockData: StockMapping[] = [
     "isin": "INE967H01025",
     "symbol": "KIMS",
     "stockid": "1003501",
-    "companyid": "45407"
+    "companyid": "45407",
+    "tickertape_sid": "KIMS",
+    "fincode": 221645,
+    "scripcode": 543308
   },
   {
     "name": "Ucal",
@@ -4998,7 +6417,10 @@ const stockData: StockMapping[] = [
     "isin": "INE139B01016",
     "symbol": "UCAL",
     "stockid": "302582",
-    "companyid": "12878"
+    "companyid": "12878",
+    "tickertape_sid": "UCAF",
+    "fincode": 100464,
+    "scripcode": 500464
   },
   {
     "name": "Alkyl Amines Chemicals",
@@ -5008,7 +6430,10 @@ const stockData: StockMapping[] = [
     "isin": "INE150B01039",
     "symbol": "ALKYLAMINE",
     "stockid": "186692",
-    "companyid": "34"
+    "companyid": "34",
+    "tickertape_sid": "ALKY",
+    "fincode": 106767,
+    "scripcode": 506767
   },
   {
     "name": "eClerx Services",
@@ -5018,7 +6443,10 @@ const stockData: StockMapping[] = [
     "isin": "INE738I01010",
     "symbol": "ECLERX",
     "stockid": "109342",
-    "companyid": "20366"
+    "companyid": "20366",
+    "tickertape_sid": "ECLE",
+    "fincode": 200017,
+    "scripcode": 532927
   },
   {
     "name": "Prince Pipes & Fittings",
@@ -5028,7 +6456,10 @@ const stockData: StockMapping[] = [
     "isin": "INE689W01016",
     "symbol": "PRINCEPIPE",
     "stockid": "1003366",
-    "companyid": "47146"
+    "companyid": "47146",
+    "tickertape_sid": "PRCE",
+    "fincode": 216564,
+    "scripcode": 542907
   },
   {
     "name": "ICICI Securities",
@@ -5048,7 +6479,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0DD101019",
     "symbol": "RAILTEL",
     "stockid": "1003463",
-    "companyid": "16503"
+    "companyid": "16503",
+    "tickertape_sid": "RAIL",
+    "fincode": 209038,
+    "scripcode": 543265
   },
   {
     "name": "Metro Brands",
@@ -5058,7 +6492,10 @@ const stockData: StockMapping[] = [
     "isin": "INE317I01021",
     "symbol": "METROBRAND",
     "stockid": "1003582",
-    "companyid": "24716"
+    "companyid": "24716",
+    "tickertape_sid": "METR",
+    "fincode": 208727,
+    "scripcode": 543426
   },
   {
     "name": "Rail Vikas Nigam",
@@ -5068,7 +6505,10 @@ const stockData: StockMapping[] = [
     "isin": "INE415G01027",
     "symbol": "RVNL",
     "stockid": "1003127",
-    "companyid": "18466"
+    "companyid": "18466",
+    "tickertape_sid": "RAIV",
+    "fincode": 209037,
+    "scripcode": 542649
   },
   {
     "name": "Motherson Sumi Wiring India",
@@ -5078,7 +6518,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0FS801015",
     "symbol": "MSUMI",
     "stockid": "1003623",
-    "companyid": "2024281"
+    "companyid": "2024281",
+    "tickertape_sid": "MSU",
+    "fincode": 305013,
+    "scripcode": 543498
   },
   {
     "name": "JK Lakshmi Cement",
@@ -5088,7 +6531,10 @@ const stockData: StockMapping[] = [
     "isin": "INE786A01032",
     "symbol": "JKLAKSHMI",
     "stockid": "508302",
-    "companyid": "12989"
+    "companyid": "12989",
+    "tickertape_sid": "JKLC",
+    "fincode": 100380,
+    "scripcode": 500380
   },
   {
     "name": "RHI Magnesita India",
@@ -5098,7 +6544,10 @@ const stockData: StockMapping[] = [
     "isin": "INE743M01012",
     "symbol": "RHIM",
     "stockid": "448344",
-    "companyid": "34738"
+    "companyid": "34738",
+    "tickertape_sid": "ORRE",
+    "fincode": 232353,
+    "scripcode": 534076
   },
   {
     "name": "Quess Corp",
@@ -5108,7 +6557,10 @@ const stockData: StockMapping[] = [
     "isin": "INE615P01015",
     "symbol": "QUESS",
     "stockid": "1002620",
-    "companyid": "55515"
+    "companyid": "55515",
+    "tickertape_sid": "QUEC",
+    "fincode": 267389,
+    "scripcode": 539978
   },
   {
     "name": "Sanofi India",
@@ -5118,7 +6570,10 @@ const stockData: StockMapping[] = [
     "isin": "INE058A01010",
     "symbol": "SANOFI",
     "stockid": "664761",
-    "companyid": "13607"
+    "companyid": "13607",
+    "tickertape_sid": "SANO",
+    "fincode": 100674,
+    "scripcode": 500674
   },
   {
     "name": "Restaurant Brands Asia",
@@ -5128,7 +6583,10 @@ const stockData: StockMapping[] = [
     "isin": "INE07T201019",
     "symbol": "RBA",
     "stockid": "1003448",
-    "companyid": "1997181"
+    "companyid": "1997181",
+    "tickertape_sid": "BUR",
+    "fincode": 296214,
+    "scripcode": 543248
   },
   {
     "name": "Phoenix Mills",
@@ -5138,7 +6596,10 @@ const stockData: StockMapping[] = [
     "isin": "INE211B01039",
     "symbol": "PHOENIXLTD",
     "stockid": "861535",
-    "companyid": "12358"
+    "companyid": "12358",
+    "tickertape_sid": "PHOE",
+    "fincode": 103100,
+    "scripcode": 503100
   },
   {
     "name": "Rattanindia Enterprises",
@@ -5148,7 +6609,10 @@ const stockData: StockMapping[] = [
     "isin": "INE834M01019",
     "symbol": "RTNINDIA",
     "stockid": "154225",
-    "companyid": "35638"
+    "companyid": "35638",
+    "tickertape_sid": "RTNI",
+    "fincode": 229901,
+    "scripcode": 534597
   },
   {
     "name": "Bikaji Foods International",
@@ -5158,7 +6622,10 @@ const stockData: StockMapping[] = [
     "isin": "INE00E101023",
     "symbol": "BIKAJI",
     "stockid": "1003740",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "BIK",
+    "fincode": 209232,
+    "scripcode": 543653
   },
   {
     "name": "The Ramco Cements",
@@ -5168,7 +6635,10 @@ const stockData: StockMapping[] = [
     "isin": "INE331A01037",
     "symbol": "RAMCOCEM",
     "stockid": "345424",
-    "companyid": "11377"
+    "companyid": "11377",
+    "tickertape_sid": "TRCE",
+    "fincode": 100260,
+    "scripcode": 500260
   },
   {
     "name": "Sapphire Foods India",
@@ -5178,7 +6648,10 @@ const stockData: StockMapping[] = [
     "isin": "INE806T01020",
     "symbol": "SAPPHIRE",
     "stockid": "1003567",
-    "companyid": "2017902"
+    "companyid": "2017902",
+    "tickertape_sid": "SAPPH",
+    "fincode": 303107,
+    "scripcode": 543397
   },
   {
     "name": "New India Assurance Company",
@@ -5188,7 +6661,10 @@ const stockData: StockMapping[] = [
     "isin": "INE470Y01017",
     "symbol": "NIACL",
     "stockid": "1002871",
-    "companyid": "4285"
+    "companyid": "4285",
+    "tickertape_sid": "THEE",
+    "fincode": 217385,
+    "scripcode": 540769
   },
   {
     "name": "PCBL",
@@ -5198,7 +6674,10 @@ const stockData: StockMapping[] = [
     "isin": "INE602A01031",
     "symbol": "PCBL",
     "stockid": "694251",
-    "companyid": "13276"
+    "companyid": "13276",
+    "tickertape_sid": "PHIL",
+    "fincode": 106590,
+    "scripcode": 506590
   },
   {
     "name": "KFin Technologies",
@@ -5208,7 +6687,10 @@ const stockData: StockMapping[] = [
     "isin": "INE138Y01010",
     "symbol": "KFINTECH",
     "stockid": "1003765",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "KFI",
+    "fincode": 305799,
+    "scripcode": 543720
   },
   {
     "name": "Blue Star",
@@ -5218,7 +6700,10 @@ const stockData: StockMapping[] = [
     "isin": "INE472A01039",
     "symbol": "BLUESTARCO",
     "stockid": "539868",
-    "companyid": "13942"
+    "companyid": "13942",
+    "tickertape_sid": "BLUS",
+    "fincode": 100067,
+    "scripcode": 500067
   },
   {
     "name": "Aster DM Healthcare Ltd",
@@ -5228,7 +6713,10 @@ const stockData: StockMapping[] = [
     "isin": "INE914M01019",
     "symbol": "ASTERDM",
     "stockid": "1002923",
-    "companyid": "67489"
+    "companyid": "67489",
+    "tickertape_sid": "ATRD",
+    "fincode": 221033,
+    "scripcode": 540975
   },
   {
     "name": "Ajanta Pharma",
@@ -5238,7 +6726,10 @@ const stockData: StockMapping[] = [
     "isin": "INE031B01049",
     "symbol": "AJANTPHARM",
     "stockid": "178818",
-    "companyid": "3723"
+    "companyid": "3723",
+    "tickertape_sid": "AJPH",
+    "fincode": 132331,
+    "scripcode": 532331
   },
   {
     "name": "Radico Khaitan",
@@ -5248,7 +6739,10 @@ const stockData: StockMapping[] = [
     "isin": "INE944F01028",
     "symbol": "RADICO",
     "stockid": "387440",
-    "companyid": "12315"
+    "companyid": "12315",
+    "tickertape_sid": "RADC",
+    "fincode": 132497,
+    "scripcode": 532497
   },
   {
     "name": "DOMS Industries",
@@ -5258,7 +6752,10 @@ const stockData: StockMapping[] = [
     "isin": "INE321T01012",
     "symbol": "DOMS",
     "stockid": "10039096",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "DOM",
+    "fincode": 311742,
+    "scripcode": 544045
   },
   {
     "name": "Archean Chemical Industries",
@@ -5268,7 +6765,10 @@ const stockData: StockMapping[] = [
     "isin": "INE128X01021",
     "symbol": "ACI",
     "stockid": "1003745",
-    "companyid": "55288"
+    "companyid": "55288",
+    "tickertape_sid": "ACA",
+    "fincode": 293601,
+    "scripcode": 543657
   },
   {
     "name": "Bombay Burmah Trading Corporation",
@@ -5278,7 +6778,10 @@ const stockData: StockMapping[] = [
     "isin": "INE050A01025",
     "symbol": "BBTC",
     "stockid": "724048",
-    "companyid": "13945"
+    "companyid": "13945",
+    "tickertape_sid": "BBRM",
+    "fincode": 101425,
+    "scripcode": 501425
   },
   {
     "name": "Alembic Pharmaceuticals",
@@ -5288,7 +6791,10 @@ const stockData: StockMapping[] = [
     "isin": "INE901L01018",
     "symbol": "APLLTD",
     "stockid": "807696",
-    "companyid": "34421"
+    "companyid": "34421",
+    "tickertape_sid": "ALEM",
+    "fincode": 224849,
+    "scripcode": 533573
   },
   {
     "name": "Balaji Amines",
@@ -5298,7 +6804,10 @@ const stockData: StockMapping[] = [
     "isin": "INE050E01027",
     "symbol": "BALAMINES",
     "stockid": "234939",
-    "companyid": "7478"
+    "companyid": "7478",
+    "tickertape_sid": "BAMN",
+    "fincode": 130999,
+    "scripcode": 530999
   },
   {
     "name": "Central Depository Services Ltd",
@@ -5308,7 +6817,10 @@ const stockData: StockMapping[] = [
     "isin": "INE736A01011",
     "symbol": "CDSL",
     "stockid": "1002774",
-    "companyid": "4259"
+    "companyid": "4259",
+    "tickertape_sid": "CENA",
+    "fincode": 207950,
+    "scripcode": 0
   },
   {
     "name": "CIE Automotive India",
@@ -5318,7 +6830,10 @@ const stockData: StockMapping[] = [
     "isin": "INE536H01010",
     "symbol": "CIEINDIA",
     "stockid": "343371",
-    "companyid": "17103"
+    "companyid": "17103",
+    "tickertape_sid": "MAHN",
+    "fincode": 132756,
+    "scripcode": 532756
   },
   {
     "name": "Granules India",
@@ -5328,7 +6843,10 @@ const stockData: StockMapping[] = [
     "isin": "INE101D01020",
     "symbol": "GRANULES",
     "stockid": "580033",
-    "companyid": "6991"
+    "companyid": "6991",
+    "tickertape_sid": "GRAN",
+    "fincode": 132482,
+    "scripcode": 532482
   },
   {
     "name": "Capri Global Capital",
@@ -5338,7 +6856,10 @@ const stockData: StockMapping[] = [
     "isin": "INE180C01042",
     "symbol": "CGCL",
     "stockid": "671224",
-    "companyid": "6183"
+    "companyid": "6183",
+    "tickertape_sid": "CAPG",
+    "fincode": 131595,
+    "scripcode": 531595
   },
   {
     "name": "HBL Power Systems",
@@ -5348,7 +6869,8 @@ const stockData: StockMapping[] = [
     "isin": "INE292B01021",
     "symbol": "HBLPOWER",
     "stockid": "670449",
-    "companyid": "12111"
+    "companyid": "12111",
+    "tickertape_sid": "HBLS"
   },
   {
     "name": "West Coast Paper Mills",
@@ -5358,7 +6880,10 @@ const stockData: StockMapping[] = [
     "isin": "INE976A01021",
     "symbol": "WSTCSTPAPR",
     "stockid": "710529",
-    "companyid": "12818"
+    "companyid": "12818",
+    "tickertape_sid": "WSTC",
+    "fincode": 100444,
+    "scripcode": 500444
   },
   {
     "name": "JK Paper",
@@ -5368,7 +6893,10 @@ const stockData: StockMapping[] = [
     "isin": "INE789E01012",
     "symbol": "JKPAPER",
     "stockid": "565761",
-    "companyid": "11827"
+    "companyid": "11827",
+    "tickertape_sid": "JKPA",
+    "fincode": 132162,
+    "scripcode": 532162
   },
   {
     "name": "Kalyan Jewellers India",
@@ -5378,7 +6906,10 @@ const stockData: StockMapping[] = [
     "isin": "INE303R01014",
     "symbol": "KALYANKJIL",
     "stockid": "1003479",
-    "companyid": "2002614"
+    "companyid": "2002614",
+    "tickertape_sid": "KALYA",
+    "fincode": 226720,
+    "scripcode": 543278
   },
   {
     "name": "Global Health",
@@ -5388,7 +6919,10 @@ const stockData: StockMapping[] = [
     "isin": "INE474Q01031",
     "symbol": "MEDANTA",
     "stockid": "1003741",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "MEDA",
+    "fincode": 279664,
+    "scripcode": 543654
   },
   {
     "name": "Ircon International ",
@@ -5398,7 +6932,10 @@ const stockData: StockMapping[] = [
     "isin": "INE962Y01021",
     "symbol": "IRCON",
     "stockid": "102348",
-    "companyid": "11980"
+    "companyid": "11980",
+    "tickertape_sid": "IRCN",
+    "fincode": 123596,
+    "scripcode": 541956
   },
   {
     "name": "Kaynes Technology India",
@@ -5408,7 +6945,10 @@ const stockData: StockMapping[] = [
     "isin": "INE918Z01012",
     "symbol": "KAYNES",
     "stockid": "1003747",
-    "companyid": "41301"
+    "companyid": "41301",
+    "tickertape_sid": "KAYN",
+    "fincode": 223187,
+    "scripcode": 543664
   },
   {
     "name": "Happy Forgings",
@@ -5418,7 +6958,10 @@ const stockData: StockMapping[] = [
     "isin": "INE330T01021",
     "symbol": "HAPPYFORGE",
     "stockid": "10039105",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "HAP",
+    "fincode": 211740,
+    "scripcode": 544057
   },
   {
     "name": "Himadri Speciality Chemical",
@@ -5428,7 +6971,10 @@ const stockData: StockMapping[] = [
     "isin": "INE019C01026",
     "symbol": "HSCL",
     "stockid": "169739",
-    "companyid": "11088"
+    "companyid": "11088",
+    "tickertape_sid": "HIMD",
+    "fincode": 100184,
+    "scripcode": 500184
   },
   {
     "name": "Avanti Feeds",
@@ -5438,7 +6984,10 @@ const stockData: StockMapping[] = [
     "isin": "INE871C01038",
     "symbol": "AVANTIFEED",
     "stockid": "518334",
-    "companyid": "6724"
+    "companyid": "6724",
+    "tickertape_sid": "AVNT",
+    "fincode": 112573,
+    "scripcode": 512573
   },
   {
     "name": "Housing & Urban Development Corporation",
@@ -5448,7 +6997,10 @@ const stockData: StockMapping[] = [
     "isin": "INE031A01017",
     "symbol": "HUDCO",
     "stockid": "1002757",
-    "companyid": "4516"
+    "companyid": "4516",
+    "tickertape_sid": "HUDC",
+    "fincode": 213327,
+    "scripcode": 540530
   },
   {
     "name": "Computer Age Management Services",
@@ -5458,7 +7010,9 @@ const stockData: StockMapping[] = [
     "isin": "INE596I01012",
     "symbol": "CAMS",
     "stockid": "1003422",
-    "companyid": "49545"
+    "companyid": "49545",
+    "fincode": 210036,
+    "scripcode": 543232
   },
   {
     "name": "Laxmi Organic Industries",
@@ -5468,7 +7022,10 @@ const stockData: StockMapping[] = [
     "isin": "INE576O01020",
     "symbol": "LXCHEM",
     "stockid": "1003478",
-    "companyid": "49476"
+    "companyid": "49476",
+    "tickertape_sid": "LXC",
+    "fincode": 208615,
+    "scripcode": 543277
   },
   {
     "name": "Concord Biotech",
@@ -5478,7 +7035,10 @@ const stockData: StockMapping[] = [
     "isin": "INE338H01029",
     "symbol": "CONCORDBIO",
     "stockid": "10038977",
-    "companyid": "15603"
+    "companyid": "15603",
+    "tickertape_sid": "CONCO",
+    "fincode": 210039,
+    "scripcode": 543960
   },
   {
     "name": "GMM Pfaudler",
@@ -5488,7 +7048,10 @@ const stockData: StockMapping[] = [
     "isin": "INE541A01023",
     "symbol": "GMMPFAUDLR",
     "stockid": "176863",
-    "companyid": "13687"
+    "companyid": "13687",
+    "tickertape_sid": "GMMP",
+    "fincode": 105255,
+    "scripcode": 505255
   },
   {
     "name": "Raymond",
@@ -5498,7 +7061,10 @@ const stockData: StockMapping[] = [
     "isin": "INE301A01014",
     "symbol": "RAYMOND",
     "stockid": "266126",
-    "companyid": "13214"
+    "companyid": "13214",
+    "tickertape_sid": "RYMD",
+    "fincode": 100330,
+    "scripcode": 500330
   },
   {
     "name": "Five-Star Business Finance",
@@ -5508,7 +7074,10 @@ const stockData: StockMapping[] = [
     "isin": "INE128S01021",
     "symbol": "FIVESTAR",
     "stockid": "1003746",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "FIVES",
+    "fincode": 278701,
+    "scripcode": 543663
   },
   {
     "name": "Bank of Maharashtra",
@@ -5518,7 +7087,10 @@ const stockData: StockMapping[] = [
     "isin": "INE457A01014",
     "symbol": "MAHABANK",
     "stockid": "291436",
-    "companyid": "12283"
+    "companyid": "12283",
+    "tickertape_sid": "BMBK",
+    "fincode": 132525,
+    "scripcode": 532525
   },
   {
     "name": "Apar Industries",
@@ -5528,7 +7100,10 @@ const stockData: StockMapping[] = [
     "isin": "INE372A01015",
     "symbol": "APARINDS",
     "stockid": "997012",
-    "companyid": "12150"
+    "companyid": "12150",
+    "tickertape_sid": "APAR",
+    "fincode": 132259,
+    "scripcode": 532259
   },
   {
     "name": "Brigade Enterprises",
@@ -5538,7 +7113,10 @@ const stockData: StockMapping[] = [
     "isin": "INE791I01019",
     "symbol": "BRIGADE",
     "stockid": "123404",
-    "companyid": "20445"
+    "companyid": "20445",
+    "tickertape_sid": "BRIG",
+    "fincode": 200020,
+    "scripcode": 532929
   },
   {
     "name": "MTAR Technologies",
@@ -5548,7 +7126,10 @@ const stockData: StockMapping[] = [
     "isin": "INE864I01014",
     "symbol": "MTARTECH",
     "stockid": "1003469",
-    "companyid": "46140"
+    "companyid": "46140",
+    "tickertape_sid": "MTA",
+    "fincode": 208763,
+    "scripcode": 543270
   },
   {
     "name": "SBFC Finance",
@@ -5558,7 +7139,10 @@ const stockData: StockMapping[] = [
     "isin": "INE423Y01016",
     "symbol": "SBFC",
     "stockid": "10038972",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "SBFC",
+    "fincode": 287490,
+    "scripcode": 543959
   },
   {
     "name": "Safari Industries (India)",
@@ -5568,7 +7152,10 @@ const stockData: StockMapping[] = [
     "isin": "INE429E01023",
     "symbol": "SAFARI",
     "stockid": "733141",
-    "companyid": "13159"
+    "companyid": "13159",
+    "tickertape_sid": "SAFA",
+    "fincode": 123025,
+    "scripcode": 523025
   },
   {
     "name": "PNB Housing Finance",
@@ -5578,7 +7165,10 @@ const stockData: StockMapping[] = [
     "isin": "INE572E01012",
     "symbol": "PNBHOUSING",
     "stockid": "1002686",
-    "companyid": "4749"
+    "companyid": "4749",
+    "tickertape_sid": "PNBH",
+    "fincode": 217757,
+    "scripcode": 540173
   },
   {
     "name": "KEC International",
@@ -5588,7 +7178,10 @@ const stockData: StockMapping[] = [
     "isin": "INE389H01022",
     "symbol": "KEC",
     "stockid": "562014",
-    "companyid": "16054"
+    "companyid": "16054",
+    "tickertape_sid": "KECL",
+    "fincode": 132714,
+    "scripcode": 532714
   },
   {
     "name": "Nuvoco Vistas Corporation",
@@ -5598,7 +7191,10 @@ const stockData: StockMapping[] = [
     "isin": "INE118D01016",
     "symbol": "NUVOCO",
     "stockid": "1003525",
-    "companyid": "3356"
+    "companyid": "3356",
+    "tickertape_sid": "NUV",
+    "fincode": 216147,
+    "scripcode": 543334
   },
   {
     "name": "Saregama India",
@@ -5608,7 +7204,10 @@ const stockData: StockMapping[] = [
     "isin": "INE979A01025",
     "symbol": "SAREGAMA",
     "stockid": "461333",
-    "companyid": "13704"
+    "companyid": "13704",
+    "tickertape_sid": "SARE",
+    "fincode": 132163,
+    "scripcode": 532163
   },
   {
     "name": "Poly Medicure",
@@ -5618,7 +7217,10 @@ const stockData: StockMapping[] = [
     "isin": "INE205C01021",
     "symbol": "POLYMED",
     "stockid": "792489",
-    "companyid": "4586"
+    "companyid": "4586",
+    "tickertape_sid": "PLMD",
+    "fincode": 131768,
+    "scripcode": 531768
   },
   {
     "name": "Prestige Estates Projects",
@@ -5628,7 +7230,10 @@ const stockData: StockMapping[] = [
     "isin": "INE811K01011",
     "symbol": "PRESTIGE",
     "stockid": "698915",
-    "companyid": "32683"
+    "companyid": "32683",
+    "tickertape_sid": "PREG",
+    "fincode": 213838,
+    "scripcode": 533274
   },
   {
     "name": "Poonawalla Fincorp",
@@ -5638,7 +7243,10 @@ const stockData: StockMapping[] = [
     "isin": "INE511C01022",
     "symbol": "POONAWALLA",
     "stockid": "348058",
-    "companyid": "8917"
+    "companyid": "8917",
+    "tickertape_sid": "MAGM",
+    "fincode": 124000,
+    "scripcode": 524000
   },
   {
     "name": "Mahindra Lifespace Developers",
@@ -5648,7 +7256,10 @@ const stockData: StockMapping[] = [
     "isin": "INE813A01018",
     "symbol": "MAHLIFE",
     "stockid": "209624",
-    "companyid": "3527"
+    "companyid": "3527",
+    "tickertape_sid": "MALD",
+    "fincode": 132313,
+    "scripcode": 532313
   },
   {
     "name": "Medplus Health Services",
@@ -5658,7 +7269,10 @@ const stockData: StockMapping[] = [
     "isin": "INE804L01022",
     "symbol": "MEDPLUS",
     "stockid": "1003583",
-    "companyid": "2020832"
+    "companyid": "2020832",
+    "tickertape_sid": "MEDP",
+    "fincode": 232604,
+    "scripcode": 543427
   },
   {
     "name": "C. E. Info Systems (MapmyIndia)",
@@ -5668,7 +7282,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0BV301023",
     "symbol": "MAPMYINDIA",
     "stockid": "",
-    "companyid": "2020538"
+    "companyid": "2020538",
+    "tickertape_sid": "MAPM",
+    "fincode": 303322,
+    "scripcode": 543425
   },
   {
     "name": "RITES",
@@ -5678,7 +7295,10 @@ const stockData: StockMapping[] = [
     "isin": "INE320J01015",
     "symbol": "RITES",
     "stockid": "1003009",
-    "companyid": "18469"
+    "companyid": "18469",
+    "tickertape_sid": "RITS",
+    "fincode": 209097,
+    "scripcode": 541556
   },
   {
     "name": "Jupiter Wagons",
@@ -5688,7 +7308,10 @@ const stockData: StockMapping[] = [
     "isin": "INE209L01016",
     "symbol": "JWL",
     "stockid": "162029",
-    "companyid": "32573"
+    "companyid": "32573",
+    "tickertape_sid": "CEBB",
+    "fincode": 220674,
+    "scripcode": 533272
   },
   {
     "name": "Praj Industries",
@@ -5698,7 +7321,10 @@ const stockData: StockMapping[] = [
     "isin": "INE074A01025",
     "symbol": "PRAJIND",
     "stockid": "107182",
-    "companyid": "10378"
+    "companyid": "10378",
+    "tickertape_sid": "PRAJ",
+    "fincode": 122205,
+    "scripcode": 522205
   },
   {
     "name": "Network 18 Media & Investments",
@@ -5708,7 +7334,10 @@ const stockData: StockMapping[] = [
     "isin": "INE870H01013",
     "symbol": "NETWORK18",
     "stockid": "380908",
-    "companyid": "15747"
+    "companyid": "15747",
+    "tickertape_sid": "NEFI",
+    "fincode": 132798,
+    "scripcode": 532798
   },
   {
     "name": "Ramkrishna Forgings",
@@ -5718,7 +7347,10 @@ const stockData: StockMapping[] = [
     "isin": "INE399G01023",
     "symbol": "RKFORGE",
     "stockid": "215354",
-    "companyid": "16774"
+    "companyid": "16774",
+    "tickertape_sid": "RKFO",
+    "fincode": 132527,
+    "scripcode": 532527
   },
   {
     "name": "Garden Reach Shipbuilders & Engineers",
@@ -5728,7 +7360,10 @@ const stockData: StockMapping[] = [
     "isin": "INE382Z01011",
     "symbol": "GRSE",
     "stockid": "1003063",
-    "companyid": "4718"
+    "companyid": "4718",
+    "tickertape_sid": "GRSE",
+    "fincode": 208196,
+    "scripcode": 542011
   },
   {
     "name": "Honasa Consumer",
@@ -5738,7 +7373,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0J5401028",
     "symbol": "HONASA",
     "stockid": "10039065",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "HON",
+    "fincode": 308764,
+    "scripcode": 544014
   },
   {
     "name": "Fine Organics Industries",
@@ -5748,7 +7386,10 @@ const stockData: StockMapping[] = [
     "isin": "INE686Y01026",
     "symbol": "FINEORG",
     "stockid": "",
-    "companyid": "67960"
+    "companyid": "67960",
+    "tickertape_sid": "FINO",
+    "fincode": 288451,
+    "scripcode": 541557
   },
   {
     "name": "NESCO",
@@ -5758,7 +7399,10 @@ const stockData: StockMapping[] = [
     "isin": "INE317F01035",
     "symbol": "NESCO",
     "stockid": "995536",
-    "companyid": "12132"
+    "companyid": "12132",
+    "tickertape_sid": "NSEN",
+    "fincode": 105355,
+    "scripcode": 505355
   },
   {
     "name": "Sterling and Wilson Renewable Energy",
@@ -5768,7 +7412,10 @@ const stockData: StockMapping[] = [
     "isin": "INE00M201021",
     "symbol": "SWSOLAR",
     "stockid": "1003161",
-    "companyid": "1944712"
+    "companyid": "1944712",
+    "tickertape_sid": "STEN",
+    "fincode": 295131,
+    "scripcode": 542760
   },
   {
     "name": "Suven Pharmaceuticals",
@@ -5778,7 +7425,8 @@ const stockData: StockMapping[] = [
     "isin": "INE03QK01018",
     "symbol": "SUVENPHAR",
     "stockid": "1003386",
-    "companyid": "1960165"
+    "companyid": "1960165",
+    "tickertape_sid": "SUVH"
   },
   {
     "name": "Welspun Living",
@@ -5788,7 +7436,10 @@ const stockData: StockMapping[] = [
     "isin": "INE192B01031",
     "symbol": "WELSPUNLIV",
     "stockid": "234124",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "WLSP",
+    "fincode": 114162,
+    "scripcode": 514162
   },
   {
     "name": "Vaibhav Global",
@@ -5798,7 +7449,10 @@ const stockData: StockMapping[] = [
     "isin": "INE884A01027",
     "symbol": "VAIBHAVGBL",
     "stockid": "176027",
-    "companyid": "5226"
+    "companyid": "5226",
+    "tickertape_sid": "VAIB",
+    "fincode": 132156,
+    "scripcode": 532156
   },
   {
     "name": "TV18 Broadcast",
@@ -5818,7 +7472,10 @@ const stockData: StockMapping[] = [
     "isin": "INE767A01016",
     "symbol": "AARTIDRUGS",
     "stockid": "657348",
-    "companyid": "10801"
+    "companyid": "10801",
+    "tickertape_sid": "ADRG",
+    "fincode": 124348,
+    "scripcode": 524348
   },
   {
     "name": "Westlife Foodworld",
@@ -5828,7 +7485,10 @@ const stockData: StockMapping[] = [
     "isin": "INE274F01020",
     "symbol": "WESTLIFE",
     "stockid": "462877",
-    "companyid": "3837"
+    "companyid": "3837",
+    "tickertape_sid": "WEST",
+    "fincode": 105533,
+    "scripcode": 505533
   },
   {
     "name": "Sun Pharma Advanced Research Company",
@@ -5838,7 +7498,10 @@ const stockData: StockMapping[] = [
     "isin": "INE232I01014",
     "symbol": "SPARC",
     "stockid": "739743",
-    "companyid": "18315"
+    "companyid": "18315",
+    "tickertape_sid": "SPRC",
+    "fincode": 132872,
+    "scripcode": 532872
   },
   {
     "name": "SUMITOMO CHEMICAL INDIA LIMITE",
@@ -5848,7 +7511,10 @@ const stockData: StockMapping[] = [
     "isin": "INE258G01013",
     "symbol": "SUMICHEM",
     "stockid": "",
-    "companyid": "49672"
+    "companyid": "49672",
+    "tickertape_sid": "SUMH",
+    "fincode": 209344,
+    "scripcode": 542920
   },
   {
     "name": "Varroc Engineering",
@@ -5858,7 +7524,10 @@ const stockData: StockMapping[] = [
     "isin": "INE665L01035",
     "symbol": "VARROC",
     "stockid": "1003011",
-    "companyid": "68496"
+    "companyid": "68496",
+    "tickertape_sid": "VARE",
+    "fincode": 214437,
+    "scripcode": 541578
   },
   {
     "name": "Zydus Wellness",
@@ -5868,7 +7537,9 @@ const stockData: StockMapping[] = [
     "isin": "INE768C01010",
     "symbol": "ZYDUSWELL",
     "stockid": "696114",
-    "companyid": "6816"
+    "companyid": "6816",
+    "fincode": 131335,
+    "scripcode": 531335
   },
   {
     "name": "La Opala RG",
@@ -5878,7 +7549,10 @@ const stockData: StockMapping[] = [
     "isin": "INE059D01020",
     "symbol": "LAOPALA",
     "stockid": "828262",
-    "companyid": "8152"
+    "companyid": "8152",
+    "tickertape_sid": "LAOP",
+    "fincode": 126947,
+    "scripcode": 526947
   },
   {
     "name": "Swan Energy",
@@ -5888,7 +7562,8 @@ const stockData: StockMapping[] = [
     "isin": "INE665A01038",
     "symbol": "SWANENERGY",
     "stockid": "305783",
-    "companyid": "11965"
+    "companyid": "11965",
+    "tickertape_sid": "SWAN"
   },
   {
     "name": "Mrs. Bectors Food Specialities",
@@ -5898,7 +7573,9 @@ const stockData: StockMapping[] = [
     "isin": "INE495P01012",
     "symbol": "BECTORFOOD",
     "stockid": "",
-    "companyid": "1998176"
+    "companyid": "1998176",
+    "fincode": 223478,
+    "scripcode": 543253
   },
   {
     "name": "G R Infraprojects",
@@ -5908,7 +7585,10 @@ const stockData: StockMapping[] = [
     "isin": "INE201P01022",
     "symbol": "GRINFRA",
     "stockid": "1003508",
-    "companyid": "40302"
+    "companyid": "40302",
+    "tickertape_sid": "GRI",
+    "fincode": 251940,
+    "scripcode": 543317
   },
   {
     "name": "Shoppers Stop",
@@ -5918,7 +7598,10 @@ const stockData: StockMapping[] = [
     "isin": "INE498B01024",
     "symbol": "SHOPERSTOP",
     "stockid": "879915",
-    "companyid": "2646"
+    "companyid": "2646",
+    "tickertape_sid": "SHOP",
+    "fincode": 132638,
+    "scripcode": 532638
   },
   {
     "name": "Manorama Industries",
@@ -5928,7 +7611,10 @@ const stockData: StockMapping[] = [
     "isin": "INE00VM01036",
     "symbol": "MANORAMA",
     "stockid": "1003059",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "MANO",
+    "fincode": 289858,
+    "scripcode": 541974
   },
   {
     "name": "Uttam Sugar Mills",
@@ -5938,7 +7624,10 @@ const stockData: StockMapping[] = [
     "isin": "INE786F01031",
     "symbol": "UTTAMSUGAR",
     "stockid": "549164",
-    "companyid": "15290"
+    "companyid": "15290",
+    "tickertape_sid": "UTSM",
+    "fincode": 132729,
+    "scripcode": 532729
   },
   {
     "name": "Indian Renewable Energy Development Agency",
@@ -5948,7 +7637,10 @@ const stockData: StockMapping[] = [
     "isin": "INE202E01016",
     "symbol": "IREDA",
     "stockid": "10039078",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "IRE",
+    "fincode": 208414,
+    "scripcode": 544026
   },
   {
     "name": "Hindustan Foods",
@@ -5958,7 +7650,10 @@ const stockData: StockMapping[] = [
     "isin": "INE254N01026",
     "symbol": "HNDFDS",
     "stockid": "276044",
-    "companyid": "13646"
+    "companyid": "13646",
+    "tickertape_sid": "HFDS",
+    "fincode": 119126,
+    "scripcode": 519126
   },
   {
     "name": "V-Mart Retail",
@@ -5968,7 +7663,10 @@ const stockData: StockMapping[] = [
     "isin": "INE665J01013",
     "symbol": "VMART",
     "stockid": "884118",
-    "companyid": "44030"
+    "companyid": "44030",
+    "tickertape_sid": "VMAR",
+    "fincode": 237191,
+    "scripcode": 534976
   },
   {
     "name": "Sula Vineyards",
@@ -5978,7 +7676,10 @@ const stockData: StockMapping[] = [
     "isin": "INE142Q01026",
     "symbol": "SULA",
     "stockid": "1003759",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "SULA",
+    "fincode": 221959,
+    "scripcode": 543711
   },
   {
     "name": "Punjab & Sind Bank",
@@ -5988,7 +7689,10 @@ const stockData: StockMapping[] = [
     "isin": "INE608A01012",
     "symbol": "PSB",
     "stockid": "170791",
-    "companyid": "11582"
+    "companyid": "11582",
+    "tickertape_sid": "PUNA",
+    "fincode": 218058,
+    "scripcode": 533295
   },
   {
     "name": "ZF Commercial Vehicle Control Systems India",
@@ -5998,7 +7702,10 @@ const stockData: StockMapping[] = [
     "isin": "INE342J01019",
     "symbol": "ZFCVINDIA",
     "stockid": "",
-    "companyid": "22706"
+    "companyid": "22706",
+    "tickertape_sid": "WABC",
+    "fincode": 200515,
+    "scripcode": 533023
   },
   {
     "name": "Tata Teleservices (Maharashtra)",
@@ -6008,7 +7715,10 @@ const stockData: StockMapping[] = [
     "isin": "INE517B01013",
     "symbol": "TTML",
     "stockid": "847959",
-    "companyid": "3545"
+    "companyid": "3545",
+    "tickertape_sid": "TTML",
+    "fincode": 132371,
+    "scripcode": 532371
   },
   {
     "name": "Timken India",
@@ -6018,7 +7728,10 @@ const stockData: StockMapping[] = [
     "isin": "INE325A01013",
     "symbol": "TIMKEN",
     "stockid": "789133",
-    "companyid": "12183"
+    "companyid": "12183",
+    "tickertape_sid": "TIMK",
+    "fincode": 122113,
+    "scripcode": 522113
   },
   {
     "name": "Tarsons Products",
@@ -6028,7 +7741,10 @@ const stockData: StockMapping[] = [
     "isin": "INE144Z01023",
     "symbol": "TARSONS",
     "stockid": "1003569",
-    "companyid": "2019639"
+    "companyid": "2019639",
+    "tickertape_sid": "TARS",
+    "fincode": 217015,
+    "scripcode": 543399
   },
   {
     "name": "SIS",
@@ -6038,7 +7754,10 @@ const stockData: StockMapping[] = [
     "isin": "INE285J01028",
     "symbol": "SIS",
     "stockid": "1002800",
-    "companyid": "46514"
+    "companyid": "46514",
+    "tickertape_sid": "SECR",
+    "fincode": 210729,
+    "scripcode": 540673
   },
   {
     "name": "Flair Writing Industries",
@@ -6048,7 +7767,10 @@ const stockData: StockMapping[] = [
     "isin": "INE00Y201027",
     "symbol": "FLAIR",
     "stockid": "10039083",
-    "companyid": "2078353"
+    "companyid": "2078353",
+    "tickertape_sid": "FLAI",
+    "fincode": 292711,
+    "scripcode": 544030
   },
   {
     "name": "Usha Martin",
@@ -6058,7 +7780,10 @@ const stockData: StockMapping[] = [
     "isin": "INE228A01035",
     "symbol": "USHAMART",
     "stockid": "604024",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "USBL",
+    "fincode": 117146,
+    "scripcode": 517146
   },
   {
     "name": "Aarti Pharmalabs",
@@ -6068,7 +7793,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0LRU01027",
     "symbol": "AARTIPHARM",
     "stockid": "1003784",
-    "companyid": "2041742"
+    "companyid": "2041742",
+    "tickertape_sid": "AART",
+    "fincode": 308020,
+    "scripcode": 543748
   },
   {
     "name": "Thyrocare Technologies",
@@ -6078,7 +7806,10 @@ const stockData: StockMapping[] = [
     "isin": "INE594H01019",
     "symbol": "THYROCARE",
     "stockid": "1000893",
-    "companyid": "60244"
+    "companyid": "60244",
+    "tickertape_sid": "THYO",
+    "fincode": 218764,
+    "scripcode": 539871
   },
   {
     "name": "Mishra Dhatu Nigam",
@@ -6088,7 +7819,10 @@ const stockData: StockMapping[] = [
     "isin": "INE099Z01011",
     "symbol": "MIDHANI",
     "stockid": "1002951",
-    "companyid": "4499"
+    "companyid": "4499",
+    "tickertape_sid": "MISR",
+    "fincode": 208745,
+    "scripcode": 541195
   },
   {
     "name": "Kopran",
@@ -6098,7 +7832,10 @@ const stockData: StockMapping[] = [
     "isin": "INE082A01010",
     "symbol": "KOPRAN",
     "stockid": "568367",
-    "companyid": "11077"
+    "companyid": "11077",
+    "tickertape_sid": "KPRN",
+    "fincode": 124280,
+    "scripcode": 524280
   },
   {
     "name": "KIOCL",
@@ -6108,7 +7845,10 @@ const stockData: StockMapping[] = [
     "isin": "INE880L01014",
     "symbol": "KIOCL",
     "stockid": "1000345",
-    "companyid": "5088"
+    "companyid": "5088",
+    "tickertape_sid": "KIOC",
+    "fincode": 220053,
+    "scripcode": 540680
   },
   {
     "name": "Maharashtra Scooters",
@@ -6118,7 +7858,10 @@ const stockData: StockMapping[] = [
     "isin": "INE288A01013",
     "symbol": "MAHSCOOTER",
     "stockid": "802538",
-    "companyid": "11421"
+    "companyid": "11421",
+    "tickertape_sid": "MHSC",
+    "fincode": 100266,
+    "scripcode": 500266
   },
   {
     "name": "Dhampur Sugar Mills",
@@ -6128,7 +7871,10 @@ const stockData: StockMapping[] = [
     "isin": "INE041A01016",
     "symbol": "DHAMPURSUG",
     "stockid": "146836",
-    "companyid": "12782"
+    "companyid": "12782",
+    "tickertape_sid": "DAMS",
+    "fincode": 100119,
+    "scripcode": 500119
   },
   {
     "name": "Cigniti Technologies",
@@ -6148,7 +7894,10 @@ const stockData: StockMapping[] = [
     "isin": "INE039C01032",
     "symbol": "JAMNAAUTO",
     "stockid": "591600",
-    "companyid": "13547"
+    "companyid": "13547",
+    "tickertape_sid": "JMNA",
+    "fincode": 120051,
+    "scripcode": 520051
   },
   {
     "name": "Globus Spirits",
@@ -6158,7 +7907,10 @@ const stockData: StockMapping[] = [
     "isin": "INE615I01010",
     "symbol": "GLOBUSSPR",
     "stockid": "796151",
-    "companyid": "20794"
+    "companyid": "20794",
+    "tickertape_sid": "GLOS",
+    "fincode": 200047,
+    "scripcode": 533104
   },
   {
     "name": "Dhampur Bio Organics",
@@ -6168,7 +7920,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0I3401014",
     "symbol": "DBOL",
     "stockid": "1003689",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "DBO",
+    "fincode": 307365,
+    "scripcode": 543593
   },
   {
     "name": "Lincoln Pharmaceuticals",
@@ -6178,7 +7933,10 @@ const stockData: StockMapping[] = [
     "isin": "INE405C01035",
     "symbol": "LINCOLN",
     "stockid": "294056",
-    "companyid": "6187"
+    "companyid": "6187",
+    "tickertape_sid": "LINP",
+    "fincode": 131633,
+    "scripcode": 531633
   },
   {
     "name": "Triveni Turbine",
@@ -6188,7 +7946,10 @@ const stockData: StockMapping[] = [
     "isin": "INE152M01016",
     "symbol": "TRITURBINE",
     "stockid": "734845",
-    "companyid": "17099"
+    "companyid": "17099",
+    "tickertape_sid": "TRVT",
+    "fincode": 226076,
+    "scripcode": 533655
   },
   {
     "name": "Prataap Snacks ",
@@ -6198,7 +7959,10 @@ const stockData: StockMapping[] = [
     "isin": "INE393P01035",
     "symbol": "DIAMONDYD",
     "stockid": "1002835",
-    "companyid": "62853"
+    "companyid": "62853",
+    "tickertape_sid": "PRAT",
+    "fincode": 273894,
+    "scripcode": 540724
   },
   {
     "name": "Supreme Petrochem",
@@ -6208,7 +7972,10 @@ const stockData: StockMapping[] = [
     "isin": "INE663A01033",
     "symbol": "SPLPETRO",
     "stockid": "910193",
-    "companyid": "10588"
+    "companyid": "10588",
+    "tickertape_sid": "SPTL",
+    "fincode": 100405,
+    "scripcode": 500405
   },
   {
     "name": "Shalby",
@@ -6218,7 +7985,10 @@ const stockData: StockMapping[] = [
     "isin": "INE597J01018",
     "symbol": "SHALBY",
     "stockid": "1002887",
-    "companyid": "67250"
+    "companyid": "67250",
+    "tickertape_sid": "SHAY",
+    "fincode": 235126,
+    "scripcode": 540797
   },
   {
     "name": "GRM Overseas",
@@ -6228,7 +7998,10 @@ const stockData: StockMapping[] = [
     "isin": "INE192H01020",
     "symbol": "GRMOVER",
     "stockid": "471325",
-    "companyid": "6534"
+    "companyid": "6534",
+    "tickertape_sid": "GRM",
+    "fincode": 131449,
+    "scripcode": 531449
   },
   {
     "name": "Nucleus Software Exports",
@@ -6238,7 +8011,10 @@ const stockData: StockMapping[] = [
     "isin": "INE096B01018",
     "symbol": "NUCLEUS",
     "stockid": "805539",
-    "companyid": "7142"
+    "companyid": "7142",
+    "tickertape_sid": "NSEL",
+    "fincode": 131209,
+    "scripcode": 531209
   },
   {
     "name": "Gulshan Polyols",
@@ -6248,7 +8024,10 @@ const stockData: StockMapping[] = [
     "isin": "INE255D01024",
     "symbol": "GULPOLY",
     "stockid": "598465",
-    "companyid": "14533"
+    "companyid": "14533",
+    "tickertape_sid": "GULS",
+    "fincode": 132457,
+    "scripcode": 532457
   },
   {
     "name": "Heritage Foods",
@@ -6258,7 +8037,10 @@ const stockData: StockMapping[] = [
     "isin": "INE978A01027",
     "symbol": "HERITGFOOD",
     "stockid": "501629",
-    "companyid": "8582"
+    "companyid": "8582",
+    "tickertape_sid": "HEFI",
+    "fincode": 119552,
+    "scripcode": 519552
   },
   {
     "name": "Rategain Travel Technologies",
@@ -6268,7 +8050,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0CLI01024",
     "symbol": "RATEGAIN",
     "stockid": "1003579",
-    "companyid": "2020311"
+    "companyid": "2020311",
+    "tickertape_sid": "RATE",
+    "fincode": 303157,
+    "scripcode": 543417
   },
   {
     "name": "Rossari Biotech",
@@ -6278,7 +8063,10 @@ const stockData: StockMapping[] = [
     "isin": "INE02A801020",
     "symbol": "ROSSARI",
     "stockid": "1003405",
-    "companyid": "49994"
+    "companyid": "49994",
+    "tickertape_sid": "ROSB",
+    "fincode": 233156,
+    "scripcode": 543213
   },
   {
     "name": "ADF Foods Industries",
@@ -6288,7 +8076,10 @@ const stockData: StockMapping[] = [
     "isin": "INE982B01027",
     "symbol": "ADFFOODS",
     "stockid": "892537",
-    "companyid": "12051"
+    "companyid": "12051",
+    "tickertape_sid": "AMRN",
+    "fincode": 119183,
+    "scripcode": 519183
   },
   {
     "name": "Bliss GVS Pharma",
@@ -6298,7 +8089,10 @@ const stockData: StockMapping[] = [
     "isin": "INE416D01022",
     "symbol": "BLISSGVS",
     "stockid": "730684",
-    "companyid": "13938"
+    "companyid": "13938",
+    "tickertape_sid": "BLIS",
+    "fincode": 106197,
+    "scripcode": 506197
   },
   {
     "name": "Welspun Corp",
@@ -6308,7 +8102,10 @@ const stockData: StockMapping[] = [
     "isin": "INE191B01025",
     "symbol": "WELCORP",
     "stockid": "671066",
-    "companyid": "5032"
+    "companyid": "5032",
+    "tickertape_sid": "WGSR",
+    "fincode": 132144,
+    "scripcode": 532144
   },
   {
     "name": "Kokuyo Camlin",
@@ -6318,7 +8115,10 @@ const stockData: StockMapping[] = [
     "isin": "INE760A01029",
     "symbol": "KOKUYOCMLN",
     "stockid": "910554",
-    "companyid": "13859"
+    "companyid": "13859",
+    "tickertape_sid": "KOCL",
+    "fincode": 123207,
+    "scripcode": 523207
   },
   {
     "name": "Sobha",
@@ -6328,7 +8128,10 @@ const stockData: StockMapping[] = [
     "isin": "INE671H01015",
     "symbol": "SOBHA",
     "stockid": "415052",
-    "companyid": "19352"
+    "companyid": "19352",
+    "tickertape_sid": "SOBH",
+    "fincode": 132784,
+    "scripcode": 532784
   },
   {
     "name": "Subex",
@@ -6338,7 +8141,10 @@ const stockData: StockMapping[] = [
     "isin": "INE754A01055",
     "symbol": "SUBEXLTD",
     "stockid": "380537",
-    "companyid": "4325"
+    "companyid": "4325",
+    "tickertape_sid": "SUBX",
+    "fincode": 132348,
+    "scripcode": 532348
   },
   {
     "name": "Vijaya Diagnostic Centre",
@@ -6348,7 +8154,10 @@ const stockData: StockMapping[] = [
     "isin": "INE043W01024",
     "symbol": "VIJAYA",
     "stockid": "1003530",
-    "companyid": "43047"
+    "companyid": "43047",
+    "tickertape_sid": "VIJAY",
+    "fincode": 302427,
+    "scripcode": 543350
   },
   {
     "name": "Indegene",
@@ -6358,7 +8167,10 @@ const stockData: StockMapping[] = [
     "isin": "INE065X01017",
     "symbol": "INDGN",
     "stockid": "10039241",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "INDGN",
+    "fincode": 210284,
+    "scripcode": 544172
   },
   {
     "name": "Delta Corp",
@@ -6368,7 +8180,10 @@ const stockData: StockMapping[] = [
     "isin": "INE124G01033",
     "symbol": "DELTACORP",
     "stockid": "561785",
-    "companyid": "9453"
+    "companyid": "9453",
+    "tickertape_sid": "DELT",
+    "fincode": 132848,
+    "scripcode": 532848
   },
   {
     "name": "LT Foods",
@@ -6378,7 +8193,10 @@ const stockData: StockMapping[] = [
     "isin": "INE818H01020",
     "symbol": "LTFOODS",
     "stockid": "315485",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "LTOL",
+    "fincode": 132783,
+    "scripcode": 532783
   },
   {
     "name": "Hester Biosciences",
@@ -6388,7 +8206,10 @@ const stockData: StockMapping[] = [
     "isin": "INE782E01017",
     "symbol": "HESTERBIO",
     "stockid": "324228",
-    "companyid": "9165"
+    "companyid": "9165",
+    "tickertape_sid": "HEST",
+    "fincode": 124669,
+    "scripcode": 524669
   },
   {
     "name": "Rain Industries",
@@ -6398,7 +8219,10 @@ const stockData: StockMapping[] = [
     "isin": "INE855B01025",
     "symbol": "RAIN",
     "stockid": "731413",
-    "companyid": "13252"
+    "companyid": "13252",
+    "tickertape_sid": "RAID",
+    "fincode": 100339,
+    "scripcode": 500339
   },
   {
     "name": "Krsnaa Diagnostics",
@@ -6408,7 +8232,10 @@ const stockData: StockMapping[] = [
     "isin": "INE08LI01020",
     "symbol": "KRSNAA",
     "stockid": "1003520",
-    "companyid": "2013914"
+    "companyid": "2013914",
+    "tickertape_sid": "KRS",
+    "fincode": 302244,
+    "scripcode": 543328
   },
   {
     "name": "Sigachi Industries",
@@ -6418,7 +8245,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0D0K01022",
     "symbol": "SIGACHI",
     "stockid": "1003563",
-    "companyid": "2017674"
+    "companyid": "2017674",
+    "tickertape_sid": "SIGA",
+    "fincode": 300012,
+    "scripcode": 543389
   },
   {
     "name": "Tanla Platforms",
@@ -6428,7 +8258,10 @@ const stockData: StockMapping[] = [
     "isin": "INE483C01032",
     "symbol": "TANLA",
     "stockid": "359242",
-    "companyid": "5351"
+    "companyid": "5351",
+    "tickertape_sid": "TNSL",
+    "fincode": 132790,
+    "scripcode": 532790
   },
   {
     "name": "Shyam Metalics & Energy",
@@ -6438,7 +8271,10 @@ const stockData: StockMapping[] = [
     "isin": "INE810G01011",
     "symbol": "SHYAMMETL",
     "stockid": "1003499",
-    "companyid": "2011527"
+    "companyid": "2011527",
+    "tickertape_sid": "SHYAE",
+    "fincode": 267465,
+    "scripcode": 543299
   },
   {
     "name": "SOLARA ACTIVE PHARMA SCIENCES",
@@ -6448,7 +8284,10 @@ const stockData: StockMapping[] = [
     "isin": "INE624Z01016",
     "symbol": "SOLARA",
     "stockid": "1003017",
-    "companyid": "66903"
+    "companyid": "66903",
+    "tickertape_sid": "SOLA",
+    "fincode": 290184,
+    "scripcode": 541540
   },
   {
     "name": "SignatureGlobal India",
@@ -6458,7 +8297,10 @@ const stockData: StockMapping[] = [
     "isin": "INE903U01023",
     "symbol": "SIGNATURE",
     "stockid": "10039014",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "SIGNA",
+    "fincode": 306733,
+    "scripcode": 543990
   },
   {
     "name": "Sasta Sundar Ventures",
@@ -6468,7 +8310,8 @@ const stockData: StockMapping[] = [
     "isin": "INE019J01013",
     "symbol": "SASTASUNDR",
     "stockid": "",
-    "companyid": "32314"
+    "companyid": "32314",
+    "tickertape_sid": "SAST"
   },
   {
     "name": "Jindal Worldwide",
@@ -6478,7 +8321,10 @@ const stockData: StockMapping[] = [
     "isin": "INE247D01039",
     "symbol": "JINDWORLD",
     "stockid": "441386",
-    "companyid": "5038"
+    "companyid": "5038",
+    "tickertape_sid": "JINW",
+    "fincode": 131543,
+    "scripcode": 531543
   },
   {
     "name": "HMA Agro Industries",
@@ -6488,7 +8334,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0ECP01024",
     "symbol": "HMAAGRO",
     "stockid": "1003875",
-    "companyid": "2135247"
+    "companyid": "2135247",
+    "tickertape_sid": "HMA",
+    "fincode": 210239,
+    "scripcode": 543929
   },
   {
     "name": "V-Guard Industries",
@@ -6498,7 +8347,10 @@ const stockData: StockMapping[] = [
     "isin": "INE951I01027",
     "symbol": "VGUARD",
     "stockid": "258069",
-    "companyid": "4264"
+    "companyid": "4264",
+    "tickertape_sid": "VGUA",
+    "fincode": 200054,
+    "scripcode": 532953
   },
   {
     "name": "Avadh Sugar & Energy",
@@ -6508,7 +8360,10 @@ const stockData: StockMapping[] = [
     "isin": "INE349W01017",
     "symbol": "AVADHSUGAR",
     "stockid": "1002794",
-    "companyid": "61297"
+    "companyid": "61297",
+    "tickertape_sid": "AVAD",
+    "fincode": 286952,
+    "scripcode": 540649
   },
   {
     "name": "Syrma SGS Technology",
@@ -6518,7 +8373,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0DYJ01015",
     "symbol": "SYRMA",
     "stockid": "1003681",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "SYR",
+    "fincode": 304549,
+    "scripcode": 543573
   },
   {
     "name": "Ujjivan Small Finance Bank",
@@ -6528,7 +8386,10 @@ const stockData: StockMapping[] = [
     "isin": "INE551W01018",
     "symbol": "UJJIVANSFB",
     "stockid": "1003363",
-    "companyid": "66383"
+    "companyid": "66383",
+    "tickertape_sid": "UJJI",
+    "fincode": 287237,
+    "scripcode": 542904
   },
   {
     "name": "S H Kelkar & Company",
@@ -6538,7 +8399,10 @@ const stockData: StockMapping[] = [
     "isin": "INE500L01026",
     "symbol": "SHK",
     "stockid": "",
-    "companyid": "39503"
+    "companyid": "39503",
+    "tickertape_sid": "SHKE",
+    "fincode": 220884,
+    "scripcode": 539450
   },
   {
     "name": "Accelya Solutions India",
@@ -6548,7 +8412,10 @@ const stockData: StockMapping[] = [
     "isin": "INE793A01012",
     "symbol": "ACCELYA",
     "stockid": "576164",
-    "companyid": "4342"
+    "companyid": "4342",
+    "tickertape_sid": "ACCY",
+    "fincode": 132268,
+    "scripcode": 532268
   },
   {
     "name": "Sunteck Realty",
@@ -6558,7 +8425,10 @@ const stockData: StockMapping[] = [
     "isin": "INE805D01034",
     "symbol": "SUNTECK",
     "stockid": "629558",
-    "companyid": "3296"
+    "companyid": "3296",
+    "tickertape_sid": "SUNT",
+    "fincode": 112179,
+    "scripcode": 512179
   },
   {
     "name": "Themis Medicare",
@@ -6568,7 +8438,10 @@ const stockData: StockMapping[] = [
     "isin": "INE083B01024",
     "symbol": "THEMISMED",
     "stockid": "469937",
-    "companyid": "7973"
+    "companyid": "7973",
+    "tickertape_sid": "THEM",
+    "fincode": 130199,
+    "scripcode": 530199
   },
   {
     "name": "GPT Healthcare",
@@ -6578,7 +8451,10 @@ const stockData: StockMapping[] = [
     "isin": "INE486R01017",
     "symbol": "GPTHEALTH",
     "stockid": "10039176",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "GPT",
+    "fincode": 287257,
+    "scripcode": 544131
   },
   {
     "name": "VIP Industries",
@@ -6588,7 +8464,10 @@ const stockData: StockMapping[] = [
     "isin": "INE054A01027",
     "symbol": "VIPIND",
     "stockid": "275976",
-    "companyid": "12830"
+    "companyid": "12830",
+    "tickertape_sid": "VIPI",
+    "fincode": 107880,
+    "scripcode": 507880
   },
   {
     "name": "Privi Speciality Chemicals",
@@ -6598,7 +8477,10 @@ const stockData: StockMapping[] = [
     "isin": "INE959A01019",
     "symbol": "PRIVISCL",
     "stockid": "844507",
-    "companyid": "8120"
+    "companyid": "8120",
+    "tickertape_sid": "FAIC",
+    "fincode": 130117,
+    "scripcode": 530117
   },
   {
     "name": "Artemis Medicare Services",
@@ -6608,7 +8490,10 @@ const stockData: StockMapping[] = [
     "isin": "INE025R01021",
     "symbol": "ARTEMISMED",
     "stockid": "1003372",
-    "companyid": "29027"
+    "companyid": "29027",
+    "tickertape_sid": "ATEM",
+    "fincode": 236257,
+    "scripcode": 542919
   },
   {
     "name": "TCI Express",
@@ -6618,7 +8503,10 @@ const stockData: StockMapping[] = [
     "isin": "INE586V01016",
     "symbol": "TCIEXP",
     "stockid": "1002698",
-    "companyid": "65069"
+    "companyid": "65069",
+    "tickertape_sid": "TCIE",
+    "fincode": 225998,
+    "scripcode": 540212
   },
   {
     "name": "Tasty Bite Eatables",
@@ -6628,7 +8516,10 @@ const stockData: StockMapping[] = [
     "isin": "INE488B01017",
     "symbol": "TASTYBITE",
     "stockid": "778907",
-    "companyid": "12912"
+    "companyid": "12912",
+    "tickertape_sid": "TABE",
+    "fincode": 119091,
+    "scripcode": 519091
   },
   {
     "name": "Sasken Technologies",
@@ -6638,7 +8529,10 @@ const stockData: StockMapping[] = [
     "isin": "INE231F01020",
     "symbol": "SASKEN",
     "stockid": "815638",
-    "companyid": "3605"
+    "companyid": "3605",
+    "tickertape_sid": "SKCT",
+    "fincode": 132663,
+    "scripcode": 532663
   },
   {
     "name": "Netweb Technologies India",
@@ -6648,7 +8542,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0NT901020",
     "symbol": "NETWEB",
     "stockid": "10038956",
-    "companyid": "2138771"
+    "companyid": "2138771",
+    "tickertape_sid": "NETWE",
+    "fincode": 310018,
+    "scripcode": 543945
   },
   {
     "name": "Ingersoll Rand (India)",
@@ -6658,7 +8555,10 @@ const stockData: StockMapping[] = [
     "isin": "INE177A01018",
     "symbol": "INGERRAND",
     "stockid": "969461",
-    "companyid": "13558"
+    "companyid": "13558",
+    "tickertape_sid": "INGR",
+    "fincode": 100210,
+    "scripcode": 500210
   },
   {
     "name": "Venkys",
@@ -6668,7 +8568,10 @@ const stockData: StockMapping[] = [
     "isin": "INE398A01010",
     "symbol": "VENKEYS",
     "stockid": "294058",
-    "companyid": "12827"
+    "companyid": "12827",
+    "tickertape_sid": "VENK",
+    "fincode": 123261,
+    "scripcode": 523261
   },
   {
     "name": "Tata Technologies",
@@ -6678,7 +8581,10 @@ const stockData: StockMapping[] = [
     "isin": "INE142M01025",
     "symbol": "TATATECH",
     "stockid": "10039079",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "TATAT",
+    "fincode": 209420,
+    "scripcode": 544028
   },
   {
     "name": "eMudhra",
@@ -6688,7 +8594,10 @@ const stockData: StockMapping[] = [
     "isin": "INE01QM01018",
     "symbol": "EMUDHRA",
     "stockid": "1003656",
-    "companyid": "2043301"
+    "companyid": "2043301",
+    "tickertape_sid": "EMU",
+    "fincode": 235668,
+    "scripcode": 543533
   },
   {
     "name": "Shilpa Medicare",
@@ -6698,7 +8607,10 @@ const stockData: StockMapping[] = [
     "isin": "INE790G01031",
     "symbol": "SHILPAMED",
     "stockid": "780523",
-    "companyid": "7974"
+    "companyid": "7974",
+    "tickertape_sid": "SHME",
+    "fincode": 130549,
+    "scripcode": 530549
   },
   {
     "name": "Windlas Biotech",
@@ -6708,7 +8620,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0H5O01029",
     "symbol": "WINDLAS",
     "stockid": "1003519",
-    "companyid": "2013610"
+    "companyid": "2013610",
+    "tickertape_sid": "WINDL",
+    "fincode": 255003,
+    "scripcode": 543329
   },
   {
     "name": "Whirlpool of India.",
@@ -6718,7 +8633,10 @@ const stockData: StockMapping[] = [
     "isin": "INE716A01013",
     "symbol": "WHIRLPOOL",
     "stockid": "958236",
-    "companyid": "13483"
+    "companyid": "13483",
+    "tickertape_sid": "WHIR",
+    "fincode": 100238,
+    "scripcode": 500238
   },
   {
     "name": "Indoco Remedies",
@@ -6728,7 +8646,10 @@ const stockData: StockMapping[] = [
     "isin": "INE873D01024",
     "symbol": "INDOCO",
     "stockid": "601817",
-    "companyid": "792"
+    "companyid": "792",
+    "tickertape_sid": "INRM",
+    "fincode": 132612,
+    "scripcode": 532612
   },
   {
     "name": "Eveready Industries India",
@@ -6738,7 +8659,10 @@ const stockData: StockMapping[] = [
     "isin": "INE128A01029",
     "symbol": "EVEREADY",
     "stockid": "448733",
-    "companyid": "12883"
+    "companyid": "12883",
+    "tickertape_sid": "ERDY",
+    "fincode": 131508,
+    "scripcode": 531508
   },
   {
     "name": "Onward Technologies",
@@ -6748,7 +8672,10 @@ const stockData: StockMapping[] = [
     "isin": "INE229A01017",
     "symbol": "ONWARDTEC",
     "stockid": "493562",
-    "companyid": "8570"
+    "companyid": "8570",
+    "tickertape_sid": "OTEC",
+    "fincode": 117536,
+    "scripcode": 517536
   },
   {
     "name": "Suven Life Sciences",
@@ -6758,7 +8685,10 @@ const stockData: StockMapping[] = [
     "isin": "INE495B01038",
     "symbol": "SUVEN",
     "stockid": "588414",
-    "companyid": "8221"
+    "companyid": "8221",
+    "tickertape_sid": "SUVP",
+    "fincode": 130239,
+    "scripcode": 530239
   },
   {
     "name": "Zaggle Prepaid Ocean Services",
@@ -6768,7 +8698,10 @@ const stockData: StockMapping[] = [
     "isin": "INE07K301024",
     "symbol": "ZAGGLE",
     "stockid": "10039006",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "ZAG",
+    "fincode": 308651,
+    "scripcode": 543985
   },
   {
     "name": "Dodla Dairy",
@@ -6778,7 +8711,10 @@ const stockData: StockMapping[] = [
     "isin": "INE021O01019",
     "symbol": "DODLA",
     "stockid": "1003502",
-    "companyid": "38210"
+    "companyid": "38210",
+    "tickertape_sid": "DOD",
+    "fincode": 222414,
+    "scripcode": 543306
   },
   {
     "name": "Control Print",
@@ -6788,7 +8724,10 @@ const stockData: StockMapping[] = [
     "isin": "INE663B01015",
     "symbol": "CONTROLPR",
     "stockid": "842422",
-    "companyid": "10489"
+    "companyid": "10489",
+    "tickertape_sid": "CONP",
+    "fincode": 122295,
+    "scripcode": 522295
   },
   {
     "name": "Sheela Foam",
@@ -6798,7 +8737,10 @@ const stockData: StockMapping[] = [
     "isin": "INE916U01025",
     "symbol": "SFL",
     "stockid": "1002694",
-    "companyid": "61459"
+    "companyid": "61459",
+    "tickertape_sid": "SHEF",
+    "fincode": 211969,
+    "scripcode": 540203
   },
   {
     "name": "AMI Organics",
@@ -6818,7 +8760,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0J1F01024",
     "symbol": "RPTECH",
     "stockid": "10039156",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "RPT",
+    "fincode": 211925,
+    "scripcode": 544119
   },
   {
     "name": "SMS Pharmaceuticals",
@@ -6828,7 +8773,10 @@ const stockData: StockMapping[] = [
     "isin": "INE812G01025",
     "symbol": "SMSPHARMA",
     "stockid": "517655",
-    "companyid": "15744"
+    "companyid": "15744",
+    "tickertape_sid": "SMSP",
+    "fincode": 132815,
+    "scripcode": 532815
   },
   {
     "name": "Associated Alcohol and Breweries",
@@ -6838,7 +8786,10 @@ const stockData: StockMapping[] = [
     "isin": "INE073G01016",
     "symbol": "ASALCBR",
     "stockid": "953735",
-    "companyid": "8442"
+    "companyid": "8442",
+    "tickertape_sid": "ASAL",
+    "fincode": 107526,
+    "scripcode": 507526
   },
   {
     "name": "Lloyds Metals and Energy",
@@ -6848,7 +8799,10 @@ const stockData: StockMapping[] = [
     "isin": "INE281B01032",
     "symbol": "LLOYDSME",
     "stockid": "648388",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "LLO",
+    "fincode": 112455,
+    "scripcode": 512455
   },
   {
     "name": "KSolves India",
@@ -6858,7 +8812,9 @@ const stockData: StockMapping[] = [
     "isin": "INE0D6I01015",
     "symbol": "KSOLVES",
     "stockid": "1003401",
-    "companyid": "1987028"
+    "companyid": "1987028",
+    "fincode": 298838,
+    "scripcode": 543599
   },
   {
     "name": "TITAGARH RAIL SYSTEMS",
@@ -6868,7 +8824,10 @@ const stockData: StockMapping[] = [
     "isin": "INE615H01020",
     "symbol": "TITAGARH",
     "stockid": "221824",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "TITW",
+    "fincode": 200115,
+    "scripcode": 532966
   },
   {
     "name": "Tejas Networks",
@@ -6878,7 +8837,10 @@ const stockData: StockMapping[] = [
     "isin": "INE010J01012",
     "symbol": "TEJASNET",
     "stockid": "1002772",
-    "companyid": "17752"
+    "companyid": "17752",
+    "tickertape_sid": "TEJS",
+    "fincode": 210859,
+    "scripcode": 540595
   },
   {
     "name": "Aditya Birla Sun Life AMC",
@@ -6888,7 +8850,10 @@ const stockData: StockMapping[] = [
     "isin": "INE404A01024",
     "symbol": "ABSLAMC",
     "stockid": "1003544",
-    "companyid": "14939"
+    "companyid": "14939",
+    "tickertape_sid": "ABS",
+    "fincode": 209979,
+    "scripcode": 543374
   },
   {
     "name": "TVS Supply Chain Solutions",
@@ -6898,7 +8863,10 @@ const stockData: StockMapping[] = [
     "isin": "INE395N01027",
     "symbol": "TVSSCS",
     "stockid": "10038979",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "TVS",
+    "fincode": 210903,
+    "scripcode": 543965
   },
   {
     "name": "MAS Financial Services",
@@ -6908,7 +8876,10 @@ const stockData: StockMapping[] = [
     "isin": "INE348L01012",
     "symbol": "MASFIN",
     "stockid": "1002843",
-    "companyid": "33203"
+    "companyid": "33203",
+    "tickertape_sid": "MASF",
+    "fincode": 226625,
+    "scripcode": 540749
   },
   {
     "name": "Triveni Engineering and Industries",
@@ -6918,7 +8889,10 @@ const stockData: StockMapping[] = [
     "isin": "INE256C01024",
     "symbol": "TRIVENI",
     "stockid": "797608",
-    "companyid": "4301"
+    "companyid": "4301",
+    "tickertape_sid": "TREI",
+    "fincode": 132356,
+    "scripcode": 532356
   },
   {
     "name": "Chaman Lal Setia Exports",
@@ -6928,7 +8902,10 @@ const stockData: StockMapping[] = [
     "isin": "INE419D01026",
     "symbol": "CLSEL",
     "stockid": "801400",
-    "companyid": "7731"
+    "companyid": "7731",
+    "tickertape_sid": "CHAMA",
+    "fincode": 130307,
+    "scripcode": 530307
   },
   {
     "name": "Star Cement",
@@ -6938,7 +8915,10 @@ const stockData: StockMapping[] = [
     "isin": "INE460H01021",
     "symbol": "STARCEMENT",
     "stockid": "1002773",
-    "companyid": "18388"
+    "companyid": "18388",
+    "tickertape_sid": "STAT",
+    "fincode": 207945,
+    "scripcode": 540575
   },
   {
     "name": "SJVN",
@@ -6948,7 +8928,10 @@ const stockData: StockMapping[] = [
     "isin": "INE002L01015",
     "symbol": "SJVN",
     "stockid": "766446",
-    "companyid": "18460"
+    "companyid": "18460",
+    "tickertape_sid": "SJVN",
+    "fincode": 220512,
+    "scripcode": 533206
   },
   {
     "name": "Advanced Enzyme Technologies",
@@ -6958,7 +8941,10 @@ const stockData: StockMapping[] = [
     "isin": "INE837H01020",
     "symbol": "ADVENZYMES",
     "stockid": "1000007",
-    "companyid": "34500"
+    "companyid": "34500",
+    "tickertape_sid": "ADEN",
+    "fincode": 207679,
+    "scripcode": 540025
   },
   {
     "name": "Ashoka Buildcon",
@@ -6968,7 +8954,10 @@ const stockData: StockMapping[] = [
     "isin": "INE442H01029",
     "symbol": "ASHOKA",
     "stockid": "166265",
-    "companyid": "21608"
+    "companyid": "21608",
+    "tickertape_sid": "ABDL",
+    "fincode": 207778,
+    "scripcode": 533271
   },
   {
     "name": "BCL Industries",
@@ -6978,7 +8967,10 @@ const stockData: StockMapping[] = [
     "isin": "INE412G01024",
     "symbol": "BCLIND",
     "stockid": "670300",
-    "companyid": "11028"
+    "companyid": "11028",
+    "tickertape_sid": "BCLI",
+    "fincode": 124332,
+    "scripcode": 524332
   },
   {
     "name": "Gokul Agro Resources",
@@ -6988,7 +8980,9 @@ const stockData: StockMapping[] = [
     "isin": "INE314T01025",
     "symbol": "GOKULAGRO",
     "stockid": "1002587",
-    "companyid": "64019"
+    "companyid": "64019",
+    "fincode": 280212,
+    "scripcode": 539725
   },
   {
     "name": "Garware Technical Fibres",
@@ -6998,7 +8992,10 @@ const stockData: StockMapping[] = [
     "isin": "INE276A01018",
     "symbol": "GARFIBRES",
     "stockid": "924049",
-    "companyid": "13723"
+    "companyid": "13723",
+    "tickertape_sid": "GRWL",
+    "fincode": 109557,
+    "scripcode": 509557
   },
   {
     "name": "Hatsun Agro Products",
@@ -7008,7 +9005,10 @@ const stockData: StockMapping[] = [
     "isin": "INE473B01035",
     "symbol": "HATSUN",
     "stockid": "143614",
-    "companyid": "6402"
+    "companyid": "6402",
+    "tickertape_sid": "HAPL",
+    "fincode": 131531,
+    "scripcode": 531531
   },
   {
     "name": "Vinati Organics",
@@ -7018,7 +9018,10 @@ const stockData: StockMapping[] = [
     "isin": "INE410B01037",
     "symbol": "VINATIORGA",
     "stockid": "301324",
-    "companyid": "6833"
+    "companyid": "6833",
+    "tickertape_sid": "VNTI",
+    "fincode": 124200,
+    "scripcode": 524200
   },
   {
     "name": "Som Distilleries and Breweries",
@@ -7028,7 +9031,10 @@ const stockData: StockMapping[] = [
     "isin": "INE480C01038",
     "symbol": "SDBL",
     "stockid": "216858",
-    "companyid": "8890"
+    "companyid": "8890",
+    "tickertape_sid": "SDB",
+    "fincode": 107514,
+    "scripcode": 507514
   },
   {
     "name": "Godrej Agrovet",
@@ -7038,7 +9044,10 @@ const stockData: StockMapping[] = [
     "isin": "INE850D01014",
     "symbol": "GODREJAGRO",
     "stockid": "1002842",
-    "companyid": "9771"
+    "companyid": "9771",
+    "tickertape_sid": "GODE",
+    "fincode": 217842,
+    "scripcode": 540743
   },
   {
     "name": "Blue Jet Healthcare",
@@ -7048,7 +9057,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0KBH01020",
     "symbol": "BLUEJET",
     "stockid": "10039056",
-    "companyid": "2077904"
+    "companyid": "2077904",
+    "tickertape_sid": "BLUEJ",
+    "fincode": 307329,
+    "scripcode": 544009
   },
   {
     "name": "Sukhjit Starch and Chemicals",
@@ -7058,7 +9070,9 @@ const stockData: StockMapping[] = [
     "isin": "INE450E01011",
     "symbol": "SUKHJITS",
     "stockid": "592029",
-    "companyid": "11506"
+    "companyid": "11506",
+    "fincode": 124542,
+    "scripcode": 524542
   },
   {
     "name": "Dwarikesh Sugar Industries",
@@ -7068,7 +9082,10 @@ const stockData: StockMapping[] = [
     "isin": "INE366A01041",
     "symbol": "DWARKESH",
     "stockid": "521481",
-    "companyid": "3589"
+    "companyid": "3589",
+    "tickertape_sid": "DWAR",
+    "fincode": 132610,
+    "scripcode": 532610
   },
   {
     "name": "Pfizer",
@@ -7078,7 +9095,10 @@ const stockData: StockMapping[] = [
     "isin": "INE182A01018",
     "symbol": "PFIZER",
     "stockid": "970356",
-    "companyid": "13274"
+    "companyid": "13274",
+    "tickertape_sid": "PFIZ",
+    "fincode": 100680,
+    "scripcode": 500680
   },
   {
     "name": "Esab India",
@@ -7088,7 +9108,10 @@ const stockData: StockMapping[] = [
     "isin": "INE284A01012",
     "symbol": "ESABINDIA",
     "stockid": "856648",
-    "companyid": "13801"
+    "companyid": "13801",
+    "tickertape_sid": "ESAB",
+    "fincode": 100133,
+    "scripcode": 500133
   },
   {
     "name": "Ugar Sugar Works",
@@ -7098,7 +9121,10 @@ const stockData: StockMapping[] = [
     "isin": "INE071E01023",
     "symbol": "UGARSUGAR",
     "stockid": "616923",
-    "companyid": "12475"
+    "companyid": "12475",
+    "tickertape_sid": "UGSW",
+    "fincode": 130363,
+    "scripcode": 530363
   },
   {
     "name": "Bajaj Consumer Care",
@@ -7108,7 +9134,10 @@ const stockData: StockMapping[] = [
     "isin": "INE933K01021",
     "symbol": "BAJAJCON",
     "stockid": "791358",
-    "companyid": "31863"
+    "companyid": "31863",
+    "tickertape_sid": "BACO",
+    "fincode": 220519,
+    "scripcode": 533229
   },
   {
     "name": "Symphony",
@@ -7118,7 +9147,10 @@ const stockData: StockMapping[] = [
     "isin": "INE225D01027",
     "symbol": "SYMPHONY",
     "stockid": "121464",
-    "companyid": "10473"
+    "companyid": "10473",
+    "tickertape_sid": "SYMP",
+    "fincode": 117385,
+    "scripcode": 517385
   },
   {
     "name": "Abans Holdings",
@@ -7128,7 +9160,10 @@ const stockData: StockMapping[] = [
     "isin": "INE00ZE01026",
     "symbol": "TANFACIND",
     "stockid": "1003761",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "AHL",
+    "fincode": 106854,
+    "scripcode": 506854
   },
   {
     "name": "Xchanging Solutions",
@@ -7138,7 +9173,10 @@ const stockData: StockMapping[] = [
     "isin": "INE692G01013",
     "symbol": "XCHANGING",
     "stockid": "979469",
-    "companyid": "13031"
+    "companyid": "13031",
+    "tickertape_sid": "XCHA",
+    "fincode": 132616,
+    "scripcode": 532616
   },
   {
     "name": "Newgen Software Technologies",
@@ -7148,7 +9186,10 @@ const stockData: StockMapping[] = [
     "isin": "INE619B01017",
     "symbol": "NEWGEN",
     "stockid": "1002910",
-    "companyid": "2825"
+    "companyid": "2825",
+    "tickertape_sid": "NEWG",
+    "fincode": 213672,
+    "scripcode": 540900
   },
   {
     "name": "M K Proteins",
@@ -7158,7 +9199,10 @@ const stockData: StockMapping[] = [
     "isin": "INE964W01021",
     "symbol": "MKPL",
     "stockid": "1002751",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "MKPR",
+    "fincode": 285272,
+    "scripcode": 543919
   },
   {
     "name": "Neuland Laboratories",
@@ -7168,7 +9212,10 @@ const stockData: StockMapping[] = [
     "isin": "INE794A01010",
     "symbol": "NEULANDLAB",
     "stockid": "229993",
-    "companyid": "9051"
+    "companyid": "9051",
+    "tickertape_sid": "NEUL",
+    "fincode": 124558,
+    "scripcode": 524558
   },
   {
     "name": "Aeroflex Industries",
@@ -7178,7 +9225,10 @@ const stockData: StockMapping[] = [
     "isin": "INE024001021",
     "symbol": "AEROFLEX",
     "stockid": "10038985",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "AER",
+    "fincode": 232356,
+    "scripcode": 543972
   },
   {
     "name": "Axiscades Technologies",
@@ -7188,7 +9238,10 @@ const stockData: StockMapping[] = [
     "isin": "INE555B01013",
     "symbol": "AXISCADES",
     "stockid": "350592",
-    "companyid": "3329"
+    "companyid": "3329",
+    "tickertape_sid": "AXIT",
+    "fincode": 132395,
+    "scripcode": 532395
   },
   {
     "name": "Supriya Lifescience",
@@ -7198,7 +9251,10 @@ const stockData: StockMapping[] = [
     "isin": "INE07RO01027",
     "symbol": "SUPRIYA",
     "stockid": "1003587",
-    "companyid": "1965188"
+    "companyid": "1965188",
+    "tickertape_sid": "SUPRI",
+    "fincode": 227331,
+    "scripcode": 543434
   },
   {
     "name": "Genesys International Corporation",
@@ -7208,7 +9264,10 @@ const stockData: StockMapping[] = [
     "isin": "INE727B01026",
     "symbol": "GENESYS",
     "stockid": "365098",
-    "companyid": "4114"
+    "companyid": "4114",
+    "tickertape_sid": "GENS",
+    "fincode": 106109,
+    "scripcode": 506109
   },
   {
     "name": "3i Infotech",
@@ -7218,7 +9277,10 @@ const stockData: StockMapping[] = [
     "isin": "INE748C01038",
     "symbol": "3IINFOLTD",
     "stockid": "344456",
-    "companyid": "3491"
+    "companyid": "3491",
+    "tickertape_sid": "TIIN",
+    "fincode": 132628,
+    "scripcode": 532628
   },
   {
     "name": "R Systems International",
@@ -7228,7 +9290,10 @@ const stockData: StockMapping[] = [
     "isin": "INE411H01032",
     "symbol": "RSYSTEMS",
     "stockid": "515672",
-    "companyid": "16240"
+    "companyid": "16240",
+    "tickertape_sid": "RSYS",
+    "fincode": 132735,
+    "scripcode": 532735
   },
   {
     "name": "Tilaknagar Industries",
@@ -7238,7 +9303,10 @@ const stockData: StockMapping[] = [
     "isin": "INE133E01013",
     "symbol": "TI",
     "stockid": "137618",
-    "companyid": "12898"
+    "companyid": "12898",
+    "tickertape_sid": "TILK",
+    "fincode": 107205,
+    "scripcode": 507205
   },
   {
     "name": "Vakrangee",
@@ -7248,7 +9316,10 @@ const stockData: StockMapping[] = [
     "isin": "INE051B01021",
     "symbol": "VAKRANGEE",
     "stockid": "467058",
-    "companyid": "10501"
+    "companyid": "10501",
+    "tickertape_sid": "VAKR",
+    "fincode": 111431,
+    "scripcode": 511431
   },
   {
     "name": "NELCO",
@@ -7258,7 +9329,10 @@ const stockData: StockMapping[] = [
     "isin": "INE045B01015",
     "symbol": "NELCO",
     "stockid": "997848",
-    "companyid": "13370"
+    "companyid": "13370",
+    "tickertape_sid": "NELC",
+    "fincode": 104112,
+    "scripcode": 504112
   },
   {
     "name": "Quick Heal Technologies",
@@ -7268,7 +9342,10 @@ const stockData: StockMapping[] = [
     "isin": "INE306L01010",
     "symbol": "QUICKHEAL",
     "stockid": "1000598",
-    "companyid": "49992"
+    "companyid": "49992",
+    "tickertape_sid": "QUIC",
+    "fincode": 223021,
+    "scripcode": 539678
   },
   {
     "name": "Dishman Carbogen Amcis",
@@ -7278,7 +9355,10 @@ const stockData: StockMapping[] = [
     "isin": "INE385W01011",
     "symbol": "DCAL",
     "stockid": "1002833",
-    "companyid": "22179"
+    "companyid": "22179",
+    "tickertape_sid": "DSHM",
+    "fincode": 228555,
+    "scripcode": 540701
   },
   {
     "name": "DB Corp",
@@ -7288,7 +9368,10 @@ const stockData: StockMapping[] = [
     "isin": "INE950I01011",
     "symbol": "DBCORP",
     "stockid": "807829",
-    "companyid": "30711"
+    "companyid": "30711",
+    "tickertape_sid": "DBCL",
+    "fincode": 200067,
+    "scripcode": 533151
   },
   {
     "name": "Authum Investment & Infrastucture",
@@ -7298,7 +9381,10 @@ const stockData: StockMapping[] = [
     "isin": "INE206F01022",
     "symbol": "AIIL",
     "stockid": "",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "AII",
+    "fincode": 243036,
+    "scripcode": 539177
   },
   {
     "name": "AGS Transact Technologies",
@@ -7308,7 +9394,10 @@ const stockData: StockMapping[] = [
     "isin": "INE583L01014",
     "symbol": "AGSTRA",
     "stockid": "1003601",
-    "companyid": "32614"
+    "companyid": "32614",
+    "tickertape_sid": "AGS",
+    "fincode": 222276,
+    "scripcode": 543451
   },
   {
     "name": "DCW",
@@ -7318,7 +9407,10 @@ const stockData: StockMapping[] = [
     "isin": "INE500A01029",
     "symbol": "DCW",
     "stockid": "955411",
-    "companyid": "13870"
+    "companyid": "13870",
+    "tickertape_sid": "DCWL",
+    "fincode": 100117,
+    "scripcode": 500117
   },
   {
     "name": "Ambika Cotton Mills",
@@ -7328,7 +9420,10 @@ const stockData: StockMapping[] = [
     "isin": "INE540G01014",
     "symbol": "AMBIKCO",
     "stockid": "974224",
-    "companyid": "5598"
+    "companyid": "5598",
+    "tickertape_sid": "AMBK",
+    "fincode": 131978,
+    "scripcode": 531978
   },
   {
     "name": "Astec Lifesciences",
@@ -7338,7 +9433,10 @@ const stockData: StockMapping[] = [
     "isin": "INE563J01010",
     "symbol": "ASTEC",
     "stockid": "574204",
-    "companyid": "19863"
+    "companyid": "19863",
+    "tickertape_sid": "ASTE",
+    "fincode": 212609,
+    "scripcode": 533138
   },
   {
     "name": "Asian Granito India",
@@ -7348,7 +9446,10 @@ const stockData: StockMapping[] = [
     "isin": "INE022I01019",
     "symbol": "ASIANTILES",
     "stockid": "678355",
-    "companyid": "19654"
+    "companyid": "19654",
+    "tickertape_sid": "ASGI",
+    "fincode": 132888,
+    "scripcode": 532888
   },
   {
     "name": "Dhanuka Agritech",
@@ -7358,7 +9459,10 @@ const stockData: StockMapping[] = [
     "isin": "INE435G01025",
     "symbol": "DHANUKA",
     "stockid": "748382",
-    "companyid": "13830"
+    "companyid": "13830",
+    "tickertape_sid": "DHNP",
+    "fincode": 107717,
+    "scripcode": 507717
   },
   {
     "name": "Astra Microwave Products",
@@ -7368,7 +9472,10 @@ const stockData: StockMapping[] = [
     "isin": "INE386C01029",
     "symbol": "ASTRAMICRO",
     "stockid": "909399",
-    "companyid": "8458"
+    "companyid": "8458",
+    "tickertape_sid": "ASTM",
+    "fincode": 132493,
+    "scripcode": 532493
   },
   {
     "name": "Epigral",
@@ -7378,7 +9485,10 @@ const stockData: StockMapping[] = [
     "isin": "INE071N01016",
     "symbol": "EPIGRAL",
     "stockid": "1003523",
-    "companyid": "22308"
+    "companyid": "22308",
+    "tickertape_sid": "MFM",
+    "fincode": 210481,
+    "scripcode": 543332
   },
   {
     "name": "Bhageria Industries",
@@ -7388,7 +9498,10 @@ const stockData: StockMapping[] = [
     "isin": "INE354C01027",
     "symbol": "BHAGERIA",
     "stockid": "100962",
-    "companyid": "7524"
+    "companyid": "7524",
+    "tickertape_sid": "BHAE",
+    "fincode": 130803,
+    "scripcode": 530803
   },
   {
     "name": "Federal-Mogul Goetze",
@@ -7398,7 +9511,10 @@ const stockData: StockMapping[] = [
     "isin": "INE529A01010",
     "symbol": "FMGOETZE",
     "stockid": "996089",
-    "companyid": "13708"
+    "companyid": "13708",
+    "tickertape_sid": "FEDM",
+    "fincode": 105744,
+    "scripcode": 505744
   },
   {
     "name": "Cheviot Company",
@@ -7408,7 +9524,10 @@ const stockData: StockMapping[] = [
     "isin": "INE974B01016",
     "symbol": "CHEVIOT",
     "stockid": "656432",
-    "companyid": "12406"
+    "companyid": "12406",
+    "tickertape_sid": "CHEV",
+    "fincode": 126817,
+    "scripcode": 526817
   },
   {
     "name": "Bharat Wire Ropes",
@@ -7418,7 +9537,10 @@ const stockData: StockMapping[] = [
     "isin": "INE316L01019",
     "symbol": "BHARATWIRE",
     "stockid": "1002588",
-    "companyid": "64018"
+    "companyid": "64018",
+    "tickertape_sid": "BHWR",
+    "fincode": 221577,
+    "scripcode": 539799
   },
   {
     "name": "Bajaj Electricals",
@@ -7428,7 +9550,10 @@ const stockData: StockMapping[] = [
     "isin": "INE193E01025",
     "symbol": "BAJAJELEC",
     "stockid": "957749",
-    "companyid": "13978"
+    "companyid": "13978",
+    "tickertape_sid": "BJEL",
+    "fincode": 100031,
+    "scripcode": 500031
   },
   {
     "name": "Dynamatic Technologies",
@@ -7438,7 +9563,10 @@ const stockData: StockMapping[] = [
     "isin": "INE221B01012",
     "symbol": "DYNAMATECH",
     "stockid": "337661",
-    "companyid": "13816"
+    "companyid": "13816",
+    "tickertape_sid": "DYNM",
+    "fincode": 105242,
+    "scripcode": 505242
   },
   {
     "name": "Bhagiradh Chemicals and Industries",
@@ -7448,7 +9576,10 @@ const stockData: StockMapping[] = [
     "isin": "INE414D01027",
     "symbol": "BHAGCHEM",
     "stockid": "109825",
-    "companyid": "5963"
+    "companyid": "5963",
+    "tickertape_sid": "BHAG",
+    "fincode": 131719,
+    "scripcode": 531719
   },
   {
     "name": "ASK Automotive",
@@ -7458,7 +9589,10 @@ const stockData: StockMapping[] = [
     "isin": "INE491J01022",
     "symbol": "ASKAUTOLTD",
     "stockid": "10039072",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "ASK",
+    "fincode": 284503,
+    "scripcode": 544022
   },
   {
     "name": "Hariom Pipe Industries",
@@ -7468,7 +9602,10 @@ const stockData: StockMapping[] = [
     "isin": "INE00EV01017",
     "symbol": "HARIOMPIPE",
     "stockid": "1003634",
-    "companyid": "2035591"
+    "companyid": "2035591",
+    "tickertape_sid": "HARIO",
+    "fincode": 288976,
+    "scripcode": 543517
   },
   {
     "name": "Deep Industries",
@@ -7478,7 +9615,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0FHS01024",
     "symbol": "DEEPINDS",
     "stockid": "1003492",
-    "companyid": "1996699"
+    "companyid": "1996699",
+    "tickertape_sid": "DEEPI",
+    "fincode": 301999,
+    "scripcode": 543288
   },
   {
     "name": "Dollar Industries",
@@ -7488,7 +9628,10 @@ const stockData: StockMapping[] = [
     "isin": "INE325C01035",
     "symbol": "DOLLAR",
     "stockid": "1000161",
-    "companyid": "65885"
+    "companyid": "65885",
+    "tickertape_sid": "DLLA",
+    "fincode": 207877,
+    "scripcode": 541403
   },
   {
     "name": "Cyient DLM",
@@ -7498,7 +9641,10 @@ const stockData: StockMapping[] = [
     "isin": "INE055S01018",
     "symbol": "CYIENTDLM",
     "stockid": "1003882",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "CYI",
+    "fincode": 209063,
+    "scripcode": 543933
   },
   {
     "name": "Automotive Stampings and Assemblies",
@@ -7508,7 +9654,10 @@ const stockData: StockMapping[] = [
     "isin": "INE900C01027",
     "symbol": "ASAL",
     "stockid": "273328",
-    "companyid": "10371"
+    "companyid": "10371",
+    "tickertape_sid": "ASAS",
+    "fincode": 120119,
+    "scripcode": 520119
   },
   {
     "name": "HG Infra Engineering Ltd.",
@@ -7518,7 +9667,10 @@ const stockData: StockMapping[] = [
     "isin": "INE926X01010",
     "symbol": "HGINFRA",
     "stockid": "",
-    "companyid": "67525"
+    "companyid": "67525",
+    "tickertape_sid": "HGIN",
+    "fincode": 282626,
+    "scripcode": 541019
   },
   {
     "name": "Chemcon Speciality Chemicals",
@@ -7528,7 +9680,10 @@ const stockData: StockMapping[] = [
     "isin": "INE03YM01018",
     "symbol": "CHEMCON",
     "stockid": "1003418",
-    "companyid": "56611"
+    "companyid": "56611",
+    "tickertape_sid": "CHEMC",
+    "fincode": 295757,
+    "scripcode": 543233
   },
   {
     "name": "Greaves Cotton",
@@ -7538,7 +9693,10 @@ const stockData: StockMapping[] = [
     "isin": "INE224A01026",
     "symbol": "GREAVESCOT",
     "stockid": "405665",
-    "companyid": "13698"
+    "companyid": "13698",
+    "tickertape_sid": "GRVL",
+    "fincode": 101455,
+    "scripcode": 501455
   },
   {
     "name": "CMS Info Systems",
@@ -7548,7 +9706,10 @@ const stockData: StockMapping[] = [
     "isin": "INE925R01014",
     "symbol": "CMSINFO",
     "stockid": "1003592",
-    "companyid": "2021084"
+    "companyid": "2021084",
+    "tickertape_sid": "CMS",
+    "fincode": 234556,
+    "scripcode": 543441
   },
   {
     "name": "Entertainment Network India",
@@ -7558,7 +9719,10 @@ const stockData: StockMapping[] = [
     "isin": "INE265F01028",
     "symbol": "ENIL",
     "stockid": "446736",
-    "companyid": "18666"
+    "companyid": "18666",
+    "tickertape_sid": "ENIL",
+    "fincode": 132700,
+    "scripcode": 532700
   },
   {
     "name": "Insecticides India",
@@ -7568,7 +9732,10 @@ const stockData: StockMapping[] = [
     "isin": "INE070I01018",
     "symbol": "INSECTICID",
     "stockid": "630265",
-    "companyid": "19033"
+    "companyid": "19033",
+    "tickertape_sid": "ISIL",
+    "fincode": 132851,
+    "scripcode": 532851
   },
   {
     "name": "Huhtamaki India",
@@ -7578,7 +9745,10 @@ const stockData: StockMapping[] = [
     "isin": "INE275B01026",
     "symbol": "HUHTAMAKI",
     "stockid": "807270",
-    "companyid": "13313"
+    "companyid": "13313",
+    "tickertape_sid": "HUHT",
+    "fincode": 109820,
+    "scripcode": 509820
   },
   {
     "name": "Ethos",
@@ -7588,7 +9758,10 @@ const stockData: StockMapping[] = [
     "isin": "INE04TZ01018",
     "symbol": "ETHOSLTD",
     "stockid": "1003655",
-    "companyid": "23844"
+    "companyid": "23844",
+    "tickertape_sid": "ETH",
+    "fincode": 223788,
+    "scripcode": 543532
   },
   {
     "name": "ALLSEC Technologies",
@@ -7598,7 +9771,8 @@ const stockData: StockMapping[] = [
     "isin": "INE835G01018",
     "symbol": "ALLSEC",
     "stockid": "222651",
-    "companyid": "4119"
+    "companyid": "4119",
+    "tickertape_sid": "ALLS"
   },
   {
     "name": "Gandhi Special Tubes",
@@ -7608,7 +9782,10 @@ const stockData: StockMapping[] = [
     "isin": "INE524B01027",
     "symbol": "GANDHITUBE",
     "stockid": "406308",
-    "companyid": "13730"
+    "companyid": "13730",
+    "tickertape_sid": "GDTB",
+    "fincode": 113108,
+    "scripcode": 513108
   },
   {
     "name": "Harsha Engineers International",
@@ -7618,7 +9795,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0JUS01029",
     "symbol": "HARSHA",
     "stockid": "1003704",
-    "companyid": "1965181"
+    "companyid": "1965181",
+    "tickertape_sid": "HARS",
+    "fincode": 305179,
+    "scripcode": 543600
   },
   {
     "name": "Aptech",
@@ -7628,7 +9808,10 @@ const stockData: StockMapping[] = [
     "isin": "INE266F01018",
     "symbol": "APTECHT",
     "stockid": "360065",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "APTA",
+    "fincode": 132475,
+    "scripcode": 532475
   },
   {
     "name": "Elin Electronics",
@@ -7638,7 +9821,10 @@ const stockData: StockMapping[] = [
     "isin": "INE050401020",
     "symbol": "ELIN",
     "stockid": "1003768",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "ELIN",
+    "fincode": 275037,
+    "scripcode": 543725
   },
   {
     "name": "GIC Housing Finance",
@@ -7648,7 +9834,10 @@ const stockData: StockMapping[] = [
     "isin": "INE289B01019",
     "symbol": "GICHSGFIN",
     "stockid": "671512",
-    "companyid": "8464"
+    "companyid": "8464",
+    "tickertape_sid": "GICH",
+    "fincode": 111676,
+    "scripcode": 511676
   },
   {
     "name": "Go Fashion India",
@@ -7658,7 +9847,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0BJS01011",
     "symbol": "GOCOLORS",
     "stockid": "",
-    "companyid": "2019899"
+    "companyid": "2019899",
+    "tickertape_sid": "GOC",
+    "fincode": 303146,
+    "scripcode": 543401
   },
   {
     "name": "Capacite Infraprojects",
@@ -7668,7 +9860,10 @@ const stockData: StockMapping[] = [
     "isin": "INE264T01014",
     "symbol": "CAPACITE",
     "stockid": "1002821",
-    "companyid": "66812"
+    "companyid": "66812",
+    "tickertape_sid": "CAPE",
+    "fincode": 285668,
+    "scripcode": 540710
   },
   {
     "name": "Credo Brands Marketing",
@@ -7678,7 +9873,10 @@ const stockData: StockMapping[] = [
     "isin": "INE220Q01020",
     "symbol": "MUFTI",
     "stockid": "10039106",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "MUF",
+    "fincode": 221669,
+    "scripcode": 544058
   },
   {
     "name": "Avalon Technologies",
@@ -7688,7 +9886,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0LCL01028",
     "symbol": "AVALON",
     "stockid": "1003830",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "AVAL",
+    "fincode": 307061,
+    "scripcode": 543896
   },
   {
     "name": "Gabriel India",
@@ -7698,7 +9899,10 @@ const stockData: StockMapping[] = [
     "isin": "INE524A01029",
     "symbol": "GABRIEL",
     "stockid": "360959",
-    "companyid": "13763"
+    "companyid": "13763",
+    "tickertape_sid": "GABR",
+    "fincode": 105714,
+    "scripcode": 505714
   },
   {
     "name": "Bigbloc Construction",
@@ -7708,7 +9912,10 @@ const stockData: StockMapping[] = [
     "isin": "INE412U01025",
     "symbol": "BIGBLOC",
     "stockid": "1002645",
-    "companyid": "64934"
+    "companyid": "64934",
+    "tickertape_sid": "BIGB",
+    "fincode": 280524,
+    "scripcode": 540061
   },
   {
     "name": "GE Power India",
@@ -7718,7 +9925,8 @@ const stockData: StockMapping[] = [
     "isin": "INE878A01011",
     "symbol": "GEPIL",
     "stockid": "598119",
-    "companyid": "3714"
+    "companyid": "3714",
+    "tickertape_sid": "GEPO"
   },
   {
     "name": "GOCL Corporation",
@@ -7728,7 +9936,10 @@ const stockData: StockMapping[] = [
     "isin": "INE077F01035",
     "symbol": "GOCLCORP",
     "stockid": "893193",
-    "companyid": "13602"
+    "companyid": "13602",
+    "tickertape_sid": "GOCL",
+    "fincode": 106480,
+    "scripcode": 506480
   },
   {
     "name": "Gensol Engineering",
@@ -7738,7 +9949,10 @@ const stockData: StockMapping[] = [
     "isin": "INE06H201014",
     "symbol": "GENSOL",
     "stockid": "1003282",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "GEN",
+    "fincode": 294928,
+    "scripcode": 542851
   },
   {
     "name": "Carysil",
@@ -7748,7 +9962,10 @@ const stockData: StockMapping[] = [
     "isin": "INE482D01024",
     "symbol": "CARYSIL",
     "stockid": "621353",
-    "companyid": "15"
+    "companyid": "15",
+    "tickertape_sid": "ACR",
+    "fincode": 124091,
+    "scripcode": 524091
   },
   {
     "name": "Balmer Lawrie & Co",
@@ -7758,7 +9975,10 @@ const stockData: StockMapping[] = [
     "isin": "INE164A01016",
     "symbol": "BALMLAWRIE",
     "stockid": "447484",
-    "companyid": "12675"
+    "companyid": "12675",
+    "tickertape_sid": "BLMR",
+    "fincode": 123319,
+    "scripcode": 523319
   },
   {
     "name": "Butterfly Gandhimathi Appliances",
@@ -7768,7 +9988,10 @@ const stockData: StockMapping[] = [
     "isin": "INE295F01017",
     "symbol": "BUTTERFLY",
     "stockid": "580605",
-    "companyid": "10472"
+    "companyid": "10472",
+    "tickertape_sid": "BUTT",
+    "fincode": 117421,
+    "scripcode": 517421
   },
   {
     "name": "Arvind",
@@ -7778,7 +10001,10 @@ const stockData: StockMapping[] = [
     "isin": "INE034A01011",
     "symbol": "ARVIND",
     "stockid": "435326",
-    "companyid": "14037"
+    "companyid": "14037",
+    "tickertape_sid": "ARVN",
+    "fincode": 100101,
+    "scripcode": 500101
   },
   {
     "name": "Genus Power Infrastructures",
@@ -7788,7 +10014,10 @@ const stockData: StockMapping[] = [
     "isin": "INE955D01029",
     "symbol": "GENUSPOWER",
     "stockid": "852146",
-    "companyid": "7916"
+    "companyid": "7916",
+    "tickertape_sid": "GEOE",
+    "fincode": 130343,
+    "scripcode": 530343
   },
   {
     "name": "HP Adhesives",
@@ -7798,7 +10027,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0GSL01024",
     "symbol": "HPAL",
     "stockid": "1003588",
-    "companyid": "2020833"
+    "companyid": "2020833",
+    "tickertape_sid": "HPA",
+    "fincode": 302830,
+    "scripcode": 543433
   },
   {
     "name": "Gulf Oil Lubricants India",
@@ -7808,7 +10040,10 @@ const stockData: StockMapping[] = [
     "isin": "INE635Q01029",
     "symbol": "GULFOILLUB",
     "stockid": "935758",
-    "companyid": "56770"
+    "companyid": "56770",
+    "tickertape_sid": "GOLU",
+    "fincode": 267543,
+    "scripcode": 538567
   },
   {
     "name": "Greenply Industries",
@@ -7818,7 +10053,10 @@ const stockData: StockMapping[] = [
     "isin": "INE461C01038",
     "symbol": "GREENPLY",
     "stockid": "836794",
-    "companyid": "4809"
+    "companyid": "4809",
+    "tickertape_sid": "GRPL",
+    "fincode": 126797,
+    "scripcode": 526797
   },
   {
     "name": "Igarashi Motors",
@@ -7828,7 +10066,10 @@ const stockData: StockMapping[] = [
     "isin": "INE188B01013",
     "symbol": "IGARASHI",
     "stockid": "289834",
-    "companyid": "11334"
+    "companyid": "11334",
+    "tickertape_sid": "IGAM",
+    "fincode": 117380,
+    "scripcode": 517380
   },
   {
     "name": "Fusion Finance",
@@ -7838,7 +10079,10 @@ const stockData: StockMapping[] = [
     "isin": "INE139R01012",
     "symbol": "FUSION",
     "stockid": "",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "FUS",
+    "fincode": 273557,
+    "scripcode": 543652
   },
   {
     "name": "Deccan Cements",
@@ -7848,7 +10092,10 @@ const stockData: StockMapping[] = [
     "isin": "INE583C01021",
     "symbol": "DECCANCE",
     "stockid": "810344",
-    "companyid": "13863"
+    "companyid": "13863",
+    "tickertape_sid": "DCNC",
+    "fincode": 102137,
+    "scripcode": 502137
   },
   {
     "name": "ICRA",
@@ -7858,7 +10105,10 @@ const stockData: StockMapping[] = [
     "isin": "INE725G01011",
     "symbol": "ICRA",
     "stockid": "355638",
-    "companyid": "1311"
+    "companyid": "1311",
+    "tickertape_sid": "ICRA",
+    "fincode": 132835,
+    "scripcode": 532835
   },
   {
     "name": "HIL",
@@ -7868,7 +10118,10 @@ const stockData: StockMapping[] = [
     "isin": "INE557A01011",
     "symbol": "HIL",
     "stockid": "470167",
-    "companyid": "13614"
+    "companyid": "13614",
+    "tickertape_sid": "HLLT",
+    "fincode": 132847,
+    "scripcode": 532847
   },
   {
     "name": "Agarwal Industrial Corporation",
@@ -7878,7 +10131,10 @@ const stockData: StockMapping[] = [
     "isin": "INE204E01012",
     "symbol": "AGARIND",
     "stockid": "776884",
-    "companyid": "4555"
+    "companyid": "4555",
+    "tickertape_sid": "AGWL",
+    "fincode": 131921,
+    "scripcode": 531921
   },
   {
     "name": "Force Motors",
@@ -7888,7 +10144,10 @@ const stockData: StockMapping[] = [
     "isin": "INE451A01017",
     "symbol": "FORCEMOT",
     "stockid": "452187",
-    "companyid": "14011"
+    "companyid": "14011",
+    "tickertape_sid": "FORC",
+    "fincode": 100033,
+    "scripcode": 500033
   },
   {
     "name": "Confidence Petroleum",
@@ -7898,7 +10157,10 @@ const stockData: StockMapping[] = [
     "isin": "INE552D01024",
     "symbol": "CONFIPET",
     "stockid": "877223",
-    "companyid": "8227"
+    "companyid": "8227",
+    "tickertape_sid": "CONF",
+    "fincode": 126829,
+    "scripcode": 526829
   },
   {
     "name": "Atul Auto",
@@ -7908,7 +10170,10 @@ const stockData: StockMapping[] = [
     "isin": "INE951D01028",
     "symbol": "ATULAUTO",
     "stockid": "553328",
-    "companyid": "5864"
+    "companyid": "5864",
+    "tickertape_sid": "ATUL",
+    "fincode": 131795,
+    "scripcode": 531795
   },
   {
     "name": "Gokaldas Exports",
@@ -7918,7 +10183,10 @@ const stockData: StockMapping[] = [
     "isin": "INE887G01027",
     "symbol": "GOKEX",
     "stockid": "396911",
-    "companyid": "13003"
+    "companyid": "13003",
+    "tickertape_sid": "GOKL",
+    "fincode": 132630,
+    "scripcode": 532630
   },
   {
     "name": "Indo Rama Synthetics (India)",
@@ -7928,7 +10196,10 @@ const stockData: StockMapping[] = [
     "isin": "INE156A01020",
     "symbol": "INDORAMA",
     "stockid": "941844",
-    "companyid": "13541"
+    "companyid": "13541",
+    "tickertape_sid": "IRSY",
+    "fincode": 100207,
+    "scripcode": 500207
   },
   {
     "name": "Bharat Bijlee",
@@ -7938,7 +10209,10 @@ const stockData: StockMapping[] = [
     "isin": "INE464A01036",
     "symbol": "BBL",
     "stockid": "203402",
-    "companyid": "13968"
+    "companyid": "13968",
+    "tickertape_sid": "BBJL",
+    "fincode": 103960,
+    "scripcode": 503960
   },
   {
     "name": "AGI Greenpac",
@@ -7948,7 +10222,10 @@ const stockData: StockMapping[] = [
     "isin": "INE415A01038",
     "symbol": "AGI",
     "stockid": "591083",
-    "companyid": "13621"
+    "companyid": "13621",
+    "tickertape_sid": "HSNT",
+    "fincode": 100187,
+    "scripcode": 500187
   },
   {
     "name": "Hercules Hoists",
@@ -7958,7 +10235,10 @@ const stockData: StockMapping[] = [
     "isin": "INE688E01024",
     "symbol": "HERCULES",
     "stockid": "429940",
-    "companyid": "11318"
+    "companyid": "11318",
+    "tickertape_sid": "HERC",
+    "fincode": 105720,
+    "scripcode": 505720
   },
   {
     "name": "Hathway Cable and Datacom",
@@ -7968,7 +10248,10 @@ const stockData: StockMapping[] = [
     "isin": "INE982F01036",
     "symbol": "HATHWAY",
     "stockid": "127926",
-    "companyid": "30990"
+    "companyid": "30990",
+    "tickertape_sid": "HAWY",
+    "fincode": 215739,
+    "scripcode": 533162
   },
   {
     "name": "Divgi Torqtransfer Systems",
@@ -7978,7 +10261,10 @@ const stockData: StockMapping[] = [
     "isin": "INE753U01022",
     "symbol": "DIVGIITTS",
     "stockid": "1003806",
-    "companyid": "60010"
+    "companyid": "60010",
+    "tickertape_sid": "DIVG",
+    "fincode": 256461,
+    "scripcode": 543812
   },
   {
     "name": "Cantabil Retail India",
@@ -7988,7 +10274,10 @@ const stockData: StockMapping[] = [
     "isin": "INE068L01024",
     "symbol": "CANTABIL",
     "stockid": "869478",
-    "companyid": "32357"
+    "companyid": "32357",
+    "tickertape_sid": "CRIL",
+    "fincode": 219452,
+    "scripcode": 533267
   },
   {
     "name": "Allcargo Terminals",
@@ -7998,7 +10287,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0NN701020",
     "symbol": "ATL",
     "stockid": "10038966",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "ATT",
+    "fincode": 310218,
+    "scripcode": 543954
   },
   {
     "name": "Dharmaj Crop Guard",
@@ -8008,7 +10300,10 @@ const stockData: StockMapping[] = [
     "isin": "INE00OQ01016",
     "symbol": "DHARMAJ",
     "stockid": "1003752",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "DHARM",
+    "fincode": 305121,
+    "scripcode": 543687
   },
   {
     "name": "Ion Exchange (India)",
@@ -8018,7 +10313,10 @@ const stockData: StockMapping[] = [
     "isin": "INE570A01022",
     "symbol": "IONEXCHANG",
     "stockid": "235849",
-    "companyid": "13603"
+    "companyid": "13603",
+    "tickertape_sid": "ION",
+    "fincode": 100214,
+    "scripcode": 500214
   },
   {
     "name": "BF Utilities",
@@ -8028,7 +10326,10 @@ const stockData: StockMapping[] = [
     "isin": "INE243D01012",
     "symbol": "BFUTILITIE",
     "stockid": "342114",
-    "companyid": "3184"
+    "companyid": "3184",
+    "tickertape_sid": "BFUT",
+    "fincode": 132430,
+    "scripcode": 532430
   },
   {
     "name": "Choice International",
@@ -8038,7 +10339,10 @@ const stockData: StockMapping[] = [
     "isin": "INE102B01014",
     "symbol": "CHOICEIN",
     "stockid": "572032",
-    "companyid": "6798"
+    "companyid": "6798",
+    "tickertape_sid": "CHOI",
+    "fincode": 131358,
+    "scripcode": 531358
   },
   {
     "name": "Borosil",
@@ -8048,7 +10352,10 @@ const stockData: StockMapping[] = [
     "isin": "INE02PY01013",
     "symbol": "BOROLTD",
     "stockid": "1003404",
-    "companyid": "64487"
+    "companyid": "64487",
+    "tickertape_sid": "BORS",
+    "fincode": 299229,
+    "scripcode": 543212
   },
   {
     "name": "Allcargo Gati",
@@ -8068,7 +10375,10 @@ const stockData: StockMapping[] = [
     "isin": "INE922A01025",
     "symbol": "BEPL",
     "stockid": "744293",
-    "companyid": "13993"
+    "companyid": "13993",
+    "tickertape_sid": "BHAN",
+    "fincode": 100052,
+    "scripcode": 500052
   },
   {
     "name": "Electronics Mart India",
@@ -8078,7 +10388,10 @@ const stockData: StockMapping[] = [
     "isin": "INE02YR01019",
     "symbol": "EMIL",
     "stockid": "1003726",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "EMI",
+    "fincode": 303575,
+    "scripcode": 543626
   },
   {
     "name": "ISGEC Heavy Engineering",
@@ -8088,7 +10401,10 @@ const stockData: StockMapping[] = [
     "isin": "INE858B01029",
     "symbol": "ISGEC",
     "stockid": "937608",
-    "companyid": "12761"
+    "companyid": "12761",
+    "tickertape_sid": "SARA",
+    "fincode": 200025,
+    "scripcode": 533033
   },
   {
     "name": "IFB Industries",
@@ -8098,7 +10414,10 @@ const stockData: StockMapping[] = [
     "isin": "INE559A01017",
     "symbol": "IFBIND",
     "stockid": "633211",
-    "companyid": "13568"
+    "companyid": "13568",
+    "tickertape_sid": "IFBI",
+    "fincode": 105726,
+    "scripcode": 505726
   },
   {
     "name": "Avantel",
@@ -8108,7 +10427,10 @@ const stockData: StockMapping[] = [
     "isin": "INE005B01027",
     "symbol": "AVANTEL",
     "stockid": "240589",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "AVA",
+    "fincode": 132406,
+    "scripcode": 532406
   },
   {
     "name": "Centum Electronics",
@@ -8118,7 +10440,10 @@ const stockData: StockMapping[] = [
     "isin": "INE320B01020",
     "symbol": "CENTUM",
     "stockid": "255722",
-    "companyid": "8584"
+    "companyid": "8584",
+    "tickertape_sid": "CENT",
+    "fincode": 117544,
+    "scripcode": 517544
   },
   {
     "name": "Excel Industries",
@@ -8128,7 +10453,10 @@ const stockData: StockMapping[] = [
     "isin": "INE369A01029",
     "symbol": "EXCELINDUS",
     "stockid": "994427",
-    "companyid": "13778"
+    "companyid": "13778",
+    "tickertape_sid": "EXCI",
+    "fincode": 100650,
+    "scripcode": 500650
   },
   {
     "name": "Den Networks",
@@ -8138,7 +10466,10 @@ const stockData: StockMapping[] = [
     "isin": "INE947J01015",
     "symbol": "DEN",
     "stockid": "449890",
-    "companyid": "30425"
+    "companyid": "30425",
+    "tickertape_sid": "DENN",
+    "fincode": 219237,
+    "scripcode": 533137
   },
   {
     "name": "Inox Green Energy Services",
@@ -8148,7 +10479,10 @@ const stockData: StockMapping[] = [
     "isin": "INE510W01014",
     "symbol": "INOXGREEN",
     "stockid": "1003748",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "INOX",
+    "fincode": 277585,
+    "scripcode": 543667
   },
   {
     "name": "ESAF Small Finance Bank",
@@ -8158,7 +10492,10 @@ const stockData: StockMapping[] = [
     "isin": "INE818W01011",
     "symbol": "ESAFSFB",
     "stockid": "10039069",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "ESAF",
+    "fincode": 287810,
+    "scripcode": 544020
   },
   {
     "name": "Edelweiss Financial Services",
@@ -8168,7 +10505,10 @@ const stockData: StockMapping[] = [
     "isin": "INE532F01054",
     "symbol": "EDELWEISS",
     "stockid": "477559",
-    "companyid": "19100"
+    "companyid": "19100",
+    "tickertape_sid": "EDEL",
+    "fincode": 132922,
+    "scripcode": 532922
   },
   {
     "name": "Ganesh Housing Corporation",
@@ -8178,7 +10518,8 @@ const stockData: StockMapping[] = [
     "isin": "INE460C01014",
     "symbol": "GANESHHOUC",
     "stockid": "337147",
-    "companyid": "10519"
+    "companyid": "10519",
+    "tickertape_sid": "GHFC"
   },
   {
     "name": "HPL Electric & Power",
@@ -8188,7 +10529,10 @@ const stockData: StockMapping[] = [
     "isin": "INE495S01016",
     "symbol": "HPL",
     "stockid": "1002662",
-    "companyid": "45949"
+    "companyid": "45949",
+    "tickertape_sid": "HPLE",
+    "fincode": 215796,
+    "scripcode": 540136
   },
   {
     "name": "Indian Metals & Ferro Alloys",
@@ -8198,7 +10542,10 @@ const stockData: StockMapping[] = [
     "isin": "INE919H01018",
     "symbol": "IMFA",
     "stockid": "880374",
-    "companyid": "11712"
+    "companyid": "11712",
+    "tickertape_sid": "IMFA",
+    "fincode": 217582,
+    "scripcode": 533047
   },
   {
     "name": "Hardwyn India",
@@ -8208,7 +10555,10 @@ const stockData: StockMapping[] = [
     "isin": "INE626Z01029",
     "symbol": "HARDWYN",
     "stockid": "1002979",
-    "companyid": "67849"
+    "companyid": "67849",
+    "tickertape_sid": "HAR",
+    "fincode": 288715,
+    "scripcode": 541276
   },
   {
     "name": "India Glycols",
@@ -8218,7 +10568,9 @@ const stockData: StockMapping[] = [
     "isin": "INE560A01015",
     "symbol": "INDIAGLYCO",
     "stockid": "956244",
-    "companyid": "13551"
+    "companyid": "13551",
+    "fincode": 100201,
+    "scripcode": 500201
   },
   {
     "name": "Hemisphere Properties India",
@@ -8228,7 +10580,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0AJG01018",
     "symbol": "HEMIPROP",
     "stockid": "1003436",
-    "companyid": "68036"
+    "companyid": "68036",
+    "tickertape_sid": "HEMI",
+    "fincode": 296057,
+    "scripcode": 543242
   },
   {
     "name": "India Shelter Finance Corporation",
@@ -8238,7 +10593,10 @@ const stockData: StockMapping[] = [
     "isin": "INE922K01024",
     "symbol": "INDIASHLTR",
     "stockid": "10039095",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "INDIS",
+    "fincode": 274038,
+    "scripcode": 544044
   },
   {
     "name": "Good Luck India",
@@ -8248,7 +10606,10 @@ const stockData: StockMapping[] = [
     "isin": "INE127I01024",
     "symbol": "GOODLUCK",
     "stockid": "",
-    "companyid": "7735"
+    "companyid": "7735",
+    "tickertape_sid": "GLST",
+    "fincode": 130655,
+    "scripcode": 530655
   },
   {
     "name": "GE T&D India",
@@ -8258,7 +10619,8 @@ const stockData: StockMapping[] = [
     "isin": "INE200A01026",
     "symbol": "GET&D",
     "stockid": "628721",
-    "companyid": "13800"
+    "companyid": "13800",
+    "tickertape_sid": "GETD"
   },
   {
     "name": "IKIO Lighting",
@@ -8268,7 +10630,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0LOJ01019",
     "symbol": "IKIO",
     "stockid": "1003863",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "IKI",
+    "fincode": 307731,
+    "scripcode": 543923
   },
   {
     "name": "The Anup Engineering",
@@ -8278,7 +10643,10 @@ const stockData: StockMapping[] = [
     "isin": "INE294Z01018",
     "symbol": "ANUP",
     "stockid": "1003108",
-    "companyid": "68035"
+    "companyid": "68035",
+    "tickertape_sid": "ANUE",
+    "fincode": 293664,
+    "scripcode": 542460
   },
   {
     "name": "Antony Waste Handling Cell",
@@ -8288,7 +10656,10 @@ const stockData: StockMapping[] = [
     "isin": "INE01BK01022",
     "symbol": "AWHCL",
     "stockid": "1003453",
-    "companyid": "1961089"
+    "companyid": "1961089",
+    "tickertape_sid": "AWH",
+    "fincode": 277374,
+    "scripcode": 543254
   },
   {
     "name": "Inox India",
@@ -8298,7 +10669,10 @@ const stockData: StockMapping[] = [
     "isin": "INE616N01034",
     "symbol": "INOXINDIA",
     "stockid": "10039097",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "INOXI",
+    "fincode": 208433,
+    "scripcode": 544046
   },
   {
     "name": "IIFL Securities Limited",
@@ -8308,7 +10682,8 @@ const stockData: StockMapping[] = [
     "isin": "INE489L01022",
     "symbol": "IIFLSEC",
     "stockid": "",
-    "companyid": "22223"
+    "companyid": "22223",
+    "tickertape_sid": "IIFS"
   },
   {
     "name": "Hinduja Global Solutions",
@@ -8318,7 +10693,10 @@ const stockData: StockMapping[] = [
     "isin": "INE170I01016",
     "symbol": "HGS",
     "stockid": "197255",
-    "companyid": "19484"
+    "companyid": "19484",
+    "tickertape_sid": "HGSL",
+    "fincode": 132859,
+    "scripcode": 532859
   },
   {
     "name": "Banco Products (India)",
@@ -8328,7 +10706,10 @@ const stockData: StockMapping[] = [
     "isin": "INE213C01025",
     "symbol": "BANCOINDIA",
     "stockid": "909467",
-    "companyid": "13994"
+    "companyid": "13994",
+    "tickertape_sid": "BNCO",
+    "fincode": 100039,
+    "scripcode": 500039
   },
   {
     "name": "Gravita India",
@@ -8338,7 +10719,10 @@ const stockData: StockMapping[] = [
     "isin": "INE024L01027",
     "symbol": "GRAVITA",
     "stockid": "916288",
-    "companyid": "32785"
+    "companyid": "32785",
+    "tickertape_sid": "GRAI",
+    "fincode": 215690,
+    "scripcode": 533282
   },
   {
     "name": "Arman Financial Services",
@@ -8348,7 +10732,10 @@ const stockData: StockMapping[] = [
     "isin": "INE109C01017",
     "symbol": "ARMANFIN",
     "stockid": "296554",
-    "companyid": "7132"
+    "companyid": "7132",
+    "tickertape_sid": "ARLF",
+    "fincode": 131179,
+    "scripcode": 531179
   },
   {
     "name": "HeidelbergCement India",
@@ -8358,7 +10745,10 @@ const stockData: StockMapping[] = [
     "isin": "INE578A01017",
     "symbol": "HEIDELBERG",
     "stockid": "259799",
-    "companyid": "13339"
+    "companyid": "13339",
+    "tickertape_sid": "HEID",
+    "fincode": 100292,
+    "scripcode": 500292
   },
   {
     "name": "Anant Raj",
@@ -8368,7 +10758,10 @@ const stockData: StockMapping[] = [
     "isin": "INE242C01024",
     "symbol": "ANANTRAJ",
     "stockid": "737446",
-    "companyid": "12130"
+    "companyid": "12130",
+    "tickertape_sid": "ANRA",
+    "fincode": 115055,
+    "scripcode": 515055
   },
   {
     "name": "IG Petrochemicals",
@@ -8378,7 +10771,10 @@ const stockData: StockMapping[] = [
     "isin": "INE204A01010",
     "symbol": "IGPL",
     "stockid": "983371",
-    "companyid": "12172"
+    "companyid": "12172",
+    "tickertape_sid": "IGPT",
+    "fincode": 100199,
+    "scripcode": 500199
   },
   {
     "name": "Indian Hume Pipe Company",
@@ -8388,7 +10784,10 @@ const stockData: StockMapping[] = [
     "isin": "INE323C01030",
     "symbol": "INDIANHUME",
     "stockid": "942521",
-    "companyid": "13587"
+    "companyid": "13587",
+    "tickertape_sid": "IHME",
+    "fincode": 104741,
+    "scripcode": 504741
   },
   {
     "name": "Dreamfolks Services",
@@ -8398,7 +10797,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0JS101016",
     "symbol": "DREAMFOLKS",
     "stockid": "1003686",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "DRE",
+    "fincode": 305057,
+    "scripcode": 543591
   },
   {
     "name": "Filatex India",
@@ -8408,7 +10810,10 @@ const stockData: StockMapping[] = [
     "isin": "INE816B01035",
     "symbol": "FILATEX",
     "stockid": "787025",
-    "companyid": "10678"
+    "companyid": "10678",
+    "tickertape_sid": "FLTX",
+    "fincode": 126227,
+    "scripcode": 526227
   },
   {
     "name": "Honda India Power Products Limited",
@@ -8418,7 +10823,10 @@ const stockData: StockMapping[] = [
     "isin": "INE634A01018",
     "symbol": "HONDAPOWER",
     "stockid": "",
-    "companyid": "13101"
+    "companyid": "13101",
+    "tickertape_sid": "HOND",
+    "fincode": 122064,
+    "scripcode": 522064
   },
   {
     "name": "Andhra Paper Limited",
@@ -8428,7 +10836,10 @@ const stockData: StockMapping[] = [
     "isin": "INE435A01051",
     "symbol": "ANDHRAPAP",
     "stockid": "",
-    "companyid": "53"
+    "companyid": "53",
+    "tickertape_sid": "ANDA",
+    "fincode": 102330,
+    "scripcode": 502330
   },
   {
     "name": "Bajaj Healthcare",
@@ -8438,7 +10849,10 @@ const stockData: StockMapping[] = [
     "isin": "INE411U01027",
     "symbol": "BAJAJHCARE",
     "stockid": "1002590",
-    "companyid": "49966"
+    "companyid": "49966",
+    "tickertape_sid": "BAJ",
+    "fincode": 212661,
+    "scripcode": 539872
   },
   {
     "name": "DCB Bank",
@@ -8448,7 +10862,10 @@ const stockData: StockMapping[] = [
     "isin": "INE503A01015",
     "symbol": "DCBBANK",
     "stockid": "527477",
-    "companyid": "4940"
+    "companyid": "4940",
+    "tickertape_sid": "DCBA",
+    "fincode": 132772,
+    "scripcode": 532772
   },
   {
     "name": "Ashiana Housing",
@@ -8458,7 +10875,10 @@ const stockData: StockMapping[] = [
     "isin": "INE365D01021",
     "symbol": "ASHIANA",
     "stockid": "247169",
-    "companyid": "11280"
+    "companyid": "11280",
+    "tickertape_sid": "AHFN",
+    "fincode": 123716,
+    "scripcode": 523716
   },
   {
     "name": "Ashapura Minechem",
@@ -8468,7 +10888,10 @@ const stockData: StockMapping[] = [
     "isin": "INE348A01023",
     "symbol": "ASHAPURMIN",
     "stockid": "240221",
-    "companyid": "10674"
+    "companyid": "10674",
+    "tickertape_sid": "ASHM",
+    "fincode": 127001,
+    "scripcode": 527001
   },
   {
     "name": "Apollo Micro Systems",
@@ -8478,7 +10901,10 @@ const stockData: StockMapping[] = [
     "isin": "INE713T01028",
     "symbol": "APOLLO",
     "stockid": "1002905",
-    "companyid": "53568"
+    "companyid": "53568",
+    "tickertape_sid": "APLL",
+    "fincode": 287382,
+    "scripcode": 540879
   },
   {
     "name": "Ganesha Ecosphere",
@@ -8488,7 +10914,10 @@ const stockData: StockMapping[] = [
     "isin": "INE845D01014",
     "symbol": "GANECOS",
     "stockid": "394105",
-    "companyid": "12155"
+    "companyid": "12155",
+    "tickertape_sid": "GANS",
+    "fincode": 114167,
+    "scripcode": 514167
   },
   {
     "name": "Gandhar Oil Refinery India",
@@ -8498,7 +10927,10 @@ const stockData: StockMapping[] = [
     "isin": "INE717W01049",
     "symbol": "GANDHAR",
     "stockid": "",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "GAND",
+    "fincode": 287199,
+    "scripcode": 544029
   },
   {
     "name": "Gateway Distriparks",
@@ -8508,7 +10940,10 @@ const stockData: StockMapping[] = [
     "isin": "INE079J01017",
     "symbol": "GATEWAY",
     "stockid": "1003615",
-    "companyid": "18345"
+    "companyid": "18345",
+    "tickertape_sid": "GAT",
+    "fincode": 221083,
+    "scripcode": 543489
   },
   {
     "name": "Dolat Algotech",
@@ -8518,7 +10953,10 @@ const stockData: StockMapping[] = [
     "isin": "INE966A01022",
     "symbol": "DOLATALGO",
     "stockid": "372251",
-    "companyid": "4494"
+    "companyid": "4494",
+    "tickertape_sid": "DOLA",
+    "fincode": 105526,
+    "scripcode": 505526
   },
   {
     "name": "Fedbank Financial Services",
@@ -8528,7 +10966,10 @@ const stockData: StockMapping[] = [
     "isin": "INE007N01010",
     "symbol": "FEDFINA",
     "stockid": "10039080",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "FEDF",
+    "fincode": 221267,
+    "scripcode": 544027
   },
   {
     "name": "Emami Paper Mills",
@@ -8538,7 +10979,10 @@ const stockData: StockMapping[] = [
     "isin": "INE830C01026",
     "symbol": "EMAMIPAP",
     "stockid": "892725",
-    "companyid": "7060"
+    "companyid": "7060",
+    "tickertape_sid": "EMAP",
+    "fincode": 219649,
+    "scripcode": 533208
   },
   {
     "name": "Ganesh Benzoplast",
@@ -8548,7 +10992,10 @@ const stockData: StockMapping[] = [
     "isin": "INE388A01029",
     "symbol": "GANESHBE",
     "stockid": "535362",
-    "companyid": "13732"
+    "companyid": "13732",
+    "tickertape_sid": "GANES",
+    "fincode": 100153,
+    "scripcode": 500153
   },
   {
     "name": "Arihant Capital Markets",
@@ -8558,7 +11005,10 @@ const stockData: StockMapping[] = [
     "isin": "INE420B01036",
     "symbol": "ARIHANTCAP",
     "stockid": "750742",
-    "companyid": "8664"
+    "companyid": "8664",
+    "tickertape_sid": "ARIH",
+    "fincode": 111605,
+    "scripcode": 511605
   },
   {
     "name": "Cosmo First",
@@ -8568,7 +11018,10 @@ const stockData: StockMapping[] = [
     "isin": "INE757A01017",
     "symbol": "COSMOFIRST",
     "stockid": "350988",
-    "companyid": "13854"
+    "companyid": "13854",
+    "tickertape_sid": "CSFL",
+    "fincode": 108814,
+    "scripcode": 508814
   },
   {
     "name": "BL Kashyap & Sons",
@@ -8578,7 +11031,10 @@ const stockData: StockMapping[] = [
     "isin": "INE350H01032",
     "symbol": "BLKASHYAP",
     "stockid": "163401",
-    "companyid": "16069"
+    "companyid": "16069",
+    "tickertape_sid": "BLKS",
+    "fincode": 132719,
+    "scripcode": 532719
   },
   {
     "name": "Fairchem Organics",
@@ -8588,7 +11044,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0DNW01011",
     "symbol": "FAIRCHEMOR",
     "stockid": "1003452",
-    "companyid": "1990545"
+    "companyid": "1990545",
+    "tickertape_sid": "FAI",
+    "fincode": 299773,
+    "scripcode": 543252
   },
   {
     "name": "Ester Industries",
@@ -8598,7 +11057,10 @@ const stockData: StockMapping[] = [
     "isin": "INE778B01029",
     "symbol": "ESTER",
     "stockid": "928540",
-    "companyid": "13796"
+    "companyid": "13796",
+    "tickertape_sid": "ESTR",
+    "fincode": 100136,
+    "scripcode": 500136
   },
   {
     "name": "Fineotex Chemical",
@@ -8608,7 +11070,9 @@ const stockData: StockMapping[] = [
     "isin": "INE045J01026",
     "symbol": "FCL",
     "stockid": "469590",
-    "companyid": "33348"
+    "companyid": "33348",
+    "fincode": 213133,
+    "scripcode": 533333
   },
   {
     "name": "DMCC Speciality Chemicals",
@@ -8618,7 +11082,10 @@ const stockData: StockMapping[] = [
     "isin": "INE505A01010",
     "symbol": "DMCC",
     "stockid": "527471",
-    "companyid": "13820"
+    "companyid": "13820",
+    "tickertape_sid": "DHARA",
+    "fincode": 106405,
+    "scripcode": 506405
   },
   {
     "name": "EMS",
@@ -8628,7 +11095,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0OV601013",
     "symbol": "EMSLIMITED",
     "stockid": "10039002",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "EMS",
+    "fincode": 310103,
+    "scripcode": 543983
   },
   {
     "name": "Arihant Superstructures",
@@ -8638,7 +11108,10 @@ const stockData: StockMapping[] = [
     "isin": "INE643K01018",
     "symbol": "ARIHANTSUP",
     "stockid": "358411",
-    "companyid": "1760"
+    "companyid": "1760",
+    "tickertape_sid": "ARIS",
+    "fincode": 106194,
+    "scripcode": 506194
   },
   {
     "name": "Ahluwalia Contracts India",
@@ -8648,7 +11121,10 @@ const stockData: StockMapping[] = [
     "isin": "INE758C01029",
     "symbol": "AHLUCONT",
     "stockid": "304977",
-    "companyid": "5704"
+    "companyid": "5704",
+    "tickertape_sid": "AHLU",
+    "fincode": 132811,
+    "scripcode": 532811
   },
   {
     "name": "Apcotex Industries",
@@ -8658,7 +11134,10 @@ const stockData: StockMapping[] = [
     "isin": "INE116A01032",
     "symbol": "APCOTEXIND",
     "stockid": "418044",
-    "companyid": "10778"
+    "companyid": "10778",
+    "tickertape_sid": "APCI",
+    "fincode": 123694,
+    "scripcode": 523694
   },
   {
     "name": "Apollo Pipes",
@@ -8668,7 +11147,10 @@ const stockData: StockMapping[] = [
     "isin": "INE126J01016",
     "symbol": "APOLLOPIPE",
     "stockid": "976655",
-    "companyid": "5962"
+    "companyid": "5962",
+    "tickertape_sid": "AOLL",
+    "fincode": 131761,
+    "scripcode": 531761
   },
   {
     "name": "Alicon Castalloy",
@@ -8678,7 +11160,10 @@ const stockData: StockMapping[] = [
     "isin": "INE062D01024",
     "symbol": "ALICON",
     "stockid": "486005",
-    "companyid": "7214"
+    "companyid": "7214",
+    "tickertape_sid": "ALIO",
+    "fincode": 131147,
+    "scripcode": 531147
   },
   {
     "name": "Barbeque Nation Hospitality",
@@ -8688,7 +11173,10 @@ const stockData: StockMapping[] = [
     "isin": "INE382M01027",
     "symbol": "BARBEQUE",
     "stockid": "",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "BARBE",
+    "fincode": 123710,
+    "scripcode": 523710
   },
   {
     "name": "Best Agrolife",
@@ -8698,7 +11186,9 @@ const stockData: StockMapping[] = [
     "isin": "INE052T01013",
     "symbol": "BESTAGRO",
     "stockid": "1000660",
-    "companyid": "5045"
+    "companyid": "5045",
+    "fincode": 245011,
+    "scripcode": 539660
   },
   {
     "name": "BF Investment",
@@ -8708,7 +11198,10 @@ const stockData: StockMapping[] = [
     "isin": "INE878K01010",
     "symbol": "BFINVEST",
     "stockid": "245716",
-    "companyid": "32924"
+    "companyid": "32924",
+    "tickertape_sid": "BFIN",
+    "fincode": 220706,
+    "scripcode": 533303
   },
   {
     "name": "Dilip Buildcon",
@@ -8718,7 +11211,10 @@ const stockData: StockMapping[] = [
     "isin": "INE917M01012",
     "symbol": "DBL",
     "stockid": "1002644",
-    "companyid": "49439"
+    "companyid": "49439",
+    "tickertape_sid": "DIBL",
+    "fincode": 226480,
+    "scripcode": 540047
   },
   {
     "name": "Gallantt Ispat",
@@ -8728,7 +11224,10 @@ const stockData: StockMapping[] = [
     "isin": "INE297H01019",
     "symbol": "GALLANTT",
     "stockid": "887823",
-    "companyid": "15271"
+    "companyid": "15271",
+    "tickertape_sid": "GALM",
+    "fincode": 132726,
+    "scripcode": 532726
   },
   {
     "name": "CarTrade Tech",
@@ -8738,7 +11237,10 @@ const stockData: StockMapping[] = [
     "isin": "INE290S01011",
     "symbol": "CARTRADE",
     "stockid": "1003524",
-    "companyid": "2014002"
+    "companyid": "2014002",
+    "tickertape_sid": "CART",
+    "fincode": 275316,
+    "scripcode": 543333
   },
   {
     "name": "Dhani Services",
@@ -8758,7 +11260,10 @@ const stockData: StockMapping[] = [
     "isin": "INE132H01018",
     "symbol": "AURIONPRO",
     "stockid": "318534",
-    "companyid": "17605"
+    "companyid": "17605",
+    "tickertape_sid": "APSL",
+    "fincode": 132668,
+    "scripcode": 532668
   },
   {
     "name": "Azad Engineering",
@@ -8768,7 +11273,10 @@ const stockData: StockMapping[] = [
     "isin": "INE02IJ01035",
     "symbol": "AZAD",
     "stockid": "10039110",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "AZA",
+    "fincode": 312314,
+    "scripcode": 544061
   },
   {
     "name": "Everest Kanto Cylinder",
@@ -8778,7 +11286,10 @@ const stockData: StockMapping[] = [
     "isin": "INE184H01027",
     "symbol": "EKC",
     "stockid": "211122",
-    "companyid": "18643"
+    "companyid": "18643",
+    "tickertape_sid": "EKCL",
+    "fincode": 132684,
+    "scripcode": 532684
   },
   {
     "name": "CARE Ratings",
@@ -8788,7 +11299,10 @@ const stockData: StockMapping[] = [
     "isin": "INE752H01013",
     "symbol": "CARERATING",
     "stockid": "734522",
-    "companyid": "42268"
+    "companyid": "42268",
+    "tickertape_sid": "CREI",
+    "fincode": 227347,
+    "scripcode": 534804
   },
   {
     "name": "Dhunseri Ventures",
@@ -8798,7 +11312,10 @@ const stockData: StockMapping[] = [
     "isin": "INE477B01010",
     "symbol": "DVL",
     "stockid": "186953",
-    "companyid": "11355"
+    "companyid": "11355",
+    "tickertape_sid": "DHUN",
+    "fincode": 123736,
+    "scripcode": 523736
   },
   {
     "name": "Balu Forge Industries",
@@ -8808,7 +11325,10 @@ const stockData: StockMapping[] = [
     "isin": "INE011E01029",
     "symbol": "BALUFORGE",
     "stockid": "530936",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "AMAZ",
+    "fincode": 131112,
+    "scripcode": 531112
   },
   {
     "name": "Foseco India",
@@ -8818,7 +11338,10 @@ const stockData: StockMapping[] = [
     "isin": "INE519A01011",
     "symbol": "FOSECOIND",
     "stockid": "531797",
-    "companyid": "11777"
+    "companyid": "11777",
+    "tickertape_sid": "FSCO",
+    "fincode": 100150,
+    "scripcode": 500150
   },
   {
     "name": "Dredging Corporation India",
@@ -8828,7 +11351,10 @@ const stockData: StockMapping[] = [
     "isin": "INE506A01018",
     "symbol": "DREDGECORP",
     "stockid": "337698",
-    "companyid": "11773"
+    "companyid": "11773",
+    "tickertape_sid": "DRDG",
+    "fincode": 123618,
+    "scripcode": 523618
   },
   {
     "name": "EIH Associated Hotels",
@@ -8838,7 +11364,10 @@ const stockData: StockMapping[] = [
     "isin": "INE276C01014",
     "symbol": "EIHAHOTELS",
     "stockid": "753852",
-    "companyid": "13270"
+    "companyid": "13270",
+    "tickertape_sid": "EIHA",
+    "fincode": 123127,
+    "scripcode": 523127
   },
   {
     "name": "Bodal Chemicals",
@@ -8848,7 +11377,10 @@ const stockData: StockMapping[] = [
     "isin": "INE338D01028",
     "symbol": "BODALCHEM",
     "stockid": "478204",
-    "companyid": "10710"
+    "companyid": "10710",
+    "tickertape_sid": "BODA",
+    "fincode": 124370,
+    "scripcode": 524370
   },
   {
     "name": "Camlin Fine Sciences",
@@ -8858,7 +11390,10 @@ const stockData: StockMapping[] = [
     "isin": "INE052I01032",
     "symbol": "CAMLINFINE",
     "stockid": "256060",
-    "companyid": "18931"
+    "companyid": "18931",
+    "tickertape_sid": "CAMF",
+    "fincode": 132834,
+    "scripcode": 532834
   },
   {
     "name": "Arvind SmartSpaces",
@@ -8868,7 +11403,10 @@ const stockData: StockMapping[] = [
     "isin": "INE034S01021",
     "symbol": "ARVSMART",
     "stockid": "999935",
-    "companyid": "32615"
+    "companyid": "32615",
+    "tickertape_sid": "ARVD",
+    "fincode": 228011,
+    "scripcode": 539301
   },
   {
     "name": "Coffee Day Enterprises",
@@ -8878,7 +11416,10 @@ const stockData: StockMapping[] = [
     "isin": "INE335K01011",
     "symbol": "COFFEEDAY",
     "stockid": "999937",
-    "companyid": "62120"
+    "companyid": "62120",
+    "tickertape_sid": "CODE",
+    "fincode": 232575,
+    "scripcode": 539436
   },
   {
     "name": "Centrum Capital",
@@ -8888,7 +11429,10 @@ const stockData: StockMapping[] = [
     "isin": "INE660C01027",
     "symbol": "CENTRUM",
     "stockid": "315296",
-    "companyid": "4447"
+    "companyid": "4447",
+    "tickertape_sid": "CENC",
+    "fincode": 101150,
+    "scripcode": 501150
   },
   {
     "name": "GNA Axles",
@@ -8898,7 +11442,10 @@ const stockData: StockMapping[] = [
     "isin": "INE934S01014",
     "symbol": "GNA",
     "stockid": "1000228",
-    "companyid": "65012"
+    "companyid": "65012",
+    "tickertape_sid": "GNAA",
+    "fincode": 211130,
+    "scripcode": 540124
   },
   {
     "name": "Global Surfaces",
@@ -8908,7 +11455,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0JSX01015",
     "symbol": "GSLSU",
     "stockid": "1003814",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "GSLSU",
+    "fincode": 306563,
+    "scripcode": 543829
   },
   {
     "name": "GTPL Hathway",
@@ -8918,7 +11468,10 @@ const stockData: StockMapping[] = [
     "isin": "INE869I01013",
     "symbol": "GTPL",
     "stockid": "1002775",
-    "companyid": "32586"
+    "companyid": "32586",
+    "tickertape_sid": "GTPH",
+    "fincode": 284223,
+    "scripcode": 540602
   },
   {
     "name": "Heranba Industries",
@@ -8928,7 +11481,10 @@ const stockData: StockMapping[] = [
     "isin": "INE694N01015",
     "symbol": "HERANBA",
     "stockid": "1003465",
-    "companyid": "49741"
+    "companyid": "49741",
+    "tickertape_sid": "HER",
+    "fincode": 223487,
+    "scripcode": 543266
   },
   {
     "name": "Fino Payments Bank",
@@ -8938,7 +11494,10 @@ const stockData: StockMapping[] = [
     "isin": "INE02NC01014",
     "symbol": "FINOPB",
     "stockid": "1003560",
-    "companyid": "2017543"
+    "companyid": "2017543",
+    "tickertape_sid": "FINOP",
+    "fincode": 302986,
+    "scripcode": 543386
   },
   {
     "name": "Ideaforge Technology",
@@ -8948,7 +11507,10 @@ const stockData: StockMapping[] = [
     "isin": "INE349Y01013",
     "symbol": "IDEAFORGE",
     "stockid": "1003880",
-    "companyid": "2136192"
+    "companyid": "2136192",
+    "tickertape_sid": "IDE",
+    "fincode": 250958,
+    "scripcode": 543932
   },
   {
     "name": "Hi-Tech Pipes ",
@@ -8958,7 +11520,10 @@ const stockData: StockMapping[] = [
     "isin": "INE106T01025",
     "symbol": "HITECH",
     "stockid": "1000265",
-    "companyid": "49516"
+    "companyid": "49516",
+    "tickertape_sid": "HITC",
+    "fincode": 208345,
+    "scripcode": 543411
   },
   {
     "name": "GTL Infrastructure",
@@ -8968,7 +11533,10 @@ const stockData: StockMapping[] = [
     "isin": "INE221H01019",
     "symbol": "GTLINFRA",
     "stockid": "171011",
-    "companyid": "16883"
+    "companyid": "16883",
+    "tickertape_sid": "GTLI",
+    "fincode": 132775,
+    "scripcode": 532775
   },
   {
     "name": "Greenpanel Industries Limited",
@@ -8978,7 +11546,10 @@ const stockData: StockMapping[] = [
     "isin": "INE08ZM01014",
     "symbol": "GREENPANEL",
     "stockid": "",
-    "companyid": "1944330"
+    "companyid": "1944330",
+    "tickertape_sid": "GREP",
+    "fincode": 295732,
+    "scripcode": 542857
   },
   {
     "name": "FIEM Industries",
@@ -8988,7 +11559,10 @@ const stockData: StockMapping[] = [
     "isin": "INE737H01014",
     "symbol": "FIEMIND",
     "stockid": "424378",
-    "companyid": "18139"
+    "companyid": "18139",
+    "tickertape_sid": "FIIN",
+    "fincode": 132768,
+    "scripcode": 532768
   },
   {
     "name": "Garware Hi-Tech Films",
@@ -8998,7 +11572,10 @@ const stockData: StockMapping[] = [
     "isin": "INE291A01017",
     "symbol": "GRWRHITECH",
     "stockid": "",
-    "companyid": "13746"
+    "companyid": "13746",
+    "tickertape_sid": "GARWR",
+    "fincode": 100655,
+    "scripcode": 500655
   },
   {
     "name": "Goldiam International",
@@ -9008,7 +11585,10 @@ const stockData: StockMapping[] = [
     "isin": "INE025B01025",
     "symbol": "GOLDIAM",
     "stockid": "772343",
-    "companyid": "8493"
+    "companyid": "8493",
+    "tickertape_sid": "GOLI",
+    "fincode": 126729,
+    "scripcode": 526729
   },
   {
     "name": "Imagicaaworld Entertainment",
@@ -9018,7 +11598,10 @@ const stockData: StockMapping[] = [
     "isin": "INE172N01012",
     "symbol": "IMAGICAA",
     "stockid": "278022",
-    "companyid": "59103"
+    "companyid": "59103",
+    "tickertape_sid": "IMAW",
+    "fincode": 256841,
+    "scripcode": 539056
   },
   {
     "name": "J Kumar Infraprojects",
@@ -9028,7 +11611,10 @@ const stockData: StockMapping[] = [
     "isin": "INE576I01022",
     "symbol": "JKIL",
     "stockid": "889147",
-    "companyid": "20692"
+    "companyid": "20692",
+    "tickertape_sid": "JKIP",
+    "fincode": 200043,
+    "scripcode": 532940
   },
   {
     "name": "Greenlam Industries",
@@ -9038,7 +11624,10 @@ const stockData: StockMapping[] = [
     "isin": "INE544R01021",
     "symbol": "GREENLAM",
     "stockid": "970040",
-    "companyid": "47614"
+    "companyid": "47614",
+    "tickertape_sid": "GEEN",
+    "fincode": 272156,
+    "scripcode": 538979
   },
   {
     "name": "Hindware Home Innovation",
@@ -9048,7 +11637,10 @@ const stockData: StockMapping[] = [
     "isin": "INE05AN01011",
     "symbol": "HINDWAREAP",
     "stockid": "1003364",
-    "companyid": "1944331"
+    "companyid": "1944331",
+    "tickertape_sid": "SOMN",
+    "fincode": 295873,
+    "scripcode": 542905
   },
   {
     "name": "IFGL Refractories",
@@ -9058,7 +11650,10 @@ const stockData: StockMapping[] = [
     "isin": "INE133Y01011",
     "symbol": "IFGLEXPOR",
     "stockid": "1002878",
-    "companyid": "41057"
+    "companyid": "41057",
+    "tickertape_sid": "IFGL",
+    "fincode": 243998,
+    "scripcode": 540774
   },
   {
     "name": "Indo Amines",
@@ -9068,7 +11663,10 @@ const stockData: StockMapping[] = [
     "isin": "INE760F01028",
     "symbol": "INDOAMIN",
     "stockid": "606149",
-    "companyid": "9118"
+    "companyid": "9118",
+    "tickertape_sid": "INDOM",
+    "fincode": 124648,
+    "scripcode": 524648
   },
   {
     "name": "ITD Cementation India",
@@ -9078,7 +11676,8 @@ const stockData: StockMapping[] = [
     "isin": "INE686A01026",
     "symbol": "ITDCEM",
     "stockid": "914093",
-    "companyid": "13902"
+    "companyid": "13902",
+    "tickertape_sid": "ITCM"
   },
   {
     "name": "GMR Power and Urban Infra",
@@ -9088,7 +11687,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0CU601026",
     "symbol": "GMRP&UI",
     "stockid": "1003617",
-    "companyid": "2023874"
+    "companyid": "2023874",
+    "tickertape_sid": "GMR",
+    "fincode": 305653,
+    "scripcode": 543490
   },
   {
     "name": "India Pesticides",
@@ -9098,7 +11700,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0D6701023",
     "symbol": "IPL",
     "stockid": "1003505",
-    "companyid": "2011905"
+    "companyid": "2011905",
+    "tickertape_sid": "IPL",
+    "fincode": 301327,
+    "scripcode": 543311
   },
   {
     "name": "India Tourism Development Corporation",
@@ -9108,7 +11713,10 @@ const stockData: StockMapping[] = [
     "isin": "INE353K01014",
     "symbol": "ITDC",
     "stockid": "360609",
-    "companyid": "4594"
+    "companyid": "4594",
+    "tickertape_sid": "ITDC",
+    "fincode": 132189,
+    "scripcode": 532189
   },
   {
     "name": "Inox Wind Energy",
@@ -9118,7 +11726,9 @@ const stockData: StockMapping[] = [
     "isin": "INE0FLR01028",
     "symbol": "IWEL",
     "stockid": "1003495",
-    "companyid": "2005429"
+    "companyid": "2005429",
+    "fincode": 100304,
+    "scripcode": 500304
   },
   {
     "name": "HLV",
@@ -9128,7 +11738,10 @@ const stockData: StockMapping[] = [
     "isin": "INE102A01024",
     "symbol": "HLVLTD",
     "stockid": "248543",
-    "companyid": "13611"
+    "companyid": "13611",
+    "tickertape_sid": "HLVL",
+    "fincode": 100193,
+    "scripcode": 500193
   },
   {
     "name": "Geojit Financial Services",
@@ -9138,7 +11751,10 @@ const stockData: StockMapping[] = [
     "isin": "INE007B01023",
     "symbol": "GEOJITFSL",
     "stockid": "748439",
-    "companyid": "6853"
+    "companyid": "6853",
+    "tickertape_sid": "GEOJ",
+    "fincode": 132285,
+    "scripcode": 532285
   },
   {
     "name": "Indo Count Industries",
@@ -9148,7 +11764,10 @@ const stockData: StockMapping[] = [
     "isin": "INE483B01026",
     "symbol": "ICIL",
     "stockid": "158315",
-    "companyid": "13576"
+    "companyid": "13576",
+    "tickertape_sid": "ICNT",
+    "fincode": 121016,
+    "scripcode": 521016
   },
   {
     "name": "GHCL Textiles",
@@ -9158,7 +11777,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0PA801013",
     "symbol": "GHCLTEXTIL",
     "stockid": "1003860",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "GHC",
+    "fincode": 310497,
+    "scripcode": 543918
   },
   {
     "name": "Faze Three",
@@ -9168,7 +11790,10 @@ const stockData: StockMapping[] = [
     "isin": "INE963C01033",
     "symbol": "FAZE3Q",
     "stockid": "145566",
-    "companyid": "8056"
+    "companyid": "8056",
+    "tickertape_sid": "FAZE",
+    "fincode": 130079,
+    "scripcode": 530079
   },
   {
     "name": "Kewal Kiran Clothing",
@@ -9178,7 +11803,10 @@ const stockData: StockMapping[] = [
     "isin": "INE401H01017",
     "symbol": "KKCL",
     "stockid": "926143",
-    "companyid": "15299"
+    "companyid": "15299",
+    "tickertape_sid": "KKCL",
+    "fincode": 132732,
+    "scripcode": 532732
   },
   {
     "name": "JTEKT India ",
@@ -9188,7 +11816,10 @@ const stockData: StockMapping[] = [
     "isin": "INE643A01035",
     "symbol": "JTEKTINDIA",
     "stockid": "801618",
-    "companyid": "13078"
+    "companyid": "13078",
+    "tickertape_sid": "JTEK",
+    "fincode": 120057,
+    "scripcode": 520057
   },
   {
     "name": "Mold-Tek Packaging",
@@ -9198,7 +11829,10 @@ const stockData: StockMapping[] = [
     "isin": "INE893J01029",
     "symbol": "MOLDTKPAC",
     "stockid": "219617",
-    "companyid": "24724"
+    "companyid": "24724",
+    "tickertape_sid": "MOLT",
+    "fincode": 218761,
+    "scripcode": 533080
   },
   {
     "name": "Kitex Garments",
@@ -9208,7 +11842,10 @@ const stockData: StockMapping[] = [
     "isin": "INE602G01020",
     "symbol": "KITEX",
     "stockid": "546852",
-    "companyid": "6360"
+    "companyid": "6360",
+    "tickertape_sid": "KITE",
+    "fincode": 121248,
+    "scripcode": 521248
   },
   {
     "name": "Keystone Realtors",
@@ -9218,7 +11855,10 @@ const stockData: StockMapping[] = [
     "isin": "INE263M01029",
     "symbol": "RUSTOMJEE",
     "stockid": "1003749",
-    "companyid": "61456"
+    "companyid": "61456",
+    "tickertape_sid": "RUST",
+    "fincode": 213397,
+    "scripcode": 543669
   },
   {
     "name": "Khaitan Chemicals and Fertilizers",
@@ -9228,7 +11868,10 @@ const stockData: StockMapping[] = [
     "isin": "INE745B01028",
     "symbol": "KHAICHEM",
     "stockid": "511670",
-    "companyid": "13427"
+    "companyid": "13427",
+    "tickertape_sid": "KHA",
+    "fincode": 107794,
+    "scripcode": 507794
   },
   {
     "name": "MOIL",
@@ -9238,7 +11881,10 @@ const stockData: StockMapping[] = [
     "isin": "INE490G01020",
     "symbol": "MOIL",
     "stockid": "805473",
-    "companyid": "4501"
+    "companyid": "4501",
+    "tickertape_sid": "MOIL",
+    "fincode": 208690,
+    "scripcode": 533286
   },
   {
     "name": "Pokarna",
@@ -9248,7 +11894,10 @@ const stockData: StockMapping[] = [
     "isin": "INE637C01025",
     "symbol": "POKARNA",
     "stockid": "520711",
-    "companyid": "6850"
+    "companyid": "6850",
+    "tickertape_sid": "POKR",
+    "fincode": 132486,
+    "scripcode": 532486
   },
   {
     "name": "Optiemus Infracom",
@@ -9258,7 +11907,10 @@ const stockData: StockMapping[] = [
     "isin": "INE350C01017",
     "symbol": "OPTIEMUS",
     "stockid": "954456",
-    "companyid": "8110"
+    "companyid": "8110",
+    "tickertape_sid": "OPTI",
+    "fincode": 130135,
+    "scripcode": 530135
   },
   {
     "name": "Navkar Corporation",
@@ -9268,7 +11920,10 @@ const stockData: StockMapping[] = [
     "isin": "INE278M01019",
     "symbol": "NAVKARCORP",
     "stockid": "999934",
-    "companyid": "61354"
+    "companyid": "61354",
+    "tickertape_sid": "NAVR",
+    "fincode": 227718,
+    "scripcode": 539332
   },
   {
     "name": "Precision Camshafts",
@@ -9278,7 +11933,10 @@ const stockData: StockMapping[] = [
     "isin": "INE484I01029",
     "symbol": "PRECAM",
     "stockid": "1000566",
-    "companyid": "43060"
+    "companyid": "43060",
+    "tickertape_sid": "PRCM",
+    "fincode": 252077,
+    "scripcode": 539636
   },
   {
     "name": "Orient Green Power Company",
@@ -9288,7 +11946,10 @@ const stockData: StockMapping[] = [
     "isin": "INE999K01014",
     "symbol": "GREENPOWER",
     "stockid": "564803",
-    "companyid": "32349"
+    "companyid": "32349",
+    "tickertape_sid": "ORIN",
+    "fincode": 220889,
+    "scripcode": 533263
   },
   {
     "name": "New Delhi Television",
@@ -9298,7 +11959,10 @@ const stockData: StockMapping[] = [
     "isin": "INE155G01029",
     "symbol": "NDTV",
     "stockid": "636797",
-    "companyid": "16783"
+    "companyid": "16783",
+    "tickertape_sid": "NDTV",
+    "fincode": 132529,
+    "scripcode": 532529
   },
   {
     "name": "Jai Corp",
@@ -9308,7 +11972,10 @@ const stockData: StockMapping[] = [
     "isin": "INE070D01027",
     "symbol": "JAICORPLTD",
     "stockid": "598896",
-    "companyid": "8597"
+    "companyid": "8597",
+    "tickertape_sid": "JAIC",
+    "fincode": 112237,
+    "scripcode": 512237
   },
   {
     "name": "Monte Carlo Fashions",
@@ -9318,7 +11985,10 @@ const stockData: StockMapping[] = [
     "isin": "INE950M01013",
     "symbol": "MONTECARLO",
     "stockid": "956522",
-    "companyid": "58299"
+    "companyid": "58299",
+    "tickertape_sid": "MOCF",
+    "fincode": 255045,
+    "scripcode": 538836
   },
   {
     "name": "Rane Holdings",
@@ -9328,7 +11998,10 @@ const stockData: StockMapping[] = [
     "isin": "INE384A01010",
     "symbol": "RANEHOLDIN",
     "stockid": "972978",
-    "companyid": "13219"
+    "companyid": "13219",
+    "tickertape_sid": "RANE",
+    "fincode": 105800,
+    "scripcode": 505800
   },
   {
     "name": "Prudent Corporate Advisory Services",
@@ -9338,7 +12011,10 @@ const stockData: StockMapping[] = [
     "isin": "INE00F201020",
     "symbol": "PRUDENT",
     "stockid": "1003649",
-    "companyid": "2041702"
+    "companyid": "2041702",
+    "tickertape_sid": "PRU",
+    "fincode": 303180,
+    "scripcode": 543527
   },
   {
     "name": "Medicamen Biotech",
@@ -9348,7 +12024,10 @@ const stockData: StockMapping[] = [
     "isin": "INE646B01010",
     "symbol": "MEDICAMEQ",
     "stockid": "770569",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "MEDI",
+    "fincode": 131146,
+    "scripcode": 531146
   },
   {
     "name": "Lloyds Engineering Works",
@@ -9358,7 +12037,10 @@ const stockData: StockMapping[] = [
     "isin": "INE093R01011",
     "symbol": "LLOYDSENGG",
     "stockid": "1002640",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "LSIL",
+    "fincode": 282112,
+    "scripcode": 539992
   },
   {
     "name": "Royal Orchid Hotels",
@@ -9368,7 +12050,10 @@ const stockData: StockMapping[] = [
     "isin": "INE283H01019",
     "symbol": "ROHLTD",
     "stockid": "476979",
-    "companyid": "17843"
+    "companyid": "17843",
+    "tickertape_sid": "ROYL",
+    "fincode": 132699,
+    "scripcode": 532699
   },
   {
     "name": "Kalyani Investment Company",
@@ -9378,7 +12063,10 @@ const stockData: StockMapping[] = [
     "isin": "INE029L01018",
     "symbol": "KICL",
     "stockid": "485202",
-    "companyid": "32926"
+    "companyid": "32926",
+    "tickertape_sid": "KALA",
+    "fincode": 220965,
+    "scripcode": 533302
   },
   {
     "name": "Kirloskar Brothers",
@@ -9388,7 +12076,10 @@ const stockData: StockMapping[] = [
     "isin": "INE732A01036",
     "symbol": "KIRLOSBROS",
     "stockid": "941607",
-    "companyid": "13470"
+    "companyid": "13470",
+    "tickertape_sid": "KRBR",
+    "fincode": 100241,
+    "scripcode": 500241
   },
   {
     "name": "Religare Enterprises",
@@ -9398,7 +12089,10 @@ const stockData: StockMapping[] = [
     "isin": "INE621H01010",
     "symbol": "RELIGARE",
     "stockid": "416310",
-    "companyid": "20026"
+    "companyid": "20026",
+    "tickertape_sid": "RELG",
+    "fincode": 132915,
+    "scripcode": 532915
   },
   {
     "name": "Rishabh Instruments",
@@ -9408,7 +12102,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0N2P01017",
     "symbol": "RISHABH",
     "stockid": "10038993",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "RISHA",
+    "fincode": 223679,
+    "scripcode": 543977
   },
   {
     "name": "NIIT",
@@ -9418,7 +12115,10 @@ const stockData: StockMapping[] = [
     "isin": "INE161A01038",
     "symbol": "NIITLTD",
     "stockid": "178477",
-    "companyid": "10952"
+    "companyid": "10952",
+    "tickertape_sid": "NIIT",
+    "fincode": 100304,
+    "scripcode": 500304
   },
   {
     "name": "Rushil Decor",
@@ -9428,7 +12128,10 @@ const stockData: StockMapping[] = [
     "isin": "INE573K01025",
     "symbol": "RUSHIL",
     "stockid": "479846",
-    "companyid": "32206"
+    "companyid": "32206",
+    "tickertape_sid": "RUSH",
+    "fincode": 213993,
+    "scripcode": 533470
   },
   {
     "name": "RSWM",
@@ -9438,7 +12141,10 @@ const stockData: StockMapping[] = [
     "isin": "INE611A01016",
     "symbol": "RSWM",
     "stockid": "941056",
-    "companyid": "13232"
+    "companyid": "13232",
+    "tickertape_sid": "RSWM",
+    "fincode": 100350,
+    "scripcode": 500350
   },
   {
     "name": "Jayant Agro-Organics",
@@ -9448,7 +12154,10 @@ const stockData: StockMapping[] = [
     "isin": "INE785A01026",
     "symbol": "JAYAGROGN",
     "stockid": "753805",
-    "companyid": "10759"
+    "companyid": "10759",
+    "tickertape_sid": "JAAO",
+    "fincode": 124330,
+    "scripcode": 524330
   },
   {
     "name": "Reliance Industrial Infrastructure",
@@ -9458,7 +12167,10 @@ const stockData: StockMapping[] = [
     "isin": "INE046A01015",
     "symbol": "RIIL",
     "stockid": "453925",
-    "companyid": "12097"
+    "companyid": "12097",
+    "tickertape_sid": "REII",
+    "fincode": 123445,
+    "scripcode": 523445
   },
   {
     "name": "JAIN IRRIGATION SYSTEMS",
@@ -9468,7 +12180,10 @@ const stockData: StockMapping[] = [
     "isin": "IN9175A01010",
     "symbol": "JISLDVREQS",
     "stockid": "329828",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "JAIRdv",
+    "fincode": 228128,
+    "scripcode": 570004
   },
   {
     "name": "KPI Green Energy",
@@ -9478,7 +12193,10 @@ const stockData: StockMapping[] = [
     "isin": "INE542W01025",
     "symbol": "KPIGREEN",
     "stockid": "1003097",
-    "companyid": "1847251"
+    "companyid": "1847251",
+    "tickertape_sid": "KPI",
+    "fincode": 293000,
+    "scripcode": 542323
   },
   {
     "name": "Matrimony.com",
@@ -9488,7 +12206,10 @@ const stockData: StockMapping[] = [
     "isin": "INE866R01028",
     "symbol": "MATRIMONY",
     "stockid": "1000415",
-    "companyid": "66811"
+    "companyid": "66811",
+    "tickertape_sid": "MATI",
+    "fincode": 223140,
+    "scripcode": 540704
   },
   {
     "name": "Shipping Corporation of India",
@@ -9498,7 +12219,10 @@ const stockData: StockMapping[] = [
     "isin": "INE109A01011",
     "symbol": "SCI",
     "stockid": "939216",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "SCI",
+    "fincode": 123598,
+    "scripcode": 523598
   },
   {
     "name": "Savita Oil Technologies",
@@ -9508,7 +12232,10 @@ const stockData: StockMapping[] = [
     "isin": "INE035D01020",
     "symbol": "SOTL",
     "stockid": "535893",
-    "companyid": "9128"
+    "companyid": "9128",
+    "tickertape_sid": "SAOL",
+    "fincode": 124667,
+    "scripcode": 524667
   },
   {
     "name": "Somany Ceramics",
@@ -9518,7 +12245,10 @@ const stockData: StockMapping[] = [
     "isin": "INE355A01028",
     "symbol": "SOMANYCERA",
     "stockid": "577230",
-    "companyid": "13077"
+    "companyid": "13077",
+    "tickertape_sid": "SOCE",
+    "fincode": 131548,
+    "scripcode": 531548
   },
   {
     "name": "RPSG VENTURES",
@@ -9528,7 +12258,10 @@ const stockData: StockMapping[] = [
     "isin": "INE425Y01011",
     "symbol": "RPSGVENT",
     "stockid": "1003099",
-    "companyid": "69233"
+    "companyid": "69233",
+    "tickertape_sid": "CESV",
+    "fincode": 293705,
+    "scripcode": 542333
   },
   {
     "name": "Landmark Cars",
@@ -9538,7 +12271,10 @@ const stockData: StockMapping[] = [
     "isin": "INE559R01029",
     "symbol": "LANDMARK",
     "stockid": "1003760",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "LANDA",
+    "fincode": 274083,
+    "scripcode": 543714
   },
   {
     "name": "PC Jeweller",
@@ -9548,7 +12284,9 @@ const stockData: StockMapping[] = [
     "isin": "INE785M01013",
     "symbol": "PCJEWELLER",
     "stockid": "267489",
-    "companyid": "42269"
+    "companyid": "42269",
+    "fincode": 223032,
+    "scripcode": 534809
   },
   {
     "name": "Shanthi Gears",
@@ -9558,7 +12296,10 @@ const stockData: StockMapping[] = [
     "isin": "INE631A01022",
     "symbol": "SHANTIGEAR",
     "stockid": "106152",
-    "companyid": "13127"
+    "companyid": "13127",
+    "tickertape_sid": "SHNT",
+    "fincode": 122034,
+    "scripcode": 522034
   },
   {
     "name": "National Fertilizers",
@@ -9568,7 +12309,10 @@ const stockData: StockMapping[] = [
     "isin": "INE870D01012",
     "symbol": "NFL",
     "stockid": "348227",
-    "companyid": "11632"
+    "companyid": "11632",
+    "tickertape_sid": "NAFT",
+    "fincode": 123630,
+    "scripcode": 523630
   },
   {
     "name": "Kellton Tech Solutions",
@@ -9578,7 +12322,9 @@ const stockData: StockMapping[] = [
     "isin": "INE164B01022",
     "symbol": "KELLTONTEC",
     "stockid": "832122",
-    "companyid": ""
+    "companyid": "",
+    "fincode": 119602,
+    "scripcode": 519602
   },
   {
     "name": "Sirca Paints India",
@@ -9588,7 +12334,10 @@ const stockData: StockMapping[] = [
     "isin": "INE792Z01011",
     "symbol": "SIRCA",
     "stockid": "1002997",
-    "companyid": "67933"
+    "companyid": "67933",
+    "tickertape_sid": "SICR",
+    "fincode": 288827,
+    "scripcode": 543686
   },
   {
     "name": "Salasar Techno Engineering",
@@ -9598,7 +12347,10 @@ const stockData: StockMapping[] = [
     "isin": "INE170V01027",
     "symbol": "SALASAR",
     "stockid": "1002793",
-    "companyid": "39695"
+    "companyid": "39695",
+    "tickertape_sid": "SALA",
+    "fincode": 284680,
+    "scripcode": 540642
   },
   {
     "name": "Paras Defence and Space Technologies",
@@ -9608,7 +12360,9 @@ const stockData: StockMapping[] = [
     "isin": "INE045601015",
     "symbol": "PARAS",
     "stockid": "1003539",
-    "companyid": "43314"
+    "companyid": "43314",
+    "fincode": 301603,
+    "scripcode": 543367
   },
   {
     "name": "Man Infraconstruction",
@@ -9618,7 +12372,10 @@ const stockData: StockMapping[] = [
     "isin": "INE949H01023",
     "symbol": "MANINFRA",
     "stockid": "857134",
-    "companyid": "22649"
+    "companyid": "22649",
+    "tickertape_sid": "MANI",
+    "fincode": 200083,
+    "scripcode": 533169
   },
   {
     "name": "Shankara Building Products",
@@ -9628,7 +12385,10 @@ const stockData: StockMapping[] = [
     "isin": "INE274V01019",
     "symbol": "SHANKARA",
     "stockid": "1002744",
-    "companyid": "65742"
+    "companyid": "65742",
+    "tickertape_sid": "SHAB",
+    "fincode": 200110,
+    "scripcode": 540425
   },
   {
     "name": "NRB Bearings",
@@ -9638,7 +12398,10 @@ const stockData: StockMapping[] = [
     "isin": "INE349A01021",
     "symbol": "NRBBEARING",
     "stockid": "873000",
-    "companyid": "7942"
+    "companyid": "7942",
+    "tickertape_sid": "NBEA",
+    "fincode": 130367,
+    "scripcode": 530367
   },
   {
     "name": "Nahar Poly Films",
@@ -9648,7 +12411,10 @@ const stockData: StockMapping[] = [
     "isin": "INE308A01027",
     "symbol": "NAHARPOLY",
     "stockid": "143187",
-    "companyid": "12676"
+    "companyid": "12676",
+    "tickertape_sid": "NAHR",
+    "fincode": 123391,
+    "scripcode": 523391
   },
   {
     "name": "Nitin Spinners",
@@ -9658,7 +12424,10 @@ const stockData: StockMapping[] = [
     "isin": "INE229H01012",
     "symbol": "NITINSPIN",
     "stockid": "127568",
-    "companyid": "17841"
+    "companyid": "17841",
+    "tickertape_sid": "NISP",
+    "fincode": 132698,
+    "scripcode": 532698
   },
   {
     "name": "Kirloskar Oil Engines",
@@ -9668,7 +12437,10 @@ const stockData: StockMapping[] = [
     "isin": "INE146L01010",
     "symbol": "KIRLOSENG",
     "stockid": "721289",
-    "companyid": "29130"
+    "companyid": "29130",
+    "tickertape_sid": "KIRO",
+    "fincode": 222961,
+    "scripcode": 533293
   },
   {
     "name": "Jagran Prakashan",
@@ -9678,7 +12450,10 @@ const stockData: StockMapping[] = [
     "isin": "INE199G01027",
     "symbol": "JAGRAN",
     "stockid": "864998",
-    "companyid": "17767"
+    "companyid": "17767",
+    "tickertape_sid": "JAGP",
+    "fincode": 132705,
+    "scripcode": 532705
   },
   {
     "name": "Rane Madras",
@@ -9688,7 +12463,10 @@ const stockData: StockMapping[] = [
     "isin": "INE050H01012",
     "symbol": "RML",
     "stockid": "328753",
-    "companyid": "16820"
+    "companyid": "16820",
+    "tickertape_sid": "RAMD",
+    "fincode": 132661,
+    "scripcode": 532661
   },
   {
     "name": "Nalwa Sons Investment",
@@ -9698,7 +12476,10 @@ const stockData: StockMapping[] = [
     "isin": "INE023A01030",
     "symbol": "NSIL",
     "stockid": "498418",
-    "companyid": "13521"
+    "companyid": "13521",
+    "tickertape_sid": "NALS",
+    "fincode": 132256,
+    "scripcode": 532256
   },
   {
     "name": "Kamdhenu",
@@ -9708,7 +12489,9 @@ const stockData: StockMapping[] = [
     "isin": "INE390H01012",
     "symbol": "KAMDHENU",
     "stockid": "318448",
-    "companyid": "16885"
+    "companyid": "16885",
+    "fincode": 132741,
+    "scripcode": 532741
   },
   {
     "name": "Muthoot Microfin",
@@ -9718,7 +12501,10 @@ const stockData: StockMapping[] = [
     "isin": "INE046W01019",
     "symbol": "MUTHOOTMF",
     "stockid": "10039101",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "MUT",
+    "fincode": 283733,
+    "scripcode": 544055
   },
   {
     "name": "Monarch Networth Capital",
@@ -9728,7 +12514,10 @@ const stockData: StockMapping[] = [
     "isin": "INE903D01011",
     "symbol": "MONARCH",
     "stockid": "547650",
-    "companyid": "8850"
+    "companyid": "8850",
+    "tickertape_sid": "MONA",
+    "fincode": 111551,
+    "scripcode": 511551
   },
   {
     "name": "PDS",
@@ -9738,7 +12527,10 @@ const stockData: StockMapping[] = [
     "isin": "INE111Q01021",
     "symbol": "PDSL",
     "stockid": "770604",
-    "companyid": "41675"
+    "companyid": "41675",
+    "tickertape_sid": "PDSM",
+    "fincode": 266384,
+    "scripcode": 538730
   },
   {
     "name": "Patel Engineering Company",
@@ -9748,7 +12540,10 @@ const stockData: StockMapping[] = [
     "isin": "INE244B01030",
     "symbol": "PATELENG",
     "stockid": "565450",
-    "companyid": "4443"
+    "companyid": "4443",
+    "tickertape_sid": "PENG",
+    "fincode": 131120,
+    "scripcode": 531120
   },
   {
     "name": "Redtape",
@@ -9758,7 +12553,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0LXT01019",
     "symbol": "REDTAPE",
     "stockid": "10038970",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "REDT",
+    "fincode": 311589,
+    "scripcode": 543957
   },
   {
     "name": "Mahindra Logistics",
@@ -9768,7 +12566,10 @@ const stockData: StockMapping[] = [
     "isin": "INE766P01016",
     "symbol": "MAHLOG",
     "stockid": "1002873",
-    "companyid": "23241"
+    "companyid": "23241",
+    "tickertape_sid": "MALO",
+    "fincode": 218067,
+    "scripcode": 540768
   },
   {
     "name": "JK Tyre and Industries",
@@ -9778,7 +12579,10 @@ const stockData: StockMapping[] = [
     "isin": "INE573A01042",
     "symbol": "JKTYRE",
     "stockid": "700089",
-    "companyid": "13537"
+    "companyid": "13537",
+    "tickertape_sid": "JKIN",
+    "fincode": 130007,
+    "scripcode": 530007
   },
   {
     "name": "Rupa and Company",
@@ -9788,7 +12592,10 @@ const stockData: StockMapping[] = [
     "isin": "INE895B01021",
     "symbol": "RUPA",
     "stockid": "634627",
-    "companyid": "4994"
+    "companyid": "4994",
+    "tickertape_sid": "RUCL",
+    "fincode": 221363,
+    "scripcode": 533552
   },
   {
     "name": "Punjab Chemicals & Crop Protection",
@@ -9798,7 +12605,10 @@ const stockData: StockMapping[] = [
     "isin": "INE277B01014",
     "symbol": "PUNJABCHEM",
     "stockid": "346062",
-    "companyid": "13247"
+    "companyid": "13247",
+    "tickertape_sid": "PCHM",
+    "fincode": 106618,
+    "scripcode": 506618
   },
   {
     "name": "Paisalo Digital Ltd.",
@@ -9808,7 +12618,10 @@ const stockData: StockMapping[] = [
     "isin": "INE420C01059",
     "symbol": "PAISALO",
     "stockid": "981047",
-    "companyid": "5947"
+    "companyid": "5947",
+    "tickertape_sid": "PISA",
+    "fincode": 132900,
+    "scripcode": 532900
   },
   {
     "name": "Kirloskar Pneumatic Company",
@@ -9818,7 +12631,10 @@ const stockData: StockMapping[] = [
     "isin": "INE811A01020",
     "symbol": "KIRLPNU",
     "stockid": "340152",
-    "companyid": "13513"
+    "companyid": "13513",
+    "tickertape_sid": "KGK",
+    "fincode": 105283,
+    "scripcode": 505283
   },
   {
     "name": "Jay Bharat Maruti",
@@ -9828,7 +12644,10 @@ const stockData: StockMapping[] = [
     "isin": "INE571B01036",
     "symbol": "JAYBARMARU",
     "stockid": "378354",
-    "companyid": "13534"
+    "companyid": "13534",
+    "tickertape_sid": "JYBM",
+    "fincode": 120066,
+    "scripcode": 520066
   },
   {
     "name": "Pearl Global Industries",
@@ -9838,7 +12657,10 @@ const stockData: StockMapping[] = [
     "isin": "INE940H01022",
     "symbol": "PGIL",
     "stockid": "147473",
-    "companyid": "18329"
+    "companyid": "18329",
+    "tickertape_sid": "PGIL",
+    "fincode": 132808,
+    "scripcode": 532808
   },
   {
     "name": "Jagsonpal Pharmaceuticals",
@@ -9848,7 +12670,9 @@ const stockData: StockMapping[] = [
     "isin": "INE048B01027",
     "symbol": "JAGSNPHARM",
     "stockid": "134241",
-    "companyid": "4745"
+    "companyid": "4745",
+    "fincode": 107789,
+    "scripcode": 507789
   },
   {
     "name": "Sarda Energy and Minerals",
@@ -9858,7 +12682,10 @@ const stockData: StockMapping[] = [
     "isin": "INE385C01021",
     "symbol": "SARDAEN",
     "stockid": "883606",
-    "companyid": "13229"
+    "companyid": "13229",
+    "tickertape_sid": "SAEM",
+    "fincode": 104614,
+    "scripcode": 504614
   },
   {
     "name": "Mahanagar Telephone Nigam",
@@ -9868,7 +12695,10 @@ const stockData: StockMapping[] = [
     "isin": "INE153A01019",
     "symbol": "MTNL",
     "stockid": "107657",
-    "companyid": "12462"
+    "companyid": "12462",
+    "tickertape_sid": "MTNL",
+    "fincode": 100108,
+    "scripcode": 500108
   },
   {
     "name": "Manoj Vaibhav Gems N Jewellers",
@@ -9878,7 +12708,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0KNT01012",
     "symbol": "MVGJL",
     "stockid": "10039024",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "MVG",
+    "fincode": 255408,
+    "scripcode": 543995
   },
   {
     "name": "Kuantum Papers",
@@ -9888,7 +12721,10 @@ const stockData: StockMapping[] = [
     "isin": "INE529I01021",
     "symbol": "KUANTUM",
     "stockid": "178029",
-    "companyid": "20176"
+    "companyid": "20176",
+    "tickertape_sid": "KAUN",
+    "fincode": 200572,
+    "scripcode": 532937
   },
   {
     "name": "Repro India",
@@ -9898,7 +12734,10 @@ const stockData: StockMapping[] = [
     "isin": "INE461B01014",
     "symbol": "REPRO",
     "stockid": "101946",
-    "companyid": "2651"
+    "companyid": "2651",
+    "tickertape_sid": "RPRO",
+    "fincode": 132687,
+    "scripcode": 532687
   },
   {
     "name": "S P Apparels",
@@ -9908,7 +12747,10 @@ const stockData: StockMapping[] = [
     "isin": "INE212I01016",
     "symbol": "SPAL",
     "stockid": "",
-    "companyid": "64531"
+    "companyid": "64531",
+    "tickertape_sid": "SPAP",
+    "fincode": 209127,
+    "scripcode": 540048
   },
   {
     "name": "Nelcast",
@@ -9918,7 +12760,10 @@ const stockData: StockMapping[] = [
     "isin": "INE189I01024",
     "symbol": "NELCAST",
     "stockid": "477981",
-    "companyid": "16164"
+    "companyid": "16164",
+    "tickertape_sid": "NLCA",
+    "fincode": 132864,
+    "scripcode": 532864
   },
   {
     "name": "Precision Wires India",
@@ -9928,7 +12773,10 @@ const stockData: StockMapping[] = [
     "isin": "INE372C01037",
     "symbol": "PRECWIRE",
     "stockid": "711837",
-    "companyid": "11310"
+    "companyid": "11310",
+    "tickertape_sid": "PRWR",
+    "fincode": 123539,
+    "scripcode": 523539
   },
   {
     "name": "RattanIndia Power",
@@ -9938,7 +12786,10 @@ const stockData: StockMapping[] = [
     "isin": "INE399K01017",
     "symbol": "RTNPOWER",
     "stockid": "972964",
-    "companyid": "24320"
+    "companyid": "24320",
+    "tickertape_sid": "RTNP",
+    "fincode": 218933,
+    "scripcode": 533122
   },
   {
     "name": "OnMobile Global",
@@ -9948,7 +12799,10 @@ const stockData: StockMapping[] = [
     "isin": "INE809I01019",
     "symbol": "ONMOBILE",
     "stockid": "282594",
-    "companyid": "20724"
+    "companyid": "20724",
+    "tickertape_sid": "ONMO",
+    "fincode": 200044,
+    "scripcode": 532944
   },
   {
     "name": "Sandhar Technologies",
@@ -9958,7 +12812,10 @@ const stockData: StockMapping[] = [
     "isin": "INE278H01035",
     "symbol": "SANDHAR",
     "stockid": "1000667",
-    "companyid": "46114"
+    "companyid": "46114",
+    "tickertape_sid": "SNTL",
+    "fincode": 209165,
+    "scripcode": 541163
   },
   {
     "name": "Responsive Industries",
@@ -9968,7 +12825,10 @@ const stockData: StockMapping[] = [
     "isin": "INE688D01026",
     "symbol": "RESPONIND",
     "stockid": "728631",
-    "companyid": "4266"
+    "companyid": "4266",
+    "tickertape_sid": "RSPO",
+    "fincode": 105509,
+    "scripcode": 505509
   },
   {
     "name": "Siyaram Silk Mills",
@@ -9978,7 +12838,10 @@ const stockData: StockMapping[] = [
     "isin": "INE076B01028",
     "symbol": "SIYSIL",
     "stockid": "426139",
-    "companyid": "13098"
+    "companyid": "13098",
+    "tickertape_sid": "SIYR",
+    "fincode": 103811,
+    "scripcode": 503811
   },
   {
     "name": "Shree Digvijay Cement Company",
@@ -9988,7 +12851,10 @@ const stockData: StockMapping[] = [
     "isin": "INE232A01011",
     "symbol": "SHREDIGCEM",
     "stockid": "964250",
-    "companyid": "13103"
+    "companyid": "13103",
+    "tickertape_sid": "SRDC",
+    "fincode": 102180,
+    "scripcode": 502180
   },
   {
     "name": "Shree Pushkar Chemicals and Fertilisers",
@@ -9998,7 +12864,10 @@ const stockData: StockMapping[] = [
     "isin": "INE712K01011",
     "symbol": "SHREEPUSHK",
     "stockid": "",
-    "companyid": "61359"
+    "companyid": "61359",
+    "tickertape_sid": "SPCH",
+    "fincode": 271117,
+    "scripcode": 539334
   },
   {
     "name": "Shreyas Shipping",
@@ -10008,7 +12877,8 @@ const stockData: StockMapping[] = [
     "isin": "INE757B01015",
     "symbol": "SHREYAS",
     "stockid": "359117",
-    "companyid": "8578"
+    "companyid": "8578",
+    "tickertape_sid": "SRSH"
   },
   {
     "name": "Orient Cement",
@@ -10018,7 +12888,10 @@ const stockData: StockMapping[] = [
     "isin": "INE876N01018",
     "symbol": "ORIENTCEM",
     "stockid": "494176",
-    "companyid": "41253"
+    "companyid": "41253",
+    "tickertape_sid": "ORCE",
+    "fincode": 242477,
+    "scripcode": 535754
   },
   {
     "name": "Prime Focus",
@@ -10028,7 +12901,10 @@ const stockData: StockMapping[] = [
     "isin": "INE367G01038",
     "symbol": "PFOCUS",
     "stockid": "898158",
-    "companyid": "18097"
+    "companyid": "18097",
+    "tickertape_sid": "PRFO",
+    "fincode": 132748,
+    "scripcode": 532748
   },
   {
     "name": "Pennar Industries",
@@ -10038,7 +12914,10 @@ const stockData: StockMapping[] = [
     "isin": "INE932A01024",
     "symbol": "PENIND",
     "stockid": "242907",
-    "companyid": "13284"
+    "companyid": "13284",
+    "tickertape_sid": "PENN",
+    "fincode": 113228,
+    "scripcode": 513228
   },
   {
     "name": "NIIT Learning Systems",
@@ -10048,7 +12927,10 @@ const stockData: StockMapping[] = [
     "isin": "INE342G01023",
     "symbol": "NIITMTS",
     "stockid": "10038964",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "NII",
+    "fincode": 224880,
+    "scripcode": 543952
   },
   {
     "name": "Shivalik Rasayan",
@@ -10058,7 +12940,10 @@ const stockData: StockMapping[] = [
     "isin": "INE788J01021",
     "symbol": "SHIVALIK",
     "stockid": "633866",
-    "companyid": "4633"
+    "companyid": "4633",
+    "tickertape_sid": "SHIVL",
+    "fincode": 225090,
+    "scripcode": 539148
   },
   {
     "name": "Kiri Industries",
@@ -10068,7 +12953,10 @@ const stockData: StockMapping[] = [
     "isin": "INE415I01015",
     "symbol": "KIRIINDUS",
     "stockid": "288150",
-    "companyid": "21067"
+    "companyid": "21067",
+    "tickertape_sid": "KIRI",
+    "fincode": 200079,
+    "scripcode": 532967
   },
   {
     "name": "Sadhana Nitrochem",
@@ -10078,7 +12966,10 @@ const stockData: StockMapping[] = [
     "isin": "INE888C01040",
     "symbol": "SADHNANIQ",
     "stockid": "835739",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "SADH",
+    "fincode": 106642,
+    "scripcode": 506642
   },
   {
     "name": "SMC Global Securities",
@@ -10088,7 +12979,10 @@ const stockData: StockMapping[] = [
     "isin": "INE103C01036",
     "symbol": "SMCGLOBAL",
     "stockid": "1003461",
-    "companyid": "6441"
+    "companyid": "6441",
+    "tickertape_sid": "SMC",
+    "fincode": 214003,
+    "scripcode": 543263
   },
   {
     "name": "Kingfa Science & Technology",
@@ -10098,7 +12992,10 @@ const stockData: StockMapping[] = [
     "isin": "INE473D01015",
     "symbol": "KINGFA",
     "stockid": "351446",
-    "companyid": "12727"
+    "companyid": "12727",
+    "tickertape_sid": "KINA",
+    "fincode": 124019,
+    "scripcode": 524019
   },
   {
     "name": "Pix Transmissions",
@@ -10108,7 +13005,10 @@ const stockData: StockMapping[] = [
     "isin": "INE751B01018",
     "symbol": "PIXTRANS",
     "stockid": "794146",
-    "companyid": "13281"
+    "companyid": "13281",
+    "tickertape_sid": "PIX",
+    "fincode": 100333,
+    "scripcode": 500333
   },
   {
     "name": "Kalyani Steels",
@@ -10118,7 +13018,10 @@ const stockData: StockMapping[] = [
     "isin": "INE907A01026",
     "symbol": "KSL",
     "stockid": "705833",
-    "companyid": "13492"
+    "companyid": "13492",
+    "tickertape_sid": "KLSL",
+    "fincode": 100235,
+    "scripcode": 500235
   },
   {
     "name": "Roto Pumps",
@@ -10128,7 +13031,9 @@ const stockData: StockMapping[] = [
     "isin": "INE535D01029",
     "symbol": "ROTO",
     "stockid": "264745",
-    "companyid": "8905"
+    "companyid": "8905",
+    "fincode": 117500,
+    "scripcode": 517500
   },
   {
     "name": "Ram Ratna Wires",
@@ -10138,7 +13043,10 @@ const stockData: StockMapping[] = [
     "isin": "INE207E01023",
     "symbol": "RAMRAT",
     "stockid": "241208",
-    "companyid": "8561"
+    "companyid": "8561",
+    "tickertape_sid": "RAMR",
+    "fincode": 122281,
+    "scripcode": 522281
   },
   {
     "name": "SJS Enterprises",
@@ -10148,7 +13056,10 @@ const stockData: StockMapping[] = [
     "isin": "INE284S01014",
     "symbol": "SJS",
     "stockid": "1003564",
-    "companyid": "2017707"
+    "companyid": "2017707",
+    "tickertape_sid": "SJS",
+    "fincode": 302921,
+    "scripcode": 543387
   },
   {
     "name": "Mangalore Chemicals and Fertilisers",
@@ -10168,7 +13079,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0BTI01037",
     "symbol": "KAMOPAINTS",
     "stockid": "1003783",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "KAMO",
+    "fincode": 307791,
+    "scripcode": 543747
   },
   {
     "name": "PG Electroplast",
@@ -10178,7 +13092,10 @@ const stockData: StockMapping[] = [
     "isin": "INE457L01029",
     "symbol": "PGEL",
     "stockid": "325754",
-    "companyid": "34598"
+    "companyid": "34598",
+    "tickertape_sid": "PGEL",
+    "fincode": 222264,
+    "scripcode": 533581
   },
   {
     "name": "Shalimar Paints",
@@ -10188,7 +13105,10 @@ const stockData: StockMapping[] = [
     "isin": "INE849C01026",
     "symbol": "SHALPAINTS",
     "stockid": "252170",
-    "companyid": "13126"
+    "companyid": "13126",
+    "tickertape_sid": "SHLP",
+    "fincode": 109874,
+    "scripcode": 509874
   },
   {
     "name": "Shriram Properties",
@@ -10198,7 +13118,10 @@ const stockData: StockMapping[] = [
     "isin": "INE217L01019",
     "symbol": "SHRIRAMPPS",
     "stockid": "1003580",
-    "companyid": "2020537"
+    "companyid": "2020537",
+    "tickertape_sid": "SHRIR",
+    "fincode": 209255,
+    "scripcode": 543419
   },
   {
     "name": "Mayur Uniquoters",
@@ -10208,7 +13131,10 @@ const stockData: StockMapping[] = [
     "isin": "INE040D01038",
     "symbol": "MAYURUNIQ",
     "stockid": "843438",
-    "companyid": "9003"
+    "companyid": "9003",
+    "tickertape_sid": "MAYU",
+    "fincode": 122249,
+    "scripcode": 522249
   },
   {
     "name": "Satia Industries",
@@ -10218,7 +13144,10 @@ const stockData: StockMapping[] = [
     "isin": "INE170E01023",
     "symbol": "SATIA",
     "stockid": "464537",
-    "companyid": "18522"
+    "companyid": "18522",
+    "tickertape_sid": "SATD",
+    "fincode": 209185,
+    "scripcode": 539201
   },
   {
     "name": "Ruby Mills",
@@ -10228,7 +13157,10 @@ const stockData: StockMapping[] = [
     "isin": "INE301D01026",
     "symbol": "RUBYMILLS",
     "stockid": "578772",
-    "companyid": "12353"
+    "companyid": "12353",
+    "tickertape_sid": "RUBY",
+    "fincode": 103169,
+    "scripcode": 503169
   },
   {
     "name": "Likhitha Infrastructure",
@@ -10238,7 +13170,10 @@ const stockData: StockMapping[] = [
     "isin": "INE060901027",
     "symbol": "LIKHITHA",
     "stockid": "1003432",
-    "companyid": "1992940"
+    "companyid": "1992940",
+    "tickertape_sid": "LIKH",
+    "fincode": 297009,
+    "scripcode": 543240
   },
   {
     "name": "Marathon Nextgen Realty",
@@ -10248,7 +13183,10 @@ const stockData: StockMapping[] = [
     "isin": "INE182D01020",
     "symbol": "MARATHON",
     "stockid": "420605",
-    "companyid": "13280"
+    "companyid": "13280",
+    "tickertape_sid": "MANE",
+    "fincode": 103101,
+    "scripcode": 503101
   },
   {
     "name": "MM Forgings",
@@ -10258,7 +13196,10 @@ const stockData: StockMapping[] = [
     "isin": "INE227C01017",
     "symbol": "MMFL",
     "stockid": "822443",
-    "companyid": "9024"
+    "companyid": "9024",
+    "tickertape_sid": "MMFO",
+    "fincode": 122241,
+    "scripcode": 522241
   },
   {
     "name": "Pilani Investment and Industries Corporation",
@@ -10268,7 +13209,10 @@ const stockData: StockMapping[] = [
     "isin": "INE417C01014",
     "symbol": "PILANIINVS",
     "stockid": "129404",
-    "companyid": "12056"
+    "companyid": "12056",
+    "tickertape_sid": "PILN",
+    "fincode": 219267,
+    "scripcode": 539883
   },
   {
     "name": "Nazara Technologies",
@@ -10278,7 +13222,9 @@ const stockData: StockMapping[] = [
     "isin": "INE418L01021",
     "symbol": "NAZARA",
     "stockid": "1003480",
-    "companyid": "67911"
+    "companyid": "67911",
+    "fincode": 229414,
+    "scripcode": 543280
   },
   {
     "name": "Mirza International",
@@ -10288,7 +13234,10 @@ const stockData: StockMapping[] = [
     "isin": "INE771A01026",
     "symbol": "MIRZAINT",
     "stockid": "644231",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "MIRZ",
+    "fincode": 126642,
+    "scripcode": 526642
   },
   {
     "name": "Power Mech Projects",
@@ -10298,7 +13247,10 @@ const stockData: StockMapping[] = [
     "isin": "INE211R01019",
     "symbol": "POWERMECH",
     "stockid": "999952",
-    "companyid": "61181"
+    "companyid": "61181",
+    "tickertape_sid": "POMP",
+    "fincode": 252076,
+    "scripcode": 539302
   },
   {
     "name": "Seshasayee Paper and Boards",
@@ -10308,7 +13260,10 @@ const stockData: StockMapping[] = [
     "isin": "INE630A01024",
     "symbol": "SESHAPAPER",
     "stockid": "474387",
-    "companyid": "13112"
+    "companyid": "13112",
+    "tickertape_sid": "SSHA",
+    "fincode": 102450,
+    "scripcode": 502450
   },
   {
     "name": "Repco Home Finance",
@@ -10318,7 +13273,10 @@ const stockData: StockMapping[] = [
     "isin": "INE612J01015",
     "symbol": "REPCOHOME",
     "stockid": "818537",
-    "companyid": "44856"
+    "companyid": "44856",
+    "tickertape_sid": "RHFL",
+    "fincode": 209089,
+    "scripcode": 535322
   },
   {
     "name": "Kabra Extrusion Technik",
@@ -10328,7 +13286,10 @@ const stockData: StockMapping[] = [
     "isin": "INE900B01029",
     "symbol": "KABRAEXTRU",
     "stockid": "495614",
-    "companyid": "13504"
+    "companyid": "13504",
+    "tickertape_sid": "KBRE",
+    "fincode": 124109,
+    "scripcode": 524109
   },
   {
     "name": "Omaxe",
@@ -10338,7 +13299,10 @@ const stockData: StockMapping[] = [
     "isin": "INE800H01010",
     "symbol": "OMAXE",
     "stockid": "223763",
-    "companyid": "15334"
+    "companyid": "15334",
+    "tickertape_sid": "OMAX",
+    "fincode": 132880,
+    "scripcode": 532880
   },
   {
     "name": "S Chand and Company Limited",
@@ -10348,7 +13312,10 @@ const stockData: StockMapping[] = [
     "isin": "INE807K01035",
     "symbol": "SCHAND",
     "stockid": "",
-    "companyid": "65883"
+    "companyid": "65883",
+    "tickertape_sid": "SCHA",
+    "fincode": 231273,
+    "scripcode": 540497
   },
   {
     "name": "Nilkamal",
@@ -10358,7 +13325,10 @@ const stockData: StockMapping[] = [
     "isin": "INE310A01015",
     "symbol": "NILKAMAL",
     "stockid": "889867",
-    "companyid": "12002"
+    "companyid": "12002",
+    "tickertape_sid": "NKML",
+    "fincode": 123385,
+    "scripcode": 523385
   },
   {
     "name": "PTC Industries",
@@ -10368,7 +13338,10 @@ const stockData: StockMapping[] = [
     "isin": "INE596F01018",
     "symbol": "PTCIL",
     "stockid": "570311",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "PTC",
+    "fincode": 244937,
+    "scripcode": 539006
   },
   {
     "name": "Sandur Manganese and Iron Ores",
@@ -10378,7 +13351,10 @@ const stockData: StockMapping[] = [
     "isin": "INE149K01016",
     "symbol": "SANDUMA",
     "stockid": "843297",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "SANDU",
+    "fincode": 104918,
+    "scripcode": 504918
   },
   {
     "name": "Sagar Cements",
@@ -10388,7 +13364,10 @@ const stockData: StockMapping[] = [
     "isin": "INE229C01021",
     "symbol": "SAGCEM",
     "stockid": "793828",
-    "companyid": "13120"
+    "companyid": "13120",
+    "tickertape_sid": "SGRC",
+    "fincode": 102090,
+    "scripcode": 502090
   },
   {
     "name": "PTC India Financial Services",
@@ -10398,7 +13377,10 @@ const stockData: StockMapping[] = [
     "isin": "INE560K01014",
     "symbol": "PFS",
     "stockid": "371883",
-    "companyid": "19509"
+    "companyid": "19509",
+    "tickertape_sid": "PTCN",
+    "fincode": 220532,
+    "scripcode": 533344
   },
   {
     "name": "PSP Projects",
@@ -10408,7 +13390,10 @@ const stockData: StockMapping[] = [
     "isin": "INE488V01015",
     "symbol": "PSPPROJECT",
     "stockid": "1002764",
-    "companyid": "65982"
+    "companyid": "65982",
+    "tickertape_sid": "PSPP",
+    "fincode": 284184,
+    "scripcode": 540544
   },
   {
     "name": "Shakti Pumps (India)",
@@ -10418,7 +13403,10 @@ const stockData: StockMapping[] = [
     "isin": "INE908D01010",
     "symbol": "SHAKTIPUMP",
     "stockid": "626838",
-    "companyid": "6576"
+    "companyid": "6576",
+    "tickertape_sid": "SHPU",
+    "fincode": 131431,
+    "scripcode": 531431
   },
   {
     "name": "Sharda Motor Industries",
@@ -10428,7 +13416,10 @@ const stockData: StockMapping[] = [
     "isin": "INE597I01028",
     "symbol": "SHARDAMOTR",
     "stockid": "830776",
-    "companyid": "2123"
+    "companyid": "2123",
+    "tickertape_sid": "SHAD",
+    "fincode": 209220,
+    "scripcode": 535602
   },
   {
     "name": "Renaissance Global",
@@ -10438,7 +13429,10 @@ const stockData: StockMapping[] = [
     "isin": "INE722H01024",
     "symbol": "RGL",
     "stockid": "470070",
-    "companyid": "16916"
+    "companyid": "16916",
+    "tickertape_sid": "RENA",
+    "fincode": 132923,
+    "scripcode": 532923
   },
   {
     "name": "Sangam (India)",
@@ -10448,7 +13442,10 @@ const stockData: StockMapping[] = [
     "isin": "INE495C01010",
     "symbol": "SANGAMIND",
     "stockid": "455903",
-    "companyid": "10906"
+    "companyid": "10906",
+    "tickertape_sid": "SANG",
+    "fincode": 114234,
+    "scripcode": 514234
   },
   {
     "name": "Sansera Engineering",
@@ -10458,7 +13455,10 @@ const stockData: StockMapping[] = [
     "isin": "INE953O01021",
     "symbol": "SANSERA",
     "stockid": "1003534",
-    "companyid": "49492"
+    "companyid": "49492",
+    "tickertape_sid": "SANS",
+    "fincode": 214084,
+    "scripcode": 543358
   },
   {
     "name": "Senco Gold",
@@ -10468,7 +13468,9 @@ const stockData: StockMapping[] = [
     "isin": "INE602W01019",
     "symbol": "SENCO",
     "stockid": "1003887",
-    "companyid": ""
+    "companyid": "",
+    "fincode": 291807,
+    "scripcode": 543936
   },
   {
     "name": "Rama Steel Tubes",
@@ -10478,7 +13480,10 @@ const stockData: StockMapping[] = [
     "isin": "INE230R01035",
     "symbol": "RAMASTEEL",
     "stockid": "999924",
-    "companyid": "1785"
+    "companyid": "1785",
+    "tickertape_sid": "RAMA",
+    "fincode": 209055,
+    "scripcode": 539309
   },
   {
     "name": "Jayaswal Neco Industries",
@@ -10488,7 +13493,10 @@ const stockData: StockMapping[] = [
     "isin": "INE854B01010",
     "symbol": "JAYNECOIND",
     "stockid": "745947",
-    "companyid": "8499"
+    "companyid": "8499",
+    "tickertape_sid": "JAYN",
+    "fincode": 122285,
+    "scripcode": 522285
   },
   {
     "name": "Ramky Infrastructure",
@@ -10498,7 +13506,10 @@ const stockData: StockMapping[] = [
     "isin": "INE874I01013",
     "symbol": "RAMKY",
     "stockid": "564675",
-    "companyid": "15558"
+    "companyid": "15558",
+    "tickertape_sid": "RAMK",
+    "fincode": 209058,
+    "scripcode": 533262
   },
   {
     "name": "Kanoria Chemicals and Industries",
@@ -10508,7 +13519,10 @@ const stockData: StockMapping[] = [
     "isin": "INE138C01024",
     "symbol": "KANORICHEM",
     "stockid": "611963",
-    "companyid": "13497"
+    "companyid": "13497",
+    "tickertape_sid": "KNRC",
+    "fincode": 106525,
+    "scripcode": 506525
   },
   {
     "name": "Jubilant Industries ",
@@ -10528,7 +13542,10 @@ const stockData: StockMapping[] = [
     "isin": "INE291D01011",
     "symbol": "KDDL",
     "stockid": "407518",
-    "companyid": "11243"
+    "companyid": "11243",
+    "tickertape_sid": "KDDL",
+    "fincode": 132054,
+    "scripcode": 532054
   },
   {
     "name": "Jindal Drilling Industries",
@@ -10538,7 +13555,10 @@ const stockData: StockMapping[] = [
     "isin": "INE742C01031",
     "symbol": "JINDRILL",
     "stockid": "359139",
-    "companyid": "13518"
+    "companyid": "13518",
+    "tickertape_sid": "JNDR",
+    "fincode": 111034,
+    "scripcode": 511034
   },
   {
     "name": "JTL Industries",
@@ -10548,7 +13568,9 @@ const stockData: StockMapping[] = [
     "isin": "INE391J01024",
     "symbol": "JTLIND",
     "stockid": "110499",
-    "companyid": "41035"
+    "companyid": "41035",
+    "fincode": 237594,
+    "scripcode": 534600
   },
   {
     "name": "Mangalam Cement",
@@ -10558,7 +13580,10 @@ const stockData: StockMapping[] = [
     "isin": "INE347A01017",
     "symbol": "MANGLMCEM",
     "stockid": "449578",
-    "companyid": "11894"
+    "companyid": "11894",
+    "tickertape_sid": "MGLC",
+    "fincode": 102157,
+    "scripcode": 502157
   },
   {
     "name": "NOCIL",
@@ -10568,7 +13593,10 @@ const stockData: StockMapping[] = [
     "isin": "INE163A01018",
     "symbol": "NOCIL",
     "stockid": "963727",
-    "companyid": "13325"
+    "companyid": "13325",
+    "tickertape_sid": "NOCI",
+    "fincode": 100730,
+    "scripcode": 500730
   },
   {
     "name": "JSW Holdings",
@@ -10578,7 +13606,10 @@ const stockData: StockMapping[] = [
     "isin": "INE824G01012",
     "symbol": "JSWHL",
     "stockid": "280329",
-    "companyid": "17007"
+    "companyid": "17007",
+    "tickertape_sid": "JNSW",
+    "fincode": 132642,
+    "scripcode": 532642
   },
   {
     "name": "Panama Petrochem",
@@ -10588,7 +13619,10 @@ const stockData: StockMapping[] = [
     "isin": "INE305C01029",
     "symbol": "PANAMAPET",
     "stockid": "129657",
-    "companyid": "8228"
+    "companyid": "8228",
+    "tickertape_sid": "PAPT",
+    "fincode": 124820,
+    "scripcode": 524820
   },
   {
     "name": "Pitti Engineering",
@@ -10598,7 +13632,10 @@ const stockData: StockMapping[] = [
     "isin": "INE450D01021",
     "symbol": "PITTIENG",
     "stockid": "449496",
-    "companyid": "8609"
+    "companyid": "8609",
+    "tickertape_sid": "PITE",
+    "fincode": 113519,
+    "scripcode": 513519
   },
   {
     "name": "Menon Bearings",
@@ -10608,7 +13645,10 @@ const stockData: StockMapping[] = [
     "isin": "INE071D01033",
     "symbol": "MENONBE",
     "stockid": "411563",
-    "companyid": "10961"
+    "companyid": "10961",
+    "tickertape_sid": "MENO",
+    "fincode": 123828,
+    "scripcode": 523828
   },
   {
     "name": "Man Industries (India)",
@@ -10618,7 +13658,10 @@ const stockData: StockMapping[] = [
     "isin": "INE993A01026",
     "symbol": "MANINDS",
     "stockid": "141778",
-    "companyid": "11357"
+    "companyid": "11357",
+    "tickertape_sid": "MIND",
+    "fincode": 113269,
+    "scripcode": 513269
   },
   {
     "name": "Manali Petrochemicals",
@@ -10628,7 +13671,10 @@ const stockData: StockMapping[] = [
     "isin": "INE201A01024",
     "symbol": "MANALIPETC",
     "stockid": "713887",
-    "companyid": "11392"
+    "companyid": "11392",
+    "tickertape_sid": "MNLI",
+    "fincode": 100268,
+    "scripcode": 500268
   },
   {
     "name": "Sanghvi Movers",
@@ -10638,7 +13684,9 @@ const stockData: StockMapping[] = [
     "isin": "INE989A01024",
     "symbol": "SANGHVIMOV",
     "stockid": "260168",
-    "companyid": "7978"
+    "companyid": "7978",
+    "fincode": 130073,
+    "scripcode": 530073
   },
   {
     "name": "Lumax Auto Technologies",
@@ -10648,7 +13696,10 @@ const stockData: StockMapping[] = [
     "isin": "INE872H01027",
     "symbol": "LUMAXTECH",
     "stockid": "485050",
-    "companyid": "18774"
+    "companyid": "18774",
+    "tickertape_sid": "LUAT",
+    "fincode": 132796,
+    "scripcode": 532796
   },
   {
     "name": "NCL Industries",
@@ -10658,7 +13709,10 @@ const stockData: StockMapping[] = [
     "isin": "INE732C01016",
     "symbol": "NCLIND",
     "stockid": "976720",
-    "companyid": "13357"
+    "companyid": "13357",
+    "tickertape_sid": "NCLI",
+    "fincode": 102168,
+    "scripcode": 502168
   },
   {
     "name": "Lumax Industries",
@@ -10668,7 +13722,10 @@ const stockData: StockMapping[] = [
     "isin": "INE162B01018",
     "symbol": "LUMAXIND",
     "stockid": "521748",
-    "companyid": "11904"
+    "companyid": "11904",
+    "tickertape_sid": "LUMA",
+    "fincode": 117206,
+    "scripcode": 517206
   },
   {
     "name": "Orient Paper and Industries",
@@ -10678,7 +13735,10 @@ const stockData: StockMapping[] = [
     "isin": "INE592A01026",
     "symbol": "ORIENTPPR",
     "stockid": "670822",
-    "companyid": "13319"
+    "companyid": "13319",
+    "tickertape_sid": "ORPP",
+    "fincode": 102420,
+    "scripcode": 502420
   },
   {
     "name": "Kolte-Patil Developers",
@@ -10688,7 +13748,10 @@ const stockData: StockMapping[] = [
     "isin": "INE094I01018",
     "symbol": "KOLTEPATIL",
     "stockid": "272282",
-    "companyid": "19423"
+    "companyid": "19423",
+    "tickertape_sid": "KOLT",
+    "fincode": 200009,
+    "scripcode": 532924
   },
   {
     "name": "Orient Bell",
@@ -10698,7 +13761,10 @@ const stockData: StockMapping[] = [
     "isin": "INE607D01018",
     "symbol": "ORIENTBELL",
     "stockid": "704324",
-    "companyid": "5055"
+    "companyid": "5055",
+    "tickertape_sid": "ORBL",
+    "fincode": 130365,
+    "scripcode": 530365
   },
   {
     "name": "MSTC",
@@ -10708,7 +13774,10 @@ const stockData: StockMapping[] = [
     "isin": "INE255X01014",
     "symbol": "MSTCLTD",
     "stockid": "1003117",
-    "companyid": "4663"
+    "companyid": "4663",
+    "tickertape_sid": "MSTC",
+    "fincode": 208646,
+    "scripcode": 542597
   },
   {
     "name": "ORIENTAL AROMATICS Ltd.",
@@ -10718,7 +13787,10 @@ const stockData: StockMapping[] = [
     "isin": "INE959C01023",
     "symbol": "OAL",
     "stockid": "774498",
-    "companyid": "13860"
+    "companyid": "13860",
+    "tickertape_sid": "OIEN",
+    "fincode": 100078,
+    "scripcode": 500078
   },
   {
     "name": "Satin Creditcare Network",
@@ -10728,7 +13800,10 @@ const stockData: StockMapping[] = [
     "isin": "INE836B01017",
     "symbol": "SATIN",
     "stockid": "999938",
-    "companyid": "5590"
+    "companyid": "5590",
+    "tickertape_sid": "SATR",
+    "fincode": 240474,
+    "scripcode": 539404
   },
   {
     "name": "SEPC",
@@ -10738,7 +13813,10 @@ const stockData: StockMapping[] = [
     "isin": "INE964H01014",
     "symbol": "SEPC",
     "stockid": "846471",
-    "companyid": "20750"
+    "companyid": "20750",
+    "tickertape_sid": "SHRI",
+    "fincode": 200051,
+    "scripcode": 532945
   },
   {
     "name": "Manaksia",
@@ -10748,7 +13826,10 @@ const stockData: StockMapping[] = [
     "isin": "INE015D01022",
     "symbol": "MANAKSIA",
     "stockid": "977821",
-    "companyid": "2256"
+    "companyid": "2256",
+    "tickertape_sid": "MANK",
+    "fincode": 200023,
+    "scripcode": 532932
   },
   {
     "name": "Paramount Communications",
@@ -10758,7 +13839,10 @@ const stockData: StockMapping[] = [
     "isin": "INE074B01023",
     "symbol": "PARACABLES",
     "stockid": "712697",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "PCML",
+    "fincode": 130555,
+    "scripcode": 530555
   },
   {
     "name": "Paradeep Phosphates",
@@ -10768,7 +13852,10 @@ const stockData: StockMapping[] = [
     "isin": "INE088F01024",
     "symbol": "PARADEEP",
     "stockid": "1003653",
-    "companyid": "4549"
+    "companyid": "4549",
+    "tickertape_sid": "PARAD",
+    "fincode": 241214,
+    "scripcode": 543530
   },
   {
     "name": "Sanghi Industries",
@@ -10788,7 +13875,10 @@ const stockData: StockMapping[] = [
     "isin": "INE295D01020",
     "symbol": "NACLIND",
     "stockid": "156509",
-    "companyid": "8650"
+    "companyid": "8650",
+    "tickertape_sid": "NACL",
+    "fincode": 124709,
+    "scripcode": 524709
   },
   {
     "name": "Refex Industries",
@@ -10798,7 +13888,10 @@ const stockData: StockMapping[] = [
     "isin": "INE056I01025",
     "symbol": "REFEX",
     "stockid": "568696",
-    "companyid": "20073"
+    "companyid": "20073",
+    "tickertape_sid": "REFE",
+    "fincode": 132884,
+    "scripcode": 532884
   },
   {
     "name": "Prakash Industries",
@@ -10808,7 +13901,10 @@ const stockData: StockMapping[] = [
     "isin": "INE603A01013",
     "symbol": "PRAKASH",
     "stockid": "161742",
-    "companyid": "13269"
+    "companyid": "13269",
+    "tickertape_sid": "PRKI",
+    "fincode": 106022,
+    "scripcode": 506022
   },
   {
     "name": "Neogen Chemicals",
@@ -10818,7 +13914,10 @@ const stockData: StockMapping[] = [
     "isin": "INE136S01016",
     "symbol": "NEOGEN",
     "stockid": "1003135",
-    "companyid": "1942599"
+    "companyid": "1942599",
+    "tickertape_sid": "NEOE",
+    "fincode": 241159,
+    "scripcode": 542665
   },
   {
     "name": "Radiant Cash Management Services",
@@ -10828,7 +13927,10 @@ const stockData: StockMapping[] = [
     "isin": "INE855R01021",
     "symbol": "RADIANTCMS",
     "stockid": "1003772",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "RADIA",
+    "fincode": 280362,
+    "scripcode": 543732
   },
   {
     "name": "Puravankara",
@@ -10838,7 +13940,10 @@ const stockData: StockMapping[] = [
     "isin": "INE323I01011",
     "symbol": "PURVA",
     "stockid": "829378",
-    "companyid": "20136"
+    "companyid": "20136",
+    "tickertape_sid": "PURA",
+    "fincode": 132891,
+    "scripcode": 532891
   },
   {
     "name": "Rajratan Global Wire",
@@ -10848,7 +13953,10 @@ const stockData: StockMapping[] = [
     "isin": "INE451D01029",
     "symbol": "RAJRATAN",
     "stockid": "119152",
-    "companyid": "8663"
+    "companyid": "8663",
+    "tickertape_sid": "RAJR",
+    "fincode": 117522,
+    "scripcode": 517522
   },
   {
     "name": "Sharda Cropchem",
@@ -10858,7 +13966,10 @@ const stockData: StockMapping[] = [
     "isin": "INE221J01015",
     "symbol": "SHARDACROP",
     "stockid": "830688",
-    "companyid": "57414"
+    "companyid": "57414",
+    "tickertape_sid": "SHCR",
+    "fincode": 226627,
+    "scripcode": 538666
   },
   {
     "name": "Sat Industries",
@@ -10868,7 +13979,8 @@ const stockData: StockMapping[] = [
     "isin": "INE065D01027",
     "symbol": "SATINDLTD",
     "stockid": "151780",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "SATI"
   },
   {
     "name": "Raghav Productivity Enhancers",
@@ -10878,7 +13990,10 @@ const stockData: StockMapping[] = [
     "isin": "INE912T01018",
     "symbol": "RPEL",
     "stockid": "1002594",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "RPE",
+    "fincode": 280526,
+    "scripcode": 539837
   },
   {
     "name": "Shivalik Bimetal Controls",
@@ -10888,7 +14003,10 @@ const stockData: StockMapping[] = [
     "isin": "INE386D01027",
     "symbol": "SBCL",
     "stockid": "464237",
-    "companyid": "12396"
+    "companyid": "12396",
+    "tickertape_sid": "SHBC",
+    "fincode": 113097,
+    "scripcode": 513097
   },
   {
     "name": "Samhi Hotels",
@@ -10898,7 +14016,10 @@ const stockData: StockMapping[] = [
     "isin": "INE08U801020",
     "symbol": "SAMHI",
     "stockid": "10039005",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "SAMH",
+    "fincode": 295966,
+    "scripcode": 543984
   },
   {
     "name": "Johnson Controls -Hitachi Air Conditioning India",
@@ -10908,7 +14029,8 @@ const stockData: StockMapping[] = [
     "isin": "INE782A01015",
     "symbol": "JCHAC",
     "stockid": "",
-    "companyid": "12710"
+    "companyid": "12710",
+    "tickertape_sid": "JCHA"
   },
   {
     "name": "Panacea Biotec",
@@ -10918,7 +14040,10 @@ const stockData: StockMapping[] = [
     "isin": "INE922B01023",
     "symbol": "PANACEABIO",
     "stockid": "622974",
-    "companyid": "6967"
+    "companyid": "6967",
+    "tickertape_sid": "PNCA",
+    "fincode": 131349,
+    "scripcode": 531349
   },
   {
     "name": "Meghmani Organics",
@@ -10928,7 +14053,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0CT101020",
     "symbol": "MOL",
     "stockid": "1003522",
-    "companyid": "2010111"
+    "companyid": "2010111",
+    "tickertape_sid": "MOM",
+    "fincode": 302222,
+    "scripcode": 543331
   },
   {
     "name": "Rolex Rings",
@@ -10938,7 +14066,9 @@ const stockData: StockMapping[] = [
     "isin": "INE645S01016",
     "symbol": "ROLEXRINGS",
     "stockid": "1003514",
-    "companyid": "2013394"
+    "companyid": "2013394",
+    "fincode": 209099,
+    "scripcode": 543325
   },
   {
     "name": "Spandana Sphoorty Financial",
@@ -10948,7 +14078,10 @@ const stockData: StockMapping[] = [
     "isin": "INE572J01011",
     "symbol": "SPANDANA",
     "stockid": "1003160",
-    "companyid": "30581"
+    "companyid": "30581",
+    "tickertape_sid": "SPAD",
+    "fincode": 220527,
+    "scripcode": 542759
   },
   {
     "name": "Snowman Logistics",
@@ -10958,7 +14091,10 @@ const stockData: StockMapping[] = [
     "isin": "INE734N01019",
     "symbol": "SNOWMAN",
     "stockid": "475608",
-    "companyid": "41914"
+    "companyid": "41914",
+    "tickertape_sid": "SNOW",
+    "fincode": 209277,
+    "scripcode": 538635
   },
   {
     "name": "Skipper",
@@ -10968,7 +14104,10 @@ const stockData: StockMapping[] = [
     "isin": "INE439E01022",
     "symbol": "SKIPPER",
     "stockid": "888024",
-    "companyid": "56366"
+    "companyid": "56366",
+    "tickertape_sid": "SKIP",
+    "fincode": 216897,
+    "scripcode": 538562
   },
   {
     "name": "Surya Roshni",
@@ -10978,7 +14117,10 @@ const stockData: StockMapping[] = [
     "isin": "INE335A01020",
     "symbol": "SURYAROSNI",
     "stockid": "452162",
-    "companyid": "13277"
+    "companyid": "13277",
+    "tickertape_sid": "SURR",
+    "fincode": 100336,
+    "scripcode": 500336
   },
   {
     "name": "Speciality Restaurants",
@@ -10988,7 +14130,10 @@ const stockData: StockMapping[] = [
     "isin": "INE247M01014",
     "symbol": "SPECIALITY",
     "stockid": "237805",
-    "companyid": "39674"
+    "companyid": "39674",
+    "tickertape_sid": "SPRE",
+    "fincode": 223869,
+    "scripcode": 534425
   },
   {
     "name": "Texmaco Rail and Engineering",
@@ -10998,7 +14143,10 @@ const stockData: StockMapping[] = [
     "isin": "INE621L01012",
     "symbol": "TEXRAIL",
     "stockid": "664903",
-    "companyid": "32984"
+    "companyid": "32984",
+    "tickertape_sid": "TEXA",
+    "fincode": 222822,
+    "scripcode": 533326
   },
   {
     "name": "TD Power Systems",
@@ -11008,7 +14156,10 @@ const stockData: StockMapping[] = [
     "isin": "INE419M01027",
     "symbol": "TDPOWERSYS",
     "stockid": "148338",
-    "companyid": "34499"
+    "companyid": "34499",
+    "tickertape_sid": "TDPS",
+    "fincode": 223658,
+    "scripcode": 533553
   },
   {
     "name": "Uniparts India",
@@ -11018,7 +14169,10 @@ const stockData: StockMapping[] = [
     "isin": "INE244O01017",
     "symbol": "UNIPARTS",
     "stockid": "1003754",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "UNIP",
+    "fincode": 271022,
+    "scripcode": 543689
   },
   {
     "name": "Veranda Learning Solutions",
@@ -11028,7 +14182,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0IQ001011",
     "symbol": "VERANDA",
     "stockid": "1003631",
-    "companyid": "2035357"
+    "companyid": "2035357",
+    "tickertape_sid": "VERAN",
+    "fincode": 304126,
+    "scripcode": 543514
   },
   {
     "name": "Time Technoplast",
@@ -11038,7 +14195,10 @@ const stockData: StockMapping[] = [
     "isin": "INE508G01029",
     "symbol": "TIMETECHNO",
     "stockid": "301579",
-    "companyid": "19129"
+    "companyid": "19129",
+    "tickertape_sid": "TIME",
+    "fincode": 132856,
+    "scripcode": 532856
   },
   {
     "name": "Venus Pipes and Tubes",
@@ -11048,7 +14208,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0JA001018",
     "symbol": "VENUSPIPES",
     "stockid": "1003651",
-    "companyid": "2035953"
+    "companyid": "2035953",
+    "tickertape_sid": "VENUS",
+    "fincode": 304683,
+    "scripcode": 543528
   },
   {
     "name": "TVS Electronics",
@@ -11058,7 +14221,10 @@ const stockData: StockMapping[] = [
     "isin": "INE236G01019",
     "symbol": "TVSELECT",
     "stockid": "643149",
-    "companyid": "14979"
+    "companyid": "14979",
+    "tickertape_sid": "TVEL",
+    "fincode": 132513,
+    "scripcode": 532513
   },
   {
     "name": "Steelcast",
@@ -11068,7 +14234,9 @@ const stockData: StockMapping[] = [
     "isin": "INE124E01020",
     "symbol": "STEELCAS",
     "stockid": "113280",
-    "companyid": "10379"
+    "companyid": "10379",
+    "fincode": 113517,
+    "scripcode": 513517
   },
   {
     "name": "TruCap Finance",
@@ -11078,7 +14246,10 @@ const stockData: StockMapping[] = [
     "isin": "INE615R01029",
     "symbol": "TRU",
     "stockid": "1002708",
-    "companyid": "65545"
+    "companyid": "65545",
+    "tickertape_sid": "DHA",
+    "fincode": 284447,
+    "scripcode": 540268
   },
   {
     "name": "Sanstar",
@@ -11088,7 +14259,10 @@ const stockData: StockMapping[] = [
     "isin": "INE08NE01025",
     "symbol": "SANSTAR",
     "stockid": "10039324",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "SANST",
+    "fincode": 313455,
+    "scripcode": 544217
   },
   {
     "name": "Thangamayil Jewellery ",
@@ -11098,7 +14272,10 @@ const stockData: StockMapping[] = [
     "isin": "INE085J01014",
     "symbol": "THANGAMAYL",
     "stockid": "633228",
-    "companyid": "30963"
+    "companyid": "30963",
+    "tickertape_sid": "THNG",
+    "fincode": 219236,
+    "scripcode": 533158
   },
   {
     "name": "Vikas Lifecare",
@@ -11108,7 +14285,10 @@ const stockData: StockMapping[] = [
     "isin": "INE161L01027",
     "symbol": "VIKASLIFE",
     "stockid": "1003136",
-    "companyid": "35540"
+    "companyid": "35540",
+    "tickertape_sid": "VIKM",
+    "fincode": 277728,
+    "scripcode": 542655
   },
   {
     "name": "TBO Tek",
@@ -11118,7 +14298,10 @@ const stockData: StockMapping[] = [
     "isin": "INE673O01025",
     "symbol": "TBOTEK",
     "stockid": "10039247",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "TBO",
+    "fincode": 304682,
+    "scripcode": 544174
   },
   {
     "name": "Tracxn Technologies",
@@ -11128,7 +14311,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0HMF01019",
     "symbol": "TRACXN",
     "stockid": "1003730",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "TRAC",
+    "fincode": 303158,
+    "scripcode": 543638
   },
   {
     "name": "Sree Rayalaseema Hi Strength Hyp",
@@ -11138,7 +14324,10 @@ const stockData: StockMapping[] = [
     "isin": "INE917H01012",
     "symbol": "SRHHYPOLTD",
     "stockid": "457610",
-    "companyid": "20144"
+    "companyid": "20144",
+    "tickertape_sid": "SRHL",
+    "fincode": 132842,
+    "scripcode": 532842
   },
   {
     "name": "TCPL Packaging",
@@ -11148,7 +14337,10 @@ const stockData: StockMapping[] = [
     "isin": "INE822C01015",
     "symbol": "TCPLPACK",
     "stockid": "529773",
-    "companyid": "2"
+    "companyid": "2",
+    "tickertape_sid": "TCPL",
+    "fincode": 123301,
+    "scripcode": 523301
   },
   {
     "name": "Sunflag Iron and Steel Company",
@@ -11158,7 +14350,10 @@ const stockData: StockMapping[] = [
     "isin": "INE947A01014",
     "symbol": "SUNFLAG",
     "stockid": "415234",
-    "companyid": "12964"
+    "companyid": "12964",
+    "tickertape_sid": "SFLG",
+    "fincode": 100404,
+    "scripcode": 500404
   },
   {
     "name": "Thirumalai Chemicals",
@@ -11168,7 +14363,10 @@ const stockData: StockMapping[] = [
     "isin": "INE338A01024",
     "symbol": "TIRUMALCHM",
     "stockid": "375519",
-    "companyid": "12896"
+    "companyid": "12896",
+    "tickertape_sid": "THRM",
+    "fincode": 100412,
+    "scripcode": 500412
   },
   {
     "name": "Swaraj Engines",
@@ -11178,7 +14376,10 @@ const stockData: StockMapping[] = [
     "isin": "INE277A01016",
     "symbol": "SWARAJENG",
     "stockid": "511273",
-    "companyid": "12960"
+    "companyid": "12960",
+    "tickertape_sid": "SWAR",
+    "fincode": 100407,
+    "scripcode": 500407
   },
   {
     "name": "Akums Drugs & Pharmaceuticals",
@@ -11188,7 +14389,10 @@ const stockData: StockMapping[] = [
     "isin": "INE09XN01023",
     "symbol": "AKUMS",
     "stockid": "10039335",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "AKU",
+    "fincode": 214816,
+    "scripcode": 544222
   },
   {
     "name": "Utkarsh Small Finance Bank",
@@ -11198,7 +14402,10 @@ const stockData: StockMapping[] = [
     "isin": "INE735W01017",
     "symbol": "UTKARSHBNK",
     "stockid": "1003893",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "UTK",
+    "fincode": 288476,
+    "scripcode": 543942
   },
   {
     "name": "Vascon Engineers",
@@ -11208,7 +14415,10 @@ const stockData: StockMapping[] = [
     "isin": "INE893I01013",
     "symbol": "VASCONEQ",
     "stockid": "218868",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "VASC",
+    "fincode": 212035,
+    "scripcode": 533156
   },
   {
     "name": "TTK Healthcare",
@@ -11218,7 +14428,10 @@ const stockData: StockMapping[] = [
     "isin": "INE910C01018",
     "symbol": "TTKHLTCARE",
     "stockid": "685542",
-    "companyid": "12938"
+    "companyid": "12938",
+    "tickertape_sid": "TTKH",
+    "fincode": 107747,
+    "scripcode": 507747
   },
   {
     "name": "Exxaro Tiles",
@@ -11228,7 +14441,9 @@ const stockData: StockMapping[] = [
     "isin": "INE0GFE01018",
     "symbol": "EXXARO",
     "stockid": "1003521",
-    "companyid": "1968065"
+    "companyid": "1968065",
+    "fincode": 287703,
+    "scripcode": 543327
   },
   {
     "name": "TVS Holdings",
@@ -11238,7 +14453,10 @@ const stockData: StockMapping[] = [
     "isin": "INE105A01035",
     "symbol": "TVSHLTD",
     "stockid": "335682",
-    "companyid": "12921"
+    "companyid": "12921",
+    "tickertape_sid": "SUND",
+    "fincode": 120056,
+    "scripcode": 520056
   },
   {
     "name": "Stove Kraft",
@@ -11248,7 +14466,10 @@ const stockData: StockMapping[] = [
     "isin": "INE00IN01015",
     "symbol": "STOVEKRAFT",
     "stockid": "1003458",
-    "companyid": "1999233"
+    "companyid": "1999233",
+    "tickertape_sid": "STOVE",
+    "fincode": 223397,
+    "scripcode": 543260
   },
   {
     "name": "Styrenix Performance Materials",
@@ -11258,7 +14479,10 @@ const stockData: StockMapping[] = [
     "isin": "INE189B01011",
     "symbol": "STYRENIX",
     "stockid": "686667",
-    "companyid": "5"
+    "companyid": "5",
+    "tickertape_sid": "INEO",
+    "fincode": 106222,
+    "scripcode": 506222
   },
   {
     "name": "Technocraft Industries (India)",
@@ -11268,7 +14492,10 @@ const stockData: StockMapping[] = [
     "isin": "INE545H01011",
     "symbol": "TIIL",
     "stockid": "313094",
-    "companyid": "18892"
+    "companyid": "18892",
+    "tickertape_sid": "TEIN",
+    "fincode": 132804,
+    "scripcode": 532804
   },
   {
     "name": "Techno Electric & Engineering Company Ltd",
@@ -11278,7 +14505,10 @@ const stockData: StockMapping[] = [
     "isin": "INE285K01026",
     "symbol": "TECHNOE",
     "stockid": "585342",
-    "companyid": "31260"
+    "companyid": "31260",
+    "tickertape_sid": "TEEC",
+    "fincode": 220869,
+    "scripcode": 542141
   },
   {
     "name": "Transformers and Rectifiers India",
@@ -11288,7 +14518,10 @@ const stockData: StockMapping[] = [
     "isin": "INE763I01026",
     "symbol": "TARIL",
     "stockid": "346524",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "TRNF",
+    "fincode": 200019,
+    "scripcode": 532928
   },
   {
     "name": "VST Tillers Tractors",
@@ -11298,7 +14531,10 @@ const stockData: StockMapping[] = [
     "isin": "INE764D01017",
     "symbol": "VSTTILLERS",
     "stockid": "965959",
-    "companyid": "11477"
+    "companyid": "11477",
+    "tickertape_sid": "VST",
+    "fincode": 131266,
+    "scripcode": 531266
   },
   {
     "name": "Udaipur Cement Works",
@@ -11318,7 +14554,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0OAF01028",
     "symbol": "JNKINDIA",
     "stockid": "10039233",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "JNK",
+    "fincode": 311741,
+    "scripcode": 544167
   },
   {
     "name": "Sterling Tools",
@@ -11328,7 +14567,10 @@ const stockData: StockMapping[] = [
     "isin": "INE334A01023",
     "symbol": "STERTOOLS",
     "stockid": "855070",
-    "companyid": "7701"
+    "companyid": "7701",
+    "tickertape_sid": "STTL",
+    "fincode": 130759,
+    "scripcode": 530759
   },
   {
     "name": "Subros",
@@ -11338,7 +14580,10 @@ const stockData: StockMapping[] = [
     "isin": "INE287B01021",
     "symbol": "SUBROS",
     "stockid": "826820",
-    "companyid": "12922"
+    "companyid": "12922",
+    "tickertape_sid": "SUBR",
+    "fincode": 117168,
+    "scripcode": 517168
   },
   {
     "name": "Awfis Space Solutions",
@@ -11348,7 +14593,10 @@ const stockData: StockMapping[] = [
     "isin": "INE108V01019",
     "symbol": "AWFIS",
     "stockid": "10039264",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "AWF",
+    "fincode": 313296,
+    "scripcode": 544181
   },
   {
     "name": "Suraj Estate Developers",
@@ -11358,7 +14606,10 @@ const stockData: StockMapping[] = [
     "isin": "INE843S01025",
     "symbol": "SURAJEST",
     "stockid": "10039102",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "SURAE",
+    "fincode": 305499,
+    "scripcode": 544054
   },
   {
     "name": "Tega Industries",
@@ -11368,7 +14619,10 @@ const stockData: StockMapping[] = [
     "isin": "INE011K01018",
     "symbol": "TEGA",
     "stockid": "1003576",
-    "companyid": "43277"
+    "companyid": "43277",
+    "tickertape_sid": "TEG",
+    "fincode": 255331,
+    "scripcode": 543413
   },
   {
     "name": "Saraswati Saree Depot",
@@ -11378,7 +14632,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0PQ101010",
     "symbol": "SSDL",
     "stockid": "10039351",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "SSD",
+    "fincode": 312316,
+    "scripcode": 544230
   },
   {
     "name": "TV Today Network",
@@ -11388,7 +14645,10 @@ const stockData: StockMapping[] = [
     "isin": "INE038F01029",
     "symbol": "TVTODAY",
     "stockid": "743220",
-    "companyid": "16508"
+    "companyid": "16508",
+    "tickertape_sid": "TVTO",
+    "fincode": 132515,
+    "scripcode": 532515
   },
   {
     "name": "Texmaco Infrastructure & Holdings",
@@ -11398,7 +14658,10 @@ const stockData: StockMapping[] = [
     "isin": "INE435C01024",
     "symbol": "TEXINFRA",
     "stockid": "768655",
-    "companyid": "12108"
+    "companyid": "12108",
+    "tickertape_sid": "TEXM",
+    "fincode": 105400,
+    "scripcode": 505400
   },
   {
     "name": "Capital Small Finance Bank",
@@ -11408,7 +14671,10 @@ const stockData: StockMapping[] = [
     "isin": "INE646H01017",
     "symbol": "CAPITALSFB",
     "stockid": "10039155",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "CAPI",
+    "fincode": 207933,
+    "scripcode": 544120
   },
   {
     "name": "Zee Media Corporation",
@@ -11418,7 +14684,10 @@ const stockData: StockMapping[] = [
     "isin": "INE966H01019",
     "symbol": "ZEEMEDIA",
     "stockid": "797974",
-    "companyid": "18879"
+    "companyid": "18879",
+    "tickertape_sid": "ZEEN",
+    "fincode": 132794,
+    "scripcode": 532794
   },
   {
     "name": "Yuken India",
@@ -11428,7 +14697,10 @@ const stockData: StockMapping[] = [
     "isin": "INE384C01016",
     "symbol": "YUKEN",
     "stockid": "837553",
-    "companyid": "12652"
+    "companyid": "12652",
+    "tickertape_sid": "YUK",
+    "fincode": 122108,
+    "scripcode": 522108
   },
   {
     "name": "DEE Development Engineers",
@@ -11438,7 +14710,10 @@ const stockData: StockMapping[] = [
     "isin": "INE841L01016",
     "symbol": "DEEDEV",
     "stockid": "10039284",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "DEED",
+    "fincode": 223666,
+    "scripcode": 544198
   },
   {
     "name": "Zuari Agro Chemicals",
@@ -11448,7 +14723,10 @@ const stockData: StockMapping[] = [
     "isin": "INE840M01016",
     "symbol": "ZUARI",
     "stockid": "413191",
-    "companyid": "34532"
+    "companyid": "34532",
+    "tickertape_sid": "ZUAR",
+    "fincode": 229943,
+    "scripcode": 534742
   },
   {
     "name": "Go Digit General Insurance",
@@ -11458,7 +14736,10 @@ const stockData: StockMapping[] = [
     "isin": "INE03JT01014",
     "symbol": "GODIGIT",
     "stockid": "10039258",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "GODIG",
+    "fincode": 294914,
+    "scripcode": 544179
   },
   {
     "name": "Voltamp Transformers",
@@ -11468,7 +14749,10 @@ const stockData: StockMapping[] = [
     "isin": "INE540H01012",
     "symbol": "VOLTAMP",
     "stockid": "918817",
-    "companyid": "15493"
+    "companyid": "15493",
+    "tickertape_sid": "VOTL",
+    "fincode": 132757,
+    "scripcode": 532757
   },
   {
     "name": "Popular Vehicles and Services",
@@ -11478,7 +14762,10 @@ const stockData: StockMapping[] = [
     "isin": "INE772T01024",
     "symbol": "PVSL",
     "stockid": "10039199",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "PVS",
+    "fincode": 213800,
+    "scripcode": 544144
   },
   {
     "name": "Zen Technologies",
@@ -11488,7 +14775,10 @@ const stockData: StockMapping[] = [
     "isin": "INE251B01027",
     "symbol": "ZENTEC",
     "stockid": "674320",
-    "companyid": "2796"
+    "companyid": "2796",
+    "tickertape_sid": "ZETE",
+    "fincode": 190032,
+    "scripcode": 533339
   },
   {
     "name": "Valiant Laboratories",
@@ -11498,7 +14788,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0JWS01017",
     "symbol": "VALIANTLAB",
     "stockid": "10039033",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "VALIN",
+    "fincode": 310852,
+    "scripcode": 543998
   },
   {
     "name": "Tatva Chintan Pharma Chem",
@@ -11508,7 +14801,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0GK401011",
     "symbol": "TATVA",
     "stockid": "1003512",
-    "companyid": "48827"
+    "companyid": "48827",
+    "tickertape_sid": "TATV",
+    "fincode": 223112,
+    "scripcode": 543321
   },
   {
     "name": "Transport Corporation of India",
@@ -11518,7 +14814,10 @@ const stockData: StockMapping[] = [
     "isin": "INE688A01022",
     "symbol": "TCI",
     "stockid": "675701",
-    "companyid": "12950"
+    "companyid": "12950",
+    "tickertape_sid": "TCIL",
+    "fincode": 132349,
+    "scripcode": 532349
   },
   {
     "name": "Jyoti CNC Automation",
@@ -11528,7 +14827,10 @@ const stockData: StockMapping[] = [
     "isin": "INE980O01024",
     "symbol": "JYOTICNC",
     "stockid": "10039127",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "JYOTC",
+    "fincode": 216065,
+    "scripcode": 544081
   },
   {
     "name": "Ugro Capital",
@@ -11538,7 +14840,10 @@ const stockData: StockMapping[] = [
     "isin": "INE583D01011",
     "symbol": "UGROCAP",
     "stockid": "593089",
-    "companyid": "8237"
+    "companyid": "8237",
+    "tickertape_sid": "UGR",
+    "fincode": 111742,
+    "scripcode": 511742
   },
   {
     "name": "Interarch Building Products",
@@ -11548,7 +14853,10 @@ const stockData: StockMapping[] = [
     "isin": "INE00M901018",
     "symbol": "INTERARCH",
     "stockid": "10039358",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "INTEI",
+    "fincode": 210320,
+    "scripcode": 544232
   },
   {
     "name": "Aadhar Housing Finance",
@@ -11558,7 +14866,10 @@ const stockData: StockMapping[] = [
     "isin": "INE883F01010",
     "symbol": "AADHARHFC",
     "stockid": "10039246",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "AADH",
+    "fincode": 221661,
+    "scripcode": 544176
   },
   {
     "name": "Ola Electric Mobility",
@@ -11568,7 +14879,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0LXG01040",
     "symbol": "OLAELEC",
     "stockid": "10039344",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "OLAE",
+    "fincode": 296367,
+    "scripcode": 544225
   },
   {
     "name": "Vishnu Chemicals",
@@ -11578,7 +14892,10 @@ const stockData: StockMapping[] = [
     "isin": "INE270I01022",
     "symbol": "VISHNU",
     "stockid": "275888",
-    "companyid": "8594"
+    "companyid": "8594",
+    "tickertape_sid": "VICH",
+    "fincode": 116072,
+    "scripcode": 516072
   },
   {
     "name": "Sundaram-Clayton",
@@ -11588,7 +14905,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0Q3R01026",
     "symbol": "SUNCLAY",
     "stockid": "",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "SUNCL",
+    "fincode": 311720,
+    "scripcode": 544066
   },
   {
     "name": "Tips Industries",
@@ -11598,7 +14918,8 @@ const stockData: StockMapping[] = [
     "isin": "INE716B01029",
     "symbol": "TIPSINDLTD",
     "stockid": "489805",
-    "companyid": "3697"
+    "companyid": "3697",
+    "tickertape_sid": "TIPS"
   },
   {
     "name": "Stanley Lifestyles",
@@ -11608,7 +14929,10 @@ const stockData: StockMapping[] = [
     "isin": "INE01A001028",
     "symbol": "STANLEY",
     "stockid": "10039293",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "STANL",
+    "fincode": 311915,
+    "scripcode": 544202
   },
   {
     "name": "Yatra Online",
@@ -11618,7 +14942,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0JR601024",
     "symbol": "YATRA",
     "stockid": "10039018",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "YATR",
+    "fincode": 221554,
+    "scripcode": 543992
   },
   {
     "name": "Gopal Snacks",
@@ -11628,7 +14955,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0L9R01028",
     "symbol": "GOPAL",
     "stockid": "10039194",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "GOPAL",
+    "fincode": 312884,
+    "scripcode": 544140
   },
   {
     "name": "Vindhya Telelink",
@@ -11638,7 +14968,10 @@ const stockData: StockMapping[] = [
     "isin": "INE707A01012",
     "symbol": "VINDHYATEL",
     "stockid": "844461",
-    "companyid": "12819"
+    "companyid": "12819",
+    "tickertape_sid": "VNDY",
+    "fincode": 117015,
+    "scripcode": 517015
   },
   {
     "name": "LE Travenues Technology (IXIGO)",
@@ -11648,7 +14981,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0HV901016",
     "symbol": "IXIGO",
     "stockid": "",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "IXI",
+    "fincode": 303125,
+    "scripcode": 544192
   },
   {
     "name": "D. P. Abhushan",
@@ -11658,7 +14994,10 @@ const stockData: StockMapping[] = [
     "isin": "INE266Y01019",
     "symbol": "DPABHUSHAN",
     "stockid": "",
-    "companyid": "67050"
+    "companyid": "67050",
+    "tickertape_sid": "DPAB",
+    "fincode": 287446,
+    "scripcode": 544161
   },
   {
     "name": "Jana Small Finance Bank",
@@ -11668,7 +15007,10 @@ const stockData: StockMapping[] = [
     "isin": "INE953L01027",
     "symbol": "JSFB",
     "stockid": "10039157",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "JSF",
+    "fincode": 240461,
+    "scripcode": 544118
   },
   {
     "name": "Suprajit Engineering",
@@ -11678,7 +15020,10 @@ const stockData: StockMapping[] = [
     "isin": "INE399C01030",
     "symbol": "SUPRAJIT",
     "stockid": "576743",
-    "companyid": "6936"
+    "companyid": "6936",
+    "tickertape_sid": "SUPE",
+    "fincode": 132509,
+    "scripcode": 532509
   },
   {
     "name": "Sutlej Textiles and Industries",
@@ -11688,7 +15033,10 @@ const stockData: StockMapping[] = [
     "isin": "INE645H01027",
     "symbol": "SUTLEJTEX",
     "stockid": "385868",
-    "companyid": "19684"
+    "companyid": "19684",
+    "tickertape_sid": "SUTI",
+    "fincode": 132782,
+    "scripcode": 532782
   },
   {
     "name": "Vidhi Specialty Food Ingredients",
@@ -11698,7 +15046,10 @@ const stockData: StockMapping[] = [
     "isin": "INE632C01026",
     "symbol": "VIDHIING",
     "stockid": "431611",
-    "companyid": "6056"
+    "companyid": "6056",
+    "tickertape_sid": "VIDH",
+    "fincode": 131717,
+    "scripcode": 531717
   },
   {
     "name": "Exicom Tele-Systems",
@@ -11708,7 +15059,10 @@ const stockData: StockMapping[] = [
     "isin": "INE777F01014",
     "symbol": "EXICOM",
     "stockid": "10039180",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "EXI",
+    "fincode": 220260,
+    "scripcode": 544133
   },
   {
     "name": "Orient Technologies",
@@ -11718,7 +15072,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0PPK01015",
     "symbol": "ORIENTTECH",
     "stockid": "10039364",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "ORIE",
+    "fincode": 314135,
+    "scripcode": 544235
   },
   {
     "name": "R K Swamy",
@@ -11728,7 +15085,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0NQ801033",
     "symbol": "RKSWAMY",
     "stockid": "10039189",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "RKS",
+    "fincode": 311640,
+    "scripcode": 544136
   },
   {
     "name": "Tourism Finance Corp of India",
@@ -11738,7 +15098,9 @@ const stockData: StockMapping[] = [
     "isin": "INE305A01015",
     "symbol": "TFCILTD",
     "stockid": "793809",
-    "companyid": "11282"
+    "companyid": "11282",
+    "fincode": 126650,
+    "scripcode": 526650
   },
   {
     "name": "TeamLease Services",
@@ -11748,7 +15110,10 @@ const stockData: StockMapping[] = [
     "isin": "INE985S01024",
     "symbol": "TEAMLEASE",
     "stockid": "",
-    "companyid": "46318"
+    "companyid": "46318",
+    "tickertape_sid": "TLSV",
+    "fincode": 221194,
+    "scripcode": 539658
   },
   {
     "name": "J G Chemicals",
@@ -11758,7 +15123,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0MB501011",
     "symbol": "JGCHEM",
     "stockid": "",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "JGC",
+    "fincode": 269816,
+    "scripcode": 544138
   },
   {
     "name": "Taj GVK Hotels & Resorts",
@@ -11768,7 +15136,10 @@ const stockData: StockMapping[] = [
     "isin": "INE586B01026",
     "symbol": "TAJGVK",
     "stockid": "485585",
-    "companyid": "3295"
+    "companyid": "3295",
+    "tickertape_sid": "TAJG",
+    "fincode": 132390,
+    "scripcode": 532390
   },
   {
     "name": "Suryoday Small Finance Bank",
@@ -11778,7 +15149,10 @@ const stockData: StockMapping[] = [
     "isin": "INE428Q01011",
     "symbol": "SURYODAY",
     "stockid": "1003481",
-    "companyid": "36673"
+    "companyid": "36673",
+    "tickertape_sid": "SURYO",
+    "fincode": 272661,
+    "scripcode": 543279
   },
   {
     "name": "Valor Estate",
@@ -11788,7 +15162,10 @@ const stockData: StockMapping[] = [
     "isin": "INE879I01012",
     "symbol": "DBREALTY",
     "stockid": "950442",
-    "companyid": "20813"
+    "companyid": "20813",
+    "tickertape_sid": "DBRL",
+    "fincode": 219492,
+    "scripcode": 533160
   },
   {
     "name": "Wendt (India)",
@@ -11798,7 +15175,10 @@ const stockData: StockMapping[] = [
     "isin": "INE274C01019",
     "symbol": "WENDT",
     "stockid": "453220",
-    "companyid": "12544"
+    "companyid": "12544",
+    "tickertape_sid": "WNDT",
+    "fincode": 105412,
+    "scripcode": 505412
   },
   {
     "name": "Sudarshan Chemical Industries",
@@ -11808,7 +15188,10 @@ const stockData: StockMapping[] = [
     "isin": "INE659A01023",
     "symbol": "SUDARSCHEM",
     "stockid": "763851",
-    "companyid": "12925"
+    "companyid": "12925",
+    "tickertape_sid": "SDCH",
+    "fincode": 106655,
+    "scripcode": 506655
   },
   {
     "name": "Medi Assist Healthcare Services",
@@ -11818,7 +15201,10 @@ const stockData: StockMapping[] = [
     "isin": "INE456Z01021",
     "symbol": "MEDIASSIST",
     "stockid": "10039132",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "MEDIS",
+    "fincode": 229218,
+    "scripcode": 544088
   },
   {
     "name": "Ceigall India",
@@ -11828,7 +15214,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0AG901020",
     "symbol": "CEIGALL",
     "stockid": "10039342",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "CEIG",
+    "fincode": 314345,
+    "scripcode": 544223
   },
   {
     "name": "Unicommerce Esolutions",
@@ -11838,7 +15227,10 @@ const stockData: StockMapping[] = [
     "isin": "INE00U401027",
     "symbol": "UNIECOM",
     "stockid": "10039348",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "UNIE",
+    "fincode": 313495,
+    "scripcode": 544227
   },
   {
     "name": "Premier Energies",
@@ -11848,7 +15240,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0BS701011",
     "symbol": "PREMIERENE",
     "stockid": "10039369",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "PREMI",
+    "fincode": 314935,
+    "scripcode": 544238
   },
   {
     "name": "Steel Strips Wheels",
@@ -11858,7 +15253,10 @@ const stockData: StockMapping[] = [
     "isin": "INE802C01033",
     "symbol": "SSWL",
     "stockid": "183917",
-    "companyid": "10667"
+    "companyid": "10667",
+    "tickertape_sid": "STWH",
+    "fincode": 113262,
+    "scripcode": 513262
   },
   {
     "name": "Wonderla Holidays",
@@ -11868,7 +15266,10 @@ const stockData: StockMapping[] = [
     "isin": "INE066O01014",
     "symbol": "WONDERLA",
     "stockid": "726784",
-    "companyid": "52803"
+    "companyid": "52803",
+    "tickertape_sid": "WOHL",
+    "fincode": 221217,
+    "scripcode": 538268
   },
   {
     "name": "TARC",
@@ -11878,7 +15279,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0EK901012",
     "symbol": "TARC",
     "stockid": "1003450",
-    "companyid": "67032"
+    "companyid": "67032",
+    "tickertape_sid": "TART",
+    "fincode": 300790,
+    "scripcode": 543249
   },
   {
     "name": "Va Tech Wabag",
@@ -11888,7 +15292,10 @@ const stockData: StockMapping[] = [
     "isin": "INE956G01038",
     "symbol": "WABAG",
     "stockid": "936284",
-    "companyid": "20188"
+    "companyid": "20188",
+    "tickertape_sid": "VATE",
+    "fincode": 209532,
+    "scripcode": 533269
   },
   {
     "name": "Vardhman Special Steels",
@@ -11898,7 +15305,10 @@ const stockData: StockMapping[] = [
     "isin": "INE050M01012",
     "symbol": "VSSL",
     "stockid": "141577",
-    "companyid": "33871"
+    "companyid": "33871",
+    "tickertape_sid": "VARM",
+    "fincode": 224243,
+    "scripcode": 534392
   },
   {
     "name": "Kronox Lab Sciences",
@@ -11908,7 +15318,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0ATZ01017",
     "symbol": "KRONOX",
     "stockid": "10039273",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "KRON",
+    "fincode": 312939,
+    "scripcode": 544187
   },
   {
     "name": "Allied Blenders & Distillers",
@@ -11918,7 +15331,10 @@ const stockData: StockMapping[] = [
     "isin": "INE552Z01027",
     "symbol": "ABDL",
     "stockid": "10039299",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "ABD",
+    "fincode": 231440,
+    "scripcode": 544203
   },
   {
     "name": "Entero Healthcare Solutions",
@@ -11928,7 +15344,10 @@ const stockData: StockMapping[] = [
     "isin": "INE010601016",
     "symbol": "ENTERO",
     "stockid": "10039164",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "ENTE",
+    "fincode": 312105,
+    "scripcode": 544122
   },
   {
     "name": "Uflex",
@@ -11938,7 +15357,10 @@ const stockData: StockMapping[] = [
     "isin": "INE516A01017",
     "symbol": "UFLEX",
     "stockid": "585335",
-    "companyid": "13781"
+    "companyid": "13781",
+    "tickertape_sid": "UFLX",
+    "fincode": 100148,
+    "scripcode": 500148
   },
   {
     "name": "Transindia Real Estate",
@@ -11948,7 +15370,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0O3901029",
     "symbol": "TREL",
     "stockid": "10038967",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "TREL",
+    "fincode": 310219,
+    "scripcode": 543955
   },
   {
     "name": "Vinyl Chemicals (India)",
@@ -11958,7 +15383,10 @@ const stockData: StockMapping[] = [
     "isin": "INE250B01029",
     "symbol": "VINYLINDIA",
     "stockid": "495199",
-    "companyid": "12854"
+    "companyid": "12854",
+    "tickertape_sid": "VNYL",
+    "fincode": 124129,
+    "scripcode": 524129
   },
   {
     "name": "Juniper Hotels",
@@ -11968,7 +15396,10 @@ const stockData: StockMapping[] = [
     "isin": "INE696F01016",
     "symbol": "JUNIPER",
     "stockid": "10039175",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "JUN",
+    "fincode": 254732,
+    "scripcode": 544129
   },
   {
     "name": "Vraj Iron & Steel",
@@ -11978,7 +15409,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0S2V01010",
     "symbol": "VRAJ",
     "stockid": "10039301",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "VRA",
+    "fincode": 313386,
+    "scripcode": 544204
   },
   {
     "name": "Welspun Enterprises",
@@ -11988,7 +15422,10 @@ const stockData: StockMapping[] = [
     "isin": "INE625G01013",
     "symbol": "WELENT",
     "stockid": "993891",
-    "companyid": "16646"
+    "companyid": "16646",
+    "tickertape_sid": "WELS",
+    "fincode": 132553,
+    "scripcode": 532553
   },
   {
     "name": "Universal Cables",
@@ -11998,7 +15435,10 @@ const stockData: StockMapping[] = [
     "isin": "INE279A01012",
     "symbol": "UNIVCABLES",
     "stockid": "914785",
-    "companyid": "12870"
+    "companyid": "12870",
+    "tickertape_sid": "UNVR",
+    "fincode": 104212,
+    "scripcode": 504212
   },
   {
     "name": "Updater Services",
@@ -12008,7 +15448,10 @@ const stockData: StockMapping[] = [
     "isin": "INE851I01011",
     "symbol": "UDS",
     "stockid": "10039027",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "UDS",
+    "fincode": 209521,
+    "scripcode": 543996
   },
   {
     "name": "Brainbees Solutions",
@@ -12018,7 +15461,10 @@ const stockData: StockMapping[] = [
     "isin": "INE02RE01045",
     "symbol": "FIRSTCRY",
     "stockid": "10039347",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "FIRS",
+    "fincode": 294253,
+    "scripcode": 544226
   },
   {
     "name": "Vishnu Prakash R Punglia",
@@ -12028,7 +15474,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0AE001013",
     "symbol": "VPRPL",
     "stockid": "10038987",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "VPR",
+    "fincode": 310205,
+    "scripcode": 543974
   },
   {
     "name": "Bharti Hexacom",
@@ -12038,7 +15487,10 @@ const stockData: StockMapping[] = [
     "isin": "INE343G01021",
     "symbol": "BHARTIHEXA",
     "stockid": "10039226",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "BHARI",
+    "fincode": 207872,
+    "scripcode": 544162
   },
   {
     "name": "Stylam Industries",
@@ -12048,7 +15500,10 @@ const stockData: StockMapping[] = [
     "isin": "INE239C01020",
     "symbol": "STYLAMIND",
     "stockid": "790785",
-    "companyid": "7914"
+    "companyid": "7914",
+    "tickertape_sid": "STY",
+    "fincode": 126951,
+    "scripcode": 526951
   },
   {
     "name": "Apeejay Surrendra Park Hotels",
@@ -12058,7 +15513,10 @@ const stockData: StockMapping[] = [
     "isin": "INE988S01028",
     "symbol": "PARKHOTELS",
     "stockid": "10039152",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "PARKH",
+    "fincode": 209914,
+    "scripcode": 544111
   },
   {
     "name": "Motisons Jewellers",
@@ -12068,7 +15526,9 @@ const stockData: StockMapping[] = [
     "isin": "INE0FRK01012",
     "symbol": "MOTISONS",
     "stockid": "10039103",
-    "companyid": ""
+    "companyid": "",
+    "fincode": 307709,
+    "scripcode": 544053
   },
   {
     "name": "Talbros Automotive Components",
@@ -12078,7 +15538,10 @@ const stockData: StockMapping[] = [
     "isin": "INE187D01029",
     "symbol": "TALBROAUTO",
     "stockid": "675281",
-    "companyid": "12919"
+    "companyid": "12919",
+    "tickertape_sid": "TALB",
+    "fincode": 105160,
+    "scripcode": 505160
   },
   {
     "name": "Steel Exchange India",
@@ -12088,7 +15551,10 @@ const stockData: StockMapping[] = [
     "isin": "INE503B01021",
     "symbol": "STEELXIND",
     "stockid": "117351",
-    "companyid": "16459"
+    "companyid": "16459",
+    "tickertape_sid": "STEI",
+    "fincode": 190037,
+    "scripcode": 534748
   },
   {
     "name": "Spencer Retail",
@@ -12098,7 +15564,10 @@ const stockData: StockMapping[] = [
     "isin": "INE020801028",
     "symbol": "SPENCERS",
     "stockid": "",
-    "companyid": "69232"
+    "companyid": "69232",
+    "tickertape_sid": "SPEN",
+    "fincode": 209306,
+    "scripcode": 542337
   },
   {
     "name": "Yasho Industries",
@@ -12108,7 +15577,10 @@ const stockData: StockMapping[] = [
     "isin": "INE616Z01012",
     "symbol": "YASHO",
     "stockid": "1002969",
-    "companyid": "54348"
+    "companyid": "54348",
+    "tickertape_sid": "YASH",
+    "fincode": 275557,
+    "scripcode": 541167
   },
   {
     "name": "EPack Durables",
@@ -12118,7 +15590,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0G5901015",
     "symbol": "EPACK",
     "stockid": "",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "EPA",
+    "fincode": 311638,
+    "scripcode": 544095
   },
   {
     "name": "Nova Agritech",
@@ -12128,7 +15603,10 @@ const stockData: StockMapping[] = [
     "isin": "INE02H701025",
     "symbol": "NOVAAGRI",
     "stockid": "10039140",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "NOVAA",
+    "fincode": 292830,
+    "scripcode": 544100
   },
   {
     "name": "VLS Finance",
@@ -12138,7 +15616,10 @@ const stockData: StockMapping[] = [
     "isin": "INE709A01018",
     "symbol": "VLSFINANCE",
     "stockid": "636348",
-    "companyid": "10947"
+    "companyid": "10947",
+    "tickertape_sid": "VLSF",
+    "fincode": 111333,
+    "scripcode": 511333
   },
   {
     "name": "VRL Logistics",
@@ -12148,7 +15629,10 @@ const stockData: StockMapping[] = [
     "isin": "INE366I01010",
     "symbol": "VRLLOG",
     "stockid": "392774",
-    "companyid": "46612"
+    "companyid": "46612",
+    "tickertape_sid": "VRLL",
+    "fincode": 209587,
+    "scripcode": 539118
   },
   {
     "name": "Emcure Pharmaceuticals",
@@ -12158,7 +15642,10 @@ const stockData: StockMapping[] = [
     "isin": "INE168P01015",
     "symbol": "EMCURE",
     "stockid": "10039308",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "EMC",
+    "fincode": 208099,
+    "scripcode": 544210
   },
   {
     "name": "Krystal Integrated Services",
@@ -12168,7 +15655,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0QN801017",
     "symbol": "KRYSTAL",
     "stockid": "10039205",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "KRYS",
+    "fincode": 221138,
+    "scripcode": 544149
   },
   {
     "name": "Mukka Proteins",
@@ -12178,7 +15668,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0CG401037",
     "symbol": "MUKKA",
     "stockid": "10039185",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "MUKK",
+    "fincode": 305620,
+    "scripcode": 544135
   },
   {
     "name": "Sportking India",
@@ -12188,7 +15681,10 @@ const stockData: StockMapping[] = [
     "isin": "INE885H01029",
     "symbol": "SPORTKING",
     "stockid": "248729",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "SPO",
+    "fincode": 245147,
+    "scripcode": 539221
   },
   {
     "name": "TVS Srichakra",
@@ -12198,7 +15694,10 @@ const stockData: StockMapping[] = [
     "isin": "INE421C01016",
     "symbol": "TVSSRICHAK",
     "stockid": "346313",
-    "companyid": "12987"
+    "companyid": "12987",
+    "tickertape_sid": "TVSC",
+    "fincode": 109243,
+    "scripcode": 509243
   },
   {
     "name": "Valiant Organics",
@@ -12208,7 +15707,10 @@ const stockData: StockMapping[] = [
     "isin": "INE565V01010",
     "symbol": "VALIANTORG",
     "stockid": "1002678",
-    "companyid": "65108"
+    "companyid": "65108",
+    "tickertape_sid": "VALI",
+    "fincode": 224818,
+    "scripcode": 540145
   },
   {
     "name": "Visaka Industries",
@@ -12218,7 +15720,10 @@ const stockData: StockMapping[] = [
     "isin": "INE392A01021",
     "symbol": "VISAKAIND",
     "stockid": "376051",
-    "companyid": "12855"
+    "companyid": "12855",
+    "tickertape_sid": "VSKI",
+    "fincode": 109055,
+    "scripcode": 509055
   },
   {
     "name": "DIC India",
@@ -12228,7 +15733,10 @@ const stockData: StockMapping[] = [
     "isin": "INE303A01010",
     "symbol": "DICIND",
     "stockid": "463886",
-    "companyid": "13888"
+    "companyid": "13888",
+    "tickertape_sid": "DICI",
+    "fincode": 100089,
+    "scripcode": 500089
   },
   {
     "name": "Harrisons Malyalam",
@@ -12238,7 +15746,10 @@ const stockData: StockMapping[] = [
     "isin": "INE544A01019",
     "symbol": "HARRMALAYA",
     "stockid": "736729",
-    "companyid": "13662"
+    "companyid": "13662",
+    "tickertape_sid": "HRMA",
+    "fincode": 100467,
+    "scripcode": 500467
   },
   {
     "name": "Asahi Songwon Colors",
@@ -12248,7 +15759,10 @@ const stockData: StockMapping[] = [
     "isin": "INE228I01012",
     "symbol": "ASAHISONG",
     "stockid": "122179",
-    "companyid": "19051"
+    "companyid": "19051",
+    "tickertape_sid": "ASSC",
+    "fincode": 132853,
+    "scripcode": 532853
   },
   {
     "name": "The Hi-Tech Gears",
@@ -12258,7 +15772,10 @@ const stockData: StockMapping[] = [
     "isin": "INE127B01011",
     "symbol": "HITECHGEAR",
     "stockid": "812927",
-    "companyid": "13655"
+    "companyid": "13655",
+    "tickertape_sid": "HTGR",
+    "fincode": 122073,
+    "scripcode": 522073
   },
   {
     "name": "HT Media",
@@ -12268,7 +15785,10 @@ const stockData: StockMapping[] = [
     "isin": "INE501G01024",
     "symbol": "HTMEDIA",
     "stockid": "253753",
-    "companyid": "16087"
+    "companyid": "16087",
+    "tickertape_sid": "HTML",
+    "fincode": 132662,
+    "scripcode": 532662
   },
   {
     "name": "Premier Explosives",
@@ -12278,7 +15798,10 @@ const stockData: StockMapping[] = [
     "isin": "INE863B01029",
     "symbol": "PREMEXPLN",
     "stockid": "130452",
-    "companyid": "10260"
+    "companyid": "10260",
+    "tickertape_sid": "PRMR",
+    "fincode": 126247,
+    "scripcode": 526247
   },
   {
     "name": "GPT Infraprojects",
@@ -12288,7 +15811,10 @@ const stockData: StockMapping[] = [
     "isin": "INE390G01014",
     "symbol": "GPTINFRA",
     "stockid": "168201",
-    "companyid": "11492"
+    "companyid": "11492",
+    "tickertape_sid": "GPTI",
+    "fincode": 221129,
+    "scripcode": 533761
   },
   {
     "name": "Hindustan Media Ventures",
@@ -12298,7 +15824,10 @@ const stockData: StockMapping[] = [
     "isin": "INE871K01015",
     "symbol": "HMVL",
     "stockid": "205441",
-    "companyid": "636"
+    "companyid": "636",
+    "tickertape_sid": "HINS",
+    "fincode": 220559,
+    "scripcode": 533217
   },
   {
     "name": "Goa Carbon",
@@ -12308,7 +15837,10 @@ const stockData: StockMapping[] = [
     "isin": "INE426D01013",
     "symbol": "GOACARBON",
     "stockid": "117742",
-    "companyid": "13716"
+    "companyid": "13716",
+    "tickertape_sid": "GOAC",
+    "fincode": 109567,
+    "scripcode": 509567
   },
   {
     "name": "Filatex Fashions",
@@ -12318,7 +15850,10 @@ const stockData: StockMapping[] = [
     "isin": "INE185E01021",
     "symbol": "FILATFASH",
     "stockid": "135324",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "FILA",
+    "fincode": 132022,
+    "scripcode": 532022
   },
   {
     "name": "SVP Global Textiles",
@@ -12328,7 +15863,10 @@ const stockData: StockMapping[] = [
     "isin": "INE308E01029",
     "symbol": "SVPGLOB",
     "stockid": "506741",
-    "companyid": "2541"
+    "companyid": "2541",
+    "tickertape_sid": "SVPG",
+    "fincode": 105590,
+    "scripcode": 505590
   },
   {
     "name": "Peninsula Land",
@@ -12338,7 +15876,10 @@ const stockData: StockMapping[] = [
     "isin": "INE138A01028",
     "symbol": "PENINLAND",
     "stockid": "226688",
-    "companyid": "13404"
+    "companyid": "13404",
+    "tickertape_sid": "PENL",
+    "fincode": 103031,
+    "scripcode": 503031
   },
   {
     "name": "Eureka Forbes",
@@ -12348,7 +15889,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0KCE01017",
     "symbol": "EUREKAFORB",
     "stockid": "1003614",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "EUREK",
+    "fincode": 242153,
+    "scripcode": 543482
   },
   {
     "name": "Swelect Energy Systems",
@@ -12358,7 +15902,10 @@ const stockData: StockMapping[] = [
     "isin": "INE409B01013",
     "symbol": "SWELECTES",
     "stockid": "468799",
-    "companyid": "5489"
+    "companyid": "5489",
+    "tickertape_sid": "SWEL",
+    "fincode": 132051,
+    "scripcode": 532051
   },
   {
     "name": "Saurashtra Cement",
@@ -12368,7 +15915,10 @@ const stockData: StockMapping[] = [
     "isin": "INE626A01014",
     "symbol": "SAURASHCEM",
     "stockid": "755243",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "SAUR",
+    "fincode": 102175,
+    "scripcode": 502175
   },
   {
     "name": "Uniphos Enterprises",
@@ -12378,7 +15928,10 @@ const stockData: StockMapping[] = [
     "isin": "INE037A01022",
     "symbol": "UNIENTER",
     "stockid": "928160",
-    "companyid": "12866"
+    "companyid": "12866",
+    "tickertape_sid": "UNPH",
+    "fincode": 100429,
+    "scripcode": 500429
   },
   {
     "name": "Dynamic Cables",
@@ -12388,7 +15941,10 @@ const stockData: StockMapping[] = [
     "isin": "INE600Y01019",
     "symbol": "DYCL",
     "stockid": "1002895",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "DYN",
+    "fincode": 287365,
+    "scripcode": 540795
   },
   {
     "name": "Diamines and Chemicals",
@@ -12398,7 +15954,10 @@ const stockData: StockMapping[] = [
     "isin": "INE591D01014",
     "symbol": "DIAMINESQ",
     "stockid": "696364",
-    "companyid": "13823"
+    "companyid": "13823",
+    "tickertape_sid": "DIAMI",
+    "fincode": 100120,
+    "scripcode": 500120
   },
   {
     "name": "PPAP Automotive",
@@ -12408,7 +15967,10 @@ const stockData: StockMapping[] = [
     "isin": "INE095I01015",
     "symbol": "PPAP",
     "stockid": "727893",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "PPAP",
+    "fincode": 200024,
+    "scripcode": 532934
   },
   {
     "name": "GVK Power & Infrastructure",
@@ -12418,7 +15980,10 @@ const stockData: StockMapping[] = [
     "isin": "INE251H01024",
     "symbol": "GVKPIL",
     "stockid": "421897",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "GVKP",
+    "fincode": 132708,
+    "scripcode": 532708
   },
   {
     "name": "DELPHI WORLD MONEY",
@@ -12428,7 +15993,9 @@ const stockData: StockMapping[] = [
     "isin": "INE726L01019",
     "symbol": "DELPHIFX",
     "stockid": "894696",
-    "companyid": "34119"
+    "companyid": "34119",
+    "fincode": 223077,
+    "scripcode": 533452
   },
   {
     "name": "Sreeleathers",
@@ -12438,7 +16005,10 @@ const stockData: StockMapping[] = [
     "isin": "INE099F01013",
     "symbol": "SREEL",
     "stockid": "241653",
-    "companyid": "4747"
+    "companyid": "4747",
+    "tickertape_sid": "SREE",
+    "fincode": 239658,
+    "scripcode": 535601
   },
   {
     "name": "Vardhman Holdings",
@@ -12448,7 +16018,10 @@ const stockData: StockMapping[] = [
     "isin": "INE701A01023",
     "symbol": "VHL",
     "stockid": "663472",
-    "companyid": "12656"
+    "companyid": "12656",
+    "tickertape_sid": "VRDM",
+    "fincode": 100439,
+    "scripcode": 500439
   },
   {
     "name": "Lux Industries",
@@ -12458,7 +16031,10 @@ const stockData: StockMapping[] = [
     "isin": "INE150G01020",
     "symbol": "LUXIND",
     "stockid": "399744",
-    "companyid": "21603"
+    "companyid": "21603",
+    "tickertape_sid": "LUXI",
+    "fincode": 213488,
+    "scripcode": 539542
   },
   {
     "name": "Sindhu Trade Links",
@@ -12468,7 +16044,10 @@ const stockData: StockMapping[] = [
     "isin": "INE325D01025",
     "symbol": "SINDHUTRAD",
     "stockid": "661429",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "SIN",
+    "fincode": 132029,
+    "scripcode": 532029
   },
   {
     "name": "Prozone Realty",
@@ -12478,7 +16057,10 @@ const stockData: StockMapping[] = [
     "isin": "INE195N01013",
     "symbol": "PROZONER",
     "stockid": "215741",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "PROZ",
+    "fincode": 236038,
+    "scripcode": 534675
   },
   {
     "name": "Indostar Capital Finance ",
@@ -12488,7 +16070,10 @@ const stockData: StockMapping[] = [
     "isin": "INE896L01010",
     "symbol": "INDOSTAR",
     "stockid": "1002983",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "INAC",
+    "fincode": 233932,
+    "scripcode": 541336
   },
   {
     "name": "OM Infra",
@@ -12498,7 +16083,10 @@ const stockData: StockMapping[] = [
     "isin": "INE239D01028",
     "symbol": "OMINFRAL",
     "stockid": "781718",
-    "companyid": "7382"
+    "companyid": "7382",
+    "tickertape_sid": "OMET",
+    "fincode": 131092,
+    "scripcode": 531092
   },
   {
     "name": "Suyog Telematics",
@@ -12508,7 +16096,10 @@ const stockData: StockMapping[] = [
     "isin": "INE442P01014",
     "symbol": "SUYOG",
     "stockid": "982071",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "SUY",
+    "fincode": 250658,
+    "scripcode": 537259
   },
   {
     "name": "NDL Ventures",
@@ -12518,7 +16109,10 @@ const stockData: StockMapping[] = [
     "isin": "INE353A01023",
     "symbol": "NDLVENTURE",
     "stockid": "713180",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "NXTD",
+    "fincode": 100189,
+    "scripcode": 500189
   },
   {
     "name": "Indo Tech Transformers",
@@ -12528,7 +16122,10 @@ const stockData: StockMapping[] = [
     "isin": "INE332H01014",
     "symbol": "INDOTECH",
     "stockid": "506539",
-    "companyid": "15235"
+    "companyid": "15235",
+    "tickertape_sid": "INTT",
+    "fincode": 132717,
+    "scripcode": 532717
   },
   {
     "name": "V2 Retail",
@@ -12538,7 +16135,9 @@ const stockData: StockMapping[] = [
     "isin": "INE945H01013",
     "symbol": "V2RETAIL",
     "stockid": "671010",
-    "companyid": "15509"
+    "companyid": "15509",
+    "fincode": 132867,
+    "scripcode": 532867
   },
   {
     "name": "State Trading Corporation of India",
@@ -12548,7 +16147,10 @@ const stockData: StockMapping[] = [
     "isin": "INE655A01013",
     "symbol": "STCINDIA",
     "stockid": "802160",
-    "companyid": "11441"
+    "companyid": "11441",
+    "tickertape_sid": "STCI",
+    "fincode": 112531,
+    "scripcode": 512531
   },
   {
     "name": "PAKKA",
@@ -12558,7 +16160,10 @@ const stockData: StockMapping[] = [
     "isin": "INE551D01018",
     "symbol": "PAKKA",
     "stockid": "975884",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "YASHP",
+    "fincode": 116030,
+    "scripcode": 516030
   },
   {
     "name": "Bajel Projects",
@@ -12568,7 +16173,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0KQN01018",
     "symbol": "BAJEL",
     "stockid": "10039093",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "BAJEL",
+    "fincode": 311991,
+    "scripcode": 544042
   },
   {
     "name": "20 Microns Limited",
@@ -12578,7 +16186,10 @@ const stockData: StockMapping[] = [
     "isin": "INE144J01027",
     "symbol": "20MICRONS",
     "stockid": "984165",
-    "companyid": "22472"
+    "companyid": "22472",
+    "tickertape_sid": "MICR",
+    "fincode": 207635,
+    "scripcode": 533022
   },
   {
     "name": "21st Century Management Services Limited",
@@ -12588,7 +16199,10 @@ const stockData: StockMapping[] = [
     "isin": "INE253B01015",
     "symbol": "21STCENMGM",
     "stockid": "",
-    "companyid": "8108"
+    "companyid": "8108",
+    "tickertape_sid": "TWMS",
+    "fincode": 126921,
+    "scripcode": 526921
   },
   {
     "name": "3P Land Holdings Limited",
@@ -12598,7 +16212,10 @@ const stockData: StockMapping[] = [
     "isin": "INE105C01023",
     "symbol": "3PLAND",
     "stockid": "632857",
-    "companyid": "9126"
+    "companyid": "9126",
+    "tickertape_sid": "3PLA",
+    "fincode": 116092,
+    "scripcode": 516092
   },
   {
     "name": "Fourth Dimension Solutions Limited",
@@ -12608,7 +16225,8 @@ const stockData: StockMapping[] = [
     "isin": "INE382T01030",
     "symbol": "4THDIM",
     "stockid": "1000208",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "FOUT"
   },
   {
     "name": "5Paisa Capital Limited",
@@ -12618,7 +16236,10 @@ const stockData: StockMapping[] = [
     "isin": "INE618L01018",
     "symbol": "5PAISA",
     "stockid": "1002879",
-    "companyid": "22221"
+    "companyid": "22221",
+    "tickertape_sid": "PAIS",
+    "fincode": 228972,
+    "scripcode": 540776
   },
   {
     "name": "A2Z Infra Engineering Limited",
@@ -12628,7 +16249,10 @@ const stockData: StockMapping[] = [
     "isin": "INE619I01012",
     "symbol": "A2ZINFRA",
     "stockid": "949223",
-    "companyid": "33061"
+    "companyid": "33061",
+    "tickertape_sid": "A2ZI",
+    "fincode": 207654,
+    "scripcode": 533292
   },
   {
     "name": "AAA Technologies Limited",
@@ -12638,7 +16262,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0D0U01013",
     "symbol": "AAATECH",
     "stockid": "1003430",
-    "companyid": "1993631"
+    "companyid": "1993631",
+    "tickertape_sid": "AAA",
+    "fincode": 299993,
+    "scripcode": 543671
   },
   {
     "name": "Aakash Exploration Services Limited",
@@ -12648,7 +16275,10 @@ const stockData: StockMapping[] = [
     "isin": "INE087Z01024",
     "symbol": "AAKASH",
     "stockid": "1002976",
-    "companyid": "67876"
+    "companyid": "67876",
+    "tickertape_sid": "AAKA",
+    "fincode": 288691,
+    "scripcode": 0
   },
   {
     "name": "Aarey Drugs & Pharmaceuticals Limited",
@@ -12658,7 +16288,10 @@ const stockData: StockMapping[] = [
     "isin": "INE198H01019",
     "symbol": "AAREYDRUGS",
     "stockid": "",
-    "companyid": "10593"
+    "companyid": "10593",
+    "tickertape_sid": "AREY",
+    "fincode": 124412,
+    "scripcode": 524412
   },
   {
     "name": "Aaron Industries Limited",
@@ -12668,7 +16301,10 @@ const stockData: StockMapping[] = [
     "isin": "INE721Z01010",
     "symbol": "AARON",
     "stockid": "1003042",
-    "companyid": "68824"
+    "companyid": "68824",
+    "tickertape_sid": "AARN",
+    "fincode": 290393,
+    "scripcode": 0
   },
   {
     "name": "Aarti Surfactants Limited",
@@ -12678,7 +16314,10 @@ const stockData: StockMapping[] = [
     "isin": "INE09EO01013",
     "symbol": "AARTISURF",
     "stockid": "1003403",
-    "companyid": "1987124"
+    "companyid": "1987124",
+    "tickertape_sid": "AARU",
+    "fincode": 299121,
+    "scripcode": 543210
   },
   {
     "name": "Aarvee Denims & Exports Limited",
@@ -12698,7 +16337,10 @@ const stockData: StockMapping[] = [
     "isin": "INE754X01016",
     "symbol": "AARVI",
     "stockid": "1002845",
-    "companyid": "66896"
+    "companyid": "66896",
+    "tickertape_sid": "AARI",
+    "fincode": 207660,
+    "scripcode": 0
   },
   {
     "name": "ABM International Limited",
@@ -12708,7 +16350,10 @@ const stockData: StockMapping[] = [
     "isin": "INE251C01025",
     "symbol": "ABMINTLLTD",
     "stockid": "",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "ABMN",
+    "fincode": 224765,
+    "scripcode": 0
   },
   {
     "name": "Accuracy Shipping Limited",
@@ -12718,7 +16363,10 @@ const stockData: StockMapping[] = [
     "isin": "INE648Z01023",
     "symbol": "ACCURACY",
     "stockid": "1003015",
-    "companyid": "68074"
+    "companyid": "68074",
+    "tickertape_sid": "ACCU",
+    "fincode": 288828,
+    "scripcode": 544598
   },
   {
     "name": "Ace Integrated Solutions Limited",
@@ -12728,7 +16376,10 @@ const stockData: StockMapping[] = [
     "isin": "INE543V01017",
     "symbol": "ACEINTEG",
     "stockid": "1002780",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "ACEN",
+    "fincode": 286680,
+    "scripcode": 0
   },
   {
     "name": "Archidply Decor Limited",
@@ -12738,7 +16389,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0CHO01012",
     "symbol": "ADL",
     "stockid": "1003420",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "ADL",
+    "fincode": 300014,
+    "scripcode": 543231
   },
   {
     "name": "Ador Welding Limited",
@@ -12748,7 +16402,8 @@ const stockData: StockMapping[] = [
     "isin": "INE045A01017",
     "symbol": "ADORWELD",
     "stockid": "339153",
-    "companyid": "22"
+    "companyid": "22",
+    "tickertape_sid": "ADOR"
   },
   {
     "name": "Adroit Infotech Limited",
@@ -12758,7 +16413,10 @@ const stockData: StockMapping[] = [
     "isin": "INE737B01033",
     "symbol": "ADROITINFO",
     "stockid": "290397",
-    "companyid": "7536"
+    "companyid": "7536",
+    "tickertape_sid": "AROI",
+    "fincode": 132172,
+    "scripcode": 532172
   },
   {
     "name": "Allied Digital Services Limited",
@@ -12768,7 +16426,10 @@ const stockData: StockMapping[] = [
     "isin": "INE102I01027",
     "symbol": "ADSL",
     "stockid": "505706",
-    "companyid": "1237"
+    "companyid": "1237",
+    "tickertape_sid": "ADIS",
+    "fincode": 132875,
+    "scripcode": 532875
   },
   {
     "name": "Advani Hotels & Resorts (India) Limited",
@@ -12778,7 +16439,10 @@ const stockData: StockMapping[] = [
     "isin": "INE199C01026",
     "symbol": "ADVANIHOTR",
     "stockid": "",
-    "companyid": "12577"
+    "companyid": "12577",
+    "tickertape_sid": "ADHO",
+    "fincode": 123269,
+    "scripcode": 523269
   },
   {
     "name": "Agri-Tech (India) Limited",
@@ -12788,7 +16452,10 @@ const stockData: StockMapping[] = [
     "isin": "INE449G01018",
     "symbol": "AGRITECH",
     "stockid": "564418",
-    "companyid": "50719"
+    "companyid": "50719",
+    "tickertape_sid": "AGTL",
+    "fincode": 200136,
+    "scripcode": 537292
   },
   {
     "name": "Agro Phos India Limited",
@@ -12798,7 +16465,10 @@ const stockData: StockMapping[] = [
     "isin": "INE740V01019",
     "symbol": "AGROPHOS",
     "stockid": "1002687",
-    "companyid": "65225"
+    "companyid": "65225",
+    "tickertape_sid": "AGRP",
+    "fincode": 283500,
+    "scripcode": 0
   },
   {
     "name": "Abans Holdings Limited",
@@ -12808,7 +16478,10 @@ const stockData: StockMapping[] = [
     "isin": "INE00ZE01026",
     "symbol": "AHL",
     "stockid": "1003761",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "AHL",
+    "fincode": 132811,
+    "scripcode": 532811
   },
   {
     "name": "Ahlada Engineers Limited",
@@ -12818,7 +16491,10 @@ const stockData: StockMapping[] = [
     "isin": "INE00PV01013",
     "symbol": "AHLADA",
     "stockid": "1003053",
-    "companyid": "68906"
+    "companyid": "68906",
+    "tickertape_sid": "AHLA",
+    "fincode": 290073,
+    "scripcode": 0
   },
   {
     "name": "Asian Hotels (East) Limited",
@@ -12828,7 +16504,10 @@ const stockData: StockMapping[] = [
     "isin": "INE926K01017",
     "symbol": "AHLEAST",
     "stockid": "109109",
-    "companyid": "22877"
+    "companyid": "22877",
+    "tickertape_sid": "ASHE",
+    "fincode": 221823,
+    "scripcode": 533227
   },
   {
     "name": "Airan Limited",
@@ -12838,7 +16517,10 @@ const stockData: StockMapping[] = [
     "isin": "INE645W01026",
     "symbol": "AIRAN",
     "stockid": "1002731",
-    "companyid": "65729"
+    "companyid": "65729",
+    "tickertape_sid": "AIRA",
+    "fincode": 284972,
+    "scripcode": 543811
   },
   {
     "name": "Airo Lam limited",
@@ -12848,7 +16530,10 @@ const stockData: StockMapping[] = [
     "isin": "INE801L01010",
     "symbol": "AIROLAM",
     "stockid": "1002836",
-    "companyid": "66862"
+    "companyid": "66862",
+    "tickertape_sid": "AIRO",
+    "fincode": 287340,
+    "scripcode": 0
   },
   {
     "name": "Ajmera Realty & Infra India Limited",
@@ -12858,7 +16543,9 @@ const stockData: StockMapping[] = [
     "isin": "INE298G01027",
     "symbol": "AJMERA",
     "stockid": "",
-    "companyid": "12071"
+    "companyid": "12071",
+    "fincode": 113349,
+    "scripcode": 513349
   },
   {
     "name": "Ajooni Biotech Limited",
@@ -12868,7 +16555,10 @@ const stockData: StockMapping[] = [
     "isin": "INE820Y01021",
     "symbol": "AJOONI",
     "stockid": "1002898",
-    "companyid": "67313"
+    "companyid": "67313",
+    "tickertape_sid": "AJOO",
+    "fincode": 287916,
+    "scripcode": 0
   },
   {
     "name": "Akash Infra-Projects Limited",
@@ -12878,7 +16568,10 @@ const stockData: StockMapping[] = [
     "isin": "INE737W01013",
     "symbol": "AKASH",
     "stockid": "",
-    "companyid": "60181"
+    "companyid": "60181",
+    "tickertape_sid": "AKAS",
+    "fincode": 284807,
+    "scripcode": 0
   },
   {
     "name": "Akg Exim Limited",
@@ -12888,7 +16581,10 @@ const stockData: StockMapping[] = [
     "isin": "INE00Y801016",
     "symbol": "AKG",
     "stockid": "1003052",
-    "companyid": "61785"
+    "companyid": "61785",
+    "tickertape_sid": "AKGE",
+    "fincode": 289778,
+    "scripcode": 0
   },
   {
     "name": "Akshar Spintex Limited",
@@ -12898,7 +16594,9 @@ const stockData: StockMapping[] = [
     "isin": "INE256Z01017",
     "symbol": "AKSHAR",
     "stockid": "1002988",
-    "companyid": ""
+    "companyid": "",
+    "fincode": 289097,
+    "scripcode": 541303
   },
   {
     "name": "AksharChem India Limited",
@@ -12908,7 +16606,10 @@ const stockData: StockMapping[] = [
     "isin": "INE542B01011",
     "symbol": "AKSHARCHEM",
     "stockid": "",
-    "companyid": "8634"
+    "companyid": "8634",
+    "tickertape_sid": "AKSH",
+    "fincode": 124598,
+    "scripcode": 524598
   },
   {
     "name": "Aksh Optifibre Limited",
@@ -12918,7 +16619,10 @@ const stockData: StockMapping[] = [
     "isin": "INE523B01011",
     "symbol": "AKSHOPTFBR",
     "stockid": "812146",
-    "companyid": "3559"
+    "companyid": "3559",
+    "tickertape_sid": "AKSO",
+    "fincode": 132351,
+    "scripcode": 532351
   },
   {
     "name": "Alankit Limited",
@@ -12928,7 +16632,10 @@ const stockData: StockMapping[] = [
     "isin": "INE914E01040",
     "symbol": "ALANKIT",
     "stockid": "373709",
-    "companyid": "7370"
+    "companyid": "7370",
+    "tickertape_sid": "ALAK",
+    "fincode": 131082,
+    "scripcode": 531082
   },
   {
     "name": "Albert David Limited",
@@ -12938,7 +16645,10 @@ const stockData: StockMapping[] = [
     "isin": "INE155C01010",
     "symbol": "ALBERTDAVD",
     "stockid": "876497",
-    "companyid": "12765"
+    "companyid": "12765",
+    "tickertape_sid": "ALBD",
+    "fincode": 124075,
+    "scripcode": 524075
   },
   {
     "name": "Alkali Metals Limited",
@@ -12948,7 +16658,10 @@ const stockData: StockMapping[] = [
     "isin": "INE773I01017",
     "symbol": "ALKALI",
     "stockid": "885963",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "ALML",
+    "fincode": 200059,
+    "scripcode": 533029
   },
   {
     "name": "Almondz Global Securities Limited",
@@ -12958,7 +16671,9 @@ const stockData: StockMapping[] = [
     "isin": "INE326B01027",
     "symbol": "ALMONDZ",
     "stockid": "585964",
-    "companyid": "6615"
+    "companyid": "6615",
+    "fincode": 131400,
+    "scripcode": 531400
   },
   {
     "name": "Alpa Laboratories Limited",
@@ -12968,7 +16683,10 @@ const stockData: StockMapping[] = [
     "isin": "INE385I01010",
     "symbol": "ALPA",
     "stockid": "476646",
-    "companyid": "18606"
+    "companyid": "18606",
+    "tickertape_sid": "ALPA",
+    "fincode": 132878,
+    "scripcode": 532878
   },
   {
     "name": "Alphageo (India) Limited",
@@ -12978,7 +16696,10 @@ const stockData: StockMapping[] = [
     "isin": "INE137C01018",
     "symbol": "ALPHAGEO",
     "stockid": "216236",
-    "companyid": "10454"
+    "companyid": "10454",
+    "tickertape_sid": "ALPI",
+    "fincode": 126397,
+    "scripcode": 526397
   },
   {
     "name": "Alps Industries Limited",
@@ -12988,7 +16709,8 @@ const stockData: StockMapping[] = [
     "isin": "INE093B01015",
     "symbol": "ALPSINDUS",
     "stockid": "621626",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "ALPS"
   },
   {
     "name": "Ambica Agarbathies & Aroma industries Limited",
@@ -12998,7 +16720,10 @@ const stockData: StockMapping[] = [
     "isin": "INE792B01012",
     "symbol": "AMBICAAGAR",
     "stockid": "",
-    "companyid": "5810"
+    "companyid": "5810",
+    "tickertape_sid": "AAAI",
+    "fincode": 132335,
+    "scripcode": 532335
   },
   {
     "name": "AMD Industries Limited",
@@ -13008,7 +16733,10 @@ const stockData: StockMapping[] = [
     "isin": "INE005I01014",
     "symbol": "AMDIND",
     "stockid": "380726",
-    "companyid": "15806"
+    "companyid": "15806",
+    "tickertape_sid": "AMDM",
+    "fincode": 132828,
+    "scripcode": 532828
   },
   {
     "name": "Amj Land Holdings Limited",
@@ -13018,7 +16746,10 @@ const stockData: StockMapping[] = [
     "isin": "INE606A01024",
     "symbol": "AMJLAND",
     "stockid": "102412",
-    "companyid": "13241"
+    "companyid": "13241",
+    "tickertape_sid": "AMJL",
+    "fincode": 100343,
+    "scripcode": 500343
   },
   {
     "name": "Amrutanjan Health Care Limited",
@@ -13028,7 +16759,10 @@ const stockData: StockMapping[] = [
     "isin": "INE098F01031",
     "symbol": "AMRUTANJAN",
     "stockid": "149140",
-    "companyid": "49"
+    "companyid": "49",
+    "tickertape_sid": "AJAN",
+    "fincode": 190006,
+    "scripcode": 590006
   },
   {
     "name": "The Andhra Sugars Limited",
@@ -13038,7 +16772,10 @@ const stockData: StockMapping[] = [
     "isin": "INE715B01021",
     "symbol": "ANDHRSUGAR",
     "stockid": "",
-    "companyid": "12612"
+    "companyid": "12612",
+    "tickertape_sid": "ANDS",
+    "fincode": 190062,
+    "scripcode": 590062
   },
   {
     "name": "Anik Industries Limited",
@@ -13048,7 +16785,10 @@ const stockData: StockMapping[] = [
     "isin": "INE087B01017",
     "symbol": "ANIKINDS",
     "stockid": "205426",
-    "companyid": "10222"
+    "companyid": "10222",
+    "tickertape_sid": "ANIK",
+    "fincode": 119383,
+    "scripcode": 519383
   },
   {
     "name": "Ankit Metal & Power Limited",
@@ -13058,7 +16798,10 @@ const stockData: StockMapping[] = [
     "isin": "INE106I01010",
     "symbol": "ANKITMETAL",
     "stockid": "",
-    "companyid": "19146"
+    "companyid": "19146",
+    "tickertape_sid": "AMPL",
+    "fincode": 132870,
+    "scripcode": 532870
   },
   {
     "name": "Anmol India Limited",
@@ -13068,7 +16811,10 @@ const stockData: StockMapping[] = [
     "isin": "INE02AR01019",
     "symbol": "ANMOL",
     "stockid": "1003104",
-    "companyid": "1851341"
+    "companyid": "1851341",
+    "tickertape_sid": "ANM",
+    "fincode": 292036,
+    "scripcode": 542437
   },
   {
     "name": "Antarctica Limited",
@@ -13078,7 +16824,10 @@ const stockData: StockMapping[] = [
     "isin": "INE414B01021",
     "symbol": "ANTGRAPHIC",
     "stockid": "359044",
-    "companyid": "8702"
+    "companyid": "8702",
+    "tickertape_sid": "ANTC",
+    "fincode": 126715,
+    "scripcode": 526715
   },
   {
     "name": "Anjani Portland Cement Limited",
@@ -13088,7 +16837,10 @@ const stockData: StockMapping[] = [
     "isin": "INE071F01012",
     "symbol": "APCL",
     "stockid": "999240",
-    "companyid": "10966"
+    "companyid": "10966",
+    "tickertape_sid": "ANCM",
+    "fincode": 118091,
+    "scripcode": 518091
   },
   {
     "name": "Apex Frozen Foods Limited",
@@ -13098,7 +16850,10 @@ const stockData: StockMapping[] = [
     "isin": "INE346W01013",
     "symbol": "APEX",
     "stockid": "1002810",
-    "companyid": "66684"
+    "companyid": "66684",
+    "tickertape_sid": "APEX",
+    "fincode": 285359,
+    "scripcode": 540692
   },
   {
     "name": "Apollo Sindoori Hotels Limited",
@@ -13108,7 +16863,10 @@ const stockData: StockMapping[] = [
     "isin": "INE451F01024",
     "symbol": "APOLSINHOT",
     "stockid": "887803",
-    "companyid": "1057"
+    "companyid": "1057",
+    "tickertape_sid": "APOS",
+    "fincode": 226350,
+    "scripcode": 0
   },
   {
     "name": "Archidply Industries Limited",
@@ -13118,7 +16876,10 @@ const stockData: StockMapping[] = [
     "isin": "INE877I01016",
     "symbol": "ARCHIDPLY",
     "stockid": "717111",
-    "companyid": "21502"
+    "companyid": "21502",
+    "tickertape_sid": "ARCY",
+    "fincode": 200099,
+    "scripcode": 532994
   },
   {
     "name": "Archies Limited",
@@ -13128,7 +16889,10 @@ const stockData: StockMapping[] = [
     "isin": "INE731A01020",
     "symbol": "ARCHIES",
     "stockid": "638049",
-    "companyid": "5657"
+    "companyid": "5657",
+    "tickertape_sid": "ARGG",
+    "fincode": 132212,
+    "scripcode": 532212
   },
   {
     "name": "Rajdarshan Industries Limited",
@@ -13138,7 +16902,10 @@ const stockData: StockMapping[] = [
     "isin": "INE610C01014",
     "symbol": "ARENTERP",
     "stockid": "894300",
-    "companyid": "7373"
+    "companyid": "7373",
+    "tickertape_sid": "RAJD",
+    "fincode": 126662,
+    "scripcode": 526662
   },
   {
     "name": "Aries Agro Limited",
@@ -13148,7 +16915,10 @@ const stockData: StockMapping[] = [
     "isin": "INE298I01015",
     "symbol": "ARIES",
     "stockid": "411597",
-    "companyid": "20477"
+    "companyid": "20477",
+    "tickertape_sid": "ARAI",
+    "fincode": 200021,
+    "scripcode": 532935
   },
   {
     "name": "Aro Granite Industries Limited",
@@ -13158,7 +16928,10 @@ const stockData: StockMapping[] = [
     "isin": "INE210C01013",
     "symbol": "AROGRANITE",
     "stockid": "222241",
-    "companyid": "8309"
+    "companyid": "8309",
+    "tickertape_sid": "AROG",
+    "fincode": 113729,
+    "scripcode": 513729
   },
   {
     "name": "Arrow Greentech Limited",
@@ -13168,7 +16941,10 @@ const stockData: StockMapping[] = [
     "isin": "INE570D01018",
     "symbol": "ARROWGREEN",
     "stockid": "270267",
-    "companyid": "8437"
+    "companyid": "8437",
+    "tickertape_sid": "ARRO",
+    "fincode": 116064,
+    "scripcode": 516064
   },
   {
     "name": "Arshiya Limited",
@@ -13178,7 +16954,10 @@ const stockData: StockMapping[] = [
     "isin": "INE968D01022",
     "symbol": "ARSHIYA",
     "stockid": "908033",
-    "companyid": "11721"
+    "companyid": "11721",
+    "tickertape_sid": "ARSH",
+    "fincode": 106074,
+    "scripcode": 506074
   },
   {
     "name": "Art Nirman Limited",
@@ -13188,7 +16967,10 @@ const stockData: StockMapping[] = [
     "isin": "INE738V01013",
     "symbol": "ARTNIRMAN",
     "stockid": "1002674",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "ARTN",
+    "fincode": 283192,
+    "scripcode": 0
   },
   {
     "name": "Arvee Laboratories (India) Limited",
@@ -13198,7 +16980,10 @@ const stockData: StockMapping[] = [
     "isin": "INE006Z01016",
     "symbol": "ARVEE",
     "stockid": "1002931",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "ARVE",
+    "fincode": 288419,
+    "scripcode": 0
   },
   {
     "name": "Arvind Fashions Limited",
@@ -13208,7 +16993,10 @@ const stockData: StockMapping[] = [
     "isin": "INE955V01021",
     "symbol": "ARVINDFASN",
     "stockid": "1003110",
-    "companyid": "15045"
+    "companyid": "15045",
+    "tickertape_sid": "ARVF",
+    "fincode": 293665,
+    "scripcode": 542484
   },
   {
     "name": "Ashima Limited",
@@ -13218,7 +17006,10 @@ const stockData: StockMapping[] = [
     "isin": "INE440A01010",
     "symbol": "ASHIMASYN",
     "stockid": "439953",
-    "companyid": "10750"
+    "companyid": "10750",
+    "tickertape_sid": "ASHL",
+    "fincode": 114286,
+    "scripcode": 514286
   },
   {
     "name": "Asian Energy Services Limited",
@@ -13228,7 +17019,10 @@ const stockData: StockMapping[] = [
     "isin": "INE276G01015",
     "symbol": "ASIANENE",
     "stockid": "813635",
-    "companyid": "7857"
+    "companyid": "7857",
+    "tickertape_sid": "ASIAO",
+    "fincode": 130355,
+    "scripcode": 530355
   },
   {
     "name": "Bartronics India Limited",
@@ -13238,7 +17032,10 @@ const stockData: StockMapping[] = [
     "isin": "INE855F01042",
     "symbol": "ASMS",
     "stockid": "873814",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "BARI",
+    "fincode": 132694,
+    "scripcode": 532694
   },
   {
     "name": "Aspinwall and Company Limited",
@@ -13248,7 +17045,10 @@ const stockData: StockMapping[] = [
     "isin": "INE991I01015",
     "symbol": "ASPINWALL",
     "stockid": "723979",
-    "companyid": "11879"
+    "companyid": "11879",
+    "tickertape_sid": "ASPI",
+    "fincode": 219253,
+    "scripcode": 0
   },
   {
     "name": "Astron Paper & Board Mill Limited",
@@ -13258,7 +17058,10 @@ const stockData: StockMapping[] = [
     "isin": "INE646X01014",
     "symbol": "ASTRON",
     "stockid": "",
-    "companyid": "55290"
+    "companyid": "55290",
+    "tickertape_sid": "ASTO",
+    "fincode": 286637,
+    "scripcode": 540824
   },
   {
     "name": "Agro Tech Foods Limited",
@@ -13268,7 +17071,8 @@ const stockData: StockMapping[] = [
     "isin": "INE209A01019",
     "symbol": "ATFL",
     "stockid": "934380",
-    "companyid": "12158"
+    "companyid": "12158",
+    "tickertape_sid": "AGRO"
   },
   {
     "name": "Atlanta  Limited",
@@ -13278,7 +17082,10 @@ const stockData: StockMapping[] = [
     "isin": "INE285H01022",
     "symbol": "ATLANTA",
     "stockid": "",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "ATLT",
+    "fincode": 288028,
+    "scripcode": 544527
   },
   {
     "name": "Aurum PropTech Limited",
@@ -13288,7 +17095,10 @@ const stockData: StockMapping[] = [
     "isin": "INE898S01029",
     "symbol": "AURUM",
     "stockid": "999966",
-    "companyid": "61223"
+    "companyid": "61223",
+    "tickertape_sid": "MAJC",
+    "fincode": 276987,
+    "scripcode": 539289
   },
   {
     "name": "Ausom Enterprise Limited",
@@ -13298,7 +17108,10 @@ const stockData: StockMapping[] = [
     "isin": "INE218C01016",
     "symbol": "AUSOMENT",
     "stockid": "716904",
-    "companyid": "11316"
+    "companyid": "11316",
+    "tickertape_sid": "AUSM",
+    "fincode": 109009,
+    "scripcode": 509009
   },
   {
     "name": "Autoline Industries Limited",
@@ -13308,7 +17121,10 @@ const stockData: StockMapping[] = [
     "isin": "INE718H01014",
     "symbol": "AUTOIND",
     "stockid": "461239",
-    "companyid": "18866"
+    "companyid": "18866",
+    "tickertape_sid": "AUIN",
+    "fincode": 132797,
+    "scripcode": 532797
   },
   {
     "name": "Avonmore Capital & Management Services Limited",
@@ -13318,7 +17134,9 @@ const stockData: StockMapping[] = [
     "isin": "INE323B01016",
     "symbol": "AVONMORE",
     "stockid": "",
-    "companyid": ""
+    "companyid": "",
+    "fincode": 111589,
+    "scripcode": 511589
   },
   {
     "name": "AVRO INDIA LIMITED",
@@ -13328,7 +17146,9 @@ const stockData: StockMapping[] = [
     "isin": "INE652Z01017",
     "symbol": "AVROIND",
     "stockid": "1003029",
-    "companyid": ""
+    "companyid": "",
+    "fincode": 289307,
+    "scripcode": 543512
   },
   {
     "name": "AVT Natural Products Limited",
@@ -13338,7 +17158,10 @@ const stockData: StockMapping[] = [
     "isin": "INE488D01021",
     "symbol": "AVTNPL",
     "stockid": "818765",
-    "companyid": "4"
+    "companyid": "4",
+    "tickertape_sid": "AVTN",
+    "fincode": 119105,
+    "scripcode": 519105
   },
   {
     "name": "Axita Cotton Limited",
@@ -13348,7 +17171,10 @@ const stockData: StockMapping[] = [
     "isin": "INE02EZ01022",
     "symbol": "AXITA",
     "stockid": "1003096",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "AXI",
+    "fincode": 293504,
+    "scripcode": 542285
   },
   {
     "name": "AYM Syntex Limited",
@@ -13358,7 +17184,10 @@ const stockData: StockMapping[] = [
     "isin": "INE193B01039",
     "symbol": "AYMSYNTEX",
     "stockid": "774952",
-    "companyid": "11314"
+    "companyid": "11314",
+    "tickertape_sid": "AYMS",
+    "fincode": 108933,
+    "scripcode": 508933
   },
   {
     "name": "Bafna Pharmaceuticals Limited",
@@ -13368,7 +17197,10 @@ const stockData: StockMapping[] = [
     "isin": "INE878I01022",
     "symbol": "BAFNAPH",
     "stockid": "852453",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "BAFP",
+    "fincode": 200062,
+    "scripcode": 532989
   },
   {
     "name": "B.A.G Films and Media Limited",
@@ -13378,7 +17210,10 @@ const stockData: StockMapping[] = [
     "isin": "INE116D01028",
     "symbol": "BAGFILMS",
     "stockid": "",
-    "companyid": "17141"
+    "companyid": "17141",
+    "tickertape_sid": "BAGF",
+    "fincode": 132507,
+    "scripcode": 532507
   },
   {
     "name": "Baid Finserv Limited",
@@ -13388,7 +17223,10 @@ const stockData: StockMapping[] = [
     "isin": "INE020D01022",
     "symbol": "BAIDFIN",
     "stockid": "343883",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "BALF",
+    "fincode": 111724,
+    "scripcode": 511724
   },
   {
     "name": "BALAXI PHARMACEUTICALS LIMITED",
@@ -13398,7 +17236,9 @@ const stockData: StockMapping[] = [
     "isin": "INE618N01014",
     "symbol": "BALAXI",
     "stockid": "999933",
-    "companyid": "12255"
+    "companyid": "12255",
+    "fincode": 226691,
+    "scripcode": 0
   },
   {
     "name": "Balkrishna Paper Mills Limited",
@@ -13408,7 +17248,10 @@ const stockData: StockMapping[] = [
     "isin": "INE875R01011",
     "symbol": "BALKRISHNA",
     "stockid": "873940",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "BALK",
+    "fincode": 274453,
+    "scripcode": 539251
   },
   {
     "name": "Ballarpur Industries Limited",
@@ -13428,7 +17271,10 @@ const stockData: StockMapping[] = [
     "isin": "INE083D01012",
     "symbol": "BALPHARMA",
     "stockid": "555664",
-    "companyid": "8252"
+    "companyid": "8252",
+    "tickertape_sid": "BALP",
+    "fincode": 124824,
+    "scripcode": 524824
   },
   {
     "name": "Banaras Beads Limited",
@@ -13438,7 +17284,10 @@ const stockData: StockMapping[] = [
     "isin": "INE655B01011",
     "symbol": "BANARBEADS",
     "stockid": "744805",
-    "companyid": "8241"
+    "companyid": "8241",
+    "tickertape_sid": "BANB",
+    "fincode": 126849,
+    "scripcode": 526849
   },
   {
     "name": "Bang Overseas Limited",
@@ -13448,7 +17297,10 @@ const stockData: StockMapping[] = [
     "isin": "INE863I01016",
     "symbol": "BANG",
     "stockid": "778190",
-    "companyid": "20732"
+    "companyid": "20732",
+    "tickertape_sid": "BANO",
+    "fincode": 200045,
+    "scripcode": 532946
   },
   {
     "name": "Banka BioLoo Limited",
@@ -13458,7 +17310,10 @@ const stockData: StockMapping[] = [
     "isin": "INE862Y01015",
     "symbol": "BANKA",
     "stockid": "1002934",
-    "companyid": "67475"
+    "companyid": "67475",
+    "tickertape_sid": "BAKN",
+    "fincode": 288357,
+    "scripcode": 0
   },
   {
     "name": "Banswara Syntex Limited",
@@ -13468,7 +17323,10 @@ const stockData: StockMapping[] = [
     "isin": "INE629D01020",
     "symbol": "BANSWRAS",
     "stockid": "857197",
-    "companyid": "13996"
+    "companyid": "13996",
+    "tickertape_sid": "BANS",
+    "fincode": 103722,
+    "scripcode": 503722
   },
   {
     "name": "Bannari Amman Spinning Mills Limited",
@@ -13478,7 +17336,10 @@ const stockData: StockMapping[] = [
     "isin": "INE186H01022",
     "symbol": "BASML",
     "stockid": "662332",
-    "companyid": "17610"
+    "companyid": "17610",
+    "tickertape_sid": "BASP",
+    "fincode": 132674,
+    "scripcode": 532674
   },
   {
     "name": "B&B Triplewall Containers Limited",
@@ -13488,7 +17349,10 @@ const stockData: StockMapping[] = [
     "isin": "INE01EE01011",
     "symbol": "BBTCL",
     "stockid": "",
-    "companyid": "69105"
+    "companyid": "69105",
+    "tickertape_sid": "BBTR",
+    "fincode": 291900,
+    "scripcode": 543668
   },
   {
     "name": "Brightcom Group Limited",
@@ -13498,7 +17362,10 @@ const stockData: StockMapping[] = [
     "isin": "INE425B01027",
     "symbol": "BCG",
     "stockid": "405845",
-    "companyid": "2120"
+    "companyid": "2120",
+    "tickertape_sid": "BRIH",
+    "fincode": 132368,
+    "scripcode": 532368
   },
   {
     "name": "Brand Concepts Limited",
@@ -13508,7 +17375,10 @@ const stockData: StockMapping[] = [
     "isin": "INE977Y01011",
     "symbol": "BCONCEPTS",
     "stockid": "1002906",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "BRAN",
+    "fincode": 287986,
+    "scripcode": 543442
   },
   {
     "name": "B.C. Power Controls Ltd",
@@ -13518,7 +17388,10 @@ const stockData: StockMapping[] = [
     "isin": "INE905P01028",
     "symbol": "BCP",
     "stockid": "",
-    "companyid": "51493"
+    "companyid": "51493",
+    "tickertape_sid": "BCPC",
+    "fincode": 252809,
+    "scripcode": 537766
   },
   {
     "name": "Beardsell Limited",
@@ -13528,7 +17401,10 @@ const stockData: StockMapping[] = [
     "isin": "INE520H01022",
     "symbol": "BEARDSELL",
     "stockid": "767573",
-    "companyid": "13976"
+    "companyid": "13976",
+    "tickertape_sid": "BRED",
+    "fincode": 219320,
+    "scripcode": 539447
   },
   {
     "name": "Bedmutha Industries Limited",
@@ -13538,7 +17414,10 @@ const stockData: StockMapping[] = [
     "isin": "INE844K01012",
     "symbol": "BEDMUTHA",
     "stockid": "912006",
-    "companyid": "32434"
+    "companyid": "32434",
+    "tickertape_sid": "BMIL",
+    "fincode": 207842,
+    "scripcode": 533270
   },
   {
     "name": "BGR Energy Systems Limited",
@@ -13548,7 +17427,10 @@ const stockData: StockMapping[] = [
     "isin": "INE661I01014",
     "symbol": "BGRENERGY",
     "stockid": "150319",
-    "companyid": "20378"
+    "companyid": "20378",
+    "tickertape_sid": "BGRE",
+    "fincode": 200018,
+    "scripcode": 532930
   },
   {
     "name": "Bhagyanagar India Limited",
@@ -13558,7 +17440,10 @@ const stockData: StockMapping[] = [
     "isin": "INE458B01036",
     "symbol": "BHAGYANGR",
     "stockid": "293603",
-    "companyid": "11860"
+    "companyid": "11860",
+    "tickertape_sid": "BHIL",
+    "fincode": 112296,
+    "scripcode": 512296
   },
   {
     "name": "Bhandari Hosiery Exports Limited",
@@ -13568,7 +17453,10 @@ const stockData: StockMapping[] = [
     "isin": "INE474E01029",
     "symbol": "BHANDARI",
     "stockid": "805261",
-    "companyid": "8645"
+    "companyid": "8645",
+    "tickertape_sid": "BHEX",
+    "fincode": 112608,
+    "scripcode": 512608
   },
   {
     "name": "Bharat Gears Limited",
@@ -13578,7 +17466,10 @@ const stockData: StockMapping[] = [
     "isin": "INE561C01019",
     "symbol": "BHARATGEAR",
     "stockid": "178391",
-    "companyid": "13959"
+    "companyid": "13959",
+    "tickertape_sid": "BGRS",
+    "fincode": 105688,
+    "scripcode": 505688
   },
   {
     "name": "Bharat Rasayan Limited",
@@ -13588,7 +17479,9 @@ const stockData: StockMapping[] = [
     "isin": "INE838B01013",
     "symbol": "BHARATRAS",
     "stockid": "267795",
-    "companyid": "10986"
+    "companyid": "10986",
+    "fincode": 190021,
+    "scripcode": 590021
   },
   {
     "name": "Bhartiya International Limited",
@@ -13598,7 +17491,10 @@ const stockData: StockMapping[] = [
     "isin": "INE828A01016",
     "symbol": "BIL",
     "stockid": "544126",
-    "companyid": "8673"
+    "companyid": "8673",
+    "tickertape_sid": "BHAI",
+    "fincode": 126666,
+    "scripcode": 526666
   },
   {
     "name": "Binani Industries Limited",
@@ -13608,7 +17504,8 @@ const stockData: StockMapping[] = [
     "isin": "INE071A01013",
     "symbol": "BINANIIND",
     "stockid": "793847",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "BINZ"
   },
   {
     "name": "Oswal Chemicals & Fertilizers Limited",
@@ -13618,7 +17515,8 @@ const stockData: StockMapping[] = [
     "isin": "INE143A01010",
     "symbol": "BINDALAGRO",
     "stockid": "",
-    "companyid": "13950"
+    "companyid": "13950",
+    "tickertape_sid": "OSGL"
   },
   {
     "name": "Biofil Chemicals & Pharmaceuticals Limited",
@@ -13628,7 +17526,10 @@ const stockData: StockMapping[] = [
     "isin": "INE829A01014",
     "symbol": "BIOFILCHEM",
     "stockid": "",
-    "companyid": "10581"
+    "companyid": "10581",
+    "tickertape_sid": "BIOF",
+    "fincode": 124396,
+    "scripcode": 524396
   },
   {
     "name": "Birla Cable Limited",
@@ -13638,7 +17539,10 @@ const stockData: StockMapping[] = [
     "isin": "INE800A01015",
     "symbol": "BIRLACABLE",
     "stockid": "166837",
-    "companyid": "10258"
+    "companyid": "10258",
+    "tickertape_sid": "BRLE",
+    "fincode": 100060,
+    "scripcode": 500060
   },
   {
     "name": "Aditya Birla Money Limited",
@@ -13648,7 +17552,10 @@ const stockData: StockMapping[] = [
     "isin": "INE865C01022",
     "symbol": "BIRLAMONEY",
     "stockid": "568410",
-    "companyid": "15854"
+    "companyid": "15854",
+    "tickertape_sid": "ABML",
+    "fincode": 190049,
+    "scripcode": 532974
   },
   {
     "name": "Bkm Industries Limited",
@@ -13658,7 +17565,10 @@ const stockData: StockMapping[] = [
     "isin": "INE831Q01016",
     "symbol": "BKMINDST",
     "stockid": "881771",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "BKMI",
+    "fincode": 274321,
+    "scripcode": 539043
   },
   {
     "name": "BLB Limited",
@@ -13668,7 +17578,10 @@ const stockData: StockMapping[] = [
     "isin": "INE791A01024",
     "symbol": "BLBLIMITED",
     "stockid": "768361",
-    "companyid": "4231"
+    "companyid": "4231",
+    "tickertape_sid": "BLB",
+    "fincode": 132290,
+    "scripcode": 532290
   },
   {
     "name": "Bohra Industries Limited",
@@ -13678,7 +17591,10 @@ const stockData: StockMapping[] = [
     "isin": "INE802W01023",
     "symbol": "BOHRAIND",
     "stockid": "229206",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "BOHA",
+    "fincode": 227291,
+    "scripcode": 0
   },
   {
     "name": "Bharat Road Network Limited",
@@ -13688,7 +17604,10 @@ const stockData: StockMapping[] = [
     "isin": "INE727S01012",
     "symbol": "BRNL",
     "stockid": "1002815",
-    "companyid": "66744"
+    "companyid": "66744",
+    "tickertape_sid": "BHRN",
+    "fincode": 275019,
+    "scripcode": 540700
   },
   {
     "name": "Brooks Laboratories Limited",
@@ -13698,7 +17617,10 @@ const stockData: StockMapping[] = [
     "isin": "INE650L01011",
     "symbol": "BROOKS",
     "stockid": "539063",
-    "companyid": "34403"
+    "companyid": "34403",
+    "tickertape_sid": "BROO",
+    "fincode": 221680,
+    "scripcode": 533543
   },
   {
     "name": "Bombay Super Hybrid Seeds Limited",
@@ -13708,7 +17630,10 @@ const stockData: StockMapping[] = [
     "isin": "INE032Z01020",
     "symbol": "BSHSL",
     "stockid": "1002975",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "BOBA",
+    "fincode": 288684,
+    "scripcode": 544757
   },
   {
     "name": "BSL Limited",
@@ -13718,7 +17643,10 @@ const stockData: StockMapping[] = [
     "isin": "INE594B01012",
     "symbol": "BSL",
     "stockid": "912834",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "BSLL",
+    "fincode": 114045,
+    "scripcode": 514045
   },
   {
     "name": "Bodhi Tree Multimedia Limited",
@@ -13728,7 +17656,9 @@ const stockData: StockMapping[] = [
     "isin": "INE0EEJ01015",
     "symbol": "BTML",
     "stockid": "1003437",
-    "companyid": ""
+    "companyid": "",
+    "fincode": 300034,
+    "scripcode": 543767
   },
   {
     "name": "Burnpur Cement Limited",
@@ -13738,7 +17668,10 @@ const stockData: StockMapping[] = [
     "isin": "INE817H01014",
     "symbol": "BURNPUR",
     "stockid": "441327",
-    "companyid": "18756"
+    "companyid": "18756",
+    "tickertape_sid": "BRCL",
+    "fincode": 200004,
+    "scripcode": 532931
   },
   {
     "name": "Barak Valley Cements Limited",
@@ -13748,7 +17681,10 @@ const stockData: StockMapping[] = [
     "isin": "INE139I01011",
     "symbol": "BVCL",
     "stockid": "680051",
-    "companyid": "16927"
+    "companyid": "16927",
+    "tickertape_sid": "BAVA",
+    "fincode": 132916,
+    "scripcode": 532916
   },
   {
     "name": "The Byke Hospitality Ltd",
@@ -13758,7 +17694,10 @@ const stockData: StockMapping[] = [
     "isin": "INE319B01014",
     "symbol": "BYKE",
     "stockid": "",
-    "companyid": "6708"
+    "companyid": "6708",
+    "tickertape_sid": "TBKH",
+    "fincode": 131373,
+    "scripcode": 531373
   },
   {
     "name": "California Software Company Limited",
@@ -13768,7 +17707,10 @@ const stockData: StockMapping[] = [
     "isin": "INE526B01014",
     "symbol": "CALSOFT",
     "stockid": "369383",
-    "companyid": "6043"
+    "companyid": "6043",
+    "tickertape_sid": "CALI",
+    "fincode": 132386,
+    "scripcode": 532386
   },
   {
     "name": "Capital Trust Limited",
@@ -13778,7 +17720,10 @@ const stockData: StockMapping[] = [
     "isin": "INE707C01018",
     "symbol": "CAPTRUST",
     "stockid": "340106",
-    "companyid": "8596"
+    "companyid": "8596",
+    "tickertape_sid": "CAPT",
+    "fincode": 111505,
+    "scripcode": 511505
   },
   {
     "name": "Career Point Limited",
@@ -13788,7 +17733,8 @@ const stockData: StockMapping[] = [
     "isin": "INE521J01018",
     "symbol": "CAREERP",
     "stockid": "740822",
-    "companyid": "32275"
+    "companyid": "32275",
+    "tickertape_sid": "CARP"
   },
   {
     "name": "Country Club Hospitality & Holidays Limited",
@@ -13798,7 +17744,10 @@ const stockData: StockMapping[] = [
     "isin": "INE652F01027",
     "symbol": "CCHHL",
     "stockid": "",
-    "companyid": "8771"
+    "companyid": "8771",
+    "tickertape_sid": "COUN",
+    "fincode": 126550,
+    "scripcode": 526550
   },
   {
     "name": "Celebrity Fashions Limited",
@@ -13808,7 +17757,10 @@ const stockData: StockMapping[] = [
     "isin": "INE185H01016",
     "symbol": "CELEBRITY",
     "stockid": "661340",
-    "companyid": "18633"
+    "companyid": "18633",
+    "tickertape_sid": "CELF",
+    "fincode": 132695,
+    "scripcode": 532695
   },
   {
     "name": "Century Extrusions Limited",
@@ -13818,7 +17770,10 @@ const stockData: StockMapping[] = [
     "isin": "INE281A01026",
     "symbol": "CENTEXT",
     "stockid": "751831",
-    "companyid": "13904"
+    "companyid": "13904",
+    "tickertape_sid": "CNTX",
+    "fincode": 100083,
+    "scripcode": 500083
   },
   {
     "name": "Cerebra Integrated Technologies Limited",
@@ -13828,7 +17783,10 @@ const stockData: StockMapping[] = [
     "isin": "INE345B01019",
     "symbol": "CEREBRAINT",
     "stockid": "356810",
-    "companyid": "3728"
+    "companyid": "3728",
+    "tickertape_sid": "CEIT",
+    "fincode": 132413,
+    "scripcode": 532413
   },
   {
     "name": "Chembond Chemicals Ltd",
@@ -13838,7 +17796,10 @@ const stockData: StockMapping[] = [
     "isin": "INE995D01025",
     "symbol": "CHEMBOND",
     "stockid": "",
-    "companyid": "7583"
+    "companyid": "7583",
+    "tickertape_sid": "CHEM",
+    "fincode": 130871,
+    "scripcode": 530871
   },
   {
     "name": "Chemfab Alkalis Limited",
@@ -13848,7 +17809,10 @@ const stockData: StockMapping[] = [
     "isin": "INE783X01023",
     "symbol": "CHEMFAB",
     "stockid": "1002978",
-    "companyid": "53390"
+    "companyid": "53390",
+    "tickertape_sid": "CHMF",
+    "fincode": 289453,
+    "scripcode": 541269
   },
   {
     "name": "Cineline India Limited",
@@ -13858,7 +17822,10 @@ const stockData: StockMapping[] = [
     "isin": "INE704H01022",
     "symbol": "CINELINE",
     "stockid": "384105",
-    "companyid": "18559"
+    "companyid": "18559",
+    "tickertape_sid": "CIIN",
+    "fincode": 132807,
+    "scripcode": 532807
   },
   {
     "name": "Cinevista Limited",
@@ -13868,7 +17835,10 @@ const stockData: StockMapping[] = [
     "isin": "INE039B01026",
     "symbol": "CINEVISTA",
     "stockid": "529084",
-    "companyid": "4155"
+    "companyid": "4155",
+    "tickertape_sid": "CINE",
+    "fincode": 132324,
+    "scripcode": 532324
   },
   {
     "name": "CL Educate Limited",
@@ -13878,7 +17848,10 @@ const stockData: StockMapping[] = [
     "isin": "INE201M01029",
     "symbol": "CLEDUCATE",
     "stockid": "1002736",
-    "companyid": "50116"
+    "companyid": "50116",
+    "tickertape_sid": "CARU",
+    "fincode": 207937,
+    "scripcode": 540403
   },
   {
     "name": "CMI Limited",
@@ -13888,7 +17861,10 @@ const stockData: StockMapping[] = [
     "isin": "INE981B01011",
     "symbol": "CMICABLES",
     "stockid": "726136",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "CMI",
+    "fincode": 117330,
+    "scripcode": 517330
   },
   {
     "name": "Coastal Corporation Limited",
@@ -13898,7 +17874,9 @@ const stockData: StockMapping[] = [
     "isin": "INE377E01016",
     "symbol": "COASTCORP",
     "stockid": "1003727",
-    "companyid": "4960"
+    "companyid": "4960",
+    "fincode": 101831,
+    "scripcode": 501831
   },
   {
     "name": "Compuage Infocom Limited",
@@ -13908,7 +17886,10 @@ const stockData: StockMapping[] = [
     "isin": "INE070C01037",
     "symbol": "COMPINFO",
     "stockid": "401967",
-    "companyid": "1744"
+    "companyid": "1744",
+    "tickertape_sid": "COMI",
+    "fincode": 132456,
+    "scripcode": 532456
   },
   {
     "name": "Compucom Software Limited",
@@ -13918,7 +17899,10 @@ const stockData: StockMapping[] = [
     "isin": "INE453B01029",
     "symbol": "COMPUSOFT",
     "stockid": "542114",
-    "companyid": "4358"
+    "companyid": "4358",
+    "tickertape_sid": "CMPU",
+    "fincode": 132339,
+    "scripcode": 532339
   },
   {
     "name": "Consolidated Finvest & Holdings Limited",
@@ -13928,7 +17912,10 @@ const stockData: StockMapping[] = [
     "isin": "INE025A01027",
     "symbol": "CONSOFINVT",
     "stockid": "",
-    "companyid": "11018"
+    "companyid": "11018",
+    "tickertape_sid": "CONS",
+    "fincode": 100226,
+    "scripcode": 500226
   },
   {
     "name": "Coral India Finance & Housing Limited",
@@ -13938,7 +17925,10 @@ const stockData: StockMapping[] = [
     "isin": "INE558D01021",
     "symbol": "CORALFINAC",
     "stockid": "",
-    "companyid": "6308"
+    "companyid": "6308",
+    "tickertape_sid": "CORI",
+    "fincode": 131556,
+    "scripcode": 531556
   },
   {
     "name": "Cords Cable Industries Limited",
@@ -13948,7 +17938,10 @@ const stockData: StockMapping[] = [
     "isin": "INE792I01017",
     "symbol": "CORDSCABLE",
     "stockid": "590649",
-    "companyid": "20697"
+    "companyid": "20697",
+    "tickertape_sid": "CCIL",
+    "fincode": 200042,
+    "scripcode": 532941
   },
   {
     "name": "name:\"Country Condos Limited\"",
@@ -13958,7 +17951,10 @@ const stockData: StockMapping[] = [
     "isin": "INE695B01025",
     "symbol": "COUNCODOS",
     "stockid": "",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "COCO",
+    "fincode": 131624,
+    "scripcode": 531624
   },
   {
     "name": "Creative Newtech Limited",
@@ -13968,7 +17964,10 @@ const stockData: StockMapping[] = [
     "isin": "INE985W01018",
     "symbol": "CREATIVE",
     "stockid": "1002746",
-    "companyid": "65766"
+    "companyid": "65766",
+    "tickertape_sid": "CREA",
+    "fincode": 132392,
+    "scripcode": 532392
   },
   {
     "name": "Creative Eye Limited",
@@ -13978,7 +17977,10 @@ const stockData: StockMapping[] = [
     "isin": "INE230B01021",
     "symbol": "CREATIVEYE",
     "stockid": "195849",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "CEYE",
+    "fincode": 132392,
+    "scripcode": 532392
   },
   {
     "name": "Crest Ventures Limited",
@@ -13988,7 +17990,10 @@ const stockData: StockMapping[] = [
     "isin": "INE559D01011",
     "symbol": "CREST",
     "stockid": "253483",
-    "companyid": "10512"
+    "companyid": "10512",
+    "tickertape_sid": "CRSV",
+    "fincode": 111413,
+    "scripcode": 511413
   },
   {
     "name": "Crown Lifters Limited",
@@ -13998,7 +18003,10 @@ const stockData: StockMapping[] = [
     "isin": "INE491V01019",
     "symbol": "CROWN",
     "stockid": "1002655",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "CROW",
+    "fincode": 282862,
+    "scripcode": 0
   },
   {
     "name": "CSL Finance Limited",
@@ -14008,7 +18016,10 @@ const stockData: StockMapping[] = [
     "isin": "INE718F01018",
     "symbol": "CSLFINANCE",
     "stockid": "452071",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "CSLF",
+    "fincode": 130067,
+    "scripcode": 530067
   },
   {
     "name": "Cambridge Technology Enterprises Limited",
@@ -14018,7 +18029,10 @@ const stockData: StockMapping[] = [
     "isin": "INE627H01017",
     "symbol": "CTE",
     "stockid": "403083",
-    "companyid": "14744"
+    "companyid": "14744",
+    "tickertape_sid": "CATE",
+    "fincode": 132801,
+    "scripcode": 532801
   },
   {
     "name": "Cubex Tubings Limited",
@@ -14028,7 +18042,10 @@ const stockData: StockMapping[] = [
     "isin": "INE144D01012",
     "symbol": "CUBEXTUB",
     "stockid": "981283",
-    "companyid": "10900"
+    "companyid": "10900",
+    "tickertape_sid": "CUBE",
+    "fincode": 126027,
+    "scripcode": 526027
   },
   {
     "name": "Cupid Limited",
@@ -14038,7 +18055,9 @@ const stockData: StockMapping[] = [
     "isin": "INE509F01011",
     "symbol": "CUPID",
     "stockid": "633933",
-    "companyid": "7772"
+    "companyid": "7772",
+    "fincode": 130843,
+    "scripcode": 530843
   },
   {
     "name": "Cyber Media (India) Limited",
@@ -14048,7 +18067,10 @@ const stockData: StockMapping[] = [
     "isin": "INE278G01037",
     "symbol": "CYBERMEDIA",
     "stockid": "616935",
-    "companyid": "1066"
+    "companyid": "1066",
+    "tickertape_sid": "CYBM",
+    "fincode": 132640,
+    "scripcode": 532640
   },
   {
     "name": "Cybertech Systems And Software Limited",
@@ -14058,7 +18080,10 @@ const stockData: StockMapping[] = [
     "isin": "INE214A01019",
     "symbol": "CYBERTECH",
     "stockid": "199885",
-    "companyid": "5485"
+    "companyid": "5485",
+    "tickertape_sid": "CTSS",
+    "fincode": 132173,
+    "scripcode": 532173
   },
   {
     "name": "Damodar Industries Limited",
@@ -14068,7 +18093,10 @@ const stockData: StockMapping[] = [
     "isin": "INE497D01022",
     "symbol": "DAMODARIND",
     "stockid": "409595",
-    "companyid": "8506"
+    "companyid": "8506",
+    "tickertape_sid": "DAMD",
+    "fincode": 121220,
+    "scripcode": 521220
   },
   {
     "name": "Dangee Dums Limited",
@@ -14078,7 +18106,10 @@ const stockData: StockMapping[] = [
     "isin": "INE688Y01022",
     "symbol": "DANGEE",
     "stockid": "1003043",
-    "companyid": "68848"
+    "companyid": "68848",
+    "tickertape_sid": "DANG",
+    "fincode": 290171,
+    "scripcode": 0
   },
   {
     "name": "DB (International) Stock Brokers Limited",
@@ -14088,7 +18119,10 @@ const stockData: StockMapping[] = [
     "isin": "INE921B01025",
     "symbol": "DBSTOCKBRO",
     "stockid": "923429",
-    "companyid": "8270"
+    "companyid": "8270",
+    "tickertape_sid": "DBSB",
+    "fincode": 130393,
+    "scripcode": 530393
   },
   {
     "name": "Dc Infotech And Communication Limited",
@@ -14098,7 +18132,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0A1101019",
     "symbol": "DCI",
     "stockid": "1003365",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "DCIN",
+    "fincode": 295850,
+    "scripcode": 543636
   },
   {
     "name": "DCM  Limited",
@@ -14108,7 +18145,10 @@ const stockData: StockMapping[] = [
     "isin": "INE498A01018",
     "symbol": "DCM",
     "stockid": "",
-    "companyid": "13868"
+    "companyid": "13868",
+    "tickertape_sid": "DCML",
+    "fincode": 102820,
+    "scripcode": 502820
   },
   {
     "name": "DCM Financial Services Limited",
@@ -14118,7 +18158,10 @@ const stockData: StockMapping[] = [
     "isin": "INE891B01012",
     "symbol": "DCMFINSERV",
     "stockid": "716123",
-    "companyid": "8733"
+    "companyid": "8733",
+    "tickertape_sid": "DCFS",
+    "fincode": 111611,
+    "scripcode": 511611
   },
   {
     "name": "DCM Nouvelle Limited",
@@ -14128,7 +18171,10 @@ const stockData: StockMapping[] = [
     "isin": "INE08KP01019",
     "symbol": "DCMNVL",
     "stockid": "1003156",
-    "companyid": "66708"
+    "companyid": "66708",
+    "tickertape_sid": "DCMN",
+    "fincode": 295658,
+    "scripcode": 542729
   },
   {
     "name": "DCM Shriram Industries Limited",
@@ -14138,7 +18184,10 @@ const stockData: StockMapping[] = [
     "isin": "INE843D01027",
     "symbol": "DCMSRIND",
     "stockid": "917970",
-    "companyid": "12220"
+    "companyid": "12220",
+    "tickertape_sid": "DCM",
+    "fincode": 123369,
+    "scripcode": 523369
   },
   {
     "name": "DCX Systems Limited",
@@ -14148,7 +18197,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0KL801015",
     "symbol": "DCXINDIA",
     "stockid": "1003733",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "DCX",
+    "fincode": 305814,
+    "scripcode": 543650
   },
   {
     "name": "DEEP ENERGY RESOURCES LIMITED",
@@ -14168,7 +18220,10 @@ const stockData: StockMapping[] = [
     "isin": "INE393A01011",
     "symbol": "DELTAMAGNT",
     "stockid": "345528",
-    "companyid": "13773"
+    "companyid": "13773",
+    "tickertape_sid": "DLTA",
+    "fincode": 104286,
+    "scripcode": 504286
   },
   {
     "name": "De Nora India Limited",
@@ -14178,7 +18233,10 @@ const stockData: StockMapping[] = [
     "isin": "INE244A01016",
     "symbol": "DENORA",
     "stockid": "509284",
-    "companyid": "12747"
+    "companyid": "12747",
+    "tickertape_sid": "DENO",
+    "fincode": 190031,
+    "scripcode": 590031
   },
   {
     "name": "Dev Information Technology Limited",
@@ -14188,7 +18246,9 @@ const stockData: StockMapping[] = [
     "isin": "INE060X01026",
     "symbol": "DEVIT",
     "stockid": "1002748",
-    "companyid": ""
+    "companyid": "",
+    "fincode": 285304,
+    "scripcode": 543462
   },
   {
     "name": "Digicontent Limited",
@@ -14198,7 +18258,10 @@ const stockData: StockMapping[] = [
     "isin": "INE03JI01017",
     "symbol": "DGCONTENT",
     "stockid": "1003157",
-    "companyid": "1942056"
+    "companyid": "1942056",
+    "tickertape_sid": "DIGC",
+    "fincode": 295246,
+    "scripcode": 542685
   },
   {
     "name": "Dhanlaxmi Bank Limited",
@@ -14208,7 +18271,10 @@ const stockData: StockMapping[] = [
     "isin": "INE680A01011",
     "symbol": "DHANBANK",
     "stockid": "782680",
-    "companyid": "8970"
+    "companyid": "8970",
+    "tickertape_sid": "DNBK",
+    "fincode": 132180,
+    "scripcode": 532180
   },
   {
     "name": "Dharani Sugars&Chemicals Limited",
@@ -14228,7 +18294,10 @@ const stockData: StockMapping[] = [
     "isin": "INE506Z01015",
     "symbol": "DHRUV",
     "stockid": "1002985",
-    "companyid": "67900"
+    "companyid": "67900",
+    "tickertape_sid": "DHR",
+    "fincode": 288547,
+    "scripcode": 541302
   },
   {
     "name": "Dhunseri Investments Limited",
@@ -14238,7 +18307,10 @@ const stockData: StockMapping[] = [
     "isin": "INE320L01011",
     "symbol": "DHUNINV",
     "stockid": "562975",
-    "companyid": "33198"
+    "companyid": "33198",
+    "tickertape_sid": "DHUS",
+    "fincode": 222629,
+    "scripcode": 533336
   },
   {
     "name": "DiGiSPICE Technologies Limited",
@@ -14248,7 +18320,10 @@ const stockData: StockMapping[] = [
     "isin": "INE927C01020",
     "symbol": "DIGISPICE",
     "stockid": "404713",
-    "companyid": "13408"
+    "companyid": "13408",
+    "tickertape_sid": "DIGS",
+    "fincode": 117214,
+    "scripcode": 517214
   },
   {
     "name": "Digjam Limited",
@@ -14258,7 +18333,10 @@ const stockData: StockMapping[] = [
     "isin": "INE731U01028",
     "symbol": "DIGJAMLMTD",
     "stockid": "1002634",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "DIGJ",
+    "fincode": 282016,
+    "scripcode": 539979
   },
   {
     "name": "Debock Industries Limited",
@@ -14268,7 +18346,10 @@ const stockData: StockMapping[] = [
     "isin": "INE411Y01011",
     "symbol": "DIL",
     "stockid": "1002994",
-    "companyid": "67991"
+    "companyid": "67991",
+    "tickertape_sid": "DEBO",
+    "fincode": 288694,
+    "scripcode": 0
   },
   {
     "name": "DJ Mediaprint & Logistics Limited",
@@ -14278,7 +18359,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0B1K01014",
     "symbol": "DJML",
     "stockid": "",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "DJM",
+    "fincode": 297816,
+    "scripcode": 543193
   },
   {
     "name": "D-Link (India) Limited",
@@ -14288,7 +18372,10 @@ const stockData: StockMapping[] = [
     "isin": "INE250K01012",
     "symbol": "DLINKINDIA",
     "stockid": "",
-    "companyid": "30772"
+    "companyid": "30772",
+    "tickertape_sid": "DLIL",
+    "fincode": 219321,
+    "scripcode": 533146
   },
   {
     "name": "Diligent Media Corporation Limited",
@@ -14298,7 +18385,10 @@ const stockData: StockMapping[] = [
     "isin": "INE016M01021",
     "symbol": "DNAMEDIA",
     "stockid": "1002892",
-    "companyid": "49786"
+    "companyid": "49786",
+    "tickertape_sid": "DILG",
+    "fincode": 208058,
+    "scripcode": 540789
   },
   {
     "name": "Donear Industries Limited",
@@ -14308,7 +18398,10 @@ const stockData: StockMapping[] = [
     "isin": "INE668D01028",
     "symbol": "DONEAR",
     "stockid": "881423",
-    "companyid": "4796"
+    "companyid": "4796",
+    "tickertape_sid": "DONE",
+    "fincode": 112519,
+    "scripcode": 512519
   },
   {
     "name": "DPSC Limited",
@@ -14318,7 +18411,10 @@ const stockData: StockMapping[] = [
     "isin": "INE360C01024",
     "symbol": "DPSCLTD",
     "stockid": "",
-    "companyid": "12522"
+    "companyid": "12522",
+    "tickertape_sid": "DPSC",
+    "fincode": 200503,
+    "scripcode": 0
   },
   {
     "name": "D P Wires Limited",
@@ -14328,7 +18424,10 @@ const stockData: StockMapping[] = [
     "isin": "INE864X01013",
     "symbol": "DPWIRES",
     "stockid": "1002846",
-    "companyid": "66833"
+    "companyid": "66833",
+    "tickertape_sid": "DPWI",
+    "fincode": 270430,
+    "scripcode": 543962
   },
   {
     "name": "DRC Systems India Limited",
@@ -14338,7 +18437,10 @@ const stockData: StockMapping[] = [
     "isin": "INE03RS01027",
     "symbol": "DRCSYSTEMS",
     "stockid": "1003468",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "DRC",
+    "fincode": 301577,
+    "scripcode": 543268
   },
   {
     "name": "Dynacons Systems & Solutions Limited",
@@ -14348,7 +18450,10 @@ const stockData: StockMapping[] = [
     "isin": "INE417B01040",
     "symbol": "DSSL",
     "stockid": "",
-    "companyid": "3700"
+    "companyid": "3700",
+    "tickertape_sid": "DSSL",
+    "fincode": 132365,
+    "scripcode": 532365
   },
   {
     "name": "Dhunseri Tea & Industries Limited",
@@ -14358,7 +18463,10 @@ const stockData: StockMapping[] = [
     "isin": "INE341R01014",
     "symbol": "DTIL",
     "stockid": "",
-    "companyid": "57791"
+    "companyid": "57791",
+    "tickertape_sid": "DHUT",
+    "fincode": 272702,
+    "scripcode": 538902
   },
   {
     "name": "Ducon Infratechnologies Limited",
@@ -14368,7 +18476,10 @@ const stockData: StockMapping[] = [
     "isin": "INE741L01018",
     "symbol": "DUCON",
     "stockid": "865541",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "DUCO",
+    "fincode": 228688,
+    "scripcode": 534674
   },
   {
     "name": "Dynemic Products Limited",
@@ -14378,7 +18489,10 @@ const stockData: StockMapping[] = [
     "isin": "INE256H01015",
     "symbol": "DYNPRO",
     "stockid": "325123",
-    "companyid": "17799"
+    "companyid": "17799",
+    "tickertape_sid": "DYPR",
+    "fincode": 132707,
+    "scripcode": 532707
   },
   {
     "name": "E2E Networks Limited",
@@ -14388,7 +18502,9 @@ const stockData: StockMapping[] = [
     "isin": "INE255Z01019",
     "symbol": "E2E",
     "stockid": "1002982",
-    "companyid": "67901"
+    "companyid": "67901",
+    "fincode": 288853,
+    "scripcode": 544783
   },
   {
     "name": "Eastern Silk Industries Limited",
@@ -14398,7 +18514,9 @@ const stockData: StockMapping[] = [
     "isin": "INE962C01027",
     "symbol": "EASTSILK",
     "stockid": "195486",
-    "companyid": ""
+    "companyid": "",
+    "fincode": 190022,
+    "scripcode": 590022
   },
   {
     "name": "Educomp Solutions Limited",
@@ -14408,7 +18526,10 @@ const stockData: StockMapping[] = [
     "isin": "INE216H01027",
     "symbol": "EDUCOMP",
     "stockid": "873525",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "EDSO",
+    "fincode": 132696,
+    "scripcode": 532696
   },
   {
     "name": "Euro India Fresh Foods Limited",
@@ -14418,7 +18539,10 @@ const stockData: StockMapping[] = [
     "isin": "INE546V01010",
     "symbol": "EIFFL",
     "stockid": "1002742",
-    "companyid": "59493"
+    "companyid": "59493",
+    "tickertape_sid": "EURN",
+    "fincode": 283943,
+    "scripcode": 0
   },
   {
     "name": "Eimco Elecon (India) Limited",
@@ -14428,7 +18552,10 @@ const stockData: StockMapping[] = [
     "isin": "INE158B01016",
     "symbol": "EIMCOELECO",
     "stockid": "624151",
-    "companyid": "11753"
+    "companyid": "11753",
+    "tickertape_sid": "EIMC",
+    "fincode": 123708,
+    "scripcode": 523708
   },
   {
     "name": "Eldeco Housing And Industries Limited",
@@ -14438,7 +18565,10 @@ const stockData: StockMapping[] = [
     "isin": "INE668G01021",
     "symbol": "ELDEHSG",
     "stockid": "540376",
-    "companyid": "4828"
+    "companyid": "4828",
+    "tickertape_sid": "ELD",
+    "fincode": 123329,
+    "scripcode": 523329
   },
   {
     "name": "Electrotherm (India) Limited",
@@ -14448,7 +18578,10 @@ const stockData: StockMapping[] = [
     "isin": "INE822G01016",
     "symbol": "ELECTHERM",
     "stockid": "995842",
-    "companyid": "4571"
+    "companyid": "4571",
+    "tickertape_sid": "ELTH",
+    "fincode": 126608,
+    "scripcode": 526608
   },
   {
     "name": "Elgi Rubber Company Limited",
@@ -14458,7 +18591,10 @@ const stockData: StockMapping[] = [
     "isin": "INE819L01012",
     "symbol": "ELGIRUBCO",
     "stockid": "1003288",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "ELGT",
+    "fincode": 190023,
+    "scripcode": 590023
   },
   {
     "name": "Emami Realty Limited",
@@ -14468,7 +18604,10 @@ const stockData: StockMapping[] = [
     "isin": "INE778K01012",
     "symbol": "EMAMIREAL",
     "stockid": "161580",
-    "companyid": "31845"
+    "companyid": "31845",
+    "tickertape_sid": "EMMI",
+    "fincode": 219957,
+    "scripcode": 533218
   },
   {
     "name": "Emkay Global Financial Services Limited",
@@ -14478,7 +18617,10 @@ const stockData: StockMapping[] = [
     "isin": "INE296H01011",
     "symbol": "EMKAY",
     "stockid": "203098",
-    "companyid": "16868"
+    "companyid": "16868",
+    "tickertape_sid": "EMKS",
+    "fincode": 132737,
+    "scripcode": 532737
   },
   {
     "name": "Emmbi Industries Limited",
@@ -14488,7 +18630,10 @@ const stockData: StockMapping[] = [
     "isin": "INE753K01015",
     "symbol": "EMMBI",
     "stockid": "921015",
-    "companyid": "30973"
+    "companyid": "30973",
+    "tickertape_sid": "EMMB",
+    "fincode": 219415,
+    "scripcode": 533161
   },
   {
     "name": "Energy Development Company Limited",
@@ -14498,7 +18643,10 @@ const stockData: StockMapping[] = [
     "isin": "INE306C01019",
     "symbol": "ENERGYDEV",
     "stockid": "168898",
-    "companyid": "4595"
+    "companyid": "4595",
+    "tickertape_sid": "EDCO",
+    "fincode": 132219,
+    "scripcode": 532219
   },
   {
     "name": "Equippp Social Impact Technologies Limited",
@@ -14508,7 +18656,10 @@ const stockData: StockMapping[] = [
     "isin": "INE217G01035",
     "symbol": "EQUIPPP",
     "stockid": "694240",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "PROS",
+    "fincode": 190057,
+    "scripcode": 590057
   },
   {
     "name": "Eros International Media Limited",
@@ -14518,7 +18669,9 @@ const stockData: StockMapping[] = [
     "isin": "INE416L01017",
     "symbol": "EROSMEDIA",
     "stockid": "324992",
-    "companyid": "32234"
+    "companyid": "32234",
+    "fincode": 219947,
+    "scripcode": 533261
   },
   {
     "name": "Essar Shipping Limited",
@@ -14528,7 +18681,10 @@ const stockData: StockMapping[] = [
     "isin": "INE122M01019",
     "symbol": "ESSARSHPNG",
     "stockid": "364815",
-    "companyid": "23260"
+    "companyid": "23260",
+    "tickertape_sid": "ESPL",
+    "fincode": 226221,
+    "scripcode": 533704
   },
   {
     "name": "Integra Essentia Limited",
@@ -14538,7 +18694,10 @@ const stockData: StockMapping[] = [
     "isin": "INE418N01035",
     "symbol": "ESSENTIA",
     "stockid": "917529",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "INGA",
+    "fincode": 246727,
+    "scripcode": 535958
   },
   {
     "name": "Excel Realty N Infra Limited",
@@ -14548,7 +18707,10 @@ const stockData: StockMapping[] = [
     "isin": "INE688J01023",
     "symbol": "EXCEL",
     "stockid": "213048",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "EXCE",
+    "fincode": 100650,
+    "scripcode": 500650
   },
   {
     "name": "Expleo Solutions Limited",
@@ -14558,7 +18720,10 @@ const stockData: StockMapping[] = [
     "isin": "INE201K01015",
     "symbol": "EXPLEOSOL",
     "stockid": "871836",
-    "companyid": "29831"
+    "companyid": "29831",
+    "tickertape_sid": "EXPL",
+    "fincode": 218926,
+    "scripcode": 533121
   },
   {
     "name": "Future Consumer Limited",
@@ -14568,7 +18733,10 @@ const stockData: StockMapping[] = [
     "isin": "INE220J01025",
     "symbol": "FCONSUMER",
     "stockid": "215441",
-    "companyid": "33818"
+    "companyid": "33818",
+    "tickertape_sid": "FTRE",
+    "fincode": 218963,
+    "scripcode": 533400
   },
   {
     "name": "FCS Software Solutions Limited",
@@ -14578,7 +18746,10 @@ const stockData: StockMapping[] = [
     "isin": "INE512B01022",
     "symbol": "FCSSOFT",
     "stockid": "212550",
-    "companyid": "2805"
+    "companyid": "2805",
+    "tickertape_sid": "FCSS",
+    "fincode": 132666,
+    "scripcode": 532666
   },
   {
     "name": "Future Enterprises Limited",
@@ -14588,7 +18759,10 @@ const stockData: StockMapping[] = [
     "isin": "IN9623B01058",
     "symbol": "FELDVR",
     "stockid": "938013",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "FURdv",
+    "fincode": 217890,
+    "scripcode": 570002
   },
   {
     "name": "Fiberweb (India) Limited",
@@ -14598,7 +18772,10 @@ const stockData: StockMapping[] = [
     "isin": "INE296C01020",
     "symbol": "FIBERWEB",
     "stockid": "288280",
-    "companyid": "13300"
+    "companyid": "13300",
+    "tickertape_sid": "FIB",
+    "fincode": 107910,
+    "scripcode": 507910
   },
   {
     "name": "Flexituff Ventures International Limited",
@@ -14608,7 +18785,10 @@ const stockData: StockMapping[] = [
     "isin": "INE060J01017",
     "symbol": "FLEXITUFF",
     "stockid": "968175",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "FLEI",
+    "fincode": 208168,
+    "scripcode": 533638
   },
   {
     "name": "Future Lifestyle Fashions Limited",
@@ -14618,7 +18798,10 @@ const stockData: StockMapping[] = [
     "isin": "INE452O01016",
     "symbol": "FLFL",
     "stockid": "226533",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "FLFL",
+    "fincode": 245775,
+    "scripcode": 536507
   },
   {
     "name": "Future Market Networks Limited",
@@ -14628,7 +18811,10 @@ const stockData: StockMapping[] = [
     "isin": "INE360L01017",
     "symbol": "FMNL",
     "stockid": "719421",
-    "companyid": "24325"
+    "companyid": "24325",
+    "tickertape_sid": "FMNL",
+    "fincode": 222820,
+    "scripcode": 533296
   },
   {
     "name": "Focus Lighting and Fixtures Limited",
@@ -14638,7 +18824,9 @@ const stockData: StockMapping[] = [
     "isin": "INE593W01010",
     "symbol": "FOCUS",
     "stockid": "1002747",
-    "companyid": "65805"
+    "companyid": "65805",
+    "fincode": 285242,
+    "scripcode": 0
   },
   {
     "name": "Foods & Inns Limited",
@@ -14648,7 +18836,10 @@ const stockData: StockMapping[] = [
     "isin": "INE976E01023",
     "symbol": "FOODSIN",
     "stockid": "",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "FOO",
+    "fincode": 107552,
+    "scripcode": 507552
   },
   {
     "name": "Future Retail Limited",
@@ -14658,7 +18849,9 @@ const stockData: StockMapping[] = [
     "isin": "INE752P01024",
     "symbol": "FRETAIL",
     "stockid": "1002647",
-    "companyid": ""
+    "companyid": "",
+    "fincode": 209968,
+    "scripcode": 540064
   },
   {
     "name": "Future Supply Chain Solutions Limited",
@@ -14678,7 +18871,10 @@ const stockData: StockMapping[] = [
     "isin": "INE482J01021",
     "symbol": "GAL",
     "stockid": "774113",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "GYSC",
+    "fincode": 132726,
+    "scripcode": 532726
   },
   {
     "name": "Galaxy Surfactants Limited",
@@ -14688,7 +18884,10 @@ const stockData: StockMapping[] = [
     "isin": "INE600K01018",
     "symbol": "GALAXYSURF",
     "stockid": "100894",
-    "companyid": "3790"
+    "companyid": "3790",
+    "tickertape_sid": "GALX",
+    "fincode": 208190,
+    "scripcode": 540935
   },
   {
     "name": "Ganga Forging Limited",
@@ -14698,7 +18897,10 @@ const stockData: StockMapping[] = [
     "isin": "INE691Z01023",
     "symbol": "GANGAFORGE",
     "stockid": "1003016",
-    "companyid": "68521"
+    "companyid": "68521",
+    "tickertape_sid": "GANF",
+    "fincode": 289573,
+    "scripcode": 0
   },
   {
     "name": "Ganges Securities Limited",
@@ -14708,7 +18910,10 @@ const stockData: StockMapping[] = [
     "isin": "INE335W01016",
     "symbol": "GANGESSECU",
     "stockid": "1002796",
-    "companyid": "61406"
+    "companyid": "61406",
+    "tickertape_sid": "GNGE",
+    "fincode": 286954,
+    "scripcode": 540647
   },
   {
     "name": "Gayatri Highways Limited",
@@ -14718,7 +18923,10 @@ const stockData: StockMapping[] = [
     "isin": "INE287Z01012",
     "symbol": "GAYAHWS",
     "stockid": "1003020",
-    "companyid": "67440"
+    "companyid": "67440",
+    "tickertape_sid": "GYAT",
+    "fincode": 288468,
+    "scripcode": 541546
   },
   {
     "name": "Gayatri Projects Limited",
@@ -14728,7 +18936,10 @@ const stockData: StockMapping[] = [
     "isin": "INE336H01023",
     "symbol": "GAYAPROJ",
     "stockid": "527252",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "GAPR",
+    "fincode": 132767,
+    "scripcode": 532767
   },
   {
     "name": "GeeCee Ventures Limited",
@@ -14738,7 +18949,10 @@ const stockData: StockMapping[] = [
     "isin": "INE916G01016",
     "symbol": "GEECEE",
     "stockid": "768774",
-    "companyid": "17795"
+    "companyid": "17795",
+    "tickertape_sid": "GECE",
+    "fincode": 132764,
+    "scripcode": 532764
   },
   {
     "name": "Geekay Wires Limited",
@@ -14748,7 +18962,9 @@ const stockData: StockMapping[] = [
     "isin": "INE669X01016",
     "symbol": "GEEKAYWIRE",
     "stockid": "1002802",
-    "companyid": "40095"
+    "companyid": "40095",
+    "fincode": 287005,
+    "scripcode": 0
   },
   {
     "name": "Generic Engineering Construction and Projects Limited",
@@ -14758,7 +18974,10 @@ const stockData: StockMapping[] = [
     "isin": "INE854S01022",
     "symbol": "GENCON",
     "stockid": "999989",
-    "companyid": "5286"
+    "companyid": "5286",
+    "tickertape_sid": "GENC",
+    "fincode": 278790,
+    "scripcode": 539407
   },
   {
     "name": "Genus Paper & Boards Limited",
@@ -14768,7 +18987,10 @@ const stockData: StockMapping[] = [
     "isin": "INE949P01018",
     "symbol": "GENUSPAPER",
     "stockid": "",
-    "companyid": "43500"
+    "companyid": "43500",
+    "tickertape_sid": "GEUS",
+    "fincode": 254202,
+    "scripcode": 538961
   },
   {
     "name": "Gillanders Arbuthnot & Company Limited",
@@ -14778,7 +19000,10 @@ const stockData: StockMapping[] = [
     "isin": "INE047B01011",
     "symbol": "GILLANDERS",
     "stockid": "",
-    "companyid": "13728"
+    "companyid": "13728",
+    "tickertape_sid": "GIAR",
+    "fincode": 132716,
+    "scripcode": 532716
   },
   {
     "name": "Ginni Filaments Limited",
@@ -14788,7 +19013,10 @@ const stockData: StockMapping[] = [
     "isin": "INE424C01010",
     "symbol": "GINNIFILA",
     "stockid": "824515",
-    "companyid": "13729"
+    "companyid": "13729",
+    "tickertape_sid": "GNNI",
+    "fincode": 190025,
+    "scripcode": 590025
   },
   {
     "name": "GI Engineering Solutions Limited",
@@ -14808,7 +19036,10 @@ const stockData: StockMapping[] = [
     "isin": "INE528A01020",
     "symbol": "GKWLIMITED",
     "stockid": "145367",
-    "companyid": "13743"
+    "companyid": "13743",
+    "tickertape_sid": "GKWL",
+    "fincode": 200036,
+    "scripcode": 504704
   },
   {
     "name": "Gujarat Lease Financing Limited",
@@ -14818,7 +19049,10 @@ const stockData: StockMapping[] = [
     "isin": "INE540A01017",
     "symbol": "GLFL",
     "stockid": "813834",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "GLSE",
+    "fincode": 100174,
+    "scripcode": 500174
   },
   {
     "name": "Global Education Limited",
@@ -14828,7 +19062,9 @@ const stockData: StockMapping[] = [
     "isin": "INE291W01029",
     "symbol": "GLOBAL",
     "stockid": "1002715",
-    "companyid": "65589"
+    "companyid": "65589",
+    "fincode": 284677,
+    "scripcode": 0
   },
   {
     "name": "Global Vectra Helicorp Limited",
@@ -14838,7 +19074,10 @@ const stockData: StockMapping[] = [
     "isin": "INE792H01019",
     "symbol": "GLOBALVECT",
     "stockid": "762970",
-    "companyid": "14745"
+    "companyid": "14745",
+    "tickertape_sid": "GLVE",
+    "fincode": 132773,
+    "scripcode": 532773
   },
   {
     "name": "Globe Textiles (India) Limited",
@@ -14848,7 +19087,10 @@ const stockData: StockMapping[] = [
     "isin": "INE581X01021",
     "symbol": "GLOBE",
     "stockid": "1002778",
-    "companyid": "66237"
+    "companyid": "66237",
+    "tickertape_sid": "GLOX",
+    "fincode": 230878,
+    "scripcode": 0
   },
   {
     "name": "GM Breweries Limited",
@@ -14858,7 +19100,10 @@ const stockData: StockMapping[] = [
     "isin": "INE075D01018",
     "symbol": "GMBREW",
     "stockid": "",
-    "companyid": "8988"
+    "companyid": "8988",
+    "tickertape_sid": "GMBR",
+    "fincode": 107488,
+    "scripcode": 507488
   },
   {
     "name": "Godha Cabcon & Insulation Limited",
@@ -14868,7 +19113,8 @@ const stockData: StockMapping[] = [
     "isin": "INE925Y01036",
     "symbol": "GODHA",
     "stockid": "",
-    "companyid": "67887"
+    "companyid": "67887",
+    "tickertape_sid": "GODH"
   },
   {
     "name": "Goenka Diamond and Jewels Limited",
@@ -14878,7 +19124,10 @@ const stockData: StockMapping[] = [
     "isin": "INE516K01024",
     "symbol": "GOENKA",
     "stockid": "334366",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "GOEN",
+    "fincode": 219475,
+    "scripcode": 533189
   },
   {
     "name": "Gokul Refoils and Solvent Limited",
@@ -14888,7 +19137,10 @@ const stockData: StockMapping[] = [
     "isin": "INE020J01029",
     "symbol": "GOKUL",
     "stockid": "913751",
-    "companyid": "21324"
+    "companyid": "21324",
+    "tickertape_sid": "GOKU",
+    "fincode": 200070,
+    "scripcode": 532980
   },
   {
     "name": "Golden Tobacco Limited",
@@ -14898,7 +19150,10 @@ const stockData: StockMapping[] = [
     "isin": "INE973A01010",
     "symbol": "GOLDENTOBC",
     "stockid": "255597",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "GLDN",
+    "fincode": 100151,
+    "scripcode": 500151
   },
   {
     "name": "Goldstone Technologies Limited",
@@ -14908,7 +19163,10 @@ const stockData: StockMapping[] = [
     "isin": "INE805A01014",
     "symbol": "GOLDTECH",
     "stockid": "669464",
-    "companyid": "6603"
+    "companyid": "6603",
+    "tickertape_sid": "GOLD",
+    "fincode": 131439,
+    "scripcode": 531439
   },
   {
     "name": "Goyal Aluminiums Limited",
@@ -14918,7 +19176,9 @@ const stockData: StockMapping[] = [
     "isin": "INE705X01018",
     "symbol": "GOYALALUM",
     "stockid": "1002961",
-    "companyid": ""
+    "companyid": "",
+    "fincode": 288403,
+    "scripcode": 541152
   },
   {
     "name": "The Grob Tea Company Limited",
@@ -14928,7 +19188,10 @@ const stockData: StockMapping[] = [
     "isin": "INE646C01018",
     "symbol": "GROBTEA",
     "stockid": "",
-    "companyid": "12771"
+    "companyid": "12771",
+    "tickertape_sid": "THEG",
+    "fincode": 222304,
+    "scripcode": 0
   },
   {
     "name": "GRP Limited",
@@ -14938,7 +19201,10 @@ const stockData: StockMapping[] = [
     "isin": "INE137I01015",
     "symbol": "GRPLTD",
     "stockid": "761882",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "GRPI",
+    "fincode": 109152,
+    "scripcode": 509152
   },
   {
     "name": "Gujarat Sidhee Cement Limited",
@@ -14958,7 +19224,10 @@ const stockData: StockMapping[] = [
     "isin": "INE871H01011",
     "symbol": "GSS",
     "stockid": "550098",
-    "companyid": "20802"
+    "companyid": "20802",
+    "tickertape_sid": "GSSI",
+    "fincode": 200053,
+    "scripcode": 532951
   },
   {
     "name": "Gufic Biosciences Limited",
@@ -14968,7 +19237,10 @@ const stockData: StockMapping[] = [
     "isin": "INE742B01025",
     "symbol": "GUFICBIO",
     "stockid": "338998",
-    "companyid": "11246"
+    "companyid": "11246",
+    "tickertape_sid": "GUFI",
+    "fincode": 109079,
+    "scripcode": 509079
   },
   {
     "name": "Gujarat Apollo Industries Limited",
@@ -14978,7 +19250,10 @@ const stockData: StockMapping[] = [
     "isin": "INE826C01016",
     "symbol": "GUJAPOLLO",
     "stockid": "604852",
-    "companyid": "10383"
+    "companyid": "10383",
+    "tickertape_sid": "GJAI",
+    "fincode": 122217,
+    "scripcode": 522217
   },
   {
     "name": "Gujarat Raffia Industries Limited",
@@ -14988,7 +19263,10 @@ const stockData: StockMapping[] = [
     "isin": "INE610B01024",
     "symbol": "GUJRAFFIA",
     "stockid": "994857",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "GJRI",
+    "fincode": 123836,
+    "scripcode": 523836
   },
   {
     "name": "GP Petroleums Limited",
@@ -14998,7 +19276,10 @@ const stockData: StockMapping[] = [
     "isin": "INE586G01017",
     "symbol": "GULFPETRO",
     "stockid": "280521",
-    "companyid": "529"
+    "companyid": "529",
+    "tickertape_sid": "GPPE",
+    "fincode": 132543,
+    "scripcode": 532543
   },
   {
     "name": "Sri Havisha Hospitality and Infrastructure Limited",
@@ -15008,7 +19289,10 @@ const stockData: StockMapping[] = [
     "isin": "INE293B01029",
     "symbol": "HAVISHA",
     "stockid": "612343",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "SRIS",
+    "fincode": 131322,
+    "scripcode": 531322
   },
   {
     "name": "HB Stockholdings Limited",
@@ -15018,7 +19302,10 @@ const stockData: StockMapping[] = [
     "isin": "INE550B01022",
     "symbol": "HBSL",
     "stockid": "434515",
-    "companyid": "12157"
+    "companyid": "12157",
+    "tickertape_sid": "HBSH",
+    "fincode": 132216,
+    "scripcode": 532216
   },
   {
     "name": "Healthcare Global Enterprises Limited",
@@ -15028,7 +19315,10 @@ const stockData: StockMapping[] = [
     "isin": "INE075I01017",
     "symbol": "HCG",
     "stockid": "1002586",
-    "companyid": "45062"
+    "companyid": "45062",
+    "tickertape_sid": "HEAC",
+    "fincode": 210217,
+    "scripcode": 539787
   },
   {
     "name": "HCL Infosystems Limited",
@@ -15038,7 +19328,10 @@ const stockData: StockMapping[] = [
     "isin": "INE236A01020",
     "symbol": "HCL-INSYS",
     "stockid": "386301",
-    "companyid": "10506"
+    "companyid": "10506",
+    "tickertape_sid": "HCLI",
+    "fincode": 100179,
+    "scripcode": 500179
   },
   {
     "name": "Housing Development Finance Corporation Limited",
@@ -15048,7 +19341,9 @@ const stockData: StockMapping[] = [
     "isin": "INE001A01036",
     "symbol": "HDFC",
     "stockid": "741664",
-    "companyid": "13640"
+    "companyid": "13640",
+    "fincode": 100180,
+    "scripcode": 500180
   },
   {
     "name": "Heads UP Ventures Limited",
@@ -15058,7 +19353,10 @@ const stockData: StockMapping[] = [
     "isin": "INE759V01019",
     "symbol": "HEADSUP",
     "stockid": "1002697",
-    "companyid": "52891"
+    "companyid": "52891",
+    "tickertape_sid": "TEMA",
+    "fincode": 283984,
+    "scripcode": 540210
   },
   {
     "name": "HEC Infra Projects Limited",
@@ -15068,7 +19366,10 @@ const stockData: StockMapping[] = [
     "isin": "INE558R01013",
     "symbol": "HECPROJECT",
     "stockid": "448610",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "HECF",
+    "fincode": 272575,
+    "scripcode": 0
   },
   {
     "name": "Hexa Tradex Limited",
@@ -15078,7 +19379,10 @@ const stockData: StockMapping[] = [
     "isin": "INE750M01017",
     "symbol": "HEXATRADEX",
     "stockid": "742678",
-    "companyid": "34887"
+    "companyid": "34887",
+    "tickertape_sid": "HEXA",
+    "fincode": 228275,
+    "scripcode": 534328
   },
   {
     "name": "Hilton Metal Forging Limited",
@@ -15088,7 +19392,10 @@ const stockData: StockMapping[] = [
     "isin": "INE788H01017",
     "symbol": "HILTON",
     "stockid": "622289",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "HILT",
+    "fincode": 132847,
+    "scripcode": 532847
   },
   {
     "name": "Hindustan Composites Limited",
@@ -15098,7 +19405,10 @@ const stockData: StockMapping[] = [
     "isin": "INE310C01029",
     "symbol": "HINDCOMPOS",
     "stockid": "634046",
-    "companyid": "13625"
+    "companyid": "13625",
+    "tickertape_sid": "HFRD",
+    "fincode": 109635,
+    "scripcode": 509635
   },
   {
     "name": "Hindcon Chemicals Limited",
@@ -15108,7 +19418,9 @@ const stockData: StockMapping[] = [
     "isin": "INE642Y01011",
     "symbol": "HINDCON",
     "stockid": "1002936",
-    "companyid": "67554"
+    "companyid": "67554",
+    "fincode": 277548,
+    "scripcode": 0
   },
   {
     "name": "Hind Rectifiers Limited",
@@ -15118,7 +19430,10 @@ const stockData: StockMapping[] = [
     "isin": "INE835D01023",
     "symbol": "HIRECT",
     "stockid": "978962",
-    "companyid": "13647"
+    "companyid": "13647",
+    "tickertape_sid": "HRCT",
+    "fincode": 104036,
+    "scripcode": 504036
   },
   {
     "name": "Hisar Metal Industries Limited",
@@ -15128,7 +19443,10 @@ const stockData: StockMapping[] = [
     "isin": "INE598C01011",
     "symbol": "HISARMETAL",
     "stockid": "610320",
-    "companyid": "6634"
+    "companyid": "6634",
+    "tickertape_sid": "HISR",
+    "fincode": 190018,
+    "scripcode": 590018
   },
   {
     "name": "Hitech Corporation Limited",
@@ -15138,7 +19456,10 @@ const stockData: StockMapping[] = [
     "isin": "INE120D01012",
     "symbol": "HITECHCORP",
     "stockid": "513047",
-    "companyid": "10640"
+    "companyid": "10640",
+    "tickertape_sid": "HITE",
+    "fincode": 126217,
+    "scripcode": 526217
   },
   {
     "name": "HLE Glascoat Limited",
@@ -15148,7 +19469,10 @@ const stockData: StockMapping[] = [
     "isin": "INE461D01028",
     "symbol": "HLEGLAS",
     "stockid": "763763",
-    "companyid": "10158"
+    "companyid": "10158",
+    "tickertape_sid": "HLE",
+    "fincode": 122215,
+    "scripcode": 522215
   },
   {
     "name": "HMT Limited",
@@ -15158,7 +19482,10 @@ const stockData: StockMapping[] = [
     "isin": "INE262A01018",
     "symbol": "HMT",
     "stockid": "122880",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "HMTL",
+    "fincode": 100191,
+    "scripcode": 500191
   },
   {
     "name": "HOV Services Limited",
@@ -15168,7 +19495,8 @@ const stockData: StockMapping[] = [
     "isin": "INE596H01014",
     "symbol": "HOVS",
     "stockid": "125602",
-    "companyid": "15319"
+    "companyid": "15319",
+    "tickertape_sid": "HOVS"
   },
   {
     "name": "Hindprakash Industries Limited",
@@ -15178,7 +19506,10 @@ const stockData: StockMapping[] = [
     "isin": "INE05X901010",
     "symbol": "HPIL",
     "stockid": "1003374",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "HINP",
+    "fincode": 295957,
+    "scripcode": 543645
   },
   {
     "name": "Hubtown Limited",
@@ -15188,7 +19519,10 @@ const stockData: StockMapping[] = [
     "isin": "INE703H01016",
     "symbol": "HUBTOWN",
     "stockid": "912302",
-    "companyid": "18870"
+    "companyid": "18870",
+    "tickertape_sid": "HUBT",
+    "fincode": 132799,
+    "scripcode": 532799
   },
   {
     "name": "Hybrid Financial Services Limited",
@@ -15198,7 +19532,10 @@ const stockData: StockMapping[] = [
     "isin": "INE965B01022",
     "symbol": "HYBRIDFIN",
     "stockid": "910960",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "MFCL",
+    "fincode": 100262,
+    "scripcode": 500262
   },
   {
     "name": "ICDS Limited",
@@ -15208,7 +19545,10 @@ const stockData: StockMapping[] = [
     "isin": "INE613B01010",
     "symbol": "ICDSLTD",
     "stockid": "915447",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "ICDS",
+    "fincode": 111194,
+    "scripcode": 511194
   },
   {
     "name": "Ice Make Refrigeration Limited",
@@ -15218,7 +19558,10 @@ const stockData: StockMapping[] = [
     "isin": "INE520Y01019",
     "symbol": "ICEMAKE",
     "stockid": "1002883",
-    "companyid": "67222"
+    "companyid": "67222",
+    "tickertape_sid": "ICEM",
+    "fincode": 287771,
+    "scripcode": 0
   },
   {
     "name": "Indiabulls Enterprises Limited",
@@ -15238,7 +19581,10 @@ const stockData: StockMapping[] = [
     "isin": "INE076C01018",
     "symbol": "IFBAGRO",
     "stockid": "995762",
-    "companyid": "13610"
+    "companyid": "13610",
+    "tickertape_sid": "IFBA",
+    "fincode": 107438,
+    "scripcode": 507438
   },
   {
     "name": "Industrial Investment Trust Limited",
@@ -15248,7 +19594,10 @@ const stockData: StockMapping[] = [
     "isin": "INE886A01014",
     "symbol": "IITL",
     "stockid": "139834",
-    "companyid": "12239"
+    "companyid": "12239",
+    "tickertape_sid": "INDI",
+    "fincode": 101295,
+    "scripcode": 501295
   },
   {
     "name": "IL&FS Engineering and Construction Company Limited",
@@ -15258,7 +19607,10 @@ const stockData: StockMapping[] = [
     "isin": "INE369I01014",
     "symbol": "IL&FSENGG",
     "stockid": "",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "ILFE",
+    "fincode": 132907,
+    "scripcode": 532907
   },
   {
     "name": "IL&FS Transportation Networks Limited",
@@ -15268,7 +19620,10 @@ const stockData: StockMapping[] = [
     "isin": "INE975G01012",
     "symbol": "IL&FSTRANS",
     "stockid": "",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "ILFT",
+    "fincode": 210277,
+    "scripcode": 533177
   },
   {
     "name": "India Motor Parts and Accessories Limited",
@@ -15278,7 +19633,10 @@ const stockData: StockMapping[] = [
     "isin": "INE547E01014",
     "symbol": "IMPAL",
     "stockid": "825580",
-    "companyid": "12061"
+    "companyid": "12061",
+    "tickertape_sid": "IMPA",
+    "fincode": 190065,
+    "scripcode": 590065
   },
   {
     "name": "Impex Ferro Tech Limited",
@@ -15288,7 +19646,10 @@ const stockData: StockMapping[] = [
     "isin": "INE691G01015",
     "symbol": "IMPEXFERRO",
     "stockid": "623272",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "IMFT",
+    "fincode": 132614,
+    "scripcode": 532614
   },
   {
     "name": "INCREDIBLE INDUSTRIES LIMITED",
@@ -15298,7 +19659,10 @@ const stockData: StockMapping[] = [
     "isin": "INE452L01012",
     "symbol": "INCREDIBLE",
     "stockid": "180856",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "ADNK",
+    "fincode": 242786,
+    "scripcode": 538365
   },
   {
     "name": "Indbank Merchant Banking Services Limited",
@@ -15308,7 +19672,10 @@ const stockData: StockMapping[] = [
     "isin": "INE841B01017",
     "symbol": "INDBANK",
     "stockid": "580002",
-    "companyid": "10521"
+    "companyid": "10521",
+    "tickertape_sid": "IMBS",
+    "fincode": 111473,
+    "scripcode": 511473
   },
   {
     "name": "Indian Card Clothing Company Limited",
@@ -15318,7 +19685,10 @@ const stockData: StockMapping[] = [
     "isin": "INE061A01014",
     "symbol": "INDIANCARD",
     "stockid": "649947",
-    "companyid": "13572"
+    "companyid": "13572",
+    "tickertape_sid": "IDIC",
+    "fincode": 109692,
+    "scripcode": 509692
   },
   {
     "name": "IMP Powers Limited",
@@ -15328,7 +19698,8 @@ const stockData: StockMapping[] = [
     "isin": "INE065B01013",
     "symbol": "INDLMETER",
     "stockid": "832299",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "IMPP"
   },
   {
     "name": "Indo Borax & Chemicals Limited",
@@ -15338,7 +19709,10 @@ const stockData: StockMapping[] = [
     "isin": "INE803D01021",
     "symbol": "INDOBORAX",
     "stockid": "",
-    "companyid": "10775"
+    "companyid": "10775",
+    "tickertape_sid": "INDOB",
+    "fincode": 124342,
+    "scripcode": 524342
   },
   {
     "name": "Indo Thai Securities Limited",
@@ -15348,7 +19722,9 @@ const stockData: StockMapping[] = [
     "isin": "INE337M01013",
     "symbol": "INDOTHAI",
     "stockid": "698412",
-    "companyid": ""
+    "companyid": "",
+    "fincode": 224777,
+    "scripcode": 533676
   },
   {
     "name": "Indowind Energy Limited",
@@ -15358,7 +19734,10 @@ const stockData: StockMapping[] = [
     "isin": "INE227G01018",
     "symbol": "INDOWIND",
     "stockid": "948844",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "INWI",
+    "fincode": 132894,
+    "scripcode": 532894
   },
   {
     "name": "Indraprastha Medical Corporation Limited",
@@ -15368,7 +19747,10 @@ const stockData: StockMapping[] = [
     "isin": "INE681B01017",
     "symbol": "INDRAMEDCO",
     "stockid": "131877",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "IMCL",
+    "fincode": 132150,
+    "scripcode": 532150
   },
   {
     "name": "Ind-Swift Laboratories Limited",
@@ -15378,7 +19760,10 @@ const stockData: StockMapping[] = [
     "isin": "INE915B01019",
     "symbol": "INDSWFTLAB",
     "stockid": "393806",
-    "companyid": "4788"
+    "companyid": "4788",
+    "tickertape_sid": "ISLB",
+    "fincode": 132305,
+    "scripcode": 532305
   },
   {
     "name": "Ind-Swift Limited",
@@ -15398,7 +19783,10 @@ const stockData: StockMapping[] = [
     "isin": "INE611L01021",
     "symbol": "INDTERRAIN",
     "stockid": "800227",
-    "companyid": "32651"
+    "companyid": "32651",
+    "tickertape_sid": "ITFL",
+    "fincode": 222623,
+    "scripcode": 533329
   },
   {
     "name": "Infibeam Avenues Limited",
@@ -15408,7 +19796,8 @@ const stockData: StockMapping[] = [
     "isin": "INE483S01020",
     "symbol": "INFIBEAM",
     "stockid": "1002585",
-    "companyid": "64057"
+    "companyid": "64057",
+    "tickertape_sid": "IFIB"
   },
   {
     "name": "InfoBeans Technologies Limited",
@@ -15418,7 +19807,10 @@ const stockData: StockMapping[] = [
     "isin": "INE344S01016",
     "symbol": "INFOBEAN",
     "stockid": "1002755",
-    "companyid": "59671"
+    "companyid": "59671",
+    "tickertape_sid": "IFOB",
+    "fincode": 275220,
+    "scripcode": 543644
   },
   {
     "name": "Inspirisys Solutions Limited",
@@ -15428,7 +19820,10 @@ const stockData: StockMapping[] = [
     "isin": "INE020G01017",
     "symbol": "INSPIRISYS",
     "stockid": "996103",
-    "companyid": "1181"
+    "companyid": "1181",
+    "tickertape_sid": "INSP",
+    "fincode": 132774,
+    "scripcode": 532774
   },
   {
     "name": "Intense Technologies Limited",
@@ -15438,7 +19833,10 @@ const stockData: StockMapping[] = [
     "isin": "INE781A01025",
     "symbol": "INTENTECH",
     "stockid": "923401",
-    "companyid": "4366"
+    "companyid": "4366",
+    "tickertape_sid": "INTN",
+    "fincode": 132326,
+    "scripcode": 532326
   },
   {
     "name": "International Conveyors Limited",
@@ -15448,7 +19846,10 @@ const stockData: StockMapping[] = [
     "isin": "INE575C01027",
     "symbol": "INTLCONV",
     "stockid": "197802",
-    "companyid": "11691"
+    "companyid": "11691",
+    "tickertape_sid": "INTL",
+    "fincode": 109709,
+    "scripcode": 509709
   },
   {
     "name": "Inventure Growth & Securities Limited",
@@ -15458,7 +19859,10 @@ const stockData: StockMapping[] = [
     "isin": "INE878H01024",
     "symbol": "INVENTURE",
     "stockid": "",
-    "companyid": "34185"
+    "companyid": "34185",
+    "tickertape_sid": "IGSL",
+    "fincode": 220196,
+    "scripcode": 533506
   },
   {
     "name": "IOL Chemicals and Pharmaceuticals Limited",
@@ -15468,7 +19872,9 @@ const stockData: StockMapping[] = [
     "isin": "INE485C01011",
     "symbol": "IOLCP",
     "stockid": "250603",
-    "companyid": "7212"
+    "companyid": "7212",
+    "fincode": 124164,
+    "scripcode": 524164
   },
   {
     "name": "Iris Business Services Limited",
@@ -15478,7 +19884,10 @@ const stockData: StockMapping[] = [
     "isin": "INE864K01010",
     "symbol": "IRIS",
     "stockid": "1002858",
-    "companyid": "42040"
+    "companyid": "42040",
+    "tickertape_sid": "IRI",
+    "fincode": 225905,
+    "scripcode": 540735
   },
   {
     "name": "Iris Clothings Limited",
@@ -15488,7 +19897,9 @@ const stockData: StockMapping[] = [
     "isin": "INE01GN01017",
     "symbol": "IRISDOREME",
     "stockid": "1003077",
-    "companyid": "69151"
+    "companyid": "69151",
+    "fincode": 291776,
+    "scripcode": 0
   },
   {
     "name": "Intrasoft Technologies Limited",
@@ -15498,7 +19909,10 @@ const stockData: StockMapping[] = [
     "isin": "INE566K01011",
     "symbol": "ISFT",
     "stockid": "650930",
-    "companyid": "31138"
+    "companyid": "31138",
+    "tickertape_sid": "INSO",
+    "fincode": 219644,
+    "scripcode": 533181
   },
   {
     "name": "ISMT Limited",
@@ -15518,7 +19932,10 @@ const stockData: StockMapping[] = [
     "isin": "INE050B01023",
     "symbol": "IVC",
     "stockid": "",
-    "companyid": "12694"
+    "companyid": "12694",
+    "tickertape_sid": "ILFS",
+    "fincode": 111208,
+    "scripcode": 511208
   },
   {
     "name": "IVP Limited",
@@ -15528,7 +19945,10 @@ const stockData: StockMapping[] = [
     "isin": "INE043C01018",
     "symbol": "IVP",
     "stockid": "594425",
-    "companyid": "13555"
+    "companyid": "13555",
+    "tickertape_sid": "IVPL",
+    "fincode": 107580,
+    "scripcode": 507580
   },
   {
     "name": "IZMO Limited",
@@ -15538,7 +19958,10 @@ const stockData: StockMapping[] = [
     "isin": "INE848A01014",
     "symbol": "IZMO",
     "stockid": "144251",
-    "companyid": "4320"
+    "companyid": "4320",
+    "tickertape_sid": "IZMO",
+    "fincode": 132341,
+    "scripcode": 532341
   },
   {
     "name": "Nandani Creation Limited",
@@ -15548,7 +19971,10 @@ const stockData: StockMapping[] = [
     "isin": "INE696V01013",
     "symbol": "JAIPURKURT",
     "stockid": "1002670",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "NANA",
+    "fincode": 283136,
+    "scripcode": 0
   },
   {
     "name": "Jash Engineering Limited",
@@ -15558,7 +19984,9 @@ const stockData: StockMapping[] = [
     "isin": "INE039O01011",
     "symbol": "JASH",
     "stockid": "1002839",
-    "companyid": "47196"
+    "companyid": "47196",
+    "fincode": 229403,
+    "scripcode": 544402
   },
   {
     "name": "Jayshree Tea & Industries Limited",
@@ -15568,7 +19996,10 @@ const stockData: StockMapping[] = [
     "isin": "INE364A01020",
     "symbol": "JAYSREETEA",
     "stockid": "",
-    "companyid": "13516"
+    "companyid": "13516",
+    "tickertape_sid": "JYST",
+    "fincode": 109715,
+    "scripcode": 509715
   },
   {
     "name": "Jet Freight Logistics Limited",
@@ -15578,7 +20009,10 @@ const stockData: StockMapping[] = [
     "isin": "INE982V01025",
     "symbol": "JETFREIGHT",
     "stockid": "1002693",
-    "companyid": "62450"
+    "companyid": "62450",
+    "tickertape_sid": "JETR",
+    "fincode": 283812,
+    "scripcode": 543420
   },
   {
     "name": "JHS Svendgaard Laboratories Limited",
@@ -15588,7 +20022,10 @@ const stockData: StockMapping[] = [
     "isin": "INE544H01014",
     "symbol": "JHS",
     "stockid": "150728",
-    "companyid": "15363"
+    "companyid": "15363",
+    "tickertape_sid": "JHSS",
+    "fincode": 132771,
+    "scripcode": 532771
   },
   {
     "name": "Jindal Photo Limited",
@@ -15598,7 +20035,10 @@ const stockData: StockMapping[] = [
     "isin": "INE796G01012",
     "symbol": "JINDALPHOT",
     "stockid": "520293",
-    "companyid": "15844"
+    "companyid": "15844",
+    "tickertape_sid": "JINP",
+    "fincode": 132624,
+    "scripcode": 532624
   },
   {
     "name": "JITF Infralogistics Limited",
@@ -15608,7 +20048,10 @@ const stockData: StockMapping[] = [
     "isin": "INE863T01013",
     "symbol": "JITFINFRA",
     "stockid": "",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "JITF",
+    "fincode": 254723,
+    "scripcode": 540311
   },
   {
     "name": "Jullundur Motor Agency (Delhi) Limited",
@@ -15618,7 +20061,10 @@ const stockData: StockMapping[] = [
     "isin": "INE412C01023",
     "symbol": "JMA",
     "stockid": "613132",
-    "companyid": "6323"
+    "companyid": "6323",
+    "tickertape_sid": "JULL",
+    "fincode": 208508,
+    "scripcode": 0
   },
   {
     "name": "Jocil Limited",
@@ -15628,7 +20074,10 @@ const stockData: StockMapping[] = [
     "isin": "INE839G01010",
     "symbol": "JOCIL",
     "stockid": "174867",
-    "companyid": "7875"
+    "companyid": "7875",
+    "tickertape_sid": "JOCI",
+    "fincode": 212123,
+    "scripcode": 0
   },
   {
     "name": "Jindal Poly Investment and Finance Company Limited",
@@ -15638,7 +20087,10 @@ const stockData: StockMapping[] = [
     "isin": "INE147P01019",
     "symbol": "JPOLYINVST",
     "stockid": "498291",
-    "companyid": "48272"
+    "companyid": "48272",
+    "tickertape_sid": "JINL",
+    "fincode": 246197,
+    "scripcode": 536773
   },
   {
     "name": "JSW Ispat Special Products Limited",
@@ -15658,7 +20110,10 @@ const stockData: StockMapping[] = [
     "isin": "INE197A01024",
     "symbol": "JYOTISTRUC",
     "stockid": "179129",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "JYTS",
+    "fincode": 113250,
+    "scripcode": 513250
   },
   {
     "name": "Kakatiya Cement Sugar & Industries Limited",
@@ -15668,7 +20123,10 @@ const stockData: StockMapping[] = [
     "isin": "INE437B01014",
     "symbol": "KAKATCEM",
     "stockid": "",
-    "companyid": "12309"
+    "companyid": "12309",
+    "tickertape_sid": "KKTY",
+    "fincode": 100234,
+    "scripcode": 500234
   },
   {
     "name": "Kalyani Forge Limited",
@@ -15678,7 +20136,10 @@ const stockData: StockMapping[] = [
     "isin": "INE314G01014",
     "symbol": "KALYANIFRG",
     "stockid": "348836",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "KALF",
+    "fincode": 113509,
+    "scripcode": 513509
   },
   {
     "name": "Kamat Hotels (I) Limited",
@@ -15688,7 +20149,10 @@ const stockData: StockMapping[] = [
     "isin": "INE967C01018",
     "symbol": "KAMATHOTEL",
     "stockid": "",
-    "companyid": "8642"
+    "companyid": "8642",
+    "tickertape_sid": "KAMT",
+    "fincode": 126668,
+    "scripcode": 526668
   },
   {
     "name": "Kanani Industries Limited",
@@ -15698,7 +20162,10 @@ const stockData: StockMapping[] = [
     "isin": "INE879E01037",
     "symbol": "KANANIIND",
     "stockid": "893637",
-    "companyid": "4303"
+    "companyid": "4303",
+    "tickertape_sid": "KANN",
+    "fincode": 106184,
+    "scripcode": 506184
   },
   {
     "name": "Kanpur Plastipack Limited",
@@ -15708,7 +20175,10 @@ const stockData: StockMapping[] = [
     "isin": "INE694E01014",
     "symbol": "KANPRPLA",
     "stockid": "887044",
-    "companyid": "12520"
+    "companyid": "12520",
+    "tickertape_sid": "KANP",
+    "fincode": 107779,
+    "scripcode": 507779
   },
   {
     "name": "Kapston Services Limited",
@@ -15718,7 +20188,9 @@ const stockData: StockMapping[] = [
     "isin": "INE542Z01010",
     "symbol": "KAPSTON",
     "stockid": "1002958",
-    "companyid": ""
+    "companyid": "",
+    "fincode": 288679,
+    "scripcode": 0
   },
   {
     "name": "Karma Energy Limited",
@@ -15728,7 +20200,10 @@ const stockData: StockMapping[] = [
     "isin": "INE725L01011",
     "symbol": "KARMAENG",
     "stockid": "821308",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "KRME",
+    "fincode": 208532,
+    "scripcode": 533451
   },
   {
     "name": "Kaushalya Infrastructure Development Corporation Limited",
@@ -15738,7 +20213,9 @@ const stockData: StockMapping[] = [
     "isin": "INE234I01010",
     "symbol": "KAUSHALYA",
     "stockid": "",
-    "companyid": "18752"
+    "companyid": "18752",
+    "fincode": 200008,
+    "scripcode": 532925
   },
   {
     "name": "Kavveri Telecom Products Limited",
@@ -15748,7 +20225,8 @@ const stockData: StockMapping[] = [
     "isin": "INE641C01019",
     "symbol": "KAVVERITEL",
     "stockid": "494911",
-    "companyid": "5036"
+    "companyid": "5036",
+    "tickertape_sid": "KATL"
   },
   {
     "name": "Kaya Limited",
@@ -15758,7 +20236,10 @@ const stockData: StockMapping[] = [
     "isin": "INE587G01015",
     "symbol": "KAYA",
     "stockid": "999932",
-    "companyid": "21946"
+    "companyid": "21946",
+    "tickertape_sid": "KAYA",
+    "fincode": 224770,
+    "scripcode": 539276
   },
   {
     "name": "KBC Global Limited",
@@ -15768,7 +20249,8 @@ const stockData: StockMapping[] = [
     "isin": "INE278R01034",
     "symbol": "KBCGLOBAL",
     "stockid": "1002940",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "KARD"
   },
   {
     "name": "KCP Limited",
@@ -15778,7 +20260,10 @@ const stockData: StockMapping[] = [
     "isin": "INE805C01028",
     "symbol": "KCP",
     "stockid": "857299",
-    "companyid": "13511"
+    "companyid": "13511",
+    "tickertape_sid": "KCP",
+    "fincode": 190066,
+    "scripcode": 590066
   },
   {
     "name": "KCP Sugar and Industries Corporation Limited",
@@ -15788,7 +20273,10 @@ const stockData: StockMapping[] = [
     "isin": "INE790B01024",
     "symbol": "KCPSUGIND",
     "stockid": "255316",
-    "companyid": "4815"
+    "companyid": "4815",
+    "tickertape_sid": "KCPS",
+    "fincode": 190067,
+    "scripcode": 533192
   },
   {
     "name": "Kirloskar Electric Company Limited",
@@ -15798,7 +20286,10 @@ const stockData: StockMapping[] = [
     "isin": "INE134B01017",
     "symbol": "KECL",
     "stockid": "313343",
-    "companyid": "12195"
+    "companyid": "12195",
+    "tickertape_sid": "KREL",
+    "fincode": 190052,
+    "scripcode": 533193
   },
   {
     "name": "DSJ Keep Learning Limited",
@@ -15808,7 +20299,10 @@ const stockData: StockMapping[] = [
     "isin": "INE055C01020",
     "symbol": "KEEPLEARN",
     "stockid": "696375",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "DLCM",
+    "fincode": 126677,
+    "scripcode": 526677
   },
   {
     "name": "Kernex Microsystems (India) Limited",
@@ -15818,7 +20312,10 @@ const stockData: StockMapping[] = [
     "isin": "INE202H01019",
     "symbol": "KERNEX",
     "stockid": "199297",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "KMIL",
+    "fincode": 132686,
+    "scripcode": 532686
   },
   {
     "name": "Keynote Financial Services Limited",
@@ -15828,7 +20325,10 @@ const stockData: StockMapping[] = [
     "isin": "INE681C01015",
     "symbol": "KEYFINSERV",
     "stockid": "125629",
-    "companyid": "8863"
+    "companyid": "8863",
+    "tickertape_sid": "KEYN",
+    "fincode": 112597,
+    "scripcode": 512597
   },
   {
     "name": "Khadim India Limited",
@@ -15838,7 +20338,10 @@ const stockData: StockMapping[] = [
     "isin": "INE834I01025",
     "symbol": "KHADIM",
     "stockid": "1002869",
-    "companyid": "18029"
+    "companyid": "18029",
+    "tickertape_sid": "KHAD",
+    "fincode": 200075,
+    "scripcode": 540775
   },
   {
     "name": "Khaitan (India) Limited",
@@ -15848,7 +20351,10 @@ const stockData: StockMapping[] = [
     "isin": "INE731C01018",
     "symbol": "KHAITANLTD",
     "stockid": "914916",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "KHAI",
+    "fincode": 190068,
+    "scripcode": 590068
   },
   {
     "name": "Khandwala Securities Limited",
@@ -15858,7 +20364,10 @@ const stockData: StockMapping[] = [
     "isin": "INE060B01014",
     "symbol": "KHANDSE",
     "stockid": "574241",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "KHSE",
+    "fincode": 131892,
+    "scripcode": 531892
   },
   {
     "name": "Kilitch Drugs (India) Limited",
@@ -15868,7 +20377,10 @@ const stockData: StockMapping[] = [
     "isin": "INE729D01010",
     "symbol": "KILITCH",
     "stockid": "189669",
-    "companyid": "10573"
+    "companyid": "10573",
+    "tickertape_sid": "KIDI",
+    "fincode": 124500,
+    "scripcode": 524500
   },
   {
     "name": "K.M.Sugar Mills Limited",
@@ -15878,7 +20390,10 @@ const stockData: StockMapping[] = [
     "isin": "INE157H01023",
     "symbol": "KMSUGAR",
     "stockid": "",
-    "companyid": "17641"
+    "companyid": "17641",
+    "tickertape_sid": "KMSU",
+    "fincode": 200037,
+    "scripcode": 532673
   },
   {
     "name": "Kothari Sugars And Chemicals Limited",
@@ -15888,7 +20403,10 @@ const stockData: StockMapping[] = [
     "isin": "INE419A01022",
     "symbol": "KOTARISUG",
     "stockid": "581449",
-    "companyid": "13464"
+    "companyid": "13464",
+    "tickertape_sid": "KTSG",
+    "fincode": 200033,
+    "scripcode": 0
   },
   {
     "name": "Kothari Petrochemicals Limited",
@@ -15898,7 +20416,10 @@ const stockData: StockMapping[] = [
     "isin": "INE720A01015",
     "symbol": "KOTHARIPET",
     "stockid": "400659",
-    "companyid": "5350"
+    "companyid": "5350",
+    "tickertape_sid": "KPOC",
+    "fincode": 200034,
+    "scripcode": 532096
   },
   {
     "name": "Kothari Products Limited",
@@ -15908,7 +20429,10 @@ const stockData: StockMapping[] = [
     "isin": "INE823A01017",
     "symbol": "KOTHARIPRO",
     "stockid": "479928",
-    "companyid": "7988"
+    "companyid": "7988",
+    "tickertape_sid": "KPRO",
+    "fincode": 130299,
+    "scripcode": 530299
   },
   {
     "name": "Krebs Biochemicals and Industries Limited",
@@ -15918,7 +20442,10 @@ const stockData: StockMapping[] = [
     "isin": "INE268B01013",
     "symbol": "KREBSBIO",
     "stockid": "142337",
-    "companyid": "10574"
+    "companyid": "10574",
+    "tickertape_sid": "KREB",
+    "fincode": 124518,
+    "scripcode": 524518
   },
   {
     "name": "Kridhan Infra Limited",
@@ -15928,7 +20455,10 @@ const stockData: StockMapping[] = [
     "isin": "INE524L01026",
     "symbol": "KRIDHANINF",
     "stockid": "521532",
-    "companyid": "34103"
+    "companyid": "34103",
+    "tickertape_sid": "KRID",
+    "fincode": 222797,
+    "scripcode": 533482
   },
   {
     "name": "Krishana Phoschem Limited",
@@ -15938,7 +20468,9 @@ const stockData: StockMapping[] = [
     "isin": "INE506W01012",
     "symbol": "KRISHANA",
     "stockid": "1002712",
-    "companyid": "40463"
+    "companyid": "40463",
+    "fincode": 284634,
+    "scripcode": 0
   },
   {
     "name": "Kriti Industries (India) Limited",
@@ -15948,7 +20480,10 @@ const stockData: StockMapping[] = [
     "isin": "INE479D01038",
     "symbol": "KRITI",
     "stockid": "755832",
-    "companyid": "10212"
+    "companyid": "10212",
+    "tickertape_sid": "KRITI",
+    "fincode": 126423,
+    "scripcode": 526423
   },
   {
     "name": "Kritika Wires Limited",
@@ -15958,7 +20493,10 @@ const stockData: StockMapping[] = [
     "isin": "INE00Z501029",
     "symbol": "KRITIKA",
     "stockid": "1003067",
-    "companyid": "40428"
+    "companyid": "40428",
+    "tickertape_sid": "KRTK",
+    "fincode": 289780,
+    "scripcode": 0
   },
   {
     "name": "Kriti Nutrients Limited",
@@ -15968,7 +20506,10 @@ const stockData: StockMapping[] = [
     "isin": "INE798K01010",
     "symbol": "KRITINUT",
     "stockid": "398540",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "KRIT",
+    "fincode": 220919,
+    "scripcode": 533210
   },
   {
     "name": "Kaveri Seed Company Limited",
@@ -15978,7 +20519,10 @@ const stockData: StockMapping[] = [
     "isin": "INE455I01029",
     "symbol": "KSCL",
     "stockid": "695791",
-    "companyid": "20272"
+    "companyid": "20272",
+    "tickertape_sid": "KVRI",
+    "fincode": 132899,
+    "scripcode": 532899
   },
   {
     "name": "Kshitij Polyline Limited",
@@ -15988,7 +20532,10 @@ const stockData: StockMapping[] = [
     "isin": "INE013801027",
     "symbol": "KSHITIJPOL",
     "stockid": "1003062",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "KSHT",
+    "fincode": 290216,
+    "scripcode": 0
   },
   {
     "name": "Lagnam Spintex Limited",
@@ -15998,7 +20545,10 @@ const stockData: StockMapping[] = [
     "isin": "INE548Z01017",
     "symbol": "LAGNAM",
     "stockid": "1003048",
-    "companyid": "68881"
+    "companyid": "68881",
+    "tickertape_sid": "LAGN",
+    "fincode": 290473,
+    "scripcode": 0
   },
   {
     "name": "Lakshmi Precision Screws Limited",
@@ -16008,7 +20558,10 @@ const stockData: StockMapping[] = [
     "isin": "INE651C01018",
     "symbol": "LAKPRE",
     "stockid": "356564",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "LXPR",
+    "fincode": 106079,
+    "scripcode": 506079
   },
   {
     "name": "Lambodhara Textiles Limited",
@@ -16018,7 +20571,10 @@ const stockData: StockMapping[] = [
     "isin": "INE112F01022",
     "symbol": "LAMBODHARA",
     "stockid": "239646",
-    "companyid": "6511"
+    "companyid": "6511",
+    "tickertape_sid": "LAMB",
+    "fincode": 190075,
+    "scripcode": 590075
   },
   {
     "name": "Lasa Supergenerics Limited",
@@ -16028,7 +20584,10 @@ const stockData: StockMapping[] = [
     "isin": "INE670X01014",
     "symbol": "LASA",
     "stockid": "1002834",
-    "companyid": "65301"
+    "companyid": "65301",
+    "tickertape_sid": "LASA",
+    "fincode": 287316,
+    "scripcode": 540702
   },
   {
     "name": "Laxmi Cotspin Limited",
@@ -16038,7 +20597,10 @@ const stockData: StockMapping[] = [
     "isin": "INE801V01019",
     "symbol": "LAXMICOT",
     "stockid": "1002739",
-    "companyid": "65733"
+    "companyid": "65733",
+    "tickertape_sid": "LAXM",
+    "fincode": 285015,
+    "scripcode": 0
   },
   {
     "name": "LCC Infotech Limited",
@@ -16048,7 +20610,10 @@ const stockData: StockMapping[] = [
     "isin": "INE938A01021",
     "symbol": "LCCINFOTEC",
     "stockid": "177718",
-    "companyid": "5497"
+    "companyid": "5497",
+    "tickertape_sid": "LCCI",
+    "fincode": 132019,
+    "scripcode": 532019
   },
   {
     "name": "Lexus Granito (India) Limited",
@@ -16058,7 +20623,10 @@ const stockData: StockMapping[] = [
     "isin": "INE500X01013",
     "symbol": "LEXUS",
     "stockid": "1002813",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "LEXU",
+    "fincode": 287018,
+    "scripcode": 0
   },
   {
     "name": "Lakshmi Finance & Industrial Corporation Limited",
@@ -16068,7 +20636,10 @@ const stockData: StockMapping[] = [
     "isin": "INE850E01012",
     "symbol": "LFIC",
     "stockid": "",
-    "companyid": "4176"
+    "companyid": "4176",
+    "tickertape_sid": "LFIC",
+    "fincode": 221451,
+    "scripcode": 0
   },
   {
     "name": "LGB Forge Limited",
@@ -16078,7 +20649,10 @@ const stockData: StockMapping[] = [
     "isin": "INE201J01017",
     "symbol": "LGBFORGE",
     "stockid": "907014",
-    "companyid": "21960"
+    "companyid": "21960",
+    "tickertape_sid": "LGBL",
+    "fincode": 205900,
+    "scripcode": 533007
   },
   {
     "name": "Libas Consumer Products Limited",
@@ -16088,7 +20662,10 @@ const stockData: StockMapping[] = [
     "isin": "INE908V01012",
     "symbol": "LIBAS",
     "stockid": "1002700",
-    "companyid": "65471"
+    "companyid": "65471",
+    "tickertape_sid": "LIBA",
+    "fincode": 284132,
+    "scripcode": 0
   },
   {
     "name": "Liberty Shoes Limited",
@@ -16098,7 +20675,10 @@ const stockData: StockMapping[] = [
     "isin": "INE557B01019",
     "symbol": "LIBERTSHOE",
     "stockid": "738290",
-    "companyid": "9036"
+    "companyid": "9036",
+    "tickertape_sid": "LIBS",
+    "fincode": 126596,
+    "scripcode": 526596
   },
   {
     "name": "Linc Limited",
@@ -16108,7 +20688,9 @@ const stockData: StockMapping[] = [
     "isin": "INE802B01019",
     "symbol": "LINC",
     "stockid": "801304",
-    "companyid": "7041"
+    "companyid": "7041",
+    "fincode": 131241,
+    "scripcode": 531241
   },
   {
     "name": "Lokesh Machines Limited",
@@ -16118,7 +20700,10 @@ const stockData: StockMapping[] = [
     "isin": "INE397H01017",
     "symbol": "LOKESHMACH",
     "stockid": "643534",
-    "companyid": "16048"
+    "companyid": "16048",
+    "tickertape_sid": "LOMA",
+    "fincode": 132740,
+    "scripcode": 532740
   },
   {
     "name": "Lotus Eye Hospital and Institute Limited",
@@ -16128,7 +20713,10 @@ const stockData: StockMapping[] = [
     "isin": "INE947I01017",
     "symbol": "LOTUSEYE",
     "stockid": "959118",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "LOTS",
+    "fincode": 200080,
+    "scripcode": 532998
   },
   {
     "name": "Lovable Lingerie Limited",
@@ -16138,7 +20726,10 @@ const stockData: StockMapping[] = [
     "isin": "INE597L01014",
     "symbol": "LOVABLE",
     "stockid": "847842",
-    "companyid": "33202"
+    "companyid": "33202",
+    "tickertape_sid": "LOVA",
+    "fincode": 222652,
+    "scripcode": 533343
   },
   {
     "name": "Loyal Textile Mills Limited",
@@ -16148,7 +20739,10 @@ const stockData: StockMapping[] = [
     "isin": "INE970D01010",
     "symbol": "LOYALTEX",
     "stockid": "504152",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "LOYA",
+    "fincode": 114036,
+    "scripcode": 514036
   },
   {
     "name": "Landmark Property Development Company Limited",
@@ -16158,7 +20752,10 @@ const stockData: StockMapping[] = [
     "isin": "INE197J01017",
     "symbol": "LPDC",
     "stockid": "758493",
-    "companyid": "22062"
+    "companyid": "22062",
+    "tickertape_sid": "LAND",
+    "fincode": 205947,
+    "scripcode": 533012
   },
   {
     "name": "Lyka Labs Limited",
@@ -16168,7 +20765,10 @@ const stockData: StockMapping[] = [
     "isin": "INE933A01014",
     "symbol": "LYKALABS",
     "stockid": "189121",
-    "companyid": "11921"
+    "companyid": "11921",
+    "tickertape_sid": "LYKA",
+    "fincode": 100259,
+    "scripcode": 500259
   },
   {
     "name": "Lypsa Gems & Jewellery Limited",
@@ -16178,7 +20778,10 @@ const stockData: StockMapping[] = [
     "isin": "INE142K01011",
     "symbol": "LYPSAGEMS",
     "stockid": "",
-    "companyid": "4775"
+    "companyid": "4775",
+    "tickertape_sid": "LYPS",
+    "fincode": 236500,
+    "scripcode": 534532
   },
   {
     "name": "Maan Aluminium Limited",
@@ -16188,7 +20791,9 @@ const stockData: StockMapping[] = [
     "isin": "INE215I01019",
     "symbol": "MAANALU",
     "stockid": "729029",
-    "companyid": "18693"
+    "companyid": "18693",
+    "fincode": 132906,
+    "scripcode": 532906
   },
   {
     "name": "Macpower CNC Machines Limited",
@@ -16198,7 +20803,10 @@ const stockData: StockMapping[] = [
     "isin": "INE155Z01011",
     "symbol": "MACPOWER",
     "stockid": "1002941",
-    "companyid": "67604"
+    "companyid": "67604",
+    "tickertape_sid": "MACP",
+    "fincode": 216198,
+    "scripcode": 0
   },
   {
     "name": "Madhav Marbles and Granites Limited",
@@ -16208,7 +20816,10 @@ const stockData: StockMapping[] = [
     "isin": "INE925C01016",
     "symbol": "MADHAV",
     "stockid": "698341",
-    "companyid": "11390"
+    "companyid": "11390",
+    "tickertape_sid": "MDVM",
+    "fincode": 115093,
+    "scripcode": 515093
   },
   {
     "name": "Madhucon Projects Limited",
@@ -16218,7 +20829,10 @@ const stockData: StockMapping[] = [
     "isin": "INE378D01032",
     "symbol": "MADHUCON",
     "stockid": "951807",
-    "companyid": "6422"
+    "companyid": "6422",
+    "tickertape_sid": "MAPR",
+    "fincode": 131497,
+    "scripcode": 531497
   },
   {
     "name": "Madras Fertilizers Limited",
@@ -16228,7 +20842,10 @@ const stockData: StockMapping[] = [
     "isin": "INE414A01015",
     "symbol": "MADRASFERT",
     "stockid": "694669",
-    "companyid": "4801"
+    "companyid": "4801",
+    "tickertape_sid": "MDFT",
+    "fincode": 200032,
+    "scripcode": 590134
   },
   {
     "name": "Magadh Sugar & Energy Limited",
@@ -16238,7 +20855,10 @@ const stockData: StockMapping[] = [
     "isin": "INE347W01011",
     "symbol": "MAGADSUGAR",
     "stockid": "",
-    "companyid": "61308"
+    "companyid": "61308",
+    "tickertape_sid": "MGAD",
+    "fincode": 286955,
+    "scripcode": 540650
   },
   {
     "name": "Magnum Ventures Limited",
@@ -16248,7 +20868,10 @@ const stockData: StockMapping[] = [
     "isin": "INE387I01016",
     "symbol": "MAGNUM",
     "stockid": "732568",
-    "companyid": "19275"
+    "companyid": "19275",
+    "tickertape_sid": "MGNM",
+    "fincode": 132896,
+    "scripcode": 532896
   },
   {
     "name": "Maha Rashtra Apex Corporation Limited",
@@ -16258,7 +20881,10 @@ const stockData: StockMapping[] = [
     "isin": "INE843B01013",
     "symbol": "MAHAPEXLTD",
     "stockid": "528922",
-    "companyid": "11351"
+    "companyid": "11351",
+    "tickertape_sid": "MAAC",
+    "fincode": 123384,
+    "scripcode": 523384
   },
   {
     "name": "Mahamaya Steel Industries Limited",
@@ -16268,7 +20894,10 @@ const stockData: StockMapping[] = [
     "isin": "INE451L01014",
     "symbol": "MAHASTEEL",
     "stockid": "558565",
-    "companyid": "10416"
+    "companyid": "10416",
+    "tickertape_sid": "MAHA",
+    "fincode": 113554,
+    "scripcode": 513554
   },
   {
     "name": "Mahindra EPC Irrigation Limited",
@@ -16278,7 +20907,10 @@ const stockData: StockMapping[] = [
     "isin": "INE215D01010",
     "symbol": "MAHEPC",
     "stockid": "514917",
-    "companyid": "11065"
+    "companyid": "11065",
+    "tickertape_sid": "MHID",
+    "fincode": 123754,
+    "scripcode": 523754
   },
   {
     "name": "Maheshwari Logistics Limited",
@@ -16288,7 +20920,10 @@ const stockData: StockMapping[] = [
     "isin": "INE263W01010",
     "symbol": "MAHESHWARI",
     "stockid": "1002703",
-    "companyid": "49702"
+    "companyid": "49702",
+    "tickertape_sid": "MAHW",
+    "fincode": 233160,
+    "scripcode": 0
   },
   {
     "name": "Maithan Alloys Limited",
@@ -16298,7 +20933,10 @@ const stockData: StockMapping[] = [
     "isin": "INE683C01011",
     "symbol": "MAITHANALL",
     "stockid": "132112",
-    "companyid": "2299"
+    "companyid": "2299",
+    "tickertape_sid": "MAIT",
+    "fincode": 200556,
+    "scripcode": 590078
   },
   {
     "name": "Mallcom (India) Limited",
@@ -16308,7 +20946,10 @@ const stockData: StockMapping[] = [
     "isin": "INE389C01015",
     "symbol": "MALLCOM",
     "stockid": "470724",
-    "companyid": "2218"
+    "companyid": "2218",
+    "tickertape_sid": "MAL",
+    "fincode": 221128,
+    "scripcode": 539400
   },
   {
     "name": "Malu Paper Mills Limited",
@@ -16318,7 +20959,10 @@ const stockData: StockMapping[] = [
     "isin": "INE383H01017",
     "symbol": "MALUPAPER",
     "stockid": "610094",
-    "companyid": "15273"
+    "companyid": "15273",
+    "tickertape_sid": "MALP",
+    "fincode": 132728,
+    "scripcode": 532728
   },
   {
     "name": "Manaksia Aluminium Company Limited",
@@ -16328,7 +20972,10 @@ const stockData: StockMapping[] = [
     "isin": "INE859Q01017",
     "symbol": "MANAKALUCO",
     "stockid": "740084",
-    "companyid": "34545"
+    "companyid": "34545",
+    "tickertape_sid": "MANL",
+    "fincode": 268722,
+    "scripcode": 539045
   },
   {
     "name": "Manaksia Coated Metals & Industries Limited",
@@ -16338,7 +20985,10 @@ const stockData: StockMapping[] = [
     "isin": "INE830Q01018",
     "symbol": "MANAKCOAT",
     "stockid": "",
-    "companyid": "34547"
+    "companyid": "34547",
+    "tickertape_sid": "MANC",
+    "fincode": 268723,
+    "scripcode": 539046
   },
   {
     "name": "Manaksia Steels Limited",
@@ -16348,7 +20998,10 @@ const stockData: StockMapping[] = [
     "isin": "INE824Q01011",
     "symbol": "MANAKSTEEL",
     "stockid": "939595",
-    "companyid": "34553"
+    "companyid": "34553",
+    "tickertape_sid": "MANM",
+    "fincode": 268726,
+    "scripcode": 539044
   },
   {
     "name": "Mangalam Drugs And Organics Limited",
@@ -16358,7 +21011,10 @@ const stockData: StockMapping[] = [
     "isin": "INE584F01014",
     "symbol": "MANGALAM",
     "stockid": "138636",
-    "companyid": "16458"
+    "companyid": "16458",
+    "tickertape_sid": "MADR",
+    "fincode": 132637,
+    "scripcode": 532637
   },
   {
     "name": "Manomay Tex India Limited",
@@ -16368,7 +21024,10 @@ const stockData: StockMapping[] = [
     "isin": "INE784W01015",
     "symbol": "MANOMAY",
     "stockid": "1002735",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "MAN",
+    "fincode": 284678,
+    "scripcode": 540396
   },
   {
     "name": "Mangalam Organics Limited",
@@ -16378,7 +21037,10 @@ const stockData: StockMapping[] = [
     "isin": "INE370D01013",
     "symbol": "MANORG",
     "stockid": "352961",
-    "companyid": "8748"
+    "companyid": "8748",
+    "tickertape_sid": "MANOR",
+    "fincode": 114418,
+    "scripcode": 514418
   },
   {
     "name": "Manugraph India Limited",
@@ -16388,7 +21050,10 @@ const stockData: StockMapping[] = [
     "isin": "INE867A01022",
     "symbol": "MANUGRAPH",
     "stockid": "553808",
-    "companyid": "12697"
+    "companyid": "12697",
+    "tickertape_sid": "MNUG",
+    "fincode": 105324,
+    "scripcode": 505324
   },
   {
     "name": "Maral Overseas Limited",
@@ -16398,7 +21063,10 @@ const stockData: StockMapping[] = [
     "isin": "INE882A01013",
     "symbol": "MARALOVER",
     "stockid": "455390",
-    "companyid": "12181"
+    "companyid": "12181",
+    "tickertape_sid": "MARL",
+    "fincode": 121018,
+    "scripcode": 521018
   },
   {
     "name": "Marine Electricals (India) Limited",
@@ -16408,7 +21076,10 @@ const stockData: StockMapping[] = [
     "isin": "INE01JE01028",
     "symbol": "MARINE",
     "stockid": "1003069",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "MARN",
+    "fincode": 291578,
+    "scripcode": 0
   },
   {
     "name": "Marksans Pharma Limited",
@@ -16418,7 +21089,10 @@ const stockData: StockMapping[] = [
     "isin": "INE750C01026",
     "symbol": "MARKSANS",
     "stockid": "604869",
-    "companyid": "10542"
+    "companyid": "10542",
+    "tickertape_sid": "MARK",
+    "fincode": 124404,
+    "scripcode": 524404
   },
   {
     "name": "Marshall Machines Limited",
@@ -16428,7 +21102,10 @@ const stockData: StockMapping[] = [
     "isin": "INE00SZ01018",
     "symbol": "MARSHALL",
     "stockid": "1003046",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "MARH",
+    "fincode": 290577,
+    "scripcode": 0
   },
   {
     "name": "Mask Investments Limited",
@@ -16438,7 +21115,10 @@ const stockData: StockMapping[] = [
     "isin": "INE885F01015",
     "symbol": "MASKINVEST",
     "stockid": "1002677",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "MASK",
+    "fincode": 283341,
+    "scripcode": 0
   },
   {
     "name": "Mawana Sugars Limited",
@@ -16448,7 +21128,10 @@ const stockData: StockMapping[] = [
     "isin": "INE636A01039",
     "symbol": "MAWANASUG",
     "stockid": "973213",
-    "companyid": "12127"
+    "companyid": "12127",
+    "tickertape_sid": "MAWS",
+    "fincode": 123371,
+    "scripcode": 523371
   },
   {
     "name": "Max India Limited",
@@ -16458,7 +21141,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0CG601016",
     "symbol": "MAXIND",
     "stockid": "1003415",
-    "companyid": "1986443"
+    "companyid": "1986443",
+    "tickertape_sid": "MAII",
+    "fincode": 299122,
+    "scripcode": 543223
   },
   {
     "name": "Max Ventures and Industries Limited",
@@ -16478,7 +21164,9 @@ const stockData: StockMapping[] = [
     "isin": "INE885E01034",
     "symbol": "MAZDA",
     "stockid": "709417",
-    "companyid": "10860"
+    "companyid": "10860",
+    "fincode": 123792,
+    "scripcode": 523792
   },
   {
     "name": "Madhya Bharat Agro Products Limited",
@@ -16488,7 +21176,9 @@ const stockData: StockMapping[] = [
     "isin": "INE900L01010",
     "symbol": "MBAPL",
     "stockid": "222901",
-    "companyid": ""
+    "companyid": "",
+    "fincode": 213513,
+    "scripcode": 0
   },
   {
     "name": "MBL Infrastructure Limited",
@@ -16498,7 +21188,10 @@ const stockData: StockMapping[] = [
     "isin": "INE912H01013",
     "symbol": "MBLINFRA",
     "stockid": "348482",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "MBLI",
+    "fincode": 219780,
+    "scripcode": 533152
   },
   {
     "name": "Madhav Copper Limited",
@@ -16508,7 +21201,10 @@ const stockData: StockMapping[] = [
     "isin": "INE813V01022",
     "symbol": "MCL",
     "stockid": "1002711",
-    "companyid": "65528"
+    "companyid": "65528",
+    "tickertape_sid": "MADC",
+    "fincode": 284404,
+    "scripcode": 0
   },
   {
     "name": "Medico Remedies Limited",
@@ -16518,7 +21214,10 @@ const stockData: StockMapping[] = [
     "isin": "INE630Y01024",
     "symbol": "MEDICO",
     "stockid": "1002925",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "MED",
+    "fincode": 216273,
+    "scripcode": 540937
   },
   {
     "name": "Megasoft Limited",
@@ -16528,7 +21227,8 @@ const stockData: StockMapping[] = [
     "isin": "INE933B01012",
     "symbol": "MEGASOFT",
     "stockid": "127310",
-    "companyid": "2542"
+    "companyid": "2542",
+    "tickertape_sid": "MSFT"
   },
   {
     "name": "Megastar Foods Limited",
@@ -16538,7 +21238,10 @@ const stockData: StockMapping[] = [
     "isin": "INE00EM01016",
     "symbol": "MEGASTAR",
     "stockid": "1002993",
-    "companyid": "67947"
+    "companyid": "67947",
+    "tickertape_sid": "MEG",
+    "fincode": 289483,
+    "scripcode": 541352
   },
   {
     "name": "Melstar Information Technologies Limited",
@@ -16548,7 +21251,10 @@ const stockData: StockMapping[] = [
     "isin": "INE817A01019",
     "symbol": "MELSTAR",
     "stockid": "636447",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "MELS",
+    "fincode": 132307,
+    "scripcode": 532307
   },
   {
     "name": "MEP Infrastructure Developers Limited",
@@ -16558,7 +21264,10 @@ const stockData: StockMapping[] = [
     "isin": "INE776I01010",
     "symbol": "MEP",
     "stockid": "189334",
-    "companyid": "59894"
+    "companyid": "59894",
+    "tickertape_sid": "MPIN",
+    "fincode": 271118,
+    "scripcode": 539126
   },
   {
     "name": "Metalyst Forgings Limited",
@@ -16568,7 +21277,9 @@ const stockData: StockMapping[] = [
     "isin": "INE425A01011",
     "symbol": "METALFORGE",
     "stockid": "432731",
-    "companyid": ""
+    "companyid": "",
+    "fincode": 113335,
+    "scripcode": 513335
   },
   {
     "name": "Mangalam Global Enterprise Limited",
@@ -16578,7 +21289,9 @@ const stockData: StockMapping[] = [
     "isin": "INE0APB01024",
     "symbol": "MGEL",
     "stockid": "1003356",
-    "companyid": "1959200"
+    "companyid": "1959200",
+    "fincode": 296148,
+    "scripcode": 544273
   },
   {
     "name": "Mahalaxmi Rubtech Limited",
@@ -16588,7 +21301,10 @@ const stockData: StockMapping[] = [
     "isin": "INE112D01035",
     "symbol": "MHLXMIRU",
     "stockid": "737826",
-    "companyid": "9091"
+    "companyid": "9091",
+    "tickertape_sid": "MHL",
+    "fincode": 114450,
+    "scripcode": 514450
   },
   {
     "name": "MIC Electronics Limited",
@@ -16598,7 +21314,10 @@ const stockData: StockMapping[] = [
     "isin": "INE287C01037",
     "symbol": "MICEL",
     "stockid": "202021",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "MELC",
+    "fincode": 132850,
+    "scripcode": 532850
   },
   {
     "name": "Mindteck (India) Limited",
@@ -16608,7 +21327,10 @@ const stockData: StockMapping[] = [
     "isin": "INE110B01017",
     "symbol": "MINDTECK",
     "stockid": "404298",
-    "companyid": "10609"
+    "companyid": "10609",
+    "tickertape_sid": "MDTK",
+    "fincode": 117344,
+    "scripcode": 517344
   },
   {
     "name": "MITCON Consultancy & Engineering Services Limited",
@@ -16618,7 +21340,10 @@ const stockData: StockMapping[] = [
     "isin": "INE828O01033",
     "symbol": "MITCON",
     "stockid": "",
-    "companyid": "46145"
+    "companyid": "46145",
+    "tickertape_sid": "MITC",
+    "fincode": 222968,
+    "scripcode": 0
   },
   {
     "name": "Mittal Life Style Limited",
@@ -16628,7 +21353,9 @@ const stockData: StockMapping[] = [
     "isin": "INE997Y01019",
     "symbol": "MITTAL",
     "stockid": "1002952",
-    "companyid": "67713"
+    "companyid": "67713",
+    "fincode": 288717,
+    "scripcode": 0
   },
   {
     "name": "MMP Industries Limited",
@@ -16638,7 +21365,10 @@ const stockData: StockMapping[] = [
     "isin": "INE511Y01018",
     "symbol": "MMP",
     "stockid": "1002959",
-    "companyid": "55881"
+    "companyid": "55881",
+    "tickertape_sid": "MMPI",
+    "fincode": 208662,
+    "scripcode": 0
   },
   {
     "name": "Modi Rubber Limited",
@@ -16648,7 +21378,10 @@ const stockData: StockMapping[] = [
     "isin": "INE832A01018",
     "symbol": "MODIRUBBER",
     "stockid": "477828",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "MODI",
+    "fincode": 100890,
+    "scripcode": 500890
   },
   {
     "name": "MODISON LIMITED",
@@ -16658,7 +21391,10 @@ const stockData: StockMapping[] = [
     "isin": "INE737D01021",
     "symbol": "MODISONLTD",
     "stockid": "386664",
-    "companyid": "4647"
+    "companyid": "4647",
+    "tickertape_sid": "MODIS",
+    "fincode": 106261,
+    "scripcode": 506261
   },
   {
     "name": "Mohit Industries Limited",
@@ -16668,7 +21404,10 @@ const stockData: StockMapping[] = [
     "isin": "INE954E01012",
     "symbol": "MOHITIND",
     "stockid": "914578",
-    "companyid": "11606"
+    "companyid": "11606",
+    "tickertape_sid": "MOHT",
+    "fincode": 131453,
+    "scripcode": 531453
   },
   {
     "name": "Moksh Ornaments Limited",
@@ -16678,7 +21417,10 @@ const stockData: StockMapping[] = [
     "isin": "INE514Y01020",
     "symbol": "MOKSH",
     "stockid": "1002899",
-    "companyid": "67321"
+    "companyid": "67321",
+    "tickertape_sid": "MOKS",
+    "fincode": 287926,
+    "scripcode": 0
   },
   {
     "name": "Mold-Tek Technologies Limited",
@@ -16688,7 +21430,10 @@ const stockData: StockMapping[] = [
     "isin": "INE835B01035",
     "symbol": "MOLDTECH",
     "stockid": "490789",
-    "companyid": "10599"
+    "companyid": "10599",
+    "tickertape_sid": "MOLD",
+    "fincode": 126263,
+    "scripcode": 526263
   },
   {
     "name": "Morarjee Textiles Limited",
@@ -16698,7 +21443,10 @@ const stockData: StockMapping[] = [
     "isin": "INE161G01027",
     "symbol": "MORARJEE",
     "stockid": "974096",
-    "companyid": "13048"
+    "companyid": "13048",
+    "tickertape_sid": "MORT",
+    "fincode": 132621,
+    "scripcode": 532621
   },
   {
     "name": "Morepen Laboratories Limited",
@@ -16708,7 +21456,10 @@ const stockData: StockMapping[] = [
     "isin": "INE083A01026",
     "symbol": "MOREPENLAB",
     "stockid": "546345",
-    "companyid": "11215"
+    "companyid": "11215",
+    "tickertape_sid": "MORL",
+    "fincode": 100288,
+    "scripcode": 500288
   },
   {
     "name": "The Motor & General Finance Limited",
@@ -16718,7 +21469,10 @@ const stockData: StockMapping[] = [
     "isin": "INE861B01023",
     "symbol": "MOTOGENFIN",
     "stockid": "",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "MGF",
+    "fincode": 101343,
+    "scripcode": 501343
   },
   {
     "name": "MRO-TEK Realty Limited",
@@ -16728,7 +21482,8 @@ const stockData: StockMapping[] = [
     "isin": "INE398B01018",
     "symbol": "MRO-TEK",
     "stockid": "952648",
-    "companyid": "3533"
+    "companyid": "3533",
+    "tickertape_sid": "MROT"
   },
   {
     "name": "MSP Steel & Power Limited",
@@ -16738,7 +21493,10 @@ const stockData: StockMapping[] = [
     "isin": "INE752G01015",
     "symbol": "MSPL",
     "stockid": "",
-    "companyid": "16827"
+    "companyid": "16827",
+    "tickertape_sid": "MSPO",
+    "fincode": 132650,
+    "scripcode": 532650
   },
   {
     "name": "MT Educare Limited",
@@ -16748,7 +21506,10 @@ const stockData: StockMapping[] = [
     "isin": "INE472M01018",
     "symbol": "MTEDUCARE",
     "stockid": "239041",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "MTED",
+    "fincode": 210518,
+    "scripcode": 534312
   },
   {
     "name": "Munjal Auto Industries Limited",
@@ -16758,7 +21519,10 @@ const stockData: StockMapping[] = [
     "isin": "INE672B01032",
     "symbol": "MUNJALAU",
     "stockid": "641632",
-    "companyid": "13700"
+    "companyid": "13700",
+    "tickertape_sid": "MUAU",
+    "fincode": 120059,
+    "scripcode": 520059
   },
   {
     "name": "Murudeshwar Ceramics Limited",
@@ -16768,7 +21532,10 @@ const stockData: StockMapping[] = [
     "isin": "INE692B01014",
     "symbol": "MURUDCERA",
     "stockid": "187285",
-    "companyid": "13394"
+    "companyid": "13394",
+    "tickertape_sid": "MURD",
+    "fincode": 115037,
+    "scripcode": 515037
   },
   {
     "name": "Muthoot Capital Services Limited",
@@ -16778,7 +21545,10 @@ const stockData: StockMapping[] = [
     "isin": "INE296G01013",
     "symbol": "MUTHOOTCAP",
     "stockid": "311468",
-    "companyid": "8235"
+    "companyid": "8235",
+    "tickertape_sid": "MUTH",
+    "fincode": 111766,
+    "scripcode": 511766
   },
   {
     "name": "Nagreeka Capital & Infrastructure Limited",
@@ -16788,7 +21558,10 @@ const stockData: StockMapping[] = [
     "isin": "INE245I01016",
     "symbol": "NAGREEKCAP",
     "stockid": "",
-    "companyid": "19656"
+    "companyid": "19656",
+    "tickertape_sid": "NCIL",
+    "fincode": 132895,
+    "scripcode": 532895
   },
   {
     "name": "Nagreeka Exports Limited",
@@ -16798,7 +21571,10 @@ const stockData: StockMapping[] = [
     "isin": "INE123B01028",
     "symbol": "NAGREEKEXP",
     "stockid": "491923",
-    "companyid": "10303"
+    "companyid": "10303",
+    "tickertape_sid": "NAGR",
+    "fincode": 121109,
+    "scripcode": 521109
   },
   {
     "name": "Nahar Capital and Financial Services Limited",
@@ -16808,7 +21584,10 @@ const stockData: StockMapping[] = [
     "isin": "INE049I01012",
     "symbol": "NAHARCAP",
     "stockid": "406579",
-    "companyid": "18395"
+    "companyid": "18395",
+    "tickertape_sid": "NAHA",
+    "fincode": 200126,
+    "scripcode": 532952
   },
   {
     "name": "Nahar Industrial Enterprises Limited",
@@ -16818,7 +21597,10 @@ const stockData: StockMapping[] = [
     "isin": "INE289A01011",
     "symbol": "NAHARINDUS",
     "stockid": "651064",
-    "companyid": "13317"
+    "companyid": "13317",
+    "tickertape_sid": "NHIE",
+    "fincode": 119136,
+    "scripcode": 519136
   },
   {
     "name": "Narmada Agrobase Limited",
@@ -16828,7 +21610,10 @@ const stockData: StockMapping[] = [
     "isin": "INE117Z01011",
     "symbol": "NARMADA",
     "stockid": "1002962",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "NARD",
+    "fincode": 288692,
+    "scripcode": 543643
   },
   {
     "name": "Nath Bio-Genes (India) Limited",
@@ -16838,7 +21623,10 @@ const stockData: StockMapping[] = [
     "isin": "INE448G01010",
     "symbol": "NATHBIOGEN",
     "stockid": "628630",
-    "companyid": "50720"
+    "companyid": "50720",
+    "tickertape_sid": "NATB",
+    "fincode": 200313,
+    "scripcode": 537291
   },
   {
     "name": "National Steel And Agro Industries Limited",
@@ -16858,7 +21646,10 @@ const stockData: StockMapping[] = [
     "isin": "INE365I01020",
     "symbol": "NBIFIN",
     "stockid": "",
-    "companyid": "4924"
+    "companyid": "4924",
+    "tickertape_sid": "NBII",
+    "fincode": 225029,
+    "scripcode": 0
   },
   {
     "name": "Naga Dhunseri Group Limited",
@@ -16868,7 +21659,10 @@ const stockData: StockMapping[] = [
     "isin": "INE756C01015",
     "symbol": "NDGL",
     "stockid": "763421",
-    "companyid": "11620"
+    "companyid": "11620",
+    "tickertape_sid": "NAGD",
+    "fincode": 241884,
+    "scripcode": 0
   },
   {
     "name": "Nandan Denim Limited",
@@ -16878,7 +21672,9 @@ const stockData: StockMapping[] = [
     "isin": "INE875G01030",
     "symbol": "NDL",
     "stockid": "205433",
-    "companyid": "19004"
+    "companyid": "19004",
+    "fincode": 132641,
+    "scripcode": 532641
   },
   {
     "name": "Ndr Auto Components Limited",
@@ -16888,7 +21684,10 @@ const stockData: StockMapping[] = [
     "isin": "INE07OG01012",
     "symbol": "NDRAUTO",
     "stockid": "1003406",
-    "companyid": "1959997"
+    "companyid": "1959997",
+    "tickertape_sid": "NDRA",
+    "fincode": 298017,
+    "scripcode": 543214
   },
   {
     "name": "North Eastern Carrying Corporation Limited",
@@ -16898,7 +21697,10 @@ const stockData: StockMapping[] = [
     "isin": "INE553C01016",
     "symbol": "NECCLTD",
     "stockid": "612974",
-    "companyid": "2390"
+    "companyid": "2390",
+    "tickertape_sid": "NECC",
+    "fincode": 208858,
+    "scripcode": 534615
   },
   {
     "name": "Nectar Lifesciences Limited",
@@ -16908,7 +21710,10 @@ const stockData: StockMapping[] = [
     "isin": "INE023H01027",
     "symbol": "NECLIFE",
     "stockid": "",
-    "companyid": "16819"
+    "companyid": "16819",
+    "tickertape_sid": "NECT",
+    "fincode": 132649,
+    "scripcode": 532649
   },
   {
     "name": "Next Mediaworks Limited",
@@ -16918,7 +21723,10 @@ const stockData: StockMapping[] = [
     "isin": "INE747B01016",
     "symbol": "NEXTMEDIA",
     "stockid": "289782",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "NEXM",
+    "fincode": 132416,
+    "scripcode": 532416
   },
   {
     "name": "Nakoda Group of Industries Limited",
@@ -16928,7 +21736,10 @@ const stockData: StockMapping[] = [
     "isin": "INE236Y01012",
     "symbol": "NGIL",
     "stockid": "1003004",
-    "companyid": "67985"
+    "companyid": "67985",
+    "tickertape_sid": "NGI",
+    "fincode": 287435,
+    "scripcode": 541418
   },
   {
     "name": "NGL Fine-Chem Limited",
@@ -16938,7 +21749,10 @@ const stockData: StockMapping[] = [
     "isin": "INE887E01022",
     "symbol": "NGLFINE",
     "stockid": "",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "NGL",
+    "fincode": 124774,
+    "scripcode": 524774
   },
   {
     "name": "NRB Industrial Bearings Limited",
@@ -16948,7 +21762,10 @@ const stockData: StockMapping[] = [
     "isin": "INE047O01014",
     "symbol": "NIBL",
     "stockid": "652056",
-    "companyid": "41082"
+    "companyid": "41082",
+    "tickertape_sid": "NIBL",
+    "fincode": 243201,
+    "scripcode": 535458
   },
   {
     "name": "Nila Infrastructures Limited",
@@ -16958,7 +21775,10 @@ const stockData: StockMapping[] = [
     "isin": "INE937C01029",
     "symbol": "NILAINFRA",
     "stockid": "145427",
-    "companyid": "7831"
+    "companyid": "7831",
+    "tickertape_sid": "NHI",
+    "fincode": 130377,
+    "scripcode": 530377
   },
   {
     "name": "Nila Spaces Limited",
@@ -16968,7 +21788,10 @@ const stockData: StockMapping[] = [
     "isin": "INE00S901012",
     "symbol": "NILASPACES",
     "stockid": "1003093",
-    "companyid": "68090"
+    "companyid": "68090",
+    "tickertape_sid": "NILS",
+    "fincode": 290380,
+    "scripcode": 542231
   },
   {
     "name": "NINtec Systems Limited",
@@ -16978,7 +21801,10 @@ const stockData: StockMapping[] = [
     "isin": "INE395U01014",
     "symbol": "NINSYS",
     "stockid": "1002601",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "NIN",
+    "fincode": 280473,
+    "scripcode": 539843
   },
   {
     "name": "Indo-National Limited",
@@ -16988,7 +21814,10 @@ const stockData: StockMapping[] = [
     "isin": "INE567A01028",
     "symbol": "NIPPOBATRY",
     "stockid": "",
-    "companyid": "13564"
+    "companyid": "13564",
+    "tickertape_sid": "INNL",
+    "fincode": 104058,
+    "scripcode": 504058
   },
   {
     "name": "Niraj Cement Structurals Limited",
@@ -16998,7 +21827,10 @@ const stockData: StockMapping[] = [
     "isin": "INE368I01016",
     "symbol": "NIRAJ",
     "stockid": "410613",
-    "companyid": "21412"
+    "companyid": "21412",
+    "tickertape_sid": "NIRAJ",
+    "fincode": 200089,
+    "scripcode": 532986
   },
   {
     "name": "Nitco Limited",
@@ -17008,7 +21840,10 @@ const stockData: StockMapping[] = [
     "isin": "INE858F01012",
     "symbol": "NITCO",
     "stockid": "587463",
-    "companyid": "16016"
+    "companyid": "16016",
+    "tickertape_sid": "NCOT",
+    "fincode": 132722,
+    "scripcode": 532722
   },
   {
     "name": "Nitiraj Engineers Limited",
@@ -17018,7 +21853,10 @@ const stockData: StockMapping[] = [
     "isin": "INE439T01012",
     "symbol": "NITIRAJ",
     "stockid": "1002716",
-    "companyid": "65620"
+    "companyid": "65620",
+    "tickertape_sid": "NITR",
+    "fincode": 284679,
+    "scripcode": 0
   },
   {
     "name": "NK Industries Limited",
@@ -17028,7 +21866,10 @@ const stockData: StockMapping[] = [
     "isin": "INE542C01019",
     "symbol": "NKIND",
     "stockid": "",
-    "companyid": "9033"
+    "companyid": "9033",
+    "tickertape_sid": "NKIN",
+    "fincode": 119494,
+    "scripcode": 519494
   },
   {
     "name": "Noida Toll Bridge Company Limited",
@@ -17038,7 +21879,10 @@ const stockData: StockMapping[] = [
     "isin": "INE781B01015",
     "symbol": "NOIDATOLL",
     "stockid": "852291",
-    "companyid": "4318"
+    "companyid": "4318",
+    "tickertape_sid": "NOID",
+    "fincode": 132481,
+    "scripcode": 532481
   },
   {
     "name": "Norben Tea & Exports Limited",
@@ -17048,7 +21892,10 @@ const stockData: StockMapping[] = [
     "isin": "INE369C01017",
     "symbol": "NORBTEAEXP",
     "stockid": "",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "NTE",
+    "fincode": 119528,
+    "scripcode": 519528
   },
   {
     "name": "N R Agarwal Industries Limited",
@@ -17058,7 +21905,10 @@ const stockData: StockMapping[] = [
     "isin": "INE740D01017",
     "symbol": "NRAIL",
     "stockid": "",
-    "companyid": "4968"
+    "companyid": "4968",
+    "tickertape_sid": "NRAI",
+    "fincode": 116082,
+    "scripcode": 516082
   },
   {
     "name": "Nupur Recyclers Limited",
@@ -17068,7 +21918,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0JM501013",
     "symbol": "NRL",
     "stockid": "1003584",
-    "companyid": "2020544"
+    "companyid": "2020544",
+    "tickertape_sid": "NRL",
+    "fincode": 303833,
+    "scripcode": 0
   },
   {
     "name": "Nureca Limited",
@@ -17078,7 +21931,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0DSF01015",
     "symbol": "NURECA",
     "stockid": "1003462",
-    "companyid": "2000018"
+    "companyid": "2000018",
+    "tickertape_sid": "NUR",
+    "fincode": 300435,
+    "scripcode": 543264
   },
   {
     "name": "Orissa Bengal Carrier Limited",
@@ -17088,7 +21944,10 @@ const stockData: StockMapping[] = [
     "isin": "INE426Z01016",
     "symbol": "OBCL",
     "stockid": "1002972",
-    "companyid": "67749"
+    "companyid": "67749",
+    "tickertape_sid": "OBC",
+    "fincode": 288619,
+    "scripcode": 541206
   },
   {
     "name": "Oriental Carbon & Chemicals Limited",
@@ -17098,7 +21957,10 @@ const stockData: StockMapping[] = [
     "isin": "INE321D01016",
     "symbol": "OCCL",
     "stockid": "",
-    "companyid": "13320"
+    "companyid": "13320",
+    "tickertape_sid": "ORCR",
+    "fincode": 106579,
+    "scripcode": 506579
   },
   {
     "name": "Oil Country Tubular Limited",
@@ -17108,7 +21970,10 @@ const stockData: StockMapping[] = [
     "isin": "INE591A01010",
     "symbol": "OILCOUNTUB",
     "stockid": "586955",
-    "companyid": "13349"
+    "companyid": "13349",
+    "tickertape_sid": "OCTL",
+    "fincode": 100313,
+    "scripcode": 500313
   },
   {
     "name": "Onelife Capital Advisors Limited",
@@ -17118,7 +21983,10 @@ const stockData: StockMapping[] = [
     "isin": "INE912L01015",
     "symbol": "ONELIFECAP",
     "stockid": "525178",
-    "companyid": "34725"
+    "companyid": "34725",
+    "tickertape_sid": "ONEL",
+    "fincode": 222898,
+    "scripcode": 533632
   },
   {
     "name": "One Point One Solutions Limited",
@@ -17128,7 +21996,10 @@ const stockData: StockMapping[] = [
     "isin": "INE840Y01029",
     "symbol": "ONEPOINT",
     "stockid": "1002890",
-    "companyid": "67273"
+    "companyid": "67273",
+    "tickertape_sid": "ONEP",
+    "fincode": 287842,
+    "scripcode": 544748
   },
   {
     "name": "Orbit Exports Limited",
@@ -17138,7 +22009,10 @@ const stockData: StockMapping[] = [
     "isin": "INE231G01010",
     "symbol": "ORBTEXP",
     "stockid": "564210",
-    "companyid": "8428"
+    "companyid": "8428",
+    "tickertape_sid": "ORBE",
+    "fincode": 112626,
+    "scripcode": 512626
   },
   {
     "name": "Oricon Enterprises Limited",
@@ -17148,7 +22022,10 @@ const stockData: StockMapping[] = [
     "isin": "INE730A01022",
     "symbol": "ORICONENT",
     "stockid": "431937",
-    "companyid": "13359"
+    "companyid": "13359",
+    "tickertape_sid": "OREN",
+    "fincode": 113121,
+    "scripcode": 513121
   },
   {
     "name": "Orient Abrasives Limited",
@@ -17158,7 +22035,8 @@ const stockData: StockMapping[] = [
     "isin": "INE569C01020",
     "symbol": "ORIENTABRA",
     "stockid": "608863",
-    "companyid": "13345"
+    "companyid": "13345",
+    "tickertape_sid": "ORNT"
   },
   {
     "name": "Oriental Trimex Limited",
@@ -17168,7 +22046,10 @@ const stockData: StockMapping[] = [
     "isin": "INE998H01012",
     "symbol": "ORIENTALTL",
     "stockid": "168479",
-    "companyid": "15743"
+    "companyid": "15743",
+    "tickertape_sid": "ORTX",
+    "fincode": 132817,
+    "scripcode": 532817
   },
   {
     "name": "Orient Electric Limited",
@@ -17178,7 +22059,10 @@ const stockData: StockMapping[] = [
     "isin": "INE142Z01019",
     "symbol": "ORIENTELEC",
     "stockid": "1002987",
-    "companyid": "66440"
+    "companyid": "66440",
+    "tickertape_sid": "ONTE",
+    "fincode": 288401,
+    "scripcode": 541301
   },
   {
     "name": "Orient Press Limited",
@@ -17188,7 +22072,10 @@ const stockData: StockMapping[] = [
     "isin": "INE609C01024",
     "symbol": "ORIENTLTD",
     "stockid": "915962",
-    "companyid": "10444"
+    "companyid": "10444",
+    "tickertape_sid": "ORPR",
+    "fincode": 126325,
+    "scripcode": 526325
   },
   {
     "name": "The Orissa Minerals Development Company Limited",
@@ -17198,7 +22085,10 @@ const stockData: StockMapping[] = [
     "isin": "INE725E01024",
     "symbol": "ORISSAMINE",
     "stockid": "",
-    "companyid": "412"
+    "companyid": "412",
+    "tickertape_sid": "ORIS",
+    "fincode": 205704,
+    "scripcode": 590086
   },
   {
     "name": "Ortin Laboratories Limited",
@@ -17208,7 +22098,8 @@ const stockData: StockMapping[] = [
     "isin": "INE749B01020",
     "symbol": "ORTINLAB",
     "stockid": "427178",
-    "companyid": "3789"
+    "companyid": "3789",
+    "tickertape_sid": "ORTN"
   },
   {
     "name": "Osia Hyper Retail Limited",
@@ -17218,7 +22109,10 @@ const stockData: StockMapping[] = [
     "isin": "INE06IR01021",
     "symbol": "OSIAHYPER",
     "stockid": "1003126",
-    "companyid": "1941117"
+    "companyid": "1941117",
+    "tickertape_sid": "OSIH",
+    "fincode": 294424,
+    "scripcode": 0
   },
   {
     "name": "Oswal Agro Mills Limited",
@@ -17228,7 +22122,10 @@ const stockData: StockMapping[] = [
     "isin": "INE142A01012",
     "symbol": "OSWALAGRO",
     "stockid": "571673",
-    "companyid": "13315"
+    "companyid": "13315",
+    "tickertape_sid": "OWAG",
+    "fincode": 100317,
+    "scripcode": 500317
   },
   {
     "name": "ShreeOswal Seeds And Chemicals Limited",
@@ -17238,7 +22135,9 @@ const stockData: StockMapping[] = [
     "isin": "INE00IK01011",
     "symbol": "OSWALSEEDS",
     "stockid": "1003010",
-    "companyid": ""
+    "companyid": "",
+    "fincode": 289048,
+    "scripcode": 0
   },
   {
     "name": "Palash Securities Limited",
@@ -17248,7 +22147,10 @@ const stockData: StockMapping[] = [
     "isin": "INE471W01019",
     "symbol": "PALASHSECU",
     "stockid": "1002799",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "PAAS",
+    "fincode": 286953,
+    "scripcode": 540648
   },
   {
     "name": "Palred Technologies Limited",
@@ -17258,7 +22160,10 @@ const stockData: StockMapping[] = [
     "isin": "INE218G01033",
     "symbol": "PALREDTEC",
     "stockid": "214609",
-    "companyid": "747"
+    "companyid": "747",
+    "tickertape_sid": "PALR",
+    "fincode": 132521,
+    "scripcode": 532521
   },
   {
     "name": "Panache Digilife Limited",
@@ -17268,7 +22173,10 @@ const stockData: StockMapping[] = [
     "isin": "INE895W01019",
     "symbol": "PANACHE",
     "stockid": "1002754",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "PNAC",
+    "fincode": 285514,
+    "scripcode": 0
   },
   {
     "name": "Pansari Developers Limited",
@@ -17278,7 +22186,10 @@ const stockData: StockMapping[] = [
     "isin": "INE697V01011",
     "symbol": "PANSARI",
     "stockid": "1002672",
-    "companyid": "65141"
+    "companyid": "65141",
+    "tickertape_sid": "PANR",
+    "fincode": 283150,
+    "scripcode": 0
   },
   {
     "name": "Par Drugs And Chemicals Limited",
@@ -17288,7 +22199,10 @@ const stockData: StockMapping[] = [
     "isin": "INE04LG01015",
     "symbol": "PAR",
     "stockid": "1003142",
-    "companyid": "55812"
+    "companyid": "55812",
+    "tickertape_sid": "PARR",
+    "fincode": 277780,
+    "scripcode": 0
   },
   {
     "name": "Parag Milk Foods Limited",
@@ -17298,7 +22212,10 @@ const stockData: StockMapping[] = [
     "isin": "INE883N01014",
     "symbol": "PARAGMILK",
     "stockid": "1000522",
-    "companyid": "45605"
+    "companyid": "45605",
+    "tickertape_sid": "PAMF",
+    "fincode": 224160,
+    "scripcode": 539889
   },
   {
     "name": "Paras Petrofils Limited",
@@ -17308,7 +22225,10 @@ const stockData: StockMapping[] = [
     "isin": "INE162C01024",
     "symbol": "PARASPETRO",
     "stockid": "517022",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "PARP",
+    "fincode": 121246,
+    "scripcode": 521246
   },
   {
     "name": "Parsvnath Developers Limited",
@@ -17318,7 +22238,10 @@ const stockData: StockMapping[] = [
     "isin": "INE561H01026",
     "symbol": "PARSVNATH",
     "stockid": "417326",
-    "companyid": "15609"
+    "companyid": "15609",
+    "tickertape_sid": "PARV",
+    "fincode": 132780,
+    "scripcode": 532780
   },
   {
     "name": "Pasupati Acrylon Limited",
@@ -17328,7 +22251,10 @@ const stockData: StockMapping[] = [
     "isin": "INE818B01023",
     "symbol": "PASUPTAC",
     "stockid": "977414",
-    "companyid": "13293"
+    "companyid": "13293",
+    "tickertape_sid": "PASUP",
+    "fincode": 100456,
+    "scripcode": 500456
   },
   {
     "name": "Patel Integrated Logistics Limited",
@@ -17338,7 +22264,10 @@ const stockData: StockMapping[] = [
     "isin": "INE529D01014",
     "symbol": "PATINTLOG",
     "stockid": "486114",
-    "companyid": "10144"
+    "companyid": "10144",
+    "tickertape_sid": "PATL",
+    "fincode": 126381,
+    "scripcode": 526381
   },
   {
     "name": "Pudumjee Paper Products Limited",
@@ -17348,7 +22277,10 @@ const stockData: StockMapping[] = [
     "isin": "INE865T01018",
     "symbol": "PDMJEPAPER",
     "stockid": "1002591",
-    "companyid": "61577"
+    "companyid": "61577",
+    "tickertape_sid": "PUDJ",
+    "fincode": 279871,
+    "scripcode": 539785
   },
   {
     "name": "Pearl Polymers Limited",
@@ -17358,7 +22290,10 @@ const stockData: StockMapping[] = [
     "isin": "INE844A01013",
     "symbol": "PEARLPOLY",
     "stockid": "891282",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "PRLP",
+    "fincode": 123260,
+    "scripcode": 523260
   },
   {
     "name": "PIL ITALICA LIFESTYLE LIMITED",
@@ -17368,7 +22303,10 @@ const stockData: StockMapping[] = [
     "isin": "INE600A01035",
     "symbol": "PILITA",
     "stockid": "890269",
-    "companyid": "11062"
+    "companyid": "11062",
+    "tickertape_sid": "PILI",
+    "fincode": 100327,
+    "scripcode": 500327
   },
   {
     "name": "Pioneer Embroideries Limited",
@@ -17378,7 +22316,10 @@ const stockData: StockMapping[] = [
     "isin": "INE156C01018",
     "symbol": "PIONEEREMB",
     "stockid": "111886",
-    "companyid": "10663"
+    "companyid": "10663",
+    "tickertape_sid": "PIOE",
+    "fincode": 114300,
+    "scripcode": 514300
   },
   {
     "name": "The Peria Karamalai Tea & Produce Company Limited",
@@ -17388,7 +22329,10 @@ const stockData: StockMapping[] = [
     "isin": "INE431F01018",
     "symbol": "PKTEA",
     "stockid": "",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "PERI",
+    "fincode": 219224,
+    "scripcode": 0
   },
   {
     "name": "Plastiblends India Limited",
@@ -17398,7 +22342,10 @@ const stockData: StockMapping[] = [
     "isin": "INE083C01022",
     "symbol": "PLASTIBLEN",
     "stockid": "376093",
-    "companyid": "11213"
+    "companyid": "11213",
+    "tickertape_sid": "PLST",
+    "fincode": 123648,
+    "scripcode": 523648
   },
   {
     "name": "Pritish Nandy Communications Limited",
@@ -17408,7 +22355,10 @@ const stockData: StockMapping[] = [
     "isin": "INE392B01011",
     "symbol": "PNC",
     "stockid": "324843",
-    "companyid": "3552"
+    "companyid": "3552",
+    "tickertape_sid": "PNCL",
+    "fincode": 132387,
+    "scripcode": 532387
   },
   {
     "name": "Pondy Oxides & Chemicals Limited",
@@ -17418,7 +22368,9 @@ const stockData: StockMapping[] = [
     "isin": "INE063E01046",
     "symbol": "POCL",
     "stockid": "",
-    "companyid": ""
+    "companyid": "",
+    "fincode": 132626,
+    "scripcode": 532626
   },
   {
     "name": "Poddar Housing and Development Limited",
@@ -17428,7 +22380,10 @@ const stockData: StockMapping[] = [
     "isin": "INE888B01018",
     "symbol": "PODDARHOUS",
     "stockid": "356486",
-    "companyid": "11648"
+    "companyid": "11648",
+    "tickertape_sid": "PODD",
+    "fincode": 123628,
+    "scripcode": 523628
   },
   {
     "name": "Poddar Pigments Limited",
@@ -17438,7 +22393,10 @@ const stockData: StockMapping[] = [
     "isin": "INE371C01013",
     "symbol": "PODDARMENT",
     "stockid": "983404",
-    "companyid": "9017"
+    "companyid": "9017",
+    "tickertape_sid": "PODR",
+    "fincode": 124570,
+    "scripcode": 524570
   },
   {
     "name": "Ponni Sugars (Erode) Limited",
@@ -17448,7 +22406,10 @@ const stockData: StockMapping[] = [
     "isin": "INE838E01017",
     "symbol": "PONNIERODE",
     "stockid": "542556",
-    "companyid": "3211"
+    "companyid": "3211",
+    "tickertape_sid": "PONS",
+    "fincode": 132460,
+    "scripcode": 532460
   },
   {
     "name": "Prakash Pipes Limited",
@@ -17458,7 +22419,10 @@ const stockData: StockMapping[] = [
     "isin": "INE050001010",
     "symbol": "PPL",
     "stockid": "1003147",
-    "companyid": "1942055"
+    "companyid": "1942055",
+    "tickertape_sid": "PRAS",
+    "fincode": 295245,
+    "scripcode": 542684
   },
   {
     "name": "Prajay Engineers Syndicate Limited",
@@ -17468,7 +22432,10 @@ const stockData: StockMapping[] = [
     "isin": "INE505C01016",
     "symbol": "PRAENG",
     "stockid": "140449",
-    "companyid": "6170"
+    "companyid": "6170",
+    "tickertape_sid": "PRJE",
+    "fincode": 131746,
+    "scripcode": 531746
   },
   {
     "name": "Prakash Steelage Limited",
@@ -17478,7 +22445,10 @@ const stockData: StockMapping[] = [
     "isin": "INE696K01024",
     "symbol": "PRAKASHSTL",
     "stockid": "147387",
-    "companyid": "31869"
+    "companyid": "31869",
+    "tickertape_sid": "PRAA",
+    "fincode": 216545,
+    "scripcode": 533239
   },
   {
     "name": "Praxis Home Retail Limited",
@@ -17488,7 +22458,10 @@ const stockData: StockMapping[] = [
     "isin": "INE546Y01022",
     "symbol": "PRAXIS",
     "stockid": "1002915",
-    "companyid": "67236"
+    "companyid": "67236",
+    "tickertape_sid": "PRAX",
+    "fincode": 287819,
+    "scripcode": 540901
   },
   {
     "name": "Precot Limited",
@@ -17498,7 +22471,10 @@ const stockData: StockMapping[] = [
     "isin": "INE283A01014",
     "symbol": "PRECOT",
     "stockid": "579849",
-    "companyid": "12784"
+    "companyid": "12784",
+    "tickertape_sid": "PREC",
+    "fincode": 200030,
+    "scripcode": 521184
   },
   {
     "name": "Premier Limited",
@@ -17508,7 +22484,10 @@ const stockData: StockMapping[] = [
     "isin": "INE342A01018",
     "symbol": "PREMIER",
     "stockid": "548487",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "PRMI",
+    "fincode": 100540,
+    "scripcode": 500540
   },
   {
     "name": "Premier Polyfilm Limited",
@@ -17518,7 +22497,9 @@ const stockData: StockMapping[] = [
     "isin": "INE309M01012",
     "symbol": "PREMIERPOL",
     "stockid": "988078",
-    "companyid": "10165"
+    "companyid": "10165",
+    "fincode": 114354,
+    "scripcode": 514354
   },
   {
     "name": "Pressman Advertising Limited",
@@ -17538,7 +22519,10 @@ const stockData: StockMapping[] = [
     "isin": "INE032B01021",
     "symbol": "PRIMESECU",
     "stockid": "907044",
-    "companyid": "9152"
+    "companyid": "9152",
+    "tickertape_sid": "PRME",
+    "fincode": 100337,
+    "scripcode": 500337
   },
   {
     "name": "Priti International Limited",
@@ -17548,7 +22532,10 @@ const stockData: StockMapping[] = [
     "isin": "INE974Z01015",
     "symbol": "PRITI",
     "stockid": "1003005",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "PRNI",
+    "fincode": 288695,
+    "scripcode": 0
   },
   {
     "name": "Pritika Auto Industries Limited",
@@ -17558,7 +22545,10 @@ const stockData: StockMapping[] = [
     "isin": "INE583R01029",
     "symbol": "PRITIKAUTO",
     "stockid": "999986",
-    "companyid": "61854"
+    "companyid": "61854",
+    "tickertape_sid": "PRIT",
+    "fincode": 278578,
+    "scripcode": 539359
   },
   {
     "name": "PTL Enterprises Limited",
@@ -17568,7 +22558,10 @@ const stockData: StockMapping[] = [
     "isin": "INE034D01049",
     "symbol": "PTL",
     "stockid": "790997",
-    "companyid": "13259"
+    "companyid": "13259",
+    "tickertape_sid": "PTLE",
+    "fincode": 109220,
+    "scripcode": 509220
   },
   {
     "name": "Radhika Jeweltech Limited",
@@ -17578,7 +22571,9 @@ const stockData: StockMapping[] = [
     "isin": "INE583V01013",
     "symbol": "RADHIKAJWE",
     "stockid": "1002667",
-    "companyid": ""
+    "companyid": "",
+    "fincode": 282602,
+    "scripcode": 540125
   },
   {
     "name": "Music Broadcast Limited",
@@ -17588,7 +22583,10 @@ const stockData: StockMapping[] = [
     "isin": "INE919I01024",
     "symbol": "RADIOCITY",
     "stockid": "1002726",
-    "companyid": "50029"
+    "companyid": "50029",
+    "tickertape_sid": "MUSI",
+    "fincode": 221106,
+    "scripcode": 540366
   },
   {
     "name": "Rajnandini Metal Limited",
@@ -17598,7 +22596,10 @@ const stockData: StockMapping[] = [
     "isin": "INE00KV01022",
     "symbol": "RAJMET",
     "stockid": "1003061",
-    "companyid": "69069"
+    "companyid": "69069",
+    "tickertape_sid": "RADN",
+    "fincode": 290267,
+    "scripcode": 0
   },
   {
     "name": "Raj Rayon Industries Limited",
@@ -17608,7 +22609,10 @@ const stockData: StockMapping[] = [
     "isin": "INE533D01032",
     "symbol": "RAJRILTD",
     "stockid": "535009",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "RRAY",
+    "fincode": 130699,
+    "scripcode": 530699
   },
   {
     "name": "Rajshree Sugars & Chemicals Limited",
@@ -17618,7 +22622,10 @@ const stockData: StockMapping[] = [
     "isin": "INE562B01019",
     "symbol": "RAJSREESUG",
     "stockid": "",
-    "companyid": "13231"
+    "companyid": "13231",
+    "tickertape_sid": "RJSG",
+    "fincode": 100354,
+    "scripcode": 500354
   },
   {
     "name": "Raj Television Network Limited",
@@ -17628,7 +22635,10 @@ const stockData: StockMapping[] = [
     "isin": "INE952H01027",
     "symbol": "RAJTV",
     "stockid": "895687",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "RATV",
+    "fincode": 132826,
+    "scripcode": 532826
   },
   {
     "name": "Rama Phosphates Limited",
@@ -17638,7 +22648,9 @@ const stockData: StockMapping[] = [
     "isin": "INE809A01024",
     "symbol": "RAMAPHO",
     "stockid": "264094",
-    "companyid": ""
+    "companyid": "",
+    "fincode": 124037,
+    "scripcode": 524037
   },
   {
     "name": "Rana Sugars Limited",
@@ -17648,7 +22660,10 @@ const stockData: StockMapping[] = [
     "isin": "INE625B01014",
     "symbol": "RANASUG",
     "stockid": "122569",
-    "companyid": "10661"
+    "companyid": "10661",
+    "tickertape_sid": "RNSG",
+    "fincode": 107490,
+    "scripcode": 507490
   },
   {
     "name": "Rane Brake Lining Limited",
@@ -17658,7 +22673,9 @@ const stockData: StockMapping[] = [
     "isin": "INE244J01017",
     "symbol": "RBL",
     "stockid": "504026",
-    "companyid": "21601"
+    "companyid": "21601",
+    "fincode": 209068,
+    "scripcode": 540065
   },
   {
     "name": "Regency Ceramics Limited",
@@ -17668,7 +22685,10 @@ const stockData: StockMapping[] = [
     "isin": "INE277C01012",
     "symbol": "REGENCERAM",
     "stockid": "283494",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "REGC",
+    "fincode": 115018,
+    "scripcode": 515018
   },
   {
     "name": "Reliance Capital Limited",
@@ -17688,7 +22708,10 @@ const stockData: StockMapping[] = [
     "isin": "INE750D01016",
     "symbol": "RELCHEMQ",
     "stockid": "538529",
-    "companyid": "12329"
+    "companyid": "12329",
+    "tickertape_sid": "RELC",
+    "fincode": 103162,
+    "scripcode": 503162
   },
   {
     "name": "Remsons Industries Limited",
@@ -17698,7 +22721,9 @@ const stockData: StockMapping[] = [
     "isin": "INE474C01015",
     "symbol": "REMSONSIND",
     "stockid": "615398",
-    "companyid": "7542"
+    "companyid": "7542",
+    "fincode": 130919,
+    "scripcode": 530919
   },
   {
     "name": "Rudrabhishek Enterprises Limited",
@@ -17708,7 +22733,10 @@ const stockData: StockMapping[] = [
     "isin": "INE364Z01019",
     "symbol": "REPL",
     "stockid": "1003014",
-    "companyid": "68520"
+    "companyid": "68520",
+    "tickertape_sid": "RURD",
+    "fincode": 289264,
+    "scripcode": 0
   },
   {
     "name": "Revathi Equipment Limited",
@@ -17718,7 +22746,10 @@ const stockData: StockMapping[] = [
     "isin": "INE617A01013",
     "symbol": "REVATHI",
     "stockid": "389840",
-    "companyid": "13180"
+    "companyid": "13180",
+    "tickertape_sid": "REVA",
+    "fincode": 316959,
+    "scripcode": 544246
   },
   {
     "name": "Reliance Home Finance Limited",
@@ -17728,7 +22759,10 @@ const stockData: StockMapping[] = [
     "isin": "INE217K01011",
     "symbol": "RHFL",
     "stockid": "390601",
-    "companyid": "57942"
+    "companyid": "57942",
+    "tickertape_sid": "RLIC",
+    "fincode": 220748,
+    "scripcode": 540709
   },
   {
     "name": "Ritco Logistics Limited",
@@ -17738,7 +22772,10 @@ const stockData: StockMapping[] = [
     "isin": "INE01EG01016",
     "symbol": "RITCO",
     "stockid": "1003101",
-    "companyid": "1850682"
+    "companyid": "1850682",
+    "tickertape_sid": "RITC",
+    "fincode": 233554,
+    "scripcode": 542383
   },
   {
     "name": "Ravi Kumar Distilleries Limited",
@@ -17748,7 +22785,10 @@ const stockData: StockMapping[] = [
     "isin": "INE722J01012",
     "symbol": "RKDL",
     "stockid": "",
-    "companyid": "33055"
+    "companyid": "33055",
+    "tickertape_sid": "RAVK",
+    "fincode": 209070,
+    "scripcode": 533294
   },
   {
     "name": "RKEC Projects Limited",
@@ -17758,7 +22798,10 @@ const stockData: StockMapping[] = [
     "isin": "INE786W01010",
     "symbol": "RKEC",
     "stockid": "1002852",
-    "companyid": "66908"
+    "companyid": "66908",
+    "tickertape_sid": "RKEC",
+    "fincode": 287352,
+    "scripcode": 0
   },
   {
     "name": "Radha Madhav Corporation Limited",
@@ -17768,7 +22811,8 @@ const stockData: StockMapping[] = [
     "isin": "INE172H01014",
     "symbol": "RMCL",
     "stockid": "148447",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "RMCP"
   },
   {
     "name": "Reliance Naval and Engineering Limited",
@@ -17788,7 +22832,10 @@ const stockData: StockMapping[] = [
     "isin": "INE927A01040",
     "symbol": "ROLLT",
     "stockid": "949177",
-    "companyid": "13165"
+    "companyid": "13165",
+    "tickertape_sid": "RLTN",
+    "fincode": 102448,
+    "scripcode": 502448
   },
   {
     "name": "Raj Oil Mills Limited",
@@ -17798,7 +22845,10 @@ const stockData: StockMapping[] = [
     "isin": "INE294G01026",
     "symbol": "ROML",
     "stockid": "697859",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "RAJS",
+    "fincode": 209040,
+    "scripcode": 533093
   },
   {
     "name": "Rossell India Limited",
@@ -17808,7 +22858,10 @@ const stockData: StockMapping[] = [
     "isin": "INE847C01020",
     "symbol": "ROSSELLIND",
     "stockid": "946670",
-    "companyid": "4800"
+    "companyid": "4800",
+    "tickertape_sid": "ROSS",
+    "fincode": 219268,
+    "scripcode": 533168
   },
   {
     "name": "RPG Life Sciences Limited",
@@ -17818,7 +22871,10 @@ const stockData: StockMapping[] = [
     "isin": "INE105J01010",
     "symbol": "RPGLIFE",
     "stockid": "456242",
-    "companyid": "21505"
+    "companyid": "21505",
+    "tickertape_sid": "RPGL",
+    "fincode": 205250,
+    "scripcode": 532983
   },
   {
     "name": "R.P.P. Infra Projects Limited",
@@ -17828,7 +22884,10 @@ const stockData: StockMapping[] = [
     "isin": "INE324L01013",
     "symbol": "RPPINFRA",
     "stockid": "",
-    "companyid": "32964"
+    "companyid": "32964",
+    "tickertape_sid": "RPPI",
+    "fincode": 221213,
+    "scripcode": 533284
   },
   {
     "name": "Rajshree Polypack Limited",
@@ -17838,7 +22897,9 @@ const stockData: StockMapping[] = [
     "isin": "INE760W01015",
     "symbol": "RPPL",
     "stockid": "1003050",
-    "companyid": "68898"
+    "companyid": "68898",
+    "fincode": 289006,
+    "scripcode": 0
   },
   {
     "name": "R. S. Software (India) Limited",
@@ -17848,7 +22909,10 @@ const stockData: StockMapping[] = [
     "isin": "INE165B01029",
     "symbol": "RSSOFTWARE",
     "stockid": "",
-    "companyid": "10490"
+    "companyid": "10490",
+    "tickertape_sid": "RSSI",
+    "fincode": 117447,
+    "scripcode": 517447
   },
   {
     "name": "Ruchi Infrastructure Limited",
@@ -17858,7 +22922,10 @@ const stockData: StockMapping[] = [
     "isin": "INE413B01023",
     "symbol": "RUCHINFRA",
     "stockid": "933424",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "RUCH",
+    "fincode": 109020,
+    "scripcode": 509020
   },
   {
     "name": "Ruchira Papers Limited",
@@ -17868,7 +22935,10 @@ const stockData: StockMapping[] = [
     "isin": "INE803H01014",
     "symbol": "RUCHIRA",
     "stockid": "577633",
-    "companyid": "18210"
+    "companyid": "18210",
+    "tickertape_sid": "RCHR",
+    "fincode": 132785,
+    "scripcode": 532785
   },
   {
     "name": "Ravinder Heights Limited",
@@ -17878,7 +22948,10 @@ const stockData: StockMapping[] = [
     "isin": "INE09E501017",
     "symbol": "RVHL",
     "stockid": "1003449",
-    "companyid": "1992578"
+    "companyid": "1992578",
+    "tickertape_sid": "RVH",
+    "fincode": 300179,
+    "scripcode": 543251
   },
   {
     "name": "Sab Events & Governance Now Media Limited",
@@ -17888,7 +22961,10 @@ const stockData: StockMapping[] = [
     "isin": "INE860T01019",
     "symbol": "SABEVENTS",
     "stockid": "",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "SABV",
+    "fincode": 282920,
+    "scripcode": 540081
   },
   {
     "name": "Sri Adhikari Brothers Television Network Limited",
@@ -17908,7 +22984,10 @@ const stockData: StockMapping[] = [
     "isin": "INE226H01026",
     "symbol": "SADBHAV",
     "stockid": "577653",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "SADE",
+    "fincode": 132710,
+    "scripcode": 532710
   },
   {
     "name": "Sadbhav Infrastructure Project Limited",
@@ -17918,7 +22997,10 @@ const stockData: StockMapping[] = [
     "isin": "INE764L01010",
     "symbol": "SADBHIN",
     "stockid": "",
-    "companyid": "30247"
+    "companyid": "30247",
+    "tickertape_sid": "SADB",
+    "fincode": 229458,
+    "scripcode": 539346
   },
   {
     "name": "Sagardeep Alloys Limited",
@@ -17928,7 +23010,10 @@ const stockData: StockMapping[] = [
     "isin": "INE976T01013",
     "symbol": "SAGARDEEP",
     "stockid": "1002618",
-    "companyid": "64202"
+    "companyid": "64202",
+    "tickertape_sid": "SAGP",
+    "fincode": 280966,
+    "scripcode": 0
   },
   {
     "name": "Sah Polymers Limited",
@@ -17938,7 +23023,10 @@ const stockData: StockMapping[] = [
     "isin": "INE035801013",
     "symbol": "SAH",
     "stockid": "1003779",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "SSH",
+    "fincode": 132841,
+    "scripcode": 532841
   },
   {
     "name": "Sakar Healthcare Limited",
@@ -17948,7 +23036,10 @@ const stockData: StockMapping[] = [
     "isin": "INE732S01012",
     "symbol": "SAKAR",
     "stockid": "1002668",
-    "companyid": "56123"
+    "companyid": "56123",
+    "tickertape_sid": "SAKA",
+    "fincode": 283121,
+    "scripcode": 0
   },
   {
     "name": "Sakthi Sugars Limited",
@@ -17958,7 +23049,10 @@ const stockData: StockMapping[] = [
     "isin": "INE623A01011",
     "symbol": "SAKHTISUG",
     "stockid": "197942",
-    "companyid": "13135"
+    "companyid": "13135",
+    "tickertape_sid": "SKSG",
+    "fincode": 107315,
+    "scripcode": 507315
   },
   {
     "name": "Saksoft Limited",
@@ -17968,7 +23062,10 @@ const stockData: StockMapping[] = [
     "isin": "INE667G01023",
     "symbol": "SAKSOFT",
     "stockid": "313906",
-    "companyid": "13045"
+    "companyid": "13045",
+    "tickertape_sid": "SAKS",
+    "fincode": 190051,
+    "scripcode": 590051
   },
   {
     "name": "Sakuma Exports Limited",
@@ -17978,7 +23075,10 @@ const stockData: StockMapping[] = [
     "isin": "INE190H01024",
     "symbol": "SAKUMA",
     "stockid": "957635",
-    "companyid": "16050"
+    "companyid": "16050",
+    "tickertape_sid": "SAKE",
+    "fincode": 132713,
+    "scripcode": 532713
   },
   {
     "name": "Salona Cotspin Limited",
@@ -17988,7 +23088,10 @@ const stockData: StockMapping[] = [
     "isin": "INE498E01010",
     "symbol": "SALONA",
     "stockid": "536762",
-    "companyid": "5648"
+    "companyid": "5648",
+    "tickertape_sid": "SALO",
+    "fincode": 190056,
+    "scripcode": 590056
   },
   {
     "name": "S.A.L. Steel Limited",
@@ -17998,7 +23101,10 @@ const stockData: StockMapping[] = [
     "isin": "INE658G01014",
     "symbol": "SALSTEEL",
     "stockid": "",
-    "companyid": "1090"
+    "companyid": "1090",
+    "tickertape_sid": "SALS",
+    "fincode": 132604,
+    "scripcode": 532604
   },
   {
     "name": "Salzer Electronics Limited",
@@ -18008,7 +23114,10 @@ const stockData: StockMapping[] = [
     "isin": "INE457F01013",
     "symbol": "SALZERELEC",
     "stockid": "594841",
-    "companyid": "12008"
+    "companyid": "12008",
+    "tickertape_sid": "SALZ",
+    "fincode": 117059,
+    "scripcode": 517059
   },
   {
     "name": "Sambhaav Media Limited",
@@ -18018,7 +23127,10 @@ const stockData: StockMapping[] = [
     "isin": "INE699B01027",
     "symbol": "SAMBHAAV",
     "stockid": "898483",
-    "companyid": "7037"
+    "companyid": "7037",
+    "tickertape_sid": "SMBH",
+    "fincode": 111630,
+    "scripcode": 511630
   },
   {
     "name": "Sanco Industries Limited",
@@ -18038,7 +23150,10 @@ const stockData: StockMapping[] = [
     "isin": "INE583B01015",
     "symbol": "SANDESH",
     "stockid": "",
-    "companyid": "8483"
+    "companyid": "8483",
+    "tickertape_sid": "SNDH",
+    "fincode": 126725,
+    "scripcode": 526725
   },
   {
     "name": "Sanginita Chemicals Limited",
@@ -18048,7 +23163,10 @@ const stockData: StockMapping[] = [
     "isin": "INE753W01010",
     "symbol": "SANGINITA",
     "stockid": "1002721",
-    "companyid": "39765"
+    "companyid": "39765",
+    "tickertape_sid": "SNGN",
+    "fincode": 252145,
+    "scripcode": 0
   },
   {
     "name": "Sanwaria Consumer Limited",
@@ -18058,7 +23176,10 @@ const stockData: StockMapping[] = [
     "isin": "INE890C01046",
     "symbol": "SANWARIA",
     "stockid": "592543",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "SNWR",
+    "fincode": 119260,
+    "scripcode": 519260
   },
   {
     "name": "Sarla Performance Fibers Limited",
@@ -18068,7 +23189,10 @@ const stockData: StockMapping[] = [
     "isin": "INE453D01025",
     "symbol": "SARLAPOLY",
     "stockid": "612785",
-    "companyid": "8081"
+    "companyid": "8081",
+    "tickertape_sid": "SARL",
+    "fincode": 126885,
+    "scripcode": 526885
   },
   {
     "name": "Sarveshwar Foods Limited",
@@ -18078,7 +23202,9 @@ const stockData: StockMapping[] = [
     "isin": "INE324X01018",
     "symbol": "SARVESHWAR",
     "stockid": "1002943",
-    "companyid": "53223"
+    "companyid": "53223",
+    "fincode": 288576,
+    "scripcode": 543688
   },
   {
     "name": "SBC Exports Limited",
@@ -18088,7 +23214,10 @@ const stockData: StockMapping[] = [
     "isin": "INE04AK01028",
     "symbol": "SBC",
     "stockid": "1003152",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "SBC",
+    "fincode": 295145,
+    "scripcode": 542725
   },
   {
     "name": "Stampede Capital Limited",
@@ -18098,7 +23227,8 @@ const stockData: StockMapping[] = [
     "isin": "INE224E01036",
     "symbol": "SCAPDVR",
     "stockid": "442477",
-    "companyid": "5896"
+    "companyid": "5896",
+    "tickertape_sid": "STAMdv"
   },
   {
     "name": "Sheetal Cool Products Limited",
@@ -18108,7 +23238,10 @@ const stockData: StockMapping[] = [
     "isin": "INE501Y01019",
     "symbol": "SCPL",
     "stockid": "1002870",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "SCP",
+    "fincode": 287353,
+    "scripcode": 540757
   },
   {
     "name": "SecUR Credentials Limited",
@@ -18118,7 +23251,10 @@ const stockData: StockMapping[] = [
     "isin": "INE195Y01010",
     "symbol": "SECURCRED",
     "stockid": "1002875",
-    "companyid": "67107"
+    "companyid": "67107",
+    "tickertape_sid": "SECC",
+    "fincode": 287622,
+    "scripcode": 543625
   },
   {
     "name": "SECUREKLOUD TECHNOLOGIES LIMITED",
@@ -18128,7 +23264,10 @@ const stockData: StockMapping[] = [
     "isin": "INE650K01021",
     "symbol": "SECURKLOUD",
     "stockid": "547354",
-    "companyid": "3836"
+    "companyid": "3836",
+    "tickertape_sid": "8KMS",
+    "fincode": 112161,
+    "scripcode": 512161
   },
   {
     "name": "Sejal Glass Limited",
@@ -18138,7 +23277,10 @@ const stockData: StockMapping[] = [
     "isin": "INE955I01044",
     "symbol": "SEJALLTD",
     "stockid": "693903",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "SEZA",
+    "fincode": 200109,
+    "scripcode": 532993
   },
   {
     "name": "Selan Exploration Technology Limited",
@@ -18148,7 +23290,8 @@ const stockData: StockMapping[] = [
     "isin": "INE818A01017",
     "symbol": "SELAN",
     "stockid": "",
-    "companyid": "8508"
+    "companyid": "8508",
+    "tickertape_sid": "SELA"
   },
   {
     "name": "SEL Manufacturing Company Limited",
@@ -18158,7 +23301,10 @@ const stockData: StockMapping[] = [
     "isin": "INE105I01020",
     "symbol": "SELMC",
     "stockid": "347964",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "SELM",
+    "fincode": 132886,
+    "scripcode": 532886
   },
   {
     "name": "S.E. Power Limited",
@@ -18168,7 +23314,8 @@ const stockData: StockMapping[] = [
     "isin": "INE735M01018",
     "symbol": "SEPOWER",
     "stockid": "",
-    "companyid": "41007"
+    "companyid": "41007",
+    "tickertape_sid": "SEPW"
   },
   {
     "name": "Sequent Scientific Limited",
@@ -18178,7 +23325,8 @@ const stockData: StockMapping[] = [
     "isin": "INE807F01027",
     "symbol": "SEQUENT",
     "stockid": "213056",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "SEQU"
   },
   {
     "name": "Servotech Power Systems Limited",
@@ -18188,7 +23336,9 @@ const stockData: StockMapping[] = [
     "isin": "INE782X01025",
     "symbol": "SERVOTECH",
     "stockid": "1002803",
-    "companyid": ""
+    "companyid": "",
+    "fincode": 287004,
+    "scripcode": 0
   },
   {
     "name": "Setco Automotive Limited",
@@ -18198,7 +23348,10 @@ const stockData: StockMapping[] = [
     "isin": "INE878E01021",
     "symbol": "SETCO",
     "stockid": "163380",
-    "companyid": "12014"
+    "companyid": "12014",
+    "tickertape_sid": "SETC",
+    "fincode": 105075,
+    "scripcode": 505075
   },
   {
     "name": "Setubandhan Infrastructure Limited",
@@ -18208,7 +23361,10 @@ const stockData: StockMapping[] = [
     "isin": "INE023M01027",
     "symbol": "SETUINFRA",
     "stockid": "375640",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "SETU",
+    "fincode": 224224,
+    "scripcode": 533605
   },
   {
     "name": "Seya Industries Limited",
@@ -18218,7 +23374,10 @@ const stockData: StockMapping[] = [
     "isin": "INE573R01012",
     "symbol": "SEYAIND",
     "stockid": "168969",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "SEYA",
+    "fincode": 124324,
+    "scripcode": 524324
   },
   {
     "name": "Synergy Green Industries Limited",
@@ -18228,7 +23387,10 @@ const stockData: StockMapping[] = [
     "isin": "INE00QT01015",
     "symbol": "SGIL",
     "stockid": "1003051",
-    "companyid": "68903"
+    "companyid": "68903",
+    "tickertape_sid": "SGI",
+    "fincode": 289870,
+    "scripcode": 541929
   },
   {
     "name": "STL Global Limited",
@@ -18238,7 +23400,10 @@ const stockData: StockMapping[] = [
     "isin": "INE353H01010",
     "symbol": "SGL",
     "stockid": "411741",
-    "companyid": "15272"
+    "companyid": "15272",
+    "tickertape_sid": "STLG",
+    "fincode": 132730,
+    "scripcode": 532730
   },
   {
     "name": "Shah Alloys Limited",
@@ -18248,7 +23413,10 @@ const stockData: StockMapping[] = [
     "isin": "INE640C01011",
     "symbol": "SHAHALLOYS",
     "stockid": "543658",
-    "companyid": "11022"
+    "companyid": "11022",
+    "tickertape_sid": "SHAA",
+    "fincode": 113436,
+    "scripcode": 513436
   },
   {
     "name": "Shaily Engineering Plastics Limited",
@@ -18258,7 +23426,9 @@ const stockData: StockMapping[] = [
     "isin": "INE151G01010",
     "symbol": "SHAILY",
     "stockid": "762139",
-    "companyid": "11888"
+    "companyid": "11888",
+    "fincode": 101423,
+    "scripcode": 501423
   },
   {
     "name": "Shanti Overseas (India) Limited",
@@ -18268,7 +23438,10 @@ const stockData: StockMapping[] = [
     "isin": "INE933X01016",
     "symbol": "SHANTI",
     "stockid": "1002792",
-    "companyid": "66463"
+    "companyid": "66463",
+    "tickertape_sid": "SNTI",
+    "fincode": 286873,
+    "scripcode": 0
   },
   {
     "name": "Share India Securities Limited",
@@ -18278,7 +23451,9 @@ const stockData: StockMapping[] = [
     "isin": "INE932X01018",
     "symbol": "SHAREINDIA",
     "stockid": "1002849",
-    "companyid": "66863"
+    "companyid": "66863",
+    "fincode": 287141,
+    "scripcode": 540725
   },
   {
     "name": "Shemaroo Entertainment Limited",
@@ -18288,7 +23463,10 @@ const stockData: StockMapping[] = [
     "isin": "INE363M01019",
     "symbol": "SHEMAROO",
     "stockid": "246592",
-    "companyid": "57482"
+    "companyid": "57482",
+    "tickertape_sid": "SHEM",
+    "fincode": 209224,
+    "scripcode": 538685
   },
   {
     "name": "Shivam Autotech Limited",
@@ -18298,7 +23476,10 @@ const stockData: StockMapping[] = [
     "isin": "INE637H01024",
     "symbol": "SHIVAMAUTO",
     "stockid": "981419",
-    "companyid": "19365"
+    "companyid": "19365",
+    "tickertape_sid": "SHAU",
+    "fincode": 132776,
+    "scripcode": 532776
   },
   {
     "name": "Shiva Mills Limited",
@@ -18308,7 +23489,10 @@ const stockData: StockMapping[] = [
     "isin": "INE644Y01017",
     "symbol": "SHIVAMILLS",
     "stockid": "1002933",
-    "companyid": "53711"
+    "companyid": "53711",
+    "tickertape_sid": "SVAM",
+    "fincode": 288530,
+    "scripcode": 540961
   },
   {
     "name": "Shiva Texyarn Limited",
@@ -18318,7 +23502,10 @@ const stockData: StockMapping[] = [
     "isin": "INE705C01020",
     "symbol": "SHIVATEX",
     "stockid": "649649",
-    "companyid": "58"
+    "companyid": "58",
+    "tickertape_sid": "SHTE",
+    "fincode": 111108,
+    "scripcode": 511108
   },
   {
     "name": "Shradha Infraprojects Limited",
@@ -18328,7 +23515,9 @@ const stockData: StockMapping[] = [
     "isin": "INE715Y01023",
     "symbol": "SHRADHA",
     "stockid": "1002891",
-    "companyid": "67227"
+    "companyid": "67227",
+    "fincode": 287754,
+    "scripcode": 0
   },
   {
     "name": "Shree Rama Multi-Tech Limited",
@@ -18338,7 +23527,10 @@ const stockData: StockMapping[] = [
     "isin": "INE879A01019",
     "symbol": "SHREERAMA",
     "stockid": "633460",
-    "companyid": "4407"
+    "companyid": "4407",
+    "tickertape_sid": "SHRM",
+    "fincode": 132310,
+    "scripcode": 532310
   },
   {
     "name": "Shrenik Limited",
@@ -18348,7 +23540,10 @@ const stockData: StockMapping[] = [
     "isin": "INE632X01030",
     "symbol": "SHRENIK",
     "stockid": "1002783",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "SHRK",
+    "fincode": 286684,
+    "scripcode": 0
   },
   {
     "name": "Shreyans Industries Limited",
@@ -18358,7 +23553,10 @@ const stockData: StockMapping[] = [
     "isin": "INE231C01019",
     "symbol": "SHREYANIND",
     "stockid": "355941",
-    "companyid": "12307"
+    "companyid": "12307",
+    "tickertape_sid": "SHRY",
+    "fincode": 116016,
+    "scripcode": 516016
   },
   {
     "name": "Shriram Pistons & Rings Limited",
@@ -18368,7 +23566,10 @@ const stockData: StockMapping[] = [
     "isin": "INE526E01018",
     "symbol": "SHRIPISTON",
     "stockid": "",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "SHIE",
+    "fincode": 218771,
+    "scripcode": 544344
   },
   {
     "name": "Shyam Century Ferrous Limited",
@@ -18378,7 +23579,10 @@ const stockData: StockMapping[] = [
     "isin": "INE979R01011",
     "symbol": "SHYAMCENT",
     "stockid": "685541",
-    "companyid": "60265"
+    "companyid": "60265",
+    "tickertape_sid": "SHYC",
+    "fincode": 239116,
+    "scripcode": 539252
   },
   {
     "name": "Signet Industries Limited",
@@ -18388,7 +23592,10 @@ const stockData: StockMapping[] = [
     "isin": "INE529F01035",
     "symbol": "SIGIND",
     "stockid": "235635",
-    "companyid": "4201"
+    "companyid": "4201",
+    "tickertape_sid": "SIGN",
+    "fincode": 112131,
+    "scripcode": 512131
   },
   {
     "name": "Sikko Industries Limited",
@@ -18398,7 +23605,9 @@ const stockData: StockMapping[] = [
     "isin": "INE112X01017",
     "symbol": "SIKKO",
     "stockid": "1002752",
-    "companyid": ""
+    "companyid": "",
+    "fincode": 285499,
+    "scripcode": 0
   },
   {
     "name": "Standard Industries Limited",
@@ -18408,7 +23617,10 @@ const stockData: StockMapping[] = [
     "isin": "INE173A01025",
     "symbol": "SIL",
     "stockid": "478090",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "STDI",
+    "fincode": 130017,
+    "scripcode": 530017
   },
   {
     "name": "Silgo Retail Limited",
@@ -18418,7 +23630,10 @@ const stockData: StockMapping[] = [
     "isin": "INE01II01013",
     "symbol": "SILGO",
     "stockid": "1003068",
-    "companyid": "69071"
+    "companyid": "69071",
+    "tickertape_sid": "SILG",
+    "fincode": 291438,
+    "scripcode": 0
   },
   {
     "name": "SIL Investments Limited",
@@ -18428,7 +23643,10 @@ const stockData: StockMapping[] = [
     "isin": "INE923A01015",
     "symbol": "SILINV",
     "stockid": "928757",
-    "companyid": "13665"
+    "companyid": "13665",
+    "tickertape_sid": "SILI",
+    "fincode": 121194,
+    "scripcode": 521194
   },
   {
     "name": "Silly Monks Entertainment Limited",
@@ -18438,7 +23656,10 @@ const stockData: StockMapping[] = [
     "isin": "INE203Y01012",
     "symbol": "SILLYMONKS",
     "stockid": "1002911",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "SILL",
+    "fincode": 288090,
+    "scripcode": 0
   },
   {
     "name": "Silver Touch Technologies Limited",
@@ -18448,7 +23669,9 @@ const stockData: StockMapping[] = [
     "isin": "INE625X01018",
     "symbol": "SILVERTUC",
     "stockid": "1002884",
-    "companyid": "56433"
+    "companyid": "56433",
+    "fincode": 287683,
+    "scripcode": 543525
   },
   {
     "name": "Simbhaoli Sugars Limited",
@@ -18458,7 +23681,10 @@ const stockData: StockMapping[] = [
     "isin": "INE748T01016",
     "symbol": "SIMBHALS",
     "stockid": "1002589",
-    "companyid": "42186"
+    "companyid": "42186",
+    "tickertape_sid": "SIMB",
+    "fincode": 269357,
+    "scripcode": 539742
   },
   {
     "name": "Simplex Infrastructures Limited",
@@ -18468,7 +23694,10 @@ const stockData: StockMapping[] = [
     "isin": "INE059B01024",
     "symbol": "SIMPLEXINF",
     "stockid": "611646",
-    "companyid": "10948"
+    "companyid": "10948",
+    "tickertape_sid": "SINF",
+    "fincode": 123838,
+    "scripcode": 523838
   },
   {
     "name": "Sintercom India Limited",
@@ -18478,7 +23707,10 @@ const stockData: StockMapping[] = [
     "isin": "INE129Z01016",
     "symbol": "SINTERCOM",
     "stockid": "1002916",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "SINE",
+    "fincode": 213563,
+    "scripcode": 0
   },
   {
     "name": "Siti Networks Limited",
@@ -18488,7 +23720,10 @@ const stockData: StockMapping[] = [
     "isin": "INE965H01011",
     "symbol": "SITINET",
     "stockid": "774406",
-    "companyid": "18878"
+    "companyid": "18878",
+    "tickertape_sid": "SITI",
+    "fincode": 132795,
+    "scripcode": 532795
   },
   {
     "name": "SKM Egg Products Export (India) Limited",
@@ -18498,7 +23733,9 @@ const stockData: StockMapping[] = [
     "isin": "INE411D01015",
     "symbol": "SKMEGGPROD",
     "stockid": "104297",
-    "companyid": "5030"
+    "companyid": "5030",
+    "fincode": 132143,
+    "scripcode": 532143
   },
   {
     "name": "Sky Gold Limited",
@@ -18508,7 +23745,10 @@ const stockData: StockMapping[] = [
     "isin": "INE01IU01018",
     "symbol": "SKYGOLD",
     "stockid": "1003056",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "SKY",
+    "fincode": 291768,
+    "scripcode": 541967
   },
   {
     "name": "Sarthak Metals Limited",
@@ -18518,7 +23758,10 @@ const stockData: StockMapping[] = [
     "isin": "INE017W01010",
     "symbol": "SMLT",
     "stockid": "1002733",
-    "companyid": "39899"
+    "companyid": "39899",
+    "tickertape_sid": "SML",
+    "fincode": 284649,
+    "scripcode": 540393
   },
   {
     "name": "SMS Lifesciences India Limited",
@@ -18528,7 +23771,8 @@ const stockData: StockMapping[] = [
     "isin": "INE320X01016",
     "symbol": "SMSLIFE",
     "stockid": "1002809",
-    "companyid": "65362"
+    "companyid": "65362",
+    "tickertape_sid": "SMSL"
   },
   {
     "name": "Softtech Engineers Limited",
@@ -18538,7 +23782,10 @@ const stockData: StockMapping[] = [
     "isin": "INE728Z01015",
     "symbol": "SOFTTECH",
     "stockid": "1002981",
-    "companyid": "67894"
+    "companyid": "67894",
+    "tickertape_sid": "SOTF",
+    "fincode": 289105,
+    "scripcode": 543470
   },
   {
     "name": "Soma Textiles & Industries Limited",
@@ -18548,7 +23795,10 @@ const stockData: StockMapping[] = [
     "isin": "INE314C01013",
     "symbol": "SOMATEX",
     "stockid": "",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "SOMA",
+    "fincode": 121034,
+    "scripcode": 521034
   },
   {
     "name": "Somi Conveyor Beltings Limited",
@@ -18558,7 +23808,10 @@ const stockData: StockMapping[] = [
     "isin": "INE323J01019",
     "symbol": "SOMICONVEY",
     "stockid": "284074",
-    "companyid": "21525"
+    "companyid": "21525",
+    "tickertape_sid": "SOMI",
+    "fincode": 200112,
+    "scripcode": 533001
   },
   {
     "name": "Sonam Clock Limited",
@@ -18578,7 +23831,10 @@ const stockData: StockMapping[] = [
     "isin": "INE980Y01015",
     "symbol": "SOUTHWEST",
     "stockid": "1002917",
-    "companyid": "67463"
+    "companyid": "67463",
+    "tickertape_sid": "SWPI",
+    "fincode": 288358,
+    "scripcode": 543986
   },
   {
     "name": "Spacenet Enterprises India Limited",
@@ -18588,7 +23844,10 @@ const stockData: StockMapping[] = [
     "isin": "INE970N01027",
     "symbol": "SPCENET",
     "stockid": "528940",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "SACE",
+    "fincode": 240542,
+    "scripcode": 0
   },
   {
     "name": "Spentex Industries Limited",
@@ -18608,7 +23867,10 @@ const stockData: StockMapping[] = [
     "isin": "INE147A01011",
     "symbol": "SPIC",
     "stockid": "",
-    "companyid": "13154"
+    "companyid": "13154",
+    "tickertape_sid": "SPIC",
+    "fincode": 190030,
+    "scripcode": 590030
   },
   {
     "name": "SPL Industries Limited",
@@ -18618,7 +23880,10 @@ const stockData: StockMapping[] = [
     "isin": "INE978G01016",
     "symbol": "SPLIL",
     "stockid": "497064",
-    "companyid": "6349"
+    "companyid": "6349",
+    "tickertape_sid": "SPND",
+    "fincode": 132651,
+    "scripcode": 532651
   },
   {
     "name": "SPML Infra Limited",
@@ -18628,7 +23893,10 @@ const stockData: StockMapping[] = [
     "isin": "INE937A01023",
     "symbol": "SPMLINFRA",
     "stockid": "853682",
-    "companyid": "11248"
+    "companyid": "11248",
+    "tickertape_sid": "SPML",
+    "fincode": 100402,
+    "scripcode": 500402
   },
   {
     "name": "Sintex Plastics Technology Limited",
@@ -18648,7 +23916,9 @@ const stockData: StockMapping[] = [
     "isin": "INE008Z01012",
     "symbol": "SRPL",
     "stockid": "1002913",
-    "companyid": ""
+    "companyid": "",
+    "fincode": 288281,
+    "scripcode": 0
   },
   {
     "name": "Star Paper Mills Limited",
@@ -18658,7 +23928,10 @@ const stockData: StockMapping[] = [
     "isin": "INE733A01018",
     "symbol": "STARPAPER",
     "stockid": "772903",
-    "companyid": "12993"
+    "companyid": "12993",
+    "tickertape_sid": "STPM",
+    "fincode": 116022,
+    "scripcode": 516022
   },
   {
     "name": "Starteck Finance Limited",
@@ -18668,7 +23941,10 @@ const stockData: StockMapping[] = [
     "isin": "INE992I01013",
     "symbol": "STARTECK",
     "stockid": "827956",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "START",
+    "fincode": 112381,
+    "scripcode": 512381
   },
   {
     "name": "Steel City Securities Limited",
@@ -18678,7 +23954,10 @@ const stockData: StockMapping[] = [
     "isin": "INE395H01011",
     "symbol": "STEELCITY",
     "stockid": "1002720",
-    "companyid": "15885"
+    "companyid": "15885",
+    "tickertape_sid": "SCYS",
+    "fincode": 229571,
+    "scripcode": 0
   },
   {
     "name": "Stel Holdings Limited",
@@ -18688,7 +23967,10 @@ const stockData: StockMapping[] = [
     "isin": "INE577L01016",
     "symbol": "STEL",
     "stockid": "386445",
-    "companyid": "7573"
+    "companyid": "7573",
+    "tickertape_sid": "STEL",
+    "fincode": 222076,
+    "scripcode": 533316
   },
   {
     "name": "Sumeet Industries Limited",
@@ -18698,7 +23980,9 @@ const stockData: StockMapping[] = [
     "isin": "INE235C01010",
     "symbol": "SUMEETINDS",
     "stockid": "763883",
-    "companyid": ""
+    "companyid": "",
+    "fincode": 114211,
+    "scripcode": 514211
   },
   {
     "name": "Sumit Woods Limited",
@@ -18708,7 +23992,10 @@ const stockData: StockMapping[] = [
     "isin": "INE748Z01013",
     "symbol": "SUMIT",
     "stockid": "1003044",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "SUMW",
+    "fincode": 289795,
+    "scripcode": 0
   },
   {
     "name": "Sundaram Multi Pap Limited",
@@ -18718,7 +24005,10 @@ const stockData: StockMapping[] = [
     "isin": "INE108E01023",
     "symbol": "SUNDARAM",
     "stockid": "301681",
-    "companyid": "6080"
+    "companyid": "6080",
+    "tickertape_sid": "SUMP",
+    "fincode": 190047,
+    "scripcode": 533166
   },
   {
     "name": "Sundaram Finance Holdings Limited",
@@ -18728,7 +24018,8 @@ const stockData: StockMapping[] = [
     "isin": "INE202Z01029",
     "symbol": "SUNDARMHLD",
     "stockid": "1002968",
-    "companyid": "5778"
+    "companyid": "5778",
+    "tickertape_sid": "SNDA"
   },
   {
     "name": "Sundaram Brake Linings Limited",
@@ -18738,7 +24029,10 @@ const stockData: StockMapping[] = [
     "isin": "INE073D01013",
     "symbol": "SUNDRMBRAK",
     "stockid": "834668",
-    "companyid": "12973"
+    "companyid": "12973",
+    "tickertape_sid": "SBKL",
+    "fincode": 190072,
+    "scripcode": 590072
   },
   {
     "name": "Superhouse Limited",
@@ -18748,7 +24042,10 @@ const stockData: StockMapping[] = [
     "isin": "INE712B01010",
     "symbol": "SUPERHOUSE",
     "stockid": "122789",
-    "companyid": "44"
+    "companyid": "44",
+    "tickertape_sid": "SPRH",
+    "fincode": 123283,
+    "scripcode": 523283
   },
   {
     "name": "Super Spinning Mills Limited",
@@ -18758,7 +24055,10 @@ const stockData: StockMapping[] = [
     "isin": "INE662A01027",
     "symbol": "SUPERSPIN",
     "stockid": "178636",
-    "companyid": "12785"
+    "companyid": "12785",
+    "tickertape_sid": "SSPM",
+    "fincode": 121180,
+    "scripcode": 521180
   },
   {
     "name": "Supreme Engineering Limited",
@@ -18768,7 +24068,10 @@ const stockData: StockMapping[] = [
     "isin": "INE319Z01021",
     "symbol": "SUPREMEENG",
     "stockid": "1003049",
-    "companyid": "68828"
+    "companyid": "68828",
+    "tickertape_sid": "SUPG",
+    "fincode": 288689,
+    "scripcode": 0
   },
   {
     "name": "Supreme Infrastructure India Limited",
@@ -18778,7 +24081,10 @@ const stockData: StockMapping[] = [
     "isin": "INE550H01011",
     "symbol": "SUPREMEINF",
     "stockid": "178660",
-    "companyid": "19467"
+    "companyid": "19467",
+    "tickertape_sid": "SIIL",
+    "fincode": 132904,
+    "scripcode": 532904
   },
   {
     "name": "Surana Solar Limited",
@@ -18788,7 +24094,10 @@ const stockData: StockMapping[] = [
     "isin": "INE272L01022",
     "symbol": "SURANASOL",
     "stockid": "900586",
-    "companyid": "33181"
+    "companyid": "33181",
+    "tickertape_sid": "SURN",
+    "fincode": 214289,
+    "scripcode": 533298
   },
   {
     "name": "Surana Telecom and Power Limited",
@@ -18798,7 +24107,10 @@ const stockData: StockMapping[] = [
     "isin": "INE130B01031",
     "symbol": "SURANAT&P",
     "stockid": "352351",
-    "companyid": "8690"
+    "companyid": "8690",
+    "tickertape_sid": "SURT",
+    "fincode": 117530,
+    "scripcode": 517530
   },
   {
     "name": "Suryalakshmi Cotton Mills Limited",
@@ -18808,7 +24120,10 @@ const stockData: StockMapping[] = [
     "isin": "INE713B01026",
     "symbol": "SURYALAXMI",
     "stockid": "464892",
-    "companyid": "12333"
+    "companyid": "12333",
+    "tickertape_sid": "SLCM",
+    "fincode": 121200,
+    "scripcode": 521200
   },
   {
     "name": "Suumaya Industries Limited",
@@ -18818,7 +24133,10 @@ const stockData: StockMapping[] = [
     "isin": "INE591Q01016",
     "symbol": "SUULD",
     "stockid": "1002999",
-    "companyid": "67948"
+    "companyid": "67948",
+    "tickertape_sid": "SUUM",
+    "fincode": 288678,
+    "scripcode": 0
   },
   {
     "name": "Suvidhaa Infoserve Limited",
@@ -18828,7 +24146,10 @@ const stockData: StockMapping[] = [
     "isin": "INE018401013",
     "symbol": "SUVIDHAA",
     "stockid": "1003482",
-    "companyid": "1998339"
+    "companyid": "1998339",
+    "tickertape_sid": "SUV",
+    "fincode": 301824,
+    "scripcode": 543281
   },
   {
     "name": "Syncom Formulations (India) Limited",
@@ -18838,7 +24159,10 @@ const stockData: StockMapping[] = [
     "isin": "INE312C01025",
     "symbol": "SYNCOMF",
     "stockid": "831770",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "SYN",
+    "fincode": 124470,
+    "scripcode": 524470
   },
   {
     "name": "Tainwala Chemical and Plastic (I) Limited",
@@ -18848,7 +24172,10 @@ const stockData: StockMapping[] = [
     "isin": "INE123C01018",
     "symbol": "TAINWALCHM",
     "stockid": "",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "TAIN",
+    "fincode": 107785,
+    "scripcode": 507785
   },
   {
     "name": "Take Solutions Limited",
@@ -18858,7 +24185,10 @@ const stockData: StockMapping[] = [
     "isin": "INE142I01023",
     "symbol": "TAKE",
     "stockid": "577625",
-    "companyid": "18603"
+    "companyid": "18603",
+    "tickertape_sid": "TAKE",
+    "fincode": 132890,
+    "scripcode": 532890
   },
   {
     "name": "Tantia Constructions Limited",
@@ -18878,7 +24208,10 @@ const stockData: StockMapping[] = [
     "isin": "INE747K01017",
     "symbol": "TARAPUR",
     "stockid": "328541",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "TARA",
+    "fincode": 219867,
+    "scripcode": 533203
   },
   {
     "name": "Tarmat Limited",
@@ -18888,7 +24221,10 @@ const stockData: StockMapping[] = [
     "isin": "INE924H01018",
     "symbol": "TARMAT",
     "stockid": "121253",
-    "companyid": "19090"
+    "companyid": "19090",
+    "tickertape_sid": "TARM",
+    "fincode": 132869,
+    "scripcode": 532869
   },
   {
     "name": "Tata Coffee Limited",
@@ -18928,7 +24264,10 @@ const stockData: StockMapping[] = [
     "isin": "INE760L01018",
     "symbol": "TBZ",
     "stockid": "205637",
-    "companyid": "38887"
+    "companyid": "38887",
+    "tickertape_sid": "TBZL",
+    "fincode": 223359,
+    "scripcode": 534369
   },
   {
     "name": "TCNS Clothing Co. Limited",
@@ -18948,7 +24287,10 @@ const stockData: StockMapping[] = [
     "isin": "INE778A01021",
     "symbol": "TECHIN",
     "stockid": "540756",
-    "companyid": "9125"
+    "companyid": "9125",
+    "tickertape_sid": "TENI",
+    "fincode": 126576,
+    "scripcode": 526576
   },
   {
     "name": "Tembo Global Industries Limited",
@@ -18958,7 +24300,10 @@ const stockData: StockMapping[] = [
     "isin": "INE869Y01010",
     "symbol": "TEMBO",
     "stockid": "1003034",
-    "companyid": "68734"
+    "companyid": "68734",
+    "tickertape_sid": "TEMB",
+    "fincode": 288168,
+    "scripcode": 0
   },
   {
     "name": "Tera Software Limited",
@@ -18968,7 +24313,10 @@ const stockData: StockMapping[] = [
     "isin": "INE482B01010",
     "symbol": "TERASOFT",
     "stockid": "250836",
-    "companyid": "3675"
+    "companyid": "3675",
+    "tickertape_sid": "TERA",
+    "fincode": 190020,
+    "scripcode": 533982
   },
   {
     "name": "Texmo Pipes and Products Limited",
@@ -18978,7 +24326,10 @@ const stockData: StockMapping[] = [
     "isin": "INE141K01013",
     "symbol": "TEXMOPIPES",
     "stockid": "123775",
-    "companyid": "25028"
+    "companyid": "25028",
+    "tickertape_sid": "TEXO",
+    "fincode": 220084,
+    "scripcode": 533164
   },
   {
     "name": "Transwarranty Finance Limited",
@@ -18988,7 +24339,10 @@ const stockData: StockMapping[] = [
     "isin": "INE804H01012",
     "symbol": "TFL",
     "stockid": "302169",
-    "companyid": "18095"
+    "companyid": "18095",
+    "tickertape_sid": "TRFI",
+    "fincode": 132812,
+    "scripcode": 532812
   },
   {
     "name": "TGB Banquets And Hotels Limited",
@@ -18998,7 +24352,10 @@ const stockData: StockMapping[] = [
     "isin": "INE797H01018",
     "symbol": "TGBHOTELS",
     "stockid": "302206",
-    "companyid": "15913"
+    "companyid": "15913",
+    "tickertape_sid": "TGBB",
+    "fincode": 132845,
+    "scripcode": 532845
   },
   {
     "name": "The Investment Trust Of India Limited",
@@ -19008,7 +24365,10 @@ const stockData: StockMapping[] = [
     "isin": "INE924D01017",
     "symbol": "THEINVEST",
     "stockid": "668137",
-    "companyid": "8109"
+    "companyid": "8109",
+    "tickertape_sid": "TNVE",
+    "fincode": 130023,
+    "scripcode": 530023
   },
   {
     "name": "Thomas Scott (India) Limited",
@@ -19018,7 +24378,10 @@ const stockData: StockMapping[] = [
     "isin": "INE480M01011",
     "symbol": "THOMASCOTT",
     "stockid": "",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "TSIL",
+    "fincode": 231259,
+    "scripcode": 533941
   },
   {
     "name": "Tide Water Oil Company (India) Limited",
@@ -19028,7 +24391,8 @@ const stockData: StockMapping[] = [
     "isin": "INE484C01030",
     "symbol": "TIDEWATER",
     "stockid": "",
-    "companyid": "12263"
+    "companyid": "12263",
+    "tickertape_sid": "TIDE"
   },
   {
     "name": "Tijaria Polypipes Limited",
@@ -19038,7 +24402,10 @@ const stockData: StockMapping[] = [
     "isin": "INE440L01017",
     "symbol": "TIJARIA",
     "stockid": "749080",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "TIJA",
+    "fincode": 212022,
+    "scripcode": 533629
   },
   {
     "name": "TIL Limited",
@@ -19048,7 +24415,10 @@ const stockData: StockMapping[] = [
     "isin": "INE806C01018",
     "symbol": "TIL",
     "stockid": "813379",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "TILL",
+    "fincode": 105196,
+    "scripcode": 505196
   },
   {
     "name": "Times Guaranty Limited",
@@ -19058,7 +24428,8 @@ const stockData: StockMapping[] = [
     "isin": "INE289C01025",
     "symbol": "TIMESGTY",
     "stockid": "817730",
-    "companyid": "8819"
+    "companyid": "8819",
+    "tickertape_sid": "TGFL"
   },
   {
     "name": "The Tinplate Company of India Limited",
@@ -19078,7 +24449,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0LQS01015",
     "symbol": "TIPSFILMS",
     "stockid": "1003711",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "TIP",
+    "fincode": 307729,
+    "scripcode": 543614
   },
   {
     "name": "Tirupati Forge Limited",
@@ -19088,7 +24462,10 @@ const stockData: StockMapping[] = [
     "isin": "INE319Y01024",
     "symbol": "TIRUPATIFL",
     "stockid": "1002861",
-    "companyid": "66910"
+    "companyid": "66910",
+    "tickertape_sid": "TIRF",
+    "fincode": 275504,
+    "scripcode": 0
   },
   {
     "name": "Tamilnad Mercantile Bank Limited",
@@ -19098,7 +24475,10 @@ const stockData: StockMapping[] = [
     "isin": "INE668A01016",
     "symbol": "TMB",
     "stockid": "1003695",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "TMB",
+    "fincode": 209400,
+    "scripcode": 543596
   },
   {
     "name": "Tamilnadu Telecommunication Limited",
@@ -19108,7 +24488,10 @@ const stockData: StockMapping[] = [
     "isin": "INE141D01018",
     "symbol": "TNTELE",
     "stockid": "",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "TAMT",
+    "fincode": 123419,
+    "scripcode": 523419
   },
   {
     "name": "Tokyo Plast International Limited",
@@ -19118,7 +24501,10 @@ const stockData: StockMapping[] = [
     "isin": "INE932C01012",
     "symbol": "TOKYOPLAST",
     "stockid": "661758",
-    "companyid": "4903"
+    "companyid": "4903",
+    "tickertape_sid": "TPLI",
+    "fincode": 100418,
+    "scripcode": 500418
   },
   {
     "name": "Total Transport Systems Limited",
@@ -19128,7 +24514,10 @@ const stockData: StockMapping[] = [
     "isin": "INE336X01012",
     "symbol": "TOTAL",
     "stockid": "1002806",
-    "companyid": "66510"
+    "companyid": "66510",
+    "tickertape_sid": "TOTA",
+    "fincode": 286906,
+    "scripcode": 0
   },
   {
     "name": "Touchwood Entertainment Limited",
@@ -19138,7 +24527,10 @@ const stockData: StockMapping[] = [
     "isin": "INE486Y01013",
     "symbol": "TOUCHWOOD",
     "stockid": "1002902",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "TOUC",
+    "fincode": 287831,
+    "scripcode": 0
   },
   {
     "name": "TPL Plastech Limited",
@@ -19148,7 +24540,10 @@ const stockData: StockMapping[] = [
     "isin": "INE413G01022",
     "symbol": "TPLPLASTEH",
     "stockid": "574344",
-    "companyid": "9097"
+    "companyid": "9097",
+    "tickertape_sid": "TPLP",
+    "fincode": 126582,
+    "scripcode": 526582
   },
   {
     "name": "Tree House Education & Accessories Limited",
@@ -19158,7 +24553,10 @@ const stockData: StockMapping[] = [
     "isin": "INE040M01013",
     "symbol": "TREEHOUSE",
     "stockid": "",
-    "companyid": "34368"
+    "companyid": "34368",
+    "tickertape_sid": "THEA",
+    "fincode": 218822,
+    "scripcode": 533540
   },
   {
     "name": "TREJHARA SOLUTIONS LIMITED",
@@ -19168,7 +24566,10 @@ const stockData: StockMapping[] = [
     "isin": "INE00CA01015",
     "symbol": "TREJHARA",
     "stockid": "1003094",
-    "companyid": "67087"
+    "companyid": "67087",
+    "tickertape_sid": "TREJ",
+    "fincode": 293864,
+    "scripcode": 542233
   },
   {
     "name": "TRF Limited",
@@ -19178,7 +24579,10 @@ const stockData: StockMapping[] = [
     "isin": "INE391D01019",
     "symbol": "TRF",
     "stockid": "774894",
-    "companyid": "12928"
+    "companyid": "12928",
+    "tickertape_sid": "TTRO",
+    "fincode": 105854,
+    "scripcode": 505854
   },
   {
     "name": "Trigyn Technologies Limited",
@@ -19188,7 +24592,10 @@ const stockData: StockMapping[] = [
     "isin": "INE948A01012",
     "symbol": "TRIGYN",
     "stockid": "930564",
-    "companyid": "8348"
+    "companyid": "8348",
+    "tickertape_sid": "TRIG",
+    "fincode": 117562,
+    "scripcode": 517562
   },
   {
     "name": "T T Limited",
@@ -19198,7 +24605,9 @@ const stockData: StockMapping[] = [
     "isin": "INE592B01016",
     "symbol": "TTL",
     "stockid": "201991",
-    "companyid": "12571"
+    "companyid": "12571",
+    "fincode": 114142,
+    "scripcode": 514142
   },
   {
     "name": "TV Vision Limited",
@@ -19208,7 +24617,10 @@ const stockData: StockMapping[] = [
     "isin": "INE871L01013",
     "symbol": "TVVISION",
     "stockid": "511138",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "TVVI",
+    "fincode": 224650,
+    "scripcode": 540083
   },
   {
     "name": "UFO Moviez India Limited",
@@ -19218,7 +24630,10 @@ const stockData: StockMapping[] = [
     "isin": "INE527H01019",
     "symbol": "UFO",
     "stockid": "297638",
-    "companyid": "45489"
+    "companyid": "45489",
+    "tickertape_sid": "UFOM",
+    "fincode": 209495,
+    "scripcode": 539141
   },
   {
     "name": "Ujaas Energy Limited",
@@ -19228,7 +24643,9 @@ const stockData: StockMapping[] = [
     "isin": "INE899L01022",
     "symbol": "UJAAS",
     "stockid": "774710",
-    "companyid": ""
+    "companyid": "",
+    "fincode": 223170,
+    "scripcode": 533644
   },
   {
     "name": "Ujjivan Financial Services Limited",
@@ -19238,7 +24655,9 @@ const stockData: StockMapping[] = [
     "isin": "INE334L01012",
     "symbol": "UJJIVAN",
     "stockid": "1000916",
-    "companyid": "32209"
+    "companyid": "32209",
+    "fincode": 287237,
+    "scripcode": 542904
   },
   {
     "name": "Uma Exports Limited",
@@ -19248,7 +24667,10 @@ const stockData: StockMapping[] = [
     "isin": "INE0GIU01018",
     "symbol": "UMAEXPORTS",
     "stockid": "1003630",
-    "companyid": "2035173"
+    "companyid": "2035173",
+    "tickertape_sid": "UMA",
+    "fincode": 303725,
+    "scripcode": 543513
   },
   {
     "name": "Umang Dairies Limited",
@@ -19268,7 +24690,10 @@ const stockData: StockMapping[] = [
     "isin": "INE240C01028",
     "symbol": "UMESLTD",
     "stockid": "",
-    "companyid": "2591"
+    "companyid": "2591",
+    "tickertape_sid": "USME",
+    "fincode": 132398,
+    "scripcode": 532398
   },
   {
     "name": "United Drilling Tools Limited",
@@ -19278,7 +24703,10 @@ const stockData: StockMapping[] = [
     "isin": "INE961D01019",
     "symbol": "UNIDT",
     "stockid": "801352",
-    "companyid": "11999"
+    "companyid": "11999",
+    "tickertape_sid": "UNID",
+    "fincode": 122014,
+    "scripcode": 522014
   },
   {
     "name": "Uniinfo Telecom Services Limited",
@@ -19288,7 +24716,10 @@ const stockData: StockMapping[] = [
     "isin": "INE481Z01011",
     "symbol": "UNIINFO",
     "stockid": "1002945",
-    "companyid": "67607"
+    "companyid": "67607",
+    "tickertape_sid": "UNNI",
+    "fincode": 288575,
+    "scripcode": 0
   },
   {
     "name": "United Polyfab Gujarat Limited",
@@ -19298,7 +24729,9 @@ const stockData: StockMapping[] = [
     "isin": "INE368U01011",
     "symbol": "UNITEDPOLY",
     "stockid": "1002628",
-    "companyid": ""
+    "companyid": "",
+    "fincode": 281243,
+    "scripcode": 544756
   },
   {
     "name": "The United Nilgiri Tea Estates Company Limited",
@@ -19308,7 +24741,10 @@ const stockData: StockMapping[] = [
     "isin": "INE458F01011",
     "symbol": "UNITEDTEA",
     "stockid": "",
-    "companyid": "8491"
+    "companyid": "8491",
+    "tickertape_sid": "UNIL",
+    "fincode": 219975,
+    "scripcode": 0
   },
   {
     "name": "Univastu India Limited",
@@ -19318,7 +24754,10 @@ const stockData: StockMapping[] = [
     "isin": "INE562X01013",
     "symbol": "UNIVASTU",
     "stockid": "1002788",
-    "companyid": "66326"
+    "companyid": "66326",
+    "tickertape_sid": "UIVA",
+    "fincode": 286712,
+    "scripcode": 0
   },
   {
     "name": "Universus Photo Imagings Limited",
@@ -19328,7 +24767,10 @@ const stockData: StockMapping[] = [
     "isin": "INE03V001013",
     "symbol": "UNIVPHOTO",
     "stockid": "1003379",
-    "companyid": "41966"
+    "companyid": "41966",
+    "tickertape_sid": "UNIH",
+    "fincode": 268509,
+    "scripcode": 542933
   },
   {
     "name": "Urja Global Limited",
@@ -19338,7 +24780,10 @@ const stockData: StockMapping[] = [
     "isin": "INE550C01020",
     "symbol": "URJA",
     "stockid": "1003464",
-    "companyid": "8068"
+    "companyid": "8068",
+    "tickertape_sid": "URJA",
+    "fincode": 126987,
+    "scripcode": 526987
   },
   {
     "name": "UTI Asset Management Company Limited",
@@ -19348,7 +24793,10 @@ const stockData: StockMapping[] = [
     "isin": "INE094J01016",
     "symbol": "UTIAMC",
     "stockid": "1003429",
-    "companyid": "596"
+    "companyid": "596",
+    "tickertape_sid": "UTI",
+    "fincode": 209492,
+    "scripcode": 543238
   },
   {
     "name": "Vadilal Industries Limited",
@@ -19358,7 +24806,10 @@ const stockData: StockMapping[] = [
     "isin": "INE694D01016",
     "symbol": "VADILALIND",
     "stockid": "856077",
-    "companyid": "12858"
+    "companyid": "12858",
+    "tickertape_sid": "VDLI",
+    "fincode": 119156,
+    "scripcode": 519156
   },
   {
     "name": "Vaishali Pharma Limited",
@@ -19368,7 +24819,9 @@ const stockData: StockMapping[] = [
     "isin": "INE972X01014",
     "symbol": "VAISHALI",
     "stockid": "1002804",
-    "companyid": "66621"
+    "companyid": "66621",
+    "fincode": 227717,
+    "scripcode": 0
   },
   {
     "name": "Vardhman Acrylics Limited",
@@ -19378,7 +24831,10 @@ const stockData: StockMapping[] = [
     "isin": "INE116G01013",
     "symbol": "VARDHACRLC",
     "stockid": "794907",
-    "companyid": "3043"
+    "companyid": "3043",
+    "tickertape_sid": "VARD",
+    "fincode": 200029,
+    "scripcode": 0
   },
   {
     "name": "Vardhman Polytex Limited",
@@ -19388,7 +24844,9 @@ const stockData: StockMapping[] = [
     "isin": "INE835A01011",
     "symbol": "VARDMNPOLY",
     "stockid": "183295",
-    "companyid": "11478"
+    "companyid": "11478",
+    "fincode": 114175,
+    "scripcode": 514175
   },
   {
     "name": "Vaswani Industries Limited",
@@ -19398,7 +24856,10 @@ const stockData: StockMapping[] = [
     "isin": "INE590L01019",
     "symbol": "VASWANI",
     "stockid": "766009",
-    "companyid": "33207"
+    "companyid": "33207",
+    "tickertape_sid": "VASW",
+    "fincode": 222336,
+    "scripcode": 533576
   },
   {
     "name": "Vaxtex Cotfab Limited",
@@ -19408,7 +24869,10 @@ const stockData: StockMapping[] = [
     "isin": "INE098201036",
     "symbol": "VCL",
     "stockid": "1003368",
-    "companyid": "1959795"
+    "companyid": "1959795",
+    "tickertape_sid": "VATX",
+    "fincode": 295449,
+    "scripcode": 0
   },
   {
     "name": "Venus Remedies Limited",
@@ -19418,7 +24882,10 @@ const stockData: StockMapping[] = [
     "isin": "INE411B01019",
     "symbol": "VENUSREM",
     "stockid": "568580",
-    "companyid": "8043"
+    "companyid": "8043",
+    "tickertape_sid": "VENR",
+    "fincode": 126953,
+    "scripcode": 526953
   },
   {
     "name": "Vertoz Advertising Limited",
@@ -19428,7 +24895,9 @@ const stockData: StockMapping[] = [
     "isin": "INE188Y01015",
     "symbol": "VERTOZ",
     "stockid": "1002881",
-    "companyid": ""
+    "companyid": "",
+    "fincode": 287655,
+    "scripcode": 0
   },
   {
     "name": "Veto Switchgears And Cables Limited",
@@ -19438,7 +24907,10 @@ const stockData: StockMapping[] = [
     "isin": "INE918N01018",
     "symbol": "VETO",
     "stockid": "480649",
-    "companyid": "42221"
+    "companyid": "42221",
+    "tickertape_sid": "VETO",
+    "fincode": 239649,
+    "scripcode": 539331
   },
   {
     "name": "Viji Finance Limited",
@@ -19448,7 +24920,10 @@ const stockData: StockMapping[] = [
     "isin": "INE159N01027",
     "symbol": "VIJIFIN",
     "stockid": "281926",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "VIJI",
+    "fincode": 244586,
+    "scripcode": 537820
   },
   {
     "name": "Vikas EcoTech Limited",
@@ -19458,7 +24933,10 @@ const stockData: StockMapping[] = [
     "isin": "INE806A01020",
     "symbol": "VIKASECO",
     "stockid": "823793",
-    "companyid": "7528"
+    "companyid": "7528",
+    "tickertape_sid": "VIEC",
+    "fincode": 130961,
+    "scripcode": 530961
   },
   {
     "name": "Vimta Labs Limited",
@@ -19468,7 +24946,10 @@ const stockData: StockMapping[] = [
     "isin": "INE579C01029",
     "symbol": "VIMTALABS",
     "stockid": "179255",
-    "companyid": "10686"
+    "companyid": "10686",
+    "tickertape_sid": "VIML",
+    "fincode": 124394,
+    "scripcode": 524394
   },
   {
     "name": "Vineet Laboratories Limited",
@@ -19478,7 +24959,10 @@ const stockData: StockMapping[] = [
     "isin": "INE505Y01010",
     "symbol": "VINEETLAB",
     "stockid": "1003496",
-    "companyid": "1998729"
+    "companyid": "1998729",
+    "tickertape_sid": "VINE",
+    "fincode": 302439,
+    "scripcode": 543298
   },
   {
     "name": "Vinny Overseas Limited",
@@ -19488,7 +24972,10 @@ const stockData: StockMapping[] = [
     "isin": "INE01KI01027",
     "symbol": "VINNY",
     "stockid": "1003071",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "VINN",
+    "fincode": 291872,
+    "scripcode": 543670
   },
   {
     "name": "VIP Clothing Limited",
@@ -19498,7 +24985,10 @@ const stockData: StockMapping[] = [
     "isin": "INE450G01024",
     "symbol": "VIPCLOTHNG",
     "stockid": "788032",
-    "companyid": "10814"
+    "companyid": "10814",
+    "tickertape_sid": "VIPC",
+    "fincode": 132613,
+    "scripcode": 532613
   },
   {
     "name": "Vipul Limited",
@@ -19508,7 +24998,10 @@ const stockData: StockMapping[] = [
     "isin": "INE946H01037",
     "symbol": "VIPULLTD",
     "stockid": "973227",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "VIPL",
+    "fincode": 111726,
+    "scripcode": 511726
   },
   {
     "name": "Visa Steel Limited",
@@ -19518,7 +25011,8 @@ const stockData: StockMapping[] = [
     "isin": "INE286H01012",
     "symbol": "VISASTEEL",
     "stockid": "157133",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "VISA"
   },
   {
     "name": "Visesh Infotecnics Limited",
@@ -19538,7 +25032,10 @@ const stockData: StockMapping[] = [
     "isin": "INE755Q01025",
     "symbol": "VISHAL",
     "stockid": "917764",
-    "companyid": "56727"
+    "companyid": "56727",
+    "tickertape_sid": "VIFA",
+    "fincode": 267541,
+    "scripcode": 538598
   },
   {
     "name": "Vishwaraj Sugar Industries Limited",
@@ -19548,7 +25045,10 @@ const stockData: StockMapping[] = [
     "isin": "INE430N01022",
     "symbol": "VISHWARAJ",
     "stockid": "1003281",
-    "companyid": "1948392"
+    "companyid": "1948392",
+    "tickertape_sid": "VNSS",
+    "fincode": 229819,
+    "scripcode": 542852
   },
   {
     "name": "Visagar Polytex Limited",
@@ -19558,7 +25058,10 @@ const stockData: StockMapping[] = [
     "isin": "INE370E01029",
     "symbol": "VIVIDHA",
     "stockid": "560577",
-    "companyid": "4025"
+    "companyid": "4025",
+    "tickertape_sid": "VIPO",
+    "fincode": 106146,
+    "scripcode": 506146
   },
   {
     "name": "Walchandnagar Industries Limited",
@@ -19568,7 +25071,10 @@ const stockData: StockMapping[] = [
     "isin": "INE711A01022",
     "symbol": "WALCHANNAG",
     "stockid": "583134",
-    "companyid": "12807"
+    "companyid": "12807",
+    "tickertape_sid": "WALC",
+    "fincode": 107410,
+    "scripcode": 507410
   },
   {
     "name": "Wanbury Limited",
@@ -19578,7 +25084,10 @@ const stockData: StockMapping[] = [
     "isin": "INE107F01022",
     "symbol": "WANBURY",
     "stockid": "965190",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "WANB",
+    "fincode": 124212,
+    "scripcode": 524212
   },
   {
     "name": "Waterbase Limited",
@@ -19588,7 +25097,10 @@ const stockData: StockMapping[] = [
     "isin": "INE054C01015",
     "symbol": "WATERBASE",
     "stockid": "593642",
-    "companyid": "11254"
+    "companyid": "11254",
+    "tickertape_sid": "WTRB",
+    "fincode": 123660,
+    "scripcode": 523660
   },
   {
     "name": "Wealth First Portfolio Managers Limited",
@@ -19598,7 +25110,10 @@ const stockData: StockMapping[] = [
     "isin": "INE658T01017",
     "symbol": "WEALTH",
     "stockid": "1002614",
-    "companyid": "63966"
+    "companyid": "63966",
+    "tickertape_sid": "WEAL",
+    "fincode": 280168,
+    "scripcode": 544536
   },
   {
     "name": "Websol Energy System Limited",
@@ -19608,7 +25123,9 @@ const stockData: StockMapping[] = [
     "isin": "INE855C01015",
     "symbol": "WEBELSOLAR",
     "stockid": "581803",
-    "companyid": "8703"
+    "companyid": "8703",
+    "fincode": 117498,
+    "scripcode": 517498
   },
   {
     "name": "Weizmann Limited",
@@ -19618,7 +25135,10 @@ const stockData: StockMapping[] = [
     "isin": "INE080A01014",
     "symbol": "WEIZMANIND",
     "stockid": "391406",
-    "companyid": "12777"
+    "companyid": "12777",
+    "tickertape_sid": "WEIZ",
+    "fincode": 123011,
+    "scripcode": 523011
   },
   {
     "name": "Wonder Electricals Limited",
@@ -19628,7 +25148,9 @@ const stockData: StockMapping[] = [
     "isin": "INE02WG01016",
     "symbol": "WEL",
     "stockid": "1003158",
-    "companyid": "1944558"
+    "companyid": "1944558",
+    "fincode": 292458,
+    "scripcode": 543449
   },
   {
     "name": "Welspun Investments and Commercials Limited",
@@ -19638,7 +25160,10 @@ const stockData: StockMapping[] = [
     "isin": "INE389K01018",
     "symbol": "WELINV",
     "stockid": "107924",
-    "companyid": "30346"
+    "companyid": "30346",
+    "tickertape_sid": "WICL",
+    "fincode": 218924,
+    "scripcode": 533252
   },
   {
     "name": "WE WIN LIMITED",
@@ -19648,7 +25173,10 @@ const stockData: StockMapping[] = [
     "isin": "INE082W01014",
     "symbol": "WEWIN",
     "stockid": "1002808",
-    "companyid": "66512"
+    "companyid": "66512",
+    "tickertape_sid": "WEWI",
+    "fincode": 286931,
+    "scripcode": 543535
   },
   {
     "name": "Williamson Magor & Company Limited",
@@ -19658,7 +25186,10 @@ const stockData: StockMapping[] = [
     "isin": "INE210A01017",
     "symbol": "WILLAMAGOR",
     "stockid": "",
-    "companyid": "12586"
+    "companyid": "12586",
+    "tickertape_sid": "WILM",
+    "fincode": 119224,
+    "scripcode": 519224
   },
   {
     "name": "Windsor Machines Limited",
@@ -19668,7 +25199,10 @@ const stockData: StockMapping[] = [
     "isin": "INE052A01021",
     "symbol": "WINDMACHIN",
     "stockid": "621602",
-    "companyid": "13460"
+    "companyid": "13460",
+    "tickertape_sid": "WIND",
+    "fincode": 122029,
+    "scripcode": 522029
   },
   {
     "name": "WinPro Industries Limited",
@@ -19678,7 +25212,8 @@ const stockData: StockMapping[] = [
     "isin": "INE974C01022",
     "symbol": "WINPRO",
     "stockid": "449057",
-    "companyid": "6947"
+    "companyid": "6947",
+    "tickertape_sid": "JUMP"
   },
   {
     "name": "The Western India Plywoods Limited",
@@ -19688,7 +25223,10 @@ const stockData: StockMapping[] = [
     "isin": "INE215F01023",
     "symbol": "WIPL",
     "stockid": "",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "WEIP",
+    "fincode": 222407,
+    "scripcode": 0
   },
   {
     "name": "Worth Peripherals Limited",
@@ -19698,7 +25236,10 @@ const stockData: StockMapping[] = [
     "isin": "INE196Y01018",
     "symbol": "WORTH",
     "stockid": "1002824",
-    "companyid": "42652"
+    "companyid": "42652",
+    "tickertape_sid": "WORP",
+    "fincode": 287262,
+    "scripcode": 544577
   },
   {
     "name": "W S Industries (I) Limited",
@@ -19708,7 +25249,10 @@ const stockData: StockMapping[] = [
     "isin": "INE100D01014",
     "symbol": "WSI",
     "stockid": "",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "WSIN",
+    "fincode": 104220,
+    "scripcode": 504220
   },
   {
     "name": "Xelpmoc Design And Tech Limited",
@@ -19718,7 +25262,10 @@ const stockData: StockMapping[] = [
     "isin": "INE01P501012",
     "symbol": "XELPMOC",
     "stockid": "1003100",
-    "companyid": "1850579"
+    "companyid": "1850579",
+    "tickertape_sid": "XELP",
+    "fincode": 291852,
+    "scripcode": 542367
   },
   {
     "name": "Xpro India Limited",
@@ -19728,7 +25275,10 @@ const stockData: StockMapping[] = [
     "isin": "INE445C01015",
     "symbol": "XPROINDIA",
     "stockid": "744932",
-    "companyid": "12692"
+    "companyid": "12692",
+    "tickertape_sid": "XPRO",
+    "fincode": 190013,
+    "scripcode": 590013
   },
   {
     "name": "Yaari Digital Integrated Services Limited",
@@ -19738,7 +25288,8 @@ const stockData: StockMapping[] = [
     "isin": "INE126M01010",
     "symbol": "YAARI",
     "stockid": "648627",
-    "companyid": "24222"
+    "companyid": "24222",
+    "tickertape_sid": "IIAB"
   },
   {
     "name": "Zee Learn Limited",
@@ -19748,7 +25299,10 @@ const stockData: StockMapping[] = [
     "isin": "INE565L01011",
     "symbol": "ZEELEARN",
     "stockid": "448436",
-    "companyid": "32769"
+    "companyid": "32769",
+    "tickertape_sid": "ZEEE",
+    "fincode": 222584,
+    "scripcode": 533287
   },
   {
     "name": "Zenith Exports Limited",
@@ -19758,7 +25312,10 @@ const stockData: StockMapping[] = [
     "isin": "INE058B01018",
     "symbol": "ZENITHEXPO",
     "stockid": "697086",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "ZENX",
+    "fincode": 112553,
+    "scripcode": 512553
   },
   {
     "name": "Zenith Steel Pipes & Industries Limited",
@@ -19768,7 +25325,10 @@ const stockData: StockMapping[] = [
     "isin": "INE318D01020",
     "symbol": "ZENITHSTL",
     "stockid": "",
-    "companyid": "12792"
+    "companyid": "12792",
+    "tickertape_sid": "ZNTH",
+    "fincode": 131845,
+    "scripcode": 531845
   },
   {
     "name": "Zim Laboratories Limited",
@@ -19778,7 +25338,10 @@ const stockData: StockMapping[] = [
     "isin": "INE518E01015",
     "symbol": "ZIMLAB",
     "stockid": "1000979",
-    "companyid": ""
+    "companyid": "",
+    "tickertape_sid": "ZIM",
+    "fincode": 227768,
+    "scripcode": 541400
   },
   {
     "name": "Zodiac Energy Limited",
@@ -19788,7 +25351,10 @@ const stockData: StockMapping[] = [
     "isin": "INE761Y01019",
     "symbol": "ZODIAC",
     "stockid": "1002889",
-    "companyid": "67226"
+    "companyid": "67226",
+    "tickertape_sid": "ZODA",
+    "fincode": 287741,
+    "scripcode": 543416
   },
   {
     "name": "Zodiac Clothing Company Limited",
@@ -19798,7 +25364,10 @@ const stockData: StockMapping[] = [
     "isin": "INE206B01013",
     "symbol": "ZODIACLOTH",
     "stockid": "107258",
-    "companyid": "6849"
+    "companyid": "6849",
+    "tickertape_sid": "ZCCL",
+    "fincode": 121163,
+    "scripcode": 521163
   },
   {
     "name": "Zota Health Care LImited",
@@ -19808,7 +25377,10 @@ const stockData: StockMapping[] = [
     "isin": "INE358U01012",
     "symbol": "ZOTA",
     "stockid": "1002761",
-    "companyid": "65889"
+    "companyid": "65889",
+    "tickertape_sid": "ZOTA",
+    "fincode": 285652,
+    "scripcode": 0
   },
   {
     "name": "ZUARI INDUSTRIES LIMITED",
@@ -19818,7 +25390,10 @@ const stockData: StockMapping[] = [
     "isin": "INE217A01012",
     "symbol": "ZUARIIND",
     "stockid": "621896",
-    "companyid": "12793"
+    "companyid": "12793",
+    "tickertape_sid": "ZURI",
+    "fincode": 100780,
+    "scripcode": 500780
   },
   {
     "name": "SAMTELTD",
@@ -19828,7 +25403,9 @@ const stockData: StockMapping[] = [
     "isin": "",
     "symbol": "SAMTELTD",
     "stockid": "",
-    "companyid": ""
+    "companyid": "",
+    "fincode": 100371,
+    "scripcode": 500371
   },
   {
     "name": "ZCHANAIN",
@@ -19888,7 +25465,9 @@ const stockData: StockMapping[] = [
     "isin": "",
     "symbol": "CHEMIESYNT",
     "stockid": "",
-    "companyid": ""
+    "companyid": "",
+    "fincode": 245869,
+    "scripcode": 539230
   },
   {
     "name": "ZHEMHOLD",
@@ -19918,7 +25497,9 @@ const stockData: StockMapping[] = [
     "isin": "",
     "symbol": "HARIGCRANK",
     "stockid": "",
-    "companyid": ""
+    "companyid": "",
+    "fincode": 100178,
+    "scripcode": 500178
   },
   {
     "name": "FRONTLINE",
@@ -19938,7 +25519,9 @@ const stockData: StockMapping[] = [
     "isin": "",
     "symbol": "SHENTRACON",
     "stockid": "",
-    "companyid": ""
+    "companyid": "",
+    "fincode": 130757,
+    "scripcode": 530757
   },
   {
     "name": "SHRIAHIMSA",
@@ -19948,7 +25531,9 @@ const stockData: StockMapping[] = [
     "isin": "",
     "symbol": "SHRIAHIMSA",
     "stockid": "",
-    "companyid": ""
+    "companyid": "",
+    "fincode": 316993,
+    "scripcode": 0
   },
   {
     "name": "ENRIN",
@@ -19958,7 +25543,9 @@ const stockData: StockMapping[] = [
     "isin": "",
     "symbol": "ENRIN",
     "stockid": "",
-    "companyid": ""
+    "companyid": "",
+    "fincode": 320028,
+    "scripcode": 544390
   },
   {
     "name": "MUFIN",
@@ -19968,7 +25555,9 @@ const stockData: StockMapping[] = [
     "isin": "",
     "symbol": "MUFIN",
     "stockid": "",
-    "companyid": ""
+    "companyid": "",
+    "fincode": 295952,
+    "scripcode": 542774
   },
   {
     "name": "WOL3D",
@@ -19978,7 +25567,9 @@ const stockData: StockMapping[] = [
     "isin": "",
     "symbol": "WOL3D",
     "stockid": "",
-    "companyid": ""
+    "companyid": "",
+    "fincode": 315202,
+    "scripcode": 0
   },
   {
     "name": "RATEGAIN",
@@ -19988,7 +25579,9 @@ const stockData: StockMapping[] = [
     "isin": "",
     "symbol": "RATEGAIN",
     "stockid": "",
-    "companyid": ""
+    "companyid": "",
+    "fincode": 303157,
+    "scripcode": 543417
   },
   {
     "name": "13510368",
@@ -20008,7 +25601,9 @@ const stockData: StockMapping[] = [
     "isin": "",
     "symbol": "STRATMONT",
     "stockid": "",
-    "companyid": ""
+    "companyid": "",
+    "fincode": 130495,
+    "scripcode": 530495
   },
   {
     "name": "KOPRAN",
@@ -20018,7 +25613,9 @@ const stockData: StockMapping[] = [
     "isin": "",
     "symbol": "KOPRAN",
     "stockid": "",
-    "companyid": ""
+    "companyid": "",
+    "fincode": 124280,
+    "scripcode": 524280
   },
   {
     "name": "PANCHSHEEL",
@@ -20028,7 +25625,9 @@ const stockData: StockMapping[] = [
     "isin": "",
     "symbol": "PANCHSHEEL",
     "stockid": "",
-    "companyid": ""
+    "companyid": "",
+    "fincode": 131726,
+    "scripcode": 531726
   },
   {
     "name": "WOCKPHARMA",
@@ -20038,7 +25637,9 @@ const stockData: StockMapping[] = [
     "isin": "",
     "symbol": "WOCKPHARMA",
     "stockid": "",
-    "companyid": ""
+    "companyid": "",
+    "fincode": 132300,
+    "scripcode": 532300
   },
   {
     "name": "GVT&D",
@@ -20048,7 +25649,9 @@ const stockData: StockMapping[] = [
     "isin": "",
     "symbol": "GVT&D",
     "stockid": "",
-    "companyid": ""
+    "companyid": "",
+    "fincode": 122275,
+    "scripcode": 522275
   },
   {
     "name": "PRSNTIN",
