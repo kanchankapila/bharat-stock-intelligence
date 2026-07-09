@@ -4,7 +4,7 @@ import {
   TrendingUp, LayoutDashboard, BarChart2, Activity, Trophy, Filter,
   Target, Zap, Search, Briefcase, Calendar, Sparkles, Radio, FlaskConical,
   Star, History, Settings2, PieChart, Bookmark, Users, Globe, CheckCircle2,
-  ToggleLeft, ToggleRight, Settings, MonitorDot, X
+  ToggleLeft, ToggleRight, Settings, MonitorDot, X, BrainCircuit
 } from 'lucide-react';
 import { cn } from '../../../lib/utils';
 
@@ -13,6 +13,8 @@ interface V2AppShellProps {
   setActiveTab: (tab: string) => void;
   v2Enabled: boolean;
   setV2Enabled: (enabled: boolean) => void;
+  dashboardVersion?: 'v1' | 'v2' | 'v3';
+  onChangeVersion?: (version: 'v1' | 'v2' | 'v3') => void;
   children: React.ReactNode;
 }
 
@@ -21,6 +23,8 @@ export const V2AppShell: React.FC<V2AppShellProps> = ({
   setActiveTab,
   v2Enabled,
   setV2Enabled,
+  dashboardVersion,
+  onChangeVersion,
   children
 }) => {
   const [toastMessage, setToastMessage] = useState<any>(null);
@@ -40,6 +44,7 @@ export const V2AppShell: React.FC<V2AppShellProps> = ({
 
   const tabs = [
     { label: 'Dashboard', id: 'dashboard', icon: LayoutDashboard },
+    { label: 'Alpha Cockpit', id: 'alpha-cockpit', icon: BrainCircuit },
     { label: 'Indices', id: 'indices', icon: BarChart2 },
     { label: 'Market Map', id: 'market-map', icon: Activity },
     { label: 'Top Rated', id: 'top-rated', icon: Trophy },
@@ -106,24 +111,28 @@ export const V2AppShell: React.FC<V2AppShellProps> = ({
           </nav>
         </div>
 
-        {/* V2 Toggle Switch at bottom */}
-        <div className="p-2 border-t border-terminal-border flex flex-col gap-2 bg-terminal-panel-header/50 rounded-xl">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">V2 Institutional Mode</span>
-            <button 
-              onClick={() => setV2Enabled(!v2Enabled)}
-              className="text-slate-400 hover:text-white transition-colors"
-            >
-              {v2Enabled ? (
-                <ToggleRight className="w-7 h-7 text-indigo-500" />
-              ) : (
-                <ToggleLeft className="w-7 h-7 text-slate-500" />
-              )}
-            </button>
+        {/* Version Switcher */}
+        <div className="p-2.5 border-t border-terminal-border flex flex-col gap-2 bg-terminal-panel-header/50 rounded-xl">
+          <span className="text-[9px] font-black uppercase text-slate-400 tracking-wider font-mono">Terminal Dashboard version</span>
+          <div className="flex gap-1 bg-slate-950 p-0.5 rounded-lg border border-slate-900 select-none">
+            {(['v1', 'v2', 'v3'] as const).map((v) => {
+              const active = (dashboardVersion || 'v3') === v;
+              return (
+                <button
+                  key={v}
+                  onClick={() => onChangeVersion?.(v)}
+                  className={cn(
+                    "flex-1 py-1 rounded text-[9px] font-black uppercase tracking-wider transition-all cursor-pointer",
+                    active 
+                      ? "bg-indigo-600 text-white font-extrabold shadow" 
+                      : "text-slate-500 hover:text-slate-300"
+                  )}
+                >
+                  {v.toUpperCase()}
+                </button>
+              );
+            })}
           </div>
-          <p className="text-[8px] text-slate-500 font-bold leading-normal">
-            Toggle off to switch back to the classic retail user experience.
-          </p>
         </div>
       </aside>
 

@@ -101,11 +101,13 @@ const V2AppShell         = React.lazy(() => import('./v2/components/layout/V2App
 const V2StockDetails     = React.lazy(() => import('./v2/views/stock-analysis/V2StockDetails').then(m => ({ default: m.V2StockDetails })));
 const V2Settings         = React.lazy(() => import('./v2/views/settings/V2Settings').then(m => ({ default: m.V2Settings })));
 const V2Dashboard        = React.lazy(() => import('./v2/views/dashboard/V2Dashboard').then(m => ({ default: m.V2Dashboard })));
+const V3Dashboard        = React.lazy(() => import('./v3/views/dashboard/V3Dashboard').then(m => ({ default: m.V3Dashboard })));
 const SignalTracking     = React.lazy(() => import('./components/SignalTracking').then(m => ({ default: m.SignalTracking })));
 const V2SignalTracking   = React.lazy(() => import('./v2/views/signals/V2SignalTracking').then(m => ({ default: m.V2SignalTracking })));
 const StockChatbot       = React.lazy(() => import('./components/StockChatbot'));
 const JobsDashboardPage   = React.lazy(() => import('./components/JobsDashboardPage'));
 const EarlyHoursSpotter   = React.lazy(() => import('./components/EarlyHoursSpotter'));
+const AlphaCockpit       = React.lazy(() => import('./components/AlphaCockpit').then(m => ({ default: m.AlphaCockpit })));
 
 // Lazy Suspense fallback
 const PageFallback = () => (
@@ -3580,11 +3582,18 @@ export default function App() {
 
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [drawerSymbol, setDrawerSymbol] = useState<string | null>(null);
-  const [v2Enabled, setV2Enabled] = useState(() => localStorage.getItem('v2Enabled') === 'true');
-  const toggleV2 = (enabled: boolean) => {
-    localStorage.setItem('v2Enabled', enabled ? 'true' : 'false');
-    setV2Enabled(enabled);
+  const [dashboardVersion, setDashboardVersion] = useState<'v1' | 'v2' | 'v3'>(() => {
+    const saved = localStorage.getItem('dashboardVersion');
+    if (saved === 'v1' || saved === 'v2' || saved === 'v3') return saved;
+    const v2 = localStorage.getItem('v2Enabled') === 'true';
+    return v2 ? 'v2' : 'v3'; // Default to v3
+  });
+  const changeDashboardVersion = (version: 'v1' | 'v2' | 'v3') => {
+    localStorage.setItem('dashboardVersion', version);
+    localStorage.setItem('v2Enabled', (version === 'v2' || version === 'v3') ? 'true' : 'false');
+    setDashboardVersion(version);
   };
+  const v2Enabled = dashboardVersion === 'v2' || dashboardVersion === 'v3';
   const [researchSubTab, setResearchSubTab] = useState<'overview' | 'deep-learning'>('overview');
   const [selectedIndex, setSelectedIndex] = useState<{ id: string; name: string } | null>(null);
   const [user, setUser] = useState<FirebaseUser | null>(null);
@@ -3754,7 +3763,12 @@ export default function App() {
         setActiveTab={setActiveTab}
         v2Enabled={v2Enabled}
         setV2Enabled={(enabled) => {
-          toggleV2(enabled);
+          changeDashboardVersion(enabled ? 'v2' : 'v1');
+          window.location.reload();
+        }}
+        dashboardVersion={dashboardVersion}
+        onChangeVersion={(v) => {
+          changeDashboardVersion(v);
           window.location.reload();
         }}
       >
@@ -3771,15 +3785,51 @@ export default function App() {
               />
             } />
             <Route path="/details" element={selectedSymbol ? (
-              <V2StockDetails
-                key={selectedSymbol}
-                symbol={selectedSymbol}
-                stock={stocks.find(s => s.symbol === selectedSymbol)}
-                onBack={() => navigate('/dashboard')}
-              />
+              dashboardVersion === 'v3' ? (
+                <V3Dashboard
+                  stocks={stocks}
+                  watchlist={watchlist}
+                  onToggleWatchlist={toggleWatchlist}
+                  onSelectStock={handleSelectStock}
+                  onSelectIndex={(id, name) => { setSelectedIndex({ id, name }); navigate('/indices'); }}
+                  initialSymbol={selectedSymbol}
+                  initialTab="stock-intelligence"
+                />
+              ) : (
+                <V2StockDetails
+                  key={selectedSymbol}
+                  symbol={selectedSymbol}
+                  stock={stocks.find(s => s.symbol === selectedSymbol)}
+                  onBack={() => navigate('/dashboard')}
+                />
+              )
             ) : <div className="p-6">Select a stock to view details</div>} />
-            <Route path="/" element={<V2Dashboard />} />
-            <Route path="/dashboard" element={<V2Dashboard />} />
+            <Route path="/" element={
+              dashboardVersion === 'v3' ? (
+                <V3Dashboard
+                  stocks={stocks}
+                  watchlist={watchlist}
+                  onToggleWatchlist={toggleWatchlist}
+                  onSelectStock={handleSelectStock}
+                  onSelectIndex={(id, name) => { setSelectedIndex({ id, name }); navigate('/indices'); }}
+                />
+              ) : (
+                <V2Dashboard />
+              )
+            } />
+            <Route path="/dashboard" element={
+              dashboardVersion === 'v3' ? (
+                <V3Dashboard
+                  stocks={stocks}
+                  watchlist={watchlist}
+                  onToggleWatchlist={toggleWatchlist}
+                  onSelectStock={handleSelectStock}
+                  onSelectIndex={(id, name) => { setSelectedIndex({ id, name }); navigate('/indices'); }}
+                />
+              ) : (
+                <V2Dashboard />
+              )
+            } />
             <Route path="/top-rated" element={<TopRatedStocks onSelectStock={handleSelectStock} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
             <Route path="/indices" element={<IndicesPage onSelectStock={handleSelectStock} selectedIndex={selectedIndex} setSelectedIndex={setSelectedIndex} />} />
             <Route path="/market-map" element={
@@ -3843,6 +3893,7 @@ export default function App() {
             <Route path="/builder" element={<div className="p-6"><StrategyBuilder /></div>} />
             <Route path="/settings" element={<V2Settings />} />
             <Route path="/chat" element={<div className="p-4 h-full"><StockChatbot /></div>} />
+            <Route path="/alpha-cockpit" element={<AlphaCockpit />} />
           </Routes>
           </SafeRoutes>
         </AnimatePresence>
@@ -3998,6 +4049,7 @@ export default function App() {
               <Route path="/portfolio" element={<div className="p-6"><PortfolioAnalytics /></div>} />
               <Route path="/builder" element={<div className="p-6"><StrategyBuilder /></div>} />
               <Route path="/chat" element={<div className="p-4"><StockChatbot /></div>} />
+              <Route path="/alpha-cockpit" element={<AlphaCockpit />} />
               </Routes>
             </motion.div>
             } />

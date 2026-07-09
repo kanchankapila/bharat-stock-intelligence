@@ -610,16 +610,39 @@ export const AppShell: React.FC<AppShellProps> = ({
             </span>
           </div>
 
-          {/* V2 Switch */}
-          <button 
-            onClick={() => {
-              localStorage.setItem('v2Enabled', 'true');
-              window.location.reload();
-            }}
-            className="flex items-center gap-1 bg-indigo-600 hover:bg-indigo-500 text-white font-black text-[9px] rounded-md px-2 py-1 shrink-0 uppercase tracking-wider cursor-pointer transition-colors"
-          >
-            V2 Terminal
-          </button>
+          {/* Version Switchers */}
+          <div className="flex gap-1 shrink-0 select-none">
+            <button 
+              onClick={() => {
+                localStorage.setItem('dashboardVersion', 'v1');
+                localStorage.setItem('v2Enabled', 'false');
+                window.location.reload();
+              }}
+              className="bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200 font-black text-[9px] rounded-md px-2.5 py-1 uppercase tracking-wider cursor-pointer transition-colors"
+            >
+              V1
+            </button>
+            <button 
+              onClick={() => {
+                localStorage.setItem('dashboardVersion', 'v2');
+                localStorage.setItem('v2Enabled', 'true');
+                window.location.reload();
+              }}
+              className="bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200 font-black text-[9px] rounded-md px-2.5 py-1 uppercase tracking-wider cursor-pointer transition-colors"
+            >
+              V2
+            </button>
+            <button 
+              onClick={() => {
+                localStorage.setItem('dashboardVersion', 'v3');
+                localStorage.setItem('v2Enabled', 'true');
+                window.location.reload();
+              }}
+              className="bg-indigo-600 hover:bg-indigo-500 text-white font-black text-[9px] rounded-md px-2.5 py-1 uppercase tracking-wider cursor-pointer transition-colors"
+            >
+              V3 Pro
+            </button>
+          </div>
         </header>
 
         {/* Scrollable content */}
