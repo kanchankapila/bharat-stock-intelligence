@@ -1,0 +1,26 @@
+## Audit Summary
+
+**tsc --noEmit**: 0 errors in the whole project (repo compiles clean). No CRASH-severity compiler issues in this slice.
+
+**Files in slice**: `router.ts`, `trpc.ts`, `context.ts` are all thin/clean (router.ts just merges 24 sub-routers; trpc.ts/context.ts are boilerplate, no issues). All findings below are in `src/server/routers/*.ts`.
+
+No CRASH-severity findings — no unguarded throws, no missing input validation that would 500 users.
+
+### SILENT
+
+- `src/server/routers/ml.router.ts:301` | SILENT | `runFullBacktest` mutation returns `{ message: 'Backtest complete' }` on success and `{ message: \`Error: ${err.message}\` }` on failure — identical shape, no `success` flag, no throw, no server-side log. | Throw `TRPCError` (or at minimum return `{ success: false, message }` and log `console.error`) so callers can't mistake a failed backtest for a completed one.
+- `src/server/routers/ml.router.ts:320` | SILENT | `optimizeScreenerWeights` mutation has the exact same bug: success returns `{message, improvement}`, failure returns `{message}` with no distinguishing field or log. | Same fix — throw or add an explicit boolean + log.
+- `src/server/routers/technicals.router.ts:225` and `:234` | SILENT | `getTvTa`/`getTvScreener` queries catch AlphaQuant client errors and return `{ error: err.message }` instead of throwing — looks like valid TA data to any caller that destructures the expected shape. | Throw `TRPCError({code:'INTERNAL_SERVER_ERROR'})` instead of returning an error-shaped payload from a `.query()`.
+- `src/server/routers/misc.router.ts:191` | SILENT | `analyzePortfolio` mutation returns `{ error: e.message }` on failure with no throw/log, same problem as above. | Throw instead of returning an ok-shaped object.
+- `src/server/routers/telegram.router.ts:25,47,59,74,97` | SILENT | Five procedures catch DB/config errors and return defaults indistinguishable from "not configured yet" (e.g. `{botToken:"", enabled:false}`), with no `console.error`. A real DB outage looks identical to "user never set up Telegram." | Log the caught error before returning the default, or add an `error` field so the UI can tell the two cases apart.
+- `src/server/routers/trendlyne.router.ts:86` | SILENT | `getTrendlyneHealth` outer catch collapses any exception (including unrelated bugs) into `{auth:false, fetchOk:false}`, same as a normal auth failure. | `console.error` before returning, so real bugs aren't mistaken for "Trendlyne session expired."
+- `src/server/routers/fno.router.ts:40` | SILENT | `getOptionsIntelligence` catches DB errors, logs them, but returns `[]` — indistinguishable client-side from "no OI data published today." | Consider throwing, or add a `stale`/`error` flag in the response like `market.router.ts` does.
+- `src/server/routers/market.router.ts:75` | SILENT | `getMarketOverview` has a bare `catch {}` with **no logging at all** around `fetchAllIndianIndices()`; falls back to null/`stale:true` placeholders. Better than most (marks staleness) but a real bug here is invisible server-side too. | Add `console.error` inside the catch even though the stale-fallback UX is fine.
+- `src/server/routers/commandCenter.router.ts:89` | SILENT | `try { ... } catch { /* table may differ in schema */ }` swallows a query against a table whose schema may have drifted (matches the Postgres schema-drift bug class already seen in this repo per project memory) with zero logging. | Log the error message; a silently-empty `intradaySignals` list is hard to distinguish from "market has no HIGH signals today."
+- `src/server/routers/agents.router.ts:101,112,123,134,163`, `technicals.router.ts:37`, `fundamentals.router.ts:15`, `research.router.ts:79` | SILENT | Fire-and-forget `runPython(...)`/`generateDailyReport(...).catch(console.error)` with no persisted failure state — unlike `monitor.router.ts`'s `triggerScript`, which writes `failed`/`_error` to `app_settings` for the dashboard to surface, these background triggers only log to the server console; the frontend has no way to learn the job failed. | Reuse the `upsertState`/`app_settings` pattern from `monitor.router.ts:298-300` so failures surface in `getSystemStatus`/`getBullMQJobsStatus` instead of only `stdout`.
+
+### MINOR
+
+- `src/server/routers/misc.router.ts:44` | MINOR | `try { enriched.detected_patterns = JSON.parse(...) } catch {}` silently drops malformed pattern JSON with no log; low-impact (cosmetic field only). | Log at debug level or default to `[]` explicitly.
+- `src/server/routers/screeners.router.ts:35` | MINOR | `.input(z.object({ provider: z.string(), params: z.any() }))` — `params` bypasses zod validation entirely, defeating the purpose of a typed tRPC input schema for whatever `params` actually needs to be. | Replace with a `z.record()` or a discriminated union keyed on `provider` if the shape is known.
+- General | MINOR | Heavy `as any` / `: any` casting on DB row results across nearly every router file (`(row as any)?.x`) masks the fact that `dbGet`/`dbAll` are effectively untyped; not a discovered bug, but any real schema-column-rename would compile silently instead of erroring. | Longer-term: type `dbGet<T>`/`dbAll<T>` call sites with row interfaces per query instead of `any`.
