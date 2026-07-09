@@ -20,6 +20,17 @@ export default function EarlyHoursSpotter({ onSelectStock }: EarlyHoursSpotterPr
       { staleTime: 30000 }
     );
 
+  const refreshMutation = trpc.refreshEarlyHoursSpotter.useMutation();
+
+  const handleRefresh = async () => {
+    try {
+      await refreshMutation.mutateAsync();
+      await refetch();
+    } catch (err) {
+      console.error("Manual pre-open refresh failed:", err);
+    }
+  };
+
   const getScoreColor = (score: number) => {
     if (score >= 50) return 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20';
     if (score >= 40) return 'text-sky-400 bg-sky-500/10 border-sky-500/20';
@@ -88,11 +99,12 @@ export default function EarlyHoursSpotter({ onSelectStock }: EarlyHoursSpotterPr
         </div>
         <div className="flex items-center gap-3 relative shrink-0">
           <button 
-            onClick={() => refetch()}
-            disabled={isRefetching}
+            onClick={handleRefresh}
+            disabled={isRefetching || refreshMutation.isPending}
             className="p-3 bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-800 rounded-xl transition-all cursor-pointer disabled:opacity-50"
+            title="Refresh Pre-Open Predictions"
           >
-            <RefreshCw className={cn("w-4 h-4", isRefetching && "animate-spin")} />
+            <RefreshCw className={cn("w-4 h-4", (isRefetching || refreshMutation.isPending) && "animate-spin")} />
           </button>
           <div className="bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 flex flex-col justify-center">
             <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest block mb-0.5">Active Session</span>

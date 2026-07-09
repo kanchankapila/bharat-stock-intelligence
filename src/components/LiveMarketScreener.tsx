@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { trpc } from '../lib/trpc';
-import { Activity, Zap, TrendingUp, TrendingDown, Minus, Filter, X } from 'lucide-react';
+import { Activity, Zap, TrendingUp, TrendingDown, Minus, Filter, X, Brain, BarChart2, Award, Play } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 // --- Filter Definitions ---
@@ -45,7 +45,9 @@ interface Props {
 export const LiveMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
   const [filters, setFilters] = useState<Record<string, boolean>>({});
   const [showFilters, setShowFilters] = useState(false);
+  const [activeTab, setActiveTab] = useState<'screener' | 'ai'>('screener');
   const [isVisible, setIsVisible] = useState(document.visibilityState === 'visible');
+
   useEffect(() => {
     const handler = () => setIsVisible(document.visibilityState === 'visible');
     document.addEventListener('visibilitychange', handler);
@@ -56,11 +58,24 @@ export const LiveMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
     refetchInterval: isVisible ? 10000 : false,
   });
 
+  const { data: optimalCombos, isLoading: loadingCombos } = trpc.getLiveScreenerOptimalCombinations.useQuery();
+  const { data: backtestRuns } = trpc.getLiveScreenerBacktestRuns.useQuery();
+
   const toggleFilter = (key: string) => {
     setFilters(prev => ({
       ...prev,
       [key]: !prev[key]
     }));
+  };
+
+  const applyCombo = (comboFilters: string[]) => {
+    const newFilters: Record<string, boolean> = {};
+    comboFilters.forEach(f => {
+      newFilters[f] = true;
+    });
+    setFilters(newFilters);
+    setActiveTab('screener');
+    setShowFilters(true);
   };
 
   const clearFilters = () => setFilters({});
@@ -69,155 +84,345 @@ export const LiveMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
   const stocks = (data as any)?.resultData || [];
   const sortedStocks = [...stocks].sort((a, b) => (b.change_per ?? 0) - (a.change_per ?? 0));
 
+  // Find a completed backtest run matching the combination
+  const findBacktestForCombo = (comboFilters: string[]) => {
+    if (!backtestRuns) return null;
+    return backtestRuns.find((run: any) => {
+      try {
+        const config = JSON.parse(run.strategy_config_json);
+        const configFilters = config.filters || [];
+        return configFilters.length === comboFilters.length && 
+               configFilters.every((f: string) => comboFilters.includes(f));
+      } catch {
+        return false;
+      }
+    });
+  };
+
   return (
-    <div className="flex flex-col h-[600px] glass border border-slate-800/50 rounded-xl p-6 text-slate-200">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6 flex-shrink-0">
+    <div className="flex flex-col h-[650px] glass border border-slate-800/50 rounded-xl p-6 text-slate-200">
+      {/* Header & Tabs */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6 flex-shrink-0">
         <div>
           <h1 className="text-2xl font-bold font-['Rajdhani'] flex items-center gap-3">
-            <Activity className="w-6 h-6 text-indigo-400" />
+            <Activity className="w-6 h-6 text-indigo-400 animate-pulse" />
             Live Market Screener
           </h1>
           <p className="text-xs font-mono text-slate-500 mt-1 uppercase tracking-widest">
-            {stocks.length} Matches Found
+            Realtime NiftyTrader Filters & AI Strategies
           </p>
         </div>
-        <button
-          onClick={() => setShowFilters(!showFilters)}
-          className={cn(
-            "flex items-center gap-2 px-4 py-2 rounded-lg font-mono text-xs font-bold transition-all",
-            activeCount > 0 ? "bg-indigo-600/20 text-indigo-400 border border-indigo-500/30" : "bg-slate-800 text-slate-400 border border-slate-700"
-          )}
-        >
-          <Filter className="w-4 h-4" />
-          {showFilters ? 'Hide Filters' : 'Show Filters'}
-          {activeCount > 0 && <span className="bg-indigo-500 text-white rounded-full px-2 py-0.5 ml-1">{activeCount}</span>}
-        </button>
+        
+        {/* Tab Controls */}
+        <div className="flex items-center gap-2 bg-slate-900/60 p-1 rounded-lg border border-slate-800">
+          <button
+            onClick={() => setActiveTab('screener')}
+            className={cn(
+              "px-3 py-1.5 rounded-md font-mono text-xs font-bold transition-all flex items-center gap-1.5",
+              activeTab === 'screener' ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/10" : "text-slate-400 hover:text-slate-200"
+            )}
+          >
+            <Zap className="w-3.5 h-3.5" />
+            Live Matches ({stocks.length})
+          </button>
+          
+          <button
+            onClick={() => setActiveTab('ai')}
+            className={cn(
+              "px-3 py-1.5 rounded-md font-mono text-xs font-bold transition-all flex items-center gap-1.5",
+              activeTab === 'ai' ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/10" : "text-slate-400 hover:text-slate-200"
+            )}
+          >
+            <Brain className="w-3.5 h-3.5" />
+            AI Strategy Cockpit
+          </button>
+        </div>
+
+        {activeTab === 'screener' && (
+          <button
+            onClick={() => setShowFilters(!showFilters)}
+            className={cn(
+              "flex items-center gap-2 px-4 py-2 rounded-lg font-mono text-xs font-bold transition-all",
+              activeCount > 0 ? "bg-indigo-600/20 text-indigo-400 border border-indigo-500/30" : "bg-slate-800 text-slate-400 border border-slate-700"
+            )}
+          >
+            <Filter className="w-4 h-4" />
+            {showFilters ? 'Hide Filters' : 'Show Filters'}
+            {activeCount > 0 && <span className="bg-indigo-500 text-white rounded-full px-2 py-0.5 ml-1">{activeCount}</span>}
+          </button>
+        )}
       </div>
 
-      {/* Filter Panel */}
-      <AnimatePresence>
-        {showFilters && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            className="overflow-hidden mb-6 flex-shrink-0"
+      {/* Suggestion banner if there are optimal strategies and we are on screen tab */}
+      {activeTab === 'screener' && optimalCombos?.optimal_combinations?.length > 0 && activeCount === 0 && (
+        <div className="bg-indigo-950/20 border border-indigo-900/40 rounded-lg p-3 mb-4 flex items-center justify-between text-xs flex-shrink-0 animate-fade-in">
+          <div className="flex items-center gap-2 text-indigo-300">
+            <Brain className="w-4 h-4 text-indigo-400 animate-pulse" />
+            <span>
+              <strong>AI Recommendation:</strong> Strategy <code>{optimalCombos.optimal_combinations[0].filters.join(' + ')}</code> has a <strong>{(optimalCombos.optimal_combinations[0].win_rate * 100).toFixed(1)}%</strong> win-rate.
+            </span>
+          </div>
+          <button 
+            onClick={() => applyCombo(optimalCombos.optimal_combinations[0].filters)}
+            className="bg-indigo-600 hover:bg-indigo-500 text-white px-2.5 py-1 rounded font-semibold transition-all flex items-center gap-1 font-mono text-[10px]"
           >
-            <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-5">
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="text-sm font-bold font-['Rajdhani'] uppercase tracking-wider text-slate-400">Active Filters</h3>
-                {activeCount > 0 && (
-                  <button onClick={clearFilters} className="text-xs text-rose-400 hover:text-rose-300 flex items-center gap-1">
-                    <X className="w-3 h-3" /> Clear All
-                  </button>
-                )}
+            <Play className="w-2.5 h-2.5 fill-current" /> Apply Combo
+          </button>
+        </div>
+      )}
+
+      {/* Filter Panel */}
+      {activeTab === 'screener' && (
+        <AnimatePresence>
+          {showFilters && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              className="overflow-hidden mb-6 flex-shrink-0"
+            >
+              <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-5">
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="text-sm font-bold font-['Rajdhani'] uppercase tracking-wider text-slate-400">Active Filters</h3>
+                  {activeCount > 0 && (
+                    <button onClick={clearFilters} className="text-xs text-rose-400 hover:text-rose-300 flex items-center gap-1">
+                      <X className="w-3 h-3" /> Clear All
+                    </button>
+                  )}
+                </div>
+                
+                <div className="space-y-6">
+                  {FILTER_GROUPS.map(group => (
+                    <div key={group.name}>
+                      <h4 className="text-xs font-mono text-slate-500 mb-3">{group.name}</h4>
+                      <div className="flex flex-wrap gap-2">
+                        {group.keys.map(key => {
+                          const active = !!filters[key];
+                          return (
+                            <button
+                              key={key}
+                              onClick={() => toggleFilter(key)}
+                              className={cn(
+                                "text-[10px] font-mono px-3 py-1.5 rounded-md transition-all border",
+                                active 
+                                  ? "bg-indigo-600/20 text-indigo-300 border-indigo-500/50 shadow-[0_0_10px_rgba(99,102,241,0.1)]" 
+                                  : "bg-slate-800/50 text-slate-400 border-slate-700/50 hover:bg-slate-800 hover:text-slate-300"
+                              )}
+                            >
+                              {key}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
-              
-              <div className="space-y-6">
-                {FILTER_GROUPS.map(group => (
-                  <div key={group.name}>
-                    <h4 className="text-xs font-mono text-slate-500 mb-3">{group.name}</h4>
-                    <div className="flex flex-wrap gap-2">
-                      {group.keys.map(key => {
-                        const active = !!filters[key];
+            </motion.div>
+          )}
+        </AnimatePresence>
+      )}
+
+      {/* Results / Screen Grid */}
+      <div className="flex-1 overflow-y-auto hide-scrollbar">
+        {activeTab === 'screener' ? (
+          isLoading ? (
+            <div className="flex flex-col items-center justify-center h-64 text-indigo-400">
+              <Zap className="w-8 h-8 animate-pulse mb-4 opacity-50" />
+              <p className="font-mono text-xs tracking-widest animate-pulse">SCANNING MARKET...</p>
+            </div>
+          ) : stocks.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-64 text-slate-500">
+              <Activity className="w-8 h-8 mb-4 opacity-30" />
+              <p className="font-mono text-xs tracking-widest">NO STOCKS MATCH FILTERS</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              {sortedStocks.map((stock: any) => {
+                const chg = stock.change_per ?? 0;
+                let borderColor = 'border-amber-500/40';
+                let bgColor = 'bg-amber-500/10';
+                let textColor = 'text-amber-400';
+                let Icon = Minus;
+
+                if (chg > 0) {
+                  borderColor = 'border-emerald-500/50';
+                  bgColor = 'bg-emerald-500/10';
+                  textColor = 'text-emerald-400';
+                  Icon = TrendingUp;
+                } else if (chg < 0) {
+                  borderColor = 'border-rose-500/50';
+                  bgColor = 'bg-rose-500/10';
+                  textColor = 'text-rose-400';
+                  Icon = TrendingDown;
+                }
+
+                return (
+                  <div 
+                    key={stock.symbol_name} 
+                    onClick={() => onSelectStock?.(stock.symbol_name)}
+                    className={cn(
+                      "rounded-xl border p-4 transition-all hover:shadow-[0_8px_30px_rgba(0,0,0,0.12)] backdrop-blur-sm cursor-pointer hover:scale-[1.01]",
+                      borderColor, bgColor
+                    )}
+                  >
+                    <div className="flex justify-between items-start mb-4">
+                      <div>
+                        <h3 className="font-['Rajdhani'] text-lg font-bold text-white tracking-wide">{stock.symbol_name}</h3>
+                        <div className={cn("flex items-center gap-1 font-mono text-[11px] mt-1 font-bold", textColor)}>
+                          <Icon className="w-3 h-3" />
+                          {chg > 0 ? '+' : ''}{chg.toFixed(2)}% ({stock.change_value > 0 ? '+' : ''}{stock.change_value})
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="font-mono text-lg font-bold text-slate-100">₹{stock.last_trade_price?.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
+                        <div className="font-mono text-[9px] text-slate-500 mt-1 uppercase">Vol: {stock.volume?.toLocaleString('en-IN')}</div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-2 border-t border-slate-800/50 pt-3">
+                      {Object.entries(stock).map(([key, value]) => {
+                        if (['symbol_name', 'last_trade_price', 'change_value', 'change_per', 'volume'].includes(key)) return null;
+                        if (value === null || value === undefined) return null;
+                        const formattedValue = typeof value === 'number' && !Number.isInteger(value) ? value.toFixed(2) : String(value);
+                        const displayKey = key.replace(/_/g, ' ').toUpperCase();
                         return (
-                          <button
-                            key={key}
-                            onClick={() => toggleFilter(key)}
-                            className={cn(
-                              "text-[10px] font-mono px-3 py-1.5 rounded-md transition-all border",
-                              active 
-                                ? "bg-indigo-600/20 text-indigo-300 border-indigo-500/50 shadow-[0_0_10px_rgba(99,102,241,0.1)]" 
-                                : "bg-slate-800/50 text-slate-400 border-slate-700/50 hover:bg-slate-800 hover:text-slate-300"
-                            )}
-                          >
-                            {key}
-                          </button>
+                          <div key={key} className="overflow-hidden">
+                            <p className="font-mono text-[9px] text-slate-500 truncate">{displayKey}</p>
+                            <p className="font-mono text-xs font-semibold text-slate-300 mt-0.5 truncate">{formattedValue}</p>
+                          </div>
                         );
                       })}
                     </div>
                   </div>
-                ))}
-              </div>
+                );
+              })}
             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Results Grid */}
-      <div className="flex-1 overflow-y-auto hide-scrollbar">
-        {isLoading ? (
-          <div className="flex flex-col items-center justify-center h-64 text-indigo-400">
-            <Zap className="w-8 h-8 animate-pulse mb-4 opacity-50" />
-            <p className="font-mono text-xs tracking-widest animate-pulse">SCANNING MARKET...</p>
-          </div>
-        ) : stocks.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-64 text-slate-500">
-            <Activity className="w-8 h-8 mb-4 opacity-30" />
-            <p className="font-mono text-xs tracking-widest">NO STOCKS MATCH FILTERS</p>
-          </div>
+          )
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {sortedStocks.map((stock: any) => {
-              const chg = stock.change_per ?? 0;
-              let borderColor = 'border-amber-500/40';
-              let bgColor = 'bg-amber-500/10';
-              let textColor = 'text-amber-400';
-              let Icon = Minus;
+          /* AI Strategy Dashboard */
+          <div className="space-y-6">
+            <div className="bg-slate-900/30 border border-slate-800 rounded-xl p-5 mb-4">
+              <h2 className="text-sm font-bold font-['Rajdhani'] uppercase tracking-wider text-slate-300 mb-2 flex items-center gap-2">
+                <Brain className="w-4 h-4 text-indigo-400" />
+                Decision Tree Strategy Optimizer
+              </h2>
+              <p className="text-xs text-slate-500 leading-relaxed font-mono">
+                The AI model continuously parses historical EOD outcomes for all live screener combinations. It ranks filters and groups them to discover optimal multi-factor triggers.
+              </p>
+            </div>
 
-              if (chg > 0) {
-                borderColor = 'border-emerald-500/50';
-                bgColor = 'bg-emerald-500/10';
-                textColor = 'text-emerald-400';
-                Icon = TrendingUp;
-              } else if (chg < 0) {
-                borderColor = 'border-rose-500/50';
-                bgColor = 'bg-rose-500/10';
-                textColor = 'text-rose-400';
-                Icon = TrendingDown;
-              }
+            {loadingCombos ? (
+              <div className="flex justify-center py-12">
+                <Zap className="w-6 h-6 text-indigo-500 animate-spin" />
+              </div>
+            ) : !optimalCombos || !optimalCombos.optimal_combinations?.length ? (
+              <div className="text-center py-12 text-slate-500 font-mono text-xs">
+                No optimal combinations computed yet. Please execute <code>live_screener_optimizer.py</code>.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {optimalCombos.optimal_combinations.map((combo: any, idx: number) => {
+                  const wr = combo.win_rate * 100;
+                  const ret = combo.avg_return;
+                  const backtest = findBacktestForCombo(combo.filters);
 
-              return (
-                <div 
-                  key={stock.symbol_name} 
-                  onClick={() => onSelectStock?.(stock.symbol_name)}
-                  className={cn(
-                    "rounded-xl border p-4 transition-all hover:shadow-[0_8px_30px_rgba(0,0,0,0.12)] backdrop-blur-sm cursor-pointer hover:scale-[1.01]",
-                    borderColor, bgColor
-                  )}
-                >
-                  <div className="flex justify-between items-start mb-4">
-                    <div>
-                      <h3 className="font-['Rajdhani'] text-lg font-bold text-white tracking-wide">{stock.symbol_name}</h3>
-                      <div className={cn("flex items-center gap-1 font-mono text-[11px] mt-1 font-bold", textColor)}>
-                        <Icon className="w-3 h-3" />
-                        {chg > 0 ? '+' : ''}{chg.toFixed(2)}% ({stock.change_value > 0 ? '+' : ''}{stock.change_value})
+                  // Classification
+                  let actionText = "HOLD";
+                  let actionColor = "text-slate-400 border-slate-800 bg-slate-950/40";
+                  if (wr >= 70 && ret >= 1.5) {
+                    actionText = "STRONG BUY (AI)";
+                    actionColor = "text-emerald-400 border-emerald-500/30 bg-emerald-500/5";
+                  } else if (wr >= 60 && ret > 0.5) {
+                    actionText = "BULLISH";
+                    actionColor = "text-indigo-400 border-indigo-500/30 bg-indigo-500/5";
+                  }
+
+                  return (
+                    <div key={idx} className="border border-slate-800/80 rounded-xl bg-slate-900/30 p-5 flex flex-col justify-between hover:border-slate-700/60 transition-all">
+                      <div>
+                        {/* Title & recommendation tag */}
+                        <div className="flex justify-between items-start gap-4 mb-4">
+                          <span className="font-mono text-xs text-indigo-400 font-bold">Strategy #{idx + 1}</span>
+                          <span className={cn("text-[9px] font-mono font-bold px-2 py-0.5 rounded border uppercase tracking-wider", actionColor)}>
+                            {actionText}
+                          </span>
+                        </div>
+
+                        {/* Combined Filters */}
+                        <div className="flex flex-wrap gap-1.5 mb-5">
+                          {combo.filters.map((f: string) => (
+                            <code key={f} className="text-[10px] font-mono bg-slate-850 px-2 py-1 rounded text-slate-300 border border-slate-800/80">{f}</code>
+                          ))}
+                        </div>
+
+                        {/* Stats block */}
+                        <div className="grid grid-cols-3 gap-2 bg-slate-950/40 border border-slate-900 rounded-lg p-3 mb-4">
+                          <div>
+                            <p className="font-mono text-[9px] text-slate-500 uppercase">Win Rate</p>
+                            <p className="font-mono text-sm font-bold text-emerald-400 mt-0.5">{wr.toFixed(1)}%</p>
+                          </div>
+                          <div>
+                            <p className="font-mono text-[9px] text-slate-500 uppercase">Avg Return (3d)</p>
+                            <p className="font-mono text-sm font-bold text-slate-200 mt-0.5">+{ret.toFixed(2)}%</p>
+                          </div>
+                          <div>
+                            <p className="font-mono text-[9px] text-slate-500 uppercase">Sample Count</p>
+                            <p className="font-mono text-sm font-bold text-slate-400 mt-0.5">{combo.sample_count}</p>
+                          </div>
+                        </div>
+
+                        {/* Backtest matching block */}
+                        <div className="border-t border-slate-800/50 pt-4 mt-2">
+                          <h4 className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5 mb-2.5">
+                            <BarChart2 className="w-3.5 h-3.5 text-indigo-400" />
+                            Historical Backtest Performance
+                          </h4>
+                          {backtest ? (
+                            <div className="grid grid-cols-2 gap-3 font-mono text-xs text-slate-300">
+                              <div className="flex justify-between items-center bg-slate-900/20 p-2 rounded">
+                                <span className="text-slate-500 text-[10px]">TOTAL RETURN:</span>
+                                <span className="font-bold text-emerald-400">+{backtest.total_return_pct.toFixed(2)}%</span>
+                              </div>
+                              <div className="flex justify-between items-center bg-slate-900/20 p-2 rounded">
+                                <span className="text-slate-500 text-[10px]">ALPHA VS NIFTY:</span>
+                                <span className="font-bold text-indigo-400">+{backtest.alpha_pct.toFixed(2)}%</span>
+                              </div>
+                              <div className="flex justify-between items-center bg-slate-900/20 p-2 rounded">
+                                <span className="text-slate-500 text-[10px]">WIN RATE:</span>
+                                <span className="font-bold text-slate-200">{(backtest.win_rate * 100).toFixed(0)}%</span>
+                              </div>
+                              <div className="flex justify-between items-center bg-slate-900/20 p-2 rounded">
+                                <span className="text-slate-500 text-[10px]">SHARPE RATIO:</span>
+                                <span className="font-bold text-indigo-300">{backtest.sharpe_ratio.toFixed(2)}</span>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="bg-slate-950/20 border border-slate-800/40 rounded p-3 text-[10px] font-mono text-slate-500 text-center">
+                              No backtest run resolved. Execute <code>backtest_live_screener.py</code> for this combo.
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Action triggers */}
+                      <div className="mt-5 pt-3 border-t border-slate-800/50 flex items-center justify-between">
+                        <span className="text-[10px] font-mono text-slate-500 flex items-center gap-1">
+                          <Award className="w-3.5 h-3.5 text-amber-500" />
+                          Rank #{idx + 1}
+                        </span>
+                        <button
+                          onClick={() => applyCombo(combo.filters)}
+                          className="bg-indigo-600 hover:bg-indigo-500 text-white font-mono text-xs font-bold px-4 py-2 rounded-lg transition-all flex items-center gap-1.5"
+                        >
+                          <Play className="w-3 h-3 fill-current" /> Apply Filter Combo
+                        </button>
                       </div>
                     </div>
-                    <div className="text-right">
-                      <div className="font-mono text-lg font-bold text-slate-100">₹{stock.last_trade_price?.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
-                      <div className="font-mono text-[9px] text-slate-500 mt-1 uppercase">Vol: {stock.volume?.toLocaleString('en-IN')}</div>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-2 border-t border-slate-800/50 pt-3">
-                    {Object.entries(stock).map(([key, value]) => {
-                      if (['symbol_name', 'last_trade_price', 'change_value', 'change_per', 'volume'].includes(key)) return null;
-                      if (value === null || value === undefined) return null;
-                      const formattedValue = typeof value === 'number' && !Number.isInteger(value) ? value.toFixed(2) : String(value);
-                      const displayKey = key.replace(/_/g, ' ').toUpperCase();
-                      return (
-                        <div key={key} className="overflow-hidden">
-                          <p className="font-mono text-[9px] text-slate-500 truncate">{displayKey}</p>
-                          <p className="font-mono text-xs font-semibold text-slate-300 mt-0.5 truncate">{formattedValue}</p>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })}
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
       </div>

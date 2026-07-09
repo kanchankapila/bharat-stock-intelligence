@@ -590,4 +590,26 @@ export const monitorRouter = router({
 
       return { success: true, jobId: job.id, message: `Successfully queued manual job in ${input.queueId}` };
     }),
+
+  getLiveScreenerOptimalCombinations: publicProcedure
+    .query(async () => {
+      const row = await dbGet<{ value: string }>(
+        "SELECT value FROM app_settings WHERE key = 'live_screener_optimal_combinations'"
+      );
+      if (!row) return null;
+      try {
+        return JSON.parse(row.value);
+      } catch {
+        return null;
+      }
+    }),
+
+  getLiveScreenerBacktestRuns: publicProcedure
+    .query(async () => {
+      const runs = await dbAll<any>(
+        "SELECT id, run_name, start_date, end_date, total_return_pct, win_rate, sharpe_ratio, alpha_pct, total_trades, strategy_config_json " +
+        "FROM backtesting_runs WHERE run_name LIKE 'live_screener_%' ORDER BY run_at DESC LIMIT 50"
+      );
+      return runs;
+    }),
 });

@@ -14,6 +14,7 @@ import { fetchNiftyTraderBreakouts } from "../marketData";
 import { fetchGlobalMarketData } from "../globalMarketService";
 import { generateStockAnalysis } from "../../services/aiService";
 import { router, publicProcedure } from "../trpc";
+import { runPython } from "../pythonRunner";
 
 export const marketRouter = router({
   getGlobalMarketData: publicProcedure
@@ -115,6 +116,15 @@ export const marketRouter = router({
         reasons: JSON.parse(r.reasons_json || '[]'),
         computedAt: r.computed_at,
       }));
+    }),
+
+  refreshEarlyHoursSpotter: publicProcedure
+    .mutation(async () => {
+      console.log('[TRPC] Running preopen_fetcher.py manually...');
+      await runPython('preopen_fetcher.py', [], 60_000);
+      console.log('[TRPC] Running early_hours_predictor.py manually...');
+      await runPython('early_hours_predictor.py', [], 60_000);
+      return { success: true };
     }),
 
   getSectorPerformance: publicProcedure

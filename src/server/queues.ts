@@ -864,6 +864,14 @@ async function processScreenerPerf(_job: Job): Promise<void> {
   await runPython('live_screener_resolver.py', [], 20 * 60_000)
     .catch(e => console.warn('[QUEUE] live_screener_resolver failed:', (e as Error).message));
 
+  // 8. Recompute optimal filter combinations using the latest resolved outcomes
+  await runPython('live_screener_optimizer.py', [], 5 * 60_000)
+    .catch(e => console.warn('[QUEUE] live_screener_optimizer failed:', (e as Error).message));
+
+  // 9. Auto-backtest top combinations so frontend cockpit always has fresh performance data
+  await runPython('backtest_live_screener.py', ['--auto-backtest-top', '5'], 10 * 60_000)
+    .catch(e => console.warn('[QUEUE] backtest_live_screener auto-backtest failed:', (e as Error).message));
+
   try {
     const { classifyAllScreeners } = await import('./screenerClassifier');
     await classifyAllScreeners();
