@@ -6,6 +6,7 @@ stock_fundamentals snapshot only when no history has accumulated. DB-backed (tem
 
 import importlib
 import os
+import re
 import sqlite3
 import sys
 import tempfile
@@ -35,6 +36,60 @@ def _restore_db_env():
     import importlib
     import db_compat
     importlib.reload(db_compat)
+
+
+def _technical_signals_alter_statements():
+    """load_training_data()'s SQLite branch selects ~160 technical_signals columns that
+    only exist via ALTER TABLE ADD COLUMN migrations -- most in db.ts, but some are
+    self-migrated by individual Python engines instead (e.g. mc_corporate_calendar_fetcher.py,
+    bse_event_classifier.py). Hand-copying either list here would drift out of sync on every
+    new migration (exactly what caused this test to start failing) -- parse both db.ts and
+    every *.py engine for their ADD COLUMN statements, so the mock schema always matches
+    whatever columns actually exist in production, wherever they're defined.
+
+    "IF NOT EXISTS" is stripped since SQLite's ALTER TABLE doesn't support it (the Postgres-only
+    variant some engines hardcode) -- duplicates across sources are handled by _make_db()'s
+    per-statement try/except, not de-duped here.
+    """
+    sources = [os.path.join(SERVER_DIR, "db.ts")]
+    sources += [
+        os.path.join(SERVER_DIR, f) for f in os.listdir(SERVER_DIR) if f.endswith(".py")
+    ]
+    # Only the column name + a single-word type is needed (SQLite type affinity doesn't
+    # care about DOUBLE PRECISION vs REAL, and any trailing DEFAULT/constraint clause is
+    # irrelevant to this test) -- so match just past the type keyword and stop.
+    literal_pattern = re.compile(
+        r"ALTER TABLE technical_signals ADD COLUMN(?: IF NOT EXISTS)? +([a-zA-Z_0-9]+) +([A-Za-z]+)"
+    )
+    # A couple of engines build the ALTER via an f-string over a Python list of column
+    # definitions (e.g. `for col, dtype in _TECHNICAL_SIGNALS_COLS:`) instead of a literal
+    # string -- literal_pattern can't see the real column name in those cases (it matches
+    # the f-string's static text up to "{...}" and misfires). Catch the two list-literal
+    # shapes actually used: [("col", "TYPE"), ...] and ["col   TYPE", ...].
+    tuple_list_pattern = re.compile(r'\(\s*"([a-zA-Z_0-9]+)"\s*,\s*"([A-Za-z]+)"\s*\)')
+    string_list_pattern = re.compile(r'"([a-zA-Z_0-9]+)\s+([A-Za-z]+)"')
+
+    statements = []
+    for path in sources:
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                text = f.read()
+        except OSError:
+            continue
+        for col, coltype in literal_pattern.findall(text):
+            if col.upper() in ("IF", "NOT", "EXISTS"):  # f-string {var} defeated the match
+                continue
+            statements.append(f"ALTER TABLE technical_signals ADD COLUMN {col} {coltype}")
+        basename = os.path.basename(path)
+        if basename == "stock_option_chain_fetcher.py":
+            for col, coltype in tuple_list_pattern.findall(text):
+                statements.append(f"ALTER TABLE technical_signals ADD COLUMN {col} {coltype}")
+        if basename == "screener_features_fetcher.py":
+            cols_block = re.search(r"^COLS = \[(.*?)^\]", text, re.MULTILINE | re.DOTALL)
+            if cols_block:
+                for col, coltype in string_list_pattern.findall(cols_block.group(1)):
+                    statements.append(f"ALTER TABLE technical_signals ADD COLUMN {col} {coltype}")
+    return statements
 
 
 def _make_db():
@@ -99,7 +154,53 @@ def _make_db():
             symbol TEXT, datetime TEXT, open REAL, high REAL, low REAL,
             close REAL, volume REAL, vwap REAL, interval TEXT
         );
+        CREATE TABLE nse_stocks (
+            symbol TEXT PRIMARY KEY,
+            name TEXT,
+            sector TEXT
+        );
+        CREATE TABLE mc_sector_earnings (
+            sector_name TEXT PRIMARY KEY,
+            np_growth_yoy REAL,
+            np_growth_qoq REAL,
+            rev_growth_yoy REAL
+        );
+        CREATE TABLE sector_fo_sentiment (
+            sector TEXT,
+            date TEXT,
+            sector_pcr REAL,
+            total_call_oi REAL,
+            total_put_oi REAL,
+            PRIMARY KEY (sector, date)
+        );
+        CREATE TABLE feature_store (
+            symbol TEXT,
+            date TEXT,
+            timeframe TEXT,
+            ret_12m_ex1m REAL,
+            PRIMARY KEY (symbol, date, timeframe)
+        );
+        CREATE TABLE historical_fno_sentiment (
+            symbol TEXT,
+            date TEXT,
+            max_pain REAL,
+            PRIMARY KEY (symbol, date)
+        );
+        CREATE TABLE credit_rating_events (
+            symbol TEXT,
+            announcement_date TEXT,
+            action TEXT
+        );
     """)
+    # Bring technical_signals up to the real production schema (base CREATE TABLE above
+    # plus every ADD COLUMN migration in db.ts) -- see _technical_signals_alter_statements.
+    for stmt in _technical_signals_alter_statements():
+        try:
+            con.execute(stmt)
+        except sqlite3.OperationalError as e:
+            if "duplicate column" not in str(e):
+                raise
+    con.commit()
     # One signal on 2024-06-01 (resolved WIN).
     con.execute("INSERT INTO signal_outcomes (symbol,signal_date,horizon_days,outcome,signal_score,signals_json,return_pct) "
                 "VALUES ('X','2024-06-01',15,'WIN',7,'[]',3.0)")

@@ -1103,6 +1103,35 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
         """
     else:
         # SQLite compatible version
+        # sector_fo_sentiment is created by run()'s startup DDL / sector_fo_proxy.py, not
+        # db.ts's schema -- may not exist yet on a fresh SQLite DB. Unlike a missing column,
+        # a missing TABLE makes a JOIN referencing it raise "no such table" regardless of
+        # which columns are selected, so guard both the SELECT columns and the JOIN itself.
+        _con = connect()
+        try:
+            _has_sfs = bool(_con.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='sector_fo_sentiment'"
+            ).fetchone())
+        except Exception:
+            _has_sfs = False
+        finally:
+            _con.close()
+
+        if _has_sfs:
+            sfs_train_sel = "sfs.sector_pcr, sfs.total_call_oi AS sector_call_oi, sfs.total_put_oi AS sector_put_oi"
+            sfs_train_join = """
+            LEFT JOIN sector_fo_sentiment sfs
+                   ON sfs.sector = (SELECT ns.sector FROM nse_stocks ns WHERE ns.symbol = so.symbol LIMIT 1)
+                  AND sfs.date = (
+                      SELECT MAX(sfs2.date) FROM sector_fo_sentiment sfs2
+                      JOIN nse_stocks ns2 ON ns2.sector = sfs2.sector AND ns2.symbol = so.symbol
+                      WHERE sfs2.date <= so.signal_date
+                  )
+            """
+        else:
+            sfs_train_sel = "NULL AS sector_pcr, NULL AS sector_call_oi, NULL AS sector_put_oi"
+            sfs_train_join = ""
+
         q = f"""
             SELECT so.symbol, so.signal_date, so.horizon_days, {label_select},
                    so.signal_score, so.signals_json, so.return_pct,
@@ -1221,7 +1250,7 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                        AND UPPER(cre.action) LIKE '%DOWNGRADE%'
                        AND date(cre.announcement_date) >= date(so.signal_date, '-365 days')
                        AND date(cre.announcement_date) <= date(so.signal_date)) AS cr_downgrades,
-                   sfs.sector_pcr, sfs.total_call_oi AS sector_call_oi, sfs.total_put_oi AS sector_put_oi
+                   {sfs_train_sel}
             FROM signal_outcomes so
             LEFT JOIN technical_signals ts
                    ON ts.symbol = so.symbol
@@ -1297,13 +1326,7 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
             LEFT JOIN mc_sector_earnings mse ON mse.sector_name = (
                 SELECT ns.sector FROM nse_stocks ns WHERE ns.symbol = so.symbol LIMIT 1
             )
-            LEFT JOIN sector_fo_sentiment sfs
-                   ON sfs.sector = (SELECT ns.sector FROM nse_stocks ns WHERE ns.symbol = so.symbol LIMIT 1)
-                  AND sfs.date = (
-                      SELECT MAX(sfs2.date) FROM sector_fo_sentiment sfs2
-                      JOIN nse_stocks ns2 ON ns2.sector = sfs2.sector AND ns2.symbol = so.symbol
-                      WHERE sfs2.date <= so.signal_date
-                  )
+            {sfs_train_join}
             {label_join}
             WHERE {label_where}
         """
@@ -1560,6 +1583,21 @@ def load_pending_signals() -> pd.DataFrame:
         sfs_pcr_sel = "sfs.sector_pcr" if "sector_pcr" in sfs_cols else "NULL AS sector_pcr"
         sfs_call_sel = "sfs.total_call_oi AS sector_call_oi" if "total_call_oi" in sfs_cols else "NULL AS sector_call_oi"
         sfs_put_sel = "sfs.total_put_oi AS sector_put_oi" if "total_put_oi" in sfs_cols else "NULL AS sector_put_oi"
+        # sector_fo_sentiment is created by run()'s startup DDL / sector_fo_proxy.py, not
+        # db.ts's schema -- unlike the other joined tables, it may not exist yet on a fresh
+        # SQLite DB, and unlike a missing column, a missing TABLE makes the JOIN itself raise
+        # "no such table" regardless of which columns are selected from it. Drop the join
+        # entirely when the table isn't there (sfs_pcr_sel/sfs_call_sel/sfs_put_sel above
+        # already default to NULL for this same case, so the SELECT list stays consistent).
+        sfs_join_sel = """
+            LEFT JOIN sector_fo_sentiment sfs
+                   ON sfs.sector = (SELECT ns.sector FROM nse_stocks ns WHERE ns.symbol = ts.symbol LIMIT 1)
+                  AND sfs.date = (
+                      SELECT MAX(sfs2.date) FROM sector_fo_sentiment sfs2
+                      JOIN nse_stocks ns2 ON ns2.sector = sfs2.sector AND ns2.symbol = ts.symbol
+                      WHERE sfs2.date <= ts.date
+                  )
+        """ if sfs_cols else ""
 
         sector_np_yoy_sel = "mse.np_growth_yoy AS sector_np_growth_yoy" if "np_growth_yoy" in mse_cols else "NULL AS sector_np_growth_yoy"
         sector_np_qoq_sel = "mse.np_growth_qoq AS sector_np_growth_qoq" if "np_growth_qoq" in mse_cols else "NULL AS sector_np_growth_qoq"
@@ -1726,13 +1764,7 @@ def load_pending_signals() -> pd.DataFrame:
             LEFT JOIN mc_sector_earnings mse ON mse.sector_name = (
                 SELECT ns.sector FROM nse_stocks ns WHERE ns.symbol = ts.symbol LIMIT 1
             )
-            LEFT JOIN sector_fo_sentiment sfs
-                   ON sfs.sector = (SELECT ns.sector FROM nse_stocks ns WHERE ns.symbol = ts.symbol LIMIT 1)
-                  AND sfs.date = (
-                      SELECT MAX(sfs2.date) FROM sector_fo_sentiment sfs2
-                      JOIN nse_stocks ns2 ON ns2.sector = sfs2.sector AND ns2.symbol = ts.symbol
-                      WHERE sfs2.date <= ts.date
-                  )
+            {sfs_join_sel}
             WHERE ts.win_probability IS NULL
               AND ts.signals_json IS NOT NULL
             ORDER BY ts.date DESC

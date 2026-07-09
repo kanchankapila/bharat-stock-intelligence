@@ -296,12 +296,20 @@ def _refresh_historical_div(con, symbols: set[str], today: date) -> int:
 
 
 def _ensure_columns(con) -> None:
+    # SQLite has no ADD COLUMN IF NOT EXISTS, so this has to be try/except-idempotent
+    # rather than relying on the (Postgres-only) IF NOT EXISTS clause this previously used.
     for stmt in [
-        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS days_to_ex_div DOUBLE PRECISION",
-        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS days_to_board_meeting DOUBLE PRECISION",
-        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS upcoming_div_pct DOUBLE PRECISION",
+        "ALTER TABLE technical_signals ADD COLUMN days_to_ex_div REAL",
+        "ALTER TABLE technical_signals ADD COLUMN days_to_board_meeting REAL",
+        "ALTER TABLE technical_signals ADD COLUMN upcoming_div_pct REAL",
     ]:
-        con.execute(stmt)
+        try:
+            con.execute(stmt)
+        except Exception:
+            # Postgres aborts the whole transaction on a failed statement (e.g. duplicate
+            # column) -- without this rollback every subsequent query on this connection
+            # would raise InFailedSqlTransaction.
+            con.rollback()
     con.commit()
 
 
