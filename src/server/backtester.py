@@ -746,6 +746,39 @@ class Backtester:
         return {'run_id': run_id, **stats}
 
 
+from pydantic import BaseModel
+
+class BacktestRequest(BaseModel):
+    start: str
+    end: str
+    horizon: int = 15
+    min_score: int = 3
+    max_pos: int = 20
+    capital: float = INITIAL_CAPITAL
+    slippage: float = 15
+    stop_loss_pct: float = 7.0
+    commission: float = 40
+    name: str = ""
+
+def run_backtest(req: BacktestRequest):
+    bt = Backtester()
+    try:
+        return bt.run(
+            start=req.start,
+            end=req.end,
+            horizon_days=req.horizon,
+            min_score=req.min_score,
+            max_positions=req.max_pos,
+            initial_capital=req.capital,
+            run_name=req.name,
+            slippage_bps=req.slippage,
+            stop_loss_pct=req.stop_loss_pct,
+            commission_bps=req.commission,
+        )
+    finally:
+        bt.close()
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Historical Backtesting Engine")
     parser.add_argument("--start",    type=str, default="2023-01-01")

@@ -156,6 +156,15 @@ class TechnicalAnalysisEngine:
                 """), results)
             print(f"Analysis complete. {len(results)} signals saved.")
 
+        return results
+
+
+def run_ta_engine():
+    engine = TechnicalAnalysisEngine()
+    results = engine.process_all()
+    return {"message": f"TA Analysis complete. {len(results) if results else 0} signals saved."}
+
+
 if __name__ == "__main__":
     engine = TechnicalAnalysisEngine()
     engine.process_all()

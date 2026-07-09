@@ -939,6 +939,28 @@ class AlphaQuantScoringEngine:
             print(f"[ScoringEngine] recommendation_log error: {e}")
 
 
+from pydantic import BaseModel
+
+class ScoringRequest(BaseModel):
+    rebuild: bool = False
+
+def run_scoring(req: ScoringRequest):
+    engine = AlphaQuantScoringEngine()
+    engine.process_scoring(force_rebuild=req.rebuild)
+
+    import requests
+    try:
+        requests.post("http://127.0.0.1:3000/api/internal/notify", json={
+            "type": "SUCCESS",
+            "title": "Scoring Complete",
+            "message": "The AI Quant Engine has finished calculating new scores."
+        }, timeout=2)
+    except requests.RequestException:
+        pass
+
+    return {"message": "Scoring engine completed successfully", "rebuild": req.rebuild}
+
+
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="AlphaQuant Scoring Engine")
