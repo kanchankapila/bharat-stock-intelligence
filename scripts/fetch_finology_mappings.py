@@ -102,14 +102,28 @@ def get_existing_mappings():
             print(f"Warning: Failed to read existing mappings: {e}")
     return mappings
 
-def fetch_finology_data(symbol, session):
-    """Query finology for a single symbol and extract fincode/scripcode"""
+def fetch_finology_data(symbol, session, max_403_retries=3):
+    """Query finology for a single symbol and extract fincode/scripcode.
+
+    On a 403 (rate limit), back off and retry this symbol a few times before giving up on
+    it specifically -- a 403 used to abort the ENTIRE batch (sys.exit), which is why ~111
+    stocks (including large caps like TATAMOTORS, LTIM) never got a fincode/scripcode: the
+    first rate-limit hit anywhere in the 5-worker pool killed every symbol still queued.
+    """
+    for attempt in range(max_403_retries + 1):
+        try:
+            params = {"q": symbol}
+            response = session.get(FINOLOGY_SEARCH_URL, headers=HEADERS, params=params, timeout=10)
+            if response.status_code == 403:
+                if attempt < max_403_retries:
+                    time.sleep(10 * (attempt + 1))
+                    continue
+                return {"status": "forbidden", "error": "403 Forbidden"}
+            break
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
     try:
-        params = {"q": symbol}
-        response = session.get(FINOLOGY_SEARCH_URL, headers=HEADERS, params=params, timeout=10)
-        if response.status_code == 403:
-            return {"status": "forbidden", "error": "403 Forbidden"}
-        elif response.status_code != 200:
+        if response.status_code != 200:
             return {"status": "error", "error": f"HTTP {response.status_code}"}
         
         try:
@@ -240,10 +254,9 @@ def main():
                         not_found_count += 1
                         print(f"[{count}/{total}] {symbol} -> NOT FOUND")
                     elif result["status"] == "forbidden":
-                        print(f"[{count}/{total}] {symbol} -> BLOCKED (403 Forbidden). Stopping fetch.")
-                        # Save current state and exit
-                        save_mappings(mappings)
-                        sys.exit(1)
+                        error_count += 1
+                        print(f"[{count}/{total}] {symbol} -> BLOCKED (403 Forbidden after retries). "
+                              f"Skipping -- will retry on next run.")
                     else:
                         error_count += 1
                         print(f"[{count}/{total}] {symbol} -> ERROR: {result.get('error')}")

@@ -560,6 +560,13 @@
     "finology_symbol": "AGIIL"
   },
   {
+    "symbol": "AGL",
+    "name": "Allcargo Global Ltd.",
+    "fincode": 323308,
+    "scripcode": 544602,
+    "finology_symbol": "AGL"
+  },
+  {
     "symbol": "AGRITECH",
     "name": "Agri-Tech (India) Ltd.",
     "fincode": 200136,
@@ -5971,6 +5978,13 @@
     "finology_symbol": "GVT&D"
   },
   {
+    "symbol": "GYFTR",
+    "name": "Gyftr Ltd.",
+    "fincode": 107912,
+    "scripcode": 507912,
+    "finology_symbol": "LKPMERFIN"
+  },
+  {
     "symbol": "HAL",
     "name": "Hindustan Aeronautics Ltd.",
     "fincode": 219494,
@@ -8237,6 +8251,13 @@
     "fincode": 200037,
     "scripcode": 532673,
     "finology_symbol": "KMSUGAR"
+  },
+  {
+    "symbol": "KNACK",
+    "name": "Knack Packaging Ltd.",
+    "fincode": 322344,
+    "scripcode": 544814,
+    "finology_symbol": "KNACK"
   },
   {
     "symbol": "KNAGRI",
