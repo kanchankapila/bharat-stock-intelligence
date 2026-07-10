@@ -157,16 +157,33 @@ def _feature_matrix(df: pd.DataFrame):
     return df[FEATURE_COLS].replace([np.inf, -np.inf], np.nan).fillna(0.0)
 
 
+def _make_model(spw: float):
+    """A single gradient-boosted classifier. The full ml_ensemble stack (CatBoost + RF +
+    ExtraTrees + LR + LGBM) × folds took 2+ CPU-hours on the 5-year / ~2M-row cross-section;
+    for a breakout screen one fast booster is plenty and keeps train/score practical."""
+    from lightgbm import LGBMClassifier
+    return LGBMClassifier(
+        n_estimators=400, learning_rate=0.03, num_leaves=63, max_depth=-1,
+        subsample=0.8, subsample_freq=1, colsample_bytree=0.8,
+        min_child_samples=200, scale_pos_weight=spw, n_jobs=-1, verbose=-1,
+    )
+
+
 def train(report_only: bool = False) -> dict:
     from sklearn.metrics import roc_auc_score
-    from ml_ensemble import _base_models
 
     df = load_labeled_features()
     if df.empty or len(df) < 500:
         print(f"[Breakout] insufficient labeled data ({len(df)} rows); skipping.")
         return {"trained": False, "n": len(df)}
 
+    # Keep every other trading day: consecutive-day labels are highly autocorrelated, so
+    # striding halves the row count with negligible information loss and keeps CV fast.
     df = df.sort_values("date").reset_index(drop=True)
+    all_dates = sorted(df["date"].unique())
+    if len(all_dates) > 200:
+        keep = set(all_dates[::2])
+        df = df[df["date"].isin(keep)].reset_index(drop=True)
     y = df["flew"].astype(int)
     X = _feature_matrix(df)
     base_rate = float(y.mean())
@@ -197,12 +214,9 @@ def train(report_only: bool = False) -> dict:
         va = df["date"].isin(val_dates).values
         if tr.sum() < 200 or va.sum() < 50 or len(set(y[tr])) < 2:
             continue
-        models = _base_models(scale_pos_weight=spw)
-        va_pred = np.zeros(va.sum())
-        for _, m in models:
-            m.fit(X[tr], y[tr])
-            va_pred += m.predict_proba(X[va])[:, 1]
-        oof[va] = va_pred / len(models)
+        m = _make_model(spw)
+        m.fit(X[tr], y[tr])
+        oof[va] = m.predict_proba(X[va])[:, 1]
     mask = ~np.isnan(oof)
     if mask.sum() < 50 or len(set(y[mask])) < 2:
         print(f"[Breakout] purged CV left too few validation rows ({int(mask.sum())}); "
@@ -222,14 +236,12 @@ def train(report_only: bool = False) -> dict:
     if report_only:
         return {"trained": False, "n": len(y), "auc": auc, "base_rate": base_rate, "lift": lift}
 
-    # Production model = the same base models refit on ALL data; prediction is their
-    # average (identical to the OOF probe, so the stored model matches what AUC measured).
-    prod_models = _base_models(scale_pos_weight=spw)
-    for _, m in prod_models:
-        m.fit(X, y)
+    # Production model: refit the same booster on ALL data (matches the OOF probe).
+    prod = _make_model(spw)
+    prod.fit(X, y)
     os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
     with open(MODEL_PATH, "wb") as f:
-        pickle.dump({"models": [m for _, m in prod_models], "feature_names": list(X.columns),
+        pickle.dump({"models": [prod], "feature_names": list(X.columns),
                      "horizon": HORIZON, "trained_at": datetime.date.today().isoformat(),
                      "oof_auc": auc}, f)
     print(f"[Breakout] saved model (OOF AUC {auc:.4f}) → {MODEL_PATH}")
