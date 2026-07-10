@@ -846,7 +846,10 @@ async function processScreenerPerf(_job: Job): Promise<void> {
     .catch(e => console.warn('[QUEUE] screener_ohlcv_backfill failed:', (e as Error).message));
 
   // 3. Compute performance metrics for all screeners (K_PRIOR adaptive; phase_e updates confidence)
-  await runPython('screener_performance.py', [], 15 * 60_000);
+  // 45 min: the run includes per-screener Ollama classification calls and routinely
+  // outlives the old 15-min budget now that screener_appearances has months of history
+  // (12 of its last 14 runs were timeout-killed with an empty "Command failed").
+  await runPython('screener_performance.py', [], 45 * 60_000);
 
   // 4. Stamp per-stock screener ML features into technical_signals
   await runPython('screener_features_fetcher.py', [], 5 * 60_000)
@@ -1566,11 +1569,14 @@ export async function initQueues(): Promise<boolean> {
           await svc.runNewsSentimentCycle();
         }
       },
+      // Network-bound (Google News/BSE fetches over ~150 companies, batched); no per-fetch
+      // timeout visible in fetchSource, so a slow upstream response can push this past the
+      // previous 5-min lockDuration -- matches the 2026-07-06 "job stalled" failures.
       {
         connection,
         concurrency: 1,
-        lockDuration: 5 * 60 * 1000,
-        lockRenewTime: 60 * 1000,
+        lockDuration: 10 * 60 * 1000,
+        lockRenewTime: 2 * 60 * 1000,
       },
     );
 
@@ -1657,11 +1663,15 @@ export async function initQueues(): Promise<boolean> {
     outcomeResolverWorker = new Worker(
       QUEUE_OUTCOME_RESOLVER,
       processOutcomeResolver,
+      // processOutcomeResolver's worst case: 180s (ohlcv_quality) + 3x resolveOutcomesResilient
+      // (each up to 180s fallback, on top of its own pythonApi call) + 1200s
+      // (live_screener_resolver) -- comfortably over 30 min, well past the previous 10-min
+      // lockDuration that caused "job stalled" failures (2026-07-04).
       {
         connection,
         concurrency: 1,
-        lockDuration: 10 * 60 * 1000,
-        lockRenewTime: 2 * 60 * 1000,
+        lockDuration: 45 * 60 * 1000,
+        lockRenewTime: 10 * 60 * 1000,
       },
     );
 
@@ -1859,7 +1869,12 @@ export async function initQueues(): Promise<boolean> {
     });
     dlMacroFetchWorker = new Worker(QUEUE_DL_MACRO_FETCH,
       async () => {
-        await processDLPython('global_macro_fetcher.py');
+        // Explicit timeout, not processDLPython's 6h default: this worker's lockDuration is
+        // only 5 min, so an unbounded default lets a hang block the lock indefinitely instead
+        // of failing cleanly -- exactly what caused a live incident (repeated "could not renew
+        // lock" errors + a growing pile of stuck python.exe processes, since a stuck subprocess
+        // was never killed and each BullMQ retry spawned another one alongside it).
+        await processDLPython('global_macro_fetcher.py', [], 2 * 60_000);
         // MC global: 15 indices (Nikkei/HangSeng/KOSPI/etc) + currencies + ADRs + commodities → mc_global_snapshot + macro_asset_prices.
         await runPython('mc_global_macro_fetcher.py', [], 60_000)
           .catch(e => console.warn('[QUEUE] mc_global_macro_fetcher failed:', (e as Error).message));
@@ -1898,7 +1913,10 @@ export async function initQueues(): Promise<boolean> {
         await runPython('early_hours_predictor.py', [], 60_000)
           .catch(e => console.warn('[QUEUE] early_hours_predictor failed:', (e as Error).message));
       },
-      { connection, concurrency: 1 });
+      // No lockDuration previously -- fell back to BullMQ's 30s default while this worker
+      // awaits up to 2 sequential 60s runPython calls (120s worst case), causing repeated
+      // "job stalled more than allowable limit" failures.
+      { connection, concurrency: 1, lockDuration: 3 * 60_000 });
     console.log('[QUEUE] Pre-open snapshot scheduled at 9:10 AM IST (weekdays)');
     dlMacroFetchWorker.on('failed', (_, err) => {
       console.error('[QUEUE] dl-macro-fetch failed:', err.message);
@@ -1984,7 +2002,9 @@ export async function initQueues(): Promise<boolean> {
       removeOnComplete: 3, removeOnFail: 3,
     });
     dlRegimeUpdateWorker = new Worker(QUEUE_DL_REGIME_UPDATE,
-      async () => processDLPython('regime_detector.py', ['--mode', 'update']),
+      // Same fix as dlMacroFetchWorker above: explicit timeout, not the 6h default, since this
+      // worker's lockDuration is only 5 min.
+      async () => processDLPython('regime_detector.py', ['--mode', 'update'], 2 * 60_000),
       { connection, concurrency: 1, lockDuration: 5 * 60 * 1000 });
     dlRegimeUpdateWorker.on('completed', () => {
       console.log('[QUEUE] dl-regime-update done');
@@ -2092,7 +2112,9 @@ export async function initQueues(): Promise<boolean> {
     confluenceComputeWorker = new Worker(
       QUEUE_CONFLUENCE_COMPUTE,
       processConfluenceCompute,
-      { connection: makeConnection(), concurrency: 1 }
+      // No lockDuration previously -- fell back to BullMQ's 30s default despite this
+      // in-process computation running across the whole stock universe every 30 minutes.
+      { connection: makeConnection(), concurrency: 1, lockDuration: 10 * 60_000 }
     );
     confluenceComputeWorker.on('completed', () => {
       recordHeartbeat('confluence-compute', 'success');
@@ -2116,7 +2138,9 @@ export async function initQueues(): Promise<boolean> {
     confluenceOutcomesWorker = new Worker(
       QUEUE_CONFLUENCE_OUTCOMES,
       processConfluenceOutcomes,
-      { connection: makeConnection(), concurrency: 1 }
+      // lockDuration must exceed the processor's ~2×120s python runs; the BullMQ
+      // default 30s lock marked every real run "stalled more than allowable limit"
+      { connection: makeConnection(), concurrency: 1, lockDuration: 10 * 60 * 1000 }
     );
     confluenceOutcomesWorker.on('completed', () => {
       recordHeartbeat('confluence-outcomes', 'success');
@@ -2153,7 +2177,13 @@ export async function initQueues(): Promise<boolean> {
     screenerPerfWorker = new Worker(
       QUEUE_SCREENER_PERFORMANCE,
       processScreenerPerf,
-      { connection, concurrency: 1, lockDuration: 20 * 60 * 1000, lockRenewTime: 5 * 60 * 1000 },
+      // processScreenerPerf runs 10 sequential runPython steps (30+5+20+45+5+2+3+20+5+10 =
+      // 145 min of individual timeouts) plus an in-process classifyAllScreeners() -- the
+      // previous 20-min lockDuration was only enough for step 1 alone, so BullMQ correctly
+      // considered the worker dead partway through step 3-4 on every run, moving the job
+      // back to "wait" and eventually failing it with "stalled more than allowable limit"
+      // regardless of whether the Python side would have actually succeeded.
+      { connection, concurrency: 1, lockDuration: 180 * 60_000, lockRenewTime: 20 * 60_000 },
     );
 
     screenerPerfWorker.on('completed', () => {
@@ -2314,11 +2344,15 @@ export async function initQueues(): Promise<boolean> {
         const { syncAndAnalyzeCompanyProfiles } = await import('./companyProfileSyncService');
         await syncAndAnalyzeCompanyProfiles();
       },
+      // syncAndAnalyzeCompanyProfiles() awaits trendlyne_overview_fetcher.py with a 70-min
+      // runPython timeout -- the previous 60-min lockDuration was shorter than that single
+      // call's own allowance, so every real (non-skipped) run stalled before finishing.
+      // This job has never recorded a success (last_success_at is NULL in job_heartbeat).
       {
         connection,
         concurrency: 1,
-        lockDuration: 60 * 60 * 1000, // 1 hour
-        lockRenewTime: 10 * 60 * 1000,
+        lockDuration: 90 * 60 * 1000, // 90 min
+        lockRenewTime: 15 * 60 * 1000,
       },
     );
 
@@ -2513,7 +2547,10 @@ export async function initQueues(): Promise<boolean> {
         console.log('[QUEUE] unified-ranker starting...');
         await runPython('unified_ranker.py', [], 5 * 60_000);
       },
-      { connection, concurrency: 1 },
+      // No lockDuration previously -- fell back to BullMQ's 30s default while awaiting a
+      // runPython call allowed up to 5 minutes, causing repeated "job stalled" failures
+      // (confirmed in job_heartbeat: 3 stalls on 2026-07-09 alone).
+      { connection, concurrency: 1, lockDuration: 6 * 60_000 },
     );
     unifiedRankerWorker = unifiedRankerWorkerInstance;
 
@@ -2547,7 +2584,9 @@ export async function initQueues(): Promise<boolean> {
         const digest = await buildDailyDigest();
         await telegramService.sendMarkdownMessage(digest);
       },
-      { connection, concurrency: 1 },
+      // No lockDuration previously -- fell back to BullMQ's 30s default while
+      // buildDailyDigest() aggregates job_heartbeat status across every registered job.
+      { connection, concurrency: 1, lockDuration: 5 * 60_000 },
     );
     jobDigestWorker.on('completed', () => console.log('[QUEUE] job-digest sent'));
     jobDigestWorker.on('failed', (_, err) => console.error('[QUEUE] job-digest failed:', err.message));

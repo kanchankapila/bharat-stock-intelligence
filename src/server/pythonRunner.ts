@@ -1,6 +1,18 @@
 import { execFile } from 'child_process';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { promisify } from 'util';
+
+// Anchor to this module's location, NOT process.cwd(): a server accidentally started
+// from a .claude worktree copy would otherwise resolve the venv inside the worktree,
+// which dies with ENOENT once the worktree is cleaned up (took out ml-daily-ops for
+// a week in July 2026). Worktrees never contain a venv, so if this module itself is
+// running from one, strip the worktree segment to reach the real repo's venv.
+const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
+// Scripts exist in a worktree, the venv does not — so PY_DIR keeps the worktree
+// path while the interpreter falls back to the real repo's venv.
+const SCRIPT_ROOT = path.resolve(MODULE_DIR, '..', '..');
+const REPO_ROOT = SCRIPT_ROOT.replace(/[\\/]\.claude[\\/]worktrees[\\/][^\\/]+$/, '');
 
 const execFileAsync = promisify(execFile);
 
@@ -32,14 +44,14 @@ function releasePythonSlot(): void {
 export const PYTHON = process.env.PYTHON_PATH
   ? (path.isAbsolute(process.env.PYTHON_PATH)
       ? process.env.PYTHON_PATH
-      : path.resolve(process.cwd(), process.env.PYTHON_PATH))
+      : path.resolve(REPO_ROOT, process.env.PYTHON_PATH))
   : (
     process.platform === 'win32'
-      ? path.resolve(process.cwd(), 'backend-python', 'venv', 'Scripts', 'python.exe')
-      : path.resolve(process.cwd(), 'backend-python', 'venv', 'bin', 'python')
+      ? path.resolve(REPO_ROOT, 'backend-python', 'venv', 'Scripts', 'python.exe')
+      : path.resolve(REPO_ROOT, 'backend-python', 'venv', 'bin', 'python')
   );
 
-export const PY_DIR = path.resolve(process.cwd(), 'src', 'server');
+export const PY_DIR = path.resolve(SCRIPT_ROOT, 'src', 'server');
 
 import log from './logger';
 
@@ -73,7 +85,16 @@ export async function runPython(
     stderr = result.stderr;
   } catch (error: any) {
     stdout = error.stdout || '';
-    stderr = error.stderr || error.message || String(error);
+    // execFile sets killed=true + a signal when the `timeout` option fires. A killed
+    // process often hasn't written anything to stderr yet, so error.stderr is '' (falsy)
+    // and this used to fall through to error.message -- just "Command failed: <cmd>",
+    // with no indication it was a timeout at all (screener_performance.py's growing
+    // dataset started tripping its 45-min budget and every failure looked identical to
+    // a code crash with an empty message).
+    stderr = (error.killed || error.signal)
+      ? `Timed out after ${timeoutMs}ms (killed by ${error.signal || 'timeout'}). ` +
+        (error.stderr || 'No stderr captured before the process was killed.')
+      : (error.stderr || error.message || String(error));
     didThrow = true;
     throw error;
   } finally {
