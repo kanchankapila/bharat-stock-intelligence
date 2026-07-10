@@ -87,17 +87,28 @@ def upsert(conn, rows: list[tuple], overwrite: bool) -> int:
                 "close=excluded.close, volume=excluded.volume" if overwrite else "DO NOTHING")
     if use_postgres():
         from psycopg2.extras import execute_values
-        raw = get_engine().raw_connection()
-        try:
-            cur = raw.cursor()
-            sql = ("INSERT INTO stock_ohlcv (symbol, date, open, high, low, close, volume) "
-                   "VALUES %s ON CONFLICT (symbol, date) " + conflict)
-            for i in range(0, len(rows), INSERT_CHUNK):
-                execute_values(cur, sql, rows[i:i + INSERT_CHUNK], page_size=INSERT_CHUNK)
-            raw.commit()
-        finally:
-            raw.close()
-        return len(rows)
+        sql = ("INSERT INTO stock_ohlcv (symbol, date, open, high, low, close, volume) "
+               "VALUES %s ON CONFLICT (symbol, date) " + conflict)
+        written = 0
+        # One transaction PER CHUNK (not one big commit): a chunk that trips a
+        # compressed-chunk ON CONFLICT error or a lock timeout must roll back ONLY itself
+        # and be logged LOUDLY — the original single-commit version swallowed such failures
+        # so whole symbols silently never landed (RELIANCE et al. showed only recent bars).
+        for i in range(0, len(rows), INSERT_CHUNK):
+            batch = rows[i:i + INSERT_CHUNK]
+            raw = get_engine().raw_connection()
+            try:
+                cur = raw.cursor()
+                execute_values(cur, sql, batch, page_size=INSERT_CHUNK)
+                raw.commit()
+                written += len(batch)
+            except Exception as e:
+                raw.rollback()
+                print(f"[MCBackfill] UPSERT ERROR on {len(batch)}-row batch "
+                      f"({batch[0][0]}..{batch[-1][0]}): {type(e).__name__}: {str(e)[:160]}")
+            finally:
+                raw.close()
+        return written
     # SQLite fallback
     sql = translate(
         "INSERT INTO stock_ohlcv (symbol, date, open, high, low, close, volume) "
@@ -121,8 +132,12 @@ def run(from_year: int, workers: int, limit: int | None,
     t0 = time.time()
     ok = failed = total_rows = 0
     fail_syms = []
-    pending: list[tuple] = []
 
+    # Fetch in parallel (I/O-bound) but write ONE SYMBOL PER TRANSACTION in the main
+    # thread. An earlier version accumulated rows across symbols and flushed interleaved
+    # 5000-row chunks; under concurrent stock_ohlcv writers (ml-daily-ops) + compressed
+    # chunks that silently dropped some symbols' rows with no error. Per-symbol atomic
+    # writes match the pattern that works reliably in isolation.
     with ThreadPoolExecutor(max_workers=workers) as ex:
         futs = {ex.submit(fetch_one, s, session, from_year): s for s in syms}
         done = 0
@@ -131,19 +146,14 @@ def run(from_year: int, workers: int, limit: int | None,
             done += 1
             if status == "ok" and rows:
                 ok += 1
-                pending.extend(rows)
-                # flush periodically so memory stays bounded on a full 2400-symbol run
-                if len(pending) >= 50_000:
-                    total_rows += upsert(conn, pending, overwrite)
-                    pending = []
+                total_rows += upsert(conn, rows, overwrite)
             else:
                 failed += 1
                 fail_syms.append(f"{sym}({status})")
             if done % 200 == 0:
-                print(f"[MCBackfill]   {done}/{len(syms)} fetched "
-                      f"({ok} ok, {failed} failed, {total_rows + len(pending)} rows)...")
+                print(f"[MCBackfill]   {done}/{len(syms)} done "
+                      f"({ok} ok, {failed} failed, {total_rows} rows)...")
 
-    total_rows += upsert(conn, pending, overwrite)
     conn.close()
     dt = time.time() - t0
     print(f"[MCBackfill] DONE in {dt:.0f}s: {ok} ok / {failed} failed / {total_rows} rows written")
