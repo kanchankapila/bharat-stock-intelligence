@@ -51,6 +51,24 @@ async function startServer() {
   const { validateEnv } = await import('./src/server/envConfig');
   validateEnv();
 
+  // Wait for Postgres to accept connections before any DB-dependent bootstrap. On a cold
+  // stack start (or a DB container restart) the server process can come up before
+  // TimescaleDB finishes booting, and bootstrapQuantScoring's first query would throw
+  // "connection refused" and hard-crash the whole server ("Failed to start server").
+  const { usePostgres } = await import('./src/server/pgConfig');
+  if (usePostgres()) {
+    const { pgHealthy } = await import('./src/server/pgClient');
+    for (let attempt = 1; attempt <= 30; attempt++) {
+      if (await pgHealthy()) break;
+      if (attempt === 30) {
+        console.error('[SERVER] Postgres not reachable after 30 attempts (~60s) — aborting boot; PM2 will retry.');
+        throw new Error('Postgres unavailable at startup');
+      }
+      console.log(`[SERVER] Waiting for Postgres (attempt ${attempt}/30)...`);
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+  }
+
   const app = express();
   const PORT = parseInt(process.env.PORT || '3000', 10);
 
