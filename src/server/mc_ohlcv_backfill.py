@@ -28,7 +28,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 
-from db_compat import connect, read_df, translate
+from db_compat import connect, read_df, translate, use_postgres, get_engine
 
 URL = "https://priceapi.moneycontrol.com/techCharts/indianMarket/stock/history"
 HEADERS = {
@@ -78,22 +78,35 @@ def fetch_one(sym: str, session: requests.Session, from_year: int) -> tuple:
 
 
 def upsert(conn, rows: list[tuple], overwrite: bool) -> int:
+    """Bulk upsert. On Postgres uses psycopg2 execute_values (one multi-row INSERT per
+    chunk) — orders of magnitude faster than per-row executemany, which turned a ~2-min
+    fetch into a ~1-hour write. Falls back to executemany on SQLite (tests)."""
     if not rows:
         return 0
     conflict = ("DO UPDATE SET open=excluded.open, high=excluded.high, low=excluded.low, "
                 "close=excluded.close, volume=excluded.volume" if overwrite else "DO NOTHING")
+    if use_postgres():
+        from psycopg2.extras import execute_values
+        raw = get_engine().raw_connection()
+        try:
+            cur = raw.cursor()
+            sql = ("INSERT INTO stock_ohlcv (symbol, date, open, high, low, close, volume) "
+                   "VALUES %s ON CONFLICT (symbol, date) " + conflict)
+            for i in range(0, len(rows), INSERT_CHUNK):
+                execute_values(cur, sql, rows[i:i + INSERT_CHUNK], page_size=INSERT_CHUNK)
+            raw.commit()
+        finally:
+            raw.close()
+        return len(rows)
+    # SQLite fallback
     sql = translate(
         "INSERT INTO stock_ohlcv (symbol, date, open, high, low, close, volume) "
-        "VALUES (?,?,?,?,?,?,?) ON CONFLICT (symbol, date) " + conflict
-    )
+        "VALUES (?,?,?,?,?,?,?) ON CONFLICT (symbol, date) " + conflict)
     cur = conn.cursor()
-    written = 0
     for i in range(0, len(rows), INSERT_CHUNK):
-        chunk = rows[i:i + INSERT_CHUNK]
-        cur.executemany(sql, chunk)
-        written += len(chunk)
+        cur.executemany(sql, rows[i:i + INSERT_CHUNK])
     conn.commit()
-    return written
+    return len(rows)
 
 
 def run(from_year: int, workers: int, limit: int | None,
