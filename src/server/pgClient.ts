@@ -239,6 +239,8 @@ export async function pgEnsureColumns(): Promise<void> {
     `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS pead_score            DOUBLE PRECISION`,
     `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS event_signal_score    DOUBLE PRECISION`,
     `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS event_type_flags      TEXT`,
+    // breakout classifier (Lever #4) — cross-sectional P(>=6% move in next 10 trading days)
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS breakout_probability  DOUBLE PRECISION`,
     // migration 066 (2026-07-04 trendlyne-fetch-rationalization) — fcf_yield_approx
     // superseded fcf_yield (Task 11) but this file wasn't updated when db.ts/
     // schema.postgres.sql were, leaving live Postgres without the column for a day

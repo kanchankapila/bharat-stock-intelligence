@@ -706,6 +706,12 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await runPython('cs_ranker.py', ['--score'], 120_000)
     .catch(e => console.warn('[QUEUE] cs_ranker score failed:', (e as Error).message));
 
+  // Breakout classifier (Lever #4): score today's universe with P(>=6% move in 10d) →
+  // technical_signals.breakout_probability. Advisory only for now (strong purged-OOF AUC
+  // ~0.73 but on limited history); the weekly --train refits as coverage grows.
+  await runPython('breakout_classifier.py', ['--score'], 3 * 60_000)
+    .catch(e => console.warn('[QUEUE] breakout_classifier score failed:', (e as Error).message));
+
   // Winner attribution: which stocks actually flew today, did we have them flagged,
   // and which precursors preceded the move → rolling lift → tomorrow's candidate list.
   await runPython('high_flyer_retrospective.py', [], 10 * 60_000)
@@ -838,6 +844,10 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean }> 
   // 0.757 in the first place) — without it, every scheduled retrain silently falls back to
   // untuned defaults, which measured ~0.20 AUC worse on held-out test in one observed run.
   await runPython('ml_ensemble.py', ['--train', '--tune', '--score'], 90 * 60_000);
+  // Retrain the breakout classifier (Lever #4) on the accumulated feature history and
+  // refresh today's scores; purged-OOF AUC printed to logs for monitoring.
+  await runPython('breakout_classifier.py', ['--train', '--score'], 30 * 60_000)
+    .catch(e => console.warn('[QUEUE] breakout_classifier train failed:', (e as Error).message));
   await runPython('cs_ranker.py', ['--train', '--score'], 30 * 60_000)
     .catch(e => console.warn('[QUEUE] cs_ranker retrain failed:', (e as Error).message));
   await runPython('strategy_optimizer.py', [], 30 * 60_000)

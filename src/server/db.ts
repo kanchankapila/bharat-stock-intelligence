@@ -1369,6 +1369,8 @@ migrateColumn('technical_signals', 'insider_buy_pct_90d', 'REAL');
 migrateColumn('technical_signals', 'opening_range_break',  'REAL');
 migrateColumn('technical_signals', 'vwap_deviation_pct',   'REAL');
 migrateColumn('technical_signals', 'first_hour_vol_share', 'REAL');
+// breakout classifier (Lever #4) — cross-sectional P(>=6% move in next 10 trading days)
+migrateColumn('technical_signals', 'breakout_probability', 'REAL');
 
 // ATM implied vol + skew snapshot (captured by pcr_fetcher.py from the NSE option chain)
 migrateColumn('stock_options_oi', 'atm_iv',   'REAL');
