@@ -156,6 +156,19 @@ def test_dry_run_writes_nothing():
     assert conn.execute("SELECT COUNT(*) FROM signal_outcomes").fetchone()[0] == 0
 
 
+# ─── data-error guard: phantom returns must not count as wins/losses ─────────────────
+
+def test_is_plausible_return_guard():
+    from outcome_resolver import is_plausible_return, MAX_PLAUSIBLE_RETURN_PCT
+    assert is_plausible_return(5.0)      # a normal swing return
+    assert is_plausible_return(-40.0)    # a big but real drawdown
+    assert is_plausible_return(MAX_PLAUSIBLE_RETURN_PCT)  # boundary is inclusive
+    assert not is_plausible_return(188.0)     # phantom (was the poisoned per-source avg)
+    assert not is_plausible_return(26325.26)  # phantom (max observed in unified_signal_outcomes)
+    assert not is_plausible_return(-150.0)    # impossible on a long (below -100%)
+    assert not is_plausible_return(None)      # unresolved
+
+
 # ─── net-of-cost (#3): win rate must be measured after round-trip transaction costs ──
 
 def test_return_pct_is_net_of_round_trip_costs():
