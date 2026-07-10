@@ -34,7 +34,7 @@ HORIZON = 10             # within the next 10 trading days
 MIN_PRICE = 20.0
 EMBARGO = HORIZON        # purge `horizon` bars between train and validation folds
 TRAIN_LOOKBACK_DAYS = 2000   # ~5.5y — use the full backfilled history for training
-SCORE_LOOKBACK_DAYS = 400    # enough for the 252-day rolling windows when scoring latest
+SCORE_LOOKBACK_DAYS = 600    # headroom for the 252-day rolling windows on the latest bar
 MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ml_models", "breakout.pkl")
 
 # Features computed DIRECTLY from stock_ohlcv (not technical_signals) so the model trains
@@ -270,9 +270,12 @@ def score() -> int:
         return 0
     feats = compute_ohlcv_features(ohlcv)
     d = feats["date"].max()
-    today = feats[feats["date"] == d].dropna(subset=FEATURE_COLS, how="any")
+    # Score EVERY symbol trading on the latest session; missing rolling features are
+    # filled with 0 (same as training's _feature_matrix), so newly-listed names still get
+    # a score from whatever features are mature — maximises breakout_probability coverage.
+    today = feats[feats["date"] == d]
     if today.empty:
-        print(f"[Breakout] no fully-populated feature rows for {d}.")
+        print(f"[Breakout] no feature rows for {d}.")
         return 0
     X = today[art["feature_names"]].replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(np.float32)
     preds = np.zeros(len(X))
