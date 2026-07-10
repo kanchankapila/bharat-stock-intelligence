@@ -33,8 +33,21 @@ RET_THRESHOLD = 0.06     # +6% forward move = breakout
 HORIZON = 10             # within the next 10 trading days
 MIN_PRICE = 20.0
 EMBARGO = HORIZON        # purge `horizon` bars between train and validation folds
-LOOKBACK_DAYS = 420
+TRAIN_LOOKBACK_DAYS = 2000   # ~5.5y — use the full backfilled history for training
+SCORE_LOOKBACK_DAYS = 400    # enough for the 252-day rolling windows when scoring latest
 MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ml_models", "breakout.pkl")
+
+# Features computed DIRECTLY from stock_ohlcv (not technical_signals) so the model trains
+# on the full multi-year history with a CONSISTENT feature set across all eras — the old
+# technical_signals join capped training at ~16 recent dates and mixed feature-completeness
+# between recent (200 cols populated) and old (all-default) rows. These momentum/trend/
+# volatility/volume factors are what drove the breakout signal in the first place.
+FEATURE_COLS = [
+    "ret_5d", "ret_21d", "ret_63d", "ret_126d",
+    "rs_rank_21d", "rs_rank_63d",
+    "dist_sma20", "dist_sma50", "dist_sma200", "above_sma200",
+    "rsi14", "hv20", "vol_ratio", "atr_pct", "dist_52w_high", "range_pct_10d",
+]
 
 
 # ── pure label core ───────────────────────────────────────────────────────────
@@ -68,39 +81,80 @@ def build_breakout_labels(close: pd.DataFrame, horizon: int = HORIZON,
     return long[["symbol", "date", "flew"]]
 
 
+# ── OHLCV-derived features ─────────────────────────────────────────────────────
+
+def _rsi(close: pd.DataFrame, period: int = 14) -> pd.DataFrame:
+    delta = close.diff()
+    gain = delta.clip(lower=0).rolling(period).mean()
+    loss = (-delta.clip(upper=0)).rolling(period).mean()
+    rs = gain / loss.replace(0, np.nan)
+    return 100 - 100 / (1 + rs)
+
+
+def compute_ohlcv_features(ohlcv: pd.DataFrame) -> pd.DataFrame:
+    """Long OHLCV (symbol,date,open,high,low,close,volume) → long feature frame
+    (symbol, date, FEATURE_COLS). All momentum/trend/vol/volume factors, vectorized."""
+    close = ohlcv.pivot_table(index="date", columns="symbol", values="close").sort_index()
+    high = ohlcv.pivot_table(index="date", columns="symbol", values="high").sort_index()
+    low = ohlcv.pivot_table(index="date", columns="symbol", values="low").sort_index()
+    vol = ohlcv.pivot_table(index="date", columns="symbol", values="volume").sort_index()
+
+    f: dict[str, pd.DataFrame] = {}
+    for n in (5, 21, 63, 126):
+        f[f"ret_{n}d"] = close.pct_change(n)
+    # cross-sectional percentile rank of trailing return across the universe each day
+    f["rs_rank_21d"] = close.pct_change(21).rank(axis=1, pct=True)
+    f["rs_rank_63d"] = close.pct_change(63).rank(axis=1, pct=True)
+    for n, name in ((20, "dist_sma20"), (50, "dist_sma50"), (200, "dist_sma200")):
+        f[name] = close / close.rolling(n).mean() - 1.0
+    f["above_sma200"] = (close > close.rolling(200).mean()).astype(float)
+    f["rsi14"] = _rsi(close)
+    f["hv20"] = close.pct_change().rolling(20).std() * np.sqrt(252)
+    f["vol_ratio"] = vol / vol.rolling(20).mean()
+    prev_close = close.shift()
+    tr = np.maximum(high - low, np.maximum((high - prev_close).abs(), (low - prev_close).abs()))
+    f["atr_pct"] = tr.rolling(14).mean() / close
+    f["dist_52w_high"] = close / close.rolling(252, min_periods=60).max() - 1.0
+    f["range_pct_10d"] = (high.rolling(10).max() - low.rolling(10).min()) / close
+
+    parts = [frame.stack(future_stack=True).rename(name) for name, frame in f.items()]
+    out = pd.concat(parts, axis=1).reset_index()
+    out.columns = ["date", "symbol"] + list(f.keys())
+    return out
+
+
 # ── training data ────────────────────────────────────────────────────────────
 
-def load_labeled_features(horizon: int = HORIZON) -> pd.DataFrame:
-    """technical_signals feature rows joined to the forward breakout label. Only dates old
-    enough to have a full forward window are kept."""
-    cutoff = (datetime.date.today() - datetime.timedelta(days=LOOKBACK_DAYS)).isoformat()
+def _load_ohlcv(cutoff: str) -> pd.DataFrame:
     ohlcv = read_df(
-        "SELECT symbol, date, close FROM stock_ohlcv "
+        "SELECT symbol, date, open, high, low, close, volume FROM stock_ohlcv "
         "WHERE date >= ? AND COALESCE(is_suspect, 0) = 0 ORDER BY date",
         (cutoff,),
     )
+    if not ohlcv.empty:
+        ohlcv["date"] = pd.to_datetime(ohlcv["date"]).dt.strftime("%Y-%m-%d")
+    return ohlcv
+
+
+def load_labeled_features(horizon: int = HORIZON) -> pd.DataFrame:
+    """OHLCV-derived features joined to the forward breakout label, over the full
+    backfilled history. Only dates with a complete forward window are labelled."""
+    cutoff = (datetime.date.today() - datetime.timedelta(days=TRAIN_LOOKBACK_DAYS)).isoformat()
+    ohlcv = _load_ohlcv(cutoff)
     if ohlcv.empty:
         return pd.DataFrame()
-    ohlcv["date"] = pd.to_datetime(ohlcv["date"]).dt.strftime("%Y-%m-%d")
     close = ohlcv.pivot_table(index="date", columns="symbol", values="close").sort_index()
     labels = build_breakout_labels(close, horizon)
     if labels.empty:
         return pd.DataFrame()
-
-    feats = read_df("SELECT * FROM technical_signals WHERE date >= ?", (cutoff,))
-    if feats.empty:
-        return pd.DataFrame()
-    feats["date"] = feats["date"].astype(str).str[:10]
-    df = feats.merge(labels, on=["symbol", "date"], how="inner")
-    return df
+    feats = compute_ohlcv_features(ohlcv)
+    df = labels.merge(feats, on=["symbol", "date"], how="inner")
+    # need the trailing windows to be populated
+    return df.dropna(subset=FEATURE_COLS, how="any").reset_index(drop=True)
 
 
 def _feature_matrix(df: pd.DataFrame):
-    from ml_ensemble import build_features
-    d = df.copy()
-    d["horizon_days"] = HORIZON
-    X = build_features(d)
-    return X.replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    return df[FEATURE_COLS].replace([np.inf, -np.inf], np.nan).fillna(0.0)
 
 
 def train(report_only: bool = False) -> dict:
@@ -152,7 +206,7 @@ def train(report_only: bool = False) -> dict:
     mask = ~np.isnan(oof)
     if mask.sum() < 50 or len(set(y[mask])) < 2:
         print(f"[Breakout] purged CV left too few validation rows ({int(mask.sum())}); "
-              f"need more history (technical_signals only spans {len(dates)} dates).")
+              f"need more history (only {len(dates)} labelled dates available).")
         return {"trained": False, "n": len(y), "auc": float("nan"), "base_rate": base_rate}
     auc = float(roc_auc_score(y[mask], oof[mask]))
 
@@ -183,7 +237,8 @@ def train(report_only: bool = False) -> dict:
 
 
 def score() -> int:
-    """Write breakout_probability onto technical_signals for the most recent date."""
+    """Compute OHLCV features for the latest session and write breakout_probability onto
+    that day's technical_signals rows."""
     if not os.path.exists(MODEL_PATH):
         print("[Breakout] no model; run --train first.")
         return 0
@@ -197,30 +252,30 @@ def score() -> int:
     except Exception:
         conn.rollback()
 
-    latest = read_df("SELECT MAX(date) AS d FROM technical_signals")
-    if latest.empty or latest.iloc[0]["d"] is None:
+    cutoff = (datetime.date.today() - datetime.timedelta(days=SCORE_LOOKBACK_DAYS)).isoformat()
+    ohlcv = _load_ohlcv(cutoff)
+    if ohlcv.empty:
         return 0
-    d = str(latest.iloc[0]["d"])[:10]
-    feats = read_df("SELECT * FROM technical_signals WHERE date = ?", (d,))
-    if feats.empty:
+    feats = compute_ohlcv_features(ohlcv)
+    d = feats["date"].max()
+    today = feats[feats["date"] == d].dropna(subset=FEATURE_COLS, how="any")
+    if today.empty:
+        print(f"[Breakout] no fully-populated feature rows for {d}.")
         return 0
-    X = _feature_matrix(feats)
-    for col in art["feature_names"]:
-        if col not in X.columns:
-            X[col] = 0.0
-    X = X[art["feature_names"]].astype(np.float32)
+    X = today[art["feature_names"]].replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(np.float32)
     preds = np.zeros(len(X))
     for m in art["models"]:
         preds += m.predict_proba(X)[:, 1]
     probs = preds / len(art["models"])
+    # Only update symbols that already have a technical_signals row for `d`.
     cur.executemany(
         "UPDATE technical_signals SET breakout_probability = ? WHERE symbol = ? AND date = ?",
         [(round(float(p), 4) if np.isfinite(p) else None, s, d)
-         for p, s in zip(probs, feats["symbol"])],
+         for p, s in zip(probs, today["symbol"])],
     )
     conn.commit()
-    print(f"[Breakout] scored {len(feats)} rows for {d}.")
-    return len(feats)
+    print(f"[Breakout] scored {len(today)} symbols for {d}.")
+    return len(today)
 
 
 if __name__ == "__main__":

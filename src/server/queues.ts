@@ -442,7 +442,15 @@ async function processIntradayFetcher(_job: Job): Promise<void> {
 }
 
 async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
-  // Point-in-time fundamentals snapshot first — builds the as-of trail load_training_data joins.
+  // FULL-UNIVERSE feature grid FIRST: the signal scan only writes technical_signals rows
+  // for stocks that produced a tradable pattern (14-800/day), so most of the universe had
+  // no feature row on most days — starving the ensemble/ranker of a complete cross-section.
+  // This guarantees a row for every liquid stock on the latest session BEFORE the enrichment
+  // engines below run, so RS/HV/aVWAP/etc. fill the whole grid, not just the signal subset.
+  await runPython('backfill_technical_features.py', ['--full-today'], 10 * 60_000)
+    .catch(e => console.warn('[QUEUE] technical grid-ensurer failed:', (e as Error).message));
+
+  // Point-in-time fundamentals snapshot — builds the as-of trail load_training_data joins.
   await runPython('fundamentals_snapshot.py', [], 90_000)
     .catch(e => console.warn('[QUEUE] fundamentals_snapshot failed:', (e as Error).message));
 
