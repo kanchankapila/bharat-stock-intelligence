@@ -666,9 +666,15 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await runPython('pead_model.py', [], 60_000)
     .catch(e => console.warn('[QUEUE] pead_model failed:', (e as Error).message));
 
-  await resolveOutcomesResilient(1);
-  await resolveOutcomesResilient(5);
-  await resolveOutcomesResilient(15);
+  // These were UNCAUGHT: if outcome resolution threw (e.g. a transient PG/IPv6 blip), the
+  // whole daily-ops run aborted here — skipping ALL ML training below AND never reaching the
+  // success handler, so the ml-ensemble-score/feature-engineering/fii-dii monitor states
+  // showed "never succeeded" for a week. Every step below is now best-effort so the run
+  // always completes and the training tail always attempts (scripts are idempotent — a
+  // failed one simply retries tomorrow).
+  await resolveOutcomesResilient(1).catch(e => console.warn('[QUEUE] resolveOutcomes(1) failed:', (e as Error).message));
+  await resolveOutcomesResilient(5).catch(e => console.warn('[QUEUE] resolveOutcomes(5) failed:', (e as Error).message));
+  await resolveOutcomesResilient(15).catch(e => console.warn('[QUEUE] resolveOutcomes(15) failed:', (e as Error).message));
 
   // Compute excursion path labels for all resolved entries:
   await runPython('exit_labeler.py', [], 5 * 60_000)
@@ -679,8 +685,10 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await runPython('live_screener_resolver.py', [], 20 * 60_000)
     .catch(err => console.error('[QUEUE] live_screener_resolver.py failed:', err.message));
 
-  await runPython('performance_tracker.py', ['--horizon', '5']);
-  await runPython('performance_tracker.py', ['--horizon', '15']);
+  await runPython('performance_tracker.py', ['--horizon', '5'])
+    .catch(e => console.warn('[QUEUE] performance_tracker(5) failed:', (e as Error).message));
+  await runPython('performance_tracker.py', ['--horizon', '15'])
+    .catch(e => console.warn('[QUEUE] performance_tracker(15) failed:', (e as Error).message));
 
   await runPython('online_learner.py', ['--window', '180'], 120_000)
     .catch(e => console.warn('[QUEUE] online_learner failed:', (e as Error).message));
@@ -717,14 +725,16 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await runPython('high_flyer_retrospective.py', [], 10 * 60_000)
     .catch(e => console.warn('[QUEUE] high_flyer_retrospective failed:', (e as Error).message));
 
-  await runPython('reward_engine.py');
+  await runPython('reward_engine.py')
+    .catch(e => console.warn('[QUEUE] reward_engine failed:', (e as Error).message));
   // --update only recomputes Q-values for existing rl_episodes rows; nothing creates NEW
   // rows day-to-day (log_episode() is unused dead code) — --backfill is what actually
   // inserts episodes from newly-resolved signal_outcomes. A short lookback keeps this a
   // cheap daily top-up instead of re-scanning the full history (default 180d) every run.
   await runPython('rl_agent.py', ['--backfill', '--lookback', '20'], 3 * 60_000)
     .catch(e => console.warn('[QUEUE] rl_agent backfill failed:', (e as Error).message));
-  await runPython('rl_agent.py', ['--update']);
+  await runPython('rl_agent.py', ['--update'])
+    .catch(e => console.warn('[QUEUE] rl_agent update failed:', (e as Error).message));
 
   const { computeSignalTypeStats } = await import('./technicalSignalsService');
   await computeSignalTypeStats().catch(e => console.warn('[QUEUE] computeSignalTypeStats failed:', (e as Error).message));
@@ -832,8 +842,12 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean }> 
   // overview-second-part call both used to make independently).
   // financial_ratios_fetcher.py + working_capital_fetcher.py moved to the
   // trendlyne-ratios-monthly queue (rewritten against ET_Stats — see Tasks 5-6).
-  await runPython('outcome_resolver.py', ['--horizon', '5']);
-  await runPython('outcome_resolver.py', ['--horizon', '15']);
+  // Best-effort: a resolver blip must NOT skip the ml_ensemble --train below (the whole
+  // point of the weekly job). Every step here is idempotent and independently catchable.
+  await runPython('outcome_resolver.py', ['--horizon', '5'])
+    .catch(e => console.warn('[QUEUE] weekly outcome_resolver(5) failed:', (e as Error).message));
+  await runPython('outcome_resolver.py', ['--horizon', '15'])
+    .catch(e => console.warn('[QUEUE] weekly outcome_resolver(15) failed:', (e as Error).message));
   // Run exit labeler to resolve excursions
   await runPython('exit_labeler.py', [], 10 * 60_000)
     .catch(e => console.warn('[QUEUE] exit_labeler failed:', (e as Error).message));
@@ -843,7 +857,8 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean }> 
   // --tune runs Optuna hyperparameter search (this is what took the model from AUC 0.70 to
   // 0.757 in the first place) — without it, every scheduled retrain silently falls back to
   // untuned defaults, which measured ~0.20 AUC worse on held-out test in one observed run.
-  await runPython('ml_ensemble.py', ['--train', '--tune', '--score'], 90 * 60_000);
+  await runPython('ml_ensemble.py', ['--train', '--tune', '--score'], 90 * 60_000)
+    .catch(e => console.warn('[QUEUE] ml_ensemble weekly retrain failed:', (e as Error).message));
   // Retrain the breakout classifier (Lever #4) on the accumulated feature history and
   // refresh today's scores; purged-OOF AUC printed to logs for monitoring.
   await runPython('breakout_classifier.py', ['--train', '--score'], 30 * 60_000)
@@ -854,8 +869,10 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean }> 
     .catch(e => console.warn('[QUEUE] strategy_optimizer failed:', (e as Error).message));
   await runPython('backtester.py', ['--start', '2023-01-01'], 30 * 60_000)
     .catch(e => console.warn('[QUEUE] backtester failed:', (e as Error).message));
-  await runPython('performance_tracker.py', ['--horizon', '5']);
-  await runPython('performance_tracker.py', ['--horizon', '15']);
+  await runPython('performance_tracker.py', ['--horizon', '5'])
+    .catch(e => console.warn('[QUEUE] weekly performance_tracker(5) failed:', (e as Error).message));
+  await runPython('performance_tracker.py', ['--horizon', '15'])
+    .catch(e => console.warn('[QUEUE] weekly performance_tracker(15) failed:', (e as Error).message));
   return { success: true };
 }
 
