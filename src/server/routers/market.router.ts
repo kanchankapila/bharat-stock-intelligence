@@ -118,6 +118,36 @@ export const marketRouter = router({
       }));
     }),
 
+  // High-flyer retrospective: yesterday's recall report + learned precursor lifts +
+  // today's fresh-setup candidate watchlist (see high_flyer_retrospective.py).
+  getHighFlyerReport: publicProcedure
+    .query(async () => {
+      const stats = await dbGet<any>(
+        'SELECT date, universe_n, flyer_n, recall_json FROM high_flyer_daily_stats ORDER BY date DESC LIMIT 1'
+      );
+      const lifts = await dbGet<{ value: string }>(
+        "SELECT value FROM app_settings WHERE key = 'high_flyer_precursor_lift'"
+      );
+      const candidates = await dbAll<any>(
+        `SELECT date, symbol, score, precursors FROM high_flyer_candidates
+         WHERE date = (SELECT MAX(date) FROM high_flyer_candidates) ORDER BY score DESC`
+      );
+      const flyers = stats ? await dbAll<any>(
+        `SELECT symbol, return_pct, volume_ratio, new_52w_high, predicted_by, precursors
+         FROM high_flyer_retrospective WHERE date = ? ORDER BY return_pct DESC LIMIT 50`,
+        [stats.date]
+      ) : [];
+      return {
+        date: stats?.date ?? null,
+        universeN: stats?.universe_n ?? 0,
+        flyerN: stats?.flyer_n ?? 0,
+        recall: stats ? JSON.parse(stats.recall_json || '{}') : {},
+        lifts: lifts ? JSON.parse(lifts.value || '{}') : {},
+        candidates,
+        flyers,
+      };
+    }),
+
   refreshEarlyHoursSpotter: publicProcedure
     .mutation(async () => {
       console.log('[TRPC] Running preopen_fetcher.py manually...');

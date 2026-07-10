@@ -228,10 +228,13 @@ async function processConfluenceCompute(_job: Job): Promise<{ computed: number; 
 }
 
 async function processConfluenceOutcomes(_job: Job): Promise<void> {
-  await Promise.all([
-    runPython('confluence_outcome_tracker.py', [], 120_000),
-    runPython('confluence_ml_engine.py', ['--train'], 120_000),
-  ]);
+  // Sequential, not Promise.all: confluence_ml_engine --train is CPU-heavy (multiprocessing)
+  // and the old concurrent 120s budget both starved the tracker AND timeout-killed the
+  // trainer (its real runtime is several minutes) — 10 of its last 11 runs failed this way.
+  await runPython('confluence_outcome_tracker.py', [], 5 * 60_000)
+    .catch(e => console.warn('[QUEUE] confluence_outcome_tracker failed:', (e as Error).message));
+  await runPython('confluence_ml_engine.py', ['--train'], 15 * 60_000)
+    .catch(e => console.warn('[QUEUE] confluence_ml_engine --train failed:', (e as Error).message));
 }
 
 // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Stock-refresh worker processor (PHASE 1: Now persists OHLCV) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
@@ -268,14 +271,26 @@ async function processAISignal(job: Job): Promise<void> {
 
   const now = new Date().toISOString();
 
+  // Override the LLM's hallucinated price levels with ATR-grounded barriers (2.5×/1.5×
+  // ATR, clamped) anchored to the model's entry. The LLM has no sense of a stock's
+  // realized range, which made ~76% of AI signals expire NEUTRAL (target unreachable)
+  // while stops still fired. Fall back to the LLM levels only if history is too thin
+  // to compute an ATR.
+  const { getAtrBarriers } = await import('./atrBarriers');
+  const direction = gate.signalType === 'SELL' ? 'short' : 'long';
+  const barriers = await getAtrBarriers(symbol, analysis.entry ?? null, direction);
+  const entryPrice = barriers?.entryPrice ?? analysis.entry ?? null;
+  const targetPrice = barriers?.targetPrice ?? analysis.target ?? null;
+  const stopLoss = barriers?.stopLoss ?? analysis.stopLoss ?? null;
+
   // Write to unified_signals so outcome resolver and reward engine can track AI signal performance
   await upsertUnifiedSignal('AI', {
     symbol,
     signalDate: now.split('T')[0],
     signalType: gate.signalType,
-    entryPrice: analysis.entry ?? null,
-    targetPrice: analysis.target ?? null,
-    stopLoss: analysis.stopLoss ?? null,
+    entryPrice,
+    targetPrice,
+    stopLoss,
     confidenceScore: analysis.confidence ?? null,
     reasoning: analysis.reasoning ?? null,
     generatedAt: now,
@@ -292,9 +307,9 @@ async function processAISignal(job: Job): Promise<void> {
       generatedAt: now,
       signal: {
         signalType: gate.signalType,
-        entryPrice: analysis.entry ?? null,
-        targetPrice: analysis.target ?? null,
-        stopLoss: analysis.stopLoss ?? null,
+        entryPrice,
+        targetPrice,
+        stopLoss,
         confidence: analysis.confidence ?? null,
         reasoning: analysis.reasoning ?? null,
       },
@@ -690,6 +705,11 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
 
   await runPython('cs_ranker.py', ['--score'], 120_000)
     .catch(e => console.warn('[QUEUE] cs_ranker score failed:', (e as Error).message));
+
+  // Winner attribution: which stocks actually flew today, did we have them flagged,
+  // and which precursors preceded the move → rolling lift → tomorrow's candidate list.
+  await runPython('high_flyer_retrospective.py', [], 10 * 60_000)
+    .catch(e => console.warn('[QUEUE] high_flyer_retrospective failed:', (e as Error).message));
 
   await runPython('reward_engine.py');
   // --update only recomputes Q-values for existing rl_episodes rows; nothing creates NEW
@@ -1902,7 +1922,9 @@ export async function initQueues(): Promise<boolean> {
     });
     new Worker(QUEUE_PREOPEN,
       async () => {
-        await runPython('preopen_fetcher.py', [], 60_000)
+        // 3 min: NSE preopen endpoints respond slowly (or hang) when hit outside the
+        // 9:00-9:15 IST window -- e.g. a restart catch-up job -- and 60s killed those runs.
+        await runPython('preopen_fetcher.py', [], 3 * 60_000)
           .then(() => recordHeartbeat('preopen-snapshot', 'success'))
           .catch(e => {
             console.warn('[QUEUE] preopen_fetcher failed:', (e as Error).message);
@@ -2138,9 +2160,10 @@ export async function initQueues(): Promise<boolean> {
     confluenceOutcomesWorker = new Worker(
       QUEUE_CONFLUENCE_OUTCOMES,
       processConfluenceOutcomes,
-      // lockDuration must exceed the processor's ~2×120s python runs; the BullMQ
-      // default 30s lock marked every real run "stalled more than allowable limit"
-      { connection: makeConnection(), concurrency: 1, lockDuration: 10 * 60 * 1000 }
+      // lockDuration must exceed the processor's now-sequential runs (5min tracker +
+      // 15min trainer = 20min worst case); the BullMQ default 30s lock marked every
+      // real run "stalled more than allowable limit"
+      { connection: makeConnection(), concurrency: 1, lockDuration: 25 * 60 * 1000 }
     );
     confluenceOutcomesWorker.on('completed', () => {
       recordHeartbeat('confluence-outcomes', 'success');
@@ -2545,12 +2568,15 @@ export async function initQueues(): Promise<boolean> {
       QUEUE_UNIFIED_RANKER,
       async () => {
         console.log('[QUEUE] unified-ranker starting...');
-        await runPython('unified_ranker.py', [], 5 * 60_000);
+        // 30 min: a full run now takes 15-20+ min (700k-row confluence window scans +
+        // quality/win-prob loaders). The old 5-min budget timeout-killed 19 of its last
+        // 24 runs, leaving unified_recommendations stale for the Top Rated tab.
+        await runPython('unified_ranker.py', [], 30 * 60_000);
       },
       // No lockDuration previously -- fell back to BullMQ's 30s default while awaiting a
       // runPython call allowed up to 5 minutes, causing repeated "job stalled" failures
       // (confirmed in job_heartbeat: 3 stalls on 2026-07-09 alone).
-      { connection, concurrency: 1, lockDuration: 6 * 60_000 },
+      { connection, concurrency: 1, lockDuration: 35 * 60_000 },
     );
     unifiedRankerWorker = unifiedRankerWorkerInstance;
 
@@ -2560,7 +2586,13 @@ export async function initQueues(): Promise<boolean> {
       'unified-ranker-daily',
       {},
       {
-        repeat:  { pattern: '15 10 * * 1-5' },
+        // 07:30 IST (02:00 UTC), pre-open. Was 15:45 IST (just after close) — but that ran
+        // the canonical ranker BEFORE its own inputs refreshed: stock_scores (stock-scoring
+        // 22:30 IST), technical_signals ML features + win_probability (ml-daily-ops 19:30 IST)
+        // and OHLCV (stock-refresh 16:00 IST) all land AFTER 15:45, so unified_recommendations
+        // was always built on ~1-day-stale scores. Running pre-open consumes the fully-refreshed
+        // prior-session features and has the fresh ranking ready before the 09:15 open.
+        repeat:  { pattern: '0 2 * * 1-5' },
         jobId:   'unified-ranker-daily-repeatable',
         attempts: 2,
         backoff:  { type: 'fixed', delay: 60_000 },
