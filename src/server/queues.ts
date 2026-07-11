@@ -850,6 +850,10 @@ async function processDLPython(script: string, args: string[] = [], timeoutMs = 
 }
 
 async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean }> {
+  // Dashboard sub-tasks (ml-ensemble-train, strategy-optimizer) run under T.run so their monitor
+  // state reflects the REAL outcome via T.finish() — not the blanket 'success' the completed
+  // handler used to stamp. Untracked steps stay best-effort with console.warn.
+  const T = new StepTracker('ml-weekly-retrain');
   // Keep index_provider_map in sync with live provider index lists.
   await runPython('sync_mc_index_map.py', [], 60_000)
     .catch(e => console.warn('[QUEUE] sync_mc_index_map failed:', (e as Error).message));
@@ -892,22 +896,21 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean }> 
   // --tune runs Optuna hyperparameter search (this is what took the model from AUC 0.70 to
   // 0.757 in the first place) — without it, every scheduled retrain silently falls back to
   // untuned defaults, which measured ~0.20 AUC worse on held-out test in one observed run.
-  await runPython('ml_ensemble.py', ['--train', '--tune', '--score'], 90 * 60_000)
-    .catch(e => console.warn('[QUEUE] ml_ensemble weekly retrain failed:', (e as Error).message));
+  await T.run('ml-ensemble-train', () => runPython('ml_ensemble.py', ['--train', '--tune', '--score'], 90 * 60_000));
   // Retrain the breakout classifier (Lever #4) on the accumulated feature history and
   // refresh today's scores; purged-OOF AUC printed to logs for monitoring.
   await runPython('breakout_classifier.py', ['--train', '--score'], 30 * 60_000)
     .catch(e => console.warn('[QUEUE] breakout_classifier train failed:', (e as Error).message));
   await runPython('cs_ranker.py', ['--train', '--score'], 30 * 60_000)
     .catch(e => console.warn('[QUEUE] cs_ranker retrain failed:', (e as Error).message));
-  await runPython('strategy_optimizer.py', [], 30 * 60_000)
-    .catch(e => console.warn('[QUEUE] strategy_optimizer failed:', (e as Error).message));
+  await T.run('strategy-optimizer', () => runPython('strategy_optimizer.py', [], 30 * 60_000));
   await runPython('backtester.py', ['--start', '2023-01-01'], 30 * 60_000)
     .catch(e => console.warn('[QUEUE] backtester failed:', (e as Error).message));
   await runPython('performance_tracker.py', ['--horizon', '5'])
     .catch(e => console.warn('[QUEUE] weekly performance_tracker(5) failed:', (e as Error).message));
   await runPython('performance_tracker.py', ['--horizon', '15'])
     .catch(e => console.warn('[QUEUE] weekly performance_tracker(15) failed:', (e as Error).message));
+  T.finish();
   return { success: true };
 }
 
@@ -1827,14 +1830,13 @@ export async function initQueues(): Promise<boolean> {
     });
     mlWeeklyRetrainWorker = new Worker(QUEUE_ML_WEEKLY_RETRAIN, processMlWeeklyRetrain, { connection, concurrency: 1, lockDuration: 6 * 60 * 60 * 1000, lockRenewTime: 30 * 60 * 1000 });
     mlWeeklyRetrainWorker.on('completed', () => {
+      // Per-step + overall monitor states are written by StepTracker.finish() in the processor.
       console.log('[QUEUE] ml-weekly-retrain done');
-      updateMonitorState('ml-ensemble-train', 'success');
-      updateMonitorState('strategy-optimizer', 'success');
     });
     mlWeeklyRetrainWorker.on('failed', (_, err) => {
+      // Processor threw before finish() ran — mark the job failed so it isn't seen as healthy.
       console.error('[QUEUE] ml-weekly-retrain failed:', err.message);
-      updateMonitorState('ml-ensemble-train', 'failed', err.message);
-      updateMonitorState('strategy-optimizer', 'failed', err.message);
+      updateMonitorState('ml-weekly-retrain', 'failed', err?.message);
     });
 
     // ── Intraday fetcher (every 30 min, 8:30 AM - 4:00 PM IST = 3:00-10:30 UTC, weekdays)

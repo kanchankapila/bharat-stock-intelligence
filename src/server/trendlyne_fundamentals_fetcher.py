@@ -271,33 +271,38 @@ def _upsert_dvm(symbol: str, today: str, dvm: dict, con) -> None:
     con.commit()
 
 
-def _backfill_technical_signals(symbol: str, features: dict, con) -> None:
+def _backfill_technical_signals(symbol: str, today: str, features: dict, con) -> None:
     if not features:
         return
+    # Point-in-time: these are the CURRENT Trendlyne snapshot (DVM changes daily, EPS/PE/div
+    # are the latest disclosed values) with no per-row history to reconstruct. Stamp only rows
+    # on/after the fetch date and NULL older ones — never smear today's fundamentals onto history
+    # the ML ensemble trains on (dvm_*/eps_ttm/pe_ttm are all features). Same anti-look-ahead
+    # discipline as the shareholding + ET_Stats fetchers.
     cur = con.cursor()
     cur.execute("""
         UPDATE technical_signals SET
-            eps_ttm          = COALESCE(?, eps_ttm),
-            eps_growth_yoy   = COALESCE(?, eps_growth_yoy),
-            eps_growth_qoq   = COALESCE(?, eps_growth_qoq),
-            eps_acceleration  = COALESCE(?, eps_acceleration),
-            pe_ttm            = COALESCE(?, pe_ttm),
-            pe_pct_rank_252d  = COALESCE(?, pe_pct_rank_252d),
-            pe_vs_median_1yr  = COALESCE(?, pe_vs_median_1yr),
-            pb_pct_rank_252d  = COALESCE(?, pb_pct_rank_252d),
-            div_yield_ttm     = COALESCE(?, div_yield_ttm),
-            dvm_durability    = COALESCE(?, dvm_durability),
-            dvm_valuation     = COALESCE(?, dvm_valuation),
-            dvm_momentum      = COALESCE(?, dvm_momentum)
+            eps_ttm          = CASE WHEN date >= ? THEN COALESCE(?, eps_ttm)          ELSE NULL END,
+            eps_growth_yoy   = CASE WHEN date >= ? THEN COALESCE(?, eps_growth_yoy)   ELSE NULL END,
+            eps_growth_qoq   = CASE WHEN date >= ? THEN COALESCE(?, eps_growth_qoq)   ELSE NULL END,
+            eps_acceleration = CASE WHEN date >= ? THEN COALESCE(?, eps_acceleration) ELSE NULL END,
+            pe_ttm           = CASE WHEN date >= ? THEN COALESCE(?, pe_ttm)           ELSE NULL END,
+            pe_pct_rank_252d = CASE WHEN date >= ? THEN COALESCE(?, pe_pct_rank_252d) ELSE NULL END,
+            pe_vs_median_1yr = CASE WHEN date >= ? THEN COALESCE(?, pe_vs_median_1yr) ELSE NULL END,
+            pb_pct_rank_252d = CASE WHEN date >= ? THEN COALESCE(?, pb_pct_rank_252d) ELSE NULL END,
+            div_yield_ttm    = CASE WHEN date >= ? THEN COALESCE(?, div_yield_ttm)    ELSE NULL END,
+            dvm_durability   = CASE WHEN date >= ? THEN COALESCE(?, dvm_durability)   ELSE NULL END,
+            dvm_valuation    = CASE WHEN date >= ? THEN COALESCE(?, dvm_valuation)    ELSE NULL END,
+            dvm_momentum     = CASE WHEN date >= ? THEN COALESCE(?, dvm_momentum)     ELSE NULL END
         WHERE symbol = ?
     """, (
-        features.get("eps_ttm"),         features.get("eps_growth_yoy"),
-        features.get("eps_growth_qoq"),  features.get("eps_acceleration"),
-        features.get("pe_ttm"),          features.get("pe_pct_rank_252d"),
-        features.get("pe_vs_median_1yr"),features.get("pb_pct_rank_252d"),
-        features.get("div_yield_ttm"),
-        features.get("dvm_d"),           features.get("dvm_v"),
-        features.get("dvm_m"),
+        today, features.get("eps_ttm"),          today, features.get("eps_growth_yoy"),
+        today, features.get("eps_growth_qoq"),   today, features.get("eps_acceleration"),
+        today, features.get("pe_ttm"),           today, features.get("pe_pct_rank_252d"),
+        today, features.get("pe_vs_median_1yr"), today, features.get("pb_pct_rank_252d"),
+        today, features.get("div_yield_ttm"),
+        today, features.get("dvm_d"),            today, features.get("dvm_v"),
+        today, features.get("dvm_m"),
         symbol,
     ))
     con.commit()
@@ -384,7 +389,7 @@ def main() -> None:
         time.sleep(RATE_LIMIT_SEC)
 
         # â”€â”€ Back-fill technical_signals â”€â”€
-        _backfill_technical_signals(symbol, features, con)
+        _backfill_technical_signals(symbol, today, features, con)
 
         pe_str  = f"PE={features.get('pe_ttm','?')} rank={features.get('pe_pct_rank_252d','?')}%"
         dvm_str = (f"D={features.get('dvm_d','?')}/V={features.get('dvm_v','?')}/M={features.get('dvm_m','?')}")
