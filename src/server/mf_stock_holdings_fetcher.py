@@ -31,6 +31,7 @@ Run:
 """
 
 import argparse
+import time
 from datetime import date, datetime, timedelta
 
 import requests
@@ -168,6 +169,8 @@ def process_stock(symbol: str, company_id: str, session: requests.Session, con) 
         data = r.json()
     except Exception:
         return None
+    finally:
+        time.sleep(0.25)  # be a good citizen — throttle the per-stock calls
     agg = aggregate(data.get("searchresult"), (data.get("pagesummary") or {}).get("totalRecords"))
     if not agg or not agg.get("as_of_date"):
         return None
