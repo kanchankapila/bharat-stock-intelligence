@@ -129,8 +129,11 @@ def per_regime_auc(conn: ConnWrapper, min_n: int = 50) -> dict:
     """).fetchall()
     g: dict = {}
     for r in rows:
+        p = float(r['p'])
+        if math.isnan(p):   # Postgres NaN passes IS NOT NULL; roc_auc_score rejects it
+            continue
         d = g.setdefault(r['regime'], {'p': [], 'y': []})
-        d['p'].append(float(r['p']))
+        d['p'].append(p)
         d['y'].append(int(r['y']))
     out: dict = {}
     for reg, d in g.items():

@@ -259,8 +259,74 @@ def run(limit: int | None = None):
     print(f"[Backfill] Done: {written} ts rows written, {skipped} skipped (insufficient OHLCV)")
 
 
+def run_full_universe_today(min_price: float = 15.0) -> int:
+    """Grid-ensurer: guarantee a technical_signals row exists for EVERY liquid stock on
+    the latest OHLCV date, with the core OHLCV-derived indicators. The signal scan only
+    writes rows for stocks that produced a tradable pattern (14-800/day), so most of the
+    universe had no feature row on most days — starving the ensemble/ranker of a complete
+    cross-section. This fills the gap (ON CONFLICT DO NOTHING, so the scan's richer rows
+    are left intact); the RS/HV/aVWAP engines then enrich the full grid."""
+    con = connect()
+    latest_row = con.execute("SELECT MAX(date) AS d FROM stock_ohlcv").fetchone()
+    latest = str(latest_row['d'])[:10] if latest_row and latest_row['d'] else None
+    if not latest:
+        print("[Grid] no OHLCV.")
+        return 0
+    cutoff = (datetime.fromisoformat(latest) - timedelta(days=320)).date().isoformat()
+
+    regime_rows = con.execute(
+        "SELECT date, regime FROM market_regimes ORDER BY date ASC").fetchall()
+    regime = next((r['regime'] for d, r in
+                   [(str(x['date'])[:10], x) for x in reversed(regime_rows)] if d <= latest),
+                  'SIDEWAYS') if regime_rows else 'SIDEWAYS'
+
+    rows = con.execute(
+        "SELECT symbol, date, open, high, low, close, volume FROM stock_ohlcv "
+        "WHERE date >= ? AND COALESCE(is_suspect,0)=0 ORDER BY symbol, date ASC",
+        (cutoff,)).fetchall()
+    from collections import defaultdict
+    by_symbol: dict[str, list[dict]] = defaultdict(list)
+    for r in rows:
+        by_symbol[r['symbol']].append({**dict(r), 'date': str(r['date'])[:10]})
+
+    now_str = datetime.now().isoformat()
+    written = 0
+    for symbol, ohlcv in by_symbol.items():
+        if len(ohlcv) < 22 or ohlcv[-1]['date'] != latest:
+            continue  # need history + a bar for the latest session
+        if (ohlcv[-1]['close'] or 0) < min_price:
+            continue
+        ind = compute_indicators(ohlcv)
+        con.execute("""
+            INSERT INTO technical_signals
+                (symbol, date, signal_score, signal_type,
+                 rsi, sma50, sma200, macd, macd_signal,
+                 bb_width, volume_ratio, above_sma200, adx, cmp,
+                 change_pct, nifty_regime, computed_at)
+            VALUES (?,?,0,'GRID',?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT (symbol, date) DO NOTHING
+        """, (
+            symbol, latest, ind['rsi'], ind['sma50'], ind['sma200'],
+            ind['macd'], ind['macd_signal'], ind['bb_width'], ind['volume_ratio'],
+            ind['above_sma200'], ind['adx'], ind['cmp'],
+            round((ohlcv[-1]['close'] / ohlcv[-2]['close'] - 1) * 100, 2) if len(ohlcv) >= 2 and ohlcv[-2]['close'] else None,
+            regime, now_str))
+        written += 1
+        if written % 2000 == 0:
+            con.commit()
+    con.commit()
+    total = con.execute("SELECT COUNT(*) AS c FROM technical_signals WHERE date=?", (latest,)).fetchone()['c']
+    print(f"[Grid] {latest}: ensured {written} rows; technical_signals now has {total} rows for the day.")
+    return written
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--limit', type=int, default=None, help='Max (symbol,date) pairs to process')
+    parser.add_argument('--full-today', action='store_true',
+                        help='Ensure a full-universe technical_signals grid for the latest session')
     args = parser.parse_args()
-    run(limit=args.limit)
+    if args.full_today:
+        run_full_universe_today()
+    else:
+        run(limit=args.limit)
