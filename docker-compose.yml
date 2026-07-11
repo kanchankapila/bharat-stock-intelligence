@@ -18,10 +18,16 @@ services:
       --maxclients 1000
       --maxmemory 512mb
       --maxmemory-policy noeviction
-      --save ""
+      --appendonly yes
+      --appendfsync everysec
       --loglevel notice
     ports:
       - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      # AOF persistence so a container restart doesn't orphan in-flight BullMQ jobs
+      # (this is the sole broker now — the native winget redis was retired to end the
+      # 6379 split-brain that undermined stalled-job recovery).
+      - bharat_redisdata:/data
     ulimits:
       nofile:
         soft: 10032
@@ -36,6 +42,12 @@ services:
     image: timescale/timescaledb:2.17.2-pg16
     container_name: bharat_timescaledb
     restart: unless-stopped
+    # Docker defaults /dev/shm to 64MB. Parallel query workers (max_parallel_workers_per_gather=2)
+    # spill hash/sort state into shared memory, and the big resolver joins (e.g. the 50k-row
+    # live_screener_resolver scan) overflowed it → "DiskFull: could not resize shared memory
+    # segment ... No space left on device". The data volume has >900GB free; this is purely
+    # the shm segment. 1GB is ample headroom for this single-box workload.
+    shm_size: 1gb
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-bharat}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-bharat}
@@ -71,3 +83,4 @@ services:
 
 volumes:
   bharat_pgdata:
+  bharat_redisdata:

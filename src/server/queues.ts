@@ -228,15 +228,14 @@ async function processConfluenceCompute(_job: Job): Promise<{ computed: number; 
 }
 
 async function processConfluenceOutcomes(_job: Job): Promise<void> {
-  // allSettled + per-script .catch: a throw in either script (timeout, transient DB blip,
-  // XGBoost OOM) must not abort the sibling that already succeeded — the fragility that
-  // turned a slow training query into a permanent fail/retry loop for this exact job.
-  await Promise.allSettled([
-    runPython('confluence_outcome_tracker.py', [], 120_000)
-      .catch(e => console.warn('[QUEUE] confluence_outcome_tracker failed:', (e as Error).message)),
-    runPython('confluence_ml_engine.py', ['--train'], 120_000)
-      .catch(e => console.warn('[QUEUE] confluence_ml_engine train failed:', (e as Error).message)),
-  ]);
+  // Sequential, not Promise.all: confluence_ml_engine --train is CPU-heavy (multiprocessing)
+  // and the old concurrent 120s budget both starved the tracker AND timeout-killed the
+  // trainer (its real runtime is several minutes) — 10 of its last 11 runs failed this way.
+  // Per-step .catch keeps a failure in one from aborting the other.
+  await runPython('confluence_outcome_tracker.py', [], 5 * 60_000)
+    .catch(e => console.warn('[QUEUE] confluence_outcome_tracker failed:', (e as Error).message));
+  await runPython('confluence_ml_engine.py', ['--train'], 15 * 60_000)
+    .catch(e => console.warn('[QUEUE] confluence_ml_engine --train failed:', (e as Error).message));
 }
 
 // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Stock-refresh worker processor (PHASE 1: Now persists OHLCV) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
@@ -273,14 +272,26 @@ async function processAISignal(job: Job): Promise<void> {
 
   const now = new Date().toISOString();
 
+  // Override the LLM's hallucinated price levels with ATR-grounded barriers (2.5×/1.5×
+  // ATR, clamped) anchored to the model's entry. The LLM has no sense of a stock's
+  // realized range, which made ~76% of AI signals expire NEUTRAL (target unreachable)
+  // while stops still fired. Fall back to the LLM levels only if history is too thin
+  // to compute an ATR.
+  const { getAtrBarriers } = await import('./atrBarriers');
+  const direction = gate.signalType === 'SELL' ? 'short' : 'long';
+  const barriers = await getAtrBarriers(symbol, analysis.entry ?? null, direction);
+  const entryPrice = barriers?.entryPrice ?? analysis.entry ?? null;
+  const targetPrice = barriers?.targetPrice ?? analysis.target ?? null;
+  const stopLoss = barriers?.stopLoss ?? analysis.stopLoss ?? null;
+
   // Write to unified_signals so outcome resolver and reward engine can track AI signal performance
   await upsertUnifiedSignal('AI', {
     symbol,
     signalDate: now.split('T')[0],
     signalType: gate.signalType,
-    entryPrice: analysis.entry ?? null,
-    targetPrice: analysis.target ?? null,
-    stopLoss: analysis.stopLoss ?? null,
+    entryPrice,
+    targetPrice,
+    stopLoss,
     confidenceScore: analysis.confidence ?? null,
     reasoning: analysis.reasoning ?? null,
     generatedAt: now,
@@ -297,9 +308,9 @@ async function processAISignal(job: Job): Promise<void> {
       generatedAt: now,
       signal: {
         signalType: gate.signalType,
-        entryPrice: analysis.entry ?? null,
-        targetPrice: analysis.target ?? null,
-        stopLoss: analysis.stopLoss ?? null,
+        entryPrice,
+        targetPrice,
+        stopLoss,
         confidence: analysis.confidence ?? null,
         reasoning: analysis.reasoning ?? null,
       },
@@ -432,7 +443,21 @@ async function processIntradayFetcher(_job: Job): Promise<void> {
 }
 
 async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
-  // Point-in-time fundamentals snapshot first — builds the as-of trail load_training_data joins.
+  // FULL-UNIVERSE feature grid FIRST: the signal scan only writes technical_signals rows
+  // for stocks that produced a tradable pattern (14-800/day), so most of the universe had
+  // no feature row on most days — starving the ensemble/ranker of a complete cross-section.
+  // This guarantees a row for every liquid stock on the latest session BEFORE the enrichment
+  // engines below run, so RS/HV/aVWAP/etc. fill the whole grid, not just the signal subset.
+  await runPython('backfill_technical_features.py', ['--full-today'], 10 * 60_000)
+    .catch(e => console.warn('[QUEUE] technical grid-ensurer failed:', (e as Error).message));
+
+  // Forward-capture alt-data: MoneyControl breakout-pattern flags + technical rating onto
+  // today's full grid (can't be backfilled — captured daily to accumulate for a future
+  // richer breakout model). Runs after the grid-ensurer so it writes onto full-universe rows.
+  await runPython('mc_techscanner_fetcher.py', [], 5 * 60_000)
+    .catch(e => console.warn('[QUEUE] mc_techscanner failed:', (e as Error).message));
+
+  // Point-in-time fundamentals snapshot — builds the as-of trail load_training_data joins.
   // Runs in ~2s solo but its DELETE+INSERT…SELECT on fundamentals_history can block far longer on
   // Postgres lock/CPU contention during the startup catch-up burst (was tripping the old 90s budget
   // with a bare SIGTERM). 3 min matches the sibling steps and clears the transient contention window.
@@ -666,9 +691,15 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await runPython('pead_model.py', [], 60_000)
     .catch(e => console.warn('[QUEUE] pead_model failed:', (e as Error).message));
 
-  await resolveOutcomesResilient(1);
-  await resolveOutcomesResilient(5);
-  await resolveOutcomesResilient(15);
+  // These were UNCAUGHT: if outcome resolution threw (e.g. a transient PG/IPv6 blip), the
+  // whole daily-ops run aborted here — skipping ALL ML training below AND never reaching the
+  // success handler, so the ml-ensemble-score/feature-engineering/fii-dii monitor states
+  // showed "never succeeded" for a week. Every step below is now best-effort so the run
+  // always completes and the training tail always attempts (scripts are idempotent — a
+  // failed one simply retries tomorrow).
+  await resolveOutcomesResilient(1).catch(e => console.warn('[QUEUE] resolveOutcomes(1) failed:', (e as Error).message));
+  await resolveOutcomesResilient(5).catch(e => console.warn('[QUEUE] resolveOutcomes(5) failed:', (e as Error).message));
+  await resolveOutcomesResilient(15).catch(e => console.warn('[QUEUE] resolveOutcomes(15) failed:', (e as Error).message));
 
   // Compute excursion path labels for all resolved entries:
   await runPython('exit_labeler.py', [], 5 * 60_000)
@@ -679,8 +710,10 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await runPython('live_screener_resolver.py', [], 20 * 60_000)
     .catch(err => console.error('[QUEUE] live_screener_resolver.py failed:', err.message));
 
-  await runPython('performance_tracker.py', ['--horizon', '5']);
-  await runPython('performance_tracker.py', ['--horizon', '15']);
+  await runPython('performance_tracker.py', ['--horizon', '5'])
+    .catch(e => console.warn('[QUEUE] performance_tracker(5) failed:', (e as Error).message));
+  await runPython('performance_tracker.py', ['--horizon', '15'])
+    .catch(e => console.warn('[QUEUE] performance_tracker(15) failed:', (e as Error).message));
 
   await runPython('online_learner.py', ['--window', '180'], 120_000)
     .catch(e => console.warn('[QUEUE] online_learner failed:', (e as Error).message));
@@ -706,14 +739,27 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await runPython('cs_ranker.py', ['--score'], 120_000)
     .catch(e => console.warn('[QUEUE] cs_ranker score failed:', (e as Error).message));
 
-  await runPython('reward_engine.py');
+  // Breakout classifier (Lever #4): score today's universe with P(>=6% move in 10d) →
+  // technical_signals.breakout_probability. Advisory only for now (strong purged-OOF AUC
+  // ~0.73 but on limited history); the weekly --train refits as coverage grows.
+  await runPython('breakout_classifier.py', ['--score'], 3 * 60_000)
+    .catch(e => console.warn('[QUEUE] breakout_classifier score failed:', (e as Error).message));
+
+  // Winner attribution: which stocks actually flew today, did we have them flagged,
+  // and which precursors preceded the move → rolling lift → tomorrow's candidate list.
+  await runPython('high_flyer_retrospective.py', [], 10 * 60_000)
+    .catch(e => console.warn('[QUEUE] high_flyer_retrospective failed:', (e as Error).message));
+
+  await runPython('reward_engine.py')
+    .catch(e => console.warn('[QUEUE] reward_engine failed:', (e as Error).message));
   // --update only recomputes Q-values for existing rl_episodes rows; nothing creates NEW
   // rows day-to-day (log_episode() is unused dead code) — --backfill is what actually
   // inserts episodes from newly-resolved signal_outcomes. A short lookback keeps this a
   // cheap daily top-up instead of re-scanning the full history (default 180d) every run.
   await runPython('rl_agent.py', ['--backfill', '--lookback', '20'], 3 * 60_000)
     .catch(e => console.warn('[QUEUE] rl_agent backfill failed:', (e as Error).message));
-  await runPython('rl_agent.py', ['--update']);
+  await runPython('rl_agent.py', ['--update'])
+    .catch(e => console.warn('[QUEUE] rl_agent update failed:', (e as Error).message));
 
   const { computeSignalTypeStats } = await import('./technicalSignalsService');
   await computeSignalTypeStats().catch(e => console.warn('[QUEUE] computeSignalTypeStats failed:', (e as Error).message));
@@ -821,10 +867,12 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean }> 
   // overview-second-part call both used to make independently).
   // financial_ratios_fetcher.py + working_capital_fetcher.py moved to the
   // trendlyne-ratios-monthly queue (rewritten against ET_Stats — see Tasks 5-6).
+  // Best-effort: a resolver blip must NOT skip the ml_ensemble --train below (the whole
+  // point of the weekly job). Every step here is idempotent and independently catchable.
   await runPython('outcome_resolver.py', ['--horizon', '5'])
-    .catch(e => console.warn('[QUEUE] outcome_resolver 5d failed:', (e as Error).message));
+    .catch(e => console.warn('[QUEUE] weekly outcome_resolver(5) failed:', (e as Error).message));
   await runPython('outcome_resolver.py', ['--horizon', '15'])
-    .catch(e => console.warn('[QUEUE] outcome_resolver 15d failed:', (e as Error).message));
+    .catch(e => console.warn('[QUEUE] weekly outcome_resolver(15) failed:', (e as Error).message));
   // Run exit labeler to resolve excursions
   await runPython('exit_labeler.py', [], 10 * 60_000)
     .catch(e => console.warn('[QUEUE] exit_labeler failed:', (e as Error).message));
@@ -835,7 +883,11 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean }> 
   // 0.757 in the first place) — without it, every scheduled retrain silently falls back to
   // untuned defaults, which measured ~0.20 AUC worse on held-out test in one observed run.
   await runPython('ml_ensemble.py', ['--train', '--tune', '--score'], 90 * 60_000)
-    .catch(e => console.warn('[QUEUE] ml_ensemble train failed:', (e as Error).message));
+    .catch(e => console.warn('[QUEUE] ml_ensemble weekly retrain failed:', (e as Error).message));
+  // Retrain the breakout classifier (Lever #4) on the accumulated feature history and
+  // refresh today's scores; purged-OOF AUC printed to logs for monitoring.
+  await runPython('breakout_classifier.py', ['--train', '--score'], 30 * 60_000)
+    .catch(e => console.warn('[QUEUE] breakout_classifier train failed:', (e as Error).message));
   await runPython('cs_ranker.py', ['--train', '--score'], 30 * 60_000)
     .catch(e => console.warn('[QUEUE] cs_ranker retrain failed:', (e as Error).message));
   await runPython('strategy_optimizer.py', [], 30 * 60_000)
@@ -843,9 +895,9 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean }> 
   await runPython('backtester.py', ['--start', '2023-01-01'], 30 * 60_000)
     .catch(e => console.warn('[QUEUE] backtester failed:', (e as Error).message));
   await runPython('performance_tracker.py', ['--horizon', '5'])
-    .catch(e => console.warn('[QUEUE] performance_tracker 5d failed:', (e as Error).message));
+    .catch(e => console.warn('[QUEUE] weekly performance_tracker(5) failed:', (e as Error).message));
   await runPython('performance_tracker.py', ['--horizon', '15'])
-    .catch(e => console.warn('[QUEUE] performance_tracker 15d failed:', (e as Error).message));
+    .catch(e => console.warn('[QUEUE] weekly performance_tracker(15) failed:', (e as Error).message));
   return { success: true };
 }
 
@@ -1922,7 +1974,9 @@ export async function initQueues(): Promise<boolean> {
     });
     new Worker(QUEUE_PREOPEN,
       async () => {
-        await runPython('preopen_fetcher.py', [], 60_000)
+        // 3 min: NSE preopen endpoints respond slowly (or hang) when hit outside the
+        // 9:00-9:15 IST window -- e.g. a restart catch-up job -- and 60s killed those runs.
+        await runPython('preopen_fetcher.py', [], 3 * 60_000)
           .then(() => recordHeartbeat('preopen-snapshot', 'success'))
           .catch(e => {
             console.warn('[QUEUE] preopen_fetcher failed:', (e as Error).message);
@@ -2158,9 +2212,10 @@ export async function initQueues(): Promise<boolean> {
     confluenceOutcomesWorker = new Worker(
       QUEUE_CONFLUENCE_OUTCOMES,
       processConfluenceOutcomes,
-      // lockDuration must exceed the processor's ~2×120s python runs; the BullMQ
-      // default 30s lock marked every real run "stalled more than allowable limit"
-      { connection: makeConnection(), concurrency: 1, lockDuration: 10 * 60 * 1000 }
+      // lockDuration must exceed the processor's now-sequential runs (5min tracker +
+      // 15min trainer = 20min worst case); the BullMQ default 30s lock marked every
+      // real run "stalled more than allowable limit"
+      { connection: makeConnection(), concurrency: 1, lockDuration: 25 * 60 * 1000 }
     );
     confluenceOutcomesWorker.on('completed', () => {
       recordHeartbeat('confluence-outcomes', 'success');
@@ -2565,12 +2620,15 @@ export async function initQueues(): Promise<boolean> {
       QUEUE_UNIFIED_RANKER,
       async () => {
         console.log('[QUEUE] unified-ranker starting...');
-        await runPython('unified_ranker.py', [], 5 * 60_000);
+        // 30 min: a full run now takes 15-20+ min (700k-row confluence window scans +
+        // quality/win-prob loaders). The old 5-min budget timeout-killed 19 of its last
+        // 24 runs, leaving unified_recommendations stale for the Top Rated tab.
+        await runPython('unified_ranker.py', [], 30 * 60_000);
       },
       // No lockDuration previously -- fell back to BullMQ's 30s default while awaiting a
       // runPython call allowed up to 5 minutes, causing repeated "job stalled" failures
       // (confirmed in job_heartbeat: 3 stalls on 2026-07-09 alone).
-      { connection, concurrency: 1, lockDuration: 6 * 60_000 },
+      { connection, concurrency: 1, lockDuration: 35 * 60_000 },
     );
     unifiedRankerWorker = unifiedRankerWorkerInstance;
 
@@ -2580,7 +2638,13 @@ export async function initQueues(): Promise<boolean> {
       'unified-ranker-daily',
       {},
       {
-        repeat:  { pattern: '15 10 * * 1-5' },
+        // 07:30 IST (02:00 UTC), pre-open. Was 15:45 IST (just after close) — but that ran
+        // the canonical ranker BEFORE its own inputs refreshed: stock_scores (stock-scoring
+        // 22:30 IST), technical_signals ML features + win_probability (ml-daily-ops 19:30 IST)
+        // and OHLCV (stock-refresh 16:00 IST) all land AFTER 15:45, so unified_recommendations
+        // was always built on ~1-day-stale scores. Running pre-open consumes the fully-refreshed
+        // prior-session features and has the fresh ranking ready before the 09:15 open.
+        repeat:  { pattern: '0 2 * * 1-5' },
         jobId:   'unified-ranker-daily-repeatable',
         attempts: 2,
         backoff:  { type: 'fixed', delay: 60_000 },

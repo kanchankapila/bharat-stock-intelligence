@@ -2359,9 +2359,13 @@ def score_pending(conn: ConnWrapper, ensemble: dict) -> int:
     print(f"[Ensemble] Regime={regime}; regime-conditional and cross-sectional rank scaling applied.")
 
     cur = conn.cursor()
+    # Write NULL (not NaN) for any non-finite probability: Postgres stores float('nan')
+    # as a value that passes IS NOT NULL, which then crashes calibration's roc_auc/isotonic
+    # and silently corrupts the ranker's bet_size_from_probability. NULL is the honest
+    # "unscored" marker every downstream reader already handles.
     cur.executemany(
         "UPDATE technical_signals SET win_probability = ? WHERE symbol = ? AND date = ?",
-        [(round(float(prob), 4), row['symbol'], row['signal_date'])
+        [(round(float(prob), 4) if np.isfinite(prob) else None, row['symbol'], row['signal_date'])
          for (_, row), prob in zip(df.iterrows(), probs)],
     )
     updated = len(df)

@@ -36,6 +36,20 @@ LOSS_THRESHOLD = -1.0
 # (25 bps commission + 10 bps slippage round trip).
 ROUND_TRIP_COST_PCT = 0.30
 
+# Data-error guard. A >100% move over a <=15-day horizon is a phantom, not a trade:
+# an unadjusted corporate action or a sustained wrong-level series in the source feed
+# that the single-bar is_suspect spike-guard can't catch (it only flags a bar that
+# deviates from BOTH neighbours). A few dozen of these (max observed +26325%) dragged
+# the learned per-source outcome averages from ~0% to +188%, poisoning reward_engine
+# and strategy_optimizer weighting. The real distribution's p95 is under 8%, so this
+# bound only ever trips on unambiguous data errors.
+MAX_PLAUSIBLE_RETURN_PCT = 100.0
+
+
+def is_plausible_return(return_pct: float | None) -> bool:
+    """False for outcome returns that can only be a data error, never a real trade."""
+    return return_pct is not None and abs(return_pct) <= MAX_PLAUSIBLE_RETURN_PCT
+
 
 def _fetch_atr_pct(conn: ConnWrapper, symbol: str, as_of_date, window: int = 14) -> float:
     """Return ATR(14) as % of closing price on `as_of_date`, or 2.0 if unavailable."""
@@ -521,7 +535,12 @@ def resolve_unified_outcomes(
                 gross += dividend_pct
                 
             return_pct = net_return_pct(gross)
-            if exit_reason == 'STOP_LOSS':
+            if not is_plausible_return(return_pct):
+                # Phantom move from a bad/unadjusted bar — neither a win nor a loss, and
+                # the return itself is untrustworthy, so null it so it can't skew the
+                # per-source averages reward_engine/strategy_optimizer learn from.
+                outcome, exit_reason, return_pct = 'NEUTRAL', 'SUSPECT_DATA', None
+            elif exit_reason == 'STOP_LOSS':
                 outcome = 'STOP_LOSS'
             else:
                 threshold = get_volatility_threshold(conn, sym, signal_date, horizon_days)
