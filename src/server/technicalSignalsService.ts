@@ -1153,19 +1153,6 @@ export async function runTechnicalSignalScan(options: {
       }
     }
 
-    // PCR lookup helper (stock-level pcr → pcr_oi, market_pcr → pcr_vol)
-    async function getPcrForSymbol(symbol: string, date: string): Promise<{ pcr_oi: number | null; pcr_vol: number | null }> {
-      const row = await dbGet(`
-        SELECT pcr, market_pcr FROM stock_options_oi
-        WHERE symbol = ? AND date <= ?
-        ORDER BY date DESC LIMIT 1
-      `, [symbol, date]) as { pcr: number; market_pcr: number } | undefined;
-      return {
-        pcr_oi:  row?.pcr        ?? null,
-        pcr_vol: row?.market_pcr ?? null,
-      };
-    }
-
     // FII/DII rolling helper — market-wide, computed once outside the transaction
     async function getFiiDiiRolling(date: string): Promise<{ fii_10d_net: number | null; dii_3d_net: number | null }> {
       const fii10 = await dbGet(`
@@ -1252,6 +1239,26 @@ export async function runTechnicalSignalScan(options: {
     const marketCapMap = new Map(mcRows.map(r => [r.symbol, r.market_cap]));
     const MIN_MARKET_CAP = 5e9; // ₹500 crore
 
+    // Pre-fetch latest PCR per symbol in one windowed query (was one lookup per result).
+    const pcrRows = symbolsInScan.length
+      ? (await dbAll(
+          `SELECT symbol, pcr AS pcr_oi, market_pcr AS pcr_vol FROM (
+             SELECT symbol, pcr, market_pcr,
+                    ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY date DESC) AS rn
+             FROM stock_options_oi
+             WHERE date <= ? AND symbol IN (${symbolsInScan.map(() => '?').join(',')})
+           ) t WHERE rn = 1`,
+          [scanDate, ...symbolsInScan]
+        ) as { symbol: string; pcr_oi: number | null; pcr_vol: number | null }[])
+      : [];
+    const pcrMap = new Map(pcrRows.map(r => [r.symbol, { pcr_oi: r.pcr_oi ?? null, pcr_vol: r.pcr_vol ?? null }]));
+
+    // Pre-fetch symbols that already have an ACTIVE technical_scan signal (was one lookup per result).
+    const activeRows = await dbAll(
+      `SELECT DISTINCT symbol FROM recommendation_log WHERE status = 'ACTIVE' AND source = 'technical_scan'`
+    ) as { symbol: string }[];
+    const activeSet = new Set(activeRows.map(r => r.symbol));
+
     // Upsert all results into DB (including new accuracy-context columns)
     const upsertSql = `
       INSERT INTO technical_signals (
@@ -1319,9 +1326,6 @@ export async function runTechnicalSignalScan(options: {
         signal_generated_at=excluded.signal_generated_at
     `;
 
-    const checkActiveSql =
-      `SELECT id FROM recommendation_log WHERE symbol = ? AND status = 'ACTIVE' AND source = 'technical_scan' LIMIT 1`;
-
     // Resolve per-symbol pcr/sector momentum BEFORE the write transaction so the tx body
     // only writes (keeps the PG transaction short and avoids cross-connection reads mid-tx).
     const enriched = [] as Array<{
@@ -1331,7 +1335,7 @@ export async function runTechnicalSignalScan(options: {
     for (const r of results) {
       const mc = marketCapMap.get(r.symbol);
       if (mc !== null && mc !== undefined && mc < MIN_MARKET_CAP) continue; // skip micro-caps
-      const { pcr_oi, pcr_vol } = await getPcrForSymbol(r.symbol, scanDate);
+      const { pcr_oi, pcr_vol } = pcrMap.get(r.symbol) ?? { pcr_oi: null, pcr_vol: null };
       const sector = symbolSectorMap.get(r.symbol) ?? null;
       const { sector_ret_5d, sector_ret_21d } = await getSectorMomentum(sector, scanDate);
       enriched.push({ r, pcr_oi, pcr_vol, sector_ret_5d, sector_ret_21d });
@@ -1340,7 +1344,7 @@ export async function runTechnicalSignalScan(options: {
     await dbTransaction(async (tx) => {
       for (const { r, pcr_oi, pcr_vol, sector_ret_5d, sector_ret_21d } of enriched) {
         // Skip if stock already has an ACTIVE signal in recommendation_log
-        if (await tx.get(checkActiveSql, [r.symbol])) continue;
+        if (activeSet.has(r.symbol)) continue;
 
         await tx.run(upsertSql, [
           r.symbol, scanDate,
