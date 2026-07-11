@@ -47,6 +47,13 @@ FEATURE_COLS = [
     "rs_rank_21d", "rs_rank_63d",
     "dist_sma20", "dist_sma50", "dist_sma200", "above_sma200",
     "rsi14", "hv20", "vol_ratio", "atr_pct", "dist_52w_high", "range_pct_10d",
+    # breakout precursors (all OHLCV-derived, deep-history-safe)
+    "dist_20d_high",      # proximity to the 20-day breakout level
+    "vol_surge_5v20",     # 5d avg volume vs 20d — accumulation
+    "range_contraction",  # 10d range vs 60d range — a squeeze coils before a breakout
+    "up_vol_ratio_10",    # share of 10d volume on up-days — buying pressure
+    "consec_up",          # up-day streak length (momentum persistence)
+    "hv_ratio_10_60",     # short vs long realized vol — vol regime shift
 ]
 
 
@@ -116,6 +123,23 @@ def compute_ohlcv_features(ohlcv: pd.DataFrame) -> pd.DataFrame:
     f["atr_pct"] = tr.rolling(14).mean() / close
     f["dist_52w_high"] = close / close.rolling(252, min_periods=60).max() - 1.0
     f["range_pct_10d"] = (high.rolling(10).max() - low.rolling(10).min()) / close
+
+    # ── breakout precursors ──
+    f["dist_20d_high"] = close / high.rolling(20).max() - 1.0
+    f["vol_surge_5v20"] = vol.rolling(5).mean() / vol.rolling(20).mean()
+    range10 = (high.rolling(10).max() - low.rolling(10).min())
+    range60 = (high.rolling(60).max() - low.rolling(60).min())
+    f["range_contraction"] = range10 / range60.replace(0, np.nan)
+    dr = close.pct_change()
+    up_vol = vol.where(dr > 0, 0.0)
+    f["up_vol_ratio_10"] = up_vol.rolling(10).sum() / vol.rolling(10).sum().replace(0, np.nan)
+    f["hv_ratio_10_60"] = dr.rolling(10).std() / dr.rolling(60).std().replace(0, np.nan)
+
+    # consecutive up-day streak ending on each date, per symbol (vectorized)
+    def _streak(s: pd.Series) -> pd.Series:
+        b = (s > 0).astype(int)
+        return b.groupby((b == 0).cumsum()).cumsum()
+    f["consec_up"] = dr.apply(_streak)
 
     parts = [frame.stack(future_stack=True).rename(name) for name, frame in f.items()]
     out = pd.concat(parts, axis=1).reset_index()
