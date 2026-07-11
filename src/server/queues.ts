@@ -27,6 +27,7 @@ import { syncMoneyControlScreeners } from './moneycontrolScreener';
 import { runFullFundamentalsSync } from './fundamentalsSyncService';
 import { fetchDeliveryMap } from './deliveryFetcher';
 import { updateMonitorState } from './monitoringService';
+import { StepTracker } from './jobSteps';
 import { getTrendlyneMetricSymbols, enqueueTrendlyneMetricsFetchJobs, runTrendlyneMetricsFetch } from './trendlyneDailyFetchService';
 import { isMarketOpen } from './marketStatusService';
 import {
@@ -443,6 +444,10 @@ async function processIntradayFetcher(_job: Job): Promise<void> {
 }
 
 async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
+  // Dashboard-visible sub-tasks are wrapped in T.run(...) so their monitor state reflects the
+  // ACTUAL step outcome (T.finish() at the end). Steps not tracked here stay best-effort with a
+  // console.warn — they aren't individually dashboarded, so they can't create a false-healthy signal.
+  const T = new StepTracker('ml-daily-ops');
   // FULL-UNIVERSE feature grid FIRST: the signal scan only writes technical_signals rows
   // for stocks that produced a tradable pattern (14-800/day), so most of the universe had
   // no feature row on most days — starving the ensemble/ranker of a complete cross-section.
@@ -469,8 +474,7 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   // Surveillance gate: ASM/GSM flags → nse_stocks and technical_signals.asm_flag/gsm_stage.
   await runPython('asm_gsm_fetcher.py', [], 2 * 60_000)
     .catch(e => console.warn('[QUEUE] asm_gsm_fetcher failed:', (e as Error).message));
-  await runPython('fii_dii_fetcher.py', [], 90_000)
-    .catch(e => console.warn('[QUEUE] fii_dii_fetcher failed:', (e as Error).message));
+  await T.run('fii-dii-fetcher', () => runPython('fii_dii_fetcher.py', [], 90_000));
   await runPython('pcr_fetcher.py', ['--gex'], 90_000)
     .catch(e => console.warn('[QUEUE] pcr_fetcher failed:', (e as Error).message));
   // Parallel batch — safe to overlap: disjoint target tables (mc_* vs quant_scores vs
@@ -483,8 +487,7 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
       .catch(e => console.warn('[QUEUE] moneycontrol_fetcher failed:', (e as Error).message)),
     runPython('institutional_quant_engine.py', [], 120_000)
       .catch(e => console.warn('[QUEUE] institutional_quant_engine failed:', (e as Error).message)),
-    runPython('finbert_scorer.py', ['--days', '1'], 180_000)
-      .catch(e => console.warn('[QUEUE] finbert_scorer failed:', (e as Error).message)),
+    T.run('finbert-scorer', () => runPython('finbert_scorer.py', ['--days', '1'], 180_000)),
   ]);
   // iv_features reads the ATM IV that pcr_fetcher just wrote to stock_options_oi → technical_signals.iv_rank.
   // Kept serial: it writes technical_signals, which several later steps also update — avoids row-lock churn.
@@ -707,8 +710,8 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   // always completes and the training tail always attempts (scripts are idempotent — a
   // failed one simply retries tomorrow).
   await resolveOutcomesResilient(1).catch(e => console.warn('[QUEUE] resolveOutcomes(1) failed:', (e as Error).message));
-  await resolveOutcomesResilient(5).catch(e => console.warn('[QUEUE] resolveOutcomes(5) failed:', (e as Error).message));
-  await resolveOutcomesResilient(15).catch(e => console.warn('[QUEUE] resolveOutcomes(15) failed:', (e as Error).message));
+  await T.run('outcome-resolver-5d', () => resolveOutcomesResilient(5));
+  await T.run('outcome-resolver-15d', () => resolveOutcomesResilient(15));
 
   // Compute excursion path labels for all resolved entries:
   await runPython('exit_labeler.py', [], 5 * 60_000)
@@ -719,8 +722,7 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await runPython('live_screener_resolver.py', [], 20 * 60_000)
     .catch(err => console.error('[QUEUE] live_screener_resolver.py failed:', err.message));
 
-  await runPython('performance_tracker.py', ['--horizon', '5'])
-    .catch(e => console.warn('[QUEUE] performance_tracker(5) failed:', (e as Error).message));
+  await T.run('performance-tracker', () => runPython('performance_tracker.py', ['--horizon', '5']));
   await runPython('performance_tracker.py', ['--horizon', '15'])
     .catch(e => console.warn('[QUEUE] performance_tracker(15) failed:', (e as Error).message));
 
@@ -730,10 +732,9 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   // Warm-start LGBM ensemble on the last 3 days of newly-resolved outcomes (+20 boost rounds).
   // Runs after online_learner so SGD priors are already updated; keeps ensemble fresh daily
   // without the cost of a full weekly retrain.
-  await runPython('ml_ensemble.py', ['--incremental', '--incr-days', '3'], 5 * 60_000)
-    .catch(e => console.warn('[QUEUE] ml_ensemble incremental failed:', (e as Error).message));
+  await T.run('ml-ensemble-incremental', () => runPython('ml_ensemble.py', ['--incremental', '--incr-days', '3'], 5 * 60_000));
 
-  await pythonApi.scorePending().catch(e => console.warn('[API] score-pending:', (e as Error).message));
+  await T.run('ml-ensemble-score', () => pythonApi.scorePending());
 
   // Isotonic-recalibrate win_probability against realized WIN/LOSS so sizing/gating use
   // honest probabilities (the ensemble stack is overconfident). Runs after outcomes resolve.
@@ -742,8 +743,7 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
 
   // PSI-based feature drift check — writes drift_score to dl_model_performance so
   // scoring_engine applies a win_probability haircut when distributions shift.
-  await runPython('drift_detector.py', [], 60_000)
-    .catch(e => console.warn('[QUEUE] drift_detector failed:', (e as Error).message));
+  await T.run('drift-detector', () => runPython('drift_detector.py', [], 60_000));
 
   await runPython('cs_ranker.py', ['--score'], 120_000)
     .catch(e => console.warn('[QUEUE] cs_ranker score failed:', (e as Error).message));
@@ -759,20 +759,21 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await runPython('high_flyer_retrospective.py', [], 10 * 60_000)
     .catch(e => console.warn('[QUEUE] high_flyer_retrospective failed:', (e as Error).message));
 
-  await runPython('reward_engine.py')
-    .catch(e => console.warn('[QUEUE] reward_engine failed:', (e as Error).message));
+  await T.run('reward-engine', () => runPython('reward_engine.py'));
   // --update only recomputes Q-values for existing rl_episodes rows; nothing creates NEW
   // rows day-to-day (log_episode() is unused dead code) — --backfill is what actually
   // inserts episodes from newly-resolved signal_outcomes. A short lookback keeps this a
   // cheap daily top-up instead of re-scanning the full history (default 180d) every run.
   await runPython('rl_agent.py', ['--backfill', '--lookback', '20'], 3 * 60_000)
     .catch(e => console.warn('[QUEUE] rl_agent backfill failed:', (e as Error).message));
-  await runPython('rl_agent.py', ['--update'])
-    .catch(e => console.warn('[QUEUE] rl_agent update failed:', (e as Error).message));
+  await T.run('rl-agent-update', () => runPython('rl_agent.py', ['--update']));
 
   const { computeSignalTypeStats } = await import('./technicalSignalsService');
-  await computeSignalTypeStats().catch(e => console.warn('[QUEUE] computeSignalTypeStats failed:', (e as Error).message));
+  await T.run('signal-type-stats', () => computeSignalTypeStats());
 
+  // Surface the real per-step outcomes (and a degraded job state if any failed) instead of the
+  // old blanket 'success' the completed handler used to stamp on all of these.
+  T.finish();
   return { success: true };
 }
 
@@ -1804,24 +1805,15 @@ export async function initQueues(): Promise<boolean> {
     );
 
     mlDailyOpsWorker.on('completed', (_job) => {
+      // Per-step + overall monitor states are written by StepTracker.finish() inside the
+      // processor (reflecting real outcomes), so this handler no longer blanket-marks success.
       console.log('[QUEUE] ml-daily-ops completed');
-      recordHeartbeat('ml-daily-ops', 'success');
-      updateMonitorState('fii-dii-fetcher', 'success');
-      updateMonitorState('finbert-scorer', 'success');
-      updateMonitorState('outcome-resolver-5d', 'success');
-      updateMonitorState('outcome-resolver-15d', 'success');
-      updateMonitorState('performance-tracker', 'success');
-      updateMonitorState('ml-ensemble-score', 'success');
-      updateMonitorState('ml-ensemble-incremental', 'success');
-      updateMonitorState('drift-detector', 'success');
-      updateMonitorState('reward-engine', 'success');
-      updateMonitorState('rl-agent-update', 'success');
-      updateMonitorState('signal-type-stats', 'success');
     });
     mlDailyOpsWorker.on('failed', (_job, err) => {
+      // Processor threw before finish() ran (steps are best-effort, so this is a harness/uncaught
+      // error, not a step failure) — mark the job failed so it isn't seen as healthy.
       console.error('[QUEUE] ml-daily-ops failed:', err.message);
       recordHeartbeat('ml-daily-ops', 'failed', err?.message);
-      updateMonitorState('ml-ensemble-score', 'failed', err.message);
     });
 
     // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ ML weekly retrain + optimize (Sunday 6 PM IST = 12:30 UTC) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
