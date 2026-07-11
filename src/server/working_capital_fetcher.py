@@ -101,6 +101,15 @@ def _parse_yearending(s: str | None) -> date | None:
         return None
 
 
+def _num(v, default=None):
+    """Coerce an ET_Stats field to float; ET returns the literal string 'NA' for missing
+    values, on which a bare float() throws and skips the whole stock."""
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return default
+
+
 def compute_ccc(balance: list[dict] | None, quarterly: list[dict] | None) -> list[dict]:
     """balance: ET_Stats Balance.list (annual, most-recent-first).
     quarterly: ET_Stats Quarterly.list (quarterly, most-recent-first, 8 back).
@@ -130,22 +139,22 @@ def compute_ccc(balance: list[dict] | None, quarterly: list[dict] | None) -> lis
         if len(year_quarters) < 4:
             continue
 
-        revenue_fy = sum(float(q.get("totalIncome") or 0) for q in year_quarters[:4])
-        cogs_fy = sum(float(q.get("totalExpenses") or 0) for q in year_quarters[:4])
+        revenue_fy = sum(_num(q.get("totalIncome"), 0) for q in year_quarters[:4])
+        cogs_fy = sum(_num(q.get("totalExpenses"), 0) for q in year_quarters[:4])
 
         if revenue_fy == 0:
             continue
 
-        receivables = b.get("tradeReceivables")
-        inventories = b.get("inventories")
-        payables = b.get("tradePayables")
+        receivables = _num(b.get("tradeReceivables"))
+        inventories = _num(b.get("inventories"))
+        payables = _num(b.get("tradePayables"))
 
         if receivables is None:
             continue
 
-        receivables_days = round(float(receivables) / revenue_fy * 365, 2)
-        inventory_days = round(float(inventories) / cogs_fy * 365, 2) if inventories is not None and cogs_fy else None
-        payables_days = round(float(payables) / cogs_fy * 365, 2) if payables is not None and cogs_fy else None
+        receivables_days = round(receivables / revenue_fy * 365, 2)
+        inventory_days = round(inventories / cogs_fy * 365, 2) if inventories is not None and cogs_fy else None
+        payables_days = round(payables / cogs_fy * 365, 2) if payables is not None and cogs_fy else None
         ccc = round(receivables_days + inventory_days - payables_days, 2) if inventory_days is not None and payables_days is not None else None
 
         results.append({

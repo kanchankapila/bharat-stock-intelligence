@@ -88,6 +88,15 @@ def ensure_schema(con) -> None:
 
 # ── Pure computation (fully unit-testable, no network/DB) ───────────────────────
 
+def _num(v, default=None):
+    """Coerce an ET_Stats field to float; ET returns the literal 'NA' for missing values,
+    which otherwise reaches the `interest_coverage < threshold` compare as a str and raises."""
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return default
+
+
 def compute_ratios(
     balance: list[dict] | None,
     cashflow: list[dict] | None,
@@ -97,9 +106,9 @@ def compute_ratios(
     """All four ET_Stats event lists are most-recent-first; index 0 is the
     latest available period. `balance` is accepted for interface symmetry
     with working_capital_fetcher.py but unused here."""
-    cfo = cashflow[0].get("netCashFlowFromOperatingActivities") if cashflow else None
-    cfi = cashflow[0].get("netCashUsedInInvestingActivities") if cashflow else None
-    interest_coverage = ratio[0].get("interestCoverage") if ratio else None
+    cfo = _num(cashflow[0].get("netCashFlowFromOperatingActivities")) if cashflow else None
+    cfi = _num(cashflow[0].get("netCashUsedInInvestingActivities")) if cashflow else None
+    interest_coverage = _num(ratio[0].get("interestCoverage")) if ratio else None
 
     fcf_ttm_approx: float | None = None
     if cfo is not None and cfi is not None:

@@ -96,6 +96,11 @@ export async function runPython(
         (error.stderr || 'No stderr captured before the process was killed.')
       : (error.stderr || error.message || String(error));
     didThrow = true;
+    // Callers overwhelmingly log only `(e as Error).message`, which for a timeout is the
+    // bare "Command failed: <cmd>" — indistinguishable from a code crash. Surface the
+    // timeout detail (and any captured stderr) on .message so every .catch and the job
+    // heartbeat/monitor records reflect what actually happened.
+    if (error.killed || error.signal) error.message = stderr;
     throw error;
   } finally {
     releasePythonSlot();

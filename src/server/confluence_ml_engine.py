@@ -75,21 +75,8 @@ def get_connection() -> ConnWrapper:
 
 
 def build_training_data(conn):
-    rows = conn.execute(f"""
-        WITH daily_confluence AS (
-            SELECT *
-            FROM (
-                SELECT cs.*,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY cs.symbol, {_CS_DAY}
-                        ORDER BY cs.computed_at DESC
-                    ) AS row_num
-                FROM confluence_signals cs
-                WHERE cs.confluence_score IS NOT NULL
-            )
-            WHERE row_num = 1
-        )
-        SELECT
+    # Common feature projection — column NAMES are what the consumer reads (order-independent).
+    _SELECT_COLS = """
             cs.symbol,
             cs.bullish_screener_count,
             cs.bearish_screener_count,
@@ -107,7 +94,50 @@ def build_training_data(conn):
             COALESCE(qs.rank_composite, 50)      AS rank_composite,
             COALESCE(sf.return_on_equity, 0)     AS return_on_equity,
             COALESCE(sf.piotroski_f_score, 4)    AS piotroski_f_score,
-            so.outcome
+            so.outcome"""
+
+    if use_postgres():
+        # Outcome-driven rewrite: the ~4k h7 WIN/LOSS outcomes drive the scan, and a LATERAL
+        # picks the latest confluence row per (symbol, signal-day) using a SARGABLE computed_at
+        # range so the (symbol, computed_at) PK does a range-seek. The previous version ran a
+        # ROW_NUMBER() window over the ENTIRE ~1.9M-row confluence_signals table and joined on a
+        # non-sargable to_char(computed_at) day-key — it hung for >8 min and tripped the 120s
+        # queue timeout every run. This form returns the same rows in <1s.
+        sql = f"""
+        SELECT
+        {_SELECT_COLS}
+        FROM signal_outcomes so
+        JOIN LATERAL (
+            SELECT c.* FROM confluence_signals c
+            WHERE c.symbol = so.symbol
+              AND c.confluence_score IS NOT NULL
+              AND c.computed_at >= so.signal_date::timestamp
+              AND c.computed_at <  so.signal_date::timestamp + INTERVAL '1 day'
+            ORDER BY c.computed_at DESC
+            LIMIT 1
+        ) cs ON true
+        LEFT JOIN technical_signals ts ON ts.symbol = cs.symbol AND ts.date = so.signal_date
+        LEFT JOIN quant_scores qs       ON qs.symbol = cs.symbol
+        LEFT JOIN stock_fundamentals sf ON sf.symbol = cs.symbol
+        WHERE so.horizon_days = 7 AND so.outcome IN ('WIN', 'LOSS')
+        """
+    else:
+        # SQLite (dev): tiny dataset, keep the portable window-function form (no LATERAL).
+        sql = f"""
+        WITH daily_confluence AS (
+            SELECT * FROM (
+                SELECT cs.*,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY cs.symbol, {_CS_DAY}
+                        ORDER BY cs.computed_at DESC
+                    ) AS row_num
+                FROM confluence_signals cs
+                WHERE cs.confluence_score IS NOT NULL
+            )
+            WHERE row_num = 1
+        )
+        SELECT
+        {_SELECT_COLS}
         FROM daily_confluence cs
         JOIN signal_outcomes so
           ON so.symbol = cs.symbol
@@ -119,7 +149,8 @@ def build_training_data(conn):
           AND ts.date = {_CS_DAY}
         LEFT JOIN quant_scores qs ON qs.symbol = cs.symbol
         LEFT JOIN stock_fundamentals sf ON sf.symbol = cs.symbol
-    """).fetchall()
+        """
+    rows = conn.execute(sql).fetchall()
 
     if len(rows) < MIN_TRAINING_ROWS:
         return None, None, len(rows)
