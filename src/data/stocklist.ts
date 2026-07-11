@@ -2693,7 +2693,7 @@ const stockData: StockMapping[] = [
     "isin": "INE330H01018",
     "symbol": "RCOM",
     "stockid": "819214",
-    "companyid": "",
+    "companyid": "15279",
     "tickertape_sid": "RLCM",
     "fincode": 132712,
     "scripcode": 532712
@@ -2830,7 +2830,7 @@ const stockData: StockMapping[] = [
     "isin": "INE875A01025",
     "symbol": "HDIL",
     "stockid": "",
-    "companyid": "",
+    "companyid": "18945",
     "fincode": 132873,
     "scripcode": 532873
   },
@@ -2842,7 +2842,7 @@ const stockData: StockMapping[] = [
     "isin": "INE270A01029",
     "symbol": "ALOKINDS",
     "stockid": "661020",
-    "companyid": "",
+    "companyid": "10648",
     "tickertape_sid": "ALOK",
     "fincode": 121070,
     "scripcode": 521070
@@ -2881,7 +2881,7 @@ const stockData: StockMapping[] = [
     "isin": "INE796A01023",
     "symbol": "ROLTA",
     "stockid": "",
-    "companyid": ""
+    "companyid": "12663"
   },
   {
     "name": "Asian Hotels (North)",
@@ -3069,7 +3069,7 @@ const stockData: StockMapping[] = [
     "isin": "INE090B01011",
     "symbol": "OMAXAUTO",
     "stockid": "778718",
-    "companyid": "",
+    "companyid": "13323",
     "tickertape_sid": "OMXA",
     "fincode": 120021,
     "scripcode": 520021
@@ -3256,7 +3256,7 @@ const stockData: StockMapping[] = [
     "isin": "INE285A01027",
     "symbol": "ELGIEQUIP",
     "stockid": "563526",
-    "companyid": "",
+    "companyid": "13805",
     "tickertape_sid": "ELGE",
     "fincode": 122074,
     "scripcode": 522074
@@ -3359,7 +3359,7 @@ const stockData: StockMapping[] = [
     "isin": "INE253A01025",
     "symbol": "HINDMOTORS",
     "stockid": "622546",
-    "companyid": "",
+    "companyid": "13617",
     "tickertape_sid": "HMTR",
     "fincode": 100500,
     "scripcode": 500500
@@ -3485,7 +3485,7 @@ const stockData: StockMapping[] = [
     "isin": "INE175A01038",
     "symbol": "JISLJALEQS",
     "stockid": "329828",
-    "companyid": "",
+    "companyid": "13532",
     "tickertape_sid": "JAIR",
     "fincode": 100219,
     "scripcode": 500219
@@ -3635,7 +3635,7 @@ const stockData: StockMapping[] = [
     "isin": "INE797A01021",
     "symbol": "VIKASWSP",
     "stockid": "",
-    "companyid": "",
+    "companyid": "10347",
     "fincode": 119307,
     "scripcode": 519307
   },
@@ -3725,7 +3725,7 @@ const stockData: StockMapping[] = [
     "isin": "INE836H01014",
     "symbol": "SBGLP",
     "stockid": "",
-    "companyid": "",
+    "companyid": "1987783",
     "fincode": 297503,
     "scripcode": 543218
   },
@@ -4209,7 +4209,7 @@ const stockData: StockMapping[] = [
     "isin": "INE069I01010",
     "symbol": "EMBDL",
     "stockid": "142544",
-    "companyid": "",
+    "companyid": "19231",
     "tickertape_sid": "INRL",
     "fincode": 132832,
     "scripcode": 532832
@@ -4350,7 +4350,7 @@ const stockData: StockMapping[] = [
     "isin": "INE623B01027",
     "symbol": "FEL",
     "stockid": "938013",
-    "companyid": "",
+    "companyid": "11339",
     "tickertape_sid": "FURE",
     "fincode": 123574,
     "scripcode": 523574
@@ -4389,7 +4389,7 @@ const stockData: StockMapping[] = [
     "isin": "INE694A01020",
     "symbol": "UNITECH",
     "stockid": "452317",
-    "companyid": "",
+    "companyid": "12874",
     "tickertape_sid": "UNTE",
     "fincode": 107878,
     "scripcode": 507878
@@ -4568,7 +4568,7 @@ const stockData: StockMapping[] = [
     "isin": "INE942G01012",
     "symbol": "MCLEODRUSS",
     "stockid": "834364",
-    "companyid": "",
+    "companyid": "13438",
     "tickertape_sid": "MCLE",
     "fincode": 132654,
     "scripcode": 532654
@@ -4711,7 +4711,7 @@ const stockData: StockMapping[] = [
     "isin": "INE669A01022",
     "symbol": "INFOMEDIA",
     "stockid": "218739",
-    "companyid": "",
+    "companyid": "12936",
     "tickertape_sid": "INFO",
     "fincode": 109069,
     "scripcode": 509069
@@ -4802,7 +4802,7 @@ const stockData: StockMapping[] = [
     "isin": "INE048A01011",
     "symbol": "HOCL",
     "stockid": "501399",
-    "companyid": "",
+    "companyid": "11979",
     "tickertape_sid": "HOCL",
     "fincode": 100449,
     "scripcode": 500449
@@ -4892,7 +4892,7 @@ const stockData: StockMapping[] = [
     "isin": "INE885A01032",
     "symbol": "ARE&M",
     "stockid": "869476",
-    "companyid": "",
+    "companyid": "12713",
     "tickertape_sid": "AMAR",
     "fincode": 100008,
     "scripcode": 500008
@@ -5048,7 +5048,7 @@ const stockData: StockMapping[] = [
     "isin": "INE063P01018",
     "symbol": "EQUITASBNK",
     "stockid": "1003439",
-    "companyid": "",
+    "companyid": "64238",
     "tickertape_sid": "EQU",
     "fincode": 273033,
     "scripcode": 543243
@@ -5444,7 +5444,7 @@ const stockData: StockMapping[] = [
     "isin": "INE758E01017",
     "symbol": "JIOFIN",
     "stockid": "1003892",
-    "companyid": "",
+    "companyid": "14555",
     "tickertape_sid": "JIO",
     "fincode": 229365,
     "scripcode": 543940
@@ -5535,7 +5535,7 @@ const stockData: StockMapping[] = [
     "isin": "INE498L01015",
     "symbol": "LTF",
     "stockid": "675291",
-    "companyid": "",
+    "companyid": "30050",
     "tickertape_sid": "LTFH",
     "fincode": 220350,
     "scripcode": 533519
@@ -5704,7 +5704,7 @@ const stockData: StockMapping[] = [
     "isin": "INE148I01020",
     "symbol": "SAMMAANCAP",
     "stockid": "559955",
-    "companyid": "",
+    "companyid": "15580",
     "tickertape_sid": "INBF",
     "fincode": 220741,
     "scripcode": 535789
@@ -6080,7 +6080,7 @@ const stockData: StockMapping[] = [
     "isin": "INE880J01026",
     "symbol": "JSWINFRA",
     "stockid": "10039023",
-    "companyid": "",
+    "companyid": "42080",
     "tickertape_sid": "JSW",
     "fincode": 237831,
     "scripcode": 543994
@@ -6171,7 +6171,7 @@ const stockData: StockMapping[] = [
     "isin": "INE0DK501011",
     "symbol": "PPLPHARMA",
     "stockid": "1003728",
-    "companyid": "",
+    "companyid": "2094561",
     "tickertape_sid": "PPL",
     "fincode": 307332,
     "scripcode": 543635
@@ -6223,7 +6223,7 @@ const stockData: StockMapping[] = [
     "isin": "INE0NNS01018",
     "symbol": "NSLNISP",
     "stockid": "1003791",
-    "companyid": "",
+    "companyid": "63615",
     "tickertape_sid": "NSLN",
     "fincode": 308021,
     "scripcode": 543768
@@ -6622,7 +6622,7 @@ const stockData: StockMapping[] = [
     "isin": "INE00E101023",
     "symbol": "BIKAJI",
     "stockid": "1003740",
-    "companyid": "",
+    "companyid": "2099545",
     "tickertape_sid": "BIK",
     "fincode": 209232,
     "scripcode": 543653
@@ -6687,7 +6687,7 @@ const stockData: StockMapping[] = [
     "isin": "INE138Y01010",
     "symbol": "KFINTECH",
     "stockid": "1003765",
-    "companyid": "",
+    "companyid": "1959671",
     "tickertape_sid": "KFI",
     "fincode": 305799,
     "scripcode": 543720
@@ -6752,7 +6752,7 @@ const stockData: StockMapping[] = [
     "isin": "INE321T01012",
     "symbol": "DOMS",
     "stockid": "10039096",
-    "companyid": "",
+    "companyid": "2160341",
     "tickertape_sid": "DOM",
     "fincode": 311742,
     "scripcode": 544045
@@ -6919,7 +6919,7 @@ const stockData: StockMapping[] = [
     "isin": "INE474Q01031",
     "symbol": "MEDANTA",
     "stockid": "1003741",
-    "companyid": "",
+    "companyid": "2099483",
     "tickertape_sid": "MEDA",
     "fincode": 279664,
     "scripcode": 543654
@@ -6958,7 +6958,7 @@ const stockData: StockMapping[] = [
     "isin": "INE330T01021",
     "symbol": "HAPPYFORGE",
     "stockid": "10039105",
-    "companyid": "",
+    "companyid": "49721",
     "tickertape_sid": "HAP",
     "fincode": 211740,
     "scripcode": 544057
@@ -7074,7 +7074,7 @@ const stockData: StockMapping[] = [
     "isin": "INE128S01021",
     "symbol": "FIVESTAR",
     "stockid": "1003746",
-    "companyid": "",
+    "companyid": "37653",
     "tickertape_sid": "FIVES",
     "fincode": 278701,
     "scripcode": 543663
@@ -7139,7 +7139,7 @@ const stockData: StockMapping[] = [
     "isin": "INE423Y01016",
     "symbol": "SBFC",
     "stockid": "10038972",
-    "companyid": "",
+    "companyid": "2141419",
     "tickertape_sid": "SBFC",
     "fincode": 287490,
     "scripcode": 543959
@@ -7373,7 +7373,7 @@ const stockData: StockMapping[] = [
     "isin": "INE0J5401028",
     "symbol": "HONASA",
     "stockid": "10039065",
-    "companyid": "",
+    "companyid": "2023293",
     "tickertape_sid": "HON",
     "fincode": 308764,
     "scripcode": 544014
@@ -7436,7 +7436,7 @@ const stockData: StockMapping[] = [
     "isin": "INE192B01031",
     "symbol": "WELSPUNLIV",
     "stockid": "234124",
-    "companyid": "",
+    "companyid": "12096",
     "tickertape_sid": "WLSP",
     "fincode": 114162,
     "scripcode": 514162
@@ -7611,7 +7611,7 @@ const stockData: StockMapping[] = [
     "isin": "INE00VM01036",
     "symbol": "MANORAMA",
     "stockid": "1003059",
-    "companyid": "",
+    "companyid": "62631",
     "tickertape_sid": "MANO",
     "fincode": 289858,
     "scripcode": 541974
@@ -7637,7 +7637,7 @@ const stockData: StockMapping[] = [
     "isin": "INE202E01016",
     "symbol": "IREDA",
     "stockid": "10039078",
-    "companyid": "",
+    "companyid": "4517",
     "tickertape_sid": "IRE",
     "fincode": 208414,
     "scripcode": 544026
@@ -7676,7 +7676,7 @@ const stockData: StockMapping[] = [
     "isin": "INE142Q01026",
     "symbol": "SULA",
     "stockid": "1003759",
-    "companyid": "",
+    "companyid": "2101578",
     "tickertape_sid": "SULA",
     "fincode": 221959,
     "scripcode": 543711
@@ -7780,7 +7780,7 @@ const stockData: StockMapping[] = [
     "isin": "INE228A01035",
     "symbol": "USHAMART",
     "stockid": "604024",
-    "companyid": "",
+    "companyid": "12833",
     "tickertape_sid": "USBL",
     "fincode": 117146,
     "scripcode": 517146
@@ -7920,7 +7920,7 @@ const stockData: StockMapping[] = [
     "isin": "INE0I3401014",
     "symbol": "DBOL",
     "stockid": "1003689",
-    "companyid": "",
+    "companyid": "2014762",
     "tickertape_sid": "DBO",
     "fincode": 307365,
     "scripcode": 543593
@@ -8167,7 +8167,7 @@ const stockData: StockMapping[] = [
     "isin": "INE065X01017",
     "symbol": "INDGN",
     "stockid": "10039241",
-    "companyid": "",
+    "companyid": "2198254",
     "tickertape_sid": "INDGN",
     "fincode": 210284,
     "scripcode": 544172
@@ -8193,7 +8193,7 @@ const stockData: StockMapping[] = [
     "isin": "INE818H01020",
     "symbol": "LTFOODS",
     "stockid": "315485",
-    "companyid": "",
+    "companyid": "18545",
     "tickertape_sid": "LTOL",
     "fincode": 132783,
     "scripcode": 532783
@@ -8297,7 +8297,7 @@ const stockData: StockMapping[] = [
     "isin": "INE903U01023",
     "symbol": "SIGNATURE",
     "stockid": "10039014",
-    "companyid": "",
+    "companyid": "2152172",
     "tickertape_sid": "SIGNA",
     "fincode": 306733,
     "scripcode": 543990
@@ -8373,7 +8373,7 @@ const stockData: StockMapping[] = [
     "isin": "INE0DYJ01015",
     "symbol": "SYRMA",
     "stockid": "1003681",
-    "companyid": "",
+    "companyid": "2077325",
     "tickertape_sid": "SYR",
     "fincode": 304549,
     "scripcode": 543573
@@ -8451,7 +8451,7 @@ const stockData: StockMapping[] = [
     "isin": "INE486R01017",
     "symbol": "GPTHEALTH",
     "stockid": "10039176",
-    "companyid": "",
+    "companyid": "59497",
     "tickertape_sid": "GPT",
     "fincode": 287257,
     "scripcode": 544131
@@ -8581,7 +8581,7 @@ const stockData: StockMapping[] = [
     "isin": "INE142M01025",
     "symbol": "TATATECH",
     "stockid": "10039079",
-    "companyid": "",
+    "companyid": "4612",
     "tickertape_sid": "TATAT",
     "fincode": 209420,
     "scripcode": 544028
@@ -8698,7 +8698,7 @@ const stockData: StockMapping[] = [
     "isin": "INE07K301024",
     "symbol": "ZAGGLE",
     "stockid": "10039006",
-    "companyid": "",
+    "companyid": "2078398",
     "tickertape_sid": "ZAG",
     "fincode": 308651,
     "scripcode": 543985
@@ -8760,7 +8760,7 @@ const stockData: StockMapping[] = [
     "isin": "INE0J1F01024",
     "symbol": "RPTECH",
     "stockid": "10039156",
-    "companyid": "",
+    "companyid": "2167089",
     "tickertape_sid": "RPT",
     "fincode": 211925,
     "scripcode": 544119
@@ -8799,7 +8799,7 @@ const stockData: StockMapping[] = [
     "isin": "INE281B01032",
     "symbol": "LLOYDSME",
     "stockid": "648388",
-    "companyid": "",
+    "companyid": "11671",
     "tickertape_sid": "LLO",
     "fincode": 112455,
     "scripcode": 512455
@@ -8824,7 +8824,7 @@ const stockData: StockMapping[] = [
     "isin": "INE615H01020",
     "symbol": "TITAGARH",
     "stockid": "221824",
-    "companyid": "",
+    "companyid": "21076",
     "tickertape_sid": "TITW",
     "fincode": 200115,
     "scripcode": 532966
@@ -8863,7 +8863,7 @@ const stockData: StockMapping[] = [
     "isin": "INE395N01027",
     "symbol": "TVSSCS",
     "stockid": "10038979",
-    "companyid": "",
+    "companyid": "20651",
     "tickertape_sid": "TVS",
     "fincode": 210903,
     "scripcode": 543965
@@ -9160,7 +9160,7 @@ const stockData: StockMapping[] = [
     "isin": "INE00ZE01026",
     "symbol": "TANFACIND",
     "stockid": "1003761",
-    "companyid": "",
+    "companyid": "12952",
     "tickertape_sid": "AHL",
     "fincode": 106854,
     "scripcode": 506854
@@ -9199,7 +9199,7 @@ const stockData: StockMapping[] = [
     "isin": "INE964W01021",
     "symbol": "MKPL",
     "stockid": "1002751",
-    "companyid": "",
+    "companyid": "65810",
     "tickertape_sid": "MKPR",
     "fincode": 285272,
     "scripcode": 543919
@@ -9225,7 +9225,7 @@ const stockData: StockMapping[] = [
     "isin": "INE024001021",
     "symbol": "AEROFLEX",
     "stockid": "10038985",
-    "companyid": "",
+    "companyid": "50401",
     "tickertape_sid": "AER",
     "fincode": 232356,
     "scripcode": 543972
@@ -9381,7 +9381,7 @@ const stockData: StockMapping[] = [
     "isin": "INE206F01022",
     "symbol": "AIIL",
     "stockid": "",
-    "companyid": "",
+    "companyid": "60439",
     "tickertape_sid": "AII",
     "fincode": 243036,
     "scripcode": 539177
@@ -9589,7 +9589,7 @@ const stockData: StockMapping[] = [
     "isin": "INE491J01022",
     "symbol": "ASKAUTOLTD",
     "stockid": "10039072",
-    "companyid": "",
+    "companyid": "38442",
     "tickertape_sid": "ASK",
     "fincode": 284503,
     "scripcode": 544022
@@ -9641,7 +9641,7 @@ const stockData: StockMapping[] = [
     "isin": "INE055S01018",
     "symbol": "CYIENTDLM",
     "stockid": "1003882",
-    "companyid": "",
+    "companyid": "61147",
     "tickertape_sid": "CYI",
     "fincode": 209063,
     "scripcode": 543933
@@ -9808,7 +9808,7 @@ const stockData: StockMapping[] = [
     "isin": "INE266F01018",
     "symbol": "APTECHT",
     "stockid": "360065",
-    "companyid": "",
+    "companyid": "2725",
     "tickertape_sid": "APTA",
     "fincode": 132475,
     "scripcode": 532475
@@ -9821,7 +9821,7 @@ const stockData: StockMapping[] = [
     "isin": "INE050401020",
     "symbol": "ELIN",
     "stockid": "1003768",
-    "companyid": "",
+    "companyid": "42466",
     "tickertape_sid": "ELIN",
     "fincode": 275037,
     "scripcode": 543725
@@ -9873,7 +9873,7 @@ const stockData: StockMapping[] = [
     "isin": "INE220Q01020",
     "symbol": "MUFTI",
     "stockid": "10039106",
-    "companyid": "",
+    "companyid": "49784",
     "tickertape_sid": "MUF",
     "fincode": 221669,
     "scripcode": 544058
@@ -9886,7 +9886,7 @@ const stockData: StockMapping[] = [
     "isin": "INE0LCL01028",
     "symbol": "AVALON",
     "stockid": "1003830",
-    "companyid": "",
+    "companyid": "1961339",
     "tickertape_sid": "AVAL",
     "fincode": 307061,
     "scripcode": 543896
@@ -9949,7 +9949,7 @@ const stockData: StockMapping[] = [
     "isin": "INE06H201014",
     "symbol": "GENSOL",
     "stockid": "1003282",
-    "companyid": "",
+    "companyid": "1948393",
     "tickertape_sid": "GEN",
     "fincode": 294928,
     "scripcode": 542851
@@ -10079,7 +10079,7 @@ const stockData: StockMapping[] = [
     "isin": "INE139R01012",
     "symbol": "FUSION",
     "stockid": "",
-    "companyid": "",
+    "companyid": "1997035",
     "tickertape_sid": "FUS",
     "fincode": 273557,
     "scripcode": 543652
@@ -10287,7 +10287,7 @@ const stockData: StockMapping[] = [
     "isin": "INE0NN701020",
     "symbol": "ATL",
     "stockid": "10038966",
-    "companyid": "",
+    "companyid": "2116783",
     "tickertape_sid": "ATT",
     "fincode": 310218,
     "scripcode": 543954
@@ -10300,7 +10300,7 @@ const stockData: StockMapping[] = [
     "isin": "INE00OQ01016",
     "symbol": "DHARMAJ",
     "stockid": "1003752",
-    "companyid": "",
+    "companyid": "2100382",
     "tickertape_sid": "DHARM",
     "fincode": 305121,
     "scripcode": 543687
@@ -10388,7 +10388,7 @@ const stockData: StockMapping[] = [
     "isin": "INE02YR01019",
     "symbol": "EMIL",
     "stockid": "1003726",
-    "companyid": "",
+    "companyid": "2096784",
     "tickertape_sid": "EMI",
     "fincode": 303575,
     "scripcode": 543626
@@ -10427,7 +10427,7 @@ const stockData: StockMapping[] = [
     "isin": "INE005B01027",
     "symbol": "AVANTEL",
     "stockid": "240589",
-    "companyid": "",
+    "companyid": "3786",
     "tickertape_sid": "AVA",
     "fincode": 132406,
     "scripcode": 532406
@@ -10479,7 +10479,7 @@ const stockData: StockMapping[] = [
     "isin": "INE510W01014",
     "symbol": "INOXGREEN",
     "stockid": "1003748",
-    "companyid": "",
+    "companyid": "61925",
     "tickertape_sid": "INOX",
     "fincode": 277585,
     "scripcode": 543667
@@ -10492,7 +10492,7 @@ const stockData: StockMapping[] = [
     "isin": "INE818W01011",
     "symbol": "ESAFSFB",
     "stockid": "10039069",
-    "companyid": "",
+    "companyid": "1967704",
     "tickertape_sid": "ESAF",
     "fincode": 287810,
     "scripcode": 544020
@@ -10593,7 +10593,7 @@ const stockData: StockMapping[] = [
     "isin": "INE922K01024",
     "symbol": "INDIASHLTR",
     "stockid": "10039095",
-    "companyid": "",
+    "companyid": "35750",
     "tickertape_sid": "INDIS",
     "fincode": 274038,
     "scripcode": 544044
@@ -10630,7 +10630,7 @@ const stockData: StockMapping[] = [
     "isin": "INE0LOJ01019",
     "symbol": "IKIO",
     "stockid": "1003863",
-    "companyid": "",
+    "companyid": "2126418",
     "tickertape_sid": "IKI",
     "fincode": 307731,
     "scripcode": 543923
@@ -10669,7 +10669,7 @@ const stockData: StockMapping[] = [
     "isin": "INE616N01034",
     "symbol": "INOXINDIA",
     "stockid": "10039097",
-    "companyid": "",
+    "companyid": "7484",
     "tickertape_sid": "INOXI",
     "fincode": 208433,
     "scripcode": 544046
@@ -10797,7 +10797,7 @@ const stockData: StockMapping[] = [
     "isin": "INE0JS101016",
     "symbol": "DREAMFOLKS",
     "stockid": "1003686",
-    "companyid": "",
+    "companyid": "2093818",
     "tickertape_sid": "DRE",
     "fincode": 305057,
     "scripcode": 543591
@@ -10927,7 +10927,7 @@ const stockData: StockMapping[] = [
     "isin": "INE717W01049",
     "symbol": "GANDHAR",
     "stockid": "",
-    "companyid": "",
+    "companyid": "40145",
     "tickertape_sid": "GAND",
     "fincode": 287199,
     "scripcode": 544029
@@ -10966,7 +10966,7 @@ const stockData: StockMapping[] = [
     "isin": "INE007N01010",
     "symbol": "FEDFINA",
     "stockid": "10039080",
-    "companyid": "",
+    "companyid": "15051",
     "tickertape_sid": "FEDF",
     "fincode": 221267,
     "scripcode": 544027
@@ -11095,7 +11095,7 @@ const stockData: StockMapping[] = [
     "isin": "INE0OV601013",
     "symbol": "EMSLIMITED",
     "stockid": "10039002",
-    "companyid": "",
+    "companyid": "59491",
     "tickertape_sid": "EMS",
     "fincode": 310103,
     "scripcode": 543983
@@ -11173,7 +11173,7 @@ const stockData: StockMapping[] = [
     "isin": "INE382M01027",
     "symbol": "BARBEQUE",
     "stockid": "",
-    "companyid": "",
+    "companyid": "23725",
     "tickertape_sid": "BARBE",
     "fincode": 123710,
     "scripcode": 523710
@@ -11273,7 +11273,7 @@ const stockData: StockMapping[] = [
     "isin": "INE02IJ01035",
     "symbol": "AZAD",
     "stockid": "10039110",
-    "companyid": "",
+    "companyid": "2154196",
     "tickertape_sid": "AZA",
     "fincode": 312314,
     "scripcode": 544061
@@ -11325,7 +11325,7 @@ const stockData: StockMapping[] = [
     "isin": "INE011E01029",
     "symbol": "BALUFORGE",
     "stockid": "530936",
-    "companyid": "",
+    "companyid": "7278",
     "tickertape_sid": "AMAZ",
     "fincode": 131112,
     "scripcode": 531112
@@ -11455,7 +11455,7 @@ const stockData: StockMapping[] = [
     "isin": "INE0JSX01015",
     "symbol": "GSLSU",
     "stockid": "1003814",
-    "companyid": "",
+    "companyid": "2106234",
     "tickertape_sid": "GSLSU",
     "fincode": 306563,
     "scripcode": 543829
@@ -11777,7 +11777,7 @@ const stockData: StockMapping[] = [
     "isin": "INE0PA801013",
     "symbol": "GHCLTEXTIL",
     "stockid": "1003860",
-    "companyid": "",
+    "companyid": "2012168",
     "tickertape_sid": "GHC",
     "fincode": 310497,
     "scripcode": 543918
@@ -12024,7 +12024,7 @@ const stockData: StockMapping[] = [
     "isin": "INE646B01010",
     "symbol": "MEDICAMEQ",
     "stockid": "770569",
-    "companyid": "",
+    "companyid": "7258",
     "tickertape_sid": "MEDI",
     "fincode": 131146,
     "scripcode": 531146
@@ -12037,7 +12037,7 @@ const stockData: StockMapping[] = [
     "isin": "INE093R01011",
     "symbol": "LLOYDSENGG",
     "stockid": "1002640",
-    "companyid": "",
+    "companyid": "64473",
     "tickertape_sid": "LSIL",
     "fincode": 282112,
     "scripcode": 539992
@@ -12102,7 +12102,7 @@ const stockData: StockMapping[] = [
     "isin": "INE0N2P01017",
     "symbol": "RISHABH",
     "stockid": "10038993",
-    "companyid": "",
+    "companyid": "50196",
     "tickertape_sid": "RISHA",
     "fincode": 223679,
     "scripcode": 543977
@@ -12219,7 +12219,7 @@ const stockData: StockMapping[] = [
     "isin": "INE109A01011",
     "symbol": "SCI",
     "stockid": "939216",
-    "companyid": "",
+    "companyid": "11972",
     "tickertape_sid": "SCI",
     "fincode": 123598,
     "scripcode": 523598
@@ -12271,7 +12271,7 @@ const stockData: StockMapping[] = [
     "isin": "INE559R01029",
     "symbol": "LANDMARK",
     "stockid": "1003760",
-    "companyid": "",
+    "companyid": "62553",
     "tickertape_sid": "LANDA",
     "fincode": 274083,
     "scripcode": 543714
@@ -12322,7 +12322,7 @@ const stockData: StockMapping[] = [
     "isin": "INE164B01022",
     "symbol": "KELLTONTEC",
     "stockid": "832122",
-    "companyid": "",
+    "companyid": "8336",
     "fincode": 119602,
     "scripcode": 519602
   },
@@ -12501,7 +12501,7 @@ const stockData: StockMapping[] = [
     "isin": "INE046W01019",
     "symbol": "MUTHOOTMF",
     "stockid": "10039101",
-    "companyid": "",
+    "companyid": "53100",
     "tickertape_sid": "MUT",
     "fincode": 283733,
     "scripcode": 544055
@@ -12553,7 +12553,7 @@ const stockData: StockMapping[] = [
     "isin": "INE0LXT01019",
     "symbol": "REDTAPE",
     "stockid": "10038970",
-    "companyid": "",
+    "companyid": "2095313",
     "tickertape_sid": "REDT",
     "fincode": 311589,
     "scripcode": 543957
@@ -12708,7 +12708,7 @@ const stockData: StockMapping[] = [
     "isin": "INE0KNT01012",
     "symbol": "MVGJL",
     "stockid": "10039024",
-    "companyid": "",
+    "companyid": "38190",
     "tickertape_sid": "MVG",
     "fincode": 255408,
     "scripcode": 543995
@@ -12927,7 +12927,7 @@ const stockData: StockMapping[] = [
     "isin": "INE342G01023",
     "symbol": "NIITMTS",
     "stockid": "10038964",
-    "companyid": "",
+    "companyid": "2128596",
     "tickertape_sid": "NII",
     "fincode": 224880,
     "scripcode": 543952
@@ -12966,7 +12966,7 @@ const stockData: StockMapping[] = [
     "isin": "INE888C01040",
     "symbol": "SADHNANIQ",
     "stockid": "835739",
-    "companyid": "",
+    "companyid": "13158",
     "tickertape_sid": "SADH",
     "fincode": 106642,
     "scripcode": 506642
@@ -13079,7 +13079,7 @@ const stockData: StockMapping[] = [
     "isin": "INE0BTI01037",
     "symbol": "KAMOPAINTS",
     "stockid": "1003783",
-    "companyid": "",
+    "companyid": "1997185",
     "tickertape_sid": "KAMO",
     "fincode": 307791,
     "scripcode": 543747
@@ -13234,7 +13234,7 @@ const stockData: StockMapping[] = [
     "isin": "INE771A01026",
     "symbol": "MIRZAINT",
     "stockid": "644231",
-    "companyid": "",
+    "companyid": "8965",
     "tickertape_sid": "MIRZ",
     "fincode": 126642,
     "scripcode": 526642
@@ -13338,7 +13338,7 @@ const stockData: StockMapping[] = [
     "isin": "INE596F01018",
     "symbol": "PTCIL",
     "stockid": "570311",
-    "companyid": "",
+    "companyid": "7565",
     "tickertape_sid": "PTC",
     "fincode": 244937,
     "scripcode": 539006
@@ -13351,7 +13351,7 @@ const stockData: StockMapping[] = [
     "isin": "INE149K01016",
     "symbol": "SANDUMA",
     "stockid": "843297",
-    "companyid": "",
+    "companyid": "11535",
     "tickertape_sid": "SANDU",
     "fincode": 104918,
     "scripcode": 504918
@@ -13468,7 +13468,7 @@ const stockData: StockMapping[] = [
     "isin": "INE602W01019",
     "symbol": "SENCO",
     "stockid": "1003887",
-    "companyid": "",
+    "companyid": "2137713",
     "fincode": 291807,
     "scripcode": 543936
   },
@@ -13839,7 +13839,7 @@ const stockData: StockMapping[] = [
     "isin": "INE074B01023",
     "symbol": "PARACABLES",
     "stockid": "712697",
-    "companyid": "",
+    "companyid": "7830",
     "tickertape_sid": "PCML",
     "fincode": 130555,
     "scripcode": 530555
@@ -13927,7 +13927,7 @@ const stockData: StockMapping[] = [
     "isin": "INE855R01021",
     "symbol": "RADIANTCMS",
     "stockid": "1003772",
-    "companyid": "",
+    "companyid": "2102154",
     "tickertape_sid": "RADIA",
     "fincode": 280362,
     "scripcode": 543732
@@ -13990,7 +13990,7 @@ const stockData: StockMapping[] = [
     "isin": "INE912T01018",
     "symbol": "RPEL",
     "stockid": "1002594",
-    "companyid": "",
+    "companyid": "64131",
     "tickertape_sid": "RPE",
     "fincode": 280526,
     "scripcode": 539837
@@ -14016,7 +14016,7 @@ const stockData: StockMapping[] = [
     "isin": "INE08U801020",
     "symbol": "SAMHI",
     "stockid": "10039005",
-    "companyid": "",
+    "companyid": "1986314",
     "tickertape_sid": "SAMH",
     "fincode": 295966,
     "scripcode": 543984
@@ -14169,7 +14169,7 @@ const stockData: StockMapping[] = [
     "isin": "INE244O01017",
     "symbol": "UNIPARTS",
     "stockid": "1003754",
-    "companyid": "",
+    "companyid": "2100436",
     "tickertape_sid": "UNIP",
     "fincode": 271022,
     "scripcode": 543689
@@ -14259,7 +14259,7 @@ const stockData: StockMapping[] = [
     "isin": "INE08NE01025",
     "symbol": "SANSTAR",
     "stockid": "10039324",
-    "companyid": "",
+    "companyid": "9917",
     "tickertape_sid": "SANST",
     "fincode": 313455,
     "scripcode": 544217
@@ -14298,7 +14298,7 @@ const stockData: StockMapping[] = [
     "isin": "INE673O01025",
     "symbol": "TBOTEK",
     "stockid": "10039247",
-    "companyid": "",
+    "companyid": "2198439",
     "tickertape_sid": "TBO",
     "fincode": 304682,
     "scripcode": 544174
@@ -14311,7 +14311,7 @@ const stockData: StockMapping[] = [
     "isin": "INE0HMF01019",
     "symbol": "TRACXN",
     "stockid": "1003730",
-    "companyid": "",
+    "companyid": "2021431",
     "tickertape_sid": "TRAC",
     "fincode": 303158,
     "scripcode": 543638
@@ -14389,7 +14389,7 @@ const stockData: StockMapping[] = [
     "isin": "INE09XN01023",
     "symbol": "AKUMS",
     "stockid": "10039335",
-    "companyid": "",
+    "companyid": "49337",
     "tickertape_sid": "AKU",
     "fincode": 214816,
     "scripcode": 544222
@@ -14402,7 +14402,7 @@ const stockData: StockMapping[] = [
     "isin": "INE735W01017",
     "symbol": "UTKARSHBNK",
     "stockid": "1003893",
-    "companyid": "",
+    "companyid": "1968301",
     "tickertape_sid": "UTK",
     "fincode": 288476,
     "scripcode": 543942
@@ -14415,7 +14415,7 @@ const stockData: StockMapping[] = [
     "isin": "INE893I01013",
     "symbol": "VASCONEQ",
     "stockid": "218868",
-    "companyid": "",
+    "companyid": "30972",
     "tickertape_sid": "VASC",
     "fincode": 212035,
     "scripcode": 533156
@@ -14518,7 +14518,7 @@ const stockData: StockMapping[] = [
     "isin": "INE763I01026",
     "symbol": "TARIL",
     "stockid": "346524",
-    "companyid": "",
+    "companyid": "20444",
     "tickertape_sid": "TRNF",
     "fincode": 200019,
     "scripcode": 532928
@@ -14554,7 +14554,7 @@ const stockData: StockMapping[] = [
     "isin": "INE0OAF01028",
     "symbol": "JNKINDIA",
     "stockid": "10039233",
-    "companyid": "",
+    "companyid": "2019106",
     "tickertape_sid": "JNK",
     "fincode": 311741,
     "scripcode": 544167
@@ -14593,7 +14593,7 @@ const stockData: StockMapping[] = [
     "isin": "INE108V01019",
     "symbol": "AWFIS",
     "stockid": "10039264",
-    "companyid": "",
+    "companyid": "2078659",
     "tickertape_sid": "AWF",
     "fincode": 313296,
     "scripcode": 544181
@@ -14606,7 +14606,7 @@ const stockData: StockMapping[] = [
     "isin": "INE843S01025",
     "symbol": "SURAJEST",
     "stockid": "10039102",
-    "companyid": "",
+    "companyid": "1965190",
     "tickertape_sid": "SURAE",
     "fincode": 305499,
     "scripcode": 544054
@@ -14632,7 +14632,7 @@ const stockData: StockMapping[] = [
     "isin": "INE0PQ101010",
     "symbol": "SSDL",
     "stockid": "10039351",
-    "companyid": "",
+    "companyid": "2223133",
     "tickertape_sid": "SSD",
     "fincode": 312316,
     "scripcode": 544230
@@ -14671,7 +14671,7 @@ const stockData: StockMapping[] = [
     "isin": "INE646H01017",
     "symbol": "CAPITALSFB",
     "stockid": "10039155",
-    "companyid": "",
+    "companyid": "18946",
     "tickertape_sid": "CAPI",
     "fincode": 207933,
     "scripcode": 544120
@@ -14710,7 +14710,7 @@ const stockData: StockMapping[] = [
     "isin": "INE841L01016",
     "symbol": "DEEDEV",
     "stockid": "10039284",
-    "companyid": "",
+    "companyid": "49658",
     "tickertape_sid": "DEED",
     "fincode": 223666,
     "scripcode": 544198
@@ -14736,7 +14736,7 @@ const stockData: StockMapping[] = [
     "isin": "INE03JT01014",
     "symbol": "GODIGIT",
     "stockid": "10039258",
-    "companyid": "",
+    "companyid": "2079718",
     "tickertape_sid": "GODIG",
     "fincode": 294914,
     "scripcode": 544179
@@ -14762,7 +14762,7 @@ const stockData: StockMapping[] = [
     "isin": "INE772T01024",
     "symbol": "PVSL",
     "stockid": "10039199",
-    "companyid": "",
+    "companyid": "50882",
     "tickertape_sid": "PVS",
     "fincode": 213800,
     "scripcode": 544144
@@ -14788,7 +14788,7 @@ const stockData: StockMapping[] = [
     "isin": "INE0JWS01017",
     "symbol": "VALIANTLAB",
     "stockid": "10039033",
-    "companyid": "",
+    "companyid": "2152583",
     "tickertape_sid": "VALIN",
     "fincode": 310852,
     "scripcode": 543998
@@ -14827,7 +14827,7 @@ const stockData: StockMapping[] = [
     "isin": "INE980O01024",
     "symbol": "JYOTICNC",
     "stockid": "10039127",
-    "companyid": "",
+    "companyid": "2162893",
     "tickertape_sid": "JYOTC",
     "fincode": 216065,
     "scripcode": 544081
@@ -14853,7 +14853,7 @@ const stockData: StockMapping[] = [
     "isin": "INE00M901018",
     "symbol": "INTERARCH",
     "stockid": "10039358",
-    "companyid": "",
+    "companyid": "49563",
     "tickertape_sid": "INTEI",
     "fincode": 210320,
     "scripcode": 544232
@@ -14866,7 +14866,7 @@ const stockData: StockMapping[] = [
     "isin": "INE883F01010",
     "symbol": "AADHARHFC",
     "stockid": "10039246",
-    "companyid": "",
+    "companyid": "34964",
     "tickertape_sid": "AADH",
     "fincode": 221661,
     "scripcode": 544176
@@ -14879,7 +14879,7 @@ const stockData: StockMapping[] = [
     "isin": "INE0LXG01040",
     "symbol": "OLAELEC",
     "stockid": "10039344",
-    "companyid": "",
+    "companyid": "2206544",
     "tickertape_sid": "OLAE",
     "fincode": 296367,
     "scripcode": 544225
@@ -14905,7 +14905,7 @@ const stockData: StockMapping[] = [
     "isin": "INE0Q3R01026",
     "symbol": "SUNCLAY",
     "stockid": "",
-    "companyid": "",
+    "companyid": "2027123",
     "tickertape_sid": "SUNCL",
     "fincode": 311720,
     "scripcode": 544066
@@ -14929,7 +14929,7 @@ const stockData: StockMapping[] = [
     "isin": "INE01A001028",
     "symbol": "STANLEY",
     "stockid": "10039293",
-    "companyid": "",
+    "companyid": "59746",
     "tickertape_sid": "STANL",
     "fincode": 311915,
     "scripcode": 544202
@@ -14942,7 +14942,7 @@ const stockData: StockMapping[] = [
     "isin": "INE0JR601024",
     "symbol": "YATRA",
     "stockid": "10039018",
-    "companyid": "",
+    "companyid": "2151841",
     "tickertape_sid": "YATR",
     "fincode": 221554,
     "scripcode": 543992
@@ -14955,7 +14955,7 @@ const stockData: StockMapping[] = [
     "isin": "INE0L9R01028",
     "symbol": "GOPAL",
     "stockid": "10039194",
-    "companyid": "",
+    "companyid": "40007",
     "tickertape_sid": "GOPAL",
     "fincode": 312884,
     "scripcode": 544140
@@ -14981,7 +14981,7 @@ const stockData: StockMapping[] = [
     "isin": "INE0HV901016",
     "symbol": "IXIGO",
     "stockid": "",
-    "companyid": "",
+    "companyid": "2151657",
     "tickertape_sid": "IXI",
     "fincode": 303125,
     "scripcode": 544192
@@ -15007,7 +15007,7 @@ const stockData: StockMapping[] = [
     "isin": "INE953L01027",
     "symbol": "JSFB",
     "stockid": "10039157",
-    "companyid": "",
+    "companyid": "36320",
     "tickertape_sid": "JSF",
     "fincode": 240461,
     "scripcode": 544118
@@ -15059,7 +15059,7 @@ const stockData: StockMapping[] = [
     "isin": "INE777F01014",
     "symbol": "EXICOM",
     "stockid": "10039180",
-    "companyid": "",
+    "companyid": "50352",
     "tickertape_sid": "EXI",
     "fincode": 220260,
     "scripcode": 544133
@@ -15072,7 +15072,7 @@ const stockData: StockMapping[] = [
     "isin": "INE0PPK01015",
     "symbol": "ORIENTTECH",
     "stockid": "10039364",
-    "companyid": "",
+    "companyid": "2206576",
     "tickertape_sid": "ORIE",
     "fincode": 314135,
     "scripcode": 544235
@@ -15085,7 +15085,7 @@ const stockData: StockMapping[] = [
     "isin": "INE0NQ801033",
     "symbol": "RKSWAMY",
     "stockid": "10039189",
-    "companyid": "",
+    "companyid": "53542",
     "tickertape_sid": "RKS",
     "fincode": 311640,
     "scripcode": 544136
@@ -15123,7 +15123,7 @@ const stockData: StockMapping[] = [
     "isin": "INE0MB501011",
     "symbol": "JGCHEM",
     "stockid": "",
-    "companyid": "",
+    "companyid": "39709",
     "tickertape_sid": "JGC",
     "fincode": 269816,
     "scripcode": 544138
@@ -15201,7 +15201,7 @@ const stockData: StockMapping[] = [
     "isin": "INE456Z01021",
     "symbol": "MEDIASSIST",
     "stockid": "10039132",
-    "companyid": "",
+    "companyid": "16414",
     "tickertape_sid": "MEDIS",
     "fincode": 229218,
     "scripcode": 544088
@@ -15214,7 +15214,7 @@ const stockData: StockMapping[] = [
     "isin": "INE0AG901020",
     "symbol": "CEIGALL",
     "stockid": "10039342",
-    "companyid": "",
+    "companyid": "1966952",
     "tickertape_sid": "CEIG",
     "fincode": 314345,
     "scripcode": 544223
@@ -15227,7 +15227,7 @@ const stockData: StockMapping[] = [
     "isin": "INE00U401027",
     "symbol": "UNIECOM",
     "stockid": "10039348",
-    "companyid": "",
+    "companyid": "2206563",
     "tickertape_sid": "UNIE",
     "fincode": 313495,
     "scripcode": 544227
@@ -15240,7 +15240,7 @@ const stockData: StockMapping[] = [
     "isin": "INE0BS701011",
     "symbol": "PREMIERENE",
     "stockid": "10039369",
-    "companyid": "",
+    "companyid": "2206533",
     "tickertape_sid": "PREMI",
     "fincode": 314935,
     "scripcode": 544238
@@ -15318,7 +15318,7 @@ const stockData: StockMapping[] = [
     "isin": "INE0ATZ01017",
     "symbol": "KRONOX",
     "stockid": "10039273",
-    "companyid": "",
+    "companyid": "2204941",
     "tickertape_sid": "KRON",
     "fincode": 312939,
     "scripcode": 544187
@@ -15331,7 +15331,7 @@ const stockData: StockMapping[] = [
     "isin": "INE552Z01027",
     "symbol": "ABDL",
     "stockid": "10039299",
-    "companyid": "",
+    "companyid": "39100",
     "tickertape_sid": "ABD",
     "fincode": 231440,
     "scripcode": 544203
@@ -15344,7 +15344,7 @@ const stockData: StockMapping[] = [
     "isin": "INE010601016",
     "symbol": "ENTERO",
     "stockid": "10039164",
-    "companyid": "",
+    "companyid": "1990623",
     "tickertape_sid": "ENTE",
     "fincode": 312105,
     "scripcode": 544122
@@ -15370,7 +15370,7 @@ const stockData: StockMapping[] = [
     "isin": "INE0O3901029",
     "symbol": "TREL",
     "stockid": "10038967",
-    "companyid": "",
+    "companyid": "2116779",
     "tickertape_sid": "TREL",
     "fincode": 310219,
     "scripcode": 543955
@@ -15396,7 +15396,7 @@ const stockData: StockMapping[] = [
     "isin": "INE696F01016",
     "symbol": "JUNIPER",
     "stockid": "10039175",
-    "companyid": "",
+    "companyid": "42992",
     "tickertape_sid": "JUN",
     "fincode": 254732,
     "scripcode": 544129
@@ -15409,7 +15409,7 @@ const stockData: StockMapping[] = [
     "isin": "INE0S2V01010",
     "symbol": "VRAJ",
     "stockid": "10039301",
-    "companyid": "",
+    "companyid": "2079972",
     "tickertape_sid": "VRA",
     "fincode": 313386,
     "scripcode": 544204
@@ -15448,7 +15448,7 @@ const stockData: StockMapping[] = [
     "isin": "INE851I01011",
     "symbol": "UDS",
     "stockid": "10039027",
-    "companyid": "",
+    "companyid": "45632",
     "tickertape_sid": "UDS",
     "fincode": 209521,
     "scripcode": 543996
@@ -15461,7 +15461,7 @@ const stockData: StockMapping[] = [
     "isin": "INE02RE01045",
     "symbol": "FIRSTCRY",
     "stockid": "10039347",
-    "companyid": "",
+    "companyid": "2077934",
     "tickertape_sid": "FIRS",
     "fincode": 294253,
     "scripcode": 544226
@@ -15474,7 +15474,7 @@ const stockData: StockMapping[] = [
     "isin": "INE0AE001013",
     "symbol": "VPRPL",
     "stockid": "10038987",
-    "companyid": "",
+    "companyid": "1963854",
     "tickertape_sid": "VPR",
     "fincode": 310205,
     "scripcode": 543974
@@ -15487,7 +15487,7 @@ const stockData: StockMapping[] = [
     "isin": "INE343G01021",
     "symbol": "BHARTIHEXA",
     "stockid": "10039226",
-    "companyid": "",
+    "companyid": "18654",
     "tickertape_sid": "BHARI",
     "fincode": 207872,
     "scripcode": 544162
@@ -15513,7 +15513,7 @@ const stockData: StockMapping[] = [
     "isin": "INE988S01028",
     "symbol": "PARKHOTELS",
     "stockid": "10039152",
-    "companyid": "",
+    "companyid": "49554",
     "tickertape_sid": "PARKH",
     "fincode": 209914,
     "scripcode": 544111
@@ -15526,7 +15526,7 @@ const stockData: StockMapping[] = [
     "isin": "INE0FRK01012",
     "symbol": "MOTISONS",
     "stockid": "10039103",
-    "companyid": "",
+    "companyid": "2161020",
     "fincode": 307709,
     "scripcode": 544053
   },
@@ -15590,7 +15590,7 @@ const stockData: StockMapping[] = [
     "isin": "INE0G5901015",
     "symbol": "EPACK",
     "stockid": "",
-    "companyid": "",
+    "companyid": "2165577",
     "tickertape_sid": "EPA",
     "fincode": 311638,
     "scripcode": 544095
@@ -15603,7 +15603,7 @@ const stockData: StockMapping[] = [
     "isin": "INE02H701025",
     "symbol": "NOVAAGRI",
     "stockid": "10039140",
-    "companyid": "",
+    "companyid": "2165666",
     "tickertape_sid": "NOVAA",
     "fincode": 292830,
     "scripcode": 544100
@@ -15642,7 +15642,7 @@ const stockData: StockMapping[] = [
     "isin": "INE168P01015",
     "symbol": "EMCURE",
     "stockid": "10039308",
-    "companyid": "",
+    "companyid": "50942",
     "tickertape_sid": "EMC",
     "fincode": 208099,
     "scripcode": 544210
@@ -15655,7 +15655,7 @@ const stockData: StockMapping[] = [
     "isin": "INE0QN801017",
     "symbol": "KRYSTAL",
     "stockid": "10039205",
-    "companyid": "",
+    "companyid": "1965682",
     "tickertape_sid": "KRYS",
     "fincode": 221138,
     "scripcode": 544149
@@ -15668,7 +15668,7 @@ const stockData: StockMapping[] = [
     "isin": "INE0CG401037",
     "symbol": "MUKKA",
     "stockid": "10039185",
-    "companyid": "",
+    "companyid": "42706",
     "tickertape_sid": "MUKK",
     "fincode": 305620,
     "scripcode": 544135
@@ -15681,7 +15681,7 @@ const stockData: StockMapping[] = [
     "isin": "INE885H01029",
     "symbol": "SPORTKING",
     "stockid": "248729",
-    "companyid": "",
+    "companyid": "6472",
     "tickertape_sid": "SPO",
     "fincode": 245147,
     "scripcode": 539221
@@ -15850,7 +15850,7 @@ const stockData: StockMapping[] = [
     "isin": "INE185E01021",
     "symbol": "FILATFASH",
     "stockid": "135324",
-    "companyid": "",
+    "companyid": "5713",
     "tickertape_sid": "FILA",
     "fincode": 132022,
     "scripcode": 532022
@@ -15889,7 +15889,7 @@ const stockData: StockMapping[] = [
     "isin": "INE0KCE01017",
     "symbol": "EUREKAFORB",
     "stockid": "1003614",
-    "companyid": "",
+    "companyid": "32431",
     "tickertape_sid": "EUREK",
     "fincode": 242153,
     "scripcode": 543482
@@ -15915,7 +15915,7 @@ const stockData: StockMapping[] = [
     "isin": "INE626A01014",
     "symbol": "SAURASHCEM",
     "stockid": "755243",
-    "companyid": "",
+    "companyid": "13148",
     "tickertape_sid": "SAUR",
     "fincode": 102175,
     "scripcode": 502175
@@ -15941,7 +15941,7 @@ const stockData: StockMapping[] = [
     "isin": "INE600Y01019",
     "symbol": "DYCL",
     "stockid": "1002895",
-    "companyid": "",
+    "companyid": "43553",
     "tickertape_sid": "DYN",
     "fincode": 287365,
     "scripcode": 540795
@@ -15967,7 +15967,7 @@ const stockData: StockMapping[] = [
     "isin": "INE095I01015",
     "symbol": "PPAP",
     "stockid": "727893",
-    "companyid": "",
+    "companyid": "20507",
     "tickertape_sid": "PPAP",
     "fincode": 200024,
     "scripcode": 532934
@@ -15980,7 +15980,7 @@ const stockData: StockMapping[] = [
     "isin": "INE251H01024",
     "symbol": "GVKPIL",
     "stockid": "421897",
-    "companyid": "",
+    "companyid": "16060",
     "tickertape_sid": "GVKP",
     "fincode": 132708,
     "scripcode": 532708
@@ -16044,7 +16044,7 @@ const stockData: StockMapping[] = [
     "isin": "INE325D01025",
     "symbol": "SINDHUTRAD",
     "stockid": "661429",
-    "companyid": "",
+    "companyid": "5803",
     "tickertape_sid": "SIN",
     "fincode": 132029,
     "scripcode": 532029
@@ -16057,7 +16057,7 @@ const stockData: StockMapping[] = [
     "isin": "INE195N01013",
     "symbol": "PROZONER",
     "stockid": "215741",
-    "companyid": "",
+    "companyid": "37676",
     "tickertape_sid": "PROZ",
     "fincode": 236038,
     "scripcode": 534675
@@ -16070,7 +16070,7 @@ const stockData: StockMapping[] = [
     "isin": "INE896L01010",
     "symbol": "INDOSTAR",
     "stockid": "1002983",
-    "companyid": "",
+    "companyid": "67869",
     "tickertape_sid": "INAC",
     "fincode": 233932,
     "scripcode": 541336
@@ -16096,7 +16096,7 @@ const stockData: StockMapping[] = [
     "isin": "INE442P01014",
     "symbol": "SUYOG",
     "stockid": "982071",
-    "companyid": "",
+    "companyid": "49507",
     "tickertape_sid": "SUY",
     "fincode": 250658,
     "scripcode": 537259
@@ -16109,7 +16109,7 @@ const stockData: StockMapping[] = [
     "isin": "INE353A01023",
     "symbol": "NDLVENTURE",
     "stockid": "713180",
-    "companyid": "",
+    "companyid": "5318",
     "tickertape_sid": "NXTD",
     "fincode": 100189,
     "scripcode": 500189
@@ -16160,7 +16160,7 @@ const stockData: StockMapping[] = [
     "isin": "INE551D01018",
     "symbol": "PAKKA",
     "stockid": "975884",
-    "companyid": "",
+    "companyid": "11155",
     "tickertape_sid": "YASHP",
     "fincode": 116030,
     "scripcode": 516030
@@ -16173,7 +16173,7 @@ const stockData: StockMapping[] = [
     "isin": "INE0KQN01018",
     "symbol": "BAJEL",
     "stockid": "10039093",
-    "companyid": "",
+    "companyid": "2151133",
     "tickertape_sid": "BAJEL",
     "fincode": 311991,
     "scripcode": 544042
@@ -16350,7 +16350,7 @@ const stockData: StockMapping[] = [
     "isin": "INE251C01025",
     "symbol": "ABMINTLLTD",
     "stockid": "",
-    "companyid": "",
+    "companyid": "2449",
     "tickertape_sid": "ABMN",
     "fincode": 224765,
     "scripcode": 0
@@ -16376,7 +16376,7 @@ const stockData: StockMapping[] = [
     "isin": "INE543V01017",
     "symbol": "ACEINTEG",
     "stockid": "1002780",
-    "companyid": "",
+    "companyid": "66301",
     "tickertape_sid": "ACEN",
     "fincode": 286680,
     "scripcode": 0
@@ -16389,7 +16389,7 @@ const stockData: StockMapping[] = [
     "isin": "INE0CHO01012",
     "symbol": "ADL",
     "stockid": "1003420",
-    "companyid": "",
+    "companyid": "1960882",
     "tickertape_sid": "ADL",
     "fincode": 300014,
     "scripcode": 543231
@@ -16478,7 +16478,7 @@ const stockData: StockMapping[] = [
     "isin": "INE00ZE01026",
     "symbol": "AHL",
     "stockid": "1003761",
-    "companyid": "",
+    "companyid": "5704",
     "tickertape_sid": "AHL",
     "fincode": 132811,
     "scripcode": 532811
@@ -16594,7 +16594,7 @@ const stockData: StockMapping[] = [
     "isin": "INE256Z01017",
     "symbol": "AKSHAR",
     "stockid": "1002988",
-    "companyid": "",
+    "companyid": "67886",
     "fincode": 289097,
     "scripcode": 541303
   },
@@ -16658,7 +16658,7 @@ const stockData: StockMapping[] = [
     "isin": "INE773I01017",
     "symbol": "ALKALI",
     "stockid": "885963",
-    "companyid": "",
+    "companyid": "22730",
     "tickertape_sid": "ALML",
     "fincode": 200059,
     "scripcode": 533029
@@ -16709,7 +16709,7 @@ const stockData: StockMapping[] = [
     "isin": "INE093B01015",
     "symbol": "ALPSINDUS",
     "stockid": "621626",
-    "companyid": "",
+    "companyid": "7696",
     "tickertape_sid": "ALPS"
   },
   {
@@ -16967,7 +16967,7 @@ const stockData: StockMapping[] = [
     "isin": "INE738V01013",
     "symbol": "ARTNIRMAN",
     "stockid": "1002674",
-    "companyid": "",
+    "companyid": "65140",
     "tickertape_sid": "ARTN",
     "fincode": 283192,
     "scripcode": 0
@@ -16980,7 +16980,7 @@ const stockData: StockMapping[] = [
     "isin": "INE006Z01016",
     "symbol": "ARVEE",
     "stockid": "1002931",
-    "companyid": "",
+    "companyid": "67493",
     "tickertape_sid": "ARVE",
     "fincode": 288419,
     "scripcode": 0
@@ -17032,7 +17032,7 @@ const stockData: StockMapping[] = [
     "isin": "INE855F01042",
     "symbol": "ASMS",
     "stockid": "873814",
-    "companyid": "",
+    "companyid": "16600",
     "tickertape_sid": "BARI",
     "fincode": 132694,
     "scripcode": 532694
@@ -17082,7 +17082,7 @@ const stockData: StockMapping[] = [
     "isin": "INE285H01022",
     "symbol": "ATLANTA",
     "stockid": "",
-    "companyid": "",
+    "companyid": "2256230",
     "tickertape_sid": "ATLT",
     "fincode": 288028,
     "scripcode": 544527
@@ -17134,7 +17134,7 @@ const stockData: StockMapping[] = [
     "isin": "INE323B01016",
     "symbol": "AVONMORE",
     "stockid": "",
-    "companyid": "",
+    "companyid": "10556",
     "fincode": 111589,
     "scripcode": 511589
   },
@@ -17146,7 +17146,7 @@ const stockData: StockMapping[] = [
     "isin": "INE652Z01017",
     "symbol": "AVROIND",
     "stockid": "1003029",
-    "companyid": "",
+    "companyid": "68605",
     "fincode": 289307,
     "scripcode": 543512
   },
@@ -17171,7 +17171,7 @@ const stockData: StockMapping[] = [
     "isin": "INE02EZ01022",
     "symbol": "AXITA",
     "stockid": "1003096",
-    "companyid": "",
+    "companyid": "1846694",
     "tickertape_sid": "AXI",
     "fincode": 293504,
     "scripcode": 542285
@@ -17197,7 +17197,7 @@ const stockData: StockMapping[] = [
     "isin": "INE878I01022",
     "symbol": "BAFNAPH",
     "stockid": "852453",
-    "companyid": "",
+    "companyid": "21408",
     "tickertape_sid": "BAFP",
     "fincode": 200062,
     "scripcode": 532989
@@ -17223,7 +17223,7 @@ const stockData: StockMapping[] = [
     "isin": "INE020D01022",
     "symbol": "BAIDFIN",
     "stockid": "343883",
-    "companyid": "",
+    "companyid": "8284",
     "tickertape_sid": "BALF",
     "fincode": 111724,
     "scripcode": 511724
@@ -17248,7 +17248,7 @@ const stockData: StockMapping[] = [
     "isin": "INE875R01011",
     "symbol": "BALKRISHNA",
     "stockid": "873940",
-    "companyid": "",
+    "companyid": "58232",
     "tickertape_sid": "BALK",
     "fincode": 274453,
     "scripcode": 539251
@@ -17261,7 +17261,7 @@ const stockData: StockMapping[] = [
     "isin": "INE294A01037",
     "symbol": "BALLARPUR",
     "stockid": "179698",
-    "companyid": ""
+    "companyid": "12477"
   },
   {
     "name": "Bal Pharma Limited",
@@ -17375,7 +17375,7 @@ const stockData: StockMapping[] = [
     "isin": "INE977Y01011",
     "symbol": "BCONCEPTS",
     "stockid": "1002906",
-    "companyid": "",
+    "companyid": "67367",
     "tickertape_sid": "BRAN",
     "fincode": 287986,
     "scripcode": 543442
@@ -17591,7 +17591,7 @@ const stockData: StockMapping[] = [
     "isin": "INE802W01023",
     "symbol": "BOHRAIND",
     "stockid": "229206",
-    "companyid": "",
+    "companyid": "35822",
     "tickertape_sid": "BOHA",
     "fincode": 227291,
     "scripcode": 0
@@ -17630,7 +17630,7 @@ const stockData: StockMapping[] = [
     "isin": "INE032Z01020",
     "symbol": "BSHSL",
     "stockid": "1002975",
-    "companyid": "",
+    "companyid": "67848",
     "tickertape_sid": "BOBA",
     "fincode": 288684,
     "scripcode": 544757
@@ -17643,7 +17643,7 @@ const stockData: StockMapping[] = [
     "isin": "INE594B01012",
     "symbol": "BSL",
     "stockid": "912834",
-    "companyid": "",
+    "companyid": "13965",
     "tickertape_sid": "BSLL",
     "fincode": 114045,
     "scripcode": 514045
@@ -17656,7 +17656,7 @@ const stockData: StockMapping[] = [
     "isin": "INE0EEJ01015",
     "symbol": "BTML",
     "stockid": "1003437",
-    "companyid": "",
+    "companyid": "1993684",
     "fincode": 300034,
     "scripcode": 543767
   },
@@ -17861,7 +17861,7 @@ const stockData: StockMapping[] = [
     "isin": "INE981B01011",
     "symbol": "CMICABLES",
     "stockid": "726136",
-    "companyid": "",
+    "companyid": "10789",
     "tickertape_sid": "CMI",
     "fincode": 117330,
     "scripcode": 517330
@@ -17951,7 +17951,7 @@ const stockData: StockMapping[] = [
     "isin": "INE695B01025",
     "symbol": "COUNCODOS",
     "stockid": "",
-    "companyid": "",
+    "companyid": "6143",
     "tickertape_sid": "COCO",
     "fincode": 131624,
     "scripcode": 531624
@@ -17977,7 +17977,7 @@ const stockData: StockMapping[] = [
     "isin": "INE230B01021",
     "symbol": "CREATIVEYE",
     "stockid": "195849",
-    "companyid": "",
+    "companyid": "3637",
     "tickertape_sid": "CEYE",
     "fincode": 132392,
     "scripcode": 532392
@@ -18003,7 +18003,7 @@ const stockData: StockMapping[] = [
     "isin": "INE491V01019",
     "symbol": "CROWN",
     "stockid": "1002655",
-    "companyid": "",
+    "companyid": "65036",
     "tickertape_sid": "CROW",
     "fincode": 282862,
     "scripcode": 0
@@ -18016,7 +18016,7 @@ const stockData: StockMapping[] = [
     "isin": "INE718F01018",
     "symbol": "CSLFINANCE",
     "stockid": "452071",
-    "companyid": "",
+    "companyid": "7674",
     "tickertape_sid": "CSLF",
     "fincode": 130067,
     "scripcode": 530067
@@ -18132,7 +18132,7 @@ const stockData: StockMapping[] = [
     "isin": "INE0A1101019",
     "symbol": "DCI",
     "stockid": "1003365",
-    "companyid": "",
+    "companyid": "1959661",
     "tickertape_sid": "DCIN",
     "fincode": 295850,
     "scripcode": 543636
@@ -18197,7 +18197,7 @@ const stockData: StockMapping[] = [
     "isin": "INE0KL801015",
     "symbol": "DCXINDIA",
     "stockid": "1003733",
-    "companyid": "",
+    "companyid": "2099122",
     "tickertape_sid": "DCX",
     "fincode": 305814,
     "scripcode": 543650
@@ -18246,7 +18246,7 @@ const stockData: StockMapping[] = [
     "isin": "INE060X01026",
     "symbol": "DEVIT",
     "stockid": "1002748",
-    "companyid": "",
+    "companyid": "65818",
     "fincode": 285304,
     "scripcode": 543462
   },
@@ -18333,7 +18333,7 @@ const stockData: StockMapping[] = [
     "isin": "INE731U01028",
     "symbol": "DIGJAMLMTD",
     "stockid": "1002634",
-    "companyid": "",
+    "companyid": "63084",
     "tickertape_sid": "DIGJ",
     "fincode": 282016,
     "scripcode": 539979
@@ -18359,7 +18359,7 @@ const stockData: StockMapping[] = [
     "isin": "INE0B1K01014",
     "symbol": "DJML",
     "stockid": "",
-    "companyid": "",
+    "companyid": "1984613",
     "tickertape_sid": "DJM",
     "fincode": 297816,
     "scripcode": 543193
@@ -18437,7 +18437,7 @@ const stockData: StockMapping[] = [
     "isin": "INE03RS01027",
     "symbol": "DRCSYSTEMS",
     "stockid": "1003468",
-    "companyid": "",
+    "companyid": "1992395",
     "tickertape_sid": "DRC",
     "fincode": 301577,
     "scripcode": 543268
@@ -18476,7 +18476,7 @@ const stockData: StockMapping[] = [
     "isin": "INE741L01018",
     "symbol": "DUCON",
     "stockid": "865541",
-    "companyid": "",
+    "companyid": "32988",
     "tickertape_sid": "DUCO",
     "fincode": 228688,
     "scripcode": 534674
@@ -18526,7 +18526,7 @@ const stockData: StockMapping[] = [
     "isin": "INE216H01027",
     "symbol": "EDUCOMP",
     "stockid": "873525",
-    "companyid": "",
+    "companyid": "17739",
     "tickertape_sid": "EDSO",
     "fincode": 132696,
     "scripcode": 532696
@@ -18591,7 +18591,7 @@ const stockData: StockMapping[] = [
     "isin": "INE819L01012",
     "symbol": "ELGIRUBCO",
     "stockid": "1003288",
-    "companyid": "",
+    "companyid": "34404",
     "tickertape_sid": "ELGT",
     "fincode": 190023,
     "scripcode": 590023
@@ -18656,7 +18656,7 @@ const stockData: StockMapping[] = [
     "isin": "INE217G01035",
     "symbol": "EQUIPPP",
     "stockid": "694240",
-    "companyid": "",
+    "companyid": "14829",
     "tickertape_sid": "PROS",
     "fincode": 190057,
     "scripcode": 590057
@@ -18694,7 +18694,7 @@ const stockData: StockMapping[] = [
     "isin": "INE418N01035",
     "symbol": "ESSENTIA",
     "stockid": "917529",
-    "companyid": "",
+    "companyid": "46554",
     "tickertape_sid": "INGA",
     "fincode": 246727,
     "scripcode": 535958
@@ -18707,7 +18707,7 @@ const stockData: StockMapping[] = [
     "isin": "INE688J01023",
     "symbol": "EXCEL",
     "stockid": "213048",
-    "companyid": "",
+    "companyid": "13778",
     "tickertape_sid": "EXCE",
     "fincode": 100650,
     "scripcode": 500650
@@ -18785,7 +18785,7 @@ const stockData: StockMapping[] = [
     "isin": "INE060J01017",
     "symbol": "FLEXITUFF",
     "stockid": "968175",
-    "companyid": "",
+    "companyid": "34719",
     "tickertape_sid": "FLEI",
     "fincode": 208168,
     "scripcode": 533638
@@ -18798,7 +18798,7 @@ const stockData: StockMapping[] = [
     "isin": "INE452O01016",
     "symbol": "FLFL",
     "stockid": "226533",
-    "companyid": "",
+    "companyid": "47561",
     "tickertape_sid": "FLFL",
     "fincode": 245775,
     "scripcode": 536507
@@ -18836,7 +18836,7 @@ const stockData: StockMapping[] = [
     "isin": "INE976E01023",
     "symbol": "FOODSIN",
     "stockid": "",
-    "companyid": "",
+    "companyid": "13791",
     "tickertape_sid": "FOO",
     "fincode": 107552,
     "scripcode": 507552
@@ -18861,7 +18861,7 @@ const stockData: StockMapping[] = [
     "isin": "INE935Q01015",
     "symbol": "FSC",
     "stockid": "1002886",
-    "companyid": ""
+    "companyid": "49560"
   },
   {
     "name": "Gyscoal Alloys Limited",
@@ -18871,7 +18871,7 @@ const stockData: StockMapping[] = [
     "isin": "INE482J01021",
     "symbol": "GAL",
     "stockid": "774113",
-    "companyid": "",
+    "companyid": "15271",
     "tickertape_sid": "GYSC",
     "fincode": 132726,
     "scripcode": 532726
@@ -18936,7 +18936,7 @@ const stockData: StockMapping[] = [
     "isin": "INE336H01023",
     "symbol": "GAYAPROJ",
     "stockid": "527252",
-    "companyid": "",
+    "companyid": "18530",
     "tickertape_sid": "GAPR",
     "fincode": 132767,
     "scripcode": 532767
@@ -19049,7 +19049,7 @@ const stockData: StockMapping[] = [
     "isin": "INE540A01017",
     "symbol": "GLFL",
     "stockid": "813834",
-    "companyid": "",
+    "companyid": "12666",
     "tickertape_sid": "GLSE",
     "fincode": 100174,
     "scripcode": 500174
@@ -19124,7 +19124,7 @@ const stockData: StockMapping[] = [
     "isin": "INE516K01024",
     "symbol": "GOENKA",
     "stockid": "334366",
-    "companyid": "",
+    "companyid": "31151",
     "tickertape_sid": "GOEN",
     "fincode": 219475,
     "scripcode": 533189
@@ -19150,7 +19150,7 @@ const stockData: StockMapping[] = [
     "isin": "INE973A01010",
     "symbol": "GOLDENTOBC",
     "stockid": "255597",
-    "companyid": "",
+    "companyid": "13739",
     "tickertape_sid": "GLDN",
     "fincode": 100151,
     "scripcode": 500151
@@ -19176,7 +19176,7 @@ const stockData: StockMapping[] = [
     "isin": "INE705X01018",
     "symbol": "GOYALALUM",
     "stockid": "1002961",
-    "companyid": "",
+    "companyid": "67656",
     "fincode": 288403,
     "scripcode": 541152
   },
@@ -19201,7 +19201,7 @@ const stockData: StockMapping[] = [
     "isin": "INE137I01015",
     "symbol": "GRPLTD",
     "stockid": "761882",
-    "companyid": "",
+    "companyid": "11759",
     "tickertape_sid": "GRPI",
     "fincode": 109152,
     "scripcode": 509152
@@ -19263,7 +19263,7 @@ const stockData: StockMapping[] = [
     "isin": "INE610B01024",
     "symbol": "GUJRAFFIA",
     "stockid": "994857",
-    "companyid": "",
+    "companyid": "11091",
     "tickertape_sid": "GJRI",
     "fincode": 123836,
     "scripcode": 523836
@@ -19289,7 +19289,7 @@ const stockData: StockMapping[] = [
     "isin": "INE293B01029",
     "symbol": "HAVISHA",
     "stockid": "612343",
-    "companyid": "",
+    "companyid": "6940",
     "tickertape_sid": "SRIS",
     "fincode": 131322,
     "scripcode": 531322
@@ -19366,7 +19366,7 @@ const stockData: StockMapping[] = [
     "isin": "INE558R01013",
     "symbol": "HECPROJECT",
     "stockid": "448610",
-    "companyid": "",
+    "companyid": "58921",
     "tickertape_sid": "HECF",
     "fincode": 272575,
     "scripcode": 0
@@ -19392,7 +19392,7 @@ const stockData: StockMapping[] = [
     "isin": "INE788H01017",
     "symbol": "HILTON",
     "stockid": "622289",
-    "companyid": "",
+    "companyid": "15821",
     "tickertape_sid": "HILT",
     "fincode": 132847,
     "scripcode": 532847
@@ -19482,7 +19482,7 @@ const stockData: StockMapping[] = [
     "isin": "INE262A01018",
     "symbol": "HMT",
     "stockid": "122880",
-    "companyid": "",
+    "companyid": "11937",
     "tickertape_sid": "HMTL",
     "fincode": 100191,
     "scripcode": 500191
@@ -19506,7 +19506,7 @@ const stockData: StockMapping[] = [
     "isin": "INE05X901010",
     "symbol": "HPIL",
     "stockid": "1003374",
-    "companyid": "",
+    "companyid": "1960112",
     "tickertape_sid": "HINP",
     "fincode": 295957,
     "scripcode": 543645
@@ -19532,7 +19532,7 @@ const stockData: StockMapping[] = [
     "isin": "INE965B01022",
     "symbol": "HYBRIDFIN",
     "stockid": "910960",
-    "companyid": "",
+    "companyid": "9390",
     "tickertape_sid": "MFCL",
     "fincode": 100262,
     "scripcode": 500262
@@ -19545,7 +19545,7 @@ const stockData: StockMapping[] = [
     "isin": "INE613B01010",
     "symbol": "ICDSLTD",
     "stockid": "915447",
-    "companyid": "",
+    "companyid": "12123",
     "tickertape_sid": "ICDS",
     "fincode": 111194,
     "scripcode": 511194
@@ -19571,7 +19571,7 @@ const stockData: StockMapping[] = [
     "isin": "INE059901020",
     "symbol": "IEL",
     "stockid": "1003763",
-    "companyid": ""
+    "companyid": "1959996"
   },
   {
     "name": "IFB Agro Industries Limited",
@@ -19607,7 +19607,7 @@ const stockData: StockMapping[] = [
     "isin": "INE369I01014",
     "symbol": "IL&FSENGG",
     "stockid": "",
-    "companyid": "",
+    "companyid": "19811",
     "tickertape_sid": "ILFE",
     "fincode": 132907,
     "scripcode": 532907
@@ -19620,7 +19620,7 @@ const stockData: StockMapping[] = [
     "isin": "INE975G01012",
     "symbol": "IL&FSTRANS",
     "stockid": "",
-    "companyid": "",
+    "companyid": "31106",
     "tickertape_sid": "ILFT",
     "fincode": 210277,
     "scripcode": 533177
@@ -19646,7 +19646,7 @@ const stockData: StockMapping[] = [
     "isin": "INE691G01015",
     "symbol": "IMPEXFERRO",
     "stockid": "623272",
-    "companyid": "",
+    "companyid": "16155",
     "tickertape_sid": "IMFT",
     "fincode": 132614,
     "scripcode": 532614
@@ -19659,7 +19659,7 @@ const stockData: StockMapping[] = [
     "isin": "INE452L01012",
     "symbol": "INCREDIBLE",
     "stockid": "180856",
-    "companyid": "",
+    "companyid": "45181",
     "tickertape_sid": "ADNK",
     "fincode": 242786,
     "scripcode": 538365
@@ -19722,7 +19722,7 @@ const stockData: StockMapping[] = [
     "isin": "INE337M01013",
     "symbol": "INDOTHAI",
     "stockid": "698412",
-    "companyid": "",
+    "companyid": "34724",
     "fincode": 224777,
     "scripcode": 533676
   },
@@ -19734,7 +19734,7 @@ const stockData: StockMapping[] = [
     "isin": "INE227G01018",
     "symbol": "INDOWIND",
     "stockid": "948844",
-    "companyid": "",
+    "companyid": "728",
     "tickertape_sid": "INWI",
     "fincode": 132894,
     "scripcode": 532894
@@ -19747,7 +19747,7 @@ const stockData: StockMapping[] = [
     "isin": "INE681B01017",
     "symbol": "INDRAMEDCO",
     "stockid": "131877",
-    "companyid": "",
+    "companyid": "5015",
     "tickertape_sid": "IMCL",
     "fincode": 132150,
     "scripcode": 532150
@@ -19971,7 +19971,7 @@ const stockData: StockMapping[] = [
     "isin": "INE696V01013",
     "symbol": "JAIPURKURT",
     "stockid": "1002670",
-    "companyid": "",
+    "companyid": "65127",
     "tickertape_sid": "NANA",
     "fincode": 283136,
     "scripcode": 0
@@ -20048,7 +20048,7 @@ const stockData: StockMapping[] = [
     "isin": "INE863T01013",
     "symbol": "JITFINFRA",
     "stockid": "",
-    "companyid": "",
+    "companyid": "38397",
     "tickertape_sid": "JITF",
     "fincode": 254723,
     "scripcode": 540311
@@ -20110,7 +20110,7 @@ const stockData: StockMapping[] = [
     "isin": "INE197A01024",
     "symbol": "JYOTISTRUC",
     "stockid": "179129",
-    "companyid": "",
+    "companyid": "13510",
     "tickertape_sid": "JYTS",
     "fincode": 113250,
     "scripcode": 513250
@@ -20136,7 +20136,7 @@ const stockData: StockMapping[] = [
     "isin": "INE314G01014",
     "symbol": "KALYANIFRG",
     "stockid": "348836",
-    "companyid": "",
+    "companyid": "10386",
     "tickertape_sid": "KALF",
     "fincode": 113509,
     "scripcode": 513509
@@ -20188,7 +20188,7 @@ const stockData: StockMapping[] = [
     "isin": "INE542Z01010",
     "symbol": "KAPSTON",
     "stockid": "1002958",
-    "companyid": "",
+    "companyid": "67726",
     "fincode": 288679,
     "scripcode": 0
   },
@@ -20200,7 +20200,7 @@ const stockData: StockMapping[] = [
     "isin": "INE725L01011",
     "symbol": "KARMAENG",
     "stockid": "821308",
-    "companyid": "",
+    "companyid": "34118",
     "tickertape_sid": "KRME",
     "fincode": 208532,
     "scripcode": 533451
@@ -20299,7 +20299,7 @@ const stockData: StockMapping[] = [
     "isin": "INE055C01020",
     "symbol": "KEEPLEARN",
     "stockid": "696375",
-    "companyid": "",
+    "companyid": "8962",
     "tickertape_sid": "DLCM",
     "fincode": 126677,
     "scripcode": 526677
@@ -20312,7 +20312,7 @@ const stockData: StockMapping[] = [
     "isin": "INE202H01019",
     "symbol": "KERNEX",
     "stockid": "199297",
-    "companyid": "",
+    "companyid": "17732",
     "tickertape_sid": "KMIL",
     "fincode": 132686,
     "scripcode": 532686
@@ -20351,7 +20351,7 @@ const stockData: StockMapping[] = [
     "isin": "INE731C01018",
     "symbol": "KHAITANLTD",
     "stockid": "914916",
-    "companyid": "",
+    "companyid": "11209",
     "tickertape_sid": "KHAI",
     "fincode": 190068,
     "scripcode": 590068
@@ -20364,7 +20364,7 @@ const stockData: StockMapping[] = [
     "isin": "INE060B01014",
     "symbol": "KHANDSE",
     "stockid": "574241",
-    "companyid": "",
+    "companyid": "5814",
     "tickertape_sid": "KHSE",
     "fincode": 131892,
     "scripcode": 531892
@@ -20506,7 +20506,7 @@ const stockData: StockMapping[] = [
     "isin": "INE798K01010",
     "symbol": "KRITINUT",
     "stockid": "398540",
-    "companyid": "",
+    "companyid": "31535",
     "tickertape_sid": "KRIT",
     "fincode": 220919,
     "scripcode": 533210
@@ -20532,7 +20532,7 @@ const stockData: StockMapping[] = [
     "isin": "INE013801027",
     "symbol": "KSHITIJPOL",
     "stockid": "1003062",
-    "companyid": "",
+    "companyid": "69077",
     "tickertape_sid": "KSHT",
     "fincode": 290216,
     "scripcode": 0
@@ -20558,7 +20558,7 @@ const stockData: StockMapping[] = [
     "isin": "INE651C01018",
     "symbol": "LAKPRE",
     "stockid": "356564",
-    "companyid": "",
+    "companyid": "13445",
     "tickertape_sid": "LXPR",
     "fincode": 106079,
     "scripcode": 506079
@@ -20623,7 +20623,7 @@ const stockData: StockMapping[] = [
     "isin": "INE500X01013",
     "symbol": "LEXUS",
     "stockid": "1002813",
-    "companyid": "",
+    "companyid": "60222",
     "tickertape_sid": "LEXU",
     "fincode": 287018,
     "scripcode": 0
@@ -20713,7 +20713,7 @@ const stockData: StockMapping[] = [
     "isin": "INE947I01017",
     "symbol": "LOTUSEYE",
     "stockid": "959118",
-    "companyid": "",
+    "companyid": "21510",
     "tickertape_sid": "LOTS",
     "fincode": 200080,
     "scripcode": 532998
@@ -20739,7 +20739,7 @@ const stockData: StockMapping[] = [
     "isin": "INE970D01010",
     "symbol": "LOYALTEX",
     "stockid": "504152",
-    "companyid": "",
+    "companyid": "11420",
     "tickertape_sid": "LOYA",
     "fincode": 114036,
     "scripcode": 514036
@@ -21024,7 +21024,7 @@ const stockData: StockMapping[] = [
     "isin": "INE784W01015",
     "symbol": "MANOMAY",
     "stockid": "1002735",
-    "companyid": "",
+    "companyid": "65700",
     "tickertape_sid": "MAN",
     "fincode": 284678,
     "scripcode": 540396
@@ -21076,7 +21076,7 @@ const stockData: StockMapping[] = [
     "isin": "INE01JE01028",
     "symbol": "MARINE",
     "stockid": "1003069",
-    "companyid": "",
+    "companyid": "69078",
     "tickertape_sid": "MARN",
     "fincode": 291578,
     "scripcode": 0
@@ -21102,7 +21102,7 @@ const stockData: StockMapping[] = [
     "isin": "INE00SZ01018",
     "symbol": "MARSHALL",
     "stockid": "1003046",
-    "companyid": "",
+    "companyid": "68856",
     "tickertape_sid": "MARH",
     "fincode": 290577,
     "scripcode": 0
@@ -21115,7 +21115,7 @@ const stockData: StockMapping[] = [
     "isin": "INE885F01015",
     "symbol": "MASKINVEST",
     "stockid": "1002677",
-    "companyid": "",
+    "companyid": "5004",
     "tickertape_sid": "MASK",
     "fincode": 283341,
     "scripcode": 0
@@ -21176,7 +21176,7 @@ const stockData: StockMapping[] = [
     "isin": "INE900L01010",
     "symbol": "MBAPL",
     "stockid": "222901",
-    "companyid": "",
+    "companyid": "50475",
     "fincode": 213513,
     "scripcode": 0
   },
@@ -21188,7 +21188,7 @@ const stockData: StockMapping[] = [
     "isin": "INE912H01013",
     "symbol": "MBLINFRA",
     "stockid": "348482",
-    "companyid": "",
+    "companyid": "30660",
     "tickertape_sid": "MBLI",
     "fincode": 219780,
     "scripcode": 533152
@@ -21214,7 +21214,7 @@ const stockData: StockMapping[] = [
     "isin": "INE630Y01024",
     "symbol": "MEDICO",
     "stockid": "1002925",
-    "companyid": "",
+    "companyid": "67439",
     "tickertape_sid": "MED",
     "fincode": 216273,
     "scripcode": 540937
@@ -21251,7 +21251,7 @@ const stockData: StockMapping[] = [
     "isin": "INE817A01019",
     "symbol": "MELSTAR",
     "stockid": "636447",
-    "companyid": "",
+    "companyid": "67947",
     "tickertape_sid": "MELS",
     "fincode": 132307,
     "scripcode": 532307
@@ -21314,7 +21314,7 @@ const stockData: StockMapping[] = [
     "isin": "INE287C01037",
     "symbol": "MICEL",
     "stockid": "202021",
-    "companyid": "",
+    "companyid": "18167",
     "tickertape_sid": "MELC",
     "fincode": 132850,
     "scripcode": 532850
@@ -21378,7 +21378,7 @@ const stockData: StockMapping[] = [
     "isin": "INE832A01018",
     "symbol": "MODIRUBBER",
     "stockid": "477828",
-    "companyid": "",
+    "companyid": "13388",
     "tickertape_sid": "MODI",
     "fincode": 100890,
     "scripcode": 500890
@@ -21469,7 +21469,7 @@ const stockData: StockMapping[] = [
     "isin": "INE861B01023",
     "symbol": "MOTOGENFIN",
     "stockid": "",
-    "companyid": "",
+    "companyid": "11437",
     "tickertape_sid": "MGF",
     "fincode": 101343,
     "scripcode": 501343
@@ -21506,7 +21506,7 @@ const stockData: StockMapping[] = [
     "isin": "INE472M01018",
     "symbol": "MTEDUCARE",
     "stockid": "239041",
-    "companyid": "",
+    "companyid": "37726",
     "tickertape_sid": "MTED",
     "fincode": 210518,
     "scripcode": 534312
@@ -21610,7 +21610,7 @@ const stockData: StockMapping[] = [
     "isin": "INE117Z01011",
     "symbol": "NARMADA",
     "stockid": "1002962",
-    "companyid": "",
+    "companyid": "67768",
     "tickertape_sid": "NARD",
     "fincode": 288692,
     "scripcode": 543643
@@ -21723,7 +21723,7 @@ const stockData: StockMapping[] = [
     "isin": "INE747B01016",
     "symbol": "NEXTMEDIA",
     "stockid": "289782",
-    "companyid": "",
+    "companyid": "2610",
     "tickertape_sid": "NEXM",
     "fincode": 132416,
     "scripcode": 532416
@@ -21749,7 +21749,7 @@ const stockData: StockMapping[] = [
     "isin": "INE887E01022",
     "symbol": "NGLFINE",
     "stockid": "",
-    "companyid": "",
+    "companyid": "8412",
     "tickertape_sid": "NGL",
     "fincode": 124774,
     "scripcode": 524774
@@ -21801,7 +21801,7 @@ const stockData: StockMapping[] = [
     "isin": "INE395U01014",
     "symbol": "NINSYS",
     "stockid": "1002601",
-    "companyid": "",
+    "companyid": "64118",
     "tickertape_sid": "NIN",
     "fincode": 280473,
     "scripcode": 539843
@@ -21892,7 +21892,7 @@ const stockData: StockMapping[] = [
     "isin": "INE369C01017",
     "symbol": "NORBTEAEXP",
     "stockid": "",
-    "companyid": "",
+    "companyid": "9155",
     "tickertape_sid": "NTE",
     "fincode": 119528,
     "scripcode": 519528
@@ -22135,7 +22135,7 @@ const stockData: StockMapping[] = [
     "isin": "INE00IK01011",
     "symbol": "OSWALSEEDS",
     "stockid": "1003010",
-    "companyid": "",
+    "companyid": "68073",
     "fincode": 289048,
     "scripcode": 0
   },
@@ -22147,7 +22147,7 @@ const stockData: StockMapping[] = [
     "isin": "INE471W01019",
     "symbol": "PALASHSECU",
     "stockid": "1002799",
-    "companyid": "",
+    "companyid": "61454",
     "tickertape_sid": "PAAS",
     "fincode": 286953,
     "scripcode": 540648
@@ -22173,7 +22173,7 @@ const stockData: StockMapping[] = [
     "isin": "INE895W01019",
     "symbol": "PANACHE",
     "stockid": "1002754",
-    "companyid": "",
+    "companyid": "65829",
     "tickertape_sid": "PNAC",
     "fincode": 285514,
     "scripcode": 0
@@ -22225,7 +22225,7 @@ const stockData: StockMapping[] = [
     "isin": "INE162C01024",
     "symbol": "PARASPETRO",
     "stockid": "517022",
-    "companyid": "",
+    "companyid": "8497",
     "tickertape_sid": "PARP",
     "fincode": 121246,
     "scripcode": 521246
@@ -22290,7 +22290,7 @@ const stockData: StockMapping[] = [
     "isin": "INE844A01013",
     "symbol": "PEARLPOLY",
     "stockid": "891282",
-    "companyid": "",
+    "companyid": "13304",
     "tickertape_sid": "PRLP",
     "fincode": 123260,
     "scripcode": 523260
@@ -22329,7 +22329,7 @@ const stockData: StockMapping[] = [
     "isin": "INE431F01018",
     "symbol": "PKTEA",
     "stockid": "",
-    "companyid": "",
+    "companyid": "12483",
     "tickertape_sid": "PERI",
     "fincode": 219224,
     "scripcode": 0
@@ -22368,7 +22368,7 @@ const stockData: StockMapping[] = [
     "isin": "INE063E01046",
     "symbol": "POCL",
     "stockid": "",
-    "companyid": "",
+    "companyid": "6304",
     "fincode": 132626,
     "scripcode": 532626
   },
@@ -22484,7 +22484,7 @@ const stockData: StockMapping[] = [
     "isin": "INE342A01018",
     "symbol": "PREMIER",
     "stockid": "548487",
-    "companyid": "",
+    "companyid": "2206533",
     "tickertape_sid": "PRMI",
     "fincode": 100540,
     "scripcode": 500540
@@ -22532,7 +22532,7 @@ const stockData: StockMapping[] = [
     "isin": "INE974Z01015",
     "symbol": "PRITI",
     "stockid": "1003005",
-    "companyid": "",
+    "companyid": "68082",
     "tickertape_sid": "PRNI",
     "fincode": 288695,
     "scripcode": 0
@@ -22571,7 +22571,7 @@ const stockData: StockMapping[] = [
     "isin": "INE583V01013",
     "symbol": "RADHIKAJWE",
     "stockid": "1002667",
-    "companyid": "",
+    "companyid": "65062",
     "fincode": 282602,
     "scripcode": 540125
   },
@@ -22609,7 +22609,7 @@ const stockData: StockMapping[] = [
     "isin": "INE533D01032",
     "symbol": "RAJRILTD",
     "stockid": "535009",
-    "companyid": "",
+    "companyid": "7718",
     "tickertape_sid": "RRAY",
     "fincode": 130699,
     "scripcode": 530699
@@ -22635,7 +22635,7 @@ const stockData: StockMapping[] = [
     "isin": "INE952H01027",
     "symbol": "RAJTV",
     "stockid": "895687",
-    "companyid": "",
+    "companyid": "15767",
     "tickertape_sid": "RATV",
     "fincode": 132826,
     "scripcode": 532826
@@ -22648,7 +22648,7 @@ const stockData: StockMapping[] = [
     "isin": "INE809A01024",
     "symbol": "RAMAPHO",
     "stockid": "264094",
-    "companyid": "",
+    "companyid": "12770",
     "fincode": 124037,
     "scripcode": 524037
   },
@@ -22685,7 +22685,7 @@ const stockData: StockMapping[] = [
     "isin": "INE277C01012",
     "symbol": "REGENCERAM",
     "stockid": "283494",
-    "companyid": "",
+    "companyid": "13184",
     "tickertape_sid": "REGC",
     "fincode": 115018,
     "scripcode": 515018
@@ -22845,7 +22845,7 @@ const stockData: StockMapping[] = [
     "isin": "INE294G01026",
     "symbol": "ROML",
     "stockid": "697859",
-    "companyid": "",
+    "companyid": "29155",
     "tickertape_sid": "RAJS",
     "fincode": 209040,
     "scripcode": 533093
@@ -22922,7 +22922,7 @@ const stockData: StockMapping[] = [
     "isin": "INE413B01023",
     "symbol": "RUCHINFRA",
     "stockid": "933424",
-    "companyid": "",
+    "companyid": "7748",
     "tickertape_sid": "RUCH",
     "fincode": 109020,
     "scripcode": 509020
@@ -22961,7 +22961,7 @@ const stockData: StockMapping[] = [
     "isin": "INE860T01019",
     "symbol": "SABEVENTS",
     "stockid": "",
-    "companyid": "",
+    "companyid": "63176",
     "tickertape_sid": "SABV",
     "fincode": 282920,
     "scripcode": 540081
@@ -22984,7 +22984,7 @@ const stockData: StockMapping[] = [
     "isin": "INE226H01026",
     "symbol": "SADBHAV",
     "stockid": "577653",
-    "companyid": "",
+    "companyid": "17871",
     "tickertape_sid": "SADE",
     "fincode": 132710,
     "scripcode": 532710
@@ -23023,7 +23023,7 @@ const stockData: StockMapping[] = [
     "isin": "INE035801013",
     "symbol": "SAH",
     "stockid": "1003779",
-    "companyid": "",
+    "companyid": "2122927",
     "tickertape_sid": "SSH",
     "fincode": 132841,
     "scripcode": 532841
@@ -23140,7 +23140,7 @@ const stockData: StockMapping[] = [
     "isin": "INE782L01012",
     "symbol": "SANCO",
     "stockid": "277774",
-    "companyid": ""
+    "companyid": "50526"
   },
   {
     "name": "The Sandesh Limited",
@@ -23176,7 +23176,7 @@ const stockData: StockMapping[] = [
     "isin": "INE890C01046",
     "symbol": "SANWARIA",
     "stockid": "592543",
-    "companyid": "",
+    "companyid": "10766",
     "tickertape_sid": "SNWR",
     "fincode": 119260,
     "scripcode": 519260
@@ -23214,7 +23214,7 @@ const stockData: StockMapping[] = [
     "isin": "INE04AK01028",
     "symbol": "SBC",
     "stockid": "1003152",
-    "companyid": "",
+    "companyid": "1943952",
     "tickertape_sid": "SBC",
     "fincode": 295145,
     "scripcode": 542725
@@ -23238,7 +23238,7 @@ const stockData: StockMapping[] = [
     "isin": "INE501Y01019",
     "symbol": "SCPL",
     "stockid": "1002870",
-    "companyid": "",
+    "companyid": "67086",
     "tickertape_sid": "SCP",
     "fincode": 287353,
     "scripcode": 540757
@@ -23277,7 +23277,7 @@ const stockData: StockMapping[] = [
     "isin": "INE955I01044",
     "symbol": "SEJALLTD",
     "stockid": "693903",
-    "companyid": "",
+    "companyid": "21481",
     "tickertape_sid": "SEZA",
     "fincode": 200109,
     "scripcode": 532993
@@ -23301,7 +23301,7 @@ const stockData: StockMapping[] = [
     "isin": "INE105I01020",
     "symbol": "SELMC",
     "stockid": "347964",
-    "companyid": "",
+    "companyid": "19820",
     "tickertape_sid": "SELM",
     "fincode": 132886,
     "scripcode": 532886
@@ -23325,7 +23325,7 @@ const stockData: StockMapping[] = [
     "isin": "INE807F01027",
     "symbol": "SEQUENT",
     "stockid": "213056",
-    "companyid": "",
+    "companyid": "3782",
     "tickertape_sid": "SEQU"
   },
   {
@@ -23336,7 +23336,7 @@ const stockData: StockMapping[] = [
     "isin": "INE782X01025",
     "symbol": "SERVOTECH",
     "stockid": "1002803",
-    "companyid": "",
+    "companyid": "66667",
     "fincode": 287004,
     "scripcode": 0
   },
@@ -23361,7 +23361,7 @@ const stockData: StockMapping[] = [
     "isin": "INE023M01027",
     "symbol": "SETUINFRA",
     "stockid": "375640",
-    "companyid": "",
+    "companyid": "34681",
     "tickertape_sid": "SETU",
     "fincode": 224224,
     "scripcode": 533605
@@ -23374,7 +23374,7 @@ const stockData: StockMapping[] = [
     "isin": "INE573R01012",
     "symbol": "SEYAIND",
     "stockid": "168969",
-    "companyid": "",
+    "companyid": "10806",
     "tickertape_sid": "SEYA",
     "fincode": 124324,
     "scripcode": 524324
@@ -23540,7 +23540,7 @@ const stockData: StockMapping[] = [
     "isin": "INE632X01030",
     "symbol": "SHRENIK",
     "stockid": "1002783",
-    "companyid": "",
+    "companyid": "66320",
     "tickertape_sid": "SHRK",
     "fincode": 286684,
     "scripcode": 0
@@ -23566,7 +23566,7 @@ const stockData: StockMapping[] = [
     "isin": "INE526E01018",
     "symbol": "SHRIPISTON",
     "stockid": "",
-    "companyid": "",
+    "companyid": "12521",
     "tickertape_sid": "SHIE",
     "fincode": 218771,
     "scripcode": 544344
@@ -23605,7 +23605,7 @@ const stockData: StockMapping[] = [
     "isin": "INE112X01017",
     "symbol": "SIKKO",
     "stockid": "1002752",
-    "companyid": "",
+    "companyid": "65828",
     "fincode": 285499,
     "scripcode": 0
   },
@@ -23617,7 +23617,7 @@ const stockData: StockMapping[] = [
     "isin": "INE173A01025",
     "symbol": "SIL",
     "stockid": "478090",
-    "companyid": "",
+    "companyid": "56433",
     "tickertape_sid": "STDI",
     "fincode": 130017,
     "scripcode": 530017
@@ -23656,7 +23656,7 @@ const stockData: StockMapping[] = [
     "isin": "INE203Y01012",
     "symbol": "SILLYMONKS",
     "stockid": "1002911",
-    "companyid": "",
+    "companyid": "67378",
     "tickertape_sid": "SILL",
     "fincode": 288090,
     "scripcode": 0
@@ -23707,7 +23707,7 @@ const stockData: StockMapping[] = [
     "isin": "INE129Z01016",
     "symbol": "SINTERCOM",
     "stockid": "1002916",
-    "companyid": "",
+    "companyid": "67460",
     "tickertape_sid": "SINE",
     "fincode": 213563,
     "scripcode": 0
@@ -23745,7 +23745,7 @@ const stockData: StockMapping[] = [
     "isin": "INE01IU01018",
     "symbol": "SKYGOLD",
     "stockid": "1003056",
-    "companyid": "",
+    "companyid": "69033",
     "tickertape_sid": "SKY",
     "fincode": 291768,
     "scripcode": 541967
@@ -23795,7 +23795,7 @@ const stockData: StockMapping[] = [
     "isin": "INE314C01013",
     "symbol": "SOMATEX",
     "stockid": "",
-    "companyid": "",
+    "companyid": "10765",
     "tickertape_sid": "SOMA",
     "fincode": 121034,
     "scripcode": 521034
@@ -23844,7 +23844,7 @@ const stockData: StockMapping[] = [
     "isin": "INE970N01027",
     "symbol": "SPCENET",
     "stockid": "528940",
-    "companyid": "",
+    "companyid": "48326",
     "tickertape_sid": "SACE",
     "fincode": 240542,
     "scripcode": 0
@@ -23916,7 +23916,7 @@ const stockData: StockMapping[] = [
     "isin": "INE008Z01012",
     "symbol": "SRPL",
     "stockid": "1002913",
-    "companyid": "",
+    "companyid": "67425",
     "fincode": 288281,
     "scripcode": 0
   },
@@ -23941,7 +23941,7 @@ const stockData: StockMapping[] = [
     "isin": "INE992I01013",
     "symbol": "STARTECK",
     "stockid": "827956",
-    "companyid": "",
+    "companyid": "4021",
     "tickertape_sid": "START",
     "fincode": 112381,
     "scripcode": 512381
@@ -23980,7 +23980,7 @@ const stockData: StockMapping[] = [
     "isin": "INE235C01010",
     "symbol": "SUMEETINDS",
     "stockid": "763883",
-    "companyid": "",
+    "companyid": "11079",
     "fincode": 114211,
     "scripcode": 514211
   },
@@ -23992,7 +23992,7 @@ const stockData: StockMapping[] = [
     "isin": "INE748Z01013",
     "symbol": "SUMIT",
     "stockid": "1003044",
-    "companyid": "",
+    "companyid": "68876",
     "tickertape_sid": "SUMW",
     "fincode": 289795,
     "scripcode": 0
@@ -24159,7 +24159,7 @@ const stockData: StockMapping[] = [
     "isin": "INE312C01025",
     "symbol": "SYNCOMF",
     "stockid": "831770",
-    "companyid": "",
+    "companyid": "10559",
     "tickertape_sid": "SYN",
     "fincode": 124470,
     "scripcode": 524470
@@ -24172,7 +24172,7 @@ const stockData: StockMapping[] = [
     "isin": "INE123C01018",
     "symbol": "TAINWALCHM",
     "stockid": "",
-    "companyid": "",
+    "companyid": "12942",
     "tickertape_sid": "TAIN",
     "fincode": 107785,
     "scripcode": 507785
@@ -24208,7 +24208,7 @@ const stockData: StockMapping[] = [
     "isin": "INE747K01017",
     "symbol": "TARAPUR",
     "stockid": "328541",
-    "companyid": "",
+    "companyid": "19322",
     "tickertape_sid": "TARA",
     "fincode": 219867,
     "scripcode": 533203
@@ -24378,7 +24378,7 @@ const stockData: StockMapping[] = [
     "isin": "INE480M01011",
     "symbol": "THOMASCOTT",
     "stockid": "",
-    "companyid": "",
+    "companyid": "36066",
     "tickertape_sid": "TSIL",
     "fincode": 231259,
     "scripcode": 533941
@@ -24402,7 +24402,7 @@ const stockData: StockMapping[] = [
     "isin": "INE440L01017",
     "symbol": "TIJARIA",
     "stockid": "749080",
-    "companyid": "",
+    "companyid": "34697",
     "tickertape_sid": "TIJA",
     "fincode": 212022,
     "scripcode": 533629
@@ -24415,7 +24415,7 @@ const stockData: StockMapping[] = [
     "isin": "INE806C01018",
     "symbol": "TIL",
     "stockid": "813379",
-    "companyid": "",
+    "companyid": "12951",
     "tickertape_sid": "TILL",
     "fincode": 105196,
     "scripcode": 505196
@@ -24449,7 +24449,7 @@ const stockData: StockMapping[] = [
     "isin": "INE0LQS01015",
     "symbol": "TIPSFILMS",
     "stockid": "1003711",
-    "companyid": "",
+    "companyid": "2043393",
     "tickertape_sid": "TIP",
     "fincode": 307729,
     "scripcode": 543614
@@ -24475,7 +24475,7 @@ const stockData: StockMapping[] = [
     "isin": "INE668A01016",
     "symbol": "TMB",
     "stockid": "1003695",
-    "companyid": "",
+    "companyid": "4520",
     "tickertape_sid": "TMB",
     "fincode": 209400,
     "scripcode": 543596
@@ -24488,7 +24488,7 @@ const stockData: StockMapping[] = [
     "isin": "INE141D01018",
     "symbol": "TNTELE",
     "stockid": "",
-    "companyid": "",
+    "companyid": "11283",
     "tickertape_sid": "TAMT",
     "fincode": 123419,
     "scripcode": 523419
@@ -24527,7 +24527,7 @@ const stockData: StockMapping[] = [
     "isin": "INE486Y01013",
     "symbol": "TOUCHWOOD",
     "stockid": "1002902",
-    "companyid": "",
+    "companyid": "67288",
     "tickertape_sid": "TOUC",
     "fincode": 287831,
     "scripcode": 0
@@ -24617,7 +24617,7 @@ const stockData: StockMapping[] = [
     "isin": "INE871L01013",
     "symbol": "TVVISION",
     "stockid": "511138",
-    "companyid": "",
+    "companyid": "29943",
     "tickertape_sid": "TVVI",
     "fincode": 224650,
     "scripcode": 540083
@@ -24643,7 +24643,7 @@ const stockData: StockMapping[] = [
     "isin": "INE899L01022",
     "symbol": "UJAAS",
     "stockid": "774710",
-    "companyid": "",
+    "companyid": "34720",
     "fincode": 223170,
     "scripcode": 533644
   },
@@ -24729,7 +24729,7 @@ const stockData: StockMapping[] = [
     "isin": "INE368U01011",
     "symbol": "UNITEDPOLY",
     "stockid": "1002628",
-    "companyid": "",
+    "companyid": "64259",
     "fincode": 281243,
     "scripcode": 544756
   },
@@ -24920,7 +24920,7 @@ const stockData: StockMapping[] = [
     "isin": "INE159N01027",
     "symbol": "VIJIFIN",
     "stockid": "281926",
-    "companyid": "",
+    "companyid": "6074",
     "tickertape_sid": "VIJI",
     "fincode": 244586,
     "scripcode": 537820
@@ -24972,7 +24972,7 @@ const stockData: StockMapping[] = [
     "isin": "INE01KI01027",
     "symbol": "VINNY",
     "stockid": "1003071",
-    "companyid": "",
+    "companyid": "69082",
     "tickertape_sid": "VINN",
     "fincode": 291872,
     "scripcode": 543670
@@ -24998,7 +24998,7 @@ const stockData: StockMapping[] = [
     "isin": "INE946H01037",
     "symbol": "VIPULLTD",
     "stockid": "973227",
-    "companyid": "",
+    "companyid": "8030",
     "tickertape_sid": "VIPL",
     "fincode": 111726,
     "scripcode": 511726
@@ -25084,7 +25084,7 @@ const stockData: StockMapping[] = [
     "isin": "INE107F01022",
     "symbol": "WANBURY",
     "stockid": "965190",
-    "companyid": "",
+    "companyid": "12103",
     "tickertape_sid": "WANB",
     "fincode": 124212,
     "scripcode": 524212
@@ -25223,7 +25223,7 @@ const stockData: StockMapping[] = [
     "isin": "INE215F01023",
     "symbol": "WIPL",
     "stockid": "",
-    "companyid": "",
+    "companyid": "11451",
     "tickertape_sid": "WEIP",
     "fincode": 222407,
     "scripcode": 0
@@ -25249,7 +25249,7 @@ const stockData: StockMapping[] = [
     "isin": "INE100D01014",
     "symbol": "WSI",
     "stockid": "",
-    "companyid": "",
+    "companyid": "12806",
     "tickertape_sid": "WSIN",
     "fincode": 104220,
     "scripcode": 504220
@@ -25312,7 +25312,7 @@ const stockData: StockMapping[] = [
     "isin": "INE058B01018",
     "symbol": "ZENITHEXPO",
     "stockid": "697086",
-    "companyid": "",
+    "companyid": "8933",
     "tickertape_sid": "ZENX",
     "fincode": 112553,
     "scripcode": 512553
@@ -25338,7 +25338,7 @@ const stockData: StockMapping[] = [
     "isin": "INE518E01015",
     "symbol": "ZIMLAB",
     "stockid": "1000979",
-    "companyid": "",
+    "companyid": "7639",
     "tickertape_sid": "ZIM",
     "fincode": 227768,
     "scripcode": 541400
@@ -25445,7 +25445,7 @@ const stockData: StockMapping[] = [
     "isin": "",
     "symbol": "MRUTR",
     "stockid": "",
-    "companyid": ""
+    "companyid": "4012"
   },
   {
     "name": "COVIDH",
@@ -25455,7 +25455,7 @@ const stockData: StockMapping[] = [
     "isin": "",
     "symbol": "COVIDH",
     "stockid": "",
-    "companyid": ""
+    "companyid": "5348"
   },
   {
     "name": "CHEMIESYNT",
@@ -25465,7 +25465,7 @@ const stockData: StockMapping[] = [
     "isin": "",
     "symbol": "CHEMIESYNT",
     "stockid": "",
-    "companyid": "",
+    "companyid": "6660",
     "fincode": 245869,
     "scripcode": 539230
   },
@@ -25477,7 +25477,7 @@ const stockData: StockMapping[] = [
     "isin": "",
     "symbol": "ZHEMHOLD",
     "stockid": "",
-    "companyid": ""
+    "companyid": "4009"
   },
   {
     "name": "OSWALEA",
@@ -25487,7 +25487,7 @@ const stockData: StockMapping[] = [
     "isin": "",
     "symbol": "OSWALEA",
     "stockid": "",
-    "companyid": ""
+    "companyid": "4014"
   },
   {
     "name": "HARIGCRANK",
@@ -25519,7 +25519,7 @@ const stockData: StockMapping[] = [
     "isin": "",
     "symbol": "SHENTRACON",
     "stockid": "",
-    "companyid": "",
+    "companyid": "7622",
     "fincode": 130757,
     "scripcode": 530757
   },
@@ -25531,7 +25531,7 @@ const stockData: StockMapping[] = [
     "isin": "",
     "symbol": "SHRIAHIMSA",
     "stockid": "",
-    "companyid": "",
+    "companyid": "2257670",
     "fincode": 316993,
     "scripcode": 0
   },
@@ -25543,7 +25543,7 @@ const stockData: StockMapping[] = [
     "isin": "",
     "symbol": "ENRIN",
     "stockid": "",
-    "companyid": "",
+    "companyid": "2258438",
     "fincode": 320028,
     "scripcode": 544390
   },
@@ -25555,7 +25555,7 @@ const stockData: StockMapping[] = [
     "isin": "",
     "symbol": "MUFIN",
     "stockid": "",
-    "companyid": "",
+    "companyid": "67150",
     "fincode": 295952,
     "scripcode": 542774
   },
@@ -25567,7 +25567,7 @@ const stockData: StockMapping[] = [
     "isin": "",
     "symbol": "WOL3D",
     "stockid": "",
-    "companyid": "",
+    "companyid": "2230507",
     "fincode": 315202,
     "scripcode": 0
   },
@@ -25579,7 +25579,7 @@ const stockData: StockMapping[] = [
     "isin": "",
     "symbol": "RATEGAIN",
     "stockid": "",
-    "companyid": "",
+    "companyid": "2020311",
     "fincode": 303157,
     "scripcode": 543417
   },
@@ -25601,7 +25601,7 @@ const stockData: StockMapping[] = [
     "isin": "",
     "symbol": "STRATMONT",
     "stockid": "",
-    "companyid": "",
+    "companyid": "4949",
     "fincode": 130495,
     "scripcode": 530495
   },
@@ -25613,7 +25613,7 @@ const stockData: StockMapping[] = [
     "isin": "",
     "symbol": "KOPRAN",
     "stockid": "",
-    "companyid": "",
+    "companyid": "11077",
     "fincode": 124280,
     "scripcode": 524280
   },
@@ -25625,7 +25625,7 @@ const stockData: StockMapping[] = [
     "isin": "",
     "symbol": "PANCHSHEEL",
     "stockid": "",
-    "companyid": "",
+    "companyid": "6036",
     "fincode": 131726,
     "scripcode": 531726
   },
@@ -25637,7 +25637,7 @@ const stockData: StockMapping[] = [
     "isin": "",
     "symbol": "WOCKPHARMA",
     "stockid": "",
-    "companyid": "",
+    "companyid": "3731",
     "fincode": 132300,
     "scripcode": 532300
   },
@@ -25649,7 +25649,7 @@ const stockData: StockMapping[] = [
     "isin": "",
     "symbol": "GVT&D",
     "stockid": "",
-    "companyid": "",
+    "companyid": "13800",
     "fincode": 122275,
     "scripcode": 522275
   },
@@ -25661,7 +25661,7 @@ const stockData: StockMapping[] = [
     "isin": "",
     "symbol": "PRSNTIN",
     "stockid": "",
-    "companyid": ""
+    "companyid": "13278"
   }
 ];
 
