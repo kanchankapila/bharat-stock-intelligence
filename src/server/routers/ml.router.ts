@@ -164,7 +164,9 @@ export const mlRouter = router({
         ROUND(AVG(uso.return_pct), 2) AS avg_return`;
       const base = `
         FROM unified_signal_outcomes uso
-        LEFT JOIN market_regimes mr ON mr.date = uso.signal_date
+        -- signal_date is stored in mixed formats ('YYYY-MM-DD' and 'YYYY-MM-DD HH:MM:SS+00');
+        -- normalise to the 10-char date so the regime join matches either way.
+        LEFT JOIN market_regimes mr ON mr.date = substr(uso.signal_date, 1, 10)
         WHERE uso.outcome IN ('WIN','LOSS','NEUTRAL','STOP_LOSS')
           AND uso.return_pct IS NOT NULL
           AND uso.signal_date >= ?`;
