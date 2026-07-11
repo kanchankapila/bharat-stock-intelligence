@@ -74,10 +74,26 @@ def ensure_schema(con) -> None:
 
     for ddl in [
         "ALTER TABLE tl_financial_quality ADD COLUMN fetched_at TEXT DEFAULT CURRENT_TIMESTAMP",
+        # Ratio-harvest columns: the Ratio/CashFlow payloads we already fetch expose ~40 ratios
+        # over 5 years and we only read interestCoverage. Harvest the orthogonal-to-
+        # fundamentals_history ones (which already has ROE/D-E/margins/growth): ROCE + its YoY
+        # trend, quick ratio, EV/EBITDA, asset turnover, CFO growth.
+        "ALTER TABLE tl_financial_quality ADD COLUMN roce           REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN roce_trend     REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN quick_ratio    REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN ev_ebitda      REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN asset_turnover REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN cfo_growth     REAL",
         "ALTER TABLE technical_signals ADD COLUMN fcf_yield_approx   REAL",
         "ALTER TABLE technical_signals ADD COLUMN interest_coverage  REAL",
         "ALTER TABLE technical_signals ADD COLUMN fcf_positive       INTEGER",
         "ALTER TABLE technical_signals ADD COLUMN debt_coverage_risk INTEGER",
+        "ALTER TABLE technical_signals ADD COLUMN roce               REAL",
+        "ALTER TABLE technical_signals ADD COLUMN roce_trend         REAL",
+        "ALTER TABLE technical_signals ADD COLUMN quick_ratio        REAL",
+        "ALTER TABLE technical_signals ADD COLUMN ev_ebitda          REAL",
+        "ALTER TABLE technical_signals ADD COLUMN asset_turnover     REAL",
+        "ALTER TABLE technical_signals ADD COLUMN cfo_growth         REAL",
     ]:
         try:
             cur.execute(ddl)
@@ -113,6 +129,17 @@ def compute_ratios(
     # these values are only written onto signal rows dated after the results were published.
     year_ending = (cashflow[0].get("yearEnding") if cashflow else None) or (ratio[0].get("yearEnding") if ratio else None)
 
+    # ── Ratio harvest (same payload, previously discarded) ──────────────────────────
+    r0 = ratio[0] if ratio else {}
+    r1 = ratio[1] if ratio and len(ratio) > 1 else {}
+    roce = _num(r0.get("roce"))
+    roce_prev = _num(r1.get("roce"))
+    roce_trend = round(roce - roce_prev, 2) if roce is not None and roce_prev is not None else None
+    quick_ratio = _num(r0.get("quickRatio"))
+    ev_ebitda = _num(r0.get("evPerEBITDA"))
+    asset_turnover = _num(r0.get("assetTurnover"))
+    cfo_growth = _num(cashflow[0].get("cfoGrowth")) if cashflow else None
+
     fcf_ttm_approx: float | None = None
     if cfo is not None and cfi is not None:
         fcf_ttm_approx = round(float(cfo) + float(cfi), 2)
@@ -137,6 +164,12 @@ def compute_ratios(
         "fcf_positive": fcf_positive,
         "debt_coverage_risk": debt_coverage_risk,
         "year_ending": year_ending,
+        "roce": round(roce, 2) if roce is not None else None,
+        "roce_trend": roce_trend,
+        "quick_ratio": round(quick_ratio, 2) if quick_ratio is not None else None,
+        "ev_ebitda": round(ev_ebitda, 2) if ev_ebitda is not None else None,
+        "asset_turnover": round(asset_turnover, 2) if asset_turnover is not None else None,
+        "cfo_growth": round(cfo_growth, 2) if cfo_growth is not None else None,
     }
 
 
@@ -147,8 +180,9 @@ def upsert_quality(symbol: str, today: str, row: dict, con) -> None:
     cur.execute("""
         INSERT INTO tl_financial_quality
             (symbol, as_of_date, cfo_ttm, cfi_ttm, fcf_ttm_approx,
-             interest_coverage, market_cap, fcf_yield_approx)
-        VALUES (?,?,?,?,?,?,?,?)
+             interest_coverage, market_cap, fcf_yield_approx,
+             roce, roce_trend, quick_ratio, ev_ebitda, asset_turnover, cfo_growth)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(symbol, as_of_date) DO UPDATE SET
             cfo_ttm            = excluded.cfo_ttm,
             cfi_ttm            = excluded.cfi_ttm,
@@ -156,11 +190,19 @@ def upsert_quality(symbol: str, today: str, row: dict, con) -> None:
             interest_coverage  = excluded.interest_coverage,
             market_cap         = excluded.market_cap,
             fcf_yield_approx   = excluded.fcf_yield_approx,
+            roce               = excluded.roce,
+            roce_trend         = excluded.roce_trend,
+            quick_ratio        = excluded.quick_ratio,
+            ev_ebitda          = excluded.ev_ebitda,
+            asset_turnover     = excluded.asset_turnover,
+            cfo_growth         = excluded.cfo_growth,
             fetched_at         = CURRENT_TIMESTAMP
     """, (
         symbol, today,
         row.get("cfo_ttm"), row.get("cfi_ttm"), row.get("fcf_ttm_approx"),
         row.get("interest_coverage"), row.get("market_cap"), row.get("fcf_yield_approx"),
+        row.get("roce"), row.get("roce_trend"), row.get("quick_ratio"),
+        row.get("ev_ebitda"), row.get("asset_turnover"), row.get("cfo_growth"),
     ))
     con.commit()
 
@@ -178,13 +220,25 @@ def update_technical_signals(symbol: str, features: dict, con) -> None:
             fcf_yield_approx   = CASE WHEN date >= ? THEN COALESCE(?, fcf_yield_approx)   ELSE NULL END,
             interest_coverage  = CASE WHEN date >= ? THEN COALESCE(?, interest_coverage)  ELSE NULL END,
             fcf_positive       = CASE WHEN date >= ? THEN COALESCE(?, fcf_positive)       ELSE NULL END,
-            debt_coverage_risk = CASE WHEN date >= ? THEN COALESCE(?, debt_coverage_risk) ELSE NULL END
+            debt_coverage_risk = CASE WHEN date >= ? THEN COALESCE(?, debt_coverage_risk) ELSE NULL END,
+            roce               = CASE WHEN date >= ? THEN COALESCE(?, roce)               ELSE NULL END,
+            roce_trend         = CASE WHEN date >= ? THEN COALESCE(?, roce_trend)         ELSE NULL END,
+            quick_ratio        = CASE WHEN date >= ? THEN COALESCE(?, quick_ratio)        ELSE NULL END,
+            ev_ebitda          = CASE WHEN date >= ? THEN COALESCE(?, ev_ebitda)          ELSE NULL END,
+            asset_turnover     = CASE WHEN date >= ? THEN COALESCE(?, asset_turnover)     ELSE NULL END,
+            cfo_growth         = CASE WHEN date >= ? THEN COALESCE(?, cfo_growth)         ELSE NULL END
         WHERE symbol = ?
     """, (
         floor, features.get("fcf_yield_approx"),
         floor, features.get("interest_coverage"),
         floor, features.get("fcf_positive"),
         floor, features.get("debt_coverage_risk"),
+        floor, features.get("roce"),
+        floor, features.get("roce_trend"),
+        floor, features.get("quick_ratio"),
+        floor, features.get("ev_ebitda"),
+        floor, features.get("asset_turnover"),
+        floor, features.get("cfo_growth"),
         symbol,
     ))
     con.commit()

@@ -69,6 +69,27 @@ class TestComputeRatios:
         result = frf.compute_ratios(balance=None, cashflow=cashflow, ratio=None, market_cap=None)
         assert result["year_ending"] == "2025-03-31"
 
+    def test_ratio_harvest_levels_and_roce_trend(self):
+        # Two years of ratios (most-recent-first) → ROCE trend = latest - prior.
+        ratio = [
+            {"roce": 18.5, "quickRatio": 1.4, "evPerEBITDA": 12.0, "assetTurnover": 0.9},
+            {"roce": 15.0},
+        ]
+        cashflow = [{**_cashflow_row(1000.0, -200.0), "cfoGrowth": 22.3}]
+        result = frf.compute_ratios(balance=None, cashflow=cashflow, ratio=ratio, market_cap=None)
+        assert result["roce"] == 18.5
+        assert result["roce_trend"] == 3.5
+        assert result["quick_ratio"] == 1.4
+        assert result["ev_ebitda"] == 12.0
+        assert result["asset_turnover"] == 0.9
+        assert result["cfo_growth"] == 22.3
+
+    def test_ratio_harvest_single_year_has_no_trend(self):
+        ratio = [{"roce": 18.5}]
+        result = frf.compute_ratios(balance=None, cashflow=None, ratio=ratio, market_cap=None)
+        assert result["roce"] == 18.5
+        assert result["roce_trend"] is None
+
 
 class TestAsOfFloor:
     def test_floor_is_year_ending_plus_publication_lag(self):

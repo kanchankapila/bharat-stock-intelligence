@@ -698,6 +698,17 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     X['debt_risk']         = num('debt_coverage_risk', 0.0).clip(0, 1)
     X['quality_score']     = X['fcf_positive'] * (1 - X['debt_risk'])  # FCF+safe = quality
 
+    # Ratio harvest (financial_ratios_fetcher.py — ET_Stats Ratio payload we already fetch).
+    # Chosen to be orthogonal to the fundamentals_history block below (which already carries
+    # ROE / D-E / margins / growth): ROCE + its YoY trend, quick ratio, EV/EBITDA, asset turnover,
+    # CFO growth. Neutral-ish defaults so uncovered names are never penalised.
+    X['roce_norm']         = num('roce', 10.0).clip(-20, 50) / 50.0
+    X['roce_trend']        = num('roce_trend', 0.0).clip(-15, 15) / 15.0
+    X['quick_ratio_norm']  = num('quick_ratio', 1.0).clip(0, 3) / 3.0
+    X['ev_ebitda_norm']    = num('ev_ebitda', 15.0).clip(0, 50) / 50.0
+    X['asset_turnover']    = num('asset_turnover', 0.7).clip(0, 3) / 3.0
+    X['cfo_growth_norm']   = num('cfo_growth', 0.0).clip(-100, 100) / 100.0
+
     # ── Delivery % trend + block deals + short proxy (delivery_trend_fetcher.py) ──
     X['delivery_trend']   = num('delivery_trend_30d', 0.0).clip(-20, 20) / 20.0
     X['block_deal']       = num('block_deal_flag', 0.0).clip(0, 1)
@@ -973,6 +984,7 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                    ts.eps_surprise_q1, ts.eps_surprise_q2, ts.eps_beat_streak,
                    ts.eps_miss_after_streak, ts.rev_surprise_q1,
                    ts.fcf_yield_approx AS fcf_yield, ts.interest_coverage, ts.fcf_positive, ts.debt_coverage_risk,
+                   ts.roce, ts.roce_trend, ts.quick_ratio, ts.ev_ebitda, ts.asset_turnover, ts.cfo_growth,
                    ts.delivery_trend_30d, ts.block_deal_flag, ts.block_deal_direction,
                    ts.short_interest_proxy,
                    ts.promoter_buy_90d_cr, ts.promoter_sell_90d_cr, ts.promoter_net_90d,
@@ -1209,6 +1221,7 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                    ts.eps_surprise_q1, ts.eps_surprise_q2, ts.eps_beat_streak,
                    ts.eps_miss_after_streak, ts.rev_surprise_q1,
                    ts.fcf_yield_approx AS fcf_yield, ts.interest_coverage, ts.fcf_positive, ts.debt_coverage_risk,
+                   ts.roce, ts.roce_trend, ts.quick_ratio, ts.ev_ebitda, ts.asset_turnover, ts.cfo_growth,
                    ts.delivery_trend_30d, ts.block_deal_flag, ts.block_deal_direction,
                    ts.short_interest_proxy,
                    ts.promoter_buy_90d_cr, ts.promoter_sell_90d_cr, ts.promoter_net_90d,
@@ -1427,6 +1440,7 @@ def load_pending_signals() -> pd.DataFrame:
                    ts.eps_surprise_q1, ts.eps_surprise_q2, ts.eps_beat_streak,
                    ts.eps_miss_after_streak, ts.rev_surprise_q1,
                    ts.fcf_yield_approx AS fcf_yield, ts.interest_coverage, ts.fcf_positive, ts.debt_coverage_risk,
+                   ts.roce, ts.roce_trend, ts.quick_ratio, ts.ev_ebitda, ts.asset_turnover, ts.cfo_growth,
                    ts.delivery_trend_30d, ts.block_deal_flag, ts.block_deal_direction,
                    ts.short_interest_proxy,
                    ts.promoter_buy_90d_cr, ts.promoter_sell_90d_cr, ts.promoter_net_90d,
