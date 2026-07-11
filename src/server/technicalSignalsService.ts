@@ -367,11 +367,11 @@ async function loadLearnedWeights(regime: string): Promise<Map<string, number>> 
 }
 
 // Returns symbol -> nearest upcoming earnings date (YYYY-MM-DD)
-async function loadEarningsCalendar(): Promise<Map<string, string>> {
+async function loadEarningsCalendar(asOf: string): Promise<Map<string, string>> {
   const map = new Map<string, string>();
   try {
-    const today = new Date().toISOString().slice(0, 10);
-    const in30Days = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const today = asOf;
+    const in30Days = new Date(new Date(asOf).getTime() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
     const rows = await dbAll(`
       SELECT symbol, MAX(ex_date) as next_earnings
       FROM corporate_actions
@@ -436,15 +436,19 @@ const SIGNAL_SCORES: Record<SignalType, Record<SignalStrength, number>> = {
   QUALITY_OVERSOLD_SIGNAL: { HIGH: 4, MEDIUM: 3, WATCH: 2 },
 };
 
-async function loadRecentNewsSentiment(days = 2): Promise<Map<string, number>> {
+async function loadRecentNewsSentiment(asOf: string, days = 2): Promise<Map<string, number>> {
   const map = new Map<string, number>();
   try {
-    const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+    const asOfMs = new Date(asOf).getTime();
+    const cutoff = new Date(asOfMs - days * 24 * 60 * 60 * 1000).toISOString();
+    // Upper-bound by the scan date + 1d so a historical scan never sees news fetched after it
+    // (live scans pass today → this is a no-op).
+    const upper = new Date(asOfMs + 24 * 60 * 60 * 1000).toISOString();
     const rows = await dbAll(`
       SELECT symbols_json, sentiment_score
       FROM news_sentiment_items
-      WHERE fetched_at >= ? AND symbols_json IS NOT NULL AND symbols_json != '' AND symbols_json != '[]'
-    `, [cutoff]) as { symbols_json: string; sentiment_score: number }[];
+      WHERE fetched_at >= ? AND fetched_at <= ? AND symbols_json IS NOT NULL AND symbols_json != '' AND symbols_json != '[]'
+    `, [cutoff, upper]) as { symbols_json: string; sentiment_score: number }[];
 
     const symbolScores = new Map<string, number[]>();
     for (const r of rows) {
@@ -1046,8 +1050,8 @@ export async function runTechnicalSignalScan(options: {
     const winRates         = await loadSignalWinRates(15, niftyRegime);
     const learnedWeights   = await loadLearnedWeights(niftyRegime);
     const fii3dNet         = await loadFIIFlow3d(scanDate);
-    const earningsCalendar = await loadEarningsCalendar();
-    const newsSentiment    = await loadRecentNewsSentiment(2); // past 48 hours of news
+    const earningsCalendar = await loadEarningsCalendar(scanDate);
+    const newsSentiment    = await loadRecentNewsSentiment(scanDate, 2); // 48h of news as of scan date
     console.log(`[SIGNALS] Regime: ${niftyRegime} | Win-rate records: ${winRates.size} | FII 3d: ${fii3dNet ?? 'N/A'} Cr | News Sentiment: ${newsSentiment.size} stocks | Earnings watchlist: ${earningsCalendar.size}`);
 
     // Pre-load latest PCR per symbol once (was an N+1 query inside detectSignals)
