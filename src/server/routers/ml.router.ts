@@ -132,6 +132,57 @@ export const mlRouter = router({
       return { bySignalType, recommendationStats };
     }),
 
+  // Live emitted-signal hit rates straight from unified_signal_outcomes, broken down by
+  // source × regime × horizon. Surfaces the emission-quality problem (e.g. a high NEUTRAL /
+  // low decisive rate) that precomputed strategy_performance rollups hide. This is the
+  // standing observability view for "does the deployed signal actually resolve, and win?".
+  getLiveHitRates: publicProcedure
+    .input(z.object({
+      days:       z.number().min(7).max(1825).default(180),
+      minSignals: z.number().min(1).max(100).default(10),
+    }).optional())
+    .query(async ({ input }) => {
+      const days = input?.days ?? 180;
+      const minSignals = input?.minSignals ?? 10;
+      const cutoff = new Date(Date.now() - days * 86400_000).toISOString().slice(0, 10);
+
+      // Shared aggregate expressions. win_rate is among DECIDED signals (win/loss/stop);
+      // decisive_rate = fraction that resolved to any directional outcome (the key emission
+      // metric); neutral_rate = fraction that expired flat.
+      const agg = `
+        COUNT(*) AS total,
+        SUM(CASE WHEN uso.outcome='WIN'       THEN 1 ELSE 0 END) AS wins,
+        SUM(CASE WHEN uso.outcome='LOSS'      THEN 1 ELSE 0 END) AS losses,
+        SUM(CASE WHEN uso.outcome='NEUTRAL'   THEN 1 ELSE 0 END) AS neutrals,
+        SUM(CASE WHEN uso.outcome='STOP_LOSS' THEN 1 ELSE 0 END) AS stops,
+        ROUND(100.0 * SUM(CASE WHEN uso.outcome='WIN' THEN 1 ELSE 0 END)
+              / NULLIF(SUM(CASE WHEN uso.outcome IN ('WIN','LOSS','STOP_LOSS') THEN 1 ELSE 0 END), 0), 1) AS win_rate,
+        ROUND(100.0 * SUM(CASE WHEN uso.outcome != 'NEUTRAL' THEN 1 ELSE 0 END)
+              / NULLIF(COUNT(*), 0), 1) AS decisive_rate,
+        ROUND(100.0 * SUM(CASE WHEN uso.outcome='NEUTRAL' THEN 1 ELSE 0 END)
+              / NULLIF(COUNT(*), 0), 1) AS neutral_rate,
+        ROUND(AVG(uso.return_pct), 2) AS avg_return`;
+      const base = `
+        FROM unified_signal_outcomes uso
+        LEFT JOIN market_regimes mr ON mr.date = uso.signal_date
+        WHERE uso.outcome IN ('WIN','LOSS','NEUTRAL','STOP_LOSS')
+          AND uso.return_pct IS NOT NULL
+          AND uso.signal_date >= ?`;
+
+      const [overall, bySource, byRegime, byHorizon, grid] = await Promise.all([
+        dbGet(`SELECT ${agg} ${base}`, [cutoff]),
+        dbAll(`SELECT uso.signal_source, ${agg} ${base} GROUP BY uso.signal_source ORDER BY total DESC`, [cutoff]),
+        dbAll(`SELECT COALESCE(mr.regime,'UNKNOWN') AS regime, ${agg} ${base} GROUP BY COALESCE(mr.regime,'UNKNOWN') ORDER BY total DESC`, [cutoff]),
+        dbAll(`SELECT uso.horizon_days, ${agg} ${base} GROUP BY uso.horizon_days ORDER BY uso.horizon_days`, [cutoff]),
+        dbAll(
+          `SELECT uso.signal_source, COALESCE(mr.regime,'UNKNOWN') AS regime, uso.horizon_days, ${agg} ${base}
+           GROUP BY uso.signal_source, COALESCE(mr.regime,'UNKNOWN'), uso.horizon_days
+           HAVING COUNT(*) >= ? ORDER BY total DESC`, [cutoff, minSignals]),
+      ]);
+
+      return { asOf: cutoff, windowDays: days, overall, bySource, byRegime, byHorizon, grid };
+    }),
+
   getSignalReportCard: publicProcedure
     .input(z.object({
       horizonDays: z.union([z.literal(5), z.literal(15)]).default(15),

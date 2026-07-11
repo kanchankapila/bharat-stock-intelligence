@@ -1,6 +1,7 @@
 import React from 'react';
 import { trpc } from '../lib/trpc';
 import { Card } from './Card';
+import { LiveHitRates } from './LiveHitRates';
 import { Loader2, ChartLine, TrendingUp, ArrowUpRight, ArrowDownRight, Activity, BarChart2, Target } from 'lucide-react';
 
 const formatPct = (value?: number | null) => {
@@ -69,6 +70,8 @@ export function SignalReportCard() {
         <h1 className="text-3xl font-semibold text-white">Signal Intelligence Engine</h1>
         <p className="mt-2 text-sm text-slate-400">Overview of current engine performance, confidence, and source signal health.</p>
       </div>
+
+      <LiveHitRates />
       <div className="grid gap-4 xl:grid-cols-3">
         <Card title="Signal Coverage" icon={ChartLine}>
           <div className="space-y-3 text-sm text-slate-300">
