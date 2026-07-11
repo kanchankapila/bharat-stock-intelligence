@@ -719,6 +719,12 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     X['asset_turnover']    = num('asset_turnover', 0.7).clip(0, 3) / 3.0
     X['cfo_growth_norm']   = num('cfo_growth', 0.0).clip(-100, 100) / 100.0
 
+    # Mutual-fund ownership flow (mf_stock_holdings_fetcher.py). Net MoM change in MF-held shares
+    # is an institutional accumulation/distribution signal; fund-count is ownership breadth.
+    X['mf_net_flow']       = num('mf_net_share_chg_pct', 0.0).clip(-25, 25) / 25.0
+    X['mf_accumulating']   = (X['mf_net_flow'] > 0).astype(float)
+    X['mf_breadth']        = (num('mf_fund_count', 0.0).clip(0, 500) / 500.0)
+
     # ── Delivery % trend + block deals + short proxy (delivery_trend_fetcher.py) ──
     X['delivery_trend']   = num('delivery_trend_30d', 0.0).clip(-20, 20) / 20.0
     X['block_deal']       = num('block_deal_flag', 0.0).clip(0, 1)
@@ -995,6 +1001,7 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                    ts.eps_miss_after_streak, ts.rev_surprise_q1,
                    ts.fcf_yield_approx AS fcf_yield, ts.interest_coverage, ts.fcf_positive, ts.debt_coverage_risk,
                    ts.roce, ts.roce_trend, ts.quick_ratio, ts.ev_ebitda, ts.asset_turnover, ts.cfo_growth,
+                   ts.mf_net_share_chg_pct, ts.mf_fund_count,
                    ts.delivery_trend_30d, ts.block_deal_flag, ts.block_deal_direction,
                    ts.short_interest_proxy,
                    ts.promoter_buy_90d_cr, ts.promoter_sell_90d_cr, ts.promoter_net_90d,
@@ -1233,6 +1240,7 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                    ts.eps_miss_after_streak, ts.rev_surprise_q1,
                    ts.fcf_yield_approx AS fcf_yield, ts.interest_coverage, ts.fcf_positive, ts.debt_coverage_risk,
                    ts.roce, ts.roce_trend, ts.quick_ratio, ts.ev_ebitda, ts.asset_turnover, ts.cfo_growth,
+                   ts.mf_net_share_chg_pct, ts.mf_fund_count,
                    ts.delivery_trend_30d, ts.block_deal_flag, ts.block_deal_direction,
                    ts.short_interest_proxy,
                    ts.promoter_buy_90d_cr, ts.promoter_sell_90d_cr, ts.promoter_net_90d,
@@ -1453,6 +1461,7 @@ def load_pending_signals() -> pd.DataFrame:
                    ts.eps_miss_after_streak, ts.rev_surprise_q1,
                    ts.fcf_yield_approx AS fcf_yield, ts.interest_coverage, ts.fcf_positive, ts.debt_coverage_risk,
                    ts.roce, ts.roce_trend, ts.quick_ratio, ts.ev_ebitda, ts.asset_turnover, ts.cfo_growth,
+                   ts.mf_net_share_chg_pct, ts.mf_fund_count,
                    ts.delivery_trend_30d, ts.block_deal_flag, ts.block_deal_direction,
                    ts.short_interest_proxy,
                    ts.promoter_buy_90d_cr, ts.promoter_sell_90d_cr, ts.promoter_net_90d,

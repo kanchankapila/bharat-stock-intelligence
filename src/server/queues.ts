@@ -2519,6 +2519,9 @@ export async function initQueues(): Promise<boolean> {
           .catch(e => console.warn('[QUEUE] financial_ratios_fetcher failed:', (e as Error).message));
         await runPython('working_capital_fetcher.py', [], 30 * 60_000)
           .catch(e => console.warn('[QUEUE] working_capital_fetcher failed:', (e as Error).message));
+        // Per-stock MF ownership flow (monthly portfolio disclosures) — same ET companyid.
+        await runPython('mf_stock_holdings_fetcher.py', [], 30 * 60_000)
+          .catch(e => console.warn('[QUEUE] mf_stock_holdings_fetcher failed:', (e as Error).message));
         return { success: true };
       },
       {
