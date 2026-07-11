@@ -30,11 +30,30 @@ NOT via Trendlyne's tlid.
 
 import json
 import time
+from datetime import date, timedelta
 from pathlib import Path
 
 import requests
 
 BASE_URL = "https://etmarketsapis.indiatimes.com/ET_Stats/mobile"
+
+# Indian issuers must file audited annual results within 60 days of the fiscal year-end
+# (SEBI LODR Reg 33). We use 90 to stay safely on the late side: an annual figure is only
+# treated as knowable ~90d after its yearEnding, so a freshly-reported value is never stamped
+# onto technical_signals rows that predate its publication (which would leak the future into
+# ml_ensemble/exit_policy training, whose feature join reads these columns at each signal_date).
+PUBLICATION_LAG_DAYS = 90
+
+
+def as_of_floor(year_ending: str | None) -> str:
+    """Earliest technical_signals.date an annual figure with this fiscal-year-end may be stamped
+    on = yearEnding + PUBLICATION_LAG_DAYS. Falls back to today (stamp current rows only) when the
+    fiscal-year-end is unknown — never earlier, so it cannot introduce look-ahead."""
+    try:
+        d = date.fromisoformat(str(year_ending)[:10]) if year_ending else None
+    except ValueError:
+        d = None
+    return (d + timedelta(days=PUBLICATION_LAG_DAYS)).isoformat() if d else date.today().isoformat()
 
 # HEADERS: exported for caller to apply to their own requests.Session once at creation time
 # (e.g., session.headers.update(HEADERS)), then pass that session into fetch_et_stats().

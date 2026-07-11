@@ -42,7 +42,7 @@ from datetime import date
 import requests
 
 from db_compat import connect
-from et_stats_client import HEADERS, fetch_et_stats, load_companyid_map
+from et_stats_client import HEADERS, fetch_et_stats, load_companyid_map, as_of_floor
 
 DEBT_COVERAGE_RISK_THRESHOLD = 1.5
 
@@ -109,6 +109,9 @@ def compute_ratios(
     cfo = _num(cashflow[0].get("netCashFlowFromOperatingActivities")) if cashflow else None
     cfi = _num(cashflow[0].get("netCashUsedInInvestingActivities")) if cashflow else None
     interest_coverage = _num(ratio[0].get("interestCoverage")) if ratio else None
+    # Fiscal-year-end of the figures above (most-recent-first); drives the as-of stamp floor so
+    # these values are only written onto signal rows dated after the results were published.
+    year_ending = (cashflow[0].get("yearEnding") if cashflow else None) or (ratio[0].get("yearEnding") if ratio else None)
 
     fcf_ttm_approx: float | None = None
     if cfo is not None and cfi is not None:
@@ -133,6 +136,7 @@ def compute_ratios(
         "fcf_yield_approx": fcf_yield_approx,
         "fcf_positive": fcf_positive,
         "debt_coverage_risk": debt_coverage_risk,
+        "year_ending": year_ending,
     }
 
 
@@ -162,19 +166,25 @@ def upsert_quality(symbol: str, today: str, row: dict, con) -> None:
 
 
 def update_technical_signals(symbol: str, features: dict, con) -> None:
+    # Point-in-time stamp: apply these annual figures only to rows on/after the results were
+    # published (date >= floor), and NULL them on older rows. A plain `WHERE symbol = ?` smeared
+    # the latest annual value across the symbol's whole history, leaking future fundamentals into
+    # the per-signal-date feature join in ml_ensemble/exit_policy. The as-of trail lives in
+    # tl_financial_quality; technical_signals only carries the value from its knowable date on.
+    floor = as_of_floor(features.get("year_ending"))
     cur = con.cursor()
     cur.execute("""
         UPDATE technical_signals SET
-            fcf_yield_approx   = COALESCE(?, fcf_yield_approx),
-            interest_coverage  = COALESCE(?, interest_coverage),
-            fcf_positive       = COALESCE(?, fcf_positive),
-            debt_coverage_risk = COALESCE(?, debt_coverage_risk)
+            fcf_yield_approx   = CASE WHEN date >= ? THEN COALESCE(?, fcf_yield_approx)   ELSE NULL END,
+            interest_coverage  = CASE WHEN date >= ? THEN COALESCE(?, interest_coverage)  ELSE NULL END,
+            fcf_positive       = CASE WHEN date >= ? THEN COALESCE(?, fcf_positive)       ELSE NULL END,
+            debt_coverage_risk = CASE WHEN date >= ? THEN COALESCE(?, debt_coverage_risk) ELSE NULL END
         WHERE symbol = ?
     """, (
-        features.get("fcf_yield_approx"),
-        features.get("interest_coverage"),
-        features.get("fcf_positive"),
-        features.get("debt_coverage_risk"),
+        floor, features.get("fcf_yield_approx"),
+        floor, features.get("interest_coverage"),
+        floor, features.get("fcf_positive"),
+        floor, features.get("debt_coverage_risk"),
         symbol,
     ))
     con.commit()

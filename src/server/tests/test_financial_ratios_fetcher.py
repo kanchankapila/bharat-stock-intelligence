@@ -3,6 +3,8 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import financial_ratios_fetcher as frf
+import et_stats_client
+from datetime import date, timedelta
 
 
 def _cashflow_row(cfo, cfi):
@@ -61,3 +63,24 @@ class TestComputeRatios:
     def test_empty_ratio_list_element_missing_key_is_none(self):
         result = frf.compute_ratios(balance=None, cashflow=None, ratio=[{}], market_cap=None)
         assert result["interest_coverage"] is None
+
+    def test_year_ending_surfaced_for_point_in_time_stamp(self):
+        cashflow = [{**_cashflow_row(1000.0, -200.0), "yearEnding": "2025-03-31"}]
+        result = frf.compute_ratios(balance=None, cashflow=cashflow, ratio=None, market_cap=None)
+        assert result["year_ending"] == "2025-03-31"
+
+
+class TestAsOfFloor:
+    def test_floor_is_year_ending_plus_publication_lag(self):
+        floor = et_stats_client.as_of_floor("2025-03-31")
+        expected = (date(2025, 3, 31) + timedelta(days=et_stats_client.PUBLICATION_LAG_DAYS)).isoformat()
+        assert floor == expected
+
+    def test_floor_never_earlier_than_year_ending(self):
+        # The whole point: the stamp floor must be AFTER the fiscal year-end, never before,
+        # so a freshly-reported figure can't back-fill onto rows that predate publication.
+        assert et_stats_client.as_of_floor("2024-03-31") > "2024-03-31"
+
+    def test_unknown_year_ending_falls_back_to_today(self):
+        assert et_stats_client.as_of_floor(None) == date.today().isoformat()
+        assert et_stats_client.as_of_floor("garbage") == date.today().isoformat()

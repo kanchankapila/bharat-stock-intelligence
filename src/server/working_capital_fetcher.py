@@ -45,7 +45,7 @@ from datetime import date, timedelta
 import requests
 
 from db_compat import connect
-from et_stats_client import HEADERS, fetch_et_stats, load_companyid_map
+from et_stats_client import HEADERS, fetch_et_stats, load_companyid_map, as_of_floor
 
 DETERIORATING_THRESHOLD_DAYS = 5
 IMPROVING_THRESHOLD_DAYS = -5
@@ -198,21 +198,26 @@ def upsert_wc_history(symbol: str, rows: list[dict], con) -> None:
 def update_technical_signals(symbol: str, features: dict, con) -> None:
     if not features:
         return
+    # Point-in-time stamp (see financial_ratios_fetcher): apply these annual working-capital
+    # figures only to rows on/after the fiscal year's results were published (date >= floor) and
+    # NULL them on older rows, so the latest year's CCC can't back-fill onto historical signal
+    # rows and leak into the ml_ensemble/exit_policy feature join. Full trail: working_capital_history.
+    floor = as_of_floor(features.get("year_ending"))
     cur = con.cursor()
     cur.execute("""
         UPDATE technical_signals SET
-            receivables_days_ttm = COALESCE(?, receivables_days_ttm),
-            ccc_ttm              = COALESCE(?, ccc_ttm),
-            ccc_trend            = COALESCE(?, ccc_trend),
-            wc_deteriorating     = COALESCE(?, wc_deteriorating),
-            wc_improving         = COALESCE(?, wc_improving)
+            receivables_days_ttm = CASE WHEN date >= ? THEN COALESCE(?, receivables_days_ttm) ELSE NULL END,
+            ccc_ttm              = CASE WHEN date >= ? THEN COALESCE(?, ccc_ttm)              ELSE NULL END,
+            ccc_trend            = CASE WHEN date >= ? THEN COALESCE(?, ccc_trend)            ELSE NULL END,
+            wc_deteriorating     = CASE WHEN date >= ? THEN COALESCE(?, wc_deteriorating)     ELSE NULL END,
+            wc_improving         = CASE WHEN date >= ? THEN COALESCE(?, wc_improving)         ELSE NULL END
         WHERE symbol = ?
     """, (
-        features.get("receivables_days_ttm"),
-        features.get("ccc_ttm"),
-        features.get("ccc_trend"),
-        features.get("wc_deteriorating"),
-        features.get("wc_improving"),
+        floor, features.get("receivables_days_ttm"),
+        floor, features.get("ccc_ttm"),
+        floor, features.get("ccc_trend"),
+        floor, features.get("wc_deteriorating"),
+        floor, features.get("wc_improving"),
         symbol,
     ))
     con.commit()
@@ -243,6 +248,7 @@ def process_stock(symbol: str, company_id: str, session: requests.Session, con) 
         "ccc_trend": ccc_trend,
         "wc_deteriorating": wc_deteriorating,
         "wc_improving": wc_improving,
+        "year_ending": latest.get("fiscal_year"),
     }
     update_technical_signals(symbol, features, con)
     return features
