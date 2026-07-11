@@ -404,7 +404,13 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     X['np_margin']       = num('np_margin', 8.0).clip(-20, 40) / 40.0
     X['promoter_pct']    = num('promoter_pct', 50.0).clip(0, 100) / 100.0
     X['fii_pct_tl']      = num('fii_pct', 10.0).clip(0, 80) / 80.0
+    X['mf_pct_tl']       = num('mf_pct', 5.0).clip(0, 60) / 60.0
     X['pledge_pct']      = num('pledge_pct', 5.0).clip(0, 100) / 100.0
+    X['promoter_chg_qoq'] = num('promoter_chg_qoq', 0.0).clip(-10, 10) / 10.0
+    X['fii_chg_qoq']      = num('fii_chg_qoq', 0.0).clip(-10, 10) / 10.0
+    X['mf_chg_qoq_tl']    = num('mf_chg_qoq', 0.0).clip(-10, 10) / 10.0
+    X['pledge_chg_qoq']   = num('pledge_chg_qoq', 0.0).clip(-10, 10) / 10.0
+    X['inst_chg_qoq']     = (X['fii_chg_qoq'] + X['mf_chg_qoq_tl']).clip(-2, 2)
     # Revenue and profit growth (quarterly YoY)
     X['rev_growth_yoy_q'] = num('rev_growth_yoy_q', 0.0).clip(-50, 100)
     X['np_growth_yoy_q']  = num('np_growth_yoy_q', 0.0).clip(-100, 200)
@@ -724,6 +730,16 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     X['mf_net_flow']       = num('mf_net_share_chg_pct', 0.0).clip(-25, 25) / 25.0
     X['mf_accumulating']   = (X['mf_net_flow'] > 0).astype(float)
     X['mf_breadth']        = (num('mf_fund_count', 0.0).clip(0, 500) / 500.0)
+    X['mf_add_breadth']    = (num('mf_funds_adding', 0.0).clip(0, 250) / 250.0)
+    X['mf_trim_breadth']   = (num('mf_funds_trimming', 0.0).clip(0, 250) / 250.0)
+    X['mf_add_trim_ratio'] = num('mf_add_trim_ratio', 1.0).clip(0, 10) / 10.0
+    X['mf_conviction']     = (X['mf_net_flow'].clip(0, 1) * X['mf_add_trim_ratio']).clip(0, 1)
+    # Conviction depth (avg % of fund assets) + big-money direction (top-5 holders' net flow).
+    X['mf_pct_assets']     = num('mf_avg_pct_assets', 0.0).clip(0, 10) / 10.0
+    X['mf_big_fund_flow']  = num('mf_big_fund_flow', 0.0).clip(-25, 25) / 25.0
+    # Peer-relative flow (ownership_relative.py): sector-demeaned flow + universe percentile.
+    X['mf_flow_vs_sector'] = num('mf_flow_vs_sector', 0.0).clip(-25, 25) / 25.0
+    X['mf_flow_rank']      = num('mf_flow_rank', 0.5).clip(0, 1)
 
     # ── Delivery % trend + block deals + short proxy (delivery_trend_fetcher.py) ──
     X['delivery_trend']   = num('delivery_trend_30d', 0.0).clip(-20, 20) / 20.0
@@ -965,7 +981,8 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                    ts.ret_1m_tl, ts.ret_3m_tl, ts.ret_6m_tl, ts.ret_1y_tl,
                    ts.analyst_upside_pct, ts.analyst_count, ts.analyst_buy_pct,
                    ts.roe_annual, ts.roce_annual, ts.ebitda_margin, ts.np_margin,
-                   ts.promoter_pct, ts.fii_pct, ts.pledge_pct,
+                   ts.promoter_pct, ts.fii_pct, ts.mf_pct, ts.pledge_pct,
+                   ts.promoter_chg_qoq, ts.fii_chg_qoq, ts.mf_chg_qoq, ts.pledge_chg_qoq,
                    ts.rev_growth_yoy_q, ts.np_growth_yoy_q,
                    ts.days_since_dividend, ts.last_dividend_amt,
                    ts.days_to_ex_div, ts.days_to_board_meeting, ts.upcoming_div_pct,
@@ -1002,6 +1019,8 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                    ts.fcf_yield_approx AS fcf_yield, ts.interest_coverage, ts.fcf_positive, ts.debt_coverage_risk,
                    ts.roce, ts.roce_trend, ts.quick_ratio, ts.ev_ebitda, ts.asset_turnover, ts.cfo_growth,
                    ts.mf_net_share_chg_pct, ts.mf_fund_count,
+                   ts.mf_funds_adding, ts.mf_funds_trimming, ts.mf_add_trim_ratio,
+                   ts.mf_avg_pct_assets, ts.mf_big_fund_flow, ts.mf_flow_vs_sector, ts.mf_flow_rank,
                    ts.delivery_trend_30d, ts.block_deal_flag, ts.block_deal_direction,
                    ts.short_interest_proxy,
                    ts.promoter_buy_90d_cr, ts.promoter_sell_90d_cr, ts.promoter_net_90d,
@@ -1204,7 +1223,8 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                    ts.ret_1m_tl, ts.ret_3m_tl, ts.ret_6m_tl, ts.ret_1y_tl,
                    ts.analyst_upside_pct, ts.analyst_count, ts.analyst_buy_pct,
                    ts.roe_annual, ts.roce_annual, ts.ebitda_margin, ts.np_margin,
-                   ts.promoter_pct, ts.fii_pct, ts.pledge_pct,
+                   ts.promoter_pct, ts.fii_pct, ts.mf_pct, ts.pledge_pct,
+                   ts.promoter_chg_qoq, ts.fii_chg_qoq, ts.mf_chg_qoq, ts.pledge_chg_qoq,
                    ts.rev_growth_yoy_q, ts.np_growth_yoy_q,
                    ts.days_since_dividend, ts.last_dividend_amt,
                    ts.days_to_ex_div, ts.days_to_board_meeting, ts.upcoming_div_pct,
@@ -1241,6 +1261,8 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                    ts.fcf_yield_approx AS fcf_yield, ts.interest_coverage, ts.fcf_positive, ts.debt_coverage_risk,
                    ts.roce, ts.roce_trend, ts.quick_ratio, ts.ev_ebitda, ts.asset_turnover, ts.cfo_growth,
                    ts.mf_net_share_chg_pct, ts.mf_fund_count,
+                   ts.mf_funds_adding, ts.mf_funds_trimming, ts.mf_add_trim_ratio,
+                   ts.mf_avg_pct_assets, ts.mf_big_fund_flow, ts.mf_flow_vs_sector, ts.mf_flow_rank,
                    ts.delivery_trend_30d, ts.block_deal_flag, ts.block_deal_direction,
                    ts.short_interest_proxy,
                    ts.promoter_buy_90d_cr, ts.promoter_sell_90d_cr, ts.promoter_net_90d,
@@ -1425,7 +1447,8 @@ def load_pending_signals() -> pd.DataFrame:
                    ts.ret_1m_tl, ts.ret_3m_tl, ts.ret_6m_tl, ts.ret_1y_tl,
                    ts.analyst_upside_pct, ts.analyst_count, ts.analyst_buy_pct,
                    ts.roe_annual, ts.roce_annual, ts.ebitda_margin, ts.np_margin,
-                   ts.promoter_pct, ts.fii_pct, ts.pledge_pct,
+                   ts.promoter_pct, ts.fii_pct, ts.mf_pct, ts.pledge_pct,
+                   ts.promoter_chg_qoq, ts.fii_chg_qoq, ts.mf_chg_qoq, ts.pledge_chg_qoq,
                    ts.rev_growth_yoy_q, ts.np_growth_yoy_q,
                    ts.days_since_dividend, ts.last_dividend_amt,
                    ts.days_to_ex_div, ts.days_to_board_meeting, ts.upcoming_div_pct,
@@ -1462,6 +1485,8 @@ def load_pending_signals() -> pd.DataFrame:
                    ts.fcf_yield_approx AS fcf_yield, ts.interest_coverage, ts.fcf_positive, ts.debt_coverage_risk,
                    ts.roce, ts.roce_trend, ts.quick_ratio, ts.ev_ebitda, ts.asset_turnover, ts.cfo_growth,
                    ts.mf_net_share_chg_pct, ts.mf_fund_count,
+                   ts.mf_funds_adding, ts.mf_funds_trimming, ts.mf_add_trim_ratio,
+                   ts.mf_avg_pct_assets, ts.mf_big_fund_flow, ts.mf_flow_vs_sector, ts.mf_flow_rank,
                    ts.delivery_trend_30d, ts.block_deal_flag, ts.block_deal_direction,
                    ts.short_interest_proxy,
                    ts.promoter_buy_90d_cr, ts.promoter_sell_90d_cr, ts.promoter_net_90d,
@@ -1680,7 +1705,8 @@ def load_pending_signals() -> pd.DataFrame:
                    {ts_c('ret_1m_tl')}, {ts_c('ret_3m_tl')}, {ts_c('ret_6m_tl')}, {ts_c('ret_1y_tl')},
                    {ts_c('analyst_upside_pct')}, {ts_c('analyst_count')}, {ts_c('analyst_buy_pct')},
                    {ts_c('roe_annual')}, {ts_c('roce_annual')}, {ts_c('ebitda_margin')}, {ts_c('np_margin')},
-                   {ts_c('promoter_pct')}, {ts_c('fii_pct')}, {ts_c('pledge_pct')},
+                   {ts_c('promoter_pct')}, {ts_c('fii_pct')}, {ts_c('mf_pct')}, {ts_c('pledge_pct')},
+                   {ts_c('promoter_chg_qoq')}, {ts_c('fii_chg_qoq')}, {ts_c('mf_chg_qoq')}, {ts_c('pledge_chg_qoq')},
                    {ts_c('rev_growth_yoy_q')}, {ts_c('np_growth_yoy_q')},
                    {ts_c('days_since_dividend')}, {ts_c('last_dividend_amt')},
                    {ts_c('days_to_ex_div')}, {ts_c('days_to_board_meeting')}, {ts_c('upcoming_div_pct')},
@@ -1715,6 +1741,10 @@ def load_pending_signals() -> pd.DataFrame:
                    {ts_c('eps_surprise_q1')}, {ts_c('eps_surprise_q2')}, {ts_c('eps_beat_streak')},
                    {ts_c('eps_miss_after_streak')}, {ts_c('rev_surprise_q1')},
                    {ts_c('fcf_yield_approx', 'fcf_yield')}, {ts_c('interest_coverage')}, {ts_c('fcf_positive')}, {ts_c('debt_coverage_risk')},
+                   {ts_c('roce')}, {ts_c('roce_trend')}, {ts_c('quick_ratio')}, {ts_c('ev_ebitda')}, {ts_c('asset_turnover')}, {ts_c('cfo_growth')},
+                   {ts_c('mf_net_share_chg_pct')}, {ts_c('mf_fund_count')},
+                   {ts_c('mf_funds_adding')}, {ts_c('mf_funds_trimming')}, {ts_c('mf_add_trim_ratio')},
+                   {ts_c('mf_avg_pct_assets')}, {ts_c('mf_big_fund_flow')}, {ts_c('mf_flow_vs_sector')}, {ts_c('mf_flow_rank')},
                    {ts_c('delivery_trend_30d')}, {ts_c('block_deal_flag')}, {ts_c('block_deal_direction')},
                    {ts_c('short_interest_proxy')},
                    {ts_c('promoter_buy_90d_cr')}, {ts_c('promoter_sell_90d_cr')}, {ts_c('promoter_net_90d')},

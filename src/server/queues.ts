@@ -499,6 +499,11 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await runPython('relative_strength.py', [], 180_000)
     .catch(e => console.warn('[QUEUE] relative_strength failed:', (e as Error).message));
 
+  // Cross-sectional ownership flow: sector-relative + universe-rank of MF net flow already
+  // stamped on technical_signals → mf_flow_vs_sector / mf_flow_rank. Same-day, no look-ahead.
+  await runPython('ownership_relative.py', [], 120_000)
+    .catch(e => console.warn('[QUEUE] ownership_relative failed:', (e as Error).message));
+
   // Market breadth internals (% above 200DMA, A/D ratio, 20d highs, 52w net highs/lows) from stock_ohlcv.
   await runPython('market_breadth.py', ['--days', '420'], 120_000)
     .catch(e => console.warn('[QUEUE] market_breadth failed:', (e as Error).message));

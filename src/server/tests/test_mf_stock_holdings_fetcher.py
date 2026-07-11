@@ -9,6 +9,26 @@ def _fund(shares, change, asset_date="31-05-2026"):
     return {"numberOfSharesHeld": shares, "changeInNumberOfShares": change, "assetDate": asset_date}
 
 
+class _Response:
+    status_code = 200
+
+    def __init__(self, body):
+        self._body = body
+
+    def json(self):
+        return self._body
+
+
+class _Session:
+    def __init__(self, pages):
+        self.pages = pages
+        self.urls = []
+
+    def get(self, url, timeout):
+        self.urls.append(url)
+        return _Response(self.pages[len(self.urls) - 1])
+
+
 class TestAggregate:
     def test_net_accumulation_and_breakdown(self):
         rows = [_fund(1000, 100), _fund(500, -50), _fund(300, 0), _fund(200, 25)]
@@ -18,6 +38,7 @@ class TestAggregate:
         assert agg["net_change_shares"] == 75.0        # 100-50+0+25
         assert agg["funds_adding"] == 2
         assert agg["funds_trimming"] == 1
+        assert agg["add_trim_ratio"] == 1.5
         # net % vs prior holding (2000-75=1925)
         assert agg["net_share_chg_pct"] == round(75.0 / 1925.0 * 100, 4)
         assert agg["as_of_date"] == "2026-05-31"
@@ -35,6 +56,51 @@ class TestAggregate:
     def test_as_of_date_picks_latest(self):
         rows = [_fund(10, 1, "30-04-2026"), _fund(10, 1, "31-05-2026")]
         assert mf.aggregate(rows, 2)["as_of_date"] == "2026-05-31"
+
+
+class TestConviction:
+    def _fund_c(self, shares, change, pct):
+        return {"numberOfSharesHeld": shares, "changeInNumberOfShares": change,
+                "percentageAssets": pct, "assetDate": "31-05-2026"}
+
+    def test_avg_pct_assets_and_big_fund_flow(self):
+        rows = [self._fund_c(1000, 100, "4.0"), self._fund_c(500, -50, "2.0")]
+        agg = mf.aggregate(rows, total_records=2)
+        assert agg["avg_pct_assets"] == 3.0                          # mean(4, 2)
+        assert agg["big_fund_flow"] == round(50 / 1450 * 100, 4)     # top-5 net 50 / prior 1450
+
+    def test_big_fund_flow_uses_only_top_five_holders(self):
+        big = [self._fund_c(10000, -500, "5.0") for _ in range(5)]   # big funds all trimming
+        small = [self._fund_c(1, 100, "0.1")]                        # a tiny fund piling in
+        agg = mf.aggregate(big + small, total_records=6)
+        assert agg["big_fund_flow"] < 0                              # dominated by the big holders
+
+    def test_missing_pct_assets_yields_none(self):
+        agg = mf.aggregate([_fund(1000, 100)], total_records=1)
+        assert agg["avg_pct_assets"] is None
+        assert agg["big_fund_flow"] == round(100 / 900 * 100, 4)
+
+
+class TestFetchHoldingsPages:
+    def test_fetches_all_reported_pages(self, monkeypatch):
+        monkeypatch.setattr(mf.time, "sleep", lambda _seconds: None)
+        session = _Session([
+            {
+                "searchresult": [_fund(100, 10)],
+                "pagesummary": {"totalRecords": 3, "totalpages": 2},
+            },
+            {
+                "searchresult": [_fund(200, 20), _fund(300, -30)],
+                "pagesummary": {"totalRecords": 3, "totalpages": 2},
+            },
+        ])
+
+        data = mf.fetch_holdings_pages("11945", session)
+
+        assert len(data["searchresult"]) == 3
+        assert data["totalRecords"] == 3
+        assert "pageno=1" in session.urls[0]
+        assert "pageno=2" in session.urls[1]
 
 
 class TestFloor:

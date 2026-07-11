@@ -16,7 +16,7 @@ from datetime import date, timedelta
 import requests
 import pandas as pd
 
-from db_compat import connect, use_postgres
+from db_compat import connect
 
 RATE_LIMIT_SEC = 0.3
 
@@ -146,11 +146,10 @@ def ensure_schema(con) -> None:
 
 def upsert_holdings(rows: list[dict], today: str, con) -> None:
     cur = con.cursor()
-    ph = "%s" if use_postgres() else "?"
     for r in rows:
-        cur.execute(f"""
+        cur.execute("""
             INSERT INTO stock_mf_holdings (symbol, date, mf_holding_pct, num_funds, chg_vs_prev)
-            VALUES ({ph},{ph},{ph},{ph},{ph})
+            VALUES (?,?,?,?,?)
             ON CONFLICT(symbol, date) DO UPDATE SET
                 mf_holding_pct = excluded.mf_holding_pct,
                 num_funds      = excluded.num_funds,
@@ -158,24 +157,17 @@ def upsert_holdings(rows: list[dict], today: str, con) -> None:
                 fetched_at     = CURRENT_TIMESTAMP
         """, (r["symbol"], today, r["mf_holding_pct"], r.get("num_funds"), r.get("chg_vs_prev")))
 
-    # Back-fill today's technical_signals rows
+    # Back-fill today's technical_signals rows using the date column used by the
+    # feature joiners in ml_ensemble/exit_policy. This keeps the write compatible with
+    # both SQLite and Postgres through db_compat.
     for r in rows:
-        if use_postgres():
-            cur.execute("""
-                UPDATE technical_signals
-                SET mf_holding_pct = %s,
-                    mf_fund_count  = %s,
-                    mf_chg_vs_prev = %s
-                WHERE symbol = %s AND signal_date = %s
-            """, (r["mf_holding_pct"], r.get("num_funds"), r.get("chg_vs_prev"), r["symbol"], today))
-        else:
-            cur.execute("""
-                UPDATE technical_signals
-                SET mf_holding_pct = ?,
-                    mf_fund_count  = ?,
-                    mf_chg_vs_prev = ?
-                WHERE symbol = ? AND signal_date = ?
-            """, (r["mf_holding_pct"], r.get("num_funds"), r.get("chg_vs_prev"), r["symbol"], today))
+        cur.execute("""
+            UPDATE technical_signals
+            SET mf_holding_pct = ?,
+                mf_fund_count  = ?,
+                mf_chg_vs_prev = ?
+            WHERE symbol = ? AND date = ?
+        """, (r["mf_holding_pct"], r.get("num_funds"), r.get("chg_vs_prev"), r["symbol"], today))
 
     con.commit()
 

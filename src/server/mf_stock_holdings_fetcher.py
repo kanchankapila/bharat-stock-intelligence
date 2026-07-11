@@ -40,7 +40,7 @@ from db_compat import connect
 from et_stats_client import HEADERS, load_companyid_map
 
 MF_URL = ("https://mfapps.indiatimes.com/Ulip/mfsInvestingInStock.htm"
-          "?pagesize=100&sortby=numberOfSharesHeld&companyid={cid}&marketcap=&callback=&pageno=1")
+          "?pagesize=100&sortby=numberOfSharesHeld&companyid={cid}&marketcap=&callback=&pageno={page}")
 
 # MF portfolio for a month-end is published ~10-14 days into the next month; use 14 to stay
 # safely on the late side so a disclosure never back-fills onto rows that predate it.
@@ -68,6 +68,11 @@ def ensure_schema(con) -> None:
     for ddl in [
         "ALTER TABLE technical_signals ADD COLUMN mf_net_share_chg_pct REAL",
         "ALTER TABLE technical_signals ADD COLUMN mf_fund_count        INTEGER",
+        "ALTER TABLE technical_signals ADD COLUMN mf_funds_adding      INTEGER",
+        "ALTER TABLE technical_signals ADD COLUMN mf_funds_trimming    INTEGER",
+        "ALTER TABLE technical_signals ADD COLUMN mf_add_trim_ratio    REAL",
+        "ALTER TABLE technical_signals ADD COLUMN mf_avg_pct_assets    REAL",
+        "ALTER TABLE technical_signals ADD COLUMN mf_big_fund_flow     REAL",
     ]:
         try:
             cur.execute(ddl); con.commit()
@@ -109,6 +114,21 @@ def aggregate(searchresult: list[dict] | None, total_records) -> dict | None:
     funds_trimming = sum(1 for r in rows if (_num(r.get("changeInNumberOfShares"), 0) or 0) < 0)
     prior = total_shares - net_change
     net_pct = round(net_change / prior * 100, 4) if prior > 0 else None
+    add_trim_ratio = round((funds_adding + 1) / (funds_trimming + 1), 4)
+
+    # Conviction depth: mean of each fund's percentageAssets (how big a bet the stock is
+    # inside the funds that hold it) — a count of funds says nothing about conviction size.
+    pct_assets = [p for p in (_num(r.get("percentageAssets")) for r in rows) if p is not None]
+    avg_pct_assets = round(sum(pct_assets) / len(pct_assets), 4) if pct_assets else None
+
+    # Big-money direction: net share change of the 5 largest holders relative to their prior
+    # holdings. A tiny fund flipping barely moves this; the funds that actually set the price do.
+    top = sorted(rows, key=lambda r: _num(r.get("numberOfSharesHeld"), 0) or 0, reverse=True)[:5]
+    top_now = sum(_num(r.get("numberOfSharesHeld"), 0) or 0 for r in top)
+    top_chg = sum(_num(r.get("changeInNumberOfShares"), 0) or 0 for r in top)
+    top_prior = top_now - top_chg
+    big_fund_flow = round(top_chg / top_prior * 100, 4) if top_prior > 0 else None
+
     return {
         "as_of_date": _as_of_date(rows),
         "num_funds": int(_num(total_records, len(rows)) or len(rows)),
@@ -117,6 +137,9 @@ def aggregate(searchresult: list[dict] | None, total_records) -> dict | None:
         "net_share_chg_pct": net_pct,
         "funds_adding": funds_adding,
         "funds_trimming": funds_trimming,
+        "add_trim_ratio": add_trim_ratio,
+        "avg_pct_assets": avg_pct_assets,
+        "big_fund_flow": big_fund_flow,
     }
 
 
@@ -126,6 +149,33 @@ def _floor(as_of_date: str | None) -> str:
     except ValueError:
         d = None
     return (d + timedelta(days=MF_DISCLOSURE_LAG_DAYS)).isoformat() if d else date.today().isoformat()
+
+
+def fetch_holdings_pages(company_id: str, session: requests.Session) -> dict | None:
+    """Fetch all pages so MF-flow aggregates are not biased to only the largest funds."""
+    rows: list[dict] = []
+    total_records = None
+    total_pages = 1
+    page = 1
+
+    while page <= total_pages:
+        try:
+            r = session.get(MF_URL.format(cid=company_id, page=page), timeout=15)
+            if r.status_code != 200:
+                return None if page == 1 else {"searchresult": rows, "totalRecords": total_records}
+            data = r.json()
+        except Exception:
+            return None if page == 1 else {"searchresult": rows, "totalRecords": total_records}
+        finally:
+            time.sleep(0.25)  # be a good citizen - throttle the per-page calls
+
+        rows.extend(data.get("searchresult") or [])
+        summary = data.get("pagesummary") or {}
+        total_records = summary.get("totalRecords", total_records)
+        total_pages = int(_num(summary.get("totalpages"), total_pages) or total_pages)
+        page += 1
+
+    return {"searchresult": rows, "totalRecords": total_records}
 
 
 # ── Persist ──────────────────────────────────────────────────────────────────────
@@ -153,25 +203,33 @@ def stamp_technical_signals(symbol: str, agg: dict, con) -> None:
     con.cursor().execute("""
         UPDATE technical_signals SET
             mf_net_share_chg_pct = CASE WHEN date >= ? THEN COALESCE(?, mf_net_share_chg_pct) ELSE NULL END,
-            mf_fund_count        = CASE WHEN date >= ? THEN COALESCE(?, mf_fund_count)        ELSE NULL END
+            mf_fund_count        = CASE WHEN date >= ? THEN COALESCE(?, mf_fund_count)        ELSE NULL END,
+            mf_funds_adding      = CASE WHEN date >= ? THEN COALESCE(?, mf_funds_adding)      ELSE NULL END,
+            mf_funds_trimming    = CASE WHEN date >= ? THEN COALESCE(?, mf_funds_trimming)    ELSE NULL END,
+            mf_add_trim_ratio    = CASE WHEN date >= ? THEN COALESCE(?, mf_add_trim_ratio)    ELSE NULL END,
+            mf_avg_pct_assets    = CASE WHEN date >= ? THEN COALESCE(?, mf_avg_pct_assets)    ELSE NULL END,
+            mf_big_fund_flow     = CASE WHEN date >= ? THEN COALESCE(?, mf_big_fund_flow)     ELSE NULL END
         WHERE symbol = ?
-    """, (floor, agg.get("net_share_chg_pct"), floor, agg.get("num_funds"), symbol))
+    """, (
+        floor, agg.get("net_share_chg_pct"),
+        floor, agg.get("num_funds"),
+        floor, agg.get("funds_adding"),
+        floor, agg.get("funds_trimming"),
+        floor, agg.get("add_trim_ratio"),
+        floor, agg.get("avg_pct_assets"),
+        floor, agg.get("big_fund_flow"),
+        symbol,
+    ))
     con.commit()
 
 
 # ── Per-stock ──────────────────────────────────────────────────────────────────────
 
 def process_stock(symbol: str, company_id: str, session: requests.Session, con) -> dict | None:
-    try:
-        r = session.get(MF_URL.format(cid=company_id), timeout=15)
-        if r.status_code != 200:
-            return None
-        data = r.json()
-    except Exception:
+    data = fetch_holdings_pages(company_id, session)
+    if not data:
         return None
-    finally:
-        time.sleep(0.25)  # be a good citizen — throttle the per-stock calls
-    agg = aggregate(data.get("searchresult"), (data.get("pagesummary") or {}).get("totalRecords"))
+    agg = aggregate(data.get("searchresult"), data.get("totalRecords"))
     if not agg or not agg.get("as_of_date"):
         return None
     upsert(symbol, agg, con)

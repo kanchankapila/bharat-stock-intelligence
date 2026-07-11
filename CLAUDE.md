@@ -96,6 +96,7 @@ src/server/
   exit_labeler.py              ← Path-based exit labels: MFE/MAE/trailing-exit → signal_excursions
   fundamentals_snapshot.py     ← Daily point-in-time snapshot of stock_fundamentals → fundamentals_history
   relative_strength.py         ← Cross-sectional RS-rank engine (stock_ohlcv → technical_signals)
+  ownership_relative.py        ← Cross-sectional MF-flow engine (sector-relative + universe rank → technical_signals)
   exit_policy.py               ← Exit-policy head: MFE/MAE regressors on signal_excursions → target/stop levels
   finbert_scorer.py            ← FinBERT NLP sentiment scoring
   institutional_quant_engine.py← Institutional flow quant analysis
@@ -173,6 +174,7 @@ python fii_dii_fetcher.py
 python pcr_fetcher.py
 python iv_features.py                  # ATM IV → iv_rank/iv_skew (after pcr_fetcher)
 python relative_strength.py            # cross-sectional RS ranks → technical_signals
+python ownership_relative.py           # sector-relative + universe-rank of MF net flow → technical_signals
 python finbert_scorer.py --days 1
 python institutional_quant_engine.py
 python performance_tracker.py --horizon 15

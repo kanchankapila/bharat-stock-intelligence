@@ -35,7 +35,7 @@ Run:
 
 import argparse
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import requests
 
@@ -54,6 +54,11 @@ HEADERS = {
 }
 
 RATE_LIMIT_SEC = 0.5
+
+# SEBI LODR Reg 31: the shareholding pattern is filed within 21 days of each period end.
+# Use 30 to stay safely on the late side so a disclosure never back-fills onto rows that
+# predate it (same anti-look-ahead discipline as the MF + ET_Stats fetchers).
+SHAREHOLDING_DISCLOSURE_LAG_DAYS = 30
 
 
 # â”€â”€ Schema â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -100,6 +105,10 @@ def ensure_schema(con) -> None:
             fii_pct         REAL,
             mf_pct          REAL,
             pledge_pct      REAL,
+            promoter_chg_qoq REAL,
+            fii_chg_qoq      REAL,
+            mf_chg_qoq       REAL,
+            pledge_chg_qoq   REAL,
             -- CAGR
             rev_cagr_5y     REAL,
             np_cagr_5y      REAL,
@@ -131,12 +140,21 @@ def ensure_schema(con) -> None:
         "ALTER TABLE technical_signals ADD COLUMN np_margin REAL",
         "ALTER TABLE technical_signals ADD COLUMN promoter_pct REAL",
         "ALTER TABLE technical_signals ADD COLUMN fii_pct REAL",
+        "ALTER TABLE technical_signals ADD COLUMN mf_pct REAL",
         "ALTER TABLE technical_signals ADD COLUMN pledge_pct REAL",
+        "ALTER TABLE technical_signals ADD COLUMN promoter_chg_qoq REAL",
+        "ALTER TABLE technical_signals ADD COLUMN fii_chg_qoq REAL",
+        "ALTER TABLE technical_signals ADD COLUMN mf_chg_qoq REAL",
+        "ALTER TABLE technical_signals ADD COLUMN pledge_chg_qoq REAL",
         "ALTER TABLE technical_signals ADD COLUMN rev_growth_yoy_q REAL",
         "ALTER TABLE technical_signals ADD COLUMN np_growth_yoy_q REAL",
         "ALTER TABLE technical_signals ADD COLUMN days_since_dividend INTEGER",
         "ALTER TABLE technical_signals ADD COLUMN last_dividend_amt REAL",
         "ALTER TABLE trendlyne_stock_profile ADD COLUMN company_description TEXT",
+        "ALTER TABLE trendlyne_stock_profile ADD COLUMN promoter_chg_qoq REAL",
+        "ALTER TABLE trendlyne_stock_profile ADD COLUMN fii_chg_qoq REAL",
+        "ALTER TABLE trendlyne_stock_profile ADD COLUMN mf_chg_qoq REAL",
+        "ALTER TABLE trendlyne_stock_profile ADD COLUMN pledge_chg_qoq REAL",
     ]:
         try:
             cur.execute(ddl)
@@ -171,6 +189,40 @@ def _latest(chart_data: list, key: str = "value") -> float | None:
             except (TypeError, ValueError):
                 continue
     return None
+
+
+def _change(chart_data: list, periods: int = 1, key: str = "value") -> float | None:
+    vals = []
+    for row in chart_data or []:
+        v = _safe(row.get(key))
+        if v is not None:
+            vals.append(v)
+    if len(vals) <= periods:
+        return None
+    return round(vals[0] - vals[periods], 4)
+
+
+def _period_end(chart_data: list) -> str | None:
+    """Most-recent period-end ISO date (yearStrTrim/quarterStrTrim) from a chart series."""
+    for row in chart_data or []:
+        raw = row.get("yearStrTrim") or row.get("quarterStrTrim")
+        if raw:
+            try:
+                return date.fromisoformat(str(raw)[:10]).isoformat()
+            except ValueError:
+                continue
+    return None
+
+
+def _sh_floor(as_of_date: str | None) -> str:
+    """First date on which a shareholding disclosure was public. Rows older than this must
+    not receive the snapshot (look-ahead). Defaults to today when the period end is unknown,
+    which confines the stamp to the current row only — conservative, never leaky."""
+    try:
+        d = date.fromisoformat(as_of_date) if as_of_date else None
+    except ValueError:
+        d = None
+    return (d + timedelta(days=SHAREHOLDING_DISCLOSURE_LAG_DAYS)).isoformat() if d else date.today().isoformat()
 
 
 def _cagr(chart_data: list, n: int = 5) -> float | None:
@@ -320,6 +372,11 @@ def extract_profile_data(body: dict) -> dict:
             obj = obj.get(k, {}) if isinstance(obj, dict) else {}
         return obj.get("qtrChartData", []) if isinstance(obj, dict) else []
 
+    promoter_hist = ac(["shareholdingMetrics", "PROMPCT"])
+    fii_hist = ac(["shareholdingMetrics", "FIIHOLD"])
+    mf_hist = ac(["shareholdingMetrics", "MFHOLD"])
+    pledge_hist = ac(["shareholdingMetrics", "PROMPLEDGE"])
+
     return {
         # Annual P&L
         "np_annual":     _latest(ac(["financials", "NP_A"])),
@@ -335,10 +392,20 @@ def extract_profile_data(body: dict) -> dict:
         "ltde_ratio":    _latest(ac(["financialsRatio", "LTDE_A"])),
         "current_ratio": _latest(ac(["financialsRatio", "CRATIO_A"])),
         # Shareholding
-        "promoter_pct": _latest(ac(["shareholdingMetrics", "PROMPCT"])),
-        "fii_pct":      _latest(ac(["shareholdingMetrics", "FIIHOLD"])),
-        "mf_pct":       _latest(ac(["shareholdingMetrics", "MFHOLD"])),
-        "pledge_pct":   _latest(ac(["shareholdingMetrics", "PROMPLEDGE"])),
+        "promoter_pct": _latest(promoter_hist),
+        "fii_pct":      _latest(fii_hist),
+        "mf_pct":       _latest(mf_hist),
+        "pledge_pct":   _latest(pledge_hist),
+        "promoter_chg_qoq": _change(promoter_hist),
+        "fii_chg_qoq":      _change(fii_hist),
+        "mf_chg_qoq":       _change(mf_hist),
+        "pledge_chg_qoq":   _change(pledge_hist),
+        # Latest period end across the shareholding series → drives the point-in-time floor.
+        "shareholding_as_of": max(
+            (p for p in (_period_end(promoter_hist), _period_end(fii_hist),
+                         _period_end(mf_hist), _period_end(pledge_hist)) if p),
+            default=None,
+        ),
         # CAGR
         "rev_cagr_5y": _cagr(ac(["financials", "SR_A"]), n=5),
         "np_cagr_5y":  _cagr(ac(["financials", "NP_A"]), n=5),
@@ -359,11 +426,12 @@ def upsert_profile(symbol: str, today: str, profile: dict, con) -> None:
             ebitda_margin, np_margin, cfo_annual,
             roe, roce, ltde_ratio, current_ratio,
             promoter_pct, fii_pct, mf_pct, pledge_pct,
+            promoter_chg_qoq, fii_chg_qoq, mf_chg_qoq, pledge_chg_qoq,
             rev_cagr_5y, np_cagr_5y,
             rev_growth_yoy_q, np_growth_yoy_q,
             analyst_target_mean, analyst_count, analyst_buy_pct, analyst_upside_pct,
             last_dividend_amt, last_ex_date, days_since_dividend, company_description
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(symbol, date) DO UPDATE SET
             np_annual           = excluded.np_annual,
             ebitda_annual       = excluded.ebitda_annual,
@@ -380,6 +448,10 @@ def upsert_profile(symbol: str, today: str, profile: dict, con) -> None:
             fii_pct             = excluded.fii_pct,
             mf_pct              = excluded.mf_pct,
             pledge_pct          = excluded.pledge_pct,
+            promoter_chg_qoq    = excluded.promoter_chg_qoq,
+            fii_chg_qoq         = excluded.fii_chg_qoq,
+            mf_chg_qoq          = excluded.mf_chg_qoq,
+            pledge_chg_qoq      = excluded.pledge_chg_qoq,
             rev_cagr_5y         = excluded.rev_cagr_5y,
             np_cagr_5y          = excluded.np_cagr_5y,
             rev_growth_yoy_q    = excluded.rev_growth_yoy_q,
@@ -403,6 +475,8 @@ def upsert_profile(symbol: str, today: str, profile: dict, con) -> None:
         _safe(profile.get("ltde_ratio")), _safe(profile.get("current_ratio")),
         _safe(profile.get("promoter_pct")), _safe(profile.get("fii_pct")),
         _safe(profile.get("mf_pct")), _safe(profile.get("pledge_pct")),
+        _safe(profile.get("promoter_chg_qoq")), _safe(profile.get("fii_chg_qoq")),
+        _safe(profile.get("mf_chg_qoq")), _safe(profile.get("pledge_chg_qoq")),
         _safe(profile.get("rev_cagr_5y")), _safe(profile.get("np_cagr_5y")),
         _safe(profile.get("rev_growth_yoy_q")), _safe(profile.get("np_growth_yoy_q")),
         _safe(profile.get("analyst_target_mean")),
@@ -418,6 +492,10 @@ def upsert_profile(symbol: str, today: str, profile: dict, con) -> None:
 def backfill_technical_signals(symbol: str, profile: dict, con) -> None:
     if not profile:
         return
+    # Point-in-time: shareholding + its QoQ deltas apply only to rows on/after the disclosure
+    # was public (date >= floor), NULL on older rows — never smear the latest ownership snapshot
+    # onto history the model trains on. Same discipline as mf_stock_holdings + the ET_Stats fetchers.
+    sh_floor = _sh_floor(profile.get("shareholding_as_of"))
     cur = con.cursor()
     cur.execute("""
         UPDATE technical_signals SET
@@ -428,9 +506,14 @@ def backfill_technical_signals(symbol: str, profile: dict, con) -> None:
             roce_annual         = COALESCE(?, roce_annual),
             ebitda_margin       = COALESCE(?, ebitda_margin),
             np_margin           = COALESCE(?, np_margin),
-            promoter_pct        = COALESCE(?, promoter_pct),
-            fii_pct             = COALESCE(?, fii_pct),
-            pledge_pct          = COALESCE(?, pledge_pct),
+            promoter_pct        = CASE WHEN date >= ? THEN COALESCE(?, promoter_pct)     ELSE NULL END,
+            fii_pct             = CASE WHEN date >= ? THEN COALESCE(?, fii_pct)          ELSE NULL END,
+            mf_pct              = CASE WHEN date >= ? THEN COALESCE(?, mf_pct)           ELSE NULL END,
+            pledge_pct          = CASE WHEN date >= ? THEN COALESCE(?, pledge_pct)       ELSE NULL END,
+            promoter_chg_qoq    = CASE WHEN date >= ? THEN COALESCE(?, promoter_chg_qoq) ELSE NULL END,
+            fii_chg_qoq         = CASE WHEN date >= ? THEN COALESCE(?, fii_chg_qoq)      ELSE NULL END,
+            mf_chg_qoq          = CASE WHEN date >= ? THEN COALESCE(?, mf_chg_qoq)       ELSE NULL END,
+            pledge_chg_qoq      = CASE WHEN date >= ? THEN COALESCE(?, pledge_chg_qoq)   ELSE NULL END,
             rev_growth_yoy_q    = COALESCE(?, rev_growth_yoy_q),
             np_growth_yoy_q     = COALESCE(?, np_growth_yoy_q),
             days_since_dividend = COALESCE(?, days_since_dividend),
@@ -442,8 +525,14 @@ def backfill_technical_signals(symbol: str, profile: dict, con) -> None:
         _safe(profile.get("analyst_buy_pct")),
         _safe(profile.get("roe")),   _safe(profile.get("roce")),
         _safe(profile.get("ebitda_margin")), _safe(profile.get("np_margin")),
-        _safe(profile.get("promoter_pct")), _safe(profile.get("fii_pct")),
-        _safe(profile.get("pledge_pct")),
+        sh_floor, _safe(profile.get("promoter_pct")),
+        sh_floor, _safe(profile.get("fii_pct")),
+        sh_floor, _safe(profile.get("mf_pct")),
+        sh_floor, _safe(profile.get("pledge_pct")),
+        sh_floor, _safe(profile.get("promoter_chg_qoq")),
+        sh_floor, _safe(profile.get("fii_chg_qoq")),
+        sh_floor, _safe(profile.get("mf_chg_qoq")),
+        sh_floor, _safe(profile.get("pledge_chg_qoq")),
         _safe(profile.get("rev_growth_yoy_q")), _safe(profile.get("np_growth_yoy_q")),
         int(profile.get("days_since_dividend") or 0) if profile.get("days_since_dividend") is not None else None,
         _safe(profile.get("last_dividend_amt")),

@@ -2371,6 +2371,24 @@ runMigration('063_index_membership_pledge_preopen_options', `
   ALTER TABLE technical_signals ADD COLUMN stock_gex_proxy    REAL;
 `);
 
+runMigration('067_ownership_flow_features', `
+  ALTER TABLE technical_signals ADD COLUMN mf_funds_adding      INTEGER;
+  ALTER TABLE technical_signals ADD COLUMN mf_funds_trimming    INTEGER;
+  ALTER TABLE technical_signals ADD COLUMN mf_add_trim_ratio    REAL;
+  ALTER TABLE technical_signals ADD COLUMN mf_pct               REAL;
+  ALTER TABLE technical_signals ADD COLUMN promoter_chg_qoq     REAL;
+  ALTER TABLE technical_signals ADD COLUMN fii_chg_qoq          REAL;
+  ALTER TABLE technical_signals ADD COLUMN mf_chg_qoq           REAL;
+  ALTER TABLE technical_signals ADD COLUMN pledge_chg_qoq       REAL;
+`);
+
+runMigration('068_mf_conviction_ownership_relative', `
+  ALTER TABLE technical_signals ADD COLUMN mf_avg_pct_assets    REAL;
+  ALTER TABLE technical_signals ADD COLUMN mf_big_fund_flow     REAL;
+  ALTER TABLE technical_signals ADD COLUMN mf_flow_vs_sector    REAL;
+  ALTER TABLE technical_signals ADD COLUMN mf_flow_rank         REAL;
+`);
+
 // ── Retention: confluence_signals is an append-only firehose (~700k rows, the single
 // largest contributor to DB bloat). expires_at exists but nothing pruned it. Delete
 // expired rows on boot and every 6h. Keeps the table bounded without losing live signals.

@@ -76,6 +76,36 @@ class TestFundamentalFactors:
         assert X['log_market_cap'].iloc[0] == pytest.approx(np.log1p(1e9), rel=1e-4)
 
 
+class TestOwnershipFlowFeatures:
+    def test_trendlyne_ownership_changes_and_mf_breadth_features_present(self):
+        X = build_features(_make_feature_df())
+        for col in (
+            'mf_pct_tl', 'promoter_chg_qoq', 'fii_chg_qoq', 'mf_chg_qoq_tl',
+            'pledge_chg_qoq', 'inst_chg_qoq', 'mf_add_breadth',
+            'mf_trim_breadth', 'mf_add_trim_ratio', 'mf_conviction',
+        ):
+            assert col in X.columns
+
+    def test_ownership_flow_values_are_normalized(self):
+        df = _make_feature_df(1)
+        df['mf_pct'] = [30.0]
+        df['fii_chg_qoq'] = [2.0]
+        df['mf_chg_qoq'] = [1.0]
+        df['mf_net_share_chg_pct'] = [10.0]
+        df['mf_funds_adding'] = [50]
+        df['mf_funds_trimming'] = [10]
+        df['mf_add_trim_ratio'] = [5.0]
+
+        X = build_features(df)
+
+        assert X['mf_pct_tl'].iloc[0] == pytest.approx(0.5)
+        assert X['inst_chg_qoq'].iloc[0] == pytest.approx(0.3)
+        assert X['mf_add_breadth'].iloc[0] == pytest.approx(0.2)
+        assert X['mf_trim_breadth'].iloc[0] == pytest.approx(0.04)
+        assert X['mf_add_trim_ratio'].iloc[0] == pytest.approx(0.5)
+        assert X['mf_conviction'].iloc[0] == pytest.approx(0.2)
+
+
 class TestImpliedVolFeatures:
     """ATM IV-rank + put/call skew (orthogonal to every price feature) must enter the model
     and fall back to neutral when the options feed has no coverage."""
