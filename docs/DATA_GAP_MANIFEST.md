@@ -9,6 +9,26 @@ remaining accuracy lives in **orthogonal data** and **better labels**, not more 
 indicators. This manifest tracks both. (Note: the triple-barrier label A/B was tested and
 **rejected** — 0.671 vs 0.706 held-out; see [[ml-label-experiments]] / the ensemble-label spec.)
 
+> **⚠️ 2026-07-10 reality check — the headline AUC does NOT survive deployment.** The 0.71/0.75
+> figure is purged-CV on the training label. The *stored, rank-scaled* `win_probability` that
+> actually gates/sizes signals has **live per-regime AUC ≈0.50 in BULL and SIDEWAYS**, and only
+> 0.613 in BEAR. So the model's usable edge is regime-dependent and currently weak in the
+> dominant regimes. Two consequences for this manifest: (1) adding daily point-features to lift
+> a CV number that doesn't deploy is low-value; (2) the one component that *does* show durable
+> out-of-sample edge is the new **breakout classifier** — see below. Prioritise data that lifts
+> the breakout model, not the win/loss ensemble's CV.
+
+> **✅ 2026-07-10 — breakout classifier is the strongest real signal.** `breakout_classifier.py`
+> learns a cross-sectional target = P(stock makes a ≥6% up-move within 10 trading days), labelled
+> from **forward** `stock_ohlcv` (no emitted-signal selection bias). Validated on 5 years /
+> ~800k rows after the MC deep-history backfill: **honest purged-OOF AUC 0.6138, top-decile
+> breakout rate ~46% vs 31.4% base = 1.47× lift.** (An earlier 0.73 was an artifact of 16 dates
+> in a bull window + row-level rather than date-level purging — always purge the 10-day forward
+> label by DATE with a 10-day embargo.) It runs advisory-only today (writes
+> `technical_signals.breakout_probability`, single-LightGBM, full-universe); nothing ranks/sizes
+> on it yet. **The best orthogonal feeds below (delivery, options, sector) should be aimed at
+> lifting this 0.61, and the ranker should blend `breakout_probability` as a component score.**
+
 ---
 
 ## A. Shipped this pass (no new feed — computed from data we already hold)

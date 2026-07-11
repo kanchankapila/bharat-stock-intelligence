@@ -365,12 +365,19 @@ python src/server/feature_engineering.py --lookback 252
 
 ---
 
-## Database Tables (67 total)
+## Database Tables (~126 total)
+
+> The trade-signal model was consolidated in the Phase-3 program: **`unified_signals` is the
+> single trade-signal table** and the legacy `signals` table was **dropped**. `unified_recommendations`
+> (from `unified_ranker.py`) is the canonical cross-source ranking. The table set has grown well
+> past the original 67 as alt-data fetchers were added (delivery, insider, options OI, credit
+> ratings, corporate calendar, market breadth, analyst estimates, etc.); the groups below list
+> the load-bearing core, not every table.
 
 | Group | Tables |
 |---|---|
 | Core | `users`, `watchlist`, `nse_stocks`, `stock_ohlcv`, `stock_fundamentals` |
-| Signals | `signals`, `technical_signals`, `technical_scans`, `confluence_signals`, `unified_signals` |
+| Signals | `technical_signals`, `technical_scans`, `confluence_signals`, `unified_signals`, `unified_recommendations` |
 | Outcomes | `signal_outcomes`, `unified_signal_outcomes`, `recommendation_log` |
 | Screeners | `trendlyne_screeners`, `trendlyne_screener_stocks`, `moneycontrol_screeners`, `moneycontrol_screener_stocks`, `etnow_screeners`, `etnow_screener_stocks`, `screener_master`, `screener_reliability` |
 | ML Models | `model_registry`, `feature_importance_log`, `feature_store`, `deep_learning_predictions`, `dl_model_performance` |

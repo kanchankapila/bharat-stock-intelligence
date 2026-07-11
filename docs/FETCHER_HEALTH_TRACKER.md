@@ -2,8 +2,9 @@
 
 _Living record of every network-calling fetcher script in `src/server/`, its current health,
 and pending action items. Written 2026-07-04 after a full live audit (every fetcher run at
-least once against production URLs), followed by two same-day fix passes. Update this file
-whenever a fetcher's status changes — don't let it go stale._
+least once against production URLs), followed by two same-day fix passes; re-swept 2026-07-11
+(all ~95 `runPython` scripts, 5 more fixes — see the 2026-07-11 section below). Update this
+file whenever a fetcher's status changes — don't let it go stale._
 
 ---
 
@@ -34,6 +35,26 @@ sets this env var and is unaffected.
 | `mc_corporate_calendar_fetcher.py` | Unguarded `date.fromisoformat()` on `corporate_actions.ex_date` (confirmed `TEXT` in Postgres) — any malformed date (e.g. a time suffix) would raise and abort the whole run | Guarded with try/except + strips a time suffix before parsing (`str(last_ex).strip().split()[0]`); unparseable dates are now skipped per-symbol instead of aborting the run. Verified against both a time-suffixed date and a totally garbage string. |
 | `marketStatusService.ts` | `isMarketOpen()`'s catch/fallback path never populated `cache`, so an NSE outage caused all 4 call sites to redo two live network calls (~20s) on every single invocation instead of respecting the 60s cache | Cache the fallback result too (short 20s TTL). Also added a secondary live source — BSE's `json.bselivefeeds.indiatimes.com/ET_Community/holidaylist` feed (holiday-aware, tells you *why* the market is closed) — tried before falling back to the pure weekday/time heuristic. Verified: forced-NSE-down test correctly engages BSE, and 3 consecutive calls during an outage only hit the network once each (caching confirmed). |
 | `trendlyneService.ts` (`fetchTrendlyneSectorRotation`/`fetchTrendlyneIndexRotation`) | Still used bare unauthenticated `fetch()` and lost their mock-data fallback, inconsistent with sibling functions upgraded to the auth service | Routed through `fetchTrendlyneWithAuth` for consistency — self-heals via the auth service if Trendlyne ever gates these endpoints too. Verified still returns real data today (these endpoints don't currently require auth). |
+
+## ✅ Fixed 2026-07-11, full job sweep (67 PASS / 24 healthy-slow / 3 hard-fail before fixes)
+
+Ran all ~95 `runPython` scripts extracted from `queues.ts` directly against live Postgres.
+Five soft/hard bugs fixed + verified (`npx tsc --noEmit` clean). Committed on branch
+`fix/job-reliability-sweep` (53b2851, 5b6d7dd), now merged to `main`.
+
+| Script | Bug | Fix |
+|---|---|---|
+| `pcr_fetcher.py` (Nifty GEX) | MoneyControl OI endpoint `priceapi.moneycontrol.com/technicalCompanyData/oiData/*` now returns HTTP 404 — dealer gamma-exposure went empty | Rewired onto NiftyTrader index option-chain (`webapi.niftytrader.in/webapi/option/option-chain-data?symbol=NIFTY`), which carries absolute strike OI + spot + totals. `pcr_fetcher` already used NiftyTrader for equity OI/PCR — the working equity path was the tell. Verified `dealer_gex=+42283B` (long gamma). |
+| `iv_features.py` | Uncommitted `ALTER TABLE` via a bare `ConnWrapper` — PG's transactional DDL rolled it back on `close()`, so a later separate-txn `executemany` hit `UndefinedColumn` (SQLite auto-commits DDL, so dev never saw it) | Switched to `db_compat.safe_alter(None, ddl)` (`ADD COLUMN IF NOT EXISTS` in its own committed `engine.begin()` txn). |
+| `insider_transactions_fetcher.py` | Compared a `TEXT` `transaction_date` column against a Python `datetime.date` param → PG `no operator matches` (SQLite's dynamic typing hid it) | Bind `.isoformat()` strings (ISO dates sort lexicographically). |
+| `working_capital_fetcher.py` + `financial_ratios_fetcher.py` | ET_Stats returns literal `'NA'`; `float(x or 0)` throws (`'NA'` is truthy) and `'NA' < threshold` raises `TypeError` — failing 100% of stocks silently (per-item try/except, exit 0, zero output) | Added `_num(v, default=None)` = `try: float(v) except (TypeError,ValueError): return default`. |
+| `online_learner.py` (call site) | `update_priors_from_outcomes(conn, df)` called with an extra `conn` arg — signature is `(outcomes_df)`; the `TypeError` was swallowed so priors never updated | Dropped the `conn` arg (the function is file-based). |
+
+Also hardened `queues.ts::processConfluenceOutcomes` (`Promise.all`→`Promise.allSettled` +
+per-script `.catch` so one script can't abort its siblings) and added ONE safe parallel batch
+in `processMlDailyOps` (`moneycontrol_fetcher || institutional_quant_engine || finbert_scorer`
+— disjoint tables, no shared advisory locks). Paired with the `confluence_ml_engine.py` LATERAL
+rewrite (16s vs >8min on the live 1.9M-row table).
 
 ## ✅ Fixed 2026-07-04, pass 2 (verified live)
 
