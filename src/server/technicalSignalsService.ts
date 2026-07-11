@@ -306,13 +306,17 @@ function computeADX(rows: OHLCVRow[], period = 14): number[] {
   return adx;
 }
 
-// Nifty50 regime — reads from stock_ohlcv; defaults to SIDEWAYS if Nifty data absent
-async function computeNiftyRegime(): Promise<'BULL' | 'BEAR' | 'SIDEWAYS'> {
+// Nifty50 regime — reads from stock_ohlcv; defaults to SIDEWAYS if Nifty data absent.
+// asOf bounds the lookback so a historical scan sees the regime as it was on the scan date,
+// not today's (live scans pass today → the bound is a no-op).
+async function computeNiftyRegime(asOf: string): Promise<'BULL' | 'BEAR' | 'SIDEWAYS'> {
   try {
     const rows = await dbAll(
       `SELECT close FROM stock_ohlcv
        WHERE symbol IN ('NIFTY50','NIFTY','NIFTY 50','^NSEI','INDIA50')
-       ORDER BY date DESC LIMIT 210`
+         AND date <= ?
+       ORDER BY date DESC LIMIT 210`,
+      [asOf]
     ) as { close: number }[];
     if (rows.length < 50) return 'SIDEWAYS';
 
@@ -381,11 +385,13 @@ async function loadEarningsCalendar(): Promise<Map<string, string>> {
   return map;
 }
 
-// Load 3-day FII net flow (negative = institutions selling)
-async function loadFIIFlow3d(): Promise<number | null> {
+// Load 3-day FII net flow (negative = institutions selling). asOf bounds the lookback so a
+// historical scan sees the flow as of the scan date, not today's (live scans pass today).
+async function loadFIIFlow3d(asOf: string): Promise<number | null> {
   try {
     const rows = await dbAll(
-      `SELECT fii_net FROM fii_dii_flow ORDER BY date DESC LIMIT 3`
+      `SELECT fii_net FROM fii_dii_flow WHERE date <= ? ORDER BY date DESC LIMIT 3`,
+      [asOf]
     ) as { fii_net: number }[];
     if (rows.length === 0) return null;
     return rows.reduce((a, r) => a + (r.fii_net ?? 0), 0);
@@ -1036,10 +1042,10 @@ export async function runTechnicalSignalScan(options: {
 
   try {
     // ── Pre-scan context (computed once, applied to all stocks) ──────────────
-    const niftyRegime      = await computeNiftyRegime();
+    const niftyRegime      = await computeNiftyRegime(scanDate);
     const winRates         = await loadSignalWinRates(15, niftyRegime);
     const learnedWeights   = await loadLearnedWeights(niftyRegime);
-    const fii3dNet         = await loadFIIFlow3d();
+    const fii3dNet         = await loadFIIFlow3d(scanDate);
     const earningsCalendar = await loadEarningsCalendar();
     const newsSentiment    = await loadRecentNewsSentiment(2); // past 48 hours of news
     console.log(`[SIGNALS] Regime: ${niftyRegime} | Win-rate records: ${winRates.size} | FII 3d: ${fii3dNet ?? 'N/A'} Cr | News Sentiment: ${newsSentiment.size} stocks | Earnings watchlist: ${earningsCalendar.size}`);
