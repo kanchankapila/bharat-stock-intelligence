@@ -329,7 +329,7 @@ def run(window_days: int = 180, min_new: int = 5, dry_run: bool = False):
 
         try:
             from signal_type_priors import update_priors_from_outcomes
-            update_priors_from_outcomes(conn, df[['signals_json', 'outcome']])
+            update_priors_from_outcomes(df[['signals_json', 'outcome']])
             print(f"[OnlineLearner] Signal-type priors updated.")
         except Exception as e:
             print(f"[OnlineLearner] Prior update skipped: {e}")

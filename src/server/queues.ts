@@ -228,9 +228,14 @@ async function processConfluenceCompute(_job: Job): Promise<{ computed: number; 
 }
 
 async function processConfluenceOutcomes(_job: Job): Promise<void> {
-  await Promise.all([
-    runPython('confluence_outcome_tracker.py', [], 120_000),
-    runPython('confluence_ml_engine.py', ['--train'], 120_000),
+  // allSettled + per-script .catch: a throw in either script (timeout, transient DB blip,
+  // XGBoost OOM) must not abort the sibling that already succeeded — the fragility that
+  // turned a slow training query into a permanent fail/retry loop for this exact job.
+  await Promise.allSettled([
+    runPython('confluence_outcome_tracker.py', [], 120_000)
+      .catch(e => console.warn('[QUEUE] confluence_outcome_tracker failed:', (e as Error).message)),
+    runPython('confluence_ml_engine.py', ['--train'], 120_000)
+      .catch(e => console.warn('[QUEUE] confluence_ml_engine train failed:', (e as Error).message)),
   ]);
 }
 
@@ -428,7 +433,10 @@ async function processIntradayFetcher(_job: Job): Promise<void> {
 
 async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   // Point-in-time fundamentals snapshot first — builds the as-of trail load_training_data joins.
-  await runPython('fundamentals_snapshot.py', [], 90_000)
+  // Runs in ~2s solo but its DELETE+INSERT…SELECT on fundamentals_history can block far longer on
+  // Postgres lock/CPU contention during the startup catch-up burst (was tripping the old 90s budget
+  // with a bare SIGTERM). 3 min matches the sibling steps and clears the transient contention window.
+  await runPython('fundamentals_snapshot.py', [], 180_000)
     .catch(e => console.warn('[QUEUE] fundamentals_snapshot failed:', (e as Error).message));
 
   // analyst_estimates_snapshot moved to weekly retrain (2328 stocks × 3 calls × 0.4s = ~47 min)
@@ -440,16 +448,23 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
     .catch(e => console.warn('[QUEUE] fii_dii_fetcher failed:', (e as Error).message));
   await runPython('pcr_fetcher.py', ['--gex'], 90_000)
     .catch(e => console.warn('[QUEUE] pcr_fetcher failed:', (e as Error).message));
-  await runPython('moneycontrol_fetcher.py', [], 300_000).catch(e => {
-    console.warn('[QUEUE] moneycontrol_fetcher failed:', (e as Error).message);
-  });
+  // Parallel batch — safe to overlap: disjoint target tables (mc_* vs quant_scores vs
+  // news_sentiment_items), no shared rows, no advisory locks, and distinct resources
+  // (MoneyControl network vs DB-compute vs GPU/FinBERT). The 5-min MC scrape now runs
+  // concurrently with quant scoring + news sentiment instead of after them. pythonRunner
+  // caps global Python concurrency at 5, so this can't oversubscribe the box.
+  await Promise.allSettled([
+    runPython('moneycontrol_fetcher.py', [], 300_000)
+      .catch(e => console.warn('[QUEUE] moneycontrol_fetcher failed:', (e as Error).message)),
+    runPython('institutional_quant_engine.py', [], 120_000)
+      .catch(e => console.warn('[QUEUE] institutional_quant_engine failed:', (e as Error).message)),
+    runPython('finbert_scorer.py', ['--days', '1'], 180_000)
+      .catch(e => console.warn('[QUEUE] finbert_scorer failed:', (e as Error).message)),
+  ]);
   // iv_features reads the ATM IV that pcr_fetcher just wrote to stock_options_oi → technical_signals.iv_rank.
+  // Kept serial: it writes technical_signals, which several later steps also update — avoids row-lock churn.
   await runPython('iv_features.py', [], 90_000)
     .catch(e => console.warn('[QUEUE] iv_features failed:', (e as Error).message));
-  await runPython('institutional_quant_engine.py', [], 120_000)
-    .catch(e => console.warn('[QUEUE] institutional_quant_engine failed:', (e as Error).message));
-  await runPython('finbert_scorer.py', ['--days', '1'], 180_000)
-    .catch(e => console.warn('[QUEUE] finbert_scorer failed:', (e as Error).message));
 
   // Flag bad-print OHLCV bars first so outcome labels skip them (ohlcv_quality.is_suspect).
   await runPython('ohlcv_quality.py', ['--no-ingest'], 180_000)
@@ -806,8 +821,10 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean }> 
   // overview-second-part call both used to make independently).
   // financial_ratios_fetcher.py + working_capital_fetcher.py moved to the
   // trendlyne-ratios-monthly queue (rewritten against ET_Stats — see Tasks 5-6).
-  await runPython('outcome_resolver.py', ['--horizon', '5']);
-  await runPython('outcome_resolver.py', ['--horizon', '15']);
+  await runPython('outcome_resolver.py', ['--horizon', '5'])
+    .catch(e => console.warn('[QUEUE] outcome_resolver 5d failed:', (e as Error).message));
+  await runPython('outcome_resolver.py', ['--horizon', '15'])
+    .catch(e => console.warn('[QUEUE] outcome_resolver 15d failed:', (e as Error).message));
   // Run exit labeler to resolve excursions
   await runPython('exit_labeler.py', [], 10 * 60_000)
     .catch(e => console.warn('[QUEUE] exit_labeler failed:', (e as Error).message));
@@ -817,15 +834,18 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean }> 
   // --tune runs Optuna hyperparameter search (this is what took the model from AUC 0.70 to
   // 0.757 in the first place) — without it, every scheduled retrain silently falls back to
   // untuned defaults, which measured ~0.20 AUC worse on held-out test in one observed run.
-  await runPython('ml_ensemble.py', ['--train', '--tune', '--score'], 90 * 60_000);
+  await runPython('ml_ensemble.py', ['--train', '--tune', '--score'], 90 * 60_000)
+    .catch(e => console.warn('[QUEUE] ml_ensemble train failed:', (e as Error).message));
   await runPython('cs_ranker.py', ['--train', '--score'], 30 * 60_000)
     .catch(e => console.warn('[QUEUE] cs_ranker retrain failed:', (e as Error).message));
   await runPython('strategy_optimizer.py', [], 30 * 60_000)
     .catch(e => console.warn('[QUEUE] strategy_optimizer failed:', (e as Error).message));
   await runPython('backtester.py', ['--start', '2023-01-01'], 30 * 60_000)
     .catch(e => console.warn('[QUEUE] backtester failed:', (e as Error).message));
-  await runPython('performance_tracker.py', ['--horizon', '5']);
-  await runPython('performance_tracker.py', ['--horizon', '15']);
+  await runPython('performance_tracker.py', ['--horizon', '5'])
+    .catch(e => console.warn('[QUEUE] performance_tracker 5d failed:', (e as Error).message));
+  await runPython('performance_tracker.py', ['--horizon', '15'])
+    .catch(e => console.warn('[QUEUE] performance_tracker 15d failed:', (e as Error).message));
   return { success: true };
 }
 

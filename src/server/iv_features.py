@@ -24,7 +24,7 @@ import datetime
 import numpy as np
 import pandas as pd
 
-from db_compat import read_df, executemany, connect
+from db_compat import read_df, executemany, connect, safe_alter
 
 IV_RANK_WINDOW = 252   # trading days (~1y) — standard IV-rank lookback
 IV_RANK_MIN_OBS = 20   # need at least this many prior obs before a rank is meaningful
@@ -133,16 +133,15 @@ def run(only_date: str | None = None) -> int:
         return 0
 
     conn = connect()
-    # Ensure new columns exist on technical_signals
-    for col_def in [
+    # Ensure new columns exist on technical_signals. safe_alter commits the DDL in its own
+    # transaction (ADD COLUMN IF NOT EXISTS on PG) — a bare conn.execute here is never committed
+    # and rolls back on conn.close() below, so the executemany then hit UndefinedColumn on Postgres.
+    for col, typ in [
         ("call_wall_dist_pct", "REAL DEFAULT 0"),
         ("put_wall_dist_pct",  "REAL DEFAULT 0"),
         ("near_expiry_gamma",  "REAL DEFAULT 0"),
     ]:
-        try:
-            conn.execute(f"ALTER TABLE technical_signals ADD COLUMN {col_def[0]} {col_def[1]}")
-        except Exception:
-            pass
+        safe_alter(None, f"ALTER TABLE technical_signals ADD COLUMN {col} {typ}")
 
     # Read spot prices needed for wall computation from stock_option_features
     spot_rows = conn.execute(

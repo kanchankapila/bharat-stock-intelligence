@@ -129,8 +129,11 @@ def per_regime_auc(conn: ConnWrapper, min_n: int = 50) -> dict:
     """).fetchall()
     g: dict = {}
     for r in rows:
+        p = float(r['p'])
+        if not math.isfinite(p):   # a stored float NaN is not SQL NULL, so it slips past the WHERE
+            continue               # filter and crashes roc_auc_score with "Input contains NaN"
         d = g.setdefault(r['regime'], {'p': [], 'y': []})
-        d['p'].append(float(r['p']))
+        d['p'].append(p)
         d['y'].append(int(r['y']))
     out: dict = {}
     for reg, d in g.items():
