@@ -29,6 +29,7 @@ import { useNewsFeed, NewsArticle } from './services/newsService';
 import { detectCandlestickPatterns, Candlestick } from './lib/candlestickUtils';
 // ─── Always-loaded (shell, drawers, inline dashboard widgets) ─────────────────
 import MCStockInfoPanel from './components/MCStockInfoPanel';
+import { FinologyPanel } from './components/FinologyPanel';
 import { MCIndexDetailPanel } from './components/MCIndexDetailPanel';
 import { GlobalMarketCards } from './components/GlobalMarketCards';
 import { Card } from './components/Card';
@@ -3385,6 +3386,7 @@ const StockDetails: React.FC<{
                <MCErrorBoundary>
                  <MCStockInfoPanel symbol={symbol} scId={mcScId} section="peers" onSelectStock={onSelectStock} watchlist={watchlist} onToggleWatchlist={onToggleWatchlist} />
                </MCErrorBoundary>
+               <FinologyPanel symbol={symbol} />
             </div>
           )}
 

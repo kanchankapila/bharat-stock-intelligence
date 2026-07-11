@@ -3,6 +3,7 @@ import { fetchMCRatios, fetchETShareholding, fetchETCorporateActions, fetchMFInv
 import { fetchTrendlyneFundamentals, fetchCompanyOverview } from "../trendlyneService";
 import { getMoneycontrolInsights } from "../moneycontrolService";
 import { getStockInsights } from "../insightService";
+import { getFinologyData } from "../finologyService";
 import { router, publicProcedure } from "../trpc";
 
 export const fundamentalsRouter = router({
@@ -88,5 +89,12 @@ export const fundamentalsRouter = router({
         WHERE symbol = ?
       `, [input.symbol]);
       return row || null;
+    }),
+
+  // Finology valuation + peers for the stock-detail page (unlocked, keyed by fincode; 1h cache).
+  getFinologyData: publicProcedure
+    .input(z.object({ symbol: z.string() }))
+    .query(async ({ input }) => {
+      return getFinologyData(input.symbol);
     }),
 });
