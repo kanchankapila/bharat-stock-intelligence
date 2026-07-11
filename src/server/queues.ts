@@ -450,6 +450,12 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await runPython('backfill_technical_features.py', ['--full-today'], 10 * 60_000)
     .catch(e => console.warn('[QUEUE] technical grid-ensurer failed:', (e as Error).message));
 
+  // Forward-capture alt-data: MoneyControl breakout-pattern flags + technical rating onto
+  // today's full grid (can't be backfilled — captured daily to accumulate for a future
+  // richer breakout model). Runs after the grid-ensurer so it writes onto full-universe rows.
+  await runPython('mc_techscanner_fetcher.py', [], 5 * 60_000)
+    .catch(e => console.warn('[QUEUE] mc_techscanner failed:', (e as Error).message));
+
   // Point-in-time fundamentals snapshot — builds the as-of trail load_training_data joins.
   await runPython('fundamentals_snapshot.py', [], 90_000)
     .catch(e => console.warn('[QUEUE] fundamentals_snapshot failed:', (e as Error).message));

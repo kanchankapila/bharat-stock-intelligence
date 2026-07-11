@@ -1371,6 +1371,11 @@ migrateColumn('technical_signals', 'vwap_deviation_pct',   'REAL');
 migrateColumn('technical_signals', 'first_hour_vol_share', 'REAL');
 // breakout classifier (Lever #4) — cross-sectional P(>=6% move in next 10 trading days)
 migrateColumn('technical_signals', 'breakout_probability', 'REAL');
+// MoneyControl technical scanners + rating (forward-capture alt-data features)
+migrateColumn('technical_signals', 'mc_bullish_scan_count', 'INTEGER');
+migrateColumn('technical_signals', 'mc_scan_52w_high', 'INTEGER');
+migrateColumn('technical_signals', 'mc_scan_squeeze_bo', 'INTEGER');
+migrateColumn('technical_signals', 'mc_tech_rating', 'INTEGER');
 
 // ATM implied vol + skew snapshot (captured by pcr_fetcher.py from the NSE option chain)
 migrateColumn('stock_options_oi', 'atm_iv',   'REAL');
