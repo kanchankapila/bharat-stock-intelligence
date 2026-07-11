@@ -73,14 +73,20 @@ HORIZON_MULT = {
     'long_term':  1.10,
 }
 
+# `breakout` is the breakout classifier's P(>=6% up-move in 10d) — the one component with
+# proven durable out-of-sample edge (5yr purged-OOF AUC 0.61, top-decile 1.47x base rate). It
+# is weighted heavier in momentum regimes (BULL/SIDEWAYS/HIGH_VOL) where cross-sectional
+# breakouts pay, and lighter in risk-off regimes (BEAR/CRASH) where a breakout into a falling
+# tape is a trap — mirroring REGIME_CAT_TILT. _blend renormalizes over engines present for each
+# symbol, so these weights need not sum to 1 and adding this key leaves the others' balance intact.
 REGIME_WEIGHTS = {
-    'BULL':     {'screener': 0.30, 'ml': 0.20, 'cs': 0.05, 'confluence': 0.20, 'technical': 0.15, 'dl': 0.10},
-    'BEAR':     {'screener': 0.35, 'ml': 0.20, 'cs': 0.05, 'confluence': 0.20, 'technical': 0.10, 'dl': 0.10},
-    'HIGH_VOL': {'screener': 0.20, 'ml': 0.15, 'cs': 0.05, 'confluence': 0.15, 'technical': 0.30, 'dl': 0.15},
-    'CRASH':    {'screener': 0.40, 'ml': 0.20, 'cs': 0.05, 'confluence': 0.15, 'technical': 0.10, 'dl': 0.10},
+    'BULL':     {'screener': 0.30, 'ml': 0.20, 'cs': 0.05, 'confluence': 0.20, 'technical': 0.15, 'dl': 0.10, 'breakout': 0.15},
+    'BEAR':     {'screener': 0.35, 'ml': 0.20, 'cs': 0.05, 'confluence': 0.20, 'technical': 0.10, 'dl': 0.10, 'breakout': 0.05},
+    'HIGH_VOL': {'screener': 0.20, 'ml': 0.15, 'cs': 0.05, 'confluence': 0.15, 'technical': 0.30, 'dl': 0.15, 'breakout': 0.10},
+    'CRASH':    {'screener': 0.40, 'ml': 0.20, 'cs': 0.05, 'confluence': 0.15, 'technical': 0.10, 'dl': 0.10, 'breakout': 0.05},
     # SIDEWAYS was silently falling back to BULL; a balanced blend is more appropriate for
     # a rangebound tape (lean slightly less on momentum/dl than BULL).
-    'SIDEWAYS': {'screener': 0.32, 'ml': 0.20, 'cs': 0.05, 'confluence': 0.20, 'technical': 0.13, 'dl': 0.10},
+    'SIDEWAYS': {'screener': 0.32, 'ml': 0.20, 'cs': 0.05, 'confluence': 0.20, 'technical': 0.13, 'dl': 0.10, 'breakout': 0.13},
 }
 
 # Per-regime CATEGORY tilt (multipliers on CAT_BASE_WT). Rangebound/neutral = SIDEWAYS (no
@@ -535,6 +541,29 @@ class UnifiedRanker:
             self.conn.rollback()
             return {}
 
+    def _get_breakout_scores(self):
+        """Latest breakout_probability per symbol (technical_signals, written daily full-universe
+        by breakout_classifier.py --score), scaled to 0-100 to sit on the same scale as the other
+        engines. This is the model with the strongest durable OOS edge; it was advisory-only until
+        it was added to REGIME_WEIGHTS/engine_maps here."""
+        cutoff = (date.today() - timedelta(days=5)).isoformat()
+        try:
+            rows = self.conn.execute(
+                "SELECT symbol, breakout_probability FROM technical_signals "
+                "WHERE date >= ? AND breakout_probability IS NOT NULL ORDER BY date DESC",
+                (cutoff,),
+            ).fetchall()
+            result = {}
+            for r in rows:  # first row per symbol is the latest (ORDER BY date DESC)
+                sym = r['symbol']
+                if sym not in result:
+                    result[sym] = float(r['breakout_probability'] or 0) * 100
+            return result
+        except Exception as e:
+            print(f"[UnifiedRanker] _get_breakout_scores failed: {e}")
+            self.conn.rollback()
+            return {}
+
     def _get_avg_track_record(self):
         cutoff = (date.today() - timedelta(days=90)).isoformat()
         try:
@@ -729,6 +758,7 @@ class UnifiedRanker:
         confluence_scores = self._get_confluence_scores()
         technical_scores  = self._get_technical_scores()
         dl_scores         = self._get_dl_scores()
+        breakout_scores   = self._get_breakout_scores()
         avg_track         = self._get_avg_track_record()
 
         # Pre-loaded once for the whole universe (was up to 5 queries PER symbol inside
@@ -739,7 +769,7 @@ class UnifiedRanker:
         unified_map    = self._get_unified_signals_latest_map()
         sector_map     = self._get_sector_map()
 
-        all_symbols = set(screener_scores) | set(ml_scores) | set(cs_scores) | set(confluence_scores) | set(technical_scores) | set(dl_scores)
+        all_symbols = set(screener_scores) | set(ml_scores) | set(cs_scores) | set(confluence_scores) | set(technical_scores) | set(dl_scores) | set(breakout_scores)
 
         engine_maps = {
             'screener':   screener_scores,
@@ -748,6 +778,7 @@ class UnifiedRanker:
             'confluence': confluence_scores,
             'technical':  technical_scores,
             'dl':         dl_scores,
+            'breakout':   breakout_scores,
         }
 
         results = []

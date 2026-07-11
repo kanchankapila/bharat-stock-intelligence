@@ -29,6 +29,10 @@ EMA_ALPHA   = 0.15
 WEIGHT_MIN  = 0.3
 WEIGHT_MAX  = 2.0
 MIN_SAMPLES = 3
+# Default look-back when --days is not given. The EMA is meant to track *recent* performance;
+# scanning the full outcomes history every run re-blends the same old rows repeatedly (and hung
+# a dry-run >150s). A bounded window keeps the cron fast and the weights fresh.
+DEFAULT_WINDOW_DAYS = 180
 
 LOSS_MULTIPLIER      = 1.5
 STOP_LOSS_MULTIPLIER = 2.0
@@ -54,19 +58,26 @@ def _parse_signal_types(signals_json: Optional[str]) -> list[str]:
         return []
 
 
-def _get_sector(conn: ConnWrapper, symbol: str) -> str:
-    row = conn.execute(
-        "SELECT sector FROM nse_stocks WHERE symbol = ?", (symbol,)
-    ).fetchone()
-    return (row[0] or 'OTHER') if row else 'OTHER'
+def _d10(x) -> str:
+    """Normalise a signal_date to a 'YYYY-MM-DD' key. signal_outcomes.signal_date is already
+    a date string; unified_signals.signal_date is a timestamptz — [:10] handles both."""
+    return str(x)[:10]
 
 
-def _get_regime(conn: ConnWrapper, symbol: str, date: str) -> str:
-    row = conn.execute(
-        "SELECT nifty_regime FROM technical_signals WHERE symbol = ? AND date = ?",
-        (symbol, date),
-    ).fetchone()
-    return (row[0] or 'SIDEWAYS') if row else 'SIDEWAYS'
+def _load_sector_map(conn: ConnWrapper) -> dict[str, str]:
+    """symbol -> sector, loaded once (was one SELECT per outcome row → N+1)."""
+    rows = conn.execute("SELECT symbol, sector FROM nse_stocks").fetchall()
+    return {r[0]: (r[1] or 'OTHER') for r in rows}
+
+
+def _load_regime_map(conn: ConnWrapper, cutoff: str) -> dict[tuple[str, str], str]:
+    """(symbol, 'YYYY-MM-DD') -> nifty_regime for the window, loaded once (was one SELECT per
+    outcome row → N+1). Bounded by the same cutoff as the outcomes query."""
+    rows = conn.execute(
+        "SELECT symbol, date, nifty_regime FROM technical_signals WHERE date >= ?",
+        (cutoff,),
+    ).fetchall()
+    return {(r[0], _d10(r[1])): (r[2] or 'SIDEWAYS') for r in rows}
 
 
 def _get_current_weight(
@@ -100,20 +111,16 @@ def update_weights(
     days: Optional[int] = None,
     dry_run: bool = False,
 ) -> dict[str, int]:
-    cutoff_clause = ""
-    params: tuple = ()
-    if days:
-        cutoff = (datetime.datetime.now() - datetime.timedelta(days=days)).strftime('%Y-%m-%d')
-        cutoff_clause = "AND signal_date >= ?"
-        params = (cutoff,)
+    window = DEFAULT_WINDOW_DAYS if days is None else days
+    cutoff = (datetime.datetime.now() - datetime.timedelta(days=window)).strftime('%Y-%m-%d')
 
     # Union technical signal outcomes with unified signal outcomes (AI, QUANT)
-    query = f"""
+    query = """
         SELECT symbol, signal_date, horizon_days, return_pct, outcome, signals_json
         FROM signal_outcomes
         WHERE outcome IN ('WIN','LOSS','NEUTRAL','STOP_LOSS')
           AND return_pct IS NOT NULL
-          {cutoff_clause}
+          AND signal_date >= ?
         UNION ALL
         SELECT uso.symbol, uso.signal_date, uso.horizon_days, uso.return_pct, uso.outcome,
                NULL AS signals_json
@@ -121,21 +128,26 @@ def update_weights(
         WHERE uso.outcome IN ('WIN','LOSS','NEUTRAL','STOP_LOSS')
           AND uso.return_pct IS NOT NULL
           AND uso.signal_source NOT IN ('TECHNICAL')
-          {cutoff_clause}
+          AND uso.signal_date >= ?
     """
-    rows = conn.execute(query, params + params).fetchall()
+    rows = conn.execute(query, (cutoff, cutoff)).fetchall()
     if not rows:
         print("[RewardEngine] No resolved outcomes found.")
         return {'processed': 0, 'updated': 0}
 
-    print(f"[RewardEngine] Processing {len(rows)} resolved outcomes...")
+    print(f"[RewardEngine] Processing {len(rows)} resolved outcomes (window={window}d)...")
+
+    # Batch-load the regime + sector lookups once, up front (was one SELECT each PER row → N+1
+    # over the full outcomes history, which hung a dry-run >150s).
+    sector_map = _load_sector_map(conn)
+    regime_map = _load_regime_map(conn, cutoff)
 
     reward_map: dict[tuple, list[float]] = {}
 
     for symbol, signal_date, horizon_days, return_pct, outcome, signals_json in rows:
         reward    = _compute_reward(float(return_pct), int(horizon_days), outcome)
-        regime    = _get_regime(conn, symbol, signal_date)
-        sector    = _get_sector(conn, symbol)
+        regime    = regime_map.get((symbol, _d10(signal_date)), 'SIDEWAYS')
+        sector    = sector_map.get(symbol, 'OTHER')
         sig_types = _parse_signal_types(signals_json)
 
         for st in sig_types:
@@ -176,6 +188,8 @@ def update_source_weights(
     PHASE 3.6: Update per-source reward weights for multi-source learning
     Tracks performance metrics per signal source (AI, technical, quant, news)
     """
+    window = DEFAULT_WINDOW_DAYS if days is None else days
+    cutoff = (datetime.datetime.now() - datetime.timedelta(days=window)).strftime('%Y-%m-%d')
     query = """
         SELECT uso.signal_source, uso.outcome, uso.return_pct, uso.horizon_days,
                us.signal_date, us.symbol
@@ -184,28 +198,25 @@ def update_source_weights(
         WHERE uso.outcome IN ('WIN','LOSS','NEUTRAL','STOP_LOSS')
           AND uso.return_pct IS NOT NULL
           AND uso.signal_source IS NOT NULL
+          AND us.signal_date >= ?
     """
-    params: tuple = ()
-    if days:
-        cutoff = (datetime.datetime.now() - datetime.timedelta(days=days)).strftime('%Y-%m-%d')
-        query += " AND us.signal_date >= ?"
-        params = (cutoff,)
-
-    rows = conn.execute(query, params).fetchall()
+    rows = conn.execute(query, (cutoff,)).fetchall()
     if not rows:
         print("[RewardEngine] No unified signal outcomes found for source tracking.")
         return {'processed': 0, 'updated': 0}
 
-    print(f"[RewardEngine] Processing {len(rows)} unified outcomes for source weights...")
+    print(f"[RewardEngine] Processing {len(rows)} unified outcomes for source weights (window={window}d)...")
+
+    # Batch-load regime + sector once (was one SELECT each PER row → N+1).
+    sector_map = _load_sector_map(conn)
+    regime_map = _load_regime_map(conn, cutoff)
 
     # Organize by (source, regime, sector)
     source_stats: dict[tuple, dict] = {}
 
     for signal_source, outcome, return_pct, horizon_days, signal_date, symbol in rows:
-        # us.signal_date is a timestamptz on Postgres (datetime) but technical_signals.date
-        # is a 'YYYY-MM-DD' string; normalise to the date portion for the regime lookup.
-        regime = _get_regime(conn, symbol, str(signal_date)[:10])
-        sector = _get_sector(conn, symbol)
+        regime = regime_map.get((symbol, _d10(signal_date)), 'SIDEWAYS')
+        sector = sector_map.get(symbol, 'OTHER')
         key = (signal_source or 'unknown', regime, sector)
 
         if key not in source_stats:

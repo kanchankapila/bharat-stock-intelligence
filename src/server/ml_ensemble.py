@@ -32,7 +32,7 @@ Run:  python ml_ensemble.py
       python ml_ensemble.py --min-samples 30
 """
 
-import os, sys, json, math, datetime, argparse, pickle, warnings
+import os, sys, json, math, datetime, argparse, pickle, shutil, warnings
 warnings.filterwarnings('ignore')
 
 import numpy as np
@@ -42,6 +42,10 @@ from db_compat import connect, read_df, use_postgres, ConnWrapper
 
 MODELS_DIR  = os.path.join(os.getcwd(), 'src', 'server', 'ml_models')
 ENSEMBLE_PATH = os.path.join(MODELS_DIR, 'ensemble.pkl')
+# Promotion bar: a retrain must beat the active model's purged-OOF CV AUC by this margin to go
+# live, else the current model is kept (rejected candidate is saved here + registered inactive).
+PROMOTION_MARGIN = 0.005
+CANDIDATE_PATH = ENSEMBLE_PATH + '.candidate'
 
 REGIME_MAP   = {'BULL': 1.0, 'SIDEWAYS': 0.0, 'BEAR': -1.0}
 SIGNAL_TYPES = [
@@ -2161,7 +2165,8 @@ def predict_proba_ensemble(ensemble: dict, X: pd.DataFrame) -> np.ndarray:
 
 # ── Model Registry ────────────────────────────────────────────────────────────
 
-def register_model(conn: ConnWrapper, ensemble: dict) -> int:
+def register_model(conn: ConnWrapper, ensemble: dict, activate: bool = True,
+                   model_path: str | None = None, notes: str | None = None) -> int:
     version = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
     top_feats = []
     if ensemble.get('feature_importances') and ensemble.get('feature_names'):
@@ -2172,17 +2177,18 @@ def register_model(conn: ConnWrapper, ensemble: dict) -> int:
         top_feats = [{'feature': f, 'importance': round(i, 6)} for f, i in pairs]
 
     cur = conn.cursor()
-    cur.execute("""
-        UPDATE model_registry SET is_active = 0
-        WHERE model_name = 'ensemble' AND is_active = 1
-    """)
+    if activate:
+        cur.execute("""
+            UPDATE model_registry SET is_active = 0
+            WHERE model_name = 'ensemble' AND is_active = 1
+        """)
     cur.execute("""
         INSERT INTO model_registry
             (model_name, model_version, model_type, trained_at,
              training_samples, cv_roc_auc, cv_accuracy,
              test_roc_auc, precision_score, recall_score, f1_score,
              feature_count, top_features_json, model_path, is_active, horizon_days, notes)
-        VALUES ('ensemble', ?, 'Stacking Ensemble', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 15, ?)
+        VALUES ('ensemble', ?, 'Stacking Ensemble', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 15, ?)
         RETURNING id
     """, (
         version,
@@ -2196,8 +2202,9 @@ def register_model(conn: ConnWrapper, ensemble: dict) -> int:
         ensemble.get('test_f1'),
         len(ensemble['feature_names']),
         json.dumps(top_feats),
-        ENSEMBLE_PATH,
-        f"label={ensemble.get('label', 'horizon')}",
+        model_path or ENSEMBLE_PATH,
+        1 if activate else 0,
+        notes or f"label={ensemble.get('label', 'horizon')}",
     ))
     model_id = cur.fetchone()[0]
 
@@ -2221,6 +2228,57 @@ def save_ensemble(ensemble: dict):
     with open(ENSEMBLE_PATH, 'wb') as f:
         pickle.dump(ensemble, f, protocol=pickle.HIGHEST_PROTOCOL)
     print(f"[Ensemble] Saved to {ENSEMBLE_PATH}")
+
+
+def _active_baseline_auc(conn: ConnWrapper) -> float | None:
+    """Purged-OOF CV AUC of the currently active ensemble, or None if there is no active model."""
+    try:
+        row = conn.execute(
+            "SELECT cv_roc_auc FROM model_registry "
+            "WHERE model_name = 'ensemble' AND is_active = 1 ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        return float(row[0]) if row and row[0] is not None else None
+    except Exception:
+        conn.rollback()
+        return None
+
+
+def promote_or_register(conn: ConnWrapper, ensemble: dict) -> int:
+    """Gate activation behind a promotion bar so a retrain can't silently replace a good live
+    model with a worse one (the ensemble.pkl auto-activate incident). The new model must beat the
+    active model's purged-OOF CV AUC by >= PROMOTION_MARGIN. On promotion the current live pkl is
+    backed up (timestamped) before being overwritten; a rejected model is written to CANDIDATE_PATH
+    and registered inactive so the run stays auditable and the candidate is inspectable. With no
+    active baseline (first train) the model is promoted to bootstrap scoring."""
+    new_auc = float(ensemble.get('cv_auc') or 0.0)
+    baseline = _active_baseline_auc(conn)
+
+    if baseline is not None and new_auc < baseline + PROMOTION_MARGIN:
+        try:
+            with open(CANDIDATE_PATH, 'wb') as f:
+                pickle.dump(ensemble, f, protocol=pickle.HIGHEST_PROTOCOL)
+        except Exception as e:
+            print(f"[Ensemble] Could not save candidate: {e}")
+        note = (f"label={ensemble.get('label', 'horizon')}; REJECTED "
+                f"cv_auc={new_auc:.4f} < active {baseline:.4f}+{PROMOTION_MARGIN}")
+        mid = register_model(conn, ensemble, activate=False, model_path=CANDIDATE_PATH, notes=note)
+        print(f"[Ensemble] NOT promoted: cv_auc={new_auc:.4f} vs active {baseline:.4f} "
+              f"(bar +{PROMOTION_MARGIN}). Live model kept; candidate at {CANDIDATE_PATH}, "
+              f"registered inactive id={mid}.")
+        return mid
+
+    if os.path.exists(ENSEMBLE_PATH):
+        backup = f"{ENSEMBLE_PATH}.{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.bak"
+        try:
+            shutil.copy2(ENSEMBLE_PATH, backup)
+            print(f"[Ensemble] Backed up current model to {backup}")
+        except Exception as e:
+            print(f"[Ensemble] Backup failed (continuing): {e}")
+    save_ensemble(ensemble)
+    reason = ("bootstrap (no active baseline)" if baseline is None
+              else f"cv_auc {new_auc:.4f} >= active {baseline:.4f}+{PROMOTION_MARGIN}")
+    print(f"[Ensemble] Promoted: {reason}")
+    return register_model(conn, ensemble, activate=True)
 
 
 _ENSEMBLE_CACHE: dict | None = None
@@ -2538,10 +2596,9 @@ def run(do_train: bool = True, do_score: bool = True,
                                           tuned_params=tuned_params)
                 ensemble['label'] = label
                 if dry_run:
-                    print(f"[Ensemble] Dry-run: would save trained ensemble to {ENSEMBLE_PATH} and register_model. Skipping write.")
+                    print(f"[Ensemble] Dry-run: would evaluate trained ensemble against the promotion bar (save+activate only if it clears it). Skipping write.")
                 else:
-                    save_ensemble(ensemble)
-                    register_model(conn, ensemble)
+                    promote_or_register(conn, ensemble)
 
         if do_score:
             # Auto-retrain if live performance has drifted >4 AUC pts below trained value
@@ -2557,10 +2614,9 @@ def run(do_train: bool = True, do_score: bool = True,
                                                   horizon_days=_hz, min_samples=min_samples)
                     ensemble_new['label'] = label
                     if dry_run:
-                        print(f"[Ensemble] Dry-run: would save drift-retrained ensemble to {ENSEMBLE_PATH} and register_model. Skipping write.")
+                        print(f"[Ensemble] Dry-run: would evaluate drift-retrained ensemble against the promotion bar (save+activate only if it clears it). Skipping write.")
                     else:
-                        save_ensemble(ensemble_new)
-                        register_model(conn, ensemble_new)
+                        promote_or_register(conn, ensemble_new)
 
             ensemble = load_ensemble()
             if ensemble is None:

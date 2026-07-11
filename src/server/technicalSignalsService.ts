@@ -1054,8 +1054,12 @@ export async function runTechnicalSignalScan(options: {
     `) as { symbol: string; pcr: number }[]).forEach(r => { if (r.pcr != null) pcrLatestMap.set(r.symbol, r.pcr); });
 
     console.log('[SIGNALS] Loading OHLCV data...');
+    // Bound by scanDate so a historical scan (options.date in the past) never sees future
+    // bars — every other feature read in this function is already scanDate-bounded. For a
+    // live scan scanDate is today, so this is a no-op there.
     const allRows = await dbAll(
-      `SELECT symbol, date, open, high, low, close, volume FROM stock_ohlcv ORDER BY symbol, date ASC`
+      `SELECT symbol, date, open, high, low, close, volume FROM stock_ohlcv WHERE date <= ? ORDER BY symbol, date ASC`,
+      [scanDate]
     ) as (OHLCVRow & { symbol: string })[];
 
     // Group by symbol
