@@ -572,6 +572,16 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     X['risk_x_score']     = X['global_risk'].clip(0, 3) / 3.0 * X['signal_score']
     # Indian ADR overnight bullishness (0-100 → 0-1). >60 = institutional risk-on for India.
     X['adrs_bullish']     = num('adrs_bullish_pct', 50.0).clip(0, 100) / 100.0
+
+    # Market Mood Index (mmi_fetcher.py → macro_asset_prices INDIA_MMI, 0-100 fear/greed).
+    # A raw market-level scalar didn't help the per-stock model (see india_vix, below), so MMI
+    # is used two ways that DO vary per stock: (1) mmi_x_score — sentiment confirming a stock's
+    # own signal; (2) mmi_extreme_fear — contrarian flag, extreme-fear days historically precede
+    # bounces. Candidate features: the ensemble.pkl promotion bar keeps them out of production
+    # unless they improve held-out AUC. Neutral default 50 for the pre-collection history.
+    X['mmi_norm']         = num('india_mmi', 50.0).clip(0, 100) / 100.0
+    X['mmi_x_score']      = X['mmi_norm'] * X['signal_score']
+    X['mmi_extreme_fear'] = (X['mmi_norm'] < 0.30).astype(float)
     # USD/INR daily return — negative = INR strengthening (bullish for importers, bearish for IT).
     X['usdinr_ret']       = num('usdinr_ret_1d', 0.0).clip(-2, 2)
     # Leading Asian indices (close before India opens) — strongest same-day predictor.
@@ -1002,7 +1012,7 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                    macro_snap.market_np_yoy, macro_snap.earnings_breadth_mkt,
                    macro_snap.fii_net_today,
                    macro_snap.usdinr_chg_pct, macro_snap.nifty_basis_pct, macro_snap.nifty_contango,
-                   macro_snap.india_vix,
+                   macro_snap.india_vix, macro_snap.india_mmi,
                    macro_snap.adrs_bullish_pct, macro_snap.usdinr_ret_1d,
                    macro_snap.nikkei_ret_1d, macro_snap.hangseng_ret_1d,
                    mse.np_growth_yoy AS sector_np_growth_yoy, mse.np_growth_qoq AS sector_np_growth_qoq,
@@ -1097,6 +1107,7 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                     MAX(CASE WHEN symbol='EARNINGS_BREADTH'       THEN close END) AS earnings_breadth_mkt,
                     MAX(CASE WHEN symbol='FII_NET_TODAY'           THEN close END) AS fii_net_today,
                     MAX(CASE WHEN symbol='INDIA_VIX'              THEN close END) AS india_vix,
+                    MAX(CASE WHEN symbol='INDIA_MMI'              THEN close END) AS india_mmi,
                     MAX(CASE WHEN symbol='USDINR_CHG_PCT'          THEN close END) AS usdinr_chg_pct,
                     MAX(CASE WHEN symbol='NIFTY_BASIS_PCT'          THEN close END) AS nifty_basis_pct,
                     MAX(CASE WHEN symbol='NIFTY_CONTANGO'           THEN close END) AS nifty_contango
@@ -1239,7 +1250,7 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                    macro_snap.market_np_yoy, macro_snap.earnings_breadth_mkt,
                    macro_snap.fii_net_today,
                    macro_snap.usdinr_chg_pct, macro_snap.nifty_basis_pct, macro_snap.nifty_contango,
-                   macro_snap.india_vix,
+                   macro_snap.india_vix, macro_snap.india_mmi,
                    macro_snap.adrs_bullish_pct, macro_snap.usdinr_ret_1d,
                    macro_snap.nikkei_ret_1d, macro_snap.hangseng_ret_1d,
                    mse.np_growth_yoy AS sector_np_growth_yoy, mse.np_growth_qoq AS sector_np_growth_qoq,
@@ -1334,6 +1345,7 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                     MAX(CASE WHEN symbol='EARNINGS_BREADTH'       THEN close END) AS earnings_breadth_mkt,
                     MAX(CASE WHEN symbol='FII_NET_TODAY'           THEN close END) AS fii_net_today,
                     MAX(CASE WHEN symbol='INDIA_VIX'              THEN close END) AS india_vix,
+                    MAX(CASE WHEN symbol='INDIA_MMI'              THEN close END) AS india_mmi,
                     MAX(CASE WHEN symbol='USDINR_CHG_PCT'          THEN close END) AS usdinr_chg_pct,
                     MAX(CASE WHEN symbol='NIFTY_BASIS_PCT'          THEN close END) AS nifty_basis_pct,
                     MAX(CASE WHEN symbol='NIFTY_CONTANGO'           THEN close END) AS nifty_contango
@@ -1458,7 +1470,7 @@ def load_pending_signals() -> pd.DataFrame:
                    macro_snap.market_np_yoy, macro_snap.earnings_breadth_mkt,
                    macro_snap.fii_net_today,
                    macro_snap.usdinr_chg_pct, macro_snap.nifty_basis_pct, macro_snap.nifty_contango,
-                   macro_snap.india_vix,
+                   macro_snap.india_vix, macro_snap.india_mmi,
                    macro_snap.adrs_bullish_pct, macro_snap.usdinr_ret_1d,
                    macro_snap.nikkei_ret_1d, macro_snap.hangseng_ret_1d,
                    mse.np_growth_yoy AS sector_np_growth_yoy, mse.np_growth_qoq AS sector_np_growth_qoq,
@@ -1522,6 +1534,7 @@ def load_pending_signals() -> pd.DataFrame:
                     MAX(CASE WHEN symbol='EARNINGS_BREADTH'       THEN close END) AS earnings_breadth_mkt,
                     MAX(CASE WHEN symbol='FII_NET_TODAY'           THEN close END) AS fii_net_today,
                     MAX(CASE WHEN symbol='INDIA_VIX'              THEN close END) AS india_vix,
+                    MAX(CASE WHEN symbol='INDIA_MMI'              THEN close END) AS india_mmi,
                     MAX(CASE WHEN symbol='USDINR_CHG_PCT'          THEN close END) AS usdinr_chg_pct,
                     MAX(CASE WHEN symbol='NIFTY_BASIS_PCT'          THEN close END) AS nifty_basis_pct,
                     MAX(CASE WHEN symbol='NIFTY_CONTANGO'           THEN close END) AS nifty_contango
@@ -1710,7 +1723,7 @@ def load_pending_signals() -> pd.DataFrame:
                    macro_snap.market_np_yoy, macro_snap.earnings_breadth_mkt,
                    macro_snap.fii_net_today,
                    macro_snap.usdinr_chg_pct, macro_snap.nifty_basis_pct, macro_snap.nifty_contango,
-                   macro_snap.india_vix,
+                   macro_snap.india_vix, macro_snap.india_mmi,
                    macro_snap.adrs_bullish_pct, macro_snap.usdinr_ret_1d,
                    macro_snap.nikkei_ret_1d, macro_snap.hangseng_ret_1d,
                    {sector_np_yoy_sel}, {sector_np_qoq_sel},
@@ -1773,6 +1786,7 @@ def load_pending_signals() -> pd.DataFrame:
                     MAX(CASE WHEN symbol='EARNINGS_BREADTH'       THEN close END) AS earnings_breadth_mkt,
                     MAX(CASE WHEN symbol='FII_NET_TODAY'           THEN close END) AS fii_net_today,
                     MAX(CASE WHEN symbol='INDIA_VIX'              THEN close END) AS india_vix,
+                    MAX(CASE WHEN symbol='INDIA_MMI'              THEN close END) AS india_mmi,
                     MAX(CASE WHEN symbol='USDINR_CHG_PCT'          THEN close END) AS usdinr_chg_pct,
                     MAX(CASE WHEN symbol='NIFTY_BASIS_PCT'          THEN close END) AS nifty_basis_pct,
                     MAX(CASE WHEN symbol='NIFTY_CONTANGO'           THEN close END) AS nifty_contango

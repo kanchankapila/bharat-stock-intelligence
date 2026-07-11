@@ -565,6 +565,10 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await runPython('nt_vix_fetcher.py', [], 60_000)
     .catch(e => console.warn('[QUEUE] nt_vix_fetcher failed:', (e as Error).message));
 
+  // Market Mood Index (Tickertape fear/greed 0-100) → macro_asset_prices INDIA_MMI.
+  await runPython('mmi_fetcher.py', [], 60_000)
+    .catch(e => console.warn('[QUEUE] mmi_fetcher failed:', (e as Error).message));
+
   // NiftyTrader per-strike OI change (buildup/unwinding) for index options.
   await runPython('nt_change_oi_fetcher.py', [], 2 * 60_000)
     .catch(e => console.warn('[QUEUE] nt_change_oi_fetcher failed:', (e as Error).message));
