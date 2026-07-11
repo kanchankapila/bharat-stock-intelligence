@@ -1,13 +1,41 @@
 import { dbAll, dbGet, dbRun, dbTransaction } from './dbAsync';
 
 export const DEFAULT_AI_SIGNAL_MIN_CONFIDENCE = 65;
+// Quant-endorsement floor for the AI path: the scoring engine only writes a win_probability
+// for stocks it itself blessed (>=0.40), so requiring one ≥ this floor means an LLM-proposed
+// signal only persists when the quant model independently agrees. Matches scoring_engine's gate.
+export const DEFAULT_AI_SIGNAL_MIN_WIN_PROB = 0.40;
 
 let _cachedMinConfidence: number | null = null;
 let _cachedMinConfidenceExp = 0;
+let _cachedMinWinProb: number | null = null;
+let _cachedMinWinProbExp = 0;
 
 export function invalidateAISignalCache(): void {
   _cachedMinConfidence = null;
   _cachedMinConfidenceExp = 0;
+  _cachedMinWinProb = null;
+  _cachedMinWinProbExp = 0;
+}
+
+export interface QuantGateResult {
+  persist: boolean;
+  reason: 'ok' | 'no_quant' | 'low_win_prob';
+}
+
+/**
+ * Quant-endorsement gate for the AI signal path (LLM demotion). An LLM-proposed BUY/SELL only
+ * persists if the stock's model win_probability clears the floor. The LLM's self-reported
+ * confidence is uncorrelated with realized outcomes (measured ~2.3% decisive win rate regardless
+ * of its confidence bucket), so the quant model — not the LLM — decides actionability. A missing
+ * win_probability means the scoring engine did not endorse the stock → drop. Pure/unit-testable.
+ */
+export function gateOnQuant(winProbability: number | null | undefined, floor: number): QuantGateResult {
+  if (winProbability === null || winProbability === undefined || Number.isNaN(winProbability)) {
+    return { persist: false, reason: 'no_quant' };
+  }
+  if (winProbability < floor) return { persist: false, reason: 'low_win_prob' };
+  return { persist: true, reason: 'ok' };
 }
 
 export interface AISignalGateResult {
@@ -67,6 +95,18 @@ export async function getAISignalMinConfidence(): Promise<number> {
   _cachedMinConfidence = Number.isFinite(parsed) ? parsed : DEFAULT_AI_SIGNAL_MIN_CONFIDENCE;
   _cachedMinConfidenceExp = Date.now() + 5 * 60_000;
   return _cachedMinConfidence;
+}
+
+/** Quant win_probability floor for persisting AI signals (app_settings override, default 0.40). */
+export async function getAISignalMinWinProb(): Promise<number> {
+  if (_cachedMinWinProb !== null && Date.now() < _cachedMinWinProbExp) return _cachedMinWinProb;
+  const row = await dbGet<{ value: string }>(
+    "SELECT value FROM app_settings WHERE key = 'ai_signal_min_win_prob'",
+  );
+  const parsed = row ? Number(row.value) : NaN;
+  _cachedMinWinProb = Number.isFinite(parsed) ? parsed : DEFAULT_AI_SIGNAL_MIN_WIN_PROB;
+  _cachedMinWinProbExp = Date.now() + 5 * 60_000;
+  return _cachedMinWinProb;
 }
 
 export interface Signal {

@@ -257,7 +257,8 @@ async function processAISignal(job: Job): Promise<void> {
   // Actionability gate: only persist conviction BUY/SELL signals above the confidence
   // floor. Drops HOLD and sub-threshold noise so the DB matches what the UI surfaces and
   // the backtester sees clean, actionable data. (See docs/.../ai-signal-gate-design.md)
-  const { gateAISignal, getAISignalMinConfidence, upsertUnifiedSignal, checkSurveillanceGate } = await import('./signals');
+  const { gateAISignal, getAISignalMinConfidence, gateOnQuant, getAISignalMinWinProb,
+          upsertUnifiedSignal, checkSurveillanceGate } = await import('./signals');
   const threshold = await getAISignalMinConfidence();
   const gate = gateAISignal(analysis as any, threshold);
   if (!gate.persist) {
@@ -267,6 +268,21 @@ async function processAISignal(job: Job): Promise<void> {
 
   const survGate = await checkSurveillanceGate(symbol);
   if (survGate) {
+    await job.updateProgress(100);
+    return;
+  }
+
+  // LLM demotion: the LLM proposes a direction, but the quant model decides actionability.
+  // The LLM's self-confidence is uncorrelated with realized outcomes, so emission is gated on
+  // the stock's win_probability — the scoring engine only writes one for stocks it endorsed —
+  // not the LLM's confidence. No quant endorsement ⇒ the LLM signal is not persisted.
+  const wpRow = await dbGet<{ win_probability: number | null }>(
+    "SELECT win_probability FROM technical_signals WHERE symbol = ? AND win_probability IS NOT NULL ORDER BY date DESC LIMIT 1",
+    [symbol],
+  );
+  const winProb = wpRow?.win_probability ?? null;
+  const qgate = gateOnQuant(winProb, await getAISignalMinWinProb());
+  if (!qgate.persist) {
     await job.updateProgress(100);
     return;
   }
@@ -285,7 +301,10 @@ async function processAISignal(job: Job): Promise<void> {
   const targetPrice = barriers?.targetPrice ?? analysis.target ?? null;
   const stopLoss = barriers?.stopLoss ?? analysis.stopLoss ?? null;
 
-  // Write to unified_signals so outcome resolver and reward engine can track AI signal performance
+  // Write to unified_signals so outcome resolver and reward engine can track AI signal performance.
+  // Demotion: confidence_score/quant_score now carry the quant win_probability (outcome-correlated),
+  // and the LLM's text is stored as ai_reasoning (narrative) rather than as the signal's authority.
+  const quantConfidence = Math.round(winProb! * 100);
   await upsertUnifiedSignal('AI', {
     symbol,
     signalDate: now.split('T')[0],
@@ -293,8 +312,10 @@ async function processAISignal(job: Job): Promise<void> {
     entryPrice,
     targetPrice,
     stopLoss,
-    confidenceScore: analysis.confidence ?? null,
+    confidenceScore: quantConfidence,
+    quantScore: quantConfidence,
     reasoning: analysis.reasoning ?? null,
+    aiReasoning: analysis.reasoning ?? null,
     generatedAt: now,
   });
 
@@ -312,7 +333,7 @@ async function processAISignal(job: Job): Promise<void> {
         entryPrice,
         targetPrice,
         stopLoss,
-        confidence: analysis.confidence ?? null,
+        confidence: quantConfidence,
         reasoning: analysis.reasoning ?? null,
       },
     });
