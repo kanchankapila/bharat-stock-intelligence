@@ -420,50 +420,50 @@ class PCRFetcher:
         Also captures total-level PCR, callOiChange, putOiChange for macro context.
         Returns a dict with keys: dealer_gex, pcr_oi, call_oi_change, put_oi_change,
         total_call_oi, total_put_oi, spot, expiry. Returns None on any fetch/parse error.
+
+        Source: NiftyTrader index option-chain — the same working feed already used for
+        equity OI/PCR. MoneyControl's oiData endpoints (expiry-dates + oi-change-chart)
+        began returning HTTP 404 in Jul 2026, so both the expiry lookup and strike OI are
+        sourced here. NiftyTrader carries absolute strike OI (calls_oi/puts_oi), the spot
+        (index_close), and total OI/ΔOI (opTotals) — everything GEX needs, single expiry.
         """
-        expiry = self._fetch_nearest_expiry()
-        if not expiry:
+        url = NIFTYTRADER_CHAIN_URL.format(symbol="NIFTY")
+        try:
+            resp = self.session.get(url, timeout=15)
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as e:
+            print(f"[GEX] Failed to fetch Nifty option chain from NiftyTrader: {e}")
             return None
 
-        url  = MC_OI_CHANGE_URL.format(expiry=expiry)
-        data = self._mc_get(url)
-        if not data or not data.get("success"):
-            print("[GEX] Failed to fetch OI change data from MoneyControl")
+        rd      = data.get("resultData") or {}
+        strikes = rd.get("opDatas") or []
+        if not strikes:
+            print("[GEX] Empty NiftyTrader option chain — cannot compute GEX")
             return None
 
-        results: dict = (data.get("data") or {}).get("results") or {}
-        if not results:
-            print("[GEX] Empty results in OI change response")
+        spot   = next((float(r.get("index_close") or 0) for r in strikes if r.get("index_close")), 0.0)
+        expiry = str(strikes[0].get("expiry_date") or "")[:10]
+        if not spot:
+            print("[GEX] Missing spot (index_close) — cannot compute GEX")
             return None
 
-        # Use the most recent date's data (first key when sorted descending)
-        latest_date = sorted(results.keys(), reverse=True)[0]
-        day_data    = results[latest_date]
-        print(f"[GEX] Using OI snapshot for date: {latest_date}")
-
-        total    = day_data.get("total") or {}
-        spot     = float(day_data.get("atm") or 0)
-        strikes  = day_data.get("list") or []
-
-        total_call_oi    = float(total.get("callOi")      or 0)
-        total_put_oi     = float(total.get("putOi")       or 0)
-        call_oi_change   = float(total.get("callOiChange") or 0)
-        put_oi_change    = float(total.get("putOiChange")  or 0)
+        total            = (rd.get("opTotals") or {}).get("total_calls_puts") or {}
+        total_call_oi    = float(total.get("total_calls_oi")        or 0)
+        total_put_oi     = float(total.get("total_puts_oi")         or 0)
+        call_oi_change   = float(total.get("total_calls_change_oi") or 0)
+        put_oi_change    = float(total.get("total_puts_change_oi")  or 0)
 
         pcr_oi = total_put_oi / total_call_oi if total_call_oi > 0 else None
-
-        if not spot or not strikes:
-            print("[GEX] Missing ATM price or strike list — cannot compute GEX")
-            return None
 
         sigma   = NIFTY_GEX_SIGMA
         lot     = NIFTY_LOT_SIZE
         gex_sum = 0.0
 
         for row in strikes:
-            k          = float(row.get("strikePrice") or 0)
-            call_oi    = float(row.get("callOi")      or 0)
-            put_oi     = float(row.get("putOi")       or 0)
+            k          = float(row.get("strike_price") or 0)
+            call_oi    = float(row.get("calls_oi")     or 0)
+            put_oi     = float(row.get("puts_oi")      or 0)
             if not k:
                 continue
             moneyness  = (k - spot) / spot
@@ -473,8 +473,9 @@ class PCRFetcher:
 
         dealer_gex = gex_sum * lot * spot / 1e9  # ₹ billions
 
+        pcr_str = f"{pcr_oi:.3f}" if pcr_oi else "N/A"
         print(
-            f"[GEX] spot={spot:,.0f}  PCR={pcr_oi:.3f if pcr_oi else 'N/A'}  "
+            f"[GEX] spot={spot:,.0f}  PCR={pcr_str}  "
             f"dealer_gex={dealer_gex:+.2f}B  "
             f"call_ΔOI={call_oi_change:+,.0f}  put_ΔOI={put_oi_change:+,.0f}"
         )
