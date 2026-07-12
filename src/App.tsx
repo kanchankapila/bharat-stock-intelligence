@@ -109,6 +109,7 @@ const StockChatbot       = React.lazy(() => import('./components/StockChatbot'))
 const JobsDashboardPage   = React.lazy(() => import('./components/JobsDashboardPage'));
 const EarlyHoursSpotter   = React.lazy(() => import('./components/EarlyHoursSpotter'));
 const AlphaCockpit       = React.lazy(() => import('./components/AlphaCockpit').then(m => ({ default: m.AlphaCockpit })));
+const IntradayPage       = React.lazy(() => import('./components/IntradayPage'));
 
 // Lazy Suspense fallback
 const PageFallback = () => (
@@ -2035,7 +2036,7 @@ const Backtest: React.FC<{ stocks?: MarketData[] }> = () => {
                    <div className="flex justify-between items-center mb-8">
                      <div>
                        <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Equity Growth</h5>
-                       <p className="text-sm font-black text-white italic">Backtest Period: 2014 - 2024</p>
+                       <p className="text-sm font-black text-white italic">Backtest Period: 2014 - {new Date().getFullYear()}</p>
                      </div>
                      <div className="flex gap-6">
                         <div className="flex items-center gap-2">
@@ -2681,7 +2682,7 @@ const MFAnalysis: React.FC<{ symbol: string }> = ({ symbol }) => {
                 </div>
                 <div className="pt-4 border-t border-slate-800/50">
                    <p className="text-[10px] text-slate-400 leading-relaxed font-medium italic">
-                     Historical SIP performance if invested ₹10,000 monthly since 2021.
+                     Historical SIP performance if invested ₹10,000 monthly since {new Date().getFullYear() - 5}.
                    </p>
                 </div>
              </div>
@@ -3833,6 +3834,7 @@ export default function App() {
               )
             } />
             <Route path="/top-rated" element={<TopRatedStocks onSelectStock={handleSelectStock} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
+            <Route path="/intraday" element={<IntradayPage onSelectStock={handleSelectStock} />} />
             <Route path="/indices" element={<IndicesPage onSelectStock={handleSelectStock} selectedIndex={selectedIndex} setSelectedIndex={setSelectedIndex} />} />
             <Route path="/market-map" element={
               <div className="p-6 space-y-6">
@@ -3959,6 +3961,7 @@ export default function App() {
                 <Route path="/alpha" element={<CommandCenterDashboard onSelectStock={(s) => { setDrawerSymbol(s); navigate('/trade-cockpit'); }} />} />
                 <Route path="/buy-recs" element={<BuyRecommendationsPage onSelectStock={handleSelectStock} />} />
               <Route path="/top-rated" element={<TopRatedStocks onSelectStock={handleSelectStock} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
+            <Route path="/intraday" element={<IntradayPage onSelectStock={handleSelectStock} />} />
                 <Route path="/indices" element={<IndicesPage onSelectStock={handleSelectStock} selectedIndex={selectedIndex} setSelectedIndex={setSelectedIndex} />} />
                 <Route path="/market-map" element={
                 <div className="p-6 space-y-6">

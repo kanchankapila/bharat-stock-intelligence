@@ -27,6 +27,15 @@ export interface JobScheduleEntry {
   critical: boolean;
 }
 
+// ── Market-hours policy (IST 09:15–15:30 = UTC 03:45–10:00, Mon–Fri, minus holidays) ──
+// INTRADAY jobs run ONLY during market hours and no-op on holidays via an isMarketOpen() guard
+// (holiday-aware, see marketStatusService): stock-refresh (live prices), intraday-fetcher,
+// market-regime-refresh + intraday-ranker (the intraday pipeline), live-screener-collect.
+// POSITIONAL/heavy jobs run OFF-HOURS (22:30 IST+ / weekends): stock-scoring, quant-scoring,
+// mc/etnow screener syncs, fundamentals-sync, nse-sync, ml-daily-ops, outcome-resolver, unified-ranker.
+// confluence-compute is positional but 24/7 by cadence — it SKIPS market hours (see queues.ts) so it
+// doesn't compete with intraday work. news-sentiment stays 24/7 on purpose: breaking news is
+// intraday-relevant, so pausing it would degrade intraday awareness.
 export const JOB_REGISTRY: JobScheduleEntry[] = [
   { jobName: 'stock-refresh', label: 'Stock Price Refresh', cronPattern: '30 10 * * 1-5', graceMinutes: 30, critical: true },
   { jobName: 'ai-signals', label: 'AI Signal Analyzer', graceMinutes: 0, critical: false },
@@ -45,6 +54,7 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   { jobName: 'dl-macro-fetch', label: 'DL Macro Fetcher', cronPattern: '30 2 * * 1-5', graceMinutes: 60, critical: false },
   { jobName: 'preopen-snapshot', label: 'Preopen Snapshot', cronPattern: '40 3 * * 1-5', graceMinutes: 45, critical: false },
   { jobName: 'market-regime-refresh', label: 'Market Regime Refresh (intraday)', cronPattern: '*/15 3-10 * * 1-5', graceMinutes: 45, critical: false },
+  { jobName: 'intraday-ranker', label: 'Intraday Ranker (regime + ranking)', cronPattern: '*/15 3-10 * * 1-5', graceMinutes: 45, critical: false },
   { jobName: 'dl-retrain-emergency', label: 'DL Emergency Retrain (drift-triggered)', graceMinutes: 0, critical: false },
   { jobName: 'confluence-compute', label: 'Confluence Engine', everyMs: 30 * 60 * 1000, graceMinutes: 45, critical: true },
   { jobName: 'confluence-outcomes', label: 'Confluence Outcomes', cronPattern: '30 17 * * 1-5', graceMinutes: 60, critical: false },

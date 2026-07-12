@@ -9,6 +9,7 @@ import {
 } from "../marketData";
 import { fetchSectorTechnicalTrends } from "../sectorApiService";
 import { fetchStockDataWithCache, getOrRefreshAllStocks } from "../liveStockData";
+import { getLatestIntradayBreadth } from "../intradayBreadth";
 import { fetchTopMovers } from "../topMoversService";
 import { fetchNiftyTraderBreakouts } from "../marketData";
 import { fetchGlobalMarketData } from "../globalMarketService";
@@ -22,6 +23,33 @@ export const marketRouter = router({
 
   getLiveStocks: publicProcedure
     .query(async () => getOrRefreshAllStocks()),
+
+  // Live intraday breadth nowcast + the daily HMM regime it refines. The daily regime is EOD and
+  // slow; `riskTilt` reacts within one 5-min refresh so the UI can show "SIDEWAYS · RISK_OFF".
+  getIntradayBreadth: publicProcedure
+    .query(async () => {
+      const [breadth, regimeRow] = await Promise.all([
+        getLatestIntradayBreadth(),
+        dbGet(`SELECT value FROM app_settings WHERE key = 'current_nifty_regime'`),
+      ]);
+      return { breadth, dailyRegime: (regimeRow as { value?: string } | undefined)?.value ?? null };
+    }),
+
+  // Intraday ranking (separate from positional getTopRatedStocks / unified_recommendations).
+  getIntradayRecommendations: publicProcedure
+    .input(z.object({ limit: z.number().min(1).max(200).default(50) }).optional())
+    .query(async ({ input }) => {
+      const limit = input?.limit ?? 50;
+      return dbAll(
+        `SELECT symbol, intraday_regime, intraday_score, conviction_level, classification,
+                screener_score, breakout_score, bullish_count, bearish_count,
+                cmp, entry_price, stop_loss, target_1, risk_reward, position_size_pct, reasoning
+         FROM intraday_recommendations
+         WHERE computed_at = (SELECT MAX(computed_at) FROM intraday_recommendations)
+         ORDER BY intraday_score DESC LIMIT ?`,
+        [limit],
+      );
+    }),
 
   getLiveStockQuote: publicProcedure
     .input(z.object({ symbol: z.string() }))

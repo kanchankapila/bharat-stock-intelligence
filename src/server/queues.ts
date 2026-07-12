@@ -220,6 +220,14 @@ let trendlyneChecklistCycleWorker: Worker | null = null;
 // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Confluence compute processor ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 
 async function processConfluenceCompute(_job: Job): Promise<{ computed: number; elite: number; strong: number }> {
+  // Positional signal (whole-universe, heavy). Skip during market hours so it doesn't compete with
+  // the intraday pipeline for CPU/DB — its consumers (positional dashboards + the post-close
+  // unified_ranker) don't need intraday freshness. The pre-open compute carries through the session
+  // and the 30-min cadence resumes after close. Returning normally keeps the heartbeat fresh.
+  if (await isMarketOpen()) {
+    console.log('[QUEUE] confluence-compute skipped — market hours (positional signal runs off-hours)');
+    return { computed: 0, elite: 0, strong: 0 };
+  }
   const { computeConfluenceSignals, runMLProbabilityOverlay } = await import('./confluenceEngine');
   const result = await computeConfluenceSignals();
   runMLProbabilityOverlay().catch((err: any) =>
@@ -459,6 +467,12 @@ async function processLiveScreenerCollect(_job: Job): Promise<void> {
 }
 
 async function processIntradayFetcher(_job: Job): Promise<void> {
+  // Cron is weekday+time only, so it still fires on a trading holiday — guard on the
+  // holiday-aware live status so intraday fetches no-op on holidays/off-hours.
+  if (!(await isMarketOpen())) {
+    console.log('[QUEUE] intraday-fetcher skipped — outside NSE market hours (weekend/holiday)');
+    return;
+  }
   // Fetches 15m bars for all 2328 NSE stocks (last 24h) — ~4 min per run.
   await runPython('intraday_fetcher.py', ['--lookback-days', '1'], 600_000)
     .catch(e => console.warn('[QUEUE] intraday_fetcher failed:', (e as Error).message));
@@ -2033,20 +2047,37 @@ export async function initQueues(): Promise<boolean> {
     });
     new Worker(QUEUE_REGIME,
       async () => {
+        // Ordered intraday chain — runs every 15 min while the tape is live. Guard on the
+        // holiday-aware status so this cron (weekday+time only) no-ops on holidays.
+        if (!(await isMarketOpen())) {
+          console.log('[QUEUE] intraday pipeline skipped — outside NSE market hours (weekend/holiday)');
+          recordHeartbeat('market-regime-refresh', 'success');
+          recordHeartbeat('intraday-ranker', 'success');
+          return;
+        }
+        // 1) fetch live macro (VIX/USDINR/basis) → macro_asset_prices
         await runPython('market_regime_fetcher.py', [], 60_000)
           .then(() => recordHeartbeat('market-regime-refresh', 'success'))
           .catch(e => {
             console.warn('[QUEUE] market_regime_fetcher failed:', (e as Error).message);
             recordHeartbeat('market-regime-refresh', 'failed', (e as Error).message);
           });
+        // 2) fuse VIX/basis/MMI/breadth → app_settings.intraday_regime (non-fatal: ranker
+        //    defaults to NEUTRAL if this is missing)
+        await runPython('intraday_regime.py', [], 60_000)
+          .catch(e => console.warn('[QUEUE] intraday_regime failed:', (e as Error).message));
+        // 3) rank stocks for intraday off the fresh regime → intraday_recommendations
+        await runPython('intraday_ranker.py', [], 5 * 60_000)
+          .then(() => recordHeartbeat('intraday-ranker', 'success'))
+          .catch(e => {
+            console.warn('[QUEUE] intraday_ranker failed:', (e as Error).message);
+            recordHeartbeat('intraday-ranker', 'failed', (e as Error).message);
+          });
       },
-      // Default lockDuration (30s) is shorter than runPython's own 60s process timeout,
-      // and runPython can additionally block well past that waiting for a free slot in
-      // its shared 5-concurrent-subprocess semaphore during busy periods — causing BullMQ
-      // to consider the job stalled and repeatedly fail to renew a lock that's already
-      // been reassigned. Match the generous lockDuration convention used by sibling workers.
-      { connection, concurrency: 1, lockDuration: 5 * 60_000 });
-    console.log('[QUEUE] Market regime refresh scheduled every 15 min during market hours');
+      // Generous lockDuration: three sequential runPython calls (~7 min worst case) plus the
+      // shared 5-concurrent-subprocess semaphore wait, so BullMQ doesn't consider it stalled.
+      { connection, concurrency: 1, lockDuration: 10 * 60_000 });
+    console.log('[QUEUE] Intraday pipeline (regime fetch → regime label → ranker) scheduled every 15 min during market hours');
 
     // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ DL Feature Refresh (3:30 PM IST = 10:00 AM UTC, weekdays) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
     dlFeatureRefreshQueue = new Queue(QUEUE_DL_FEATURE_REFRESH, { connection });

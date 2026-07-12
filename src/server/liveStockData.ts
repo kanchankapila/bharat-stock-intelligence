@@ -6,6 +6,7 @@ import { cacheGet, cacheSet } from "./cacheService";
 import { dbAll, dbRun } from "./dbAsync";
 import { bulkUpsert, rowGroups } from "./dbBulk";
 import { isMarketOpen } from "./marketStatusService";
+import { persistIntradayBreadth } from "./intradayBreadth";
 
 // ─── Symbol & name resolution ─────────────────────────────────────────────────
 
@@ -434,6 +435,13 @@ async function runBulkRefresh(): Promise<void> {
     bulkMirror = new Map(freshData.map((s) => [s.symbol, s]));
     lastBulkFetchTime = Date.now();
     hasFetchedOnce = true;
+
+    // Intraday breadth nowcast off the fresh universe (only while the tape is live).
+    if (marketOpen) {
+      persistIntradayBreadth(freshData).catch((err) =>
+        console.warn("[LIVE DATA] intraday breadth snapshot failed:", err?.message ?? err),
+      );
+    }
 
     // If market closed, cache for a long time (until next open approx), else standard TTL
     const ttl = marketOpen ? BULK_TTL : 12 * 60 * 60; // 12 hours when closed

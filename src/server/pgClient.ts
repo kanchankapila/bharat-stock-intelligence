@@ -139,6 +139,34 @@ export async function pgEnsureColumns(): Promise<void> {
        PRIMARY KEY (symbol, date)
      )`,
     `CREATE INDEX IF NOT EXISTS idx_ehp_date ON early_hours_predictions(date DESC)`,
+    `CREATE TABLE IF NOT EXISTS intraday_breadth_snapshots (
+       snapshot_at TEXT PRIMARY KEY,
+       date TEXT,
+       adv INTEGER, dec INTEGER, unch INTEGER, total INTEGER,
+       adv_decline_ratio DOUBLE PRECISION,
+       pct_positive DOUBLE PRECISION,
+       avg_change_pct DOUBLE PRECISION,
+       breadth_score DOUBLE PRECISION,
+       risk_tilt TEXT,
+       computed_at TEXT
+     )`,
+    `CREATE INDEX IF NOT EXISTS idx_ibs_date ON intraday_breadth_snapshots(date DESC)`,
+    `CREATE TABLE IF NOT EXISTS intraday_recommendations (
+       symbol TEXT, computed_at TEXT, intraday_regime TEXT,
+       intraday_score DOUBLE PRECISION, conviction_level TEXT, classification TEXT,
+       screener_score DOUBLE PRECISION, breakout_score DOUBLE PRECISION,
+       bullish_count INTEGER, bearish_count INTEGER,
+       cmp DOUBLE PRECISION, entry_price DOUBLE PRECISION, stop_loss DOUBLE PRECISION,
+       target_1 DOUBLE PRECISION, risk_reward DOUBLE PRECISION, position_size_pct DOUBLE PRECISION,
+       reasoning TEXT, computed_ts TIMESTAMP,
+       PRIMARY KEY (symbol, computed_at)
+     )`,
+    `CREATE INDEX IF NOT EXISTS idx_intraday_recs_score ON intraday_recommendations(computed_at DESC, intraday_score DESC)`,
+    `CREATE TABLE IF NOT EXISTS intraday_regime_history (
+       computed_at TEXT PRIMARY KEY, date TEXT, regime TEXT,
+       composite DOUBLE PRECISION, vix DOUBLE PRECISION, mmi DOUBLE PRECISION,
+       usdinr_chg DOUBLE PRECISION, basis DOUBLE PRECISION, breadth_score DOUBLE PRECISION
+     )`,
     `CREATE TABLE IF NOT EXISTS trendlyne_checklist (
        symbol TEXT PRIMARY KEY,
        score DOUBLE PRECISION,

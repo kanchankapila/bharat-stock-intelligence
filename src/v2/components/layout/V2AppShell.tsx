@@ -4,7 +4,7 @@ import {
   TrendingUp, LayoutDashboard, BarChart2, Activity, Trophy, Filter,
   Target, Zap, Search, Briefcase, Calendar, Sparkles, Radio, FlaskConical,
   Star, History, Settings2, PieChart, Bookmark, Users, Globe, CheckCircle2,
-  ToggleLeft, ToggleRight, Settings, MonitorDot, X, BrainCircuit
+  ToggleLeft, ToggleRight, Settings, MonitorDot, X, BrainCircuit, Flame
 } from 'lucide-react';
 import { cn } from '../../../lib/utils';
 
@@ -48,6 +48,7 @@ export const V2AppShell: React.FC<V2AppShellProps> = ({
     { label: 'Indices', id: 'indices', icon: BarChart2 },
     { label: 'Market Map', id: 'market-map', icon: Activity },
     { label: 'Top Rated', id: 'top-rated', icon: Trophy },
+    { label: 'Intraday', id: 'intraday', icon: Flame },
     { label: 'Screener', id: 'screener', icon: Filter },
     { label: 'Live Screener', id: 'live-screener', icon: Filter },
     { label: 'EOD Screener', id: 'eod-screener', icon: Filter },

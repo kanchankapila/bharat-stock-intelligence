@@ -1138,6 +1138,64 @@ db.exec(`
     computed_at        TEXT
   );
 
+  -- Intraday breadth nowcast (written every ~5 min during market hours by intradayBreadth.ts
+  -- off the live whole-universe quote feed). Point-in-time by snapshot_at so history accumulates
+  -- for a future intraday-aware regime model; the daily market_breadth above is EOD-only.
+  CREATE TABLE IF NOT EXISTS intraday_breadth_snapshots (
+    snapshot_at        TEXT PRIMARY KEY,
+    date               TEXT,
+    adv                INTEGER,
+    dec                INTEGER,
+    unch               INTEGER,
+    total              INTEGER,
+    adv_decline_ratio  REAL,
+    pct_positive       REAL,
+    avg_change_pct     REAL,
+    breadth_score      REAL,
+    risk_tilt          TEXT,
+    computed_at        TEXT
+  );
+
+  -- Intraday regime nowcast history (written every ~15 min by intraday_regime.py). Fuses
+  -- VIX/USDINR/basis/MMI/breadth into one RISK_ON|NEUTRAL|RISK_OFF label; latest also lands in
+  -- app_settings.intraday_regime for the ranker to gate on.
+  CREATE TABLE IF NOT EXISTS intraday_regime_history (
+    computed_at        TEXT PRIMARY KEY,
+    date               TEXT,
+    regime             TEXT,
+    composite          REAL,
+    vix                REAL,
+    mmi                REAL,
+    usdinr_chg         REAL,
+    basis              REAL,
+    breadth_score      REAL
+  );
+
+  -- Intraday stock ranking (written every ~15 min during market hours by intraday_ranker.py).
+  -- Fully separate from unified_recommendations (positional): intraday-classified screeners +
+  -- breakout_probability, gated by the intraday regime. Latest-per-day (computed_at=date).
+  CREATE TABLE IF NOT EXISTS intraday_recommendations (
+    symbol             TEXT,
+    computed_at        TEXT,
+    intraday_regime    TEXT,
+    intraday_score     REAL,
+    conviction_level   TEXT,
+    classification     TEXT,
+    screener_score     REAL,
+    breakout_score     REAL,
+    bullish_count      INTEGER,
+    bearish_count      INTEGER,
+    cmp                REAL,
+    entry_price        REAL,
+    stop_loss          REAL,
+    target_1           REAL,
+    risk_reward        REAL,
+    position_size_pct  REAL,
+    reasoning          TEXT,
+    computed_ts        TIMESTAMP,
+    PRIMARY KEY (symbol, computed_at)
+  );
+
   CREATE TABLE IF NOT EXISTS feature_store (
     symbol          TEXT NOT NULL,
     date            TEXT NOT NULL,
