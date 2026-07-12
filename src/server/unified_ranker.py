@@ -200,6 +200,16 @@ MAX_POSITION = 0.10      # per-name cap
 VOL_FLOOR_PCT = 10.0     # don't let an ultra-low-vol name dominate
 DEFAULT_VOL_PCT = 30.0   # when annualized_vol is missing
 
+# The breakout classifier is the one component with validated live edge (purged-OOF AUC ~0.61,
+# top-decile 1.47× base rate). The ML win-prob meta-label it's blended against has ~0.50 AUC
+# (no edge) outside BEAR, so sizing on win-prob alone leaves capital un-allocated in the dominant
+# BULL/SIDEWAYS regimes. These map a name's cross-sectional breakout percentile to a sizing
+# conviction on the same [0,1] scale as the López de Prado ML bet, so a top-decile breakout gets
+# sized even when the ML label is asleep. Rank-based (not a raw-prob cut) because P(≥6% move) has
+# a ~20-30% base rate, not 50% — a fixed 0.5 threshold would zero out nearly everything.
+BREAKOUT_SIZE_P90 = 0.25   # top decile → conviction comparable to a ~0.63 ML win-prob bet
+BREAKOUT_SIZE_P80 = 0.12   # top quintile → modest tilt
+
 
 def bet_size_from_probability(p, neutral: float = 0.5) -> float:
     """López de Prado bet size in [0,1] from a win probability (long-only: 0 at/below neutral)."""
@@ -783,6 +793,13 @@ class UnifiedRanker:
 
         results = []
         raw_sizes = {}   # symbol -> conviction×inverse-vol (normalized into weights after the loop)
+        # Cross-sectional breakout cutoffs for the sizing tilt (see BREAKOUT_SIZE_* above).
+        _bo_sorted = sorted(v for v in breakout_scores.values() if v is not None)
+        def _bo_pctl(q):
+            if not _bo_sorted:
+                return None
+            return _bo_sorted[min(len(_bo_sorted) - 1, int(q * len(_bo_sorted)))]
+        bo_p90, bo_p80 = _bo_pctl(0.90), _bo_pctl(0.80)
         for sym in all_symbols:
             if not self._passes_rl_gate(sym, rl_gate_map):
                 continue
@@ -809,8 +826,16 @@ class UnifiedRanker:
                 unified *= RED_FLAG_VETO_MULT
                 classification = veto_classification(classification)
 
-            # #6 position size: bet on the ML meta-label, inverse-vol weighted, longs only.
-            bet = bet_size_from_probability(win_probs.get(sym))
+            # #6 position size: back the stronger of the two validated edges — the López de Prado
+            # bet on the calibrated ML meta-label, OR a cross-sectional breakout tilt — inverse-vol
+            # weighted, longs only. Breakout is additive (max, not a multiplier) because the ML bet
+            # is ~0 in BULL/SIDEWAYS where win-prob has no edge, and a multiplier on 0 stays 0.
+            ml_bet = bet_size_from_probability(win_probs.get(sym))
+            bo_score = engine_scores['breakout']   # breakout_probability × 100, 0 if absent
+            bo_bet = (BREAKOUT_SIZE_P90 if (bo_p90 and bo_score >= bo_p90)
+                      else BREAKOUT_SIZE_P80 if (bo_p80 and bo_score >= bo_p80)
+                      else 0.0)
+            bet = max(ml_bet, bo_bet)
             vol = max(VOL_FLOOR_PCT, (qm or {}).get('vol') or DEFAULT_VOL_PCT)
             raw_sizes[sym] = (bet / vol) if classification in ('Strong Buy', 'Buy') else 0.0
             cats = sorted({s.get('category', 'other') for s in membership.get(sym, [])} - {'other', ''})
