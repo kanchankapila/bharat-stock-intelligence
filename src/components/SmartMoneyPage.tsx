@@ -1,24 +1,29 @@
 import React, { useState } from 'react';
 import { trpc } from '../lib/trpc';
-import { TrendingUp, TrendingDown, DollarSign, Users, BarChart2, RefreshCw } from 'lucide-react';
+import { TrendingUp, TrendingDown, DollarSign, Users, BarChart2, RefreshCw, Calendar } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie
 } from 'recharts';
 import { motion } from 'motion/react';
 import { cn } from '../lib/utils';
+import { SmartMoneyMonitor } from './SmartMoneyMonitor';
+import { SeasonalityCalendar } from './SeasonalityCalendar';
 
 interface SmartMoneyPageProps {
   onSelectStock?: (symbol: string) => void;
 }
 
-type DealTab = 'large' | 'insider' | 'institutional' | 'sector';
+type DealTab = 'large' | 'insider' | 'institutional' | 'sector' | 'fii_mf_flows' | 'seasonality';
 
 const DEAL_TABS: { key: DealTab; label: string; icon: React.ElementType }[] = [
   { key: 'large',         label: 'Large Deals',     icon: DollarSign },
   { key: 'insider',       label: 'Insider Trading',  icon: Users      },
   { key: 'institutional', label: 'Institutional',    icon: TrendingUp },
   { key: 'sector',        label: 'By Sector',        icon: BarChart2  },
+  { key: 'fii_mf_flows',  label: 'MF/FII Flows',    icon: Users      },
+  { key: 'seasonality',   label: 'Seasonality',     icon: Calendar   },
 ];
+
 
 const COLORS = ['#10b981', '#f43f5e', '#3b82f6', '#f97316', '#8b5cf6', '#ec4899'];
 
@@ -247,8 +252,16 @@ export const SmartMoneyPage: React.FC<SmartMoneyPageProps> = ({ onSelectStock })
           </div>
         </div>
       )}
+
+      {activeTab === 'fii_mf_flows' && (
+        <SmartMoneyMonitor onSelectStock={onSelectStock} />
+      )}
+
+      {activeTab === 'seasonality' && (
+        <SeasonalityCalendar onSelectStock={onSelectStock} />
+      )}
     </div>
   );
 };
-
 export default SmartMoneyPage;
+

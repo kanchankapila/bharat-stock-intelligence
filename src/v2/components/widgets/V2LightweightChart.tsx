@@ -83,12 +83,18 @@ export const V2LightweightChart: React.FC<V2LightweightChartProps> = ({ data, he
       // Convert timestamps to lightweight-charts format (YYYY-MM-DD or Unix timestamp)
       const formatted = data.map((d, index) => {
         // Parse time: if format is not YYYY-MM-DD, generate a sequential day to prevent errors
-        let timeVal: string | number = d.time;
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(d.time)) {
-          // Fallback sequential dates starting from 2026-01-01
-          const date = new Date(2026, 0, 1 + index);
+        let timeVal: any = d.time;
+        if (typeof d.time === 'number' || /^\d+$/.test(d.time)) {
+          timeVal = typeof d.time === 'number' ? d.time : parseInt(d.time, 10);
+        } else if (!/^\d{4}-\d{2}-\d{2}$/.test(d.time)) {
+          // Fallback sequential dates sliding back from today
+          const totalDays = data.length;
+          const date = new Date();
+          date.setDate(date.getDate() - (totalDays - index));
           timeVal = date.toISOString().split('T')[0];
         }
+
+
         return {
           time: timeVal,
           open: d.open,

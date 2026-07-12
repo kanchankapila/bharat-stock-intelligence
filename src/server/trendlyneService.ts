@@ -425,8 +425,13 @@ export async function fetchTrendlyneStockOptionChain(symbol: string, expiryDate?
     }
 
     if (!expDate) {
-      expDate = '2026-05-26';
+      const d = new Date();
+      const day = d.getDay();
+      const diff = (4 - day + 7) % 7;
+      const nextThursday = new Date(d.getTime() + diff * 24 * 60 * 60 * 1000);
+      expDate = nextThursday.toISOString().split('T')[0];
     }
+
   }
 
   console.log(`[TRENDLYNE] Fetching option chain for ${stockCode} on expiry ${expDate}`);

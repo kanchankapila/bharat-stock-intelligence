@@ -216,8 +216,23 @@ async function getNearExpiry() {
   } catch (e) {
     console.error('[FNO] Failed to fetch near expiry:', e);
   }
-  return { iso: '2026-05-26', trendlyne: '26-may-2026' }; 
+  
+  // Dynamic next Thursday fallback
+  const d = new Date();
+  const day = d.getDay();
+  const diff = (4 - day + 7) % 7;
+  const nextThursday = new Date(d.getTime() + diff * 24 * 60 * 60 * 1000);
+  const dd = nextThursday.getDate().toString().padStart(2, '0');
+  const months = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+  const month = months[nextThursday.getMonth()];
+  const yyyy = nextThursday.getFullYear();
+  
+  return {
+    iso: nextThursday.toISOString().split('T')[0],
+    trendlyne: `${dd}-${month}-${yyyy}`
+  };
 }
+
 
 export async function getTrendlyneFnoScanners(mtype: 'options' | 'futures', screenType: string, instType?: string) {
   const dates = await getNearExpiry();
