@@ -55,6 +55,7 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   { jobName: 'preopen-snapshot', label: 'Preopen Snapshot', cronPattern: '40 3 * * 1-5', graceMinutes: 45, critical: false },
   { jobName: 'market-regime-refresh', label: 'Market Regime Refresh (intraday)', cronPattern: '*/15 3-10 * * 1-5', graceMinutes: 45, critical: false },
   { jobName: 'intraday-ranker', label: 'Intraday Ranker (regime + ranking)', cronPattern: '*/15 3-10 * * 1-5', graceMinutes: 45, critical: false },
+  { jobName: 'closed-day-early-batch', label: 'Closed-Day Early Batch (holiday pipeline)', cronPattern: '0 2 * * 1-5', graceMinutes: 60, critical: false },
   { jobName: 'dl-retrain-emergency', label: 'DL Emergency Retrain (drift-triggered)', graceMinutes: 0, critical: false },
   { jobName: 'confluence-compute', label: 'Confluence Engine', everyMs: 30 * 60 * 1000, graceMinutes: 45, critical: true },
   { jobName: 'confluence-outcomes', label: 'Confluence Outcomes', cronPattern: '30 17 * * 1-5', graceMinutes: 60, critical: false },

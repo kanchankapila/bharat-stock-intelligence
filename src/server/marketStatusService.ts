@@ -110,3 +110,33 @@ export async function isMarketOpen(): Promise<boolean> {
   cache = { isOpen: heuristic, expiresAt: Date.now() + FALLBACK_CACHE_TTL_MS };
   return heuristic;
 }
+
+/**
+ * True only on a **trading holiday** — a weekday on which the exchange is shut (Republic Day,
+ * Diwali, etc.), as opposed to a normal session day or a weekend. Used by the closed-day early
+ * dispatcher so batch work runs in the morning instead of waiting for a market close that never
+ * comes. Weekends are excluded (their weekly jobs are separately timed early on Sunday).
+ *
+ * Defaults to false on any uncertainty (BSE unreachable / ambiguous purpose) so the normal
+ * schedule is never wrongly suppressed — the worst case is a holiday runs on its usual schedule.
+ */
+export async function isTradingHolidayToday(): Promise<boolean> {
+  const istNow = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+  const day = istNow.getUTCDay(); // 0=Sun, 6=Sat
+  if (day === 0 || day === 6) return false; // weekend, not a trading holiday
+
+  try {
+    const res = await fetch(BSE_STATUS_URL, { headers: { 'User-Agent': HEADERS['User-Agent'] }, signal: AbortSignal.timeout(10_000) });
+    if (!res.ok) return false;
+    const data = await res.json();
+    const purpose = String(data.purpose ?? '').toLowerCase();
+    const status = String(data.currentMarketStatus ?? data.marketStatus ?? '').toLowerCase();
+    // A trading holiday names the reason (e.g. "…holiday", "closed for …"); a normal weekday
+    // reports "normal market". "Weekly off" only appears on weekends (already excluded above).
+    if (purpose.includes('normal') || purpose.includes('weekly')) return false;
+    return purpose.includes('holiday') || purpose.includes('closed') ||
+           (status === 'closed' && purpose.length > 0);
+  } catch {
+    return false;
+  }
+}

@@ -29,7 +29,7 @@ import { fetchDeliveryMap } from './deliveryFetcher';
 import { updateMonitorState } from './monitoringService';
 import { StepTracker } from './jobSteps';
 import { getTrendlyneMetricSymbols, enqueueTrendlyneMetricsFetchJobs, runTrendlyneMetricsFetch } from './trendlyneDailyFetchService';
-import { isMarketOpen } from './marketStatusService';
+import { isMarketOpen, isTradingHolidayToday } from './marketStatusService';
 import {
   isDormant, shouldStartNewCycle, pickRandomBatch, randomDelayMs, DORMANT_RECHECK_MS,
   getCycleState, startNewCycle, completeCycle, getPendingStocksForCycle, upsertChecklistResult,
@@ -1480,7 +1480,7 @@ export async function initQueues(): Promise<boolean> {
       'sync-fundamentals-weekly',
       { phase2Only: false },
       {
-        repeat: { pattern: '0 22 * * 0' }, // Sunday 3:30 AM IST (22:00 UTC Saturday night)
+        repeat: { pattern: '0 3 * * 0' }, // Sunday 08:30 IST (03:00 UTC) — early on the closed day, not Mon 03:30 IST
         jobId: 'fundamentals-sync-weekly',
         removeOnComplete: 3,
         removeOnFail: 3,
@@ -1859,7 +1859,7 @@ export async function initQueues(): Promise<boolean> {
     const mlWkRep = await mlWeeklyRetrainQueue.getRepeatableJobs();
     for (const r of mlWkRep) await mlWeeklyRetrainQueue.removeRepeatableByKey(r.key);
     await addJobWithCatchup(mlWeeklyRetrainQueue, 'ml-weekly-retrain', {}, {
-      repeat: { pattern: '30 12 * * 0' },
+      repeat: { pattern: '0 5 * * 0' }, // Sunday 10:30 IST (05:00 UTC) — early on the closed day, after fundamentals
       jobId: 'ml-weekly-retrain',
       removeOnComplete: 2, removeOnFail: 3,
     });
@@ -2079,6 +2079,42 @@ export async function initQueues(): Promise<boolean> {
       { connection, concurrency: 1, lockDuration: 10 * 60_000 });
     console.log('[QUEUE] Intraday pipeline (regime fetch → regime label → ranker) scheduled every 15 min during market hours');
 
+    // ── Closed-day early batch ────────────────────────────────────────────────
+    // On a TRADING HOLIDAY (weekday, exchange shut) there is no market close to wait for, so run
+    // the daily learning/ranking pipeline in the morning instead of the usual evening slot.
+    // Weekends are handled separately by the early-Sunday weekly jobs. No-ops on normal sessions.
+    // On a holiday the usual evening crons still fire (idempotent re-run) — this is purely additive.
+    const QUEUE_CLOSED_DAY = 'closed-day-early-batch';
+    const closedDayQueue = new Queue(QUEUE_CLOSED_DAY, { connection });
+    const cdRep = await closedDayQueue.getRepeatableJobs();
+    for (const r of cdRep) await closedDayQueue.removeRepeatableByKey(r.key);
+    await addJobWithCatchup(closedDayQueue, 'closed-day-early-batch', {}, {
+      repeat: { pattern: '0 2 * * 1-5' },  // 07:30 IST weekdays (pre-open)
+      jobId: 'closed-day-early-batch',
+      removeOnComplete: 3, removeOnFail: 3,
+    });
+    new Worker(QUEUE_CLOSED_DAY,
+      async () => {
+        if (!(await isTradingHolidayToday())) {
+          recordHeartbeat('closed-day-early-batch', 'success'); // normal session / weekend — nothing to early-run
+          return;
+        }
+        console.log('[QUEUE] Trading holiday — running daily pipeline early (outcome-resolver → ml-daily-ops → unified-ranker)');
+        const opt = { removeOnComplete: 3, removeOnFail: 3 };
+        try {
+          await outcomeResolverQueue?.add('closed-day-early', {}, opt);
+          await mlDailyOpsQueue?.add('closed-day-early', {}, opt);
+          // unified-ranker after a delay so fresh scores / ml-ops land first
+          await unifiedRankerQueue?.add('closed-day-early', {}, { ...opt, delay: 20 * 60_000 });
+          recordHeartbeat('closed-day-early-batch', 'success');
+        } catch (e) {
+          console.warn('[QUEUE] closed-day-early-batch failed:', (e as Error).message);
+          recordHeartbeat('closed-day-early-batch', 'failed', (e as Error).message);
+        }
+      },
+      { connection, concurrency: 1, lockDuration: 5 * 60_000 });
+    console.log('[QUEUE] Closed-day early batch scheduled (pre-open weekdays; runs the daily pipeline early on trading holidays)');
+
     // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ DL Feature Refresh (3:30 PM IST = 10:00 AM UTC, weekdays) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
     dlFeatureRefreshQueue = new Queue(QUEUE_DL_FEATURE_REFRESH, { connection });
     const dlFeatRep = await dlFeatureRefreshQueue.getRepeatableJobs();
@@ -2149,7 +2185,7 @@ export async function initQueues(): Promise<boolean> {
     const dlWkRep = await dlRetrainWeeklyQueue.getRepeatableJobs();
     for (const r of dlWkRep) await dlRetrainWeeklyQueue.removeRepeatableByKey(r.key);
     await addJobWithCatchup(dlRetrainWeeklyQueue, 'dl-retrain-weekly', {}, {
-      repeat: { pattern: '30 17 * * 0' },
+      repeat: { pattern: '0 6 * * 0' }, // Sunday 11:30 IST (06:00 UTC) — early on the closed day, after ml retrain
       jobId: 'dl-retrain-weekly',
       removeOnComplete: 2, removeOnFail: 3,
     });
