@@ -55,6 +55,7 @@ type SortKey = 'intraday_score' | 'breakout_score' | 'risk_reward' | 'position_s
 const IntradayPage: React.FC<{ onSelectStock: (symbol: string) => void }> = ({ onSelectStock }) => {
   const recsQ = trpc.getIntradayRecommendations.useQuery({ limit: 100 }, { refetchInterval: 60_000 });
   const breadthQ = trpc.getIntradayBreadth.useQuery(undefined, { refetchInterval: 60_000 });
+  const accuracyQ = trpc.getIntradayAccuracy.useQuery({ days: 30 });
 
   const [sortKey, setSortKey] = useState<SortKey>('intraday_score');
   const [query, setQuery] = useState('');
@@ -146,6 +147,48 @@ const IntradayPage: React.FC<{ onSelectStock: (symbol: string) => void }> = ({ o
         <Kpi icon={Gauge} label="Avg R:R" value={avgRR ? avgRR.toFixed(2) : '—'} accent="text-amber-300" sub="target ÷ stop" />
         <Kpi icon={Radio} label="Ranked" value={n0(rows.length)} accent="text-slate-200" sub="intraday universe" />
       </div>
+
+      {/* ── Backtest accuracy (paper-trade outcomes, last 30d) ──────────── */}
+      {(() => {
+        const a = accuracyQ.data?.overall as { total?: number; wins?: number; losses?: number; avg_pnl?: number; total_pnl?: number } | undefined;
+        const total = Number(a?.total ?? 0);
+        if (!total) {
+          return (
+            <div className="rounded-2xl ring-1 ring-slate-800 bg-slate-900/40 px-5 py-4 text-sm text-slate-500 flex items-center gap-2">
+              <Gauge className="w-4 h-4" /> Paper-trade accuracy accrues after market close — no resolved intraday trades yet.
+            </div>
+          );
+        }
+        const wins = Number(a?.wins ?? 0);
+        const winRate = (wins / total) * 100;
+        const avgPnl = Number(a?.avg_pnl ?? 0);
+        const totalPnl = Number(a?.total_pnl ?? 0);
+        const pos = avgPnl >= 0;
+        return (
+          <div className="rounded-2xl ring-1 ring-slate-800 bg-slate-900/40 p-4 grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div>
+              <div className="text-[10px] uppercase tracking-widest text-slate-500 font-bold">Win Rate (30d)</div>
+              <div className={cn('text-2xl font-black tabular-nums', winRate >= 50 ? 'text-emerald-300' : 'text-amber-300')}>{winRate.toFixed(1)}%</div>
+              <div className="text-[10px] text-slate-600">{wins}W / {Number(a?.losses ?? 0)}L of {total}</div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-widest text-slate-500 font-bold">Avg P&amp;L / trade</div>
+              <div className={cn('text-2xl font-black tabular-nums', pos ? 'text-emerald-300' : 'text-rose-300')}>{pos ? '+' : ''}{avgPnl.toFixed(2)}%</div>
+              <div className="text-[10px] text-slate-600">paper, entry→exit</div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-widest text-slate-500 font-bold">Cumulative P&amp;L</div>
+              <div className={cn('text-2xl font-black tabular-nums', totalPnl >= 0 ? 'text-emerald-300' : 'text-rose-300')}>{totalPnl >= 0 ? '+' : ''}{totalPnl.toFixed(1)}%</div>
+              <div className="text-[10px] text-slate-600">sum of resolved trades</div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-widest text-slate-500 font-bold">Resolved Trades</div>
+              <div className="text-2xl font-black tabular-nums text-slate-200">{total}</div>
+              <div className="text-[10px] text-slate-600">EOD paper-traded</div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── Controls ────────────────────────────────────────────────────── */}
       <div className="flex flex-wrap items-center gap-3">

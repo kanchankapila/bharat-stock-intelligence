@@ -51,6 +51,31 @@ export const marketRouter = router({
       );
     }),
 
+  // Intraday paper-trade accuracy (from intraday_recommendation_outcomes).
+  getIntradayAccuracy: publicProcedure
+    .input(z.object({ days: z.number().min(1).max(365).default(30) }).optional())
+    .query(async ({ input }) => {
+      const days = input?.days ?? 30;
+      const cutoff = new Date(Date.now() - days * 864e5).toISOString().slice(0, 10);
+      const overall = await dbGet(
+        `SELECT COUNT(*) AS total,
+                SUM(CASE WHEN outcome='WIN'  THEN 1 ELSE 0 END) AS wins,
+                SUM(CASE WHEN outcome='LOSS' THEN 1 ELSE 0 END) AS losses,
+                AVG(pnl_pct) AS avg_pnl, SUM(pnl_pct) AS total_pnl
+         FROM intraday_recommendation_outcomes WHERE computed_at >= ?`,
+        [cutoff],
+      );
+      const byDay = await dbAll(
+        `SELECT computed_at AS date, COUNT(*) AS n,
+                SUM(CASE WHEN outcome='WIN' THEN 1 ELSE 0 END) AS wins,
+                AVG(pnl_pct) AS avg_pnl
+         FROM intraday_recommendation_outcomes WHERE computed_at >= ?
+         GROUP BY computed_at ORDER BY computed_at DESC LIMIT 30`,
+        [cutoff],
+      );
+      return { overall, byDay };
+    }),
+
   getLiveStockQuote: publicProcedure
     .input(z.object({ symbol: z.string() }))
     .query(async ({ input }) => {

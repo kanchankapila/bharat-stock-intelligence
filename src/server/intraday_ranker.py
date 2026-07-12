@@ -38,6 +38,10 @@ W_BREAKOUT, W_SCREENER = 0.45, 0.55
 # Regime tilt on the final score (intraday breadth risk-on/off from intraday_regime.py).
 REGIME_TILT = {"RISK_ON": 1.15, "NEUTRAL": 1.0, "RISK_OFF": 0.80}
 
+# News-sentiment tilt: a fresh news score in [-1, +1] nudges the blended score up to ±15%. News is
+# sparse (only some names have coverage), so it modifies rather than drives the ranking.
+NEWS_TILT_WEIGHT = 0.15
+
 
 def _wilder_atr(bars, period: int = 14) -> float:
     """Wilder ATR(period) from bars ascending by date; 0 when history is too short."""
@@ -128,6 +132,48 @@ class IntradayRanker:
                 out[r["symbol"]] = float(r["breakout_probability"] or 0) * 100
         return out
 
+    def _news_sentiment(self, days: int = 2):
+        """Avg recent news sentiment per symbol in [-1, +1] (mirrors technicalSignalsService's
+        loadRecentNewsSentiment: news_sentiment_items.symbols_json → sentiment_score)."""
+        import json as _json
+        upper = (date.today() + timedelta(days=1)).isoformat()
+        cutoff = (date.today() - timedelta(days=days)).isoformat()
+        try:
+            rows = self.conn.execute(
+                "SELECT symbols_json, sentiment_score FROM news_sentiment_items "
+                "WHERE fetched_at >= ? AND fetched_at <= ? AND symbols_json IS NOT NULL "
+                "AND symbols_json != '' AND symbols_json != '[]'", (cutoff, upper)
+            ).fetchall()
+        except Exception as e:
+            print(f"[IntradayRanker] news sentiment skipped: {str(e)[:80]}")
+            return {}
+        acc = {}
+        for r in rows:
+            try:
+                syms = _json.loads(r["symbols_json"])
+            except Exception:
+                continue
+            for s in syms:
+                acc.setdefault(s, []).append(float(r["sentiment_score"] or 0))
+        return {s: sum(v) / len(v) for s, v in acc.items() if v}
+
+    def _learned_weights(self):
+        """Blend weights learned from realized outcomes by intraday_strategy_learner.py (published
+        to app_settings once enough trades accumulate). Falls back to the module defaults."""
+        row = self.conn.execute(
+            "SELECT value FROM app_settings WHERE key='intraday_learned_weights'"
+        ).fetchone()
+        if not row or not row["value"]:
+            return W_BREAKOUT, W_SCREENER, NEWS_TILT_WEIGHT
+        try:
+            import json as _json
+            w = _json.loads(row["value"])
+            return (float(w.get("W_BREAKOUT", W_BREAKOUT)),
+                    float(w.get("W_SCREENER", W_SCREENER)),
+                    float(w.get("NEWS_TILT_WEIGHT", NEWS_TILT_WEIGHT)))
+        except Exception:
+            return W_BREAKOUT, W_SCREENER, NEWS_TILT_WEIGHT
+
     def _intraday_regime(self) -> str:
         row = self.conn.execute(
             "SELECT value FROM app_settings WHERE key='intraday_regime'"
@@ -164,8 +210,11 @@ class IntradayRanker:
         membership = self._intraday_membership()
         screener_scores, bull_counts, bear_counts = compute_screener_stock_scores(membership, {})
         breakout_scores = self._breakout_scores()
+        news_scores = self._news_sentiment()
         regime = self._intraday_regime()
         tilt = REGIME_TILT.get(regime, 1.0)
+        # Blend weights: learned from realized outcomes if available, else defaults (self-improving).
+        w_breakout, w_screener, news_tilt = self._learned_weights()
 
         all_symbols = set(screener_scores) | set(breakout_scores)
         rows = []
@@ -175,12 +224,15 @@ class IntradayRanker:
             b_sc = breakout_scores.get(sym)
             # Renormalize the blend over whichever components are present for this symbol.
             if s_sc is not None and b_sc is not None:
-                base = W_SCREENER * s_sc + W_BREAKOUT * b_sc
+                base = w_screener * s_sc + w_breakout * b_sc
             elif s_sc is not None:
                 base = s_sc
             else:
                 base = b_sc
-            score = min(100.0, max(0.0, base * tilt))
+            # News tilt: nudge the score by up to ±(news_tilt) on fresh sentiment (0 when no coverage).
+            news = news_scores.get(sym)
+            news_mult = 1.0 + news_tilt * max(-1.0, min(1.0, news)) if news is not None else 1.0
+            score = min(100.0, max(0.0, base * tilt * news_mult))
             bull, bear = bull_counts.get(sym, 0), bear_counts.get(sym, 0)
             classification = _classify(score, bull, bear)
             rows.append({
@@ -188,6 +240,7 @@ class IntradayRanker:
                 "conviction": _conviction(score), "classification": classification,
                 "screener_score": round(s_sc, 2) if s_sc is not None else None,
                 "breakout_score": round(b_sc, 2) if b_sc is not None else None,
+                "news_sentiment": round(news, 3) if news is not None else None,
                 "bull": bull, "bear": bear,
                 "breakout_prob": (b_sc / 100.0) if b_sc is not None else None,
             })
@@ -220,26 +273,28 @@ class IntradayRanker:
         for r in rows:
             reasoning = (f"{r['bull']} bullish / {r['bear']} bearish intraday screeners "
                          f"({r['classification']}); regime {regime}"
-                         + (f"; breakout P={r['breakout_prob']:.2f}" if r["breakout_prob"] else ""))
+                         + (f"; breakout P={r['breakout_prob']:.2f}" if r["breakout_prob"] else "")
+                         + (f"; news {r['news_sentiment']:+.2f}" if r["news_sentiment"] is not None else ""))
             cur.execute(
                 """INSERT INTO intraday_recommendations
                    (symbol, computed_at, intraday_regime, intraday_score, conviction_level,
-                    classification, screener_score, breakout_score, bullish_count, bearish_count,
-                    cmp, entry_price, stop_loss, target_1, risk_reward, position_size_pct,
-                    reasoning, computed_ts)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
+                    classification, screener_score, breakout_score, news_sentiment, bullish_count,
+                    bearish_count, cmp, entry_price, stop_loss, target_1, risk_reward,
+                    position_size_pct, reasoning, computed_ts)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
                    ON CONFLICT(symbol, computed_at) DO UPDATE SET
                      intraday_regime=excluded.intraday_regime, intraday_score=excluded.intraday_score,
                      conviction_level=excluded.conviction_level, classification=excluded.classification,
                      screener_score=excluded.screener_score, breakout_score=excluded.breakout_score,
+                     news_sentiment=excluded.news_sentiment,
                      bullish_count=excluded.bullish_count, bearish_count=excluded.bearish_count,
                      cmp=excluded.cmp, entry_price=excluded.entry_price, stop_loss=excluded.stop_loss,
                      target_1=excluded.target_1, risk_reward=excluded.risk_reward,
                      position_size_pct=excluded.position_size_pct, reasoning=excluded.reasoning,
                      computed_ts=CURRENT_TIMESTAMP""",
                 (r["symbol"], today, regime, r["score"], r["conviction"], r["classification"],
-                 r["screener_score"], r["breakout_score"], r["bull"], r["bear"], r["cmp"],
-                 r["entry_price"], r["stop_loss"], r["target_1"], r["risk_reward"],
+                 r["screener_score"], r["breakout_score"], r["news_sentiment"], r["bull"], r["bear"],
+                 r["cmp"], r["entry_price"], r["stop_loss"], r["target_1"], r["risk_reward"],
                  r["position_size_pct"], reasoning),
             )
         self.conn.commit()

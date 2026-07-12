@@ -794,6 +794,13 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await runPython('high_flyer_retrospective.py', [], 10 * 60_000)
     .catch(e => console.warn('[QUEUE] high_flyer_retrospective failed:', (e as Error).message));
 
+  // Intraday feedback loop: paper-trade today's intraday recs vs the day's OHLC, then reverse-
+  // engineer which signals preceded the winners → learned blend weights the ranker leans on.
+  await runPython('intraday_outcome_resolver.py', [], 120_000)
+    .catch(e => console.warn('[QUEUE] intraday_outcome_resolver failed:', (e as Error).message));
+  await runPython('intraday_strategy_learner.py', [], 120_000)
+    .catch(e => console.warn('[QUEUE] intraday_strategy_learner failed:', (e as Error).message));
+
   await T.run('reward-engine', () => runPython('reward_engine.py'));
   // --update only recomputes Q-values for existing rl_episodes rows; nothing creates NEW
   // rows day-to-day (log_episode() is unused dead code) — --backfill is what actually

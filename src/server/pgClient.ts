@@ -155,6 +155,7 @@ export async function pgEnsureColumns(): Promise<void> {
        symbol TEXT, computed_at TEXT, intraday_regime TEXT,
        intraday_score DOUBLE PRECISION, conviction_level TEXT, classification TEXT,
        screener_score DOUBLE PRECISION, breakout_score DOUBLE PRECISION,
+       news_sentiment DOUBLE PRECISION,
        bullish_count INTEGER, bearish_count INTEGER,
        cmp DOUBLE PRECISION, entry_price DOUBLE PRECISION, stop_loss DOUBLE PRECISION,
        target_1 DOUBLE PRECISION, risk_reward DOUBLE PRECISION, position_size_pct DOUBLE PRECISION,
@@ -162,6 +163,21 @@ export async function pgEnsureColumns(): Promise<void> {
        PRIMARY KEY (symbol, computed_at)
      )`,
     `CREATE INDEX IF NOT EXISTS idx_intraday_recs_score ON intraday_recommendations(computed_at DESC, intraday_score DESC)`,
+    `CREATE TABLE IF NOT EXISTS intraday_recommendation_outcomes (
+       symbol TEXT, computed_at TEXT,
+       entry_price DOUBLE PRECISION, target_1 DOUBLE PRECISION, stop_loss DOUBLE PRECISION,
+       day_high DOUBLE PRECISION, day_low DOUBLE PRECISION, day_close DOUBLE PRECISION,
+       exit_price DOUBLE PRECISION, exit_reason TEXT, pnl_pct DOUBLE PRECISION, outcome TEXT,
+       resolved_at TIMESTAMP,
+       PRIMARY KEY (symbol, computed_at)
+     )`,
+    `CREATE INDEX IF NOT EXISTS idx_intraday_outcomes_date ON intraday_recommendation_outcomes(computed_at DESC)`,
+    `CREATE TABLE IF NOT EXISTS intraday_strategy_lifts (
+       as_of TEXT, dimension TEXT, bucket TEXT,
+       n INTEGER, wins INTEGER, win_rate DOUBLE PRECISION, lift DOUBLE PRECISION,
+       avg_pnl DOUBLE PRECISION,
+       PRIMARY KEY (as_of, dimension, bucket)
+     )`,
     `CREATE TABLE IF NOT EXISTS intraday_regime_history (
        computed_at TEXT PRIMARY KEY, date TEXT, regime TEXT,
        composite DOUBLE PRECISION, vix DOUBLE PRECISION, mmi DOUBLE PRECISION,
@@ -306,6 +322,8 @@ export async function pgEnsureColumns(): Promise<void> {
     `ALTER TABLE quant_scores ADD COLUMN IF NOT EXISTS mf_risk_adj_score  DOUBLE PRECISION`,
     `ALTER TABLE quant_scores ADD COLUMN IF NOT EXISTS mf_macro_score     DOUBLE PRECISION`,
     `ALTER TABLE quant_scores ADD COLUMN IF NOT EXISTS mf_composite_score DOUBLE PRECISION`,
+    // intraday_recommendations news-sentiment feature (added after the table's initial creation)
+    `ALTER TABLE intraday_recommendations ADD COLUMN IF NOT EXISTS news_sentiment DOUBLE PRECISION`,
   ];
   // Run each ALTER individually — Postgres can't do multiple DDL in one statement
   for (const sql of alters) {

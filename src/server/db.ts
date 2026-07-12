@@ -1183,6 +1183,7 @@ db.exec(`
     classification     TEXT,
     screener_score     REAL,
     breakout_score     REAL,
+    news_sentiment     REAL,
     bullish_count      INTEGER,
     bearish_count      INTEGER,
     cmp                REAL,
@@ -1194,6 +1195,39 @@ db.exec(`
     reasoning          TEXT,
     computed_ts        TIMESTAMP,
     PRIMARY KEY (symbol, computed_at)
+  );
+
+  -- Intraday paper-trade outcomes: entry/target/stop simulated against the day's OHLC by
+  -- intraday_outcome_resolver.py (post-close). Feeds accuracy metrics + the strategy learner.
+  CREATE TABLE IF NOT EXISTS intraday_recommendation_outcomes (
+    symbol             TEXT,
+    computed_at        TEXT,
+    entry_price        REAL,
+    target_1           REAL,
+    stop_loss          REAL,
+    day_high           REAL,
+    day_low            REAL,
+    day_close          REAL,
+    exit_price         REAL,
+    exit_reason        TEXT,
+    pnl_pct            REAL,
+    outcome            TEXT,
+    resolved_at        TIMESTAMP,
+    PRIMARY KEY (symbol, computed_at)
+  );
+
+  -- Reverse-engineered signal lifts (intraday_strategy_learner.py): per signal bucket, the
+  -- paper-trade win rate and its lift over the base rate — which setups actually precede winners.
+  CREATE TABLE IF NOT EXISTS intraday_strategy_lifts (
+    as_of              TEXT,
+    dimension          TEXT,
+    bucket             TEXT,
+    n                  INTEGER,
+    wins               INTEGER,
+    win_rate           REAL,
+    lift               REAL,
+    avg_pnl            REAL,
+    PRIMARY KEY (as_of, dimension, bucket)
   );
 
   CREATE TABLE IF NOT EXISTS feature_store (
