@@ -130,4 +130,19 @@ export const moneycontrolRouter = router({
       const { fetchKayalScreener } = await import('../mcApiService');
       return fetchKayalScreener(input.screenpk, input.limit);
     }),
+
+  getMcSeasonality: publicProcedure
+    .input(z.object({ month: z.number().optional() }))
+    .query(async ({ input }) => {
+      const month = input.month ?? (new Date().getMonth() + 1);
+      const { dbAll } = await import('../dbAsync');
+      return dbAll(`
+        SELECT tab_type, sc_fullname as name, avg_pct, max_pct, min_pct, total_yr as years_positive, tot_yr as total_years, sc_id
+        FROM mc_seasonality_best_stocks
+        WHERE month = ?
+        ORDER BY avg_pct DESC
+        LIMIT 50
+      `, [month]);
+    }),
 });
+

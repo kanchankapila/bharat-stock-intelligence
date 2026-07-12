@@ -9,6 +9,8 @@ import {
 import { Card } from './MCCommon';
 import FnOHeatmap from './FnOHeatmap';
 import { OptionChainView } from './OptionChainView';
+import { MaxPainAlerts } from './MaxPainAlerts';
+import { EarningsPlaybook } from './EarningsPlaybook';
 
 interface FnOScannerProps {
   onSelectStock: (symbol: string) => void;
@@ -294,14 +296,16 @@ const SentimentMeter: React.FC<{ pct: number; bull: number; bear: number; total:
 // ── Main Component ──────────────────────────────────────────────────────────
 const FnOIntelligenceCenter: React.FC<FnOScannerProps> = ({ onSelectStock }) => {
   const [masterView, setMasterView] = useState<'overview' | 'chain'>('overview');
-  const [activeTab, setActiveTab] = useState<'futures' | 'options'>('futures');
+  const [activeTab, setActiveTab] = useState<'futures' | 'options' | 'maxpain' | 'earnings'>('futures');
   const [activeScanner, setActiveScanner] = useState<string>('long-build-up');
   const [instType, setInstType] = useState<'all' | 'index' | 'stock'>('all');
 
   const { data: scannerData, isLoading } = trpc.getTrendlyneFnoScanners.useQuery({
-    mtype: activeTab,
+    mtype: (activeTab === 'futures' || activeTab === 'options') ? activeTab : 'futures',
     screenType: activeScanner,
     instType: instType === 'all' ? undefined : instType,
+  }, {
+    enabled: activeTab === 'futures' || activeTab === 'options'
   });
 
   const scanners = {
@@ -324,11 +328,13 @@ const FnOIntelligenceCenter: React.FC<FnOScannerProps> = ({ onSelectStock }) => 
       { id: 'long-build-up',    name: 'Long Buildup',     icon: TrendingUp,   desc: 'Option Longs Accumulating',                  sentiment: 'bullish' },
       { id: 'short-build-up',   name: 'Short Buildup',    icon: TrendingDown, desc: 'Option Writers Adding Shorts',                sentiment: 'bearish' },
       { id: 'short-covering',   name: 'Short Covering',   icon: Zap,          desc: 'Option Shorts Being Covered',                sentiment: 'bullish' },
-    ]
+    ],
+    maxpain: [] as any[],
+    earnings: [] as any[]
   };
 
-  const headers: any[] = scannerData?.header || [];
-  const rows: any[][] = scannerData?.tableData || [];
+  const headers: any[] = (activeTab === 'futures' || activeTab === 'options') ? (scannerData?.header || []) : [];
+  const rows: any[][] = (activeTab === 'futures' || activeTab === 'options') ? (scannerData?.tableData || []) : [];
   const isOptions = activeTab === 'options';
   const intel = useIntelligence(rows, isOptions);
 
@@ -411,27 +417,40 @@ const FnOIntelligenceCenter: React.FC<FnOScannerProps> = ({ onSelectStock }) => 
           
           {masterView === 'overview' && (
             <div className="flex flex-col gap-3 items-end">
-              <div className="flex glass border border-slate-800/50 p-1 rounded-2xl">
+              <div className="flex flex-wrap glass border border-slate-800/50 p-1 rounded-2xl gap-1">
                 <button onClick={() => { setActiveTab('futures'); setActiveScanner('long-build-up'); }}
-                  className={cn("px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
+                  className={cn("px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
                     activeTab === 'futures' ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20" : "text-slate-400 hover:text-slate-300")}>
-                  Futures Scanners
+                  Futures
                 </button>
                 <button onClick={() => { setActiveTab('options'); setActiveScanner('oi-gainers-call'); }}
-                  className={cn("px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
+                  className={cn("px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
                     activeTab === 'options' ? "bg-indigo-600 text-white shadow-lg shadow-indigo-500/20" : "text-slate-400 hover:text-slate-300")}>
-                  Options Scanners
+                  Options
+                </button>
+                <button onClick={() => { setActiveTab('maxpain'); }}
+                  className={cn("px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
+                    activeTab === 'maxpain' ? "bg-rose-600 text-white shadow-lg shadow-rose-500/20" : "text-slate-400 hover:text-slate-300")}>
+                  Max Pain Magnet
+                </button>
+                <button onClick={() => { setActiveTab('earnings'); }}
+                  className={cn("px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
+                    activeTab === 'earnings' ? "bg-amber-600 text-white shadow-lg shadow-amber-500/20" : "text-slate-400 hover:text-slate-300")}>
+                  Earnings Skew
                 </button>
               </div>
-              <div className="flex glass border border-slate-800/50 p-1 rounded-xl gap-0.5">
-                {(['all', 'index', 'stock'] as const).map(t => (
-                  <button key={t} onClick={() => setInstType(t)}
-                    className={cn("px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all",
-                      instType === t ? "bg-slate-700 text-white" : "text-slate-400 hover:text-slate-400")}>
-                    {t === 'all' ? 'All' : t === 'index' ? 'Indices' : 'Stocks'}
-                  </button>
-                ))}
-              </div>
+              {(activeTab === 'futures' || activeTab === 'options') && (
+                <div className="flex glass border border-slate-800/50 p-1 rounded-xl gap-0.5">
+                  {(['all', 'index', 'stock'] as const).map(t => (
+                    <button key={t} onClick={() => setInstType(t)}
+                      className={cn("px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all",
+                        instType === t ? "bg-slate-700 text-white" : "text-slate-400 hover:text-slate-400")}>
+                      {t === 'all' ? 'All' : t === 'index' ? 'Indices' : 'Stocks'}
+                    </button>
+                  ))}
+                </div>
+              )}
+
             </div>
           )}
         </div>
@@ -439,10 +458,15 @@ const FnOIntelligenceCenter: React.FC<FnOScannerProps> = ({ onSelectStock }) => 
 
       {masterView === 'chain' ? (
         <OptionChainView onSymbolSelect={onSelectStock} />
+      ) : activeTab === 'maxpain' ? (
+        <MaxPainAlerts onSelectStock={onSelectStock} />
+      ) : activeTab === 'earnings' ? (
+        <EarningsPlaybook onSelectStock={onSelectStock} />
       ) : (
         <>
           {/* Heatmap */}
           <FnOHeatmap onSelectStock={onSelectStock} />
+
 
       {/* Market Intelligence Summary Strip */}
       {intel && intel.total > 0 && (

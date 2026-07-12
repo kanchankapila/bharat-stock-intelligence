@@ -191,7 +191,7 @@ interface MCStockInfoPanelProps {
 }
 
 type Timeframe = 'D' | 'W' | 'M';
-type Tab = 'overview' | 'financials' | 'technical' | 'analysis' | 'analyst' | 'trendlyne' | 'fno' | 'peers';
+type Tab = 'overview' | 'technical' | 'financials' | 'fno' | 'ai_report';
 
 export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({ 
   symbol, 
@@ -204,12 +204,13 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
   const [activeTab, setActiveTab] = React.useState<Tab>(
     section === 'technical' ? 'technical' :
     section === 'fundamental' ? 'financials' :
-    section === 'insights' ? 'analysis' :
+    section === 'insights' ? 'ai_report' :
     section === 'overview' ? 'overview' :
-    section === 'shareholding' ? 'analysis' :
-    section === 'trendlyne' ? 'trendlyne' :
-    section === 'peers' ? 'analysis' : 'overview'
+    section === 'shareholding' ? 'financials' :
+    section === 'trendlyne' ? 'ai_report' :
+    section === 'peers' ? 'financials' : 'overview'
   );
+
 
   const [isModalOpen, setIsModalOpen] = React.useState(false);
   const [selectedScreener, setSelectedScreener] = React.useState<any>(null);
@@ -223,12 +224,13 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
   React.useEffect(() => {
     if (section === 'technical') setActiveTab('technical');
     else if (section === 'fundamental') setActiveTab('financials');
-    else if (section === 'insights') setActiveTab('analysis');
+    else if (section === 'insights') setActiveTab('ai_report');
     else if (section === 'overview') setActiveTab('overview');
-    else if (section === 'shareholding') setActiveTab('analysis');
-    else if (section === 'peers') setActiveTab('analysis');
-    else if (section === 'trendlyne') setActiveTab('trendlyne');
-  }, [section]);  const containerRef = React.useRef<HTMLDivElement>(null);
+    else if (section === 'shareholding') setActiveTab('financials');
+    else if (section === 'peers') setActiveTab('financials');
+    else if (section === 'trendlyne') setActiveTab('ai_report');
+  }, [section]);
+  const containerRef = React.useRef<HTMLDivElement>(null);
   const [isVisible, setIsVisible] = React.useState(false);
 
   React.useEffect(() => {
@@ -267,7 +269,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
 
   const { data: trendlyneMetrics, isLoading: loadingTlMetrics } = trpc.getTrendlyneStockMetrics.useQuery(
     { symbol },
-    { enabled: isVisible && activeTab === 'trendlyne', staleTime: 60000 }
+    { enabled: isVisible && activeTab === 'ai_report', staleTime: 60000 }
   );
 
   const { data: trendlyneTa, isLoading: loadingTlTa } = trpc.getTrendlyneAdvTechnicalAnalysis.useQuery(
@@ -277,7 +279,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
 
   const { data: trendlyneOverview, isLoading: loadingTlOverview } = trpc.getTrendlyneOverview.useQuery(
     { symbol },
-    { enabled: isVisible && (activeTab === 'trendlyne' || activeTab === 'overview'), staleTime: 60000 }
+    { enabled: isVisible && (activeTab === 'ai_report' || activeTab === 'overview'), staleTime: 60000 }
   );
 
   const { data: vwapData } = trpc.getMcVwapChart.useQuery(
@@ -305,8 +307,9 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
 
   const { data: peersData, isLoading: loadingPeers } = trpc.getNSEStocksBySector.useQuery(
     { sector: nseStockData?.sector ?? '' },
-    { enabled: isVisible && activeTab === 'peers' && !!nseStockData?.sector }
+    { enabled: isVisible && activeTab === 'financials' && !!nseStockData?.sector }
   );
+
 
   const { data: indexFnoData } = trpc.getIndexFno.useQuery(
     { id: 'NIFTY' },
@@ -422,15 +425,13 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
   const changePct = eq?.pricepercentchange || sp?.perChange || '—';
 
   const TABS: { key: Tab; label: string }[] = [
-    { key: 'overview',   label: 'Overview'   },
-    { key: 'financials', label: 'Financials'  },
-    { key: 'technical',  label: 'Technical'   },
-    { key: 'peers',      label: 'Peers'       },
-    { key: 'fno',        label: 'F&O'         },
-    { key: 'analysis',   label: 'Analysis'    },
-    { key: 'analyst',    label: 'Analyst'     },
-    { key: 'trendlyne',  label: 'Trendlyne'   },
+    { key: 'overview',   label: 'Overview Cockpit' },
+    { key: 'technical',  label: 'Technical Gauges' },
+    { key: 'financials', label: 'Financials & Peers' },
+    { key: 'fno',        label: 'Options & Flow (F&O)' },
+    { key: 'ai_report',  label: 'AI Auditor Report' },
   ];
+
 
   return (
     <div ref={containerRef} className="space-y-4">
@@ -2159,9 +2160,9 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
       )}
 
       {/* ══════════════════════════════════════════════════════════════ */}
-      {/* PEERS TAB                                                      */}
+      {/* PEERS PANEL (Rendered under Financials & Peers)               */}
       {/* ══════════════════════════════════════════════════════════════ */}
-      {activeTab === 'peers' && (
+      {activeTab === 'financials' && (
         <div className="space-y-6">
           {loadingPeers ? (
             <div className="flex items-center justify-center p-8 bg-slate-900/10 border border-slate-800 border-dashed rounded-2xl">
@@ -2319,9 +2320,9 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
       )}
 
       {/* ══════════════════════════════════════════════════════════════ */}
-      {/* ANALYSIS TAB                                                   */}
+      {/* ANALYSIS SECTION (Rendered under AI Auditor Report)            */}
       {/* ══════════════════════════════════════════════════════════════ */}
-      {activeTab === 'analysis' && (
+      {activeTab === 'ai_report' && (
         <div className="space-y-6">
 
           {/* Intelligence Hub: Qualitative Factors */}
@@ -2535,9 +2536,9 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
       )}
 
       {/* ══════════════════════════════════════════════════════════════ */}
-      {/* ANALYST TAB                                                    */}
+      {/* ANALYST RECOMMENDATIONS (Rendered under AI Auditor Report)     */}
       {/* ══════════════════════════════════════════════════════════════ */}
-      {activeTab === 'analyst' && (
+      {activeTab === 'ai_report' && (
         <div className="space-y-6">
 
           {/* Analyst Intelligence Dashboard */}
@@ -2674,9 +2675,9 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
       )}
 
       {/* ══════════════════════════════════════════════════════════════ */}
-      {/* TRENDLYNE TAB                                                  */}
+      {/* TRENDLYNE METRICS (Rendered under AI Auditor Report)           */}
       {/* ══════════════════════════════════════════════════════════════ */}
-      {activeTab === 'trendlyne' && (
+      {activeTab === 'ai_report' && (
         <div className="space-y-6">
           {loadingTlMetrics || loadingTlTa || loadingTlOverview ? (
             <div className="flex items-center justify-center p-8 bg-slate-900/10 border border-slate-800 border-dashed rounded-2xl">

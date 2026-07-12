@@ -4,8 +4,15 @@ export default function ExportPortfolioView() {
   const [loading, setLoading] = useState(false);
   const [picks, setPicks] = useState<any[]>([]);
   const [stats, setStats] = useState<any | null>(null);
-  const [start, setStart] = useState('2025-05-12');
-  const [end, setEnd] = useState('2026-05-29');
+  const [start, setStart] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 30);
+    return d.toISOString().split('T')[0];
+  });
+  const [end, setEnd] = useState(() => {
+    return new Date().toISOString().split('T')[0];
+  });
+
 
   async function fetchPicks(runBacktest = false) {
     setLoading(true);
