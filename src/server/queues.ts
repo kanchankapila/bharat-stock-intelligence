@@ -478,6 +478,29 @@ async function processIntradayFetcher(_job: Job): Promise<void> {
     .catch(e => console.warn('[QUEUE] intraday_fetcher failed:', (e as Error).message));
 }
 
+/**
+ * Overall execution budget for a heavy processor.
+ *
+ * Per-step runPython timeouts don't bound the job as a whole: a step that hangs in TS
+ * (network sync, DB lock wait) never returns, the processor promise never settles, and the
+ * concurrency-1 slot is held forever — every later run queues behind it. Losing the race
+ * rejects the processor so BullMQ frees the slot and fails the job instead of wedging.
+ *
+ * Caveat: this cannot cancel the work already in flight. Any in-flight HTTP/DB call or
+ * Python child keeps running to its own timeout; we only stop waiting on it. Budget must
+ * stay under the worker's lockDuration so the timeout fires before stall-detection does.
+ */
+function withJobTimeout<T>(name: string, budgetMs: number, fn: () => Promise<T>): Promise<T> {
+  let timer: NodeJS.Timeout;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`${name} exceeded its ${Math.round(budgetMs / 60_000)}min execution budget — failing the job to free the worker slot`)),
+      budgetMs,
+    );
+  });
+  return Promise.race([fn(), timeout]).finally(() => clearTimeout(timer)) as Promise<T>;
+}
+
 async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   // Dashboard-visible sub-tasks are wrapped in T.run(...) so their monitor state reflects the
   // ACTUAL step outcome (T.finish() at the end). Steps not tracked here stay best-effort with a
@@ -1116,36 +1139,83 @@ async function processAgentOptimizer(_job: Job): Promise<{ success: boolean }> {
 // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Initialise queues & workers ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 
 
+/**
+ * One quant-eod-sync step, under its own execution budget.
+ *
+ * These steps are TypeScript, so unlike the Python steps (which execFile already bounds and
+ * kills) nothing bounds them: a stalled socket or a DB lock wait parks the step forever and
+ * wedges the concurrency-1 slot. A blown budget throws, which preserves this job's existing
+ * abort-on-step-failure behaviour while naming the culprit instead of failing anonymously.
+ *
+ * Budgets are PROVISIONAL and deliberately loose. No per-step timings were ever recorded; the
+ * only hard data is whole-job runs of 153/157/239 min plus etnow-screener-sync's measured ~11
+ * min standalone. They are sized to catch a hang, not to police normal runtime. The duration
+ * line logged below is the data needed to tighten them — revisit once a week of runs exists.
+ */
+async function quantStep<T>(label: string, budgetMin: number, fn: () => Promise<T>): Promise<T> {
+  const t0 = Date.now();
+  try {
+    return await withJobTimeout(`quant-eod-sync:${label}`, budgetMin * 60_000, fn);
+  } finally {
+    console.log(`[QUANT EOD] ${label} took ${((Date.now() - t0) / 60_000).toFixed(1)}min`);
+  }
+}
+
+/**
+ * Await concurrent steps, then re-throw the first failure.
+ *
+ * allSettled rather than Promise.all on purpose: all() rejects on the first failure and leaves
+ * the siblings running unawaited, which is how you orphan an in-flight sync — the exact class of
+ * problem this job already has. Waiting for every step to settle before re-throwing preserves
+ * the processor's pre-existing abort-on-step-failure behaviour with no orphans.
+ */
+async function quantPhase(steps: Promise<unknown>[]): Promise<void> {
+  const results = await Promise.allSettled(steps);
+  const failed = results.find(r => r.status === 'rejected');
+  if (failed) throw (failed as PromiseRejectedResult).reason;
+}
+
 async function processQuantEodSync(_job: Job): Promise<{ success: boolean }> {
   console.log('[QUEUE] quant-eod-sync starting...');
   try {
+    // Phase 1 — different vendors (NiftyTrader vs Trendlyne). Both write proprietary_scores_history
+    // but under a different `source`, so ON CONFLICT(symbol,date,source,score_type) keeps the rows
+    // disjoint; concurrent upserts can't collide.
     console.log('[QUANT EOD] 1. Syncing NiftyTrader & Trendlyne Scores');
-    await syncNiftyTraderScores();
-    await syncTrendlyneScores();
-    
-    console.log('[QUANT EOD] 1.5. Syncing Trendlyne Technical Snapshots');
-    await syncTrendlyneTechnicals();
-    
-    console.log('[QUANT EOD] 2. Syncing Trendlyne Screeners');
-    await syncAllScreenerStocksToDB();
-    
-    console.log('[QUANT EOD] 3. Syncing MoneyControl Screeners');
-    await syncMoneyControlScreeners();
+    await quantPhase([
+      quantStep('niftytrader-scores', 30, () => syncNiftyTraderScores()),
+      quantStep('trendlyne-scores', 30, () => syncTrendlyneScores()),
+    ]);
 
-    console.log('[QUANT EOD] 3b. Syncing ETNow Screeners');
+    // Serial, and deliberately not folded into a phase with any other Trendlyne step: overlapping
+    // two Trendlyne calls risks the vendor rate-limit this repo has been bitten by before.
+    console.log('[QUANT EOD] 1.5. Syncing Trendlyne Technical Snapshots');
+    await quantStep('trendlyne-technicals', 45, () => syncTrendlyneTechnicals());
+
+    // Phase 2 — three distinct vendors writing three disjoint table families
+    // (trendlyne_screeners* / moneycontrol_screeners* / etnow_screeners*), no shared rows. Only
+    // one Trendlyne call in the set, so the vendor constraint above still holds.
+    console.log('[QUANT EOD] 2/3/3b. Syncing Trendlyne + MoneyControl + ETNow Screeners');
     const { syncETnowScreeners } = await import('./etnowScreenerSync');
-    await syncETnowScreeners().catch((e: any) => console.error('[QUANT EOD] ETNow sync failed:', e.message));
+    await quantPhase([
+      quantStep('trendlyne-screeners', 60, () => syncAllScreenerStocksToDB()),
+      quantStep('mc-screeners', 45, () => syncMoneyControlScreeners()),
+      // Stays best-effort (pre-existing behaviour): ETNow must not abort the remaining steps.
+      quantStep('etnow-screeners', 30, () => syncETnowScreeners())
+        .catch((e: any) => console.error('[QUANT EOD] ETNow sync failed:', e.message)),
+    ]);
 
     console.log('[QUANT EOD] 4. Syncing Point-in-time Fundamentals');
-    await runFullFundamentalsSync();
-    
+    await quantStep('fundamentals-sync', 60, () => runFullFundamentalsSync());
+
     console.log('[QUANT EOD] 5. Syncing Delivery Data for Today');
     const today = new Date().toISOString().split('T')[0];
-    await fetchDeliveryMap(today);
-    
+    await quantStep('delivery-map', 10, () => fetchDeliveryMap(today));
+
     console.log('[QUANT EOD] 6. Fetching PCR & Max Pain');
+    // No quantStep wrapper: runPython's execFile timeout already bounds and kills this one.
     await runPython('pcr_fetcher.py', ['--gex'], 90_000).catch((e: any) => console.error('[QUANT EOD] pcr_fetcher failed:', e.message));
-    
+
     updateMonitorState('quant-eod-sync', 'success');
     console.log('[QUEUE] quant-eod-sync completed successfully');
     return { success: true };
@@ -1156,6 +1226,14 @@ async function processQuantEodSync(_job: Job): Promise<{ success: boolean }> {
   }
 }
 
+
+// Catch-up throttle. Every queue that missed a slot used to enqueue its make-up run with no
+// delay, so a restart fired all of them at once — each queue has its own concurrency-1 worker,
+// so N heavy jobs started simultaneously on one box. That burst is what preceded both wedges.
+// Staggering start times spreads the herd; the counter is module-level so the stagger is global
+// across every addJobWithCatchup call in a single initQueues() pass, not per-queue.
+const CATCHUP_STAGGER_MS = 5 * 60_000;
+let _catchupSlot = 0;
 
 async function addJobWithCatchup(
   queue: Queue,
@@ -1219,10 +1297,15 @@ async function addJobWithCatchup(
     }
 
     if (missed) {
-      console.log(`[QUEUE] Job ${jobName} in ${queue.name} missed its scheduled run. Executing catch-up...`);
+      const delay = _catchupSlot++ * CATCHUP_STAGGER_MS;
+      console.log(
+        `[QUEUE] Job ${jobName} in ${queue.name} missed its scheduled run. ` +
+        `Catch-up queued with a ${delay / 60_000}min stagger.`,
+      );
       const catchupOpts = { ...opts };
       delete catchupOpts.repeat;
       catchupOpts.jobId = `${opts.jobId || jobName}-catchup-${now}`;
+      catchupOpts.delay = delay;
       await queue.add(jobName, { ...data, isCatchup: true }, catchupOpts);
     }
   } catch (err) {
@@ -1877,7 +1960,9 @@ export async function initQueues(): Promise<boolean> {
 
     mlDailyOpsWorker = new Worker(
       QUEUE_ML_DAILY_OPS,
-      processMlDailyOps,
+      // 3.5h budget vs the 4h lock: a normal run is ~2-3h, so this only fires on a genuine
+      // hang, and it fires before BullMQ's stall path can requeue the wedged job.
+      (job) => withJobTimeout('ml-daily-ops', 3.5 * 60 * 60 * 1000, () => processMlDailyOps(job)),
       {
         connection,
         concurrency: 1,
@@ -2517,7 +2602,13 @@ export async function initQueues(): Promise<boolean> {
 
     quantEodSyncWorker = new Worker(
       QUEUE_QUANT_EOD_SYNC,
-      processQuantEodSync,
+      // 5.5h backstop. NOT sized off lockDuration: the last three runs took 153/157/239 min and
+      // all completed fine — lockRenewTime keeps renewing while the worker lives, so the 120min
+      // lock bounds silence, not runtime. Anything under ~4h would kill healthy nightly runs.
+      // The per-step budgets are the real defense and must stay the binding constraint, so this
+      // sits above their ~207min worst-case (phases count only their slowest member); it only
+      // catches a hang in an unwrapped gap.
+      (job) => withJobTimeout('quant-eod-sync', 5.5 * 60 * 60_000, () => processQuantEodSync(job)),
       {
         connection,
         concurrency: 1,
@@ -2528,7 +2619,12 @@ export async function initQueues(): Promise<boolean> {
       }
     );
     quantEodSyncWorker.on('completed', () => console.log('[QUEUE] quant-eod-sync done'));
-    quantEodSyncWorker.on('failed', (_, e) => console.error('[QUEUE] quant-eod-sync failed:', e.message));
+    quantEodSyncWorker.on('failed', (_, e) => {
+      // The processor's own catch can't see a timeout — it rejects outside the processor —
+      // so mark the state here too, otherwise a timed-out run leaves the last success showing.
+      updateMonitorState('quant-eod-sync', 'failed', e.message);
+      console.error('[QUEUE] quant-eod-sync failed:', e.message);
+    });
 
     trendlyneDailyFetchQueue = new Queue(QUEUE_TRENDLYNE_DAILY_FETCH, { connection });
 
