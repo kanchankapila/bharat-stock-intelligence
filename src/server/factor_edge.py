@@ -93,8 +93,31 @@ def _verdict(mic, auc, dates):
     return "no edge"
 
 
-def run(table, scores, symbol_col, date_col, horizons, by_regime, min_per_date, min_n, quantiles):
+def _ensure_history(con):
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS factor_edge_history (
+            run_at        TEXT NOT NULL,
+            table_name    TEXT NOT NULL,
+            score_col     TEXT NOT NULL,
+            regime        TEXT NOT NULL,
+            horizon_days  INTEGER NOT NULL,
+            rank_ic       REAL,
+            hit_auc       REAL,
+            n             INTEGER,
+            dates         INTEGER,
+            verdict       TEXT,
+            PRIMARY KEY (run_at, table_name, score_col, regime, horizon_days)
+        )
+    """)
+    con.commit()
+
+
+def run(table, scores, symbol_col, date_col, horizons, by_regime, min_per_date, min_n, quantiles,
+        persist=False):
     con = connect()
+    if persist:
+        _ensure_history(con)
+        run_at = __import__("datetime").datetime.now().isoformat()
     df = _load(con, table, symbol_col, date_col, scores)
     print(f"[factor_edge] {table}: rows={len(df)} symbols={df.symbol.nunique()} "
           f"dates={df.date.nunique()} span={df.date.min().date()}..{df.date.max().date()}")
@@ -124,7 +147,24 @@ def run(table, scores, symbol_col, date_col, horizons, by_regime, min_per_date, 
                 if res is None:
                     continue
                 mic, auc, n, dates = res
-                print(f"{score:22} {reg_name:9} {N:4}d {mic:8.3f} {auc:8.3f} {n:7} {dates:6}  {_verdict(mic, auc, dates)}")
+                vd = _verdict(mic, auc, dates)
+                print(f"{score:22} {reg_name:9} {N:4}d {mic:8.3f} {auc:8.3f} {n:7} {dates:6}  {vd}")
+                if persist:
+                    # NaN -> NULL (never store NaN in a REAL — it poisons downstream reads, same
+                    # lesson as win_probability). run_at makes each row unique, so DO NOTHING is safe.
+                    con.execute(
+                        "INSERT INTO factor_edge_history "
+                        "(run_at,table_name,score_col,regime,horizon_days,rank_ic,hit_auc,n,dates,verdict) "
+                        "VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING",
+                        (run_at, table, score, reg_name, N,
+                         None if mic != mic else round(mic, 4),
+                         None if auc != auc else round(auc, 4),
+                         n, dates, vd),
+                    )
+
+    if persist:
+        con.commit()
+        print(f"[factor_edge] persisted results to factor_edge_history (run_at={run_at})")
 
     if quantiles:
         score, N = scores[0], horizons[0]
@@ -156,6 +196,8 @@ if __name__ == "__main__":
     ap.add_argument("--quantiles", action="store_true", help="print decile-spread for the first score+horizon")
     ap.add_argument("--min-per-date", type=int, default=10)
     ap.add_argument("--min-n", type=int, default=100)
+    ap.add_argument("--persist", action="store_true", help="write results to factor_edge_history")
     a = ap.parse_args()
     run(a.table, [s.strip() for s in a.scores.split(",")], a.symbol_col, a.date_col,
-        [int(h) for h in a.horizons.split(",")], a.by_regime, a.min_per_date, a.min_n, a.quantiles)
+        [int(h) for h in a.horizons.split(",")], a.by_regime, a.min_per_date, a.min_n, a.quantiles,
+        a.persist)

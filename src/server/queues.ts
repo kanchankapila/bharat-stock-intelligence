@@ -976,6 +976,14 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean }> 
     .catch(e => console.warn('[QUEUE] weekly performance_tracker(5) failed:', (e as Error).message));
   await runPython('performance_tracker.py', ['--horizon', '15'])
     .catch(e => console.warn('[QUEUE] weekly performance_tracker(15) failed:', (e as Error).message));
+  // Factor-edge validation: does each candidate vendor/derived score actually predict forward
+  // returns? Persists rank IC + cross-sectional AUC per horizon/regime to factor_edge_history so a
+  // score that crosses the usable threshold surfaces as history accumulates. Advisory only —
+  // nothing sizes on these yet (DVM is still LOW-DATA; re-evaluated every weekly run).
+  await runPython('factor_edge.py',
+    ['--table', 'trendlyne_dvm_scores', '--scores', 'd_score,v_score,m_score',
+     '--horizons', '5,10,21,63', '--by-regime', '--persist'], 15 * 60_000)
+    .catch(e => console.warn('[QUEUE] factor_edge (dvm) failed:', (e as Error).message));
   T.finish();
   return { success: true };
 }
