@@ -279,11 +279,7 @@ Indices use a separate `indexData` array in `src/server/stockMapping.ts` with `{
 
 ## General Rules
 
-- **Ponytail Skill (ACTIVE EVERY RESPONSE — Full Mode)**: Act as a "lazy senior developer" ([ponytail](file:///.agents/skills/ponytail/SKILL.md)). Follow the ladder before writing code:
-  1. *YAGNI*: Skip speculative abstractions and boilerplate.
-  2. *Codebase reuse*: Reuse existing helpers/types before writing new ones.
-  3. *Stdlib / Native*: Use standard library and native browser/platform features (`<input type="date">`, standard CSS/JS, Python stdlib) over adding/reinventing dependencies.
-  4. *One line / Minimal diff*: Write the shortest, simplest code that works while preserving 100% of security, validation, accessibility, and error handling.
+- **Active Skills**: Enforce [claude-mem](file:///.agents/skills/claude-mem/SKILL.md) for persistent state, [headroom](file:///.agents/skills/headroom/SKILL.md) for token budgeting, and [codebase](file:///.agents/skills/codebase/SKILL.md) for repo navigation.
 - Read memory before exploring files — it already maps the codebase.
 - All backend endpoints are in `src/server/router.ts`. Check there before searching elsewhere.
 - Symbol mappings live in `src/data/stocklist.ts` (180 stocks) and `src/data/nseStocks.ts` (2000+ stocks).
