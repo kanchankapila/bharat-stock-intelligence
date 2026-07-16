@@ -1,5 +1,9 @@
 # Bharat Stock Intelligence — Claude Instructions
 
+## Reasoning Discipline (MANDATORY — read first)
+
+**Read and follow `fable-brain.md` (project root) on every task.** It defines the standing operating procedures for reading intent, problem decomposition, effort placement, verification, known-vs-guessed labeling, self-attack, completeness, refusing to guess, delivery format, and the fake-competence patterns to avoid — plus a final gate checklist that must pass before sending any answer.
+
 ## Knowledge Graph (use this before reading files)
 
 A persistent graphify knowledge graph lives at `graphify-out/graph.json`. **Before reading any source file to answer a question about the codebase, query the graph first:**
