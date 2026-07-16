@@ -30,7 +30,7 @@ IV_RANK_WINDOW = 252   # trading days (~1y) — standard IV-rank lookback
 IV_RANK_MIN_OBS = 20   # need at least this many prior obs before a rank is meaningful
 
 
-def compute_options_walls(conn, symbol: str, spot: float, as_of_date: str) -> dict:
+def compute_options_walls(conn, symbol: str, spot: float, as_of_date: str, rows=None) -> dict:
     """Compute call wall, put wall distance, and near-expiry gamma flag from option OI."""
     result = {'call_wall_dist_pct': 0.0, 'put_wall_dist_pct': 0.0, 'near_expiry_gamma': 0.0}
     if not spot or spot <= 0:
@@ -38,12 +38,13 @@ def compute_options_walls(conn, symbol: str, spot: float, as_of_date: str) -> di
     try:
         import datetime as _dt
         today = _dt.date.fromisoformat(as_of_date[:10])
-        rows = conn.execute("""
-            SELECT strike, calls_oi, puts_oi, expiry
-            FROM so_option_chain
-            WHERE symbol = ? AND date = ?
-            ORDER BY expiry ASC, strike ASC
-        """, (symbol, as_of_date)).fetchall()
+        if rows is None:
+            rows = conn.execute("""
+                SELECT strike, ce_oi AS calls_oi, pe_oi AS puts_oi, expiry
+                FROM so_option_chain
+                WHERE symbol = ? AND date = ?
+                ORDER BY expiry ASC, strike ASC
+            """, (symbol, as_of_date)).fetchall()
         if not rows:
             return result
 
@@ -154,12 +155,40 @@ def run(only_date: str | None = None) -> int:
         sp  = float(r[2] if isinstance(r, (list, tuple)) else r['spot'] or 0)
         spot_map[(sym, dt)] = sp
 
+    # Pre-fetch option chain rows for the target symbols and dates in bulk
+    chain_map = {}
+    if not feats.empty:
+        target_dates = list(set(str(d)[:10] for d in feats['date']))
+        target_symbols = list(set(feats['symbol']))
+        date_placeholders = ",".join(["?"] * len(target_dates))
+        sym_placeholders = ",".join(["?"] * len(target_symbols))
+        
+        q = f"""
+            SELECT symbol, date, strike, ce_oi AS calls_oi, pe_oi AS puts_oi, expiry
+            FROM so_option_chain
+            WHERE date IN ({date_placeholders}) AND symbol IN ({sym_placeholders})
+        """
+        chain_rows = conn.execute(q, target_dates + target_symbols).fetchall()
+        for r in chain_rows:
+            sym = r[0] if isinstance(r, (list, tuple)) else r['symbol']
+            dt  = str(r[1] if isinstance(r, (list, tuple)) else r['date'])[:10]
+            strike = r[2] if isinstance(r, (list, tuple)) else r['strike']
+            calls_oi = r[3] if isinstance(r, (list, tuple)) else r['calls_oi']
+            puts_oi = r[4] if isinstance(r, (list, tuple)) else r['puts_oi']
+            expiry = r[5] if isinstance(r, (list, tuple)) else r['expiry']
+            
+            key = (sym, dt)
+            if key not in chain_map:
+                chain_map[key] = []
+            chain_map[key].append((strike, calls_oi, puts_oi, expiry))
+
     # Update the most-recent ts row per symbol (scanner rows lag by days; exact date match misses them).
     params = []
     for row in feats.itertuples(index=False):
         date_str = str(row.date)[:10]
         spot = spot_map.get((row.symbol, date_str), 0.0)
-        walls = compute_options_walls(conn, row.symbol, spot, date_str)
+        c_rows = chain_map.get((row.symbol, date_str))
+        walls = compute_options_walls(conn, row.symbol, spot, date_str, rows=c_rows)
         params.append((
             float(row.iv_rank), float(row.iv_skew),
             walls['call_wall_dist_pct'], walls['put_wall_dist_pct'], walls['near_expiry_gamma'],

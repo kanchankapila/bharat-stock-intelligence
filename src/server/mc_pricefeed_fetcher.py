@@ -35,6 +35,7 @@ Run:
 
 import argparse
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime
 
 from curl_cffi import requests
@@ -54,6 +55,8 @@ MC_HEADERS = {
 }
 
 RATE_LIMIT_SEC = 0.35
+BATCH_SIZE     = 15
+BATCH_GAP_SEC  = 0.5
 
 
 # ── Schema ──────────────────────────────────────────────────────────────────────
@@ -498,29 +501,37 @@ def main() -> None:
         print("[MCPricefeed] No stocks with mcsymbol found.")
         return
 
-    print(f"[MCPricefeed] Fetching {len(stocks)} stocks…")
+    print(f"[MCPricefeed] Fetching {len(stocks)} stocks in batches of {BATCH_SIZE} ({BATCH_GAP_SEC}s gap)…")
     session = requests.Session()
     today = date.today().isoformat()
     ok = 0
+    done = 0
 
-    for i, (symbol, mcsymbol) in enumerate(stocks, 1):
+    def _fetch_one(args):
+        symbol, mcsymbol = args
         data = _fetch(mcsymbol, session)
-        if data is None:
-            print(f"  [{i}/{len(stocks)}] {symbol}: no data")
-            time.sleep(RATE_LIMIT_SEC)
-            continue
+        return symbol, mcsymbol, data
 
-        f = extract_features(data)
-        upsert_row(symbol, today, f, con)
-        backfill_technical_signals(symbol, f, con)
-        append_pe_pb_history(symbol, today, f.get("pe"), f.get("pb"), con)
-
-        ind_pe_str = f"IND_PE={f.get('ind_pe','?')} vs_ind={f.get('pe_vs_ind','?')}"
-        cagr_str   = f"CAGR3={f.get('cagr_3y','?')}% CAGR5={f.get('cagr_5y','?')}%"
-        ma_str     = f"MA200={f.get('ma200_dist_pct','?')}%"
-        print(f"  [{i}/{len(stocks)}] {symbol}: {ind_pe_str} | {cagr_str} | {ma_str}")
-        ok += 1
-        time.sleep(RATE_LIMIT_SEC)
+    for batch_start in range(0, len(stocks), BATCH_SIZE):
+        batch = stocks[batch_start:batch_start + BATCH_SIZE]
+        with ThreadPoolExecutor(max_workers=len(batch)) as pool:
+            futures = [pool.submit(_fetch_one, item) for item in batch]
+            for fut in as_completed(futures):
+                symbol, mcsymbol, data = fut.result()
+                done += 1
+                if data is None:
+                    print(f"  [{done}/{len(stocks)}] {symbol}: no data")
+                    continue
+                f = extract_features(data)
+                upsert_row(symbol, today, f, con)
+                backfill_technical_signals(symbol, f, con)
+                append_pe_pb_history(symbol, today, f.get("pe"), f.get("pb"), con)
+                ind_pe_str = f"IND_PE={f.get('ind_pe','?')} vs_ind={f.get('pe_vs_ind','?')}"
+                cagr_str   = f"CAGR3={f.get('cagr_3y','?')}% CAGR5={f.get('cagr_5y','?')}%"
+                ma_str     = f"MA200={f.get('ma200_dist_pct','?')}%"
+                print(f"  [{done}/{len(stocks)}] {symbol}: {ind_pe_str} | {cagr_str} | {ma_str}")
+                ok += 1
+        time.sleep(BATCH_GAP_SEC)
 
     print(f"[MCPricefeed] Done. {ok}/{len(stocks)} stocks.")
     con.close()

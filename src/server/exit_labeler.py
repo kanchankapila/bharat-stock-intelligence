@@ -157,14 +157,21 @@ def compute_excursions(entry: float, bars: list, atr: float,
 
 def _entries(horizon: int | None, limit: int | None) -> list:
     sql = (
-        "SELECT symbol, signal_date, horizon_days, entry_price "
-        "FROM signal_outcomes WHERE entry_price IS NOT NULL"
+        "SELECT o.symbol, o.signal_date, o.horizon_days, o.entry_price "
+        "FROM signal_outcomes o "
+        "WHERE o.entry_price IS NOT NULL "
+        "AND NOT EXISTS ( "
+        "  SELECT 1 FROM signal_excursions e "
+        "  WHERE e.symbol = o.symbol "
+        "    AND e.signal_date = o.signal_date "
+        "    AND e.horizon_days = o.horizon_days "
+        ")"
     )
     params = []
     if horizon is not None:
-        sql += " AND horizon_days = ?"
+        sql += " AND o.horizon_days = ?"
         params.append(horizon)
-    sql += " ORDER BY signal_date DESC"
+    sql += " ORDER BY o.signal_date DESC"
     if limit:
         sql += f" LIMIT {int(limit)}"
     return query_all(sql, tuple(params))

@@ -497,11 +497,17 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await runPython('mc_techscanner_fetcher.py', [], 5 * 60_000)
     .catch(e => console.warn('[QUEUE] mc_techscanner failed:', (e as Error).message));
 
+  // Fetch extra alt-data from Indiatimes, MarketsMojo, and Trading80.
+  await runPython('extra_endpoints_fetcher.py', [], 30 * 60_000)
+    .catch(e => console.warn('[QUEUE] extra_endpoints_fetcher failed:', (e as Error).message));
+
   // Point-in-time fundamentals snapshot — builds the as-of trail load_training_data joins.
   // Runs in ~2s solo but its DELETE+INSERT…SELECT on fundamentals_history can block far longer on
   // Postgres lock/CPU contention during the startup catch-up burst (was tripping the old 90s budget
   // with a bare SIGTERM). 3 min matches the sibling steps and clears the transient contention window.
-  await runPython('fundamentals_snapshot.py', [], 180_000)
+  // 6 min: DELETE+INSERT on fundamentals_history can block under Postgres lock/CPU contention;
+  // 3 min was clipping on the 2nd daily-ops run (observed 2026-07-14 07:54 under load).
+  await runPython('fundamentals_snapshot.py', [], 360_000)
     .catch(e => console.warn('[QUEUE] fundamentals_snapshot failed:', (e as Error).message));
 
   // analyst_estimates_snapshot moved to weekly retrain (2328 stocks × 3 calls × 0.4s = ~47 min)
@@ -518,7 +524,7 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   // concurrently with quant scoring + news sentiment instead of after them. pythonRunner
   // caps global Python concurrency at 5, so this can't oversubscribe the box.
   await Promise.allSettled([
-    runPython('moneycontrol_fetcher.py', [], 300_000)
+    runPython('moneycontrol_fetcher.py', [], 900_000)
       .catch(e => console.warn('[QUEUE] moneycontrol_fetcher failed:', (e as Error).message)),
     runPython('institutional_quant_engine.py', [], 120_000)
       .catch(e => console.warn('[QUEUE] institutional_quant_engine failed:', (e as Error).message)),
@@ -526,11 +532,11 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   ]);
   // iv_features reads the ATM IV that pcr_fetcher just wrote to stock_options_oi → technical_signals.iv_rank.
   // Kept serial: it writes technical_signals, which several later steps also update — avoids row-lock churn.
-  await runPython('iv_features.py', [], 90_000)
+  await runPython('iv_features.py', ['--date', 'today'], 300_000)
     .catch(e => console.warn('[QUEUE] iv_features failed:', (e as Error).message));
 
   // Flag bad-print OHLCV bars first so outcome labels skip them (ohlcv_quality.is_suspect).
-  await runPython('ohlcv_quality.py', ['--no-ingest'], 180_000)
+  await runPython('ohlcv_quality.py', ['--no-ingest'], 600_000)
     .catch(e => console.warn('[QUEUE] ohlcv_quality flag failed:', (e as Error).message));
 
   // Cross-sectional relative strength from (cleaned) OHLCV → technical_signals.rs_rank_21d/63d.
@@ -691,7 +697,9 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
     .catch(e => console.warn('[QUEUE] delivery_trend_fetcher failed:', (e as Error).message));
 
   // Promoter insider transactions (90d rolling) from NSE → insider_transactions + technical_signals.
-  await runPython('insider_transactions_fetcher.py', [], 10 * 60_000)
+  // Doubled from 10→20 min: NSE HTTP pool times out mid-alphabet when the connection is
+  // congested (observed 2026-07-13: EL* batch all timed out at read_timeout=12 causing SIGTERM).
+  await runPython('insider_transactions_fetcher.py', [], 30 * 60_000)
     .catch(e => console.warn('[QUEUE] insider_transactions_fetcher failed:', (e as Error).message));
 
   // Credit rating events (upgrades/downgrades) from BSE → credit_rating_events + technical_signals.
@@ -749,7 +757,7 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await T.run('outcome-resolver-15d', () => resolveOutcomesResilient(15));
 
   // Compute excursion path labels for all resolved entries:
-  await runPython('exit_labeler.py', [], 5 * 60_000)
+  await runPython('exit_labeler.py', ['--limit', '500'], 10 * 60_000)
     .catch(e => console.warn('[QUEUE] exit_labeler failed:', (e as Error).message));
 
   // Now a windowed batch-resolve (was per-row N+1, routinely blew the old 180s
@@ -778,7 +786,19 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
 
   // PSI-based feature drift check — writes drift_score to dl_model_performance so
   // scoring_engine applies a win_probability haircut when distributions shift.
-  await T.run('drift-detector', () => runPython('drift_detector.py', [], 60_000));
+  // exit(1) from drift_detector means EMERGENCY_RETRAIN is needed — that is a deliberate
+  // signal, not a crash. Tolerate it here: queue the DL retrain and mark the step OK.
+  await T.run('drift-detector', () =>
+    runPython('drift_detector.py', [], 60_000).catch(async (e: any) => {
+      if (e?.code === 1 || (e?.message || '').includes('exit code 1') ||
+          (e?.message || '').includes('Command failed')) {
+        console.log('[QUEUE] drift-detector: EMERGENCY_RETRAIN signalled — queuing DL retrain');
+        try { await dlRetrainEmergencyQueue?.add('dl-retrain-emergency', { trigger: 'drift' }, { jobId: `drift-retrain-${Date.now()}`, removeOnComplete: 2, removeOnFail: 3 }); } catch (_) {}
+        return { stdout: '[DRIFT] EMERGENCY_RETRAIN', stderr: '' }; // step succeeds
+      }
+      throw e; // real crash — propagate
+    })
+  );
 
   await runPython('cs_ranker.py', ['--score'], 120_000)
     .catch(e => console.warn('[QUEUE] cs_ranker score failed:', (e as Error).message));
@@ -806,7 +826,7 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   // rows day-to-day (log_episode() is unused dead code) — --backfill is what actually
   // inserts episodes from newly-resolved signal_outcomes. A short lookback keeps this a
   // cheap daily top-up instead of re-scanning the full history (default 180d) every run.
-  await runPython('rl_agent.py', ['--backfill', '--lookback', '20'], 3 * 60_000)
+  await runPython('rl_agent.py', ['--backfill', '--lookback', '5'], 5 * 60_000)
     .catch(e => console.warn('[QUEUE] rl_agent backfill failed:', (e as Error).message));
   await T.run('rl-agent-update', () => runPython('rl_agent.py', ['--update']));
 
@@ -938,7 +958,11 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean }> 
   // --tune runs Optuna hyperparameter search (this is what took the model from AUC 0.70 to
   // 0.757 in the first place) — without it, every scheduled retrain silently falls back to
   // untuned defaults, which measured ~0.20 AUC worse on held-out test in one observed run.
-  await T.run('ml-ensemble-train', () => runPython('ml_ensemble.py', ['--train', '--tune', '--score'], 90 * 60_000));
+  // Soft failure: if ml-ensemble-train crashes (e.g. ValueError in score_pending), log the
+  // warning but let the weekly job continue to breakout_classifier, strategy-optimizer, etc.
+  // and always reach T.finish() so the heartbeat is written.
+  await T.run('ml-ensemble-train', () => runPython('ml_ensemble.py', ['--train', '--tune', '--score'], 90 * 60_000))
+    .catch(e => console.warn('[QUEUE] ml-ensemble-train failed (weekly retrain continues):', (e as Error).message));
   // Retrain the breakout classifier (Lever #4) on the accumulated feature history and
   // refresh today's scores; purged-OOF AUC printed to logs for monitoring.
   await runPython('breakout_classifier.py', ['--train', '--score'], 30 * 60_000)
@@ -1135,9 +1159,18 @@ async function addJobWithCatchup(
     opts.repeat.tz = 'Etc/UTC';
   }
 
+  const now = Date.now();
   const repeatables = await queue.getRepeatableJobs();
+  // A repeatable's `next` from before we remove it tells us whether BullMQ was already
+  // holding a slot that hadn't fired yet. If that slot's time has already passed, this
+  // restart (removeRepeatableByKey + re-add, which recomputes `next` from `now`) would
+  // otherwise silently forfeit it — the completed/failed-history check below can't catch
+  // this because a queue with zero run history ever (or fully-evicted history) has no
+  // lastRunTime to compare against.
+  let staleNextMissed = false;
   for (const r of repeatables) {
     if (r.id === opts.jobId || r.name === jobName) {
+      if (typeof r.next === 'number' && r.next < now) staleNextMissed = true;
       await queue.removeRepeatableByKey(r.key);
     }
   }
@@ -1153,10 +1186,9 @@ async function addJobWithCatchup(
     const lastJob = jobs.length > 0 ? jobs[0] : null;
     const lastRunTime = lastJob?.timestamp || null;
 
-    if (lastRunTime) {
-      const now = Date.now();
-      let missed = false;
+    let missed = staleNextMissed;
 
+    if (!missed && lastRunTime) {
       if (opts.repeat.pattern || opts.repeat.cron) {
         const pattern = opts.repeat.pattern || opts.repeat.cron;
         const parserOpts: any = { currentDate: new Date(now) };
@@ -1167,7 +1199,7 @@ async function addJobWithCatchup(
         }
         const interval = CronExpressionParser.parse(pattern, parserOpts);
         const prevExpected = interval.prev().getTime();
-        
+
         if (lastRunTime < prevExpected && prevExpected < now) {
           missed = true;
         }
@@ -1176,14 +1208,14 @@ async function addJobWithCatchup(
           missed = true;
         }
       }
+    }
 
-      if (missed) {
-        console.log(`[QUEUE] Job ${jobName} in ${queue.name} missed its scheduled run. Executing catch-up...`);
-        const catchupOpts = { ...opts };
-        delete catchupOpts.repeat;
-        catchupOpts.jobId = `${opts.jobId || jobName}-catchup-${now}`;
-        await queue.add(jobName, { ...data, isCatchup: true }, catchupOpts);
-      }
+    if (missed) {
+      console.log(`[QUEUE] Job ${jobName} in ${queue.name} missed its scheduled run. Executing catch-up...`);
+      const catchupOpts = { ...opts };
+      delete catchupOpts.repeat;
+      catchupOpts.jobId = `${opts.jobId || jobName}-catchup-${now}`;
+      await queue.add(jobName, { ...data, isCatchup: true }, catchupOpts);
     }
   } catch (err) {
     console.warn(`[QUEUE] Failed to determine catch-up for ${jobName}:`, err);
@@ -1846,6 +1878,8 @@ export async function initQueues(): Promise<boolean> {
         // the next day's scheduled run. Scripts use ON CONFLICT so restart is safe.
         lockDuration: 4 * 60 * 60 * 1000,  // 4h — covers the full daily ops run
         lockRenewTime: 30 * 60 * 1000,
+        stalledInterval: 15 * 60 * 1000,
+        maxStalledCount: 3,
       },
     );
 
@@ -1853,6 +1887,14 @@ export async function initQueues(): Promise<boolean> {
       // Per-step + overall monitor states are written by StepTracker.finish() inside the
       // processor (reflecting real outcomes), so this handler no longer blanket-marks success.
       console.log('[QUEUE] ml-daily-ops completed');
+      if (_job.name.includes('test')) {
+        console.log('[QUEUE][TEST] ml-daily-ops-test completed. Enqueuing ml-weekly-retrain-test next...');
+        mlWeeklyRetrainQueue?.add('ml-weekly-retrain-test', {}, {
+          jobId: `ml-weekly-retrain-test-${Date.now()}`,
+          removeOnComplete: 1,
+          removeOnFail: 1,
+        }).catch(err => console.warn('[QUEUE][TEST] Failed to enqueue ml-weekly-retrain-test:', err.message));
+      }
     });
     mlDailyOpsWorker.on('failed', (_job, err) => {
       // Processor threw before finish() ran (steps are best-effort, so this is a harness/uncaught
@@ -1863,14 +1905,22 @@ export async function initQueues(): Promise<boolean> {
 
     // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ ML weekly retrain + optimize (Sunday 6 PM IST = 12:30 UTC) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
     mlWeeklyRetrainQueue = new Queue(QUEUE_ML_WEEKLY_RETRAIN, { connection });
-    const mlWkRep = await mlWeeklyRetrainQueue.getRepeatableJobs();
-    for (const r of mlWkRep) await mlWeeklyRetrainQueue.removeRepeatableByKey(r.key);
+    // addJobWithCatchup does its own remove-then-add internally (and needs the pre-removal
+    // repeatable's `next` to detect a slot missed by a restart) — removing it here first would
+    // erase that signal before the helper ever sees it.
     await addJobWithCatchup(mlWeeklyRetrainQueue, 'ml-weekly-retrain', {}, {
       repeat: { pattern: '0 5 * * 0' }, // Sunday 10:30 IST (05:00 UTC) — early on the closed day, after fundamentals
       jobId: 'ml-weekly-retrain',
       removeOnComplete: 2, removeOnFail: 3,
     });
-    mlWeeklyRetrainWorker = new Worker(QUEUE_ML_WEEKLY_RETRAIN, processMlWeeklyRetrain, { connection, concurrency: 1, lockDuration: 6 * 60 * 60 * 1000, lockRenewTime: 30 * 60 * 1000 });
+    mlWeeklyRetrainWorker = new Worker(QUEUE_ML_WEEKLY_RETRAIN, processMlWeeklyRetrain, {
+      connection,
+      concurrency: 1,
+      lockDuration: 6 * 60 * 60 * 1000,
+      lockRenewTime: 30 * 60 * 1000,
+      stalledInterval: 15 * 60 * 1000,
+      maxStalledCount: 3,
+    });
     mlWeeklyRetrainWorker.on('completed', () => {
       // Per-step + overall monitor states are written by StepTracker.finish() in the processor.
       console.log('[QUEUE] ml-weekly-retrain done');
@@ -2201,7 +2251,14 @@ export async function initQueues(): Promise<boolean> {
         const trigger = _job.data?.trigger || 'scheduled';
         return processDLPython('dl_trainer.py', ['--trigger', trigger]);
       },
-      { connection, concurrency: 1, lockDuration: 6 * 60 * 60 * 1000, lockRenewTime: 30 * 60 * 1000 });
+      {
+        connection,
+        concurrency: 1,
+        lockDuration: 6 * 60 * 60 * 1000,
+        lockRenewTime: 30 * 60 * 1000,
+        stalledInterval: 15 * 60 * 1000,
+        maxStalledCount: 3,
+      });
     dlRetrainWeeklyWorker.on('completed', () => {
       console.log('[QUEUE] dl-retrain-weekly done');
       updateMonitorState('dl-trainer', 'success');
@@ -2215,7 +2272,14 @@ export async function initQueues(): Promise<boolean> {
     dlRetrainEmergencyQueue = new Queue(QUEUE_DL_RETRAIN_EMERGENCY, { connection });
     dlRetrainEmergencyWorker = new Worker(QUEUE_DL_RETRAIN_EMERGENCY,
       async () => processDLPython('dl_trainer.py', ['--trigger', 'drift']),
-      { connection, concurrency: 1, lockDuration: 6 * 60 * 60 * 1000, lockRenewTime: 30 * 60 * 1000 });
+      {
+        connection,
+        concurrency: 1,
+        lockDuration: 6 * 60 * 60 * 1000,
+        lockRenewTime: 30 * 60 * 1000,
+        stalledInterval: 15 * 60 * 1000,
+        maxStalledCount: 3,
+      });
     dlRetrainEmergencyWorker.on('completed', () => {
       console.log('[QUEUE] dl-retrain-emergency done');
       recordHeartbeat('dl-retrain-emergency', 'success');
@@ -2234,7 +2298,14 @@ export async function initQueues(): Promise<boolean> {
         const lookback = (job.data?.lookback as number) || 30;
         return processDLPython('backfill_ohlcv.py', ['--mode', mode, '--lookback', String(lookback)]);
       },
-      { connection, concurrency: 1, lockDuration: 3 * 60 * 60 * 1000, lockRenewTime: 15 * 60 * 1000 });
+      {
+        connection,
+        concurrency: 1,
+        lockDuration: 3 * 60 * 60 * 1000,
+        lockRenewTime: 15 * 60 * 1000,
+        stalledInterval: 15 * 60 * 1000,
+        maxStalledCount: 3,
+      });
     ohlcvBackfillWorker.on('completed', (job) => {
       console.log(`[QUEUE] ohlcv-backfill (${job.data?.mode}) done`);
       updateMonitorState('ohlcv-backfill', 'success');
@@ -2439,7 +2510,14 @@ export async function initQueues(): Promise<boolean> {
     quantEodSyncWorker = new Worker(
       QUEUE_QUANT_EOD_SYNC,
       processQuantEodSync,
-      { connection, concurrency: 1, lockDuration: 120 * 60_000 }
+      {
+        connection,
+        concurrency: 1,
+        lockDuration: 120 * 60_000,
+        lockRenewTime: 15 * 60_000,
+        stalledInterval: 15 * 60 * 1000,
+        maxStalledCount: 3,
+      }
     );
     quantEodSyncWorker.on('completed', () => console.log('[QUEUE] quant-eod-sync done'));
     quantEodSyncWorker.on('failed', (_, e) => console.error('[QUEUE] quant-eod-sync failed:', e.message));
@@ -2526,6 +2604,8 @@ export async function initQueues(): Promise<boolean> {
         concurrency: 1,
         lockDuration: 90 * 60 * 1000, // 90 min
         lockRenewTime: 15 * 60 * 1000,
+        stalledInterval: 15 * 60 * 1000,
+        maxStalledCount: 3,
       },
     );
 
@@ -2611,7 +2691,10 @@ export async function initQueues(): Promise<boolean> {
         }
         await runPython('financial_ratios_fetcher.py', [], 30 * 60_000)
           .catch(e => console.warn('[QUEUE] financial_ratios_fetcher failed:', (e as Error).message));
-        await runPython('working_capital_fetcher.py', [], 30 * 60_000)
+        // 60 min: 1969-stock sequential cash-conversion-cycle fetch runs ~33 min at ~1 stock/s,
+        // so the old 30-min budget SIGTERM'd near the end (leaving partial data + a 'failed' mark
+        // in the monthly report even though most rows were written).
+        await runPython('working_capital_fetcher.py', [], 60 * 60_000)
           .catch(e => console.warn('[QUEUE] working_capital_fetcher failed:', (e as Error).message));
         // Per-stock MF ownership flow (monthly portfolio disclosures) — same ET companyid.
         await runPython('mf_stock_holdings_fetcher.py', [], 30 * 60_000)
@@ -2815,6 +2898,26 @@ export async function initQueues(): Promise<boolean> {
     startHeartbeatMonitor();
     startJobWatchdog();
     console.log('[QUEUE] BullMQ initialised (stock-refresh + ai-signals)');
+
+    // ── TEMPORARY TEST SCHEDULE ─────────────────────────────────────────────
+    // Fires ml-daily-ops 10 s after startup to verify today's fixes.
+    // ml-weekly-retrain-test will be enqueued in sequence upon completion of ml-daily-ops-test.
+    // REMOVE AFTER VERIFICATION.
+    setTimeout(async () => {
+      try {
+        console.log('[QUEUE][TEST] Enqueuing one-shot test: ml-daily-ops-test');
+        await mlDailyOpsQueue?.add('ml-daily-ops-test', {}, {
+          jobId: `ml-daily-ops-test-${Date.now()}`,
+          removeOnComplete: 1,
+          removeOnFail: 1,
+        });
+        console.log('[QUEUE][TEST] Test job enqueued — watch logs for sequential run (daily-ops -> weekly-retrain)');
+      } catch (e: any) {
+        console.warn('[QUEUE][TEST] Failed to enqueue test jobs:', e.message);
+      }
+    }, 10_000);
+    // ── END TEMPORARY TEST SCHEDULE ─────────────────────────────────────────
+
     return true;
   } catch (err: any) {
     console.warn = _origWarn;

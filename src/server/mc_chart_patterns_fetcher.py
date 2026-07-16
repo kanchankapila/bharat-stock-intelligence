@@ -27,6 +27,7 @@ Run:
 import argparse
 import json
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
 
 from curl_cffi import requests
@@ -49,6 +50,8 @@ MC_HEADERS = {
 }
 
 RATE_LIMIT_SEC = 0.5
+BATCH_SIZE     = 15
+BATCH_GAP_SEC  = 0.5
 
 
 # ── Schema ──────────────────────────────────────────────────────────────────────
@@ -266,24 +269,33 @@ def main() -> None:
         print("[MCPatterns] No stocks with mcsymbol found.")
         return
 
-    print(f"[MCPatterns] Fetching chart patterns for {len(stocks)} stocks…")
+    print(f"[MCPatterns] Fetching chart patterns for {len(stocks)} stocks in batches of {BATCH_SIZE} ({BATCH_GAP_SEC}s gap)…")
     session = requests.Session()
     today = date.today().isoformat()
     ok = 0
+    done = 0
 
-    for i, (symbol, mcsymbol) in enumerate(stocks, 1):
+    def _fetch_one(args):
+        symbol, mcsymbol = args
         raw_list = _fetch(mcsymbol, session)
         patterns = [p for p in (_parse_pattern(r) for r in raw_list) if p is not None]
+        return symbol, mcsymbol, patterns
 
-        upsert_patterns(symbol, mcsymbol, patterns, con)
-        sigs = compute_and_upsert_signals(symbol, today, patterns, con)
-        backfill_technical_signals(symbol, sigs, con)
-
-        print(f"  [{i}/{len(stocks)}] {symbol}: {len(patterns)} patterns | "
-              f"bull={sigs['bull_count']} bear={sigs['bear_count']} "
-              f"net={sigs['net_score']} tgt={sigs.get('avg_target_pct','?')}%")
-        ok += 1
-        time.sleep(RATE_LIMIT_SEC)
+    for batch_start in range(0, len(stocks), BATCH_SIZE):
+        batch = stocks[batch_start:batch_start + BATCH_SIZE]
+        with ThreadPoolExecutor(max_workers=len(batch)) as pool:
+            futures = [pool.submit(_fetch_one, item) for item in batch]
+            for fut in as_completed(futures):
+                symbol, mcsymbol, patterns = fut.result()
+                done += 1
+                upsert_patterns(symbol, mcsymbol, patterns, con)
+                sigs = compute_and_upsert_signals(symbol, today, patterns, con)
+                backfill_technical_signals(symbol, sigs, con)
+                print(f"  [{done}/{len(stocks)}] {symbol}: {len(patterns)} patterns | "
+                      f"bull={sigs['bull_count']} bear={sigs['bear_count']} "
+                      f"net={sigs['net_score']} tgt={sigs.get('avg_target_pct','?')}%")
+                ok += 1
+        time.sleep(BATCH_GAP_SEC)
 
     print(f"[MCPatterns] Done. {ok}/{len(stocks)} stocks processed.")
     con.close()

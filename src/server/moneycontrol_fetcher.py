@@ -808,14 +808,22 @@ class MoneyControlFetcher:
             print("[MC Fetcher] No active target symbols to process.")
             return
 
-        print(f"[MC Fetcher] Starting crawl at {datetime.datetime.now()}")
+        print(f"[MC Fetcher] Starting crawl of {len(targets)} stocks in parallel (6 workers) at {datetime.datetime.now()}")
+        from concurrent.futures import ThreadPoolExecutor, as_completed
         success_count = 0
-        for stock in targets:
-            try:
-                self.fetch_stock_data(stock)
-                success_count += 1
-            except Exception as e:
-                print(f"[MC Fetcher] Execution error for {stock.get('symbol')}: {e}")
+
+        def _fetch_worker(stock):
+            self.fetch_stock_data(stock)
+            return stock.get("symbol")
+
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            futures = [pool.submit(_fetch_worker, stock) for stock in targets]
+            for fut in as_completed(futures):
+                try:
+                    sym = fut.result()
+                    success_count += 1
+                except Exception as e:
+                    print(f"[MC Fetcher] Execution error: {e}")
 
         print(f"[MC Fetcher] Finished crawling. Successfully processed {success_count}/{len(targets)} stocks.")
 

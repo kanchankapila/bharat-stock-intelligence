@@ -66,19 +66,19 @@ export async function fetchNiftyTraderStockData(symbol: string): Promise<NiftyTr
           headers,
           body,
           method: "POST",
-          signal: AbortSignal.timeout(10000)
+          signal: AbortSignal.timeout(25000)
         }),
         fetch("https://webapi.niftytrader.in/webapi/Analysis/stock-analysis-data", {
           headers,
           body,
           method: "POST",
-          signal: AbortSignal.timeout(10000)
+          signal: AbortSignal.timeout(25000)
         }),
         fetch("https://webapi.niftytrader.in/webapi/Analysis/stock-financial-data", {
           headers,
           body,
           method: "POST",
-          signal: AbortSignal.timeout(10000)
+          signal: AbortSignal.timeout(25000)
         })
       ]);
 

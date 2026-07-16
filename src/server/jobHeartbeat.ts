@@ -78,7 +78,7 @@ export async function recordHeartbeat(jobName: string, status: 'success' | 'fail
   }
 }
 
-export async function getStaleJobs(): Promise<Array<{ job: string; hoursStale: number }>> {
+export async function getStaleJobs(): Promise<Array<{ job: string; hoursStale: number | null }>> {
   try {
     await ensureTable();
     const now = Date.now();
@@ -86,12 +86,20 @@ export async function getStaleJobs(): Promise<Array<{ job: string; hoursStale: n
     const monitorScriptIds = new Set(MONITOR_SCRIPTS.map(s => s.id as string));
     const rows = await dbAll('SELECT job_name, last_success_at FROM job_heartbeat') as
       Array<{ job_name: string; last_success_at: number | null }>;
-    const stale: Array<{ job: string; hoursStale: number }> = [];
+    const stale: Array<{ job: string; hoursStale: number | null }> = [];
     for (const r of rows) {
       if (registryNames.has(r.job_name)) continue; // covered by cron-aware getLateJobs() instead
       if (monitorScriptIds.has(r.job_name)) continue; // covered by getSystemStatus() instead
-      const last = r.last_success_at ?? 0;
-      if (now - last > DEFAULT_STALE_MS) stale.push({ job: r.job_name, hoursStale: Math.floor((now - last) / 3_600_000) });
+      if (r.last_success_at == null) {
+        // Never succeeded — no epoch to measure staleness against; "?? 0" here would
+        // report "hours since 1970" (~495,000h) instead of the real signal, which is
+        // just "this job has never once completed successfully."
+        stale.push({ job: r.job_name, hoursStale: null });
+        continue;
+      }
+      if (now - r.last_success_at > DEFAULT_STALE_MS) {
+        stale.push({ job: r.job_name, hoursStale: Math.floor((now - r.last_success_at) / 3_600_000) });
+      }
     }
     return stale;
   } catch (error) {
@@ -186,6 +194,10 @@ export function startHeartbeatMonitor(): void {
   const check = async () => {
     const stale = await getStaleJobs();
     for (const s of stale) {
+      if (s.hoursStale == null) {
+        console.warn(`[HEARTBEAT] STALE: '${s.job}' has never succeeded`);
+        continue;
+      }
       console.warn(`[HEARTBEAT] STALE: '${s.job}' has not succeeded in ~${s.hoursStale}h`);
     }
   };

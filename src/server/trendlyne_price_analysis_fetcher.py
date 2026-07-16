@@ -28,6 +28,7 @@ Run:
 
 import argparse
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
 
 import requests
@@ -46,6 +47,8 @@ HEADERS = {
 }
 
 RATE_LIMIT_SEC = 0.5
+BATCH_SIZE     = 15
+BATCH_GAP_SEC  = 0.5
 
 # Map period name from returnsComparison to column key
 PERIOD_MAP = {
@@ -311,30 +314,37 @@ def main() -> None:
         print("[TLPriceAnalysis] No stocks with tlid found.")
         return
 
-    print(f"[TLPriceAnalysis] Fetching price-performance-analysis for {len(stocks)} stocksâ€¦")
+    print(f"[TLPriceAnalysis] Fetching price-performance-analysis for {len(stocks)} stocks in batches of {BATCH_SIZE} ({BATCH_GAP_SEC}s gap)...")
     session = requests.Session()
     session.headers.update(HEADERS)
     today = date.today()
     today_str = today.isoformat()
     ok = 0
+    done = 0
 
-    for i, (symbol, tlid) in enumerate(stocks, 1):
-        body = _fetch(tlid, session)
-        if body is None:
-            print(f"  [{i}/{len(stocks)}] {symbol}: no data")
-            time.sleep(RATE_LIMIT_SEC)
-            continue
+    def _fetch_one(args):
+        symbol, tlid = args
+        return symbol, tlid, _fetch(tlid, session)
 
-        f = extract_features(body, today)
-        upsert_row(symbol, today_str, f, con)
-        backfill_technical_signals(symbol, f, con)
-
-        alpha_str    = f"Î±Nifty1M={f.get('alpha_nifty_1m','?')}% Î±Nifty3M={f.get('alpha_nifty_3m','?')}%"
-        ind_str      = f"Î±Ind1M={f.get('alpha_ind_1m','?')}%"
-        seasonal_str = f"season={f.get('tl_seasonal_month_5y','?')}%"
-        print(f"  [{i}/{len(stocks)}] {symbol}: {alpha_str} | {ind_str} | {seasonal_str}")
-        ok += 1
-        time.sleep(RATE_LIMIT_SEC)
+    for batch_start in range(0, len(stocks), BATCH_SIZE):
+        batch = stocks[batch_start:batch_start + BATCH_SIZE]
+        with ThreadPoolExecutor(max_workers=len(batch)) as pool:
+            futures = [pool.submit(_fetch_one, item) for item in batch]
+            for fut in as_completed(futures):
+                symbol, tlid, body = fut.result()
+                done += 1
+                if body is None:
+                    print(f"  [{done}/{len(stocks)}] {symbol}: no data")
+                    continue
+                f = extract_features(body, today)
+                upsert_row(symbol, today_str, f, con)
+                backfill_technical_signals(symbol, f, con)
+                alpha_str    = f"aNifty1M={f.get('alpha_nifty_1m','?')}% aNifty3M={f.get('alpha_nifty_3m','?')}%"
+                ind_str      = f"aInd1M={f.get('alpha_ind_1m','?')}%"
+                seasonal_str = f"season={f.get('tl_seasonal_month_5y','?')}%"
+                print(f"  [{done}/{len(stocks)}] {symbol}: {alpha_str} | {ind_str} | {seasonal_str}")
+                ok += 1
+        time.sleep(BATCH_GAP_SEC)
 
     print(f"[TLPriceAnalysis] Done. {ok}/{len(stocks)} stocks.")
     con.close()

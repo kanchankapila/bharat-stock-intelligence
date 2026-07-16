@@ -84,7 +84,7 @@ def check_feature_drift(model_name: str = "LSTM_TFT_ENSEMBLE") -> dict:
     )
 
     print(f"[DRIFT] Feature drift: max_psi={max_psi:.3f} avg={avg_psi:.3f} "
-          f"crit_frac={crit_frac:.2%} → {status}")
+          f"crit_frac={crit_frac:.2%} -> {status}")
     return {"status": status, "max_psi": max_psi, "avg_psi": avg_psi, "crit_frac": crit_frac}
 
 
@@ -119,7 +119,7 @@ def check_accuracy_drift(model_name: str = "LSTM_TFT_ENSEMBLE", horizon: int = 5
 
     status = "EMERGENCY_RETRAIN" if drop > ACC_DROP else "OK"
     print(f"[DRIFT] Accuracy drift: baseline={baseline_acc:.3f} recent={recent_acc:.3f} "
-          f"drop={drop:.3f} → {status}")
+          f"drop={drop:.3f} -> {status}")
     return {"status": status, "baseline_acc": baseline_acc, "recent_acc": recent_acc, "drop": drop}
 
 

@@ -16,7 +16,7 @@ from datetime import date, timedelta
 import requests
 import pandas as pd
 
-from db_compat import connect
+from db_compat import connect, use_postgres
 
 RATE_LIMIT_SEC = 0.3
 

@@ -24,6 +24,7 @@ import argparse
 import datetime
 import math
 import requests
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from db_compat import get_engine, use_postgres
 from sql_translate import translate, build_params
@@ -47,6 +48,8 @@ HEADERS = {
 }
 
 SLEEP_BETWEEN = 0.3   # seconds — respectful rate-limit for a public API
+BATCH_SIZE = 15
+BATCH_GAP_SEC = 0.5
 
 
 # ─── Black-Scholes implied volatility ─────────────────────────────────────────
@@ -384,7 +387,7 @@ def main():
                   "Run nt_dashboard_fetcher.py first or pass --symbol.")
             sys.exit(1)
 
-    print(f"[StockOptionChain] Processing {len(symbols)} symbols for {today} …")
+    print(f"[StockOptionChain] Processing {len(symbols)} symbols for {today}...")
 
     session = requests.Session()
     session.headers.update(HEADERS)
@@ -392,42 +395,45 @@ def main():
     successes = 0
     failures  = 0
     move_pcts = []
+    done = 0
 
-    for i, symbol in enumerate(symbols, 1):
+    def _fetch_one(symbol):
         result_data = fetch_chain(session, symbol)
         if result_data is None:
-            print(f"[StockOptionChain] {symbol}: no data")
-            failures += 1
-            time.sleep(SLEEP_BETWEEN)
-            continue
-
+            return symbol, None
         row = compute_features(result_data, symbol)
-        if row is None:
-            print(f"[StockOptionChain] {symbol}: could not compute features (empty chain)")
-            failures += 1
-            time.sleep(SLEEP_BETWEEN)
-            continue
+        return symbol, row
 
-        try:
-            upsert_features(engine, row, today)
-            patch_technical_signals(
-                engine, symbol, today,
-                row["expected_move_pct"], row["gex_proxy"], row.get("atm_iv")
-            )
-            pct = row["expected_move_pct"]
-            iv  = row.get("atm_iv")
-            pct_str = f"{pct:.2f}%" if pct is not None else "n/a"
-            iv_str  = f"{iv*100:.1f}%" if iv is not None else "n/a"
-            print(f"[StockOptionChain] {i}/{len(symbols)} {symbol}: "
-                  f"ATM={row['atm_strike']:.0f}  move={pct_str}  GEX={row['gex_proxy']:+.3f}  IV={iv_str}")
-            if pct is not None:
-                move_pcts.append(pct)
-            successes += 1
-        except Exception as e:
-            print(f"[StockOptionChain] {symbol}: DB write error — {e}")
-            failures += 1
-
-        time.sleep(SLEEP_BETWEEN)
+    for batch_start in range(0, len(symbols), BATCH_SIZE):
+        batch = symbols[batch_start:batch_start + BATCH_SIZE]
+        with ThreadPoolExecutor(max_workers=len(batch)) as pool:
+            futures = [pool.submit(_fetch_one, s) for s in batch]
+            for fut in as_completed(futures):
+                symbol, row = fut.result()
+                done += 1
+                if row is None:
+                    print(f"[StockOptionChain] {done}/{len(symbols)} {symbol}: no data or empty chain")
+                    failures += 1
+                    continue
+                try:
+                    upsert_features(engine, row, today)
+                    patch_technical_signals(
+                        engine, symbol, today,
+                        row["expected_move_pct"], row["gex_proxy"], row.get("atm_iv")
+                    )
+                    pct = row["expected_move_pct"]
+                    iv  = row.get("atm_iv")
+                    pct_str = f"{pct:.2f}%" if pct is not None else "n/a"
+                    iv_str  = f"{iv*100:.1f}%" if iv is not None else "n/a"
+                    print(f"[StockOptionChain] {done}/{len(symbols)} {symbol}: "
+                          f"ATM={row['atm_strike']:.0f}  move={pct_str}  GEX={row['gex_proxy']:+.3f}  IV={iv_str}")
+                    if pct is not None:
+                        move_pcts.append(pct)
+                    successes += 1
+                except Exception as e:
+                    print(f"[StockOptionChain] {symbol}: DB write error — {e}")
+                    failures += 1
+        time.sleep(BATCH_GAP_SEC)
 
     avg_move = sum(move_pcts) / len(move_pcts) if move_pcts else 0.0
     print(

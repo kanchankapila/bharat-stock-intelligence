@@ -285,6 +285,8 @@ def _train_one_fold(model: BiLSTMModel, X: np.ndarray, y5: np.ndarray,
         stepped = False
         for start in range(0, n, bs):
             idx = perm[start:start + bs]
+            if len(idx) <= 1:
+                continue
             xb   = X_t[idx].to(DEVICE, non_blocking=is_cuda)
             yb   = y5_t[idx].to(DEVICE, non_blocking=is_cuda)
             rb   = yr5_t[idx].to(DEVICE, non_blocking=is_cuda)
@@ -342,6 +344,10 @@ def train_lstm(version: int = 1) -> Dict:
         "SELECT DISTINCT symbol FROM feature_store "
         "GROUP BY symbol HAVING COUNT(*) >= 252"
     ).fetchall()]
+    con.close()  # release before the multi-hour training loop — a PG connection held idle that
+                 # long gets reaped server-side ("server closed the connection unexpectedly"),
+                 # which silently failed every retrain. load_symbol_sequences() below opens its
+                 # own pooled connection per call, so nothing needs this one during training.
 
     print(f"[DL] Training BiLSTM on {len(symbols)} symbols (chunk size {_CHUNK_SIZE})...")
 
@@ -379,7 +385,6 @@ def train_lstm(version: int = 1) -> Dict:
             _flush_chunk()
 
     _flush_chunk()  # remaining symbols
-    con.close()
 
     if total_seqs == 0:
         return {"error": "no training data"}
@@ -403,7 +408,7 @@ def train_lstm(version: int = 1) -> Dict:
         y5_val  = np.concatenate(val_y5)
         y15_val = np.concatenate(val_y15)
         yr5_val = np.concatenate(val_yr5)
-        metrics = walk_forward_validate(model, X_val, y5_val, y15_val, yr5_val, fold_size=250)
+        metrics = walk_forward_validate(model, X_val, y5_val, y15_val, yr5_val, fold_size=2000)
         print(f"[DL] Walk-forward metrics: {metrics}")
 
     MODEL_DIR.mkdir(parents=True, exist_ok=True)

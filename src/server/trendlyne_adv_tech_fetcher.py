@@ -36,6 +36,7 @@ Run:
 
 import argparse
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
 
 import requests
@@ -56,6 +57,8 @@ HEADERS = {
 }
 
 RATE_LIMIT_SEC = 0.5
+BATCH_SIZE     = 15
+BATCH_GAP_SEC  = 0.5
 
 # Total count of MA signals (8 SMA + 8 EMA = 16) and oscillator signals (9)
 # used as denominators for the fractional features.
@@ -457,7 +460,7 @@ def backfill_technical_signals(symbol: str, feat: dict, con) -> None:
     con.commit()
 
 
-# â”€â”€ Stock list â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# â”€â”€ Stock list â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _load_stocks(symbol_filter: str | None, con) -> list[tuple[str, str]]:
     """Return [(symbol, tlid), ...].
@@ -501,40 +504,41 @@ def main() -> None:
         print("[TLAdvTech] No stocks with tlid found.")
         con.close()
         return
-
-    print(f"[TLAdvTech] Processing {len(stocks)} stocks â€” daily adv-technicalâ€¦")
+    print(f"[TLAdvTech] Processing {len(stocks)} stocks in batches of {BATCH_SIZE} ({BATCH_GAP_SEC}s gap)...")
     session = requests.Session()
     session.headers.update(HEADERS)
     today = date.today().isoformat()
-
     ok = 0
     skipped = 0
+    done = 0
 
-    for i, (symbol, tlid) in enumerate(stocks, 1):
-        params = fetch_adv_tech(tlid, session)
-        if params is None:
-            print(f"  [{i}/{len(stocks)}] {symbol}: SKIP (no data)")
-            skipped += 1
-            time.sleep(RATE_LIMIT_SEC)
-            continue
+    def _fetch_one(args):
+        symbol, tlid = args
+        return symbol, tlid, fetch_adv_tech(tlid, session)
 
-        feat = extract_features(params)
-        upsert_row(symbol, today, feat, con)
-        backfill_technical_signals(symbol, feat, con)
-
-        # Summary line
-        ma_str  = f"MA {feat.get('ma_bull', '?')}up/{feat.get('ma_bear', '?')}dn"
-        osc_str = f"OSC {feat.get('osc_bull', '?')}up/{feat.get('osc_bear', '?')}dn"
-        rsi_str = f"RSI={feat.get('rsi', '?')}"
-        adx_str = f"ADX={feat.get('adx', '?')}"
-        ret_str = f"1m={feat.get('ret_1m', '?')}% 3m={feat.get('ret_3m', '?')}%"
-        pdist   = f"pvt_dist={feat.get('pivot_dist_pct', '?'):.2f}%" if feat.get("pivot_dist_pct") is not None else "pvt_dist=?"
-        print(
-            f"  [{i}/{len(stocks)}] {symbol}: {ma_str} | {osc_str} | "
-            f"{rsi_str} | {adx_str} | {ret_str} | {pdist}"
-        )
-        ok += 1
-        time.sleep(RATE_LIMIT_SEC)
+    for batch_start in range(0, len(stocks), BATCH_SIZE):
+        batch = stocks[batch_start:batch_start + BATCH_SIZE]
+        with ThreadPoolExecutor(max_workers=len(batch)) as pool:
+            futures = [pool.submit(_fetch_one, item) for item in batch]
+            for fut in as_completed(futures):
+                symbol, tlid, params = fut.result()
+                done += 1
+                if params is None:
+                    print(f"  [{done}/{len(stocks)}] {symbol}: SKIP (no data)")
+                    skipped += 1
+                    continue
+                feat = extract_features(params)
+                upsert_row(symbol, today, feat, con)
+                backfill_technical_signals(symbol, feat, con)
+                ma_str  = f"MA {feat.get('ma_bull','?')}up/{feat.get('ma_bear','?')}dn"
+                osc_str = f"OSC {feat.get('osc_bull','?')}up/{feat.get('osc_bear','?')}dn"
+                rsi_str = f"RSI={feat.get('rsi','?')}"
+                adx_str = f"ADX={feat.get('adx','?')}"
+                ret_str = f"1m={feat.get('ret_1m','?')}% 3m={feat.get('ret_3m','?')}%"
+                pdist   = f"pvt_dist={feat.get('pivot_dist_pct',0):.2f}%" if feat.get("pivot_dist_pct") is not None else "pvt_dist=?"
+                print(f"  [{done}/{len(stocks)}] {symbol}: {ma_str} | {osc_str} | {rsi_str} | {adx_str} | {ret_str} | {pdist}")
+                ok += 1
+        time.sleep(BATCH_GAP_SEC)
 
     print(f"[TLAdvTech] Done. {ok} OK / {skipped} skipped out of {len(stocks)} stocks.")
     con.close()

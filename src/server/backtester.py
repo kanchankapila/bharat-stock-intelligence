@@ -212,6 +212,10 @@ class Backtester:
                         dividends_dict[(sym_d, ex_d)] = amt
             except Exception as e:
                 print(f"[Backtest] Dividend pre-fetch error: {e}")
+                try:
+                    self.conn.rollback()  # clear aborted-transaction state so save_run() can proceed
+                except Exception:
+                    pass
 
         capital   = initial_capital
         cash      = capital

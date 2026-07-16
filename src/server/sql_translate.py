@@ -166,11 +166,26 @@ def translate(sql: str, use_pg: "bool | None" = None) -> str:
     return convert_placeholders(sql)
 
 
+try:
+    import numpy as np
+except ImportError:
+    np = None
+
+
+def _clean_value(v):
+    if np is not None and isinstance(v, np.generic):
+        return v.item()
+    if isinstance(v, (list, tuple)):
+        return type(v)(_clean_value(x) for x in v)
+    return v
+
+
 def build_params(params) -> dict:
     """Normalise positional params (tuple/list) into the `:pN` dict the binds expect.
     A dict is passed through unchanged (already-named binds)."""
     if params is None:
         return {}
     if isinstance(params, dict):
-        return params
-    return {f"p{i}": v for i, v in enumerate(params)}
+        return {k: _clean_value(v) for k, v in params.items()}
+    return {f"p{i}": _clean_value(v) for i, v in enumerate(params)}
+

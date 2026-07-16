@@ -48,12 +48,29 @@ def retrain_models(trigger: str = "scheduled") -> dict:
     con = connect()
 
     # Lock check — prevent concurrent retrains
-    if _get_setting(con, LOCK_KEY) == "1":
-        print("[TRAINER] Retrain already running — skipping")
-        con.close()
-        return {"status": "SKIPPED", "reason": "lock_held"}
+    lock_val = _get_setting(con, LOCK_KEY)
+    if lock_val == "1":
+        lock_time_str = _get_setting(con, "dl_retrain_acquired_at")
+        is_stale = False
+        if lock_time_str:
+            try:
+                lock_time = datetime.fromisoformat(lock_time_str)
+                if (datetime.now() - lock_time).total_seconds() > 7200:
+                    is_stale = True
+            except Exception:
+                is_stale = True
+        else:
+            is_stale = True
+
+        if not is_stale:
+            print("[TRAINER] Retrain already running — skipping")
+            con.close()
+            return {"status": "SKIPPED", "reason": "lock_held"}
+        else:
+            print("[TRAINER] Stale lock detected, clearing lock and proceeding.")
 
     _set_setting(con, LOCK_KEY, "1")
+    _set_setting(con, "dl_retrain_acquired_at", datetime.now().isoformat())
     con.close()
 
     result = {"trigger": trigger, "timestamp": datetime.now().isoformat()}
@@ -151,3 +168,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
     result = retrain_models(args.trigger)
     print(f"[TRAINER] Done: {result}")
+    # Exit non-zero on a real training error so the BullMQ worker records a failure instead of a
+    # false success. Without this, retrain_models() swallows its own exceptions (returns an 'error'
+    # dict, never throws), the process exits 0, the job heartbeat logs success — yet model_registry
+    # gets no new BiLSTM row (observed: job "succeeded" but the model went 29 days without a retrain).
+    # SKIPPED (concurrent-lock) is not a failure, so gate only on 'error'.
+    if result.get("error"):
+        sys.exit(1)

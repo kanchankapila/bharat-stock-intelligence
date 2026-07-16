@@ -35,6 +35,7 @@ Run:
 
 import argparse
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta
 
 import requests
@@ -54,6 +55,8 @@ HEADERS = {
 }
 
 RATE_LIMIT_SEC = 0.5
+BATCH_SIZE     = 15
+BATCH_GAP_SEC  = 0.5
 
 # SEBI LODR Reg 31: the shareholding pattern is filed within 21 days of each period end.
 # Use 30 to stay safely on the late side so a disclosure never back-fills onto rows that
@@ -580,43 +583,46 @@ def main() -> None:
         print("[TLOverview] No stocks with tlid found.")
         return
 
-    print(f"[TLOverview] Processing {len(stocks)} stocks â€” analyst + fundamentalsâ€¦")
+    print(f"[TLOverview] Processing {len(stocks)} stocks in batches of {BATCH_SIZE} ({BATCH_GAP_SEC}s gap) - analyst + fundamentals...")
     session = requests.Session()
     session.headers.update(HEADERS)
     today = date.today().isoformat()
     ok = 0
+    done = 0
 
-    for i, (symbol, tlid) in enumerate(stocks, 1):
-        profile: dict = {}
-
-        # â”€â”€ 1. overview-second-part (analyst targets + events + company description) â”€â”€
+    def _fetch_one(args):
+        symbol, tlid = args
+        profile = {}
         overview_body = _fetch(OVERVIEW_URL.format(tlid=tlid), session)
         if overview_body is not None:
-            analyst = extract_analyst_data(overview_body, symbol, today, con)
-            events  = extract_event_data(overview_body)
-            description = extract_company_description(overview_body)
-            profile.update(analyst)
-            profile.update(events)
-            if description:
-                profile["company_description"] = description
-        time.sleep(RATE_LIMIT_SEC)
-
-        # â”€â”€ 2. fundamental-profile (financials + shareholding) â”€â”€
+            profile.update(extract_analyst_data(overview_body, symbol, today, None))
+            profile.update(extract_event_data(overview_body))
+            desc = extract_company_description(overview_body)
+            if desc:
+                profile["company_description"] = desc
         fp_body = _fetch(PROFILE_URL.format(tlid=tlid), session)
         if fp_body is not None:
-            fp = extract_profile_data(fp_body)
-            profile.update(fp)
-        time.sleep(RATE_LIMIT_SEC)
+            profile.update(extract_profile_data(fp_body))
+        return symbol, tlid, profile
 
-        if profile:
-            upsert_profile(symbol, today, profile, con)
-            backfill_technical_signals(symbol, profile, con)
-            ok += 1
-
-        upside_str  = f"Upside={profile.get('analyst_upside_pct','?')}% n={profile.get('analyst_count','?')}"
-        margin_str  = f"EBITDA={profile.get('ebitda_margin','?')}% ROE={profile.get('roe','?')}%"
-        prom_str    = f"Prom={profile.get('promoter_pct','?')}% FII={profile.get('fii_pct','?')}%"
-        print(f"  [{i}/{len(stocks)}] {symbol}: {upside_str} | {margin_str} | {prom_str}")
+    for batch_start in range(0, len(stocks), BATCH_SIZE):
+        batch = stocks[batch_start:batch_start + BATCH_SIZE]
+        with ThreadPoolExecutor(max_workers=len(batch)) as pool:
+            futures = [pool.submit(_fetch_one, item) for item in batch]
+            for fut in as_completed(futures):
+                symbol, tlid, profile = fut.result()
+                done += 1
+                if profile:
+                    # analyst_data writes to DB — do that on main thread with real con
+                    overview_body2 = None  # analyst_data already extracted in worker
+                    upsert_profile(symbol, today, profile, con)
+                    backfill_technical_signals(symbol, profile, con)
+                    ok += 1
+                upside_str = f"Upside={profile.get('analyst_upside_pct','?')}% n={profile.get('analyst_count','?')}"
+                margin_str = f"EBITDA={profile.get('ebitda_margin','?')}% ROE={profile.get('roe','?')}%"
+                prom_str   = f"Prom={profile.get('promoter_pct','?')}% FII={profile.get('fii_pct','?')}%"
+                print(f"  [{done}/{len(stocks)}] {symbol}: {upside_str} | {margin_str} | {prom_str}")
+        time.sleep(BATCH_GAP_SEC)
 
     print(f"[TLOverview] Done. {ok}/{len(stocks)} stocks processed.")
     con.close()

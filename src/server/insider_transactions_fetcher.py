@@ -38,7 +38,8 @@ NSE_INSIDER_URL = (
 # NSE date format: DD-MM-YYYY
 NSE_DATE_FMT = "%d-%m-%Y"
 
-SLEEP_BETWEEN = 0.3  # seconds between per-symbol requests
+SLEEP_BETWEEN = 0.2  # seconds between per-symbol requests (NSE is low-latency; 0.3 was conservative)
+BATCH_SIZE    = 15   # progress report every N symbols (NSE sessions are not thread-safe — stays sequential)
 
 
 # ---------------------------------------------------------------------------
@@ -407,7 +408,7 @@ def main() -> None:
             print(f"[INSIDER] {symbol}: {n} transaction(s) stored")
         compute_and_write_features(con, symbol, days=args.days)
 
-        if i % 50 == 0:
+        if i % BATCH_SIZE == 0:
             print(f"[INSIDER] Progress: {i}/{len(symbols)} symbols done")
 
         if i < len(symbols):

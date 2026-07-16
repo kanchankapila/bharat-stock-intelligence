@@ -23,7 +23,7 @@ Run:  python fundamentals_snapshot.py
 import argparse
 import datetime
 
-from db_compat import execute, query_all, use_postgres
+from db_compat import execute, query_all, use_postgres, connect
 
 # ── Schema migrations (idempotent ADD COLUMN) ────────────────────────────────
 
@@ -130,8 +130,14 @@ def _compute_and_write_pledge_trend(pg: bool) -> int:
     rows = query_all(_pledge_chg_sql(pg))
     if not rows:
         return 0
-    for row in rows:
-        execute(_UPDATE_TS_SQL, (row["pledge_chg_90d"], row["symbol"], row["symbol"]))
+    con = connect()
+    try:
+        cur = con.cursor()
+        for row in rows:
+            cur.execute(_UPDATE_TS_SQL, (row["pledge_chg_90d"], row["symbol"], row["symbol"]))
+        con.commit()
+    finally:
+        con.close()
     return len(rows)
 
 

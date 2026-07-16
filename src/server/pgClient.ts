@@ -17,10 +17,10 @@ export function getPool(): Pool {
   if (!pool) {
     pool = new Pool({
       connectionString: pgConnectionString(),
-      // Budget: bharat-server 15 + alphaquant 5 + ml-api 5 + chatbot 3 + Python 10 = 38 / 60 max_connections
-      max: Number(process.env.PG_POOL_MAX ?? 15),
+      // Budget: bharat-server 22 + alphaquant 5 + ml-api 5 + chatbot 3 + Python 10 = 45 / 60 max_connections
+      max: Number(process.env.PG_POOL_MAX ?? 22),
       idleTimeoutMillis: 20_000,
-      connectionTimeoutMillis: 8_000,  // fail fast — pgQuery retries with backoff so total wait is still ~4s
+      connectionTimeoutMillis: 15_000,  // more resilient to startup spikes
     });
     pool.on('error', (err) => console.error('[PG] idle client error:', err.message));
   }
@@ -308,6 +308,18 @@ export async function pgEnsureColumns(): Promise<void> {
     // until ml_ensemble.py --score started throwing UndefinedColumn. Keep this file
     // in sync with db.ts's ALTER block whenever a migration touches Postgres-backed tables.
     `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS fcf_yield_approx      DOUBLE PRECISION`,
+    // Extra endpoints features (parsed from indiatimes/marketsmojo/trading80)
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS ext_fii_holding_pct   DOUBLE PRECISION`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS ext_dii_holding_pct   DOUBLE PRECISION`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS ext_fii_qoq_chg       DOUBLE PRECISION`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS ext_dii_qoq_chg       DOUBLE PRECISION`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS ext_t80_tech_score    DOUBLE PRECISION`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS ext_t80_quality_rank  DOUBLE PRECISION`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS ext_t80_valuation_rank DOUBLE PRECISION`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS ext_t80_financial_pts  DOUBLE PRECISION`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS ext_mojo_quality_rank  DOUBLE PRECISION`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS ext_mojo_valuation_rank DOUBLE PRECISION`,
+    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS ext_mojo_financial_pts DOUBLE PRECISION`,
     `ALTER TABLE tl_financial_quality ADD COLUMN IF NOT EXISTS cfi_ttm            DOUBLE PRECISION`,
     `ALTER TABLE tl_financial_quality ADD COLUMN IF NOT EXISTS fcf_ttm_approx     DOUBLE PRECISION`,
     `ALTER TABLE tl_financial_quality ADD COLUMN IF NOT EXISTS fcf_yield_approx   DOUBLE PRECISION`,

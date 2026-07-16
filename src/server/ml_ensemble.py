@@ -891,6 +891,19 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     # Signal count (complexity)
     X['signal_count'] = type_sets.apply(len)
 
+    # ── Extra endpoints features (parsed from indiatimes/marketsmojo/trading80) ──
+    X['ext_fii_holding_pct']    = num('ext_fii_holding_pct', 15.0).clip(0, 100) / 100.0
+    X['ext_dii_holding_pct']    = num('ext_dii_holding_pct', 15.0).clip(0, 100) / 100.0
+    X['ext_fii_qoq_chg']        = num('ext_fii_qoq_chg', 0.0).clip(-10, 10) / 10.0
+    X['ext_dii_qoq_chg']        = num('ext_dii_qoq_chg', 0.0).clip(-10, 10) / 10.0
+    X['ext_t80_tech_score']     = num('ext_t80_tech_score', 0.0).clip(-3, 3) / 3.0
+    X['ext_t80_quality_rank']   = num('ext_t80_quality_rank', 5.0).clip(0, 20) / 20.0
+    X['ext_t80_valuation_rank'] = num('ext_t80_valuation_rank', 2.0).clip(0, 5) / 5.0
+    X['ext_t80_financial_pts']  = num('ext_t80_financial_pts', 5.0).clip(0, 20) / 20.0
+    X['ext_mojo_quality_rank']  = num('ext_mojo_quality_rank', 2.0).clip(0, 5) / 5.0
+    X['ext_mojo_valuation_rank']= num('ext_mojo_valuation_rank', 2.0).clip(0, 5) / 5.0
+    X['ext_mojo_financial_pts'] = num('ext_mojo_financial_pts', 4.0).clip(0, 10) / 10.0
+
     return X.astype(np.float32)
 
 
@@ -1024,6 +1037,9 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                    ts.delivery_trend_30d, ts.block_deal_flag, ts.block_deal_direction,
                    ts.short_interest_proxy,
                    ts.promoter_buy_90d_cr, ts.promoter_sell_90d_cr, ts.promoter_net_90d,
+                    ts.ext_fii_holding_pct, ts.ext_dii_holding_pct, ts.ext_fii_qoq_chg, ts.ext_dii_qoq_chg,
+                    ts.ext_t80_tech_score, ts.ext_t80_quality_rank, ts.ext_t80_valuation_rank, ts.ext_t80_financial_pts,
+                    ts.ext_mojo_quality_rank, ts.ext_mojo_valuation_rank, ts.ext_mojo_financial_pts,
                    ts.insider_buy_flag, ts.insider_sell_flag,
                    ts.rating_upgrade_180d, ts.rating_downgrade_180d, ts.days_since_upgrade,
                    ts.mf_sector_flow_pct,
@@ -1266,6 +1282,9 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                    ts.delivery_trend_30d, ts.block_deal_flag, ts.block_deal_direction,
                    ts.short_interest_proxy,
                    ts.promoter_buy_90d_cr, ts.promoter_sell_90d_cr, ts.promoter_net_90d,
+                    ts.ext_fii_holding_pct, ts.ext_dii_holding_pct, ts.ext_fii_qoq_chg, ts.ext_dii_qoq_chg,
+                    ts.ext_t80_tech_score, ts.ext_t80_quality_rank, ts.ext_t80_valuation_rank, ts.ext_t80_financial_pts,
+                    ts.ext_mojo_quality_rank, ts.ext_mojo_valuation_rank, ts.ext_mojo_financial_pts,
                    ts.insider_buy_flag, ts.insider_sell_flag,
                    ts.rating_upgrade_180d, ts.rating_downgrade_180d, ts.days_since_upgrade,
                    ts.mf_sector_flow_pct,
@@ -1490,6 +1509,9 @@ def load_pending_signals() -> pd.DataFrame:
                    ts.delivery_trend_30d, ts.block_deal_flag, ts.block_deal_direction,
                    ts.short_interest_proxy,
                    ts.promoter_buy_90d_cr, ts.promoter_sell_90d_cr, ts.promoter_net_90d,
+                    ts.ext_fii_holding_pct, ts.ext_dii_holding_pct, ts.ext_fii_qoq_chg, ts.ext_dii_qoq_chg,
+                    ts.ext_t80_tech_score, ts.ext_t80_quality_rank, ts.ext_t80_valuation_rank, ts.ext_t80_financial_pts,
+                    ts.ext_mojo_quality_rank, ts.ext_mojo_valuation_rank, ts.ext_mojo_financial_pts,
                    ts.insider_buy_flag, ts.insider_sell_flag,
                    ts.rating_upgrade_180d, ts.rating_downgrade_180d, ts.days_since_upgrade,
                    ts.mf_sector_flow_pct,
@@ -1748,6 +1770,9 @@ def load_pending_signals() -> pd.DataFrame:
                    {ts_c('delivery_trend_30d')}, {ts_c('block_deal_flag')}, {ts_c('block_deal_direction')},
                    {ts_c('short_interest_proxy')},
                    {ts_c('promoter_buy_90d_cr')}, {ts_c('promoter_sell_90d_cr')}, {ts_c('promoter_net_90d')},
+                   {ts_c('ext_fii_holding_pct')}, {ts_c('ext_dii_holding_pct')}, {ts_c('ext_fii_qoq_chg')}, {ts_c('ext_dii_qoq_chg')},
+                   {ts_c('ext_t80_tech_score')}, {ts_c('ext_t80_quality_rank')}, {ts_c('ext_t80_valuation_rank')}, {ts_c('ext_t80_financial_pts')},
+                   {ts_c('ext_mojo_quality_rank')}, {ts_c('ext_mojo_valuation_rank')}, {ts_c('ext_mojo_financial_pts')},
                    {ts_c('insider_buy_flag')}, {ts_c('insider_sell_flag')},
                    {ts_c('rating_upgrade_180d')}, {ts_c('rating_downgrade_180d')}, {ts_c('days_since_upgrade')},
                    {ts_c('mf_sector_flow_pct')},
@@ -1951,10 +1976,11 @@ def tune_hyperparameters(X: pd.DataFrame, y: pd.Series, weights: np.ndarray | No
 
     optuna.logging.set_verbosity(optuna.logging.WARNING)
 
+    effective_embargo = min(embargo, len(X) // 10)
     n_eff = n_splits
-    if embargo > 0:
-        n_eff = max(2, min(n_splits, len(X) // max(1, embargo + 1) - 1))
-    skf = TimeSeriesSplit(n_splits=n_eff, gap=embargo)
+    if effective_embargo > 0:
+        n_eff = max(2, min(n_splits, len(X) // max(1, effective_embargo + 1) - 1))
+    skf = TimeSeriesSplit(n_splits=n_eff, gap=effective_embargo)
     sw = weights if weights is not None else None
 
     def objective(trial):
@@ -2058,10 +2084,11 @@ def _fit_stack(X: pd.DataFrame, y: pd.Series, spw: float, embargo: int, n_splits
 
     base = _base_models(scale_pos_weight=spw, tuned_params=tuned_params)
     sw = np.asarray(sample_weight, dtype=float) if sample_weight is not None else None
+    effective_embargo = min(embargo, len(X) // 10)
     n_eff = n_splits
-    if embargo > 0:
-        n_eff = max(2, min(n_splits, len(X) // max(1, embargo + 1) - 1))
-    skf = TimeSeriesSplit(n_splits=n_eff, gap=embargo)
+    if effective_embargo > 0:
+        n_eff = max(2, min(n_splits, len(X) // max(1, effective_embargo + 1) - 1))
+    skf = TimeSeriesSplit(n_splits=n_eff, gap=effective_embargo)
 
     oof     = np.zeros((len(X), len(base)))
     covered = np.zeros(len(X), dtype=bool)
@@ -2115,7 +2142,11 @@ def train_ensemble(X: pd.DataFrame, y: pd.Series, dates: pd.Series | None = None
     embargo = 0
     if dates is not None and dates.nunique() > 1:
         samples_per_day = max(1.0, len(X) / dates.nunique())
-        embargo = int(min(len(X) // 10, samples_per_day * horizon_days))
+        raw_embargo = int(samples_per_day * horizon_days)
+        # Cap embargo so TimeSeriesSplit(n_splits=2, gap=embargo) is always feasible:
+        # sklearn requires n_splits * (test_size + gap) < n_samples.
+        # Use at most len(X)//6 so 2 folds still fit with room for a train set.
+        embargo = min(raw_embargo, len(X) // 6, len(X) // 10)
 
     # Sample weights: López de Prado average uniqueness — down-weight overlapping/crowded
     # label windows (correlated outcomes) so they aren't overcounted as independent. Directly
@@ -2471,15 +2502,20 @@ def score_pending(conn: ConnWrapper, ensemble: dict) -> int:
     df_scores = _apply_regime_adjustment(df_scores, regime)
 
     # ── Cross-sectional rank-scaling per day ──
-    # Apply a gentle boost/penalty of up to +/- 7.5% based on cross-sectional rank
-    def _rank_scale(group):
-        if len(group) <= 1:
-            return group['win_probability']
-        ranks = group['win_probability'].rank(pct=True)  # 0 to 1
-        median_prob = group['win_probability'].median()
-        return median_prob + (ranks - 0.5) * 0.15
-
-    df_scores['win_probability'] = df_scores.groupby('date', group_keys=False).apply(_rank_scale)
+    # Apply a gentle boost/penalty of up to +/- 7.5% based on cross-sectional rank.
+    # Uses groupby.rank/transform directly (not groupby.apply) — apply() on a func that
+    # returns a per-group Series is ambiguous when the groupby has exactly one group (e.g.
+    # all pending signals share one signal_date, the common case), and can come back as a
+    # DataFrame instead of an index-aligned Series, breaking the single-column assignment.
+    grp = df_scores.groupby('date')['win_probability']
+    ranks = grp.rank(pct=True)
+    median_prob = grp.transform('median')
+    group_size = grp.transform('size')
+    df_scores['win_probability'] = np.where(
+        group_size <= 1,
+        df_scores['win_probability'],
+        median_prob + (ranks - 0.5) * 0.15,
+    )
     probs = df_scores['win_probability'].clip(0, 0.95).values
     print(f"[Ensemble] Regime={regime}; regime-conditional and cross-sectional rank scaling applied.")
 

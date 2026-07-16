@@ -25,8 +25,13 @@ import json
 import datetime
 import argparse
 import requests
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from db_compat import connect, try_advisory_lock, release_advisory_lock
+
+RATE_LIMIT_SEC = 0.4
+BATCH_SIZE = 15
+BATCH_GAP_SEC = 0.5
 
 KAYAL_URL = (
     "https://kayal.trendlyne.com/broker-webview/kayal/"
@@ -389,36 +394,41 @@ def sync_pks(pks: list[int], con, label: str = "known") -> set[int]:
     discovered = set()
     ok = 0
     skip = 0
+    done = 0
 
-    for i, pk in enumerate(pks):
-        data = fetch_screener(pk)
-        if data is None:
-            skip += 1
-            time.sleep(RATE_LIMIT_SEC)
-            continue
+    def _fetch_one(pk):
+        return pk, fetch_screener(pk)
 
-        info = extract_screener_info(pk, data)
-        if info is None:
-            skip += 1
-            time.sleep(RATE_LIMIT_SEC)
-            continue
+    for batch_start in range(0, len(pks), BATCH_SIZE):
+        batch = pks[batch_start:batch_start + BATCH_SIZE]
+        with ThreadPoolExecutor(max_workers=len(batch)) as pool:
+            futures = [pool.submit(_fetch_one, pk) for pk in batch]
+            for fut in as_completed(futures):
+                pk, data = fut.result()
+                done += 1
+                if data is None:
+                    skip += 1
+                    continue
 
-        upsert_screener(con, info)
-        ok += 1
+                info = extract_screener_info(pk, data)
+                if info is None:
+                    skip += 1
+                    continue
 
-        for rel_pk in info["related_pks"]:
-            discovered.add(rel_pk)
+                upsert_screener(con, info)
+                ok += 1
 
-        if (i + 1) % 50 == 0:
-            con.commit()
-            print(f"  [{label}] {i+1}/{len(pks)} done ({ok} ok / {skip} skip) | "
-                  f"{len(discovered)} new PKs discovered")
+                for rel_pk in info["related_pks"]:
+                    discovered.add(rel_pk)
 
-        time.sleep(RATE_LIMIT_SEC)
+        con.commit()
+        print(f"  [{label}] {done}/{len(pks)} done ({ok} ok / {skip} skip) | "
+              f"{len(discovered)} new PKs discovered")
+        time.sleep(BATCH_GAP_SEC)
 
     con.commit()
     print(f"[Discovery] {label}: {ok} screeners synced, {skip} failed, "
-          f"{len(discovered)} related PKs found")
+          f"[Discovery] {len(discovered)} related PKs found")
     return discovered
 
 

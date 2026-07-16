@@ -30,6 +30,7 @@ import os
 import sys
 import time
 import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from sqlalchemy import text
 from curl_cffi import requests
@@ -63,6 +64,8 @@ TYPE_MAP = {"positive": 1, "inline": 0, "negative": -1}
 RATE_LIMIT_SEC = 0.5    # two requests per stock → effective ~0.25 req/s per URL
 RETRY_DELAY_SEC = 3
 MAX_RETRIES = 3
+BATCH_SIZE     = 15
+BATCH_GAP_SEC  = 0.5
 
 
 # ── helpers ────────────────────────────────────────────────────────────────────
@@ -243,37 +246,40 @@ def run(limit: int | None = None, symbol_filter: str | None = None) -> None:
         if limit:
             stocks = stocks[:limit]
 
-        print(f"[EARNINGS] Fetching EPS forecast + beat/miss for {len(stocks)} stocks …")
+        print(f"[EARNINGS] Fetching EPS forecast + beat/miss for {len(stocks)} stocks in batches of {BATCH_SIZE} ({BATCH_GAP_SEC}s gap) …")
         session = requests.Session()
         total_rows = 0
+        done = 0
 
-        for i, (symbol, mcsymbol) in enumerate(stocks, 1):
-            annual = _annual_rows(session, mcsymbol)
-            time.sleep(RATE_LIMIT_SEC)
+        def _fetch_one(args):
+            symbol, mcsymbol = args
+            annual    = _annual_rows(session, mcsymbol)
             quarterly = _quarterly_rows(session, mcsymbol)
-            time.sleep(RATE_LIMIT_SEC)
-
-            # Annual rows take precedence; quarterly fills in months with no annual data
-            # Deduplicate: if annual already has a row for a period_date, skip quarterly
             annual_dates = {r["period_date"] for r in annual}
             combined = annual + [r for r in quarterly if r["period_date"] not in annual_dates]
+            return symbol, mcsymbol, annual, combined
 
-            if not combined:
-                print(f"  [{i}/{len(stocks)}] {symbol} ({mcsymbol}) — no data")
-                continue
-
-            n = upsert_rows(conn, symbol, combined)
-            conn.commit()
-            total_rows += n
-
-            annual_with_surprise = [r for r in annual if r["surprise_pct"] is not None]
-            surprise_summary = ""
-            if annual_with_surprise:
-                spcts = [f"{r['surprise_pct']:+.1f}%" for r in sorted(annual_with_surprise, key=lambda x: x["period_date"])[-3:]]
-                surprise_summary = f" | surprise last 3yr: {', '.join(spcts)}"
-
-            if i % 10 == 0 or i == len(stocks):
-                print(f"  [{i}/{len(stocks)}] {symbol}: {n} periods upserted{surprise_summary} (total={total_rows})")
+        for batch_start in range(0, len(stocks), BATCH_SIZE):
+            batch = stocks[batch_start:batch_start + BATCH_SIZE]
+            with ThreadPoolExecutor(max_workers=len(batch)) as pool:
+                futures = [pool.submit(_fetch_one, item) for item in batch]
+                for fut in as_completed(futures):
+                    symbol, mcsymbol, annual, combined = fut.result()
+                    done += 1
+                    if not combined:
+                        print(f"  [{done}/{len(stocks)}] {symbol} ({mcsymbol}) — no data")
+                        continue
+                    n = upsert_rows(conn, symbol, combined)
+                    conn.commit()
+                    total_rows += n
+                    annual_with_surprise = [r for r in annual if r["surprise_pct"] is not None]
+                    surprise_summary = ""
+                    if annual_with_surprise:
+                        spcts = [f"{r['surprise_pct']:+.1f}%" for r in sorted(annual_with_surprise, key=lambda x: x["period_date"])[-3:]]
+                        surprise_summary = f" | surprise last 3yr: {', '.join(spcts)}"
+                    if done % 10 == 0 or done == len(stocks):
+                        print(f"  [{done}/{len(stocks)}] {symbol}: {n} periods upserted{surprise_summary} (total={total_rows})")
+            time.sleep(BATCH_GAP_SEC)
 
         print(f"[EARNINGS] Done. {total_rows} period rows upserted for {len(stocks)} stocks.")
 

@@ -103,3 +103,12 @@ def test_build_params_dict_passthrough_and_empty():
     assert build_params({"x": 1}) == {"x": 1}
     assert build_params(()) == {}
     assert build_params(None) == {}
+
+
+def test_build_params_numpy_conversion():
+    import numpy as np
+    assert build_params({"a": np.float64(19.6)}) == {"a": 19.6}
+    assert build_params([np.int64(42)]) == {"p0": 42}
+    assert build_params(({"x": np.int32(1)},)) == {"p0": {"x": np.int32(1)}}  # nested dict in tuple isn't deeply cleaned but lists/tuples are:
+    assert build_params(([np.float64(1.5)],)) == {"p0": [1.5]}
+

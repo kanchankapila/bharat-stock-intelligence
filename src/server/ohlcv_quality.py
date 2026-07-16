@@ -17,7 +17,7 @@ stock_ohlcv.is_suspect so label/feature code can exclude them. A corporate-actio
 import argparse
 import datetime
 
-from db_compat import connect, ConnWrapper
+from db_compat import connect, ConnWrapper, executemany
 
 BAD_PRINT_THRESHOLD = 0.35   # > 35% day-over-day vs BOTH neighbours = suspect spike
 ACTION_WINDOW_DAYS = 3       # don't flag within ±3d of a known ex-date
@@ -109,27 +109,61 @@ def flag_bad_prints(conn: ConnWrapper, threshold: float = BAD_PRINT_THRESHOLD,
                     action_window_days: int = ACTION_WINDOW_DAYS) -> dict:
     """Mark stock_ohlcv.is_suspect for single-bar bad prints. Idempotent (resets first)."""
     conn.execute("UPDATE stock_ohlcv SET is_suspect=0 WHERE is_suspect=1")
-    symbols = [r[0] for r in conn.execute("SELECT DISTINCT symbol FROM stock_ohlcv").fetchall()]
-    flagged = 0
-    for sym in symbols:
-        bars = conn.execute(
-            "SELECT date, close FROM stock_ohlcv WHERE symbol=? ORDER BY date", (sym,)).fetchall()
+    conn.commit()
+
+    # Bulk fetch corporate actions
+    actions_rows = conn.execute("SELECT symbol, ex_date FROM corporate_actions").fetchall()
+    action_map = {}
+    for r in actions_rows:
+        sym = r[0] if isinstance(r, (list, tuple)) else r['symbol']
+        dt  = str(r[1] if isinstance(r, (list, tuple)) else r['ex_date'])[:10]
+        if sym not in action_map:
+            action_map[sym] = []
+        action_map[sym].append(dt)
+
+    # Bulk fetch stock_ohlcv ordered by symbol and date
+    print("[OHLCVQuality] Fetching all OHLCV rows for analysis...")
+    bars_rows = conn.execute("SELECT symbol, date, close FROM stock_ohlcv ORDER BY symbol, date").fetchall()
+    
+    # Group bars by symbol in memory
+    bars_map = {}
+    for r in bars_rows:
+        sym = r[0] if isinstance(r, (list, tuple)) else r['symbol']
+        dt  = str(r[1] if isinstance(r, (list, tuple)) else r['date'])[:10]
+        c   = float(r[2] if isinstance(r, (list, tuple)) else r['close'] or 0)
+        if sym not in bars_map:
+            bars_map[sym] = []
+        bars_map[sym].append((dt, c))
+
+    suspects_to_update = []
+    for sym, bars in bars_map.items():
         if len(bars) < 3:
             continue
-        action_dates = [str(r[0]) for r in conn.execute(
-            "SELECT ex_date FROM corporate_actions WHERE symbol=?", (sym,)).fetchall()]
-        suspects = []
+        action_dates = action_map.get(sym, [])
         for i in range(1, len(bars) - 1):
-            d, c = str(bars[i][0]), bars[i][1]
-            near = any(_within(d, ad, action_window_days) for ad in action_dates)
-            if is_bad_print(bars[i - 1][1], c, bars[i + 1][1], near_known_action=near, threshold=threshold):
-                suspects.append(d)
-        for d in suspects:
-            conn.execute("UPDATE stock_ohlcv SET is_suspect=1 WHERE symbol=? AND date=?", (sym, d))
-            flagged += 1
-    conn.commit()
-    print(f"[OHLCVQuality] flagged {flagged} suspect bars")
-    return {'flagged': flagged}
+            d, c = bars[i]
+            prev_close = bars[i - 1][1]
+            next_close = bars[i + 1][1]
+            if prev_close <= 0 or next_close <= 0 or c is None:
+                continue
+            dev_prev = abs(c - prev_close) / prev_close
+            dev_next = abs(c - next_close) / next_close
+            if dev_prev > threshold and dev_next > threshold:
+                near = any(_within(d, ad, action_window_days) for ad in action_dates)
+                if not near:
+                    suspects_to_update.append((sym, d))
+
+    print(f"[OHLCVQuality] Flagging {len(suspects_to_update)} suspect bars in database...")
+    if suspects_to_update:
+        executemany(
+            "UPDATE stock_ohlcv SET is_suspect=1 WHERE symbol=? AND date=?",
+            suspects_to_update
+        )
+    else:
+        conn.commit()
+
+    print(f"[OHLCVQuality] flagged {len(suspects_to_update)} suspect bars")
+    return {'flagged': len(suspects_to_update)}
 
 
 def run(ingest: bool = True):

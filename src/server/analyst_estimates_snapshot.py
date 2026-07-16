@@ -15,10 +15,14 @@ import argparse
 import datetime
 import time
 from typing import Callable, Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 
 from db_compat import execute, query_all
+
+_BATCH_SIZE = 15
+_BATCH_GAP_SEC = 0.5
 
 # ── MoneyControl API endpoints (same ones mcApiService.ts wraps) ──────────────
 
@@ -123,10 +127,10 @@ def parse_earnings_forecast(data: Optional[dict]) -> dict:
 
 # ── HTTP fetch ────────────────────────────────────────────────────────────────
 
-def _mc_get(url: str) -> Optional[dict]:
+def _mc_get(url: str, session: requests.Session) -> Optional[dict]:
     """Fetch a MoneyControl JSON endpoint; return the .data payload or None."""
     try:
-        resp = requests.get(url, headers=_MC_HEADERS, timeout=10)
+        resp = session.get(url, headers=_MC_HEADERS, timeout=10)
         j = resp.json()
         if j.get("success") == 1:
             return j.get("data")
@@ -135,12 +139,12 @@ def _mc_get(url: str) -> Optional[dict]:
     return None
 
 
-def _fetch_symbol(mcsymbol: str) -> dict:
+def _fetch_symbol(mcsymbol: str, session: requests.Session) -> dict:
     """Fetch and merge analyst-rating + price-forecast + earnings-forecast for one stock."""
     result: dict = {}
-    result.update(parse_analyst_rating(_mc_get(_URL_ANALYST.format(scId=mcsymbol))))
-    result.update(parse_price_forecast(_mc_get(_URL_PRICE.format(scId=mcsymbol))))
-    result.update(parse_earnings_forecast(_mc_get(_URL_EARNINGS.format(scId=mcsymbol))))
+    result.update(parse_analyst_rating(_mc_get(_URL_ANALYST.format(scId=mcsymbol), session)))
+    result.update(parse_price_forecast(_mc_get(_URL_PRICE.format(scId=mcsymbol), session)))
+    result.update(parse_earnings_forecast(_mc_get(_URL_EARNINGS.format(scId=mcsymbol), session)))
     return result
 
 
@@ -178,7 +182,6 @@ def run(
     `fetch_fn(mcsymbol) -> dict` is injectable for tests; defaults to live MC fetch.
     Returns count of rows written."""
     as_of  = as_of  or datetime.date.today().isoformat()
-    fetch  = fetch_fn or _fetch_symbol
     use_live = fetch_fn is None
 
     if symbols:
@@ -190,34 +193,47 @@ def run(
     else:
         rows = query_all(_SELECT_SYMBOLS)
 
+    session = requests.Session()
+    session.headers.update(_MC_HEADERS)
+
     written = 0
-    for i, row in enumerate(rows):
+    done = 0
+
+    def _process_one(row):
         symbol, mcsymbol = row["symbol"], row["mcsymbol"]
-        fields = fetch(mcsymbol)
+        if fetch_fn:
+            fields = fetch_fn(mcsymbol)
+        else:
+            fields = _fetch_symbol(mcsymbol, session)
+        return symbol, fields
 
-        if all(v is None for v in fields.values()):
-            if use_live and i > 0 and i % _BATCH_SIZE == 0:
-                time.sleep(_SLEEP_BETWEEN)
-            continue
+    for batch_start in range(0, len(rows), _BATCH_SIZE):
+        batch = rows[batch_start:batch_start + _BATCH_SIZE]
+        with ThreadPoolExecutor(max_workers=len(batch)) as pool:
+            futures = [pool.submit(_process_one, r) for r in batch]
+            for fut in as_completed(futures):
+                symbol, fields = fut.result()
+                done += 1
+                if all(v is None for v in fields.values()):
+                    continue
 
-        execute(_DELETE, (symbol, as_of))
-        execute(_INSERT, (
-            symbol, as_of,
-            fields.get("n_analysts"),
-            fields.get("final_rating"),
-            fields.get("buy_count"),
-            fields.get("hold_count"),
-            fields.get("sell_count"),
-            fields.get("target_high"),
-            fields.get("target_mean"),
-            fields.get("target_low"),
-            fields.get("eps_est_next"),
-            fields.get("revenue_est_next"),
-        ))
-        written += 1
-
-        if use_live and i > 0 and i % _BATCH_SIZE == 0:
-            time.sleep(_SLEEP_BETWEEN)
+                execute(_DELETE, (symbol, as_of))
+                execute(_INSERT, (
+                    symbol, as_of,
+                    fields.get("n_analysts"),
+                    fields.get("final_rating"),
+                    fields.get("buy_count"),
+                    fields.get("hold_count"),
+                    fields.get("sell_count"),
+                    fields.get("target_high"),
+                    fields.get("target_mean"),
+                    fields.get("target_low"),
+                    fields.get("eps_est_next"),
+                    fields.get("revenue_est_next"),
+                ))
+                written += 1
+        if use_live:
+            time.sleep(_BATCH_GAP_SEC)
 
     print(f"[ANALYST-SNAP] Wrote {written}/{len(rows)} analyst snapshots as_of {as_of}.")
     return written

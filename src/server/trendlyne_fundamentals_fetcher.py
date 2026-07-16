@@ -22,16 +22,23 @@ ML features computed from stored history:
   div_yield_ttm      (% dividend yield)
   dvm_durability, dvm_valuation, dvm_momentum (0-100)
 
+Stock universe: scripts/stocklist.json (2005 stocks). Fetched in parallel batches of
+BATCH_SIZE with BATCH_GAP_SEC between batches.
+
 Run:
-  python trendlyne_fundamentals_fetcher.py           # all stocks with tlid
+  python trendlyne_fundamentals_fetcher.py           # all stocks in stocklist.json
   python trendlyne_fundamentals_fetcher.py --symbol BEL
 """
 
 import argparse
+import json
+import os
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timezone
 
 import requests
+from requests.adapters import HTTPAdapter
 
 from db_compat import connect
 
@@ -47,6 +54,9 @@ HEADERS = {
 }
 
 RATE_LIMIT_SEC = 0.5
+BATCH_SIZE = 15
+BATCH_GAP_SEC = 0.5
+STOCKLIST_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "scripts", "stocklist.json")
 
 
 # â”€â”€ Schema â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -310,24 +320,14 @@ def _backfill_technical_signals(symbol: str, today: str, features: dict, con) ->
 
 # â”€â”€ Stock list â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-def _load_stocks(symbol_filter: str | None, con) -> list[tuple[str, str]]:
-    """Return [(symbol, tlid), ...].
-    Primary: nse_stocks.tlid (canonical, 1822 stocks).
-    Fallback: MAX(trendlyne_screener_stocks.stock_id) for the rest (~1200 more).
-    """
-    cur = con.cursor()
-    cur.execute("""
-        SELECT symbol, tlid::TEXT AS tlid FROM nse_stocks
-        WHERE symbol IS NOT NULL AND tlid IS NOT NULL AND tlid::TEXT != ''
-        UNION
-        SELECT tss.symbol, MAX(tss.stock_id)::TEXT AS tlid
-        FROM trendlyne_screener_stocks tss
-        WHERE tss.stock_id IS NOT NULL AND tss.stock_id::TEXT != ''
-          AND NOT EXISTS (SELECT 1 FROM nse_stocks ns WHERE ns.symbol = tss.symbol AND ns.tlid IS NOT NULL)
-        GROUP BY tss.symbol
-        ORDER BY symbol
-    """)
-    rows = [(r[0], str(r[1])) for r in cur.fetchall() if r[0] is not None]
+def _load_stocks(symbol_filter: str | None) -> list[tuple[str, str]]:
+    """Return [(symbol, tlid), ...] from scripts/stocklist.json — the canonical
+    provider-mapping table (2005 stocks) — instead of the much larger (7000+)
+    trendlyne_screener_stocks fallback universe, which is why this fetcher used to
+    blow past its timeout ceiling."""
+    with open(STOCKLIST_PATH, encoding="utf-8") as f:
+        entries = json.load(f)
+    rows = [(e["symbol"], str(e["tlid"])) for e in entries if e.get("symbol") and e.get("tlid")]
     if symbol_filter:
         rows = [(s, t) for s, t in rows if s.upper() == symbol_filter.upper()]
     return rows
@@ -335,29 +335,13 @@ def _load_stocks(symbol_filter: str | None, con) -> list[tuple[str, str]]:
 
 # â”€â”€ Main â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--symbol", default=None)
-    args = parser.parse_args()
-
+def _process_one(symbol: str, tlid: str, today: str, session: requests.Session) -> tuple[bool, str]:
+    """Fetch + persist one stock's fundamentals. Opens its own DB connection (pulled from
+    the SQLAlchemy pool) since connections aren't safe to share across threads."""
     con = connect()
-    ensure_schema(con)
-
-    stocks = _load_stocks(args.symbol, con)
-    if not stocks:
-        print("[TLFund] No stocks with tlid found.")
-        return
-
-    print(f"[TLFund] Processing {len(stocks)} stocks â€” EPS/DivYield + DVMâ€¦")
-    session = requests.Session()
-    session.headers.update(HEADERS)
-    today = date.today().isoformat()
-    ok = 0
-
-    for i, (symbol, tlid) in enumerate(stocks, 1):
+    try:
         features: dict = {}
 
-        # â”€â”€ 1. EPS_TTM (also carries DVM scores) â”€â”€
         body = _fetch(tlid, "EPS_TTM", session)
         if body is not None:
             eps_series = _parse_eod(body)
@@ -372,33 +356,64 @@ def main() -> None:
                 features["dvm_m"] = dvm.get("m_score")
         time.sleep(RATE_LIMIT_SEC)
 
-        # PE/PB history is now appended daily by mc_pricefeed_fetcher.py (that endpoint
-        # already fetches each stock's own daily PE/PB — re-pulling Trendlyne's full
-        # multi-year history here every week was pure duplication). Still read the
-        # percentile-rank features from the same tables, now fresher (daily not weekly).
         features.update(_pe_features_from_db(symbol, con))
         features.update(_pb_features_from_db(symbol, con))
 
-        # â”€â”€ 2. DIVIDEND_YIELD_TTM_Q (quarterly, 32 pts) â”€â”€
         body = _fetch(tlid, "DIVIDEND_YIELD_TTM_Q", session)
         if body is not None:
             dy_series = _parse_eod(body)
             if dy_series:
                 _upsert_series("trendlyne_div_yield_history", "div_yield_pct", symbol, dy_series, con)
-                features["div_yield_ttm"] = dy_series[0][1]  # latest
+                features["div_yield_ttm"] = dy_series[0][1]
         time.sleep(RATE_LIMIT_SEC)
 
-        # â”€â”€ Back-fill technical_signals â”€â”€
         _backfill_technical_signals(symbol, today, features, con)
 
         pe_str  = f"PE={features.get('pe_ttm','?')} rank={features.get('pe_pct_rank_252d','?')}%"
-        dvm_str = (f"D={features.get('dvm_d','?')}/V={features.get('dvm_v','?')}/M={features.get('dvm_m','?')}")
+        dvm_str = f"D={features.get('dvm_d','?')}/V={features.get('dvm_v','?')}/M={features.get('dvm_m','?')}"
         eps_str = f"EPS={features.get('eps_ttm','?')} YoY={features.get('eps_growth_yoy','?')}%"
-        print(f"  [{i}/{len(stocks)}] {symbol}: {eps_str} | {pe_str} | DY={features.get('div_yield_ttm','?')}% | {dvm_str}")
-        ok += 1
+        return True, f"{symbol}: {eps_str} | {pe_str} | DY={features.get('div_yield_ttm','?')}% | {dvm_str}"
+    except Exception as e:
+        return False, f"{symbol}: error {e}"
+    finally:
+        con.close()
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--symbol", default=None)
+    args = parser.parse_args()
+
+    con = connect()
+    ensure_schema(con)
+    con.close()
+
+    stocks = _load_stocks(args.symbol)
+    if not stocks:
+        print("[TLFund] No stocks with tlid found.")
+        return
+
+    print(f"[TLFund] Processing {len(stocks)} stocks in batches of {BATCH_SIZE} "
+          f"({BATCH_GAP_SEC}s gap) - EPS/DivYield + DVM...")
+    session = requests.Session()
+    session.headers.update(HEADERS)
+    session.mount("https://", HTTPAdapter(pool_connections=BATCH_SIZE, pool_maxsize=BATCH_SIZE))
+    today = date.today().isoformat()
+    ok = 0
+    done = 0
+
+    for batch_start in range(0, len(stocks), BATCH_SIZE):
+        batch = stocks[batch_start:batch_start + BATCH_SIZE]
+        with ThreadPoolExecutor(max_workers=len(batch)) as pool:
+            futures = [pool.submit(_process_one, symbol, tlid, today, session) for symbol, tlid in batch]
+            for fut in as_completed(futures):
+                success, line = fut.result()
+                done += 1
+                ok += success
+                print(f"  [{done}/{len(stocks)}] {line}")
+        time.sleep(BATCH_GAP_SEC)
 
     print(f"[TLFund] Done. {ok}/{len(stocks)} stocks processed.")
-    con.close()
 
 
 if __name__ == "__main__":

@@ -13,7 +13,7 @@ const MARKET_STATUS_URL = 'https://www.nseindia.com/api/marketStatus';
 const NSE_HOME_URL = 'https://www.nseindia.com/';
 // Primary live source: BSE via ET Community feeds. Holiday-aware (its `purpose` field names the
 // reason, e.g. "Weekly Off" or a named holiday). Shape:
-//   {"currentMarketStatus":"OPEN"|"CLOSED","marketStatus":"ON"|"OFF","purpose":"Normal Market"|...}
+//   {"currentMarketStatus":"Live"|"Closed"(?),"marketStatus":"ON"|"OFF","purpose":"Normal Working Day"|...}
 const BSE_STATUS_URL = 'https://json.bselivefeeds.indiatimes.com/ET_Community/holidaylist';
 const CACHE_TTL_MS = 60_000; // live sources reflect state changes in real time; no need to poll faster
 const FALLBACK_CACHE_TTL_MS = 20_000; // shorter TTL for degraded paths so a live recovery is picked up quickly
@@ -58,7 +58,9 @@ async function fetchBseMarketStatus(): Promise<boolean | null> {
     const status = data.currentMarketStatus ?? data.marketStatus;
     if (!status) return null;
     const s = String(status).trim().toLowerCase();
-    return s === 'open' || s === 'on';
+    // currentMarketStatus returns "Live" during an active session (not "OPEN" as the
+    // shape comment above assumes) — marketStatus separately uses "ON"/"OFF".
+    return s === 'open' || s === 'on' || s === 'live';
   } catch {
     return null;
   }

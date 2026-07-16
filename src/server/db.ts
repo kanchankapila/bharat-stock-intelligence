@@ -1469,6 +1469,19 @@ migrateColumn('technical_signals', 'mc_scan_52w_high', 'INTEGER');
 migrateColumn('technical_signals', 'mc_scan_squeeze_bo', 'INTEGER');
 migrateColumn('technical_signals', 'mc_tech_rating', 'INTEGER');
 
+// Extra endpoints features (parsed from indiatimes/marketsmojo/trading80)
+migrateColumn('technical_signals', 'ext_fii_holding_pct', 'REAL');
+migrateColumn('technical_signals', 'ext_dii_holding_pct', 'REAL');
+migrateColumn('technical_signals', 'ext_fii_qoq_chg', 'REAL');
+migrateColumn('technical_signals', 'ext_dii_qoq_chg', 'REAL');
+migrateColumn('technical_signals', 'ext_t80_tech_score', 'REAL');
+migrateColumn('technical_signals', 'ext_t80_quality_rank', 'REAL');
+migrateColumn('technical_signals', 'ext_t80_valuation_rank', 'REAL');
+migrateColumn('technical_signals', 'ext_t80_financial_pts', 'REAL');
+migrateColumn('technical_signals', 'ext_mojo_quality_rank', 'REAL');
+migrateColumn('technical_signals', 'ext_mojo_valuation_rank', 'REAL');
+migrateColumn('technical_signals', 'ext_mojo_financial_pts', 'REAL');
+
 // ATM implied vol + skew snapshot (captured by pcr_fetcher.py from the NSE option chain)
 migrateColumn('stock_options_oi', 'atm_iv',   'REAL');
 migrateColumn('stock_options_oi', 'iv_skew',  'REAL');
