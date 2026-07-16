@@ -267,19 +267,41 @@ export async function syncTrendlyneTechnicals() {
 
   let count = 0;
   let consecutiveFailures = 0;
+  // Counts cooldown cycles hit back-to-back with zero intervening successes. A flat 30s
+  // retry-forever loop is indistinguishable from a real vendor block (session/WAF rejecting
+  // ~everything, as happened 2026-07-16 for hours) vs a transient blip — it just re-hammers
+  // the same endpoint every 30s for the full ~2000-symbol list, burning 45-80+ min and
+  // spamming the same log line hundreds of times without getting closer to success.
+  let blockedCycles = 0;
+  const MAX_BLOCKED_CYCLES = 4; // 4 cycles x 5 fails = 20 straight fails, zero successes -> bail
   for (const stock of stocks) {
     try {
       const result = await fetchAndProcessTechnicalData(stock.symbol, 'D');
       if (!result) {
         consecutiveFailures++;
         if (consecutiveFailures >= 5) {
-          console.warn(`[TRENDLYNE TECHNICALS] 5 consecutive failures. Cool down for 30s...`);
-          await new Promise(r => setTimeout(r, 30000));
+          blockedCycles++;
+          if (blockedCycles >= MAX_BLOCKED_CYCLES) {
+            console.error(
+              `[TRENDLYNE TECHNICALS] ${blockedCycles} straight cooldown cycles with no ` +
+              `successes in between — looks like a sustained vendor block, not a blip. ` +
+              `Aborting early after ${count} synced (of ${stocks.length}) rather than grinding ` +
+              `through the rest at 30s+/cooldown.`
+            );
+            return;
+          }
+          // Escalating cooldown (30s/60s/120s/240s): a fixed 30s retries a blocked vendor at
+          // the same rate forever; backing off further each cycle is both faster to detect a
+          // real block (fewer log lines before MAX_BLOCKED_CYCLES) and less abusive if it isn't.
+          const cooldownMs = 30_000 * Math.pow(2, blockedCycles - 1);
+          console.warn(`[TRENDLYNE TECHNICALS] 5 consecutive failures (cycle ${blockedCycles}/${MAX_BLOCKED_CYCLES}). Cool down for ${cooldownMs / 1000}s...`);
+          await new Promise(r => setTimeout(r, cooldownMs));
           consecutiveFailures = 0;
         }
         continue;
       }
       consecutiveFailures = 0;
+      blockedCycles = 0;
       count++;
     } catch (e: any) {
       console.error(`[TRENDLYNE TECHNICALS] Error for ${stock.symbol}:`, e.message);
