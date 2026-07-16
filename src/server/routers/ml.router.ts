@@ -4,6 +4,57 @@ import { dbGet, dbAll, dbRun } from "../dbAsync";
 import { alphaQuant } from "../alphaQuantClient";
 import { router, publicProcedure } from "../trpc";
 
+type RocResult = {
+  regime: string; n: number; positives: number; negatives: number;
+  baseRate: number; auc: number; roc: { fpr: number; tpr: number }[];
+};
+
+/**
+ * Rank-based AUC (== sklearn roc_auc_score, tie-aware) + ROC curve points for one group of
+ * (score, label) pairs. Read-only diagnostics — deliberately NOT a call into ml_calibration.py
+ * (that recalibrates and writes). Returns null for groups too small or single-class to score.
+ */
+function computeRoc(regime: string, pts: { p: number; y: number }[], minN: number, maxPoints: number): RocResult | null {
+  const n = pts.length;
+  const positives = pts.reduce((s, d) => s + d.y, 0);
+  const negatives = n - positives;
+  if (n < minN || positives === 0 || negatives === 0) return null;
+
+  // AUC via Mann-Whitney U: (sum of avg-ranks of positives - nP*(nP+1)/2) / (nP*nN)
+  const asc = [...pts].sort((a, b) => a.p - b.p);
+  let i = 0, rankSum = 0;
+  while (i < n) {
+    let j = i;
+    while (j < n && asc[j].p === asc[i].p) j++;
+    const avgRank = (i + 1 + j) / 2;               // average of 1-indexed ranks [i+1..j]
+    for (let k = i; k < j; k++) if (asc[k].y === 1) rankSum += avgRank;
+    i = j;
+  }
+  const auc = (rankSum - (positives * (positives + 1)) / 2) / (positives * negatives);
+
+  // ROC curve: threshold sweep from high score to low, grouping tied scores into one step.
+  const desc = [...pts].sort((a, b) => b.p - a.p);
+  const roc: { fpr: number; tpr: number }[] = [{ fpr: 0, tpr: 0 }];
+  let tp = 0, fp = 0, k = 0;
+  while (k < n) {
+    let m = k;
+    while (m < n && desc[m].p === desc[k].p) m++;
+    for (let t = k; t < m; t++) { if (desc[t].y === 1) tp++; else fp++; }
+    roc.push({ fpr: fp / negatives, tpr: tp / positives });
+    k = m;
+  }
+  const curve = roc.length > maxPoints
+    ? Array.from({ length: maxPoints }, (_, idx) => roc[Math.round((idx * (roc.length - 1)) / (maxPoints - 1))])
+    : roc;
+
+  return {
+    regime, n, positives, negatives,
+    baseRate: Math.round((positives / n) * 1000) / 1000,
+    auc: Math.round(auc * 1000) / 1000,
+    roc: curve,
+  };
+}
+
 export const mlRouter = router({
   getFiiDiiFlow: publicProcedure
     .input(z.object({ days: z.number().min(1).max(90).default(30) }).optional())
@@ -464,6 +515,85 @@ export const mlRouter = router({
         avgReturn:    Math.round(avgReturn * 100) / 100,
         sharpe:       Math.round(sharpe * 100) / 100,
         equityCurve,
+      };
+    }),
+
+  // Honest deployment diagnostics: the live win_probability's ability to rank realized
+  // WIN vs LOSS, per market regime. Replicates ml_calibration.per_regime_auc's exact join so
+  // the AUC matches (BULL/SIDEWAYS ~0.50 = no live edge, BEAR ~0.62). Surfaces the gap between
+  // the model's flattering training-CV AUC (model_registry.cv_roc_auc) and what actually holds
+  // in deployment — the panel exists to keep that gap visible, not to hide it.
+  getModelRocDiagnostics: publicProcedure
+    .input(z.object({
+      minSamples: z.number().min(20).max(2000).default(50),
+      maxPoints:  z.number().min(20).max(500).default(120),
+    }).optional())
+    .query(async ({ input }) => {
+      const minN = input?.minSamples ?? 50;
+      const maxPoints = input?.maxPoints ?? 120;
+
+      const rows = await dbAll(`
+        SELECT ts.nifty_regime AS regime, ts.win_probability AS prob,
+               CASE WHEN so.outcome = 'WIN' THEN 1 ELSE 0 END AS y
+        FROM signal_outcomes so JOIN technical_signals ts
+          ON ts.symbol = so.symbol AND ts.date = so.signal_date
+        WHERE so.outcome IN ('WIN', 'LOSS') AND ts.win_probability IS NOT NULL
+      `) as Array<{ regime: string | null; prob: number; y: number }>;
+
+      // A signal counts only when the ensemble actually scored it. Unscored rows carry
+      // win_probability = 0.5 exactly (legacy default from the pre-fix scoring outage) or NaN — if
+      // left in, they drag whatever regime they fall in toward a fabricated AUC 0.5 (a constant
+      // score is always 0.5). Split them out so a regime with no real scores reads as "unmeasured",
+      // not "no edge".
+      const groups = new Map<string, { p: number; y: number }[]>();
+      const unscored = new Map<string, number>();
+      const push = (key: string, p: number, y: number) => {
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key)!.push({ p, y });
+      };
+      for (const r of rows) {
+        const p = Number(r.prob);
+        const reg = r.regime ?? 'UNKNOWN';
+        if (!Number.isFinite(p) || p === 0.5) {
+          unscored.set(reg, (unscored.get(reg) ?? 0) + 1);
+          continue;
+        }
+        const y = Number(r.y) === 1 ? 1 : 0;
+        push(reg, p, y);
+        push('OVERALL', p, y);
+      }
+
+      const regimes = [...groups.entries()]
+        .map(([regime, pts]) => computeRoc(regime, pts, minN, maxPoints))
+        .filter((x): x is RocResult => x !== null)
+        .sort((a, b) => (a.regime === 'OVERALL' ? -1 : b.regime === 'OVERALL' ? 1 : b.n - a.n));
+
+      // Regimes that appear in resolved outcomes but have no scored signals to evaluate — reported
+      // so the panel doesn't imply they were tested and failed.
+      const scoredRegimes = new Set(regimes.map((r) => r.regime));
+      const unscoredRegimes = [...unscored.entries()]
+        .filter(([reg]) => !scoredRegimes.has(reg))
+        .map(([regime, count]) => ({ regime, count }))
+        .sort((a, b) => b.count - a.count);
+
+      const model = await dbGet(`
+        SELECT cv_roc_auc, model_version, trained_at FROM model_registry
+        WHERE model_name = 'ensemble' AND is_active = 1
+        ORDER BY trained_at DESC LIMIT 1
+      `) as { cv_roc_auc: number | null; model_version: string | null; trained_at: string | null } | undefined;
+
+      const scoredTotal = regimes.find((r) => r.regime === 'OVERALL')?.n
+        ?? [...groups.values()].reduce((s, g) => s + g.length, 0);
+
+      return {
+        regimes,
+        unscoredRegimes,
+        trainingAuc: model?.cv_roc_auc ?? null,
+        trainingModelVersion: model?.model_version ?? null,
+        trainingTrainedAt: model?.trained_at ?? null,
+        totalResolved: rows.length,
+        scoredTotal,
+        computedAt: new Date().toISOString(),
       };
     }),
 });

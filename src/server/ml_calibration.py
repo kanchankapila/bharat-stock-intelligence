@@ -54,6 +54,11 @@ def recalibrate_win_probabilities(conn: ConnWrapper, min_samples: int = 200,
     technical_signals with a raw win_probability. A regime gets its OWN calibrator only when it
     clears min_regime_days distinct days AND min_regime_episodes episodes AND has ≥2 classes;
     otherwise it falls back to the global calibrator. Idempotent."""
+    # win_probability = 0.5 exactly marks an UNSCORED signal — the legacy default written before
+    # "unscored -> NULL" was fixed (e.g. the 2026-05-16..23 scoring outage). A real model score is
+    # never exactly 0.5, and 0.5 carries no ranking/calibration information. Excluding it here is
+    # load-bearing: training the isotonic map on that blob de-calibrates the entire 0.5 region and
+    # feeds bad calibrated_win_probability into position sizing.
     rows = conn.execute("""
         SELECT ts.nifty_regime AS regime, ts.date AS d,
                ts.win_probability AS p,
@@ -61,6 +66,7 @@ def recalibrate_win_probabilities(conn: ConnWrapper, min_samples: int = 200,
         FROM signal_outcomes so
         JOIN technical_signals ts ON ts.symbol = so.symbol AND ts.date = so.signal_date
         WHERE so.outcome IN ('WIN', 'LOSS') AND ts.win_probability IS NOT NULL
+          AND ts.win_probability <> 0.5
     """).fetchall()
     # Postgres allows storing float('nan') in a NOT NULL-satisfying column — filter those
     # out explicitly since IS NOT NULL doesn't catch NaN and isotonic regression rejects it.
@@ -97,7 +103,8 @@ def recalibrate_win_probabilities(conn: ConnWrapper, min_samples: int = 200,
                              'used': 'regime' if qualifies else 'global'}
 
     sigs = conn.execute(
-        "SELECT symbol, date, nifty_regime, win_probability FROM technical_signals WHERE win_probability IS NOT NULL"
+        "SELECT symbol, date, nifty_regime, win_probability FROM technical_signals "
+        "WHERE win_probability IS NOT NULL AND win_probability <> 0.5"   # skip unscored 0.5 defaults
     ).fetchall()
     updated = 0
     for s in sigs:
@@ -126,6 +133,7 @@ def per_regime_auc(conn: ConnWrapper, min_n: int = 50) -> dict:
         FROM signal_outcomes so JOIN technical_signals ts
           ON ts.symbol = so.symbol AND ts.date = so.signal_date
         WHERE so.outcome IN ('WIN', 'LOSS') AND ts.win_probability IS NOT NULL
+          AND ts.win_probability <> 0.5          -- exclude unscored 0.5 defaults (see recalibrate)
     """).fetchall()
     g: dict = {}
     for r in rows:
@@ -150,6 +158,7 @@ def regime_readiness(conn: ConnWrapper, min_regime_days: int = 20, min_regime_ep
         FROM signal_outcomes so JOIN technical_signals ts
           ON ts.symbol = so.symbol AND ts.date = so.signal_date
         WHERE so.outcome IN ('WIN', 'LOSS') AND ts.win_probability IS NOT NULL
+          AND ts.win_probability <> 0.5          -- exclude unscored 0.5 defaults (see recalibrate)
     """).fetchall()
     g: dict = {}
     for r in rows:

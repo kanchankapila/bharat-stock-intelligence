@@ -21,6 +21,7 @@ import { MomentumIntelligence } from '../../../components/MomentumIntelligence';
 import { TopMoversIntelligence } from '../../../components/TopMoversIntelligence';
 import { IntradayBreakouts } from '../../../components/IntradayBreakouts';
 import { IndexOverview } from '../../../components/MarketInsights';
+import { ModelRocPanel } from '../../../components/ModelRocPanel';
 import { GlobalMarkets } from '../../../components/GlobalMarkets';
 import { PremarketPanel } from '../../../components/PremarketPanel';
 import { LiveMarketScreener } from '../../../components/LiveMarketScreener';
@@ -1259,6 +1260,9 @@ Based on the multi-factor scoring array and SWOT profiles, ${symbol} displays ${
                 </div>
 
               </div>
+
+              {/* Deployment ROC / AUC diagnostics — live win-probability vs realized outcome */}
+              <ModelRocPanel />
 
             </div>
           )}
