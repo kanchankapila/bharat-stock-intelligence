@@ -1092,9 +1092,9 @@ async function processAgentStrategist(_job: Job): Promise<{ success: boolean }> 
       for (const p of highPicks) {
         const firstSentence = (p.narrative as string || '').split('.')[0];
         await tg.sendMarkdownMessage(
-          `Ã°Å¸Å½Â¯ *STRATEGY ALERT Ã¢â‚¬â€ ${(p.timeframe as string).toUpperCase()}*\n` +
-          `*${p.symbol}* | Entry: Ã¢â€šÂ¹${p.entry_zone_low}Ã¢â‚¬â€œ${p.entry_zone_high} | SL: Ã¢â€šÂ¹${p.stop_loss}\n` +
-          `T1: Ã¢â€šÂ¹${p.target_1} | T2: Ã¢â€šÂ¹${p.target_2} | T3: Ã¢â€šÂ¹${p.target_3}\n` +
+          `🎯 *STRATEGY ALERT — ${(p.timeframe as string).toUpperCase()}*\n` +
+          `*${p.symbol}* | Entry: ₹${p.entry_zone_low}–${p.entry_zone_high} | SL: ₹${p.stop_loss}\n` +
+          `T1: ₹${p.target_1} | T2: ₹${p.target_2} | T3: ₹${p.target_3}\n` +
           `Conviction: HIGH | Score: ${Number(p.composite_score).toFixed(0)}\n` +
           `${firstSentence}.`
         );
@@ -1125,9 +1125,9 @@ async function processAgentOptimizer(_job: Job): Promise<{ success: boolean }> {
       const tg = new TelegramNotificationService();
       const firstSentence = (latest.narrative as string || '').split('.')[0];
       await tg.sendMarkdownMessage(
-        `Ã¢Å¡â„¢Ã¯Â¸Â *OPTIMIZER ALERT*\n` +
-        `Win rate: ${Number(latest.baseline_win_rate).toFixed(0)}% Ã¢â€ â€™ ${Number(latest.new_win_rate).toFixed(0)}%\n` +
-        `Full optimizer: ${latest.full_optimizer_triggered ? 'YES Ã°Å¸â€â€ž' : 'NO'}\n` +
+        `⚙️ *OPTIMIZER ALERT*\n` +
+        `Win rate: ${Number(latest.baseline_win_rate).toFixed(0)}% → ${Number(latest.new_win_rate).toFixed(0)}%\n` +
+        `Full optimizer: ${latest.full_optimizer_triggered ? 'YES 🔄' : 'NO'}\n` +
         `${firstSentence}.`
       );
     } catch (err: unknown) {
