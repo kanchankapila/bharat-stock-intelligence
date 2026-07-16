@@ -41,14 +41,14 @@ export const V2Dashboard: React.FC = () => {
           <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Ensemble Prediction Quality</p>
           <div className="flex items-baseline gap-2">
             <span className="text-2xl font-black text-slate-200 font-mono italic">
-              {((dashboardData?.overall?.win_rate ?? 0.62) * 100).toFixed(1)}%
+              {dashboardData?.overall?.win_rate != null ? `${(dashboardData.overall.win_rate * 100).toFixed(1)}%` : '—'}
             </span>
             <span className="text-[9px] text-emerald-400 font-bold font-mono">Win Rate</span>
           </div>
           <div className="w-full h-1 bg-slate-800 rounded-full mt-3 overflow-hidden">
             <div 
               className="h-full bg-indigo-500" 
-              style={{ width: `${(dashboardData?.overall?.win_rate ?? 0.62) * 100}%` }}
+              style={{ width: `${dashboardData?.overall?.win_rate != null ? dashboardData.overall.win_rate * 100 : 0}%` }}
             />
           </div>
         </div>
@@ -57,7 +57,7 @@ export const V2Dashboard: React.FC = () => {
           <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Sharpe Ratio (1Y Ann.)</p>
           <div className="flex items-baseline gap-2">
             <span className="text-2xl font-black text-slate-200 font-mono italic">
-              {(dashboardData?.overall?.sharpe_ratio ?? 2.14).toFixed(2)}
+              {dashboardData?.overall?.sharpe_ratio != null ? dashboardData.overall.sharpe_ratio.toFixed(2) : '—'}
             </span>
             <span className="text-[9px] text-indigo-400 font-bold uppercase tracking-wider">Alpha Grade</span>
           </div>
@@ -68,7 +68,7 @@ export const V2Dashboard: React.FC = () => {
           <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Active Trading Signals</p>
           <div className="flex items-baseline gap-2">
             <span className="text-2xl font-black text-slate-200 font-mono italic">
-              {dashboardData?.overall?.total_signals ?? 142}
+              {dashboardData?.overall?.total_signals != null ? dashboardData.overall.total_signals : '—'}
             </span>
             <span className="text-[9px] text-slate-400 font-bold uppercase">Gated rules</span>
           </div>
@@ -157,7 +157,7 @@ export const V2Dashboard: React.FC = () => {
                   <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider mt-0.5">{m.model_type}</p>
                 </div>
                 <div className="text-right">
-                  <span className="text-xs font-black text-indigo-400 font-mono">AUC: {m.cv_roc_auc?.toFixed(3) || '0.785'}</span>
+                  <span className="text-xs font-black text-indigo-400 font-mono">AUC: {m.cv_roc_auc != null ? m.cv_roc_auc.toFixed(3) : 'N/A'}</span>
                   <p className="text-[8px] text-slate-500 uppercase font-bold mt-0.5">{m.training_samples} samples trained</p>
                 </div>
               </div>
@@ -181,7 +181,7 @@ export const V2Dashboard: React.FC = () => {
                 </div>
                 <div className="text-right">
                   <span className="text-xs font-black text-emerald-400 font-mono">{(s.win_rate * 100).toFixed(1)}% WR</span>
-                  <p className="text-[8px] text-slate-500 uppercase font-bold mt-0.5">Sharpe: {s.sharpe_ratio?.toFixed(2) || '2.1'}</p>
+                  <p className="text-[8px] text-slate-500 uppercase font-bold mt-0.5">Sharpe: {s.sharpe_ratio != null ? s.sharpe_ratio.toFixed(2) : 'N/A'}</p>
                 </div>
               </div>
             ))}

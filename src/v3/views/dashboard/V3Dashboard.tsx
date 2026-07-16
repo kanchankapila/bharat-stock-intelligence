@@ -41,12 +41,14 @@ function fmtPct(n: number) {
 }
 
 // ─── ScoreGauge ─────────────────────────────────────────────────────────────
-const ScoreGauge: React.FC<{ value: number }> = ({ value }) => {
+const ScoreGauge: React.FC<{ value: number | null | undefined }> = ({ value }) => {
   const r = 40;
   const c = 50;
   const circ = 2 * Math.PI * r;
-  const pct = Math.min(value, 100) / 100;
-  const color = value >= 75 ? emerald : value >= 50 ? amber : rose;
+  const has = value != null && Number.isFinite(value);
+  const v = has ? (value as number) : 0;
+  const pct = Math.min(v, 100) / 100;
+  const color = !has ? '#64748b' : v >= 75 ? emerald : v >= 50 ? amber : rose;
 
   return (
     <div className="flex flex-col items-center justify-center relative w-24 h-24">
@@ -66,7 +68,7 @@ const ScoreGauge: React.FC<{ value: number }> = ({ value }) => {
         />
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="text-xl font-black font-mono tracking-tighter text-slate-100">{value}</span>
+        <span className="text-xl font-black font-mono tracking-tighter text-slate-100">{has ? v : 'N/A'}</span>
         <span className="text-[7px] font-black text-slate-500 uppercase tracking-widest font-mono">QUANT SCORE</span>
       </div>
     </div>
@@ -1135,10 +1137,10 @@ Based on the multi-factor scoring array and SWOT profiles, ${symbol} displays ${
               {/* Header metrics */}
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 {[
-                  { label: 'Ensemble Win Rate', val: `${((dashboardData?.overall?.win_rate ?? 0.62) * 100).toFixed(1)}%`, sub: 'Prediction accuracy', progress: (dashboardData?.overall?.win_rate ?? 0.62) * 100 },
-                  { label: 'Ann. Sharpe Ratio', val: (dashboardData?.overall?.sharpe_ratio ?? 2.14).toFixed(2), sub: 'Alpha Grade: Premium risk adjust' },
-                  { label: 'ML Trading Signals', val: dashboardData?.overall?.total_signals ?? 142, sub: 'Active database count' },
-                  { label: 'Alpha vs Nifty 50', val: `+${((dashboardData?.overall?.alpha_vs_nifty ?? 0.052) * 100).toFixed(2)}%`, sub: 'Excess portfolio returns', color: 'text-emerald-400' }
+                  { label: 'Ensemble Win Rate', val: dashboardData?.overall?.win_rate != null ? `${(dashboardData.overall.win_rate * 100).toFixed(1)}%` : '—', sub: 'Resolved WIN rate', progress: dashboardData?.overall?.win_rate != null ? dashboardData.overall.win_rate * 100 : undefined },
+                  { label: 'Ann. Sharpe Ratio', val: dashboardData?.overall?.sharpe_ratio != null ? dashboardData.overall.sharpe_ratio.toFixed(2) : '—', sub: 'Risk-adjusted return' },
+                  { label: 'ML Trading Signals', val: dashboardData?.overall?.total_signals != null ? dashboardData.overall.total_signals : '—', sub: 'Resolved signal count' },
+                  { label: 'Alpha vs Nifty 50', val: dashboardData?.overall?.alpha_vs_nifty != null ? `${dashboardData.overall.alpha_vs_nifty >= 0 ? '+' : ''}${(dashboardData.overall.alpha_vs_nifty * 100).toFixed(2)}%` : '—', sub: 'Excess vs benchmark', color: dashboardData?.overall?.alpha_vs_nifty == null ? 'text-slate-300' : dashboardData.overall.alpha_vs_nifty >= 0 ? 'text-emerald-400' : 'text-rose-400' }
                 ].map((item, idx) => (
                   <div key={idx} className="glass border border-slate-800/60 p-4 rounded-xl relative overflow-hidden">
                     <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest font-mono">{item.label}</span>
@@ -1228,7 +1230,7 @@ Based on the multi-factor scoring array and SWOT profiles, ${symbol} displays ${
                           <p className="text-[9px] text-slate-400 font-black uppercase mt-0.5 font-mono">{m.model_type}</p>
                         </div>
                         <div className="text-right">
-                          <span className="text-xs font-black text-indigo-400 font-mono uppercase">AUC: {m.cv_roc_auc?.toFixed(3) || '0.785'}</span>
+                          <span className="text-xs font-black text-indigo-400 font-mono uppercase">AUC: {m.cv_roc_auc != null ? m.cv_roc_auc.toFixed(3) : 'N/A'}</span>
                           <p className="text-[8px] text-slate-500 font-bold uppercase mt-0.5 font-mono">{m.training_samples} samples trained</p>
                         </div>
                       </div>
@@ -1252,7 +1254,7 @@ Based on the multi-factor scoring array and SWOT profiles, ${symbol} displays ${
                         </div>
                         <div className="text-right">
                           <span className="text-xs font-black text-emerald-400 font-mono">{(s.win_rate * 100).toFixed(1)}% WR</span>
-                          <p className="text-[8px] text-slate-500 font-bold uppercase mt-0.5 font-mono">Sharpe Ratio: {s.sharpe_ratio?.toFixed(2) || '2.1'}</p>
+                          <p className="text-[8px] text-slate-500 font-bold uppercase mt-0.5 font-mono">Sharpe Ratio: {s.sharpe_ratio != null ? s.sharpe_ratio.toFixed(2) : 'N/A'}</p>
                         </div>
                       </div>
                     ))}
@@ -1620,7 +1622,7 @@ Based on the multi-factor scoring array and SWOT profiles, ${symbol} displays ${
                         
                         {/* Circle Gauge + Factor list */}
                         <div className="lg:col-span-5 glass border border-slate-800/60 rounded-2xl p-5 flex flex-col sm:flex-row justify-between items-center gap-6">
-                          <ScoreGauge value={score?.score ?? 78} />
+                          <ScoreGauge value={score?.score ?? null} />
                           <div className="flex-1 w-full space-y-2 text-[10px] font-bold">
                             <span className="text-[8px] font-black text-slate-500 block uppercase tracking-widest font-mono">Factor Scores</span>
                             {factorsList.map(f => (
@@ -1662,9 +1664,9 @@ Based on the multi-factor scoring array and SWOT profiles, ${symbol} displays ${
                           <div className="mt-4 pt-3 border-t border-slate-800/60 flex items-center gap-3">
                             <span className="text-[9px] font-black text-slate-400 font-mono uppercase shrink-0">Company Health Score:</span>
                             <div className="flex-1 h-1.5 bg-slate-900 rounded-full overflow-hidden">
-                              <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${unifiedData?.tradebrains?.health_score ?? 76}%` }} />
+                              <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${unifiedData?.tradebrains?.health_score != null ? unifiedData.tradebrains.health_score : 0}%` }} />
                             </div>
-                            <span className="text-[9px] font-black text-emerald-400 font-mono shrink-0">{unifiedData?.tradebrains?.health_score ?? 76}/100</span>
+                            <span className="text-[9px] font-black text-emerald-400 font-mono shrink-0">{unifiedData?.tradebrains?.health_score != null ? `${unifiedData.tradebrains.health_score}/100` : 'N/A'}</span>
                           </div>
                         </div>
 
@@ -1883,7 +1885,7 @@ Based on the multi-factor scoring array and SWOT profiles, ${symbol} displays ${
                           <div>
                             <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest font-mono block">Put-Call Ratio (PCR)</span>
                             <span className="text-3xl font-black text-emerald-400 font-mono mt-1 block">
-                              {fno?.marketSentiment?.pcr?.toFixed(2) || '1.14'}
+                              {fno?.marketSentiment?.pcr != null ? fno.marketSentiment.pcr.toFixed(2) : 'N/A'}
                             </span>
                             <span className="text-[9px] font-black uppercase text-slate-400 mt-1 block font-mono">Derivatives Sentiment bias</span>
                           </div>

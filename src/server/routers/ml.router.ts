@@ -90,10 +90,14 @@ export const mlRouter = router({
   getPerformanceDashboard: publicProcedure
     .query(async () => {
       return {
+        // Pin to the canonical 15-day horizon (the default used across getStrategyPerformance /
+        // getSignalQualityReport). A bare "most recent" flips the headline win-rate/Sharpe between
+        // the 5d and 15d rows depending on which performance_tracker horizon ran last.
         overall: await dbGet(`
           SELECT win_rate, avg_return_pct, sharpe_ratio, profit_factor, max_drawdown_pct,
-                 alpha_vs_nifty, total_signals, last_computed
-          FROM strategy_performance WHERE segment = 'overall' ORDER BY last_computed DESC LIMIT 1
+                 alpha_vs_nifty, total_signals, horizon_days, last_computed
+          FROM strategy_performance WHERE segment = 'overall'
+          ORDER BY (horizon_days = 15) DESC, last_computed DESC LIMIT 1
         `),
         topSignals: await dbAll(`
           SELECT strategy_name, win_rate, avg_return_pct, sharpe_ratio, total_signals
