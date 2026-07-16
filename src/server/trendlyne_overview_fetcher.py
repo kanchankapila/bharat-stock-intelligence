@@ -34,6 +34,7 @@ Run:
 """
 
 import argparse
+import hashlib
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta
@@ -546,20 +547,34 @@ def backfill_technical_signals(symbol: str, profile: dict, con) -> None:
 
 # â”€â”€ Stock list â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-def _load_stocks(symbol_filter: str | None, con) -> list[tuple[str, str]]:
+def _load_stocks(symbol_filter: str | None, con, only_unsynced: bool = True) -> list[tuple[str, str]]:
     """Return [(symbol, tlid), ...].
     Primary: nse_stocks.tlid (canonical). Fallback: trendlyne_screener_stocks.stock_id.
+
+    Company profile/description/fundamentals data is near-static — there's no reason to
+    re-scrape the same NSE stock over and over. With only_unsynced=True (the default), a
+    symbol that already has ANY row in trendlyne_stock_profile (any date) is excluded, so
+    each of the ~7,283 NSE stocks gets scraped once, ever; subsequent runs only pick up
+    stocks that have never been synced (new listings). --resync-all bypasses this to force
+    a full refresh of the whole universe when one is genuinely needed.
     """
     cur = con.cursor()
-    cur.execute("""
-        SELECT symbol, tlid::TEXT AS tlid FROM nse_stocks
-        WHERE symbol IS NOT NULL AND tlid IS NOT NULL AND tlid::TEXT != ''
-        UNION
-        SELECT tss.symbol, MAX(tss.stock_id)::TEXT AS tlid
-        FROM trendlyne_screener_stocks tss
-        WHERE tss.stock_id IS NOT NULL AND tss.stock_id::TEXT != ''
-          AND NOT EXISTS (SELECT 1 FROM nse_stocks ns WHERE ns.symbol = tss.symbol AND ns.tlid IS NOT NULL)
-        GROUP BY tss.symbol
+    unsynced_clause = (
+        "AND NOT EXISTS (SELECT 1 FROM trendlyne_stock_profile tsp WHERE tsp.symbol = symbol)"
+        if only_unsynced else ""
+    )
+    cur.execute(f"""
+        SELECT symbol, tlid FROM (
+            SELECT symbol, tlid::TEXT AS tlid FROM nse_stocks
+            WHERE symbol IS NOT NULL AND tlid IS NOT NULL AND tlid::TEXT != ''
+            UNION
+            SELECT tss.symbol, MAX(tss.stock_id)::TEXT AS tlid
+            FROM trendlyne_screener_stocks tss
+            WHERE tss.stock_id IS NOT NULL AND tss.stock_id::TEXT != ''
+              AND NOT EXISTS (SELECT 1 FROM nse_stocks ns WHERE ns.symbol = tss.symbol AND ns.tlid IS NOT NULL)
+            GROUP BY tss.symbol
+        ) universe(symbol, tlid)
+        WHERE 1=1 {unsynced_clause}
         ORDER BY symbol
     """)
     rows = [(r[0], str(r[1])) for r in cur.fetchall() if r[0]]
@@ -570,18 +585,44 @@ def _load_stocks(symbol_filter: str | None, con) -> list[tuple[str, str]]:
 
 # â”€â”€ Main â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
+def _shard(stocks: list[tuple[str, str]], index: int, count: int) -> list[tuple[str, str]]:
+    """Deterministic ~1/count slice of the universe, stable across runs (independent of DB
+    row order so the same symbol always lands in the same shard). Used to spread the full
+    scrape (~3.6h) across several days instead of one run that blows a 70-min budget."""
+    if count <= 1:
+        return stocks
+    return [
+        (s, t) for s, t in stocks
+        if int(hashlib.md5(s.encode()).hexdigest(), 16) % count == index
+    ]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--symbol", default=None)
+    parser.add_argument("--shard-index", type=int, default=None,
+                         help="0-based shard to process this run (with --shard-count)")
+    parser.add_argument("--shard-count", type=int, default=None,
+                         help="Total number of shards the universe is split across")
+    parser.add_argument("--resync-all", action="store_true",
+                         help="Re-scrape the whole universe, including symbols already synced "
+                              "at least once (default only fetches never-synced symbols)")
     args = parser.parse_args()
 
     con = connect()
     ensure_schema(con)
 
-    stocks = _load_stocks(args.symbol, con)
+    stocks = _load_stocks(args.symbol, con, only_unsynced=not args.resync_all)
     if not stocks:
-        print("[TLOverview] No stocks with tlid found.")
+        print("[TLOverview] No stocks with tlid found (or the whole universe is already synced — "
+              "pass --resync-all to force a full refresh).")
         return
+
+    if args.shard_count and args.shard_index is not None:
+        full_count = len(stocks)
+        stocks = _shard(stocks, args.shard_index, args.shard_count)
+        print(f"[TLOverview] Shard {args.shard_index}/{args.shard_count}: "
+              f"{len(stocks)}/{full_count} stocks this run.")
 
     print(f"[TLOverview] Processing {len(stocks)} stocks in batches of {BATCH_SIZE} ({BATCH_GAP_SEC}s gap) - analyst + fundamentals...")
     session = requests.Session()

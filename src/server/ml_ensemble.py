@@ -2158,6 +2158,23 @@ def train_ensemble(X: pd.DataFrame, y: pd.Series, dates: pd.Series | None = None
         horizons = pd.to_numeric(X['horizon_days'], errors='coerce').fillna(horizon_days).astype(int).to_numpy()
         weights = np.asarray(average_uniqueness(starts, horizons), dtype=float)
 
+    # Regime-balance: the training window can be heavily skewed toward one regime (2026-07
+    # data was ~94% SIDEWAYS/HIGH_VOL vs 0% BULL, 2% BEAR — see model_registry notes around
+    # id=83). Left alone, BULL/BEAR examples get drowned out and the model overfits to
+    # whichever regime dominates the window, which is what widened the cv/test AUC gap
+    # starting 2026-07-14. Inverse-frequency weight per encoded regime bucket (BULL=1,
+    # SIDEWAYS/HIGH_VOL/UNKNOWN=0, BEAR=-1), applied multiplicatively with the average-
+    # uniqueness weight above — these correct different biases (overlapping labels vs
+    # regime imbalance), not the same one.
+    if 'regime' in X.columns:
+        regime_counts = X['regime'].value_counts()
+        if len(regime_counts) > 1:
+            regime_weight_map = (len(X) / (len(regime_counts) * regime_counts)).to_dict()
+            regime_weights = X['regime'].map(regime_weight_map).fillna(1.0).to_numpy()
+            # Clip so a near-empty regime bucket doesn't get an extreme, unstable weight.
+            regime_weights = np.clip(regime_weights, 0.2, 5.0)
+            weights = (weights if weights is not None else np.ones(len(X))) * regime_weights
+
     # ── Honest held-out test: last 10% for reporting, prior 10% for threshold selection ──
     # Threshold is found on a dedicated val split (rows [tr_end : tr_end+n_val]), NOT the
     # test set. This keeps F1/Recall metrics unbiased on the held-out test window.
@@ -2328,41 +2345,117 @@ def save_ensemble(ensemble: dict):
     print(f"[Ensemble] Saved to {ENSEMBLE_PATH}")
 
 
-def _active_baseline_auc(conn: ConnWrapper) -> float | None:
-    """Purged-OOF CV AUC of the currently active ensemble, or None if there is no active model."""
+# A candidate stuck behind a stale baseline forever (e.g. the baseline's CV AUC was inflated by
+# a leak that's since been fixed, so nothing can ever clear PROMOTION_MARGIN over it again) gets
+# auto-adopted once the baseline has gone unbeaten this long. This is a safety valve, not a
+# relaxation of the bar itself — it only fires after sustained, repeated rejection.
+STALENESS_MAX_DAYS = 7
+STALENESS_MAX_REJECTIONS = 10
+# A candidate's true held-out AUC is allowed to sit below baseline's by at most this much even
+# if its CV AUC clears the promotion bar — protects against promoting a model whose CV score
+# looks fine but that doesn't actually generalize (the cv/test gap seen 2026-07-14 onward).
+TEST_AUC_TOLERANCE = 0.03
+
+
+def _active_baseline(conn: ConnWrapper) -> dict | None:
+    """id/cv_roc_auc/test_roc_auc/trained_at of the currently active ensemble, or None."""
     try:
         row = conn.execute(
-            "SELECT cv_roc_auc FROM model_registry "
+            "SELECT id, cv_roc_auc, test_roc_auc, trained_at FROM model_registry "
             "WHERE model_name = 'ensemble' AND is_active = 1 ORDER BY id DESC LIMIT 1"
         ).fetchone()
-        return float(row[0]) if row and row[0] is not None else None
+        if not row:
+            return None
+        return {
+            'id': row[0],
+            'cv_auc': float(row[1]) if row[1] is not None else None,
+            'test_auc': float(row[2]) if row[2] is not None else None,
+            'trained_at': row[3],
+        }
     except Exception:
         conn.rollback()
         return None
 
 
+def _rejections_since(conn: ConnWrapper, baseline_id: int) -> int:
+    """How many candidates have been registered (and rejected) against the current baseline."""
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM model_registry WHERE model_name = 'ensemble' "
+            "AND is_active = 0 AND id > ?", (baseline_id,)
+        ).fetchone()
+        return int(row[0]) if row and row[0] is not None else 0
+    except Exception:
+        conn.rollback()
+        return 0
+
+
+def _days_since(trained_at) -> float:
+    try:
+        if isinstance(trained_at, str):
+            trained_at = datetime.datetime.fromisoformat(trained_at)
+        # Postgres returns tz-aware datetimes (UTC); datetime.now() is naive. Match awareness
+        # on both sides so the subtraction doesn't raise (which silently produced 0.0 here).
+        now = datetime.datetime.now(trained_at.tzinfo) if trained_at.tzinfo else datetime.datetime.now()
+        return (now - trained_at).total_seconds() / 86400.0
+    except Exception as e:
+        print(f"[Ensemble] _days_since failed for trained_at={trained_at!r}: {e}")
+        return 0.0
+
+
 def promote_or_register(conn: ConnWrapper, ensemble: dict) -> int:
     """Gate activation behind a promotion bar so a retrain can't silently replace a good live
     model with a worse one (the ensemble.pkl auto-activate incident). The new model must beat the
-    active model's purged-OOF CV AUC by >= PROMOTION_MARGIN. On promotion the current live pkl is
-    backed up (timestamped) before being overwritten; a rejected model is written to CANDIDATE_PATH
-    and registered inactive so the run stays auditable and the candidate is inspectable. With no
-    active baseline (first train) the model is promoted to bootstrap scoring."""
-    new_auc = float(ensemble.get('cv_auc') or 0.0)
-    baseline = _active_baseline_auc(conn)
+    active model's purged-OOF CV AUC by >= PROMOTION_MARGIN AND not regress true held-out
+    (test_roc_auc) by more than TEST_AUC_TOLERANCE. On promotion the current live pkl is backed up
+    (timestamped) before being overwritten; a rejected model is written to CANDIDATE_PATH and
+    registered inactive so the run stays auditable and the candidate is inspectable. With no active
+    baseline (first train) the model is promoted to bootstrap scoring.
 
-    if baseline is not None and new_auc < baseline + PROMOTION_MARGIN:
+    STALENESS OVERRIDE: if the active baseline has gone unbeaten for >= STALENESS_MAX_DAYS across
+    >= STALENESS_MAX_REJECTIONS rejected candidates, the current candidate is promoted anyway even
+    though it didn't clear the bar. This exists because a baseline's CV AUC can become permanently
+    unreproducible (e.g. it was trained before a data leak was fixed) — without this, every future
+    retrain rejects forever and the registry looks like accuracy is "stuck", when actually nothing
+    can ever beat a number that was never real. See model_registry id=26 (cv_auc=0.7570, promoted
+    2026-07-03, 19+ consecutive rejections through 2026-07-16 after the shareholding/fundamentals
+    leak fix dropped the honest ceiling to ~0.70-0.73)."""
+    new_cv_auc = float(ensemble.get('cv_auc') or 0.0)
+    new_test_auc = ensemble.get('test_auc')
+    baseline = _active_baseline(conn)
+
+    clears_cv_bar = baseline is None or new_cv_auc >= baseline['cv_auc'] + PROMOTION_MARGIN
+    # Only enforce the test-AUC gate when both sides have a real reading to compare.
+    clears_test_gate = (
+        baseline is None or baseline['test_auc'] is None or new_test_auc is None
+        or float(new_test_auc) >= baseline['test_auc'] - TEST_AUC_TOLERANCE
+    )
+    clears_bar = clears_cv_bar and clears_test_gate
+
+    staleness_override = False
+    age_days = 0.0
+    rejections = 0
+    if baseline is not None and not clears_bar:
+        age_days = _days_since(baseline['trained_at'])
+        rejections = _rejections_since(conn, baseline['id'])
+        staleness_override = age_days >= STALENESS_MAX_DAYS and rejections >= STALENESS_MAX_REJECTIONS
+
+    if baseline is not None and not clears_bar and not staleness_override:
         try:
             with open(CANDIDATE_PATH, 'wb') as f:
                 pickle.dump(ensemble, f, protocol=pickle.HIGHEST_PROTOCOL)
         except Exception as e:
             print(f"[Ensemble] Could not save candidate: {e}")
-        note = (f"label={ensemble.get('label', 'horizon')}; REJECTED "
-                f"cv_auc={new_auc:.4f} < active {baseline:.4f}+{PROMOTION_MARGIN}")
+        reasons = []
+        if not clears_cv_bar:
+            reasons.append(f"cv_auc={new_cv_auc:.4f} < active {baseline['cv_auc']:.4f}+{PROMOTION_MARGIN}")
+        if not clears_test_gate:
+            reasons.append(f"test_auc={new_test_auc} < active {baseline['test_auc']:.4f}-{TEST_AUC_TOLERANCE}")
+        note = (f"label={ensemble.get('label', 'horizon')}; REJECTED " + "; ".join(reasons) +
+                f" (baseline stale {age_days:.1f}d, {rejections} rejections so far)")
         mid = register_model(conn, ensemble, activate=False, model_path=CANDIDATE_PATH, notes=note)
-        print(f"[Ensemble] NOT promoted: cv_auc={new_auc:.4f} vs active {baseline:.4f} "
-              f"(bar +{PROMOTION_MARGIN}). Live model kept; candidate at {CANDIDATE_PATH}, "
-              f"registered inactive id={mid}.")
+        print(f"[Ensemble] NOT promoted: {'; '.join(reasons)}. Live model kept; candidate at "
+              f"{CANDIDATE_PATH}, registered inactive id={mid}.")
         return mid
 
     if os.path.exists(ENSEMBLE_PATH):
@@ -2373,8 +2466,14 @@ def promote_or_register(conn: ConnWrapper, ensemble: dict) -> int:
         except Exception as e:
             print(f"[Ensemble] Backup failed (continuing): {e}")
     save_ensemble(ensemble)
-    reason = ("bootstrap (no active baseline)" if baseline is None
-              else f"cv_auc {new_auc:.4f} >= active {baseline:.4f}+{PROMOTION_MARGIN}")
+    if baseline is None:
+        reason = "bootstrap (no active baseline)"
+    elif staleness_override:
+        reason = (f"STALENESS OVERRIDE — baseline id={baseline['id']} unbeaten {age_days:.1f}d "
+                   f"across {rejections} rejections; adopting best-available candidate "
+                   f"cv_auc={new_cv_auc:.4f} (baseline {baseline['cv_auc']:.4f})")
+    else:
+        reason = f"cv_auc {new_cv_auc:.4f} >= active {baseline['cv_auc']:.4f}+{PROMOTION_MARGIN}"
     print(f"[Ensemble] Promoted: {reason}")
     return register_model(conn, ensemble, activate=True)
 

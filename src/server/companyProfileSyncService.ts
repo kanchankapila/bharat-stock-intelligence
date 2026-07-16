@@ -2,24 +2,54 @@ import { dbAll, dbRun } from './dbAsync';
 import { runPython } from './pythonRunner';
 import { analyzeCompanyProfile, releaseOllamaModel } from '../services/aiService';
 
+// Company profile/fundamentals data is near-static, so trendlyne_overview_fetcher.py now
+// scrapes each NSE stock ONCE, ever (skips any symbol that already has a trendlyne_stock_profile
+// row) — this is not a periodic refresh. The only reason SHARD_COUNT still exists: the *initial*
+// backfill covers the full ~7,283-stock universe, which takes ~3.6h sequentially while runPython
+// below is capped at 70 min (a single-shot run could never finish it — job_heartbeat showed 7/7
+// failures, last_success always null). Splitting that one-time backfill across SHARD_COUNT daily
+// runs (~1/SHARD_COUNT of the still-unsynced stocks per day) lets each run fit its budget; once
+// the backlog clears, daily runs only pick up new listings (a handful), so sharding becomes a
+// no-op in steady state. Pass --resync-all to trendlyne_overview_fetcher.py directly if a genuine
+// full refresh is ever needed.
+const SHARD_COUNT = 7;
+
 export async function syncAndAnalyzeCompanyProfiles() {
   console.log('[PROFILE SYNC] Fetching Trendlyne overview + company descriptions (also feeds the ML overview features)...');
+
+  // Stable per-day shard so the same day-of-year always covers the same slice — no state to
+  // track between runs, and restarts/catch-up re-running the same day just re-covers that shard.
+  const dayOfYear = Math.floor(
+    (Date.now() - new Date(new Date().getFullYear(), 0, 0).getTime()) / 86_400_000,
+  );
+  const shardIndex = dayOfYear % SHARD_COUNT;
 
   // trendlyne_overview_fetcher.py fetches overview-second-part once per stock and writes
   // both the ML-facing financial/shareholding/analyst fields AND the company description
   // into trendlyne_stock_profile — this used to be duplicated by a second, independent
   // Trendlyne call from this file (fetchCompanyOverview), 8.5 hours apart, same endpoint,
   // same ~3,022-stock universe. Reading from the DB instead removes that duplicate call.
-  await runPython('trendlyne_overview_fetcher.py', [], 70 * 60_000);
+  await runPython(
+    'trendlyne_overview_fetcher.py',
+    ['--shard-index', String(shardIndex), '--shard-count', String(SHARD_COUNT)],
+    70 * 60_000,
+  );
 
+  // Only (re-)analyze profiles that are missing entirely or haven't been AI-analyzed in the
+  // last SHARD_COUNT days — otherwise daily runs would re-run Ollama analysis over the whole
+  // universe every day instead of just the stocks the scrape actually refreshed. Cutoff is
+  // computed in JS (not SQL INTERVAL) to stay portable across the Postgres/SQLite backends.
+  const reanalysisCutoff = new Date(Date.now() - SHARD_COUNT * 24 * 60 * 60 * 1000).toISOString();
   const stocks = await dbAll<{ symbol: string; name: string; company_description: string | null }>(`
     SELECT tsp.symbol, ns.name, tsp.company_description
     FROM trendlyne_stock_profile tsp
     JOIN nse_stocks ns ON ns.symbol = tsp.symbol
+    LEFT JOIN company_profiles cp ON cp.symbol = tsp.symbol
     WHERE tsp.date = (SELECT MAX(date) FROM trendlyne_stock_profile tsp2 WHERE tsp2.symbol = tsp.symbol)
-  `);
+      AND (cp.last_updated IS NULL OR cp.last_updated < ?)
+  `, [reanalysisCutoff]);
 
-  console.log(`[PROFILE SYNC] Found ${stocks.length} stocks with an overview snapshot.`);
+  console.log(`[PROFILE SYNC] Shard ${shardIndex}/${SHARD_COUNT}. Found ${stocks.length} stocks due for (re-)analysis.`);
 
   let successCount = 0;
   let failCount = 0;

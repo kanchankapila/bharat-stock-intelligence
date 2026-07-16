@@ -1980,14 +1980,6 @@ export async function initQueues(): Promise<boolean> {
       // Per-step + overall monitor states are written by StepTracker.finish() inside the
       // processor (reflecting real outcomes), so this handler no longer blanket-marks success.
       console.log('[QUEUE] ml-daily-ops completed');
-      if (_job.name.includes('test')) {
-        console.log('[QUEUE][TEST] ml-daily-ops-test completed. Enqueuing ml-weekly-retrain-test next...');
-        mlWeeklyRetrainQueue?.add('ml-weekly-retrain-test', {}, {
-          jobId: `ml-weekly-retrain-test-${Date.now()}`,
-          removeOnComplete: 1,
-          removeOnFail: 1,
-        }).catch(err => console.warn('[QUEUE][TEST] Failed to enqueue ml-weekly-retrain-test:', err.message));
-      }
     });
     mlDailyOpsWorker.on('failed', (_job, err) => {
       // Processor threw before finish() ran (steps are best-effort, so this is a harness/uncaught
@@ -2671,12 +2663,18 @@ export async function initQueues(): Promise<boolean> {
     for (const r of cpRepeatables) {
       await companyProfilesSyncQueue.removeRepeatableByKey(r.key);
     }
-    await addJobWithCatchup(companyProfilesSyncQueue, 
+    // Was weekly (single run covering the full ~7,283-stock universe) — but the underlying
+    // scrape takes ~3.6h while runPython caps it at 70 min, so the weekly run NEVER completed
+    // (7/7 failures, last_success_at always null). syncAndAnalyzeCompanyProfiles() now shards
+    // the universe into 1/7ths internally and picks a shard by day-of-year, so daily runs each
+    // cover a fast (~30 min) slice and full coverage completes every 7 days — same cadence as
+    // before, but each individual run actually fits its budget and can succeed.
+    await addJobWithCatchup(companyProfilesSyncQueue,
       'sync-company-profiles',
       {},
       {
-        repeat: { pattern: '0 4 * * 0' }, // Sunday 4:00 AM UTC
-        jobId: 'company-profiles-sync-weekly',
+        repeat: { pattern: '0 4 * * *' }, // Daily, 4:00 AM UTC
+        jobId: 'company-profiles-sync-daily',
         removeOnComplete: 3,
         removeOnFail: 3,
       },
@@ -2685,24 +2683,11 @@ export async function initQueues(): Promise<boolean> {
     companyProfilesSyncWorker = new Worker(
       QUEUE_COMPANY_PROFILES_SYNC,
       async (_job: Job) => {
-        // Bi-weekly: check job_heartbeat for the last successful run and skip if it was
-        // less than 12 days ago (company descriptions/financials barely change week to
-        // week — this used to run weekly for no benefit).
-        const last = await dbGet(
-          `SELECT last_success_at FROM job_heartbeat WHERE job_name = 'company-profiles-sync'`,
-        ) as { last_success_at: number | null } | undefined;
-        const twelveDaysMs = 12 * 24 * 60 * 60 * 1000;
-        if (last?.last_success_at && Date.now() - Number(last.last_success_at) < twelveDaysMs) {
-          console.log('[QUEUE] company-profiles-sync: ran within the last 12 days, skipping');
-          return;
-        }
         const { syncAndAnalyzeCompanyProfiles } = await import('./companyProfileSyncService');
         await syncAndAnalyzeCompanyProfiles();
       },
-      // syncAndAnalyzeCompanyProfiles() awaits trendlyne_overview_fetcher.py with a 70-min
-      // runPython timeout -- the previous 60-min lockDuration was shorter than that single
-      // call's own allowance, so every real (non-skipped) run stalled before finishing.
-      // This job has never recorded a success (last_success_at is NULL in job_heartbeat).
+      // Each shard's runPython call is bounded at 70 min (comfortably covers a ~30-min
+      // 1/7-universe slice); lockDuration keeps headroom above that single call.
       {
         connection,
         concurrency: 1,
@@ -3002,25 +2987,6 @@ export async function initQueues(): Promise<boolean> {
     startHeartbeatMonitor();
     startJobWatchdog();
     console.log('[QUEUE] BullMQ initialised (stock-refresh + ai-signals)');
-
-    // ── TEMPORARY TEST SCHEDULE ─────────────────────────────────────────────
-    // Fires ml-daily-ops 10 s after startup to verify today's fixes.
-    // ml-weekly-retrain-test will be enqueued in sequence upon completion of ml-daily-ops-test.
-    // REMOVE AFTER VERIFICATION.
-    setTimeout(async () => {
-      try {
-        console.log('[QUEUE][TEST] Enqueuing one-shot test: ml-daily-ops-test');
-        await mlDailyOpsQueue?.add('ml-daily-ops-test', {}, {
-          jobId: `ml-daily-ops-test-${Date.now()}`,
-          removeOnComplete: 1,
-          removeOnFail: 1,
-        });
-        console.log('[QUEUE][TEST] Test job enqueued — watch logs for sequential run (daily-ops -> weekly-retrain)');
-      } catch (e: any) {
-        console.warn('[QUEUE][TEST] Failed to enqueue test jobs:', e.message);
-      }
-    }, 10_000);
-    // ── END TEMPORARY TEST SCHEDULE ─────────────────────────────────────────
 
     return true;
   } catch (err: any) {
