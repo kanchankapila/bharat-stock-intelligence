@@ -5,13 +5,15 @@ import { analyzeCompanyProfile, releaseOllamaModel } from '../services/aiService
 // Company profile/fundamentals data is near-static, so trendlyne_overview_fetcher.py now
 // scrapes each NSE stock ONCE, ever (skips any symbol that already has a trendlyne_stock_profile
 // row) — this is not a periodic refresh. The only reason SHARD_COUNT still exists: the *initial*
-// backfill covers the full ~7,283-stock universe, which takes ~3.6h sequentially while runPython
-// below is capped at 70 min (a single-shot run could never finish it — job_heartbeat showed 7/7
-// failures, last_success always null). Splitting that one-time backfill across SHARD_COUNT daily
-// runs (~1/SHARD_COUNT of the still-unsynced stocks per day) lets each run fit its budget; once
-// the backlog clears, daily runs only pick up new listings (a handful), so sharding becomes a
-// no-op in steady state. Pass --resync-all to trendlyne_overview_fetcher.py directly if a genuine
-// full refresh is ever needed.
+// backfill covers the full nse_stocks.tlid universe (NSE master list only — no more
+// trendlyne_screener_stocks fallback, which used to pull in ~7,000+ non-NSE-master junk
+// symbols), which used to take ~3.6h sequentially while runPython below is capped at 70 min
+// (a single-shot run could never finish it — job_heartbeat showed 7/7 failures, last_success
+// always null). Splitting that one-time backfill across SHARD_COUNT daily runs (~1/SHARD_COUNT
+// of the still-unsynced stocks per day) lets each run fit its budget; once the backlog clears,
+// daily runs only pick up new listings (a handful), so sharding becomes a no-op in steady state.
+// Pass --resync-all to trendlyne_overview_fetcher.py directly if a genuine full refresh is ever
+// needed.
 const SHARD_COUNT = 7;
 
 export async function syncAndAnalyzeCompanyProfiles() {

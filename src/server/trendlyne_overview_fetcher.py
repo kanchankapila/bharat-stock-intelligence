@@ -548,15 +548,16 @@ def backfill_technical_signals(symbol: str, profile: dict, con) -> None:
 # â”€â”€ Stock list â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _load_stocks(symbol_filter: str | None, con, only_unsynced: bool = True) -> list[tuple[str, str]]:
-    """Return [(symbol, tlid), ...].
-    Primary: nse_stocks.tlid (canonical). Fallback: trendlyne_screener_stocks.stock_id.
+    """Return [(symbol, tlid), ...] scoped to the NSE master list only (nse_stocks.tlid).
+    No trendlyne_screener_stocks fallback — that table carries non-NSE-master symbols
+    (junk/delisted/BSE-only tickers) which pulled the universe well past NSE coverage.
 
     Company profile/description/fundamentals data is near-static — there's no reason to
     re-scrape the same NSE stock over and over. With only_unsynced=True (the default), a
     symbol that already has ANY row in trendlyne_stock_profile (any date) is excluded, so
-    each of the ~7,283 NSE stocks gets scraped once, ever; subsequent runs only pick up
-    stocks that have never been synced (new listings). --resync-all bypasses this to force
-    a full refresh of the whole universe when one is genuinely needed.
+    each NSE stock gets scraped once, ever; subsequent runs only pick up stocks that have
+    never been synced (new listings). --resync-all bypasses this to force a full refresh
+    of the whole universe when one is genuinely needed.
     """
     cur = con.cursor()
     unsynced_clause = (
@@ -567,12 +568,6 @@ def _load_stocks(symbol_filter: str | None, con, only_unsynced: bool = True) -> 
         SELECT symbol, tlid FROM (
             SELECT symbol, tlid::TEXT AS tlid FROM nse_stocks
             WHERE symbol IS NOT NULL AND tlid IS NOT NULL AND tlid::TEXT != ''
-            UNION
-            SELECT tss.symbol, MAX(tss.stock_id)::TEXT AS tlid
-            FROM trendlyne_screener_stocks tss
-            WHERE tss.stock_id IS NOT NULL AND tss.stock_id::TEXT != ''
-              AND NOT EXISTS (SELECT 1 FROM nse_stocks ns WHERE ns.symbol = tss.symbol AND ns.tlid IS NOT NULL)
-            GROUP BY tss.symbol
         ) universe(symbol, tlid)
         WHERE 1=1 {unsynced_clause}
         ORDER BY symbol

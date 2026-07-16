@@ -280,19 +280,14 @@ def backfill_technical_signals(symbol: str, f: dict, con) -> None:
 
 
 def _load_stocks(symbol_filter: str | None, con) -> list[tuple[str, str]]:
-    """Return [(symbol, tlid), ...].
-    Primary: nse_stocks.tlid (canonical). Fallback: trendlyne_screener_stocks.stock_id.
+    """Return [(symbol, tlid), ...] scoped to the NSE master list only (nse_stocks.tlid).
+    No trendlyne_screener_stocks fallback — that table carries non-NSE-master symbols
+    (junk/delisted/BSE-only tickers) which pulled the universe well past NSE coverage.
     """
     cur = con.cursor()
     cur.execute("""
         SELECT symbol, tlid::TEXT AS tlid FROM nse_stocks
         WHERE symbol IS NOT NULL AND tlid IS NOT NULL AND tlid::TEXT != ''
-        UNION
-        SELECT tss.symbol, MAX(tss.stock_id)::TEXT AS tlid
-        FROM trendlyne_screener_stocks tss
-        WHERE tss.stock_id IS NOT NULL AND tss.stock_id::TEXT != ''
-          AND NOT EXISTS (SELECT 1 FROM nse_stocks ns WHERE ns.symbol = tss.symbol AND ns.tlid IS NOT NULL)
-        GROUP BY tss.symbol
         ORDER BY symbol
     """)
     rows = [(r[0], str(r[1])) for r in cur.fetchall() if r[0] is not None]

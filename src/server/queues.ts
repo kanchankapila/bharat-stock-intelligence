@@ -954,7 +954,8 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean }> 
     .catch(e => console.warn('[QUEUE] mf_holdings_fetcher failed:', (e as Error).message));
   // Trendlyne EPS/DivYield series + DVM scores — 2 calls/stock (PE/PB dropped: MC's daily
   // fetch already covers them, fed into the same history tables — see mc_pricefeed_fetcher.py).
-  // 7240 stocks × 2 API calls × 0.5s = ~121 min; 150 min timeout for headroom
+  // Scoped to scripts/stocklist.json (~2005 stocks), not the full tlid universe: 2005 stocks
+  // × 2 API calls × 0.5s = ~34 min; 150 min timeout is generous headroom
   await runPython('trendlyne_fundamentals_fetcher.py', [], 150 * 60_000)
     .catch(e => console.warn('[QUEUE] trendlyne_fundamentals_fetcher failed:', (e as Error).message));
   // Analyst consensus + price targets — 2328 stocks × 3 calls × 0.4s = ~47 min (quarterly data)
@@ -2663,7 +2664,7 @@ export async function initQueues(): Promise<boolean> {
     for (const r of cpRepeatables) {
       await companyProfilesSyncQueue.removeRepeatableByKey(r.key);
     }
-    // Was weekly (single run covering the full ~7,283-stock universe) — but the underlying
+    // Was weekly (single run covering the full NSE-master-list universe) — but the underlying
     // scrape takes ~3.6h while runPython caps it at 70 min, so the weekly run NEVER completed
     // (7/7 failures, last_success_at always null). syncAndAnalyzeCompanyProfiles() now shards
     // the universe into 1/7ths internally and picks a shard by day-of-year, so daily runs each
