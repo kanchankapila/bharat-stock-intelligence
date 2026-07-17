@@ -1059,16 +1059,9 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                    macro_snap.nikkei_ret_1d, macro_snap.hangseng_ret_1d,
                    mse.np_growth_yoy AS sector_np_growth_yoy, mse.np_growth_qoq AS sector_np_growth_qoq,
                    mse.rev_growth_yoy AS sector_rev_growth_yoy,
-                   COALESCE(fh.fifty_two_week_high, sf.fifty_two_week_high) AS fifty_two_week_high,
-                   COALESCE(fh.piotroski_f_score, sf.piotroski_f_score)     AS piotroski_f_score,
-                   COALESCE(fh.debt_to_equity, sf.debt_to_equity)           AS debt_to_equity,
-                   COALESCE(fh.operating_margins, sf.operating_margins)     AS operating_margins,
-                   COALESCE(fh.return_on_equity, sf.return_on_equity)       AS return_on_equity,
-                   COALESCE(fh.revenue_growth, sf.revenue_growth)           AS revenue_growth,
-                   COALESCE(fh.earnings_growth, sf.earnings_growth)         AS earnings_growth,
-                   COALESCE(fh.earnings_yield, sf.earnings_yield)           AS earnings_yield,
-                   COALESCE(fh.price_to_book, sf.price_to_book)             AS price_to_book,
-                   COALESCE(fh.market_cap, sf.market_cap)                   AS market_cap,
+                   fh.fifty_two_week_high, fh.piotroski_f_score, fh.debt_to_equity,
+                   fh.operating_margins, fh.return_on_equity, fh.revenue_growth,
+                   fh.earnings_growth, fh.earnings_yield, fh.price_to_book, fh.market_cap,
                    aeh.n_analysts, aeh.buy_count, aeh.target_mean,
                    psh_az.score_value AS altman_z,
                    psh_oo.score_value AS ohlson_o,
@@ -1098,8 +1091,6 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                       SELECT MAX(fh2.as_of_date) FROM fundamentals_history fh2
                       WHERE fh2.symbol = so.symbol AND fh2.as_of_date <= so.signal_date
                   )
-            LEFT JOIN stock_fundamentals sf
-                   ON sf.symbol = so.symbol
             LEFT JOIN analyst_estimates_history aeh
                    ON aeh.symbol = so.symbol
                   AND aeh.as_of_date = (
@@ -1304,16 +1295,9 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                    macro_snap.nikkei_ret_1d, macro_snap.hangseng_ret_1d,
                    mse.np_growth_yoy AS sector_np_growth_yoy, mse.np_growth_qoq AS sector_np_growth_qoq,
                    mse.rev_growth_yoy AS sector_rev_growth_yoy,
-                   COALESCE(fh.fifty_two_week_high, sf.fifty_two_week_high) AS fifty_two_week_high,
-                   COALESCE(fh.piotroski_f_score, sf.piotroski_f_score)     AS piotroski_f_score,
-                   COALESCE(fh.debt_to_equity, sf.debt_to_equity)           AS debt_to_equity,
-                   COALESCE(fh.operating_margins, sf.operating_margins)     AS operating_margins,
-                   COALESCE(fh.return_on_equity, sf.return_on_equity)       AS return_on_equity,
-                   COALESCE(fh.revenue_growth, sf.revenue_growth)           AS revenue_growth,
-                   COALESCE(fh.earnings_growth, sf.earnings_growth)         AS earnings_growth,
-                   COALESCE(fh.earnings_yield, sf.earnings_yield)           AS earnings_yield,
-                   COALESCE(fh.price_to_book, sf.price_to_book)             AS price_to_book,
-                   COALESCE(fh.market_cap, sf.market_cap)                   AS market_cap,
+                   fh.fifty_two_week_high, fh.piotroski_f_score, fh.debt_to_equity,
+                   fh.operating_margins, fh.return_on_equity, fh.revenue_growth,
+                   fh.earnings_growth, fh.earnings_yield, fh.price_to_book, fh.market_cap,
                    aeh.n_analysts, aeh.buy_count, aeh.target_mean,
                    psh_az.score_value AS altman_z,
                    psh_oo.score_value AS ohlson_o,
@@ -1343,8 +1327,6 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                       SELECT MAX(fh2.as_of_date) FROM fundamentals_history fh2
                       WHERE fh2.symbol = so.symbol AND fh2.as_of_date <= so.signal_date
                   )
-            LEFT JOIN stock_fundamentals sf
-                   ON sf.symbol = so.symbol
             LEFT JOIN analyst_estimates_history aeh
                    ON aeh.symbol = so.symbol
                   AND aeh.as_of_date = (

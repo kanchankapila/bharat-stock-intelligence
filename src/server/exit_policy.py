@@ -61,16 +61,9 @@ def load_exit_training_data() -> pd.DataFrame:
                ts.fii_10d_net, ts.dii_3d_net, ts.delivery_pct,
                ts.sector_ret_5d, ts.sector_ret_21d,
                ts.iv_rank, ts.iv_skew, ts.rs_rank_21d, ts.rs_rank_63d,
-               COALESCE(fh.fifty_two_week_high, sf.fifty_two_week_high) AS fifty_two_week_high,
-               COALESCE(fh.piotroski_f_score, sf.piotroski_f_score)     AS piotroski_f_score,
-               COALESCE(fh.debt_to_equity, sf.debt_to_equity)           AS debt_to_equity,
-               COALESCE(fh.operating_margins, sf.operating_margins)     AS operating_margins,
-               COALESCE(fh.return_on_equity, sf.return_on_equity)       AS return_on_equity,
-               COALESCE(fh.revenue_growth, sf.revenue_growth)           AS revenue_growth,
-               COALESCE(fh.earnings_growth, sf.earnings_growth)         AS earnings_growth,
-               COALESCE(fh.earnings_yield, sf.earnings_yield)           AS earnings_yield,
-               COALESCE(fh.price_to_book, sf.price_to_book)             AS price_to_book,
-               COALESCE(fh.market_cap, sf.market_cap)                   AS market_cap
+               fh.fifty_two_week_high, fh.piotroski_f_score, fh.debt_to_equity,
+               fh.operating_margins, fh.return_on_equity, fh.revenue_growth,
+               fh.earnings_growth, fh.earnings_yield, fh.price_to_book, fh.market_cap
         FROM signal_excursions se
         JOIN technical_signals ts ON ts.symbol = se.symbol AND ts.date = se.signal_date
         LEFT JOIN fundamentals_history fh
@@ -79,7 +72,6 @@ def load_exit_training_data() -> pd.DataFrame:
                   SELECT MAX(fh2.as_of_date) FROM fundamentals_history fh2
                   WHERE fh2.symbol = se.symbol AND fh2.as_of_date <= se.signal_date
               )
-        LEFT JOIN stock_fundamentals sf ON sf.symbol = se.symbol
         WHERE se.mfe_pct IS NOT NULL AND se.mae_pct IS NOT NULL
         ORDER BY se.signal_date
     """
@@ -103,16 +95,26 @@ def train_from_df(df: pd.DataFrame, min_samples: int = 100) -> dict | None:
     y_mfe = pd.to_numeric(df['mfe_pct'], errors='coerce').fillna(0.0).values
     y_mae = pd.to_numeric(df['mae_pct'], errors='coerce').fillna(0.0).values
 
+    # Date-based split with an embargo equal to the excursion horizon. A plain row-index
+    # 80/20 cut left the forward MFE/MAE windows of rows just before the cut overlapping
+    # the holdout rows just after it -- the holdout wasn't genuinely out-of-sample.
+    dates = pd.to_datetime(df['signal_date'])
+    horizon_days = int(pd.to_numeric(df['horizon_days'], errors='coerce').fillna(0).max()) or 1
     cut = max(min_samples // 2, int(len(df) * 0.8))
+    train_end_date = dates.iloc[min(cut, len(df) - 1)]
+    embargo_end_date = train_end_date + pd.Timedelta(days=horizon_days)
+    train_mask = (dates <= train_end_date).values
+    test_mask  = (dates > embargo_end_date).values
+
     models, metrics = {}, {}
     for name, y in (('mfe', y_mfe), ('mae', y_mae)):
         model = GradientBoostingRegressor(
             n_estimators=300, max_depth=3, learning_rate=0.03,
             subsample=0.8, random_state=42,
         )
-        model.fit(Xv[:cut], y[:cut])
-        if cut < len(df):
-            mae = float(mean_absolute_error(y[cut:], model.predict(Xv[cut:])))
+        model.fit(Xv[train_mask], y[train_mask])
+        if test_mask.any():
+            mae = float(mean_absolute_error(y[test_mask], model.predict(Xv[test_mask])))
         else:
             mae = float('nan')
         model.fit(Xv, y)          # refit on all data for production use

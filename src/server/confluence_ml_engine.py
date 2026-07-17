@@ -41,7 +41,6 @@ from sklearn.calibration import CalibratedClassifierCV
 
 MODEL_DIR = os.path.join(os.path.dirname(__file__), 'ml_models')
 MODEL_PATH = os.path.join(MODEL_DIR, 'confluence_ml.pkl')
-SCALER_PATH = os.path.join(MODEL_DIR, 'confluence_scaler.pkl')
 
 FEATURE_COLS = [
     'bullish_screener_count',
@@ -92,9 +91,21 @@ def build_training_data(conn):
             COALESCE(ts.signal_score, 0)         AS signal_score,
             COALESCE(qs.momentum_score, 50)      AS momentum_score,
             COALESCE(qs.rank_composite, 50)      AS rank_composite,
-            COALESCE(sf.return_on_equity, 0)     AS return_on_equity,
-            COALESCE(sf.piotroski_f_score, 4)    AS piotroski_f_score,
+            COALESCE(fh.return_on_equity, 0)     AS return_on_equity,
+            COALESCE(fh.piotroski_f_score, 4)    AS piotroski_f_score,
             so.outcome"""
+
+    # Point-in-time fundamentals as-of so.signal_date. stock_fundamentals is a current
+    # snapshot only -- joining it directly (as this used to) leaks future fundamentals
+    # into training rows for symbols whose outcome predates today.
+    _FUND_JOIN = """
+        LEFT JOIN fundamentals_history fh
+               ON fh.symbol = so.symbol
+              AND fh.as_of_date = (
+                  SELECT MAX(fh2.as_of_date) FROM fundamentals_history fh2
+                  WHERE fh2.symbol = so.symbol AND fh2.as_of_date <= so.signal_date
+              )
+    """
 
     if use_postgres():
         # Outcome-driven rewrite: the ~4k h7 WIN/LOSS outcomes drive the scan, and a LATERAL
@@ -118,7 +129,7 @@ def build_training_data(conn):
         ) cs ON true
         LEFT JOIN technical_signals ts ON ts.symbol = cs.symbol AND ts.date = so.signal_date
         LEFT JOIN quant_scores qs       ON qs.symbol = cs.symbol
-        LEFT JOIN stock_fundamentals sf ON sf.symbol = cs.symbol
+        {_FUND_JOIN}
         WHERE so.horizon_days = 7 AND so.outcome IN ('WIN', 'LOSS')
         """
     else:
@@ -148,7 +159,7 @@ def build_training_data(conn):
           ON ts.symbol = cs.symbol
           AND ts.date = {_CS_DAY}
         LEFT JOIN quant_scores qs ON qs.symbol = cs.symbol
-        LEFT JOIN stock_fundamentals sf ON sf.symbol = cs.symbol
+        {_FUND_JOIN}
         """
     rows = conn.execute(sql).fetchall()
 
@@ -217,22 +228,24 @@ def train(conn):
         return False
 
     print(f'[ML] Training on {n} samples (win rate: {y.mean():.1%})')
-    scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X)
 
+    # Scaler lives INSIDE the pipeline so cross_val_score and CalibratedClassifierCV's
+    # internal CV each refit it per-fold. Previously scaler.fit_transform(X) ran on the
+    # full dataset before any split, so every fold's held-out rows had already shaped the
+    # mean/std used to scale that fold's training rows -- inflating the reported CV AUC
+    # that gates deployment of this model.
     base_model = build_model()
-    model = CalibratedClassifierCV(base_model, cv=5, method='isotonic')
-    model.fit(X_scaled, y)
+    pipeline = Pipeline([('scaler', StandardScaler()), ('clf', base_model)])
+    model = CalibratedClassifierCV(pipeline, cv=5, method='isotonic')
+    model.fit(X, y)
 
     cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-    auc_scores = cross_val_score(model, X_scaled, y, cv=cv, scoring='roc_auc')
+    auc_scores = cross_val_score(model, X, y, cv=cv, scoring='roc_auc')
     print(f'[ML] CV AUC: {auc_scores.mean():.3f} +/- {auc_scores.std():.3f}')
 
     os.makedirs(MODEL_DIR, exist_ok=True)
     with open(MODEL_PATH, 'wb') as f:
         pickle.dump(model, f)
-    with open(SCALER_PATH, 'wb') as f:
-        pickle.dump(scaler, f)
 
     # Register in model_registry (best-effort). NOTE: the prior code wrote a non-existent
     # `auc_score` column (correct column is cv_roc_auc) and omitted the NOT NULL model_version,
@@ -254,7 +267,7 @@ def train(conn):
 
 
 def update_probabilities(conn):
-    if not os.path.exists(MODEL_PATH) or not os.path.exists(SCALER_PATH):
+    if not os.path.exists(MODEL_PATH):
         print('[ML] No trained model found. Attempting initial training.')
         if not train(conn):
             print('[ML] Probability overlay deferred until enough 7-day outcomes are available.')
@@ -262,8 +275,6 @@ def update_probabilities(conn):
 
     with open(MODEL_PATH, 'rb') as f:
         model = pickle.load(f)
-    with open(SCALER_PATH, 'rb') as f:
-        scaler = pickle.load(f)
 
     latest_batch = conn.execute(
         'SELECT MAX(computed_at) as ts FROM confluence_signals'
@@ -310,8 +321,9 @@ def update_probabilities(conn):
         r['return_on_equity'], r['piotroski_f_score'], r['confluence_score'],
     ] for r in rows], dtype=np.float32)
 
-    X_scaled = scaler.transform(X)
-    probs = model.predict_proba(X_scaled)[:, 1]
+    # model is a CalibratedClassifierCV wrapping a Pipeline(scaler, clf) -- scaling
+    # happens inside predict_proba, so X is passed through raw (unscaled).
+    probs = model.predict_proba(X)[:, 1]
 
     conn.executemany("""
         UPDATE confluence_signals
@@ -334,10 +346,7 @@ def evaluate(conn):
         return
     with open(MODEL_PATH, 'rb') as f:
         model = pickle.load(f)
-    with open(SCALER_PATH, 'rb') as f:
-        scaler = pickle.load(f)
-    X_scaled = scaler.transform(X)
-    probs = model.predict_proba(X_scaled)[:, 1]
+    probs = model.predict_proba(X)[:, 1]
     preds = (probs >= 0.5).astype(int)
     print(f'[ML] Samples: {n}  Win rate: {y.mean():.1%}')
     print(f'[ML] AUC: {roc_auc_score(y, probs):.3f}  Accuracy: {accuracy_score(y, preds):.3f}')

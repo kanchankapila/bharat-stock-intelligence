@@ -18,7 +18,7 @@ import pandas as pd
 from sklearn.preprocessing import RobustScaler
 import ta
 
-from db_compat import connect, read_df, query_one, use_postgres, ConnWrapper
+from db_compat import connect, read_df, use_postgres, ConnWrapper
 
 SCALER_PATH = Path(__file__).parent / "ml_models" / "feature_scaler_v1.pkl"
 
@@ -44,8 +44,6 @@ _FEATURE_STORE_CONFLICT = (
     ) + ", computed_at=CURRENT_TIMESTAMP"
 )
 
-# Fundamentals lag: data published ~45 days after quarter end
-FUND_LAG_DAYS = 45
 # FII/DII lag: published next morning
 FII_LAG_DAYS = 1
 
@@ -197,29 +195,53 @@ class FeatureEngineer:
         return feat
 
     def _merge_fundamentals(self, feat: pd.DataFrame, symbol: str) -> pd.DataFrame:
-        """Fundamentals — lagged 45 days (earnings reporting delay)."""
-        row = query_one(
-            """SELECT trailing_pe, return_on_equity, debt_to_equity,
-                      operating_margins, piotroski_f_score, last_updated
-               FROM stock_fundamentals WHERE symbol = ?
-               ORDER BY last_updated DESC LIMIT 1""",
+        """Fundamentals — point-in-time as-of join against fundamentals_history.
+
+        stock_fundamentals is a *current* snapshot only (keyed on last_updated, not an
+        as-of date). The old lag check compared last_updated to TODAY and, if old enough,
+        broadcast that single current value across the ENTIRE feat window (up to 504 days
+        of history) -- stamping today's fundamentals onto months-old dates. fundamentals_history
+        accumulates a daily as-of trail (fundamentals_snapshot.py); merge_asof pulls, for each
+        date, only the snapshot actually known by then. Dates before history coverage begins
+        get NaN, not a leaked current value. fundamentals_history has no trailing_pe column,
+        so it's derived from the point-in-time earnings_yield instead.
+        """
+        hist = read_df(
+            """SELECT as_of_date, return_on_equity, debt_to_equity, operating_margins,
+                      piotroski_f_score, earnings_yield
+               FROM fundamentals_history WHERE symbol = ? ORDER BY as_of_date""",
             (symbol,),
         )
-        if row:
-            fetched = pd.to_datetime(row["last_updated"])
-            # PG returns timestamptz (tz-aware); the cutoff is tz-naive. Normalize so the
-            # comparison doesn't raise "Cannot compare tz-naive and tz-aware timestamps".
-            if getattr(fetched, "tzinfo", None) is not None:
-                fetched = fetched.tz_localize(None)
-            cutoff  = pd.Timestamp.today() - pd.Timedelta(days=FUND_LAG_DAYS)
-            if fetched < cutoff:
-                feat["trailing_pe"]    = row["trailing_pe"]
-                feat["roe"]            = row["return_on_equity"]
-                feat["debt_to_equity"] = row["debt_to_equity"]
-                feat["op_margins"]     = row["operating_margins"]
-                feat["piotroski_f"]    = row["piotroski_f_score"]
-                pe = row["trailing_pe"]
-                feat["earnings_yield"] = (1.0 / pe) if pe and pe > 0 else None
+        if hist.empty:
+            return feat
+        hist["as_of_date"] = pd.to_datetime(hist["as_of_date"]).astype("datetime64[ns]")
+        hist = hist.dropna(subset=["as_of_date"]).sort_values("as_of_date")
+        if hist.empty:
+            return feat
+
+        date_col = feat.index.name or "index"
+        left = feat.reset_index()
+        # PG timestamptz and the SQLite text-parsed as_of_date can come back as different
+        # datetime64 resolutions (e.g. [s] vs [us]) depending on driver/pandas version --
+        # merge_asof requires the join keys to share an exact dtype.
+        left[date_col] = pd.to_datetime(left[date_col]).astype("datetime64[ns]")
+        left = left.sort_values(date_col)
+        merged = pd.merge_asof(
+            left, hist, left_on=date_col, right_on="as_of_date", direction="backward",
+        ).set_index(date_col).reindex(feat.index)
+
+        feat["roe"]            = merged["return_on_equity"]
+        feat["debt_to_equity"] = merged["debt_to_equity"]
+        feat["op_margins"]     = merged["operating_margins"]
+        feat["piotroski_f"]    = merged["piotroski_f_score"]
+        # fundamentals_history.earnings_yield mirrors stock_fundamentals.earnings_yield's
+        # convention: a PERCENTAGE (e.g. 4.46 meaning 4.46%, so trailing_pe = 100/ey), not a
+        # decimal fraction. The old code's "earnings_yield" feature was a decimal 1/pe
+        # (~0.02-0.10); ey/100 reproduces that same scale so historical feature_store rows
+        # stay comparable to rows written under this fix.
+        ey = merged["earnings_yield"]
+        feat["earnings_yield"] = ey / 100.0
+        feat["trailing_pe"] = np.where(ey.notna() & (ey != 0), 100.0 / ey, np.nan)
         return feat
 
     def _merge_macro(self, feat: pd.DataFrame) -> pd.DataFrame:

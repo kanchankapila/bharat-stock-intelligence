@@ -1054,14 +1054,17 @@ export async function runTechnicalSignalScan(options: {
     const newsSentiment    = await loadRecentNewsSentiment(scanDate, 2); // 48h of news as of scan date
     console.log(`[SIGNALS] Regime: ${niftyRegime} | Win-rate records: ${winRates.size} | FII 3d: ${fii3dNet ?? 'N/A'} Cr | News Sentiment: ${newsSentiment.size} stocks | Earnings watchlist: ${earningsCalendar.size}`);
 
-    // Pre-load latest PCR per symbol once (was an N+1 query inside detectSignals)
+    // Pre-load latest PCR per symbol once (was an N+1 query inside detectSignals).
+    // Bound by scanDate so a historical rescan doesn't pull a PCR snapshot that postdates
+    // the date being scanned (mirrors the OHLCV bound just below).
     const pcrLatestMap = new Map<string, number>();
     (await dbAll(`
       SELECT symbol, pcr FROM (
         SELECT symbol, pcr, ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY date DESC) AS rn
         FROM stock_options_oi
+        WHERE date <= ?
       ) t WHERE rn = 1
-    `) as { symbol: string; pcr: number }[]).forEach(r => { if (r.pcr != null) pcrLatestMap.set(r.symbol, r.pcr); });
+    `, [scanDate]) as { symbol: string; pcr: number }[]).forEach(r => { if (r.pcr != null) pcrLatestMap.set(r.symbol, r.pcr); });
 
     console.log('[SIGNALS] Loading OHLCV data...');
     // Bound by scanDate so a historical scan (options.date in the past) never sees future

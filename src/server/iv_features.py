@@ -182,7 +182,11 @@ def run(only_date: str | None = None) -> int:
                 chain_map[key] = []
             chain_map[key].append((strike, calls_oi, puts_oi, expiry))
 
-    # Update the most-recent ts row per symbol (scanner rows lag by days; exact date match misses them).
+    # Update the technical_signals row nearest each IV snapshot's OWN date (scanner rows lag
+    # by days, so an exact date match misses some). Previously this always targeted
+    # MAX(date) globally, so every historical (symbol, date) row in feats overwrote the
+    # SAME single latest technical_signals row -- only the last-processed date's IV values
+    # survived, and they landed on a row that could postdate the snapshot they came from.
     params = []
     for row in feats.itertuples(index=False):
         date_str = str(row.date)[:10]
@@ -192,7 +196,7 @@ def run(only_date: str | None = None) -> int:
         params.append((
             float(row.iv_rank), float(row.iv_skew),
             walls['call_wall_dist_pct'], walls['put_wall_dist_pct'], walls['near_expiry_gamma'],
-            row.symbol, row.symbol,
+            row.symbol, row.symbol, date_str,
         ))
 
     conn.close()
@@ -200,7 +204,8 @@ def run(only_date: str | None = None) -> int:
     n = executemany(
         "UPDATE technical_signals "
         "SET iv_rank = ?, iv_skew = ?, call_wall_dist_pct = ?, put_wall_dist_pct = ?, near_expiry_gamma = ? "
-        "WHERE symbol = ? AND date = (SELECT MAX(date) FROM technical_signals t2 WHERE t2.symbol = ?)",
+        "WHERE symbol = ? AND date = (SELECT t2.date FROM technical_signals t2 "
+        "WHERE t2.symbol = ? AND t2.date <= ? ORDER BY t2.date DESC LIMIT 1)",
         params,
     )
     print(f"[IV] Updated iv_rank/iv_skew/walls on {n} technical_signals rows "

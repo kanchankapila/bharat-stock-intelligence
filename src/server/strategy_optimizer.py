@@ -69,7 +69,7 @@ class StrategyOptimizer:
                    sfb.valuation, sfb.delivery, sfb.news
             FROM strategy_performance sp
             LEFT JOIN stock_factor_breakdown sfb
-                   ON sfb.symbol = sp.segment_value AND sfb.timeframe = 'medium'
+                   ON sfb.symbol = sp.segment_value AND sfb.timeframe = 'long_term'
             WHERE sp.horizon_days = ?
               AND sp.total_signals >= 5
         """
@@ -78,7 +78,12 @@ class StrategyOptimizer:
 
     def load_signal_outcomes_with_factors(self, horizon_days: int = 15) -> pd.DataFrame:
         """Load individual outcomes joined with factor breakdown for simulation."""
-        # sfb joined with timeframe='medium' — closest to typical signal horizons.
+        # scoring_engine.py only ever writes timeframe IN ('long_term', 'intraday')
+        # (HORIZON_MAP maps 'swing'/'positional' -> 'long_term'). This previously joined
+        # on timeframe='medium', a bucket that has never existed -- stock_factor_breakdown
+        # always came back NULL, so the optimizer's category-weight objective ran on an
+        # all-zero factor breakdown the whole time. 'long_term' is the multi-day bucket
+        # that matches signal_outcomes' 5/15-day horizons (vs. same-day 'intraday').
         # screener_master join removed: signal_outcomes are from technical_signals,
         # not screener sources (Trendlyne/MC/ETnow), so source was always NULL.
         q = """
@@ -88,7 +93,7 @@ class StrategyOptimizer:
                    sfb.valuation, sfb.delivery, sfb.news
             FROM signal_outcomes so
             LEFT JOIN stock_factor_breakdown sfb
-                   ON sfb.symbol = so.symbol AND sfb.timeframe = 'medium'
+                   ON sfb.symbol = so.symbol AND sfb.timeframe = 'long_term'
             WHERE so.outcome IN ('WIN','LOSS','NEUTRAL')
               AND so.return_pct IS NOT NULL
               AND so.horizon_days = ?
@@ -141,20 +146,18 @@ class StrategyOptimizer:
         objective = sample_weight * (0.5 * win_rate + 0.3 * pf_norm + 0.2 * sharpe_norm)
         return objective
         
-    def _objective(self, params: np.ndarray, train_df: pd.DataFrame, test_df: pd.DataFrame) -> float:
+    def _objective(self, params: np.ndarray, train_df: pd.DataFrame) -> float:
         """
-        Simulate weighted scores with trial weights on train/test, compute objective.
+        Simulate weighted scores with trial weights on the TRAIN split only.
         Returns negative value (scipy minimises).
+
+        test_df is scored separately in optimise() for reporting. Previously this
+        objective blended in 0.3*test_score, so the optimizer's search saw the holdout
+        score on every single iteration -- that isn't a genuine walk-forward evaluation,
+        it's the test set actively shaping the fit.
         """
         train_score = self._compute_score(params, train_df)
-        test_score  = self._compute_score(params, test_df)
-        
-        # Penalize if test score diverges significantly from train score (overfitting)
-        overfit_penalty = max(0, train_score - test_score) * 0.5
-        
-        # Weighted average objective
-        objective = 0.7 * train_score + 0.3 * test_score - overfit_penalty
-        return -objective  # minimise
+        return -train_score  # minimise
 
     def optimise(
         self,
@@ -181,11 +184,10 @@ class StrategyOptimizer:
         train_df = df.iloc[:split_idx]
         test_df = df.iloc[split_idx:]
 
-        baseline = -self._objective(
-            list(DEFAULT_CATEGORY_WEIGHTS.values()) + list(DEFAULT_SOURCE_WEIGHTS.values()),
-            train_df, test_df
-        )
-        print(f"[Optimizer] Baseline objective: {baseline:.4f}")
+        baseline_params = list(DEFAULT_CATEGORY_WEIGHTS.values()) + list(DEFAULT_SOURCE_WEIGHTS.values())
+        baseline_train = -self._objective(baseline_params, train_df)
+        baseline_test  = self._compute_score(baseline_params, test_df)
+        print(f"[Optimizer] Baseline — train: {baseline_train:.4f}  held-out test: {baseline_test:.4f}")
 
         # Bounds: categories [0.2, 2.0], sources [0.5, 1.5]
         bounds = [(0.2, 2.0)] * len(CATEGORIES) + [(0.5, 1.5)] * len(SOURCES)
@@ -193,7 +195,7 @@ class StrategyOptimizer:
         result = differential_evolution(
             self._objective,
             bounds=bounds,
-            args=(train_df, test_df),
+            args=(train_df,),
             maxiter=max_iterations,
             popsize=popsize,
             seed=42,
@@ -202,13 +204,16 @@ class StrategyOptimizer:
             recombination=0.7,
             workers=1,  # SQLite connection cannot be pickled to multiple processes easily
             callback=lambda xk, convergence: print(
-                f"[Optimizer]   iter... obj={-self._objective(xk, train_df, test_df):.4f}"
+                f"[Optimizer]   iter... obj={-self._objective(xk, train_df):.4f}"
             ) if False else None,
         )
 
-        optimised_obj = -result.fun
-        print(f"[Optimizer] Optimised objective: {optimised_obj:.4f}  "
-              f"(improvement: {(optimised_obj/baseline - 1)*100:+.1f}%)")
+        optimised_train = -result.fun
+        optimised_test  = self._compute_score(result.x, test_df)
+        print(f"[Optimizer] Optimised — train: {optimised_train:.4f}  held-out test: {optimised_test:.4f}")
+        if optimised_test < baseline_test:
+            print("[Optimizer] WARNING: optimised weights underperform baseline on held-out "
+                  "test data -- likely overfit to the train split. Review before applying.")
 
         opt_cat = dict(zip(CATEGORIES, result.x[:len(CATEGORIES)]))
         opt_src = dict(zip(SOURCES,    result.x[len(CATEGORIES):]))
@@ -224,14 +229,21 @@ class StrategyOptimizer:
         base_top = df[base_df_score >= base_df_score.quantile(0.75)]
         base_wr  = (base_top['outcome'] == 'WIN').mean() if len(base_top) > 0 else 0.0
 
+        # improvement_pct is now measured on the held-out test split, not the train-blended
+        # objective the optimizer searched over -- an honest walk-forward number instead of
+        # one the optimization itself could inflate.
+        improvement_pct = ((optimised_test / baseline_test - 1) * 100) if baseline_test > 0 else 0.0
+
         return {
             'category_weights': {k: round(float(v), 4) for k, v in opt_cat.items()},
             'source_weights':   {k: round(float(v), 4) for k, v in opt_src.items()},
-            'optimised_objective': round(float(optimised_obj), 6),
-            'baseline_objective':  round(float(baseline), 6),
+            'optimised_objective': round(float(optimised_train), 6),
+            'baseline_objective':  round(float(baseline_train), 6),
+            'optimised_test_objective': round(float(optimised_test), 6),
+            'baseline_test_objective':  round(float(baseline_test), 6),
             'baseline_win_rate':   round(float(base_wr), 4),
             'optimised_win_rate':  round(float(opt_wr), 4),
-            'improvement_pct':     round(float((optimised_obj / baseline - 1) * 100), 2),
+            'improvement_pct':     round(float(improvement_pct), 2),
             'training_samples':    len(df),
             'horizon_days':        horizon_days,
         }
@@ -240,28 +252,48 @@ class StrategyOptimizer:
     # Per-screener weight refinement (fine-tuning on top of global optimisation)
     # ──────────────────────────────────────────────────────────────────────────
 
-    def compute_screener_overrides(self, opt_weights: dict) -> dict[str, float]:
+    def compute_screener_overrides(self, opt_weights: dict, train_frac: float = 0.8) -> dict[str, float]:
         """
         Compute per-screener weight multipliers based on historical signal count
         and win rate. Screeners that consistently appear in winning signals get
         a boost; those appearing in losing signals get penalised.
+
+        Fit on the earlier train_frac of signal dates only, with the remaining dates
+        held out purely to log a generalisation check. Previously this used ALL-history
+        win rates with zero split before writing straight into screener_master
+        .weight_override -- an in-sample fit with no signal of whether it generalises.
         """
         q = """
             SELECT sm.scan_id, sm.name, sm.source, sm.inferred_category,
-                   COUNT(so.symbol) AS appearances,
-                   SUM(CASE WHEN so.outcome = 'WIN' THEN 1 ELSE 0 END) AS wins
+                   so.signal_date, so.symbol, so.outcome
             FROM screener_master sm
             JOIN trendlyne_screener_stocks tss ON tss.screener_id = sm.scan_id
             JOIN signal_outcomes so ON so.symbol = tss.symbol
             WHERE so.outcome IN ('WIN','LOSS','NEUTRAL')
-            GROUP BY sm.scan_id, sm.name
-            HAVING COUNT(so.symbol) >= 10
         """
-        df = read_df(q)
+        raw = read_df(q)
+        if raw.empty:
+            return {}
+        raw['signal_date'] = pd.to_datetime(raw['signal_date'])
+        raw = raw.sort_values('signal_date')
+        dates = raw['signal_date'].unique()
+        if len(dates) < 10:
+            return {}
+        cutoff = dates[int(len(dates) * train_frac)]
+        train_raw, holdout_raw = raw[raw['signal_date'] <= cutoff], raw[raw['signal_date'] > cutoff]
+
+        def _agg(rows: pd.DataFrame) -> pd.DataFrame:
+            g = rows.groupby('scan_id').agg(
+                appearances=('symbol', 'count'),
+                wins=('outcome', lambda s: (s == 'WIN').sum()),
+            )
+            g = g[g['appearances'] >= 10]
+            g['win_rate'] = g['wins'] / g['appearances']
+            return g
+
+        df = _agg(train_raw)
         if df.empty:
             return {}
-
-        df['win_rate'] = df['wins'] / df['appearances']
 
         # Mean revert: weight = 0.8 + (win_rate / overall_win_rate) × 0.4, capped [0.5, 1.8]
         overall_wr = df['win_rate'].mean()
@@ -269,7 +301,19 @@ class StrategyOptimizer:
             return {}
 
         df['weight_override'] = (0.8 + (df['win_rate'] / overall_wr) * 0.4).clip(0.5, 1.8)
-        overrides = dict(zip(df['scan_id'].astype(str), df['weight_override'].round(4)))
+
+        # Generalisation check: does the train-fit override direction agree with the
+        # holdout window's actual win rate? Logged only -- doesn't block the write, since
+        # a handful of screeners can legitimately fail this on a small holdout.
+        holdout_agg = _agg(holdout_raw)
+        if not holdout_agg.empty:
+            joined = df[['weight_override']].join(holdout_agg[['win_rate']], how='inner')
+            if len(joined) >= 5:
+                corr = joined['weight_override'].corr(joined['win_rate'])
+                print(f"[Optimizer] screener override train→holdout win-rate correlation: {corr:.3f} "
+                      f"(n={len(joined)})")
+
+        overrides = {str(scan_id): round(float(w), 4) for scan_id, w in df['weight_override'].items()}
         return overrides
 
     # ──────────────────────────────────────────────────────────────────────────
