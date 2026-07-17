@@ -67,10 +67,15 @@ SUBCAT_MOD = {
 }
 
 HORIZON_MULT = {
-    'intraday':   0.70,
-    'swing':      0.95,
-    'positional': 1.05,
-    'long_term':  1.10,
+    'intraday':    0.70,
+    'swing':       0.95,
+    'positional':  1.05,
+    'long_term':   1.10,
+    # screener_catalog_enricher.py inserts rows with this coarser vocabulary
+    # (screener_master entries missing from screener_scoring_v2.csv) — map them
+    # onto the same scale instead of silently falling back to the 0.95 default.
+    'short_term':  0.95,
+    'medium_term': 1.05,
 }
 
 # `breakout` is the breakout classifier's P(>=6% up-move in 10d) — the one component with
