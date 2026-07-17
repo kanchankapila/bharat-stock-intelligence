@@ -37,11 +37,21 @@ def _set_setting(con: ConnWrapper, key: str, value: str):
     con.commit()
 
 
-def _run(cmd: str) -> int:
+def _run(cmd: str, timeout_sec: int = 1800) -> int:
     cmd_resolved = cmd.replace("python ", f'"{sys.executable}" ', 1)
     print(f"[TRAINER] Running: {cmd_resolved}")
-    result = subprocess.run(cmd_resolved, shell=True, cwd=PYDIR)
-    return result.returncode
+    try:
+        result = subprocess.run(cmd_resolved, shell=True, cwd=PYDIR, timeout=timeout_sec)
+        return result.returncode
+    except subprocess.TimeoutExpired:
+        # A hung sub-step (observed: a broken ProcessPoolExecutor in feature_engineering.py
+        # can block its own shutdown/join indefinitely on Windows) used to wedge this whole
+        # process forever, leaving dl_retrain_running='1' stuck until an unrelated server
+        # restart happened to kill it — masking weeks of "job succeeded" heartbeats while
+        # model_registry never got a new row. A bounded timeout turns that into a real,
+        # loud failure that clears the lock via the except block in retrain_models().
+        print(f"[TRAINER] Command timed out after {timeout_sec}s, killing: {cmd_resolved}")
+        return 1
 
 
 def retrain_models(trigger: str = "scheduled") -> dict:
