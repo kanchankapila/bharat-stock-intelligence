@@ -157,6 +157,7 @@ CREATE TABLE IF NOT EXISTS "backtesting_runs" (
   "monthly_returns_json" TEXT,
   "equity_curve_json" TEXT,
   "trade_log_json" TEXT,
+  "walk_forward_folds_json" TEXT,
   "run_at" TIMESTAMPTZ DEFAULT now()
 );
 

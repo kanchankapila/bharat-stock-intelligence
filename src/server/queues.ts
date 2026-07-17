@@ -19,6 +19,7 @@ import Redis from 'ioredis';
 import { REDIS_BASE } from './redisConfig';
 import { CronExpressionParser } from 'cron-parser';
 import { runPython } from './pythonRunner';
+import { alphaQuant } from './alphaQuantClient';
 
 import { syncNiftyTraderScores, syncTrendlyneScores } from './syncProprietaryScores';
 import { syncTrendlyneTechnicals } from './technicalIntelligenceService';
@@ -86,6 +87,7 @@ export const QUEUE_ETNOW_SCREENER_SYNC  = 'etnow-screener-sync';
 export const QUEUE_NSE_SYNC             = 'nse-sync';  // PHASE 2: Weekly NSE master data sync
 export const QUEUE_FUNDAMENTALS_SYNC    = 'fundamentals-sync';
 export const QUEUE_QUANT_SCORING        = 'quant-scoring';
+export const QUEUE_WALK_FORWARD_OPTIMIZE = 'walk-forward-optimize';
 export const QUEUE_TECHNICAL_SIGNALS    = 'technical-signals';
 export const QUEUE_SIGNAL_OUTCOMES      = 'signal-outcomes';
 export const QUEUE_NEWS_SENTIMENT       = 'news-sentiment';
@@ -134,6 +136,7 @@ export let etnowScreenerSyncQueue: Queue | null = null;
 export let nseScreenerSyncQueue:   Queue | null = null;  // PHASE 2: NSE master data sync
 export let fundamentalsSyncQueue:  Queue | null = null;
 export let quantScoringQueue:      Queue | null = null;
+export let walkForwardOptimizeQueue: Queue | null = null;
 export let technicalSignalsQueue:  Queue | null = null;
 export let signalOutcomesQueue:    Queue | null = null;
 export let newsSentimentQueue:     Queue | null = null;
@@ -151,6 +154,7 @@ let etnowScreenerSyncWorker:  Worker | null = null;
 let nseScreenerSyncWorker:    Worker | null = null;  // PHASE 2: NSE worker
 let fundamentalsSyncWorker:   Worker | null = null;
 let quantScoringWorker:       Worker | null = null;
+let walkForwardOptimizeWorker: Worker | null = null;
 let technicalSignalsWorker:   Worker | null = null;
 let signalOutcomesWorker:     Worker | null = null;
 let newsSentimentWorker:      Worker | null = null;
@@ -420,6 +424,15 @@ async function processQuantScoring(_job: Job): Promise<{ success: boolean }> {
   const { runQuantScoring } = await import('./quantScoringService');
   await runQuantScoring();
   return { success: true };
+}
+
+// ── Walk-forward-optimize worker processor ─────────────────────────────────
+// On-demand (user-triggered), not a daily batch job — data comes straight from
+// job.data (the request the tRPC mutation enqueued) and is forwarded to the
+// AlphaQuant FastAPI service, which does the actual DE search + simulation.
+async function processWalkForwardOptimize(job: Job): Promise<any> {
+  console.log(`[QUEUE] Starting walk-forward optimize (${job.data?.start}→${job.data?.end})...`);
+  return alphaQuant.walkForwardOptimize(job.data);
 }
 
 /**
@@ -1685,6 +1698,27 @@ export async function initQueues(): Promise<boolean> {
     quantScoringWorker.on('failed', (_job, err) => {
       console.error('[QUEUE] quant-scoring failed:', err.message);
       recordHeartbeat('quant-scoring', 'failed', err.message);
+    });
+
+    // ── Walk-forward-optimize queue (on-demand, no repeatable schedule) ────────
+    walkForwardOptimizeQueue = new Queue(QUEUE_WALK_FORWARD_OPTIMIZE, { connection });
+
+    walkForwardOptimizeWorker = new Worker(
+      QUEUE_WALK_FORWARD_OPTIMIZE,
+      processWalkForwardOptimize,
+      {
+        connection,
+        concurrency: 1,
+        lockDuration: 30 * 60 * 1000, // 30 min — several DE searches back to back per fold
+        lockRenewTime: 5 * 60 * 1000,
+      },
+    );
+
+    walkForwardOptimizeWorker.on('completed', (job) => {
+      console.log(`[QUEUE] walk-forward-optimize completed (job ${job.id})`);
+    });
+    walkForwardOptimizeWorker.on('failed', (job, err) => {
+      console.error(`[QUEUE] walk-forward-optimize failed (job ${job?.id}):`, err.message);
     });
 
     // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Technical signals queue (every 30 minutes) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
@@ -3056,6 +3090,7 @@ export async function shutdownQueues(): Promise<void> {
     etnowScreenerSyncWorker?.close(),
     fundamentalsSyncWorker?.close(),
     quantScoringWorker?.close(),
+    walkForwardOptimizeWorker?.close(),
     stockRefreshQueue?.close(),
     aiSignalsQueue?.close(),
     stockScoringQueue?.close(),
@@ -3063,6 +3098,7 @@ export async function shutdownQueues(): Promise<void> {
     etnowScreenerSyncQueue?.close(),
     fundamentalsSyncQueue?.close(),
     quantScoringQueue?.close(),
+    walkForwardOptimizeQueue?.close(),
     technicalSignalsWorker?.close(),
     technicalSignalsQueue?.close(),
     signalOutcomesWorker?.close(),
@@ -3160,6 +3196,46 @@ export async function enqueueAISignals(
     queued:         toAdd.length,
     skipped:        stocks.length - toAdd.length,
     queueAvailable: true,
+  };
+}
+
+export interface WalkForwardOptimizeParams {
+  start: string; end: string; mode?: 'rolling' | 'anchored';
+  n_folds?: number; is_days?: number; oos_days?: number; step_days?: number;
+  optimize?: boolean; objective?: 'sharpe' | 'sortino';
+  min_score?: number; horizon?: number; max_pos?: number; capital?: number; name?: string;
+}
+
+export async function enqueueWalkForwardOptimize(
+  params: WalkForwardOptimizeParams,
+): Promise<{ jobId: string }> {
+  if (!walkForwardOptimizeQueue) {
+    throw new Error('Walk-forward-optimize queue unavailable (Redis not connected)');
+  }
+  const job = await walkForwardOptimizeQueue.add('walk-forward-optimize', params, {
+    removeOnComplete: 10,
+    removeOnFail: 10,
+  });
+  return { jobId: job.id! };
+}
+
+export async function getWalkForwardOptimizeJobStatus(jobId: string): Promise<{
+  state: string;
+  result: any | null;
+  failedReason: string | null;
+}> {
+  if (!walkForwardOptimizeQueue) {
+    throw new Error('Walk-forward-optimize queue unavailable (Redis not connected)');
+  }
+  const job = await walkForwardOptimizeQueue.getJob(jobId);
+  if (!job) {
+    return { state: 'not_found', result: null, failedReason: null };
+  }
+  const state = await job.getState();
+  return {
+    state,
+    result: state === 'completed' ? job.returnvalue : null,
+    failedReason: job.failedReason ?? null,
   };
 }
 

@@ -39,6 +39,17 @@ export const alphaQuant = {
     max_pos: number; capital: number; name?: string;
   }) => aqPost<{ run_id: string }>('/api/v1/backtest', body),
 
+  // Runs a differential_evolution search per fold (default: rolling 365d IS / 90d OOS
+  // windows), each fold simulating trades ~200 times — real multi-minute-per-fold cost,
+  // so give it the same headroom as the daily score job rather than backtest's default.
+  walkForwardOptimize: (body: {
+    start: string; end: string; mode?: 'rolling' | 'anchored';
+    n_folds?: number; is_days?: number; oos_days?: number; step_days?: number;
+    optimize?: boolean; objective?: 'sharpe' | 'sortino';
+    min_score?: number; horizon?: number; max_pos?: number; capital?: number; name?: string;
+  }) => aqPost<{ run_id?: number; mode: string; objective: string; folds: any[]; combined: any }>(
+    '/api/v1/walk-forward-optimize', body, 45 * 60_000),
+
   optimize: (body: { horizon_days: number; iterations: number; apply: boolean }) =>
     aqPost<{ improvement_pct: number }>('/api/v1/optimize', body),
 

@@ -246,7 +246,7 @@ class Backtester:
                     payout = div_amt * pos['shares']
                     cash += payout
                     pos['total_cost'] -= payout  # reduce cost basis of trade
-                    print(f"  [Dividend] {date_str}: {sym} paid ₹{div_amt} per share (Total: ₹{payout:,.2f})")
+                    print(f"  [Dividend] {date_str}: {sym} paid Rs.{div_amt} per share (Total: Rs.{payout:,.2f})")
 
             # ── check and update open positions day-by-day ──────────────
             for sym in list(open_positions.keys()):
@@ -478,63 +478,270 @@ class Backtester:
             print(f"[Backtester] surveillance filter failed, continuing unfiltered: {str(e)[:120]}")
             return set()
 
+    # Search bounds for the IS parameter optimizer. (min_score, stop_loss_pct, horizon_days)
+    DEFAULT_WF_BOUNDS = {
+        'min_score':     (2, 6),
+        'stop_loss_pct': (3.0, 12.0),
+        'horizon_days':  (5, 30),
+    }
+    MIN_TRADES_FOR_VALID_FOLD = 5
+
+    def _wf_fold_bounds(self, start: str, end: str, mode: str, n_folds: int,
+                         is_days: int, oos_days: int, step_days: int):
+        """Compute (is_start, is_end, oos_start, oos_end) date tuples for each fold."""
+        import datetime as _dt
+        s = _dt.date.fromisoformat(start)
+        e = _dt.date.fromisoformat(end)
+        folds = []
+        if mode == 'anchored':
+            total_days = (e - s).days
+            fold_days  = total_days // n_folds
+            for i in range(n_folds):
+                fold_start = s + _dt.timedelta(days=i * fold_days)
+                fold_end   = fold_start + _dt.timedelta(days=fold_days) if i < n_folds - 1 else e
+                oos_start  = fold_start + _dt.timedelta(days=int(fold_days * 0.75))
+                folds.append((fold_start, oos_start, oos_start, fold_end))
+        elif mode == 'rolling':
+            is_start = s
+            while True:
+                is_end    = is_start + _dt.timedelta(days=is_days)
+                oos_start = is_end
+                oos_end   = oos_start + _dt.timedelta(days=oos_days)
+                if oos_end > e:
+                    break
+                folds.append((is_start, is_end, oos_start, oos_end))
+                is_start = is_start + _dt.timedelta(days=step_days)
+        else:
+            raise ValueError(f"Unknown walk-forward mode: {mode!r} (expected 'anchored' or 'rolling')")
+        return folds
+
+    def _wf_objective(self, params, raw_signals: pd.DataFrame, ohlcv_dict: dict,
+                       objective: str, max_positions: int, initial_capital: float,
+                       commission_bps: float) -> float:
+        """DE minimises this — returns negative Sharpe/Sortino on the IS slice only.
+        raw_signals/ohlcv_dict are pre-loaded ONCE per fold and reused across every DE
+        candidate; only the in-memory score filter and horizon_days column change per
+        candidate, so this never re-hits the DB inside the search loop.
+        """
+        min_score_c, stop_loss_pct_c, horizon_days_c = params
+        cand = raw_signals[raw_signals['signal_score'] >= round(min_score_c)].copy()
+        if cand.empty:
+            return 10.0  # worst score (DE minimises) — no candidate signals
+        cand['horizon_days'] = int(round(horizon_days_c))
+
+        trade_log, equity = self.simulate_trades(
+            cand, ohlcv_dict,
+            max_positions=max_positions,
+            initial_capital=initial_capital,
+            slippage_bps=15,  # execution cost is not a decision parameter — held fixed
+            stop_loss_pct=float(stop_loss_pct_c),
+            commission_bps=commission_bps,
+        )
+        if len(trade_log) < self.MIN_TRADES_FOR_VALID_FOLD or equity.empty:
+            return 10.0
+
+        stats = self.compute_stats(trade_log, equity, pd.Series(dtype=float), initial_capital)
+        key = 'sortino_ratio' if objective == 'sortino' else 'sharpe_ratio'
+        score = stats.get(key)
+        if score is None or not np.isfinite(score):
+            return 10.0
+        return -float(score)
+
     def run_walk_forward(
         self,
         start: str,
         end: str,
-        n_folds: int = 4,
+        mode: str = 'rolling',
+        n_folds: int = 4,               # only used by mode='anchored'
+        is_days: int = 365,             # only used by mode='rolling'
+        oos_days: int = 90,
+        step_days: int = 90,
+        optimize: bool = True,
+        objective: str = 'sharpe',      # 'sharpe' | 'sortino'
+        param_bounds: dict | None = None,
         min_score: int = 3,
         horizon_days: int = 15,
+        stop_loss_pct: float = 7.0,
+        max_positions: int = 20,
         initial_capital: float = INITIAL_CAPITAL,
         commission_bps: float = 40,
         slippage_bps: float = 15,
-    ) -> list[dict]:
-        import datetime as _dt
-        s = _dt.date.fromisoformat(start)
-        e = _dt.date.fromisoformat(end)
-        total_days = (e - s).days
-        fold_days  = total_days // n_folds
+        max_de_iterations: int = 25,
+        de_popsize: int = 8,
+    ) -> dict:
+        """
+        Rolling/anchored walk-forward optimization. For each fold: optimize decision
+        parameters (min_score, stop_loss_pct, horizon_days) with differential_evolution
+        on the IN-SAMPLE slice only, then simulate the OUT-OF-SAMPLE slice once with the
+        winning params. The IS optimizer never sees OOS data (separate DB loads per
+        window), and OOS results are only ever scored with parameters chosen before that
+        window was touched — this is what makes the reported metrics a genuine
+        walk-forward result rather than an in-sample fit.
+        """
+        if optimize:
+            try:
+                from scipy.optimize import differential_evolution
+            except ImportError:
+                print("[WalkForward] scipy not installed. Run: pip install scipy")
+                raise
+        bounds_cfg = {**self.DEFAULT_WF_BOUNDS, **(param_bounds or {})}
+        bounds = [bounds_cfg['min_score'], bounds_cfg['stop_loss_pct'], bounds_cfg['horizon_days']]
 
-        results = []
-        for i in range(n_folds):
-            fold_start = s + _dt.timedelta(days=i * fold_days)
-            fold_end   = fold_start + _dt.timedelta(days=fold_days) if i < n_folds - 1 else e
-            oos_start  = fold_start + _dt.timedelta(days=int(fold_days * 0.75))
+        folds = self._wf_fold_bounds(start, end, mode, n_folds, is_days, oos_days, step_days)
+        if not folds:
+            print("[WalkForward] No folds fit in the given date range/window sizes.")
+            return {'folds': [], 'combined': {}}
 
-            print(f"\n[WalkForward] Fold {i+1}/{n_folds}: OOS {oos_start}–{fold_end}")
+        fold_results = []
+        combined_trade_log: list[dict] = []
+        combined_equity_parts: list[pd.Series] = []
+        running_capital = initial_capital
 
-            signals = self.load_signals(oos_start.isoformat(), fold_end.isoformat(), min_score, horizon_days)
-            if signals.empty:
-                print("  No signals — skipping.")
+        for i, (is_start, is_end, oos_start, oos_end) in enumerate(folds):
+            fold_no = i + 1
+            print(f"\n[WalkForward] Fold {fold_no}/{len(folds)}  "
+                  f"IS {is_start}->{is_end}  OOS {oos_start}->{oos_end}")
+
+            best_min_score, best_stop_loss, best_horizon = min_score, stop_loss_pct, horizon_days
+
+            if optimize:
+                # Load the loosest candidate universe once; DE filters in-memory per candidate.
+                raw_is_signals = self.load_signals(
+                    is_start.isoformat(), is_end.isoformat(),
+                    min_score=int(bounds[0][0]), horizon_days=horizon_days,
+                )
+                if raw_is_signals.empty:
+                    print("  No IS signals - using default params, skipping optimization.")
+                else:
+                    is_syms = raw_is_signals['symbol'].unique().tolist()
+                    is_ohlcv = self.load_ohlcv(is_syms, is_start.isoformat(), is_end.isoformat())
+                    is_ohlcv_dict = {sym: g.reset_index(drop=True) for sym, g in is_ohlcv.groupby('symbol')}
+
+                    result = differential_evolution(
+                        self._wf_objective,
+                        bounds=bounds,
+                        args=(raw_is_signals, is_ohlcv_dict, objective, max_positions,
+                              initial_capital, commission_bps),
+                        maxiter=max_de_iterations,
+                        popsize=de_popsize,
+                        seed=42,
+                        tol=1e-6,
+                        mutation=(0.5, 1.5),
+                        recombination=0.7,
+                        workers=1,  # DB connection isn't picklable across processes
+                    )
+                    best_min_score  = int(round(result.x[0]))
+                    best_stop_loss  = float(result.x[1])
+                    best_horizon    = int(round(result.x[2]))
+                    print(f"  IS-optimal: min_score={best_min_score} "
+                          f"stop_loss_pct={best_stop_loss:.2f} horizon_days={best_horizon} "
+                          f"({objective}={-result.fun:.4f})")
+
+            # ── OOS: simulate once with params chosen from IS only ──────────
+            oos_signals = self.load_signals(oos_start.isoformat(), oos_end.isoformat(),
+                                             best_min_score, best_horizon)
+            if oos_signals.empty:
+                print("  No OOS signals - skipping fold.")
+                fold_results.append({
+                    'fold': fold_no, 'is_start': is_start.isoformat(), 'is_end': is_end.isoformat(),
+                    'oos_start': oos_start.isoformat(), 'oos_end': oos_end.isoformat(),
+                    'best_params': {'min_score': best_min_score, 'stop_loss_pct': best_stop_loss,
+                                     'horizon_days': best_horizon},
+                    'oos_stats': {}, 'n_trades': 0,
+                })
                 continue
 
-            syms = signals['symbol'].unique().tolist()
-            ohlcv = self.load_ohlcv(syms, oos_start.isoformat(), fold_end.isoformat())
-            ohlcv_dict = {sym: g.reset_index(drop=True) for sym, g in ohlcv.groupby('symbol')}
+            oos_syms = oos_signals['symbol'].unique().tolist()
+            extended_oos_end = (pd.to_datetime(oos_end) + pd.Timedelta(days=best_horizon + 10)).strftime('%Y-%m-%d')
+            oos_ohlcv = self.load_ohlcv(oos_syms, oos_start.isoformat(), extended_oos_end)
+            oos_ohlcv_dict = {sym: g.reset_index(drop=True) for sym, g in oos_ohlcv.groupby('symbol')}
 
-            trades, equity = self.simulate_trades(
-                signals, ohlcv_dict, initial_capital=initial_capital,
-                commission_bps=commission_bps, slippage_bps=slippage_bps,
+            oos_trades, oos_equity = self.simulate_trades(
+                oos_signals, oos_ohlcv_dict,
+                max_positions=max_positions,
+                initial_capital=running_capital,
+                slippage_bps=slippage_bps,
+                stop_loss_pct=best_stop_loss,
+                commission_bps=commission_bps,
             )
-            if not trades:
-                print("  No trades.")
-                continue
+            nifty_oos = self.load_nifty(oos_start.isoformat(), extended_oos_end)
+            oos_stats = self.compute_stats(oos_trades, oos_equity, nifty_oos, running_capital)
 
-            wins  = sum(1 for t in trades if t.get('pnl', 0) > 0)
-            total = len(trades)
-            pnl   = sum(t.get('pnl', 0) for t in trades)
-            result = {
-                'fold': i + 1,
-                'oos_start': oos_start.isoformat(),
-                'oos_end': fold_end.isoformat(),
-                'n_trades': total,
-                'win_rate': round(wins / total, 4) if total else 0,
-                'total_pnl': round(pnl, 2),
-            }
-            results.append(result)
-            print(f"  Trades={total}  Win%={result['win_rate']*100:.1f}  PnL=₹{pnl:,.0f}")
+            fold_results.append({
+                'fold': fold_no,
+                'is_start': is_start.isoformat(), 'is_end': is_end.isoformat(),
+                'oos_start': oos_start.isoformat(), 'oos_end': oos_end.isoformat(),
+                'best_params': {'min_score': best_min_score, 'stop_loss_pct': best_stop_loss,
+                                 'horizon_days': best_horizon},
+                'oos_stats': oos_stats,
+                'n_trades': len(oos_trades),
+            })
+            print(f"  OOS: trades={len(oos_trades)}  "
+                  f"win_rate={oos_stats.get('win_rate', 0)*100:.1f}%  "
+                  f"sharpe={oos_stats.get('sharpe_ratio', 0):.2f}")
 
-        return results
+            combined_trade_log.extend(oos_trades)
+            if not oos_equity.empty:
+                combined_equity_parts.append(oos_equity)
+                running_capital = float(oos_equity.iloc[-1])
+
+        combined_equity = pd.concat(combined_equity_parts) if combined_equity_parts else pd.Series(dtype=float)
+        combined_equity = combined_equity[~combined_equity.index.duplicated(keep='last')].sort_index()
+        nifty_full = self.load_nifty(start, end)
+        combined_stats = self.compute_stats(combined_trade_log, combined_equity, nifty_full, initial_capital) \
+            if combined_trade_log else {}
+
+        return {
+            'mode': mode, 'objective': objective, 'folds': fold_results,
+            'combined': combined_stats,
+            'combined_trade_log': combined_trade_log,
+            'combined_equity': combined_equity,
+        }
+
+    def run_walk_forward_and_save(
+        self,
+        start: str, end: str,
+        mode: str = 'rolling',
+        n_folds: int = 4,
+        is_days: int = 365,
+        oos_days: int = 90,
+        step_days: int = 90,
+        optimize: bool = True,
+        objective: str = 'sharpe',
+        min_score: int = 3,
+        horizon_days: int = 15,
+        stop_loss_pct: float = 7.0,
+        max_positions: int = 20,
+        initial_capital: float = INITIAL_CAPITAL,
+        commission_bps: float = 40,
+        slippage_bps: float = 15,
+        run_name: str = "",
+    ) -> dict:
+        wf = self.run_walk_forward(
+            start, end, mode=mode, n_folds=n_folds, is_days=is_days, oos_days=oos_days,
+            step_days=step_days, optimize=optimize, objective=objective,
+            min_score=min_score, horizon_days=horizon_days, stop_loss_pct=stop_loss_pct,
+            max_positions=max_positions, initial_capital=initial_capital,
+            commission_bps=commission_bps, slippage_bps=slippage_bps,
+        )
+        if not wf['folds'] or not wf['combined']:
+            print("[WalkForward] No valid folds produced a combined result - nothing saved.")
+            return wf
+
+        symbols_count = len({t['symbol'] for t in wf['combined_trade_log']})
+        config = {
+            'start': start, 'end': end, 'mode': mode, 'objective': objective,
+            'n_folds': n_folds, 'is_days': is_days, 'oos_days': oos_days, 'step_days': step_days,
+            'optimize': optimize, 'symbols_count': symbols_count,
+            'initial_capital': initial_capital,
+            'commission_bps': commission_bps, 'slippage_bps': slippage_bps,
+        }
+        run_id = self.save_run(
+            run_name or f"wf_{mode}_{start}_{end}_{objective}",
+            config, wf['combined'], wf['combined_trade_log'], wf['combined_equity'],
+            walk_forward_folds=wf['folds'],
+        )
+        return {'run_id': run_id, **wf}
 
     # ──────────────────────────────────────────────────────────────────────────
     # Performance statistics
@@ -634,6 +841,7 @@ class Backtester:
         stats: dict,
         trade_log: list[dict],
         equity_curve: pd.Series,
+        walk_forward_folds: list[dict] | None = None,
     ) -> int:
         cur = self.conn.cursor()
         # Trim equity curve to 1 point per week to keep JSON small
@@ -641,6 +849,7 @@ class Backtester:
         ec_json    = json.dumps({str(d.date()): float(v) for d, v in ec_weekly.items()})
         # Trim trade log to last 500 trades
         tl_json = json.dumps(trade_log[-500:])
+        wf_json = json.dumps(walk_forward_folds) if walk_forward_folds is not None else None
 
         cur.execute("""
             INSERT INTO backtesting_runs
@@ -649,8 +858,9 @@ class Backtester:
                  cagr_pct, sharpe_ratio, calmar_ratio, sortino_ratio,
                  max_drawdown_pct, nifty_return_pct, alpha_pct,
                  avg_trade_return_pct, profit_factor, avg_holding_days,
-                 monthly_returns_json, equity_curve_json, trade_log_json)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 monthly_returns_json, equity_curve_json, trade_log_json,
+                 walk_forward_folds_json)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             RETURNING id
         """, (
             run_name,
@@ -674,6 +884,7 @@ class Backtester:
             json.dumps(stats.get('monthly_returns', {})),
             ec_json,
             tl_json,
+            wf_json,
         ))
         run_id = cur.fetchone()[0]
         self.conn.commit()
@@ -791,6 +1002,51 @@ def run_backtest(req: BacktestRequest):
         bt.close()
 
 
+class WalkForwardRequest(BaseModel):
+    start: str
+    end: str
+    mode: str = 'rolling'          # 'rolling' | 'anchored'
+    n_folds: int = 4               # anchored mode only
+    is_days: int = 365             # rolling mode only
+    oos_days: int = 90
+    step_days: int = 90
+    optimize: bool = True
+    objective: str = 'sharpe'      # 'sharpe' | 'sortino'
+    min_score: int = 3
+    horizon: int = 15
+    stop_loss_pct: float = 7.0
+    max_pos: int = 20
+    capital: float = INITIAL_CAPITAL
+    slippage: float = 15
+    commission: float = 40
+    name: str = ""
+
+def run_walk_forward_optimize(req: WalkForwardRequest):
+    bt = Backtester()
+    try:
+        return bt.run_walk_forward_and_save(
+            start=req.start,
+            end=req.end,
+            mode=req.mode,
+            n_folds=req.n_folds,
+            is_days=req.is_days,
+            oos_days=req.oos_days,
+            step_days=req.step_days,
+            optimize=req.optimize,
+            objective=req.objective,
+            min_score=req.min_score,
+            horizon_days=req.horizon,
+            stop_loss_pct=req.stop_loss_pct,
+            max_positions=req.max_pos,
+            initial_capital=req.capital,
+            slippage_bps=req.slippage,
+            commission_bps=req.commission,
+            run_name=req.name,
+        )
+    finally:
+        bt.close()
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Historical Backtesting Engine")
     parser.add_argument("--start",    type=str, default="2023-01-01")
@@ -803,22 +1059,36 @@ if __name__ == "__main__":
     parser.add_argument("--commission", type=float, default=40, help="Round-trip commission in bps (default 40 = STT+stamp+GST+brokerage)")
     parser.add_argument("--name",     type=str, default="")
     parser.add_argument('--walk-forward', action='store_true')
-    parser.add_argument('--folds', type=int, default=4)
+    parser.add_argument('--optimize', action='store_true', help="Re-optimize params on each fold's IS window (default off = plain walk-forward evaluation with fixed params)")
+    parser.add_argument('--wf-mode', type=str, default='rolling', choices=['rolling', 'anchored'])
+    parser.add_argument('--folds', type=int, default=4, help="anchored mode only")
+    parser.add_argument('--is-days', type=int, default=365, help="rolling mode only")
+    parser.add_argument('--oos-days', type=int, default=90)
+    parser.add_argument('--step-days', type=int, default=90)
+    parser.add_argument('--wf-objective', type=str, default='sharpe', choices=['sharpe', 'sortino'])
     args = parser.parse_args()
 
     bt = Backtester()
     try:
         if args.walk_forward:
-            results = bt.run_walk_forward(
+            result = bt.run_walk_forward_and_save(
                 args.start, args.end,
+                mode=args.wf_mode,
                 n_folds=args.folds,
+                is_days=args.is_days,
+                oos_days=args.oos_days,
+                step_days=args.step_days,
+                optimize=args.optimize,
+                objective=args.wf_objective,
                 min_score=args.min_score,
                 horizon_days=args.horizon,
+                stop_loss_pct=7.0,
                 initial_capital=args.capital,
                 commission_bps=args.commission,
                 slippage_bps=args.slippage,
             )
-            print(f"\nWalk-forward complete: {len(results)} folds")
+            print(f"\nWalk-forward complete: {len(result.get('folds', []))} folds, "
+                  f"combined sharpe={result.get('combined', {}).get('sharpe_ratio', 'n/a')}")
         else:
             bt.run(
                 start=args.start,

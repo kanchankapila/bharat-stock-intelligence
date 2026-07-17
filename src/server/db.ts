@@ -2817,6 +2817,9 @@ runMigration('053_qs_mf_risk_adj_score',  `ALTER TABLE quant_scores ADD COLUMN m
 runMigration('053_qs_mf_macro_score',     `ALTER TABLE quant_scores ADD COLUMN mf_macro_score     REAL`);
 runMigration('053_qs_mf_composite_score', `ALTER TABLE quant_scores ADD COLUMN mf_composite_score REAL`);
 
+// walk-forward optimization per-fold breakdown (run_walk_forward in backtester.py)
+runMigration('069_backtesting_runs_wf_folds', `ALTER TABLE backtesting_runs ADD COLUMN walk_forward_folds_json TEXT`);
+
 // Keep startup diagnostics off stdout so stdio-based clients can parse JSON-RPC.
 console.error('[DB] Schema normalization complete (Phase 3.5)');
 

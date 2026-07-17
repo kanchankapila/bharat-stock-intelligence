@@ -2,6 +2,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { dbGet, dbAll, dbRun } from "../dbAsync";
 import { alphaQuant } from "../alphaQuantClient";
+import { enqueueWalkForwardOptimize, getWalkForwardOptimizeJobStatus } from "../queues";
 import { router, publicProcedure } from "../trpc";
 
 type RocResult = {
@@ -407,6 +408,57 @@ export const mlRouter = router({
           name:      input.runName ?? '',
         });
         return { run_id: data.run_id, message: 'Backtest complete' };
+      } catch (err: any) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: err.message });
+      }
+    }),
+
+  runWalkForwardOptimization: publicProcedure
+    .input(z.object({
+      start:       z.string().default('2020-01-01'),
+      end:         z.string().optional(),
+      mode:        z.enum(['rolling', 'anchored']).default('rolling'),
+      nFolds:      z.number().min(2).max(12).default(4),
+      isDays:      z.number().min(90).max(1500).default(365),
+      oosDays:     z.number().min(30).max(365).default(90),
+      stepDays:    z.number().min(30).max(365).default(90),
+      optimize:    z.boolean().default(true),
+      objective:   z.enum(['sharpe', 'sortino']).default('sharpe'),
+      minScore:    z.number().min(1).max(10).default(3),
+      horizonDays: z.number().min(5).max(30).default(15),
+      maxPositions:   z.number().min(5).max(50).default(20),
+      initialCapital: z.number().min(100000).default(1000000),
+      runName:        z.string().optional(),
+    }))
+    .mutation(async ({ input }) => {
+      try {
+        const { jobId } = await enqueueWalkForwardOptimize({
+          start: input.start,
+          end:   input.end ?? new Date().toISOString().split('T')[0],
+          mode:  input.mode,
+          n_folds: input.nFolds,
+          is_days: input.isDays,
+          oos_days: input.oosDays,
+          step_days: input.stepDays,
+          optimize: input.optimize,
+          objective: input.objective,
+          min_score: input.minScore,
+          horizon:   input.horizonDays,
+          max_pos:   input.maxPositions,
+          capital:   input.initialCapital,
+          name:      input.runName ?? '',
+        });
+        return { jobId, message: 'Walk-forward optimization queued' };
+      } catch (err: any) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: err.message });
+      }
+    }),
+
+  getWalkForwardStatus: publicProcedure
+    .input(z.object({ jobId: z.string() }))
+    .query(async ({ input }) => {
+      try {
+        return await getWalkForwardOptimizeJobStatus(input.jobId);
       } catch (err: any) {
         throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: err.message });
       }

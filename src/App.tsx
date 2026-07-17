@@ -1852,13 +1852,45 @@ const Backtest: React.FC<{ stocks?: MarketData[] }> = () => {
   const startBacktest = () => {
     setIsRunning(true);
     setResults(null);
-    backtestMutation.mutate({ 
-      symbol, 
-      strategy: 'Custom RSI+EMA', 
+    backtestMutation.mutate({
+      symbol,
+      strategy: 'Custom RSI+EMA',
       period: timeframe === 'Daily Candlesticks' ? '1D' : timeframe === '1H Momentum' ? '1H' : '15M',
       params: { rsiUpper, rsiLower, emaShort, emaLong }
     });
   };
+
+  // ── Walk-Forward Optimization (real engine: backtester.py run_walk_forward,
+  //    signal-based across the whole universe — separate from the RSI/EMA demo above) ──
+  const [wfStart, setWfStart] = useState('2020-01-01');
+  const [wfEnd, setWfEnd] = useState(new Date().toISOString().split('T')[0]);
+  const [wfMode, setWfMode] = useState<'rolling' | 'anchored'>('rolling');
+  const [wfObjective, setWfObjective] = useState<'sharpe' | 'sortino'>('sharpe');
+  const [wfJobId, setWfJobId] = useState<string | null>(null);
+  const [wfDone, setWfDone] = useState(false);
+
+  const wfMutation = trpc.runWalkForwardOptimization.useMutation({
+    onSuccess: (data) => setWfJobId(data.jobId),
+  });
+
+  const { data: wfStatus } = trpc.getWalkForwardStatus.useQuery(
+    { jobId: wfJobId ?? '' },
+    { enabled: !!wfJobId && !wfDone, refetchInterval: 4000 }
+  );
+
+  useEffect(() => {
+    if (wfStatus?.state === 'completed' || wfStatus?.state === 'failed') setWfDone(true);
+  }, [wfStatus?.state]);
+
+  const startWalkForward = () => {
+    setWfJobId(null);
+    setWfDone(false);
+    wfMutation.mutate({ start: wfStart, end: wfEnd, mode: wfMode, objective: wfObjective });
+  };
+
+  const wfRunning = !!wfJobId && !wfDone;
+  const wfCombined = wfStatus?.state === 'completed' ? wfStatus.result?.combined : null;
+  const wfFolds = wfStatus?.state === 'completed' ? wfStatus.result?.folds ?? [] : [];
 
   const handleSaveStrategy = () => {
     if (!strategyName) return;
@@ -2103,6 +2135,107 @@ const Backtest: React.FC<{ stocks?: MarketData[] }> = () => {
           </Card>
         </div>
       </div>
+
+      <Card title="Walk-Forward Optimization" icon={Zap}>
+        <p className="text-slate-400 text-xs mb-6 max-w-2xl">
+          Re-optimizes signal thresholds (min score / stop-loss / horizon) on rolling in-sample
+          windows and scores only the following out-of-sample window — the real universe-wide
+          engine (<span className="font-bold text-slate-300">backtester.py</span>), not the demo
+          simulation above.
+        </p>
+        <div className="flex flex-wrap items-end gap-4 mb-6">
+          <div className="space-y-1.5">
+            <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Start</label>
+            <input type="date" value={wfStart} onChange={(e) => setWfStart(e.target.value)}
+              className="glass-strong border border-slate-800/50 rounded-lg p-2 text-xs font-bold text-white" />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">End</label>
+            <input type="date" value={wfEnd} onChange={(e) => setWfEnd(e.target.value)}
+              className="glass-strong border border-slate-800/50 rounded-lg p-2 text-xs font-bold text-white" />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Mode</label>
+            <select value={wfMode} onChange={(e) => setWfMode(e.target.value as any)}
+              className="glass-strong border border-slate-800/50 rounded-lg p-2 text-xs font-bold text-white">
+              <option value="rolling">Rolling (365d IS / 90d OOS)</option>
+              <option value="anchored">Anchored (4 folds)</option>
+            </select>
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Objective</label>
+            <select value={wfObjective} onChange={(e) => setWfObjective(e.target.value as any)}
+              className="glass-strong border border-slate-800/50 rounded-lg p-2 text-xs font-bold text-white">
+              <option value="sharpe">Sharpe</option>
+              <option value="sortino">Sortino</option>
+            </select>
+          </div>
+          <button
+            onClick={startWalkForward}
+            disabled={wfRunning}
+            className={cn(
+              "py-2.5 px-6 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-xl text-[10px] tracking-widest uppercase transition-all",
+              wfRunning && "opacity-50 cursor-not-allowed"
+            )}
+          >
+            {wfRunning ? `Running... (${wfStatus?.state ?? 'queued'})` : "Run Walk-Forward"}
+          </button>
+        </div>
+
+        {wfStatus?.state === 'failed' && (
+          <p className="text-rose-400 text-xs font-bold">Failed: {wfStatus.failedReason}</p>
+        )}
+
+        {wfCombined && (
+          <div className="space-y-6 animate-in fade-in duration-500">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+              {[
+                { label: 'Total Return', value: `${wfCombined.total_return_pct ?? 0}%` },
+                { label: 'Sharpe', value: wfCombined.sharpe_ratio ?? 0 },
+                { label: 'Sortino', value: wfCombined.sortino_ratio ?? 0 },
+                { label: 'Win Rate', value: `${((wfCombined.win_rate ?? 0) * 100).toFixed(1)}%` },
+                { label: 'Max DD', value: `${wfCombined.max_drawdown_pct ?? 0}%` },
+              ].map(stat => (
+                <div key={stat.label} className="p-4 glass-strong border border-slate-800/50 rounded-2xl">
+                  <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest">{stat.label}</p>
+                  <p className="text-xl font-black mt-1 text-white tracking-tighter">{stat.value}</p>
+                </div>
+              ))}
+            </div>
+
+            {wfFolds.length > 0 && (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-800/50">
+                      <th className="text-left p-2">Fold</th>
+                      <th className="text-left p-2">OOS Window</th>
+                      <th className="text-left p-2">Best Params</th>
+                      <th className="text-left p-2">Trades</th>
+                      <th className="text-left p-2">OOS Sharpe</th>
+                      <th className="text-left p-2">OOS Win%</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {wfFolds.map((f: any) => (
+                      <tr key={f.fold} className="border-b border-slate-800/30">
+                        <td className="p-2 font-bold text-white">{f.fold}</td>
+                        <td className="p-2 text-slate-400">{f.oos_start} → {f.oos_end}</td>
+                        <td className="p-2 text-slate-400">
+                          score≥{f.best_params?.min_score}, SL {f.best_params?.stop_loss_pct?.toFixed?.(1)}%, {f.best_params?.horizon_days}d
+                        </td>
+                        <td className="p-2 text-slate-400">{f.n_trades}</td>
+                        <td className="p-2 text-slate-400">{f.oos_stats?.sharpe_ratio ?? '—'}</td>
+                        <td className="p-2 text-slate-400">{f.oos_stats?.win_rate != null ? `${(f.oos_stats.win_rate * 100).toFixed(1)}%` : '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+      </Card>
 
       <AnimatePresence>
         {showSaveModal && (

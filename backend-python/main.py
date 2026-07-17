@@ -113,11 +113,15 @@ def health_check():
 # ── Backtester ────────────────────────────────────────────────────────────────
 # Uses the canonical src/server/backtester.py (full version with slippage + commissions).
 
-from backtester import run_backtest, BacktestRequest  # type: ignore
+from backtester import run_backtest, BacktestRequest, run_walk_forward_optimize, WalkForwardRequest  # type: ignore
 
 @app.post("/api/v1/backtest")
 def api_run_backtest(req: BacktestRequest):
     return run_backtest(req)
+
+@app.post("/api/v1/walk-forward-optimize")
+def api_walk_forward_optimize(req: WalkForwardRequest):
+    return run_walk_forward_optimize(req)
 
 
 # ── TradingView bridge ────────────────────────────────────────────────────────
