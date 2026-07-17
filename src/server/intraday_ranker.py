@@ -51,6 +51,14 @@ MIN_TURNOVER_CR = 1.0
 # Don't size NEW intraday entries in the last stretch before NSE close (15:30 IST) -- a signal
 # firing this late has too little time left to reach an ATR target before same-day square-off.
 LATE_CUTOFF_MINUTES_BEFORE_CLOSE = 45
+
+# Max plausible same-day move vs. the last known daily close before an intraday_ohlcv price is
+# treated as corrupt rather than real. NSE circuit limits cap a genuine one-day move at ~20%;
+# anything beyond that is far more likely a symbol/provider-mapping bug than price action --
+# found live 2026-07-17: nse_stocks.RELINFRA.mcsymbol was mapped to BSE Ltd's MoneyControl
+# code, so intraday_ohlcv carried BSE's ~Rs 3589 price under RELINFRA's symbol (a 54x
+# mismatch vs. RELINFRA's real ~Rs 66 close) -- 17 symbols total had the same class of bug.
+PLAUSIBLE_INTRADAY_DEVIATION = 0.30
 NSE_CLOSE_MINUTES_IST = 15 * 60 + 30  # 15:30 IST
 
 
@@ -270,7 +278,17 @@ class IntradayRanker:
                     for x in reversed(rs)]  # ascending
             if not bars:
                 continue
-            cmp_ = intraday_cmp.get(sym, bars[-1]["close"])
+            daily_close = bars[-1]["close"]
+            cmp_ = intraday_cmp.get(sym)
+            if cmp_ is not None and daily_close:
+                deviation = abs(cmp_ - daily_close) / daily_close
+                if deviation > PLAUSIBLE_INTRADAY_DEVIATION:
+                    print(f"[IntradayRanker] {sym}: intraday_ohlcv price {cmp_} implausible vs "
+                          f"daily close {daily_close} ({deviation:.0%} off) -- falling back to "
+                          f"daily close, likely a bad mcsymbol mapping")
+                    cmp_ = None
+            if cmp_ is None:
+                cmp_ = daily_close
             atr = _wilder_atr(bars)
             out[sym] = (cmp_, atr)
         return out
