@@ -837,6 +837,18 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await runPython('high_flyer_retrospective.py', [], 10 * 60_000)
     .catch(e => console.warn('[QUEUE] high_flyer_retrospective failed:', (e as Error).message));
 
+  // Breakout classifier (Lever #4) -- moved here from the weekly retrain (2026-07-17): its
+  // only training source, stock_ohlcv, updates once a day at EOD, so daily is the cadence
+  // that actually tracks the data rather than going stale for most of the week.
+  await runPython('breakout_classifier.py', ['--train', '--score'], 30 * 60_000)
+    .catch(e => console.warn('[QUEUE] breakout_classifier train failed:', (e as Error).message));
+  // Day-movement predictor: cross-sectional model for which stocks will have an outsized
+  // intraday RANGE today (regardless of direction) -- purged-OOF AUC 0.76 on OHLCV alone
+  // (2026-07-17). Advisory-only for now: writes technical_signals.movement_probability,
+  // not yet blended into intraday_ranker.py's score or position sizing.
+  await runPython('movement_predictor.py', ['--train', '--score'], 30 * 60_000)
+    .catch(e => console.warn('[QUEUE] movement_predictor train failed:', (e as Error).message));
+
   // Intraday feedback loop: paper-trade today's intraday recs vs the day's OHLC, then reverse-
   // engineer which signals preceded the winners → learned blend weights the ranker leans on.
   await runPython('intraday_outcome_resolver.py', [], 120_000)
@@ -987,10 +999,9 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean }> 
   // and always reach T.finish() so the heartbeat is written.
   await T.run('ml-ensemble-train', () => runPython('ml_ensemble.py', ['--train', '--tune', '--score'], 90 * 60_000))
     .catch(e => console.warn('[QUEUE] ml-ensemble-train failed (weekly retrain continues):', (e as Error).message));
-  // Retrain the breakout classifier (Lever #4) on the accumulated feature history and
-  // refresh today's scores; purged-OOF AUC printed to logs for monitoring.
-  await runPython('breakout_classifier.py', ['--train', '--score'], 30 * 60_000)
-    .catch(e => console.warn('[QUEUE] breakout_classifier train failed:', (e as Error).message));
+  // breakout_classifier.py moved to daily ops (2026-07-17) -- its only training source,
+  // stock_ohlcv, updates once a day at EOD, so a weekly cadence left it stale against data
+  // that had already moved on for up to 6 of every 7 days.
   await runPython('cs_ranker.py', ['--train', '--score'], 30 * 60_000)
     .catch(e => console.warn('[QUEUE] cs_ranker retrain failed:', (e as Error).message));
   await T.run('strategy-optimizer', () => runPython('strategy_optimizer.py', [], 30 * 60_000));
