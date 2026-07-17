@@ -462,12 +462,20 @@ class Backtester:
         return trade_log, equity_series
 
     def _load_surveillance_symbols(self) -> set:
+        """Symbols under NSE surveillance (ASM/GSM) -- many GSM stages (and T2T-segment ASM
+        stocks) settle delivery-only, so a signal there doesn't behave like the rest of the
+        backtest universe. Was pointed at a table (asm_gsm_stocks) that doesn't exist on this
+        database, so this silently returned an empty set on every call -- run() below has been
+        filtering nothing for however long that's been the case. nse_stocks.is_asm/gsm_stage
+        are the live, actively-synced surveillance flags (same source intraday_ranker.py's
+        equivalent filter uses)."""
         try:
             rows = self.conn.execute(
-                "SELECT DISTINCT symbol FROM asm_gsm_stocks WHERE stage IS NOT NULL"
+                "SELECT symbol FROM nse_stocks WHERE is_asm=1 OR gsm_stage>0"
             ).fetchall()
             return {r[0] if isinstance(r, (list, tuple)) else r['symbol'] for r in rows}
-        except Exception:
+        except Exception as e:
+            print(f"[Backtester] surveillance filter failed, continuing unfiltered: {str(e)[:120]}")
             return set()
 
     def run_walk_forward(
