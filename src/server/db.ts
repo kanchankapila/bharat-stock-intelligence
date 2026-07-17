@@ -711,6 +711,24 @@ db.exec(`
     PRIMARY KEY (signal_type, horizon_days, market_regime)
   );
 
+  -- Append-only daily snapshot trail for signal_type_stats (which is overwrite-in-place, no
+  -- history). Lets a historical technical-signal rescan read win-rates as they stood on the
+  -- scan date instead of today's latest. Matching entry added to pgClient.ts's
+  -- pgEnsureColumns() -- this file alone does not reach live Postgres (see note below).
+  CREATE TABLE IF NOT EXISTS signal_type_stats_history (
+    snapshot_date     TEXT NOT NULL,
+    signal_type       TEXT NOT NULL,
+    horizon_days      INTEGER NOT NULL,
+    market_regime     TEXT NOT NULL DEFAULT 'ALL',
+    total_occurrences INTEGER DEFAULT 0,
+    win_count         INTEGER DEFAULT 0,
+    avg_return_pct    REAL,
+    median_return_pct REAL,
+    win_rate          REAL,
+    PRIMARY KEY (snapshot_date, signal_type, horizon_days, market_regime)
+  );
+  CREATE INDEX IF NOT EXISTS idx_sts_hist_date ON signal_type_stats_history(snapshot_date DESC);
+
   -- Daily FII/DII institutional flow from NSE
   CREATE TABLE IF NOT EXISTS fii_dii_flow (
     date      TEXT PRIMARY KEY,
@@ -914,6 +932,20 @@ db.exec(`
     last_updated TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now')),
     UNIQUE(signal_type, regime, sector)
   );
+
+  -- Append-only daily snapshot trail for signal_type_weights (see signal_type_stats_history
+  -- above for why -- loadLearnedWeights in technicalSignalsService.ts reads this for
+  -- historical rescans). Matching entry added to pgClient.ts's pgEnsureColumns().
+  CREATE TABLE IF NOT EXISTS signal_type_weights_history (
+    snapshot_date TEXT NOT NULL,
+    signal_type   TEXT NOT NULL,
+    regime        TEXT NOT NULL,
+    sector        TEXT NOT NULL DEFAULT 'ALL',
+    weight        REAL NOT NULL DEFAULT 1.0,
+    sample_count  INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (snapshot_date, signal_type, regime, sector)
+  );
+  CREATE INDEX IF NOT EXISTS idx_stw_hist_date ON signal_type_weights_history(snapshot_date DESC);
 
   -- Q-learning table: Q(state, action) values
   CREATE TABLE IF NOT EXISTS rl_q_table (

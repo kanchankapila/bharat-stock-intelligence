@@ -37,9 +37,16 @@ class FinBERTInference:
                 print("FinBERT is disabled via USE_FINBERT env var.")
 
     def predict(self, text: str) -> Dict[str, Any]:
+        # "available" distinguishes a genuine FinBERT-neutral verdict from the model simply
+        # not having run (never loaded, or this call threw). Both used to collapse into the
+        # same {"sentiment": "neutral", "score": 0.0} output, so a caller (or anyone
+        # monitoring sentiment quality) couldn't tell "FinBERT looked and said neutral" from
+        # "FinBERT never looked." infer() below still falls back to regex in both cases
+        # (that's the correct behavior either way) -- this only restores the ability to see
+        # which one happened.
         if not self.classifier:
-            return {"sentiment": "neutral", "score": 0.0}
-        
+            return {"sentiment": "neutral", "score": 0.0, "available": False}
+
         try:
             # Truncate text to BERT's max length (512 tokens, approx 300-400 words)
             result = self.classifier(text[:1500])[0]
@@ -51,11 +58,12 @@ class FinBERTInference:
             }
             return {
                 "sentiment": label_map.get(result["label"], "neutral"),
-                "score": result["score"]
+                "score": result["score"],
+                "available": True,
             }
         except Exception as e:
             print(f"Error during FinBERT inference: {e}")
-            return {"sentiment": "neutral", "score": 0.0}
+            return {"sentiment": "neutral", "score": 0.0, "available": False}
 
 
 class NLPScreenerInference:
@@ -419,6 +427,8 @@ class NLPScreenerInference:
             sentiment = finbert_res["sentiment"]
             sentiment_score = finbert_res["score"]
         else:
+            if not finbert_res.get("available", True):
+                print(f"[NLP] FinBERT unavailable, falling back to regex: {text[:60]!r}")
             # Fallback to regex if FinBERT is neutral or failed
             if bearish_score > bullish_score:
                 sentiment = "bearish"
@@ -519,6 +529,7 @@ class NLPScreenerInference:
             "bullish_hits": bullish_score,
             "bearish_hits": bearish_score,
             "signal_type_tag": signal_type_tag,
+            "finbert_available": finbert_res.get("available", True),
         }
 
 

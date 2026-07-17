@@ -181,10 +181,14 @@ class IntradayRanker:
         return (row["value"] if row else None) or "NEUTRAL"
 
     def _cmp_atr_map(self, symbols):
-        """Latest close + Wilder ATR from recent daily bars for the given symbols (one query)."""
+        """Current price (from today's intraday bars when available) + Wilder ATR (from daily
+        bars) for the given symbols."""
         if not symbols:
             return {}
         ph = ",".join("?" for _ in symbols)
+
+        # ATR still comes from daily bars -- the STOP_ATR_MULT/TARGET_ATR_MULT barrier
+        # multipliers above are tuned against daily-ATR magnitude, so this stays unchanged.
         rows = self.conn.execute(
             f"SELECT symbol, date, high, low, close FROM stock_ohlcv "
             f"WHERE symbol IN ({ph}) AND COALESCE(is_suspect,0)=0 "
@@ -195,13 +199,29 @@ class IntradayRanker:
             by_sym.setdefault(r["symbol"], [])
             if len(by_sym[r["symbol"]]) < 30:  # newest 30, still desc
                 by_sym[r["symbol"]].append(r)
+
+        # Today's freshest intraday bar per symbol, when intraday_fetcher.py has run at
+        # least once today (every 30 min during market hours). stock_ohlcv's row for
+        # "today" is only populated after EOD, so using it as `cmp` for a ranker that runs
+        # every 15 min intraday meant every pre-close run priced entries off yesterday's
+        # close. Falls back to the daily close when no intraday bar exists yet today.
+        today = date.today().isoformat()
+        intraday_rows = self.conn.execute(
+            f"SELECT symbol, close FROM ("
+            f"  SELECT symbol, close, "
+            f"    ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY datetime DESC) AS rn "
+            f"  FROM intraday_ohlcv WHERE symbol IN ({ph}) AND datetime >= ?"
+            f") t WHERE rn = 1", tuple(symbols) + (today,)
+        ).fetchall()
+        intraday_cmp = {r["symbol"]: float(r["close"]) for r in intraday_rows if r["close"] is not None}
+
         out = {}
         for sym, rs in by_sym.items():
             bars = [{"high": float(x["high"]), "low": float(x["low"]), "close": float(x["close"])}
                     for x in reversed(rs)]  # ascending
             if not bars:
                 continue
-            cmp_ = bars[-1]["close"]
+            cmp_ = intraday_cmp.get(sym, bars[-1]["close"])
             atr = _wilder_atr(bars)
             out[sym] = (cmp_, atr)
         return out

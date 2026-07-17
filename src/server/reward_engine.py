@@ -104,6 +104,18 @@ def _upsert_weight(
             sample_count=excluded.sample_count,
             last_updated=excluded.last_updated
     """, (signal_type, regime, sector, round(new_weight, 6), sample_count, now))
+    # Append-only daily trail (idempotent per day) so a historical technical-signal rescan
+    # can read weights as they stood on that scan date -- see loadLearnedWeights in
+    # technicalSignalsService.ts. signal_type_weights itself is overwrite-in-place.
+    today = datetime.date.today().isoformat()
+    conn.execute("""
+        INSERT INTO signal_type_weights_history
+            (snapshot_date, signal_type, regime, sector, weight, sample_count)
+        VALUES (?,?,?,?,?,?)
+        ON CONFLICT(snapshot_date, signal_type, regime, sector) DO UPDATE SET
+            weight=excluded.weight,
+            sample_count=excluded.sample_count
+    """, (today, signal_type, regime, sector, round(new_weight, 6), sample_count))
 
 
 def update_weights(

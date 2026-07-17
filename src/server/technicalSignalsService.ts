@@ -333,10 +333,39 @@ async function computeNiftyRegime(asOf: string): Promise<'BULL' | 'BEAR' | 'SIDE
   }
 }
 
-// Load per-signal win rates from signal_type_stats (populated by computeSignalTypeStats)
-async function loadSignalWinRates(horizonDays = 15, regime: 'BULL' | 'BEAR' | 'SIDEWAYS' | 'ALL' = 'ALL'): Promise<Map<string, number>> {
+// Load per-signal win rates from signal_type_stats (populated by computeSignalTypeStats).
+// asOf bounds a historical rescan to the stats snapshot as it stood on that date, via
+// signal_type_stats_history -- signal_type_stats itself is overwrite-in-place (no history),
+// so without this bound a rescan of a past date would silently pick up win-rates that were
+// only learned after that date. Live scans (asOf omitted or === today) skip the extra
+// history lookup and read the current table directly, same as before.
+async function loadSignalWinRates(horizonDays = 15, regime: 'BULL' | 'BEAR' | 'SIDEWAYS' | 'ALL' = 'ALL', asOf?: string): Promise<Map<string, number>> {
   const map = new Map<string, number>();
+  const today = new Date().toISOString().slice(0, 10);
+  const historical = !!asOf && asOf !== today;
   try {
+    if (historical) {
+      const snap = await dbGet(
+        `SELECT MAX(snapshot_date) as d FROM signal_type_stats_history WHERE snapshot_date <= ?`,
+        [asOf]
+      ) as { d: string | null } | undefined;
+      if (!snap?.d) return map; // no snapshot old enough to be safe for this date
+      const regimeRows = await dbAll(`
+        SELECT signal_type, win_rate FROM signal_type_stats_history
+        WHERE snapshot_date = ? AND horizon_days = ? AND market_regime = ? AND total_occurrences >= 10
+      `, [snap.d, horizonDays, regime]) as { signal_type: string; win_rate: number }[];
+      for (const r of regimeRows) map.set(r.signal_type, r.win_rate);
+
+      const allRows = await dbAll(`
+        SELECT signal_type, win_rate FROM signal_type_stats_history
+        WHERE snapshot_date = ? AND horizon_days = ? AND market_regime = 'ALL' AND total_occurrences >= 20
+      `, [snap.d, horizonDays]) as { signal_type: string; win_rate: number }[];
+      for (const r of allRows) {
+        if (!map.has(r.signal_type)) map.set(r.signal_type, r.win_rate);
+      }
+      return map;
+    }
+
     // First try regime-specific rates (require ≥10 samples to be reliable)
     const regimeRows = await dbAll(`
       SELECT signal_type, win_rate FROM signal_type_stats
@@ -356,7 +385,25 @@ async function loadSignalWinRates(horizonDays = 15, regime: 'BULL' | 'BEAR' | 'S
   return map;
 }
 
-async function loadLearnedWeights(regime: string): Promise<Map<string, number>> {
+// asOf bounds a historical rescan the same way as loadSignalWinRates above, via
+// signal_type_weights_history.
+async function loadLearnedWeights(regime: string, asOf?: string): Promise<Map<string, number>> {
+  const today = new Date().toISOString().slice(0, 10);
+  if (asOf && asOf !== today) {
+    const snap = await dbGet(
+      `SELECT MAX(snapshot_date) as d FROM signal_type_weights_history WHERE snapshot_date <= ?`,
+      [asOf]
+    ) as { d: string | null } | undefined;
+    if (!snap?.d) return new Map();
+    const rows = await dbAll(`
+      SELECT signal_type, weight
+      FROM signal_type_weights_history
+      WHERE snapshot_date = ? AND (regime = ? OR regime = 'ALL') AND sector IN ('ALL', 'Unknown')
+      ORDER BY regime DESC
+    `, [snap.d, regime]) as { signal_type: string; weight: number }[];
+    return new Map(rows.map(r => [r.signal_type, r.weight]));
+  }
+
   const rows = await dbAll(`
     SELECT signal_type, weight
     FROM signal_type_weights
@@ -1047,8 +1094,8 @@ export async function runTechnicalSignalScan(options: {
   try {
     // ── Pre-scan context (computed once, applied to all stocks) ──────────────
     const niftyRegime      = await computeNiftyRegime(scanDate);
-    const winRates         = await loadSignalWinRates(15, niftyRegime);
-    const learnedWeights   = await loadLearnedWeights(niftyRegime);
+    const winRates         = await loadSignalWinRates(15, niftyRegime, scanDate);
+    const learnedWeights   = await loadLearnedWeights(niftyRegime, scanDate);
     const fii3dNet         = await loadFIIFlow3d(scanDate);
     const earningsCalendar = await loadEarningsCalendar(scanDate);
     const newsSentiment    = await loadRecentNewsSentiment(scanDate, 2); // 48h of news as of scan date
@@ -1637,6 +1684,19 @@ export async function computeSignalTypeStats(): Promise<{ updated: number }> {
       avg_return_pct=excluded.avg_return_pct, median_return_pct=excluded.median_return_pct,
       win_rate=excluded.win_rate, last_computed=excluded.last_computed
   `;
+  // Append-only daily trail (idempotent per day) so a historical rescan can read win-rates
+  // as they stood on that scan date instead of always the latest -- see loadSignalWinRates.
+  const historySql = `
+    INSERT INTO signal_type_stats_history
+      (snapshot_date, signal_type, horizon_days, market_regime, total_occurrences, win_count,
+       avg_return_pct, median_return_pct, win_rate)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(snapshot_date, signal_type, horizon_days, market_regime) DO UPDATE SET
+      total_occurrences=excluded.total_occurrences, win_count=excluded.win_count,
+      avg_return_pct=excluded.avg_return_pct, median_return_pct=excluded.median_return_pct,
+      win_rate=excluded.win_rate
+  `;
+  const snapshotDate = new Date().toISOString().slice(0, 10);
 
   let updated = 0;
   await dbTransaction(async (tx) => {
@@ -1647,7 +1707,9 @@ export async function computeSignalTypeStats(): Promise<{ updated: number }> {
       const median = sorted.length > 0 ? sorted[Math.floor(sorted.length / 2)] : 0;
       const avg    = acc.returns.length > 0
         ? acc.returns.reduce((a, b) => a + b, 0) / acc.returns.length : 0;
-      await tx.run(upsertSql, [sigType, parseInt(horizon), regime, acc.total, acc.wins, avg, median, acc.wins / acc.total]);
+      const winRate = acc.wins / acc.total;
+      await tx.run(upsertSql, [sigType, parseInt(horizon), regime, acc.total, acc.wins, avg, median, winRate]);
+      await tx.run(historySql, [snapshotDate, sigType, parseInt(horizon), regime, acc.total, acc.wins, avg, median, winRate]);
       updated++;
     }
   });

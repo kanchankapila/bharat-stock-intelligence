@@ -244,6 +244,12 @@ class FeatureEngineer:
         feat["trailing_pe"] = np.where(ey.notna() & (ey != 0), 100.0 / ey, np.nan)
         return feat
 
+    # Max trading days a forward-filled macro/sentiment value may carry before it reads as
+    # missing (NaN) again. Without this, a multi-week gap in a fetcher (e.g. a stalled
+    # global_macro_fetcher.py run) would silently carry a stale value indefinitely across
+    # the whole feature window instead of surfacing as missing data.
+    FFILL_LIMIT_DAYS = 5
+
     def _merge_macro(self, feat: pd.DataFrame) -> pd.DataFrame:
         """India macro + global macro from macro_asset_prices."""
         macro_syms = {
@@ -259,7 +265,7 @@ class FeatureEngineer:
             df = df.set_index("date")
             df = df[df.index.notnull()]
             if not df.empty:
-                feat[col] = df["ret_5d"].reindex(feat.index, method="ffill")
+                feat[col] = df["ret_5d"].reindex(feat.index, method="ffill", limit=self.FFILL_LIMIT_DAYS)
 
         # Nifty metrics
         nifty = read_df("SELECT date, close FROM stock_ohlcv WHERE symbol='NIFTY50' ORDER BY date")
@@ -267,8 +273,8 @@ class FeatureEngineer:
         nifty = nifty.set_index("date")
         nifty = nifty[nifty.index.notnull()]
         if not nifty.empty:
-            feat["nifty_ret_5d"]  = nifty["close"].pct_change(5).reindex(feat.index, method="ffill")
-            feat["nifty_ret_21d"] = nifty["close"].pct_change(21).reindex(feat.index, method="ffill")
+            feat["nifty_ret_5d"]  = nifty["close"].pct_change(5).reindex(feat.index, method="ffill", limit=self.FFILL_LIMIT_DAYS)
+            feat["nifty_ret_21d"] = nifty["close"].pct_change(21).reindex(feat.index, method="ffill", limit=self.FFILL_LIMIT_DAYS)
 
         # India VIX from macro_asset_prices (true implied-vol index; was a weak NSEBANK proxy)
         vix_df = read_df("SELECT date, close FROM macro_asset_prices WHERE symbol='INDIAVIX' ORDER BY date")
@@ -276,7 +282,7 @@ class FeatureEngineer:
         vix_df = vix_df.set_index("date")
         vix_df = vix_df[vix_df.index.notnull()]
         if not vix_df.empty:
-            feat["nifty_vix"] = vix_df["close"].reindex(feat.index, method="ffill")
+            feat["nifty_vix"] = vix_df["close"].reindex(feat.index, method="ffill", limit=self.FFILL_LIMIT_DAYS)
 
         return feat
 
@@ -301,10 +307,10 @@ class FeatureEngineer:
         rows = rows[rows.index.notnull()]
         if not rows.empty:
             feat["news_sentiment_score"] = rows["score"].rolling(3).mean().reindex(
-                feat.index, method="ffill"
+                feat.index, method="ffill", limit=self.FFILL_LIMIT_DAYS
             )
             feat["news_impact_count"] = rows["high_count"].rolling(5).sum().reindex(
-                feat.index, method="ffill"
+                feat.index, method="ffill", limit=self.FFILL_LIMIT_DAYS
             )
         return feat
 

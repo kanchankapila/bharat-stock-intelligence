@@ -192,6 +192,33 @@ export async function pgEnsureColumns(): Promise<void> {
        checklist_data TEXT,
        fetched_at TIMESTAMPTZ
      )`,
+    // Append-only daily snapshot trail for signal_type_stats/signal_type_weights, which are
+    // themselves overwrite-in-place (no history). A historical technical-signal rescan needs
+    // to read win-rates/weights as they stood on the scan date, not today's latest -- see
+    // loadSignalWinRates/loadLearnedWeights in technicalSignalsService.ts.
+    `CREATE TABLE IF NOT EXISTS signal_type_stats_history (
+       snapshot_date TEXT NOT NULL,
+       signal_type TEXT NOT NULL,
+       horizon_days BIGINT NOT NULL,
+       market_regime TEXT NOT NULL DEFAULT 'ALL',
+       total_occurrences BIGINT DEFAULT 0,
+       win_count BIGINT DEFAULT 0,
+       avg_return_pct DOUBLE PRECISION,
+       median_return_pct DOUBLE PRECISION,
+       win_rate DOUBLE PRECISION,
+       PRIMARY KEY (snapshot_date, signal_type, horizon_days, market_regime)
+     )`,
+    `CREATE INDEX IF NOT EXISTS idx_sts_hist_date ON signal_type_stats_history(snapshot_date DESC)`,
+    `CREATE TABLE IF NOT EXISTS signal_type_weights_history (
+       snapshot_date TEXT NOT NULL,
+       signal_type TEXT NOT NULL,
+       regime TEXT NOT NULL,
+       sector TEXT NOT NULL DEFAULT 'ALL',
+       weight DOUBLE PRECISION NOT NULL DEFAULT 1.0,
+       sample_count BIGINT NOT NULL DEFAULT 0,
+       PRIMARY KEY (snapshot_date, signal_type, regime, sector)
+     )`,
+    `CREATE INDEX IF NOT EXISTS idx_stw_hist_date ON signal_type_weights_history(snapshot_date DESC)`,
   ];
   const client = await getPool().connect();
   try {

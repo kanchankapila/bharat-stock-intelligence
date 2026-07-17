@@ -145,23 +145,13 @@ def train_hmm(lookback_days: int = 1260) -> dict:
     return {"state_labels": state_labels, "n_samples": len(df)}
 
 
-def update_regime(date: str = None) -> str:
-    """Run Viterbi on recent history, write today's regime to market_regimes."""
-    if date is None:
-        date = datetime.today().strftime("%Y-%m-%d")
-
-    if not HMM_PATH.exists():
-        print("[HMM] No model — run --mode train first")
-        return "SIDEWAYS"
-
-    with open(HMM_PATH, "rb") as f:
-        bundle = pickle.load(f)
-    model: hmm.GaussianHMM = bundle["model"]
-    scaler: StandardScaler = bundle["scaler"]
-    state_labels: dict      = bundle["state_labels"]
-
+def _label_day(model, scaler, state_labels: dict, date: str, publish_live: bool = True) -> str:
+    """Causal single-day regime label: Viterbi over a trailing 120-day window ending at
+    `date`, and only `date`. Shared by update_regime (live) and backfill_regimes (looped
+    per day) so both paths use identical, leak-free logic -- neither ever lets a later
+    date's observations influence an earlier date's label.
+    """
     df = _load_hmm_features(lookback_days=120, as_of_date=date)  # recent 6 months for inference
-
     if df.empty:
         return "SIDEWAYS"
 
@@ -190,54 +180,68 @@ def update_regime(date: str = None) -> str:
                                                for k, v in features_dict.items()})),
     )
 
-    # ── Publish live regime to app_settings so ML ensemble, queues, and the
-    #    technical-signals scanner can gate dynamically without manual wiring. ──
-    execute(
-        """INSERT INTO app_settings (key, value)
-           VALUES ('current_nifty_regime', ?)
-           ON CONFLICT(key) DO UPDATE SET value = excluded.value""",
-        (today_regime,),
-    )
+    if publish_live:
+        # Publish live regime to app_settings so ML ensemble, queues, and the technical-signals
+        # scanner can gate dynamically without manual wiring. Skipped during backfill_regimes'
+        # per-day loop so relabeling past dates doesn't clobber this with a stale historical value.
+        execute(
+            """INSERT INTO app_settings (key, value)
+               VALUES ('current_nifty_regime', ?)
+               ON CONFLICT(key) DO UPDATE SET value = excluded.value""",
+            (today_regime,),
+        )
+        print(f"[HMM] Published current_nifty_regime={today_regime} to app_settings")
 
     print(f"[HMM] Regime for {date}: {today_regime} (prob={today_prob:.2f}, state={today_state})")
-    print(f"[HMM] Published current_nifty_regime={today_regime} to app_settings")
     return today_regime
 
 
+def update_regime(date: str = None) -> str:
+    """Run Viterbi on recent history, write today's regime to market_regimes, and
+    publish it live to app_settings."""
+    if date is None:
+        date = datetime.today().strftime("%Y-%m-%d")
+
+    if not HMM_PATH.exists():
+        print("[HMM] No model — run --mode train first")
+        return "SIDEWAYS"
+
+    with open(HMM_PATH, "rb") as f:
+        bundle = pickle.load(f)
+    return _label_day(bundle["model"], bundle["scaler"], bundle["state_labels"], date, publish_live=True)
+
+
 def backfill_regimes(start_date: str, end_date: str) -> int:
-    """Label every trading day in [start_date, end_date] in one Viterbi pass and upsert market_regimes."""
+    """Label every trading day in [start_date, end_date], one causal day at a time.
+
+    Each day is decoded from ONLY a trailing 120-day window ending at that day (identical
+    discipline to update_regime) -- never a single joint Viterbi pass over the whole
+    [start_date, end_date] range. Viterbi finds the single best STATE SEQUENCE for whatever
+    window it's given, so decoding the full range in one shot let a later date's
+    observations shape an earlier date's label -- a real look-ahead leak for any consumer
+    that reads market_regimes as an entry-time feature (e.g. ml_ensemble.py's nifty_regime).
+    """
     if not HMM_PATH.exists():
         print("[HMM] No model — run --mode train first")
         return 0
     with open(HMM_PATH, "rb") as f:
         bundle = pickle.load(f)
-    model: hmm.GaussianHMM = bundle["model"]
-    scaler: StandardScaler = bundle["scaler"]
-    state_labels: dict      = bundle["state_labels"]
+    model, scaler, state_labels = bundle["model"], bundle["scaler"], bundle["state_labels"]
 
-    df = _load_hmm_features(lookback_days=2000, as_of_date=end_date)
-    df = df[df.index >= pd.to_datetime(start_date)]
-    if df.empty:
-        print("[HMM] no features in range")
+    trading_days = _read_dated(
+        "SELECT date FROM stock_ohlcv WHERE symbol='NIFTY50' AND date>=? AND date<=? ORDER BY date",
+        (start_date, end_date),
+    ).index
+    if len(trading_days) == 0:
+        print("[HMM] no trading days in range")
         return 0
 
-    X = scaler.transform(df.fillna(0))
-    states    = model.predict(X)
-    fwd_probs = model.predict_proba(X)
     n = 0
-    for ts, st, probs in zip(df.index, states, fwd_probs):
+    for ts in trading_days:
         d = ts.strftime("%Y-%m-%d")
-        st = int(st)
-        regime = state_labels.get(st, "SIDEWAYS")
-        execute(
-            """INSERT INTO market_regimes (date, regime, regime_prob, hmm_state, computed_at)
-               VALUES (?,?,?,?,CURRENT_TIMESTAMP)
-               ON CONFLICT(date) DO UPDATE SET
-                 regime=excluded.regime, regime_prob=excluded.regime_prob,
-                 hmm_state=excluded.hmm_state, computed_at=CURRENT_TIMESTAMP""",
-            (d, regime, float(probs[st]), st))
+        _label_day(model, scaler, state_labels, d, publish_live=False)
         n += 1
-    print(f"[HMM] backfilled {n} regime days {start_date}..{end_date}")
+    print(f"[HMM] backfilled {n} regime days {start_date}..{end_date} (causal, day-by-day)")
     return n
 
 
