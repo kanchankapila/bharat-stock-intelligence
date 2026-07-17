@@ -120,10 +120,43 @@ REGIME_CAT_TILT = {
 }
 
 
+_regime_tilt_override = None  # lazy-loaded: None = not yet checked, {} = checked, nothing learned yet
+
+
+def _load_regime_tilt_override():
+    """REGIME_CAT_TILT below is hand-set, never backtested — mirrors the same "dressed up as
+    regime-aware, actually intuition" gap CATEGORY_WEIGHTS/SOURCE_WEIGHTS had before
+    strategy_optimizer.py started fitting those from real outcomes. This wires the same
+    override-from-app_settings pattern scoring_engine.py already uses for those, so a future
+    backtest-fit tilt can be loaded here without another code change.
+
+    Fitting one properly is currently blocked by a real data gap, not a code gap:
+    stock_factor_breakdown is a current-state-only table (PRIMARY KEY symbol+timeframe, no
+    history), so there is no historical per-category score to backtest a regime-conditional
+    edge against. A daily-snapshotted stock_factor_breakdown_history table would need to exist
+    and accumulate real regime-labeled history before this key should ever be populated —
+    until then this intentionally returns {} and REGIME_CAT_TILT's hand-set values stand.
+    """
+    global _regime_tilt_override
+    if _regime_tilt_override is not None:
+        return _regime_tilt_override
+    try:
+        conn = connect()
+        row = conn.execute(
+            "SELECT value FROM app_settings WHERE key = 'optimal_regime_cat_tilt'"
+        ).fetchone()
+        _regime_tilt_override = json.loads(row['value']) if row and row['value'] else {}
+    except Exception as e:
+        print(f"[UnifiedRanker] Could not load optimal_regime_cat_tilt override: {e}")
+        _regime_tilt_override = {}
+    return _regime_tilt_override
+
+
 def regime_cat_weights(regime):
     """CAT_BASE_WT with the regime's category tilt applied (returns a fresh dict; an unknown
     or SIDEWAYS regime yields a plain copy of CAT_BASE_WT)."""
-    tilt = REGIME_CAT_TILT.get(regime, {})
+    tilt_map = _load_regime_tilt_override() or REGIME_CAT_TILT
+    tilt = tilt_map.get(regime, {})
     return {cat: base * tilt.get(cat, 1.0) for cat, base in CAT_BASE_WT.items()}
 
 CONVICTION_TIERS = [

@@ -11,16 +11,12 @@ interface Props {
 export const MaxPainAlerts: React.FC<Props> = ({ onSelectStock }) => {
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Fallback high-fidelity Max Pain dataset
-  const maxPainData = [
-    { symbol: 'SBIN', name: 'State Bank of India', ltp: 765.4, maxPain: 790.0, diffPct: -3.11, rec: 'Bullish Reversion Target', strength: 'Strong Magnet' },
-    { symbol: 'TCS', name: 'Tata Consultancy Services Ltd.', ltp: 3880.0, maxPain: 4000.0, diffPct: -3.00, rec: 'Bullish Reversion Target', strength: 'Moderate Magnet' },
-    { symbol: 'INFY', name: 'Infosys Ltd.', ltp: 1420.5, maxPain: 1460.0, diffPct: -2.71, rec: 'Bullish Reversion Target', strength: 'Moderate Magnet' },
-    { symbol: 'RELIANCE', name: 'Reliance Industries Ltd.', ltp: 2450.2, maxPain: 2400.0, diffPct: 2.09, rec: 'Bearish Reversion Target', strength: 'Weak Magnet' },
-    { symbol: 'HDFCBANK', name: 'HDFC Bank Ltd.', ltp: 1530.5, maxPain: 1500.0, diffPct: 2.03, rec: 'Bearish Reversion Target', strength: 'Weak Magnet' },
-  ];
+  const { data: maxPainData = [], isLoading, isError } = trpc.getMaxPainAlerts.useQuery(undefined, {
+    staleTime: 5 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
+  });
 
-  const filtered = maxPainData.filter(d => 
+  const filtered = maxPainData.filter(d =>
     d.symbol.toLowerCase().includes(searchQuery.toLowerCase()) ||
     d.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
@@ -52,7 +48,15 @@ export const MaxPainAlerts: React.FC<Props> = ({ onSelectStock }) => {
 
       {/* List Container */}
       <div className="flex-grow overflow-y-auto pr-1 terminal-scrollbar min-h-0">
-        {filtered.length === 0 ? (
+        {isLoading ? (
+          <div className="flex items-center justify-center h-full text-slate-500 text-xs font-bold">
+            Loading live Max Pain data&hellip;
+          </div>
+        ) : isError ? (
+          <div className="flex items-center justify-center h-full text-slate-500 text-xs font-bold">
+            Failed to load Max Pain data.
+          </div>
+        ) : filtered.length === 0 ? (
           <div className="flex items-center justify-center h-full text-slate-500 text-xs font-bold">
             No Max Pain magnet alignments.
           </div>
@@ -88,7 +92,7 @@ export const MaxPainAlerts: React.FC<Props> = ({ onSelectStock }) => {
                     {/* Middle Numbers */}
                     <div className="grid grid-cols-3 gap-4 flex-grow max-w-xs text-center sm:text-left">
                       <div>
-                        <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest block">LTP</span>
+                        <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest block">Prev Close</span>
                         <span className="text-xs font-bold text-slate-200 font-mono">₹{item.ltp.toFixed(1)}</span>
                       </div>
                       <div>

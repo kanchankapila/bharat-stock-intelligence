@@ -25,7 +25,7 @@ Run:  python exit_labeler.py
 import argparse
 import datetime
 
-from db_compat import read_df, executemany, query_all
+from db_compat import read_df, executemany, query_all, execute
 
 CHANDELIER_ATR_MULT = 3.0   # trailing stop = highest-high-since-entry − 3×ATR (mirrors resolver)
 ATR_WINDOW = 14
@@ -177,6 +177,42 @@ def _entries(horizon: int | None, limit: int | None) -> list:
     return query_all(sql, tuple(params))
 
 
+def _mark_delisted(candidate_symbols: list[str]) -> None:
+    """Flip nse_stocks.status to DELISTED for symbols whose stock_ohlcv feed has genuinely
+    stopped (latest bar >30 calendar days old), confirmed independently of any one signal's
+    date so a temporary data gap around a single signal doesn't get misread as delisting.
+    Historical rows (stock_ohlcv, signal_outcomes, signal_excursions) are never touched —
+    only the nse_stocks status flag, so screens/search stop treating dead tickers as tradeable
+    while training queries keep full access to their price history.
+    """
+    if not candidate_symbols:
+        return
+    placeholders = ",".join("?" for _ in candidate_symbols)
+    stale_cutoff = (datetime.date.today() - datetime.timedelta(days=30)).isoformat()
+    confirmed = query_all(
+        f"SELECT symbol, MAX(date) AS last_date FROM stock_ohlcv "
+        f"WHERE symbol IN ({placeholders}) GROUP BY symbol "
+        f"HAVING MAX(date) < ?",
+        (*candidate_symbols, stale_cutoff),
+    )
+    if not confirmed:
+        return
+    to_delist = [r["symbol"] for r in confirmed]
+    already = query_all(
+        f"SELECT symbol FROM nse_stocks WHERE symbol IN ({','.join('?' for _ in to_delist)}) "
+        f"AND status = 'DELISTED'",
+        tuple(to_delist),
+    )
+    already_set = {r["symbol"] for r in already}
+    newly = [s for s in to_delist if s not in already_set]
+    if not newly:
+        return
+    for sym in newly:
+        execute("UPDATE nse_stocks SET status = 'DELISTED' WHERE symbol = ?", (sym,))
+    print(f"[EXIT] Marked {len(newly)} symbols DELISTED in nse_stocks "
+          f"(no stock_ohlcv update since before {stale_cutoff}): {newly}")
+
+
 def run(horizon: int | None = None, limit: int | None = None) -> int:
     """Compute excursion labels for signal_outcomes entries and upsert signal_excursions.
     Returns rows written."""
@@ -187,6 +223,9 @@ def run(horizon: int | None = None, limit: int | None = None) -> int:
 
     rows = []
     missing_ohlcv: list[str] = []
+    stale_missing: list[str] = []   # zero forward bars AND the horizon window has long since
+                                     # elapsed — likely delisted/suspended, not "too recent to label"
+    today = datetime.date.today()
     for e in entries:
         symbol, signal_date, hd, entry = e["symbol"], e["signal_date"], e["horizon_days"], e["entry_price"]
         ohlcv = read_df(
@@ -197,6 +236,16 @@ def run(horizon: int | None = None, limit: int | None = None) -> int:
         )
         if ohlcv.empty:
             missing_ohlcv.append(f"{symbol}@{signal_date}")
+            # A generous 2.5x calendar-day buffer over the horizon (weekends/holidays) — if
+            # that's elapsed with zero forward bars, the feed has stopped, not "not caught up
+            # yet". This is the subset that actually drives survivorship bias; the rest are
+            # simply too recent to label and will resolve on a later run.
+            try:
+                sig_dt = datetime.date.fromisoformat(str(signal_date)[:10])
+                if (today - sig_dt).days > int(hd) * 2.5 + 10:
+                    stale_missing.append(symbol)
+            except ValueError:
+                pass
             continue
         prior = read_df(
             "SELECT high, low, close FROM stock_ohlcv "
@@ -218,10 +267,15 @@ def run(horizon: int | None = None, limit: int | None = None) -> int:
         ))
 
     if missing_ohlcv:
-        print(f"[EXIT] WARNING: {len(missing_ohlcv)}/{len(entries)} entries skipped — "
-              f"no OHLCV coverage (delisted/suspended stocks). "
-              f"These are excluded from excursion labels, introducing survivorship bias "
-              f"in exit_policy training. First 10: {missing_ohlcv[:10]}")
+        too_recent = len(missing_ohlcv) - len(stale_missing)
+        print(f"[EXIT] {len(missing_ohlcv)}/{len(entries)} entries skipped for zero forward "
+              f"OHLCV coverage — {too_recent} too recent to label yet (will resolve on a "
+              f"later run), {len(set(stale_missing))} likely delisted/suspended (feed stopped "
+              f"long ago; permanently excluded from excursion labels — this subset is the real "
+              f"survivorship-bias source). First 10 likely-delisted: {sorted(set(stale_missing))[:10]}")
+
+        if stale_missing:
+            _mark_delisted(sorted(set(stale_missing)))
 
     if not rows:
         print("[EXIT] No OHLCV coverage for the selected entries.")

@@ -256,7 +256,46 @@ async function processConfluenceOutcomes(_job: Job): Promise<void> {
 async function processStockRefresh(_job: Job): Promise<{ count: number; persisted: number }> {
   const { fetchAndPersistOHLCVData } = await import('./liveStockData');
   const result = await fetchAndPersistOHLCVData();
+  await checkPriceAlerts().catch(e => console.error('[QUEUE] checkPriceAlerts failed:', (e as Error).message));
   return result;
+}
+
+// Evaluates ACTIVE price_alerts against the just-refreshed live prices and pushes a broadcastAlert
+// (sse.ts) for each threshold crossed — the piece that was missing: the SSE pipe + AlertsToast UI
+// already existed end-to-end, nothing ever called broadcastAlert().
+async function checkPriceAlerts(): Promise<void> {
+  const active = await dbAll<{ id: number; userId: string; symbol: string; condition: string; thresholdPrice: number }>(
+    `SELECT id, "userId", symbol, condition, "thresholdPrice" FROM price_alerts WHERE status = 'ACTIVE'`
+  );
+  if (active.length === 0) return;
+
+  const symbols = new Set(active.map(a => a.symbol));
+  const { getOrRefreshAllStocks } = await import('./liveStockData');
+  const stocks = await getOrRefreshAllStocks();
+  const priceBySymbol = new Map<string, number>();
+  for (const s of stocks as any[]) {
+    if (symbols.has(s.symbol)) priceBySymbol.set(s.symbol, s.price);
+  }
+
+  const { broadcastAlert } = await import('./sse');
+  for (const alert of active) {
+    const price = priceBySymbol.get(alert.symbol);
+    if (price === undefined || !Number.isFinite(price)) continue;
+    const crossed = alert.condition === 'ABOVE' ? price >= alert.thresholdPrice : price <= alert.thresholdPrice;
+    if (!crossed) continue;
+
+    await dbRun(
+      `UPDATE price_alerts SET status = 'TRIGGERED', "triggeredAt" = now(), "triggeredPrice" = ? WHERE id = ? AND status = 'ACTIVE'`,
+      [price, alert.id]
+    );
+    broadcastAlert({
+      id: `price-alert-${alert.id}`,
+      type: 'SUCCESS',
+      title: `${alert.symbol} ${alert.condition === 'ABOVE' ? 'crossed above' : 'fell below'} ₹${alert.thresholdPrice}`,
+      message: `Now ₹${price.toFixed(2)}`,
+      userId: alert.userId,
+    });
+  }
 }
 
 // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ AI-signals worker processor ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
@@ -545,6 +584,12 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   // 3 min was clipping on the 2nd daily-ops run (observed 2026-07-14 07:54 under load).
   await runPython('fundamentals_snapshot.py', [], 360_000)
     .catch(e => console.warn('[QUEUE] fundamentals_snapshot failed:', (e as Error).message));
+
+  // Same rationale as fundamentals_snapshot above: stock_factor_breakdown is current-state-only
+  // (overwritten in place), so this is the only way a future regime-conditional backtest of
+  // unified_ranker's REGIME_CAT_TILT will ever have history to fit against.
+  await runPython('factor_breakdown_snapshot.py', [], 120_000)
+    .catch(e => console.warn('[QUEUE] factor_breakdown_snapshot failed:', (e as Error).message));
 
   // analyst_estimates_snapshot moved to weekly retrain (2328 stocks × 3 calls × 0.4s = ~47 min)
 

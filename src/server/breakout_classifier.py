@@ -193,7 +193,7 @@ def _make_model(spw: float):
     )
 
 
-def train(report_only: bool = False) -> dict:
+def train(report_only: bool = False, leak_check: bool = False) -> dict:
     from sklearn.metrics import roc_auc_score
 
     df = load_labeled_features()
@@ -219,7 +219,19 @@ def train(report_only: bool = False) -> dict:
     # forward-label windows of adjacent folds massively overlapping -> leakage -> a
     # fantasy AUC. We hold out contiguous date blocks and drop `horizon` embargo dates
     # between train and validation so no training row's forward window touches a val date.
-    dates = np.array(sorted(df["date"].unique()))
+    #
+    # This purged-OOF number is also used as the promotion-gate metric AND as the last check
+    # before refitting on all data — the same figure serves as both tuning signal and final
+    # sign-off. To get one independent read, carve off the most recent HOLDOUT_FRAC of dates
+    # up front; the walk-forward CV loop below never trains or validates on them. A model
+    # fit on everything before the holdout is scored against it separately, after CV.
+    HOLDOUT_FRAC = 0.15
+    all_dates_sorted = np.array(sorted(df["date"].unique()))
+    n_holdout_dates = max(EMBARGO, int(len(all_dates_sorted) * HOLDOUT_FRAC))
+    holdout_dates = set(all_dates_sorted[-n_holdout_dates:]) if len(all_dates_sorted) > 4 * EMBARGO else set()
+    cv_df = df[~df["date"].isin(holdout_dates)] if holdout_dates else df
+
+    dates = np.array(sorted(cv_df["date"].unique()))
     oof = np.full(len(y), np.nan)
     n_folds = 4
     if len(dates) < 2 * EMBARGO:
@@ -257,8 +269,59 @@ def train(report_only: bool = False) -> dict:
     print(f"[Breakout] n={len(y)} base_rate={base_rate:.3f} purged-OOF AUC={auc:.4f} "
           f"top-decile breakout rate={top_rate:.3f} (lift {lift:.2f}x)")
 
+    # Held-out test AUC — independent of the OOF number above. A model trained on everything
+    # up to (holdout_start - EMBARGO) is scored against the reserved final HOLDOUT_FRAC of
+    # dates, which never appeared in any CV fold's train or validation split. This is the one
+    # number in this file that answers "does it generalize" rather than "how was it tuned".
+    test_auc = float("nan")
+    if holdout_dates:
+        train_cutoff = sorted(set(all_dates_sorted) - holdout_dates)
+        train_cutoff_dates = set(train_cutoff[:max(1, len(train_cutoff) - EMBARGO)])  # embargo before holdout too
+        tr_ho = df["date"].isin(train_cutoff_dates).values
+        va_ho = df["date"].isin(holdout_dates).values
+        if tr_ho.sum() >= 200 and va_ho.sum() >= 50 and len(set(y[tr_ho])) >= 2 and len(set(y[va_ho])) >= 2:
+            ho_model = _make_model(spw)
+            ho_model.fit(X[tr_ho], y[tr_ho])
+            test_auc = float(roc_auc_score(y[va_ho], ho_model.predict_proba(X[va_ho])[:, 1]))
+            print(f"[Breakout] held-out test AUC={test_auc:.4f} on {va_ho.sum()} rows across "
+                  f"{len(holdout_dates)} never-cross-validated final dates")
+        else:
+            print(f"[Breakout] held-out test skipped - insufficient rows/class balance "
+                  f"(train={tr_ho.sum()}, holdout={va_ho.sum()})")
+
+    if leak_check:
+        from ml_leak_check import leak_canary
+
+        def _oof_auc_only(frame, cols):
+            fy = frame["flew"].astype(int).values
+            fX = _feature_matrix(frame)
+            f_spw = (1 - fy.mean()) / max(fy.mean(), 1e-6)
+            f_dates = np.array(sorted(frame["date"].unique()))
+            f_oof = np.full(len(fy), np.nan)
+            f_block = max(1, (len(f_dates) - EMBARGO) // (n_folds + 1))
+            for j in range(1, n_folds + 1):
+                f_train_end = f_block * j
+                f_val_start = f_train_end + EMBARGO
+                f_val_end = f_val_start + f_block
+                if f_val_start >= len(f_dates) or f_train_end < 1:
+                    continue
+                f_tr = frame["date"].isin(set(f_dates[:f_train_end])).values
+                f_va = frame["date"].isin(set(f_dates[f_val_start:min(f_val_end, len(f_dates))])).values
+                if f_tr.sum() < 200 or f_va.sum() < 50 or len(set(fy[f_tr])) < 2:
+                    continue
+                fm = _make_model(f_spw)
+                fm.fit(fX[f_tr], fy[f_tr])
+                f_oof[f_va] = fm.predict_proba(fX[f_va])[:, 1]
+            f_mask = ~np.isnan(f_oof)
+            if f_mask.sum() < 50 or len(set(fy[f_mask])) < 2:
+                return None
+            return float(roc_auc_score(fy[f_mask], f_oof[f_mask]))
+
+        canary = leak_canary(cv_df, FEATURE_COLS, _oof_auc_only)
+        print(f"[Breakout][LEAK-CHECK] {canary['note']}")
+
     if report_only:
-        return {"trained": False, "n": len(y), "auc": auc, "base_rate": base_rate, "lift": lift}
+        return {"trained": False, "n": len(y), "auc": auc, "test_auc": test_auc, "base_rate": base_rate, "lift": lift}
 
     # Production model: refit the same booster on ALL data (matches the OOF probe).
     prod = _make_model(spw)
@@ -267,9 +330,9 @@ def train(report_only: bool = False) -> dict:
     with open(MODEL_PATH, "wb") as f:
         pickle.dump({"models": [prod], "feature_names": list(X.columns),
                      "horizon": HORIZON, "trained_at": datetime.date.today().isoformat(),
-                     "oof_auc": auc}, f)
-    print(f"[Breakout] saved model (OOF AUC {auc:.4f}) → {MODEL_PATH}")
-    return {"trained": True, "n": len(y), "auc": auc, "base_rate": base_rate, "lift": lift}
+                     "oof_auc": auc, "test_auc": test_auc}, f)
+    print(f"[Breakout] saved model (OOF AUC {auc:.4f}, held-out test AUC {test_auc:.4f}) -> {MODEL_PATH}")
+    return {"trained": True, "n": len(y), "auc": auc, "test_auc": test_auc, "base_rate": base_rate, "lift": lift}
 
 
 def score() -> int:
@@ -321,10 +384,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Breakout classifier (Lever #4)")
     parser.add_argument("--train", action="store_true", help="Fit + report purged-OOF AUC")
     parser.add_argument("--report", action="store_true", help="Evaluate only, don't save a model")
+    parser.add_argument("--leak-check", action="store_true", help="Run the leak-canary test (re-runs OOF CV on an extra-lagged copy of the features; expensive, opt-in)")
     parser.add_argument("--score", action="store_true", help="Write breakout_probability for latest date")
     args = parser.parse_args()
     if args.train or args.report:
-        train(report_only=args.report)
+        train(report_only=args.report, leak_check=args.leak_check)
     if args.score:
         score()
     if not (args.train or args.report or args.score):

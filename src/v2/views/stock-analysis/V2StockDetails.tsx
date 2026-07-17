@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { trpc } from '../../../lib/trpc';
 import { V2LightweightChart } from '../../components/widgets/V2LightweightChart';
 import { OptionChainView } from '../../../components/OptionChainView';
+import { WhyThisPick } from '../../../components/WhyThisPick';
 import {
   ArrowLeft, ArrowUpRight, Activity, TrendingUp, Filter, History, PieChart, Zap, LayoutDashboard, Database, BarChart3, Target, BrainCircuit
 } from 'lucide-react';
@@ -113,6 +114,8 @@ export const V2StockDetails: React.FC<V2StockDetailsProps> = ({ symbol, stock, o
           </button>
         </div>
       </div>
+
+      <WhyThisPick symbol={symbol} />
 
       {/* ── TECHNICALS TAB ── */}
       {activeTab === 'Technicals' && (

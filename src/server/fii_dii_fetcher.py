@@ -17,6 +17,7 @@ import pandas as pd
 from sqlalchemy import text
 
 from db_compat import get_engine
+from fetch_utils import retry_get
 
 NSE_FII_DII_URL = "https://www.nseindia.com/api/fiidiiTradeReact"
 
@@ -56,11 +57,10 @@ class FiiDiiFetcher:
         We pivot these into one record per date with fii_* and dii_* columns.
         """
         try:
-            resp = self.session.get(NSE_FII_DII_URL, timeout=15)
-            resp.raise_for_status()
+            resp = retry_get(self.session, NSE_FII_DII_URL, timeout=15)
             data = resp.json()
         except Exception as e:
-            print(f"[FiiDii] Fetch error: {e}")
+            print(f"[FiiDii] Fetch error after retries: {e}")
             return []
 
         # Group by date, then pivot FII/FPI and DII rows into one record per date

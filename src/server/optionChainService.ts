@@ -1,4 +1,5 @@
 import { getNiftyTraderHeaders } from './niftytraderService';
+import { dbAll } from './dbAsync';
 
 export interface OptionChainData {
   success: boolean;
@@ -79,38 +80,58 @@ export async function fetchOptionChain(symbol: string): Promise<any> {
       const firstItem = oc[0] || {};
       const spotPrice = rd.spotPrice || firstItem.index_close || firstItem.last_price || 0;
       
+      // The live NiftyTrader feed doesn't populate Greeks/IV (always 0) for individual stock
+      // options. so_option_chain_fetcher.py computes real per-strike Greeks for equity F&O
+      // names (not indices) into so_option_chain — enrich from there when available.
+      let greeksByStrike = new Map<number, any>();
+      try {
+        const greekRows = await dbAll<any>(
+          `SELECT strike, ce_delta, ce_gamma, ce_theta, ce_vega, ce_iv,
+                  pe_delta, pe_gamma, pe_theta, pe_vega, pe_iv
+           FROM so_option_chain
+           WHERE symbol = ? AND date = (SELECT MAX(date) FROM so_option_chain WHERE symbol = ?)`,
+          [normalizedSymbol, normalizedSymbol]
+        );
+        for (const r of greekRows || []) greeksByStrike.set(Number(r.strike), r);
+      } catch (e) {
+        console.error(`[OPTION CHAIN] Greeks enrichment lookup failed for ${normalizedSymbol}:`, e);
+      }
+
       // Map the chain data, handling underscored or camelCase fields
-      const mappedChain = oc.map((row: any) => ({
+      const mappedChain = oc.map((row: any) => {
+        const g = greeksByStrike.get(Number(row.strike_price));
+        return {
         callOi: row.calls_oi || 0,
         callOiChange: row.calls_change_oi || 0,
         callLtp: row.calls_ltp || 0,
         callVol: row.calls_volume || 0,
-        callIv: row.calls_iv || 0,
-        callDelta: row.call_delta || 0,
-        callTheta: row.call_theta || 0,
-        callVega: row.call_vega || 0,
-        callGamma: row.call_gamma || 0,
+        callIv: row.calls_iv || g?.ce_iv || 0,
+        callDelta: row.call_delta || g?.ce_delta || 0,
+        callTheta: row.call_theta || g?.ce_theta || 0,
+        callVega: row.call_vega || g?.ce_vega || 0,
+        callGamma: row.call_gamma || g?.ce_gamma || 0,
         callBuiltup: row.calls_builtup || "No Conclusion",
         callBid: row.calls_bid_price || 0,
         callAsk: row.calls_ask_price || 0,
-        
+
         strikePrice: row.strike_price,
-        
+
         putLtp: row.puts_ltp || 0,
         putOiChange: row.puts_change_oi || 0,
         putOi: row.puts_oi || 0,
         putVol: row.puts_volume || 0,
-        putIv: row.puts_iv || 0,
-        putDelta: row.put_delta || 0,
-        putTheta: row.put_theta || 0,
-        putVega: row.put_vega || 0,
-        putGamma: row.put_gamma || 0,
+        putIv: row.puts_iv || g?.pe_iv || 0,
+        putDelta: row.put_delta || g?.pe_delta || 0,
+        putTheta: row.put_theta || g?.pe_theta || 0,
+        putVega: row.put_vega || g?.pe_vega || 0,
+        putGamma: row.put_gamma || g?.pe_gamma || 0,
         putBuiltup: row.puts_builtup || "No Conclusion",
         putBid: row.puts_bid_price || 0,
         putAsk: row.puts_ask_price || 0,
-        
+
         expiryDate: row.expiry_date
-      }));
+      };
+      });
 
       // Calculate PCR if volume_pcr is missing
       const totals = rd.opTotals?.total_calls_puts || {};

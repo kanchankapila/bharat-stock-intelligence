@@ -24,6 +24,7 @@ import pandas as pd
 from sqlalchemy import text
 
 from db_compat import get_engine
+from fetch_utils import retry_get, FetchTracker
 
 # MoneyControl Nifty index OI endpoints
 MC_EXPIRY_DATES_URL = (
@@ -196,11 +197,10 @@ class PCRFetcher:
         NOT populate equity IV, so atm_iv/iv_skew come back None (vendor limit)."""
         url = NIFTYTRADER_CHAIN_URL.format(symbol=symbol.upper())
         try:
-            resp = self.session.get(url, timeout=15)
-            resp.raise_for_status()
+            resp = retry_get(self.session, url, timeout=15)
             data = resp.json()
         except Exception as e:
-            print(f"[PCR] {symbol}: fetch error — {e}")
+            print(f"[PCR] {symbol}: fetch error after retries — {e}")
             return None
         if data.get("result") != 1 or not data.get("resultData"):
             return None
@@ -212,11 +212,10 @@ class PCRFetcher:
             symbol=symbol
         )
         try:
-            resp = self.session.get(url, timeout=15)
-            resp.raise_for_status()
+            resp = retry_get(self.session, url, timeout=15)
             data = resp.json()
         except Exception as e:
-            print(f"[PCR] {symbol}: fetch error — {e}")
+            print(f"[PCR] {symbol}: fetch error after retries — {e}")
             return None
 
         try:
@@ -537,10 +536,12 @@ class PCRFetcher:
     def run(self, symbols: list[str], delay: float = 1.5):
         print(f"[PCR] Fetching {len(symbols)} symbols at {datetime.datetime.now()}")
         results = []
+        tracker = FetchTracker("pcr_fetcher")
 
         for i, sym in enumerate(symbols):
             print(f"[PCR] ({i+1}/{len(symbols)}) {sym}...")
             rec = self.fetch_symbol_niftytrader(sym)
+            tracker.record(sym, ok=rec is not None)
             if rec:
                 results.append(rec)
                 pcr_str = f"{rec['pcr']:.3f}" if rec['pcr'] is not None else "N/A"
@@ -549,6 +550,7 @@ class PCRFetcher:
 
         saved = self.save(results)
         print(f"\n[PCR] Done. Saved {saved}/{len(symbols)} symbols to stock_options_oi.")
+        tracker.finish()  # exits non-zero if the failure rate crosses threshold
 
         if results:
             df = pd.DataFrame(results)[["symbol", "pcr", "total_call_oi", "total_put_oi"]]

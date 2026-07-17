@@ -138,12 +138,14 @@ export interface AppShellProps {
   onSelectStock: (symbol: string) => void;
   displayIndices: Array<{ name: string; value: number; change: number; isUp: boolean }>;
   onSelectIndexByName: (name: string) => void;
+  /** Timestamp (ms) the live stock quotes were last fetched from the server — drives the "data as of" freshness badge. */
+  dataUpdatedAt?: number;
   children: React.ReactNode;
 }
 
 // ─── Sidebar inner ────────────────────────────────────────────────────────────
 
-const SidebarInner = React.memo(function SidebarInner({ collapsed, setCollapsed, activeTab, setActiveTab, user, onLogin, displayIndices, stocks, onSelectStock, closeMobile }: {
+const SidebarInner = React.memo(function SidebarInner({ collapsed, setCollapsed, activeTab, setActiveTab, user, onLogin, displayIndices, stocks, onSelectStock, closeMobile, dataUpdatedAt }: {
   collapsed: boolean;
   setCollapsed: (v: boolean) => void;
   activeTab: string;
@@ -154,6 +156,7 @@ const SidebarInner = React.memo(function SidebarInner({ collapsed, setCollapsed,
   stocks: MarketData[];
   onSelectStock: (s: string) => void;
   closeMobile?: () => void;
+  dataUpdatedAt?: number;
 }) {
   const [marketStatus, setMarketStatus] = useState(getMarketStatus());
   const [searchQuery, setSearchQuery]   = useState('');
@@ -165,6 +168,21 @@ const SidebarInner = React.memo(function SidebarInner({ collapsed, setCollapsed,
     const t = setInterval(() => setMarketStatus(getMarketStatus()), 30000);
     return () => clearInterval(t);
   }, []);
+
+  // Recompute the "as of" label every 30s so it reflects elapsed time, not just the fetch timestamp.
+  const [staleTick, setStaleTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setStaleTick(n => n + 1), 30000);
+    return () => clearInterval(t);
+  }, []);
+  const dataAgeLabel = useMemo(() => {
+    if (!dataUpdatedAt) return null;
+    const ageSec = Math.max(0, Math.round((Date.now() - dataUpdatedAt) / 1000));
+    const stamp = new Date(dataUpdatedAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
+    if (ageSec < 60) return `Prices as of ${stamp} · ${ageSec}s ago`;
+    const ageMin = Math.round(ageSec / 60);
+    return `Prices as of ${stamp} · ${ageMin}m ago${ageMin >= 10 ? ' (stale)' : ''}`;
+  }, [dataUpdatedAt, staleTick]);
 
   // "/" shortcut
   useEffect(() => {
@@ -269,6 +287,11 @@ const SidebarInner = React.memo(function SidebarInner({ collapsed, setCollapsed,
                   NSE {marketStatus.isOpen ? 'LIVE' : 'CLOSED'}
                 </p>
                 <p className="text-[9px] text-slate-400 mt-0.5 leading-none truncate">{marketStatus.countdown}</p>
+                {dataAgeLabel && (
+                  <p className="text-[8px] text-slate-500 mt-0.5 leading-none truncate" title="Backend polls live quotes every 5 minutes">
+                    {dataAgeLabel}
+                  </p>
+                )}
               </motion.div>
             )}
           </AnimatePresence>
@@ -482,7 +505,7 @@ const SidebarInner = React.memo(function SidebarInner({ collapsed, setCollapsed,
 
 export const AppShell: React.FC<AppShellProps> = ({
   user, onLogin, activeTab, setActiveTab,
-  stocks, onSelectStock, displayIndices, onSelectIndexByName, children,
+  stocks, onSelectStock, displayIndices, onSelectIndexByName, dataUpdatedAt, children,
 }) => {
   const [collapsed, setCollapsed]     = useState(false);
   const [mobileOpen, setMobileOpen]   = useState(false);
@@ -493,7 +516,7 @@ export const AppShell: React.FC<AppShellProps> = ({
 
   const sidebarProps = {
     collapsed, setCollapsed, activeTab, setActiveTab,
-    user, onLogin, displayIndices, stocks, onSelectStock,
+    user, onLogin, displayIndices, stocks, onSelectStock, dataUpdatedAt,
   };
 
   const [toastMessage, setToastMessage] = useState<any>(null);

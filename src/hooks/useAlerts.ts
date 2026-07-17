@@ -8,11 +8,12 @@ export interface AlertMessage {
   timestamp: string;
 }
 
-export function useAlerts() {
+export function useAlerts(userId?: string) {
   const [alerts, setAlerts] = useState<AlertMessage[]>([]);
 
   useEffect(() => {
-    const eventSource = new EventSource('/api/stream');
+    const url = userId ? `/api/stream?userId=${encodeURIComponent(userId)}` : '/api/stream';
+    const eventSource = new EventSource(url);
 
     eventSource.onmessage = (event) => {
       try {
@@ -40,7 +41,7 @@ export function useAlerts() {
     return () => {
       eventSource.close();
     };
-  }, []);
+  }, [userId]);
 
   const removeAlert = (id: string) => {
     setAlerts((prev) => prev.filter((a) => a.id !== id));

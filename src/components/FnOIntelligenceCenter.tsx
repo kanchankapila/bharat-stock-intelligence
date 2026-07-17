@@ -11,6 +11,7 @@ import FnOHeatmap from './FnOHeatmap';
 import { OptionChainView } from './OptionChainView';
 import { MaxPainAlerts } from './MaxPainAlerts';
 import { EarningsPlaybook } from './EarningsPlaybook';
+import { RolloverPositioningPanel } from './RolloverPositioningPanel';
 
 interface FnOScannerProps {
   onSelectStock: (symbol: string) => void;
@@ -296,7 +297,7 @@ const SentimentMeter: React.FC<{ pct: number; bull: number; bear: number; total:
 // ── Main Component ──────────────────────────────────────────────────────────
 const FnOIntelligenceCenter: React.FC<FnOScannerProps> = ({ onSelectStock }) => {
   const [masterView, setMasterView] = useState<'overview' | 'chain'>('overview');
-  const [activeTab, setActiveTab] = useState<'futures' | 'options' | 'maxpain' | 'earnings'>('futures');
+  const [activeTab, setActiveTab] = useState<'futures' | 'options' | 'maxpain' | 'earnings' | 'rollover'>('futures');
   const [activeScanner, setActiveScanner] = useState<string>('long-build-up');
   const [instType, setInstType] = useState<'all' | 'index' | 'stock'>('all');
 
@@ -438,6 +439,11 @@ const FnOIntelligenceCenter: React.FC<FnOScannerProps> = ({ onSelectStock }) => 
                     activeTab === 'earnings' ? "bg-amber-600 text-white shadow-lg shadow-amber-500/20" : "text-slate-400 hover:text-slate-300")}>
                   Earnings Skew
                 </button>
+                <button onClick={() => { setActiveTab('rollover'); }}
+                  className={cn("px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
+                    activeTab === 'rollover' ? "bg-sky-600 text-white shadow-lg shadow-sky-500/20" : "text-slate-400 hover:text-slate-300")}>
+                  Rollover Positioning
+                </button>
               </div>
               {(activeTab === 'futures' || activeTab === 'options') && (
                 <div className="flex glass border border-slate-800/50 p-1 rounded-xl gap-0.5">
@@ -462,6 +468,8 @@ const FnOIntelligenceCenter: React.FC<FnOScannerProps> = ({ onSelectStock }) => 
         <MaxPainAlerts onSelectStock={onSelectStock} />
       ) : activeTab === 'earnings' ? (
         <EarningsPlaybook onSelectStock={onSelectStock} />
+      ) : activeTab === 'rollover' ? (
+        <RolloverPositioningPanel onSelectStock={onSelectStock} />
       ) : (
         <>
           {/* Heatmap */}

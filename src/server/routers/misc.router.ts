@@ -200,6 +200,29 @@ export const miscRouter = router({
   getDeals: publicProcedure
     .query(async () => fetchDealsAll()),
 
+  // Raw NSE PIT (insider) filings: promoter/designated-person transactions with before/after
+  // %holding — richer than getDeals, previously only consumed as a binary flag by the scoring
+  // engine (technical_signals.insider_buy_flag/sell_flag).
+  getInsiderTransactions: publicProcedure
+    .input(z.object({ symbol: z.string().optional(), limit: z.number().min(1).max(200).optional().default(100) }))
+    .query(async ({ input }) => {
+      try {
+        const rows = await dbAll<any>(
+          `SELECT symbol, person_name, person_category, transaction_mode, quantity, value_cr,
+                  before_pct, after_pct, transaction_date
+           FROM insider_transactions
+           ${input.symbol ? "WHERE symbol = ?" : ""}
+           ORDER BY transaction_date DESC
+           LIMIT ?`,
+          input.symbol ? [input.symbol.toUpperCase(), input.limit] : [input.limit]
+        );
+        return rows || [];
+      } catch (e: any) {
+        console.error("[Misc Router] Error fetching insider transactions:", e);
+        return [];
+      }
+    }),
+
   getSensibullEvents: publicProcedure
     .query(async () => {
       return fetchWithCache('sensibull_current_events', async () => {

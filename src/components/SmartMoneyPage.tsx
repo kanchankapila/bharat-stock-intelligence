@@ -27,6 +27,73 @@ const DEAL_TABS: { key: DealTab; label: string; icon: React.ElementType }[] = [
 
 const COLORS = ['#10b981', '#f43f5e', '#3b82f6', '#f97316', '#8b5cf6', '#ec4899'];
 
+const InsiderFilingsTable: React.FC<{ onSelectStock?: (symbol: string) => void }> = ({ onSelectStock }) => {
+  const { data: filings = [], isLoading } = trpc.getInsiderTransactions.useQuery({ limit: 100 }, {
+    staleTime: 15 * 60 * 1000,
+  });
+
+  return (
+    <div className="bg-slate-800/50 rounded-xl border border-slate-800/30 overflow-hidden">
+      <div className="px-3 py-2 bg-slate-900/60 border-b border-slate-800/50 flex items-center justify-between">
+        <span className="text-xs font-bold text-slate-300">NSE Insider Filings — Promoter / Designated Person</span>
+        <span className="text-[10px] text-slate-500 font-mono">before/after % holding, from SAST/PIT disclosures</span>
+      </div>
+      {isLoading ? (
+        <div className="p-4 text-xs text-slate-500 font-mono">Loading filings&hellip;</div>
+      ) : filings.length === 0 ? (
+        <div className="p-4 text-xs text-slate-500 font-mono">No recent insider filings.</div>
+      ) : (
+        <div className="overflow-y-auto max-h-96">
+          <table className="w-full text-xs">
+            <thead className="sticky top-0 bg-slate-900/80">
+              <tr className="text-[10px] text-slate-500 uppercase tracking-wider">
+                <th className="text-left px-3 py-2 font-medium">Symbol</th>
+                <th className="text-left px-3 py-2 font-medium">Person</th>
+                <th className="text-left px-3 py-2 font-medium">Category</th>
+                <th className="text-left px-3 py-2 font-medium">Mode</th>
+                <th className="text-right px-3 py-2 font-medium">Value (₹Cr)</th>
+                <th className="text-right px-3 py-2 font-medium">Before %</th>
+                <th className="text-right px-3 py-2 font-medium">After %</th>
+                <th className="text-right px-3 py-2 font-medium">Date</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-800/30">
+              {filings.map((f: any, i: number) => {
+                const isBuy = /acqui|buy|allot|subscri/i.test(f.transaction_mode || '');
+                const isSell = /dispos|sell|sale/i.test(f.transaction_mode || '');
+                return (
+                  <tr
+                    key={i}
+                    className="hover:bg-slate-800/40 cursor-pointer"
+                    onClick={() => onSelectStock?.(f.symbol)}
+                  >
+                    <td className="px-3 py-1.5 font-bold text-slate-200">{f.symbol}</td>
+                    <td className="px-3 py-1.5 text-slate-300 truncate max-w-[160px]">{f.person_name}</td>
+                    <td className="px-3 py-1.5 text-slate-400">{f.person_category || '—'}</td>
+                    <td className={cn("px-3 py-1.5 font-medium", isBuy ? "text-emerald-400" : isSell ? "text-red-400" : "text-slate-400")}>
+                      {f.transaction_mode}
+                    </td>
+                    <td className="px-3 py-1.5 text-right font-mono text-slate-300">
+                      {f.value_cr != null ? Number(f.value_cr).toFixed(2) : '—'}
+                    </td>
+                    <td className="px-3 py-1.5 text-right font-mono text-slate-400">
+                      {f.before_pct != null ? `${Number(f.before_pct).toFixed(2)}%` : '—'}
+                    </td>
+                    <td className="px-3 py-1.5 text-right font-mono text-slate-200">
+                      {f.after_pct != null ? `${Number(f.after_pct).toFixed(2)}%` : '—'}
+                    </td>
+                    <td className="px-3 py-1.5 text-right font-mono text-slate-500">{f.transaction_date}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+};
+
 export const SmartMoneyPage: React.FC<SmartMoneyPageProps> = ({ onSelectStock }) => {
   const [activeTab, setActiveTab] = useState<DealTab>('large');
   const { data, isLoading, refetch } = trpc.getDeals.useQuery(undefined, {
@@ -191,6 +258,10 @@ export const SmartMoneyPage: React.FC<SmartMoneyPageProps> = ({ onSelectStock })
                 <tbody>{insiderSellList.slice(0, 15).map(renderDealRow)}</tbody>
               </table>
             </div>
+          </div>
+
+          <div className="lg:col-span-3">
+            <InsiderFilingsTable onSelectStock={onSelectStock} />
           </div>
         </div>
       )}

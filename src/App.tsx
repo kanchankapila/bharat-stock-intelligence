@@ -33,6 +33,9 @@ import { FinologyPanel } from './components/FinologyPanel';
 import { MCIndexDetailPanel } from './components/MCIndexDetailPanel';
 import { GlobalMarketCards } from './components/GlobalMarketCards';
 import { Card } from './components/Card';
+import { MacroDashboard } from './components/MacroDashboard';
+import { CorporateEventsPanel } from './components/CorporateEventsPanel';
+import { PriceAlertsPanel } from './components/PriceAlertsPanel';
 import { AlertsToast } from './components/AlertsToast';
 import { AppShell } from './components/AppShell';
 import { SlideOutDrawer } from './components/SlideOutDrawer';
@@ -3736,7 +3739,7 @@ export default function App() {
   const [watchlist, setWatchlist] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const stocks = useMarketData();
+  const { stocks, dataUpdatedAt: stocksUpdatedAt } = useMarketData();
   const { data: realIndices } = trpc.getAllIndices.useQuery();
   const syncNSEStocksMutation = trpc.syncNSEStocks.useMutation();
 
@@ -3912,13 +3915,16 @@ export default function App() {
           <SafeRoutes>
           <Routes location={location} key={activeTab}>
             <Route path="/watchlist" element={
-              <Watchlist
-                watchlist={watchlist}
-                stocks={stocks}
-                watchlistDetails={watchlistDetails || []}
-                onSelectStock={handleSelectStock}
-                onRemove={toggleWatchlist}
-              />
+              <div className="space-y-6">
+                <Watchlist
+                  watchlist={watchlist}
+                  stocks={stocks}
+                  watchlistDetails={watchlistDetails || []}
+                  onSelectStock={handleSelectStock}
+                  onRemove={toggleWatchlist}
+                />
+                <PriceAlertsPanel userId={user?.uid} />
+              </div>
             } />
             <Route path="/details" element={selectedSymbol ? (
               dashboardVersion === 'v3' ? (
@@ -4043,7 +4049,7 @@ export default function App() {
           onToggleWatchlist={toggleWatchlist}
           onSelectStock={setDrawerSymbol}
         />
-        <AlertsToast />
+        <AlertsToast userId={user?.uid} />
       </V2AppShell>
     );
   }
@@ -4059,6 +4065,7 @@ export default function App() {
         onSelectStock={handleSelectStock}
         displayIndices={displayIndices}
         onSelectIndexByName={handleSelectIndexByName}
+        dataUpdatedAt={stocksUpdatedAt}
       >
         <TickerTapeWidget />
         <AnimatePresence mode="wait">
@@ -4165,6 +4172,8 @@ export default function App() {
               <Route path="/sentiment" element={<SentimentIntelligence onSelectStock={handleSelectStock} />} />
               <Route path="/economics" element={
                 <div className="p-6 space-y-6">
+                  <MacroDashboard />
+                  <CorporateEventsPanel onSelectStock={handleSelectStock} />
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                     <div className="lg:col-span-2">
                       <Card title="Global Economic Calendar" icon={Globe}>
@@ -4205,7 +4214,7 @@ export default function App() {
         onSelectStock={setDrawerSymbol}
       />
 
-      <AlertsToast />
+      <AlertsToast userId={user?.uid} />
 
       {/* Signal toast notifications */}
       <div className="fixed bottom-6 right-6 z-[100] flex flex-col gap-3 pointer-events-none">

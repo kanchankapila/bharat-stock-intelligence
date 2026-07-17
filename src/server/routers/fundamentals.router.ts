@@ -4,6 +4,7 @@ import { fetchTrendlyneFundamentals, fetchCompanyOverview } from "../trendlyneSe
 import { getMoneycontrolInsights } from "../moneycontrolService";
 import { getStockInsights } from "../insightService";
 import { getFinologyData } from "../finologyService";
+import { dbAll } from "../dbAsync";
 import { router, publicProcedure } from "../trpc";
 
 export const fundamentalsRouter = router({
@@ -58,6 +59,56 @@ export const fundamentalsRouter = router({
   getCorporateActions: publicProcedure
     .input(z.object({ symbol: z.string() }))
     .query(async ({ input }) => fetchETCorporateActions(input.symbol)),
+
+  // Market-wide corporate actions calendar — corporate_actions is populated daily but had no
+  // consumer beyond a per-stock "has an action" boolean flag in EarlyHoursSpotter.tsx.
+  getCorporateActionsCalendar: publicProcedure
+    .input(z.object({
+      daysBack: z.number().min(0).max(60).optional().default(3),
+      daysForward: z.number().min(0).max(60).optional().default(21),
+      actionType: z.string().optional(),
+    }))
+    .query(async ({ input }) => {
+      try {
+        const rows = await dbAll<any>(
+          `SELECT ca.symbol, ns.name, ca.ex_date, ca.action_type, ca.ratio, ca.amount
+           FROM corporate_actions ca
+           LEFT JOIN nse_stocks ns ON ns.symbol = ca.symbol AND ns.status = 'ACTIVE'
+           WHERE ca.ex_date >= (CURRENT_DATE - (? || ' days')::interval)::text
+             AND ca.ex_date <= (CURRENT_DATE + (? || ' days')::interval)::text
+             ${input.actionType ? "AND ca.action_type = ?" : ""}
+           ORDER BY ca.ex_date ASC`,
+          input.actionType
+            ? [input.daysBack, input.daysForward, input.actionType.toUpperCase()]
+            : [input.daysBack, input.daysForward]
+        );
+        return rows || [];
+      } catch (e: any) {
+        console.error("[Fundamentals Router] Error fetching corporate actions calendar:", e);
+        return [];
+      }
+    }),
+
+  // credit_rating_events is populated by credit_rating_fetcher.py but had no tRPC procedure at
+  // all — only fed internal technical_signals scoring flags.
+  getCreditRatingEvents: publicProcedure
+    .input(z.object({ symbol: z.string().optional(), limit: z.number().min(1).max(200).optional().default(60) }))
+    .query(async ({ input }) => {
+      try {
+        const rows = await dbAll<any>(
+          `SELECT bse_code, symbol, isin, announcement_date, rating_agency, action, instrument_type, headline
+           FROM credit_rating_events
+           ${input.symbol ? "WHERE symbol = ?" : ""}
+           ORDER BY announcement_date DESC
+           LIMIT ?`,
+          input.symbol ? [input.symbol.toUpperCase(), input.limit] : [input.limit]
+        );
+        return rows || [];
+      } catch (e: any) {
+        console.error("[Fundamentals Router] Error fetching credit rating events:", e);
+        return [];
+      }
+    }),
 
   getMFInvestments: publicProcedure
     .input(z.object({ symbol: z.string() }))

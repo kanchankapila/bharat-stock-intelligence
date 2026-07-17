@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { WhyThisPick } from '../../../components/WhyThisPick';
 import { AreaChart, Area, XAxis, YAxis, ResponsiveContainer, Tooltip, CartesianGrid, BarChart, Bar } from 'recharts';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -1478,6 +1479,8 @@ Based on the multi-factor scoring array and SWOT profiles, ${symbol} displays ${
                       </div>
                     </div>
                   </div>
+
+                  <WhyThisPick symbol={searchSymbol} />
 
                   {/* Stock detail tabs */}
                   <div className="flex glass border border-slate-800/50 p-1 rounded-2xl w-fit">

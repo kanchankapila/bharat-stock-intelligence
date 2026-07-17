@@ -25,10 +25,12 @@ export function useMarketData() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const { data: liveStocks, isLoading: isLoadingLive } = trpc.getLiveStocks.useQuery(undefined, {
-    // Match backend 5-min cache TTL; background refresh keeps server data fresh
+  const { data: liveStocks, isLoading: isLoadingLive, dataUpdatedAt } = trpc.getLiveStocks.useQuery(undefined, {
+    // Match backend 5-min cache TTL; poll for genuinely fresh data at the same cadence
+    // instead of faking movement client-side between fetches.
     staleTime: 5 * 60 * 1000,
     gcTime: 10 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
     refetchOnWindowFocus: false,
   });
 
@@ -48,40 +50,7 @@ export function useMarketData() {
     }
   }, [liveStocks, isLoadingLive]);
 
-  useEffect(() => {
-    if (!liveStocks || liveStocks.length === 0) return;
-
-    // Simulate micro-price moves for a "live" feel between real 5-min fetches.
-    // Cap at 300 stocks — mapping 2000+ objects every 5 s is wasteful and the
-    // tail stocks are rarely visible on screen anyway.
-    const MAX_SIMULATED = 300;
-    const tick = () => {
-      if (document.hidden) return; // skip updates when tab is not visible
-      setStocks(prevStocks =>
-        prevStocks.map((stock, idx) => {
-          if (idx >= MAX_SIMULATED) return stock;
-          const volatility = 0.0005;
-          const change = (Math.random() - 0.5) * 2 * volatility * stock.price;
-          const newPrice = stock.price + change;
-          const totalChange = newPrice - stock.prevClose;
-          const totalChangePct = (totalChange / stock.prevClose) * 100;
-          return {
-            ...stock,
-            price: Number(newPrice.toFixed(2)),
-            change: Number(totalChange.toFixed(2)),
-            changePct: Number(totalChangePct.toFixed(2)),
-            high: Math.max(stock.high, newPrice),
-            low: Math.min(stock.low, newPrice),
-          };
-        })
-      );
-    };
-
-    const interval = setInterval(tick, 5000);
-    return () => clearInterval(interval);
-  }, [liveStocks]);
-
-  return stocks;
+  return { stocks, dataUpdatedAt };
 }
 
 

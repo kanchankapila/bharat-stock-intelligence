@@ -19,10 +19,12 @@ Run:  python mc_broker_reco_fetcher.py             # fetch + backfill (7-day win
 
 import argparse
 import datetime
+import sys
 
 import pandas as pd
 
 from db_compat import connect, translate, read_df, executemany
+from fetch_utils import retry_get
 
 try:
     from curl_cffi import requests as cffi_req
@@ -121,11 +123,10 @@ def fetch_recos(lookback_days: int = FETCH_LOOKBACK_DAYS) -> list[dict]:
         start = page * PAGE_SIZE
         url = BASE_URL.format(start=start)
         try:
-            resp = cffi_req.get(url, headers=HEADERS, impersonate="chrome120", timeout=30)
-            resp.raise_for_status()
+            resp = retry_get(cffi_req, url, headers=HEADERS, impersonate="chrome120", timeout=30)
             payload = resp.json()
         except Exception as exc:
-            print(f"[BrokerReco] WARN: page {page} fetch failed: {exc}")
+            print(f"[BrokerReco] WARN: page {page} fetch failed after retries: {exc}")
             break
 
         if not payload.get("success"):
@@ -326,6 +327,12 @@ def main() -> None:
     # Fetch
     recos = fetch_recos(lookback_days=max(args.days, FETCH_LOOKBACK_DAYS))
     print(f"[BrokerReco] Fetched {len(recos)} recs.")
+    if not recos:
+        # An empty result after retries most often means the upstream API is down or the
+        # response shape changed — surface this as a real failure instead of a silent no-op
+        # that would otherwise look identical to "no new recos today" in the job monitor.
+        print("[BrokerReco] ERROR: 0 recos fetched — treating as a failed run.")
+        sys.exit(1)
 
     # Persist
     upsert_recos(recos)

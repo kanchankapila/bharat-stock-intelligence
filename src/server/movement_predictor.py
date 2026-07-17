@@ -326,7 +326,35 @@ def _purged_oof(df: pd.DataFrame, feature_cols: list, n_folds: int = 4) -> tuple
     return auc, lift, base_rate
 
 
-def train(report_only: bool = False, enrich: bool = False) -> dict:
+def _holdout_test_auc(df: pd.DataFrame, feature_cols: list, holdout_dates: set) -> float:
+    """Train on everything before `holdout_dates` (minus an embargo) and score against them.
+    These dates never appear in any _purged_oof fold's train or validation split, so this is
+    an independent read on generalization rather than the number CV was tuned against."""
+    from sklearn.metrics import roc_auc_score
+
+    if not holdout_dates:
+        return float("nan")
+    all_dates = np.array(sorted(df["date"].unique()))
+    pre_holdout = sorted(set(all_dates) - holdout_dates)
+    train_dates = set(pre_holdout[:max(1, len(pre_holdout) - EMBARGO)])
+
+    y = df["moved"].astype(int).values
+    X = _feature_matrix(df, feature_cols)
+    tr = df["date"].isin(train_dates).values
+    va = df["date"].isin(holdout_dates).values
+    if tr.sum() < 200 or va.sum() < 50 or len(set(y[tr])) < 2 or len(set(y[va])) < 2:
+        print(f"[Movement] held-out test skipped - insufficient rows/class balance "
+              f"(train={tr.sum()}, holdout={va.sum()})")
+        return float("nan")
+
+    base_rate = float(y[tr].mean())
+    spw = (1 - base_rate) / max(base_rate, 1e-6)
+    m = _make_model(spw)
+    m.fit(X[tr], y[tr])
+    return float(roc_auc_score(y[va], m.predict_proba(X[va])[:, 1]))
+
+
+def train(report_only: bool = False, enrich: bool = False, leak_check: bool = False) -> dict:
     core = load_core_training_data()
     if core.empty or len(core) < 500:
         print(f"[Movement] insufficient core data ({len(core)} rows); skipping.")
@@ -338,15 +366,37 @@ def train(report_only: bool = False, enrich: bool = False) -> dict:
         keep = set(all_dates[::2])   # halve for CV speed, same rationale as breakout_classifier
         core = core[core["date"].isin(keep)].reset_index(drop=True)
 
-    auc, lift, base_rate = _purged_oof(core, OHLCV_FEATURE_COLS)
+    # Reserve the most recent 15% of dates as a final holdout, untouched by any CV fold below,
+    # for one independent generalization check (see _holdout_test_auc).
+    core_dates_sorted = np.array(sorted(core["date"].unique()))
+    n_holdout_dates = max(EMBARGO, int(len(core_dates_sorted) * 0.15))
+    holdout_dates = set(core_dates_sorted[-n_holdout_dates:]) if len(core_dates_sorted) > 4 * EMBARGO else set()
+    cv_core = core[~core["date"].isin(holdout_dates)] if holdout_dates else core
+
+    auc, lift, base_rate = _purged_oof(cv_core, OHLCV_FEATURE_COLS)
     if auc is None:
         print(f"[Movement] purged CV left too few validation rows; need more history.")
         return {"trained": False, "n": len(core)}
     print(f"[Movement][CORE] n={len(core)} base_rate={base_rate:.3f} purged-OOF AUC={auc:.4f} "
           f"top-decile move-rate lift={lift:.2f}x")
 
-    result = {"trained": False, "n": len(core), "core_auc": auc, "core_lift": lift,
-              "base_rate": base_rate}
+    test_auc = _holdout_test_auc(core, OHLCV_FEATURE_COLS, holdout_dates)
+    if not np.isnan(test_auc):
+        print(f"[Movement][CORE] held-out test AUC={test_auc:.4f} on {len(holdout_dates)} "
+              f"never-cross-validated final dates")
+
+    if leak_check:
+        from ml_leak_check import leak_canary
+
+        def _oof_auc_only(frame, cols):
+            a, _, _ = _purged_oof(frame, cols)
+            return a
+
+        canary = leak_canary(cv_core, OHLCV_FEATURE_COLS, _oof_auc_only)
+        print(f"[Movement][LEAK-CHECK][CORE] {canary['note']}")
+
+    result = {"trained": False, "n": len(core), "core_auc": auc, "core_test_auc": test_auc,
+              "core_lift": lift, "base_rate": base_rate}
 
     if enrich:
         e_cutoff = (datetime.date.today() - datetime.timedelta(days=ENRICH_LOOKBACK_DAYS)).isoformat()
@@ -379,6 +429,15 @@ def train(report_only: bool = False, enrich: bool = False) -> dict:
                 result.update({"enrich_window_days": enriched["date"].nunique(),
                                 "core_only_auc_same_window": c_auc,
                                 "core_plus_enrichment_auc": e_auc})
+                if leak_check:
+                    from ml_leak_check import leak_canary
+
+                    def _enrich_oof_only(frame, cols):
+                        a, _, _ = _purged_oof(frame, cols, n_folds=2)
+                        return a
+
+                    e_canary = leak_canary(enriched, all_cols, _enrich_oof_only, min_rows=100)
+                    print(f"[Movement][LEAK-CHECK][ENRICH] {e_canary['note']}")
             else:
                 print("[Movement][ENRICH] purged CV on the enrichment window left too few rows.")
 
@@ -393,8 +452,9 @@ def train(report_only: bool = False, enrich: bool = False) -> dict:
     os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
     with open(MODEL_PATH, "wb") as f:
         pickle.dump({"model": prod, "feature_names": OHLCV_FEATURE_COLS,
-                     "trained_at": datetime.date.today().isoformat(), "oof_auc": auc}, f)
-    print(f"[Movement] saved model (core OOF AUC {auc:.4f}) -> {MODEL_PATH}")
+                     "trained_at": datetime.date.today().isoformat(), "oof_auc": auc,
+                     "test_auc": test_auc}, f)
+    print(f"[Movement] saved model (core OOF AUC {auc:.4f}, held-out test AUC {test_auc:.4f}) -> {MODEL_PATH}")
     result["trained"] = True
     return result
 
@@ -443,10 +503,11 @@ if __name__ == "__main__":
     parser.add_argument("--train", action="store_true", help="Fit + report purged-OOF AUC")
     parser.add_argument("--report", action="store_true", help="Evaluate only, don't save a model")
     parser.add_argument("--enrich", action="store_true", help="Also report the screener/news/options enrichment lift check")
+    parser.add_argument("--leak-check", action="store_true", help="Run the leak-canary test (re-runs OOF CV on an extra-lagged copy of the features; expensive, opt-in)")
     parser.add_argument("--score", action="store_true", help="Write movement_probability for latest date")
     args = parser.parse_args()
     if args.train or args.report:
-        train(report_only=args.report, enrich=args.enrich)
+        train(report_only=args.report, enrich=args.enrich, leak_check=args.leak_check)
     if args.score:
         score()
     if not (args.train or args.report or args.score):
