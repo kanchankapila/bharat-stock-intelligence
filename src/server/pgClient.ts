@@ -163,6 +163,16 @@ export async function pgEnsureColumns(): Promise<void> {
        PRIMARY KEY (symbol, computed_at)
      )`,
     `CREATE INDEX IF NOT EXISTS idx_intraday_recs_score ON intraday_recommendations(computed_at DESC, intraday_score DESC)`,
+    `CREATE TABLE IF NOT EXISTS intraday_recommendations_history (
+       symbol TEXT NOT NULL, computed_at TEXT NOT NULL, cycle_at TEXT NOT NULL,
+       intraday_regime TEXT, intraday_score DOUBLE PRECISION, conviction_level TEXT,
+       classification TEXT, screener_score DOUBLE PRECISION, breakout_score DOUBLE PRECISION,
+       news_sentiment DOUBLE PRECISION, bullish_count INTEGER, bearish_count INTEGER,
+       cmp DOUBLE PRECISION, entry_price DOUBLE PRECISION, stop_loss DOUBLE PRECISION,
+       target_1 DOUBLE PRECISION, risk_reward DOUBLE PRECISION, position_size_pct DOUBLE PRECISION,
+       PRIMARY KEY (symbol, cycle_at)
+     )`,
+    `CREATE INDEX IF NOT EXISTS idx_irh_symbol_date ON intraday_recommendations_history(symbol, computed_at, cycle_at)`,
     `CREATE TABLE IF NOT EXISTS intraday_recommendation_outcomes (
        symbol TEXT, computed_at TEXT,
        entry_price DOUBLE PRECISION, target_1 DOUBLE PRECISION, stop_loss DOUBLE PRECISION,

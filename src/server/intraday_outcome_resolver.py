@@ -23,9 +23,24 @@ from db_compat import connect
 
 NEUTRAL_BAND = 0.2  # |pnl%| below this at a close-exit = NEUTRAL
 
+# Execution-cost model. Previously paper_trade() compared pure price levels with no cost at
+# all, so the reported win-rate/avg-PnL was the best case, not the realistic one -- every
+# other backtest path in this codebase (backtester.py) models slippage + commission.
+# Intraday equity costs are lower than the positional/delivery round-trip backtester.py
+# assumes (commission_bps=40/leg there): no STT on the intraday buy leg, only ~2.5bps STT on
+# the sell leg, and intraday brokerage is typically flat/lower than delivery. These are
+# deliberately conservative estimates (better to slightly overstate cost than understate it),
+# not a precise broker-specific figure.
+INTRADAY_SLIPPAGE_BPS = 10     # entry fill worse than the signal's cmp by this much
+INTRADAY_COMMISSION_BPS = 20   # charged on both entry and exit notional
+
 
 def paper_trade(entry, tgt, stop, o, hi, lo, cl):
-    """Pure same-day long paper trade. Returns (exit_price, exit_reason, pnl_pct, outcome)."""
+    """Pure same-day long paper trade, cost-adjusted for realistic entry slippage and
+    round-trip commission. Returns (exit_price, exit_reason, pnl_pct, outcome). exit_price/
+    exit_reason reflect the raw price level touched (an objective, cost-free fact about what
+    happened); pnl_pct/outcome are net of the cost model above.
+    """
     if not entry or entry <= 0:
         return None, None, None, None
     if o >= tgt:
@@ -40,10 +55,20 @@ def paper_trade(entry, tgt, stop, o, hi, lo, cl):
         exit_p, reason = stop, "STOP"
     else:
         exit_p, reason = cl, "CLOSE"
-    pnl = (exit_p - entry) / entry * 100.0
-    if reason.startswith("TARGET") or pnl > NEUTRAL_BAND:
+
+    fill_entry = entry * (1 + INTRADAY_SLIPPAGE_BPS / 10_000)  # buy slightly worse than signalled
+    gross_pnl_pct = (exit_p - fill_entry) / fill_entry * 100.0
+    cost_pct = 2 * INTRADAY_COMMISSION_BPS / 100.0  # entry leg + exit leg, in %
+    pnl = gross_pnl_pct - cost_pct
+
+    # Outcome is driven purely by net (cost-adjusted) pnl vs. NEUTRAL_BAND now, not by which
+    # price level was touched -- previously a raw TARGET/STOP touch was unconditionally
+    # WIN/LOSS regardless of pnl, which was harmless pre-cost-model (touching target always
+    # meant positive pnl by construction) but would misclassify a target that barely clears
+    # costs, or a stop that gaps back through breakeven, once costs are in the picture.
+    if pnl > NEUTRAL_BAND:
         outcome = "WIN"
-    elif reason.startswith("STOP") or pnl < -NEUTRAL_BAND:
+    elif pnl < -NEUTRAL_BAND:
         outcome = "LOSS"
     else:
         outcome = "NEUTRAL"
@@ -51,11 +76,31 @@ def paper_trade(entry, tgt, stop, o, hi, lo, cl):
 
 
 def resolve(conn, d: str) -> dict:
+    # Prefer the FIRST Buy/Strong-Buy-classified cycle of the day per symbol, from the
+    # append-only history table. intraday_recommendations is overwrite-in-place per
+    # (symbol, day) -- paper-trading "the latest recommendation" structurally biased the
+    # evaluated entry toward whatever the LAST 15-min cycle of the day looked like, which is
+    # often close to market close with little time left to reach target. Falls back to the
+    # plain intraday_recommendations table for dates that predate the history table.
     recs = conn.execute(
-        "SELECT symbol, entry_price, target_1, stop_loss FROM intraday_recommendations "
-        "WHERE computed_at = ? AND entry_price IS NOT NULL AND target_1 IS NOT NULL "
-        "AND stop_loss IS NOT NULL", (d,)
+        """SELECT h.symbol, h.entry_price, h.target_1, h.stop_loss
+           FROM intraday_recommendations_history h
+           WHERE h.computed_at = ? AND h.classification IN ('Strong Buy', 'Buy')
+             AND h.entry_price IS NOT NULL AND h.target_1 IS NOT NULL AND h.stop_loss IS NOT NULL
+             AND h.cycle_at = (
+                 SELECT MIN(h2.cycle_at) FROM intraday_recommendations_history h2
+                 WHERE h2.symbol = h.symbol AND h2.computed_at = h.computed_at
+                   AND h2.classification IN ('Strong Buy', 'Buy')
+                   AND h2.entry_price IS NOT NULL AND h2.target_1 IS NOT NULL
+                   AND h2.stop_loss IS NOT NULL
+             )""", (d,)
     ).fetchall()
+    if not recs:
+        recs = conn.execute(
+            "SELECT symbol, entry_price, target_1, stop_loss FROM intraday_recommendations "
+            "WHERE computed_at = ? AND entry_price IS NOT NULL AND target_1 IS NOT NULL "
+            "AND stop_loss IS NOT NULL", (d,)
+        ).fetchall()
     if not recs:
         return {"date": d, "resolved": 0, "note": "no tradeable recs"}
 

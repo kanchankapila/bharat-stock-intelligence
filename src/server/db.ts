@@ -1229,6 +1229,35 @@ db.exec(`
     PRIMARY KEY (symbol, computed_at)
   );
 
+  -- Append-only trail of every 15-min ranking cycle (intraday_recommendations above is
+  -- overwrite-in-place per symbol per day, so only the LAST cycle of the day survives there).
+  -- intraday_outcome_resolver.py reads this to paper-trade the FIRST Buy-classified cycle of
+  -- the day per symbol instead of whatever the last cycle happened to say -- otherwise the
+  -- evaluated "entry" is structurally biased toward late-day snapshots with little time left
+  -- before same-day square-off. Matching entry added to pgClient.ts's pgEnsureColumns().
+  CREATE TABLE IF NOT EXISTS intraday_recommendations_history (
+    symbol             TEXT NOT NULL,
+    computed_at        TEXT NOT NULL,   -- date, matches intraday_recommendations.computed_at
+    cycle_at           TEXT NOT NULL,   -- full timestamp of this specific 15-min cycle
+    intraday_regime    TEXT,
+    intraday_score     REAL,
+    conviction_level   TEXT,
+    classification     TEXT,
+    screener_score     REAL,
+    breakout_score     REAL,
+    news_sentiment     REAL,
+    bullish_count      INTEGER,
+    bearish_count      INTEGER,
+    cmp                REAL,
+    entry_price        REAL,
+    stop_loss          REAL,
+    target_1           REAL,
+    risk_reward        REAL,
+    position_size_pct  REAL,
+    PRIMARY KEY (symbol, cycle_at)
+  );
+  CREATE INDEX IF NOT EXISTS idx_irh_symbol_date ON intraday_recommendations_history(symbol, computed_at, cycle_at);
+
   -- Intraday paper-trade outcomes: entry/target/stop simulated against the day's OHLC by
   -- intraday_outcome_resolver.py (post-close). Feeds accuracy metrics + the strategy learner.
   CREATE TABLE IF NOT EXISTS intraday_recommendation_outcomes (

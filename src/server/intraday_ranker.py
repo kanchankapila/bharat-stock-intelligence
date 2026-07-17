@@ -14,7 +14,7 @@ no table or query with the positional pipeline, so unified_ranker output is neve
 Run (market hours, every 15 min):  python intraday_ranker.py
 """
 import json
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from db_compat import connect
 from unified_ranker import (
@@ -35,12 +35,23 @@ TARGET_PCT_FLOOR, TARGET_PCT_CAP = 0.008, 0.05   # 0.8%–5%
 # Score blend: breakout (validated edge) vs intraday screener confluence. Both on a 0-100 scale.
 W_BREAKOUT, W_SCREENER = 0.45, 0.55
 
-# Regime tilt on the final score (intraday breadth risk-on/off from intraday_regime.py).
+# Regime tilt — applied to both the final score AND (unlike before) position sizing, so a
+# RISK_OFF regime actually shrinks exposure instead of just relabeling the same full-size bet.
 REGIME_TILT = {"RISK_ON": 1.15, "NEUTRAL": 1.0, "RISK_OFF": 0.80}
 
 # News-sentiment tilt: a fresh news score in [-1, +1] nudges the blended score up to ±15%. News is
 # sparse (only some names have coverage), so it modifies rather than drives the ranking.
 NEWS_TILT_WEIGHT = 0.15
+
+# Minimum 20-day average daily turnover (₹ crore) to be eligible for an intraday recommendation.
+# Intraday trades need enough same-day volume to enter AND exit without material slippage --
+# unlike a positional trade, there's no multi-day window to work an illiquid fill.
+MIN_TURNOVER_CR = 1.0
+
+# Don't size NEW intraday entries in the last stretch before NSE close (15:30 IST) -- a signal
+# firing this late has too little time left to reach an ATR target before same-day square-off.
+LATE_CUTOFF_MINUTES_BEFORE_CLOSE = 45
+NSE_CLOSE_MINUTES_IST = 15 * 60 + 30  # 15:30 IST
 
 
 def _wilder_atr(bars, period: int = 14) -> float:
@@ -76,8 +87,12 @@ class IntradayRanker:
         self.conn = conn or connect()
 
     def _intraday_membership(self):
-        """Screener memberships restricted to intraday-classified screeners (same join shape as
-        unified_ranker._get_screener_membership, filtered to investment_horizon='intraday')."""
+        """Screener memberships restricted to intraday-relevant screeners (same join shape as
+        unified_ranker._get_screener_membership, filtered to investment_horizon IN
+        ('intraday', 'short_term')). 'short_term' is included alongside 'intraday' because
+        screener_catalog_enricher.py inserts rows under that coarser label for screeners
+        screener_scoring_v2.csv doesn't classify -- excluding it left ~109 real screeners
+        (vs. ~92 tagged 'intraday') invisible to this ranker."""
         membership = {}
 
         def add(sym, bias, conf, cat, sub, name):
@@ -98,17 +113,17 @@ class IntradayRanker:
              "FROM trendlyne_screener_stocks ss "
              "JOIN screener_catalog sc ON sc.screener_id=ss.screener_id AND sc.source='trendlyne' "
              "LEFT JOIN trendlyne_screeners ts ON ts.screener_id=sc.screener_id "
-             "WHERE sc.investment_horizon='intraday'"),
+             "WHERE sc.investment_horizon IN ('intraday', 'short_term')"),
             ("SELECT ss.symbol, sc.signal_bias, sc.confidence, sc.category, sc.subcategory, "
              "COALESCE(sc.screener_name, sc.screener_id) sname "
              "FROM moneycontrol_screener_stocks ss "
              "JOIN screener_catalog sc ON sc.screener_id=ss.scan_id AND sc.source='moneycontrol' "
-             "WHERE sc.investment_horizon='intraday'"),
+             "WHERE sc.investment_horizon IN ('intraday', 'short_term')"),
             ("SELECT ss.symbol, sc.signal_bias, sc.confidence, sc.category, sc.subcategory, "
              "COALESCE(sc.screener_name, sc.screener_id) sname "
              "FROM etnow_screener_stocks ss "
              "JOIN screener_catalog sc ON sc.screener_id=ss.screener_id AND sc.source='etnow' "
-             "WHERE sc.investment_horizon='intraday'"),
+             "WHERE sc.investment_horizon IN ('intraday', 'short_term')"),
         ]
         for sql in queries:
             try:
@@ -118,6 +133,40 @@ class IntradayRanker:
             except Exception as e:
                 print(f"[IntradayRanker] membership query skipped: {str(e)[:80]}")
         return membership
+
+    def _restricted_symbols(self) -> set:
+        """Symbols under NSE surveillance (ASM/GSM). Many GSM stages (and T2T-segment ASM
+        stocks) settle delivery-only -- intraday square-off isn't permitted by the exchange,
+        so recommending an entry/target/stop meant to be closed same-day is not just risky,
+        it may describe a trade the exchange won't let through. nse_stocks.is_asm/gsm_stage
+        are the live, actively-synced surveillance flags (verified populated as of today);
+        backtester.py's own ASM/GSM filter reads from a separate asm_gsm_stocks table that
+        does not exist on this database, so deliberately not reused here."""
+        try:
+            rows = self.conn.execute(
+                "SELECT symbol FROM nse_stocks WHERE is_asm=1 OR gsm_stage>0"
+            ).fetchall()
+            return {r["symbol"] for r in rows}
+        except Exception as e:
+            print(f"[IntradayRanker] surveillance filter skipped: {str(e)[:80]}")
+            return set()
+
+    def _liquid_symbols(self, symbols: set) -> set:
+        """Symbols clearing MIN_TURNOVER_CR average daily turnover over the last 20 sessions.
+        Intraday trades need enough same-day volume to enter AND exit without material
+        slippage; there's no multi-day window to work an illiquid fill like a positional
+        trade has."""
+        if not symbols:
+            return set()
+        ph = ",".join("?" for _ in symbols)
+        cutoff = (date.today() - timedelta(days=30)).isoformat()
+        rows = self.conn.execute(
+            f"SELECT symbol, AVG(volume * close) AS avg_turnover FROM stock_ohlcv "
+            f"WHERE symbol IN ({ph}) AND date >= ? AND COALESCE(is_suspect,0)=0 "
+            f"GROUP BY symbol", tuple(symbols) + (cutoff,)
+        ).fetchall()
+        min_turnover = MIN_TURNOVER_CR * 1e7  # crore -> rupees
+        return {r["symbol"] for r in rows if (r["avg_turnover"] or 0) >= min_turnover}
 
     def _breakout_scores(self):
         """Latest breakout_probability per symbol, scaled to 0-100 (same source as unified_ranker)."""
@@ -237,6 +286,19 @@ class IntradayRanker:
         w_breakout, w_screener, news_tilt = self._learned_weights()
 
         all_symbols = set(screener_scores) | set(breakout_scores)
+
+        # Eligibility filter: drop symbols that can't actually be traded intraday as described
+        # (surveillance-restricted) or don't have enough same-day volume to enter/exit cleanly.
+        restricted = self._restricted_symbols()
+        before = len(all_symbols)
+        all_symbols -= restricted
+        illiquid = all_symbols - self._liquid_symbols(all_symbols)
+        all_symbols -= illiquid
+        if restricted or illiquid:
+            print(f"[IntradayRanker] Eligibility filter: {before} -> {len(all_symbols)} "
+                  f"(-{len(restricted & (set(screener_scores) | set(breakout_scores)))} ASM/GSM, "
+                  f"-{len(illiquid)} illiquid)")
+
         rows = []
         buy_syms = []
         for sym in all_symbols:
@@ -279,8 +341,11 @@ class IntradayRanker:
             target, stop, rr = _atr_barriers(cmp_, atr)
             r.update({"cmp": round(cmp_, 2), "entry_price": round(cmp_, 2),
                       "stop_loss": stop, "target_1": target, "risk_reward": rr})
-            # Size on the validated breakout edge, inverse-vol (ATR%), longs only.
-            bet = bet_size_from_probability(r["breakout_prob"])
+            # Size on the validated breakout edge, inverse-vol (ATR%), longs only. tilt is the
+            # same regime multiplier applied to score above -- previously RISK_OFF only
+            # relabeled the classification, exposure stayed full-size regardless of the
+            # system's own risk-off signal.
+            bet = bet_size_from_probability(r["breakout_prob"]) * tilt
             vol = max(VOL_FLOOR_PCT, (atr / cmp_ * 100.0) if cmp_ else VOL_FLOOR_PCT)
             raw_sizes[r["symbol"]] = bet / vol
 
@@ -288,7 +353,20 @@ class IntradayRanker:
         for r in rows:
             r["position_size_pct"] = round(sizes.get(r["symbol"], 0.0) * 100, 2)
 
+        # Don't deploy fresh capital in the last stretch before close -- a signal this late
+        # has too little time left to reach target before same-day square-off. Still write
+        # the recommendation/score for visibility, just zero the sizing.
+        ist_now = datetime.utcnow() + timedelta(hours=5, minutes=30)
+        minutes_to_close = NSE_CLOSE_MINUTES_IST - (ist_now.hour * 60 + ist_now.minute)
+        if 0 <= minutes_to_close <= LATE_CUTOFF_MINUTES_BEFORE_CLOSE:
+            for r in rows:
+                if r["position_size_pct"]:
+                    r["position_size_pct"] = 0.0
+            print(f"[IntradayRanker] {minutes_to_close}min to close -- late-cutoff active, "
+                  f"no new position sizing this cycle.")
+
         today = date.today().isoformat()
+        cycle_at = datetime.utcnow().isoformat()
         cur = self.conn.cursor()
         for r in rows:
             reasoning = (f"{r['bull']} bullish / {r['bear']} bearish intraday screeners "
@@ -316,6 +394,22 @@ class IntradayRanker:
                  r["screener_score"], r["breakout_score"], r["news_sentiment"], r["bull"], r["bear"],
                  r["cmp"], r["entry_price"], r["stop_loss"], r["target_1"], r["risk_reward"],
                  r["position_size_pct"], reasoning),
+            )
+            # Append-only trail of this specific cycle -- intraday_recommendations above is
+            # overwrite-in-place per (symbol, day), so it's the LATEST cycle's row only. The
+            # outcome resolver reads this history table to paper-trade the FIRST Buy-classified
+            # cycle of the day per symbol, not whichever cycle happened to run last.
+            cur.execute(
+                """INSERT INTO intraday_recommendations_history
+                   (symbol, computed_at, cycle_at, intraday_regime, intraday_score, conviction_level,
+                    classification, screener_score, breakout_score, news_sentiment, bullish_count,
+                    bearish_count, cmp, entry_price, stop_loss, target_1, risk_reward, position_size_pct)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                   ON CONFLICT(symbol, cycle_at) DO NOTHING""",
+                (r["symbol"], today, cycle_at, regime, r["score"], r["conviction"], r["classification"],
+                 r["screener_score"], r["breakout_score"], r["news_sentiment"], r["bull"], r["bear"],
+                 r["cmp"], r["entry_price"], r["stop_loss"], r["target_1"], r["risk_reward"],
+                 r["position_size_pct"]),
             )
         self.conn.commit()
         buys = sum(1 for r in rows if r["classification"] in ("Strong Buy", "Buy"))
