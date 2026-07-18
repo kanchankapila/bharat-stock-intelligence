@@ -1,13 +1,21 @@
 #!/usr/bin/env python3
 """
 Live Screener Outcome Resolver.
-Resolves EOD outcomes (1d, 3d, 5d returns) for live_screener_appearances.
+Resolves EOD outcomes (1d, 3d, 5d returns) plus a same-day (intraday) return for
+live_screener_appearances.
 """
 
 import sys
+import datetime
 from db_compat import connect, read_df, use_postgres, try_advisory_lock, release_advisory_lock
 
 NIFTY_SYMBOL = "NIFTY50"
+
+# Max plausible same-day deviation between the intraday_ohlcv last bar and the daily close
+# before treating the intraday price as a bad symbol/provider mapping rather than real price
+# action -- same guard intraday_ranker.py applies (PLAUSIBLE_INTRADAY_DEVIATION) after a live
+# mcsymbol mismatch produced a 54x price jump for one symbol.
+INTRADAY_DEVIATION_CAP = 0.30
 
 # Batched pending-row cap per run: the resolver used to do 3-5 per-row DB round
 # trips against stock_ohlcv (see git history) and fell 360k+ rows behind because
@@ -70,6 +78,36 @@ def _load_price_series(symbols, start_date: str) -> dict:
     return out
 
 
+def _load_intraday_close_series(symbols, start_date: str, end_date_exclusive: str) -> dict:
+    """Last intraday_ohlcv bar's close per (symbol, appearance-date) -- the same-day exit
+    price behind return_intraday. Callers fall back to the daily close (from
+    _load_price_series) when a symbol/date has no intraday bars, e.g. intraday_fetcher.py
+    hadn't run yet for that day."""
+    if not symbols:
+        return {}
+    symbols = sorted(set(symbols))
+    if use_postgres():
+        df = read_df(
+            "SELECT symbol, datetime::date AS d, close FROM intraday_ohlcv "
+            "WHERE symbol = ANY(?) AND datetime >= ? AND datetime < ? "
+            "ORDER BY symbol, datetime",
+            (symbols, start_date, end_date_exclusive),
+        )
+    else:
+        placeholders = ",".join(["?"] * len(symbols))
+        df = read_df(
+            f"SELECT symbol, substr(datetime,1,10) AS d, close FROM intraday_ohlcv "
+            f"WHERE symbol IN ({placeholders}) AND datetime >= ? AND datetime < ? "
+            f"ORDER BY symbol, datetime",
+            (*symbols, start_date, end_date_exclusive),
+        )
+    if df.empty:
+        return {}
+    df["d"] = df["d"].astype(str).str.slice(0, 10)
+    last = df.groupby(["symbol", "d"], sort=False).tail(1)
+    return {(r["symbol"], r["d"]): r["close"] for _, r in last.iterrows()}
+
+
 def resolve_outcomes(dry_run=False):
     if not try_advisory_lock("live_screener_resolver"):
         print("[LiveScreenerResolver] Another run is already in progress — skipping.")
@@ -87,7 +125,7 @@ def resolve_outcomes(dry_run=False):
             FROM   live_screener_appearances a
             JOIN   live_screener_runs r ON a.run_id = r.id
             LEFT   JOIN live_screener_outcomes o ON a.id = o.appearance_id
-            WHERE  o.appearance_id IS NULL OR o.return_5d IS NULL
+            WHERE  o.appearance_id IS NULL OR o.return_5d IS NULL OR o.return_intraday IS NULL
             ORDER  BY r.created_at ASC
             LIMIT  {MAX_PER_RUN}
         """).fetchall()
@@ -100,7 +138,10 @@ def resolve_outcomes(dry_run=False):
 
         symbols = {row[1] for row in pending}
         min_run_ts = min(str(row[4])[:10] for row in pending)
+        max_run_ts = max(str(row[4])[:10] for row in pending)
+        intraday_end_bound = (datetime.date.fromisoformat(max_run_ts) + datetime.timedelta(days=1)).isoformat()
         prices = _load_price_series(symbols, min_run_ts)
+        intraday_closes = _load_intraday_close_series(symbols, min_run_ts, intraday_end_bound)
 
         resolved = 0
         to_write = []
@@ -122,7 +163,19 @@ def resolve_outcomes(dry_run=False):
 
             r1, r3, r5 = _ret(entry_close, c1), _ret(entry_close, c3), _ret(entry_close, c5)
 
-            if r1 is None and r3 is None and r5 is None:
+            # Same-day exit: last intraday bar on the appearance date, falling back to the
+            # daily close when intraday_fetcher.py had no bars that day. entry_price (not
+            # entry_close) is the base here -- it's the live price captured the moment the
+            # NiftyTrader filter matched, which is what an intraday trade would actually enter at.
+            same_day_close = intraday_closes.get((symbol, run_ts))
+            if same_day_close is not None and entry_close:
+                if abs(same_day_close - entry_close) / entry_close > INTRADAY_DEVIATION_CAP:
+                    same_day_close = None
+            if same_day_close is None:
+                same_day_close = entry_close
+            r_intraday = _ret(entry_price, same_day_close)
+
+            if r1 is None and r3 is None and r5 is None and r_intraday is None:
                 continue
 
             alpha_3d = None
@@ -134,9 +187,9 @@ def resolve_outcomes(dry_run=False):
                     alpha_3d = round(r3 - nifty_r3, 4) if nifty_r3 is not None else None
 
             if dry_run:
-                print(f"  [DRY] {app_id} {symbol}: 1d={r1}% 3d={r3}% 5d={r5}% alpha3d={alpha_3d}%")
+                print(f"  [DRY] {app_id} {symbol}: intraday={r_intraday}% 1d={r1}% 3d={r3}% 5d={r5}% alpha3d={alpha_3d}%")
             else:
-                to_write.append((app_id, symbol, filter_key, run_ts, entry_price, r1, r3, r5))
+                to_write.append((app_id, symbol, filter_key, run_ts, entry_price, r1, r3, r5, r_intraday))
             resolved += 1
 
         if not dry_run and to_write:
@@ -145,12 +198,13 @@ def resolve_outcomes(dry_run=False):
                 conn.executemany("""
                     INSERT INTO live_screener_outcomes
                         (appearance_id, symbol, filter_key, appeared_at,
-                         entry_price, return_1d, return_3d, return_5d)
-                    VALUES (?,?,?,?,?,?,?,?)
+                         entry_price, return_1d, return_3d, return_5d, return_intraday)
+                    VALUES (?,?,?,?,?,?,?,?,?)
                     ON CONFLICT(appearance_id) DO UPDATE SET
                         return_1d = excluded.return_1d,
                         return_3d = excluded.return_3d,
-                        return_5d = excluded.return_5d
+                        return_5d = excluded.return_5d,
+                        return_intraday = excluded.return_intraday
                 """, to_write[i:i + CHUNK])
             conn.commit()
             print(f"[LiveScreenerResolver] Resolved {resolved} outcomes.")

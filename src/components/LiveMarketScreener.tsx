@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { trpc } from '../lib/trpc';
-import { Activity, Zap, TrendingUp, TrendingDown, Minus, Filter, X, Brain, BarChart2, Award, Play } from 'lucide-react';
+import { Activity, Zap, TrendingUp, TrendingDown, Minus, Filter, X, Brain, BarChart2, Award, Play, Target, Clock } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 // --- Filter Definitions ---
@@ -45,7 +45,7 @@ interface Props {
 export const LiveMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
   const [filters, setFilters] = useState<Record<string, boolean>>({});
   const [showFilters, setShowFilters] = useState(false);
-  const [activeTab, setActiveTab] = useState<'screener' | 'ai'>('screener');
+  const [activeTab, setActiveTab] = useState<'screener' | 'ai' | 'intraday'>('screener');
   const [isVisible, setIsVisible] = useState(document.visibilityState === 'visible');
 
   useEffect(() => {
@@ -60,6 +60,11 @@ export const LiveMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
 
   const { data: optimalCombos, isLoading: loadingCombos } = trpc.getLiveScreenerOptimalCombinations.useQuery();
   const { data: backtestRuns } = trpc.getLiveScreenerBacktestRuns.useQuery();
+
+  const { data: intradayCombos, isLoading: loadingIntradayCombos } = trpc.getLiveScreenerOptimalIntradayCombinations.useQuery();
+  const { data: intradaySignals, isLoading: loadingIntradaySignals } = trpc.getLiveScreenerIntradaySignals.useQuery(undefined, {
+    refetchInterval: isVisible ? 30000 : false,
+  });
 
   const toggleFilter = (key: string) => {
     setFilters(prev => ({
@@ -91,7 +96,25 @@ export const LiveMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
       try {
         const config = JSON.parse(run.strategy_config_json);
         const configFilters = config.filters || [];
-        return configFilters.length === comboFilters.length && 
+        return config.horizon !== 'intraday' &&
+               configFilters.length === comboFilters.length &&
+               configFilters.every((f: string) => comboFilters.includes(f));
+      } catch {
+        return false;
+      }
+    });
+  };
+
+  // Same match, restricted to the same-day (intraday) horizon backtests -- run_name/horizon
+  // disambiguates these from the swing (1d/3d/5d) runs above so the two never mix.
+  const findIntradayBacktestForCombo = (comboFilters: string[]) => {
+    if (!backtestRuns) return null;
+    return backtestRuns.find((run: any) => {
+      try {
+        const config = JSON.parse(run.strategy_config_json);
+        const configFilters = config.filters || [];
+        return config.horizon === 'intraday' &&
+               configFilters.length === comboFilters.length &&
                configFilters.every((f: string) => comboFilters.includes(f));
       } catch {
         return false;
@@ -135,6 +158,17 @@ export const LiveMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
           >
             <Brain className="w-3.5 h-3.5" />
             AI Strategy Cockpit
+          </button>
+
+          <button
+            onClick={() => setActiveTab('intraday')}
+            className={cn(
+              "px-3 py-1.5 rounded-md font-mono text-xs font-bold transition-all flex items-center gap-1.5",
+              activeTab === 'intraday' ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/10" : "text-slate-400 hover:text-slate-200"
+            )}
+          >
+            <Target className="w-3.5 h-3.5" />
+            Intraday Edge
           </button>
         </div>
 
@@ -299,7 +333,7 @@ export const LiveMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
               })}
             </div>
           )
-        ) : (
+        ) : activeTab === 'ai' ? (
           /* AI Strategy Dashboard */
           <div className="space-y-6">
             <div className="bg-slate-900/30 border border-slate-800 rounded-xl p-5 mb-4">
@@ -423,6 +457,199 @@ export const LiveMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
                 })}
               </div>
             )}
+          </div>
+        ) : (
+          /* Intraday Edge — NiftyTrader live screener ranked by same-day (return_intraday) outcomes.
+             Fully separate from the AI tab above: that one optimizes for the 1d/3d/5d swing
+             horizon, this one for the same-day exit an intraday trade would actually take. */
+          <div className="space-y-6">
+            <div className="bg-slate-900/30 border border-slate-800 rounded-xl p-5 mb-4">
+              <h2 className="text-sm font-bold font-['Rajdhani'] uppercase tracking-wider text-slate-300 mb-2 flex items-center gap-2">
+                <Target className="w-4 h-4 text-indigo-400" />
+                Intraday Edge Ranking
+              </h2>
+              <p className="text-xs text-slate-500 leading-relaxed font-mono">
+                Stocks matching NiftyTrader filters as of the latest 15-min collection cycle, ranked by that
+                filter's historical <strong>same-day</strong> win-rate / avg-return (min 3 resolved samples).
+                Distinct from the AI Strategy tab, which optimizes for a 1-5 day swing horizon.
+              </p>
+              {intradaySignals?.asOf && (
+                <p className="text-[10px] font-mono text-slate-600 mt-2 flex items-center gap-1.5">
+                  <Clock className="w-3 h-3" /> Live matches as of {new Date(intradaySignals.asOf).toLocaleString('en-IN')}
+                </p>
+              )}
+            </div>
+
+            {loadingIntradaySignals ? (
+              <div className="flex justify-center py-12">
+                <Zap className="w-6 h-6 text-indigo-500 animate-spin" />
+              </div>
+            ) : !intradaySignals?.stocks?.length ? (
+              <div className="text-center py-12 text-slate-500 font-mono text-xs">
+                No live screener matches yet this cycle — the collector runs every 15 min during market hours.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                {intradaySignals.stocks.map((s: any) => {
+                  const chg = s.change_per ?? 0;
+                  const hasEdge = s.best_sample_count > 0;
+                  const borderColor = !hasEdge ? 'border-slate-700/50' : s.edge_score > 0 ? 'border-emerald-500/50' : 'border-rose-500/40';
+                  const bgColor = !hasEdge ? 'bg-slate-900/30' : s.edge_score > 0 ? 'bg-emerald-500/10' : 'bg-rose-500/10';
+                  return (
+                    <div
+                      key={s.symbol}
+                      onClick={() => onSelectStock?.(s.symbol)}
+                      className={cn(
+                        "rounded-xl border p-4 transition-all hover:shadow-[0_8px_30px_rgba(0,0,0,0.12)] backdrop-blur-sm cursor-pointer hover:scale-[1.01]",
+                        borderColor, bgColor
+                      )}
+                    >
+                      <div className="flex justify-between items-start mb-3">
+                        <div>
+                          <h3 className="font-['Rajdhani'] text-lg font-bold text-white tracking-wide">{s.symbol}</h3>
+                          <div className={cn("flex items-center gap-1 font-mono text-[11px] mt-1 font-bold", chg >= 0 ? 'text-emerald-400' : 'text-rose-400')}>
+                            {chg >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+                            {chg > 0 ? '+' : ''}{chg.toFixed(2)}%
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="font-mono text-lg font-bold text-slate-100">₹{s.price?.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
+                        </div>
+                      </div>
+
+                      <div className="border-t border-slate-800/50 pt-3">
+                        {hasEdge ? (
+                          <>
+                            <p className="font-mono text-[9px] text-slate-500 uppercase mb-1">Best Setup</p>
+                            <code className="text-[10px] font-mono bg-slate-850 px-2 py-1 rounded text-indigo-300 border border-slate-800/80">{s.best_filter}</code>
+                            <div className="grid grid-cols-3 gap-2 mt-3">
+                              <div>
+                                <p className="font-mono text-[9px] text-slate-500 uppercase">Win Rate</p>
+                                <p className={cn("font-mono text-sm font-bold mt-0.5", s.best_win_rate >= 0.5 ? 'text-emerald-400' : 'text-amber-400')}>
+                                  {(s.best_win_rate * 100).toFixed(0)}%
+                                </p>
+                              </div>
+                              <div>
+                                <p className="font-mono text-[9px] text-slate-500 uppercase">Avg Return</p>
+                                <p className={cn("font-mono text-sm font-bold mt-0.5", s.best_avg_return >= 0 ? 'text-emerald-400' : 'text-rose-400')}>
+                                  {s.best_avg_return >= 0 ? '+' : ''}{s.best_avg_return.toFixed(2)}%
+                                </p>
+                              </div>
+                              <div>
+                                <p className="font-mono text-[9px] text-slate-500 uppercase">Samples</p>
+                                <p className="font-mono text-sm font-bold text-slate-400 mt-0.5">{s.best_sample_count}</p>
+                              </div>
+                            </div>
+                          </>
+                        ) : (
+                          <p className="font-mono text-[10px] text-slate-600">
+                            Matched {s.filters.map((f: any) => f.filter_key).join(', ')} — no resolved same-day track record yet.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Optimal intraday filter combinations (decision-tree, isolated from the swing model) */}
+            <div className="pt-2">
+              <h2 className="text-sm font-bold font-['Rajdhani'] uppercase tracking-wider text-slate-300 mb-4 flex items-center gap-2">
+                <Brain className="w-4 h-4 text-indigo-400" />
+                Optimal Intraday Filter Combinations
+              </h2>
+              {loadingIntradayCombos ? (
+                <div className="flex justify-center py-8">
+                  <Zap className="w-6 h-6 text-indigo-500 animate-spin" />
+                </div>
+              ) : !intradayCombos || !intradayCombos.optimal_combinations?.length ? (
+                <div className="text-center py-8 text-slate-500 font-mono text-xs">
+                  No optimal intraday combinations computed yet. Please execute <code>live_screener_optimizer.py</code>.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {intradayCombos.optimal_combinations.map((combo: any, idx: number) => {
+                    const wr = combo.win_rate * 100;
+                    const backtest = findIntradayBacktestForCombo(combo.filters);
+                    return (
+                      <div key={idx} className="border border-slate-800/80 rounded-xl bg-slate-900/30 p-5 flex flex-col justify-between hover:border-slate-700/60 transition-all">
+                        <div>
+                          <div className="flex justify-between items-start gap-4 mb-4">
+                            <span className="font-mono text-xs text-indigo-400 font-bold">Intraday Strategy #{idx + 1}</span>
+                            <span className={cn("text-[9px] font-mono font-bold px-2 py-0.5 rounded border uppercase tracking-wider",
+                              wr >= 60 ? "text-emerald-400 border-emerald-500/30 bg-emerald-500/5" : "text-slate-400 border-slate-800 bg-slate-950/40")}>
+                              {wr >= 60 ? 'STRONG (AI)' : 'WATCH'}
+                            </span>
+                          </div>
+                          <div className="flex flex-wrap gap-1.5 mb-5">
+                            {combo.filters.map((f: string) => (
+                              <code key={f} className="text-[10px] font-mono bg-slate-850 px-2 py-1 rounded text-slate-300 border border-slate-800/80">{f}</code>
+                            ))}
+                          </div>
+                          <div className="grid grid-cols-3 gap-2 bg-slate-950/40 border border-slate-900 rounded-lg p-3 mb-4">
+                            <div>
+                              <p className="font-mono text-[9px] text-slate-500 uppercase">Win Rate</p>
+                              <p className="font-mono text-sm font-bold text-emerald-400 mt-0.5">{wr.toFixed(1)}%</p>
+                            </div>
+                            <div>
+                              <p className="font-mono text-[9px] text-slate-500 uppercase">Avg Return (same-day)</p>
+                              <p className="font-mono text-sm font-bold text-slate-200 mt-0.5">{combo.avg_return >= 0 ? '+' : ''}{combo.avg_return.toFixed(2)}%</p>
+                            </div>
+                            <div>
+                              <p className="font-mono text-[9px] text-slate-500 uppercase">Samples</p>
+                              <p className="font-mono text-sm font-bold text-slate-400 mt-0.5">{combo.sample_count}</p>
+                            </div>
+                          </div>
+                          <div className="border-t border-slate-800/50 pt-4 mt-2">
+                            <h4 className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5 mb-2.5">
+                              <BarChart2 className="w-3.5 h-3.5 text-indigo-400" />
+                              Historical Backtest Performance
+                            </h4>
+                            {backtest ? (
+                              <div className="grid grid-cols-2 gap-3 font-mono text-xs text-slate-300">
+                                <div className="flex justify-between items-center bg-slate-900/20 p-2 rounded">
+                                  <span className="text-slate-500 text-[10px]">TOTAL RETURN:</span>
+                                  <span className="font-bold text-emerald-400">{backtest.total_return_pct >= 0 ? '+' : ''}{backtest.total_return_pct.toFixed(2)}%</span>
+                                </div>
+                                <div className="flex justify-between items-center bg-slate-900/20 p-2 rounded">
+                                  <span className="text-slate-500 text-[10px]">ALPHA VS NIFTY:</span>
+                                  <span className="font-bold text-indigo-400">{backtest.alpha_pct >= 0 ? '+' : ''}{backtest.alpha_pct.toFixed(2)}%</span>
+                                </div>
+                                <div className="flex justify-between items-center bg-slate-900/20 p-2 rounded">
+                                  <span className="text-slate-500 text-[10px]">WIN RATE:</span>
+                                  <span className="font-bold text-slate-200">{(backtest.win_rate * 100).toFixed(0)}%</span>
+                                </div>
+                                <div className="flex justify-between items-center bg-slate-900/20 p-2 rounded">
+                                  <span className="text-slate-500 text-[10px]">SHARPE RATIO:</span>
+                                  <span className="font-bold text-indigo-300">{backtest.sharpe_ratio.toFixed(2)}</span>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="bg-slate-950/20 border border-slate-800/40 rounded p-3 text-[10px] font-mono text-slate-500 text-center">
+                                No backtest run resolved. Execute <code>backtest_live_screener.py --intraday</code> for this combo.
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        <div className="mt-5 pt-3 border-t border-slate-800/50 flex items-center justify-between">
+                          <span className="text-[10px] font-mono text-slate-500 flex items-center gap-1">
+                            <Award className="w-3.5 h-3.5 text-amber-500" />
+                            Rank #{idx + 1}
+                          </span>
+                          <button
+                            onClick={() => applyCombo(combo.filters)}
+                            className="bg-indigo-600 hover:bg-indigo-500 text-white font-mono text-xs font-bold px-4 py-2 rounded-lg transition-all flex items-center gap-1.5"
+                          >
+                            <Play className="w-3 h-3 fill-current" /> Apply Filter Combo
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>

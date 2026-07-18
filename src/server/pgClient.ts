@@ -375,6 +375,8 @@ export async function pgEnsureColumns(): Promise<void> {
     `ALTER TABLE intraday_recommendations ADD COLUMN IF NOT EXISTS news_sentiment DOUBLE PRECISION`,
     // walk-forward optimization per-fold breakdown (run_walk_forward in backtester.py)
     `ALTER TABLE backtesting_runs ADD COLUMN IF NOT EXISTS walk_forward_folds_json TEXT`,
+    // same-day return alongside the existing 1d/3d/5d EOD horizons (migration 070)
+    `ALTER TABLE live_screener_outcomes ADD COLUMN IF NOT EXISTS return_intraday DOUBLE PRECISION`,
   ];
   // Run each ALTER individually — Postgres can't do multiple DDL in one statement
   for (const sql of alters) {

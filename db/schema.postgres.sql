@@ -776,6 +776,7 @@ CREATE TABLE IF NOT EXISTS "live_screener_outcomes" (
   "return_1d" DOUBLE PRECISION,
   "return_3d" DOUBLE PRECISION,
   "return_5d" DOUBLE PRECISION,
+  "return_intraday" DOUBLE PRECISION,
   PRIMARY KEY ("appearance_id")
 );
 

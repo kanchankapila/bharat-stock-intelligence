@@ -2063,6 +2063,14 @@ runMigration('047_live_screener_optimization', `
   );
 `);
 
+// Same-day (intraday) return alongside the existing 1d/3d/5d EOD horizons — resolved from
+// intraday_ohlcv's last bar of the appearance date, falling back to stock_ohlcv's daily close.
+// Kept as an additional column rather than a new table so live_screener_optimizer.py /
+// backtest_live_screener.py can query one row per appearance across all horizons.
+runMigration('070_live_screener_intraday_outcome', `
+  ALTER TABLE live_screener_outcomes ADD COLUMN return_intraday REAL;
+`);
+
 runMigration('048_cs_score_column', `
   ALTER TABLE technical_signals ADD COLUMN cs_score REAL;
   CREATE INDEX IF NOT EXISTS idx_ts_cs_score
