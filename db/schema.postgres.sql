@@ -791,6 +791,19 @@ CREATE TABLE IF NOT EXISTS "live_screener_runs" (
   "created_at" TIMESTAMPTZ DEFAULT now()
 );
 
+-- ── live_screener_ml_scores ─────────────────────────────────────────────
+-- ML win-probability per (run, symbol) from live_screener_ml_ranker.py, scored against
+-- the currently-active live_screener_intraday_clf.pkl right after each collection cycle.
+CREATE TABLE IF NOT EXISTS "live_screener_ml_scores" (
+  "run_id" BIGINT NOT NULL,
+  "symbol" TEXT NOT NULL,
+  "win_probability" DOUBLE PRECISION NOT NULL,
+  "model_version" TEXT,
+  "computed_at" TIMESTAMPTZ DEFAULT now(),
+  PRIMARY KEY ("run_id", "symbol")
+);
+CREATE INDEX IF NOT EXISTS idx_lsms_run ON live_screener_ml_scores(run_id);
+
 -- ── macro_asset_prices ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "macro_asset_prices" (
   "date" DATE NOT NULL,

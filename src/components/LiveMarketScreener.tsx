@@ -65,6 +65,9 @@ export const LiveMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
   const { data: intradaySignals, isLoading: loadingIntradaySignals } = trpc.getLiveScreenerIntradaySignals.useQuery(undefined, {
     refetchInterval: isVisible ? 30000 : false,
   });
+  const { data: mlModelStatus } = trpc.getLiveScreenerMlModelStatus.useQuery(undefined, {
+    refetchInterval: isVisible ? 60000 : false,
+  });
 
   const toggleFilter = (key: string) => {
     setFilters(prev => ({
@@ -469,13 +472,31 @@ export const LiveMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
                 Intraday Edge Ranking
               </h2>
               <p className="text-xs text-slate-500 leading-relaxed font-mono">
-                Stocks matching NiftyTrader filters as of the latest 15-min collection cycle, ranked by that
-                filter's historical <strong>same-day</strong> win-rate / avg-return (min 3 resolved samples).
-                Distinct from the AI Strategy tab, which optimizes for a 1-5 day swing horizon.
+                Stocks matching NiftyTrader filters as of the latest 15-min collection cycle. Ranked by a
+                gradient-boosted classifier's learned <strong>same-day</strong> win-probability once trained
+                (backtested against actual EOD screener stock movement, retrained daily, gated so a worse
+                retrain never replaces a better one); falls back to the single-best-filter win-rate / avg-return
+                rule (min 3 resolved samples) until then. Distinct from the AI Strategy tab, which optimizes
+                for a 1-5 day swing horizon.
               </p>
               {intradaySignals?.asOf && (
                 <p className="text-[10px] font-mono text-slate-600 mt-2 flex items-center gap-1.5">
                   <Clock className="w-3 h-3" /> Live matches as of {new Date(intradaySignals.asOf).toLocaleString('en-IN')}
+                </p>
+              )}
+              {mlModelStatus ? (
+                <div className="mt-3 pt-3 border-t border-slate-800/50 flex flex-wrap items-center gap-x-5 gap-y-1 text-[10px] font-mono text-slate-400">
+                  <span className="text-indigo-300 font-bold uppercase tracking-wider">ML Ranker Active</span>
+                  <span>Held-out AUC: <strong className="text-slate-200">{mlModelStatus.test_auc?.toFixed(3)}</strong></span>
+                  {mlModelStatus.cv_auc != null && <span>CV AUC: <strong className="text-slate-200">{mlModelStatus.cv_auc.toFixed(3)}</strong></span>}
+                  <span>Base rate: <strong className="text-slate-200">{(mlModelStatus.base_rate * 100).toFixed(1)}%</strong></span>
+                  <span>Trained on: <strong className="text-slate-200">{mlModelStatus.n_samples}</strong> samples</span>
+                  <span>{new Date(mlModelStatus.trained_at).toLocaleString('en-IN')}</span>
+                </div>
+              ) : (
+                <p className="text-[10px] font-mono text-slate-600 mt-3 pt-3 border-t border-slate-800/50">
+                  No trained ML model yet — execute <code>live_screener_ml_ranker.py --train</code> once enough
+                  same-day outcomes have resolved. Ranking below falls back to the single-best-filter rule until then.
                 </p>
               )}
             </div>
@@ -493,8 +514,10 @@ export const LiveMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
                 {intradaySignals.stocks.map((s: any) => {
                   const chg = s.change_per ?? 0;
                   const hasEdge = s.best_sample_count > 0;
-                  const borderColor = !hasEdge ? 'border-slate-700/50' : s.edge_score > 0 ? 'border-emerald-500/50' : 'border-rose-500/40';
-                  const bgColor = !hasEdge ? 'bg-slate-900/30' : s.edge_score > 0 ? 'bg-emerald-500/10' : 'bg-rose-500/10';
+                  const hasMl = s.ml_win_probability !== null && s.ml_win_probability !== undefined;
+                  const positive = hasMl ? s.ml_win_probability >= 0.5 : s.edge_score > 0;
+                  const borderColor = !hasEdge && !hasMl ? 'border-slate-700/50' : positive ? 'border-emerald-500/50' : 'border-rose-500/40';
+                  const bgColor = !hasEdge && !hasMl ? 'bg-slate-900/30' : positive ? 'bg-emerald-500/10' : 'bg-rose-500/10';
                   return (
                     <div
                       key={s.symbol}
@@ -514,6 +537,11 @@ export const LiveMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
                         </div>
                         <div className="text-right">
                           <div className="font-mono text-lg font-bold text-slate-100">₹{s.price?.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
+                          {hasMl && (
+                            <div className={cn("font-mono text-[10px] font-bold mt-1 px-1.5 py-0.5 rounded inline-block", s.ml_win_probability >= 0.5 ? 'text-emerald-400 bg-emerald-500/10' : 'text-amber-400 bg-amber-500/10')}>
+                              ML {(s.ml_win_probability * 100).toFixed(0)}%
+                            </div>
+                          )}
                         </div>
                       </div>
 

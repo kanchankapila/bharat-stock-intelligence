@@ -641,7 +641,7 @@ export const monitorRouter = router({
       );
       if (!latestRun?.id) return { asOf: null, stocks: [] };
 
-      const [appearances, filterStats, runRow] = await Promise.all([
+      const [appearances, filterStats, mlScores, runRow] = await Promise.all([
         dbAll<{ symbol: string; filter_key: string; price: number; change_per: number; volume: number }>(
           "SELECT symbol, filter_key, price, change_per, volume FROM live_screener_appearances WHERE run_id = ?",
           [latestRun.id]
@@ -655,10 +655,18 @@ export const monitorRouter = router({
            GROUP BY filter_key
            HAVING COUNT(*) >= 3`
         ),
+        // ML win-probability from live_screener_ml_ranker.py, scored for this same run_id
+        // right after collection (queues.ts). Absent until the first --train has promoted
+        // a model -- callers fall back to the rule-based edge_score below until then.
+        dbAll<{ symbol: string; win_probability: number }>(
+          "SELECT symbol, win_probability FROM live_screener_ml_scores WHERE run_id = ?",
+          [latestRun.id]
+        ),
         dbGet<{ created_at: string }>("SELECT created_at FROM live_screener_runs WHERE id = ?", [latestRun.id]),
       ]);
 
       const statsByFilter = new Map(filterStats.map(f => [f.filter_key, f]));
+      const mlBySymbol = new Map(mlScores.map(m => [m.symbol, Number(m.win_probability)]));
 
       type StockAgg = {
         symbol: string; price: number; change_per: number; volume: number;
@@ -696,9 +704,35 @@ export const monitorRouter = router({
           best_avg_return: best?.avg_return ?? null,
           best_sample_count: best?.sample_count ?? 0,
           edge_score: best?.avg_return ?? 0,
+          ml_win_probability: mlBySymbol.get(s.symbol) ?? null,
         };
-      }).sort((a, b) => b.edge_score - a.edge_score);
+      }).sort((a, b) => {
+        // ML-scored stocks first (ranked by the learned model, which weighs all matched
+        // filters plus change_per/volume jointly), then whatever's left ranked by the
+        // single-best-filter rule above -- keeps the tab useful before the first model trains.
+        if (a.ml_win_probability !== null && b.ml_win_probability !== null) return b.ml_win_probability - a.ml_win_probability;
+        if (a.ml_win_probability !== null) return -1;
+        if (b.ml_win_probability !== null) return 1;
+        return b.edge_score - a.edge_score;
+      });
 
       return { asOf: runRow?.created_at ?? null, stocks };
+    }),
+
+  // Status of the currently-ACTIVE live_screener_intraday_clf model (written by
+  // live_screener_ml_ranker.py --train only when a retrain clears its promotion-margin
+  // check against the prior model -- a rejected candidate never touches this key, so it
+  // always reflects whichever model is actually scoring stocks right now).
+  getLiveScreenerMlModelStatus: publicProcedure
+    .query(async () => {
+      const row = await dbGet<{ value: string }>(
+        "SELECT value FROM app_settings WHERE key = 'live_screener_ml_model_status'"
+      );
+      if (!row) return null;
+      try {
+        return JSON.parse(row.value);
+      } catch {
+        return null;
+      }
     }),
 });
