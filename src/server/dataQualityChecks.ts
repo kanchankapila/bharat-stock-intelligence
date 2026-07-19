@@ -197,17 +197,22 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     label: 'stock_scores freshness & coverage',
     category: 'scoring',
     critical: true,
+    // 'long_term' is the canonical timeframe read by getTopRatedStocks/unified_ranker.py's
+    // own join (verified: scoringService.ts:129 default param, unified_ranker.py:432) — the
+    // schema also allows 'intraday'/'short' (misc.router.ts:295) but nothing ever writes/reads
+    // a 'swing' timeframe; an earlier version of this check used that guessed value and would
+    // have always seen 0 rows, alarming as a permanent critical failure.
     sql: `SELECT COUNT(*) AS total,
                  (SELECT COUNT(*) FROM nse_stocks) AS universe,
                  MAX(last_updated) AS last_updated
-          FROM stock_scores WHERE timeframe = 'swing'`,
+          FROM stock_scores WHERE timeframe = 'long_term'`,
     evaluate: (row, now) => {
       const total = Number(row?.total) || 0;
       const universe = Number(row?.universe) || 0;
       const stale = daysStale(row?.last_updated, now);
-      if (total === 0) return { status: 'fail', detail: 'stock_scores (swing) is empty' };
+      if (total === 0) return { status: 'fail', detail: 'stock_scores (long_term) is empty' };
       if (universe > 0 && total < universe * 0.2) {
-        return { status: 'fail', detail: `Only ${total}/${universe} NSE stocks have a swing score` };
+        return { status: 'fail', detail: `Only ${total}/${universe} NSE stocks have a long_term score` };
       }
       if (stale != null && stale > 3) return { status: 'warn', detail: `Newest stock_scores row is ${fmtDays(stale)} old` };
       return { status: 'pass', detail: `${total} stocks scored (of ${universe} in universe)` };
