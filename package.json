@@ -24,7 +24,8 @@
     "fetch:mc-market-stats": "tsx scripts/fetchMoneycontrolMarketStats.ts",
     "sync:mappings": "tsx scripts/syncAllStockMappings.ts",
     "update:sectors": "tsx scripts/updateSectors.ts",
-    "smoke:ci": "tsx scripts/ci_smoke_test.ts"
+    "smoke:ci": "tsx scripts/ci_smoke_test.ts",
+    "dq:check": "tsx scripts/run_data_quality_checks.ts"
   },
   "dependencies": {
     "@aws-sdk/client-bedrock-runtime": "^3.1075.0",

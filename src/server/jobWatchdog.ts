@@ -11,6 +11,7 @@ import { getLateJobs, wasAlreadyAlerted, markAlerted } from './jobHeartbeat';
 import { JOB_REGISTRY } from './jobRegistry';
 import { getSystemStatus } from './routers/monitor.router';
 import { telegramService } from './telegramService';
+import { runDataQualityChecks } from './dataQualityChecks';
 
 export async function checkAndAlertLateJobs(now: Date = new Date()): Promise<void> {
   const late = await getLateJobs(now);
@@ -52,6 +53,28 @@ export async function checkAndAlertStaleScripts(now: Date = new Date()): Promise
   }
 }
 
+/**
+ * Data-quality counterpart to checkAndAlertStaleScripts: MONITOR_SCRIPTS/JOB_REGISTRY only
+ * know whether a job *ran*; dataQualityChecks.ts asks whether what it wrote is actually
+ * correct/complete (see that module's header for the class of bug this exists to catch).
+ * Dedupes by calendar day (UTC) the same way — reusing markAlerted/wasAlreadyAlerted keyed
+ * by check id, so a persistently-failing check pages once per day, not every 15 minutes.
+ */
+export async function checkAndAlertDataQuality(now: Date = new Date()): Promise<void> {
+  const startOfToday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const results = await runDataQualityChecks(now);
+  for (const r of results) {
+    if (!r.critical) continue;
+    if (r.status !== 'fail' && r.status !== 'error') continue;
+    if (await wasAlreadyAlerted(r.id, startOfToday)) continue;
+
+    const icon = r.status === 'error' ? '⛔' : '🚨';
+    const text = `${icon} *Data quality ${r.status}*: \`${r.label}\`\n${r.detail}`;
+    await telegramService.sendMarkdownMessage(text);
+    await markAlerted(r.id, startOfToday.getTime());
+  }
+}
+
 export async function buildDailyDigest(now: Date = new Date()): Promise<string> {
   const late = await getLateJobs(now);
   const lateNames = new Set(late.map(l => l.job));
@@ -70,6 +93,13 @@ export async function buildDailyDigest(now: Date = new Date()): Promise<string> 
   const scriptIcon = (state: string) => state === 'success' ? '✅' : state === 'stale' ? '⚠️' : state === 'failed' ? '❌' : '⏳';
   const scriptLines = scriptStatuses.map((s: any) => `${scriptIcon(s.runState)} ${s.label} (${s.runState})`).join('\n');
 
+  const dqResults = await runDataQualityChecks(now);
+  const dqIcon = (status: string) => status === 'pass' ? '✅' : status === 'warn' ? '⚠️' : status === 'fail' ? '❌' : '⛔';
+  const dqLines = dqResults
+    .sort((a, b) => Number(b.critical) - Number(a.critical))
+    .map(r => `${dqIcon(r.status)} ${r.label}${r.status === 'pass' ? '' : ` — ${r.detail}`}`)
+    .join('\n');
+
   return [
     `📋 *Daily Job Health Digest* — ${now.toISOString().slice(0, 10)}`,
     '',
@@ -81,6 +111,9 @@ export async function buildDailyDigest(now: Date = new Date()): Promise<string> 
     '',
     '*ML/data engines:*',
     scriptLines,
+    '',
+    '*Data quality:*',
+    dqLines,
   ].join('\n');
 }
 
@@ -95,6 +128,11 @@ export function startJobWatchdog(): void {
       await checkAndAlertStaleScripts();
     } catch (err) {
       console.error('[WATCHDOG] checkAndAlertStaleScripts failed:', (err as Error).message);
+    }
+    try {
+      await checkAndAlertDataQuality();
+    } catch (err) {
+      console.error('[WATCHDOG] checkAndAlertDataQuality failed:', (err as Error).message);
     }
   };
   setInterval(() => { void check(); }, 15 * 60 * 1000).unref();
