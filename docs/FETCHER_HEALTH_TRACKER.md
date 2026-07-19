@@ -17,6 +17,15 @@ same 15-min cadence as the existing watchdog, folded into the same Telegram dail
 bug found here, consider adding a check for it so a regression pages instead of waiting for the
 next manual sweep.
 
+**2026-07-19: backfilled regression tests for 6 fixes that had none.** Cross-referencing the
+"Fixed" tables above against the test suite found `asm_gsm_fetcher.py`, `mc_corporate_calendar_fetcher.py`,
+`credit_rating_fetcher.py`, `insider_transactions_fetcher.py`, `eps_surprise_fetcher.py`, and
+`market_regime_fetcher.py`'s fixes were each verified once by hand during their fix session and
+never turned into a lasting test — meaning a regression in any of them would only resurface via
+the next manual audit. Added `src/server/tests/test_{asm_gsm_fetcher,mc_corporate_calendar_fetcher,
+credit_rating_fetcher,insider_transactions_fetcher,eps_surprise_fetcher,market_regime_fetcher}.py`
+(51 tests) encoding the exact failure mode each fix addresses.
+
 ---
 
 ## How to re-check a fetcher
