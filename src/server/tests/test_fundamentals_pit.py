@@ -11,6 +11,7 @@ import sqlite3
 import sys
 import tempfile
 
+import pandas as pd
 import pytest
 
 SERVER_DIR = os.path.join(os.path.dirname(__file__), "..")
@@ -68,6 +69,14 @@ def _technical_signals_alter_statements():
     # shapes actually used: [("col", "TYPE"), ...] and ["col   TYPE", ...].
     tuple_list_pattern = re.compile(r'\(\s*"([a-zA-Z_0-9]+)"\s*,\s*"([A-Za-z]+)"\s*\)')
     string_list_pattern = re.compile(r'"([a-zA-Z_0-9]+)\s+([A-Za-z]+)"')
+    # db.ts's SQLite migration path increasingly uses a migrateColumn(table, col, def) helper
+    # (`if (hasColumn(...)) return; ALTER TABLE ... ADD COLUMN`) instead of a literal ALTER
+    # string -- 39 technical_signals columns as of 2026-07, including ext_fii_holding_pct,
+    # calibrated_win_probability, adx, nifty_regime. literal_pattern can't see these at all
+    # (root cause of this test suite's "no such column: ts.ext_fii_holding_pct" failures).
+    migrate_column_pattern = re.compile(
+        r"migrateColumn\(\s*'technical_signals'\s*,\s*'([a-zA-Z_0-9]+)'\s*,\s*[\"']([A-Za-z]+)"
+    )
 
     statements = []
     for path in sources:
@@ -79,6 +88,8 @@ def _technical_signals_alter_statements():
         for col, coltype in literal_pattern.findall(text):
             if col.upper() in ("IF", "NOT", "EXISTS"):  # f-string {var} defeated the match
                 continue
+            statements.append(f"ALTER TABLE technical_signals ADD COLUMN {col} {coltype}")
+        for col, coltype in migrate_column_pattern.findall(text):
             statements.append(f"ALTER TABLE technical_signals ADD COLUMN {col} {coltype}")
         basename = os.path.basename(path)
         if basename == "stock_option_chain_fetcher.py":
@@ -223,12 +234,19 @@ def _load(path):
     return ml_ensemble.load_training_data()
 
 
-def test_falls_back_to_current_snapshot_when_no_history():
+def test_no_fundamentals_history_leaves_return_on_equity_null():
+    """As of commit 66023a5 (2026-07-17, "close look-ahead bias leaks across the training
+    pipeline"), load_training_data() no longer falls back to the CURRENT stock_fundamentals
+    snapshot when a symbol has no fundamentals_history row as-of the signal date -- that
+    fallback was the leak (it stamped today's fundamentals onto historical training rows).
+    The correct, leak-free behaviour is to leave the fundamentals features NULL for that row
+    rather than backfill them with post-hoc data; the model treats it as missing, which is
+    honest. This test previously asserted the old, since-removed fallback."""
     path, con = _make_db()
     try:
         df = _load(path)
         assert len(df) == 1
-        assert df.iloc[0]["return_on_equity"] == pytest.approx(30.0)  # current snapshot fallback
+        assert df.iloc[0]["return_on_equity"] is None or pd.isna(df.iloc[0]["return_on_equity"])
     finally:
         con.close()
 

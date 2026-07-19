@@ -84,12 +84,25 @@ def _make_feat_df(n: int = 3) -> pd.DataFrame:
     return pd.DataFrame(data, index=dates)
 
 
-def _make_in_memory_db() -> sqlite3.Connection:
-    """Open an in-memory SQLite DB with the required tables."""
+def _make_in_memory_db(symbol: str = None, ohlcv_rows: int = 60) -> sqlite3.Connection:
+    """Open an in-memory SQLite DB with the required tables. If `symbol` is given, seeds
+    stock_ohlcv with `ohlcv_rows` rows for it -- process_symbol's OHLCV read now goes
+    through the passed-in `con` (see feature_engineering.py's process_symbol), not a
+    mockable global pandas.read_sql call, so the row-count guard (len(ohlcv) < 60) needs
+    real rows here rather than a `patch("pandas.read_sql", ...)`."""
     con = sqlite3.connect(":memory:")
     con.row_factory = sqlite3.Row
     con.execute(_FEATURE_STORE_DDL)
     con.execute(_OHLCV_DDL)
+    if symbol:
+        # process_symbol's real query filters WHERE date >= today - lookback_days (504 default)
+        # -- dates must be recent, not a fixed 2023 range (which was fine when this only fed a
+        # mocked pandas.read_sql, but is silently excluded now that the read is real).
+        dates = pd.date_range(end=pd.Timestamp.today().normalize(), periods=ohlcv_rows, freq="D")
+        con.executemany(
+            "INSERT INTO stock_ohlcv (symbol, date, open, high, low, close, volume) VALUES (?,?,?,?,?,?,?)",
+            [(symbol, d.strftime("%Y-%m-%d"), 100.0, 105.0, 95.0, 100.0, 1e6) for d in dates],
+        )
     con.commit()
     return con
 
@@ -110,7 +123,9 @@ class TestBatchWrites:
         feat_df = _make_feat_df(3)
         fe = _stub_fe()
 
-        con = _make_in_memory_db()
+        # Seeds stock_ohlcv with 60 real rows for TEST -- process_symbol reads OHLCV
+        # through `con` directly now, so the >=60-row guard needs real rows, not a mock.
+        con = _make_in_memory_db(symbol="TEST")
 
         # Wrap the real connection so MagicMock records calls to con.executemany()
         # directly, while still delegating to the real implementation.
@@ -127,16 +142,7 @@ class TestBatchWrites:
         )
         fe._apply_scaler = lambda feat, scaler: feat
 
-        # Provide a minimal OHLCV dataframe (>= 60 rows required, but we bypass
-        # _compute_ohlcv_features so the raw df size doesn't matter — we just need
-        # pd.read_sql to return something with len >= 60 to pass the guard)
-        ohlcv_df = pd.DataFrame(
-            {"date": pd.date_range("2023-01-01", periods=60, freq="D"),
-             "open": [100.0] * 60, "high": [105.0] * 60,
-             "low": [95.0] * 60, "close": [100.0] * 60, "volume": [1e6] * 60},
-        )
-        with patch("pandas.read_sql", return_value=ohlcv_df), \
-             patch("src.server.feature_engineering.SCALER_PATH", _TMP_SCALER), \
+        with patch("src.server.feature_engineering.SCALER_PATH", _TMP_SCALER), \
              patch("pickle.dump"):  # avoid writing scaler to disk
             result = fe.process_symbol("TEST", con=mock_con)
 
@@ -190,7 +196,7 @@ class TestBatchWrites:
         n_rows = 5
         feat_df = _make_feat_df(n_rows)
         fe = _stub_fe()
-        con = _make_in_memory_db()
+        con = _make_in_memory_db(symbol="TATA")
 
         fe._compute_ohlcv_features = lambda df: feat_df
         fe._merge_fii = lambda feat: feat
@@ -202,13 +208,7 @@ class TestBatchWrites:
         )
         fe._apply_scaler = lambda feat, scaler: feat
 
-        ohlcv_df = pd.DataFrame(
-            {"date": pd.date_range("2023-01-01", periods=60, freq="D"),
-             "open": [100.0] * 60, "high": [105.0] * 60,
-             "low": [95.0] * 60, "close": [100.0] * 60, "volume": [1e6] * 60},
-        )
-        with patch("pandas.read_sql", return_value=ohlcv_df), \
-             patch("src.server.feature_engineering.SCALER_PATH", _TMP_SCALER), \
+        with patch("src.server.feature_engineering.SCALER_PATH", _TMP_SCALER), \
              patch("pickle.dump"):
             result = fe.process_symbol("TATA", con=con)
 

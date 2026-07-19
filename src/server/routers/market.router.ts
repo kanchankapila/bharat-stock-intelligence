@@ -26,29 +26,63 @@ export const marketRouter = router({
 
   // Live intraday breadth nowcast + the daily HMM regime it refines. The daily regime is EOD and
   // slow; `riskTilt` reacts within one 5-min refresh so the UI can show "SIDEWAYS · RISK_OFF".
+  //
+  // The capture behind `breadth` runs off the Node process's own setInterval (liveStockData.ts),
+  // not a BullMQ job with catch-up -- a restart or a slow refresh cycle can leave it hours old
+  // with no signal of that (observed: a full-day outage and hours-old reads reaching consumers
+  // as if live -- see intraday_regime.py's matching staleness guard). `isStale` lets any
+  // consumer (UI, ranker) refuse to treat old numbers as current instead of trusting them blind.
   getIntradayBreadth: publicProcedure
     .query(async () => {
       const [breadth, regimeRow] = await Promise.all([
         getLatestIntradayBreadth(),
         dbGet(`SELECT value FROM app_settings WHERE key = 'current_nifty_regime'`),
       ]);
-      return { breadth, dailyRegime: (regimeRow as { value?: string } | undefined)?.value ?? null };
+      const snapshotAt = (breadth as { snapshot_at?: string } | null)?.snapshot_at;
+      const ageMin = snapshotAt ? (Date.now() - new Date(snapshotAt).getTime()) / 60_000 : null;
+      const isStale = ageMin === null || ageMin > 20;
+      return {
+        breadth,
+        dailyRegime: (regimeRow as { value?: string } | undefined)?.value ?? null,
+        isStale,
+        ageMinutes: ageMin === null ? null : Math.round(ageMin),
+      };
     }),
 
   // Intraday ranking (separate from positional getTopRatedStocks / unified_recommendations).
+  // `isStale` guards against a missed/failed intraday_ranker.py cycle (every 15 min in market
+  // hours) silently presenting yesterday's or an hours-old batch as if it were fresh.
   getIntradayRecommendations: publicProcedure
     .input(z.object({ limit: z.number().min(1).max(200).default(50) }).optional())
     .query(async ({ input }) => {
       const limit = input?.limit ?? 50;
-      return dbAll(
-        `SELECT symbol, intraday_regime, intraday_score, conviction_level, classification,
-                screener_score, breakout_score, bullish_count, bearish_count,
-                cmp, entry_price, stop_loss, target_1, risk_reward, position_size_pct, reasoning
-         FROM intraday_recommendations
-         WHERE computed_at = (SELECT MAX(computed_at) FROM intraday_recommendations)
-         ORDER BY intraday_score DESC LIMIT ?`,
-        [limit],
-      );
+      // `computed_at` is a DATE (the per-day upsert key, ON CONFLICT(symbol, computed_at) --
+      // intentional, see intraday_ranker.py) so it can't tell a run from 5 min ago apart from
+      // one from market open 7 hours ago. `computed_ts` (set to CURRENT_TIMESTAMP on every
+      // write) is the actual last-run instant and is what staleness must be measured against.
+      const [rows, latest] = await Promise.all([
+        dbAll(
+          `SELECT symbol, intraday_regime, intraday_score, conviction_level, classification,
+                  screener_score, breakout_score, bullish_count, bearish_count,
+                  cmp, entry_price, stop_loss, target_1, risk_reward, position_size_pct, reasoning
+           FROM intraday_recommendations
+           WHERE computed_at = (SELECT MAX(computed_at) FROM intraday_recommendations)
+           ORDER BY intraday_score DESC LIMIT ?`,
+          [limit],
+        ),
+        // Naive TIMESTAMP columns are now parsed as UTC globally (see pgClient.ts's TIMESTAMP
+        // type-parser override) so this no longer needs a ::text + manual 'Z'-append workaround.
+        dbGet(`SELECT MAX(computed_ts) as t FROM intraday_recommendations`),
+      ]);
+      const computedAtRaw = (latest as { t?: string | Date } | undefined)?.t ?? null;
+      const computedAtDate = computedAtRaw ? new Date(computedAtRaw) : null;
+      const ageMin = computedAtDate ? (Date.now() - computedAtDate.getTime()) / 60_000 : null;
+      return {
+        rows,
+        computedAt: computedAtDate ? computedAtDate.toISOString() : null,
+        isStale: ageMin === null || ageMin > 30,
+        ageMinutes: ageMin === null ? null : Math.round(ageMin),
+      };
     }),
 
   // Intraday paper-trade accuracy (from intraday_recommendation_outcomes).

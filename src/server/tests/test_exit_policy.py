@@ -37,6 +37,10 @@ def _synthetic(n=80, seed=0):
         # MFE grows with score, MAE shrinks (more negative) with weaker scores — learnable.
         "mfe_pct": 5 + 0.8 * score + rng.normal(0, 0.5, n),
         "mae_pct": -(6 - 0.4 * score) + rng.normal(0, 0.3, n),
+        # train_from_df's purge-embargo split (added to close a look-ahead leak — see
+        # docs/superpowers commit 66023a5) reads horizon_days directly off the df; this
+        # fixture predates that change. 15 matches the codebase's typical default horizon.
+        "horizon_days": 15,
     })
 
 

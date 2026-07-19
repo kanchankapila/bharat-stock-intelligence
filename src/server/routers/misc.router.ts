@@ -346,8 +346,10 @@ export const miscRouter = router({
           const sym = sig.symbol as string;
           if (symbolMap.has(sym)) continue; // keep first (most recent)
           const scores = sentimentMap.get(sym) || [];
-          // Prefer ML-calibrated win_probability stored by the scoring engine; fall back to heuristic
-          const dbWinProb = sig.win_probability as number | null;
+          // Prefer ML-calibrated win_probability stored by the scoring engine; fall back to heuristic.
+          // Was reading sig.win_probability (raw) despite this comment — ts.* already carries
+          // calibrated_win_probability, it just wasn't selected here (2026-07-18 gating follow-up).
+          const dbWinProb = (sig.calibrated_win_probability as number | null) ?? (sig.win_probability as number | null);
           const winProb = dbWinProb != null ? Math.max(0.35, Math.min(0.95, dbWinProb)) : heuristicWinProb(sig);
           symbolMap.set(sym, {
             sig,

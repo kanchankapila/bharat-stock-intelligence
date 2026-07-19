@@ -138,9 +138,11 @@ export async function regimeSectorFilter(topNSectors = 3, minScore = 60, minWinP
     if (sectorScores.length === 0) return [];
     const topSectorSet = new Set(sectorScores.map(s => s.sector));
 
-    // win_probability added via db migration at line 720 in db.ts
+    // win_probability added via db migration at line 720 in db.ts. Reads
+    // COALESCE(calibrated_win_probability, win_probability) — was raw unconditionally,
+    // inconsistent with scoring_engine.py/unified_ranker sizing (2026-07-18 gating follow-up).
     const wpRows = await dbAll(`
-      SELECT symbol, MAX(win_probability) AS wp
+      SELECT symbol, MAX(COALESCE(calibrated_win_probability, win_probability)) AS wp
       FROM technical_signals
       WHERE win_probability IS NOT NULL
         AND date >= date('now', '-7 days')

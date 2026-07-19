@@ -94,6 +94,9 @@ async function getLastRunAt(scriptId: ScriptId): Promise<string | null> {
       case 'tickertape-scorecard':
         row = await dbGet("SELECT MAX(date) as t FROM proprietary_scores_history WHERE source = 'tickertape'");
         break;
+      case 'intraday-breadth-capture':
+        row = await dbGet("SELECT MAX(snapshot_at) as t FROM intraday_breadth_snapshots");
+        break;
       default:
         return null;
     }
@@ -126,9 +129,16 @@ async function getScriptStats(scriptId: ScriptId): Promise<Record<string, number
         return { coverage: Math.round(scored / total * 100) + '%' };
       }
       case 'ml-ensemble-score': {
-        const t2 = ((await dbGet("SELECT COUNT(*) as n FROM technical_signals")) as any)?.n ?? 1;
-        const s2 = ((await dbGet("SELECT COUNT(*) as n FROM technical_signals WHERE win_probability IS NOT NULL")) as any)?.n ?? 0;
-        return { coverage: Math.round(s2 / t2 * 100) + '%' };
+        // Was an all-time coverage ratio over the whole table -- diluted a severe recent
+        // regression into a decent-looking historical average (a 3-week collapse to ~1-3%/day
+        // coverage, caused by score-pending's now-fixed signals_json filter silently excluding
+        // full-universe grid rows, still read as ~85%+ "coverage" here because most of the
+        // table predates the regression). Window to the last 7 days so a live collapse is
+        // immediately visible instead of averaged away. Found + fixed 2026-07-18.
+        const cutoff = new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10);
+        const t2 = ((await dbGet("SELECT COUNT(*) as n FROM technical_signals WHERE date >= ?", [cutoff])) as any)?.n ?? 1;
+        const s2 = ((await dbGet("SELECT COUNT(*) as n FROM technical_signals WHERE win_probability IS NOT NULL AND date >= ?", [cutoff])) as any)?.n ?? 0;
+        return { coverage: Math.round(s2 / (t2 || 1) * 100) + '%' };
       }
       case 'ml-ensemble-train': {
         const m = await dbGet("SELECT cv_roc_auc, training_samples FROM model_registry WHERE model_name='ensemble' ORDER BY trained_at DESC LIMIT 1") as any;
@@ -201,6 +211,8 @@ async function getScriptStats(scriptId: ScriptId): Promise<Record<string, number
         return { rows: ((await dbGet("SELECT COUNT(*) as n FROM working_capital_history WHERE fiscal_year = (SELECT MAX(fiscal_year) FROM working_capital_history)")) as any)?.n ?? 0 };
       case 'tickertape-scorecard':
         return { rows: ((await dbGet("SELECT COUNT(*) as n FROM proprietary_scores_history WHERE source = 'tickertape' AND date = (SELECT MAX(date) FROM proprietary_scores_history WHERE source = 'tickertape')")) as any)?.n ?? 0 };
+      case 'intraday-breadth-capture':
+        return { snapshotsToday: ((await dbGet("SELECT COUNT(*) as n FROM intraday_breadth_snapshots WHERE date = CURRENT_DATE::text")) as any)?.n ?? 0 };
       default:
         return {};
     }

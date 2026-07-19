@@ -78,13 +78,19 @@ export const commandCenterRouter = router({
       if (regime.name !== 'CRASH') {
         try {
           const today = new Date().toISOString().slice(0, 10);
+          // Orders on COALESCE(calibrated_win_probability, win_probability) — was raw
+          // unconditionally (2026-07-18 gating follow-up).
+          // signal_strength was never a real technical_signals column (this always threw and
+          // was silently swallowed by the catch below, so intradaySignals was always []) --
+          // signal_score (real, 0-10 composite) is this codebase's actual strength measure;
+          // >=7 matches the "HIGH" tier threshold used elsewhere. Found via CI smoke test.
           intradaySignals = await dbAll<any>(`
-            SELECT symbol, signal_type, signal_strength, win_probability,
+            SELECT symbol, signal_type, win_probability,
                    signal_score, rsi, cmp, change_pct, ai_insight,
                    entry_zone, stop_loss, targets, time_horizon
             FROM technical_signals
-            WHERE date = ? AND signal_strength = 'HIGH'
-            ORDER BY win_probability DESC LIMIT 20
+            WHERE date = ? AND signal_score >= 7
+            ORDER BY COALESCE(calibrated_win_probability, win_probability) DESC LIMIT 20
           `, [today]);
         } catch (e) { console.error(e); /* table may differ in schema */ }
       }
@@ -140,8 +146,9 @@ export const commandCenterRouter = router({
           ur.entry_zone_low, ur.entry_zone_high, ur.risk_reward,
           ur.ml_score, ur.confluence_score, ur.technical_score, ur.dl_score,
           ur.trade_reasoning, ur.computed_at,
-          -- technical_signals feature columns
-          ts.win_probability, ts.signal_type, ts.signal_strength,
+          -- technical_signals feature columns (signal_strength removed -- not a real column,
+          -- always threw and 500'd this endpoint; found via CI smoke test)
+          ts.win_probability, ts.signal_type,
           ts.rsi, ts.cmp, ts.change_pct,
           ts.rs_vs_sector_21d, ts.rs_vs_sector_63d,
           ts.eps_surprise_q1, ts.eps_surprise_q2, ts.eps_beat_streak,

@@ -28,7 +28,7 @@ warnings.filterwarnings('ignore')
 import numpy as np
 import pandas as pd
 
-from db_compat import connect, read_df
+from db_compat import connect
 
 # Default weights — mirrors scoring_engine.py defaults
 DEFAULT_CATEGORY_WEIGHTS = {
@@ -58,6 +58,20 @@ class StrategyOptimizer:
     def close(self):
         self.conn.close()
 
+    def _read_df(self, sql: str, params=()) -> pd.DataFrame:
+        """SELECT through self.conn instead of the global-engine read_df() helper -- this
+        class accepts an injected self.conn (see __init__) but every load_* method used to
+        read via the module-level read_df()/get_engine() regardless, silently ignoring
+        whatever connection the caller set. Harmless in normal use (self.conn and the global
+        engine point at the same DB), but made this class untestable against an isolated
+        connection (test_strategy_optimizer.py's test_optimise_uses_temporal_split built its
+        own in-memory sqlite `conn`, assigned it to self.conn, and got live production data
+        back instead). dict(row) works for both the Row wrapper (db_compat) and sqlite3.Row
+        (tests) since both are mapping-like, so this needs no hardcoded column list even for
+        the `SELECT sp.*` case in load_performance."""
+        rows = self.conn.execute(sql, params).fetchall()
+        return pd.DataFrame([dict(r) for r in rows])
+
     # ──────────────────────────────────────────────────────────────────────────
     # Load historical performance
     # ──────────────────────────────────────────────────────────────────────────
@@ -73,7 +87,7 @@ class StrategyOptimizer:
             WHERE sp.horizon_days = ?
               AND sp.total_signals >= 5
         """
-        df = read_df(q, (horizon_days,))
+        df = self._read_df(q, (horizon_days,))
         return df
 
     def load_signal_outcomes_with_factors(self, horizon_days: int = 15) -> pd.DataFrame:
@@ -98,7 +112,7 @@ class StrategyOptimizer:
               AND so.return_pct IS NOT NULL
               AND so.horizon_days = ?
         """
-        df = read_df(q, (horizon_days,))
+        df = self._read_df(q, (horizon_days,))
         for col in CATEGORIES:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
@@ -271,7 +285,7 @@ class StrategyOptimizer:
             JOIN signal_outcomes so ON so.symbol = tss.symbol
             WHERE so.outcome IN ('WIN','LOSS','NEUTRAL')
         """
-        raw = read_df(q)
+        raw = self._read_df(q)
         if raw.empty:
             return {}
         raw['signal_date'] = pd.to_datetime(raw['signal_date'])

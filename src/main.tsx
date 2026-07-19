@@ -5,8 +5,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { httpBatchLink } from "@trpc/client";
 import superjson from "superjson";
 import { trpc } from "./lib/trpc";
+import { initSentry } from "./lib/sentry";
 import App from './App.tsx';
 import './index.css';
+
+// No-op without VITE_SENTRY_DSN. Init before render so it can capture render-time errors too.
+initSentry();
 
 // superjson v2 changed serialize() to accept SuperJSONValue instead of unknown,
 // which breaks tRPC's DataTransformer structural type check — cast to any as workaround.

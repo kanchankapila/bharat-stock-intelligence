@@ -1506,16 +1506,19 @@ export async function getTechnicalSignalsForDate(
     const maxRow = await dbGet<{ d: string }>('SELECT MAX(date) as d FROM technical_signals');
     d = maxRow?.d ?? new Date().toISOString().slice(0, 10);
   }
+  // Ranks and filters on COALESCE(calibrated_win_probability, win_probability) — was raw
+  // win_probability unconditionally, inconsistent with scoring_engine.py/unified_ranker, which
+  // already prefer the regime-fair calibrated value (2026-07-18 gating follow-up).
   return await dbAll(`
     SELECT ts.*,
            ns.name,
            ns.sector,
-           ROUND(ts.signal_score * (0.5 + COALESCE(ts.win_probability, 0.5)), 2) AS effective_score
+           ROUND(ts.signal_score * (0.5 + COALESCE(ts.calibrated_win_probability, ts.win_probability, 0.5)), 2) AS effective_score
     FROM technical_signals ts
     LEFT JOIN nse_stocks ns ON ns.symbol = ts.symbol
     WHERE ts.date = ?
       AND ts.signal_score >= ?
-      AND (ts.win_probability IS NULL OR ts.win_probability >= ?)
+      AND (ts.win_probability IS NULL OR COALESCE(ts.calibrated_win_probability, ts.win_probability) >= ?)
     ORDER BY effective_score DESC, ts.signal_score DESC
     LIMIT ?
   `, [d, minScore, minWinProbability, limit]) as Record<string, unknown>[];

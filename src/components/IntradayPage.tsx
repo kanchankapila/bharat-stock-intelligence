@@ -61,11 +61,16 @@ const IntradayPage: React.FC<{ onSelectStock: (symbol: string) => void }> = ({ o
   const [query, setQuery] = useState('');
   const [buysOnly, setBuysOnly] = useState(true);
 
-  const rows = (recsQ.data ?? []) as IntradayRec[];
+  const rows = (recsQ.data?.rows ?? []) as IntradayRec[];
   const breadth = (breadthQ.data?.breadth ?? null) as unknown as BreadthRow | null;
   const dailyRegime = breadthQ.data?.dailyRegime ?? null;
   const intradayRegime = rows[0]?.intraday_regime ?? breadth?.risk_tilt ?? 'NEUTRAL';
   const tilt = tiltOf(intradayRegime);
+  // Both feeds run off intraday capture that can silently go stale (server restart, missed
+  // cycle) with no other signal of that — don't badge "live" unless the data backs it up.
+  const breadthStale = breadthQ.data ? breadthQ.data.isStale : false;
+  const recsStale = recsQ.data ? recsQ.data.isStale : false;
+  const isLive = !breadthStale && !recsStale;
 
   const filtered = useMemo(() => {
     let r = rows;
@@ -87,9 +92,16 @@ const IntradayPage: React.FC<{ onSelectStock: (symbol: string) => void }> = ({ o
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.25em] text-slate-400">
               <Zap className="w-3.5 h-3.5 text-cyan-400" /> Intraday Terminal
-              <span className="inline-flex items-center gap-1.5 ml-2 text-slate-500">
-                <span className={cn('w-2 h-2 rounded-full animate-pulse', tilt.dot)} /> live
-              </span>
+              {isLive ? (
+                <span className="inline-flex items-center gap-1.5 ml-2 text-slate-500">
+                  <span className={cn('w-2 h-2 rounded-full animate-pulse', tilt.dot)} /> live
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 ml-2 text-amber-500" title="Breadth or ranking data is older than expected — showing the last available read.">
+                  <span className="w-2 h-2 rounded-full bg-amber-500" /> stale
+                  {recsQ.data?.ageMinutes != null && ` · rec ${recsQ.data.ageMinutes}m old`}
+                </span>
+              )}
             </div>
             <div className="mt-3 flex items-end gap-4 flex-wrap">
               <h1 className={cn('text-5xl md:text-6xl font-black tracking-tight leading-none', tilt.text)}>
@@ -112,7 +124,14 @@ const IntradayPage: React.FC<{ onSelectStock: (symbol: string) => void }> = ({ o
           <div className="w-full lg:w-[340px] shrink-0">
             <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2">
               <span className="flex items-center gap-1.5"><Activity className="w-3.5 h-3.5" /> Market Breadth</span>
-              {breadth && <span className={tilt.text}>{(breadth.breadth_score * 100).toFixed(0)}<span className="text-slate-500">/100</span></span>}
+              {breadth && (
+                <span className={breadthStale ? 'text-amber-500' : tilt.text}>
+                  {(breadth.breadth_score * 100).toFixed(0)}<span className="text-slate-500">/100</span>
+                  {breadthStale && breadthQ.data?.ageMinutes != null && (
+                    <span className="ml-1.5 text-[10px] text-amber-500 normal-case tracking-normal">({breadthQ.data.ageMinutes}m old)</span>
+                  )}
+                </span>
+              )}
             </div>
             {breadth ? (
               <>

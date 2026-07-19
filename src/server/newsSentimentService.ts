@@ -423,10 +423,36 @@ async function fetchBseDay(ymd: string, maxPages = 5): Promise<BseAnnouncement[]
   return out;
 }
 
+// Minimum count of stocks reporting results within RESULTS_SEASON_WINDOW_DAYS to consider
+// "results season" active -- results-day board-meeting announcements are the most
+// price-sensitive BSE filings, and an hourly poll can sit on one for up to 59 minutes.
+// Tightened to a 2nd (~30-min effective) cadence only in these weeks; quiet weeks stay hourly.
+const RESULTS_SEASON_MIN_STOCKS = 30;
+const RESULTS_SEASON_WINDOW_DAYS = 3;
+
+/** True when enough stocks have results due imminently to justify a tighter BSE-announcements
+ * poll (days_to_next_results is refreshed daily by mc_earnings_fetcher.py). Best-effort: any
+ * query failure (e.g. column not backfilled yet) defaults to "not results season" -- quiet
+ * cadence is the safe default, not the tight one. */
+export async function isResultsSeasonActive(): Promise<boolean> {
+  try {
+    const row = await dbGet<{ n: number }>(
+      `SELECT COUNT(DISTINCT symbol) as n FROM technical_signals
+       WHERE days_to_next_results BETWEEN 0 AND ?
+         AND date = (SELECT MAX(date) FROM technical_signals t2 WHERE t2.symbol = technical_signals.symbol)`,
+      [RESULTS_SEASON_WINDOW_DAYS],
+    );
+    return (row?.n ?? 0) >= RESULTS_SEASON_MIN_STOCKS;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Ingest BSE corporate announcements (board meetings, results, orders, pledges,
  * ratings) for the last 2 days. Inherently per-stock and high-signal; mapped to
- * NSE symbols by company name. Schedule hourly.
+ * NSE symbols by company name. Schedule hourly (plus a results-season-gated
+ * 2nd pass -- see isResultsSeasonActive()).
  */
 export async function runBseAnnouncementsCycle(): Promise<{ fetched: number; inserted: number }> {
   await ensureNSESymbols();

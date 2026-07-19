@@ -21,6 +21,19 @@ export function convertPlaceholders(sql: string): string {
   let inDouble = false;
   for (let i = 0; i < sql.length; i++) {
     const ch = sql[i];
+    // Skip `-- ...` line comments entirely (outside a string) before quote-tracking sees
+    // them. Without this, a stray apostrophe in a natural-language SQL comment (e.g.
+    // "wasn't", "500'd the endpoint") toggles `inSingle` just like a real string-literal
+    // quote would, desyncing quote state for the rest of the query and silently leaving
+    // every subsequent `?` unconverted -- a real bug hit live 2026-07-18 via a comment in
+    // commandCenter.router.ts, not a hypothetical.
+    if (!inSingle && !inDouble && ch === '-' && sql[i + 1] === '-') {
+      const nl = sql.indexOf('\n', i);
+      const end = nl === -1 ? sql.length : nl;
+      out += sql.slice(i, end);
+      i = end - 1;
+      continue;
+    }
     if (ch === "'" && !inDouble) inSingle = !inSingle;
     else if (ch === '"' && !inSingle) inDouble = !inDouble;
     if (ch === '?' && !inSingle && !inDouble) {

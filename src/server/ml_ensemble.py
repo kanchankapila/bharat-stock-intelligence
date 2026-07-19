@@ -658,6 +658,11 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     X['expected_move_pct'] = num('expected_move_pct', 3.0).clip(0.5, 15) / 15.0
     X['stock_gex_proxy']   = num('stock_gex_proxy', 0.0).clip(-1, 1)  # >0=mean-rev, <0=trending
     X['low_expected_move'] = (X['expected_move_pct'] < 0.15).astype(float)  # cheap options
+    # IV term structure (next-month ATM IV minus near-month) -- negative (backwardation,
+    # near-term IV priced above far-term) often anticipates a near-term event; default 0
+    # (contango-neutral) when the second leg wasn't fetched for this row.
+    X['iv_term_slope']      = num('iv_term_slope', 0.0).clip(-0.15, 0.15)
+    X['iv_term_backwardation'] = (X['iv_term_slope'] < -0.02).astype(float)
 
     # ── Provisional FII flow (T+0, available by 6 PM same day) ──
     X['fii_net_today']  = num('fii_net_today', 0.0).clip(-5000, 5000) / 5000.0
@@ -1026,7 +1031,7 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                    ts.is_nifty50, ts.is_nifty100, ts.nifty_tier,
                    ts.pledge_chg_90d,
                    ts.iep_gap_pct, ts.preopen_imbalance,
-                   ts.expected_move_pct, ts.stock_gex_proxy,
+                   ts.expected_move_pct, ts.stock_gex_proxy, ts.iv_term_slope,
                    ts.eps_surprise_q1, ts.eps_surprise_q2, ts.eps_beat_streak,
                    ts.eps_miss_after_streak, ts.rev_surprise_q1,
                    ts.fcf_yield_approx AS fcf_yield, ts.interest_coverage, ts.fcf_positive, ts.debt_coverage_risk,
@@ -1262,7 +1267,7 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                    ts.is_nifty50, ts.is_nifty100, ts.nifty_tier,
                    ts.pledge_chg_90d,
                    ts.iep_gap_pct, ts.preopen_imbalance,
-                   ts.expected_move_pct, ts.stock_gex_proxy,
+                   ts.expected_move_pct, ts.stock_gex_proxy, ts.iv_term_slope,
                    ts.eps_surprise_q1, ts.eps_surprise_q2, ts.eps_beat_streak,
                    ts.eps_miss_after_streak, ts.rev_surprise_q1,
                    ts.fcf_yield_approx AS fcf_yield, ts.interest_coverage, ts.fcf_positive, ts.debt_coverage_risk,
@@ -1480,7 +1485,7 @@ def load_pending_signals() -> pd.DataFrame:
                    ts.is_nifty50, ts.is_nifty100, ts.nifty_tier,
                    ts.pledge_chg_90d,
                    ts.iep_gap_pct, ts.preopen_imbalance,
-                   ts.expected_move_pct, ts.stock_gex_proxy,
+                   ts.expected_move_pct, ts.stock_gex_proxy, ts.iv_term_slope,
                    ts.eps_surprise_q1, ts.eps_surprise_q2, ts.eps_beat_streak,
                    ts.eps_miss_after_streak, ts.rev_surprise_q1,
                    ts.fcf_yield_approx AS fcf_yield, ts.interest_coverage, ts.fcf_positive, ts.debt_coverage_risk,
@@ -1590,7 +1595,15 @@ def load_pending_signals() -> pd.DataFrame:
                 LIMIT 1
             ) sfs ON true
             WHERE ts.win_probability IS NULL
-              AND ts.signals_json IS NOT NULL
+            -- Was `AND ts.signals_json IS NOT NULL` -- excluded every row the full-universe
+            -- grid-ensurer (backfill_technical_features.py --full-today) writes, since those
+            -- rows correctly have no signals_json (no specific pattern matched, just a
+            -- feature-complete row for every liquid stock). Downstream feature building
+            -- already treats a missing signals_json as '[]' (see sig_col fallback below),
+            -- so the filter was never protecting against a real crash -- it silently
+            -- collapsed scoring coverage to ~1-3%/day once the grid-ensurer landed
+            -- (2026-07-11), since the vast majority of daily rows are now grid rows, not
+            -- pattern-matched signal rows. Found + fixed 2026-07-18.
             ORDER BY ts.date DESC
             LIMIT 10000
         """
@@ -1741,7 +1754,7 @@ def load_pending_signals() -> pd.DataFrame:
                    {ts_c('is_nifty50')}, {ts_c('is_nifty100')}, {ts_c('nifty_tier')},
                    {ts_c('pledge_chg_90d')},
                    {ts_c('iep_gap_pct')}, {ts_c('preopen_imbalance')},
-                   {ts_c('expected_move_pct')}, {ts_c('stock_gex_proxy')},
+                   {ts_c('expected_move_pct')}, {ts_c('stock_gex_proxy')}, {ts_c('iv_term_slope')},
                    {ts_c('eps_surprise_q1')}, {ts_c('eps_surprise_q2')}, {ts_c('eps_beat_streak')},
                    {ts_c('eps_miss_after_streak')}, {ts_c('rev_surprise_q1')},
                    {ts_c('fcf_yield_approx', 'fcf_yield')}, {ts_c('interest_coverage')}, {ts_c('fcf_positive')}, {ts_c('debt_coverage_risk')},
@@ -1844,7 +1857,7 @@ def load_pending_signals() -> pd.DataFrame:
             )
             {sfs_join_sel}
             WHERE ts.win_probability IS NULL
-              AND ts.signals_json IS NOT NULL
+            -- See matching comment in the Postgres branch above -- same fix, same reason.
             ORDER BY ts.date DESC
             LIMIT 10000
         """

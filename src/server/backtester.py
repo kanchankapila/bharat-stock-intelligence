@@ -66,7 +66,7 @@ class Backtester:
         q = """
             SELECT ts.symbol, ts.date AS signal_date, ts.signal_score,
                    ts.cmp AS entry_price_ref, ts.stop_loss, ts.targets, ts.signals_json,
-                   ts.nifty_regime, ts.adx, ts.win_probability
+                   ts.nifty_regime, ts.adx, ts.win_probability, ts.calibrated_win_probability
             FROM technical_signals ts
             WHERE ts.date BETWEEN ? AND ?
               AND ts.signal_score >= ?
@@ -310,6 +310,7 @@ class Backtester:
                         'signal_score': pos['signal_score'],
                         'holding_days': days_held,
                         'shares':       pos['initial_shares'],
+                        'regime':       pos.get('regime'),
                     })
                     del open_positions[sym]
                     continue
@@ -350,6 +351,7 @@ class Backtester:
                         'signal_score': pos['signal_score'],
                         'holding_days': days_held,
                         'shares':       pos['initial_shares'],
+                        'regime':       pos.get('regime'),
                     })
                     del open_positions[sym]
                     continue
@@ -386,7 +388,13 @@ class Backtester:
                 if pd.isna(raw_entry) or raw_entry <= 0:
                     continue
 
-                win_prob_val = float(row.get('win_probability') or 0) if hasattr(row, 'get') else float(getattr(row, 'win_probability', 0) or 0)
+                # A/B instrumentation (2026-07-18, regime-conditional-gating follow-up): read
+                # calibrated_win_probability with a raw fallback, matching the COALESCE pattern
+                # already used by scoring_engine.py/unified_ranker._get_win_probabilities — Kelly
+                # sizing here was the one place still reading raw win_probability unconditionally.
+                _cal = row.get('calibrated_win_probability') if hasattr(row, 'get') else getattr(row, 'calibrated_win_probability', None)
+                _raw = row.get('win_probability') if hasattr(row, 'get') else getattr(row, 'win_probability', None)
+                win_prob_val = float(_cal) if _cal is not None and pd.notna(_cal) else float(_raw or 0)
                 sl_price = float(row['stop_loss']) if pd.notna(row['stop_loss']) else None
                 target_p = float(row['target_price']) if pd.notna(row['target_price']) else None
                 kelly_f = _kelly_fraction(win_prob_val or None, target_p, raw_entry, sl_price)
@@ -445,6 +453,7 @@ class Backtester:
                     'highest_high': entry_price,
                     'partial_taken': False,
                     'partial_proceeds': 0.0,
+                    'regime':       row.get('nifty_regime') if hasattr(row, 'get') else getattr(row, 'nifty_regime', None),
                 }
 
             # ── Mark-to-market portfolio value ───────────────────────────────

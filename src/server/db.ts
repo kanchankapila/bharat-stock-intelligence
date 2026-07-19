@@ -1482,6 +1482,25 @@ migrateColumn('technical_signals', 'delivery_pct',   'REAL');
 migrateColumn('technical_signals', 'fii_3d_net',     'REAL');
 migrateColumn('technical_signals', 'win_probability', 'REAL');
 migrateColumn('technical_signals', 'news_sentiment_score', 'REAL');
+// Self-migrated on Postgres only (backfill_technical_features.py's own safe_alter()),
+// never mirrored here -- schema.postgres.sql is generated FROM this file's SQLite schema
+// (see scripts/generate_pg_schema.py), so a Postgres-only self-migration is invisible to
+// the generator and a fresh install from schema.postgres.sql silently lacks the column.
+// Found 2026-07-18 via the CI smoke test against a freshly-applied schema.
+migrateColumn('technical_signals', 'signal_type', 'TEXT');
+// The raw `ALTER TABLE technical_signals ADD COLUMN fcf_yield_approx REAL` inside the
+// named, _migrations-tracked migration '064_earnings_quality_insider_macro' further down
+// this file never actually landed on database.sqlite: migration 064 had already run and
+// been marked done in _migrations before this line was added to its body, and runMigration()
+// only checks the migration NAME, not whether its SQL text changed -- so the new statement
+// silently never executed. Root cause found + the dead line removed from 064's body
+// 2026-07-18 via the CI smoke test; re-added here via the idempotent, hasColumn-guarded
+// helper so it self-heals on any DB regardless of _migrations history.
+migrateColumn('technical_signals', 'fcf_yield_approx', 'REAL');
+
+// Options IV term structure (near vs next-month ATM IV) -- new feature, 2026-07-18.
+migrateColumn('technical_signals', 'next_expiry_iv', 'REAL');
+migrateColumn('technical_signals', 'iv_term_slope', 'REAL');
 
 // screener_master — signal type tag for dedup (prevents momentum/technical cross-bleed)
 migrateColumn('screener_master', 'signal_type_tag', "TEXT DEFAULT 'OTHER'");
@@ -2455,7 +2474,11 @@ runMigration('064_earnings_quality_insider_macro', `
   ALTER TABLE technical_signals ADD COLUMN eps_miss_after_streak INTEGER DEFAULT 0;
   ALTER TABLE technical_signals ADD COLUMN rev_surprise_q1       REAL;
   ALTER TABLE technical_signals ADD COLUMN fcf_yield             REAL;
-  ALTER TABLE technical_signals ADD COLUMN fcf_yield_approx      REAL;
+  -- fcf_yield_approx intentionally NOT here: this migration (064) is _migrations-tracked by
+  -- NAME, so editing its SQL body after it already ran on an existing DB is a no-op forever
+  -- (the exact historical bug that left it missing on database.sqlite for weeks -- see the
+  -- migrateColumn('technical_signals', 'fcf_yield_approx', ...) call above, which self-heals
+  -- regardless of _migrations history and is where this column is now actually added).
   ALTER TABLE technical_signals ADD COLUMN interest_coverage     REAL;
   ALTER TABLE technical_signals ADD COLUMN fcf_positive          INTEGER DEFAULT 0;
   ALTER TABLE technical_signals ADD COLUMN debt_coverage_risk    INTEGER DEFAULT 0;
@@ -2506,7 +2529,12 @@ runMigration('063_index_membership_pledge_preopen_options', `
     PRIMARY KEY (symbol, snapshot_date)
   );
 
-  -- Per-stock option chain features
+  -- Per-stock option chain features. atm_iv/next_expiry_iv/iv_term_slope were previously
+  -- only added by stock_option_chain_fetcher.py's own ensure_schema() (self-migrated on
+  -- whichever DB the script actually runs against), never mirrored here -- the same
+  -- schema-of-record drift class as technical_signals.signal_type/fcf_yield_approx
+  -- (found + fixed 2026-07-18 via the CI smoke test). Declared directly here now so a
+  -- fresh DB (via database.sqlite -> schema.postgres.sql) has them from the start.
   CREATE TABLE IF NOT EXISTS stock_option_features (
     symbol              TEXT NOT NULL,
     date                TEXT NOT NULL,
@@ -2519,6 +2547,9 @@ runMigration('063_index_membership_pledge_preopen_options', `
     total_call_oi       REAL,
     total_put_oi        REAL,
     gex_proxy           REAL,
+    atm_iv              REAL,
+    next_expiry_iv      REAL,
+    iv_term_slope       REAL,
     fetched_at          TEXT DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (symbol, date)
   );
@@ -2536,6 +2567,15 @@ runMigration('063_index_membership_pledge_preopen_options', `
   ALTER TABLE technical_signals ADD COLUMN expected_move_pct  REAL;
   ALTER TABLE technical_signals ADD COLUMN stock_gex_proxy    REAL;
 `);
+
+// stock_option_features predates atm_iv/next_expiry_iv/iv_term_slope in its CREATE TABLE
+// above (same never-mirrored self-migration pattern flagged elsewhere in this file) --
+// migrateColumn placed here, after the table's CREATE TABLE statement, so it works whether
+// this run created the table fresh (with the columns already) or is patching an existing
+// one (created before this migration's CREATE TABLE body had them).
+migrateColumn('stock_option_features', 'atm_iv', 'REAL');
+migrateColumn('stock_option_features', 'next_expiry_iv', 'REAL');
+migrateColumn('stock_option_features', 'iv_term_slope', 'REAL');
 
 runMigration('067_ownership_flow_features', `
   ALTER TABLE technical_signals ADD COLUMN mf_funds_adding      INTEGER;

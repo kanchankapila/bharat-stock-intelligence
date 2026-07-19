@@ -1,5 +1,14 @@
-import sqlite3, sys, os
+import sqlite3, sys, os, datetime
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
+# update_weights() filters signal_date >= now() - DEFAULT_WINDOW_DAYS (180). The hardcoded
+# 2024-01-0X dates this file used to insert are now (2026) far outside that window, so every
+# test silently hit reward_engine's "No resolved outcomes found" early-return -- 2 tests failed
+# outright, and the other 2 (test_weight_clamped_to_floor, test_dry_run_no_writes) passed
+# vacuously without ever exercising update_weights' row-processing path. Use dates relative to
+# today so the fixture stays valid regardless of when the suite runs.
+def _d(days_ago: int) -> str:
+    return (datetime.date.today() - datetime.timedelta(days=days_ago)).isoformat()
 
 def make_db():
     conn = sqlite3.connect(':memory:')
@@ -35,6 +44,12 @@ def make_db():
             symbol TEXT, signal_date TEXT, signal_source TEXT,
             horizon_days INTEGER, return_pct REAL, outcome TEXT
         );
+        CREATE TABLE signal_type_weights_history (
+            snapshot_date TEXT NOT NULL, signal_type TEXT NOT NULL,
+            regime TEXT NOT NULL, sector TEXT NOT NULL DEFAULT 'ALL',
+            weight REAL NOT NULL DEFAULT 1.0, sample_count INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (snapshot_date, signal_type, regime, sector)
+        );
     """)
     return conn
 
@@ -52,9 +67,9 @@ def insert_outcome(conn, symbol, date, return_pct, outcome, regime='BULL',
 
 def test_win_increases_weight():
     conn = make_db()
-    insert_outcome(conn, 'INFY', '2024-01-01', 5.0, 'WIN')
-    insert_outcome(conn, 'INFY', '2024-01-02', 5.0, 'WIN')
-    insert_outcome(conn, 'INFY', '2024-01-03', 5.0, 'WIN')
+    insert_outcome(conn, 'INFY', _d(3), 5.0, 'WIN')
+    insert_outcome(conn, 'INFY', _d(2), 5.0, 'WIN')
+    insert_outcome(conn, 'INFY', _d(1), 5.0, 'WIN')
 
     from reward_engine import update_weights
     update_weights(conn, dry_run=False)
@@ -68,11 +83,11 @@ def test_win_increases_weight():
 
 def test_stop_loss_decreases_weight_more_than_loss():
     conn = make_db()
-    insert_outcome(conn, 'TCS', '2024-01-02', -3.0, 'LOSS',
+    insert_outcome(conn, 'TCS', _d(3), -3.0, 'LOSS',
                    signals='[{"type":"MACD_CROSSOVER"}]', sector='IT')
-    insert_outcome(conn, 'TCS', '2024-01-03', -3.0, 'LOSS',
+    insert_outcome(conn, 'TCS', _d(2), -3.0, 'LOSS',
                    signals='[{"type":"MACD_CROSSOVER"}]', sector='IT')
-    insert_outcome(conn, 'TCS', '2024-01-04', -3.0, 'LOSS',
+    insert_outcome(conn, 'TCS', _d(1), -3.0, 'LOSS',
                    signals='[{"type":"MACD_CROSSOVER"}]', sector='IT')
     from reward_engine import update_weights
     update_weights(conn, dry_run=False)
@@ -82,11 +97,11 @@ def test_stop_loss_decreases_weight_more_than_loss():
     """).fetchone()[0]
 
     conn2 = make_db()
-    insert_outcome(conn2, 'WIPRO', '2024-01-02', -3.0, 'STOP_LOSS',
+    insert_outcome(conn2, 'WIPRO', _d(3), -3.0, 'STOP_LOSS',
                    signals='[{"type":"MACD_CROSSOVER"}]', sector='IT')
-    insert_outcome(conn2, 'WIPRO', '2024-01-03', -3.0, 'STOP_LOSS',
+    insert_outcome(conn2, 'WIPRO', _d(2), -3.0, 'STOP_LOSS',
                    signals='[{"type":"MACD_CROSSOVER"}]', sector='IT')
-    insert_outcome(conn2, 'WIPRO', '2024-01-04', -3.0, 'STOP_LOSS',
+    insert_outcome(conn2, 'WIPRO', _d(1), -3.0, 'STOP_LOSS',
                    signals='[{"type":"MACD_CROSSOVER"}]', sector='IT')
     update_weights(conn2, dry_run=False)
     sl_weight = conn2.execute("""
@@ -107,7 +122,7 @@ def test_weight_clamped_to_floor():
     conn.commit()
     # Insert 3 outcomes (MIN_SAMPLES=3) with massive STOP_LOSS to drive weight toward floor
     for i, sym in enumerate(['X1', 'X2', 'X3']):
-        insert_outcome(conn, sym, f'2024-01-0{i+1}', -20.0, 'STOP_LOSS')
+        insert_outcome(conn, sym, _d(i + 1), -20.0, 'STOP_LOSS')
     from reward_engine import update_weights
     update_weights(conn, dry_run=False)
     row = conn.execute("""
@@ -119,11 +134,11 @@ def test_weight_clamped_to_floor():
 
 def test_dry_run_no_writes():
     conn = make_db()
-    insert_outcome(conn, 'HDFCBANK', '2024-01-01', 8.0, 'WIN',
+    insert_outcome(conn, 'HDFCBANK', _d(3), 8.0, 'WIN',
                    signals='[{"type":"GOLDEN_CROSS"}]')
-    insert_outcome(conn, 'HDFCBANK', '2024-01-02', 8.0, 'WIN',
+    insert_outcome(conn, 'HDFCBANK', _d(2), 8.0, 'WIN',
                    signals='[{"type":"GOLDEN_CROSS"}]')
-    insert_outcome(conn, 'HDFCBANK', '2024-01-03', 8.0, 'WIN',
+    insert_outcome(conn, 'HDFCBANK', _d(1), 8.0, 'WIN',
                    signals='[{"type":"GOLDEN_CROSS"}]')
     from reward_engine import update_weights
     update_weights(conn, dry_run=True)

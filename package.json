@@ -23,12 +23,15 @@
     "fetch:chart-patterns": "tsx scripts/fetchChartPatterns.ts",
     "fetch:mc-market-stats": "tsx scripts/fetchMoneycontrolMarketStats.ts",
     "sync:mappings": "tsx scripts/syncAllStockMappings.ts",
-    "update:sectors": "tsx scripts/updateSectors.ts"
+    "update:sectors": "tsx scripts/updateSectors.ts",
+    "smoke:ci": "tsx scripts/ci_smoke_test.ts"
   },
   "dependencies": {
     "@aws-sdk/client-bedrock-runtime": "^3.1075.0",
     "@google/genai": "^2.0.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@sentry/node": "^10.66.0",
+    "@sentry/react": "^10.66.0",
     "@tailwindcss/vite": "^4.1.14",
     "@tanstack/react-query": "^5.100.9",
     "@trpc/client": "^11.17.0",

@@ -178,10 +178,14 @@ def test_per_regime_auc_distinguishes_rankable_vs_random():
                      (f"R{i}", f"2026-01-{i % 28 + 1:02d}", p, 'BULL'))
         conn.execute("INSERT INTO signal_outcomes (symbol,signal_date,horizon_days,outcome) VALUES (?,?,5,?)",
                      (f"R{i}", f"2026-01-{i % 28 + 1:02d}", y))
-    # RANDOM: prob unrelated to outcome
+    # RANDOM: prob unrelated to outcome. Alternates 0.3/0.7 by i%2, independent of the i<50
+    # WIN/LOSS split -- NOT a constant 0.5, which per_regime_auc/regime_readiness treat as the
+    # "unscored" sentinel and exclude outright (this used to be a literal 0.5 here, which made
+    # every BEAR row invisible to the query and raised KeyError on auc['BEAR'] below).
     for i in range(100):
+        p = 0.3 if i % 2 == 0 else 0.7
         conn.execute("INSERT INTO technical_signals (symbol,date,win_probability,nifty_regime) VALUES (?,?,?,?)",
-                     (f"X{i}", f"2026-02-{i % 28 + 1:02d}", 0.5, 'BEAR'))
+                     (f"X{i}", f"2026-02-{i % 28 + 1:02d}", p, 'BEAR'))
         conn.execute("INSERT INTO signal_outcomes (symbol,signal_date,horizon_days,outcome) VALUES (?,?,5,?)",
                      (f"X{i}", f"2026-02-{i % 28 + 1:02d}", 'WIN' if i < 50 else 'LOSS'))
     conn.commit()
@@ -195,13 +199,16 @@ def test_regime_readiness_flags():
     import datetime as dt
     ready_days = _spread_days(22)            # 22 days, 2 episodes -> ready
     not_days = [(dt.date(2026, 3, 1) + dt.timedelta(days=i)).isoformat() for i in range(5)]  # 5 days -> not
+    # win_probability=0.5 exactly is the "unscored" sentinel that regime_readiness's query
+    # excludes (AND ts.win_probability <> 0.5) -- use 0.6 so these rows are actually visible
+    # to it (was 0.5, which made every row here invisible and raised KeyError on rr['BEAR']).
     for d in ready_days:
         conn.execute("INSERT INTO technical_signals (symbol,date,win_probability,nifty_regime) VALUES (?,?,?,?)",
-                     (f"a{d}", d, 0.5, 'BEAR'))
+                     (f"a{d}", d, 0.6, 'BEAR'))
         conn.execute("INSERT INTO signal_outcomes (symbol,signal_date,horizon_days,outcome) VALUES (?,?,5,'WIN')", (f"a{d}", d))
     for d in not_days:
         conn.execute("INSERT INTO technical_signals (symbol,date,win_probability,nifty_regime) VALUES (?,?,?,?)",
-                     (f"b{d}", d, 0.5, 'BULL'))
+                     (f"b{d}", d, 0.6, 'BULL'))
         conn.execute("INSERT INTO signal_outcomes (symbol,signal_date,horizon_days,outcome) VALUES (?,?,5,'WIN')", (f"b{d}", d))
     conn.commit()
     rr = regime_readiness(conn)

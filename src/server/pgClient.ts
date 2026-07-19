@@ -11,6 +11,16 @@ import { pgConnectionString } from './pgConfig';
 // Parse Postgres BIGINT (INT8) as JavaScript numbers (safe up to 2^53 - 1)
 types.setTypeParser(types.builtins.INT8, (val) => parseInt(val, 10));
 
+// node-postgres's default parser for TIMESTAMP WITHOUT TIME ZONE (OID 1114) builds the JS Date
+// using the *client host's* local timezone, not the DB session's. Every naive TIMESTAMP column
+// in this schema (computed_ts, resolved_at, fetched_at, etc.) is written via CURRENT_TIMESTAMP
+// on a UTC-configured Postgres session (confirmed via `SHOW timezone`), so on an IST host the
+// default parser silently shifted every such value by -5:30 (e.g. "10:00 UTC" read back as
+// "04:30 UTC"). Confirmed live 2026-07-17 against intraday_recommendations.computed_ts, which
+// produced a wrong-by-5.5h staleness read. Override globally so every consumer gets a correct
+// Date without a per-callsite `::text` + manual 'Z'-append workaround.
+types.setTypeParser(types.builtins.TIMESTAMP, (val) => (val === null ? null : new Date(val.replace(' ', 'T') + 'Z')));
+
 let pool: Pool | null = null;
 
 export function getPool(): Pool {
@@ -99,9 +109,30 @@ export async function withClient<T>(fn: (client: PoolClient) => Promise<T>): Pro
 let _columnsEnsured = false;
 
 /**
+ * Schema version as tracked by `_migrations` (created by db/schema.postgres.sql). Distinct from
+ * the SQLite side's `runMigration()` audit trail in db.ts, which this mirrors. Read this instead
+ * of assuming the live schema matches any particular commit — see pgEnsureColumns below for why
+ * that assumption has broken in the past (technical_signals.fcf_yield_approx incident).
+ */
+export async function pgSchemaVersion(): Promise<{ appliedCount: number; latest: string | null }> {
+  const rows = await pgQuery<{ name: string }>('SELECT name FROM "_migrations" ORDER BY applied_at DESC LIMIT 1');
+  const countRow = await pgQuery<{ n: number }>('SELECT COUNT(*)::int as n FROM "_migrations"');
+  return { appliedCount: countRow[0]?.n ?? 0, latest: rows[0]?.name ?? null };
+}
+
+/**
  * Idempotent column guard: ensures columns added after the initial DB creation
  * exist in the live Postgres instance. Safe to run on every startup (IF NOT EXISTS).
  * Only called when USE_POSTGRES=true, after the pool is healthy.
+ *
+ * ALTERs are tracked against the `_migrations` table (already created by
+ * db/schema.postgres.sql but previously unused on the Postgres path — every restart blind-ran
+ * all ~90 ALTER statements and silently swallowed "already exists" errors, so there was no way
+ * to tell what schema state a running server was actually on. That gap is exactly how
+ * technical_signals.fcf_yield_approx drifted between db.ts and schema.postgres.sql for a day
+ * (see CLAUDE.md's migration-066 note) — nothing recorded that the column had ever been added.
+ * Now each ALTER runs at most once per fresh DB and is recorded, matching the SQLite side's
+ * runMigration() pattern; pgSchemaVersion() gives a queryable schema state for ops/CI checks.
  */
 export async function pgEnsureColumns(): Promise<void> {
   if (_columnsEnsured) return;
@@ -376,13 +407,28 @@ export async function pgEnsureColumns(): Promise<void> {
     // walk-forward optimization per-fold breakdown (run_walk_forward in backtester.py)
     `ALTER TABLE backtesting_runs ADD COLUMN IF NOT EXISTS walk_forward_folds_json TEXT`,
   ];
-  // Run each ALTER individually — Postgres can't do multiple DDL in one statement
+
+  await client.query(`CREATE TABLE IF NOT EXISTS "_migrations" (
+    "name" TEXT PRIMARY KEY,
+    "applied_at" TIMESTAMPTZ DEFAULT now()
+  )`);
+  const applied = new Set(
+    (await client.query('SELECT name FROM "_migrations"')).rows.map((r: { name: string }) => r.name),
+  );
+
+  // Run each ALTER individually — Postgres can't do multiple DDL in one statement. Skip ones
+  // already recorded in _migrations so a warm restart doesn't re-issue ~90 ALTERs every time.
   for (const sql of alters) {
+    const name = alterMigrationName(sql);
+    if (applied.has(name)) continue;
     try {
       await client.query(sql);
+      await client.query('INSERT INTO "_migrations" (name) VALUES ($1) ON CONFLICT (name) DO NOTHING', [name]);
     } catch (err) {
-      // Column-already-exists (42701) is silently swallowed; real errors re-throw.
-      if ((err as { code?: string }).code !== '42701') {
+      if ((err as { code?: string }).code === '42701') {
+        // Column already exists from a pre-fix blind ALTER — record it now so future boots skip it.
+        await client.query('INSERT INTO "_migrations" (name) VALUES ($1) ON CONFLICT (name) DO NOTHING', [name]).catch(() => {});
+      } else {
         console.error('[PG] pgEnsureColumns failed:', (err as Error).message, '|', sql);
       }
     }
@@ -390,6 +436,13 @@ export async function pgEnsureColumns(): Promise<void> {
   } finally {
     client.release();
   }
+}
+
+/** Derives a stable, human-readable _migrations name from an `ALTER TABLE t ADD COLUMN IF NOT EXISTS c ...` statement. */
+export function alterMigrationName(sql: string): string {
+  const m = sql.match(/ALTER TABLE (\S+) ADD COLUMN IF NOT EXISTS (\S+)/i);
+  if (!m) throw new Error(`alterMigrationName: unrecognized ALTER shape: ${sql}`);
+  return `alter_${m[1]}_${m[2]}`;
 }
 
 export async function pgHealthy(): Promise<boolean> {

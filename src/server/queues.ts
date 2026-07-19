@@ -327,8 +327,11 @@ async function processAISignal(job: Job): Promise<void> {
   // The LLM's self-confidence is uncorrelated with realized outcomes, so emission is gated on
   // the stock's win_probability — the scoring engine only writes one for stocks it endorsed —
   // not the LLM's confidence. No quant endorsement ⇒ the LLM signal is not persisted.
+  // Reads calibrated_win_probability (COALESCE to raw) — was reading raw unconditionally,
+  // inconsistent with scoring_engine.py/unified_ranker sizing, which already prefer the
+  // regime-fair calibrated value (2026-07-18 gating follow-up).
   const wpRow = await dbGet<{ win_probability: number | null }>(
-    "SELECT win_probability FROM technical_signals WHERE symbol = ? AND win_probability IS NOT NULL ORDER BY date DESC LIMIT 1",
+    "SELECT COALESCE(calibrated_win_probability, win_probability) AS win_probability FROM technical_signals WHERE symbol = ? AND win_probability IS NOT NULL ORDER BY date DESC LIMIT 1",
     [symbol],
   );
   const winProb = wpRow?.win_probability ?? null;
@@ -678,34 +681,36 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await runPython('mc_chart_patterns_fetcher.py', [], 25 * 60_000)
     .catch(e => console.warn('[QUEUE] mc_chart_patterns_fetcher failed:', (e as Error).message));
 
-  // NiftyTrader F&O dashboard: max_pain per stock + directional OI flow (calls vs puts Δoi)
-  // for all 147 F&O stocks in a single API call — daily because max pain shifts each session.
-  await runPython('nt_dashboard_fetcher.py', [], 2 * 60_000)
-    .catch(e => console.warn('[QUEUE] nt_dashboard_fetcher failed:', (e as Error).message));
-
-  // NiftyTrader intraday PCR time series for major indices (NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY).
-  await runPython('nt_pcr_ts_fetcher.py', [], 2 * 60_000)
-    .catch(e => console.warn('[QUEUE] nt_pcr_ts_fetcher failed:', (e as Error).message));
-
-  // NiftyTrader EOD strike-wise OI snapshot — feeds index_max_pain + nt_index_oi_eod.
-  await runPython('nt_oi_snapshot_fetcher.py', [], 2 * 60_000)
-    .catch(e => console.warn('[QUEUE] nt_oi_snapshot_fetcher failed:', (e as Error).message));
-
-  // India VIX + GIFT NIFTY intraday values + EOD close → macro_asset_prices + nt_index_pcr_ts.
-  await runPython('nt_vix_fetcher.py', [], 60_000)
-    .catch(e => console.warn('[QUEUE] nt_vix_fetcher failed:', (e as Error).message));
-
-  // Market Mood Index (Tickertape fear/greed 0-100) → macro_asset_prices INDIA_MMI.
-  await runPython('mmi_fetcher.py', [], 60_000)
-    .catch(e => console.warn('[QUEUE] mmi_fetcher failed:', (e as Error).message));
-
-  // NiftyTrader per-strike OI change (buildup/unwinding) for index options.
-  await runPython('nt_change_oi_fetcher.py', [], 2 * 60_000)
-    .catch(e => console.warn('[QUEUE] nt_change_oi_fetcher failed:', (e as Error).message));
-
-  // SmartOptions Greek-enriched option chain for all F&O stocks (Delta/Gamma/Theta/Vega/IV).
-  await runPython('so_option_chain_fetcher.py', ['--delay', '0.3'], 30 * 60_000)
-    .catch(e => console.warn('[QUEUE] so_option_chain_fetcher failed:', (e as Error).message));
+  // Index/F&O microstructure batch — safe to overlap like the moneycontrol/institutional/finbert
+  // group above: each hits a distinct external API and writes its own dedicated index-level
+  // table (nt_dashboard/nt_index_pcr_ts/nt_index_oi_eod/macro_asset_prices[distinct symbol
+  // keys]/stock_option_features), never technical_signals, so there's no row-lock contention
+  // with the per-stock feature writers elsewhere in this pipeline. Was ~9-10 min sequential
+  // (six ~2min steps + one 30min step dominating); now bounded by the slowest member.
+  await Promise.allSettled([
+    // NiftyTrader F&O dashboard: max_pain per stock + directional OI flow (calls vs puts Δoi)
+    // for all 147 F&O stocks in a single API call — daily because max pain shifts each session.
+    runPython('nt_dashboard_fetcher.py', [], 2 * 60_000)
+      .catch(e => console.warn('[QUEUE] nt_dashboard_fetcher failed:', (e as Error).message)),
+    // NiftyTrader intraday PCR time series for major indices (NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY).
+    runPython('nt_pcr_ts_fetcher.py', [], 2 * 60_000)
+      .catch(e => console.warn('[QUEUE] nt_pcr_ts_fetcher failed:', (e as Error).message)),
+    // NiftyTrader EOD strike-wise OI snapshot — feeds index_max_pain + nt_index_oi_eod.
+    runPython('nt_oi_snapshot_fetcher.py', [], 2 * 60_000)
+      .catch(e => console.warn('[QUEUE] nt_oi_snapshot_fetcher failed:', (e as Error).message)),
+    // India VIX + GIFT NIFTY intraday values + EOD close → macro_asset_prices + nt_index_pcr_ts.
+    runPython('nt_vix_fetcher.py', [], 60_000)
+      .catch(e => console.warn('[QUEUE] nt_vix_fetcher failed:', (e as Error).message)),
+    // Market Mood Index (Tickertape fear/greed 0-100) → macro_asset_prices INDIA_MMI.
+    runPython('mmi_fetcher.py', [], 60_000)
+      .catch(e => console.warn('[QUEUE] mmi_fetcher failed:', (e as Error).message)),
+    // NiftyTrader per-strike OI change (buildup/unwinding) for index options.
+    runPython('nt_change_oi_fetcher.py', [], 2 * 60_000)
+      .catch(e => console.warn('[QUEUE] nt_change_oi_fetcher failed:', (e as Error).message)),
+    // SmartOptions Greek-enriched option chain for all F&O stocks (Delta/Gamma/Theta/Vega/IV).
+    runPython('so_option_chain_fetcher.py', ['--delay', '0.3'], 30 * 60_000)
+      .catch(e => console.warn('[QUEUE] so_option_chain_fetcher failed:', (e as Error).message)),
+  ]);
 
   // Earnings beat features (reads stock_earnings_beats, refreshed weekly by earnings_surprise_fetcher).
   // Writes eps_beat_last_q / eps_beat_streak_4q / eps_miss_streak_4q → technical_signals.
@@ -733,6 +738,13 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await runPython('mc_earnings_fetcher.py', [], 5 * 60_000)
     .catch(e => console.warn('[QUEUE] mc_earnings_fetcher failed:', (e as Error).message));
 
+  // F&O expiry countdown (days_to_expiry/is_expiry_day) -- the expiry-side counterpart to
+  // days_to_next_results above. nt_fno_expiry's own expiry dates are refreshed weekly
+  // (sync_nt_fno_symbols.py, ml-weekly-retrain) since they rarely change, but the countdown
+  // itself must recompute daily against today's date, same as days_to_next_results.
+  await runPython('expiry_features.py', [], 60_000)
+    .catch(e => console.warn('[QUEUE] expiry_features failed:', (e as Error).message));
+
   // Broker research recommendations: named broker BUY/SELL events → mc_broker_reco + technical_signals.
   await runPython('mc_broker_reco_fetcher.py', ['--days', '7'], 2 * 60_000)
     .catch(e => console.warn('[QUEUE] mc_broker_reco_fetcher failed:', (e as Error).message));
@@ -759,8 +771,11 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await runPython('screener_signal_generator.py', [], 3 * 60_000)
     .catch(e => console.warn('[QUEUE] screener_signal_generator failed:', (e as Error).message));
 
-  // Per-stock option chain: expected move + GEX proxy + BS-derived ATM IV → stock_option_features + stock_options_oi + technical_signals.
-  await runPython('stock_option_chain_fetcher.py', [], 3 * 60_000)
+  // Per-stock option chain: expected move + GEX proxy + BS-derived ATM IV + next-month IV
+  // term structure → stock_option_features + stock_options_oi + technical_signals.
+  // 3min -> 6min (2026-07-18): the term-structure feature adds a second per-symbol API call
+  // (next-month expiry chain), roughly doubling this script's request count.
+  await runPython('stock_option_chain_fetcher.py', [], 6 * 60_000)
     .catch(e => console.warn('[QUEUE] stock_option_chain_fetcher failed:', (e as Error).message));
   // Re-run iv_features after stock chains so per-stock iv_rank reflects BS-computed ATM IV (not just index IV from pcr_fetcher).
   await runPython('iv_features.py', [], 90_000)
@@ -791,28 +806,32 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await runPython('mf_sector_flow_fetcher.py', [], 5 * 60_000)
     .catch(e => console.warn('[QUEUE] mf_sector_flow_fetcher failed:', (e as Error).message));
 
-  // India macro indicators: PMI, GST, IIP, auto sales, RBI rate → macro_asset_prices.
-  await runPython('india_macro_fetcher.py', [], 3 * 60_000)
-    .catch(e => console.warn('[QUEUE] india_macro_fetcher failed:', (e as Error).message));
-
-  // Index PE/PB/EPS → index_valuation (MoneyControl + Trendlyne, last 30 days).
-  // ~35 of the ~91 indices now fall back to a second Trendlyne round-trip per index because
-  // MC's graph endpoint returns corrupted data for most sector sub-indices — a full run takes
-  // 6-7 minutes, well past the old 3-minute budget.
-  await runPython('nifty_pe_fetcher.py', ['--days', '30'], 10 * 60_000)
-    .catch(e => console.warn('[QUEUE] nifty_pe_fetcher failed:', (e as Error).message));
-
-  // Index OHLC history from MoneyControl → stock_ohlcv (covers SENSEX + indices missing from Yahoo).
-  await runPython('mc_index_ohlc_fetcher.py', ['--range', '5d'], 3 * 60_000)
-    .catch(e => console.warn('[QUEUE] mc_index_ohlc_fetcher failed:', (e as Error).message));
-
-  // NSE/BSE advance-decline raw counts → mc_advance_decline + market_breadth.adv_decline_ratio.
-  await runPython('mc_advance_decline_fetcher.py', [], 60_000)
-    .catch(e => console.warn('[QUEUE] mc_advance_decline_fetcher failed:', (e as Error).message));
-
-  // Index options OI by strike → index_option_oi + index_max_pain (Nifty + BankNifty).
-  await runPython('mc_index_oi_fetcher.py', [], 3 * 60_000)
-    .catch(e => console.warn('[QUEUE] mc_index_oi_fetcher failed:', (e as Error).message));
+  // Index/macro batch — same rationale as the NT/MMI/option-chain batch above: five distinct
+  // external APIs, five distinct index-level destination tables (macro_asset_prices, index_valuation,
+  // stock_ohlcv[index symbols only — disjoint from the per-stock rows written elsewhere],
+  // mc_advance_decline/market_breadth.adv_decline_ratio, index_option_oi/index_max_pain), no
+  // technical_signals writes. Dominated by nifty_pe_fetcher's ~91-index 6-7min run either way,
+  // so this collapses ~13 min of sequential 1-10min steps into ~7 min.
+  await Promise.allSettled([
+    // India macro indicators: PMI, GST, IIP, auto sales, RBI rate → macro_asset_prices.
+    runPython('india_macro_fetcher.py', [], 3 * 60_000)
+      .catch(e => console.warn('[QUEUE] india_macro_fetcher failed:', (e as Error).message)),
+    // Index PE/PB/EPS → index_valuation (MoneyControl + Trendlyne, last 30 days).
+    // ~35 of the ~91 indices now fall back to a second Trendlyne round-trip per index because
+    // MC's graph endpoint returns corrupted data for most sector sub-indices — a full run takes
+    // 6-7 minutes, well past the old 3-minute budget.
+    runPython('nifty_pe_fetcher.py', ['--days', '30'], 10 * 60_000)
+      .catch(e => console.warn('[QUEUE] nifty_pe_fetcher failed:', (e as Error).message)),
+    // Index OHLC history from MoneyControl → stock_ohlcv (covers SENSEX + indices missing from Yahoo).
+    runPython('mc_index_ohlc_fetcher.py', ['--range', '5d'], 3 * 60_000)
+      .catch(e => console.warn('[QUEUE] mc_index_ohlc_fetcher failed:', (e as Error).message)),
+    // NSE/BSE advance-decline raw counts → mc_advance_decline + market_breadth.adv_decline_ratio.
+    runPython('mc_advance_decline_fetcher.py', [], 60_000)
+      .catch(e => console.warn('[QUEUE] mc_advance_decline_fetcher failed:', (e as Error).message)),
+    // Index options OI by strike → index_option_oi + index_max_pain (Nifty + BankNifty).
+    runPython('mc_index_oi_fetcher.py', [], 3 * 60_000)
+      .catch(e => console.warn('[QUEUE] mc_index_oi_fetcher failed:', (e as Error).message)),
+  ]);
 
   // BSE event classifier: news_articles → event_signal_score in technical_signals.
   await runPython('bse_event_classifier.py', [], 60_000)
@@ -1773,11 +1792,16 @@ export async function initQueues(): Promise<boolean> {
     for (const r of tsRepeatables) {
       await technicalSignalsQueue.removeRepeatableByKey(r.key);
     }
-    await addJobWithCatchup(technicalSignalsQueue, 
+    await addJobWithCatchup(technicalSignalsQueue,
       'technical-signals-daily',
       {},
       {
-        repeat: { pattern: '*/30 * * * *' }, // Run every 30 minutes
+        // Was '*/30 * * * *' (unrestricted, 24/7) -- the only intraday-cadence job in this file
+        // without an hours/isMarketOpen guard, so it recomputed RSI/MACD/BB/divergence across
+        // the full universe at 2 AM and on weekends/holidays against completely unchanged EOD
+        // data. Narrowed to the same 8:30 AM-4:00 PM IST window as intraday-fetcher (one extra
+        // post-close run), plus the same in-handler isMarketOpen() check for holiday-awareness.
+        repeat: { pattern: '*/30 3-10 * * 1-5' }, // 3:00-10:30 UTC = 8:30 AM-4:00 PM IST, weekdays
         jobId: 'technical-signals-daily',
         removeOnComplete: 3,
         removeOnFail: 3,
@@ -1787,6 +1811,10 @@ export async function initQueues(): Promise<boolean> {
     technicalSignalsWorker = new Worker(
       QUEUE_TECHNICAL_SIGNALS,
       async (_job: Job) => {
+        if (!(await isMarketOpen())) {
+          console.log('[QUEUE] technical-signals skipped — outside NSE market hours (weekend/holiday)');
+          return;
+        }
         const { runTechnicalSignalScan } = await import('./technicalSignalsService');
         await runTechnicalSignalScan();
       },
@@ -1896,6 +1924,22 @@ export async function initQueues(): Promise<boolean> {
           removeOnFail: 3,
         },
       ),
+      // Results-season 2nd pass: board-meeting/results announcements are the most
+      // price-sensitive BSE filings and an hourly-only poll can sit on one for up to 59 min.
+      // Offset 30 min from the hourly job above (effective ~30-min cadence together) but a
+      // pure no-op outside results season (isResultsSeasonActive() gate in the worker below) --
+      // so this changes nothing on a quiet week and only adds load during the ~6 weeks/quarter
+      // that actually need it.
+      addJobWithCatchup(newsSentimentQueue,
+        'bse-announcements-refresh-hot',
+        {},
+        {
+          repeat: { every: 60 * 60 * 1000, offset: 30 * 60 * 1000 },
+          jobId: 'bse-announcements-hot-repeatable',
+          removeOnComplete: 3,
+          removeOnFail: 3,
+        },
+      ),
     ]);
 
     newsSentimentWorker = new Worker(
@@ -1905,6 +1949,12 @@ export async function initQueues(): Promise<boolean> {
         if (job.name === 'company-news-refresh') {
           await svc.runCompanyNewsCycle();
         } else if (job.name === 'bse-announcements-refresh') {
+          await svc.runBseAnnouncementsCycle();
+        } else if (job.name === 'bse-announcements-refresh-hot') {
+          if (!(await svc.isResultsSeasonActive())) {
+            console.log('[QUEUE] bse-announcements-refresh-hot skipped — not results season');
+            return;
+          }
           await svc.runBseAnnouncementsCycle();
         } else {
           await svc.runNewsSentimentCycle();
@@ -2295,7 +2345,14 @@ export async function initQueues(): Promise<boolean> {
             console.warn('[QUEUE] market_regime_fetcher failed:', (e as Error).message);
             recordHeartbeat('market-regime-refresh', 'failed', (e as Error).message);
           });
-        // 2) fuse VIX/basis/MMI/breadth → app_settings.intraday_regime (non-fatal: ranker
+        // 1b) Nifty PCR + dealer GEX (index-level only, ~90s) → macro_asset_prices. Previously
+        // only refreshed once/day inside ml-daily-ops/quant-eod-sync, so the intraday regime
+        // nowcast below fused a stale EOD PCR all session. This is the lightweight index-only
+        // call (NOT so_option_chain_fetcher.py/stock_option_chain_fetcher.py, the ~30min/3min
+        // per-stock scrapes that stay EOD-only) -- cheap enough for a 15-min cadence.
+        await runPython('pcr_fetcher.py', ['--gex'], 90_000)
+          .catch(e => console.warn('[QUEUE] pcr_fetcher (intraday) failed:', (e as Error).message));
+        // 2) fuse VIX/basis/MMI/breadth/PCR → app_settings.intraday_regime (non-fatal: ranker
         //    defaults to NEUTRAL if this is missing)
         await runPython('intraday_regime.py', [], 60_000)
           .catch(e => console.warn('[QUEUE] intraday_regime failed:', (e as Error).message));
@@ -2307,10 +2364,10 @@ export async function initQueues(): Promise<boolean> {
             recordHeartbeat('intraday-ranker', 'failed', (e as Error).message);
           });
       },
-      // Generous lockDuration: three sequential runPython calls (~7 min worst case) plus the
+      // Generous lockDuration: four sequential runPython calls (~8.5 min worst case) plus the
       // shared 5-concurrent-subprocess semaphore wait, so BullMQ doesn't consider it stalled.
       { connection, concurrency: 1, lockDuration: 10 * 60_000 });
-    console.log('[QUEUE] Intraday pipeline (regime fetch → regime label → ranker) scheduled every 15 min during market hours');
+    console.log('[QUEUE] Intraday pipeline (regime fetch → PCR/GEX → regime label → ranker) scheduled every 15 min during market hours');
 
     // ── Closed-day early batch ────────────────────────────────────────────────
     // On a TRADING HOLIDAY (weekday, exchange shut) there is no market close to wait for, so run

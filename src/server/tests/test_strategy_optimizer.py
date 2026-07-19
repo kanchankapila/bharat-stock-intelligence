@@ -59,6 +59,10 @@ class TestTemporalSplit:
         import sqlite3
 
         conn = sqlite3.connect(':memory:')
+        # StrategyOptimizer._read_df() builds DataFrames via dict(row), which needs a mapping
+        # row type (matches the row_factory convention every other test file in this suite
+        # already uses for connections passed into production code) -- a plain tuple isn't one.
+        conn.row_factory = sqlite3.Row
         conn.execute("""
             CREATE TABLE signal_outcomes (
                 symbol TEXT, signal_date TEXT, horizon_days INTEGER,
@@ -94,21 +98,25 @@ class TestTemporalSplit:
         opt = StrategyOptimizer.__new__(StrategyOptimizer)
         opt.conn = conn
 
-        # Patch _objective to capture train/test splits
-        original_objective = opt._objective.__func__  # Get unbound method
+        # Patch _compute_score, not _objective: _objective only ever evaluates train_df (its
+        # own docstring: "test_df is scored separately in optimise() for reporting") -- the
+        # held-out baseline/optimised scores are computed via direct self._compute_score(...,
+        # test_df) calls in optimise(), never through self._objective. Patching _objective
+        # (as this test previously did, with a (train_df, test_df) 2-arg signature that also
+        # didn't match _objective's real 1-df signature) never sees test_df at all.
+        # _compute_score is the common method both the train (via _objective) and test
+        # (direct) paths funnel through, so patching it here captures both.
+        original_compute_score = opt._compute_score.__func__  # Get unbound method
 
-        def patched_objective(self, params, train_df, test_df):
-            train_max = train_df['signal_date'].max()
-            test_min = test_df['signal_date'].min()
+        def patched_compute_score(self, params, df):
             captured['objective_calls'].append({
-                'train_max': train_max,
-                'test_min': test_min,
-                'train_size': len(train_df),
-                'test_size': len(test_df),
+                'min_date': df['signal_date'].min(),
+                'max_date': df['signal_date'].max(),
+                'size': len(df),
             })
-            return original_objective(self, params, train_df, test_df)
+            return original_compute_score(self, params, df)
 
-        opt._objective = patched_objective.__get__(opt, StrategyOptimizer)
+        opt._compute_score = patched_compute_score.__get__(opt, StrategyOptimizer)
 
         # Call optimise
         result = opt.optimise(horizon_days=15, max_iterations=2)
@@ -116,9 +124,16 @@ class TestTemporalSplit:
         # Verify at least one call captured the split
         assert len(captured['objective_calls']) > 0, "Objective was never called (empty data?)"
 
-        # Check first call's temporal property
-        first_call = captured['objective_calls'][0]
-        assert first_call['train_max'] <= first_call['test_min'], (
-            f"Temporal leakage detected in first objective call: "
-            f"train_max={first_call['train_max']}, test_min={first_call['test_min']}"
+        # _objective is called with either train_df (many times, larger, fixed size) or
+        # test_df (fewer times, smaller, fixed size) -- distinguish by size and check no
+        # temporal leakage between the two groups.
+        by_size = {}
+        for c in captured['objective_calls']:
+            by_size.setdefault(c['size'], c)
+        assert len(by_size) == 2, f"expected exactly 2 distinct df sizes (train, test), got sizes={sorted(by_size)}"
+        smaller_size, larger_size = sorted(by_size)
+        test_call, train_call = by_size[smaller_size], by_size[larger_size]
+        assert train_call['max_date'] <= test_call['min_date'], (
+            f"Temporal leakage detected: train_max={train_call['max_date']}, "
+            f"test_min={test_call['min_date']}"
         )

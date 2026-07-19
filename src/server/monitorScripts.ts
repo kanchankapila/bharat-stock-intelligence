@@ -12,10 +12,14 @@ export const MONITOR_SCRIPTS = [
     category: 'Signals',
     critical: true,
     description: 'Scans 2000+ stocks for EMA, RSI, BB, divergence patterns',
-    schedule: 'Every 30 min',
+    schedule: 'Every 30 min, 8:30 AM-4:00 PM IST weekdays',
     pyScript: null,          // queue-based
     queueName: 'technical-signals',
-    staleLimitHours: 1,
+    // Was 1h when the job ran unrestricted 24/7. Now market-hours-gated (queues.ts) like
+    // outcome-resolver-5d/performance-tracker/fii-dii-fetcher below -- 1h would false-alarm
+    // 'stale' every single evening/weekend. 26h matches those siblings' convention: tolerates
+    // the overnight gap, still flags within a day of a genuine same-session failure.
+    staleLimitHours: 26,
   },
   {
     id: 'outcome-resolver-5d',
@@ -270,5 +274,16 @@ export const MONITOR_SCRIPTS = [
     pyScript: 'tickertape_scorecard_fetcher.py',
     queueName: 'tickertape-scorecard',
     staleLimitHours: 200,
+  },
+  {
+    id: 'intraday-breadth-capture',
+    label: 'Intraday Breadth Capture',
+    category: 'Data',
+    critical: true,
+    description: 'Live adv/dec breadth nowcast off the 5-min quote refresh, feeding intraday_regime.py. Runs off the Node process setInterval (not a BullMQ job) -- no catch-up on a restart, so this is the one guard that catches a silent capture outage (e.g. the 2026-07-16 all-day gap).',
+    schedule: 'Every 5 min, market hours',
+    pyScript: null,
+    queueName: null,
+    staleLimitHours: 1,
   },
 ] as const;

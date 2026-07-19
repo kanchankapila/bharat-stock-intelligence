@@ -273,7 +273,7 @@ Indices use a separate `indexData` array in `src/server/stockMapping.ts` with `{
 
 - **Cache**: Redis first → in-memory Map fallback. TTLs: live stocks 5 min, insights 1 hr, technical 30 min.
 - **Batching**: Yahoo Finance 50 symbols/batch, 8 concurrent batches. tRPC `httpBatchLink` groups frontend calls.
-- **Polling**: BullMQ repeatable job every 5 min. Accuracy tracking every 30 s. Screener sync every 12 hr.
+- **Polling**: Live stock prices refresh every 5 min via a `setInterval` in `liveStockData.ts` (not a BullMQ job — the BullMQ `stock-refresh` queue is the once-daily 4 PM IST OHLCV persist, confusingly named). Intraday-cadence BullMQ jobs (regime/breadth/screener scans) run every 15-30 min, market-hours-gated. MC/ETNow screener syncs run once/day (post-close). See [job_frequency_audit_2026_07_17.md] memory for the full cadence audit.
 - **Resilience**: `AbortSignal.timeout(10000)`, exponential backoff+jitter, Gemini fallback, setInterval fallback if Redis down.
 - **Symbol resolution**: See **Ticker Resolution Strategy** section above. `stocklist.ts` (180 stocks) takes precedence over `nseStocks.ts` (2000+ stocks).
 

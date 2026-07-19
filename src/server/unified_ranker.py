@@ -524,8 +524,14 @@ class UnifiedRanker:
         # string (date('now',...) translates to a real date on Postgres -> text>=date error).
         cutoff = (date.today() - timedelta(days=3)).isoformat()
         try:
+            # Was AVG(win_probability) (raw) — inconsistent with _get_win_probabilities above,
+            # which already reads the regime-fair calibrated value for sizing. This 'ml' score
+            # feeds the composite unified_recommendations rank/classification directly, so the
+            # same raw-vs-regime-honest gap applied to ranking, not just sizing. COALESCE keeps
+            # not-yet-calibrated rows working on the raw value (2026-07-18 gating follow-up).
             rows = self.conn.execute(
-                "SELECT symbol, AVG(win_probability) AS p FROM technical_signals WHERE date >= ? GROUP BY symbol",
+                "SELECT symbol, AVG(COALESCE(calibrated_win_probability, win_probability)) AS p "
+                "FROM technical_signals WHERE date >= ? GROUP BY symbol",
                 (cutoff,),
             ).fetchall()
             return {r['symbol']: float(r['p'] or 0) * 100 for r in rows}

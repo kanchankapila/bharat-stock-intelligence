@@ -157,8 +157,8 @@ CREATE TABLE IF NOT EXISTS "backtesting_runs" (
   "monthly_returns_json" TEXT,
   "equity_curve_json" TEXT,
   "trade_log_json" TEXT,
-  "walk_forward_folds_json" TEXT,
-  "run_at" TIMESTAMPTZ DEFAULT now()
+  "run_at" TIMESTAMPTZ DEFAULT now(),
+  "walk_forward_folds_json" TEXT
 );
 
 -- ── bulk_block_deals ─────────────────────────────────────────────
@@ -382,6 +382,23 @@ CREATE TABLE IF NOT EXISTS "dl_model_performance" (
   "retrain_triggered" BIGINT DEFAULT 0,
   UNIQUE ("model_name", "eval_date", "horizon_days")
 );
+
+-- ── early_hours_predictions ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "early_hours_predictions" (
+  "symbol" TEXT NOT NULL,
+  "date" TEXT NOT NULL,
+  "score" DOUBLE PRECISION NOT NULL,
+  "iep_gap_pct" DOUBLE PRECISION,
+  "preopen_imbalance" DOUBLE PRECISION,
+  "delivery_spike_pct" DOUBLE PRECISION,
+  "has_corporate_action" BIGINT DEFAULT 0,
+  "corporate_action_title" TEXT,
+  "breakout_signals" TEXT,
+  "reasons_json" TEXT,
+  "computed_at" TIMESTAMPTZ DEFAULT now(),
+  PRIMARY KEY ("symbol", "date")
+);
+CREATE INDEX idx_ehp_date ON early_hours_predictions(date DESC);
 
 -- ── eco_calendar ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "eco_calendar" (
@@ -726,6 +743,23 @@ CREATE TABLE IF NOT EXISTS "institutional_rankings" (
   "composite_score" DOUBLE PRECISION
 );
 
+-- ── intraday_breadth_snapshots ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "intraday_breadth_snapshots" (
+  "snapshot_at" TEXT,
+  "date" TEXT,
+  "adv" BIGINT,
+  "dec" BIGINT,
+  "unch" BIGINT,
+  "total" BIGINT,
+  "adv_decline_ratio" DOUBLE PRECISION,
+  "pct_positive" DOUBLE PRECISION,
+  "avg_change_pct" DOUBLE PRECISION,
+  "breadth_score" DOUBLE PRECISION,
+  "risk_tilt" TEXT,
+  "computed_at" TEXT,
+  PRIMARY KEY ("snapshot_at")
+);
+
 -- ── intraday_ohlcv ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "intraday_ohlcv" (
   "symbol" TEXT NOT NULL,
@@ -741,6 +775,98 @@ CREATE TABLE IF NOT EXISTS "intraday_ohlcv" (
 );
 CREATE INDEX idx_intra_sym ON intraday_ohlcv(symbol, datetime DESC);
 
+-- ── intraday_recommendation_outcomes ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "intraday_recommendation_outcomes" (
+  "symbol" TEXT,
+  "computed_at" TEXT,
+  "entry_price" DOUBLE PRECISION,
+  "target_1" DOUBLE PRECISION,
+  "stop_loss" DOUBLE PRECISION,
+  "day_high" DOUBLE PRECISION,
+  "day_low" DOUBLE PRECISION,
+  "day_close" DOUBLE PRECISION,
+  "exit_price" DOUBLE PRECISION,
+  "exit_reason" TEXT,
+  "pnl_pct" DOUBLE PRECISION,
+  "outcome" TEXT,
+  "resolved_at" TIMESTAMPTZ,
+  PRIMARY KEY ("symbol", "computed_at")
+);
+
+-- ── intraday_recommendations ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "intraday_recommendations" (
+  "symbol" TEXT,
+  "computed_at" TEXT,
+  "intraday_regime" TEXT,
+  "intraday_score" DOUBLE PRECISION,
+  "conviction_level" TEXT,
+  "classification" TEXT,
+  "screener_score" DOUBLE PRECISION,
+  "breakout_score" DOUBLE PRECISION,
+  "bullish_count" BIGINT,
+  "bearish_count" BIGINT,
+  "cmp" DOUBLE PRECISION,
+  "entry_price" DOUBLE PRECISION,
+  "stop_loss" DOUBLE PRECISION,
+  "target_1" DOUBLE PRECISION,
+  "risk_reward" DOUBLE PRECISION,
+  "position_size_pct" DOUBLE PRECISION,
+  "reasoning" TEXT,
+  "computed_ts" TIMESTAMPTZ,
+  PRIMARY KEY ("symbol", "computed_at")
+);
+
+-- ── intraday_recommendations_history ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "intraday_recommendations_history" (
+  "symbol" TEXT NOT NULL,
+  "computed_at" TEXT NOT NULL,
+  "cycle_at" TEXT NOT NULL,
+  "intraday_regime" TEXT,
+  "intraday_score" DOUBLE PRECISION,
+  "conviction_level" TEXT,
+  "classification" TEXT,
+  "screener_score" DOUBLE PRECISION,
+  "breakout_score" DOUBLE PRECISION,
+  "news_sentiment" DOUBLE PRECISION,
+  "bullish_count" BIGINT,
+  "bearish_count" BIGINT,
+  "cmp" DOUBLE PRECISION,
+  "entry_price" DOUBLE PRECISION,
+  "stop_loss" DOUBLE PRECISION,
+  "target_1" DOUBLE PRECISION,
+  "risk_reward" DOUBLE PRECISION,
+  "position_size_pct" DOUBLE PRECISION,
+  PRIMARY KEY ("symbol", "cycle_at")
+);
+CREATE INDEX idx_irh_symbol_date ON intraday_recommendations_history(symbol, computed_at, cycle_at);
+
+-- ── intraday_regime_history ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "intraday_regime_history" (
+  "computed_at" TEXT,
+  "date" TEXT,
+  "regime" TEXT,
+  "composite" DOUBLE PRECISION,
+  "vix" DOUBLE PRECISION,
+  "mmi" DOUBLE PRECISION,
+  "usdinr_chg" DOUBLE PRECISION,
+  "basis" DOUBLE PRECISION,
+  "breadth_score" DOUBLE PRECISION,
+  PRIMARY KEY ("computed_at")
+);
+
+-- ── intraday_strategy_lifts ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "intraday_strategy_lifts" (
+  "as_of" TEXT,
+  "dimension" TEXT,
+  "bucket" TEXT,
+  "n" BIGINT,
+  "wins" BIGINT,
+  "win_rate" DOUBLE PRECISION,
+  "lift" DOUBLE PRECISION,
+  "avg_pnl" DOUBLE PRECISION,
+  PRIMARY KEY ("as_of", "dimension", "bucket")
+);
+
 -- ── job_heartbeat ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "job_heartbeat" (
   "job_name" TEXT,
@@ -750,6 +876,7 @@ CREATE TABLE IF NOT EXISTS "job_heartbeat" (
   "last_error" TEXT,
   "run_count" BIGINT DEFAULT 0,
   "fail_count" BIGINT DEFAULT 0,
+  "last_alert_sent_at" BIGINT,
   PRIMARY KEY ("job_name")
 );
 
@@ -911,7 +1038,6 @@ CREATE TABLE IF NOT EXISTS "mc_chart_patterns" (
   "symbol" TEXT,
   "pattern_id" BIGINT NOT NULL,
   "pattern_name" TEXT NOT NULL,
-  "direction" TEXT,
   "comment" TEXT,
   "time_frame" TEXT,
   "exchange" TEXT DEFAULT 'nse',
@@ -925,7 +1051,6 @@ CREATE TABLE IF NOT EXISTS "mc_chart_patterns" (
   "cmp" DOUBLE PRECISION,
   "metadata_json" TEXT,
   "end_date" TEXT,
-  "created_at" TEXT,
   "analyst_name" TEXT,
   "analyst_image" TEXT,
   "fetched_at" TIMESTAMPTZ DEFAULT now(),
@@ -1190,11 +1315,6 @@ CREATE INDEX idx_nse_symbol ON nse_stocks(symbol);
 CREATE INDEX idx_nse_sector ON nse_stocks(sector);
 CREATE INDEX idx_nse_industry ON nse_stocks(industry);
 CREATE INDEX idx_nse_status ON nse_stocks(status);
-CREATE EXTENSION IF NOT EXISTS pg_trgm;
-CREATE INDEX idx_nse_stocks_symbol_gin ON nse_stocks USING GIN (symbol gin_trgm_ops);
-CREATE INDEX idx_nse_stocks_name_gin ON nse_stocks USING GIN (name gin_trgm_ops);
-CREATE INDEX idx_nse_stocks_sector_gin ON nse_stocks USING GIN (sector gin_trgm_ops);
-CREATE INDEX idx_nse_stocks_industry_gin ON nse_stocks USING GIN (industry gin_trgm_ops);
 
 -- ── nt_fno_expiry ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "nt_fno_expiry" (
@@ -1351,6 +1471,16 @@ CREATE TABLE IF NOT EXISTS "quant_scores" (
   "ohlcv_days" BIGINT,
   "last_computed" TIMESTAMPTZ DEFAULT now(),
   "return_1w" DOUBLE PRECISION,
+  "beta_1y" DOUBLE PRECISION,
+  "beta_6m" DOUBLE PRECISION,
+  "sortino_ratio" DOUBLE PRECISION,
+  "var_95" DOUBLE PRECISION,
+  "mf_quality_score" DOUBLE PRECISION,
+  "mf_momentum_score" DOUBLE PRECISION,
+  "mf_value_score" DOUBLE PRECISION,
+  "mf_risk_adj_score" DOUBLE PRECISION,
+  "mf_macro_score" DOUBLE PRECISION,
+  "mf_composite_score" DOUBLE PRECISION,
   PRIMARY KEY ("symbol")
 );
 CREATE INDEX idx_qs_composite  ON quant_scores(rank_composite DESC);
@@ -1696,6 +1826,21 @@ CREATE TABLE IF NOT EXISTS "signal_type_stats" (
   PRIMARY KEY ("signal_type", "horizon_days", "market_regime")
 );
 
+-- ── signal_type_stats_history ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "signal_type_stats_history" (
+  "snapshot_date" TEXT NOT NULL,
+  "signal_type" TEXT NOT NULL,
+  "horizon_days" BIGINT NOT NULL,
+  "market_regime" TEXT NOT NULL DEFAULT 'ALL',
+  "total_occurrences" BIGINT DEFAULT 0,
+  "win_count" BIGINT DEFAULT 0,
+  "avg_return_pct" DOUBLE PRECISION,
+  "median_return_pct" DOUBLE PRECISION,
+  "win_rate" DOUBLE PRECISION,
+  PRIMARY KEY ("snapshot_date", "signal_type", "horizon_days", "market_regime")
+);
+CREATE INDEX idx_sts_hist_date ON signal_type_stats_history(snapshot_date DESC);
+
 -- ── signal_type_weights ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "signal_type_weights" (
   "id" BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
@@ -1708,6 +1853,18 @@ CREATE TABLE IF NOT EXISTS "signal_type_weights" (
   UNIQUE ("signal_type", "regime", "sector")
 );
 CREATE INDEX idx_stw_key ON signal_type_weights(signal_type, regime, sector);
+
+-- ── signal_type_weights_history ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "signal_type_weights_history" (
+  "snapshot_date" TEXT NOT NULL,
+  "signal_type" TEXT NOT NULL,
+  "regime" TEXT NOT NULL,
+  "sector" TEXT NOT NULL DEFAULT 'ALL',
+  "weight" DOUBLE PRECISION NOT NULL DEFAULT 1.0,
+  "sample_count" BIGINT NOT NULL DEFAULT 0,
+  PRIMARY KEY ("snapshot_date", "signal_type", "regime", "sector")
+);
+CREATE INDEX idx_stw_hist_date ON signal_type_weights_history(snapshot_date DESC);
 
 -- ── so_option_chain ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "so_option_chain" (
@@ -1806,23 +1963,6 @@ CREATE TABLE IF NOT EXISTS "stock_earnings_dates" (
   PRIMARY KEY ("scid", "result_date")
 );
 
--- ── price_alerts ─────────────────────────────────────────────
--- Real price/threshold alerts on top of the SSE pipe in sse.ts (broadcastAlert/AlertsToast
--- already existed end-to-end but nothing ever called broadcastAlert -- this is what does.
-CREATE TABLE IF NOT EXISTS "price_alerts" (
-  "id" BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
-  "userId" TEXT NOT NULL,
-  "symbol" TEXT NOT NULL,
-  "condition" TEXT NOT NULL,           -- 'ABOVE' | 'BELOW'
-  "thresholdPrice" DOUBLE PRECISION NOT NULL,
-  "status" TEXT NOT NULL DEFAULT 'ACTIVE',  -- 'ACTIVE' | 'TRIGGERED' | 'CANCELLED'
-  "createdAt" TIMESTAMPTZ DEFAULT now(),
-  "triggeredAt" TIMESTAMPTZ,
-  "triggeredPrice" DOUBLE PRECISION
-);
-CREATE INDEX idx_price_alerts_user ON price_alerts("userId");
-CREATE INDEX idx_price_alerts_active ON price_alerts(symbol, status) WHERE status = 'ACTIVE';
-
 -- ── stock_factor_breakdown ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "stock_factor_breakdown" (
   "symbol" TEXT NOT NULL,
@@ -1838,27 +1978,6 @@ CREATE TABLE IF NOT EXISTS "stock_factor_breakdown" (
 );
 CREATE UNIQUE INDEX idx_sfb_uniq
     ON stock_factor_breakdown(symbol, timeframe);
-
--- ── stock_factor_breakdown_history ─────────────────────────────────────────
--- Daily snapshot of stock_factor_breakdown (which is current-state-only, PK symbol+timeframe,
--- and gets overwritten in place). Without this, there is no historical per-category score to
--- backtest a regime-conditional edge against, which is what currently blocks fitting
--- unified_ranker.py's REGIME_CAT_TILT from real outcomes instead of hand-set multipliers.
-CREATE TABLE IF NOT EXISTS "stock_factor_breakdown_history" (
-  "symbol" TEXT NOT NULL,
-  "timeframe" TEXT NOT NULL DEFAULT 'long_term',
-  "snapshot_date" TEXT NOT NULL,
-  "technical" DOUBLE PRECISION DEFAULT 0,
-  "fundamental" DOUBLE PRECISION DEFAULT 0,
-  "momentum" DOUBLE PRECISION DEFAULT 0,
-  "valuation" DOUBLE PRECISION DEFAULT 0,
-  "delivery" DOUBLE PRECISION DEFAULT 0,
-  "news" DOUBLE PRECISION DEFAULT 0,
-  "regime" TEXT,
-  "snapshotted_at" TIMESTAMPTZ DEFAULT now(),
-  PRIMARY KEY ("symbol", "timeframe", "snapshot_date")
-);
-CREATE INDEX idx_sfbh_date ON stock_factor_breakdown_history(snapshot_date DESC);
 
 -- ── stock_fundamentals ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "stock_fundamentals" (
@@ -1927,6 +2046,9 @@ CREATE TABLE IF NOT EXISTS "stock_option_features" (
   "total_put_oi" DOUBLE PRECISION,
   "gex_proxy" DOUBLE PRECISION,
   "fetched_at" TEXT DEFAULT now(),
+  "atm_iv" DOUBLE PRECISION,
+  "next_expiry_iv" DOUBLE PRECISION,
+  "iv_term_slope" DOUBLE PRECISION,
   PRIMARY KEY ("symbol", "date")
 );
 
@@ -2230,7 +2352,6 @@ CREATE TABLE IF NOT EXISTS "technical_signals" (
   "eps_miss_after_streak" BIGINT DEFAULT 0,
   "rev_surprise_q1" DOUBLE PRECISION,
   "fcf_yield" DOUBLE PRECISION,
-  "fcf_yield_approx" DOUBLE PRECISION,
   "interest_coverage" DOUBLE PRECISION,
   "fcf_positive" BIGINT DEFAULT 0,
   "debt_coverage_risk" BIGINT DEFAULT 0,
@@ -2252,17 +2373,47 @@ CREATE TABLE IF NOT EXISTS "technical_signals" (
   "ccc_trend" DOUBLE PRECISION,
   "wc_deteriorating" BIGINT DEFAULT 0,
   "wc_improving" BIGINT DEFAULT 0,
+  "breakout_probability" DOUBLE PRECISION,
+  "mc_bullish_scan_count" BIGINT,
+  "mc_scan_52w_high" BIGINT,
+  "mc_scan_squeeze_bo" BIGINT,
+  "mc_tech_rating" BIGINT,
+  "mf_funds_adding" BIGINT,
+  "mf_funds_trimming" BIGINT,
+  "mf_add_trim_ratio" DOUBLE PRECISION,
+  "mf_pct" DOUBLE PRECISION,
+  "promoter_chg_qoq" DOUBLE PRECISION,
+  "fii_chg_qoq" DOUBLE PRECISION,
+  "mf_chg_qoq" DOUBLE PRECISION,
+  "pledge_chg_qoq" DOUBLE PRECISION,
+  "mf_avg_pct_assets" DOUBLE PRECISION,
+  "mf_big_fund_flow" DOUBLE PRECISION,
+  "mf_flow_vs_sector" DOUBLE PRECISION,
+  "mf_flow_rank" DOUBLE PRECISION,
+  "ext_fii_holding_pct" DOUBLE PRECISION,
+  "ext_dii_holding_pct" DOUBLE PRECISION,
+  "ext_fii_qoq_chg" DOUBLE PRECISION,
+  "ext_dii_qoq_chg" DOUBLE PRECISION,
+  "ext_t80_tech_score" DOUBLE PRECISION,
+  "ext_t80_quality_rank" DOUBLE PRECISION,
+  "ext_t80_valuation_rank" DOUBLE PRECISION,
+  "ext_t80_financial_pts" DOUBLE PRECISION,
+  "ext_mojo_quality_rank" DOUBLE PRECISION,
+  "ext_mojo_valuation_rank" DOUBLE PRECISION,
+  "ext_mojo_financial_pts" DOUBLE PRECISION,
+  "signal_type" TEXT,
+  "fcf_yield_approx" DOUBLE PRECISION,
+  "next_expiry_iv" DOUBLE PRECISION,
+  "iv_term_slope" DOUBLE PRECISION,
   PRIMARY KEY ("symbol", "date")
 );
-CREATE INDEX idx_tsig_date     ON technical_signals(date DESC);
-CREATE INDEX idx_tsig_score    ON technical_signals(signal_score DESC);
-CREATE INDEX idx_tsig_sym      ON technical_signals(symbol);
-CREATE INDEX idx_tsig_sym_date ON technical_signals(symbol, date DESC);
+CREATE INDEX idx_tsig_date  ON technical_signals(date DESC);
+CREATE INDEX idx_tsig_score ON technical_signals(signal_score DESC);
+CREATE INDEX idx_tsig_sym   ON technical_signals(symbol);
+CREATE INDEX idx_technical_signals_symbol ON technical_signals(symbol);
 CREATE INDEX idx_technical_signals_created_at ON technical_signals(created_at DESC);
 CREATE INDEX idx_ts_cs_score
     ON technical_signals(cs_score) WHERE cs_score IS NOT NULL;
-CREATE EXTENSION IF NOT EXISTS pg_trgm;
-CREATE INDEX idx_tsig_signals_json_gin ON technical_signals USING GIN (signals_json gin_trgm_ops);
 
 -- ── tick_data ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "tick_data" (
@@ -2301,24 +2452,14 @@ CREATE TABLE IF NOT EXISTS "tl_financial_quality" (
   "symbol" TEXT NOT NULL,
   "as_of_date" TEXT NOT NULL,
   "cfo_ttm" DOUBLE PRECISION,
-  "cfi_ttm" DOUBLE PRECISION,
-  "fcf_ttm_approx" DOUBLE PRECISION,
-  "interest_coverage" DOUBLE PRECISION,
+  "capex_ttm" DOUBLE PRECISION,
+  "fcf_ttm" DOUBLE PRECISION,
+  "ebit_ttm" DOUBLE PRECISION,
+  "interest_expense_ttm" DOUBLE PRECISION,
   "market_cap" DOUBLE PRECISION,
-  "fcf_yield_approx" DOUBLE PRECISION,
-  "fetched_at" TEXT DEFAULT CURRENT_TIMESTAMP,
+  "fcf_yield" DOUBLE PRECISION,
+  "interest_coverage" DOUBLE PRECISION,
   PRIMARY KEY ("symbol", "as_of_date")
-);
-
--- ── trendlyne_checklist ─────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS "trendlyne_checklist" (
-  "symbol" TEXT PRIMARY KEY,
-  "score" DOUBLE PRECISION,
-  "total" BIGINT,
-  "yes_count" BIGINT,
-  "insight" TEXT,
-  "checklist_data" TEXT,
-  "fetched_at" TIMESTAMPTZ
 );
 
 -- ── todos ─────────────────────────────────────────────
@@ -2331,6 +2472,18 @@ CREATE TABLE IF NOT EXISTS "todos" (
   "priority" TEXT DEFAULT 'MEDIUM',
   "createdAt" TIMESTAMPTZ DEFAULT now(),
   "updatedAt" TIMESTAMPTZ DEFAULT now()
+);
+
+-- ── trendlyne_checklist ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "trendlyne_checklist" (
+  "symbol" TEXT,
+  "score" DOUBLE PRECISION,
+  "total" BIGINT,
+  "yes_count" BIGINT,
+  "insight" TEXT,
+  "checklist_data" TEXT,
+  "fetched_at" TIMESTAMPTZ,
+  PRIMARY KEY ("symbol")
 );
 
 -- ── trendlyne_screener_stocks ─────────────────────────────────────────────
@@ -2490,15 +2643,14 @@ CREATE INDEX idx_watchlist_userId ON watchlist("userId");
 -- ── working_capital_history ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "working_capital_history" (
   "symbol" TEXT NOT NULL,
-  "fiscal_year" TEXT NOT NULL,
+  "quarter" TEXT NOT NULL,
   "receivables_days" DOUBLE PRECISION,
   "inventory_days" DOUBLE PRECISION,
   "payables_days" DOUBLE PRECISION,
   "ccc" DOUBLE PRECISION,
-  "revenue_fy" DOUBLE PRECISION,
-  "cogs_proxy_fy" DOUBLE PRECISION,
-  "fetched_at" TEXT DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY ("symbol", "fiscal_year")
+  "revenue_qtr" DOUBLE PRECISION,
+  "cogs_qtr" DOUBLE PRECISION,
+  PRIMARY KEY ("symbol", "quarter")
 );
 
 -- ── xgboost_predictions ─────────────────────────────────────────────

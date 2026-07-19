@@ -39,6 +39,15 @@ W_BREAKOUT, W_SCREENER = 0.45, 0.55
 # RISK_OFF regime actually shrinks exposure instead of just relabeling the same full-size bet.
 REGIME_TILT = {"RISK_ON": 1.15, "NEUTRAL": 1.0, "RISK_OFF": 0.80}
 
+# Event-risk haircut on position sizing (not a hard block -- same "soft multiplier" pattern as
+# REGIME_TILT): a stock on its own F&O expiry day (gamma/unwind flows into the 3:00-3:30 PM
+# close) or with quarterly results due imminently (a post-close print can still gap a position
+# that wasn't squared off in time) carries risk beyond what the ATR-derived stop/target
+# accounts for. <=1 day matches movement_predictor.py's own near-results threshold for
+# consistency across the codebase.
+EVENT_RISK_TILT = 0.70
+RESULTS_IMMINENT_DAYS = 1
+
 # News-sentiment tilt: a fresh news score in [-1, +1] nudges the blended score up to ±15%. News is
 # sparse (only some names have coverage), so it modifies rather than drives the ranking.
 NEWS_TILT_WEIGHT = 0.15
@@ -237,6 +246,32 @@ class IntradayRanker:
         ).fetchone()
         return (row["value"] if row else None) or "NEUTRAL"
 
+    def _event_risk_map(self, symbols):
+        """Latest days_to_expiry/is_expiry_day (expiry_features.py) and days_to_next_results
+        (mc_earnings_fetcher.py) per symbol, both daily-ops features on technical_signals.
+        Returns {symbol: (is_expiry_day, days_to_next_results)}; missing values are None
+        (most of the universe has no F&O contract / no announced results date -- that's the
+        expected, not an error)."""
+        if not symbols:
+            return {}
+        ph = ",".join("?" for _ in symbols)
+        try:
+            rows = self.conn.execute(
+                f"SELECT symbol, is_expiry_day, days_to_next_results FROM technical_signals "
+                f"WHERE symbol IN ({ph}) AND date = (SELECT MAX(date) FROM technical_signals t2 "
+                f"WHERE t2.symbol = technical_signals.symbol)", tuple(symbols)
+            ).fetchall()
+        except Exception as e:
+            print(f"[IntradayRanker] event-risk lookup skipped: {str(e)[:80]}")
+            return {}
+        return {
+            r["symbol"]: (
+                int(r["is_expiry_day"]) if r["is_expiry_day"] is not None else 0,
+                int(r["days_to_next_results"]) if r["days_to_next_results"] is not None else None,
+            )
+            for r in rows
+        }
+
     def _cmp_atr_map(self, symbols):
         """Current price (from today's intraday bars when available) + Wilder ATR (from daily
         bars) for the given symbols."""
@@ -349,10 +384,12 @@ class IntradayRanker:
 
         # Entry/target/stop + inverse-vol sizing for the buy pool only.
         cmp_atr = self._cmp_atr_map(buy_syms)
+        event_risk = self._event_risk_map(buy_syms)
         raw_sizes = {}
         for r in rows:
             r.update({"cmp": None, "entry_price": None, "stop_loss": None,
-                      "target_1": None, "risk_reward": None, "position_size_pct": 0.0})
+                      "target_1": None, "risk_reward": None, "position_size_pct": 0.0,
+                      "event_risk_flag": None})
             if r["symbol"] not in cmp_atr:
                 continue
             cmp_, atr = cmp_atr[r["symbol"]]
@@ -364,6 +401,14 @@ class IntradayRanker:
             # relabeled the classification, exposure stayed full-size regardless of the
             # system's own risk-off signal.
             bet = bet_size_from_probability(r["breakout_prob"]) * tilt
+            is_expiry, days_res = event_risk.get(r["symbol"], (0, None))
+            results_imminent = days_res is not None and days_res <= RESULTS_IMMINENT_DAYS
+            if is_expiry or results_imminent:
+                bet *= EVENT_RISK_TILT
+                r["event_risk_flag"] = (
+                    "F&O expiry today" if is_expiry
+                    else ("results today" if days_res == 0 else f"results in {days_res}d")
+                )
             vol = max(VOL_FLOOR_PCT, (atr / cmp_ * 100.0) if cmp_ else VOL_FLOOR_PCT)
             raw_sizes[r["symbol"]] = bet / vol
 
@@ -390,7 +435,9 @@ class IntradayRanker:
             reasoning = (f"{r['bull']} bullish / {r['bear']} bearish intraday screeners "
                          f"({r['classification']}); regime {regime}"
                          + (f"; breakout P={r['breakout_prob']:.2f}" if r["breakout_prob"] else "")
-                         + (f"; news {r['news_sentiment']:+.2f}" if r["news_sentiment"] is not None else ""))
+                         + (f"; news {r['news_sentiment']:+.2f}" if r["news_sentiment"] is not None else "")
+                         + (f"; EVENT RISK: {r['event_risk_flag']} (size cut {int((1 - EVENT_RISK_TILT) * 100)}%)"
+                            if r.get("event_risk_flag") else ""))
             cur.execute(
                 """INSERT INTO intraday_recommendations
                    (symbol, computed_at, intraday_regime, intraday_score, conviction_level,

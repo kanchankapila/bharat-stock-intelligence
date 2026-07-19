@@ -57,6 +57,7 @@ import {
 
 import stockData from './data/stocklist';
 import { nseStocksData } from './data/nseStocks';
+import { captureException } from './lib/sentry';
 
 // O(1) lookup maps — avoids O(n) .find() on every stock detail open
 const _stockDataMap = new Map(stockData.map(s => [s.symbol.toUpperCase(), s]));
@@ -131,6 +132,9 @@ class MCErrorBoundary extends React.Component<
   static getDerivedStateFromError(error: Error) {
     return { hasError: true, message: error.message };
   }
+  componentDidCatch(error: Error) {
+    captureException(error, { boundary: 'MCErrorBoundary' });
+  }
   render() {
     if (this.state.hasError) {
       return (
@@ -158,6 +162,12 @@ class TabErrorBoundary extends React.Component<
   static getDerivedStateFromError(error: Error) {
     const isChunkError = CHUNK_LOAD_ERRORS.some(msg => error.message?.includes(msg));
     return { hasError: true, message: error.message, isChunkError };
+  }
+  componentDidCatch(error: Error) {
+    // Chunk-load errors are transient network blips (auto-reloaded below), not real bugs —
+    // reporting them would just add noise.
+    const isChunkError = CHUNK_LOAD_ERRORS.some(msg => error.message?.includes(msg));
+    if (!isChunkError) captureException(error, { boundary: 'TabErrorBoundary', path: window.location.pathname });
   }
   componentDidUpdate(_: unknown, prev: { isChunkError: boolean }) {
     // Auto-reload once on chunk load failures (transient network error from Vite)

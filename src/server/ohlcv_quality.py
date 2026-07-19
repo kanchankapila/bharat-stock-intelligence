@@ -17,7 +17,7 @@ stock_ohlcv.is_suspect so label/feature code can exclude them. A corporate-actio
 import argparse
 import datetime
 
-from db_compat import connect, ConnWrapper, executemany
+from db_compat import connect, ConnWrapper
 
 BAD_PRINT_THRESHOLD = 0.35   # > 35% day-over-day vs BOTH neighbours = suspect spike
 ACTION_WINDOW_DAYS = 3       # don't flag within ±3d of a known ex-date
@@ -155,12 +155,18 @@ def flag_bad_prints(conn: ConnWrapper, threshold: float = BAD_PRINT_THRESHOLD,
 
     print(f"[OHLCVQuality] Flagging {len(suspects_to_update)} suspect bars in database...")
     if suspects_to_update:
-        executemany(
+        # Was the module-level executemany() helper, which opens its OWN connection via a
+        # global get_engine() -- completely bypassing the `conn` this function reads through.
+        # In production conn and the global engine usually point at the same live DB so this
+        # went unnoticed, but it's wrong (silently writes to whatever get_engine() resolves to,
+        # not necessarily `conn`) and made this function untestable against an isolated
+        # connection -- flag_bad_prints() always reported the correct count while writing
+        # nowhere the caller could see. Route the write through `conn` like every read above.
+        conn.executemany(
             "UPDATE stock_ohlcv SET is_suspect=1 WHERE symbol=? AND date=?",
             suspects_to_update
         )
-    else:
-        conn.commit()
+    conn.commit()
 
     print(f"[OHLCVQuality] flagged {len(suspects_to_update)} suspect bars")
     return {'flagged': len(suspects_to_update)}

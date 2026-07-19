@@ -104,7 +104,7 @@ async function scoreStocks(): Promise<{ picks: StockPick[]; avoid: { symbol: str
 
   const techMap = new Map<string, any>();
   (await dbAll(`
-    SELECT ts.symbol, ts.signal_score, ts.win_probability, ts.rsi, ts.adx,
+    SELECT ts.symbol, ts.signal_score, ts.win_probability, ts.calibrated_win_probability, ts.rsi, ts.adx,
            ts.volume_ratio, ts.above_sma200, ts.signals_json, ts.news_sentiment_score
     FROM technical_signals ts
     INNER JOIN (
@@ -215,7 +215,11 @@ async function scoreStocks(): Promise<{ picks: StockPick[]; avoid: { symbol: str
     const tech_component       = tech ? (tech.signal_score / 10) * 15 : (u?.technical_score ? Math.min(u.technical_score / 10, 1) * 10 : 0);
     const xgb_component        = xgb ? xgb.xgboost_score * 10 : 0;
     const confluence_component = confluenceScore ? Math.min(confluenceScore / 100, 1) * 10 : 0;
-    const ml_component         = u?.ml_score ? Math.min(u.ml_score / 100, 1) * 10 : (tech?.win_probability ? Math.min(tech.win_probability, 1) * 10 : 0);
+    // Falls back to COALESCE(calibrated_win_probability, win_probability) when there's no
+    // unified_recommendations row for this symbol — was raw win_probability unconditionally
+    // (2026-07-18 gating follow-up).
+    const techWinProb          = tech?.calibrated_win_probability ?? tech?.win_probability;
+    const ml_component         = u?.ml_score ? Math.min(u.ml_score / 100, 1) * 10 : (techWinProb ? Math.min(techWinProb, 1) * 10 : 0);
     const screener_component   = u?.screener_stock_score ? Math.min(u.screener_stock_score / 100, 1) * 10 : Math.min((q?.screener_net_score || 0) / 50, 1) * 10;
     const news_component       = Math.min(newsScore / 3, 1) * 10;
 
@@ -247,7 +251,7 @@ async function scoreStocks(): Promise<{ picks: StockPick[]; avoid: { symbol: str
       unified_score:        u?.unified_score,
       conviction_level:     u?.conviction_level,
       confluence_score:     confluenceScore,
-      ml_score:             u?.ml_score ?? (tech?.win_probability ? tech.win_probability * 100 : 0),
+      ml_score:             u?.ml_score ?? (techWinProb ? techWinProb * 100 : 0),
       technical_score:      u?.technical_score ?? (tech?.signal_score ?? 0),
       dl_score:             dlScore,
       screener_stock_score: u?.screener_stock_score ?? Math.min((q?.screener_net_score || 0) / 50, 1) * 100,

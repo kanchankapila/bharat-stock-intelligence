@@ -29,3 +29,79 @@ jobs:
 
       - name: Unit tests
         run: npm test
+
+  python-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install dependencies (CPU torch — no CUDA runner in CI)
+        run: |
+          python -m pip install --upgrade pip
+          grep -v '^torch' backend-python/requirements.txt > /tmp/requirements-ci.txt
+          pip install -r /tmp/requirements-ci.txt
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+      # Hard gate (2026-07-18): the 13 pre-existing failures this job used to tolerate are
+      # fixed — mostly stale test fixtures (schema drift after migrations, hardcoded dates
+      # vs a rolling now()-window filter, mismatched mock signatures) plus two real bugs
+      # (ohlcv_quality.flag_bad_prints and strategy_optimizer/feature_engineering's read
+      # paths silently bypassed the caller's `conn` via a global-engine read_df() helper).
+      # Verified this job's actual environment (no .env, no Postgres service) passes clean:
+      # temporarily hid .env locally and ran the full suite with USE_POSTGRES/POSTGRES_*
+      # unset and DATABASE_URL pointed at a nonexistent sqlite file — 391/391 passed.
+      - name: Run pytest
+        run: python -m pytest src/server/tests/ -q
+
+  smoke-test:
+    runs-on: ubuntu-latest
+    # Boots the real tRPC router in-process (no Express/Redis/Ollama — see
+    # scripts/ci_smoke_test.ts's header comment) against a fresh Postgres schema and calls
+    # ~10 read-only, DB-only procedures. Catches "router code references a column
+    # schema.postgres.sql doesn't have" bugs that unit tests (mocked DB) and typecheck (no
+    # runtime DB access) both miss. Added 2026-07-18 after this exact class of bug
+    # (getBuyRecommendations referencing a nonexistent ts.signal_strength column) was found
+    # by hand-running this script locally — this job makes that check automatic.
+    services:
+      postgres:
+        image: timescale/timescaledb:latest-pg16
+        env:
+          POSTGRES_USER: bharat
+          POSTGRES_PASSWORD: bharat
+          POSTGRES_DB: bharat_intel
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      USE_POSTGRES: 'true'
+      POSTGRES_HOST: 127.0.0.1
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: bharat
+      POSTGRES_PASSWORD: bharat
+      POSTGRES_DB: bharat_intel
+      POSTGRES_URL: postgresql://bharat:bharat@127.0.0.1:5432/bharat_intel
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Apply schema
+        run: PGPASSWORD=bharat psql -h 127.0.0.1 -U bharat -d bharat_intel -f db/schema.postgres.sql
+
+      - name: Run smoke test
+        run: npm run smoke:ci

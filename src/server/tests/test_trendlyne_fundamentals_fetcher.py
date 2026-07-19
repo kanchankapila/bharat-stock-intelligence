@@ -22,7 +22,10 @@ def test_pe_and_pb_params_are_not_fetched_during_a_full_run(monkeypatch):
         return {"eodData": []}
 
     monkeypatch.setattr(tff, "_fetch", fake_fetch)
-    monkeypatch.setattr(tff, "_load_stocks", lambda symbol_filter, con: [("BEL", "175")])
+    # _load_stocks(symbol_filter) takes one arg -- main() calls it as _load_stocks(args.symbol)
+    # with no `con` (it opens/manages its own connection internally). The old 2-arg mock
+    # signature here predates that and TypeErrors on the very first call in main().
+    monkeypatch.setattr(tff, "_load_stocks", lambda symbol_filter: [("BEL", "175")])
     monkeypatch.setattr(tff, "connect", lambda: MagicMock())
     monkeypatch.setattr(tff, "ensure_schema", lambda con: None)
     monkeypatch.setattr(tff, "_upsert_series", lambda *a, **k: None)

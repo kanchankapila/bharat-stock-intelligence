@@ -1,5 +1,15 @@
 import "dotenv/config";
 
+import { validateEnv } from "./src/server/envConfig";
+// Fail fast on misconfiguration (e.g. USE_POSTGRES unset/malformed) before anything else
+// touches the DB — this is what would have caught the AlphaQuant SQLite split-brain at
+// startup instead of silently writing to the wrong database for hours.
+validateEnv();
+
+import { initSentry, sentryEnabled, Sentry } from "./src/server/sentry";
+// As early as possible so startup-path errors are captured too. No-op without SENTRY_DSN.
+initSentry();
+
 // Suppress ioredis connection-time WARN about Redis 7 + requirepass ACL mismatch.
 // Every one of the 88 BullMQ connections logs this on startup — it's cosmetic;
 // auth still works (88 clients connected, zero rejections).
@@ -448,6 +458,13 @@ async function startServer() {
     broadcastAlert(req.body);
     res.json({ success: true });
   });
+
+  // Must come after all routes, before the Vite/static-file catch-alls -- no-op without
+  // SENTRY_DSN (sentryEnabled() guards it so an unconfigured Sentry client never intercepts
+  // Express's default error handling).
+  if (sentryEnabled()) {
+    Sentry.setupExpressErrorHandler(app);
+  }
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {

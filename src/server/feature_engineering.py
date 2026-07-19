@@ -350,11 +350,20 @@ class FeatureEngineer:
         cutoff = (datetime.today() - timedelta(days=lookback_days)).date()
 
         try:
-            ohlcv = read_df(
+            # Reads through `con` (like the write path below) instead of the global-engine
+            # read_df() helper -- was ignoring the caller-supplied `con` entirely, which broke
+            # the "con: shared connection from caller" contract this method's own docstring
+            # promises, and made process_symbol untestable against an isolated connection
+            # (test_feature_engineering_batch.py's `patch("pandas.read_sql", ...)` never got a
+            # chance to run: the global engine's own connection attempt failed first whenever
+            # no live DB was reachable). Functionally identical in the owns_con=True default
+            # path, since self._con() opens the same DB read_df()'s global engine would.
+            ohlcv_rows = con.execute(
                 "SELECT date, open, high, low, close, volume FROM stock_ohlcv "
                 "WHERE symbol=? AND date>=? AND COALESCE(is_suspect,0)=0 ORDER BY date",
                 (symbol, cutoff),
-            )
+            ).fetchall()
+            ohlcv = pd.DataFrame(ohlcv_rows, columns=["date", "open", "high", "low", "close", "volume"])
             if len(ohlcv) < 60:
                 return 0
             ohlcv["date"] = pd.to_datetime(ohlcv["date"])

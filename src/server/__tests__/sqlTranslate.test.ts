@@ -14,6 +14,21 @@ describe('convertPlaceholders', () => {
     expect(convertPlaceholders('SELECT "we?rd" FROM t WHERE a=?'))
       .toBe('SELECT "we?rd" FROM t WHERE a=$1');
   });
+  it('does not let an apostrophe inside a -- comment desync quote-tracking', () => {
+    // A stray apostrophe in a natural-language comment (contractions, possessives) used to
+    // toggle inSingle just like a real string-literal quote, leaving every subsequent `?`
+    // unconverted — hit live 2026-07-18 in commandCenter.router.ts's getBuyRecommendations.
+    const sql = `SELECT a\n-- this wasn't obvious, 500'd the endpoint\nFROM t WHERE a=? AND b=?`;
+    expect(convertPlaceholders(sql)).toBe(
+      `SELECT a\n-- this wasn't obvious, 500'd the endpoint\nFROM t WHERE a=$1 AND b=$2`,
+    );
+  });
+  it('handles multiple -- comments each with their own apostrophe', () => {
+    const sql = `-- won't happen\nSELECT a FROM t\n-- can't skip\nWHERE a=?`;
+    expect(convertPlaceholders(sql)).toBe(
+      `-- won't happen\nSELECT a FROM t\n-- can't skip\nWHERE a=$1`,
+    );
+  });
 });
 
 describe('translateSql function mapping', () => {
