@@ -303,20 +303,13 @@ async function checkPriceAlerts(): Promise<void> {
 async function processAISignal(job: Job): Promise<void> {
   const { symbol, stockData } = job.data as { symbol: string; stockData: Record<string, unknown> };
 
-  const analysis = await generateStockAnalysis(symbol, stockData);
-
-  // Actionability gate: only persist conviction BUY/SELL signals above the confidence
-  // floor. Drops HOLD and sub-threshold noise so the DB matches what the UI surfaces and
-  // the backtester sees clean, actionable data. (See docs/.../ai-signal-gate-design.md)
   const { gateAISignal, getAISignalMinConfidence, gateOnQuant, getAISignalMinWinProb,
           upsertUnifiedSignal, checkSurveillanceGate } = await import('./signals');
-  const threshold = await getAISignalMinConfidence();
-  const gate = gateAISignal(analysis as any, threshold);
-  if (!gate.persist) {
-    await job.updateProgress(100);
-    return;
-  }
 
+  // Cheap DB-only gates FIRST, before spending an Ollama/Gemini call. Both of these are
+  // independent of the LLM's output, so if either would reject the signal there is no reason
+  // to generate one at all — this is what actually cuts inference volume/cost, not the
+  // after-the-fact gates below.
   const survGate = await checkSurveillanceGate(symbol);
   if (survGate) {
     await job.updateProgress(100);
@@ -337,6 +330,18 @@ async function processAISignal(job: Job): Promise<void> {
   const winProb = wpRow?.win_probability ?? null;
   const qgate = gateOnQuant(winProb, await getAISignalMinWinProb());
   if (!qgate.persist) {
+    await job.updateProgress(100);
+    return;
+  }
+
+  const analysis = await generateStockAnalysis(symbol, stockData);
+
+  // Actionability gate: only persist conviction BUY/SELL signals above the confidence
+  // floor. Drops HOLD and sub-threshold noise so the DB matches what the UI surfaces and
+  // the backtester sees clean, actionable data. (See docs/.../ai-signal-gate-design.md)
+  const threshold = await getAISignalMinConfidence();
+  const gate = gateAISignal(analysis as any, threshold);
+  if (!gate.persist) {
     await job.updateProgress(100);
     return;
   }
@@ -1495,14 +1500,18 @@ export async function initQueues(): Promise<boolean> {
       processAISignal,
       {
         connection,
-        concurrency: 1,           // Reduced to 1 to prevent CPU thrashing during local Ollama inference
-        lockDuration: 1200000,    // 20 minutes (Windows/Ollama can be extremely slow)
-        lockRenewTime: 300000,   // 5 minutes renewal
+        // Ollama now keeps the model resident between calls (OLLAMA_KEEP_ALIVE in aiService.ts,
+        // was `keep_alive: 0` forcing a full reload per stock) and the quant/surveillance gates
+        // run before the LLM call, so this no longer needs to be as conservative as when every
+        // single job paid a cold model load.
+        concurrency: 2,
+        lockDuration: 600000,    // 10 minutes
+        lockRenewTime: 180000,   // 3 minutes renewal
         stalledInterval: 600000, // 10 minutes (Don't check for stalls too frequently)
         maxStalledCount: 2,      // Fewer stalls allowed to trigger fail-fast
         limiter: {
-          max: 2,                 // Further reduced to prevent concurrent inference overhead
-          duration: 10_000,        
+          max: 3,
+          duration: 10_000,
         },
       },
     );

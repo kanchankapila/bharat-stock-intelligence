@@ -1,12 +1,20 @@
 import ollama from 'ollama';
-import { generateStockAnalysis as generateGeminiStockAnalysis } from './geminiService';
-import { 
+import {
+  generateStockAnalysis as generateGeminiStockAnalysis,
+  analyzeCompanyProfile as analyzeGeminiCompanyProfile,
+} from './geminiService';
+import {
   generateStockAnalysis as generateBedrockStockAnalysis,
   analyzeCompanyProfile as analyzeBedrockCompanyProfile
 } from './bedrockService';
 
 const OLLAMA_SIGNAL_MODEL  = process.env.OLLAMA_SIGNAL_MODEL  || process.env.OLLAMA_MODEL || 'mistral';
 const OLLAMA_PROFILE_MODEL = process.env.OLLAMA_PROFILE_MODEL || process.env.OLLAMA_MODEL || 'qwen3:30b';
+
+// Keep the model resident between calls instead of unloading after every single inference
+// (was `keep_alive: 0`, which forced a full reload per stock and was the reason the BullMQ
+// ai-signals worker had to be throttled to concurrency 1 with 20-minute lock durations).
+const OLLAMA_KEEP_ALIVE = process.env.OLLAMA_KEEP_ALIVE || '5m';
 
 const AI_PROVIDER = process.env.AI_PROVIDER || (
   (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) ? 'bedrock' : (
@@ -31,9 +39,9 @@ export async function releaseOllamaModel(): Promise<void> {
 export interface StockAnalysis {
   sentiment: string;
   signal: "BUY" | "SELL" | "HOLD";
-  entry: number;
-  target: number;
-  stopLoss: number;
+  entry?: number;
+  target?: number;
+  stopLoss?: number;
   reasoning: string;
   confidence: number;
   error?: string;
@@ -57,11 +65,15 @@ export async function generateStockAnalysis(symbol: string, data: any): Promise<
     return generateGeminiStockAnalysis(symbol, data) as any;
   }
 
+  // Price levels are NOT requested: atrBarriers.ts overrides entry/target/stopLoss for every
+  // AI signal with ATR-grounded math regardless of what the model says (it has no sense of a
+  // stock's realized range), so asking for them here only cost tokens on a task this model
+  // fails at. Only the direction + narrative are used downstream.
   const prompt = `
-You are a senior Indian equity analyst. Analyze the following data for ${symbol} and produce a trading recommendation.
+You are a senior Indian equity analyst. Analyze the following data for ${symbol} and produce a trading verdict.
 
 DATA:
-${JSON.stringify(data, null, 2)}
+${JSON.stringify(data)}
 
 INTERPRETATION GUIDE (use fields present; skip absent ones):
 - rsi: >70 overbought, <30 oversold, 40-60 neutral
@@ -80,24 +92,19 @@ INTERPRETATION GUIDE (use fields present; skip absent ones):
 - week52_high / week52_low: price relative to annual range shows momentum context
 
 RULES:
-- entry, target, stopLoss MUST be realistic price levels near current price
-- target should imply a risk:reward ratio ≥ 1.5:1 vs stopLoss
 - confidence should reflect data quality and signal confluence (more confirming signals = higher)
-- reasoning must synthesise the key signals, not just list them
+- reasoning must synthesise the key signals in 1-2 sentences, not list them
 
 Respond ONLY with valid JSON matching exactly this structure:
 {
   "sentiment": "Bullish" | "Bearish" | "Neutral",
   "signal": "BUY" | "SELL" | "HOLD",
-  "entry": number,
-  "target": number,
-  "stopLoss": number,
-  "reasoning": "string (2-4 sentences explaining the key confluence)",
+  "reasoning": "string (1-2 sentences explaining the key confluence)",
   "confidence": number (0-100)
 }
   `;
 
-  const FAST_OPTIONS = { temperature: 0.1, top_k: 20, num_predict: 500, num_ctx: 3072 };
+  const FAST_OPTIONS = { temperature: 0.1, top_k: 20, num_predict: 250, num_ctx: 3072 };
 
   let response;
 
@@ -107,7 +114,7 @@ Respond ONLY with valid JSON matching exactly this structure:
         model: OLLAMA_SIGNAL_MODEL,
         messages: [{ role: 'user', content: prompt }],
         format: 'json',
-        keep_alive: 0,
+        keep_alive: OLLAMA_KEEP_ALIVE,
         options: FAST_OPTIONS,
       } as any) as any;
     } catch (error: any) {
@@ -118,7 +125,7 @@ Respond ONLY with valid JSON matching exactly this structure:
           model: OLLAMA_SIGNAL_MODEL,
           messages: [{ role: 'user', content: prompt }],
           format: 'json',
-          keep_alive: 0,
+          keep_alive: OLLAMA_KEEP_ALIVE,
           options: { ...FAST_OPTIONS, num_gpu: 0 },
         } as any) as any;
       } else if (errorStr.includes('does not support chat') || errorStr.includes('does not support')) {
@@ -127,7 +134,7 @@ Respond ONLY with valid JSON matching exactly this structure:
           model: OLLAMA_SIGNAL_MODEL,
           prompt,
           format: 'json',
-          keep_alive: 0,
+          keep_alive: OLLAMA_KEEP_ALIVE,
           options: FAST_OPTIONS,
         } as any) as any;
         response = { message: { content: gen.response } };
@@ -150,13 +157,10 @@ Respond ONLY with valid JSON matching exactly this structure:
     console.error("Ollama API Error:", error);
     
     // Fallback/Error handling
-    return { 
+    return {
       error: "AI Analysis failed",
       sentiment: "Neutral",
       signal: "HOLD",
-      entry: data.price || 0,
-      target: (data.price || 0) * 1.05,
-      stopLoss: (data.price || 0) * 0.95,
       reasoning: "Local AI analysis encountered an error. Please ensure Ollama is running.",
       confidence: 0
     };
@@ -167,6 +171,10 @@ export async function analyzeCompanyProfile(symbol: string, description: string)
   if (AI_PROVIDER === 'bedrock') {
     console.log(`[AI] Routing profile analysis for ${symbol} to Amazon Bedrock (Claude)`);
     return analyzeBedrockCompanyProfile(symbol, description);
+  }
+  if (AI_PROVIDER === 'gemini') {
+    console.log(`[AI] Routing profile analysis for ${symbol} to Google Gemini`);
+    return analyzeGeminiCompanyProfile(symbol, description) as any;
   }
 
   const prompt = `Analyze the following company profile for ${symbol}:
@@ -179,10 +187,10 @@ Respond ONLY with valid JSON:
   "high_growth_scope": boolean,
   "in_news_for_growth": boolean,
   "growth_score": number (0 to 100),
-  "reasoning": "2-3 sentence explanation."
+  "reasoning": "1-2 sentence explanation."
 }`;
 
-  const PROFILE_OPTIONS = { temperature: 0.1, top_k: 20, num_predict: 600, num_ctx: 4096 };
+  const PROFILE_OPTIONS = { temperature: 0.1, top_k: 20, num_predict: 300, num_ctx: 4096 };
 
   const messages = [
     { role: 'user' as const, content: prompt },
@@ -196,7 +204,7 @@ Respond ONLY with valid JSON:
         model: OLLAMA_PROFILE_MODEL,
         messages,
         format: 'json',
-        keep_alive: 0,
+        keep_alive: OLLAMA_KEEP_ALIVE,
         options: PROFILE_OPTIONS,
       } as any) as any;
     } catch (error: any) {
@@ -207,7 +215,7 @@ Respond ONLY with valid JSON:
           model: OLLAMA_PROFILE_MODEL,
           messages,
           format: 'json',
-          keep_alive: 0,
+          keep_alive: OLLAMA_KEEP_ALIVE,
           options: { ...PROFILE_OPTIONS, num_gpu: 0 },
         } as any) as any;
       } else if (errorStr.includes('does not support chat') || errorStr.includes('does not support')) {
@@ -215,7 +223,7 @@ Respond ONLY with valid JSON:
           model: OLLAMA_PROFILE_MODEL,
           prompt,
           format: 'json',
-          keep_alive: 0,
+          keep_alive: OLLAMA_KEEP_ALIVE,
           options: PROFILE_OPTIONS,
         } as any) as any;
         response = { message: { content: gen.response } };
