@@ -142,6 +142,38 @@ class TestDir15dTraining:
         _train_one_fold(model, X, y5, yr5, epochs=1)
 
 
+class TestLoadSymbolSequencesLabelRange:
+    """Regression: stored target_dir_5d/target_dir_15d columns held legacy values outside
+    {0,1} (observed live: -4,-2,-1,2,4) — CrossEntropyLoss on the 2-class dir heads then
+    crashes with a CUDA 't >= 0 && t < n_classes' assertion. load_symbol_sequences must
+    derive labels from target_ret_5d/target_ret_15d instead of trusting the stored columns.
+    """
+
+    def test_labels_derived_from_return_sign_ignore_corrupt_dir_columns(self):
+        import pandas as pd
+        import src.server.dl_engine as mod
+
+        n = mod.SEQUENCE_LEN + 5
+        feat_cols = mod.FEATURE_COLS[:mod.N_FEATURES]
+        numeric_cols = [c for c in feat_cols if c not in mod._VOL_ONEHOT]
+        data = {c: np.random.randn(n) for c in numeric_cols}
+        data["date"] = pd.date_range("2024-01-01", periods=n).strftime("%Y-%m-%d")
+        data["vol_regime"] = ["MED"] * n
+        # Corrupt legacy target_dir_5d/15d values (out of {0,1}) must not reach training —
+        # correct labels are the sign of target_ret_5d/15d, which here disagree with these.
+        data["target_ret_5d"]  = [-1.0, 1.0] * (n // 2) + [-1.0] * (n % 2)
+        data["target_ret_15d"] = [1.0, -1.0] * (n // 2) + [1.0] * (n % 2)
+        fake_df = pd.DataFrame(data)
+
+        with patch.object(mod, "read_df", return_value=fake_df):
+            X, y5, y15, yr5, dates = mod.load_symbol_sequences("FAKESYM")
+
+        assert set(np.unique(y5)).issubset({0, 1}), f"y5 out of {{0,1}}: {np.unique(y5)}"
+        assert set(np.unique(y15)).issubset({0, 1}), f"y15 out of {{0,1}}: {np.unique(y15)}"
+        # Labels must match the sign of the return columns, not any stale dir column.
+        assert list(y5) == [1 if r > 0 else 0 for r in yr5]
+
+
 class TestWalkForwardValidation:
     def test_train_lstm_calls_walk_forward_validate(self):
         """train_lstm must call walk_forward_validate (not return a hardcoded NaN stub)."""

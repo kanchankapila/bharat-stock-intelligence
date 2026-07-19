@@ -1,16 +1,18 @@
 /**
  * Schedule metadata for the pure-BullMQ queues NOT already covered by
  * MONITOR_SCRIPTS (monitor.router.ts) — that registry's queueName field
- * covers technical-signals, ml-weekly-retrain, ohlcv-backfill,
- * screener-performance, company-profiles-sync already, with real DB-freshness
- * checks. Do not duplicate those here.
+ * covers ohlcv-backfill, screener-performance, company-profiles-sync
+ * already, with real DB-freshness checks. Do not duplicate those here.
  *
- * outcome-resolver and ml-daily-ops themselves are NOT MONITOR_SCRIPTS ids
- * (only their downstream effects — outcome-resolver-5d/15d, ml-ensemble-score,
- * etc. — are), so without an entry here they fell through to getStaleJobs()'s
- * flat 26h threshold, which doesn't know they're Mon-Fri-only and false-alarmed
- * every weekend. Listed here instead so lateness is judged against their real
- * cron schedule (see queues.ts's `repeat: { pattern }` for each).
+ * outcome-resolver, ml-daily-ops, ml-weekly-retrain and trendlyne-ratios-monthly
+ * are NOT themselves MONITOR_SCRIPTS ids (only their downstream effects —
+ * outcome-resolver-5d/15d, ml-ensemble-score, ml-ensemble-train,
+ * strategy-optimizer, financial-ratios, working-capital, etc. — are), so
+ * without an entry here they fell through to getStaleJobs()'s flat 26h
+ * threshold, which doesn't know some are Mon-Fri-only and others are weekly —
+ * false-alarming every weekend (or every day of the week, for weekly jobs).
+ * Listed here instead so lateness is judged against their real cron schedule
+ * (see queues.ts's `repeat: { pattern }` for each).
  *
  * cronPattern values are copied verbatim from queues.ts `repeat: { pattern }`
  * configs and MUST be evaluated with `{ tz: 'Etc/UTC' }` (see Global Constraints
@@ -69,4 +71,6 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   { jobName: 'outcome-resolver', label: 'Outcome Resolver', cronPattern: '0 4 * * 1-5', graceMinutes: 45, critical: true },
   { jobName: 'ml-daily-ops', label: 'ML Daily Ops', cronPattern: '0 14 * * 1-5', graceMinutes: 60, critical: true },
   { jobName: 'trendlyne-daily-fetch', label: 'Trendlyne Daily Metrics Fetch', cronPattern: '30 4 * * 1-5', graceMinutes: 60, critical: false },
+  { jobName: 'ml-weekly-retrain', label: 'ML Weekly Retrain', cronPattern: '0 5 * * 0', graceMinutes: 180, critical: false },
+  { jobName: 'trendlyne-ratios-monthly', label: 'Trendlyne Ratios Monthly (weekly gate)', cronPattern: '30 12 * * 0', graceMinutes: 60, critical: false },
 ];
