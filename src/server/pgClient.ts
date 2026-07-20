@@ -260,6 +260,16 @@ export async function pgEnsureColumns(): Promise<void> {
        PRIMARY KEY (snapshot_date, signal_type, regime, sector)
      )`,
     `CREATE INDEX IF NOT EXISTS idx_stw_hist_date ON signal_type_weights_history(snapshot_date DESC)`,
+    // ML win-probability per (run, symbol) from live_screener_ml_ranker.py (migration 071)
+    `CREATE TABLE IF NOT EXISTS live_screener_ml_scores (
+       run_id BIGINT NOT NULL,
+       symbol TEXT NOT NULL,
+       win_probability DOUBLE PRECISION NOT NULL,
+       model_version TEXT,
+       computed_at TIMESTAMPTZ DEFAULT now(),
+       PRIMARY KEY (run_id, symbol)
+     )`,
+    `CREATE INDEX IF NOT EXISTS idx_lsms_run ON live_screener_ml_scores(run_id)`,
   ];
   const client = await getPool().connect();
   try {
@@ -406,6 +416,8 @@ export async function pgEnsureColumns(): Promise<void> {
     `ALTER TABLE intraday_recommendations ADD COLUMN IF NOT EXISTS news_sentiment DOUBLE PRECISION`,
     // walk-forward optimization per-fold breakdown (run_walk_forward in backtester.py)
     `ALTER TABLE backtesting_runs ADD COLUMN IF NOT EXISTS walk_forward_folds_json TEXT`,
+    // same-day return alongside the existing 1d/3d/5d EOD horizons (migration 070)
+    `ALTER TABLE live_screener_outcomes ADD COLUMN IF NOT EXISTS return_intraday DOUBLE PRECISION`,
   ];
 
   await client.query(`CREATE TABLE IF NOT EXISTS "_migrations" (

@@ -624,4 +624,127 @@ export const monitorRouter = router({
       );
       return runs;
     }),
+
+  // Same-day (return_intraday) counterpart to getLiveScreenerOptimalCombinations, trained by
+  // live_screener_optimizer.py's second, isolated pass so it never blends with the swing/EOD
+  // combos above.
+  getLiveScreenerOptimalIntradayCombinations: publicProcedure
+    .query(async () => {
+      const row = await dbGet<{ value: string }>(
+        "SELECT value FROM app_settings WHERE key = 'live_screener_optimal_combinations_intraday'"
+      );
+      if (!row) return null;
+      try {
+        return JSON.parse(row.value);
+      } catch {
+        return null;
+      }
+    }),
+
+  // Stocks matching NiftyTrader live-screener filters as of the most recent collection cycle
+  // (liveScreenerCollector.ts, every 15 min during market hours), ranked by each matched
+  // filter's historical same-day (return_intraday) win-rate/avg-return from
+  // live_screener_outcomes. Reads the already-collected DB rows rather than re-hitting the
+  // NiftyTrader API, so this can refresh on a short frontend poll without adding API load.
+  getLiveScreenerIntradaySignals: publicProcedure
+    .query(async () => {
+      const latestRun = await dbGet<{ id: number }>(
+        "SELECT MAX(id) as id FROM live_screener_runs WHERE status IN ('SUCCESS','PARTIAL')"
+      );
+      if (!latestRun?.id) return { asOf: null, stocks: [] };
+
+      const [appearances, filterStats, mlScores, runRow] = await Promise.all([
+        dbAll<{ symbol: string; filter_key: string; price: number; change_per: number; volume: number }>(
+          "SELECT symbol, filter_key, price, change_per, volume FROM live_screener_appearances WHERE run_id = ?",
+          [latestRun.id]
+        ),
+        dbAll<{ filter_key: string; sample_count: number; win_rate: number; avg_return: number }>(
+          `SELECT filter_key, COUNT(*) as sample_count,
+                  AVG(CASE WHEN return_intraday > 0 THEN 1.0 ELSE 0.0 END) as win_rate,
+                  AVG(return_intraday) as avg_return
+           FROM live_screener_outcomes
+           WHERE return_intraday IS NOT NULL
+           GROUP BY filter_key
+           HAVING COUNT(*) >= 3`
+        ),
+        // ML win-probability from live_screener_ml_ranker.py, scored for this same run_id
+        // right after collection (queues.ts). Absent until the first --train has promoted
+        // a model -- callers fall back to the rule-based edge_score below until then.
+        dbAll<{ symbol: string; win_probability: number }>(
+          "SELECT symbol, win_probability FROM live_screener_ml_scores WHERE run_id = ?",
+          [latestRun.id]
+        ),
+        dbGet<{ created_at: string }>("SELECT created_at FROM live_screener_runs WHERE id = ?", [latestRun.id]),
+      ]);
+
+      const statsByFilter = new Map(filterStats.map(f => [f.filter_key, f]));
+      const mlBySymbol = new Map(mlScores.map(m => [m.symbol, Number(m.win_probability)]));
+
+      type StockAgg = {
+        symbol: string; price: number; change_per: number; volume: number;
+        filters: { filter_key: string; win_rate: number | null; avg_return: number | null; sample_count: number }[];
+      };
+      const bySymbol = new Map<string, StockAgg>();
+      for (const a of appearances) {
+        if (!bySymbol.has(a.symbol)) {
+          bySymbol.set(a.symbol, { symbol: a.symbol, price: a.price, change_per: a.change_per, volume: a.volume, filters: [] });
+        }
+        const stat = statsByFilter.get(a.filter_key);
+        bySymbol.get(a.symbol)!.filters.push({
+          filter_key: a.filter_key,
+          win_rate: stat ? Number(stat.win_rate) : null,
+          avg_return: stat ? Number(stat.avg_return) : null,
+          sample_count: stat ? Number(stat.sample_count) : 0,
+        });
+      }
+
+      const stocks = Array.from(bySymbol.values()).map(s => {
+        const tracked = s.filters.filter(f => f.sample_count >= 3 && f.win_rate !== null && f.avg_return !== null);
+        // Rank by avg_return (the mean realized same-day return across all resolved samples,
+        // wins and losses alike) -- the same metric live_screener_optimizer.py sorts its
+        // combinations by. win_rate is exposed for context, not blended in: multiplying the
+        // two double-counts the loss side, since avg_return already nets wins against losses.
+        const best = [...tracked].sort((a, b) => b.avg_return! - a.avg_return!)[0] ?? null;
+        return {
+          symbol: s.symbol,
+          price: s.price,
+          change_per: s.change_per,
+          volume: s.volume,
+          filters: s.filters,
+          best_filter: best?.filter_key ?? null,
+          best_win_rate: best?.win_rate ?? null,
+          best_avg_return: best?.avg_return ?? null,
+          best_sample_count: best?.sample_count ?? 0,
+          edge_score: best?.avg_return ?? 0,
+          ml_win_probability: mlBySymbol.get(s.symbol) ?? null,
+        };
+      }).sort((a, b) => {
+        // ML-scored stocks first (ranked by the learned model, which weighs all matched
+        // filters plus change_per/volume jointly), then whatever's left ranked by the
+        // single-best-filter rule above -- keeps the tab useful before the first model trains.
+        if (a.ml_win_probability !== null && b.ml_win_probability !== null) return b.ml_win_probability - a.ml_win_probability;
+        if (a.ml_win_probability !== null) return -1;
+        if (b.ml_win_probability !== null) return 1;
+        return b.edge_score - a.edge_score;
+      });
+
+      return { asOf: runRow?.created_at ?? null, stocks };
+    }),
+
+  // Status of the currently-ACTIVE live_screener_intraday_clf model (written by
+  // live_screener_ml_ranker.py --train only when a retrain clears its promotion-margin
+  // check against the prior model -- a rejected candidate never touches this key, so it
+  // always reflects whichever model is actually scoring stocks right now).
+  getLiveScreenerMlModelStatus: publicProcedure
+    .query(async () => {
+      const row = await dbGet<{ value: string }>(
+        "SELECT value FROM app_settings WHERE key = 'live_screener_ml_model_status'"
+      );
+      if (!row) return null;
+      try {
+        return JSON.parse(row.value);
+      } catch {
+        return null;
+      }
+    }),
 });

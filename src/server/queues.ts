@@ -524,6 +524,13 @@ async function processLiveScreenerCollect(_job: Job): Promise<void> {
   }
   const { runLiveScreenerCollection } = await import('./liveScreenerCollector');
   await runLiveScreenerCollection();
+
+  // Score this cycle's matches against the currently-active ML model right after
+  // collecting them, so the Intraday Edge tab's ml_win_probability is fresh every 15 min.
+  // No-ops quietly (prints, doesn't throw) until live_screener_ml_ranker.py --train has
+  // produced a first model.
+  await runPython('live_screener_ml_ranker.py', ['--score'], 3 * 60_000)
+    .catch(e => console.warn('[QUEUE] live_screener_ml_ranker --score failed:', (e as Error).message));
 }
 
 async function processIntradayFetcher(_job: Job): Promise<void> {
@@ -1143,13 +1150,23 @@ async function processScreenerPerf(_job: Job): Promise<void> {
   await runPython('live_screener_resolver.py', [], 20 * 60_000)
     .catch(e => console.warn('[QUEUE] live_screener_resolver failed:', (e as Error).message));
 
-  // 8. Recompute optimal filter combinations using the latest resolved outcomes
+  // 8. Recompute optimal filter combinations using the latest resolved outcomes. Trains both
+  // the swing-horizon model and an isolated same-day intraday model in one run (see
+  // live_screener_optimizer.py's optimize_combinations()).
   await runPython('live_screener_optimizer.py', [], 5 * 60_000)
     .catch(e => console.warn('[QUEUE] live_screener_optimizer failed:', (e as Error).message));
+
+  // 8b. Retrain the ML win-probability classifier on the same freshly-resolved outcomes.
+  // Gated behind a held-out-AUC promotion check inside the script itself, so a worse
+  // retrain never silently replaces a better live model.
+  await runPython('live_screener_ml_ranker.py', ['--train'], 10 * 60_000)
+    .catch(e => console.warn('[QUEUE] live_screener_ml_ranker --train failed:', (e as Error).message));
 
   // 9. Auto-backtest top combinations so frontend cockpit always has fresh performance data
   await runPython('backtest_live_screener.py', ['--auto-backtest-top', '5'], 10 * 60_000)
     .catch(e => console.warn('[QUEUE] backtest_live_screener auto-backtest failed:', (e as Error).message));
+  await runPython('backtest_live_screener.py', ['--auto-backtest-top', '5', '--intraday'], 10 * 60_000)
+    .catch(e => console.warn('[QUEUE] backtest_live_screener intraday auto-backtest failed:', (e as Error).message));
 
   try {
     const { classifyAllScreeners } = await import('./screenerClassifier');
