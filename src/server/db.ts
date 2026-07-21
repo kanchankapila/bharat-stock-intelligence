@@ -2082,6 +2082,28 @@ runMigration('047_live_screener_optimization', `
   );
 `);
 
+// Same-day (intraday) return alongside the existing 1d/3d/5d EOD horizons — resolved from
+// intraday_ohlcv's last bar of the appearance date, falling back to stock_ohlcv's daily close.
+// Kept as an additional column rather than a new table so live_screener_optimizer.py /
+// backtest_live_screener.py can query one row per appearance across all horizons.
+runMigration('070_live_screener_intraday_outcome', `
+  ALTER TABLE live_screener_outcomes ADD COLUMN return_intraday REAL;
+`);
+
+// ML win-probability per (run, symbol) from live_screener_ml_ranker.py, scored against the
+// currently-active live_screener_intraday_clf.pkl right after each collection cycle.
+runMigration('071_live_screener_ml_scores', `
+  CREATE TABLE IF NOT EXISTS live_screener_ml_scores (
+    run_id INTEGER NOT NULL,
+    symbol TEXT NOT NULL,
+    win_probability REAL NOT NULL,
+    model_version TEXT,
+    computed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (run_id, symbol)
+  );
+  CREATE INDEX IF NOT EXISTS idx_lsms_run ON live_screener_ml_scores(run_id);
+`);
+
 runMigration('048_cs_score_column', `
   ALTER TABLE technical_signals ADD COLUMN cs_score REAL;
   CREATE INDEX IF NOT EXISTS idx_ts_cs_score
