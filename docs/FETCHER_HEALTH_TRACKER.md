@@ -6,6 +6,26 @@ least once against production URLs), followed by two same-day fix passes; re-swe
 (all ~95 `runPython` scripts, 5 more fixes — see the 2026-07-11 section below). Update this
 file whenever a fetcher's status changes — don't let it go stale._
 
+**2026-07-19: this tracker is now backed by a continuous check, not just manual sweeps.**
+Every bug logged below was a job that exited 0 while writing wrong/empty/stuck data — invisible
+to job-run monitoring (`jobHeartbeat.ts`/`jobWatchdog.ts`/`MONITOR_SCRIPTS`), only ever caught by
+a human running this file's audit by hand. `src/server/dataQualityChecks.ts` now runs ~24
+freshness/coverage/range/plausibility checks against the tables these fetchers write, on the
+same 15-min cadence as the existing watchdog, folded into the same Telegram daily digest (see
+`checkAndAlertDataQuality`/`buildDailyDigest` in `jobWatchdog.ts`). Run it on demand with
+`npm run dq:check` (needs `USE_POSTGRES=true` against a live instance). When you fix a fetcher
+bug found here, consider adding a check for it so a regression pages instead of waiting for the
+next manual sweep.
+
+**2026-07-19: backfilled regression tests for 6 fixes that had none.** Cross-referencing the
+"Fixed" tables above against the test suite found `asm_gsm_fetcher.py`, `mc_corporate_calendar_fetcher.py`,
+`credit_rating_fetcher.py`, `insider_transactions_fetcher.py`, `eps_surprise_fetcher.py`, and
+`market_regime_fetcher.py`'s fixes were each verified once by hand during their fix session and
+never turned into a lasting test — meaning a regression in any of them would only resurface via
+the next manual audit. Added `src/server/tests/test_{asm_gsm_fetcher,mc_corporate_calendar_fetcher,
+credit_rating_fetcher,insider_transactions_fetcher,eps_surprise_fetcher,market_regime_fetcher}.py`
+(51 tests) encoding the exact failure mode each fix addresses.
+
 ---
 
 ## How to re-check a fetcher

@@ -12,6 +12,7 @@ import { JOB_REGISTRY } from './jobRegistry';
 import { getSystemStatus } from './routers/monitor.router';
 import { telegramService } from './telegramService';
 import { dbGet, dbRun } from './dbAsync';
+import { runDataQualityChecks, getLatestDataQualityResults } from './dataQualityChecks';
 
 export async function checkAndAlertLateJobs(now: Date = new Date()): Promise<void> {
   const late = await getLateJobs(now);
@@ -53,6 +54,30 @@ export async function checkAndAlertStaleScripts(now: Date = new Date()): Promise
   }
 }
 
+/**
+ * Data-quality counterpart to checkAndAlertStaleScripts: MONITOR_SCRIPTS/JOB_REGISTRY only
+ * know whether a job *ran*; dataQualityChecks.ts asks whether what it wrote is actually
+ * correct/complete (see that module's header for the class of bug this exists to catch).
+ * This is the only place that actually re-runs the checks (buildDailyDigest below just
+ * reads what this already persisted) — dedupes alerts by calendar day (UTC) the same way,
+ * reusing markAlerted/wasAlreadyAlerted keyed by check id, so a persistently-failing check
+ * pages once per day, not every 15 minutes.
+ */
+export async function checkAndAlertDataQuality(now: Date = new Date()): Promise<void> {
+  const startOfToday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const results = await runDataQualityChecks(now);
+  for (const r of results) {
+    if (!r.critical) continue;
+    if (r.status !== 'fail' && r.status !== 'error') continue;
+    if (await wasAlreadyAlerted(r.id, startOfToday)) continue;
+
+    const icon = r.status === 'error' ? '⛔' : '🚨';
+    const text = `${icon} *Data quality ${r.status}*: \`${r.label}\`\n${r.detail}`;
+    await telegramService.sendMarkdownMessage(text);
+    await markAlerted(r.id, startOfToday.getTime());
+  }
+}
+
 const DIGEST_STATE_KEY = 'job_digest_last_state';
 
 async function loadDigestState(): Promise<Record<string, string>> {
@@ -76,14 +101,17 @@ async function saveDigestState(state: Record<string, string>): Promise<void> {
 }
 
 const scriptIcon = (state: string) => state === 'success' ? '✅' : state === 'stale' ? '⚠️' : state === 'failed' ? '❌' : '⏳';
+const dqIcon = (state: string) => state === 'pass' ? '✅' : state === 'warn' ? '⚠️' : state === 'fail' ? '❌' : '⛔';
 
 /**
  * Incremental digest: instead of re-listing all ~45 tracked jobs every time (mostly unchanged
  * day to day, and noisy to read on Telegram), this reports (1) whatever is CURRENTLY a problem
- * (late/stale/failed — so nothing silently persists unmentioned), (2) whatever CHANGED state
- * since the last time the digest ran (recoveries and new problems), and (3) a one-line count of
- * everything else that's healthy and unchanged. State is persisted in app_settings so the next
- * run can diff against it.
+ * (late/stale/failed/data-quality-fail — so nothing silently persists unmentioned), (2) whatever
+ * CHANGED state since the last time the digest ran (recoveries and new problems), and (3) a
+ * one-line count of everything else that's healthy and unchanged. State is persisted in
+ * app_settings so the next run can diff against it. Data-quality results are read via
+ * getLatestDataQualityResults() (already kept fresh by checkAndAlertDataQuality's 15-min poll)
+ * rather than re-run here, so the digest doesn't duplicate that DB work or its persistence.
  */
 export async function buildDailyDigest(now: Date = new Date()): Promise<string> {
   const late = await getLateJobs(now);
@@ -91,6 +119,7 @@ export async function buildDailyDigest(now: Date = new Date()): Promise<string> 
   const scheduledRegistry = JOB_REGISTRY.filter(j => j.cronPattern || j.everyMs);
   const eventDriven = JOB_REGISTRY.filter(j => !j.cronPattern && !j.everyMs);
   const scriptStatuses = await getSystemStatus(now);
+  const dqResults = await getLatestDataQualityResults();
 
   const prevState = await loadDigestState();
   const currState: Record<string, string> = {};
@@ -137,6 +166,28 @@ export async function buildDailyDigest(now: Date = new Date()): Promise<string> 
     }
   }
 
+  for (const r of dqResults) {
+    const key = `dq:${r.id}`;
+    const state = r.status;
+    currState[key] = state;
+    const prev = prevState[key];
+    const isProblem = state === 'fail' || state === 'error';
+
+    if (isProblem) {
+      attention.push(`${dqIcon(state)} ${r.label} — ${r.detail}`);
+    }
+
+    if (prev === undefined) continue;
+    if (prev !== state) {
+      const wasProblem = prev === 'fail' || prev === 'error';
+      if (wasProblem && !isProblem) changed.push(`✅ ${r.label} — recovered (was ${prev})`);
+      else if (!wasProblem && isProblem) changed.push(`${dqIcon(state)} ${r.label} — newly ${state}: ${r.detail}`);
+      // pass<->warn transitions aren't worth a line
+    } else if (state === 'pass') {
+      unchangedHealthy++;
+    }
+  }
+
   await saveDigestState(currState);
 
   const lines = [`📋 *Daily Job Health Digest* — ${now.toISOString().slice(0, 10)}`, ''];
@@ -170,6 +221,11 @@ export function startJobWatchdog(): void {
       await checkAndAlertStaleScripts();
     } catch (err) {
       console.error('[WATCHDOG] checkAndAlertStaleScripts failed:', (err as Error).message);
+    }
+    try {
+      await checkAndAlertDataQuality();
+    } catch (err) {
+      console.error('[WATCHDOG] checkAndAlertDataQuality failed:', (err as Error).message);
     }
   };
   setInterval(() => { void check(); }, 15 * 60 * 1000).unref();
