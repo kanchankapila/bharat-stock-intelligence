@@ -11,6 +11,7 @@ import { getLateJobs, wasAlreadyAlerted, markAlerted } from './jobHeartbeat';
 import { JOB_REGISTRY } from './jobRegistry';
 import { getSystemStatus } from './routers/monitor.router';
 import { telegramService } from './telegramService';
+import { dbGet, dbRun } from './dbAsync';
 
 export async function checkAndAlertLateJobs(now: Date = new Date()): Promise<void> {
   const late = await getLateJobs(now);
@@ -39,7 +40,7 @@ export async function checkAndAlertLateJobs(now: Date = new Date()): Promise<voi
  */
 export async function checkAndAlertStaleScripts(now: Date = new Date()): Promise<void> {
   const startOfToday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-  const statuses = await getSystemStatus();
+  const statuses = await getSystemStatus(now);
   for (const s of statuses) {
     if (!s.critical) continue;
     if (s.runState !== 'stale' && s.runState !== 'failed') continue;
@@ -52,36 +53,110 @@ export async function checkAndAlertStaleScripts(now: Date = new Date()): Promise
   }
 }
 
+const DIGEST_STATE_KEY = 'job_digest_last_state';
+
+async function loadDigestState(): Promise<Record<string, string>> {
+  try {
+    const row = await dbGet<{ value: string }>('SELECT value FROM app_settings WHERE key = ?', [DIGEST_STATE_KEY]);
+    return row?.value ? JSON.parse(row.value) : {};
+  } catch {
+    return {};
+  }
+}
+
+async function saveDigestState(state: Record<string, string>): Promise<void> {
+  try {
+    await dbRun(
+      'INSERT INTO app_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+      [DIGEST_STATE_KEY, JSON.stringify(state)],
+    );
+  } catch (err) {
+    console.warn('[WATCHDOG] saveDigestState failed:', (err as Error).message);
+  }
+}
+
+const scriptIcon = (state: string) => state === 'success' ? '✅' : state === 'stale' ? '⚠️' : state === 'failed' ? '❌' : '⏳';
+
+/**
+ * Incremental digest: instead of re-listing all ~45 tracked jobs every time (mostly unchanged
+ * day to day, and noisy to read on Telegram), this reports (1) whatever is CURRENTLY a problem
+ * (late/stale/failed — so nothing silently persists unmentioned), (2) whatever CHANGED state
+ * since the last time the digest ran (recoveries and new problems), and (3) a one-line count of
+ * everything else that's healthy and unchanged. State is persisted in app_settings so the next
+ * run can diff against it.
+ */
 export async function buildDailyDigest(now: Date = new Date()): Promise<string> {
   const late = await getLateJobs(now);
-  const lateNames = new Set(late.map(l => l.job));
+  const lateByName = new Map(late.map(l => [l.job, l]));
+  const scheduledRegistry = JOB_REGISTRY.filter(j => j.cronPattern || j.everyMs);
+  const eventDriven = JOB_REGISTRY.filter(j => !j.cronPattern && !j.everyMs);
+  const scriptStatuses = await getSystemStatus(now);
 
-  const registryLines = JOB_REGISTRY
-    .filter(j => j.cronPattern || j.everyMs) // skip event-driven in the scheduled section
-    .map(j => `${lateNames.has(j.jobName) ? '⚠️' : '✅'} ${j.label}`)
-    .join('\n');
+  const prevState = await loadDigestState();
+  const currState: Record<string, string> = {};
+  const attention: string[] = [];
+  const changed: string[] = [];
+  let unchangedHealthy = 0;
 
-  const eventDrivenLines = JOB_REGISTRY
-    .filter(j => !j.cronPattern && !j.everyMs)
-    .map(j => `⏳ ${j.label} (event-driven)`)
-    .join('\n');
+  for (const j of scheduledRegistry) {
+    const key = `registry:${j.jobName}`;
+    const lateEntry = lateByName.get(j.jobName);
+    const state = lateEntry ? 'late' : 'ontime';
+    currState[key] = state;
+    const prev = prevState[key];
 
-  const scriptStatuses = await getSystemStatus();
-  const scriptIcon = (state: string) => state === 'success' ? '✅' : state === 'stale' ? '⚠️' : state === 'failed' ? '❌' : '⏳';
-  const scriptLines = scriptStatuses.map((s: any) => `${scriptIcon(s.runState)} ${s.label} (${s.runState})`).join('\n');
+    if (state === 'late') attention.push(`⚠️ ${j.label} (~${lateEntry!.hoursLate}h late)`);
 
-  return [
-    `📋 *Daily Job Health Digest* — ${now.toISOString().slice(0, 10)}`,
-    '',
-    '*Scheduled queues:*',
-    registryLines,
-    '',
-    '*Event-driven:*',
-    eventDrivenLines,
-    '',
-    '*ML/data engines:*',
-    scriptLines,
-  ].join('\n');
+    if (prev === undefined) continue; // first time this key is tracked — nothing to diff yet
+    if (prev !== state) {
+      changed.push(state === 'ontime' ? `✅ ${j.label} — recovered` : `⚠️ ${j.label} — newly late`);
+    } else if (state === 'ontime') {
+      unchangedHealthy++;
+    }
+  }
+
+  for (const s of scriptStatuses as any[]) {
+    const key = `script:${s.id}`;
+    const state: string = s.runState;
+    currState[key] = state;
+    const prev = prevState[key];
+    const isProblem = state === 'stale' || state === 'failed';
+
+    if (isProblem) {
+      attention.push(`${scriptIcon(state)} ${s.label} (${state}, last: ${s.lastRunAt ?? 'never'})`);
+    }
+
+    if (prev === undefined) continue;
+    if (prev !== state) {
+      const wasProblem = prev === 'stale' || prev === 'failed';
+      if (wasProblem && !isProblem) changed.push(`✅ ${s.label} — recovered (was ${prev})`);
+      else if (!wasProblem && isProblem) changed.push(`${scriptIcon(state)} ${s.label} — newly ${state}`);
+      // routine transitions (never→running→success etc.) aren't worth a line
+    } else if (state === 'success') {
+      unchangedHealthy++;
+    }
+  }
+
+  await saveDigestState(currState);
+
+  const lines = [`📋 *Daily Job Health Digest* — ${now.toISOString().slice(0, 10)}`, ''];
+
+  if (attention.length) {
+    lines.push(`*Needs attention (${attention.length}):*`, ...attention, '');
+  }
+  if (changed.length) {
+    lines.push(`*Changed since last report (${changed.length}):*`, ...changed, '');
+  }
+  if (!attention.length && !changed.length) {
+    lines.push('✅ Nothing changed since the last report — all jobs on schedule.', '');
+  }
+  lines.push(`_${unchangedHealthy} other job(s) healthy and unchanged._`);
+
+  if (eventDriven.length) {
+    lines.push('', '*Event-driven (no fixed schedule):*', ...eventDriven.map(j => `⏳ ${j.label}`));
+  }
+
+  return lines.join('\n');
 }
 
 export function startJobWatchdog(): void {

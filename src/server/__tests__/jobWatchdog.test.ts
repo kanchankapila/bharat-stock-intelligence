@@ -3,12 +3,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // vi.mock() calls are hoisted above all other statements, so any variable referenced
 // inside a factory must itself be created via vi.hoisted() (or be "mock"-prefixed and
 // still hit ordering edge cases with multiple mocks) — see https://vitest.dev/api/vi.html#vi-hoisted
-const { mockSend, mockGetLateJobs, mockWasAlreadyAlerted, mockMarkAlerted, mockGetSystemStatus } = vi.hoisted(() => ({
+const { mockSend, mockGetLateJobs, mockWasAlreadyAlerted, mockMarkAlerted, mockGetSystemStatus, mockDbGet, mockDbRun } = vi.hoisted(() => ({
   mockSend: vi.fn(async (_text: string) => true),
   mockGetLateJobs: vi.fn(),
   mockWasAlreadyAlerted: vi.fn(),
   mockMarkAlerted: vi.fn(),
   mockGetSystemStatus: vi.fn(async () => []),
+  mockDbGet: vi.fn(async () => undefined),
+  mockDbRun: vi.fn(async () => ({ changes: 0, lastInsertRowid: 0 })),
 }));
 
 vi.mock('../telegramService', () => ({
@@ -31,6 +33,11 @@ vi.mock('../jobRegistry', () => ({
 vi.mock('../routers/monitor.router', () => ({
   getSystemStatus: mockGetSystemStatus,
   MONITOR_SCRIPTS: [],
+}));
+
+vi.mock('../dbAsync', () => ({
+  dbGet: mockDbGet,
+  dbRun: mockDbRun,
 }));
 
 import { checkAndAlertLateJobs, buildDailyDigest, checkAndAlertStaleScripts } from '../jobWatchdog';
@@ -125,14 +132,66 @@ describe('checkAndAlertStaleScripts', () => {
 });
 
 describe('buildDailyDigest', () => {
-  it('includes every registry job and every MONITOR_SCRIPTS entry', async () => {
+  beforeEach(() => {
+    mockDbGet.mockReset().mockResolvedValue(undefined);
+    mockDbRun.mockReset().mockResolvedValue({ changes: 0, lastInsertRowid: 0 });
+  });
+
+  it('lists a late registry job and a stale script under "Needs attention"', async () => {
+    mockGetLateJobs.mockResolvedValue([
+      { job: 'critical-job', label: 'Critical Job', expectedAt: new Date('2026-07-02T10:00:00Z'), hoursLate: 2, lastError: null },
+    ]);
+    mockGetSystemStatus.mockResolvedValue([
+      { id: 'technical-scan', label: 'Technical Signal Scan', runState: 'stale', lastRunAt: '2026-06-28T09:00:00Z', critical: true },
+    ]);
+    const digest = await buildDailyDigest(new Date('2026-07-02T15:30:00Z'));
+    expect(digest).toContain('Needs attention');
+    expect(digest).toContain('Critical Job');
+    expect(digest).toContain('Technical Signal Scan');
+    // Healthy, never-before-seen "Noncritical Job" isn't spammed into the digest body —
+    // first-seen keys are recorded but not diffed/listed until the next run.
+    expect(digest).not.toContain('Noncritical Job');
+  });
+
+  it('reports a recovery in "Changed since last report" when a previously-stale item turns healthy', async () => {
+    mockDbGet.mockResolvedValue({
+      value: JSON.stringify({ 'registry:critical-job': 'ontime', 'script:technical-scan': 'stale' }),
+    });
+    mockGetLateJobs.mockResolvedValue([]); // critical-job on time again
+    mockGetSystemStatus.mockResolvedValue([
+      { id: 'technical-scan', label: 'Technical Signal Scan', runState: 'success', lastRunAt: '2026-07-02T09:00:00Z', critical: true },
+    ]);
+    const digest = await buildDailyDigest(new Date('2026-07-02T15:30:00Z'));
+    expect(digest).toContain('Changed since last report');
+    expect(digest).toContain('Technical Signal Scan');
+    expect(digest).toContain('recovered');
+    expect(digest).not.toContain('Needs attention');
+  });
+
+  it('reports a compact "all healthy, unchanged" summary when nothing changed and nothing is wrong', async () => {
+    mockDbGet.mockResolvedValue({
+      value: JSON.stringify({ 'registry:critical-job': 'ontime', 'registry:noncritical-job': 'ontime', 'script:technical-scan': 'success' }),
+    });
     mockGetLateJobs.mockResolvedValue([]);
     mockGetSystemStatus.mockResolvedValue([
       { id: 'technical-scan', label: 'Technical Signal Scan', runState: 'success', lastRunAt: '2026-07-02T09:00:00Z', critical: true },
     ]);
     const digest = await buildDailyDigest(new Date('2026-07-02T15:30:00Z'));
-    expect(digest).toContain('Critical Job');
-    expect(digest).toContain('Noncritical Job');
-    expect(digest).toContain('Technical Signal Scan');
+    expect(digest).toContain('Nothing changed since the last report');
+    expect(digest).toContain('3 other job(s) healthy and unchanged');
+    expect(digest).not.toContain('Needs attention');
+    expect(digest).not.toContain('Changed since last report');
+  });
+
+  it('persists the current state for the next run to diff against', async () => {
+    mockGetLateJobs.mockResolvedValue([]);
+    mockGetSystemStatus.mockResolvedValue([
+      { id: 'technical-scan', label: 'Technical Signal Scan', runState: 'success', lastRunAt: '2026-07-02T09:00:00Z', critical: true },
+    ]);
+    await buildDailyDigest(new Date('2026-07-02T15:30:00Z'));
+    expect(mockDbRun).toHaveBeenCalled();
+    const call = mockDbRun.mock.calls[0] as unknown as [string, any[]];
+    const saved = JSON.parse(call[1][1]);
+    expect(saved).toMatchObject({ 'registry:critical-job': 'ontime', 'script:technical-scan': 'success' });
   });
 });

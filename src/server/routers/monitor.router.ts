@@ -7,6 +7,7 @@ import { runPython } from '../pythonRunner';
 import { fetchIndexAdvanceDecline, fetchIndiaVix, fetchLiveMarketScreener, fetchEODMarketScreener } from '../marketIntelService';
 import * as queueModule from '../queues';
 import { MONITOR_SCRIPTS } from '../monitorScripts';
+import { computeCronLateness } from '../jobHeartbeat';
 
 export { MONITOR_SCRIPTS };
 
@@ -20,10 +21,16 @@ async function getLastRunAt(scriptId: ScriptId): Promise<string | null> {
         row = await dbGet("SELECT MAX(computed_at) as t FROM technical_signals");
         break;
       case 'outcome-resolver-5d':
-        row = await dbGet("SELECT MAX(computed_at) as t FROM signal_outcomes WHERE horizon_days=5 AND outcome!='PENDING'");
+        // computed_at is stamped on every upsert regardless of outcome (see outcome_resolver.py's
+        // ON CONFLICT ... computed_at=excluded.computed_at), so filtering out PENDING rows here
+        // under-counted freshness: on a day where every eligible signal at this horizon is still
+        // within its holding period, the resolver runs fine but touches only PENDING rows, and
+        // this query kept reporting the last *resolved* outcome (which can be days older) as "last
+        // run" — false-flagging the job stale even though it executed on schedule.
+        row = await dbGet("SELECT MAX(computed_at) as t FROM signal_outcomes WHERE horizon_days=5");
         break;
       case 'outcome-resolver-15d':
-        row = await dbGet("SELECT MAX(computed_at) as t FROM signal_outcomes WHERE horizon_days=15 AND outcome!='PENDING'");
+        row = await dbGet("SELECT MAX(computed_at) as t FROM signal_outcomes WHERE horizon_days=15");
         break;
       case 'performance-tracker':
         row = await dbGet("SELECT MAX(last_computed) as t FROM strategy_performance");
@@ -222,7 +229,7 @@ async function getScriptStats(scriptId: ScriptId): Promise<Record<string, number
   }
 }
 
-export async function getSystemStatus() {
+export async function getSystemStatus(now: Date = new Date()) {
   const runStates: Record<string, string> = {};
   try {
     const rows = await dbAll<any>("SELECT key, value FROM app_settings WHERE key LIKE 'monitor_%'");
@@ -246,12 +253,24 @@ export async function getSystemStatus() {
     // (manual trigger, crash mid-run) stuck it forever — masking weeks of otherwise-healthy
     // runs behind a permanent "⏳ running" even though fresh output kept landing.
     if (lastRunAt) {
-      const ageHours = (Date.now() - new Date(lastRunAt).getTime()) / 3600000;
-      if (ageHours <= s.staleLimitHours) {
-        runState = 'success';
+      const cronPatterns = (s as any).cronPatterns as string[] | undefined;
+      let isLate: boolean;
+      if (cronPatterns?.length) {
+        // Cron-aware: not late until THIS entry's own next expected fire time (plus grace)
+        // has actually passed, instead of a flat hours-since-success threshold that trips
+        // every time it's checked before a Mon-Fri/weekly job has had its daily/weekly chance
+        // to run (e.g. Monday morning off Friday's success, or mid-day before tonight's batch).
+        isLate = computeCronLateness(
+          cronPatterns,
+          (s as any).graceMinutes ?? 60,
+          new Date(lastRunAt).getTime(),
+          now,
+        ).late;
       } else {
-        runState = rawState === 'running' ? 'running' : (rawState === 'failed' ? 'failed' : 'stale');
+        const ageHours = (now.getTime() - new Date(lastRunAt).getTime()) / 3600000;
+        isLate = ageHours > s.staleLimitHours;
       }
+      runState = !isLate ? 'success' : (rawState === 'running' ? 'running' : (rawState === 'failed' ? 'failed' : 'stale'));
     } else {
       runState = rawState === 'running' ? 'running' : (rawState === 'failed' ? 'failed' : 'never');
     }
