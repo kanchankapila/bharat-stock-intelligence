@@ -537,7 +537,7 @@ export async function fetchLiveMarketScreener(filters: Record<string, boolean>) 
     signal: AbortSignal.timeout(10000)
   });
 
-  if (!res.ok) throw new Error('Live Market Screener fetch error');
+  if (!res.ok) throw new Error(`Live Market Screener fetch error: ${res.status} ${res.statusText}`);
   return res.json();
 }
 

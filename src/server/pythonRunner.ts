@@ -20,15 +20,36 @@ const execFileAsync = promisify(execFile);
 let _runningPython = 0;
 const _pythonQueue: Array<() => void> = [];
 const MAX_PYTHON_CONCURRENT = 5;
+// If a slot leaks (observed 2026-07-21: a killed subprocess whose inherited stdio handle
+// never closed, so execFile's promisified callback never fired even though the OS process
+// was already gone) an unbounded wait here silently deadlocks every Python-backed job app-wide
+// -- ml-daily-ops and everything behind it queued for 4h+ with zero log output until the outer
+// job timeout eventually fired. Bound the wait so a leak degrades to a loud per-call failure
+// instead of a silent freeze.
+const SLOT_WAIT_TIMEOUT_MS = 20 * 60_000;
 
 function acquirePythonSlot(): Promise<void> {
-  return new Promise(resolve => {
+  return new Promise((resolve, reject) => {
     if (_runningPython < MAX_PYTHON_CONCURRENT) {
       _runningPython++;
       resolve();
-    } else {
-      _pythonQueue.push(() => { _runningPython++; resolve(); });
+      return;
     }
+    const entry = () => {
+      clearTimeout(timer);
+      _runningPython++;
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      const idx = _pythonQueue.indexOf(entry);
+      if (idx !== -1) _pythonQueue.splice(idx, 1);
+      reject(new Error(
+        `Timed out after ${SLOT_WAIT_TIMEOUT_MS}ms waiting for a Python subprocess slot ` +
+        `(${_runningPython}/${MAX_PYTHON_CONCURRENT} running, ${_pythonQueue.length} queued ahead) ` +
+        `-- a slot has likely leaked.`
+      ));
+    }, SLOT_WAIT_TIMEOUT_MS);
+    _pythonQueue.push(entry);
   });
 }
 

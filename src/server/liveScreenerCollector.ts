@@ -131,4 +131,12 @@ export async function runLiveScreenerCollection() {
   } catch (err: any) {
     console.error(`[LIVE-SCREENER-COLLECTOR] Failed to update run status for id ${runId}:`, err.message);
   }
+
+  // Every filter failing is not a "completed" run — throw so the BullMQ worker/setInterval
+  // fallback mark this job FAILED and the job_heartbeat dashboard reflects reality instead of
+  // silently reporting 'success' while the collector produced zero data (see live_screener_runs
+  // status history: this went undetected for 4 days behind a green heartbeat, 2026-07-21).
+  if (status === 'FAILED') {
+    throw new Error(`Live screener collection produced 0/${LIVE_SCREENER_FILTERS.length} filters. Last error: ${errors[errors.length - 1] || 'unknown'}`);
+  }
 }
