@@ -226,18 +226,20 @@ def compute_and_upsert_signals(symbol: str, today: str, patterns: list[dict], co
             "net_score": net_score, "avg_target_pct": avg_target}
 
 
-def backfill_technical_signals(symbol: str, signals: dict, con) -> None:
+def backfill_technical_signals(symbol: str, today: str, signals: dict, con) -> None:
+    """date >= ? ELSE NULL guard added 2026-07-19 -- see mc_pricefeed_fetcher.py's
+    backfill_technical_signals for the full writeup of the no-date-filter bug this fixes."""
     cur = con.cursor()
     cur.execute("""
         UPDATE technical_signals SET
-            mc_cp_bull_count     = COALESCE(?, mc_cp_bull_count),
-            mc_cp_bear_count     = COALESCE(?, mc_cp_bear_count),
-            mc_cp_net_score      = COALESCE(?, mc_cp_net_score),
-            mc_cp_avg_target_pct = COALESCE(?, mc_cp_avg_target_pct)
+            mc_cp_bull_count     = CASE WHEN date >= ? THEN COALESCE(?, mc_cp_bull_count)     ELSE NULL END,
+            mc_cp_bear_count     = CASE WHEN date >= ? THEN COALESCE(?, mc_cp_bear_count)     ELSE NULL END,
+            mc_cp_net_score      = CASE WHEN date >= ? THEN COALESCE(?, mc_cp_net_score)      ELSE NULL END,
+            mc_cp_avg_target_pct = CASE WHEN date >= ? THEN COALESCE(?, mc_cp_avg_target_pct) ELSE NULL END
         WHERE symbol = ?
     """, (
-        signals.get("bull_count"), signals.get("bear_count"),
-        signals.get("net_score"), signals.get("avg_target_pct"),
+        today, signals.get("bull_count"), today, signals.get("bear_count"),
+        today, signals.get("net_score"), today, signals.get("avg_target_pct"),
         symbol,
     ))
     con.commit()
@@ -290,7 +292,7 @@ def main() -> None:
                 done += 1
                 upsert_patterns(symbol, mcsymbol, patterns, con)
                 sigs = compute_and_upsert_signals(symbol, today, patterns, con)
-                backfill_technical_signals(symbol, sigs, con)
+                backfill_technical_signals(symbol, today, sigs, con)
                 print(f"  [{done}/{len(stocks)}] {symbol}: {len(patterns)} patterns | "
                       f"bull={sigs['bull_count']} bear={sigs['bear_count']} "
                       f"net={sigs['net_score']} tgt={sigs.get('avg_target_pct','?')}%")

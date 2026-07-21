@@ -214,8 +214,15 @@ def fetch_earnings_dates(con) -> None:
 
 
 def _backfill_days_to_results(con) -> None:
-    """Update technical_signals.days_to_next_results by joining via mc_pricefeed_daily.scid."""
+    """Update technical_signals.days_to_next_results by joining via mc_pricefeed_daily.scid.
+
+    date = today guard added 2026-07-19 on both branches -- the PG branch previously matched
+    (SELECT MAX(date)...) (see bse_event_classifier.py's run_daily docstring for why that's
+    wrong), and the SQLite branch had NO date guard at all -- it overwrote every historical row
+    for every symbol on every run (the severe smear bug, not just the milder latest-row one).
+    """
     cur = con.cursor()
+    today = date.today().isoformat()
     if use_postgres():
         cur.execute("""
             UPDATE technical_signals ts
@@ -229,8 +236,8 @@ def _backfill_days_to_results(con) -> None:
                 GROUP BY ns.symbol
             ) subq
             WHERE ts.symbol = subq.symbol
-              AND ts.date = (SELECT MAX(date) FROM technical_signals t2 WHERE t2.symbol = ts.symbol)
-        """)
+              AND ts.date = ?
+        """, (today,))
     else:
         cur.execute("""
             UPDATE technical_signals
@@ -241,7 +248,8 @@ def _backfill_days_to_results(con) -> None:
                 WHERE ns.symbol = technical_signals.symbol
                   AND sed.result_date >= date('now')
             )
-        """)
+            WHERE date = ?
+        """, (today,))
     con.commit()
 
 
@@ -356,8 +364,12 @@ def fetch_rapid_results(con) -> None:
 
 
 def _backfill_rapid_features(con) -> int:
-    """Update technical_signals with earnings category scores and NP growth from rapid results."""
+    """Update technical_signals with earnings category scores and NP growth from rapid results.
+
+    date = today guard added 2026-07-19 on both branches -- same fix as
+    _backfill_days_to_results above (PG had MAX(date), SQLite had no date guard at all)."""
     cur = con.cursor()
+    today = date.today().isoformat()
 
     # For each symbol in technical_signals, find the most recent rapid result per sub_type.
     # We pick the row with the highest |category_score| (strongest signal) when multiple exist.
@@ -393,8 +405,8 @@ def _backfill_rapid_features(con) -> int:
                 ORDER BY ns.symbol, ABS(r.category_score) DESC
             ) qoq ON qoq.symbol = yoy.symbol
             WHERE ts.symbol = yoy.symbol
-              AND ts.date = (SELECT MAX(date) FROM technical_signals t2 WHERE t2.symbol = ts.symbol)
-        """)
+              AND ts.date = ?
+        """, (today,))
     else:
         for col_score, col_growth, sub_type in [
             ("earnings_category_yoy", "earnings_np_growth_yoy", "yoy"),
@@ -421,7 +433,8 @@ def _backfill_rapid_features(con) -> int:
                         ORDER BY ABS(r.category_score) DESC
                         LIMIT 1
                     )
-            """, [sub_type, sub_type])
+                WHERE date = ?
+            """, [sub_type, sub_type, today])
     con.commit()
 
     # Count how many technical_signals rows got a non-null yoy category
@@ -488,7 +501,10 @@ def fetch_price_shockers(con) -> None:
 
 
 def _backfill_shockers(con) -> None:
+    """date = today guard added 2026-07-19 on both branches -- same fix as
+    _backfill_days_to_results above (PG had MAX(date), SQLite had no date guard at all)."""
     cur = con.cursor()
+    today = date.today().isoformat()
     if use_postgres():
         cur.execute("""
             UPDATE technical_signals ts
@@ -498,8 +514,8 @@ def _backfill_shockers(con) -> None:
             FROM mc_price_shockers s
             JOIN nse_stocks ns ON ns.mcsymbol = s.scid
             WHERE ts.symbol = ns.symbol
-              AND ts.date = (SELECT MAX(date) FROM technical_signals t2 WHERE t2.symbol = ts.symbol)
-        """)
+              AND ts.date = ?
+        """, (today,))
         cur.execute("""
             UPDATE technical_signals ts
             SET earnings_shocker_flag = 0
@@ -507,8 +523,8 @@ def _backfill_shockers(con) -> None:
                 SELECT 1 FROM mc_price_shockers s
                 JOIN nse_stocks ns ON ns.mcsymbol = s.scid
                 WHERE ns.symbol = ts.symbol
-            ) AND ts.date = (SELECT MAX(date) FROM technical_signals t2 WHERE t2.symbol = ts.symbol)
-        """)
+            ) AND ts.date = ?
+        """, (today,))
     else:
         cur.execute("""
             UPDATE technical_signals
@@ -525,7 +541,8 @@ def _backfill_shockers(con) -> None:
                     WHERE ns.symbol = technical_signals.symbol
                     LIMIT 1
                 )
-        """)
+            WHERE date = ?
+        """, (today,))
     con.commit()
 
 
@@ -727,7 +744,10 @@ def fetch_actual_estimate_beats(con, max_pages: int = 25) -> None:
         print("[EarningsFetcher] actual-estimate: no matched symbols")
         return
 
-    # Stamp most-recent ts row per symbol (strip priority from tuple)
+    # Stamp today's ts row per symbol (strip priority from tuple).
+    # date = today guard added 2026-07-19 instead of MAX(date) -- see
+    # bse_event_classifier.py's run_daily docstring for why that matters.
+    today = date.today().isoformat()
     if use_postgres():
         cur.execute("""
             UPDATE technical_signals ts
@@ -735,19 +755,19 @@ def fetch_actual_estimate_beats(con, max_pages: int = 25) -> None:
                 mc_eps_vs_cons  = v.beat_pct
             FROM (VALUES {}) AS v(symbol, beat_label, beat_pct)
             WHERE ts.symbol = v.symbol
-              AND ts.date = (SELECT MAX(date) FROM technical_signals t2 WHERE t2.symbol = ts.symbol)
+              AND ts.date = ?
         """.format(
             ", ".join(
                 f"('{sym}', {lbl}, {pct if pct is not None else 'NULL'})"
                 for sym, (lbl, pct, _) in rows_by_symbol.items()
             )
-        ))
+        ), (today,))
     else:
         for sym, (lbl, pct, _) in rows_by_symbol.items():
             cur.execute(
                 "UPDATE technical_signals SET eps_beat_last_q = ?, mc_eps_vs_cons = ? "
-                "WHERE symbol = ? AND date = (SELECT MAX(date) FROM technical_signals t2 WHERE t2.symbol = ?)",
-                (lbl, pct, sym, sym),
+                "WHERE symbol = ? AND date = ?",
+                (lbl, pct, sym, today),
             )
     con.commit()
 

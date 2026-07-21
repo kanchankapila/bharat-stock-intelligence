@@ -524,6 +524,13 @@ async function processLiveScreenerCollect(_job: Job): Promise<void> {
   }
   const { runLiveScreenerCollection } = await import('./liveScreenerCollector');
   await runLiveScreenerCollection();
+
+  // Score this cycle's matches against the currently-active ML model right after
+  // collecting them, so the Intraday Edge tab's ml_win_probability is fresh every 15 min.
+  // No-ops quietly (prints, doesn't throw) until live_screener_ml_ranker.py --train has
+  // produced a first model.
+  await runPython('live_screener_ml_ranker.py', ['--score'], 3 * 60_000)
+    .catch(e => console.warn('[QUEUE] live_screener_ml_ranker --score failed:', (e as Error).message));
 }
 
 async function processIntradayFetcher(_job: Job): Promise<void> {
@@ -676,10 +683,23 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await runPython('block_deal_fetcher.py', ['--days', '1'], 60_000)
     .catch(e => console.warn('[QUEUE] block_deal_fetcher failed:', (e as Error).message));
 
-  // MC pricefeed: IND_PE, CAGR 3/5y, consensus PE/PB, 200DMA distance, delivery avg, 52w position.
+  // MC pricefeed: IND_PE, CAGR 3/5y, consensus PE/PB, delivery avg (fundamentals/delivery only —
+  // price/volume columns moved to mc_price_features_ohlcv.py below, see its docstring for why).
   // 2328 stocks × 0.35s = ~14 min
   await runPython('mc_pricefeed_fetcher.py', [], 25 * 60_000)
     .catch(e => console.warn('[QUEUE] mc_pricefeed_fetcher failed:', (e as Error).message));
+
+  // Point-in-time mc_ma30/50/150/200_dist_pct, mc_3d_return, mc_52w_high/low_dist_pct,
+  // mc_days_from_52wh, mc_ytd_return, mc_vol_ratio -- computed from stock_ohlcv (fresh as of
+  // today's 16:00 IST stock-refresh, earlier in the day) rather than MoneyControl's live
+  // snapshot. Replaces mc_pricefeed_fetcher's old no-date-filter UPDATE for these columns,
+  // which was smearing today's value across a symbol's entire technical_signals history
+  // (found 2026-07-19: mc_ma30_dist was the #1 most important ml_ensemble feature and was
+  // frozen per-symbol for weeks — see mc_price_features_ohlcv.py's docstring).
+  // MUST run after ohlcv_quality.py above -- it reads WHERE is_suspect=0 so a bad-print/
+  // extreme-level-shift bar doesn't poison every moving-average window it falls inside.
+  await runPython('mc_price_features_ohlcv.py', [], 15 * 60_000)
+    .catch(e => console.warn('[QUEUE] mc_price_features_ohlcv failed:', (e as Error).message));
 
   // MC chart patterns: professional pattern detection with target price, stop-loss, direction.
   // 2328 stocks × 0.35s = ~14 min
@@ -1067,8 +1087,10 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean }> 
     .catch(e => console.warn('[QUEUE] weekly outcome_resolver(5) failed:', (e as Error).message));
   await runPython('outcome_resolver.py', ['--horizon', '15'])
     .catch(e => console.warn('[QUEUE] weekly outcome_resolver(15) failed:', (e as Error).message));
-  // Run exit labeler to resolve excursions
-  await runPython('exit_labeler.py', [], 10 * 60_000)
+  // Run exit labeler to resolve excursions. Unlike the daily-ops call (--limit 500), this
+  // one is unbounded — it's the weekly catch-up sweep for the full backlog since last
+  // Sunday — so it needs real headroom; 10min was SIGTERM-killing it most weeks (2026-07-19).
+  await runPython('exit_labeler.py', [], 30 * 60_000)
     .catch(e => console.warn('[QUEUE] exit_labeler failed:', (e as Error).message));
   // Retrain the exit policy models
   await runPython('exit_policy.py', ['--train'], 10 * 60_000)
@@ -1143,13 +1165,23 @@ async function processScreenerPerf(_job: Job): Promise<void> {
   await runPython('live_screener_resolver.py', [], 20 * 60_000)
     .catch(e => console.warn('[QUEUE] live_screener_resolver failed:', (e as Error).message));
 
-  // 8. Recompute optimal filter combinations using the latest resolved outcomes
+  // 8. Recompute optimal filter combinations using the latest resolved outcomes. Trains both
+  // the swing-horizon model and an isolated same-day intraday model in one run (see
+  // live_screener_optimizer.py's optimize_combinations()).
   await runPython('live_screener_optimizer.py', [], 5 * 60_000)
     .catch(e => console.warn('[QUEUE] live_screener_optimizer failed:', (e as Error).message));
+
+  // 8b. Retrain the ML win-probability classifier on the same freshly-resolved outcomes.
+  // Gated behind a held-out-AUC promotion check inside the script itself, so a worse
+  // retrain never silently replaces a better live model.
+  await runPython('live_screener_ml_ranker.py', ['--train'], 10 * 60_000)
+    .catch(e => console.warn('[QUEUE] live_screener_ml_ranker --train failed:', (e as Error).message));
 
   // 9. Auto-backtest top combinations so frontend cockpit always has fresh performance data
   await runPython('backtest_live_screener.py', ['--auto-backtest-top', '5'], 10 * 60_000)
     .catch(e => console.warn('[QUEUE] backtest_live_screener auto-backtest failed:', (e as Error).message));
+  await runPython('backtest_live_screener.py', ['--auto-backtest-top', '5', '--intraday'], 10 * 60_000)
+    .catch(e => console.warn('[QUEUE] backtest_live_screener intraday auto-backtest failed:', (e as Error).message));
 
   try {
     const { classifyAllScreeners } = await import('./screenerClassifier');

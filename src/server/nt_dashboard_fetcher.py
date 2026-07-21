@@ -207,23 +207,25 @@ def upsert_row(f: dict, con) -> None:
     con.commit()
 
 
-def backfill_technical_signals(f: dict, con) -> None:
+def backfill_technical_signals(today: str, f: dict, con) -> None:
+    """date >= ? ELSE NULL guard added 2026-07-19 -- see mc_pricefeed_fetcher.py's
+    backfill_technical_signals for the full writeup of the no-date-filter bug this fixes."""
     opt_vol = f.get("option_volume")
     vol_log = round(math.log1p(opt_vol), 4) if opt_vol and opt_vol > 0 else None
 
     cur = con.cursor()
     cur.execute(translate("""
         UPDATE technical_signals SET
-            nt_max_pain_dist_pct = COALESCE(?, nt_max_pain_dist_pct),
-            nt_oi_direction      = COALESCE(?, nt_oi_direction),
-            nt_pcr               = COALESCE(?, nt_pcr),
-            nt_option_volume_log = COALESCE(?, nt_option_volume_log)
+            nt_max_pain_dist_pct = CASE WHEN date >= ? THEN COALESCE(?, nt_max_pain_dist_pct) ELSE NULL END,
+            nt_oi_direction      = CASE WHEN date >= ? THEN COALESCE(?, nt_oi_direction)      ELSE NULL END,
+            nt_pcr               = CASE WHEN date >= ? THEN COALESCE(?, nt_pcr)               ELSE NULL END,
+            nt_option_volume_log = CASE WHEN date >= ? THEN COALESCE(?, nt_option_volume_log) ELSE NULL END
         WHERE symbol = ?
     """), (
-        f.get("max_pain_dist_pct"),
-        f.get("oi_direction"),
-        f.get("pcr"),
-        vol_log,
+        today, f.get("max_pain_dist_pct"),
+        today, f.get("oi_direction"),
+        today, f.get("pcr"),
+        today, vol_log,
         f["symbol"],
     ))
     con.commit()
@@ -257,7 +259,7 @@ def main() -> None:
         if f is None:
             continue
         upsert_row(f, con)
-        backfill_technical_signals(f, con)
+        backfill_technical_signals(today, f, con)
         ok += 1
 
     print(f"[NTDashboard] Done. {ok} records upserted (stocks={len(stocks)}, indices={len(indices)}).")

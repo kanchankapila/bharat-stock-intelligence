@@ -179,9 +179,17 @@ def run(limit: int | None = None):
     regime_dates = [(r['date'], r['regime']) for r in regime_rows]
 
     def get_regime(date_str: str) -> str:
+        # Collapse the HMM's 5-state label (BULL/SIDEWAYS/HIGH_VOL/BEAR/CRASH) to the 3-state
+        # vocabulary every consumer of technical_signals.nifty_regime expects (win-rate
+        # lookups, ml_ensemble.REGIME_MAP, gating). Previously this returned the raw 5-state
+        # value, so HIGH_VOL/CRASH rows leaked in unmapped and silently fell through
+        # REGIME_MAP.fillna(0.0) as SIDEWAYS (0.0) in ml_ensemble's numeric encoding — found
+        # 2026-07-19 comparing technicalSignalsService.ts's computeNiftyRegime() against this.
         for d, reg in reversed(regime_dates):
             if d <= date_str:
-                return reg
+                if reg in ('BULL', 'SIDEWAYS'):
+                    return reg
+                return 'BEAR'  # HIGH_VOL | BEAR | CRASH
         return 'SIDEWAYS'
 
     # Pre-load FII 3d net by date

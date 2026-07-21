@@ -103,15 +103,15 @@ WHERE {cur_filter}
   AND hist.pledge_pct IS NOT NULL
 """
 
-# COALESCE update: only overwrite if the computed value is not NULL, preserving
-# any value set by other engines (e.g. trendlyne_overview_fetcher).
+# date >= floor ELSE NULL guard added 2026-07-19 -- the old `updated_at IS NULL OR ...` guard
+# was not a date filter at all: technical_signals.updated_at is NULL for 100% of rows in
+# production (nothing else in the codebase sets it), so `updated_at IS NULL` always matched
+# and this plain `=` (not actually COALESCE, despite the stale comment above) overwrote every
+# historical row for a symbol on every run -- same bug class as mc_pricefeed_fetcher.py etc.
 _UPDATE_TS_SQL = """
 UPDATE technical_signals
-SET    pledge_chg_90d = ?
+SET    pledge_chg_90d = CASE WHEN date >= ? THEN ? ELSE NULL END
 WHERE  symbol = ?
-  AND  (updated_at IS NULL OR updated_at = (
-           SELECT MAX(updated_at) FROM technical_signals WHERE symbol = ?
-       ))
 """
 
 
@@ -124,7 +124,7 @@ def _ensure_schema() -> None:
             pass  # column already exists
 
 
-def _compute_and_write_pledge_trend(pg: bool) -> int:
+def _compute_and_write_pledge_trend(pg: bool, as_of: str) -> int:
     """Compute pledge_chg_90d for all symbols with sufficient history and write to
     technical_signals. Returns the number of symbols updated."""
     rows = query_all(_pledge_chg_sql(pg))
@@ -134,7 +134,7 @@ def _compute_and_write_pledge_trend(pg: bool) -> int:
     try:
         cur = con.cursor()
         for row in rows:
-            cur.execute(_UPDATE_TS_SQL, (row["pledge_chg_90d"], row["symbol"], row["symbol"]))
+            cur.execute(_UPDATE_TS_SQL, (as_of, row["pledge_chg_90d"], row["symbol"]))
         con.commit()
     finally:
         con.close()
@@ -155,7 +155,7 @@ def run(as_of: str | None = None) -> int:
     n = execute(_INSERT_SQL, (as_of,))
     print(f"[FUND-SNAP] Wrote {n} fundamentals snapshots as_of {as_of}.")
 
-    n_trend = _compute_and_write_pledge_trend(pg)
+    n_trend = _compute_and_write_pledge_trend(pg, as_of)
     print(f"[FUND-SNAP] Wrote pledge_chg_90d for {n_trend} symbols -> technical_signals.")
 
     return n

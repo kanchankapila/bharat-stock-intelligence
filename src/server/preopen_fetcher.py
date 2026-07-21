@@ -245,34 +245,24 @@ def fetch_nse_preopen(con) -> int:
         """), row)
     con.commit()
 
-    # Backfill most-recent technical_signals row per symbol
-    for (sym, _sd, _iep, _pc, iep_gap_pct, _bq, _sq, preopen_imbalance, _lp, _fa) in rows:
+    # Backfill today's technical_signals row per symbol.
+    # date = ? guard (2026-07-19): previously matched created_at = MAX(created_at), but
+    # technical_signals.created_at is NULL for 100% of rows in production (nothing else in
+    # this codebase sets it) -- MAX(created_at) is therefore always NULL, and `created_at =
+    # NULL` never matches in SQL, so this UPDATE has never actually written a row, ever.
+    # Uses snapshot_date (this batch's own date), not a fresh now() call, to stay consistent
+    # with what was just written to preopen_stock_snapshot above.
+    for (sym, sd, _iep, _pc, iep_gap_pct, _bq, _sq, preopen_imbalance, _lp, _fa) in rows:
         if iep_gap_pct is None and preopen_imbalance is None:
             continue
-        if use_postgres():
-            cur.execute(
-                """
-                UPDATE technical_signals
-                SET iep_gap_pct = ?, preopen_imbalance = ?
-                WHERE symbol = ?
-                  AND created_at = (
-                      SELECT MAX(created_at) FROM technical_signals WHERE symbol = ?
-                  )
-                """,
-                (iep_gap_pct, preopen_imbalance, sym, sym),
-            )
-        else:
-            cur.execute(
-                """
-                UPDATE technical_signals
-                SET iep_gap_pct = ?, preopen_imbalance = ?
-                WHERE symbol = ?
-                  AND created_at = (
-                      SELECT MAX(created_at) FROM technical_signals WHERE symbol = ?
-                  )
-                """,
-                (iep_gap_pct, preopen_imbalance, sym, sym),
-            )
+        cur.execute(
+            """
+            UPDATE technical_signals
+            SET iep_gap_pct = ?, preopen_imbalance = ?
+            WHERE symbol = ? AND date = ?
+            """,
+            (iep_gap_pct, preopen_imbalance, sym, sd),
+        )
     con.commit()
 
     # Summary

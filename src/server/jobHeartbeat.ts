@@ -109,6 +109,33 @@ export async function getStaleJobs(): Promise<Array<{ job: string; hoursStale: n
 }
 
 /**
+ * Cron-aware lateness for an arbitrary set of contributing cron patterns (a script fed by
+ * more than one queue, e.g. outcome-resolver-5d is touched by both the 9:30am resolver queue
+ * and the 7:30pm ml-daily-ops batch, uses the MOST RECENT of the two expected fire times).
+ * Mirrors getLateJobs()'s single-pattern logic below, generalized to N patterns, so MONITOR_SCRIPTS
+ * entries (monitor.router.ts's getSystemStatus) can share the same "not late until its own
+ * schedule's grace window has passed" semantics that JOB_REGISTRY jobs already get — instead of
+ * a flat hours-since-last-success threshold that false-flags "stale" every time it's checked
+ * before that day's/week's run has had a chance to fire (see docs on the Monday-morning /
+ * pre-evening-batch false positives this was written to fix).
+ */
+export function computeCronLateness(
+  cronPatterns: string[],
+  graceMinutes: number,
+  lastSuccessMs: number | null,
+  now: Date = new Date(),
+): { late: boolean; expectedAt: Date } {
+  let expectedAt: Date | null = null;
+  for (const pattern of cronPatterns) {
+    const prev = CronExpressionParser.parse(pattern, { currentDate: now, tz: 'Etc/UTC' }).prev().toDate();
+    if (!expectedAt || prev > expectedAt) expectedAt = prev;
+  }
+  const deadline = expectedAt!.getTime() + graceMinutes * 60_000;
+  if (now.getTime() < deadline) return { late: false, expectedAt: expectedAt! };
+  return { late: (lastSuccessMs ?? 0) < expectedAt!.getTime(), expectedAt: expectedAt! };
+}
+
+/**
  * Cron-aware lateness check for JOB_REGISTRY entries. A job is "late" when today's most
  * recent expected fire time (per its cron/every schedule) plus its grace period has
  * passed, and no success has been recorded since that fire time. Event-driven entries

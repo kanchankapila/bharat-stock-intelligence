@@ -11,7 +11,8 @@ import { getLateJobs, wasAlreadyAlerted, markAlerted } from './jobHeartbeat';
 import { JOB_REGISTRY } from './jobRegistry';
 import { getSystemStatus } from './routers/monitor.router';
 import { telegramService } from './telegramService';
-import { runDataQualityChecks } from './dataQualityChecks';
+import { dbGet, dbRun } from './dbAsync';
+import { runDataQualityChecks, getLatestDataQualityResults } from './dataQualityChecks';
 
 export async function checkAndAlertLateJobs(now: Date = new Date()): Promise<void> {
   const late = await getLateJobs(now);
@@ -40,7 +41,7 @@ export async function checkAndAlertLateJobs(now: Date = new Date()): Promise<voi
  */
 export async function checkAndAlertStaleScripts(now: Date = new Date()): Promise<void> {
   const startOfToday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-  const statuses = await getSystemStatus();
+  const statuses = await getSystemStatus(now);
   for (const s of statuses) {
     if (!s.critical) continue;
     if (s.runState !== 'stale' && s.runState !== 'failed') continue;
@@ -57,8 +58,10 @@ export async function checkAndAlertStaleScripts(now: Date = new Date()): Promise
  * Data-quality counterpart to checkAndAlertStaleScripts: MONITOR_SCRIPTS/JOB_REGISTRY only
  * know whether a job *ran*; dataQualityChecks.ts asks whether what it wrote is actually
  * correct/complete (see that module's header for the class of bug this exists to catch).
- * Dedupes by calendar day (UTC) the same way — reusing markAlerted/wasAlreadyAlerted keyed
- * by check id, so a persistently-failing check pages once per day, not every 15 minutes.
+ * This is the only place that actually re-runs the checks (buildDailyDigest below just
+ * reads what this already persisted) — dedupes alerts by calendar day (UTC) the same way,
+ * reusing markAlerted/wasAlreadyAlerted keyed by check id, so a persistently-failing check
+ * pages once per day, not every 15 minutes.
  */
 export async function checkAndAlertDataQuality(now: Date = new Date()): Promise<void> {
   const startOfToday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
@@ -75,46 +78,136 @@ export async function checkAndAlertDataQuality(now: Date = new Date()): Promise<
   }
 }
 
+const DIGEST_STATE_KEY = 'job_digest_last_state';
+
+async function loadDigestState(): Promise<Record<string, string>> {
+  try {
+    const row = await dbGet<{ value: string }>('SELECT value FROM app_settings WHERE key = ?', [DIGEST_STATE_KEY]);
+    return row?.value ? JSON.parse(row.value) : {};
+  } catch {
+    return {};
+  }
+}
+
+async function saveDigestState(state: Record<string, string>): Promise<void> {
+  try {
+    await dbRun(
+      'INSERT INTO app_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+      [DIGEST_STATE_KEY, JSON.stringify(state)],
+    );
+  } catch (err) {
+    console.warn('[WATCHDOG] saveDigestState failed:', (err as Error).message);
+  }
+}
+
+const scriptIcon = (state: string) => state === 'success' ? '✅' : state === 'stale' ? '⚠️' : state === 'failed' ? '❌' : '⏳';
+const dqIcon = (state: string) => state === 'pass' ? '✅' : state === 'warn' ? '⚠️' : state === 'fail' ? '❌' : '⛔';
+
+/**
+ * Incremental digest: instead of re-listing all ~45 tracked jobs every time (mostly unchanged
+ * day to day, and noisy to read on Telegram), this reports (1) whatever is CURRENTLY a problem
+ * (late/stale/failed/data-quality-fail — so nothing silently persists unmentioned), (2) whatever
+ * CHANGED state since the last time the digest ran (recoveries and new problems), and (3) a
+ * one-line count of everything else that's healthy and unchanged. State is persisted in
+ * app_settings so the next run can diff against it. Data-quality results are read via
+ * getLatestDataQualityResults() (already kept fresh by checkAndAlertDataQuality's 15-min poll)
+ * rather than re-run here, so the digest doesn't duplicate that DB work or its persistence.
+ */
 export async function buildDailyDigest(now: Date = new Date()): Promise<string> {
   const late = await getLateJobs(now);
-  const lateNames = new Set(late.map(l => l.job));
+  const lateByName = new Map(late.map(l => [l.job, l]));
+  const scheduledRegistry = JOB_REGISTRY.filter(j => j.cronPattern || j.everyMs);
+  const eventDriven = JOB_REGISTRY.filter(j => !j.cronPattern && !j.everyMs);
+  const scriptStatuses = await getSystemStatus(now);
+  const dqResults = await getLatestDataQualityResults();
 
-  const registryLines = JOB_REGISTRY
-    .filter(j => j.cronPattern || j.everyMs) // skip event-driven in the scheduled section
-    .map(j => `${lateNames.has(j.jobName) ? '⚠️' : '✅'} ${j.label}`)
-    .join('\n');
+  const prevState = await loadDigestState();
+  const currState: Record<string, string> = {};
+  const attention: string[] = [];
+  const changed: string[] = [];
+  let unchangedHealthy = 0;
 
-  const eventDrivenLines = JOB_REGISTRY
-    .filter(j => !j.cronPattern && !j.everyMs)
-    .map(j => `⏳ ${j.label} (event-driven)`)
-    .join('\n');
+  for (const j of scheduledRegistry) {
+    const key = `registry:${j.jobName}`;
+    const lateEntry = lateByName.get(j.jobName);
+    const state = lateEntry ? 'late' : 'ontime';
+    currState[key] = state;
+    const prev = prevState[key];
 
-  const scriptStatuses = await getSystemStatus();
-  const scriptIcon = (state: string) => state === 'success' ? '✅' : state === 'stale' ? '⚠️' : state === 'failed' ? '❌' : '⏳';
-  const scriptLines = scriptStatuses.map((s: any) => `${scriptIcon(s.runState)} ${s.label} (${s.runState})`).join('\n');
+    if (state === 'late') attention.push(`⚠️ ${j.label} (~${lateEntry!.hoursLate}h late)`);
 
-  const dqResults = await runDataQualityChecks(now);
-  const dqIcon = (status: string) => status === 'pass' ? '✅' : status === 'warn' ? '⚠️' : status === 'fail' ? '❌' : '⛔';
-  const dqLines = dqResults
-    .sort((a, b) => Number(b.critical) - Number(a.critical))
-    .map(r => `${dqIcon(r.status)} ${r.label}${r.status === 'pass' ? '' : ` — ${r.detail}`}`)
-    .join('\n');
+    if (prev === undefined) continue; // first time this key is tracked — nothing to diff yet
+    if (prev !== state) {
+      changed.push(state === 'ontime' ? `✅ ${j.label} — recovered` : `⚠️ ${j.label} — newly late`);
+    } else if (state === 'ontime') {
+      unchangedHealthy++;
+    }
+  }
 
-  return [
-    `📋 *Daily Job Health Digest* — ${now.toISOString().slice(0, 10)}`,
-    '',
-    '*Scheduled queues:*',
-    registryLines,
-    '',
-    '*Event-driven:*',
-    eventDrivenLines,
-    '',
-    '*ML/data engines:*',
-    scriptLines,
-    '',
-    '*Data quality:*',
-    dqLines,
-  ].join('\n');
+  for (const s of scriptStatuses as any[]) {
+    const key = `script:${s.id}`;
+    const state: string = s.runState;
+    currState[key] = state;
+    const prev = prevState[key];
+    const isProblem = state === 'stale' || state === 'failed';
+
+    if (isProblem) {
+      attention.push(`${scriptIcon(state)} ${s.label} (${state}, last: ${s.lastRunAt ?? 'never'})`);
+    }
+
+    if (prev === undefined) continue;
+    if (prev !== state) {
+      const wasProblem = prev === 'stale' || prev === 'failed';
+      if (wasProblem && !isProblem) changed.push(`✅ ${s.label} — recovered (was ${prev})`);
+      else if (!wasProblem && isProblem) changed.push(`${scriptIcon(state)} ${s.label} — newly ${state}`);
+      // routine transitions (never→running→success etc.) aren't worth a line
+    } else if (state === 'success') {
+      unchangedHealthy++;
+    }
+  }
+
+  for (const r of dqResults) {
+    const key = `dq:${r.id}`;
+    const state = r.status;
+    currState[key] = state;
+    const prev = prevState[key];
+    const isProblem = state === 'fail' || state === 'error';
+
+    if (isProblem) {
+      attention.push(`${dqIcon(state)} ${r.label} — ${r.detail}`);
+    }
+
+    if (prev === undefined) continue;
+    if (prev !== state) {
+      const wasProblem = prev === 'fail' || prev === 'error';
+      if (wasProblem && !isProblem) changed.push(`✅ ${r.label} — recovered (was ${prev})`);
+      else if (!wasProblem && isProblem) changed.push(`${dqIcon(state)} ${r.label} — newly ${state}: ${r.detail}`);
+      // pass<->warn transitions aren't worth a line
+    } else if (state === 'pass') {
+      unchangedHealthy++;
+    }
+  }
+
+  await saveDigestState(currState);
+
+  const lines = [`📋 *Daily Job Health Digest* — ${now.toISOString().slice(0, 10)}`, ''];
+
+  if (attention.length) {
+    lines.push(`*Needs attention (${attention.length}):*`, ...attention, '');
+  }
+  if (changed.length) {
+    lines.push(`*Changed since last report (${changed.length}):*`, ...changed, '');
+  }
+  if (!attention.length && !changed.length) {
+    lines.push('✅ Nothing changed since the last report — all jobs on schedule.', '');
+  }
+  lines.push(`_${unchangedHealthy} other job(s) healthy and unchanged._`);
+
+  if (eventDriven.length) {
+    lines.push('', '*Event-driven (no fixed schedule):*', ...eventDriven.map(j => `⏳ ${j.label}`));
+  }
+
+  return lines.join('\n');
 }
 
 export function startJobWatchdog(): void {

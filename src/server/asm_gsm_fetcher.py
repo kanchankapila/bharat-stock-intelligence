@@ -167,22 +167,35 @@ def backfill_technical_signals(con) -> int:
         except Exception:
             con.rollback()
 
+    # date >= today ELSE NULL guard added 2026-07-19 -- this previously used plain `=` with NO
+    # date filter at all (worse than COALESCE: it REWRITES every historical row on every run,
+    # so asm_flag/gsm_stage never reflected true historical surveillance status, only
+    # "whatever it is today"). nse_stocks has no historical ASM/GSM snapshot to backfill from,
+    # so older rows are explicitly nulled rather than left holding today's status.
+    today = date.today().isoformat()
     if use_postgres():
         cur.execute(
             """
             UPDATE technical_signals
-            SET asm_flag = ns.is_asm, gsm_stage = ns.gsm_stage
+            SET asm_flag  = CASE WHEN technical_signals.date >= %s THEN ns.is_asm ELSE NULL END,
+                gsm_stage = CASE WHEN technical_signals.date >= %s THEN ns.gsm_stage ELSE NULL END
             FROM nse_stocks ns
             WHERE technical_signals.symbol = ns.symbol
-            """
+            """,
+            (today, today),
         )
     else:
         cur.execute(
             """
             UPDATE technical_signals
-            SET asm_flag = (SELECT is_asm FROM nse_stocks WHERE symbol = technical_signals.symbol),
-                gsm_stage = (SELECT gsm_stage FROM nse_stocks WHERE symbol = technical_signals.symbol)
-            """
+            SET asm_flag = CASE WHEN date >= ? THEN
+                    (SELECT is_asm FROM nse_stocks WHERE symbol = technical_signals.symbol)
+                ELSE NULL END,
+                gsm_stage = CASE WHEN date >= ? THEN
+                    (SELECT gsm_stage FROM nse_stocks WHERE symbol = technical_signals.symbol)
+                ELSE NULL END
+            """,
+            (today, today),
         )
 
     updated = cur.rowcount

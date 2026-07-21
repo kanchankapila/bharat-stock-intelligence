@@ -17,7 +17,7 @@
  * — same shape as job_heartbeat) and folded into the existing Telegram watchdog/daily
  * digest in jobWatchdog.ts rather than introducing a second alerting path.
  */
-import { dbGet, dbRun, dbExec } from './dbAsync';
+import { dbGet, dbAll, dbRun, dbExec } from './dbAsync';
 
 export type DataQualityStatus = 'pass' | 'warn' | 'fail' | 'error';
 
@@ -544,4 +544,20 @@ export async function runDataQualityChecks(now: Date = new Date()): Promise<Data
     await persistResult(check, outcome);
   }
   return results;
+}
+
+/** Reads the latest persisted result per check_id (written by the most recent
+ *  runDataQualityChecks() call, at most 15 minutes stale — the watchdog poll interval)
+ *  without re-running any query. Use this for reporting (e.g. the daily digest); use
+ *  runDataQualityChecks() only where you need a fresh, synchronous evaluation. */
+export async function getLatestDataQualityResults(): Promise<DataQualityResult[]> {
+  await ensureTable();
+  try {
+    const rows = await dbAll<{ check_id: string; label: string; category: string; critical: number; status: DataQualityStatus; detail: string }>(
+      'SELECT check_id, label, category, critical, status, detail FROM data_quality_results',
+    );
+    return rows.map(r => ({ id: r.check_id, label: r.label, category: r.category, critical: !!r.critical, status: r.status, detail: r.detail }));
+  } catch {
+    return [];
+  }
 }

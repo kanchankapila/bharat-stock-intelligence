@@ -31,6 +31,12 @@ export const MONITOR_SCRIPTS = [
     pyScript: 'outcome_resolver.py --horizon 5',
     queueName: 'outcome-resolver',
     staleLimitHours: 26,
+    // Actually touched twice a day: the 9:30am outcome-resolver queue AND again inside the
+    // 7:30pm ml-daily-ops batch (queues.ts processMlDailyOps). Cron-aware lateness takes the
+    // more recent of the two expected fire times instead of a flat hours threshold, so a
+    // mid-day check (before either run) doesn't false-flag "stale" off Friday's success.
+    cronPatterns: ['0 4 * * 1-5', '0 14 * * 1-5'],
+    graceMinutes: 60,
   },
   {
     id: 'outcome-resolver-15d',
@@ -42,6 +48,8 @@ export const MONITOR_SCRIPTS = [
     pyScript: 'outcome_resolver.py --horizon 15',
     queueName: 'outcome-resolver',
     staleLimitHours: 26,
+    cronPatterns: ['0 4 * * 1-5', '0 14 * * 1-5'],
+    graceMinutes: 60,
   },
   {
     id: 'performance-tracker',
@@ -64,6 +72,10 @@ export const MONITOR_SCRIPTS = [
     pyScript: 'fii_dii_fetcher.py',
     queueName: null,
     staleLimitHours: 30,
+    // Runs as a step inside ml-daily-ops (0 14 * * 1-5 = 7:30pm IST); checked before that
+    // hasn't run yet today, not actually stale off Friday's run.
+    cronPatterns: ['0 14 * * 1-5'],
+    graceMinutes: 60,
   },
   {
     id: 'finbert-scorer',
@@ -75,6 +87,8 @@ export const MONITOR_SCRIPTS = [
     pyScript: 'finbert_scorer.py --days 1',
     queueName: null,
     staleLimitHours: 30,
+    cronPatterns: ['0 14 * * 1-5'],
+    graceMinutes: 60,
   },
   {
     id: 'ml-ensemble-score',
@@ -86,6 +100,8 @@ export const MONITOR_SCRIPTS = [
     pyScript: 'ml_ensemble.py --score',
     queueName: 'ml-daily-ops',
     staleLimitHours: 26,
+    cronPatterns: ['0 14 * * 1-5'],
+    graceMinutes: 60,
   },
   {
     id: 'ml-ensemble-train',
@@ -141,6 +157,9 @@ export const MONITOR_SCRIPTS = [
     pyScript: 'feature_engineering.py --date today',
     queueName: null,
     staleLimitHours: 26,
+    // Dedicated DL Feature Refresh queue, 0 10 * * 1-5 = 3:30pm IST (not ml-daily-ops).
+    cronPatterns: ['0 10 * * 1-5'],
+    graceMinutes: 60,
   },
   {
     id: 'reward-engine',
@@ -152,6 +171,8 @@ export const MONITOR_SCRIPTS = [
     pyScript: 'reward_engine.py',
     queueName: null,
     staleLimitHours: 26,
+    cronPatterns: ['0 14 * * 1-5'],
+    graceMinutes: 60,
   },
   {
     id: 'rl-agent-update',
@@ -163,6 +184,8 @@ export const MONITOR_SCRIPTS = [
     pyScript: 'rl_agent.py --update',
     queueName: null,
     staleLimitHours: 26,
+    cronPatterns: ['0 14 * * 1-5'],
+    graceMinutes: 60,
   },
   {
     id: 'dl-engine-infer',
@@ -174,6 +197,9 @@ export const MONITOR_SCRIPTS = [
     pyScript: 'dl_engine.py --mode infer',
     queueName: null,
     staleLimitHours: 26,
+    // Dedicated DL Inference queue, 0 17 * * 1-5 = 10:30pm IST.
+    cronPatterns: ['0 17 * * 1-5'],
+    graceMinutes: 45,
   },
   {
     id: 'dl-trainer',
@@ -197,6 +223,8 @@ export const MONITOR_SCRIPTS = [
     queueName: null,
     tsFunction: 'computeSignalTypeStats',
     staleLimitHours: 26,
+    cronPatterns: ['0 14 * * 1-5'],
+    graceMinutes: 60,
   },
   {
     id: 'screener-performance',
@@ -241,6 +269,13 @@ export const MONITOR_SCRIPTS = [
     pyScript: null,
     queueName: 'trendlyne-midweek',
     staleLimitHours: 200,
+    // Weekly Tuesday 30 12 * * 2 = 6pm IST. Cron-aware grace still correctly flags this one
+    // stale if it's genuinely missed 2+ weekly cycles (its MIN() of two source tables means
+    // a single broken underlying fetcher pins the whole entry stale) -- that is a real data
+    // problem to chase (see trendlyne_adv_tech_fetcher.py / trendlyne_price_analysis_fetcher.py),
+    // not a timing false-positive, so this field only removes the "checked mid-week" noise.
+    cronPatterns: ['30 12 * * 2'],
+    graceMinutes: 120,
   },
   {
     id: 'financial-ratios',
@@ -285,5 +320,11 @@ export const MONITOR_SCRIPTS = [
     pyScript: null,
     queueName: null,
     staleLimitHours: 1,
+    // Every 5 min, 9:15am-4:00pm IST weekdays (3:45-10:00 UTC truncated to hour boundaries).
+    // Cron-aware grace means this is only evaluated as "due" during the trading window --
+    // checking pre-market or over a weekend no longer false-flags off Friday's last capture,
+    // while a genuine intraday outage (like 2026-07-16) is still caught within ~20 min.
+    cronPatterns: ['*/5 3-10 * * 1-5'],
+    graceMinutes: 20,
   },
 ] as const;

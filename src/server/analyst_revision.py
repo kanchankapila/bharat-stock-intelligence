@@ -155,6 +155,8 @@ def _int(val) -> Optional[int]:
 
 # ─── Write-back ───────────────────────────────────────────────────────────────
 
+# date = ? guard (2026-07-19) instead of MAX(date) -- see bse_event_classifier.py's
+# run_daily docstring for why matching the latest row isn't the same as matching today's row.
 _UPDATE_SQL = """
 UPDATE technical_signals
 SET
@@ -162,9 +164,7 @@ SET
     target_revision_3m_pct = COALESCE(?, target_revision_3m_pct),
     analyst_count_chg      = COALESCE(?, analyst_count_chg)
 WHERE symbol = ?
-  AND date = (
-      SELECT MAX(date) FROM technical_signals ts2 WHERE ts2.symbol = ?
-  )
+  AND date = ?
 """
 
 
@@ -174,6 +174,7 @@ def write_revisions(revisions: pd.DataFrame) -> tuple[int, int]:
     if revisions.empty:
         return 0, 0
 
+    today = datetime.date.today().isoformat()
     params = []
     skipped = 0
     for r in revisions.itertuples(index=False):
@@ -186,7 +187,7 @@ def write_revisions(revisions: pd.DataFrame) -> tuple[int, int]:
             r.target_revision_3m_pct,
             r.analyst_count_chg,
             r.symbol,
-            r.symbol,
+            today,
         ))
 
     if not params:

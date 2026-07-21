@@ -417,44 +417,50 @@ def upsert_row(symbol: str, today: str, feat: dict, con) -> None:
 
 # â”€â”€ Back-fill technical_signals â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-def backfill_technical_signals(symbol: str, feat: dict, con) -> None:
+def backfill_technical_signals(symbol: str, today: str, feat: dict, con) -> None:
     """Write ML features derived from the fetched data into technical_signals.
 
-    Uses COALESCE so existing (non-NULL) values are not overwritten by a NULL.
-    Updates all rows for the symbol (no date filter) â€” technical_signals rows
-    are rolling and contain only the latest state per symbol.
+    Uses COALESCE so existing (non-NULL) values are not overwritten by a NULL, guarded to
+    today-or-later rows only. BUG FOUND 2026-07-19: this previously had no date filter at all
+    (`WHERE symbol = ?`) on the theory that "technical_signals rows are rolling and contain
+    only the latest state per symbol" -- that premise is wrong; it's a proper per-date time
+    series used for ML training on historical outcomes, and the old query smeared today's
+    snapshot across a symbol's entire history via COALESCE-fills-null-once-then-frozen-forever
+    (confirmed via mc_ma30_dist/mc_days_from_52wh in mc_pricefeed_fetcher.py, which had the
+    identical pattern). The `date >= ? ELSE NULL` guard matches the pattern already used
+    correctly elsewhere (trendlyne_fundamentals_fetcher.py, working_capital_fetcher.py).
     """
     if not feat:
         return
     cur = con.cursor()
     cur.execute("""
         UPDATE technical_signals SET
-            ma_bull_frac       = COALESCE(?, ma_bull_frac),
-            osc_bull_frac      = COALESCE(?, osc_bull_frac),
-            adx_tl             = COALESCE(?, adx_tl),
-            atr_pct_tl         = COALESCE(?, atr_pct_tl),
-            mfi_tl             = COALESCE(?, mfi_tl),
-            pivot_dist_pct_tl  = COALESCE(?, pivot_dist_pct_tl),
-            delivery_avg_1m_tl = COALESCE(?, delivery_avg_1m_tl),
-            beta_1y_tl         = COALESCE(?, beta_1y_tl),
-            ret_1m_tl          = COALESCE(?, ret_1m_tl),
-            ret_3m_tl          = COALESCE(?, ret_3m_tl),
-            ret_6m_tl          = COALESCE(?, ret_6m_tl),
-            ret_1y_tl          = COALESCE(?, ret_1y_tl)
+            ma_bull_frac       = CASE WHEN date >= ? THEN COALESCE(?, ma_bull_frac)       ELSE NULL END,
+            osc_bull_frac      = CASE WHEN date >= ? THEN COALESCE(?, osc_bull_frac)      ELSE NULL END,
+            adx_tl             = CASE WHEN date >= ? THEN COALESCE(?, adx_tl)             ELSE NULL END,
+            atr_pct_tl         = CASE WHEN date >= ? THEN COALESCE(?, atr_pct_tl)         ELSE NULL END,
+            mfi_tl             = CASE WHEN date >= ? THEN COALESCE(?, mfi_tl)             ELSE NULL END,
+            pivot_dist_pct_tl  = CASE WHEN date >= ? THEN COALESCE(?, pivot_dist_pct_tl)  ELSE NULL END,
+            delivery_avg_1m_tl = CASE WHEN date >= ? THEN COALESCE(?, delivery_avg_1m_tl) ELSE NULL END,
+            beta_1y_tl         = CASE WHEN date >= ? THEN COALESCE(?, beta_1y_tl)         ELSE NULL END,
+            ret_1m_tl          = CASE WHEN date >= ? THEN COALESCE(?, ret_1m_tl)          ELSE NULL END,
+            ret_3m_tl          = CASE WHEN date >= ? THEN COALESCE(?, ret_3m_tl)          ELSE NULL END,
+            ret_6m_tl          = CASE WHEN date >= ? THEN COALESCE(?, ret_6m_tl)          ELSE NULL END,
+            ret_1y_tl          = CASE WHEN date >= ? THEN COALESCE(?, ret_1y_tl)          ELSE NULL END
         WHERE symbol = ?
     """, (
-        feat.get("ma_bull_frac"),
-        feat.get("osc_bull_frac"),
-        feat.get("adx"),
-        feat.get("atr_pct"),
-        feat.get("mfi"),
-        feat.get("pivot_dist_pct"),
-        feat.get("delivery_pct_1m"),
-        feat.get("beta_1y"),
-        feat.get("ret_1m"),
-        feat.get("ret_3m"),
-        feat.get("ret_6m"),
-        feat.get("ret_1y"),
+        today, feat.get("ma_bull_frac"),
+        today, feat.get("osc_bull_frac"),
+        today, feat.get("adx"),
+        today, feat.get("atr_pct"),
+        today, feat.get("mfi"),
+        today, feat.get("pivot_dist_pct"),
+        today, feat.get("delivery_pct_1m"),
+        today, feat.get("beta_1y"),
+        today, feat.get("ret_1m"),
+        today, feat.get("ret_3m"),
+        today, feat.get("ret_6m"),
+        today, feat.get("ret_1y"),
         symbol,
     ))
     con.commit()
@@ -524,7 +530,7 @@ def main() -> None:
                     continue
                 feat = extract_features(params)
                 upsert_row(symbol, today, feat, con)
-                backfill_technical_signals(symbol, feat, con)
+                backfill_technical_signals(symbol, today, feat, con)
                 ma_str  = f"MA {feat.get('ma_bull','?')}up/{feat.get('ma_bear','?')}dn"
                 osc_str = f"OSC {feat.get('osc_bull','?')}up/{feat.get('osc_bear','?')}dn"
                 rsi_str = f"RSI={feat.get('rsi','?')}"

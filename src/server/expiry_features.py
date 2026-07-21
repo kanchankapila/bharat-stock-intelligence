@@ -31,9 +31,15 @@ def ensure_schema(con) -> None:
 
 
 def backfill_days_to_expiry(con) -> None:
-    """Update technical_signals.days_to_expiry/is_expiry_day for the latest row per symbol.
+    """Update technical_signals.days_to_expiry/is_expiry_day for today's row per symbol.
     nt_fno_expiry.symbol is already the canonical NSE ticker (no mcsymbol/scid mapping needed
-    -- sync_nt_fno_symbols.py writes NiftyTrader's symbol_name directly)."""
+    -- sync_nt_fno_symbols.py writes NiftyTrader's symbol_name directly).
+
+    date = today guard added 2026-07-19 on both branches -- the PG branch previously matched
+    (SELECT MAX(date)...) (see bse_event_classifier.py's run_daily docstring for why that's
+    wrong), and the SQLite branch had NO date guard at all -- it overwrote every historical row
+    for every symbol on every run (the severe smear bug, not just the milder latest-row one).
+    """
     cur = con.cursor()
     if use_postgres():
         cur.execute("""
@@ -47,14 +53,14 @@ def backfill_days_to_expiry(con) -> None:
                 GROUP BY symbol
             ) subq
             WHERE ts.symbol = subq.symbol
-              AND ts.date = (SELECT MAX(date) FROM technical_signals t2 WHERE t2.symbol = ts.symbol)
+              AND ts.date = CURRENT_DATE::text
         """)
         # Clear stale values for symbols that dropped out of the F&O universe (delisted from
         # F&O, or nt_fno_expiry's own refresh temporarily has no rows for them).
         cur.execute("""
             UPDATE technical_signals ts
             SET days_to_expiry = NULL, is_expiry_day = NULL
-            WHERE ts.date = (SELECT MAX(date) FROM technical_signals t2 WHERE t2.symbol = ts.symbol)
+            WHERE ts.date = CURRENT_DATE::text
               AND ts.days_to_expiry IS NOT NULL
               AND NOT EXISTS (
                   SELECT 1 FROM nt_fno_expiry e
@@ -70,11 +76,12 @@ def backfill_days_to_expiry(con) -> None:
                     WHERE e.symbol = technical_signals.symbol
                       AND e.expiry >= date('now')
                 )
+            WHERE date = date('now')
         """)
         cur.execute("""
             UPDATE technical_signals
             SET is_expiry_day = CASE WHEN days_to_expiry = 0 THEN 1 ELSE 0 END
-            WHERE days_to_expiry IS NOT NULL
+            WHERE days_to_expiry IS NOT NULL AND date = date('now')
         """)
     con.commit()
 

@@ -26,14 +26,16 @@ def run_backtest(filters: list[str], horizon: str = '3d', initial_capital: float
         print("[Error] No filters provided for backtest.")
         return
         
-    horizon_days_map = {'1d': 1, '3d': 3, '5d': 5}
+    # 'intraday' exits same-day, but the equity loop below steps day-by-day, so it still
+    # needs a 1-day holding slot to clear the position on the next date it processes.
+    horizon_days_map = {'1d': 1, '3d': 3, '5d': 5, 'intraday': 1}
     horizon_days = horizon_days_map.get(horizon, 3)
-    return_col = f"return_{horizon}"
-    
+    return_col = 'return_intraday' if horizon == 'intraday' else f"return_{horizon}"
+
     # 1. Fetch live screener outcomes for the specified filters
     placeholders = ",".join(["?"] * len(filters))
     q = f"""
-        SELECT symbol, appeared_at, entry_price, return_1d, return_3d, return_5d, filter_key
+        SELECT symbol, appeared_at, entry_price, return_1d, return_3d, return_5d, return_intraday, filter_key
         FROM live_screener_outcomes
         WHERE filter_key IN ({placeholders})
     """
@@ -255,7 +257,9 @@ def run_backtest(filters: list[str], horizon: str = '3d', initial_capital: float
                  monthly_returns_json, equity_curve_json, trade_log_json)
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
-            f"live_screener_{'_'.join(filters[:2])}",
+            # horizon suffix keeps intraday and swing (1d/3d/5d) backtests of the same filter
+            # combo from colliding under one run_name -- frontend matches runs by name+filters.
+            f"live_screener_{horizon}_{'_'.join(filters[:2])}",
             json.dumps(config),
             unique_dates[0],
             unique_dates[-1],
@@ -279,9 +283,9 @@ def run_backtest(filters: list[str], horizon: str = '3d', initial_capital: float
         ))
         print("[LiveScreenerBacktester] Saved backtest run to backtesting_runs table.")
 
-def show_recommendations():
+def show_recommendations(settings_key: str = 'live_screener_optimal_combinations'):
     conn = connect()
-    row = conn.execute("SELECT value FROM app_settings WHERE key = 'live_screener_optimal_combinations'").fetchone()
+    row = conn.execute("SELECT value FROM app_settings WHERE key = ?", (settings_key,)).fetchone()
     conn.close()
     if row:
         data = json.loads(row[0])
@@ -294,10 +298,11 @@ def show_recommendations():
     else:
         print("[LiveScreenerBacktester] No recommendations found. Run live_screener_optimizer.py first.")
 
-def auto_backtest_top(n: int = 5, horizon: str = '3d', initial_capital: float = 1000000.0, max_positions: int = 10):
+def auto_backtest_top(n: int = 5, horizon: str = '3d', initial_capital: float = 1000000.0, max_positions: int = 10,
+                       settings_key: str = 'live_screener_optimal_combinations'):
     """Reads top N combinations from app_settings and runs a backtest for each one."""
     conn = connect()
-    row = conn.execute("SELECT value FROM app_settings WHERE key = 'live_screener_optimal_combinations'").fetchone()
+    row = conn.execute("SELECT value FROM app_settings WHERE key = ?", (settings_key,)).fetchone()
     conn.close()
     if not row:
         print("[AutoBacktest] No optimal combinations found. Run live_screener_optimizer.py first.")
@@ -330,20 +335,27 @@ def auto_backtest_top(n: int = 5, horizon: str = '3d', initial_capital: float = 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Backtest custom NiftyTrader live screener combinations.")
     parser.add_argument('--filters', type=str, help="Comma-separated NiftyTrader filter keys.")
-    parser.add_argument('--horizon', type=str, choices=['1d', '3d', '5d'], default='3d', help="Holding period horizon.")
+    parser.add_argument('--horizon', type=str, choices=['1d', '3d', '5d', 'intraday'], default='3d', help="Holding period horizon.")
     parser.add_argument('--capital', type=float, default=1000000.0, help="Initial portfolio capital.")
     parser.add_argument('--max-positions', type=int, default=10, help="Maximum open concurrent positions.")
     parser.add_argument('--start', type=str, help="Start date (YYYY-MM-DD).")
     parser.add_argument('--end', type=str, help="End date (YYYY-MM-DD).")
     parser.add_argument('--recommend', action='store_true', help="Show recommended combinations from optimizer.")
     parser.add_argument('--auto-backtest-top', type=int, metavar='N', help="Auto-backtest top N combos from optimizer.")
-    
+    parser.add_argument('--intraday', action='store_true',
+                         help="Use the intraday optimizer combos (live_screener_optimal_combinations_intraday) "
+                              "and return_intraday outcomes. Combine with --auto-backtest-top or --filters.")
+
     args = parser.parse_args()
-    
+
+    if args.intraday:
+        args.horizon = 'intraday'
+
     if args.recommend:
-        show_recommendations()
+        show_recommendations('live_screener_optimal_combinations_intraday' if args.intraday else 'live_screener_optimal_combinations')
     elif args.auto_backtest_top:
-        auto_backtest_top(args.auto_backtest_top, args.horizon, args.capital, args.max_positions)
+        settings_key = 'live_screener_optimal_combinations_intraday' if args.intraday else 'live_screener_optimal_combinations'
+        auto_backtest_top(args.auto_backtest_top, args.horizon, args.capital, args.max_positions, settings_key)
     elif args.filters:
         filters_list = [f.strip() for f in args.filters.split(',')]
         run_backtest(filters_list, args.horizon, args.capital, args.max_positions, args.start, args.end)

@@ -395,7 +395,24 @@ def upsert_row(symbol: str, today: str, f: dict, con) -> None:
     con.commit()
 
 
-def backfill_technical_signals(symbol: str, f: dict, con) -> None:
+def backfill_technical_signals(symbol: str, today: str, f: dict, con) -> None:
+    """Writes only the columns that genuinely have no point-in-time-correct alternative
+    (fundamentals/consensus/delivery -- live-snapshot-only by nature). The price/volume
+    columns this used to write (mc_ma30/50/150/200_dist_pct, mc_3d_return,
+    mc_52w_high/low_dist_pct, mc_days_from_52wh, mc_ytd_return, mc_vol_ratio) are now owned
+    exclusively by mc_price_features_ohlcv.py, which derives them from stock_ohlcv and is
+    correct for every historical date, not just today.
+
+    BUG FOUND 2026-07-19: the old UPDATE here had `WHERE symbol = ?` with NO date filter, so
+    every run smeared today's live snapshot across a symbol's ENTIRE technical_signals
+    history via COALESCE-fills-null-once-then-frozen-forever (confirmed: mc_days_from_52wh,
+    a day-counter that must increment daily, was IDENTICAL across 8-16 different dates for
+    every symbol checked). The `date >= ? ELSE NULL` guard below is the same pattern already
+    used correctly elsewhere in this codebase (trendlyne_fundamentals_fetcher.py,
+    working_capital_fetcher.py, financial_ratios_fetcher.py) for exactly this class of
+    live-only data: only apply to today-or-later rows, and explicitly NULL any older row
+    that's still carrying yesterday's frozen value instead of silently keeping it.
+    """
     cur = con.cursor()
     # del_acceleration: 3-day delivery % relative to 20-day baseline (positive = rising institutional interest)
     d3  = f.get("del_pct_3d")
@@ -405,46 +422,32 @@ def backfill_technical_signals(symbol: str, f: dict, con) -> None:
 
     cur.execute("""
         UPDATE technical_signals SET
-            mc_52w_high_dist_pct = COALESCE(?, mc_52w_high_dist_pct),
-            mc_52w_low_dist_pct  = COALESCE(?, mc_52w_low_dist_pct),
-            mc_days_from_52wh    = COALESCE(?, mc_days_from_52wh),
-            mc_cagr_3y           = COALESCE(?, mc_cagr_3y),
-            mc_cagr_5y           = COALESCE(?, mc_cagr_5y),
-            mc_cagr_10y          = COALESCE(?, mc_cagr_10y),
-            mc_ind_pe            = COALESCE(?, mc_ind_pe),
-            mc_pe_vs_ind         = COALESCE(?, mc_pe_vs_ind),
-            mc_consensus_pe      = COALESCE(?, mc_consensus_pe),
-            mc_consensus_pb      = COALESCE(?, mc_consensus_pb),
-            mc_ma30_dist_pct     = COALESCE(?, mc_ma30_dist_pct),
-            mc_ma50_dist_pct     = COALESCE(?, mc_ma50_dist_pct),
-            mc_ma150_dist_pct    = COALESCE(?, mc_ma150_dist_pct),
-            mc_ma200_dist_pct    = COALESCE(?, mc_ma200_dist_pct),
-            mc_del_pct_3d        = COALESCE(?, mc_del_pct_3d),
-            mc_del_pct_5d        = COALESCE(?, mc_del_pct_5d),
-            mc_del_pct_20d       = COALESCE(?, mc_del_pct_20d),
-            mc_del_acceleration  = COALESCE(?, mc_del_acceleration),
-            mc_vol_ratio         = COALESCE(?, mc_vol_ratio),
-            mc_circuit_dist_pct  = COALESCE(?, mc_circuit_dist_pct),
-            mc_fno_eligible      = COALESCE(?, mc_fno_eligible),
-            mc_3d_return         = COALESCE(?, mc_3d_return),
-            mc_ytd_return        = COALESCE(?, mc_ytd_return),
-            mc_price_cash        = COALESCE(?, mc_price_cash),
-            mc_consensus_eps     = COALESCE(?, mc_consensus_eps),
-            mc_eps_vs_cons       = COALESCE(?, mc_eps_vs_cons),
-            mc_pe_fwd_discount   = COALESCE(?, mc_pe_fwd_discount)
+            mc_cagr_3y           = CASE WHEN date >= ? THEN COALESCE(?, mc_cagr_3y)           ELSE NULL END,
+            mc_cagr_5y           = CASE WHEN date >= ? THEN COALESCE(?, mc_cagr_5y)           ELSE NULL END,
+            mc_cagr_10y          = CASE WHEN date >= ? THEN COALESCE(?, mc_cagr_10y)          ELSE NULL END,
+            mc_ind_pe            = CASE WHEN date >= ? THEN COALESCE(?, mc_ind_pe)            ELSE NULL END,
+            mc_pe_vs_ind         = CASE WHEN date >= ? THEN COALESCE(?, mc_pe_vs_ind)         ELSE NULL END,
+            mc_consensus_pe      = CASE WHEN date >= ? THEN COALESCE(?, mc_consensus_pe)      ELSE NULL END,
+            mc_consensus_pb      = CASE WHEN date >= ? THEN COALESCE(?, mc_consensus_pb)      ELSE NULL END,
+            mc_del_pct_3d        = CASE WHEN date >= ? THEN COALESCE(?, mc_del_pct_3d)        ELSE NULL END,
+            mc_del_pct_5d        = CASE WHEN date >= ? THEN COALESCE(?, mc_del_pct_5d)        ELSE NULL END,
+            mc_del_pct_20d       = CASE WHEN date >= ? THEN COALESCE(?, mc_del_pct_20d)       ELSE NULL END,
+            mc_del_acceleration  = CASE WHEN date >= ? THEN COALESCE(?, mc_del_acceleration)  ELSE NULL END,
+            mc_circuit_dist_pct  = CASE WHEN date >= ? THEN COALESCE(?, mc_circuit_dist_pct)  ELSE NULL END,
+            mc_fno_eligible      = CASE WHEN date >= ? THEN COALESCE(?, mc_fno_eligible)      ELSE NULL END,
+            mc_price_cash        = CASE WHEN date >= ? THEN COALESCE(?, mc_price_cash)        ELSE NULL END,
+            mc_consensus_eps     = CASE WHEN date >= ? THEN COALESCE(?, mc_consensus_eps)     ELSE NULL END,
+            mc_eps_vs_cons       = CASE WHEN date >= ? THEN COALESCE(?, mc_eps_vs_cons)       ELSE NULL END,
+            mc_pe_fwd_discount   = CASE WHEN date >= ? THEN COALESCE(?, mc_pe_fwd_discount)   ELSE NULL END
         WHERE symbol = ?
     """, (
-        f.get("dist_52w_high"), f.get("dist_52w_low"), f.get("days_from_52wh"),
-        f.get("cagr_3y"), f.get("cagr_5y"), f.get("cagr_10y"),
-        f.get("ind_pe"), f.get("pe_vs_ind"), f.get("consensus_pe"), f.get("consensus_pb"),
-        f.get("ma30_dist_pct"), f.get("ma50_dist_pct"),
-        f.get("ma150_dist_pct"), f.get("ma200_dist_pct"),
-        f.get("del_pct_3d"), f.get("del_pct_5d"), f.get("del_pct_20d"),
-        del_acc, f.get("vol_ratio"), f.get("circuit_dist_pct"),
-        fno_elig,
-        f.get("ret_3d"), f.get("ret_ytd"),
-        f.get("price_cash"), f.get("consensus_eps"),
-        f.get("eps_vs_cons"), f.get("pe_fwd_discount"),
+        today, f.get("cagr_3y"), today, f.get("cagr_5y"), today, f.get("cagr_10y"),
+        today, f.get("ind_pe"), today, f.get("pe_vs_ind"),
+        today, f.get("consensus_pe"), today, f.get("consensus_pb"),
+        today, f.get("del_pct_3d"), today, f.get("del_pct_5d"), today, f.get("del_pct_20d"),
+        today, del_acc, today, f.get("circuit_dist_pct"), today, fno_elig,
+        today, f.get("price_cash"), today, f.get("consensus_eps"),
+        today, f.get("eps_vs_cons"), today, f.get("pe_fwd_discount"),
         symbol,
     ))
     con.commit()
@@ -524,7 +527,7 @@ def main() -> None:
                     continue
                 f = extract_features(data)
                 upsert_row(symbol, today, f, con)
-                backfill_technical_signals(symbol, f, con)
+                backfill_technical_signals(symbol, today, f, con)
                 append_pe_pb_history(symbol, today, f.get("pe"), f.get("pb"), con)
                 ind_pe_str = f"IND_PE={f.get('ind_pe','?')} vs_ind={f.get('pe_vs_ind','?')}"
                 cagr_str   = f"CAGR3={f.get('cagr_3y','?')}% CAGR5={f.get('cagr_5y','?')}%"

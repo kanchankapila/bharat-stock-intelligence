@@ -100,8 +100,16 @@ def _build_event_index(con, since: str) -> dict[str, list[tuple[str, float, str]
 
 
 def run_daily(con):
-    """Update latest ts row per symbol using last 30 days of news."""
+    """Update today's ts row per symbol using last 30 days of news.
+
+    date = ? guard added 2026-07-19 -- previously matched (symbol, MAX(date)), which silently
+    overwrites a STALE historical row (not today's) whenever this runs before today's scan has
+    created a row, or after a gap in the scan schedule. Same underlying assumption-bug class as
+    the no-date-filter smear already fixed elsewhere, just milder (touches one wrong row, not
+    every historical row) -- see mc_pricefeed_fetcher.py's backfill_technical_signals docstring.
+    """
     ensure_schema(con)
+    today = datetime.now().strftime('%Y-%m-%d')
     since = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
     idx = _build_event_index(con, since)
     print(f"[EventClassifier] {len(idx)} symbols with events in last 30 days")
@@ -113,10 +121,8 @@ def run_daily(con):
         con.execute("""
             UPDATE technical_signals
             SET event_signal_score = ?, event_type_flags = ?
-            WHERE (symbol, date) IN (
-                SELECT symbol, MAX(date) FROM technical_signals WHERE symbol = ? GROUP BY symbol
-            )
-        """, (round(score, 2), json.dumps(etypes), symbol))
+            WHERE symbol = ? AND date = ?
+        """, (round(score, 2), json.dumps(etypes), symbol, today))
         updated += 1
     con.commit()
     print(f"[EventClassifier] Wrote event scores for {updated} symbols.")

@@ -256,24 +256,29 @@ def upsert_row(symbol: str, today_str: str, f: dict, con) -> None:
     con.commit()
 
 
-def backfill_technical_signals(symbol: str, f: dict, con) -> None:
+def backfill_technical_signals(symbol: str, today_str: str, f: dict, con) -> None:
+    """date >= ? ELSE NULL guard added 2026-07-19 -- this previously had no date filter
+    (`WHERE symbol = ?`), smearing today's snapshot across a symbol's entire history via
+    COALESCE-fills-null-once-then-frozen-forever. Same bug class found in
+    mc_pricefeed_fetcher.py and trendlyne_adv_tech_fetcher.py; see those for the full writeup."""
     cur = con.cursor()
     cur.execute("""
         UPDATE technical_signals SET
-            tl_vs_nifty_1m       = COALESCE(?, tl_vs_nifty_1m),
-            tl_vs_nifty_3m       = COALESCE(?, tl_vs_nifty_3m),
-            tl_vs_nifty_6m       = COALESCE(?, tl_vs_nifty_6m),
-            tl_vs_ind_1m         = COALESCE(?, tl_vs_ind_1m),
-            tl_vs_ind_3m         = COALESCE(?, tl_vs_ind_3m),
-            tl_seasonal_month_5y = COALESCE(?, tl_seasonal_month_5y),
-            tl_dist_3m_high_pct  = COALESCE(?, tl_dist_3m_high_pct),
-            tl_dist_3m_low_pct   = COALESCE(?, tl_dist_3m_low_pct)
+            tl_vs_nifty_1m       = CASE WHEN date >= ? THEN COALESCE(?, tl_vs_nifty_1m)       ELSE NULL END,
+            tl_vs_nifty_3m       = CASE WHEN date >= ? THEN COALESCE(?, tl_vs_nifty_3m)       ELSE NULL END,
+            tl_vs_nifty_6m       = CASE WHEN date >= ? THEN COALESCE(?, tl_vs_nifty_6m)       ELSE NULL END,
+            tl_vs_ind_1m         = CASE WHEN date >= ? THEN COALESCE(?, tl_vs_ind_1m)         ELSE NULL END,
+            tl_vs_ind_3m         = CASE WHEN date >= ? THEN COALESCE(?, tl_vs_ind_3m)         ELSE NULL END,
+            tl_seasonal_month_5y = CASE WHEN date >= ? THEN COALESCE(?, tl_seasonal_month_5y) ELSE NULL END,
+            tl_dist_3m_high_pct  = CASE WHEN date >= ? THEN COALESCE(?, tl_dist_3m_high_pct)  ELSE NULL END,
+            tl_dist_3m_low_pct   = CASE WHEN date >= ? THEN COALESCE(?, tl_dist_3m_low_pct)   ELSE NULL END
         WHERE symbol = ?
     """, (
-        f.get("alpha_nifty_1m"), f.get("alpha_nifty_3m"), f.get("alpha_nifty_6m"),
-        f.get("alpha_ind_1m"), f.get("alpha_ind_3m"),
-        f.get("tl_seasonal_month_5y"),
-        f.get("dist_3m_high_pct"), f.get("dist_3m_low_pct"),
+        today_str, f.get("alpha_nifty_1m"), today_str, f.get("alpha_nifty_3m"),
+        today_str, f.get("alpha_nifty_6m"),
+        today_str, f.get("alpha_ind_1m"), today_str, f.get("alpha_ind_3m"),
+        today_str, f.get("tl_seasonal_month_5y"),
+        today_str, f.get("dist_3m_high_pct"), today_str, f.get("dist_3m_low_pct"),
         symbol,
     ))
     con.commit()
@@ -333,7 +338,7 @@ def main() -> None:
                     continue
                 f = extract_features(body, today)
                 upsert_row(symbol, today_str, f, con)
-                backfill_technical_signals(symbol, f, con)
+                backfill_technical_signals(symbol, today_str, f, con)
                 alpha_str    = f"aNifty1M={f.get('alpha_nifty_1m','?')}% aNifty3M={f.get('alpha_nifty_3m','?')}%"
                 ind_str      = f"aInd1M={f.get('alpha_ind_1m','?')}%"
                 seasonal_str = f"season={f.get('tl_seasonal_month_5y','?')}%"

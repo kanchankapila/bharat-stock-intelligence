@@ -3,12 +3,19 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // vi.mock() calls are hoisted above all other statements, so any variable referenced
 // inside a factory must itself be created via vi.hoisted() (or be "mock"-prefixed and
 // still hit ordering edge cases with multiple mocks) — see https://vitest.dev/api/vi.html#vi-hoisted
-const { mockSend, mockGetLateJobs, mockWasAlreadyAlerted, mockMarkAlerted, mockGetSystemStatus } = vi.hoisted(() => ({
+const {
+  mockSend, mockGetLateJobs, mockWasAlreadyAlerted, mockMarkAlerted, mockGetSystemStatus,
+  mockDbGet, mockDbRun, mockRunDataQualityChecks, mockGetLatestDataQualityResults,
+} = vi.hoisted(() => ({
   mockSend: vi.fn(async (_text: string) => true),
   mockGetLateJobs: vi.fn(),
   mockWasAlreadyAlerted: vi.fn(),
   mockMarkAlerted: vi.fn(),
   mockGetSystemStatus: vi.fn(async () => []),
+  mockDbGet: vi.fn(async () => undefined),
+  mockDbRun: vi.fn(async () => ({ changes: 0, lastInsertRowid: 0 })),
+  mockRunDataQualityChecks: vi.fn(async () => []),
+  mockGetLatestDataQualityResults: vi.fn(async () => []),
 }));
 
 vi.mock('../telegramService', () => ({
@@ -33,7 +40,17 @@ vi.mock('../routers/monitor.router', () => ({
   MONITOR_SCRIPTS: [],
 }));
 
-import { checkAndAlertLateJobs, buildDailyDigest, checkAndAlertStaleScripts } from '../jobWatchdog';
+vi.mock('../dbAsync', () => ({
+  dbGet: mockDbGet,
+  dbRun: mockDbRun,
+}));
+
+vi.mock('../dataQualityChecks', () => ({
+  runDataQualityChecks: mockRunDataQualityChecks,
+  getLatestDataQualityResults: mockGetLatestDataQualityResults,
+}));
+
+import { checkAndAlertLateJobs, buildDailyDigest, checkAndAlertStaleScripts, checkAndAlertDataQuality } from '../jobWatchdog';
 
 describe('checkAndAlertLateJobs', () => {
   beforeEach(() => {
@@ -124,15 +141,135 @@ describe('checkAndAlertStaleScripts', () => {
   });
 });
 
+describe('checkAndAlertDataQuality', () => {
+  beforeEach(() => {
+    mockSend.mockClear();
+    mockMarkAlerted.mockClear();
+    mockWasAlreadyAlerted.mockReset().mockResolvedValue(false);
+    mockRunDataQualityChecks.mockReset();
+  });
+
+  it('sends one Telegram alert for a critical check in fail state not yet alerted today', async () => {
+    mockRunDataQualityChecks.mockResolvedValue([
+      { id: 'ohlcv-freshness-coverage', label: 'OHLCV freshness', category: 'ohlcv', critical: true, status: 'fail', detail: 'stale' },
+    ]);
+    await checkAndAlertDataQuality(new Date('2026-07-02T12:00:00Z'));
+    expect(mockSend).toHaveBeenCalledTimes(1);
+    expect(mockSend.mock.calls[0][0]).toContain('OHLCV freshness');
+    expect(mockMarkAlerted).toHaveBeenCalledWith('ohlcv-freshness-coverage', Date.UTC(2026, 6, 2));
+  });
+
+  it('alerts for a critical check in error state too', async () => {
+    mockRunDataQualityChecks.mockResolvedValue([
+      { id: 'some-check', label: 'Some Check', category: 'ohlcv', critical: true, status: 'error', detail: 'query threw' },
+    ]);
+    await checkAndAlertDataQuality(new Date('2026-07-02T12:00:00Z'));
+    expect(mockSend).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not alert for a critical check in pass/warn state', async () => {
+    mockRunDataQualityChecks.mockResolvedValue([
+      { id: 'a', label: 'A', category: 'ohlcv', critical: true, status: 'pass', detail: 'ok' },
+      { id: 'b', label: 'B', category: 'ohlcv', critical: true, status: 'warn', detail: 'borderline' },
+    ]);
+    await checkAndAlertDataQuality(new Date('2026-07-02T12:00:00Z'));
+    expect(mockSend).not.toHaveBeenCalled();
+  });
+
+  it('does not alert for a non-critical check even if failing', async () => {
+    mockRunDataQualityChecks.mockResolvedValue([
+      { id: 'noncrit', label: 'Noncrit', category: 'ohlcv', critical: false, status: 'fail', detail: 'oops' },
+    ]);
+    await checkAndAlertDataQuality(new Date('2026-07-02T12:00:00Z'));
+    expect(mockSend).not.toHaveBeenCalled();
+  });
+
+  it('does not re-alert if wasAlreadyAlerted returns true for today', async () => {
+    mockRunDataQualityChecks.mockResolvedValue([
+      { id: 'ohlcv-freshness-coverage', label: 'OHLCV freshness', category: 'ohlcv', critical: true, status: 'fail', detail: 'stale' },
+    ]);
+    mockWasAlreadyAlerted.mockResolvedValue(true);
+    await checkAndAlertDataQuality(new Date('2026-07-02T12:00:00Z'));
+    expect(mockSend).not.toHaveBeenCalled();
+  });
+});
+
 describe('buildDailyDigest', () => {
-  it('includes every registry job and every MONITOR_SCRIPTS entry', async () => {
+  beforeEach(() => {
+    mockDbGet.mockReset().mockResolvedValue(undefined);
+    mockDbRun.mockReset().mockResolvedValue({ changes: 0, lastInsertRowid: 0 });
+    mockGetLatestDataQualityResults.mockReset().mockResolvedValue([]);
+    mockRunDataQualityChecks.mockClear();
+  });
+
+  it('lists a late registry job and a stale script under "Needs attention"', async () => {
+    mockGetLateJobs.mockResolvedValue([
+      { job: 'critical-job', label: 'Critical Job', expectedAt: new Date('2026-07-02T10:00:00Z'), hoursLate: 2, lastError: null },
+    ]);
+    mockGetSystemStatus.mockResolvedValue([
+      { id: 'technical-scan', label: 'Technical Signal Scan', runState: 'stale', lastRunAt: '2026-06-28T09:00:00Z', critical: true },
+    ]);
+    const digest = await buildDailyDigest(new Date('2026-07-02T15:30:00Z'));
+    expect(digest).toContain('Needs attention');
+    expect(digest).toContain('Critical Job');
+    expect(digest).toContain('Technical Signal Scan');
+    // Healthy, never-before-seen "Noncritical Job" isn't spammed into the digest body —
+    // first-seen keys are recorded but not diffed/listed until the next run.
+    expect(digest).not.toContain('Noncritical Job');
+  });
+
+  it('reports a recovery in "Changed since last report" when a previously-stale item turns healthy', async () => {
+    mockDbGet.mockResolvedValue({
+      value: JSON.stringify({ 'registry:critical-job': 'ontime', 'script:technical-scan': 'stale' }),
+    });
+    mockGetLateJobs.mockResolvedValue([]); // critical-job on time again
+    mockGetSystemStatus.mockResolvedValue([
+      { id: 'technical-scan', label: 'Technical Signal Scan', runState: 'success', lastRunAt: '2026-07-02T09:00:00Z', critical: true },
+    ]);
+    const digest = await buildDailyDigest(new Date('2026-07-02T15:30:00Z'));
+    expect(digest).toContain('Changed since last report');
+    expect(digest).toContain('Technical Signal Scan');
+    expect(digest).toContain('recovered');
+    expect(digest).not.toContain('Needs attention');
+  });
+
+  it('reports a compact "all healthy, unchanged" summary when nothing changed and nothing is wrong', async () => {
+    mockDbGet.mockResolvedValue({
+      value: JSON.stringify({ 'registry:critical-job': 'ontime', 'registry:noncritical-job': 'ontime', 'script:technical-scan': 'success' }),
+    });
     mockGetLateJobs.mockResolvedValue([]);
     mockGetSystemStatus.mockResolvedValue([
       { id: 'technical-scan', label: 'Technical Signal Scan', runState: 'success', lastRunAt: '2026-07-02T09:00:00Z', critical: true },
     ]);
     const digest = await buildDailyDigest(new Date('2026-07-02T15:30:00Z'));
-    expect(digest).toContain('Critical Job');
-    expect(digest).toContain('Noncritical Job');
-    expect(digest).toContain('Technical Signal Scan');
+    expect(digest).toContain('Nothing changed since the last report');
+    expect(digest).toContain('3 other job(s) healthy and unchanged');
+    expect(digest).not.toContain('Needs attention');
+    expect(digest).not.toContain('Changed since last report');
+  });
+
+  it('persists the current state for the next run to diff against', async () => {
+    mockGetLateJobs.mockResolvedValue([]);
+    mockGetSystemStatus.mockResolvedValue([
+      { id: 'technical-scan', label: 'Technical Signal Scan', runState: 'success', lastRunAt: '2026-07-02T09:00:00Z', critical: true },
+    ]);
+    await buildDailyDigest(new Date('2026-07-02T15:30:00Z'));
+    expect(mockDbRun).toHaveBeenCalled();
+    const call = mockDbRun.mock.calls[0] as unknown as [string, any[]];
+    const saved = JSON.parse(call[1][1]);
+    expect(saved).toMatchObject({ 'registry:critical-job': 'ontime', 'script:technical-scan': 'success' });
+  });
+
+  it('lists a failing critical data-quality check under "Needs attention" and reads it from the persisted table, not a fresh run', async () => {
+    mockGetLateJobs.mockResolvedValue([]);
+    mockGetSystemStatus.mockResolvedValue([]);
+    mockGetLatestDataQualityResults.mockResolvedValue([
+      { id: 'ohlcv-freshness-coverage', label: 'OHLCV freshness', category: 'ohlcv', critical: true, status: 'fail', detail: 'Latest bar is 6.0d old' },
+    ]);
+    const digest = await buildDailyDigest(new Date('2026-07-02T15:30:00Z'));
+    expect(digest).toContain('Needs attention');
+    expect(digest).toContain('OHLCV freshness');
+    expect(digest).toContain('Latest bar is 6.0d old');
+    expect(mockRunDataQualityChecks).not.toHaveBeenCalled();
   });
 });

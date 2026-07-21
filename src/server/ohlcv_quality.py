@@ -22,6 +22,20 @@ from db_compat import connect, ConnWrapper
 BAD_PRINT_THRESHOLD = 0.35   # > 35% day-over-day vs BOTH neighbours = suspect spike
 ACTION_WINDOW_DAYS = 3       # don't flag within ±3d of a known ex-date
 
+# is_bad_print/flag_bad_prints only catch a transient single-bar SPIKE (deviates from both
+# neighbours, then reverts) -- by design a genuine level shift is kept, since that's meant to
+# protect real corporate-action repricing. But that also means a SUSTAINED, non-reverting jump
+# slips through untouched even when it's not a real corporate action -- e.g. a split-adjustment
+# seam between this codebase's two OHLCV sources (deep MC backfill vs live yfinance daily
+# appends, see mc_ohlcv_backfill.py's docstring) for a symbol whose split happened after the
+# initial backfill. Found 2026-07-19: ARIHANT jumps from ~40 to ~930 on 2026-04-20 and STAYS
+# there for the following week -- not a spike, is_bad_print correctly doesn't flag it, but no
+# real NSE stock moves 2200% in one session either. EXTREME_SHIFT_THRESHOLD is set far above
+# anything a real single-day move (even a freak one) could produce, so it's safe to flag off a
+# single neighbour without requiring reversion -- still gated by the same corporate-action
+# allowlist so a real, legitimate large repricing is never flagged.
+EXTREME_SHIFT_THRESHOLD = 0.75  # > 75% vs prior close, un-reverted = still flagged
+
 
 # ── corporate-action parsing (allowlist source) ─────────────────────────────────
 
@@ -172,6 +186,55 @@ def flag_bad_prints(conn: ConnWrapper, threshold: float = BAD_PRINT_THRESHOLD,
     return {'flagged': len(suspects_to_update)}
 
 
+def flag_extreme_level_shifts(conn: ConnWrapper, threshold: float = EXTREME_SHIFT_THRESHOLD,
+                              action_window_days: int = ACTION_WINDOW_DAYS) -> dict:
+    """Mark stock_ohlcv.is_suspect for single-day moves too large to ever be a real trade,
+    whether or not the price reverts afterward (unlike flag_bad_prints, which requires
+    reversion on both sides). Does NOT reset is_suspect first -- runs after flag_bad_prints
+    in run() and adds to what it already flagged, rather than overwriting it."""
+    actions_rows = conn.execute("SELECT symbol, ex_date FROM corporate_actions").fetchall()
+    action_map = {}
+    for r in actions_rows:
+        sym = r[0] if isinstance(r, (list, tuple)) else r['symbol']
+        dt  = str(r[1] if isinstance(r, (list, tuple)) else r['ex_date'])[:10]
+        action_map.setdefault(sym, []).append(dt)
+
+    bars_rows = conn.execute("SELECT symbol, date, close FROM stock_ohlcv ORDER BY symbol, date").fetchall()
+    bars_map = {}
+    for r in bars_rows:
+        sym = r[0] if isinstance(r, (list, tuple)) else r['symbol']
+        dt  = str(r[1] if isinstance(r, (list, tuple)) else r['date'])[:10]
+        c   = float(r[2] if isinstance(r, (list, tuple)) else r['close'] or 0)
+        bars_map.setdefault(sym, []).append((dt, c))
+
+    suspects_to_update = []
+    for sym, bars in bars_map.items():
+        if len(bars) < 2:
+            continue
+        action_dates = action_map.get(sym, [])
+        for i in range(1, len(bars)):
+            d, c = bars[i]
+            prev_close = bars[i - 1][1]
+            if prev_close <= 0 or c is None or c < 0:
+                continue
+            dev = abs(c - prev_close) / prev_close
+            if dev > threshold:
+                near = any(_within(d, ad, action_window_days) for ad in action_dates)
+                if not near:
+                    suspects_to_update.append((sym, d))
+
+    print(f"[OHLCVQuality] Flagging {len(suspects_to_update)} extreme-level-shift bars in database...")
+    if suspects_to_update:
+        conn.executemany(
+            "UPDATE stock_ohlcv SET is_suspect=1 WHERE symbol=? AND date=?",
+            suspects_to_update
+        )
+    conn.commit()
+
+    print(f"[OHLCVQuality] flagged {len(suspects_to_update)} extreme-level-shift bars")
+    return {'flagged': len(suspects_to_update)}
+
+
 def run(ingest: bool = True):
     conn = connect()
     try:
@@ -179,6 +242,7 @@ def run(ingest: bool = True):
             symbols = [r[0] for r in conn.execute("SELECT DISTINCT symbol FROM stock_ohlcv").fetchall()]
             ingest_corporate_actions(conn, symbols)
         flag_bad_prints(conn)
+        flag_extreme_level_shifts(conn)
     finally:
         conn.close()
 

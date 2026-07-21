@@ -493,7 +493,7 @@ def upsert_profile(symbol: str, today: str, profile: dict, con) -> None:
     con.commit()
 
 
-def backfill_technical_signals(symbol: str, profile: dict, con) -> None:
+def backfill_technical_signals(symbol: str, today: str, profile: dict, con) -> None:
     if not profile:
         return
     # Point-in-time: shareholding + its QoQ deltas apply only to rows on/after the disclosure
@@ -503,13 +503,13 @@ def backfill_technical_signals(symbol: str, profile: dict, con) -> None:
     cur = con.cursor()
     cur.execute("""
         UPDATE technical_signals SET
-            analyst_upside_pct  = COALESCE(?, analyst_upside_pct),
-            analyst_count       = COALESCE(?, analyst_count),
-            analyst_buy_pct     = COALESCE(?, analyst_buy_pct),
-            roe_annual          = COALESCE(?, roe_annual),
-            roce_annual         = COALESCE(?, roce_annual),
-            ebitda_margin       = COALESCE(?, ebitda_margin),
-            np_margin           = COALESCE(?, np_margin),
+            analyst_upside_pct  = CASE WHEN date >= ? THEN COALESCE(?, analyst_upside_pct)  ELSE NULL END,
+            analyst_count       = CASE WHEN date >= ? THEN COALESCE(?, analyst_count)       ELSE NULL END,
+            analyst_buy_pct     = CASE WHEN date >= ? THEN COALESCE(?, analyst_buy_pct)     ELSE NULL END,
+            roe_annual          = CASE WHEN date >= ? THEN COALESCE(?, roe_annual)          ELSE NULL END,
+            roce_annual         = CASE WHEN date >= ? THEN COALESCE(?, roce_annual)         ELSE NULL END,
+            ebitda_margin       = CASE WHEN date >= ? THEN COALESCE(?, ebitda_margin)       ELSE NULL END,
+            np_margin           = CASE WHEN date >= ? THEN COALESCE(?, np_margin)           ELSE NULL END,
             promoter_pct        = CASE WHEN date >= ? THEN COALESCE(?, promoter_pct)     ELSE NULL END,
             fii_pct             = CASE WHEN date >= ? THEN COALESCE(?, fii_pct)          ELSE NULL END,
             mf_pct              = CASE WHEN date >= ? THEN COALESCE(?, mf_pct)           ELSE NULL END,
@@ -518,17 +518,17 @@ def backfill_technical_signals(symbol: str, profile: dict, con) -> None:
             fii_chg_qoq         = CASE WHEN date >= ? THEN COALESCE(?, fii_chg_qoq)      ELSE NULL END,
             mf_chg_qoq          = CASE WHEN date >= ? THEN COALESCE(?, mf_chg_qoq)       ELSE NULL END,
             pledge_chg_qoq      = CASE WHEN date >= ? THEN COALESCE(?, pledge_chg_qoq)   ELSE NULL END,
-            rev_growth_yoy_q    = COALESCE(?, rev_growth_yoy_q),
-            np_growth_yoy_q     = COALESCE(?, np_growth_yoy_q),
-            days_since_dividend = COALESCE(?, days_since_dividend),
-            last_dividend_amt   = COALESCE(?, last_dividend_amt)
+            rev_growth_yoy_q    = CASE WHEN date >= ? THEN COALESCE(?, rev_growth_yoy_q)    ELSE NULL END,
+            np_growth_yoy_q     = CASE WHEN date >= ? THEN COALESCE(?, np_growth_yoy_q)     ELSE NULL END,
+            days_since_dividend = CASE WHEN date >= ? THEN COALESCE(?, days_since_dividend) ELSE NULL END,
+            last_dividend_amt   = CASE WHEN date >= ? THEN COALESCE(?, last_dividend_amt)   ELSE NULL END
         WHERE symbol = ?
     """, (
-        _safe(profile.get("analyst_upside_pct")),
-        int(profile.get("analyst_count") or 0) if profile.get("analyst_count") is not None else None,
-        _safe(profile.get("analyst_buy_pct")),
-        _safe(profile.get("roe")),   _safe(profile.get("roce")),
-        _safe(profile.get("ebitda_margin")), _safe(profile.get("np_margin")),
+        today, _safe(profile.get("analyst_upside_pct")),
+        today, int(profile.get("analyst_count") or 0) if profile.get("analyst_count") is not None else None,
+        today, _safe(profile.get("analyst_buy_pct")),
+        today, _safe(profile.get("roe")),   today, _safe(profile.get("roce")),
+        today, _safe(profile.get("ebitda_margin")), today, _safe(profile.get("np_margin")),
         sh_floor, _safe(profile.get("promoter_pct")),
         sh_floor, _safe(profile.get("fii_pct")),
         sh_floor, _safe(profile.get("mf_pct")),
@@ -537,9 +537,9 @@ def backfill_technical_signals(symbol: str, profile: dict, con) -> None:
         sh_floor, _safe(profile.get("fii_chg_qoq")),
         sh_floor, _safe(profile.get("mf_chg_qoq")),
         sh_floor, _safe(profile.get("pledge_chg_qoq")),
-        _safe(profile.get("rev_growth_yoy_q")), _safe(profile.get("np_growth_yoy_q")),
-        int(profile.get("days_since_dividend") or 0) if profile.get("days_since_dividend") is not None else None,
-        _safe(profile.get("last_dividend_amt")),
+        today, _safe(profile.get("rev_growth_yoy_q")), today, _safe(profile.get("np_growth_yoy_q")),
+        today, int(profile.get("days_since_dividend") or 0) if profile.get("days_since_dividend") is not None else None,
+        today, _safe(profile.get("last_dividend_amt")),
         symbol,
     ))
     con.commit()
@@ -652,7 +652,7 @@ def main() -> None:
                     # analyst_data writes to DB — do that on main thread with real con
                     overview_body2 = None  # analyst_data already extracted in worker
                     upsert_profile(symbol, today, profile, con)
-                    backfill_technical_signals(symbol, profile, con)
+                    backfill_technical_signals(symbol, today, profile, con)
                     ok += 1
                 upside_str = f"Upside={profile.get('analyst_upside_pct','?')}% n={profile.get('analyst_count','?')}"
                 margin_str = f"EBITDA={profile.get('ebitda_margin','?')}% ROE={profile.get('roe','?')}%"
