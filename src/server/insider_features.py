@@ -69,13 +69,14 @@ def run():
             return
 
         rows = [
-            (float(r['insider_buy_pct_90d']), r['symbol'], r['symbol'])
+            (float(r['insider_buy_pct_90d']), r['symbol'], today)
             for _, r in features.iterrows()
         ]
+        # date = ? guard (2026-07-19) instead of MAX(date) -- see bse_event_classifier.py's
+        # run_daily docstring for why matching the latest row isn't the same as matching today.
         executemany(
             "UPDATE technical_signals SET insider_buy_pct_90d = ? "
-            "WHERE symbol = ? "
-            "  AND date = (SELECT MAX(ts2.date) FROM technical_signals ts2 WHERE ts2.symbol = ?)",
+            "WHERE symbol = ? AND date = ?",
             rows,
         )
         print(f"[Insider Features] Updated {len(rows)} symbols with insider_buy_pct_90d")

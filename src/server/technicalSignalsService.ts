@@ -306,10 +306,37 @@ function computeADX(rows: OHLCVRow[], period = 14): number[] {
   return adx;
 }
 
-// Nifty50 regime — reads from stock_ohlcv; defaults to SIDEWAYS if Nifty data absent.
+// 5-state HMM label (regime_detector.py) -> the 3-state vocabulary the rest of the codebase
+// (win-rate lookups, gating, ml_ensemble's REGIME_MAP) understands. HIGH_VOL's mean 21d
+// return ranks below SIDEWAYS (see _assign_state_labels' descending-return ordering) and vol
+// spikes are typically risk-off, so it collapses to BEAR alongside CRASH rather than SIDEWAYS.
+function collapseHmmRegime(hmm: string): 'BULL' | 'BEAR' | 'SIDEWAYS' {
+  if (hmm === 'BULL') return 'BULL';
+  if (hmm === 'SIDEWAYS') return 'SIDEWAYS';
+  return 'BEAR'; // HIGH_VOL | BEAR | CRASH
+}
+
+// Nifty50 regime. Prefers the audited 5-state HMM (market_regimes, written causally by
+// regime_detector.py) collapsed to this module's 3-state vocabulary; falls back to a crude
+// SMA200 heuristic only for dates the HMM hasn't covered yet (market_regimes started
+// 2026-05-04) so older historical rescans don't just return a flat default. Before this fix,
+// this function computed its OWN SMA200-based regime independently of the HMM — the two
+// disagreed ~74% of the time in a spot check (2026-07-19), and this function's (weaker) label
+// was what actually fed ml_ensemble training (ts.nifty_regime), not the audited one used for
+// win_probability gating (app_settings.current_nifty_regime). See regime_detector.py.
 // asOf bounds the lookback so a historical scan sees the regime as it was on the scan date,
 // not today's (live scans pass today → the bound is a no-op).
 async function computeNiftyRegime(asOf: string): Promise<'BULL' | 'BEAR' | 'SIDEWAYS'> {
+  try {
+    const hmmRow = await dbAll(
+      `SELECT regime FROM market_regimes WHERE date <= ? ORDER BY date DESC LIMIT 1`,
+      [asOf]
+    ) as { regime: string }[];
+    if (hmmRow.length > 0) return collapseHmmRegime(hmmRow[0].regime);
+  } catch {
+    // market_regimes not populated yet / query failed — fall through to the SMA200 heuristic.
+  }
+
   try {
     const rows = await dbAll(
       `SELECT close FROM stock_ohlcv

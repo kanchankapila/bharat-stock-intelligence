@@ -315,41 +315,24 @@ def compute_and_write_features(con, symbol: str, days: int = 90) -> None:
     insider_buy_flag = 1 if buy_cr > 1.0 else 0
     insider_sell_flag = 1 if sell_cr > 5.0 else 0
 
-    # Update the most-recent technical_signals row for this symbol (COALESCE pattern)
-    if use_postgres():
-        cur.execute(
-            """
-            UPDATE technical_signals
-            SET
-                promoter_buy_90d_cr  = ?,
-                promoter_sell_90d_cr = ?,
-                promoter_net_90d     = ?,
-                insider_buy_flag     = ?,
-                insider_sell_flag    = ?
-            WHERE symbol = ?
-              AND created_at = (
-                  SELECT MAX(created_at) FROM technical_signals WHERE symbol = ?
-              )
-            """,
-            (buy_cr, sell_cr, net, insider_buy_flag, insider_sell_flag, symbol, symbol),
-        )
-    else:
-        cur.execute(
-            """
-            UPDATE technical_signals
-            SET
-                promoter_buy_90d_cr  = ?,
-                promoter_sell_90d_cr = ?,
-                promoter_net_90d     = ?,
-                insider_buy_flag     = ?,
-                insider_sell_flag    = ?
-            WHERE symbol = ?
-              AND created_at = (
-                  SELECT MAX(created_at) FROM technical_signals WHERE symbol = ?
-              )
-            """,
-            (buy_cr, sell_cr, net, insider_buy_flag, insider_sell_flag, symbol, symbol),
-        )
+    # date = ? guard (2026-07-19): previously matched created_at = MAX(created_at), but
+    # technical_signals.created_at is NULL for 100% of rows in production (nothing else in
+    # this codebase sets it) -- MAX(created_at) is therefore always NULL, and `created_at =
+    # NULL` never matches in SQL, so this UPDATE has never actually written a row, ever.
+    today = date.today().isoformat()
+    cur.execute(
+        """
+        UPDATE technical_signals
+        SET
+            promoter_buy_90d_cr  = ?,
+            promoter_sell_90d_cr = ?,
+            promoter_net_90d     = ?,
+            insider_buy_flag     = ?,
+            insider_sell_flag    = ?
+        WHERE symbol = ? AND date = ?
+        """,
+        (buy_cr, sell_cr, net, insider_buy_flag, insider_sell_flag, symbol, today),
+    )
 
     con.commit()
 

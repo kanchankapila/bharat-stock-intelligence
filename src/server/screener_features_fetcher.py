@@ -206,6 +206,9 @@ def compute_features(symbol: str, screener_ids: list, meta: dict) -> dict:
 # ── Stamp into technical_signals ─────────────────────────────────────────────
 
 def stamp_features(con, features_by_symbol: dict, streaks: dict):
+    # date = ? guard (2026-07-19) instead of MAX(date) -- see bse_event_classifier.py's
+    # run_daily docstring for why matching the latest row isn't the same as matching today.
+    today = datetime.date.today().isoformat()
     updated = 0
     for symbol, feats in features_by_symbol.items():
         streak = streaks.get(symbol, 0)
@@ -220,9 +223,7 @@ def stamp_features(con, features_by_symbol: dict, streaks: dict):
                     screener_streak_days    = ?,
                     screener_name_signal    = ?,
                     screener_alpha_score    = ?
-                WHERE symbol = ?
-                  AND date = (SELECT MAX(date) FROM technical_signals t2
-                              WHERE t2.symbol = technical_signals.symbol)
+                WHERE symbol = ? AND date = ?
             """, (
                 feats["screener_bull_count"],
                 feats["screener_bear_count"],
@@ -232,7 +233,7 @@ def stamp_features(con, features_by_symbol: dict, streaks: dict):
                 float(streak),
                 feats["screener_name_signal"],
                 feats["screener_alpha_score"],
-                symbol,
+                symbol, today,
             ))
             updated += 1
         except Exception as e:

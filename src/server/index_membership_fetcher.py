@@ -143,47 +143,59 @@ def backfill_technical_signals(con) -> int:
     """Copy index flags + compute nifty_tier from nse_stocks → technical_signals."""
     cur = con.cursor()
 
+    # date >= today ELSE NULL guard added 2026-07-19 -- this previously used plain `=` with NO
+    # date filter (worse than COALESCE: REWRITES every historical row on every run, so index
+    # membership never reflected true historical status, only "whatever it is today"). No
+    # historical index-membership snapshot exists to backfill from, so older rows are
+    # explicitly nulled rather than left holding today's status.
+    today = datetime.now().strftime("%Y-%m-%d")
     if use_postgres():
         cur.execute(
             """
             UPDATE technical_signals
             SET
-                is_nifty50     = ns.is_nifty50,
-                is_nifty100    = ns.is_nifty100,
-                is_nifty200    = ns.is_nifty200,
-                is_midcap150   = ns.is_midcap150,
-                is_smallcap250 = ns.is_smallcap250,
-                nifty_tier     = CASE
-                    WHEN ns.is_nifty50     = 1 THEN 50
-                    WHEN ns.is_nifty100    = 1 THEN 100
-                    WHEN ns.is_nifty200    = 1 THEN 200
-                    WHEN ns.is_midcap150   = 1 THEN 150
-                    WHEN ns.is_smallcap250 = 1 THEN 250
-                    ELSE 0
-                END
+                is_nifty50     = CASE WHEN technical_signals.date >= %s THEN ns.is_nifty50     ELSE NULL END,
+                is_nifty100    = CASE WHEN technical_signals.date >= %s THEN ns.is_nifty100    ELSE NULL END,
+                is_nifty200    = CASE WHEN technical_signals.date >= %s THEN ns.is_nifty200    ELSE NULL END,
+                is_midcap150   = CASE WHEN technical_signals.date >= %s THEN ns.is_midcap150   ELSE NULL END,
+                is_smallcap250 = CASE WHEN technical_signals.date >= %s THEN ns.is_smallcap250 ELSE NULL END,
+                nifty_tier     = CASE WHEN technical_signals.date >= %s THEN
+                    CASE
+                        WHEN ns.is_nifty50     = 1 THEN 50
+                        WHEN ns.is_nifty100    = 1 THEN 100
+                        WHEN ns.is_nifty200    = 1 THEN 200
+                        WHEN ns.is_midcap150   = 1 THEN 150
+                        WHEN ns.is_smallcap250 = 1 THEN 250
+                        ELSE 0
+                    END
+                ELSE NULL END
             FROM nse_stocks ns
             WHERE technical_signals.symbol = ns.symbol
-            """
+            """,
+            (today, today, today, today, today, today),
         )
     else:
         cur.execute(
             """
             UPDATE technical_signals
             SET
-                is_nifty50     = (SELECT is_nifty50     FROM nse_stocks WHERE symbol = technical_signals.symbol),
-                is_nifty100    = (SELECT is_nifty100    FROM nse_stocks WHERE symbol = technical_signals.symbol),
-                is_nifty200    = (SELECT is_nifty200    FROM nse_stocks WHERE symbol = technical_signals.symbol),
-                is_midcap150   = (SELECT is_midcap150   FROM nse_stocks WHERE symbol = technical_signals.symbol),
-                is_smallcap250 = (SELECT is_smallcap250 FROM nse_stocks WHERE symbol = technical_signals.symbol),
-                nifty_tier     = CASE
-                    WHEN (SELECT is_nifty50     FROM nse_stocks WHERE symbol = technical_signals.symbol) = 1 THEN 50
-                    WHEN (SELECT is_nifty100    FROM nse_stocks WHERE symbol = technical_signals.symbol) = 1 THEN 100
-                    WHEN (SELECT is_nifty200    FROM nse_stocks WHERE symbol = technical_signals.symbol) = 1 THEN 200
-                    WHEN (SELECT is_midcap150   FROM nse_stocks WHERE symbol = technical_signals.symbol) = 1 THEN 150
-                    WHEN (SELECT is_smallcap250 FROM nse_stocks WHERE symbol = technical_signals.symbol) = 1 THEN 250
-                    ELSE 0
-                END
-            """
+                is_nifty50     = CASE WHEN date >= ? THEN (SELECT is_nifty50     FROM nse_stocks WHERE symbol = technical_signals.symbol) ELSE NULL END,
+                is_nifty100    = CASE WHEN date >= ? THEN (SELECT is_nifty100    FROM nse_stocks WHERE symbol = technical_signals.symbol) ELSE NULL END,
+                is_nifty200    = CASE WHEN date >= ? THEN (SELECT is_nifty200    FROM nse_stocks WHERE symbol = technical_signals.symbol) ELSE NULL END,
+                is_midcap150   = CASE WHEN date >= ? THEN (SELECT is_midcap150   FROM nse_stocks WHERE symbol = technical_signals.symbol) ELSE NULL END,
+                is_smallcap250 = CASE WHEN date >= ? THEN (SELECT is_smallcap250 FROM nse_stocks WHERE symbol = technical_signals.symbol) ELSE NULL END,
+                nifty_tier     = CASE WHEN date >= ? THEN
+                    CASE
+                        WHEN (SELECT is_nifty50     FROM nse_stocks WHERE symbol = technical_signals.symbol) = 1 THEN 50
+                        WHEN (SELECT is_nifty100    FROM nse_stocks WHERE symbol = technical_signals.symbol) = 1 THEN 100
+                        WHEN (SELECT is_nifty200    FROM nse_stocks WHERE symbol = technical_signals.symbol) = 1 THEN 200
+                        WHEN (SELECT is_midcap150   FROM nse_stocks WHERE symbol = technical_signals.symbol) = 1 THEN 150
+                        WHEN (SELECT is_smallcap250 FROM nse_stocks WHERE symbol = technical_signals.symbol) = 1 THEN 250
+                        ELSE 0
+                    END
+                ELSE NULL END
+            """,
+            (today, today, today, today, today, today),
         )
 
     updated = cur.rowcount

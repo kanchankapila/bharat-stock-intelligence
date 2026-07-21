@@ -396,6 +396,9 @@ VALUES
      :total_call_oi, :total_put_oi, :market_pcr, :atm_iv, :iv_skew, :fetched_at)
 """
 
+# date = :date guard (2026-07-19) instead of MAX(date) -- see bse_event_classifier.py's
+# run_daily docstring for why matching the latest row isn't the same as matching today.
+# patch_technical_signals() already builds `:date` into its params, just wasn't used here.
 _PATCH_TECHNICAL_SIGNALS_PG = """
 UPDATE technical_signals
 SET expected_move_pct = :expected_move_pct,
@@ -403,8 +406,7 @@ SET expected_move_pct = :expected_move_pct,
     atm_iv            = :atm_iv,
     next_expiry_iv    = :next_expiry_iv,
     iv_term_slope     = :iv_term_slope
-WHERE symbol = :symbol
-  AND date = (SELECT MAX(date) FROM technical_signals t2 WHERE t2.symbol = :symbol)
+WHERE symbol = :symbol AND date = :date
 """
 
 _PATCH_TECHNICAL_SIGNALS_SL = _PATCH_TECHNICAL_SIGNALS_PG   # same syntax

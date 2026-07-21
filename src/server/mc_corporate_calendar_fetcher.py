@@ -240,9 +240,12 @@ def _stamp_technical_signals(con, ex_div: dict, board: dict, dry_run: bool) -> i
         if not set_parts:
             continue
 
+        # date = :date guard (2026-07-19) instead of MAX(date) -- see bse_event_classifier.py's
+        # run_daily docstring for why matching the latest row isn't the same as matching today.
+        params["date"] = today.isoformat()
         sql = (
             f"UPDATE technical_signals SET {', '.join(set_parts)} "
-            f"WHERE symbol = :sym AND date = (SELECT MAX(date) FROM technical_signals t2 WHERE t2.symbol = :sym)"
+            f"WHERE symbol = :sym AND date = :date"
         )
         con.execute(sql, params)
         updated += 1
@@ -284,12 +287,13 @@ def _refresh_historical_div(con, symbols: set[str], today: date) -> int:
                 print(f"[CorpCalendar] Skipping {sym}: unparseable ex_date {last_ex!r} ({e})")
                 continue
         days_since = (today - last_ex_date).days
+        # date = :date guard (2026-07-19) instead of MAX(date) -- same fix as above.
         con.execute(
             "UPDATE technical_signals SET days_since_dividend = :ds, last_dividend_amt = :la "
-            "WHERE symbol = :sym AND date = (SELECT MAX(date) FROM technical_signals t2 WHERE t2.symbol = :sym)",
+            "WHERE symbol = :sym AND date = :date",
             {"ds": float(days_since) if days_since is not None else None,
              "la": float(last_amt) if last_amt is not None else None,
-             "sym": sym},
+             "sym": sym, "date": today.isoformat()},
         )
         updated += 1
     return updated

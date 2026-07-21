@@ -274,18 +274,18 @@ def update_technical_signals(conn, lookback_days: int = 180) -> int:
     if not updates:
         return 0
 
+    # date = ? guard (2026-07-19) instead of MAX(date) -- see bse_event_classifier.py's
+    # run_daily docstring for why matching the latest row isn't the same as matching today.
     # Single ?-placeholder SQL for both backends — see comment in upsert_events().
     sql = """
         UPDATE technical_signals
         SET rating_upgrade_180d   = ?,
             rating_downgrade_180d = ?,
             days_since_upgrade    = ?
-        WHERE symbol = ?
-          AND date = (
-              SELECT MAX(date) FROM technical_signals ts2 WHERE ts2.symbol = ?
-          )
+        WHERE symbol = ? AND date = ?
     """
-    params = [(u[0], u[1], u[2], u[3], u[3]) for u in updates]
+    today_str = today.strftime("%Y-%m-%d")
+    params = [(u[0], u[1], u[2], u[3], today_str) for u in updates]
 
     executemany(sql, params)
     return len(updates)
