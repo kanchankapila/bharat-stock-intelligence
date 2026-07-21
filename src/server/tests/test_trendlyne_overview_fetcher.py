@@ -87,7 +87,7 @@ def test_backfill_technical_signals_is_point_in_time():
             "promoter_chg_qoq": 0.5, "fii_chg_qoq": 1.5, "mf_chg_qoq": -0.8, "pledge_chg_qoq": -2.0,
             "shareholding_as_of": "2026-03-31",  # floor → 2026-04-30
         }
-        tof.backfill_technical_signals("BEL", profile, con)
+        tof.backfill_technical_signals("BEL", "2026-05-15", profile, con)
 
         old = con.execute(
             "SELECT promoter_pct, mf_pct, promoter_chg_qoq FROM technical_signals WHERE date='2026-01-15'"
