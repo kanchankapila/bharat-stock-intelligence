@@ -270,6 +270,16 @@ export async function pgEnsureColumns(): Promise<void> {
        PRIMARY KEY (run_id, symbol)
      )`,
     `CREATE INDEX IF NOT EXISTS idx_lsms_run ON live_screener_ml_scores(run_id)`,
+    // Per-stock GDELT news tone (gdeltService.ts) — never had a canonical schema entry, so on
+    // Postgres this table simply never existed and the ml_ensemble.py training-data join added
+    // for it (COALESCE fallback for pre-finbert-coverage rows) would have failed at runtime.
+    `CREATE TABLE IF NOT EXISTS gdelt_sentiment (
+       symbol TEXT NOT NULL,
+       date TEXT NOT NULL,
+       avg_tone DOUBLE PRECISION,
+       computed_at TEXT,
+       PRIMARY KEY (symbol, date)
+     )`,
   ];
   const client = await getPool().connect();
   try {
