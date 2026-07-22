@@ -78,8 +78,11 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     label: 'OHLCV freshness & universe coverage',
     category: 'ohlcv',
     critical: true,
+    // stock_ohlcv.date is a native Postgres DATE column (unlike most other date columns in
+    // this file, which are TEXT) — cast it to ::text so it compares against date('now',...)'s
+    // text output (see sqlTranslate.ts); ::text is stripped on the SQLite path by stripPgCasts.
     sql: `SELECT MAX(date) AS last_date, COUNT(DISTINCT symbol) AS symbols
-          FROM stock_ohlcv WHERE date >= date('now','-10 days')`,
+          FROM stock_ohlcv WHERE date::text >= date('now','-10 days')`,
     evaluate: (row, now) => {
       const stale = daysStale(row?.last_date, now);
       const symbols = Number(row?.symbols) || 0;
@@ -96,9 +99,9 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     category: 'ohlcv',
     critical: true,
     sql: `SELECT
-            (SELECT COUNT(*) FROM stock_ohlcv WHERE date >= date('now','-5 days')
+            (SELECT COUNT(*) FROM stock_ohlcv WHERE date::text >= date('now','-5 days')
                AND (close <= 0 OR high < low OR is_suspect = 1)) AS bad,
-            (SELECT COUNT(*) FROM stock_ohlcv WHERE date >= date('now','-5 days')) AS total`,
+            (SELECT COUNT(*) FROM stock_ohlcv WHERE date::text >= date('now','-5 days')) AS total`,
     evaluate: (row) => {
       const ratio = safeRatio(row?.bad, row?.total);
       const total = Number(row?.total) || 0;
@@ -181,8 +184,9 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     label: 'feature_store freshness',
     category: 'ml',
     critical: false,
+    // feature_store.date is also a native Postgres DATE column — see the stock_ohlcv note above.
     sql: `SELECT MAX(date) AS last_date, COUNT(DISTINCT symbol) AS symbols
-          FROM feature_store WHERE date >= date('now','-10 days')`,
+          FROM feature_store WHERE date::text >= date('now','-10 days')`,
     evaluate: (row, now) => {
       const stale = daysStale(row?.last_date, now);
       if (stale == null) return { status: 'fail', detail: 'No feature_store rows in the last 10 days' };

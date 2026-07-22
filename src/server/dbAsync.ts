@@ -14,7 +14,11 @@
 import sqliteDb from './db';
 import { usePostgres } from './pgConfig';
 import { pgQuery, pgExecute, pgClient, pgEnsureColumns } from './pgClient';
-import { translateSql } from './sqlTranslate';
+import { translateSql, stripPgCasts } from './sqlTranslate';
+
+// Prepare SQL for the SQLite engine: strip PG-only ::type casts that would be
+// a syntax error in SQLite but are needed for PostgreSQL type coercion.
+const sqSql = (sql: string) => stripPgCasts(sql);
 
 const usePg = () => usePostgres();
 
@@ -44,14 +48,14 @@ export async function dbGet<T = any>(sql: string, params: unknown[] = []): Promi
     const rows = await pgQuery<any>(translateSql(sql), params);
     return rows[0] as T | undefined;
   }
-  return sqliteDb.prepare(sql).get(...params) as T | undefined;
+  return sqliteDb.prepare(sqSql(sql)).get(...params) as T | undefined;
 }
 
 export async function dbAll<T = any>(sql: string, params: unknown[] = []): Promise<T[]> {
   if (usePg()) {
     return (await pgQuery<any>(translateSql(sql), params)) as T[];
   }
-  return sqliteDb.prepare(sql).all(...params) as T[];
+  return sqliteDb.prepare(sqSql(sql)).all(...params) as T[];
 }
 
 export async function dbRun(sql: string, params: unknown[] = []): Promise<RunResult> {
@@ -63,7 +67,7 @@ export async function dbRun(sql: string, params: unknown[] = []): Promise<RunRes
   // better-sqlite3 throws if you .run() a statement that returns data (e.g. RETURNING),
   // so branch on `.reader` and read the RETURNING row's id as lastInsertRowid — giving
   // the same {changes,lastInsertRowid} contract on both engines.
-  const stmt = sqliteDb.prepare(sql);
+  const stmt = sqliteDb.prepare(sqSql(sql));
   if (stmt.reader) {
     const rows = stmt.all(...params) as any[];
     const last = rows.length ? (rows[rows.length - 1]?.id ?? 0) : 0;
@@ -78,7 +82,7 @@ export async function dbExec(sql: string): Promise<void> {
     await pgExecute(translateSql(sql));
     return;
   }
-  sqliteDb.exec(sql);
+  sqliteDb.exec(sqSql(sql));
 }
 
 // ─── Transactions ─────────────────────────────────────────────────────────────
@@ -109,10 +113,10 @@ export async function dbTransaction<T>(fn: (tx: DbTx) => Promise<T>): Promise<T>
 
   // SQLite path: single connection, manual BEGIN/COMMIT so the fn can stay async.
   const tx: DbTx = {
-    get: async (sql, params = []) => sqliteDb.prepare(sql).get(...params) as any,
-    all: async (sql, params = []) => sqliteDb.prepare(sql).all(...params) as any[],
+    get: async (sql, params = []) => sqliteDb.prepare(sqSql(sql)).get(...params) as any,
+    all: async (sql, params = []) => sqliteDb.prepare(sqSql(sql)).all(...params) as any[],
     run: async (sql, params = []) => {
-      const info = sqliteDb.prepare(sql).run(...params);
+      const info = sqliteDb.prepare(sqSql(sql)).run(...params);
       return { changes: info.changes, lastInsertRowid: info.lastInsertRowid };
     },
   };

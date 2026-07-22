@@ -183,7 +183,10 @@ async function getScriptStats(scriptId: ScriptId): Promise<Record<string, number
       case 'dl-engine-infer':
         return {
           symbols: ((await dbGet("SELECT COUNT(DISTINCT symbol) as n FROM deep_learning_predictions")) as any)?.n ?? 0,
-          today: ((await dbGet("SELECT COUNT(*) as n FROM deep_learning_predictions WHERE date(created_at)=date('now')")) as any)?.n ?? 0,
+          // created_at is TIMESTAMPTZ; date('now') translates to a ::text literal (sqlTranslate.ts),
+          // so the column side must also be cast to ::text to compare equal (::text is stripped
+          // on the SQLite fallback path, leaving the original date(created_at)=date('now') form).
+          today: ((await dbGet("SELECT COUNT(*) as n FROM deep_learning_predictions WHERE date(created_at)::text=date('now')")) as any)?.n ?? 0,
         };
       case 'dl-trainer': {
         const m = await dbGet("SELECT cv_roc_auc, is_active FROM model_registry WHERE model_name='BiLSTM' ORDER BY trained_at DESC LIMIT 1") as any;

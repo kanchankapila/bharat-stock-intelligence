@@ -94,9 +94,12 @@ function mapSqliteFunctions(sql: string): string {
   s = s.replace(/datetime\(\s*'now'\s*\)/gi, 'now()');
   s = s.replace(/datetime\(\s*'now'\s*,\s*'([^']+)'\s*\)/gi, (_m, mod) => `(now() + interval '${mod}')`);
 
-  // date('now' [, '<modifier>']) -> current_date / ((current_date + interval '<mod>')::date)
-  s = s.replace(/date\(\s*'now'\s*\)/gi, 'current_date');
-  s = s.replace(/date\(\s*'now'\s*,\s*'([^']+)'\s*\)/gi, (_m, mod) => `((current_date + interval '${mod}')::date)`);
+  // date('now' [, '<modifier>']) -> current_date::text / ((current_date + interval '<mod>')::date)::text
+  // The ::text cast is essential: date/signal_date columns are stored as TEXT (migrated from SQLite),
+  // so PG refuses `TEXT >= date` without it. Both the 'now' form and the modifier form must output
+  // TEXT to match the column type used in WHERE date >= date('now','-N days') comparisons.
+  s = s.replace(/date\(\s*'now'\s*\)/gi, 'current_date::text');
+  s = s.replace(/date\(\s*'now'\s*,\s*'([^']+)'\s*\)/gi, (_m, mod) => `((current_date + interval '${mod}')::date)::text`);
   // date(<column/expr>) -> (<expr>)::date  (must run AFTER the 'now' forms; skip quoted args)
   s = s.replace(/\bdate\(\s*([^'")][^)]*?)\s*\)/gi, '($1)::date');
 
@@ -142,4 +145,23 @@ function mapSqliteFunctions(sql: string): string {
 /** Full translation: function/syntax mapping, then placeholder conversion. */
 export function translateSql(sql: string): string {
   return convertPlaceholders(mapSqliteFunctions(sql));
+}
+
+/**
+ * Strip PostgreSQL-style `::typename` casts from SQL so it can be passed to SQLite,
+ * which does not understand that syntax. Called on the SQLite path in dbAsync.ts.
+ *
+ * Examples:
+ *   `?::timestamptz`   -> `?`
+ *   `current_date::text` -> `current_date`
+ *   `(col::jsonb ->> 'k')` -> `(col ->> 'k')`  (jsonb stripped too)
+ *
+ * The regex matches `::` followed by an optional `[]` array suffix (e.g. `::text[]`).
+ * It does NOT touch `::` inside string literals (extremely rare in practice).
+ */
+export function stripPgCasts(sql: string): string {
+  // Match :: followed by a pg type name (letters, digits, underscore) with optional []
+  // array suffix. Does NOT include space so that operators like ->> after a ::jsonb cast
+  // retain their separating whitespace.
+  return sql.replace(/::[A-Za-z][A-Za-z0-9_]*(?:\[\])?/g, '');
 }

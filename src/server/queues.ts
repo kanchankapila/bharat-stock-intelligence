@@ -1206,7 +1206,7 @@ async function processAgentStrategist(_job: Job): Promise<{ success: boolean }> 
     SELECT symbol, timeframe, entry_zone_low, entry_zone_high,
            stop_loss, target_1, target_2, target_3, composite_score, narrative
     FROM agent_strategy_picks
-    WHERE date(run_date) = date('now') AND conviction = 'HIGH'
+    WHERE date(run_date)::text = date('now') AND conviction = 'HIGH'
     ORDER BY composite_score DESC
   `);
 

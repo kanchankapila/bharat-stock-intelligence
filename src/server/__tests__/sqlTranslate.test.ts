@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { convertPlaceholders, translateSql } from '../sqlTranslate';
+import { convertPlaceholders, translateSql, stripPgCasts } from '../sqlTranslate';
 
 describe('convertPlaceholders', () => {
   it('numbers positional placeholders', () => {
@@ -38,7 +38,13 @@ describe('translateSql function mapping', () => {
       .toBe("WHERE d < (now() + interval '-30 days')");
   });
   it('maps date(now)', () => {
-    expect(translateSql("WHERE d = date('now')")).toBe('WHERE d = current_date');
+    // ::text is required: date/signal_date columns are TEXT in PG (migrated from SQLite);
+    // PG refuses `TEXT >= date` without the cast.
+    expect(translateSql("WHERE d = date('now')")).toBe('WHERE d = current_date::text');
+  });
+  it('maps date(now, modifier) to ::text so TEXT columns compare correctly', () => {
+    expect(translateSql("WHERE date >= date('now', '-3 days')"))
+      .toBe("WHERE date >= ((current_date + interval '-3 days')::date)::text");
   });
   it('maps date(column) to ::date cast', () => {
     expect(translateSql('WHERE date(cs.computed_at) = ?')).toBe('WHERE (cs.computed_at)::date = $1');
@@ -73,5 +79,29 @@ describe('translateSql function mapping', () => {
   it('maps CAST REAL -> double precision and group_concat -> string_agg', () => {
     expect(translateSql('SELECT CAST(x AS REAL) FROM t')).toBe('SELECT CAST(x AS double precision) FROM t');
     expect(translateSql('SELECT GROUP_CONCAT(sym) FROM t')).toBe("SELECT string_agg(sym::text, ',') FROM t");
+  });
+});
+
+describe('stripPgCasts', () => {
+  it('strips simple ::type casts from bound parameters', () => {
+    expect(stripPgCasts('VALUES (?, ?::timestamptz, ?)')).toBe('VALUES (?, ?, ?)');
+  });
+  it('strips ::text casts produced by translateSql date mapping', () => {
+    expect(stripPgCasts('WHERE d = current_date::text')).toBe('WHERE d = current_date');
+  });
+  it('strips ::numeric and ::date casts', () => {
+    expect(stripPgCasts('round((x)::numeric, 2)')).toBe('round((x), 2)');
+    expect(stripPgCasts('WHERE (ts)::date = $1')).toBe('WHERE (ts) = $1');
+  });
+  it('strips ::jsonb casts', () => {
+    // Space between ::jsonb and ->> is preserved (space NOT in type-name char class)
+    expect(stripPgCasts("(col::jsonb ->> 'k')")).toBe("(col ->> 'k')");
+  });
+  it('strips ::text[] array type casts', () => {
+    expect(stripPgCasts('?::text[]')).toBe('?');
+  });
+  it('leaves normal SQL untouched', () => {
+    const sql = "SELECT * FROM t WHERE a = 'it\'s ok' AND b = ?";
+    expect(stripPgCasts(sql)).toBe(sql);
   });
 });

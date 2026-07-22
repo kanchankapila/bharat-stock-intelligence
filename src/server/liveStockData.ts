@@ -403,6 +403,12 @@ const PER_SYMBOL_TTL = 30; // seconds
 const BULK_TTL = 5 * 60; // 5 minutes
 const BULK_REFRESH_INTERVAL = BULK_TTL * 1000;
 
+// intraday_regime.py consumes breadth every 15 min and its staleness guard is 20 min.
+// Throttling the DB write to match avoids storing 3× more snapshots than the consumer
+// can ever use, without affecting the live regime nowcast.
+const BREADTH_CAPTURE_INTERVAL_MS = 15 * 60 * 1000; // 15 min
+let lastBreadthCaptureTime = 0;
+
 // In-memory mirror of bulk data for O(1) symbol lookups (avoids deserialising
 // the full ~2000-entry JSON blob from Redis on every quote request).
 let bulkMirror: Map<string, MarketData> = new Map();
@@ -436,8 +442,13 @@ async function runBulkRefresh(): Promise<void> {
     lastBulkFetchTime = Date.now();
     hasFetchedOnce = true;
 
-    // Intraday breadth nowcast off the fresh universe (only while the tape is live).
-    if (marketOpen) {
+    // Intraday breadth nowcast — throttled to every 15 min even though the quote refresh
+    // runs every 5 min. intraday_regime.py only consumes breadth every 15 min (20-min
+    // staleness tolerance), so writing every 5 min just triples the snapshot table growth
+    // with no benefit to the downstream regime label.
+    const now = Date.now();
+    if (marketOpen && now - lastBreadthCaptureTime >= BREADTH_CAPTURE_INTERVAL_MS) {
+      lastBreadthCaptureTime = now;
       persistIntradayBreadth(freshData).catch((err) =>
         console.warn("[LIVE DATA] intraday breadth snapshot failed:", err?.message ?? err),
       );

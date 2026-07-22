@@ -315,16 +315,14 @@ export const MONITOR_SCRIPTS = [
     label: 'Intraday Breadth Capture',
     category: 'Data',
     critical: true,
-    description: 'Live adv/dec breadth nowcast off the 5-min quote refresh, feeding intraday_regime.py. Runs off the Node process setInterval (not a BullMQ job) -- no catch-up on a restart, so this is the one guard that catches a silent capture outage (e.g. the 2026-07-16 all-day gap).',
-    schedule: 'Every 5 min, market hours',
+    description: 'Live adv/dec breadth nowcast off the 5-min quote refresh, feeding intraday_regime.py. Snapshot is throttled to every 15 min (matching the regime detector cadence) to avoid 3× redundant DB writes — the 20-min staleness guard in intraday_regime.py still sees a fresh row every cycle. Runs off the Node process setInterval (not a BullMQ job) -- no catch-up on a restart, so this is the one guard that catches a silent capture outage (e.g. the 2026-07-16 all-day gap).',
+    schedule: 'Every 15 min, market hours',
     pyScript: null,
     queueName: null,
     staleLimitHours: 1,
-    // Every 5 min, 9:15am-4:00pm IST weekdays (3:45-10:00 UTC truncated to hour boundaries).
-    // Cron-aware grace means this is only evaluated as "due" during the trading window --
-    // checking pre-market or over a weekend no longer false-flags off Friday's last capture,
-    // while a genuine intraday outage (like 2026-07-16) is still caught within ~20 min.
-    cronPatterns: ['*/5 3-10 * * 1-5'],
-    graceMinutes: 20,
+    // Every 15 min, 9:15am-4:00pm IST (3:45-10:00 UTC, rounded to hour boundaries).
+    // graceMinutes: 25 = 15-min interval + 10 min tolerance for a slow quote-fetch cycle.
+    cronPatterns: ['*/15 3-10 * * 1-5'],
+    graceMinutes: 25,
   },
 ] as const;

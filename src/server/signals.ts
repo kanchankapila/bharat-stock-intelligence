@@ -198,7 +198,7 @@ export async function upsertUnifiedSignal(source: string, s: UnifiedSignalInput)
        entry_price, target_price, stop_loss, confidence_score,
        reasoning, technical_score, quant_score, ai_reasoning,
        status, signal_generated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?)
+    VALUES (?, ?::timestamptz, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?)
     ON CONFLICT(symbol, signal_source, signal_type, signal_date) DO UPDATE SET
       entry_price=excluded.entry_price, target_price=excluded.target_price,
       stop_loss=excluded.stop_loss, confidence_score=excluded.confidence_score,

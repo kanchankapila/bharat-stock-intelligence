@@ -268,15 +268,15 @@ export const mlRouter = router({
         UNION ALL
         SELECT 'CONFLUENCE' AS signal_source,
                COUNT(*) AS total_signals,
-               SUM(CASE WHEN computed_at >= date('now', '-7 days') THEN 1 ELSE 0 END) AS active_signals,
-               SUM(CASE WHEN computed_at < date('now', '-7 days') THEN 1 ELSE 0 END) AS completed_signals,
+               SUM(CASE WHEN date(computed_at)::text >= date('now', '-7 days') THEN 1 ELSE 0 END) AS active_signals,
+               SUM(CASE WHEN date(computed_at)::text < date('now', '-7 days') THEN 1 ELSE 0 END) AS completed_signals,
                AVG(confluence_score) AS avg_confidence_score,
                NULL AS avg_technical_score,
                NULL AS avg_quant_score,
                NULL AS avg_entry_price,
                AVG(julianday('now') - julianday(computed_at)) AS avg_age_days
         FROM confluence_signals
-        WHERE computed_at >= date('now', '-30 days')
+        WHERE date(computed_at)::text >= date('now', '-30 days')
         GROUP BY signal_source
       `);
 
