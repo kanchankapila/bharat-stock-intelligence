@@ -23,7 +23,64 @@ const MAX_PYTHON_CONCURRENT = 5;
 // -- ml-daily-ops and everything behind it queued for 4h+ with zero log output until the outer
 // job timeout eventually fired. Bound the wait so a leak degrades to a loud per-call failure
 // instead of a silent freeze.
-const SLOT_WAIT_TIMEOUT_MS = 20 * 60_000;
+//
+// Root cause: grandchildren spawned by daily_ml_update.py (subprocess.run) and
+// feature_engineering.py (ProcessPoolExecutor) inherited Node's stdio pipe endpoints.
+// When Node killed the parent python.exe via taskkill /T /F the grandchildren survived
+// and kept those endpoints open, so the pipe's 'close' event never fired in Node.
+// Fixed in those Python scripts by redirecting stdio to DEVNULL + CREATE_NO_WINDOW.
+// This shorter timeout (3 min vs old 20 min) + the periodic watchdog below are a
+// belt-and-suspenders safety net if any other script introduces the same pattern.
+const SLOT_WAIT_TIMEOUT_MS = 3 * 60_000;  // 3 min — fail fast so queue drains quickly
+
+// ─── Slot watchdog ────────────────────────────────────────────────────────────
+// If _runningPython stays > MAX_PYTHON_CONCURRENT for longer than the maximum possible
+// script lifetime, every slot holder must have leaked. Reset the counter so jobs can
+// proceed without a full server restart.
+// Longest configured timeout across all runPython() call sites is 90 min (lockDuration);
+// add KILL_GRACE_MS (15 s) + generous buffer → 100 min.
+const MAX_SLOT_AGE_MS = 100 * 60_000;
+let _overLimitSince: number | null = null;
+
+function _slotHealthWatchdog(): void {
+  const now = Date.now();
+  if (_runningPython > MAX_PYTHON_CONCURRENT) {
+    if (_overLimitSince === null) {
+      _overLimitSince = now;
+    } else if (now - _overLimitSince > MAX_SLOT_AGE_MS) {
+      // Been stuck for longer than any script could legitimately run — force-reset.
+      console.error(
+        `[PY-WATCHDOG] _runningPython=${_runningPython} has exceeded MAX_PYTHON_CONCURRENT=${MAX_PYTHON_CONCURRENT} ` +
+        `for >${Math.round((now - _overLimitSince) / 60_000)}min — slot leak confirmed. ` +
+        `Resetting counter to 0 and draining ${_pythonQueue.length} queued waiters.`
+      );
+      _runningPython = 0;
+      _overLimitSince = null;
+      // Drain the queue: release up to MAX_PYTHON_CONCURRENT waiters immediately.
+      while (_pythonQueue.length > 0 && _runningPython < MAX_PYTHON_CONCURRENT) {
+        const next = _pythonQueue.shift();
+        if (next) next();
+      }
+    }
+  } else {
+    _overLimitSince = null;
+  }
+}
+
+// Start the watchdog (every 5 min). unref() so it doesn't block process exit.
+setInterval(_slotHealthWatchdog, 5 * 60_000).unref?.();
+
+/** Expose current slot state for diagnostics / tests. */
+export function getPythonSlotState(): { running: number; queued: number; max: number } {
+  return { running: _runningPython, queued: _pythonQueue.length, max: MAX_PYTHON_CONCURRENT };
+}
+
+/** Force-reset the slot counter (use only in tests or after confirmed leak). */
+export function resetPythonSlots(): void {
+  _runningPython = 0;
+  _overLimitSince = null;
+}
+
 
 function acquirePythonSlot(): Promise<void> {
   return new Promise((resolve, reject) => {

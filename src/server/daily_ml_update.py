@@ -15,6 +15,7 @@ import subprocess
 import sys
 import datetime
 import argparse
+import os
 
 SCRIPTS = [
     ('outcome_resolver',  ['python', 'outcome_resolver.py']),
@@ -22,6 +23,25 @@ SCRIPTS = [
     ('ml_ensemble_incr',  ['python', 'ml_ensemble.py', '--incremental', '--incr-days', '3']),
     ('drift_detector',    ['python', 'drift_detector.py']),
 ]
+
+# On Windows, subprocess.run() with the default stdout/stderr=None inherits the *parent* process's
+# stdio handles — which are the pipe endpoints that Node's execFile/spawn gave us. When Node kills
+# the parent python.exe (daily_ml_update.py) via taskkill /T /F, the grandchildren spawned here
+# may survive briefly with those handles still open, preventing the pipe's 'close' event from
+# firing in Node. The slot is therefore never released and _runningPython stays inflated.
+# Fix: redirect all stdio to DEVNULL so grandchildren never hold Node's pipe endpoints.
+_DEVNULL = subprocess.DEVNULL
+_POPEN_KWARGS: dict = {
+    "stdin":  _DEVNULL,
+    "stdout": _DEVNULL,
+    "stderr": _DEVNULL,
+}
+if sys.platform == "win32":
+    # CREATE_NO_WINDOW also prevents a console window from appearing and ensures
+    # the grandchild has its own console group (further isolating its handle table).
+    _POPEN_KWARGS["creationflags"] = subprocess.CREATE_NO_WINDOW
+else:
+    _POPEN_KWARGS["close_fds"] = True
 
 
 def run(dry_run: bool = False) -> None:
@@ -32,7 +52,7 @@ def run(dry_run: bool = False) -> None:
         if dry_run:
             print(f"  DRY-RUN: {' '.join(cmd)}")
             continue
-        result = subprocess.run(cmd)
+        result = subprocess.run(cmd, **_POPEN_KWARGS)
         if result.returncode != 0:
             print(f"[DailyML] WARNING: {name} exited {result.returncode}")
             failed.append(name)

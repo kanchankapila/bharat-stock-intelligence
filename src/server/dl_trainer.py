@@ -40,8 +40,24 @@ def _set_setting(con: ConnWrapper, key: str, value: str):
 def _run(cmd: str, timeout_sec: int = 1800) -> int:
     cmd_resolved = cmd.replace("python ", f'"{sys.executable}" ', 1)
     print(f"[TRAINER] Running: {cmd_resolved}")
+    # Redirect stdio to DEVNULL so the subprocess (and any grandchildren it spawns, e.g.
+    # feature_engineering.py's ProcessPoolExecutor workers) never hold Node's inherited
+    # pipe endpoints open. If this process is killed by Node the pipe closes immediately.
+    import os
+    _kwargs: dict = {
+        "shell": True,
+        "cwd": PYDIR,
+        "timeout": timeout_sec,
+        "stdin": subprocess.DEVNULL,
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+    }
+    if sys.platform == "win32":
+        _kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+    else:
+        _kwargs["close_fds"] = True
     try:
-        result = subprocess.run(cmd_resolved, shell=True, cwd=PYDIR, timeout=timeout_sec)
+        result = subprocess.run(cmd_resolved, **_kwargs)
         return result.returncode
     except subprocess.TimeoutExpired:
         # A hung sub-step (observed: a broken ProcessPoolExecutor in feature_engineering.py

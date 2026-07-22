@@ -13,6 +13,31 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
+
+def _worker_init() -> None:
+    """Redirect worker-process stdio to DEVNULL.
+
+    On Windows, ProcessPoolExecutor workers are spawned as new python.exe processes that
+    inherit the *parent's* file descriptors — including the stdio pipe endpoints that Node's
+    spawn() gave the top-level Python process. When Node kills the parent via
+    taskkill /T /F those handles survive in the workers, preventing the pipe's 'close'
+    event from firing in Node and causing the _runningPython slot to leak indefinitely.
+    Redirecting the workers' stdio to os.devnull severs that inheritance chain.
+    """
+    import os
+    devnull = open(os.devnull, 'w')  # noqa: WPS515 — intentionally left open for process lifetime
+    try:
+        sys.stdout.flush()
+        sys.stderr.flush()
+    except Exception:
+        pass
+    try:
+        os.dup2(devnull.fileno(), sys.stdout.fileno())
+        os.dup2(devnull.fileno(), sys.stderr.fileno())
+    except Exception:
+        pass
+
+
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import RobustScaler
@@ -597,7 +622,9 @@ class FeatureEngineer:
             i = 0
             written = 0
             last_scaler = None
-            with ProcessPoolExecutor(max_workers=num_workers) as executor:
+            # initializer=_worker_init: each spawned worker redirects its own stdio to
+            # DEVNULL so it doesn't hold Node's inherited pipe endpoints open after kill.
+            with ProcessPoolExecutor(max_workers=num_workers, initializer=_worker_init) as executor:
                 while True:
                     chunk = list(islice(it, CHUNK_SIZE))
                     if not chunk:
