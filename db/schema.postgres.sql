@@ -469,6 +469,17 @@ CREATE TABLE IF NOT EXISTS "feature_importance_log" (
 );
 CREATE INDEX idx_feat_model ON feature_importance_log(model_name, computed_at DESC);
 
+-- ── gdelt_sentiment ─────────────────────────────────────────────
+-- Per-stock GDELT news tone (gdeltService.ts); mirrored in pgClient.ts's pgEnsureColumns()
+-- since this table historically had no schema entry here.
+CREATE TABLE IF NOT EXISTS "gdelt_sentiment" (
+  "symbol" TEXT NOT NULL,
+  "date" TEXT NOT NULL,
+  "avg_tone" DOUBLE PRECISION,
+  "computed_at" TEXT,
+  PRIMARY KEY ("symbol", "date")
+);
+
 -- ── feature_store ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "feature_store" (
   "symbol" TEXT NOT NULL,
