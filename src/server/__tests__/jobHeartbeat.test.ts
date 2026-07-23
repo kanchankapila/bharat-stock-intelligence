@@ -12,8 +12,12 @@ vi.mock('../jobRegistry', () => ({
     { jobName: 'event-job', label: 'Event Job', graceMinutes: 0, critical: false },
   ],
 }));
+vi.mock('../monitorScripts', () => ({ MONITOR_SCRIPTS: [] }));
+vi.mock('../dataQualityChecks', () => ({
+  DATA_QUALITY_CHECKS: [{ id: 'ohlcv-freshness-coverage' }],
+}));
 
-import { getLateJobs } from '../jobHeartbeat';
+import { getLateJobs, getStaleJobs } from '../jobHeartbeat';
 
 describe('getLateJobs', () => {
   beforeEach(() => { mockRows.length = 0; });
@@ -46,5 +50,25 @@ describe('getLateJobs', () => {
     mockRows.push({ job_name: 'event-job', last_success_at: null, last_error: null, last_alert_sent_at: null });
     const late = await getLateJobs(now);
     expect(late.map(l => l.job)).not.toContain('event-job');
+  });
+});
+
+describe('getStaleJobs', () => {
+  beforeEach(() => { mockRows.length = 0; });
+
+  it('does not flag a data-quality check id even with last_success_at null', async () => {
+    // markAlerted() inserts a job_heartbeat row keyed by DQ check id to dedupe Telegram
+    // alerts; recordHeartbeat() is never called for these ids so last_success_at stays
+    // NULL forever. Without the dataQualityIds exclusion this false-positives as
+    // "has never succeeded" permanently, even after the check itself starts passing.
+    mockRows.push({ job_name: 'ohlcv-freshness-coverage', last_success_at: null, last_error: null, last_alert_sent_at: 1234 });
+    const stale = await getStaleJobs();
+    expect(stale.map(s => s.job)).not.toContain('ohlcv-freshness-coverage');
+  });
+
+  it('still flags an unknown job with last_success_at null', async () => {
+    mockRows.push({ job_name: 'some-untracked-job', last_success_at: null, last_error: null, last_alert_sent_at: null });
+    const stale = await getStaleJobs();
+    expect(stale.map(s => s.job)).toContain('some-untracked-job');
   });
 });

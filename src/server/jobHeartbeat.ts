@@ -12,6 +12,7 @@ import { dbAll, dbRun, dbExec } from './dbAsync';
 import { CronExpressionParser } from 'cron-parser';
 import { JOB_REGISTRY } from './jobRegistry';
 import { MONITOR_SCRIPTS } from './monitorScripts';
+import { DATA_QUALITY_CHECKS } from './dataQualityChecks';
 
 // This module is the sole creator of job_heartbeat on both engines (it is not in db.ts
 // nor the generated PG schema). The CREATE runs once, memoized, and every public fn
@@ -84,12 +85,20 @@ export async function getStaleJobs(): Promise<Array<{ job: string; hoursStale: n
     const now = Date.now();
     const registryNames = new Set(JOB_REGISTRY.map(j => j.jobName));
     const monitorScriptIds = new Set(MONITOR_SCRIPTS.map(s => s.id as string));
+    const dataQualityIds = new Set(DATA_QUALITY_CHECKS.map(c => c.id));
     const rows = await dbAll('SELECT job_name, last_success_at FROM job_heartbeat') as
       Array<{ job_name: string; last_success_at: number | null }>;
     const stale: Array<{ job: string; hoursStale: number | null }> = [];
     for (const r of rows) {
       if (registryNames.has(r.job_name)) continue; // covered by cron-aware getLateJobs() instead
       if (monitorScriptIds.has(r.job_name)) continue; // covered by getSystemStatus() instead
+      // markAlerted() inserts a job_heartbeat row keyed by check id to dedupe Telegram
+      // alerts for failing data-quality checks (checkAndAlertDataQuality in jobWatchdog.ts).
+      // recordHeartbeat() is never called with these ids, so last_success_at is permanently
+      // NULL — without this exclusion every DQ check that has ever failed once logs
+      // "has never succeeded" here forever, even after it starts passing again, duplicating
+      // the check's own real freshness signal in data_quality_results/getLatestDataQualityResults().
+      if (dataQualityIds.has(r.job_name)) continue;
       if (r.last_success_at == null) {
         // Never succeeded — no epoch to measure staleness against; "?? 0" here would
         // report "hours since 1970" (~495,000h) instead of the real signal, which is
@@ -216,7 +225,8 @@ export async function wasAlreadyAlerted(jobName: string, expectedAt: Date): Prom
 }
 
 /** Periodically log stale jobs (jobs NOT in JOB_REGISTRY — e.g. MONITOR_SCRIPTS-bridged
- * ones already have their own freshness check via getSystemStatus()). */
+ * ones already have their own freshness check via getSystemStatus(), and DATA_QUALITY_CHECKS
+ * ids already have their own freshness check via getLatestDataQualityResults()). */
 export function startHeartbeatMonitor(): void {
   const check = async () => {
     const stale = await getStaleJobs();
