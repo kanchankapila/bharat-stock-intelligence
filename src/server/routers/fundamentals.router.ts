@@ -54,7 +54,24 @@ export const fundamentalsRouter = router({
 
   getShareholding: publicProcedure
     .input(z.object({ symbol: z.string() }))
-    .query(async ({ input }) => fetchETShareholding(input.symbol)),
+    .query(async ({ input }) => {
+      const live = await fetchETShareholding(input.symbol);
+      if (live) return live;
+      // ET Markets unreachable/no data — technical_signals already carries a promoter/FII/MF/
+      // pledge trail (populated by fundamentals_snapshot.py for the scoring engine) that this
+      // endpoint never read; fall back to the latest row instead of leaving the page empty.
+      try {
+        const row = await dbAll<any>(
+          `SELECT promoter_pct, fii_pct, mf_pct, pledge_pct, promoter_chg_qoq, fii_chg_qoq, mf_chg_qoq, pledge_chg_qoq
+           FROM technical_signals WHERE symbol = ? ORDER BY date DESC LIMIT 1`,
+          [input.symbol.toUpperCase()]
+        );
+        return row[0] ?? null;
+      } catch (e) {
+        console.error("[Fundamentals Router] getShareholding DB fallback failed:", e);
+        return null;
+      }
+    }),
 
   getCorporateActions: publicProcedure
     .input(z.object({ symbol: z.string() }))
