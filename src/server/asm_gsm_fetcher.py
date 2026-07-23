@@ -177,8 +177,8 @@ def backfill_technical_signals(con) -> int:
         cur.execute(
             """
             UPDATE technical_signals
-            SET asm_flag  = CASE WHEN technical_signals.date >= %s THEN ns.is_asm ELSE NULL END,
-                gsm_stage = CASE WHEN technical_signals.date >= %s THEN ns.gsm_stage ELSE NULL END
+            SET asm_flag  = CASE WHEN technical_signals.date >= ? THEN ns.is_asm ELSE NULL END,
+                gsm_stage = CASE WHEN technical_signals.date >= ? THEN ns.gsm_stage ELSE NULL END
             FROM nse_stocks ns
             WHERE technical_signals.symbol = ns.symbol
             """,

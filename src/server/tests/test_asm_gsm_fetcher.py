@@ -87,3 +87,26 @@ class TestUpsertFlagsFailureIsolation:
         agf.upsert_flags(set(), {})
         assert any("SET is_asm = 0, gsm_stage = 0" in sql for sql, _ in fake_conn.cur.executed)
         assert fake_conn.committed is True
+
+
+class TestBackfillTechnicalSignalsPlaceholders:
+    """Regression test for the 2026-07-23 fix: the Postgres branch of
+    backfill_technical_signals() used raw psycopg2-style '%s' placeholders passed
+    through db_compat's SQLAlchemy text()+sql_translate pipeline, which expects '?'
+    (SQLite-style, converted per-dialect by sql_translate.translate()). The literal
+    '%s' bypassed translation and psycopg2 raised
+    `SyntaxError: syntax error at or near "%"` on every single run -- this job never
+    succeeded against Postgres until the placeholder was fixed to match the sqlite
+    branch. Caught live in production logs, not by any prior test -- no test
+    previously exercised this function's SQL at all."""
+
+    def test_postgres_branch_uses_question_mark_placeholders(self, monkeypatch):
+        monkeypatch.setattr(agf, "use_postgres", lambda: True)
+        fake_conn = _FakeConn()
+        agf.backfill_technical_signals(fake_conn)
+        update_calls = [(sql, params) for sql, params in fake_conn.cur.executed if "asm_flag" in sql and "CASE" in sql]
+        assert len(update_calls) == 1, "expected exactly one UPDATE ... CASE WHEN statement"
+        sql, params = update_calls[0]
+        assert "%s" not in sql, "raw '%s' breaks db_compat's translate()/psycopg2 pipeline -- use '?'"
+        assert sql.count("?") == 2
+        assert len(params) == 2

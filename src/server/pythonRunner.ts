@@ -82,7 +82,8 @@ export function resetPythonSlots(): void {
 }
 
 
-function acquirePythonSlot(): Promise<void> {
+/** Exposed for tests only -- production callers go through runPython(). */
+export function acquirePythonSlot(): Promise<void> {
   return new Promise((resolve, reject) => {
     if (_runningPython < MAX_PYTHON_CONCURRENT) {
       _runningPython++;
@@ -107,12 +108,19 @@ function acquirePythonSlot(): Promise<void> {
   });
 }
 
-function releasePythonSlot(): void {
+/** Exposed for tests only -- production callers go through runPython(). */
+export function releasePythonSlot(): void {
+  // Always decrement for the finishing holder first. If a waiter is queued,
+  // handing them the slot re-increments via entry() -- net zero (transfer).
+  // Previously this branch skipped the decrement on handoff, so every transfer
+  // under queue contention leaked +1 permanently; with 5 concurrent slots and
+  // 40+ Python jobs firing every few minutes, the queue was rarely empty, so
+  // the counter drifted past MAX_PYTHON_CONCURRENT within minutes of every
+  // watchdog reset instead of only after a genuine subprocess leak.
+  _runningPython--;
   const next = _pythonQueue.shift();
   if (next) {
     next();
-  } else {
-    _runningPython--;
   }
 }
 
@@ -243,10 +251,12 @@ export async function runPython(
           } else if (code === 0) {
             resolve({ stdout: out, stderr: err });
           } else {
-            reject(Object.assign(
-              new Error(err || `Command failed with exit code ${code}`),
-              { stdout: out, stderr: err, code },
-            ));
+            // A script can sys.exit(1) after printing its failure reason to stdout
+            // (e.g. mc_broker_reco_fetcher.py's "0 recos fetched" guard) rather than
+            // stderr -- fall back to the stdout tail so the reason isn't lost behind
+            // a bare "Command failed with exit code 1" in job logs.
+            const reason = err || (out ? out.slice(-500) : '') || `Command failed with exit code ${code}`;
+            reject(Object.assign(new Error(reason), { stdout: out, stderr: err, code }));
           }
         });
       });
