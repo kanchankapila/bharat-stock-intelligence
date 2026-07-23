@@ -730,6 +730,45 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     X['asset_turnover']    = num('asset_turnover', 0.7).clip(0, 3) / 3.0
     X['cfo_growth_norm']   = num('cfo_growth', 0.0).clip(-100, 100) / 100.0
 
+    # ── 2026-07-23 harvest: universal solvency (same financial_ratios_fetcher.py payload) ──
+    X['interest_cov_posttax'] = num('interest_coverage_post_tax', 5.0).clip(0, 20) / 20.0
+    X['lt_de_norm']           = num('lt_de_ratio', 0.3).clip(0, 3) / 3.0
+    X['cfi_growth_norm']      = num('cfi_growth', 0.0).clip(-100, 100) / 100.0
+    X['cff_growth_norm']      = num('cff_growth', 0.0).clip(-100, 100) / 100.0
+    X['cfo_cagr_3y_norm']     = num('cfo_cagr_3y', 0.0).clip(-50, 100) / 100.0
+    X['cfi_cagr_3y_norm']     = num('cfi_cagr_3y', 0.0).clip(-50, 100) / 100.0
+    X['cff_cagr_3y_norm']     = num('cff_cagr_3y', 0.0).clip(-50, 100) / 100.0
+    X['cfo_cagr_5y_norm']     = num('cfo_cagr_5y', 0.0).clip(-50, 100) / 100.0
+    X['cfi_cagr_5y_norm']     = num('cfi_cagr_5y', 0.0).clip(-50, 100) / 100.0
+    X['cff_cagr_5y_norm']     = num('cff_cagr_5y', 0.0).clip(-50, 100) / 100.0
+
+    # ── 2026-07-23 harvest: banking-only ratios (financial_ratios_fetcher.py ET_Stats
+    # Ratio bucket, NULL for ~95% of the universe — non-bank/non-NBFC stocks). Neutral
+    # mid-range defaults so an uncovered (non-bank) name is never penalised or rewarded;
+    # a constant default carries no split information for tree models, exactly like the
+    # roce/quick_ratio defaults above. num_branches is intentionally NOT wired here — it's
+    # a raw headcount-style level correlated with bank size/market cap already in the
+    # model, not a normalized quality ratio (see business_per_employee/branch below for
+    # the per-unit versions that actually carry signal).
+    X['nim_norm']            = num('nim', 3.0).clip(-2, 8) / 8.0
+    X['cost_to_income_norm'] = num('cost_to_income', 45.0).clip(20, 90) / 90.0
+    X['int_inc_ea_norm']     = num('int_income_earning_assets', 7.0).clip(0, 15) / 15.0
+    X['non_int_inc_ea_norm'] = num('non_int_income_earning_assets', 1.0).clip(-2, 5) / 5.0
+    X['op_profit_ea_norm']   = num('op_profit_earning_assets', 0.3).clip(-2, 5) / 5.0
+    X['op_expense_ea_norm']  = num('op_expense_earning_assets', 1.5).clip(0, 5) / 5.0
+    X['int_exp_ea_norm']     = num('int_exp_earning_assets', 4.0).clip(0, 10) / 10.0
+    X['capital_adequacy_norm'] = num('capital_adequacy', 15.0).clip(5, 30) / 30.0
+    X['tier1_capital_norm']  = num('tier1_capital', 12.0).clip(0, 25) / 25.0
+    X['tier2_capital_norm']  = num('tier2_capital', 2.0).clip(0, 10) / 10.0
+    X['gross_npa_norm']      = num('gross_npa_pct', 3.0).clip(0, 20) / 20.0
+    X['net_npa_norm']        = num('net_npa_pct', 1.0).clip(0, 10) / 10.0
+    X['net_npa_adv_norm']    = num('net_npa_to_advances', 0.5).clip(0, 5) / 5.0
+    X['int_inc_per_emp_norm'] = num('int_income_per_employee', 0.1).clip(0, 1) / 1.0
+    X['np_per_emp_norm']     = num('np_per_employee', 0.05).clip(0, 1) / 1.0
+    X['biz_per_emp_norm']    = num('business_per_employee', 2.0).clip(0, 10) / 10.0
+    X['int_inc_per_branch_norm'] = num('int_income_per_branch', 2.0).clip(0, 10) / 10.0
+    X['np_per_branch_norm']  = num('np_per_branch', 0.5).clip(0, 5) / 5.0
+
     # Mutual-fund ownership flow (mf_stock_holdings_fetcher.py). Net MoM change in MF-held shares
     # is an institutional accumulation/distribution signal; fund-count is ownership breadth.
     X['mf_net_flow']       = num('mf_net_share_chg_pct', 0.0).clip(-25, 25) / 25.0
@@ -1037,6 +1076,15 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                    ts.eps_miss_after_streak, ts.rev_surprise_q1,
                    ts.fcf_yield_approx AS fcf_yield, ts.interest_coverage, ts.fcf_positive, ts.debt_coverage_risk,
                    ts.roce, ts.roce_trend, ts.quick_ratio, ts.ev_ebitda, ts.asset_turnover, ts.cfo_growth,
+                   ts.interest_coverage_post_tax, ts.lt_de_ratio,
+                   ts.nim, ts.cost_to_income, ts.int_income_earning_assets, ts.non_int_income_earning_assets,
+                   ts.op_profit_earning_assets, ts.op_expense_earning_assets, ts.int_exp_earning_assets,
+                   ts.capital_adequacy, ts.tier1_capital, ts.tier2_capital,
+                   ts.gross_npa_pct, ts.net_npa_pct, ts.net_npa_to_advances, ts.num_branches,
+                   ts.int_income_per_employee, ts.np_per_employee, ts.business_per_employee,
+                   ts.int_income_per_branch, ts.np_per_branch,
+                   ts.cfi_growth, ts.cff_growth,
+                   ts.cfo_cagr_3y, ts.cfi_cagr_3y, ts.cff_cagr_3y, ts.cfo_cagr_5y, ts.cfi_cagr_5y, ts.cff_cagr_5y,
                    ts.mf_net_share_chg_pct, ts.mf_fund_count,
                    ts.mf_funds_adding, ts.mf_funds_trimming, ts.mf_add_trim_ratio,
                    ts.mf_avg_pct_assets, ts.mf_big_fund_flow, ts.mf_flow_vs_sector, ts.mf_flow_rank,
@@ -1301,6 +1349,15 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                    ts.eps_miss_after_streak, ts.rev_surprise_q1,
                    ts.fcf_yield_approx AS fcf_yield, ts.interest_coverage, ts.fcf_positive, ts.debt_coverage_risk,
                    ts.roce, ts.roce_trend, ts.quick_ratio, ts.ev_ebitda, ts.asset_turnover, ts.cfo_growth,
+                   ts.interest_coverage_post_tax, ts.lt_de_ratio,
+                   ts.nim, ts.cost_to_income, ts.int_income_earning_assets, ts.non_int_income_earning_assets,
+                   ts.op_profit_earning_assets, ts.op_expense_earning_assets, ts.int_exp_earning_assets,
+                   ts.capital_adequacy, ts.tier1_capital, ts.tier2_capital,
+                   ts.gross_npa_pct, ts.net_npa_pct, ts.net_npa_to_advances, ts.num_branches,
+                   ts.int_income_per_employee, ts.np_per_employee, ts.business_per_employee,
+                   ts.int_income_per_branch, ts.np_per_branch,
+                   ts.cfi_growth, ts.cff_growth,
+                   ts.cfo_cagr_3y, ts.cfi_cagr_3y, ts.cff_cagr_3y, ts.cfo_cagr_5y, ts.cfi_cagr_5y, ts.cff_cagr_5y,
                    ts.mf_net_share_chg_pct, ts.mf_fund_count,
                    ts.mf_funds_adding, ts.mf_funds_trimming, ts.mf_add_trim_ratio,
                    ts.mf_avg_pct_assets, ts.mf_big_fund_flow, ts.mf_flow_vs_sector, ts.mf_flow_rank,
@@ -1520,6 +1577,15 @@ def load_pending_signals() -> pd.DataFrame:
                    ts.eps_miss_after_streak, ts.rev_surprise_q1,
                    ts.fcf_yield_approx AS fcf_yield, ts.interest_coverage, ts.fcf_positive, ts.debt_coverage_risk,
                    ts.roce, ts.roce_trend, ts.quick_ratio, ts.ev_ebitda, ts.asset_turnover, ts.cfo_growth,
+                   ts.interest_coverage_post_tax, ts.lt_de_ratio,
+                   ts.nim, ts.cost_to_income, ts.int_income_earning_assets, ts.non_int_income_earning_assets,
+                   ts.op_profit_earning_assets, ts.op_expense_earning_assets, ts.int_exp_earning_assets,
+                   ts.capital_adequacy, ts.tier1_capital, ts.tier2_capital,
+                   ts.gross_npa_pct, ts.net_npa_pct, ts.net_npa_to_advances, ts.num_branches,
+                   ts.int_income_per_employee, ts.np_per_employee, ts.business_per_employee,
+                   ts.int_income_per_branch, ts.np_per_branch,
+                   ts.cfi_growth, ts.cff_growth,
+                   ts.cfo_cagr_3y, ts.cfi_cagr_3y, ts.cff_cagr_3y, ts.cfo_cagr_5y, ts.cfi_cagr_5y, ts.cff_cagr_5y,
                    ts.mf_net_share_chg_pct, ts.mf_fund_count,
                    ts.mf_funds_adding, ts.mf_funds_trimming, ts.mf_add_trim_ratio,
                    ts.mf_avg_pct_assets, ts.mf_big_fund_flow, ts.mf_flow_vs_sector, ts.mf_flow_rank,
@@ -1790,6 +1856,15 @@ def load_pending_signals() -> pd.DataFrame:
                    {ts_c('eps_miss_after_streak')}, {ts_c('rev_surprise_q1')},
                    {ts_c('fcf_yield_approx', 'fcf_yield')}, {ts_c('interest_coverage')}, {ts_c('fcf_positive')}, {ts_c('debt_coverage_risk')},
                    {ts_c('roce')}, {ts_c('roce_trend')}, {ts_c('quick_ratio')}, {ts_c('ev_ebitda')}, {ts_c('asset_turnover')}, {ts_c('cfo_growth')},
+                   {ts_c('interest_coverage_post_tax')}, {ts_c('lt_de_ratio')},
+                   {ts_c('nim')}, {ts_c('cost_to_income')}, {ts_c('int_income_earning_assets')}, {ts_c('non_int_income_earning_assets')},
+                   {ts_c('op_profit_earning_assets')}, {ts_c('op_expense_earning_assets')}, {ts_c('int_exp_earning_assets')},
+                   {ts_c('capital_adequacy')}, {ts_c('tier1_capital')}, {ts_c('tier2_capital')},
+                   {ts_c('gross_npa_pct')}, {ts_c('net_npa_pct')}, {ts_c('net_npa_to_advances')}, {ts_c('num_branches')},
+                   {ts_c('int_income_per_employee')}, {ts_c('np_per_employee')}, {ts_c('business_per_employee')},
+                   {ts_c('int_income_per_branch')}, {ts_c('np_per_branch')},
+                   {ts_c('cfi_growth')}, {ts_c('cff_growth')},
+                   {ts_c('cfo_cagr_3y')}, {ts_c('cfi_cagr_3y')}, {ts_c('cff_cagr_3y')}, {ts_c('cfo_cagr_5y')}, {ts_c('cfi_cagr_5y')}, {ts_c('cff_cagr_5y')},
                    {ts_c('mf_net_share_chg_pct')}, {ts_c('mf_fund_count')},
                    {ts_c('mf_funds_adding')}, {ts_c('mf_funds_trimming')}, {ts_c('mf_add_trim_ratio')},
                    {ts_c('mf_avg_pct_assets')}, {ts_c('mf_big_fund_flow')}, {ts_c('mf_flow_vs_sector')}, {ts_c('mf_flow_rank')},

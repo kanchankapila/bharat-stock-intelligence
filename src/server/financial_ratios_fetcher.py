@@ -22,13 +22,27 @@ ET_Stats mobile endpoint (see et_stats_client.py), keyed by each stock's ET
                        every column/field name so downstream consumers know
                        this is an approximation, not a precise FCF figure.
 
+2026-07-23 harvest extension: the same Ratio/CashFlow payloads carry ~40 more
+fields we already pay the network cost for but discard. Added:
+  - Banking-only ratios (null for cType="NonBank", populated for cType="Bank" —
+    live-verified against HDFCBANK): NIM, Cost-to-Income, CASA-adjacent
+    earning-asset ratios, Capital Adequacy + Tier 1/2, Gross/Net NPA (+ NPA to
+    Advances), branch count, and per-employee/per-branch productivity ratios.
+    `numberOfEmployees`/`npAfterMIPerEmployee`/`npAfterMIPerBranches` are
+    DELIBERATELY not harvested — live-verified unreliable (0 or null even for
+    a well-covered stock like HDFCBANK).
+  - Universal: Interest Coverage Post Tax, LT Debt/Equity, CFI/CFF YoY growth
+    (cashflow already fetched at last=6 now, not 5, so 3Y/5Y CAGR for
+    CFO/CFI/CFF can be computed from the same response — no extra network
+    call).
+
 Cadence: monthly (Balance/CashFlow/Ratio are annual-refresh ET_Stats data —
 no value in fetching more often than once a month).
 
 Writes:
   tl_financial_quality  (symbol, as_of_date) — raw + derived values
   technical_signals     — fcf_yield_approx, interest_coverage, fcf_positive,
-                          debt_coverage_risk
+                          debt_coverage_risk, + the harvested fields above
 
 Run:
   python financial_ratios_fetcher.py              # all stocks with a companyid
@@ -94,6 +108,66 @@ def ensure_schema(con) -> None:
         "ALTER TABLE technical_signals ADD COLUMN ev_ebitda          REAL",
         "ALTER TABLE technical_signals ADD COLUMN asset_turnover     REAL",
         "ALTER TABLE technical_signals ADD COLUMN cfo_growth         REAL",
+        # ── 2026-07-23 harvest: banking ratios (bank-only, NULL for non-banks) ──
+        "ALTER TABLE tl_financial_quality ADD COLUMN nim                        REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN cost_to_income             REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN int_income_earning_assets  REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN non_int_income_earning_assets REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN op_profit_earning_assets   REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN op_expense_earning_assets  REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN int_exp_earning_assets     REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN capital_adequacy           REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN tier1_capital              REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN tier2_capital              REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN gross_npa_pct              REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN net_npa_pct                REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN net_npa_to_advances        REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN num_branches               REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN int_income_per_employee    REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN np_per_employee            REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN business_per_employee      REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN int_income_per_branch      REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN np_per_branch              REAL",
+        # ── 2026-07-23 harvest: universal solvency / cash-flow-growth ──
+        "ALTER TABLE tl_financial_quality ADD COLUMN interest_coverage_post_tax REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN lt_de_ratio                REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN cfi_growth                 REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN cff_growth                 REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN cfo_cagr_3y                REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN cfi_cagr_3y                REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN cff_cagr_3y                REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN cfo_cagr_5y                REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN cfi_cagr_5y                REAL",
+        "ALTER TABLE tl_financial_quality ADD COLUMN cff_cagr_5y                REAL",
+        "ALTER TABLE technical_signals ADD COLUMN nim                        REAL",
+        "ALTER TABLE technical_signals ADD COLUMN cost_to_income             REAL",
+        "ALTER TABLE technical_signals ADD COLUMN int_income_earning_assets  REAL",
+        "ALTER TABLE technical_signals ADD COLUMN non_int_income_earning_assets REAL",
+        "ALTER TABLE technical_signals ADD COLUMN op_profit_earning_assets   REAL",
+        "ALTER TABLE technical_signals ADD COLUMN op_expense_earning_assets  REAL",
+        "ALTER TABLE technical_signals ADD COLUMN int_exp_earning_assets     REAL",
+        "ALTER TABLE technical_signals ADD COLUMN capital_adequacy           REAL",
+        "ALTER TABLE technical_signals ADD COLUMN tier1_capital              REAL",
+        "ALTER TABLE technical_signals ADD COLUMN tier2_capital              REAL",
+        "ALTER TABLE technical_signals ADD COLUMN gross_npa_pct              REAL",
+        "ALTER TABLE technical_signals ADD COLUMN net_npa_pct                REAL",
+        "ALTER TABLE technical_signals ADD COLUMN net_npa_to_advances        REAL",
+        "ALTER TABLE technical_signals ADD COLUMN num_branches               REAL",
+        "ALTER TABLE technical_signals ADD COLUMN int_income_per_employee    REAL",
+        "ALTER TABLE technical_signals ADD COLUMN np_per_employee            REAL",
+        "ALTER TABLE technical_signals ADD COLUMN business_per_employee      REAL",
+        "ALTER TABLE technical_signals ADD COLUMN int_income_per_branch      REAL",
+        "ALTER TABLE technical_signals ADD COLUMN np_per_branch              REAL",
+        "ALTER TABLE technical_signals ADD COLUMN interest_coverage_post_tax REAL",
+        "ALTER TABLE technical_signals ADD COLUMN lt_de_ratio                REAL",
+        "ALTER TABLE technical_signals ADD COLUMN cfi_growth                 REAL",
+        "ALTER TABLE technical_signals ADD COLUMN cff_growth                 REAL",
+        "ALTER TABLE technical_signals ADD COLUMN cfo_cagr_3y                REAL",
+        "ALTER TABLE technical_signals ADD COLUMN cfi_cagr_3y                REAL",
+        "ALTER TABLE technical_signals ADD COLUMN cff_cagr_3y                REAL",
+        "ALTER TABLE technical_signals ADD COLUMN cfo_cagr_5y                REAL",
+        "ALTER TABLE technical_signals ADD COLUMN cfi_cagr_5y                REAL",
+        "ALTER TABLE technical_signals ADD COLUMN cff_cagr_5y                REAL",
     ]:
         try:
             cur.execute(ddl)
@@ -111,6 +185,22 @@ def _num(v, default=None):
         return float(v)
     except (TypeError, ValueError):
         return default
+
+
+def _cagr(latest: float | None, base: float | None, years: int) -> float | None:
+    """Compound annual growth from `base` (N years ago) to `latest` (now), as a percentage.
+    None whenever the result would be undefined/meaningless: either value missing, `base`
+    non-positive (fractional power of a negative number is not real), or `latest` non-positive
+    (a positive-to-negative or negative-to-negative swing has no sensible CAGR). This makes CFI/
+    CFF CAGR frequently None in practice — those lines are routinely negative (cash outflow),
+    which is a data-honesty null, not a bug (same philosophy as is_plausible_return() elsewhere
+    in this project: an undefined stat is reported as missing, never as a garbage number)."""
+    if latest is None or base is None or base <= 0 or latest <= 0 or years <= 0:
+        return None
+    try:
+        return round(((latest / base) ** (1.0 / years) - 1.0) * 100, 2)
+    except (ValueError, ZeroDivisionError):
+        return None
 
 
 def compute_ratios(
@@ -139,6 +229,56 @@ def compute_ratios(
     ev_ebitda = _num(r0.get("evPerEBITDA"))
     asset_turnover = _num(r0.get("assetTurnover"))
     cfo_growth = _num(cashflow[0].get("cfoGrowth")) if cashflow else None
+
+    # ── 2026-07-23 harvest: universal solvency (same Ratio payload) ─────────────────
+    interest_coverage_post_tax = _num(r0.get("interestCoveragePostTax"))
+    lt_de_ratio = _num(r0.get("longTermDebtEquity"))
+
+    # ── 2026-07-23 harvest: banking-only ratios. NULL for cType="NonBank" — that's the
+    # ET_Stats provider's own classification, not a parsing failure; every field below is
+    # expected to be None for ~95% of the universe (non-bank/non-NBFC stocks). Live-verified
+    # against HDFCBANK (cType="Bank"): nim=2.94, costToIncome=37.99, capitalAdequacyRatios=19.71.
+    # `numberOfEmployees`/`npAfterMIPerEmployee`/`npAfterMIPerBranches` are deliberately NOT
+    # harvested — live-verified unreliable (0 or null even for HDFCBANK).
+    nim = _num(r0.get("nim"))
+    cost_to_income = _num(r0.get("costToIncome"))
+    int_income_earning_assets = _num(r0.get("interestIncomeByEarningAssets"))
+    non_int_income_earning_assets = _num(r0.get("nonInterestIncomeByEarningAssets"))
+    op_profit_earning_assets = _num(r0.get("operatingProfitByEarningAssets"))
+    op_expense_earning_assets = _num(r0.get("operatingExpensesByEarningAssets"))
+    int_exp_earning_assets = _num(r0.get("interestExpensesByEarningAssets"))
+    capital_adequacy = _num(r0.get("capitalAdequacyRatios"))
+    tier1_capital = _num(r0.get("keyPerformanceTier1"))
+    tier2_capital = _num(r0.get("keyPerformanceTier2"))
+    gross_npa_pct = _num(r0.get("grossNPAPercentage"))
+    net_npa_pct = _num(r0.get("netNPAPercentage"))
+    net_npa_to_advances = _num(r0.get("netNPAToAdvancesPercentage"))
+    num_branches = _num(r0.get("numberOfBranches"))
+    int_income_per_employee = _num(r0.get("interestIncomePerEmployee"))
+    np_per_employee = _num(r0.get("npPerEmployee"))
+    business_per_employee = _num(r0.get("businessPerEmployee"))
+    int_income_per_branch = _num(r0.get("interestIncomePerBranch"))
+    np_per_branch = _num(r0.get("npPerBranches"))
+
+    # ── 2026-07-23 harvest: CFI/CFF YoY growth + 3Y/5Y CAGR for CFO/CFI/CFF. Needs cashflow
+    # fetched at last=6 (index 3 = 3 years back, index 5 = 5 years back); process_stock() below
+    # requests last=6 for exactly this. Falls back to None (not a crash) if fewer periods came back.
+    cfi_growth = _num(cashflow[0].get("cfiGrowth")) if cashflow else None
+    cff_growth = _num(cashflow[0].get("cffGrowth")) if cashflow else None
+
+    def _cf_cagr(field: str, years: int) -> float | None:
+        if not cashflow or len(cashflow) <= years:
+            return None
+        latest = _num(cashflow[0].get(field))
+        base = _num(cashflow[years].get(field))
+        return _cagr(latest, base, years)
+
+    cfo_cagr_3y = _cf_cagr("netCashFlowFromOperatingActivities", 3)
+    cfi_cagr_3y = _cf_cagr("netCashUsedInInvestingActivities", 3)
+    cff_cagr_3y = _cf_cagr("netCashUsedFromFinancingActivities", 3)
+    cfo_cagr_5y = _cf_cagr("netCashFlowFromOperatingActivities", 5)
+    cfi_cagr_5y = _cf_cagr("netCashUsedInInvestingActivities", 5)
+    cff_cagr_5y = _cf_cagr("netCashUsedFromFinancingActivities", 5)
 
     fcf_ttm_approx: float | None = None
     if cfo is not None and cfi is not None:
@@ -170,40 +310,69 @@ def compute_ratios(
         "ev_ebitda": round(ev_ebitda, 2) if ev_ebitda is not None else None,
         "asset_turnover": round(asset_turnover, 2) if asset_turnover is not None else None,
         "cfo_growth": round(cfo_growth, 2) if cfo_growth is not None else None,
+        "interest_coverage_post_tax": round(interest_coverage_post_tax, 2) if interest_coverage_post_tax is not None else None,
+        "lt_de_ratio": round(lt_de_ratio, 2) if lt_de_ratio is not None else None,
+        "nim": round(nim, 2) if nim is not None else None,
+        "cost_to_income": round(cost_to_income, 2) if cost_to_income is not None else None,
+        "int_income_earning_assets": round(int_income_earning_assets, 2) if int_income_earning_assets is not None else None,
+        "non_int_income_earning_assets": round(non_int_income_earning_assets, 2) if non_int_income_earning_assets is not None else None,
+        "op_profit_earning_assets": round(op_profit_earning_assets, 2) if op_profit_earning_assets is not None else None,
+        "op_expense_earning_assets": round(op_expense_earning_assets, 2) if op_expense_earning_assets is not None else None,
+        "int_exp_earning_assets": round(int_exp_earning_assets, 2) if int_exp_earning_assets is not None else None,
+        "capital_adequacy": round(capital_adequacy, 2) if capital_adequacy is not None else None,
+        "tier1_capital": round(tier1_capital, 2) if tier1_capital is not None else None,
+        "tier2_capital": round(tier2_capital, 2) if tier2_capital is not None else None,
+        "gross_npa_pct": round(gross_npa_pct, 2) if gross_npa_pct is not None else None,
+        "net_npa_pct": round(net_npa_pct, 2) if net_npa_pct is not None else None,
+        "net_npa_to_advances": round(net_npa_to_advances, 2) if net_npa_to_advances is not None else None,
+        "num_branches": round(num_branches, 0) if num_branches is not None else None,
+        "int_income_per_employee": round(int_income_per_employee, 4) if int_income_per_employee is not None else None,
+        "np_per_employee": round(np_per_employee, 4) if np_per_employee is not None else None,
+        "business_per_employee": round(business_per_employee, 4) if business_per_employee is not None else None,
+        "int_income_per_branch": round(int_income_per_branch, 4) if int_income_per_branch is not None else None,
+        "np_per_branch": round(np_per_branch, 4) if np_per_branch is not None else None,
+        "cfi_growth": round(cfi_growth, 2) if cfi_growth is not None else None,
+        "cff_growth": round(cff_growth, 2) if cff_growth is not None else None,
+        "cfo_cagr_3y": cfo_cagr_3y,
+        "cfi_cagr_3y": cfi_cagr_3y,
+        "cff_cagr_3y": cff_cagr_3y,
+        "cfo_cagr_5y": cfo_cagr_5y,
+        "cfi_cagr_5y": cfi_cagr_5y,
+        "cff_cagr_5y": cff_cagr_5y,
     }
 
 
 # ── Persist ──────────────────────────────────────────────────────────────────────
 
+_HARVEST_COLUMNS = [
+    "roce", "roce_trend", "quick_ratio", "ev_ebitda", "asset_turnover", "cfo_growth",
+    "interest_coverage_post_tax", "lt_de_ratio",
+    "nim", "cost_to_income", "int_income_earning_assets", "non_int_income_earning_assets",
+    "op_profit_earning_assets", "op_expense_earning_assets", "int_exp_earning_assets",
+    "capital_adequacy", "tier1_capital", "tier2_capital",
+    "gross_npa_pct", "net_npa_pct", "net_npa_to_advances", "num_branches",
+    "int_income_per_employee", "np_per_employee", "business_per_employee",
+    "int_income_per_branch", "np_per_branch",
+    "cfi_growth", "cff_growth",
+    "cfo_cagr_3y", "cfi_cagr_3y", "cff_cagr_3y", "cfo_cagr_5y", "cfi_cagr_5y", "cff_cagr_5y",
+]
+
+
 def upsert_quality(symbol: str, today: str, row: dict, con) -> None:
     cur = con.cursor()
-    cur.execute("""
-        INSERT INTO tl_financial_quality
-            (symbol, as_of_date, cfo_ttm, cfi_ttm, fcf_ttm_approx,
-             interest_coverage, market_cap, fcf_yield_approx,
-             roce, roce_trend, quick_ratio, ev_ebitda, asset_turnover, cfo_growth)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    columns = ["symbol", "as_of_date", "cfo_ttm", "cfi_ttm", "fcf_ttm_approx",
+               "interest_coverage", "market_cap", "fcf_yield_approx"] + _HARVEST_COLUMNS
+    placeholders = ",".join(["?"] * len(columns))
+    update_clause = ",\n            ".join(
+        f"{c} = excluded.{c}" for c in columns if c not in ("symbol", "as_of_date")
+    )
+    cur.execute(f"""
+        INSERT INTO tl_financial_quality ({", ".join(columns)})
+        VALUES ({placeholders})
         ON CONFLICT(symbol, as_of_date) DO UPDATE SET
-            cfo_ttm            = excluded.cfo_ttm,
-            cfi_ttm            = excluded.cfi_ttm,
-            fcf_ttm_approx     = excluded.fcf_ttm_approx,
-            interest_coverage  = excluded.interest_coverage,
-            market_cap         = excluded.market_cap,
-            fcf_yield_approx   = excluded.fcf_yield_approx,
-            roce               = excluded.roce,
-            roce_trend         = excluded.roce_trend,
-            quick_ratio        = excluded.quick_ratio,
-            ev_ebitda          = excluded.ev_ebitda,
-            asset_turnover     = excluded.asset_turnover,
-            cfo_growth         = excluded.cfo_growth,
-            fetched_at         = CURRENT_TIMESTAMP
-    """, (
-        symbol, today,
-        row.get("cfo_ttm"), row.get("cfi_ttm"), row.get("fcf_ttm_approx"),
-        row.get("interest_coverage"), row.get("market_cap"), row.get("fcf_yield_approx"),
-        row.get("roce"), row.get("roce_trend"), row.get("quick_ratio"),
-        row.get("ev_ebitda"), row.get("asset_turnover"), row.get("cfo_growth"),
-    ))
+            {update_clause},
+            fetched_at = CURRENT_TIMESTAMP
+    """, tuple(symbol if c == "symbol" else today if c == "as_of_date" else row.get(c) for c in columns))
     con.commit()
 
 
@@ -215,32 +384,19 @@ def update_technical_signals(symbol: str, features: dict, con) -> None:
     # tl_financial_quality; technical_signals only carries the value from its knowable date on.
     floor = as_of_floor(features.get("year_ending"))
     cur = con.cursor()
-    cur.execute("""
+    base_columns = ["fcf_yield_approx", "interest_coverage", "fcf_positive", "debt_coverage_risk"] + _HARVEST_COLUMNS
+    set_clause = ",\n            ".join(
+        f"{c} = CASE WHEN date >= ? THEN COALESCE(?, {c}) ELSE NULL END" for c in base_columns
+    )
+    params = []
+    for c in base_columns:
+        params.extend([floor, features.get(c)])
+    params.append(symbol)
+    cur.execute(f"""
         UPDATE technical_signals SET
-            fcf_yield_approx   = CASE WHEN date >= ? THEN COALESCE(?, fcf_yield_approx)   ELSE NULL END,
-            interest_coverage  = CASE WHEN date >= ? THEN COALESCE(?, interest_coverage)  ELSE NULL END,
-            fcf_positive       = CASE WHEN date >= ? THEN COALESCE(?, fcf_positive)       ELSE NULL END,
-            debt_coverage_risk = CASE WHEN date >= ? THEN COALESCE(?, debt_coverage_risk) ELSE NULL END,
-            roce               = CASE WHEN date >= ? THEN COALESCE(?, roce)               ELSE NULL END,
-            roce_trend         = CASE WHEN date >= ? THEN COALESCE(?, roce_trend)         ELSE NULL END,
-            quick_ratio        = CASE WHEN date >= ? THEN COALESCE(?, quick_ratio)        ELSE NULL END,
-            ev_ebitda          = CASE WHEN date >= ? THEN COALESCE(?, ev_ebitda)          ELSE NULL END,
-            asset_turnover     = CASE WHEN date >= ? THEN COALESCE(?, asset_turnover)     ELSE NULL END,
-            cfo_growth         = CASE WHEN date >= ? THEN COALESCE(?, cfo_growth)         ELSE NULL END
+            {set_clause}
         WHERE symbol = ?
-    """, (
-        floor, features.get("fcf_yield_approx"),
-        floor, features.get("interest_coverage"),
-        floor, features.get("fcf_positive"),
-        floor, features.get("debt_coverage_risk"),
-        floor, features.get("roce"),
-        floor, features.get("roce_trend"),
-        floor, features.get("quick_ratio"),
-        floor, features.get("ev_ebitda"),
-        floor, features.get("asset_turnover"),
-        floor, features.get("cfo_growth"),
-        symbol,
-    ))
+    """, tuple(params))
     con.commit()
 
 
@@ -255,7 +411,7 @@ def get_market_cap(symbol: str, con) -> float | None:
 
 def process_stock(symbol: str, company_id: str, today: str,
                    session: requests.Session, con) -> dict:
-    cashflow = fetch_et_stats(company_id, "CashFlow", session)
+    cashflow = fetch_et_stats(company_id, "CashFlow", session, last=6)  # 6 periods -> 5Y CAGR possible
     ratio = fetch_et_stats(company_id, "Ratio", session)
     market_cap = get_market_cap(symbol, con)
 
@@ -315,7 +471,7 @@ def main() -> None:
             if features.get("debt_coverage_risk"):
                 distress_count += 1
 
-            fcf_str = f"FCF yield≈{features['fcf_yield_approx']:.2f}%" if features.get("fcf_yield_approx") is not None else "FCF yield=n/a"
+            fcf_str = f"FCF yield~{features['fcf_yield_approx']:.2f}%" if features.get("fcf_yield_approx") is not None else "FCF yield=n/a"
             cov_str = f"IC={features['interest_coverage']:.1f}x" if features.get("interest_coverage") is not None else "IC=n/a"
             flag = " [DISTRESS]" if features.get("debt_coverage_risk") else ""
             print(f"  [{i}/{len(stocks)}] {symbol}: {fcf_str} | {cov_str}{flag}")

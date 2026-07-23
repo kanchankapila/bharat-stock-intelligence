@@ -90,6 +90,118 @@ class TestComputeRatios:
         assert result["roce"] == 18.5
         assert result["roce_trend"] is None
 
+    def test_universal_solvency_harvest(self):
+        # interestCoveragePostTax / longTermDebtEquity — live-verified field names against
+        # Reliance Industries (cType=NonBank): interestCoveragePostTax=7.35, longTermDebtEquity=0.33.
+        ratio = [{"interestCoveragePostTax": 7.35, "longTermDebtEquity": 0.33}]
+        result = frf.compute_ratios(balance=None, cashflow=None, ratio=ratio, market_cap=None)
+        assert result["interest_coverage_post_tax"] == 7.35
+        assert result["lt_de_ratio"] == 0.33
+
+    def test_banking_ratios_populated_for_bank_ctype(self):
+        # Field names + live values verified against HDFCBANK (cType=Bank) on 2026-07-23.
+        ratio = [{
+            "cType": "Bank",
+            "nim": 2.94, "costToIncome": 37.99,
+            "interestIncomeByEarningAssets": 7.04, "nonInterestIncomeByEarningAssets": 1.43,
+            "operatingProfitByEarningAssets": 0.27, "operatingExpensesByEarningAssets": 1.66,
+            "interestExpensesByEarningAssets": 4.09,
+            "capitalAdequacyRatios": 19.71, "keyPerformanceTier1": 17.73, "keyPerformanceTier2": 1.98,
+            "grossNPAPercentage": 1.15, "netNPAPercentage": 1.15, "netNPAToAdvancesPercentage": 0.38,
+            "numberOfBranches": 9689.0,
+            "interestIncomePerEmployee": 0.15, "npPerEmployee": 0.04, "businessPerEmployee": 2.86,
+            "interestIncomePerBranch": 3.17, "npPerBranches": 0.77,
+        }]
+        result = frf.compute_ratios(balance=None, cashflow=None, ratio=ratio, market_cap=None)
+        assert result["nim"] == 2.94
+        assert result["cost_to_income"] == 37.99
+        assert result["capital_adequacy"] == 19.71
+        assert result["tier1_capital"] == 17.73
+        assert result["tier2_capital"] == 1.98
+        assert result["gross_npa_pct"] == 1.15
+        assert result["net_npa_pct"] == 1.15
+        assert result["net_npa_to_advances"] == 0.38
+        assert result["num_branches"] == 9689.0
+        assert result["business_per_employee"] == 2.86
+        assert result["np_per_branch"] == 0.77
+
+    def test_banking_ratios_none_for_nonbank_ctype(self):
+        # Non-bank stocks get cType=NonBank and every banking-only field is None on the raw
+        # payload — must surface as None here, not 0 or a crash (0 would read as "zero NPAs",
+        # a false-positive quality signal).
+        ratio = [{"cType": "NonBank", "nim": None, "capitalAdequacyRatios": None, "grossNPAPercentage": None}]
+        result = frf.compute_ratios(balance=None, cashflow=None, ratio=ratio, market_cap=None)
+        assert result["nim"] is None
+        assert result["capital_adequacy"] is None
+        assert result["gross_npa_pct"] is None
+
+    def test_cfi_cff_growth_harvest(self):
+        cashflow = [{**_cashflow_row(1000.0, -200.0), "cfiGrowth": -12.4, "cffGrowth": 5.1}]
+        result = frf.compute_ratios(balance=None, cashflow=cashflow, ratio=None, market_cap=None)
+        assert result["cfi_growth"] == -12.4
+        assert result["cff_growth"] == 5.1
+
+    def test_cfi_cff_growth_na_string_is_none_not_crash(self):
+        # ET_Stats returns the literal string "NA" for an unavailable growth figure.
+        cashflow = [{**_cashflow_row(1000.0, -200.0), "cfiGrowth": "NA", "cffGrowth": "NA"}]
+        result = frf.compute_ratios(balance=None, cashflow=cashflow, ratio=None, market_cap=None)
+        assert result["cfi_growth"] is None
+        assert result["cff_growth"] is None
+
+    def test_cfo_cagr_computed_from_6_period_cashflow_list(self):
+        # Most-recent-first: index 0 = latest, index 3 = 3Y ago, index 5 = 5Y ago.
+        # Clean 10%/year geometric series (index_k = 1000 * 1.1^(5-k)) so both CAGRs
+        # resolve to an exact 10.0% instead of an eyeballed decimal.
+        cashflow = [
+            {"netCashFlowFromOperatingActivities": 1610.51},  # latest (1000*1.1^5)
+            {"netCashFlowFromOperatingActivities": 1464.1},
+            {"netCashFlowFromOperatingActivities": 1331.0},
+            {"netCashFlowFromOperatingActivities": 1210.0},   # 3Y ago (1000*1.1^2)
+            {"netCashFlowFromOperatingActivities": 1100.0},
+            {"netCashFlowFromOperatingActivities": 1000.0},   # 5Y ago
+        ]
+        result = frf.compute_ratios(balance=None, cashflow=cashflow, ratio=None, market_cap=None)
+        assert result["cfo_cagr_3y"] == 10.0
+        assert result["cfo_cagr_5y"] == 10.0
+
+    def test_cagr_none_when_fewer_than_required_periods(self):
+        # Only 4 periods available (indices 0-3) — index 5 doesn't exist, so 5Y CAGR must be
+        # None rather than IndexError.
+        cashflow = [{"netCashFlowFromOperatingActivities": v} for v in [1000, 900, 800, 700]]
+        result = frf.compute_ratios(balance=None, cashflow=cashflow, ratio=None, market_cap=None)
+        assert result["cfo_cagr_5y"] is None
+        assert result["cfo_cagr_3y"] is not None  # index 3 exists
+
+    def test_cagr_none_when_cfi_negative_both_periods(self):
+        # CFI (net cash USED in investing) is routinely negative — CAGR of a negative series
+        # is undefined (fractional power of a negative base), must be None, not a complex number
+        # or a crash.
+        cashflow = [{"netCashUsedInInvestingActivities": v} for v in [-500, -450, -400, -300]]
+        result = frf.compute_ratios(balance=None, cashflow=cashflow, ratio=None, market_cap=None)
+        assert result["cfi_cagr_3y"] is None
+
+
+class TestCagrHelper:
+    def test_cagr_normal_case(self):
+        # 1000 * 1.1^3 = 1331.0 exactly -> a clean 10.0% CAGR over 3 years.
+        assert frf._cagr(latest=1331.0, base=1000.0, years=3) == 10.0
+
+    def test_cagr_none_on_negative_base(self):
+        assert frf._cagr(latest=100.0, base=-50.0, years=3) is None
+
+    def test_cagr_none_on_negative_latest(self):
+        assert frf._cagr(latest=-100.0, base=50.0, years=3) is None
+
+    def test_cagr_none_on_zero_base(self):
+        assert frf._cagr(latest=100.0, base=0.0, years=3) is None
+
+    def test_cagr_none_on_missing_values(self):
+        assert frf._cagr(latest=None, base=100.0, years=3) is None
+        assert frf._cagr(latest=100.0, base=None, years=3) is None
+
+    def test_cagr_none_on_zero_years(self):
+        assert frf._cagr(latest=100.0, base=50.0, years=0) is None
+
 
 class TestAsOfFloor:
     def test_floor_is_year_ending_plus_publication_lag(self):
