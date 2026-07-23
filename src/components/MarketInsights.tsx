@@ -12,7 +12,7 @@ export const IndexOverview: React.FC<{ className?: string; onSelectIndex?: (id: 
   const ref = React.useRef<HTMLDivElement>(null);
   const isVisible = useIntersectionObserver(ref, { threshold: 0.1 });
 
-  const { data: indices, isLoading } = trpc.getAllIndices.useQuery(undefined, {
+  const { data: indices, isLoading, isError } = trpc.getAllIndices.useQuery(undefined, {
     enabled: isVisible,
     refetchInterval: isVisible ? 30000 : false,
   });
@@ -24,14 +24,26 @@ export const IndexOverview: React.FC<{ className?: string; onSelectIndex?: (id: 
     return '';
   };
 
-  if (isLoading || !indices) return <div ref={ref} className="h-40 bg-slate-900/50 animate-pulse rounded-2xl" />;
-
   const groups: { name: string; list: any[] }[] = (indices as any)?.data?.indiceList ?? [];
   const keyList = groups.find(g => g.name === 'Key Indices')?.list ?? [];
 
+  // isLoading only covers the "query hasn't settled yet" window — once it settles (success with
+  // no rows, or a network error), the old code kept showing this same skeleton forever instead of
+  // ever reaching an end state. Distinguish loading vs. actually-empty/errored so it doesn't
+  // pulse indefinitely when there's simply no data (e.g. no network access to the upstream feed).
+  const settledEmpty = !isLoading && (isError || keyList.length === 0);
+
   return (
     <Card title="Key Market Indices" icon={Activity} className={className}>
-      <div ref={ref} className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
+      <div ref={ref}>
+        {isLoading ? (
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
+            {[0, 1, 2].map(i => <div key={i} className="h-20 bg-slate-900/50 animate-pulse rounded-2xl" />)}
+          </div>
+        ) : settledEmpty ? (
+          <div className="text-xs text-slate-500 py-4 text-center">No live index data available right now.</div>
+        ) : (
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {keyList.slice(0, 3).map((idx: any) => {
           const indexId = getIndexId(idx.name);
           const isClickable = !!indexId && !!onSelectIndex;
@@ -71,6 +83,8 @@ export const IndexOverview: React.FC<{ className?: string; onSelectIndex?: (id: 
             </div>
           );
         })}
+      </div>
+        )}
       </div>
     </Card>
   );

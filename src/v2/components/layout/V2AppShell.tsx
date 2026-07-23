@@ -5,7 +5,7 @@ import {
   Target, Zap, Search, Briefcase, Calendar, Sparkles, Radio, FlaskConical,
   Star, History, Settings2, PieChart, Bookmark, Users, Globe, CheckCircle2,
   ToggleLeft, ToggleRight, Settings, MonitorDot, X, BrainCircuit, Flame,
-  Gauge, Newspaper
+  Gauge, Newspaper, Crosshair, Layers, ChartLine, MessageSquare,
 } from 'lucide-react';
 import { cn } from '../../../lib/utils';
 
@@ -43,45 +43,101 @@ export const V2AppShell: React.FC<V2AppShellProps> = ({
     }
   }, [lastMessage]);
 
-  const tabs = [
-    { label: 'Market Command', id: 'market-command', icon: Gauge },
-    { label: 'Stock Intelligence', id: 'stock-intelligence-hub', icon: Search },
-    { label: 'Dashboard', id: 'dashboard', icon: LayoutDashboard },
-    { label: 'Alpha Cockpit', id: 'alpha-cockpit', icon: BrainCircuit },
-    { label: 'Indices', id: 'indices', icon: BarChart2 },
-    { label: 'Market Map', id: 'market-map', icon: Activity },
-    { label: 'Top Rated', id: 'top-rated', icon: Trophy },
-    { label: 'Intraday', id: 'intraday', icon: Flame },
-    { label: 'Screener', id: 'screener', icon: Filter },
-    { label: 'Live Screener', id: 'live-screener', icon: Filter },
-    { label: 'EOD Screener', id: 'eod-screener', icon: Filter },
-    { label: 'F&O Intel', id: 'fno-scanners', icon: Target },
-    { label: 'Options Intel', id: 'options', icon: TrendingUp },
-    { label: 'Trendlyne', id: 'trendlyne', icon: Zap },
-    { label: 'Discover', id: 'discover', icon: Search },
-    { label: 'Smart Money', id: 'smart-money', icon: Briefcase },
-    { label: 'Sentiment', id: 'sentiment', icon: Newspaper },
-    { label: 'Earnings', id: 'earnings', icon: Calendar },
-    { label: 'Trade Cockpit', id: 'trade-cockpit', icon: Sparkles },
-    { label: 'Signals', id: 'signals', icon: Radio },
-    { label: 'Signal Ledger', id: 'signal-tracking', icon: Radio },
-    { label: 'Research', id: 'research', icon: FlaskConical },
-    { label: 'Strategy', id: 'strategy', icon: Star },
-    { label: 'Backtest', id: 'backtest', icon: History },
-    { label: 'Portfolio', id: 'portfolio', icon: PieChart },
-    { label: 'Watchlist', id: 'watchlist', icon: Bookmark },
-    { label: 'Settings', id: 'settings', icon: Settings },
-    { label: 'Monitor',  id: 'monitor',  icon: MonitorDot },
-    { label: 'Jobs',     id: 'jobs',     icon: Calendar },
+  // Grouped nav — every id here has a real, working route in App.tsx (verified against both
+  // the v1 classic AppShell's nav list and the v2Enabled route block; anything present in v1
+  // but missing a v2Enabled route got one added alongside this list: /alpha, /buy-recs, /economics).
+  const tabGroups: { label: string; items: { label: string; id: string; icon: any }[] }[] = [
+    {
+      label: 'Command',
+      items: [
+        { label: 'Market Command',     id: 'market-command',        icon: Gauge },
+        { label: 'Stock Intelligence', id: 'stock-intelligence-hub', icon: Search },
+        { label: 'Dashboard',          id: 'dashboard',              icon: LayoutDashboard },
+        { label: 'Alpha Cockpit',      id: 'alpha-cockpit',          icon: BrainCircuit },
+        { label: 'Alpha',              id: 'alpha',                  icon: Zap },
+        { label: 'Buy Recommendations', id: 'buy-recs',              icon: TrendingUp },
+      ],
+    },
+    {
+      label: 'Markets',
+      items: [
+        { label: 'Indices',    id: 'indices',    icon: BarChart2 },
+        { label: 'Market Map', id: 'market-map', icon: Activity },
+        { label: 'Top Rated',  id: 'top-rated',  icon: Trophy },
+        { label: 'Intraday',   id: 'intraday',   icon: Flame },
+      ],
+    },
+    {
+      label: 'Analysis',
+      items: [
+        { label: 'Screener',      id: 'screener',       icon: Filter },
+        { label: 'Live Screener', id: 'live-screener',  icon: Filter },
+        { label: 'EOD Screener',  id: 'eod-screener',   icon: Filter },
+        { label: 'F&O Intel',     id: 'fno-scanners',   icon: Target },
+        { label: 'Options Intel', id: 'options',        icon: TrendingUp },
+        { label: 'Trendlyne',     id: 'trendlyne',      icon: Zap },
+        { label: 'Discover',      id: 'discover',       icon: Search },
+        { label: 'Smart Money',   id: 'smart-money',    icon: Briefcase },
+        { label: 'Earnings',      id: 'earnings',       icon: Calendar },
+        { label: 'Economics',     id: 'economics',      icon: Globe },
+      ],
+    },
+    {
+      label: 'Intelligence',
+      items: [
+        { label: 'Screener Intel',      id: 'screener-intelligence', icon: BarChart2 },
+        { label: 'Trade Cockpit',       id: 'trade-cockpit',         icon: Sparkles },
+        { label: 'Early Spotter',       id: 'early-spotter',         icon: Zap },
+        { label: 'Best Picks',          id: 'best-picks',            icon: Crosshair },
+        { label: 'Signal Intel',        id: 'signal-intelligence',   icon: Layers },
+        { label: 'Signal Report Card',  id: 'signal-report-card',    icon: ChartLine },
+        { label: 'Signals',             id: 'signals',               icon: Radio },
+        { label: 'Signal Ledger',       id: 'signal-tracking',       icon: Radio },
+        { label: 'Strategy',            id: 'strategy',              icon: Star },
+        { label: 'Strategy Builder',    id: 'strategy-builder',      icon: Target },
+        { label: 'ML Builder',          id: 'builder',               icon: Settings2 },
+        { label: 'Sentiment',           id: 'sentiment',             icon: Newspaper },
+        { label: 'Research',            id: 'research',              icon: FlaskConical },
+        { label: 'Backtest',            id: 'backtest',              icon: History },
+      ],
+    },
+    {
+      label: 'Portfolio',
+      items: [
+        { label: 'Portfolio',   id: 'portfolio',   icon: PieChart },
+        { label: 'Watchlist',   id: 'watchlist',   icon: Bookmark },
+        { label: 'Superstars',  id: 'superstars',  icon: Users },
+        { label: 'My Profile',  id: 'profile',     icon: Star },
+      ],
+    },
+    {
+      label: 'Agent Intelligence',
+      items: [
+        { label: 'Data Scientist', id: 'agent-data-scientist', icon: BarChart2 },
+        { label: 'Strategist',     id: 'agent-strategist',     icon: Target },
+        { label: 'Auditor',        id: 'agent-auditor',        icon: Activity },
+        { label: 'Optimizer',      id: 'agent-optimizer',      icon: Settings2 },
+      ],
+    },
+    {
+      label: 'Tools',
+      items: [
+        { label: 'AI Chat',  id: 'chat',    icon: MessageSquare },
+        { label: 'ToDo',     id: 'todo',    icon: CheckCircle2 },
+        { label: 'Monitor',  id: 'monitor', icon: MonitorDot },
+        { label: 'Jobs',     id: 'jobs',    icon: Calendar },
+        { label: 'Settings', id: 'settings', icon: Settings },
+      ],
+    },
   ];
 
   return (
     <div className="flex h-screen overflow-hidden bg-terminal-bg text-slate-200 font-sans">
       {/* V2 Sidebar */}
-      <aside className="w-60 border-r border-terminal-border bg-terminal-panel flex flex-col justify-between p-3 shrink-0">
-        <div className="flex flex-col gap-6">
+      <aside className="w-64 border-r border-terminal-border bg-terminal-panel flex flex-col justify-between p-3 shrink-0 min-h-0">
+        <div className="flex flex-col gap-4 min-h-0 flex-1">
           {/* V2 Header Logo */}
-          <div className="flex items-center justify-between px-2 py-1.5 border-b border-terminal-border">
+          <div className="flex items-center justify-between px-2 py-1.5 border-b border-terminal-border shrink-0">
             <div className="flex items-center gap-2">
               <div className="w-6 h-6 bg-indigo-600 rounded flex items-center justify-center shadow-[0_0_8px_rgba(79,70,229,0.4)]">
                 <TrendingUp className="w-3.5 h-3.5 text-white" />
@@ -93,26 +149,35 @@ export const V2AppShell: React.FC<V2AppShellProps> = ({
           </div>
 
           {/* V2 Navigation List */}
-          <nav className="flex-1 overflow-y-auto space-y-1 terminal-scrollbar max-h-[70vh]">
-            {tabs.map((tab) => {
-              const active = activeTab === tab.id;
-              const Icon = tab.icon;
-              return (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  className={cn(
-                    "w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left text-xs font-bold transition-all",
-                    active 
-                      ? "bg-indigo-600/10 text-indigo-400 border-l-2 border-indigo-500 font-extrabold" 
-                      : "text-slate-400 hover:text-slate-200 hover:bg-slate-900/30"
-                  )}
-                >
-                  <Icon className={cn("w-4 h-4", active ? "text-indigo-400" : "text-slate-400")} />
-                  <span>{tab.label}</span>
-                </button>
-              );
-            })}
+          <nav className="flex-1 min-h-0 overflow-y-auto space-y-4 terminal-scrollbar pr-1">
+            {tabGroups.map((group) => (
+              <div key={group.label}>
+                <div className="px-3 pb-1 text-[9px] font-black uppercase tracking-widest text-slate-600">
+                  {group.label}
+                </div>
+                <div className="space-y-0.5">
+                  {group.items.map((tab) => {
+                    const active = activeTab === tab.id;
+                    const Icon = tab.icon;
+                    return (
+                      <button
+                        key={tab.id}
+                        onClick={() => setActiveTab(tab.id)}
+                        className={cn(
+                          "w-full flex items-center gap-3 px-3 py-1.5 rounded-lg text-left text-xs font-bold transition-all",
+                          active
+                            ? "bg-indigo-600/10 text-indigo-400 border-l-2 border-indigo-500 font-extrabold"
+                            : "text-slate-400 hover:text-slate-200 hover:bg-slate-900/30"
+                        )}
+                      >
+                        <Icon className={cn("w-4 h-4 shrink-0", active ? "text-indigo-400" : "text-slate-400")} />
+                        <span className="truncate">{tab.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
           </nav>
         </div>
 

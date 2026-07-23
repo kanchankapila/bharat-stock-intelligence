@@ -4062,6 +4062,26 @@ export default function App() {
             <Route path="/settings" element={<V2Settings />} />
             <Route path="/chat" element={<div className="p-4 h-full"><StockChatbot /></div>} />
             <Route path="/alpha-cockpit" element={<AlphaCockpit />} />
+            <Route path="/alpha" element={<CommandCenterDashboard onSelectStock={(s) => { setDrawerSymbol(s); navigate('/trade-cockpit'); }} />} />
+            <Route path="/buy-recs" element={<BuyRecommendationsPage onSelectStock={handleSelectStock} />} />
+            <Route path="/economics" element={
+              <div className="p-6 space-y-6">
+                <MacroDashboard />
+                <CorporateEventsPanel onSelectStock={handleSelectStock} />
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  <div className="lg:col-span-2">
+                    <Card title="Global Economic Calendar" icon={Globe}>
+                      <div className="pt-2"><EconomicCalendarWidget /></div>
+                    </Card>
+                  </div>
+                  <div>
+                    <Card title="Market Sentiment Overview" icon={Activity}>
+                      <div className="pt-2"><MarketOverviewWidget /></div>
+                    </Card>
+                  </div>
+                </div>
+              </div>
+            } />
           </Routes>
           </SafeRoutes>
         </AnimatePresence>
