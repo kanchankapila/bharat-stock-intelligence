@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useWebSocket } from '../../hooks/useWebSocket';
-import { 
+import {
   TrendingUp, LayoutDashboard, BarChart2, Activity, Trophy, Filter,
   Target, Zap, Search, Briefcase, Calendar, Sparkles, Radio, FlaskConical,
   Star, History, Settings2, PieChart, Bookmark, Users, Globe, CheckCircle2,
-  ToggleLeft, ToggleRight, Settings, MonitorDot, X, BrainCircuit, Flame
+  ToggleLeft, ToggleRight, Settings, MonitorDot, X, BrainCircuit, Flame,
+  Gauge, Newspaper
 } from 'lucide-react';
 import { cn } from '../../../lib/utils';
 
@@ -43,6 +44,8 @@ export const V2AppShell: React.FC<V2AppShellProps> = ({
   }, [lastMessage]);
 
   const tabs = [
+    { label: 'Market Command', id: 'market-command', icon: Gauge },
+    { label: 'Stock Intelligence', id: 'stock-intelligence-hub', icon: Search },
     { label: 'Dashboard', id: 'dashboard', icon: LayoutDashboard },
     { label: 'Alpha Cockpit', id: 'alpha-cockpit', icon: BrainCircuit },
     { label: 'Indices', id: 'indices', icon: BarChart2 },
@@ -57,6 +60,7 @@ export const V2AppShell: React.FC<V2AppShellProps> = ({
     { label: 'Trendlyne', id: 'trendlyne', icon: Zap },
     { label: 'Discover', id: 'discover', icon: Search },
     { label: 'Smart Money', id: 'smart-money', icon: Briefcase },
+    { label: 'Sentiment', id: 'sentiment', icon: Newspaper },
     { label: 'Earnings', id: 'earnings', icon: Calendar },
     { label: 'Trade Cockpit', id: 'trade-cockpit', icon: Sparkles },
     { label: 'Signals', id: 'signals', icon: Radio },
