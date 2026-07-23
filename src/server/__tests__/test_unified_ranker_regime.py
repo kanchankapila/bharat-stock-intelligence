@@ -57,7 +57,7 @@ class TestRegimeCatWeights:
 class TestRegimeWeightsHasSideways:
     def test_sideways_present(self):
         assert "SIDEWAYS" in REGIME_WEIGHTS
-        assert set(REGIME_WEIGHTS["SIDEWAYS"]) == {"screener", "ml", "cs", "confluence", "technical", "dl"}
+        assert set(REGIME_WEIGHTS["SIDEWAYS"]) == {"screener", "ml", "cs", "confluence", "technical", "dl", "breakout"}
 
 
 class TestComputeScoresWithRegimeWeights:

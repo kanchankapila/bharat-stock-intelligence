@@ -83,15 +83,18 @@ HORIZON_MULT = {
 # is weighted heavier in momentum regimes (BULL/SIDEWAYS/HIGH_VOL) where cross-sectional
 # breakouts pay, and lighter in risk-off regimes (BEAR/CRASH) where a breakout into a falling
 # tape is a trap — mirroring REGIME_CAT_TILT. _blend renormalizes over engines present for each
-# symbol, so these weights need not sum to 1 and adding this key leaves the others' balance intact.
+# symbol (so a per-symbol missing engine doesn't deflate its score), but every regime's full
+# table must still sum to 1.0 for the case where all engines have data — screener/cs/breakout
+# are pinned at their documented values and ml/confluence/technical/dl are scaled down from
+# their pre-cs/breakout values to absorb the added weight.
 REGIME_WEIGHTS = {
-    'BULL':     {'screener': 0.30, 'ml': 0.20, 'cs': 0.05, 'confluence': 0.20, 'technical': 0.15, 'dl': 0.10, 'breakout': 0.15},
-    'BEAR':     {'screener': 0.35, 'ml': 0.20, 'cs': 0.05, 'confluence': 0.20, 'technical': 0.10, 'dl': 0.10, 'breakout': 0.05},
-    'HIGH_VOL': {'screener': 0.20, 'ml': 0.15, 'cs': 0.05, 'confluence': 0.15, 'technical': 0.30, 'dl': 0.15, 'breakout': 0.10},
-    'CRASH':    {'screener': 0.40, 'ml': 0.20, 'cs': 0.05, 'confluence': 0.15, 'technical': 0.10, 'dl': 0.10, 'breakout': 0.05},
+    'BULL':     {'screener': 0.30, 'ml': 0.15,   'cs': 0.05, 'confluence': 0.15,   'technical': 0.12,  'dl': 0.08,   'breakout': 0.15},
+    'BEAR':     {'screener': 0.35, 'ml': 0.183,  'cs': 0.05, 'confluence': 0.183,  'technical': 0.092, 'dl': 0.092,  'breakout': 0.05},
+    'HIGH_VOL': {'screener': 0.20, 'ml': 0.13,   'cs': 0.05, 'confluence': 0.13,   'technical': 0.26,  'dl': 0.13,   'breakout': 0.10},
+    'CRASH':    {'screener': 0.40, 'ml': 0.18,   'cs': 0.05, 'confluence': 0.14,   'technical': 0.09,  'dl': 0.09,   'breakout': 0.05},
     # SIDEWAYS was silently falling back to BULL; a balanced blend is more appropriate for
     # a rangebound tape (lean slightly less on momentum/dl than BULL).
-    'SIDEWAYS': {'screener': 0.32, 'ml': 0.20, 'cs': 0.05, 'confluence': 0.20, 'technical': 0.13, 'dl': 0.10, 'breakout': 0.13},
+    'SIDEWAYS': {'screener': 0.32, 'ml': 0.16,   'cs': 0.05, 'confluence': 0.16,   'technical': 0.10,  'dl': 0.08,   'breakout': 0.13},
 }
 
 # Per-regime CATEGORY tilt (multipliers on CAT_BASE_WT). Rangebound/neutral = SIDEWAYS (no
