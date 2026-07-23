@@ -107,6 +107,8 @@ const V2StockDetails     = React.lazy(() => import('./v2/views/stock-analysis/V2
 const V2Settings         = React.lazy(() => import('./v2/views/settings/V2Settings').then(m => ({ default: m.V2Settings })));
 const V2Dashboard        = React.lazy(() => import('./v2/views/dashboard/V2Dashboard').then(m => ({ default: m.V2Dashboard })));
 const V3Dashboard        = React.lazy(() => import('./v3/views/dashboard/V3Dashboard').then(m => ({ default: m.V3Dashboard })));
+const MarketCommandCenter = React.lazy(() => import('./v4/views/MarketCommandCenter').then(m => ({ default: m.MarketCommandCenter })));
+const StockIntelligencePage = React.lazy(() => import('./v4/views/StockIntelligencePage').then(m => ({ default: m.StockIntelligencePage })));
 const SignalTracking     = React.lazy(() => import('./components/SignalTracking').then(m => ({ default: m.SignalTracking })));
 const V2SignalTracking   = React.lazy(() => import('./v2/views/signals/V2SignalTracking').then(m => ({ default: m.V2SignalTracking })));
 const StockChatbot       = React.lazy(() => import('./components/StockChatbot'));
@@ -3935,6 +3937,19 @@ export default function App() {
                 <PriceAlertsPanel userId={user?.uid} />
               </div>
             } />
+            <Route path="/market-command" element={
+              <MarketCommandCenter
+                onSelectStock={handleSelectStock}
+                onSelectIndex={(id, name) => { setSelectedIndex({ id, name }); navigate('/indices'); }}
+              />
+            } />
+            <Route path="/stock-intelligence-hub" element={
+              <StockIntelligencePage
+                initialSymbol={selectedSymbol}
+                watchlist={watchlist}
+                onToggleWatchlist={toggleWatchlist}
+              />
+            } />
             <Route path="/details" element={selectedSymbol ? (
               dashboardVersion === 'v3' ? (
                 <V3Dashboard
@@ -4046,6 +4061,26 @@ export default function App() {
             <Route path="/settings" element={<V2Settings />} />
             <Route path="/chat" element={<div className="p-4 h-full"><StockChatbot /></div>} />
             <Route path="/alpha-cockpit" element={<AlphaCockpit />} />
+            <Route path="/alpha" element={<CommandCenterDashboard onSelectStock={(s) => { setDrawerSymbol(s); navigate('/trade-cockpit'); }} />} />
+            <Route path="/buy-recs" element={<BuyRecommendationsPage onSelectStock={handleSelectStock} />} />
+            <Route path="/economics" element={
+              <div className="p-6 space-y-6">
+                <MacroDashboard />
+                <CorporateEventsPanel onSelectStock={handleSelectStock} />
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  <div className="lg:col-span-2">
+                    <Card title="Global Economic Calendar" icon={Globe}>
+                      <div className="pt-2"><EconomicCalendarWidget /></div>
+                    </Card>
+                  </div>
+                  <div>
+                    <Card title="Market Sentiment Overview" icon={Activity}>
+                      <div className="pt-2"><MarketOverviewWidget /></div>
+                    </Card>
+                  </div>
+                </div>
+              </div>
+            } />
           </Routes>
           </SafeRoutes>
         </AnimatePresence>
