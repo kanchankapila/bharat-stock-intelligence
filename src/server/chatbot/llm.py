@@ -1,4 +1,5 @@
 import os
+import time
 import logging
 
 logger = logging.getLogger(__name__)
@@ -66,3 +67,21 @@ def reset_llm_cache():
     """Force re-detection of LLM on next call (useful in tests)."""
     global _cached_llm
     _cached_llm = None
+
+
+def invoke_with_retry(llm, prompt: str, max_attempts: int = 3, base_delay: float = 1.0):
+    """llm.invoke() with bounded exponential backoff. A transient Ollama/Gemini hiccup
+    previously propagated straight to a 500 (/chat) or an SSE error event (/chat/stream)
+    with no retry — this bounds that to `max_attempts` tries before giving up."""
+    last_err: Exception | None = None
+    for attempt in range(max_attempts):
+        try:
+            return llm.invoke(prompt)
+        except Exception as e:
+            last_err = e
+            if attempt < max_attempts - 1:
+                delay = base_delay * (2 ** attempt)
+                logger.warning(f"LLM invoke failed (attempt {attempt + 1}/{max_attempts}), retrying in {delay:.1f}s: {e}")
+                time.sleep(delay)
+    logger.error(f"LLM invoke failed after {max_attempts} attempts: {last_err}")
+    raise last_err

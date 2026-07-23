@@ -1,12 +1,25 @@
 """
 Intraday OHLCV Fetcher
 ======================
-Fetches 15-minute bars from MoneyControl TechCharts API for all NSE stocks that
-have an mcsymbol. Writes into intraday_ohlcv(symbol, datetime, open, high, low,
-close, volume, interval) with upsert semantics.
+Fetches 15-minute bars from MoneyControl TechCharts API for all NSE stocks.
+Writes into intraday_ohlcv(symbol, datetime, open, high, low, close, volume,
+interval) with upsert semantics.
 
-Runs every 30 minutes during market hours via the QUEUE_INTRADAY_FETCHER BullMQ
-job (cron: */30 3-10 * * 1-5 = 8:30 AM – 4:00 PM IST on weekdays).
+The TechCharts `history` endpoint is keyed by the RAW NSE ticker (confirmed live:
+`symbol=RELIANCE`/`symbol=SBIN` return real bars, `symbol=RI`/`symbol=SBI` --
+those stocks' `mcsymbol` -- return `{"s":"error"}`), matching what
+mc_ohlcv_backfill.py already does for the same endpoint. This script used to pass
+`mcsymbol` instead: for the ~53 stocks where mcsymbol happens to equal the ticker
+(e.g. TCS) that coincidentally worked, but for the other ~97% of the universe
+(RELIANCE/mcsymbol=RI, SBIN/mcsymbol=SBI, HDFCBANK/mcsymbol=HDF01, ...) every
+fetch silently returned no bars -- the job still logged success because nothing
+threw. Verified live 2026-07-23: before this fix, RELIANCE's last bar was
+2026-06-30 (3+ weeks stale) despite running every 30 min the whole time.
+
+Runs every 15 minutes during market hours via the QUEUE_INTRADAY_FETCHER BullMQ
+job (cron: */15 3-10 * * 1-5 = 8:30 AM – 4:00 PM IST on weekdays) -- matches the
+underlying bar resolution (`resolution=15`), so there's no value fetching more
+often than that.
 
 Run standalone:
     python intraday_fetcher.py                      # last 5 days, all stocks
@@ -52,14 +65,14 @@ _URL = (
 )
 
 _SELECT_SYMBOLS = """
-    SELECT DISTINCT symbol, mcsymbol
+    SELECT DISTINCT symbol
     FROM nse_stocks
-    WHERE mcsymbol IS NOT NULL AND mcsymbol != ''
+    WHERE symbol IS NOT NULL AND symbol != ''
 """
 _SELECT_SYMBOLS_FILTER = """
-    SELECT symbol, mcsymbol
+    SELECT symbol
     FROM nse_stocks
-    WHERE mcsymbol IS NOT NULL AND mcsymbol != ''
+    WHERE symbol IS NOT NULL AND symbol != ''
       AND symbol IN ({ph})
 """
 
@@ -106,8 +119,8 @@ def parse_bars(data: Optional[dict], symbol: str, interval: str = "15m") -> list
 
 # ── Live fetch ─────────────────────────────────────────────────────────────────
 
-def _fetch_live(mcsymbol: str, from_ts: int, to_ts: int) -> Optional[dict]:
-    url = _URL.format(scId=mcsymbol, from_ts=from_ts, to_ts=to_ts)
+def _fetch_live(symbol: str, from_ts: int, to_ts: int) -> Optional[dict]:
+    url = _URL.format(scId=symbol, from_ts=from_ts, to_ts=to_ts)
     try:
         resp = _http_get(url)
         data = resp.json()
@@ -141,9 +154,10 @@ def run(
         rows = query_all(_SELECT_SYMBOLS)
 
     total = 0
+    failed = 0
     for i, row in enumerate(rows):
-        symbol, mcsymbol = row["symbol"], row["mcsymbol"]
-        data = fetch(mcsymbol, from_ts, to_ts)
+        symbol = row["symbol"]
+        data = fetch(symbol, from_ts, to_ts)
         bars = parse_bars(data, symbol)
         if bars:
             executemany(
@@ -152,11 +166,17 @@ def run(
                   b["low"], b["close"], b["volume"], b["interval"]) for b in bars],
             )
             total += len(bars)
+        else:
+            failed += 1
 
         if use_live and i % 10 == 9:
             time.sleep(0.1)   # 10ms per stock avg; pause 100ms every 10
 
-    print(f"[INTRADAY] {total} bars upserted for {len(rows)} symbols (lookback={lookback_days}d).")
+    # Surface partial failure explicitly -- an aggregate "N bars upserted for M symbols"
+    # line reads as full success even when a large fraction silently returned no data
+    # (exactly how the mcsymbol/raw-symbol bug above went unnoticed for weeks).
+    print(f"[INTRADAY] {total} bars upserted; {len(rows) - failed}/{len(rows)} symbols "
+          f"returned data ({failed} empty/failed) (lookback={lookback_days}d).")
     return total
 
 

@@ -393,6 +393,15 @@ export async function computeConfluenceSignals(): Promise<{ computed: number; el
   `) as any[];
   for (const r of etStocks) addToMap(r.symbol, r.screener_id, r.screener_name);
 
+  // ET Marketstats/Technicals
+  const emsStocks = await dbAll(`
+    SELECT ess.symbol, ess.screener_key AS screener_id, es.label AS screener_name
+    FROM et_marketstats_screener_stocks ess
+    JOIN et_marketstats_screeners es ON es.screener_key = ess.screener_key
+    WHERE ess.symbol IS NOT NULL AND ess.symbol != ''
+  `) as any[];
+  for (const r of emsStocks) addToMap(r.symbol, r.screener_id, r.screener_name);
+
   if (screenerMap.size === 0) {
     console.log('[CONFLUENCE] No screener stock data found. Run screener sync first.');
     return { computed: 0, elite: 0, strong: 0 };

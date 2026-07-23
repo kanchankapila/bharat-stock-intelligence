@@ -2,7 +2,7 @@ import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
 import { dbGet, dbAll, dbRun } from "../dbAsync";
-import { router, publicProcedure } from "../trpc";
+import { router, publicProcedure, adminProcedure } from "../trpc";
 import { runPython } from '../pythonRunner';
 import { fetchIndexAdvanceDecline, fetchIndiaVix, fetchLiveMarketScreener, fetchEODMarketScreener } from '../marketIntelService';
 import * as queueModule from '../queues';
@@ -314,7 +314,7 @@ export const monitorRouter = router({
       return fetchEODMarketScreener((input as Record<string, boolean>) || {});
     }),
 
-  triggerScript: publicProcedure
+  triggerScript: adminProcedure
     .input(z.object({ scriptId: z.string() }))
     .mutation(async ({ input }) => {
       const script = MONITOR_SCRIPTS.find(s => s.id === input.scriptId);
@@ -401,7 +401,7 @@ export const monitorRouter = router({
       return { queued: false, running: true, message: `Started ${script.label}` };
     }),
 
-  triggerAllDaily: publicProcedure.mutation(async () => {
+  triggerAllDaily: adminProcedure.mutation(async () => {
     const dailyScripts = ['fii-dii-fetcher', 'regime-detector', 'feature-engineering', 'outcome-resolver-5d', 'outcome-resolver-15d', 'performance-tracker', 'reward-engine', 'rl-agent-update', 'ml-ensemble-score', 'dl-engine-infer', 'signal-type-stats'];
     const upsert = async (key: string, val: string, errorMsg?: string) => {
       try {
@@ -445,6 +445,7 @@ export const monitorRouter = router({
       { id: 'stock-scoring', q: queueModule.stockScoringQueue, label: 'Stock Scoring Sync', desc: 'Aggregates screeners, technicals, and calculates composite scores', category: 'machine-learning' },
       { id: 'mc-screener-sync', q: queueModule.mcScreenerSyncQueue, label: 'MoneyControl Sync', desc: 'Pulls positive and negative stock scans from MoneyControl', category: 'data-sync' },
       { id: 'etnow-screener-sync', q: queueModule.etnowScreenerSyncQueue, label: 'ETNow Sync', desc: 'Synchronizes ETNow screener lists and breakouts', category: 'data-sync' },
+      { id: 'et-marketstats-sync', q: queueModule.etMarketstatsSyncQueue, label: 'ET Marketstats Sync', desc: 'Synchronizes ET marketstats/technicals screeners (financials, RSI/MACD, moving averages, relative returns, etc.)', category: 'data-sync' },
       { id: 'nse-sync', q: queueModule.nseScreenerSyncQueue, label: 'NSE Master Sync', desc: 'Weekly synchronization of the NSE master stock list', category: 'data-sync' },
       { id: 'fundamentals-sync', q: queueModule.fundamentalsSyncQueue, label: 'Fundamentals Sync', desc: 'Fetches company financials and ratios', category: 'data-sync' },
       { id: 'quant-scoring', q: queueModule.quantScoringQueue, label: 'Quant Score Engine', desc: 'Calculates momentum and volatility ranks', category: 'machine-learning' },
@@ -573,7 +574,7 @@ export const monitorRouter = router({
     return results;
   }),
 
-  triggerBullMQJob: publicProcedure
+  triggerBullMQJob: adminProcedure
     .input(z.object({ queueId: z.string() }))
     .mutation(async ({ input }) => {
       const queueList = [
@@ -582,6 +583,7 @@ export const monitorRouter = router({
         { id: 'stock-scoring', q: queueModule.stockScoringQueue },
         { id: 'mc-screener-sync', q: queueModule.mcScreenerSyncQueue },
         { id: 'etnow-screener-sync', q: queueModule.etnowScreenerSyncQueue },
+        { id: 'et-marketstats-sync', q: queueModule.etMarketstatsSyncQueue },
         { id: 'nse-sync', q: queueModule.nseScreenerSyncQueue },
         { id: 'fundamentals-sync', q: queueModule.fundamentalsSyncQueue },
         { id: 'quant-scoring', q: queueModule.quantScoringQueue },

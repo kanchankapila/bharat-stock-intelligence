@@ -84,6 +84,7 @@ export const QUEUE_AI_SIGNALS           = 'ai-signals';
 export const QUEUE_STOCK_SCORING        = 'stock-scoring';
 export const QUEUE_MC_SCREENER_SYNC     = 'mc-screener-sync';
 export const QUEUE_ETNOW_SCREENER_SYNC  = 'etnow-screener-sync';
+export const QUEUE_ET_MARKETSTATS_SYNC  = 'et-marketstats-sync';
 export const QUEUE_NSE_SYNC             = 'nse-sync';  // PHASE 2: Weekly NSE master data sync
 export const QUEUE_FUNDAMENTALS_SYNC    = 'fundamentals-sync';
 export const QUEUE_QUANT_SCORING        = 'quant-scoring';
@@ -133,6 +134,7 @@ export let aiSignalsQueue:         Queue | null = null;
 export let stockScoringQueue:      Queue | null = null;
 export let mcScreenerSyncQueue:    Queue | null = null;
 export let etnowScreenerSyncQueue: Queue | null = null;
+export let etMarketstatsSyncQueue: Queue | null = null;
 export let nseScreenerSyncQueue:   Queue | null = null;  // PHASE 2: NSE master data sync
 export let fundamentalsSyncQueue:  Queue | null = null;
 export let quantScoringQueue:      Queue | null = null;
@@ -151,6 +153,7 @@ let signalWorker:             Worker | null = null;
 let scoringWorker:            Worker | null = null;
 let mcScreenerSyncWorker:     Worker | null = null;
 let etnowScreenerSyncWorker:  Worker | null = null;
+let etMarketstatsSyncWorker:  Worker | null = null;
 let nseScreenerSyncWorker:    Worker | null = null;  // PHASE 2: NSE worker
 let fundamentalsSyncWorker:   Worker | null = null;
 let quantScoringWorker:       Worker | null = null;
@@ -428,6 +431,13 @@ async function processEtnowScreenerSync(_job: Job): Promise<{ success: boolean }
   console.log('[QUEUE] Starting scheduled ETNow screener sync...');
   const { syncETnowScreeners } = await import('./etnowScreenerSync');
   await syncETnowScreeners();
+  return { success: true };
+}
+
+async function processEtMarketstatsSync(_job: Job): Promise<{ success: boolean }> {
+  console.log('[QUEUE] Starting scheduled ET Marketstats screener sync...');
+  const { syncEtMarketstatsScreeners } = await import('./etMarketstatsSync');
+  await syncEtMarketstatsScreeners();
   return { success: true };
 }
 
@@ -1685,6 +1695,46 @@ export async function initQueues(): Promise<boolean> {
       recordHeartbeat('etnow-screener-sync', 'failed', err.message);
     });
 
+    // ── ET Marketstats/Technicals screener sync queue ──
+    etMarketstatsSyncQueue = new Queue(QUEUE_ET_MARKETSTATS_SYNC, { connection });
+
+    // Once daily at 11:35 PM IST (18:05 UTC) on weekdays — staggered 5 min after etnow-sync
+    const etMarketstatsRepeatables = await etMarketstatsSyncQueue.getRepeatableJobs();
+    for (const r of etMarketstatsRepeatables) {
+      await etMarketstatsSyncQueue.removeRepeatableByKey(r.key);
+    }
+    await addJobWithCatchup(etMarketstatsSyncQueue,
+      'et-marketstats-sync',
+      {},
+      {
+        repeat: { pattern: '5 18 * * 1-5' }, // 11:35 PM IST weekdays
+        jobId: 'et-marketstats-sync-repeatable',
+        removeOnComplete: 5,
+        removeOnFail: 3,
+      },
+    );
+
+    etMarketstatsSyncWorker = new Worker(
+      QUEUE_ET_MARKETSTATS_SYNC,
+      processEtMarketstatsSync,
+      {
+        connection,
+        concurrency: 1,
+        // ~92 screeners sequentially (fetch + 500ms rate-limit delay each) — a few minutes.
+        lockDuration: 20 * 60 * 1000,  // 20 min
+        lockRenewTime: 5 * 60 * 1000,  // 5 min
+      },
+    );
+
+    etMarketstatsSyncWorker.on('completed', (_job) => {
+      console.log(`[QUEUE] et-marketstats-sync completed`);
+      recordHeartbeat('et-marketstats-sync', 'success');
+    });
+    etMarketstatsSyncWorker.on('failed', (_job, err) => {
+      console.error(`[QUEUE] et-marketstats-sync failed:`, err.message);
+      recordHeartbeat('et-marketstats-sync', 'failed', err.message);
+    });
+
     // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ NSE sync queue (PHASE 2: Weekly master data update) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
     nseScreenerSyncQueue = new Queue(QUEUE_NSE_SYNC, { connection });
 
@@ -2198,12 +2248,15 @@ export async function initQueues(): Promise<boolean> {
       updateMonitorState('ml-weekly-retrain', 'failed', err?.message);
     });
 
-    // ── Intraday fetcher (every 30 min, 8:30 AM - 4:00 PM IST = 3:00-10:30 UTC, weekdays)
+    // ── Intraday fetcher (every 15 min, 8:30 AM - 4:00 PM IST = 3:00-10:30 UTC, weekdays)
+    // Was */30: TechCharts bars are resolution=15 (a new bar only forms every 15 min), so a
+    // 30-min cadence needlessly doubled worst-case CMP staleness for no reason -- 15 min
+    // matches the source data's own granularity, ~4min runtime leaves ample headroom.
     intradayFetcherQueue = new Queue(QUEUE_INTRADAY_FETCHER, { connection });
     const intradayRep = await intradayFetcherQueue.getRepeatableJobs();
     for (const r of intradayRep) await intradayFetcherQueue.removeRepeatableByKey(r.key);
     await intradayFetcherQueue.add('intraday-fetcher', {}, {
-      repeat: { pattern: '*/30 3-10 * * 1-5', tz: 'Etc/UTC' },
+      repeat: { pattern: '*/15 3-10 * * 1-5', tz: 'Etc/UTC' },
       jobId: 'intraday-fetcher',
       removeOnComplete: 5,
       removeOnFail: 3,
@@ -3231,6 +3284,7 @@ export async function shutdownQueues(): Promise<void> {
     scoringWorker?.close(),
     mcScreenerSyncWorker?.close(),
     etnowScreenerSyncWorker?.close(),
+    etMarketstatsSyncWorker?.close(),
     fundamentalsSyncWorker?.close(),
     quantScoringWorker?.close(),
     walkForwardOptimizeWorker?.close(),
@@ -3239,6 +3293,7 @@ export async function shutdownQueues(): Promise<void> {
     stockScoringQueue?.close(),
     mcScreenerSyncQueue?.close(),
     etnowScreenerSyncQueue?.close(),
+    etMarketstatsSyncQueue?.close(),
     fundamentalsSyncQueue?.close(),
     quantScoringQueue?.close(),
     walkForwardOptimizeQueue?.close(),

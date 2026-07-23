@@ -60,10 +60,12 @@ def _fetch_scan(session, cat_id: int, scan_id: str) -> set[str]:
     try:
         r = session.get(SCAN_URL, params={"catId": cat_id, "scanId": scan_id}, timeout=20)
         if r.status_code != 200:
+            print(f"[MC_TECHSCANNER] scan catId={cat_id} scanId={scan_id} HTTP {r.status_code} — treating as 0 matches")
             return set()
         rows = (r.json().get("data") or {}).get("list", {}).get("scannerDetails") or []
         return {row["stkId"] for row in rows if row.get("stkId")}
-    except Exception:
+    except Exception as e:
+        print(f"[MC_TECHSCANNER] scan catId={cat_id} scanId={scan_id} failed: {e} — treating as 0 matches")
         return set()
 
 
@@ -79,7 +81,8 @@ def _fetch_trend(session, path: str) -> set[str]:
             if not rows:
                 break
             out.update(row["scId"] for row in rows if row.get("scId"))
-        except Exception:
+        except Exception as e:
+            print(f"[MC_TECHSCANNER] trend path={path} page={page} failed: {e} — stopping pagination, {len(out)} collected so far")
             break
     return out
 

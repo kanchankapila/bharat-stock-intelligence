@@ -3826,9 +3826,9 @@ export default function App() {
     return unsubscribe;
   }, []);
 
-  const { data: watchlistData } = trpc.getWatchlist.useQuery({ userId: user?.uid || '' }, { enabled: !!user });
+  const { data: watchlistData } = trpc.getWatchlist.useQuery(undefined, { enabled: !!user });
   const { data: watchlistDetails, refetch: refetchWatchlistDetails } = trpc.getWatchlistDetails.useQuery(
-    { userId: user?.uid || '' },
+    undefined,
     { enabled: !!user }
   );
   
@@ -3856,11 +3856,10 @@ export default function App() {
 
     try {
       if (isInWatchlist) {
-        await removeFromWatchlistMutation.mutateAsync({ userId: user.uid, symbol });
+        await removeFromWatchlistMutation.mutateAsync({ symbol });
         setWatchlist(prev => prev.filter(s => s !== symbol));
       } else {
-        await addToWatchlistMutation.mutateAsync({ 
-          userId: user.uid, 
+        await addToWatchlistMutation.mutateAsync({
           symbol,
           price: metadata?.price,
           name: metadata?.name,

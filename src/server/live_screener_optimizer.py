@@ -44,15 +44,30 @@ def _optimize_for_horizon(df: pd.DataFrame, target_col: str, settings_key: str, 
     print(f"[LiveScreenerOptimizer] Optimizing for horizon: {target_col} -> app_settings['{settings_key}']")
 
     # Filter out rows with null target
-    train_data = matrix.dropna(subset=[target_col]).copy()
-    if len(train_data) < 15:
+    resolved = matrix.dropna(subset=[target_col]).copy()
+    if len(resolved) < 15:
         print(f"[LiveScreenerOptimizer] Insufficient resolved targets for {target_col} to train the tree model.")
+        return
+
+    # Chronological holdout: fit the tree on the earlier ~80% of appearances, then report
+    # win_rate/avg_return/sample_count against the later ~20% only. Fitting AND grading on
+    # the same rows (the previous behavior) reports in-sample performance as if it were
+    # out-of-sample — this is exactly the defect live_screener_ml_ranker.py was built to
+    # avoid; this function produces a distinct app_settings key still read downstream, so it
+    # needs the same protection rather than being retired silently.
+    resolved = resolved.sort_values('appeared_at')
+    split_idx = int(len(resolved) * 0.8)
+    train_data = resolved.iloc[:split_idx].copy()
+    holdout_data = resolved.iloc[split_idx:].copy()
+    if len(train_data) < 15 or len(holdout_data) < 5:
+        print(f"[LiveScreenerOptimizer] Insufficient data for a chronological holdout split "
+              f"(train={len(train_data)}, holdout={len(holdout_data)}) — skipping {target_col}.")
         return
 
     filter_cols = [c for c in pivot_df.columns if c not in ['appeared_at', 'symbol']]
     X = train_data[filter_cols]
     y = train_data[target_col]
-    
+
     # Train a decision tree regressor to find combinations
     try:
         from sklearn.tree import DecisionTreeRegressor
@@ -74,41 +89,42 @@ def _optimize_for_horizon(df: pd.DataFrame, target_col: str, settings_key: str, 
                 # Right split (feature > 0.5 -> filter active)
                 recurse(tree.children_right[node], depth + 1, path_rules + [(name, True)])
             else:  # leaf node
-                samples = tree.n_node_samples[node]
-                value = tree.value[node][0][0]
-                
                 # We only care about combinations requiring filters to be ACTIVE (True)
                 active_filters = [f for f, state in path_rules if state is True]
-                
-                if active_filters and samples >= 3:
-                    # Calculate win rate for this leaf
-                    # Get index of rows matching path rules
-                    mask = pd.Series(True, index=train_data.index)
-                    for f, state in path_rules:
-                        mask &= (train_data[f] == (1 if state else 0))
-                    leaf_rows = train_data[mask]
-                    win_rate = float((leaf_rows[target_col] > 0).mean()) if len(leaf_rows) > 0 else 0.0
-                    
-                    combinations.append({
-                        "filters": active_filters,
-                        "avg_return": round(float(value), 4),
-                        "win_rate": round(win_rate, 4),
-                        "sample_count": int(samples)
-                    })
-                    
+                if not active_filters:
+                    return
+
+                # Grade this rule on the held-out (post-split) rows only — the tree's own
+                # n_node_samples/value are in-sample train statistics and must not be reported.
+                mask = pd.Series(True, index=holdout_data.index)
+                for f, state in path_rules:
+                    mask &= (holdout_data[f] == (1 if state else 0))
+                leaf_rows = holdout_data[mask]
+                if len(leaf_rows) < 3:
+                    return
+                win_rate = float((leaf_rows[target_col] > 0).mean())
+                avg_return = float(leaf_rows[target_col].mean())
+
+                combinations.append({
+                    "filters": active_filters,
+                    "avg_return": round(avg_return, 4),
+                    "win_rate": round(win_rate, 4),
+                    "sample_count": int(len(leaf_rows)),
+                })
+
         recurse(0, 1, [])
-        
+
         # Sort combinations by average return DESC
         combinations = sorted(combinations, key=lambda x: x['avg_return'], reverse=True)
-        
+
     except ImportError:
         print("[LiveScreenerOptimizer] sklearn not installed. Falling back to single-filter rankings.")
         combinations = []
-        
-    # Calculate single filter baseline metrics as fallback/supplement
+
+    # Calculate single filter baseline metrics on the held-out set (same reasoning as above)
     single_rankings = []
     for f in filter_cols:
-        matches = train_data[train_data[f] == 1]
+        matches = holdout_data[holdout_data[f] == 1]
         if len(matches) >= 3:
             avg_ret = float(matches[target_col].mean())
             win_rate = float((matches[target_col] > 0).mean())
@@ -123,7 +139,8 @@ def _optimize_for_horizon(df: pd.DataFrame, target_col: str, settings_key: str, 
     # Build result JSON structure
     result = {
         "last_computed": datetime.datetime.now().isoformat(),
-        "total_samples": len(train_data),
+        "total_samples": len(train_data) + len(holdout_data),
+        "holdout_samples": len(holdout_data),
         "target_horizon": target_col,
         "optimal_combinations": combinations[:10], # Top 10 combinations
         "single_filter_rankings": single_rankings[:15] # Top 15 single filters

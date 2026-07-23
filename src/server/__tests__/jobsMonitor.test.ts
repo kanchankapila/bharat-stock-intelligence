@@ -1,5 +1,12 @@
 import { describe, it, expect, vi } from 'vitest';
-import { createCallerFactory } from '../trpc';
+
+// triggerBullMQJob is adminProcedure — stub token verification so the caller below
+// authenticates as an admin without a real Firebase round-trip.
+vi.mock('../firebaseAdmin', () => ({
+  verifyIdToken: vi.fn().mockResolvedValue('test-admin-uid'),
+  AuthTokenError: class AuthTokenError extends Error {},
+}));
+process.env.ADMIN_UIDS = 'test-admin-uid';
 
 // Mock the queues module so we don't attempt real Redis connection in tests
 vi.mock('../queues', () => {
@@ -55,9 +62,10 @@ vi.mock('../queues', () => {
   };
 });
 
+const { createCallerFactory } = await import('../trpc');
 const { appRouter } = await import('../router');
 const createCaller = createCallerFactory(appRouter);
-const caller = createCaller({} as any);
+const caller = createCaller({ req: { headers: { authorization: 'Bearer test' } } } as any);
 
 describe('BullMQ Monitor Router Procedures', () => {
   

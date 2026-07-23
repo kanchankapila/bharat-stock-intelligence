@@ -149,11 +149,29 @@ class TestRunDb:
         itf.run(fetch_fn=_good_fetch)
         assert con.execute("SELECT COUNT(*) FROM intraday_ohlcv").fetchone()[0] == 3
 
-    def test_skips_symbols_without_mcsymbol(self):
+    def test_fetches_symbols_even_without_mcsymbol(self):
+        """TechCharts is keyed by the raw NSE ticker, not mcsymbol (verified live against
+        MoneyControl -- mcsymbol codes like RI/SBI/HDF01 return {"s":"error"} on this
+        endpoint while the raw ticker works) -- a missing/blank mcsymbol must not exclude
+        a stock from intraday fetching."""
         _, con = _make_db([("INFY", "IT"), ("NOCOVER", None)])
         n = itf.run(fetch_fn=_good_fetch)
-        assert n == 3   # only INFY
-        assert con.execute("SELECT COUNT(*) FROM intraday_ohlcv WHERE symbol='NOCOVER'").fetchone()[0] == 0
+        assert n == 6   # both INFY and NOCOVER fetched by raw symbol
+        assert con.execute("SELECT COUNT(*) FROM intraday_ohlcv WHERE symbol='NOCOVER'").fetchone()[0] == 3
+
+    def test_fetch_called_with_raw_symbol_not_mcsymbol(self):
+        """Regression test for the bug this fetcher shipped with: passing mcsymbol (e.g.
+        'RI' for RELIANCE) to TechCharts instead of the raw ticker silently returned zero
+        bars for ~98% of the universe every cycle."""
+        _make_db([("RELIANCE", "RI")])
+        seen = []
+
+        def _capturing_fetch(sym, from_ts, to_ts):
+            seen.append(sym)
+            return _good_fetch(sym, from_ts, to_ts)
+
+        itf.run(fetch_fn=_capturing_fetch)
+        assert seen == ["RELIANCE"]
 
     def test_skips_symbols_with_no_data(self):
         _, con = _make_db([("INFY", "IT")])

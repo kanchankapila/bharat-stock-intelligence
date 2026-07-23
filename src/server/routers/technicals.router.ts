@@ -5,7 +5,7 @@ import { getCachedScan, runTechnicalScan } from "../technicalScanner";
 import { getLatestRSIForSymbols } from "../technicalSignalsService";
 import { getSymbolFromMcsymbol } from "../stockMapping";
 import { alphaQuant } from "../alphaQuantClient";
-import { router, publicProcedure } from "../trpc";
+import { router, publicProcedure, adminProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
 
 export const technicalsRouter = router({
@@ -31,7 +31,7 @@ export const technicalsRouter = router({
       return { ...row, patterns: JSON.parse(row.patterns || '[]') };
     }),
 
-  runTechnicalSignalScan: publicProcedure
+  runTechnicalSignalScan: adminProcedure
     .input(z.object({ minScore: z.number().min(1).max(10).optional() }).optional())
     .mutation(async ({ input }) => {
       const { runTechnicalSignalScan } = await import('../technicalSignalsService');
@@ -127,7 +127,7 @@ export const technicalsRouter = router({
       return await getWinRateStats();
     }),
 
-  computeSignalOutcomes: publicProcedure
+  computeSignalOutcomes: adminProcedure
     .input(z.object({ horizonDays: z.union([z.literal(5), z.literal(15)]).default(5) }))
     .mutation(async ({ input }) => {
       const { computeSignalOutcomes } = await import('../signalOutcomesService');
@@ -141,7 +141,7 @@ export const technicalsRouter = router({
       return await getSignalTypeStats(input?.horizonDays ?? 15);
     }),
 
-  computeSignalTypeStats: publicProcedure
+  computeSignalTypeStats: adminProcedure
     .mutation(async () => {
       const { computeSignalTypeStats } = await import('../technicalSignalsService');
       return await computeSignalTypeStats();

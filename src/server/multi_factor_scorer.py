@@ -175,8 +175,8 @@ def _load_macro_state() -> dict:
         )
         if rows:
             state["fii_5d_net"] = sum(float(r[0] or 0) for r in rows)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[MULTI_FACTOR] fii_5d_net load failed, defaulting to 0.0 (neutral): {e}")
 
     try:
         # Latest manufacturing PMI
@@ -186,8 +186,8 @@ def _load_macro_state() -> dict:
         )
         if row and row[0]:
             state["pmi"] = float(row[0])
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[MULTI_FACTOR] pmi load failed, defaulting to None: {e}")
 
     try:
         # Repo rate change: compare last 2 readings
@@ -197,8 +197,8 @@ def _load_macro_state() -> dict:
         )
         if len(rows) >= 2:
             state["repo_chg"] = float(rows[0][0] or 0) - float(rows[1][0] or 0)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[MULTI_FACTOR] repo_chg load failed, defaulting to 0.0 (neutral): {e}")
 
     return state
 

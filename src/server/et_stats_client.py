@@ -113,6 +113,7 @@ def fetch_et_stats(
             timeout=15,
         )
         if r.status_code != 200:
+            print(f"  [ET_Stats {events}] companyId={company_id} HTTP {r.status_code}")
             return None
         data = r.json()
         rows = data.get(result_key, {}).get("list", [])

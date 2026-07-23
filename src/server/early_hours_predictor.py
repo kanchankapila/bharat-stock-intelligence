@@ -126,15 +126,19 @@ def fetch_delivery_data(con, dates: list[str]) -> pd.DataFrame:
 def fetch_corporate_announcements(con, t1_date: str, t0_date: str) -> dict[str, list[dict]]:
     """Fetch BSE corporate announcements after market close of T-1 up to market open of T-0."""
     cur = con.cursor()
-    # Check announcements since T-1 15:30:00
+    # Window: T-1 15:30:00 (close) up to T-0 09:15:00 (open) — the upper bound matters for
+    # historical/backfill runs (run_predictor with an explicit --date): without it, same-day
+    # or later announcements leak into the +15-point has_corporate_action score component.
     cutoff = f"{t1_date} 15:30:00"
-    
+    open_cutoff = f"{t0_date} 09:15:00"
+
     cur.execute(translate("""
         SELECT symbols_json, title, summary, published_at
         FROM news_sentiment_items
         WHERE source = 'BSE Announcements'
           AND published_at >= ?
-    """), [cutoff])
+          AND published_at < ?
+    """), [cutoff, open_cutoff])
     rows = cur.fetchall()
     
     out = {}

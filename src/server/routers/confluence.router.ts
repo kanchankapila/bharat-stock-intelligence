@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { dbGet, dbAll } from '../dbAsync';
-import { router, publicProcedure } from '../trpc';
+import { router, publicProcedure, adminProcedure } from '../trpc';
 import { computeConfluenceSignals, getLatestConfluenceSignals } from '../confluenceEngine';
 
 // Cached latest computed_at for confluence_signals — avoids a MAX() scan on every request.
@@ -88,7 +88,7 @@ export const confluenceRouter = router({
     }),
 
   // Trigger a fresh computation
-  refreshConfluenceSignals: publicProcedure
+  refreshConfluenceSignals: adminProcedure
     .mutation(async () => {
       const result = await computeConfluenceSignals();
       _confluenceLatestAt = null; // invalidate cache so next read re-queries MAX()

@@ -3,7 +3,7 @@ import { TRPCError } from "@trpc/server";
 import { dbGet, dbAll, dbRun } from "../dbAsync";
 import { alphaQuant } from "../alphaQuantClient";
 import { enqueueWalkForwardOptimize, getWalkForwardOptimizeJobStatus } from "../queues";
-import { router, publicProcedure } from "../trpc";
+import { router, publicProcedure, adminProcedure } from "../trpc";
 
 type RocResult = {
   regime: string; n: number; positives: number; negatives: number;
@@ -386,7 +386,7 @@ export const mlRouter = router({
       };
     }),
 
-  runFullBacktest: publicProcedure
+  runFullBacktest: adminProcedure
     .input(z.object({
       start:          z.string().default('2023-01-01'),
       end:            z.string().optional(),
@@ -413,7 +413,7 @@ export const mlRouter = router({
       }
     }),
 
-  runWalkForwardOptimization: publicProcedure
+  runWalkForwardOptimization: adminProcedure
     .input(z.object({
       start:       z.string().default('2020-01-01'),
       end:         z.string().optional(),
@@ -464,7 +464,7 @@ export const mlRouter = router({
       }
     }),
 
-  optimizeScreenerWeights: publicProcedure
+  optimizeScreenerWeights: adminProcedure
     .input(z.object({
       horizonDays: z.union([z.literal(5), z.literal(15)]).default(15),
       iterations:  z.number().min(50).max(1000).default(300),
@@ -507,7 +507,7 @@ export const mlRouter = router({
         .map(r => ({ ...r, params: JSON.parse(r.params) }));
     }),
 
-  runBacktest: publicProcedure
+  runBacktest: adminProcedure
     .input(z.object({
       symbol:   z.string(),
       strategy: z.string(),

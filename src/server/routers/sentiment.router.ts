@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { dbGet, dbAll } from "../dbAsync";
-import { router, publicProcedure } from "../trpc";
+import { router, publicProcedure, adminProcedure } from "../trpc";
 
 export const sentimentRouter = router({
   getMarketSentiment: publicProcedure
@@ -99,7 +99,7 @@ export const sentimentRouter = router({
       }
     }),
 
-  refreshNewsSentiment: publicProcedure
+  refreshNewsSentiment: adminProcedure
     .mutation(async () => {
       const { newsSentimentQueue } = await import('../queues');
       if (newsSentimentQueue) {

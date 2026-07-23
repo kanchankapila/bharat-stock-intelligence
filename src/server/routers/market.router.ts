@@ -14,7 +14,7 @@ import { fetchTopMovers } from "../topMoversService";
 import { fetchNiftyTraderBreakouts } from "../marketData";
 import { fetchGlobalMarketData } from "../globalMarketService";
 import { generateStockAnalysis } from "../../services/aiService";
-import { router, publicProcedure } from "../trpc";
+import { router, publicProcedure, adminProcedure } from "../trpc";
 import { runPython } from "../pythonRunner";
 
 export const marketRouter = router({
@@ -235,7 +235,7 @@ export const marketRouter = router({
       };
     }),
 
-  refreshEarlyHoursSpotter: publicProcedure
+  refreshEarlyHoursSpotter: adminProcedure
     .mutation(async () => {
       console.log('[TRPC] Running preopen_fetcher.py manually...');
       await runPython('preopen_fetcher.py', [], 60_000);
@@ -333,7 +333,7 @@ export const marketRouter = router({
       return data.slice(0, 200);
     }),
 
-  generateTrendReport: publicProcedure
+  generateTrendReport: adminProcedure
     .input(z.object({ symbol: z.string() }))
     .mutation(async ({ input }) => {
       const stock = await fetchStockDataWithCache(input.symbol);

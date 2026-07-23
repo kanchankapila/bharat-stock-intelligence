@@ -22,7 +22,7 @@ export async function getNiftyTraderHeaders(): Promise<Record<string, string>> {
 
   let token = _cachedToken;
   if (!token) {
-    token = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1laWRlbnRpZmllciI6IjU0MzM4IiwiaHR0cDovL3NjaGVtYXMubWljcm9zb2Z0LmNvbS93cy8yMDA4LzA2L2lkZW50aXR5L2NsYWltcy9yb2xlIjoiMCIsIlNlc3Npb25JZCI6IjUwODkiLCJleHAiOjE3ODQ0OTAzNDEsImlzcyI6InByb2QtbmlmdHl0cmFkZXIuaW4iLCJhdWQiOiJwcm9kLW5pZnR5dHJhZGVyLmluIn0.pIFSPRIal82Wxd9tSs2YOr0ipJEjz0f7tow4NrXEwt0";
+    console.warn('[NIFTYTRADER] No auth token in app_settings — set one via saveNiftyTraderToken; requests will fail until then.');
   }
 
   if (token && !token.startsWith('Bearer ')) {

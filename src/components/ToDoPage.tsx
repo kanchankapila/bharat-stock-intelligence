@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { trpc } from '../lib/trpc';
-import { 
-  Plus, Trash2, CheckCircle2, Circle, Clock, 
-  AlertCircle, ChevronRight, MessageSquare, 
+import { auth } from '../lib/firebase';
+import { onAuthStateChanged, type User } from 'firebase/auth';
+import {
+  Plus, Trash2, CheckCircle2, Circle, Clock,
+  AlertCircle, ChevronRight, MessageSquare,
   Lightbulb, Star, Filter, MoreVertical, Edit2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -20,8 +22,11 @@ export const ToDoPage: React.FC = () => {
   const [isAdding, setIsAdding] = useState(false);
   const [filter, setFilter] = useState<'ALL' | 'PENDING' | 'IN_PROGRESS' | 'COMPLETED'>('ALL');
 
+  const [user, setUser] = useState<User | null>(null);
+  useEffect(() => onAuthStateChanged(auth, setUser), []);
+
   const utils = trpc.useUtils();
-  const { data: todos, isLoading } = trpc.getTodos.useQuery();
+  const { data: todos, isLoading } = trpc.getTodos.useQuery(undefined, { enabled: !!user });
   const addMutation = trpc.addTodo.useMutation({
     onSuccess: () => {
       utils.getTodos.invalidate();
@@ -59,6 +64,16 @@ export const ToDoPage: React.FC = () => {
     
     updateMutation.mutate({ id: todo.id, status: nextStatus });
   };
+
+  if (!user) {
+    return (
+      <div className="p-6 max-w-5xl mx-auto">
+        <div className="glass/50 border border-slate-800/50 rounded-2xl p-8 text-center text-sm text-slate-400 font-mono">
+          Sign in to view and manage your ideas.
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-8">

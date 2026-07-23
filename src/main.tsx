@@ -6,6 +6,7 @@ import { httpBatchLink } from "@trpc/client";
 import superjson from "superjson";
 import { trpc } from "./lib/trpc";
 import { initSentry } from "./lib/sentry";
+import { auth } from "./lib/firebase";
 import App from './App.tsx';
 import './index.css';
 
@@ -34,6 +35,10 @@ const Main = () => {
         httpBatchLink({
           url: "/api/trpc",
           transformer,
+          async headers() {
+            const idToken = await auth.currentUser?.getIdToken();
+            return idToken ? { authorization: `Bearer ${idToken}` } : {};
+          },
         }),
       ],
     })

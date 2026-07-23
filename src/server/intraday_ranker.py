@@ -125,12 +125,16 @@ class IntradayRanker:
             })
 
         queries = [
+            # symbol NOT LIKE guard: defense in depth against the URL-as-symbol corruption
+            # class (root cause: a since-fixed trendlyne_screener_discovery.py bug; a DB
+            # CHECK constraint now blocks it at the source, this is a second layer).
             ("SELECT ss.symbol, sc.signal_bias, sc.confidence, sc.category, sc.subcategory, "
              "COALESCE(ts.screener_name, sc.screener_name, sc.screener_id) sname "
              "FROM trendlyne_screener_stocks ss "
              "JOIN screener_catalog sc ON sc.screener_id=ss.screener_id AND sc.source='trendlyne' "
              "LEFT JOIN trendlyne_screeners ts ON ts.screener_id=sc.screener_id "
-             "WHERE sc.investment_horizon IN ('intraday', 'short_term')"),
+             "WHERE sc.investment_horizon IN ('intraday', 'short_term') "
+             "AND (ss.symbol IS NULL OR ss.symbol NOT LIKE '%://%')"),
             ("SELECT ss.symbol, sc.signal_bias, sc.confidence, sc.category, sc.subcategory, "
              "COALESCE(sc.screener_name, sc.screener_id) sname "
              "FROM moneycontrol_screener_stocks ss "

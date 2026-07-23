@@ -66,6 +66,7 @@ def fetch_scorecard(sid: str, session: requests.Session) -> list[dict] | None:
     try:
         r = session.get(SCORECARD_URL.format(sid=sid), timeout=15)
         if r.status_code != 200:
+            print(f"  [Tickertape scorecard] sid={sid} HTTP {r.status_code}")
             return None
         data = r.json().get("data", [])
         return data if data else None

@@ -46,9 +46,15 @@ describe('pgClient', () => {
     expect(parse(null as unknown as string)).toBeNull();
   });
 
-  it('derives a stable migration name from an ALTER statement', () => {
+  it('derives a stable migration name from an ALTER ADD COLUMN statement', () => {
     expect(alterMigrationName('ALTER TABLE quant_scores ADD COLUMN IF NOT EXISTS beta_1y            DOUBLE PRECISION'))
       .toBe('alter_quant_scores_beta_1y');
     expect(() => alterMigrationName('DROP TABLE foo')).toThrow();
+  });
+
+  it('derives a stable migration name from an ALTER ADD CONSTRAINT statement', () => {
+    expect(alterMigrationName(
+      "ALTER TABLE confluence_signals ADD CONSTRAINT chk_confluence_signals_symbol_not_url CHECK (symbol NOT LIKE '%://%')"
+    )).toBe('alter_confluence_signals_chk_confluence_signals_symbol_not_url');
   });
 });

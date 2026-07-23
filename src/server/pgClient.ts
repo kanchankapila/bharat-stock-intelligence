@@ -428,6 +428,27 @@ export async function pgEnsureColumns(): Promise<void> {
     `ALTER TABLE backtesting_runs ADD COLUMN IF NOT EXISTS walk_forward_folds_json TEXT`,
     // same-day return alongside the existing 1d/3d/5d EOD horizons (migration 070)
     `ALTER TABLE live_screener_outcomes ADD COLUMN IF NOT EXISTS return_intraday DOUBLE PRECISION`,
+    // todos ownership column — closes an unauthenticated-CRUD gap (todo.router.ts now scopes
+    // every read/write to ctx.uid via protectedProcedure)
+    `ALTER TABLE todos ADD COLUMN IF NOT EXISTS "userId" TEXT`,
+    // CHECK constraint (structural guard, not a column) — root cause: trendlyne_screener_
+    // discovery.py had a blind "column 0" fallback when no table header matched nsecode/
+    // symbol, and for some screeners column 0 is the stock-name/profile-link column —
+    // writing a raw Trendlyne URL into `symbol` (~2M rows in confluence_signals, ~79K in
+    // unified_recommendations, plus smaller counts in stock_scores/stock_factor_breakdown/
+    // stock_factor_breakdown_history/recommendation_log/intraday_recommendations, all
+    // sourced from THIS table). The writer is fixed and all known-bad rows purged
+    // (2026-07-23); this constraint makes the bug class structurally impossible at its
+    // actual source regardless of which reader (present or future) trusts it.
+    // NOTE: the same constraint on confluence_signals was NOT added — it's a compressed
+    // TimescaleDB hypertable and Postgres refuses ADD CONSTRAINT on those without first
+    // decompressing every chunk (a heavy operation on 2M+ rows, not done without a explicit
+    // go-ahead). confluence_signals is defended instead by: (a) this upstream constraint
+    // (its only writer, confluenceEngine.ts, sources symbols exclusively from this table and
+    // the other screener-membership tables, none of which were found contaminated), and
+    // (b) the symbol NOT LIKE '%://%' read-side guards in unified_ranker.py's
+    // _get_confluence_scores/_get_confluence_latest_map.
+    `ALTER TABLE trendlyne_screener_stocks ADD CONSTRAINT chk_tl_screener_stocks_symbol_not_url CHECK (symbol IS NULL OR symbol NOT LIKE '%://%')`,
   ];
 
   await client.query(`CREATE TABLE IF NOT EXISTS "_migrations" (
@@ -447,8 +468,10 @@ export async function pgEnsureColumns(): Promise<void> {
       await client.query(sql);
       await client.query('INSERT INTO "_migrations" (name) VALUES ($1) ON CONFLICT (name) DO NOTHING', [name]);
     } catch (err) {
-      if ((err as { code?: string }).code === '42701') {
-        // Column already exists from a pre-fix blind ALTER — record it now so future boots skip it.
+      const code = (err as { code?: string }).code;
+      if (code === '42701' || code === '42710') {
+        // 42701 = column already exists (pre-fix blind ALTER), 42710 = constraint already
+        // exists — either way, record it now so future boots skip it.
         await client.query('INSERT INTO "_migrations" (name) VALUES ($1) ON CONFLICT (name) DO NOTHING', [name]).catch(() => {});
       } else {
         console.error('[PG] pgEnsureColumns failed:', (err as Error).message, '|', sql);
@@ -460,11 +483,14 @@ export async function pgEnsureColumns(): Promise<void> {
   }
 }
 
-/** Derives a stable, human-readable _migrations name from an `ALTER TABLE t ADD COLUMN IF NOT EXISTS c ...` statement. */
+/** Derives a stable, human-readable _migrations name from an `ALTER TABLE t ADD COLUMN IF NOT EXISTS c ...`
+ *  or `ALTER TABLE t ADD CONSTRAINT name ...` statement. */
 export function alterMigrationName(sql: string): string {
-  const m = sql.match(/ALTER TABLE (\S+) ADD COLUMN IF NOT EXISTS (\S+)/i);
-  if (!m) throw new Error(`alterMigrationName: unrecognized ALTER shape: ${sql}`);
-  return `alter_${m[1]}_${m[2]}`;
+  const addColumn = sql.match(/ALTER TABLE (\S+) ADD COLUMN IF NOT EXISTS (\S+)/i);
+  if (addColumn) return `alter_${addColumn[1]}_${addColumn[2]}`;
+  const addConstraint = sql.match(/ALTER TABLE (\S+) ADD CONSTRAINT (\S+)/i);
+  if (addConstraint) return `alter_${addConstraint[1]}_${addConstraint[2]}`;
+  throw new Error(`alterMigrationName: unrecognized ALTER shape: ${sql}`);
 }
 
 export async function pgHealthy(): Promise<boolean> {

@@ -8,7 +8,7 @@ from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 
-from llm import get_llm
+from llm import get_llm, invoke_with_retry
 from tools.sql_tool import (
     get_stock_fundamentals, filter_stocks_by_fundamentals,
     get_buy_signals, get_screener_membership, get_quant_scores,
@@ -123,7 +123,7 @@ def _safe_json(text: str, fallback: dict) -> dict:
 def classify_intent(state: AgentState) -> dict:
     query = state["messages"][-1].content
     llm = get_llm()
-    response = llm.invoke(INTENT_PROMPT.format(query=query))
+    response = invoke_with_retry(llm, INTENT_PROMPT.format(query=query))
     parsed = _safe_json(response.content, {"intent": "general", "stock_symbol": None, "sector": None})
     return {
         "intent": parsed.get("intent", "general"),
@@ -190,7 +190,7 @@ def execute_tools(state: AgentState, db_path: str = DB_PATH) -> dict:
 
     # ── fundamental_filter ───────────────────────────────────────────────────
     elif intent == "fundamental_filter":
-        resp = llm.invoke(FILTER_PARAMS_PROMPT.format(query=query))
+        resp = invoke_with_retry(llm, FILTER_PARAMS_PROMPT.format(query=query))
         params = _safe_json(resp.content, {"pe_lt": 25, "pb_lt": 3, "roe_gt": 12, "min_score": 60})
         # Guardrail: weaker models often return all-null params, which would run an
         # UNFILTERED query and surface expensive stocks (PE 200x+) for an "undervalued"
@@ -358,7 +358,7 @@ If data has a staleness warning, mention the date of the data.
 """
 
     llm = get_llm()
-    response = llm.invoke(full_prompt)
+    response = invoke_with_retry(llm, full_prompt)
     return {"messages": [AIMessage(content=response.content)]}
 
 

@@ -1,40 +1,40 @@
 import { z } from "zod";
 import { dbAll, dbRun } from "../dbAsync";
-import { router, publicProcedure } from "../trpc";
+import { router, protectedProcedure } from "../trpc";
 
+// userId is derived from the verified Firebase ID token (ctx.uid), never accepted from the
+// client, so one user can never read/cancel/create alerts against another user's account.
 export const alertsRouter = router({
-  getMyPriceAlerts: publicProcedure
-    .input(z.object({ userId: z.string() }))
-    .query(async ({ input }) => {
+  getMyPriceAlerts: protectedProcedure
+    .query(async ({ ctx }) => {
       return dbAll<any>(
         `SELECT id, symbol, condition, "thresholdPrice", status, "createdAt", "triggeredAt", "triggeredPrice"
          FROM price_alerts WHERE "userId" = ? ORDER BY "createdAt" DESC LIMIT 100`,
-        [input.userId]
+        [ctx.uid]
       );
     }),
 
-  createPriceAlert: publicProcedure
+  createPriceAlert: protectedProcedure
     .input(z.object({
-      userId: z.string(),
       symbol: z.string(),
       condition: z.enum(["ABOVE", "BELOW"]),
       thresholdPrice: z.number().positive(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       await dbRun(
         `INSERT INTO price_alerts ("userId", symbol, condition, "thresholdPrice", status)
          VALUES (?, ?, ?, ?, 'ACTIVE')`,
-        [input.userId, input.symbol.toUpperCase(), input.condition, input.thresholdPrice]
+        [ctx.uid, input.symbol.toUpperCase(), input.condition, input.thresholdPrice]
       );
       return { success: true };
     }),
 
-  cancelPriceAlert: publicProcedure
-    .input(z.object({ id: z.number(), userId: z.string() }))
-    .mutation(async ({ input }) => {
+  cancelPriceAlert: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ input, ctx }) => {
       await dbRun(
         `UPDATE price_alerts SET status = 'CANCELLED' WHERE id = ? AND "userId" = ? AND status = 'ACTIVE'`,
-        [input.id, input.userId]
+        [input.id, ctx.uid]
       );
       return { success: true };
     }),

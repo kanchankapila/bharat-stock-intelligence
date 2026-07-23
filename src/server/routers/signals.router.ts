@@ -2,7 +2,7 @@ import { z } from "zod";
 import { dbGet, dbAll, dbRun } from "../dbAsync";
 import { enqueueAISignals, getAIQueueStats } from "../queues";
 import { invalidateAISignalCache } from "../signals";
-import { router, publicProcedure } from "../trpc";
+import { router, publicProcedure, protectedProcedure, adminProcedure } from "../trpc";
 
 /** ISO timestamp `days` ago — used instead of SQLite datetime('now','-N days') so the
  *  same query runs on both SQLite and Postgres (a parameterised interval isn't portable). */
@@ -26,7 +26,9 @@ export const signalsRouter = router({
       return dbAll(`${UNIFIED_SIGNAL_SELECT} ORDER BY signal_generated_at DESC LIMIT ?`, [input.limit]);
     }),
 
-  saveSignal: publicProcedure
+  // Writes directly into unified_signals (the platform's canonical signal table, read by
+  // every signal UI/backtest downstream) — gated to admin, not a per-user resource.
+  saveSignal: adminProcedure
     .input(z.object({
       symbol: z.string(),
       type: z.enum(['BUY', 'SELL', 'HOLD']),
@@ -83,12 +85,14 @@ export const signalsRouter = router({
       };
     }),
 
-  saveSignalAction: publicProcedure
+  // user_id below is always ctx.uid (the verified token owner), never client input — this is
+  // a personal trade journal (quantity/entry/pnl/notes), so one user must never read or write
+  // into another user's rows.
+  saveSignalAction: protectedProcedure
     .input(z.object({
       signalId: z.number(),
       signalSource: z.enum(['AI', 'technical', 'quant', 'news']),
       symbol: z.string(),
-      userId: z.string().optional(),
       actionType: z.enum(['BUY', 'SELL', 'HOLD', 'SKIP']),
       quantity: z.number().optional(),
       entryPriceRec: z.number().optional(),
@@ -100,7 +104,7 @@ export const signalsRouter = router({
       pnlPct: z.number().optional(),
       notes: z.string().optional(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       // INSERT OR REPLACE -> explicit ON CONFLICT (unique key is signal_id, user_id).
       await dbRun(`
         INSERT INTO signal_actions (
@@ -116,7 +120,7 @@ export const signalsRouter = router({
           exit_date = excluded.exit_date, pnl = excluded.pnl, pnl_pct = excluded.pnl_pct,
           notes = excluded.notes, executed_at = CURRENT_TIMESTAMP
       `, [
-        input.signalId, input.signalSource, input.symbol, input.userId ?? null,
+        input.signalId, input.signalSource, input.symbol, ctx.uid,
         input.actionType, input.quantity ?? null, input.entryPriceRec ?? null,
         input.entryActual ?? null, input.targetPriceRec ?? null,
         input.exitPriceActual ?? null, input.exitDate ?? null,
@@ -125,24 +129,22 @@ export const signalsRouter = router({
       return { success: true, signalId: input.signalId };
     }),
 
-  getSignalActions: publicProcedure
+  getSignalActions: protectedProcedure
     .input(z.object({
       symbol: z.string().optional(),
-      userId: z.string().optional(),
       signalSource: z.enum(['AI', 'technical', 'quant', 'news']).optional(),
       limit: z.number().default(50),
       offset: z.number().default(0),
     }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       let query = `
         SELECT id, signal_id, signal_source, symbol, action_type,
                executed_at, quantity, entry_price_rec, entry_actual,
                target_price_rec, exit_price_actual, pnl, pnl_pct, notes
-        FROM signal_actions WHERE 1=1
+        FROM signal_actions WHERE user_id = ?
       `;
-      const params: unknown[] = [];
+      const params: unknown[] = [ctx.uid];
       if (input.symbol)       { query += ' AND symbol = ?';       params.push(input.symbol); }
-      if (input.userId)       { query += ' AND user_id = ?';      params.push(input.userId); }
       if (input.signalSource) { query += ' AND signal_source = ?'; params.push(input.signalSource); }
       query += ' ORDER BY executed_at DESC LIMIT ? OFFSET ?';
       params.push(input.limit, input.offset);
@@ -159,21 +161,19 @@ export const signalsRouter = router({
       };
     }),
 
-  getSignalActionMetrics: publicProcedure
+  getSignalActionMetrics: protectedProcedure
     .input(z.object({
-      userId: z.string().optional(),
       signalSource: z.enum(['AI', 'technical', 'quant', 'news']).optional(),
       days: z.number().default(30),
     }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       let query = `
         SELECT signal_source, action_type, COUNT(*) as count,
                AVG(pnl_pct) as avg_pnl_pct, SUM(pnl) as total_pnl
         FROM signal_actions
-        WHERE executed_at >= ?
+        WHERE executed_at >= ? AND user_id = ?
       `;
-      const params: unknown[] = [daysAgoIso(input.days)];
-      if (input.userId)       { query += ' AND user_id = ?';       params.push(input.userId); }
+      const params: unknown[] = [daysAgoIso(input.days), ctx.uid];
       if (input.signalSource) { query += ' AND signal_source = ?'; params.push(input.signalSource); }
       query += ' GROUP BY signal_source, action_type';
       return { metrics: await dbAll(query, params) };
@@ -265,7 +265,7 @@ export const signalsRouter = router({
       `, [daysAgoIso(days)]);
     }),
 
-  setAISignalMinConfidence: publicProcedure
+  setAISignalMinConfidence: adminProcedure
     .input(z.object({ confidence: z.number().min(0).max(100) }))
     .mutation(async ({ input }) => {
       await dbRun(

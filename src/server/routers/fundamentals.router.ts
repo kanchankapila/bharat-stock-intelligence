@@ -5,10 +5,10 @@ import { getMoneycontrolInsights } from "../moneycontrolService";
 import { getStockInsights } from "../insightService";
 import { getFinologyData } from "../finologyService";
 import { dbAll } from "../dbAsync";
-import { router, publicProcedure } from "../trpc";
+import { router, publicProcedure, adminProcedure } from "../trpc";
 
 export const fundamentalsRouter = router({
-  triggerFundamentalsSync: publicProcedure
+  triggerFundamentalsSync: adminProcedure
     .input(z.object({ phase2Only: z.boolean().optional() }).optional())
     .mutation(async ({ input }) => {
       const { fundamentalsSyncQueue } = await import('../queues');

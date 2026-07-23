@@ -10,18 +10,18 @@ export const PriceAlertsPanel: React.FC<{ userId?: string; defaultSymbol?: strin
 
   const utils = trpc.useContext();
   const { data: alerts = [], isLoading } = trpc.getMyPriceAlerts.useQuery(
-    { userId: userId || '' },
+    undefined,
     { enabled: !!userId, staleTime: 30_000, refetchInterval: 60_000 }
   );
 
   const create = trpc.createPriceAlert.useMutation({
     onSuccess: () => {
-      utils.getMyPriceAlerts.invalidate({ userId: userId || '' });
+      utils.getMyPriceAlerts.invalidate();
       setThreshold('');
     },
   });
   const cancel = trpc.cancelPriceAlert.useMutation({
-    onSuccess: () => utils.getMyPriceAlerts.invalidate({ userId: userId || '' }),
+    onSuccess: () => utils.getMyPriceAlerts.invalidate(),
   });
 
   if (!userId) {
@@ -38,7 +38,7 @@ export const PriceAlertsPanel: React.FC<{ userId?: string; defaultSymbol?: strin
   const handleCreate = () => {
     const t = parseFloat(threshold);
     if (!symbol.trim() || !Number.isFinite(t) || t <= 0) return;
-    create.mutate({ userId, symbol: symbol.trim().toUpperCase(), condition, thresholdPrice: t });
+    create.mutate({ symbol: symbol.trim().toUpperCase(), condition, thresholdPrice: t });
   };
 
   return (
@@ -95,7 +95,7 @@ export const PriceAlertsPanel: React.FC<{ userId?: string; defaultSymbol?: strin
                       {a.condition === 'ABOVE' ? <TrendingUp className="w-3 h-3 text-emerald-400" /> : <TrendingDown className="w-3 h-3 text-rose-400" />}
                       <b>{a.symbol}</b> {a.condition === 'ABOVE' ? '≥' : '≤'} ₹{a.thresholdPrice}
                     </span>
-                    <button onClick={() => cancel.mutate({ id: a.id, userId })} className="text-slate-500 hover:text-rose-400">
+                    <button onClick={() => cancel.mutate({ id: a.id })} className="text-slate-500 hover:text-rose-400">
                       <X className="w-3.5 h-3.5" />
                     </button>
                   </div>

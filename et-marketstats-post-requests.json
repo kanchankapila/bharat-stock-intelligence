@@ -1,0 +1,4080 @@
+{
+  "source": "Economic Times Stock Technicals and Intraday Marketstats",
+  "capturedAt": "2026-07-14T13:49:02.339Z",
+  "summary": {
+    "totalTargeted": 91,
+    "capturedCount": 91,
+    "failedCount": 0
+  },
+  "requests": [
+    {
+      "label": "Current Ratio Annual",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/financials?firstoperand=CurrentRatio_L0&operationtype=Above&secondoperand=1",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":7860,\"firstOperand\":\"CurrentRatio_L0\",\"operationType\":\"Above\",\"secondOperand\":\"1\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 7860,
+          "firstOperand": "CurrentRatio_L0",
+          "operationType": "Above",
+          "secondOperand": "1",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:43:54.503Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "36906",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:43:51 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Net Profit QoQ Growth %",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/financials?firstoperand=PAT_QoQ_PercentChange_Q&operationtype=Above&secondoperand=10",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":7862,\"firstOperand\":\"PAT_QoQ_PercentChange_Q\",\"operationType\":\"Above\",\"secondOperand\":\"10\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 7862,
+          "firstOperand": "PAT_QoQ_PercentChange_Q",
+          "operationType": "Above",
+          "secondOperand": "10",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:43:58.064Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "38634",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:43:54 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Net Profit Qtr Growth YoY %",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/financials?firstoperand=PAT_YoY_PercentChange_Q&operationtype=Above&secondoperand=0",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":7863,\"firstOperand\":\"PAT_YoY_PercentChange_Q\",\"operationType\":\"Above\",\"secondOperand\":\"0\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 7863,
+          "firstOperand": "PAT_YoY_PercentChange_Q",
+          "operationType": "Above",
+          "secondOperand": "0",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:44:01.477Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "38630",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:43:58 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "EBIT Margin",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/financials?firstoperand=EBIT_Margin_L0&operationtype=Above&secondoperand=20",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":7865,\"firstOperand\":\"EBIT_Margin_L0\",\"operationType\":\"Above\",\"secondOperand\":\"20\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 7865,
+          "firstOperand": "EBIT_Margin_L0",
+          "operationType": "Above",
+          "secondOperand": "20",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:44:05.071Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "37480",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:44:01 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Net Sales QoQ chng",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/financials?firstoperand=NetSales_QoQ_PercentChange_Q&operationtype=Above&secondoperand=10",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":7866,\"firstOperand\":\"NetSales_QoQ_PercentChange_Q\",\"operationType\":\"Above\",\"secondOperand\":\"10\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 7866,
+          "firstOperand": "NetSales_QoQ_PercentChange_Q",
+          "operationType": "Above",
+          "secondOperand": "10",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:44:07.792Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "38188",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:44:04 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Qtr Net Sales YoY chng",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/financials?firstoperand=NetSales_YoY_PercentChange_Q&operationtype=Above&secondoperand=0",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":7867,\"firstOperand\":\"NetSales_YoY_PercentChange_Q\",\"operationType\":\"Above\",\"secondOperand\":\"0\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 7867,
+          "firstOperand": "NetSales_YoY_PercentChange_Q",
+          "operationType": "Above",
+          "secondOperand": "0",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:44:11.245Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "37926",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:44:07 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "RoA Annual %",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/financials?firstoperand=ROA_L0&operationtype=Above&secondoperand=5",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":7869,\"firstOperand\":\"ROA_L0\",\"operationType\":\"Above\",\"secondOperand\":\"5\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 7869,
+          "firstOperand": "ROA_L0",
+          "operationType": "Above",
+          "secondOperand": "5",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:44:14.846Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "36863",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:44:11 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "ROCE Annual %",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/financials?firstoperand=ROCE_L0&operationtype=Above&secondoperand=20",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":7872,\"firstOperand\":\"ROCE_L0\",\"operationType\":\"Above\",\"secondOperand\":\"20\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 7872,
+          "firstOperand": "ROCE_L0",
+          "operationType": "Above",
+          "secondOperand": "20",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:44:18.540Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "36939",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:44:15 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "ROE Annual %",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/financials?firstoperand=ROE_L0&operationtype=Above&secondoperand=20",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":7875,\"firstOperand\":\"ROE_L0\",\"operationType\":\"Above\",\"secondOperand\":\"20\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 7875,
+          "firstOperand": "ROE_L0",
+          "operationType": "Above",
+          "secondOperand": "20",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:44:21.989Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "36960",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:44:18 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Relative Outperformers to Sector",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/relative-returns?firstoperand=R1DayReturn&operationtype=Above&secondoperand=sector1DayReturn",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":8130,\"firstOperand\":\"R1DayReturn\",\"operationType\":\"Above\",\"secondOperand\":\"sector1DayReturn\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 8130,
+          "firstOperand": "R1DayReturn",
+          "operationType": "Above",
+          "secondOperand": "sector1DayReturn",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:44:25.342Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "32895",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:44:22 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Relative Underperformers to Sector",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/relative-returns?firstoperand=R1DayReturn&operationtype=Below&secondoperand=sector1DayReturn",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":8166,\"firstOperand\":\"R1DayReturn\",\"operationType\":\"Below\",\"secondOperand\":\"sector1DayReturn\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 8166,
+          "firstOperand": "R1DayReturn",
+          "operationType": "Below",
+          "secondOperand": "sector1DayReturn",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:44:28.656Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "33378",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:44:25 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Relative Outperformers to Industry",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/relative-returns?firstoperand=R1DayReturn&operationtype=Above&secondoperand=industry1DayReturn",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":8139,\"firstOperand\":\"R1DayReturn\",\"operationType\":\"Above\",\"secondOperand\":\"industry1DayReturn\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 8139,
+          "firstOperand": "R1DayReturn",
+          "operationType": "Above",
+          "secondOperand": "industry1DayReturn",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:44:32.322Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "32865",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:44:28 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Relative Underperformers to Industry",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/relative-returns?firstoperand=R1DayReturn&operationtype=Below&secondoperand=industry1DayReturn",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":8175,\"firstOperand\":\"R1DayReturn\",\"operationType\":\"Below\",\"secondOperand\":\"industry1DayReturn\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 8175,
+          "firstOperand": "R1DayReturn",
+          "operationType": "Below",
+          "secondOperand": "industry1DayReturn",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:44:35.575Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "32846",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:44:32 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Relative Outperformers to Nifty50",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/relative-returns?firstoperand=R1DayReturn&operationtype=Above&secondoperand=R1DayReturnNifty50",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":8148,\"firstOperand\":\"R1DayReturn\",\"operationType\":\"Above\",\"secondOperand\":\"R1DayReturnNifty50\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 8148,
+          "firstOperand": "R1DayReturn",
+          "operationType": "Above",
+          "secondOperand": "R1DayReturnNifty50",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:44:38.990Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "32525",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:44:35 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Relative Underperformers to Nifty50",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/relative-returns?firstoperand=R1DayReturn&operationtype=Below&secondoperand=R1DayReturnNifty50",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":8184,\"firstOperand\":\"R1DayReturn\",\"operationType\":\"Below\",\"secondOperand\":\"R1DayReturnNifty50\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 8184,
+          "firstOperand": "R1DayReturn",
+          "operationType": "Below",
+          "secondOperand": "R1DayReturnNifty50",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:44:42.631Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "32590",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:44:39 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Relative Outperformers to Sensex",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/relative-returns?firstoperand=R1DayReturn&operationtype=Above&secondoperand=R1DayReturnSensex",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":8157,\"firstOperand\":\"R1DayReturn\",\"operationType\":\"Above\",\"secondOperand\":\"R1DayReturnSensex\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 8157,
+          "firstOperand": "R1DayReturn",
+          "operationType": "Above",
+          "secondOperand": "R1DayReturnSensex",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:44:45.926Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "32136",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:44:42 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Relative Underperformers to Sensex",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/relative-returns?firstoperand=R1DayReturn&operationtype=Below&secondoperand=R1DayReturnSensex",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":8193,\"firstOperand\":\"R1DayReturn\",\"operationType\":\"Below\",\"secondOperand\":\"R1DayReturnSensex\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 8193,
+          "firstOperand": "R1DayReturn",
+          "operationType": "Below",
+          "secondOperand": "R1DayReturnSensex",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:44:49.311Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "32727",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:44:46 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Promoter Shareholding-Bought by Promoter",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/shareholding?firstoperand=PromoterHoldingChangeQoQ_L0&operationtype=Above&secondoperand=0",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":8780,\"firstOperand\":\"PromoterHoldingChangeQoQ_L0\",\"operationType\":\"Above\",\"secondOperand\":\"0\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 8780,
+          "firstOperand": "PromoterHoldingChangeQoQ_L0",
+          "operationType": "Above",
+          "secondOperand": "0",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:44:52.697Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "30684",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:44:49 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Promoter Shareholding-Sold by Promoter",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/shareholding?firstoperand=PromoterHoldingChangeQoQ_L0&operationtype=Below&secondoperand=0",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":8781,\"firstOperand\":\"PromoterHoldingChangeQoQ_L0\",\"operationType\":\"Below\",\"secondOperand\":\"0\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 8781,
+          "firstOperand": "PromoterHoldingChangeQoQ_L0",
+          "operationType": "Below",
+          "secondOperand": "0",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:44:56.205Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "30842",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:44:53 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Promoter Shareholding-Highest Promoter Pledges",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/shareholding?firstoperand=PromoterPledgedHolding_L0&operationtype=Above&secondoperand=0",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":8784,\"firstOperand\":\"PromoterPledgedHolding_L0\",\"operationType\":\"Above\",\"secondOperand\":\"0\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 8784,
+          "firstOperand": "PromoterPledgedHolding_L0",
+          "operationType": "Above",
+          "secondOperand": "0",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:44:59.614Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "30791",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:44:56 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Promoter Shareholding-Increase in Pledges",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/shareholding?firstoperand=PromoterHoldingPledgedChangeQoQ_L0&operationtype=Above&secondoperand=0",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":8786,\"firstOperand\":\"PromoterHoldingPledgedChangeQoQ_L0\",\"operationType\":\"Above\",\"secondOperand\":\"0\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 8786,
+          "firstOperand": "PromoterHoldingPledgedChangeQoQ_L0",
+          "operationType": "Above",
+          "secondOperand": "0",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:45:03.032Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "32180",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:44:59 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Promoter Shareholding-Decrease in Pledges",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/shareholding?firstoperand=PromoterHoldingPledgedChangeQoQ_L0&operationtype=Below&secondoperand=0",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":8787,\"firstOperand\":\"PromoterHoldingPledgedChangeQoQ_L0\",\"operationType\":\"Below\",\"secondOperand\":\"0\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 8787,
+          "firstOperand": "PromoterHoldingPledgedChangeQoQ_L0",
+          "operationType": "Below",
+          "secondOperand": "0",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:45:06.347Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "33068",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:45:03 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "FII Shareholding- Bought By FII",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/shareholding?firstoperand=FIIHoldingChangeQoQ_L0&operationtype=Above&secondoperand=0",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":8792,\"firstOperand\":\"FIIHoldingChangeQoQ_L0\",\"operationType\":\"Above\",\"secondOperand\":\"0\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 8792,
+          "firstOperand": "FIIHoldingChangeQoQ_L0",
+          "operationType": "Above",
+          "secondOperand": "0",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:45:10.332Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "36220",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:45:07 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "FII Shareholding- Sold By FII",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/shareholding?firstoperand=FIIHoldingChangeQoQ_L0&operationtype=Below&secondoperand=0",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":8793,\"firstOperand\":\"FIIHoldingChangeQoQ_L0\",\"operationType\":\"Below\",\"secondOperand\":\"0\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 8793,
+          "firstOperand": "FIIHoldingChangeQoQ_L0",
+          "operationType": "Below",
+          "secondOperand": "0",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:45:13.612Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "36257",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:45:10 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "FII Shareholding- Highest FII Holdings",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/shareholding?firstoperand=FIIHolding_L0&operationtype=Above&secondoperand=0",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":8790,\"firstOperand\":\"FIIHolding_L0\",\"operationType\":\"Above\",\"secondOperand\":\"0\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 8790,
+          "firstOperand": "FIIHolding_L0",
+          "operationType": "Above",
+          "secondOperand": "0",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:45:16.840Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "36519",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:45:14 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "MF Shareholding- Bought by MF",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/shareholding?firstoperand=MFHoldingChangeQoQ_L0&operationtype=Above&secondoperand=0",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":8798,\"firstOperand\":\"MFHoldingChangeQoQ_L0\",\"operationType\":\"Above\",\"secondOperand\":\"0\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 8798,
+          "firstOperand": "MFHoldingChangeQoQ_L0",
+          "operationType": "Above",
+          "secondOperand": "0",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:45:20.028Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "27167",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:45:16 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "MF Shareholding- Sold by MF",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/shareholding?firstoperand=MFHoldingChangeQoQ_L0&operationtype=Below&secondoperand=0",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":8799,\"firstOperand\":\"MFHoldingChangeQoQ_L0\",\"operationType\":\"Below\",\"secondOperand\":\"0\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 8799,
+          "firstOperand": "MFHoldingChangeQoQ_L0",
+          "operationType": "Below",
+          "secondOperand": "0",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:45:23.390Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "26994",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:45:20 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "MF Shareholding- Highest MF Holdings",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/shareholding?firstoperand=MutualFundHolding_L0&operationtype=Above&secondoperand=0",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":8796,\"firstOperand\":\"MutualFundHolding_L0\",\"operationType\":\"Above\",\"secondOperand\":\"0\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 8796,
+          "firstOperand": "MutualFundHolding_L0",
+          "operationType": "Above",
+          "secondOperand": "0",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:45:26.842Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "26582",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:45:23 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Top Gainers",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats/top-gainers/nse",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/intraday-stats",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":6925,\"apiType\":\"gainers\",\"duration\":\"1D\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 6925,
+          "apiType": "gainers",
+          "duration": "1D",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:45:30.298Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "39383",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:45:27 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Top Losers",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats/top-losers/nse",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/intraday-stats",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":6926,\"apiType\":\"losers\",\"duration\":\"1D\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 6926,
+          "apiType": "losers",
+          "duration": "1D",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:45:33.760Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "39722",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:45:30 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Hourly Gainers",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats/hourly-gainers/nse",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/intraday-stats",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":6941,\"apiType\":\"hourly-gainers\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 6941,
+          "apiType": "hourly-gainers",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:45:37.173Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "33989",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:45:33 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Hourly Losers",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats/hourly-losers/nse",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/intraday-stats",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":6942,\"apiType\":\"hourly-losers\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 6942,
+          "apiType": "hourly-losers",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:45:40.709Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "34096",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:45:37 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Most Active - Volume",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats?type=most-active-volume",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/intraday-stats",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":6927,\"apiType\":\"most-active-volume\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 6927,
+          "apiType": "most-active-volume",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:45:44.187Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "38095",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:45:40 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Most Active - Value",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats?type=most-active-value",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/intraday-stats",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":6928,\"apiType\":\"most-active-value\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 6928,
+          "apiType": "most-active-value",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:45:47.671Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "38539",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:45:44 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Only Buyers",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats?type=only-buyers",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/intraday-stats",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":6929,\"apiType\":\"only-buyers\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 6929,
+          "apiType": "only-buyers",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:45:50.355Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "36794",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:45:47 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Only Sellers",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats?type=only-sellers",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/intraday-stats",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":6930,\"apiType\":\"only-sellers\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 6930,
+          "apiType": "only-sellers",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:45:53.789Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "36535",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:45:50 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "New 52 Week High",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats?type=new-52-week-high",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/intraday-stats",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":6931,\"apiType\":\"new-52-week-high\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 6931,
+          "apiType": "new-52-week-high",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:45:57.273Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "35957",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:45:54 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "New 52 Week Low",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats?type=new-52-week-low",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/intraday-stats",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":6932,\"apiType\":\"new-52-week-low\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 6932,
+          "apiType": "new-52-week-low",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:46:00.723Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "29741",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:45:57 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Near 52 Week High",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats?type=near-52-week-high",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/intraday-stats",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":6933,\"apiType\":\"near-52-week-high\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 6933,
+          "apiType": "near-52-week-high",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:46:04.571Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "37698",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:46:01 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Near 52 Week Low",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats?type=near-52-week-low",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/intraday-stats",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":6934,\"apiType\":\"near-52-week-low\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 6934,
+          "apiType": "near-52-week-low",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:46:08.065Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "36582",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:46:04 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Fall From Intraday High",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats?type=fall-from-intraday-high",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/intraday-stats",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":6935,\"apiType\":\"fall-from-intraday-high\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 6935,
+          "apiType": "fall-from-intraday-high",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:46:11.465Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "39566",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:46:08 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Recovery from Intraday Low",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats?type=recovery-from-intraday-low",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/intraday-stats",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":6936,\"apiType\":\"recovery-from-intraday-low\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 6936,
+          "apiType": "recovery-from-intraday-low",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:46:15.269Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "38887",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:46:12 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Volume Shockers",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats/volume-shockers-nse",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/intraday-stats",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":6937,\"apiType\":\"volume-shockers\",\"timespan\":\"3D\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 6937,
+          "apiType": "volume-shockers",
+          "timespan": "3D",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:46:19.003Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "41106",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:46:15 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Golden Cross",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/moving-averages?firstoperand=currentSma50&operationtype=Above&secondoperand=currentSma200",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":7213,\"firstOperand\":\"currentSma50\",\"operationType\":\"Above\",\"secondOperand\":\"currentSma200\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 7213,
+          "firstOperand": "currentSma50",
+          "operationType": "Above",
+          "secondOperand": "currentSma200",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:46:22.291Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "38044",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:46:18 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Death Cross",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/moving-averages?firstoperand=currentSma50&operationtype=Below&secondoperand=currentSma200",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":7221,\"firstOperand\":\"currentSma50\",\"operationType\":\"Below\",\"secondOperand\":\"currentSma200\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 7221,
+          "firstOperand": "currentSma50",
+          "operationType": "Below",
+          "secondOperand": "currentSma200",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:46:25.637Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "36630",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:46:22 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "SMA-SMA Crossovers",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/moving-averages?firstoperand=currentSma5&operationtype=Above&secondoperand=currentSma200",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":7021,\"firstOperand\":\"currentSma5\",\"operationType\":\"Above\",\"secondOperand\":\"currentSma200\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 7021,
+          "firstOperand": "currentSma5",
+          "operationType": "Above",
+          "secondOperand": "currentSma200",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:46:28.838Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "38097",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:46:25 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "EMA-EMA Crossovers",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/moving-averages?firstoperand=currentEma5&operationtype=Above&secondoperand=currentEma200",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":7308,\"firstOperand\":\"currentEma5\",\"operationType\":\"Above\",\"secondOperand\":\"currentEma200\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 7308,
+          "firstOperand": "currentEma5",
+          "operationType": "Above",
+          "secondOperand": "currentEma200",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:46:32.416Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "37917",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:46:29 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Above SMA-20",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/moving-averages?firstoperand=lastTradedPrice&operationtype=Above&secondoperand=currentSma20",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":6986,\"firstOperand\":\"lastTradedPrice\",\"operationType\":\"Above\",\"secondOperand\":\"currentSma20\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 6986,
+          "firstOperand": "lastTradedPrice",
+          "operationType": "Above",
+          "secondOperand": "currentSma20",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:46:35.837Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "36810",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:46:32 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Above SMA-50",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/moving-averages?firstoperand=lastTradedPrice&operationtype=Above&secondoperand=currentSma50",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":6988,\"firstOperand\":\"lastTradedPrice\",\"operationType\":\"Above\",\"secondOperand\":\"currentSma50\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 6988,
+          "firstOperand": "lastTradedPrice",
+          "operationType": "Above",
+          "secondOperand": "currentSma50",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:46:39.371Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "36857",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:46:36 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Below SMA-20",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/moving-averages?firstoperand=lastTradedPrice&operationtype=Below&secondoperand=currentSma20",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":6994,\"firstOperand\":\"lastTradedPrice\",\"operationType\":\"Below\",\"secondOperand\":\"currentSma20\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 6994,
+          "firstOperand": "lastTradedPrice",
+          "operationType": "Below",
+          "secondOperand": "currentSma20",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:46:42.603Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "36342",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:46:39 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Below SMA-50",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/moving-averages?firstoperand=lastTradedPrice&operationtype=Below&secondoperand=currentSma50",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":6996,\"firstOperand\":\"lastTradedPrice\",\"operationType\":\"Below\",\"secondOperand\":\"currentSma50\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 6996,
+          "firstOperand": "lastTradedPrice",
+          "operationType": "Below",
+          "secondOperand": "currentSma50",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:46:45.777Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "36788",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:46:42 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Crossed Above SMA-20",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/moving-averages?firstoperand=lastTradedPrice&operationtype=CrossedAbove&secondoperand=currentSma20",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":7002,\"firstOperand\":\"lastTradedPrice\",\"operationType\":\"CrossedAbove\",\"secondOperand\":\"currentSma20\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 7002,
+          "firstOperand": "lastTradedPrice",
+          "operationType": "CrossedAbove",
+          "secondOperand": "currentSma20",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:46:49.187Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "25210",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:46:45 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Crossed Above SMA-50",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/moving-averages?firstoperand=lastTradedPrice&operationtype=CrossedAbove&secondoperand=currentSma50",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":7004,\"firstOperand\":\"lastTradedPrice\",\"operationType\":\"CrossedAbove\",\"secondOperand\":\"currentSma50\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 7004,
+          "firstOperand": "lastTradedPrice",
+          "operationType": "CrossedAbove",
+          "secondOperand": "currentSma50",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:46:52.508Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "18924",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:46:49 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Crossed Below SMA-20",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/moving-averages?firstoperand=lastTradedPrice&operationtype=CrossedBelow&secondoperand=currentSma20",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":7010,\"firstOperand\":\"lastTradedPrice\",\"operationType\":\"CrossedBelow\",\"secondOperand\":\"currentSma20\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 7010,
+          "firstOperand": "lastTradedPrice",
+          "operationType": "CrossedBelow",
+          "secondOperand": "currentSma20",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:46:55.772Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "36056",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:46:52 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Crossed Below SMA-50",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/moving-averages?firstoperand=lastTradedPrice&operationtype=CrossedBelow&secondoperand=currentSma50",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":7012,\"firstOperand\":\"lastTradedPrice\",\"operationType\":\"CrossedBelow\",\"secondOperand\":\"currentSma50\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 7012,
+          "firstOperand": "lastTradedPrice",
+          "operationType": "CrossedBelow",
+          "secondOperand": "currentSma50",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:46:59.026Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "36118",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:46:55 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Above EMA-20",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/moving-averages?firstoperand=lastTradedPrice&operationtype=Above&secondoperand=currentEma20",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":7273,\"firstOperand\":\"lastTradedPrice\",\"operationType\":\"Above\",\"secondOperand\":\"currentEma20\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 7273,
+          "firstOperand": "lastTradedPrice",
+          "operationType": "Above",
+          "secondOperand": "currentEma20",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:47:02.502Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "36976",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:46:59 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Above EMA-50",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/moving-averages?firstoperand=lastTradedPrice&operationtype=Above&secondoperand=currentEma50",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":7275,\"firstOperand\":\"lastTradedPrice\",\"operationType\":\"Above\",\"secondOperand\":\"currentEma50\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 7275,
+          "firstOperand": "lastTradedPrice",
+          "operationType": "Above",
+          "secondOperand": "currentEma50",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:47:05.779Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "37018",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:47:02 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Below EMA-20",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/moving-averages?firstoperand=lastTradedPrice&operationtype=Below&secondoperand=currentEma20",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":7281,\"firstOperand\":\"lastTradedPrice\",\"operationType\":\"Below\",\"secondOperand\":\"currentEma20\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 7281,
+          "firstOperand": "lastTradedPrice",
+          "operationType": "Below",
+          "secondOperand": "currentEma20",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:47:09.230Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "36455",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:47:06 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Below EMA-50",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/moving-averages?firstoperand=lastTradedPrice&operationtype=Below&secondoperand=currentEma50",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":7283,\"firstOperand\":\"lastTradedPrice\",\"operationType\":\"Below\",\"secondOperand\":\"currentEma50\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 7283,
+          "firstOperand": "lastTradedPrice",
+          "operationType": "Below",
+          "secondOperand": "currentEma50",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:47:12.505Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "36708",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:47:09 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Crossed Above EMA-20",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/moving-averages?firstoperand=lastTradedPrice&operationtype=CrossedAbove&secondoperand=currentEma20",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":7289,\"firstOperand\":\"lastTradedPrice\",\"operationType\":\"CrossedAbove\",\"secondOperand\":\"currentEma20\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 7289,
+          "firstOperand": "lastTradedPrice",
+          "operationType": "CrossedAbove",
+          "secondOperand": "currentEma20",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:47:15.822Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "29056",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:47:12 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Crossed Above EMA-50",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/moving-averages?firstoperand=lastTradedPrice&operationtype=CrossedAbove&secondoperand=currentEma50",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":7291,\"firstOperand\":\"lastTradedPrice\",\"operationType\":\"CrossedAbove\",\"secondOperand\":\"currentEma50\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 7291,
+          "firstOperand": "lastTradedPrice",
+          "operationType": "CrossedAbove",
+          "secondOperand": "currentEma50",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:47:19.154Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "16990",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:47:15 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Crossed Below EMA-20",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/moving-averages?firstoperand=lastTradedPrice&operationtype=CrossedBelow&secondoperand=currentEma20",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":7297,\"firstOperand\":\"lastTradedPrice\",\"operationType\":\"CrossedBelow\",\"secondOperand\":\"currentEma20\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 7297,
+          "firstOperand": "lastTradedPrice",
+          "operationType": "CrossedBelow",
+          "secondOperand": "currentEma20",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:47:22.768Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "35606",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:47:19 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Crossed Below EMA-50",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/moving-averages?firstoperand=lastTradedPrice&operationtype=CrossedBelow&secondoperand=currentEma50",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":7299,\"firstOperand\":\"lastTradedPrice\",\"operationType\":\"CrossedBelow\",\"secondOperand\":\"currentEma50\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 7299,
+          "firstOperand": "lastTradedPrice",
+          "operationType": "CrossedBelow",
+          "secondOperand": "currentEma50",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:47:26.652Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "35821",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:47:23 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Below 20",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/rsi?firstoperand=currentRsi&operationtype=Below&secondoperand=20",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":7847,\"firstOperand\":\"currentRsi\",\"operationType\":\"Below\",\"secondOperand\":\"20\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 7847,
+          "firstOperand": "currentRsi",
+          "operationType": "Below",
+          "secondOperand": "20",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:47:29.879Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "5764",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:47:26 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Above 80",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/rsi?firstoperand=currentRsi&operationtype=Above&secondoperand=80",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":7846,\"firstOperand\":\"currentRsi\",\"operationType\":\"Above\",\"secondOperand\":\"80\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 7846,
+          "firstOperand": "currentRsi",
+          "operationType": "Above",
+          "secondOperand": "80",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:47:33.229Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "19752",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:47:29 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Crossed Below 20",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/rsi?firstoperand=currentRsi&operationtype=CrossedBelow&secondoperand=20",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":7849,\"firstOperand\":\"currentRsi\",\"operationType\":\"CrossedBelow\",\"secondOperand\":\"20\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 7849,
+          "firstOperand": "currentRsi",
+          "operationType": "CrossedBelow",
+          "secondOperand": "20",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:47:36.545Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "1848",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:47:33 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Crossed Above 20",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/rsi?firstoperand=currentRsi&operationtype=CrossedAbove&secondoperand=20",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":7848,\"firstOperand\":\"currentRsi\",\"operationType\":\"CrossedAbove\",\"secondOperand\":\"20\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 7848,
+          "firstOperand": "currentRsi",
+          "operationType": "CrossedAbove",
+          "secondOperand": "20",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:47:39.859Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "3175",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:47:36 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Crossed Below 30",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/rsi?firstoperand=currentRsi&operationtype=CrossedBelow&secondoperand=30",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":7849,\"firstOperand\":\"currentRsi\",\"operationType\":\"CrossedBelow\",\"secondOperand\":\"30\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 7849,
+          "firstOperand": "currentRsi",
+          "operationType": "CrossedBelow",
+          "secondOperand": "30",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:47:43.026Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "12162",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:47:39 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Crossed Above 30",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/rsi?firstoperand=currentRsi&operationtype=CrossedAbove&secondoperand=30",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":7848,\"firstOperand\":\"currentRsi\",\"operationType\":\"CrossedAbove\",\"secondOperand\":\"30\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 7848,
+          "firstOperand": "currentRsi",
+          "operationType": "CrossedAbove",
+          "secondOperand": "30",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:47:46.241Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "7991",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:47:42 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Crossed Below 70",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/rsi?firstoperand=currentRsi&operationtype=CrossedBelow&secondoperand=70",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":7849,\"firstOperand\":\"currentRsi\",\"operationType\":\"CrossedBelow\",\"secondOperand\":\"70\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 7849,
+          "firstOperand": "currentRsi",
+          "operationType": "CrossedBelow",
+          "secondOperand": "70",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:47:49.744Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "33080",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:47:46 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Crossed Above 70",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/rsi?firstoperand=currentRsi&operationtype=CrossedAbove&secondoperand=70",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":7848,\"firstOperand\":\"currentRsi\",\"operationType\":\"CrossedAbove\",\"secondOperand\":\"70\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 7848,
+          "firstOperand": "currentRsi",
+          "operationType": "CrossedAbove",
+          "secondOperand": "70",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:47:53.347Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "14400",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:47:50 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Crossed Below 80",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/rsi?firstoperand=currentRsi&operationtype=CrossedBelow&secondoperand=80",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":7849,\"firstOperand\":\"currentRsi\",\"operationType\":\"CrossedBelow\",\"secondOperand\":\"80\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 7849,
+          "firstOperand": "currentRsi",
+          "operationType": "CrossedBelow",
+          "secondOperand": "80",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:47:57.441Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "3690",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:47:54 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Crossed Above 80",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/rsi?firstoperand=currentRsi&operationtype=CrossedAbove&secondoperand=80",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":7848,\"firstOperand\":\"currentRsi\",\"operationType\":\"CrossedAbove\",\"secondOperand\":\"80\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 7848,
+          "firstOperand": "currentRsi",
+          "operationType": "CrossedAbove",
+          "secondOperand": "80",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:48:00.593Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "3991",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:47:57 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "MACD Crossed above Signal",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/macd?firstoperand=currentMacd&operationtype=CrossedAbove&secondoperand=currentMacdSignal",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":7850,\"firstOperand\":\"currentMacd\",\"operationType\":\"CrossedAbove\",\"secondOperand\":\"currentMacdSignal\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 7850,
+          "firstOperand": "currentMacd",
+          "operationType": "CrossedAbove",
+          "secondOperand": "currentMacdSignal",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:48:04.246Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "36149",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:48:00 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "MACD Crossed below Signal",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/macd?firstoperand=currentMacd&operationtype=CrossedBelow&secondoperand=currentMacdSignal",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":7851,\"firstOperand\":\"currentMacd\",\"operationType\":\"CrossedBelow\",\"secondOperand\":\"currentMacdSignal\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 7851,
+          "firstOperand": "currentMacd",
+          "operationType": "CrossedBelow",
+          "secondOperand": "currentMacdSignal",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:48:07.613Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "35542",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:48:04 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Above Upper BB",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/bollinger-band?firstoperand=lastTradedPrice&operationtype=Above&secondoperand=currentUpperBollingerBand",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":7852,\"firstOperand\":\"lastTradedPrice\",\"operationType\":\"Above\",\"secondOperand\":\"currentUpperBollingerBand\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 7852,
+          "firstOperand": "lastTradedPrice",
+          "operationType": "Above",
+          "secondOperand": "currentUpperBollingerBand",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:48:10.995Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "41321",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:48:08 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Crossed Above Upper BB",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/bollinger-band?firstoperand=lastTradedPrice&operationtype=CrossedAbove&secondoperand=currentUpperBollingerBand",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":7856,\"firstOperand\":\"lastTradedPrice\",\"operationType\":\"CrossedAbove\",\"secondOperand\":\"currentUpperBollingerBand\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 7856,
+          "firstOperand": "lastTradedPrice",
+          "operationType": "CrossedAbove",
+          "secondOperand": "currentUpperBollingerBand",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:48:14.697Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "21000",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:48:11 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Crossed Above Lower BB",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/bollinger-band?firstoperand=lastTradedPrice&operationtype=CrossedAbove&secondoperand=currentLowerBollingerBand",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":7857,\"firstOperand\":\"lastTradedPrice\",\"operationType\":\"CrossedAbove\",\"secondOperand\":\"currentLowerBollingerBand\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 7857,
+          "firstOperand": "lastTradedPrice",
+          "operationType": "CrossedAbove",
+          "secondOperand": "currentLowerBollingerBand",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:48:18.073Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "2280",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:48:14 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Below Lower BB",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/bollinger-band?firstoperand=lastTradedPrice&operationtype=Below&secondoperand=currentLowerBollingerBand",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":7855,\"firstOperand\":\"lastTradedPrice\",\"operationType\":\"Below\",\"secondOperand\":\"currentLowerBollingerBand\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 7855,
+          "firstOperand": "lastTradedPrice",
+          "operationType": "Below",
+          "secondOperand": "currentLowerBollingerBand",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:48:21.428Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "40324",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:48:18 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Crossed Below Upper BB",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/bollinger-band?firstoperand=lastTradedPrice&operationtype=CrossedBelow&secondoperand=currentUpperBollingerBand",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":7858,\"firstOperand\":\"lastTradedPrice\",\"operationType\":\"CrossedBelow\",\"secondOperand\":\"currentUpperBollingerBand\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 7858,
+          "firstOperand": "lastTradedPrice",
+          "operationType": "CrossedBelow",
+          "secondOperand": "currentUpperBollingerBand",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:48:25.048Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "40442",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:48:21 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Crossed Below Lower BB",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/bollinger-band?firstoperand=lastTradedPrice&operationtype=CrossedBelow&secondoperand=currentLowerBollingerBand",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":7859,\"firstOperand\":\"lastTradedPrice\",\"operationType\":\"CrossedBelow\",\"secondOperand\":\"currentLowerBollingerBand\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 7859,
+          "firstOperand": "lastTradedPrice",
+          "operationType": "CrossedBelow",
+          "secondOperand": "currentLowerBollingerBand",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:48:28.344Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "40613",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:48:25 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Fast Stochastic Above 80",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/stochastic?firstoperand=currentStochasticFast&operationtype=Above&secondoperand=80",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":8809,\"firstOperand\":\"currentStochasticFast\",\"operationType\":\"Above\",\"secondOperand\":\"80\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 8809,
+          "firstOperand": "currentStochasticFast",
+          "operationType": "Above",
+          "secondOperand": "80",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:48:31.646Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "40916",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:48:28 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Fast Stochastic Below 20",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/stochastic?firstoperand=currentStochasticFast&operationtype=Below&secondoperand=20",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":8811,\"firstOperand\":\"currentStochasticFast\",\"operationType\":\"Below\",\"secondOperand\":\"20\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 8811,
+          "firstOperand": "currentStochasticFast",
+          "operationType": "Below",
+          "secondOperand": "20",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:48:35.163Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "41449",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:48:31 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Fast Stochastic Crossed Above Slow Stochastic",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/stochastic?firstoperand=currentStochasticFast&operationtype=CrossedAbove&secondoperand=currentStochasticSlow",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":8812,\"firstOperand\":\"currentStochasticFast\",\"operationType\":\"CrossedAbove\",\"secondOperand\":\"currentStochasticSlow\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 8812,
+          "firstOperand": "currentStochasticFast",
+          "operationType": "CrossedAbove",
+          "secondOperand": "currentStochasticSlow",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:48:38.445Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "41308",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:48:35 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Fast Stochastic Crossed Below Slow Stochastic",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/stochastic?firstoperand=currentStochasticFast&operationtype=CrossedBelow&secondoperand=currentStochasticSlow",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":8814,\"firstOperand\":\"currentStochasticFast\",\"operationType\":\"CrossedBelow\",\"secondOperand\":\"currentStochasticSlow\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 8814,
+          "firstOperand": "currentStochasticFast",
+          "operationType": "CrossedBelow",
+          "secondOperand": "currentStochasticSlow",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:48:41.738Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "41296",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:48:38 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Positive Breakout First Resistance",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/price-and-pivots?firstoperand=lastTradedPrice&operationtype=Above&secondoperand=resistanceLevel1",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":7557,\"firstOperand\":\"lastTradedPrice\",\"operationType\":\"Above\",\"secondOperand\":\"resistanceLevel1\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 7557,
+          "firstOperand": "lastTradedPrice",
+          "operationType": "Above",
+          "secondOperand": "resistanceLevel1",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:48:45.075Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "35073",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:48:41 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Positive Breakout Second Resistance",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/price-and-pivots?firstoperand=lastTradedPrice&operationtype=Above&secondoperand=resistanceLevel2",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":7558,\"firstOperand\":\"lastTradedPrice\",\"operationType\":\"Above\",\"secondOperand\":\"resistanceLevel2\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 7558,
+          "firstOperand": "lastTradedPrice",
+          "operationType": "Above",
+          "secondOperand": "resistanceLevel2",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:48:48.509Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "34838",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:48:45 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Positive Breakout Third Resistance",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/price-and-pivots?firstoperand=lastTradedPrice&operationtype=Above&secondoperand=resistanceLevel3",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":7559,\"firstOperand\":\"lastTradedPrice\",\"operationType\":\"Above\",\"secondOperand\":\"resistanceLevel3\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 7559,
+          "firstOperand": "lastTradedPrice",
+          "operationType": "Above",
+          "secondOperand": "resistanceLevel3",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:48:51.838Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "33363",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:48:48 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Negative Breakout First Support",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/price-and-pivots?firstoperand=lastTradedPrice&operationtype=Above&secondoperand=supportLevel1",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":7560,\"firstOperand\":\"lastTradedPrice\",\"operationType\":\"Above\",\"secondOperand\":\"supportLevel1\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 7560,
+          "firstOperand": "lastTradedPrice",
+          "operationType": "Above",
+          "secondOperand": "supportLevel1",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:48:55.154Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "38423",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:48:52 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Negative Breakout Second Support",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/price-and-pivots?firstoperand=lastTradedPrice&operationtype=Above&secondoperand=supportLevel2",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":7561,\"firstOperand\":\"lastTradedPrice\",\"operationType\":\"Above\",\"secondOperand\":\"supportLevel2\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 7561,
+          "firstOperand": "lastTradedPrice",
+          "operationType": "Above",
+          "secondOperand": "supportLevel2",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:48:58.535Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "38664",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:48:55 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    },
+    {
+      "label": "Negative Breakout Third Support",
+      "screenerPageUrl": "https://economictimes.indiatimes.com/stocks/marketstats-technicals/price-and-pivots?firstoperand=lastTradedPrice&operationtype=Above&secondoperand=supportLevel3",
+      "request": {
+        "url": "https://etapi.indiatimes.com/et-screener/v2/technical-data",
+        "method": "POST",
+        "headers": {
+          "isprime": "false",
+          "referer": "https://economictimes.indiatimes.com/",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "content-type": "application/json",
+          "ssoid": "",
+          "ticketid": ""
+        },
+        "postData": "{\"viewId\":7562,\"firstOperand\":\"lastTradedPrice\",\"operationType\":\"Above\",\"secondOperand\":\"supportLevel3\",\"filterValue\":[],\"filterType\":\"index\",\"sort\":[],\"pagesize\":100,\"pageno\":1}",
+        "payload": {
+          "viewId": 7562,
+          "firstOperand": "lastTradedPrice",
+          "operationType": "Above",
+          "secondOperand": "supportLevel3",
+          "filterValue": [],
+          "filterType": "index",
+          "sort": [],
+          "pagesize": 100,
+          "pageno": 1
+        },
+        "timestamp": "2026-07-14T13:49:01.833Z"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "strict-transport-security": "max-age=25920000; includeSubdomains",
+          "content-encoding": "gzip",
+          "connection": "keep-alive",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "https://economictimes.indiatimes.com",
+          "content-length": "38537",
+          "x-xss-protection": "1; mode=block",
+          "date": "Tue, 14 Jul 2026 13:48:58 GMT",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding",
+          "x-frame-options": "sameorigin"
+        }
+      }
+    }
+  ],
+  "failures": []
+}

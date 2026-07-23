@@ -147,6 +147,24 @@ def get_q(conn: ConnWrapper, state_key: str, action: str) -> float:
     return float(row[0]) if row else 0.0
 
 
+def get_q_for_update(conn: ConnWrapper, state_key: str, action: str) -> float:
+    """Same as get_q, but on Postgres takes a row lock held until the caller's next
+    commit/rollback — use immediately before a get→compute→set_q sequence so two concurrent
+    invocations touching the same (state_key, action) serialize instead of one silently
+    clobbering the other's update. SQLite has no row-level FOR UPDATE; its writer-serializing
+    file lock across the whole update transaction already prevents the same interleaving.
+    Gated on isinstance(conn, ConnWrapper) rather than the bare use_postgres() env flag —
+    callers (including this module's own test suite) can pass a raw sqlite3.Connection
+    directly regardless of what USE_POSTGRES says, and FOR UPDATE is invalid SQLite syntax."""
+    if isinstance(conn, ConnWrapper) and use_postgres():
+        row = conn.execute(
+            "SELECT q_value FROM rl_q_table WHERE state_key=? AND action=? FOR UPDATE",
+            (state_key, action),
+        ).fetchone()
+        return float(row[0]) if row else 0.0
+    return get_q(conn, state_key, action)
+
+
 def set_q(conn: ConnWrapper, state_key: str, action: str, value: float):
     now = datetime.datetime.now().isoformat()
     conn.execute("""
@@ -350,7 +368,7 @@ def daily_update(conn: ConnWrapper, dry_run: bool = False,
 
         next_state = _get_next_state_key(conn, state_key, ep_date, horizon_days=horizon_days)
         next_max   = get_max_q(conn, next_state)
-        old_q      = get_q(conn, state_key, action)
+        old_q      = get_q_for_update(conn, state_key, action)
         new_q      = q_update(old_q, reward, next_max)
 
         if dry_run:
@@ -450,7 +468,7 @@ def backfill_episodes(conn: ConnWrapper, lookback_days: int = 180, dry_run: bool
 
             next_state = _get_next_state_key(conn, state_key, sig_date, horizon_days=15)
             next_max   = get_max_q(conn, next_state)
-            old_q      = get_q(conn, state_key, action)
+            old_q      = get_q_for_update(conn, state_key, action)
             new_q      = q_update(old_q, reward, next_max)
 
             if dry_run:

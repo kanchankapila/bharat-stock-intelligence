@@ -143,7 +143,8 @@ def get_drift_multiplier(conn=None) -> float:
         if ds > PSI_WARN:
             return 0.93
         return 1.0
-    except Exception:
+    except Exception as e:
+        print(f"[DRIFT] get_drift_multiplier failed, defaulting to 1.0 (no haircut applied — drift status unknown): {e}")
         return 1.0
 
 

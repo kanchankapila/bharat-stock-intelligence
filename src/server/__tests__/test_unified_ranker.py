@@ -88,6 +88,12 @@ def make_db():
             symbol TEXT PRIMARY KEY,
             piotroski_f_score INTEGER, return_on_equity REAL, annualized_vol REAL
         );
+        CREATE TABLE confluence_signals (
+            symbol TEXT NOT NULL, computed_at DATETIME NOT NULL,
+            confluence_score REAL, entry_zone_low REAL, entry_zone_high REAL,
+            stop_loss REAL, target_1 REAL, target_2 REAL, target_3 REAL,
+            risk_reward REAL, suggested_timeframe TEXT, trade_reasoning TEXT, sector TEXT
+        );
     ''')
     return conn
 
@@ -353,6 +359,64 @@ class TestUnifiedRankerRun:
         assert REGIME_WEIGHTS['CRASH']['screener'] == 0.40
         for regime, weights in REGIME_WEIGHTS.items():
             assert abs(sum(weights.values()) - 1.0) < 1e-9, f"{regime} weights don't sum to 1"
+
+
+class TestConfluenceUrlSymbolGuard:
+    """Regression test: confluence_signals briefly accumulated rows where `symbol`
+    was a raw Trendlyne URL (root cause: a since-fixed trendlyne_screener_discovery.py
+    bug). Those rows fed straight into unified_recommendations via the union of engine
+    score-map keys in run() — ~67% of daily output was corrupted by this. Both
+    _get_confluence_scores and _get_confluence_latest_map must reject URL-shaped
+    symbols so a URL-keyed row can never again reach unified_recommendations, even
+    if a legacy row lingers in confluence_signals."""
+
+    def _setup_with_confluence(self, rows):
+        conn = make_db()
+        csv_path = make_csv([
+            {'source': 'trendlyne', 'screener_id': 'bull1', 'screener_name': 'Bull Breakout',
+             'category': 'technical_breakout', 'subcategory': 'price_breakout',
+             'signal_bias': 'bullish', 'investment_horizon': 'swing', 'confidence': '0.82'},
+        ])
+        from unified_ranker import UnifiedRanker
+        ranker = UnifiedRanker(conn=conn, csv_path=csv_path)
+        ranker.seed_screener_catalog()
+        conn.execute("INSERT INTO market_regimes (date, regime, regime_prob) VALUES (date('now'),'BULL',0.8)")
+        for symbol, score in rows:
+            conn.execute(
+                "INSERT INTO confluence_signals (symbol, computed_at, confluence_score) VALUES (?, datetime('now'), ?)",
+                (symbol, score),
+            )
+        conn.commit()
+        return ranker, conn, csv_path
+
+    def test_url_shaped_symbol_excluded_from_scores_map(self):
+        ranker, conn, csv_path = self._setup_with_confluence([
+            ('https://trendlyne.com/equity/108994/541945/RANJEET-MECHATRONICS-LTD/', 22),
+            ('INFY', 45),
+        ])
+        scores = ranker._get_confluence_scores()
+        assert 'INFY' in scores
+        assert not any('://' in s for s in scores)
+        os.unlink(csv_path)
+
+    def test_url_shaped_symbol_excluded_from_latest_map(self):
+        ranker, conn, csv_path = self._setup_with_confluence([
+            ('https://trendlyne.com/equity/929/NESCO/NESCO-LTD/', 3),
+            ('INFY', 45),
+        ])
+        latest = ranker._get_confluence_latest_map()
+        assert 'INFY' in latest
+        assert not any('://' in s for s in latest)
+        os.unlink(csv_path)
+
+    def test_url_shaped_symbol_never_reaches_unified_recommendations(self):
+        ranker, conn, csv_path = self._setup_with_confluence([
+            ('https://trendlyne.com/equity/144996/13520889/BMW-INDUSTRIES-LTD/', 3),
+        ])
+        ranker.run()
+        rows = conn.execute('SELECT symbol FROM unified_recommendations').fetchall()
+        assert not any('://' in r['symbol'] for r in rows)
+        os.unlink(csv_path)
 
 
 class TestUIGradeRanking:

@@ -364,22 +364,23 @@ server.tool(
  * -------------------------------------------------------------
  * Lightweight search to index code and find logic patterns.
  */
-function searchDir(dir: string, query: string, extensions: string[], results: Array<{ file: string; line: number; text: string }>, maxResults: number = 50) {
+async function searchDir(dir: string, query: string, extensions: string[], results: Array<{ file: string; line: number; text: string }>, maxResults: number = 50) {
   if (results.length >= maxResults) return;
-  
-  const files = fs.readdirSync(dir);
+
+  const files = await fs.promises.readdir(dir);
   for (const file of files) {
+    if (results.length >= maxResults) return;
     const fullPath = path.join(dir, file);
-    const stat = fs.statSync(fullPath);
+    const stat = await fs.promises.stat(fullPath);
 
     if (stat.isDirectory()) {
       if (file === "node_modules" || file === "dist" || file === ".git" || file === ".gemini") continue;
-      searchDir(fullPath, query, extensions, results, maxResults);
+      await searchDir(fullPath, query, extensions, results, maxResults);
     } else {
       const ext = path.extname(file);
       if (!extensions.includes(ext)) continue;
 
-      const content = fs.readFileSync(fullPath, "utf-8");
+      const content = await fs.promises.readFile(fullPath, "utf-8");
       if (content.toLowerCase().includes(query.toLowerCase())) {
         const lines = content.split("\n");
         lines.forEach((line, index) => {
@@ -407,13 +408,13 @@ server.tool(
       const results: Array<{ file: string; line: number; text: string }> = [];
       const extensions = [".ts", ".tsx", ".py", ".js", ".json", ".md"];
       
-      searchDir(path.join(process.cwd(), "src"), query, extensions, results);
+      await searchDir(path.join(process.cwd(), "src"), query, extensions, results);
       // Also search root files
-      const rootFiles = fs.readdirSync(process.cwd());
+      const rootFiles = await fs.promises.readdir(process.cwd());
       for (const file of rootFiles) {
         const fullPath = path.join(process.cwd(), file);
-        if (fs.statSync(fullPath).isFile() && extensions.includes(path.extname(file))) {
-          const content = fs.readFileSync(fullPath, "utf-8");
+        if ((await fs.promises.stat(fullPath)).isFile() && extensions.includes(path.extname(file))) {
+          const content = await fs.promises.readFile(fullPath, "utf-8");
           if (content.toLowerCase().includes(query.toLowerCase())) {
             const lines = content.split("\n");
             lines.forEach((line, index) => {

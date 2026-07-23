@@ -581,10 +581,16 @@ class UnifiedRanker:
             return {}
 
     def _get_confluence_scores(self):
+        # symbol NOT LIKE guards reject the URL-shaped values a since-fixed
+        # trendlyne_screener_discovery.py bug wrote into confluence_signals.symbol
+        # (root cause: a blind "column 0" fallback when no header matched
+        # nsecode/symbol) — defense in depth even after the legacy rows are purged,
+        # in case a similar bug elsewhere reintroduces non-ticker values.
         cutoff = (date.today() - timedelta(days=1)).isoformat()
         try:
             rows = self.conn.execute(
-                "SELECT symbol, confluence_score FROM confluence_signals WHERE computed_at >= ?",
+                "SELECT symbol, confluence_score FROM confluence_signals "
+                "WHERE computed_at >= ? AND symbol NOT LIKE '%://%' AND LENGTH(symbol) <= 20",
                 (cutoff,),
             ).fetchall()
             return {r['symbol']: float(r['confluence_score'] or 0) for r in rows}
@@ -679,6 +685,10 @@ class UnifiedRanker:
         return True
 
     def _get_confluence_latest_map(self):
+        # Same symbol-shape guard as _get_confluence_scores (see comment there) — this
+        # map has no freshness cutoff at all, so without the guard a URL-shaped "symbol"
+        # would surface forever (it can never receive a real update since it isn't a
+        # real ticker any fetcher will ever write again).
         try:
             rows = self.conn.execute("""
                 SELECT * FROM (
@@ -687,6 +697,7 @@ class UnifiedRanker:
                            sector,
                            ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY computed_at DESC) AS rn
                     FROM confluence_signals
+                    WHERE symbol NOT LIKE '%://%' AND LENGTH(symbol) <= 20
                 ) t WHERE rn = 1
             """).fetchall()
             return {r['symbol']: r for r in rows}

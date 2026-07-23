@@ -103,7 +103,10 @@ def phase_a_bootstrap(conn: ConnWrapper) -> dict:
         if not conf_entries:
             continue
 
-        # Find closest confluence entry at or before signal_date
+        # Find closest confluence entry at or before signal_date. No fallback to the most
+        # recent entry when none qualifies — that entry can postdate signal_date and would
+        # attribute an already-known outcome to a screener the symbol only joined afterward
+        # (look-ahead bias into the Phase C Bayesian win-rate/tier computation).
         best_ids = None
         best_date = '0000-00-00'
         for conf_date, ids in conf_entries:
@@ -112,7 +115,7 @@ def phase_a_bootstrap(conn: ConnWrapper) -> dict:
                 best_ids = ids
 
         if not best_ids:
-            best_ids = conf_entries[0][1]  # fallback: most recent
+            continue
 
         for screener_id in best_ids:
             screener_outcomes[screener_id].append((return_pct, outcome))

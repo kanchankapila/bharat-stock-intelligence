@@ -219,23 +219,44 @@ def extract_screener_info(pk: int, data: dict) -> dict | None:
     related     = body.get("relatedScreeners", []) or []
 
     # Extract stock symbols from tableData
-    # Find the column index for "nsecode" / "symbol" in headers
+    # Find the column index for "nsecode" / "symbol" in headers. The live Kayal API's real
+    # header shape uses `unique_name` (e.g. {"unique_name": "NSEcode", "name": "NSE Symbol",
+    # "type": "string"}) — NOT `field`/`key`, which this code checked for years without ever
+    # matching (verified live, 2026-07-23: every header on a real screener has field=None,
+    # key=None). That's the actual root cause of the blind "column 0" fallback always firing
+    # — checking `field`/`key` as a defensive fallback below in case the API shape ever adds
+    # those, but `unique_name` is the one that actually works today.
     symbol_col = None
     for i, h in enumerate(headers):
-        field = (h.get("field") or h.get("key") or "").lower()
+        field = (h.get("unique_name") or h.get("field") or h.get("key") or "").lower()
         if field in ("nsecode", "symbol", "nse_code", "nse"):
             symbol_col = i
             break
-    if symbol_col is None and headers:
-        symbol_col = 0  # fallback: first column
-
-    stocks = []
-    if symbol_col is not None:
+    # No blind "column 0" fallback: for screeners whose headers don't label a
+    # symbol/nsecode column, column 0 is often the stock-name/profile-link column
+    # instead (observed root cause of ~2M rows with a Trendlyne URL stored as
+    # `symbol` in trendlyne_screener_stocks/confluence_signals). Skip this
+    # screener's stocks rather than guess — no rows is safer than wrong rows.
+    if symbol_col is None:
+        if headers:
+            print(f"[TL_DISCOVERY] pk={pk}: no symbol/nsecode column found in headers "
+                  f"({[h.get('unique_name') or h.get('field') or h.get('key') for h in headers]}) — skipping stock extraction")
+        stocks = []
+    else:
+        stocks = []
+        skipped = 0
         for row in table_data:
             if isinstance(row, (list, tuple)) and len(row) > symbol_col:
                 sym = str(row[symbol_col]).strip().upper()
-                if sym and sym not in ("", "SYMBOL", "NSE CODE"):
-                    stocks.append(sym)
+                if not sym or sym in ("", "SYMBOL", "NSE CODE"):
+                    continue
+                # A real NSE ticker is short, uppercase alnum (plus &/-), never a URL.
+                if len(sym) > 20 or "://" in sym or " " in sym or not re.match(r'^[A-Z0-9&\-]+$', sym):
+                    skipped += 1
+                    continue
+                stocks.append(sym)
+        if skipped:
+            print(f"[TL_DISCOVERY] pk={pk}: skipped {skipped} non-ticker-looking value(s) in symbol column")
 
     # Related screeners — record their PKs and URLs for later discovery
     related_pks = []

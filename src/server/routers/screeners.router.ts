@@ -14,7 +14,7 @@ import {
   testTrendlyneApiResponse,
   recategorizeAllScreeners,
 } from "../trendlyneScreener";
-import { router, publicProcedure } from "../trpc";
+import { router, publicProcedure, adminProcedure } from "../trpc";
 import { SCANNER_CATALOG } from "../config/scannerCatalog";
 
 export const screenersRouter = router({
@@ -141,7 +141,7 @@ export const screenersRouter = router({
   getTrendlyneScreenerNames: publicProcedure
     .query(async () => getTrendlyneScreenerList()),
 
-  configTrendlyneFetchInterval: publicProcedure
+  configTrendlyneFetchInterval: adminProcedure
     .input(z.object({ intervalMs: z.number().min(0), type: z.enum(['screener', 'names']).optional().default('screener') }))
     .mutation(({ input }) => {
       if (input.type === 'names') updateScreenerNamesInterval(input.intervalMs);
@@ -164,16 +164,29 @@ export const screenersRouter = router({
     .query(async ({ input }) => {
       const { findScreenersByStock } = await import('../trendlyneScreener');
       const { findMcScreenersByStock } = await import('../moneycontrolScreener');
-      return [...(await findScreenersByStock(input.stockId)), ...(await findMcScreenersByStock(input.stockId))];
+      const { findEtScreenersByStock } = await import('../etnow');
+      const { findEtMarketstatsScreenersByStock } = await import('../etMarketstatsSync');
+      return [
+        ...(await findScreenersByStock(input.stockId)),
+        ...(await findMcScreenersByStock(input.stockId)),
+        ...(await findEtScreenersByStock(input.stockId)),
+        ...(await findEtMarketstatsScreenersByStock(input.stockId)),
+      ];
     }),
 
-  refreshTrendlyneScreenersDB: publicProcedure
+  getEtMarketstatsScreeners: publicProcedure
+    .query(async () => {
+      const { getEtMarketstatsScreenerDefs } = await import('../etMarketstats');
+      return getEtMarketstatsScreenerDefs();
+    }),
+
+  refreshTrendlyneScreenersDB: adminProcedure
     .mutation(async () => {
       const screenerNames = await fetchAllTrendlyneScreenerNames(true);
       return { success: true, message: `Refreshed screener database with ${screenerNames.size} screeners`, count: screenerNames.size };
     }),
 
-  recategorizeTrendlyneScreeners: publicProcedure
+  recategorizeTrendlyneScreeners: adminProcedure
     .mutation(async () => recategorizeAllScreeners()),
 
   // ── Screener Intelligence (Sub-project A) ─────────────────────────────────
@@ -325,7 +338,7 @@ export const screenersRouter = router({
       `, params);
     }),
 
-  triggerScreenerPerformanceRecompute: publicProcedure
+  triggerScreenerPerformanceRecompute: adminProcedure
     .input(z.object({ force: z.boolean().optional() }))
     .mutation(async () => {
       try {
@@ -358,7 +371,7 @@ export const screenersRouter = router({
       return dbAll(sql, params);
     }),
 
-  triggerBacktest: publicProcedure
+  triggerBacktest: adminProcedure
     .input(z.object({ runId: z.string().optional(), screenerId: z.string().optional(), timeframe: z.enum(['intraday','short','medium','long']).optional(), horizonDays: z.number().optional(), topN: z.number().optional() }))
     .mutation(async ({ input }) => {
       const bt = await import('../backtestRunner');
@@ -366,7 +379,7 @@ export const screenersRouter = router({
       return { success: true, result: res };
     }),
 
-  createScreenerRun: publicProcedure
+  createScreenerRun: adminProcedure
     .input(z.object({
       screenerId: z.string(),
       symbols: z.array(z.string()),

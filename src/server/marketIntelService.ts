@@ -460,12 +460,9 @@ export async function fetchStockEarningsSummary(scId: string) {
 }
 
 export async function fetchFNOSymbols() {
+  const headers = await getNiftyTraderHeaders();
   const res = await fetch("https://webapi.niftytrader.in/webapi/symbol/psymbol-list", {
-    headers: {
-      "accept": "application/json, text/plain, */*",
-      "authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1laWRlbnRpZmllciI6IjU0MzM4IiwiaHR0cDovL3NjaGVtYXMubWljcm9zb2Z0LmNvbS93cy8yMDA4LzA2L2lkZW50aXR5L2NsYWltcy9yb2xlIjoiMCIsIlNlc3Npb25JZCI6IjQ5NDQiLCJleHAiOjE3ODA2NzUyNTUsImlzcyI6InByb2QtbmlmdHl0cmFkZXIuaW4iLCJhdWQiOiJwcm9kLW5pZnR5dHJhZGVyLmluIn0.VaWV3jFHcpP4y7UOmWzVzVwBjzK1AfHx9Qgj8vZPQGs",
-      "platform_type": "1"
-    },
+    headers: { ...headers, "platform_type": "1" },
     signal: AbortSignal.timeout(10000)
   });
   if (!res.ok) throw new Error('Failed to fetch FNO symbols');
@@ -474,12 +471,9 @@ export async function fetchFNOSymbols() {
 
 export async function fetchOptionChain(symbol: string) {
   const url = `https://webapi.niftytrader.in/webapi/option/option-chain-data?symbol=${encodeURIComponent(symbol)}&exchange=nse&expiryDate=&atmBelow=0&atmAbove=0`;
+  const headers = await getNiftyTraderHeaders();
   const res = await fetch(url, {
-    headers: {
-      "accept": "application/json, text/plain, */*",
-      "authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1laWRlbnRpZmllciI6IjU0MzM4IiwiaHR0cDovL3NjaGVtYXMubWljcm9zb2Z0LmNvbS93cy8yMDA4LzA2L2lkZW50aXR5L2NsYWltcy9yb2xlIjoiMCIsIlNlc3Npb25JZCI6IjQ5NDQiLCJleHAiOjE3ODA2NzUyNTUsImlzcyI6InByb2QtbmlmdHl0cmFkZXIuaW4iLCJhdWQiOiJwcm9kLW5pZnR5dHJhZGVyLmluIn0.VaWV3jFHcpP4y7UOmWzVzVwBjzK1AfHx9Qgj8vZPQGs",
-      "platform_type": "1"
-    },
+    headers: { ...headers, "platform_type": "1" },
     signal: AbortSignal.timeout(10000)
   });
   if (!res.ok) throw new Error('Failed to fetch option chain');

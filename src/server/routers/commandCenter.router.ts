@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { dbGet, dbAll } from '../dbAsync';
-import { router, publicProcedure } from '../trpc';
+import { router, publicProcedure, adminProcedure } from '../trpc';
 import { runPython } from '../pythonRunner';
 import { cacheGet } from '../cacheService';
 
@@ -200,7 +200,7 @@ export const commandCenterRouter = router({
       return { picks, regime, sectorList: sectorSet, lastComputedAt: rows[0]?.computed_at ?? null };
     }),
 
-  runUnifiedRanker: publicProcedure
+  runUnifiedRanker: adminProcedure
     .mutation(async () => {
       try {
         const { stdout } = await runPython('unified_ranker.py', [], 5 * 60_000);

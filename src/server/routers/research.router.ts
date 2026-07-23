@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { dbGet, dbAll } from '../dbAsync';
-import { router, publicProcedure } from '../trpc';
+import { router, publicProcedure, adminProcedure } from '../trpc';
 import { researchPremarketQueue, researchPostcloseQueue } from '../queues';
 
 export const researchRouter = router({
@@ -64,7 +64,7 @@ export const researchRouter = router({
       `, [date, type])) ?? { status: 'PENDING', generated_at: null, error_message: null };
     }),
 
-  triggerResearchGeneration: publicProcedure
+  triggerResearchGeneration: adminProcedure
     .input(z.object({
       date: z.string(),
       type: z.enum(['PRE_MARKET', 'POST_CLOSE']),

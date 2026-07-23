@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { dbGet, dbAll } from '../dbAsync';
-import { router, publicProcedure } from '../trpc';
+import { router, publicProcedure, adminProcedure } from '../trpc';
 
 export const agentsRouter = router({
 
@@ -91,7 +91,7 @@ export const agentsRouter = router({
 
   // ── Mutations ─────────────────────────────────────────────────────────────
 
-  runDataScientistAgent: publicProcedure.mutation(async () => {
+  runDataScientistAgent: adminProcedure.mutation(async () => {
     const { agentDataScientistQueue } = await import('../queues');
     if (agentDataScientistQueue) {
       await agentDataScientistQueue.add('manual-ds', {}, { removeOnComplete: 1 });
@@ -102,7 +102,7 @@ export const agentsRouter = router({
     return { queued: false, running: true };
   }),
 
-  runStrategistAgent: publicProcedure.mutation(async () => {
+  runStrategistAgent: adminProcedure.mutation(async () => {
     const { agentStrategistQueue } = await import('../queues');
     if (agentStrategistQueue) {
       await agentStrategistQueue.add('manual-strat', {}, { removeOnComplete: 1 });
@@ -113,7 +113,7 @@ export const agentsRouter = router({
     return { queued: false, running: true };
   }),
 
-  runAuditorAgent: publicProcedure.mutation(async () => {
+  runAuditorAgent: adminProcedure.mutation(async () => {
     const { agentAuditorQueue } = await import('../queues');
     if (agentAuditorQueue) {
       await agentAuditorQueue.add('manual-audit', {}, { removeOnComplete: 1 });
@@ -124,7 +124,7 @@ export const agentsRouter = router({
     return { queued: false, running: true };
   }),
 
-  runOptimizerAgent: publicProcedure.mutation(async () => {
+  runOptimizerAgent: adminProcedure.mutation(async () => {
     const { agentOptimizerQueue } = await import('../queues');
     if (agentOptimizerQueue) {
       await agentOptimizerQueue.add('manual-optim', {}, { removeOnComplete: 1 });
@@ -135,7 +135,7 @@ export const agentsRouter = router({
     return { queued: false, running: true };
   }),
 
-  runFullAgentPipeline: publicProcedure.mutation(async () => {
+  runFullAgentPipeline: adminProcedure.mutation(async () => {
     const queues = await import('../queues');
     const jobs = [
       { q: queues.agentDataScientistQueue, name: 'pipeline-ds',    delay: 0,  script: 'agents/data_scientist_agent.py', timeout: 10 * 60_000 },

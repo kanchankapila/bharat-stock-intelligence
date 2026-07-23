@@ -281,6 +281,40 @@ db.exec(`
     FOREIGN KEY (screener_id) REFERENCES etnow_screeners(screener_id)
   );
 
+  -- 6a2. ET Marketstats/Technicals Intelligence (etapi.indiatimes.com/et-screener/v2 —
+  -- distinct API family from etnow_screeners' screener.indiatimes.com scrid-based screener)
+  CREATE TABLE IF NOT EXISTS et_marketstats_screeners (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    screener_key TEXT UNIQUE NOT NULL,
+    label TEXT NOT NULL,
+    endpoint TEXT NOT NULL,        -- 'technical-data' | 'intraday-stats'
+    view_id INTEGER,
+    first_operand TEXT,
+    operation_type TEXT,
+    second_operand TEXT,
+    api_type TEXT,
+    duration TEXT,
+    timespan TEXT,
+    screener_page_url TEXT,
+    last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS et_marketstats_screener_stocks (
+    screener_key TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    stock_name TEXT,
+    asset_id TEXT,
+    exchange_id TEXT,
+    last_traded_price REAL,
+    percent_change REAL,
+    raw_data TEXT,
+    first_seen TEXT,
+    last_seen TEXT,
+    PRIMARY KEY (screener_key, symbol),
+    FOREIGN KEY (screener_key) REFERENCES et_marketstats_screeners(screener_key)
+  );
+  CREATE INDEX IF NOT EXISTS idx_ems_stock_symbol ON et_marketstats_screener_stocks(symbol);
+
   -- 6b. News & Sentiment
   CREATE TABLE IF NOT EXISTS news_articles (
     id TEXT PRIMARY KEY,
@@ -2895,6 +2929,10 @@ runMigration('070_gdelt_sentiment', `
     PRIMARY KEY (symbol, date)
   );
 `);
+
+// todos ownership column — closes an unauthenticated-CRUD gap (todo.router.ts now scopes
+// every read/write to ctx.uid via protectedProcedure).
+runMigration('071_todos_user_id', `ALTER TABLE todos ADD COLUMN userId TEXT`);
 
 // Keep startup diagnostics off stdout so stdio-based clients can parse JSON-RPC.
 console.error('[DB] Schema normalization complete (Phase 3.5)');

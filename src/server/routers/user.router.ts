@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { dbAll, dbRun } from "../dbAsync";
-import { router, publicProcedure } from "../trpc";
+import { router, publicProcedure, protectedProcedure } from "../trpc";
 
 // camelCase columns (photoURL, userId, addedAt) are double-quoted so they resolve on both
 // SQLite (current) and Postgres (post-cutover, which folds unquoted identifiers to lowercase).
@@ -25,34 +25,33 @@ export const userRouter = router({
       return { success: true };
     }),
 
-  getWatchlist: publicProcedure
-    .input(z.object({ userId: z.string() }))
-    .query(async ({ input }) => {
+  // userId is intentionally NOT accepted from the client below — it's derived from the
+  // verified Firebase ID token (ctx.uid), so one user can never read/write another's watchlist.
+  getWatchlist: protectedProcedure
+    .query(async ({ ctx }) => {
       const rows = await dbAll<{ symbol: string }>(
         'SELECT symbol FROM watchlist WHERE "userId" = ? ORDER BY "addedAt" DESC',
-        [input.userId],
+        [ctx.uid],
       );
       return rows.map(r => r.symbol);
     }),
 
-  getWatchlistDetails: publicProcedure
-    .input(z.object({ userId: z.string() }))
-    .query(async ({ input }) => {
+  getWatchlistDetails: protectedProcedure
+    .query(async ({ ctx }) => {
       return dbAll<{ symbol: string; price?: number; name?: string; addedAt: string; source?: string }>(
         'SELECT symbol, price, name, "addedAt", source FROM watchlist WHERE "userId" = ? ORDER BY "addedAt" DESC',
-        [input.userId],
+        [ctx.uid],
       );
     }),
 
-  addToWatchlist: publicProcedure
+  addToWatchlist: protectedProcedure
     .input(z.object({
-      userId: z.string(),
       symbol: z.string(),
       price: z.number().optional(),
       name: z.string().optional(),
       source: z.string().optional(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       await dbRun(`
         INSERT INTO watchlist ("userId", symbol, price, name, source)
         VALUES (?, ?, ?, ?, ?)
@@ -60,14 +59,14 @@ export const userRouter = router({
           price = coalesce(excluded.price, price),
           name = coalesce(excluded.name, name),
           source = coalesce(excluded.source, source)
-      `, [input.userId, input.symbol, input.price ?? null, input.name ?? null, input.source ?? null]);
+      `, [ctx.uid, input.symbol, input.price ?? null, input.name ?? null, input.source ?? null]);
       return { success: true };
     }),
 
-  removeFromWatchlist: publicProcedure
-    .input(z.object({ userId: z.string(), symbol: z.string() }))
-    .mutation(async ({ input }) => {
-      await dbRun('DELETE FROM watchlist WHERE "userId" = ? AND symbol = ?', [input.userId, input.symbol]);
+  removeFromWatchlist: protectedProcedure
+    .input(z.object({ symbol: z.string() }))
+    .mutation(async ({ input, ctx }) => {
+      await dbRun('DELETE FROM watchlist WHERE "userId" = ? AND symbol = ?', [ctx.uid, input.symbol]);
       return { success: true };
     }),
 });

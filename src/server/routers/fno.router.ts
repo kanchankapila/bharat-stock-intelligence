@@ -6,7 +6,7 @@ import { fetchFNOSymbols } from "../marketIntelService";
 import { alphaQuant } from "../alphaQuantClient";
 import { fetchWithCache } from "../cacheService";
 import type { FnoIndexId } from "../marketIntelService";
-import { router, publicProcedure } from "../trpc";
+import { router, publicProcedure, adminProcedure } from "../trpc";
 
 export const fnoRouter = router({
   getFnOSignals: publicProcedure
@@ -190,7 +190,7 @@ export const fnoRouter = router({
       }
     }),
 
-  runPcrFetch: publicProcedure
+  runPcrFetch: adminProcedure
     .input(z.object({ symbols: z.array(z.string()).optional() }))
     .mutation(async ({ input }) => {
       try {

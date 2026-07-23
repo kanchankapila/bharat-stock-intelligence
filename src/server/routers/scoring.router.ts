@@ -2,7 +2,7 @@ import { z } from "zod";
 import { dbGet, dbAll } from "../dbAsync";
 import { getTopRatedStocks, syncAndScore, recalculateScores, getStockScoreDetail } from "../scoringService";
 import { crossSourceFilter, regimeSectorFilter, qualityOversoldScanner } from "../strategySignalsService";
-import { router, publicProcedure } from "../trpc";
+import { router, publicProcedure, adminProcedure } from "../trpc";
 import { cacheGet } from "../cacheService";
 
 // Cached latest computed_at for unified_recommendations — avoids MAX() scan on every strategy query.
@@ -41,16 +41,16 @@ export const scoringRouter = router({
     }))
     .query(({ input }) => getStockScoreDetail(input.symbol, input.timeframe)),
 
-  triggerStockScoring: publicProcedure
+  triggerStockScoring: adminProcedure
     .mutation(async () => {
       _urLatestAt = null; // unified_ranker will write new rows
       return syncAndScore();
     }),
 
-  recalculateScoresOnly: publicProcedure
+  recalculateScoresOnly: adminProcedure
     .mutation(async () => recalculateScores()),
 
-  runQuantScoring: publicProcedure
+  runQuantScoring: adminProcedure
     .mutation(async () => {
       const { quantScoringQueue } = await import('../queues');
       if (!quantScoringQueue) {

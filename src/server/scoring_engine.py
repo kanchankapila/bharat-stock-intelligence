@@ -63,9 +63,10 @@ class AlphaQuantScoringEngine:
     }
 
     SOURCE_WEIGHTS = {
-        'Trendlyne':    1.0,
-        'MoneyControl': 0.9,
-        'ETnow':        0.85,
+        'Trendlyne':      1.0,
+        'MoneyControl':   0.9,
+        'ETnow':          0.85,
+        'ETMarketstats':  0.8,
     }
 
     def __init__(self):
@@ -79,6 +80,7 @@ class AlphaQuantScoringEngine:
         self._edge_status_checked_ts: float = 0.0
         self._load_optimised_weights()
         self.etnow_screeners = self._load_etnow_screeners()
+        self.et_marketstats_screeners = self._load_et_marketstats_screeners()
 
     def _refresh_drift_multiplier(self) -> None:
         import time
@@ -149,6 +151,18 @@ class AlphaQuantScoringEngine:
             print(f"[SCORING] Warning: could not load ETnow screeners from DB: {e}")
             return []
 
+    def _load_et_marketstats_screeners(self) -> list:
+        """Read ET Marketstats/Technicals screeners from the database (source of truth)."""
+        try:
+            with self.engine.connect() as conn:
+                rows = conn.execute(
+                    text("SELECT screener_key AS scan_id, label AS name FROM et_marketstats_screeners")
+                ).fetchall()
+                return [{'scan_id': r.scan_id, 'name': r.name, 'is_positive': None} for r in rows]
+        except Exception as e:
+            print(f"[SCORING] Warning: could not load ET Marketstats screeners from DB: {e}")
+            return []
+
     # ------------------------------------------------------------------
     # Data Loading
     # ------------------------------------------------------------------
@@ -163,8 +177,12 @@ class AlphaQuantScoringEngine:
             )
             tl_screeners['source'] = 'Trendlyne'
             tl_screeners['is_positive'] = None  # let NLP determine; no forced default
+            # symbol NOT LIKE guard: defense in depth against the URL-as-symbol corruption
+            # class (root cause: a since-fixed trendlyne_screener_discovery.py bug; a DB
+            # CHECK constraint now blocks it at the source, this is a second layer).
             tl_mappings = pd.read_sql(
-                "SELECT screener_id AS scan_id, stock_id, symbol, last_seen FROM trendlyne_screener_stocks",
+                "SELECT screener_id AS scan_id, stock_id, symbol, last_seen FROM trendlyne_screener_stocks "
+                "WHERE symbol IS NULL OR symbol NOT LIKE '%://%'",
                 conn,
             )
 
@@ -190,8 +208,18 @@ class AlphaQuantScoringEngine:
                 conn,
             )
 
-        screeners = pd.concat([tl_screeners, mc_screeners, et_screeners], ignore_index=True)
-        mappings  = pd.concat([tl_mappings, mc_mappings, et_mappings],    ignore_index=True)
+            # ET Marketstats/Technicals (loaded from instance variable)
+            ems_screeners = pd.DataFrame(self.et_marketstats_screeners)
+            ems_screeners['source'] = 'ETMarketstats'
+            ems_screeners['description'] = ""
+
+            ems_mappings = pd.read_sql(
+                "SELECT screener_key AS scan_id, symbol, stock_name AS stock_id, last_seen FROM et_marketstats_screener_stocks",
+                conn,
+            )
+
+        screeners = pd.concat([tl_screeners, mc_screeners, et_screeners, ems_screeners], ignore_index=True)
+        mappings  = pd.concat([tl_mappings, mc_mappings, et_mappings, ems_mappings],     ignore_index=True)
         return screeners, mappings
 
     # ------------------------------------------------------------------

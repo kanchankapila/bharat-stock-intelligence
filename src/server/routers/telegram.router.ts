@@ -1,9 +1,12 @@
 import { z } from "zod";
-import { router, publicProcedure } from "../trpc";
+import { router, publicProcedure, adminProcedure } from "../trpc";
 import { telegramService } from "../telegramService";
 import { dbGet, dbRun } from "../dbAsync";
 import { invalidateNiftyTraderToken } from "../niftytraderService";
 
+// Mutations that write global app credentials (bot token, broker session token) require
+// adminProcedure — an authenticated user AND uid ∈ ADMIN_UIDS — since these aren't
+// per-user resources, they're shared platform config any signed-in user must not overwrite.
 export const telegramRouter = router({
   getTelegramSettings: publicProcedure
     .query(async () => {
@@ -28,7 +31,7 @@ export const telegramRouter = router({
       }
     }),
 
-  saveTelegramSettings: publicProcedure
+  saveTelegramSettings: adminProcedure
     .input(z.object({
       botToken: z.string(),
       chatId: z.string(),
@@ -51,7 +54,7 @@ export const telegramRouter = router({
       }
     }),
 
-  testTelegramConnection: publicProcedure
+  testTelegramConnection: adminProcedure
     .mutation(async () => {
       try {
         const ok = await telegramService.sendMarkdownMessage(
@@ -80,7 +83,7 @@ export const telegramRouter = router({
       }
     }),
 
-  saveNiftyTraderToken: publicProcedure
+  saveNiftyTraderToken: adminProcedure
     .input(z.object({
       token: z.string(),
     }))

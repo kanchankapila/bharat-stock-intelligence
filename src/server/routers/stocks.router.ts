@@ -11,7 +11,7 @@ import {
   getAllIndustriesFromDB,
   getNSEStockCount,
 } from "../nseService";
-import { router, publicProcedure } from "../trpc";
+import { router, publicProcedure, adminProcedure } from "../trpc";
 
 export const stocksRouter = router({
   getStockList: publicProcedure
@@ -21,7 +21,7 @@ export const stocksRouter = router({
     .input(z.object({ symbol: z.string() }))
     .query(({ input }) => getStockMapping(input.symbol)),
 
-  syncNSEStocks: publicProcedure
+  syncNSEStocks: adminProcedure
     .mutation(async () => syncNSEStocksToDatabase()),
 
   getAllNSEStocks: publicProcedure
