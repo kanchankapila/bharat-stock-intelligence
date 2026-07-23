@@ -967,6 +967,7 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                    ts.rsi, ts.adx, ts.nifty_regime, ts.cmp, ts.sma200, ts.volume_ratio,
                    ts.fii_3d_net,
                    ts.above_sma200,
+                   COALESCE(ts.news_sentiment_score, gdelt.tone_scaled) AS news_sentiment_score,
                    ts.pcr_oi, ts.pcr_vol,
                    ts.fii_10d_net, ts.dii_3d_net,
                    ts.delivery_pct,
@@ -1102,6 +1103,18 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                       SELECT MAX(aeh2.as_of_date) FROM analyst_estimates_history aeh2
                       WHERE aeh2.symbol = so.symbol AND aeh2.as_of_date <= so.signal_date
                   )
+            -- GDELT tone (-100..+100, typically -10..+10) scaled to the same -1..1 range as
+            -- technical_signals.news_sentiment_score, used ONLY as a fallback (COALESCE above)
+            -- for rows that predate live finbert/RSS coverage -- gdelt_sentiment has history
+            -- back to 2015, closing the gap where those older training rows silently got a
+            -- fabricated 0 (== "confirmed neutral") instead of missing/unknown.
+            LEFT JOIN LATERAL (
+                SELECT AVG(g.avg_tone) / 10.0 AS tone_scaled
+                FROM gdelt_sentiment g
+                WHERE g.symbol = so.symbol
+                  AND g.date <= so.signal_date
+                  AND g.date >= (so.signal_date::date - interval '30 days')::text
+            ) gdelt ON TRUE
             LEFT JOIN proprietary_scores_history psh_az
                    ON psh_az.symbol = so.symbol
                   AND psh_az.source = 'moneycontrol'
@@ -1179,8 +1192,23 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
             ).fetchone())
         except Exception:
             _has_sfs = False
+        try:
+            _has_gdelt = bool(_con.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='gdelt_sentiment'"
+            ).fetchone())
+        except Exception:
+            _has_gdelt = False
         finally:
             _con.close()
+
+        if _has_gdelt:
+            news_sent_sel = """COALESCE(ts.news_sentiment_score, (
+                       SELECT AVG(g.avg_tone) / 10.0 FROM gdelt_sentiment g
+                       WHERE g.symbol = so.symbol AND g.date <= so.signal_date
+                         AND g.date >= date(so.signal_date, '-30 days')
+                   )) AS news_sentiment_score"""
+        else:
+            news_sent_sel = "ts.news_sentiment_score"
 
         if _has_sfs:
             sfs_train_sel = "sfs.sector_pcr, sfs.total_call_oi AS sector_call_oi, sfs.total_put_oi AS sector_put_oi"
@@ -1203,6 +1231,7 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                    ts.rsi, ts.adx, ts.nifty_regime, ts.cmp, ts.sma200, ts.volume_ratio,
                    ts.fii_3d_net,
                    ts.above_sma200,
+                   {news_sent_sel},
                    ts.pcr_oi, ts.pcr_vol,
                    ts.fii_10d_net, ts.dii_3d_net,
                    ts.delivery_pct,
@@ -1421,6 +1450,7 @@ def load_pending_signals() -> pd.DataFrame:
                    ts.rsi, ts.adx, ts.nifty_regime, ts.cmp, ts.sma200, ts.volume_ratio,
                    ts.fii_3d_net,
                    ts.above_sma200,
+                   ts.news_sentiment_score,
                    ts.pcr_oi, ts.pcr_vol,
                    ts.fii_10d_net, ts.dii_3d_net,
                    ts.delivery_pct,
@@ -1690,6 +1720,7 @@ def load_pending_signals() -> pd.DataFrame:
                    {ts_c('rsi')}, {ts_c('adx')}, {ts_c('nifty_regime')}, {ts_c('cmp')}, {ts_c('sma200')}, {ts_c('volume_ratio')},
                    {ts_c('fii_3d_net')},
                    {ts_c('above_sma200')},
+                   {ts_c('news_sentiment_score')},
                    {ts_c('pcr_oi')}, {ts_c('pcr_vol')},
                    {ts_c('fii_10d_net')}, {ts_c('dii_3d_net')},
                    {ts_c('delivery_pct')},

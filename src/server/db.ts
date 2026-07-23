@@ -2882,6 +2882,20 @@ runMigration('053_qs_mf_composite_score', `ALTER TABLE quant_scores ADD COLUMN m
 // walk-forward optimization per-fold breakdown (run_walk_forward in backtester.py)
 runMigration('069_backtesting_runs_wf_folds', `ALTER TABLE backtesting_runs ADD COLUMN walk_forward_folds_json TEXT`);
 
+// Per-stock GDELT news tone (gdeltService.ts) — had no canonical schema entry, so it only ever
+// existed if runGdeltBackfill()'s own ad-hoc ensureTable() happened to run first. Declaring it
+// here lets ml_ensemble.py's training-data query (COALESCE fallback for pre-finbert-coverage
+// rows) rely on the table always existing, matching the mirrored entry in pgClient.ts.
+runMigration('070_gdelt_sentiment', `
+  CREATE TABLE IF NOT EXISTS gdelt_sentiment (
+    symbol TEXT NOT NULL,
+    date TEXT NOT NULL,
+    avg_tone REAL,
+    computed_at TEXT,
+    PRIMARY KEY (symbol, date)
+  );
+`);
+
 // Keep startup diagnostics off stdout so stdio-based clients can parse JSON-RPC.
 console.error('[DB] Schema normalization complete (Phase 3.5)');
 
