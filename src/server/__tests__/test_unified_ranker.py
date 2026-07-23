@@ -59,8 +59,10 @@ def make_db():
         CREATE TABLE technical_signals (
             id INTEGER PRIMARY KEY AUTOINCREMENT, symbol TEXT,
             date TEXT, win_probability REAL, calibrated_win_probability REAL,
+            nifty_regime TEXT, breakout_probability REAL,
             signal_score INTEGER DEFAULT 0
         );
+        CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT);
         CREATE TABLE unified_recommendations (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             symbol TEXT NOT NULL, computed_at TEXT NOT NULL,
@@ -490,3 +492,87 @@ def test_normalize_sizes_respects_cap_and_gross():
 def test_normalize_sizes_all_zero():
     from unified_ranker import normalize_position_sizes
     assert normalize_position_sizes({'a': 0.0, 'b': 0.0}) == {'a': 0.0, 'b': 0.0}
+
+
+# ── _get_win_probabilities: per-row regime edge adjustment ──────────────────────
+
+def _seed_edge_status_row(conn, regime, auc, ready=True):
+    from ml_calibration import ensure_edge_status_table
+    ensure_edge_status_table(conn)
+    conn.execute(
+        "INSERT INTO regime_edge_status (regime, auc, auc_n, distinct_days, episodes, ready, computed_at) "
+        "VALUES (?, ?, 100, 30, 3, ?, datetime('now'))",
+        (regime, auc, 1 if ready else 0),
+    )
+
+
+def test_get_win_probabilities_flag_off_is_plain_average():
+    from unified_ranker import UnifiedRanker
+    conn = make_db()
+    _seed_edge_status_row(conn, 'BULL', auc=0.50, ready=True)  # present but flag is off
+    conn.execute("INSERT INTO technical_signals (symbol, date, win_probability, nifty_regime) "
+                 "VALUES ('X', date('now'), 0.85, 'BULL')")
+    conn.commit()
+    ranker = UnifiedRanker(conn=conn)
+    probs = ranker._get_win_probabilities()
+    assert probs['X'] == pytest.approx(0.85)   # unchanged -- flag off, no per-row adjustment
+
+
+def test_get_win_probabilities_edge_adjusts_per_row_regime_when_enabled():
+    from unified_ranker import UnifiedRanker
+    conn = make_db()
+    conn.execute("INSERT INTO app_settings (key, value) VALUES ('edge_adjustment_enabled', 'true')")
+    _seed_edge_status_row(conn, 'BULL', auc=0.50, ready=True)   # no live edge
+    _seed_edge_status_row(conn, 'BEAR', auc=0.61, ready=True)   # proven edge
+    conn.execute("INSERT INTO technical_signals (symbol, date, win_probability, nifty_regime) "
+                 "VALUES ('BULLSYM', date('now'), 0.85, 'BULL')")
+    conn.execute("INSERT INTO technical_signals (symbol, date, win_probability, nifty_regime) "
+                 "VALUES ('BEARSYM', date('now'), 0.72, 'BEAR')")
+    conn.commit()
+    ranker = UnifiedRanker(conn=conn)
+    probs = ranker._get_win_probabilities()
+    assert probs['BULLSYM'] == pytest.approx(0.5)    # shrunk to neutral -- no live edge in BULL
+    assert probs['BEARSYM'] == pytest.approx(0.72)   # unchanged -- BEAR has proven edge
+
+
+def test_get_win_probabilities_blends_multiple_regimes_for_same_symbol():
+    """A symbol with signals spanning both an edge-bearing and a no-edge regime blends
+    per-row, not uniformly by the single 'current' regime."""
+    from unified_ranker import UnifiedRanker
+    conn = make_db()
+    conn.execute("INSERT INTO app_settings (key, value) VALUES ('edge_adjustment_enabled', 'true')")
+    _seed_edge_status_row(conn, 'BULL', auc=0.50, ready=True)
+    _seed_edge_status_row(conn, 'BEAR', auc=0.61, ready=True)
+    # both rows must fall within _get_win_probabilities' 30-day lookback window
+    conn.execute("INSERT INTO technical_signals (symbol, date, win_probability, nifty_regime) "
+                 "VALUES ('MIXED', date('now', '-1 day'), 0.80, 'BULL')")
+    conn.execute("INSERT INTO technical_signals (symbol, date, win_probability, nifty_regime) "
+                 "VALUES ('MIXED', date('now'), 0.80, 'BEAR')")
+    conn.commit()
+    ranker = UnifiedRanker(conn=conn)
+    probs = ranker._get_win_probabilities()
+    # BULL row shrinks to 0.5, BEAR row stays 0.80 -> average = 0.65, not a plain 0.80
+    assert probs['MIXED'] == pytest.approx(0.65)
+
+
+def test_max_ml_bet_bo_bet_hedge_still_wins_in_no_edge_regime():
+    """Regression: when the ML leg is fully shrunk to neutral (no live edge), sizing must still
+    be able to back a strong breakout signal via max(ml_bet, bo_bet) -- this change only makes
+    the ML leg honest, it must not remove or weaken that existing hedge."""
+    from unified_ranker import UnifiedRanker, bet_size_from_probability
+    conn = make_db()
+    conn.execute("INSERT INTO app_settings (key, value) VALUES ('edge_adjustment_enabled', 'true')")
+    _seed_edge_status_row(conn, 'BULL', auc=0.50, ready=True)
+    conn.execute("INSERT INTO technical_signals (symbol, date, win_probability, nifty_regime) "
+                 "VALUES ('HEDGED', date('now'), 0.85, 'BULL')")
+    conn.commit()
+    ranker = UnifiedRanker(conn=conn)
+    probs = ranker._get_win_probabilities()
+
+    ml_bet = bet_size_from_probability(probs.get('HEDGED'))
+    assert ml_bet == 0.0, "edge-adjusted ML leg must be fully shrunk in a no-edge regime"
+
+    # the breakout leg is independent of win_probability entirely -- max(ml_bet, bo_bet) in
+    # run() still lets a strong breakout signal drive sizing even though ml_bet is zero here.
+    bo_bet = 0.42   # a representative strong cross-sectional breakout bet
+    assert max(ml_bet, bo_bet) == bo_bet

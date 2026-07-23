@@ -9,6 +9,15 @@ from ml_calibration import (  # noqa: E402
     count_episodes,
     per_regime_auc,
     regime_readiness,
+    ensure_edge_status_table,
+    persist_regime_edge_status,
+    load_regime_edge_status,
+    collapse_regime5,
+    regime_edge_weight,
+    edge_adjusted_probability,
+    is_edge_adjustment_enabled,
+    AUC_RANDOM,
+    AUC_TRUST_FLOOR,
 )
 
 
@@ -61,6 +70,7 @@ def make_db():
             symbol TEXT, signal_date TEXT, horizon_days INTEGER, outcome TEXT,
             PRIMARY KEY (symbol, signal_date, horizon_days)
         );
+        CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT);
     """)
     return conn
 
@@ -213,3 +223,164 @@ def test_regime_readiness_flags():
     conn.commit()
     rr = regime_readiness(conn)
     assert rr['BEAR']['ready'] is True and rr['BULL']['ready'] is False
+
+
+# ── regime_edge_status persistence ──────────────────────────────────────────────
+
+def test_persist_regime_edge_status_writes_and_upserts():
+    conn = make_db()
+    _seed(conn, 'BEAR', 0.8, 4, _spread_days(22))
+    _seed(conn, 'BULL', 0.8, 8, _spread_days(22, start="2025-06-01"))
+    out1 = persist_regime_edge_status(conn, min_n=50, min_regime_days=20, min_regime_episodes=2)
+    assert 'BEAR' in out1 and 'BULL' in out1 and '__GLOBAL__' in out1
+    rows1 = conn.execute("SELECT regime FROM regime_edge_status").fetchall()
+    assert len(rows1) == len(set(r[0] for r in rows1))  # no duplicate regime keys
+
+    # second run with different data must UPSERT (overwrite), not duplicate
+    _seed(conn, 'BEAR', 0.9, 1, _spread_days(22, start="2024-01-01"))
+    out2 = persist_regime_edge_status(conn, min_n=50, min_regime_days=20, min_regime_episodes=2)
+    rows2 = conn.execute("SELECT regime FROM regime_edge_status").fetchall()
+    assert len(rows2) == len(set(r[0] for r in rows2))
+    assert len(rows2) == len(rows1)  # same regimes, no new rows appended
+
+
+def test_load_regime_edge_status_roundtrip():
+    conn = make_db()
+    _seed(conn, 'BEAR', 0.8, 4, _spread_days(22))
+    persist_regime_edge_status(conn, min_n=50, min_regime_days=20, min_regime_episodes=2)
+    loaded = load_regime_edge_status(conn)
+    assert 'BEAR' in loaded
+    assert loaded['BEAR']['ready'] is True
+    assert isinstance(loaded['BEAR']['auc'], float)
+
+
+def test_load_regime_edge_status_empty_table_returns_empty_dict():
+    conn = make_db()
+    ensure_edge_status_table(conn)
+    assert load_regime_edge_status(conn) == {}
+
+
+def test_load_regime_edge_status_missing_table_returns_empty_dict():
+    conn = make_db()
+    assert load_regime_edge_status(conn) == {}
+
+
+# ── is_edge_adjustment_enabled ────────────────────────────────────────────────────
+
+def test_edge_adjustment_defaults_off_when_unset():
+    conn = make_db()
+    assert is_edge_adjustment_enabled(conn) is False
+
+
+def test_edge_adjustment_off_when_explicitly_false():
+    conn = make_db()
+    conn.execute("INSERT INTO app_settings (key, value) VALUES ('edge_adjustment_enabled', 'false')")
+    conn.commit()
+    assert is_edge_adjustment_enabled(conn) is False
+
+
+def test_edge_adjustment_on_when_explicitly_true():
+    conn = make_db()
+    conn.execute("INSERT INTO app_settings (key, value) VALUES ('edge_adjustment_enabled', 'true')")
+    conn.commit()
+    assert is_edge_adjustment_enabled(conn) is True
+
+
+# ── collapse_regime5 ─────────────────────────────────────────────────────────────
+
+def test_collapse_regime5():
+    assert collapse_regime5('BULL') == 'BULL'
+    assert collapse_regime5('SIDEWAYS') == 'SIDEWAYS'
+    assert collapse_regime5('HIGH_VOL') == 'BEAR'
+    assert collapse_regime5('BEAR') == 'BEAR'
+    assert collapse_regime5('CRASH') == 'BEAR'
+    assert collapse_regime5(None) is None
+    assert collapse_regime5('') is None
+
+
+# ── regime_edge_weight ───────────────────────────────────────────────────────────
+
+def _edge_status(**regimes):
+    """Build a minimal edge_status dict for pure-function tests, e.g.
+    _edge_status(BEAR={'auc': 0.61, 'ready': True}, __GLOBAL__={'auc': 0.50})."""
+    return dict(regimes)
+
+
+def test_regime_edge_weight_full_trust_at_or_above_floor():
+    es = _edge_status(BEAR={'auc': 0.61, 'ready': True})
+    assert regime_edge_weight('BEAR', es) == pytest.approx(1.0)
+    es2 = _edge_status(BEAR={'auc': AUC_TRUST_FLOOR, 'ready': True})
+    assert regime_edge_weight('BEAR', es2) == pytest.approx(1.0)
+
+
+def test_regime_edge_weight_full_shrink_at_random():
+    es = _edge_status(BULL={'auc': AUC_RANDOM, 'ready': True})
+    assert regime_edge_weight('BULL', es) == pytest.approx(0.0)
+
+
+def test_regime_edge_weight_below_random_clamps_to_zero():
+    es = _edge_status(BULL={'auc': 0.42, 'ready': True})
+    assert regime_edge_weight('BULL', es) == pytest.approx(0.0)
+
+
+def test_regime_edge_weight_linear_between():
+    mid_auc = (AUC_RANDOM + AUC_TRUST_FLOOR) / 2
+    es = _edge_status(SIDEWAYS={'auc': mid_auc, 'ready': True})
+    assert regime_edge_weight('SIDEWAYS', es) == pytest.approx(0.5, abs=1e-6)
+
+
+def test_regime_edge_weight_not_ready_falls_back_to_global():
+    # regime's own AUC looks good but isn't ready (thin data) -> must use global, not the
+    # regime's own unproven number
+    es = _edge_status(BULL={'auc': 0.90, 'ready': False}, __GLOBAL__={'auc': AUC_RANDOM})
+    assert regime_edge_weight('BULL', es) == pytest.approx(0.0)
+
+
+def test_regime_edge_weight_no_data_passes_through():
+    assert regime_edge_weight('BULL', {}) == pytest.approx(1.0)
+    es = _edge_status(BEAR={'auc': 0.61, 'ready': True})   # BULL absent entirely, no __GLOBAL__
+    assert regime_edge_weight('BULL', es) == pytest.approx(1.0)
+
+
+def test_regime_edge_weight_high_vol_and_crash_resolve_via_bear_row():
+    # HIGH_VOL/CRASH aren't keys in edge_status (only BULL/SIDEWAYS/BEAR/UNKNOWN/__GLOBAL__
+    # ever get persisted) -- collapse_regime5 must route them to the BEAR row, not silently
+    # miss and fall through to weight=1.0.
+    es = _edge_status(BEAR={'auc': AUC_RANDOM, 'ready': True})
+    assert regime_edge_weight('HIGH_VOL', es) == pytest.approx(0.0)
+    assert regime_edge_weight('CRASH', es) == pytest.approx(0.0)
+
+
+def test_regime_edge_weight_none_regime_uses_unknown_key():
+    es = _edge_status(UNKNOWN={'auc': AUC_RANDOM, 'ready': True})
+    assert regime_edge_weight(None, es) == pytest.approx(0.0)
+
+
+# ── edge_adjusted_probability ─────────────────────────────────────────────────────
+
+def test_edge_adjusted_probability_collapses_to_neutral_when_no_edge():
+    es = _edge_status(BULL={'auc': AUC_RANDOM, 'ready': True})
+    assert edge_adjusted_probability(0.85, 'BULL', es) == pytest.approx(0.5)
+    assert edge_adjusted_probability(0.10, 'BULL', es) == pytest.approx(0.5)
+
+
+def test_edge_adjusted_probability_passthrough_when_trusted():
+    es = _edge_status(BEAR={'auc': 0.61, 'ready': True})
+    assert edge_adjusted_probability(0.72, 'BEAR', es) == pytest.approx(0.72)
+
+
+def test_edge_adjusted_probability_none_returns_none():
+    assert edge_adjusted_probability(None, 'BULL', {}) is None
+
+
+def test_edge_adjusted_probability_realistic_snapshot():
+    # mirrors live numbers observed on this project: BEAR has real edge, BULL/SIDEWAYS do not
+    es = _edge_status(
+        BEAR={'auc': 0.61, 'ready': True},
+        BULL={'auc': 0.50, 'ready': True},
+        SIDEWAYS={'auc': None, 'ready': False},
+        __GLOBAL__={'auc': 0.50},
+    )
+    assert edge_adjusted_probability(0.70, 'BEAR', es) == pytest.approx(0.70)
+    assert edge_adjusted_probability(0.70, 'BULL', es) == pytest.approx(0.5)
+    assert edge_adjusted_probability(0.70, 'SIDEWAYS', es) == pytest.approx(0.5)  # falls back to global (0.50)

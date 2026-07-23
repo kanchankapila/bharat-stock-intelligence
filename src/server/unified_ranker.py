@@ -451,15 +451,38 @@ class UnifiedRanker:
         }
 
     def _get_win_probabilities(self):
-        """ML meta-label per symbol: avg isotonic-calibrated win prob (fallback to raw) over
-        recent technical signals. Calibrated value is honest, so sizing only backs real edge."""
+        """ML meta-label per symbol: mean isotonic-calibrated win prob (fallback to raw) over
+        recent technical signals. Calibrated value is honest, so sizing only backs real edge.
+
+        When app_settings.edge_adjustment_enabled='true' (see ml_calibration.py), each row is
+        additionally shrunk toward neutral (0.5) using its OWN stamped nifty_regime before
+        averaging -- win_probability has real live discrimination only in some regimes (e.g.
+        BEAR), so a symbol whose recent signals span both an edge-bearing and a no-edge regime
+        blends correctly instead of being trusted uniformly. Off by default: identical to the
+        prior plain-average behavior. Does NOT touch the existing max(ml_bet, bo_bet) breakout
+        hedge in run() -- this only makes the ML leg honest, it doesn't remove the hedge that
+        already covers for it in no-edge regimes."""
         cutoff = (date.today() - timedelta(days=30)).isoformat()
         rows = self.conn.execute(
-            "SELECT symbol, AVG(COALESCE(calibrated_win_probability, win_probability)) AS p "
-            "FROM technical_signals WHERE date >= ? AND win_probability IS NOT NULL GROUP BY symbol",
+            "SELECT symbol, nifty_regime, COALESCE(calibrated_win_probability, win_probability) AS p "
+            "FROM technical_signals WHERE date >= ? AND win_probability IS NOT NULL",
             (cutoff,)
         ).fetchall()
-        return {r['symbol']: float(r['p']) for r in rows if r['p'] is not None}
+
+        from ml_calibration import is_edge_adjustment_enabled, edge_adjusted_probability, load_regime_edge_status
+        enabled = is_edge_adjustment_enabled(self.conn)
+        edge_status = load_regime_edge_status(self.conn) if enabled else {}
+
+        acc: dict = {}
+        for r in rows:
+            p = r['p']
+            if p is None:
+                continue
+            p = float(p)
+            if enabled:
+                p = edge_adjusted_probability(p, r['nifty_regime'], edge_status)
+            acc.setdefault(r['symbol'], []).append(p)
+        return {sym: sum(v) / len(v) for sym, v in acc.items() if v}
 
     def _get_screener_membership(self):
         membership = {}

@@ -174,12 +174,219 @@ def regime_readiness(conn: ConnWrapper, min_regime_days: int = 20, min_regime_ep
     return out
 
 
+# ── Regime Edge Status Persistence ───────────────────────────────────────────
+#
+# per_regime_auc/regime_readiness above are print-only -- nothing persists them, so no
+# consumer can read "does this regime's win_probability currently carry live edge?" without
+# recomputing the join itself. This snapshots both (plus a pooled global AUC) into a small
+# table every consumer can read cheaply.
+
+_EDGE_STATUS_DDL = """
+CREATE TABLE IF NOT EXISTS regime_edge_status (
+    regime         TEXT PRIMARY KEY,
+    auc            REAL,
+    auc_n          INTEGER,
+    distinct_days  INTEGER,
+    episodes       INTEGER,
+    ready          INTEGER NOT NULL DEFAULT 0,
+    first_day      TEXT,
+    last_day       TEXT,
+    computed_at    TEXT NOT NULL
+)
+"""
+
+
+def ensure_edge_status_table(conn: ConnWrapper) -> None:
+    conn.execute(_EDGE_STATUS_DDL)
+    conn.commit()
+
+
+def _pooled_auc(conn: ConnWrapper, min_n: int = 50):
+    """Same join as per_regime_auc but pooled across ALL regimes -- the fallback trust level
+    regime_edge_weight() uses when a specific regime hasn't cleared the readiness floor."""
+    from sklearn.metrics import roc_auc_score
+    rows = conn.execute("""
+        SELECT ts.win_probability AS p,
+               CASE WHEN so.outcome = 'WIN' THEN 1 ELSE 0 END AS y
+        FROM signal_outcomes so JOIN technical_signals ts
+          ON ts.symbol = so.symbol AND ts.date = so.signal_date
+        WHERE so.outcome IN ('WIN', 'LOSS') AND ts.win_probability IS NOT NULL
+          AND ts.win_probability <> 0.5
+    """).fetchall()
+    pairs = [(float(r['p']), int(r['y'])) for r in rows if math.isfinite(float(r['p']))]
+    if len(pairs) < min_n or len({y for _, y in pairs}) < 2:
+        return None
+    p = [x[0] for x in pairs]
+    y = [x[1] for x in pairs]
+    return {'n': len(p), 'auc': float(roc_auc_score(y, p))}
+
+
+def _upsert_edge_status_row(conn: ConnWrapper, row: dict) -> None:
+    conn.execute("""
+        INSERT INTO regime_edge_status
+            (regime, auc, auc_n, distinct_days, episodes, ready, first_day, last_day, computed_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(regime) DO UPDATE SET
+            auc = excluded.auc, auc_n = excluded.auc_n,
+            distinct_days = excluded.distinct_days, episodes = excluded.episodes,
+            ready = excluded.ready, first_day = excluded.first_day,
+            last_day = excluded.last_day, computed_at = excluded.computed_at
+    """, (
+        row['regime'], row.get('auc'), row.get('auc_n'),
+        row.get('distinct_days'), row.get('episodes'),
+        1 if row.get('ready') else 0,
+        row.get('first_day'), row.get('last_day'), row['computed_at'],
+    ))
+
+
+def persist_regime_edge_status(conn: ConnWrapper, min_n: int = 50,
+                                min_regime_days: int = 20, min_regime_episodes: int = 2) -> dict:
+    """Snapshot per_regime_auc + regime_readiness + a pooled global AUC into regime_edge_status.
+    Stateless: every call fully recomputes from the live join and UPSERTs -- no decay/hysteresis,
+    so a regime's status re-arms automatically the next time this runs once its live numbers
+    cross back over the trust floor (see regime_edge_weight)."""
+    ensure_edge_status_table(conn)
+    auc = per_regime_auc(conn, min_n=min_n)
+    readiness = regime_readiness(conn, min_regime_days, min_regime_episodes)
+    pooled = _pooled_auc(conn, min_n=min_n)
+    now = _dt.datetime.utcnow().isoformat()
+
+    out: dict = {}
+    for reg in (set(auc) | set(readiness)):
+        key = reg if reg is not None else 'UNKNOWN'
+        a = auc.get(reg, {})
+        r = readiness.get(reg, {})
+        row = dict(regime=key, auc=a.get('auc'), auc_n=a.get('n'),
+                   distinct_days=r.get('distinct_days'), episodes=r.get('episodes'),
+                   ready=bool(r.get('ready', False)), first_day=r.get('first_day'),
+                   last_day=r.get('last_day'), computed_at=now)
+        _upsert_edge_status_row(conn, row)
+        out[key] = row
+
+    if pooled is not None:
+        row = dict(regime='__GLOBAL__', auc=pooled['auc'], auc_n=pooled['n'],
+                   distinct_days=None, episodes=None, ready=True,
+                   first_day=None, last_day=None, computed_at=now)
+        _upsert_edge_status_row(conn, row)
+        out['__GLOBAL__'] = row
+
+    conn.commit()
+    print(f"[Calibration] edge status persisted for {len(out)} regime rows.")
+    return out
+
+
+def load_regime_edge_status(conn: ConnWrapper) -> dict:
+    """Read the last persisted per-regime edge snapshot. Returns {} if the table doesn't exist
+    yet or is empty -- callers must treat that as 'no data', which regime_edge_weight() already
+    treats as full trust (weight=1.0, no-op) rather than assuming no edge."""
+    try:
+        rows = conn.execute(
+            "SELECT regime, auc, auc_n, distinct_days, episodes, ready, first_day, last_day, computed_at "
+            "FROM regime_edge_status"
+        ).fetchall()
+    except Exception:
+        return {}
+    out = {}
+    for r in rows:
+        out[r['regime']] = {
+            'auc': r['auc'], 'auc_n': r['auc_n'],
+            'distinct_days': r['distinct_days'], 'episodes': r['episodes'],
+            'ready': bool(r['ready']), 'first_day': r['first_day'],
+            'last_day': r['last_day'], 'computed_at': r['computed_at'],
+        }
+    return out
+
+
+# ── Regime-Conditional Edge Weighting ────────────────────────────────────────
+#
+# win_probability has real live discrimination only in some regimes (e.g. BEAR AUC~0.61) and
+# ~coin-flip elsewhere (BULL/SIDEWAYS AUC~0.50). Consumers (ml_ensemble's expiry gate,
+# scoring_engine's ML bonus/discount, unified_ranker's position sizing) should trust the
+# probability in proportion to its regime's PROVEN discrimination, not treat every regime the
+# same. These are pure functions -- no DB access -- callers pass in the edge_status dict already
+# loaded via load_regime_edge_status().
+
+AUC_RANDOM = 0.50        # coin-flip baseline -- an AUC at/below this carries zero rank information
+AUC_TRUST_FLOOR = 0.55   # empirically: BEAR sits ~0.61 (trust), BULL/SIDEWAYS sit ~0.50 (no edge)
+
+
+def is_edge_adjustment_enabled(conn: ConnWrapper) -> bool:
+    """Feature flag gating the three win_probability consumers' edge-adjustment wiring
+    (ml_ensemble's expiry gate, scoring_engine's discount/bonus, unified_ranker's sizing).
+    Defaults to OFF (missing row) so shipping the persistence/table work is inert on its own --
+    a true kill switch without a redeploy. Flip with:
+      UPDATE app_settings SET value='true' WHERE key='edge_adjustment_enabled';
+      -- or INSERT if the key has never been set."""
+    row = conn.execute(
+        "SELECT value FROM app_settings WHERE key = 'edge_adjustment_enabled'"
+    ).fetchone()
+    return bool(row) and row['value'] == 'true'
+
+
+def collapse_regime5(regime):
+    """5-state HMM regime (market_regimes.regime / app_settings.current_nifty_regime) -> the
+    3-class taxonomy technical_signals.nifty_regime / regime_edge_status use. Mirrors
+    backfill_technical_features.py's get_regime() closure verbatim -- keep both in sync; a
+    mismatch here would make HIGH_VOL/CRASH silently miss the regime_edge_status lookup and
+    fall through to the 'no data -> weight=1.0' branch, silently disabling this feature for
+    those two states."""
+    if not regime:
+        return None
+    if regime in ('BULL', 'SIDEWAYS'):
+        return regime
+    return 'BEAR'   # HIGH_VOL | BEAR | CRASH
+
+
+def regime_edge_weight(regime, edge_status: dict,
+                        auc_random: float = AUC_RANDOM, auc_trust_floor: float = AUC_TRUST_FLOOR) -> float:
+    """0..1 confidence weight for how much live discriminative edge win_probability carries in
+    `regime` today, per a persisted regime_edge_status snapshot (see load_regime_edge_status).
+
+    Source of the AUC used (most to least trusted):
+      1. the regime's OWN auc, only if edge_status[regime]['ready'] is True (clears the
+         distinct-days/episode floor) -- an un-ready regime's AUC may be one autocorrelated
+         episode (the same concurrency problem recalibrate_win_probabilities already guards
+         against for the isotonic fit).
+      2. the pooled '__GLOBAL__' auc, if present.
+      3. neither available -> weight = 1.0 (pass through unchanged). Absence of evidence is not
+         evidence of no edge.
+
+    weight = clip((auc_used - auc_random) / (auc_trust_floor - auc_random), 0, 1)
+    """
+    reg3 = collapse_regime5(regime)
+    key = reg3 if reg3 is not None else 'UNKNOWN'
+    row = edge_status.get(key)
+    auc_used = row['auc'] if (row and row.get('ready') and row.get('auc') is not None) else None
+    if auc_used is None:
+        g = edge_status.get('__GLOBAL__')
+        auc_used = g['auc'] if (g and g.get('auc') is not None) else None
+    if auc_used is None:
+        return 1.0
+    return max(0.0, min(1.0, (auc_used - auc_random) / (auc_trust_floor - auc_random)))
+
+
+def edge_adjusted_probability(p, regime, edge_status: dict,
+                               auc_random: float = AUC_RANDOM, auc_trust_floor: float = AUC_TRUST_FLOOR):
+    """Shrink `p` toward the neutral 0.5 point in proportion to regime_edge_weight(regime).
+    weight=1 (proven edge, or not enough data to judge) -> p unchanged.
+    weight=0 (proven no edge, AUC<=auc_random) -> collapses exactly to 0.5, the neutral point
+    every consumer already treats as 'no opinion' (bet_size_from_probability(<=0.5)==0,
+    _REGIME_THRESHOLDS are all <0.5, scoring_engine's bonus/discount bands straddle 0.5).
+    Shrinking toward 0.5 -- not the regime's empirical base rate -- is a deliberate choice to
+    match those existing conventions."""
+    if p is None:
+        return None
+    w = regime_edge_weight(regime, edge_status, auc_random, auc_trust_floor)
+    return 0.5 + w * (float(p) - 0.5)
+
+
 def run():
     conn = connect()
     try:
         recalibrate_win_probabilities(conn)
         regime_readiness(conn)
         per_regime_auc(conn)
+        persist_regime_edge_status(conn)
     finally:
         conn.close()
 

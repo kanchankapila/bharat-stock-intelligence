@@ -7,7 +7,43 @@ from sqlalchemy import text
 from nlp_engine import NLPScreenerInference, NLP_VERSION
 from typing import Dict, Any, List
 
-from db_compat import get_engine
+from db_compat import get_engine, connect as db_connect
+
+
+# ── Pure functions: regime-edge-adjusted ML win_probability consumption ────────
+# win_probability has real live discrimination only in some regimes (e.g. BEAR) and ~coin-flip
+# elsewhere (see ml_calibration.py). These are pure/DB-free so they're independently unit
+# testable; the class wires them in behind app_settings.edge_adjustment_enabled (default off).
+
+def apply_edge_adjustment_to_win_probs(win_prob_map: Dict[str, float], regime_map: Dict[str, str],
+                                        edge_status: Dict[str, Any]) -> Dict[str, float]:
+    """Shrink each symbol's win_probability toward neutral (0.5) per its own regime's proven
+    live edge. Symbols with no known regime pass through unchanged."""
+    from ml_calibration import edge_adjusted_probability
+    out = {}
+    for sym, wp in win_prob_map.items():
+        regime = regime_map.get(sym)
+        out[sym] = edge_adjusted_probability(wp, regime, edge_status) if regime else wp
+    return out
+
+
+def apply_ml_score_adjustment(final_score: float, normalized_score: float, wp) -> float:
+    """ML consensus bonus / weak-probability discount, extracted from the scoring loop for unit
+    testing. `wp` should already be edge-adjusted by the caller when the flag is enabled."""
+    if wp is None:
+        return final_score
+    if normalized_score >= 60 and wp >= 0.55:
+        return final_score * 1.10   # ML consensus bonus: both systems agree bullish
+    if wp < 0.40:
+        return final_score * (0.85 if wp < 0.30 else 0.92)   # ML sees weak probability
+    return final_score
+
+
+def ml_alignment_points(wp) -> int:
+    """Factor 3: ML win_probability alignment (0-20 points), extracted for unit testing."""
+    if wp is None:
+        return 8  # neutral if no ML signal
+    return min(20, int(wp * 24))   # wp=0.55 -> 13pts, wp=0.80 -> 19pts
 
 
 class AlphaQuantScoringEngine:
@@ -38,6 +74,9 @@ class AlphaQuantScoringEngine:
         self.stock_stats = {}
         self._drift_multiplier: float = 1.0
         self._drift_checked_ts: float = 0.0
+        self._edge_status: Dict[str, Any] = {}
+        self._edge_adjustment_enabled: bool = False
+        self._edge_status_checked_ts: float = 0.0
         self._load_optimised_weights()
         self.etnow_screeners = self._load_etnow_screeners()
 
@@ -53,6 +92,30 @@ class AlphaQuantScoringEngine:
                 print(f"[Scoring] Drift haircut active: {self._drift_multiplier:.2f}x")
         except Exception:
             pass
+
+    def _refresh_edge_status(self) -> None:
+        """TTL-cached read of the regime_edge_status snapshot + the edge_adjustment_enabled
+        flag (see ml_calibration.py) -- same 1hr cadence as _refresh_drift_multiplier. Uses
+        db_compat.connect() (ConnWrapper), not self.engine -- ml_calibration's functions are
+        written against ConnWrapper's ?-placeholder/dict-row API, not raw SQLAlchemy text()."""
+        import time
+        if time.time() - self._edge_status_checked_ts < 3600:
+            return
+        conn = None
+        try:
+            from ml_calibration import load_regime_edge_status, is_edge_adjustment_enabled
+            conn = db_connect()
+            self._edge_status = load_regime_edge_status(conn)
+            self._edge_adjustment_enabled = is_edge_adjustment_enabled(conn)
+            self._edge_status_checked_ts = time.time()
+        except Exception:
+            pass
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
     def _load_optimised_weights(self):
         """Override default weights with ML-optimised values from app_settings if available."""
@@ -502,19 +565,23 @@ class AlphaQuantScoringEngine:
             )).fetchall()
         screener_updated = {r[0]: r[1] for r in sm_rows}
 
-        # Load latest win_probability per symbol from ML-scored technical signal rows
+        # Load latest win_probability (+ the regime it was set in) per symbol from ML-scored
+        # technical signal rows. DISTINCT ON picks the row that supplied the MAX probability.
         win_prob_map: Dict[str, float] = {}
+        win_prob_regime_map: Dict[str, str] = {}
         try:
             wp_cutoff = (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
             with self.engine.connect() as conn:
                 wp_rows = conn.execute(text("""
-                    SELECT symbol, MAX(COALESCE(calibrated_win_probability, win_probability)) AS wp
+                    SELECT DISTINCT ON (symbol) symbol, nifty_regime,
+                           COALESCE(calibrated_win_probability, win_probability) AS wp
                     FROM technical_signals
                     WHERE date >= :cutoff
                       AND win_probability IS NOT NULL
-                    GROUP BY symbol
+                    ORDER BY symbol, COALESCE(calibrated_win_probability, win_probability) DESC
                 """), {"cutoff": wp_cutoff}).fetchall()
-            win_prob_map = {r[0]: float(r[1]) for r in wp_rows}
+            win_prob_map = {r[0]: float(r[2]) for r in wp_rows}
+            win_prob_regime_map = {r[0]: r[1] for r in wp_rows}
         except Exception:
             pass
 
@@ -523,6 +590,15 @@ class AlphaQuantScoringEngine:
         if self._drift_multiplier < 1.0:
             win_prob_map = {sym: round(wp * self._drift_multiplier, 4)
                            for sym, wp in win_prob_map.items()}
+
+        # Edge-adjust win_probability per symbol's own regime when enabled (see ml_calibration.py
+        # -- win_probability has real live discrimination only in some regimes, e.g. BEAR; this
+        # shrinks it toward neutral 0.5 elsewhere instead of trusting it uniformly). Off by
+        # default -- app_settings.edge_adjustment_enabled='true' to activate.
+        self._refresh_edge_status()
+        if self._edge_adjustment_enabled:
+            win_prob_map = apply_edge_adjustment_to_win_probs(
+                win_prob_map, win_prob_regime_map, self._edge_status)
 
         # Load Technical Composite Score
         tech_composite_map: Dict[str, float] = {}
@@ -745,13 +821,7 @@ class AlphaQuantScoringEngine:
 
                 normalized_score = min(100, max(0, 50 + (final_score * 2)))
                 wp = win_prob_map.get(symbol)
-                if wp is not None:
-                    if normalized_score >= 60 and wp >= 0.55:
-                        final_score *= 1.10   # ML consensus bonus: both systems agree bullish
-                    elif wp < 0.40:
-                        # ML sees weak probability — discount composite score
-                        discount = 0.85 if wp < 0.30 else 0.92
-                        final_score *= discount
+                final_score = apply_ml_score_adjustment(final_score, normalized_score, wp)
 
                 screener_count = len(data['positive_screeners']) + len(data['negative_screeners'])
                 source_count   = len(data['sources'])
@@ -765,10 +835,7 @@ class AlphaQuantScoringEngine:
 
                 # Factor 3: ML win_probability alignment (0–20 points)
                 wp = win_prob_map.get(symbol)
-                if wp is not None:
-                    ml_pts = min(20, int(wp * 24))   # wp=0.55 → 13pts, wp=0.80 → 19pts
-                else:
-                    ml_pts = 8  # neutral if no ML signal
+                ml_pts = ml_alignment_points(wp)
 
                 # Factor 4: screener volume (0–10 points) — secondary signal of conviction
                 vol_pts = min(10, screener_count * 2)

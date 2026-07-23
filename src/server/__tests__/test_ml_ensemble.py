@@ -1,6 +1,8 @@
 """
 Tests for ml_ensemble.py
 """
+import sqlite3
+import datetime
 import pytest
 
 
@@ -62,3 +64,306 @@ def test_regime_threshold_varies_by_regime(monkeypatch):
     assert regime_threshold(FakeConn('HIGH_VOL'))== 0.38
     assert regime_threshold(FakeConn('CRASH'))   == 0.42
     assert regime_threshold(FakeConn('SIDEWAYS'))== 0.40
+
+
+# ── recommendation_log propagation + expiry gate ────────────────────────────────
+
+def _make_gate_db():
+    conn = sqlite3.connect(':memory:')
+    conn.row_factory = sqlite3.Row
+    conn.executescript("""
+        CREATE TABLE technical_signals (
+            symbol TEXT, date TEXT, win_probability REAL, calibrated_win_probability REAL,
+            nifty_regime TEXT, PRIMARY KEY (symbol, date)
+        );
+        CREATE TABLE recommendation_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            symbol TEXT NOT NULL, rec_type TEXT NOT NULL, signal_date TEXT NOT NULL,
+            generated_at DATETIME NOT NULL, win_probability REAL, nifty_regime TEXT,
+            source TEXT DEFAULT 'platform', status TEXT DEFAULT 'ACTIVE'
+        );
+        CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT);
+    """)
+    return conn
+
+
+def _insert_rec(conn, symbol, signal_date, win_probability=None, status='ACTIVE'):
+    conn.execute(
+        "INSERT INTO recommendation_log (symbol, rec_type, signal_date, generated_at, "
+        "win_probability, source, status) VALUES (?, 'BUY', ?, ?, ?, 'technical_scan', ?)",
+        (symbol, signal_date, datetime.datetime.utcnow().isoformat(), win_probability, status),
+    )
+
+
+def test_expiry_gate_uses_calibrated_probability(monkeypatch):
+    """Regression for the propagation bug: recommendation_log.win_probability must be filled
+    from calibrated_win_probability when present, not the raw (overconfident) win_probability.
+    A row with a high raw probability but a low calibrated one must expire."""
+    import ml_ensemble
+    from ml_ensemble import _propagate_and_gate_recommendation_log
+    monkeypatch.setattr(ml_ensemble, "use_postgres", lambda: False)  # test DB is sqlite
+
+    conn = _make_gate_db()
+    today = datetime.date.today().isoformat()
+    conn.execute(
+        "INSERT INTO technical_signals (symbol, date, win_probability, calibrated_win_probability) "
+        "VALUES ('CALTEST', ?, 0.60, 0.30)", (today,)
+    )
+    _insert_rec(conn, 'CALTEST', today)
+    conn.commit()
+
+    _propagate_and_gate_recommendation_log(conn)
+
+    row = conn.execute(
+        "SELECT win_probability, status FROM recommendation_log WHERE symbol='CALTEST'"
+    ).fetchone()
+    assert row['win_probability'] == pytest.approx(0.30), \
+        "propagation must prefer calibrated_win_probability over raw win_probability"
+    assert row['status'] == 'EXPIRED', \
+        "0.30 is below every regime threshold (min 0.36) so this must expire"
+
+
+def test_expiry_gate_falls_back_to_raw_when_uncalibrated(monkeypatch):
+    import ml_ensemble
+    from ml_ensemble import _propagate_and_gate_recommendation_log
+    monkeypatch.setattr(ml_ensemble, "use_postgres", lambda: False)  # test DB is sqlite
+
+    conn = _make_gate_db()
+    today = datetime.date.today().isoformat()
+    conn.execute(
+        "INSERT INTO technical_signals (symbol, date, win_probability, calibrated_win_probability) "
+        "VALUES ('RAWTEST', ?, 0.70, NULL)", (today,)
+    )
+    _insert_rec(conn, 'RAWTEST', today)
+    conn.commit()
+
+    _propagate_and_gate_recommendation_log(conn)
+
+    row = conn.execute(
+        "SELECT win_probability, status FROM recommendation_log WHERE symbol='RAWTEST'"
+    ).fetchone()
+    assert row['win_probability'] == pytest.approx(0.70)
+    assert row['status'] == 'ACTIVE'
+
+
+# ── flag-gated regime-aware abstention (edge_adjustment_enabled) ───────────────
+
+def _enable_edge_adjustment(conn):
+    conn.execute("INSERT INTO app_settings (key, value) VALUES ('edge_adjustment_enabled', 'true')")
+
+
+def _seed_edge_status(conn, regime, auc, ready=True):
+    from ml_calibration import ensure_edge_status_table
+    ensure_edge_status_table(conn)
+    conn.execute(
+        "INSERT INTO regime_edge_status (regime, auc, auc_n, distinct_days, episodes, ready, computed_at) "
+        "VALUES (?, ?, 100, 30, 3, ?, datetime('now'))",
+        (regime, auc, 1 if ready else 0),
+    )
+
+
+def test_expiry_gate_flag_off_uses_raw_threshold_regardless_of_regime(monkeypatch):
+    """Backward compatibility: with the flag off (default), a low-probability BULL row expires
+    on raw threshold exactly like before this change, even with a no-edge regime_edge_status
+    on record."""
+    import ml_ensemble
+    from ml_ensemble import _propagate_and_gate_recommendation_log
+    monkeypatch.setattr(ml_ensemble, "use_postgres", lambda: False)
+
+    conn = _make_gate_db()
+    today = datetime.date.today().isoformat()
+    _seed_edge_status(conn, 'BULL', auc=0.50, ready=True)  # no edge, would abstain if flag were on
+    conn.execute(
+        "INSERT INTO technical_signals (symbol, date, win_probability, calibrated_win_probability, nifty_regime) "
+        "VALUES ('FLAGOFF', ?, 0.20, NULL, 'BULL')", (today,)
+    )
+    _insert_rec(conn, 'FLAGOFF', today)
+    conn.execute("UPDATE recommendation_log SET nifty_regime='BULL' WHERE symbol='FLAGOFF'")
+    conn.commit()
+
+    _propagate_and_gate_recommendation_log(conn)
+
+    row = conn.execute("SELECT status FROM recommendation_log WHERE symbol='FLAGOFF'").fetchone()
+    assert row['status'] == 'EXPIRED'
+
+
+def test_expiry_gate_abstains_in_no_edge_regime_when_flag_on(monkeypatch):
+    """With the flag on, a BULL row (proven no live edge, weight=0) with a low win_probability
+    but a RECENT signal_date must NOT expire on probability alone -- abstention routes it to the
+    same date-cutoff rule NULL rows use, and it isn't old enough to hit that either."""
+    import ml_ensemble
+    from ml_ensemble import _propagate_and_gate_recommendation_log
+    monkeypatch.setattr(ml_ensemble, "use_postgres", lambda: False)
+
+    conn = _make_gate_db()
+    today = datetime.date.today().isoformat()
+    _enable_edge_adjustment(conn)
+    _seed_edge_status(conn, 'BULL', auc=0.50, ready=True)
+    conn.execute(
+        "INSERT INTO technical_signals (symbol, date, win_probability, calibrated_win_probability, nifty_regime) "
+        "VALUES ('NOEDGE', ?, 0.10, NULL, 'BULL')", (today,)
+    )
+    _insert_rec(conn, 'NOEDGE', today)
+    conn.execute("UPDATE recommendation_log SET nifty_regime='BULL' WHERE symbol='NOEDGE'")
+    conn.commit()
+
+    _propagate_and_gate_recommendation_log(conn)
+
+    row = conn.execute("SELECT status FROM recommendation_log WHERE symbol='NOEDGE'").fetchone()
+    assert row['status'] == 'ACTIVE', "no-edge regime must abstain on probability, not expire"
+
+
+def test_expiry_gate_abstains_then_expires_old_row_via_date_fallback(monkeypatch):
+    """Same no-edge regime, but the signal is old (past the 2-day cutoff) -- abstention still
+    falls back to the date rule, so it must expire, same as a NULL-probability row would."""
+    import ml_ensemble
+    from ml_ensemble import _propagate_and_gate_recommendation_log
+    monkeypatch.setattr(ml_ensemble, "use_postgres", lambda: False)
+
+    conn = _make_gate_db()
+    old_date = (datetime.date.today() - datetime.timedelta(days=5)).isoformat()
+    _enable_edge_adjustment(conn)
+    _seed_edge_status(conn, 'BULL', auc=0.50, ready=True)
+    conn.execute(
+        "INSERT INTO technical_signals (symbol, date, win_probability, calibrated_win_probability, nifty_regime) "
+        "VALUES ('NOEDGEOLD', ?, 0.10, NULL, 'BULL')", (old_date,)
+    )
+    _insert_rec(conn, 'NOEDGEOLD', old_date)
+    conn.execute("UPDATE recommendation_log SET nifty_regime='BULL' WHERE symbol='NOEDGEOLD'")
+    conn.commit()
+
+    _propagate_and_gate_recommendation_log(conn)
+
+    row = conn.execute("SELECT status FROM recommendation_log WHERE symbol='NOEDGEOLD'").fetchone()
+    assert row['status'] == 'EXPIRED'
+
+
+def test_expiry_gate_still_gates_in_edge_regime_when_flag_on(monkeypatch):
+    """A BEAR row (proven live edge, weight~1) with low win_probability must still expire on
+    probability -- the flag doesn't weaken the one regime that has real edge."""
+    import ml_ensemble
+    from ml_ensemble import _propagate_and_gate_recommendation_log
+    monkeypatch.setattr(ml_ensemble, "use_postgres", lambda: False)
+
+    conn = _make_gate_db()
+    today = datetime.date.today().isoformat()
+    _enable_edge_adjustment(conn)
+    _seed_edge_status(conn, 'BEAR', auc=0.61, ready=True)
+    conn.execute(
+        "INSERT INTO technical_signals (symbol, date, win_probability, calibrated_win_probability, nifty_regime) "
+        "VALUES ('EDGEBEAR', ?, 0.10, NULL, 'BEAR')", (today,)
+    )
+    _insert_rec(conn, 'EDGEBEAR', today)
+    conn.execute("UPDATE recommendation_log SET nifty_regime='BEAR' WHERE symbol='EDGEBEAR'")
+    conn.commit()
+
+    _propagate_and_gate_recommendation_log(conn)
+
+    row = conn.execute("SELECT status FROM recommendation_log WHERE symbol='EDGEBEAR'").fetchone()
+    assert row['status'] == 'EXPIRED'
+
+
+# ── per-row temporal regime-threshold fix ───────────────────────────────────────
+# Regression for a pre-existing bug: the gate used to apply TODAY's current regime threshold
+# uniformly to every ACTIVE row, even one created under a different regime days ago. Each row
+# must now be judged against the threshold for its OWN stamped nifty_regime.
+
+def test_row_threshold_uses_own_regime_not_current_app_settings_regime(monkeypatch):
+    """A BEAR-stamped row (threshold 0.36) with wp=0.38 must survive even though the CURRENT
+    app_settings regime is BULL (threshold 0.40, under which 0.38 would have expired the row
+    under the old current-regime-only gate)."""
+    import ml_ensemble
+    from ml_ensemble import _propagate_and_gate_recommendation_log
+    monkeypatch.setattr(ml_ensemble, "use_postgres", lambda: False)
+
+    conn = _make_gate_db()
+    today = datetime.date.today().isoformat()
+    conn.execute("INSERT INTO app_settings (key, value) VALUES ('current_nifty_regime', 'BULL')")
+    conn.execute(
+        "INSERT INTO technical_signals (symbol, date, win_probability, calibrated_win_probability, nifty_regime) "
+        "VALUES ('OWNREGIME', ?, 0.38, NULL, 'BEAR')", (today,)
+    )
+    _insert_rec(conn, 'OWNREGIME', today)
+    conn.execute("UPDATE recommendation_log SET nifty_regime='BEAR' WHERE symbol='OWNREGIME'")
+    conn.commit()
+
+    _propagate_and_gate_recommendation_log(conn)
+
+    row = conn.execute("SELECT status FROM recommendation_log WHERE symbol='OWNREGIME'").fetchone()
+    assert row['status'] == 'ACTIVE', \
+        "0.38 clears the row's OWN BEAR threshold (0.36) even though current regime is BULL (0.40)"
+
+
+def test_row_threshold_still_expires_below_own_regime_threshold(monkeypatch):
+    """Same BEAR-stamped row, but wp=0.30 -- below even BEAR's own (lower) threshold -- must
+    still expire regardless of the current app_settings regime."""
+    import ml_ensemble
+    from ml_ensemble import _propagate_and_gate_recommendation_log
+    monkeypatch.setattr(ml_ensemble, "use_postgres", lambda: False)
+
+    conn = _make_gate_db()
+    today = datetime.date.today().isoformat()
+    conn.execute("INSERT INTO app_settings (key, value) VALUES ('current_nifty_regime', 'BULL')")
+    conn.execute(
+        "INSERT INTO technical_signals (symbol, date, win_probability, calibrated_win_probability, nifty_regime) "
+        "VALUES ('OWNREGIME2', ?, 0.30, NULL, 'BEAR')", (today,)
+    )
+    _insert_rec(conn, 'OWNREGIME2', today)
+    conn.execute("UPDATE recommendation_log SET nifty_regime='BEAR' WHERE symbol='OWNREGIME2'")
+    conn.commit()
+
+    _propagate_and_gate_recommendation_log(conn)
+
+    row = conn.execute("SELECT status FROM recommendation_log WHERE symbol='OWNREGIME2'").fetchone()
+    assert row['status'] == 'EXPIRED'
+
+
+def test_row_threshold_falls_back_to_current_regime_when_row_regime_missing(monkeypatch):
+    """A row with no stamped nifty_regime (NULL) must fall back to today's current regime
+    threshold -- unchanged legacy behavior for rows predating regime-stamping."""
+    import ml_ensemble
+    from ml_ensemble import _propagate_and_gate_recommendation_log
+    monkeypatch.setattr(ml_ensemble, "use_postgres", lambda: False)
+
+    conn = _make_gate_db()
+    today = datetime.date.today().isoformat()
+    conn.execute("INSERT INTO app_settings (key, value) VALUES ('current_nifty_regime', 'BEAR')")
+    conn.execute(
+        "INSERT INTO technical_signals (symbol, date, win_probability, calibrated_win_probability, nifty_regime) "
+        "VALUES ('NOREGIME', ?, 0.38, NULL, NULL)", (today,)
+    )
+    _insert_rec(conn, 'NOREGIME', today)
+    conn.commit()
+
+    _propagate_and_gate_recommendation_log(conn)
+
+    row = conn.execute("SELECT status FROM recommendation_log WHERE symbol='NOREGIME'").fetchone()
+    assert row['status'] == 'ACTIVE', \
+        "0.38 clears BEAR's threshold (0.36), the current-regime fallback for a row with no stamped regime"
+
+
+def test_row_threshold_used_by_edge_adjusted_path_too(monkeypatch):
+    """The per-row-regime threshold fix applies identically whether edge_adjustment_enabled is
+    on or off -- it's an orthogonal correctness fix, not part of the edge-adjustment feature."""
+    import ml_ensemble
+    from ml_ensemble import _propagate_and_gate_recommendation_log
+    monkeypatch.setattr(ml_ensemble, "use_postgres", lambda: False)
+
+    conn = _make_gate_db()
+    today = datetime.date.today().isoformat()
+    conn.execute("INSERT INTO app_settings (key, value) VALUES ('current_nifty_regime', 'BULL')")
+    _enable_edge_adjustment(conn)
+    _seed_edge_status(conn, 'BEAR', auc=0.61, ready=True)   # proven edge -> full trust, no shrink
+    conn.execute(
+        "INSERT INTO technical_signals (symbol, date, win_probability, calibrated_win_probability, nifty_regime) "
+        "VALUES ('OWNREGIMEFLAG', ?, 0.38, NULL, 'BEAR')", (today,)
+    )
+    _insert_rec(conn, 'OWNREGIMEFLAG', today)
+    conn.execute("UPDATE recommendation_log SET nifty_regime='BEAR' WHERE symbol='OWNREGIMEFLAG'")
+    conn.commit()
+
+    _propagate_and_gate_recommendation_log(conn)
+
+    row = conn.execute("SELECT status FROM recommendation_log WHERE symbol='OWNREGIMEFLAG'").fetchone()
+    assert row['status'] == 'ACTIVE', \
+        "same BEAR-threshold logic must apply under the edge-adjusted gate path too"

@@ -2626,40 +2626,128 @@ def score_pending(conn: ConnWrapper, ensemble: dict) -> int:
     updated = len(df)
     conn.commit()
 
-    # Propagate win_probability to active recommendation_log entries
-    cols = _table_columns(conn, 'recommendation_log')
-    if 'win_probability' in cols:
-        conn.execute("""
-            UPDATE recommendation_log
-            SET win_probability = (
-                SELECT ts.win_probability
-                FROM technical_signals ts
-                WHERE ts.symbol = recommendation_log.symbol
-                  AND ts.date = recommendation_log.signal_date
-                LIMIT 1
-            )
-            WHERE source = 'technical_scan'
-              AND status = 'ACTIVE'
-              AND date(signal_date) >= date('now', '-14 days')
-        """)
-        # Deactivate entries where ML now says win < threshold (regime-adaptive)
-        threshold = regime_threshold(conn)
-        cutoff_date = (datetime.date.today() - datetime.timedelta(days=2)).isoformat()
-        conn.execute("""
-            UPDATE recommendation_log
-            SET status = 'EXPIRED'
-            WHERE (
-                (win_probability IS NOT NULL AND win_probability < ?)
-                OR (win_probability IS NULL AND signal_date < ?)
-            )
-              AND status = 'ACTIVE'
-              AND source = 'technical_scan'
-        """, (threshold, cutoff_date))
-        conn.commit()
-        print(f"[Ensemble] win_probability gate applied at {threshold:.2f} (regime-adaptive); "
-              f"NULL signals older than 2 days also expired.")
+    # Propagate win_probability to active recommendation_log entries + apply regime-adaptive gate
+    _propagate_and_gate_recommendation_log(conn)
 
     return updated
+
+
+def _row_threshold(regime, default_threshold: float) -> float:
+    """Per-row regime-adaptive threshold: use the row's OWN stamped nifty_regime (the regime
+    that was active when this recommendation was created), not just today's current regime
+    applied uniformly to every ACTIVE row regardless of age. A row created during BEAR
+    (threshold 0.36) was previously judged against whatever regime happens to be current today
+    (e.g. BULL, threshold 0.40) once that changed -- a temporal mismatch, not a deliberate
+    design choice. _REGIME_THRESHOLDS is keyed on the same 3-class taxonomy (BULL/SIDEWAYS/BEAR)
+    recommendation_log.nifty_regime already stores, so a direct lookup is correct here with no
+    HIGH_VOL/CRASH collapsing needed -- those values never appear in this column."""
+    if regime is None:
+        return default_threshold
+    return _REGIME_THRESHOLDS.get(regime, default_threshold)
+
+
+def _propagate_and_gate_recommendation_log(conn: ConnWrapper) -> None:
+    """Propagate the latest win_probability from technical_signals onto active
+    recommendation_log rows (preferring calibrated_win_probability -- the raw stacking output
+    is known to be overconfident/non-monotonic, see ml_calibration.py), then expire rows whose
+    probability falls below the regime-adaptive threshold -- each row judged against the
+    threshold for the regime it was actually created in (see _row_threshold), falling back to
+    today's current regime only for rows with no stamped nifty_regime.
+
+    When app_settings.edge_adjustment_enabled='true', the gate additionally abstains (falls back
+    to the same date-only cutoff rule NULL-probability rows already use) in regimes with no
+    proven live discrimination for win_probability, instead of gating on a probability that
+    carries no information there. See ml_calibration.regime_edge_weight. Defaults OFF."""
+    cols = _table_columns(conn, 'recommendation_log')
+    if 'win_probability' not in cols:
+        return
+    conn.execute("""
+        UPDATE recommendation_log
+        SET win_probability = (
+            SELECT COALESCE(ts.calibrated_win_probability, ts.win_probability)
+            FROM technical_signals ts
+            WHERE ts.symbol = recommendation_log.symbol
+              AND ts.date = recommendation_log.signal_date
+            LIMIT 1
+        )
+        WHERE source = 'technical_scan'
+          AND status = 'ACTIVE'
+          AND date(signal_date) >= date('now', '-14 days')
+    """)
+    default_threshold = regime_threshold(conn)   # fallback for rows with no stamped nifty_regime
+    cutoff_date = (datetime.date.today() - datetime.timedelta(days=2)).isoformat()
+
+    from ml_calibration import is_edge_adjustment_enabled
+    if is_edge_adjustment_enabled(conn):
+        n = _apply_regime_expiry_gate(conn, default_threshold, cutoff_date)
+        print(f"[Ensemble] regime-aware win_probability gate applied (per-signal regime "
+              f"threshold, default {default_threshold:.2f}); {n} rows expired (edge-adjusted).")
+    else:
+        n = _apply_plain_expiry_gate(conn, default_threshold, cutoff_date)
+        print(f"[Ensemble] win_probability gate applied (per-signal regime threshold, default "
+              f"{default_threshold:.2f}); {n} rows expired; NULL signals older than 2 days "
+              f"also expired.")
+
+
+def _apply_plain_expiry_gate(conn: ConnWrapper, default_threshold: float, cutoff_date: str) -> int:
+    """Legacy (non-edge-adjusted) expiry gate, using each row's OWN stamped nifty_regime for its
+    threshold (see _row_threshold) instead of a single current-regime threshold applied to every
+    row. Returns rows expired."""
+    rows = conn.execute("""
+        SELECT id, signal_date, win_probability, nifty_regime FROM recommendation_log
+        WHERE status = 'ACTIVE' AND source = 'technical_scan'
+    """).fetchall()
+    expire_ids = []
+    for r in rows:
+        wp = r['win_probability']
+        if wp is None:
+            if str(r['signal_date']) < cutoff_date:
+                expire_ids.append(r['id'])
+            continue
+        threshold = _row_threshold(r['nifty_regime'], default_threshold)
+        if float(wp) < threshold:
+            expire_ids.append(r['id'])
+    if expire_ids:
+        conn.executemany("UPDATE recommendation_log SET status='EXPIRED' WHERE id=?",
+                          [(i,) for i in expire_ids])
+        conn.commit()
+    return len(expire_ids)
+
+
+def _apply_regime_expiry_gate(conn: ConnWrapper, default_threshold: float, cutoff_date: str) -> int:
+    """Per-row expiry gate that abstains (routes to the date-cutoff fallback already used for
+    NULL win_probability) in regimes with no proven live edge for win_probability, instead of
+    gating on a probability that has been shrunk toward noise there. Also uses each row's OWN
+    stamped nifty_regime for its threshold (see _row_threshold). Returns rows expired."""
+    from ml_calibration import regime_edge_weight, load_regime_edge_status
+    edge_status = load_regime_edge_status(conn)
+    rows = conn.execute("""
+        SELECT id, signal_date, win_probability, nifty_regime FROM recommendation_log
+        WHERE status = 'ACTIVE' AND source = 'technical_scan'
+    """).fetchall()
+    expire_ids = []
+    for r in rows:
+        wp = r['win_probability']
+        if wp is None:
+            if str(r['signal_date']) < cutoff_date:
+                expire_ids.append(r['id'])
+            continue
+        threshold = _row_threshold(r['nifty_regime'], default_threshold)
+        w = regime_edge_weight(r['nifty_regime'], edge_status)
+        if w <= 0.0:
+            # No live discriminative edge in this regime -- acting on wp here is worse than not
+            # acting. Fall back to the same date-only rule NULL rows already use.
+            if str(r['signal_date']) < cutoff_date:
+                expire_ids.append(r['id'])
+        else:
+            adj = 0.5 + w * (float(wp) - 0.5)
+            if adj < threshold:
+                expire_ids.append(r['id'])
+    if expire_ids:
+        conn.executemany("UPDATE recommendation_log SET status='EXPIRED' WHERE id=?",
+                          [(i,) for i in expire_ids])
+        conn.commit()
+    return len(expire_ids)
 
 
 # ── Drift detection ───────────────────────────────────────────────────────────
