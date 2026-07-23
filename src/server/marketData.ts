@@ -1,6 +1,7 @@
 import { getStockMapping } from './stockMapping';
 import { fetchTrendlyneFundamentals } from './trendlyneService';
 import { mcFetchJson } from './mcApiService';
+import { dbAll } from './dbAsync';
 
 export { fetchTrendlyneFundamentals };
 
@@ -75,6 +76,28 @@ export async function fetchETCorporateActions(symbol: string) {
   return response.json();
 }
 
+// Fallback for when the live Moneycontrol techCharts feed is unreachable/empty (e.g. a network
+// outage, or this symbol not covered by that feed) — stock_ohlcv is fed by separate backfill
+// jobs and was previously only ever read by scoring/ML, never by this chart-serving path, so an
+// MC outage meant "no chart" even when perfectly good historical bars already sat in the DB.
+async function fetchOhlcvFromDb(symbol: string, fromDate: string) {
+  const rows = await dbAll<any>(
+    `SELECT date, open, high, low, close, volume FROM stock_ohlcv
+     WHERE symbol = ? AND date >= ? AND is_suspect = 0
+     ORDER BY date ASC`,
+    [symbol.toUpperCase(), fromDate]
+  );
+  if (!rows.length) return { success: 0, data: [] };
+  return {
+    success: 1,
+    data: rows.map((r: any) => ({
+      time: Math.floor(new Date(r.date).getTime() / 1000),
+      open: Number(r.open), high: Number(r.high), low: Number(r.low), close: Number(r.close),
+      c: Number(r.close), volume: r.volume != null ? Number(r.volume) : 0,
+    })),
+  };
+}
+
 export async function fetchHistoricalOHLC(symbol: string, dur: string = '1y') {
   try {
     const map = getStockMapping(symbol);
@@ -125,14 +148,16 @@ export async function fetchHistoricalOHLC(symbol: string, dur: string = '1y') {
       },
     });
 
+    const fromDate = new Date(from * 1000).toISOString().slice(0, 10);
+
     if (!response.ok) {
-      console.error(`[OHLC] Moneycontrol returned ${response.status} for ${mcSymbol}`);
-      return { success: 0, data: [] };
+      console.error(`[OHLC] Moneycontrol returned ${response.status} for ${mcSymbol}, falling back to stock_ohlcv`);
+      return await fetchOhlcvFromDb(symbol, fromDate);
     }
 
     const data = await response.json();
     if (data.s !== 'ok' || !data.t) {
-      return { success: 0, data: [] };
+      return await fetchOhlcvFromDb(symbol, fromDate);
     }
 
     const mappedData = data.t.map((ts: number, i: number) => ({
@@ -147,8 +172,12 @@ export async function fetchHistoricalOHLC(symbol: string, dur: string = '1y') {
 
     return { success: 1, data: mappedData };
   } catch (error) {
-    console.error(`[OHLC] Error fetching OHLC for ${symbol}:`, error);
-    return { success: 0, data: [] };
+    console.error(`[OHLC] Error fetching OHLC for ${symbol}, falling back to stock_ohlcv:`, error);
+    // `from`/`to` above are scoped to the try block, not visible here — recompute a safe default
+    // window (this is an error-path fallback, exact precision isn't critical).
+    const fallbackDays = { '1d': 1, '5d': 5, '1m': 30, '3m': 90, '6m': 180, '1y': 365, '5y': 1825, max: 20000 }[dur.toLowerCase()] ?? 365;
+    const fallbackFromDate = new Date(Date.now() - fallbackDays * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    return await fetchOhlcvFromDb(symbol, fallbackFromDate);
   }
 }
 

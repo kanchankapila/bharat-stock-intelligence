@@ -87,7 +87,11 @@ const OverviewTab: React.FC<{ symbol: string }> = ({ symbol }) => {
         </div>
         {factors && (
           <div className="mt-3 space-y-2 border-t border-slate-800/60 pt-3">
-            {Object.entries(factors).map(([k, v]: [string, any]) => (
+            {(['technical', 'fundamental', 'momentum', 'valuation', 'delivery', 'news'] as const)
+              .filter((k) => (factors as any)[k] != null)
+              .map((k) => {
+                const v = (factors as any)[k] as number;
+                return (
               <div key={k} className="flex items-center justify-between text-[11px]">
                 <span className="text-slate-400 capitalize">{k}</span>
                 <div className="flex items-center gap-2 w-32">
@@ -100,7 +104,8 @@ const OverviewTab: React.FC<{ symbol: string }> = ({ symbol }) => {
                   <span className="text-slate-500 font-mono w-8 text-right">{v != null ? Math.round(v) : '—'}</span>
                 </div>
               </div>
-            ))}
+                );
+              })}
           </div>
         )}
         {score?.reasons && score.reasons.length > 0 && (
@@ -189,7 +194,7 @@ const FundamentalsTab: React.FC<{ symbol: string }> = ({ symbol }) => {
 
   const rows: [string, any, string?][] = [
     ['Market Cap (Cr)', fundamentals?.market_cap],
-    ['P/E', fundamentals?.pe_ratio ?? ratios?.pe],
+    ['P/E', fundamentals?.trailing_pe ?? ratios?.pe],
     ['P/B', fundamentals?.price_to_book ?? ratios?.pb],
     ['ROE %', fundamentals?.return_on_equity],
     ['Debt/Equity', fundamentals?.debt_to_equity],

@@ -6,7 +6,7 @@ import {
   Search, History, PieChart, Bookmark, Users, Globe, CheckCircle2,
   Star, LogIn, TrendingUp, ArrowUpRight, ArrowDownRight, Menu,
   ChevronLeft, ChevronRight, Radio, Settings2, Briefcase, Calendar, Sparkles,
-  FlaskConical, Layers, MonitorDot, ChartLine, X, MessageSquare,
+  FlaskConical, Layers, MonitorDot, ChartLine, X, MessageSquare, Gauge,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { nseStocksData } from '../data/nseStocks';
@@ -28,6 +28,8 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Markets',
     items: [
+      { icon: Gauge,           label: 'Market Command',     id: 'market-command'        },
+      { icon: Search,          label: 'Stock Intelligence', id: 'stock-intelligence-hub' },
       { icon: LayoutDashboard, label: 'Dashboard',  id: 'dashboard'   },
       { icon: BarChart2,       label: 'Indices',    id: 'indices'     },
       { icon: Activity,        label: 'Market Map', id: 'market-map'  },

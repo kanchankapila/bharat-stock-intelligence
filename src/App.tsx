@@ -4142,6 +4142,19 @@ export default function App() {
               <Routes>
                 <Route path="/" element={<DashboardPage stocks={stocks} onNewSignal={addToast} onSelectStock={handleSelectStock} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} onSelectIndex={(id, name) => { setSelectedIndex({ id, name }); navigate('/indices'); }} />} />
                 <Route path="/dashboard" element={<DashboardPage stocks={stocks} onNewSignal={addToast} onSelectStock={handleSelectStock} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} onSelectIndex={(id, name) => { setSelectedIndex({ id, name }); navigate('/indices'); }} />} />
+                <Route path="/market-command" element={
+                  <MarketCommandCenter
+                    onSelectStock={handleSelectStock}
+                    onSelectIndex={(id, name) => { setSelectedIndex({ id, name }); navigate('/indices'); }}
+                  />
+                } />
+                <Route path="/stock-intelligence-hub" element={
+                  <StockIntelligencePage
+                    initialSymbol={selectedSymbol}
+                    watchlist={watchlist}
+                    onToggleWatchlist={toggleWatchlist}
+                  />
+                } />
                 <Route path="/alpha" element={<CommandCenterDashboard onSelectStock={(s) => { setDrawerSymbol(s); navigate('/trade-cockpit'); }} />} />
                 <Route path="/buy-recs" element={<BuyRecommendationsPage onSelectStock={handleSelectStock} />} />
               <Route path="/top-rated" element={<TopRatedStocks onSelectStock={handleSelectStock} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
