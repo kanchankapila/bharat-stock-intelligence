@@ -5,9 +5,9 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { dbGet, dbAll } from "./dbAsync.js";
 import { usePostgres } from "./pgConfig.js";
+import { runPython } from "./pythonRunner.js";
 import path from "path";
 import fs from "fs";
-import { execFile } from "child_process";
 
 // Create the MCP server
 const server = new McpServer({
@@ -489,7 +489,7 @@ const VALID_ENGINES: { [key: string]: string } = {
 
 server.tool(
   "run_analytical_engine",
-  "Spawns and executes one of the core quantitative or machine learning Python engines in the project. Returns the output logs directly. Safe and sandboxed.",
+  "Spawns and executes one of the core quantitative or machine learning Python engines in the project. Returns the output logs directly. Runs through the app's shared Python concurrency semaphore (pythonRunner.ts, MAX_PYTHON_CONCURRENT slots) alongside every BullMQ-scheduled job, so it queues instead of stacking an uncounted extra process on top of the cap -- it may wait for a free slot before starting.",
   {
     engineName: z.enum([
       "scoring_engine",
@@ -507,53 +507,44 @@ server.tool(
     args: z.array(z.string()).optional().describe("Optional arguments to pass to the script (e.g. ['--horizon', '15'] or ['--symbol', 'TCS'])."),
   },
   async ({ engineName, args = [] }) => {
-    return new Promise((resolve) => {
-      const scriptFilename = VALID_ENGINES[engineName];
-      const scriptPath = path.resolve(process.cwd(), "src", "server", scriptFilename);
+    const scriptFilename = VALID_ENGINES[engineName];
+    const scriptPath = path.resolve(process.cwd(), "src", "server", scriptFilename);
 
-      if (!fs.existsSync(scriptPath)) {
-        return resolve({
-          content: [{ type: "text", text: `Error: Script file not found at ${scriptPath}` }],
-          isError: true,
-        });
+    if (!fs.existsSync(scriptPath)) {
+      return {
+        content: [{ type: "text", text: `Error: Script file not found at ${scriptPath}` }],
+        isError: true,
+      };
+    }
+
+    console.error(`🚀 MCP Agent queuing (via pythonRunner): src/server/${scriptFilename} ${args.join(" ")}`);
+    const commandLine = `python src/server/${scriptFilename} ${args.join(" ")}`;
+
+    try {
+      const { stdout, stderr } = await runPython(scriptFilename, args);
+      let output = `## Engine Execution: ${engineName}\n\n`;
+      output += `**Command:** \`${commandLine}\`\n\n`;
+      output += `✅ **Execution Successful!**\n\n`;
+      if (stdout) {
+        output += `**Stdout Output:**\n\`\`\`\n${stdout}\n\`\`\`\n\n`;
       }
-
-      const pythonBin = process.env.PYTHON_BIN || "python";
-      console.error(`🚀 MCP Agent spawning: ${pythonBin} src/server/${scriptFilename} ${args.join(" ")}`);
-
-      // Spawn process and fetch output safely
-      execFile(pythonBin, [scriptPath, ...args], { timeout: 300_000 }, (error, stdout, stderr) => {
-        let output = `## Engine Execution: ${engineName}\n\n`;
-        output += `**Command:** \`${pythonBin} src/server/${scriptFilename} ${args.join(" ")}\`\n\n`;
-
-        if (error) {
-          output += `❌ **Failed with Exit Code:** ${error.code}\n`;
-          output += `**Error Details:**\n\`\`\`\n${error.message}\n\`\`\`\n\n`;
-          if (stderr) {
-            output += `**Stderr Logs:**\n\`\`\`\n${stderr}\n\`\`\`\n\n`;
-          }
-          if (stdout) {
-            output += `**Stdout Output (Partial):**\n\`\`\`\n${stdout.slice(-2000)}\n\`\`\`\n`;
-          }
-          return resolve({
-            content: [{ type: "text", text: output }],
-            isError: true,
-          });
-        }
-
-        output += `✅ **Execution Successful!**\n\n`;
-        if (stdout) {
-          output += `**Stdout Output:**\n\`\`\`\n${stdout}\n\`\`\`\n\n`;
-        }
-        if (stderr) {
-          output += `**Stderr Warnings/Logs:**\n\`\`\`\n${stderr}\n\`\`\`\n`;
-        }
-
-        resolve({
-          content: [{ type: "text", text: output }],
-        });
-      });
-    });
+      if (stderr) {
+        output += `**Stderr Warnings/Logs:**\n\`\`\`\n${stderr}\n\`\`\`\n`;
+      }
+      return { content: [{ type: "text", text: output }] };
+    } catch (error: any) {
+      let output = `## Engine Execution: ${engineName}\n\n`;
+      output += `**Command:** \`${commandLine}\`\n\n`;
+      output += `❌ **Failed with Exit Code:** ${error?.code ?? "unknown"}\n`;
+      output += `**Error Details:**\n\`\`\`\n${error?.message ?? String(error)}\n\`\`\`\n\n`;
+      if (error?.stderr) {
+        output += `**Stderr Logs:**\n\`\`\`\n${error.stderr}\n\`\`\`\n\n`;
+      }
+      if (error?.stdout) {
+        output += `**Stdout Output (Partial):**\n\`\`\`\n${String(error.stdout).slice(-2000)}\n\`\`\`\n`;
+      }
+      return { content: [{ type: "text", text: output }], isError: true };
+    }
   }
 );
 

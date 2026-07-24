@@ -44,6 +44,7 @@ from sklearn.preprocessing import RobustScaler
 import ta
 
 from db_compat import connect, read_df, use_postgres, ConnWrapper
+from as_of import read_as_of_history
 
 SCALER_PATH = Path(__file__).parent / "ml_models" / "feature_scaler_v1.pkl"
 
@@ -231,16 +232,11 @@ class FeatureEngineer:
         get NaN, not a leaked current value. fundamentals_history has no trailing_pe column,
         so it's derived from the point-in-time earnings_yield instead.
         """
-        hist = read_df(
-            """SELECT as_of_date, return_on_equity, debt_to_equity, operating_margins,
-                      piotroski_f_score, earnings_yield
-               FROM fundamentals_history WHERE symbol = ? ORDER BY as_of_date""",
-            (symbol,),
+        hist = read_as_of_history(
+            "fundamentals_history", symbol,
+            ["return_on_equity", "debt_to_equity", "operating_margins",
+             "piotroski_f_score", "earnings_yield"],
         )
-        if hist.empty:
-            return feat
-        hist["as_of_date"] = pd.to_datetime(hist["as_of_date"]).astype("datetime64[ns]")
-        hist = hist.dropna(subset=["as_of_date"]).sort_values("as_of_date")
         if hist.empty:
             return feat
 

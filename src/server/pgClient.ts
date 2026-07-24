@@ -133,6 +133,11 @@ export async function pgSchemaVersion(): Promise<{ appliedCount: number; latest:
  * (see CLAUDE.md's migration-066 note) — nothing recorded that the column had ever been added.
  * Now each ALTER runs at most once per fresh DB and is recorded, matching the SQLite side's
  * runMigration() pattern; pgSchemaVersion() gives a queryable schema state for ops/CI checks.
+ *
+ * As of 2026-07-24, node-pg-migrate is the tool for NEW schema changes (see migrations/ and the
+ * npm run migrate:* scripts) — do not add new entries to `creates`/`alters` below; write a
+ * migration instead. This function and its existing entries stay as-is (idempotent, harmless)
+ * for schema predating that adoption.
  */
 export async function pgEnsureColumns(): Promise<void> {
   if (_columnsEnsured) return;

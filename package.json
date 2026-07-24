@@ -25,7 +25,10 @@
     "sync:mappings": "tsx scripts/syncAllStockMappings.ts",
     "update:sectors": "tsx scripts/updateSectors.ts",
     "smoke:ci": "tsx scripts/ci_smoke_test.ts",
-    "dq:check": "tsx scripts/run_data_quality_checks.ts"
+    "dq:check": "tsx scripts/run_data_quality_checks.ts",
+    "migrate:up": "node-pg-migrate up -d POSTGRES_URL",
+    "migrate:down": "node-pg-migrate down -d POSTGRES_URL",
+    "migrate:create": "node-pg-migrate create -j sql -d POSTGRES_URL"
   },
   "dependencies": {
     "@aws-sdk/client-bedrock-runtime": "^3.1075.0",
@@ -81,6 +84,7 @@
     "@types/react-dom": "^19.2.3",
     "autoprefixer": "^10.4.21",
     "concurrently": "^9.2.1",
+    "node-pg-migrate": "^9.0.0",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",

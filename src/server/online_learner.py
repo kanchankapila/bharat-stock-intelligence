@@ -26,6 +26,7 @@ import numpy as np
 import pandas as pd
 
 from db_compat import connect, read_df, ConnWrapper
+from as_of import as_of_join_sql
 
 MODELS_DIR     = os.path.join(os.getcwd(), 'src', 'server', 'ml_models')
 ONLINE_PATH    = os.path.join(MODELS_DIR, 'online_sgd.pkl')
@@ -51,7 +52,7 @@ def load_recent_outcomes(window_days: int, min_new: int) -> pd.DataFrame:
     it expects (missing ones default safely inside the ensemble's num() helper).
     """
     cutoff = (datetime.datetime.now() - datetime.timedelta(days=window_days)).strftime('%Y-%m-%d')
-    q = """
+    q = f"""
         SELECT so.symbol, so.signal_date, so.horizon_days, so.outcome,
                so.signal_score, so.signals_json,
                ts.rsi, ts.adx, ts.nifty_regime, ts.cmp, ts.sma200, ts.volume_ratio,
@@ -78,19 +79,9 @@ def load_recent_outcomes(window_days: int, min_new: int) -> pd.DataFrame:
         FROM signal_outcomes so
         LEFT JOIN technical_signals ts
                ON ts.symbol = so.symbol AND ts.date = so.signal_date
-        LEFT JOIN fundamentals_history fh
-               ON fh.symbol = so.symbol
-              AND fh.as_of_date = (
-                  SELECT MAX(fh2.as_of_date) FROM fundamentals_history fh2
-                  WHERE fh2.symbol = so.symbol AND fh2.as_of_date <= so.signal_date
-              )
+        {as_of_join_sql('fundamentals_history', 'fh', 'so', 'symbol', 'signal_date')}
         LEFT JOIN stock_fundamentals sf ON sf.symbol = so.symbol
-        LEFT JOIN analyst_estimates_history aeh
-               ON aeh.symbol = so.symbol
-              AND aeh.as_of_date = (
-                  SELECT MAX(aeh2.as_of_date) FROM analyst_estimates_history aeh2
-                  WHERE aeh2.symbol = so.symbol AND aeh2.as_of_date <= so.signal_date
-              )
+        {as_of_join_sql('analyst_estimates_history', 'aeh', 'so', 'symbol', 'signal_date')}
         LEFT JOIN proprietary_scores_history psh_az
                ON psh_az.symbol = so.symbol AND psh_az.source = 'moneycontrol'
               AND psh_az.score_type = 'altman_z_score'

@@ -33,6 +33,8 @@ RET_THRESHOLD = 0.06     # +6% forward move = breakout
 HORIZON = 10             # within the next 10 trading days
 MIN_PRICE = 20.0
 EMBARGO = HORIZON        # purge `horizon` bars between train and validation folds
+RANDOM_STATE = 42        # pinned so promotion-gate comparisons and the purge regression
+                         # test (test_breakout_purge_regression.py) are deterministic
 TRAIN_LOOKBACK_DAYS = 2000   # ~5.5y — use the full backfilled history for training
 SCORE_LOOKBACK_DAYS = 600    # headroom for the 252-day rolling windows on the latest bar
 MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ml_models", "breakout.pkl")
@@ -190,16 +192,33 @@ def _make_model(spw: float):
         n_estimators=400, learning_rate=0.03, num_leaves=63, max_depth=-1,
         subsample=0.8, subsample_freq=1, colsample_bytree=0.8,
         min_child_samples=200, scale_pos_weight=spw, n_jobs=-1, verbose=-1,
+        random_state=RANDOM_STATE,
     )
 
 
-def train(report_only: bool = False, leak_check: bool = False) -> dict:
-    from sklearn.metrics import roc_auc_score
+def evaluate_purged_cv(df: pd.DataFrame, embargo: int = EMBARGO, n_folds: int = 4,
+                        holdout_frac: float = 0.15) -> dict:
+    """Purged walk-forward OOF AUC — the honest read on whether breakouts are predictable.
+    CRITICAL: purge by DATE, not by row. The label looks forward `horizon` trading days,
+    and each date holds ~170 rows, so a row-based gap (TimeSeriesSplit gap=10) leaves the
+    forward-label windows of adjacent folds massively overlapping -> leakage -> a
+    fantasy AUC. We hold out contiguous date blocks and drop `horizon` embargo dates
+    between train and validation so no training row's forward window touches a val date.
 
-    df = load_labeled_features()
-    if df.empty or len(df) < 500:
-        print(f"[Breakout] insufficient labeled data ({len(df)} rows); skipping.")
-        return {"trained": False, "n": len(df)}
+    This purged-OOF number is also used as the promotion-gate metric AND as the last check
+    before refitting on all data — the same figure serves as both tuning signal and final
+    sign-off. To get one independent read, carve off the most recent holdout_frac of dates
+    up front; the walk-forward CV loop below never trains or validates on them. A model
+    fit on everything before the holdout is scored against it separately, after CV.
+
+    Pure function of `df` (no DB access) so it's directly testable on a synthetic frame --
+    see test_breakout_purge_regression.py, which compares this against a deliberately
+    naive row-index-gap split on the same leak-shaped synthetic data.
+
+    Returns a dict: trained, n, auc, test_auc, base_rate, lift, plus X/y/spw/cv_df for
+    reuse by callers (leak-check, the final production refit) without recomputing them.
+    """
+    from sklearn.metrics import roc_auc_score
 
     # Keep every other trading day: consecutive-day labels are highly autocorrelated, so
     # striding halves the row count with negligible information loss and keeps CV fast.
@@ -213,34 +232,21 @@ def train(report_only: bool = False, leak_check: bool = False) -> dict:
     base_rate = float(y.mean())
     spw = (1 - base_rate) / max(base_rate, 1e-6)
 
-    # Purged walk-forward OOF AUC — the honest read on whether breakouts are predictable.
-    # CRITICAL: purge by DATE, not by row. The label looks forward `horizon` trading days,
-    # and each date holds ~170 rows, so a row-based gap (TimeSeriesSplit gap=10) leaves the
-    # forward-label windows of adjacent folds massively overlapping -> leakage -> a
-    # fantasy AUC. We hold out contiguous date blocks and drop `horizon` embargo dates
-    # between train and validation so no training row's forward window touches a val date.
-    #
-    # This purged-OOF number is also used as the promotion-gate metric AND as the last check
-    # before refitting on all data — the same figure serves as both tuning signal and final
-    # sign-off. To get one independent read, carve off the most recent HOLDOUT_FRAC of dates
-    # up front; the walk-forward CV loop below never trains or validates on them. A model
-    # fit on everything before the holdout is scored against it separately, after CV.
-    HOLDOUT_FRAC = 0.15
+    HOLDOUT_FRAC = holdout_frac
     all_dates_sorted = np.array(sorted(df["date"].unique()))
-    n_holdout_dates = max(EMBARGO, int(len(all_dates_sorted) * HOLDOUT_FRAC))
-    holdout_dates = set(all_dates_sorted[-n_holdout_dates:]) if len(all_dates_sorted) > 4 * EMBARGO else set()
+    n_holdout_dates = max(embargo, int(len(all_dates_sorted) * HOLDOUT_FRAC))
+    holdout_dates = set(all_dates_sorted[-n_holdout_dates:]) if len(all_dates_sorted) > 4 * embargo else set()
     cv_df = df[~df["date"].isin(holdout_dates)] if holdout_dates else df
 
     dates = np.array(sorted(cv_df["date"].unique()))
     oof = np.full(len(y), np.nan)
-    n_folds = 4
-    if len(dates) < 2 * EMBARGO:
+    if len(dates) < 2 * embargo:
         print(f"[Breakout] only {len(dates)} distinct dates; too few for a purged CV with "
-              f"{EMBARGO}-day embargo — treat the AUC as provisional until history grows.")
-    block = max(1, (len(dates) - EMBARGO) // (n_folds + 1))
+              f"{embargo}-day embargo — treat the AUC as provisional until history grows.")
+    block = max(1, (len(dates) - embargo) // (n_folds + 1))
     for i in range(1, n_folds + 1):
         train_end = block * i
-        val_start = train_end + EMBARGO
+        val_start = train_end + embargo
         val_end = val_start + block
         if val_start >= len(dates) or train_end < 1:
             continue
@@ -257,7 +263,9 @@ def train(report_only: bool = False, leak_check: bool = False) -> dict:
     if mask.sum() < 50 or len(set(y[mask])) < 2:
         print(f"[Breakout] purged CV left too few validation rows ({int(mask.sum())}); "
               f"need more history (only {len(dates)} labelled dates available).")
-        return {"trained": False, "n": len(y), "auc": float("nan"), "base_rate": base_rate}
+        return {"trained": False, "n": len(y), "auc": float("nan"), "base_rate": base_rate,
+                "test_auc": float("nan"), "lift": float("nan"), "X": X, "y": y, "spw": spw,
+                "df": df, "cv_df": cv_df}
     auc = float(roc_auc_score(y[mask], oof[mask]))
 
     # top-decile lift: of the highest-scored decile, how much more often do they break out?
@@ -270,13 +278,13 @@ def train(report_only: bool = False, leak_check: bool = False) -> dict:
           f"top-decile breakout rate={top_rate:.3f} (lift {lift:.2f}x)")
 
     # Held-out test AUC — independent of the OOF number above. A model trained on everything
-    # up to (holdout_start - EMBARGO) is scored against the reserved final HOLDOUT_FRAC of
+    # up to (holdout_start - embargo) is scored against the reserved final holdout_frac of
     # dates, which never appeared in any CV fold's train or validation split. This is the one
     # number in this file that answers "does it generalize" rather than "how was it tuned".
     test_auc = float("nan")
     if holdout_dates:
         train_cutoff = sorted(set(all_dates_sorted) - holdout_dates)
-        train_cutoff_dates = set(train_cutoff[:max(1, len(train_cutoff) - EMBARGO)])  # embargo before holdout too
+        train_cutoff_dates = set(train_cutoff[:max(1, len(train_cutoff) - embargo)])  # embargo before holdout too
         tr_ho = df["date"].isin(train_cutoff_dates).values
         va_ho = df["date"].isin(holdout_dates).values
         if tr_ho.sum() >= 200 and va_ho.sum() >= 50 and len(set(y[tr_ho])) >= 2 and len(set(y[va_ho])) >= 2:
@@ -288,6 +296,26 @@ def train(report_only: bool = False, leak_check: bool = False) -> dict:
         else:
             print(f"[Breakout] held-out test skipped - insufficient rows/class balance "
                   f"(train={tr_ho.sum()}, holdout={va_ho.sum()})")
+
+    return {"trained": True, "n": len(y), "auc": auc, "test_auc": test_auc,
+            "base_rate": base_rate, "lift": lift, "X": X, "y": y, "spw": spw,
+            "df": df, "cv_df": cv_df}
+
+
+def train(report_only: bool = False, leak_check: bool = False) -> dict:
+    from sklearn.metrics import roc_auc_score  # used by the leak_check closure below
+
+    df = load_labeled_features()
+    if df.empty or len(df) < 500:
+        print(f"[Breakout] insufficient labeled data ({len(df)} rows); skipping.")
+        return {"trained": False, "n": len(df)}
+
+    result = evaluate_purged_cv(df)
+    if not result["trained"]:
+        return result
+    auc, test_auc, base_rate, lift = result["auc"], result["test_auc"], result["base_rate"], result["lift"]
+    X, y, spw, cv_df = result["X"], result["y"], result["spw"], result["cv_df"]
+    n_folds = 4  # matches evaluate_purged_cv's default; leak_canary below reimplements the same CV shape
 
     if leak_check:
         from ml_leak_check import leak_canary
