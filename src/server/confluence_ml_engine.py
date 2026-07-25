@@ -17,6 +17,7 @@ import numpy as np
 from datetime import datetime, timedelta
 
 from db_compat import connect, use_postgres, ConnWrapper
+from as_of import as_of_join_sql
 
 # ── Optional imports (graceful fallback) ──────────────────────────────────────
 try:
@@ -98,14 +99,7 @@ def build_training_data(conn):
     # Point-in-time fundamentals as-of so.signal_date. stock_fundamentals is a current
     # snapshot only -- joining it directly (as this used to) leaks future fundamentals
     # into training rows for symbols whose outcome predates today.
-    _FUND_JOIN = """
-        LEFT JOIN fundamentals_history fh
-               ON fh.symbol = so.symbol
-              AND fh.as_of_date = (
-                  SELECT MAX(fh2.as_of_date) FROM fundamentals_history fh2
-                  WHERE fh2.symbol = so.symbol AND fh2.as_of_date <= so.signal_date
-              )
-    """
+    _FUND_JOIN = as_of_join_sql('fundamentals_history', 'fh', 'so', 'symbol', 'signal_date')
 
     if use_postgres():
         # Outcome-driven rewrite: the ~4k h7 WIN/LOSS outcomes drive the scan, and a LATERAL

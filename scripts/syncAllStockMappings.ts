@@ -1,10 +1,19 @@
 import { nseStocksData } from '../src/data/nseStocks';
-import { resolveMoneycontrolSymbol } from '../src/server/stockMapping';
-import db from '../src/server/db';
-import { getStockMapping } from '../src/server/stockMapping';
+import { resolveMoneycontrolSymbol, getStockMapping } from '../src/server/stockMapping';
+import { dbGet, dbRun } from '../src/server/dbAsync';
 
-const BATCH_SIZE = 50;
 const DELAY_MS = 500;
+
+interface NseStocksRow {
+  mcsymbol: string | null;
+  tlid: string | null;
+  tlname: string | null;
+  stockid: string | null;
+  companyid: string | null;
+  tickertape_sid: string | null;
+  fincode: string | null;
+  scripcode: string | null;
+}
 
 async function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -12,23 +21,33 @@ async function sleep(ms: number) {
 
 async function syncMappings() {
   console.log(`Starting sync for ${nseStocksData.length} stocks...`);
-  
+
   let updatedCount = 0;
   let skippedCount = 0;
   let failedCount = 0;
 
   for (const stock of nseStocksData) {
     const symbol = stock.symbol;
-    
-    // Check if mapping already exists in db
-    const row = db.prepare('SELECT mcsymbol, tlid, tlname FROM nse_stocks WHERE symbol = ?').get(symbol) as any;
-    
-    // Also check static mapping
+
+    // Check if mapping already exists in db. Routed through dbAsync (Postgres/SQLite-aware) --
+    // this script previously imported the raw better-sqlite3 handle from db.ts, so it only ever
+    // wrote to the SQLite dev-fallback DB regardless of USE_POSTGRES and never reached production.
+    const row = await dbGet<NseStocksRow>(
+      'SELECT mcsymbol, tlid, tlname, stockid, companyid, tickertape_sid, fincode, scripcode FROM nse_stocks WHERE symbol = ?',
+      [symbol],
+    );
+
+    // Also check static mapping (src/data/stocklist.ts)
     const staticMap = getStockMapping(symbol);
 
     let mcsymbol = row?.mcsymbol || staticMap?.mcsymbol;
     let tlid = row?.tlid || staticMap?.tlid;
     let tlname = row?.tlname || staticMap?.tlname;
+    const stockid = row?.stockid || staticMap?.stockid;
+    const companyid = row?.companyid || staticMap?.companyid;
+    const tickertapeSid = row?.tickertape_sid || staticMap?.tickertape_sid;
+    const fincode = row?.fincode || staticMap?.fincode;
+    const scripcode = row?.scripcode || staticMap?.scripcode;
 
     let needsUpdate = false;
 
@@ -50,7 +69,10 @@ async function syncMappings() {
 
     // 2. Resolve Trendlyne ID if missing (from existing screener table)
     if (!tlid) {
-      const tlRow = db.prepare('SELECT DISTINCT stock_id FROM trendlyne_screener_stocks WHERE symbol = ?').get(symbol) as { stock_id: string } | undefined;
+      const tlRow = await dbGet<{ stock_id: string }>(
+        'SELECT DISTINCT stock_id FROM trendlyne_screener_stocks WHERE symbol = ?',
+        [symbol],
+      );
       if (tlRow?.stock_id) {
         tlid = tlRow.stock_id;
         needsUpdate = true;
@@ -58,24 +80,37 @@ async function syncMappings() {
       }
     }
 
-    if (needsUpdate || (mcsymbol && !row?.mcsymbol) || (tlid && !row?.tlid)) {
+    const gainedNewField =
+      (mcsymbol && !row?.mcsymbol) || (tlid && !row?.tlid) ||
+      (stockid && !row?.stockid) || (companyid && !row?.companyid) ||
+      (tickertapeSid && !row?.tickertape_sid) || (fincode && !row?.fincode) ||
+      (scripcode && !row?.scripcode);
+
+    if (needsUpdate || gainedNewField) {
       try {
-        db.prepare(`
-          UPDATE nse_stocks 
-          SET mcsymbol = ?, tlid = ?, tlname = ? 
-          WHERE symbol = ?
-        `).run(mcsymbol || null, tlid || null, tlname || null, symbol);
-        
+        await dbRun(
+          `UPDATE nse_stocks
+           SET mcsymbol = ?, tlid = ?, tlname = ?, stockid = ?, companyid = ?,
+               tickertape_sid = ?, fincode = ?, scripcode = ?
+           WHERE symbol = ?`,
+          [mcsymbol || null, tlid || null, tlname || null, stockid || null, companyid || null,
+           tickertapeSid || null, fincode || null, scripcode || null, symbol],
+        );
+
         // Ensure the row exists just in case (though it should if nse_stocks is populated)
-        // If row doesn't exist, we might need to insert it
-        const checkRow = db.prepare('SELECT id FROM nse_stocks WHERE symbol = ?').get(symbol);
+        const checkRow = await dbGet('SELECT id FROM nse_stocks WHERE symbol = ?', [symbol]);
         if (!checkRow) {
-           db.prepare(`
-             INSERT INTO nse_stocks (symbol, name, sector, industry, isin, listing_date, mcsymbol, tlid, tlname)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-           `).run(symbol, stock.name, stock.sector, stock.industry, stock.isin, stock.listing_date, mcsymbol || null, tlid || null, tlname || null);
+          await dbRun(
+            `INSERT INTO nse_stocks
+             (symbol, name, sector, industry, isin, listing_date, mcsymbol, tlid, tlname,
+              stockid, companyid, tickertape_sid, fincode, scripcode)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [symbol, stock.name, stock.sector, stock.industry, stock.isin, stock.listing_date,
+             mcsymbol || null, tlid || null, tlname || null, stockid || null, companyid || null,
+             tickertapeSid || null, fincode || null, scripcode || null],
+          );
         }
-        
+
         updatedCount++;
       } catch (e: any) {
         console.error(`Failed to update DB for ${symbol}: ${e.message}`);

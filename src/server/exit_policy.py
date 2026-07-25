@@ -28,6 +28,7 @@ import pandas as pd
 
 from db_compat import read_df
 from ml_ensemble import build_features
+from as_of import as_of_join_sql
 
 MODELS_DIR = os.path.join(os.getcwd(), 'src', 'server', 'ml_models')
 EXIT_MODEL_PATH = os.path.join(MODELS_DIR, 'exit_policy.pkl')
@@ -52,7 +53,7 @@ def suggest_levels(entry: float, pred_mfe_pct: float, pred_mae_pct: float,
 def load_exit_training_data() -> pd.DataFrame:
     """Excursion labels joined to the entry-time technical features + point-in-time
     fundamentals (same as-of discipline as ml_ensemble.load_training_data)."""
-    q = """
+    q = f"""
         SELECT se.symbol, se.signal_date, se.horizon_days,
                se.mfe_pct, se.mae_pct,
                ts.signal_score, ts.signals_json,
@@ -66,12 +67,7 @@ def load_exit_training_data() -> pd.DataFrame:
                fh.earnings_growth, fh.earnings_yield, fh.price_to_book, fh.market_cap
         FROM signal_excursions se
         JOIN technical_signals ts ON ts.symbol = se.symbol AND ts.date = se.signal_date
-        LEFT JOIN fundamentals_history fh
-               ON fh.symbol = se.symbol
-              AND fh.as_of_date = (
-                  SELECT MAX(fh2.as_of_date) FROM fundamentals_history fh2
-                  WHERE fh2.symbol = se.symbol AND fh2.as_of_date <= se.signal_date
-              )
+        {as_of_join_sql('fundamentals_history', 'fh', 'se', 'symbol', 'signal_date')}
         WHERE se.mfe_pct IS NOT NULL AND se.mae_pct IS NOT NULL
         ORDER BY se.signal_date
     """
@@ -157,7 +153,7 @@ def predict_levels(df_row: pd.DataFrame, entry: float, model: dict | None = None
 
 def load_latest_features_for_symbol(symbol: str) -> pd.DataFrame:
     """Query database for the latest technical signals and other features for a single stock."""
-    q = """
+    q = f"""
         SELECT ts.symbol, ts.date AS signal_date, ts.signal_score, ts.signals_json,
                ts.rsi, ts.adx, ts.nifty_regime, ts.cmp, ts.sma200, ts.volume_ratio,
                ts.fii_3d_net,
@@ -265,12 +261,7 @@ def load_latest_features_for_symbol(symbol: str) -> pd.DataFrame:
         LEFT JOIN market_breadth mb ON mb.date = ts.date
         LEFT JOIN historical_fno_sentiment hfs
                ON hfs.symbol = ts.symbol AND hfs.date = ts.date
-        LEFT JOIN analyst_estimates_history aeh
-               ON aeh.symbol = ts.symbol
-              AND aeh.as_of_date = (
-                  SELECT MAX(aeh2.as_of_date) FROM analyst_estimates_history aeh2
-                  WHERE aeh2.symbol = ts.symbol AND aeh2.as_of_date <= ts.date
-              )
+        {as_of_join_sql('analyst_estimates_history', 'aeh', 'ts', 'symbol', 'date')}
         LEFT JOIN proprietary_scores_history psh_az
                ON psh_az.symbol = ts.symbol
               AND psh_az.source = 'moneycontrol'

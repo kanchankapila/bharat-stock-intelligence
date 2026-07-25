@@ -39,6 +39,7 @@ import numpy as np
 import pandas as pd
 
 from db_compat import connect, read_df, use_postgres, ConnWrapper
+from as_of import as_of_join_sql
 
 MODELS_DIR  = os.path.join(os.getcwd(), 'src', 'server', 'ml_models')
 ENSEMBLE_PATH = os.path.join(MODELS_DIR, 'ensemble.pkl')
@@ -1139,18 +1140,8 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                 ORDER BY ts2.date DESC
                 LIMIT 1
             ) ts ON TRUE
-            LEFT JOIN fundamentals_history fh
-                   ON fh.symbol = so.symbol
-                  AND fh.as_of_date = (
-                      SELECT MAX(fh2.as_of_date) FROM fundamentals_history fh2
-                      WHERE fh2.symbol = so.symbol AND fh2.as_of_date <= so.signal_date
-                  )
-            LEFT JOIN analyst_estimates_history aeh
-                   ON aeh.symbol = so.symbol
-                  AND aeh.as_of_date = (
-                      SELECT MAX(aeh2.as_of_date) FROM analyst_estimates_history aeh2
-                      WHERE aeh2.symbol = so.symbol AND aeh2.as_of_date <= so.signal_date
-                  )
+            {as_of_join_sql('fundamentals_history', 'fh', 'so', 'symbol', 'signal_date')}
+            {as_of_join_sql('analyst_estimates_history', 'aeh', 'so', 'symbol', 'signal_date')}
             -- GDELT tone (-100..+100, typically -10..+10) scaled to the same -1..1 range as
             -- technical_signals.news_sentiment_score, used ONLY as a fallback (COALESCE above)
             -- for rows that predate live finbert/RSS coverage -- gdelt_sentiment has history
@@ -1412,18 +1403,8 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                         AND ts2.date <= so.signal_date
                         AND ts2.date >= date(so.signal_date, '-3 days')
                   )
-            LEFT JOIN fundamentals_history fh
-                   ON fh.symbol = so.symbol
-                  AND fh.as_of_date = (
-                      SELECT MAX(fh2.as_of_date) FROM fundamentals_history fh2
-                      WHERE fh2.symbol = so.symbol AND fh2.as_of_date <= so.signal_date
-                  )
-            LEFT JOIN analyst_estimates_history aeh
-                   ON aeh.symbol = so.symbol
-                  AND aeh.as_of_date = (
-                      SELECT MAX(aeh2.as_of_date) FROM analyst_estimates_history aeh2
-                      WHERE aeh2.symbol = so.symbol AND aeh2.as_of_date <= so.signal_date
-                  )
+            {as_of_join_sql('fundamentals_history', 'fh', 'so', 'symbol', 'signal_date')}
+            {as_of_join_sql('analyst_estimates_history', 'aeh', 'so', 'symbol', 'signal_date')}
             LEFT JOIN proprietary_scores_history psh_az
                    ON psh_az.symbol = so.symbol
                   AND psh_az.source = 'moneycontrol'
@@ -1502,7 +1483,7 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
 
 def load_pending_signals() -> pd.DataFrame:
     if use_postgres():
-        q = """
+        q = f"""
             SELECT ts.symbol, ts.date AS signal_date, ts.signal_score, ts.signals_json,
                    ts.rsi, ts.adx, ts.nifty_regime, ts.cmp, ts.sma200, ts.volume_ratio,
                    ts.fii_3d_net,
@@ -1630,12 +1611,7 @@ def load_pending_signals() -> pd.DataFrame:
             LEFT JOIN historical_fno_sentiment hfs
                    ON hfs.symbol = ts.symbol AND hfs.date = ts.date
             -- Latest analyst snapshot on/before today
-            LEFT JOIN analyst_estimates_history aeh
-                   ON aeh.symbol = ts.symbol
-                  AND aeh.as_of_date = (
-                      SELECT MAX(aeh2.as_of_date) FROM analyst_estimates_history aeh2
-                      WHERE aeh2.symbol = ts.symbol AND aeh2.as_of_date <= ts.date
-                  )
+            {as_of_join_sql('analyst_estimates_history', 'aeh', 'ts', 'symbol', 'date')}
             LEFT JOIN proprietary_scores_history psh_az
                    ON psh_az.symbol = ts.symbol
                   AND psh_az.source = 'moneycontrol'
@@ -1908,12 +1884,7 @@ def load_pending_signals() -> pd.DataFrame:
             LEFT JOIN market_breadth mb ON mb.date = ts.date
             LEFT JOIN historical_fno_sentiment hfs
                    ON hfs.symbol = ts.symbol AND hfs.date = ts.date
-            LEFT JOIN analyst_estimates_history aeh
-                   ON aeh.symbol = ts.symbol
-                  AND aeh.as_of_date = (
-                      SELECT MAX(aeh2.as_of_date) FROM analyst_estimates_history aeh2
-                      WHERE aeh2.symbol = ts.symbol AND aeh2.as_of_date <= ts.date
-                  )
+            {as_of_join_sql('analyst_estimates_history', 'aeh', 'ts', 'symbol', 'date')}
             LEFT JOIN proprietary_scores_history psh_az
                    ON psh_az.symbol = ts.symbol
                   AND psh_az.source = 'moneycontrol'

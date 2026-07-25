@@ -69,7 +69,7 @@ def make_db():
             regime TEXT NOT NULL, unified_score REAL NOT NULL,
             conviction_level TEXT NOT NULL, classification TEXT, screener_stock_score REAL,
             ml_score REAL, confluence_score REAL, technical_score REAL,
-            dl_score REAL, avg_engine_track_record REAL,
+            dl_score REAL, avg_engine_track_record REAL, engine_coverage_count INTEGER,
             bullish_screener_count INTEGER, bearish_screener_count INTEGER,
             screener_names_json TEXT, fundamental_score REAL,
             entry_zone_low REAL, entry_zone_high REAL, stop_loss REAL,

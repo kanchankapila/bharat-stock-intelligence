@@ -2934,6 +2934,24 @@ runMigration('070_gdelt_sentiment', `
 // every read/write to ctx.uid via protectedProcedure).
 runMigration('071_todos_user_id', `ALTER TABLE todos ADD COLUMN userId TEXT`);
 
+// nse_stocks provider-ID columns — mirrors migrations/*_nse-stocks-provider-ids.sql (Postgres).
+// Makes nse_stocks the queryable symbol_mapping table (Python engines can join directly)
+// instead of the provider-ID mapping living only in the TS-only src/data/stocklist.ts.
+runMigration('072_nse_stocks_provider_ids', `
+  ALTER TABLE nse_stocks ADD COLUMN stockid TEXT;
+  ALTER TABLE nse_stocks ADD COLUMN companyid TEXT;
+  ALTER TABLE nse_stocks ADD COLUMN tickertape_sid TEXT;
+  ALTER TABLE nse_stocks ADD COLUMN fincode TEXT;
+  ALTER TABLE nse_stocks ADD COLUMN scripcode TEXT;
+`);
+
+// engine_coverage_count — mirrors migrations/*_unified-recommendations-engine-coverage.sql
+// (Postgres). How many independent component scorers had data for this symbol when
+// unified_ranker.py's _blend() renormalized weights (see unified_ranker.py's `present` set).
+runMigration('073_unified_recommendations_engine_coverage', `
+  ALTER TABLE unified_recommendations ADD COLUMN engine_coverage_count INTEGER;
+`);
+
 // Keep startup diagnostics off stdout so stdio-based clients can parse JSON-RPC.
 console.error('[DB] Schema normalization complete (Phase 3.5)');
 

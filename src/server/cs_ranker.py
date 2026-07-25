@@ -23,6 +23,7 @@ import pandas as pd
 from scipy.stats import spearmanr
 
 from db_compat import connect, read_df, ConnWrapper
+from as_of import as_of_join_sql
 
 # Import feature engineering from the binary ensemble — same pipeline, different label.
 sys.path.insert(0, os.path.dirname(__file__))
@@ -66,7 +67,7 @@ def load_cs_training_data() -> pd.DataFrame:
         print("[CSRanker] WARNING: No NIFTY50 data in stock_ohlcv — using raw return_pct as target")
         nifty = None
 
-    q = """
+    q = f"""
         SELECT so.symbol, so.signal_date, so.return_pct,
                so.signal_score, so.signals_json, so.horizon_days,
                ts.rsi, ts.adx, ts.nifty_regime, ts.cmp, ts.sma200, ts.volume_ratio,
@@ -95,19 +96,9 @@ def load_cs_training_data() -> pd.DataFrame:
         FROM signal_outcomes so
         LEFT JOIN technical_signals ts
                ON ts.symbol = so.symbol AND ts.date = so.signal_date
-        LEFT JOIN fundamentals_history fh
-               ON fh.symbol = so.symbol
-              AND fh.as_of_date = (
-                  SELECT MAX(fh2.as_of_date) FROM fundamentals_history fh2
-                  WHERE fh2.symbol = so.symbol AND fh2.as_of_date <= so.signal_date
-              )
+        {as_of_join_sql('fundamentals_history', 'fh', 'so', 'symbol', 'signal_date')}
         LEFT JOIN stock_fundamentals sf ON sf.symbol = so.symbol
-        LEFT JOIN analyst_estimates_history aeh
-               ON aeh.symbol = so.symbol
-              AND aeh.as_of_date = (
-                  SELECT MAX(aeh2.as_of_date) FROM analyst_estimates_history aeh2
-                  WHERE aeh2.symbol = so.symbol AND aeh2.as_of_date <= so.signal_date
-              )
+        {as_of_join_sql('analyst_estimates_history', 'aeh', 'so', 'symbol', 'signal_date')}
         LEFT JOIN proprietary_scores_history psh_az
                ON psh_az.symbol = so.symbol
               AND psh_az.source = 'moneycontrol'
@@ -278,7 +269,7 @@ def score_batch() -> int:
         print("[CSRanker] No model found — run --train first.")
         return 0
 
-    q = """
+    q = f"""
         SELECT ts.symbol, ts.date AS signal_date, ts.signal_score, ts.signals_json,
                ts.rsi, ts.adx, ts.nifty_regime, ts.cmp, ts.sma200, ts.volume_ratio,
                ts.fii_3d_net, ts.above_sma200, ts.pcr_oi, ts.pcr_vol,
@@ -299,12 +290,7 @@ def score_batch() -> int:
                psh_oo.score_value AS ohlson_o
         FROM technical_signals ts
         LEFT JOIN stock_fundamentals sf ON sf.symbol = ts.symbol
-        LEFT JOIN analyst_estimates_history aeh
-               ON aeh.symbol = ts.symbol
-              AND aeh.as_of_date = (
-                  SELECT MAX(aeh2.as_of_date) FROM analyst_estimates_history aeh2
-                  WHERE aeh2.symbol = ts.symbol AND aeh2.as_of_date <= ts.date
-              )
+        {as_of_join_sql('analyst_estimates_history', 'aeh', 'ts', 'symbol', 'date')}
         LEFT JOIN proprietary_scores_history psh_az
                ON psh_az.symbol = ts.symbol
               AND psh_az.source = 'moneycontrol'
