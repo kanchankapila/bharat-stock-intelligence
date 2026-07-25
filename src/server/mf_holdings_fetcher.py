@@ -183,7 +183,14 @@ def main():
 
     session = requests.Session()
     session.headers.update(HEADERS)
-    today = date.today().isoformat()
+    # Align to the last completed trading session (same date the grid-ensurer builds), NOT
+    # date.today() -- this job runs in the Sunday ml-weekly-retrain batch, a non-trading day
+    # with no technical_signals row yet. The UPDATE below is a plain "WHERE date = today" (no
+    # ELSE-NULL branch), so on a day with no matching row it silently affects 0 rows -- no
+    # error, no rows touched, mf_holding_pct/mf_chg_vs_prev permanently null. Same fix pattern
+    # as mc_techscanner_fetcher.py / trendlyne_fundamentals_fetcher.py.
+    latest_row = con.execute("SELECT MAX(date) AS d FROM stock_ohlcv").fetchone()
+    today = str(latest_row["d"])[:10] if latest_row and latest_row["d"] else date.today().isoformat()
 
     results = []
     for i, stock in enumerate(stocks, 1):

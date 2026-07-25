@@ -386,6 +386,15 @@ def main() -> None:
 
     con = connect()
     ensure_schema(con)
+    # Align to the last completed trading session (same date the grid-ensurer builds), NOT
+    # date.today() -- this job runs Sunday (ml-weekly-retrain, 'ml-weekly-retrain' cron), a
+    # non-trading day with no technical_signals row yet. date.today() there matched zero rows
+    # in _backfill_technical_signals' "date >= today" branch while its "date < today" ELSE
+    # branch nulled every existing historical row -- silently wiping eps_ttm/dvm_*/pe_* to NULL
+    # every week with no error, since the UPDATE always "succeeds" (0 rows affected on either
+    # branch is not an exception). Same fix pattern as mc_techscanner_fetcher.py.
+    latest_row = con.execute("SELECT MAX(date) AS d FROM stock_ohlcv").fetchone()
+    today = str(latest_row["d"])[:10] if latest_row and latest_row["d"] else date.today().isoformat()
     con.close()
 
     stocks = _load_stocks(args.symbol)
@@ -398,7 +407,6 @@ def main() -> None:
     session = requests.Session()
     session.headers.update(HEADERS)
     session.mount("https://", HTTPAdapter(pool_connections=BATCH_SIZE, pool_maxsize=BATCH_SIZE))
-    today = date.today().isoformat()
     ok = 0
     done = 0
 
