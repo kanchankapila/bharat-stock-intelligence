@@ -45,15 +45,26 @@ BASE_URL = "https://etmarketsapis.indiatimes.com/ET_Stats/mobile"
 PUBLICATION_LAG_DAYS = 90
 
 
-def as_of_floor(year_ending: str | None) -> str:
+def as_of_floor(year_ending: str | None, fallback: str | None = None) -> str:
     """Earliest technical_signals.date an annual figure with this fiscal-year-end may be stamped
-    on = yearEnding + PUBLICATION_LAG_DAYS. Falls back to today (stamp current rows only) when the
-    fiscal-year-end is unknown — never earlier, so it cannot introduce look-ahead."""
+    on = yearEnding + PUBLICATION_LAG_DAYS. Falls back to `fallback` (stamp current rows only)
+    when the fiscal-year-end is unknown — never earlier, so it cannot introduce look-ahead.
+
+    `fallback` should be the last completed trading session's date (MAX(date) FROM stock_ohlcv),
+    NOT left to default to date.today(): both callers of this function run inside the Sunday
+    ml-weekly-retrain / monthly-first-Sunday batches, non-trading days with no technical_signals
+    row yet for date.today(). On the (rare) fallback path -- year_ending missing/unparseable --
+    a bare date.today() floor would match zero existing rows, so COALESCE(?, col) never fires for
+    the caller's UPDATE ... WHERE date >= floor branch and the value silently never lands, same
+    failure mode found and fixed in trendlyne_fundamentals_fetcher.py / mf_holdings_fetcher.py.
+    """
     try:
         d = date.fromisoformat(str(year_ending)[:10]) if year_ending else None
     except ValueError:
         d = None
-    return (d + timedelta(days=PUBLICATION_LAG_DAYS)).isoformat() if d else date.today().isoformat()
+    if d:
+        return (d + timedelta(days=PUBLICATION_LAG_DAYS)).isoformat()
+    return fallback if fallback else date.today().isoformat()
 
 # HEADERS: exported for caller to apply to their own requests.Session once at creation time
 # (e.g., session.headers.update(HEADERS)), then pass that session into fetch_et_stats().

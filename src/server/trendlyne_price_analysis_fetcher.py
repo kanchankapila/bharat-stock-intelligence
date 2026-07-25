@@ -317,7 +317,15 @@ def main() -> None:
     print(f"[TLPriceAnalysis] Fetching price-performance-analysis for {len(stocks)} stocks in batches of {BATCH_SIZE} ({BATCH_GAP_SEC}s gap)...")
     session = requests.Session()
     session.headers.update(HEADERS)
-    today = date.today()
+    today = date.today()  # real calendar date -- extract_features() needs this for the seasonal-month lookup
+    # But the technical_signals UPDATE below needs the last COMPLETED trading session, not the
+    # calendar date: this job runs Tuesday evening (trendlyne-midweek), and any day the grid-ensurer
+    # hasn't yet created date.today()'s row (e.g. before it runs that day, or on any non-trading day
+    # this script is re-run ad-hoc) leaves "date >= today_str" matching zero rows while the ELSE
+    # branch nulls every existing row -- same bug found in trendlyne_fundamentals_fetcher.py /
+    # mf_holdings_fetcher.py / financial_ratios_fetcher.py.
+    latest_row = con.execute("SELECT MAX(date) AS d FROM stock_ohlcv").fetchone()
+    anchor_str = str(latest_row["d"])[:10] if latest_row and latest_row["d"] else today.isoformat()
     today_str = today.isoformat()
     ok = 0
     done = 0
@@ -338,7 +346,7 @@ def main() -> None:
                     continue
                 f = extract_features(body, today)
                 upsert_row(symbol, today_str, f, con)
-                backfill_technical_signals(symbol, today_str, f, con)
+                backfill_technical_signals(symbol, anchor_str, f, con)
                 alpha_str    = f"aNifty1M={f.get('alpha_nifty_1m','?')}% aNifty3M={f.get('alpha_nifty_3m','?')}%"
                 ind_str      = f"aInd1M={f.get('alpha_ind_1m','?')}%"
                 seasonal_str = f"season={f.get('tl_seasonal_month_5y','?')}%"

@@ -508,7 +508,12 @@ def main() -> None:
     print(f"[TLAdvTech] Processing {len(stocks)} stocks in batches of {BATCH_SIZE} ({BATCH_GAP_SEC}s gap)...")
     session = requests.Session()
     session.headers.update(HEADERS)
-    today = date.today().isoformat()
+    # Align to the last completed trading session, NOT date.today() -- this job runs in the
+    # trendlyne-midweek batch (Tuesday) and can race the day's grid-ensurer (or run ad-hoc on a
+    # non-trading day), leaving "date >= today" matching zero rows while nulling every existing
+    # row via the ELSE branch. Same bug/fix as trendlyne_price_analysis_fetcher.py and others.
+    latest_row = con.execute("SELECT MAX(date) AS d FROM stock_ohlcv").fetchone()
+    today = str(latest_row["d"])[:10] if latest_row and latest_row["d"] else date.today().isoformat()
     ok = 0
     skipped = 0
     done = 0

@@ -69,6 +69,7 @@ ENRICH_FEATURE_COLS = [
     "screener_bull_count", "screener_bear_count", "screener_total_count",
     "news_sentiment_score", "news_impact_count",
     "iv_rank", "pcr_oi", "days_to_next_results_flag", "earnings_shocker_flag",
+    "mc_tech_rating",  # SCRATCH TEST 2026-07-25: does MC's daily technical rating add lift?
 ]
 
 
@@ -261,14 +262,15 @@ def load_ts_precursors(cutoff: str) -> pd.DataFrame:
         SELECT ts.symbol, ts.date, ts.iv_rank, ts.pcr_oi,
                CASE WHEN ts.days_to_next_results IS NOT NULL AND ts.days_to_next_results <= 2
                     THEN 1 ELSE 0 END AS days_to_next_results_flag,
-               COALESCE(ts.earnings_shocker_flag, 0) AS earnings_shocker_flag
+               COALESCE(ts.earnings_shocker_flag, 0) AS earnings_shocker_flag,
+               COALESCE(ts.mc_tech_rating, 0) AS mc_tech_rating
         FROM technical_signals ts
         WHERE ts.date >= ?
     """
     rows = read_df(q, (cutoff,))
     if rows.empty:
         return rows
-    cols = ["iv_rank", "pcr_oi", "days_to_next_results_flag", "earnings_shocker_flag"]
+    cols = ["iv_rank", "pcr_oi", "days_to_next_results_flag", "earnings_shocker_flag", "mc_tech_rating"]
     return _lag_by_symbol(rows, cols)
 
 
@@ -278,17 +280,27 @@ def _feature_matrix(df: pd.DataFrame, cols: list):
     return df[cols].replace([np.inf, -np.inf], np.nan).fillna(0.0)
 
 
-def _make_model(spw: float):
+def _make_model(spw: float, min_child_samples: int = 200):
     from lightgbm import LGBMClassifier
     return LGBMClassifier(
         n_estimators=400, learning_rate=0.03, num_leaves=63, max_depth=-1,
         subsample=0.8, subsample_freq=1, colsample_bytree=0.8,
-        min_child_samples=200, scale_pos_weight=spw, n_jobs=-1, verbose=-1,
+        min_child_samples=min_child_samples, scale_pos_weight=spw, n_jobs=-1, verbose=-1,
     )
 
 
-def _purged_oof(df: pd.DataFrame, feature_cols: list, n_folds: int = 4) -> tuple:
-    """Purged date-block walk-forward OOF probabilities. Returns (oof_array, mask)."""
+def _purged_oof(df: pd.DataFrame, feature_cols: list, n_folds: int = 4,
+                 min_child_samples: int = 200) -> tuple:
+    """Purged date-block walk-forward OOF probabilities. Returns (oof_array, mask).
+
+    min_child_samples defaults to 200 for the CORE model (610k+ rows, appropriate there).
+    The ENRICH tier passes a much smaller value: with only ~60 trading days of alt-data
+    history, a sparse-but-real feature (e.g. only ~130 non-zero rows total across the whole
+    window) can never form a valid split at min_child_samples=200 regardless of whether it's
+    predictive -- the enrichment lift check would silently read as "no signal" purely from a
+    leaf-size floor sized for the CORE model, not because the feature lacks a real effect.
+    Found via mc_tech_rating: raw correlation vs next-day range was 0.15-0.27 (two independent
+    windows) yet the enrichment purged-OOF delta was identically +0.0000 with min_child_samples=200."""
     from sklearn.metrics import roc_auc_score
 
     y = df["moved"].astype(int).values
@@ -311,7 +323,7 @@ def _purged_oof(df: pd.DataFrame, feature_cols: list, n_folds: int = 4) -> tuple
         va = df["date"].isin(val_dates).values
         if tr.sum() < 200 or va.sum() < 50 or len(set(y[tr])) < 2:
             continue
-        m = _make_model(spw)
+        m = _make_model(spw, min_child_samples=min_child_samples)
         m.fit(X[tr], y[tr])
         oof[va] = m.predict_proba(X[va])[:, 1]
 
@@ -418,9 +430,17 @@ def train(report_only: bool = False, enrich: bool = False, leak_check: bool = Fa
                   f"window -- too thin for a purged CV yet. Skipping the enrichment check "
                   f"rather than report a number nobody should trust.")
         else:
+            # min_child_samples=30 (not the CORE model's 200): the enrichment window is thin by
+            # nature (~60d of alt-data history) and several columns are sparse-but-potentially-
+            # real (e.g. mc_tech_rating had ~130 non-zero rows total in one test window) -- 200
+            # would structurally block LightGBM from ever splitting on them regardless of signal.
+            # See _purged_oof's docstring for how this was found.
+            ENRICH_MIN_CHILD_SAMPLES = 30
             all_cols = OHLCV_FEATURE_COLS + ENRICH_FEATURE_COLS
-            e_auc, e_lift, e_base = _purged_oof(enriched, all_cols, n_folds=2)
-            c_auc, c_lift, _ = _purged_oof(enriched, OHLCV_FEATURE_COLS, n_folds=2)
+            e_auc, e_lift, e_base = _purged_oof(enriched, all_cols, n_folds=2,
+                                                 min_child_samples=ENRICH_MIN_CHILD_SAMPLES)
+            c_auc, c_lift, _ = _purged_oof(enriched, OHLCV_FEATURE_COLS, n_folds=2,
+                                            min_child_samples=ENRICH_MIN_CHILD_SAMPLES)
             if e_auc is not None and c_auc is not None:
                 print(f"[Movement][ENRICH-WINDOW] same {enriched['date'].nunique()}-day window -- "
                       f"core-only AUC={c_auc:.4f} vs core+enrichment AUC={e_auc:.4f} "
@@ -433,7 +453,8 @@ def train(report_only: bool = False, enrich: bool = False, leak_check: bool = Fa
                     from ml_leak_check import leak_canary
 
                     def _enrich_oof_only(frame, cols):
-                        a, _, _ = _purged_oof(frame, cols, n_folds=2)
+                        a, _, _ = _purged_oof(frame, cols, n_folds=2,
+                                               min_child_samples=ENRICH_MIN_CHILD_SAMPLES)
                         return a
 
                     e_canary = leak_canary(enriched, all_cols, _enrich_oof_only, min_rows=100)

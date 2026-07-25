@@ -218,15 +218,20 @@ def _period_end(chart_data: list) -> str | None:
     return None
 
 
-def _sh_floor(as_of_date: str | None) -> str:
+def _sh_floor(as_of_date: str | None, fallback: str | None = None) -> str:
     """First date on which a shareholding disclosure was public. Rows older than this must
-    not receive the snapshot (look-ahead). Defaults to today when the period end is unknown,
-    which confines the stamp to the current row only — conservative, never leaky."""
+    not receive the snapshot (look-ahead). Defaults to `fallback` when the period end is
+    unknown, which confines the stamp to the current row only — conservative, never leaky.
+    `fallback` must be the last completed trading session, not date.today(): this job runs
+    daily including weekends (company-profiles-sync), and a bare date.today() floor on a
+    non-trading day matches zero existing technical_signals rows, silently dropping the value."""
     try:
         d = date.fromisoformat(as_of_date) if as_of_date else None
     except ValueError:
         d = None
-    return (d + timedelta(days=SHAREHOLDING_DISCLOSURE_LAG_DAYS)).isoformat() if d else date.today().isoformat()
+    if d:
+        return (d + timedelta(days=SHAREHOLDING_DISCLOSURE_LAG_DAYS)).isoformat()
+    return fallback if fallback else date.today().isoformat()
 
 
 def _cagr(chart_data: list, n: int = 5) -> float | None:
@@ -269,8 +274,14 @@ def extract_analyst_data(body: dict, symbol: str, today: str, con) -> dict:
     cutoff  = date.today().replace(year=date.today().year - 1).isoformat()
     recent  = [r for r in reports if isinstance(r, dict) and r.get("recoDate", "") >= cutoff]
 
-    # Persist all reports
-    if recent:
+    # Persist all reports. `con` is None when called from a worker thread (see main()'s
+    # comment: DB writes must happen on the main thread with a real connection) -- this used
+    # to call con.cursor() unconditionally, crashing _fetch_one (and the whole batch, since
+    # nothing catches the exception from fut.result()) for every stock with >=1 recent analyst
+    # report -- i.e. almost every actively-covered stock. That silently prevented this function
+    # from ever returning its extracted dict, which is what feeds analyst_upside_pct/
+    # analyst_count/analyst_buy_pct into backfill_technical_signals downstream.
+    if recent and con is not None:
         cur = con.cursor()
         for r in recent:
             try:
@@ -499,7 +510,7 @@ def backfill_technical_signals(symbol: str, today: str, profile: dict, con) -> N
     # Point-in-time: shareholding + its QoQ deltas apply only to rows on/after the disclosure
     # was public (date >= floor), NULL on older rows — never smear the latest ownership snapshot
     # onto history the model trains on. Same discipline as mf_stock_holdings + the ET_Stats fetchers.
-    sh_floor = _sh_floor(profile.get("shareholding_as_of"))
+    sh_floor = _sh_floor(profile.get("shareholding_as_of"), fallback=today)
     cur = con.cursor()
     cur.execute("""
         UPDATE technical_signals SET
@@ -623,6 +634,13 @@ def main() -> None:
     session = requests.Session()
     session.headers.update(HEADERS)
     today = date.today().isoformat()
+    # Separate anchor for the technical_signals UPDATE below: this job runs DAILY including
+    # weekends (company-profiles-sync, '0 4 * * *') -- on a Sat/Sun `today` has no grid-ensurer
+    # row yet, so "date >= today" would match zero rows while nulling every existing row via the
+    # ELSE branch. Same bug/fix as trendlyne_fundamentals_fetcher.py and others. `today` itself is
+    # left untouched for extract_analyst_data()'s own use, which is a real-calendar-date concept.
+    latest_row = con.execute("SELECT MAX(date) AS d FROM stock_ohlcv").fetchone()
+    ts_anchor = str(latest_row["d"])[:10] if latest_row and latest_row["d"] else today
     ok = 0
     done = 0
 
@@ -652,7 +670,7 @@ def main() -> None:
                     # analyst_data writes to DB — do that on main thread with real con
                     overview_body2 = None  # analyst_data already extracted in worker
                     upsert_profile(symbol, today, profile, con)
-                    backfill_technical_signals(symbol, today, profile, con)
+                    backfill_technical_signals(symbol, ts_anchor, profile, con)
                     ok += 1
                 upside_str = f"Upside={profile.get('analyst_upside_pct','?')}% n={profile.get('analyst_count','?')}"
                 margin_str = f"EBITDA={profile.get('ebitda_margin','?')}% ROE={profile.get('roe','?')}%"

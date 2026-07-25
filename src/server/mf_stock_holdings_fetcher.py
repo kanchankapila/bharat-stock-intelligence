@@ -143,12 +143,18 @@ def aggregate(searchresult: list[dict] | None, total_records) -> dict | None:
     }
 
 
-def _floor(as_of_date: str | None) -> str:
+def _floor(as_of_date: str | None, fallback: str | None = None) -> str:
     try:
         d = date.fromisoformat(as_of_date) if as_of_date else None
     except ValueError:
         d = None
-    return (d + timedelta(days=MF_DISCLOSURE_LAG_DAYS)).isoformat() if d else date.today().isoformat()
+    if d:
+        return (d + timedelta(days=MF_DISCLOSURE_LAG_DAYS)).isoformat()
+    # Fallback (as_of_date missing/unparseable) must be the last completed trading session, NOT
+    # date.today() -- this job runs in the Sunday trendlyne-ratios-monthly batch, a non-trading
+    # day with no technical_signals row yet. A bare date.today() floor there would match zero
+    # existing rows, silently dropping the value. Same bug/fix as et_stats_client.as_of_floor().
+    return fallback if fallback else date.today().isoformat()
 
 
 def fetch_holdings_pages(company_id: str, session: requests.Session) -> dict | None:

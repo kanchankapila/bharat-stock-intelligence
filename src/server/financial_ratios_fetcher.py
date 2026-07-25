@@ -376,13 +376,13 @@ def upsert_quality(symbol: str, today: str, row: dict, con) -> None:
     con.commit()
 
 
-def update_technical_signals(symbol: str, features: dict, con) -> None:
+def update_technical_signals(symbol: str, features: dict, con, today: str | None = None) -> None:
     # Point-in-time stamp: apply these annual figures only to rows on/after the results were
     # published (date >= floor), and NULL them on older rows. A plain `WHERE symbol = ?` smeared
     # the latest annual value across the symbol's whole history, leaking future fundamentals into
     # the per-signal-date feature join in ml_ensemble/exit_policy. The as-of trail lives in
     # tl_financial_quality; technical_signals only carries the value from its knowable date on.
-    floor = as_of_floor(features.get("year_ending"))
+    floor = as_of_floor(features.get("year_ending"), fallback=today)
     cur = con.cursor()
     base_columns = ["fcf_yield_approx", "interest_coverage", "fcf_positive", "debt_coverage_risk"] + _HARVEST_COLUMNS
     set_clause = ",\n            ".join(
@@ -418,7 +418,7 @@ def process_stock(symbol: str, company_id: str, today: str,
     features = compute_ratios(balance=None, cashflow=cashflow, ratio=ratio, market_cap=market_cap)
 
     upsert_quality(symbol, today, features, con)
-    update_technical_signals(symbol, features, con)
+    update_technical_signals(symbol, features, con, today=today)
     return features
 
 
@@ -455,7 +455,11 @@ def main() -> None:
     print(f"[FinancialRatios] Processing {len(stocks)} stocks — FCF yield (approx) + interest coverage…")
     session = requests.Session()
     session.headers.update(HEADERS)
-    today = date.today().isoformat()
+    # Align to the last completed trading session, NOT date.today() -- this job runs in the
+    # trendlyne-ratios-monthly batch (first Sunday of the month), a non-trading day with no
+    # technical_signals row yet. Same fix as trendlyne_fundamentals_fetcher.py / mf_holdings_fetcher.py.
+    latest_row = con.execute("SELECT MAX(date) AS d FROM stock_ohlcv").fetchone()
+    today = str(latest_row["d"])[:10] if latest_row and latest_row["d"] else date.today().isoformat()
 
     ok = 0
     fcf_positive_count = 0
