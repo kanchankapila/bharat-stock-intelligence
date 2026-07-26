@@ -44,6 +44,7 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   { jobName: 'stock-scoring', label: 'Stock Scoring Sync', cronPattern: '0 17 * * 1-5', graceMinutes: 60, critical: true },
   { jobName: 'mc-screener-sync', label: 'MoneyControl Screener Sync', cronPattern: '30 17 * * 1-5', graceMinutes: 60, critical: true },
   { jobName: 'etnow-screener-sync', label: 'ETNow Screener Sync', cronPattern: '0 18 * * 1-5', graceMinutes: 90, critical: true },
+  { jobName: 'et-marketstats-sync', label: 'ET Marketstats Screener Sync', cronPattern: '5 18 * * 1-5', graceMinutes: 90, critical: false },
   { jobName: 'nse-sync', label: 'NSE Master List Sync', cronPattern: '0 2 * * 0', graceMinutes: 120, critical: false },
   { jobName: 'fundamentals-sync', label: 'Fundamentals Sync', cronPattern: '0 3 * * 0', graceMinutes: 120, critical: false },
   { jobName: 'quant-scoring', label: 'Quant Score Engine', cronPattern: '30 17 * * 1-5', graceMinutes: 45, critical: true },

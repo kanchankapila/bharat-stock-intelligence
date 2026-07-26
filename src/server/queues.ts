@@ -1102,8 +1102,12 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean }> 
   // Sunday — so it needs real headroom; 10min was SIGTERM-killing it most weeks (2026-07-19).
   await runPython('exit_labeler.py', [], 30 * 60_000)
     .catch(e => console.warn('[QUEUE] exit_labeler failed:', (e as Error).message));
-  // Retrain the exit policy models
-  await runPython('exit_policy.py', ['--train'], 10 * 60_000)
+  // Retrain the exit policy models. 10min was SIGTERM-killing this deterministically (not
+  // just under contention) once signal_excursions grew to ~145k rows -- GradientBoosting
+  // fits 4 models (2 targets x split-fit + refit-all) at n_estimators=300, measured 703s
+  // uncontended on 2026-07-26. Same growing-dataset timeout pattern already hit once before
+  // by exit_labeler.py just above (bumped 10min -> 30min on 2026-07-19); mirrored here.
+  await runPython('exit_policy.py', ['--train'], 20 * 60_000)
     .catch(e => console.warn('[QUEUE] exit_policy training failed:', (e as Error).message));
   // --tune runs Optuna hyperparameter search (this is what took the model from AUC 0.70 to
   // 0.757 in the first place) — without it, every scheduled retrain silently falls back to

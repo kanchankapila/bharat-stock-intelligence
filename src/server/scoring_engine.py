@@ -181,8 +181,10 @@ class AlphaQuantScoringEngine:
             # class (root cause: a since-fixed trendlyne_screener_discovery.py bug; a DB
             # CHECK constraint now blocks it at the source, this is a second layer).
             tl_mappings = pd.read_sql(
-                "SELECT screener_id AS scan_id, stock_id, symbol, last_seen FROM trendlyne_screener_stocks "
-                "WHERE symbol IS NULL OR symbol NOT LIKE '%://%'",
+                text(
+                    "SELECT screener_id AS scan_id, stock_id, symbol, last_seen FROM trendlyne_screener_stocks "
+                    "WHERE symbol IS NULL OR symbol NOT LIKE '%://%'"
+                ),
                 conn,
             )
 

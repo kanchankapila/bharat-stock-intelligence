@@ -154,12 +154,12 @@ def backfill_technical_signals(con) -> int:
             """
             UPDATE technical_signals
             SET
-                is_nifty50     = CASE WHEN technical_signals.date >= %s THEN ns.is_nifty50     ELSE NULL END,
-                is_nifty100    = CASE WHEN technical_signals.date >= %s THEN ns.is_nifty100    ELSE NULL END,
-                is_nifty200    = CASE WHEN technical_signals.date >= %s THEN ns.is_nifty200    ELSE NULL END,
-                is_midcap150   = CASE WHEN technical_signals.date >= %s THEN ns.is_midcap150   ELSE NULL END,
-                is_smallcap250 = CASE WHEN technical_signals.date >= %s THEN ns.is_smallcap250 ELSE NULL END,
-                nifty_tier     = CASE WHEN technical_signals.date >= %s THEN
+                is_nifty50     = CASE WHEN technical_signals.date >= ? THEN ns.is_nifty50     ELSE NULL END,
+                is_nifty100    = CASE WHEN technical_signals.date >= ? THEN ns.is_nifty100    ELSE NULL END,
+                is_nifty200    = CASE WHEN technical_signals.date >= ? THEN ns.is_nifty200    ELSE NULL END,
+                is_midcap150   = CASE WHEN technical_signals.date >= ? THEN ns.is_midcap150   ELSE NULL END,
+                is_smallcap250 = CASE WHEN technical_signals.date >= ? THEN ns.is_smallcap250 ELSE NULL END,
+                nifty_tier     = CASE WHEN technical_signals.date >= ? THEN
                     CASE
                         WHEN ns.is_nifty50     = 1 THEN 50
                         WHEN ns.is_nifty100    = 1 THEN 100

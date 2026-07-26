@@ -189,3 +189,60 @@ class TestRunDb:
         _, con = _make_db([("INFY", "IT"), ("TCS", "TCS01"), ("HDFC", "HDF01")])
         n = itf.run(fetch_fn=_good_fetch)
         assert n == 9   # 3 bars × 3 symbols
+
+
+# ── Dual-source (MC + Yahoo) dispatch ───────────────────────────────────────────
+
+class TestDualSourceFetch:
+    """run() with fetch_fn=None takes the live dual-source path (_fetch_dual), which
+    alternates MC/Yahoo as primary per symbol and falls back to the other source on a
+    miss. Network calls are avoided by monkeypatching the module-level _fetch_live /
+    _fetch_yahoo functions _fetch_dual actually calls."""
+
+    def test_falls_back_to_yahoo_when_mc_has_no_data(self, monkeypatch):
+        _, con = _make_db([("NOMCDATA", None)])
+        monkeypatch.setattr(itf, "_fetch_live", lambda symbol, from_ts, to_ts, countback=500: None)
+        monkeypatch.setattr(itf, "_fetch_yahoo", lambda symbol, from_ts, to_ts, countback=500: _good_fetch(symbol, from_ts, to_ts))
+        n = itf.run()
+        assert n == 3
+        assert con.execute("SELECT COUNT(*) FROM intraday_ohlcv WHERE symbol='NOMCDATA'").fetchone()[0] == 3
+
+    def test_falls_back_to_mc_when_yahoo_has_no_data(self, monkeypatch):
+        _, con = _make_db([("NOYAHOODATA", None)])
+        monkeypatch.setattr(itf, "_fetch_live", lambda symbol, from_ts, to_ts, countback=500: _good_fetch(symbol, from_ts, to_ts))
+        monkeypatch.setattr(itf, "_fetch_yahoo", lambda symbol, from_ts, to_ts, countback=500: None)
+        n = itf.run()
+        assert n == 3
+        assert con.execute("SELECT COUNT(*) FROM intraday_ohlcv WHERE symbol='NOYAHOODATA'").fetchone()[0] == 3
+
+    def test_both_sources_empty_counts_as_failed_not_written(self, monkeypatch):
+        _, con = _make_db([("NODATAANYWHERE", None)])
+        monkeypatch.setattr(itf, "_fetch_live", lambda *a, **k: None)
+        monkeypatch.setattr(itf, "_fetch_yahoo", lambda *a, **k: None)
+        n = itf.run()
+        assert n == 0
+        assert con.execute("SELECT COUNT(*) FROM intraday_ohlcv").fetchone()[0] == 0
+
+    def test_both_sources_get_used_across_the_universe(self, monkeypatch):
+        """Regression guard for the load-distribution goal: with both sources healthy,
+        neither source should end up handling 100% of the universe."""
+        symbols = [(f"SYM{i}", None) for i in range(20)]
+        _, con = _make_db(symbols)
+        mc_hits, yahoo_hits = [], []
+
+        def fake_mc(symbol, from_ts, to_ts, countback=500):
+            mc_hits.append(symbol)
+            return _good_fetch(symbol, from_ts, to_ts)
+
+        def fake_yahoo(symbol, from_ts, to_ts, countback=500):
+            yahoo_hits.append(symbol)
+            return _good_fetch(symbol, from_ts, to_ts)
+
+        monkeypatch.setattr(itf, "_fetch_live", fake_mc)
+        monkeypatch.setattr(itf, "_fetch_yahoo", fake_yahoo)
+        itf.run()
+        # Each symbol's primary source succeeds immediately, so no fallback calls happen --
+        # every symbol hits exactly one of the two sources, split by index parity.
+        assert len(mc_hits) + len(yahoo_hits) == 20
+        assert len(mc_hits) > 0
+        assert len(yahoo_hits) > 0
