@@ -761,6 +761,12 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
     // SmartOptions Greek-enriched option chain for all F&O stocks (Delta/Gamma/Theta/Vega/IV).
     runPython('so_option_chain_fetcher.py', ['--delay', '0.3'], 30 * 60_000)
       .catch(e => console.warn('[QUEUE] so_option_chain_fetcher failed:', (e as Error).message)),
+    // SmartOptions cross-market F&O activity screeners (most-active-value/oi-gainers/oi-losers)
+    // at the current monthly expiry -- distinct from so_option_chain_fetcher's per-stock chain
+    // above (that one needs stockCode; this one is a ranked cross-market screener with no
+    // per-stock id). Promoted 2026-07-30 from a stale-expiry URL found in updated_urls.json.
+    runPython('trendlyne_fno_activity_fetcher.py', [], 3 * 60_000)
+      .catch(e => console.warn('[QUEUE] trendlyne_fno_activity_fetcher failed:', (e as Error).message)),
   ]);
 
   // Earnings beat features (reads stock_earnings_beats, refreshed weekly by earnings_surprise_fetcher).
@@ -808,6 +814,12 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   // Prevents false STOP_LOSS signals on ex-div days; adds pre-earnings drift feature.
   await runPython('mc_corporate_calendar_fetcher.py', [], 60_000)
     .catch(e => console.warn('[QUEUE] mc_corporate_calendar_fetcher failed:', (e as Error).message));
+
+  // NSE's own primary-market IPO calendar (current/upcoming/past issues) → nse_ipo_calendar.
+  // Promoted 2026-07-30 via the `nse` (NseIndiaApi) package -- genuinely new data, no prior
+  // fetcher in this codebase covered the IPO calendar.
+  await runPython('nse_ipo_calendar_fetcher.py', [], 60_000)
+    .catch(e => console.warn('[QUEUE] nse_ipo_calendar_fetcher failed:', (e as Error).message));
 
   // Screener features: stamp per-stock screener ML features into technical_signals
   // (runs after screener sync so appearances are current)

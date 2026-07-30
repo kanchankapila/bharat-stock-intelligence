@@ -1596,6 +1596,13 @@ migrateColumn('technical_signals', 'ext_mojo_quality_rank', 'REAL');
 migrateColumn('technical_signals', 'ext_mojo_valuation_rank', 'REAL');
 migrateColumn('technical_signals', 'ext_mojo_financial_pts', 'REAL');
 
+// Extra endpoints features (parsed from InvestSights/Tapetide, promoted 2026-07-30 from
+// updated_urls.json) -- independently-computed composite scores, distinct methodology from
+// the ext_t80_*/ext_mojo_* pair above (which were live-verified byte-identical to each other).
+migrateColumn('technical_signals', 'ext_is_overall_score', 'REAL');
+migrateColumn('technical_signals', 'ext_is_percentile_rank', 'REAL');
+migrateColumn('technical_signals', 'ext_tt_score', 'REAL');
+
 // ATM implied vol + skew snapshot (captured by pcr_fetcher.py from the NSE option chain)
 migrateColumn('stock_options_oi', 'atm_iv',   'REAL');
 migrateColumn('stock_options_oi', 'iv_skew',  'REAL');

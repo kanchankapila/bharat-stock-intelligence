@@ -942,17 +942,34 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     X['signal_count'] = type_sets.apply(len)
 
     # ── Extra endpoints features (parsed from indiatimes/marketsmojo/trading80) ──
+    # ext_mojo_{quality_rank,valuation_rank,financial_pts} are live-verified (2026-07-30, 15/15
+    # sample stocks + identical factor_edge rank_IC/hit_AUC) to be the SAME Trading80 dot_summary
+    # values reissued under MarketsMojo's API -- not an independent source. Clip bounds below are
+    # intentionally identical between the ext_t80_*/ext_mojo_* pairs for this reason; the previous
+    # asymmetric bounds (e.g. mojo clip(0,5) vs t80 clip(0,20) for the *same* q_rank field) silently
+    # destroyed most of the real variance on the mojo side. Ranges widened from a live sample that
+    # showed q_rank 2-66 (plus a -99997 "no score" sentinel, now filtered in extra_features_parser.py)
+    # and v_rank/f_pts running negative -- both previously clipped to a positive-only floor of 0.
     X['ext_fii_holding_pct']    = num('ext_fii_holding_pct', 15.0).clip(0, 100) / 100.0
     X['ext_dii_holding_pct']    = num('ext_dii_holding_pct', 15.0).clip(0, 100) / 100.0
     X['ext_fii_qoq_chg']        = num('ext_fii_qoq_chg', 0.0).clip(-10, 10) / 10.0
     X['ext_dii_qoq_chg']        = num('ext_dii_qoq_chg', 0.0).clip(-10, 10) / 10.0
     X['ext_t80_tech_score']     = num('ext_t80_tech_score', 0.0).clip(-3, 3) / 3.0
-    X['ext_t80_quality_rank']   = num('ext_t80_quality_rank', 5.0).clip(0, 20) / 20.0
-    X['ext_t80_valuation_rank'] = num('ext_t80_valuation_rank', 2.0).clip(0, 5) / 5.0
-    X['ext_t80_financial_pts']  = num('ext_t80_financial_pts', 5.0).clip(0, 20) / 20.0
-    X['ext_mojo_quality_rank']  = num('ext_mojo_quality_rank', 2.0).clip(0, 5) / 5.0
-    X['ext_mojo_valuation_rank']= num('ext_mojo_valuation_rank', 2.0).clip(0, 5) / 5.0
-    X['ext_mojo_financial_pts'] = num('ext_mojo_financial_pts', 4.0).clip(0, 10) / 10.0
+    X['ext_t80_quality_rank']   = num('ext_t80_quality_rank', 5.0).clip(0, 100) / 100.0
+    X['ext_t80_valuation_rank'] = num('ext_t80_valuation_rank', 2.0).clip(-5, 5) / 5.0
+    X['ext_t80_financial_pts']  = num('ext_t80_financial_pts', 5.0).clip(-50, 50) / 50.0
+    X['ext_mojo_quality_rank']  = num('ext_mojo_quality_rank', 5.0).clip(0, 100) / 100.0
+    X['ext_mojo_valuation_rank']= num('ext_mojo_valuation_rank', 2.0).clip(-5, 5) / 5.0
+    X['ext_mojo_financial_pts'] = num('ext_mojo_financial_pts', 5.0).clip(-50, 50) / 50.0
+
+    # InvestSights/Tapetide (promoted 2026-07-30) -- two more independently-computed composite
+    # scores. Both are documented 0-100 scales; unlike ext_t80_*/ext_mojo_*, these were NOT
+    # found byte-identical to each other or to anything else in a live spot-check, but that
+    # was not a rigorous factor_edge pass -- treat as unvalidated signal until enough
+    # technical_signals history accumulates to run factor_edge.py against them too.
+    X['ext_is_overall_score']   = num('ext_is_overall_score', 50.0).clip(0, 100) / 100.0
+    X['ext_is_percentile_rank'] = num('ext_is_percentile_rank', 50.0).clip(0, 100) / 100.0
+    X['ext_tt_score']           = num('ext_tt_score', 50.0).clip(0, 100) / 100.0
 
     return X.astype(np.float32)
 
@@ -1100,6 +1117,7 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                     ts.ext_fii_holding_pct, ts.ext_dii_holding_pct, ts.ext_fii_qoq_chg, ts.ext_dii_qoq_chg,
                     ts.ext_t80_tech_score, ts.ext_t80_quality_rank, ts.ext_t80_valuation_rank, ts.ext_t80_financial_pts,
                     ts.ext_mojo_quality_rank, ts.ext_mojo_valuation_rank, ts.ext_mojo_financial_pts,
+                    ts.ext_is_overall_score, ts.ext_is_percentile_rank, ts.ext_tt_score,
                    ts.insider_buy_flag, ts.insider_sell_flag,
                    ts.rating_upgrade_180d, ts.rating_downgrade_180d, ts.days_since_upgrade,
                    ts.mf_sector_flow_pct,
@@ -1363,6 +1381,7 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                     ts.ext_fii_holding_pct, ts.ext_dii_holding_pct, ts.ext_fii_qoq_chg, ts.ext_dii_qoq_chg,
                     ts.ext_t80_tech_score, ts.ext_t80_quality_rank, ts.ext_t80_valuation_rank, ts.ext_t80_financial_pts,
                     ts.ext_mojo_quality_rank, ts.ext_mojo_valuation_rank, ts.ext_mojo_financial_pts,
+                    ts.ext_is_overall_score, ts.ext_is_percentile_rank, ts.ext_tt_score,
                    ts.insider_buy_flag, ts.insider_sell_flag,
                    ts.rating_upgrade_180d, ts.rating_downgrade_180d, ts.days_since_upgrade,
                    ts.mf_sector_flow_pct,
@@ -1581,6 +1600,7 @@ def load_pending_signals() -> pd.DataFrame:
                     ts.ext_fii_holding_pct, ts.ext_dii_holding_pct, ts.ext_fii_qoq_chg, ts.ext_dii_qoq_chg,
                     ts.ext_t80_tech_score, ts.ext_t80_quality_rank, ts.ext_t80_valuation_rank, ts.ext_t80_financial_pts,
                     ts.ext_mojo_quality_rank, ts.ext_mojo_valuation_rank, ts.ext_mojo_financial_pts,
+                    ts.ext_is_overall_score, ts.ext_is_percentile_rank, ts.ext_tt_score,
                    ts.insider_buy_flag, ts.insider_sell_flag,
                    ts.rating_upgrade_180d, ts.rating_downgrade_180d, ts.days_since_upgrade,
                    ts.mf_sector_flow_pct,
@@ -1855,6 +1875,7 @@ def load_pending_signals() -> pd.DataFrame:
                    {ts_c('ext_fii_holding_pct')}, {ts_c('ext_dii_holding_pct')}, {ts_c('ext_fii_qoq_chg')}, {ts_c('ext_dii_qoq_chg')},
                    {ts_c('ext_t80_tech_score')}, {ts_c('ext_t80_quality_rank')}, {ts_c('ext_t80_valuation_rank')}, {ts_c('ext_t80_financial_pts')},
                    {ts_c('ext_mojo_quality_rank')}, {ts_c('ext_mojo_valuation_rank')}, {ts_c('ext_mojo_financial_pts')},
+                   {ts_c('ext_is_overall_score')}, {ts_c('ext_is_percentile_rank')}, {ts_c('ext_tt_score')},
                    {ts_c('insider_buy_flag')}, {ts_c('insider_sell_flag')},
                    {ts_c('rating_upgrade_180d')}, {ts_c('rating_downgrade_180d')}, {ts_c('days_since_upgrade')},
                    {ts_c('mf_sector_flow_pct')},

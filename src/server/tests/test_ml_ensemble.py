@@ -185,6 +185,53 @@ class TestMCVitalsFeatures:
         assert X['ohlson_o'].iloc[1] <= 5.0
 
 
+class TestExtraEndpointFeatures:
+    """ext_* columns from extra_endpoints_fetcher.py (Trading80/MarketsMojo/Indiatimes).
+    Clip bounds fixed 2026-07-30 after live-probing real dot_summary payloads: q_rank/v_rank/
+    f_pts run negative and well outside the old [0,5]/[0,20] assumptions (observed q_rank up to
+    66, v_rank down to -2, f_pts down to -22) — the old bounds silently clamped most real
+    variance to the floor. ext_mojo_* and ext_t80_* are confirmed byte-identical for the same
+    stock (15/15 live sample), so their clip bounds must match — they are the same field."""
+
+    def test_extra_endpoint_features_present(self):
+        X = build_features(_make_feature_df())
+        for c in (
+            'ext_fii_holding_pct', 'ext_dii_holding_pct', 'ext_fii_qoq_chg', 'ext_dii_qoq_chg',
+            'ext_t80_tech_score', 'ext_t80_quality_rank', 'ext_t80_valuation_rank', 'ext_t80_financial_pts',
+            'ext_mojo_quality_rank', 'ext_mojo_valuation_rank', 'ext_mojo_financial_pts',
+        ):
+            assert c in X.columns
+
+    def test_quality_rank_not_clamped_to_old_0_5_ceiling(self):
+        df = _make_feature_df(2)
+        df['ext_t80_quality_rank'] = [46.0, 66.0]
+        df['ext_mojo_quality_rank'] = [46.0, 66.0]
+        X = build_features(df)
+        assert list(X['ext_t80_quality_rank']) == pytest.approx([0.46, 0.66])
+        assert list(X['ext_mojo_quality_rank']) == pytest.approx([0.46, 0.66])
+
+    def test_valuation_rank_and_financial_pts_allow_negative(self):
+        df = _make_feature_df(1)
+        df['ext_t80_valuation_rank'] = [-2.0]
+        df['ext_mojo_valuation_rank'] = [-2.0]
+        df['ext_t80_financial_pts'] = [-22.0]
+        df['ext_mojo_financial_pts'] = [-22.0]
+        X = build_features(df)
+        assert X['ext_t80_valuation_rank'].iloc[0] == pytest.approx(-0.4)
+        assert X['ext_mojo_valuation_rank'].iloc[0] == pytest.approx(-0.4)
+        assert X['ext_t80_financial_pts'].iloc[0] == pytest.approx(-0.44)
+        assert X['ext_mojo_financial_pts'].iloc[0] == pytest.approx(-0.44)
+
+    def test_mojo_and_t80_clip_bounds_are_identical(self):
+        """They are a confirmed duplicate data source -- diverging bounds for the same
+        underlying value was the original bug (mojo clip(0,5) vs t80 clip(0,20))."""
+        df = _make_feature_df(1)
+        df['ext_t80_quality_rank'] = [40.0]
+        df['ext_mojo_quality_rank'] = [40.0]
+        X = build_features(df)
+        assert X['ext_t80_quality_rank'].iloc[0] == pytest.approx(X['ext_mojo_quality_rank'].iloc[0])
+
+
 class TestEmptyInput:
     """build_features must not crash when load_pending_signals returns zero rows (the calendar
     block divided an empty datetime-typed Series)."""

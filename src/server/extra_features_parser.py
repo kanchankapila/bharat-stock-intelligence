@@ -24,6 +24,31 @@ def parse_json(json_str: str) -> dict:
     except Exception:
         return {}
 
+# Trading80/MarketsMojo's dot_summary uses -99997 (and similar large-magnitude values) as a
+# "no score computed for this stock" sentinel in q_rank/v_rank/f_pts/tech_score -- live-verified
+# 2026-07-30 across a 15-stock sample (LPDC, MAHAPEXLTD, ZIMLAB, VIDHIING all returned q_rank=-99997
+# while genuinely-scored stocks ranged 2-66). Without this guard the sentinel passes straight through
+# float() and gets fed to ml_ensemble.py as if -99997 were a real (extremely bearish) score.
+_SENTINEL_ABS_THRESHOLD = 90000
+
+def _clean_score(value) -> float | None:
+    if value is None or value == "":
+        return None
+    try:
+        f = float(value)
+    except (ValueError, TypeError):
+        return None
+    if abs(f) >= _SENTINEL_ABS_THRESHOLD:
+        return None
+    return f
+
+def _as_dict(value) -> dict:
+    """Some providers return an empty list (`[]`) instead of `{}` for a nested object when
+    there's no data for a stock -- live-confirmed 2026-07-30 for trading80_header_info's
+    "data" key on ELGIRUBCO/MUTHOOTFIN/ADANIGREEN, which crashed extract_features() on
+    .get("dot_summary", ...) since a list has no .get(). Treat any non-dict as "no data"."""
+    return value if isinstance(value, dict) else {}
+
 def extract_features(symbol: str, responses: list) -> dict:
     feat = {
         "ext_fii_holding_pct": None,
@@ -36,19 +61,22 @@ def extract_features(symbol: str, responses: list) -> dict:
         "ext_t80_financial_pts": None,
         "ext_mojo_quality_rank": None,
         "ext_mojo_valuation_rank": None,
-        "ext_mojo_financial_pts": None
+        "ext_mojo_financial_pts": None,
+        "ext_is_overall_score": None,
+        "ext_is_percentile_rank": None,
+        "ext_tt_score": None,
     }
 
     for endpoint, res_json in responses:
         data = parse_json(res_json)
-        if not data:
+        if not data or not isinstance(data, dict):
             continue
 
         if endpoint == "marketservices_shareholding":
             # {"summary": {"dii": {"percentage": 20.97, "changeQoQ": 1.0}, "fii": {"percentage": 18.02, "changeQoQ": -1.49}}}
-            summary = data.get("summary", {})
-            fii = summary.get("fii", {})
-            dii = summary.get("dii", {})
+            summary = _as_dict(data.get("summary"))
+            fii = _as_dict(summary.get("fii"))
+            dii = _as_dict(summary.get("dii"))
             if fii:
                 try:
                     feat["ext_fii_holding_pct"] = float(fii.get("percentage"))
@@ -64,35 +92,42 @@ def extract_features(symbol: str, responses: list) -> dict:
 
         elif endpoint == "trading80_header_info":
             # {"data": {"dot_summary": {"tech_score": 1.17, "q_rank": 11, "v_rank": 2, "f_pts": 6}}}
-            inner = data.get("data", {})
-            summary = inner.get("dot_summary", {})
+            inner = _as_dict(data.get("data"))
+            summary = _as_dict(inner.get("dot_summary"))
             if summary:
-                try:
-                    if summary.get("tech_score") is not None:
-                        feat["ext_t80_tech_score"] = float(summary.get("tech_score"))
-                    if summary.get("q_rank") is not None:
-                        feat["ext_t80_quality_rank"] = float(summary.get("q_rank"))
-                    if summary.get("v_rank") is not None:
-                        feat["ext_t80_valuation_rank"] = float(summary.get("v_rank"))
-                    if summary.get("f_pts") is not None:
-                        feat["ext_t80_financial_pts"] = float(summary.get("f_pts"))
-                except (ValueError, TypeError):
-                    pass
+                feat["ext_t80_tech_score"] = _clean_score(summary.get("tech_score"))
+                feat["ext_t80_quality_rank"] = _clean_score(summary.get("q_rank"))
+                feat["ext_t80_valuation_rank"] = _clean_score(summary.get("v_rank"))
+                feat["ext_t80_financial_pts"] = _clean_score(summary.get("f_pts"))
 
         elif endpoint == "marketsmojo_header_info":
             # {"data": {"dot_summary": {"q_rank": 1, "v_rank": 0, "f_pts": 4}}}
-            inner = data.get("data", {})
-            summary = inner.get("dot_summary", {})
+            # NOTE (live-verified 2026-07-30, 15/15 stocks byte-identical dot_summary): MarketsMojo's
+            # header_info is the SAME underlying Trading80 score data reissued under a different
+            # provider name, not an independent opinion -- see AI_ENDPOINT_MEMORY.md. Kept as a
+            # separate column set only because ml_ensemble.py already reads both; do not treat
+            # ext_mojo_* and ext_t80_* as diversified signal.
+            inner = _as_dict(data.get("data"))
+            summary = _as_dict(inner.get("dot_summary"))
             if summary:
-                try:
-                    if summary.get("q_rank") is not None:
-                        feat["ext_mojo_quality_rank"] = float(summary.get("q_rank"))
-                    if summary.get("v_rank") is not None:
-                        feat["ext_mojo_valuation_rank"] = float(summary.get("v_rank"))
-                    if summary.get("f_pts") is not None:
-                        feat["ext_mojo_financial_pts"] = float(summary.get("f_pts"))
-                except (ValueError, TypeError):
-                    pass
+                feat["ext_mojo_quality_rank"] = _clean_score(summary.get("q_rank"))
+                feat["ext_mojo_valuation_rank"] = _clean_score(summary.get("v_rank"))
+                feat["ext_mojo_financial_pts"] = _clean_score(summary.get("f_pts"))
+
+        elif endpoint == "investsights_score":
+            # {"overall_score": 66.19, "percentile_rank": 73.72, "factors": {...},
+            #  "forensic_scores": {...}, "risk_indicators": {...}} -- only the headline
+            # overall_score/percentile_rank are promoted to ML features for now; factors/
+            # forensic_scores/risk_indicators overlap conceptually with existing altman_z/
+            # piotroski features from a different source and need a cross-validation pass
+            # (do they agree?) before adding them too -- not done yet, see AI_ENDPOINT_MEMORY.md.
+            feat["ext_is_overall_score"] = _clean_score(data.get("overall_score"))
+            feat["ext_is_percentile_rank"] = _clean_score(data.get("percentile_rank"))
+
+        elif endpoint == "tapetide_score":
+            # {"data": {"score": 44, "pillars": {...}, "pillar_weights": {...}}}
+            inner = _as_dict(data.get("data"))
+            feat["ext_tt_score"] = _clean_score(inner.get("score"))
 
     return feat
 
@@ -185,7 +220,10 @@ def run(target_date: str) -> int:
                 ext_t80_financial_pts = ?,
                 ext_mojo_quality_rank = ?,
                 ext_mojo_valuation_rank = ?,
-                ext_mojo_financial_pts = ?
+                ext_mojo_financial_pts = ?,
+                ext_is_overall_score = ?,
+                ext_is_percentile_rank = ?,
+                ext_tt_score = ?
             WHERE symbol = ? AND date = ?
         """, (
             feat["ext_fii_holding_pct"],
@@ -199,6 +237,9 @@ def run(target_date: str) -> int:
             feat["ext_mojo_quality_rank"],
             feat["ext_mojo_valuation_rank"],
             feat["ext_mojo_financial_pts"],
+            feat["ext_is_overall_score"],
+            feat["ext_is_percentile_rank"],
+            feat["ext_tt_score"],
             sym,
             target_date
         ))

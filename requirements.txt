@@ -4,6 +4,7 @@ ta
 sqlalchemy
 numpy
 requests
+nse
 beautifulsoup4
 ollama
 frozendict

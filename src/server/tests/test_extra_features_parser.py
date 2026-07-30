@@ -41,7 +41,9 @@ def _make_db():
             ext_t80_tech_score REAL, ext_t80_quality_rank REAL,
             ext_t80_valuation_rank REAL, ext_t80_financial_pts REAL,
             ext_mojo_quality_rank REAL, ext_mojo_valuation_rank REAL,
-            ext_mojo_financial_pts REAL
+            ext_mojo_financial_pts REAL,
+            ext_is_overall_score REAL, ext_is_percentile_rank REAL,
+            ext_tt_score REAL
         )
     """)
     con.execute("""
@@ -113,3 +115,86 @@ class TestSnapshotDateGuard:
 
         updated = efp.run("2026-07-30")
         assert updated == 0
+
+
+class TestSentinelScoreFiltering:
+    """Trading80/MarketsMojo's dot_summary uses -99997 (and similar large-magnitude values) as a
+    "no score computed" sentinel -- live-verified 2026-07-30 across a 15-stock sample (LPDC,
+    MAHAPEXLTD, ZIMLAB, VIDHIING all returned q_rank=-99997 while genuinely-scored stocks ranged
+    2-66). Must be filtered to None, not fed to ml_ensemble.py as a real (extremely bearish) score."""
+
+    T80_SENTINEL_RESPONSE = (
+        '{"data": {"dot_summary": {"tech_score": -1.28, "q_rank": -99997, '
+        '"v_rank": -2, "f_pts": -99997}}}'
+    )
+    T80_REAL_RESPONSE = (
+        '{"data": {"dot_summary": {"tech_score": -1.28, "q_rank": 46, "v_rank": -2, "f_pts": -22}}}'
+    )
+
+    def test_sentinel_value_is_filtered_to_none(self):
+        feat = efp.extract_features("LPDC", [("trading80_header_info", self.T80_SENTINEL_RESPONSE)])
+        assert feat["ext_t80_quality_rank"] is None
+        assert feat["ext_t80_financial_pts"] is None
+        # v_rank=-2 is a real (non-sentinel) negative value and must pass through
+        assert feat["ext_t80_valuation_rank"] == -2.0
+        assert feat["ext_t80_tech_score"] == -1.28
+
+    def test_real_negative_and_large_values_pass_through(self):
+        feat = efp.extract_features("RELIANCE", [("trading80_header_info", self.T80_REAL_RESPONSE)])
+        assert feat["ext_t80_quality_rank"] == 46.0
+        assert feat["ext_t80_financial_pts"] == -22.0
+        assert feat["ext_t80_valuation_rank"] == -2.0
+
+    def test_empty_string_score_does_not_crash(self):
+        response = '{"data": {"dot_summary": {"tech_score": "", "q_rank": "", "v_rank": "", "f_pts": ""}}}'
+        feat = efp.extract_features("XYZ", [("trading80_header_info", response)])
+        assert feat["ext_t80_tech_score"] is None
+        assert feat["ext_t80_quality_rank"] is None
+
+
+class TestNonDictNestedShapeDoesNotCrash:
+    """Live-confirmed 2026-07-30: trading80_header_info's "data" key is sometimes an empty
+    LIST (`[]`) instead of a dict for stocks with no computed score (ELGIRUBCO/MUTHOOTFIN/
+    ADANIGREEN observed live) -- crashed the whole full-universe parse run with
+    AttributeError: 'list' object has no attribute 'get' on the very first such stock
+    encountered, silently failing the parser for every symbol after it in the same run."""
+
+    def test_trading80_list_shaped_data_is_skipped_not_crashed(self):
+        response = '{"code": "200", "data": []}'
+        feat = efp.extract_features("ELGIRUBCO", [("trading80_header_info", response)])
+        assert feat["ext_t80_tech_score"] is None
+        assert feat["ext_t80_quality_rank"] is None
+
+    def test_marketsmojo_list_shaped_dot_summary_is_skipped_not_crashed(self):
+        response = '{"code": "200", "data": {"dot_summary": []}}'
+        feat = efp.extract_features("XYZ", [("marketsmojo_header_info", response)])
+        assert feat["ext_mojo_quality_rank"] is None
+
+    def test_top_level_list_response_is_skipped_not_crashed(self):
+        """Defensive: if any endpoint ever returns a top-level JSON array instead of an
+        object, extract_features must not crash trying to call .get() on it."""
+        feat = efp.extract_features("XYZ", [("marketservices_shareholding", "[1, 2, 3]")])
+        assert feat["ext_fii_holding_pct"] is None
+
+
+class TestInvestSightsAndTapetideScores:
+    """Promoted 2026-07-30 from updated_urls.json -- two independently-computed composite
+    scores (distinct methodology/pillars from each other and from the Trading80/MarketsMojo
+    pair), live-verified against real RELIANCE responses before being wired in."""
+
+    def test_investsights_score_extracts_headline_fields(self):
+        response = '{"overall_score": 66.19, "percentile_rank": 73.72, "factors": {"value": {"score": 87.52}}}'
+        feat = efp.extract_features("RELIANCE", [("investsights_score", response)])
+        assert feat["ext_is_overall_score"] == 66.19
+        assert feat["ext_is_percentile_rank"] == 73.72
+
+    def test_tapetide_score_extracts_nested_score(self):
+        response = '{"data": {"score": 44, "pillars": {"quality": 53.39}}, "meta": {"symbol": "RELIANCE"}}'
+        feat = efp.extract_features("RELIANCE", [("tapetide_score", response)])
+        assert feat["ext_tt_score"] == 44.0
+
+    def test_missing_score_fields_do_not_crash(self):
+        feat = efp.extract_features("XYZ", [("investsights_score", "{}"), ("tapetide_score", '{"data": {}}')])
+        assert feat["ext_is_overall_score"] is None
+        assert feat["ext_is_percentile_rank"] is None
+        assert feat["ext_tt_score"] is None

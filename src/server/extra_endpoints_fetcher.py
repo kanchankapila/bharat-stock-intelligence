@@ -2,7 +2,7 @@
 """
 Extra Endpoints Fetcher
 =======================
-Fetches data from 12 financial endpoints (Indiatimes, MarketsMojo, Trading80)
+Fetches data from validated parser-ready financial endpoints
 using companyid and stockid (sid) from scripts/stocklist.json.
 Stores responses in the 'extra_endpoint_responses' table.
 
@@ -10,6 +10,7 @@ Usage:
   python src/server/extra_endpoints_fetcher.py           # Fetch all stocks
   python src/server/extra_endpoints_fetcher.py --limit 5  # Fetch only 5 stocks (for testing)
   python src/server/extra_endpoints_fetcher.py --symbol BEL # Fetch a specific stock
+  python src/server/extra_endpoints_fetcher.py --registry-only # Validate/sync endpoint registry only
 """
 
 import argparse
@@ -21,29 +22,18 @@ import ssl
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from db_compat import connect
+from endpoint_registry import (
+    ensure_endpoint_registry_schema,
+    get_fetchable_endpoints,
+    load_endpoint_registry,
+    registry_summary,
+    render_endpoint_url,
+    sync_registry_to_db,
+)
 
 # HTTP fetch is I/O-bound; a bounded thread pool turns ~20k sequential requests
 # (2-3h, overran the queue's 30-min budget) into a run that fits. Override via env.
 MAX_WORKERS = int(os.environ.get("EXTRA_ENDPOINTS_WORKERS", "8"))
-
-# Endpoints Config
-STOCK_ENDPOINTS = {
-    "marketservices_shareholding": "https://marketservices.indiatimes.com/marketservices/shareholding?companyid={companyid}",
-    "mfapps_mfsInvestingInStock": "https://mfapps.indiatimes.com/Ulip/mfsInvestingInStock.htm?pagesize=25&sortby=numberOfSharesHeld&companyid={companyid}&marketcap=&callback=ajaxResponse&pageno=1",
-    "et_companypagedata": "https://json.bselivefeeds.indiatimes.com/ET_Community/companypagedata?companyid={companyid}",
-    "et_bsensejson": "https://json.bselivefeeds.indiatimes.com/ET_Community/bsensejson?companyid={companyid}",
-    "trading80_header_info": "https://frapi.trading80.com/stocks_stocksid/header_info?sid={stockid}&exchange=0",
-    "trading80_technical_card": "https://www.trading80.com/technical_card/getCardInfo?sid={stockid}&se=bse&cardlist=sectPrice_techScore,sectPrice_indiScale,sectIndigraph_graph,sectMacd_macd_w,sectMacd_macd_m,sectRsi_rsi_w,sectRsi_rsi_m,sectBb_bb_w,sectBb_bb_m,sectMa_ma_w,sectKst_kst_w,sectKst_kst_m,sectDow_dow_w,sectDow_dow_m,sectObv_obv_w,sectObv_obv_m",
-    "marketsmojo_quality_vcard": "https://frapi.marketsmojo.com/stocks_quality/vcardinfo?sid={stockid}",
-    "marketsmojo_thingsknow": "https://frapi.marketsmojo.com/Stocks_Thingsknow/thingsknow?sid={stockid}&exchange=0",
-    "marketsmojo_return_contribution": "https://frapi.marketsmojo.com/stocks_Stocksid/returnContri_info?se=&cardlist=&period=&alphabet=&sid={stockid}&stockID={stockid}&exchange=0&",
-    "marketsmojo_header_info": "https://frapi.marketsmojo.com/stocks_stocksid/header_info?sid={stockid}&exchange=0"
-}
-
-MARKET_ENDPOINTS = {
-    "marketsmojo_marketaction": "https://frapi.marketsmojo.com/market_marketaction/getData?",
-    "trading80_call_alerts": "https://frapi.trading80.com/callsapi/getCallAlerts?w=yes"
-}
 
 STOCKLIST_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "scripts", "stocklist.json")
 
@@ -58,6 +48,7 @@ def ensure_schema(con) -> None:
             PRIMARY KEY (symbol, endpoint_name)
         )
     """)
+    ensure_endpoint_registry_schema(cur)
     con.commit()
 
 def fetch_url(url: str) -> str:
@@ -65,7 +56,10 @@ def fetch_url(url: str) -> str:
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
     req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-    with urllib.request.urlopen(req, context=ctx, timeout=10) as response:
+    # 20s, not 10s: Tapetide's api.tapetide.com (promoted 2026-07-30) live-verified needing
+    # 10-20s under this fetcher's real 8-worker concurrent load -- 10s silently dropped every
+    # tapetide_* fetch (confirmed: 0 rows written, no error surfaced beyond a log line).
+    with urllib.request.urlopen(req, context=ctx, timeout=20) as response:
         return response.read().decode('utf-8')
 
 def save_response(cur, symbol: str, endpoint_name: str, data: str) -> None:
@@ -83,6 +77,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--symbol", type=str, help="Fetch a single stock by Symbol (e.g. BEL)")
     parser.add_argument("--limit", type=int, help="Limit number of stocks fetched")
+    parser.add_argument("--registry-only", action="store_true", help="Validate/sync endpoint registry without fetching")
     args = parser.parse_args()
 
     # Load stocks
@@ -106,32 +101,50 @@ def main():
     con = connect()
     ensure_schema(con)
     cur = con.cursor()
+    registry_entries = load_endpoint_registry(
+        os.environ.get("AI_ENDPOINT_MEMORY_PATH"),
+        os.environ.get("AI_ENDPOINT_REFERENCE_PATH"),
+    )
+    synced = sync_registry_to_db(cur, registry_entries)
+    con.commit()
+    summary = registry_summary(registry_entries)
+    print(
+        "[REGISTRY] Synced "
+        f"{synced} endpoints: {summary['curated']} curated, {summary['ai_memory']} from ai_endpoint_memory.json, "
+        f"{summary['valid']} valid, {summary['fetchable']} parser-ready fetchable"
+    )
+    stock_endpoints, market_endpoints = get_fetchable_endpoints(registry_entries)
+    if args.registry_only:
+        con.close()
+        return
 
     # Fetch market-wide endpoints first (only 2 — keep sequential)
     print("Fetching market-wide endpoints...")
-    for name, url in MARKET_ENDPOINTS.items():
+    for endpoint in market_endpoints:
         try:
+            name = endpoint.name
+            url = render_endpoint_url(endpoint)
+            if not url:
+                print(f"Skipping {name}: could not render URL")
+                continue
             print(f"Fetching {name}...")
             data = fetch_url(url)
             save_response(cur, "MARKET", name, data)
         except Exception as e:
-            print(f"Error fetching market-wide endpoint {name}: {e}")
+            print(f"Error fetching market-wide endpoint {endpoint.name}: {e}")
     con.commit()
 
     # Build the full request list up front, skipping rows missing the id a template needs.
     tasks = []  # (symbol, endpoint_name, url)
     for stock in stocks:
         symbol = stock.get("symbol")
-        companyid = stock.get("companyid")
-        stockid = stock.get("stockid")
         if not symbol:
             continue
-        for name, url_template in STOCK_ENDPOINTS.items():
-            if "{companyid}" in url_template and not companyid:
+        for endpoint in stock_endpoints:
+            url = render_endpoint_url(endpoint, stock)
+            if not url:
                 continue
-            if "{stockid}" in url_template and not stockid:
-                continue
-            tasks.append((symbol, name, url_template.format(companyid=companyid, stockid=stockid)))
+            tasks.append((symbol, endpoint.name, url))
 
     print(f"Fetching {len(tasks)} stock-endpoint requests across {len(stocks)} stocks "
           f"with {MAX_WORKERS} workers...")
