@@ -13,22 +13,18 @@ export const SmartMoneyMonitor: React.FC<Props> = ({ onSelectStock }) => {
   const [filterType, setFilterType] = useState<'accumulation' | 'distribution'>('accumulation');
   const [searchQuery, setSearchQuery] = useState('');
 
-  // High-fidelity fallback institutional flow data
-  const flowData = [
-    { symbol: 'INFY', name: 'Infosys Ltd.', promoter: 0.0, fii: 1.85, dii: 0.95, netFlow: 2.80, status: 'accumulation' },
-    { symbol: 'RELIANCE', name: 'Reliance Industries Ltd.', promoter: 0.2, fii: 1.10, dii: 0.50, netFlow: 1.80, status: 'accumulation' },
-    { symbol: 'TCS', name: 'Tata Consultancy Services Ltd.', promoter: -0.1, fii: 0.90, dii: 0.40, netFlow: 1.20, status: 'accumulation' },
-    { symbol: 'ICICIBANK', name: 'ICICI Bank Ltd.', promoter: 0.0, fii: 1.35, dii: -0.20, netFlow: 1.15, status: 'accumulation' },
-    { symbol: 'BHARTIARTL', name: 'Bharti Airtel Ltd.', promoter: 0.0, fii: 0.85, dii: 0.25, netFlow: 1.10, status: 'accumulation' },
-    { symbol: 'HDFCBANK', name: 'HDFC Bank Ltd.', promoter: 0.0, fii: -1.95, dii: 0.80, netFlow: -1.15, status: 'distribution' },
-    { symbol: 'SBIN', name: 'State Bank of India', promoter: 0.0, fii: -0.75, dii: -0.45, netFlow: -1.20, status: 'distribution' },
-    { symbol: 'WIPRO', name: 'Wipro Ltd.', promoter: -0.5, fii: -0.60, dii: -0.30, netFlow: -1.40, status: 'distribution' },
-    { symbol: 'AXISBANK', name: 'Axis Bank Ltd.', promoter: 0.0, fii: -1.10, dii: -0.40, netFlow: -1.50, status: 'distribution' },
-  ];
+  // Fixed 2026-07-30 (Finding #94, full-stack audit): this used to be a hardcoded array of
+  // 9 stocks with invented promoter/FII/DII numbers -- not a fallback, the only data path
+  // that existed. Now reads real quarterly promoter/FII/MF ownership-change data from
+  // technical_signals (see getSmartMoneyFlow in fundamentals.router.ts for the query and
+  // the note on mf_chg_qoq standing in for DII).
+  const { data: flowData, isLoading, isError } = trpc.getSmartMoneyFlow.useQuery(
+    { direction: filterType, limit: 30 },
+    { staleTime: 60 * 60 * 1000, refetchOnWindowFocus: false }
+  );
 
-  const filtered = flowData
-    .filter(d => d.status === filterType)
-    .filter(d => 
+  const filtered = (flowData ?? [])
+    .filter(d =>
       d.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       d.symbol.toLowerCase().includes(searchQuery.toLowerCase())
     );
@@ -86,18 +82,26 @@ export const SmartMoneyMonitor: React.FC<Props> = ({ onSelectStock }) => {
 
       {/* Scrollable Flow Cards */}
       <div className="flex-grow overflow-y-auto pr-1 terminal-scrollbar min-h-0">
-        {filtered.length === 0 ? (
+        {isLoading ? (
           <div className="flex items-center justify-center h-full text-slate-500 text-xs font-bold">
-            No institutional flow matches found.
+            Loading institutional flow data...
+          </div>
+        ) : isError ? (
+          <div className="flex items-center justify-center h-full text-rose-400 text-xs font-bold">
+            Failed to load institutional flow data.
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="flex items-center justify-center h-full text-slate-500 text-xs font-bold">
+            No institutional flow data captured yet.
           </div>
         ) : (
           <div className="space-y-4">
             <AnimatePresence mode="popLayout">
               {filtered.map((stock, i) => {
                 const chartData = [
-                  { name: 'Promoter', value: stock.promoter, fill: stock.promoter >= 0 ? '#3b82f6' : '#f43f5e' },
-                  { name: 'FII', value: stock.fii, fill: stock.fii >= 0 ? '#10b981' : '#f43f5e' },
-                  { name: 'DII', value: stock.dii, fill: stock.dii >= 0 ? '#8b5cf6' : '#f43f5e' },
+                  { name: 'Promoter', value: stock.promoter ?? 0, fill: (stock.promoter ?? 0) >= 0 ? '#3b82f6' : '#f43f5e' },
+                  { name: 'FII', value: stock.fii ?? 0, fill: (stock.fii ?? 0) >= 0 ? '#10b981' : '#f43f5e' },
+                  { name: 'DII', value: stock.dii ?? 0, fill: (stock.dii ?? 0) >= 0 ? '#8b5cf6' : '#f43f5e' },
                 ];
 
                 return (
@@ -122,6 +126,9 @@ export const SmartMoneyMonitor: React.FC<Props> = ({ onSelectStock }) => {
                         </span>
                       </div>
                       <p className="text-[10px] text-slate-500 font-bold leading-tight">{stock.name}</p>
+                      {stock.asOfDate && (
+                        <p className="text-[9px] text-slate-600 font-mono">As of {stock.asOfDate}</p>
+                      )}
                     </div>
 
                     {/* Right: Small Bar Chart for Flow */}

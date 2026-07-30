@@ -1143,10 +1143,17 @@ export async function runTechnicalSignalScan(options: {
     console.log('[SIGNALS] Loading OHLCV data...');
     // Bound by scanDate so a historical scan (options.date in the past) never sees future
     // bars — every other feature read in this function is already scanDate-bounded. For a
-    // live scan scanDate is today, so this is a no-op there.
+    // live scan scanDate is today, so the upper bound is a no-op there.
+    //
+    // Fixed 2026-07-30 (Finding #34, full-stack audit): the query had no LOWER date bound,
+    // so it pulled the entire multi-year stock_ohlcv table (2.57M+ rows back to 2021) into
+    // Node memory every ~30-min scan cycle, even though detectSignals() below only needs
+    // ~200-250 trailing days per symbol (SMA200 is the longest lookback used). 300 calendar
+    // days is a generous buffer over 200 trading days (accounts for weekends/holidays).
+    const lowerBoundDate = new Date(new Date(scanDate).getTime() - 300 * 86_400_000).toISOString().slice(0, 10);
     const allRows = await dbAll(
-      `SELECT symbol, date, open, high, low, close, volume FROM stock_ohlcv WHERE date <= ? ORDER BY symbol, date ASC`,
-      [scanDate]
+      `SELECT symbol, date, open, high, low, close, volume FROM stock_ohlcv WHERE date <= ? AND date >= ? ORDER BY symbol, date ASC`,
+      [scanDate, lowerBoundDate]
     ) as (OHLCVRow & { symbol: string })[];
 
     // Group by symbol

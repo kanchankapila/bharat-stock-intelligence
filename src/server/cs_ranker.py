@@ -31,6 +31,10 @@ from ml_ensemble import build_features
 
 MODELS_DIR    = os.path.join(os.path.dirname(__file__), 'ml_models')
 CS_MODEL_PATH = os.path.join(MODELS_DIR, 'cs_ranker.pkl')
+CS_CANDIDATE_PATH = CS_MODEL_PATH + '.candidate'
+# New held-out Spearman rho must beat the active model's by at least this much to be
+# promoted. Same value as live_screener_ml_ranker.py's PROMOTION_MARGIN.
+CS_PROMOTION_MARGIN = 0.01
 MIN_DATE_SIGNALS = 5   # minimum signals per date to include in training
 
 
@@ -157,6 +161,28 @@ def load_cs_training_data() -> pd.DataFrame:
 
 # ── Model Training ────────────────────────────────────────────────────────────
 
+HORIZON_DAYS_LABEL = 5  # cs_percentile is a 5-day-forward outcome (so.horizon_days=5 filter
+                         # in load_cs_training_data's SQL) — kept as a module constant so the
+                         # embargo below and the SQL filter can't silently drift apart.
+
+
+def _compute_date_split(dates_sorted: list, test_frac: float = 0.20,
+                         horizon_days_label: int = HORIZON_DAYS_LABEL) -> tuple[set, set]:
+    """Finding #20 (2026-07-28 audit): a plain positional last-20%-of-dates split has zero
+    gap, so training rows near the boundary have forward-looking labels that mechanically
+    overlap the test window's own dates. Embargo the horizon_days_label trading dates
+    immediately before the test window, mirroring ml_ensemble.py's date-based embargo
+    (adapted here to trading-date count since this split is date-based, not row-positional).
+    Returns (train_dates, test_dates) as sets of date strings.
+    """
+    n_test_dates = max(1, int(len(dates_sorted) * test_frac))
+    test_start_idx = len(dates_sorted) - n_test_dates
+    test_dates = set(dates_sorted[test_start_idx:])
+    embargo_start_idx = max(0, test_start_idx - horizon_days_label)
+    train_dates = set(dates_sorted[:embargo_start_idx])
+    return train_dates, test_dates
+
+
 def train_cs_ranker(df: pd.DataFrame, min_samples: int = 50) -> dict:
     """
     Train LightGBM regressor on cs_percentile. Returns a model dict with keys:
@@ -170,12 +196,11 @@ def train_cs_ranker(df: pd.DataFrame, min_samples: int = 50) -> dict:
     X = build_features(df)
     y = df['cs_percentile'].values
 
-    # Held-out test: last 20% of dates (chronological, no shuffling)
+    # Held-out test: last 20% of dates (chronological, no shuffling), embargoed per Finding #20.
     dates_sorted = sorted(df['signal_date'].unique())
-    n_test_dates = max(1, int(len(dates_sorted) * 0.20))
-    test_dates   = set(dates_sorted[-n_test_dates:])
-    train_mask   = ~df['signal_date'].isin(test_dates)
-    test_mask    = df['signal_date'].isin(test_dates)
+    train_dates, test_dates = _compute_date_split(dates_sorted)
+    train_mask = df['signal_date'].isin(train_dates)
+    test_mask  = df['signal_date'].isin(test_dates)
 
     X_tr, y_tr = X[train_mask], y[train_mask]
     X_te, y_te = X[test_mask],  y[test_mask]
@@ -211,11 +236,11 @@ def train_cs_ranker(df: pd.DataFrame, min_samples: int = 50) -> dict:
     }
 
 
-def save_cs_model(m: dict):
+def save_cs_model(m: dict, path: str = CS_MODEL_PATH):
     os.makedirs(MODELS_DIR, exist_ok=True)
-    with open(CS_MODEL_PATH, 'wb') as f:
+    with open(path, 'wb') as f:
         pickle.dump(m, f, protocol=pickle.HIGHEST_PROTOCOL)
-    print(f"[CSRanker] Saved to {CS_MODEL_PATH}")
+    print(f"[CSRanker] Saved to {path}")
 
 
 def load_cs_model() -> dict | None:
@@ -225,7 +250,33 @@ def load_cs_model() -> dict | None:
         return pickle.load(f)
 
 
+def _active_cs_baseline(conn: ConnWrapper) -> float | None:
+    """Held-out Spearman rho of the currently active cs_ranker model, or None."""
+    try:
+        row = conn.execute(
+            "SELECT cv_roc_auc FROM model_registry "
+            "WHERE model_name = 'cs_ranker' AND is_active = 1 ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        if row and row[0] is not None:
+            return float(row[0])
+    except Exception:
+        pass
+    return None
+
+
 def _register_cs_model(conn: ConnWrapper, m: dict) -> int:
+    """Registers the trained model in model_registry AND decides whether it becomes the
+    active model (writes CS_MODEL_PATH) or is saved as a rejected candidate for inspection
+    (CS_CANDIDATE_PATH, model_registry row kept with is_active=0).
+
+    Promotion gate (Finding #17, 2026-07-28 full-stack audit): this used to unconditionally
+    deactivate the previous model and activate the new one -- the code even logged "rho
+    below threshold... model saved anyway" and proceeded to activate it regardless. A single
+    noisy or adverse-regime retrain could silently degrade the live cs_score for every
+    downstream consumer with no safety net. Now matches the champion/challenger gate
+    ml_ensemble.py/live_screener_ml_ranker.py already use: only activate if the new held-out
+    rho beats the active model's by >= CS_PROMOTION_MARGIN, or there is no active model yet.
+    """
     import json
     version  = datetime.datetime.utcnow().strftime('%Y%m%d_%H%M%S')
     feats    = m.get('feature_names', [])
@@ -235,7 +286,35 @@ def _register_cs_model(conn: ConnWrapper, m: dict) -> int:
         pairs = sorted(zip(feats, mdl.feature_importances_), key=lambda x: -x[1])[:15]
         top_feats = [{'feature': f, 'importance': round(float(i), 6)} for f, i in pairs]
 
+    baseline_rho = _active_cs_baseline(conn)
+    new_rho = m['spearman_rho']
+    promote = baseline_rho is None or new_rho >= baseline_rho + CS_PROMOTION_MARGIN
+
     cur = conn.cursor()
+    if not promote:
+        save_cs_model(m, path=CS_CANDIDATE_PATH)
+        print(f"[CSRanker] Candidate REJECTED: rho={new_rho:.4f} did not beat active model's "
+              f"{baseline_rho:.4f} + {CS_PROMOTION_MARGIN} margin. Saved to {CS_CANDIDATE_PATH} "
+              f"for inspection; active model unchanged.")
+        cur.execute("""
+            INSERT INTO model_registry
+                (model_name, model_version, model_type, trained_at,
+                 training_samples, cv_roc_auc, cv_accuracy,
+                 feature_count, top_features_json, model_path, is_active, horizon_days, notes)
+            VALUES ('cs_ranker', ?, 'LightGBM Regressor', ?, ?, ?, ?, ?, ?, ?, 0, 5, ?)
+            RETURNING id
+        """, (
+            version, m['trained_at'], m['n_samples'],
+            new_rho, None,
+            len(feats), json.dumps(top_feats), CS_CANDIDATE_PATH,
+            f"REJECTED spearman_rho={new_rho:.4f} vs baseline={baseline_rho:.4f}",
+        ))
+        model_id = cur.fetchone()[0]
+        conn.commit()
+        print(f"[CSRanker] Rejected candidate logged as model_id={model_id} version={version} (is_active=0)")
+        return model_id
+
+    save_cs_model(m, path=CS_MODEL_PATH)
     cur.execute("UPDATE model_registry SET is_active = 0 WHERE model_name = 'cs_ranker' AND is_active = 1")
     cur.execute("""
         INSERT INTO model_registry
@@ -246,13 +325,13 @@ def _register_cs_model(conn: ConnWrapper, m: dict) -> int:
         RETURNING id
     """, (
         version, m['trained_at'], m['n_samples'],
-        m['spearman_rho'], None,
+        new_rho, None,
         len(feats), json.dumps(top_feats), CS_MODEL_PATH,
-        f"spearman_rho={m['spearman_rho']:.4f}",
+        f"spearman_rho={new_rho:.4f}" + (f" (beat baseline {baseline_rho:.4f})" if baseline_rho is not None else " (no prior model)"),
     ))
     model_id = cur.fetchone()[0]
     conn.commit()
-    print(f"[CSRanker] Registered as model_id={model_id} version={version}")
+    print(f"[CSRanker] Registered as model_id={model_id} version={version} (ACTIVE)")
     return model_id
 
 
@@ -365,7 +444,6 @@ if __name__ == '__main__':
             print("[CSRanker] No training data — aborting.")
             sys.exit(1)
         m = train_cs_ranker(df)
-        save_cs_model(m)
         conn = connect()
         _register_cs_model(conn, m)
 

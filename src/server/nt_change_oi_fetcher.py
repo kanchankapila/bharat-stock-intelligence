@@ -25,6 +25,7 @@ from datetime import date as _date
 import requests
 
 from db_compat import execute, executemany, query_all
+from fetch_utils import retry_get
 
 NT_HEADERS = {
     "User-Agent": (
@@ -78,14 +79,14 @@ def _sf(v) -> float | None:
 def fetch_change_oi(nt_symbol: str, snap_time: str, exchange: str) -> list[dict]:
     url = CHANGE_OI_URL.format(symbol=nt_symbol, time=snap_time, exchange=exchange)
     try:
-        r = requests.get(url, headers=NT_HEADERS, timeout=20)
+        r = retry_get(requests, url, headers=NT_HEADERS, timeout=20)
         d = r.json()
         if d.get("result") != 1:
             print(f"  [chg-OI] API error for {nt_symbol}: {d.get('resultMessage')}")
             return []
         return d.get("resultData") or []
     except Exception as e:
-        print(f"  [chg-OI] fetch error for {nt_symbol}: {e}")
+        print(f"  [chg-OI] fetch error for {nt_symbol} after retries: {e}")
         return []
 
 

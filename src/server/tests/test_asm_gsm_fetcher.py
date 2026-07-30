@@ -26,12 +26,17 @@ class TestParseStage:
 
 
 class _FakeCursor:
-    def __init__(self):
+    def __init__(self, floor_row=None):
         self.executed = []
         self.rowcount = 1
+        self._floor_row = floor_row if floor_row is not None else {"d": "2026-07-29"}
 
     def execute(self, sql, params=None):
         self.executed.append((sql, params))
+        return self
+
+    def fetchone(self):
+        return self._floor_row
 
 
 class _FakeConn:
@@ -104,9 +109,59 @@ class TestBackfillTechnicalSignalsPlaceholders:
         monkeypatch.setattr(agf, "use_postgres", lambda: True)
         fake_conn = _FakeConn()
         agf.backfill_technical_signals(fake_conn)
-        update_calls = [(sql, params) for sql, params in fake_conn.cur.executed if "asm_flag" in sql and "CASE" in sql]
-        assert len(update_calls) == 1, "expected exactly one UPDATE ... CASE WHEN statement"
+        update_calls = [(sql, params) for sql, params in fake_conn.cur.executed if "UPDATE technical_signals" in sql and "asm_flag" in sql]
+        assert len(update_calls) == 1, "expected exactly one UPDATE technical_signals statement"
         sql, params = update_calls[0]
         assert "%s" not in sql, "raw '%s' breaks db_compat's translate()/psycopg2 pipeline -- use '?'"
-        assert sql.count("?") == 2
-        assert len(params) == 2
+        assert sql.count("?") == 1
+        assert len(params) == 1
+
+
+class TestBackfillTechnicalSignalsScoped:
+    """Regression test for Finding #82 (2026-07-28 full-stack audit, live-confirmed
+    2026-07-30 as actively corrupting production): the old UPDATE had NO WHERE clause
+    restricting which technical_signals rows it touched -- the join predicate was
+    symbol-only, so a CASE WHEN date >= today() ELSE NULL guard with zero matching
+    rows (e.g. run on a trading holiday) nulled asm_flag/gsm_stage for every symbol's
+    ENTIRE history in one run. Live DB showed 47,234 total rows vs only 2,486 non-null
+    asm_flag (5.3%) -- confirmed active data loss, not a latent risk. The fix anchors
+    to the last completed trading session (MAX(date) FROM stock_ohlcv, not
+    date.today()) and adds an explicit `date >= floor` WHERE clause so the UPDATE can
+    only ever touch the current session's row set -- it must be structurally
+    impossible for a mismatched anchor to null the rest of the table."""
+
+    def test_postgres_branch_scopes_update_to_current_session_only(self, monkeypatch):
+        monkeypatch.setattr(agf, "use_postgres", lambda: True)
+        fake_conn = _FakeConn()
+        fake_conn.cur._floor_row = {"d": "2026-07-29"}
+        agf.backfill_technical_signals(fake_conn)
+        update_calls = [(sql, params) for sql, params in fake_conn.cur.executed if "UPDATE technical_signals" in sql]
+        assert len(update_calls) == 1
+        sql, params = update_calls[0]
+        assert "WHERE" in sql and "technical_signals.date >= ?" in sql, \
+            "UPDATE must be scoped by a WHERE date >= floor clause, or it can touch the whole table again"
+        assert "ELSE NULL" not in sql, "the old CASE...ELSE NULL construct is exactly what nulled unrelated rows"
+        assert params == ("2026-07-29",), "must anchor to MAX(date) FROM stock_ohlcv, not date.today()"
+
+    def test_sqlite_branch_scopes_update_to_current_session_only(self, monkeypatch):
+        monkeypatch.setattr(agf, "use_postgres", lambda: False)
+        fake_conn = _FakeConn()
+        fake_conn.cur._floor_row = {"d": "2026-07-29"}
+        agf.backfill_technical_signals(fake_conn)
+        update_calls = [(sql, params) for sql, params in fake_conn.cur.executed if "UPDATE technical_signals" in sql]
+        assert len(update_calls) == 1
+        sql, params = update_calls[0]
+        assert "WHERE date >= ?" in sql
+        assert "ELSE NULL" not in sql
+        assert params == ("2026-07-29",)
+
+    def test_falls_back_to_today_when_stock_ohlcv_has_no_rows(self, monkeypatch):
+        """An empty stock_ohlcv (fresh DB / test fixture) must not crash the backfill --
+        fall back to date.today() rather than propagating a None floor into the UPDATE."""
+        monkeypatch.setattr(agf, "use_postgres", lambda: True)
+        fake_conn = _FakeConn()
+        fake_conn.cur._floor_row = None
+        agf.backfill_technical_signals(fake_conn)
+        update_calls = [(sql, params) for sql, params in fake_conn.cur.executed if "UPDATE technical_signals" in sql]
+        sql, params = update_calls[0]
+        assert params[0] == agf.date.today().isoformat()

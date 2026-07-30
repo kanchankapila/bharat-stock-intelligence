@@ -178,10 +178,13 @@ def _compute_max_pain(rows: list[dict]) -> float | None:
                 continue
             ce_oi = r["ce_oi"] or 0
             pe_oi = r["pe_oi"] or 0
-            # CE writers lose when settlement > strike
-            total_loss += max(0.0, settlement - s) * pe_oi
-            # PE writers lose when settlement < strike
-            total_loss += max(0.0, s - settlement) * ce_oi
+            # Fixed 2026-07-30 (Finding #51, full-stack audit): call/put OI were swapped --
+            # call writers lose (and are weighted by CALL oi) when settlement > strike; put
+            # writers lose (weighted by PUT oi) when settlement < strike. Verified against
+            # the correct implementation already used elsewhere in this codebase
+            # (pcr_fetcher.py x2, nt_oi_snapshot_fetcher.py).
+            total_loss += max(0.0, settlement - s) * ce_oi
+            total_loss += max(0.0, s - settlement) * pe_oi
         if min_loss is None or total_loss < min_loss:
             min_loss = total_loss
             max_pain_strike = settlement

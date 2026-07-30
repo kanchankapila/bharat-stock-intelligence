@@ -33,6 +33,7 @@ import sys
 import time
 
 from db_compat import connect, translate, use_postgres, read_df, executemany
+from fetch_utils import retry_get
 
 try:
     from curl_cffi import requests as cffi_req
@@ -159,7 +160,11 @@ def fetch_bulk(mc_to_symbol: dict[str, str]) -> tuple[dict[str, dict], list[tupl
     if cffi_req is None:
         raise ImportError("curl_cffi is required: pip install curl-cffi")
 
-    r = cffi_req.get(BULK_URL, headers=MC_HEADERS, impersonate="chrome110", timeout=30)
+    try:
+        r = retry_get(cffi_req, BULK_URL, headers=MC_HEADERS, impersonate="chrome110", timeout=30)
+    except Exception as e:
+        print(f"[EPSSurprise] Bulk endpoint fetch failed after retries: {e}")
+        return {}, []
     try:
         rows = r.json()["data"]["list"]
     except (ValueError, KeyError, TypeError) as e:
@@ -222,8 +227,8 @@ def _fetch_per_stock(scid: str) -> list[dict] | None:
     if cffi_req is None:
         return None
     try:
-        r = cffi_req.get(STOCK_URL.format(scid=scid), headers=MC_HEADERS,
-                         impersonate="chrome110", timeout=12)
+        r = retry_get(cffi_req, STOCK_URL.format(scid=scid), headers=MC_HEADERS,
+                       impersonate="chrome110", timeout=12)
         payload = r.json()
     except Exception as exc:
         print(f"[EPSSurprise] HTTP error for {scid}: {exc}", file=sys.stderr)

@@ -19,6 +19,7 @@ from datetime import datetime, timedelta, date
 import requests
 
 from db_compat import connect, translate, use_postgres
+from fetch_utils import retry_get
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -116,13 +117,11 @@ def fetch_nse_insider(
         to_date=to_date,
     )
     try:
-        r = sess.get(url, timeout=12)
-        if r.status_code == 200:
-            payload = r.json()
-            return payload.get("data") or []
-        print(f"[INSIDER] {symbol}: HTTP {r.status_code}", file=sys.stderr)
+        r = retry_get(sess, url, timeout=12)
+        payload = r.json()
+        return payload.get("data") or []
     except Exception as e:
-        print(f"[INSIDER] {symbol}: fetch error — {e}", file=sys.stderr)
+        print(f"[INSIDER] {symbol}: fetch error after retries — {e}", file=sys.stderr)
     return []
 
 

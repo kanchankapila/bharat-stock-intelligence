@@ -95,8 +95,12 @@ export async function runTechnicalScan(symbol: string): Promise<ScanResult> {
     }
 
     // 5. MACD
+    // Fixed 2026-07-30 (Finding #10, full-stack audit): missing `else if` branch meant this
+    // scanner could structurally never emit a bearish MACD signal, skewing output bullish
+    // regardless of actual market momentum.
     const macd = indicators.indicators?.find((i: any) => i.id === 'macd')?.indication;
     if (macd === 'Bullish') signals.push({ type: 'MACD', label: 'MACD Crossover', sentiment: 'Bullish', description: 'Momentum indicator showing bullish trend initiation' });
+    else if (macd === 'Bearish') signals.push({ type: 'MACD', label: 'MACD Crossover', sentiment: 'Bearish', description: 'Momentum indicator showing bearish trend initiation' });
   }
 
   // 6. 52W High/Low

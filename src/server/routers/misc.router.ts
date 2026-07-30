@@ -258,15 +258,27 @@ export const miscRouter = router({
     .query(async () => {
       try {
         // Pull latest technical snapshot per symbol (most recent date per symbol)
+        // Fixed 2026-07-30 (Finding #33, full-stack audit): the correlated subquery
+        // re-executed once per outer row with no date bound -- O(total historical rows)
+        // instead of O(distinct symbols). ROW_NUMBER() computed over the UNFILTERED
+        // per-symbol history (then filtered by rn=1 AND cmp>0 in the outer WHERE, not
+        // pushed into the partitioned subquery) preserves the original semantics exactly:
+        // a symbol is excluded when its truly-latest row lacks a valid cmp, rather than
+        // silently falling back to an earlier row that happens to have one. Also added a
+        // `symbol ASC` tiebreaker to the ORDER BY -- the original had none, so with (date,
+        // signal_score) tied across hundreds of symbols on any given day, LIMIT 200 was
+        // returning a non-reproducible arbitrary subset (confirmed live: the correlated-
+        // subquery and window-function query plans picked entirely different 200-symbol
+        // sets from the same underlying ties before this tiebreaker was added).
         const signals = await dbAll<Record<string, unknown>>(`
-          SELECT ts.*, ns.sector, ns.industry
-          FROM technical_signals ts
-          LEFT JOIN nse_stocks ns ON ns.symbol = ts.symbol
-          WHERE ts.date = (
-            SELECT MAX(ts2.date) FROM technical_signals ts2 WHERE ts2.symbol = ts.symbol
-          )
-          AND ts.cmp IS NOT NULL AND ts.cmp > 0
-          ORDER BY ts.date DESC, ts.signal_score DESC
+          SELECT * FROM (
+            SELECT ts.*, ns.sector, ns.industry,
+                   ROW_NUMBER() OVER (PARTITION BY ts.symbol ORDER BY ts.date DESC) AS rn
+            FROM technical_signals ts
+            LEFT JOIN nse_stocks ns ON ns.symbol = ts.symbol
+          ) t
+          WHERE rn = 1 AND cmp IS NOT NULL AND cmp > 0
+          ORDER BY date DESC, signal_score DESC, symbol ASC
           LIMIT 200
         `);
 

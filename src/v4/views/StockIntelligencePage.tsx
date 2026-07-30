@@ -142,9 +142,12 @@ const TechnicalsTab: React.FC<{ symbol: string }> = ({ symbol }) => {
     }));
   }, [ohlc]);
 
+  // sma20 dropped 2026-07-30 (Finding #106, full-stack audit): no data source computes a
+  // 20-day SMA anywhere in this codebase -- it doesn't exist on technical_signals or the
+  // legacy technical_analysis_signals table, so this key was always going to render nothing.
   const indicatorFields: [string, string][] = [
     ['rsi', 'RSI'], ['macd', 'MACD'], ['adx', 'ADX'],
-    ['sma20', 'SMA 20'], ['sma50', 'SMA 50'], ['sma200', 'SMA 200'],
+    ['sma50', 'SMA 50'], ['sma200', 'SMA 200'],
     ['win_probability', 'Win Probability'],
   ];
 

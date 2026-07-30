@@ -11,6 +11,10 @@ class _FakeResp:
         self._payload = payload
         self._raise = raise_on_json
 
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise RuntimeError(f"HTTP {self.status_code}")
+
     def json(self):
         if self._raise:
             raise ValueError("Expecting value: line 1 column 1 (char 0)")
@@ -31,7 +35,16 @@ class TestFetchBulkDegradesGracefully:
     It now degrades to '0 stocks resolved' and continues."""
 
     def test_decode_failure_returns_empty_without_raising(self, monkeypatch):
-        monkeypatch.setattr(esf, "cffi_req", _FakeCffi(_FakeResp(status_code=502, raise_on_json=True)))
+        # status_code=200 (a "successful" response) with a malformed body — exercises the
+        # JSON-decode-failure path specifically, distinct from an HTTP-error status (which
+        # retry_get's own raise_for_status now intercepts before .json() is ever called).
+        monkeypatch.setattr(esf, "cffi_req", _FakeCffi(_FakeResp(status_code=200, raise_on_json=True)))
+        features, history = esf.fetch_bulk({"SCID1": "RELIANCE"})
+        assert features == {}
+        assert history == []
+
+    def test_http_error_status_returns_empty_without_raising(self, monkeypatch):
+        monkeypatch.setattr(esf, "cffi_req", _FakeCffi(_FakeResp(status_code=502)))
         features, history = esf.fetch_bulk({"SCID1": "RELIANCE"})
         assert features == {}
         assert history == []

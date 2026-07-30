@@ -167,35 +167,45 @@ def backfill_technical_signals(con) -> int:
         except Exception:
             con.rollback()
 
-    # date >= today ELSE NULL guard added 2026-07-19 -- this previously used plain `=` with NO
-    # date filter at all (worse than COALESCE: it REWRITES every historical row on every run,
-    # so asm_flag/gsm_stage never reflected true historical surveillance status, only
-    # "whatever it is today"). nse_stocks has no historical ASM/GSM snapshot to backfill from,
-    # so older rows are explicitly nulled rather than left holding today's status.
-    today = date.today().isoformat()
+    # date.today()-anchored CASE...ELSE NULL guard (added 2026-07-19, replacing an even worse
+    # unfiltered `=`) had NO WHERE clause restricting which rows the UPDATE touched at all --
+    # the join predicate was symbol-only, so on any day "today" doesn't exactly match an
+    # existing technical_signals row (e.g. a trading holiday, when this job still runs via
+    # ml-daily-ops' closed-day-early-batch dispatcher at 07:30 IST), `date >= today` matched
+    # zero rows platform-wide and the ELSE branch nulled asm_flag/gsm_stage for EVERY symbol's
+    # ENTIRE history in one run. Live-confirmed 2026-07-30: technical_signals had 47,234 total
+    # rows vs only 2,486 non-null asm_flag (5.3%) -- the surveillance-flag history had been
+    # wiped down to "only today survives" repeatedly. Fixed the same way the 6 date.today()
+    # siblings were fixed 2026-07-25: anchor to the last completed trading session
+    # (MAX(date) FROM stock_ohlcv, matching the grid-ensurer's own anchor) instead of
+    # date.today(), AND scope the UPDATE with an explicit WHERE so it can only ever touch the
+    # current session's row set -- never any prior date, regardless of what "floor" resolves
+    # to. This also makes the CASE/ELSE NULL construct unnecessary: the WHERE clause alone
+    # keeps historical rows untouched instead of relying on a NULL-if-mismatched branch.
+    floor_row = cur.execute("SELECT MAX(date) AS d FROM stock_ohlcv").fetchone()
+    floor = str(floor_row["d"])[:10] if floor_row and floor_row["d"] else date.today().isoformat()
+
     if use_postgres():
         cur.execute(
             """
             UPDATE technical_signals
-            SET asm_flag  = CASE WHEN technical_signals.date >= ? THEN ns.is_asm ELSE NULL END,
-                gsm_stage = CASE WHEN technical_signals.date >= ? THEN ns.gsm_stage ELSE NULL END
+            SET asm_flag  = ns.is_asm,
+                gsm_stage = ns.gsm_stage
             FROM nse_stocks ns
             WHERE technical_signals.symbol = ns.symbol
+              AND technical_signals.date >= ?
             """,
-            (today, today),
+            (floor,),
         )
     else:
         cur.execute(
             """
             UPDATE technical_signals
-            SET asm_flag = CASE WHEN date >= ? THEN
-                    (SELECT is_asm FROM nse_stocks WHERE symbol = technical_signals.symbol)
-                ELSE NULL END,
-                gsm_stage = CASE WHEN date >= ? THEN
-                    (SELECT gsm_stage FROM nse_stocks WHERE symbol = technical_signals.symbol)
-                ELSE NULL END
+            SET asm_flag = (SELECT is_asm FROM nse_stocks WHERE symbol = technical_signals.symbol),
+                gsm_stage = (SELECT gsm_stage FROM nse_stocks WHERE symbol = technical_signals.symbol)
+            WHERE date >= ?
             """,
-            (today, today),
+            (floor,),
         )
 
     updated = cur.rowcount

@@ -32,6 +32,7 @@ from datetime import date, datetime, timedelta
 import requests
 
 from db_compat import connect, safe_alter
+from fetch_utils import retry_get
 
 MTO_URL = "https://nsearchives.nseindia.com/archives/equities/mto/MTO_{date}.DAT"
 
@@ -89,12 +90,12 @@ def fetch_mto(trade_date: date, session: requests.Session) -> list[dict] | None:
     """Download and parse MTO DAT file. Returns list of row dicts or None on failure."""
     url = MTO_URL.format(date=trade_date.strftime("%d%m%Y"))
     try:
-        r = session.get(url, timeout=15)
-        if r.status_code == 404:
-            return None  # holiday
-        r.raise_for_status()
+        r = retry_get(session, url, timeout=15)
     except Exception as e:
-        print(f"[Delivery] {trade_date}: download failed — {e}")
+        status = getattr(getattr(e, 'response', None), 'status_code', None)
+        if status == 404:
+            return None  # holiday
+        print(f"[Delivery] {trade_date}: download failed after retries — {e}")
         return None
 
     rows = []

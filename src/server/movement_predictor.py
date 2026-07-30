@@ -57,6 +57,9 @@ SCORE_LOOKBACK_DAYS = 400
 EMBARGO = 3                # small buffer against lagged-feature autocorrelation at the fold edge
 ENRICH_LOOKBACK_DAYS = 60   # screener/technical_signals history only goes back ~6-7 weeks
 MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ml_models", "movement.pkl")
+# New held-out test_auc must beat the active model's by at least this much to be promoted.
+# Same value as ml_ensemble.py's PROMOTION_MARGIN.
+MOVEMENT_PROMOTION_MARGIN = 0.005
 
 # Screener categories that plausibly precede a big intraday move -- deliberately excludes
 # slow-moving fundamental/valuation/ownership categories.
@@ -366,6 +369,38 @@ def _holdout_test_auc(df: pd.DataFrame, feature_cols: list, holdout_dates: set) 
     return float(roc_auc_score(y[va], m.predict_proba(X[va])[:, 1]))
 
 
+def _load_baseline_test_auc(model_path: str) -> float | None:
+    """The currently-active model's own stored test_auc, or None if there's no existing
+    model or it can't be read."""
+    if not os.path.exists(model_path):
+        return None
+    try:
+        with open(model_path, "rb") as f:
+            existing = pickle.load(f)
+        return existing.get("test_auc")
+    except Exception as e:
+        print(f"[Movement] Could not read existing model at {model_path} for comparison "
+              f"({e}) -- treating as no baseline.")
+        return None
+
+
+def _movement_promotion_decision(test_auc: float, baseline_test_auc: float | None) -> tuple[bool, str | None]:
+    """Pure gate decision (Finding #80): returns (promote, refusal_reason).
+
+    A NaN held-out AUC (insufficient holdout rows) must never auto-promote just because
+    there happens to be no prior baseline to fail against -- "no baseline" and "invalid
+    metric" are different states that were conflated before this fix.
+    """
+    if np.isnan(test_auc):
+        return False, "held-out test AUC is NaN (insufficient holdout data) -- cannot confirm this model is safe to promote."
+    if baseline_test_auc is None:
+        return True, None
+    if test_auc >= baseline_test_auc + MOVEMENT_PROMOTION_MARGIN:
+        return True, None
+    return False, (f"new held-out test AUC {test_auc:.4f} did not beat active model's "
+                    f"{baseline_test_auc:.4f} + {MOVEMENT_PROMOTION_MARGIN} margin.")
+
+
 def train(report_only: bool = False, enrich: bool = False, leak_check: bool = False) -> dict:
     core = load_core_training_data()
     if core.empty or len(core) < 500:
@@ -465,6 +500,21 @@ def train(report_only: bool = False, enrich: bool = False, leak_check: bool = Fa
     if report_only:
         return result
 
+    # Promotion gate (Finding #80, 2026-07-28 full-stack audit): this used to unconditionally
+    # overwrite MODEL_PATH whenever not report_only -- it never loaded the existing pickle's
+    # own stored test_auc to compare against the freshly computed one, even though the
+    # artifact already stores it. score() blindly loads whatever is at MODEL_PATH, so a
+    # retrain that regresses (bad fold, unlucky init) silently replaced a better production
+    # model with a worse one. Mirrors live_screener_ml_ranker.py's
+    # _load_active_metrics()/PROMOTION_MARGIN pattern, which this sibling file didn't reuse.
+    baseline_test_auc = _load_baseline_test_auc(MODEL_PATH)
+    promote, refusal_reason = _movement_promotion_decision(test_auc, baseline_test_auc)
+    if not promote:
+        print(f"[Movement] REFUSED: {refusal_reason} Active model at {MODEL_PATH} left unchanged.")
+        result["trained"] = False
+        result["promoted"] = False
+        return result
+
     X = _feature_matrix(core, OHLCV_FEATURE_COLS)
     y = core["moved"].astype(int)
     spw = (1 - base_rate) / max(base_rate, 1e-6)
@@ -475,8 +525,11 @@ def train(report_only: bool = False, enrich: bool = False, leak_check: bool = Fa
         pickle.dump({"model": prod, "feature_names": OHLCV_FEATURE_COLS,
                      "trained_at": datetime.date.today().isoformat(), "oof_auc": auc,
                      "test_auc": test_auc}, f)
-    print(f"[Movement] saved model (core OOF AUC {auc:.4f}, held-out test AUC {test_auc:.4f}) -> {MODEL_PATH}")
+    print(f"[Movement] saved model (core OOF AUC {auc:.4f}, held-out test AUC {test_auc:.4f}"
+          + (f", beat baseline {baseline_test_auc:.4f}" if baseline_test_auc is not None else ", no prior model")
+          + f") -> {MODEL_PATH}")
     result["trained"] = True
+    result["promoted"] = True
     return result
 
 

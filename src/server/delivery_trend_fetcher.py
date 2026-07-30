@@ -42,6 +42,7 @@ from datetime import date, timedelta
 import requests
 
 from db_compat import connect, translate, use_postgres
+from fetch_utils import retry_get
 
 # ── NSE session headers ───────────────────────────────────────────────────────
 
@@ -177,16 +178,13 @@ def _nse_session() -> requests.Session:
 
 def _fetch_json(session: requests.Session, url: str, params: dict | None = None) -> list[dict]:
     try:
-        r = session.get(url, params=params, timeout=12)
-        if r.status_code != 200:
-            print(f"[DeliveryTrend] {url} → HTTP {r.status_code}")
-            return []
+        r = retry_get(session, url, params=params, timeout=12)
         data = r.json()
         if isinstance(data, list):
             return data
         return data.get("data", [])
     except Exception as e:
-        print(f"[DeliveryTrend] Fetch error {url}: {e}")
+        print(f"[DeliveryTrend] Fetch error {url} after retries: {e}")
         return []
 
 

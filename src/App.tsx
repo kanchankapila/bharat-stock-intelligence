@@ -1482,6 +1482,22 @@ const OptionChain: React.FC<{ symbol: string; stockPrice: number }> = ({ symbol,
   const ivPercentile = ocData?.marketSentiment?.ivPercentile;
   const maxPain = ocData?.marketSentiment?.maxPain;
 
+  // Portfolio-impact Greeks (Finding #73, 2026-07-28 audit): OI-weighted sum of each Greek
+  // across the full chain — same real per-strike callDelta/callTheta/callVega/callGamma the
+  // chart above already plots, not invented numbers.
+  const portfolioGreeks = useMemo(() => {
+    const totalOi = chain.reduce((s: number, r: any) => s + (r.callOi || 0) + (r.putOi || 0), 0);
+    if (!totalOi) return { Delta: 0, Gamma: 0, Theta: 0, Vega: 0 };
+    const weighted = (callKey: string, putKey: string) => chain.reduce((s: number, r: any) =>
+      s + (r[callKey] || 0) * (r.callOi || 0) + (r[putKey] || 0) * (r.putOi || 0), 0) / totalOi;
+    return {
+      Delta: weighted('callDelta', 'putDelta'),
+      Gamma: weighted('callGamma', 'putGamma'),
+      Theta: weighted('callTheta', 'putTheta'),
+      Vega:  weighted('callVega', 'putVega'),
+    };
+  }, [chain]);
+
   if (isLoading) {
     return (
       <div className="py-20 text-center glass-strong rounded-2xl border border-slate-800/50 border-dashed">
@@ -1658,7 +1674,7 @@ const OptionChain: React.FC<{ symbol: string; stockPrice: number }> = ({ symbol,
                   g === 'Delta' ? 'bg-emerald-500' : g === 'Theta' ? 'bg-rose-500' : 'bg-blue-500'
                 )} />
                 <p className="text-[10px] font-bold text-slate-300">
-                  {g === 'Gamma' ? '0.0024' : Math.random().toFixed(2)}
+                  {portfolioGreeks[g as keyof typeof portfolioGreeks].toFixed(g === 'Gamma' ? 4 : 2)}
                 </p>
              </div>
            ))}
@@ -2779,63 +2795,84 @@ const FundamentalInsights: React.FC<{ symbol: string }> = ({ symbol }) => {
 };
 
 const MFAnalysis: React.FC<{ symbol: string }> = ({ symbol }) => {
+  // Finding #74 (2026-07-28 audit): this component took a `symbol` prop but never queried
+  // with it — "Top Mutual Fund Holders" was 5 hardcoded identical rows and "FII/DII Trends"
+  // was Math.random()-generated, both fabricated and identical for every stock. The live
+  // per-fund holder breakdown endpoint (mf_holding) is confirmed dead (404) as of this fix —
+  // no per-fund-name data source exists in this codebase — so this now shows the real,
+  // stock-specific aggregate MF/FII/DII/promoter ownership + QoQ trend from getShareholding
+  // (live-verified working) instead of inventing fund-level detail. FII/DII Trends is wired
+  // to the real market-wide getFiiDiiFlow series already used elsewhere in the app.
+  const { data: sh } = trpc.getShareholding.useQuery({ symbol });
+  const { data: fiiDii } = trpc.getFiiDiiFlow.useQuery({ days: 6 });
+
+  const mfPct = (sh as any)?.summary?.mf?.percentage ?? (sh as any)?.mf_pct ?? null;
+  const mfChg = (sh as any)?.summary?.mf?.changeQoQ ?? (sh as any)?.mf_chg_qoq ?? null;
+  const fiiPct = (sh as any)?.summary?.fii?.percentage ?? (sh as any)?.fii_pct ?? null;
+  const diiPct = (sh as any)?.summary?.dii?.percentage ?? (sh as any)?.dii_pct ?? null;
+  const promPct = (sh as any)?.summary?.promoters?.percentage ?? (sh as any)?.promoter_pct ?? null;
+
+  const flowSeries = useMemo(
+    () => Array.isArray(fiiDii) ? [...fiiDii].reverse().map((r: any) => ({
+      date: r.date, fii: r.fii_net, dii: r.dii_net,
+    })) : [],
+    [fiiDii],
+  );
+
   return (
     <div className="space-y-6">
-       <Card title="Top Mutual Fund Holders" icon={PieChart}>
-          <div className="overflow-x-auto rounded-xl border border-slate-800/50">
-             <table className="w-full text-left">
-                <thead className="glass">
-                   <tr>
-                      {['Fund Name', 'Shares Held', 'Value (Cr)', 'Trend'].map(h => (
-                        <th key={h} className="px-4 py-3 text-[9px] font-black uppercase text-slate-400 tracking-widest">{h}</th>
-                      ))}
-                   </tr>
-                </thead>
-                <tbody className="glass-strong divide-y divide-slate-800">
-                   {[1, 2, 3, 4, 5].map(i => (
-                     <tr key={i} className="hover:glass transition-colors">
-                        <td className="px-4 py-3 font-bold text-white text-xs whitespace-nowrap uppercase italic">HDFC Top 100 Fund</td>
-                        <td className="px-4 py-3 text-slate-400 text-xs font-bold tabular-nums">2,450,000</td>
-                        <td className="px-4 py-3 text-slate-400 text-xs font-bold tabular-nums">₹412.5</td>
-                        <td className="px-4 py-3">
-                           <span className="text-emerald-400 text-[9px] font-black uppercase">Increased</span>
-                        </td>
-                     </tr>
-                   ))}
-                </tbody>
-             </table>
-          </div>
+       <Card title={`Institutional & MF Ownership — ${symbol}`} icon={PieChart}>
+          {mfPct === null && fiiPct === null ? (
+            <p className="text-slate-400 text-[10px] uppercase font-bold tracking-widest text-center py-8">
+              Shareholding data unavailable for {symbol}
+            </p>
+          ) : (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {[
+                { label: 'Mutual Funds', pct: mfPct, chg: mfChg },
+                { label: 'FII', pct: fiiPct, chg: null },
+                { label: 'DII', pct: diiPct, chg: null },
+                { label: 'Promoters', pct: promPct, chg: null },
+              ].map(row => (
+                <div key={row.label} className="text-center p-3 glass-strong rounded-xl border border-slate-800/50">
+                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">{row.label}</p>
+                  <p className="text-xl font-black text-white italic tracking-tighter">
+                    {row.pct !== null ? `${Number(row.pct).toFixed(2)}%` : '—'}
+                  </p>
+                  {row.chg !== null && (
+                    <p className={cn("text-[9px] font-bold mt-1", Number(row.chg) >= 0 ? "text-emerald-400" : "text-rose-400")}>
+                      {Number(row.chg) >= 0 ? '+' : ''}{Number(row.chg).toFixed(2)}% QoQ
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
        </Card>
 
-       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <Card title="FII/DII Trends" icon={Activity}>
-             <div className="h-48 mt-4">
-                <ResponsiveContainer width="100%" height="100%">
-                   <AreaChart data={Array.from({ length: 6 }, (_, i) => ({ month: i, fii: 15 + Math.random() * 5, dii: 12 + Math.random() * 5 }))}>
-                      <XAxis dataKey="month" hide />
-                      <YAxis hide />
-                      <Area type="monotone" dataKey="fii" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.1} />
-                      <Area type="monotone" dataKey="dii" stroke="#f43f5e" fill="#f43f5e" fillOpacity={0.1} />
-                   </AreaChart>
-                </ResponsiveContainer>
-             </div>
-             <p className="text-[10px] text-slate-400 mt-4 italic text-center font-bold">Consolidated inflow trend across last 6 months</p>
-          </Card>
-
-          <Card title="SIP Return Explorer" icon={TrendingUp}>
-             <div className="space-y-6">
-                <div>
-                   <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">SIP Return (3Y Ann.)</p>
-                   <p className="text-3xl font-black text-emerald-400 italic tracking-tighter">18.4%</p>
-                </div>
-                <div className="pt-4 border-t border-slate-800/50">
-                   <p className="text-[10px] text-slate-400 leading-relaxed font-medium italic">
-                     Historical SIP performance if invested ₹10,000 monthly since {new Date().getFullYear() - 5}.
-                   </p>
-                </div>
-             </div>
-          </Card>
-       </div>
+       <Card title="FII/DII Trends (Market-Wide)" icon={Activity}>
+          {flowSeries.length === 0 ? (
+            <p className="text-slate-400 text-[10px] uppercase font-bold tracking-widest text-center py-8">
+              FII/DII flow data unavailable
+            </p>
+          ) : (
+            <div className="h-48 mt-4">
+               <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={flowSeries}>
+                     <XAxis dataKey="date" hide />
+                     <YAxis hide />
+                     <Tooltip
+                       contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px' }}
+                       itemStyle={{ fontSize: '11px', fontWeight: 'bold' }}
+                     />
+                     <Area type="monotone" dataKey="fii" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.1} name="FII Net (₹ Cr)" />
+                     <Area type="monotone" dataKey="dii" stroke="#f43f5e" fill="#f43f5e" fillOpacity={0.1} name="DII Net (₹ Cr)" />
+                  </AreaChart>
+               </ResponsiveContainer>
+            </div>
+          )}
+          <p className="text-[10px] text-slate-400 mt-4 italic text-center font-bold">Net FII/DII flow across the whole market, not specific to {symbol} — no per-stock FII/DII flow source exists</p>
+       </Card>
     </div>
   );
 };
@@ -3010,6 +3047,17 @@ const StockDetails: React.FC<{
   const [activeTab, setActiveTab] = useState('insights');
   const [report, setReport] = useState<any>(null);
   const { data: unifiedData } = trpc.getAlphaQuantDetail.useQuery({ symbol });
+  // Fixed 2026-07-30 (Finding #89, full-stack audit): the "Technical Scorecard" sidebar
+  // below used to hardcode RSI/MACD/Bollinger/pivot points -- directly contradicting the
+  // real values on this same page's Technical tab (TechnicalAnalysis component, which
+  // already fetches this exact query). Reused rather than duplicated.
+  const { data: tech } = trpc.getTechnicalDetails.useQuery({ symbol, dur: 'D' });
+  // Fixed 2026-07-30 (Finding #90, full-stack audit): the "Institutional Flow (FII/DII)"
+  // card in the F&O tab below used to hardcode +₹4,250 Cr / -₹1,120 Cr and a permanently
+  // static "15 mins ago" timestamp for every stock, every session. This is market-wide
+  // (not per-stock) FII/DII net flow -- the closest real data this platform has for that
+  // card, and what the audit itself points at (getFiiDiiFlow/getInstitutionalFlows).
+  const { data: fiiDiiFlow } = trpc.getFiiDiiFlow.useQuery({ days: 1 });
 
   // Resolve MC symbol (scId) from stocklist mapping for MoneyControl API calls
   const stockMapping = _stockDataMap.get(symbol.toUpperCase());
@@ -3056,37 +3104,34 @@ const StockDetails: React.FC<{
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stock?.price, symbol]);
 
-  // Synthetic high-fidelity candlestick data
-  const [chartData] = useState(() => {
-    const base = stock?.price || 1000;
-    let currentPrice = base;
-    return Array.from({ length: 40 }, (_, i) => {
-      const open = currentPrice;
-      const volatility = base * 0.015;
-      const close = currentPrice + (Math.random() - 0.48) * volatility;
-      const high = Math.max(open, close) + Math.random() * (volatility * 0.5);
-      const low = Math.min(open, close) - Math.random() * (volatility * 0.5);
-      
-      currentPrice = close;
-      
-      const vwap = close * 0.99;
-      const stdDev = base * 0.02;
-      const upperBand = close + stdDev;
-      const lowerBand = close - stdDev;
-
-      return { 
-        time: `${10 + Math.floor(i/10)}:${(i%10)*6}`, 
-        open,
-        high,
-        low,
-        close,
-        price: close, 
-        vwap, 
-        bollinger: [lowerBand, upperBand],
-        volume: Math.random() * 100000 
+  // Real OHLCV chart data (Finding #75, 2026-07-28 audit): this used to generate 40
+  // Math.random() candles and run real pattern-detection/support-resistance logic on top of
+  // them — a fabricated conclusion presented as real technical analysis. Now sourced from
+  // getOHLCData (the same procedure v4's StockIntelligencePage already uses correctly).
+  // VWAP/Bollinger bands are computed the same way the old code did, just from real OHLCV.
+  const { data: ohlcResp } = trpc.getOHLCData.useQuery({ symbol, dur: '3m' });
+  const chartData = useMemo(() => {
+    const rows: any[] = (ohlcResp as any)?.data ?? [];
+    const BOLL_WINDOW = 20;
+    return rows.map((r: any, i: number) => {
+      const open = Number(r.open), high = Number(r.high), low = Number(r.low), close = Number(r.close);
+      const volume = Number(r.volume) || 0;
+      const windowRows = rows.slice(Math.max(0, i - BOLL_WINDOW + 1), i + 1);
+      const windowVol = windowRows.reduce((s: number, x: any) => s + (Number(x.volume) || 0), 0);
+      const vwap = windowVol > 0
+        ? windowRows.reduce((s: number, x: any) =>
+            s + ((Number(x.high) + Number(x.low) + Number(x.close)) / 3) * (Number(x.volume) || 0), 0) / windowVol
+        : (high + low + close) / 3;
+      const windowCloses = windowRows.map((x: any) => Number(x.close));
+      const mean = windowCloses.reduce((s: number, v: number) => s + v, 0) / windowCloses.length;
+      const stdDev = Math.sqrt(windowCloses.reduce((s: number, v: number) => s + (v - mean) ** 2, 0) / windowCloses.length);
+      return {
+        time: r.time, open, high, low, close, price: close, volume,
+        vwap,
+        bollinger: [mean - 2 * stdDev, mean + 2 * stdDev],
       };
     });
-  });
+  }, [ohlcResp]);
 
   const patterns = React.useMemo(() => {
     const candles = chartData.map(d => ({
@@ -3283,11 +3328,11 @@ const StockDetails: React.FC<{
                       <div className="flex gap-4">
                          <div className="flex-1 p-3 glass-strong rounded-xl border border-slate-800/50">
                             <span className="text-[8px] font-black text-slate-400 uppercase block mb-1">52W High</span>
-                            <span className="text-xs font-bold text-white">{stock?.high ? `₹${stock.high + 100}` : '—'}</span>
+                            <span className="text-xs font-bold text-white">{stock?.high52w ? `₹${stock.high52w}` : '—'}</span>
                          </div>
                          <div className="flex-1 p-3 glass-strong rounded-xl border border-slate-800/50">
                             <span className="text-[8px] font-black text-slate-400 uppercase block mb-1">52W Low</span>
-                            <span className="text-xs font-bold text-white">{stock?.low ? `₹${stock.low - 50}` : '—'}</span>
+                            <span className="text-xs font-bold text-white">{stock?.low52w ? `₹${stock.low52w}` : '—'}</span>
                          </div>
                       </div>
                    </div>
@@ -3563,17 +3608,32 @@ const StockDetails: React.FC<{
                <FnOSignals symbol={symbol} />
 
                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <Card title="Institutional Flow (FII/DII)" icon={TrendingUp}>
+                  <Card title="Market-Wide Institutional Flow (FII/DII)" icon={TrendingUp}>
                      <div className="space-y-4">
-                        <div className="flex justify-between items-center p-3 glass-strong rounded-xl border border-slate-800/50">
-                           <span className="text-xs font-bold text-slate-400">Net FII Position</span>
-                           <span className="text-emerald-400 font-black">+₹4,250 Cr</span>
-                        </div>
-                        <div className="flex justify-between items-center p-3 glass-strong rounded-xl border border-slate-800/50">
-                           <span className="text-xs font-bold text-slate-400">DII Activity</span>
-                           <span className="text-rose-400 font-black">-₹1,120 Cr</span>
-                        </div>
-                        <p className="text-[9px] text-slate-400 italic text-center uppercase tracking-widest mt-2 font-bold">Update: 15 mins ago</p>
+                        {(() => {
+                          const latest = Array.isArray(fiiDiiFlow) && fiiDiiFlow.length > 0 ? fiiDiiFlow[0] as any : null;
+                          const fmtCr = (n: number | null | undefined) =>
+                            n == null ? '—' : `${n >= 0 ? '+' : ''}₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })} Cr`;
+                          return (
+                            <>
+                              <div className="flex justify-between items-center p-3 glass-strong rounded-xl border border-slate-800/50">
+                                 <span className="text-xs font-bold text-slate-400">Net FII Position</span>
+                                 <span className={cn("font-black", (latest?.fii_net ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400")}>
+                                   {fmtCr(latest?.fii_net)}
+                                 </span>
+                              </div>
+                              <div className="flex justify-between items-center p-3 glass-strong rounded-xl border border-slate-800/50">
+                                 <span className="text-xs font-bold text-slate-400">DII Activity</span>
+                                 <span className={cn("font-black", (latest?.dii_net ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400")}>
+                                   {fmtCr(latest?.dii_net)}
+                                 </span>
+                              </div>
+                              <p className="text-[9px] text-slate-400 italic text-center uppercase tracking-widest mt-2 font-bold">
+                                {latest?.date ? `As of ${latest.date}` : 'No flow data captured yet'}
+                              </p>
+                            </>
+                          );
+                        })()}
                      </div>
                   </Card>
                </div>
@@ -3593,48 +3653,71 @@ const StockDetails: React.FC<{
         <div className="col-span-12 lg:col-span-4 space-y-6">
           <Card title="Technical Scorecard" icon={Activity}>
              <div className="space-y-6 pt-2">
-                <div>
-                  <div className="flex justify-between items-center mb-2">
-                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">RSI (14)</span>
-                    <span className="text-amber-400 font-bold text-xs uppercase tracking-tighter">Neutral (58.4)</span>
-                  </div>
-                  <div className="w-full h-2 glass-strong rounded-full relative overflow-hidden border border-slate-800/50">
-                    <div className="absolute inset-y-0 left-[30%] right-[70%] bg-blue-500/10 border-x border-blue-500/20" />
-                    <div className="absolute top-0 h-full w-1 bg-amber-400 left-[58.4%]" />
-                  </div>
-                </div>
+                {(() => {
+                  // Fixed 2026-07-30 (Finding #89): all values below now come from the same
+                  // getTechnicalDetails query the Technical tab (TechnicalAnalysis component)
+                  // already renders correctly two tabs over.
+                  const techIndicators = (tech as any)?.data?.indicators ?? [];
+                  const rsiInd = techIndicators.find((i: any) => i.displayName?.includes('RSI'));
+                  const macdInd = techIndicators.find((i: any) => i.displayName?.includes('MACD'));
+                  const bbInd = techIndicators.find((i: any) => i.displayName?.includes('Bollinger'));
+                  const rsiVal = rsiInd ? parseFloat(rsiInd.value) : null;
+                  const rsiPct = rsiVal != null && !isNaN(rsiVal) ? Math.min(100, Math.max(0, rsiVal)) : null;
+                  const classicPivot = (tech as any)?.data?.pivotLevels?.find((p: any) => p.key === 'Classic')?.pivotLevel;
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="p-3 glass-strong rounded-xl border border-slate-800/50">
-                    <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">MACD</p>
-                    <p className="text-xs font-bold text-emerald-400 italic">Bullish Crossover</p>
-                  </div>
-                  <div className="p-3 glass-strong rounded-xl border border-slate-800/50">
-                    <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Bollinger</p>
-                    <p className="text-xs font-bold text-slate-300 italic">Upper Band Touch</p>
-                  </div>
-                </div>
+                  return (
+                    <>
+                      <div>
+                        <div className="flex justify-between items-center mb-2">
+                          <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">RSI (14)</span>
+                          <span className="text-amber-400 font-bold text-xs uppercase tracking-tighter">
+                            {rsiInd ? `${rsiInd.indication} (${rsiVal})` : '—'}
+                          </span>
+                        </div>
+                        <div className="w-full h-2 glass-strong rounded-full relative overflow-hidden border border-slate-800/50">
+                          <div className="absolute inset-y-0 left-[30%] right-[70%] bg-blue-500/10 border-x border-blue-500/20" />
+                          {rsiPct != null && (
+                            <div className="absolute top-0 h-full w-1 bg-amber-400" style={{ left: `${rsiPct}%` }} />
+                          )}
+                        </div>
+                      </div>
 
-                <div className="space-y-2">
-                   <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Pivot Points (Standard)</p>
-                   <div className="space-y-1">
-                      {[
-                        { label: 'R2', val: (stock?.high ?? 0) + 10, color: 'text-emerald-400' },
-                        { label: 'R1', val: stock?.high ?? 0, color: 'text-emerald-500' },
-                        { label: 'PP', val: stock?.price ?? 0, color: 'text-white' },
-                        { label: 'S1', val: stock?.low ?? 0, color: 'text-rose-500' },
-                        { label: 'S2', val: (stock?.low ?? 0) - 10, color: 'text-rose-400' },
-                      ].map(p => {
-                         const displayVal = typeof p.val === 'number' ? `₹${p.val.toFixed(2)}` : p.val;
-                         return (
-                           <div key={p.label} className="flex justify-between items-center px-4 py-2 glass-strong rounded-lg border border-slate-800/30">
-                              <span className={cn("text-[9px] font-black uppercase tracking-widest", p.color)}>{p.label}</span>
-                              <span className="text-xs font-bold tabular-nums text-slate-300">{displayVal}</span>
-                           </div>
-                         );
-                       })}
-                   </div>
-                </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="p-3 glass-strong rounded-xl border border-slate-800/50">
+                          <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">MACD</p>
+                          <p className={cn("text-xs font-bold italic", macdInd?.indication === 'Bullish' ? "text-emerald-400" : macdInd?.indication === 'Bearish' ? "text-rose-400" : "text-slate-300")}>
+                            {macdInd ? macdInd.indication : '—'}
+                          </p>
+                        </div>
+                        <div className="p-3 glass-strong rounded-xl border border-slate-800/50">
+                          <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Bollinger</p>
+                          <p className="text-xs font-bold text-slate-300 italic">{bbInd ? bbInd.indication : '—'}</p>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                         <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Pivot Points (Classic)</p>
+                         <div className="space-y-1">
+                            {[
+                              { label: 'R2', val: classicPivot?.r2, color: 'text-emerald-400' },
+                              { label: 'R1', val: classicPivot?.r1, color: 'text-emerald-500' },
+                              { label: 'PP', val: classicPivot?.pivotPoint, color: 'text-white' },
+                              { label: 'S1', val: classicPivot?.s1, color: 'text-rose-500' },
+                              { label: 'S2', val: classicPivot?.s2, color: 'text-rose-400' },
+                            ].map(p => {
+                               const displayVal = typeof p.val === 'number' ? `₹${p.val.toFixed(2)}` : '—';
+                               return (
+                                 <div key={p.label} className="flex justify-between items-center px-4 py-2 glass-strong rounded-lg border border-slate-800/30">
+                                    <span className={cn("text-[9px] font-black uppercase tracking-widest", p.color)}>{p.label}</span>
+                                    <span className="text-xs font-bold tabular-nums text-slate-300">{displayVal}</span>
+                                 </div>
+                               );
+                             })}
+                         </div>
+                      </div>
+                    </>
+                  );
+                })()}
 
                 <div className="pt-2">
                   {aiAnalysisMutation.isPending ? (

@@ -71,10 +71,30 @@ def fetch_one(sym: str, session: requests.Session, from_year: int) -> tuple:
             if c[i] is None or c[i] <= 0:
                 continue
             rows.append((sym, d.isoformat(), o[i], h[i], l[i], c[i],
-                         int(v[i]) if v[i] is not None else None))
+                         int(v[i]) if v[i] is not None else None, "split_only"))
         return (sym, "ok", rows)
     except Exception as e:
         return (sym, f"ERR:{str(e)[:40]}", [])
+
+
+def ensure_adjustment_basis_column(conn) -> None:
+    """Fixed 2026-07-30 (Finding #6, full-stack audit): this writer produces SPLIT-ONLY
+    adjusted prices; the weekly backfill_ohlcv.py (yfinance auto_adjust=True) produces
+    SPLIT+DIVIDEND adjusted prices for the same table -- verified live (ITC.NS, 2026-07-30):
+    yfinance's dividend adjustment alone shifted a 90-day-old bar by ~2.65%, a real,
+    material discontinuity at whichever row the two writers' date ranges meet, worst for
+    high-yield names. Tagging every row with which basis wrote it is the safe, additive
+    first step (Finding #6's option (b)) -- it does NOT rewrite price-adjustment math
+    (higher-risk, not attempted here), but lets downstream consumers
+    (relative_strength.py/ml_ensemble.py/breakout_classifier.py) detect and correct for a
+    straddling return window instead of silently absorbing the step artifact.
+    """
+    cur = conn.cursor()
+    try:
+        cur.execute("ALTER TABLE stock_ohlcv ADD COLUMN adjustment_basis TEXT")
+        conn.commit()
+    except Exception:
+        conn.rollback()
 
 
 def upsert(conn, rows: list[tuple], overwrite: bool) -> int:
@@ -84,10 +104,11 @@ def upsert(conn, rows: list[tuple], overwrite: bool) -> int:
     if not rows:
         return 0
     conflict = ("DO UPDATE SET open=excluded.open, high=excluded.high, low=excluded.low, "
-                "close=excluded.close, volume=excluded.volume" if overwrite else "DO NOTHING")
+                "close=excluded.close, volume=excluded.volume, "
+                "adjustment_basis=excluded.adjustment_basis" if overwrite else "DO NOTHING")
     if use_postgres():
         from psycopg2.extras import execute_values
-        sql = ("INSERT INTO stock_ohlcv (symbol, date, open, high, low, close, volume) "
+        sql = ("INSERT INTO stock_ohlcv (symbol, date, open, high, low, close, volume, adjustment_basis) "
                "VALUES %s ON CONFLICT (symbol, date) " + conflict)
         written = 0
         # One transaction PER CHUNK (not one big commit): a chunk that trips a
@@ -111,8 +132,8 @@ def upsert(conn, rows: list[tuple], overwrite: bool) -> int:
         return written
     # SQLite fallback
     sql = translate(
-        "INSERT INTO stock_ohlcv (symbol, date, open, high, low, close, volume) "
-        "VALUES (?,?,?,?,?,?,?) ON CONFLICT (symbol, date) " + conflict)
+        "INSERT INTO stock_ohlcv (symbol, date, open, high, low, close, volume, adjustment_basis) "
+        "VALUES (?,?,?,?,?,?,?,?) ON CONFLICT (symbol, date) " + conflict)
     cur = conn.cursor()
     for i in range(0, len(rows), INSERT_CHUNK):
         cur.executemany(sql, rows[i:i + INSERT_CHUNK])
@@ -126,6 +147,7 @@ def run(from_year: int, workers: int, limit: int | None,
     print(f"[MCBackfill] {len(syms)} symbols, from {from_year}, {workers} workers, "
           f"{'OVERWRITE' if overwrite else 'fill-only'}")
     conn = connect()
+    ensure_adjustment_basis_column(conn)
     session = requests.Session()
     session.headers.update(HEADERS)
 

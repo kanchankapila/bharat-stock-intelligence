@@ -40,11 +40,11 @@ try:
                 "Chrome/125.0.0.0 Safari/537.36"
             ),
         }
-        return cffi_req.get(url, headers=headers, timeout=20, **kw)
+        return retry_get(cffi_req, url, headers=headers, timeout=20, **kw)
 except ImportError:
     import requests as _req
     def _get(url: str, **kw):
-        return _req.get(url, timeout=20, **kw)
+        return retry_get(_req, url, timeout=20, **kw)
 
 # ── path setup ──────────────────────────────────────────────────────────────
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -56,6 +56,7 @@ if _ROOT not in sys.path:
 
 os.environ.setdefault("USE_POSTGRES", "true")
 from db_compat import connect   # noqa: E402
+from fetch_utils import retry_get   # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)

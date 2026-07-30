@@ -3,8 +3,7 @@ import { ArrowLeft, ArrowUpRight, ArrowDownRight } from 'lucide-react';
 import { trpc } from '../lib/trpc';
 import { cn } from '../lib/utils';
 import IndexFnoOverview from './IndexFnoOverview';
-import { MCIndexDetailPanel } from './MCIndexDetailPanel';
-import stockData from '../data/stocklist';
+import { MCIndexDetailPanel, resolveConstituentSymbol } from './MCIndexDetailPanel';
 
 export const IndexDetailPage: React.FC<{
   indexId: string;
@@ -309,7 +308,14 @@ export const IndexDetailPage: React.FC<{
               <tbody>
                 {stocks.slice(0, 50).map((s: any) => {
                   const up = s.direction === '1';
-                  const nseSym = stockData.find(st => st.symbol.toUpperCase() === String(s.id).toUpperCase())?.symbol || s.id;
+                  // Fixed 2026-07-30 (Finding #100, full-stack audit): s.id from MC's
+                  // marketmap endpoint is an opaque MC ticker (e.g. "AT18"), not the NSE
+                  // symbol -- matching it directly against stockData's .symbol field almost
+                  // never hit, so most constituent rows navigated/displayed the wrong
+                  // symbol. Reuses MCIndexDetailPanel.tsx's already-correct resolver
+                  // (mcsymbol fallback, then company-name fallback) instead of duplicating
+                  // a second, wrong version of the same logic.
+                  const nseSym = resolveConstituentSymbol(s) || s.id;
                   return (
                     <tr
                       key={s.id}

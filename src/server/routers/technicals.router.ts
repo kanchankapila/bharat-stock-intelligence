@@ -26,7 +26,17 @@ export const technicalsRouter = router({
   getTechnicalPredictions: publicProcedure
     .input(z.object({ symbol: z.string() }))
     .query(async ({ input }) => {
-      const row = await dbGet<any>('SELECT * FROM technical_analysis_signals WHERE symbol = ?', [input.symbol]);
+      // Fixed 2026-07-30 (Finding #106, full-stack audit): this used to read the legacy,
+      // mostly-superseded technical_analysis_signals table, which has neither adx nor sma20/
+      // sma50/sma200 nor win_probability -- 5 of 7 "Technical Signal Snapshot" tiles on
+      // v4's StockIntelligencePage (including win_probability, the platform's central ML
+      // output) silently never rendered. technical_signals is the actively-maintained
+      // table with all of those columns; ORDER BY date DESC LIMIT 1 replaces the legacy
+      // table's symbol-only PK, which had guaranteed exactly one row per symbol.
+      const row = await dbGet<any>(
+        'SELECT * FROM technical_signals WHERE symbol = ? ORDER BY date DESC LIMIT 1',
+        [input.symbol]
+      );
       if (!row) return null;
       return { ...row, patterns: JSON.parse(row.patterns || '[]') };
     }),

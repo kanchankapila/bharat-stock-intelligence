@@ -25,6 +25,7 @@ from datetime import date as _date
 import requests
 
 from db_compat import connect, executemany, load_index_map_inv, query_all, translate
+from fetch_utils import retry_get
 
 NT_HEADERS = {
     "User-Agent": (
@@ -84,7 +85,7 @@ def fetch_pcr(nt_symbol: str, req_type: str, req_date: str = "") -> tuple[list[s
     """Fetch PCR time series. Returns (expiry_dates, oiDatas)."""
     url = PCR_URL.format(symbol=nt_symbol, req_type=req_type, req_date=req_date)
     try:
-        r = requests.get(url, headers=NT_HEADERS, timeout=20)
+        r = retry_get(requests, url, headers=NT_HEADERS, timeout=20)
         d = r.json()
         if d.get("result") != 1:
             print(f"  [PCR] API error for {nt_symbol}: {d.get('resultMessage')}")
@@ -94,7 +95,7 @@ def fetch_pcr(nt_symbol: str, req_type: str, req_date: str = "") -> tuple[list[s
         data     = rd.get("oiDatas") or []
         return expiries, data
     except Exception as e:
-        print(f"  [PCR] fetch error for {nt_symbol}: {e}")
+        print(f"  [PCR] fetch error for {nt_symbol} after retries: {e}")
         return [], []
 
 

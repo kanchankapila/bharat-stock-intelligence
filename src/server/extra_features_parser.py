@@ -126,26 +126,53 @@ def run(target_date: str) -> int:
 
     print(f"[PARSER] Found {len(symbols)} symbols in technical_signals for date {target_date}")
 
-    # Fetch cached responses for these symbols
+    # Fetch cached responses for these symbols, plus each row's own updated_at.
+    # Fixed 2026-07-30 (Finding #65, full-stack audit): extra_endpoint_responses has
+    # PRIMARY KEY (symbol, endpoint_name) and only ever holds the LATEST live snapshot --
+    # it has no history. Writing that current-only snapshot onto an arbitrary historical
+    # technical_signals row (via a past --date, or the "fall back to most recent existing
+    # date" path above) was a confirmed look-ahead leak into ext_fii_holding_pct/
+    # ext_t80_tech_score/ext_mojo_quality_rank/etc, all consumed by ml_ensemble.py. A
+    # snapshot-only table structurally cannot reconstruct what was true on a past date, so
+    # this now only ever writes onto the technical_signals row for the date the snapshot
+    # was ACTUALLY fetched (updated_at's date) -- never target_date blindly.
     cur.execute("""
-        SELECT symbol, endpoint_name, response_json 
+        SELECT symbol, endpoint_name, response_json, updated_at
         FROM extra_endpoint_responses
         WHERE symbol IN ({})
     """.format(",".join("?" for _ in symbols)), tuple(symbols))
-    
+
     responses_by_symbol = {}
+    fetched_date_by_symbol = {}
     for r in cur.fetchall():
-        sym, endpoint, resp = r[0], r[1], r[2]
+        sym, endpoint, resp, updated_at = r[0], r[1], r[2], r[3]
         responses_by_symbol.setdefault(sym, []).append((endpoint, resp))
+        fetched_date = str(updated_at)[:10] if updated_at else None
+        # Latest fetched_date across this symbol's endpoints -- if endpoints were fetched
+        # on different days, the snapshot as a whole is only as fresh as its oldest part,
+        # but MAX is the closest available proxy without per-endpoint row granularity.
+        if fetched_date and fetched_date > fetched_date_by_symbol.get(sym, ""):
+            fetched_date_by_symbol[sym] = fetched_date
 
     # Parse and update
     updated_count = 0
+    skipped_stale = 0
     for sym in symbols:
         resps = responses_by_symbol.get(sym, [])
         if not resps:
             continue
+
+        fetched_date = fetched_date_by_symbol.get(sym)
+        if fetched_date != target_date:
+            # The cached snapshot was NOT captured on target_date -- writing it there would
+            # leak a different day's data into this row (backward if fetched_date is newer
+            # than target_date, i.e. a historical backfill; stale if older). Skip rather
+            # than fabricate a point-in-time value this table cannot actually supply.
+            skipped_stale += 1
+            continue
+
         feat = extract_features(sym, resps)
-        
+
         cur.execute("""
             UPDATE technical_signals
             SET ext_fii_holding_pct = ?,
@@ -180,7 +207,8 @@ def run(target_date: str) -> int:
 
     con.commit()
     con.close()
-    print(f"[PARSER] Successfully updated features for {updated_count} symbols on {target_date}")
+    print(f"[PARSER] Successfully updated features for {updated_count} symbols on {target_date} "
+          f"({skipped_stale} skipped -- cached snapshot wasn't fetched on {target_date})")
     return updated_count
 
 if __name__ == "__main__":

@@ -1,13 +1,15 @@
 import { dbAll, dbRun, dbTransaction } from './dbAsync';
+import { rowGroups, bulkUpsert } from './dbBulk';
 import {
   initEtMarketstatsScreeners, getEtMarketstatsScreenerDefs,
   fetchEtMarketstatsScreener, getFieldValue, cleanNseSymbol, extractMetricRows,
   type EtMarketstatsScreenerDef,
 } from './etMarketstats';
 
-const upsertMetricSql = `
+const METRIC_COLS = 7;
+const buildMetricUpsertSql = (n: number) => `
   INSERT INTO mc_general_metrics (symbol, source_api, metric_group, metric_name, metric_value_num, metric_value_text, fetched_at)
-  VALUES (?, ?, ?, ?, ?, ?, ?)
+  VALUES ${rowGroups(n, METRIC_COLS)}
   ON CONFLICT(symbol, source_api, metric_group, metric_name, fetched_at) DO UPDATE SET
     metric_value_num  = excluded.metric_value_num,
     metric_value_text = excluded.metric_value_text
@@ -53,10 +55,11 @@ export async function syncEtMarketstatsScreeners(timeframeFilter?: 'intraday' | 
 
   console.log(`[ET_MARKETSTATS] Fetching ${defs.length} screeners...`);
 
-  const upsertStockSql = `
+  const STOCK_COLS = 10;
+  const buildStockUpsertSql = (n: number) => `
     INSERT INTO et_marketstats_screener_stocks
       (screener_key, symbol, stock_name, asset_id, exchange_id, last_traded_price, percent_change, raw_data, first_seen, last_seen)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES ${rowGroups(n, STOCK_COLS)}
     ON CONFLICT(screener_key, symbol) DO UPDATE SET
       stock_name = excluded.stock_name,
       last_traded_price = excluded.last_traded_price,
@@ -102,6 +105,44 @@ export async function syncEtMarketstatsScreeners(timeframeFilter?: 'intraday' | 
         if (symbol) incomingSymbols.add(symbol);
       }
 
+      // Fixed 2026-07-30 (Finding #37, full-stack audit): this loop used to run one
+      // tx.run() per stock row plus one per extracted metric -- ~83,000-127,000
+      // sequential statement executions per sync run (confirmed live: ~8,453 stock rows +
+      // 75,512-118,398 metric rows per run). Batched into multi-row VALUES upserts via the
+      // existing rowGroups()/bulkUpsert() helpers, already used correctly for the same
+      // pattern in confluenceEngine.ts. dbBulk.ts requires rows deduped by their ON
+      // CONFLICT key beforehand (a multi-row upsert touching the same key twice errors on
+      // Postgres) -- Map-keyed-by-conflict-key with last-write-wins insertion order
+      // preserves the exact same "later duplicate overwrites earlier" semantics the
+      // sequential tx.run() calls had.
+      const stockRowsByKey = new Map<string, unknown[]>();
+      const metricRowsByKey = new Map<string, unknown[]>();
+
+      for (const record of records) {
+        const raw = record.assetSymbol || '';
+        if (!raw) continue;
+        const symbol = cleanNseSymbol(raw);
+        if (!symbol) continue;
+
+        const ltp = parseFloat(getFieldValue(record, 'lastTradedPrice') || '') || null;
+        const pctChg = parseFloat(getFieldValue(record, 'percentChange') || '') || null;
+
+        stockRowsByKey.set(`${def.screenerKey}|${symbol}`, [
+          def.screenerKey, symbol, record.assetName || null, record.assetId || null,
+          record.assetExchangeId || null, ltp, pctChg, JSON.stringify(record.data || []),
+          today, today,
+        ]);
+
+        // Structured extraction into mc_general_metrics — makes every field this
+        // screener returns (Beta, DSCR, Ultimate Oscillator, quarterly margin trail,
+        // etc.) queryable without parsing raw_data. Applies to all 95 screeners
+        // (existing + the 4 confirmed extra views), not just the new ones.
+        for (const metricRow of extractMetricRows(def, symbol, record, today)) {
+          const [sym, sourceApi, metricGroup, metricName, , , fetchedAt] = metricRow;
+          metricRowsByKey.set(`${sym}|${sourceApi}|${metricGroup}|${metricName}|${fetchedAt}`, metricRow);
+        }
+      }
+
       await dbTransaction(async (tx) => {
         const existing = await tx.all<{ symbol: string }>(
           `SELECT symbol FROM et_marketstats_screener_stocks WHERE screener_key = ?`, [def.screenerKey]);
@@ -110,29 +151,8 @@ export async function syncEtMarketstatsScreeners(timeframeFilter?: 'intraday' | 
           await tx.run(`DELETE FROM et_marketstats_screener_stocks WHERE screener_key = ? AND symbol = ?`, [def.screenerKey, r.symbol]);
         }
 
-        for (const record of records) {
-          const raw = record.assetSymbol || '';
-          if (!raw) continue;
-          const symbol = cleanNseSymbol(raw);
-          if (!symbol) continue;
-
-          const ltp = parseFloat(getFieldValue(record, 'lastTradedPrice') || '') || null;
-          const pctChg = parseFloat(getFieldValue(record, 'percentChange') || '') || null;
-
-          await tx.run(upsertStockSql, [
-            def.screenerKey, symbol, record.assetName || null, record.assetId || null,
-            record.assetExchangeId || null, ltp, pctChg, JSON.stringify(record.data || []),
-            today, today,
-          ]);
-
-          // Structured extraction into mc_general_metrics — makes every field this
-          // screener returns (Beta, DSCR, Ultimate Oscillator, quarterly margin trail,
-          // etc.) queryable without parsing raw_data. Applies to all 95 screeners
-          // (existing + the 4 confirmed extra views), not just the new ones.
-          for (const metricRow of extractMetricRows(def, symbol, record, today)) {
-            await tx.run(upsertMetricSql, metricRow);
-          }
-        }
+        await bulkUpsert(tx, [...stockRowsByKey.values()], STOCK_COLS, buildStockUpsertSql);
+        await bulkUpsert(tx, [...metricRowsByKey.values()], METRIC_COLS, buildMetricUpsertSql);
       });
 
       const entered = Array.from(incomingSymbols).filter(s => !prevSymbols.has(s));

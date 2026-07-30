@@ -73,6 +73,52 @@ export const fundamentalsRouter = router({
       }
     }),
 
+  // Added 2026-07-30 (Finding #94, full-stack audit): SmartMoneyMonitor.tsx previously had
+  // no backend call at all -- a hardcoded array of 9 stocks with invented promoter/FII/DII
+  // percentage-change numbers presented as live data, with no fallback framing (it was the
+  // only data path that existed). This surfaces the SAME real, quarterly promoter/FII/MF
+  // ownership-change trail getShareholding's DB fallback already reads per-symbol
+  // (technical_signals, populated by fundamentals_snapshot.py), ranked across the whole
+  // universe instead of one symbol at a time. mf_chg_qoq (mutual fund flow) is used as the
+  // DII proxy -- it's the closest real column to "DII flow" this table actually has; there
+  // is no separate non-MF-DII column to report instead.
+  getSmartMoneyFlow: publicProcedure
+    .input(z.object({
+      direction: z.enum(['accumulation', 'distribution']).default('accumulation'),
+      limit: z.number().min(1).max(50).optional().default(20),
+    }))
+    .query(async ({ input }) => {
+      try {
+        const rows = await dbAll<any>(`
+          SELECT t.symbol, ns.name, t.date, t.promoter_chg_qoq, t.fii_chg_qoq, t.mf_chg_qoq,
+                 (COALESCE(t.fii_chg_qoq, 0) + COALESCE(t.mf_chg_qoq, 0)) AS net_flow
+          FROM (
+            SELECT *, ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY date DESC) AS rn
+            FROM technical_signals
+            WHERE fii_chg_qoq IS NOT NULL OR mf_chg_qoq IS NOT NULL
+          ) t
+          LEFT JOIN nse_stocks ns ON ns.symbol = t.symbol
+          WHERE t.rn = 1
+          ORDER BY net_flow ${input.direction === 'accumulation' ? 'DESC' : 'ASC'}
+          LIMIT ?
+        `, [input.limit]);
+
+        return rows.map((r: any) => ({
+          symbol: r.symbol,
+          name: r.name ?? r.symbol,
+          promoter: r.promoter_chg_qoq != null ? Number(r.promoter_chg_qoq) : null,
+          fii: r.fii_chg_qoq != null ? Number(r.fii_chg_qoq) : null,
+          dii: r.mf_chg_qoq != null ? Number(r.mf_chg_qoq) : null,
+          netFlow: Number(r.net_flow),
+          status: r.net_flow >= 0 ? 'accumulation' : 'distribution',
+          asOfDate: r.date,
+        }));
+      } catch (e) {
+        console.error("[Fundamentals Router] getSmartMoneyFlow failed:", e);
+        return [];
+      }
+    }),
+
   getCorporateActions: publicProcedure
     .input(z.object({ symbol: z.string() }))
     .query(async ({ input }) => fetchETCorporateActions(input.symbol)),

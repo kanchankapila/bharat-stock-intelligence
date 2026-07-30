@@ -35,6 +35,7 @@ from datetime import date, datetime, timedelta
 import requests
 
 from db_compat import connect
+from fetch_utils import retry_get
 
 LIVE_URL  = "https://www.nseindia.com/api/block-deal"
 HIST_URL  = "https://www.nseindia.com/api/historical/block-deals"
@@ -109,14 +110,11 @@ def _prime_session(session: requests.Session) -> None:
 def fetch_live(session: requests.Session) -> list[dict]:
     """Fetch today's block deals from the live endpoint."""
     try:
-        r = session.get(LIVE_URL, timeout=10)
-        if r.status_code != 200:
-            print(f"[Block] Live API returned {r.status_code}")
-            return []
+        r = retry_get(session, LIVE_URL, timeout=10)
         data = r.json()
         return data.get("data", [])
     except Exception as e:
-        print(f"[Block] Live fetch error: {e}")
+        print(f"[Block] Live fetch error after retries: {e}")
         return []
 
 
@@ -124,19 +122,22 @@ def fetch_historical(trade_date: date, session: requests.Session) -> list[dict]:
     """Fetch historical block deals for a single date."""
     date_str = trade_date.strftime("%d-%b-%Y")
     try:
-        r = session.get(HIST_URL, params={"from": date_str, "to": date_str}, timeout=15)
-        if r.status_code == 403 or r.status_code == 401:
+        r = retry_get(session, HIST_URL, params={"from": date_str, "to": date_str}, timeout=15)
+    except Exception as e:
+        status = getattr(getattr(e, 'response', None), 'status_code', None)
+        if status in (401, 403):
             print(f"[Block] {trade_date}: auth required for historical API")
-            return []
-        if r.status_code != 200:
-            return []
+        else:
+            print(f"[Block] {trade_date}: historical fetch error after retries: {e}")
+        return []
+    try:
         data = r.json()
         # Historical response: {"data": [...]} or directly [...]
         if isinstance(data, dict):
             return data.get("data", [])
         return data if isinstance(data, list) else []
     except Exception as e:
-        print(f"[Block] {trade_date}: historical fetch error: {e}")
+        print(f"[Block] {trade_date}: historical parse error: {e}")
         return []
 
 

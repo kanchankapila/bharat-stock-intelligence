@@ -115,14 +115,26 @@ def run(only_date: str | None = None, only_symbol: str | None = None) -> int:
 
     cutoff = (datetime.date.today() - datetime.timedelta(days=LOOKBACK_DAYS)).isoformat()
 
+    # Fixed 2026-07-30 (Finding #67, full-stack audit): the OHLCV read had a lower date
+    # bound but no upper one -- the write side correctly filtered which symbols/dates got
+    # updated for a --date backfill, but the HV values themselves were computed from OHLCV
+    # through TODAY regardless of the target date, leaking future realized volatility into
+    # a historical technical_signals row whenever --date targeted the past. Resolve the
+    # target date up front (same "today" normalization the write-side filter below already
+    # does) and bound the read with it too.
+    upper_bound = (
+        datetime.date.today().isoformat() if not only_date or only_date == "today"
+        else only_date
+    )
+
     base_sql = (
         "SELECT symbol, date, close FROM stock_ohlcv "
-        "WHERE date >= ? AND COALESCE(is_suspect, 0) = 0"
+        "WHERE date >= ? AND date <= ? AND COALESCE(is_suspect, 0) = 0"
     )
-    params: tuple = (cutoff,)
+    params: tuple = (cutoff, upper_bound)
     if only_symbol:
         base_sql += " AND symbol = ?"
-        params = (cutoff, only_symbol.upper())
+        params = (cutoff, upper_bound, only_symbol.upper())
     base_sql += " ORDER BY symbol, date"
 
     ohlcv = read_df(base_sql, params)

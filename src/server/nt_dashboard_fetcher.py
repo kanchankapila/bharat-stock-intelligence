@@ -37,7 +37,7 @@ from datetime import date
 
 import requests
 
-from db_compat import connect, translate
+from db_compat import connect, translate, query_scalar
 
 DASHBOARD_URL = "https://webapi.niftytrader.in/webapi/Option/dashboard-data"
 
@@ -207,9 +207,17 @@ def upsert_row(f: dict, con) -> None:
     con.commit()
 
 
-def backfill_technical_signals(today: str, f: dict, con) -> None:
+def backfill_technical_signals(ts_floor: str, f: dict, con) -> None:
     """date >= ? ELSE NULL guard added 2026-07-19 -- see mc_pricefeed_fetcher.py's
-    backfill_technical_signals for the full writeup of the no-date-filter bug this fixes."""
+    backfill_technical_signals for the full writeup of the no-date-filter bug this fixes.
+
+    BUG FOUND 2026-07-28 (Finding #64 of the full-stack audit): the guard threshold
+    (`ts_floor`, named `today` before this fix) was date.today() -- the same bug class
+    already fixed in 6 sibling fetchers on 2026-07-25, copied here *after* that fix
+    existed. On a closed-market day this job still runs, date.today() matches zero
+    technical_signals rows, and the ELSE branch nulls nt_max_pain_dist_pct/nt_pcr/etc
+    across a symbol's entire history. Caller must pass the last completed trading
+    session (MAX(date) FROM stock_ohlcv), not raw date.today() -- see main()."""
     opt_vol = f.get("option_volume")
     vol_log = round(math.log1p(opt_vol), 4) if opt_vol and opt_vol > 0 else None
 
@@ -222,10 +230,10 @@ def backfill_technical_signals(today: str, f: dict, con) -> None:
             nt_option_volume_log = CASE WHEN date >= ? THEN COALESCE(?, nt_option_volume_log) ELSE NULL END
         WHERE symbol = ?
     """), (
-        today, f.get("max_pain_dist_pct"),
-        today, f.get("oi_direction"),
-        today, f.get("pcr"),
-        today, vol_log,
+        ts_floor, f.get("max_pain_dist_pct"),
+        ts_floor, f.get("oi_direction"),
+        ts_floor, f.get("pcr"),
+        ts_floor, vol_log,
         f["symbol"],
     ))
     con.commit()
@@ -240,6 +248,8 @@ def main() -> None:
     ensure_schema(con)
 
     today = date.today().isoformat()
+    ohlcv_max = query_scalar("SELECT MAX(date) AS d FROM stock_ohlcv")
+    ts_floor = str(ohlcv_max)[:10] if ohlcv_max else today
     data = _fetch_all()
     if data is None:
         print("[NTDashboard] No data returned.")
@@ -259,7 +269,7 @@ def main() -> None:
         if f is None:
             continue
         upsert_row(f, con)
-        backfill_technical_signals(today, f, con)
+        backfill_technical_signals(ts_floor, f, con)
         ok += 1
 
     print(f"[NTDashboard] Done. {ok} records upserted (stocks={len(stocks)}, indices={len(indices)}).")

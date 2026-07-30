@@ -63,10 +63,15 @@ class Backtester:
         min_score: int = 3,
         horizon_days: int = 15,
     ) -> pd.DataFrame:
+        # asm_flag/gsm_stage added (Finding #47, 2026-07-28 full-stack audit): pulled
+        # straight from THIS signal's own technical_signals row (i.e. exactly the trading
+        # session it fired on), not a blanket join against nse_stocks' live current-day
+        # flag -- see the point-in-time filter in simulate_trades() for the full rationale.
         q = """
             SELECT ts.symbol, ts.date AS signal_date, ts.signal_score,
                    ts.cmp AS entry_price_ref, ts.stop_loss, ts.targets, ts.signals_json,
-                   ts.nifty_regime, ts.adx, ts.win_probability, ts.calibrated_win_probability
+                   ts.nifty_regime, ts.adx, ts.win_probability, ts.calibrated_win_probability,
+                   ts.asm_flag, ts.gsm_stage
             FROM technical_signals ts
             WHERE ts.date BETWEEN ? AND ?
               AND ts.signal_score >= ?
@@ -174,13 +179,27 @@ class Backtester:
         Simulate trades from signals.  Returns (trade_log, equity_curve_daily).
         equity_curve_daily: pd.Series indexed by date.
         """
-        surveillance = self._load_surveillance_symbols()
-        if surveillance:
+        # Fixed 2026-07-30 (Finding #47, full-stack audit): this used to exclude a symbol
+        # from the ENTIRE backtest window via _load_surveillance_symbols()'s blanket join
+        # against nse_stocks' LIVE (today's) is_asm/gsm_stage flag -- a stock currently
+        # under surveillance had its whole multi-year trade history wiped from the backtest
+        # (reverse-survivorship bias), while a now-clean stock's historically-restricted
+        # period was never excluded, letting the backtest simulate trades the exchange
+        # wouldn't have allowed at the time. Fixed to a true point-in-time filter: each
+        # signal's own technical_signals row (loaded in load_signals(), exactly the session
+        # it fired on) now carries asm_flag/gsm_stage, so a signal is only dropped if THAT
+        # DAY's flag was set -- not today's. Historical dates predating the 2026-07-30
+        # asm_gsm_fetcher.py fix have no point-in-time snapshot (NULL, not backfillable --
+        # NSE's API is current-state-only) and are correctly treated as "unknown, not
+        # excluded" rather than wrongly excluded or wrongly included.
+        if 'asm_flag' in signals.columns:
             before = len(signals)
-            signals = signals[~signals['symbol'].isin(surveillance)].reset_index(drop=True)
+            excluded_mask = (signals['asm_flag'].fillna(0).astype(float) == 1) | \
+                             (pd.to_numeric(signals['gsm_stage'], errors='coerce').fillna(0) > 0)
+            signals = signals[~excluded_mask].reset_index(drop=True)
             dropped = before - len(signals)
             if dropped:
-                print(f"[Backtester] Filtered {dropped} ASM/GSM signals")
+                print(f"[Backtester] Filtered {dropped} point-in-time ASM/GSM signals")
 
         trade_log: list[dict] = []
         # Position state: symbol -> {entry_date, entry_price, stop_loss, target_price, horizon_days, ...}
@@ -469,23 +488,6 @@ class Backtester:
 
         equity_series = pd.Series(equity)
         return trade_log, equity_series
-
-    def _load_surveillance_symbols(self) -> set:
-        """Symbols under NSE surveillance (ASM/GSM) -- many GSM stages (and T2T-segment ASM
-        stocks) settle delivery-only, so a signal there doesn't behave like the rest of the
-        backtest universe. Was pointed at a table (asm_gsm_stocks) that doesn't exist on this
-        database, so this silently returned an empty set on every call -- run() below has been
-        filtering nothing for however long that's been the case. nse_stocks.is_asm/gsm_stage
-        are the live, actively-synced surveillance flags (same source intraday_ranker.py's
-        equivalent filter uses)."""
-        try:
-            rows = self.conn.execute(
-                "SELECT symbol FROM nse_stocks WHERE is_asm=1 OR gsm_stage>0"
-            ).fetchall()
-            return {r[0] if isinstance(r, (list, tuple)) else r['symbol'] for r in rows}
-        except Exception as e:
-            print(f"[Backtester] surveillance filter failed, continuing unfiltered: {str(e)[:120]}")
-            return set()
 
     # Search bounds for the IS parameter optimizer. (min_score, stop_loss_pct, horizon_days)
     DEFAULT_WF_BOUNDS = {

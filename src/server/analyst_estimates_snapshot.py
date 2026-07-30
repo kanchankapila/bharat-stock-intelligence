@@ -20,6 +20,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
 
 from db_compat import execute, query_all
+from fetch_utils import retry_get
 
 _BATCH_SIZE = 15
 _BATCH_GAP_SEC = 0.5
@@ -130,7 +131,7 @@ def parse_earnings_forecast(data: Optional[dict]) -> dict:
 def _mc_get(url: str, session: requests.Session) -> Optional[dict]:
     """Fetch a MoneyControl JSON endpoint; return the .data payload or None."""
     try:
-        resp = session.get(url, headers=_MC_HEADERS, timeout=10)
+        resp = retry_get(session, url, headers=_MC_HEADERS, timeout=10)
         j = resp.json()
         if j.get("success") == 1:
             return j.get("data")

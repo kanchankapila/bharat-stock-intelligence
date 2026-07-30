@@ -48,7 +48,12 @@ ENSEMBLE_PATH = os.path.join(MODELS_DIR, 'ensemble.pkl')
 PROMOTION_MARGIN = 0.005
 CANDIDATE_PATH = ENSEMBLE_PATH + '.candidate'
 
-REGIME_MAP   = {'BULL': 1.0, 'SIDEWAYS': 0.0, 'BEAR': -1.0}
+# Finding #19 (2026-07-28 audit): previously only {'BULL':1.0,'SIDEWAYS':0.0,'BEAR':-1.0} —
+# HIGH_VOL/CRASH fell through .fillna(0.0) and were indistinguishable from SIDEWAYS to the
+# model, even though _REGIME_THRESHOLDS/position sizing treat all 5 as materially different.
+# Ordinal scale ordered by "risk-off-ness" (mirrors _REGIME_THRESHOLDS' own severity ordering:
+# CRASH's 0.42 confidence bar is the strictest, HIGH_VOL's 0.38 sits between SIDEWAYS and BEAR).
+REGIME_MAP   = {'BULL': 1.0, 'SIDEWAYS': 0.0, 'HIGH_VOL': -0.5, 'BEAR': -1.0, 'CRASH': -2.0}
 SIGNAL_TYPES = [
     'RSI_DIVERGENCE', 'HIDDEN_DIVERGENCE', 'RESISTANCE_BREAKOUT',
     'MACD_CROSSOVER', 'BB_COMPRESSION', 'GOLDEN_CROSS', 'OVERSOLD_RECOVERY',
@@ -2202,6 +2207,40 @@ def _fit_stack(X: pd.DataFrame, y: pd.Series, spw: float, embargo: int, n_splits
     return fitted, meta, float(auc), acc, imp
 
 
+def _compute_holdout_split(X: pd.DataFrame, dates: pd.Series | None, embargo: int,
+                            min_samples: int = 30) -> tuple[int, int, int]:
+    """Date-based test/val holdout boundary (Finding #18, 2026-07-28 audit fix): the exact
+    split train_ensemble() uses to carve out its honest held-out test window, factored out
+    so callers that need to know "where does the held-out window start" BEFORE training —
+    e.g. tune_hyperparameters, which must never see rows from the later-reported test/val
+    period — can compute the identical boundary instead of re-deriving their own and risking
+    drift from this function's own logic.
+
+    Returns (tr_end, n_test, n_val). n_test/n_val are 0 when there isn't enough distinct-date
+    coverage for a meaningful holdout — in that case tr_end == len(X) (train on everything,
+    matching train_ensemble's own no-holdout fallback, where there's no test window to leak
+    into anyway).
+    """
+    MIN_SPLIT_DAYS = 15
+    unique_dates = sorted(pd.Series(list(dates)).dropna().unique()) if dates is not None and len(dates) == len(X) else []
+    if len(unique_dates) >= (2 * MIN_SPLIT_DAYS + 5):
+        n_test_days = max(MIN_SPLIT_DAYS, int(len(unique_dates) * 0.10))
+        n_val_days  = max(MIN_SPLIT_DAYS, int(len(unique_dates) * 0.10))
+        test_start_date = unique_dates[-n_test_days]
+        val_start_date  = unique_dates[-(n_test_days + n_val_days)]
+        date_arr = pd.Series(list(dates)).reset_index(drop=True)
+        n_test = int((date_arr >= test_start_date).sum())
+        n_val  = int(((date_arr >= val_start_date) & (date_arr < test_start_date)).sum())
+    else:
+        n_test = int(len(X) * 0.10)
+        n_val  = int(len(X) * 0.10)
+    if n_test >= 10 and n_val >= 10 and (len(X) - n_test - n_val - embargo) >= max(min_samples, 100):
+        tr_end = len(X) - n_test - n_val - embargo
+    else:
+        tr_end, n_test, n_val = len(X), 0, 0
+    return tr_end, n_test, n_val
+
+
 def train_ensemble(X: pd.DataFrame, y: pd.Series, dates: pd.Series | None = None,
                    horizon_days: int = 15, min_samples: int = 30, tuned_params: dict | None = None):
     from sklearn.metrics import roc_auc_score, precision_score, recall_score, f1_score
@@ -2234,9 +2273,10 @@ def train_ensemble(X: pd.DataFrame, y: pd.Series, dates: pd.Series | None = None
     # data was ~94% SIDEWAYS/HIGH_VOL vs 0% BULL, 2% BEAR — see model_registry notes around
     # id=83). Left alone, BULL/BEAR examples get drowned out and the model overfits to
     # whichever regime dominates the window, which is what widened the cv/test AUC gap
-    # starting 2026-07-14. Inverse-frequency weight per encoded regime bucket (BULL=1,
-    # SIDEWAYS/HIGH_VOL/UNKNOWN=0, BEAR=-1), applied multiplicatively with the average-
-    # uniqueness weight above — these correct different biases (overlapping labels vs
+    # starting 2026-07-14. Inverse-frequency weight per encoded regime bucket (REGIME_MAP's
+    # 5-value ordinal — since Finding #19's fix, HIGH_VOL/CRASH each get their own bucket
+    # here too, no longer silently merged into SIDEWAYS's), applied multiplicatively with the
+    # average-uniqueness weight above — these correct different biases (overlapping labels vs
     # regime imbalance), not the same one.
     if 'regime' in X.columns:
         regime_counts = X['regime'].value_counts()
@@ -2262,22 +2302,8 @@ def train_ensemble(X: pd.DataFrame, y: pd.Series, dates: pd.Series | None = None
     # same model). Falls back to the old row-based heuristic when there aren't enough
     # distinct dates to form a meaningful date-based split.
     test = {'auc': None, 'precision': None, 'recall': None, 'f1': None, 'n': 0}
-    MIN_SPLIT_DAYS = 15
-    unique_dates = sorted(pd.Series(list(dates)).dropna().unique()) if dates is not None and len(dates) == len(X) else []
-    if len(unique_dates) >= (2 * MIN_SPLIT_DAYS + 5):
-        n_test_days = max(MIN_SPLIT_DAYS, int(len(unique_dates) * 0.10))
-        n_val_days  = max(MIN_SPLIT_DAYS, int(len(unique_dates) * 0.10))
-        test_start_date = unique_dates[-n_test_days]
-        val_start_date  = unique_dates[-(n_test_days + n_val_days)]
-        date_arr = pd.Series(list(dates)).reset_index(drop=True)
-        # X/dates are sorted ascending by date, so these counts are contiguous row spans.
-        n_test = int((date_arr >= test_start_date).sum())
-        n_val  = int(((date_arr >= val_start_date) & (date_arr < test_start_date)).sum())
-    else:
-        n_test = int(len(X) * 0.10)  # last 10% = reporting test set
-        n_val  = int(len(X) * 0.10)  # prior 10% = threshold selection val set
-    if n_test >= 10 and n_val >= 10 and (len(X) - n_test - n_val - embargo) >= max(min_samples, 100):
-        tr_end = len(X) - n_test - n_val - embargo
+    tr_end, n_test, n_val = _compute_holdout_split(X, dates, embargo, min_samples)
+    if n_test >= 10 and n_val >= 10:
         fb, mt, _, _, _ = _fit_stack(X.iloc[:tr_end], y.iloc[:tr_end], spw, embargo,
                                      sample_weight=(weights[:tr_end] if weights is not None else None),
                                      tuned_params=tuned_params)
@@ -2948,8 +2974,18 @@ def run(do_train: bool = True, do_score: bool = True,
                         horizons = pd.to_numeric(X['horizon_days'], errors='coerce').fillna(_hz).astype(int).to_numpy()
                         weights = np.asarray(average_uniqueness(starts, horizons), dtype=float)
 
+                    # Finding #18 (2026-07-28 audit): tuning must never see rows from the same
+                    # held-out test/val window train_ensemble() later reports metrics on. Carve
+                    # out the identical date-based boundary FIRST (same helper train_ensemble
+                    # itself uses) and tune only inside it — otherwise Optuna's internal
+                    # TimeSeriesSplit folds overlap the calendar dates later reported as "held-out".
+                    tune_tr_end, _, _ = _compute_holdout_split(X, df['signal_date'], embargo, min_samples)
+                    X_tune = X.iloc[:tune_tr_end]
+                    y_tune = y.iloc[:tune_tr_end]
+                    weights_tune = weights[:tune_tr_end] if weights is not None else None
+
                     try:
-                        tuned_params = tune_hyperparameters(X, y, weights, spw, embargo, n_trials=30)
+                        tuned_params = tune_hyperparameters(X_tune, y_tune, weights_tune, spw, embargo, n_trials=30)
                     except Exception as e:
                         print(f"[Ensemble] Tuning failed: {e}. Falling back to default parameters.")
 

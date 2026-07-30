@@ -33,12 +33,44 @@ from sqlalchemy import text
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from db_compat import get_engine, use_postgres
 
+# Neither MC endpoint feeding stock_earnings_beats (earning-forecast, hits-misses) exposes
+# the actual result-announcement date -- quarter_date is the FISCAL PERIOD-END date, not
+# when the market learned the number. SEBI LODR Reg 33 gives issuers up to 45 days after a
+# quarter-end (quarterly/half-yearly results) or 60 days after a year-end (audited annual
+# results) to actually file. Treating quarter_date <= as_of as "known" (the pre-fix
+# behavior) was therefore a confirmed look-ahead leak of 30-60+ days into every consumer of
+# eps_beat_last_q/eps_beat_streak_4q/eps_surprise_last_yr/eps_estimate_dispersion
+# (ml_ensemble.py, scoring_engine.py, etc). Lag values mirror et_stats_client.py's
+# PUBLICATION_LAG_DAYS=90 philosophy (statutory deadline + a safety margin, never the bare
+# statutory minimum) rather than inventing a new convention.
+PERIOD_LAG_DAYS = {"quarterly": 60, "annual": 90}
+_DEFAULT_LAG_DAYS = max(PERIOD_LAG_DAYS.values())
+
+
+def _knowable_by(quarter_date: str, period_type: str) -> str | None:
+    """The earliest date this period's beat/surprise figures may be treated as known."""
+    try:
+        d = datetime.date.fromisoformat(str(quarter_date)[:10])
+    except ValueError:
+        return None
+    lag = PERIOD_LAG_DAYS.get(period_type, _DEFAULT_LAG_DAYS)
+    return (d + datetime.timedelta(days=lag)).isoformat()
+
 
 def compute_beat_features(conn, as_of: str) -> list[dict]:
     """
-    Compute all five features per symbol using data up to `as_of` (no look-ahead).
+    Compute all five features per symbol using data knowable as of `as_of` -- i.e. whose
+    period-end date plus its SEBI-driven publication lag has already passed, not merely
+    whose period-end date has passed (see PERIOD_LAG_DAYS above for why the plain
+    quarter_date <= as_of check this used to use was a look-ahead leak).
     Annual rows contribute surprise_pct and estimate_dispersion; all rows feed streaks.
     """
+    # quarter_date <= as_of is a superset prefilter (any row passing the stricter
+    # knowable-by check below also satisfies this), kept for query efficiency; the actual
+    # look-ahead guard is the per-row _knowable_by() filter in Python, since the correct
+    # cutoff depends on period_type (quarterly vs annual lag differ) and per-dialect date
+    # arithmetic in SQL (SQLite date() vs Postgres ::date + INTERVAL) is easy to get subtly
+    # wrong across the two backends this codebase supports.
     rows = conn.execute(text("""
         SELECT symbol, quarter_date, period_type, beat_score, surprise_pct,
                eps_avg, eps_high, eps_low
@@ -53,6 +85,9 @@ def compute_beat_features(conn, as_of: str) -> list[dict]:
     # Group by symbol; each value is list of row dicts (already DESC by quarter_date)
     by_sym: dict[str, list[dict]] = defaultdict(list)
     for sym, qd, ptype, bscore, spct, eavg, ehi, elo in rows:
+        knowable_by = _knowable_by(qd, ptype)
+        if knowable_by is None or knowable_by > as_of:
+            continue
         by_sym[sym].append({
             "period_type": ptype,
             "beat_score":  int(bscore) if bscore is not None else 0,

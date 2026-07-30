@@ -240,6 +240,12 @@ GROSS_EXPOSURE = 1.0     # weights sum to at most 100% of the long book
 MAX_POSITION = 0.10      # per-name cap
 VOL_FLOOR_PCT = 10.0     # don't let an ultra-low-vol name dominate
 DEFAULT_VOL_PCT = 30.0   # when annualized_vol is missing
+# Findings #27/#30 (2026-07-28 audit): the per-name cap alone lets N independently-sized but
+# highly correlated same-sector names (e.g. IT-services riding the same USD/INR tailwind)
+# each approach MAX_POSITION simultaneously — effective single-factor exposure far above what
+# the flat gross cap implies. A rolling covariance matrix would be the fuller fix; this is the
+# cheap first-order approximation the audit itself suggests: cap aggregate sector weight.
+MAX_SECTOR_EXPOSURE = 0.30
 
 # The breakout classifier is the one component with validated live edge (purged-OOF AUC ~0.61,
 # top-decile 1.47× base rate). The ML win-prob meta-label it's blended against has ~0.50 AUC
@@ -264,12 +270,34 @@ def bet_size_from_probability(p, neutral: float = 0.5) -> float:
     return max(0.0, min(1.0, 2.0 * cdf - 1.0))
 
 
-def normalize_position_sizes(raw: dict, gross: float = GROSS_EXPOSURE, cap: float = MAX_POSITION) -> dict:
-    """Normalize raw conviction×inverse-vol sizes to portfolio weights (sum ≤ gross, each ≤ cap)."""
+def normalize_position_sizes(raw: dict, sectors: dict | None = None,
+                              gross: float = GROSS_EXPOSURE, cap: float = MAX_POSITION,
+                              sector_cap: float = MAX_SECTOR_EXPOSURE) -> dict:
+    """Normalize raw conviction×inverse-vol sizes to portfolio weights (sum ≤ gross, each ≤
+    cap), then apply a sector-concentration cap (Findings #27/#30): if a sector's aggregate
+    weight exceeds sector_cap, scale every position in that sector down proportionally so the
+    sector's total lands exactly at the cap. `sectors` is an optional {symbol: sector} map —
+    omitted or empty, this is a no-op (unchanged behavior for callers that don't pass it).
+    """
     total = sum(v for v in raw.values() if v and v > 0)
     if total <= 0:
         return {k: 0.0 for k in raw}
-    return {k: round(min(cap, gross * max(0.0, (v or 0.0)) / total), 4) for k, v in raw.items()}
+    weights = {k: min(cap, gross * max(0.0, (v or 0.0)) / total) for k, v in raw.items()}
+
+    if sectors:
+        sector_totals: dict = {}
+        for sym, w in weights.items():
+            sec = sectors.get(sym)
+            if sec and w > 0:
+                sector_totals[sec] = sector_totals.get(sec, 0.0) + w
+        for sec, sec_total in sector_totals.items():
+            if sec_total > sector_cap:
+                scale = sector_cap / sec_total
+                for sym in weights:
+                    if sectors.get(sym) == sec:
+                        weights[sym] *= scale
+
+    return {k: round(v, 4) for k, v in weights.items()}
 
 
 def _classify(score, bull, bear):
@@ -345,6 +373,44 @@ def is_red_flagged(screeners) -> bool:
 def veto_classification(classification):
     """A vetoed name cannot be a Buy — collapse buy tiers to Hold, leave the rest."""
     return 'Hold' if classification in ('Strong Buy', 'Buy') else classification
+
+
+# ── Factor crowding (#28) ────────────────────────────────────────────────────────
+# Mirrors multi_factor_scorer.py's FACTOR_WEIGHTS — duplicated rather than imported so this
+# DB-only script doesn't pick up numpy/pandas as a new dependency just for one dict. Keep the
+# two in sync if either changes.
+_MF_FACTOR_WEIGHTS = {
+    'mf_quality_score':  0.25,
+    'mf_momentum_score': 0.30,
+    'mf_value_score':    0.20,
+    'mf_risk_adj_score': 0.15,
+    'mf_macro_score':    0.10,
+}
+FACTOR_CROWDING_THRESHOLD = 0.70  # >70% of weighted deviation-from-neutral in one factor
+FACTOR_CROWDING_DISCOUNT  = 0.90  # mild demotion (quality_gate's style), not a veto
+
+
+def factor_crowding_multiplier(factor_scores: dict) -> tuple:
+    """Finding #28 (2026-07-28 audit): multi_factor_scorer.py's orthogonal 5-factor breakdown
+    (quality/momentum/value/risk-adj/macro) existed but was never used to check whether a
+    name's composite score is genuinely diversified across factors, or one factor wearing a
+    diversified-looking wrapper. Each factor is a cross-sectional percentile rank (0-100,
+    neutral=50); this measures what share of the total weighted deviation-from-neutral traces
+    to the single largest factor. Returns (multiplier, dominant_factor_or_None) — multiplier
+    is 1.0 (no discount) when factor data is missing or no single factor dominates.
+    """
+    devs = {}
+    for col, w in _MF_FACTOR_WEIGHTS.items():
+        v = factor_scores.get(col)
+        if v is not None:
+            devs[col] = w * abs(v - 50.0)
+    total = sum(devs.values())
+    if total <= 0:
+        return 1.0, None
+    dominant = max(devs, key=devs.get)
+    if devs[dominant] / total > FACTOR_CROWDING_THRESHOLD:
+        return FACTOR_CROWDING_DISCOUNT, dominant
+    return 1.0, None
 
 
 class UnifiedRanker:
@@ -743,6 +809,21 @@ class UnifiedRanker:
             self.conn.rollback()
             return {}
 
+    def _get_multi_factor_map(self):
+        """Finding #28: multi_factor_scorer.py's 5-factor breakdown, keyed by symbol, for the
+        factor-crowding check. Empty dict (safe no-op via factor_crowding_multiplier's own
+        missing-data handling) until multi_factor_scorer.py has run at least once."""
+        try:
+            rows = self.conn.execute(
+                """SELECT symbol, mf_quality_score, mf_momentum_score, mf_value_score,
+                          mf_risk_adj_score, mf_macro_score
+                   FROM quant_scores WHERE mf_composite_score IS NOT NULL"""
+            ).fetchall()
+            return {r['symbol']: dict(r) for r in rows}
+        except Exception:
+            self.conn.rollback()
+            return {}
+
     def _get_entry_targets(self, symbol, confluence_map, rec_log_map, unified_map, sector_map):
         # Fallback 1: confluence_signals (best source with entry zones, atr, risk-reward, etc.)
         row = confluence_map.get(symbol)
@@ -859,6 +940,7 @@ class UnifiedRanker:
         rec_log_map    = self._get_rec_log_latest_map()
         unified_map    = self._get_unified_signals_latest_map()
         sector_map     = self._get_sector_map()
+        mf_map         = self._get_multi_factor_map()
 
         all_symbols = set(screener_scores) | set(ml_scores) | set(cs_scores) | set(confluence_scores) | set(technical_scores) | set(dl_scores) | set(breakout_scores)
 
@@ -907,6 +989,13 @@ class UnifiedRanker:
                 unified *= RED_FLAG_VETO_MULT
                 classification = veto_classification(classification)
 
+            # Factor-crowding discount (#28): demote (not veto) names where >70% of the
+            # multi-factor deviation-from-neutral traces to one factor — a high score that's
+            # really just one undiversified bet wearing a diversified-looking wrapper.
+            crowd_mult, crowd_factor = factor_crowding_multiplier(mf_map.get(sym, {}))
+            if crowd_mult < 1.0:
+                unified *= crowd_mult
+
             # #6 position size: back the stronger of the two validated edges — the López de Prado
             # bet on the calibrated ML meta-label, OR a cross-sectional breakout tilt — inverse-vol
             # weighted, longs only. Breakout is additive (max, not a multiplier) because the ML bet
@@ -939,6 +1028,7 @@ class UnifiedRanker:
                 f"{bull} bullish / {bear} bearish screener signals ({classification}); "
                 f"regime {regime}" + (f"; drivers: {', '.join(cats[:4])}" if cats else "")
                 + ("; RED-FLAG VETO" if red_flagged else "")
+                + (f"; FACTOR-CROWDED ({crowd_factor})" if crowd_mult < 1.0 else "")
             )
 
             et = self._get_entry_targets(sym, confluence_map, rec_log_map, unified_map, sector_map)
@@ -977,8 +1067,9 @@ class UnifiedRanker:
                 **et,
             })
 
-        # Normalize conviction×inverse-vol into capped portfolio weights (# 6).
-        position_sizes = normalize_position_sizes(raw_sizes)
+        # Normalize conviction×inverse-vol into capped portfolio weights (# 6), then apply the
+        # sector-concentration cap (#27/#30) using the same sector_map already loaded above.
+        position_sizes = normalize_position_sizes(raw_sizes, sectors=sector_map)
         for r in results:
             r['position_size_pct'] = round(position_sizes.get(r['symbol'], 0.0) * 100, 2)
 

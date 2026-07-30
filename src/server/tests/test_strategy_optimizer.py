@@ -137,3 +137,85 @@ class TestTemporalSplit:
             f"Temporal leakage detected: train_max={train_call['max_date']}, "
             f"test_min={test_call['min_date']}"
         )
+
+
+class TestPromotionGate:
+    """Regression tests for Finding #42 (2026-07-28 full-stack audit): optimise()
+    already computed an honest held-out test score and warned when the optimised
+    weights underperformed baseline on it, but run() called save_to_history()/
+    apply_to_scoring_engine()/apply_screener_overrides() unconditionally regardless
+    of that result -- an overfit run could silently overwrite the live
+    scoring_engine.py weights platform-wide. Fixed by gating the writes on
+    optimised_test_objective >= baseline_test_objective, matching the already-proven
+    pattern in backtest_optimizer.py."""
+
+    def _make_optimizer(self, monkeypatch, result, overrides=None):
+        opt = StrategyOptimizer.__new__(StrategyOptimizer)
+        calls = {'saved': False, 'applied_scoring': False, 'applied_screeners': False}
+        monkeypatch.setattr(opt, 'optimise', lambda **kw: result)
+        monkeypatch.setattr(opt, 'compute_screener_overrides', lambda r: overrides or {})
+        monkeypatch.setattr(opt, 'save_to_history', lambda *a, **kw: calls.__setitem__('saved', True))
+        monkeypatch.setattr(opt, 'apply_to_scoring_engine', lambda *a, **kw: calls.__setitem__('applied_scoring', True))
+        monkeypatch.setattr(opt, 'apply_screener_overrides', lambda *a, **kw: calls.__setitem__('applied_screeners', True))
+        return opt, calls
+
+    def test_underperforming_holdout_blocks_all_writes(self, monkeypatch):
+        result = {
+            'category_weights': {}, 'source_weights': {},
+            'optimised_test_objective': 0.40, 'baseline_test_objective': 0.55,
+            'baseline_win_rate': 0.5, 'optimised_win_rate': 0.5, 'improvement_pct': -27.3,
+        }
+        opt, calls = self._make_optimizer(monkeypatch, result)
+        opt.run(dry_run=False, apply=True)
+        assert calls == {'saved': False, 'applied_scoring': False, 'applied_screeners': False}
+
+    def test_improving_holdout_allows_writes(self, monkeypatch):
+        result = {
+            'category_weights': {}, 'source_weights': {},
+            'optimised_test_objective': 0.60, 'baseline_test_objective': 0.55,
+            'baseline_win_rate': 0.5, 'optimised_win_rate': 0.6, 'improvement_pct': 9.1,
+        }
+        opt, calls = self._make_optimizer(monkeypatch, result)
+        opt.run(dry_run=False, apply=True)
+        assert calls == {'saved': True, 'applied_scoring': True, 'applied_screeners': True}
+
+    def test_equal_holdout_score_is_not_treated_as_a_regression(self, monkeypatch):
+        """A tie should still be allowed through -- only a strict regression blocks the write."""
+        result = {
+            'category_weights': {}, 'source_weights': {},
+            'optimised_test_objective': 0.55, 'baseline_test_objective': 0.55,
+            'baseline_win_rate': 0.5, 'optimised_win_rate': 0.5, 'improvement_pct': 0.0,
+        }
+        opt, calls = self._make_optimizer(monkeypatch, result)
+        opt.run(dry_run=False, apply=True)
+        assert calls['saved'] is True
+
+
+class TestScreenerOverrideHoldoutGate:
+    """Regression test for the second half of Finding #42: compute_screener_overrides()
+    logged a train->holdout correlation but never acted on it. A negative aggregate
+    correlation (override direction anti-correlated with what the holdout window
+    actually showed) must now block the entire batch of overrides for that run."""
+
+    def test_negative_holdout_correlation_returns_empty_overrides(self, monkeypatch):
+        opt = StrategyOptimizer.__new__(StrategyOptimizer)
+
+        # train: scan A gets boosted (high win_rate), scan B gets penalised (low win_rate)
+        train_raw = pd.DataFrame({
+            'scan_id': ['A'] * 12 + ['B'] * 12,
+            'symbol': [f'S{i}' for i in range(24)],
+            'signal_date': pd.to_datetime(['2026-01-01'] * 24),
+            'outcome': ['WIN'] * 10 + ['LOSS'] * 2 + ['LOSS'] * 10 + ['WIN'] * 2,
+        })
+        # holdout: the SAME scans now show the opposite direction (A does badly, B does well)
+        holdout_raw = pd.DataFrame({
+            'scan_id': ['A'] * 12 + ['B'] * 12,
+            'symbol': [f'S{i}' for i in range(24)],
+            'signal_date': pd.to_datetime(['2026-03-01'] * 24),
+            'outcome': ['LOSS'] * 10 + ['WIN'] * 2 + ['WIN'] * 10 + ['LOSS'] * 2,
+        })
+        raw = pd.concat([train_raw, holdout_raw]).sort_values('signal_date').reset_index(drop=True)
+
+        monkeypatch.setattr(opt, '_read_df', lambda q: raw)
+        overrides = opt.compute_screener_overrides({}, train_frac=0.5)
+        assert overrides == {}, "negatively-correlated holdout must block the whole override batch"

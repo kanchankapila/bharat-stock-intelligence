@@ -46,6 +46,7 @@ except ImportError:
     cffi_req = None
 
 from db_compat import connect, translate, use_postgres
+from fetch_utils import retry_get
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
@@ -122,8 +123,7 @@ RATING_SCORE = {
 
 def _get(url: str) -> dict | list | None:
     try:
-        r = cffi_req.get(url, headers=MC_HEADERS, timeout=15)
-        r.raise_for_status()
+        r = retry_get(cffi_req, url, headers=MC_HEADERS, timeout=15)
         return r.json()
     except Exception as e:
         print(f"[GlobalMacro] Fetch error {url}: {e}", file=sys.stderr)

@@ -7,8 +7,10 @@ robust equity-momentum factor (Jegadeesh-Titman / AQR). It is fully derivable fr
 stock_ohlcv, no new feed.
 
 For each (symbol, date) it writes the universe percentile rank of the 21-day and 63-day
-return into technical_signals.rs_rank_21d / rs_rank_63d (0=worst, 1=best). ml_ensemble joins
-them via the existing technical_signals join.
+return into technical_signals.rs_rank_21d / rs_rank_63d (0=worst, 1=best). The 63-day return
+is skip-month adjusted (t-63 to t-21, excluding the most recent ~month) per Jegadeesh-Titman
+-- see SKIP_MONTH_DAYS below for why. ml_ensemble joins them via the existing
+technical_signals join.
 
 Run:  python relative_strength.py
       python relative_strength.py --date today
@@ -25,6 +27,29 @@ LOOKBACK_DAYS = 420   # enough to cover a 63-day return plus buffer
 RET_WINDOWS = (21, 63)
 MIN_UNIVERSE = 20     # need a reasonable cross-section before a rank is meaningful
 MIN_SECTOR_SIZE = 5   # minimum stocks in a sector before computing sector avg
+
+# Fixed 2026-07-30 (Finding #25, full-stack audit): the 63-day window was plain trailing
+# return (wide.pct_change(63)) with no skip-month treatment -- Jegadeesh-Titman (1993)
+# cross-sectional momentum specifically excludes the most recent month because short-term
+# reversal is a distinct, opposite-signed effect that dilutes (and can invert) the momentum
+# signal in exactly the window it's most sensitive to. multi_factor_scorer.py already
+# implements this correctly (12M-minus-1M) but for a completely different, unscheduled
+# horizon -- rather than wire a whole new unscheduled engine into unified_ranker.py's
+# regime-weighted engine_maps (a much larger, higher-risk change to the canonical ranker),
+# this applies the same skip-month principle directly to relative_strength.py's own 63-day
+# window, scaled to its horizon: return from (t-63) to (t-21) instead of (t-63) to (t). The
+# 21-day window is left as pure short-horizon momentum -- it's too short to sensibly "skip a
+# month" from (there'd be nothing left), and it's a distinct, intentionally-short signal, not
+# an under-cooked version of the 63-day one.
+SKIP_MONTH_DAYS = 21
+
+
+def _windowed_return(wide: pd.DataFrame, w: int) -> pd.DataFrame:
+    """Cross-sectional trailing return over window `w`, skip-month-adjusted for the 63-day
+    window (return from t-w to t-SKIP_MONTH_DAYS, excluding the most recent ~month)."""
+    if w > SKIP_MONTH_DAYS:
+        return wide.shift(SKIP_MONTH_DAYS).pct_change(w - SKIP_MONTH_DAYS)
+    return wide.pct_change(w)
 
 
 def ensure_schema() -> None:
@@ -73,7 +98,7 @@ def build_sector_features(ohlcv: pd.DataFrame) -> pd.DataFrame:
 
     out = None
     for w in RET_WINDOWS:
-        rets = wide.pct_change(w)  # dates × symbols, float returns
+        rets = _windowed_return(wide, w)  # dates × symbols, float returns (skip-month for w=63)
 
         # For each date compute sector-avg returns (equal-weight, min MIN_SECTOR_SIZE stocks)
         # Melt returns into long form so we can groupby sector
@@ -118,7 +143,7 @@ def build_rs_features(ohlcv: pd.DataFrame) -> pd.DataFrame:
     wide = ohlcv.pivot_table(index="date", columns="symbol", values="close").sort_index()
     out = None
     for w in RET_WINDOWS:
-        rets = wide.pct_change(w)
+        rets = _windowed_return(wide, w)  # skip-month for w=63, see SKIP_MONTH_DAYS
         ranks = cross_sectional_rank(rets)
         long = ranks.stack(future_stack=True).dropna().rename(f"rs_rank_{w}d").reset_index()
         out = long if out is None else out.merge(long, on=["date", "symbol"], how="outer")

@@ -528,22 +528,32 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
                   </div>
 
                   {/* Factor Bars */}
+                  {/* Fixed 2026-07-30 (Finding #97, full-stack audit): only "ML Win Prob"
+                      below is a validated backend score; the other 4 are ad hoc linear
+                      transforms invented client-side with no calibration
+                      (techSignalCount*25, 100-quantRank, 50+smartMoneyCr*5,
+                      50+newsSentiment*50) -- they used to render with equal visual weight,
+                      implying a validated 5-factor model backs this trade decision when it
+                      doesn't. Kept the same underlying values (a backend rewrite of these
+                      transforms is a separate, larger initiative) but now visually and
+                      textually distinguishes the one real model score from the 4 raw/
+                      derived heuristics per the audit's minimum-bar recommendation. */}
                   <div className="bg-slate-900/60 border border-slate-800/50 rounded-xl p-3 space-y-2">
                     <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Factor Breakdown</p>
                     {[
-                      { label: 'ML Win Prob', v: selectedCand.mlProbability, color: 'bg-indigo-500' },
-                      { label: 'Technical Signals', v: Math.min(100, (selectedCand.techSignalCount ?? 0) * 25), color: 'bg-emerald-500' },
-                      { label: 'Quant Rank', v: Math.max(0, 100 - (selectedCand.quantRank ?? 100)), color: 'bg-amber-500' },
-                      { label: 'Smart Money', v: Math.min(100, Math.max(0, 50 + (selectedCand.smartMoneyCr ?? 0) * 5)), color: 'bg-pink-500' },
-                      { label: 'News Sentiment', v: Math.min(100, Math.max(0, 50 + (selectedCand.newsSentiment ?? 0) * 50)), color: 'bg-blue-500' },
+                      { label: 'ML Win Prob', v: selectedCand.mlProbability, color: 'bg-indigo-500', isModel: true },
+                      { label: 'Technical Signals (derived)', v: Math.min(100, (selectedCand.techSignalCount ?? 0) * 25), color: 'bg-emerald-500', isModel: false },
+                      { label: 'Quant Rank (derived)', v: Math.max(0, 100 - (selectedCand.quantRank ?? 100)), color: 'bg-amber-500', isModel: false },
+                      { label: 'Smart Money (derived)', v: Math.min(100, Math.max(0, 50 + (selectedCand.smartMoneyCr ?? 0) * 5)), color: 'bg-pink-500', isModel: false },
+                      { label: 'News Sentiment (derived)', v: Math.min(100, Math.max(0, 50 + (selectedCand.newsSentiment ?? 0) * 50)), color: 'bg-blue-500', isModel: false },
                     ].map((f, i) => (
-                      <div key={i}>
+                      <div key={i} title={f.isModel ? 'Validated ML model output' : 'Client-side heuristic, not a calibrated model score'}>
                         <div className="flex justify-between text-[9px] font-bold mb-0.5">
-                          <span className="text-slate-400">{f.label}</span>
+                          <span className={f.isModel ? "text-slate-300" : "text-slate-500"}>{f.label}</span>
                           <span className="text-slate-300 tabular-nums">{f.v != null ? `${Math.round(f.v)}%` : '—'}</span>
                         </div>
                         <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                          <div className={cn('h-full rounded-full', f.color)}
+                          <div className={cn('h-full rounded-full', f.color, !f.isModel && 'opacity-60')}
                             style={{ width: `${f.v ?? 0}%` }} />
                         </div>
                       </div>

@@ -123,6 +123,14 @@ async def _fetch_ohlcv_async(
                         float(lows[i])    if lows[i]    is not None else c,
                         c,
                         int(volumes[i])   if volumes[i] is not None else 0,
+                        # This gap-fill path hits Yahoo's v8 chart API directly (not the
+                        # yfinance library), reading `quote.close` -- raw, with NEITHER
+                        # split NOR dividend adjustment applied (unlike this file's other
+                        # writer, _extract_records, which downloads via yf.download(...,
+                        # auto_adjust=True)). A third distinct basis in the same table,
+                        # found while fixing Finding #6 -- tagged accurately rather than
+                        # mislabeled as either of the other two.
+                        "unadjusted",
                     ))
                 except (IndexError, TypeError, ValueError):
                     continue
@@ -172,6 +180,14 @@ def init_db(conn):
         )
     """)
     conn.commit()
+    # adjustment_basis added 2026-07-30 (Finding #6, full-stack audit) -- see
+    # mc_ohlcv_backfill.py's ensure_adjustment_basis_column() docstring. CREATE TABLE IF NOT
+    # EXISTS above is a no-op on the live table, so an existing DB needs this ALTER too.
+    try:
+        conn.execute("ALTER TABLE stock_ohlcv ADD COLUMN adjustment_basis TEXT")
+        conn.commit()
+    except Exception:
+        conn.rollback()
     print(f"[OK] stock_ohlcv table ready  [DB: {DB_PATH}]")
 
 def get_all_nse_symbols(conn):
@@ -211,6 +227,13 @@ def _extract_records(symbol: str, df: pd.DataFrame) -> list:
                 float(row.get("Low",   row["Close"])),
                 float(row["Close"]),
                 int(row.get("Volume", 0)),
+                # Fixed 2026-07-30 (Finding #6, full-stack audit): this writer downloads
+                # with auto_adjust=True (splits AND dividends) while mc_ohlcv_backfill.py's
+                # deep-history rows are split-only -- see that file's
+                # ensure_adjustment_basis_column() docstring for the live-verified
+                # magnitude of the resulting discontinuity. Tagging every row lets
+                # downstream consumers detect a straddling return window.
+                "split_dividend",
             ))
         except Exception:
             continue
@@ -326,11 +349,12 @@ def _upsert(conn, records: list):
     if not trading:
         return
     conn.executemany(
-        "INSERT INTO stock_ohlcv (symbol, date, open, high, low, close, volume) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?) "
+        "INSERT INTO stock_ohlcv (symbol, date, open, high, low, close, volume, adjustment_basis) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
         "ON CONFLICT(symbol, date) DO UPDATE SET "
         "open=excluded.open, high=excluded.high, low=excluded.low, "
-        "close=excluded.close, volume=excluded.volume",
+        "close=excluded.close, volume=excluded.volume, "
+        "adjustment_basis=excluded.adjustment_basis",
         trading,
     )
     conn.commit()

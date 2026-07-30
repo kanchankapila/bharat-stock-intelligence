@@ -26,32 +26,17 @@ export const V2StockDetails: React.FC<V2StockDetailsProps> = ({ symbol, stock, o
   const { data: profileAnalysis } = trpc.getCompanyProfileAnalysis.useQuery({ symbol });
   const { data: niftyTraderData } = trpc.getNiftyTraderData.useQuery({ symbol });
 
-  // Generate synthetic high-fidelity candlestick data for Lightweight Chart
-  const [chartData] = useState(() => {
-    const base = stock?.price || 1000;
-    let currentPrice = base;
-    return Array.from({ length: 100 }, (_, i) => {
-      const open = currentPrice;
-      const volatility = base * 0.015;
-      const close = currentPrice + (Math.random() - 0.48) * volatility;
-      const high = Math.max(open, close) + Math.random() * (volatility * 0.5);
-      const low = Math.min(open, close) - Math.random() * (volatility * 0.5);
-      
-      currentPrice = close;
-      
-      const date = new Date(2026, 0, 1 + i);
-      const timeStr = date.toISOString().split('T')[0];
-
-      return { 
-        time: timeStr, 
-        open,
-        high,
-        low,
-        close,
-        volume: Math.random() * 100000 
-      };
-    });
-  });
+  // Real OHLCV chart data (Finding #75, 2026-07-28 audit): this used to generate 100
+  // Math.random() candles. Now sourced from getOHLCData, the same procedure v4's
+  // StockIntelligencePage already uses correctly.
+  const { data: ohlcResp } = trpc.getOHLCData.useQuery({ symbol, dur: '6m' });
+  const chartData = React.useMemo(() => {
+    const rows: any[] = (ohlcResp as any)?.data ?? [];
+    return rows.map((r: any) => ({
+      time: r.time, open: Number(r.open), high: Number(r.high), low: Number(r.low),
+      close: Number(r.close), volume: Number(r.volume) || 0,
+    }));
+  }, [ohlcResp]);
 
   // Extract financial ratios
   const ratioItems = (unifiedData as any)?.ratios?.item || [];

@@ -23,7 +23,7 @@ Run:  python fundamentals_snapshot.py
 import argparse
 import datetime
 
-from db_compat import execute, query_all, use_postgres, connect
+from db_compat import execute, query_all, query_scalar, use_postgres, connect
 
 # ── Schema migrations (idempotent ADD COLUMN) ────────────────────────────────
 
@@ -124,7 +124,25 @@ def _ensure_schema() -> None:
             pass  # column already exists
 
 
-def _compute_and_write_pledge_trend(pg: bool, as_of: str) -> int:
+def _last_trading_session_floor(as_of: str) -> str:
+    """Last completed trading session (MAX(date) FROM stock_ohlcv), falling back to `as_of`
+    if the query fails or the table is empty. Used only as the `date >= ?` guard threshold
+    for the technical_signals UPDATE below -- NOT for the fundamentals_history snapshot date,
+    which stays `as_of` (today, or --as-of) since that's an INSERT, not a NULL-ing guard.
+
+    date.today()-anchoring here was the same bug class fixed 2026-07-25 in 6 sibling fetchers
+    (trendlyne_fundamentals_fetcher.py etc): on a weekend/holiday run, `date.today()` matches
+    zero technical_signals rows, so the CASE...ELSE NULL branch fires and nulls every existing
+    historical pledge_chg_90d row for that symbol, silently, on every such run.
+    """
+    try:
+        d = query_scalar("SELECT MAX(date) AS d FROM stock_ohlcv")
+        return str(d)[:10] if d else as_of
+    except Exception:
+        return as_of
+
+
+def _compute_and_write_pledge_trend(pg: bool, ts_floor: str) -> int:
     """Compute pledge_chg_90d for all symbols with sufficient history and write to
     technical_signals. Returns the number of symbols updated."""
     rows = query_all(_pledge_chg_sql(pg))
@@ -134,7 +152,7 @@ def _compute_and_write_pledge_trend(pg: bool, as_of: str) -> int:
     try:
         cur = con.cursor()
         for row in rows:
-            cur.execute(_UPDATE_TS_SQL, (as_of, row["pledge_chg_90d"], row["symbol"]))
+            cur.execute(_UPDATE_TS_SQL, (ts_floor, row["pledge_chg_90d"], row["symbol"]))
         con.commit()
     finally:
         con.close()
@@ -155,8 +173,9 @@ def run(as_of: str | None = None) -> int:
     n = execute(_INSERT_SQL, (as_of,))
     print(f"[FUND-SNAP] Wrote {n} fundamentals snapshots as_of {as_of}.")
 
-    n_trend = _compute_and_write_pledge_trend(pg, as_of)
-    print(f"[FUND-SNAP] Wrote pledge_chg_90d for {n_trend} symbols -> technical_signals.")
+    ts_floor = _last_trading_session_floor(as_of)
+    n_trend = _compute_and_write_pledge_trend(pg, ts_floor)
+    print(f"[FUND-SNAP] Wrote pledge_chg_90d for {n_trend} symbols -> technical_signals (floor={ts_floor}).")
 
     return n
 

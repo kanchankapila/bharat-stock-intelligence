@@ -8,6 +8,7 @@ from nlp_engine import NLPScreenerInference, NLP_VERSION
 from typing import Dict, Any, List
 
 from db_compat import get_engine, connect as db_connect
+from technical_analysis_engine import compute_atr_barriers
 
 
 # ── Pure functions: regime-edge-adjusted ML win_probability consumption ────────
@@ -1009,14 +1010,53 @@ class AlphaQuantScoringEngine:
         if not candidates:
             return
 
+        # Fixed 2026-07-30 (discovered while building Finding #29's trailing-stop updater,
+        # full-stack audit): this dict literal never included entry_price/stop_loss/
+        # target_1 at all -- confirmed live, 10,969 of 10,969 currently-ACTIVE
+        # scoring_engine-sourced rows (100%) have NULL entry_price. recommendation_log is
+        # the table the platform's own outcome-tracking AND Finding #29's live trailing-stop
+        # job both depend on having real position data; without this, neither could ever do
+        # anything for the dominant (by volume) recommendation source. One batched query for
+        # current price + a volatility proxy (confluence_signals.atr, already computed
+        # platform-wide), then the same compute_atr_barriers() convention every other
+        # entry/target/stop in this codebase uses (atrBarriers.ts mirrors this exact
+        # function) -- not a new, separate formula.
+        symbols = [r['symbol'] for r in candidates]
+        price_atr_map: Dict[str, tuple] = {}
+        try:
+            with self.engine.connect() as conn:
+                placeholders = ', '.join(f':s{i}' for i in range(len(symbols)))
+                price_rows = conn.execute(text(f"""
+                    SELECT ts.symbol, ts.cmp,
+                           (SELECT cs.atr FROM confluence_signals cs
+                            WHERE cs.symbol = ts.symbol AND cs.atr IS NOT NULL
+                            ORDER BY cs.computed_at DESC LIMIT 1) AS atr
+                    FROM technical_signals ts
+                    WHERE ts.symbol IN ({placeholders})
+                      AND ts.date = (SELECT MAX(date) FROM technical_signals ts2 WHERE ts2.symbol = ts.symbol)
+                """), {f's{i}': s for i, s in enumerate(symbols)}).fetchall()
+                for row in price_rows:
+                    price_atr_map[row[0]] = (row[1], row[2])
+        except Exception as e:
+            print(f"[ScoringEngine] price/ATR lookup for recommendation_log failed (entry_price will be null): {e}")
+
         rows = []
         for r in candidates:
+            cmp_val, atr_val = price_atr_map.get(r['symbol'], (None, None))
+            entry_price = float(cmp_val) if cmp_val else None
+            target_1 = stop_loss = None
+            if entry_price and entry_price > 0:
+                target_1, stop_loss = compute_atr_barriers(entry_price, atr_val, 'long')
+
             rows.append({
                 'symbol':         r['symbol'],
                 'rec_type':       'BUY' if r['classification'] == 'Buy' else 'STRONG_BUY',
                 'signal_date':    today,
                 'generated_at':   now,
                 'timeframe':      r.get('timeframe', 'medium'),
+                'entry_price':    entry_price,
+                'stop_loss':      stop_loss,
+                'target_1':       target_1,
                 'confidence_score': r.get('confidence'),
                 'screener_score': r.get('score'),
                 'reasoning':      r.get('reasons', ''),

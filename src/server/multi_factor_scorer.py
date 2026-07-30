@@ -211,7 +211,7 @@ def run(symbol: Optional[str] = None, force: bool = False, test: bool = False) -
     Returns summary dict.
     """
     today = datetime.date.today().isoformat()
-    print(f"[MultiFactor] Starting — {today}")
+    print(f"[MultiFactor] Starting - {today}")
 
     # --- Load quant_scores as universe ---
     q_cols = [
@@ -296,7 +296,7 @@ def run(symbol: Optional[str] = None, force: bool = False, test: bool = False) -
         conn.close()
 
     processed = len(rows)
-    print(f"[MultiFactor] Done — {processed} stocks updated")
+    print(f"[MultiFactor] Done - {processed} stocks updated")
     return {"processed": processed, "skipped": 0, "errors": 0}
 
 

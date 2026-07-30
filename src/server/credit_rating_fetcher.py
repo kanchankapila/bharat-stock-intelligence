@@ -18,6 +18,7 @@ import requests
 import pandas as pd
 
 from db_compat import connect, read_df, executemany, safe_alter, execute
+from fetch_utils import retry_get
 
 # ---------------------------------------------------------------------------
 # NSE API
@@ -106,8 +107,7 @@ def fetch_nse_rating_announcements(from_date: str, to_date: str) -> list[dict]:
         print(f"[CreditRating] NSE session prime warning: {e}")
 
     try:
-        resp = session.get(url, timeout=20)
-        resp.raise_for_status()
+        resp = retry_get(session, url, timeout=20)
         data = resp.json()
     except Exception as e:
         print(f"[CreditRating] NSE API error: {e}")

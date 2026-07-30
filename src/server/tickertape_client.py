@@ -22,6 +22,8 @@ from pathlib import Path
 
 import requests
 
+from fetch_utils import retry_get
+
 SCORECARD_URL = "https://analyze.api.tickertape.in/stocks/scorecard/{sid}"
 
 HEADERS = {
@@ -64,14 +66,11 @@ def fetch_scorecard(sid: str, session: requests.Session) -> list[dict] | None:
     """Fetch the scorecard `data` array for one stock. Returns None on
     failure or an empty response."""
     try:
-        r = session.get(SCORECARD_URL.format(sid=sid), timeout=15)
-        if r.status_code != 200:
-            print(f"  [Tickertape scorecard] sid={sid} HTTP {r.status_code}")
-            return None
+        r = retry_get(session, SCORECARD_URL.format(sid=sid), timeout=15)
         data = r.json().get("data", [])
         return data if data else None
     except Exception as e:
-        print(f"  [Tickertape scorecard] error for sid={sid}: {e}")
+        print(f"  [Tickertape scorecard] error for sid={sid} after retries: {e}")
         return None
     finally:
         import time

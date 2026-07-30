@@ -34,7 +34,7 @@ except ImportError:
 
 from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import StratifiedKFold, cross_val_score
+from sklearn.model_selection import TimeSeriesSplit, cross_val_score
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import roc_auc_score, accuracy_score
 from sklearn.pipeline import Pipeline
@@ -42,6 +42,10 @@ from sklearn.calibration import CalibratedClassifierCV
 
 MODEL_DIR = os.path.join(os.path.dirname(__file__), 'ml_models')
 MODEL_PATH = os.path.join(MODEL_DIR, 'confluence_ml.pkl')
+CANDIDATE_PATH = MODEL_PATH + '.candidate'
+# New held-out AUC must beat the active model's by at least this much to be promoted.
+# Same value as ml_ensemble.py's PROMOTION_MARGIN, for consistency across engines.
+PROMOTION_MARGIN = 0.005
 
 FEATURE_COLS = [
     'bullish_screener_count',
@@ -78,6 +82,7 @@ def build_training_data(conn):
     # Common feature projection — column NAMES are what the consumer reads (order-independent).
     _SELECT_COLS = """
             cs.symbol,
+            so.signal_date,
             cs.bullish_screener_count,
             cs.bearish_screener_count,
             cs.active_screener_count,
@@ -158,9 +163,15 @@ def build_training_data(conn):
     rows = conn.execute(sql).fetchall()
 
     if len(rows) < MIN_TRAINING_ROWS:
-        return None, None, len(rows)
+        return None, None, None, len(rows)
 
-    X, y = [], []
+    # Sort chronologically by signal_date -- required for TimeSeriesSplit(gap=embargo) in
+    # train() to actually be a walk-forward split rather than an arbitrary row order (Finding
+    # #16, 2026-07-28 full-stack audit: the query itself had no ORDER BY, so even disabling
+    # StratifiedKFold's shuffle wouldn't have made the folds chronological).
+    rows = sorted(rows, key=lambda r: r['signal_date'])
+
+    X, y, dates = [], [], []
     for r in rows:
         x_row = [
             r['bullish_screener_count'] or 0,
@@ -182,8 +193,9 @@ def build_training_data(conn):
         ]
         X.append(x_row)
         y.append(1 if r['outcome'] == 'WIN' else 0)
+        dates.append(r['signal_date'])
 
-    return np.array(X, dtype=np.float32), np.array(y), len(rows)
+    return np.array(X, dtype=np.float32), np.array(y), np.array(dates), len(rows)
 
 
 def build_model():
@@ -209,8 +221,24 @@ def build_model():
     )
 
 
+def compute_embargo(n_samples: int, n_unique_dates: int, horizon_days: int,
+                     n_splits_target: int = 5) -> tuple[int, int]:
+    """Purged walk-forward embargo, mirroring ml_ensemble.py's _fit_stack formula exactly
+    (Finding #16, 2026-07-28 full-stack audit): rows carry `horizon_days`-forward-return
+    labels, so adjacent trading days' rows have heavily overlapping forward windows and
+    correlated outcomes -- a plain TimeSeriesSplit with no gap would still leak across the
+    train/test boundary via that overlap. Returns (embargo_rows, n_splits), capping
+    n_splits so sklearn's `n_splits * (test_size + gap) < n_samples` constraint always
+    holds."""
+    samples_per_day = max(1.0, n_samples / max(1, n_unique_dates))
+    raw_embargo = int(samples_per_day * horizon_days)
+    embargo = min(raw_embargo, n_samples // 6, n_samples // 10)
+    n_splits = max(2, min(n_splits_target, n_samples // max(1, embargo + 1) - 1))
+    return embargo, n_splits
+
+
 def train(conn):
-    X, y, n = build_training_data(conn)
+    X, y, dates, n = build_training_data(conn)
     if X is None:
         print(f'[ML] Insufficient training data (need >={MIN_TRAINING_ROWS} rows with outcomes, have {n}). Skipping.')
         return False
@@ -223,6 +251,23 @@ def train(conn):
 
     print(f'[ML] Training on {n} samples (win rate: {y.mean():.1%})')
 
+    # Purged, chronological CV (Finding #16, 2026-07-28 full-stack audit): rows carry
+    # 7-day-forward-return labels with heavily overlapping windows across adjacent trading
+    # days -- the previous StratifiedKFold(shuffle=True) on an unordered query result was a
+    # textbook CV leakage pattern (identical to what ml_ensemble.py's _fit_stack was already
+    # built to avoid), inflating cv_roc_auc versus true forward performance. build_training_data
+    # now returns rows sorted by signal_date; embargo/n_splits mirror _fit_stack's own formula.
+    # This purged split is used ONLY for the outer, reported cv_roc_auc metric.
+    # CalibratedClassifierCV's OWN internal cv below is deliberately left as the plain
+    # integer 5 (unshuffled, contiguous stratified folds -- this was never the shuffled
+    # StratifiedKFold the audit flagged, only the standalone `cv` object below was): each
+    # outer TimeSeriesSplit fold's training slice can be far smaller than the full dataset
+    # (e.g. ~1,500 rows for an early fold), and re-applying the SAME embargo size to that
+    # inner split violates sklearn's `n_splits * (test_size + gap) < n_samples` constraint,
+    # crashing every inner fold (confirmed live: "Too many splits=5 ... gap=2349").
+    embargo, n_splits = compute_embargo(len(X), len(set(dates.tolist())), horizon_days=7)
+    cv = TimeSeriesSplit(n_splits=n_splits, gap=embargo)
+
     # Scaler lives INSIDE the pipeline so cross_val_score and CalibratedClassifierCV's
     # internal CV each refit it per-fold. Previously scaler.fit_transform(X) ran on the
     # full dataset before any split, so every fold's held-out rows had already shaped the
@@ -233,11 +278,52 @@ def train(conn):
     model = CalibratedClassifierCV(pipeline, cv=5, method='isotonic')
     model.fit(X, y)
 
-    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
     auc_scores = cross_val_score(model, X, y, cv=cv, scoring='roc_auc')
-    print(f'[ML] CV AUC: {auc_scores.mean():.3f} +/- {auc_scores.std():.3f}')
+    new_auc = float(auc_scores.mean())
+    print(f'[ML] CV AUC: {new_auc:.3f} +/- {auc_scores.std():.3f}  '
+          f'(TimeSeriesSplit n_splits={n_splits}, embargo={embargo} rows)')
+
+    # Promotion gate (Finding #17, 2026-07-28 full-stack audit): train() used to
+    # unconditionally overwrite confluence_ml.pkl and set is_active=1 regardless of AUC --
+    # a single noisy or adverse-regime retrain could silently degrade the live
+    # ml_breakout_probability for every downstream consumer with no safety net. Matches the
+    # champion/challenger gate ml_ensemble.py/live_screener_ml_ranker.py already use: only
+    # activate if the new model beats the currently-active one's cv_roc_auc by >=
+    # PROMOTION_MARGIN, or there is no active model yet.
+    baseline_auc = None
+    try:
+        row = conn.execute("""
+            SELECT cv_roc_auc FROM model_registry
+            WHERE model_name = 'confluence_ml' AND is_active = 1
+            ORDER BY id DESC LIMIT 1
+        """).fetchone()
+        if row and row[0] is not None:
+            baseline_auc = float(row[0])
+    except Exception:
+        pass
+
+    promote = baseline_auc is None or new_auc >= baseline_auc + PROMOTION_MARGIN
 
     os.makedirs(MODEL_DIR, exist_ok=True)
+    version = datetime.now().strftime('%Y%m%d_%H%M%S')
+
+    if not promote:
+        with open(CANDIDATE_PATH, 'wb') as f:
+            pickle.dump(model, f)
+        print(f'[ML] Candidate REJECTED: CV AUC={new_auc:.4f} did not beat active model\'s '
+              f'{baseline_auc:.4f} + {PROMOTION_MARGIN} margin. Saved to {CANDIDATE_PATH} '
+              f'for inspection; active model unchanged.')
+        try:
+            conn.execute("""
+                INSERT INTO model_registry (model_name, model_version, model_type, cv_roc_auc,
+                  feature_count, is_active, trained_at)
+                VALUES (?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP)
+            """, ('confluence_ml', version, 'breakout_probability', new_auc, len(FEATURE_COLS)))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+        return True
+
     with open(MODEL_PATH, 'wb') as f:
         pickle.dump(model, f)
 
@@ -247,15 +333,20 @@ def train(conn):
     # best-effort write from poisoning the shared Postgres transaction.
     try:
         conn.execute("""
+            UPDATE model_registry SET is_active = 0
+            WHERE model_name = 'confluence_ml' AND is_active = 1
+        """)
+        conn.execute("""
             INSERT INTO model_registry (model_name, model_version, model_type, cv_roc_auc,
               feature_count, is_active, trained_at)
             VALUES (?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
-        """, ('confluence_ml', datetime.now().strftime('%Y%m%d_%H%M%S'),
-              'breakout_probability', float(auc_scores.mean()), len(FEATURE_COLS)))
+        """, ('confluence_ml', version, 'breakout_probability', new_auc, len(FEATURE_COLS)))
         conn.commit()
     except Exception:
         conn.rollback()
 
+    print(f'[ML] Model ACTIVATED (CV AUC={new_auc:.4f}'
+          + (f', beat baseline {baseline_auc:.4f})' if baseline_auc is not None else ', no prior model)'))
     print(f'[ML] Model saved to {MODEL_PATH}')
     return True
 
@@ -331,7 +422,7 @@ def update_probabilities(conn):
 
 
 def evaluate(conn):
-    X, y, n = build_training_data(conn)
+    X, y, _dates, n = build_training_data(conn)
     if X is None:
         print(f'[ML] Not enough data to evaluate (have {n} rows).')
         return

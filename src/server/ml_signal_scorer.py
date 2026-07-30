@@ -65,10 +65,22 @@ def load_training_data() -> pd.DataFrame:
             ts.volume_ratio
         FROM signal_outcomes so
         LEFT JOIN technical_signals ts
-            ON ts.symbol = so.symbol AND ts.scan_date = so.signal_date
+            ON ts.symbol = so.symbol AND ts.date = so.signal_date
         WHERE so.outcome IN ('WIN', 'LOSS', 'NEUTRAL')
           AND so.return_pct IS NOT NULL
+        ORDER BY so.signal_date
     """
+    # ORDER BY signal_date added (Finding #45, 2026-07-28 full-stack audit): cross_val_score
+    # below uses cv=5 with the sklearn default of shuffle=False, whose "contiguous fold"
+    # property is meaningless without a guaranteed chronological row order -- the reported
+    # CV AUC wasn't a trustworthy walk-forward estimate without this.
+    #
+    # ts.scan_date -> ts.date fixed in the same pass: technical_signals has no scan_date
+    # column (only `date` -- confirmed against db/schema.postgres.sql), so this JOIN
+    # previously threw psycopg2.errors.UndefinedColumn on every single run against
+    # Postgres. This is consistent with the audit's own "confirmed dormant" framing for
+    # this script -- it hadn't just never been scheduled, it couldn't have run successfully
+    # against production at all.
     df = read_df(query)
     return df
 
@@ -116,11 +128,27 @@ def build_label(df: pd.DataFrame) -> pd.Series:
     return (df['outcome'] == 'WIN').astype(int)
 
 
-def train(min_samples: int = 30) -> object | None:
-    """Train GradientBoostingClassifier. Returns fitted model or None if insufficient data."""
+def compute_embargo(n_samples: int, n_unique_dates: int, horizon_days: float,
+                     n_splits_target: int = 5) -> tuple[int, int]:
+    """Purged walk-forward embargo -- same formula as confluence_ml_engine.py's
+    compute_embargo() / ml_ensemble.py's _fit_stack (Finding #45, 2026-07-28 full-stack
+    audit). StratifiedKFold(cv=5)'s default shuffle=False groups rows by class label
+    first, then slices contiguous chunks WITHIN each class -- that is NOT a chronological
+    walk-forward split even if the input rows are pre-sorted by date, so a real
+    TimeSeriesSplit(gap=embargo) is needed here, not just an ORDER BY."""
+    samples_per_day = max(1.0, n_samples / max(1, n_unique_dates))
+    raw_embargo = int(samples_per_day * horizon_days)
+    embargo = min(raw_embargo, n_samples // 6, n_samples // 10)
+    n_splits = max(2, min(n_splits_target, n_samples // max(1, embargo + 1) - 1))
+    return embargo, n_splits
+
+
+def train(min_samples: int = 30) -> tuple[object, float, int] | tuple[None, None, int]:
+    """Train GradientBoostingClassifier. Returns (fitted model, purged CV AUC, n_samples),
+    or (None, None, n_rows_seen) if insufficient data."""
     try:
         from sklearn.ensemble import GradientBoostingClassifier
-        from sklearn.model_selection import cross_val_score
+        from sklearn.model_selection import cross_val_score, TimeSeriesSplit
         from sklearn.preprocessing import StandardScaler
         from sklearn.pipeline import Pipeline
     except ImportError:
@@ -134,7 +162,7 @@ def train(min_samples: int = 30) -> object | None:
     if len(df) < min_samples:
         print(f"[ML] Insufficient data ({len(df)} < {min_samples} samples). "
               "Run signal scans and compute outcomes first.")
-        return None
+        return None, None, len(df)
 
     X = extract_features(df)
     y = build_label(df)
@@ -153,8 +181,18 @@ def train(min_samples: int = 30) -> object | None:
         )),
     ])
 
-    cv_scores = cross_val_score(model, X, y, cv=5, scoring='roc_auc')
-    print(f"[ML] CV ROC-AUC: {cv_scores.mean():.3f} ± {cv_scores.std():.3f}")
+    # Purged, chronological CV (Finding #45): df is sorted by signal_date (see
+    # load_training_data), and rows carry overlapping-window forward-return labels --
+    # horizon_days varies per row, so the median horizon is used as a representative
+    # embargo width (a conservative, not row-exact, purge).
+    median_horizon = float(pd.to_numeric(df['horizon_days'], errors='coerce').fillna(5).median())
+    embargo, n_splits = compute_embargo(len(X), df['signal_date'].nunique(), median_horizon)
+    cv = TimeSeriesSplit(n_splits=n_splits, gap=embargo)
+
+    cv_scores = cross_val_score(model, X, y, cv=cv, scoring='roc_auc')
+    cv_auc = float(cv_scores.mean())
+    print(f"[ML] CV ROC-AUC: {cv_auc:.3f} +/- {cv_scores.std():.3f}  "
+          f"(TimeSeriesSplit n_splits={n_splits}, embargo={embargo} rows)")
 
     model.fit(X, y)
     print(f"[ML] Model trained on {len(df)} samples.")
@@ -166,18 +204,21 @@ def train(min_samples: int = 30) -> object | None:
     for name, imp in feat_imp[:10]:
         print(f"  {name:30s}  {imp:.4f}")
 
-    return model
+    return model, cv_auc, len(df)
 
 
 def score_pending(conn: ConnWrapper, model) -> int:
     """Score technical_signals rows with no win_probability yet. Returns count updated."""
+    # date AS scan_date (not a real column -- see load_training_data()'s note on the same
+    # ts.scan_date -> ts.date fix) keeps the Python-side df['scan_date']/row['scan_date']
+    # references below unchanged.
     query = """
-        SELECT symbol, scan_date, signal_score, signals_json,
+        SELECT symbol, date AS scan_date, signal_score, signals_json,
                rsi, adx, nifty_regime, sma200, cmp, volume_ratio
         FROM technical_signals
         WHERE win_probability IS NULL
           AND signals_json IS NOT NULL
-        ORDER BY scan_date DESC
+        ORDER BY date DESC
         LIMIT 5000
     """
     df = read_df(query)
@@ -195,7 +236,7 @@ def score_pending(conn: ConnWrapper, model) -> int:
 
     cur = conn.cursor()
     cur.executemany(
-        "UPDATE technical_signals SET win_probability = ? WHERE symbol = ? AND scan_date = ?",
+        "UPDATE technical_signals SET win_probability = ? WHERE symbol = ? AND date = ?",
         [(round(float(prob), 4), row['symbol'], row['scan_date'])
          for (_, row), prob in zip(df.iterrows(), probs)],
     )
@@ -221,6 +262,56 @@ def load_model_from_disk():
     return model
 
 
+# `technical_signals.win_probability` is the canonical, hard-gated ML output for the whole
+# platform (scoring_engine.py's 0.40 win-probability floor, written under ml_ensemble.py's
+# own PROMOTION_MARGIN check). This script is confirmed dormant -- not wired into any
+# queues.ts cron -- but nothing stops it being run manually, at which point it would
+# silently overwrite that canonical, gated column with an ungated model (Finding #45,
+# 2026-07-28 full-stack audit). CANONICAL_WRITE_TOLERANCE allows this simpler model to be
+# somewhat worse than the canonical ensemble without blocking the write (it's a different,
+# intentionally lighter model family, not expected to beat the full stacking ensemble) --
+# but a write is refused outright if it would be a meaningful downgrade.
+CANONICAL_WRITE_TOLERANCE = 0.03
+
+
+def _active_ensemble_baseline(conn: ConnWrapper) -> float | None:
+    """test_roc_auc (preferred) or cv_roc_auc of the currently active canonical `ensemble`
+    model -- the one whose win_probability this script would overwrite."""
+    try:
+        row = conn.execute(
+            "SELECT test_roc_auc, cv_roc_auc FROM model_registry "
+            "WHERE model_name = 'ensemble' AND is_active = 1 ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        if not row:
+            return None
+        test_auc, cv_auc = row[0], row[1]
+        val = test_auc if test_auc is not None else cv_auc
+        return float(val) if val is not None else None
+    except Exception:
+        return None
+
+
+def register_run(conn: ConnWrapper, cv_auc: float, n_samples: int, promoted: bool,
+                  baseline_auc: float | None) -> None:
+    try:
+        notes = f"CV AUC={cv_auc:.4f}" + (
+            f" vs canonical ensemble baseline={baseline_auc:.4f} -> "
+            f"{'WROTE win_probability' if promoted else 'REFUSED write, canonical column untouched'}"
+            if baseline_auc is not None else " (no active ensemble baseline to compare against)"
+        )
+        conn.execute("""
+            INSERT INTO model_registry (model_name, model_version, model_type, cv_roc_auc,
+              training_samples, is_active, notes, trained_at)
+            VALUES ('ml_signal_scorer', ?, 'GradientBoostingClassifier', ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        """, (
+            datetime.datetime.now().strftime('%Y%m%d_%H%M%S'),
+            round(cv_auc, 4), n_samples, 1 if promoted else 0, notes,
+        ))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+
+
 def run(train_only: bool = False, score_only: bool = False, min_samples: int = 30):
     print(f"[ML] Starting at {datetime.datetime.now()}")
     conn = connect()
@@ -231,13 +322,35 @@ def run(train_only: bool = False, score_only: bool = False, min_samples: int = 3
             if model is None:
                 print("[ML] No saved model found. Run without --score-only to train first.")
                 return
+            cv_auc, n_samples = None, None
         else:
-            model = train(min_samples=min_samples)
+            model, cv_auc, n_samples = train(min_samples=min_samples)
             if model is None:
                 return
             save_model(model)
 
         if not train_only:
+            # Promotion gate (Finding #45, 2026-07-28 full-stack audit): only allowed to
+            # write to the canonical win_probability column if this run's CV AUC doesn't
+            # meaningfully undercut the currently-active canonical ensemble's own AUC.
+            # --score-only reuses a previously-saved (already-trained) model with no fresh
+            # cv_auc to check -- refuse that path outright rather than assume it's still safe.
+            if cv_auc is None:
+                print("[ML] REFUSED: --score-only has no fresh CV AUC to gate against the "
+                      "canonical ensemble baseline -- re-run without --score-only to train "
+                      "and re-validate before writing win_probability.")
+                return
+
+            baseline_auc = _active_ensemble_baseline(conn)
+            promoted = baseline_auc is None or cv_auc >= baseline_auc - CANONICAL_WRITE_TOLERANCE
+            register_run(conn, cv_auc, n_samples, promoted, baseline_auc)
+
+            if not promoted:
+                print(f"[ML] REFUSED: CV AUC={cv_auc:.4f} is more than {CANONICAL_WRITE_TOLERANCE} "
+                      f"below the active canonical ensemble's {baseline_auc:.4f} -- NOT writing "
+                      f"win_probability. Model saved to {MODEL_PATH} for inspection only.")
+                return
+
             updated = score_pending(conn, model)
             print(f"[ML] Updated win_probability for {updated} signals.")
 

@@ -22,6 +22,7 @@ from datetime import date as _date
 import requests
 
 from db_compat import execute, executemany
+from fetch_utils import retry_get
 
 NT_HEADERS = {
     "User-Agent": (
@@ -51,14 +52,14 @@ def _sf(v) -> float | None:
 
 def fetch_spot(nt_param: str) -> dict | None:
     try:
-        r = requests.get(SPOT_URL.format(symbol=nt_param), headers=NT_HEADERS, timeout=15)
+        r = retry_get(requests, SPOT_URL.format(symbol=nt_param), headers=NT_HEADERS, timeout=15)
         d = r.json()
         if d.get("result") != 1:
             print(f"  [spot] API error for {nt_param}: {d.get('resultMessage')}")
             return None
         return d.get("resultData")
     except Exception as e:
-        print(f"  [spot] fetch error for {nt_param}: {e}")
+        print(f"  [spot] fetch error for {nt_param} after retries: {e}")
         return None
 
 

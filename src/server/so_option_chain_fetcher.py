@@ -49,20 +49,82 @@ CHAIN_URL = (
     "?stockCode={symbol}&expDate={expiry}"
 )
 
-# Column positions in the positional tableData array (from tableHeaders unique_name)
-_COL = {
-    "ce_price":     0,   "ce_day_chg":  1,  "ce_volume":   2,
-    "ce_vol_chg":   3,   "ce_ttv":      4,  "ce_oi":       5,
-    "ce_oi_chg":    6,   "ce_iv":       7,  "ce_iv_chg":   8,
-    "ce_delta":     9,   "ce_gamma":   10,  "ce_rho":      11,
-    "ce_theta":    12,   "ce_vega":    13,  "ce_buildup":  14,
-    "strike":      17,
-    "pe_price":    18,   "pe_day_chg": 19,  "pe_volume":   20,
-    "pe_vol_chg":  21,   "pe_ttv":     22,  "pe_oi":       23,
-    "pe_oi_chg":   24,   "pe_iv":      25,  "pe_iv_chg":   26,
-    "pe_delta":    27,   "pe_gamma":   28,  "pe_rho":      29,
-    "pe_theta":    30,   "pe_vega":    31,  "pe_buildup":  32,
+# Fixed 2026-07-30 (Finding #52, full-stack audit): these were previously hardcoded fixed
+# indices into the positional tableData array, never validated against the API's own
+# tableHeaders -- the same architectural bug class ("blind column N" trust with no header
+# check) that already silently corrupted ~2.1M rows across 7 tables in
+# trendlyne_screener_discovery.py before anyone checked a live response against the code.
+# _UNIQUE_NAME_TO_FIELD maps Trendlyne's own field-identity strings (tableHeaders[i]
+# ['unique_name'], confirmed live against a real RELIANCE option-chain response) to our
+# field names; _build_col_map() resolves each field's ACTUAL index at parse time instead
+# of trusting a fixed position, so a future Trendlyne column reorder fails loudly (a clear
+# RuntimeError naming the missing field) instead of silently swapping Delta/Gamma/Theta/
+# Vega/OI/IV across every F&O stock's option chain.
+_UNIQUE_NAME_TO_FIELD = {
+    "current_price_call":           "ce_price",
+    "day_change_call":              "ce_day_chg",
+    "traded_contracts_call":        "ce_volume",
+    "traded_contracts_change_call": "ce_vol_chg",
+    "ttv_call":                     "ce_ttv",
+    "open_interest_call":           "ce_oi",
+    "oi_change_call":               "ce_oi_chg",
+    "implied_volatility_call":      "ce_iv",
+    "iv_change_call":               "ce_iv_chg",
+    "delta_calc_call":              "ce_delta",
+    "gamma_calc_call":              "ce_gamma",
+    "rho_calc_call":                "ce_rho",
+    "theta_calc_call":              "ce_theta",
+    "vega_calc_call":               "ce_vega",
+    "get_built_up_str_call":        "ce_buildup",
+    "strike_price":                 "strike",
+    "current_price_put":            "pe_price",
+    "day_change_put":               "pe_day_chg",
+    "traded_contracts_put":         "pe_volume",
+    "traded_contracts_change_put":  "pe_vol_chg",
+    "ttv_put":                      "pe_ttv",
+    "open_interest_put":            "pe_oi",
+    "oi_change_put":                "pe_oi_chg",
+    "implied_volatility_put":       "pe_iv",
+    "iv_change_put":                "pe_iv_chg",
+    "delta_calc_put":               "pe_delta",
+    "gamma_calc_put":               "pe_gamma",
+    "rho_calc_put":                 "pe_rho",
+    "theta_calc_put":               "pe_theta",
+    "vega_calc_put":                "pe_vega",
+    "get_built_up_str_put":         "pe_buildup",
 }
+
+# Fields _parse_chain actually reads per row -- if any of these can't be resolved from a
+# live response's tableHeaders, that response's shape no longer matches what this fetcher
+# was built against and must not be silently parsed.
+_REQUIRED_FIELDS = {
+    "strike",
+    "ce_price", "ce_volume", "ce_oi", "ce_oi_chg", "ce_iv", "ce_iv_chg",
+    "ce_delta", "ce_gamma", "ce_theta", "ce_vega", "ce_rho", "ce_buildup",
+    "pe_price", "pe_volume", "pe_oi", "pe_oi_chg", "pe_iv", "pe_iv_chg",
+    "pe_delta", "pe_gamma", "pe_theta", "pe_vega", "pe_rho", "pe_buildup",
+}
+
+
+def _build_col_map(table_headers: list) -> dict:
+    """Resolve field -> tableData index from the response's OWN tableHeaders, keyed by
+    unique_name. Raises RuntimeError (not a silent skip) if a required field is missing --
+    a mismatch here means Trendlyne changed the response shape and every downstream Greek
+    would otherwise be read from the wrong column with no error."""
+    col: dict[str, int] = {}
+    for idx, header in enumerate(table_headers or []):
+        field = _UNIQUE_NAME_TO_FIELD.get(header.get("unique_name"))
+        if field:
+            col[field] = idx
+    missing = _REQUIRED_FIELDS - col.keys()
+    if missing:
+        raise RuntimeError(
+            f"[so_chain] tableHeaders shape mismatch -- required field(s) not found: "
+            f"{sorted(missing)}. Trendlyne's option-chain response layout may have "
+            f"changed; refusing to parse with a stale/incomplete column map rather than "
+            f"silently misreading Greeks."
+        )
+    return col
 
 
 def _nearest_thursday() -> str:
@@ -121,28 +183,33 @@ def fetch_chain(symbol: str, expiry: str) -> dict | None:
 
 
 def _parse_chain(body: dict, symbol: str, today: str, expiry: str) -> tuple[list, dict | None]:
-    """Parse tableData into chain rows + summary. Returns (chain_rows, summary_dict)."""
+    """Parse tableData into chain rows + summary. Returns (chain_rows, summary_dict).
+
+    Raises RuntimeError (via _build_col_map) if this response's tableHeaders don't
+    contain every field this function reads -- see Finding #52.
+    """
+    col = _build_col_map(body.get("tableHeaders"))
     rows = []
     for rec in body.get("tableData") or []:
-        strike = _sf(rec[_COL["strike"]])
+        strike = _sf(rec[col["strike"]])
         if strike is None:
             continue
         rows.append((
             symbol, today, expiry, strike,
-            _sf(rec[_COL["ce_price"]]),   _sf(rec[_COL["ce_volume"]]),
-            _sf(rec[_COL["ce_oi"]]),      _sf(rec[_COL["ce_oi_chg"]]),
-            _sf(rec[_COL["ce_iv"]]),      _sf(rec[_COL["ce_iv_chg"]]),
-            _sf(rec[_COL["ce_delta"]]),   _sf(rec[_COL["ce_gamma"]]),
-            _sf(rec[_COL["ce_theta"]]),   _sf(rec[_COL["ce_vega"]]),
-            _sf(rec[_COL["ce_rho"]]),
-            rec[_COL["ce_buildup"]] if len(rec) > _COL["ce_buildup"] else None,
-            _sf(rec[_COL["pe_price"]]),   _sf(rec[_COL["pe_volume"]]),
-            _sf(rec[_COL["pe_oi"]]),      _sf(rec[_COL["pe_oi_chg"]]),
-            _sf(rec[_COL["pe_iv"]]),      _sf(rec[_COL["pe_iv_chg"]]),
-            _sf(rec[_COL["pe_delta"]]),   _sf(rec[_COL["pe_gamma"]]),
-            _sf(rec[_COL["pe_theta"]]),   _sf(rec[_COL["pe_vega"]]),
-            _sf(rec[_COL["pe_rho"]]),
-            rec[_COL["pe_buildup"]] if len(rec) > _COL["pe_buildup"] else None,
+            _sf(rec[col["ce_price"]]),   _sf(rec[col["ce_volume"]]),
+            _sf(rec[col["ce_oi"]]),      _sf(rec[col["ce_oi_chg"]]),
+            _sf(rec[col["ce_iv"]]),      _sf(rec[col["ce_iv_chg"]]),
+            _sf(rec[col["ce_delta"]]),   _sf(rec[col["ce_gamma"]]),
+            _sf(rec[col["ce_theta"]]),   _sf(rec[col["ce_vega"]]),
+            _sf(rec[col["ce_rho"]]),
+            rec[col["ce_buildup"]] if len(rec) > col["ce_buildup"] else None,
+            _sf(rec[col["pe_price"]]),   _sf(rec[col["pe_volume"]]),
+            _sf(rec[col["pe_oi"]]),      _sf(rec[col["pe_oi_chg"]]),
+            _sf(rec[col["pe_iv"]]),      _sf(rec[col["pe_iv_chg"]]),
+            _sf(rec[col["pe_delta"]]),   _sf(rec[col["pe_gamma"]]),
+            _sf(rec[col["pe_theta"]]),   _sf(rec[col["pe_vega"]]),
+            _sf(rec[col["pe_rho"]]),
+            rec[col["pe_buildup"]] if len(rec) > col["pe_buildup"] else None,
         ))
 
     # Stock-level summary
@@ -250,7 +317,19 @@ def run(
             print("no data")
             fail += 1
         else:
-            chain_rows, summary = _parse_chain(body, sym, today, exp)
+            try:
+                chain_rows, summary = _parse_chain(body, sym, today, exp)
+            except RuntimeError as e:
+                # A tableHeaders shape mismatch (Finding #52) is caught HERE, per-symbol,
+                # rather than left to propagate and abort every remaining symbol in this
+                # run -- Trendlyne almost certainly reordered the SAME way for every
+                # symbol, so this will likely repeat, but that's a loud, visible failure
+                # count, not a silent wrong-Greeks write for any of them.
+                print(f"SKIPPED: {e}")
+                fail += 1
+                if delay > 0:
+                    time.sleep(delay)
+                continue
             n = save_chain(chain_rows, summary)
             mp = summary["max_pain"] if summary else None
             print(f"{n} strikes  maxPain={mp}")

@@ -317,15 +317,25 @@ class StrategyOptimizer:
         df['weight_override'] = (0.8 + (df['win_rate'] / overall_wr) * 0.4).clip(0.5, 1.8)
 
         # Generalisation check: does the train-fit override direction agree with the
-        # holdout window's actual win rate? Logged only -- doesn't block the write, since
-        # a handful of screeners can legitimately fail this on a small holdout.
+        # holdout window's actual win rate? Individual screeners can legitimately fail
+        # this on a small holdout (kept as log-only, per-scan_id, by design), but a
+        # NEGATIVE aggregate correlation means the override direction as a whole doesn't
+        # generalise -- writing every scan_id's weight_override in that case is the
+        # unconditional-apply-regardless-of-holdout-result pattern Finding #42 flagged
+        # (same class of bug as optimise()'s pre-fix unconditional save/apply). Fixed by
+        # gating the entire batch on the aggregate correlation, not filtering per screener.
         holdout_agg = _agg(holdout_raw)
         if not holdout_agg.empty:
             joined = df[['weight_override']].join(holdout_agg[['win_rate']], how='inner')
             if len(joined) >= 5:
                 corr = joined['weight_override'].corr(joined['win_rate'])
-                print(f"[Optimizer] screener override train→holdout win-rate correlation: {corr:.3f} "
+                print(f"[Optimizer] screener override train->holdout win-rate correlation: {corr:.3f} "
                       f"(n={len(joined)})")
+                if corr < 0:
+                    print("[Optimizer] WARNING: screener overrides are NEGATIVELY correlated with "
+                          "holdout win rate -- override direction does not generalise. Skipping "
+                          "screener_master.weight_override write for this run.")
+                    return {}
 
         overrides = {str(scan_id): round(float(w), 4) for scan_id, w in df['weight_override'].items()}
         return overrides
@@ -433,6 +443,19 @@ class StrategyOptimizer:
         if dry_run:
             print("[Optimizer] Dry-run: not saving.")
             return
+
+        # Promotion gate (Finding #42, 2026-07-28 full-stack audit): optimise() already
+        # computes an honest held-out test score and logs a warning when the optimised
+        # weights underperform baseline on it -- but this used to save/apply regardless.
+        # These weights are read by scoring_engine.py at startup and drive every score
+        # platform-wide, so an overfit run must not reach app_settings at all, not just
+        # log a warning about it. Matches the already-proven gate pattern in
+        # backtest_optimizer.py (only updates app_settings when the holdout result beats
+        # the constraint/baseline).
+        if result['optimised_test_objective'] < result['baseline_test_objective']:
+            print("[Optimizer] Optimised weights underperform baseline on held-out test data -- "
+                  "NOT saving to screener_weight_history or applying to scoring_engine/screener_master.")
+            return result
 
         self.save_to_history(result, overrides)
         self.apply_to_scoring_engine(result)

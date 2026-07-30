@@ -89,6 +89,7 @@ class TestTickertapeClient:
     def test_fetch_scorecard_returns_none_on_non_200(self):
         fake_response = MagicMock()
         fake_response.status_code = 404
+        fake_response.raise_for_status.side_effect = RuntimeError("HTTP 404")
         fake_session = MagicMock()
         fake_session.get.return_value = fake_response
 

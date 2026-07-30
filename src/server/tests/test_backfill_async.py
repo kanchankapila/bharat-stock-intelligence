@@ -67,8 +67,13 @@ class TestGapFillAsync:
         assert isinstance(result, list)
         assert len(result) == 1
         rec = result[0]
-        # 7-tuple: (symbol, date, open, high, low, close, volume)
-        assert len(rec) == 7
+        # 8-tuple: (symbol, date, open, high, low, close, volume, adjustment_basis) --
+        # adjustment_basis added 2026-07-30 (Finding #6, full-stack audit): this path reads
+        # Yahoo's v8 chart API directly (raw `quote.close`, no split/dividend adjustment),
+        # a third distinct basis from this file's other writer (_extract_records, which
+        # downloads via yf.download(..., auto_adjust=True)) and from mc_ohlcv_backfill.py
+        # (split-only) -- tagged "unadjusted" to keep that honest.
+        assert len(rec) == 8
         assert rec[0] == "INFY"
         assert rec[1] == "2024-01-02"
         assert rec[2] == pytest.approx(100.0)
@@ -76,6 +81,7 @@ class TestGapFillAsync:
         assert rec[4] == pytest.approx(99.0)
         assert rec[5] == pytest.approx(102.5)
         assert rec[6] == 1000000
+        assert rec[7] == "unadjusted"
 
     def test_fetch_ohlcv_async_handles_404(self):
         """Returns empty list when API returns non-200 status."""
@@ -114,6 +120,7 @@ class TestGapFillAsync:
         conn.execute(
             "CREATE TABLE stock_ohlcv "
             "(symbol TEXT, date TEXT, open REAL, high REAL, low REAL, close REAL, volume INTEGER, "
+            "adjustment_basis TEXT, "
             "PRIMARY KEY (symbol, date))"
         )
         conn.commit()

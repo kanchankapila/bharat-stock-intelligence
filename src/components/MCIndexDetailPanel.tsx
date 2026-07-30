@@ -21,7 +21,7 @@ interface MCIndexDetailPanelProps {
 
 type Timeframe = 'D' | 'W' | 'M';
 
-function resolveConstituentSymbol(s: any): string | null {
+export function resolveConstituentSymbol(s: any): string | null {
   // s.id from MC marketmap is the NSE/BSE ticker (e.g. "RELIANCE")
   if (s.id) {
     const bySymbol = stockData.find(st => st.symbol.toUpperCase() === String(s.id).toUpperCase());

@@ -186,20 +186,60 @@ def predict_sgd(state: dict, X: np.ndarray) -> np.ndarray:
 
 # ── Register update ───────────────────────────────────────────────────────────
 
+# An incremental update that regresses cv_auc below the last active row's by more than this
+# is logged but NOT marked active -- the SGD state itself (state['model']/state['scaler'])
+# has already absorbed the new batch via partial_fit regardless (online learning has no
+# clean "reject this batch" rollback short of a full snapshot mechanism, out of scope here),
+# but model_registry must not claim a regressed update is the trustworthy active state.
+ONLINE_REGRESSION_TOLERANCE = 0.02
+
+
 def register_update(conn: ConnWrapper, state: dict, n_new: int, cv_auc: float):
+    """Registers this incremental update in model_registry.
+
+    Promotion gate (Finding #17, 2026-07-28 full-stack audit): this used to insert every
+    update as is_active=1 with no comparison to pre-update state and no deactivation of
+    prior rows -- model_registry could accumulate multiple 'active' online_sgd rows, and a
+    regressed update was indistinguishable from a good one to anything reading is_active.
+    Unlike confluence_ml_engine.py/cs_ranker.py, partial_fit has already mutated the live
+    SGD state by the time this is called (there is no separate candidate file to withhold),
+    so this can't prevent a bad batch from being absorbed -- what it CAN do, and now does,
+    is keep model_registry honest: deactivate the previous active row, and only mark this
+    one active if cv_auc didn't regress beyond ONLINE_REGRESSION_TOLERANCE versus it.
+    """
+    baseline_auc = None
+    try:
+        row = conn.execute(
+            "SELECT cv_roc_auc FROM model_registry "
+            "WHERE model_name = 'online_sgd' AND is_active = 1 ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        if row and row[0] is not None:
+            baseline_auc = float(row[0])
+    except Exception:
+        pass
+
+    is_active = 1 if (baseline_auc is None or cv_auc >= baseline_auc - ONLINE_REGRESSION_TOLERANCE) else 0
+    notes = f"Incremental update — {n_new} new outcomes"
+    if not is_active:
+        notes += f" (REGRESSED: cv_auc={cv_auc:.4f} vs active baseline={baseline_auc:.4f} — not marked active)"
+        print(f"[OnlineLearner] WARNING: cv_auc regressed from {baseline_auc:.4f} to {cv_auc:.4f} "
+              f"(beyond {ONLINE_REGRESSION_TOLERANCE} tolerance) — this update logged but NOT marked active.")
+
     version = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
     cur = conn.cursor()
+    cur.execute("UPDATE model_registry SET is_active = 0 WHERE model_name = 'online_sgd' AND is_active = 1")
     cur.execute("""
         INSERT INTO model_registry
             (model_name, model_version, model_type, trained_at,
              training_samples, cv_roc_auc, is_active, horizon_days, notes)
-        VALUES ('online_sgd', ?, 'OnlineSGD', ?, ?, ?, 1, 15, ?)
+        VALUES ('online_sgd', ?, 'OnlineSGD', ?, ?, ?, ?, 15, ?)
     """, (
         version,
         state['last_updated'],
         state['n_samples_seen'],
         round(cv_auc, 4),
-        f"Incremental update — {n_new} new outcomes",
+        is_active,
+        notes,
     ))
     conn.commit()
 
@@ -259,6 +299,17 @@ def score_pending_with_ensemble_blend(
     return updated
 
 
+def _embargoed_train_end(n_rows: int, n_dates: int, med_horizon: int, val_start: int) -> int:
+    """Finding #21 (2026-07-28 audit): row-count estimate of how many training rows near the
+    val_start boundary to drop so their own forward-return horizon can't still reach into the
+    val split (adapted from ml_ensemble.py's date-based embargo — horizon_days varies per row
+    here rather than being fixed, so this uses the median horizon as a representative gap).
+    """
+    samples_per_day = max(1.0, n_rows / max(1, n_dates))
+    embargo = int(min(samples_per_day * med_horizon, n_rows // 10))
+    return max(5, val_start - embargo)
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def run(window_days: int = 180, min_new: int = 5, dry_run: bool = False):
@@ -293,8 +344,16 @@ def run(window_days: int = 180, min_new: int = 5, dry_run: bool = False):
 
         # Evaluate on last 20% before updating (rough held-out estimate)
         split = max(int(len(X) * 0.8), 5)
-        Xtrain, Xval = X[:split], X[split:]
-        ytrain, yval = y[:split], y[split:]
+        # Finding #21 (2026-07-28 audit): this val_AUC now gates register_update()'s is_active
+        # decision (Finding #17's promotion-gate fix) so it's no longer purely informational —
+        # a plain positional cut with zero gap for the outcome horizon leaks forward-window
+        # overlap across the boundary. Embargo the rows whose own horizon could still reach
+        # into the val split, mirroring ml_ensemble.py's date-based embargo.
+        med_horizon = int(pd.to_numeric(df['horizon_days'], errors='coerce').median() or 15)
+        n_dates = df['signal_date'].nunique()
+        train_end = _embargoed_train_end(len(X), n_dates, med_horizon, split)
+        Xtrain, Xval = X[:train_end], X[split:]
+        ytrain, yval = y[:train_end], y[split:]
 
         if dry_run:
             print("[OnlineLearner] Dry-run: skipping update and scoring.")

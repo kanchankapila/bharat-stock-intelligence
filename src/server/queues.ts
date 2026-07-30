@@ -29,6 +29,7 @@ import { runFullFundamentalsSync } from './fundamentalsSyncService';
 import { fetchDeliveryMap } from './deliveryFetcher';
 import { updateMonitorState } from './monitoringService';
 import { StepTracker } from './jobSteps';
+import { updateTrailingStops } from './trailingStopUpdater';
 import { getTrendlyneMetricSymbols, enqueueTrendlyneMetricsFetchJobs, runTrendlyneMetricsFetch } from './trendlyneDailyFetchService';
 import { isMarketOpen, isTradingHolidayToday } from './marketStatusService';
 import {
@@ -621,6 +622,13 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   // Surveillance gate: ASM/GSM flags → nse_stocks and technical_signals.asm_flag/gsm_stage.
   await runPython('asm_gsm_fetcher.py', [], 2 * 60_000)
     .catch(e => console.warn('[QUEUE] asm_gsm_fetcher failed:', (e as Error).message));
+
+  // Trailing chandelier stop ratchet for live ACTIVE positions (Finding #29, 2026-07-28
+  // full-stack audit) -- the correct trailing-stop formula already proven in
+  // exit_labeler.py/outcome_resolver.py for offline backtest grading had never been applied
+  // to actual open positions before this. TS function, runs in-process (no runPython needed).
+  await updateTrailingStops()
+    .catch(e => console.warn('[QUEUE] trailing stop updater failed:', (e as Error).message));
   await T.run('fii-dii-fetcher', () => runPython('fii_dii_fetcher.py', [], 90_000));
   await runPython('pcr_fetcher.py', ['--gex'], 90_000)
     .catch(e => console.warn('[QUEUE] pcr_fetcher failed:', (e as Error).message));
@@ -653,6 +661,14 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   // stamped on technical_signals → mf_flow_vs_sector / mf_flow_rank. Same-day, no look-ahead.
   await runPython('ownership_relative.py', [], 120_000)
     .catch(e => console.warn('[QUEUE] ownership_relative failed:', (e as Error).message));
+
+  // Multi-factor alpha score (Quality/Momentum/Value/Risk-Adj/Macro, orthogonal 5-factor
+  // model) → quant_scores.mf_*. Finding #28 (2026-07-28 audit): this was a fully-built,
+  // never-scheduled dead branch — unified_ranker.py's factor-crowding check (added alongside
+  // this fix) reads these columns, so they need to actually be populated. Depends on
+  // quant_scores (quantScoringService) already having today's rows.
+  await runPython('multi_factor_scorer.py', [], 180_000)
+    .catch(e => console.warn('[QUEUE] multi_factor_scorer failed:', (e as Error).message));
 
   // Market breadth internals (% above 200DMA, A/D ratio, 20d highs, 52w net highs/lows) from stock_ohlcv.
   await runPython('market_breadth.py', ['--days', '420'], 120_000)

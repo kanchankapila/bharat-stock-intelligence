@@ -550,6 +550,70 @@ def _save_config(cfg: Dict):
         json.dump(cfg, f, indent=2)
 
 
+# New walk-forward roc_auc must beat the currently-active version's recorded roc_auc by at
+# least this much to be promoted. Same value as ml_ensemble.py's PROMOTION_MARGIN.
+LSTM_PROMOTION_MARGIN = 0.005
+
+
+def _promote_lstm_version(new_version: int, metrics: Dict) -> bool:
+    """Gate `--mode train`'s config write behind a promotion bar (Finding #70, 2026-07-28
+    full-stack audit): `cfg["lstm_version"] = args.version; _save_config(cfg)` used to run
+    unconditionally -- a regression in the new BiLSTM (bad batch, NaN fold, unlucky init)
+    would go to production automatically the moment `run_inference()` next read the config,
+    with no comparison against the previously-active version's own walk-forward metrics and
+    no backup of the prior config. Mirrors ml_ensemble.py's promotion pattern: a required
+    metric-improvement bar plus a timestamped backup of the previous config.
+
+    `train_lstm()` already saves each version to its own versioned path
+    (`lstm_v{version}.pt`) rather than overwriting a shared filename -- so a rejected
+    version's weights are naturally preserved on disk as a candidate with no extra work;
+    only the config pointer `run_inference()` reads is what needs gating here.
+
+    Returns True if promoted (cfg written), False if rejected (cfg left untouched).
+    """
+    new_auc = metrics.get("roc_auc")
+    if new_auc is None or (isinstance(new_auc, float) and np.isnan(new_auc)):
+        print(f"[DL] REFUSED: walk-forward validation did not produce a usable roc_auc "
+              f"(metrics={metrics}) -- cannot confirm v{new_version} is safe to promote. "
+              f"Weights saved to lstm_v{new_version}.pt but NOT activated; "
+              f"re-run --mode train once validation succeeds.")
+        return False
+
+    cfg = _load_config()
+    active_version = cfg.get("lstm_version")
+    version_metrics = cfg.get("lstm_metrics", {})
+    baseline_auc = None
+    if active_version is not None:
+        baseline = version_metrics.get(str(active_version))
+        if baseline and baseline.get("roc_auc") is not None and not (
+            isinstance(baseline["roc_auc"], float) and np.isnan(baseline["roc_auc"])
+        ):
+            baseline_auc = float(baseline["roc_auc"])
+
+    promote = baseline_auc is None or new_auc >= baseline_auc + LSTM_PROMOTION_MARGIN
+
+    version_metrics[str(new_version)] = {k: (None if isinstance(v, float) and np.isnan(v) else v)
+                                          for k, v in metrics.items()}
+    cfg["lstm_metrics"] = version_metrics
+
+    if not promote:
+        print(f"[DL] REFUSED: v{new_version} roc_auc={new_auc:.4f} did not beat active "
+              f"v{active_version}'s {baseline_auc:.4f} + {LSTM_PROMOTION_MARGIN} margin. "
+              f"Weights saved to lstm_v{new_version}.pt for inspection; active version unchanged.")
+        _save_config(cfg)  # still persist this version's metrics for future comparisons
+        return False
+
+    if CONFIG_PATH.exists():
+        backup_path = MODEL_DIR / f"dl_model_config.{datetime.now().strftime('%Y%m%d_%H%M%S')}.bak.json"
+        backup_path.write_text(CONFIG_PATH.read_text())
+
+    cfg["lstm_version"] = new_version
+    _save_config(cfg)
+    print(f"[DL] Model ACTIVATED: v{new_version} roc_auc={new_auc:.4f}"
+          + (f" (beat v{active_version} baseline {baseline_auc:.4f})" if baseline_auc is not None else " (no prior active version)"))
+    return True
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--mode", choices=["train", "infer", "validate"], default="infer")
@@ -559,9 +623,7 @@ if __name__ == "__main__":
 
     if args.mode == "train":
         metrics = train_lstm(version=args.version)
-        cfg = _load_config()
-        cfg["lstm_version"] = args.version
-        _save_config(cfg)
+        _promote_lstm_version(args.version, metrics)
         print(f"[DL] Training complete: {metrics}")
     elif args.mode == "infer":
         run_inference(args.date)

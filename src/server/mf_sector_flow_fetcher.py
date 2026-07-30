@@ -30,7 +30,7 @@ except ImportError:
     import requests as cffi_requests
     _USE_CFFI = False
 
-from db_compat import connect, translate, executemany, read_df
+from db_compat import connect, translate, executemany, read_df, query_scalar
 
 # ---------------------------------------------------------------------------
 # AMFI portfolio disclosure URL — returns a large pipe-/comma-delimited CSV
@@ -330,17 +330,33 @@ def _update_macro_asset_prices(flow: pd.DataFrame, month_str: str) -> None:
 
 
 def _update_technical_signals(flow: pd.DataFrame) -> int:
-    """Set mf_sector_flow_pct on technical_signals rows where stock's sector matches."""
+    """Set mf_sector_flow_pct on technical_signals rows where stock's sector matches.
+
+    Bounded to the current trading session only (date >= floor) -- this is a
+    point-in-time feature write, not a historical backfill: mf_sector_flow_pct
+    reflects THIS run's month-over-month AMFI flow number, so writing it onto every
+    historical technical_signals row (unbounded, as this previously did) would
+    smear today's value across the stock's entire history the first time this
+    fetcher ran to completion. Live DB confirmed 0 non-null mf_sector_flow_pct rows
+    before this fix -- the fetcher had apparently never completed a run against
+    production, so this closes the gap before it ever corrupts anything (same
+    discipline already applied correctly in relative_strength.py/ownership_relative.py).
+    """
     flow_map = dict(zip(flow["sector"], flow["flow_pct"]))
     if not flow_map:
         return 0
 
-    # Load all distinct (symbol, date) rows from technical_signals + sector from nse_stocks
+    floor = query_scalar("SELECT MAX(date) AS d FROM stock_ohlcv")
+    floor = str(floor)[:10] if floor else datetime.date.today().isoformat()
+
+    # Load only the current trading session's (symbol, date) rows from technical_signals
+    # + sector from nse_stocks -- never touch rows before `floor`.
     ts = read_df(
         "SELECT ts.symbol, ts.date, ns.sector "
         "FROM technical_signals ts "
         "JOIN nse_stocks ns ON ts.symbol = ns.symbol "
-        "WHERE ns.sector IS NOT NULL"
+        "WHERE ns.sector IS NOT NULL AND ts.date >= ?",
+        params=(floor,),
     )
     if ts.empty:
         return 0

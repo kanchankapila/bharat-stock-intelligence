@@ -40,7 +40,7 @@ from datetime import date, datetime
 
 from curl_cffi import requests
 
-from db_compat import connect
+from db_compat import connect, query_scalar
 
 PRICEFEED_URL = "https://priceapi.moneycontrol.com/pricefeed/nse/equitycash/{scid}"
 
@@ -395,7 +395,7 @@ def upsert_row(symbol: str, today: str, f: dict, con) -> None:
     con.commit()
 
 
-def backfill_technical_signals(symbol: str, today: str, f: dict, con) -> None:
+def backfill_technical_signals(symbol: str, ts_floor: str, f: dict, con) -> None:
     """Writes only the columns that genuinely have no point-in-time-correct alternative
     (fundamentals/consensus/delivery -- live-snapshot-only by nature). The price/volume
     columns this used to write (mc_ma30/50/150/200_dist_pct, mc_3d_return,
@@ -412,6 +412,15 @@ def backfill_technical_signals(symbol: str, today: str, f: dict, con) -> None:
     working_capital_fetcher.py, financial_ratios_fetcher.py) for exactly this class of
     live-only data: only apply to today-or-later rows, and explicitly NULL any older row
     that's still carrying yesterday's frozen value instead of silently keeping it.
+
+    BUG FOUND 2026-07-28 (Finding #64 of the full-stack audit): `ts_floor` (the guard
+    threshold, named `today` before this fix) was `date.today()`, the exact bug class
+    already fixed in 6 sibling fetchers on 2026-07-25 -- on a closed-market day this
+    job still runs via ml-daily-ops' closed-day-early-batch dispatcher, `date.today()`
+    then matches zero technical_signals rows, and the ELSE branch nulls every one of
+    the columns above across a symbol's ENTIRE history. Callers must now pass the
+    last completed trading session (MAX(date) FROM stock_ohlcv), not raw
+    date.today() -- see main()'s `ts_floor` computation.
     """
     cur = con.cursor()
     # del_acceleration: 3-day delivery % relative to 20-day baseline (positive = rising institutional interest)
@@ -441,13 +450,13 @@ def backfill_technical_signals(symbol: str, today: str, f: dict, con) -> None:
             mc_pe_fwd_discount   = CASE WHEN date >= ? THEN COALESCE(?, mc_pe_fwd_discount)   ELSE NULL END
         WHERE symbol = ?
     """, (
-        today, f.get("cagr_3y"), today, f.get("cagr_5y"), today, f.get("cagr_10y"),
-        today, f.get("ind_pe"), today, f.get("pe_vs_ind"),
-        today, f.get("consensus_pe"), today, f.get("consensus_pb"),
-        today, f.get("del_pct_3d"), today, f.get("del_pct_5d"), today, f.get("del_pct_20d"),
-        today, del_acc, today, f.get("circuit_dist_pct"), today, fno_elig,
-        today, f.get("price_cash"), today, f.get("consensus_eps"),
-        today, f.get("eps_vs_cons"), today, f.get("pe_fwd_discount"),
+        ts_floor, f.get("cagr_3y"), ts_floor, f.get("cagr_5y"), ts_floor, f.get("cagr_10y"),
+        ts_floor, f.get("ind_pe"), ts_floor, f.get("pe_vs_ind"),
+        ts_floor, f.get("consensus_pe"), ts_floor, f.get("consensus_pb"),
+        ts_floor, f.get("del_pct_3d"), ts_floor, f.get("del_pct_5d"), ts_floor, f.get("del_pct_20d"),
+        ts_floor, del_acc, ts_floor, f.get("circuit_dist_pct"), ts_floor, fno_elig,
+        ts_floor, f.get("price_cash"), ts_floor, f.get("consensus_eps"),
+        ts_floor, f.get("eps_vs_cons"), ts_floor, f.get("pe_fwd_discount"),
         symbol,
     ))
     con.commit()
@@ -507,6 +516,12 @@ def main() -> None:
     print(f"[MCPricefeed] Fetching {len(stocks)} stocks in batches of {BATCH_SIZE} ({BATCH_GAP_SEC}s gap)…")
     session = requests.Session()
     today = date.today().isoformat()
+    # ts_floor anchors backfill_technical_signals' write guard to the last completed trading
+    # session (not raw date.today()) -- see that function's docstring for why. `today` above
+    # is kept as-is for upsert_row/append_pe_pb_history, which genuinely want the actual
+    # calendar date as their per-day snapshot key.
+    ohlcv_max = query_scalar("SELECT MAX(date) AS d FROM stock_ohlcv")
+    ts_floor = str(ohlcv_max)[:10] if ohlcv_max else today
     ok = 0
     done = 0
 
@@ -527,7 +542,7 @@ def main() -> None:
                     continue
                 f = extract_features(data)
                 upsert_row(symbol, today, f, con)
-                backfill_technical_signals(symbol, today, f, con)
+                backfill_technical_signals(symbol, ts_floor, f, con)
                 append_pe_pb_history(symbol, today, f.get("pe"), f.get("pb"), con)
                 ind_pe_str = f"IND_PE={f.get('ind_pe','?')} vs_ind={f.get('pe_vs_ind','?')}"
                 cagr_str   = f"CAGR3={f.get('cagr_3y','?')}% CAGR5={f.get('cagr_5y','?')}%"

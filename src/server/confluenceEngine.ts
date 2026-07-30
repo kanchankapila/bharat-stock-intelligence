@@ -408,8 +408,18 @@ export async function computeConfluenceSignals(): Promise<{ computed: number; el
   }
 
   // Fetch supporting data
+  // Fixed 2026-07-30 (Finding #33, full-stack audit): the correlated subquery re-executed
+  // once per outer row scanned with no bound on which rows it correlated against -- O(total
+  // historical rows) instead of O(distinct symbols), getting slower every day more history
+  // accumulates. ROW_NUMBER() OVER (PARTITION BY symbol ...) is a single-pass equivalent
+  // that works identically on both SQLite and Postgres (unlike DISTINCT ON, Postgres-only).
   const techMap = new Map<string, any>(
-    (await dbAll('SELECT * FROM technical_signals WHERE date = (SELECT MAX(date) FROM technical_signals ts2 WHERE ts2.symbol = technical_signals.symbol)') as any[])
+    (await dbAll(`
+      SELECT * FROM (
+        SELECT *, ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY date DESC) AS rn
+        FROM technical_signals
+      ) t WHERE rn = 1
+    `) as any[])
       .map((r: any) => [r.symbol, r])
   );
   const quantMap = new Map<string, any>(

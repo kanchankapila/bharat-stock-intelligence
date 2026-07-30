@@ -35,6 +35,7 @@ import pandas as pd
 import requests
 
 from db_compat import connect, safe_alter
+from fetch_utils import retry_get
 
 BHAVCOPY_URL = (
     "https://nsearchives.nseindia.com/content/fo/"
@@ -111,16 +112,20 @@ def fetch_bhavcopy(trade_date: date, session: requests.Session) -> pd.DataFrame 
     """Download and parse the F&O bhavcopy for `trade_date`. Returns None on failure."""
     url = BHAVCOPY_URL.format(date=trade_date.strftime("%Y%m%d"))
     try:
-        r = session.get(url, timeout=20)
-        if r.status_code == 404:
+        r = retry_get(session, url, timeout=20)
+    except Exception as e:
+        status = getattr(getattr(e, 'response', None), 'status_code', None)
+        if status == 404:
             return None  # holiday / non-trading day
-        r.raise_for_status()
+        print(f"[Rollover] {trade_date}: download failed after retries — {e}")
+        return None
+    try:
         z = zipfile.ZipFile(io.BytesIO(r.content))
         with z.open(z.namelist()[0]) as f:
             df = pd.read_csv(f, dtype=str)
         return df
     except Exception as e:
-        print(f"[Rollover] {trade_date}: download failed — {e}")
+        print(f"[Rollover] {trade_date}: parse failed — {e}")
         return None
 
 

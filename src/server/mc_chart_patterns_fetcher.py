@@ -32,7 +32,7 @@ from datetime import date
 
 from curl_cffi import requests
 
-from db_compat import connect
+from db_compat import connect, query_scalar
 
 PATTERNS_URL = (
     "https://api.moneycontrol.com/mcapi/technicalpicks/chart-patterns"
@@ -226,9 +226,17 @@ def compute_and_upsert_signals(symbol: str, today: str, patterns: list[dict], co
             "net_score": net_score, "avg_target_pct": avg_target}
 
 
-def backfill_technical_signals(symbol: str, today: str, signals: dict, con) -> None:
+def backfill_technical_signals(symbol: str, ts_floor: str, signals: dict, con) -> None:
     """date >= ? ELSE NULL guard added 2026-07-19 -- see mc_pricefeed_fetcher.py's
-    backfill_technical_signals for the full writeup of the no-date-filter bug this fixes."""
+    backfill_technical_signals for the full writeup of the no-date-filter bug this fixes.
+
+    BUG FOUND 2026-07-28 (Finding #64 of the full-stack audit): the guard threshold
+    (`ts_floor`, named `today` before this fix) was date.today() -- the same bug class
+    already fixed in 6 sibling fetchers on 2026-07-25, copied here *after* that fix
+    existed. On a closed-market day this job still runs, date.today() matches zero
+    technical_signals rows, and the ELSE branch nulls mc_cp_bull/bear_count etc across
+    a symbol's entire history. Caller must pass the last completed trading session
+    (MAX(date) FROM stock_ohlcv), not raw date.today() -- see main()."""
     cur = con.cursor()
     cur.execute("""
         UPDATE technical_signals SET
@@ -238,8 +246,8 @@ def backfill_technical_signals(symbol: str, today: str, signals: dict, con) -> N
             mc_cp_avg_target_pct = CASE WHEN date >= ? THEN COALESCE(?, mc_cp_avg_target_pct) ELSE NULL END
         WHERE symbol = ?
     """, (
-        today, signals.get("bull_count"), today, signals.get("bear_count"),
-        today, signals.get("net_score"), today, signals.get("avg_target_pct"),
+        ts_floor, signals.get("bull_count"), ts_floor, signals.get("bear_count"),
+        ts_floor, signals.get("net_score"), ts_floor, signals.get("avg_target_pct"),
         symbol,
     ))
     con.commit()
@@ -274,6 +282,8 @@ def main() -> None:
     print(f"[MCPatterns] Fetching chart patterns for {len(stocks)} stocks in batches of {BATCH_SIZE} ({BATCH_GAP_SEC}s gap)…")
     session = requests.Session()
     today = date.today().isoformat()
+    ohlcv_max = query_scalar("SELECT MAX(date) AS d FROM stock_ohlcv")
+    ts_floor = str(ohlcv_max)[:10] if ohlcv_max else today
     ok = 0
     done = 0
 
@@ -292,7 +302,7 @@ def main() -> None:
                 done += 1
                 upsert_patterns(symbol, mcsymbol, patterns, con)
                 sigs = compute_and_upsert_signals(symbol, today, patterns, con)
-                backfill_technical_signals(symbol, today, sigs, con)
+                backfill_technical_signals(symbol, ts_floor, sigs, con)
                 print(f"  [{done}/{len(stocks)}] {symbol}: {len(patterns)} patterns | "
                       f"bull={sigs['bull_count']} bear={sigs['bear_count']} "
                       f"net={sigs['net_score']} tgt={sigs.get('avg_target_pct','?')}%")
