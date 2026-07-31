@@ -93,6 +93,7 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   // fine on their last scheduled weekday). Grace is wider than the parent's 60min since these
   // run partway through an ~11-step chain that can itself run late via addJobWithCatchup.
   { jobName: 'fii-dii-fetcher', label: 'ML Daily Ops: FII/DII Fetcher', cronPattern: '0 14 * * 1-5', graceMinutes: 120, critical: false },
+  { jobName: 'fii-dii-history', label: 'ML Daily Ops: FII/DII Deep History', cronPattern: '0 14 * * 1-5', graceMinutes: 120, critical: false },
   { jobName: 'finbert-scorer', label: 'ML Daily Ops: FinBERT Scorer', cronPattern: '0 14 * * 1-5', graceMinutes: 120, critical: false },
   { jobName: 'outcome-resolver-5d', label: 'ML Daily Ops: Outcome Resolver 5d', cronPattern: '0 14 * * 1-5', graceMinutes: 120, critical: false },
   { jobName: 'outcome-resolver-15d', label: 'ML Daily Ops: Outcome Resolver 15d', cronPattern: '0 14 * * 1-5', graceMinutes: 120, critical: false },

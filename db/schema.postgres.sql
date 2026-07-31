@@ -575,6 +575,18 @@ CREATE TABLE IF NOT EXISTS "fii_dii_flow" (
   "dii_buy" DOUBLE PRECISION,
   "dii_sell" DOUBLE PRECISION,
   "dii_net" DOUBLE PRECISION,
+  -- Segment breakdown from investsights (fii_dii_history_fetcher.py). fii_net stays CASH
+  -- EQUITY; fii_net_all_segments is the derivatives-dominated all-segment figure, and mf_*
+  -- is mutual-funds-only -- a subset of dii_net, not a substitute. See the 1785600000000
+  -- migration for the live measurements behind keeping these apart.
+  "fii_equity" DOUBLE PRECISION,
+  "fii_debt" DOUBLE PRECISION,
+  "fii_derivatives" DOUBLE PRECISION,
+  "fii_net_all_segments" DOUBLE PRECISION,
+  "mf_equity" DOUBLE PRECISION,
+  "mf_debt" DOUBLE PRECISION,
+  "mf_derivatives" DOUBLE PRECISION,
+  "mf_total" DOUBLE PRECISION,
   "source" TEXT DEFAULT 'NSE',
   "fetched_at" TIMESTAMPTZ DEFAULT now(),
   PRIMARY KEY ("date")
