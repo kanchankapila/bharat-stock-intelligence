@@ -200,7 +200,16 @@ def backfill(conn: ConnWrapper, start: str, end: str, monthly: bool) -> None:
     e = datetime.date.fromisoformat(end)
     dates = list(month_ends(s, e)) if monthly else [
         s + datetime.timedelta(days=i) for i in range((e - s).days + 1)]
-    dates = [d for d in dates if d.weekday() < 5]
+    # Do NOT filter out weekends. NSE runs live special sessions on weekends -- the Union
+    # Budget session on Sunday 2026-02-01 is a real one, 2,955 securities, and the weekday
+    # filter that used to live here meant it was never fetched: nse_universe_history was
+    # simply missing an entire trading day. That is invisible in every row-count and
+    # freshness check, and it silently corrupts anything comparing consecutive sessions
+    # (it was found via ohlcv_adjust.py, where hundreds of symbols showed a bogus
+    # prev_close/close discontinuity on the following Monday).
+    # The archive is authoritative about whether a session happened: a non-trading day 404s
+    # (verified: Saturday 2026-01-31 -> 404) and fetch_bhavcopy already treats that as "no
+    # session", so probing every calendar day is correct and costs only the 404s.
     _log(f"backfilling {len(dates)} dates ({'month-end' if monthly else 'daily'}) "
          f"{start}..{end}")
     total = ok = 0

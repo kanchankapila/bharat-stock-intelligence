@@ -109,3 +109,74 @@ class TestRedFlagVeto:
         assert veto_classification("Hold") == "Hold"
         assert veto_classification("Sell") == "Sell"
         assert veto_classification("Strong Sell") == "Strong Sell"
+
+
+class TestTiltShrinkage:
+    """Finding #31 (resolved 2026-07-31). REGIME_CAT_TILT is hand-set intuition that cannot be
+    fitted OR sign-validated: BULL/CRASH carry the most extreme multipliers (0.30, 1.50) while
+    having ZERO days of stock_factor_breakdown_history and only 3 and 6 lifetime regime
+    episodes. So the tilts are treated as priors and shrunk halfway toward neutral -- direction
+    preserved, unjustifiable magnitude damped."""
+
+    def test_shrink_pulls_toward_neutral_and_keeps_sign(self):
+        from unified_ranker import shrink_tilt
+        assert shrink_tilt(0.30, 0.5) == pytest.approx(0.65)   # 70% cut -> 35% cut
+        assert shrink_tilt(1.50, 0.5) == pytest.approx(1.25)
+        assert shrink_tilt(1.0, 0.5) == pytest.approx(1.0)     # neutral stays neutral
+
+    def test_shrinkage_bounds(self):
+        from unified_ranker import shrink_tilt
+        assert shrink_tilt(0.30, 0.0) == pytest.approx(1.0)    # fully neutral
+        assert shrink_tilt(0.30, 1.0) == pytest.approx(0.30)   # raw hand-set value
+
+    def test_direction_of_every_hand_set_tilt_is_preserved(self):
+        """Shrinkage must never flip a tilt across neutral -- that would silently invert an
+        economically-motivated call (e.g. 'underweight breakout in a crash')."""
+        from unified_ranker import REGIME_CAT_TILT, shrink_tilt
+        for regime, tilt in REGIME_CAT_TILT.items():
+            for cat, raw in tilt.items():
+                got = shrink_tilt(raw)
+                if raw > 1.0:
+                    assert got > 1.0, f"{regime}/{cat} flipped below neutral"
+                elif raw < 1.0:
+                    assert got < 1.0, f"{regime}/{cat} flipped above neutral"
+                assert min(raw, 1.0) <= got <= max(raw, 1.0), f"{regime}/{cat} outside bounds"
+
+    def test_applied_weights_are_shrunk_not_raw(self):
+        from unified_ranker import CAT_BASE_WT, REGIME_CAT_TILT, regime_cat_weights, shrink_tilt
+        crash = regime_cat_weights("CRASH")
+        raw_mult = REGIME_CAT_TILT["CRASH"]["technical_breakout"]
+        base = CAT_BASE_WT["technical_breakout"]
+        assert crash["technical_breakout"] == pytest.approx(base * shrink_tilt(raw_mult))
+        assert crash["technical_breakout"] != pytest.approx(base * raw_mult), \
+            "raw hand-set multiplier is being applied at full strength"
+
+    def test_a_fitted_override_is_applied_unshrunk(self):
+        """Shrinkage damps unvalidated intuition. A tilt actually fitted from outcomes is not
+        that, so it must win at full strength."""
+        import unified_ranker as ur
+        saved = ur._regime_tilt_override
+        try:
+            ur._regime_tilt_override = {"BEAR": {"valuation": 2.0}}
+            w = ur.regime_cat_weights("BEAR")
+            assert w["valuation"] == pytest.approx(ur.CAT_BASE_WT["valuation"] * 2.0)
+        finally:
+            ur._regime_tilt_override = saved
+
+    def test_readiness_reports_not_ready_on_thin_history(self):
+        """The gate that lets Finding #31 unblock itself: a regime with almost no history must
+        report ready_to_fit False, so nothing starts fitting on 13 days of data."""
+        import sqlite3
+        from unified_ranker import regime_tilt_fit_readiness
+        con = sqlite3.connect(":memory:")
+        con.execute("CREATE TABLE stock_factor_breakdown_history (regime TEXT, snapshot_date TEXT)")
+        con.execute("CREATE TABLE market_regimes (date TEXT, regime TEXT)")
+        con.executemany("INSERT INTO stock_factor_breakdown_history VALUES (?,?)",
+                        [("BEAR", "2026-07-17")])
+        con.executemany("INSERT INTO market_regimes VALUES (?,?)",
+                        [("2026-07-17", "BEAR"), ("2026-07-18", "BULL")])
+        con.commit()
+        out = regime_tilt_fit_readiness(con)
+        assert out["BEAR"]["ready_to_fit"] is False
+        assert out["BEAR"]["factor_history_days"] == 1
+        assert out["BULL"]["factor_history_days"] == 0
