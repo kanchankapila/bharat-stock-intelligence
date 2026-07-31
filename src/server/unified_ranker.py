@@ -646,6 +646,46 @@ class UnifiedRanker:
             self.conn.rollback()
             return {}
 
+    def _restrict_to_tradeable_universe(self, symbols):
+        """Drop anything that is not a real NSE instrument we can price.
+
+        The screener sources feed in BSE-only/SME microcaps and, on 2026-07-30, a raw numeric
+        id ('13510368') sitting in a symbol column -- 2,362 of that day's 3,959 ranked symbols
+        were absent from nse_stocks. Those names have no sector/market-cap/liquidity data to
+        risk-control on, and no stock_ohlcv history, so every backtest silently drops them:
+        the backtested universe and the live recommended universe were different populations.
+        """
+        try:
+            master = {r[0] for r in self.conn.execute(
+                "SELECT symbol FROM nse_stocks").fetchall()}
+            # stock_ohlcv.date is a native DATE column (unlike most date columns here, which
+            # are TEXT carried over from SQLite) — compare it against a DATE, not ::text, or
+            # Postgres throws "operator does not exist: date >= text".
+            priced = {r[0] for r in self.conn.execute(
+                "SELECT DISTINCT symbol FROM stock_ohlcv "
+                "WHERE date >= CURRENT_DATE - 30").fetchall()}
+        except Exception as e:
+            # A failed statement poisons the whole transaction; without this rollback every
+            # subsequent query in run() dies with InFailedSqlTransaction.
+            try:
+                self.conn.rollback()
+            except Exception:
+                pass
+            print(f"[UnifiedRanker] universe restriction unavailable ({e}); ranking unfiltered")
+            return symbols
+
+        if not master or not priced:
+            print("[UnifiedRanker] empty master/price universe; ranking unfiltered")
+            return symbols
+
+        keep = {s for s in symbols if s in master and s in priced}
+        dropped = len(symbols) - len(keep)
+        if dropped:
+            sample = sorted(s for s in symbols if s not in keep)[:5]
+            print(f"[UnifiedRanker] universe filter: kept {len(keep)}, dropped {dropped} "
+                  f"non-tradeable/unpriced symbols (e.g. {sample})")
+        return keep
+
     def _get_confluence_scores(self):
         # symbol NOT LIKE guards reject the URL-shaped values a since-fixed
         # trendlyne_screener_discovery.py bug wrote into confluence_signals.symbol
@@ -943,6 +983,7 @@ class UnifiedRanker:
         mf_map         = self._get_multi_factor_map()
 
         all_symbols = set(screener_scores) | set(ml_scores) | set(cs_scores) | set(confluence_scores) | set(technical_scores) | set(dl_scores) | set(breakout_scores)
+        all_symbols = self._restrict_to_tradeable_universe(all_symbols)
 
         engine_maps = {
             'screener':   screener_scores,

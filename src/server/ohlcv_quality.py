@@ -235,14 +235,45 @@ def flag_extreme_level_shifts(conn: ConnWrapper, threshold: float = EXTREME_SHIF
     return {'flagged': len(suspects_to_update)}
 
 
+def flag_malformed_bars(conn: ConnWrapper) -> dict:
+    """Mark bars that are internally impossible regardless of price history.
+
+    flag_bad_prints/flag_extreme_level_shifts both reason about a bar RELATIVE to its
+    neighbours, so neither catches a bar that is self-inconsistent: close outside
+    [low, high], or a non-positive price. The live DB had 115 of the former and 84 of the
+    latter, and a non-positive close produces an infinite return the moment anything
+    computes a percentage change off it.
+
+    Like flag_extreme_level_shifts, this ADDS to what is already flagged and must not reset
+    -- flag_bad_prints owns the reset at the top of run().
+    """
+    rows = conn.execute("""
+        SELECT symbol, date FROM stock_ohlcv
+        WHERE close > high OR close < low OR open > high OR open < low OR high < low
+           OR close <= 0 OR open <= 0 OR high <= 0 OR low <= 0
+    """).fetchall()
+    if rows:
+        # stock_ohlcv is a compressed hypertable: a predicate-wide UPDATE makes Timescale
+        # decompress every chunk and fail on max_tuples_decompressed_per_dml_transaction.
+        # Updating by explicit key touches only the affected chunks.
+        conn.execute("SET timescaledb.max_tuples_decompressed_per_dml_transaction = 0")
+        conn.executemany(
+            "UPDATE stock_ohlcv SET is_suspect=1 WHERE symbol=? AND date=?",
+            [(r[0], r[1]) for r in rows])
+        conn.commit()
+    print(f"[OHLCVQuality] flagged {len(rows)} malformed bars (OHLC inconsistent / non-positive)")
+    return {'flagged': len(rows)}
+
+
 def run(ingest: bool = True):
     conn = connect()
     try:
         if ingest:
             symbols = [r[0] for r in conn.execute("SELECT DISTINCT symbol FROM stock_ohlcv").fetchall()]
             ingest_corporate_actions(conn, symbols)
-        flag_bad_prints(conn)
+        flag_bad_prints(conn)          # owns the reset
         flag_extreme_level_shifts(conn)
+        flag_malformed_bars(conn)
     finally:
         conn.close()
 

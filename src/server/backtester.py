@@ -100,6 +100,47 @@ class Backtester:
         df['target_price'] = df['targets'].apply(parse_price_str)
         return df
 
+    def survivorship_gap(self, start: str, end: str) -> dict:
+        """How much of the real traded universe is missing from stock_ohlcv over a window.
+
+        nse_universe_history is the NSE bhavcopy record of what ACTUALLY traded each day,
+        including names since delisted. stock_ohlcv was built by iterating the *current*
+        nse_stocks master, so it structurally cannot contain them. Measured 2026-07-31 over
+        66 monthly snapshots: 1,450 of 3,860 securities (37.6%) had no stock_ohlcv history.
+
+        This is reported rather than silently patched. The bhavcopy carries RAW traded prices
+        -- it is NOT split-adjusted, while stock_ohlcv is (`adjustment_basis='split_only'`).
+        Unioning the two price series without adjusting first would reintroduce exactly the
+        mixed-adjustment-basis seam this audit flagged, and would put a fake gap-down on every
+        split in a delisted name's history. Wiring the prices in therefore needs a split
+        adjustment pass first; the honest interim behaviour is to quantify the gap so a
+        backtest reports how survivorship-biased its own universe is.
+        """
+        try:
+            row = read_df("""
+                SELECT
+                  (SELECT COUNT(DISTINCT symbol) FROM nse_universe_history
+                    WHERE date BETWEEN %(s)s AND %(e)s)                       AS traded,
+                  (SELECT COUNT(DISTINCT u.symbol) FROM nse_universe_history u
+                    WHERE u.date BETWEEN %(s)s AND %(e)s
+                      AND NOT EXISTS (SELECT 1 FROM stock_ohlcv o
+                                       WHERE o.symbol = u.symbol))            AS missing
+            """.replace('%(s)s', f"'{start}'").replace('%(e)s', f"'{end}'"))
+        except Exception as e:
+            print(f"[Backtest] survivorship check unavailable: {e}")
+            return {}
+        if row.empty or not row.iloc[0]['traded']:
+            print("[Backtest] nse_universe_history is empty -- run nse_bhavcopy_fetcher.py "
+                  "--backfill to measure survivorship bias")
+            return {}
+        traded = int(row.iloc[0]['traded'])
+        missing = int(row.iloc[0]['missing'])
+        pct = 100.0 * missing / traded if traded else 0.0
+        print(f"[Backtest] SURVIVORSHIP: {missing}/{traded} securities ({pct:.1f}%) traded in "
+              f"{start}..{end} but have no price history — results are biased upward by their "
+              f"absence")
+        return {'traded': traded, 'missing': missing, 'missing_pct': round(pct, 2)}
+
     def load_ohlcv(self, symbols: list[str], start: str, end: str) -> pd.DataFrame:
         if not symbols:
             return pd.DataFrame()
@@ -109,6 +150,7 @@ class Backtester:
             FROM stock_ohlcv
             WHERE symbol IN ('{sym_list}')
               AND date BETWEEN '{start}' AND '{end}'
+              AND COALESCE(is_suspect, 0) = 0
             ORDER BY symbol, date
         """
         df = read_df(q)
@@ -123,6 +165,7 @@ class Backtester:
             SELECT date, close FROM stock_ohlcv
             WHERE symbol IN ('{sym_list}')
               AND date BETWEEN '{start}' AND '{end}'
+              AND COALESCE(is_suspect, 0) = 0
             ORDER BY date
         """
         df = read_df(q)
@@ -929,6 +972,10 @@ class Backtester:
         symbols = signals['symbol'].unique().tolist()
         print(f"[Backtester] {len(signals)} signals across {len(symbols)} symbols")
 
+        # Report how survivorship-biased this run's own universe is, so the numbers below are
+        # never read as if they came from the real historical universe.
+        survivorship = self.survivorship_gap(start, end)
+
         # Extend end date for exit prices
         extended_end = (pd.to_datetime(end) + pd.Timedelta(days=horizon_days + 10)).strftime('%Y-%m-%d')
         print("[Backtester] Loading OHLCV data...")
@@ -977,7 +1024,7 @@ class Backtester:
             run_name or f"bt_{start}_{end}_h{horizon_days}_s{min_score}",
             config, stats, trade_log, equity_curve,
         )
-        return {'run_id': run_id, **stats}
+        return {'run_id': run_id, 'survivorship': survivorship, **stats}
 
 
 from pydantic import BaseModel

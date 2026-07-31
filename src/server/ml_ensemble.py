@@ -1159,7 +1159,12 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                 SELECT * FROM technical_signals ts2
                 WHERE ts2.symbol = so.symbol
                   AND ts2.date <= so.signal_date
-                  AND ts2.date >= (so.signal_date::date - interval '3 days')::text
+                  -- 7 days, not 3: the window only has to tolerate market closures (a long
+                  -- weekend plus an adjacent holiday exceeds 3 days and used to return NO
+                  -- feature row at all). Column sparsity is handled upstream by
+                  -- densify_feature_matrix.py, which forward-fills the enrichment columns
+                  -- across the grid -- widening this window is not a substitute for that.
+                  AND ts2.date >= (so.signal_date::date - interval '7 days')::text
                 ORDER BY ts2.date DESC
                 LIMIT 1
             ) ts ON TRUE
@@ -1425,7 +1430,8 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                       SELECT MAX(ts2.date) FROM technical_signals ts2
                       WHERE ts2.symbol = so.symbol
                         AND ts2.date <= so.signal_date
-                        AND ts2.date >= date(so.signal_date, '-3 days')
+                        -- see the Postgres branch: 7 days tolerates a holiday+weekend gap
+                        AND ts2.date >= date(so.signal_date, '-7 days')
                   )
             {as_of_join_sql('fundamentals_history', 'fh', 'so', 'symbol', 'signal_date')}
             {as_of_join_sql('analyst_estimates_history', 'aeh', 'so', 'symbol', 'signal_date')}

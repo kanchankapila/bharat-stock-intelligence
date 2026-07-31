@@ -87,11 +87,31 @@ def ensure_schema(con):
 
 # ── Data loading ─────────────────────────────────────────────────────────────
 
-def load_screener_meta(con) -> dict:
+def load_screener_meta(con, as_of: str | None = None) -> dict:
     """
     Returns dict: screener_id -> {sentiment, inferred_category, bayesian_score,
                                    alpha_20d, tier, screener_name}
+
+    bayesian_score is the WEIGHT used to build screener_momentum_score, so it must be the
+    score as it stood on `as_of` -- screener_performance_v2 holds a single full-sample value
+    whose use on a historical row leaks future performance into the feature. Reads the newest
+    screener_performance_history snapshot <= as_of, and only falls back to the current
+    full-sample score when no PIT snapshot exists yet (bootstrap).
     """
+    pit = {}
+    if as_of:
+        try:
+            for sid, score, tier, alpha in con.execute("""
+                SELECT DISTINCT ON (screener_id) screener_id, bayesian_score, tier, alpha_20d
+                FROM screener_performance_history
+                WHERE as_of_date <= ?
+                ORDER BY screener_id, as_of_date DESC
+            """, (as_of,)).fetchall():
+                pit[sid] = (score, tier, alpha)
+        except Exception as e:
+            print(f"[ScreenerFeatures] PIT scores unavailable ({e}); "
+                  f"falling back to full-sample bayesian_score")
+
     rows = con.execute("""
         SELECT sm.scan_id,
                sm.inferred_sentiment,
@@ -107,15 +127,65 @@ def load_screener_meta(con) -> dict:
 
     meta = {}
     for row in rows:
-        meta[row[0]] = {
+        sid = row[0]
+        p = pit.get(sid)
+        meta[sid] = {
             "sentiment":  row[1] or "neutral",
             "category":   row[2] or "other",
-            "bayesian":   float(row[3] or 0.40),
-            "alpha_20d":  float(row[4]) if row[4] is not None else None,
-            "tier":       row[5],
+            "bayesian":   float(p[0]) if p and p[0] is not None else float(row[3] or 0.40),
+            "alpha_20d":  (float(p[2]) if p[2] is not None else None) if p
+                          else (float(row[4]) if row[4] is not None else None),
+            "tier":       (p[1] if p else None) or row[5],
             "name":       row[6] or row[0],
+            "pit":        bool(p),
         }
+    if as_of:
+        n_pit = sum(1 for m in meta.values() if m.get("pit"))
+        print(f"[ScreenerFeatures] as_of={as_of}: {n_pit}/{len(meta)} screeners "
+              f"using point-in-time bayesian_score")
     return meta
+
+
+def ensure_snapshot_schema(con) -> None:
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS screener_membership_snapshot (
+            as_of_date  TEXT NOT NULL,
+            symbol      TEXT NOT NULL,
+            screener_id TEXT NOT NULL,
+            PRIMARY KEY (as_of_date, symbol, screener_id)
+        )
+    """)
+    con.execute("""CREATE INDEX IF NOT EXISTS idx_sms_date
+                   ON screener_membership_snapshot (as_of_date)""")
+    con.commit()
+
+
+def snapshot_membership(con, as_of: str, appearances: dict) -> int:
+    """Record the EXACT membership set used to build today's features.
+
+    screener_appearances is mutated in place -- exited_date is backfilled when a symbol
+    leaves, and new appearance rows arrive continuously -- so reconstructing "who was in
+    which screener on date D" from it later does NOT reproduce what the job actually saw.
+    Measured 2026-07-31: rebuilding screener_momentum_score for 2026-07-20 with the
+    production compute_features() gave corr 0.672 / 2.1% exact match against the stored
+    values, with the stored mean ~3x the rebuilt one. The precise divergence mechanism was
+    NOT isolated -- so rather than guess at it, this makes the question moot: the inputs are
+    written down immutably at the moment they are used, and every future feature value is
+    exactly reproducible by construction.
+
+    ~42k rows/day at current screener coverage.
+    """
+    ensure_snapshot_schema(con)
+    n = 0
+    for symbol, ids in appearances.items():
+        for sid in set(ids):
+            con.execute(
+                "INSERT INTO screener_membership_snapshot (as_of_date, symbol, screener_id) "
+                "VALUES (?,?,?) ON CONFLICT (as_of_date, symbol, screener_id) DO NOTHING",
+                (as_of, symbol, sid))
+            n += 1
+    con.commit()
+    return n
 
 
 def load_today_appearances(con, as_of: str) -> dict:
@@ -250,12 +320,20 @@ def run():
         as_of = datetime.date.today().isoformat()
 
         print(f"[ScreenerFeatures] Loading screener metadata...")
-        meta = load_screener_meta(con)
+        meta = load_screener_meta(con, as_of)
         print(f"[ScreenerFeatures] {len(meta)} screeners loaded")
 
         print(f"[ScreenerFeatures] Loading today's appearances (window: {as_of})...")
         appearances = load_today_appearances(con, as_of)
         print(f"[ScreenerFeatures] {len(appearances)} symbols active in screeners")
+
+        # Immutable record of the inputs, written BEFORE the features are computed from them.
+        try:
+            n_snap = snapshot_membership(con, as_of, appearances)
+            print(f"[ScreenerFeatures] snapshotted {n_snap} (symbol, screener) memberships "
+                  f"for {as_of}")
+        except Exception as e:
+            print(f"[ScreenerFeatures] membership snapshot failed: {e}")
 
         print(f"[ScreenerFeatures] Loading streaks...")
         streaks = load_streaks(con)

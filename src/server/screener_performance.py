@@ -455,6 +455,122 @@ def phase_e_update_confidence(conn: ConnWrapper) -> None:
     print(f"[PhaseE] Updated confidence for {changed} screeners in screener_catalog")
 
 
+# -- Phase F: point-in-time bayesian_score ------------------------------------
+#
+# phase_c writes ONE current bayesian_score per screener, computed over every resolved
+# appearance in the table. screener_features_fetcher.py then uses that score as the WEIGHT
+# in screener_momentum_score, which lands in technical_signals and feeds ml_ensemble.py and
+# unified_ranker.py's screener block. Applying a full-sample score to a historical feature
+# row means the row embeds knowledge of how the screener performed AFTER that date.
+#
+# No purged CV / embargo / holdout can detect this: the leak sits inside the feature value
+# and is identical in train and test. So the score has to be stored as a time series, and
+# each feature row has to read the score as it stood on that row's own date.
+#
+# An appearance is treated as KNOWN on `as_of` only once its 20-trading-day outcome could
+# have been observed — approximated as appeared_date + RESOLUTION_LAG_DAYS calendar days.
+
+RESOLUTION_LAG_DAYS = 30   # 20 trading days, with slack for weekends/holidays
+
+
+def ensure_pit_schema(conn: ConnWrapper) -> None:
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS screener_performance_history (
+            screener_id     TEXT NOT NULL,
+            as_of_date      TEXT NOT NULL,
+            bayesian_score  REAL,
+            tier            TEXT,
+            wr_20d          REAL,
+            alpha_20d       REAL,
+            resolved_count  INTEGER,
+            computed_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (screener_id, as_of_date)
+        )
+    """)
+    conn.execute("""CREATE INDEX IF NOT EXISTS idx_sph_asof
+                    ON screener_performance_history (as_of_date)""")
+    conn.commit()
+
+
+def compute_pit_scores(conn: ConnWrapper, as_of: str) -> dict:
+    """bayesian_score per screener using ONLY appearances resolved strictly before as_of."""
+    cutoff = (datetime.date.fromisoformat(as_of)
+              - datetime.timedelta(days=RESOLUTION_LAG_DAYS)).isoformat()
+
+    rows = conn.execute("""
+        SELECT screener_id, return_20d, nifty_ret_20d
+        FROM screener_appearances
+        WHERE outcome_20d IN ('WIN','LOSS','NEUTRAL')
+          AND return_20d IS NOT NULL
+          AND appeared_date::text < ?
+    """, (cutoff,)).fetchall()
+
+    by_screener = defaultdict(list)
+    for sid, r20, nifty20 in rows:
+        by_screener[sid].append((float(r20), float(nifty20) if nifty20 is not None else None))
+
+    # global prior from screeners with enough resolved history AS OF this date
+    wrs = [_wr_from_list([r for r, _ in v]) for v in by_screener.values() if len(v) >= 10]
+    wrs = [w for w in wrs if w is not None]
+    global_mean_wr = float(statistics.mean(wrs)) if wrs else 0.52
+    K_PRIOR = K_PRIOR_STARTUP if len(by_screener) < 50 else K_PRIOR_MATURE
+
+    out = {}
+    for sid, vals in by_screener.items():
+        rets = [r for r, _ in vals]
+        niftys = [n for _, n in vals]
+        n = len(rets)
+        wr = float(_wr_from_list(rets) or 0.0)
+        shrunk_wr = (n * wr + K_PRIOR * global_mean_wr) / (n + K_PRIOR)
+        m = _metrics_from_list(rets, niftys)
+        alpha_norm = min(max(((m.get('alpha') or 0) + 5) / 15, 0.0), 1.0)
+        sharpe_norm = min(max((m.get('sharpe') or 0) / 3.0, 0.0), 1.0)
+        dd_norm = 1.0 - min(abs(m.get('max_drawdown') or 0) / 20.0, 1.0)
+        composite = round(0.40 * shrunk_wr + 0.30 * alpha_norm
+                          + 0.20 * sharpe_norm + 0.10 * dd_norm, 4)
+        if n < MIN_SIGNALS_FOR_TIER:
+            tier = 'Unranked'
+        elif composite >= 0.70: tier = 'A'
+        elif composite >= 0.55: tier = 'B'
+        elif composite >= 0.40: tier = 'C'
+        else: tier = 'D'
+        out[sid] = {'bayesian_score': composite, 'tier': tier, 'wr_20d': round(wr, 4),
+                    'alpha_20d': m.get('alpha'), 'resolved_count': n}
+    return out
+
+
+def phase_f_pit(conn: ConnWrapper, as_of: str) -> int:
+    ensure_pit_schema(conn)
+    scores = compute_pit_scores(conn, as_of)
+    for sid, s in scores.items():
+        conn.execute("""
+            INSERT INTO screener_performance_history
+              (screener_id, as_of_date, bayesian_score, tier, wr_20d, alpha_20d, resolved_count)
+            VALUES (?,?,?,?,?,?,?)
+            ON CONFLICT(screener_id, as_of_date) DO UPDATE SET
+              bayesian_score=excluded.bayesian_score, tier=excluded.tier,
+              wr_20d=excluded.wr_20d, alpha_20d=excluded.alpha_20d,
+              resolved_count=excluded.resolved_count, computed_at=CURRENT_TIMESTAMP
+        """, (sid, as_of, s['bayesian_score'], s['tier'], s['wr_20d'],
+              s['alpha_20d'], s['resolved_count']))
+    conn.commit()
+    print(f"[PhaseF] as_of={as_of}: wrote {len(scores)} point-in-time screener scores")
+    return len(scores)
+
+
+def backfill_pit(conn: ConnWrapper, start: str, end: str, step_days: int = 7) -> None:
+    """Walk history writing a PIT score snapshot every step_days. Weekly is enough --
+    readers pick the latest snapshot <= their date."""
+    ensure_pit_schema(conn)
+    d = datetime.date.fromisoformat(start)
+    end_d = datetime.date.fromisoformat(end)
+    total = 0
+    while d <= end_d:
+        total += phase_f_pit(conn, d.isoformat())
+        d += datetime.timedelta(days=step_days)
+    print(f"[PhaseF] backfill complete: {total} rows across {start}..{end}")
+
+
 # -- Entry point --------------------------------------------------------------
 
 def run():
@@ -465,6 +581,7 @@ def run():
         phase_c_bayesian(conn, proxy)
         phase_d_sync_back(conn)
         phase_e_update_confidence(conn)
+        phase_f_pit(conn, datetime.date.today().isoformat())
         print("[ScreenerPerf] All phases complete.")
 
         # Print quick summary
@@ -477,4 +594,19 @@ def run():
 
 
 if __name__ == '__main__':
-    run()
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument('--backfill-pit', action='store_true',
+                    help='backfill point-in-time screener scores over a date range')
+    ap.add_argument('--start', default='2026-04-01')
+    ap.add_argument('--end', default=datetime.date.today().isoformat())
+    ap.add_argument('--step-days', type=int, default=7)
+    args = ap.parse_args()
+    if args.backfill_pit:
+        c = connect()
+        try:
+            backfill_pit(c, args.start, args.end, args.step_days)
+        finally:
+            c.close()
+    else:
+        run()
