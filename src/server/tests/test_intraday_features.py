@@ -116,3 +116,82 @@ class TestFirstHourVolShare:
         result = compute_intraday_features(_DATE)
         for col in ['symbol', 'opening_range_break', 'vwap_deviation_pct', 'first_hour_vol_share']:
             assert col in result.columns
+
+
+def _snapshot_bar(sym, hour, minute, second, price):
+    """The synthetic 'last price' quote both vendors append to the history array, stamped at
+    request time instead of on the bar grid: zero volume, open==high==low==close."""
+    dt = datetime.datetime(2026, 6, 22, hour, minute, second, tzinfo=_IST).isoformat()
+    return {'symbol': sym, 'datetime': dt, 'open': price, 'high': price, 'low': price,
+            'close': price, 'volume': 0, 'vwap': None, 'interval': '15m'}
+
+
+class TestOffGridBarsDoNotShiftWindows:
+    """Regression for the 2026-07-31 audit finding: windows were taken POSITIONALLY
+    (grp.iloc[:2] / grp.iloc[:4]), so interleaved off-grid snapshot rows shortened the
+    'first 30 minutes' / 'first hour' windows -- measured live, the stored
+    first_hour_vol_share correlated only 0.642 with the correct value (5.9% exact match).
+    intraday_fetcher.py now drops these at write time, but ~2M already exist in the
+    compressed hypertable and are not being backfilled out, so the read side must defend."""
+
+    def _polluted(self, sym):
+        bars = _session(sym, or_high=105.0, or_low=95.0, last_close=100.0)
+        # one snapshot row after each of the first four real bars -- positional selection
+        # would consume the window with these and cover 30 min instead of 60
+        return bars + [
+            _snapshot_bar(sym, 9, 15, 20, 100.0),
+            _snapshot_bar(sym, 9, 30, 18, 100.0),
+            _snapshot_bar(sym, 9, 45, 21, 100.0),
+            _snapshot_bar(sym, 10, 0, 17, 100.0),
+        ]
+
+    def test_first_hour_share_matches_clean_session(self, monkeypatch):
+        clean = pd.DataFrame(_session('INFY'))
+        monkeypatch.setattr('src.server.intraday_features.read_df', lambda sql, params=(): clean)
+        expected = compute_intraday_features(_DATE)['first_hour_vol_share'].iloc[0]
+
+        polluted = pd.DataFrame(self._polluted('INFY'))
+        monkeypatch.setattr('src.server.intraday_features.read_df', lambda sql, params=(): polluted)
+        got = compute_intraday_features(_DATE)['first_hour_vol_share'].iloc[0]
+        assert got == pytest.approx(expected)
+
+    def test_opening_range_matches_clean_session(self, monkeypatch):
+        """An opening range widened by a flat snapshot row would mask a real breakout."""
+        clean = pd.DataFrame(_session('TCS', or_high=105.0, or_low=95.0, last_close=107.0))
+        monkeypatch.setattr('src.server.intraday_features.read_df', lambda sql, params=(): clean)
+        expected = compute_intraday_features(_DATE)['opening_range_break'].iloc[0]
+
+        # snapshot printed at 108 -- above both the real opening-range high (105) and the
+        # closing price (107). If it is allowed into the opening range it lifts or_high to 108
+        # and the genuine breakout silently reads as "inside range".
+        bars = _session('TCS', or_high=105.0, or_low=95.0, last_close=107.0)
+        bars += [_snapshot_bar('TCS', 9, 15, 20, 108.0), _snapshot_bar('TCS', 9, 30, 18, 108.0)]
+        monkeypatch.setattr('src.server.intraday_features.read_df',
+                            lambda sql, params=(): pd.DataFrame(bars))
+        got = compute_intraday_features(_DATE)['opening_range_break'].iloc[0]
+        assert got == expected == 1.0
+
+
+class TestVwapFallbackWhenColumnNull:
+    """intraday_ohlcv.vwap was a literal NULL on every row until 2026-07-31. The old code
+    fell straight through to vwap_dev = 0.0, so the feature was a constant zero for every
+    symbol on every session while passing any non-null coverage check."""
+
+    def test_null_vwap_column_still_yields_a_real_deviation(self, monkeypatch):
+        bars = _session('INFY', last_close=110.0)
+        for b in bars:
+            b['vwap'] = None          # exactly the historical state of the column
+        monkeypatch.setattr('src.server.intraday_features.read_df',
+                            lambda sql, params=(): pd.DataFrame(bars))
+        dev = compute_intraday_features(_DATE)['vwap_deviation_pct'].iloc[0]
+        assert dev != 0.0, "must fall back to VWAP derived from the bars themselves"
+        assert dev > 0, "last close 110 is above the ~100 session VWAP"
+
+    def test_stored_vwap_is_preferred_when_present(self, monkeypatch):
+        bars = _session('INFY', last_close=110.0)
+        for b in bars:
+            b['vwap'] = 100.0
+        monkeypatch.setattr('src.server.intraday_features.read_df',
+                            lambda sql, params=(): pd.DataFrame(bars))
+        dev = compute_intraday_features(_DATE)['vwap_deviation_pct'].iloc[0]
+        assert dev == pytest.approx(10.0)   # (110 - 100) / 100 * 100

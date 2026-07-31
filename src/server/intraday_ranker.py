@@ -17,6 +17,8 @@ import json
 from datetime import date, datetime, timedelta
 
 from db_compat import connect
+# Index series stored alongside stocks in intraday_ohlcv -- excluded from the stock ranking.
+from intraday_fetcher import _INDEX_SYMBOLS
 from unified_ranker import (
     compute_screener_stock_scores,
     bet_size_from_probability,
@@ -32,8 +34,28 @@ STOP_ATR_MULT, TARGET_ATR_MULT = 0.6, 1.0
 STOP_PCT_FLOOR, STOP_PCT_CAP = 0.005, 0.03       # 0.5%–3%
 TARGET_PCT_FLOOR, TARGET_PCT_CAP = 0.008, 0.05   # 0.8%–5%
 
-# Score blend: breakout (validated edge) vs intraday screener confluence. Both on a 0-100 scale.
-W_BREAKOUT, W_SCREENER = 0.45, 0.55
+# Score blend, all components on a 0-100 scale. Must sum to 1.0 (asserted below -- the
+# unified_ranker REGIME_WEIGHTS drift bug of 2026-07-23 was exactly this going unchecked).
+#
+# REBALANCED 2026-07-31 after the intraday audit. Both original components are
+# momentum/breakout-flavoured, and momentum is the WRONG SIGN intraday: measured over 23
+# sessions of 15m bars, every momentum feature has a NEGATIVE cross-sectional IC against the
+# remainder of the session (vwap_dev -0.090 t=-5.7, or_pos -0.086, above_or -0.061,
+# rvol -0.054 t=-7.4) and only "broke below the opening range" is positive (+0.059 t=+6.0).
+# Graded honestly (entry at the next 15m bar open after the signal, exits only on later bars)
+# this engine's Buy/Strong-Buy signals returned -0.099% gross against a -0.003% universe,
+# t=-6.55 -- genuine negative alpha, not noise.
+#
+# W_REVERSAL introduces the one component that measured the right way round. Breakout is cut
+# rather than removed: breakout_probability is the platform's only model with validated
+# forward edge, but that edge is at a MULTI-DAY horizon (purged-OOF AUC ~0.61 on a 10-day
+# forward label), which is not the horizon this file trades.
+#
+# These weights are deliberately conservative -- 23 sessions is not enough to fit weights on,
+# and hand-fitting them here would repeat Finding #31. The load-bearing safety mechanism is
+# EMISSION_GATE below, which is empirical; this rebalance only stops the score actively
+# pointing the wrong way.
+W_BREAKOUT, W_SCREENER, W_REVERSAL = 0.20, 0.40, 0.40
 
 # Regime tilt — applied to both the final score AND (unlike before) position sizing, so a
 # RISK_OFF regime actually shrinks exposure instead of just relabeling the same full-size bet.
@@ -51,6 +73,26 @@ RESULTS_IMMINENT_DAYS = 1
 # News-sentiment tilt: a fresh news score in [-1, +1] nudges the blended score up to ±15%. News is
 # sparse (only some names have coverage), so it modifies rather than drives the ranking.
 NEWS_TILT_WEIGHT = 0.15
+
+assert abs(W_BREAKOUT + W_SCREENER + W_REVERSAL - 1.0) < 1e-9, "blend weights must sum to 1.0"
+
+# ── Emission gate ─────────────────────────────────────────────────────────────
+# The engine may only publish actionable Buy/Strong-Buy classifications while its OWN realised
+# net PnL over recent sessions is positive. This is the same champion/challenger discipline the
+# ML engines in this codebase already apply to model promotion, applied to signal emission.
+#
+# Why a gate rather than simply flipping the sign: across 256 backtested configurations
+# (8 signal families x 4 decision times x 4 exit rules x 2 basket sizes) over the liquid
+# universe, the best net return at a generous 15bps round-trip was -0.004%. The intraday
+# mean-reversion effect is real and robust in sign but its magnitude (~0.08-0.22% gross) sits
+# below the cost floor, so a correctly-signed score is break-even, not profitable. Publishing
+# Buy recommendations with measured-negative expectancy is the actual defect; the gate closes
+# it and re-opens by itself if and when realised edge appears. Nothing is hardcoded off.
+EMISSION_GATE_LOOKBACK_DAYS = 10
+EMISSION_GATE_MIN_TRADES = 100      # below this the realised estimate is too noisy to trust
+EMISSION_GATE_MIN_AVG_PNL = 0.0     # required trailing mean net PnL % per trade
+# Escape hatch so the gate can be overridden deliberately (app_settings key, default off).
+EMISSION_GATE_SETTING = "intraday_emission_gate_disabled"
 
 # Minimum 20-day average daily turnover (₹ crore) to be eligible for an intraday recommendation.
 # Intraday trades need enough same-day volume to enter AND exit without material slippage --
@@ -202,6 +244,123 @@ class IntradayRanker:
                 out[r["symbol"]] = float(r["breakout_probability"] or 0) * 100
         return out
 
+    def _reversal_scores(self):
+        """Cross-sectional intraday mean-reversion score per symbol, 0-100 (100 = most
+        oversold within today's own session, i.e. the most attractive long under the measured
+        effect).
+
+        Built from today's 15m bars directly rather than from technical_signals, because the
+        session state has to be current as of THIS 15-minute cycle -- technical_signals is
+        refreshed post-close.
+
+        Two inputs, both measured with strong negative IC against the remaining session, so
+        both are inverted here:
+          vwap_dev   (close - session VWAP) / VWAP     IC -0.090 (t=-5.7) at 10:15
+          range_pos  (close - low) / (high - low)      IC -0.090 (t=-6.6) at 10:15
+        Ranked cross-sectionally (not thresholded) so the score is comparable across days
+        regardless of how trendy the tape is.
+        """
+        today = date.today().isoformat()
+        try:
+            rows = self.conn.execute(
+                """SELECT symbol, datetime, high, low, close, volume
+                   FROM intraday_ohlcv
+                   WHERE interval='15m' AND datetime >= ?
+                   ORDER BY symbol, datetime""", (today + "T00:00:00+05:30",)
+            ).fetchall()
+        except Exception as e:
+            print(f"[IntradayRanker] reversal scores skipped: {str(e)[:80]}")
+            return {}
+
+        acc: dict = {}
+        for r in rows:
+            ts = str(r["datetime"])
+            # Skip the off-grid synthetic "last price" quotes both vendors append (zero volume,
+            # open==high==low==close). intraday_fetcher.py drops these at write time now, but
+            # ~2M already exist in the compressed hypertable and are not being backfilled out.
+            try:
+                mm, ss = int(ts[14:16]), int(ts[17:19])
+            except (ValueError, IndexError):
+                continue
+            if ss != 0 or mm % 15 != 0:
+                continue
+            h, l, c = r["high"], r["low"], r["close"]
+            if h is None or l is None or c is None:
+                continue
+            h, l, c, v = float(h), float(l), float(c), float(r["volume"] or 0)
+            a = acc.setdefault(r["symbol"], {"hi": h, "lo": l, "pv": 0.0, "v": 0.0, "last": c})
+            a["hi"] = max(a["hi"], h)
+            a["lo"] = min(a["lo"], l)
+            a["last"] = c
+            if v > 0:
+                a["pv"] += ((h + l + c) / 3.0) * v
+                a["v"] += v
+
+        vwap_dev, range_pos = {}, {}
+        for sym, a in acc.items():
+            if a["v"] > 0:
+                vwap = a["pv"] / a["v"]
+                if vwap > 0:
+                    vwap_dev[sym] = (a["last"] - vwap) / vwap
+            span = a["hi"] - a["lo"]
+            if span > 0:
+                range_pos[sym] = (a["last"] - a["lo"]) / span
+
+        def _pct_rank(d: dict) -> dict:
+            if not d:
+                return {}
+            order = sorted(d, key=lambda s: d[s])
+            n = len(order)
+            return {s: i / (n - 1) if n > 1 else 0.5 for i, s in enumerate(order)}
+
+        rv, rr = _pct_rank(vwap_dev), _pct_rank(range_pos)
+        out = {}
+        for sym in set(rv) | set(rr):
+            parts = [v for v in (rv.get(sym), rr.get(sym)) if v is not None]
+            if parts:
+                # invert: lowest vwap_dev / lowest range position -> highest score
+                out[sym] = (1.0 - sum(parts) / len(parts)) * 100.0
+        return out
+
+    def _emission_edge(self):
+        """(avg_net_pnl_pct, n_trades) over the engine's own recently-resolved recommendations.
+
+        Reads intraday_recommendation_outcomes, which as of 2026-07-31 is produced by an
+        honest post-signal-only simulation on 15m bars. Before that rewrite it graded against
+        the DAILY bar and included pre-signal price action, so this gate would have been
+        reading fabricated exits -- the two changes only make sense together.
+        """
+        cutoff = (date.today() - timedelta(days=EMISSION_GATE_LOOKBACK_DAYS)).isoformat()
+        try:
+            row = self.conn.execute(
+                "SELECT AVG(pnl_pct) AS avg_pnl, COUNT(*) AS n "
+                "FROM intraday_recommendation_outcomes "
+                "WHERE computed_at >= ? AND pnl_pct IS NOT NULL", (cutoff,)
+            ).fetchone()
+        except Exception as e:
+            print(f"[IntradayRanker] emission-edge lookup failed: {str(e)[:80]}")
+            return None, 0
+        if not row or not row["n"]:
+            return None, 0
+        return (float(row["avg_pnl"]) if row["avg_pnl"] is not None else None), int(row["n"])
+
+    def _emission_allowed(self):
+        """(allowed, reason). Buy/Strong-Buy may only be published when the engine's own
+        trailing realised edge is positive on a large enough sample."""
+        row = self.conn.execute(
+            "SELECT value FROM app_settings WHERE key=?", (EMISSION_GATE_SETTING,)
+        ).fetchone()
+        if row and str(row["value"]).lower() in ("1", "true", "yes"):
+            return True, "gate manually disabled via app_settings"
+        avg_pnl, n = self._emission_edge()
+        if n < EMISSION_GATE_MIN_TRADES:
+            return False, (f"only {n} resolved trades in the last "
+                           f"{EMISSION_GATE_LOOKBACK_DAYS}d (need {EMISSION_GATE_MIN_TRADES})")
+        if avg_pnl is None or avg_pnl <= EMISSION_GATE_MIN_AVG_PNL:
+            return False, (f"trailing realised net PnL {avg_pnl:+.3f}%/trade over {n} trades "
+                           f"is not above {EMISSION_GATE_MIN_AVG_PNL:+.2f}%")
+        return True, f"trailing realised net PnL {avg_pnl:+.3f}%/trade over {n} trades"
+
     def _news_sentiment(self, days: int = 2):
         """Avg recent news sentiment per symbol in [-1, +1] (mirrors technicalSignalsService's
         loadRecentNewsSentiment: news_sentiment_items.symbols_json → sentiment_score)."""
@@ -336,13 +495,35 @@ class IntradayRanker:
         membership = self._intraday_membership()
         screener_scores, bull_counts, bear_counts = compute_screener_stock_scores(membership, {})
         breakout_scores = self._breakout_scores()
+        reversal_scores = self._reversal_scores()
         news_scores = self._news_sentiment()
         regime = self._intraday_regime()
         tilt = REGIME_TILT.get(regime, 1.0)
         # Blend weights: learned from realized outcomes if available, else defaults (self-improving).
         w_breakout, w_screener, news_tilt = self._learned_weights()
+        emission_ok, emission_reason = self._emission_allowed()
+        print(f"[IntradayRanker] emission gate: {'OPEN' if emission_ok else 'CLOSED'} -- {emission_reason}")
+        if reversal_scores:
+            print(f"[IntradayRanker] reversal component: {len(reversal_scores)} symbols scored "
+                  f"from today's 15m bars")
 
-        all_symbols = set(screener_scores) | set(breakout_scores)
+        all_symbols = set(screener_scores) | set(breakout_scores) | set(reversal_scores)
+
+        # Index series are not tradeable instruments and must never be emitted as stock
+        # recommendations. Excluded here at the universe level rather than per-component,
+        # because they reach the ranker by more than one route: technical_signals already
+        # carries breakout_probability rows for NIFTY50/NIFTYBANK/NIFTYIT/NIFTYMIDCAP (so
+        # _breakout_scores picks them up), and as of 2026-07-31 intraday_ohlcv carries their
+        # bars too (so _reversal_scores would as well). This was a live pre-existing bug, not
+        # a new one: 522 index rows had accumulated in intraday_recommendations_history --
+        # complete with entry/stop/target and position sizing -- because the downstream
+        # liquidity filter only drops the ones that happen to have no ADTV, which let NIFTY50
+        # and NIFTYMIDCAP through.
+        index_syms = all_symbols & set(_INDEX_SYMBOLS)
+        if index_syms:
+            all_symbols -= index_syms
+            print(f"[IntradayRanker] Excluded {len(index_syms)} index series from the stock "
+                  f"universe: {sorted(index_syms)}")
 
         # Eligibility filter: drop symbols that can't actually be traded intraday as described
         # (surveillance-restricted) or don't have enough same-day volume to enter/exit cleanly.
@@ -358,27 +539,37 @@ class IntradayRanker:
 
         rows = []
         buy_syms = []
+        gated = 0
         for sym in all_symbols:
             s_sc = screener_scores.get(sym)
             b_sc = breakout_scores.get(sym)
-            # Renormalize the blend over whichever components are present for this symbol.
-            if s_sc is not None and b_sc is not None:
-                base = w_screener * s_sc + w_breakout * b_sc
-            elif s_sc is not None:
-                base = s_sc
-            else:
-                base = b_sc
+            r_sc = reversal_scores.get(sym)
+            # Renormalize the blend over whichever components are present for this symbol, so a
+            # missing component never silently dilutes the others toward zero.
+            parts = [(w_screener, s_sc), (w_breakout, b_sc), (W_REVERSAL, r_sc)]
+            present = [(w, v) for w, v in parts if v is not None]
+            if not present:
+                continue
+            wsum = sum(w for w, _ in present)
+            base = sum(w * v for w, v in present) / wsum if wsum > 0 else 0.0
             # News tilt: nudge the score by up to ±(news_tilt) on fresh sentiment (0 when no coverage).
             news = news_scores.get(sym)
             news_mult = 1.0 + news_tilt * max(-1.0, min(1.0, news)) if news is not None else 1.0
             score = min(100.0, max(0.0, base * tilt * news_mult))
             bull, bear = bull_counts.get(sym, 0), bear_counts.get(sym, 0)
             classification = _classify(score, bull, bear)
+            # Emission gate: the score is still computed and stored (it is the input the
+            # strategy learner and the UI ranking need), but an actionable Buy is only
+            # published while the engine's own trailing realised edge justifies it.
+            if not emission_ok and classification in ("Strong Buy", "Buy"):
+                classification = "Hold"
+                gated += 1
             rows.append({
                 "symbol": sym, "score": round(score, 2),
                 "conviction": _conviction(score), "classification": classification,
                 "screener_score": round(s_sc, 2) if s_sc is not None else None,
                 "breakout_score": round(b_sc, 2) if b_sc is not None else None,
+                "reversal_score": round(r_sc, 2) if r_sc is not None else None,
                 "news_sentiment": round(news, 3) if news is not None else None,
                 "bull": bull, "bear": bear,
                 "breakout_prob": (b_sc / 100.0) if b_sc is not None else None,
@@ -438,8 +629,11 @@ class IntradayRanker:
         for r in rows:
             reasoning = (f"{r['bull']} bullish / {r['bear']} bearish intraday screeners "
                          f"({r['classification']}); regime {regime}"
+                         + (f"; reversal {r['reversal_score']:.0f}/100" if r.get("reversal_score") is not None else "")
                          + (f"; breakout P={r['breakout_prob']:.2f}" if r["breakout_prob"] else "")
                          + (f"; news {r['news_sentiment']:+.2f}" if r["news_sentiment"] is not None else "")
+                         + ("; EMISSION GATED (engine's trailing realised edge is not positive)"
+                            if not emission_ok else "")
                          + (f"; EVENT RISK: {r['event_risk_flag']} (size cut {int((1 - EVENT_RISK_TILT) * 100)}%)"
                             if r.get("event_risk_flag") else ""))
             cur.execute(
@@ -483,6 +677,9 @@ class IntradayRanker:
         self.conn.commit()
         buys = sum(1 for r in rows if r["classification"] in ("Strong Buy", "Buy"))
         print(json.dumps({"success": True, "ranked": len(rows), "buy_pool": buys,
+                          "emission_gate": "open" if emission_ok else "closed",
+                          "emission_gate_reason": emission_reason, "gated_to_hold": gated,
+                          "reversal_scored": len(reversal_scores),
                           "intraday_regime": regime}))
         return rows
 

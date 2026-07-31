@@ -630,6 +630,14 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await updateTrailingStops()
     .catch(e => console.warn('[QUEUE] trailing stop updater failed:', (e as Error).message));
   await T.run('fii-dii-fetcher', () => runPython('fii_dii_fetcher.py', [], 90_000));
+  // Deep-history top-up (endpoint-corpus audit §5-1). One call returns all 2,584 daily rows
+  // back to 2016 in ~3s, so backfill and daily top-up are the same operation -- there is no
+  // separate backfill mode to schedule. Runs AFTER fii_dii_fetcher deliberately: it only ever
+  // fills NULLs, so today's authoritative NSE row is already in place and wins. Tolerated
+  // (.catch) rather than fatal -- this is a supplementary third-party source, and an outage
+  // must not fail the whole daily ML chain the way the drift-detector timeout did.
+  await T.run('fii-dii-history', () => runPython('fii_dii_history_fetcher.py', [], 120_000))
+    .catch(e => console.warn('[QUEUE] fii_dii_history_fetcher failed (daily ops continues):', (e as Error).message));
   await runPython('pcr_fetcher.py', ['--gex'], 90_000)
     .catch(e => console.warn('[QUEUE] pcr_fetcher failed:', (e as Error).message));
   // Parallel batch — safe to overlap: disjoint target tables (mc_* vs quant_scores vs
@@ -2519,6 +2527,23 @@ export async function initQueues(): Promise<boolean> {
           recordHeartbeat('market-regime-refresh', 'success');
           recordHeartbeat('intraday-ranker', 'success');
           return;
+        }
+        // 0) capture intraday breadth BEFORE the regime label that consumes it.
+        // Previously this only ran as a side effect of liveStockData.ts's quote refresh,
+        // which is cache-driven -- so it fired only when a user request happened to miss the
+        // cache during market hours. Result: 54 snapshot rows total, with multi-day gaps, and
+        // intraday_regime.py's (correct) staleness guard therefore dropped breadth from the
+        // regime fusion most cycles. On this chain it runs every 15 min like its consumer.
+        try {
+          const { getOrRefreshAllStocks } = await import('./liveStockData');
+          const { persistIntradayBreadth } = await import('./intradayBreadth');
+          const quotes = await getOrRefreshAllStocks();
+          const breadth = await persistIntradayBreadth(quotes);
+          recordHeartbeat('intraday-breadth-capture', 'success');
+          if (breadth) console.log(`[QUEUE] intraday breadth captured (score ${breadth.breadthScore})`);
+        } catch (e) {
+          console.warn('[QUEUE] intraday breadth capture failed:', (e as Error).message);
+          recordHeartbeat('intraday-breadth-capture', 'failed', (e as Error).message);
         }
         // 1) fetch live macro (VIX/USDINR/basis) → macro_asset_prices
         await runPython('market_regime_fetcher.py', [], 60_000)

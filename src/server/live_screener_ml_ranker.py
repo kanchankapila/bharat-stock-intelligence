@@ -36,6 +36,53 @@ MIN_DATES = 10             # minimum distinct trading days for an honest chronol
 TEST_FRAC = 0.2            # most recent 20% of dates held out, untouched by CV
 PROMOTION_MARGIN = 0.01    # new held-out AUC must beat the active model's by this much
 
+# ── Live-edge check (added 2026-07-31 after the intraday audit) ───────────────
+# Held-out AUC only justifies promotion if it TRANSFERS. Measured against realised outcomes,
+# the deployed model's live AUC was 0.3778 over 47,559 scored-and-resolved rows -- not merely
+# skill-less but anti-predictive: its highest-confidence picks systematically underperformed.
+# (An independent check over five sessions of 15m bars agreed: AUC 0.4962, daily rank IC
+# -0.0017, and the top win_probability quintile was the worst-returning one.) The model is
+# trained on live-screener filter-match features, which are momentum-flavoured, and momentum
+# has a NEGATIVE cross-sectional IC intraday -- so the family is learning the wrong side.
+#
+# While live AUC sits below LIVE_AUC_FLOOR, a small held-out improvement is not evidence of
+# anything: it is movement in a metric already shown not to transfer. Promotion therefore
+# requires a much larger held-out gain (STRICT_PROMOTION_MARGIN) rather than being blocked
+# outright -- blocking would freeze the current, worse model permanently in place.
+LIVE_AUC_FLOOR = 0.52          # below this, the deployed family has no demonstrated live edge
+LIVE_AUC_MIN_ROWS = 500        # below this the live estimate is too noisy to act on
+STRICT_PROMOTION_MARGIN = 0.05  # required held-out gain while live edge is unproven
+
+
+def _live_auc() -> tuple:
+    """(auc, n_rows) for the DEPLOYED model's stored probabilities against realised outcomes.
+
+    Grades what actually shipped -- live_screener_ml_scores joined through the appearance it
+    scored to that appearance's realised same-day return -- rather than anything computed at
+    training time. Returns (None, 0) when there is not enough resolved history.
+    """
+    try:
+        df = read_df("""
+            SELECT s.win_probability AS wp, o.return_intraday AS ret
+            FROM live_screener_ml_scores s
+            JOIN live_screener_appearances a ON a.run_id = s.run_id AND a.symbol = s.symbol
+            JOIN live_screener_outcomes o ON o.appearance_id = a.id
+            WHERE o.return_intraday IS NOT NULL AND s.win_probability IS NOT NULL
+        """)
+    except Exception as e:
+        print(f"[LiveScreenerMLRanker] live-AUC lookup failed: {str(e)[:100]}")
+        return None, 0
+    if df is None or df.empty or len(df) < LIVE_AUC_MIN_ROWS:
+        return None, 0 if df is None or df.empty else len(df)
+    y = (pd.to_numeric(df["ret"], errors="coerce") > 0).astype(int)
+    wp = pd.to_numeric(df["wp"], errors="coerce")
+    ok = wp.notna()
+    y, wp = y[ok], wp[ok]
+    if y.nunique() < 2:
+        return None, int(len(y))   # single-class window -- AUC undefined
+    from sklearn.metrics import roc_auc_score
+    return float(roc_auc_score(y, wp)), int(len(y))
+
 
 # ── feature construction ──────────────────────────────────────────────────────
 
@@ -171,9 +218,22 @@ def train():
           f"dates={len(dates)}")
 
     baseline = _load_active_metrics()
+    live_auc, live_n = _live_auc()
+    live_edge_proven = live_auc is not None and live_auc >= LIVE_AUC_FLOOR
+    # A held-out gain only counts as evidence when held-out AUC has been shown to transfer.
+    margin = PROMOTION_MARGIN if (live_auc is None or live_edge_proven) else STRICT_PROMOTION_MARGIN
+    if live_auc is not None:
+        print(f"[LiveScreenerMLRanker] LIVE AUC of the deployed model = {live_auc:.4f} "
+              f"over {live_n} scored-and-resolved rows (floor {LIVE_AUC_FLOOR}) -- "
+              + ("live edge confirmed." if live_edge_proven else
+                 f"NO demonstrated live edge; promotion margin raised to {margin}."))
+    else:
+        print(f"[LiveScreenerMLRanker] LIVE AUC unavailable ({live_n} gradeable rows, "
+              f"need {LIVE_AUC_MIN_ROWS}) -- using standard promotion margin.")
+
     promote = (
         baseline is None or baseline.get("test_auc") is None
-        or test_auc >= baseline["test_auc"] + PROMOTION_MARGIN
+        or test_auc >= baseline["test_auc"] + margin
     )
 
     # Refit on ALL data (train + test windows) for the artifact that actually goes live --
@@ -189,6 +249,9 @@ def train():
         "test_acc": test_acc,
         "base_rate": base_rate,
         "n_samples": len(matrix),
+        "live_auc": live_auc,
+        "live_auc_rows": live_n,
+        "live_edge_proven": live_edge_proven,
     }
     os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
 
@@ -204,16 +267,24 @@ def train():
                 "trained_at": artifact["trained_at"], "cv_auc": cv_auc, "test_auc": test_auc,
                 "test_acc": test_acc, "base_rate": base_rate, "n_samples": len(matrix),
                 "n_features": len(feature_cols),
+                # Surfaced so consumers (the Live Screener page's "Intraday Edge" tab) can tell
+                # a model with demonstrated live discrimination from one without.
+                "live_auc": live_auc, "live_auc_rows": live_n,
+                "live_edge_proven": live_edge_proven,
             }),
             datetime.datetime.now().isoformat(),
         ))
         print(f"[LiveScreenerMLRanker] Model ACTIVATED (test_auc={test_auc:.4f}"
               + (f", beat baseline {baseline['test_auc']:.4f})" if baseline and baseline.get('test_auc') is not None else ", no prior model)"))
+        if not live_edge_proven and live_auc is not None:
+            print("[LiveScreenerMLRanker] WARNING: activated model's family has NO demonstrated "
+                  f"live edge (live AUC {live_auc:.4f} < {LIVE_AUC_FLOOR}). Scores remain "
+                  "advisory -- do not rank or size on them until live AUC clears the floor.")
     else:
         with open(CANDIDATE_PATH, "wb") as f:
             pickle.dump(artifact, f)
         print(f"[LiveScreenerMLRanker] Candidate REJECTED: test_auc={test_auc:.4f} did not "
-              f"beat active model's {baseline['test_auc']:.4f} + {PROMOTION_MARGIN} margin. "
+              f"beat active model's {baseline['test_auc']:.4f} + {margin} margin. "
               f"Saved to {CANDIDATE_PATH} for inspection; active model unchanged.")
 
 
