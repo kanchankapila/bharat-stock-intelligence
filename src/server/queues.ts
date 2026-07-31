@@ -649,6 +649,16 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await runPython('iv_features.py', ['--date', 'today'], 300_000)
     .catch(e => console.warn('[QUEUE] iv_features failed:', (e as Error).message));
 
+  // NSE full bhavcopy -> nse_universe_history: the exchange's own record of what actually
+  // traded each day, i.e. the POINT-IN-TIME universe. Every other price path here iterates
+  // the current nse_stocks master, so anything delisted before today was never fetched --
+  // 2,436 of 2,450 symbols in 5.5y of stock_ohlcv are still trading and exactly ONE stopped
+  // >12 months ago. Measured against 66 monthly bhavcopies: 1,450 of 3,860 securities that
+  // really traded (37.6%) have no stock_ohlcv history at all, and they are systematically
+  // the ones that died. Runs before the quality/feature steps so today's row is available.
+  await runPython('nse_bhavcopy_fetcher.py', [], 10 * 60_000)
+    .catch(e => console.warn('[QUEUE] nse_bhavcopy_fetcher failed:', (e as Error).message));
+
   // Flag bad-print OHLCV bars first so outcome labels skip them (ohlcv_quality.is_suspect).
   await runPython('ohlcv_quality.py', ['--no-ingest'], 600_000)
     .catch(e => console.warn('[QUEUE] ohlcv_quality flag failed:', (e as Error).message));
@@ -803,7 +813,12 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
     .catch(e => console.warn('[QUEUE] expiry_features failed:', (e as Error).message));
 
   // Broker research recommendations: named broker BUY/SELL events → mc_broker_reco + technical_signals.
-  await runPython('mc_broker_reco_fetcher.py', ['--days', '7'], 2 * 60_000)
+  // Timeout bumped 2min->6min (2026-07-31): fetch_recos() no longer breaks out of pagination on
+  // the first stale row (that early-exit was silently dropping recent recs -- the API's
+  // reco_data is NOT chronologically sorted, a single page can mix Apr-2026 and Jul-2026 rows
+  // in any order). Fixing that means every run now scans all MAX_PAGES=15 pages regardless of
+  // --days, live-measured at ~4.6 min end-to-end.
+  await runPython('mc_broker_reco_fetcher.py', ['--days', '7'], 6 * 60_000)
     .catch(e => console.warn('[QUEUE] mc_broker_reco_fetcher failed:', (e as Error).message));
 
   // Economic calendar: upcoming high-impact macro events → eco_calendar + macro_asset_prices.
@@ -932,6 +947,24 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await runPython('performance_tracker.py', ['--horizon', '15'])
     .catch(e => console.warn('[QUEUE] performance_tracker(15) failed:', (e as Error).message));
 
+  // ── feature-matrix hygiene (2026-07-31 bias audit) ──────────────────────────────
+  // Must run AFTER every enrichment fetcher above and BEFORE any training step below.
+  //
+  // Each enrichment fetcher UPDATEs only the technical_signals row matching its own as-of
+  // anchor, so a feature lands on exactly the day its fetcher ran and is NULL on every other
+  // day (216 of 306 columns were <50% covered; ~150 at exactly 0%). Training then read them
+  // through a bounded lateral join and saw NULL, while live inference read today's row and
+  // saw values — train/serve skew. This forward-fills the sparse columns across the grid
+  // (strictly forward, capped by age, never backward, so it introduces no look-ahead).
+  await T.run('densify-feature-matrix',
+    () => runPython('densify_feature_matrix.py', [], 15 * 60_000));
+
+  // NOTE: bad-bar flagging deliberately lives in ohlcv_quality.py (which runs earlier in this
+  // chain), NOT here. ohlcv_quality.flag_bad_prints() RESETS is_suspect=0 at the top of every
+  // run, so a second flagging pass scheduled after it would be silently wiped on the next
+  // cycle. The audit's extra checks were merged into ohlcv_quality.flag_malformed_bars()
+  // instead; data_integrity_repair.py --bad-bars remains available as a manual one-off.
+
   await runPython('online_learner.py', ['--window', '180'], 120_000)
     .catch(e => console.warn('[QUEUE] online_learner failed:', (e as Error).message));
 
@@ -944,15 +977,24 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
 
   // Isotonic-recalibrate win_probability against realized WIN/LOSS so sizing/gating use
   // honest probabilities (the ensemble stack is overconfident). Runs after outcomes resolve.
-  await runPython('ml_calibration.py', [], 120_000)
+  // Budget: measured 119s uncontended on 2026-07-31 against a 120_000 budget — a 1-second
+  // margin, so it only ever passed on a fully idle box and was killed by the timeout on most
+  // real runs. Same measure-then-budget correction as exit_labeler/exit_policy before it.
+  await runPython('ml_calibration.py', [], 10 * 60_000)
     .catch(e => console.warn('[QUEUE] ml_calibration failed:', (e as Error).message));
 
   // PSI-based feature drift check — writes drift_score to dl_model_performance so
   // scoring_engine applies a win_probability haircut when distributions shift.
   // exit(1) from drift_detector means EMERGENCY_RETRAIN is needed — that is a deliberate
   // signal, not a crash. Tolerate it here: queue the DL retrain and mark the step OK.
+  // Budget: measured 57.2s uncontended on 2026-07-31 against a 60_000 budget — a 2.8-second
+  // margin. This is a T.run() step (not a tolerated .catch()), so every timeout-kill failed the
+  // WHOLE ml-daily-ops parent job: 32 of 66 runs (48%) had last_error='1 steps failed:
+  // drift-detector', and the parent's last success was 2 days stale while every sibling step
+  // had succeeded. A timeout message does not match the exit-code-1 branch below, so it
+  // correctly rethrew — the defect was purely the budget, not the handling.
   await T.run('drift-detector', () =>
-    runPython('drift_detector.py', [], 60_000).catch(async (e: any) => {
+    runPython('drift_detector.py', [], 5 * 60_000).catch(async (e: any) => {
       if (e?.code === 1 || (e?.message || '').includes('exit code 1') ||
           (e?.message || '').includes('Command failed')) {
         console.log('[QUEUE] drift-detector: EMERGENCY_RETRAIN signalled — queuing DL retrain');
@@ -1001,7 +1043,9 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   // rows day-to-day (log_episode() is unused dead code) — --backfill is what actually
   // inserts episodes from newly-resolved signal_outcomes. A short lookback keeps this a
   // cheap daily top-up instead of re-scanning the full history (default 180d) every run.
-  await runPython('rl_agent.py', ['--backfill', '--lookback', '5'], 5 * 60_000)
+  // Budget: measured 220s uncontended on 2026-07-31 (13,313 outcomes -> Q-updates) against a
+  // 5-minute budget — 27% headroom, which concurrent load in this 19:30-00:00 window eats.
+  await runPython('rl_agent.py', ['--backfill', '--lookback', '5'], 15 * 60_000)
     .catch(e => console.warn('[QUEUE] rl_agent backfill failed:', (e as Error).message));
   await T.run('rl-agent-update', () => runPython('rl_agent.py', ['--update']));
 
@@ -1647,7 +1691,14 @@ export async function initQueues(): Promise<boolean> {
     // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ MC screener sync queue ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
     mcScreenerSyncQueue = new Queue(QUEUE_MC_SCREENER_SYNC, { connection });
 
-    // Once daily at 11 PM IST (17:30 UTC) on weekdays — after quant-eod-sync (6 PM IST)
+    // 6:20 PM IST (12:50 UTC) weekdays. MOVED from 11:00 PM IST (2026-07-31): every consumer
+    // of the screener tables ran BEFORE this sync, so they all read yesterday's membership.
+    // `screener_features_fetcher.py` runs inside ml-daily-ops (7:30 PM IST) and builds
+    // `screener_momentum_score` — the largest single engine weight in most REGIME_WEIGHTS
+    // regimes — off `screener_appearances`, which this job populates. Running the sync at
+    // 11 PM meant that feature was a day stale every single day. Now: syncs 6:00–6:40 PM,
+    // then ml-daily-ops 7:30 PM, then stock-scoring 10:30 PM — strictly downstream.
+    // 6:20 PM is ~3h after the 3:30 PM close, so provider-side EOD screeners have published.
     const mcRepeatables = await mcScreenerSyncQueue.getRepeatableJobs();
     for (const r of mcRepeatables) {
       await mcScreenerSyncQueue.removeRepeatableByKey(r.key);
@@ -1656,7 +1707,7 @@ export async function initQueues(): Promise<boolean> {
       'mc-sync',
       {},
       {
-        repeat: { pattern: '30 17 * * 1-5' }, // 11 PM IST weekdays
+        repeat: { pattern: '50 12 * * 1-5' }, // 6:20 PM IST (12:50 UTC) weekdays — see note above
         jobId: 'mc-sync-repeatable',
         removeOnComplete: 5,
         removeOnFail: 3,
@@ -1688,7 +1739,8 @@ export async function initQueues(): Promise<boolean> {
     // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ ETNow screener sync queue ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
     etnowScreenerSyncQueue = new Queue(QUEUE_ETNOW_SCREENER_SYNC, { connection });
 
-    // Once daily at 11:30 PM IST (18:00 UTC) on weekdays — staggered after mc-sync
+    // 6:40 PM IST (13:10 UTC) weekdays — staggered 20 min after mc-sync, still ahead of
+    // ml-daily-ops (7:30 PM). Moved from 11:30 PM; see the mc-sync note for why.
     const etnowRepeatables = await etnowScreenerSyncQueue.getRepeatableJobs();
     for (const r of etnowRepeatables) {
       await etnowScreenerSyncQueue.removeRepeatableByKey(r.key);
@@ -1697,7 +1749,7 @@ export async function initQueues(): Promise<boolean> {
       'etnow-sync',
       {},
       {
-        repeat: { pattern: '0 18 * * 1-5' }, // 11:30 PM IST weekdays
+        repeat: { pattern: '10 13 * * 1-5' }, // 6:40 PM IST (13:10 UTC) weekdays — see mc-sync note
         jobId: 'etnow-sync-repeatable',
         removeOnComplete: 5,
         removeOnFail: 3,
@@ -1730,7 +1782,11 @@ export async function initQueues(): Promise<boolean> {
     // ── ET Marketstats/Technicals screener sync queue ──
     etMarketstatsSyncQueue = new Queue(QUEUE_ET_MARKETSTATS_SYNC, { connection });
 
-    // Once daily at 11:35 PM IST (18:05 UTC) on weekdays — staggered 5 min after etnow-sync
+    // 6:00 PM IST (12:30 UTC) weekdays — FIRST of the three screener syncs. Moved from
+    // 11:35 PM (see the mc-sync note). This one mattered most: et_marketstats is the only
+    // screener source `syncAndScore()` does NOT re-sync in-process before scoring, yet
+    // `scoring_engine.load_data()` reads it — so at 11:35 PM it was always exactly one day
+    // behind the scores built from it at 10:30 PM.
     const etMarketstatsRepeatables = await etMarketstatsSyncQueue.getRepeatableJobs();
     for (const r of etMarketstatsRepeatables) {
       await etMarketstatsSyncQueue.removeRepeatableByKey(r.key);
@@ -1739,7 +1795,7 @@ export async function initQueues(): Promise<boolean> {
       'et-marketstats-sync',
       {},
       {
-        repeat: { pattern: '5 18 * * 1-5' }, // 11:35 PM IST weekdays
+        repeat: { pattern: '30 12 * * 1-5' }, // 6:00 PM IST (12:30 UTC) weekdays — see mc-sync note
         jobId: 'et-marketstats-sync-repeatable',
         removeOnComplete: 5,
         removeOnFail: 3,
@@ -2505,7 +2561,10 @@ export async function initQueues(): Promise<boolean> {
     const cdRep = await closedDayQueue.getRepeatableJobs();
     for (const r of cdRep) await closedDayQueue.removeRepeatableByKey(r.key);
     await addJobWithCatchup(closedDayQueue, 'closed-day-early-batch', {}, {
-      repeat: { pattern: '0 2 * * 1-5' },  // 07:30 IST weekdays (pre-open)
+      // 07:10 IST weekdays (pre-open). Moved off 07:30 IST 2026-07-31 — it started on the
+      // same minute as unified-ranker, which it also dispatches (with a 20-min delay) on
+      // closed days, so the two were contending at exactly the moment it fans work out.
+      repeat: { pattern: '40 1 * * 1-5' },
       jobId: 'closed-day-early-batch',
       removeOnComplete: 3, removeOnFail: 3,
     });
@@ -2536,7 +2595,11 @@ export async function initQueues(): Promise<boolean> {
     const dlFeatRep = await dlFeatureRefreshQueue.getRepeatableJobs();
     for (const r of dlFeatRep) await dlFeatureRefreshQueue.removeRepeatableByKey(r.key);
     await addJobWithCatchup(dlFeatureRefreshQueue, 'dl-feature-daily', {}, {
-      repeat: { pattern: '0 10 * * 1-5' },
+      // 5:00 PM IST (11:30 UTC). MOVED from 3:30 PM IST (2026-07-31): feature_engineering.py
+      // reads stock_ohlcv, but that day's bar is only persisted by stock-refresh at 4:00 PM
+      // and gap-filled at 4:15 PM — so running at 3:30 PM (the closing bell itself) built
+      // every DL feature set without the current session in it, every day.
+      repeat: { pattern: '30 11 * * 1-5' },
       jobId: 'dl-feature-daily',
       removeOnComplete: 3, removeOnFail: 3,
     });
@@ -2557,7 +2620,11 @@ export async function initQueues(): Promise<boolean> {
     const dlInfRep = await dlInferenceQueue.getRepeatableJobs();
     for (const r of dlInfRep) await dlInferenceQueue.removeRepeatableByKey(r.key);
     await addJobWithCatchup(dlInferenceQueue, 'dl-infer-daily', {}, {
-      repeat: { pattern: '0 17 * * 1-5' },  // 10:30 PM IST — low-load window after all market jobs
+      // 12:00 AM IST (18:30 UTC). Moved off 10:30 PM IST (2026-07-31): it collided exactly
+      // with stock-scoring, and the 10:00 PM–11:35 PM window held 8 heavy jobs in 95 minutes,
+      // which is where all 43 pg-pool "timeout exceeded when trying to connect" errors landed.
+      // Still strictly after dl-feature-refresh (5:00 PM) and before unified-ranker (7:30 AM).
+      repeat: { pattern: '30 18 * * 1-5' },
       jobId: 'dl-infer-daily',
       removeOnComplete: 3, removeOnFail: 3,
     });
@@ -2684,7 +2751,11 @@ export async function initQueues(): Promise<boolean> {
       removeOnComplete: 2, removeOnFail: 3,
     });
     await addJobWithCatchup(ohlcvBackfillQueue, 'ohlcv-gap-fill-daily', { mode: 'gap-fill', lookback: 3 }, {
-      repeat: { pattern: '45 10 * * 1-5' },
+      // 04:20 PM IST (10:50 UTC). Moved off 4:15 PM 2026-07-31 — it started on the same
+      // minute as research-postclose. Order that matters is unchanged and now explicit:
+      // stock-refresh 4:00 PM writes the day's bar -> this gap-fills it 4:20 PM ->
+      // dl-feature-refresh reads stock_ohlcv at 5:00 PM.
+      repeat: { pattern: '50 10 * * 1-5' },
       jobId: 'ohlcv-gap-fill-daily',
       removeOnComplete: 3, removeOnFail: 3,
     });
@@ -2755,7 +2826,9 @@ export async function initQueues(): Promise<boolean> {
     await addJobWithCatchup(confluenceOutcomesQueue,
       'confluence-outcomes-daily',
       {},
-      { repeat: { pattern: '30 17 * * 1-5' }, removeOnComplete: 3, removeOnFail: 3 }  // 11:00 PM IST — after dl-inference
+      // 11:30 PM IST (18:00 UTC). Moved off 11:00 PM (2026-07-31) so it no longer shares a
+      // slot with quant-scoring; the evening tail is now one job per 30 min.
+      { repeat: { pattern: '0 18 * * 1-5' }, removeOnComplete: 3, removeOnFail: 3 }
     );
     console.log('[QUEUE] confluence-compute (every 30 min) + confluence-outcomes (daily) registered');
 
@@ -2766,11 +2839,26 @@ export async function initQueues(): Promise<boolean> {
     for (const r of screenerPerfRepeatables) {
       await screenerPerfQueue.removeRepeatableByKey(r.key);
     }
-    await addJobWithCatchup(screenerPerfQueue, 
+    await addJobWithCatchup(screenerPerfQueue,
       'screener-performance-daily',
       {},
       {
-        repeat: { every: 24 * 60 * 60 * 1000 },
+        // 2:00 AM IST (20:30 UTC), Tue–Sat — i.e. after each weekday's ml-daily-ops chain
+        // finishes (~12:00 AM) and well before unified-ranker (7:30 AM), in an otherwise
+        // empty window. This job runs 10 sequential Python steps (~145 min of budget), so it
+        // needs one; at its old slot it collided with the EOD cluster.
+        //
+        // Was `every: 24h`, which is NOT a wall-clock schedule — it fires 24h after the last
+        // run, so the time DRIFTS on every restart. The comment above claimed "daily 6 PM
+        // IST" while it actually last succeeded at 5:42 AM IST (2026-07-31). A cron pins it.
+        //
+        // Deliberately NOT moved ahead of ml-daily-ops: it writes screener_performance_history,
+        // which screener_features_fetcher.py reads AS-OF — a lagged snapshot is the correct
+        // point-in-time input there, and making it same-day would reintroduce look-ahead.
+        //
+        // 21:00 UTC (not 20:30) so it clears ohlcv-gap-fill-weekly, which fires Fri 20:30 UTC
+        // = Sat 2:00 AM IST — the one day-of-week where these two would otherwise collide.
+        repeat: { pattern: '0 21 * * 1-5' },
         jobId: 'screener-performance-daily',
         removeOnComplete: 3,
         removeOnFail: 3,
@@ -2829,7 +2917,9 @@ export async function initQueues(): Promise<boolean> {
     const asRep = await agentStrategistQueue.getRepeatableJobs();
     for (const r of asRep) await agentStrategistQueue.removeRepeatableByKey(r.key);
     await addJobWithCatchup(agentStrategistQueue, 'agent-strat-daily', {}, {
-      repeat: { pattern: '0 3 * * 1-5' },
+      // 08:50 IST. Moved off 08:30 IST 2026-07-31 — it started on the same minute as
+      // research-premarket. Still comfortably pre-open (09:15 IST).
+      repeat: { pattern: '20 3 * * 1-5' },
       jobId: 'agent-strat-daily',
       removeOnComplete: 3, removeOnFail: 3,
     });
@@ -2943,11 +3033,18 @@ export async function initQueues(): Promise<boolean> {
     // the universe into 1/7ths internally and picks a shard by day-of-year, so daily runs each
     // cover a fast (~30 min) slice and full coverage completes every 7 days — same cadence as
     // before, but each individual run actually fits its budget and can succeed.
+    //
+    // Kept running all 7 days (not Mon-Fri) deliberately -- the day-of-year sharding needs one
+    // run per CALENDAR day to complete full coverage every 7 days; restricting to weekdays would
+    // stretch that to ~9-10 calendar days. Moved from 4:00 UTC (9:30 IST, mid-market-hours -- the
+    // one daily sync in this file that wasn't off-hours) to 15:30 UTC (21:00 IST, well after the
+    // 15:30 IST close and clear of the 22:00-23:35 IST EOD job cluster) -- found in the 2026-07-30
+    // fifth full-stack-audit pass.
     await addJobWithCatchup(companyProfilesSyncQueue,
       'sync-company-profiles',
       {},
       {
-        repeat: { pattern: '0 4 * * *' }, // Daily, 4:00 AM UTC
+        repeat: { pattern: '30 15 * * *' }, // Daily (all 7 days), 15:30 UTC = 21:00 IST
         jobId: 'company-profiles-sync-daily',
         removeOnComplete: 3,
         removeOnFail: 3,
@@ -2991,7 +3088,10 @@ export async function initQueues(): Promise<boolean> {
       'trendlyne-midweek-batch',
       {},
       {
-        repeat: { pattern: '30 12 * * 2' }, // Tuesday 12:30 UTC (6:00 PM IST)
+        // Tuesday 14:30 UTC (8:00 PM IST). Moved off 6:00 PM IST 2026-07-31: the three
+        // screener syncs relocated into the 6:00-6:40 PM block, and this heavy weekly
+        // Trendlyne batch landed exactly on et-marketstats-sync every Tuesday.
+        repeat: { pattern: '30 14 * * 2' },
         jobId: 'trendlyne-midweek-weekly',
         removeOnComplete: 3,
         removeOnFail: 3,
@@ -3038,7 +3138,9 @@ export async function initQueues(): Promise<boolean> {
       'trendlyne-ratios-monthly-check',
       {},
       {
-        repeat: { pattern: '30 12 * * 0' }, // every Sunday 12:30 UTC; handler no-ops unless day <= 7
+        // Every Sunday 12:30 UTC. financial_ratios_fetcher runs on ALL of them (weekly);
+        // working_capital + mf_stock_holdings only on the first Sunday of the month.
+        repeat: { pattern: '30 12 * * 0' },
         jobId: 'trendlyne-ratios-monthly-weekly-check',
         removeOnComplete: 3,
         removeOnFail: 3,
@@ -3048,18 +3150,36 @@ export async function initQueues(): Promise<boolean> {
     trendlyneRatiosMonthlyWorker = new Worker(
       QUEUE_TRENDLYNE_RATIOS_MONTHLY,
       async (_job: Job) => {
-        if (new Date().getUTCDate() > 7) {
-          console.log('[QUEUE] trendlyne-ratios-monthly: not the first Sunday of the month, skipping');
-          return { success: true, skipped: true };
-        }
-        await runPython('financial_ratios_fetcher.py', [], 30 * 60_000)
+        const isFirstSundayOfMonth = new Date().getUTCDate() <= 7;
+
+        // WEEKLY (every Sunday) — moved out of the first-Sunday gate 2026-07-31.
+        // The ratios themselves only change quarterly, but the gate meant a newly-added
+        // COLUMN was invisible for up to a month: the 2026-07-23 banking-ratio harvest
+        // (nim/cost_to_income/capital_adequacy/gross_npa_pct) still had 1,969 of 1,978 rows
+        // predating it on 07-31, because the last full-universe run was 07-11. Nothing
+        // errored — the columns were simply NULL — and densify_feature_matrix.py cannot
+        // help, since there is no prior value to carry forward.
+        //
+        // 60 min, not 30: measured 29m02s for 1,969 stocks on 2026-07-31, i.e. 97% of the
+        // old 30-min budget. That is the same under-budgeted-timeout pattern that has bitten
+        // this file repeatedly — treat anything under ~2x the measured runtime as too tight.
+        await runPython('financial_ratios_fetcher.py', [], 60 * 60_000)
           .catch(e => console.warn('[QUEUE] financial_ratios_fetcher failed:', (e as Error).message));
+
+        if (!isFirstSundayOfMonth) {
+          console.log('[QUEUE] trendlyne-ratios: weekly ratios done; monthly steps skipped '
+            + '(not the first Sunday of the month)');
+          return { success: true, monthlySkipped: true };
+        }
+
+        // MONTHLY — these two genuinely track monthly/quarterly source publications, so
+        // running them weekly would be pure load for no new data.
         // 60 min: 1969-stock sequential cash-conversion-cycle fetch runs ~33 min at ~1 stock/s,
         // so the old 30-min budget SIGTERM'd near the end (leaving partial data + a 'failed' mark
         // in the monthly report even though most rows were written).
         await runPython('working_capital_fetcher.py', [], 60 * 60_000)
           .catch(e => console.warn('[QUEUE] working_capital_fetcher failed:', (e as Error).message));
-        // Per-stock MF ownership flow (monthly portfolio disclosures) — same ET companyid.
+        // Per-stock MF ownership flow (AMFI publishes portfolio disclosures monthly).
         await runPython('mf_stock_holdings_fetcher.py', [], 30 * 60_000)
           .catch(e => console.warn('[QUEUE] mf_stock_holdings_fetcher failed:', (e as Error).message));
         return { success: true };
@@ -3219,8 +3339,14 @@ export async function initQueues(): Promise<boolean> {
       // buildDailyDigest() aggregates job_heartbeat status across every registered job.
       { connection, concurrency: 1, lockDuration: 5 * 60_000 },
     );
-    jobDigestWorker.on('completed', () => console.log('[QUEUE] job-digest sent'));
-    jobDigestWorker.on('failed', (_, err) => console.error('[QUEUE] job-digest failed:', err.message));
+    jobDigestWorker.on('completed', () => {
+      console.log('[QUEUE] job-digest sent');
+      recordHeartbeat('job-digest', 'success');
+    });
+    jobDigestWorker.on('failed', (_, err) => {
+      console.error('[QUEUE] job-digest failed:', err.message);
+      recordHeartbeat('job-digest', 'failed', err.message);
+    });
 
     const digestRepeatables = await jobDigestQueue.getRepeatableJobs();
     for (const r of digestRepeatables) await jobDigestQueue.removeRepeatableByKey(r.key);

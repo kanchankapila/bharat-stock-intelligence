@@ -190,49 +190,8 @@ CREATE TABLE IF NOT EXISTS "bulk_deals" (
 CREATE INDEX idx_bulk_sym_date ON bulk_deals(symbol, date DESC);
 
 -- ── chart_patterns ─────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS "chart_patterns" (
-  "userid" BIGINT,
-  "instrument_type" TEXT,
-  "instrument" TEXT,
-  "exchange" TEXT,
-  "pattern_name" TEXT,
-  "comment" TEXT,
-  "time_frame" TEXT,
-  "sc_id" TEXT,
-  "is_closed" TEXT,
-  "is_deleted" BIGINT,
-  "end_date" TEXT,
-  "p_status" TEXT,
-  "pattern_id" BIGINT,
-  "analyst_name" TEXT,
-  "analyst_image" TEXT,
-  "updated_at" TEXT,
-  "created_at" TEXT,
-  "updated_at_epoch" BIGINT,
-  "created_at_epoch" BIGINT,
-  "sc_name" TEXT,
-  "symbol" TEXT,
-  "chartType" TEXT,
-  "displayLock" TEXT,
-  "scanproflg" BIGINT,
-  "meta_data_chart_type" TEXT,
-  "meta_data_sc_name" TEXT,
-  "meta_data_sc_symbol" TEXT,
-  "meta_data_sc_scripcode" TEXT,
-  "meta_data_instrument_type_code" TEXT,
-  "meta_data_entry_condition" TEXT,
-  "meta_data_entry_price" TEXT,
-  "meta_data_pattern_type" TEXT,
-  "meta_data_cmp" TEXT,
-  "meta_data_price_key" TEXT,
-  "meta_data_target_price" TEXT,
-  "meta_data_target_return_prcnt" TEXT,
-  "meta_data_stoploss_price" TEXT,
-  "meta_data_stoploss_prcnt" TEXT,
-  "meta_data_ind_id" TEXT,
-  "meta_data_expiry_date" TEXT,
-  "meta_data_timeline" TEXT
-);
+-- chart_patterns dropped 2026-07-30 (migrations/1785500000001_drop-dead-tables.sql) --
+-- confirmed zero writers/readers anywhere in the live app; superseded by mc_chart_patterns.
 
 -- ── company_profiles ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "company_profiles" (
@@ -757,36 +716,8 @@ CREATE TABLE IF NOT EXISTS "insider_transactions" (
 );
 
 -- ── institutional_rankings ─────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS "institutional_rankings" (
-  "symbol" TEXT,
-  "pe" DOUBLE PRECISION,
-  "ps" DOUBLE PRECISION,
-  "earnings_yield" DOUBLE PRECISION,
-  "rev_growth" DOUBLE PRECISION,
-  "eps_growth" DOUBLE PRECISION,
-  "roe" DOUBLE PRECISION,
-  "op_margin" DOUBLE PRECISION,
-  "price" DOUBLE PRECISION,
-  "ma200" DOUBLE PRECISION,
-  "debt_to_equity" DOUBLE PRECISION,
-  "interest_coverage" DOUBLE PRECISION,
-  "avg_vol_usd" DOUBLE PRECISION,
-  "f_score" BIGINT,
-  "pass_safety" INTEGER,
-  "score_pe" DOUBLE PRECISION,
-  "score_ps" DOUBLE PRECISION,
-  "score_ey" DOUBLE PRECISION,
-  "score_rev" DOUBLE PRECISION,
-  "score_eps" DOUBLE PRECISION,
-  "score_roe" DOUBLE PRECISION,
-  "score_margin" DOUBLE PRECISION,
-  "dist_ma200" DOUBLE PRECISION,
-  "score_momentum" DOUBLE PRECISION,
-  "value_score" DOUBLE PRECISION,
-  "growth_score" DOUBLE PRECISION,
-  "quality_score" DOUBLE PRECISION,
-  "composite_score" DOUBLE PRECISION
-);
+-- institutional_rankings dropped 2026-07-30 (migrations/1785500000001_drop-dead-tables.sql) --
+-- confirmed zero writers/readers anywhere in the live app; superseded by quant_scores.
 
 -- ── intraday_breadth_snapshots ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "intraday_breadth_snapshots" (

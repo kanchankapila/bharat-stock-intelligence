@@ -73,3 +73,60 @@ class TestParseRecordAcqNameFallback:
         rec = itf._parse_record("RELIANCE", _base_row(secVal="NA", totSharesNo="NA"))
         assert rec is not None
         assert rec["value_cr"] is None
+
+
+# ── Regression: dead NSE session no longer silently truncates the run (2026-07-31) ──
+#
+# Observed live 2026-07-30: the run walks the universe alphabetically; NSE expired the cookies
+# from the single startup warm-up partway through, and EVERY symbol from "E" onward then failed
+# with a read timeout (96 E + 37 F + 27 G in one run, zero successes after) until the 30-minute
+# job timeout killed it. H-Z was never fetched on any run. Two defects made that invisible:
+# fetch_nse_insider returned [] for BOTH "no filings" and "request failed", and the summary line
+# printed only an aggregate row count. Now: None means failure, and the session is rebuilt.
+
+class _StubResp:
+    def __init__(self, payload):
+        self._payload = payload
+
+    def json(self):
+        return self._payload
+
+
+class TestFetchDistinguishesFailureFromEmpty:
+    def test_returns_empty_list_when_nse_says_no_filings(self, monkeypatch):
+        monkeypatch.setattr(itf, "retry_get", lambda *a, **k: _StubResp({"data": []}))
+        assert itf.fetch_nse_insider(None, "INFY", "01-01-2026", "31-01-2026") == []
+
+    def test_returns_none_when_request_fails(self, monkeypatch):
+        def _boom(*a, **k):
+            raise RuntimeError("Read timed out. (read timeout=12)")
+        monkeypatch.setattr(itf, "retry_get", _boom)
+        # None, NOT [] — conflating them is what made a throttled run look like a
+        # universe with no insider activity.
+        assert itf.fetch_nse_insider(None, "INFY", "01-01-2026", "31-01-2026") is None
+
+    def test_returns_data_array_on_success(self, monkeypatch):
+        monkeypatch.setattr(itf, "retry_get",
+                            lambda *a, **k: _StubResp({"data": [{"symbol": "INFY"}]}))
+        assert itf.fetch_nse_insider(None, "INFY", "01-01-2026", "31-01-2026") == [{"symbol": "INFY"}]
+
+
+class TestSessionRebuildGuards:
+    def test_rebuild_thresholds_are_sane(self):
+        assert 1 <= itf.CONSECUTIVE_FAIL_LIMIT <= 20
+        assert itf.MAX_SESSION_REBUILDS >= 1
+
+    def test_rebuild_returns_none_instead_of_raising(self, monkeypatch):
+        """A failed warm-up must not abort the run — the loop needs to keep its old
+        session and decide for itself when to give up."""
+        monkeypatch.setattr(itf.time, "sleep", lambda *_: None)
+        def _boom():
+            raise RuntimeError("NSE refused warm-up")
+        monkeypatch.setattr(itf, "_nse_session", _boom)
+        assert itf._rebuild_session(1) is None
+
+    def test_rebuild_returns_new_session_on_success(self, monkeypatch):
+        monkeypatch.setattr(itf.time, "sleep", lambda *_: None)
+        sentinel = object()
+        monkeypatch.setattr(itf, "_nse_session", lambda: sentinel)
+        assert itf._rebuild_session(1) is sentinel

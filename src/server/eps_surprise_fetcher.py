@@ -15,14 +15,15 @@ Strategy (two-pass):
             sc_id in the response = mcsymbol in nse_stocks. No per-stock ID needed.
             URL: https://api.moneycontrol.com/mcapi/v1/earnings/actual-estimate?page=1&limit=30000
 
-  Pass 2 — PER-STOCK endpoint (optional, for q2 + beat streak history):
-            https://api.moneycontrol.com/mcapi/v1/earnings/actual-estimate?scId={mcsymbol}
-            Only called for symbols we already resolved in pass 1.
+  Pass 2 — STORED HISTORY (no network): q2 + beat streak are derived by reading back the
+            eps_surprise_history rows the bulk pass itself accumulates, one per
+            (scid, results-date), run after run. MC exposes NO per-stock variant of this
+            endpoint — see enrich_from_history for the live 422 evidence.
 
 All five columns are written to the most-recent technical_signals row per symbol.
 
 Run:
-  python eps_surprise_fetcher.py                # bulk + per-stock detail
+  python eps_surprise_fetcher.py                # bulk + history-derived streak
   python eps_surprise_fetcher.py --bulk-only    # bulk pass only (fast, q1 only)
   python eps_surprise_fetcher.py --symbol INFY  # single stock test
   python eps_surprise_fetcher.py --limit 50     # first 50 resolved stocks
@@ -30,7 +31,6 @@ Run:
 
 import argparse
 import sys
-import time
 
 from db_compat import connect, translate, use_postgres, read_df, executemany
 from fetch_utils import retry_get
@@ -43,7 +43,8 @@ except ImportError:
 # ── Constants ─────────────────────────────────────────────────────────────────
 
 BULK_URL  = "https://api.moneycontrol.com/mcapi/v1/earnings/actual-estimate?page=1&limit=30000"
-STOCK_URL = "https://api.moneycontrol.com/mcapi/v1/earnings/actual-estimate?scId={scid}&type=Q&subType=yoy"
+# NOTE: there is deliberately no per-stock URL here. MC's actual-estimate endpoint is list-only
+# (see enrich_from_history) — every per-stock query-string variant returns HTTP 422.
 
 MC_HEADERS = {
     "accept": "application/json",
@@ -56,7 +57,6 @@ MC_HEADERS = {
     ),
 }
 
-RATE_LIMIT_SEC = 0.2
 MAX_QUARTERS   = 8
 
 
@@ -221,109 +221,95 @@ def fetch_bulk(mc_to_symbol: dict[str, str]) -> tuple[dict[str, dict], list[tupl
     return features_by_symbol, history_rows
 
 
-# ── Pass 2: Per-stock endpoint for q2 + beat streak ──────────────────────────
+# ── Pass 2: q2 + beat streak from accumulated history ────────────────────────
+#
+# This used to call a per-stock MC endpoint once per resolved symbol. That endpoint does not
+# exist: live-probed 2026-07-31, `...actual-estimate?scId=RI&type=Q&subType=yoy` returns HTTP
+# 422 `{"success":0,"data":"\"scId\" is not allowed"}` — scId/sc_id/scid/id/symbol are ALL
+# rejected as parameters, and `type` only accepts [all, std, con]. So the endpoint is
+# list-only; there is no per-stock variant to fix the query string to. Every one of the ~500
+# calls 422'd, each one retried by retry_get, which burned the job's whole 600s budget and
+# killed it by timeout on every run (132 `HTTP Error 422` lines per run in pm2-err.log).
+#
+# The replacement needs no network at all: the bulk pass already upserts one row per
+# (scid, quarter) into eps_surprise_history on every run, so the quarter-over-quarter history
+# this pass wanted is accumulating in our own table. Read it back instead.
 
-def _fetch_per_stock(scid: str) -> list[dict] | None:
-    if cffi_req is None:
-        return None
+_MONTHS = {m: i for i, m in enumerate(
+    ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"), 1)}
+
+
+def _quarter_sort_key(quarter: str) -> tuple:
+    """MC's `quarter` is a results-announcement date ('May 30, 2026'), not a quarter label,
+    so it does NOT sort correctly as text. Parse to (y, m, d); unparseable sorts oldest."""
     try:
-        r = retry_get(cffi_req, STOCK_URL.format(scid=scid), headers=MC_HEADERS,
-                       impersonate="chrome110", timeout=12)
-        payload = r.json()
-    except Exception as exc:
-        print(f"[EPSSurprise] HTTP error for {scid}: {exc}", file=sys.stderr)
-        return None
-
-    if isinstance(payload, list):
-        return payload
-    if isinstance(payload, dict):
-        if payload.get("success") == 0:
-            return None
-        data = payload.get("data")
-        if isinstance(data, list):
-            return data
-        if isinstance(data, dict):
-            return data.get("result") or data.get("list") or []
-    return None
+        mon, rest = quarter.split(" ", 1)
+        day, year = rest.split(",", 1)
+        return (int(year.strip()), _MONTHS[mon.strip()[:3].title()], int(day.strip()))
+    except (ValueError, KeyError, AttributeError):
+        return (0, 0, 0)
 
 
-def _parse_per_stock_quarter(entry: dict) -> dict:
-    def _from_block(block, key_a, key_e, key_s):
-        if not isinstance(block, dict):
-            return None, None, None
-        actual   = _safe_float(block.get(key_a) or block.get("actual"))
-        estimate = _safe_float(block.get(key_e) or block.get("estimate"))
-        surprise = _safe_float(block.get(key_s) or block.get("surprise")
-                               or block.get("beat") or block.get("miss"))
-        return actual, estimate, surprise
 
-    quarter   = entry.get("quarter") or entry.get("quarterName") or entry.get("period") or ""
-    np_block  = entry.get("netProfit") or entry.get("profit") or entry.get("np") or {}
-    rev_block = entry.get("revenue") or entry.get("sales") or entry.get("topline") or {}
+def enrich_from_history(bulk_features: dict[str, dict],
+                        symbol_filter: str | None,
+                        limit: int | None) -> tuple[dict[str, dict], list[tuple]]:
+    """Derive q2 + beat streak from eps_surprise_history (written by the bulk pass).
 
-    np_a, np_e, np_s   = _from_block(np_block,  "actual", "estimate", "surprise")
-    rv_a, rv_e, rv_s   = _from_block(rev_block, "actual", "estimate", "surprise")
-
-    if np_a is None:
-        np_a = _safe_float(entry.get("npActual") or entry.get("actualNetProfit"))
-    if np_s is None:
-        np_s = _safe_float(entry.get("npSurprise") or entry.get("netProfitSurprise"))
-
-    return {"quarter": quarter, "np_surprise": np_s, "rev_surprise": rv_s}
-
-
-def enrich_with_per_stock(mc_to_symbol: dict[str, str],
-                          bulk_features: dict[str, dict],
-                          symbol_filter: str | None,
-                          limit: int | None) -> tuple[dict[str, dict], list[tuple]]:
-    """For symbols resolved in bulk, fetch per-stock history to get q2 + beat streak."""
-    history_rows: list[tuple] = []
-    symbols_to_fetch = list(bulk_features.keys())
-
+    Returns the same (features, history_rows) shape the old network pass did; history_rows is
+    always empty because this pass is now a pure read — it adds no new quarters, it only reads
+    back the ones the bulk pass already persisted.
+    """
+    symbols = list(bulk_features.keys())
     if symbol_filter:
-        symbols_to_fetch = [s for s in symbols_to_fetch if s.upper() == symbol_filter.upper()]
+        symbols = [s for s in symbols if s.upper() == symbol_filter.upper()]
     if limit:
-        symbols_to_fetch = symbols_to_fetch[:limit]
+        symbols = symbols[:limit]
+    if not symbols:
+        return bulk_features, []
 
-    # Build reverse map: nse_symbol → mcsymbol
-    symbol_to_mc = {v: k for k, v in mc_to_symbol.items()}
+    ph = ",".join("?" for _ in symbols)
+    hist = read_df(
+        translate(
+            f"SELECT symbol, quarter, np_surprise, rev_surprise "
+            f"FROM eps_surprise_history WHERE symbol IN ({ph})"
+        ),
+        params=symbols,
+    )
+    if hist.empty:
+        return bulk_features, []
 
-    for symbol in symbols_to_fetch:
-        scid = symbol_to_mc.get(symbol)
-        if not scid:
-            continue
+    by_symbol: dict[str, list[dict]] = {}
+    for row in hist.to_dict("records"):
+        if row.get("quarter"):
+            by_symbol.setdefault(row["symbol"], []).append(row)
 
-        quarters_raw = _fetch_per_stock(scid)
-        time.sleep(RATE_LIMIT_SEC)
-        if not quarters_raw:
-            continue
-
-        parsed = []
-        for entry in quarters_raw[:MAX_QUARTERS]:
-            if not isinstance(entry, dict):
-                continue
-            q = _parse_per_stock_quarter(entry)
-            if q["quarter"]:
-                parsed.append(q)
-
-        if not parsed:
-            continue
-
-        feats = _compute_features(parsed)
-        # Merge: keep q1 surprise from bulk (more reliable API-provided value), add q2 + streak
+    enriched = 0
+    for symbol, rows in by_symbol.items():
+        # newest-first — _compute_features documents that contract
+        rows.sort(key=lambda r: _quarter_sort_key(r["quarter"]), reverse=True)
+        if len(rows) < 2:
+            continue  # nothing the bulk pass's own q1 didn't already give us
+        feats = _compute_features([
+            {"quarter": r["quarter"],
+             "np_surprise": _safe_float(r.get("np_surprise")),
+             "rev_surprise": _safe_float(r.get("rev_surprise"))}
+            for r in rows[:MAX_QUARTERS]
+        ])
         existing = bulk_features.get(symbol, {})
-        bulk_features[symbol] = {**existing, **feats,
-                                 "eps_surprise_q1": existing.get("eps_surprise_q1") or feats["eps_surprise_q1"]}
+        # Keep the bulk pass's q1/rev_q1: those come straight from MC's own surprise % field,
+        # which is more authoritative than anything recomputed off stored actual-vs-estimate.
+        bulk_features[symbol] = {
+            **existing,
+            **feats,
+            "eps_surprise_q1": existing.get("eps_surprise_q1") or feats["eps_surprise_q1"],
+            "rev_surprise_q1": existing.get("rev_surprise_q1") or feats["rev_surprise_q1"],
+        }
+        enriched += 1
 
-        for q in parsed:
-            history_rows.append((
-                scid, symbol, q["quarter"],
-                None, None, q.get("np_surprise"),
-                None, None, q.get("rev_surprise"),
-                None, None, None,
-            ))
-
-    return bulk_features, history_rows
+    print(f"[EPSSurprise]   History: {enriched} symbols enriched with q2/streak "
+          f"from {len(hist)} stored quarters")
+    return bulk_features, []
 
 
 # ── DB writes ─────────────────────────────────────────────────────────────────
@@ -434,12 +420,10 @@ def main() -> None:
     if args.symbol:
         features = {k: v for k, v in features.items() if k.upper() == args.symbol.upper()}
 
-    # Pass 2: per-stock detail (q2 + streak)
+    # Pass 2: q2 + streak, read back from the history the bulk pass just wrote
     if not args.bulk_only:
-        print("[EPSSurprise] Pass 2 — per-stock history for q2 + beat streak...")
-        features, hist2 = enrich_with_per_stock(mc_to_symbol, features, args.symbol, args.limit)
-        _write_history(hist2)
-        print(f"[EPSSurprise]   Per-stock: {len(hist2)} additional history rows")
+        print("[EPSSurprise] Pass 2 — q2 + beat streak from stored history...")
+        features, _ = enrich_from_history(features, args.symbol, args.limit)
 
     # Patch technical_signals
     ts_updated = _write_technical_signals(con, features)

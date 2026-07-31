@@ -122,6 +122,14 @@ function StockCard({ p, onSelect }: { p: any; onSelect: (sym: string) => void })
           {p.timeframe && (
             <span className="text-[9px] text-slate-500 uppercase">{p.timeframe.replace('_', ' ')}</span>
           )}
+          {p.engine_coverage_count != null && (
+            <span
+              className="text-[9px] text-slate-500"
+              title="How many of the ranker's component engines (screener/ml/confluence/technical/dl/cs/breakout) had data for this stock — higher means the unified_score is backed by more independent sources, not just one"
+            >
+              {p.engine_coverage_count}/7 engines
+            </span>
+          )}
         </div>
       </div>
 

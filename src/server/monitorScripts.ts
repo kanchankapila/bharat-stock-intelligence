@@ -193,12 +193,13 @@ export const MONITOR_SCRIPTS = [
     category: 'ML',
     critical: false,
     description: 'Deep learning model inference — writes win probabilities to deep_learning_predictions.',
-    schedule: 'Daily 5 PM',
+    schedule: 'Daily 12:00 AM IST',
     pyScript: 'dl_engine.py --mode infer',
     queueName: null,
     staleLimitHours: 26,
-    // Dedicated DL Inference queue, 0 17 * * 1-5 = 10:30pm IST.
-    cronPatterns: ['0 17 * * 1-5'],
+    // Dedicated DL Inference queue. Moved 2026-07-31 from '0 17' (10:30 PM IST, where it
+    // collided with stock-scoring) to '30 18' = 12:00 AM IST. Keep in lockstep with queues.ts.
+    cronPatterns: ['30 18 * * 1-5'],
     graceMinutes: 45,
   },
   {
@@ -232,10 +233,14 @@ export const MONITOR_SCRIPTS = [
     category: 'ML',
     critical: false,
     description: 'Fills screener_appearances returns, computes Bayesian tiers (A/B/C/D), classifies new screeners via Ollama',
-    schedule: 'Daily 6 PM',
+    // Was labelled "Daily 6 PM" but the queue used `every: 24h`, which drifts on every
+    // restart — it actually last succeeded at 5:42 AM IST. Pinned to a real cron 2026-07-31.
+    schedule: 'Daily 2:30 AM IST',
     pyScript: 'screener_performance.py',
     queueName: 'screener-performance',
     staleLimitHours: 26,
+    cronPatterns: ['0 21 * * 1-5'],
+    graceMinutes: 180,
   },
   {
     id: 'company-profiles-sync',

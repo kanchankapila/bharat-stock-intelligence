@@ -42,9 +42,13 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   { jobName: 'stock-refresh', label: 'Stock Price Refresh', cronPattern: '30 10 * * 1-5', graceMinutes: 30, critical: true },
   { jobName: 'ai-signals', label: 'AI Signal Analyzer', graceMinutes: 0, critical: false },
   { jobName: 'stock-scoring', label: 'Stock Scoring Sync', cronPattern: '0 17 * * 1-5', graceMinutes: 60, critical: true },
-  { jobName: 'mc-screener-sync', label: 'MoneyControl Screener Sync', cronPattern: '30 17 * * 1-5', graceMinutes: 60, critical: true },
-  { jobName: 'etnow-screener-sync', label: 'ETNow Screener Sync', cronPattern: '0 18 * * 1-5', graceMinutes: 90, critical: true },
-  { jobName: 'et-marketstats-sync', label: 'ET Marketstats Screener Sync', cronPattern: '5 18 * * 1-5', graceMinutes: 90, critical: false },
+  // Screener syncs moved 2026-07-31 from the 11:00-11:35 PM IST block to 6:00-6:40 PM IST so
+  // they run AHEAD of every consumer (ml-daily-ops 7:30 PM, stock-scoring 10:30 PM) instead of
+  // hours behind them. Keep these three in lockstep with queues.ts — a stale cronPattern here
+  // produces phantom "late" alerts against a deadline the job never had.
+  { jobName: 'mc-screener-sync', label: 'MoneyControl Screener Sync', cronPattern: '50 12 * * 1-5', graceMinutes: 60, critical: true },
+  { jobName: 'etnow-screener-sync', label: 'ETNow Screener Sync', cronPattern: '10 13 * * 1-5', graceMinutes: 90, critical: true },
+  { jobName: 'et-marketstats-sync', label: 'ET Marketstats Screener Sync', cronPattern: '30 12 * * 1-5', graceMinutes: 90, critical: false },
   { jobName: 'nse-sync', label: 'NSE Master List Sync', cronPattern: '0 2 * * 0', graceMinutes: 120, critical: false },
   { jobName: 'fundamentals-sync', label: 'Fundamentals Sync', cronPattern: '0 3 * * 0', graceMinutes: 120, critical: false },
   { jobName: 'quant-scoring', label: 'Quant Score Engine', cronPattern: '30 17 * * 1-5', graceMinutes: 45, critical: true },
@@ -58,12 +62,12 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   { jobName: 'preopen-snapshot', label: 'Preopen Snapshot', cronPattern: '40 3 * * 1-5', graceMinutes: 45, critical: false },
   { jobName: 'market-regime-refresh', label: 'Market Regime Refresh (intraday)', cronPattern: '*/15 3-10 * * 1-5', graceMinutes: 45, critical: false },
   { jobName: 'intraday-ranker', label: 'Intraday Ranker (regime + ranking)', cronPattern: '*/15 3-10 * * 1-5', graceMinutes: 45, critical: false },
-  { jobName: 'closed-day-early-batch', label: 'Closed-Day Early Batch (holiday pipeline)', cronPattern: '0 2 * * 1-5', graceMinutes: 60, critical: false },
+  { jobName: 'closed-day-early-batch', label: 'Closed-Day Early Batch (holiday pipeline)', cronPattern: '40 1 * * 1-5', graceMinutes: 60, critical: false },
   { jobName: 'dl-retrain-emergency', label: 'DL Emergency Retrain (drift-triggered)', graceMinutes: 0, critical: false },
   { jobName: 'confluence-compute', label: 'Confluence Engine', everyMs: 30 * 60 * 1000, graceMinutes: 45, critical: true },
-  { jobName: 'confluence-outcomes', label: 'Confluence Outcomes', cronPattern: '30 17 * * 1-5', graceMinutes: 60, critical: false },
+  { jobName: 'confluence-outcomes', label: 'Confluence Outcomes', cronPattern: '0 18 * * 1-5', graceMinutes: 60, critical: false },
   { jobName: 'agent-data-scientist', label: 'Agent: Data Scientist', cronPattern: '30 1 * * 1-5', graceMinutes: 60, critical: false },
-  { jobName: 'agent-strategist', label: 'Agent: Strategist', cronPattern: '0 3 * * 1-5', graceMinutes: 60, critical: false },
+  { jobName: 'agent-strategist', label: 'Agent: Strategist', cronPattern: '20 3 * * 1-5', graceMinutes: 60, critical: false },
   { jobName: 'agent-auditor', label: 'Agent: Auditor', cronPattern: '0 11 * * 1-5', graceMinutes: 60, critical: false },
   { jobName: 'agent-optimizer', label: 'Agent: Optimizer', cronPattern: '0 12 * * 1-5', graceMinutes: 60, critical: false },
   { jobName: 'unified-ranker', label: 'Unified Daily Ranker', cronPattern: '0 2 * * 1-5', graceMinutes: 45, critical: true },
@@ -73,8 +77,13 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   { jobName: 'ml-daily-ops', label: 'ML Daily Ops', cronPattern: '0 14 * * 1-5', graceMinutes: 60, critical: true },
   { jobName: 'trendlyne-daily-fetch', label: 'Trendlyne Daily Metrics Fetch', cronPattern: '30 4 * * 1-5', graceMinutes: 60, critical: false },
   { jobName: 'ml-weekly-retrain', label: 'ML Weekly Retrain', cronPattern: '0 5 * * 0', graceMinutes: 180, critical: false },
-  { jobName: 'trendlyne-ratios-monthly', label: 'Trendlyne Ratios Monthly (weekly gate)', cronPattern: '30 12 * * 0', graceMinutes: 60, critical: false },
-  { jobName: 'dl-feature-refresh', label: 'DL Feature Refresh', cronPattern: '0 10 * * 1-5', graceMinutes: 90, critical: false },
+  // Queue id kept as '-monthly' deliberately: renaming a BullMQ queue would orphan its
+  // repeatable-job key and monitor state. As of 2026-07-31 the ratios step is WEEKLY (every
+  // Sunday); only working_capital + mf_stock_holdings remain first-Sunday-only.
+  // graceMinutes 60 -> 150: the weekly ratios leg alone is budgeted 60 min, and on a first
+  // Sunday it is followed by working_capital (60) + mf_stock_holdings (30).
+  { jobName: 'trendlyne-ratios-monthly', label: 'ET Ratios (weekly) + Working Capital/MF Holdings (monthly)', cronPattern: '30 12 * * 0', graceMinutes: 150, critical: false },
+  { jobName: 'dl-feature-refresh', label: 'DL Feature Refresh', cronPattern: '30 11 * * 1-5', graceMinutes: 90, critical: false },
 
   // ml-daily-ops (cron '0 14 * * 1-5', see queues.ts processMlDailyOps) writes each of its
   // StepTracker sub-steps as its OWN job_heartbeat row (see jobSteps.ts), so without entries
@@ -88,6 +97,12 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   { jobName: 'outcome-resolver-5d', label: 'ML Daily Ops: Outcome Resolver 5d', cronPattern: '0 14 * * 1-5', graceMinutes: 120, critical: false },
   { jobName: 'outcome-resolver-15d', label: 'ML Daily Ops: Outcome Resolver 15d', cronPattern: '0 14 * * 1-5', graceMinutes: 120, critical: false },
   { jobName: 'performance-tracker', label: 'ML Daily Ops: Performance Tracker', cronPattern: '0 14 * * 1-5', graceMinutes: 120, critical: false },
+  // critical: if this silently stops running, the enrichment half of the feature matrix goes
+  // sparse again and every model trains on technicals alone without anything erroring.
+  { jobName: 'densify-feature-matrix', label: 'ML Daily Ops: Densify Feature Matrix', cronPattern: '0 14 * * 1-5', graceMinutes: 120, critical: true },
+  // critical: this is the only survivorship-free record of the traded universe. Every day it
+  // misses is a day whose delisted names are gone for good from nse_universe_history.
+  { jobName: 'nse-bhavcopy-fetcher', label: 'ML Daily Ops: NSE Bhavcopy (PIT universe)', cronPattern: '0 14 * * 1-5', graceMinutes: 120, critical: true },
   { jobName: 'ml-ensemble-incremental', label: 'ML Daily Ops: Ensemble Incremental', cronPattern: '0 14 * * 1-5', graceMinutes: 120, critical: false },
   { jobName: 'ml-ensemble-score', label: 'ML Daily Ops: Ensemble Score', cronPattern: '0 14 * * 1-5', graceMinutes: 120, critical: false },
   { jobName: 'drift-detector', label: 'ML Daily Ops: Drift Detector', cronPattern: '0 14 * * 1-5', graceMinutes: 120, critical: false },
@@ -98,4 +113,11 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   // Same story for ml-weekly-retrain's (cron '0 5 * * 0') StepTracker sub-steps.
   { jobName: 'ml-ensemble-train', label: 'ML Weekly Retrain: Ensemble Train', cronPattern: '0 5 * * 0', graceMinutes: 240, critical: false },
   { jobName: 'strategy-optimizer', label: 'ML Weekly Retrain: Strategy Optimizer', cronPattern: '0 5 * * 0', graceMinutes: 240, critical: false },
+
+  // job-digest (queues.ts '45 18 * * *', runs all 7 days) had NO entry here and never called
+  // recordHeartbeat() at all -- the one job whose entire purpose is monitoring every other job
+  // was itself completely unmonitored (found in the 2026-07-30 fifth full-stack-audit pass).
+  // Not critical -- it's a Telegram notification job, not a data pipeline -- but a missed
+  // digest send should still show up as stale rather than silently vanish.
+  { jobName: 'job-digest', label: 'Daily Job Digest (Telegram)', cronPattern: '45 18 * * *', graceMinutes: 60, critical: false },
 ];

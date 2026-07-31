@@ -148,7 +148,15 @@ def backfill_technical_signals(con) -> int:
     # membership never reflected true historical status, only "whatever it is today"). No
     # historical index-membership snapshot exists to backfill from, so older rows are
     # explicitly nulled rather than left holding today's status.
-    today = datetime.now().strftime("%Y-%m-%d")
+    #
+    # Anchor to the last completed trading session, NOT datetime.now() -- this job runs weekly
+    # via nse-sync (Sunday 07:30 IST, queues.ts), a non-trading day with no technical_signals row
+    # yet for today's wall-clock date. A bare datetime.now() floor matches zero existing rows, so
+    # every historical is_nifty50/.../nifty_tier column gets NULLed out on every single run -- same
+    # bug class already fixed in asm_gsm_fetcher.py, financial_ratios_fetcher.py, and 7 other
+    # fetchers (see CLAUDE.md "date('now') anchor" recurring-bug notes).
+    latest_row = cur.execute("SELECT MAX(date) AS d FROM stock_ohlcv").fetchone()
+    today = str(latest_row["d"])[:10] if latest_row and latest_row["d"] else datetime.now().strftime("%Y-%m-%d")
     if use_postgres():
         cur.execute(
             """

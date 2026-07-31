@@ -136,8 +136,17 @@ def train():
 
     # Purged-in-time OOF AUC over the training window only (TimeSeriesSplit never trains on
     # rows chronologically after what it validates on).
+    #
+    # gap=1: unlike ml_ensemble.py/cs_ranker.py's multi-day-forward-return labels (which need a
+    # multi-day embargo to stop a training row's forward window from touching a validation-fold
+    # date), this label is same-day intraday resolution (return_intraday, resolved by that same
+    # day's close) -- there's no forward window past the split boundary for a later fold to leak
+    # into. gap=1 is added anyway for defensive consistency with every other CV site in this
+    # codebase (ml_ensemble.py/cs_ranker.py/confluence_ml_engine.py/ml_signal_scorer.py all pass
+    # gap=embargo), not because a leak was demonstrated here (2026-07-30 fifth full-stack-audit
+    # pass assessed this and found no actual leak, just a convention inconsistency).
     n_splits = min(5, max(2, len(dates) // (MIN_DATES // 2)))
-    tscv = TimeSeriesSplit(n_splits=n_splits)
+    tscv = TimeSeriesSplit(n_splits=n_splits, gap=1)
     cv_aucs = []
     for tr_idx, val_idx in tscv.split(X_train):
         y_tr, y_val = y_train.iloc[tr_idx], y_train.iloc[val_idx]

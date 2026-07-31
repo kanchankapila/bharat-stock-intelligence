@@ -38,6 +38,9 @@ RANDOM_STATE = 42        # pinned so promotion-gate comparisons and the purge re
 TRAIN_LOOKBACK_DAYS = 2000   # ~5.5y — use the full backfilled history for training
 SCORE_LOOKBACK_DAYS = 600    # headroom for the 252-day rolling windows on the latest bar
 MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ml_models", "breakout.pkl")
+CANDIDATE_PATH = MODEL_PATH + ".candidate"
+# Same value as ml_ensemble.py's PROMOTION_MARGIN / movement_predictor.py's MOVEMENT_PROMOTION_MARGIN.
+BREAKOUT_PROMOTION_MARGIN = 0.005
 
 # Features computed DIRECTLY from stock_ohlcv (not technical_signals) so the model trains
 # on the full multi-year history with a CONSISTENT feature set across all eras — the old
@@ -302,6 +305,39 @@ def evaluate_purged_cv(df: pd.DataFrame, embargo: int = EMBARGO, n_folds: int = 
             "df": df, "cv_df": cv_df}
 
 
+def _load_baseline_test_auc(model_path: str) -> float | None:
+    """The currently-active model's own stored test_auc, or None if there's no existing
+    model or it can't be read. Mirrors movement_predictor.py's helper of the same name --
+    this is the one ML file in the codebase that historically had NO promotion gate at all
+    (Finding #17-class bug, closed 2026-07-30): train() unconditionally overwrote
+    ml_models/breakout.pkl regardless of whether the new fit was better or worse than the
+    currently-deployed model, the single engine in this platform with genuine validated
+    live edge (purged-OOF AUC ~0.61, top-decile lift ~1.47x)."""
+    if not os.path.exists(model_path):
+        return None
+    try:
+        with open(model_path, "rb") as f:
+            existing = pickle.load(f)
+        return existing.get("test_auc")
+    except Exception as e:
+        print(f"[Breakout] Could not read existing model at {model_path} for comparison "
+              f"({e}) -- treating as no baseline.")
+        return None
+
+
+def _breakout_promotion_decision(test_auc: float, baseline_test_auc: float | None) -> tuple[bool, str | None]:
+    """Pure gate decision: returns (promote, refusal_reason). A NaN held-out AUC (insufficient
+    holdout rows) must never auto-promote just because there happens to be no prior baseline."""
+    if test_auc is None or np.isnan(test_auc):
+        return False, "held-out test AUC is NaN (insufficient holdout data) -- cannot confirm this model is safe to promote."
+    if baseline_test_auc is None:
+        return True, None
+    if test_auc >= baseline_test_auc + BREAKOUT_PROMOTION_MARGIN:
+        return True, None
+    return False, (f"new held-out test AUC {test_auc:.4f} did not beat active model's "
+                    f"{baseline_test_auc:.4f} + {BREAKOUT_PROMOTION_MARGIN} margin.")
+
+
 def train(report_only: bool = False, leak_check: bool = False) -> dict:
     from sklearn.metrics import roc_auc_score  # used by the leak_check closure below
 
@@ -354,13 +390,26 @@ def train(report_only: bool = False, leak_check: bool = False) -> dict:
     # Production model: refit the same booster on ALL data (matches the OOF probe).
     prod = _make_model(spw)
     prod.fit(X, y)
+    payload = {"models": [prod], "feature_names": list(X.columns),
+               "horizon": HORIZON, "trained_at": datetime.date.today().isoformat(),
+               "oof_auc": auc, "test_auc": test_auc}
     os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
-    with open(MODEL_PATH, "wb") as f:
-        pickle.dump({"models": [prod], "feature_names": list(X.columns),
-                     "horizon": HORIZON, "trained_at": datetime.date.today().isoformat(),
-                     "oof_auc": auc, "test_auc": test_auc}, f)
-    print(f"[Breakout] saved model (OOF AUC {auc:.4f}, held-out test AUC {test_auc:.4f}) -> {MODEL_PATH}")
-    return {"trained": True, "n": len(y), "auc": auc, "test_auc": test_auc, "base_rate": base_rate, "lift": lift}
+
+    baseline_test_auc = _load_baseline_test_auc(MODEL_PATH)
+    promote, refusal_reason = _breakout_promotion_decision(test_auc, baseline_test_auc)
+    if promote:
+        with open(MODEL_PATH, "wb") as f:
+            pickle.dump(payload, f)
+        print(f"[Breakout] PROMOTED (OOF AUC {auc:.4f}, held-out test AUC {test_auc:.4f}, "
+              f"baseline {baseline_test_auc}) -> {MODEL_PATH}")
+    else:
+        with open(CANDIDATE_PATH, "wb") as f:
+            pickle.dump(payload, f)
+        print(f"[Breakout] REJECTED — {refusal_reason} Candidate saved to {CANDIDATE_PATH}; "
+              f"active model at {MODEL_PATH} left untouched.")
+
+    return {"trained": True, "n": len(y), "auc": auc, "test_auc": test_auc, "base_rate": base_rate,
+            "lift": lift, "promoted": promote}
 
 
 def score() -> int:

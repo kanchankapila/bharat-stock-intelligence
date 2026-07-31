@@ -54,6 +54,29 @@ def _nse_session() -> requests.Session:
     return s
 
 
+# NSE expires the cookies handed out by the homepage warm-up partway through a long
+# sequential run. Observed live on 2026-07-30: the run walked the universe alphabetically,
+# succeeded through A–D, then EVERY symbol from "E" onward failed with a read timeout
+# (96 E + 37 F + 27 G in one run, zero successes after) until the 30-minute job timeout
+# killed it — so H–Z was never fetched at all, on every single run. The session was warmed
+# exactly once at startup and never rebuilt, so one cookie expiry ended the whole run.
+CONSECUTIVE_FAIL_LIMIT = 5    # rebuild the session after this many failures in a row
+MAX_SESSION_REBUILDS   = 12   # then give up rather than loop forever against a hard block
+REBUILD_BACKOFF_SEC    = 5.0
+
+
+def _rebuild_session(attempt: int) -> requests.Session | None:
+    """Fresh cookies after NSE stops answering. Returns None if NSE refuses the warm-up."""
+    time.sleep(REBUILD_BACKOFF_SEC * attempt)
+    try:
+        sess = _nse_session()
+        print(f"[INSIDER] NSE session rebuilt (attempt {attempt}/{MAX_SESSION_REBUILDS})")
+        return sess
+    except Exception as exc:
+        print(f"[INSIDER] session rebuild {attempt} failed — {exc}", file=sys.stderr)
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Schema helpers
 # ---------------------------------------------------------------------------
@@ -106,10 +129,14 @@ def fetch_nse_insider(
     symbol: str,
     from_date: str,
     to_date: str,
-) -> list[dict]:
+) -> list[dict] | None:
     """Fetch insider trading records for one symbol from NSE.
 
-    Returns a list of raw dicts from the NSE API `data` array.
+    Returns the raw `data` array, or None if the request FAILED. None and [] are
+    deliberately distinct: [] means "NSE answered, this stock has no filings" while None
+    means "we never got an answer" — main() needs that difference to detect a dead session
+    (see _refresh_session_if_stalled), and a caller that conflates them would silently treat
+    a throttled run as a universe with no insider activity.
     """
     url = NSE_INSIDER_URL.format(
         symbol=symbol,
@@ -122,7 +149,7 @@ def fetch_nse_insider(
         return payload.get("data") or []
     except Exception as e:
         print(f"[INSIDER] {symbol}: fetch error after retries — {e}", file=sys.stderr)
-    return []
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -381,8 +408,33 @@ def main() -> None:
     print(f"[INSIDER] Processing {len(symbols)} symbol(s)")
 
     total_rows = 0
+    consecutive_fails = 0
+    rebuilds = 0
+    failed_symbols = 0
+
     for i, symbol in enumerate(symbols, 1):
         raw = fetch_nse_insider(sess, symbol, from_date, to_date)
+
+        if raw is None:
+            failed_symbols += 1
+            consecutive_fails += 1
+            if consecutive_fails >= CONSECUTIVE_FAIL_LIMIT:
+                if rebuilds >= MAX_SESSION_REBUILDS:
+                    print(
+                        f"[INSIDER] Aborting at {symbol} ({i}/{len(symbols)}): "
+                        f"{consecutive_fails} consecutive failures after "
+                        f"{rebuilds} session rebuilds — NSE is refusing this run.",
+                        file=sys.stderr,
+                    )
+                    break
+                rebuilds += 1
+                new_sess = _rebuild_session(rebuilds)
+                if new_sess is not None:
+                    sess = new_sess
+                    consecutive_fails = 0
+            continue
+
+        consecutive_fails = 0
         parsed = [p for p in (_parse_record(symbol, r) for r in raw) if p]
         if parsed:
             n = upsert_transactions(con, parsed)
@@ -397,8 +449,11 @@ def main() -> None:
             time.sleep(SLEEP_BETWEEN)
 
     con.close()
+    # Report the failure count explicitly: an aggregate-only "N rows upserted" line made a run
+    # that died at "E" and skipped 70% of the universe look identical to a healthy one.
     print(
-        f"[INSIDER] Done. {total_rows} total rows upserted across {len(symbols)} symbol(s)."
+        f"[INSIDER] Done. {total_rows} total rows upserted across {len(symbols)} symbol(s); "
+        f"{failed_symbols} symbol(s) failed, {rebuilds} session rebuild(s)."
     )
 
 

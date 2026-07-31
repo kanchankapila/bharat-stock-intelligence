@@ -195,14 +195,18 @@ def upsert_wc_history(symbol: str, rows: list[dict], con) -> None:
     con.commit()
 
 
-def update_technical_signals(symbol: str, features: dict, con) -> None:
+def update_technical_signals(symbol: str, features: dict, con, today: str | None = None) -> None:
     if not features:
         return
     # Point-in-time stamp (see financial_ratios_fetcher): apply these annual working-capital
     # figures only to rows on/after the fiscal year's results were published (date >= floor) and
     # NULL them on older rows, so the latest year's CCC can't back-fill onto historical signal
     # rows and leak into the ml_ensemble/exit_policy feature join. Full trail: working_capital_history.
-    floor = as_of_floor(features.get("year_ending"))
+    # `fallback=today` (last completed trading session) matters on the rare path where
+    # year_ending is missing/unparseable -- without it, as_of_floor() silently falls through to a
+    # bare date.today(), which matches zero rows on a non-trading run day and the whole UPDATE
+    # becomes a silent no-op (same bug class fixed in financial_ratios_fetcher.py/mf_holdings_fetcher.py).
+    floor = as_of_floor(features.get("year_ending"), fallback=today)
     cur = con.cursor()
     cur.execute("""
         UPDATE technical_signals SET
@@ -225,7 +229,7 @@ def update_technical_signals(symbol: str, features: dict, con) -> None:
 
 # ── Per-stock processing ──────────────────────────────────────────────────────────
 
-def process_stock(symbol: str, company_id: str, session: requests.Session, con) -> dict:
+def process_stock(symbol: str, company_id: str, today: str, session: requests.Session, con) -> dict:
     balance = fetch_et_stats(company_id, "Balance", session)
     quarterly = fetch_et_stats(company_id, "Quarterly", session)
 
@@ -250,7 +254,7 @@ def process_stock(symbol: str, company_id: str, session: requests.Session, con) 
         "wc_improving": wc_improving,
         "year_ending": latest.get("fiscal_year"),
     }
-    update_technical_signals(symbol, features, con)
+    update_technical_signals(symbol, features, con, today=today)
     return features
 
 
@@ -286,6 +290,11 @@ def main() -> None:
     print(f"[WorkingCapital] Processing {len(stocks)} stocks — cash conversion cycle (annual)…")
     session = requests.Session()
     session.headers.update(HEADERS)
+    # Align to the last completed trading session, NOT date.today() -- this job runs in the
+    # trendlyne-ratios-monthly batch (first Sunday of the month), a non-trading day with no
+    # technical_signals row yet. Same fix as financial_ratios_fetcher.py.
+    latest_row = con.execute("SELECT MAX(date) AS d FROM stock_ohlcv").fetchone()
+    today = str(latest_row["d"])[:10] if latest_row and latest_row["d"] else date.today().isoformat()
 
     ok = 0
     ccc_sum = 0.0
@@ -295,7 +304,7 @@ def main() -> None:
 
     for i, (symbol, company_id) in enumerate(stocks, 1):
         try:
-            features = process_stock(symbol, company_id, session, con)
+            features = process_stock(symbol, company_id, today, session, con)
             if not features:
                 print(f"  [{i}/{len(stocks)}] {symbol}: no data")
                 continue

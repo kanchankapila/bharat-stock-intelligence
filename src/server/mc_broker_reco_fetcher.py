@@ -110,7 +110,20 @@ def ensure_schema(con) -> None:
 # ---------------------------------------------------------------------------
 
 def fetch_recos(lookback_days: int = FETCH_LOOKBACK_DAYS) -> list[dict]:
-    """Page through the MC broker-reco API until recs are older than lookback_days."""
+    """Page through the MC broker-reco API, keeping every rec within lookback_days.
+
+    The API's reco_data is NOT sorted chronologically -- live-verified 2026-07-31: a single
+    100-row page mixed entry_dates from 2025-04-29 through 2026-07-28 in no discernible order
+    (first 5 rows: 2026-04-29, 2026-06-12, 2025-04-29, 2025-11-06, 2026-05-05; last 5 rows of
+    the SAME page: all 2026-07-28). An earlier version of this function assumed newest-first
+    ordering and broke out of the whole fetch on the FIRST stale row encountered per page --
+    since stale rows can appear anywhere, this silently discarded genuinely recent recs sitting
+    later in the same page, and could return a fully empty result on a day the first row
+    happened to be old (root-caused via a live_datasource test that reproduced exactly this:
+    the real endpoint returned 97 real recs including several from 3 days ago, but
+    fetch_recos() returned []). Fixed to filter every row on every page without early-exit,
+    paging up to MAX_PAGES (already bounded for timeout reasons) or until a page returns no
+    data at all (genuine end of dataset)."""
     if cffi_req is None:
         raise ImportError(
             "curl_cffi is required: pip install curl-cffi"
@@ -137,7 +150,6 @@ def fetch_recos(lookback_days: int = FETCH_LOOKBACK_DAYS) -> list[dict]:
         if not reco_data:
             break
 
-        reached_cutoff = False
         for rec in reco_data:
             entry_date_str = rec.get("entry_date", "")
             try:
@@ -146,8 +158,7 @@ def fetch_recos(lookback_days: int = FETCH_LOOKBACK_DAYS) -> list[dict]:
                 entry_dt = datetime.datetime.now()
 
             if entry_dt < cutoff:
-                reached_cutoff = True
-                break
+                continue
 
             all_recos.append({
                 "scid":              rec.get("scId", ""),
@@ -159,9 +170,6 @@ def fetch_recos(lookback_days: int = FETCH_LOOKBACK_DAYS) -> list[dict]:
                 "entry_date":        entry_date_str,
                 "recommend_date":    rec.get("recommend_date", ""),
             })
-
-        if reached_cutoff:
-            break
 
     return all_recos
 

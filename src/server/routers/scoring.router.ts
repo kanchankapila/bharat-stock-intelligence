@@ -246,7 +246,7 @@ export const scoringRouter = router({
           r.signal_score, r.entry_price, r.signals_json,
           qs.piotroski_f_score, qs.sharpe_ratio, qs.rank_composite,
           qs.bullish_screener_count, qs.return_12m,
-          ur.conviction_level, ur.avg_engine_track_record,
+          ur.conviction_level, ur.avg_engine_track_record, ur.engine_coverage_count,
           COALESCE(ur.stop_loss, r.entry_price * 0.95) AS stop_loss,
           COALESCE(ur.target_1,  r.entry_price * 1.12) AS target
         FROM ranked r
@@ -295,6 +295,7 @@ export const scoringRouter = router({
           avgTrackRecord:       row.avg_engine_track_record != null
                                   ? parseFloat((row.avg_engine_track_record as number).toFixed(3))
                                   : null,
+          engineCoverageCount:  (row.engine_coverage_count as number) ?? null,
           stopLoss:  parseFloat(stop.toFixed(2)),
           target:    parseFloat(target.toFixed(2)),
           rrRatio,
