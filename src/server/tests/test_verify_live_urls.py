@@ -18,7 +18,12 @@ if not os.path.isdir(_SCRIPTS):
     )
 sys.path.insert(0, os.path.abspath(_SCRIPTS))
 
-verify = pytest.importorskip("verify_live_urls")
+# Deliberately a hard import, NOT pytest.importorskip. verify_live_urls imports its parsers
+# from probe_endpoint_payloads; with importorskip, a missing or renamed dependency would make
+# all 24 tests below silently SKIP and the suite would still report green -- the precise
+# "test passes while the real code is broken" failure this repo has been burned by repeatedly.
+# A missing dependency must fail loudly here.
+import verify_live_urls as verify  # noqa: E402
 
 
 class TestSlashNormalization:
