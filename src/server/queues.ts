@@ -638,6 +638,11 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   // must not fail the whole daily ML chain the way the drift-detector timeout did.
   await T.run('fii-dii-history', () => runPython('fii_dii_history_fetcher.py', [], 120_000))
     .catch(e => console.warn('[QUEUE] fii_dii_history_fetcher failed (daily ops continues):', (e as Error).message));
+  // Bulk/block deals carrying pctTransacted (% of float) -- the cross-sectionally comparable
+  // deal-size field NSE's own feed does not provide (endpoint-corpus audit §5-2). 5 pages of
+  // 200 covers several days of deals, so a missed run self-heals on the next one.
+  await T.run('tickertape-deals', () => runPython('tickertape_deals_fetcher.py', ['--pages', '5'], 180_000))
+    .catch(e => console.warn('[QUEUE] tickertape_deals_fetcher failed (daily ops continues):', (e as Error).message));
   await runPython('pcr_fetcher.py', ['--gex'], 90_000)
     .catch(e => console.warn('[QUEUE] pcr_fetcher failed:', (e as Error).message));
   // Parallel batch — safe to overlap: disjoint target tables (mc_* vs quant_scores vs
@@ -3378,6 +3383,42 @@ export async function initQueues(): Promise<boolean> {
     await addJobWithCatchup(jobDigestQueue, 'job-digest-daily', {}, {
       repeat: { pattern: '45 18 * * *' }, // 12:15 AM IST next day (18:45 UTC), covers late-night jobs
       jobId: 'job-digest-daily-repeatable',
+      removeOnComplete: 3,
+      removeOnFail: 3,
+    });
+
+    // ── Daily stock-recommendation digest — 8:15 AM IST (02:45 UTC), Mon-Fri ──────
+    // Scheduled 45 min after unified-ranker ('0 2 * * 1-5' = 07:30 IST) so it reads that
+    // day's freshly-built ranking, and before the 09:15 IST open so the picks are actionable.
+    const QUEUE_RECS_DIGEST = 'recommendations-digest';
+    const recsDigestQueue = new Queue(QUEUE_RECS_DIGEST, { connection });
+    const recsDigestWorker = new Worker(
+      QUEUE_RECS_DIGEST,
+      async () => {
+        const { sendRecommendationsDigest } = await import('./telegramRecommendations');
+        const res = await sendRecommendationsDigest();
+        if (!res.sent && res.picks > 0) {
+          // Picks existed but Telegram rejected the send -- fail loudly so the heartbeat marks
+          // it failed rather than reporting success on a digest nobody received.
+          throw new Error('recommendations digest failed to send to Telegram');
+        }
+      },
+      { connection, concurrency: 1, lockDuration: 5 * 60_000 },
+    );
+    recsDigestWorker.on('completed', () => {
+      console.log('[QUEUE] recommendations-digest sent');
+      recordHeartbeat('recommendations-digest', 'success');
+    });
+    recsDigestWorker.on('failed', (_, err) => {
+      console.error('[QUEUE] recommendations-digest failed:', err.message);
+      recordHeartbeat('recommendations-digest', 'failed', err.message);
+    });
+
+    const recsRepeatables = await recsDigestQueue.getRepeatableJobs();
+    for (const r of recsRepeatables) await recsDigestQueue.removeRepeatableByKey(r.key);
+    await addJobWithCatchup(recsDigestQueue, 'recommendations-digest-daily', {}, {
+      repeat: { pattern: '45 2 * * 1-5' },
+      jobId: 'recommendations-digest-daily-repeatable',
       removeOnComplete: 3,
       removeOnFail: 3,
     });

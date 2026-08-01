@@ -94,6 +94,7 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   // run partway through an ~11-step chain that can itself run late via addJobWithCatchup.
   { jobName: 'fii-dii-fetcher', label: 'ML Daily Ops: FII/DII Fetcher', cronPattern: '0 14 * * 1-5', graceMinutes: 120, critical: false },
   { jobName: 'fii-dii-history', label: 'ML Daily Ops: FII/DII Deep History', cronPattern: '0 14 * * 1-5', graceMinutes: 120, critical: false },
+  { jobName: 'tickertape-deals', label: 'ML Daily Ops: Bulk/Block Deals (% of float)', cronPattern: '0 14 * * 1-5', graceMinutes: 120, critical: false },
   { jobName: 'finbert-scorer', label: 'ML Daily Ops: FinBERT Scorer', cronPattern: '0 14 * * 1-5', graceMinutes: 120, critical: false },
   { jobName: 'outcome-resolver-5d', label: 'ML Daily Ops: Outcome Resolver 5d', cronPattern: '0 14 * * 1-5', graceMinutes: 120, critical: false },
   { jobName: 'outcome-resolver-15d', label: 'ML Daily Ops: Outcome Resolver 15d', cronPattern: '0 14 * * 1-5', graceMinutes: 120, critical: false },
@@ -121,4 +122,10 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   // Not critical -- it's a Telegram notification job, not a data pipeline -- but a missed
   // digest send should still show up as stale rather than silently vanish.
   { jobName: 'job-digest', label: 'Daily Job Digest (Telegram)', cronPattern: '45 18 * * *', graceMinutes: 60, critical: false },
+
+  // Stock-recommendation digest. Runs after unified-ranker ('0 2 * * 1-5' = 07:30 IST) so it
+  // reads the freshly-built ranking. Critical: this is the user-facing output of the whole
+  // pipeline, and its predecessor (the websocketService confidence>=85 alert) went silent for
+  // ~2 weeks without anything noticing, which is exactly what a heartbeat entry prevents.
+  { jobName: 'recommendations-digest', label: 'Daily Stock Recommendations (Telegram)', cronPattern: '45 2 * * 1-5', graceMinutes: 90, critical: true },
 ];

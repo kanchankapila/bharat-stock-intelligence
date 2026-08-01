@@ -494,3 +494,18 @@ inside any one component, since they now arrive via two independent routes. Leak
 verified zero remain after a re-run. Three regression tests pin it, including one that asserts
 the reversal component *would* otherwise score an index — the reason a component-level guard is
 not sufficient.
+
+---
+
+## 9. BACKLOG RESOLUTION — 2026-07-31 (later session)
+
+The §6 "still open" table is now resolved. Two items are **closed as won't-fix** with reasons,
+so future passes do not keep re-opening them; the rest are done or unchanged.
+
+| Item | Resolution |
+|---|---|
+| **`nse_universe_history` → backtest path** | **DONE.** New `ohlcv_adjust.py` derives split/bonus factors from NSE's own data (649 events persisted), and `backtester.load_ohlcv()` now unions split-adjusted bhavcopy prices for any symbol absent from `stock_ohlcv`. Live: MEGASOFT 1,260 bars ending exactly at its 2026-02-06 delisting, INFIBEAM 1,257, SEQUENT 1,251 — all previously untradeable. Split path verified end-to-end (IVZINNIFTY's 1:10 is continuous across its ex-date). |
+| **Finding #31 (regime tilts)** | **RESOLVED — as shrinkage, not a fit.** Measured: BULL has 3 lifetime regime episodes and CRASH 6, and `stock_factor_breakdown_history` has **zero days** of either. Fitting *and* sign-validation are both impossible, and will not become possible on any useful horizon. Tilts are now treated as priors and shrunk halfway to neutral (direction preserved, magnitude damped); `regime_tilt_fit_readiness()` reports when a regime accumulates enough history to justify a real fit. |
+| **`adjustment_basis` consumers** | **CLOSED — won't fix.** 287 of 2,608,478 rows are tagged (**0.011%**), and backfilling means decompressing 21 of 24 Timescale chunks and permanently losing the compression. Wiring `relative_strength.py` / `ml_ensemble.py` / `breakout_classifier.py` to a column that is empty for 99.989% of rows buys nothing. The mixed-basis problem it was meant to detect is now handled at source by `ohlcv_adjust.py`. Re-open only if a *dense* basis tag ever exists. |
+| **Pre-2026-07-31 screener feature values** | **CLOSED — permanently unverifiable, and superseded.** `screener_membership_snapshot` (2026-07-31) makes every value reproducible from that date forward. A bitemporal rebuild of `screener_appearances` cannot recover state that was overwritten in place, so it would cost a dual-write migration to fix nothing historical. Treat pre-07-31 screener-derived numbers as void and move on. |
+| **`live_datasource` coverage** | Improving incrementally, still the largest single control gap. Not closeable in one pass. |
