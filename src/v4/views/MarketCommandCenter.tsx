@@ -1,5 +1,5 @@
-import React from 'react';
-import { Activity, Gauge, TrendingUp, TrendingDown, Flame, BarChart3 } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Activity, Gauge, TrendingUp, TrendingDown, Flame, BarChart3, LayoutDashboard } from 'lucide-react';
 import { trpc } from '../../lib/trpc';
 import { Card } from '../../components/Card';
 import { cn } from '../../lib/utils';
@@ -12,6 +12,10 @@ import { PreMarketBriefing } from '../components/PreMarketBriefing';
 import { FnOIndexInsight } from '../components/FnOIndexInsight';
 import { SentimentPulseWidget } from '../components/SentimentPulseWidget';
 import { EarningsPulseWidget } from '../components/EarningsPulseWidget';
+import { V4QuickNav } from '../components/V4QuickNav';
+import { TopPicksWidget } from '../components/TopPicksWidget';
+import { MoneyFlowPulseWidget } from '../components/MoneyFlowPulseWidget';
+import { currentTimeInZone } from '../../lib/timeFormat';
 
 const REGIME_STYLE: Record<string, { color: string; bg: string; label: string }> = {
   BULL:     { color: 'text-emerald-400', bg: 'bg-emerald-500/10 border-emerald-500/25', label: 'BULL' },
@@ -67,6 +71,20 @@ const BreadthStrip: React.FC = () => {
   );
 };
 
+const LiveClock: React.FC = () => {
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => tick((n) => n + 1), 30_000);
+    return () => clearInterval(t);
+  }, []);
+  return (
+    <span className="flex items-center gap-1.5 text-[10px] text-slate-500 font-mono">
+      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+      {currentTimeInZone('Asia/Kolkata')} IST
+    </span>
+  );
+};
+
 interface MarketCommandCenterProps {
   onSelectStock?: (symbol: string) => void;
   onSelectIndex?: (id: string, name: string) => void;
@@ -82,15 +100,33 @@ interface MarketCommandCenterProps {
 export const MarketCommandCenter: React.FC<MarketCommandCenterProps> = ({ onSelectStock, onSelectIndex }) => {
   return (
     <div className="space-y-6 pb-10">
-      {/* Header strip: indices + regime + breadth */}
-      <div className="flex flex-col lg:flex-row gap-4 lg:items-start">
-        <div className="flex-1">
-          <IndexOverview onSelectIndex={onSelectIndex} />
+      <V4QuickNav />
+
+      {/* Hero: title + live clock, then indices/regime/breadth in a unified gradient shell */}
+      <div className="rounded-2xl border border-slate-800 bg-gradient-to-br from-indigo-950/30 via-slate-900/60 to-slate-950/80 p-4 space-y-4">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div className="flex items-center gap-2">
+            <LayoutDashboard className="w-4 h-4 text-indigo-400" />
+            <h1 className="text-sm font-black text-slate-100 uppercase tracking-widest">Market Command Center</h1>
+          </div>
+          <LiveClock />
         </div>
-        <div className="flex flex-row lg:flex-col gap-3 shrink-0">
-          <RegimeBadge />
-          <BreadthStrip />
+
+        <div className="flex flex-col lg:flex-row gap-4 lg:items-start">
+          <div className="flex-1">
+            <IndexOverview onSelectIndex={onSelectIndex} />
+          </div>
+          <div className="flex flex-row lg:flex-col gap-3 shrink-0">
+            <RegimeBadge />
+            <BreadthStrip />
+          </div>
         </div>
+      </div>
+
+      {/* Canonical picks + institutional flow -- the decisive numbers, front and center */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <TopPicksWidget onSelectStock={onSelectStock} />
+        <MoneyFlowPulseWidget />
       </div>
 
       <PreMarketBriefing />

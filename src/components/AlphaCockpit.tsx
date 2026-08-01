@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { formatISTWithLocal, relativeFromNow } from '../lib/timeFormat';
 import { CanonicalBadge } from './CanonicalSourceNote';
+import { V4QuickNav } from '../v4/components/V4QuickNav';
 
 // ─── Style Maps ───────────────────────────────────────────────────────────────
 
@@ -233,7 +234,8 @@ export const AlphaCockpit: React.FC = () => {
 
   return (
     <div className="space-y-6 select-none font-sans">
-      
+      <V4QuickNav />
+
       {/* Toast Alert */}
       {toast && (
         <div className={cn(

@@ -7,6 +7,7 @@ import {
   CartesianGrid, Tooltip, Legend, ReferenceLine,
 } from 'recharts';
 import { formatISTWithLocal, relativeFromNow } from '../lib/timeFormat';
+import { V4QuickNav } from '../v4/components/V4QuickNav';
 
 // fii_dii_flow was deep-backfilled to 2016-01-01 (fii_dii_history_fetcher.py) -- this page
 // is the first place that history gets a real trend view instead of an 8-day snippet.
@@ -88,6 +89,7 @@ export function MoneyFlowPage() {
 
   return (
     <div className="min-h-screen bg-slate-900 text-white p-4 space-y-4">
+      <V4QuickNav />
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-xl font-bold flex items-center gap-2">

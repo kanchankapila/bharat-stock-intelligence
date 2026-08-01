@@ -11,6 +11,8 @@ import {
 } from 'lucide-react';
 import { formatISTWithLocal, relativeFromNow } from '../lib/timeFormat';
 import { CanonicalBadge } from './CanonicalSourceNote';
+import { StockTagRow } from './StockTagRow';
+import { V4QuickNav } from '../v4/components/V4QuickNav';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -39,48 +41,6 @@ const pctFmt = (v: number | null | undefined, decimals = 1) =>
 const pctColor = (v: number | null | undefined) =>
   v == null ? 'text-slate-400' : v >= 0 ? 'text-emerald-400' : 'text-rose-400';
 const numFmt = (v: number | null | undefined) => v == null ? '—' : v.toFixed(1);
-
-// ─── Signal badges ────────────────────────────────────────────────────────────
-
-function Badge({ label, color = 'bg-slate-700 text-slate-300' }: { label: string; color?: string }) {
-  return <span className={cn('px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide', color)}>{label}</span>;
-}
-
-function StockBadges({ p }: { p: any }) {
-  const badges: Array<{ label: string; color: string }> = [];
-
-  if (p.eps_beat_streak >= 3) badges.push({ label: `EPS ×${p.eps_beat_streak}`, color: 'bg-emerald-500/20 text-emerald-300' });
-  else if (p.eps_surprise_q1 > 5) badges.push({ label: 'EPS beat', color: 'bg-emerald-500/15 text-emerald-400' });
-  if (p.eps_miss_after_streak) badges.push({ label: 'PEAD', color: 'bg-rose-500/20 text-rose-300' });
-
-  if (p.insider_buy_flag) badges.push({ label: 'Insider buy', color: 'bg-violet-500/20 text-violet-300' });
-  if (p.insider_sell_flag) badges.push({ label: 'Insider sell', color: 'bg-rose-500/15 text-rose-400' });
-  if (p.promoter_net_90d > 0.5) badges.push({ label: 'Promoter ↑', color: 'bg-violet-500/15 text-violet-400' });
-
-  if (p.rating_upgrade_180d) badges.push({ label: 'Rating ↑', color: 'bg-sky-500/20 text-sky-300' });
-  if (p.rating_downgrade_180d) badges.push({ label: 'Rating ↓', color: 'bg-rose-500/15 text-rose-400' });
-
-  if (p.fcf_positive && p.fcf_yield > 3) badges.push({ label: `FCF ${numFmt(p.fcf_yield)}%`, color: 'bg-teal-500/20 text-teal-300' });
-  if (p.debt_coverage_risk) badges.push({ label: 'Debt risk', color: 'bg-orange-500/20 text-orange-300' });
-
-  if (p.block_deal_flag && p.block_deal_direction > 0) badges.push({ label: 'Block buy', color: 'bg-sky-500/15 text-sky-400' });
-  if (p.block_deal_flag && p.block_deal_direction < 0) badges.push({ label: 'Block sell', color: 'bg-rose-500/15 text-rose-400' });
-
-  if (p.mf_sector_flow_pct > 1) badges.push({ label: 'MF inflow', color: 'bg-indigo-500/20 text-indigo-300' });
-
-  if (p.wc_improving) badges.push({ label: 'WC ↑', color: 'bg-teal-500/15 text-teal-400' });
-  if (p.wc_deteriorating) badges.push({ label: 'WC ↓', color: 'bg-orange-500/15 text-orange-400' });
-
-  if (p.asm_flag) badges.push({ label: 'ASM', color: 'bg-red-500/25 text-red-300' });
-
-  if (p.is_nifty50) badges.push({ label: 'N50', color: 'bg-slate-600/60 text-slate-300' });
-
-  return (
-    <div className="flex flex-wrap gap-1 mt-2">
-      {badges.map((b, i) => <Badge key={i} label={b.label} color={b.color} />)}
-    </div>
-  );
-}
 
 // ─── Mini score bar ───────────────────────────────────────────────────────────
 
@@ -209,7 +169,7 @@ function StockCard({ p, onSelect }: { p: any; onSelect: (sym: string) => void })
       )}
 
       {/* Badges */}
-      <StockBadges p={p} />
+      <StockTagRow p={p} className="mt-2" />
 
       {/* Expand toggle */}
       <button
@@ -361,6 +321,7 @@ export function BuyRecommendationsPage({ onSelectStock }: { onSelectStock: (sym:
 
   return (
     <div className="min-h-screen bg-slate-900 text-white p-4 space-y-4">
+      <V4QuickNav />
 
       {/* Page header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
