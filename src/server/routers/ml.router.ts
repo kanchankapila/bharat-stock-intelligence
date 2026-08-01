@@ -58,10 +58,13 @@ function computeRoc(regime: string, pts: { p: number; y: number }[], minN: numbe
 
 export const mlRouter = router({
   getFiiDiiFlow: publicProcedure
-    .input(z.object({ days: z.number().min(1).max(90).default(30) }).optional())
+    // fii_dii_flow was deep-backfilled to 2016-01-01 (see fii_dii_history_fetcher.py) --
+    // 4000 comfortably covers the full history (~2,600 trading days) for long-range trend views.
+    .input(z.object({ days: z.number().min(1).max(4000).default(30) }).optional())
     .query(async ({ input }) => {
       return dbAll(`
-        SELECT date, fii_buy, fii_sell, fii_net, dii_buy, dii_sell, dii_net, source, fetched_at
+        SELECT date, fii_buy, fii_sell, fii_net, dii_buy, dii_sell, dii_net,
+               fii_net_all_segments, mf_total, source, fetched_at
         FROM fii_dii_flow ORDER BY date DESC LIMIT ?
       `, [input?.days ?? 30]);
     }),

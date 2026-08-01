@@ -8,6 +8,7 @@ import {
 import { cn } from '../lib/utils';
 import { motion } from 'motion/react';
 import stockData from '../data/stocklist';
+import { LegacyScoreBanner } from './CanonicalSourceNote';
 
 interface ScoredStock {
   symbol?: string;
@@ -138,8 +139,8 @@ const TopRatedStocks: React.FC<{
   watchlist: string[];
   onToggleWatchlist: (symbol: string, metadata?: { price?: number; name?: string; source?: string }) => void;
 }> = ({ onSelectStock, watchlist = [], onToggleWatchlist }) => {
-  const { data: longTermStocks, isLoading: isLoadingLT, refetch: refetchLT } = trpc.getTopRatedStocks.useQuery({ limit: 20, timeframe: 'long_term' });
-  const { data: intradayStocks, isLoading: isLoadingID, refetch: refetchID } = trpc.getTopRatedStocks.useQuery({ limit: 20, timeframe: 'intraday' });
+  const { data: longTermStocks, isLoading: isLoadingLT, refetch: refetchLT } = trpc.getTopRatedStocks.useQuery({ limit: 20, timeframe: 'long_term' }, { refetchInterval: 15 * 60_000 });
+  const { data: intradayStocks, isLoading: isLoadingID, refetch: refetchID } = trpc.getTopRatedStocks.useQuery({ limit: 20, timeframe: 'intraday' }, { refetchInterval: 5 * 60_000 });
   const triggerStockScoring = trpc.triggerStockScoring.useMutation();
 
   const handleRecalculate = async () => {
@@ -190,6 +191,8 @@ const TopRatedStocks: React.FC<{
           {triggerStockScoring.isPending ? 'Syncing intelligence...' : 'Refresh All Scopes'}
         </button>
       </div>
+
+      <LegacyScoreBanner note="Ranked from the per-timeframe scoring engine (stock_scores), computed separately from the unified cross-engine model -- check Alpha / Buy Recs for the canonical, regime-aware view of the same stocks." />
 
       <div className="grid grid-cols-1 xl:grid-cols-4 gap-8">
         <div className="xl:col-span-3 grid grid-cols-1 lg:grid-cols-2 gap-8">

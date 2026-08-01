@@ -2,6 +2,7 @@ import React from 'react';
 import { RefreshCw, Crosshair, Target, AlertTriangle } from 'lucide-react';
 import { trpc } from '../lib/trpc';
 import { cn } from '../lib/utils';
+import { LegacyScoreBanner } from './CanonicalSourceNote';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -222,6 +223,8 @@ export function HighConvictionPage({
           </button>
         </div>
       </div>
+
+      <LegacyScoreBanner note="A separate rule-based gate (RSI divergence/EMA stack + Piotroski + Sharpe filters on signal_outcomes/quant_scores), not the unified cross-engine model -- check Alpha / Buy Recs for the canonical, regime-aware view." />
 
       {/* Loading skeletons */}
       {isLoading && (

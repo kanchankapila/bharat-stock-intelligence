@@ -64,6 +64,11 @@ export const Watchlist: React.FC<WatchlistProps> = ({
     refetchInterval: isVisible ? 10000 : false,
   });
 
+  const { data: closeSeries } = trpc.getRecentCloseSeries.useQuery(
+    { symbols: watchlist, days: 15 },
+    { enabled: isVisible && watchlist.length > 0, staleTime: 15 * 60_000 }
+  );
+
   const watchlistStocks = stocks.filter(s => watchlist.includes(s.symbol)).map(stock => {
     const live = liveQuotes?.find((q: any) => q.symbol === stock.symbol);
     const detail = watchlistDetails?.find(d => d.symbol === stock.symbol);
@@ -132,7 +137,22 @@ export const Watchlist: React.FC<WatchlistProps> = ({
                         <p className="text-[7px] font-black text-slate-400 uppercase tracking-widest mb-1">LTP</p>
                         <p className="text-xl font-black text-white tabular-nums tracking-tight italic">₹{stock.price.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
                      </div>
-                     <WatchlistSparkline symbol={stock.symbol} isUp={isUp} enabled={isVisible} />
+                     <div className="h-8 w-20">
+                        {(() => {
+                          const closes = closeSeries?.[stock.symbol];
+                          if (!closes || closes.length < 2) {
+                            return <span className="text-[8px] text-slate-600 italic">No trend yet</span>;
+                          }
+                          const data = closes.map(v => ({ v }));
+                          return (
+                            <ResponsiveContainer width="100%" height="100%">
+                               <BarChart data={data}>
+                                  <Bar dataKey="v" fill={isUp ? "#10b981" : "#f43f5e"} opacity={0.5} radius={[2, 2, 0, 0]} />
+                               </BarChart>
+                            </ResponsiveContainer>
+                          );
+                        })()}
+                     </div>
                   </div>
                 </div>
 

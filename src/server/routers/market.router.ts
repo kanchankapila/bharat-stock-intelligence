@@ -126,6 +126,30 @@ export const marketRouter = router({
       return results.filter(Boolean);
     }),
 
+  // Recent daily closes per symbol, for lightweight sparklines (watchlist cards, etc).
+  // DB-only (stock_ohlcv), no external fetch -- cheap enough to call for a whole watchlist grid.
+  getRecentCloseSeries: publicProcedure
+    .input(z.object({ symbols: z.array(z.string()).max(60), days: z.number().min(2).max(60).default(15) }))
+    .query(async ({ input }) => {
+      const { symbols, days } = input;
+      if (symbols.length === 0) return {};
+      const placeholders = symbols.map(() => '?').join(',');
+      const rows = await dbAll<{ symbol: string; date: string; close: number }>(`
+        SELECT symbol, date, close FROM (
+          SELECT symbol, date, close,
+                 ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY date DESC) AS rn
+          FROM stock_ohlcv
+          WHERE symbol IN (${placeholders}) AND (is_suspect IS NULL OR is_suspect = 0) AND close IS NOT NULL
+        ) t WHERE rn <= ?
+        ORDER BY symbol ASC, date ASC
+      `, [...symbols, days]);
+      const bySymbol: Record<string, number[]> = {};
+      for (const r of rows) {
+        (bySymbol[r.symbol] ??= []).push(r.close);
+      }
+      return bySymbol;
+    }),
+
   getStocks: publicProcedure
     .input(z.object({ limit: z.number().optional().default(10), sector: z.string().optional() }))
     .query(async ({ input }) => {

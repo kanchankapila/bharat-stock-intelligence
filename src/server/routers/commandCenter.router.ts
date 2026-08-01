@@ -200,6 +200,39 @@ export const commandCenterRouter = router({
       return { picks, regime, sectorList: sectorSet, lastComputedAt: rows[0]?.computed_at ?? null };
     }),
 
+  // Single-symbol canonical score -- for stock-detail pages (v4 StockIntelligencePage) that
+  // need one stock's unified_recommendations row plus its technical_signals feature set for a
+  // tag row, without pulling and filtering the whole ranked list client-side.
+  getUnifiedScoreForSymbol: publicProcedure
+    .input(z.object({ symbol: z.string() }))
+    .query(async ({ input }) => {
+      const latest = await urLatestAt();
+      const row = await dbGet<any>(`
+        SELECT
+          ur.symbol, ur.unified_score, ur.conviction_level, ur.timeframe, ur.sector,
+          ur.classification, ur.stop_loss, ur.target_1, ur.target_2,
+          ur.entry_zone_low, ur.entry_zone_high, ur.risk_reward,
+          ur.ml_score, ur.confluence_score, ur.technical_score, ur.dl_score,
+          ur.trade_reasoning, ur.engine_coverage_count, ur.computed_at,
+          ts.win_probability, ts.signal_type, ts.rsi, ts.cmp, ts.change_pct,
+          ts.eps_surprise_q1, ts.eps_surprise_q2, ts.eps_beat_streak, ts.eps_miss_after_streak,
+          ts.fcf_yield_approx AS fcf_yield, ts.interest_coverage, ts.fcf_positive, ts.debt_coverage_risk,
+          ts.delivery_trend_30d, ts.block_deal_flag, ts.block_deal_direction,
+          ts.promoter_buy_90d_cr, ts.promoter_sell_90d_cr, ts.promoter_net_90d,
+          ts.insider_buy_flag, ts.insider_sell_flag,
+          ts.rating_upgrade_180d, ts.rating_downgrade_180d,
+          ts.mf_sector_flow_pct, ts.wc_improving, ts.wc_deteriorating,
+          ts.asm_flag, ts.gsm_stage, ts.is_nifty50, ts.nifty_tier,
+          ts.days_to_next_results
+        FROM unified_recommendations ur
+        LEFT JOIN (
+          SELECT * FROM technical_signals WHERE date = (SELECT MAX(date) FROM technical_signals)
+        ) ts ON ts.symbol = ur.symbol
+        WHERE ur.symbol = ? AND ur.computed_at = ?
+      `, [input.symbol, latest ?? '']);
+      return row ?? null;
+    }),
+
   runUnifiedRanker: adminProcedure
     .mutation(async () => {
       try {

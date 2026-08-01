@@ -117,6 +117,7 @@ const JobsDashboardPage   = React.lazy(() => import('./components/JobsDashboardP
 const EarlyHoursSpotter   = React.lazy(() => import('./components/EarlyHoursSpotter'));
 const AlphaCockpit       = React.lazy(() => import('./components/AlphaCockpit').then(m => ({ default: m.AlphaCockpit })));
 const IntradayPage       = React.lazy(() => import('./components/IntradayPage'));
+const MoneyFlowPage      = React.lazy(() => import('./components/MoneyFlowPage').then(m => ({ default: m.MoneyFlowPage })));
 
 // Lazy Suspense fallback
 const PageFallback = () => (
@@ -4181,6 +4182,7 @@ export default function App() {
             <Route path="/alpha-cockpit" element={<AlphaCockpit />} />
             <Route path="/alpha" element={<CommandCenterDashboard onSelectStock={(s) => { setDrawerSymbol(s); navigate('/trade-cockpit'); }} />} />
             <Route path="/buy-recs" element={<BuyRecommendationsPage onSelectStock={handleSelectStock} />} />
+            <Route path="/money-flow" element={<MoneyFlowPage />} />
             <Route path="/economics" element={
               <div className="p-6 space-y-6">
                 <MacroDashboard />
@@ -4275,6 +4277,7 @@ export default function App() {
                 } />
                 <Route path="/alpha" element={<CommandCenterDashboard onSelectStock={(s) => { setDrawerSymbol(s); navigate('/trade-cockpit'); }} />} />
                 <Route path="/buy-recs" element={<BuyRecommendationsPage onSelectStock={handleSelectStock} />} />
+                <Route path="/money-flow" element={<MoneyFlowPage />} />
               <Route path="/top-rated" element={<TopRatedStocks onSelectStock={handleSelectStock} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
             <Route path="/intraday" element={<IntradayPage onSelectStock={handleSelectStock} />} />
                 <Route path="/indices" element={<IndicesPage onSelectStock={handleSelectStock} selectedIndex={selectedIndex} setSelectedIndex={setSelectedIndex} />} />
