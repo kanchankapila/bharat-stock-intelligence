@@ -6,6 +6,8 @@ import {
   Shield, Zap, ChevronDown, ChevronUp, BarChart2,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { formatISTWithLocal, relativeFromNow } from '../lib/timeFormat';
+import { CanonicalBadge } from './CanonicalSourceNote';
 
 type ConvictionFilter = 'ALL' | 'S_ELITE' | 'A_HIGH' | 'B_MEDIUM' | 'C_LOW' | 'D_MARGINAL';
 type HorizonFilter    = 'ALL' | 'intraday' | 'swing' | 'long_term';
@@ -180,10 +182,10 @@ export function CommandCenterDashboard({ onSelectStock }: { onSelectStock: (sym:
   const [conviction, setConviction] = useState<ConvictionFilter>('ALL');
   const [horizon, setHorizon] = useState<HorizonFilter>('ALL');
 
-  const { data, isLoading, refetch, isRefetching } =
+  const { data, isLoading, refetch, isRefetching, dataUpdatedAt } =
     trpc.getCommandCenter.useQuery(
       { conviction, horizon, limit: 30 },
-      { refetchInterval: 5 * 60_000 },
+      { refetchInterval: 5 * 60_000, refetchOnWindowFocus: true },
     );
 
   const { mutate: triggerRanker, isPending: isRunning } =
@@ -214,6 +216,8 @@ export function CommandCenterDashboard({ onSelectStock }: { onSelectStock: (sym:
             </div>
           </div>
 
+          <CanonicalBadge />
+
           {data?.avgEngineTrackRecord != null && (
             <div className="flex items-center gap-1.5 text-[11px]">
               <BarChart2 className="w-3.5 h-3.5 text-slate-400" />
@@ -226,7 +230,10 @@ export function CommandCenterDashboard({ onSelectStock }: { onSelectStock: (sym:
 
           <div className="flex items-center gap-2 ml-auto">
             {data?.lastComputedAt && (
-              <span className="text-[10px] text-slate-500">Last run: {data.lastComputedAt}</span>
+              <span className="text-[10px] text-slate-500">
+                Model run {formatISTWithLocal(data.lastComputedAt)}
+                {dataUpdatedAt > 0 && <span className="ml-1.5 text-slate-600">· fetched {relativeFromNow(dataUpdatedAt)}</span>}
+              </span>
             )}
             <button
               onClick={() => triggerRanker()}

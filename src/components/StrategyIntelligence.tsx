@@ -6,6 +6,8 @@ import {
   AlertCircle, CheckCircle2, Loader2, SlidersHorizontal, X
 } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { LegacyScoreBanner } from './CanonicalSourceNote';
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
 
 type Strategy = 'composite' | 'momentum' | 'quality' | 'value' | 'confluence' | 'investment_picks';
 
@@ -53,6 +55,10 @@ const CLASS_COLORS: Record<string, { bg: string; text: string; dot: string }> = 
   'Hold':       { bg: 'bg-amber-500/10',   text: 'text-amber-400',   dot: 'bg-amber-400' },
   'Avoid':      { bg: 'bg-orange-500/10',  text: 'text-orange-400',  dot: 'bg-orange-400' },
   'Sell':       { bg: 'bg-rose-500/10',    text: 'text-rose-400',    dot: 'bg-rose-400' },
+};
+
+const STRATEGY_CHART_COLOR: Record<string, string> = {
+  indigo: '#6366f1', emerald: '#10b981', sky: '#0ea5e9', amber: '#f59e0b', violet: '#8b5cf6',
 };
 
 const STRATEGIES: { id: Strategy; label: string; icon: React.ElementType; desc: string }[] = [
@@ -205,6 +211,19 @@ export function StrategyIntelligence({ onSelectStock }: { onSelectStock: (symbol
     return s;
   }, [stocks, sort.key, sort.dir]);
 
+  // Score-distribution histogram for the active strategy's ranking key -- deciles 0-100.
+  const scoreHistogram = useMemo(() => {
+    const buckets = ['0-20', '20-40', '40-60', '60-80', '80-100'];
+    const counts = new Array(buckets.length).fill(0);
+    stocks.forEach((s) => {
+      const v = ((s as unknown) as Record<string, number | undefined>)[sort.key];
+      if (v == null || Number.isNaN(v)) return;
+      const idx = v < 20 ? 0 : v < 40 ? 1 : v < 60 ? 2 : v < 80 ? 3 : 4;
+      counts[idx]++;
+    });
+    return buckets.map((bucket, i) => ({ bucket, count: counts[i] }));
+  }, [stocks, sort.key]);
+
   function toggleSort(key: string) {
     setSort(p => p.key === key ? { key, dir: p.dir === 'desc' ? 'asc' : 'desc' } : { key, dir: 'desc' });
   }
@@ -259,6 +278,8 @@ export function StrategyIntelligence({ onSelectStock }: { onSelectStock: (symbol
         </div>
       </div>
 
+      <LegacyScoreBanner note="Ranked from the quant scoring engine (quant_scores) -- computed separately from the unified cross-engine model -- check Alpha / Buy Recs for the canonical, regime-aware view of the same stocks." />
+
       {/* Summary strip */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         {(['Strong Buy','Buy','Hold','Avoid','Sell'] as const).map(cls => {
@@ -270,6 +291,20 @@ export function StrategyIntelligence({ onSelectStock }: { onSelectStock: (symbol
             </div>
           );
         })}
+      </div>
+
+      {/* Score distribution for the active ranking */}
+      <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-3">
+        <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1">{scoreLabel} score distribution</div>
+        <ResponsiveContainer width="100%" height={100}>
+          <BarChart data={scoreHistogram} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
+            <XAxis dataKey="bucket" tick={{ fontSize: 9, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+            <YAxis tick={{ fontSize: 9, fill: '#94a3b8' }} axisLine={false} tickLine={false} allowDecimals={false} />
+            <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #334155', fontSize: 11 }} />
+            <Bar dataKey="count" fill={STRATEGY_CHART_COLOR[scoreColor] ?? '#6366f1'} radius={[3, 3, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
       </div>
 
       {/* Strategy selector */}

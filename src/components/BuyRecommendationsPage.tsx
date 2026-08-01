@@ -2,10 +2,15 @@ import { useState, useMemo } from 'react';
 import { trpc } from '../lib/trpc';
 import { cn } from '../lib/utils';
 import {
+  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell,
+} from 'recharts';
+import {
   TrendingUp, RefreshCw, Shield, Zap, Star, Activity,
   ChevronUp, ChevronDown, AlertTriangle, Users, BarChart2,
   Building2, Percent, Clock,
 } from 'lucide-react';
+import { formatISTWithLocal, relativeFromNow } from '../lib/timeFormat';
+import { CanonicalBadge } from './CanonicalSourceNote';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -303,12 +308,12 @@ export function BuyRecommendationsPage({ onSelectStock }: { onSelectStock: (sym:
   const [sector, setSector] = useState<string>('');
   const [search, setSearch] = useState('');
 
-  const { data, isLoading, refetch, isFetching } = trpc.getBuyRecommendations.useQuery({
+  const { data, isLoading, refetch, isFetching, dataUpdatedAt } = trpc.getBuyRecommendations.useQuery({
     conviction,
     horizon,
     sector: sector || undefined,
     limit: 120,
-  }, { staleTime: 2 * 60_000 });
+  }, { staleTime: 2 * 60_000, refetchInterval: 3 * 60_000, refetchOnWindowFocus: true });
 
   const filtered = useMemo(() => {
     if (!data?.picks) return [];
@@ -329,6 +334,29 @@ export function BuyRecommendationsPage({ onSelectStock }: { onSelectStock: (sym:
     return vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length * 100) : null;
   }, [filtered]);
 
+  // Sector distribution of the currently-filtered picks -- top 8 sectors by count.
+  const sectorChartData = useMemo(() => {
+    const counts: Record<string, number> = {};
+    filtered.forEach((p: any) => { const s = p.sector || 'Unclassified'; counts[s] = (counts[s] ?? 0) + 1; });
+    return Object.entries(counts)
+      .map(([sector, count]) => ({ sector, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 8);
+  }, [filtered]);
+
+  // Win-probability histogram in 10pt buckets, over the currently-filtered picks.
+  const winProbHistogram = useMemo(() => {
+    const buckets = ['<40%', '40-50%', '50-60%', '60-70%', '70-80%', '80%+'];
+    const counts = new Array(buckets.length).fill(0);
+    filtered.forEach((p: any) => {
+      if (p.win_probability == null) return;
+      const pct = p.win_probability * 100;
+      const idx = pct < 40 ? 0 : pct < 50 ? 1 : pct < 60 ? 2 : pct < 70 ? 3 : pct < 80 ? 4 : 5;
+      counts[idx]++;
+    });
+    return buckets.map((bucket, i) => ({ bucket, count: counts[i] }));
+  }, [filtered]);
+
   const regimeColor = REGIME_COLOR[data?.regime ?? ''] ?? 'text-slate-400';
 
   return (
@@ -340,12 +368,15 @@ export function BuyRecommendationsPage({ onSelectStock }: { onSelectStock: (sym:
           <h1 className="text-xl font-bold flex items-center gap-2">
             <TrendingUp size={20} className="text-emerald-400" />
             Buy Recommendations
+            <CanonicalBadge />
           </h1>
           <p className="text-xs text-slate-400 mt-0.5">
-            ML-ranked picks · {data?.picks?.length ?? 0} stocks ·{' '}
-            {data?.lastComputedAt ? new Date(data.lastComputedAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : '—'}
+            ML-ranked picks · {data?.picks?.length ?? 0} stocks · Model run {data?.lastComputedAt ? formatISTWithLocal(data.lastComputedAt) : '—'}
             {data?.regime && (
               <span className={cn('ml-2 font-semibold', regimeColor)}>· {data.regime}</span>
+            )}
+            {dataUpdatedAt > 0 && (
+              <span className="ml-2 text-slate-600">· page data fetched {relativeFromNow(dataUpdatedAt)}</span>
             )}
           </p>
         </div>
@@ -366,6 +397,40 @@ export function BuyRecommendationsPage({ onSelectStock }: { onSelectStock: (sym:
         <StatPill label="B — Medium" value={breakdown.B_MEDIUM} color="text-amber-400" />
         <StatPill label="Avg win prob" value={avgWin != null ? `${avgWin}%` : '—'} color="text-violet-400" />
       </div>
+
+      {/* At-a-glance charts */}
+      {filtered.length > 0 && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="bg-slate-800/40 border border-slate-700/50 rounded-lg p-3">
+            <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1">Win-probability distribution</div>
+            <ResponsiveContainer width="100%" height={110}>
+              <BarChart data={winProbHistogram} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
+                <XAxis dataKey="bucket" tick={{ fontSize: 9, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fontSize: 9, fill: '#94a3b8' }} axisLine={false} tickLine={false} allowDecimals={false} />
+                <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #334155', fontSize: 11 }} />
+                <Bar dataKey="count" radius={[3, 3, 0, 0]}>
+                  {winProbHistogram.map((entry, i) => (
+                    <Cell key={i} fill={i >= 4 ? '#10b981' : i >= 2 ? '#0ea5e9' : '#f59e0b'} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="bg-slate-800/40 border border-slate-700/50 rounded-lg p-3">
+            <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1">Sector concentration (top 8)</div>
+            <ResponsiveContainer width="100%" height={110}>
+              <BarChart data={sectorChartData} layout="vertical" margin={{ top: 4, right: 12, left: 4, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#334155" horizontal={false} />
+                <XAxis type="number" tick={{ fontSize: 9, fill: '#94a3b8' }} axisLine={false} tickLine={false} allowDecimals={false} />
+                <YAxis dataKey="sector" type="category" width={90} tick={{ fontSize: 9, fill: '#cbd5e1' }} axisLine={false} tickLine={false} />
+                <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #334155', fontSize: 11 }} />
+                <Bar dataKey="count" fill="#8b5cf6" radius={[0, 3, 3, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="flex flex-wrap gap-2">
