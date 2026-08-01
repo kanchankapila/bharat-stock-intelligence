@@ -29,21 +29,9 @@ export const SeasonalityCalendar: React.FC<Props> = ({ onSelectStock }) => {
 
   const { data: rawData, isLoading } = trpc.getMcSeasonality.useQuery({ month: selectedMonth });
 
-  // Stand-in high-fidelity dataset if database seasonality table is still sync-loading
-  const fallbackData = [
-    { name: 'Reliance Industries Ltd.', sc_id: 'RI', avg_pct: 6.4, max_pct: 14.2, min_pct: -2.1, years_positive: 8, total_years: 10, tab_type: 'nse' },
-    { name: 'Tata Consultancy Services', sc_id: 'TCS', avg_pct: 5.8, max_pct: 12.5, min_pct: -1.4, years_positive: 9, total_years: 10, tab_type: 'nse' },
-    { name: 'Infosys Ltd.', sc_id: 'INFY', avg_pct: 7.2, max_pct: 18.1, min_pct: -3.0, years_positive: 8, total_years: 10, tab_type: 'nse' },
-    { name: 'HDFC Bank Ltd.', sc_id: 'HDFCBANK', avg_pct: 4.9, max_pct: 9.8, min_pct: -1.9, years_positive: 7, total_years: 10, tab_type: 'nse' },
-    { name: 'ICICI Bank Ltd.', sc_id: 'ICICIBANK', avg_pct: 5.1, max_pct: 11.2, min_pct: -2.5, years_positive: 8, total_years: 10, tab_type: 'nse' },
-    { name: 'ITC Ltd.', sc_id: 'ITC', avg_pct: 4.2, max_pct: 8.5, min_pct: -0.8, years_positive: 9, total_years: 10, tab_type: 'nse' },
-    { name: 'State Bank of India', sc_id: 'SBIN', avg_pct: 6.1, max_pct: 15.6, min_pct: -4.1, years_positive: 7, total_years: 10, tab_type: 'nse' },
-    { name: 'Bharti Airtel Ltd.', sc_id: 'BHARTIARTL', avg_pct: 3.8, max_pct: 7.9, min_pct: -1.2, years_positive: 8, total_years: 10, tab_type: 'nse' },
-  ];
+  const list = Array.isArray(rawData) ? rawData : [];
 
-  const list = Array.isArray(rawData) && rawData.length > 0 ? rawData : fallbackData;
-
-  const filtered = list.filter(item => 
+  const filtered = list.filter(item =>
     item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     item.sc_id.toLowerCase().includes(searchQuery.toLowerCase())
   );
@@ -97,13 +85,14 @@ export const SeasonalityCalendar: React.FC<Props> = ({ onSelectStock }) => {
           </div>
         ) : filtered.length === 0 ? (
           <div className="flex items-center justify-center h-full text-slate-500 text-xs font-bold">
-            No seasonality matches found.
+            {list.length === 0 ? 'No seasonality data available for this month yet.' : 'No seasonality matches found.'}
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             <AnimatePresence mode="popLayout">
               {filtered.map((item, idx) => {
-                const winRate = item.total_years > 0 ? (item.years_positive / item.total_years) * 100 : 80;
+                const hasWinRate = item.total_years > 0;
+                const winRate = hasWinRate ? (item.years_positive / item.total_years) * 100 : null;
                 return (
                   <motion.div
                     key={item.sc_id}
@@ -122,9 +111,10 @@ export const SeasonalityCalendar: React.FC<Props> = ({ onSelectStock }) => {
                           <p className="text-[9px] text-slate-500 font-bold truncate max-w-[150px]">{item.name}</p>
                         </div>
                         <span className={cn("text-[9px] font-black px-2 py-0.5 rounded border uppercase tracking-wider",
+                          winRate === null ? "bg-slate-800/50 text-slate-500 border-slate-700/40" :
                           winRate >= 80 ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" : "bg-amber-500/10 text-amber-400 border-amber-500/20"
                         )}>
-                          {winRate.toFixed(0)}% Win
+                          {winRate === null ? 'N/A' : `${winRate.toFixed(0)}% Win`}
                         </span>
                       </div>
 

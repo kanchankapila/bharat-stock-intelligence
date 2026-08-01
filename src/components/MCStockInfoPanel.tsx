@@ -667,15 +667,22 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                     </div>
                   ))}
                 </div>
-                <div className="mt-3">
-                  <div className="flex items-center justify-between text-[8px] font-black uppercase tracking-widest text-slate-405 mb-1">
-                    <span>Aggregate</span>
-                    <span className="text-blue-400">{(alphaData.factors.momentum * 10).toFixed(0)}%</span>
-                  </div>
-                  <div className="h-0.5 w-full bg-slate-900 rounded-full overflow-hidden">
-                    <div className="h-full bg-blue-500 rounded-full" style={{ width: `${alphaData.factors.momentum * 10}%` }} />
-                  </div>
-                </div>
+                {(() => {
+                  const f = alphaData.factors;
+                  const aggregateRaw = (f.technical + f.fundamental + f.momentum + f.valuation + f.delivery) / 5 * 10;
+                  const aggregatePct = Math.max(0, Math.min(100, aggregateRaw));
+                  return (
+                    <div className="mt-3">
+                      <div className="flex items-center justify-between text-[8px] font-black uppercase tracking-widest text-slate-405 mb-1">
+                        <span>Aggregate (derived)</span>
+                        <span className="text-blue-400">{aggregatePct.toFixed(0)}%</span>
+                      </div>
+                      <div className="h-0.5 w-full bg-slate-900 rounded-full overflow-hidden">
+                        <div className="h-full bg-blue-500 rounded-full" style={{ width: `${aggregatePct}%` }} />
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             )}
 

@@ -510,7 +510,11 @@ export const mlRouter = router({
         .map(r => ({ ...r, params: JSON.parse(r.params) }));
     }),
 
-  runBacktest: adminProcedure
+  // Pure read + in-memory aggregation over already-computed signal_outcomes for one symbol --
+  // no writes, no expensive job trigger, so this stays public like its sibling saveBacktestStrategy
+  // (it was previously adminProcedure, which silently 401'd the public Backtest tab for every
+  // non-admin user -- an oversight from the 2026-07-23 mass admin-gating pass, not intentional).
+  runBacktest: publicProcedure
     .input(z.object({
       symbol:   z.string(),
       strategy: z.string(),
@@ -554,15 +558,21 @@ export const mlRouter = router({
       const profitFactor = grossLoss > 0 ? grossProfit / grossLoss : grossProfit > 0 ? Infinity : 0;
 
       let equity = 100;
+      let peak = 100;
+      let maxDrawdown = 0;
       const equityCurve = filtered.map((r: any) => {
         equity *= (1 + (r.return_pct ?? 0) / 100);
-        return { date: r.signal_date, equity: Math.round(equity * 100) / 100 };
+        peak = Math.max(peak, equity);
+        const drawdown = peak > 0 ? ((equity - peak) / peak) * 100 : 0;
+        maxDrawdown = Math.min(maxDrawdown, drawdown);
+        return { date: r.signal_date, equity: Math.round(equity * 100) / 100, drawdown: Math.round(drawdown * 100) / 100 };
       });
 
       const returns = filtered.map((r: any) => r.return_pct ?? 0);
       const avgReturn = returns.reduce((s: number, v: number) => s + v, 0) / returns.length;
       const variance  = returns.reduce((s: number, v: number) => s + (v - avgReturn) ** 2, 0) / returns.length;
       const sharpe    = variance > 0 ? avgReturn / Math.sqrt(variance) : 0;
+      const totalReturn = equity - 100;
 
       return {
         symbol:       input.symbol,
@@ -572,6 +582,8 @@ export const mlRouter = router({
         winRate:      Math.round(winRate * 10000) / 100,
         profitFactor: Math.round(profitFactor * 100) / 100,
         avgReturn:    Math.round(avgReturn * 100) / 100,
+        totalReturn:  Math.round(totalReturn * 100) / 100,
+        maxDrawdown:  Math.round(maxDrawdown * 100) / 100,
         sharpe:       Math.round(sharpe * 100) / 100,
         equityCurve,
       };

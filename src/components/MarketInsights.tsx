@@ -61,13 +61,13 @@ export const IndexOverview: React.FC<{ className?: string; onSelectIndex?: (id: 
                 <h4 className="text-xs font-black text-slate-400 group-hover:text-white transition-colors uppercase tracking-widest">{idx.name}</h4>
                 <span className={cn(
                   "text-[9px] font-black px-1.5 py-0.5 rounded uppercase tracking-tighter",
-                  parseFloat(idx.percentChange) >= 0 ? "bg-emerald-500/10 text-emerald-400" : "bg-rose-500/10 text-rose-400"
+                  parseFloat(idx.changePer) >= 0 ? "bg-emerald-500/10 text-emerald-400" : "bg-rose-500/10 text-rose-400"
                 )}>
-                  {parseFloat(idx.percentChange) >= 0 ? '▲' : '▼'} {Math.abs(parseFloat(idx.percentChange)).toFixed(2)}%
+                  {parseFloat(idx.changePer) >= 0 ? '▲' : '▼'} {Math.abs(parseFloat(idx.changePer)).toFixed(2)}%
                 </span>
               </div>
               <div className="flex items-baseline gap-2">
-                <span className="text-xl font-black text-white italic tracking-tight">{idx.lastPrice}</span>
+                <span className="text-xl font-black text-white italic tracking-tight">{idx.value}</span>
                 <span className={cn(
                   "text-[10px] font-bold",
                   parseFloat(idx.change) >= 0 ? "text-emerald-500" : "text-rose-500"

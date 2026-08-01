@@ -52,8 +52,9 @@ export const SlideOutDrawer: React.FC<SlideOutDrawerProps> = ({
 
   if (!isOpen || !symbol) return null;
 
-  const scoreValue = quantScore?.rank_composite ?? 50;
-  const scoreClass = quantScore?.composite_class ?? 'Hold';
+  const hasScore = quantScore?.rank_composite != null;
+  const scoreValue = quantScore?.rank_composite ?? 0;
+  const scoreClass = hasScore ? (quantScore?.composite_class ?? 'Hold') : 'Not Scored';
 
   const scoreColors = {
     'Strong Buy': { bg: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20', fill: 'bg-emerald-500' },
@@ -61,7 +62,8 @@ export const SlideOutDrawer: React.FC<SlideOutDrawerProps> = ({
     'Hold': { bg: 'bg-amber-500/10 text-amber-400 border-amber-500/20', fill: 'bg-amber-500' },
     'Avoid': { bg: 'bg-orange-500/10 text-orange-400 border-orange-500/20', fill: 'bg-orange-500' },
     'Sell': { bg: 'bg-rose-500/10 text-rose-400 border-rose-500/20', fill: 'bg-rose-500' },
-  }[scoreClass as 'Strong Buy' | 'Buy' | 'Hold' | 'Avoid' | 'Sell'] || { bg: 'bg-slate-500/10 text-slate-400 border-slate-500/20', fill: 'bg-slate-500' };
+    'Not Scored': { bg: 'bg-slate-500/10 text-slate-400 border-slate-500/20', fill: 'bg-slate-600' },
+  }[scoreClass as 'Strong Buy' | 'Buy' | 'Hold' | 'Avoid' | 'Sell' | 'Not Scored'] || { bg: 'bg-slate-500/10 text-slate-400 border-slate-500/20', fill: 'bg-slate-500' };
 
   return (
     <div className="fixed inset-0 z-[100] flex justify-end overflow-hidden">
@@ -160,8 +162,8 @@ export const SlideOutDrawer: React.FC<SlideOutDrawerProps> = ({
                   </span>
                 </div>
                 <div className="flex items-baseline gap-2 mb-3">
-                  <span className="text-3xl font-black text-white tabular-nums">{scoreValue.toFixed(0)}</span>
-                  <span className="text-xs font-bold text-slate-400">/ 100 percentile rank</span>
+                  <span className="text-3xl font-black text-white tabular-nums">{hasScore ? scoreValue.toFixed(0) : '—'}</span>
+                  <span className="text-xs font-bold text-slate-400">{hasScore ? '/ 100 percentile rank' : 'awaiting next scoring run'}</span>
                 </div>
                 <div className="h-2 w-full bg-slate-800 rounded-full overflow-hidden border border-white/[0.05]">
                   <div className={cn("h-full rounded-full transition-all duration-500", scoreColors.fill)} style={{ width: `${scoreValue}%` }} />

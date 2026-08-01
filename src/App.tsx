@@ -2084,7 +2084,7 @@ const Backtest: React.FC<{ stocks?: MarketData[] }> = () => {
               <div className="space-y-8 animate-in fade-in duration-500">
                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                    {[
-                     { label: 'Returns', value: `+${results.totalReturn}%`, icon: TrendingUp, color: 'text-emerald-400' },
+                     { label: 'Returns', value: `${results.totalReturn >= 0 ? '+' : ''}${results.totalReturn}%`, icon: TrendingUp, color: results.totalReturn >= 0 ? 'text-emerald-400' : 'text-rose-400' },
                      { label: 'Profit Factor', value: results.profitFactor, icon: Activity, color: 'text-blue-400' },
                      { label: 'Win Rate', value: `${results.winRate}%`, icon: Zap, color: 'text-amber-400' },
                      { label: 'Max DD', value: `${results.maxDrawdown}%`, icon: ArrowDownRight, color: 'text-rose-400' },
@@ -2116,7 +2116,7 @@ const Backtest: React.FC<{ stocks?: MarketData[] }> = () => {
                    </div>
                    <div className="h-80">
                      <ResponsiveContainer width="100%" height="100%">
-                       <AreaChart data={results.history}>
+                       <AreaChart data={results.equityCurve}>
                          <defs>
                            <linearGradient id="equityGradient" x1="0" y1="0" x2="0" y2="1">
                              <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/>
@@ -2128,9 +2128,9 @@ const Backtest: React.FC<{ stocks?: MarketData[] }> = () => {
                            </linearGradient>
                          </defs>
                          <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                         <XAxis dataKey="day" hide />
+                         <XAxis dataKey="date" hide />
                          <YAxis yAxisId="left" hide domain={['auto', 'auto']} />
-                         <YAxis yAxisId="right" hide orientation="right" domain={[-20, 0]} />
+                         <YAxis yAxisId="right" hide orientation="right" domain={['auto', 0]} />
                          <Tooltip 
                            contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px' }}
                            labelStyle={{ color: '#64748b', fontSize: '10px', fontWeight: 'bold' }}
@@ -2153,7 +2153,11 @@ const Backtest: React.FC<{ stocks?: MarketData[] }> = () => {
                         </div>
                         <div>
                             <h5 className="text-white font-black text-lg tracking-tight uppercase italic mb-1">Adaptive Strategy Intelligence</h5>
-                            <p className="text-slate-400 font-medium text-xs max-w-md">Gemini has analyzed this strategy and recommends tightening the stop-loss during high volatility regimes to preserve the alpha generated.</p>
+                            <p className="text-slate-400 font-medium text-xs max-w-md">
+                              {Math.abs(parseFloat(results.maxDrawdown)) > 15
+                                ? `This run drew down ${results.maxDrawdown}% at its worst point — consider tightening the stop-loss to reduce that exposure.`
+                                : `Max drawdown for this run was a contained ${results.maxDrawdown}%. Re-run Walk-Forward Optimization below to re-tune thresholds on the real engine.`}
+                            </p>
                         </div>
                     </div>
                     <button 
@@ -3467,7 +3471,9 @@ const StockDetails: React.FC<{
                                   AI Probability Core
                                 </h6>
                                 <p className="text-[10px] text-slate-400 font-bold leading-relaxed">
-                                  Based on current volatility bands and historical earnings surprises, our core engine predicts a 68.4% probability of {report.outlook.toLowerCase()} continuation over the next 22 trading sessions.
+                                  {typeof unifiedData?.score?.confidence === 'number'
+                                    ? `Our quant scoring engine holds ${unifiedData.score.confidence.toFixed(1)}% confidence in the current ${report.outlook.toLowerCase()} classification, based on the technical, fundamental, momentum, valuation and delivery factor blend.`
+                                    : `Quant confidence for this classification is not yet available for ${symbol}.`}
                                 </p>
                               </div>
                            </div>
