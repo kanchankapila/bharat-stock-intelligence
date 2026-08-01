@@ -8,6 +8,9 @@ import {
   DollarSign, Sliders, Database, CheckCircle2, Target,
   ShieldAlert, Scale, RefreshCw, Layers, Calendar
 } from 'lucide-react';
+import { formatISTWithLocal, relativeFromNow } from '../lib/timeFormat';
+import { CanonicalBadge } from './CanonicalSourceNote';
+import { V4QuickNav } from '../v4/components/V4QuickNav';
 
 // ─── Style Maps ───────────────────────────────────────────────────────────────
 
@@ -59,15 +62,15 @@ export const AlphaCockpit: React.FC = () => {
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
   // Queries
-  const { data: recommendationsData, isLoading: recommendationsLoading, refetch: refetchPicks } = 
+  const { data: recommendationsData, isLoading: recommendationsLoading, refetch: refetchPicks, dataUpdatedAt } =
     trpc.getBuyRecommendations.useQuery({
       conviction,
       horizon,
       limit: 100
-    });
+    }, { refetchInterval: 3 * 60_000, refetchOnWindowFocus: true });
 
-  const { data: fiiDiiData } = trpc.getFiiDiiFlow.useQuery({ days: 8 });
-  const { data: signalStats } = trpc.getSignalQualityReport.useQuery({ horizonDays: 15 });
+  const { data: fiiDiiData } = trpc.getFiiDiiFlow.useQuery({ days: 8 }, { refetchInterval: 5 * 60_000 });
+  const { data: signalStats } = trpc.getSignalQualityReport.useQuery({ horizonDays: 15 }, { refetchInterval: 10 * 60_000 });
 
   // Mutations
   const logActionMutation = trpc.saveSignalAction.useMutation({
@@ -231,7 +234,8 @@ export const AlphaCockpit: React.FC = () => {
 
   return (
     <div className="space-y-6 select-none font-sans">
-      
+      <V4QuickNav />
+
       {/* Toast Alert */}
       {toast && (
         <div className={cn(
@@ -253,12 +257,19 @@ export const AlphaCockpit: React.FC = () => {
               <Zap className="w-5 h-5 text-indigo-400 fill-indigo-400/20" />
             </div>
             <div>
-              <h1 className="text-2xl font-black text-slate-100 tracking-tighter uppercase italic">
+              <h1 className="text-2xl font-black text-slate-100 tracking-tighter uppercase italic flex items-center gap-2">
                 Quant Alpha Cockpit
+                <CanonicalBadge />
               </h1>
               <p className="text-[10px] text-slate-400 font-mono font-bold tracking-widest uppercase mt-0.5">
                 Phase 3 Decision Authority & Execution Router
               </p>
+              {recommendationsData?.lastComputedAt && (
+                <p className="text-[9px] text-slate-500 font-mono mt-1 normal-case tracking-normal">
+                  Model run {formatISTWithLocal(recommendationsData.lastComputedAt)}
+                  {dataUpdatedAt > 0 && <span className="ml-1.5 text-slate-600">· fetched {relativeFromNow(dataUpdatedAt)}</span>}
+                </p>
+              )}
             </div>
           </div>
         </div>

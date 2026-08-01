@@ -44,6 +44,7 @@ const NAV_GROUPS: NavGroup[] = [
       { icon: Zap,     label: 'Trendlyne',  id: 'trendlyne'   },
       { icon: Search,     label: 'Discover',    id: 'discover'    },
       { icon: Briefcase,  label: 'Smart Money', id: 'smart-money' },
+      { icon: Users,      label: 'Money Flow',  id: 'money-flow'  },
       { icon: Calendar,   label: 'Earnings',    id: 'earnings'    },
     ],
   },
