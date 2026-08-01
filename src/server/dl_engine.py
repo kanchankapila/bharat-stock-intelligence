@@ -7,6 +7,7 @@ Reads from feature_store, writes to deep_learning_predictions.
 import os
 import sys
 import json
+import math
 import pickle
 import argparse
 from datetime import datetime, timedelta
@@ -430,6 +431,20 @@ def train_lstm(version: int = 1) -> Dict:
 
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
     path = MODEL_DIR / f"lstm_v{version}.pt"
+
+    # Divergence check on the weights themselves, not just the metrics. A metric-based gate
+    # cannot catch this: all-NaN weights make walk_forward_validate raise, which the handler
+    # above deliberately swallows as non-fatal, leaving NaN metrics behind. lstm_v3..v18 were
+    # all saved with 100% NaN parameters this way and v18 became the active model.
+    nan_params = sum(int(torch.isnan(t).sum()) + int(torch.isinf(t).sum())
+                     for t in model.state_dict().values() if t.is_floating_point())
+    if nan_params:
+        metrics["error"] = f"training diverged: {nan_params} non-finite parameters"
+        print(f"[DL] REFUSED to save v{version}: training diverged "
+              f"({nan_params} non-finite parameters). Lower the learning rate or check the "
+              f"input features for NaN; the previous checkpoint stays active.", file=sys.stderr)
+        return metrics
+
     torch.save(model.state_dict(), path)
     print(f"[DL] Model saved to {path}")
     return metrics
@@ -482,12 +497,14 @@ def run_inference(prediction_date: str = None) -> None:
     conf_modifier   = {"BULL": 1.0, "SIDEWAYS": 1.0, "HIGH_VOL": 0.85, "BEAR": 0.85, "CRASH": 0.50}.get(regime, 1.0)
 
     written = 0
+    skipped_nonfinite = 0
     batch_X, batch_syms = [], []
 
     def flush(b_X, b_syms):
         nonlocal written
         if not b_X:
             return
+        nonlocal skipped_nonfinite
         X_np = np.concatenate(b_X, axis=0)
         preds = _predict_batch(model, X_np)
         cur = con.cursor()
@@ -495,6 +512,14 @@ def run_inference(prediction_date: str = None) -> None:
             pu_1d  = float(preds["dir_1d"][i][1])
             pu_5d  = float(preds["dir_5d"][i][1])
             pu_15d = float(preds["dir_15d"][i][1])
+            r5     = float(preds["ret_5d"][i])
+            r15    = float(preds["ret_15d"][i])
+            # Never persist a non-finite prediction. A diverged checkpoint emits all-NaN, and
+            # downstream consumers (unified_ranker's dl_score) cannot distinguish "NaN" from
+            # "a real probability" — writing nothing leaves the engine correctly absent.
+            if not all(math.isfinite(v) for v in (pu_1d, pu_5d, pu_15d, r5, r15)):
+                skipped_nonfinite += 1
+                continue
             conf   = float(np.mean([pu_1d, pu_5d, pu_15d])) * conf_modifier
             unc    = float(np.std([pu_1d, pu_5d, pu_15d]))
             cur.execute(
@@ -517,7 +542,7 @@ def run_inference(prediction_date: str = None) -> None:
                 (sym, prediction_date, "LSTM_TFT_ENSEMBLE", str(model_version),
                  pu_1d, pu_5d, pu_15d,
                  1 - pu_1d, 1 - pu_5d, 1 - pu_15d,
-                 float(preds["ret_5d"][i]), float(preds["ret_15d"][i]),
+                 r5, r15,
                  conf, unc, regime, regime_prob),
             )
             written += 1
@@ -535,6 +560,14 @@ def run_inference(prediction_date: str = None) -> None:
     flush(batch_X, batch_syms)
     con.close()
     print(f"[DL] Inference complete: {written} predictions written for {prediction_date}")
+    if skipped_nonfinite:
+        # Loud, and non-zero exit when the model produced nothing usable — an all-NaN
+        # checkpoint previously ran to "success" every day while writing pure NaN.
+        print(f"[DL] ERROR: {skipped_nonfinite} predictions dropped as non-finite (NaN/inf). "
+              f"The active checkpoint (lstm_v{model_version}.pt) is likely diverged - retrain.",
+              file=sys.stderr)
+        if written == 0:
+            sys.exit(1)
 
 
 def _load_config() -> Dict:
@@ -571,6 +604,13 @@ def _promote_lstm_version(new_version: int, metrics: Dict) -> bool:
 
     Returns True if promoted (cfg written), False if rejected (cfg left untouched).
     """
+    # A diverged run never reaches a usable checkpoint; train_lstm() refuses to save it and
+    # reports the divergence here. Promoting the version pointer anyway would activate a
+    # missing (or previously-written all-NaN) file.
+    if metrics.get("error"):
+        print(f"[DL] REFUSED: v{new_version} not promoted -- {metrics['error']}.")
+        return False
+
     new_auc = metrics.get("roc_auc")
     if new_auc is None or (isinstance(new_auc, float) and np.isnan(new_auc)):
         print(f"[DL] REFUSED: walk-forward validation did not produce a usable roc_auc "
