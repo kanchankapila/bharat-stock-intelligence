@@ -574,13 +574,13 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
                         val: selectedCand.macd != null ? fmt(selectedCand.macd, 2) : '—',
                         sub: selectedCand.macd != null && selectedCand.macdSignal != null
                           ? (selectedCand.macd > selectedCand.macdSignal ? 'Bullish Cross' : 'Bearish Cross') : '',
-                        color: selectedCand.macd > selectedCand.macdSignal ? 'text-emerald-400' : 'text-rose-400'
+                        color: selectedCand.macd == null || selectedCand.macdSignal == null ? 'text-slate-400' : (selectedCand.macd > selectedCand.macdSignal ? 'text-emerald-400' : 'text-rose-400')
                       },
                       {
                         label: 'SMA 50/200',
-                        val: selectedCand.sma50 ? `${fmt(selectedCand.sma50, 0)}/${fmt(selectedCand.sma200, 0)}` : '—',
-                        sub: selectedCand.sma50 > selectedCand.sma200 ? 'Golden Cross' : 'Death Cross',
-                        color: selectedCand.sma50 > selectedCand.sma200 ? 'text-emerald-400' : 'text-rose-400'
+                        val: selectedCand.sma50 != null && selectedCand.sma200 != null ? `${fmt(selectedCand.sma50, 0)}/${fmt(selectedCand.sma200, 0)}` : '—',
+                        sub: selectedCand.sma50 == null || selectedCand.sma200 == null ? '' : (selectedCand.sma50 > selectedCand.sma200 ? 'Golden Cross' : 'Death Cross'),
+                        color: selectedCand.sma50 == null || selectedCand.sma200 == null ? 'text-slate-400' : (selectedCand.sma50 > selectedCand.sma200 ? 'text-emerald-400' : 'text-rose-400')
                       },
                       {
                         label: 'Vol Ratio',

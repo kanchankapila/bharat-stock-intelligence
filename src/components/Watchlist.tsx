@@ -25,12 +25,36 @@ interface WatchlistProps {
   onRemove: (symbol: string) => void;
 }
 
-export const Watchlist: React.FC<WatchlistProps> = ({ 
-  watchlist, 
-  stocks, 
+const WatchlistSparkline: React.FC<{ symbol: string; isUp: boolean; enabled: boolean }> = ({ symbol, isUp, enabled }) => {
+  const { data } = trpc.getOHLCData.useQuery(
+    { symbol, dur: '1m' },
+    { enabled, staleTime: 5 * 60 * 1000, refetchOnWindowFocus: false }
+  );
+
+  const bars = React.useMemo(() => {
+    const closes: number[] = (data?.data ?? []).map((d: any) => d.close).filter((c: number) => Number.isFinite(c));
+    return closes.slice(-8).map(v => ({ v }));
+  }, [data]);
+
+  if (bars.length < 2) return <div className="h-8 w-20" />;
+
+  return (
+    <div className="h-8 w-20">
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={bars}>
+          <Bar dataKey="v" fill={isUp ? "#10b981" : "#f43f5e"} opacity={0.3} radius={[2, 2, 0, 0]} />
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+};
+
+export const Watchlist: React.FC<WatchlistProps> = ({
+  watchlist,
+  stocks,
   watchlistDetails,
-  onSelectStock, 
-  onRemove 
+  onSelectStock,
+  onRemove
 }) => {
   const ref = React.useRef<HTMLDivElement>(null);
   const isVisible = useIntersectionObserver(ref, { threshold: 0.1 });
@@ -108,13 +132,7 @@ export const Watchlist: React.FC<WatchlistProps> = ({
                         <p className="text-[7px] font-black text-slate-400 uppercase tracking-widest mb-1">LTP</p>
                         <p className="text-xl font-black text-white tabular-nums tracking-tight italic">₹{stock.price.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
                      </div>
-                     <div className="h-8 w-20">
-                        <ResponsiveContainer width="100%" height="100%">
-                           <BarChart data={Array.from({length: 8}, () => ({ v: Math.random() }))}>
-                              <Bar dataKey="v" fill={isUp ? "#10b981" : "#f43f5e"} opacity={0.3} radius={[2, 2, 0, 0]} />
-                           </BarChart>
-                        </ResponsiveContainer>
-                     </div>
+                     <WatchlistSparkline symbol={stock.symbol} isUp={isUp} enabled={isVisible} />
                   </div>
                 </div>
 

@@ -385,6 +385,9 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
   const { data: queueStats, refetch: refetchStats } = trpc.getQueueStats.useQuery(undefined, {
     refetchInterval: isGenerating ? 2000 : false,
   });
+  const { data: accuracyMetrics } = trpc.getAccuracyMetrics.useQuery(undefined, {
+    staleTime: 15 * 60 * 1000,
+  });
   const { data: savedSignals, refetch: refetchSignals } = trpc.getSignals.useQuery(
     { limit: 50 },
     { refetchInterval: isGenerating ? 3000 : false },
@@ -510,10 +513,10 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
           icon={<Radio size={9} />}
         />
         <KpiChip
-          label="Win Rate (84d)"
-          value="84%"
-          sub="Backtested ML ensemble"
-          up={true}
+          label="Win Rate"
+          value={accuracyMetrics && accuracyMetrics.totalSignals > 0 ? `${accuracyMetrics.profitHitRate.toFixed(0)}%` : '—'}
+          sub={accuracyMetrics && accuracyMetrics.totalSignals > 0 ? `${accuracyMetrics.totalSignals} signals resolved` : 'No resolved signals yet'}
+          up={(accuracyMetrics?.profitHitRate ?? 0) >= 50}
           accent={emerald}
           icon={<TrendingUp size={9} />}
         />
