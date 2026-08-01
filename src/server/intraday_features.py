@@ -24,8 +24,20 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 from db_compat import connect, read_df, executemany
 
 _IST        = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
-FIRST_BARS  = 2   # opening range = first 2 x 15m bars (30 minutes)
-FIRST_HOUR  = 4   # first-hour volume window = first 4 x 15m bars
+BAR_MINUTES = 15
+# Windows are defined in MINUTES FROM THE SESSION OPEN and resolved against each bar's own
+# timestamp -- never by row position. Both vendors append the current in-progress quote to the
+# history array stamped at request time rather than on the bar grid (a real 09:30:00 bar plus a
+# bogus 09:30:20 one, volume 0, open==high==low==close). Selecting positionally (the previous
+# `grp.iloc[:2]` / `grp.iloc[:4]`) let those synthetic rows eat the window, so "first hour"
+# routinely covered only 45 minutes: measured 2026-07-30, the stored first_hour_vol_share
+# correlated just 0.642 with the same feature computed off clean grid bars (5.9% exact match,
+# MAE 0.060 on a 0-1 feature, biased low at 0.197 vs 0.245). intraday_fetcher.py now drops
+# off-grid bars at write time, but ~2M such rows already exist in the compressed hypertable and
+# are not being backfilled out, so the read side has to defend itself too (_on_grid below).
+OPENING_RANGE_MIN = 30   # opening range = first 30 minutes
+FIRST_HOUR_MIN    = 60   # first-hour volume window
+SESSION_OPEN      = datetime.time(9, 15)
 
 
 def compute_intraday_features(date_str: str) -> pd.DataFrame:
@@ -54,41 +66,62 @@ def compute_intraday_features(date_str: str) -> pd.DataFrame:
         df[col] = pd.to_numeric(df[col], errors='coerce')
     df['volume'] = df['volume'].fillna(0.0)
 
+    ts = pd.to_datetime(df['datetime'], utc=True, errors='coerce').dt.tz_convert(_IST)
+    df = df.assign(_ts=ts).dropna(subset=['_ts'])
+    # Drop off-grid synthetic quotes (see module constants) before any window is taken.
+    df = df[(df['_ts'].dt.second == 0) & (df['_ts'].dt.minute % BAR_MINUTES == 0)]
+    if df.empty:
+        return pd.DataFrame(columns=[
+            'symbol', 'opening_range_break', 'vwap_deviation_pct', 'first_hour_vol_share',
+        ])
+    open_ts = pd.Timestamp(datetime.datetime.combine(d, SESSION_OPEN), tz=_IST)
+    df = df.assign(_min=(df['_ts'] - open_ts).dt.total_seconds() / 60.0)
+
     results = []
     for symbol, grp in df.groupby('symbol'):
-        grp = grp.sort_values('datetime').reset_index(drop=True)
-        if len(grp) < FIRST_BARS:
-            continue
+        grp = grp.sort_values('_ts')
+        opening = grp[grp['_min'] < OPENING_RANGE_MIN]
+        if opening.empty:
+            continue  # no session-open data -- an opening range can't be defined
 
-        # ── Opening Range Break ──────────────────────────────────────────────
         last_close = grp.iloc[-1]['close']
 
-        if len(grp) >= FIRST_BARS:
-            or_high = grp.iloc[:FIRST_BARS]['high'].max()
-            or_low  = grp.iloc[:FIRST_BARS]['low'].min()
-
-            if pd.isna(last_close) or pd.isna(or_high) or pd.isna(or_low):
-                orb = 0.0
-            elif last_close > or_high:
-                orb = 1.0
-            elif last_close < or_low:
-                orb = -1.0
-            else:
-                orb = 0.0
+        # ── Opening Range Break ──────────────────────────────────────────────
+        or_high = opening['high'].max()
+        or_low  = opening['low'].min()
+        if pd.isna(last_close) or pd.isna(or_high) or pd.isna(or_low):
+            orb = 0.0
+        elif last_close > or_high:
+            orb = 1.0
+        elif last_close < or_low:
+            orb = -1.0
         else:
             orb = 0.0
 
         # ── VWAP Deviation ──────────────────────────────────────────────────
-        valid_vwap = grp['vwap'].dropna()
-        if len(valid_vwap) > 0 and not pd.isna(last_close):
-            session_vwap = float(valid_vwap.iloc[-1])
-            vwap_dev = (last_close - session_vwap) / session_vwap * 100 if session_vwap != 0 else 0.0
+        # Prefer the stored session VWAP; fall back to computing it from the bars themselves
+        # (cumulative typical-price * volume) when the column is NULL. intraday_ohlcv.vwap was
+        # written as a literal NULL for every row until 2026-07-31, so without this fallback
+        # the feature is a constant 0.0 -- populated-looking and information-free -- for every
+        # symbol on every historical session.
+        session_vwap = None
+        stored = grp['vwap'].dropna()
+        if len(stored):
+            session_vwap = float(stored.iloc[-1])
+        else:
+            vol = grp['volume'].fillna(0.0)
+            typ = (grp['high'] + grp['low'] + grp['close']) / 3.0
+            mask = typ.notna() & (vol > 0)
+            if mask.any() and vol[mask].sum() > 0:
+                session_vwap = float((typ[mask] * vol[mask]).sum() / vol[mask].sum())
+        if session_vwap and not pd.isna(last_close):
+            vwap_dev = (last_close - session_vwap) / session_vwap * 100
         else:
             vwap_dev = 0.0
 
         # ── First-Hour Volume Share ─────────────────────────────────────────
         total_vol = float(grp['volume'].sum())
-        first_vol = float(grp.iloc[:FIRST_HOUR]['volume'].sum())
+        first_vol = float(grp[grp['_min'] < FIRST_HOUR_MIN]['volume'].sum())
         vol_share = (first_vol / total_vol) if total_vol > 0 else 0.5
         vol_share = min(max(vol_share, 0.0), 1.0)
 

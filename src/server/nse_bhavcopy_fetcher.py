@@ -176,6 +176,25 @@ def run_one(conn: ConnWrapper, d: datetime.date) -> int:
     rows = fetch_bhavcopy(d)
     if not rows:
         return 0
+
+    # The archive RE-SERVES the previous session's file for most weekend dates instead of
+    # 404ing: requesting Sunday 2024-10-20 returns a byte-identical copy of Friday
+    # 2024-10-18's file (verified by md5 across every weekend probed). Only three genuine
+    # weekend sessions exist in this whole history -- Diwali Muhurat 2023-11-12 and the
+    # Budget sessions of 2025-02-01 and 2026-02-01.
+    #
+    # This is not corrupting, because parse_bhavcopy keys every row off the file's own DATE1
+    # rather than the requested date, so a re-serve just upserts rows that already exist. But
+    # without this check the log would claim a session happened on a day the market was shut,
+    # which is exactly the kind of quietly-wrong signal that makes a later audit distrust the
+    # table. Report it instead.
+    file_dates = {r['date'] for r in rows}
+    if file_dates and d.isoformat() not in file_dates:
+        _log(f"{d}: archive served {sorted(file_dates)[0]}'s file (no session on this date) "
+             f"-- rows upserted under their own date, nothing invented")
+        store_bhavcopy(conn, rows)
+        return 0
+
     n = store_bhavcopy(conn, rows)
     _log(f"{d}: {n} equity securities stored")
     return n
@@ -200,7 +219,16 @@ def backfill(conn: ConnWrapper, start: str, end: str, monthly: bool) -> None:
     e = datetime.date.fromisoformat(end)
     dates = list(month_ends(s, e)) if monthly else [
         s + datetime.timedelta(days=i) for i in range((e - s).days + 1)]
-    dates = [d for d in dates if d.weekday() < 5]
+    # Do NOT filter out weekends. NSE runs live special sessions on weekends -- the Union
+    # Budget session on Sunday 2026-02-01 is a real one, 2,955 securities, and the weekday
+    # filter that used to live here meant it was never fetched: nse_universe_history was
+    # simply missing an entire trading day. That is invisible in every row-count and
+    # freshness check, and it silently corrupts anything comparing consecutive sessions
+    # (it was found via ohlcv_adjust.py, where hundreds of symbols showed a bogus
+    # prev_close/close discontinuity on the following Monday).
+    # The archive is authoritative about whether a session happened: a non-trading day 404s
+    # (verified: Saturday 2026-01-31 -> 404) and fetch_bhavcopy already treats that as "no
+    # session", so probing every calendar day is correct and costs only the 404s.
     _log(f"backfilling {len(dates)} dates ({'month-end' if monthly else 'daily'}) "
          f"{start}..{end}")
     total = ok = 0

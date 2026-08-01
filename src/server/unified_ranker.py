@@ -122,6 +122,73 @@ REGIME_CAT_TILT = {
     'SIDEWAYS': {},
 }
 
+# ── Finding #31 resolution (2026-07-31) ──────────────────────────────────────────────────
+# REGIME_CAT_TILT above is hand-set intuition that has never been validated against outcomes.
+# The audit left it open pending "regime-labeled outcome history". That history was measured
+# directly this session, and the conclusion is that it will not arrive on any useful horizon:
+#
+#   independent regime EPISODES over the full market_regimes history (2023-11 -> 2026-07):
+#       HIGH_VOL 172 · SIDEWAYS 170 · BEAR 14 · CRASH 6 · BULL 3
+#   stock_factor_breakdown_history (the only per-category score history, 13 distinct dates):
+#       SIDEWAYS 8 days · HIGH_VOL 4 · BEAR 1 · BULL 0 · CRASH 0
+#
+# So BULL and CRASH -- which carry the most extreme multipliers (0.30, 1.50) -- have ZERO days
+# of per-category history and 3 and 6 lifetime episodes. Neither fitting the magnitudes NOR
+# validating their sign is possible, and the 170+ HIGH_VOL/SIDEWAYS "episodes" are day-to-day
+# alternation rather than durable regimes, so they do not supply independent samples either.
+# Fitting on this would reproduce exactly the overfit-then-write bug Finding #42 fixed in
+# strategy_optimizer.py.
+#
+# The resolution is therefore NOT to fit, and not to leave unvalidated intuition at full
+# strength either: the tilts are treated as PRIORS and shrunk halfway toward neutral (1.0).
+# Direction is economically defensible (don't chase breakouts into a crash) and is preserved;
+# only the unjustifiable magnitude is damped. A 70% cut to breakout weight in CRASH is an
+# opinion nobody has ever tested -- a 35% cut is the same opinion, held less confidently.
+# Shrinkage is the standard treatment for a prior with no supporting sample.
+TILT_SHRINKAGE = 0.5
+
+
+def shrink_tilt(raw: float, shrinkage: float = TILT_SHRINKAGE) -> float:
+    """Pull a hand-set multiplier toward neutral 1.0. shrinkage=0 -> no tilt at all,
+    1.0 -> the raw hand-set value. Sign of the tilt (above/below 1.0) is always preserved."""
+    return 1.0 + (raw - 1.0) * shrinkage
+
+
+def regime_tilt_fit_readiness(conn, min_days: int = 60, min_episodes: int = 20) -> dict:
+    """Report, per regime, whether enough history has accumulated to actually FIT the tilt.
+
+    This exists so Finding #31 unblocks itself instead of sitting open forever: once a regime
+    clears both thresholds, its tilt can be fitted from real outcomes and written to
+    app_settings.optimal_regime_cat_tilt (already wired below). Advisory only -- nothing
+    consumes the verdict, and it must never silently start fitting on thin data.
+    """
+    out = {}
+    try:
+        days = {r[0]: r[1] for r in conn.execute(
+            "SELECT regime, COUNT(DISTINCT snapshot_date) FROM stock_factor_breakdown_history "
+            "WHERE regime IS NOT NULL GROUP BY regime"
+        ).fetchall()}
+        rows = conn.execute("SELECT date, regime FROM market_regimes ORDER BY date").fetchall()
+    except Exception as e:
+        print(f"[UnifiedRanker] regime_tilt_fit_readiness unavailable: {e}")
+        return {}
+
+    episodes, prev = {}, None
+    for r in rows:
+        rg = r[1]
+        if rg != prev:
+            episodes[rg] = episodes.get(rg, 0) + 1
+        prev = rg
+
+    for regime in REGIME_CAT_TILT:
+        d, e = int(days.get(regime, 0)), int(episodes.get(regime, 0))
+        out[regime] = {
+            'factor_history_days': d,
+            'regime_episodes': e,
+            'ready_to_fit': d >= min_days and e >= min_episodes,
+        }
+    return out
+
 
 _regime_tilt_override = None  # lazy-loaded: None = not yet checked, {} = checked, nothing learned yet
 
@@ -133,12 +200,18 @@ def _load_regime_tilt_override():
     override-from-app_settings pattern scoring_engine.py already uses for those, so a future
     backtest-fit tilt can be loaded here without another code change.
 
-    Fitting one properly is currently blocked by a real data gap, not a code gap:
-    stock_factor_breakdown is a current-state-only table (PRIMARY KEY symbol+timeframe, no
-    history), so there is no historical per-category score to backtest a regime-conditional
-    edge against. A daily-snapshotted stock_factor_breakdown_history table would need to exist
-    and accumulate real regime-labeled history before this key should ever be populated —
-    until then this intentionally returns {} and REGIME_CAT_TILT's hand-set values stand.
+    CORRECTED 2026-07-31: this docstring used to say the blocker was that no per-category
+    history table existed. stock_factor_breakdown_history DOES now exist and even carries a
+    `regime` column — but it holds only 13 distinct dates (SIDEWAYS 8, HIGH_VOL 4, BEAR 1,
+    BULL 0, CRASH 0), and BULL/CRASH have just 3 and 6 lifetime regime episodes. So the real
+    blocker is sample size, not schema, and it is not a gap that waiting will close on any
+    useful horizon. See TILT_SHRINKAGE above: rather than fit on thin data, the hand-set
+    values are treated as priors and shrunk toward neutral.
+
+    A fitted override written to app_settings.optimal_regime_cat_tilt still wins outright and
+    is used UNSHRUNK — shrinkage exists to damp unvalidated intuition, and a value actually
+    fitted from outcomes is not that. Use regime_tilt_fit_readiness() to check whether a
+    regime has accumulated enough history to justify fitting before populating this key.
     """
     global _regime_tilt_override
     if _regime_tilt_override is not None:
@@ -157,10 +230,18 @@ def _load_regime_tilt_override():
 
 def regime_cat_weights(regime):
     """CAT_BASE_WT with the regime's category tilt applied (returns a fresh dict; an unknown
-    or SIDEWAYS regime yields a plain copy of CAT_BASE_WT)."""
-    tilt_map = _load_regime_tilt_override() or REGIME_CAT_TILT
-    tilt = tilt_map.get(regime, {})
-    return {cat: base * tilt.get(cat, 1.0) for cat, base in CAT_BASE_WT.items()}
+    or SIDEWAYS regime yields a plain copy of CAT_BASE_WT).
+
+    A fitted override from app_settings is applied at full strength. The hand-set
+    REGIME_CAT_TILT fallback is shrunk toward neutral first (Finding #31) — it is a prior with
+    no supporting sample, not a measurement.
+    """
+    override = _load_regime_tilt_override()
+    if override:
+        tilt = override.get(regime, {})
+        return {cat: base * tilt.get(cat, 1.0) for cat, base in CAT_BASE_WT.items()}
+    tilt = REGIME_CAT_TILT.get(regime, {})
+    return {cat: base * shrink_tilt(tilt.get(cat, 1.0)) for cat, base in CAT_BASE_WT.items()}
 
 CONVICTION_TIERS = [
     ('S_ELITE',    80),
@@ -196,6 +277,29 @@ def _normalize_to_100(raw):
         equal = sum(1 for x in values if x == v)
         out[k] = (less + 0.5 * equal) / n * 100.0
     return out
+
+
+def _finite_engine_map(name, raw):
+    """Drop non-finite (NaN/inf) scores from an engine map.
+
+    A NaN score must be treated as *absent*, not as a value: `_blend` renormalizes over the
+    engines that actually have data, so dropping the entry degrades that symbol to the other
+    engines instead of poisoning the blend. Keeping it silently produces a NaN unified_score,
+    which then falls through `_classify` (every comparison against NaN is False) to a plain
+    'Buy' and through `_conviction` to 'D_MARGINAL' — i.e. a fabricated recommendation.
+
+    This is not hypothetical: the BiLSTM checkpoints lstm_v3..v18 all carry 100% NaN weights,
+    so every deep_learning_predictions.prob_up_5d has been NaN, which made 1563 of 1566 rows
+    in unified_recommendations NaN-scored on 2026-07-31 before this guard existed.
+    """
+    if not raw:
+        return raw
+    clean = {k: v for k, v in raw.items() if v is not None and math.isfinite(v)}
+    dropped = len(raw) - len(clean)
+    if dropped:
+        print(f"[UnifiedRanker] WARNING: engine '{name}' returned {dropped}/{len(raw)} "
+              f"non-finite scores - those symbols are treated as having no {name} signal.")
+    return clean
 
 
 def _blend(engine_scores, present_engines, weights):
@@ -994,6 +1098,9 @@ class UnifiedRanker:
             'dl':         dl_scores,
             'breakout':   breakout_scores,
         }
+        # Sanitize before blending: a single engine emitting NaN would otherwise NaN every
+        # score it touches, and NaN survives `if unified < 1` to be written as a fake 'Buy'.
+        engine_maps = {name: _finite_engine_map(name, m) for name, m in engine_maps.items()}
 
         results = []
         raw_sizes = {}   # symbol -> conviction×inverse-vol (normalized into weights after the loop)
@@ -1016,7 +1123,9 @@ class UnifiedRanker:
             qm = quality_metrics.get(sym)
             if qm:
                 unified *= quality_gate(qm['piotroski'], qm['roe'])
-            if unified < 1:
+            # Explicit non-finite check: `unified < 1` is False for NaN, so without this a
+            # NaN score is written out and mislabelled 'Buy' by _classify's fall-through.
+            if not math.isfinite(unified) or unified < 1:
                 continue
 
             bull = bull_counts.get(sym, 0)
@@ -1154,6 +1263,27 @@ class UnifiedRanker:
                     position_size_pct=excluded.position_size_pct
             ''', r)
         self.conn.commit()
+
+        # Purge rows this run did not produce. The upsert key is (symbol, computed_at), so a
+        # symbol scored by an earlier run today but dropped by this one (universe filter, RL
+        # gate, or the non-finite guard above) would keep its stale row and still be ranked
+        # by every consumer. Without this, re-running after a fix leaves the old bad rows behind.
+        try:
+            scored = [r['symbol'] for r in results]
+            if scored:
+                placeholders = ','.join('?' for _ in scored)
+                cur.execute(
+                    f"DELETE FROM unified_recommendations WHERE computed_at = ? "
+                    f"AND symbol NOT IN ({placeholders})",
+                    tuple([today] + scored),
+                )
+                if cur.rowcount:
+                    print(f"[UnifiedRanker] purged {cur.rowcount} stale rows for {today} "
+                          f"(scored by an earlier run, not by this one).")
+                self.conn.commit()
+        except Exception as e:
+            print(f"[UnifiedRanker] stale-row purge failed: {e}")
+            self.conn.rollback()
 
         # Backfill sector from nse_stocks for any row still NULL/Unknown
         try:

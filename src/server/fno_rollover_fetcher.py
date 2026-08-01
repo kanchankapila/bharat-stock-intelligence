@@ -97,15 +97,11 @@ def ensure_schema(con) -> None:
 
 # ── Download ────────────────────────────────────────────────────────────────────
 
-def _trading_days_back(n: int) -> list[date]:
-    """Return last n trading days (Mon-Fri), most recent first."""
-    days = []
-    d = date.today() - timedelta(days=1)
-    while len(days) < n:
-        if d.weekday() < 5:
-            days.append(d)
-        d -= timedelta(days=1)
-    return days
+def _trading_days_back(n: int, con=None) -> list[date]:
+    """Real trading sessions, newest first. Shared helper -- the previous weekday-only
+    version was holiday-blind (see as_of.trading_days_back)."""
+    from as_of import trading_days_back
+    return trading_days_back(n, con)
 
 
 def fetch_bhavcopy(trade_date: date, session: requests.Session) -> pd.DataFrame | None:

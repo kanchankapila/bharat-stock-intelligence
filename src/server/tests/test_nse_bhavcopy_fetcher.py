@@ -147,3 +147,90 @@ class TestMonthEnds:
     def test_does_not_overrun_the_end_bound(self):
         end = datetime.date(2026, 3, 15)
         assert all(d <= end for d in bhav.month_ends(datetime.date(2026, 1, 1), end))
+
+
+# ── weekend special sessions + the archive's re-serve behaviour ─────────────────
+# The backfill used to filter weekends out entirely, so NSE's live weekend sessions were never
+# captured. Probing every calendar day fixes that, but exposes a second behaviour: for most
+# weekend dates the archive RE-SERVES the previous session's file rather than 404ing --
+# requesting Sunday 2024-10-20 returns a byte-identical copy of Friday 2024-10-18's file
+# (verified by md5 across every weekend probed 2021-2026). Only THREE genuine weekend sessions
+# exist in the whole history: Diwali Muhurat 2023-11-12, and the Budget sessions of
+# 2025-02-01 and 2026-02-01.
+
+class _FakeConn:
+    def __init__(self):
+        self.rows = []
+
+    def execute(self, sql, params=()):
+        if sql.strip().upper().startswith("INSERT"):
+            self.rows.append(params)
+        return self
+
+    def fetchall(self):
+        return []
+
+    def fetchone(self):
+        return None
+
+    def commit(self):
+        pass
+
+
+def _csv(date_str, symbols=("RELIANCE", "INFY")):
+    head = ("SYMBOL, SERIES, DATE1, PREV_CLOSE, OPEN_PRICE, HIGH_PRICE, LOW_PRICE, "
+            "LAST_PRICE, CLOSE_PRICE, AVG_PRICE, TTL_TRD_QNTY, TURNOVER_LACS, "
+            "NO_OF_TRADES, DELIV_QTY, DELIV_PER")
+    lines = [head]
+    for s in symbols:
+        lines.append(f"{s}, EQ, {date_str}, 100, 101, 102, 99, 100.5, 100.5, 100.7, "
+                     f"1000, 10.5, 50, 500, 50.0")
+    return "\n".join(lines)
+
+
+def test_parser_keys_rows_off_the_files_own_date_not_the_request():
+    """This is why a re-serve cannot corrupt the table: rows land under the file's true
+    session date, so a re-served Friday file just upserts Friday's existing rows."""
+    import nse_bhavcopy_fetcher as nbf
+    rows = nbf.parse_bhavcopy(_csv("18-Oct-2024"))
+    assert rows and {r["date"] for r in rows} == {"2024-10-18"}
+
+
+def test_run_one_reports_a_reserved_file_and_counts_zero_for_that_date():
+    """A re-serve must not be logged as a session on a day the market was shut."""
+    import datetime
+    import nse_bhavcopy_fetcher as nbf
+
+    orig = nbf.fetch_bhavcopy
+    try:
+        nbf.fetch_bhavcopy = lambda d: nbf.parse_bhavcopy(_csv("18-Oct-2024"))
+        n = nbf.run_one(_FakeConn(), datetime.date(2024, 10, 20))   # a Sunday
+        assert n == 0, "a re-served file must not be counted as a session for the requested date"
+    finally:
+        nbf.fetch_bhavcopy = orig
+
+
+def test_run_one_counts_a_genuine_weekend_session():
+    """Budget Sunday 2026-02-01 is real -- the file's own date matches the request."""
+    import datetime
+    import nse_bhavcopy_fetcher as nbf
+
+    orig = nbf.fetch_bhavcopy
+    try:
+        nbf.fetch_bhavcopy = lambda d: nbf.parse_bhavcopy(_csv("01-Feb-2026"))
+        n = nbf.run_one(_FakeConn(), datetime.date(2026, 2, 1))
+        assert n > 0, "a genuine weekend session must be stored and counted"
+    finally:
+        nbf.fetch_bhavcopy = orig
+
+
+def test_backfill_no_longer_filters_out_weekends():
+    """The weekday filter that used to live in backfill() is what made the Budget sessions
+    unreachable. Guard against it being reintroduced."""
+    import inspect
+    import nse_bhavcopy_fetcher as nbf
+    src = inspect.getsource(nbf.backfill)
+    assert "weekday() < 5" not in src, (
+        "backfill() is filtering weekdays again -- NSE runs live weekend sessions "
+        "(Budget day, Diwali Muhurat) and they would be silently skipped"
+    )

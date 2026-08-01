@@ -80,3 +80,84 @@ def test_apply_edge_adjustment_preserves_all_symbols():
     win_prob_map = {'A': 0.6, 'B': 0.7, 'C': 0.8}
     out = apply_edge_adjustment_to_win_probs(win_prob_map, {}, {})
     assert set(out.keys()) == {'A', 'B', 'C'}
+
+
+# ── _restrict_to_tradeable_universe ────────────────────────────────────────────
+# Full-stack audit line 2346 left a "residual NULL entry_price" gap open. Measured live on
+# 2026-08-01 it was NOT a barrier-computation gap: 84 of the 87 NULL-entry_price symbols were
+# absent from the nse_stocks master entirely, including the raw numeric id '13510368' -- the
+# exact artifact the 2026-07-30 bias audit purged from unified_recommendations. The control
+# unified_ranker gained then was never applied to this second writer.
+
+class _FakeConn:
+    def __init__(self, master, priced):
+        self._master, self._priced = master, priced
+
+    def execute(self, stmt):
+        sql = str(stmt)
+        rows = self._master if "nse_stocks" in sql else self._priced
+        return _FakeResult([(s,) for s in rows])
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+class _FakeResult:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def fetchall(self):
+        return self._rows
+
+
+class _FakeEngine:
+    def __init__(self, master, priced):
+        self._master, self._priced = master, priced
+
+    def connect(self):
+        return _FakeConn(self._master, self._priced)
+
+
+def _engine_with(master, priced):
+    from scoring_engine import AlphaQuantScoringEngine
+    eng = AlphaQuantScoringEngine.__new__(AlphaQuantScoringEngine)  # skip __init__ (loads FinBERT)
+    eng.engine = _FakeEngine(master, priced)
+    return eng
+
+
+def test_universe_filter_drops_symbols_absent_from_master():
+    eng = _engine_with({"RELIANCE", "INFY"}, {"RELIANCE", "INFY"})
+    cands = [{"symbol": "RELIANCE"}, {"symbol": "13510368"}, {"symbol": "ACCORD"}]
+    kept = eng._restrict_to_tradeable_universe(cands)
+    assert [c["symbol"] for c in kept] == ["RELIANCE"]
+
+
+def test_universe_filter_drops_symbols_with_no_recent_price():
+    """In the master but unpriced is still unactionable -- no entry, no stop, no grading."""
+    eng = _engine_with({"RELIANCE", "STALECO"}, {"RELIANCE"})
+    kept = eng._restrict_to_tradeable_universe([{"symbol": "RELIANCE"}, {"symbol": "STALECO"}])
+    assert [c["symbol"] for c in kept] == ["RELIANCE"]
+
+
+def test_universe_filter_is_a_noop_when_lookup_fails():
+    """A DB hiccup must not silently empty the recommendation set -- degrade to unfiltered
+    rather than publishing nothing at all."""
+    class Boom:
+        def connect(self):
+            raise RuntimeError("db down")
+
+    from scoring_engine import AlphaQuantScoringEngine
+    eng = AlphaQuantScoringEngine.__new__(AlphaQuantScoringEngine)
+    eng.engine = Boom()
+    cands = [{"symbol": "RELIANCE"}, {"symbol": "13510368"}]
+    assert eng._restrict_to_tradeable_universe(cands) == cands
+
+
+def test_universe_filter_is_a_noop_when_reference_tables_are_empty():
+    """An empty master means the reference data is missing, not that nothing is tradeable."""
+    eng = _engine_with(set(), set())
+    cands = [{"symbol": "RELIANCE"}]
+    assert eng._restrict_to_tradeable_universe(cands) == cands

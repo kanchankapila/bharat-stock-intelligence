@@ -120,6 +120,12 @@ export class WebSocketSignalService {
       timestamp: new Date().toISOString(),
     });
 
+    // NOTE: this threshold is effectively unreachable and has not fired since 2026-07-18.
+    // `confidence` here is the quant win_probability x100 (commit 0609a49 replaced the LLM's
+    // self-reported 85-98 confidence with it); win_probability peaks around 0.41 across the
+    // universe, so `>= 85` never passes. Stock recommendations are delivered by the daily
+    // digest in telegramRecommendations.ts instead. Left in place rather than re-tuned:
+    // lowering it would restore a ~1000-alerts/day firehose that was deliberately removed.
     if (alert.signal && alert.signal.signalType === 'BUY' && (alert.signal.confidence ?? 0) >= 85) {
       telegramService.sendSignalNotification(
         alert.symbol,

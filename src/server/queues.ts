@@ -630,6 +630,22 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await updateTrailingStops()
     .catch(e => console.warn('[QUEUE] trailing stop updater failed:', (e as Error).message));
   await T.run('fii-dii-fetcher', () => runPython('fii_dii_fetcher.py', [], 90_000));
+  // Deep-history top-up (endpoint-corpus audit §5-1). One call returns all 2,584 daily rows
+  // back to 2016 in ~3s, so backfill and daily top-up are the same operation -- there is no
+  // separate backfill mode to schedule. Runs AFTER fii_dii_fetcher deliberately: it only ever
+  // fills NULLs, so today's authoritative NSE row is already in place and wins. Tolerated
+  // (.catch) rather than fatal -- this is a supplementary third-party source, and an outage
+  // must not fail the whole daily ML chain the way the drift-detector timeout did.
+  await T.run('fii-dii-history', () => runPython('fii_dii_history_fetcher.py', [], 120_000))
+    .catch(e => console.warn('[QUEUE] fii_dii_history_fetcher failed (daily ops continues):', (e as Error).message));
+  // Bulk/block deals carrying pctTransacted (% of float) -- the cross-sectionally comparable
+  // deal-size field NSE's own feed does not provide (endpoint-corpus audit §5-2). 5 pages of
+  // 200 covers several days of deals, so a missed run self-heals on the next one.
+  // --insider also lands the feed's insider filings in insider_trades WITH pct_transacted,
+  // which NSE's PIT feed does not carry -- insider_features.py's ratio is near-binary, so
+  // materiality (a 70%-of-float promoter exit vs a 0.01% one) is the missing dimension.
+  await T.run('tickertape-deals', () => runPython('tickertape_deals_fetcher.py', ['--pages', '5', '--insider'], 180_000))
+    .catch(e => console.warn('[QUEUE] tickertape_deals_fetcher failed (daily ops continues):', (e as Error).message));
   await runPython('pcr_fetcher.py', ['--gex'], 90_000)
     .catch(e => console.warn('[QUEUE] pcr_fetcher failed:', (e as Error).message));
   // Parallel batch — safe to overlap: disjoint target tables (mc_* vs quant_scores vs
@@ -2520,6 +2536,23 @@ export async function initQueues(): Promise<boolean> {
           recordHeartbeat('intraday-ranker', 'success');
           return;
         }
+        // 0) capture intraday breadth BEFORE the regime label that consumes it.
+        // Previously this only ran as a side effect of liveStockData.ts's quote refresh,
+        // which is cache-driven -- so it fired only when a user request happened to miss the
+        // cache during market hours. Result: 54 snapshot rows total, with multi-day gaps, and
+        // intraday_regime.py's (correct) staleness guard therefore dropped breadth from the
+        // regime fusion most cycles. On this chain it runs every 15 min like its consumer.
+        try {
+          const { getOrRefreshAllStocks } = await import('./liveStockData');
+          const { persistIntradayBreadth } = await import('./intradayBreadth');
+          const quotes = await getOrRefreshAllStocks();
+          const breadth = await persistIntradayBreadth(quotes);
+          recordHeartbeat('intraday-breadth-capture', 'success');
+          if (breadth) console.log(`[QUEUE] intraday breadth captured (score ${breadth.breadthScore})`);
+        } catch (e) {
+          console.warn('[QUEUE] intraday breadth capture failed:', (e as Error).message);
+          recordHeartbeat('intraday-breadth-capture', 'failed', (e as Error).message);
+        }
         // 1) fetch live macro (VIX/USDINR/basis) → macro_asset_prices
         await runPython('market_regime_fetcher.py', [], 60_000)
           .then(() => recordHeartbeat('market-regime-refresh', 'success'))
@@ -3353,6 +3386,42 @@ export async function initQueues(): Promise<boolean> {
     await addJobWithCatchup(jobDigestQueue, 'job-digest-daily', {}, {
       repeat: { pattern: '45 18 * * *' }, // 12:15 AM IST next day (18:45 UTC), covers late-night jobs
       jobId: 'job-digest-daily-repeatable',
+      removeOnComplete: 3,
+      removeOnFail: 3,
+    });
+
+    // ── Daily stock-recommendation digest — 8:15 AM IST (02:45 UTC), Mon-Fri ──────
+    // Scheduled 45 min after unified-ranker ('0 2 * * 1-5' = 07:30 IST) so it reads that
+    // day's freshly-built ranking, and before the 09:15 IST open so the picks are actionable.
+    const QUEUE_RECS_DIGEST = 'recommendations-digest';
+    const recsDigestQueue = new Queue(QUEUE_RECS_DIGEST, { connection });
+    const recsDigestWorker = new Worker(
+      QUEUE_RECS_DIGEST,
+      async () => {
+        const { sendRecommendationsDigest } = await import('./telegramRecommendations');
+        const res = await sendRecommendationsDigest();
+        if (!res.sent && res.picks > 0) {
+          // Picks existed but Telegram rejected the send -- fail loudly so the heartbeat marks
+          // it failed rather than reporting success on a digest nobody received.
+          throw new Error('recommendations digest failed to send to Telegram');
+        }
+      },
+      { connection, concurrency: 1, lockDuration: 5 * 60_000 },
+    );
+    recsDigestWorker.on('completed', () => {
+      console.log('[QUEUE] recommendations-digest sent');
+      recordHeartbeat('recommendations-digest', 'success');
+    });
+    recsDigestWorker.on('failed', (_, err) => {
+      console.error('[QUEUE] recommendations-digest failed:', err.message);
+      recordHeartbeat('recommendations-digest', 'failed', err.message);
+    });
+
+    const recsRepeatables = await recsDigestQueue.getRepeatableJobs();
+    for (const r of recsRepeatables) await recsDigestQueue.removeRepeatableByKey(r.key);
+    await addJobWithCatchup(recsDigestQueue, 'recommendations-digest-daily', {}, {
+      repeat: { pattern: '45 2 * * 1-5' },
+      jobId: 'recommendations-digest-daily-repeatable',
       removeOnComplete: 3,
       removeOnFail: 3,
     });

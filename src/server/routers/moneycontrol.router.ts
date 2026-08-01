@@ -2,6 +2,7 @@ import { z } from "zod";
 import { getStockMapping } from "../stockMapping";
 import { alphaQuant } from "../alphaQuantClient";
 import { router, publicProcedure } from "../trpc";
+import type { McStockNewsResponse } from "../mcApiService";
 
 export const moneycontrolRouter = router({
   getMcConsolidated: publicProcedure
@@ -144,5 +145,19 @@ export const moneycontrolRouter = router({
         LIMIT 50
       `, [month]);
     }),
-});
 
+  getMcStockNews: publicProcedure
+    .input(z.object({ symbol: z.string() }))
+    .query(async ({ input }): Promise<McStockNewsResponse> => {
+      const { resolveMoneycontrolSymbol } = await import('../stockMapping');
+      // resolveMoneycontrolSymbol already prefers stocklist.ts's mcsymbol before
+      // falling back to MC autocomplete. The news endpoint is keyed strictly on
+      // sc_id — a raw NSE ticker answers `news: null` — so don't waste a call.
+      const scId = await resolveMoneycontrolSymbol(input.symbol);
+      if (!scId) {
+        return { scId: '', status: 'no_news', count: 0, news: [], additional_links: [] };
+      }
+      const { fetchMcStockNews } = await import('../mcApiService');
+      return fetchMcStockNews(scId, input.symbol);
+    }),
+});

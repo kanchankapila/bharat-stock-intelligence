@@ -772,6 +772,17 @@ db.exec(`
     dii_buy   REAL,
     dii_sell  REAL,
     dii_net   REAL,
+    -- fii_net is CASH EQUITY net; fii_net_all_segments is the derivatives-dominated
+    -- all-segment figure (15x larger on some days) and mf_* is mutual-funds-only, a subset
+    -- of the DII aggregate. Conflating any of these was the trap in fii_dii_history_fetcher.py.
+    fii_equity           REAL,
+    fii_debt             REAL,
+    fii_derivatives      REAL,
+    fii_net_all_segments REAL,
+    mf_equity            REAL,
+    mf_debt              REAL,
+    mf_derivatives       REAL,
+    mf_total             REAL,
     source    TEXT DEFAULT 'NSE',
     fetched_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );

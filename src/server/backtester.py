@@ -141,6 +141,68 @@ class Backtester:
               f"absence")
         return {'traded': traded, 'missing': missing, 'missing_pct': round(pct, 2)}
 
+    def traded_window(self, symbols: list[str], start: str, end: str) -> dict:
+        """{symbol: (first_traded_date, last_traded_date)} from the NSE bhavcopy record.
+
+        This is the half of the survivorship fix that needs NO price adjustment, so unlike
+        wiring bhavcopy prices in (see survivorship_gap) it is safe to apply today: it uses
+        nse_universe_history purely as the exchange's own record of WHEN each security was
+        actually trading, while prices still come from stock_ohlcv.
+
+        Without it the backtest's universe is implicitly "whatever is in stock_ohlcv now",
+        which lets it open positions in names that had already stopped trading (or had not
+        yet listed) on the signal date, and lets a position in a delisted name simply run out
+        of bars and vanish from the trade log rather than being closed at its last real price.
+        """
+        if not symbols:
+            return {}
+        sym_list = "','".join(symbols)
+        try:
+            df = read_df(f"""
+                SELECT symbol, MIN(date) AS first_date, MAX(date) AS last_date
+                FROM nse_universe_history
+                WHERE symbol IN ('{sym_list}') AND date BETWEEN '{start}' AND '{end}'
+                GROUP BY symbol
+            """)
+        except Exception as e:
+            print(f"[Backtester] traded-window lookup unavailable ({str(e)[:80]}) -- "
+                  "point-in-time universe filter skipped")
+            return {}
+        if df.empty:
+            return {}
+        return {
+            r['symbol']: (pd.to_datetime(r['first_date']), pd.to_datetime(r['last_date']))
+            for _, r in df.iterrows()
+        }
+
+    def filter_to_traded_universe(self, signals: pd.DataFrame, start: str, end: str):
+        """Drop signals for symbols that were not actually trading on the signal date.
+
+        Returns (filtered_signals, stats). Symbols absent from nse_universe_history entirely
+        are LEFT IN and counted separately -- absence there means the bhavcopy backfill does
+        not cover them, which is a coverage gap, not evidence that they were untraded.
+        """
+        if signals.empty or 'symbol' not in signals.columns:
+            return signals, {}
+        windows = self.traded_window(signals['symbol'].unique().tolist(), start, end)
+        if not windows:
+            return signals, {}
+        sig_dates = pd.to_datetime(signals['signal_date'], errors='coerce')
+        known = signals['symbol'].isin(windows)
+        first = signals['symbol'].map(lambda s: windows[s][0] if s in windows else pd.NaT)
+        last = signals['symbol'].map(lambda s: windows[s][1] if s in windows else pd.NaT)
+        untraded = known & (sig_dates.notna()) & ((sig_dates < first) | (sig_dates > last))
+        n_drop = int(untraded.sum())
+        stats = {
+            'signals_before': int(len(signals)),
+            'dropped_not_trading': n_drop,
+            'symbols_absent_from_bhavcopy': int((~known).sum()),
+        }
+        if n_drop:
+            print(f"[Backtester] Point-in-time universe: dropped {n_drop} signals on dates the "
+                  f"symbol was not trading per NSE bhavcopy")
+        return signals[~untraded].reset_index(drop=True), stats
+
     def load_ohlcv(self, symbols: list[str], start: str, end: str) -> pd.DataFrame:
         if not symbols:
             return pd.DataFrame()
@@ -157,6 +219,69 @@ class Backtester:
         df['date']  = pd.to_datetime(df['date'])
         for col in ['open', 'high', 'low', 'close']:
             df[col] = pd.to_numeric(df[col], errors='coerce')
+
+        # Fill the survivorship hole with split-adjusted bhavcopy prices. traded_window()
+        # already knows WHEN a delisted name traded; without this it still has no PRICES, so
+        # the ~306 genuinely-delisted companies remain untradeable and the backtest stays
+        # biased upward by their absence.
+        missing = sorted(set(symbols) - set(df['symbol'].unique()))
+        if missing:
+            extra = self.load_bhavcopy_adjusted(missing, start, end)
+            if not extra.empty:
+                df = pd.concat([df, extra], ignore_index=True).sort_values(['symbol', 'date'])
+        return df
+
+    def load_bhavcopy_adjusted(self, symbols: list[str], start: str, end: str) -> pd.DataFrame:
+        """Bhavcopy OHLCV for symbols absent from stock_ohlcv, back-adjusted for splits.
+
+        bhavcopy is RAW; stock_ohlcv is split-adjusted. Concatenating the two without this
+        step would reintroduce exactly the mixed-adjustment-basis seam the 2026-07-30 audit
+        flagged -- every split in a delisted name would read as a real gap-down and
+        manufacture false losses. ohlcv_adjust.py derives the factors from the exchange's own
+        data (see that module); here they are applied cumulatively, so a bar is scaled by the
+        product of every action dated after it.
+        """
+        if not symbols:
+            return pd.DataFrame()
+        sym_list = "','".join(symbols)
+        try:
+            df = read_df(f"""
+                SELECT symbol, date, open, high, low, close, volume
+                FROM nse_universe_history
+                WHERE symbol IN ('{sym_list}') AND series IN ('EQ','BE')
+                  AND date BETWEEN '{start}' AND '{end}'
+                ORDER BY symbol, date
+            """)
+            fac = read_df(f"""
+                SELECT symbol, ex_date, factor FROM ohlcv_adjustment_factors
+                WHERE symbol IN ('{sym_list}')
+            """)
+        except Exception as e:
+            print(f"[Backtester] bhavcopy price fallback unavailable ({str(e)[:80]})")
+            return pd.DataFrame()
+        if df.empty:
+            return df
+
+        df['date'] = pd.to_datetime(df['date'])
+        for col in ['open', 'high', 'low', 'close']:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+
+        if not fac.empty:
+            fac['ex_date'] = pd.to_datetime(fac['ex_date'])
+            fac['factor'] = pd.to_numeric(fac['factor'], errors='coerce')
+            for sym, events in fac.groupby('symbol'):
+                mask = df['symbol'] == sym
+                if not mask.any():
+                    continue
+                for _, ev in events.iterrows():
+                    # Strictly BEFORE the ex-date: the ex-date bar is already on the new basis.
+                    pre = mask & (df['date'] < ev['ex_date'])
+                    if pre.any():
+                        for col in ['open', 'high', 'low', 'close']:
+                            df.loc[pre, col] = df.loc[pre, col] * ev['factor']
+        n_adj = 0 if fac.empty else len(fac)
+        print(f"[Backtester] bhavcopy fallback: {df['symbol'].nunique()} symbols, "
+              f"{len(df)} bars, {n_adj} split adjustments applied")
         return df
 
     def load_nifty(self, start: str, end: str) -> pd.Series:
@@ -969,12 +1094,21 @@ class Backtester:
             print("[Backtester] No signals found for the given parameters.")
             return {}
 
+        # Point-in-time universe: never trade a name on a date it was not actually trading.
+        # Applied BEFORE the symbol list is taken so untraded names don't reach OHLCV loading.
+        signals, pit_stats = self.filter_to_traded_universe(signals, start, end)
+        if signals.empty:
+            print("[Backtester] No signals remain after the point-in-time universe filter.")
+            return {}
+
         symbols = signals['symbol'].unique().tolist()
         print(f"[Backtester] {len(signals)} signals across {len(symbols)} symbols")
 
         # Report how survivorship-biased this run's own universe is, so the numbers below are
         # never read as if they came from the real historical universe.
         survivorship = self.survivorship_gap(start, end)
+        if pit_stats:
+            survivorship = {**survivorship, **pit_stats}
 
         # Extend end date for exit prices
         extended_end = (pd.to_datetime(end) + pd.Timedelta(days=horizon_days + 10)).strftime('%Y-%m-%d')

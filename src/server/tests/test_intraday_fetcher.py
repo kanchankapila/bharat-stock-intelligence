@@ -22,8 +22,15 @@ import intraday_fetcher as itf
 
 # ── Pure-function tests ───────────────────────────────────────────────────────
 
+# 2026-06-15 09:15:00 IST -- an NSE session open, exactly on the 15-minute bar grid.
+# parse_bars now rejects off-grid timestamps (vendors append the current in-progress quote
+# stamped at request time) and only emits VWAP for sessions whose opening bar is present, so
+# fixtures must start at a real session open rather than an arbitrary epoch.
+SESSION_OPEN_TS = 1_781_495_100
+
+
 class TestParseBars:
-    def _mc_payload(self, n=3, base_ts=1_750_000_000):
+    def _mc_payload(self, n=3, base_ts=SESSION_OPEN_TS):
         """Build a minimal MC TechCharts JSON payload with n bars."""
         return {
             "t": [base_ts + i * 900 for i in range(n)],   # 15-min steps
@@ -49,7 +56,7 @@ class TestParseBars:
         assert bars[0]["interval"] == "15m"
 
     def test_ohlcv_values_correct(self):
-        bars = itf.parse_bars(self._mc_payload(1, base_ts=1_750_000_000), "X")
+        bars = itf.parse_bars(self._mc_payload(1, base_ts=SESSION_OPEN_TS), "X")
         assert bars[0]["open"]   == pytest.approx(100.0)
         assert bars[0]["high"]   == pytest.approx(105.0)
         assert bars[0]["low"]    == pytest.approx(98.0)
@@ -70,6 +77,96 @@ class TestParseBars:
 
     def test_returns_empty_list_for_empty_t_array(self):
         assert itf.parse_bars({"t": [], "o": [], "h": [], "l": [], "c": [], "v": []}, "X") == []
+
+
+class TestOffGridBarsRejected:
+    """Both vendors append the current in-progress quote to the history array stamped at
+    request time rather than on the bar grid -- a real 09:30:00 bar plus a bogus 09:30:20 one
+    with volume 0 and open==high==low==close. Written verbatim these accounted for 5.5% of all
+    July 2026 rows and ~1 junk row per real bar for actively-fetched names (RELIANCE: 49 rows
+    for a 25-bar session). They are not bars."""
+
+    def _payload_with_snapshot(self):
+        # two real grid bars, plus the vendor's synthetic "last price" quote 20s into bar 3
+        return {
+            "t": [SESSION_OPEN_TS, SESSION_OPEN_TS + 900, SESSION_OPEN_TS + 1800 + 20],
+            "o": [100.0, 101.0, 102.0],
+            "h": [105.0, 106.0, 102.0],
+            "l": [98.0,  99.0,  102.0],
+            "c": [103.0, 104.0, 102.0],
+            "v": [10000, 11000, 0],
+        }
+
+    def test_off_grid_snapshot_bar_is_dropped(self):
+        bars = itf.parse_bars(self._payload_with_snapshot(), "X")
+        assert len(bars) == 2
+        assert all(b["datetime"].endswith(":00+05:30") for b in bars)
+        assert not any(b["datetime"][11:19].endswith(":20") for b in bars)
+
+    def test_on_grid_bars_survive_unchanged(self):
+        bars = itf.parse_bars(self._payload_with_snapshot(), "X")
+        assert [b["volume"] for b in bars] == [10000, 11000]
+
+    def test_unknown_interval_does_not_silently_discard(self):
+        """A grid can only be enforced for known intervals -- an unrecognised label must pass
+        data through rather than delete it."""
+        bars = itf.parse_bars(self._payload_with_snapshot(), "X", interval="7m")
+        assert len(bars) == 3
+
+
+class TestSessionVwap:
+    """intraday_ohlcv.vwap was written as a literal NULL for every row until 2026-07-31, which
+    silently made intraday_features.py's vwap_deviation_pct a constant 0.0 for every symbol on
+    every session while still looking populated."""
+
+    def _session(self, n=3, base_ts=SESSION_OPEN_TS):
+        return {
+            "t": [base_ts + i * 900 for i in range(n)],
+            "o": [100.0] * n,
+            "h": [110.0] * n,
+            "l": [90.0] * n,
+            "c": [100.0] * n,
+            "v": [1000] * n,
+        }
+
+    def test_vwap_is_populated(self):
+        bars = itf.parse_bars(self._session(3), "X")
+        assert all(b["vwap"] is not None for b in bars)
+
+    def test_vwap_equals_typical_price_for_constant_bars(self):
+        # typical price = (110 + 90 + 100) / 3 = 100 on every bar, so VWAP must be exactly 100
+        bars = itf.parse_bars(self._session(3), "X")
+        assert all(b["vwap"] == pytest.approx(100.0) for b in bars)
+
+    def test_vwap_accumulates_and_is_volume_weighted(self):
+        p = self._session(2)
+        p["h"] = [110.0, 230.0]; p["l"] = [90.0, 190.0]; p["c"] = [100.0, 210.0]
+        p["v"] = [1000, 3000]
+        bars = itf.parse_bars(p, "X")
+        # bar1 typical 100 (vol 1000); bar2 typical 210 (vol 3000)
+        # cumulative VWAP after bar2 = (100*1000 + 210*3000) / 4000 = 182.5
+        assert bars[0]["vwap"] == pytest.approx(100.0)
+        assert bars[1]["vwap"] == pytest.approx(182.5)
+
+    def test_vwap_is_null_when_session_open_bar_absent(self):
+        """The earliest day of any lookback window is partial. Accumulating from an arbitrary
+        mid-session bar produces a confidently wrong VWAP, and the upsert would overwrite a
+        previously-correct value with it -- so emit NULL instead."""
+        bars = itf.parse_bars(self._session(3, base_ts=SESSION_OPEN_TS + 3 * 3600), "X")
+        assert bars, "mid-session bars should still be written"
+        assert all(b["vwap"] is None for b in bars)
+
+    def test_vwap_resets_across_sessions(self):
+        day1 = self._session(2, SESSION_OPEN_TS)
+        day2 = self._session(2, SESSION_OPEN_TS + 86400)
+        merged = {k: day1[k] + day2[k] for k in day1}
+        merged["h"] = [110.0, 110.0, 230.0, 230.0]
+        merged["l"] = [90.0, 90.0, 190.0, 190.0]
+        merged["c"] = [100.0, 100.0, 210.0, 210.0]
+        bars = itf.parse_bars(merged, "X")
+        assert bars[1]["vwap"] == pytest.approx(100.0)
+        # day 2 must not inherit day 1's accumulation
+        assert bars[3]["vwap"] == pytest.approx(210.0)
 
 
 # ── DB-integration tests ──────────────────────────────────────────────────────
@@ -121,7 +218,7 @@ def _make_db(symbols_with_mc: list) -> tuple:
 
 def _good_fetch(mcsymbol, from_ts, to_ts):
     """Returns a 3-bar payload regardless of timestamps."""
-    base = 1_750_000_000
+    base = SESSION_OPEN_TS
     return {
         "t": [base, base + 900, base + 1800],
         "o": [100.0, 101.0, 102.0],

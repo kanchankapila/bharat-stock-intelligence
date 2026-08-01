@@ -67,6 +67,27 @@ export const telegramRouter = router({
       }
     }),
 
+  /** Send the stock-recommendation digest immediately, outside its 08:15 IST schedule. */
+  sendRecommendationsDigest: adminProcedure
+    .mutation(async () => {
+      try {
+        const { sendRecommendationsDigest } = await import('../telegramRecommendations');
+        const res = await sendRecommendationsDigest();
+        return { success: res.sent, picks: res.picks };
+      } catch (err: any) {
+        console.error(err);
+        return { success: false, error: err.message };
+      }
+    }),
+
+  /** Preview the digest text without sending it — useful for checking formatting. */
+  previewRecommendationsDigest: adminProcedure
+    .query(async () => {
+      const { buildRecommendationsDigest, renderDigest } = await import('../telegramRecommendations');
+      const data = await buildRecommendationsDigest();
+      return { text: renderDigest(data), picks: data.longTerm.length + data.intraday.length };
+    }),
+
   getNiftyTraderToken: publicProcedure
     .query(async () => {
       try {

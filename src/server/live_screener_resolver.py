@@ -211,6 +211,9 @@ def resolve_outcomes(dry_run=False):
         else:
             print(f"[LiveScreenerResolver] Dry-run: {resolved} would be resolved.")
 
+        if not dry_run:
+            prune_old_appearances(conn)
+
     except Exception as e:
         print(f"[LiveScreenerResolver] Error: {e}")
         conn.rollback()
@@ -218,6 +221,49 @@ def resolve_outcomes(dry_run=False):
     finally:
         conn.close()
         release_advisory_lock("live_screener_resolver")
+
+
+# Raw live-screener history is the largest thing this pipeline writes: ~235k appearance rows a
+# day, and as of the 2026-07-31 audit live_screener_appearances was 499 MB with
+# live_screener_outcomes a further 381 MB -- 880 MB backing a feature family whose best
+# individual filter is worth ~0.17% gross per trade. Unbounded, that reaches tens of millions
+# of rows within a year.
+#
+# This is a GROWTH GUARD, not a space reclaim: the data is currently only ~5 weeks old, so at
+# the default window nothing is deleted today. The window is deliberately far longer than any
+# consumer's lookback -- live_screener_ml_ranker needs >= 10 distinct dates and reads the whole
+# outcome history, and neither live_screener_optimizer nor backtest_live_screener bounds its
+# own read -- so retention can never silently starve training.
+#
+# The larger win the audit identified (aggregate to a daily per-(symbol, filter) fact and keep
+# raw rows only briefly) is deliberately NOT done here: it changes the shape every consumer
+# reads and deserves its own pass with a full consumer inventory.
+RETENTION_DAYS = 365
+
+
+def prune_old_appearances(conn, retention_days: int = RETENTION_DAYS) -> int:
+    """Delete appearances (and their outcomes) older than the retention window."""
+    cutoff = (datetime.date.today() - datetime.timedelta(days=retention_days)).isoformat()
+    try:
+        cur = conn.execute(
+            "DELETE FROM live_screener_outcomes WHERE appearance_id IN ("
+            "  SELECT a.id FROM live_screener_appearances a"
+            "  JOIN live_screener_runs r ON r.id = a.run_id WHERE r.timestamp < ?)", (cutoff,))
+        n_out = cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+        cur = conn.execute(
+            "DELETE FROM live_screener_appearances WHERE run_id IN ("
+            "  SELECT id FROM live_screener_runs WHERE timestamp < ?)", (cutoff,))
+        n_app = cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+        conn.commit()
+        if n_app or n_out:
+            print(f"[LiveScreenerResolver] Retention: pruned {n_app} appearances / "
+                  f"{n_out} outcomes older than {cutoff} ({retention_days}d).")
+        return n_app
+    except Exception as e:
+        # Retention must never fail the resolve run -- the outcomes it just wrote matter more.
+        conn.rollback()
+        print(f"[LiveScreenerResolver] Retention skipped: {str(e)[:120]}")
+        return 0
 
 
 if __name__ == "__main__":
