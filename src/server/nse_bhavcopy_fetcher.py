@@ -176,6 +176,25 @@ def run_one(conn: ConnWrapper, d: datetime.date) -> int:
     rows = fetch_bhavcopy(d)
     if not rows:
         return 0
+
+    # The archive RE-SERVES the previous session's file for most weekend dates instead of
+    # 404ing: requesting Sunday 2024-10-20 returns a byte-identical copy of Friday
+    # 2024-10-18's file (verified by md5 across every weekend probed). Only three genuine
+    # weekend sessions exist in this whole history -- Diwali Muhurat 2023-11-12 and the
+    # Budget sessions of 2025-02-01 and 2026-02-01.
+    #
+    # This is not corrupting, because parse_bhavcopy keys every row off the file's own DATE1
+    # rather than the requested date, so a re-serve just upserts rows that already exist. But
+    # without this check the log would claim a session happened on a day the market was shut,
+    # which is exactly the kind of quietly-wrong signal that makes a later audit distrust the
+    # table. Report it instead.
+    file_dates = {r['date'] for r in rows}
+    if file_dates and d.isoformat() not in file_dates:
+        _log(f"{d}: archive served {sorted(file_dates)[0]}'s file (no session on this date) "
+             f"-- rows upserted under their own date, nothing invented")
+        store_bhavcopy(conn, rows)
+        return 0
+
     n = store_bhavcopy(conn, rows)
     _log(f"{d}: {n} equity securities stored")
     return n

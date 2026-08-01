@@ -61,3 +61,82 @@ def read_as_of_history(table: str, symbol: str, columns: Sequence[str]) -> pd.Da
         return hist
     hist["as_of_date"] = pd.to_datetime(hist["as_of_date"]).astype("datetime64[ns]")
     return hist.dropna(subset=["as_of_date"]).sort_values("as_of_date")
+
+
+def trading_days_back(n: int, conn=None) -> list:
+    """The last `n` REAL trading sessions, newest first, as datetime.date objects.
+
+    Fetchers that walk backwards over recent sessions were each hand-rolling
+    "step back a day, keep it if weekday() < 5" (delivery_volume_fetcher.py,
+    fno_rollover_fetcher.py). That is holiday-blind, so `--days 30` silently covered fewer
+    than 30 real sessions whenever a holiday fell in range -- and India has ~15 a year, so
+    a month-long window routinely lost one or two days of data with nothing reporting it.
+
+    The exchange's own record is authoritative and always current, so the session list comes
+    from stock_ohlcv (falling back to nse_universe_history). Deliberately NOT market_holidays:
+    that table is built from observed gaps and currently stops at 2026-04-14, so it cannot
+    answer questions about recent dates -- exactly the range these callers ask about.
+
+    Falls back to the old weekday heuristic if neither table can be read, so a fetcher still
+    runs (slightly over-broad, hitting a holiday and getting a 404) rather than failing.
+    """
+    import datetime
+
+    def _weekday_fallback():
+        days, d = [], datetime.date.today() - datetime.timedelta(days=1)
+        while len(days) < n:
+            if d.weekday() < 5:
+                days.append(d)
+            d -= datetime.timedelta(days=1)
+        return days
+
+    if n <= 0:
+        return []
+
+    own_conn = False
+    if conn is None:
+        try:
+            from db_compat import connect
+            conn = connect()
+            own_conn = True
+        except Exception:
+            return _weekday_fallback()
+
+    try:
+        rows = None
+        for table in ("stock_ohlcv", "nse_universe_history"):
+            try:
+                rows = conn.execute(
+                    f"SELECT DISTINCT date FROM {table} ORDER BY date DESC LIMIT ?", (n + 5,)
+                ).fetchall()
+            except Exception:
+                # A failed statement poisons the transaction in Postgres; without this
+                # rollback every later query dies with InFailedSqlTransaction.
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                rows = None
+            if rows:
+                break
+        if not rows:
+            return _weekday_fallback()
+
+        out = []
+        today = datetime.date.today()
+        for r in rows:
+            v = r[0]
+            d = v if isinstance(v, datetime.date) else datetime.date.fromisoformat(str(v)[:10])
+            # Exclude today: the session may still be open or its file not yet published,
+            # which is the same reason the weekday version started at today-1.
+            if d < today:
+                out.append(d)
+            if len(out) >= n:
+                break
+        return out or _weekday_fallback()
+    finally:
+        if own_conn:
+            try:
+                conn.close()
+            except Exception:
+                pass

@@ -641,7 +641,10 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   // Bulk/block deals carrying pctTransacted (% of float) -- the cross-sectionally comparable
   // deal-size field NSE's own feed does not provide (endpoint-corpus audit §5-2). 5 pages of
   // 200 covers several days of deals, so a missed run self-heals on the next one.
-  await T.run('tickertape-deals', () => runPython('tickertape_deals_fetcher.py', ['--pages', '5'], 180_000))
+  // --insider also lands the feed's insider filings in insider_trades WITH pct_transacted,
+  // which NSE's PIT feed does not carry -- insider_features.py's ratio is near-binary, so
+  // materiality (a 70%-of-float promoter exit vs a 0.01% one) is the missing dimension.
+  await T.run('tickertape-deals', () => runPython('tickertape_deals_fetcher.py', ['--pages', '5', '--insider'], 180_000))
     .catch(e => console.warn('[QUEUE] tickertape_deals_fetcher failed (daily ops continues):', (e as Error).message));
   await runPython('pcr_fetcher.py', ['--gex'], 90_000)
     .catch(e => console.warn('[QUEUE] pcr_fetcher failed:', (e as Error).message));

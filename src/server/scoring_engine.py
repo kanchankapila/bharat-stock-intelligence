@@ -1002,11 +1002,55 @@ class AlphaQuantScoringEngine:
         print("Ranking and scoring complete!")
         self._log_recommendations(results)
 
+    def _restrict_to_tradeable_universe(self, candidates: list) -> list:
+        """Drop recommendations for symbols that are not real, priceable NSE instruments.
+
+        This mirrors unified_ranker._restrict_to_tradeable_universe(), which the 2026-07-30
+        bias audit added after finding 2,362 of that day's 3,959 ranked symbols absent from
+        nse_stocks. The SAME control was never applied to this writer, so the identical defect
+        was still live in recommendation_log: measured 2026-08-01, 84 of the 87 symbols with a
+        NULL entry_price were absent from the master -- including the raw numeric id
+        '13510368', the exact artifact that audit purged from unified_recommendations.
+
+        This is why entry_price was still ~22% NULL after the barrier lookup was added: not a
+        barrier-computation gap, a universe gap. A recommendation for a symbol with no price
+        history cannot be entered, stopped, graded or backtested -- the row should not exist.
+        """
+        symbols = {r['symbol'] for r in candidates if r.get('symbol')}
+        if not symbols:
+            return candidates
+        try:
+            with self.engine.connect() as conn:
+                master = {r[0] for r in conn.execute(text("SELECT symbol FROM nse_stocks")).fetchall()}
+                # stock_ohlcv.date is a native DATE column (most date columns here are TEXT
+                # from the SQLite heritage) -- compare against a DATE, not ::text, or Postgres
+                # throws "operator does not exist: date >= text".
+                priced = {r[0] for r in conn.execute(text(
+                    "SELECT DISTINCT symbol FROM stock_ohlcv WHERE date >= CURRENT_DATE - 30"
+                )).fetchall()}
+        except Exception as e:
+            print(f"[ScoringEngine] universe restriction unavailable ({e}); logging unfiltered")
+            return candidates
+
+        if not master or not priced:
+            return candidates
+
+        keep = [r for r in candidates if r.get('symbol') in master and r.get('symbol') in priced]
+        dropped = len(candidates) - len(keep)
+        if dropped:
+            print(f"[ScoringEngine] recommendation_log: dropped {dropped} of {len(candidates)} "
+                  f"candidates not in the tradeable universe (no master entry or no recent price)")
+        return keep
+
     def _log_recommendations(self, results: list):
         """Write top BUY/STRONG BUY recommendations to recommendation_log for outcome tracking."""
         now        = datetime.datetime.now().isoformat()
         today      = datetime.date.today().isoformat()
         candidates = [r for r in results if r.get('classification') in ('Strong Buy', 'Buy')]
+        if not candidates:
+            return
+
+        candidates = self._restrict_to_tradeable_universe(candidates)
         if not candidates:
             return
 

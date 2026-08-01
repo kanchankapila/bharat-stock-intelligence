@@ -36,9 +36,14 @@ def compute_insider_features(cutoff_date: str) -> pd.DataFrame:
         datetime.date.fromisoformat(cutoff_date) - datetime.timedelta(days=WINDOW_DAYS)
     ).isoformat()
 
+    # date_iso, NOT date. `insider_trades.date` is TEXT holding NSE's display format
+    # ("05 Apr, 2022") on 46,194 of 46,198 rows, so `date >= '2026-05-01'` is a LEXICOGRAPHIC
+    # string compare that matches almost nothing -- which is why this feature sat at 4 of
+    # 2,187 rows (0.18%) despite 46k trades being available. The 2026-07-30 bias audit added
+    # the parsed date_iso column for exactly this, but no consumer was ever switched over.
     df = read_df(
         'SELECT symbol, "typeOfTransaction", quantity FROM insider_trades '
-        "WHERE date >= ? AND date <= ?",
+        "WHERE date_iso >= ? AND date_iso <= ?",
         (window_start, cutoff_date),
     )
     if df.empty:

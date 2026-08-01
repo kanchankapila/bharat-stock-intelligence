@@ -76,14 +76,12 @@ def ensure_schema(con) -> None:
     safe_alter(None, "ALTER TABLE technical_signals ADD COLUMN delivery_pct REAL")
 
 
-def _trading_days_back(n: int) -> list[date]:
-    days = []
-    d = date.today() - timedelta(days=1)
-    while len(days) < n:
-        if d.weekday() < 5:
-            days.append(d)
-        d -= timedelta(days=1)
-    return days
+def _trading_days_back(n: int, con=None) -> list[date]:
+    """Real trading sessions, newest first. Delegates to the shared helper -- the old
+    weekday-only version was holiday-blind, so --days 30 silently covered fewer than 30 real
+    sessions whenever a holiday fell in range."""
+    from as_of import trading_days_back
+    return trading_days_back(n, con)
 
 
 def fetch_mto(trade_date: date, session: requests.Session) -> list[dict] | None:
@@ -94,7 +92,12 @@ def fetch_mto(trade_date: date, session: requests.Session) -> list[dict] | None:
     except Exception as e:
         status = getattr(getattr(e, 'response', None), 'status_code', None)
         if status == 404:
-            return None  # holiday
+            # No file published for this date = no session. Distinct from a failure: return
+            # an empty list, so a caller can tell "nothing happened" from "we don't know".
+            # Both used to return None, which made a throttled run look like a run of
+            # holidays -- the same silent-partial-failure contract bug fixed in
+            # insider_transactions_fetcher.py.
+            return []
         print(f"[Delivery] {trade_date}: download failed after retries — {e}")
         return None
 
@@ -184,14 +187,18 @@ def main() -> None:
     if args.date:
         dates = [datetime.strptime(args.date, "%Y-%m-%d").date()]
     else:
-        dates = _trading_days_back(args.days)
+        dates = _trading_days_back(args.days, con)
 
-    total = 0
+    total = failed = 0
     for i, trade_date in enumerate(dates):
         print(f"[Delivery] Fetching {trade_date} ({i+1}/{len(dates)})…")
         rows = fetch_mto(trade_date, session)
         if rows is None:
-            print(f"[Delivery] {trade_date}: skipped (holiday or not yet published)")
+            failed += 1
+            print(f"[Delivery] {trade_date}: FETCH FAILED (not a holiday — investigate)")
+            continue
+        if not rows:
+            print(f"[Delivery] {trade_date}: no session (holiday / not yet published)")
             continue
         upsert_rows(rows, con)
         print(f"[Delivery] {trade_date}: {len(rows)} stocks saved")
