@@ -843,3 +843,134 @@ export async function fetchKayalScreener(
   if (res?.head && res?.body) return res;
   return null;
 }
+
+// ─── MoneyControl Stock News ──────────────────────────────────────────────────
+
+export interface McStockNewsItem {
+  heading: string;
+  posturl: string;
+  creation_date_epoch: string;
+  update_date_epoch: string;
+  display_date: string;
+  post_type: string;
+  post_image: string;
+  summary: string;
+  formatted_date?: string;
+}
+
+export interface McNewsLink {
+  name: string;
+  link: string;
+}
+
+/**
+ * `no_news` means MoneyControl has nothing for this sc_id (it answers with
+ * `news: null`); `fetch_failed` means we never got a usable response. Callers
+ * must not collapse the two — an outage rendered as "no news" is how a broken
+ * feed goes unnoticed.
+ */
+export type McNewsStatus = 'ok' | 'no_news' | 'fetch_failed';
+
+export interface McStockNewsResponse {
+  scId: string;
+  status: McNewsStatus;
+  count: number;
+  news: McStockNewsItem[];
+  additional_links: McNewsLink[];
+  more_link?: McNewsLink;
+}
+
+/**
+ * MoneyControl serves some headlines with the backslash stripped from JSON
+ * `\uXXXX` escapes, so an en-dash arrives as the literal text "u2013".
+ * Only rewrite sequences that carry a digit and decode above ASCII, so ordinary
+ * words that happen to be hex-shaped are left alone.
+ */
+export function decodeMangledEscapes(text: string): string {
+  if (!text) return text;
+  return text.replace(/(^|[^A-Za-z0-9])u([0-9a-fA-F]{4})/g, (match, prefix: string, hex: string) => {
+    if (!/\d/.test(hex)) return match;
+    const code = parseInt(hex, 16);
+    if (code < 0x80) return match;
+    return prefix + String.fromCharCode(code);
+  });
+}
+
+export function formatHumanTimestamp(epochStr?: string, displayDate?: string): string {
+  if (epochStr && !isNaN(Number(epochStr))) {
+    const epochSec = Number(epochStr);
+    const date = new Date(epochSec * 1000);
+    if (!isNaN(date.getTime())) {
+      const now = new Date();
+      const diffMs = now.getTime() - date.getTime();
+      const diffHours = diffMs / (1000 * 60 * 60);
+
+      if (diffMs >= 0 && diffHours < 24) {
+        if (diffHours < 1) {
+          const mins = Math.max(1, Math.floor(diffMs / (1000 * 60)));
+          return `${mins} ${mins === 1 ? 'min' : 'mins'} ago`;
+        }
+        const hrs = Math.floor(diffHours);
+        return `${hrs} ${hrs === 1 ? 'hour' : 'hours'} ago`;
+      }
+
+      if (diffMs >= 0 && diffHours < 168) {
+        const days = Math.floor(diffHours / 24);
+        return `${days} ${days === 1 ? 'day' : 'days'} ago`;
+      }
+
+      const day = date.getDate().toString().padStart(2, '0');
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const month = months[date.getMonth()];
+      const year = date.getFullYear();
+      let hours = date.getHours();
+      const minutes = date.getMinutes().toString().padStart(2, '0');
+      const ampm = hours >= 12 ? 'PM' : 'AM';
+      hours = hours % 12;
+      hours = hours ? hours : 12;
+      const timeStr = `${hours.toString().padStart(2, '0')}:${minutes} ${ampm}`;
+
+      return `${day} ${month} ${year}, ${timeStr}`;
+    }
+  }
+  return displayDate || '—';
+}
+
+export function parseMcStockNews(scId: string, res: any): McStockNewsResponse {
+  if (!res || typeof res !== 'object' || !res.body) {
+    return { scId, status: 'fetch_failed', count: 0, news: [], additional_links: [] };
+  }
+
+  const block = res.body.news;
+  if (!block || !Array.isArray(block.data)) {
+    return { scId, status: 'no_news', count: 0, news: [], additional_links: [] };
+  }
+
+  const news: McStockNewsItem[] = block.data.map((item: any) => ({
+    heading: decodeMangledEscapes(item.heading || ''),
+    posturl: item.posturl || '',
+    creation_date_epoch: item.creation_date_epoch || '',
+    update_date_epoch: item.update_date_epoch || '',
+    display_date: item.display_date || '',
+    post_type: item.post_type || 'news',
+    post_image: item.post_image || '',
+    summary: decodeMangledEscapes(item.summary || ''),
+    formatted_date: formatHumanTimestamp(item.creation_date_epoch || item.update_date_epoch, item.display_date),
+  }));
+
+  return {
+    scId,
+    status: news.length > 0 ? 'ok' : 'no_news',
+    // The upstream `count` is the page size, not a total — report what we return.
+    count: news.length,
+    news,
+    additional_links: Array.isArray(block.additional_links) ? block.additional_links : [],
+    more_link: block.more_link,
+  };
+}
+
+export async function fetchMcStockNews(scId: string, symbol?: string): Promise<McStockNewsResponse> {
+  const url = `https://www.moneycontrol.com/techmvc/mc_apis/mc_pricechart_homepage/news?sc_did=${encodeURIComponent(scId)}`;
+  const res = await mcFetchJson<any>(url, 3, symbol);
+  return parseMcStockNews(scId, res);
+}

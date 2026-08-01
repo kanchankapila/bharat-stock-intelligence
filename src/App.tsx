@@ -29,6 +29,7 @@ import { useNewsFeed, NewsArticle } from './services/newsService';
 import { detectCandlestickPatterns, Candlestick } from './lib/candlestickUtils';
 // ─── Always-loaded (shell, drawers, inline dashboard widgets) ─────────────────
 import MCStockInfoPanel from './components/MCStockInfoPanel';
+import { McNewsCard, McNewsLinks, McNewsEmptyState } from './components/McNewsCard';
 import { FinologyPanel } from './components/FinologyPanel';
 import { MCIndexDetailPanel } from './components/MCIndexDetailPanel';
 import { GlobalMarketCards } from './components/GlobalMarketCards';
@@ -2971,27 +2972,55 @@ const FnOSignals: React.FC<{ symbol: string }> = ({ symbol }) => {
 // AnalystEstimates, PriceVolume, StockSWOT, FundamentalEssentials removed — data now shown via MCStockInfoPanel
 
 const NewsTab: React.FC<{ symbol: string }> = ({ symbol }) => {
+  const { data: mcNewsData, isLoading: loadingMcNews } = trpc.getMcStockNews.useQuery(
+    { symbol },
+    { staleTime: 60000 },
+  );
   const allNews = useNewsFeed();
-  const news = useMemo(
+  const fallbackNews = useMemo(
     () => allNews.filter(n => n.relatedSymbols?.includes(symbol)),
     [allNews, symbol],
   );
 
-  if (news.length === 0) {
+  const mcItems = mcNewsData?.news ?? [];
+
+  if (loadingMcNews) {
     return (
-      <div className="flex flex-col items-center justify-center py-20 glass-strong rounded-2xl border border-slate-800/50 border-dashed">
-         <Activity className="w-12 h-12 text-slate-200 animate-pulse mb-4" />
-         <h3 className="text-slate-400 font-black text-lg uppercase tracking-tighter italic text-center">No Targeted News Found</h3>
-         <p className="text-slate-400 text-[10px] uppercase font-bold tracking-widest mt-2">{symbol} section under observation</p>
+      <div className="flex flex-col items-center justify-center py-20 glass-strong rounded-2xl border border-slate-800/50 animate-pulse">
+        <Activity className="w-10 h-10 text-blue-500 mb-3 animate-spin" />
+        <h3 className="text-slate-300 font-bold text-sm uppercase tracking-wider">Loading MoneyControl Live News…</h3>
       </div>
     );
+  }
+
+  if (mcItems.length > 0) {
+    return (
+      <div className="space-y-6">
+        <Card title={`${symbol} — MoneyControl Live News`} icon={Activity}>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
+            {mcItems.map((item, idx) => (
+              <McNewsCard key={item.posturl || idx} item={item} accent="blue" />
+            ))}
+          </div>
+          <McNewsLinks
+            additionalLinks={mcNewsData?.additional_links}
+            moreLink={mcNewsData?.more_link}
+            accent="blue"
+          />
+        </Card>
+      </div>
+    );
+  }
+
+  if (fallbackNews.length === 0) {
+    return <McNewsEmptyState status={mcNewsData?.status} symbol={symbol} />;
   }
 
   return (
     <div className="space-y-6">
       <Card title={`${symbol} Intel Feed`} icon={Activity}>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
-          {news.map((item) => (
+          {fallbackNews.map((item) => (
             <div key={item.id} className="p-5 glass-strong border border-slate-800/50 rounded-2xl hover:border-blue-500/30 transition-all group">
               <div className="flex gap-3 items-center mb-3">
                 <span className={cn(

@@ -5,7 +5,7 @@ import stockData from '../data/stocklist';
 import {
   TrendingUp, TrendingDown, Activity, Zap, Info, AlertCircle,
   BarChart3, PieChart, Users, Filter, ArrowUpRight,
-  CheckCircle2, BrainCircuit, Search, Database, History
+  CheckCircle2, BrainCircuit, Search, Database, History, Newspaper
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import {
@@ -15,6 +15,7 @@ import {
   TechnicalAnalysisWidget, 
   AdvancedChartWidget 
 } from './TradingViewWidgets';
+import { McNewsCard, McNewsLinks, McNewsEmptyState } from './McNewsCard';
 
 
 const Candlestick = (props: any) => {
@@ -184,14 +185,14 @@ const TrendlyneChecklistCard: React.FC<{ checklist: any }> = ({ checklist }) => 
 interface MCStockInfoPanelProps {
   symbol: string;
   scId: string;
-  section?: 'all' | 'technical' | 'fundamental' | 'insights' | 'overview' | 'shareholding' | 'peers' | 'trendlyne';
+  section?: 'all' | 'technical' | 'fundamental' | 'insights' | 'overview' | 'shareholding' | 'peers' | 'trendlyne' | 'news';
   onSelectStock?: (symbol: string) => void;
   watchlist?: string[];
   onToggleWatchlist?: (symbol: string, metadata?: { price?: number; name?: string; source?: string }) => void;
 }
 
 type Timeframe = 'D' | 'W' | 'M';
-type Tab = 'overview' | 'technical' | 'financials' | 'fno' | 'ai_report';
+type Tab = 'overview' | 'technical' | 'financials' | 'fno' | 'ai_report' | 'news';
 
 export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({ 
   symbol, 
@@ -208,6 +209,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
     section === 'overview' ? 'overview' :
     section === 'shareholding' ? 'financials' :
     section === 'trendlyne' ? 'ai_report' :
+    section === 'news' ? 'news' :
     section === 'peers' ? 'financials' : 'overview'
   );
 
@@ -229,6 +231,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
     else if (section === 'shareholding') setActiveTab('financials');
     else if (section === 'peers') setActiveTab('financials');
     else if (section === 'trendlyne') setActiveTab('ai_report');
+    else if (section === 'news') setActiveTab('news');
   }, [section]);
   const containerRef = React.useRef<HTMLDivElement>(null);
   const [isVisible, setIsVisible] = React.useState(false);
@@ -343,6 +346,11 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
     { enabled: isVisible, staleTime: 60000 }
   );
 
+  const { data: mcNewsData, isLoading: loadingMcNews } = trpc.getMcStockNews.useQuery(
+    { symbol },
+    { enabled: isVisible && activeTab === 'news', staleTime: 60000 }
+  );
+
   if (!isVisible && !unifiedData) {
     return (
       <div ref={containerRef} className="h-40 flex items-center justify-center bg-slate-900/10 border border-dashed border-slate-800 rounded-2xl">
@@ -430,6 +438,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
     { key: 'financials', label: 'Financials & Peers' },
     { key: 'fno',        label: 'Options & Flow (F&O)' },
     { key: 'ai_report',  label: 'AI Auditor Report' },
+    { key: 'news',       label: 'Stock News' },
   ];
 
 
@@ -3156,6 +3165,43 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
               </details>
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── TAB: STOCK NEWS ── */}
+      {activeTab === 'news' && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-black text-slate-300 uppercase tracking-widest flex items-center gap-2">
+              <Newspaper className="w-4 h-4 text-blue-400" />
+              <span>MoneyControl Live News — {symbol}</span>
+            </h3>
+            {mcNewsData && mcNewsData.count > 0 && (
+              <span className="text-[10px] font-mono text-slate-500 bg-slate-800 px-2 py-0.5 rounded-full">
+                Latest {mcNewsData.count}
+              </span>
+            )}
+          </div>
+
+          {loadingMcNews ? (
+            <div className="text-center py-12 bg-slate-900/30 border border-slate-800 rounded-2xl animate-pulse">
+              <p className="text-xs text-slate-400 font-bold">Fetching latest news for {symbol}…</p>
+            </div>
+          ) : !mcNewsData || mcNewsData.news.length === 0 ? (
+            <McNewsEmptyState status={mcNewsData?.status} symbol={symbol} />
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {mcNewsData.news.map((item, idx) => (
+                <McNewsCard key={item.posturl || idx} item={item} accent="blue" />
+              ))}
+            </div>
+          )}
+
+          <McNewsLinks
+            additionalLinks={mcNewsData?.additional_links}
+            moreLink={mcNewsData?.more_link}
+            accent="blue"
+          />
         </div>
       )}
 

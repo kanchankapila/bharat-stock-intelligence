@@ -9,6 +9,7 @@ import { cn } from '../../lib/utils';
 import { V2LightweightChart } from '../../v2/components/widgets/V2LightweightChart';
 import { OptionChainView } from '../../components/OptionChainView';
 import { WhyThisPick } from '../../components/WhyThisPick';
+import { McNewsCard, McNewsLinks, McNewsEmptyState } from '../../components/McNewsCard';
 
 type TabId = 'overview' | 'technicals' | 'fundamentals' | 'ownership' | 'fno' | 'earnings' | 'news';
 
@@ -372,19 +373,32 @@ const EarningsTab: React.FC<{ symbol: string }> = ({ symbol }) => {
 
 // ─── News & Sentiment tab ───────────────────────────────────────────────────
 const NewsTab: React.FC<{ symbol: string }> = ({ symbol }) => {
-  const { data: insights, isLoading } = trpc.getStockInsights.useQuery({ symbol });
-  const hasData = insights && typeof insights === 'object' && Object.keys(insights).length > 0;
+  const { data: mcNewsData, isLoading: loadingMcNews } = trpc.getMcStockNews.useQuery(
+    { symbol },
+    { staleTime: 60000 },
+  );
+  const newsList = mcNewsData?.news ?? [];
 
   return (
     <Card title={`News & Sentiment — ${symbol}`} icon={Newspaper}>
-      {isLoading ? (
-        <div className="text-xs text-slate-500 py-4">Loading…</div>
-      ) : !hasData ? (
-        <div className="text-xs text-slate-500 py-4">No stock-specific news/insight data available for {symbol}.</div>
+      {loadingMcNews ? (
+        <div className="text-xs text-slate-500 py-6 text-center animate-pulse">Fetching latest news for {symbol}…</div>
+      ) : newsList.length === 0 ? (
+        <McNewsEmptyState status={mcNewsData?.status} symbol={symbol} />
       ) : (
-        <pre className="text-[11px] text-slate-300 whitespace-pre-wrap font-mono leading-relaxed max-h-96 overflow-y-auto terminal-scrollbar">
-          {JSON.stringify(insights, null, 2).slice(0, 3000)}
-        </pre>
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {newsList.map((item, idx) => (
+              <McNewsCard key={item.posturl || idx} item={item} accent="indigo" />
+            ))}
+          </div>
+
+          <McNewsLinks
+            additionalLinks={mcNewsData?.additional_links}
+            moreLink={mcNewsData?.more_link}
+            accent="indigo"
+          />
+        </div>
       )}
     </Card>
   );
