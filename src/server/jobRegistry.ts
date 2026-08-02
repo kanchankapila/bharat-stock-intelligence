@@ -82,7 +82,11 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   // Sunday); only working_capital + mf_stock_holdings remain first-Sunday-only.
   // graceMinutes 60 -> 150: the weekly ratios leg alone is budgeted 60 min, and on a first
   // Sunday it is followed by working_capital (60) + mf_stock_holdings (30).
-  { jobName: 'trendlyne-ratios-monthly', label: 'ET Ratios (weekly) + Working Capital/MF Holdings (monthly)', cronPattern: '30 12 * * 0', graceMinutes: 150, critical: false },
+  // graceMinutes 150 -> 210: a first-Sunday run now chains 4 steps (financial_ratios 60min +
+  // working_capital 60min + mf_stock_holdings 30min + mc_stockvitals_history 60min = up to
+  // 210min worst case), not 3 -- same reasoning as the prior 150min bump when mf_stock_holdings
+  // was added (see CLAUDE.md's session notes on this job's timeout history).
+  { jobName: 'trendlyne-ratios-monthly', label: 'ET Ratios (weekly) + Working Capital/MF Holdings/MC StockVitals History (monthly)', cronPattern: '30 12 * * 0', graceMinutes: 210, critical: false },
   { jobName: 'dl-feature-refresh', label: 'DL Feature Refresh', cronPattern: '30 11 * * 1-5', graceMinutes: 90, critical: false },
 
   // ml-daily-ops (cron '0 14 * * 1-5', see queues.ts processMlDailyOps) writes each of its
@@ -128,4 +132,15 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   // pipeline, and its predecessor (the websocketService confidence>=85 alert) went silent for
   // ~2 weeks without anything noticing, which is exactly what a heartbeat entry prevents.
   { jobName: 'recommendations-digest', label: 'Daily Stock Recommendations (Telegram)', cronPattern: '45 2 * * 1-5', graceMinutes: 90, critical: true },
+
+  // Formal daily wrapper around dataQualityChecks.ts's 25-check suite (2026-08-01). The
+  // 15-min setInterval poll in jobWatchdog.ts already runs these checks continuously and
+  // alerts on critical failures, but it was never a JOB_REGISTRY/cron job itself -- an
+  // unregistered setInterval has no lateness detection, so a silently-dead Node process
+  // would take the checks down with it and nothing would notice (the exact class of gap
+  // that already bit job-digest once). This job re-runs the full suite once a day and
+  // sends a summary regardless of pass/fail, so the report itself is monitored, not just
+  // the alerts it produces. Runs all 7 days (data staleness matters on weekends too, and
+  // job-digest already sets this precedent) after unified-ranker + recommendations-digest.
+  { jobName: 'data-quality-daily', label: 'Daily Data-Integrity Report (Telegram)', cronPattern: '10 3 * * *', graceMinutes: 90, critical: true },
 ];

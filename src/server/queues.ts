@@ -2708,12 +2708,19 @@ export async function initQueues(): Promise<boolean> {
     dlRetrainWeeklyWorker = new Worker(QUEUE_DL_RETRAIN_WEEKLY,
       async (_job: Job) => {
         const trigger = _job.data?.trigger || 'scheduled';
-        return processDLPython('dl_trainer.py', ['--trigger', trigger]);
+        // Explicit 24h timeout, not processDLPython's 6h default: a real full-universe BiLSTM
+        // retrain (~2100 symbols, chunked training + walk-forward validation retraining
+        // several more model copies) measured at ~15min for just 25 symbols on this machine's
+        // shared 8GB GPU under typical contention (Ollama + other jobs) -- extrapolated, a full
+        // run can run well past 6h. The 6h default is still correct for every OTHER
+        // processDLPython caller (feature_engineering.py, dl_engine.py --mode infer,
+        // backfill_ohlcv.py), so it's overridden per-call here rather than raised globally.
+        return processDLPython('dl_trainer.py', ['--trigger', trigger], 24 * 60 * 60 * 1000);
       },
       {
         connection,
         concurrency: 1,
-        lockDuration: 6 * 60 * 60 * 1000,
+        lockDuration: 24 * 60 * 60 * 1000,
         lockRenewTime: 30 * 60 * 1000,
         stalledInterval: 15 * 60 * 1000,
         maxStalledCount: 3,
@@ -2730,11 +2737,13 @@ export async function initQueues(): Promise<boolean> {
     // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ DL Emergency Retrain (on-demand, triggered by drift detector) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
     dlRetrainEmergencyQueue = new Queue(QUEUE_DL_RETRAIN_EMERGENCY, { connection });
     dlRetrainEmergencyWorker = new Worker(QUEUE_DL_RETRAIN_EMERGENCY,
-      async () => processDLPython('dl_trainer.py', ['--trigger', 'drift']),
+      // Same 24h override as dl-retrain-weekly above, and for the same reason -- this queue
+      // runs the identical dl_trainer.py orchestrator, just drift-triggered instead of cron'd.
+      async () => processDLPython('dl_trainer.py', ['--trigger', 'drift'], 24 * 60 * 60 * 1000),
       {
         connection,
         concurrency: 1,
-        lockDuration: 6 * 60 * 60 * 1000,
+        lockDuration: 24 * 60 * 60 * 1000,
         lockRenewTime: 30 * 60 * 1000,
         stalledInterval: 15 * 60 * 1000,
         maxStalledCount: 3,
@@ -3215,6 +3224,15 @@ export async function initQueues(): Promise<boolean> {
         // Per-stock MF ownership flow (AMFI publishes portfolio disclosures monthly).
         await runPython('mf_stock_holdings_fetcher.py', [], 30 * 60_000)
           .catch(e => console.warn('[QUEUE] mf_stock_holdings_fetcher failed:', (e as Error).message));
+        // Deepens proprietary_scores_history's Altman/Ohlson/Graham/DuPont history from
+        // moneycontrol_fetcher.py's daily single-snapshot scrape to ~9 years of annual bars.
+        // Runs AFTER working_capital_fetcher.py above (not before) because it resolves each
+        // stock's real fiscal year-end from working_capital_history -- freshest FY-end data
+        // first, then the history backfill that depends on it. Monthly cadence: these are
+        // annual figures that change at most once a year, so a weekly re-run (like the ratios
+        // above) would be pure load for no new data.
+        await runPython('mc_stockvitals_history_fetcher.py', [], 60 * 60_000)
+          .catch(e => console.warn('[QUEUE] mc_stockvitals_history_fetcher failed:', (e as Error).message));
         return { success: true };
       },
       {
@@ -3422,6 +3440,66 @@ export async function initQueues(): Promise<boolean> {
     await addJobWithCatchup(recsDigestQueue, 'recommendations-digest-daily', {}, {
       repeat: { pattern: '45 2 * * 1-5' },
       jobId: 'recommendations-digest-daily-repeatable',
+      removeOnComplete: 3,
+      removeOnFail: 3,
+    });
+
+    // ── Daily data-integrity report — 8:40 AM IST (03:10 UTC), every day ──────────
+    // Formal cron wrapper around dataQualityChecks.ts's ~25-check suite (2026-08-01 audit).
+    // The 15-min setInterval poll in jobWatchdog.ts already runs these checks continuously
+    // and pages on critical failures -- this does NOT replace that, it exists because the
+    // poll itself was never a monitored JOB_REGISTRY job (an unregistered setInterval has no
+    // lateness detection: a dead process silently takes monitoring down with it, same class
+    // of gap job-digest had before it was registered). Sends a pass/warn/fail summary
+    // regardless of outcome, so a quiet day is confirmed rather than assumed. Scheduled
+    // after both unified-ranker (07:30 IST) and recommendations-digest (08:15 IST weekdays)
+    // so the report reflects that morning's freshly-built state when both ran.
+    const QUEUE_DATA_QUALITY_DAILY = 'data-quality-daily';
+    const dataQualityDailyQueue = new Queue(QUEUE_DATA_QUALITY_DAILY, { connection });
+    const dataQualityDailyWorker = new Worker(
+      QUEUE_DATA_QUALITY_DAILY,
+      async () => {
+        const { runDataQualityChecks } = await import('./dataQualityChecks');
+        const results = await runDataQualityChecks();
+        const passed = results.filter(r => r.status === 'pass').length;
+        const warned = results.filter(r => r.status === 'warn');
+        const failed = results.filter(r => r.status === 'fail' || r.status === 'error');
+        const criticalFailed = failed.filter(r => r.critical);
+
+        const lines = [`📊 *Daily Data-Integrity Report*`, `${passed}/${results.length} checks passed.`];
+        if (failed.length) {
+          lines.push('', '*Failures:*');
+          for (const r of failed) lines.push(`${r.critical ? '🚨' : '⚠️'} \`${r.label}\` — ${r.detail}`);
+        }
+        if (warned.length) {
+          lines.push('', '*Warnings:*');
+          for (const r of warned) lines.push(`⚠️ \`${r.label}\` — ${r.detail}`);
+        }
+        await telegramService.sendMarkdownMessage(lines.join('\n'));
+
+        if (criticalFailed.length) {
+          // The 15-min poll already alerted on these individually; failing this job too
+          // means a stuck critical failure shows up as "late" in the digest, not just as a
+          // once-a-day Telegram message that's easy to miss among the rest of the channel.
+          throw new Error(`${criticalFailed.length} critical data-quality check(s) failing: ${criticalFailed.map(r => r.id).join(', ')}`);
+        }
+      },
+      { connection, concurrency: 1, lockDuration: 5 * 60_000 },
+    );
+    dataQualityDailyWorker.on('completed', () => {
+      console.log('[QUEUE] data-quality-daily sent');
+      recordHeartbeat('data-quality-daily', 'success');
+    });
+    dataQualityDailyWorker.on('failed', (_, err) => {
+      console.error('[QUEUE] data-quality-daily failed:', err.message);
+      recordHeartbeat('data-quality-daily', 'failed', err.message);
+    });
+
+    const dataQualityRepeatables = await dataQualityDailyQueue.getRepeatableJobs();
+    for (const r of dataQualityRepeatables) await dataQualityDailyQueue.removeRepeatableByKey(r.key);
+    await addJobWithCatchup(dataQualityDailyQueue, 'data-quality-daily-run', {}, {
+      repeat: { pattern: '10 3 * * *' },
+      jobId: 'data-quality-daily-repeatable',
       removeOnComplete: 3,
       removeOnFail: 3,
     });

@@ -271,6 +271,18 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     # Ohlson O-Score: log-odds of failure; negative = lower failure probability.
     # Neutral default -2.0 (moderate safety, representative of a typical listed company).
     X['ohlson_o']        = num('ohlson_o', -2.0).clip(-10, 5)
+    # Graham Number: Graham's intrinsic-value estimate is an absolute price, not directly
+    # usable by the model at the stock's own price scale -- expressed as % discount/premium
+    # vs current price, same pattern as target_upside_pct above. Positive = undervalued
+    # (price below Graham fair value); negative = overvalued. Neutral default 0.0 (fairly
+    # valued) rather than dropping the row when either side of the ratio is missing/zero.
+    X['graham_discount_pct'] = ((num('graham_number', np.nan) - cmp_) / cmp_.replace(0, np.nan) * 100) \
+        .fillna(0).clip(-100, 200)
+    # DuPont ROE: MC's 3-way decomposed ROE (margin x turnover x leverage), distinct from
+    # stock_fundamentals.return_on_equity (a different vendor/methodology) -- kept as its own
+    # feature rather than merged, so the model can weigh them independently. Neutral default
+    # 12.0 (a representative mid-range ROE for a typical listed company).
+    X['dupont_roe'] = num('dupont_score', 12.0).clip(-50, 100)
 
     # ── Insider activity (from insider_features.py → technical_signals) ──
     # > 0.5 = promoters/directors accumulating (strong India signal: insider buying rarely occurs
@@ -1143,6 +1155,8 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                    aeh.n_analysts, aeh.buy_count, aeh.target_mean,
                    psh_az.score_value AS altman_z,
                    psh_oo.score_value AS ohlson_o,
+                   psh_gn.score_value AS graham_number,
+                   psh_ds.score_value AS dupont_score,
                    (SELECT COUNT(*) FROM credit_rating_events cre
                      WHERE cre.symbol = so.symbol
                        AND UPPER(cre.action) LIKE '%UPGRADE%'
@@ -1200,6 +1214,26 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                       SELECT MAX(p2.date) FROM proprietary_scores_history p2
                       WHERE p2.symbol = so.symbol AND p2.source = 'moneycontrol'
                         AND p2.score_type = 'ohlson_o_score'
+                        AND p2.date <= so.signal_date
+                  )
+            LEFT JOIN proprietary_scores_history psh_gn
+                   ON psh_gn.symbol = so.symbol
+                  AND psh_gn.source = 'moneycontrol'
+                  AND psh_gn.score_type = 'graham_number'
+                  AND psh_gn.date = (
+                      SELECT MAX(p2.date) FROM proprietary_scores_history p2
+                      WHERE p2.symbol = so.symbol AND p2.source = 'moneycontrol'
+                        AND p2.score_type = 'graham_number'
+                        AND p2.date <= so.signal_date
+                  )
+            LEFT JOIN proprietary_scores_history psh_ds
+                   ON psh_ds.symbol = so.symbol
+                  AND psh_ds.source = 'moneycontrol'
+                  AND psh_ds.score_type = 'dupont_score'
+                  AND psh_ds.date = (
+                      SELECT MAX(p2.date) FROM proprietary_scores_history p2
+                      WHERE p2.symbol = so.symbol AND p2.source = 'moneycontrol'
+                        AND p2.score_type = 'dupont_score'
                         AND p2.date <= so.signal_date
                   )
             LEFT JOIN feature_store fs
@@ -1412,6 +1446,8 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                    aeh.n_analysts, aeh.buy_count, aeh.target_mean,
                    psh_az.score_value AS altman_z,
                    psh_oo.score_value AS ohlson_o,
+                   psh_gn.score_value AS graham_number,
+                   psh_ds.score_value AS dupont_score,
                    (SELECT COUNT(*) FROM credit_rating_events cre
                      WHERE cre.symbol = so.symbol
                        AND UPPER(cre.action) LIKE '%UPGRADE%'
@@ -1453,6 +1489,26 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                       SELECT MAX(p2.date) FROM proprietary_scores_history p2
                       WHERE p2.symbol = so.symbol AND p2.source = 'moneycontrol'
                         AND p2.score_type = 'ohlson_o_score'
+                        AND p2.date <= so.signal_date
+                  )
+            LEFT JOIN proprietary_scores_history psh_gn
+                   ON psh_gn.symbol = so.symbol
+                  AND psh_gn.source = 'moneycontrol'
+                  AND psh_gn.score_type = 'graham_number'
+                  AND psh_gn.date = (
+                      SELECT MAX(p2.date) FROM proprietary_scores_history p2
+                      WHERE p2.symbol = so.symbol AND p2.source = 'moneycontrol'
+                        AND p2.score_type = 'graham_number'
+                        AND p2.date <= so.signal_date
+                  )
+            LEFT JOIN proprietary_scores_history psh_ds
+                   ON psh_ds.symbol = so.symbol
+                  AND psh_ds.source = 'moneycontrol'
+                  AND psh_ds.score_type = 'dupont_score'
+                  AND psh_ds.date = (
+                      SELECT MAX(p2.date) FROM proprietary_scores_history p2
+                      WHERE p2.symbol = so.symbol AND p2.source = 'moneycontrol'
+                        AND p2.score_type = 'dupont_score'
                         AND p2.date <= so.signal_date
                   )
             LEFT JOIN feature_store fs
@@ -1633,6 +1689,8 @@ def load_pending_signals() -> pd.DataFrame:
                    aeh.n_analysts, aeh.buy_count, aeh.target_mean,
                    psh_az.score_value AS altman_z,
                    psh_oo.score_value AS ohlson_o,
+                   psh_gn.score_value AS graham_number,
+                   psh_ds.score_value AS dupont_score,
                    sfs.sector_pcr, sfs.total_call_oi AS sector_call_oi, sfs.total_put_oi AS sector_put_oi
             FROM technical_signals ts
             LEFT JOIN stock_fundamentals sf ON sf.symbol = ts.symbol
@@ -1661,6 +1719,26 @@ def load_pending_signals() -> pd.DataFrame:
                       SELECT MAX(p2.date) FROM proprietary_scores_history p2
                       WHERE p2.symbol = ts.symbol AND p2.source = 'moneycontrol'
                         AND p2.score_type = 'ohlson_o_score'
+                        AND p2.date <= ts.date
+                  )
+            LEFT JOIN proprietary_scores_history psh_gn
+                   ON psh_gn.symbol = ts.symbol
+                  AND psh_gn.source = 'moneycontrol'
+                  AND psh_gn.score_type = 'graham_number'
+                  AND psh_gn.date = (
+                      SELECT MAX(p2.date) FROM proprietary_scores_history p2
+                      WHERE p2.symbol = ts.symbol AND p2.source = 'moneycontrol'
+                        AND p2.score_type = 'graham_number'
+                        AND p2.date <= ts.date
+                  )
+            LEFT JOIN proprietary_scores_history psh_ds
+                   ON psh_ds.symbol = ts.symbol
+                  AND psh_ds.source = 'moneycontrol'
+                  AND psh_ds.score_type = 'dupont_score'
+                  AND psh_ds.date = (
+                      SELECT MAX(p2.date) FROM proprietary_scores_history p2
+                      WHERE p2.symbol = ts.symbol AND p2.source = 'moneycontrol'
+                        AND p2.score_type = 'dupont_score'
                         AND p2.date <= ts.date
                   )
             LEFT JOIN (
@@ -1752,6 +1830,14 @@ def load_pending_signals() -> pd.DataFrame:
         def psh_oo_c(col, alias=None):
             out_alias = alias if alias else col
             return f"psh_oo.{col}" if col.lower() in psh_cols else f"NULL AS {out_alias}"
+
+        def psh_gn_c(col, alias=None):
+            out_alias = alias if alias else col
+            return f"psh_gn.{col}" if col.lower() in psh_cols else f"NULL AS {out_alias}"
+
+        def psh_ds_c(col, alias=None):
+            out_alias = alias if alias else col
+            return f"psh_ds.{col}" if col.lower() in psh_cols else f"NULL AS {out_alias}"
 
         def fs_c(col, alias=None):
             out_alias = alias if alias else col
@@ -1908,6 +1994,8 @@ def load_pending_signals() -> pd.DataFrame:
                    {aeh_c('n_analysts')}, {aeh_c('buy_count')}, {aeh_c('target_mean')},
                    {psh_az_c('score_value', 'altman_z')},
                    {psh_oo_c('score_value', 'ohlson_o')},
+                   {psh_gn_c('score_value', 'graham_number')},
+                   {psh_ds_c('score_value', 'dupont_score')},
                    {sfs_pcr_sel}, {sfs_call_sel}, {sfs_put_sel}
             FROM technical_signals ts
             LEFT JOIN stock_fundamentals sf ON sf.symbol = ts.symbol
@@ -1935,6 +2023,26 @@ def load_pending_signals() -> pd.DataFrame:
                       SELECT MAX(p2.date) FROM proprietary_scores_history p2
                       WHERE p2.symbol = ts.symbol AND p2.source = 'moneycontrol'
                         AND p2.score_type = 'ohlson_o_score'
+                        AND p2.date <= ts.date
+                  )
+            LEFT JOIN proprietary_scores_history psh_gn
+                   ON psh_gn.symbol = ts.symbol
+                  AND psh_gn.source = 'moneycontrol'
+                  AND psh_gn.score_type = 'graham_number'
+                  AND psh_gn.date = (
+                      SELECT MAX(p2.date) FROM proprietary_scores_history p2
+                      WHERE p2.symbol = ts.symbol AND p2.source = 'moneycontrol'
+                        AND p2.score_type = 'graham_number'
+                        AND p2.date <= ts.date
+                  )
+            LEFT JOIN proprietary_scores_history psh_ds
+                   ON psh_ds.symbol = ts.symbol
+                  AND psh_ds.source = 'moneycontrol'
+                  AND psh_ds.score_type = 'dupont_score'
+                  AND psh_ds.date = (
+                      SELECT MAX(p2.date) FROM proprietary_scores_history p2
+                      WHERE p2.symbol = ts.symbol AND p2.source = 'moneycontrol'
+                        AND p2.score_type = 'dupont_score'
                         AND p2.date <= ts.date
                   )
             LEFT JOIN (
