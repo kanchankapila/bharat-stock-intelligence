@@ -168,10 +168,16 @@ def load_symbol_sequences(
     df = df.dropna(subset=["target_ret_5d", "target_ret_15d"])
     df = df.fillna(0)
 
-    X_all = df[feat_cols].values.astype(np.float32)
+    # A ratio-style feature (e.g. dist_sma200_pct, pe, vwap_dist_pct) computed off a near-zero
+    # denominator or an implausible bad bar (this codebase has documented cases of >100,000%
+    # single-day "returns" from bad OHLCV rows -- see ohlcv_quality.py) can be +/-inf. Feeding
+    # that straight into the LSTM blows up the first matmul instantly and diverges the whole
+    # model; np.nan_to_num maps it to 0 (treated the same as the missing-data fillna(0) above)
+    # rather than letting a single row poison every future gradient step.
+    X_all = np.nan_to_num(df[feat_cols].values.astype(np.float32), nan=0.0, posinf=0.0, neginf=0.0)
     y5    = (df["target_ret_5d"]  > 0).astype(np.int64).values
     y15   = (df["target_ret_15d"] > 0).astype(np.int64).values
-    yr5   = df["target_ret_5d"].values.astype(np.float32)
+    yr5   = np.nan_to_num(df["target_ret_5d"].values.astype(np.float32), nan=0.0, posinf=0.0, neginf=0.0)
     dates = df["date"].dt.strftime("%Y-%m-%d").tolist()
 
     # Build sliding windows
@@ -213,7 +219,10 @@ def load_inference_sequence(
         return None, None
     df = df.sort_values("date")
     df = _onehot_vol_regime(df).fillna(0)
-    X = df[feat_cols].values.astype(np.float32)
+    # Same non-finite guard as load_symbol_sequences (training) -- a live inf feature here
+    # would otherwise produce an inf/NaN prediction, which the caller's finite-check then
+    # correctly drops, but there's no reason to let it reach the model at all.
+    X = np.nan_to_num(df[feat_cols].values.astype(np.float32), nan=0.0, posinf=0.0, neginf=0.0)
     return X[np.newaxis], df["date"].iloc[-1]
 
 
@@ -308,15 +317,31 @@ def _train_one_fold(model: BiLSTMModel, X: np.ndarray, y5: np.ndarray,
                 loss = ce(out["dir_5d"], yb) * 0.5 + hub(out["ret_5d"], rb) * 0.5
                 if yb15 is not None:
                     loss = loss + ce(out["dir_15d"], yb15) * 0.5
+            if not torch.isfinite(loss):
+                # A single non-finite batch (e.g. one remaining bad-data row that np.nan_to_num
+                # in load_symbol_sequences didn't already zero, or an unlucky fp16 overflow under
+                # autocast) must not be allowed to backward() at all -- every lstm_v3..v18
+                # checkpoint diverged to ~100% NaN weights this way, and once the LSTM's hidden
+                # state carries a NaN it poisons every subsequent batch and epoch permanently.
+                continue
             if scaler is not None:
                 prev_scale = scaler.get_scale()
                 scaler.scale(loss).backward()
+                # unscale BEFORE clipping -- clip_grad_norm_ on still-fp16-scaled gradients
+                # clips against the wrong (scaled) magnitude and doesn't actually bound the
+                # true gradient norm.
+                scaler.unscale_(opt)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 scaler.step(opt)
                 scaler.update()
                 if scaler.get_scale() >= prev_scale:  # step was not skipped
                     stepped = True
             else:
                 loss.backward()
+                # Gradient clipping is the standard fix for LSTM exploding-gradient divergence;
+                # this loop previously had none, and an unbounded update from one bad batch or
+                # a stretch of high-lr instability could push weights to NaN in a single step.
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 opt.step()
                 stepped = True
         if stepped:
@@ -467,8 +492,18 @@ def run_inference(prediction_date: str = None) -> None:
     model_path = MODEL_DIR / f"lstm_v{model_version}.pt"
 
     if not model_path.exists():
-        print(f"[DL] No model at {model_path}. Run --mode train first.")
-        return
+        # A missing file here means dl_model_config.json's pointer and what's actually on disk
+        # have diverged (observed live: the config pointed at lstm_v19.pt after training refused
+        # to save a diverged checkpoint, but the promotion step still activated the version
+        # number). Returning quietly used to let this run to "success" every day while writing
+        # zero predictions -- indistinguishable from a healthy day in every job-monitoring signal.
+        # A raised exception (not sys.exit) so this fails loudly both from the CLI entry point
+        # (uncaught -> non-zero exit, same as any other Python crash) and from python_api.py's
+        # in-process FastAPI call, where sys.exit would raise SystemExit -- a BaseException the
+        # endpoint's `except Exception` does NOT catch, which would have taken down the whole
+        # uvicorn worker instead of just failing this one request.
+        raise RuntimeError(f"No model at {model_path} (config points to version {model_version}). "
+                            f"Run --mode train first.")
 
     mtime = model_path.stat().st_mtime
     if (
@@ -561,13 +596,14 @@ def run_inference(prediction_date: str = None) -> None:
     con.close()
     print(f"[DL] Inference complete: {written} predictions written for {prediction_date}")
     if skipped_nonfinite:
-        # Loud, and non-zero exit when the model produced nothing usable — an all-NaN
-        # checkpoint previously ran to "success" every day while writing pure NaN.
-        print(f"[DL] ERROR: {skipped_nonfinite} predictions dropped as non-finite (NaN/inf). "
-              f"The active checkpoint (lstm_v{model_version}.pt) is likely diverged - retrain.",
-              file=sys.stderr)
+        # Loud, and a raised error (not sys.exit — see the missing-model branch above for why)
+        # when the model produced nothing usable — an all-NaN checkpoint previously ran to
+        # "success" every day while writing pure NaN.
+        msg = (f"{skipped_nonfinite} predictions dropped as non-finite (NaN/inf). "
+               f"The active checkpoint (lstm_v{model_version}.pt) is likely diverged - retrain.")
+        print(f"[DL] ERROR: {msg}", file=sys.stderr)
         if written == 0:
-            sys.exit(1)
+            raise RuntimeError(msg)
 
 
 def _load_config() -> Dict:

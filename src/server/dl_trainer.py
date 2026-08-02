@@ -2,7 +2,9 @@
 """
 DL retrain orchestrator. Runs full pipeline, quality-gates new model,
 promotes only if it beats current production model.
-Quality gate: directional_accuracy > 0.50 AND roc_auc > 0.52
+Quality gate lives in dl_engine.py's _promote_lstm_version() — see that function's
+docstring for the full rule (must beat the active version's roc_auc by a margin,
+refuses anything with diverged/non-finite weights).
 """
 
 import subprocess
@@ -19,8 +21,13 @@ MODEL_DIR = Path(__file__).parent / "ml_models"
 LOCK_KEY  = "dl_retrain_running"
 PYDIR     = str(Path(__file__).parent)
 
-QUALITY_MIN_ACC = 0.50
-QUALITY_MIN_AUC = 0.52
+# Must exceed queues.ts's dl-retrain-weekly/emergency BullMQ timeout (24h) -- a lower threshold
+# here would consider a legitimately-still-running full-universe retrain "stale" partway through
+# and let a second trainer start concurrently (both writing lstm_v{N}.pt / dl_model_config.json
+# at once). The old 7200s (2h) threshold predated any measurement of real training time; a
+# 25-symbol sample measured ~15min under typical GPU contention on this machine, so a full
+# ~2100-symbol run plus walk-forward validation can genuinely run for many hours.
+STALE_LOCK_SECONDS = 25 * 60 * 60  # 25h -- 1h of slack past the 24h job timeout
 
 
 def _get_setting(con: ConnWrapper, key: str, default=None):
@@ -33,6 +40,32 @@ def _set_setting(con: ConnWrapper, key: str, value: str):
         "INSERT INTO app_settings (key, value) VALUES (?,?) "
         "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
         (key, value),
+    )
+    con.commit()
+
+
+def _record_model_registry(con: ConnWrapper, new_version: int, auc, acc, promoted: bool) -> None:
+    """Write this training attempt's model_registry row, deactivating the prior active
+    BiLSTM row iff this one was actually promoted (mirrors cs_ranker.py's
+    _register_cs_model / ml_ensemble.py's champion-challenger bookkeeping). Split out from
+    retrain_models() so the is_active handling is unit-testable without the real
+    training/subprocess/torch pipeline.
+
+    Previously this INSERT ran unconditionally with is_active based on a gate that treated
+    NaN metrics as an automatic pass, and never deactivated the previous row either way —
+    every version from v4 through v18 was left with is_active=1 in model_registry forever.
+    """
+    if promoted:
+        con.execute(
+            "UPDATE model_registry SET is_active=0 WHERE model_name=? AND is_active=1",
+            ("BiLSTM",),
+        )
+    con.execute(
+        """INSERT INTO model_registry
+           (model_name, model_version, model_type, cv_roc_auc, cv_accuracy,
+            training_samples, is_active, trained_at)
+           VALUES (?,?,?,?,?,?,?,CURRENT_TIMESTAMP)""",
+        ("BiLSTM", str(new_version), "deep_learning", auc, acc, -1, 1 if promoted else 0),
     )
     con.commit()
 
@@ -81,7 +114,7 @@ def retrain_models(trigger: str = "scheduled") -> dict:
         if lock_time_str:
             try:
                 lock_time = datetime.fromisoformat(lock_time_str)
-                if (datetime.now() - lock_time).total_seconds() > 7200:
+                if (datetime.now() - lock_time).total_seconds() > STALE_LOCK_SECONDS:
                     is_stale = True
             except Exception:
                 is_stale = True
@@ -124,46 +157,31 @@ def retrain_models(trigger: str = "scheduled") -> dict:
 
         acc = metrics.get("directional_accuracy")
         auc = metrics.get("roc_auc")
+        acc_str = 'N/A' if acc is None or math.isnan(acc) else f'{acc:.3f}'
+        auc_str = 'N/A' if auc is None or math.isnan(auc) else f'{auc:.3f}'
 
-        acc_valid = acc is not None and not math.isnan(acc)
-        auc_valid = auc is not None and not math.isnan(auc)
-
-        acc_val_for_gate = acc if acc_valid else 0.0
-        auc_val_for_gate = auc if auc_valid else 0.0
-
-        # Gate: accuracy must beat random (>=0.50). Skip gate if NaN/None (insufficient data).
-        acc_ok = (not acc_valid) or (acc_val_for_gate >= QUALITY_MIN_ACC)
-        auc_ok = (not auc_valid) or (auc_val_for_gate > QUALITY_MIN_AUC)  # NaN = skip AUC gate
-
-        acc_str = 'N/A' if not acc_valid else f'{acc:.3f}'
-        auc_str = 'N/A' if not auc_valid else f'{auc:.3f}'
-
-        # Step 4: Quality gate
-        if acc_ok and auc_ok:
-            cfg["lstm_version"] = new_version
-            cfg_path.write_text(json.dumps(cfg, indent=2))
+        # Step 4: Quality gate — delegate to dl_engine's _promote_lstm_version, the ONE gate
+        # for this model (mirrors ml_ensemble.py/cs_ranker.py's promotion pattern). This used
+        # to be a separate, weaker gate reimplemented here that only checked acc/auc for NaN
+        # and treated "metrics came back NaN" as "skip the check, promote anyway" — which is
+        # backwards: train_lstm() sets metrics["error"] when the weights themselves diverged
+        # (and correctly refuses to even save the checkpoint), but this gate never looked at
+        # that key, so a diverged-and-unsaved version still got activated in dl_model_config.json
+        # (observed live: v19 pointed to a lstm_v19.pt that was never written). Every version
+        # from v4 through v18 was also left with is_active=1 in model_registry forever, since
+        # this gate never deactivated the previous row either.
+        result["promoted"] = dl._promote_lstm_version(new_version, metrics)
+        if result["promoted"]:
             print(f"[TRAINER] Quality gate PASSED (acc={acc_str}, auc={auc_str}) -> promoted v{new_version}")
-            result["promoted"] = True
         else:
-            bad_path = MODEL_DIR / f"lstm_v{new_version}.pt"
-            if bad_path.exists():
-                bad_path.unlink()
-            reason = f"acc={acc_str}<{QUALITY_MIN_ACC}" if not acc_ok else f"auc={auc_str}<{QUALITY_MIN_AUC}"
-            print(f"[TRAINER] Quality gate FAILED ({reason}) — keeping v{cfg.get('lstm_version', 1)}")
-            result["promoted"] = False
+            print(f"[TRAINER] Quality gate FAILED/SKIPPED (acc={acc_str}, auc={auc_str}) — "
+                  f"keeping v{cfg.get('lstm_version', 1)}. Candidate weights (if saved) are left "
+                  f"on disk at lstm_v{new_version}.pt for inspection, not deleted.")
 
         # Step 5: Write model_registry entry
         con2 = connect()
         try:
-            con2.execute(
-                """INSERT INTO model_registry
-                   (model_name, model_version, model_type, cv_roc_auc,
-                    training_samples, is_active, trained_at)
-                   VALUES (?,?,?,?,?,?,CURRENT_TIMESTAMP)""",
-                ("BiLSTM", str(new_version), "deep_learning",
-                 auc, -1, 1 if result.get("promoted") else 0),
-            )
-            con2.commit()
+            _record_model_registry(con2, new_version, auc, acc, result["promoted"])
 
             # Step 6: Regime retrain — piggybacks on the weekly schedule since nothing
             # fires trigger="monthly" (dead code path); without this the HMM model
