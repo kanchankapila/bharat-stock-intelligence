@@ -254,8 +254,13 @@ export const miscRouter = router({
     .input(z.object({ type: z.enum(['LR', 'BP']).optional().default('BP') }))
     .query(async ({ input }) => fetchEarningsRapidResults(input.type)),
 
+  // Was uncached despite being polled every 60s by TradeDecisionCockpit.tsx from every open
+  // tab -- the full query set + composite-scoring computation below reran from scratch on every
+  // single request even though technical_signals/unified_signals/stock_scores/
+  // news_sentiment_items only change on batch-job cadence. TTL matched to the frontend's own
+  // poll interval so a cache hit never serves data older than one poll cycle would anyway.
   getTradeDecisionCockpitData: publicProcedure
-    .query(async () => {
+    .query(async () => fetchWithCache('misc:trade-decision-cockpit', async () => {
       try {
         // Pull latest technical snapshot per symbol (most recent date per symbol)
         // Fixed 2026-07-30 (Finding #33, full-stack audit): the correlated subquery
@@ -453,5 +458,5 @@ export const miscRouter = router({
       } catch (err) {
         return { success: false, data: { marketOverview: { verdict: 'NO TRADE', verdictReason: 'Data unavailable', advDecRatio: 1, avgWinProbability: 0, activeSignalsCount: 0 }, candidates: [] } };
       }
-    }),
+    }, 45)),
 });

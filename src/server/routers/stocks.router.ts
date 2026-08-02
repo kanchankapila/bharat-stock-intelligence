@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { getAllStocks, getStockMapping } from "../stockMapping";
+import { getAllStocks, getStockMapping, resolveMoneycontrolSymbol } from "../stockMapping";
 import {
   syncNSEStocksToDatabase,
   getAllNSEStocksFromDB,
@@ -74,13 +74,12 @@ export const stocksRouter = router({
       scoreTimeframe: z.enum(['long_term', 'intraday']).optional().default('long_term'),
     }))
     .query(async ({ input }) => {
-      const mapping = getStockMapping(input.symbol);
-      const scId = mapping?.mcsymbol || input.symbol;
+      const scId = await resolveMoneycontrolSymbol(input.symbol);
       const { getMcConsolidatedData } = await import('../mcApiService');
       const { getStockScoreDetail } = await import('../scoringService');
       const { fetchTradebrainsData } = await import('../tradebrainsService');
       const [mcData, scoreData, tbData] = await Promise.all([
-        getMcConsolidatedData(scId, input.symbol, input.timeframe),
+        scId ? getMcConsolidatedData(scId, input.symbol, input.timeframe) : Promise.resolve(null),
         getStockScoreDetail(input.symbol, input.scoreTimeframe),
         fetchTradebrainsData(input.symbol),
       ]);

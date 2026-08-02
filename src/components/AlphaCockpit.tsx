@@ -69,7 +69,10 @@ export const AlphaCockpit: React.FC = () => {
       limit: 100
     }, { refetchInterval: 3 * 60_000, refetchOnWindowFocus: true });
 
-  const { data: fiiDiiData } = trpc.getFiiDiiFlow.useQuery({ days: 8 }, { refetchInterval: 5 * 60_000 });
+  // Standardized on days:10 (2026-08-02 perf pass) -- matches every other current-flow caller
+  // of getFiiDiiFlow so React Query shares one cache entry instead of a per-component variant;
+  // only fiiDiiData[0] (the latest row) is used below.
+  const { data: fiiDiiData } = trpc.getFiiDiiFlow.useQuery({ days: 10 }, { refetchInterval: 5 * 60_000 });
   const { data: signalStats } = trpc.getSignalQualityReport.useQuery({ horizonDays: 15 }, { refetchInterval: 10 * 60_000 });
 
   // Mutations

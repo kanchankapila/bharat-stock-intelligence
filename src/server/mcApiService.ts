@@ -1,4 +1,3 @@
-import { getStockMapping } from './stockMapping';
 import { Semaphore } from './semaphore';
 import { findMcScreenersByStock } from './moneycontrolScreener';
 import { findScreenersByStock } from './trendlyneScreener';
@@ -689,8 +688,12 @@ export async function fetchMcChartPatterns(scId: string, symbol?: string): Promi
  * Optimised: Refreshes Price/Technical data every time, but caches Fundamentals for 1 hour.
  */
 export async function getMcConsolidatedData(scId: string, symbol: string, timeframe: 'D' | 'W' | 'M' = 'D'): Promise<McConsolidatedData> {
-  const mapping = getStockMapping(symbol);
-  const effectiveScId = mapping?.mcsymbol || scId;
+  // scId is expected to already be resolved by the caller via resolveMoneycontrolSymbol
+  // (stockMapping.ts) -- do not re-derive it here. A prior version of this function did
+  // `getStockMapping(symbol)?.mcsymbol || scId`, which silently reintroduced the same
+  // empty-mcsymbol-falls-back-to-raw-ticker bug this codebase fixed at every call site
+  // (2026-08-02) if this function's own fallback ever diverged from the caller's.
+  const effectiveScId = scId;
 
   // 1. Local Screeners (Instant)
   const mcScreeners = await findMcScreenersByStock(symbol);

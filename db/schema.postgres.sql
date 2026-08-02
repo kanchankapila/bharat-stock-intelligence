@@ -1280,6 +1280,9 @@ CREATE INDEX idx_nsi_published ON news_sentiment_items(published_at DESC);
 CREATE INDEX idx_nsi_sentiment ON news_sentiment_items(sentiment);
 CREATE INDEX idx_nsi_category  ON news_sentiment_items(category);
 CREATE INDEX idx_nsi_fetched   ON news_sentiment_items(fetched_at DESC);
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE INDEX idx_nsi_symbols_json_trgm ON news_sentiment_items USING GIN (symbols_json gin_trgm_ops);
+CREATE INDEX idx_nsi_title_trgm        ON news_sentiment_items USING GIN (title gin_trgm_ops);
 
 -- ── nse_stocks ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "nse_stocks" (
@@ -1568,6 +1571,7 @@ CREATE TABLE IF NOT EXISTS "screener_appearances" (
 );
 CREATE INDEX idx_sa_date     ON screener_appearances(appeared_date);
 CREATE INDEX idx_sa_screener ON screener_appearances(screener_id);
+CREATE INDEX idx_scap_symbol ON screener_appearances(symbol, appeared_date DESC);
 
 -- ── screener_catalog ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "screener_catalog" (
@@ -2071,6 +2075,7 @@ CREATE TABLE IF NOT EXISTS "stock_options_oi" (
   PRIMARY KEY ("symbol", "date", "expiry")
 );
 CREATE INDEX idx_options_sym_date ON stock_options_oi(symbol, date DESC);
+CREATE INDEX idx_soo_date ON stock_options_oi(date DESC);
 
 -- ── stock_scores ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "stock_scores" (

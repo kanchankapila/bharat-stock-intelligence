@@ -69,20 +69,27 @@ export const Watchlist: React.FC<WatchlistProps> = ({
     { enabled: isVisible && watchlist.length > 0, staleTime: 15 * 60_000 }
   );
 
-  const watchlistStocks = stocks.filter(s => watchlist.includes(s.symbol)).map(stock => {
-    const live = liveQuotes?.find((q: any) => q.symbol === stock.symbol);
-    const detail = watchlistDetails?.find(d => d.symbol === stock.symbol);
-    
-    return { 
-      ...stock, 
-      price: live ? live.price : stock.price, 
-      changePct: live ? (live.changePct ?? stock.changePct) : stock.changePct,
-      capturedPrice: detail?.price,
-      capturedName: detail?.name,
-      capturedDate: detail?.addedAt,
-      capturedSource: detail?.source
-    };
-  });
+  // Was an un-memoized filter->map with a nested O(n·m) .find() per row against liveQuotes and
+  // watchlistDetails, recomputed on every render including the unrelated 10s liveQuotes poll
+  // tick. Build lookup Maps once per data change instead of re-scanning both arrays per row.
+  const watchlistStocks = React.useMemo(() => {
+    const watchSet = new Set(watchlist);
+    const liveBySymbol = new Map<string, any>((liveQuotes ?? []).map((q: any) => [q.symbol, q]));
+    const detailBySymbol = new Map((watchlistDetails ?? []).map(d => [d.symbol, d]));
+    return stocks.filter(s => watchSet.has(s.symbol)).map(stock => {
+      const live = liveBySymbol.get(stock.symbol);
+      const detail = detailBySymbol.get(stock.symbol);
+      return {
+        ...stock,
+        price: live ? live.price : stock.price,
+        changePct: live ? (live.changePct ?? stock.changePct) : stock.changePct,
+        capturedPrice: detail?.price,
+        capturedName: detail?.name,
+        capturedDate: detail?.addedAt,
+        capturedSource: detail?.source
+      };
+    });
+  }, [stocks, watchlist, liveQuotes, watchlistDetails]);
 
   return (
     <div ref={ref} className="p-4 space-y-4">

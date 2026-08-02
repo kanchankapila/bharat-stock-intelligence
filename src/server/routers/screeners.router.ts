@@ -166,12 +166,16 @@ export const screenersRouter = router({
       const { findMcScreenersByStock } = await import('../moneycontrolScreener');
       const { findEtScreenersByStock } = await import('../etnow');
       const { findEtMarketstatsScreenersByStock } = await import('../etMarketstatsSync');
-      return [
-        ...(await findScreenersByStock(input.stockId)),
-        ...(await findMcScreenersByStock(input.stockId)),
-        ...(await findEtScreenersByStock(input.stockId)),
-        ...(await findEtMarketstatsScreenersByStock(input.stockId)),
-      ];
+      // These 4 lookups hit independent tables keyed on the same stockId -- were run
+      // sequentially (await, await, await, await), tripling+ this call's latency for no
+      // reason. Independent, so fan them out concurrently instead.
+      const [trendlyne, mc, et, etMarketstats] = await Promise.all([
+        findScreenersByStock(input.stockId),
+        findMcScreenersByStock(input.stockId),
+        findEtScreenersByStock(input.stockId),
+        findEtMarketstatsScreenersByStock(input.stockId),
+      ]);
+      return [...trendlyne, ...mc, ...et, ...etMarketstats];
     }),
 
   getEtMarketstatsScreeners: publicProcedure
@@ -443,24 +447,28 @@ export const screenersRouter = router({
       minMomentum: z.number().default(5.0),
     }))
     .query(async ({ input }) => {
+      // Was a correlated `WHERE ts.date = (SELECT MAX(date) ... WHERE t2.symbol = ts.symbol)`
+      // subquery -- the exact anti-pattern already fixed once in misc.router.ts (Finding #33,
+      // full-stack audit 2026-07-30): it re-executes once per row of the FULL historical
+      // technical_signals table (O(total rows)) instead of O(distinct symbols). Rewritten to
+      // the same ROW_NUMBER() partition used at misc.router.ts's getTradeDecisionCockpitData.
       return dbAll(`
-        SELECT ts.symbol,
-               ts.screener_momentum_score,
-               ts.screener_bull_count,
-               ts.screener_bear_count,
-               ts.screener_tier1_count,
-               ts.screener_cat_breadth,
-               ts.screener_streak_days,
-               ts.screener_name_signal,
-               ts.screener_alpha_score,
-               ns.sector,
-               ns.company_name
-        FROM technical_signals ts
-        LEFT JOIN nse_stocks ns ON ns.symbol = ts.symbol
-        WHERE ts.date = (SELECT MAX(date) FROM technical_signals t2 WHERE t2.symbol = ts.symbol)
-          AND ts.screener_momentum_score >= ?
-          AND ts.screener_bull_count > ts.screener_bear_count
-        ORDER BY ts.screener_momentum_score DESC
+        SELECT symbol, screener_momentum_score, screener_bull_count, screener_bear_count,
+               screener_tier1_count, screener_cat_breadth, screener_streak_days,
+               screener_name_signal, screener_alpha_score, sector, company_name
+        FROM (
+          SELECT ts.symbol, ts.screener_momentum_score, ts.screener_bull_count,
+                 ts.screener_bear_count, ts.screener_tier1_count, ts.screener_cat_breadth,
+                 ts.screener_streak_days, ts.screener_name_signal, ts.screener_alpha_score,
+                 ns.sector, ns.company_name,
+                 ROW_NUMBER() OVER (PARTITION BY ts.symbol ORDER BY ts.date DESC) AS rn
+          FROM technical_signals ts
+          LEFT JOIN nse_stocks ns ON ns.symbol = ts.symbol
+        ) t
+        WHERE rn = 1
+          AND screener_momentum_score >= ?
+          AND screener_bull_count > screener_bear_count
+        ORDER BY screener_momentum_score DESC
         LIMIT ?
       `, [input.minMomentum, input.topN]);
     }),

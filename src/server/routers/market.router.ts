@@ -16,10 +16,20 @@ import { fetchGlobalMarketData } from "../globalMarketService";
 import { generateStockAnalysis } from "../../services/aiService";
 import { router, publicProcedure, adminProcedure } from "../trpc";
 import { runPython } from "../pythonRunner";
+import { fetchWithCache } from "../cacheService";
 
 export const marketRouter = router({
+  // These upstream-fetching procedures (getGlobalMarketData/getMarketOverview/getTopMovers/
+  // getBreakouts/getSectorPerformance below) previously called their live MoneyControl/
+  // NiftyTrader/ET fetch functions directly with no caching -- every dashboard load AND every
+  // poll tick from every concurrent browser tab was a synchronous round-trip to a third-party
+  // API. At any real concurrency this both inflates request latency to the upstream's latency
+  // and risks the upstream rate-limiting/banning this app. fetchWithCache already implements
+  // Redis/in-memory fallback + in-flight de-dup (cache-stampede protection) -- these just
+  // weren't calling it. TTLs are short enough that a fresh page load is never more than one
+  // interval stale, matching how often the frontend already polls these.
   getGlobalMarketData: publicProcedure
-    .query(async () => fetchGlobalMarketData()),
+    .query(async () => fetchWithCache('market:global-data', () => fetchGlobalMarketData(), 30)),
 
   getLiveStocks: publicProcedure
     .query(async () => getOrRefreshAllStocks()),
@@ -159,7 +169,7 @@ export const marketRouter = router({
     }),
 
   getMarketOverview: publicProcedure
-    .query(async () => {
+    .query(async () => fetchWithCache('market:overview', async () => {
       const parse = (s: unknown) => parseFloat(String(s ?? '0').replace(/,/g, '')) || 0;
       const { getIndexByName } = await import('../indexMapping');
       const extractId = (name: string, url: string) => {
@@ -189,13 +199,13 @@ export const marketRouter = router({
         sensex:    { indId: '4',  value: null, change: null, changePct: null, stale: true },
         bankNifty: { indId: '23', value: null, change: null, changePct: null, stale: true },
       };
-    }),
+    }, 30)),
 
   getTopMovers: publicProcedure
-    .query(async () => fetchTopMovers()),
+    .query(async () => fetchWithCache('market:top-movers', () => fetchTopMovers(), 60)),
 
   getBreakouts: publicProcedure
-    .query(async () => fetchNiftyTraderBreakouts()),
+    .query(async () => fetchWithCache('market:breakouts', () => fetchNiftyTraderBreakouts(), 60)),
 
   getEarlyHoursPredictions: publicProcedure
     .input(z.object({ date: z.string().optional() }).optional())
@@ -277,30 +287,33 @@ export const marketRouter = router({
       limit:   z.number().optional(),
     }).optional())
     .query(async ({ input }) => {
-      const data = await fetchSectorPerformance(input);
-      if (data && data.success === 1 && data.data) {
-        return data.data.map((s: any) => {
-          const name = s.sectorName || s.sector || 'Unknown';
-          const rawChange = s.percentChange ?? s.mcapPerChange ?? 0;
-          const change = typeof rawChange === 'number' ? rawChange : parseFloat(String(rawChange).replace(/,/g, ''));
-          return { name, change: isNaN(change) ? 0 : change, stocks: s.stocksCount || 0 };
-        });
-      }
-      const allStocks = await getOrRefreshAllStocks();
-      const sectorMap = new Map<string, number[]>();
-      for (const stock of allStocks) {
-        const sector = (stock as any).sector || (stock as any).industry;
-        if (sector && sector !== 'Unknown') {
-          if (!sectorMap.has(sector)) sectorMap.set(sector, []);
-          sectorMap.get(sector)!.push(stock.changePct);
+      const cacheKey = `market:sector-perf:${JSON.stringify(input ?? {})}`;
+      return fetchWithCache(cacheKey, async () => {
+        const data = await fetchSectorPerformance(input);
+        if (data && data.success === 1 && data.data) {
+          return data.data.map((s: any) => {
+            const name = s.sectorName || s.sector || 'Unknown';
+            const rawChange = s.percentChange ?? s.mcapPerChange ?? 0;
+            const change = typeof rawChange === 'number' ? rawChange : parseFloat(String(rawChange).replace(/,/g, ''));
+            return { name, change: isNaN(change) ? 0 : change, stocks: s.stocksCount || 0 };
+          });
         }
-      }
-      return Array.from(sectorMap.entries())
-        .map(([name, changes]) => {
-          const avgChange = changes.reduce((a, b) => a + b, 0) / changes.length;
-          return { name, change: isNaN(avgChange) ? 0 : Number(avgChange.toFixed(2)), stocks: changes.length };
-        })
-        .sort((a, b) => b.change - a.change);
+        const allStocks = await getOrRefreshAllStocks();
+        const sectorMap = new Map<string, number[]>();
+        for (const stock of allStocks) {
+          const sector = (stock as any).sector || (stock as any).industry;
+          if (sector && sector !== 'Unknown') {
+            if (!sectorMap.has(sector)) sectorMap.set(sector, []);
+            sectorMap.get(sector)!.push(stock.changePct);
+          }
+        }
+        return Array.from(sectorMap.entries())
+          .map(([name, changes]) => {
+            const avgChange = changes.reduce((a, b) => a + b, 0) / changes.length;
+            return { name, change: isNaN(avgChange) ? 0 : Number(avgChange.toFixed(2)), stocks: changes.length };
+          })
+          .sort((a, b) => b.change - a.change);
+      }, 60);
     }),
 
   getSectorTechnicalTrends: publicProcedure
