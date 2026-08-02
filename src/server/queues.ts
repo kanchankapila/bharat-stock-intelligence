@@ -14,11 +14,18 @@ import { fetchAllLiveStocks } from './liveStockData';
 import { cacheSet } from './cacheService';
 import { generateStockAnalysis } from '../services/aiService';
 import { dbGet, dbAll, dbRun } from './dbAsync';
-import { syncAndScore } from './scoringService';
 import Redis from 'ioredis';
 import { REDIS_BASE } from './redisConfig';
-import { CronExpressionParser } from 'cron-parser';
 import { runPython } from './pythonRunner';
+import { registerScreenerJobs } from './jobs/screeners.jobs';
+import { addJobWithCatchup } from './jobs/registerJob';
+import { registerAgentJobs } from './jobs/agents.jobs';
+import { registerOperationsJobs, resolveOutcomesResilient } from './jobs/operations.jobs';
+import { registerSyncJobs } from './jobs/sync.jobs';
+import { registerDlJobs, processDLPython } from './jobs/dl.jobs';
+import { registerTrendlyneWeeklyJobs } from './jobs/trendlyneWeekly.jobs';
+import { registerConfluenceJobs } from './jobs/confluence.jobs';
+import { registerDigestJobs } from './jobs/digests.jobs';
 import { alphaQuant } from './alphaQuantClient';
 
 import { syncNiftyTraderScores, syncTrendlyneScores } from './syncProprietaryScores';
@@ -46,7 +53,7 @@ import { telegramService } from './telegramService';
 
 // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Redis connection shared across all BullMQ objects ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 
-function makeConnection(isProbe = false): any {
+export function makeConnection(isProbe = false): any {
   const base = {
     ...REDIS_BASE,
     connectTimeout: isProbe ? 2000 : 30000,
@@ -82,45 +89,28 @@ function makeConnection(isProbe = false): any {
 
 export const QUEUE_STOCK_REFRESH        = 'stock-refresh';
 export const QUEUE_AI_SIGNALS           = 'ai-signals';
-export const QUEUE_STOCK_SCORING        = 'stock-scoring';
-export const QUEUE_MC_SCREENER_SYNC     = 'mc-screener-sync';
-export const QUEUE_ETNOW_SCREENER_SYNC  = 'etnow-screener-sync';
-export const QUEUE_ET_MARKETSTATS_SYNC  = 'et-marketstats-sync';
-export const QUEUE_NSE_SYNC             = 'nse-sync';  // PHASE 2: Weekly NSE master data sync
-export const QUEUE_FUNDAMENTALS_SYNC    = 'fundamentals-sync';
-export const QUEUE_QUANT_SCORING        = 'quant-scoring';
 export const QUEUE_WALK_FORWARD_OPTIMIZE = 'walk-forward-optimize';
+export { QUEUE_STOCK_SCORING, QUEUE_MC_SCREENER_SYNC, QUEUE_ETNOW_SCREENER_SYNC, QUEUE_ET_MARKETSTATS_SYNC, QUEUE_FUNDAMENTALS_SYNC, QUEUE_QUANT_SCORING } from './jobs/screeners.jobs';
 export const QUEUE_TECHNICAL_SIGNALS    = 'technical-signals';
 export const QUEUE_SIGNAL_OUTCOMES      = 'signal-outcomes';
 export const QUEUE_NEWS_SENTIMENT       = 'news-sentiment';
 export const QUEUE_TRENDLYNE_INTRADAY   = 'trendlyne-intraday';
-export const QUEUE_OUTCOME_RESOLVER     = 'outcome-resolver';
 export const QUEUE_ML_DAILY_OPS        = 'ml-daily-ops';
 export const QUEUE_ML_WEEKLY_RETRAIN   = 'ml-weekly-retrain';
 export const QUEUE_INTRADAY_FETCHER    = 'intraday-fetcher';
-export const QUEUE_RESEARCH_PREMARKET  = 'research-premarket';
-export const QUEUE_RESEARCH_POSTCLOSE  = 'research-postclose';
-export const QUEUE_DL_MACRO_FETCH       = 'dl-macro-fetch';
-export const QUEUE_DL_FEATURE_REFRESH   = 'dl-feature-refresh';
-export const QUEUE_DL_INFERENCE         = 'dl-inference';
-export const QUEUE_DL_REGIME_UPDATE     = 'dl-regime-update';
-export const QUEUE_DL_RETRAIN_WEEKLY    = 'dl-retrain-weekly';
+export { QUEUE_RESEARCH_PREMARKET, QUEUE_RESEARCH_POSTCLOSE, QUEUE_OUTCOME_RESOLVER } from './jobs/operations.jobs';
+export { QUEUE_SCREENER_PERFORMANCE, QUEUE_COMPANY_PROFILES_SYNC, QUEUE_TICKERTAPE_SCORECARD } from './jobs/sync.jobs';
+export { QUEUE_NSE_SYNC } from './jobs/sync.jobs';
+export { QUEUE_DL_MACRO_FETCH, QUEUE_DL_FEATURE_REFRESH, QUEUE_DL_INFERENCE, QUEUE_DL_REGIME_UPDATE, QUEUE_DL_RETRAIN_WEEKLY } from './jobs/dl.jobs';
+export { QUEUE_TRENDLYNE_MIDWEEK, QUEUE_TRENDLYNE_RATIOS_MONTHLY } from './jobs/trendlyneWeekly.jobs';
+export { QUEUE_CONFLUENCE_COMPUTE, QUEUE_CONFLUENCE_OUTCOMES } from './jobs/confluence.jobs';
+export { QUEUE_JOB_DIGEST, QUEUE_RECOMMENDATIONS_DIGEST } from './jobs/digests.jobs';
 export const QUEUE_DL_RETRAIN_EMERGENCY = 'dl-retrain-emergency';
 export const QUEUE_OHLCV_BACKFILL       = 'ohlcv-backfill';
-export const QUEUE_CONFLUENCE_COMPUTE  = 'confluence-compute';
-export const QUEUE_CONFLUENCE_OUTCOMES = 'confluence-outcomes';
-export const QUEUE_SCREENER_PERFORMANCE = 'screener-performance';
-export const QUEUE_AGENT_DATA_SCIENTIST = 'agent-data-scientist';
-export const QUEUE_AGENT_STRATEGIST     = 'agent-strategist';
-export const QUEUE_AGENT_AUDITOR        = 'agent-auditor';
-export const QUEUE_AGENT_OPTIMIZER      = 'agent-optimizer';
 export const QUEUE_UNIFIED_RANKER       = 'unified-ranker';
-export const QUEUE_COMPANY_PROFILES_SYNC = 'company-profiles-sync';
+export { QUEUE_AGENT_DATA_SCIENTIST, QUEUE_AGENT_STRATEGIST, QUEUE_AGENT_AUDITOR, QUEUE_AGENT_OPTIMIZER } from './jobs/agents.jobs';
 export const QUEUE_QUANT_EOD_SYNC = 'quant-eod-sync';
 export const QUEUE_TRENDLYNE_DAILY_FETCH = 'trendlyne-daily-fetch';
-export const QUEUE_TRENDLYNE_MIDWEEK = 'trendlyne-midweek';
-export const QUEUE_TRENDLYNE_RATIOS_MONTHLY = 'trendlyne-ratios-monthly';
-export const QUEUE_TICKERTAPE_SCORECARD = 'tickertape-scorecard';
 export const QUEUE_LIVE_SCREENER_COLLECT = 'live-screener-collect';
 export const QUEUE_TRENDLYNE_CHECKLIST_CYCLE = 'trendlyne-checklist-cycle';
 
@@ -224,36 +214,6 @@ export let unifiedRankerWorker: Worker | null = null;
 let trendlyneChecklistCycleQueue: Queue | null = null;
 let trendlyneChecklistCycleWorker: Worker | null = null;
 
-
-// ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Confluence compute processor ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
-
-async function processConfluenceCompute(_job: Job): Promise<{ computed: number; elite: number; strong: number }> {
-  // Positional signal (whole-universe, heavy). Skip during market hours so it doesn't compete with
-  // the intraday pipeline for CPU/DB — its consumers (positional dashboards + the post-close
-  // unified_ranker) don't need intraday freshness. The pre-open compute carries through the session
-  // and the 30-min cadence resumes after close. Returning normally keeps the heartbeat fresh.
-  if (await isMarketOpen()) {
-    console.log('[QUEUE] confluence-compute skipped — market hours (positional signal runs off-hours)');
-    return { computed: 0, elite: 0, strong: 0 };
-  }
-  const { computeConfluenceSignals, runMLProbabilityOverlay } = await import('./confluenceEngine');
-  const result = await computeConfluenceSignals();
-  runMLProbabilityOverlay().catch((err: any) =>
-    console.warn('[CONFLUENCE] ML overlay failed (non-blocking):', err?.message ?? err)
-  );
-  return result;
-}
-
-async function processConfluenceOutcomes(_job: Job): Promise<void> {
-  // Sequential, not Promise.all: confluence_ml_engine --train is CPU-heavy (multiprocessing)
-  // and the old concurrent 120s budget both starved the tracker AND timeout-killed the
-  // trainer (its real runtime is several minutes) — 10 of its last 11 runs failed this way.
-  // Per-step .catch keeps a failure in one from aborting the other.
-  await runPython('confluence_outcome_tracker.py', [], 5 * 60_000)
-    .catch(e => console.warn('[QUEUE] confluence_outcome_tracker failed:', (e as Error).message));
-  await runPython('confluence_ml_engine.py', ['--train'], 15 * 60_000)
-    .catch(e => console.warn('[QUEUE] confluence_ml_engine --train failed:', (e as Error).message));
-}
 
 // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Stock-refresh worker processor (PHASE 1: Now persists OHLCV) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 
@@ -408,82 +368,6 @@ async function processAISignal(job: Job): Promise<void> {
   await job.updateProgress(100);
 }
 
-// ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Stock-scoring worker processor ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
-
-async function processStockScoring(_job: Job): Promise<{ success: boolean }> {
-  console.log('[QUEUE] Starting scheduled stock scoring...');
-  const result = await syncAndScore();
-  if (!result.success) throw new Error(`Stock scoring failed: ${result.message}`);
-  return { success: true };
-}
-
-// ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ MC screener sync worker processor ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
-
-async function processMcScreenerSync(_job: Job): Promise<{ success: boolean }> {
-  console.log('[QUEUE] Starting scheduled MoneyControl screener sync...');
-  const { syncMoneyControlScreeners } = await import('./moneycontrolScreener');
-  await syncMoneyControlScreeners();
-  return { success: true };
-}
-
-// ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ ETNow screener sync worker processor ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
-
-async function processEtnowScreenerSync(_job: Job): Promise<{ success: boolean }> {
-  console.log('[QUEUE] Starting scheduled ETNow screener sync...');
-  const { syncETnowScreeners } = await import('./etnowScreenerSync');
-  await syncETnowScreeners();
-  return { success: true };
-}
-
-async function processEtMarketstatsSync(_job: Job): Promise<{ success: boolean }> {
-  console.log('[QUEUE] Starting scheduled ET Marketstats screener sync...');
-  const { syncEtMarketstatsScreeners } = await import('./etMarketstatsSync');
-  await syncEtMarketstatsScreeners();
-  return { success: true };
-}
-
-// ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ NSE-sync worker processor (PHASE 2: Weekly NSE master data sync) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
-
-async function processNSESync(_job: Job): Promise<{ success: boolean; stockCount: number }> {
-  console.log('[QUEUE] Starting NSE master data sync...');
-  try {
-    const { syncNSEStocksToDatabase } = await import('./nseService');
-    const result = await syncNSEStocksToDatabase();
-    const stockCount = (result?.inserted || 0) + (result?.updated || 0);
-    console.log(`[QUEUE] NSE sync completed, ${stockCount} stocks updated`);
-    // Backfill canonical nse_stocks.sector from already-resolved confluence data, then
-    // propagate to historical signal tables. Keeps sector segmentation healthy over time.
-    await runPython('backfill_sectors.py', [], 120_000)
-      .catch(err => console.warn('[QUEUE] sector backfill failed (non-blocking):', (err as Error).message));
-    // Index membership flags (Nifty50/100/200/Midcap150/Smallcap250) — passive ETF flow signal.
-    await runPython('index_membership_fetcher.py', [], 60_000)
-      .catch(err => console.warn('[QUEUE] index_membership_fetcher failed (non-blocking):', (err as Error).message));
-    return { success: true, stockCount };
-  } catch (err: any) {
-    console.error('[QUEUE] NSE sync failed:', err.message);
-    throw err;
-  }
-}
-
-// ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Fundamentals-sync worker processor ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
-
-async function processFundamentalsSync(job: Job): Promise<{ success: boolean }> {
-  const phase2Only = job.data?.phase2Only === true;
-  console.log(`[QUEUE] Starting fundamentals sync (phase2Only=${phase2Only})...`);
-  const { runFullFundamentalsSync } = await import('./fundamentalsSyncService');
-  await runFullFundamentalsSync(phase2Only);
-  return { success: true };
-}
-
-// ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Quant-scoring worker processor ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
-
-async function processQuantScoring(_job: Job): Promise<{ success: boolean }> {
-  console.log('[QUEUE] Starting quant strategy scoring...');
-  const { runQuantScoring } = await import('./quantScoringService');
-  await runQuantScoring();
-  return { success: true };
-}
-
 // ── Walk-forward-optimize worker processor ─────────────────────────────────
 // On-demand (user-triggered), not a daily batch job — data comes straight from
 // job.data (the request the tRPC mutation enqueued) and is forwarded to the
@@ -491,39 +375,6 @@ async function processQuantScoring(_job: Job): Promise<{ success: boolean }> {
 async function processWalkForwardOptimize(job: Job): Promise<any> {
   console.log(`[QUEUE] Starting walk-forward optimize (${job.data?.start}→${job.data?.end})...`);
   return alphaQuant.walkForwardOptimize(job.data);
-}
-
-/**
- * Resolve outcomes at the given horizon. Prefer the in-process Python API (port 8002),
- * but if it is unreachable fall back to spawning outcome_resolver.py directly — the
- * resolver is self-contained (connects straight to SQLite), so resolution must NOT
- * silently no-op just because the AlphaQuant service happens to be down.
- */
-async function resolveOutcomesResilient(horizon: number): Promise<void> {
-  try {
-    await pythonApi.resolveOutcomes(horizon);
-  } catch (e) {
-    console.warn(`[API] resolve-outcomes(${horizon}) failed, falling back to runPython:`, (e as Error).message);
-    await runPython('outcome_resolver.py', ['--horizon', String(horizon)], 180_000)
-      .catch(err => console.error(`[QUEUE] outcome_resolver.py fallback(${horizon}) failed:`, (err as Error).message));
-  }
-}
-
-async function processOutcomeResolver(_job: Job): Promise<{ success: boolean }> {
-  // Flag bad-print OHLCV bars first so outcome labels skip them (ohlcv_quality.is_suspect).
-  await runPython('ohlcv_quality.py', ['--no-ingest'], 180_000)
-    .catch(e => console.warn('[QUEUE] ohlcv_quality flag failed:', (e as Error).message));
-
-  await resolveOutcomesResilient(1);
-  await resolveOutcomesResilient(5);
-  await resolveOutcomesResilient(15);
-
-  // Now a windowed batch-resolve (was per-row N+1, routinely blew the old 180s
-  // timeout on any real backlog) — give it real headroom.
-  await runPython('live_screener_resolver.py', [], 20 * 60_000)
-    .catch(err => console.error('[QUEUE] live_screener_resolver.py failed:', err.message));
-
-  return { success: true };
 }
 
 // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ ML daily ops worker processor ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
@@ -1123,28 +974,7 @@ async function processTrendlyneChecklistCycle(_job: Job): Promise<void> {
   }
 }
 
-// ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Research report processor functions ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
-
-async function processResearchPremarket(_job: Job): Promise<{ success: boolean }> {
-  const { generateDailyReport } = await import('./researchEngine');
-  const today = new Date().toISOString().split('T')[0];
-  await generateDailyReport(today, 'PRE_MARKET');
-  return { success: true };
-}
-
-async function processResearchPostclose(_job: Job): Promise<{ success: boolean }> {
-  const { generateDailyReport } = await import('./researchEngine');
-  const today = new Date().toISOString().split('T')[0];
-  await generateDailyReport(today, 'POST_CLOSE');
-  return { success: true };
-}
-
 // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ DL Python runner ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
-
-async function processDLPython(script: string, args: string[] = [], timeoutMs = 6 * 60 * 60_000): Promise<{ success: boolean }> {
-  await runPython(script, args, timeoutMs);
-  return { success: true };
-}
 
 async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean }> {
   // Dashboard sub-tasks (ml-ensemble-train, strategy-optimizer) run under T.run so their monitor
@@ -1226,141 +1056,6 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean }> 
      '--horizons', '5,10,21,63', '--by-regime', '--persist'], 15 * 60_000)
     .catch(e => console.warn('[QUEUE] factor_edge (dvm) failed:', (e as Error).message));
   T.finish();
-  return { success: true };
-}
-
-async function processScreenerPerf(_job: Job): Promise<void> {
-  // 1. Sync newly discovered Trendlyne screener PKs. "known" mode only re-fetches PKs
-  // missing from the DB, but with ~612 known PKs and a 0.4s rate limit that can still
-  // run 20+ minutes in practice — the old 10-min timeout routinely SIGTERM'd it mid-run
-  // (execFile kills before any stderr flushes, logged as an opaque "Command failed").
-  await runPython('trendlyne_screener_discovery.py', [], 30 * 60_000)
-    .catch(e => console.warn('[QUEUE] trendlyne_screener_discovery failed:', (e as Error).message));
-
-  // 2. Bulk-enrich signal_keywords + screener_url; INSERT 858 missing catalog entries; fix sector_theme bias
-  await runPython('screener_catalog_enricher.py', [], 5 * 60_000)
-    .catch(e => console.warn('[QUEUE] screener_catalog_enricher failed:', (e as Error).message));
-
-  // 2b. Backfill OHLCV for any symbols that appeared in screeners but are missing from stock_ohlcv
-  await runPython('screener_ohlcv_backfill.py', [], 20 * 60_000)
-    .catch(e => console.warn('[QUEUE] screener_ohlcv_backfill failed:', (e as Error).message));
-
-  // 3. Compute performance metrics for all screeners (K_PRIOR adaptive; phase_e updates confidence)
-  // 45 min: the run includes per-screener Ollama classification calls and routinely
-  // outlives the old 15-min budget now that screener_appearances has months of history
-  // (12 of its last 14 runs were timeout-killed with an empty "Command failed").
-  await runPython('screener_performance.py', [], 45 * 60_000);
-
-  // 4. Stamp per-stock screener ML features into technical_signals
-  await runPython('screener_features_fetcher.py', [], 5 * 60_000)
-    .catch(e => console.warn('[QUEUE] screener_features_fetcher failed:', (e as Error).message));
-
-  // 5. Aggregate sector screener rotation signals
-  await runPython('screener_sector_rotation.py', [], 2 * 60_000)
-    .catch(e => console.warn('[QUEUE] screener_sector_rotation failed:', (e as Error).message));
-
-  // 6. Generate screener surfacing alerts → unified_signals
-  await runPython('screener_signal_generator.py', [], 3 * 60_000)
-    .catch(e => console.warn('[QUEUE] screener_signal_generator failed:', (e as Error).message));
-
-  // 7. Resolve live screener outcomes (needs ohlcv data to be fresh first)
-  await runPython('live_screener_resolver.py', [], 20 * 60_000)
-    .catch(e => console.warn('[QUEUE] live_screener_resolver failed:', (e as Error).message));
-
-  // 8. Recompute optimal filter combinations using the latest resolved outcomes. Trains both
-  // the swing-horizon model and an isolated same-day intraday model in one run (see
-  // live_screener_optimizer.py's optimize_combinations()).
-  await runPython('live_screener_optimizer.py', [], 5 * 60_000)
-    .catch(e => console.warn('[QUEUE] live_screener_optimizer failed:', (e as Error).message));
-
-  // 8b. Retrain the ML win-probability classifier on the same freshly-resolved outcomes.
-  // Gated behind a held-out-AUC promotion check inside the script itself, so a worse
-  // retrain never silently replaces a better live model.
-  await runPython('live_screener_ml_ranker.py', ['--train'], 10 * 60_000)
-    .catch(e => console.warn('[QUEUE] live_screener_ml_ranker --train failed:', (e as Error).message));
-
-  // 9. Auto-backtest top combinations so frontend cockpit always has fresh performance data
-  await runPython('backtest_live_screener.py', ['--auto-backtest-top', '5'], 10 * 60_000)
-    .catch(e => console.warn('[QUEUE] backtest_live_screener auto-backtest failed:', (e as Error).message));
-  await runPython('backtest_live_screener.py', ['--auto-backtest-top', '5', '--intraday'], 10 * 60_000)
-    .catch(e => console.warn('[QUEUE] backtest_live_screener intraday auto-backtest failed:', (e as Error).message));
-
-  try {
-    const { classifyAllScreeners } = await import('./screenerClassifier');
-    await classifyAllScreeners();
-  } catch (e: unknown) {
-    console.error('[QUEUE] screener classification failed:', (e as Error).message);
-  }
-}
-
-async function processAgentDataScientist(_job: Job): Promise<{ success: boolean; grade?: string }> {
-  await runPython('agents/data_scientist_agent.py', [], 10 * 60_000);
-  const row = await dbGet<{ quality_grade: string }>(
-    'SELECT quality_grade FROM agent_data_scientist_reports ORDER BY created_at DESC LIMIT 1'
-  );
-  return { success: true, grade: row?.quality_grade };
-}
-
-async function processAgentStrategist(_job: Job): Promise<{ success: boolean }> {
-  await runPython('agents/strategist_agent.py', [], 15 * 60_000);
-
-  const highPicks = await dbAll<any>(`
-    SELECT symbol, timeframe, entry_zone_low, entry_zone_high,
-           stop_loss, target_1, target_2, target_3, composite_score, narrative
-    FROM agent_strategy_picks
-    WHERE date(run_date)::text = date('now') AND conviction = 'HIGH'
-    ORDER BY composite_score DESC
-  `);
-
-  if (highPicks.length > 0) {
-    try {
-      const { TelegramNotificationService } = await import('./telegramService');
-      const tg = new TelegramNotificationService();
-      for (const p of highPicks) {
-        const firstSentence = (p.narrative as string || '').split('.')[0];
-        await tg.sendMarkdownMessage(
-          `🎯 *STRATEGY ALERT — ${(p.timeframe as string).toUpperCase()}*\n` +
-          `*${p.symbol}* | Entry: ₹${p.entry_zone_low}–${p.entry_zone_high} | SL: ₹${p.stop_loss}\n` +
-          `T1: ₹${p.target_1} | T2: ₹${p.target_2} | T3: ₹${p.target_3}\n` +
-          `Conviction: HIGH | Score: ${Number(p.composite_score).toFixed(0)}\n` +
-          `${firstSentence}.`
-        );
-      }
-    } catch (err: unknown) {
-      console.warn('[QUEUE] Strategist Telegram alert failed:', (err as Error).message);
-    }
-  }
-  return { success: true };
-}
-
-async function processAgentAuditor(_job: Job): Promise<{ success: boolean }> {
-  await runPython('agents/auditor_agent.py', [], 15 * 60_000);
-  return { success: true };
-}
-
-async function processAgentOptimizer(_job: Job): Promise<{ success: boolean }> {
-  await runPython('agents/optimizer_agent.py', [], 20 * 60_000);
-
-  const latest = await dbGet<any>(
-    'SELECT weights_changed, full_optimizer_triggered, baseline_win_rate, new_win_rate, narrative ' +
-    'FROM agent_optimizer_reports ORDER BY created_at DESC LIMIT 1'
-  );
-
-  if (latest && (latest.weights_changed || latest.full_optimizer_triggered)) {
-    try {
-      const { TelegramNotificationService } = await import('./telegramService');
-      const tg = new TelegramNotificationService();
-      const firstSentence = (latest.narrative as string || '').split('.')[0];
-      await tg.sendMarkdownMessage(
-        `⚙️ *OPTIMIZER ALERT*\n` +
-        `Win rate: ${Number(latest.baseline_win_rate).toFixed(0)}% → ${Number(latest.new_win_rate).toFixed(0)}%\n` +
-        `Full optimizer: ${latest.full_optimizer_triggered ? 'YES 🔄' : 'NO'}\n` +
-        `${firstSentence}.`
-      );
-    } catch (err: unknown) {
-      console.warn('[QUEUE] Optimizer Telegram alert failed:', (err as Error).message);
-    }
-  }
   return { success: true };
 }
 
@@ -1462,84 +1157,6 @@ async function processQuantEodSync(_job: Job): Promise<{ success: boolean }> {
 // across every addJobWithCatchup call in a single initQueues() pass, not per-queue.
 const CATCHUP_STAGGER_MS = 5 * 60_000;
 let _catchupSlot = 0;
-
-async function addJobWithCatchup(
-  queue: Queue,
-  jobName: string,
-  data: any,
-  opts: any = {}
-) {
-  if (opts.repeat && (opts.repeat.pattern || opts.repeat.cron) && !opts.repeat.tz) {
-    opts.repeat.tz = 'Etc/UTC';
-  }
-
-  const now = Date.now();
-  const repeatables = await queue.getRepeatableJobs();
-  // A repeatable's `next` from before we remove it tells us whether BullMQ was already
-  // holding a slot that hadn't fired yet. If that slot's time has already passed, this
-  // restart (removeRepeatableByKey + re-add, which recomputes `next` from `now`) would
-  // otherwise silently forfeit it — the completed/failed-history check below can't catch
-  // this because a queue with zero run history ever (or fully-evicted history) has no
-  // lastRunTime to compare against.
-  let staleNextMissed = false;
-  for (const r of repeatables) {
-    if (r.id === opts.jobId || r.name === jobName) {
-      if (typeof r.next === 'number' && r.next < now) staleNextMissed = true;
-      await queue.removeRepeatableByKey(r.key);
-    }
-  }
-
-  await queue.add(jobName, data, opts);
-
-  if (!opts.repeat || (!opts.repeat.pattern && !opts.repeat.every && !opts.repeat.cron)) {
-    return;
-  }
-
-  try {
-    const jobs = await queue.getJobs(['completed', 'failed'], 0, 1, false);
-    const lastJob = jobs.length > 0 ? jobs[0] : null;
-    const lastRunTime = lastJob?.timestamp || null;
-
-    let missed = staleNextMissed;
-
-    if (!missed && lastRunTime) {
-      if (opts.repeat.pattern || opts.repeat.cron) {
-        const pattern = opts.repeat.pattern || opts.repeat.cron;
-        const parserOpts: any = { currentDate: new Date(now) };
-        if (opts.repeat.tz) {
-          parserOpts.tz = opts.repeat.tz;
-        } else {
-          parserOpts.utc = true;
-        }
-        const interval = CronExpressionParser.parse(pattern, parserOpts);
-        const prevExpected = interval.prev().getTime();
-
-        if (lastRunTime < prevExpected && prevExpected < now) {
-          missed = true;
-        }
-      } else if (opts.repeat.every) {
-        if (now - lastRunTime > opts.repeat.every) {
-          missed = true;
-        }
-      }
-    }
-
-    if (missed) {
-      const delay = _catchupSlot++ * CATCHUP_STAGGER_MS;
-      console.log(
-        `[QUEUE] Job ${jobName} in ${queue.name} missed its scheduled run. ` +
-        `Catch-up queued with a ${delay / 60_000}min stagger.`,
-      );
-      const catchupOpts = { ...opts };
-      delete catchupOpts.repeat;
-      catchupOpts.jobId = `${opts.jobId || jobName}-catchup-${now}`;
-      catchupOpts.delay = delay;
-      await queue.add(jobName, { ...data, isCatchup: true }, catchupOpts);
-    }
-  } catch (err) {
-    console.warn(`[QUEUE] Failed to determine catch-up for ${jobName}:`, err);
-  }
-}
 
 export async function initQueues(): Promise<boolean> {
   // Suppress BullMQ's per-queue/worker Redis version warnings (Redis 5 works fine here)
@@ -1666,298 +1283,13 @@ export async function initQueues(): Promise<boolean> {
 
     console.log('[QUEUE] BullMQ initialised (stock-refresh + ai-signals)');
 
-    // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Stock scoring queue ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
-    stockScoringQueue = new Queue(QUEUE_STOCK_SCORING, { connection });
-
-    // Repeat every 24 hours
-    const scoringRepeatables = await stockScoringQueue.getRepeatableJobs();
-    for (const r of scoringRepeatables) {
-      await stockScoringQueue.removeRepeatableByKey(r.key);
-    }
-    await addJobWithCatchup(stockScoringQueue, 
-      'score-all',
-      {},
-      {
-        repeat: { pattern: '0 17 * * 1-5' }, // 10:30 PM IST (17:00 UTC), Mon-Fri after daily ops
-        jobId: 'score-all-repeatable',
-        removeOnComplete: 5,
-        removeOnFail: 3,
-      },
-    );
-
-    scoringWorker = new Worker(
-      QUEUE_STOCK_SCORING,
-      processStockScoring,
-      { 
-        connection, 
-        concurrency: 1,
-        lockDuration: 600000, // 10 minutes for heavy scoring sync
-      },
-    );
-
-    scoringWorker.on('completed', (job) => {
-      console.log(`[QUEUE] stock-scoring completed`);
-      recordHeartbeat('stock-scoring', 'success');
-    });
-    scoringWorker.on('failed', (job, err) => {
-      console.error(`[QUEUE] stock-scoring failed:`, err.message);
-      recordHeartbeat('stock-scoring', 'failed', err?.message);
-    });
-
-    // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ MC screener sync queue ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
-    mcScreenerSyncQueue = new Queue(QUEUE_MC_SCREENER_SYNC, { connection });
-
-    // 6:20 PM IST (12:50 UTC) weekdays. MOVED from 11:00 PM IST (2026-07-31): every consumer
-    // of the screener tables ran BEFORE this sync, so they all read yesterday's membership.
-    // `screener_features_fetcher.py` runs inside ml-daily-ops (7:30 PM IST) and builds
-    // `screener_momentum_score` — the largest single engine weight in most REGIME_WEIGHTS
-    // regimes — off `screener_appearances`, which this job populates. Running the sync at
-    // 11 PM meant that feature was a day stale every single day. Now: syncs 6:00–6:40 PM,
-    // then ml-daily-ops 7:30 PM, then stock-scoring 10:30 PM — strictly downstream.
-    // 6:20 PM is ~3h after the 3:30 PM close, so provider-side EOD screeners have published.
-    const mcRepeatables = await mcScreenerSyncQueue.getRepeatableJobs();
-    for (const r of mcRepeatables) {
-      await mcScreenerSyncQueue.removeRepeatableByKey(r.key);
-    }
-    await addJobWithCatchup(mcScreenerSyncQueue,
-      'mc-sync',
-      {},
-      {
-        repeat: { pattern: '50 12 * * 1-5' }, // 6:20 PM IST (12:50 UTC) weekdays — see note above
-        jobId: 'mc-sync-repeatable',
-        removeOnComplete: 5,
-        removeOnFail: 3,
-      },
-    );
-
-    mcScreenerSyncWorker = new Worker(
-      QUEUE_MC_SCREENER_SYNC,
-      processMcScreenerSync,
-      {
-        connection,
-        concurrency: 1,
-        // MC screener sync fetches ~1,400 screeners sequentially — same problem as
-        // ETNow: 60s lockDuration caused "could not renew lock" every cycle.
-        lockDuration: 90 * 60 * 1000,   // 90 min
-        lockRenewTime: 15 * 60 * 1000,  // 15 min
-      },
-    );
-
-    mcScreenerSyncWorker.on('completed', (_job) => {
-      console.log(`[QUEUE] mc-screener-sync completed`);
-      recordHeartbeat('mc-screener-sync', 'success');
-    });
-    mcScreenerSyncWorker.on('failed', (_job, err) => {
-      console.error(`[QUEUE] mc-screener-sync failed:`, err.message);
-      recordHeartbeat('mc-screener-sync', 'failed', err.message);
-    });
-
-    // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ ETNow screener sync queue ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
-    etnowScreenerSyncQueue = new Queue(QUEUE_ETNOW_SCREENER_SYNC, { connection });
-
-    // 6:40 PM IST (13:10 UTC) weekdays — staggered 20 min after mc-sync, still ahead of
-    // ml-daily-ops (7:30 PM). Moved from 11:30 PM; see the mc-sync note for why.
-    const etnowRepeatables = await etnowScreenerSyncQueue.getRepeatableJobs();
-    for (const r of etnowRepeatables) {
-      await etnowScreenerSyncQueue.removeRepeatableByKey(r.key);
-    }
-    await addJobWithCatchup(etnowScreenerSyncQueue,
-      'etnow-sync',
-      {},
-      {
-        repeat: { pattern: '10 13 * * 1-5' }, // 6:40 PM IST (13:10 UTC) weekdays — see mc-sync note
-        jobId: 'etnow-sync-repeatable',
-        removeOnComplete: 5,
-        removeOnFail: 3,
-      },
-    );
-
-    etnowScreenerSyncWorker = new Worker(
-      QUEUE_ETNOW_SCREENER_SYNC,
-      processEtnowScreenerSync,
-      {
-        connection,
-        concurrency: 1,
-        // Syncs ~1,300 screeners sequentially (fetch + 800ms rate-limit delay each) —
-        // real runtime is ~35-60 min. The old 60s lockDuration made BullMQ think the
-        // job died mid-run every cycle (repeated "could not renew lock" errors).
-        lockDuration: 90 * 60 * 1000,   // 90 min
-        lockRenewTime: 15 * 60 * 1000,  // 15 min
-      },
-    );
-
-    etnowScreenerSyncWorker.on('completed', (_job) => {
-      console.log(`[QUEUE] etnow-screener-sync completed`);
-      recordHeartbeat('etnow-screener-sync', 'success');
-    });
-    etnowScreenerSyncWorker.on('failed', (_job, err) => {
-      console.error(`[QUEUE] etnow-screener-sync failed:`, err.message);
-      recordHeartbeat('etnow-screener-sync', 'failed', err.message);
-    });
-
-    // ── ET Marketstats/Technicals screener sync queue ──
-    etMarketstatsSyncQueue = new Queue(QUEUE_ET_MARKETSTATS_SYNC, { connection });
-
-    // 6:00 PM IST (12:30 UTC) weekdays — FIRST of the three screener syncs. Moved from
-    // 11:35 PM (see the mc-sync note). This one mattered most: et_marketstats is the only
-    // screener source `syncAndScore()` does NOT re-sync in-process before scoring, yet
-    // `scoring_engine.load_data()` reads it — so at 11:35 PM it was always exactly one day
-    // behind the scores built from it at 10:30 PM.
-    const etMarketstatsRepeatables = await etMarketstatsSyncQueue.getRepeatableJobs();
-    for (const r of etMarketstatsRepeatables) {
-      await etMarketstatsSyncQueue.removeRepeatableByKey(r.key);
-    }
-    await addJobWithCatchup(etMarketstatsSyncQueue,
-      'et-marketstats-sync',
-      {},
-      {
-        repeat: { pattern: '30 12 * * 1-5' }, // 6:00 PM IST (12:30 UTC) weekdays — see mc-sync note
-        jobId: 'et-marketstats-sync-repeatable',
-        removeOnComplete: 5,
-        removeOnFail: 3,
-      },
-    );
-
-    etMarketstatsSyncWorker = new Worker(
-      QUEUE_ET_MARKETSTATS_SYNC,
-      processEtMarketstatsSync,
-      {
-        connection,
-        concurrency: 1,
-        // ~92 screeners sequentially (fetch + 500ms rate-limit delay each) — a few minutes.
-        lockDuration: 20 * 60 * 1000,  // 20 min
-        lockRenewTime: 5 * 60 * 1000,  // 5 min
-      },
-    );
-
-    etMarketstatsSyncWorker.on('completed', (_job) => {
-      console.log(`[QUEUE] et-marketstats-sync completed`);
-      recordHeartbeat('et-marketstats-sync', 'success');
-    });
-    etMarketstatsSyncWorker.on('failed', (_job, err) => {
-      console.error(`[QUEUE] et-marketstats-sync failed:`, err.message);
-      recordHeartbeat('et-marketstats-sync', 'failed', err.message);
-    });
-
-    // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ NSE sync queue (PHASE 2: Weekly master data update) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
-    nseScreenerSyncQueue = new Queue(QUEUE_NSE_SYNC, { connection });
-
-    // Remove any stale repeatable job
-    const nseRepeatables = await nseScreenerSyncQueue.getRepeatableJobs();
-    for (const r of nseRepeatables) {
-      await nseScreenerSyncQueue.removeRepeatableByKey(r.key);
-    }
-
-    // Repeat weekly on Sunday at 2 AM UTC (7:30 AM IST) for low load time
-    await addJobWithCatchup(nseScreenerSyncQueue, 
-      'nse-sync-weekly',
-      {},
-      {
-        repeat: { pattern: '0 2 * * 0' },  // Weekly Sunday 2 AM UTC
-        jobId: 'nse-sync-weekly-repeatable',
-        removeOnComplete: { age: 86400 },   // Keep for 1 day
-        removeOnFail: { age: 604800 },      // Keep failures for 7 days
-        attempts: 2,
-        backoff: { type: 'exponential', delay: 5000 },
-      },
-    );
-
-    nseScreenerSyncWorker = new Worker(
-      QUEUE_NSE_SYNC,
-      processNSESync,
-      { 
-        connection, 
-        concurrency: 1,
-        lockDuration: 180000,  // 3 minutes for NSE API calls
-      },
-    );
-
-    nseScreenerSyncWorker.on('completed', (job) => {
-      const result = job.returnvalue as any;
-      console.log(`[QUEUE] nse-sync completed (${result?.stockCount || 0} stocks)`);
-      recordHeartbeat('nse-sync', 'success');
-    });
-    nseScreenerSyncWorker.on('failed', (_job, err) => {
-      console.error(`[QUEUE] nse-sync failed:`, err.message);
-      recordHeartbeat('nse-sync', 'failed', err.message);
-    });
-
-    // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Fundamentals sync queue ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
-    fundamentalsSyncQueue = new Queue(QUEUE_FUNDAMENTALS_SYNC, { connection });
-
-    // Weekly repeatable job (Phase 1 + Phase 2 every 7 days)
-    const fundRepeatables = await fundamentalsSyncQueue.getRepeatableJobs();
-    for (const r of fundRepeatables) {
-      await fundamentalsSyncQueue.removeRepeatableByKey(r.key);
-    }
-    await addJobWithCatchup(fundamentalsSyncQueue, 
-      'sync-fundamentals-weekly',
-      { phase2Only: false },
-      {
-        repeat: { pattern: '0 3 * * 0' }, // Sunday 08:30 IST (03:00 UTC) — early on the closed day, not Mon 03:30 IST
-        jobId: 'fundamentals-sync-weekly',
-        removeOnComplete: 3,
-        removeOnFail: 3,
-      },
-    );
-
-    fundamentalsSyncWorker = new Worker(
-      QUEUE_FUNDAMENTALS_SYNC,
-      processFundamentalsSync,
-      {
-        connection,
-        concurrency: 1,
-        lockDuration: 30 * 60 * 1000,  // 30 min ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Phase 2 deep sync is slow
-        lockRenewTime: 5 * 60 * 1000,
-      },
-    );
-
-    fundamentalsSyncWorker.on('completed', (_job) => {
-      console.log('[QUEUE] fundamentals-sync completed');
-      recordHeartbeat('fundamentals-sync', 'success');
-    });
-    fundamentalsSyncWorker.on('failed', (_job, err) => {
-      console.error('[QUEUE] fundamentals-sync failed:', err.message);
-      recordHeartbeat('fundamentals-sync', 'failed', err.message);
-    });
-
-    // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Quant scoring queue (daily) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
-    quantScoringQueue = new Queue(QUEUE_QUANT_SCORING, { connection });
-
-    const quantRepeatables = await quantScoringQueue.getRepeatableJobs();
-    for (const r of quantRepeatables) {
-      await quantScoringQueue.removeRepeatableByKey(r.key);
-    }
-    await addJobWithCatchup(quantScoringQueue, 
-      'quant-score-daily',
-      {},
-      {
-        repeat: { pattern: '30 17 * * 1-5' }, // 11:00 PM IST (17:30 UTC), Mon-Fri after stock scoring
-        jobId: 'quant-scoring-daily',
-        removeOnComplete: 3,
-        removeOnFail: 3,
-      },
-    );
-
-    quantScoringWorker = new Worker(
-      QUEUE_QUANT_SCORING,
-      processQuantScoring,
-      {
-        connection,
-        concurrency: 1,
-        lockDuration: 10 * 60 * 1000, // 10 min ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â pure in-process computation
-        lockRenewTime: 2 * 60 * 1000,
-      },
-    );
-
-    quantScoringWorker.on('completed', (_job) => {
-      console.log('[QUEUE] quant-scoring completed');
-      recordHeartbeat('quant-scoring', 'success');
-    });
-    quantScoringWorker.on('failed', (_job, err) => {
-      console.error('[QUEUE] quant-scoring failed:', err.message);
-      recordHeartbeat('quant-scoring', 'failed', err.message);
-    });
+    const screenerJobs = await registerScreenerJobs(connection);
+    ({ queue: stockScoringQueue, worker: scoringWorker } = screenerJobs.stockScoring);
+    ({ queue: mcScreenerSyncQueue, worker: mcScreenerSyncWorker } = screenerJobs.mcScreenerSync);
+    ({ queue: etnowScreenerSyncQueue, worker: etnowScreenerSyncWorker } = screenerJobs.etnowScreenerSync);
+    ({ queue: etMarketstatsSyncQueue, worker: etMarketstatsSyncWorker } = screenerJobs.etMarketstatsSync);
+    ({ queue: fundamentalsSyncQueue, worker: fundamentalsSyncWorker } = screenerJobs.fundamentalsSync);
+    ({ queue: quantScoringQueue, worker: quantScoringWorker } = screenerJobs.quantScoring);
 
     // ── Walk-forward-optimize queue (on-demand, no repeatable schedule) ────────
     walkForwardOptimizeQueue = new Queue(QUEUE_WALK_FORWARD_OPTIMIZE, { connection });
@@ -2228,53 +1560,10 @@ export async function initQueues(): Promise<boolean> {
       console.error('[QUEUE] trendlyne-intraday error:', err.message);
     });
 
-    // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Outcome resolver queue (daily at 9:30 AM IST = 04:00 UTC, weekdays) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
-    outcomeResolverQueue = new Queue(QUEUE_OUTCOME_RESOLVER, { connection });
-
-    const orRepeatables = await outcomeResolverQueue.getRepeatableJobs();
-    for (const r of orRepeatables) {
-      await outcomeResolverQueue.removeRepeatableByKey(r.key);
-    }
-    await addJobWithCatchup(outcomeResolverQueue, 
-      'outcome-resolver-daily',
-      {},
-      {
-        repeat: { pattern: '0 4 * * 1-5' },
-        jobId: 'outcome-resolver-daily',
-        removeOnComplete: 3,
-        removeOnFail: 3,
-      },
-    );
-
-    outcomeResolverWorker = new Worker(
-      QUEUE_OUTCOME_RESOLVER,
-      processOutcomeResolver,
-      // processOutcomeResolver's worst case: 180s (ohlcv_quality) + 3x resolveOutcomesResilient
-      // (each up to 180s fallback, on top of its own pythonApi call) + 1200s
-      // (live_screener_resolver) -- comfortably over 30 min, well past the previous 10-min
-      // lockDuration that caused "job stalled" failures (2026-07-04).
-      {
-        connection,
-        concurrency: 1,
-        lockDuration: 45 * 60 * 1000,
-        lockRenewTime: 10 * 60 * 1000,
-      },
-    );
-
-    outcomeResolverWorker.on('completed', (_job) => {
-      console.log('[QUEUE] outcome-resolver completed');
-      recordHeartbeat('outcome-resolver', 'success');
-      updateMonitorState('outcome-resolver-5d', 'success');
-      updateMonitorState('outcome-resolver-15d', 'success');
-      updateMonitorState('performance-tracker', 'success');
-    });
-    outcomeResolverWorker.on('failed', (_job, err) => {
-      console.error('[QUEUE] outcome-resolver failed:', err.message);
-      recordHeartbeat('outcome-resolver', 'failed', err?.message);
-      updateMonitorState('outcome-resolver-5d', 'failed', err.message);
-      updateMonitorState('outcome-resolver-15d', 'failed', err.message);
-      updateMonitorState('performance-tracker', 'failed', err.message);
-    });
+    const operationsJobs = await registerOperationsJobs(connection);
+    ({ queue: outcomeResolverQueue, worker: outcomeResolverWorker } = operationsJobs.outcomeResolver);
+    ({ queue: researchPremarketQueue, worker: researchPremarketWorker } = operationsJobs.researchPremarket);
+    ({ queue: researchPostcloseQueue, worker: researchPostcloseWorker } = operationsJobs.researchPostclose);
 
     // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ ML daily ops queue (5:00 PM IST = 11:30 UTC, weekdays) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
     mlDailyOpsQueue = new Queue(QUEUE_ML_DAILY_OPS, { connection });
@@ -2404,81 +1693,12 @@ export async function initQueues(): Promise<boolean> {
     });
 
 
-    // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Research report queues ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
-    researchPremarketQueue = new Queue(QUEUE_RESEARCH_PREMARKET, { connection });
-    const premarketRep = await researchPremarketQueue.getRepeatableJobs();
-    for (const r of premarketRep) await researchPremarketQueue.removeRepeatableByKey(r.key);
-    await addJobWithCatchup(researchPremarketQueue, 'research-premarket-daily', {}, {
-      repeat: { pattern: '0 3 * * 1-5' },
-      jobId: 'research-premarket-repeatable',
-      removeOnComplete: { age: 86400 },
-      removeOnFail: { age: 604800 },
-      attempts: 2,
-      backoff: { type: 'exponential', delay: 5000 },
-    });
-    researchPremarketWorker = new Worker(QUEUE_RESEARCH_PREMARKET, processResearchPremarket,
-      { connection, concurrency: 1, lockDuration: 15 * 60 * 1000 });
-    researchPremarketWorker.on('completed', () => {
-      console.log('[QUEUE] research-premarket done');
-      recordHeartbeat('research-premarket', 'success');
-    });
-    researchPremarketWorker.on('failed', (_, err) => {
-      console.error('[QUEUE] research-premarket failed:', err.message);
-      recordHeartbeat('research-premarket', 'failed', err.message);
-    });
-
-    researchPostcloseQueue = new Queue(QUEUE_RESEARCH_POSTCLOSE, { connection });
-    const postcloseRep = await researchPostcloseQueue.getRepeatableJobs();
-    for (const r of postcloseRep) await researchPostcloseQueue.removeRepeatableByKey(r.key);
-    await addJobWithCatchup(researchPostcloseQueue, 'research-postclose-daily', {}, {
-      repeat: { pattern: '45 10 * * 1-5' },
-      jobId: 'research-postclose-repeatable',
-      removeOnComplete: { age: 86400 },
-      removeOnFail: { age: 604800 },
-      attempts: 2,
-      backoff: { type: 'exponential', delay: 5000 },
-    });
-    researchPostcloseWorker = new Worker(QUEUE_RESEARCH_POSTCLOSE, processResearchPostclose,
-      { connection, concurrency: 1, lockDuration: 15 * 60 * 1000 });
-    researchPostcloseWorker.on('completed', () => {
-      console.log('[QUEUE] research-postclose done');
-      recordHeartbeat('research-postclose', 'success');
-    });
-    researchPostcloseWorker.on('failed', (_, err) => {
-      console.error('[QUEUE] research-postclose failed:', err.message);
-      recordHeartbeat('research-postclose', 'failed', err.message);
-    });
-
-    // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ DL Macro Fetch (8:00 AM IST = 2:30 AM UTC, weekdays) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
-    dlMacroFetchQueue = new Queue(QUEUE_DL_MACRO_FETCH, { connection });
-    const dlMacroRep = await dlMacroFetchQueue.getRepeatableJobs();
-    for (const r of dlMacroRep) await dlMacroFetchQueue.removeRepeatableByKey(r.key);
-    await addJobWithCatchup(dlMacroFetchQueue, 'dl-macro-daily', {}, {
-      repeat: { pattern: '30 2 * * 1-5' },
-      jobId: 'dl-macro-daily',
-      removeOnComplete: 3, removeOnFail: 3,
-    });
-    dlMacroFetchWorker = new Worker(QUEUE_DL_MACRO_FETCH,
-      async () => {
-        // Explicit timeout, not processDLPython's 6h default: this worker's lockDuration is
-        // only 5 min, so an unbounded default lets a hang block the lock indefinitely instead
-        // of failing cleanly -- exactly what caused a live incident (repeated "could not renew
-        // lock" errors + a growing pile of stuck python.exe processes, since a stuck subprocess
-        // was never killed and each BullMQ retry spawned another one alongside it).
-        await processDLPython('global_macro_fetcher.py', [], 2 * 60_000);
-        // MC global: 15 indices (Nikkei/HangSeng/KOSPI/etc) + currencies + ADRs + commodities → mc_global_snapshot + macro_asset_prices.
-        await runPython('mc_global_macro_fetcher.py', [], 60_000)
-          .catch(e => console.warn('[QUEUE] mc_global_macro_fetcher failed:', (e as Error).message));
-        // Sector-global correlation depends on macro_asset_prices populated above.
-        await runPython('sector_global_corr.py', [], 3 * 60_000)
-          .catch(e => console.warn('[QUEUE] sector_global_corr failed:', (e as Error).message));
-        // Bond yields (India G-Sec + US/UK/DE 10yr) are now fetched inside global_macro_fetcher.py.
-      },
-      { connection, concurrency: 1, lockDuration: 5 * 60 * 1000 });
-    dlMacroFetchWorker.on('completed', () => {
-      console.log('[QUEUE] dl-macro-fetch done');
-      recordHeartbeat('dl-macro-fetch', 'success');
-    });
+    const dlJobs = await registerDlJobs(connection);
+    ({ queue: dlMacroFetchQueue, worker: dlMacroFetchWorker } = dlJobs.macroFetch);
+    ({ queue: dlFeatureRefreshQueue, worker: dlFeatureRefreshWorker } = dlJobs.featureRefresh);
+    ({ queue: dlInferenceQueue, worker: dlInferenceWorker } = dlJobs.inference);
+    ({ queue: dlRegimeUpdateQueue, worker: dlRegimeUpdateWorker } = dlJobs.regimeUpdate);
+    ({ queue: dlRetrainWeeklyQueue, worker: dlRetrainWeeklyWorker } = dlJobs.retrainWeekly);
 
     // ── Pre-open snapshot (3:40 AM UTC = 9:10 AM IST, weekdays) ──────────────────────────
     // GIFT Nifty level + Asia sentiment + global risk score captured before Indian market opens.
@@ -2511,10 +1731,6 @@ export async function initQueues(): Promise<boolean> {
       // "job stalled more than allowable limit" failures.
       { connection, concurrency: 1, lockDuration: 3 * 60_000 });
     console.log('[QUEUE] Pre-open snapshot scheduled at 9:10 AM IST (weekdays)');
-    dlMacroFetchWorker.on('failed', (_, err) => {
-      console.error('[QUEUE] dl-macro-fetch failed:', err.message);
-      recordHeartbeat('dl-macro-fetch', 'failed', err.message);
-    });
 
     // ── Intraday regime refresh: VIX + USDINR + Nifty basis every 15 min (9:15–15:30 IST) ──
     const QUEUE_REGIME = 'market-regime-refresh';
@@ -2623,117 +1839,6 @@ export async function initQueues(): Promise<boolean> {
       { connection, concurrency: 1, lockDuration: 5 * 60_000 });
     console.log('[QUEUE] Closed-day early batch scheduled (pre-open weekdays; runs the daily pipeline early on trading holidays)');
 
-    // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ DL Feature Refresh (3:30 PM IST = 10:00 AM UTC, weekdays) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
-    dlFeatureRefreshQueue = new Queue(QUEUE_DL_FEATURE_REFRESH, { connection });
-    const dlFeatRep = await dlFeatureRefreshQueue.getRepeatableJobs();
-    for (const r of dlFeatRep) await dlFeatureRefreshQueue.removeRepeatableByKey(r.key);
-    await addJobWithCatchup(dlFeatureRefreshQueue, 'dl-feature-daily', {}, {
-      // 5:00 PM IST (11:30 UTC). MOVED from 3:30 PM IST (2026-07-31): feature_engineering.py
-      // reads stock_ohlcv, but that day's bar is only persisted by stock-refresh at 4:00 PM
-      // and gap-filled at 4:15 PM — so running at 3:30 PM (the closing bell itself) built
-      // every DL feature set without the current session in it, every day.
-      repeat: { pattern: '30 11 * * 1-5' },
-      jobId: 'dl-feature-daily',
-      removeOnComplete: 3, removeOnFail: 3,
-    });
-    dlFeatureRefreshWorker = new Worker(QUEUE_DL_FEATURE_REFRESH,
-      async () => processDLPython('feature_engineering.py'),
-      { connection, concurrency: 1, lockDuration: 60 * 60 * 1000, lockRenewTime: 10 * 60 * 1000 });
-    dlFeatureRefreshWorker.on('completed', () => {
-      console.log('[QUEUE] dl-feature-refresh done');
-      recordHeartbeat('dl-feature-refresh', 'success');
-    });
-    dlFeatureRefreshWorker.on('failed', (_, err) => {
-      console.error('[QUEUE] dl-feature-refresh failed:', err.message);
-      recordHeartbeat('dl-feature-refresh', 'failed', err.message);
-    });
-
-    // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ DL Inference (4:30 PM IST = 11:00 AM UTC, weekdays) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
-    dlInferenceQueue = new Queue(QUEUE_DL_INFERENCE, { connection });
-    const dlInfRep = await dlInferenceQueue.getRepeatableJobs();
-    for (const r of dlInfRep) await dlInferenceQueue.removeRepeatableByKey(r.key);
-    await addJobWithCatchup(dlInferenceQueue, 'dl-infer-daily', {}, {
-      // 12:00 AM IST (18:30 UTC). Moved off 10:30 PM IST (2026-07-31): it collided exactly
-      // with stock-scoring, and the 10:00 PM–11:35 PM window held 8 heavy jobs in 95 minutes,
-      // which is where all 43 pg-pool "timeout exceeded when trying to connect" errors landed.
-      // Still strictly after dl-feature-refresh (5:00 PM) and before unified-ranker (7:30 AM).
-      repeat: { pattern: '30 18 * * 1-5' },
-      jobId: 'dl-infer-daily',
-      removeOnComplete: 3, removeOnFail: 3,
-    });
-    dlInferenceWorker = new Worker(QUEUE_DL_INFERENCE,
-      async () => processDLPython('dl_engine.py', ['--mode', 'infer']),
-      { connection, concurrency: 1, lockDuration: 30 * 60 * 1000, lockRenewTime: 5 * 60 * 1000 });
-    dlInferenceWorker.on('completed', () => {
-      console.log('[QUEUE] dl-inference done');
-      updateMonitorState('dl-engine-infer', 'success');
-    });
-    dlInferenceWorker.on('failed', (_, err) => {
-      console.error('[QUEUE] dl-inference failed:', err.message);
-      updateMonitorState('dl-engine-infer', 'failed', err.message);
-    });
-
-    // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ DL Regime Update (4:45 PM IST = 11:15 AM UTC, weekdays) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
-    dlRegimeUpdateQueue = new Queue(QUEUE_DL_REGIME_UPDATE, { connection });
-    const dlRegRep = await dlRegimeUpdateQueue.getRepeatableJobs();
-    for (const r of dlRegRep) await dlRegimeUpdateQueue.removeRepeatableByKey(r.key);
-    await addJobWithCatchup(dlRegimeUpdateQueue, 'dl-regime-daily', {}, {
-      repeat: { pattern: '15 11 * * 1-5' },
-      jobId: 'dl-regime-daily',
-      removeOnComplete: 3, removeOnFail: 3,
-    });
-    dlRegimeUpdateWorker = new Worker(QUEUE_DL_REGIME_UPDATE,
-      // Same fix as dlMacroFetchWorker above: explicit timeout, not the 6h default, since this
-      // worker's lockDuration is only 5 min.
-      async () => processDLPython('regime_detector.py', ['--mode', 'update'], 2 * 60_000),
-      { connection, concurrency: 1, lockDuration: 5 * 60 * 1000 });
-    dlRegimeUpdateWorker.on('completed', () => {
-      console.log('[QUEUE] dl-regime-update done');
-      updateMonitorState('regime-detector', 'success');
-    });
-    dlRegimeUpdateWorker.on('failed', (_, err) => {
-      console.error('[QUEUE] dl-regime-update failed:', err.message);
-      updateMonitorState('regime-detector', 'failed', err.message);
-    });
-
-    // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ DL Weekly Retrain (Sunday 11:00 PM IST = Sun 17:30 UTC) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
-    dlRetrainWeeklyQueue = new Queue(QUEUE_DL_RETRAIN_WEEKLY, { connection });
-    const dlWkRep = await dlRetrainWeeklyQueue.getRepeatableJobs();
-    for (const r of dlWkRep) await dlRetrainWeeklyQueue.removeRepeatableByKey(r.key);
-    await addJobWithCatchup(dlRetrainWeeklyQueue, 'dl-retrain-weekly', {}, {
-      repeat: { pattern: '0 6 * * 0' }, // Sunday 11:30 IST (06:00 UTC) — early on the closed day, after ml retrain
-      jobId: 'dl-retrain-weekly',
-      removeOnComplete: 2, removeOnFail: 3,
-    });
-    dlRetrainWeeklyWorker = new Worker(QUEUE_DL_RETRAIN_WEEKLY,
-      async (_job: Job) => {
-        const trigger = _job.data?.trigger || 'scheduled';
-        // Explicit 24h timeout, not processDLPython's 6h default: a real full-universe BiLSTM
-        // retrain (~2100 symbols, chunked training + walk-forward validation retraining
-        // several more model copies) measured at ~15min for just 25 symbols on this machine's
-        // shared 8GB GPU under typical contention (Ollama + other jobs) -- extrapolated, a full
-        // run can run well past 6h. The 6h default is still correct for every OTHER
-        // processDLPython caller (feature_engineering.py, dl_engine.py --mode infer,
-        // backfill_ohlcv.py), so it's overridden per-call here rather than raised globally.
-        return processDLPython('dl_trainer.py', ['--trigger', trigger], 24 * 60 * 60 * 1000);
-      },
-      {
-        connection,
-        concurrency: 1,
-        lockDuration: 24 * 60 * 60 * 1000,
-        lockRenewTime: 30 * 60 * 1000,
-        stalledInterval: 15 * 60 * 1000,
-        maxStalledCount: 3,
-      });
-    dlRetrainWeeklyWorker.on('completed', () => {
-      console.log('[QUEUE] dl-retrain-weekly done');
-      updateMonitorState('dl-trainer', 'success');
-    });
-    dlRetrainWeeklyWorker.on('failed', (_, err) => {
-      console.error('[QUEUE] dl-retrain-weekly failed:', err.message);
-      updateMonitorState('dl-trainer', 'failed', err.message);
-    });
-
     // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ DL Emergency Retrain (on-demand, triggered by drift detector) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
     dlRetrainEmergencyQueue = new Queue(QUEUE_DL_RETRAIN_EMERGENCY, { connection });
     dlRetrainEmergencyWorker = new Worker(QUEUE_DL_RETRAIN_EMERGENCY,
@@ -2822,163 +1927,22 @@ export async function initQueues(): Promise<boolean> {
       }
     }
 
-    // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Confluence Compute Queue ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
-    confluenceComputeQueue = new Queue(QUEUE_CONFLUENCE_COMPUTE, { connection: makeConnection() });
-    confluenceComputeWorker = new Worker(
-      QUEUE_CONFLUENCE_COMPUTE,
-      processConfluenceCompute,
-      // No lockDuration previously -- fell back to BullMQ's 30s default despite this
-      // in-process computation running across the whole stock universe every 30 minutes.
-      { connection: makeConnection(), concurrency: 1, lockDuration: 10 * 60_000 }
-    );
-    confluenceComputeWorker.on('completed', () => {
-      recordHeartbeat('confluence-compute', 'success');
-    });
-    confluenceComputeWorker.on('failed', (_job, err) => {
-      console.error(`[QUEUE] ${QUEUE_CONFLUENCE_COMPUTE} job failed:`, err.message);
-      recordHeartbeat('confluence-compute', 'failed', err.message);
-    });
-    confluenceComputeWorker.on('error', (err) => {
-      if ((err as any).code === -2 || err.message?.includes('Missing lock')) return;
-      console.error(`[QUEUE] ${QUEUE_CONFLUENCE_COMPUTE} error:`, err.message);
-    });
-    await addJobWithCatchup(confluenceComputeQueue, 
-      'confluence-compute',
-      {},
-      { repeat: { every: 30 * 60 * 1000 }, removeOnComplete: 3, removeOnFail: 3 }
-    );
+    const confluenceJobs = await registerConfluenceJobs();
+    ({ queue: confluenceComputeQueue, worker: confluenceComputeWorker } = confluenceJobs.compute);
+    ({ queue: confluenceOutcomesQueue, worker: confluenceOutcomesWorker } = confluenceJobs.outcomes);
 
-    // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Confluence Outcomes Queue ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
-    confluenceOutcomesQueue = new Queue(QUEUE_CONFLUENCE_OUTCOMES, { connection: makeConnection() });
-    confluenceOutcomesWorker = new Worker(
-      QUEUE_CONFLUENCE_OUTCOMES,
-      processConfluenceOutcomes,
-      // lockDuration must exceed the processor's now-sequential runs (5min tracker +
-      // 15min trainer = 20min worst case); the BullMQ default 30s lock marked every
-      // real run "stalled more than allowable limit"
-      { connection: makeConnection(), concurrency: 1, lockDuration: 25 * 60 * 1000 }
-    );
-    confluenceOutcomesWorker.on('completed', () => {
-      recordHeartbeat('confluence-outcomes', 'success');
-    });
-    confluenceOutcomesWorker.on('failed', (job, err) => {
-      console.error(`[QUEUE] ${QUEUE_CONFLUENCE_OUTCOMES} job failed:`, err.message);
-      recordHeartbeat('confluence-outcomes', 'failed', err.message);
-    });
-    await addJobWithCatchup(confluenceOutcomesQueue,
-      'confluence-outcomes-daily',
-      {},
-      // 11:30 PM IST (18:00 UTC). Moved off 11:00 PM (2026-07-31) so it no longer shares a
-      // slot with quant-scoring; the evening tail is now one job per 30 min.
-      { repeat: { pattern: '0 18 * * 1-5' }, removeOnComplete: 3, removeOnFail: 3 }
-    );
-    console.log('[QUEUE] confluence-compute (every 30 min) + confluence-outcomes (daily) registered');
+    const agentJobs = await registerAgentJobs(connection);
+    ({ queue: agentDataScientistQueue, worker: agentDataScientistWorker } = agentJobs.dataScientist);
+    ({ queue: agentStrategistQueue, worker: agentStrategistWorker } = agentJobs.strategist);
+    ({ queue: agentAuditorQueue, worker: agentAuditorWorker } = agentJobs.auditor);
+    ({ queue: agentOptimizerQueue, worker: agentOptimizerWorker } = agentJobs.optimizer);
 
-    // Ã¢â€â‚¬Ã¢â€â‚¬ Screener performance queue (daily 6 PM IST = 12:30 UTC, weekdays) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
-    screenerPerfQueue = new Queue(QUEUE_SCREENER_PERFORMANCE, { connection });
+    const syncJobs = await registerSyncJobs(connection);
+    ({ queue: screenerPerfQueue, worker: screenerPerfWorker } = syncJobs.screenerPerf);
+    ({ queue: companyProfilesSyncQueue, worker: companyProfilesSyncWorker } = syncJobs.companyProfilesSync);
+    ({ queue: tickertapeScorecardQueue, worker: tickertapeScorecardWorker } = syncJobs.tickertapeScorecard);
+    ({ queue: nseScreenerSyncQueue, worker: nseScreenerSyncWorker } = syncJobs.nseSync);
 
-    const screenerPerfRepeatables = await screenerPerfQueue.getRepeatableJobs();
-    for (const r of screenerPerfRepeatables) {
-      await screenerPerfQueue.removeRepeatableByKey(r.key);
-    }
-    await addJobWithCatchup(screenerPerfQueue,
-      'screener-performance-daily',
-      {},
-      {
-        // 2:00 AM IST (20:30 UTC), Tue–Sat — i.e. after each weekday's ml-daily-ops chain
-        // finishes (~12:00 AM) and well before unified-ranker (7:30 AM), in an otherwise
-        // empty window. This job runs 10 sequential Python steps (~145 min of budget), so it
-        // needs one; at its old slot it collided with the EOD cluster.
-        //
-        // Was `every: 24h`, which is NOT a wall-clock schedule — it fires 24h after the last
-        // run, so the time DRIFTS on every restart. The comment above claimed "daily 6 PM
-        // IST" while it actually last succeeded at 5:42 AM IST (2026-07-31). A cron pins it.
-        //
-        // Deliberately NOT moved ahead of ml-daily-ops: it writes screener_performance_history,
-        // which screener_features_fetcher.py reads AS-OF — a lagged snapshot is the correct
-        // point-in-time input there, and making it same-day would reintroduce look-ahead.
-        //
-        // 21:00 UTC (not 20:30) so it clears ohlcv-gap-fill-weekly, which fires Fri 20:30 UTC
-        // = Sat 2:00 AM IST — the one day-of-week where these two would otherwise collide.
-        repeat: { pattern: '0 21 * * 1-5' },
-        jobId: 'screener-performance-daily',
-        removeOnComplete: 3,
-        removeOnFail: 3,
-      },
-    );
-
-    screenerPerfWorker = new Worker(
-      QUEUE_SCREENER_PERFORMANCE,
-      processScreenerPerf,
-      // processScreenerPerf runs 10 sequential runPython steps (30+5+20+45+5+2+3+20+5+10 =
-      // 145 min of individual timeouts) plus an in-process classifyAllScreeners() -- the
-      // previous 20-min lockDuration was only enough for step 1 alone, so BullMQ correctly
-      // considered the worker dead partway through step 3-4 on every run, moving the job
-      // back to "wait" and eventually failing it with "stalled more than allowable limit"
-      // regardless of whether the Python side would have actually succeeded.
-      { connection, concurrency: 1, lockDuration: 180 * 60_000, lockRenewTime: 20 * 60_000 },
-    );
-
-    screenerPerfWorker.on('completed', () => {
-      console.log('[QUEUE] screener-performance completed');
-      updateMonitorState('screener-performance', 'success');
-    });
-    screenerPerfWorker.on('failed', (_job, err) => {
-      console.error('[QUEUE] screener-performance failed:', err.message);
-      updateMonitorState('screener-performance', 'failed', err.message);
-    });
-    screenerPerfWorker.on('error', (err) => {
-      if ((err as any).code === -2 || err.message?.includes('Missing lock')) return;
-      console.error('[QUEUE] screener-performance error:', err.message);
-    });
-
-    console.log('[QUEUE] screener-performance (daily 6PM IST weekdays) registered');
-
-    // Ã¢â€â‚¬Ã¢â€â‚¬ Agent: Data Scientist (07:00 IST = 01:30 UTC, weekdays) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
-    agentDataScientistQueue = new Queue(QUEUE_AGENT_DATA_SCIENTIST, { connection });
-    const adsRep = await agentDataScientistQueue.getRepeatableJobs();
-    for (const r of adsRep) await agentDataScientistQueue.removeRepeatableByKey(r.key);
-    await addJobWithCatchup(agentDataScientistQueue, 'agent-ds-daily', {}, {
-      repeat: { pattern: '30 1 * * 1-5' },
-      jobId: 'agent-ds-daily',
-      removeOnComplete: 3, removeOnFail: 3,
-    });
-    agentDataScientistWorker = new Worker(QUEUE_AGENT_DATA_SCIENTIST,
-      processAgentDataScientist, { connection, concurrency: 1, lockDuration: 10 * 60_000 });
-    agentDataScientistWorker.on('completed', (_, r: any) => {
-      console.log('[QUEUE] agent-ds done, grade=', r?.grade);
-      recordHeartbeat('agent-data-scientist', 'success');
-    });
-    agentDataScientistWorker.on('failed', (_, e) => {
-      console.error('[QUEUE] agent-ds failed:', e.message);
-      recordHeartbeat('agent-data-scientist', 'failed', e.message);
-    });
-
-    // Ã¢â€â‚¬Ã¢â€â‚¬ Agent: Strategist (08:30 IST = 03:00 UTC, weekdays) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
-    agentStrategistQueue = new Queue(QUEUE_AGENT_STRATEGIST, { connection });
-    const asRep = await agentStrategistQueue.getRepeatableJobs();
-    for (const r of asRep) await agentStrategistQueue.removeRepeatableByKey(r.key);
-    await addJobWithCatchup(agentStrategistQueue, 'agent-strat-daily', {}, {
-      // 08:50 IST. Moved off 08:30 IST 2026-07-31 — it started on the same minute as
-      // research-premarket. Still comfortably pre-open (09:15 IST).
-      repeat: { pattern: '20 3 * * 1-5' },
-      jobId: 'agent-strat-daily',
-      removeOnComplete: 3, removeOnFail: 3,
-    });
-    agentStrategistWorker = new Worker(QUEUE_AGENT_STRATEGIST,
-      processAgentStrategist, { connection, concurrency: 1, lockDuration: 15 * 60_000 });
-    agentStrategistWorker.on('completed', () => {
-      console.log('[QUEUE] agent-strategist done');
-      recordHeartbeat('agent-strategist', 'success');
-    });
-    agentStrategistWorker.on('failed', (_, e) => {
-      console.error('[QUEUE] agent-strategist failed:', e.message);
-      recordHeartbeat('agent-strategist', 'failed', e.message);
-    });
-
-    // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Company Profiles & AI Analysis Sync queue (Weekly) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
-
-    // ----------------------------------------------------
     // End Of Day Quant Sync queue (Daily 12:30 UTC / 18:00 IST)
     // ----------------------------------------------------
     quantEodSyncQueue = new Queue(QUEUE_QUANT_EOD_SYNC, { connection });
@@ -3063,274 +2027,9 @@ export async function initQueues(): Promise<boolean> {
       recordHeartbeat('trendlyne-daily-fetch', 'failed', e?.message);
     });
 
-    companyProfilesSyncQueue = new Queue(QUEUE_COMPANY_PROFILES_SYNC, { connection });
-
-    const cpRepeatables = await companyProfilesSyncQueue.getRepeatableJobs();
-    for (const r of cpRepeatables) {
-      await companyProfilesSyncQueue.removeRepeatableByKey(r.key);
-    }
-    // Was weekly (single run covering the full NSE-master-list universe) — but the underlying
-    // scrape takes ~3.6h while runPython caps it at 70 min, so the weekly run NEVER completed
-    // (7/7 failures, last_success_at always null). syncAndAnalyzeCompanyProfiles() now shards
-    // the universe into 1/7ths internally and picks a shard by day-of-year, so daily runs each
-    // cover a fast (~30 min) slice and full coverage completes every 7 days — same cadence as
-    // before, but each individual run actually fits its budget and can succeed.
-    //
-    // Kept running all 7 days (not Mon-Fri) deliberately -- the day-of-year sharding needs one
-    // run per CALENDAR day to complete full coverage every 7 days; restricting to weekdays would
-    // stretch that to ~9-10 calendar days. Moved from 4:00 UTC (9:30 IST, mid-market-hours -- the
-    // one daily sync in this file that wasn't off-hours) to 15:30 UTC (21:00 IST, well after the
-    // 15:30 IST close and clear of the 22:00-23:35 IST EOD job cluster) -- found in the 2026-07-30
-    // fifth full-stack-audit pass.
-    await addJobWithCatchup(companyProfilesSyncQueue,
-      'sync-company-profiles',
-      {},
-      {
-        repeat: { pattern: '30 15 * * *' }, // Daily (all 7 days), 15:30 UTC = 21:00 IST
-        jobId: 'company-profiles-sync-daily',
-        removeOnComplete: 3,
-        removeOnFail: 3,
-      },
-    );
-
-    companyProfilesSyncWorker = new Worker(
-      QUEUE_COMPANY_PROFILES_SYNC,
-      async (_job: Job) => {
-        const { syncAndAnalyzeCompanyProfiles } = await import('./companyProfileSyncService');
-        await syncAndAnalyzeCompanyProfiles();
-      },
-      // Each shard's runPython call is bounded at 70 min (comfortably covers a ~30-min
-      // 1/7-universe slice); lockDuration keeps headroom above that single call.
-      {
-        connection,
-        concurrency: 1,
-        lockDuration: 90 * 60 * 1000, // 90 min
-        lockRenewTime: 15 * 60 * 1000,
-        stalledInterval: 15 * 60 * 1000,
-        maxStalledCount: 3,
-      },
-    );
-
-    companyProfilesSyncWorker.on('completed', (_job) => {
-      console.log('[QUEUE] company-profiles-sync completed');
-      updateMonitorState('company-profiles-sync', 'success');
-    });
-    companyProfilesSyncWorker.on('failed', (_job, err) => {
-      console.error('[QUEUE] company-profiles-sync failed:', err.message);
-      updateMonitorState('company-profiles-sync', 'failed', err.message);
-    });
-
-    // ── Trendlyne midweek batch ──
-    // Trendlyne midweek batch: adv-tech + price analysis (moved off Sunday to
-    // de-conflict from the main ml-weekly-retrain batch).
-    trendlyneMidweekQueue = new Queue(QUEUE_TRENDLYNE_MIDWEEK, { connection });
-    const tmwRep = await trendlyneMidweekQueue.getRepeatableJobs();
-    for (const r of tmwRep) await trendlyneMidweekQueue.removeRepeatableByKey(r.key);
-    await addJobWithCatchup(trendlyneMidweekQueue,
-      'trendlyne-midweek-batch',
-      {},
-      {
-        // Tuesday 14:30 UTC (8:00 PM IST). Moved off 6:00 PM IST 2026-07-31: the three
-        // screener syncs relocated into the 6:00-6:40 PM block, and this heavy weekly
-        // Trendlyne batch landed exactly on et-marketstats-sync every Tuesday.
-        repeat: { pattern: '30 14 * * 2' },
-        jobId: 'trendlyne-midweek-weekly',
-        removeOnComplete: 3,
-        removeOnFail: 3,
-      },
-    );
-
-    trendlyneMidweekWorker = new Worker(
-      QUEUE_TRENDLYNE_MIDWEEK,
-      async (_job: Job) => {
-        await runPython('trendlyne_adv_tech_fetcher.py', [], 40 * 60_000)
-          .catch(e => console.warn('[QUEUE] trendlyne_adv_tech_fetcher failed:', (e as Error).message));
-        await runPython('trendlyne_price_analysis_fetcher.py', [], 40 * 60_000)
-          .catch(e => console.warn('[QUEUE] trendlyne_price_analysis_fetcher failed:', (e as Error).message));
-        return { success: true };
-      },
-      {
-        connection,
-        concurrency: 1,
-        lockDuration: 90 * 60 * 1000,
-        lockRenewTime: 10 * 60 * 1000,
-      },
-    );
-
-    trendlyneMidweekWorker.on('completed', () => {
-      console.log('[QUEUE] trendlyne-midweek completed');
-      updateMonitorState('trendlyne-midweek', 'success');
-    });
-    trendlyneMidweekWorker.on('failed', (_job, err) => {
-      console.error('[QUEUE] trendlyne-midweek failed:', err.message);
-      updateMonitorState('trendlyne-midweek', 'failed', err.message);
-    });
-
-    // ── Trendlyne ratios (monthly) ──
-    // Trendlyne ratios (monthly): financial_ratios + working_capital, now via
-    // ET_Stats (Trendlyne's own params for this are confirmed dead — see Tasks 5-6).
-    // Fires the Sunday cron every week but only actually runs on the first Sunday of
-    // the month (day-of-month <= 7) — cron's day-of-month/day-of-week fields are OR'd,
-    // not AND'd, by the underlying cron-parser, so "first Sunday" needs an in-handler
-    // guard rather than a single cron expression.
-    trendlyneRatiosMonthlyQueue = new Queue(QUEUE_TRENDLYNE_RATIOS_MONTHLY, { connection });
-    const trmRep = await trendlyneRatiosMonthlyQueue.getRepeatableJobs();
-    for (const r of trmRep) await trendlyneRatiosMonthlyQueue.removeRepeatableByKey(r.key);
-    await addJobWithCatchup(trendlyneRatiosMonthlyQueue,
-      'trendlyne-ratios-monthly-check',
-      {},
-      {
-        // Every Sunday 12:30 UTC. financial_ratios_fetcher runs on ALL of them (weekly);
-        // working_capital + mf_stock_holdings only on the first Sunday of the month.
-        repeat: { pattern: '30 12 * * 0' },
-        jobId: 'trendlyne-ratios-monthly-weekly-check',
-        removeOnComplete: 3,
-        removeOnFail: 3,
-      },
-    );
-
-    trendlyneRatiosMonthlyWorker = new Worker(
-      QUEUE_TRENDLYNE_RATIOS_MONTHLY,
-      async (_job: Job) => {
-        const isFirstSundayOfMonth = new Date().getUTCDate() <= 7;
-
-        // WEEKLY (every Sunday) — moved out of the first-Sunday gate 2026-07-31.
-        // The ratios themselves only change quarterly, but the gate meant a newly-added
-        // COLUMN was invisible for up to a month: the 2026-07-23 banking-ratio harvest
-        // (nim/cost_to_income/capital_adequacy/gross_npa_pct) still had 1,969 of 1,978 rows
-        // predating it on 07-31, because the last full-universe run was 07-11. Nothing
-        // errored — the columns were simply NULL — and densify_feature_matrix.py cannot
-        // help, since there is no prior value to carry forward.
-        //
-        // 60 min, not 30: measured 29m02s for 1,969 stocks on 2026-07-31, i.e. 97% of the
-        // old 30-min budget. That is the same under-budgeted-timeout pattern that has bitten
-        // this file repeatedly — treat anything under ~2x the measured runtime as too tight.
-        await runPython('financial_ratios_fetcher.py', [], 60 * 60_000)
-          .catch(e => console.warn('[QUEUE] financial_ratios_fetcher failed:', (e as Error).message));
-
-        if (!isFirstSundayOfMonth) {
-          console.log('[QUEUE] trendlyne-ratios: weekly ratios done; monthly steps skipped '
-            + '(not the first Sunday of the month)');
-          return { success: true, monthlySkipped: true };
-        }
-
-        // MONTHLY — these two genuinely track monthly/quarterly source publications, so
-        // running them weekly would be pure load for no new data.
-        // 60 min: 1969-stock sequential cash-conversion-cycle fetch runs ~33 min at ~1 stock/s,
-        // so the old 30-min budget SIGTERM'd near the end (leaving partial data + a 'failed' mark
-        // in the monthly report even though most rows were written).
-        await runPython('working_capital_fetcher.py', [], 60 * 60_000)
-          .catch(e => console.warn('[QUEUE] working_capital_fetcher failed:', (e as Error).message));
-        // Per-stock MF ownership flow (AMFI publishes portfolio disclosures monthly).
-        await runPython('mf_stock_holdings_fetcher.py', [], 30 * 60_000)
-          .catch(e => console.warn('[QUEUE] mf_stock_holdings_fetcher failed:', (e as Error).message));
-        // Deepens proprietary_scores_history's Altman/Ohlson/Graham/DuPont history from
-        // moneycontrol_fetcher.py's daily single-snapshot scrape to ~9 years of annual bars.
-        // Runs AFTER working_capital_fetcher.py above (not before) because it resolves each
-        // stock's real fiscal year-end from working_capital_history -- freshest FY-end data
-        // first, then the history backfill that depends on it. Monthly cadence: these are
-        // annual figures that change at most once a year, so a weekly re-run (like the ratios
-        // above) would be pure load for no new data.
-        await runPython('mc_stockvitals_history_fetcher.py', [], 60 * 60_000)
-          .catch(e => console.warn('[QUEUE] mc_stockvitals_history_fetcher failed:', (e as Error).message));
-        return { success: true };
-      },
-      {
-        connection,
-        concurrency: 1,
-        lockDuration: 60 * 60 * 1000,
-        lockRenewTime: 10 * 60 * 1000,
-      },
-    );
-
-    trendlyneRatiosMonthlyWorker.on('completed', () => {
-      console.log('[QUEUE] trendlyne-ratios-monthly completed');
-      updateMonitorState('trendlyne-ratios-monthly', 'success');
-    });
-    trendlyneRatiosMonthlyWorker.on('failed', (_job, err) => {
-      console.error('[QUEUE] trendlyne-ratios-monthly failed:', err.message);
-      updateMonitorState('trendlyne-ratios-monthly', 'failed', err.message);
-    });
-
-    // ── Tickertape scorecard: ordinal category tags (Performance/Valuation/
-    // Growth/Profitability) — supplementary signal, weekly is sufficient. ──
-    tickertapeScorecardQueue = new Queue(QUEUE_TICKERTAPE_SCORECARD, { connection });
-    const ttscRep = await tickertapeScorecardQueue.getRepeatableJobs();
-    for (const r of ttscRep) await tickertapeScorecardQueue.removeRepeatableByKey(r.key);
-    await addJobWithCatchup(tickertapeScorecardQueue,
-      'tickertape-scorecard-weekly',
-      {},
-      {
-        repeat: { pattern: '0 13 * * 6' }, // Saturday 1:00 PM UTC
-        jobId: 'tickertape-scorecard-weekly',
-        removeOnComplete: 3,
-        removeOnFail: 3,
-      },
-    );
-
-    tickertapeScorecardWorker = new Worker(
-      QUEUE_TICKERTAPE_SCORECARD,
-      async (_job: Job) => {
-        await runPython('tickertape_scorecard_fetcher.py', [], 60 * 60_000)
-          .catch(e => console.warn('[QUEUE] tickertape_scorecard_fetcher failed:', (e as Error).message));
-        return { success: true };
-      },
-      {
-        connection,
-        concurrency: 1,
-        lockDuration: 90 * 60 * 1000,
-        lockRenewTime: 10 * 60 * 1000,
-      },
-    );
-
-    tickertapeScorecardWorker.on('completed', () => {
-      console.log('[QUEUE] tickertape-scorecard completed');
-      updateMonitorState('tickertape-scorecard', 'success');
-    });
-    tickertapeScorecardWorker.on('failed', (_job, err) => {
-      console.error('[QUEUE] tickertape-scorecard failed:', err.message);
-      updateMonitorState('tickertape-scorecard', 'failed', err.message);
-    });
-
-    // ── Agent: Auditor (16:30 IST = 11:00 UTC, weekdays) ──
-    agentAuditorQueue = new Queue(QUEUE_AGENT_AUDITOR, { connection });
-    const aaRep = await agentAuditorQueue.getRepeatableJobs();
-    for (const r of aaRep) await agentAuditorQueue.removeRepeatableByKey(r.key);
-    await addJobWithCatchup(agentAuditorQueue, 'agent-audit-daily', {}, {
-      repeat: { pattern: '0 11 * * 1-5' },
-      jobId: 'agent-audit-daily',
-      removeOnComplete: 3, removeOnFail: 3,
-    });
-    agentAuditorWorker = new Worker(QUEUE_AGENT_AUDITOR,
-      processAgentAuditor, { connection, concurrency: 1, lockDuration: 15 * 60_000 });
-    agentAuditorWorker.on('completed', () => {
-      console.log('[QUEUE] agent-auditor done');
-      recordHeartbeat('agent-auditor', 'success');
-    });
-    agentAuditorWorker.on('failed', (_, e) => {
-      console.error('[QUEUE] agent-auditor failed:', e.message);
-      recordHeartbeat('agent-auditor', 'failed', e.message);
-    });
-
-    // Ã¢â€â‚¬Ã¢â€â‚¬ Agent: Optimizer (17:30 IST = 12:00 UTC, weekdays) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
-    agentOptimizerQueue = new Queue(QUEUE_AGENT_OPTIMIZER, { connection });
-    const aoRep = await agentOptimizerQueue.getRepeatableJobs();
-    for (const r of aoRep) await agentOptimizerQueue.removeRepeatableByKey(r.key);
-    await addJobWithCatchup(agentOptimizerQueue, 'agent-optim-daily', {}, {
-      repeat: { pattern: '0 12 * * 1-5' },
-      jobId: 'agent-optim-daily',
-      removeOnComplete: 3, removeOnFail: 3,
-    });
-    agentOptimizerWorker = new Worker(QUEUE_AGENT_OPTIMIZER,
-      processAgentOptimizer, { connection, concurrency: 1, lockDuration: 20 * 60_000 });
-    agentOptimizerWorker.on('completed', () => {
-      console.log('[QUEUE] agent-optimizer done');
-      recordHeartbeat('agent-optimizer', 'success');
-    });
-    agentOptimizerWorker.on('failed', (_, e) => {
-      console.error('[QUEUE] agent-optimizer failed:', e.message);
-      recordHeartbeat('agent-optimizer', 'failed', e.message);
-    });
+    const trendlyneWeeklyJobs = await registerTrendlyneWeeklyJobs(connection);
+    ({ queue: trendlyneMidweekQueue, worker: trendlyneMidweekWorker } = trendlyneWeeklyJobs.midweek);
+    ({ queue: trendlyneRatiosMonthlyQueue, worker: trendlyneRatiosMonthlyWorker } = trendlyneWeeklyJobs.ratiosMonthly);
 
     // Ã¢â€â‚¬Ã¢â€â‚¬ Unified Ranker Ã¢â‚¬â€ daily at 15:45 IST (10:15 UTC) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
     unifiedRankerQueue = new Queue(QUEUE_UNIFIED_RANKER, { connection });
@@ -3377,72 +2076,7 @@ export async function initQueues(): Promise<boolean> {
       recordHeartbeat('unified-ranker', 'failed', err.message);
     });
 
-    // ── Daily job-health digest — 9:00 PM IST (15:30 UTC), every day ──────────────
-    const QUEUE_JOB_DIGEST = 'job-digest';
-    const jobDigestQueue = new Queue(QUEUE_JOB_DIGEST, { connection });
-    const jobDigestWorker = new Worker(
-      QUEUE_JOB_DIGEST,
-      async () => {
-        const digest = await buildDailyDigest();
-        await telegramService.sendMarkdownMessage(digest);
-      },
-      // No lockDuration previously -- fell back to BullMQ's 30s default while
-      // buildDailyDigest() aggregates job_heartbeat status across every registered job.
-      { connection, concurrency: 1, lockDuration: 5 * 60_000 },
-    );
-    jobDigestWorker.on('completed', () => {
-      console.log('[QUEUE] job-digest sent');
-      recordHeartbeat('job-digest', 'success');
-    });
-    jobDigestWorker.on('failed', (_, err) => {
-      console.error('[QUEUE] job-digest failed:', err.message);
-      recordHeartbeat('job-digest', 'failed', err.message);
-    });
-
-    const digestRepeatables = await jobDigestQueue.getRepeatableJobs();
-    for (const r of digestRepeatables) await jobDigestQueue.removeRepeatableByKey(r.key);
-    await addJobWithCatchup(jobDigestQueue, 'job-digest-daily', {}, {
-      repeat: { pattern: '45 18 * * *' }, // 12:15 AM IST next day (18:45 UTC), covers late-night jobs
-      jobId: 'job-digest-daily-repeatable',
-      removeOnComplete: 3,
-      removeOnFail: 3,
-    });
-
-    // ── Daily stock-recommendation digest — 8:15 AM IST (02:45 UTC), Mon-Fri ──────
-    // Scheduled 45 min after unified-ranker ('0 2 * * 1-5' = 07:30 IST) so it reads that
-    // day's freshly-built ranking, and before the 09:15 IST open so the picks are actionable.
-    const QUEUE_RECS_DIGEST = 'recommendations-digest';
-    const recsDigestQueue = new Queue(QUEUE_RECS_DIGEST, { connection });
-    const recsDigestWorker = new Worker(
-      QUEUE_RECS_DIGEST,
-      async () => {
-        const { sendRecommendationsDigest } = await import('./telegramRecommendations');
-        const res = await sendRecommendationsDigest();
-        if (!res.sent && res.picks > 0) {
-          // Picks existed but Telegram rejected the send -- fail loudly so the heartbeat marks
-          // it failed rather than reporting success on a digest nobody received.
-          throw new Error('recommendations digest failed to send to Telegram');
-        }
-      },
-      { connection, concurrency: 1, lockDuration: 5 * 60_000 },
-    );
-    recsDigestWorker.on('completed', () => {
-      console.log('[QUEUE] recommendations-digest sent');
-      recordHeartbeat('recommendations-digest', 'success');
-    });
-    recsDigestWorker.on('failed', (_, err) => {
-      console.error('[QUEUE] recommendations-digest failed:', err.message);
-      recordHeartbeat('recommendations-digest', 'failed', err.message);
-    });
-
-    const recsRepeatables = await recsDigestQueue.getRepeatableJobs();
-    for (const r of recsRepeatables) await recsDigestQueue.removeRepeatableByKey(r.key);
-    await addJobWithCatchup(recsDigestQueue, 'recommendations-digest-daily', {}, {
-      repeat: { pattern: '45 2 * * 1-5' },
-      jobId: 'recommendations-digest-daily-repeatable',
-      removeOnComplete: 3,
-      removeOnFail: 3,
-    });
+    await registerDigestJobs(connection);
 
     // ── Daily data-integrity report — 8:40 AM IST (03:10 UTC), every day ──────────
     // Formal cron wrapper around dataQualityChecks.ts's ~25-check suite (2026-08-01 audit).

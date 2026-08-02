@@ -5,10 +5,27 @@
  * high-frequency, unambiguous conversions so the 477-site migration is mostly a
  * find/replace of the call API, not the SQL. It is NOT a full transpiler:
  *
- *   - INSERT OR REPLACE  -> left as-is on purpose (no generic conflict target exists);
- *                           Postgres will error, forcing an explicit ON CONFLICT in P3e.
+ *   - INSERT OR REPLACE  -> rejected loudly at translate time (see below); no generic
+ *                           conflict target exists, so this must become an explicit
+ *                           ON CONFLICT at the call site, not something this file guesses.
  *   - strftime(...)      -> left as-is; convert per-call where it appears.
  *   - complex json paths -> only single/dotted json_extract is handled.
+ *
+ * date('now'[, mod]) -> `current_date::text` is a DELIBERATE, NOT universally correct,
+ * choice: most `date`/`signal_date` columns in this schema are TEXT (migrated from
+ * SQLite), so the ::text cast is required there — but a handful of tables use native
+ * Postgres DATE (e.g. `stock_ohlcv.date`, `feature_store.date`). Comparing a native DATE
+ * column against this ::text output raises `operator does not exist: date >= text`; the
+ * existing convention at those call sites is to cast the *column* side to ::text too
+ * (`date::text >= date('now', ...)`) rather than changing this function's default, since
+ * the majority (TEXT) case would break instead. Check the column's real type via
+ * `information_schema.columns` or `db/schema.postgres.sql` before trusting either side —
+ * `db.ts`'s SQLite schema-of-record shows everything as TEXT and is not authoritative for
+ * this. See CLAUDE.md's "date('now')" / column-type-blind-SQL-fix incident notes for the
+ * history of bugs this exact ambiguity has caused. The Python port of this file
+ * (`sql_translate.py`) has the *opposite* default (bare `current_date`, no cast) because
+ * the majority of its own callers target native-DATE tables — the two are not equivalent
+ * translators and neither default is "the fix" for the other's callers.
  *
  * Everything it does handle is covered by sqlTranslate.test.ts.
  */
@@ -142,9 +159,36 @@ function mapSqliteFunctions(sql: string): string {
   return s;
 }
 
-/** Full translation: function/syntax mapping, then placeholder conversion. */
+/**
+ * Reject SQLite constructs this translator deliberately does not map, so a bad call site
+ * fails loudly and immediately (a clear dev-time error) instead of reaching Postgres as a
+ * confusing raw syntax error, or silently doing the wrong thing.
+ */
+function assertTranslatable(sql: string): void {
+  if (/\bINSERT\s+OR\s+REPLACE\b/i.test(sql)) {
+    throw new Error(
+      'sqlTranslate: INSERT OR REPLACE has no generic Postgres translation (no single ' +
+      'conflict target to infer). Rewrite the call site as an explicit ' +
+      'INSERT ... ON CONFLICT (<key columns>) DO UPDATE SET ... — see the signals.router.ts ' +
+      'getSignalHistory upsert for a worked example.'
+    );
+  }
+}
+
+// translateSql() is a pure function of its input, called on every query on the hot request
+// path for SQL that is static per call site (only bound parameters vary) — cache the result
+// instead of re-running the full regex pipeline every time. Unbounded in practice: distinct
+// call-site SQL strings in this codebase number in the hundreds, not per-request.
+const translateCache = new Map<string, string>();
+
+/** Full translation: function/syntax mapping, then placeholder conversion. Memoized. */
 export function translateSql(sql: string): string {
-  return convertPlaceholders(mapSqliteFunctions(sql));
+  const cached = translateCache.get(sql);
+  if (cached !== undefined) return cached;
+  assertTranslatable(sql);
+  const out = convertPlaceholders(mapSqliteFunctions(sql));
+  translateCache.set(sql, out);
+  return out;
 }
 
 /**

@@ -82,6 +82,32 @@ describe('translateSql function mapping', () => {
   });
 });
 
+describe('translateSql: INSERT OR REPLACE rejection', () => {
+  it('throws instead of silently passing an untranslatable construct to Postgres', () => {
+    expect(() => translateSql('INSERT OR REPLACE INTO t (a) VALUES (?)')).toThrow(
+      /INSERT OR REPLACE/
+    );
+  });
+  it('leaves INSERT OR IGNORE alone (that one IS translated)', () => {
+    expect(() => translateSql('INSERT OR IGNORE INTO t (a) VALUES (?)')).not.toThrow();
+  });
+});
+
+describe('translateSql: memoization', () => {
+  it('is a pure cache — repeated calls with the same input return the same output', () => {
+    const sql = "SELECT * FROM t WHERE d = date('now') AND a = ?";
+    const first = translateSql(sql);
+    const second = translateSql(sql);
+    expect(second).toBe(first);
+    expect(second).toBe("SELECT * FROM t WHERE d = current_date::text AND a = $1");
+  });
+  it('does not cross-contaminate between distinct SQL strings', () => {
+    expect(translateSql('SELECT a FROM t WHERE x = ?')).toBe('SELECT a FROM t WHERE x = $1');
+    expect(translateSql('SELECT b FROM t WHERE y = ?')).toBe('SELECT b FROM t WHERE y = $1');
+    expect(translateSql('SELECT a FROM t WHERE x = ?')).toBe('SELECT a FROM t WHERE x = $1');
+  });
+});
+
 describe('stripPgCasts', () => {
   it('strips simple ::type casts from bound parameters', () => {
     expect(stripPgCasts('VALUES (?, ?::timestamptz, ?)')).toBe('VALUES (?, ?, ?)');
