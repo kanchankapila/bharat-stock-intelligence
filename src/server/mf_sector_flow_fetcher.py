@@ -30,7 +30,8 @@ except ImportError:
     import requests as cffi_requests
     _USE_CFFI = False
 
-from db_compat import connect, translate, executemany, read_df, query_scalar
+from db_compat import connect, translate, executemany, read_df
+from as_of import logical_write_floor
 
 # ---------------------------------------------------------------------------
 # AMFI portfolio disclosure URL — returns a large pipe-/comma-delimited CSV
@@ -346,8 +347,7 @@ def _update_technical_signals(flow: pd.DataFrame) -> int:
     if not flow_map:
         return 0
 
-    floor = query_scalar("SELECT MAX(date) AS d FROM stock_ohlcv")
-    floor = str(floor)[:10] if floor else datetime.date.today().isoformat()
+    floor = logical_write_floor(fallback=datetime.date.today().isoformat())
 
     # Load only the current trading session's (symbol, date) rows from technical_signals
     # + sector from nse_stocks -- never touch rows before `floor`.

@@ -144,3 +144,112 @@ class TestDateAnchoredFeatures:
         with patch.object(regime_detector, 'read_df', self._patched_read_df(conn)):
             df = _load_hmm_features(lookback_days=90, as_of_date='2024-06-01')
         assert (df['advance_decline_ratio'] == 0.55).all()
+
+
+class TestLogLikelihoodPerSample:
+    """Two GaussianHMMs fit with different StandardScalers aren't comparable via raw
+    model.score() -- each scaler's fitted std shifts the density by a Jacobian term. This
+    correction is what makes the promotion-gate comparison below apples-to-apples."""
+
+    def test_jacobian_correction_matches_manual_calc(self):
+        model = MagicMock()
+        model.score.return_value = 100.0  # sum log-lik in transformed space, n=4 samples
+        scaler = MagicMock()
+        scaler.transform.side_effect = lambda X: X  # identity, isolates the Jacobian term
+        scaler.scale_ = np.array([2.0, 4.0])
+        X = np.zeros((4, 2))
+        result = regime_detector._log_likelihood_per_sample(model, scaler, X)
+        expected = (100.0 - 4 * (np.log(2.0) + np.log(4.0))) / 4
+        assert result == pytest.approx(expected)
+
+    def test_empty_input_returns_negative_infinity(self):
+        model, scaler = MagicMock(), MagicMock()
+        result = regime_detector._log_likelihood_per_sample(model, scaler, np.zeros((0, 2)))
+        assert result == float('-inf')
+
+
+class TestTrainHmmPromotionGate:
+    """2026-08-01 audit sweep: train_hmm() unconditionally overwrote hmm_regime.pkl with no
+    held-out comparison, no model_registry entry, and no stability check -- unlike every
+    sibling ML file in this codebase. This model's daily label drives REGIME_WEIGHTS in
+    unified_ranker.py, the largest single blend-switch in the whole ranker."""
+
+    @staticmethod
+    def _synthetic_features(n=340, seed=0):
+        rng = np.random.default_rng(seed)
+        idx = pd.date_range('2024-01-01', periods=n, freq='D')
+        cols = ['nifty_ret_21d', 'nifty_vol_21d', 'nifty_vix', 'fii_5d_net_norm',
+                'advance_decline_ratio', 'us10y_chg5d', 'dxy_ret_5d', 'sp500_ret_5d']
+        data = {c: rng.normal(loc=i, scale=1.0, size=n) for i, c in enumerate(cols)}
+        return pd.DataFrame(data, index=idx)
+
+    def test_first_ever_train_promotes_without_prior_model(self, tmp_path, monkeypatch):
+        hmm_path = tmp_path / "hmm_regime.pkl"
+        monkeypatch.setattr(regime_detector, 'HMM_PATH', hmm_path)
+        monkeypatch.setattr(regime_detector, '_load_hmm_features',
+                             lambda lookback_days: self._synthetic_features())
+        result = regime_detector.train_hmm(holdout_days=60)
+        assert result['promotion']['promoted'] is True
+        assert hmm_path.exists()
+        assert not (tmp_path / "hmm_regime.pkl.candidate").exists()
+
+    def test_insufficient_data_for_holdout_still_promotes(self, tmp_path, monkeypatch):
+        """Below holdout_days+252 rows, effective_holdout collapses to 0 -- the gate must not
+        block a legitimate train just because there isn't enough data to hold out yet."""
+        hmm_path = tmp_path / "hmm_regime.pkl"
+        monkeypatch.setattr(regime_detector, 'HMM_PATH', hmm_path)
+        monkeypatch.setattr(regime_detector, '_load_hmm_features',
+                             lambda lookback_days: self._synthetic_features(n=260))
+        regime_detector.train_hmm(holdout_days=60)  # seed a prior model
+        result = regime_detector.train_hmm(holdout_days=60)
+        assert result['promotion']['promoted'] is True
+        assert result['promotion']['reason'] == 'no_prior_model_or_no_holdout'
+
+    def test_forced_train_always_promotes(self, tmp_path, monkeypatch):
+        hmm_path = tmp_path / "hmm_regime.pkl"
+        monkeypatch.setattr(regime_detector, 'HMM_PATH', hmm_path)
+        monkeypatch.setattr(regime_detector, '_load_hmm_features',
+                             lambda lookback_days: self._synthetic_features())
+        regime_detector.train_hmm(holdout_days=60)
+        result = regime_detector.train_hmm(holdout_days=60, force=True)
+        assert result['promotion']['promoted'] is True
+        assert result['promotion']['reason'] == 'forced'
+
+    def test_regressing_retrain_is_rejected_to_candidate_file(self, tmp_path, monkeypatch):
+        hmm_path = tmp_path / "hmm_regime.pkl"
+        monkeypatch.setattr(regime_detector, 'HMM_PATH', hmm_path)
+        monkeypatch.setattr(regime_detector, '_load_hmm_features',
+                             lambda lookback_days: self._synthetic_features())
+        regime_detector.train_hmm(holdout_days=60)  # seed a live model
+        prior_bytes = hmm_path.read_bytes()
+
+        # train_hmm calls _log_likelihood_per_sample(new, ...) before (prior, ...) -- the
+        # first return is new_ll, the second is old_ll. new < old => a genuine regression.
+        monkeypatch.setattr(regime_detector, '_log_likelihood_per_sample',
+                             MagicMock(side_effect=[5.0, 10.0]))
+
+        result = regime_detector.train_hmm(holdout_days=60)
+
+        assert result['promotion']['promoted'] is False
+        assert hmm_path.read_bytes() == prior_bytes, "live model must be untouched on regression"
+        assert (tmp_path / "hmm_regime.pkl.candidate").exists(), \
+            "rejected candidate must still be saved for inspection"
+
+    def test_improving_retrain_is_promoted(self, tmp_path, monkeypatch):
+        hmm_path = tmp_path / "hmm_regime.pkl"
+        monkeypatch.setattr(regime_detector, 'HMM_PATH', hmm_path)
+        monkeypatch.setattr(regime_detector, '_load_hmm_features',
+                             lambda lookback_days: self._synthetic_features(seed=0))
+        regime_detector.train_hmm(holdout_days=60)
+        prior_bytes = hmm_path.read_bytes()
+
+        # Different seed -> a genuinely different fitted model, so a promoted overwrite is
+        # actually detectable on disk (same seed would refit to byte-identical output).
+        monkeypatch.setattr(regime_detector, '_load_hmm_features',
+                             lambda lookback_days: self._synthetic_features(seed=1))
+        monkeypatch.setattr(regime_detector, '_log_likelihood_per_sample',
+                             MagicMock(side_effect=[10.0, 5.0]))  # new > old
+
+        result = regime_detector.train_hmm(holdout_days=60)
+        assert result['promotion']['promoted'] is True
+        assert hmm_path.read_bytes() != prior_bytes, "live model must be updated on improvement"

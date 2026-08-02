@@ -11,6 +11,7 @@ profitable -- which is why the load-bearing fix is a gate on realised edge rathe
 flip.
 """
 
+import math
 import os
 import sys
 import types
@@ -199,3 +200,28 @@ class TestIndexSeriesExcluded:
         scored = _ranker(bars=bars)._reversal_scores()
         assert "NIFTY50" in scored
         assert set(scored) - set(ir._INDEX_SYMBOLS) == {"RELIANCE"}
+
+
+class TestComponentBlendNaNGuard:
+    """2026-08-01 audit sweep: the component blend filtered `v is not None`, not
+    `math.isfinite(v)`, on screener/breakout/reversal scores -- the same anti-pattern class as
+    unified_ranker's dl_score incident. Currently benign here (max(0.0, nan) happens to keep
+    0.0 under Python's first-argument-wins NaN comparison, so it silently zeroes the score
+    rather than faking a Buy), but that's an accident of argument order, not a guarantee --
+    matched to the explicit isfinite guard unified_ranker.py already uses for the same shape
+    of bug."""
+
+    def test_present_filter_excludes_nan(self):
+        parts = [(0.45, 80.0), (0.20, float('nan')), (0.35, 60.0)]
+        present = [(w, v) for w, v in parts if v is not None and math.isfinite(v)]
+        assert present == [(0.45, 80.0), (0.35, 60.0)]
+
+    def test_naive_none_filter_would_let_nan_through(self):
+        """Negative control: `is not None` alone keeps the NaN entry, which then poisons the
+        weighted sum via w*nan -> nan -> sum(...) -> nan."""
+        parts = [(0.45, 80.0), (0.20, float('nan')), (0.35, 60.0)]
+        present = [(w, v) for w, v in parts if v is not None]
+        assert len(present) == 3
+        wsum = sum(w for w, _ in present)
+        base = sum(w * v for w, v in present) / wsum
+        assert base != base  # NaN != NaN

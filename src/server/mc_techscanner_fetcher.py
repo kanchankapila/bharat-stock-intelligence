@@ -26,6 +26,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
 
 from db_compat import connect
+from as_of import logical_write_floor
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Gecko/20100101 Firefox/124.0"}
 SCAN_URL = "https://api.moneycontrol.com/mcapi/v1/techscanner/scanner-detail"
@@ -92,8 +93,7 @@ def run() -> int:
     # Align to the last completed trading session (same date the grid-ensurer builds), NOT
     # max(technical_signals.date) — a stray forward-dated row (e.g. an early next-day AI
     # signal) would otherwise misroute the writes onto a near-empty date.
-    latest_row = conn.execute("SELECT MAX(date) AS d FROM stock_ohlcv").fetchone()
-    latest = str(latest_row["d"])[:10] if latest_row and latest_row["d"] else None
+    latest = logical_write_floor(conn)
     if not latest:
         print("[MCScan] no OHLCV rows.")
         return 0

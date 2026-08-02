@@ -180,14 +180,27 @@ export async function registerRepeatableJob(
     backoff: cfg.backoff,
   });
 
-  const worker = new Worker(cfg.queueName, cfg.processor, {
+  // BullMQ's Worker constructor validates several of its options (observed live:
+  // maxStalledCount specifically throws "must be greater or equal than 0") rather than
+  // treating an explicit `undefined` the same as an omitted key and falling back to its own
+  // internal default. Most callers of registerRepeatableJob don't set lockRenewTime/
+  // stalledInterval/maxStalledCount at all, so passing them through unconditionally (as
+  // `undefined`) broke the Worker constructor for every one of those jobs -- and because
+  // this all happens inside initQueues()'s single try block, one bad Worker construction
+  // took down BullMQ initialization for the ENTIRE server (confirmed live: a restart on
+  // 2026-08-03 fell back to setInterval-only mode for every scheduled job, not just the
+  // one whose config happened to omit these fields). Only include a key when the caller
+  // actually set it, so BullMQ's own defaults apply otherwise.
+  const workerOpts: any = {
     connection: cfg.connection,
     concurrency: cfg.concurrency,
     lockDuration: cfg.lockDuration,
-    lockRenewTime: cfg.lockRenewTime,
-    stalledInterval: cfg.stalledInterval,
-    maxStalledCount: cfg.maxStalledCount,
-  });
+  };
+  if (cfg.lockRenewTime !== undefined) workerOpts.lockRenewTime = cfg.lockRenewTime;
+  if (cfg.stalledInterval !== undefined) workerOpts.stalledInterval = cfg.stalledInterval;
+  if (cfg.maxStalledCount !== undefined) workerOpts.maxStalledCount = cfg.maxStalledCount;
+
+  const worker = new Worker(cfg.queueName, cfg.processor, workerOpts);
 
   const monitor = cfg.monitorFn ?? recordHeartbeat;
 

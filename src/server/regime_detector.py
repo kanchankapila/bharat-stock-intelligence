@@ -119,15 +119,50 @@ def _assign_state_labels(model) -> dict[int, str]:
     return {int(state_idx): label_seq[rank] for rank, state_idx in enumerate(order)}
 
 
-def train_hmm(lookback_days: int = 1260) -> dict:
-    """Train 5-state Gaussian HMM on market features."""
+def _log_likelihood_per_sample(model, scaler, X_raw: np.ndarray) -> float:
+    """Average per-sample log-likelihood of raw (unscaled) rows under (model, scaler).
+
+    Comparing two GaussianHMMs fit with DIFFERENT StandardScalers (e.g. the currently-active
+    model vs. a freshly retrained one) by their raw `model.score()` isn't apples-to-apples --
+    each scaler's own fitted std shifts the density by a Jacobian term
+    (x' = (x-mean)/scale => dx'/dx = 1/scale => log|det J| = -sum(log(scale_i)) per sample), so
+    a model whose training window happened to have larger feature variance would score itself
+    as "better" purely from that constant, unrelated to fit quality. This undoes the Jacobian
+    so both models are compared on the same raw density.
+    """
+    if len(X_raw) == 0:
+        return float("-inf")
+    ll_scaled = model.score(scaler.transform(X_raw))  # sum log-lik in transformed space
+    jacobian = len(X_raw) * float(np.sum(np.log(scaler.scale_)))
+    return (ll_scaled - jacobian) / len(X_raw)
+
+
+def train_hmm(lookback_days: int = 1260, holdout_days: int = 60, force: bool = False) -> dict:
+    """Train 5-state Gaussian HMM on market features.
+
+    Champion/challenger gate (2026-08-01 audit): this model's daily label drives
+    REGIME_WEIGHTS in unified_ranker.py -- the largest single blend-switch in the whole
+    ranker -- but train_hmm() unconditionally overwrote hmm_regime.pkl with no held-out
+    comparison, no model_registry entry, and no stability check, unlike every sibling ML file
+    in this codebase (ml_ensemble.py, cs_ranker.py, movement_predictor.py, ...), which all
+    already gate on a held-out metric. Scores the trailing `holdout_days` under BOTH the
+    currently-active model and the freshly-retrained one (see _log_likelihood_per_sample for
+    why the comparison needs a Jacobian correction) and only overwrites the live file if the
+    new model doesn't regress; a regression is written to hmm_regime.pkl.candidate instead so
+    it's inspectable without touching the live model. --force skips the gate (e.g. first-ever
+    train, or a deliberate relabeling after DEFAULT_STATE_LABELS changed).
+    """
     df = _load_hmm_features(lookback_days)
 
     if len(df) < 252:
         return {"error": f"Only {len(df)} rows — need 252 minimum"}
 
+    effective_holdout = holdout_days if len(df) > holdout_days + 252 else 0
+    train_df = df.iloc[:-effective_holdout] if effective_holdout else df
+    holdout_df = df.iloc[-effective_holdout:] if effective_holdout else None
+
     scaler = StandardScaler()
-    X = scaler.fit_transform(df.fillna(0))
+    X = scaler.fit_transform(train_df.fillna(0))
 
     model = hmm.GaussianHMM(
         n_components=N_STATES, covariance_type="full",
@@ -137,12 +172,31 @@ def train_hmm(lookback_days: int = 1260) -> dict:
 
     state_labels = _assign_state_labels(model)
 
-    MODEL_DIR.mkdir(parents=True, exist_ok=True)
-    with open(HMM_PATH, "wb") as f:
-        pickle.dump({"model": model, "scaler": scaler, "state_labels": state_labels}, f)
+    decision = {"promoted": True, "reason": "forced" if force else "no_prior_model_or_no_holdout"}
+    if holdout_df is not None and not holdout_df.empty and HMM_PATH.exists() and not force:
+        holdout_raw = holdout_df.fillna(0).values
+        new_ll = _log_likelihood_per_sample(model, scaler, holdout_raw)
+        try:
+            with open(HMM_PATH, "rb") as f:
+                prior = pickle.load(f)
+            old_ll = _log_likelihood_per_sample(prior["model"], prior["scaler"], holdout_raw)
+            decision = {
+                "promoted": new_ll >= old_ll,
+                "reason": f"new_ll={new_ll:.4f} vs old_ll={old_ll:.4f}",
+                "new_ll": new_ll, "old_ll": old_ll,
+            }
+        except Exception as e:
+            print(f"[HMM] Could not load prior model for comparison, promoting: {e}")
 
-    print(f"[HMM] Trained on {len(df)} days. State labels: {state_labels}")
-    return {"state_labels": state_labels, "n_samples": len(df)}
+    MODEL_DIR.mkdir(parents=True, exist_ok=True)
+    payload = {"model": model, "scaler": scaler, "state_labels": state_labels}
+    target = HMM_PATH if decision["promoted"] else HMM_PATH.parent / (HMM_PATH.name + ".candidate")
+    with open(target, "wb") as f:
+        pickle.dump(payload, f)
+
+    print(f"[HMM] Trained on {len(train_df)} days (holdout={effective_holdout}). "
+          f"State labels: {state_labels}. Promotion: {decision}")
+    return {"state_labels": state_labels, "n_samples": len(train_df), "promotion": decision}
 
 
 def _label_day(model, scaler, state_labels: dict, date: str, publish_live: bool = True) -> str:
@@ -251,10 +305,11 @@ if __name__ == "__main__":
     parser.add_argument("--date", help="Date to classify (default: today)")
     parser.add_argument("--start", help="Backfill start date (YYYY-MM-DD)")
     parser.add_argument("--end", help="Backfill end date (YYYY-MM-DD)")
+    parser.add_argument("--force", action="store_true", help="Skip the promotion gate")
     args = parser.parse_args()
 
     if args.mode == "train":
-        result = train_hmm()
+        result = train_hmm(force=args.force)
         print(f"[HMM] Train result: {result}")
     elif args.mode == "backfill":
         rows = backfill_regimes(args.start, args.end)

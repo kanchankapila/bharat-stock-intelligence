@@ -42,6 +42,7 @@ from datetime import date, datetime, timedelta
 import requests
 
 from db_compat import connect
+from as_of import logical_write_floor
 
 OVERVIEW_URL = "https://trendlyne.com/equity/overview-second-part/{tlid}/"
 PROFILE_URL  = "https://trendlyne.com/equity/chart/fundamental-profile/{tlid}/"
@@ -639,8 +640,7 @@ def main() -> None:
     # row yet, so "date >= today" would match zero rows while nulling every existing row via the
     # ELSE branch. Same bug/fix as trendlyne_fundamentals_fetcher.py and others. `today` itself is
     # left untouched for extract_analyst_data()'s own use, which is a real-calendar-date concept.
-    latest_row = con.execute("SELECT MAX(date) AS d FROM stock_ohlcv").fetchone()
-    ts_anchor = str(latest_row["d"])[:10] if latest_row and latest_row["d"] else today
+    ts_anchor = logical_write_floor(con, fallback=today)
     ok = 0
     done = 0
 

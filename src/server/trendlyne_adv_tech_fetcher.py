@@ -42,6 +42,7 @@ from datetime import date
 import requests
 
 from db_compat import connect
+from as_of import logical_write_floor
 
 BASE_URL = (
     "https://trendlyne.com/equity/api/stock/adv-technical-analysis/{tlid}/24/"
@@ -512,8 +513,7 @@ def main() -> None:
     # trendlyne-midweek batch (Tuesday) and can race the day's grid-ensurer (or run ad-hoc on a
     # non-trading day), leaving "date >= today" matching zero rows while nulling every existing
     # row via the ELSE branch. Same bug/fix as trendlyne_price_analysis_fetcher.py and others.
-    latest_row = con.execute("SELECT MAX(date) AS d FROM stock_ohlcv").fetchone()
-    today = str(latest_row["d"])[:10] if latest_row and latest_row["d"] else date.today().isoformat()
+    today = logical_write_floor(con, fallback=date.today().isoformat())
     ok = 0
     skipped = 0
     done = 0

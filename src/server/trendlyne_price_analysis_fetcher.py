@@ -34,6 +34,7 @@ from datetime import date
 import requests
 
 from db_compat import connect
+from as_of import logical_write_floor
 
 ANALYSIS_URL = "https://trendlyne.com/share-price/price-performance-analysis/{tlid}/"
 
@@ -324,8 +325,7 @@ def main() -> None:
     # this script is re-run ad-hoc) leaves "date >= today_str" matching zero rows while the ELSE
     # branch nulls every existing row -- same bug found in trendlyne_fundamentals_fetcher.py /
     # mf_holdings_fetcher.py / financial_ratios_fetcher.py.
-    latest_row = con.execute("SELECT MAX(date) AS d FROM stock_ohlcv").fetchone()
-    anchor_str = str(latest_row["d"])[:10] if latest_row and latest_row["d"] else today.isoformat()
+    anchor_str = logical_write_floor(con, fallback=today.isoformat())
     today_str = today.isoformat()
     ok = 0
     done = 0

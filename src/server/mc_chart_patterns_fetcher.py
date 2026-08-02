@@ -32,7 +32,8 @@ from datetime import date
 
 from curl_cffi import requests
 
-from db_compat import connect, query_scalar
+from db_compat import connect
+from as_of import logical_write_floor
 
 PATTERNS_URL = (
     "https://api.moneycontrol.com/mcapi/technicalpicks/chart-patterns"
@@ -282,8 +283,7 @@ def main() -> None:
     print(f"[MCPatterns] Fetching chart patterns for {len(stocks)} stocks in batches of {BATCH_SIZE} ({BATCH_GAP_SEC}s gap)…")
     session = requests.Session()
     today = date.today().isoformat()
-    ohlcv_max = query_scalar("SELECT MAX(date) AS d FROM stock_ohlcv")
-    ts_floor = str(ohlcv_max)[:10] if ohlcv_max else today
+    ts_floor = logical_write_floor(fallback=today)
     ok = 0
     done = 0
 

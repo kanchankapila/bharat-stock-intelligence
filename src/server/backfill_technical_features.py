@@ -26,6 +26,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from db_compat import connect, safe_alter
+from as_of import logical_write_floor
 
 # ── Technical indicator helpers ───────────────────────────────────────────────
 
@@ -278,8 +279,7 @@ def run_full_universe_today(min_price: float = 15.0) -> int:
     cross-section. This fills the gap (ON CONFLICT DO NOTHING, so the scan's richer rows
     are left intact); the RS/HV/aVWAP engines then enrich the full grid."""
     con = connect()
-    latest_row = con.execute("SELECT MAX(date) AS d FROM stock_ohlcv").fetchone()
-    latest = str(latest_row['d'])[:10] if latest_row and latest_row['d'] else None
+    latest = logical_write_floor(con)
     if not latest:
         print("[Grid] no OHLCV.")
         return 0

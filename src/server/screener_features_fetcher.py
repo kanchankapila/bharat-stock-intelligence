@@ -23,6 +23,7 @@ import time
 import datetime
 from collections import defaultdict
 from db_compat import connect
+from as_of import logical_trading_date
 
 # ── NLP keyword mappings for screener names ──────────────────────────────────
 
@@ -278,7 +279,10 @@ def compute_features(symbol: str, screener_ids: list, meta: dict) -> dict:
 def stamp_features(con, features_by_symbol: dict, streaks: dict):
     # date = ? guard (2026-07-19) instead of MAX(date) -- see bse_event_classifier.py's
     # run_daily docstring for why matching the latest row isn't the same as matching today.
-    today = datetime.date.today().isoformat()
+    # logical_trading_date(), not date.today() (2026-08-01) -- this is the largest single
+    # engine weight in unified_ranker; ml-daily-ops's step chain regularly finishes after
+    # midnight IST, so a raw wall-clock date silently targeted a day with no grid row yet.
+    today = logical_trading_date()
     updated = 0
     for symbol, feats in features_by_symbol.items():
         streak = streaks.get(symbol, 0)
@@ -317,7 +321,9 @@ def run():
     con = connect()
     try:
         ensure_schema(con)
-        as_of = datetime.date.today().isoformat()
+        # logical_trading_date(), not date.today() -- keeps the membership snapshot/appearances
+        # window consistent with stamp_features()'s own write target above.
+        as_of = logical_trading_date()
 
         print(f"[ScreenerFeatures] Loading screener metadata...")
         meta = load_screener_meta(con, as_of)

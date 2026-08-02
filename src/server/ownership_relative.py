@@ -25,6 +25,7 @@ import datetime
 import pandas as pd
 
 from db_compat import read_df, executemany, connect, translate
+from as_of import logical_trading_date
 
 MIN_UNIVERSE = 20     # need a reasonable cross-section on a day before a rank is meaningful
 MIN_SECTOR_SIZE = 5   # minimum stocks in a sector before its average flow is trustworthy
@@ -94,7 +95,11 @@ def run(only_date: str | None = None) -> int:
     rows["date"] = pd.to_datetime(rows["date"]).dt.strftime("%Y-%m-%d")
     feats = build_ownership_features(rows)
     if only_date:
-        target = datetime.date.today().isoformat() if only_date == "today" else only_date
+        # logical_trading_date(), not date.today() (2026-08-01) -- not currently reachable in
+        # production (queues.ts calls this with no --date arg), but `--date today` is this
+        # script's own documented usage pattern, and ml-daily-ops's step chain regularly
+        # finishes after midnight IST -- see as_of.logical_trading_date's docstring.
+        target = logical_trading_date() if only_date == "today" else only_date
         feats = feats[feats["date"] == target]
     if feats.empty:
         print("[OWN] No ownership-relative features to write.")

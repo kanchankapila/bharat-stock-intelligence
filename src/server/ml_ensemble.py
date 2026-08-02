@@ -5,8 +5,8 @@ Trains an ensemble of classifiers on historical signal_outcomes and uses the
 combined probability estimate as win_probability for new signals.
 
 Models:
-  - LGBMClassifier              (GPU-accelerated, replaces GradientBoostingClassifier)
-  - XGBClassifier               (GPU-accelerated, 5th base model)
+  - LGBMClassifier              (CPU by default; optional CUDA build support)
+  - XGBClassifier               (GPU-accelerated when CUDA is available)
   - RandomForestClassifier
   - ExtraTreesClassifier
   - LogisticRegression          (linear baseline)
@@ -2085,23 +2085,66 @@ def load_pending_signals() -> pd.DataFrame:
 
 # ── Model Building ────────────────────────────────────────────────────────────
 
-def _gpu_device() -> str:
-    """Return 'cuda' if GPU is available AND LightGBM was built with CUDA, else 'cpu'."""
+_LIGHTGBM_DEVICE_CACHE: dict[str, str] = {}
+
+
+def _truthy_env(name: str) -> bool:
+    return os.getenv(name, '').strip().lower() in {'1', 'true', 'yes', 'y', 'on'}
+
+
+def _torch_cuda_available() -> bool:
     try:
         import torch
-        if not torch.cuda.is_available():
-            return 'cpu'
+        return bool(torch.cuda.is_available())
     except ImportError:
-        return 'cpu'
-    # Verify LightGBM CUDA support with a minimal probe
+        return False
+
+
+def _probe_lightgbm_device(device: str) -> bool:
+    """Fit a tiny LightGBM model while suppressing native stderr from failed CUDA builds."""
+    if device in _LIGHTGBM_DEVICE_CACHE:
+        return _LIGHTGBM_DEVICE_CACHE[device] == device
+
     try:
         from lightgbm import LGBMClassifier
         import numpy as np
-        _probe = LGBMClassifier(n_estimators=1, device='cuda', verbose=-1)
-        _probe.fit(np.array([[0], [1]]), np.array([0, 1]))
-        return 'cuda'
+        with open(os.devnull, 'w') as devnull:
+            old_stderr = os.dup(2)
+            try:
+                os.dup2(devnull.fileno(), 2)
+                probe = LGBMClassifier(n_estimators=1, device=device, verbose=-1)
+                probe.fit(np.array([[0], [1]]), np.array([0, 1]))
+            finally:
+                os.dup2(old_stderr, 2)
+                os.close(old_stderr)
+        _LIGHTGBM_DEVICE_CACHE[device] = device
+        return True
     except Exception:
+        _LIGHTGBM_DEVICE_CACHE[device] = 'cpu'
+        return False
+
+
+def _lightgbm_device(requested: str | None = None) -> str:
+    """Return a LightGBM device that is safe for the installed wheel."""
+    requested = (requested or os.getenv('ML_ENSEMBLE_LIGHTGBM_DEVICE') or 'cpu').strip().lower()
+    if requested in {'', 'auto'}:
+        requested = 'cuda' if _truthy_env('ML_ENSEMBLE_ENABLE_LGBM_CUDA') else 'cpu'
+    if requested == 'cpu':
         return 'cpu'
+    if requested == 'cuda' and not _torch_cuda_available():
+        print("[Ensemble] LightGBM CUDA requested but torch sees no CUDA GPU; using CPU.")
+        return 'cpu'
+    if requested in {'cuda', 'gpu'} and _probe_lightgbm_device(requested):
+        return requested
+    print(f"[Ensemble] LightGBM {requested!r} device unavailable in this build; using CPU.")
+    return 'cpu'
+
+
+def _xgboost_device() -> str:
+    """Return the preferred XGBoost device."""
+    if _truthy_env('ML_ENSEMBLE_FORCE_CPU'):
+        return 'cpu'
+    return 'cuda' if _torch_cuda_available() else 'cpu'
 
 
 def _base_models(scale_pos_weight: float = 1.0, tuned_params: dict | None = None):
@@ -2112,14 +2155,16 @@ def _base_models(scale_pos_weight: float = 1.0, tuned_params: dict | None = None
     from xgboost import XGBClassifier
 
     tp = tuned_params or {}
-    _dev = _gpu_device()
+    lgbm_device = _lightgbm_device()
+    xgb_device = _xgboost_device()
 
     lgbm_params = {
         'n_estimators': 300, 'max_depth': 4, 'learning_rate': 0.04,
         'subsample': 0.8, 'min_child_samples': 5, 'random_state': 42,
-        'device': _dev, 'verbose': -1, 'class_weight': 'balanced',
+        'device': lgbm_device, 'verbose': -1, 'class_weight': 'balanced',
     }
     lgbm_params.update(tp.get('lgbm', {}))
+    lgbm_params['device'] = _lightgbm_device(str(lgbm_params.get('device', 'cpu')))
     lgbm = CalibratedClassifierCV(
         LGBMClassifier(**lgbm_params),
         method='isotonic', cv=3,
@@ -2128,9 +2173,13 @@ def _base_models(scale_pos_weight: float = 1.0, tuned_params: dict | None = None
     xgb_params = {
         'n_estimators': 300, 'max_depth': 4, 'learning_rate': 0.04,
         'subsample': 0.8, 'random_state': 42, 'scale_pos_weight': scale_pos_weight,
-        'device': _dev, 'eval_metric': 'logloss', 'verbosity': 0,
+        'device': xgb_device, 'eval_metric': 'logloss', 'verbosity': 0,
     }
     xgb_params.update(tp.get('xgb', {}))
+    if _truthy_env('ML_ENSEMBLE_FORCE_CPU') or (
+        str(xgb_params.get('device', 'cpu')).startswith('cuda') and not _torch_cuda_available()
+    ):
+        xgb_params['device'] = 'cpu'
     xgb_model = CalibratedClassifierCV(
         XGBClassifier(**xgb_params),
         method='isotonic', cv=3,
@@ -3241,8 +3290,10 @@ def incremental_update(n_days: int = 3, n_rounds: int = 20, dry_run: bool = Fals
     X_aligned = X[feature_names].astype(np.float32)
 
     ds = lgb.Dataset(X_aligned, label=y, free_raw_data=False)
+    lgbm_train_params = dict(lgbm_model.get_params())
+    lgbm_train_params['device'] = _lightgbm_device(str(lgbm_train_params.get('device', 'cpu')))
     lgbm_model.booster_ = lgb.train(
-        lgbm_model.get_params(),
+        lgbm_train_params,
         ds,
         num_boost_round=n_rounds,
         init_model=lgbm_model.booster_,

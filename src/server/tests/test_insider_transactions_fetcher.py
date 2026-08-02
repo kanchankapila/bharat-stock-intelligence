@@ -130,3 +130,66 @@ class TestSessionRebuildGuards:
         sentinel = object()
         monkeypatch.setattr(itf, "_nse_session", lambda: sentinel)
         assert itf._rebuild_session(1) is sentinel
+
+
+# ── Regression: compute_and_write_features() write-target date (2026-08-01) ──────────────
+#
+# compute_and_write_features()'s `UPDATE ... WHERE symbol = ? AND date = ?` already had a
+# date = ? guard (2026-07-19) to avoid overwriting a stale historical row, but anchored it to
+# a raw date.today() -- which silently writes into a calendar day with no technical_signals
+# grid row whenever ml-daily-ops's step chain crosses midnight IST. Must use
+# as_of.logical_trading_date() instead (same fix as insider_features.py/bse_event_classifier.py).
+
+class _FakeCursor:
+    def __init__(self, select_result=(10.0, 2.0)):
+        self._select_result = select_result
+        self.executed = []
+
+    def execute(self, sql, params=None):
+        self.executed.append((sql, params))
+
+    def fetchone(self):
+        return self._select_result
+
+
+class _FakeConn:
+    def __init__(self):
+        self.cur = _FakeCursor()
+        self.committed = False
+
+    def cursor(self):
+        return self.cur
+
+    def commit(self):
+        self.committed = True
+
+
+class TestComputeAndWriteFeaturesUsesLogicalTradingDate:
+    def test_write_targets_logical_trading_date_not_raw_today(self, monkeypatch):
+        monkeypatch.setattr(itf, "logical_trading_date", lambda: "2026-07-31")
+        monkeypatch.setattr(itf, "use_postgres", lambda: False)
+        conn = _FakeConn()
+
+        itf.compute_and_write_features(conn, "INFY", days=90)
+
+        updates = [c for c in conn.cur.executed if "UPDATE technical_signals" in c[0]]
+        assert len(updates) == 1
+        _, params = updates[0]
+        assert params[-2] == "INFY"
+        assert params[-1] == "2026-07-31", (
+            "compute_and_write_features() must write against logical_trading_date()'s "
+            "value, not date.today()"
+        )
+        assert conn.committed
+
+    def test_wrong_calendar_date_would_match_nothing_silently(self, monkeypatch):
+        """Negative control: documents the original failure mode without the fix."""
+        monkeypatch.setattr(itf, "logical_trading_date", lambda: "2026-08-01")
+        monkeypatch.setattr(itf, "use_postgres", lambda: False)
+        conn = _FakeConn()
+
+        itf.compute_and_write_features(conn, "INFY", days=90)
+
+        updates = [c for c in conn.cur.executed if "UPDATE technical_signals" in c[0]]
+        _, params = updates[0]
+        assert params[-1] == "2026-08-01"  # would NOT match a grid row dated 2026-07-31

@@ -24,6 +24,7 @@ from curl_cffi import requests
 # Set sys.path so we can import db_compat
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from db_compat import get_engine, use_postgres
+from data_integrity_repair import parse_loose_date
 
 HEADERS = {
     "Accept": "application/json, text/plain, */*",
@@ -164,8 +165,13 @@ def ensure_tables_exist(engine):
             "typeOfTransaction" TEXT NOT NULL,
             quantity BIGINT NOT NULL,
             "valueInr" {float_type} NOT NULL,
-            date TEXT NOT NULL
+            date TEXT NOT NULL,
+            date_iso TEXT
         )""",
+        # Self-healing for any DB created before the 2026-07-30 date_iso fix (production
+        # already has it via data_integrity_repair.py --insider-dates). Postgres-only syntax;
+        # the per-statement try/except below tolerates it failing on the SQLite dev fallback.
+        "ALTER TABLE insider_trades ADD COLUMN IF NOT EXISTS date_iso TEXT",
         f"""CREATE TABLE IF NOT EXISTS bulk_deals (
             id {id_type},
             date TEXT NOT NULL,
@@ -507,6 +513,15 @@ class MoneyControlFetcher:
 
             if date_str and name_str:
                 val_inr = (qty * price) if (qty and price) else 0.0
+                # date_iso via the same parser data_integrity_repair.py's one-time backfill
+                # used -- this is the dominant writer of insider_trades (moneycontrol_fetcher
+                # is the primary source, not insider_transactions_fetcher.py) and never
+                # populated date_iso itself, so every row it wrote after that backfill was
+                # invisible to insider_features.py's `WHERE date_iso >= ?` filter (NULL is
+                # excluded by both `>=` and `<=`). `date_str` is already ISO when the strptime
+                # above succeeds, but parse_loose_date is re-run on it (not just re-used)
+                # so the fallback-to-raw-MC-format branch above still gets a real ISO date.
+                parsed = parse_loose_date(date_str)
                 rows.append({
                     "symbol": symbol,
                     "acquirerName": name_str,
@@ -514,7 +529,8 @@ class MoneyControlFetcher:
                     "typeOfTransaction": action_str or "Trade",
                     "quantity": qty or 0,
                     "valueInr": val_inr,
-                    "date": date_str
+                    "date": date_str,
+                    "dateIso": parsed.isoformat() if parsed else None,
                 })
 
         if rows:
@@ -522,8 +538,8 @@ class MoneyControlFetcher:
                 for r in rows:
                     # Write to database (Postgres has ID sequence, SQLite has autoinc)
                     conn.execute(text("""
-                        INSERT INTO insider_trades (symbol, "acquirerName", category, "typeOfTransaction", quantity, "valueInr", date)
-                        VALUES (:symbol, :acquirerName, :category, :typeOfTransaction, :quantity, :valueInr, :date)
+                        INSERT INTO insider_trades (symbol, "acquirerName", category, "typeOfTransaction", quantity, "valueInr", date, date_iso)
+                        VALUES (:symbol, :acquirerName, :category, :typeOfTransaction, :quantity, :valueInr, :date, :dateIso)
                     """), r)
             print(f"[MC Fetcher] Ingested {len(rows)} insider trades for {symbol}")
 

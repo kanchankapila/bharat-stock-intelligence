@@ -363,8 +363,14 @@ BREAKOUT_SIZE_P80 = 0.12   # top quintile → modest tilt
 
 
 def bet_size_from_probability(p, neutral: float = 0.5) -> float:
-    """López de Prado bet size in [0,1] from a win probability (long-only: 0 at/below neutral)."""
-    if p is None or p <= neutral:
+    """López de Prado bet size in [0,1] from a win probability (long-only: 0 at/below neutral).
+
+    isfinite guard: a NaN p fails `p <= neutral` (every NaN comparison is False), so without
+    this it falls through to `min(1.0, nan)`, which -- because Python's min/max keep the FIRST
+    argument when compared against NaN -- returns 1.0, the MAXIMUM bet size for an undefined
+    probability. Same failure shape as the 2026-07-31 dl_score-into-'Buy' incident.
+    """
+    if p is None or not math.isfinite(p) or p <= neutral:
         return 0.0
     denom = math.sqrt(p * (1.0 - p))
     if denom <= 0:
@@ -646,7 +652,13 @@ class UnifiedRanker:
         acc: dict = {}
         for r in rows:
             p = r['p']
-            if p is None:
+            # isfinite, not just `is None` -- a NaN win_probability/calibrated_win_probability
+            # passes `IS NOT NULL` in SQL (NaN is a real float, not NULL) and passes `is None`
+            # here too, then poisons the whole symbol's sum()/len() average with NaN, which
+            # bet_size_from_probability then turns into a MAXIMUM bet size (see that function's
+            # own guard, added alongside this one) -- the same NaN-is-truthy failure mode as
+            # the 2026-07-31 dl_score incident, just in the win-probability leg instead.
+            if p is None or not math.isfinite(p):
                 continue
             p = float(p)
             if enabled:

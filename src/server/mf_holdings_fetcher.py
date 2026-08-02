@@ -17,6 +17,7 @@ import requests
 import pandas as pd
 
 from db_compat import connect, use_postgres
+from as_of import logical_write_floor
 
 RATE_LIMIT_SEC = 0.3
 
@@ -189,8 +190,7 @@ def main():
     # ELSE-NULL branch), so on a day with no matching row it silently affects 0 rows -- no
     # error, no rows touched, mf_holding_pct/mf_chg_vs_prev permanently null. Same fix pattern
     # as mc_techscanner_fetcher.py / trendlyne_fundamentals_fetcher.py.
-    latest_row = con.execute("SELECT MAX(date) AS d FROM stock_ohlcv").fetchone()
-    today = str(latest_row["d"])[:10] if latest_row and latest_row["d"] else date.today().isoformat()
+    today = logical_write_floor(con, fallback=date.today().isoformat())
 
     results = []
     for i, stock in enumerate(stocks, 1):

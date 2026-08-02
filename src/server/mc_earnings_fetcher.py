@@ -25,6 +25,7 @@ from datetime import date, datetime, timedelta
 from curl_cffi import requests as cffi_req
 
 from db_compat import connect, use_postgres
+from as_of import logical_trading_date
 
 # ── Constants ────────────────────────────────────────────────────────────────────
 
@@ -220,9 +221,13 @@ def _backfill_days_to_results(con) -> None:
     (SELECT MAX(date)...) (see bse_event_classifier.py's run_daily docstring for why that's
     wrong), and the SQLite branch had NO date guard at all -- it overwrote every historical row
     for every symbol on every run (the severe smear bug, not just the milder latest-row one).
+
+    logical_trading_date(), not date.today() (2026-08-01) -- ml-daily-ops's step chain
+    regularly finishes after midnight IST, so a raw wall-clock date silently targeted a day
+    with no grid row yet. See as_of.logical_trading_date's docstring for the incident.
     """
     cur = con.cursor()
-    today = date.today().isoformat()
+    today = logical_trading_date()
     if use_postgres():
         cur.execute("""
             UPDATE technical_signals ts
@@ -367,9 +372,12 @@ def _backfill_rapid_features(con) -> int:
     """Update technical_signals with earnings category scores and NP growth from rapid results.
 
     date = today guard added 2026-07-19 on both branches -- same fix as
-    _backfill_days_to_results above (PG had MAX(date), SQLite had no date guard at all)."""
+    _backfill_days_to_results above (PG had MAX(date), SQLite had no date guard at all).
+
+    logical_trading_date(), not date.today() (2026-08-01) -- see _backfill_days_to_results
+    above for why (ml-daily-ops crosses midnight IST)."""
     cur = con.cursor()
-    today = date.today().isoformat()
+    today = logical_trading_date()
 
     # For each symbol in technical_signals, find the most recent rapid result per sub_type.
     # We pick the row with the highest |category_score| (strongest signal) when multiple exist.
@@ -502,9 +510,12 @@ def fetch_price_shockers(con) -> None:
 
 def _backfill_shockers(con) -> None:
     """date = today guard added 2026-07-19 on both branches -- same fix as
-    _backfill_days_to_results above (PG had MAX(date), SQLite had no date guard at all)."""
+    _backfill_days_to_results above (PG had MAX(date), SQLite had no date guard at all).
+
+    logical_trading_date(), not date.today() (2026-08-01) -- see _backfill_days_to_results
+    above for why (ml-daily-ops crosses midnight IST)."""
     cur = con.cursor()
-    today = date.today().isoformat()
+    today = logical_trading_date()
     if use_postgres():
         cur.execute("""
             UPDATE technical_signals ts
@@ -747,7 +758,9 @@ def fetch_actual_estimate_beats(con, max_pages: int = 25) -> None:
     # Stamp today's ts row per symbol (strip priority from tuple).
     # date = today guard added 2026-07-19 instead of MAX(date) -- see
     # bse_event_classifier.py's run_daily docstring for why that matters.
-    today = date.today().isoformat()
+    # logical_trading_date(), not date.today() (2026-08-01) -- ml-daily-ops's step chain
+    # regularly finishes after midnight IST, see as_of.logical_trading_date's docstring.
+    today = logical_trading_date()
     if use_postgres():
         cur.execute("""
             UPDATE technical_signals ts

@@ -37,7 +37,8 @@ from datetime import date
 
 import requests
 
-from db_compat import connect, translate, query_scalar
+from db_compat import connect, translate
+from as_of import logical_write_floor
 
 DASHBOARD_URL = "https://webapi.niftytrader.in/webapi/Option/dashboard-data"
 
@@ -248,8 +249,7 @@ def main() -> None:
     ensure_schema(con)
 
     today = date.today().isoformat()
-    ohlcv_max = query_scalar("SELECT MAX(date) AS d FROM stock_ohlcv")
-    ts_floor = str(ohlcv_max)[:10] if ohlcv_max else today
+    ts_floor = logical_write_floor(fallback=today)
     data = _fetch_all()
     if data is None:
         print("[NTDashboard] No data returned.")

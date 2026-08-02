@@ -25,6 +25,7 @@ import numpy as np
 import pandas as pd
 
 from db_compat import read_df, executemany, connect, safe_alter
+from as_of import logical_trading_date
 
 IV_RANK_WINDOW = 252   # trading days (~1y) — standard IV-rank lookback
 IV_RANK_MIN_OBS = 20   # need at least this many prior obs before a rank is meaningful
@@ -127,7 +128,11 @@ def run(only_date: str | None = None) -> int:
     )
     feats = build_iv_features(options)
     if only_date:
-        target = datetime.date.today().isoformat() if only_date == "today" else only_date
+        # logical_trading_date(), not date.today() (2026-08-01) -- ml-daily-ops calls this
+        # with --date today, and its step chain regularly finishes after midnight IST, which
+        # silently targeted a day with no grid row yet. See as_of.logical_trading_date's
+        # docstring for the incident.
+        target = logical_trading_date() if only_date == "today" else only_date
         feats = feats[feats["date"] == target]
     if feats.empty:
         print("[IV] No IV features to write.")

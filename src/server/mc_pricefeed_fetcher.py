@@ -40,7 +40,8 @@ from datetime import date, datetime
 
 from curl_cffi import requests
 
-from db_compat import connect, query_scalar
+from db_compat import connect
+from as_of import logical_write_floor
 
 PRICEFEED_URL = "https://priceapi.moneycontrol.com/pricefeed/nse/equitycash/{scid}"
 
@@ -520,8 +521,7 @@ def main() -> None:
     # session (not raw date.today()) -- see that function's docstring for why. `today` above
     # is kept as-is for upsert_row/append_pe_pb_history, which genuinely want the actual
     # calendar date as their per-day snapshot key.
-    ohlcv_max = query_scalar("SELECT MAX(date) AS d FROM stock_ohlcv")
-    ts_floor = str(ohlcv_max)[:10] if ohlcv_max else today
+    ts_floor = logical_write_floor(fallback=today)
     ok = 0
     done = 0
 

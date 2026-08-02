@@ -20,6 +20,7 @@ import requests
 
 from db_compat import connect, translate, use_postgres
 from fetch_utils import retry_get
+from as_of import logical_trading_date
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -345,7 +346,11 @@ def compute_and_write_features(con, symbol: str, days: int = 90) -> None:
     # technical_signals.created_at is NULL for 100% of rows in production (nothing else in
     # this codebase sets it) -- MAX(created_at) is therefore always NULL, and `created_at =
     # NULL` never matches in SQL, so this UPDATE has never actually written a row, ever.
-    today = date.today().isoformat()
+    # logical_trading_date(), not date.today() (2026-08-01) -- this fetcher runs inside
+    # ml-daily-ops, whose step chain regularly finishes after midnight IST; a raw wall-clock
+    # date silently targets a day with no grid row yet. See as_of.logical_trading_date's
+    # docstring for the incident.
+    today = logical_trading_date()
     cur.execute(
         """
         UPDATE technical_signals

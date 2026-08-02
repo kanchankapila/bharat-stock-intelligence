@@ -21,6 +21,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 from db_compat import connect, read_df, executemany
+from as_of import logical_trading_date
 
 WINDOW_DAYS = 90
 BUY_TYPES   = {'BUY', 'ACQUISITION', 'PURCHASE', 'ACQUIRE'}
@@ -67,7 +68,12 @@ def compute_insider_features(cutoff_date: str) -> pd.DataFrame:
 def run():
     conn = connect()
     try:
-        today = datetime.date.today().isoformat()
+        # logical_trading_date(), not date.today() -- ml-daily-ops's step chain now regularly
+        # crosses midnight IST, and a raw date.today() write-target silently matched 0 rows
+        # every time that happened (found 2026-08-01: 2026-07-31's row was still 4/2187
+        # populated -- the exact pre-fix symptom -- because the run that should have written
+        # it executed at 2026-08-01 01:23 IST, targeting a day with no grid row yet).
+        today = logical_trading_date()
         features = compute_insider_features(today)
         if features.empty:
             print("[Insider Features] No insider data in the last 90 days — skipping.")

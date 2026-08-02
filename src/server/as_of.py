@@ -63,6 +63,74 @@ def read_as_of_history(table: str, symbol: str, columns: Sequence[str]) -> pd.Da
     return hist.dropna(subset=["as_of_date"]).sort_values("as_of_date")
 
 
+def logical_trading_date(cutoff_hour: int = 4, now=None) -> str:
+    """The calendar date this 'trading day' should be considered, tolerant of a post-close
+    job chain that spans midnight.
+
+    ml-daily-ops starts ~19:30 IST and its step chain has grown long enough to regularly
+    finish after midnight (confirmed via job_heartbeat: a run processing the 2026-07-31
+    trading day completed at 2026-08-01 01:23 IST). Any post-close enrichment script that
+    took a naive date.today()/datetime.now() as its `UPDATE ... WHERE date = ?` target
+    silently wrote into a calendar day that has no grid row yet -- 0 rows matched, no error,
+    every time the run crosses midnight (found in insider_features.py, bse_event_classifier.py
+    -- insider_features.py's fix for a different bug on 2026-08-01 was itself invisible in
+    production for exactly this reason: it was verified by calling compute_insider_features()
+    directly, never by confirming the scheduled run's UPDATE actually matched a row).
+
+    Before `cutoff_hour` local time, "today" is treated as yesterday (the trading day whose
+    EOD processing is still finishing); at/after it, "today" is the real calendar date. This
+    is deliberately NOT the same as anchoring to MAX(date) FROM technical_signals -- that
+    would reintroduce the exact failure bse_event_classifier.py's `date = ?` guard (added
+    2026-07-19) was written to prevent: silently overwriting an even-older stale row if this
+    runs before today's grid exists for some other reason (e.g. a manual backfill at 11am).
+    A fixed early-morning cutoff fixes the midnight-crossing case without reopening that one.
+    """
+    import datetime
+    if now is None:
+        now = datetime.datetime.now()
+    d = now.date()
+    if now.hour < cutoff_hour:
+        d -= datetime.timedelta(days=1)
+    return d.isoformat()
+
+
+def logical_write_floor(conn=None, *, fallback: str = None) -> str:
+    """The reference date for a "CASE WHEN date >= floor THEN val ELSE NULL END" point-in-time
+    write guard -- the ISO date of the most recent session actually present in stock_ohlcv.
+
+    This is a DIFFERENT bug class from logical_trading_date() above: that one fixes an exact-
+    match write TARGET (`WHERE date = ?`) around a midnight-crossing job chain. This one fixes
+    a write FLOOR used to decide whether an incoming value belongs on today's row or should be
+    rejected as stale -- and needs the real last-completed-session date, not a cutoff-hour
+    guess, because the caller is asking "does this value's date qualify," not "what date do I
+    write into."
+
+    Hand-rolled independently (as `SELECT MAX(date) FROM stock_ohlcv` + str(...)[:10], each with
+    its own ad-hoc fallback) in asm_gsm_fetcher.py, mc_pricefeed_fetcher.py, mf_sector_flow_fetcher.py,
+    index_membership_fetcher.py, fundamentals_snapshot.py, working_capital_fetcher.py, and others
+    across five-plus separate review sessions after the SAME underlying mistake (anchoring to
+    date.today() instead of the last real session, which silently NULLs a stock's entire history
+    on any day the two don't match -- weekends, holidays, midnight-crossing runs) kept recurring.
+    This is the one place that anchor is computed now; a new fetcher has nothing left to
+    hand-roll wrong.
+
+    `fallback` is used only if stock_ohlcv is completely empty (fresh DB). Each call site's
+    prior ad-hoc behavior is preserved exactly: some pass date.today().isoformat() (or an
+    already-computed "today" variable) as their fallback; two (backfill_technical_features.py,
+    mc_techscanner_fetcher.py) deliberately pass nothing and check `if not floor:` themselves --
+    so the default here is None, NOT today's date, to match that contract precisely rather than
+    silently substituting a guess where the original code refused to.
+    """
+    if conn is not None:
+        row = conn.execute("SELECT MAX(date) AS d FROM stock_ohlcv").fetchone()
+        d = row["d"] if row is not None else None
+    else:
+        from db_compat import query_scalar
+        d = query_scalar("SELECT MAX(date) AS d FROM stock_ohlcv")
+
+    return str(d)[:10] if d else fallback
+
+
 def trading_days_back(n: int, conn=None) -> list:
     """The last `n` REAL trading sessions, newest first, as datetime.date objects.
 
