@@ -13,14 +13,35 @@ Differences from the TS version (both intentional):
     byte-for-byte unchanged (so converted engines behave identically until cutover).
 
 NOT a full transpiler — same carve-outs as the TS version:
-  - INSERT OR REPLACE  -> left as-is (Postgres errors, forcing an explicit ON CONFLICT).
+  - INSERT OR REPLACE  -> rejected loudly by translate() (see below); no generic conflict
+                          target exists, so this must become an explicit ON CONFLICT at
+                          the call site instead of being guessed here.
   - strftime(...)      -> left as-is; convert per-call where it appears.
   - PRAGMA table_info  -> left as-is; the few sites are hand-converted per file.
+
+date('now'[, mod]) -> bare `current_date` (NO ::text cast) is a DELIBERATE, NOT universally
+correct, choice — the opposite default from the TS translator (sqlTranslate.ts), which casts
+to `current_date::text`. Most Python engines read/write tables with a native Postgres DATE
+column (stock_ohlcv.date, macro_asset_prices.date, feature_store.date — confirmed via
+db/schema.postgres.sql, NOT db.ts's SQLite schema-of-record, which shows everything as TEXT
+and is not authoritative for this), so bare current_date is correct for the common case here.
+But several tables carry a TEXT date column instead (technical_signals.date,
+nt_fno_expiry.expiry, stock_earnings_dates.result_date) — comparing those against this
+function's bare current_date raises `operator does not exist: text >= date`. This is NOT
+hypothetical: expiry_features.py and mc_earnings_fetcher.py each independently hand-rolled a
+full if/else dialect branch to work around it, and unified_ranker.py's _get_ml_scores()
+avoids date('now') entirely and precomputes the cutoff in Python instead — three separate
+workarounds for the same gap. Do not "fix" this by adding ::text to the default: that would
+break the (larger) native-DATE-column population instead. If your target column is TEXT,
+use date_now_text()/date_now_offset_text() below instead of writing date('now') and hoping —
+they exist specifically so the workaround is one import, not a re-derived if/else block.
+Check the column's real type before choosing.
 
 Covered by test_sql_translate.py.
 """
 import os
 import re
+from functools import lru_cache
 
 
 def use_postgres() -> bool:
@@ -154,16 +175,58 @@ def map_sqlite_functions(sql: str) -> str:
     return s
 
 
+def _assert_translatable(sql: str) -> None:
+    """Reject constructs this translator deliberately does not map, so a bad call site
+    fails loudly and immediately instead of reaching Postgres as a confusing raw syntax
+    error, or silently doing the wrong thing. Postgres-path only, by design — several
+    fetchers (earnings_surprise_fetcher.py, insider_transactions_fetcher.py,
+    mc_global_macro_fetcher.py, moneycontrol_fetcher.py, stock_option_chain_fetcher.py)
+    correctly dialect-branch and use a real INSERT OR REPLACE statement on the SQLite
+    path only; that usage is valid SQLite and must keep working unchanged."""
+    if re.search(r"\bINSERT\s+OR\s+REPLACE\b", sql, flags=re.I):
+        raise ValueError(
+            "sql_translate: INSERT OR REPLACE has no generic Postgres translation (no "
+            "single conflict target to infer). Rewrite the call site as an explicit "
+            "INSERT ... ON CONFLICT (<key columns>) DO UPDATE SET ..."
+        )
+
+
+@lru_cache(maxsize=4096)
+def _translate_cached(sql: str, use_pg: bool) -> str:
+    if use_pg:
+        _assert_translatable(sql)
+        sql = map_sqlite_functions(sql)
+    return convert_placeholders(sql)
+
+
 def translate(sql: str, use_pg: "bool | None" = None) -> str:
     """Full translation: function/syntax mapping (PG only), then placeholder conversion.
 
     `use_pg=None` reads the USE_POSTGRES env var; pass explicitly in tests.
+
+    Memoized: `sql` is static per call site in normal usage (only bound parameters vary),
+    so re-running the regex pipeline on every query is pure waste on the hot path. Bounded
+    LRU cache — a caller that builds genuinely unique SQL per call (e.g. f-string-interpolated
+    values instead of bind params) just gets cache misses, never incorrect output or
+    unbounded growth.
     """
     if use_pg is None:
         use_pg = use_postgres()
-    if use_pg:
-        sql = map_sqlite_functions(sql)
-    return convert_placeholders(sql)
+    return _translate_cached(sql, use_pg)
+
+
+def date_now_text(modifier: "str | None" = None) -> str:
+    """`date('now'[, modifier])`, correctly cast for comparison against a TEXT date column
+    (technical_signals.date, nt_fno_expiry.expiry, stock_earnings_dates.result_date, ...).
+
+    Use this instead of writing `date('now')` inline when you know your target column is
+    TEXT — see the module docstring above for why translate() can't safely do this by
+    default. Verify the column's real type first; using this against a native DATE column
+    raises the mirror-image error (`operator does not exist: date >= text`).
+    """
+    if modifier is None:
+        return "current_date::text"
+    return f"((current_date + interval '{modifier}')::date)::text"
 
 
 try:
