@@ -8,6 +8,7 @@ import { fetchIndexAdvanceDecline, fetchIndiaVix, fetchLiveMarketScreener, fetch
 import * as queueModule from '../queues';
 import { MONITOR_SCRIPTS } from '../monitorScripts';
 import { computeCronLateness } from '../jobHeartbeat';
+import { fetchWithCache } from '../cacheService';
 
 export { MONITOR_SCRIPTS };
 
@@ -242,7 +243,15 @@ export async function getSystemStatus(now: Date = new Date()) {
   }
 
   return Promise.all(MONITOR_SCRIPTS.map(async s => {
-    const dbLastRunAt = await getLastRunAt(s.id as ScriptId);
+    // getScriptStats(s.id) depends on nothing getLastRunAt(s.id) computes -- these were awaited
+    // sequentially per script (2 round trips deep) despite being fully independent. Across the
+    // ~30 scripts in MONITOR_SCRIPTS this whole map is already running concurrently (Promise.all
+    // over the map, not a true N+1 loop), so this halves the critical-path depth per script
+    // rather than the total round-trip count.
+    const [dbLastRunAt, stats] = await Promise.all([
+      getLastRunAt(s.id as ScriptId),
+      getScriptStats(s.id as ScriptId),
+    ]);
     // Fall back to stored timestamp for scripts that ran but produced no DB rows
     const storedRanAt = runStates[`monitor_${s.id}_ran_at`] ?? null;
     const lastRunAt = dbLastRunAt ?? storedRanAt;
@@ -282,14 +291,19 @@ export async function getSystemStatus(now: Date = new Date()) {
       ...s,
       lastRunAt,
       runState,
-      stats: await getScriptStats(s.id as ScriptId),
+      stats,
       error: runStates[`monitor_${s.id}_error`] ?? null,
     };
   }));
 }
 
 export const monitorRouter = router({
-  getSystemStatus: publicProcedure.query(() => getSystemStatus()),
+  // ~30 monitored scripts x 2 independent lookups each (now parallelized above) = ~60 DB round
+  // trips recomputed from scratch on every single call. This is an ops dashboard, not a
+  // real-time trading surface -- a 30s cache is well below every staleLimitHours/graceMinutes
+  // threshold this function itself checks against, so cached staleness never meaningfully lags
+  // what a live call would show.
+  getSystemStatus: publicProcedure.query(() => fetchWithCache('monitor:system-status', () => getSystemStatus(), 30)),
 
   getIndexAdvanceDecline: publicProcedure
     .query(async () => {

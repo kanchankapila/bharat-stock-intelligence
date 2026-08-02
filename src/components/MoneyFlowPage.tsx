@@ -43,6 +43,11 @@ export function MoneyFlowPage() {
   const [range, setRange] = useState<RangeKey>('3M');
   const [showMf, setShowMf] = useState(false);
 
+  // Deliberately NOT standardized onto the shared days:10 query key used by the other
+  // getFiiDiiFlow callers (2026-08-02 perf pass) -- this page's whole purpose is deep,
+  // user-selectable history (up to days:4000/ALL), a fundamentally different cost profile than
+  // the "current flow snapshot" cards elsewhere. Sharing one cache entry would either force
+  // those lightweight cards to pay for a multi-thousand-row fetch or cap this page's own range.
   const { data, isLoading, refetch, isFetching, dataUpdatedAt } = trpc.getFiiDiiFlow.useQuery(
     { days: RANGE_DAYS[range] },
     { staleTime: 15 * 60_000, refetchInterval: 30 * 60_000 }

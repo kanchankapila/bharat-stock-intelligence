@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   AreaChart, Area, XAxis, YAxis, ResponsiveContainer, Tooltip, CartesianGrid,
 } from 'recharts';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Activity, Zap, TrendingUp, ArrowUpRight, ArrowDownRight,
-  History, Plus, RefreshCw, Cpu, Radio, BarChart2,
+  History, Plus, RefreshCw, Cpu, Radio, BarChart2, Gauge,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '../lib/utils';
@@ -364,6 +365,7 @@ interface DashboardPageProps {
 const DashboardPage: React.FC<DashboardPageProps> = ({
   stocks, onNewSignal, onSelectStock, watchlist, onToggleWatchlist, onSelectIndex,
 }) => {
+  const navigate = useNavigate();
   const news = useNewsFeed();
   const [aiSignals, setAiSignals] = useState<any[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -441,12 +443,17 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
     }
   }, [stocks.length]);
 
-  // Derived market stats
-  const advancers = stocks.filter(s => s.changePct > 0).length;
-  const decliners = stocks.filter(s => s.changePct < 0).length;
-  const topGainers = [...stocks].sort((a, b) => b.changePct - a.changePct).slice(0, 5);
-  const topLosers  = [...stocks].sort((a, b) => a.changePct - b.changePct).slice(0, 5);
-  const niftyStock = stocks.find(s => s.symbol === 'NIFTY' || s.symbol === 'NIFTY50') ?? stocks[0];
+  // Derived market stats — this component polls getQueueStats every 2s and getSignals every
+  // 3s while signal generation is running (potentially minutes on a cold cache), and every
+  // tick re-rendered this component. These sorts/filters over the full live `stocks` list only
+  // need to recompute when the market data itself changes, not on every queue-status tick.
+  const { advancers, decliners, topGainers, topLosers, niftyStock } = useMemo(() => ({
+    advancers: stocks.filter(s => s.changePct > 0).length,
+    decliners: stocks.filter(s => s.changePct < 0).length,
+    topGainers: [...stocks].sort((a, b) => b.changePct - a.changePct).slice(0, 5),
+    topLosers: [...stocks].sort((a, b) => a.changePct - b.changePct).slice(0, 5),
+    niftyStock: stocks.find(s => s.symbol === 'NIFTY' || s.symbol === 'NIFTY50') ?? stocks[0],
+  }), [stocks]);
 
   const signalCount = aiSignals.filter(s => s.signal === 'BUY' || s.signal === 'SELL').length;
   const buySignals  = aiSignals.filter(s => s.signal === 'BUY').length;
@@ -480,6 +487,36 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
 
   return (
     <div style={{ padding: '12px 16px', background: 'transparent', minHeight: '100vh' }}>
+
+      {/* ── V4 entry point ───────────────────────────────────────────────
+          This dashboard (v1) is still the default landing experience, but v4's
+          MarketCommandCenter/StockIntelligencePage are already reachable via the sidebar
+          ("Market Command"/"Stock Intelligence" in both AppShell.tsx and V2AppShell.tsx) --
+          just not prominently, buried among 30+ other nav items. This is a second, more
+          discoverable entry point from the page every session actually lands on first. */}
+      <button
+        onClick={() => navigate('/market-command')}
+        style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          width: '100%', marginBottom: 12, padding: '10px 16px',
+          background: 'linear-gradient(90deg, rgba(79,70,229,0.15), rgba(59,130,246,0.08))',
+          border: '1px solid rgba(99,102,241,0.3)', borderRadius: 10,
+          cursor: 'pointer', textAlign: 'left',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <Gauge size={16} color="#818cf8" />
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#e2e8f0' }}>
+              Try the new Market Command Center
+            </div>
+            <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 1 }}>
+              Regime/breadth header, pre-market briefing, F&amp;O read, sector rotation — the next-gen dashboard
+            </div>
+          </div>
+        </div>
+        <ArrowUpRight size={14} color="#818cf8" style={{ flexShrink: 0 }} />
+      </button>
 
       {/* ── Row 0: Market Indices Strip ─────────────────────────────────── */}
       <div style={{ marginBottom: 12 }}>

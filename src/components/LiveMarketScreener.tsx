@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { trpc } from '../lib/trpc';
 import { Activity, Zap, TrendingUp, TrendingDown, Minus, Filter, X, Brain, BarChart2, Award, Play, Target, Clock } from 'lucide-react';
@@ -90,7 +90,12 @@ export const LiveMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
 
   const activeCount = Object.values(filters).filter(Boolean).length;
   const stocks = (data as any)?.resultData || [];
-  const sortedStocks = [...stocks].sort((a, b) => (b.change_per ?? 0) - (a.change_per ?? 0));
+  // Was recomputed on every render, including the unrelated 30s/60s combo-status poll ticks
+  // this component also holds queries for.
+  const sortedStocks = useMemo(
+    () => [...stocks].sort((a, b) => (b.change_per ?? 0) - (a.change_per ?? 0)),
+    [stocks],
+  );
 
   // Find a completed backtest run matching the combination
   const findBacktestForCombo = (comboFilters: string[]) => {

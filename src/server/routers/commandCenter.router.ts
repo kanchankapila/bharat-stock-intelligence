@@ -139,6 +139,10 @@ export const commandCenterRouter = router({
       }
       params.push(input.limit);
 
+      // The `ts` subquery used to be `SELECT * FROM technical_signals WHERE date = (SELECT
+      // MAX(date) ...)` -- materializing every symbol's full ~300-column row for the latest
+      // date before joining down to the (up to 200) rows this endpoint actually returns.
+      // Project only the columns the outer SELECT reads.
       const rows = await dbAll<any>(`
         SELECT
           ur.symbol, ur.unified_score, ur.conviction_level, ur.timeframe, ur.sector,
@@ -153,7 +157,7 @@ export const commandCenterRouter = router({
           ts.rs_vs_sector_21d, ts.rs_vs_sector_63d,
           ts.eps_surprise_q1, ts.eps_surprise_q2, ts.eps_beat_streak,
           ts.eps_miss_after_streak, ts.rev_surprise_q1,
-          ts.fcf_yield_approx AS fcf_yield, ts.interest_coverage, ts.fcf_positive, ts.debt_coverage_risk,
+          ts.fcf_yield AS fcf_yield, ts.interest_coverage, ts.fcf_positive, ts.debt_coverage_risk,
           ts.delivery_trend_30d, ts.block_deal_flag, ts.block_deal_direction,
           ts.short_interest_proxy,
           ts.promoter_buy_90d_cr, ts.promoter_sell_90d_cr, ts.promoter_net_90d,
@@ -170,7 +174,26 @@ export const commandCenterRouter = router({
           ts.days_to_next_results
         FROM unified_recommendations ur
         LEFT JOIN (
-          SELECT * FROM technical_signals
+          SELECT symbol, win_probability, signal_type, rsi, cmp, change_pct,
+                 rs_vs_sector_21d, rs_vs_sector_63d,
+                 eps_surprise_q1, eps_surprise_q2, eps_beat_streak,
+                 eps_miss_after_streak, rev_surprise_q1,
+                 fcf_yield_approx AS fcf_yield, interest_coverage, fcf_positive, debt_coverage_risk,
+                 delivery_trend_30d, block_deal_flag, block_deal_direction,
+                 short_interest_proxy,
+                 promoter_buy_90d_cr, promoter_sell_90d_cr, promoter_net_90d,
+                 insider_buy_flag, insider_sell_flag,
+                 rating_upgrade_180d, rating_downgrade_180d,
+                 mf_sector_flow_pct,
+                 ccc_trend, wc_deteriorating, wc_improving,
+                 expected_move_pct, stock_gex_proxy,
+                 iep_gap_pct, preopen_imbalance,
+                 pledge_chg_90d, asm_flag, gsm_stage,
+                 mc_broker_buy_7d, mc_broker_sell_7d, mc_broker_upside,
+                 is_nifty50, nifty_tier,
+                 hv_20d, iv_hv_ratio,
+                 days_to_next_results
+          FROM technical_signals
           WHERE date = (SELECT MAX(date) FROM technical_signals)
         ) ts ON ts.symbol = ur.symbol
         WHERE ur.computed_at = ?
@@ -207,30 +230,40 @@ export const commandCenterRouter = router({
     .input(z.object({ symbol: z.string() }))
     .query(async ({ input }) => {
       const latest = await urLatestAt();
-      const row = await dbGet<any>(`
-        SELECT
-          ur.symbol, ur.unified_score, ur.conviction_level, ur.timeframe, ur.sector,
-          ur.classification, ur.stop_loss, ur.target_1, ur.target_2,
-          ur.entry_zone_low, ur.entry_zone_high, ur.risk_reward,
-          ur.ml_score, ur.confluence_score, ur.technical_score, ur.dl_score,
-          ur.trade_reasoning, ur.engine_coverage_count, ur.computed_at,
-          ts.win_probability, ts.signal_type, ts.rsi, ts.cmp, ts.change_pct,
-          ts.eps_surprise_q1, ts.eps_surprise_q2, ts.eps_beat_streak, ts.eps_miss_after_streak,
-          ts.fcf_yield_approx AS fcf_yield, ts.interest_coverage, ts.fcf_positive, ts.debt_coverage_risk,
-          ts.delivery_trend_30d, ts.block_deal_flag, ts.block_deal_direction,
-          ts.promoter_buy_90d_cr, ts.promoter_sell_90d_cr, ts.promoter_net_90d,
-          ts.insider_buy_flag, ts.insider_sell_flag,
-          ts.rating_upgrade_180d, ts.rating_downgrade_180d,
-          ts.mf_sector_flow_pct, ts.wc_improving, ts.wc_deteriorating,
-          ts.asm_flag, ts.gsm_stage, ts.is_nifty50, ts.nifty_tier,
-          ts.days_to_next_results
-        FROM unified_recommendations ur
-        LEFT JOIN (
-          SELECT * FROM technical_signals WHERE date = (SELECT MAX(date) FROM technical_signals)
-        ) ts ON ts.symbol = ur.symbol
-        WHERE ur.symbol = ? AND ur.computed_at = ?
-      `, [input.symbol, latest ?? '']);
-      return row ?? null;
+      // Was `LEFT JOIN (SELECT * FROM technical_signals WHERE date = (SELECT MAX(date)...))` --
+      // materializing every symbol's full ~300-column row for the latest date just to join
+      // down to this one symbol. This is likely the single highest-traffic per-symbol endpoint
+      // in the app (every stock-detail page load). Split into two indexed point lookups run
+      // in parallel instead: `ur` by (symbol, computed_at) and `ts` by symbol, latest date only.
+      const [ur, ts] = await Promise.all([
+        dbGet<any>(`
+          SELECT symbol, unified_score, conviction_level, timeframe, sector,
+                 classification, stop_loss, target_1, target_2,
+                 entry_zone_low, entry_zone_high, risk_reward,
+                 ml_score, confluence_score, technical_score, dl_score,
+                 trade_reasoning, engine_coverage_count, computed_at
+          FROM unified_recommendations
+          WHERE symbol = ? AND computed_at = ?
+        `, [input.symbol, latest ?? '']),
+        dbGet<any>(`
+          SELECT win_probability, signal_type, rsi, cmp, change_pct,
+                 eps_surprise_q1, eps_surprise_q2, eps_beat_streak, eps_miss_after_streak,
+                 fcf_yield_approx AS fcf_yield, interest_coverage, fcf_positive, debt_coverage_risk,
+                 delivery_trend_30d, block_deal_flag, block_deal_direction,
+                 promoter_buy_90d_cr, promoter_sell_90d_cr, promoter_net_90d,
+                 insider_buy_flag, insider_sell_flag,
+                 rating_upgrade_180d, rating_downgrade_180d,
+                 mf_sector_flow_pct, wc_improving, wc_deteriorating,
+                 asm_flag, gsm_stage, is_nifty50, nifty_tier,
+                 days_to_next_results
+          FROM technical_signals
+          WHERE symbol = ?
+          ORDER BY date DESC
+          LIMIT 1
+        `, [input.symbol]),
+      ]);
+      if (!ur) return null;
+      return { ...ur, ...(ts ?? {}) };
     }),
 
   runUnifiedRanker: adminProcedure

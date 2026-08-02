@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Search, Filter, TrendingUp, Briefcase, Grid3x3, List, Loader } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { trpc } from '../lib/trpc';
@@ -25,11 +25,21 @@ type ViewMode = 'grid' | 'list';
 const NSEStockDiscovery: React.FC<{
   onSelectStock?: (symbol: string) => void;
 }> = ({ onSelectStock }) => {
+  const PAGE_SIZE = 60;
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedSector, setSelectedSector] = useState<string | null>(null);
   const [selectedIndustry, setSelectedIndustry] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
   const [displayedStocks, setDisplayedStocks] = useState<NSEStock[]>([]);
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+
+  // Debounced so typing a symbol/name doesn't re-filter the full (up to thousands-of-rows)
+  // stock list on every keystroke -- was firing the useEffect below on each character.
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearchQuery(searchQuery), 300);
+    return () => clearTimeout(t);
+  }, [searchQuery]);
 
   // TRPC Hooks
   const allStocksQuery = trpc.getAllNSEStocks.useQuery();
@@ -37,11 +47,11 @@ const NSEStockDiscovery: React.FC<{
   const industriesQuery = trpc.getAllIndustries.useQuery();
   const sectorStocksQuery = trpc.getNSEStocksBySector.useQuery(
     { sector: selectedSector || '' },
-    { enabled: !!selectedSector && !searchQuery }
+    { enabled: !!selectedSector && !debouncedSearchQuery }
   );
   const industryStocksQuery = trpc.getNSEStocksByIndustry.useQuery(
     { industry: selectedIndustry || '' },
-    { enabled: !!selectedIndustry && !searchQuery && !selectedSector }
+    { enabled: !!selectedIndustry && !debouncedSearchQuery && !selectedSector }
   );
   const stockCountQuery = trpc.getNSEStockCount.useQuery();
 
@@ -49,9 +59,9 @@ const NSEStockDiscovery: React.FC<{
   useEffect(() => {
     let stocks: NSEStock[] = [];
 
-    if (searchQuery.length > 0) {
-      const lowerQuery = searchQuery.toLowerCase();
-      
+    if (debouncedSearchQuery.length > 0) {
+      const lowerQuery = debouncedSearchQuery.toLowerCase();
+
       if (allStocksQuery.data?.stocks) {
         stocks = allStocksQuery.data.stocks.filter((s) =>
           (s.name && s.name.toLowerCase().includes(lowerQuery)) ||
@@ -67,8 +77,9 @@ const NSEStockDiscovery: React.FC<{
     }
 
     setDisplayedStocks(stocks);
+    setVisibleCount(PAGE_SIZE); // reset paging whenever the effective filter set changes
   }, [
-    searchQuery,
+    debouncedSearchQuery,
     selectedSector,
     sectorStocksQuery.data,
     selectedIndustry,
@@ -84,6 +95,17 @@ const NSEStockDiscovery: React.FC<{
   const sectors = sectorsQuery.data || [];
   const industries = industriesQuery.data || [];
   const totalStocks = stockCountQuery.data || 0;
+
+  // The unfiltered universe is thousands of rows -- rendering all of them as full card/row DOM
+  // subtrees at once (previously: no cap at all) was the first-open freeze/jank flagged in the
+  // 2026-08-02 audit. Cap the render to a page at a time instead of pulling in a virtualization
+  // library (a new dependency + a bundle-size tradeoff working against the same audit's other
+  // goal, and one this sandbox can't visually verify against a live browser).
+  const visibleStocks = useMemo(
+    () => displayedStocks.slice(0, visibleCount),
+    [displayedStocks, visibleCount],
+  );
+  const hasMore = visibleCount < displayedStocks.length;
 
   const clearFilters = () => {
     setSearchQuery('');
@@ -269,7 +291,7 @@ const NSEStockDiscovery: React.FC<{
             {selectedIndustry && ` • ${selectedIndustry}`}
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {displayedStocks.map((stock) => (
+            {visibleStocks.map((stock) => (
               <div
                 key={stock.symbol}
                 onClick={() => onSelectStock && stock.symbol && onSelectStock(stock.symbol)}
@@ -310,6 +332,14 @@ const NSEStockDiscovery: React.FC<{
               </div>
             ))}
           </div>
+          {hasMore && (
+            <button
+              onClick={() => setVisibleCount(c => c + PAGE_SIZE)}
+              className="w-full py-3 bg-slate-800/50 border border-slate-800/30 rounded-lg text-sm font-medium text-slate-400 hover:text-white hover:border-slate-600 transition-all"
+            >
+              Load {Math.min(PAGE_SIZE, displayedStocks.length - visibleCount)} more ({displayedStocks.length - visibleCount} remaining)
+            </button>
+          )}
         </div>
       )}
 
@@ -326,7 +356,7 @@ const NSEStockDiscovery: React.FC<{
               <div className="col-span-3">Sector</div>
               <div className="col-span-3">Industry</div>
             </div>
-            {displayedStocks.map((stock) => (
+            {visibleStocks.map((stock) => (
               <div
                 key={stock.symbol}
                 onClick={() => onSelectStock && stock.symbol && onSelectStock(stock.symbol)}
@@ -353,6 +383,14 @@ const NSEStockDiscovery: React.FC<{
               </div>
             ))}
           </div>
+          {hasMore && (
+            <button
+              onClick={() => setVisibleCount(c => c + PAGE_SIZE)}
+              className="w-full py-3 bg-slate-800/50 border border-slate-800/30 rounded-lg text-sm font-medium text-slate-400 hover:text-white hover:border-slate-600 transition-all"
+            >
+              Load {Math.min(PAGE_SIZE, displayedStocks.length - visibleCount)} more ({displayedStocks.length - visibleCount} remaining)
+            </button>
+          )}
         </div>
       )}
 

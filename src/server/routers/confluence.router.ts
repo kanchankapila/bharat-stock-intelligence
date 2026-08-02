@@ -146,12 +146,23 @@ export const confluenceRouter = router({
     .query(async ({ input }) => {
       const symbol = input?.symbol;
       const limit = input?.limit ?? 50;
+      // Was `DATE(cs.computed_at) = so.signal_date` -- comparing a DATE-typed expression
+      // (computed_at is TIMESTAMPTZ) against so.signal_date (TEXT). Postgres has no `date =
+      // text` operator for a column with a declared TEXT type (only untyped literals get an
+      // implicit cast), so this JOIN condition throws `operator does not exist: date = text` on
+      // Postgres -- the exact bug class documented repeatedly in this codebase's history
+      // (2026-07-22/23 date('now')::text fixes). It only "worked" on the SQLite dev fallback,
+      // where DATE()/date comparisons are untyped string comparisons. Appending `::text` casts
+      // the DATE side to match -- this is the same established pattern already applied to
+      // confluence_signals.computed_at elsewhere (ml.router.ts's getSignalReportCard), and is a
+      // no-op on SQLite (the cast is stripped by stripPgCasts, leaving the already-working
+      // native `DATE(...)` comparison unchanged).
       if (symbol) {
         return dbAll(`
           SELECT so.*, cs.conviction_level, cs.bullish_screener_count, cs.screener_names_json
           FROM signal_outcomes so
           LEFT JOIN confluence_signals cs ON cs.symbol = so.symbol
-            AND DATE(cs.computed_at) = so.signal_date
+            AND DATE(cs.computed_at)::text = so.signal_date
           WHERE so.symbol = ?
           ORDER BY so.signal_date DESC
           LIMIT ?
@@ -161,7 +172,7 @@ export const confluenceRouter = router({
         SELECT so.*, cs.conviction_level, cs.bullish_screener_count, cs.screener_names_json
         FROM signal_outcomes so
         LEFT JOIN confluence_signals cs ON cs.symbol = so.symbol
-          AND DATE(cs.computed_at) = so.signal_date
+          AND DATE(cs.computed_at)::text = so.signal_date
         ORDER BY so.signal_date DESC
         LIMIT ?
       `, [limit]);

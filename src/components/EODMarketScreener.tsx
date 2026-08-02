@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { trpc } from '../lib/trpc';
 import { Activity, Zap, TrendingUp, TrendingDown, Minus, Filter, X } from 'lucide-react';
@@ -65,9 +65,18 @@ interface Props {
 export const EODMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
   const [filters, setFilters] = useState<Record<string, boolean>>({});
   const [showFilters, setShowFilters] = useState(false);
+  // Was polling unconditionally even when this tab wasn't visible, unlike its sibling
+  // LiveMarketScreener/MarketIndices/GlobalMarkets/Watchlist which all gate on tab visibility.
+  const [isVisible, setIsVisible] = useState(document.visibilityState === 'visible');
+
+  useEffect(() => {
+    const handler = () => setIsVisible(document.visibilityState === 'visible');
+    document.addEventListener('visibilitychange', handler);
+    return () => document.removeEventListener('visibilitychange', handler);
+  }, []);
 
   const { data, isLoading } = trpc.getEODMarketScreener.useQuery(filters, {
-    refetchInterval: 60000, // EOD data changes less frequently
+    refetchInterval: isVisible ? 60000 : false, // EOD data changes less frequently
   });
 
   const toggleFilter = (key: string) => {
@@ -81,7 +90,10 @@ export const EODMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
 
   const activeCount = Object.values(filters).filter(Boolean).length;
   const stocks = (data as any)?.resultData || [];
-  const sortedStocks = [...stocks].sort((a, b) => (b.change_percent ?? 0) - (a.change_percent ?? 0));
+  const sortedStocks = useMemo(
+    () => [...stocks].sort((a, b) => (b.change_percent ?? 0) - (a.change_percent ?? 0)),
+    [stocks],
+  );
 
   return (
     <div className="flex flex-col h-[600px] backdrop-blur-md bg-slate-900/30 border border-slate-800/50 rounded-xl p-6 text-slate-200">

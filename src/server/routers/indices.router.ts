@@ -10,13 +10,16 @@ import {
 } from "../marketData";
 import { getIndexData } from "../insightService";
 import { router, publicProcedure } from "../trpc";
+import { fetchWithCache } from "../cacheService";
 
 export const indicesRouter = router({
+  // getAllIndices/getGlobalIndices are polled every 30s per client (TradeDecisionCockpit and
+  // others) with no caching -- every poll tick from every open tab was a live upstream fetch.
   getAllIndices: publicProcedure
-    .query(async () => fetchAllIndianIndices()),
+    .query(async () => fetchWithCache('indices:all', () => fetchAllIndianIndices(), 30)),
 
   getGlobalIndices: publicProcedure
-    .query(async () => fetchGlobalIndices()),
+    .query(async () => fetchWithCache('indices:global', () => fetchGlobalIndices(), 30)),
 
   getIndexDetails: publicProcedure
     .input(z.object({ indexId: z.string() }))
@@ -26,9 +29,14 @@ export const indicesRouter = router({
     .input(z.object({ indId: z.string() }))
     .query(async ({ input }) => fetchIndexFullDetails(input.indId)),
 
+  // Index constituent membership changes at most quarterly -- cache generously.
   getIndexStocksList: publicProcedure
     .input(z.object({ indId: z.string(), type: z.enum(['0', '1']).optional() }))
-    .query(async ({ input }) => fetchIndexStocksList(input.indId, input.type ?? '0')),
+    .query(async ({ input }) => fetchWithCache(
+      `indices:stocks-list:${input.indId}:${input.type ?? '0'}`,
+      () => fetchIndexStocksList(input.indId, input.type ?? '0'),
+      3600,
+    )),
 
   getIndexPriceFeed: publicProcedure
     .input(z.object({ bridgeSymbol: z.string() }))
@@ -92,10 +100,14 @@ export const indicesRouter = router({
 
   getIndexConstituents: publicProcedure
     .input(z.object({ indId: z.string(), type: z.enum(['0', '1']).optional().default('0') }))
-    .query(async ({ input }) => {
-      const { fetchIndexConstituents } = await import('../indexApiService');
-      return fetchIndexConstituents(input.indId, input.type);
-    }),
+    .query(async ({ input }) => fetchWithCache(
+      `indices:constituents:${input.indId}:${input.type}`,
+      async () => {
+        const { fetchIndexConstituents } = await import('../indexApiService');
+        return fetchIndexConstituents(input.indId, input.type);
+      },
+      3600,
+    )),
 
   getAdvanceDecline: publicProcedure
     .input(z.object({ ex: z.string().optional().default('N') }))

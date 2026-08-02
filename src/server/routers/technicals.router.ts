@@ -7,6 +7,7 @@ import { getSymbolFromMcsymbol } from "../stockMapping";
 import { alphaQuant } from "../alphaQuantClient";
 import { router, publicProcedure, adminProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
+import { fetchWithCache } from "../cacheService";
 
 export const technicalsRouter = router({
   getTechnicalDetails: publicProcedure
@@ -157,12 +158,15 @@ export const technicalsRouter = router({
       return await computeSignalTypeStats();
     }),
 
+  // Was uncached -- a cold DB cache (getLatestRSIForSymbols) makes this fall back to fetching
+  // RSI from MoneyControl live, in batches of 5, INLINE in the request handler; every concurrent
+  // request paid that cost independently instead of one request per TTL window absorbing it.
   getTechnicalTrends: publicProcedure
     .input(z.object({
       type:  z.enum(['bullish', 'bearish', 'turning-bullish', 'turning-bearish']),
       index: z.string().optional(),
     }))
-    .query(async ({ input }) => {
+    .query(async ({ input }) => fetchWithCache(`tech:trends:${input.type}:${input.index ?? ''}`, async () => {
       const result = await fetchTechnicalTrends(input.type, input.index);
       if (result?.success === 1) {
         const list = result.data?.list || result.data?.tableDataList || [];
@@ -205,7 +209,7 @@ export const technicalsRouter = router({
         if (result.data?.tableDataList) result.data.tableDataList = finalData;
       }
       return result;
-    }),
+    }, 300)),
 
   getTechTrendsBySegment: publicProcedure
     .input(z.object({ type: z.enum(['bullish', 'bearish', 'turning-bullish', 'turning-bearish']) }))

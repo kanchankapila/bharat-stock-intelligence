@@ -67,9 +67,11 @@ export const fnoRouter = router({
     .input(z.object({ symbol: z.string(), expiry: z.string().optional() }))
     .query(async ({ input }) => {
       const { fetchStockFnoExpiry, fetchStockFnoFutures, fetchStockFnoOptions } = await import('../marketIntelService');
-      const { getStockMapping } = await import('../stockMapping');
-      const mapping = getStockMapping(input.symbol);
-      const scId = mapping?.mcsymbol || input.symbol;
+      const { resolveMoneycontrolSymbol } = await import('../stockMapping');
+      const scId = await resolveMoneycontrolSymbol(input.symbol);
+      if (!scId) {
+        return { success: false, error: 'No MoneyControl mapping found for this symbol' };
+      }
 
       let targetExpiry = input.expiry;
       

@@ -6,6 +6,7 @@ import { getStockInsights } from "../insightService";
 import { getFinologyData } from "../finologyService";
 import { dbAll } from "../dbAsync";
 import { router, publicProcedure, adminProcedure } from "../trpc";
+import { fetchWithCache } from "../cacheService";
 
 export const fundamentalsRouter = router({
   triggerFundamentalsSync: adminProcedure
@@ -48,13 +49,18 @@ export const fundamentalsRouter = router({
       return row ?? null;
     }),
 
+  // Ratios/shareholding/corporate-actions/MF-investment data changes at most quarterly, but
+  // previously called the live MoneyControl/ET upstream on every single stock-page view with
+  // no caching. fetchWithCache (Redis/in-memory fallback + in-flight de-dup) already existed
+  // in this codebase (used correctly by getSuperstarList/getEarningsSummary) -- these simply
+  // weren't calling it.
   getRatios: publicProcedure
     .input(z.object({ symbol: z.string() }))
-    .query(async ({ input }) => fetchMCRatios(input.symbol)),
+    .query(async ({ input }) => fetchWithCache(`fund:ratios:${input.symbol}`, () => fetchMCRatios(input.symbol), 3600)),
 
   getShareholding: publicProcedure
     .input(z.object({ symbol: z.string() }))
-    .query(async ({ input }) => {
+    .query(async ({ input }) => fetchWithCache(`fund:shareholding:${input.symbol}`, async () => {
       const live = await fetchETShareholding(input.symbol);
       if (live) return live;
       // ET Markets unreachable/no data — technical_signals already carries a promoter/FII/MF/
@@ -71,7 +77,7 @@ export const fundamentalsRouter = router({
         console.error("[Fundamentals Router] getShareholding DB fallback failed:", e);
         return null;
       }
-    }),
+    }, 3600)),
 
   // Added 2026-07-30 (Finding #94, full-stack audit): SmartMoneyMonitor.tsx previously had
   // no backend call at all -- a hardcoded array of 9 stocks with invented promoter/FII/DII
@@ -87,13 +93,23 @@ export const fundamentalsRouter = router({
       direction: z.enum(['accumulation', 'distribution']).default('accumulation'),
       limit: z.number().min(1).max(50).optional().default(20),
     }))
-    .query(async ({ input }) => {
+    .query(async ({ input }) => fetchWithCache(`fund:smart-money:${input.direction}:${input.limit}`, async () => {
       try {
+        // The windowed subquery used to be `SELECT *` -- materializing every one of
+        // technical_signals' ~300 columns for every historical row matching the (unindexed) OR
+        // filter, before the outer query narrows to rn=1. Deliberately NOT adding a date bound
+        // here (unlike the sibling fixes in this file/session): fii_chg_qoq/mf_chg_qoq are
+        // quarterly figures that may persist unchanged on a symbol's row for weeks, so a narrow
+        // date window could silently drop symbols whose latest value sits on an older row --
+        // that's a real behavior/correctness risk this sandbox has no live DB to verify against.
+        // Projecting only the columns actually read below is output-identical and still cuts
+        // the I/O materially.
         const rows = await dbAll<any>(`
           SELECT t.symbol, ns.name, t.date, t.promoter_chg_qoq, t.fii_chg_qoq, t.mf_chg_qoq,
                  (COALESCE(t.fii_chg_qoq, 0) + COALESCE(t.mf_chg_qoq, 0)) AS net_flow
           FROM (
-            SELECT *, ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY date DESC) AS rn
+            SELECT symbol, date, promoter_chg_qoq, fii_chg_qoq, mf_chg_qoq,
+                   ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY date DESC) AS rn
             FROM technical_signals
             WHERE fii_chg_qoq IS NOT NULL OR mf_chg_qoq IS NOT NULL
           ) t
@@ -117,11 +133,11 @@ export const fundamentalsRouter = router({
         console.error("[Fundamentals Router] getSmartMoneyFlow failed:", e);
         return [];
       }
-    }),
+    }, 300)),
 
   getCorporateActions: publicProcedure
     .input(z.object({ symbol: z.string() }))
-    .query(async ({ input }) => fetchETCorporateActions(input.symbol)),
+    .query(async ({ input }) => fetchWithCache(`fund:corp-actions:${input.symbol}`, () => fetchETCorporateActions(input.symbol), 3600)),
 
   // Market-wide corporate actions calendar — corporate_actions is populated daily but had no
   // consumer beyond a per-stock "has an action" boolean flag in EarlyHoursSpotter.tsx.
@@ -175,7 +191,7 @@ export const fundamentalsRouter = router({
 
   getMFInvestments: publicProcedure
     .input(z.object({ symbol: z.string() }))
-    .query(async ({ input }) => fetchMFInvestments(input.symbol)),
+    .query(async ({ input }) => fetchWithCache(`fund:mf-investments:${input.symbol}`, () => fetchMFInvestments(input.symbol), 3600)),
 
   getInsights: publicProcedure
     .input(z.object({ symbol: z.string() }))

@@ -4,6 +4,7 @@ import { dbGet, dbAll, dbRun } from "../dbAsync";
 import { alphaQuant } from "../alphaQuantClient";
 import { enqueueWalkForwardOptimize, getWalkForwardOptimizeJobStatus } from "../queues";
 import { router, publicProcedure, adminProcedure } from "../trpc";
+import { fetchWithCache } from "../cacheService";
 
 type RocResult = {
   regime: string; n: number; positives: number; negatives: number;
@@ -279,7 +280,14 @@ export const mlRouter = router({
                NULL AS avg_entry_price,
                AVG(julianday('now') - julianday(computed_at)) AS avg_age_days
         FROM confluence_signals
-        WHERE date(computed_at)::text >= date('now', '-30 days')
+        -- Was  WHERE date(computed_at)::text >= date('now', '-30 days')  -- wrapping the raw
+        -- partition column (confluence_signals is a TimescaleDB hypertable chunked on
+        -- computed_at) in date()::text defeats both a plain btree index AND Timescale's own
+        -- chunk-exclusion pruning, forcing a scan across every chunk back to the table's full
+        -- history instead of just the last ~5 (30d / 7d chunks). Casting the literal side
+        -- instead keeps the column bare and sargable; ::timestamptz survives PG translation
+        -- and is stripped (no-op) on the SQLite fallback path via stripPgCasts.
+        WHERE computed_at >= (date('now', '-30 days'))::timestamptz
         GROUP BY signal_source
       `);
 
@@ -310,13 +318,17 @@ export const mlRouter = router({
         ORDER BY signal_source, win_count DESC
       `);
 
+      // Was `WHERE (symbol, date) IN (SELECT symbol, MAX(date) FROM stock_ohlcv GROUP BY
+      // symbol)` -- a full GROUP BY aggregation over the entire stock_ohlcv hypertable to
+      // build the row-value IN list, re-scanning the table a second time to match it. Same
+      // ROW_NUMBER() rewrite used at scoring.router.ts's getStrategyPicks.
       const activeSignalGrowth = await dbAll<any>(`
         WITH latest_price AS (
-          SELECT symbol, close
-          FROM stock_ohlcv
-          WHERE (symbol, date) IN (
-            SELECT symbol, MAX(date) FROM stock_ohlcv GROUP BY symbol
-          )
+          SELECT symbol, close FROM (
+            SELECT symbol, close,
+                   ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY date DESC) AS rn
+            FROM stock_ohlcv
+          ) t WHERE rn = 1
         )
         SELECT ts.id,
                ts.symbol,
@@ -598,18 +610,31 @@ export const mlRouter = router({
     .input(z.object({
       minSamples: z.number().min(20).max(2000).default(50),
       maxPoints:  z.number().min(20).max(500).default(120),
+      // signal_outcomes has no upper bound on this query's WHERE clause and grows daily
+      // (237,816 rows and climbing per the 2026-07-28 audit) -- this AUC/ROC computation also
+      // runs synchronously in the request handler (Mann-Whitney rank sort over the whole
+      // result set), so an unbounded query means both I/O and CPU cost grow forever. A rolling
+      // window is enough for a regime-level AUC read and caps both.
+      days: z.number().min(30).max(1825).default(365),
     }).optional())
     .query(async ({ input }) => {
       const minN = input?.minSamples ?? 50;
       const maxPoints = input?.maxPoints ?? 120;
+      const days = input?.days ?? 365;
+      const cutoff = new Date(Date.now() - days * 864e5).toISOString().slice(0, 10);
 
+      // Same underlying data (signal_outcomes/technical_signals/model_registry) only changes on
+      // batch-job cadence, not per request -- this whole read-only diagnostics computation was
+      // re-run from scratch (including the synchronous rank-sort AUC math) on every single call.
+      return fetchWithCache(`ml:roc-diagnostics:${minN}:${maxPoints}:${days}`, async () => {
       const rows = await dbAll(`
         SELECT ts.nifty_regime AS regime, ts.win_probability AS prob,
                CASE WHEN so.outcome = 'WIN' THEN 1 ELSE 0 END AS y
         FROM signal_outcomes so JOIN technical_signals ts
           ON ts.symbol = so.symbol AND ts.date = so.signal_date
         WHERE so.outcome IN ('WIN', 'LOSS') AND ts.win_probability IS NOT NULL
-      `) as Array<{ regime: string | null; prob: number; y: number }>;
+          AND so.signal_date >= ?
+      `, [cutoff]) as Array<{ regime: string | null; prob: number; y: number }>;
 
       // A signal counts only when the ensemble actually scored it. Unscored rows carry
       // win_probability = 0.5 exactly (legacy default from the pre-fix scoring outage) or NaN — if
@@ -666,5 +691,6 @@ export const mlRouter = router({
         scoredTotal,
         computedAt: new Date().toISOString(),
       };
+      }, 300);
     }),
 });
