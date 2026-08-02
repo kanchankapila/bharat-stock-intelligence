@@ -28,6 +28,7 @@ import numpy as np
 import pandas as pd
 
 from db_compat import connect, read_df, translate, use_postgres
+from model_promotion import decide_promotion_with_nan_guard
 
 RET_THRESHOLD = 0.06     # +6% forward move = breakout
 HORIZON = 10             # within the next 10 trading days
@@ -327,15 +328,11 @@ def _load_baseline_test_auc(model_path: str) -> float | None:
 
 def _breakout_promotion_decision(test_auc: float, baseline_test_auc: float | None) -> tuple[bool, str | None]:
     """Pure gate decision: returns (promote, refusal_reason). A NaN held-out AUC (insufficient
-    holdout rows) must never auto-promote just because there happens to be no prior baseline."""
-    if test_auc is None or np.isnan(test_auc):
-        return False, "held-out test AUC is NaN (insufficient holdout data) -- cannot confirm this model is safe to promote."
-    if baseline_test_auc is None:
-        return True, None
-    if test_auc >= baseline_test_auc + BREAKOUT_PROMOTION_MARGIN:
-        return True, None
-    return False, (f"new held-out test AUC {test_auc:.4f} did not beat active model's "
-                    f"{baseline_test_auc:.4f} + {BREAKOUT_PROMOTION_MARGIN} margin.")
+    holdout rows) must never auto-promote just because there happens to be no prior baseline.
+    Delegates to the shared gate in model_promotion.py (also used by movement_predictor.py's
+    identical _movement_promotion_decision) -- same comparison, same NaN handling."""
+    return decide_promotion_with_nan_guard(test_auc, baseline_test_auc, BREAKOUT_PROMOTION_MARGIN,
+                                            metric_name="test AUC")
 
 
 def train(report_only: bool = False, leak_check: bool = False) -> dict:

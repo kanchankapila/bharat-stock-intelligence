@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 from db_compat import connect, read_df
+from model_promotion import clears_promotion_bar
 
 # Must be set before torch/cuBLAS initialises
 os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
@@ -666,7 +667,7 @@ def _promote_lstm_version(new_version: int, metrics: Dict) -> bool:
         ):
             baseline_auc = float(baseline["roc_auc"])
 
-    promote = baseline_auc is None or new_auc >= baseline_auc + LSTM_PROMOTION_MARGIN
+    promote = clears_promotion_bar(new_auc, baseline_auc, LSTM_PROMOTION_MARGIN)
 
     version_metrics[str(new_version)] = {k: (None if isinstance(v, float) and np.isnan(v) else v)
                                           for k, v in metrics.items()}

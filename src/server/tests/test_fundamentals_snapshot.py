@@ -42,17 +42,21 @@ class TestLastTradingSessionFloor:
     (the last completed trading session), matching the already-proven pattern."""
 
     def test_uses_max_stock_ohlcv_date_when_available(self, monkeypatch):
-        monkeypatch.setattr(fs, "query_scalar", lambda sql, *a, **k: "2026-07-29")
+        # logical_write_floor() (as_of.py) now owns the MAX(date) FROM stock_ohlcv query --
+        # extracted into the shared helper 10+ fetchers were independently hand-rolling.
+        monkeypatch.setattr(fs, "logical_write_floor", lambda *a, **k: "2026-07-29")
         assert fs._last_trading_session_floor("2026-07-30") == "2026-07-29"
 
     def test_falls_back_to_as_of_when_stock_ohlcv_empty(self, monkeypatch):
-        monkeypatch.setattr(fs, "query_scalar", lambda sql, *a, **k: None)
+        # logical_write_floor() itself returns the given fallback when stock_ohlcv is empty --
+        # simulate that by honoring the fallback kwarg, same as the real implementation.
+        monkeypatch.setattr(fs, "logical_write_floor", lambda *a, fallback=None, **k: fallback)
         assert fs._last_trading_session_floor("2026-07-30") == "2026-07-30"
 
     def test_falls_back_to_as_of_on_query_failure(self, monkeypatch):
         def raises(*a, **k):
             raise RuntimeError("DB unavailable")
-        monkeypatch.setattr(fs, "query_scalar", raises)
+        monkeypatch.setattr(fs, "logical_write_floor", raises)
         assert fs._last_trading_session_floor("2026-07-30") == "2026-07-30"
 
 

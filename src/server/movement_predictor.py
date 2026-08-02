@@ -48,6 +48,7 @@ import pandas as pd
 
 from db_compat import connect, read_df, translate
 from breakout_classifier import compute_ohlcv_features, FEATURE_COLS as OHLCV_FEATURE_COLS
+from model_promotion import decide_promotion_with_nan_guard
 
 TOP_PCT = 0.90            # top decile of day-range = "high movement"
 MIN_PRICE = 20.0
@@ -389,16 +390,12 @@ def _movement_promotion_decision(test_auc: float, baseline_test_auc: float | Non
 
     A NaN held-out AUC (insufficient holdout rows) must never auto-promote just because
     there happens to be no prior baseline to fail against -- "no baseline" and "invalid
-    metric" are different states that were conflated before this fix.
+    metric" are different states that were conflated before this fix. Delegates to the
+    shared gate in model_promotion.py (also used by breakout_classifier.py's identical
+    _breakout_promotion_decision) -- same comparison, same NaN handling, same messages.
     """
-    if np.isnan(test_auc):
-        return False, "held-out test AUC is NaN (insufficient holdout data) -- cannot confirm this model is safe to promote."
-    if baseline_test_auc is None:
-        return True, None
-    if test_auc >= baseline_test_auc + MOVEMENT_PROMOTION_MARGIN:
-        return True, None
-    return False, (f"new held-out test AUC {test_auc:.4f} did not beat active model's "
-                    f"{baseline_test_auc:.4f} + {MOVEMENT_PROMOTION_MARGIN} margin.")
+    return decide_promotion_with_nan_guard(test_auc, baseline_test_auc, MOVEMENT_PROMOTION_MARGIN,
+                                            metric_name="test AUC")
 
 
 def train(report_only: bool = False, enrich: bool = False, leak_check: bool = False) -> dict:

@@ -21,7 +21,9 @@ class TestUpdateTechnicalSignalsScoped:
     never written to."""
 
     def test_read_df_is_bounded_by_trading_session_floor(self, monkeypatch):
-        monkeypatch.setattr(mf, "query_scalar", lambda sql: "2026-07-29")
+        # logical_write_floor() (as_of.py) now owns the MAX(date) FROM stock_ohlcv query --
+        # extracted into the shared helper 10+ fetchers were independently hand-rolling.
+        monkeypatch.setattr(mf, "logical_write_floor", lambda *a, **k: "2026-07-29")
 
         captured = {}
 
@@ -42,7 +44,9 @@ class TestUpdateTechnicalSignalsScoped:
         assert captured["params"] == ("2026-07-29",)
 
     def test_falls_back_to_today_when_stock_ohlcv_has_no_rows(self, monkeypatch):
-        monkeypatch.setattr(mf, "query_scalar", lambda sql: None)
+        # logical_write_floor() itself returns the given fallback when stock_ohlcv is empty --
+        # simulate that by honoring the fallback kwarg, same as the real implementation.
+        monkeypatch.setattr(mf, "logical_write_floor", lambda *a, fallback=None, **k: fallback)
 
         captured = {}
 
@@ -58,13 +62,13 @@ class TestUpdateTechnicalSignalsScoped:
 
     def test_empty_flow_map_short_circuits_without_querying_db(self, monkeypatch):
         called = []
-        monkeypatch.setattr(mf, "query_scalar", lambda sql: called.append(True))
+        monkeypatch.setattr(mf, "logical_write_floor", lambda *a, **k: called.append(True))
         result = mf._update_technical_signals(pd.DataFrame(columns=["sector", "flow_pct"]))
         assert result == 0
         assert called == []
 
     def test_only_matched_sector_rows_within_the_floor_get_written(self, monkeypatch):
-        monkeypatch.setattr(mf, "query_scalar", lambda sql: "2026-07-29")
+        monkeypatch.setattr(mf, "logical_write_floor", lambda *a, **k: "2026-07-29")
         monkeypatch.setattr(mf, "read_df", lambda sql, params=(): pd.DataFrame({
             "symbol": ["TCS", "HDFCBANK", "RANDOMCO"],
             "date": ["2026-07-29", "2026-07-29", "2026-07-29"],

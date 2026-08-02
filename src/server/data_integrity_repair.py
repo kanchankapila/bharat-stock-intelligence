@@ -21,6 +21,7 @@ import json
 import re
 
 from db_compat import connect, ConnWrapper
+from hypertable_safe_write import safe_keyed_update
 
 # A bar is physically impossible if OHLC is internally inconsistent, or if it implies a
 # 1-day move beyond what NSE circuit limits allow, with no corporate action to explain it.
@@ -85,21 +86,11 @@ def repair_bad_bars(conn: ConnWrapper, dry: bool) -> None:
     if not found or dry:
         return
 
-    # stock_ohlcv is a compressed TimescaleDB hypertable. A predicate-wide UPDATE makes
-    # Timescale decompress every chunk it might touch (2.2M tuples -> hits
-    # max_tuples_decompressed_per_dml_transaction). Updating by explicit (symbol, date) key
-    # in small batches keeps decompression to the handful of chunks actually affected.
-    conn.execute("SET timescaledb.max_tuples_decompressed_per_dml_transaction = 0")
-    items = list(found.items())
-    done = 0
-    for i in range(0, len(items), 50):
-        batch = items[i:i + 50]
-        for (sym, dt), reason in batch:
-            conn.execute(
-                "UPDATE stock_ohlcv SET is_suspect=1, suspect_reason=? "
-                "WHERE symbol=? AND date::text=?", (reason, sym, dt))
-        conn.commit()
-        done += len(batch)
+    done = safe_keyed_update(
+        conn,
+        "UPDATE stock_ohlcv SET is_suspect=1, suspect_reason=? WHERE symbol=? AND date::text=?",
+        [(reason, sym, dt) for (sym, dt), reason in found.items()],
+        batch_size=50)
     _log(f"  flagged {done} bars")
 
     total = conn.execute("SELECT count(*) FROM stock_ohlcv WHERE is_suspect=1").fetchone()[0]

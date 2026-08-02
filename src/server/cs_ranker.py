@@ -23,6 +23,7 @@ import pandas as pd
 from scipy.stats import spearmanr
 
 from db_compat import connect, read_df, ConnWrapper
+from model_promotion import clears_promotion_bar
 from as_of import as_of_join_sql
 
 # Import feature engineering from the binary ensemble — same pipeline, different label.
@@ -288,7 +289,7 @@ def _register_cs_model(conn: ConnWrapper, m: dict) -> int:
 
     baseline_rho = _active_cs_baseline(conn)
     new_rho = m['spearman_rho']
-    promote = baseline_rho is None or new_rho >= baseline_rho + CS_PROMOTION_MARGIN
+    promote = clears_promotion_bar(new_rho, baseline_rho, CS_PROMOTION_MARGIN)
 
     cur = conn.cursor()
     if not promote:

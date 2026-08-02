@@ -27,6 +27,7 @@ import numpy as np
 import pandas as pd
 
 from db_compat import execute, executemany, query_one, read_df
+from model_promotion import clears_promotion_bar
 
 MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ml_models", "live_screener_intraday_clf.pkl")
 CANDIDATE_PATH = MODEL_PATH.replace(".pkl", "_candidate.pkl")
@@ -231,10 +232,8 @@ def train():
         print(f"[LiveScreenerMLRanker] LIVE AUC unavailable ({live_n} gradeable rows, "
               f"need {LIVE_AUC_MIN_ROWS}) -- using standard promotion margin.")
 
-    promote = (
-        baseline is None or baseline.get("test_auc") is None
-        or test_auc >= baseline["test_auc"] + margin
-    )
+    baseline_test_auc = baseline.get("test_auc") if baseline else None
+    promote = clears_promotion_bar(test_auc, baseline_test_auc, margin)
 
     # Refit on ALL data (train + test windows) for the artifact that actually goes live --
     # matches the OOF/held-out probe above, same as breakout_classifier.py's convention.

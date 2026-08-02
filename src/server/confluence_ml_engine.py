@@ -17,6 +17,7 @@ import numpy as np
 from datetime import datetime, timedelta
 
 from db_compat import connect, use_postgres, ConnWrapper
+from model_promotion import clears_promotion_bar
 from as_of import as_of_join_sql
 
 # ── Optional imports (graceful fallback) ──────────────────────────────────────
@@ -302,7 +303,7 @@ def train(conn):
     except Exception:
         pass
 
-    promote = baseline_auc is None or new_auc >= baseline_auc + PROMOTION_MARGIN
+    promote = clears_promotion_bar(new_auc, baseline_auc, PROMOTION_MARGIN)
 
     os.makedirs(MODEL_DIR, exist_ok=True)
     version = datetime.now().strftime('%Y%m%d_%H%M%S')

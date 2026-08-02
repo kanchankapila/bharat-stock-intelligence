@@ -40,6 +40,7 @@ import pandas as pd
 
 from db_compat import connect, read_df, use_postgres, ConnWrapper
 from as_of import as_of_join_sql
+from model_promotion import clears_promotion_bar
 
 MODELS_DIR  = os.path.join(os.getcwd(), 'src', 'server', 'ml_models')
 ENSEMBLE_PATH = os.path.join(MODELS_DIR, 'ensemble.pkl')
@@ -2706,7 +2707,7 @@ def promote_or_register(conn: ConnWrapper, ensemble: dict) -> int:
     new_test_auc = ensemble.get('test_auc')
     baseline = _active_baseline(conn)
 
-    clears_cv_bar = baseline is None or new_cv_auc >= baseline['cv_auc'] + PROMOTION_MARGIN
+    clears_cv_bar = clears_promotion_bar(new_cv_auc, baseline['cv_auc'] if baseline else None, PROMOTION_MARGIN)
     # Only enforce the test-AUC gate when both sides have a real reading to compare.
     clears_test_gate = (
         baseline is None or baseline['test_auc'] is None or new_test_auc is None
