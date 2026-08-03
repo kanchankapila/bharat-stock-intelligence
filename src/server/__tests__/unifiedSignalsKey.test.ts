@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { dbRun, dbAll } from '../dbAsync';
+
+// Isolates this test from the host environment's USE_POSTGRES -- see createSignal.test.ts
+// for the full explanation of why a dynamic import is required here, not a plain top-level
+// statement before a static `import { dbRun, dbAll } from '../dbAsync'`.
+process.env.USE_POSTGRES = 'false';
+const { dbRun, dbAll } = await import('../dbAsync');
 
 describe('unified_signals 4-col uniqueness key', () => {
   beforeEach(async () => {

@@ -1,6 +1,14 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
 process.env.DATABASE_URL = ':memory:';
+// Isolates this test from the host environment's USE_POSTGRES (dbAsync.ts's usePostgres()
+// reads it fresh on every call, not just at import time) -- without this, a real dev/CI
+// environment with USE_POSTGRES=true routes every dbAsync call to a live Postgres pool
+// instead of the in-memory SQLite `db` this file sets up and populates directly, and the
+// test fails on ECONNREFUSED regardless of what it's actually testing. Must be set before
+// any (even transitive) import of dbAsync.ts/pgConfig.ts -- see the dynamic `await import`
+// below, which exists specifically so these env vars land first.
+process.env.USE_POSTGRES = 'false';
 const dbModule = await import('../db');
 const db = dbModule.default;
 const backtestModule = await import('../backtestRunner');
