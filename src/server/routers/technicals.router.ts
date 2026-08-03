@@ -77,7 +77,10 @@ export const technicalsRouter = router({
       }));
     }),
 
-  getUnifiedSignals: publicProcedure
+  // Renamed from getUnifiedSignals (2026-08) -- despite the old name, this has never read the
+  // unified_signals table. It reads technical_signals LEFT JOIN confluence_signals and computes
+  // its own ad-hoc unified_score, unrelated to unified_signals or unified_recommendations.
+  getTechnicalConfluenceSignals: publicProcedure
     .input(z.object({
       date:          z.string().optional(),
       minUnified:    z.number().min(0).max(1).default(0.55),
