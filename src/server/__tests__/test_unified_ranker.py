@@ -52,10 +52,6 @@ def make_db():
             entry_price REAL, actual_return_pct REAL, outcome TEXT,
             generated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
-        CREATE TABLE technical_analysis_signals (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, symbol TEXT,
-            date TEXT, win_probability REAL, signal_score REAL
-        );
         CREATE TABLE technical_signals (
             id INTEGER PRIMARY KEY AUTOINCREMENT, symbol TEXT,
             date TEXT, win_probability REAL, calibrated_win_probability REAL,

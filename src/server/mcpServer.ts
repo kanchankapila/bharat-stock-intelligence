@@ -161,8 +161,16 @@ server.tool(
       const factorBreakdowns = await dbAll("SELECT * FROM stock_factor_breakdown WHERE symbol = ?", [sym]) as any[];
       const quantScores = await dbGet("SELECT * FROM quant_scores WHERE symbol = ?", [sym]) as any;
 
-      // 3. Technical analysis signals
-      const techSignals = await dbGet("SELECT * FROM technical_analysis_signals WHERE symbol = ?", [sym]) as any;
+      // 3. Technical analysis signals (technical_analysis_signals folded into unified_signals,
+      // signal_source='technical', Cluster B-lite 2026-08 -- aliases keep the same shape
+      // markdown below reads: trend/rsi/entry_price/target_price/stop_loss/patterns)
+      const techSignals = await dbGet(`
+        SELECT signal_type AS trend, technical_score AS rsi, entry_price, target_price,
+               stop_loss, ai_reasoning AS patterns
+        FROM unified_signals
+        WHERE symbol = ? AND signal_source = 'technical'
+        ORDER BY signal_generated_at DESC LIMIT 1
+      `, [sym]) as any;
       const dailyTech = await dbGet("SELECT * FROM technical_signals WHERE symbol = ? ORDER BY date DESC LIMIT 1", [sym]) as any;
 
       // 4. Fundamentals (Yahoo bulk sync data)

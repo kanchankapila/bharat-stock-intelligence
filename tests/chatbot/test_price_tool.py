@@ -46,14 +46,17 @@ def test_get_earnings_calendar_returns_dict_with_expected_keys(tmp_path):
     import sqlite3
     db_path = str(tmp_path / "test.db")
     conn = sqlite3.connect(db_path)
+    # technical_analysis_signals folded into unified_signals (signal_source='technical',
+    # Cluster B-lite, 2026-08): trend -> signal_type, rsi -> technical_score.
     conn.executescript("""
         CREATE TABLE nse_stocks (symbol TEXT PRIMARY KEY, name TEXT, sector TEXT, industry TEXT);
-        CREATE TABLE technical_analysis_signals (symbol TEXT PRIMARY KEY, trend TEXT, rsi REAL);
+        CREATE TABLE unified_signals (symbol TEXT, signal_source TEXT, signal_type TEXT,
+            technical_score REAL, signal_generated_at TEXT);
         CREATE TABLE stock_scores (symbol TEXT, timeframe TEXT, score REAL, classification TEXT,
             confidence REAL, top_domain TEXT, PRIMARY KEY (symbol, timeframe));
     """)
     conn.execute("INSERT INTO nse_stocks VALUES ('INFY','Infosys Ltd','IT','Software')")
-    conn.execute("INSERT INTO technical_analysis_signals VALUES ('INFY','Bullish',62.0)")
+    conn.execute("INSERT INTO unified_signals VALUES ('INFY','technical','Bullish',62.0,'2026-08-03T18:00:00')")
     conn.execute("INSERT INTO stock_scores VALUES ('INFY','long_term',80.0,'Buy',0.82,'Technical')")
     conn.commit()
     conn.close()

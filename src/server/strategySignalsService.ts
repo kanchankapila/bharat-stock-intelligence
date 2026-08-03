@@ -208,9 +208,18 @@ export async function qualityOversoldScanner(maxRsi = 35, maxScore = 65): Promis
 
     if (qualityMap.size === 0) return [];
 
+    // technical_analysis_signals folded into unified_signals (signal_source='technical',
+    // Cluster B-lite, 2026-08) -- rsi now lives in technical_score. The widened 4-col
+    // conflict key allows multiple signal_types per symbol per day, so "latest row" needs an
+    // explicit MAX(signal_generated_at), unlike the old table's one-row-per-symbol PK.
     const rsiRows = await dbAll(`
-      SELECT symbol, rsi FROM technical_analysis_signals
-      WHERE rsi <= ? AND symbol IS NOT NULL
+      SELECT u.symbol, u.technical_score AS rsi
+      FROM unified_signals u
+      WHERE u.signal_source = 'technical' AND u.technical_score <= ? AND u.symbol IS NOT NULL
+        AND u.signal_generated_at = (
+          SELECT MAX(u2.signal_generated_at) FROM unified_signals u2
+          WHERE u2.symbol = u.symbol AND u2.signal_source = 'technical'
+        )
     `, [maxRsi]) as { symbol: string; rsi: number }[];
     const rsiMap = new Map(rsiRows.map(r => [r.symbol, r.rsi]));
 

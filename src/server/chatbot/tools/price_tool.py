@@ -43,14 +43,21 @@ def get_earnings_calendar(days_ahead: int = 14, db_path: str = DB_PATH) -> dict:
     query = f"NSE BSE quarterly results announcement upcoming {month_year} earnings calendar"
     web_results = web_search(query, max_results=5)
 
+    # technical_analysis_signals folded into unified_signals (signal_source='technical',
+    # Cluster B-lite, 2026-08): trend -> signal_type, rsi -> technical_score. The widened
+    # 4-col conflict key allows multiple signal_types/day, so "latest row" needs an explicit
+    # MAX(signal_generated_at) rather than assuming one row per symbol.
     conn = connect()
     bullish = conn.execute("""
-        SELECT tas.symbol, ns.name, ns.sector, tas.trend, tas.rsi,
-               ss.score, ss.classification
-        FROM technical_analysis_signals tas
+        SELECT tas.symbol, ns.name, ns.sector, tas.signal_type AS trend,
+               tas.technical_score AS rsi, ss.score, ss.classification
+        FROM unified_signals tas
         JOIN nse_stocks ns ON tas.symbol = ns.symbol
         LEFT JOIN stock_scores ss ON tas.symbol = ss.symbol AND ss.timeframe = 'long_term'
-        WHERE tas.trend = 'Bullish'
+        WHERE tas.signal_source = 'technical' AND tas.signal_type = 'Bullish'
+          AND tas.signal_generated_at = (
+              SELECT MAX(u2.signal_generated_at) FROM unified_signals u2
+              WHERE u2.symbol = tas.symbol AND u2.signal_source = 'technical')
           AND (ss.classification IN ('Buy','Strong Buy') OR ss.classification IS NULL)
         ORDER BY ss.score DESC
         LIMIT 20
