@@ -2129,20 +2129,8 @@ CREATE TABLE IF NOT EXISTS "strategy_performance" (
 );
 CREATE INDEX idx_perfkey ON strategy_performance(strategy_name, horizon_days);
 
--- ── technical_analysis_signals ─────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS "technical_analysis_signals" (
-  "symbol" TEXT,
-  "trend" TEXT,
-  "rsi" DOUBLE PRECISION,
-  "macd" TEXT,
-  "bollinger" TEXT,
-  "patterns" TEXT,
-  "entry_price" DOUBLE PRECISION,
-  "target_price" DOUBLE PRECISION,
-  "stop_loss" DOUBLE PRECISION,
-  "last_updated" TIMESTAMPTZ DEFAULT now(),
-  PRIMARY KEY ("symbol")
-);
+-- technical_analysis_signals folded into unified_signals (signal_source='technical'),
+-- Cluster B-lite, 2026-08 -- see migration 074_drop_technical_analysis_signals in db.ts.
 
 -- ── technical_composite_scores ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "technical_composite_scores" (

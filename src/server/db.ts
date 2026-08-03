@@ -388,18 +388,8 @@ db.exec(`
   );
 
   -- 9. Technical Analysis Signals & Predictions
-  CREATE TABLE IF NOT EXISTS technical_analysis_signals (
-    symbol TEXT PRIMARY KEY,
-    trend TEXT, -- 'Bullish' | 'Bearish' | 'Neutral'
-    rsi REAL,
-    macd TEXT,
-    bollinger TEXT,
-    patterns TEXT, -- JSON array of detected candlestick patterns
-    entry_price REAL,
-    target_price REAL,
-    stop_loss REAL,
-    last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
+  -- technical_analysis_signals folded into unified_signals (signal_source='technical'),
+  -- Cluster B-lite, 2026-08 -- see migration 074_drop_technical_analysis_signals below.
 
   -- 8. Strategies & Settings
   CREATE TABLE IF NOT EXISTS backtest_strategies (
@@ -2968,6 +2958,13 @@ runMigration('072_nse_stocks_provider_ids', `
 // unified_ranker.py's _blend() renormalized weights (see unified_ranker.py's `present` set).
 runMigration('073_unified_recommendations_engine_coverage', `
   ALTER TABLE unified_recommendations ADD COLUMN engine_coverage_count INTEGER;
+`);
+
+// technical_analysis_signals folded into unified_signals (signal_source='technical'),
+// Cluster B-lite, 2026-08 -- writer (technical_analysis_engine.py) and all 3 non-UI readers
+// (mcpServer.ts, strategySignalsService.ts, chatbot price_tool.py) already repointed.
+runMigration('074_drop_technical_analysis_signals', `
+  DROP TABLE IF EXISTS technical_analysis_signals;
 `);
 
 // Keep startup diagnostics off stdout so stdio-based clients can parse JSON-RPC.
