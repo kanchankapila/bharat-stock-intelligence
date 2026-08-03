@@ -612,6 +612,10 @@ db.exec(`
     signal_score  INTEGER,
     signals_json  TEXT,
     computed_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+    -- label_definition ('terminal_pct2' | 'path_barrier' | 'unknown') / is_suspect: see the
+    -- migrateColumn() catch-up below for why these are on the CREATE TABLE too.
+    label_definition TEXT,
+    is_suspect    INTEGER DEFAULT 0,
     PRIMARY KEY (symbol, signal_date, horizon_days)
   );
 
@@ -1542,6 +1546,13 @@ migrateColumn('screener_master', 'signal_type_tag', "TEXT DEFAULT 'OTHER'");
 
 // signal_outcomes — max intraday high return over horizon for accurate WIN detection
 migrateColumn('signal_outcomes', 'max_return_pct', 'REAL');
+
+// signal_outcomes — label_definition/is_suspect were previously added only via
+// data_integrity_repair.py's runtime ALTER TABLE ... ADD COLUMN IF NOT EXISTS; not in the
+// tracked schema, so a fresh bootstrap or DR restore would silently lose them. Schema
+// catch-up, 2026-08 -- no behavior change, the live DB already has these columns.
+migrateColumn('signal_outcomes', 'label_definition', 'TEXT');
+migrateColumn('signal_outcomes', 'is_suspect', 'INTEGER DEFAULT 0');
 
 // signal_excursions — triple-barrier label (vol-scaled, asymmetric) + the ATR%% scale
 // it was computed against, written by exit_labeler.py. Consumed by ml_ensemble --label.

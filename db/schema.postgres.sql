@@ -1776,11 +1776,18 @@ CREATE TABLE IF NOT EXISTS "signal_outcomes" (
   "signals_json" TEXT,
   "computed_at" TIMESTAMPTZ DEFAULT now(),
   "max_return_pct" DOUBLE PRECISION,
+  -- label_definition ('terminal_pct2' | 'path_barrier' | 'unknown') / is_suspect were
+  -- previously added only at runtime by data_integrity_repair.py's ALTER TABLE ... ADD
+  -- COLUMN IF NOT EXISTS -- absent here, a fresh bootstrap or DR restore would silently lose
+  -- them even though they already exist on the live table. Schema catch-up, 2026-08.
+  "label_definition" TEXT,
+  "is_suspect" SMALLINT DEFAULT 0,
   PRIMARY KEY ("symbol", "signal_date", "horizon_days")
 );
 CREATE INDEX idx_sout_date    ON signal_outcomes(signal_date DESC);
 CREATE INDEX idx_sout_outcome ON signal_outcomes(outcome);
 CREATE INDEX idx_sout_sym     ON signal_outcomes(symbol);
+CREATE INDEX idx_so_label     ON signal_outcomes(label_definition);
 
 -- ── signal_portfolio_correlation ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "signal_portfolio_correlation" (
