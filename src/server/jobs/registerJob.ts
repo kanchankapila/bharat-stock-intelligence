@@ -91,16 +91,35 @@ export async function addJobWithCatchup(
     }
 
     if (missed) {
-      const delay = _catchupSlot++ * CATCHUP_STAGGER_MS;
-      console.log(
-        `[QUEUE] Job ${jobName} in ${queue.name} missed its scheduled run. ` +
-        `Catch-up queued with a ${delay / 60_000}min stagger.`,
-      );
-      const catchupOpts = { ...opts };
-      delete catchupOpts.repeat;
-      catchupOpts.jobId = `${opts.jobId || jobName}-catchup-${now}`;
-      catchupOpts.delay = delay;
-      await queue.add(jobName, { ...data, isCatchup: true }, catchupOpts);
+      // Guard against a second restart queuing a duplicate catchup while one from an earlier
+      // restart is still in flight: getJobs(['completed','failed']) above only sees FINISHED
+      // work, so a still-running (active/waiting/delayed) catchup from a prior restart is
+      // invisible to the "missed" check -- a second restart minutes later independently
+      // concludes "missed" too and queues its own. Confirmed live 2026-08-02/03: two
+      // ml-weekly-retrain catchups ~30min apart from two restarts ran concurrently, and the
+      // resulting resource contention made exit_policy.py --train time out on every attempt
+      // that weekend (it has no dedicated timeout headroom for two full retrains competing for
+      // the same 5-concurrent-Python-subprocess cap). Same risk for every other queue this
+      // helper serves, not just ml-weekly-retrain, so the guard is generic.
+      const inFlight = await queue.getJobs(['active', 'waiting', 'delayed'], 0, -1, false);
+      const alreadyPending = inFlight.some(j => j.name === jobName);
+      if (alreadyPending) {
+        console.log(
+          `[QUEUE] Job ${jobName} in ${queue.name} missed its scheduled run, but an instance ` +
+          `is already active/waiting/delayed -- skipping duplicate catch-up.`,
+        );
+      } else {
+        const delay = _catchupSlot++ * CATCHUP_STAGGER_MS;
+        console.log(
+          `[QUEUE] Job ${jobName} in ${queue.name} missed its scheduled run. ` +
+          `Catch-up queued with a ${delay / 60_000}min stagger.`,
+        );
+        const catchupOpts = { ...opts };
+        delete catchupOpts.repeat;
+        catchupOpts.jobId = `${opts.jobId || jobName}-catchup-${now}`;
+        catchupOpts.delay = delay;
+        await queue.add(jobName, { ...data, isCatchup: true }, catchupOpts);
+      }
     }
   } catch (err) {
     console.warn(`[QUEUE] Failed to determine catch-up for ${jobName}:`, err);

@@ -7,7 +7,7 @@ vi.mock('../dbAsync', () => ({
   dbExec: vi.fn(async () => {}),
 }));
 
-import { DATA_QUALITY_CHECKS, daysStale, safeRatio, runDataQualityChecks } from '../dataQualityChecks';
+import { DATA_QUALITY_CHECKS, daysStale, tradingDaysStale, safeRatio, runDataQualityChecks } from '../dataQualityChecks';
 
 describe('daysStale', () => {
   const now = new Date('2026-07-19T12:00:00Z');
@@ -31,6 +31,36 @@ describe('daysStale', () => {
   });
 });
 
+describe('tradingDaysStale', () => {
+  it('returns null for missing/unparseable values, same as daysStale', () => {
+    const now = new Date('2026-08-03T12:00:00Z');
+    expect(tradingDaysStale(null, now)).toBeNull();
+    expect(tradingDaysStale('not-a-date', now)).toBeNull();
+  });
+
+  it('subtracts the weekend from a Friday-to-Monday gap (the regression this fixes)', () => {
+    // Friday 2026-07-31 -> Monday 2026-08-03, ~08:40 IST (03:10 UTC) check time.
+    const now = new Date('2026-08-03T03:10:00Z');
+    const raw = daysStale('2026-07-31', now)!;
+    const adjusted = tradingDaysStale('2026-07-31', now)!;
+    expect(raw).toBeGreaterThan(3); // this is what falsely warned before the fix
+    expect(adjusted).toBeLessThan(2); // Sat+Sun subtracted -> reads as a normal same-week lag
+    expect(raw - adjusted).toBeCloseTo(2, 5);
+  });
+
+  it('does not subtract anything for a same-week weekday gap', () => {
+    // Tuesday -> Wednesday, no weekend in between.
+    const now = new Date('2026-07-22T12:00:00Z');
+    expect(tradingDaysStale('2026-07-21', now)).toBeCloseTo(daysStale('2026-07-21', now)!, 5);
+  });
+
+  it('never goes negative even if the weekend subtraction would overshoot', () => {
+    const now = new Date('2026-08-01T01:00:00Z'); // Saturday, just after Friday close
+    const adjusted = tradingDaysStale('2026-07-31T18:30:00Z', now)!;
+    expect(adjusted).toBeGreaterThanOrEqual(0);
+  });
+});
+
 describe('safeRatio', () => {
   it('divides normally', () => {
     expect(safeRatio(3, 12)).toBeCloseTo(0.25, 6);
@@ -51,6 +81,26 @@ describe('DATA_QUALITY_CHECKS registry', () => {
   it('has no duplicate ids', () => {
     const ids = DATA_QUALITY_CHECKS.map(c => c.id);
     expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('covers at least 55 checks (25 hand-written + the 2026-08-03 live-datasource sweep)', () => {
+    // Not a magic-number pin on the exact count -- a floor. This exists so a future refactor
+    // that accidentally drops the generated TABLE_FRESHNESS_CHECKS entries (e.g. forgetting the
+    // spread into DATA_QUALITY_CHECKS) fails a test instead of silently shrinking coverage back
+    // toward the ~25 checks this file started with.
+    expect(DATA_QUALITY_CHECKS.length).toBeGreaterThanOrEqual(55);
+  });
+
+  it('every generated freshness check\'s SQL targets its own declared table', () => {
+    // Spot-checks a representative sample rather than every entry -- this is a wiring
+    // sanity check (did the factory interpolate the right table name), not a re-test of the
+    // factory's own logic (covered by the dedicated describe block below).
+    const sample = ['nse-universe-history-freshness', 'confluence-signals-freshness', 'mf-sector-allocation-recency'];
+    for (const id of sample) {
+      const check = DATA_QUALITY_CHECKS.find(c => c.id === id)!;
+      expect(check).toBeDefined();
+      expect(check.sql).toMatch(/FROM \S+/);
+    }
   });
 
   it('every check has a non-empty label and sql', () => {
@@ -78,6 +128,44 @@ describe('individual evaluate() functions', () => {
   it('ohlcv-freshness-coverage passes for fresh, broad data', () => {
     const r = byId('ohlcv-freshness-coverage').evaluate({ last_date: '2026-07-19T00:00:00Z', symbols: 2000 }, now);
     expect(r.status).toBe('pass');
+  });
+
+  it('ohlcv-freshness-coverage does not false-warn on a Monday morning check for Friday data (regression)', () => {
+    const mondayMorning = new Date('2026-08-03T03:10:00Z'); // ~08:40 IST
+    const r = byId('ohlcv-freshness-coverage').evaluate({ last_date: '2026-07-31', symbols: 2436 }, mondayMorning);
+    expect(r.status).toBe('pass');
+  });
+
+  it('fii-dii-flow-freshness does not false-warn on a Monday morning check for Friday data (regression)', () => {
+    const mondayMorning = new Date('2026-08-03T03:10:00Z');
+    const r = byId('fii-dii-flow-freshness').evaluate({ last_date: '2026-07-31' }, mondayMorning);
+    expect(r.status).toBe('pass');
+  });
+
+  it('market-regimes-freshness does not false-warn on a Monday morning check for Friday data (regression)', () => {
+    const mondayMorning = new Date('2026-08-03T03:10:00Z');
+    const r = byId('market-regimes-freshness').evaluate({ last_date: '2026-07-31' }, mondayMorning);
+    expect(r.status).toBe('pass');
+  });
+
+  it('ohlcv/fii-dii/market-regimes freshness checks still fail a real multi-weekday outage', () => {
+    // A full week stale (well beyond any weekend adjustment) must still fail/warn.
+    const aWeekLater = new Date('2026-08-07T12:00:00Z');
+    expect(byId('ohlcv-freshness-coverage').evaluate({ last_date: '2026-07-31', symbols: 2436 }, aWeekLater).status).toBe('fail');
+    expect(byId('fii-dii-flow-freshness').evaluate({ last_date: '2026-07-31' }, aWeekLater).status).toBe('fail');
+    expect(byId('market-regimes-freshness').evaluate({ last_date: '2026-07-31' }, aWeekLater).status).toBe('fail');
+  });
+
+  it('insider-trades-recency reads the parsed date_iso column, not the raw non-sortable display-text date', () => {
+    // insider_trades.date is NSE's raw "22 May, 2026"-style text -- MAX(date) sorts lexically and
+    // silently returns the wrong "latest" row. date_iso is the ISO column added to fix that.
+    expect(byId('insider-trades-recency').sql).toMatch(/date_iso/);
+    expect(byId('insider-trades-recency').sql).not.toMatch(/MAX\(date\)/);
+  });
+
+  it('bulk-deals-recency (id kept stable) now points at the live block_deals table, not the dead bulk_deals one', () => {
+    expect(byId('bulk-deals-recency').sql).toMatch(/block_deals/);
+    expect(byId('bulk-deals-recency').sql).not.toMatch(/\bbulk_deals\b/);
   });
 
   it('technical-signals-freshness-coverage fails on the exact silent-collapse regression (low coverage, job still "fresh")', () => {
@@ -116,6 +204,56 @@ describe('individual evaluate() functions', () => {
   it('signal-outcomes-resolution-rate passes when the backlog is mostly resolved', () => {
     const r = byId('signal-outcomes-resolution-rate').evaluate({ total: 200, pending: 10 }, now);
     expect(r.status).toBe('pass');
+  });
+});
+
+describe('generated freshness checks (TABLE_FRESHNESS_CHECKS via makeFreshnessCheck)', () => {
+  const now = new Date('2026-08-03T12:00:00Z'); // a Monday
+  const byId = (id: string) => DATA_QUALITY_CHECKS.find(c => c.id === id)!;
+
+  it('a critical, standard 3-tier check (nse_universe_history) fails on an empty table', () => {
+    const r = byId('nse-universe-history-freshness').evaluate(undefined, now);
+    expect(r.status).toBe('fail');
+  });
+
+  it('a non-critical standard check reads empty as a warn, not a fail', () => {
+    const r = byId('so-option-chain-freshness').evaluate(undefined, now);
+    expect(r.status).toBe('warn');
+  });
+
+  it('a "sparse by nature" check (no failDays) never returns fail, only warn/pass', () => {
+    // 66 days stale -- would be a hard fail under a standard 3-tier threshold.
+    const r = byId('insider-transactions-recency').evaluate({ last_date: '2026-05-29' }, now);
+    expect(r.status).toBe('warn');
+    expect(r.detail).toMatch(/sparse by nature/);
+  });
+
+  it('mf-sector-allocation-recency (found empty by this very sweep) reads as warn on a real empty table', () => {
+    const r = byId('mf-sector-allocation-recency').evaluate(undefined, now);
+    expect(r.status).toBe('warn');
+    expect(r.detail).toBe('mf_sector_allocation is empty');
+  });
+
+  it('trading-day-aware checks absorb a weekend gap (Friday data on a Monday check)', () => {
+    // Same regression shape as the ohlcv/fii-dii/market-regimes fix above, exercised through
+    // the generic factory this time instead of a bespoke evaluate().
+    const r = byId('nse-universe-history-freshness').evaluate({ last_date: '2026-07-31' }, now);
+    expect(r.status).toBe('pass');
+  });
+
+  it('confluence-signals-freshness is NOT trading-day-aware (24/7 30-min cadence) and uses hour-scale thresholds', () => {
+    // 3 hours stale should already warn for a job that runs every 30 minutes, every day.
+    const threeHoursAgo = new Date(now.getTime() - 3 * 3_600_000).toISOString();
+    const r = byId('confluence-signals-freshness').evaluate({ last_date: threeHoursAgo }, now);
+    expect(r.status).not.toBe('pass');
+    // And a weekend gap must NOT be absorbed here -- Saturday's data is genuinely stale by Monday.
+    const satMorning = new Date(now.getTime() - 2.2 * 86_400_000).toISOString();
+    expect(byId('confluence-signals-freshness').evaluate({ last_date: satMorning }, now).status).toBe('fail');
+  });
+
+  it('nativeDateColumn casts the date column to ::text in the generated SQL', () => {
+    // macro_asset_prices.date is a native Postgres DATE column (see stock_ohlcv precedent).
+    expect(byId('macro-asset-prices-freshness').sql).toMatch(/date::text/);
   });
 });
 

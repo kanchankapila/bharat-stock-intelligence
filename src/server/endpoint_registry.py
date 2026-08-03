@@ -507,6 +507,102 @@ CURATED_EXTRA_ENDPOINTS: tuple[EndpointDefinition, ...] = (
         enabled=True,
         parser_ready=True,
     ),
+    # Round 4 (2026-08-03): promoted from the urls.txt field-analysis pass
+    # (docs/url_explorer/DATA_CATEGORIZATION_AND_USAGE.md) -- all live-verified with real
+    # requests (no TLS impersonation needed, unlike ndtvprofit.com/MoneyControl) before being
+    # added here. The deeper "which superstar investor entered/exited THIS stock" signal is
+    # NOT here -- that needs a list->per-investor fan-out this registry's simple
+    # market/stock scopes can't express, so it's a standalone fetcher instead:
+    # investsights_investor_activity_fetcher.py -> superstar_investor_activity table.
+    EndpointDefinition(
+        name="tickertape_mmi",
+        url_template="https://api.tickertape.in/mmi/now",
+        scope="market",
+        required_ids=(),
+        source="curated_extra",
+        provider="Tickertape",
+        category="General Market Metadata",
+        # India's best-known retail-sentiment gauge (analogous to CNN's Fear & Greed Index) --
+        # confirmed via grep absent from this codebase/frontend before this addition. One call
+        # returns the current indicator plus lastDay/lastWeek/lastMonth snapshots, so no
+        # separate historical fetch is needed for a simple trend sparkline.
+        enabled=True,
+        parser_ready=True,
+    ),
+    EndpointDefinition(
+        name="mc_deals_insight_top_investor",
+        url_template="https://api.moneycontrol.com/mcapi/v1/deals/insight?start=0&limit=9&value=value&range=1W&action=buy&dealsType=topInvestor",
+        scope="market",
+        required_ids=(),
+        source="curated_extra",
+        provider="MoneyControl",
+        category="Ownership & Institutional Holdings",
+        # Richer counterparty/sector/value detail (boughtBy, dealValue, dealsCount, sector) than
+        # block_deal_fetcher.py's NSE-sourced pull. `dealsType` also accepts topDeal/topInsider --
+        # only topInvestor promoted here since Insider overlaps tickertape_deals' own insider
+        # rows and topDeal overlaps this same feed's own default (action=buy, no dealsType).
+        enabled=True,
+        parser_ready=True,
+    ),
+    EndpointDefinition(
+        name="investsights_investors_list",
+        url_template="https://investsights.in/api/v2/investors/?only_superstars=true&sort_by=total_stocks_held&page=0&limit=60",
+        scope="market",
+        required_ids=(),
+        source="curated_extra",
+        provider="InvestSights",
+        category="Ownership & Institutional Holdings",
+        # A snapshot of the superstar-investor directory itself (aggregate stats per investor,
+        # not per-stock activity) -- archived raw for a future "Superstar Investors" leaderboard
+        # UI. The per-stock signal is investsights_investor_activity_fetcher.py, not this.
+        enabled=True,
+        parser_ready=True,
+    ),
+    EndpointDefinition(
+        name="investsights_concall_recent",
+        url_template="https://investsights.in/api/v2/concall/recent?limit=20",
+        scope="market",
+        required_ids=(),
+        source="curated_extra",
+        provider="InvestSights",
+        category="News, Filings & AI Sentiment",
+        # AI-generated per-company earnings-call tone_assessment + key_takeaway -- the
+        # "unstructured-text LLM edge" opportunity the 2026-07-30/31 quant-strategy audit
+        # flagged (bounded, timestamped component score, never a free-floating verdict), already
+        # built by a third party rather than needing an in-house concall-NLP pipeline.
+        enabled=True,
+        parser_ready=True,
+    ),
+    EndpointDefinition(
+        name="investsights_sector_rrg",
+        url_template="https://investsights.in/api/v2/market/sector-rrg?weeks=12",
+        scope="market",
+        required_ids=(),
+        source="curated_extra",
+        provider="InvestSights",
+        category="General Market Metadata",
+        # A genuine Relative Rotation Graph (rs_ratio/rs_momentum/quadrant: Leading/Weakening/
+        # Lagging/Improving) -- a distinct, recognizable framework from this platform's own
+        # cross-sectional relative_strength.py ranking. No RRG visualization exists anywhere in
+        # this frontend today.
+        enabled=True,
+        parser_ready=True,
+    ),
+    EndpointDefinition(
+        name="investsights_sector_correlation",
+        url_template="https://investsights.in/api/v2/market/sector-correlation?period=60",
+        scope="market",
+        required_ids=(),
+        source="curated_extra",
+        provider="InvestSights",
+        category="General Market Metadata",
+        # A real sector x sector correlation matrix, with explicit diversifier/redundant-pair
+        # lists -- the "fuller fix" unified_ranker.py's MAX_SECTOR_EXPOSURE cap (added
+        # 2026-07-30 as a first-order approximation with no covariance term) was explicitly
+        # flagged as needing.
+        enabled=True,
+        parser_ready=True,
+    ),
 )
 
 

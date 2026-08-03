@@ -146,6 +146,15 @@ export const MONITOR_SCRIPTS = [
     pyScript: 'regime_detector.py --mode update',
     queueName: null,
     staleLimitHours: 26,
+    // Mon-Fri only (dl.jobs.ts's dl-regime-daily, monitor id 'regime-detector') — without
+    // cronPatterns this falls back to the flat 26h staleLimitHours check, which false-alarms
+    // "stale" every single weekend even when Friday's run succeeded (found 2026-08-03: ground
+    // truth in market_regimes was fresh through Jul 31, but this entry showed stale all
+    // weekend). Same false-alarm class already fixed for dl-engine-infer/trendlyne-midweek/
+    // intraday-breadth-capture below — this one was just missed. Keep in lockstep with
+    // dl.jobs.ts's registerDlJobs() repeat pattern.
+    cronPatterns: ['15 11 * * 1-5'],
+    graceMinutes: 60,
   },
   {
     id: 'feature-engineering',
@@ -274,12 +283,17 @@ export const MONITOR_SCRIPTS = [
     pyScript: null,
     queueName: 'trendlyne-midweek',
     staleLimitHours: 200,
-    // Weekly Tuesday 30 12 * * 2 = 6pm IST. Cron-aware grace still correctly flags this one
-    // stale if it's genuinely missed 2+ weekly cycles (its MIN() of two source tables means
-    // a single broken underlying fetcher pins the whole entry stale) -- that is a real data
-    // problem to chase (see trendlyne_adv_tech_fetcher.py / trendlyne_price_analysis_fetcher.py),
-    // not a timing false-positive, so this field only removes the "checked mid-week" noise.
-    cronPatterns: ['30 12 * * 2'],
+    // Weekly Tuesday 30 14 * * 2 = 8pm IST. Was '30 12 * * 2' (6pm IST) until the queue's own
+    // registration moved to 14:30 UTC on 2026-07-31 (trendlyneWeekly.jobs.ts's own comment: the
+    // three screener syncs relocated into 6:00-6:40pm IST, landing exactly on this job's old
+    // slot every Tuesday) -- this mirror was never updated, a stale-cronPattern drift of exactly
+    // the class this file's own header warns about elsewhere. Cron-aware grace still correctly
+    // flags this one stale if it's genuinely missed 2+ weekly cycles (its MIN() of two source
+    // tables means a single broken underlying fetcher pins the whole entry stale) -- that is a
+    // real data problem to chase (see trendlyne_adv_tech_fetcher.py / trendlyne_price_analysis_
+    // fetcher.py, both hardened with retry/backoff + a loud-failure guard 2026-08-03 after the
+    // latter silently wrote zero rows on 2026-07-28), not a timing false-positive.
+    cronPatterns: ['30 14 * * 2'],
     graceMinutes: 120,
   },
   {

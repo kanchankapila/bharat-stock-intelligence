@@ -30,6 +30,13 @@ NEW_ENDPOINTS = {
     "tapetide_score", "tapetide_analyst_ratings", "tapetide_forecasts",
 }
 
+# Round 4 (2026-08-03) added 4 more InvestSights entries, market-wide rather than per-stock
+# like this file's fixtures assume -- covered by their own file instead of duplicating here.
+COVERED_ELSEWHERE = {
+    "investsights_investors_list", "investsights_concall_recent",
+    "investsights_sector_rrg", "investsights_sector_correlation",
+}
+
 
 def _real_stock():
     with open(STOCKLIST_PATH, "r", encoding="utf-8") as f:
@@ -122,7 +129,8 @@ class TestInvestSightsTapetideLiveDataSource:
 
 
 def test_all_new_endpoints_are_covered_by_a_test_above():
-    actual = {e.name for e in CURATED_EXTRA_ENDPOINTS if e.provider in ("InvestSights", "Tapetide")}
+    actual = {e.name for e in CURATED_EXTRA_ENDPOINTS
+              if e.provider in ("InvestSights", "Tapetide") and e.name not in COVERED_ELSEWHERE}
     assert actual == NEW_ENDPOINTS, (
         f"InvestSights/Tapetide entries changed but this test file wasn't updated. "
         f"Missing tests for: {actual - NEW_ENDPOINTS}. Stale tests for: {NEW_ENDPOINTS - actual}."

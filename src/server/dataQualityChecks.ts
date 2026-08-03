@@ -53,6 +53,31 @@ export function daysStale(value: unknown, now: Date): number | null {
   return (now.getTime() - d.getTime()) / 86_400_000;
 }
 
+/** Like daysStale(), but subtracts weekend (Sat/Sun) calendar days that fall strictly between
+ *  the value's date and `now` — for tables that only update on trading days, a flat calendar-day
+ *  threshold false-positives every Monday morning purely from the Sat/Sun gap, even though
+ *  Friday's data landed correctly and Monday's own pipeline simply hasn't run yet (found
+ *  2026-08-03: ohlcv-freshness-coverage/fii-dii-flow-freshness/market-regimes-freshness all
+ *  warned "3+ days stale" on a Monday morning check that runs at 08:40 IST, hours before that
+ *  day's own stock-refresh/fii-dii-fetcher/regime-detector jobs even fire). Deliberately not a
+ *  full NSE holiday calendar — this module's own header explicitly avoids that dependency for
+ *  simplicity — just removes the two weekend days baked into any post-weekend check; a real
+ *  multi-weekday outage still accumulates past the threshold undiminished. */
+export function tradingDaysStale(value: unknown, now: Date): number | null {
+  const raw = daysStale(value, now);
+  if (raw == null) return raw;
+  const then = value instanceof Date ? value : new Date(String(value));
+  let weekendDays = 0;
+  const cursor = new Date(Date.UTC(then.getUTCFullYear(), then.getUTCMonth(), then.getUTCDate()));
+  const nowMidnight = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  while (cursor < nowMidnight) {
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+    const dow = cursor.getUTCDay();
+    if (dow === 0 || dow === 6) weekendDays++;
+  }
+  return Math.max(0, raw - weekendDays);
+}
+
 /** Safe ratio; undefined denominator/zero denominator reads as "no data" (0), not divide-by-zero. */
 export function safeRatio(numerator: unknown, denominator: unknown): number {
   const n = Number(numerator) || 0;
@@ -71,6 +96,163 @@ function fmtDays(d: number | null): string {
 // calendar dependency) — the goal is to catch multi-day silent breakage, not to be a
 // precise SLA monitor (jobHeartbeat/JOB_REGISTRY already do cron-aware lateness).
 
+// ─── Generic freshness-check factory ──────────────────────────────────────────
+// MANDATE (see CLAUDE.md "General Rules"): every live datasource fetcher writes to a table
+// with its own date/timestamp column — adding one entry to TABLE_FRESHNESS_CHECKS below is the
+// required way to get that table monitored. This exists because dataQualityChecks.ts started
+// with ~25 hand-written checks covering only a fraction of the ~140 DB-writing Python fetchers
+// in this codebase (found 2026-08-03, in response to a user request to cover "all live
+// datasources") — most fetchers had NO freshness monitoring at all, so a silently-broken one
+// (see mf_sector_allocation below, found empty by this very audit) looked identical to a
+// healthy one in every dashboard. A declarative registry + one factory function means adding
+// a check for a new datasource is a single config object, not a hand-rolled SQL+evaluate()
+// block — the friction that made this mandate hard to honor before.
+interface TableFreshnessConfig {
+  id: string;
+  label: string;
+  category: DataQualityCheck['category'];
+  critical: boolean;
+  table: string;
+  /** Column holding the row's own date/timestamp. */
+  dateColumn: string;
+  /** Set true when dateColumn is a native Postgres DATE (not TEXT) — needs a ::text cast to
+   *  compare against the JS-computed staleness value the same way stock_ohlcv/feature_store do. */
+  nativeDateColumn?: boolean;
+  /** Use tradingDaysStale() (subtracts weekends) instead of plain daysStale() — appropriate for
+   *  any table that only updates on NSE trading days. Default true; set false for tables fed by
+   *  a genuinely 24/7 cadence (e.g. confluence_signals' 30-min-everyMs job). */
+  tradingDayAware?: boolean;
+  warnDays: number;
+  /** Omit for a "sparse by nature" table (matches insider-trades-recency/bulk-deals-recency's
+   *  existing style): only ever warns past warnDays, never fails, since the data itself is
+   *  naturally episodic (insider filings, IPOs, bulk deals) rather than daily. */
+  failDays?: number;
+}
+
+function makeFreshnessCheck(cfg: TableFreshnessConfig): DataQualityCheck {
+  const col = cfg.nativeDateColumn ? `${cfg.dateColumn}::text` : cfg.dateColumn;
+  const useTradingDays = cfg.tradingDayAware !== false;
+  return {
+    id: cfg.id,
+    label: cfg.label,
+    category: cfg.category,
+    critical: cfg.critical,
+    sql: `SELECT MAX(${col}) AS last_date FROM ${cfg.table}`,
+    evaluate: (row, now) => {
+      const stale = (useTradingDays ? tradingDaysStale : daysStale)(row?.last_date, now);
+      if (stale == null) return { status: cfg.critical ? 'fail' : 'warn', detail: `${cfg.table} is empty` };
+      if (cfg.failDays == null) {
+        if (stale > cfg.warnDays) {
+          return { status: 'warn', detail: `Latest ${cfg.table} row is ${fmtDays(stale)} old (sparse by nature, so a soft warn)` };
+        }
+        return { status: 'pass', detail: `Latest ${cfg.table} row ${fmtDays(stale)} old` };
+      }
+      if (stale > cfg.failDays) return { status: 'fail', detail: `Latest ${cfg.table} row is ${fmtDays(stale)} old` };
+      if (stale > cfg.warnDays) return { status: 'warn', detail: `Latest ${cfg.table} row is ${fmtDays(stale)} old` };
+      return { status: 'pass', detail: `Latest ${cfg.table} row ${fmtDays(stale)} old` };
+    },
+  };
+}
+
+// Every entry here is a genuine external-data landing table (a live datasource per CLAUDE.md's
+// "Adding a New Data Source" mandate) found via a full sweep of runPython() call sites across
+// queues.ts + jobs/*.jobs.ts, cross-referenced against each script's own INSERT/CREATE TABLE
+// targets (2026-08-03). Deliberately excludes pure-internal/derived-only tables (model
+// registries, RL Q-tables, weight-history bookkeeping, backtest run logs) — those are ML
+// state, not datasources, and adding freshness checks for them would dilute what this file is
+// for. One check per logically-distinct table; where several sibling fetchers share one table
+// (e.g. macro_asset_prices, fed by ~8 different scripts) there is one check, not one per script.
+const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
+  // ohlcv
+  { id: 'nse-universe-history-freshness', label: 'nse_universe_history (survivorship-free PIT universe)',
+    category: 'ohlcv', critical: true, table: 'nse_universe_history', dateColumn: 'date', warnDays: 3, failDays: 5 },
+
+  // options
+  { id: 'so-option-chain-freshness', label: 'so_option_chain (Trendlyne live options chain)',
+    category: 'options', critical: false, table: 'so_option_chain', dateColumn: 'date', warnDays: 3, failDays: 5 },
+  { id: 'index-option-oi-freshness', label: 'index_option_oi (MC index OI/max-pain)',
+    category: 'options', critical: false, table: 'index_option_oi', dateColumn: 'date', warnDays: 3, failDays: 5 },
+  { id: 'nt-index-pcr-ts-freshness', label: 'nt_index_pcr_ts (NiftyTrader PCR/VIX)',
+    category: 'options', critical: false, table: 'nt_index_pcr_ts', dateColumn: 'fetched_at', warnDays: 3, failDays: 5 },
+  { id: 'stock-option-features-freshness', label: 'stock_option_features (per-stock option chain features)',
+    category: 'options', critical: false, table: 'stock_option_features', dateColumn: 'date', warnDays: 3, failDays: 5 },
+
+  // flows
+  { id: 'insider-transactions-recency', label: 'insider_transactions (NSE PIT filings)',
+    category: 'flows', critical: false, table: 'insider_transactions', dateColumn: 'transaction_date', warnDays: 14 },
+  { id: 'bulk-block-deals-recency', label: 'bulk_block_deals (delivery-trend NSE bulk/block feed)',
+    category: 'flows', critical: false, table: 'bulk_block_deals', dateColumn: 'deal_date', warnDays: 14 },
+  { id: 'stock-delivery-volume-freshness', label: 'stock_delivery_volume (MTO delivery %)',
+    category: 'flows', critical: false, table: 'stock_delivery_volume', dateColumn: 'date', warnDays: 3, failDays: 5 },
+  { id: 'mf-stock-holdings-recency', label: 'mf_stock_holdings (per-stock MF ownership, monthly disclosure)',
+    category: 'flows', critical: false, table: 'mf_stock_holdings', dateColumn: 'as_of_date', warnDays: 45 },
+  { id: 'mf-sector-allocation-recency', label: 'mf_sector_allocation (MF sector flow)',
+    category: 'flows', critical: false, table: 'mf_sector_allocation', dateColumn: 'month', warnDays: 45 },
+
+  // fundamentals
+  { id: 'tl-financial-quality-freshness', label: 'tl_financial_quality (weekly ET ratios)',
+    category: 'fundamentals', critical: false, table: 'tl_financial_quality', dateColumn: 'as_of_date', warnDays: 10, failDays: 16 },
+  { id: 'trendlyne-dvm-scores-freshness', label: 'trendlyne_dvm_scores',
+    category: 'fundamentals', critical: false, table: 'trendlyne_dvm_scores', dateColumn: 'date', warnDays: 3, failDays: 5 },
+  { id: 'proprietary-scores-history-freshness', label: 'proprietary_scores_history (Altman/Ohlson/Graham/DuPont)',
+    category: 'fundamentals', critical: false, table: 'proprietary_scores_history', dateColumn: 'date', warnDays: 3, failDays: 5 },
+  { id: 'working-capital-history-recency', label: 'working_capital_history (monthly cash-conversion-cycle)',
+    category: 'fundamentals', critical: false, table: 'working_capital_history', dateColumn: 'fetched_at', warnDays: 45 },
+  { id: 'stock-earnings-beats-recency', label: 'stock_earnings_beats',
+    category: 'fundamentals', critical: false, table: 'stock_earnings_beats', dateColumn: 'fetched_at', warnDays: 10 },
+  { id: 'eps-surprise-history-recency', label: 'eps_surprise_history',
+    category: 'fundamentals', critical: false, table: 'eps_surprise_history', dateColumn: 'fetched_at', warnDays: 10 },
+
+  // macro
+  { id: 'macro-asset-prices-freshness', label: 'macro_asset_prices (VIX/FII-DII/global indices/PCR-GEX/MMI)',
+    category: 'macro', critical: true, table: 'macro_asset_prices', dateColumn: 'date', nativeDateColumn: true, warnDays: 3, failDays: 5 },
+  { id: 'eco-calendar-recency', label: 'eco_calendar (MC economic calendar)',
+    category: 'macro', critical: false, table: 'eco_calendar', dateColumn: 'fetched_at', warnDays: 14 },
+  { id: 'index-valuation-freshness', label: 'index_valuation (Nifty/Sensex PE-PB)',
+    category: 'macro', critical: false, table: 'index_valuation', dateColumn: 'date', warnDays: 3, failDays: 5 },
+  { id: 'mc-global-snapshot-freshness', label: 'mc_global_snapshot (global indices/currencies/ADRs/commodities)',
+    category: 'macro', critical: false, table: 'mc_global_snapshot', dateColumn: 'date', warnDays: 3, failDays: 5 },
+  { id: 'sector-global-corr-freshness', label: 'sector_global_corr',
+    category: 'macro', critical: false, table: 'sector_global_corr', dateColumn: 'date', warnDays: 3, failDays: 5 },
+  { id: 'historical-fno-sentiment-freshness', label: 'historical_fno_sentiment (index-level PCR/GEX)',
+    category: 'macro', critical: false, table: 'historical_fno_sentiment', dateColumn: 'date', warnDays: 3, failDays: 5 },
+  { id: 'sector-fo-sentiment-freshness', label: 'sector_fo_sentiment',
+    category: 'macro', critical: false, table: 'sector_fo_sentiment', dateColumn: 'date', nativeDateColumn: true, warnDays: 3, failDays: 5 },
+  { id: 'nse-ipo-calendar-recency', label: 'nse_ipo_calendar',
+    category: 'macro', critical: false, table: 'nse_ipo_calendar', dateColumn: 'fetched_at', warnDays: 14 },
+
+  // signals / scoring
+  { id: 'confluence-signals-freshness', label: 'confluence_signals (canonical confluence engine)',
+    category: 'scoring', critical: true, table: 'confluence_signals', dateColumn: 'computed_at',
+    tradingDayAware: false, warnDays: 0.1, failDays: 0.25 },
+  { id: 'unified-signals-freshness', label: 'unified_signals',
+    category: 'signals', critical: false, table: 'unified_signals', dateColumn: 'signal_date', warnDays: 3, failDays: 5 },
+  { id: 'screener-appearances-freshness', label: 'screener_appearances (feeds screener_momentum_score)',
+    category: 'signals', critical: true, table: 'screener_appearances', dateColumn: 'appeared_date', warnDays: 3, failDays: 5 },
+  { id: 'screener-sector-rotation-freshness', label: 'screener_sector_rotation',
+    category: 'signals', critical: false, table: 'screener_sector_rotation', dateColumn: 'date', warnDays: 3, failDays: 5 },
+  { id: 'intraday-recommendations-freshness', label: 'intraday_recommendations',
+    category: 'signals', critical: false, table: 'intraday_recommendations', dateColumn: 'computed_at', warnDays: 3, failDays: 5 },
+
+  // reference
+  { id: 'mc-broker-reco-freshness', label: 'mc_broker_reco',
+    category: 'reference', critical: false, table: 'mc_broker_reco', dateColumn: 'fetched_at', warnDays: 5, failDays: 10 },
+  { id: 'mc-chart-patterns-freshness', label: 'mc_chart_patterns',
+    category: 'reference', critical: false, table: 'mc_chart_patterns', dateColumn: 'fetched_at', warnDays: 3, failDays: 5 },
+  { id: 'market-breadth-freshness', label: 'market_breadth (advance/decline)',
+    category: 'reference', critical: false, table: 'market_breadth', dateColumn: 'date', warnDays: 3, failDays: 5 },
+  { id: 'preopen-snapshot-freshness', label: 'preopen_snapshot',
+    category: 'reference', critical: false, table: 'preopen_snapshot', dateColumn: 'snapshot_date', warnDays: 3, failDays: 5 },
+  { id: 'nt-fno-dashboard-freshness', label: 'nt_fno_dashboard (NiftyTrader F&O dashboard)',
+    category: 'reference', critical: false, table: 'nt_fno_dashboard', dateColumn: 'date', warnDays: 3, failDays: 5 },
+  { id: 'trendlyne-fno-activity-freshness', label: 'trendlyne_fno_activity',
+    category: 'reference', critical: false, table: 'trendlyne_fno_activity', dateColumn: 'date', warnDays: 3, failDays: 5 },
+  { id: 'mc-pricefeed-daily-freshness', label: 'mc_pricefeed_daily (IND_PE/CAGR/consensus/delivery)',
+    category: 'reference', critical: false, table: 'mc_pricefeed_daily', dateColumn: 'date', warnDays: 3, failDays: 5 },
+  { id: 'extra-endpoint-responses-recency', label: 'extra_endpoint_responses',
+    category: 'reference', critical: false, table: 'extra_endpoint_responses', dateColumn: 'updated_at', warnDays: 10 },
+];
+
 export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
   // ── OHLCV ──────────────────────────────────────────────────────────────
   {
@@ -84,7 +266,7 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     sql: `SELECT MAX(date) AS last_date, COUNT(DISTINCT symbol) AS symbols
           FROM stock_ohlcv WHERE date::text >= date('now','-10 days')`,
     evaluate: (row, now) => {
-      const stale = daysStale(row?.last_date, now);
+      const stale = tradingDaysStale(row?.last_date, now);
       const symbols = Number(row?.symbols) || 0;
       if (stale == null) return { status: 'fail', detail: 'No stock_ohlcv rows in the last 10 days' };
       if (symbols < 300) return { status: 'fail', detail: `Only ${symbols} distinct symbols refreshed in 10d (expected 300+)` };
@@ -357,7 +539,7 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     critical: true,
     sql: `SELECT MAX(date) AS last_date FROM fii_dii_flow WHERE fii_net IS NOT NULL`,
     evaluate: (row, now) => {
-      const stale = daysStale(row?.last_date, now);
+      const stale = tradingDaysStale(row?.last_date, now);
       if (stale == null) return { status: 'fail', detail: 'No fii_dii_flow rows with a non-null fii_net' };
       if (stale > 5) return { status: 'fail', detail: `Latest FII/DII row is ${fmtDays(stale)} old` };
       if (stale > 3) return { status: 'warn', detail: `Latest FII/DII row is ${fmtDays(stale)} old` };
@@ -369,7 +551,12 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     label: 'insider_trades recency',
     category: 'flows',
     critical: false,
-    sql: `SELECT MAX(date) AS last_date FROM insider_trades`,
+    // insider_trades.date is NSE's raw display text ("22 May, 2026"), not sortable lexically --
+    // MAX(date) returned "31 Oct, 2025" (an alphabetically-late month name) while the real
+    // latest row was 2026-07-31, a 276-day false "stale" reading (found 2026-08-03). date_iso
+    // is the parsed, ISO, actually-sortable column added for exactly this reason (see CLAUDE.md's
+    // 2026-08-01 midnight-crossing/date_iso session) and has had 100% coverage since; use it.
+    sql: `SELECT MAX(date_iso) AS last_date FROM insider_trades`,
     evaluate: (row, now) => {
       const stale = daysStale(row?.last_date, now);
       if (stale == null) return { status: 'warn', detail: 'insider_trades is empty' };
@@ -379,15 +566,20 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
   },
   {
     id: 'bulk-deals-recency',
-    label: 'bulk_deals recency',
+    label: 'bulk/block deals recency',
     category: 'flows',
     critical: false,
-    sql: `SELECT MAX(date) AS last_date FROM bulk_deals`,
+    // `bulk_deals` was fed by a feature merged 2026-05-19 and reverted 2026-05-21 -- its last
+    // real row IS 2026-05-19, so its "76 days stale" reading was correct, not a bug, but it was
+    // monitoring a table nothing has written to in 2.5 months. `block_deals` (tickertape_deals_
+    // fetcher.py, wired into ml-daily-ops since 2026-07-31, carries pctTransacted/% of float) is
+    // the live replacement -- point the check at the table that's actually fed (found 2026-08-03).
+    sql: `SELECT MAX(date) AS last_date FROM block_deals`,
     evaluate: (row, now) => {
-      const stale = daysStale(row?.last_date, now);
-      if (stale == null) return { status: 'warn', detail: 'bulk_deals is empty' };
-      if (stale > 14) return { status: 'warn', detail: `Latest bulk deal is ${fmtDays(stale)} old (sparse by nature, so a soft warn)` };
-      return { status: 'pass', detail: `Latest bulk deal ${fmtDays(stale)} old` };
+      const stale = tradingDaysStale(row?.last_date, now);
+      if (stale == null) return { status: 'warn', detail: 'block_deals is empty' };
+      if (stale > 14) return { status: 'warn', detail: `Latest bulk/block deal is ${fmtDays(stale)} old (sparse by nature, so a soft warn)` };
+      return { status: 'pass', detail: `Latest bulk/block deal ${fmtDays(stale)} old` };
     },
   },
 
@@ -418,7 +610,7 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     critical: true,
     sql: `SELECT MAX(date) AS last_date FROM market_regimes`,
     evaluate: (row, now) => {
-      const stale = daysStale(row?.last_date, now);
+      const stale = tradingDaysStale(row?.last_date, now);
       if (stale == null) return { status: 'fail', detail: 'market_regimes is empty' };
       if (stale > 4) return { status: 'fail', detail: `Latest regime row is ${fmtDays(stale)} old` };
       if (stale > 2) return { status: 'warn', detail: `Latest regime row is ${fmtDays(stale)} old` };
@@ -481,6 +673,9 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
       return { status: 'pass', detail: `${row?.indicators ?? 0} indicators, latest ${fmtDays(stale)} old` };
     },
   },
+
+  // ── Generated from TABLE_FRESHNESS_CHECKS (see the factory + mandate comment above) ──────
+  ...TABLE_FRESHNESS_CHECKS.map(makeFreshnessCheck),
 ];
 
 // Fail fast on a duplicate id — two checks silently overwriting the same
