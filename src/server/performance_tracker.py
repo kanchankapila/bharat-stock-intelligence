@@ -77,6 +77,7 @@ class PerformanceTracker:
             LEFT JOIN nse_stocks ns ON ns.symbol = so.symbol
             WHERE so.outcome IN ('WIN', 'LOSS', 'NEUTRAL')
               AND so.return_pct IS NOT NULL
+              AND so.signal_source = 'technical'
         """
         params = []
         if horizon_days:
@@ -339,6 +340,7 @@ class PerformanceTracker:
                     WHERE so.symbol = recommendation_log.symbol
                       AND so.signal_date = recommendation_log.signal_date
                       AND so.outcome NOT IN ('PENDING')
+                      AND so.signal_source = 'technical'
                     ORDER BY so.horizon_days ASC, so.computed_at DESC LIMIT 1
                 ),
                 actual_return_pct = (
@@ -346,6 +348,7 @@ class PerformanceTracker:
                     WHERE so.symbol = recommendation_log.symbol
                       AND so.signal_date = recommendation_log.signal_date
                       AND so.outcome NOT IN ('PENDING')
+                      AND so.signal_source = 'technical'
                     ORDER BY so.horizon_days ASC, so.computed_at DESC LIMIT 1
                 ),
                 outcome = (
@@ -353,6 +356,7 @@ class PerformanceTracker:
                     WHERE so.symbol = recommendation_log.symbol
                       AND so.signal_date = recommendation_log.signal_date
                       AND so.outcome NOT IN ('PENDING')
+                      AND so.signal_source = 'technical'
                     ORDER BY so.horizon_days ASC, so.computed_at DESC LIMIT 1
                 ),
                 status = 'RESOLVED',
@@ -363,6 +367,7 @@ class PerformanceTracker:
                 WHERE so.symbol = recommendation_log.symbol
                   AND so.signal_date = recommendation_log.signal_date
                   AND so.outcome NOT IN ('PENDING')
+                  AND so.signal_source = 'technical'
               )
         """)
         updated = cur.rowcount

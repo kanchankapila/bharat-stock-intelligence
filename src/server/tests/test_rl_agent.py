@@ -39,7 +39,10 @@ def _make_test_conn():
     conn.execute("""
         CREATE TABLE signal_outcomes (
             symbol TEXT, signal_date TEXT, horizon_days INTEGER,
-            outcome TEXT, return_pct REAL, signal_score INTEGER
+            outcome TEXT, return_pct REAL, signal_score INTEGER,
+            -- rl_agent.py filters to signal_source='technical' (2026-08 fix); default so the
+            -- existing positional 6-col INSERTs below don't need touching.
+            signal_source TEXT NOT NULL DEFAULT 'technical'
         )
     """)
     conn.execute("""
@@ -136,7 +139,9 @@ class TestDailyUpdateLooksBack:
             (target_date, 'BULL_IT_HIGH', 'AGGRESSIVE', 0.1)
         )
         conn.execute(
-            "INSERT INTO signal_outcomes VALUES (?,?,?,?,?,?)",
+            "INSERT INTO signal_outcomes "
+            "(symbol, signal_date, horizon_days, outcome, return_pct, signal_score) "
+            "VALUES (?,?,?,?,?,?)",
             ('INFY', target_date, 15, 'WIN', 8.5, 7)
         )
         conn.execute(
@@ -158,7 +163,9 @@ class TestDailyUpdateLooksBack:
             (target_date, 'BULL_IT_HIGH', 'AGGRESSIVE', 0.1)
         )
         conn.execute(
-            "INSERT INTO signal_outcomes VALUES (?,?,?,?,?,?)",
+            "INSERT INTO signal_outcomes "
+            "(symbol, signal_date, horizon_days, outcome, return_pct, signal_score) "
+            "VALUES (?,?,?,?,?,?)",
             ('INFY', target_date, 15, 'WIN', 8.5, 7)
         )
         conn.execute(
