@@ -155,6 +155,7 @@ def run(limit: int | None = None):
         FROM signal_outcomes so
         WHERE so.outcome IN ('WIN','LOSS','STOP_LOSS')
           AND so.return_pct IS NOT NULL
+          AND so.signal_source = 'technical'
           AND NOT EXISTS (
               SELECT 1 FROM technical_signals ts
               WHERE ts.symbol = so.symbol
