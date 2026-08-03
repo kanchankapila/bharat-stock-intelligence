@@ -499,16 +499,29 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
     .catch(e => console.warn('[QUEUE] tickertape_deals_fetcher failed (daily ops continues):', (e as Error).message));
   await runPython('pcr_fetcher.py', ['--gex'], 90_000)
     .catch(e => console.warn('[QUEUE] pcr_fetcher failed:', (e as Error).message));
-  // Parallel batch — safe to overlap: disjoint target tables (mc_* vs quant_scores vs
+  // Parallel batch — safe to overlap: disjoint target tables (mc_* vs unified_signals vs
   // news_sentiment_items), no shared rows, no advisory locks, and distinct resources
   // (MoneyControl network vs DB-compute vs GPU/FinBERT). The 5-min MC scrape now runs
-  // concurrently with quant scoring + news sentiment instead of after them. pythonRunner
+  // concurrently with the technical engine + news sentiment instead of after them. pythonRunner
   // caps global Python concurrency at 5, so this can't oversubscribe the box.
+  //
+  // institutional_quant_engine.py used to run here, writing quant_scores via a full
+  // DELETE+re-INSERT — but quantScoringService.ts's own upsert runs 3.5h later (11 PM IST,
+  // quant-scoring queue) and writes the identical column set, so this engine's nightly writes
+  // were always clobbered same-night before anything could read them. Retired as an automatic
+  // writer (2026-08); still reachable on-demand via mcpServer.ts's run_analytical_engine tool,
+  // now upsert-safe (see institutional_quant_engine.py's _save()) so an on-demand run can't
+  // null out quantScoringService's/multi_factor_scorer.py's columns either.
+  //
+  // technical_analysis_engine.py (trend/RSI/MACD/Bollinger/patterns -> unified_signals,
+  // signal_source='technical') takes the vacated slot — it had never run on any schedule before
+  // this fix, only reachable via the same MCP tool, so signal_source='technical' rows were
+  // stale indefinitely between manual triggers.
   await Promise.allSettled([
     runPython('moneycontrol_fetcher.py', [], 900_000)
       .catch(e => console.warn('[QUEUE] moneycontrol_fetcher failed:', (e as Error).message)),
-    runPython('institutional_quant_engine.py', [], 120_000)
-      .catch(e => console.warn('[QUEUE] institutional_quant_engine failed:', (e as Error).message)),
+    runPython('technical_analysis_engine.py', [], 120_000)
+      .catch(e => console.warn('[QUEUE] technical_analysis_engine failed:', (e as Error).message)),
     T.run('finbert-scorer', () => runPython('finbert_scorer.py', ['--days', '1'], 180_000)),
   ]);
   // iv_features reads the ATM IV that pcr_fetcher just wrote to stock_options_oi → technical_signals.iv_rank.
@@ -539,13 +552,11 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await runPython('ownership_relative.py', [], 120_000)
     .catch(e => console.warn('[QUEUE] ownership_relative failed:', (e as Error).message));
 
-  // Multi-factor alpha score (Quality/Momentum/Value/Risk-Adj/Macro, orthogonal 5-factor
-  // model) → quant_scores.mf_*. Finding #28 (2026-07-28 audit): this was a fully-built,
-  // never-scheduled dead branch — unified_ranker.py's factor-crowding check (added alongside
-  // this fix) reads these columns, so they need to actually be populated. Depends on
-  // quant_scores (quantScoringService) already having today's rows.
-  await runPython('multi_factor_scorer.py', [], 180_000)
-    .catch(e => console.warn('[QUEUE] multi_factor_scorer failed:', (e as Error).message));
+  // multi_factor_scorer.py (quant_scores.mf_*) used to run here — but this step (ml-daily-ops,
+  // 7:30 PM IST) runs 3.5h BEFORE quantScoringService.ts's own quant_scores upsert (11 PM IST,
+  // quant-scoring queue), exactly inverting the dependency its own docstring claimed ("depends
+  // on quant_scores already having today's rows"). It always read yesterday's quant factors.
+  // Moved into processQuantScoring() (screeners.jobs.ts), after runQuantScoring(), 2026-08.
 
   // Market breadth internals (% above 200DMA, A/D ratio, 20d highs, 52w net highs/lows) from stock_ohlcv.
   await runPython('market_breadth.py', ['--days', '420'], 120_000)

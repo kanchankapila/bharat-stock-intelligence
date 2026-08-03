@@ -257,16 +257,24 @@ class InstitutionalQuantEngine:
         # Coerce numpy types to Python native for sqlite3
         rows = rows.where(pd.notna(rows), None)
 
+        # Upsert on symbol rather than DELETE+INSERT. This is the platform's canonical scorer
+        # (quantScoringService.ts, 11 PM IST) writes the same table nightly with an upsert; a
+        # DELETE here would race it and, on any on-demand run of this engine, null out every
+        # column this engine doesn't itself compute (mf_*, beta_*, sortino_ratio, var_95).
         with self.engine.begin() as conn:
-            conn.execute(text("DELETE FROM quant_scores"))
             for _, r in rows.iterrows():
                 data = {k: (None if (v is None or (isinstance(v, float) and math.isnan(v))) else v)
                         for k, v in r.items()}
-                placeholders = ', '.join(f':{k}' for k in data)
-                keys = ', '.join(data.keys())
-                conn.execute(text(f"INSERT INTO quant_scores ({keys}) VALUES ({placeholders})"), data)
+                keys = list(data.keys())
+                placeholders = ', '.join(f':{k}' for k in keys)
+                insert_cols = ', '.join(keys)
+                update_set = ', '.join(f"{k}=excluded.{k}" for k in keys if k != 'symbol')
+                conn.execute(text(
+                    f"INSERT INTO quant_scores ({insert_cols}) VALUES ({placeholders}) "
+                    f"ON CONFLICT(symbol) DO UPDATE SET {update_set}"
+                ), data)
 
-        print(f"[QuantEngine] Saved {len(rows)} rows to quant_scores.")
+        print(f"[QuantEngine] Upserted {len(rows)} rows to quant_scores.")
 
 
 if __name__ == "__main__":
