@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
 process.env.DATABASE_URL = ':memory:';
+// Isolates this test from the host environment's USE_POSTGRES -- see backtestRunner.test.ts
+// for the full explanation of why this must be set before any dbAsync.ts import.
+process.env.USE_POSTGRES = 'false';
 const { default: db } = await import('../db');
 
 import { createCallerFactory } from '../trpc';
