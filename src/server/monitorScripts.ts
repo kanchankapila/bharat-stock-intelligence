@@ -17,9 +17,20 @@ export const MONITOR_SCRIPTS = [
     queueName: 'technical-signals',
     // Was 1h when the job ran unrestricted 24/7. Now market-hours-gated (queues.ts) like
     // outcome-resolver-5d/performance-tracker/fii-dii-fetcher below -- 1h would false-alarm
-    // 'stale' every single evening/weekend. 26h matches those siblings' convention: tolerates
-    // the overnight gap, still flags within a day of a genuine same-session failure.
+    // 'stale' every single evening/weekend. staleLimitHours is only the FALLBACK now (used if
+    // cronPatterns is ever absent); the real guard is cronPatterns below.
+    //
+    // A bare 26h number here (the historical/pre-cronPatterns state, restored 2026-08-03 while
+    // auditing job/Telegram health -- this entry had drifted to having NO cronPatterns despite
+    // its own comment claiming it "matches siblings' convention") does NOT tolerate the real
+    // gap: the underlying job (queues.ts technicalSignalsQueue, '*/30 3-10 * * 1-5') is
+    // Mon-Fri-only, so the true gap from Friday's last ~4pm IST run to Monday's first ~8:30am
+    // IST run is ~64.5h, not "overnight" -- 26h flagged 'stale' (critical: true, real Telegram
+    // alert) for roughly 38 hours every single weekend. cronPatterns makes this cron-aware like
+    // its true siblings (fii-dii-fetcher etc.) instead of relying on the flat threshold.
     staleLimitHours: 26,
+    cronPatterns: ['*/30 3-10 * * 1-5'],
+    graceMinutes: 45,
   },
   {
     id: 'outcome-resolver-5d',
@@ -35,8 +46,17 @@ export const MONITOR_SCRIPTS = [
     // 7:30pm ml-daily-ops batch (queues.ts processMlDailyOps). Cron-aware lateness takes the
     // more recent of the two expected fire times instead of a flat hours threshold, so a
     // mid-day check (before either run) doesn't false-flag "stale" off Friday's success.
+    // graceMinutes 60 -> 280: this entry is a step inside the ml-daily-ops chain (the
+    // '0 14 * * 1-5' pattern above), whose Worker lockDuration is 4h (240min) --
+    // jobRegistryGraceMinutesConsistency.test.ts already found and fixed the equivalent
+    // JOB_REGISTRY entry for this same underlying job, but this is a SEPARATE, independently
+    // tracked registry (DB-freshness via monitor.router.ts, not job_heartbeat), so fixing one
+    // never touched the other. 60min grace flagged 'stale' on every run that took over an
+    // hour into the chain, which per ml-daily-ops's own declared budget is normal. Bumped to
+    // match the corresponding JOB_REGISTRY sub-step fix (270min parent + 10min). Found
+    // 2026-08-03 while building the graceMinutes mirror-consistency test.
     cronPatterns: ['0 4 * * 1-5', '0 14 * * 1-5'],
-    graceMinutes: 60,
+    graceMinutes: 280,
   },
   {
     id: 'outcome-resolver-15d',
@@ -48,8 +68,17 @@ export const MONITOR_SCRIPTS = [
     pyScript: 'outcome_resolver.py --horizon 15',
     queueName: 'outcome-resolver',
     staleLimitHours: 26,
+    // graceMinutes 60 -> 280: this entry is a step inside the ml-daily-ops chain (the
+    // '0 14 * * 1-5' pattern above), whose Worker lockDuration is 4h (240min) --
+    // jobRegistryGraceMinutesConsistency.test.ts already found and fixed the equivalent
+    // JOB_REGISTRY entry for this same underlying job, but this is a SEPARATE, independently
+    // tracked registry (DB-freshness via monitor.router.ts, not job_heartbeat), so fixing one
+    // never touched the other. 60min grace flagged 'stale' on every run that took over an
+    // hour into the chain, which per ml-daily-ops's own declared budget is normal. Bumped to
+    // match the corresponding JOB_REGISTRY sub-step fix (270min parent + 10min). Found
+    // 2026-08-03 while building the graceMinutes mirror-consistency test.
     cronPatterns: ['0 4 * * 1-5', '0 14 * * 1-5'],
-    graceMinutes: 60,
+    graceMinutes: 280,
   },
   {
     id: 'performance-tracker',
@@ -61,6 +90,23 @@ export const MONITOR_SCRIPTS = [
     pyScript: 'performance_tracker.py --horizon 5',
     queueName: null,
     staleLimitHours: 26,
+    // Runs as a step inside ml-daily-ops (0 14 * * 1-5), same as sibling entries below
+    // (fii-dii-fetcher, finbert-scorer, ml-ensemble-score, reward-engine, rl-agent-update,
+    // signal-type-stats) -- but unlike them had NO cronPatterns, so the flat 26h
+    // staleLimitHours false-flagged 'stale' (critical: true, real Telegram alert) every
+    // Saturday off Friday's success (it also runs inside ml-weekly-retrain on Sunday, but
+    // that doesn't help Saturday). Found 2026-08-03 while auditing job/Telegram health.
+    // graceMinutes 60 -> 280: this entry is a step inside the ml-daily-ops chain (the
+    // '0 14 * * 1-5' pattern above), whose Worker lockDuration is 4h (240min) --
+    // jobRegistryGraceMinutesConsistency.test.ts already found and fixed the equivalent
+    // JOB_REGISTRY entry for this same underlying job, but this is a SEPARATE, independently
+    // tracked registry (DB-freshness via monitor.router.ts, not job_heartbeat), so fixing one
+    // never touched the other. 60min grace flagged 'stale' on every run that took over an
+    // hour into the chain, which per ml-daily-ops's own declared budget is normal. Bumped to
+    // match the corresponding JOB_REGISTRY sub-step fix (270min parent + 10min). Found
+    // 2026-08-03 while building the graceMinutes mirror-consistency test.
+    cronPatterns: ['0 14 * * 1-5'],
+    graceMinutes: 280,
   },
   {
     id: 'fii-dii-fetcher',
@@ -74,8 +120,17 @@ export const MONITOR_SCRIPTS = [
     staleLimitHours: 30,
     // Runs as a step inside ml-daily-ops (0 14 * * 1-5 = 7:30pm IST); checked before that
     // hasn't run yet today, not actually stale off Friday's run.
+    // graceMinutes 60 -> 280: this entry is a step inside the ml-daily-ops chain (the
+    // '0 14 * * 1-5' pattern above), whose Worker lockDuration is 4h (240min) --
+    // jobRegistryGraceMinutesConsistency.test.ts already found and fixed the equivalent
+    // JOB_REGISTRY entry for this same underlying job, but this is a SEPARATE, independently
+    // tracked registry (DB-freshness via monitor.router.ts, not job_heartbeat), so fixing one
+    // never touched the other. 60min grace flagged 'stale' on every run that took over an
+    // hour into the chain, which per ml-daily-ops's own declared budget is normal. Bumped to
+    // match the corresponding JOB_REGISTRY sub-step fix (270min parent + 10min). Found
+    // 2026-08-03 while building the graceMinutes mirror-consistency test.
     cronPatterns: ['0 14 * * 1-5'],
-    graceMinutes: 60,
+    graceMinutes: 280,
   },
   {
     id: 'finbert-scorer',
@@ -87,8 +142,17 @@ export const MONITOR_SCRIPTS = [
     pyScript: 'finbert_scorer.py --days 1',
     queueName: null,
     staleLimitHours: 30,
+    // graceMinutes 60 -> 280: this entry is a step inside the ml-daily-ops chain (the
+    // '0 14 * * 1-5' pattern above), whose Worker lockDuration is 4h (240min) --
+    // jobRegistryGraceMinutesConsistency.test.ts already found and fixed the equivalent
+    // JOB_REGISTRY entry for this same underlying job, but this is a SEPARATE, independently
+    // tracked registry (DB-freshness via monitor.router.ts, not job_heartbeat), so fixing one
+    // never touched the other. 60min grace flagged 'stale' on every run that took over an
+    // hour into the chain, which per ml-daily-ops's own declared budget is normal. Bumped to
+    // match the corresponding JOB_REGISTRY sub-step fix (270min parent + 10min). Found
+    // 2026-08-03 while building the graceMinutes mirror-consistency test.
     cronPatterns: ['0 14 * * 1-5'],
-    graceMinutes: 60,
+    graceMinutes: 280,
   },
   {
     id: 'ml-ensemble-score',
@@ -100,8 +164,17 @@ export const MONITOR_SCRIPTS = [
     pyScript: 'ml_ensemble.py --score',
     queueName: 'ml-daily-ops',
     staleLimitHours: 26,
+    // graceMinutes 60 -> 280: this entry is a step inside the ml-daily-ops chain (the
+    // '0 14 * * 1-5' pattern above), whose Worker lockDuration is 4h (240min) --
+    // jobRegistryGraceMinutesConsistency.test.ts already found and fixed the equivalent
+    // JOB_REGISTRY entry for this same underlying job, but this is a SEPARATE, independently
+    // tracked registry (DB-freshness via monitor.router.ts, not job_heartbeat), so fixing one
+    // never touched the other. 60min grace flagged 'stale' on every run that took over an
+    // hour into the chain, which per ml-daily-ops's own declared budget is normal. Bumped to
+    // match the corresponding JOB_REGISTRY sub-step fix (270min parent + 10min). Found
+    // 2026-08-03 while building the graceMinutes mirror-consistency test.
     cronPatterns: ['0 14 * * 1-5'],
-    graceMinutes: 60,
+    graceMinutes: 280,
   },
   {
     id: 'ml-ensemble-train',
@@ -146,6 +219,14 @@ export const MONITOR_SCRIPTS = [
     pyScript: 'regime_detector.py --mode update',
     queueName: null,
     staleLimitHours: 26,
+    // Driven by the dedicated DL Regime Update queue ('dl-regime-daily' in
+    // src/server/jobs/dl.jobs.ts), which is Mon-Fri only (15 11 * * 1-5 = 4:45pm IST) -- this
+    // entry had no cronPatterns at all, so the flat 26h staleLimitHours false-flagged 'stale'
+    // (critical: true, real Telegram alert) every Sat/Sun off Friday's success, the exact
+    // "false-alarm every weekend" bug class already fixed for dl-feature-refresh/drift-detector/
+    // ml-ensemble-incremental on 2026-07-19. Found 2026-08-03 while auditing job/Telegram health.
+    cronPatterns: ['15 11 * * 1-5'],
+    graceMinutes: 45,
   },
   {
     id: 'feature-engineering',
@@ -157,8 +238,14 @@ export const MONITOR_SCRIPTS = [
     pyScript: 'feature_engineering.py --date today',
     queueName: null,
     staleLimitHours: 26,
-    // Dedicated DL Feature Refresh queue, 0 10 * * 1-5 = 3:30pm IST (not ml-daily-ops).
-    cronPatterns: ['0 10 * * 1-5'],
+    // Dedicated DL Feature Refresh queue ('dl-feature-daily' in src/server/jobs/dl.jobs.ts).
+    // MOVED 2026-07-31 from 0 10 * * 1-5 (3:30pm IST, the closing bell -- ran before that
+    // day's OHLCV bar was persisted) to 30 11 * * 1-5 (5:00pm IST). This mirror was not
+    // updated at the time, so feature-engineering false-alarmed 'stale' (critical: true,
+    // real Telegram alert) every weekday between the old 4:30pm deadline and the real
+    // 5:00pm+ run completing -- found 2026-08-03 while auditing job/Telegram health. Keep
+    // in lockstep with dl.jobs.ts's 'dl-feature-daily' repeat pattern.
+    cronPatterns: ['30 11 * * 1-5'],
     graceMinutes: 60,
   },
   {
@@ -171,8 +258,17 @@ export const MONITOR_SCRIPTS = [
     pyScript: 'reward_engine.py',
     queueName: null,
     staleLimitHours: 26,
+    // graceMinutes 60 -> 280: this entry is a step inside the ml-daily-ops chain (the
+    // '0 14 * * 1-5' pattern above), whose Worker lockDuration is 4h (240min) --
+    // jobRegistryGraceMinutesConsistency.test.ts already found and fixed the equivalent
+    // JOB_REGISTRY entry for this same underlying job, but this is a SEPARATE, independently
+    // tracked registry (DB-freshness via monitor.router.ts, not job_heartbeat), so fixing one
+    // never touched the other. 60min grace flagged 'stale' on every run that took over an
+    // hour into the chain, which per ml-daily-ops's own declared budget is normal. Bumped to
+    // match the corresponding JOB_REGISTRY sub-step fix (270min parent + 10min). Found
+    // 2026-08-03 while building the graceMinutes mirror-consistency test.
     cronPatterns: ['0 14 * * 1-5'],
-    graceMinutes: 60,
+    graceMinutes: 280,
   },
   {
     id: 'rl-agent-update',
@@ -184,8 +280,17 @@ export const MONITOR_SCRIPTS = [
     pyScript: 'rl_agent.py --update',
     queueName: null,
     staleLimitHours: 26,
+    // graceMinutes 60 -> 280: this entry is a step inside the ml-daily-ops chain (the
+    // '0 14 * * 1-5' pattern above), whose Worker lockDuration is 4h (240min) --
+    // jobRegistryGraceMinutesConsistency.test.ts already found and fixed the equivalent
+    // JOB_REGISTRY entry for this same underlying job, but this is a SEPARATE, independently
+    // tracked registry (DB-freshness via monitor.router.ts, not job_heartbeat), so fixing one
+    // never touched the other. 60min grace flagged 'stale' on every run that took over an
+    // hour into the chain, which per ml-daily-ops's own declared budget is normal. Bumped to
+    // match the corresponding JOB_REGISTRY sub-step fix (270min parent + 10min). Found
+    // 2026-08-03 while building the graceMinutes mirror-consistency test.
     cronPatterns: ['0 14 * * 1-5'],
-    graceMinutes: 60,
+    graceMinutes: 280,
   },
   {
     id: 'dl-engine-infer',
@@ -224,8 +329,17 @@ export const MONITOR_SCRIPTS = [
     queueName: null,
     tsFunction: 'computeSignalTypeStats',
     staleLimitHours: 26,
+    // graceMinutes 60 -> 280: this entry is a step inside the ml-daily-ops chain (the
+    // '0 14 * * 1-5' pattern above), whose Worker lockDuration is 4h (240min) --
+    // jobRegistryGraceMinutesConsistency.test.ts already found and fixed the equivalent
+    // JOB_REGISTRY entry for this same underlying job, but this is a SEPARATE, independently
+    // tracked registry (DB-freshness via monitor.router.ts, not job_heartbeat), so fixing one
+    // never touched the other. 60min grace flagged 'stale' on every run that took over an
+    // hour into the chain, which per ml-daily-ops's own declared budget is normal. Bumped to
+    // match the corresponding JOB_REGISTRY sub-step fix (270min parent + 10min). Found
+    // 2026-08-03 while building the graceMinutes mirror-consistency test.
     cronPatterns: ['0 14 * * 1-5'],
-    graceMinutes: 60,
+    graceMinutes: 280,
   },
   {
     id: 'screener-performance',
@@ -248,7 +362,12 @@ export const MONITOR_SCRIPTS = [
     category: 'Data',
     critical: false,
     description: 'Fetches Trendlyne company descriptions and scores high-growth potential via Ollama AI.',
-    schedule: 'Bi-weekly Sunday',
+    // Actually daily, all 7 days, 21:00 IST (sync.jobs.ts 'sync-company-profiles', 30 15 * * *)
+    // -- shards the universe by day-of-year, one run/day needed for full coverage every ~7
+    // days. Label corrected 2026-08-03 (was stale "Bi-weekly Sunday", pure display text with
+    // no effect on the staleLimitHours=360 threshold below, which was already generously
+    // sized for the real daily cadence).
+    schedule: 'Daily (all 7 days), universe sharded across ~7 days',
     pyScript: null,
     queueName: 'company-profiles-sync',
     staleLimitHours: 360,
@@ -274,12 +393,17 @@ export const MONITOR_SCRIPTS = [
     pyScript: null,
     queueName: 'trendlyne-midweek',
     staleLimitHours: 200,
-    // Weekly Tuesday 30 12 * * 2 = 6pm IST. Cron-aware grace still correctly flags this one
-    // stale if it's genuinely missed 2+ weekly cycles (its MIN() of two source tables means
-    // a single broken underlying fetcher pins the whole entry stale) -- that is a real data
-    // problem to chase (see trendlyne_adv_tech_fetcher.py / trendlyne_price_analysis_fetcher.py),
+    // Weekly Tuesday 30 14 * * 2 = 8pm IST. MOVED 2026-07-31 from 30 12 * * 2 (6pm IST) when
+    // the three screener syncs relocated into the 6:00-6:40pm block and landed on this job's
+    // old slot (see src/server/jobs/trendlyneWeekly.jobs.ts's 'trendlyne-midweek-batch'). This
+    // mirror was not updated at the time, so every Tuesday this entry false-flagged 'stale' in
+    // the daily digest between the old 8pm deadline and the real 8pm+ run completing -- found
+    // 2026-08-03 while auditing job/Telegram health. Cron-aware grace still correctly flags
+    // this one stale if it's genuinely missed 2+ weekly cycles (its MIN() of two source tables
+    // means a single broken underlying fetcher pins the whole entry stale) -- that is a real
+    // data problem to chase (see trendlyne_adv_tech_fetcher.py / trendlyne_price_analysis_fetcher.py),
     // not a timing false-positive, so this field only removes the "checked mid-week" noise.
-    cronPatterns: ['30 12 * * 2'],
+    cronPatterns: ['30 14 * * 2'],
     graceMinutes: 120,
   },
   {
@@ -288,10 +412,22 @@ export const MONITOR_SCRIPTS = [
     category: 'ML',
     critical: false,
     description: 'FCF yield (approx) + interest coverage, rewritten against ET_Stats after Trendlyne retired the params',
-    schedule: 'First Sunday of month',
+    // Was "First Sunday of month" / staleLimitHours: 900 -- both stale. financial_ratios_fetcher.py
+    // was moved OUT of the first-Sunday gate on 2026-07-31 (see trendlyneWeekly.jobs.ts's
+    // processTrendlyneRatiosMonthly: it now runs unconditionally on every Sunday, before the
+    // `isFirstSundayOfMonth` check that still gates working_capital_fetcher.py/
+    // mf_stock_holdings_fetcher.py below it) -- this entry's own label/threshold were never
+    // updated to match, so it was carrying a 5x-looser threshold than its real weekly cadence
+    // needs (not a false-alarm risk, since 900h > the true 168h worst case, but a real
+    // staleness-detection blind spot: a genuine break wouldn't have been flagged for up to 900h
+    // instead of ~200h). Found 2026-08-03 while building the staleLimitHours mirror-consistency
+    // test -- corrected to match its ml-weekly-retrain/trendlyne-fundamentals siblings' convention
+    // (168h worst case + margin). working-capital below is genuinely still monthly-gated and
+    // keeps its own correct 900h.
+    schedule: 'Weekly Sunday',
     pyScript: 'financial_ratios_fetcher.py',
     queueName: 'trendlyne-ratios-monthly',
-    staleLimitHours: 800,
+    staleLimitHours: 200,
   },
   {
     id: 'working-capital',
@@ -302,7 +438,8 @@ export const MONITOR_SCRIPTS = [
     schedule: 'First Sunday of month',
     pyScript: 'working_capital_fetcher.py',
     queueName: 'trendlyne-ratios-monthly',
-    staleLimitHours: 800,
+    // Same "first Sunday of month" worst-case-gap fix as financial-ratios above (840h > 800h).
+    staleLimitHours: 900,
   },
   {
     id: 'tickertape-scorecard',
@@ -329,5 +466,61 @@ export const MONITOR_SCRIPTS = [
     // graceMinutes: 25 = 15-min interval + 10 min tolerance for a slow quote-fetch cycle.
     cronPatterns: ['*/15 3-10 * * 1-5'],
     graceMinutes: 25,
+  },
+  // Both entries below (2026-08-03) close a gap found while auditing whether JOB_REGISTRY's
+  // everyMs-driven jobs (news-sentiment, trendlyne-intraday, confluence-compute) should also
+  // have an independent MONITOR_SCRIPTS DB-freshness watch, not just the job_heartbeat
+  // "did it run" signal. Both ids are added to KNOWN_SAFE_OVERLAPS in
+  // jobRegistryVsMonitorScripts.test.ts -- this is a deliberate, intentional overlap (same
+  // convention as the 11 existing ones there), not an accidental id clash.
+  {
+    id: 'confluence-compute',
+    label: 'Confluence Engine',
+    category: 'ML',
+    critical: true,
+    description: 'Cross-sectional confluence scoring (screener-membership confluence + ML probability overlay) across the full universe, feeding unified_ranker.py\'s confluence blend component.',
+    // The strongest of the three candidates: its JOB_REGISTRY job_heartbeat entry is
+    // STRUCTURALLY BLIND to whether this job is actually writing fresh data.
+    // confluence.jobs.ts's processConfluenceCompute() returns `{ computed: 0, ... }` --
+    // success, not a throw -- whenever isMarketOpen() is true (a deliberate skip: this is a
+    // positional signal that intentionally doesn't run during market hours, to avoid
+    // contending with the intraday pipeline). BullMQ's Worker fires its 'completed' handler
+    // (and recordHeartbeat('confluence-compute', 'success')) on ANY non-throwing return,
+    // identically whether real computation happened or the run was skipped -- so
+    // job_heartbeat reports "success" every 30 minutes forever, even if confluence_signals
+    // silently stopped getting real updates entirely. Only a DB-freshness check like this one
+    // can catch that.
+    schedule: 'Every 30 min, real writes only OUTSIDE weekday market hours (9:15am-3:30pm IST)',
+    pyScript: null,
+    queueName: 'confluence-compute',
+    // Real worst-case gap between fresh writes is the weekday market-hours window itself
+    // (~6h15m) -- isMarketOpen() is holiday/weekend-aware (queries live BSE/NSE status), so
+    // weekends and holidays get real 30-min writes all day, same as any off-hours weekday
+    // slot; there is no multi-day gap to model here, unlike the market-hours-ONLY jobs this
+    // session already found and fixed (technical-scan, regime-detector). Not expressed as
+    // cronPatterns: "every 30 min except weekday market hours" needs an inverted hour range
+    // combined with a day-of-week exception that doesn't reduce to one clean 5-field cron
+    // pattern -- a flat threshold generously above the real ~6h15m gap is the simpler, more
+    // robust choice here, not a workaround.
+    staleLimitHours: 10,
+  },
+  {
+    id: 'news-sentiment',
+    label: 'News Sentiment Refresh',
+    category: 'Data',
+    critical: false,
+    description: 'Aggregates and AI-scores news/RSS items into news_sentiment_items, feeding finbert-scorer and the ML sentiment feature.',
+    schedule: 'Every 15 min, 24/7 (no market-hours gating -- news is intraday-relevant around the clock)',
+    pyScript: null,
+    queueName: 'news-sentiment',
+    staleLimitHours: 26, // fallback only; cronPatterns below is the real guard
+    // Genuinely unrestricted 24/7 cadence (queues.ts: "news-sentiment stays 24/7 on purpose:
+    // breaking news is intraday-relevant, so pausing it would degrade intraday awareness") --
+    // unlike confluence-compute/trendlyne-intraday, there's no day/hour gating to model, so a
+    // plain every-15-min cron is exact rather than an approximation.
+    cronPatterns: ['*/15 * * * *'],
+    // Worker lockDuration is 10min (queues.ts's newsSentimentWorker); graceMinutes generously
+    // exceeds it to tolerate a slow RSS-fetch cycle without false-alarming.
+    graceMinutes: 45,
   },
 ] as const;

@@ -21,6 +21,12 @@ async function getLastRunAt(scriptId: ScriptId): Promise<string | null> {
       case 'technical-scan':
         row = await dbGet("SELECT MAX(computed_at) as t FROM technical_signals");
         break;
+      case 'confluence-compute':
+        row = await dbGet("SELECT MAX(computed_at) as t FROM confluence_signals");
+        break;
+      case 'news-sentiment':
+        row = await dbGet("SELECT MAX(fetched_at) as t FROM news_sentiment_items");
+        break;
       case 'outcome-resolver-5d':
         // computed_at is stamped on every upsert regardless of outcome (see outcome_resolver.py's
         // ON CONFLICT ... computed_at=excluded.computed_at), so filtering out PENDING rows here
@@ -120,6 +126,19 @@ async function getScriptStats(scriptId: ScriptId): Promise<Record<string, number
     switch (scriptId) {
       case 'technical-scan':
         return { total: ((await dbGet("SELECT COUNT(*) as n FROM technical_signals")) as any)?.n ?? 0 };
+      case 'confluence-compute':
+        return {
+          elite: ((await dbGet("SELECT COUNT(*) as n FROM confluence_signals WHERE conviction_level='ELITE' AND computed_at = (SELECT MAX(computed_at) FROM confluence_signals)")) as any)?.n ?? 0,
+          latest: ((await dbGet("SELECT COUNT(*) as n FROM confluence_signals WHERE computed_at = (SELECT MAX(computed_at) FROM confluence_signals)")) as any)?.n ?? 0,
+        };
+      case 'news-sentiment': {
+        // Cutoff computed in JS and bound as a parameter, not `NOW() - INTERVAL ...` --
+        // this codebase has repeatedly been bitten by Postgres-only date arithmetic that
+        // doesn't survive sqlTranslate.ts's translation to the SQLite dev fallback (see
+        // ml-ensemble-score's case above for the same pattern already proven safe here).
+        const cutoff = new Date(Date.now() - 24 * 3600_000).toISOString();
+        return { rows24h: ((await dbGet("SELECT COUNT(*) as n FROM news_sentiment_items WHERE fetched_at >= ?", [cutoff])) as any)?.n ?? 0 };
+      }
       case 'outcome-resolver-5d':
         return { resolved: ((await dbGet("SELECT COUNT(*) as n FROM signal_outcomes WHERE horizon_days=5 AND outcome!='PENDING'")) as any)?.n ?? 0 };
       case 'outcome-resolver-15d':
