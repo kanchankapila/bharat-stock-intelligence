@@ -17,9 +17,20 @@ export const MONITOR_SCRIPTS = [
     queueName: 'technical-signals',
     // Was 1h when the job ran unrestricted 24/7. Now market-hours-gated (queues.ts) like
     // outcome-resolver-5d/performance-tracker/fii-dii-fetcher below -- 1h would false-alarm
-    // 'stale' every single evening/weekend. 26h matches those siblings' convention: tolerates
-    // the overnight gap, still flags within a day of a genuine same-session failure.
+    // 'stale' every single evening/weekend. staleLimitHours is only the FALLBACK now (used if
+    // cronPatterns is ever absent); the real guard is cronPatterns below.
+    //
+    // A bare 26h number here (the historical/pre-cronPatterns state, restored 2026-08-03 while
+    // auditing job/Telegram health -- this entry had drifted to having NO cronPatterns despite
+    // its own comment claiming it "matches siblings' convention") does NOT tolerate the real
+    // gap: the underlying job (queues.ts technicalSignalsQueue, '*/30 3-10 * * 1-5') is
+    // Mon-Fri-only, so the true gap from Friday's last ~4pm IST run to Monday's first ~8:30am
+    // IST run is ~64.5h, not "overnight" -- 26h flagged 'stale' (critical: true, real Telegram
+    // alert) for roughly 38 hours every single weekend. cronPatterns makes this cron-aware like
+    // its true siblings (fii-dii-fetcher etc.) instead of relying on the flat threshold.
     staleLimitHours: 26,
+    cronPatterns: ['*/30 3-10 * * 1-5'],
+    graceMinutes: 45,
   },
   {
     id: 'outcome-resolver-5d',
@@ -61,6 +72,14 @@ export const MONITOR_SCRIPTS = [
     pyScript: 'performance_tracker.py --horizon 5',
     queueName: null,
     staleLimitHours: 26,
+    // Runs as a step inside ml-daily-ops (0 14 * * 1-5), same as sibling entries below
+    // (fii-dii-fetcher, finbert-scorer, ml-ensemble-score, reward-engine, rl-agent-update,
+    // signal-type-stats) -- but unlike them had NO cronPatterns, so the flat 26h
+    // staleLimitHours false-flagged 'stale' (critical: true, real Telegram alert) every
+    // Saturday off Friday's success (it also runs inside ml-weekly-retrain on Sunday, but
+    // that doesn't help Saturday). Found 2026-08-03 while auditing job/Telegram health.
+    cronPatterns: ['0 14 * * 1-5'],
+    graceMinutes: 60,
   },
   {
     id: 'fii-dii-fetcher',
@@ -146,6 +165,14 @@ export const MONITOR_SCRIPTS = [
     pyScript: 'regime_detector.py --mode update',
     queueName: null,
     staleLimitHours: 26,
+    // Driven by the dedicated DL Regime Update queue ('dl-regime-daily' in
+    // src/server/jobs/dl.jobs.ts), which is Mon-Fri only (15 11 * * 1-5 = 4:45pm IST) -- this
+    // entry had no cronPatterns at all, so the flat 26h staleLimitHours false-flagged 'stale'
+    // (critical: true, real Telegram alert) every Sat/Sun off Friday's success, the exact
+    // "false-alarm every weekend" bug class already fixed for dl-feature-refresh/drift-detector/
+    // ml-ensemble-incremental on 2026-07-19. Found 2026-08-03 while auditing job/Telegram health.
+    cronPatterns: ['15 11 * * 1-5'],
+    graceMinutes: 45,
   },
   {
     id: 'feature-engineering',
@@ -157,8 +184,14 @@ export const MONITOR_SCRIPTS = [
     pyScript: 'feature_engineering.py --date today',
     queueName: null,
     staleLimitHours: 26,
-    // Dedicated DL Feature Refresh queue, 0 10 * * 1-5 = 3:30pm IST (not ml-daily-ops).
-    cronPatterns: ['0 10 * * 1-5'],
+    // Dedicated DL Feature Refresh queue ('dl-feature-daily' in src/server/jobs/dl.jobs.ts).
+    // MOVED 2026-07-31 from 0 10 * * 1-5 (3:30pm IST, the closing bell -- ran before that
+    // day's OHLCV bar was persisted) to 30 11 * * 1-5 (5:00pm IST). This mirror was not
+    // updated at the time, so feature-engineering false-alarmed 'stale' (critical: true,
+    // real Telegram alert) every weekday between the old 4:30pm deadline and the real
+    // 5:00pm+ run completing -- found 2026-08-03 while auditing job/Telegram health. Keep
+    // in lockstep with dl.jobs.ts's 'dl-feature-daily' repeat pattern.
+    cronPatterns: ['30 11 * * 1-5'],
     graceMinutes: 60,
   },
   {
@@ -248,7 +281,12 @@ export const MONITOR_SCRIPTS = [
     category: 'Data',
     critical: false,
     description: 'Fetches Trendlyne company descriptions and scores high-growth potential via Ollama AI.',
-    schedule: 'Bi-weekly Sunday',
+    // Actually daily, all 7 days, 21:00 IST (sync.jobs.ts 'sync-company-profiles', 30 15 * * *)
+    // -- shards the universe by day-of-year, one run/day needed for full coverage every ~7
+    // days. Label corrected 2026-08-03 (was stale "Bi-weekly Sunday", pure display text with
+    // no effect on the staleLimitHours=360 threshold below, which was already generously
+    // sized for the real daily cadence).
+    schedule: 'Daily (all 7 days), universe sharded across ~7 days',
     pyScript: null,
     queueName: 'company-profiles-sync',
     staleLimitHours: 360,
@@ -274,12 +312,17 @@ export const MONITOR_SCRIPTS = [
     pyScript: null,
     queueName: 'trendlyne-midweek',
     staleLimitHours: 200,
-    // Weekly Tuesday 30 12 * * 2 = 6pm IST. Cron-aware grace still correctly flags this one
-    // stale if it's genuinely missed 2+ weekly cycles (its MIN() of two source tables means
-    // a single broken underlying fetcher pins the whole entry stale) -- that is a real data
-    // problem to chase (see trendlyne_adv_tech_fetcher.py / trendlyne_price_analysis_fetcher.py),
+    // Weekly Tuesday 30 14 * * 2 = 8pm IST. MOVED 2026-07-31 from 30 12 * * 2 (6pm IST) when
+    // the three screener syncs relocated into the 6:00-6:40pm block and landed on this job's
+    // old slot (see src/server/jobs/trendlyneWeekly.jobs.ts's 'trendlyne-midweek-batch'). This
+    // mirror was not updated at the time, so every Tuesday this entry false-flagged 'stale' in
+    // the daily digest between the old 8pm deadline and the real 8pm+ run completing -- found
+    // 2026-08-03 while auditing job/Telegram health. Cron-aware grace still correctly flags
+    // this one stale if it's genuinely missed 2+ weekly cycles (its MIN() of two source tables
+    // means a single broken underlying fetcher pins the whole entry stale) -- that is a real
+    // data problem to chase (see trendlyne_adv_tech_fetcher.py / trendlyne_price_analysis_fetcher.py),
     // not a timing false-positive, so this field only removes the "checked mid-week" noise.
-    cronPatterns: ['30 12 * * 2'],
+    cronPatterns: ['30 14 * * 2'],
     graceMinutes: 120,
   },
   {
@@ -291,7 +334,13 @@ export const MONITOR_SCRIPTS = [
     schedule: 'First Sunday of month',
     pyScript: 'financial_ratios_fetcher.py',
     queueName: 'trendlyne-ratios-monthly',
-    staleLimitHours: 800,
+    // 800h < the true worst-case "first Sunday of month" gap: computed exhaustively, the max
+    // gap between consecutive first-Sundays is 35 days = 840h (e.g. 2020-03-01 -> 2020-04-05;
+    // recurs periodically, next after 2026-08-03 is 2026-11-01 -> 2026-12-06), which would
+    // false-flag 'stale' for ~40h non-critical (digest-only, no real-time alert since
+    // critical: false) around that boundary. Bumped past the real worst case with margin.
+    // Found 2026-08-03 while auditing job/Telegram health.
+    staleLimitHours: 900,
   },
   {
     id: 'working-capital',
@@ -302,7 +351,8 @@ export const MONITOR_SCRIPTS = [
     schedule: 'First Sunday of month',
     pyScript: 'working_capital_fetcher.py',
     queueName: 'trendlyne-ratios-monthly',
-    staleLimitHours: 800,
+    // Same "first Sunday of month" worst-case-gap fix as financial-ratios above (840h > 800h).
+    staleLimitHours: 900,
   },
   {
     id: 'tickertape-scorecard',
