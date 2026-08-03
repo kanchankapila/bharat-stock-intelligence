@@ -131,6 +131,7 @@ def build_training_data(conn):
         LEFT JOIN quant_scores qs       ON qs.symbol = cs.symbol
         {_FUND_JOIN}
         WHERE so.horizon_days = 7 AND so.outcome IN ('WIN', 'LOSS')
+          AND so.signal_source = 'confluence'
         """
     else:
         # SQLite (dev): tiny dataset, keep the portable window-function form (no LATERAL).
@@ -155,6 +156,7 @@ def build_training_data(conn):
           AND {_CS_DAY} = so.signal_date
           AND so.horizon_days = 7
           AND so.outcome IN ('WIN', 'LOSS')
+          AND so.signal_source = 'confluence'
         LEFT JOIN technical_signals ts
           ON ts.symbol = cs.symbol
           AND ts.date = {_CS_DAY}
