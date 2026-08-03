@@ -1782,10 +1782,16 @@ CREATE TABLE IF NOT EXISTS "signal_outcomes" (
   -- them even though they already exist on the live table. Schema catch-up, 2026-08.
   "label_definition" TEXT,
   "is_suspect" SMALLINT DEFAULT 0,
-  PRIMARY KEY ("symbol", "signal_date", "horizon_days")
+  -- signal_source: which upstream signal this row grades ('technical' via outcome_resolver.py,
+  -- 'confluence' via confluence_outcome_tracker.py, 'unknown' for pre-2026-08 rows). Without
+  -- this the two writers collided on (symbol, signal_date, horizon_days) and silently picked
+  -- whichever wrote first -- see migrations/*_signal-outcomes-signal-source.sql.
+  "signal_source" TEXT NOT NULL DEFAULT 'unknown',
+  PRIMARY KEY ("symbol", "signal_date", "horizon_days", "signal_source")
 );
 CREATE INDEX idx_sout_date    ON signal_outcomes(signal_date DESC);
 CREATE INDEX idx_sout_outcome ON signal_outcomes(outcome);
+CREATE INDEX idx_sout_source  ON signal_outcomes(signal_source);
 CREATE INDEX idx_sout_sym     ON signal_outcomes(symbol);
 CREATE INDEX idx_so_label     ON signal_outcomes(label_definition);
 

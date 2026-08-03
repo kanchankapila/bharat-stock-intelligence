@@ -600,6 +600,11 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_tsig_sym   ON technical_signals(symbol);
 
   -- 15. Signal Outcomes — win rate tracking (entry vs exit N days later)
+  -- signal_source: which upstream signal this row grades ('technical' = technical_signals via
+  -- outcome_resolver.py, 'confluence' = confluence_signals via confluence_outcome_tracker.py,
+  -- 'unknown' = pre-2026-08 rows that can't be attributed). Without this, both writers collide
+  -- on (symbol, signal_date, horizon_days) and silently pick whichever wrote first -- see
+  -- migration 075 below for the fresh-DB-vs-existing-DB split of this fix.
   CREATE TABLE IF NOT EXISTS signal_outcomes (
     symbol        TEXT NOT NULL,
     signal_date   TEXT NOT NULL,
@@ -612,11 +617,13 @@ db.exec(`
     signal_score  INTEGER,
     signals_json  TEXT,
     computed_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+    max_return_pct REAL,
     -- label_definition ('terminal_pct2' | 'path_barrier' | 'unknown') / is_suspect: see the
     -- migrateColumn() catch-up below for why these are on the CREATE TABLE too.
     label_definition TEXT,
     is_suspect    INTEGER DEFAULT 0,
-    PRIMARY KEY (symbol, signal_date, horizon_days)
+    signal_source TEXT NOT NULL DEFAULT 'unknown',
+    PRIMARY KEY (symbol, signal_date, horizon_days, signal_source)
   );
 
   CREATE INDEX IF NOT EXISTS idx_sout_date    ON signal_outcomes(signal_date DESC);
@@ -2976,6 +2983,56 @@ runMigration('073_unified_recommendations_engine_coverage', `
 // (mcpServer.ts, strategySignalsService.ts, chatbot price_tool.py) already repointed.
 runMigration('074_drop_technical_analysis_signals', `
   DROP TABLE IF EXISTS technical_analysis_signals;
+`);
+
+// signal_outcomes gained a signal_source discriminator (2026-08): outcome_resolver.py
+// (technical_signals, horizons 1/5/15) and confluence_outcome_tracker.py (confluence_signals,
+// horizons 3/7/14/30) were both writing the same (symbol, signal_date, horizon_days) key with no
+// way to tell which upstream signal a row grades -- silently colliding, and letting ML consumers
+// that JOIN back to technical_signals mispair a confluence-sourced outcome with an unrelated
+// technical signal's features. Widened key mirrors unified_signals' own 4-col key (migrations
+// 043/044) -- same rename->recreate->copy->drop dance, since SQLite can't alter an inline PK.
+runMigration('075_signal_outcomes_signal_source', `
+  PRAGMA foreign_keys=OFF;
+
+  ALTER TABLE signal_outcomes RENAME TO signal_outcomes_old;
+
+  CREATE TABLE signal_outcomes (
+    symbol        TEXT NOT NULL,
+    signal_date   TEXT NOT NULL,
+    horizon_days  INTEGER NOT NULL,
+    entry_price   REAL NOT NULL,
+    check_date    TEXT,
+    exit_price    REAL,
+    return_pct    REAL,
+    outcome       TEXT,
+    signal_score  INTEGER,
+    signals_json  TEXT,
+    computed_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+    max_return_pct REAL,
+    label_definition TEXT,
+    is_suspect    INTEGER DEFAULT 0,
+    signal_source TEXT NOT NULL DEFAULT 'unknown',
+    PRIMARY KEY (symbol, signal_date, horizon_days, signal_source)
+  );
+
+  INSERT INTO signal_outcomes
+    (symbol, signal_date, horizon_days, entry_price, check_date, exit_price, return_pct,
+     outcome, signal_score, signals_json, computed_at, max_return_pct, label_definition,
+     is_suspect, signal_source)
+  SELECT
+    symbol, signal_date, horizon_days, entry_price, check_date, exit_price, return_pct,
+    outcome, signal_score, signals_json, computed_at, max_return_pct, label_definition,
+    is_suspect, 'unknown'
+  FROM signal_outcomes_old;
+
+  DROP TABLE signal_outcomes_old;
+
+  CREATE INDEX IF NOT EXISTS idx_sout_date    ON signal_outcomes(signal_date DESC);
+  CREATE INDEX IF NOT EXISTS idx_sout_outcome ON signal_outcomes(outcome);
+  CREATE INDEX IF NOT EXISTS idx_sout_sym     ON signal_outcomes(symbol);
+  CREATE INDEX IF NOT EXISTS idx_so_label     ON signal_outcomes(label_definition);
+  CREATE INDEX IF NOT EXISTS idx_sout_source  ON signal_outcomes(signal_source);
 `);
 
 // Keep startup diagnostics off stdout so stdio-based clients can parse JSON-RPC.
