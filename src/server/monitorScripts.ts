@@ -46,8 +46,17 @@ export const MONITOR_SCRIPTS = [
     // 7:30pm ml-daily-ops batch (queues.ts processMlDailyOps). Cron-aware lateness takes the
     // more recent of the two expected fire times instead of a flat hours threshold, so a
     // mid-day check (before either run) doesn't false-flag "stale" off Friday's success.
+    // graceMinutes 60 -> 280: this entry is a step inside the ml-daily-ops chain (the
+    // '0 14 * * 1-5' pattern above), whose Worker lockDuration is 4h (240min) --
+    // jobRegistryGraceMinutesConsistency.test.ts already found and fixed the equivalent
+    // JOB_REGISTRY entry for this same underlying job, but this is a SEPARATE, independently
+    // tracked registry (DB-freshness via monitor.router.ts, not job_heartbeat), so fixing one
+    // never touched the other. 60min grace flagged 'stale' on every run that took over an
+    // hour into the chain, which per ml-daily-ops's own declared budget is normal. Bumped to
+    // match the corresponding JOB_REGISTRY sub-step fix (270min parent + 10min). Found
+    // 2026-08-03 while building the graceMinutes mirror-consistency test.
     cronPatterns: ['0 4 * * 1-5', '0 14 * * 1-5'],
-    graceMinutes: 60,
+    graceMinutes: 280,
   },
   {
     id: 'outcome-resolver-15d',
@@ -59,8 +68,17 @@ export const MONITOR_SCRIPTS = [
     pyScript: 'outcome_resolver.py --horizon 15',
     queueName: 'outcome-resolver',
     staleLimitHours: 26,
+    // graceMinutes 60 -> 280: this entry is a step inside the ml-daily-ops chain (the
+    // '0 14 * * 1-5' pattern above), whose Worker lockDuration is 4h (240min) --
+    // jobRegistryGraceMinutesConsistency.test.ts already found and fixed the equivalent
+    // JOB_REGISTRY entry for this same underlying job, but this is a SEPARATE, independently
+    // tracked registry (DB-freshness via monitor.router.ts, not job_heartbeat), so fixing one
+    // never touched the other. 60min grace flagged 'stale' on every run that took over an
+    // hour into the chain, which per ml-daily-ops's own declared budget is normal. Bumped to
+    // match the corresponding JOB_REGISTRY sub-step fix (270min parent + 10min). Found
+    // 2026-08-03 while building the graceMinutes mirror-consistency test.
     cronPatterns: ['0 4 * * 1-5', '0 14 * * 1-5'],
-    graceMinutes: 60,
+    graceMinutes: 280,
   },
   {
     id: 'performance-tracker',
@@ -78,8 +96,17 @@ export const MONITOR_SCRIPTS = [
     // staleLimitHours false-flagged 'stale' (critical: true, real Telegram alert) every
     // Saturday off Friday's success (it also runs inside ml-weekly-retrain on Sunday, but
     // that doesn't help Saturday). Found 2026-08-03 while auditing job/Telegram health.
+    // graceMinutes 60 -> 280: this entry is a step inside the ml-daily-ops chain (the
+    // '0 14 * * 1-5' pattern above), whose Worker lockDuration is 4h (240min) --
+    // jobRegistryGraceMinutesConsistency.test.ts already found and fixed the equivalent
+    // JOB_REGISTRY entry for this same underlying job, but this is a SEPARATE, independently
+    // tracked registry (DB-freshness via monitor.router.ts, not job_heartbeat), so fixing one
+    // never touched the other. 60min grace flagged 'stale' on every run that took over an
+    // hour into the chain, which per ml-daily-ops's own declared budget is normal. Bumped to
+    // match the corresponding JOB_REGISTRY sub-step fix (270min parent + 10min). Found
+    // 2026-08-03 while building the graceMinutes mirror-consistency test.
     cronPatterns: ['0 14 * * 1-5'],
-    graceMinutes: 60,
+    graceMinutes: 280,
   },
   {
     id: 'fii-dii-fetcher',
@@ -93,8 +120,17 @@ export const MONITOR_SCRIPTS = [
     staleLimitHours: 30,
     // Runs as a step inside ml-daily-ops (0 14 * * 1-5 = 7:30pm IST); checked before that
     // hasn't run yet today, not actually stale off Friday's run.
+    // graceMinutes 60 -> 280: this entry is a step inside the ml-daily-ops chain (the
+    // '0 14 * * 1-5' pattern above), whose Worker lockDuration is 4h (240min) --
+    // jobRegistryGraceMinutesConsistency.test.ts already found and fixed the equivalent
+    // JOB_REGISTRY entry for this same underlying job, but this is a SEPARATE, independently
+    // tracked registry (DB-freshness via monitor.router.ts, not job_heartbeat), so fixing one
+    // never touched the other. 60min grace flagged 'stale' on every run that took over an
+    // hour into the chain, which per ml-daily-ops's own declared budget is normal. Bumped to
+    // match the corresponding JOB_REGISTRY sub-step fix (270min parent + 10min). Found
+    // 2026-08-03 while building the graceMinutes mirror-consistency test.
     cronPatterns: ['0 14 * * 1-5'],
-    graceMinutes: 60,
+    graceMinutes: 280,
   },
   {
     id: 'finbert-scorer',
@@ -106,8 +142,17 @@ export const MONITOR_SCRIPTS = [
     pyScript: 'finbert_scorer.py --days 1',
     queueName: null,
     staleLimitHours: 30,
+    // graceMinutes 60 -> 280: this entry is a step inside the ml-daily-ops chain (the
+    // '0 14 * * 1-5' pattern above), whose Worker lockDuration is 4h (240min) --
+    // jobRegistryGraceMinutesConsistency.test.ts already found and fixed the equivalent
+    // JOB_REGISTRY entry for this same underlying job, but this is a SEPARATE, independently
+    // tracked registry (DB-freshness via monitor.router.ts, not job_heartbeat), so fixing one
+    // never touched the other. 60min grace flagged 'stale' on every run that took over an
+    // hour into the chain, which per ml-daily-ops's own declared budget is normal. Bumped to
+    // match the corresponding JOB_REGISTRY sub-step fix (270min parent + 10min). Found
+    // 2026-08-03 while building the graceMinutes mirror-consistency test.
     cronPatterns: ['0 14 * * 1-5'],
-    graceMinutes: 60,
+    graceMinutes: 280,
   },
   {
     id: 'ml-ensemble-score',
@@ -119,8 +164,17 @@ export const MONITOR_SCRIPTS = [
     pyScript: 'ml_ensemble.py --score',
     queueName: 'ml-daily-ops',
     staleLimitHours: 26,
+    // graceMinutes 60 -> 280: this entry is a step inside the ml-daily-ops chain (the
+    // '0 14 * * 1-5' pattern above), whose Worker lockDuration is 4h (240min) --
+    // jobRegistryGraceMinutesConsistency.test.ts already found and fixed the equivalent
+    // JOB_REGISTRY entry for this same underlying job, but this is a SEPARATE, independently
+    // tracked registry (DB-freshness via monitor.router.ts, not job_heartbeat), so fixing one
+    // never touched the other. 60min grace flagged 'stale' on every run that took over an
+    // hour into the chain, which per ml-daily-ops's own declared budget is normal. Bumped to
+    // match the corresponding JOB_REGISTRY sub-step fix (270min parent + 10min). Found
+    // 2026-08-03 while building the graceMinutes mirror-consistency test.
     cronPatterns: ['0 14 * * 1-5'],
-    graceMinutes: 60,
+    graceMinutes: 280,
   },
   {
     id: 'ml-ensemble-train',
@@ -204,8 +258,17 @@ export const MONITOR_SCRIPTS = [
     pyScript: 'reward_engine.py',
     queueName: null,
     staleLimitHours: 26,
+    // graceMinutes 60 -> 280: this entry is a step inside the ml-daily-ops chain (the
+    // '0 14 * * 1-5' pattern above), whose Worker lockDuration is 4h (240min) --
+    // jobRegistryGraceMinutesConsistency.test.ts already found and fixed the equivalent
+    // JOB_REGISTRY entry for this same underlying job, but this is a SEPARATE, independently
+    // tracked registry (DB-freshness via monitor.router.ts, not job_heartbeat), so fixing one
+    // never touched the other. 60min grace flagged 'stale' on every run that took over an
+    // hour into the chain, which per ml-daily-ops's own declared budget is normal. Bumped to
+    // match the corresponding JOB_REGISTRY sub-step fix (270min parent + 10min). Found
+    // 2026-08-03 while building the graceMinutes mirror-consistency test.
     cronPatterns: ['0 14 * * 1-5'],
-    graceMinutes: 60,
+    graceMinutes: 280,
   },
   {
     id: 'rl-agent-update',
@@ -217,8 +280,17 @@ export const MONITOR_SCRIPTS = [
     pyScript: 'rl_agent.py --update',
     queueName: null,
     staleLimitHours: 26,
+    // graceMinutes 60 -> 280: this entry is a step inside the ml-daily-ops chain (the
+    // '0 14 * * 1-5' pattern above), whose Worker lockDuration is 4h (240min) --
+    // jobRegistryGraceMinutesConsistency.test.ts already found and fixed the equivalent
+    // JOB_REGISTRY entry for this same underlying job, but this is a SEPARATE, independently
+    // tracked registry (DB-freshness via monitor.router.ts, not job_heartbeat), so fixing one
+    // never touched the other. 60min grace flagged 'stale' on every run that took over an
+    // hour into the chain, which per ml-daily-ops's own declared budget is normal. Bumped to
+    // match the corresponding JOB_REGISTRY sub-step fix (270min parent + 10min). Found
+    // 2026-08-03 while building the graceMinutes mirror-consistency test.
     cronPatterns: ['0 14 * * 1-5'],
-    graceMinutes: 60,
+    graceMinutes: 280,
   },
   {
     id: 'dl-engine-infer',
@@ -257,8 +329,17 @@ export const MONITOR_SCRIPTS = [
     queueName: null,
     tsFunction: 'computeSignalTypeStats',
     staleLimitHours: 26,
+    // graceMinutes 60 -> 280: this entry is a step inside the ml-daily-ops chain (the
+    // '0 14 * * 1-5' pattern above), whose Worker lockDuration is 4h (240min) --
+    // jobRegistryGraceMinutesConsistency.test.ts already found and fixed the equivalent
+    // JOB_REGISTRY entry for this same underlying job, but this is a SEPARATE, independently
+    // tracked registry (DB-freshness via monitor.router.ts, not job_heartbeat), so fixing one
+    // never touched the other. 60min grace flagged 'stale' on every run that took over an
+    // hour into the chain, which per ml-daily-ops's own declared budget is normal. Bumped to
+    // match the corresponding JOB_REGISTRY sub-step fix (270min parent + 10min). Found
+    // 2026-08-03 while building the graceMinutes mirror-consistency test.
     cronPatterns: ['0 14 * * 1-5'],
-    graceMinutes: 60,
+    graceMinutes: 280,
   },
   {
     id: 'screener-performance',
