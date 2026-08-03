@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { CronExpressionParser } from 'cron-parser';
 import { MONITOR_SCRIPTS } from '../monitorScripts';
 
 /**
@@ -67,7 +68,13 @@ describe('MONITOR_SCRIPTS cronPatterns mirror consistency', () => {
     expect(withCron.length).toBeGreaterThan(5);
   });
 
-  it.each(withCron.flatMap(s => s.cronPatterns.map((p: string) => ({ id: s.id, pattern: p }))))(
+  // news-sentiment (added 2026-08-03) is excluded from this literal-string sweep: its
+  // cronPatterns ('*/15 * * * *') is a deliberately SYNTHESIZED clock-aligned equivalent of
+  // the real job's `repeat: { every: 15*60*1000 }` registration (queues.ts) -- BullMQ's
+  // `every:` fires every N ms from an arbitrary phase, not necessarily aligned to :00/:15/:30/
+  // :45 the way a cron `*/15 * * * *` is, so this string was never going to appear literally
+  // in source and never should. It gets its own equivalence check below instead.
+  it.each(withCron.filter(s => s.id !== 'news-sentiment').flatMap(s => s.cronPatterns.map((p: string) => ({ id: s.id, pattern: p }))))(
     '$id: cronPattern "$pattern" exists as a real repeat pattern somewhere in source',
     ({ pattern }) => {
       // A pattern that exists nowhere in source is definitely stale -- this alone would have
@@ -76,6 +83,30 @@ describe('MONITOR_SCRIPTS cronPatterns mirror consistency', () => {
       expect(realPatterns.has(pattern)).toBe(true);
     },
   );
+
+  it("news-sentiment's cronPattern is a genuine 15-min-interval equivalent of the real job's every: 15*60*1000", () => {
+    const entry = (MONITOR_SCRIPTS as readonly any[]).find(s => s.id === 'news-sentiment');
+    expect(entry?.cronPatterns).toEqual(['*/15 * * * *']);
+
+    // Verify the REAL source registration is genuinely a 15-min interval (not some other
+    // value the synthesized cron string would then silently misrepresent).
+    const everyRe = /'news-sentiment-refresh'[\s\S]{0,400}?repeat:\s*\{\s*every:\s*([0-9*+._\s]+?)(?:,|\s*\})/;
+    const m = everyRe.exec(src);
+    expect(m, "could not find news-sentiment-refresh's repeat:{every:...} in source -- source shape may have changed").not.toBeNull();
+    // eslint-disable-next-line no-new-func
+    const realEveryMs = Function(`"use strict"; return (${m![1]});`)() as number;
+    expect(realEveryMs).toBe(15 * 60 * 1000);
+
+    // Verify the synthesized cron pattern itself really does fire every 15 minutes, clock-
+    // aligned -- not just that the string LOOKS like "15" somewhere in it.
+    const interval = CronExpressionParser.parse('*/15 * * * *', { currentDate: new Date('2024-01-01T00:00:00Z'), tz: 'Etc/UTC' });
+    let prev = interval.next().toDate().getTime();
+    for (let i = 0; i < 20; i++) {
+      const next = interval.next().toDate().getTime();
+      expect(next - prev).toBe(15 * 60_000);
+      prev = next;
+    }
+  });
 
   // Pinned regressions for the five entries fixed 2026-08-03, tied to their specific driving
   // job by name -- stronger than the general sweep above, which only proves the pattern

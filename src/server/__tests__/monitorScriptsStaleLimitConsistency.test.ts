@@ -124,7 +124,28 @@ function worstCaseFirstSundayOfMonthGapHours(): number {
   return worstMs / 3_600_000;
 }
 
+/**
+ * Worst-case gap (hours) for a job that writes real data 24/7 EXCEPT during weekday NSE market
+ * hours (09:15-15:30 IST = 03:45-10:00 UTC, per jobRegistry.ts's own header comment) --
+ * confluence-compute's real cadence (added 2026-08-03): its processor returns success without
+ * writing whenever isMarketOpen() is true, by design. isMarketOpen() is holiday/weekend-aware
+ * (queries live BSE/NSE status), so this window only ever excludes a WEEKDAY session -- unlike
+ * the market-hours-ONLY jobs found and fixed elsewhere this session (technical-scan,
+ * regime-detector), there is no multi-day weekend gap to model here, since weekends get real
+ * writes all day. A fixed 6h15m constant, not a calendar search, since the window itself never
+ * varies (no DST in IST, no month-boundary effect the way "first Sunday" has).
+ */
+function marketHoursSkipWindowHours(): number {
+  const marketOpenUtcMinutes = 3 * 60 + 45;  // 03:45 UTC = 09:15 IST
+  const marketCloseUtcMinutes = 10 * 60 + 0; // 10:00 UTC = 15:30 IST
+  return (marketCloseUtcMinutes - marketOpenUtcMinutes) / 60;
+}
+
 describe('MONITOR_SCRIPTS.staleLimitHours consistency', () => {
+  it('parser sanity: the weekday market-hours skip window is exactly 6.25h', () => {
+    expect(marketHoursSkipWindowHours()).toBe(6.25);
+  });
+
   it('parser sanity: cron-parser worst-case gap for a weekly Sunday pattern is exactly 168h', () => {
     // Pins the helper itself against a known-correct case before trusting it below.
     expect(worstCaseGapHoursFromCron('0 5 * * 0')).toBe(168);
@@ -144,10 +165,12 @@ describe('MONITOR_SCRIPTS.staleLimitHours consistency', () => {
 
   /**
    * jobName is the source marker used to look up the real driving job's cron pattern; the
-   * optional `monthlyGated` flag marks the one entry whose real cadence is a conditional
-   * sub-cadence of that cron, not the cron itself.
+   * optional `monthlyGated` flag marks the entry whose real cadence is a conditional
+   * sub-cadence of that cron, not the cron itself; `marketHoursSkipGated` marks the entry
+   * whose real cadence is "24/7 except weekday market hours" -- no marker/cron lookup needed
+   * for that one, since the gap is a fixed constant, not derived from a repeat pattern.
    */
-  const driving: Array<{ id: string; jobName: string; monthlyGated?: boolean }> = [
+  const driving: Array<{ id: string; jobName?: string; monthlyGated?: boolean; marketHoursSkipGated?: boolean }> = [
     { id: 'ml-ensemble-train', jobName: "'ml-weekly-retrain'" },
     { id: 'strategy-optimizer', jobName: "'ml-weekly-retrain'" },
     { id: 'trendlyne-fundamentals', jobName: "'ml-weekly-retrain'" },
@@ -157,6 +180,7 @@ describe('MONITOR_SCRIPTS.staleLimitHours consistency', () => {
     { id: 'financial-ratios', jobName: "jobName: 'trendlyne-ratios-monthly-check'" },
     { id: 'working-capital', jobName: "jobName: 'trendlyne-ratios-monthly-check'", monthlyGated: true },
     { id: 'tickertape-scorecard', jobName: "jobName: 'tickertape-scorecard-weekly'" },
+    { id: 'confluence-compute', marketHoursSkipGated: true },
   ];
 
   it('driving-job list covers every no-cronPatterns MONITOR_SCRIPTS entry', () => {
@@ -167,7 +191,7 @@ describe('MONITOR_SCRIPTS.staleLimitHours consistency', () => {
     expect(missing).toEqual([]);
   });
 
-  it.each(driving)('$id: staleLimitHours covers the real worst-case gap for its driving job', ({ id, jobName, monthlyGated }) => {
+  it.each(driving)('$id: staleLimitHours covers the real worst-case gap for its driving job', ({ id, jobName, monthlyGated, marketHoursSkipGated }) => {
     const entry = (MONITOR_SCRIPTS as readonly any[]).find(s => s.id === id);
     expect(entry, `${id} not found in MONITOR_SCRIPTS`).toBeDefined();
     expect(entry!.staleLimitHours, `${id} has no staleLimitHours`).toBeTypeOf('number');
@@ -181,7 +205,16 @@ describe('MONITOR_SCRIPTS.staleLimitHours consistency', () => {
       return;
     }
 
-    const realPattern = findRealPattern(jobName);
+    if (marketHoursSkipGated) {
+      const worst = marketHoursSkipWindowHours();
+      expect(
+        entry!.staleLimitHours,
+        `${id}: staleLimitHours=${entry!.staleLimitHours}h does not cover the real weekday-market-hours-skip worst case of ${worst}h`,
+      ).toBeGreaterThanOrEqual(worst);
+      return;
+    }
+
+    const realPattern = findRealPattern(jobName!);
     expect(realPattern, `no repeat pattern found near marker "${jobName}" for ${id} -- source shape may have changed`).not.toBeNull();
     const worst = worstCaseGapHoursFromCron(realPattern!);
     expect(

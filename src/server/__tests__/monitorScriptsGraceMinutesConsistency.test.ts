@@ -127,6 +127,10 @@ describe('MONITOR_SCRIPTS.graceMinutes consistency', () => {
     'signal-type-stats': [{ jobKey: 'ml-daily-ops', marker: 'mlDailyOpsWorker = new Worker' }],
     'screener-performance': [{ jobKey: 'screener-performance-daily', marker: "jobName: 'screener-performance-daily'" }],
     'trendlyne-midweek': [{ jobKey: 'trendlyne-midweek-batch', marker: "jobName: 'trendlyne-midweek-batch'" }],
+    // Added 2026-08-03 alongside the new MONITOR_SCRIPTS entry -- same marker already proven
+    // correct in jobRegistryGraceMinutesConsistency.test.ts's driving map for the JOB_REGISTRY
+    // 'news-sentiment' entry.
+    'news-sentiment': [{ jobKey: 'news-sentiment-refresh', marker: "'news-sentiment-refresh'" }],
   };
 
   // Runs off a Node process setInterval, not a BullMQ job -- no lockDuration exists to compare

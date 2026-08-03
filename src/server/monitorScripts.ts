@@ -467,4 +467,60 @@ export const MONITOR_SCRIPTS = [
     cronPatterns: ['*/15 3-10 * * 1-5'],
     graceMinutes: 25,
   },
+  // Both entries below (2026-08-03) close a gap found while auditing whether JOB_REGISTRY's
+  // everyMs-driven jobs (news-sentiment, trendlyne-intraday, confluence-compute) should also
+  // have an independent MONITOR_SCRIPTS DB-freshness watch, not just the job_heartbeat
+  // "did it run" signal. Both ids are added to KNOWN_SAFE_OVERLAPS in
+  // jobRegistryVsMonitorScripts.test.ts -- this is a deliberate, intentional overlap (same
+  // convention as the 11 existing ones there), not an accidental id clash.
+  {
+    id: 'confluence-compute',
+    label: 'Confluence Engine',
+    category: 'ML',
+    critical: true,
+    description: 'Cross-sectional confluence scoring (screener-membership confluence + ML probability overlay) across the full universe, feeding unified_ranker.py\'s confluence blend component.',
+    // The strongest of the three candidates: its JOB_REGISTRY job_heartbeat entry is
+    // STRUCTURALLY BLIND to whether this job is actually writing fresh data.
+    // confluence.jobs.ts's processConfluenceCompute() returns `{ computed: 0, ... }` --
+    // success, not a throw -- whenever isMarketOpen() is true (a deliberate skip: this is a
+    // positional signal that intentionally doesn't run during market hours, to avoid
+    // contending with the intraday pipeline). BullMQ's Worker fires its 'completed' handler
+    // (and recordHeartbeat('confluence-compute', 'success')) on ANY non-throwing return,
+    // identically whether real computation happened or the run was skipped -- so
+    // job_heartbeat reports "success" every 30 minutes forever, even if confluence_signals
+    // silently stopped getting real updates entirely. Only a DB-freshness check like this one
+    // can catch that.
+    schedule: 'Every 30 min, real writes only OUTSIDE weekday market hours (9:15am-3:30pm IST)',
+    pyScript: null,
+    queueName: 'confluence-compute',
+    // Real worst-case gap between fresh writes is the weekday market-hours window itself
+    // (~6h15m) -- isMarketOpen() is holiday/weekend-aware (queries live BSE/NSE status), so
+    // weekends and holidays get real 30-min writes all day, same as any off-hours weekday
+    // slot; there is no multi-day gap to model here, unlike the market-hours-ONLY jobs this
+    // session already found and fixed (technical-scan, regime-detector). Not expressed as
+    // cronPatterns: "every 30 min except weekday market hours" needs an inverted hour range
+    // combined with a day-of-week exception that doesn't reduce to one clean 5-field cron
+    // pattern -- a flat threshold generously above the real ~6h15m gap is the simpler, more
+    // robust choice here, not a workaround.
+    staleLimitHours: 10,
+  },
+  {
+    id: 'news-sentiment',
+    label: 'News Sentiment Refresh',
+    category: 'Data',
+    critical: false,
+    description: 'Aggregates and AI-scores news/RSS items into news_sentiment_items, feeding finbert-scorer and the ML sentiment feature.',
+    schedule: 'Every 15 min, 24/7 (no market-hours gating -- news is intraday-relevant around the clock)',
+    pyScript: null,
+    queueName: 'news-sentiment',
+    staleLimitHours: 26, // fallback only; cronPatterns below is the real guard
+    // Genuinely unrestricted 24/7 cadence (queues.ts: "news-sentiment stays 24/7 on purpose:
+    // breaking news is intraday-relevant, so pausing it would degrade intraday awareness") --
+    // unlike confluence-compute/trendlyne-intraday, there's no day/hour gating to model, so a
+    // plain every-15-min cron is exact rather than an approximation.
+    cronPatterns: ['*/15 * * * *'],
+    // Worker lockDuration is 10min (queues.ts's newsSentimentWorker); graceMinutes generously
+    // exceeds it to tolerate a slow RSS-fetch cycle without false-alarming.
+    graceMinutes: 45,
+  },
 ] as const;
