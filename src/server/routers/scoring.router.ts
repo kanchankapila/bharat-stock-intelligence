@@ -86,6 +86,7 @@ export const scoringRouter = router({
         maxDebtToEquity: z.number().optional(),
         minPiotroski:    z.number().optional(),
         minMarketCapCr:  z.number().optional(),
+        requireUnifiedCoverage: z.boolean().optional(),
       }).optional(),
     }))
     .query(async ({ input }) => {
