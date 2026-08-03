@@ -233,6 +233,10 @@ def resolve_outcomes(
     # Signals old enough that horizon has passed, not yet resolved at THIS horizon.
     # Scoped to horizon_days so each horizon is selected independently — without this
     # the h1 pass would exclude signals from h5/h15 passes (starvation bug).
+    # signal_source='technical' scoped explicitly (2026-08): the dedup guard used to match on
+    # ANY row for (symbol, signal_date, horizon_days) regardless of who wrote it, so this
+    # resolver would silently skip a horizon confluence_outcome_tracker.py had already claimed
+    # (and vice versa) — see the signal_outcomes.signal_source migration for the full mechanism.
     pending = conn.execute("""
         SELECT ts.symbol, ts.date AS signal_date, ts.cmp AS entry_price,
                ts.signal_score, ts.signals_json,
@@ -245,6 +249,7 @@ def resolve_outcomes(
                WHERE so2.symbol = ts.symbol
                  AND so2.signal_date = ts.date
                  AND so2.horizon_days = ?
+                 AND so2.signal_source = 'technical'
                  AND so2.outcome IN ('WIN','LOSS','NEUTRAL','STOP_LOSS')
            )
          ORDER BY ts.date DESC
@@ -265,12 +270,13 @@ def resolve_outcomes(
         INSERT INTO signal_outcomes
             (symbol, signal_date, horizon_days, entry_price,
              check_date, exit_price, return_pct, outcome,
-             signal_score, signals_json, computed_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
-        ON CONFLICT(symbol, signal_date, horizon_days) DO UPDATE SET
+             signal_score, signals_json, computed_at,
+             signal_source, label_definition)
+        VALUES (?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,'technical','path_barrier')
+        ON CONFLICT(symbol, signal_date, horizon_days, signal_source) DO UPDATE SET
             check_date=excluded.check_date, exit_price=excluded.exit_price,
             return_pct=excluded.return_pct, outcome=excluded.outcome,
-            computed_at=excluded.computed_at
+            computed_at=excluded.computed_at, label_definition=excluded.label_definition
     """
 
     for row in rows:
@@ -280,9 +286,11 @@ def resolve_outcomes(
         stop_loss    = row['stop_loss']
         sig_horizon  = parse_horizon(row.get('time_horizon'), horizon_days)
 
-        # Skip if already resolved at this specific horizon
+        # Skip if already resolved at this specific horizon (technical source only — see the
+        # outer query's NOT EXISTS comment above for why signal_source is part of this check)
         if conn.execute(
-            "SELECT 1 FROM signal_outcomes WHERE symbol=? AND signal_date=? AND horizon_days=? AND outcome != 'PENDING' LIMIT 1",
+            "SELECT 1 FROM signal_outcomes WHERE symbol=? AND signal_date=? AND horizon_days=? "
+            "AND signal_source='technical' AND outcome != 'PENDING' LIMIT 1",
             (sym, signal_date, sig_horizon)
         ).fetchone():
             continue

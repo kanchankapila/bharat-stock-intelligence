@@ -57,22 +57,29 @@ def track_outcomes(conn):
         ohlcv_cache[sym][dt] = close
     print(f"[OUTCOME-TRACKER] Loaded {len(ohlcv_rows)} closing prices for {len(ohlcv_cache)} symbols")
 
-    # Load existing outcomes to skip already-resolved ones
+    # Load existing outcomes to skip already-resolved ones. Scoped to signal_source='confluence'
+    # (2026-08): this used to key on ANY row for (symbol, signal_date, horizon_days) regardless
+    # of writer, so it silently skipped horizons outcome_resolver.py had already claimed (and
+    # vice versa) instead of writing its own, correctly-attributed row alongside — see the
+    # signal_outcomes.signal_source migration for the full mechanism.
     existing_outcomes = set()
-    existing_rows = conn.execute("SELECT symbol, signal_date, horizon_days FROM signal_outcomes").fetchall()
+    existing_rows = conn.execute(
+        "SELECT symbol, signal_date, horizon_days FROM signal_outcomes WHERE signal_source = 'confluence'"
+    ).fetchall()
     for row in existing_rows:
         sig_date_str = str(row['signal_date'])
         existing_outcomes.add((row['symbol'], sig_date_str, int(row['horizon_days'])))
 
     insert_sql = """
         INSERT INTO signal_outcomes (symbol, signal_date, horizon_days, entry_price,
-          check_date, exit_price, return_pct, outcome)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(symbol, signal_date, horizon_days) DO UPDATE SET
+          check_date, exit_price, return_pct, outcome, signal_source, label_definition)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'confluence', 'terminal_pct2')
+        ON CONFLICT(symbol, signal_date, horizon_days, signal_source) DO UPDATE SET
           exit_price = excluded.exit_price,
           return_pct = excluded.return_pct,
           outcome    = excluded.outcome,
-          check_date = excluded.check_date
+          check_date = excluded.check_date,
+          label_definition = excluded.label_definition
     """
 
     params_list = []
@@ -147,14 +154,18 @@ def recompute_screener_reliability(conn):
 
         placeholders = ','.join(['?'] * len(symbols))
 
-        # 7-day win rate
+        # 7-day win rate. signal_source='confluence' (2026-08): this table also carries
+        # technical-sourced h7/h30 rows if outcome_resolver.py is ever extended to those
+        # horizons later — without this filter that would silently blend two different
+        # methodologies into "screener reliability", which is specifically about how this
+        # script's OWN confluence-signal grading performed.
         stats_7 = conn.execute(f"""
             SELECT
               COUNT(*) AS total,
               SUM(CASE WHEN outcome = 'WIN'  THEN 1 ELSE 0 END) AS wins,
               AVG(CASE WHEN outcome IN ('WIN','LOSS') THEN return_pct END) AS avg_return
             FROM signal_outcomes
-            WHERE symbol IN ({placeholders}) AND horizon_days = 7
+            WHERE symbol IN ({placeholders}) AND horizon_days = 7 AND signal_source = 'confluence'
               AND outcome IN ('WIN','LOSS','NEUTRAL')
         """, symbols).fetchone()
 
@@ -166,7 +177,7 @@ def recompute_screener_reliability(conn):
               AVG(CASE WHEN outcome IN ('WIN','LOSS') THEN return_pct END) AS avg_return,
               MAX(CASE WHEN return_pct < 0 THEN ABS(return_pct) ELSE 0 END) AS max_dd
             FROM signal_outcomes
-            WHERE symbol IN ({placeholders}) AND horizon_days = 30
+            WHERE symbol IN ({placeholders}) AND horizon_days = 30 AND signal_source = 'confluence'
               AND outcome IN ('WIN','LOSS','NEUTRAL')
         """, symbols).fetchone()
 
