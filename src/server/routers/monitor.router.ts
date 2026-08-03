@@ -34,10 +34,10 @@ async function getLastRunAt(scriptId: ScriptId): Promise<string | null> {
         // within its holding period, the resolver runs fine but touches only PENDING rows, and
         // this query kept reporting the last *resolved* outcome (which can be days older) as "last
         // run" — false-flagging the job stale even though it executed on schedule.
-        row = await dbGet("SELECT MAX(computed_at) as t FROM signal_outcomes WHERE horizon_days=5");
+        row = await dbGet("SELECT MAX(computed_at) as t FROM signal_outcomes WHERE horizon_days=5 AND signal_source='technical'");
         break;
       case 'outcome-resolver-15d':
-        row = await dbGet("SELECT MAX(computed_at) as t FROM signal_outcomes WHERE horizon_days=15");
+        row = await dbGet("SELECT MAX(computed_at) as t FROM signal_outcomes WHERE horizon_days=15 AND signal_source='technical'");
         break;
       case 'performance-tracker':
         row = await dbGet("SELECT MAX(last_computed) as t FROM strategy_performance");
@@ -140,9 +140,9 @@ async function getScriptStats(scriptId: ScriptId): Promise<Record<string, number
         return { rows24h: ((await dbGet("SELECT COUNT(*) as n FROM news_sentiment_items WHERE fetched_at >= ?", [cutoff])) as any)?.n ?? 0 };
       }
       case 'outcome-resolver-5d':
-        return { resolved: ((await dbGet("SELECT COUNT(*) as n FROM signal_outcomes WHERE horizon_days=5 AND outcome!='PENDING'")) as any)?.n ?? 0 };
+        return { resolved: ((await dbGet("SELECT COUNT(*) as n FROM signal_outcomes WHERE horizon_days=5 AND outcome!='PENDING' AND signal_source='technical'")) as any)?.n ?? 0 };
       case 'outcome-resolver-15d':
-        return { resolved: ((await dbGet("SELECT COUNT(*) as n FROM signal_outcomes WHERE horizon_days=15 AND outcome!='PENDING'")) as any)?.n ?? 0 };
+        return { resolved: ((await dbGet("SELECT COUNT(*) as n FROM signal_outcomes WHERE horizon_days=15 AND outcome!='PENDING' AND signal_source='technical'")) as any)?.n ?? 0 };
       case 'performance-tracker':
         return {
           strategies: ((await dbGet("SELECT COUNT(*) as n FROM strategy_performance")) as any)?.n ?? 0,

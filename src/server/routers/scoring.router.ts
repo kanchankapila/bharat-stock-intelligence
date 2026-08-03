@@ -248,6 +248,7 @@ export const scoringRouter = router({
           WHERE outcome IN ('WIN','PENDING')
             AND signal_score >= 5
             AND (signals_json LIKE '%RSI_DIVERGENCE%' OR signals_json LIKE '%EMA_BULL_STACK%')
+            AND signal_source = 'technical'
         )
         SELECT
           r.symbol, ns.name, ns.sector,

@@ -302,7 +302,7 @@ export const mlRouter = router({
                AVG(max_return_pct) AS avg_max_return_pct,
                NULL AS avg_min_return_pct
         FROM signal_outcomes
-        WHERE outcome IS NOT NULL
+        WHERE outcome IS NOT NULL AND signal_source = 'technical'
         UNION ALL
         SELECT 'RECOMMENDATION' AS signal_source,
                15 AS horizon_days,
@@ -549,6 +549,7 @@ export const mlRouter = router({
         LEFT JOIN technical_signals ts ON so.symbol = ts.symbol AND so.signal_date = ts.date
         WHERE so.symbol = ?
           AND so.outcome IN ('WIN', 'LOSS', 'NEUTRAL')
+          AND so.signal_source = 'technical'
         ORDER BY so.signal_date ASC
       `, [input.symbol]);
 
@@ -633,7 +634,7 @@ export const mlRouter = router({
         FROM signal_outcomes so JOIN technical_signals ts
           ON ts.symbol = so.symbol AND ts.date = so.signal_date
         WHERE so.outcome IN ('WIN', 'LOSS') AND ts.win_probability IS NOT NULL
-          AND so.signal_date >= ?
+          AND so.signal_date >= ? AND so.signal_source = 'technical'
       `, [cutoff]) as Array<{ regime: string | null; prob: number; y: number }>;
 
       // A signal counts only when the ensemble actually scored it. Unscored rows carry
