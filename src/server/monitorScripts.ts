@@ -331,16 +331,22 @@ export const MONITOR_SCRIPTS = [
     category: 'ML',
     critical: false,
     description: 'FCF yield (approx) + interest coverage, rewritten against ET_Stats after Trendlyne retired the params',
-    schedule: 'First Sunday of month',
+    // Was "First Sunday of month" / staleLimitHours: 900 -- both stale. financial_ratios_fetcher.py
+    // was moved OUT of the first-Sunday gate on 2026-07-31 (see trendlyneWeekly.jobs.ts's
+    // processTrendlyneRatiosMonthly: it now runs unconditionally on every Sunday, before the
+    // `isFirstSundayOfMonth` check that still gates working_capital_fetcher.py/
+    // mf_stock_holdings_fetcher.py below it) -- this entry's own label/threshold were never
+    // updated to match, so it was carrying a 5x-looser threshold than its real weekly cadence
+    // needs (not a false-alarm risk, since 900h > the true 168h worst case, but a real
+    // staleness-detection blind spot: a genuine break wouldn't have been flagged for up to 900h
+    // instead of ~200h). Found 2026-08-03 while building the staleLimitHours mirror-consistency
+    // test -- corrected to match its ml-weekly-retrain/trendlyne-fundamentals siblings' convention
+    // (168h worst case + margin). working-capital below is genuinely still monthly-gated and
+    // keeps its own correct 900h.
+    schedule: 'Weekly Sunday',
     pyScript: 'financial_ratios_fetcher.py',
     queueName: 'trendlyne-ratios-monthly',
-    // 800h < the true worst-case "first Sunday of month" gap: computed exhaustively, the max
-    // gap between consecutive first-Sundays is 35 days = 840h (e.g. 2020-03-01 -> 2020-04-05;
-    // recurs periodically, next after 2026-08-03 is 2026-11-01 -> 2026-12-06), which would
-    // false-flag 'stale' for ~40h non-critical (digest-only, no real-time alert since
-    // critical: false) around that boundary. Bumped past the real worst case with margin.
-    // Found 2026-08-03 while auditing job/Telegram health.
-    staleLimitHours: 900,
+    staleLimitHours: 200,
   },
   {
     id: 'working-capital',
