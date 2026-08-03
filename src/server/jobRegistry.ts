@@ -46,7 +46,11 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   // they run AHEAD of every consumer (ml-daily-ops 7:30 PM, stock-scoring 10:30 PM) instead of
   // hours behind them. Keep these three in lockstep with queues.ts — a stale cronPattern here
   // produces phantom "late" alerts against a deadline the job never had.
-  { jobName: 'mc-screener-sync', label: 'MoneyControl Screener Sync', cronPattern: '50 12 * * 1-5', graceMinutes: 60, critical: true },
+  // graceMinutes 60 -> 105: the queue's own Worker lockDuration is 90min (screeners.jobs.ts's
+  // 'mc-sync' registration) -- 60min grace flagged 'late' (critical: true, real Telegram
+  // alert) on any run that took longer than an hour, which its own declared 90min budget
+  // says is normal. Found 2026-08-03 while building the graceMinutes mirror-consistency test.
+  { jobName: 'mc-screener-sync', label: 'MoneyControl Screener Sync', cronPattern: '50 12 * * 1-5', graceMinutes: 105, critical: true },
   { jobName: 'etnow-screener-sync', label: 'ETNow Screener Sync', cronPattern: '10 13 * * 1-5', graceMinutes: 90, critical: true },
   { jobName: 'et-marketstats-sync', label: 'ET Marketstats Screener Sync', cronPattern: '30 12 * * 1-5', graceMinutes: 90, critical: false },
   { jobName: 'nse-sync', label: 'NSE Master List Sync', cronPattern: '0 2 * * 0', graceMinutes: 120, critical: false },
@@ -72,11 +76,31 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   { jobName: 'agent-optimizer', label: 'Agent: Optimizer', cronPattern: '0 12 * * 1-5', graceMinutes: 60, critical: false },
   { jobName: 'unified-ranker', label: 'Unified Daily Ranker', cronPattern: '0 2 * * 1-5', graceMinutes: 45, critical: true },
   { jobName: 'live-screener-collect', label: 'Live Screener Poller', cronPattern: '*/15 3-10 * * 1-5', graceMinutes: 30, critical: false },
-  { jobName: 'quant-eod-sync', label: 'Quant EOD Sync', cronPattern: '30 16 * * 1-5', graceMinutes: 45, critical: false },
+  // graceMinutes 45 -> 360: the processor's own comment says "5.5h backstop... the last
+  // three runs took 153/157/239 min" (queues.ts's withJobTimeout('quant-eod-sync', 5.5h,...)),
+  // and the Worker's own lockDuration is 120min -- 45min grace flagged 'late' on every run
+  // that took over 45 minutes, which per the job's own documented real runs is EVERY run.
+  // Found 2026-08-03 while building the graceMinutes mirror-consistency test.
+  { jobName: 'quant-eod-sync', label: 'Quant EOD Sync', cronPattern: '30 16 * * 1-5', graceMinutes: 360, critical: false },
   { jobName: 'outcome-resolver', label: 'Outcome Resolver', cronPattern: '0 4 * * 1-5', graceMinutes: 45, critical: true },
-  { jobName: 'ml-daily-ops', label: 'ML Daily Ops', cronPattern: '0 14 * * 1-5', graceMinutes: 60, critical: true },
+  // graceMinutes 60 -> 270: the Worker's own lockDuration is 4h (240min, "covers the full
+  // daily ops run" per queues.ts's own comment) and processMlDailyOps is wrapped in
+  // withJobTimeout(..., 3.5h) -- 60min grace flagged 'late' (critical: true, real Telegram
+  // alert) on every run past an hour, which is the norm for an ~11-15-step chain the source
+  // itself budgets up to 4h for. CLAUDE.md's own job-schedule-review note independently
+  // measured this job's real runtime at ~4.4h (and a separate note recorded a run completing
+  // at 01:23 IST off a 19:30 IST start, ~5h53m) -- both exceed even the corrected 270min here,
+  // so this may need revisiting once the pipeline-growth concern those notes already flag is
+  // addressed; 270min is the source-DECLARED ceiling (240min) plus a modest margin, not a
+  // number stretched to match those anecdotal figures. Found 2026-08-03 while building the
+  // graceMinutes mirror-consistency test.
+  { jobName: 'ml-daily-ops', label: 'ML Daily Ops', cronPattern: '0 14 * * 1-5', graceMinutes: 270, critical: true },
   { jobName: 'trendlyne-daily-fetch', label: 'Trendlyne Daily Metrics Fetch', cronPattern: '30 4 * * 1-5', graceMinutes: 60, critical: false },
-  { jobName: 'ml-weekly-retrain', label: 'ML Weekly Retrain', cronPattern: '0 5 * * 0', graceMinutes: 180, critical: false },
+  // graceMinutes 180 -> 390: the Worker's own lockDuration is 6h (360min) -- 180min grace
+  // flagged 'late' on any run past 3 hours, well inside what the job's own declared budget
+  // (which includes a 90min ml_ensemble.py --train --tune --score step alone) allows.
+  // Found 2026-08-03 while building the graceMinutes mirror-consistency test.
+  { jobName: 'ml-weekly-retrain', label: 'ML Weekly Retrain', cronPattern: '0 5 * * 0', graceMinutes: 390, critical: false },
   // Queue id kept as '-monthly' deliberately: renaming a BullMQ queue would orphan its
   // repeatable-job key and monitor state. As of 2026-07-31 the ratios step is WEEKLY (every
   // Sunday); only working_capital + mf_stock_holdings remain first-Sunday-only.
@@ -96,29 +120,29 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   // drift-detector, ml-ensemble-incremental were spamming STALE every Sat/Sun despite running
   // fine on their last scheduled weekday). Grace is wider than the parent's 60min since these
   // run partway through an ~11-step chain that can itself run late via addJobWithCatchup.
-  { jobName: 'fii-dii-fetcher', label: 'ML Daily Ops: FII/DII Fetcher', cronPattern: '0 14 * * 1-5', graceMinutes: 120, critical: false },
-  { jobName: 'fii-dii-history', label: 'ML Daily Ops: FII/DII Deep History', cronPattern: '0 14 * * 1-5', graceMinutes: 120, critical: false },
-  { jobName: 'tickertape-deals', label: 'ML Daily Ops: Bulk/Block Deals (% of float)', cronPattern: '0 14 * * 1-5', graceMinutes: 120, critical: false },
-  { jobName: 'finbert-scorer', label: 'ML Daily Ops: FinBERT Scorer', cronPattern: '0 14 * * 1-5', graceMinutes: 120, critical: false },
-  { jobName: 'outcome-resolver-5d', label: 'ML Daily Ops: Outcome Resolver 5d', cronPattern: '0 14 * * 1-5', graceMinutes: 120, critical: false },
-  { jobName: 'outcome-resolver-15d', label: 'ML Daily Ops: Outcome Resolver 15d', cronPattern: '0 14 * * 1-5', graceMinutes: 120, critical: false },
-  { jobName: 'performance-tracker', label: 'ML Daily Ops: Performance Tracker', cronPattern: '0 14 * * 1-5', graceMinutes: 120, critical: false },
+  { jobName: 'fii-dii-fetcher', label: 'ML Daily Ops: FII/DII Fetcher', cronPattern: '0 14 * * 1-5', graceMinutes: 280, critical: false },
+  { jobName: 'fii-dii-history', label: 'ML Daily Ops: FII/DII Deep History', cronPattern: '0 14 * * 1-5', graceMinutes: 280, critical: false },
+  { jobName: 'tickertape-deals', label: 'ML Daily Ops: Bulk/Block Deals (% of float)', cronPattern: '0 14 * * 1-5', graceMinutes: 280, critical: false },
+  { jobName: 'finbert-scorer', label: 'ML Daily Ops: FinBERT Scorer', cronPattern: '0 14 * * 1-5', graceMinutes: 280, critical: false },
+  { jobName: 'outcome-resolver-5d', label: 'ML Daily Ops: Outcome Resolver 5d', cronPattern: '0 14 * * 1-5', graceMinutes: 280, critical: false },
+  { jobName: 'outcome-resolver-15d', label: 'ML Daily Ops: Outcome Resolver 15d', cronPattern: '0 14 * * 1-5', graceMinutes: 280, critical: false },
+  { jobName: 'performance-tracker', label: 'ML Daily Ops: Performance Tracker', cronPattern: '0 14 * * 1-5', graceMinutes: 280, critical: false },
   // critical: if this silently stops running, the enrichment half of the feature matrix goes
   // sparse again and every model trains on technicals alone without anything erroring.
-  { jobName: 'densify-feature-matrix', label: 'ML Daily Ops: Densify Feature Matrix', cronPattern: '0 14 * * 1-5', graceMinutes: 120, critical: true },
+  { jobName: 'densify-feature-matrix', label: 'ML Daily Ops: Densify Feature Matrix', cronPattern: '0 14 * * 1-5', graceMinutes: 280, critical: true },
   // critical: this is the only survivorship-free record of the traded universe. Every day it
   // misses is a day whose delisted names are gone for good from nse_universe_history.
-  { jobName: 'nse-bhavcopy-fetcher', label: 'ML Daily Ops: NSE Bhavcopy (PIT universe)', cronPattern: '0 14 * * 1-5', graceMinutes: 120, critical: true },
-  { jobName: 'ml-ensemble-incremental', label: 'ML Daily Ops: Ensemble Incremental', cronPattern: '0 14 * * 1-5', graceMinutes: 120, critical: false },
-  { jobName: 'ml-ensemble-score', label: 'ML Daily Ops: Ensemble Score', cronPattern: '0 14 * * 1-5', graceMinutes: 120, critical: false },
-  { jobName: 'drift-detector', label: 'ML Daily Ops: Drift Detector', cronPattern: '0 14 * * 1-5', graceMinutes: 120, critical: false },
-  { jobName: 'reward-engine', label: 'ML Daily Ops: Reward Engine', cronPattern: '0 14 * * 1-5', graceMinutes: 120, critical: false },
-  { jobName: 'rl-agent-update', label: 'ML Daily Ops: RL Agent Update', cronPattern: '0 14 * * 1-5', graceMinutes: 120, critical: false },
-  { jobName: 'signal-type-stats', label: 'ML Daily Ops: Signal Type Stats', cronPattern: '0 14 * * 1-5', graceMinutes: 120, critical: false },
+  { jobName: 'nse-bhavcopy-fetcher', label: 'ML Daily Ops: NSE Bhavcopy (PIT universe)', cronPattern: '0 14 * * 1-5', graceMinutes: 280, critical: true },
+  { jobName: 'ml-ensemble-incremental', label: 'ML Daily Ops: Ensemble Incremental', cronPattern: '0 14 * * 1-5', graceMinutes: 280, critical: false },
+  { jobName: 'ml-ensemble-score', label: 'ML Daily Ops: Ensemble Score', cronPattern: '0 14 * * 1-5', graceMinutes: 280, critical: false },
+  { jobName: 'drift-detector', label: 'ML Daily Ops: Drift Detector', cronPattern: '0 14 * * 1-5', graceMinutes: 280, critical: false },
+  { jobName: 'reward-engine', label: 'ML Daily Ops: Reward Engine', cronPattern: '0 14 * * 1-5', graceMinutes: 280, critical: false },
+  { jobName: 'rl-agent-update', label: 'ML Daily Ops: RL Agent Update', cronPattern: '0 14 * * 1-5', graceMinutes: 280, critical: false },
+  { jobName: 'signal-type-stats', label: 'ML Daily Ops: Signal Type Stats', cronPattern: '0 14 * * 1-5', graceMinutes: 280, critical: false },
 
   // Same story for ml-weekly-retrain's (cron '0 5 * * 0') StepTracker sub-steps.
-  { jobName: 'ml-ensemble-train', label: 'ML Weekly Retrain: Ensemble Train', cronPattern: '0 5 * * 0', graceMinutes: 240, critical: false },
-  { jobName: 'strategy-optimizer', label: 'ML Weekly Retrain: Strategy Optimizer', cronPattern: '0 5 * * 0', graceMinutes: 240, critical: false },
+  { jobName: 'ml-ensemble-train', label: 'ML Weekly Retrain: Ensemble Train', cronPattern: '0 5 * * 0', graceMinutes: 400, critical: false },
+  { jobName: 'strategy-optimizer', label: 'ML Weekly Retrain: Strategy Optimizer', cronPattern: '0 5 * * 0', graceMinutes: 400, critical: false },
 
   // job-digest (queues.ts '45 18 * * *', runs all 7 days) had NO entry here and never called
   // recordHeartbeat() at all -- the one job whose entire purpose is monitoring every other job
