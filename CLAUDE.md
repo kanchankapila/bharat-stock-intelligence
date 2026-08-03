@@ -209,7 +209,7 @@ python backtester.py --start 2023-01-01
 
 **ML model artifacts:** `src/server/ml_models/ensemble.pkl`, `src/server/ml_models/online_sgd.pkl` — generated at runtime by `ml_ensemble.py` and `online_learner.py`; directory is created on first training run.
 
-## Scoring Authority & Signal Model (canonical — Phase 2 governance)
+## Scoring Authority & Signal Model (canonical — updated 2026-08-03)
 
 **Scoring authority.** There are three score producers; do not invent a fourth. The canonical
 cross-source ranking is `unified_recommendations`, produced by `unified_ranker.py` (scheduled via
@@ -222,17 +222,43 @@ ranking/UI surfaces should read:
 | `quantScoringService` / quant engines | `quant_scores` | momentum/quality/value/composite ranks |
 | `unified_ranker.py` | **`unified_recommendations`** | **canonical** — merges the above + screener confluence |
 
-Legacy direct reads still exist (`getTopRatedStocks`→`stock_scores`, `getStrategyStocks`→`quant_scores`);
-**rerouting those UI reads onto `unified_recommendations` is deferred to Phase 3** (behavioral change,
-done with the frontend during the Postgres migration). Until then, treat `unified_recommendations`
-as authoritative and have any new engine write a *component* score that the ranker ingests — never a
-parallel "final" score.
+**`stock_scores`/`quant_scores` are inputs to `unified_recommendations`, not duplicates of it** —
+`unified_ranker.py` reads both as component scores, so they cannot be physically merged into the
+table they feed. "Consolidation" here means keeping UI reads from bypassing the canonical table,
+not deleting the input tables. Both closed 2026-08: `getTopRatedStocks` (`scoringService.ts`) reads
+`unified_recommendations` first, falling back to `stock_scores` only when UR has no rows yet
+(cold start); `getStrategyStocks` (`quantScoringService.ts`) surfaces UR's `unified_score`/
+`classification`/`conviction_level` as read-only context columns on every row, plus an opt-in
+`requireUnifiedCoverage` filter, with the same cold-start fallback. Any new engine should still
+write a *component* score the ranker ingests — never a parallel "final" score.
 
-**Signal model.** Six overlapping signal tables exist today (`signals`, `unified_signals`,
-`technical_signals`, `technical_analysis_signals`, + outcomes `signal_outcomes` /
-`unified_signal_outcomes`). All are load-bearing (many consumers across `router.ts` + Python).
-**Phase 3 target:** collapse to `unified_signals` + one outcome table, performed *during* the
-Postgres/Timescale rewrite so each consumer is migrated exactly once. Do not add new signal tables.
+`quant_scores` previously had three writers with a real ordering bug: `institutional_quant_engine.py`
+ran inside `ml-daily-ops` (7:30 PM IST) and did a full `DELETE`+re-`INSERT`, but `quantScoringService.ts`'s
+own upsert ran 3.5h later (11 PM IST) writing the identical columns — the earlier engine's writes were
+always clobbered same-night. Retired as an automatic writer (still reachable on-demand via `mcpServer.ts`'s
+`run_analytical_engine`, now upsert-safe). `multi_factor_scorer.py` (writes `quant_scores.mf_*`) claimed to
+depend on `quantScoringService` having already run but ran *before* it — moved to run inside the
+`quant-scoring` job, after `runQuantScoring()`.
+
+**Signal model.** `signals` was dropped 2026-06-20 ("Cluster A" —
+`docs/superpowers/plans/2026-06-19-signal-model-rationalization-cluster-a.md`); `technical_analysis_signals`
+was folded into `unified_signals` (`signal_source='technical'`) 2026-08 ("Cluster B-lite", continuing
+Cluster A's own deferred scope) — its writer (`technical_analysis_engine.py`, now also scheduled nightly
+inside `ml-daily-ops` for the first time — it had never run on any automatic schedule before) and all 3
+non-UI readers (`mcpServer.ts`, `strategySignalsService.ts`'s `qualityOversoldScanner`, chatbot
+`price_tool.py`) repointed first. **Four signal tables remain**: `unified_signals`, `technical_signals`,
+`signal_outcomes`, `unified_signal_outcomes`. `signal_outcomes`'s `label_definition`/`is_suspect` columns
+(previously added only at runtime by `data_integrity_repair.py`) are now captured in both tracked schema
+files.
+
+**Full Cluster B is explicitly out of scope, not just deferred without reason:** renaming
+`technical_signals`→`technical_features` touches ~35 writer files (one enrichment fetcher each) and ~69
+readers across the entire Python ML stack (calibration, ensemble training, backtesting); dropping
+`signal_outcomes` requires first *resolving*, not just documenting, its mixed label-definition issue
+(fixed ±2% terminal-return barrier for h3/7/14/30 vs. path-based MFE/stop labels with an overlapping
+NEUTRAL band for h1/5/15) — training joins can't safely read through it until that's fixed. This is a
+standalone effort needing its own full consumer inventory, not a drive-by addition to any other pass.
+Do not add new signal tables.
 
 ## Ticker Resolution Strategy
 
@@ -659,3 +685,13 @@ Indices use a separate `indexData` array in `src/server/stockMapping.ts` with `{
   - **`trendlyne-intraday`**: deliberately given **no** entry. `runIntradayScreenerScan()` only writes on a genuine new high-scoring breakout with no existing active signal, so zero new rows on a quiet day is normal — a naive freshness check would false-alarm. Worse, its write target (`unified_signals`, `signal_source='screener'`) is shared with several unrelated writers, so even a "recent rows exist" check would be misleadingly reassuring about this job specifically. A real check needs a scan-attempt log, out of scope here.
   - **Shipped**: two new `MONITOR_SCRIPTS` entries (`confluence-compute` — `staleLimitHours=10h`, since the real worst-case gap is the ~6h15m weekday-market-hours-skip window, not one clean 5-field cron pattern; `news-sentiment` — `cronPatterns=['*/15 * * * *']` + `graceMinutes=45`, genuinely 24/7 so an exact cron works), each wired to a real `getLastRunAt`/`getScriptStats` case in `monitor.router.ts` (without the former, the switch's `default: return null` would silently show "never run" forever — worse than no entry). Both ids added to `jobRegistryVsMonitorScripts.test.ts`'s `KNOWN_SAFE_OVERLAPS`. `monitorScriptsCronMirror.test.ts`, `monitorScriptsStaleLimitConsistency.test.ts` (new `marketHoursSkipGated` model, fixed 6.25h constant), and `monitorScriptsGraceMinutesConsistency.test.ts` all extended to cover the two new entries. New `everyMsMonitorCoverage.test.ts` (6 tests) encodes the finding directly — re-verifies `trendlyne-intraday`'s exemption reasoning against actual source (its write is still conditional, `unified_signals` still has multiple writers) rather than just asserting it, so a future refactor that changes either premise fails loud instead of leaving a stale exemption.
   - **Negative-controlled**: removed `confluence-compute`'s `getLastRunAt` case, corrupted `news-sentiment`'s `cronPatterns`/`graceMinutes`, corrupted `confluence-compute`'s `staleLimitHours` below 6.25h — all four caught, then restored. Full suite: 495/523 passed (was 485/513), same pre-existing failures only, `tsc --noEmit` clean.
+
+- **`edge_adjustment_enabled` turned on, re-verified as a live no-op (2026-08-03).** Following the gap-analysis roadmap's #1 sequencing item, checked `app_settings.edge_adjustment_enabled` and found it **already `'true'`** — flipped by a concurrent session sometime after the 2026-07-23 no-op verification (that entry's "Flag currently OFF" is now stale; corrected here). Re-ran the read-only `scripts/diff_edge_adjustment.py` against live data rather than trusting the old check: **still a complete no-op** — BEAR AUC 0.630 and SIDEWAYS AUC 0.567 (moved from 0.618 since 07-23) both still clear the 0.55 trust floor with sufficient history (26-31 distinct days, 4 episodes each), so no shrinkage fires; 0 of 0 `recommendation_log` ACTIVE rows flip (that table now has 0 `technical_scan`-sourced ACTIVE rows, down from 45 in July — reflects normal turnover, not a bug), 0 of 21 `scoring_engine` win-probs changed, 0 of 2,259 `unified_ranker` bet sizes changed. HIGH_VOL still isn't `ready` (only 3 days of history). No code/restart needed — the flag is read live from the DB on every call, so it's already active in production. The mechanism will only start doing something the moment a regime with enough history drops below 0.55 AUC, which is exactly the point of it.
+
+- **Score & signal table consolidation, phased execution of the previously-deferred "Phase 3" governance work (2026-08-03).** User asked to consolidate the 3 score tables + 6 (really 5 -- signals was already dropped) signal tables flagged in the gap-analysis roadmap; scoped via plan mode into a Score track (S1/S2) and a Signal track ("Cluster B-lite", continuing 2026-06's Cluster A) after a full consumer inventory (3 parallel research passes) found the naive interpretation was architecturally wrong -- `stock_scores`/`quant_scores` are `unified_ranker.py`'s *inputs*, not duplicates of `unified_recommendations`, so they cannot be physically merged into it.
+  - **S1 (real correctness bug, not just cleanup):** `quant_scores` had three writers with a confirmed-live ordering conflict, verified directly against `queues.ts`'/`screeners.jobs.ts` cron patterns (not just claimed) -- `institutional_quant_engine.py` (ml-daily-ops, 7:30 PM IST, full `DELETE`+re-`INSERT`) was always clobbered same-night by `quantScoringService.ts`'s own upsert (11 PM IST, identical columns); live-verified via a seed-then-rerun smoke test that a real sibling column (`mf_quality_score`) survived a second engine run only after the fix. Retired as an automatic writer, kept upsert-safe on-demand. `multi_factor_scorer.py` claimed in its own comment to depend on `quantScoringService` already having run, but ran 3.5h *before* it -- moved into the `quant-scoring` job, after `runQuantScoring()`.
+  - **S2:** `getStrategyStocks` gained `unified_recommendations` context columns (`ur_unified_score`/`ur_classification`/`ur_conviction_level`) + an opt-in `requireUnifiedCoverage` gate with cold-start fallback -- deliberately NOT a table swap like `getTopRatedStocks`'s existing UR-first/`stock_scores`-fallback, since UR and `quant_scores` share zero filterable columns and a swap would have silently broken every filter.
+  - **B1-B7 (Cluster B-lite):** found and retired a second, behaviorally-*drifted* dead copy of the technical-analysis engine (`backend-python/app/technical_analysis_engine.py` -- missing two bug-fixes the live `src/server/` copy already had, and its only route had zero callers anywhere). Folded `technical_analysis_signals` into `unified_signals` (`signal_source='technical'`) using the exact mapping precedent from Cluster A's own deferred-but-fully-spec'd Task 5/6/7 -- `rsi`->`technical_score` (kept numeric, not buried in text, since `strategySignalsService.ts`'s `qualityOversoldScanner` filters on it with `<= ?`), `patterns`->`ai_reasoning` (still JSON-parseable). User confirmed scheduling the engine nightly (it had *never* run automatically before -- only reachable via `mcpServer.ts`'s on-demand MCP tool), taking the ml-daily-ops slot `institutional_quant_engine.py` vacated. Repointed all 3 non-UI readers, dropped the table (177 live rows, all pre-migrated) via a new SQLite migration `074_drop_technical_analysis_signals` + live `DROP TABLE` on the Postgres container. **End-to-end live-verified with a real production run, not just a dry pass:** `technical_analysis_engine.py` actually executed against all 2,450 stocks, wrote 2,429 real `signal_source='technical'` rows, and all three repointed readers were confirmed reading real data afterward.
+  - **B5/B6 (independent cleanups):** caught up `signal_outcomes`'s `label_definition`/`is_suspect` columns in both tracked schema files (previously added only at runtime by `data_integrity_repair.py`, invisible to a fresh bootstrap) -- pure documentation, live DB unchanged. Renamed the misleadingly-named `getUnifiedSignals` tRPC procedure (it read `technical_signals`+`confluence_signals`, never `unified_signals`) to `getTechnicalConfluenceSignals`.
+  - **Deliberately out of scope, with reasons written into CLAUDE.md's own governance section:** full Cluster B (`technical_signals`->`technical_features` rename, dropping `signal_outcomes`) -- ~35 writer files/~69 readers across the entire Python ML stack, plus `signal_outcomes`'s mixed fixed-barrier-vs-path-based label definition needs to be *resolved*, not just documented, before any training join through it is safe. This mirrors the project's own established discipline (see the 2026-07-30 audit's repeated “deserves its own pass with a full consumer inventory” language) of not doing high-blast-radius consolidations as a drive-by.
+  - **Process note:** followed the exact TDD-per-task methodology Cluster A itself established (failing test -> implementation -> passing test -> live-Postgres smoke -> commit, one task at a time) rather than inventing a new approach -- this consolidation is a continuation of a real team plan, not a fresh design.
