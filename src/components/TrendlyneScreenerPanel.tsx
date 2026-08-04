@@ -131,11 +131,6 @@ const TrendlyneScreenerPanel: React.FC<TrendlyneScreenerPanelProps> = ({ onSelec
     ? dynamicCategories
     : ((getTrendlyneCategories.data || []) as ScreenerCategory[]);
 
-  console.log('DEBUG: categories length:', categories.length);
-  console.log('DEBUG: first category:', categories[0]);
-  console.log('DEBUG: bullish count:', categories.filter(c => c.sentiment === 'bullish').length);
-  console.log('DEBUG: filterSentiment state:', filterSentiment);
-
   // Apply filters to screeners list
   const filteredCategories = categories.filter(c => {
     const matchSentiment = filterSentiment === 'all' || c.sentiment === filterSentiment;

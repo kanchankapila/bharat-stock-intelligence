@@ -106,6 +106,22 @@ export function dayOfWeekInZone(tz: string, at: Date = new Date()): number {
   return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(weekday);
 }
 
+// NSE cash session: 09:15-15:30 IST, Mon-Fri. Doesn't account for exchange holidays (no
+// holiday calendar is wired into the frontend) -- a holiday will read as "open" here, same
+// known limitation as AppShell.tsx's own getMarketStatus(). Good enough to distinguish "market
+// is genuinely closed" from "market is open but this feed returned no rows" in an empty-state
+// message, which is the only thing this is used for.
+const NSE_OPEN_MIN = 9 * 60 + 15;
+const NSE_CLOSE_MIN = 15 * 60 + 30;
+
+/** True during the NSE cash session (09:15-15:30 IST, Mon-Fri), false otherwise. */
+export function isNseMarketOpen(at: Date = new Date()): boolean {
+  const day = dayOfWeekInZone(IST_TZ, at);
+  if (day < 1 || day > 5) return false;
+  const mins = minutesSinceMidnightInZone(IST_TZ, at);
+  return mins >= NSE_OPEN_MIN && mins < NSE_CLOSE_MIN;
+}
+
 // Country-name substring -> exchange timezone, for the global-markets board. Matched by
 // substring (case-insensitive) against whatever country label the upstream vendor sends,
 // since the backend (globalMarketService.ts) has no timezone field of its own -- only

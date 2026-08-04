@@ -12,6 +12,7 @@ import { OptionChainView } from './OptionChainView';
 import { MaxPainAlerts } from './MaxPainAlerts';
 import { EarningsPlaybook } from './EarningsPlaybook';
 import { RolloverPositioningPanel } from './RolloverPositioningPanel';
+import { isNseMarketOpen } from '../lib/timeFormat';
 
 interface FnOScannerProps {
   onSelectStock: (symbol: string) => void;
@@ -685,7 +686,11 @@ const FnOIntelligenceCenter: React.FC<FnOScannerProps> = ({ onSelectStock }) => 
               ) : (
                 <div className="py-24 text-center">
                   <AlertTriangle className="w-8 h-8 text-slate-200 mx-auto mb-4" />
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">No signals detected — market may be closed or data loading</p>
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                    {isNseMarketOpen()
+                      ? 'No signals match this filter right now — try a different scanner'
+                      : 'No signals — NSE market is closed (09:15–15:30 IST, Mon–Fri)'}
+                  </p>
                 </div>
               )}
             </div>

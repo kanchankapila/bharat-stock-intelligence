@@ -21,6 +21,19 @@ types.setTypeParser(types.builtins.INT8, (val) => parseInt(val, 10));
 // Date without a per-callsite `::text` + manual 'Z'-append workaround.
 types.setTypeParser(types.builtins.TIMESTAMP, (val) => (val === null ? null : new Date(val.replace(' ', 'T') + 'Z')));
 
+// node-postgres leaves NUMERIC/DECIMAL (OID 1700) as a string by default, to avoid silent
+// precision loss on bignum values. Every NUMERIC column this app actually produces is a
+// financial ratio/percentage/score, not a value needing exact decimal precision, and callers
+// throughout the codebase treat query results as plain numbers (`.toFixed()`, `>`/`<`
+// comparisons) -- e.g. `growth_pct` in signals.router.ts/ml.router.ts is built via
+// `ROUND(<double precision expr>, 2)`, and Postgres only has a 2-arg round() overload for
+// `numeric`, so it silently upcasts the double-precision expression and returns `numeric`
+// even though every input column is DOUBLE PRECISION. Confirmed live 2026-08-04: growth_pct
+// arrived as a string, and SignalTracking.tsx/V2SignalTracking.tsx's unguarded
+// `sig.growth_pct.toFixed(2)` threw during render -- caught by TabErrorBoundary and shown as
+// "Service temporarily unavailable", not an actual backend outage.
+types.setTypeParser(types.builtins.NUMERIC, (val) => (val === null ? null : parseFloat(val)));
+
 let pool: Pool | null = null;
 
 export function getPool(): Pool {
