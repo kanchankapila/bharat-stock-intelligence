@@ -110,9 +110,14 @@ export const indicesRouter = router({
     )),
 
   getAdvanceDecline: publicProcedure
-    .input(z.object({ ex: z.string().optional().default('N') }))
+    // The whole input object must itself be optional -- `z.object({ ex: ....optional() })`
+    // only makes the FIELD optional, not omitting the object entirely. TradeDecisionCockpit.tsx
+    // calls this with `useQuery(undefined, ...)` (no input at all), which zod rejected as
+    // "expected object, received undefined" -- a 400 that silently sat behind a batched 207
+    // Multi-Status response, so the Trade Cockpit's Adv/Dec figure always rendered "—".
+    .input(z.object({ ex: z.string().optional().default('N') }).optional())
     .query(async ({ input }) => {
       const { fetchAdvanceDecline } = await import('../indexApiService');
-      return fetchAdvanceDecline(input.ex);
+      return fetchAdvanceDecline(input?.ex ?? 'N');
     }),
 });

@@ -3,12 +3,14 @@ import { motion, AnimatePresence } from 'motion/react';
 import { useAlerts } from '../hooks/useAlerts';
 import { X, Info, CheckCircle, AlertTriangle, XCircle } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { AlertPreferencesToggle } from './AlertPreferencesToggle';
 
 export function AlertsToast({ userId }: { userId?: string } = {}) {
   const { alerts, removeAlert } = useAlerts(userId);
 
   return (
-    <div className="fixed top-6 right-6 z-[100] flex flex-col gap-3 pointer-events-none">
+    <div className="fixed top-6 right-6 z-[100] flex flex-col items-end gap-3 pointer-events-none">
+      <AlertPreferencesToggle />
       <AnimatePresence>
         {alerts.map((alert) => (
           <motion.div

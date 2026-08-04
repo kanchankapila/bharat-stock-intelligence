@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatIST, relativeFromNow, lookupExchangeTimeZone, minutesSinceMidnightInZone, dayOfWeekInZone } from './timeFormat';
+import { formatIST, relativeFromNow, lookupExchangeTimeZone, minutesSinceMidnightInZone, dayOfWeekInZone, isNseMarketOpen } from './timeFormat';
 
 describe('formatIST', () => {
   it('always renders an explicit IST label', () => {
@@ -81,5 +81,27 @@ describe('minutesSinceMidnightInZone / dayOfWeekInZone', () => {
     // 2026-01-15 is a Thursday
     const at = new Date('2026-01-15T04:00:00Z');
     expect(dayOfWeekInZone('Asia/Kolkata', at)).toBe(4);
+  });
+});
+
+describe('isNseMarketOpen', () => {
+  it('is open mid-session on a weekday', () => {
+    // 2026-01-15T04:00:00Z -> 09:30 IST, Thursday -> inside 09:15-15:30
+    expect(isNseMarketOpen(new Date('2026-01-15T04:00:00Z'))).toBe(true);
+  });
+
+  it('is closed before the 09:15 IST open on a weekday', () => {
+    // -> 05:30 IST, Thursday
+    expect(isNseMarketOpen(new Date('2026-01-15T00:00:00Z'))).toBe(false);
+  });
+
+  it('is closed after the 15:30 IST close on a weekday', () => {
+    // -> 16:00 IST, Thursday
+    expect(isNseMarketOpen(new Date('2026-01-15T10:30:00Z'))).toBe(false);
+  });
+
+  it('is closed on a weekend even during normal session hours', () => {
+    // 2026-01-17 is a Saturday; -> 09:30 IST
+    expect(isNseMarketOpen(new Date('2026-01-17T04:00:00Z'))).toBe(false);
   });
 });

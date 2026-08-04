@@ -885,10 +885,16 @@ export async function getTrendlyneScreenerList() {
   const result = [];
   
   // 3. Process Trendlyne screeners
+  // `id` is namespaced per source (tl-/mc-/et-) below -- these 3 sources each hand out their
+  // own raw numeric id sequence (screener_id/scan_id/screener_id), so an unprefixed id from one
+  // source can collide with an unrelated screener's id from another (confirmed live 2026-08-04:
+  // React "duplicate key" warnings on the Quick Directory grid traced to exactly this). `id` is
+  // only ever used for React keys/selection-equality in TrendlyneScreenerPanel.tsx -- the actual
+  // data fetch keys off `screenpk`, which is untouched here, so this is safe to change.
   for (const s of trendlyneScreeners) {
     const meta = masterMeta.get(s.screener_id);
     result.push({
-      id: s.screener_id,
+      id: `tl-${s.screener_id}`,
       name: s.screener_name,
       description: s.description,
       screenpk: s.screenpk,
@@ -905,7 +911,7 @@ export async function getTrendlyneScreenerList() {
   for (const mc of mcScreeners) {
     const meta = masterMeta.get(mc.scan_id);
     result.push({
-      id: mc.scan_id,
+      id: `mc-${mc.scan_id}`,
       name: mc.screener_name,
       description: 'Moneycontrol ' + (mc.type === 'pro' ? 'Fundamental' : 'Technical') + ' Screener',
       screenpk: 'MC_' + mc.scan_id,
@@ -928,7 +934,7 @@ export async function getTrendlyneScreenerList() {
     for (const et of etScreeners) {
       const meta = masterMeta.get(et.screener_id);
       result.push({
-        id: et.screener_id,
+        id: `et-${et.screener_id}`,
         name: et.screener_name,
         description: 'ETnow Market Screener',
         screenpk: 'ET_' + et.screener_id,

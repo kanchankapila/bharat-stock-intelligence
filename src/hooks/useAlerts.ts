@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { notifyAlert } from '../lib/browserNotify';
 
 export interface AlertMessage {
   id: string;
@@ -29,6 +30,7 @@ export function useAlerts(userId?: string) {
         };
 
         setAlerts((prev) => [newAlert, ...prev].slice(0, 10)); // keep last 10
+        notifyAlert(newAlert.title, newAlert.message);
       } catch (e) {
         console.error('Failed to parse SSE message', e);
       }

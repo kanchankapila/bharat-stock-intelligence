@@ -10,6 +10,7 @@ import {
 } from 'recharts';
 import { useIntersectionObserver } from '../hooks/useIntersectionObserver';
 import { MarketData } from '../services/marketService';
+import { relativeFromNow, formatISTWithLocal } from '../lib/timeFormat';
 
 interface WatchlistProps {
   watchlist: string[];
@@ -59,10 +60,15 @@ export const Watchlist: React.FC<WatchlistProps> = ({
   const ref = React.useRef<HTMLDivElement>(null);
   const isVisible = useIntersectionObserver(ref, { threshold: 0.1 });
 
-  const { data: liveQuotes } = trpc.getLiveQuotesBatch.useQuery(watchlist, {
+  const { data: liveQuotes, dataUpdatedAt: quotesUpdatedAt } = trpc.getLiveQuotesBatch.useQuery(watchlist, {
     enabled: isVisible && watchlist.length > 0,
     refetchInterval: isVisible ? 10000 : false,
   });
+
+  // > 3x the poll interval means the last poll likely failed silently rather than the tab
+  // just having been backgrounded (isVisible gates polling off entirely when backgrounded,
+  // so a live stale reading here only fires while the panel is actually on-screen).
+  const quotesAreStale = quotesUpdatedAt > 0 && Date.now() - quotesUpdatedAt > 30_000;
 
   const { data: closeSeries } = trpc.getRecentCloseSeries.useQuery(
     { symbols: watchlist, days: 15 },
@@ -99,7 +105,17 @@ export const Watchlist: React.FC<WatchlistProps> = ({
             <WatchlistIcon className="w-5 h-5 text-indigo-400" />
             My Watchlist
           </h2>
-          <p className="text-slate-400 text-xs mt-1">Tracking your selected assets</p>
+          <p className="text-slate-400 text-xs mt-1">
+            Tracking your selected assets
+            {watchlistStocks.length > 0 && quotesUpdatedAt > 0 && (
+              <span
+                className={cn('ml-2', quotesAreStale ? 'text-amber-400 font-semibold' : 'text-slate-500')}
+                title={formatISTWithLocal(quotesUpdatedAt)}
+              >
+                · prices {relativeFromNow(quotesUpdatedAt)}{quotesAreStale ? ' — may be delayed' : ''}
+              </span>
+            )}
+          </p>
         </div>
       </div>
 
