@@ -1314,6 +1314,11 @@ CREATE TABLE IF NOT EXISTS "nse_stocks" (
   "fno_eligible" BIGINT DEFAULT 0,
   "lot_size" DOUBLE PRECISION,
   "fno_lot_updated_at" TEXT,
+  "stockid" TEXT,
+  "companyid" TEXT,
+  "tickertape_sid" TEXT,
+  "fincode" TEXT,
+  "scripcode" TEXT,
   UNIQUE ("symbol")
 );
 CREATE INDEX idx_nse_symbol ON nse_stocks(symbol);
@@ -2564,6 +2569,7 @@ CREATE TABLE IF NOT EXISTS "unified_recommendations" (
   "trade_reasoning" TEXT,
   "classification" TEXT,
   "position_size_pct" DOUBLE PRECISION,
+  "engine_coverage_count" INTEGER,
   UNIQUE ("symbol", "computed_at")
 );
 CREATE INDEX idx_ur_date_score ON unified_recommendations(computed_at, unified_score DESC);
