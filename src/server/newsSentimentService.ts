@@ -17,6 +17,8 @@ import { fetchGlobalMarketData } from './globalMarketService';
 import {
   buildAliasIndex, extractSymbolsByName, companyAliases, NEWS_ALIAS_OVERRIDES, type AliasEntry,
 } from './newsEntityTagger';
+import { resolveMoneycontrolSymbol } from './stockMapping';
+import { fetchMcStockNews } from './mcApiService';
 
 function toSqliteDateTime(date: Date): string {
   return date.toISOString().replace('T', ' ').substring(0, 19);
@@ -387,6 +389,56 @@ export async function runCompanyNewsCycle(limit = 150): Promise<{ companies: num
   return { companies: universe.length, inserted: sentRows.size };
 }
 
+// ─── MoneyControl per-stock news (genuinely live — no publish-delay caveat) ───
+// Reuses the same fetchMcStockNews()/resolveMoneycontrolSymbol() this codebase already proved
+// working for the per-stock news tab (McNewsCard.tsx, 2026-07-31) — MC's own news feed, not the
+// market-wide MoneyControl RSS feeds already in NEWS_SOURCES above (those cover MC's homepage/
+// section feeds; this is the per-scId `techmvc/mc_apis/mc_pricechart_homepage/news` endpoint,
+// force-tagged to its query symbol the same way BSE/Google News already are). Unlike GNews,
+// there is no metered daily quota here -- `mcFetchJson`'s own Semaphore already throttles
+// concurrency platform-wide, so this can run denser/more often without a separate rate budget.
+const MC_NEWS_STOCKS_TRACKED = 100;
+const MC_NEWS_BATCH = 8; // matches mcFetchJson's own concurrency ceiling elsewhere in the app
+
+export async function runMcStockNewsCycle(limit = MC_NEWS_STOCKS_TRACKED): Promise<{ companies: number; inserted: number }> {
+  const universe = await dbAll(
+    `SELECT ns.symbol FROM nse_stocks ns
+     JOIN stock_fundamentals sf ON sf.symbol = ns.symbol
+     WHERE ns.status = 'ACTIVE' AND sf.market_cap IS NOT NULL
+     ORDER BY sf.market_cap DESC LIMIT ?`, [limit],
+  ) as { symbol: string }[];
+  if (universe.length === 0) return { companies: 0, inserted: 0 };
+
+  await ensureNSESymbols();
+  const sentRows = new Map<string, unknown[]>();
+  const legacyRows = new Map<string, unknown[]>();
+
+  for (let i = 0; i < universe.length; i += MC_NEWS_BATCH) {
+    const batch = universe.slice(i, i + MC_NEWS_BATCH);
+    await Promise.all(batch.map(async ({ symbol }) => {
+      try {
+        const scId = await resolveMoneycontrolSymbol(symbol);
+        if (!scId) return;
+        const res = await fetchMcStockNews(scId, symbol);
+        if (res.status !== 'ok') return; // 'no_news'/'fetch_failed' both legitimately skip
+        for (const item of res.news.slice(0, 8)) {
+          if (!item.posturl) continue; // no link -> no stable dedup id
+          const epoch = Number(item.creation_date_epoch || item.update_date_epoch);
+          const pubDate = epoch ? new Date(epoch * 1000).toISOString() : '';
+          processNewsItem(
+            { title: item.heading, description: item.summary, link: item.posturl, pubDate },
+            'MoneyControl Stock News', 'INDIAN', sentRows, legacyRows, symbol,
+          );
+        }
+      } catch { /* one bad stock must not abort the batch */ }
+    }));
+  }
+
+  if (sentRows.size > 0) await persistNewsRows(sentRows, legacyRows);
+  console.log(`[SENTIMENT] MC stock-news cycle: ${universe.length} companies → ${sentRows.size} articles`);
+  return { companies: universe.length, inserted: sentRows.size };
+}
+
 // ─── BSE Corporate Announcements (free, per-stock, structured, historical) ────
 
 interface BseAnnouncement {
@@ -484,6 +536,221 @@ export async function runBseAnnouncementsCycle(): Promise<{ fetched: number; ins
   if (sentRows.size > 0) await persistNewsRows(sentRows, legacyRows);
   console.log(`[SENTIMENT] BSE announcements: ${anns.length} fetched → ${sentRows.size} mapped to NSE symbols`);
   return { fetched: anns.length, inserted: sentRows.size };
+}
+
+// ─── GNews (gnews.io — structured JSON, needs GNEWS_API_KEY) ──────────────────
+// A 4th source tier, split into 3 independently-scheduled cycles rather than one flat job,
+// because "market", "stock", and "global" news genuinely warrant different cadences -- market-
+// moving and per-stock news are what actually feeds trading decisions and go stale fast, while
+// world business headlines are slower-moving macro context. Each is entity-tagged by the same
+// name-based tagger the RSS sources use (GNews doesn't identify the stock any more than an RSS
+// feed does). Gated on GNEWS_API_KEY -- no key means a silent no-op on all 3, the same pattern
+// this file already uses for ANTHROPIC_API_KEY-gated enrichWithAI below.
+//
+// Also gated on app_settings.gnews_enabled, DEFAULT OFF -- live-verified 2026-08-04 that GNews's
+// own free-tier response carries `information.realTimeArticles: "Real-time news data is only
+// available on paid plans. Free plan has a 12-hour delay."`. That is a materially different
+// freshness guarantee than every other source in this file (RSS lags ~15-30min, MC stock news
+// and BSE announcements are live) and would be misleading to present as "live" market/stock
+// news without an explicit opt-in. Flip on with:
+//   UPDATE app_settings SET value='true' WHERE key='gnews_enabled' (insert if missing)
+// -- same escape-hatch pattern as edge_adjustment_enabled elsewhere in this codebase.
+//
+// Free tier is also only 100 req/day and (unlike free/uncapped RSS) every call spends metered
+// quota, so the 3 cycles' cadences were chosen to add up to a fraction of that budget, not to
+// each be "as fresh as possible" independently:
+//   market  (business headlines + NSE/BSE/Nifty/Sensex search, 2 calls) every 2h  -> 24 req/day
+//   stocks  (1 OR-joined search over a rotating batch of top-cap names) every 1h  -> 24 req/day
+//   global  (world business headlines, 1 call)                          every 6h  ->  4 req/day
+// Total 52 req/day, leaving ~48/day headroom for manual testing/retries (see queues.ts).
+
+interface GNewsArticle {
+  title: string;
+  description?: string;
+  url: string;
+  publishedAt: string;
+  source?: { name: string; url?: string };
+}
+
+const GNEWS_BASE = 'https://gnews.io/api/v4';
+const GNEWS_ENABLED_SETTING = 'gnews_enabled';
+
+async function isGNewsEnabled(): Promise<boolean> {
+  try {
+    const row = await dbGet<{ value: string }>(
+      "SELECT value FROM app_settings WHERE key = ?", [GNEWS_ENABLED_SETTING],
+    );
+    return !!row && ['1', 'true', 'yes'].includes(String(row.value).toLowerCase());
+  } catch {
+    return false; // DB error -> fail closed, same posture as every other kill-switch here
+  }
+}
+
+/** Shared guard for all 3 GNews cycles: needs both a real API key AND the explicit
+ *  app_settings opt-in (default off — see the 12-hour-delay note above). Returns the
+ *  skip reason so callers can log which gate actually blocked the run. */
+async function gnewsGateReason(): Promise<string | null> {
+  if (!process.env.GNEWS_API_KEY) return 'GNEWS_API_KEY not set';
+  if (!(await isGNewsEnabled())) return "disabled (app_settings.gnews_enabled != 'true' — free tier is 12h-delayed, opt in explicitly)";
+  return null;
+}
+
+async function fetchGNews(path: 'top-headlines' | 'search', params: Record<string, string>): Promise<GNewsArticle[]> {
+  const apiKey = process.env.GNEWS_API_KEY;
+  if (!apiKey) return [];
+  const qs = new URLSearchParams({ lang: 'en', max: '10', ...params, apikey: apiKey });
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10000);
+    const res = await fetch(`${GNEWS_BASE}/${path}?${qs.toString()}`, { signal: controller.signal });
+    clearTimeout(timer);
+    if (!res.ok) {
+      // Never log the querystring -- it carries the API key.
+      console.warn(`[SENTIMENT] GNews ${path} (${params.category ?? params.q}) failed: HTTP ${res.status}`);
+      return [];
+    }
+    const j = await res.json() as { articles?: GNewsArticle[] };
+    return j.articles ?? [];
+  } catch (e) {
+    console.warn(`[SENTIMENT] GNews ${path} fetch error:`, (e as Error).message);
+    return [];
+  }
+}
+
+function gnewsToRaw(a: GNewsArticle): RawNewsItem {
+  return { title: a.title ?? '', link: a.url, pubDate: a.publishedAt, description: a.description ?? '' };
+}
+
+function gnewsTag(
+  arts: GNewsArticle[], srcName: string, srcType: 'INDIAN' | 'GLOBAL',
+  sentRows: Map<string, unknown[]>, legacyRows: Map<string, unknown[]>,
+  forceSymbol?: (a: GNewsArticle) => string | undefined,
+): number {
+  let n = 0;
+  for (const a of arts) {
+    if (!a.url) continue; // no link -> no stable dedup id, skip
+    n++;
+    processNewsItem(gnewsToRaw(a), srcName, srcType, sentRows, legacyRows, forceSymbol?.(a));
+  }
+  return n;
+}
+
+/** India business headlines + an NSE/BSE/Nifty/Sensex search -- market-moving news, the most
+ *  time-sensitive of the 3 cycles. 2 calls, paced (not Promise.all) -- live-verified 2026-08-04:
+ *  3 concurrent GNews calls got 2x HTTP 429 on the free tier (a burst/concurrency limit, not
+ *  the 100/day quota -- a lone call immediately afterward succeeded fine), so these must be
+ *  paced like this codebase's other rate-limited sources (BSE/Google News above use 200-250ms). */
+export async function runGNewsMarketCycle(): Promise<{ fetched: number; inserted: number; skipped?: boolean }> {
+  const skipReason = await gnewsGateReason();
+  if (skipReason) {
+    console.log(`[SENTIMENT] GNews market cycle skipped — ${skipReason}`);
+    return { fetched: 0, inserted: 0, skipped: true };
+  }
+  await ensureNSESymbols();
+
+  const indiaBiz = await fetchGNews('top-headlines', { category: 'business', country: 'in' });
+  await new Promise(r => setTimeout(r, 1200));
+  const indiaMarket = await fetchGNews('search', { q: 'NSE OR BSE OR Nifty OR Sensex OR "Indian stock market"', country: 'in' });
+
+  const sentRows = new Map<string, unknown[]>();
+  const legacyRows = new Map<string, unknown[]>();
+  const fetched = gnewsTag(indiaBiz, 'GNews India', 'INDIAN', sentRows, legacyRows)
+                + gnewsTag(indiaMarket, 'GNews Market', 'INDIAN', sentRows, legacyRows);
+
+  const inserted = sentRows.size;
+  if (inserted > 0) await persistNewsRows(sentRows, legacyRows);
+  console.log(`[SENTIMENT] GNews market cycle: fetched=${fetched}, processed=${inserted}`);
+  return { fetched, inserted };
+}
+
+/** World business headlines -- slower-moving macro context, not stock/market-specific. 1 call. */
+export async function runGNewsGlobalCycle(): Promise<{ fetched: number; inserted: number; skipped?: boolean }> {
+  const skipReason = await gnewsGateReason();
+  if (skipReason) {
+    console.log(`[SENTIMENT] GNews global cycle skipped — ${skipReason}`);
+    return { fetched: 0, inserted: 0, skipped: true };
+  }
+  await ensureNSESymbols();
+
+  const worldBiz = await fetchGNews('top-headlines', { category: 'business', country: 'us' });
+  const sentRows = new Map<string, unknown[]>();
+  const legacyRows = new Map<string, unknown[]>();
+  const fetched = gnewsTag(worldBiz, 'GNews Global', 'GLOBAL', sentRows, legacyRows);
+
+  const inserted = sentRows.size;
+  if (inserted > 0) await persistNewsRows(sentRows, legacyRows);
+  console.log(`[SENTIMENT] GNews global cycle: fetched=${fetched}, processed=${inserted}`);
+  return { fetched, inserted };
+}
+
+// ─── GNews per-stock coverage (rotating batch — GNews search is metered, unlike Google
+// News RSS above, so this cannot cover the same 150-company universe runCompanyNewsCycle does)
+
+const GNEWS_STOCKS_TRACKED = 60;  // top-N by market cap eligible for GNews stock coverage
+const GNEWS_STOCKS_BATCH = 5;     // company names OR-joined into one search call per cycle
+const GNEWS_STOCKS_OFFSET_KEY = 'gnews_stocks_rotation_offset';
+
+/** Advances a persisted round-robin cursor over the top-N liquid universe (by market cap) and
+ *  returns the next batch. At GNEWS_STOCKS_BATCH=5 and an hourly cycle, the full 60-name
+ *  universe rotates through every 12 hours. */
+async function nextGNewsStockBatch(): Promise<{ symbol: string; name: string }[]> {
+  const universe = await dbAll(
+    `SELECT ns.symbol, ns.name FROM nse_stocks ns
+     JOIN stock_fundamentals sf ON sf.symbol = ns.symbol
+     WHERE ns.status = 'ACTIVE' AND ns.name IS NOT NULL AND sf.market_cap IS NOT NULL
+     ORDER BY sf.market_cap DESC LIMIT ?`, [GNEWS_STOCKS_TRACKED],
+  ) as { symbol: string; name: string }[];
+  if (universe.length === 0) return [];
+
+  const row = await dbGet<{ value: string }>(
+    'SELECT value FROM app_settings WHERE key = ?', [GNEWS_STOCKS_OFFSET_KEY],
+  );
+  const offset = row?.value ? (parseInt(row.value, 10) || 0) % universe.length : 0;
+  const batch: { symbol: string; name: string }[] = [];
+  for (let i = 0; i < GNEWS_STOCKS_BATCH && i < universe.length; i++) {
+    batch.push(universe[(offset + i) % universe.length]);
+  }
+  const nextOffset = (offset + GNEWS_STOCKS_BATCH) % universe.length;
+  await dbRun(
+    `INSERT INTO app_settings (key, value) VALUES (?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    [GNEWS_STOCKS_OFFSET_KEY, String(nextOffset)],
+  );
+  return batch;
+}
+
+/** Per-stock news via one OR-joined GNews search over a rotating batch of top-cap names --
+ *  force-tagged to whichever batch symbol's name literally appears in each article (falling
+ *  back to the ordinary name-tagger for co-mentions outside the batch), same force-tag +
+ *  union-with-co-mentions contract processNewsItem already gives runCompanyNewsCycle/BSE. */
+export async function runGNewsStocksCycle(): Promise<{ fetched: number; inserted: number; skipped?: boolean; batch?: string[] }> {
+  const skipReason = await gnewsGateReason();
+  if (skipReason) {
+    console.log(`[SENTIMENT] GNews stocks cycle skipped — ${skipReason}`);
+    return { fetched: 0, inserted: 0, skipped: true };
+  }
+  await ensureNSESymbols();
+
+  const batch = await nextGNewsStockBatch();
+  if (batch.length === 0) return { fetched: 0, inserted: 0 };
+
+  const cleanedNames = batch.map(b => companyAliases(b.name)[0] ?? b.name);
+  const q = cleanedNames.map(n => `"${n}"`).join(' OR ');
+  const articles = await fetchGNews('search', { q, country: 'in' });
+
+  const sentRows = new Map<string, unknown[]>();
+  const legacyRows = new Map<string, unknown[]>();
+  const forceSymbol = (a: GNewsArticle): string | undefined => {
+    const text = `${a.title} ${a.description ?? ''}`.toLowerCase();
+    return batch.find(b => text.includes((companyAliases(b.name)[0] ?? b.name).toLowerCase()))?.symbol;
+  };
+  const fetched = gnewsTag(articles, 'GNews Stocks', 'INDIAN', sentRows, legacyRows, forceSymbol);
+
+  const inserted = sentRows.size;
+  if (inserted > 0) await persistNewsRows(sentRows, legacyRows);
+  const batchSymbols = batch.map(b => b.symbol);
+  console.log(`[SENTIMENT] GNews stocks cycle: batch=[${batchSymbols.join(',')}] fetched=${fetched} processed=${inserted}`);
+  return { fetched, inserted, batch: batchSymbols };
 }
 
 // ─── Main Fetch + Score Cycle ─────────────────────────────────────────────────

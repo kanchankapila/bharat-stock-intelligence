@@ -221,6 +221,9 @@ def test_all_curated_endpoints_are_covered_by_a_test_above():
         "marketsmojo_stock_picks_history", "marketsmojo_results_corner",
         "tickertape_financials_income", "tickertape_estimates_history", "tickertape_deals",
         "trendlyne_market_insight", "trendlyne_mf_home",
+        # Round 4 (2026-08-03) — test_live_datasource_round4_endpoints.py
+        "tickertape_mmi", "mc_deals_insight_top_investor", "investsights_investors_list",
+        "investsights_concall_recent", "investsights_sector_rrg", "investsights_sector_correlation",
     }
     actual = {
         e.name for e in CURATED_EXTRA_ENDPOINTS

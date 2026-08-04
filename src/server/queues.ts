@@ -453,6 +453,13 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await runPython('extra_endpoints_fetcher.py', [], 30 * 60_000)
     .catch(e => console.warn('[QUEUE] extra_endpoints_fetcher failed:', (e as Error).message));
 
+  // Superstar-investor conviction tracking (InvestSights) — per-stock entry/exit/increase/
+  // decrease by named investors, closing the gap the 2026-08-03 urls.txt field analysis
+  // flagged as this platform's top new-data opportunity. ~60 sequential per-investor requests;
+  // 5 min budget is generous headroom over the measured sub-minute runtime.
+  await runPython('investsights_investor_activity_fetcher.py', [], 5 * 60_000)
+    .catch(e => console.warn('[QUEUE] investsights_investor_activity_fetcher failed:', (e as Error).message));
+
   // Point-in-time fundamentals snapshot — builds the as-of trail load_training_data joins.
   // Runs in ~2s solo but its DELETE+INSERT…SELECT on fundamentals_history can block far longer on
   // Postgres lock/CPU contention during the startup catch-up burst (was tripping the old 90s budget
@@ -499,6 +506,16 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
     .catch(e => console.warn('[QUEUE] tickertape_deals_fetcher failed (daily ops continues):', (e as Error).message));
   await runPython('pcr_fetcher.py', ['--gex'], 90_000)
     .catch(e => console.warn('[QUEUE] pcr_fetcher failed:', (e as Error).message));
+  // Per-symbol PCR/max-pain/ATM-IV for the DEFAULT_SYMBOLS large-cap set -> stock_options_oi +
+  // historical_fno_sentiment. Every OTHER pcr_fetcher.py call site in this file passes --gex
+  // (index-level dealer GEX only, writes macro_asset_prices) -- this was the only call that
+  // still ran the default per-symbol path, and it was removed at some point without anyone
+  // noticing historical_fno_sentiment had no other writer left: found 2026-08-03 via the new
+  // data-quality sweep (11+ days stale, `stock_options_oi` masked the gap since so_option_chain_
+  // fetcher.py/stock_option_chain_fetcher.py independently keep IT fresh). 20 symbols at NiftyTrader's
+  // own 1.5s delay is ~30s, cheap enough for the daily chain.
+  await runPython('pcr_fetcher.py', [], 90_000)
+    .catch(e => console.warn('[QUEUE] pcr_fetcher (per-symbol) failed:', (e as Error).message));
   // Parallel batch — safe to overlap: disjoint target tables (mc_* vs unified_signals vs
   // news_sentiment_items), no shared rows, no advisory locks, and distinct resources
   // (MoneyControl network vs DB-compute vs GPU/FinBERT). The 5-min MC scrape now runs
@@ -536,8 +553,7 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   // >12 months ago. Measured against 66 monthly bhavcopies: 1,450 of 3,860 securities that
   // really traded (37.6%) have no stock_ohlcv history at all, and they are systematically
   // the ones that died. Runs before the quality/feature steps so today's row is available.
-  await runPython('nse_bhavcopy_fetcher.py', [], 10 * 60_000)
-    .catch(e => console.warn('[QUEUE] nse_bhavcopy_fetcher failed:', (e as Error).message));
+  await T.run('nse-bhavcopy-fetcher', () => runPython('nse_bhavcopy_fetcher.py', [], 10 * 60_000));
 
   // Flag bad-print OHLCV bars first so outcome labels skip them (ohlcv_quality.is_suspect).
   await runPython('ohlcv_quality.py', ['--no-ingest'], 600_000)
@@ -1450,6 +1466,19 @@ export async function initQueues(): Promise<boolean> {
           removeOnFail: 3,
         },
       ),
+      // MoneyControl per-stock news (genuinely live, no metered quota -- mcFetchJson's own
+      // Semaphore throttles concurrency) — denser cadence than Google News above since there's
+      // no external rate budget to conserve.
+      addJobWithCatchup(newsSentimentQueue,
+        'mc-stock-news-refresh',
+        {},
+        {
+          repeat: { every: 2 * 60 * 60 * 1000 }, // every 2 hours
+          jobId: 'mc-stock-news-repeatable',
+          removeOnComplete: 3,
+          removeOnFail: 3,
+        },
+      ),
       // BSE corporate announcements (per-stock, high-signal events) — hourly captures
       // intraday + after-close filings without hammering the endpoint.
       addJobWithCatchup(newsSentimentQueue,
@@ -1478,6 +1507,41 @@ export async function initQueues(): Promise<boolean> {
           removeOnFail: 3,
         },
       ),
+      // GNews (gnews.io) — 3 differentiated cadences, not one flat job: market/stock news is
+      // what actually feeds trading decisions and goes stale fast, global business context
+      // moves slower. Gated on GNEWS_API_KEY (a no-op cycle otherwise). Combined budget
+      // 24+24+4=52 req/day against the 100/day free-tier cap — see newsSentimentService.ts's
+      // GNews section header for the full per-cycle breakdown.
+      addJobWithCatchup(newsSentimentQueue,
+        'gnews-market-refresh',
+        {},
+        {
+          repeat: { every: 2 * 60 * 60 * 1000 }, // 2h -> 24 req/day (2 calls/cycle)
+          jobId: 'gnews-market-repeatable',
+          removeOnComplete: 3,
+          removeOnFail: 3,
+        },
+      ),
+      addJobWithCatchup(newsSentimentQueue,
+        'gnews-stocks-refresh',
+        {},
+        {
+          repeat: { every: 60 * 60 * 1000 }, // 1h -> 24 req/day (1 call/cycle, rotating batch)
+          jobId: 'gnews-stocks-repeatable',
+          removeOnComplete: 3,
+          removeOnFail: 3,
+        },
+      ),
+      addJobWithCatchup(newsSentimentQueue,
+        'gnews-global-refresh',
+        {},
+        {
+          repeat: { every: 6 * 60 * 60 * 1000 }, // 6h -> 4 req/day (1 call/cycle)
+          jobId: 'gnews-global-repeatable',
+          removeOnComplete: 3,
+          removeOnFail: 3,
+        },
+      ),
     ]);
 
     newsSentimentWorker = new Worker(
@@ -1486,6 +1550,8 @@ export async function initQueues(): Promise<boolean> {
         const svc = await import('./newsSentimentService');
         if (job.name === 'company-news-refresh') {
           await svc.runCompanyNewsCycle();
+        } else if (job.name === 'mc-stock-news-refresh') {
+          await svc.runMcStockNewsCycle();
         } else if (job.name === 'bse-announcements-refresh') {
           await svc.runBseAnnouncementsCycle();
         } else if (job.name === 'bse-announcements-refresh-hot') {
@@ -1494,6 +1560,12 @@ export async function initQueues(): Promise<boolean> {
             return;
           }
           await svc.runBseAnnouncementsCycle();
+        } else if (job.name === 'gnews-market-refresh') {
+          await svc.runGNewsMarketCycle();
+        } else if (job.name === 'gnews-stocks-refresh') {
+          await svc.runGNewsStocksCycle();
+        } else if (job.name === 'gnews-global-refresh') {
+          await svc.runGNewsGlobalCycle();
         } else {
           await svc.runNewsSentimentCycle();
         }

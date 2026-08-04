@@ -2,6 +2,7 @@ import os
 import sys
 
 import pandas as pd
+import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import mf_sector_flow_fetcher as mf
@@ -84,3 +85,50 @@ class TestUpdateTechnicalSignalsScoped:
         assert n == 2, "RANDOMCO's unmapped sector must be dropped, not written with a NaN flow value"
         written_symbols = {p[1] for p in written}
         assert written_symbols == {"TCS", "HDFCBANK"}
+
+
+class TestZeroHoldingsFailsLoudly:
+    """Regression test found live 2026-08-03 by the data-quality coverage sweep:
+    mf_sector_allocation had 0 rows in production despite this fetcher "completing
+    successfully" on every scheduled run for weeks. AMFI's DownloadSchemeData_Po.aspx
+    endpoint currently returns the scheme MASTER list (no Total AUM / market-value /
+    %-to-NAV columns at all) instead of the portfolio-holdings disclosure this parser
+    expects, so _parse_amfi() correctly finds zero matching rows every single time --
+    but run() used to just print a message and `return`, exiting 0. Fixed to sys.exit(1)
+    so a silently-empty run is no longer indistinguishable from a healthy one."""
+
+    def test_run_exits_nonzero_when_current_month_holdings_parse_empty(self, monkeypatch):
+        monkeypatch.setattr(mf, "ensure_schema", lambda: None)
+        monkeypatch.setattr(mf, "_load_sector_map", lambda: pd.DataFrame(columns=["isin", "symbol", "sector"]))
+        monkeypatch.setattr(mf, "_load_saved_allocation", lambda month_str: pd.DataFrame(columns=["sector", "aum_pct"]))
+        monkeypatch.setattr(mf, "_fetch_raw", lambda month_str: "irrelevant raw text")
+        # Real AMFI-format-changed symptom: the parser runs but finds nothing.
+        monkeypatch.setattr(mf, "_parse_amfi", lambda raw: pd.DataFrame())
+        monkeypatch.setattr(mf.time, "sleep", lambda *_: None)
+
+        with pytest.raises(SystemExit) as exc_info:
+            mf.run(month_str="2026-06")
+        assert exc_info.value.code == 1
+
+    def test_run_proceeds_normally_when_holdings_parse_successfully(self, monkeypatch):
+        # Sanity check the fix didn't make the happy path exit too.
+        monkeypatch.setattr(mf, "ensure_schema", lambda: None)
+        monkeypatch.setattr(mf, "_load_sector_map", lambda: pd.DataFrame({
+            "isin": ["INF209K01165"], "symbol": ["ABSLAMC"], "sector": ["Financial Services"],
+        }))
+        monkeypatch.setattr(mf, "_load_saved_allocation", lambda month_str: pd.DataFrame(columns=["sector", "aum_pct"]))
+        monkeypatch.setattr(mf, "_fetch_raw", lambda month_str: "irrelevant raw text")
+        monkeypatch.setattr(mf, "_parse_amfi", lambda raw: pd.DataFrame({
+            "isin": ["INF209K01165"], "name": ["x"], "industry": ["Financial Services"],
+            "mkt_val": [1000.0], "pct_nav": [5.0],
+        }))
+        monkeypatch.setattr(mf, "_save_sector_allocation", lambda month_str, df: None)
+        monkeypatch.setattr(mf, "_update_macro_asset_prices", lambda flow, month_str: None)
+        monkeypatch.setattr(mf, "_update_technical_signals", lambda flow: 0)
+        monkeypatch.setattr(mf.time, "sleep", lambda *_: None)
+
+        # Prior-month fetch fails harmlessly (already tolerated by the existing try/except).
+        monkeypatch.setattr(mf, "_fetch_raw", lambda month_str: (_ for _ in ()).throw(RuntimeError("boom"))
+                             if month_str == "2026-05" else "irrelevant raw text")
+
+        mf.run(month_str="2026-06")  # must not raise SystemExit

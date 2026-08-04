@@ -35,6 +35,7 @@ import requests
 
 from db_compat import connect
 from as_of import logical_write_floor
+from fetch_utils import retry_get, FetchTracker
 
 ANALYSIS_URL = "https://trendlyne.com/share-price/price-performance-analysis/{tlid}/"
 
@@ -134,9 +135,7 @@ def ensure_schema(con) -> None:
 def _fetch(tlid: str, session: requests.Session) -> dict | None:
     url = ANALYSIS_URL.format(tlid=tlid)
     try:
-        r = session.get(url, params={"format": "json"}, timeout=15)
-        if r.status_code != 200:
-            return None
+        r = retry_get(session, url, params={"format": "json"}, timeout=15)
         data = r.json()
         if data.get("head", {}).get("status") != "0":
             return None
@@ -329,6 +328,11 @@ def main() -> None:
     today_str = today.isoformat()
     ok = 0
     done = 0
+    # Every stock returning "no data" (found live 2026-07-28: all 1822/1822 stocks silently
+    # empty, script still exited 0 and logged "execution completed") must not look identical to
+    # a healthy run -- FetchTracker exits non-zero once the failure rate crosses its threshold,
+    # so pythonRunner/T.run() surfaces it as a real job failure instead of a silent no-op.
+    tracker = FetchTracker("trendlyne_price_analysis_fetcher")
 
     def _fetch_one(args):
         symbol, tlid = args
@@ -343,6 +347,7 @@ def main() -> None:
                 done += 1
                 if body is None:
                     print(f"  [{done}/{len(stocks)}] {symbol}: no data")
+                    tracker.record(symbol, ok=False)
                     continue
                 f = extract_features(body, today)
                 upsert_row(symbol, today_str, f, con)
@@ -352,10 +357,12 @@ def main() -> None:
                 seasonal_str = f"season={f.get('tl_seasonal_month_5y','?')}%"
                 print(f"  [{done}/{len(stocks)}] {symbol}: {alpha_str} | {ind_str} | {seasonal_str}")
                 ok += 1
+                tracker.record(symbol, ok=True)
         time.sleep(BATCH_GAP_SEC)
 
     print(f"[TLPriceAnalysis] Done. {ok}/{len(stocks)} stocks.")
     con.close()
+    tracker.finish()
 
 
 if __name__ == "__main__":

@@ -518,6 +518,35 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
         <ArrowUpRight size={14} color="#818cf8" style={{ flexShrink: 0 }} />
       </button>
 
+      {/* ── Top Picks entry point ────────────────────────────────────────
+          One canonical "most accurate signals only" page (S_ELITE/A_HIGH conviction,
+          Buy-classified only) instead of navigating through the many screener/scanner
+          pages to find what's actually worth acting on. Also surfaces same-day intraday
+          picks with an honest gate-open/closed status, previously not shown anywhere. */}
+      <button
+        onClick={() => navigate('/buy-recs')}
+        style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          width: '100%', marginBottom: 12, padding: '10px 16px',
+          background: 'linear-gradient(90deg, rgba(16,185,129,0.15), rgba(5,150,105,0.08))',
+          border: '1px solid rgba(16,185,129,0.3)', borderRadius: 10,
+          cursor: 'pointer', textAlign: 'left',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <TrendingUp size={16} color="#34d399" />
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#e2e8f0' }}>
+              View Top Picks — highest-conviction signals only
+            </div>
+            <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 1 }}>
+              S/A-tier Buy calls plus gated intraday picks, instead of scanning every screener page
+            </div>
+          </div>
+        </div>
+        <ArrowUpRight size={14} color="#34d399" style={{ flexShrink: 0 }} />
+      </button>
+
       {/* ── Row 0: Market Indices Strip ─────────────────────────────────── */}
       <div style={{ marginBottom: 12 }}>
         <MarketIndices onSelect={(id, name) => onSelectIndex?.(id, name)} />

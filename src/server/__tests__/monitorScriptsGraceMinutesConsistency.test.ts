@@ -127,10 +127,12 @@ describe('MONITOR_SCRIPTS.graceMinutes consistency', () => {
     'signal-type-stats': [{ jobKey: 'ml-daily-ops', marker: 'mlDailyOpsWorker = new Worker' }],
     'screener-performance': [{ jobKey: 'screener-performance-daily', marker: "jobName: 'screener-performance-daily'" }],
     'trendlyne-midweek': [{ jobKey: 'trendlyne-midweek-batch', marker: "jobName: 'trendlyne-midweek-batch'" }],
-    // Added 2026-08-03 alongside the new MONITOR_SCRIPTS entry -- same marker already proven
-    // correct in jobRegistryGraceMinutesConsistency.test.ts's driving map for the JOB_REGISTRY
-    // 'news-sentiment' entry.
-    'news-sentiment': [{ jobKey: 'news-sentiment-refresh', marker: "'news-sentiment-refresh'" }],
+    // Added 2026-08-03 alongside the new MONITOR_SCRIPTS entry. Marker updated 2026-08-04:
+    // the GNews (3 cycles) + MC stock-news jobs added between the 'news-sentiment-refresh'
+    // marker and the Worker's lockDuration pushed that distance to 5378 chars, over
+    // MAX_LOOKAHEAD -- switched to the Worker-constructor marker, same fix applied in
+    // jobRegistryGraceMinutesConsistency.test.ts's driving map for this same job.
+    'news-sentiment': [{ jobKey: 'news-sentiment-refresh', marker: 'newsSentimentWorker = new Worker' }],
   };
 
   // Runs off a Node process setInterval, not a BullMQ job -- no lockDuration exists to compare

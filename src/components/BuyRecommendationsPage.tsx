@@ -7,7 +7,7 @@ import {
 import {
   TrendingUp, RefreshCw, Shield, Zap, Star, Activity,
   ChevronUp, ChevronDown, AlertTriangle, Users, BarChart2,
-  Building2, Percent, Clock,
+  Building2, Percent, Clock, Lock, Newspaper,
 } from 'lucide-react';
 import { formatISTWithLocal, relativeFromNow } from '../lib/timeFormat';
 import { CanonicalBadge } from './CanonicalSourceNote';
@@ -16,7 +16,8 @@ import { V4QuickNav } from '../v4/components/V4QuickNav';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type ConvFilter = 'ALL' | 'S_ELITE' | 'A_HIGH' | 'B_MEDIUM';
+// 'TOP' = S_ELITE + A_HIGH combined -- the "most accurate only" default tier.
+type ConvFilter = 'TOP' | 'ALL' | 'S_ELITE' | 'A_HIGH' | 'B_MEDIUM';
 type HorizonFilter = 'ALL' | 'intraday' | 'swing' | 'long_term';
 
 // ─── Style maps ───────────────────────────────────────────────────────────────
@@ -249,6 +250,49 @@ function StockCard({ p, onSelect }: { p: any; onSelect: (sym: string) => void })
   );
 }
 
+// ─── Intraday pick card (compact -- distinct data source from the swing/positional cards above) ──
+
+function IntradayPickCard({ p, onSelect }: { p: any; onSelect: (sym: string) => void }) {
+  const style = CONV[p.conviction_level as keyof typeof CONV] ?? CONV.B_MEDIUM;
+  const rr = n2(p.risk_reward);
+  return (
+    <div className={cn('rounded-xl border p-3 flex flex-col gap-1.5', style.bg, style.border)}>
+      <div className="flex items-start justify-between gap-2">
+        <button
+          onClick={() => onSelect(p.symbol)}
+          className="font-bold text-white text-sm hover:text-sky-300 transition-colors text-left"
+        >
+          {p.symbol}
+        </button>
+        <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded-full border', style.text, style.border)}>
+          {style.label} · {n2(p.intraday_score)}
+        </span>
+      </div>
+      <div className="grid grid-cols-3 gap-1 text-[10px]">
+        <div>
+          <div className="text-slate-500">Entry</div>
+          <div className="text-white font-medium">{p.entry_price ? `₹${p.entry_price.toFixed(0)}` : '—'}</div>
+        </div>
+        <div>
+          <div className="text-slate-500">SL</div>
+          <div className="text-rose-400 font-medium">{p.stop_loss ? `₹${p.stop_loss.toFixed(0)}` : '—'}</div>
+        </div>
+        <div>
+          <div className="text-slate-500">T1 {rr ? `(${rr}R)` : ''}</div>
+          <div className="text-emerald-400 font-medium">{p.target_1 ? `₹${p.target_1.toFixed(0)}` : '—'}</div>
+        </div>
+      </div>
+      {p.news_sentiment != null && (
+        <div className="flex items-center gap-1 text-[10px]">
+          <Newspaper size={9} className={pctColor(p.news_sentiment)} />
+          <span className={pctColor(p.news_sentiment)}>news {p.news_sentiment >= 0 ? '+' : ''}{p.news_sentiment.toFixed(2)}</span>
+        </div>
+      )}
+      <p className="text-[10px] text-slate-400 leading-relaxed">{p.reasoning}</p>
+    </div>
+  );
+}
+
 // ─── Stat pill ────────────────────────────────────────────────────────────────
 
 function StatPill({ label, value, color = 'text-white' }: { label: string; value: string | number; color?: string }) {
@@ -263,7 +307,7 @@ function StatPill({ label, value, color = 'text-white' }: { label: string; value
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export function BuyRecommendationsPage({ onSelectStock }: { onSelectStock: (sym: string) => void }) {
-  const [conviction, setConviction] = useState<ConvFilter>('ALL');
+  const [conviction, setConviction] = useState<ConvFilter>('TOP');
   const [horizon, setHorizon] = useState<HorizonFilter>('ALL');
   const [sector, setSector] = useState<string>('');
   const [search, setSearch] = useState('');
@@ -274,6 +318,10 @@ export function BuyRecommendationsPage({ onSelectStock }: { onSelectStock: (sym:
     sector: sector || undefined,
     limit: 120,
   }, { staleTime: 2 * 60_000, refetchInterval: 3 * 60_000, refetchOnWindowFocus: true });
+
+  const { data: intraday, isLoading: intradayLoading } = trpc.getIntradayTopPicks.useQuery(undefined, {
+    staleTime: 60_000, refetchInterval: 2 * 60_000, refetchOnWindowFocus: true,
+  });
 
   const filtered = useMemo(() => {
     if (!data?.picks) return [];
@@ -328,11 +376,11 @@ export function BuyRecommendationsPage({ onSelectStock }: { onSelectStock: (sym:
         <div>
           <h1 className="text-xl font-bold flex items-center gap-2">
             <TrendingUp size={20} className="text-emerald-400" />
-            Buy Recommendations
+            Top Picks
             <CanonicalBadge />
           </h1>
           <p className="text-xs text-slate-400 mt-0.5">
-            ML-ranked picks · {data?.picks?.length ?? 0} stocks · Model run {data?.lastComputedAt ? formatISTWithLocal(data.lastComputedAt) : '—'}
+            Highest-conviction Buy calls only · {data?.picks?.length ?? 0} stocks · Model run {data?.lastComputedAt ? formatISTWithLocal(data.lastComputedAt) : '—'}
             {data?.regime && (
               <span className={cn('ml-2 font-semibold', regimeColor)}>· {data.regime}</span>
             )}
@@ -349,6 +397,45 @@ export function BuyRecommendationsPage({ onSelectStock }: { onSelectStock: (sym:
           <RefreshCw size={13} className={isFetching ? 'animate-spin' : ''} />
           Refresh
         </button>
+      </div>
+
+      {/* Intraday section -- a distinct engine/table (intraday_ranker.py -> intraday_recommendations),
+          isolated from the swing/positional picks above. Its Buy/Strong Buy emission is gated on the
+          engine's own trailing realised P&L, so an empty/closed state here is a correct, honest
+          reflection of "no validated same-day edge right now", not a loading or data problem. */}
+      <div className="bg-slate-800/30 border border-slate-700/40 rounded-xl p-3">
+        <div className="flex items-center gap-2 mb-2">
+          <Zap size={14} className="text-amber-400" />
+          <span className="text-sm font-semibold text-white">Intraday</span>
+          {intraday && (
+            <span className={cn(
+              'text-[10px] font-semibold px-2 py-0.5 rounded-full border flex items-center gap-1',
+              intraday.gateOpen ? 'text-emerald-300 border-emerald-500/40 bg-emerald-500/10'
+                                 : 'text-slate-400 border-slate-600/40 bg-slate-700/30',
+            )}>
+              {intraday.gateOpen ? <Zap size={9} /> : <Lock size={9} />}
+              {intraday.gateOpen ? 'Live edge confirmed' : 'Gated — no confirmed edge today'}
+            </span>
+          )}
+        </div>
+        {intradayLoading ? (
+          <div className="h-16 animate-pulse bg-slate-800/40 rounded-lg" />
+        ) : !intraday?.gateOpen ? (
+          <p className="text-xs text-slate-500">
+            {intraday?.gateReason ?? 'No intraday picks scored yet today.'}
+            {(intraday?.totalScored ?? 0) > 0 && (
+              <span className="text-slate-600"> ({intraday!.totalScored} stocks scored this cycle, none cleared for same-day entry.)</span>
+            )}
+          </p>
+        ) : (intraday?.picks?.length ?? 0) === 0 ? (
+          <p className="text-xs text-slate-500">Gate is open, but nothing clears the score threshold this cycle.</p>
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+            {intraday!.picks.map((p: any) => (
+              <IntradayPickCard key={p.symbol} p={p} onSelect={onSelectStock} />
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Stats row */}
@@ -405,13 +492,14 @@ export function BuyRecommendationsPage({ onSelectStock }: { onSelectStock: (sym:
 
         {/* Conviction */}
         <div className="flex bg-slate-800 border border-slate-700 rounded-lg overflow-hidden text-xs">
-          {(['ALL', 'S_ELITE', 'A_HIGH', 'B_MEDIUM'] as ConvFilter[]).map(c => (
+          {(['TOP', 'ALL', 'S_ELITE', 'A_HIGH', 'B_MEDIUM'] as ConvFilter[]).map(c => (
             <button
               key={c}
               onClick={() => setConviction(c)}
+              title={c === 'TOP' ? 'S_ELITE + A_HIGH only — the most accurate tier' : undefined}
               className={cn('px-3 py-1.5 transition-colors', conviction === c ? 'bg-sky-600 text-white' : 'text-slate-400 hover:text-white')}
             >
-              {c === 'ALL' ? 'All' : c === 'S_ELITE' ? 'S' : c === 'A_HIGH' ? 'A' : 'B'}
+              {c === 'TOP' ? 'Top ★' : c === 'ALL' ? 'All' : c === 'S_ELITE' ? 'S' : c === 'A_HIGH' ? 'A' : 'B'}
             </button>
           ))}
         </div>

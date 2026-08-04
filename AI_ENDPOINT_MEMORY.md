@@ -17,13 +17,48 @@ platform coverage. If you need real endpoint counts, they are:
 
 | Status | Count | Where |
 |---|---|---|
-| **Live-fetchable, tested against real APIs (2026-07-30, three passes)** | **29** | `CURATED_EXTRA_ENDPOINTS` in `src/server/endpoint_registry.py` (27) + `trendlyne_fno_activity_fetcher.py` (1 endpoint family, 3 screen types) + `nse_ipo_calendar_fetcher.py` (1 endpoint family, 3 phases) |
-| Parsed into ML features (`ml_ensemble.py`) | 15 feature columns from 5 of the 29 | `marketservices_shareholding`, `trading80_header_info`, `marketsmojo_header_info`, `investsights_score`, `tapetide_score` |
-| Archived raw only (no parser yet, fetched + stored as-is) | 22 of the 29 | the original 9 + `stockedge_high_delivery_qty` + `investsights_pe_band`/`investsights_dcf_valuation`/`investsights_growth_metrics`/`investsights_pros_cons` + `tapetide_analyst_ratings`/`tapetide_forecasts` + `marketsmojo_stock_picks_history`/`marketsmojo_results_corner`/`tickertape_financials_income`/`tickertape_estimates_history`/`tickertape_deals`/`trendlyne_market_insight`/`trendlyne_mf_home` |
+| **Live-fetchable, tested against real APIs (2026-08-03, four passes)** | **35** | `CURATED_EXTRA_ENDPOINTS` in `src/server/endpoint_registry.py` (34) + `trendlyne_fno_activity_fetcher.py` (1 endpoint family, 3 screen types) + `nse_ipo_calendar_fetcher.py` (1 endpoint family, 3 phases) — **plus** `investsights_investor_activity_fetcher.py`, a standalone fan-out fetcher (investor-list → per-investor `/activity`) that doesn't fit this registry's simple market/stock scopes and so isn't counted in the 35 |
+| Parsed into ML features (`ml_ensemble.py`) | 15 feature columns from 5 of the 35 | `marketservices_shareholding`, `trading80_header_info`, `marketsmojo_header_info`, `investsights_score`, `tapetide_score` |
+| Archived raw only (no parser yet, fetched + stored as-is) | 28 of the 35 | the original 9 + `stockedge_high_delivery_qty` + `investsights_pe_band`/`investsights_dcf_valuation`/`investsights_growth_metrics`/`investsights_pros_cons` + `tapetide_analyst_ratings`/`tapetide_forecasts` + `marketsmojo_stock_picks_history`/`marketsmojo_results_corner`/`tickertape_financials_income`/`tickertape_estimates_history`/`tickertape_deals`/`trendlyne_market_insight`/`trendlyne_mf_home` + **Round 4**: `tickertape_mmi`/`mc_deals_insight_top_investor`/`investsights_investors_list`/`investsights_concall_recent`/`investsights_sector_rrg`/`investsights_sector_correlation` |
 | Confirmed unreachable/blocked — do not add without solving the noted blocker | 2 | Sensibull `oxide.sensibull.com/*` (returns `401 invalid platform access token`); StockEdge per-stock endpoints (opaque numeric ID, no resolver) |
-| **Tested and ruled dead** (403/404 even with full browser headers, or HTML not JSON — see Round 3) | ~72 unique shapes | `www.ndtvprofit.com` (16), `ticker.finology.in` (10), `api.niftytrader.in` (15, retired subdomain), `oxide.sensibull.com` (5), `www.moneycontrol.com/mc/widget/*` (13), plus scattered others |
+| **Tested and ruled dead** (403/404 even with full browser headers, or HTML not JSON — see Round 3) | ~72 unique shapes | `www.ndtvprofit.com` (16, **but see the 2026-08-03 correction below — re-tested alive under TLS impersonation**), `ticker.finology.in` (10), `api.niftytrader.in` (15, retired subdomain), `oxide.sensibull.com` (5), `www.moneycontrol.com/mc/widget/*` (13), plus scattered others |
 | **Tested and confirmed real, but already covered by an existing fetcher** (not re-promoted) | ~180 unique shapes | see Round 3 — mostly `trendlyne.com`'s screener-catalog and per-stock paths, and most of `api.moneycontrol.com`/`webapi.niftytrader.in`/ETNow's surface (presumed, not path-by-path re-verified against every existing fetcher) |
 | Unverified (Section 3 catalogue, AI-generated) | 1024 | This file, below — treat as a source of URL *shapes* to investigate, never as confirmed-working endpoints |
+
+### Round 4 (2026-08-03): urls.txt field-analysis pass + a correction to the Round 3 "dead" list
+
+Full detail: `docs/url_explorer/DATA_CATEGORIZATION_AND_USAGE.md`. `url_explorer` (a new
+generic tool, `src/server/url_explorer/`) normalized `urls.txt`'s 1,983 URLs into 250 endpoint
+templates and live-fetched + field-profiled every one — not a sample. Two outcomes:
+
+- **A correction, not yet fully resolved**: `www.ndtvprofit.com` returned real data on **all 14**
+  templates this pass, contradicting Round 3's "403 even with full browser headers" verdict. The
+  difference: this fetch used `curl_cffi`'s Chrome TLS-fingerprint impersonation, not plain
+  `requests` + spoofed headers. Not re-verified rigorously (single fetch per template, not a
+  multi-symbol/multi-time `live_datasource` test) — treat as "contested," not "confirmed alive,"
+  until that test is written.
+- **6 new curated endpoints promoted**, all market-wide, all live-tested with plain `requests`
+  (no TLS impersonation needed for these hosts): `tickertape_mmi` (Market Mood Index, previously
+  absent from this codebase entirely), `mc_deals_insight_top_investor` (richer counterparty deal
+  data than `block_deal_fetcher.py`), `investsights_investors_list` (superstar-investor
+  directory snapshot), `investsights_concall_recent` (AI-scored earnings-call tone/takeaway),
+  `investsights_sector_rrg` + `investsights_sector_correlation` (a real Relative Rotation Graph
+  and sector correlation matrix — the "fuller fix" `unified_ranker.py`'s first-order
+  `MAX_SECTOR_EXPOSURE` cap was flagged as needing). Live-datasource tests:
+  `test_live_datasource_round4_endpoints.py`.
+- **One standalone fetcher, not a registry entry**: `investsights_investor_activity_fetcher.py`.
+  The investor-list endpoint alone only gives aggregate per-investor stats, not which stocks a
+  superstar investor actually holds — the real per-stock signal needs a second call per investor
+  (`/investors/{slug}/activity`), a list→fan-out shape this registry's simple market/stock scopes
+  can't express. Writes to a new `superstar_investor_activity` table (symbol, investor_slug,
+  change_type, pct_holding_change, period_end_date). **Endpoint quirk, live-confirmed**: the
+  `symbol` field on both `/investors/{slug}` and `/investors/{slug}/activity` is sometimes a raw
+  BSE numeric scrip code instead of an NSE ticker (e.g. `"517238"` for Dynavision Ltd, alongside
+  a normal ticker `"APOLSINHOT"` in the same investor's holdings) — this fetcher only keeps rows
+  whose symbol matches an existing `nse_stocks` ticker, silently dropping BSE-only holdings
+  rather than guessing a resolver (no BSE-code resolver exists in this codebase for this
+  provider). Wired into `queues.ts` alongside `extra_endpoints_fetcher.py`. Live-datasource test:
+  `test_live_datasource_investsights_investor_activity.py`.
 
 ### Round 3 (2026-07-30, same day): all 437 unique URL shapes tested, not just a sample
 

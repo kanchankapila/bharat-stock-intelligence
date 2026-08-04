@@ -43,6 +43,7 @@ import requests
 
 from db_compat import connect
 from as_of import logical_write_floor
+from fetch_utils import retry_get, FetchTracker
 
 BASE_URL = (
     "https://trendlyne.com/equity/api/stock/adv-technical-analysis/{tlid}/24/"
@@ -162,10 +163,7 @@ def fetch_adv_tech(tlid: str, session: requests.Session) -> dict | None:
     Returns the parsed ``body.parameters`` dict or None on failure."""
     url = BASE_URL.format(tlid=tlid)
     try:
-        r = session.get(url, params={"format": "json"}, timeout=15)
-        if r.status_code != 200:
-            print(f"  HTTP {r.status_code} for tlid={tlid}")
-            return None
+        r = retry_get(session, url, params={"format": "json"}, timeout=15)
         data = r.json()
         body = data.get("body", {})
         params = body.get("parameters")
@@ -517,6 +515,10 @@ def main() -> None:
     ok = 0
     skipped = 0
     done = 0
+    # Same silent-degradation guard as trendlyne_price_analysis_fetcher.py (its sibling in the
+    # same trendlyne-midweek batch): a run where most/all stocks come back "no data" must not
+    # look identical to a healthy one.
+    tracker = FetchTracker("trendlyne_adv_tech_fetcher")
 
     def _fetch_one(args):
         symbol, tlid = args
@@ -532,6 +534,7 @@ def main() -> None:
                 if params is None:
                     print(f"  [{done}/{len(stocks)}] {symbol}: SKIP (no data)")
                     skipped += 1
+                    tracker.record(symbol, ok=False)
                     continue
                 feat = extract_features(params)
                 upsert_row(symbol, today, feat, con)
@@ -544,10 +547,12 @@ def main() -> None:
                 pdist   = f"pvt_dist={feat.get('pivot_dist_pct',0):.2f}%" if feat.get("pivot_dist_pct") is not None else "pvt_dist=?"
                 print(f"  [{done}/{len(stocks)}] {symbol}: {ma_str} | {osc_str} | {rsi_str} | {adx_str} | {ret_str} | {pdist}")
                 ok += 1
+                tracker.record(symbol, ok=True)
         time.sleep(BATCH_GAP_SEC)
 
     print(f"[TLAdvTech] Done. {ok} OK / {skipped} skipped out of {len(stocks)} stocks.")
     con.close()
+    tracker.finish()
 
 
 if __name__ == "__main__":

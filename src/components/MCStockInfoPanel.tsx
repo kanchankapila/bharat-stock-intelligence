@@ -1119,7 +1119,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                     <div key={period} className="p-2.5 bg-slate-950 rounded-xl border border-slate-800/50 text-center">
                       <p className="text-[7px] font-black text-slate-500 uppercase tracking-widest mb-0.5">{period}</p>
                       <p className={cn("text-[11px] font-black italic", Number(val) >= 0 ? "text-emerald-400" : "text-rose-400")}>
-                        {Number(val) >= 0 ? '+' : ''}{val}%
+                        {Number(val) >= 0 ? '+' : ''}{String(val)}%
                       </p>
                     </div>
                   ))}
