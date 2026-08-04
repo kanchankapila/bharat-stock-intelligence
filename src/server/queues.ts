@@ -1455,6 +1455,19 @@ export async function initQueues(): Promise<boolean> {
           removeOnFail: 3,
         },
       ),
+      // MoneyControl per-stock news (genuinely live, no metered quota -- mcFetchJson's own
+      // Semaphore throttles concurrency) — denser cadence than Google News above since there's
+      // no external rate budget to conserve.
+      addJobWithCatchup(newsSentimentQueue,
+        'mc-stock-news-refresh',
+        {},
+        {
+          repeat: { every: 2 * 60 * 60 * 1000 }, // every 2 hours
+          jobId: 'mc-stock-news-repeatable',
+          removeOnComplete: 3,
+          removeOnFail: 3,
+        },
+      ),
       // BSE corporate announcements (per-stock, high-signal events) — hourly captures
       // intraday + after-close filings without hammering the endpoint.
       addJobWithCatchup(newsSentimentQueue,
@@ -1483,6 +1496,41 @@ export async function initQueues(): Promise<boolean> {
           removeOnFail: 3,
         },
       ),
+      // GNews (gnews.io) — 3 differentiated cadences, not one flat job: market/stock news is
+      // what actually feeds trading decisions and goes stale fast, global business context
+      // moves slower. Gated on GNEWS_API_KEY (a no-op cycle otherwise). Combined budget
+      // 24+24+4=52 req/day against the 100/day free-tier cap — see newsSentimentService.ts's
+      // GNews section header for the full per-cycle breakdown.
+      addJobWithCatchup(newsSentimentQueue,
+        'gnews-market-refresh',
+        {},
+        {
+          repeat: { every: 2 * 60 * 60 * 1000 }, // 2h -> 24 req/day (2 calls/cycle)
+          jobId: 'gnews-market-repeatable',
+          removeOnComplete: 3,
+          removeOnFail: 3,
+        },
+      ),
+      addJobWithCatchup(newsSentimentQueue,
+        'gnews-stocks-refresh',
+        {},
+        {
+          repeat: { every: 60 * 60 * 1000 }, // 1h -> 24 req/day (1 call/cycle, rotating batch)
+          jobId: 'gnews-stocks-repeatable',
+          removeOnComplete: 3,
+          removeOnFail: 3,
+        },
+      ),
+      addJobWithCatchup(newsSentimentQueue,
+        'gnews-global-refresh',
+        {},
+        {
+          repeat: { every: 6 * 60 * 60 * 1000 }, // 6h -> 4 req/day (1 call/cycle)
+          jobId: 'gnews-global-repeatable',
+          removeOnComplete: 3,
+          removeOnFail: 3,
+        },
+      ),
     ]);
 
     newsSentimentWorker = new Worker(
@@ -1491,6 +1539,8 @@ export async function initQueues(): Promise<boolean> {
         const svc = await import('./newsSentimentService');
         if (job.name === 'company-news-refresh') {
           await svc.runCompanyNewsCycle();
+        } else if (job.name === 'mc-stock-news-refresh') {
+          await svc.runMcStockNewsCycle();
         } else if (job.name === 'bse-announcements-refresh') {
           await svc.runBseAnnouncementsCycle();
         } else if (job.name === 'bse-announcements-refresh-hot') {
@@ -1499,6 +1549,12 @@ export async function initQueues(): Promise<boolean> {
             return;
           }
           await svc.runBseAnnouncementsCycle();
+        } else if (job.name === 'gnews-market-refresh') {
+          await svc.runGNewsMarketCycle();
+        } else if (job.name === 'gnews-stocks-refresh') {
+          await svc.runGNewsStocksCycle();
+        } else if (job.name === 'gnews-global-refresh') {
+          await svc.runGNewsGlobalCycle();
         } else {
           await svc.runNewsSentimentCycle();
         }

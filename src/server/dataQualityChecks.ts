@@ -251,6 +251,15 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
     category: 'reference', critical: false, table: 'mc_pricefeed_daily', dateColumn: 'date', warnDays: 3, failDays: 5 },
   { id: 'extra-endpoint-responses-recency', label: 'extra_endpoint_responses',
     category: 'reference', critical: false, table: 'extra_endpoint_responses', dateColumn: 'updated_at', warnDays: 10 },
+  // news_sentiment_items -- a TS-side (not Python) live datasource, so it fell outside the
+  // 2026-08-03 runPython()-call-site sweep above; genuinely never had a freshness check
+  // despite being written by 4 sources (market-wide RSS, per-company Google News, BSE
+  // announcements, and now GNews). tradingDayAware:false -- news happens on weekends/holidays
+  // too, unlike the NSE-trading-day-gated tables above. warnDays kept tight since the
+  // fastest of its writers (market-wide RSS) runs every 15 min.
+  { id: 'news-sentiment-freshness', label: 'news_sentiment_items (RSS + Google News + BSE + GNews)',
+    category: 'reference', critical: false, table: 'news_sentiment_items', dateColumn: 'fetched_at',
+    tradingDayAware: false, warnDays: 1, failDays: 3 },
 ];
 
 export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [

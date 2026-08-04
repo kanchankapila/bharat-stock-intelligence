@@ -106,7 +106,8 @@ export const commandCenterRouter = router({
 
   getBuyRecommendations: publicProcedure
     .input(z.object({
-      conviction: z.enum(['ALL', 'S_ELITE', 'A_HIGH', 'B_MEDIUM']).default('ALL'),
+      // 'TOP' = S_ELITE + A_HIGH combined -- the "most accurate only" tier, and the default.
+      conviction: z.enum(['TOP', 'ALL', 'S_ELITE', 'A_HIGH', 'B_MEDIUM']).default('TOP'),
       horizon:    z.enum(['ALL', 'intraday', 'swing', 'long_term']).default('ALL'),
       sector:     z.string().optional(),
       limit:      z.number().min(1).max(200).default(60),
@@ -119,13 +120,21 @@ export const commandCenterRouter = router({
 
       const latest = await urLatestAt();
       const params: (string | number)[] = [latest ?? ''];
-      let convFilter = '';
-      if (input.conviction !== 'ALL') {
-        convFilter = ` AND ur.conviction_level = ?`;
+      // This is a BUY recommendations page -- unified_score is a magnitude, not a signed
+      // direction (a high score can back a Sell just as easily as a Buy: e.g. live data
+      // 2026-08-03 had the #1 and #2 top-scored S_ELITE rows both classified 'Sell'). Found
+      // while wiring up the "most accurate signals only" page -- without this filter, 62% of
+      // what this endpoint returned (958/1551 rows, default filters) was Sell/Strong Sell/Hold,
+      // not a buy call at all.
+      let convFilter = ` AND ur.classification IN ('Buy', 'Strong Buy')`;
+      if (input.conviction === 'TOP') {
+        convFilter += ` AND ur.conviction_level IN ('S_ELITE', 'A_HIGH')`;
+      } else if (input.conviction !== 'ALL') {
+        convFilter += ` AND ur.conviction_level = ?`;
         params.push(input.conviction);
       } else {
-        // default: exclude D_MARGINAL
-        convFilter = ` AND ur.conviction_level != 'D_MARGINAL'`;
+        // ALL: still exclude D_MARGINAL -- never a useful "buy idea" tier
+        convFilter += ` AND ur.conviction_level != 'D_MARGINAL'`;
       }
       let horizonFilter = '';
       if (input.horizon !== 'ALL') {
@@ -221,6 +230,54 @@ export const commandCenterRouter = router({
       const sectorSet = [...new Set(picks.map((p: any) => p.sector).filter(Boolean))].sort();
 
       return { picks, regime, sectorList: sectorSet, lastComputedAt: rows[0]?.computed_at ?? null };
+    }),
+
+  // Same-day intraday picks from intraday_ranker.py's own ranked output (intraday_recommendations),
+  // never surfaced by any existing page before this -- IntradayBreakouts/LiveMarketScreener are
+  // live third-party pass-throughs with no persisted ranking, and getBuyRecommendations reads
+  // unified_recommendations (a different, positional/swing engine; its own 'INTRADAY' timeframe
+  // rows are a separate thing again). intraday_ranker.py gates Buy/Strong Buy emission on its own
+  // trailing realised PnL (see EMISSION_GATE in that file) -- when the gate is closed this
+  // legitimately returns zero picks, which is the correct behavior, not a bug, so gateOpen/
+  // gateReason are returned explicitly rather than leaving an empty list unexplained.
+  getIntradayTopPicks: publicProcedure
+    .query(async () => {
+      const latestRow = await dbGet<{ ts: string }>(
+        'SELECT CAST(MAX(computed_at) AS TEXT) AS ts FROM intraday_recommendations'
+      );
+      const latest = latestRow?.ts ?? null;
+      if (!latest) {
+        return { picks: [], gateOpen: null, gateReason: null, lastComputedAt: null, totalScored: 0 };
+      }
+
+      const [picks, gateRow, totalRow] = await Promise.all([
+        dbAll<any>(`
+          SELECT symbol, intraday_regime, intraday_score, conviction_level, classification,
+                 screener_score, breakout_score, news_sentiment, bullish_count, bearish_count,
+                 cmp, entry_price, stop_loss, target_1, risk_reward, position_size_pct, reasoning
+          FROM intraday_recommendations
+          WHERE computed_at = ? AND classification IN ('Buy', 'Strong Buy')
+          ORDER BY intraday_score DESC
+          LIMIT 60
+        `, [latest]),
+        dbGet<{ reasoning: string }>(`
+          SELECT reasoning FROM intraday_recommendations
+          WHERE computed_at = ? AND reasoning LIKE '%EMISSION GATED%'
+          LIMIT 1
+        `, [latest]),
+        dbGet<{ n: number }>('SELECT COUNT(*) AS n FROM intraday_recommendations WHERE computed_at = ?', [latest]),
+      ]);
+
+      const gateOpen = !gateRow;
+      return {
+        picks,
+        gateOpen,
+        gateReason: gateOpen
+          ? null
+          : "The engine's own trailing realised P&L over the last 10 trading days is not positive, so Buy/Strong Buy emission is paused until it recovers (re-checked every 15-min cycle) -- scores are still computed, just not published as actionable.",
+        lastComputedAt: latest,
+        totalScored: totalRow?.n ?? 0,
+      };
     }),
 
   // Single-symbol canonical score -- for stock-detail pages (v4 StockIntelligencePage) that

@@ -255,6 +255,23 @@ describe('generated freshness checks (TABLE_FRESHNESS_CHECKS via makeFreshnessCh
     // macro_asset_prices.date is a native Postgres DATE column (see stock_ohlcv precedent).
     expect(byId('macro-asset-prices-freshness').sql).toMatch(/date::text/);
   });
+
+  it('news-sentiment-freshness is NOT trading-day-aware (news lands 7 days a week) and does not absorb a weekend gap', () => {
+    // A tradingDayAware:true check would forgive a Fri->Mon gap (~2 weekend days subtracted)
+    // and read this as fresh. This table is fed by RSS/Google News/BSE/GNews around the
+    // clock, so the same raw gap must still register as stale, never silently absorbed to 'pass'.
+    const satMorning = new Date(now.getTime() - 2.2 * 86_400_000).toISOString();
+    expect(byId('news-sentiment-freshness').evaluate({ last_date: satMorning }, now).status).toBe('warn');
+
+    // Comfortably past failDays=3 with no weekend-forgiveness applied -> fail.
+    const fourDaysAgo = new Date(now.getTime() - 4 * 86_400_000).toISOString();
+    expect(byId('news-sentiment-freshness').evaluate({ last_date: fourDaysAgo }, now).status).toBe('fail');
+  });
+
+  it('news-sentiment-freshness reads empty as a warn (non-critical)', () => {
+    const r = byId('news-sentiment-freshness').evaluate(undefined, now);
+    expect(r.status).toBe('warn');
+  });
 });
 
 describe('runDataQualityChecks (orchestration)', () => {
