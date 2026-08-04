@@ -8,6 +8,7 @@ from technical_analysis_engine import (  # noqa: E402
     compute_atr_barriers,
     STOP_PCT_FLOOR, STOP_PCT_CAP,
     TARGET_PCT_FLOOR, TARGET_PCT_CAP,
+    to_unified_signal_row,
 )
 
 PRICE = 100.0
@@ -57,3 +58,47 @@ def test_zero_atr_falls_back_to_floor_not_price():
 
 def test_nonpositive_price_returns_zeros():
     assert compute_atr_barriers(0.0, atr=2.0, direction='long') == (0.0, 0.0)
+
+
+# ── to_unified_signal_row: technical_analysis_signals -> unified_signals fold ──────────
+# (Cluster B-lite, 2026-08) trend->signal_type, rsi->technical_score (must stay numeric,
+# not text, so strategySignalsService's `rsi <= ?` filter keeps working), patterns (JSON
+# string) -> ai_reasoning (so mcpServer's JSON.parse(...) keeps working unchanged).
+
+def test_to_unified_signal_row_maps_trend_rsi_patterns():
+    row = {
+        'symbol': 'INFY', 'trend': 'Bullish', 'rsi': 62.345,
+        'macd': 'Bullish Crossover', 'bollinger': 'Normal',
+        'patterns': '["Doji"]', 'entry_price': 1500.0,
+        'target_price': 1550.0, 'stop_loss': 1470.0,
+        'last_updated': '2026-08-03T18:00:00',
+    }
+    out = to_unified_signal_row(row, signal_date='2026-08-03')
+
+    assert out['symbol'] == 'INFY'
+    assert out['signal_date'] == '2026-08-03'
+    assert out['signal_type'] == 'Bullish'
+    assert out['technical_score'] == 62.345
+    assert out['ai_reasoning'] == '["Doji"]'
+    assert 'RSI=62.3' in out['reasoning']
+    assert 'MACD=Bullish Crossover' in out['reasoning']
+    assert 'BB=Normal' in out['reasoning']
+    assert out['entry_price'] == 1500.0
+    assert out['target_price'] == 1550.0
+    assert out['stop_loss'] == 1470.0
+    assert out['signal_generated_at'] == '2026-08-03T18:00:00'
+
+
+def test_to_unified_signal_row_preserves_bearish_and_empty_patterns():
+    row = {
+        'symbol': 'TCS', 'trend': 'Bearish', 'rsi': 71.0,
+        'macd': 'Bearish', 'bollinger': 'High',
+        'patterns': '[]', 'entry_price': 3500.0,
+        'target_price': 3400.0, 'stop_loss': 3560.0,
+        'last_updated': '2026-08-03T18:00:00',
+    }
+    out = to_unified_signal_row(row, signal_date='2026-08-03')
+
+    assert out['signal_type'] == 'Bearish'
+    assert out['ai_reasoning'] == '[]'
+    assert out['technical_score'] == 71.0

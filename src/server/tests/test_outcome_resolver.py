@@ -25,7 +25,8 @@ def make_db():
             entry_price REAL, check_date TEXT, exit_price REAL,
             return_pct REAL, outcome TEXT, signal_score INTEGER,
             signals_json TEXT, computed_at TEXT,
-            PRIMARY KEY (symbol, signal_date, horizon_days)
+            label_definition TEXT, signal_source TEXT NOT NULL DEFAULT 'unknown',
+            PRIMARY KEY (symbol, signal_date, horizon_days, signal_source)
         );
     """)
     return conn
@@ -363,7 +364,8 @@ def make_multi_horizon_db():
             entry_price REAL, check_date TEXT, exit_price REAL,
             return_pct REAL, outcome TEXT, signal_score INTEGER,
             signals_json TEXT, computed_at TEXT,
-            PRIMARY KEY (symbol, signal_date, horizon_days)
+            label_definition TEXT, signal_source TEXT NOT NULL DEFAULT 'unknown',
+            PRIMARY KEY (symbol, signal_date, horizon_days, signal_source)
         );
         CREATE TABLE unified_signals (
             id INTEGER PRIMARY KEY AUTOINCREMENT, symbol TEXT, signal_date TEXT,

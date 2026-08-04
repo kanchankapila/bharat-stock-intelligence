@@ -433,10 +433,15 @@ def get_signal_accuracy(db_path: str = DB_PATH) -> dict:
     db = _connect(db_path)
     result: dict = {}
 
-    # Overall outcome distribution
+    # Overall outcome distribution. signal_source='technical' (2026-08): confluence-sourced
+    # rows use a different, incompatible labeling methodology (a fixed +/-2% terminal barrier
+    # vs. technical's path-based ~15% band) -- blending both into one "win rate" would report a
+    # number that doesn't mean anything coherent, matching every other signal-accuracy consumer
+    # in this codebase's choice to scope to the platform's primary trade-signal concept.
     try:
         rows = db.execute(
             "SELECT outcome, COUNT(*) AS cnt FROM signal_outcomes "
+            "WHERE signal_source = 'technical' "
             "GROUP BY outcome"
         ).fetchall()
         total = sum(r["cnt"] for r in rows)

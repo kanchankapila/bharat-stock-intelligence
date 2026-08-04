@@ -16,6 +16,7 @@
 import { Job } from 'bullmq';
 import { syncAndScore } from '../scoringService';
 import { registerRepeatableJob } from './registerJob';
+import { runPython } from '../pythonRunner';
 
 export const QUEUE_STOCK_SCORING       = 'stock-scoring';
 export const QUEUE_MC_SCREENER_SYNC    = 'mc-screener-sync';
@@ -64,6 +65,12 @@ async function processQuantScoring(_job: Job): Promise<{ success: boolean }> {
   console.log('[QUEUE] Starting quant strategy scoring...');
   const { runQuantScoring } = await import('../quantScoringService');
   await runQuantScoring();
+  // Multi-factor alpha score (Quality/Momentum/Value/Risk-Adj/Macro) -> quant_scores.mf_*.
+  // Must run AFTER runQuantScoring() so it reads today's fresh upsert, not a stale row — it
+  // used to run inside ml-daily-ops at 7:30 PM IST, 3.5h BEFORE this 11 PM job, exactly
+  // inverting the dependency its own docstring claims. Moved here 2026-08.
+  await runPython('multi_factor_scorer.py', [], 180_000)
+    .catch(e => console.warn('[QUEUE] multi_factor_scorer failed:', (e as Error).message));
   return { success: true };
 }
 

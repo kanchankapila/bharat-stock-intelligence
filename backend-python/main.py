@@ -180,16 +180,6 @@ def api_run_scoring(req: ScoringRequest):
     return run_scoring(req)
 
 
-# ── Technical Analysis Engine ─────────────────────────────────────────────────
-
-from technical_analysis_engine import run_ta_engine  # type: ignore
-
-
-@app.post("/api/v1/ta_engine")
-def api_run_ta_engine():
-    return run_ta_engine()
-
-
 # ── PCR Engine ────────────────────────────────────────────────────────────────
 
 from app.pcr_engine import run_pcr_fetch, get_latest_pcr, PcrRequest  # type: ignore

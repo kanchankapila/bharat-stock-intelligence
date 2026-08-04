@@ -68,6 +68,7 @@ def load_training_data() -> pd.DataFrame:
             ON ts.symbol = so.symbol AND ts.date = so.signal_date
         WHERE so.outcome IN ('WIN', 'LOSS', 'NEUTRAL')
           AND so.return_pct IS NOT NULL
+          AND so.signal_source = 'technical'
         ORDER BY so.signal_date
     """
     # ORDER BY signal_date added (Finding #45, 2026-07-28 full-stack audit): cross_val_score

@@ -599,7 +599,8 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     category: 'outcomes',
     critical: true,
     sql: `SELECT COUNT(*) AS total, COUNT(CASE WHEN outcome = 'PENDING' THEN 1 END) AS pending
-          FROM signal_outcomes WHERE horizon_days = 15 AND signal_date <= date('now','-20 days')`,
+          FROM signal_outcomes WHERE horizon_days = 15 AND signal_date <= date('now','-20 days')
+            AND signal_source = 'technical'`,
     evaluate: (row) => {
       const total = Number(row?.total) || 0;
       if (total === 0) return { status: 'warn', detail: 'No 15d-horizon signals old enough to expect resolution yet' };

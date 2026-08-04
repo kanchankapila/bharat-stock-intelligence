@@ -163,7 +163,7 @@ export const confluenceRouter = router({
           FROM signal_outcomes so
           LEFT JOIN confluence_signals cs ON cs.symbol = so.symbol
             AND DATE(cs.computed_at)::text = so.signal_date
-          WHERE so.symbol = ?
+          WHERE so.symbol = ? AND so.signal_source = 'confluence'
           ORDER BY so.signal_date DESC
           LIMIT ?
         `, [symbol, limit]);
@@ -173,6 +173,7 @@ export const confluenceRouter = router({
         FROM signal_outcomes so
         LEFT JOIN confluence_signals cs ON cs.symbol = so.symbol
           AND DATE(cs.computed_at)::text = so.signal_date
+        WHERE so.signal_source = 'confluence'
         ORDER BY so.signal_date DESC
         LIMIT ?
       `, [limit]);

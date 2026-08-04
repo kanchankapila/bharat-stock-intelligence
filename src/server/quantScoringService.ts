@@ -433,6 +433,10 @@ export interface StrategyFilters {
   maxDebtToEquity?: number;    // D/E cap (Yahoo stores as % so 100 = 1×)
   minPiotroski?: number;       // 0–9
   minMarketCapCr?: number;     // market cap in crores
+  // Restrict to symbols present in the latest unified_recommendations (canonical ranker) snapshot.
+  // Silently skipped (falls back to the full quant_scores universe) if UR has no rows yet for
+  // today — a cold-start/pre-ranker-run guard, mirroring getTopRatedStocks' own UR-empty fallback.
+  requireUnifiedCoverage?: boolean;
 }
 
 export async function getStrategyStocks(
@@ -510,6 +514,21 @@ export async function getStrategyStocks(
     params.push(capInr);
   }
 
+  // unified_recommendations involvement (score-consolidation, 2026-08): a straight table swap
+  // like getTopRatedStocks' UR-first/stock_scores-fallback doesn't work here — UR's columns
+  // (unified_score, classification, ...) are a cross-source composite with no overlap with the
+  // raw quant factors (sharpe_ratio, piotroski_f_score, rank_composite, ...) this function
+  // filters/ranks on. Instead: surface UR's opinion as read-only context columns, plus an
+  // opt-in coverage gate, without changing which stocks a filter set already surfaces.
+  let urGate = '';
+  if (filters.requireUnifiedCoverage) {
+    const urCount = await dbGet<{ n: number }>(`
+      SELECT COUNT(*) AS n FROM unified_recommendations
+      WHERE computed_at = (SELECT MAX(computed_at) FROM unified_recommendations)
+    `);
+    if ((urCount?.n ?? 0) > 0) urGate = 'AND ur.symbol IS NOT NULL';
+  }
+
   const where = conditions.join(' AND ');
   params.push(limit);
 
@@ -535,12 +554,19 @@ export async function getStrategyStocks(
       qs.rank_momentum, qs.rank_quality, qs.rank_value, qs.rank_composite,
       qs.composite_class, qs.ohlcv_days,
       -- live price ref
-      sf.market_cap, sf.analyst_rating
+      sf.market_cap, sf.analyst_rating,
+      -- canonical ranker context (read-only; never changes default filtering/ranking)
+      ur.unified_score  AS ur_unified_score,
+      ur.classification AS ur_classification,
+      ur.conviction_level AS ur_conviction_level
       ${customSelect}
     FROM quant_scores qs
     LEFT JOIN nse_stocks  ns ON ns.symbol = qs.symbol
     LEFT JOIN stock_fundamentals sf ON sf.symbol = qs.symbol
-    WHERE ${where} ${customWhere}
+    LEFT JOIN unified_recommendations ur
+           ON ur.symbol = qs.symbol
+          AND ur.computed_at = (SELECT MAX(computed_at) FROM unified_recommendations)
+    WHERE ${where} ${customWhere} ${urGate}
     ORDER BY ${selectColName} DESC
     LIMIT ?
   `, params) as any[];

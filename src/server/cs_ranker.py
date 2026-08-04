@@ -125,6 +125,7 @@ def load_cs_training_data() -> pd.DataFrame:
         WHERE so.outcome IN ('WIN', 'LOSS', 'STOP_LOSS')
           AND so.return_pct IS NOT NULL
           AND so.horizon_days = 5
+          AND so.signal_source = 'technical'
     """
     df = read_df(q)
     if df.empty:

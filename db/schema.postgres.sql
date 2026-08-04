@@ -1776,11 +1776,24 @@ CREATE TABLE IF NOT EXISTS "signal_outcomes" (
   "signals_json" TEXT,
   "computed_at" TIMESTAMPTZ DEFAULT now(),
   "max_return_pct" DOUBLE PRECISION,
-  PRIMARY KEY ("symbol", "signal_date", "horizon_days")
+  -- label_definition ('terminal_pct2' | 'path_barrier' | 'unknown') / is_suspect were
+  -- previously added only at runtime by data_integrity_repair.py's ALTER TABLE ... ADD
+  -- COLUMN IF NOT EXISTS -- absent here, a fresh bootstrap or DR restore would silently lose
+  -- them even though they already exist on the live table. Schema catch-up, 2026-08.
+  "label_definition" TEXT,
+  "is_suspect" SMALLINT DEFAULT 0,
+  -- signal_source: which upstream signal this row grades ('technical' via outcome_resolver.py,
+  -- 'confluence' via confluence_outcome_tracker.py, 'unknown' for pre-2026-08 rows). Without
+  -- this the two writers collided on (symbol, signal_date, horizon_days) and silently picked
+  -- whichever wrote first -- see migrations/*_signal-outcomes-signal-source.sql.
+  "signal_source" TEXT NOT NULL DEFAULT 'unknown',
+  PRIMARY KEY ("symbol", "signal_date", "horizon_days", "signal_source")
 );
 CREATE INDEX idx_sout_date    ON signal_outcomes(signal_date DESC);
 CREATE INDEX idx_sout_outcome ON signal_outcomes(outcome);
+CREATE INDEX idx_sout_source  ON signal_outcomes(signal_source);
 CREATE INDEX idx_sout_sym     ON signal_outcomes(symbol);
+CREATE INDEX idx_so_label     ON signal_outcomes(label_definition);
 
 -- ── signal_portfolio_correlation ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "signal_portfolio_correlation" (
@@ -2129,20 +2142,8 @@ CREATE TABLE IF NOT EXISTS "strategy_performance" (
 );
 CREATE INDEX idx_perfkey ON strategy_performance(strategy_name, horizon_days);
 
--- ── technical_analysis_signals ─────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS "technical_analysis_signals" (
-  "symbol" TEXT,
-  "trend" TEXT,
-  "rsi" DOUBLE PRECISION,
-  "macd" TEXT,
-  "bollinger" TEXT,
-  "patterns" TEXT,
-  "entry_price" DOUBLE PRECISION,
-  "target_price" DOUBLE PRECISION,
-  "stop_loss" DOUBLE PRECISION,
-  "last_updated" TIMESTAMPTZ DEFAULT now(),
-  PRIMARY KEY ("symbol")
-);
+-- technical_analysis_signals folded into unified_signals (signal_source='technical'),
+-- Cluster B-lite, 2026-08 -- see migration 074_drop_technical_analysis_signals in db.ts.
 
 -- ── technical_composite_scores ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "technical_composite_scores" (

@@ -354,6 +354,7 @@ def daily_update(conn: ConnWrapper, dry_run: bool = False,
             WHERE so.signal_date = ?
               AND so.outcome IN ('WIN','LOSS','NEUTRAL','STOP_LOSS')
               AND ts.nifty_regime = ?
+              AND so.signal_source = 'technical'
         """, (ep_date, regime)).fetchall()
 
         if not outcomes:
@@ -425,6 +426,7 @@ def backfill_episodes(conn: ConnWrapper, lookback_days: int = 180, dry_run: bool
         WHERE so.outcome IN ('WIN','LOSS','NEUTRAL','STOP_LOSS')
           AND so.signal_date >= ?
           AND so.return_pct IS NOT NULL
+          AND so.signal_source = 'technical'
         ORDER BY so.signal_date ASC
     """, (cutoff,)).fetchall()
 

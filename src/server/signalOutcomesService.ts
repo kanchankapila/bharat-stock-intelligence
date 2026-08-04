@@ -33,13 +33,20 @@ export interface WinRateStats {
   recentOutcomes: OutcomeRow[];
 }
 
+// signal_source='technical' (2026-08): this grades technical_signals rows -- the same source
+// bucket as outcome_resolver.py's resolve_outcomes(), which runs on its own independent
+// schedule against the same (symbol, signal_date, horizon_days=5|15). Before signal_source
+// existed, both writers' dedup guards matched on ANY row for that key regardless of writer, so
+// whichever ran first silently blocked the other. Stamping 'technical' here lets ON CONFLICT
+// correctly update-in-place when either writer re-touches the same key, instead of colliding
+// with the unrelated confluence_outcome_tracker.py writer that also shares this table.
 const UPSERT_OUTCOME_SQL = `
   INSERT INTO signal_outcomes (
     symbol, signal_date, horizon_days, entry_price,
     check_date, exit_price, return_pct, max_return_pct, outcome,
-    signal_score, signals_json, computed_at
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-  ON CONFLICT(symbol, signal_date, horizon_days) DO UPDATE SET
+    signal_score, signals_json, computed_at, signal_source
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, 'technical')
+  ON CONFLICT(symbol, signal_date, horizon_days, signal_source) DO UPDATE SET
     check_date=excluded.check_date, exit_price=excluded.exit_price,
     return_pct=excluded.return_pct, max_return_pct=excluded.max_return_pct,
     outcome=excluded.outcome, computed_at=excluded.computed_at
@@ -65,6 +72,7 @@ export async function computeSignalOutcomes(horizonDays: HorizonDays = 5): Promi
           AND so.signal_date = ts.date
           AND so.horizon_days = ?
           AND so.outcome != 'PENDING'
+          AND so.signal_source = 'technical'
       )
     ORDER BY ts.date DESC
     LIMIT 500
@@ -199,8 +207,11 @@ export async function computeSignalOutcomes(horizonDays: HorizonDays = 5): Promi
 }
 
 export async function getWinRateStats(): Promise<WinRateStats> {
+  // signal_source='technical' (2026-08): confluence-sourced rows use an incompatible fixed
+  // +/-2% labeling threshold -- blending both into one win-rate report would mix two different
+  // questions, matching every other signal-accuracy consumer's choice in this codebase.
   const rows = await dbAll(`
-    SELECT * FROM signal_outcomes WHERE outcome != 'PENDING'
+    SELECT * FROM signal_outcomes WHERE outcome != 'PENDING' AND signal_source = 'technical'
     ORDER BY signal_date DESC LIMIT 2000
   `) as OutcomeRow[];
 
@@ -287,6 +298,6 @@ export async function getWinRateStats(): Promise<WinRateStats> {
 
 export async function getOutcomesForSignalDate(signalDate: string): Promise<OutcomeRow[]> {
   return await dbAll(`
-    SELECT * FROM signal_outcomes WHERE signal_date = ? ORDER BY return_pct DESC
+    SELECT * FROM signal_outcomes WHERE signal_date = ? AND signal_source = 'technical' ORDER BY return_pct DESC
   `, [signalDate]) as OutcomeRow[];
 }

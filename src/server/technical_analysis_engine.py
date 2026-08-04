@@ -38,6 +38,33 @@ def compute_atr_barriers(price, atr, direction,
     return round(price * (1 - target_frac), 2), round(price * (1 + stop_frac), 2)
 
 
+# ── unified_signals row mapping (Cluster B-lite, 2026-08) ────────────────────────
+# technical_analysis_signals folded into unified_signals (signal_source='technical').
+# Column choices preserve queryability for the three readers this replaces:
+#   trend            -> signal_type      (kept as a real filter key, not buried in text)
+#   rsi              -> technical_score  (numeric column, so strategySignalsService's
+#                                          `rsi <= ?` filter still works as a plain comparison —
+#                                          a formatted text blob would not be queryable)
+#   patterns (JSON)  -> ai_reasoning     (already json.dumps'd; mcpServer's JSON.parse(...)
+#                                          still works unchanged)
+#   entry/target/stop -> passthrough (unified_signals already has these columns)
+#   reasoning         -> a human-readable RSI/MACD/BB summary (unified_signals' own free-text column)
+
+def to_unified_signal_row(row: dict, signal_date: str) -> dict:
+    return {
+        'symbol': row['symbol'],
+        'signal_date': signal_date,
+        'signal_type': row['trend'],
+        'entry_price': row['entry_price'],
+        'target_price': row['target_price'],
+        'stop_loss': row['stop_loss'],
+        'reasoning': f"RSI={row['rsi']:.1f} MACD={row['macd']} BB={row['bollinger']}",
+        'technical_score': row['rsi'],
+        'ai_reasoning': row['patterns'],
+        'signal_generated_at': row['last_updated'],
+    }
+
+
 class TechnicalAnalysisEngine:
     def __init__(self):
         self.engine = get_engine()
@@ -162,18 +189,24 @@ class TechnicalAnalysisEngine:
                 print(f"Error analyzing {symbol}: {e}")
 
         if results:
+            today_str = datetime.datetime.now().date().isoformat()
+            unified_rows = [to_unified_signal_row(r, signal_date=today_str) for r in results]
             with self.engine.begin() as conn:
                 conn.execute(text("""
-                    INSERT INTO technical_analysis_signals
-                    (symbol, trend, rsi, macd, bollinger, patterns, entry_price, target_price, stop_loss, last_updated)
-                    VALUES (:symbol, :trend, :rsi, :macd, :bollinger, :patterns, :entry_price, :target_price, :stop_loss, :last_updated)
-                    ON CONFLICT(symbol) DO UPDATE SET
-                        trend=excluded.trend, rsi=excluded.rsi, macd=excluded.macd,
-                        bollinger=excluded.bollinger, patterns=excluded.patterns,
+                    INSERT INTO unified_signals
+                      (symbol, signal_date, signal_source, signal_type,
+                       entry_price, target_price, stop_loss, reasoning,
+                       technical_score, ai_reasoning, status, signal_generated_at)
+                    VALUES (:symbol, :signal_date, 'technical', :signal_type,
+                            :entry_price, :target_price, :stop_loss, :reasoning,
+                            :technical_score, :ai_reasoning, 'ACTIVE', :signal_generated_at)
+                    ON CONFLICT(symbol, signal_source, signal_type, signal_date) DO UPDATE SET
                         entry_price=excluded.entry_price, target_price=excluded.target_price,
-                        stop_loss=excluded.stop_loss, last_updated=excluded.last_updated
-                """), results)
-            print(f"Analysis complete. {len(results)} signals saved.")
+                        stop_loss=excluded.stop_loss, reasoning=excluded.reasoning,
+                        technical_score=excluded.technical_score, ai_reasoning=excluded.ai_reasoning,
+                        signal_generated_at=excluded.signal_generated_at
+                """), unified_rows)
+            print(f"Analysis complete. {len(results)} signals saved to unified_signals.")
 
         return results
 

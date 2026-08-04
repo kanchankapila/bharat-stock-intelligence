@@ -1391,10 +1391,15 @@ export async function runTechnicalSignalScan(options: {
       ON CONFLICT DO NOTHING
     `;
 
+    // signal_source='technical' (2026-08): must match what outcome_resolver.py /
+    // signalOutcomesService.ts later UPSERT with (ON CONFLICT symbol, signal_date,
+    // horizon_days, signal_source) -- seeding at the default 'unknown' would make the
+    // resolver's UPDATE target a different 4-col key, silently leaving this PENDING row
+    // stuck forever while a second, separate 'technical' row gets created alongside it.
     const seedOutcomeSql = `
       INSERT OR IGNORE INTO signal_outcomes
-        (symbol, signal_date, horizon_days, entry_price, outcome)
-      VALUES (?, ?, ?, ?, 'PENDING')
+        (symbol, signal_date, horizon_days, entry_price, outcome, signal_source)
+      VALUES (?, ?, ?, ?, 'PENDING', 'technical')
     `;
 
     const unifiedUpsertSql = `
@@ -1685,7 +1690,7 @@ export async function computeSignalTypeStats(): Promise<{ updated: number }> {
            ts.nifty_regime
     FROM signal_outcomes so
     LEFT JOIN technical_signals ts ON ts.symbol = so.symbol AND ts.date = so.signal_date
-    WHERE so.outcome IN ('WIN', 'LOSS', 'NEUTRAL')
+    WHERE so.outcome IN ('WIN', 'LOSS', 'NEUTRAL') AND so.signal_source = 'technical'
   `) as {
     symbol: string; horizon_days: number; return_pct: number;
     outcome: string; signals_json: string; nifty_regime: string | null;

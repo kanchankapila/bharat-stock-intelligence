@@ -1022,6 +1022,10 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
       - 'horizon'        → so.outcome ∈ {WIN,LOSS} thresholded at the horizon (default).
       - 'triple_barrier' → se.tb_label (vol-scaled first-touch label from signal_excursions).
     """
+    # signal_source='technical' (2026-08): this whole query's feature set is a technical_signals
+    # LEFT JOIN (rsi/adx/nifty_regime/etc.) -- without this filter, a confluence-sourced outcome
+    # row sharing (symbol, signal_date) with an unrelated technical_signals row would be trained
+    # on as if it graded that signal, exactly the mispairing bug documented for ml_calibration.py.
     if label == 'triple_barrier':
         label_select = "se.tb_label AS outcome"
         label_join = (
@@ -1029,11 +1033,12 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
             "ON se.symbol = so.symbol AND se.signal_date = so.signal_date "
             "AND se.horizon_days = so.horizon_days"
         )
-        label_where = "se.tb_label IS NOT NULL"
+        label_where = "se.tb_label IS NOT NULL AND so.signal_source = 'technical'"
     else:
         label_select = "so.outcome"
         label_join = ""
-        label_where = "so.outcome IN ('WIN','LOSS','STOP_LOSS')\n          AND so.return_pct IS NOT NULL"
+        label_where = ("so.outcome IN ('WIN','LOSS','STOP_LOSS')\n          AND so.return_pct IS NOT NULL"
+                       "\n          AND so.signal_source = 'technical'")
 
     if use_postgres():
         q = f"""
@@ -3058,6 +3063,9 @@ def check_drift(conn: ConnWrapper, auc_drop_threshold: float = 0.04,
         return False
     trained_auc = float(row[0])
 
+    # signal_source='technical' (2026-08): the ensemble is trained only on technical-sourced
+    # rows (see load_training_data's label_where) -- comparing against a pooled win-rate across
+    # both sources would produce a spurious drift signal, not a real one.
     live = conn.execute(f"""
         SELECT
             COUNT(*) as total,
@@ -3065,6 +3073,7 @@ def check_drift(conn: ConnWrapper, auc_drop_threshold: float = 0.04,
         FROM signal_outcomes
         WHERE computed_at >= date('now', '-{window_days} days')
           AND outcome IN ('WIN', 'LOSS', 'STOP_LOSS')
+          AND signal_source = 'technical'
     """).fetchone()
 
     if not live or not live[0] or live[0] < 20:
@@ -3253,6 +3262,7 @@ def incremental_update(n_days: int = 3, n_rounds: int = 20, dry_run: bool = Fals
               )
         WHERE so.outcome IN ('WIN','LOSS')
           AND so.signal_date >= ?
+          AND so.signal_source = 'technical'
         ORDER BY so.signal_date ASC
     """
     df = read_df(q, (cutoff,))

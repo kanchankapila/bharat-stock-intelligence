@@ -133,6 +133,7 @@ def update_weights(
         WHERE outcome IN ('WIN','LOSS','NEUTRAL','STOP_LOSS')
           AND return_pct IS NOT NULL
           AND signal_date >= ?
+          AND signal_source = 'technical'
         UNION ALL
         SELECT uso.symbol, uso.signal_date, uso.horizon_days, uso.return_pct, uso.outcome,
                NULL AS signals_json

@@ -111,6 +111,7 @@ class StrategyOptimizer:
             WHERE so.outcome IN ('WIN','LOSS','NEUTRAL')
               AND so.return_pct IS NOT NULL
               AND so.horizon_days = ?
+              AND so.signal_source = 'technical'
         """
         df = self._read_df(q, (horizon_days,))
         for col in CATEGORIES:
@@ -283,7 +284,7 @@ class StrategyOptimizer:
             FROM screener_master sm
             JOIN trendlyne_screener_stocks tss ON tss.screener_id = sm.scan_id
             JOIN signal_outcomes so ON so.symbol = tss.symbol
-            WHERE so.outcome IN ('WIN','LOSS','NEUTRAL')
+            WHERE so.outcome IN ('WIN','LOSS','NEUTRAL') AND so.signal_source = 'technical'
         """
         raw = self._read_df(q)
         if raw.empty:

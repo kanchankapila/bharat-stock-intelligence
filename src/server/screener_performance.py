@@ -63,12 +63,17 @@ def phase_a_bootstrap(conn: ConnWrapper) -> dict:
     """
     print("[PhaseA] Bootstrapping screener metrics from confluence_signals x signal_outcomes...")
 
-    # Load resolved outcomes — prefer 5D (2,157 rows) since no 20D data exists yet
+    # Load resolved outcomes — prefer 5D (2,157 rows) since no 20D data exists yet.
+    # signal_source='technical' (2026-08): horizon=5 is exclusively written by
+    # outcome_resolver.py (confluence_outcome_tracker.py's own HORIZONS list never includes
+    # 5), so this has always practically read technical-sourced rows despite the docstring
+    # above framing it as a confluence-screener proxy -- made explicit rather than accidental.
     outcomes = conn.execute("""
         SELECT symbol, signal_date, return_pct, outcome
         FROM signal_outcomes
         WHERE outcome IN ('WIN', 'LOSS', 'NEUTRAL')
           AND return_pct IS NOT NULL
+          AND signal_source = 'technical'
         ORDER BY horizon_days DESC, signal_date DESC
     """).fetchall()
 
