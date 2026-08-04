@@ -13,17 +13,28 @@ import { nseStocksData } from '../data/nseStocks';
 import type { MarketData } from '../services/marketService';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { useWebSocket } from '../v2/hooks/useWebSocket';
+import { notifyAlert } from '../lib/browserNotify';
+import { CommandPalette } from './CommandPalette';
 
 // ─── Nav Config ───────────────────────────────────────────────────────────────
 
 interface NavItem { icon: React.ElementType; label: string; id: string; }
 interface NavGroup { label: string; items: NavItem[]; }
 
-// Items that appear only when "Advanced" is expanded
-const ADVANCED_INTELLIGENCE_IDS = new Set([
-  'top-rated', 'signals', 'todays-picks', 'research',
-]);
-
+// Nav restructuring (2026-08-04 UX audit follow-up): the old flat 18-item "Intelligence" group
+// mixed the canonical cross-engine ranking (unified_recommendations, via unified_ranker.py --
+// see CLAUDE.md's "Scoring Authority" section) with several independent/alternative scoring
+// models and pure diagnostics tools, with no visual signal for which to trust first. Split into
+// three groups by what each tab actually is, verified against each page's own backend query
+// and on-page copy (several -- Best Picks, Strategy -- already self-label "independent scoring
+// model, not the unified cross-engine model" in their own UI; that framing is now reflected in
+// the nav itself instead of only showing up once you've already opened the page):
+//   - "Top Picks": canonical, unified_recommendations-backed. Placed right after Markets.
+//   - "Alternative Screens": independent scoring models -- a different lens, not a duplicate.
+//   - "Signal Tools": logs/diagnostics/research, not ranked "buy this" lists at all.
+// The old "Advanced" hide-behind-a-toggle mechanism (top-rated/signals/todays-picks/research)
+// is dropped in favor of this grouping -- each new group is small enough (4-7 items) to show
+// everything without an extra click, matching the density of the un-collapsed "Analysis" group.
 const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Markets',
@@ -33,6 +44,15 @@ const NAV_GROUPS: NavGroup[] = [
       { icon: LayoutDashboard, label: 'Dashboard',  id: 'dashboard'   },
       { icon: BarChart2,       label: 'Indices',    id: 'indices'     },
       { icon: Activity,        label: 'Market Map', id: 'market-map'  },
+    ],
+  },
+  {
+    label: 'Top Picks',
+    items: [
+      { icon: TrendingUp, label: 'Buy Recs 🟢',   id: 'buy-recs'      },
+      { icon: Zap,        label: 'Alpha ⚡',      id: 'alpha'         },
+      { icon: Trophy,     label: 'Top Rated',     id: 'top-rated'     },
+      { icon: Sparkles,   label: 'Trade Cockpit', id: 'trade-cockpit' },
     ],
   },
   {
@@ -49,27 +69,27 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    label: 'Intelligence',
+    label: 'Alternative Screens',
     items: [
-      { icon: TrendingUp, label: 'Buy Recs 🟢',          id: 'buy-recs'             },
-      { icon: Zap,      label: 'Alpha ⚡',             id: 'alpha'                },
-      { icon: BarChart2, label: 'Screener Intel',      id: 'screener-intelligence' },
-      { icon: Sparkles, label: 'Trade Cockpit',        id: 'trade-cockpit'        },
-      { icon: Zap,      label: 'Early Spotter ⚡', id: 'early-spotter'        },
-      { icon: Crosshair, label: 'Best Picks',          id: 'best-picks'           },
-      { icon: Layers,  label: 'Signal Intel', id: 'signal-intelligence' },
-      { icon: ChartLine, label: 'Signal Report Card', id: 'signal-report-card' },
-      { icon: Star,    label: 'Strategy',   id: 'strategy'    },
-      { icon: Target,  label: 'Builder',    id: 'strategy-builder' },
-      { icon: Activity,label: 'Sentiment',  id: 'sentiment'   },
-      { icon: History, label: 'Backtest',   id: 'backtest'    },
-      { icon: Settings2, label: 'ML Builder', id: 'builder'   },
-      // Advanced (hidden by default):
-      { icon: Trophy,   label: 'Top Rated',     id: 'top-rated'    },
-      { icon: Radio,    label: 'Signal Ledger',  id: 'signal-tracking' },
-      { icon: Radio,    label: 'Signals',        id: 'signals'      },
-      { icon: Zap,      label: "Today's Picks",  id: 'todays-picks' },
-      { icon: FlaskConical, label: 'Research',   id: 'research'     },
+      { icon: Crosshair, label: 'Best Picks',           id: 'best-picks'            },
+      { icon: Star,      label: 'Strategy',             id: 'strategy'              },
+      { icon: Target,    label: 'Strategy Builder',     id: 'strategy-builder'      },
+      { icon: Layers,    label: 'Signal Intel',         id: 'signal-intelligence'   },
+      { icon: BarChart2, label: 'Screener Intel',       id: 'screener-intelligence' },
+      { icon: Zap,       label: 'Early Spotter ⚡',     id: 'early-spotter'         },
+      { icon: Zap,       label: "Today's Picks",        id: 'todays-picks'          },
+    ],
+  },
+  {
+    label: 'Signal Tools',
+    items: [
+      { icon: Radio,        label: 'Signal Ledger',      id: 'signal-tracking'    },
+      { icon: Radio,        label: 'Signals',            id: 'signals'            },
+      { icon: ChartLine,    label: 'Signal Report Card', id: 'signal-report-card' },
+      { icon: Activity,     label: 'Sentiment',          id: 'sentiment'          },
+      { icon: History,      label: 'Backtest',           id: 'backtest'           },
+      { icon: Settings2,    label: 'ML Builder',         id: 'builder'            },
+      { icon: FlaskConical, label: 'Research',           id: 'research'           },
     ],
   },
   {
@@ -164,7 +184,6 @@ const SidebarInner = React.memo(function SidebarInner({ collapsed, setCollapsed,
   const [marketStatus, setMarketStatus] = useState(getMarketStatus());
   const [searchQuery, setSearchQuery]   = useState('');
   const [showSearch, setShowSearch]     = useState(false);
-  const [showAdvancedTabs, setShowAdvancedTabs] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -370,7 +389,6 @@ const SidebarInner = React.memo(function SidebarInner({ collapsed, setCollapsed,
             {collapsed && <div className="my-1 mx-1 border-t border-slate-800/50" />}
 
             {group.items
-              .filter(item => !ADVANCED_INTELLIGENCE_IDS.has(item.id) || showAdvancedTabs)
               .map(item => {
                 const active = activeTab === item.id;
                 return (
@@ -413,15 +431,6 @@ const SidebarInner = React.memo(function SidebarInner({ collapsed, setCollapsed,
                   </button>
                 );
               })}
-            {/* Advanced toggle — shown only in Intelligence group when not collapsed */}
-            {group.label === 'Intelligence' && !collapsed && (
-              <button
-                onClick={() => setShowAdvancedTabs(!showAdvancedTabs)}
-                className="flex items-center gap-1 px-2 py-1 text-[11px] text-slate-500 hover:text-slate-300 transition-colors w-full"
-              >
-                Advanced {showAdvancedTabs ? '‹' : '›'}
-              </button>
-            )}
           </div>
         ))}
       </nav>
@@ -529,6 +538,10 @@ export const AppShell: React.FC<AppShellProps> = ({
   useEffect(() => {
     if (lastMessage) {
       setToastMessage(lastMessage);
+      const body = lastMessage.type === 'new_signal'
+        ? `New ${lastMessage.signal?.signalType || 'Signal'} generated (${lastMessage.source || 'AI'})`
+        : lastMessage.level || 'Status update';
+      notifyAlert(`Live Alert: ${lastMessage.symbol}`, body);
       const timer = setTimeout(() => {
         setToastMessage(null);
       }, 5000);
@@ -696,7 +709,7 @@ export const AppShell: React.FC<AppShellProps> = ({
                 </p>
               </div>
             </div>
-            <button 
+            <button
               onClick={() => setToastMessage(null)}
               className="p-1 hover:bg-white/10 rounded-full transition-colors self-start -mt-1 -mr-1"
             >
@@ -705,6 +718,8 @@ export const AppShell: React.FC<AppShellProps> = ({
           </div>
         </div>
       )}
+
+      <CommandPalette navGroups={NAV_GROUPS} onNavigate={setActiveTab} onSelectStock={onSelectStock} stocks={stocks} />
     </div>
   );
 };

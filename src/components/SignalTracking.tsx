@@ -1,17 +1,48 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { trpc } from '../lib/trpc';
 import { Card } from './Card';
-import { 
-  Activity, Search, Clock, ArrowUpRight, ArrowDownRight, Radio
+import {
+  Activity, Search, Clock, ArrowUpRight, ArrowDownRight, Radio,
+  ChevronUp, ChevronDown, ChevronsUpDown
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { format } from 'date-fns';
+import { useSignalLedgerSort, type SignalSortKey } from '../hooks/useSignalLedgerSort';
+
+const SortableHeader: React.FC<{
+  label: string; sortKey: SignalSortKey; active: SignalSortKey; dir: 'asc' | 'desc';
+  onSort: (key: SignalSortKey) => void; align?: 'left' | 'center' | 'right';
+}> = ({ label, sortKey, active, dir, onSort, align = 'left' }) => (
+  <th
+    className={cn(
+      'px-4 py-3 cursor-pointer select-none hover:text-slate-200 transition-colors',
+      align === 'center' && 'text-center', align === 'right' && 'text-right',
+    )}
+    onClick={() => onSort(sortKey)}
+    title={`Sort by ${label}`}
+  >
+    <span className={cn('inline-flex items-center gap-1', align === 'right' && 'flex-row-reverse')}>
+      {label}
+      {active === sortKey
+        ? (dir === 'asc' ? <ChevronUp className="w-3 h-3 text-indigo-400" /> : <ChevronDown className="w-3 h-3 text-indigo-400" />)
+        : <ChevronsUpDown className="w-3 h-3 text-slate-600" />}
+    </span>
+  </th>
+);
 
 export const SignalTracking: React.FC = () => {
   const [daysFilter, setDaysFilter] = useState(30);
   const [searchQuery, setSearchQuery] = useState('');
-  
+
   const { data: signals, isLoading, error } = trpc.getSignalTracking.useQuery({ days: daysFilter });
+
+  // Hooks must run unconditionally on every render -- computed here, above the loading/error
+  // early returns below, even though their result is only rendered on the success path.
+  const searchFiltered = useMemo(() => (signals || []).filter((s: any) =>
+    s.symbol.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    s.signal_source.toLowerCase().includes(searchQuery.toLowerCase())
+  ), [signals, searchQuery]);
+  const { sorted: filteredSignals, sortKey, sortDir, handleSort } = useSignalLedgerSort(searchFiltered);
 
   if (isLoading) {
     return (
@@ -39,11 +70,6 @@ export const SignalTracking: React.FC = () => {
       </div>
     );
   }
-
-  const filteredSignals = (signals || []).filter((s: any) => 
-    s.symbol.toLowerCase().includes(searchQuery.toLowerCase()) || 
-    s.signal_source.toLowerCase().includes(searchQuery.toLowerCase())
-  );
 
   return (
     <div className="p-6 space-y-6">
@@ -91,12 +117,12 @@ export const SignalTracking: React.FC = () => {
           <table className="min-w-full text-sm text-left border-separate border-spacing-y-2">
             <thead>
               <tr className="text-slate-400 text-xs uppercase tracking-[0.2em]">
-                <th className="px-4 py-3">Generated At</th>
-                <th className="px-4 py-3">Symbol</th>
-                <th className="px-4 py-3 text-center">Type / Source</th>
-                <th className="px-4 py-3 text-right">Entry Price</th>
-                <th className="px-4 py-3 text-right">Current Price</th>
-                <th className="px-4 py-3 text-right">Growth / PnL</th>
+                <SortableHeader label="Generated At" sortKey="signal_generated_at" active={sortKey} dir={sortDir} onSort={handleSort} />
+                <SortableHeader label="Symbol" sortKey="symbol" active={sortKey} dir={sortDir} onSort={handleSort} />
+                <SortableHeader label="Type / Source" sortKey="signal_type" active={sortKey} dir={sortDir} onSort={handleSort} align="center" />
+                <SortableHeader label="Entry Price" sortKey="entry_price" active={sortKey} dir={sortDir} onSort={handleSort} align="right" />
+                <SortableHeader label="Current Price" sortKey="current_price" active={sortKey} dir={sortDir} onSort={handleSort} align="right" />
+                <SortableHeader label="Growth / PnL" sortKey="growth_pct" active={sortKey} dir={sortDir} onSort={handleSort} align="right" />
               </tr>
             </thead>
             <tbody>

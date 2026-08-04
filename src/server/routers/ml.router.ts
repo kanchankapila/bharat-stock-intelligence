@@ -330,7 +330,7 @@ export const mlRouter = router({
             FROM stock_ohlcv
           ) t WHERE rn = 1
         )
-        SELECT ts.id,
+        SELECT ts.symbol || '-' || ts.date AS id,
                ts.symbol,
                ts.date AS signal_date,
                'TECHNICAL' AS signal_source,

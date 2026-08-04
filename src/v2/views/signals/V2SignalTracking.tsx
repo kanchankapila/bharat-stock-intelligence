@@ -1,17 +1,48 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { trpc } from '../../../lib/trpc';
-import { 
-  Activity, Search, TrendingUp, Clock, Filter, 
-  ArrowUpRight, ArrowDownRight, Radio, Target
+import {
+  Activity, Search, TrendingUp, Clock, Filter,
+  ArrowUpRight, ArrowDownRight, Radio, Target,
+  ChevronUp, ChevronDown, ChevronsUpDown
 } from 'lucide-react';
 import { cn } from '../../../lib/utils';
 import { format } from 'date-fns';
+import { useSignalLedgerSort, type SignalSortKey } from '../../../hooks/useSignalLedgerSort';
+
+const SortableHeader: React.FC<{
+  label: string; sortKey: SignalSortKey; active: SignalSortKey; dir: 'asc' | 'desc';
+  onSort: (key: SignalSortKey) => void; align?: 'left' | 'center' | 'right';
+}> = ({ label, sortKey, active, dir, onSort, align = 'left' }) => (
+  <th
+    className={cn(
+      'px-4 py-3 text-[10px] font-black uppercase text-slate-500 tracking-widest border-b border-terminal-border cursor-pointer select-none hover:text-slate-300 transition-colors',
+      align === 'center' && 'text-center', align === 'right' && 'text-right',
+    )}
+    onClick={() => onSort(sortKey)}
+    title={`Sort by ${label}`}
+  >
+    <span className={cn('inline-flex items-center gap-1', align === 'right' && 'flex-row-reverse')}>
+      {label}
+      {active === sortKey
+        ? (dir === 'asc' ? <ChevronUp className="w-3 h-3 text-indigo-400" /> : <ChevronDown className="w-3 h-3 text-indigo-400" />)
+        : <ChevronsUpDown className="w-3 h-3 text-slate-600" />}
+    </span>
+  </th>
+);
 
 export const V2SignalTracking: React.FC = () => {
   const [daysFilter, setDaysFilter] = useState(30);
   const [searchQuery, setSearchQuery] = useState('');
-  
+
   const { data: signals, isLoading, error } = trpc.getSignalTracking.useQuery({ days: daysFilter });
+
+  // Hooks must run unconditionally on every render -- computed here, above the loading/error
+  // early returns below, even though their result is only rendered on the success path.
+  const searchFiltered = useMemo(() => (signals || []).filter((s: any) =>
+    s.symbol.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    s.signal_source.toLowerCase().includes(searchQuery.toLowerCase())
+  ), [signals, searchQuery]);
+  const { sorted: filteredSignals, sortKey, sortDir, handleSort } = useSignalLedgerSort(searchFiltered);
 
   if (isLoading) {
     return (
@@ -31,11 +62,6 @@ export const V2SignalTracking: React.FC = () => {
       </div>
     );
   }
-
-  const filteredSignals = (signals || []).filter((s: any) => 
-    s.symbol.toLowerCase().includes(searchQuery.toLowerCase()) || 
-    s.signal_source.toLowerCase().includes(searchQuery.toLowerCase())
-  );
 
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -92,12 +118,12 @@ export const V2SignalTracking: React.FC = () => {
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-terminal-panel-header/50">
-                <th className="px-4 py-3 text-[10px] font-black uppercase text-slate-500 tracking-widest border-b border-terminal-border whitespace-nowrap">Generated At</th>
-                <th className="px-4 py-3 text-[10px] font-black uppercase text-slate-500 tracking-widest border-b border-terminal-border">Symbol</th>
-                <th className="px-4 py-3 text-[10px] font-black uppercase text-slate-500 tracking-widest border-b border-terminal-border text-center">Type / Source</th>
-                <th className="px-4 py-3 text-[10px] font-black uppercase text-slate-500 tracking-widest border-b border-terminal-border text-right">Entry Price</th>
-                <th className="px-4 py-3 text-[10px] font-black uppercase text-slate-500 tracking-widest border-b border-terminal-border text-right">Current Price</th>
-                <th className="px-4 py-3 text-[10px] font-black uppercase text-slate-500 tracking-widest border-b border-terminal-border text-right">Growth / PnL</th>
+                <SortableHeader label="Generated At" sortKey="signal_generated_at" active={sortKey} dir={sortDir} onSort={handleSort} />
+                <SortableHeader label="Symbol" sortKey="symbol" active={sortKey} dir={sortDir} onSort={handleSort} />
+                <SortableHeader label="Type / Source" sortKey="signal_type" active={sortKey} dir={sortDir} onSort={handleSort} align="center" />
+                <SortableHeader label="Entry Price" sortKey="entry_price" active={sortKey} dir={sortDir} onSort={handleSort} align="right" />
+                <SortableHeader label="Current Price" sortKey="current_price" active={sortKey} dir={sortDir} onSort={handleSort} align="right" />
+                <SortableHeader label="Growth / PnL" sortKey="growth_pct" active={sortKey} dir={sortDir} onSort={handleSort} align="right" />
               </tr>
             </thead>
             <tbody className="divide-y divide-terminal-border">

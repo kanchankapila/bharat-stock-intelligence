@@ -23,6 +23,7 @@ import { GlobalMarkets } from './GlobalMarkets';
 import { PremarketPanel } from './PremarketPanel';
 import { LiveMarketScreener } from './LiveMarketScreener';
 import { EODMarketScreener } from './EODMarketScreener';
+import { ActivityFeed } from './ActivityFeed';
 
 // ─── Fonts injected once ──────────────────────────────────────────────────────
 const FONT_FAMILY_DISPLAY = "'Rajdhani', sans-serif";
@@ -908,6 +909,13 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
           <SectionLabel>Global Markets</SectionLabel>
           <GlobalMarkets />
         </div>
+      </div>
+
+      {/* ── Row 3.5: Activity Feed — reverse-chronological signals + news, so a trader can
+          scan "what happened, in order" right from the landing page. ────────────────────── */}
+      <div className="glass border border-slate-800/50 shadow-[0_4px_20px_rgba(0,0,0,0.02)]" style={{ borderRadius: 10, padding: '14px 16px', marginBottom: 12 }}>
+        <SectionLabel>Activity Feed</SectionLabel>
+        <ActivityFeed onSelectStock={onSelectStock} />
       </div>
 
       {/* ── Row 4: Top Movers ─────────────────────────────────────────────── */}
