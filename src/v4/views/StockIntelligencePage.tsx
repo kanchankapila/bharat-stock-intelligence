@@ -50,8 +50,8 @@ const SymbolSearch: React.FC<{ onSelect: (symbol: string) => void }> = ({ onSele
         />
       </div>
       {q.length >= 1 && results.length > 0 && (
-        <div className="absolute z-20 mt-1 w-full max-h-72 overflow-y-auto glass-strong rounded-xl border border-slate-800 terminal-scrollbar">
-          {results.slice(0, 15).map((s: any) => (
+        <div className="absolute z-20 mt-1 w-full max-h-96 overflow-y-auto glass-strong rounded-xl border border-slate-800 terminal-scrollbar">
+          {results.map((s: any) => (
             <button
               key={s.symbol}
               onClick={() => { onSelect(s.symbol); setQ(''); }}
@@ -70,8 +70,18 @@ const SymbolSearch: React.FC<{ onSelect: (symbol: string) => void }> = ({ onSele
 // ─── Overview tab: unified score + reasoning (the "why", not shown anywhere else today) ──
 const OverviewTab: React.FC<{ symbol: string }> = ({ symbol }) => {
   const { data: scoreDetail } = trpc.getStockScoreDetail.useQuery({ symbol, timeframe: 'long_term' });
+  const { data: quote } = trpc.getLiveStockQuote.useQuery({ symbol }, { enabled: !!symbol, retry: false });
   const score = scoreDetail?.score;
   const factors = scoreDetail?.factors;
+
+  // Day range / 52-week range / volume -- already fetched by StockHeaderCard's own
+  // getLiveStockQuote call for the price ticker, just never surfaced in the tab body itself.
+  const keyStats: [string, any][] = [
+    ['Open', quote?.open], ['Prev Close', quote?.prevClose],
+    ['Day High', quote?.high], ['Day Low', quote?.low],
+    ['52W High', quote?.high52w], ['52W Low', quote?.low52w],
+    ['Volume', quote?.volume],
+  ];
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -128,7 +138,19 @@ const OverviewTab: React.FC<{ symbol: string }> = ({ symbol }) => {
         )}
       </Card>
 
-      <div className="lg:col-span-2">
+      <div className="lg:col-span-2 space-y-4">
+        <Card title="Key Stats" icon={LayoutGrid}>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {keyStats.map(([label, value]) => (
+              <div key={label} className="glass rounded-xl p-2.5 text-center">
+                <div className="text-sm font-mono font-bold text-slate-100">
+                  {label === 'Volume' ? (value ?? '—') : `₹${fmt(value)}`}
+                </div>
+                <div className="text-[9px] text-slate-500 uppercase tracking-widest mt-1">{label}</div>
+              </div>
+            ))}
+          </div>
+        </Card>
         <WhyThisPick symbol={symbol} timeframe="long_term" />
       </div>
     </div>
@@ -312,14 +334,18 @@ const FundamentalsTab: React.FC<{ symbol: string }> = ({ symbol }) => {
 const OwnershipTab: React.FC<{ symbol: string }> = ({ symbol }) => {
   const { data: shareholding } = trpc.getShareholding.useQuery({ symbol });
   const { data: insiders } = trpc.getInsiderTransactions.useQuery({ symbol, limit: 25 });
-  const { data: mf } = trpc.getMFInvestments.useQuery({ symbol });
 
   const sh = shareholding?.data ?? shareholding;
+  // The live ET endpoint (fetchETShareholding) returns a nested { summary: { promoters: {
+  // percentage, changeQoQ }, fii: {...}, dii: {...}, mf: {...}, pledge: {...} } } shape --
+  // the flat promoter_pct/fii_pct/... fields only exist on the DB fallback path (no live
+  // data). Read both, same dual-shape pattern already proven live in V1MFAnalysis.tsx.
   const holdingRows: [string, any][] = [
-    ['Promoter %', sh?.promoter_pct ?? sh?.promoterHolding],
-    ['FII %', sh?.fii_pct ?? sh?.fiiHolding],
-    ['DII / MF %', sh?.mf_pct ?? sh?.mfHolding],
-    ['Pledge %', sh?.pledge_pct ?? sh?.pledgePct],
+    ['Promoter %', sh?.summary?.promoters?.percentage ?? sh?.promoter_pct],
+    ['FII %', sh?.summary?.fii?.percentage ?? sh?.fii_pct],
+    ['DII %', sh?.summary?.dii?.percentage ?? sh?.dii_pct],
+    ['MF %', sh?.summary?.mf?.percentage ?? sh?.mf_pct],
+    ['Pledge %', sh?.summary?.pledge?.percentage ?? sh?.pledge_pct],
   ];
 
   return (
@@ -338,17 +364,6 @@ const OwnershipTab: React.FC<{ symbol: string }> = ({ symbol }) => {
                   {value != null ? `${fmt(value)}%` : '—'}
                 </div>
                 <div className="text-[9px] text-slate-500 uppercase tracking-widest mt-1">{label}</div>
-              </div>
-            ))}
-          </div>
-        )}
-        {mf && Array.isArray(mf) && mf.length > 0 && (
-          <div className="mt-3 pt-3 border-t border-slate-800/60">
-            <div className="text-[10px] text-slate-500 uppercase tracking-widest mb-1.5">Mutual Fund Holders</div>
-            {mf.slice(0, 5).map((m: any, i: number) => (
-              <div key={i} className="flex justify-between text-[11px] text-slate-400 py-0.5">
-                <span className="truncate">{m.fund_name ?? m.fundName ?? '—'}</span>
-                <span className="font-mono text-slate-300">{fmt(m.holding_pct ?? m.pct)}%</span>
               </div>
             ))}
           </div>

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { ArrowLeft, ArrowUpRight, ArrowDownRight } from 'lucide-react';
 import { trpc } from '../lib/trpc';
 import { cn } from '../lib/utils';
+import { marketHoursRefetchInterval } from '../lib/timeFormat';
 import IndexFnoOverview from './IndexFnoOverview';
 import { MCIndexDetailPanel, resolveConstituentSymbol } from './MCIndexDetailPanel';
 
@@ -19,7 +20,7 @@ export const IndexDetailPage: React.FC<{
     { bridgeSymbol: (details as any)?.bridgeSymbol ?? '' },
     { enabled: !!(details as any)?.bridgeSymbol, refetchInterval: 30000 }
   );
-  const { data: stocksList } = trpc.getIndexStocksList.useQuery({ indId: indexId, type: '0' }, { refetchInterval: 60000 });
+  const { data: stocksList } = trpc.getIndexStocksList.useQuery({ indId: indexId, type: '0' }, { refetchInterval: marketHoursRefetchInterval(10000) });
   const { data: technicals } = trpc.getIndexTechnicals.useQuery(
     { period: techPeriod, bridgeSymbol: (details as any)?.bridgeSymbol ?? '' },
     { enabled: !!(details as any)?.bridgeSymbol, refetchInterval: 60000 }
@@ -285,7 +286,7 @@ export const IndexDetailPage: React.FC<{
       )}
 
       {/* Extended MC Index Intelligence Panel — PE/PB charts, fundamentals, intraday A/D breadth */}
-      <MCIndexDetailPanel indId={indexId} name={indexName} bridgeSymbol={d?.bridgeSymbol ?? ''} onSelectStock={onSelectStock} />
+      <MCIndexDetailPanel indId={indexId} name={indexName} bridgeSymbol={d?.bridgeSymbol ?? ''} />
 
       {/* Constituent Stocks */}
       {stocks.length > 0 && (

@@ -130,48 +130,6 @@ export const EconomicCalendarWidget: React.FC = memo(() => {
   );
 });
 
-// --- Market Heatmap Widget ---
-export const MarketHeatmapWidget: React.FC = memo(() => {
-  const container = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!container.current) return;
-    
-    container.current.innerHTML = '<div class="tradingview-widget-container__widget"></div>';
-    
-    const script = document.createElement("script");
-    script.src = "https://s3.tradingview.com/external-embedding/embed-widget-stock-heatmap.js";
-    script.type = "text/javascript";
-    script.async = true;
-    script.innerHTML = JSON.stringify({
-      "exchanges": ["NSE"],
-      "dataSource": "Nifty50",
-      "grouping": "sector",
-      "blockSize": "market_cap_basic",
-      "blockColor": "change",
-      "locale": "in",
-      "symbolUrl": "",
-      "colorTheme": "dark",
-      "hasTopBar": true,
-      "isTransparent": true,
-      "hasSymbolTooltip": true,
-      "width": "100%",
-      "height": "600"
-    });
-    container.current.appendChild(script);
-
-    return () => {
-      if (container.current) {
-        container.current.innerHTML = '';
-      }
-    };
-  }, []);
-
-  return (
-    <div className="tradingview-widget-container" ref={container} />
-  );
-});
-
 // --- Advanced Real-Time Chart Widget ---
 interface AdvancedChartWidgetProps {
   symbol: string;

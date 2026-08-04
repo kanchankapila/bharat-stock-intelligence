@@ -235,8 +235,14 @@ async function getNearExpiry() {
 
 
 export async function getTrendlyneFnoScanners(mtype: 'options' | 'futures', screenType: string, instType?: string) {
-  const dates = await getNearExpiry();
-  let url = `https://smartoptions.trendlyne.com/phoenix/api/fno/market/filter/?mtype=${mtype}&expDate=${dates.iso}&screenType=${screenType}`;
+  // Deliberately no `expDate` param -- Trendlyne's own filter endpoint auto-resolves it to
+  // the live near expiry when omitted (live-verified). getNearExpiry() derives a single date
+  // from NIFTY's own weekly-expiry list and previously got reused for every underlying here;
+  // BankNifty only trades monthly contracts, so that NIFTY-specific weekly date never matched
+  // a BankNifty row and it silently disappeared from every instType=index response (NIFTY's
+  // OI Intelligence Summary showed, BankNifty's didn't). Confirmed live: omitting expDate
+  // returns the same current monthly cycle for both NIFTY and BANKNIFTY consistently.
+  let url = `https://smartoptions.trendlyne.com/phoenix/api/fno/market/filter/?mtype=${mtype}&screenType=${screenType}`;
   if (instType) url += `&instType=${instType}`;
 
   console.log(`[TRENDLYNE FNO] Fetching: ${url}`);
@@ -262,8 +268,11 @@ export async function getTrendlyneFnoScanners(mtype: 'options' | 'futures', scre
     const body = json?.body || json;
     const header = body?.tableHeaders || [];
     const tableData = body?.tableData || [];
+    // Read the resolved expiry back off the response's own rows rather than the (removed)
+    // pre-guessed date -- reflects whatever Trendlyne actually auto-resolved to.
+    const expiry = tableData?.[0]?.[0]?.callbackinfo?.expiry;
     console.log(`[TRENDLYNE FNO] Success: ${screenType} | Rows: ${tableData.length}`);
-    return { header, tableData, expiry: dates.iso };
+    return { header, tableData, expiry };
   } catch (error) {
     console.error(`[TRENDLYNE FNO] Error fetching ${screenType}:`, error);
     return { header: [], tableData: [], error: String(error) };

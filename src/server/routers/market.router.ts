@@ -4,6 +4,8 @@ import {
   fetchAllIndianIndices,
   fetchGlobalIndices,
   fetchSectorPerformance,
+  fetchSectorAdvanceDecline,
+  fetchSectorStocks,
   fetchHistoricalOHLC,
   fetchMarketMap,
 } from "../marketData";
@@ -170,12 +172,31 @@ export const marketRouter = router({
 
   getMarketOverview: publicProcedure
     .query(async () => fetchWithCache('market:overview', async () => {
-      const parse = (s: unknown) => parseFloat(String(s ?? '0').replace(/,/g, '')) || 0;
       const { getIndexByName } = await import('../indexMapping');
+      const { fetchIndexSpot } = await import('../marketData');
+      const id = (name: string) => getIndexByName(name)?.id || null;
+
+      // Primary: 3 distinct NiftyTrader per-index URLs, fetched in parallel -- so a 5s poll
+      // distributes load across 3 endpoints instead of one shared MoneyControl "all indices"
+      // call. Falls back to the single combined MC call below only if any of the 3 fail.
+      try {
+        const [n50, bnk, sx] = await Promise.all([
+          fetchIndexSpot('NIFTY'),
+          fetchIndexSpot('NIFTY BANK'),
+          fetchIndexSpot('sensex', 'bse'),
+        ]);
+        return {
+          nifty50:   { indId: id('NIFTY 50'),   ...n50 },
+          sensex:    { indId: id('SENSEX'),     ...sx  },
+          bankNifty: { indId: id('NIFTY BANK'), ...bnk },
+        };
+      } catch (e) { console.error('[MARKET OVERVIEW] NiftyTrader per-index fetch failed, falling back to MC:', e); }
+
+      const parse = (s: unknown) => parseFloat(String(s ?? '0').replace(/,/g, '')) || 0;
       const extractId = (name: string, url: string) => {
         const m = url?.match(/-(\d+)\.html$/);
         if (m) return m[1];
-        return getIndexByName(name)?.id || null;
+        return id(name);
       };
       try {
         const data = await fetchAllIndianIndices();
@@ -199,7 +220,7 @@ export const marketRouter = router({
         sensex:    { indId: '4',  value: null, change: null, changePct: null, stale: true },
         bankNifty: { indId: '23', value: null, change: null, changePct: null, stale: true },
       };
-    }, 30)),
+    }, 5)),
 
   getTopMovers: publicProcedure
     .query(async () => fetchWithCache('market:top-movers', () => fetchTopMovers(), 60)),
@@ -329,6 +350,13 @@ export const marketRouter = router({
   getMarketMapData: publicProcedure
     .input(z.object({ indId: z.string().optional() }))
     .query(async ({ input }) => fetchMarketMap(input.indId)),
+
+  getSectorAdvanceDecline: publicProcedure
+    .query(async () => fetchWithCache('market:sector-ad', () => fetchSectorAdvanceDecline(), 30)),
+
+  getSectorStocks: publicProcedure
+    .input(z.object({ slug: z.string() }))
+    .query(async ({ input }) => fetchWithCache(`market:sector-stocks:${input.slug}`, () => fetchSectorStocks(input.slug), 300)),
 
   getScreenerResults: publicProcedure
     .input(z.object({

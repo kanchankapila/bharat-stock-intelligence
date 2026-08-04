@@ -11,10 +11,15 @@ const crFmt = (v: number | null | undefined) =>
 
 // Command Center teaser for the Money Flow page (getFiiDiiFlow) -- today's FII/DII net plus
 // a 10-day cumulative sparkline, so institutional flow direction is visible without a
-// separate page visit. Same query/semantics as the full Money Flow page.
+// separate page visit. Same query/semantics as the full Money Flow page. Also folds in
+// getInstitutionalFlows' per-category (FII/DII) buy/sell/net cards -- previously a second,
+// separate "Institutional Flows" card elsewhere on the page; merged here since both show the
+// same institutional-flow concept from two different sources and belong in one place.
 export const MoneyFlowPulseWidget: React.FC = () => {
   const navigate = useNavigate();
   const { data, isLoading } = trpc.getFiiDiiFlow.useQuery({ days: 10 }, { refetchInterval: 30 * 60_000 });
+  const { data: instData } = trpc.getInstitutionalFlows.useQuery();
+  const flows = instData?.data?.institutionalDetails ?? [];
 
   const rows = useMemo(() => {
     const list = (data ?? []).slice().reverse(); // ascending
@@ -64,6 +69,33 @@ export const MoneyFlowPulseWidget: React.FC = () => {
               </AreaChart>
             </ResponsiveContainer>
           </div>
+        </div>
+      )}
+
+      {flows.length > 0 && (
+        <div className="mt-4 pt-4 border-t border-slate-800/50 space-y-2">
+          <div className="text-[9px] text-slate-500 uppercase tracking-widest">Institutional Activity</div>
+          {flows.slice(0, 2).map((flow: any) => (
+            <div key={flow.category} className="p-3 bg-slate-950 border border-slate-800 rounded-xl flex justify-between items-center">
+              <div>
+                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{flow.category} Activity</h4>
+                <p className="text-[9px] font-bold text-slate-600 mt-0.5 uppercase tracking-wider">Date: {flow.date}</p>
+              </div>
+              <div className="text-right">
+                <span className={cn(
+                  'text-xs font-black italic tracking-tight px-2.5 py-0.5 rounded-lg block mb-1',
+                  parseFloat(flow.netBuySell) >= 0 ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/10' : 'bg-rose-500/10 text-rose-400 border border-rose-500/10'
+                )}>
+                  {parseFloat(flow.netBuySell) >= 0 ? '+' : ''}₹{parseFloat(flow.netBuySell).toLocaleString()} Cr
+                </span>
+                <div className="flex gap-2 text-[9px] font-bold text-slate-500 justify-end">
+                  <span>B: ₹{parseFloat(flow.buyValue).toLocaleString()}</span>
+                  <span>•</span>
+                  <span>S: ₹{parseFloat(flow.sellValue).toLocaleString()}</span>
+                </div>
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </Card>

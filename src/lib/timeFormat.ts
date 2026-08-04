@@ -122,6 +122,17 @@ export function isNseMarketOpen(at: Date = new Date()): boolean {
   return mins >= NSE_OPEN_MIN && mins < NSE_CLOSE_MIN;
 }
 
+/**
+ * A React Query `refetchInterval` value that only polls at `activeMs` while the NSE cash
+ * session is open, and falls back to `idleMs` (default: no polling) otherwise -- so a tight
+ * 5s/10s poll doesn't keep firing all night/weekend against data that isn't moving. Pass
+ * directly as `refetchInterval: marketHoursRefetchInterval(10000)`; React Query re-evaluates
+ * the function on every tick, so it also stops/resumes correctly across an intraday open/close.
+ */
+export function marketHoursRefetchInterval(activeMs: number, idleMs: number | false = false) {
+  return () => (isNseMarketOpen() ? activeMs : idleMs);
+}
+
 // Country-name substring -> exchange timezone, for the global-markets board. Matched by
 // substring (case-insensitive) against whatever country label the upstream vendor sends,
 // since the backend (globalMarketService.ts) has no timezone field of its own -- only

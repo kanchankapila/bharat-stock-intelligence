@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
+import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
   AreaChart, Area, BarChart, Bar, ReferenceLine, PieChart as RePieChart, Pie, Cell,
@@ -40,14 +40,13 @@ import { PriceAlertsPanel } from './components/PriceAlertsPanel';
 import { AlertsToast } from './components/AlertsToast';
 import { AppShell } from './components/AppShell';
 import { SlideOutDrawer } from './components/SlideOutDrawer';
-import { SectorHeatmap, SectorPerformance } from './components/SectorIntelligence';
+import { SectorHeatmap, SectorPerformance, SectorAdvanceDecline, SectorConstituents } from './components/SectorIntelligence';
 import { Watchlist } from './components/Watchlist';
 import { TrendlyneSectorDashboard } from './components/TrendlyneSectorDashboard';
 import { PageFallback } from './components/PageFallback';
 import {
   TickerTapeWidget,
   EconomicCalendarWidget,
-  MarketHeatmapWidget,
   MarketOverviewWidget
 } from './components/TradingViewWidgets';
 
@@ -87,7 +86,6 @@ const AgentStrategistPage      = React.lazy(() => import('./components/AgentStra
 const AgentAuditorPage         = React.lazy(() => import('./components/AgentAuditorPage').then(m => ({ default: m.AgentAuditorPage })));
 const AgentOptimizerPage       = React.lazy(() => import('./components/AgentOptimizerPage').then(m => ({ default: m.AgentOptimizerPage })));
 const CommandCenterDashboard   = React.lazy(() => import('./components/CommandCenterDashboard').then(m => ({ default: m.CommandCenterDashboard })));
-const BuyRecommendationsPage   = React.lazy(() => import('./components/BuyRecommendationsPage').then(m => ({ default: m.BuyRecommendationsPage })));
 // Named-export lazy wrappers
 const ToDoPage           = React.lazy(() => import('./components/ToDoPage').then(m => ({ default: m.ToDoPage })));
 const InvestmentStrategy = React.lazy(() => import('./components/InvestmentStrategy').then(m => ({ default: m.InvestmentStrategy })));
@@ -110,7 +108,6 @@ const V2SignalTracking   = React.lazy(() => import('./v2/views/signals/V2SignalT
 const StockChatbot       = React.lazy(() => import('./components/StockChatbot'));
 const JobsDashboardPage   = React.lazy(() => import('./components/JobsDashboardPage'));
 const EarlyHoursSpotter   = React.lazy(() => import('./components/EarlyHoursSpotter'));
-const AlphaCockpit       = React.lazy(() => import('./components/AlphaCockpit').then(m => ({ default: m.AlphaCockpit })));
 const IntradayPage       = React.lazy(() => import('./components/IntradayPage'));
 const MoneyFlowPage      = React.lazy(() => import('./components/MoneyFlowPage').then(m => ({ default: m.MoneyFlowPage })));
 
@@ -518,13 +515,12 @@ export default function App() {
             <Route path="/indices" element={<IndicesPage onSelectStock={handleSelectStock} selectedIndex={selectedIndex} setSelectedIndex={setSelectedIndex} />} />
             <Route path="/market-map" element={
               <div className="p-6 space-y-6">
-                <Card title="NSE Market Heatmap" icon={Activity}>
-                  <div className="pt-2"><MarketHeatmapWidget /></div>
-                </Card>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <SectorPerformance />
                   <SectorHeatmap />
                 </div>
+                <SectorAdvanceDecline />
+                <SectorConstituents onSelectStock={handleSelectStock} />
               </div>
             } />
             <Route path="/screener" element={<V1Screener stocks={stocks} onSelectStock={handleSelectStock} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
@@ -577,9 +573,9 @@ export default function App() {
             <Route path="/builder" element={<div className="p-6"><StrategyBuilder /></div>} />
             <Route path="/settings" element={<V2Settings />} />
             <Route path="/chat" element={<div className="p-4 h-full"><StockChatbot /></div>} />
-            <Route path="/alpha-cockpit" element={<AlphaCockpit />} />
+            <Route path="/alpha-cockpit" element={<Navigate to="/alpha" replace />} />
             <Route path="/alpha" element={<CommandCenterDashboard onSelectStock={(s) => { setDrawerSymbol(s); navigate('/trade-cockpit'); }} />} />
-            <Route path="/buy-recs" element={<BuyRecommendationsPage onSelectStock={handleSelectStock} />} />
+            <Route path="/buy-recs" element={<Navigate to="/alpha" replace />} />
             <Route path="/money-flow" element={<MoneyFlowPage />} />
             <Route path="/economics" element={
               <div className="p-6 space-y-6">
@@ -674,20 +670,19 @@ export default function App() {
                   />
                 } />
                 <Route path="/alpha" element={<CommandCenterDashboard onSelectStock={(s) => { setDrawerSymbol(s); navigate('/trade-cockpit'); }} />} />
-                <Route path="/buy-recs" element={<BuyRecommendationsPage onSelectStock={handleSelectStock} />} />
+                <Route path="/buy-recs" element={<Navigate to="/alpha" replace />} />
                 <Route path="/money-flow" element={<MoneyFlowPage />} />
               <Route path="/top-rated" element={<TopRatedStocks onSelectStock={handleSelectStock} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
             <Route path="/intraday" element={<IntradayPage onSelectStock={handleSelectStock} />} />
                 <Route path="/indices" element={<IndicesPage onSelectStock={handleSelectStock} selectedIndex={selectedIndex} setSelectedIndex={setSelectedIndex} />} />
                 <Route path="/market-map" element={
                 <div className="p-6 space-y-6">
-                  <Card title="NSE Market Heatmap" icon={Activity}>
-                    <div className="pt-2"><MarketHeatmapWidget /></div>
-                  </Card>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <SectorPerformance />
                     <SectorHeatmap />
                   </div>
+                  <SectorAdvanceDecline />
+                  <SectorConstituents onSelectStock={handleSelectStock} />
                 </div>
               } />
               <Route path="/screener" element={<V1Screener stocks={stocks} onSelectStock={handleSelectStock} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
@@ -772,7 +767,7 @@ export default function App() {
               <Route path="/portfolio" element={<div className="p-6"><PortfolioAnalytics /></div>} />
               <Route path="/builder" element={<div className="p-6"><StrategyBuilder /></div>} />
               <Route path="/chat" element={<div className="p-4"><StockChatbot /></div>} />
-              <Route path="/alpha-cockpit" element={<AlphaCockpit />} />
+              <Route path="/alpha-cockpit" element={<Navigate to="/alpha" replace />} />
               </Routes>
             </motion.div>
             } />

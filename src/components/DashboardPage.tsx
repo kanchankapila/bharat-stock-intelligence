@@ -24,6 +24,7 @@ import { PremarketPanel } from './PremarketPanel';
 import { LiveMarketScreener } from './LiveMarketScreener';
 import { EODMarketScreener } from './EODMarketScreener';
 import { ActivityFeed } from './ActivityFeed';
+import { MarketBreadthIntraday } from './MarketBreadthIntraday';
 
 // ─── Fonts injected once ──────────────────────────────────────────────────────
 const FONT_FAMILY_DISPLAY = "'Rajdhani', sans-serif";
@@ -525,7 +526,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
           pages to find what's actually worth acting on. Also surfaces same-day intraday
           picks with an honest gate-open/closed status, previously not shown anywhere. */}
       <button
-        onClick={() => navigate('/buy-recs')}
+        onClick={() => navigate('/alpha')}
         style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           width: '100%', marginBottom: 12, padding: '10px 16px',
@@ -909,6 +910,12 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
           <SectionLabel>Global Markets</SectionLabel>
           <GlobalMarkets />
         </div>
+      </div>
+
+      {/* ── Row 3.4: Market Breadth (Intraday) — same shared, 10s-polled widget used on
+          Market Command Center and the Index Detail page. ─────────────────────────────── */}
+      <div style={{ marginBottom: 12 }}>
+        <MarketBreadthIntraday ex="N" refetchInterval={10000} />
       </div>
 
       {/* ── Row 3.5: Activity Feed — reverse-chronological signals + news, so a trader can

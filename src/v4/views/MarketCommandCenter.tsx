@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { Activity, Gauge, TrendingUp, TrendingDown, Flame, BarChart3, LayoutDashboard } from 'lucide-react';
+import { Gauge, TrendingUp, TrendingDown, Flame, BarChart3, LayoutDashboard } from 'lucide-react';
 import { trpc } from '../../lib/trpc';
 import { Card } from '../../components/Card';
 import { cn } from '../../lib/utils';
-import { IndexOverview, InstitutionalInsights } from '../../components/MarketInsights';
+import { IndexOverview } from '../../components/MarketInsights';
 import { SectorHeatmap } from '../../components/SectorIntelligence';
 import { TopMoversIntelligence } from '../../components/TopMoversIntelligence';
 import { IntradayBreakouts } from '../../components/IntradayBreakouts';
@@ -15,6 +15,7 @@ import { EarningsPulseWidget } from '../components/EarningsPulseWidget';
 import { V4QuickNav } from '../components/V4QuickNav';
 import { TopPicksWidget } from '../components/TopPicksWidget';
 import { MoneyFlowPulseWidget } from '../components/MoneyFlowPulseWidget';
+import { MarketBreadthIntraday } from '../../components/MarketBreadthIntraday';
 import { currentTimeInZone } from '../../lib/timeFormat';
 
 const REGIME_STYLE: Record<string, { color: string; bg: string; label: string }> = {
@@ -45,28 +46,6 @@ const RegimeBadge: React.FC = () => {
           {data.current.guidance.action}
         </span>
       )}
-    </div>
-  );
-};
-
-const BreadthStrip: React.FC = () => {
-  const { data } = trpc.getIntradayBreadth.useQuery(undefined, { refetchInterval: 60000 });
-  const b = data?.breadth as { adv?: number; dec?: number; advDeclineRatio?: number } | null | undefined;
-  if (!b) return null;
-  const adv = b.adv ?? null;
-  const dec = b.dec ?? null;
-  const ratio = b.advDeclineRatio ?? 0.5;
-  const color = ratio > 0.6 ? 'text-emerald-400' : ratio < 0.4 ? 'text-rose-400' : 'text-amber-400';
-
-  return (
-    <div className="flex items-center gap-3 px-3 py-2 rounded-xl border border-slate-800 bg-slate-950/30">
-      <Activity className={cn('w-4 h-4', color)} />
-      <div>
-        <div className={cn('text-xs font-black font-mono', color)}>
-          {adv ?? '—'}<span className="text-slate-600 mx-1">/</span>{dec ?? '—'}
-        </div>
-        <div className="text-[9px] text-slate-500 uppercase tracking-widest">Advance / Decline</div>
-      </div>
     </div>
   );
 };
@@ -116,11 +95,20 @@ export const MarketCommandCenter: React.FC<MarketCommandCenterProps> = ({ onSele
           <div className="flex-1">
             <IndexOverview onSelectIndex={onSelectIndex} />
           </div>
-          <div className="flex flex-row lg:flex-col gap-3 shrink-0">
+          <div className="shrink-0">
             <RegimeBadge />
-            <BreadthStrip />
           </div>
         </div>
+      </div>
+
+      {/* Market Breadth (Intraday) — replaces the old compact Advance/Decline strip with the
+          fuller live chart, same shared widget used on Dashboard and the Index Detail page */}
+      <div>
+        <div className="flex items-center gap-2 mb-3">
+          <BarChart3 className="w-4 h-4 text-indigo-400" />
+          <h2 className="text-xs font-black text-slate-200 uppercase tracking-widest">Market Breadth</h2>
+        </div>
+        <MarketBreadthIntraday ex="N" refetchInterval={10000} />
       </div>
 
       {/* Canonical picks + institutional flow -- the decisive numbers, front and center */}
@@ -132,6 +120,15 @@ export const MarketCommandCenter: React.FC<MarketCommandCenterProps> = ({ onSele
       <PreMarketBriefing />
 
       <FnOIndexInsight />
+
+      {/* Sentiment + Global Markets — surfaced right after the F&O read, ahead of the
+          supporting sector/movers/earnings sections below */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <SentimentPulseWidget />
+        <Card title="Global Markets" icon={TrendingDown}>
+          <GlobalMarkets />
+        </Card>
+      </div>
 
       <div>
         <div className="flex items-center gap-2 mb-3">
@@ -158,17 +155,7 @@ export const MarketCommandCenter: React.FC<MarketCommandCenterProps> = ({ onSele
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <SentimentPulseWidget />
-        <EarningsPulseWidget onSelectStock={onSelectStock} />
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <InstitutionalInsights />
-        <Card title="Global Markets" icon={TrendingDown}>
-          <GlobalMarkets />
-        </Card>
-      </div>
+      <EarningsPulseWidget onSelectStock={onSelectStock} />
     </div>
   );
 };

@@ -4,14 +4,16 @@ import { cn } from '../lib/utils';
 import { motion } from 'motion/react';
 import { ArrowUpRight, ArrowDownRight } from 'lucide-react';
 import { useIntersectionObserver } from '../hooks/useIntersectionObserver';
+import { marketHoursRefetchInterval } from '../lib/timeFormat';
 
 export const MarketIndices: React.FC<{ onSelect?: (id: string, name: string) => void }> = ({ onSelect }) => {
   const ref = React.useRef<HTMLDivElement>(null);
   const isVisible = useIntersectionObserver(ref, { threshold: 0.1 });
+  const activeRefetch = marketHoursRefetchInterval(5000);
 
   const { data: indices, isLoading } = trpc.getMarketOverview.useQuery(undefined, {
     enabled: isVisible,
-    refetchInterval: isVisible ? 10000 : false,
+    refetchInterval: isVisible ? activeRefetch : false,
   });
 
   if (isLoading || !indices) return (
