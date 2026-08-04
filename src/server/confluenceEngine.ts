@@ -82,17 +82,26 @@ setInterval(() => {
   if (now - screenerMetaCacheFetchedAt > CONFLUENCE_CACHE_TTL) screenerMetaCache.clear();
 }, CONFLUENCE_CACHE_TTL);
 
+// scan_id is only unique WITHIN a provider -- MoneyControl and ETnow both hand out small
+// sequential integers independently and 7 currently collide (e.g. scan_id 173 is MC's "Double
+// Dhamaka" AND ETnow's "Warren Buffet Screener"), see the 2026-08-04 screener_master memory.
+// Every cache/lookup here is keyed by (source, scanId), matching screener_master's composite PK.
+function metaKey(source: string, scanId: string): string {
+  return `${source}::${scanId}`;
+}
+
 export async function ensureScreenerMeta(): Promise<void> {
   if (screenerMetaCache.size > 0 && Date.now() - screenerMetaCacheFetchedAt < CONFLUENCE_CACHE_TTL) return;
   const rows = await dbAll(
-    'SELECT scan_id, inferred_sentiment, inferred_category, inferred_timeframe, confidence, weight_override FROM screener_master'
+    'SELECT scan_id, source, inferred_sentiment, inferred_category, inferred_timeframe, confidence, weight_override FROM screener_master'
   ) as any[];
-  for (const r of rows) screenerMetaCache.set(r.scan_id, r);
+  for (const r of rows) screenerMetaCache.set(metaKey(r.source, r.scan_id), r);
   screenerMetaCacheFetchedAt = Date.now();
 }
 
-export function classifyScreener(scanId: string, name: string): ScreenerClass {
-  if (classCache.has(scanId) && Date.now() - classCacheFetchedAt < CONFLUENCE_CACHE_TTL) return classCache.get(scanId)!;
+export function classifyScreener(scanId: string, name: string, source: string): ScreenerClass {
+  const key = metaKey(source, scanId);
+  if (classCache.has(key) && Date.now() - classCacheFetchedAt < CONFLUENCE_CACHE_TTL) return classCache.get(key)!;
 
   const lname = name.toLowerCase();
   for (const entry of SCREENER_PATTERNS) {
@@ -103,14 +112,14 @@ export function classifyScreener(scanId: string, name: string): ScreenerClass {
         category: entry.category,
         timeframe: entry.timeframe,
       };
-      classCache.set(scanId, result);
+      classCache.set(key, result);
       if (!classCacheFetchedAt) classCacheFetchedAt = Date.now();
       return result;
     }
   }
 
   // Fallback: screener_master NLP fields (pre-loaded by ensureScreenerMeta)
-  const meta = screenerMetaCache.get(scanId);
+  const meta = screenerMetaCache.get(key);
 
   if (meta) {
     const result: ScreenerClass = {
@@ -119,13 +128,13 @@ export function classifyScreener(scanId: string, name: string): ScreenerClass {
       category: meta.inferred_category ?? 'technical',
       timeframe: meta.inferred_timeframe === 'intraday' ? 'intraday' : 'positional',
     };
-    classCache.set(scanId, result);
+    classCache.set(key, result);
     if (!classCacheFetchedAt) classCacheFetchedAt = Date.now();
     return result;
   }
 
   const fallback: ScreenerClass = { weight: 5, sentiment: 'neutral', category: 'technical', timeframe: 'positional' };
-  classCache.set(scanId, fallback);
+  classCache.set(key, fallback);
   if (!classCacheFetchedAt) classCacheFetchedAt = Date.now();
   return fallback;
 }
@@ -352,17 +361,24 @@ export async function computeConfluenceSignals(): Promise<{ computed: number; el
   await ensureScreenerMeta();
   await ensureRegime();
 
-  const screenerMap = new Map<string, { ids: string[]; names: string[]; classes: ScreenerClass[] }>();
+  const screenerMap = new Map<string, { ids: string[]; names: string[]; classes: ScreenerClass[]; seen: Set<string> }>();
 
-  function addToMap(symbol: string, scanId: string, name: string) {
+  // seen tracks (source, scanId) composites -- scan_id alone is only unique WITHIN a provider
+  // (see classifyScreener's comment), so deduping on bare scanId would have silently dropped a
+  // stock's real ETnow screener membership whenever it collided with an already-added MC scan_id
+  // of the same number. entry.ids/.names still store the plain scanId/name (unchanged shape for
+  // screener_ids_json/screener_names_json, which downstream consumers already parse).
+  function addToMap(symbol: string, scanId: string, name: string, source: string) {
     const s = symbol?.trim().toUpperCase();
     if (!s) return;
-    if (!screenerMap.has(s)) screenerMap.set(s, { ids: [], names: [], classes: [] });
+    if (!screenerMap.has(s)) screenerMap.set(s, { ids: [], names: [], classes: [], seen: new Set() });
     const entry = screenerMap.get(s)!;
-    if (!entry.ids.includes(scanId)) {
+    const key = metaKey(source, scanId);
+    if (!entry.seen.has(key)) {
+      entry.seen.add(key);
       entry.ids.push(scanId);
       entry.names.push(name);
-      entry.classes.push(classifyScreener(scanId, name));
+      entry.classes.push(classifyScreener(scanId, name, source));
     }
   }
 
@@ -373,7 +389,7 @@ export async function computeConfluenceSignals(): Promise<{ computed: number; el
     JOIN trendlyne_screeners ts ON ts.screener_id = tss.screener_id
     WHERE tss.symbol IS NOT NULL AND tss.symbol != ''
   `) as any[];
-  for (const r of tlStocks) addToMap(r.symbol, r.screener_id, r.screener_name);
+  for (const r of tlStocks) addToMap(r.symbol, r.screener_id, r.screener_name, 'Trendlyne');
 
   // MoneyControl
   const mcStocks = await dbAll(`
@@ -382,7 +398,7 @@ export async function computeConfluenceSignals(): Promise<{ computed: number; el
     JOIN moneycontrol_screeners ms ON ms.scan_id = mss.scan_id
     WHERE mss.symbol IS NOT NULL AND mss.symbol != ''
   `) as any[];
-  for (const r of mcStocks) addToMap(r.symbol, r.scan_id, r.screener_name);
+  for (const r of mcStocks) addToMap(r.symbol, r.scan_id, r.screener_name, 'MoneyControl');
 
   // ETnow
   const etStocks = await dbAll(`
@@ -391,7 +407,7 @@ export async function computeConfluenceSignals(): Promise<{ computed: number; el
     JOIN etnow_screeners es ON es.screener_id = ess.screener_id
     WHERE ess.symbol IS NOT NULL AND ess.symbol != ''
   `) as any[];
-  for (const r of etStocks) addToMap(r.symbol, r.screener_id, r.screener_name);
+  for (const r of etStocks) addToMap(r.symbol, r.screener_id, r.screener_name, 'ETnow');
 
   // ET Marketstats/Technicals
   const emsStocks = await dbAll(`
@@ -400,7 +416,7 @@ export async function computeConfluenceSignals(): Promise<{ computed: number; el
     JOIN et_marketstats_screeners es ON es.screener_key = ess.screener_key
     WHERE ess.symbol IS NOT NULL AND ess.symbol != ''
   `) as any[];
-  for (const r of emsStocks) addToMap(r.symbol, r.screener_id, r.screener_name);
+  for (const r of emsStocks) addToMap(r.symbol, r.screener_id, r.screener_name, 'et_marketstats');
 
   if (screenerMap.size === 0) {
     console.log('[CONFLUENCE] No screener stock data found. Run screener sync first.');

@@ -130,7 +130,7 @@ export async function findEtScreenersByStock(symbol: string): Promise<Array<{
       SELECT s.screener_id, s.screener_name, m.inferred_sentiment
       FROM etnow_screeners s
       JOIN etnow_screener_stocks ss ON s.screener_id = ss.screener_id
-      LEFT JOIN screener_master m ON s.screener_id = m.scan_id
+      LEFT JOIN screener_master m ON s.screener_id = m.scan_id AND m.source = 'ETnow'
       WHERE ss.symbol = ?
     `, [symbol]);
 

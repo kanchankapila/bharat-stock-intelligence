@@ -259,10 +259,13 @@ export async function syncMoneyControlScreeners(timeframeFilter?: 'intraday' | '
       // neutral/weight-5 default), but silently loses the precise inferred_sentiment/category
       // screenerClassifier.ts would otherwise assign. ON CONFLICT DO NOTHING so this never
       // clobbers classification work already done for an existing scan_id.
+      // screener_master's PK is (source, scan_id), not scan_id alone -- MC and ETnow scan_ids
+      // collide (see the 2026-08-04 screener_master memory), so both providers can now own a
+      // row for the same numeric scan_id without clobbering each other.
       await dbRun(`
         INSERT INTO screener_master (scan_id, name, source, inferred_sentiment)
         VALUES (?, ?, 'MoneyControl', ?)
-        ON CONFLICT(scan_id) DO NOTHING
+        ON CONFLICT(source, scan_id) DO NOTHING
       `, [config.scanId, screenerName, config.is_positive ? 'bullish' : 'bearish']);
 
       const stocks = response.data.list?.scannerDetails || response.data.stock || response.data.stocks || [];
@@ -309,7 +312,7 @@ export async function syncMoneyControlScreeners(timeframeFilter?: 'intraday' | '
       }
 
       // Update screener_master sync time
-      await dbRun(`UPDATE screener_master SET last_updated = ?, stocks_synced_at = ? WHERE scan_id = ?`,
+      await dbRun(`UPDATE screener_master SET last_updated = ?, stocks_synced_at = ? WHERE scan_id = ? AND source = 'MoneyControl'`,
         [today, today, config.scanId]);
 
       // Diff patch
@@ -376,7 +379,7 @@ export async function findMcScreenersByStock(symbol: string): Promise<Array<{
       SELECT s.scan_id, s.screener_name, m.inferred_sentiment, s.is_positive, s.type
       FROM moneycontrol_screeners s
       JOIN moneycontrol_screener_stocks ss ON s.scan_id = ss.scan_id
-      LEFT JOIN screener_master m ON s.scan_id = m.scan_id
+      LEFT JOIN screener_master m ON s.scan_id = m.scan_id AND m.source = 'MoneyControl'
       WHERE ss.symbol = ?
     `, [symbol]);
 

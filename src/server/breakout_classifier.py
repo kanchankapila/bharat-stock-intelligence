@@ -163,6 +163,35 @@ def _load_ohlcv(cutoff: str) -> pd.DataFrame:
     )
     if not ohlcv.empty:
         ohlcv["date"] = pd.to_datetime(ohlcv["date"]).dt.strftime("%Y-%m-%d")
+
+    # stock_ohlcv was backfilled by iterating the *current* nse_stocks master, so it
+    # structurally excludes the ~306 companies that have since delisted -- training only on
+    # survivors overstates this classifier's real edge (the 5yr purged-OOF AUC 0.61 headline
+    # figure is itself measured on this same survivorship-biased universe). Fill the gap with
+    # split-adjusted NSE bhavcopy history via backtester.py's own proven fallback (reused, not
+    # duplicated, since it already handles the raw-vs-split-adjusted seam that a naive UNION
+    # would reintroduce -- see Backtester.load_bhavcopy_adjusted's docstring).
+    try:
+        from backtester import Backtester
+        universe = read_df("SELECT DISTINCT symbol FROM nse_universe_history "
+                            "WHERE date >= ? AND series IN ('EQ','BE')", (cutoff,))
+        missing = sorted(set(universe["symbol"]) - set(ohlcv["symbol"] if not ohlcv.empty else []))
+        if missing:
+            bt = Backtester()
+            try:
+                extra = bt.load_bhavcopy_adjusted(missing, cutoff, datetime.date.today().isoformat())
+            finally:
+                bt.close()
+            if not extra.empty:
+                extra = extra.copy()
+                extra["date"] = pd.to_datetime(extra["date"]).dt.strftime("%Y-%m-%d")
+                ohlcv = pd.concat([ohlcv, extra], ignore_index=True) if not ohlcv.empty else extra
+                print(f"[BreakoutClassifier] survivorship fill: +{extra['symbol'].nunique()} "
+                      f"delisted symbols, +{len(extra)} bars")
+    except Exception as e:
+        print(f"[BreakoutClassifier] survivorship fill unavailable ({str(e)[:80]}); "
+              "training on stock_ohlcv's current-universe-only history")
+
     return ohlcv
 
 

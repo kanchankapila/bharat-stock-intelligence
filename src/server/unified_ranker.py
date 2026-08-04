@@ -87,14 +87,23 @@ HORIZON_MULT = {
 # table must still sum to 1.0 for the case where all engines have data — screener/cs/breakout
 # are pinned at their documented values and ml/confluence/technical/dl are scaled down from
 # their pre-cs/breakout values to absorb the added weight.
+#
+# `smart_money` (insider buying + institutional block-deal accumulation, 2026-08-04) is flat
+# 0.05 across every regime — same treatment as `cs`, both genuinely orthogonal signals with no
+# regime-dependent rationale for tilting and no backtested edge magnitude to size a bigger
+# weight off (unlike breakout's 5yr OOS AUC). Held out of the momentum-vs-risk-off tilt that
+# governs breakout/technical, since insider/institutional accumulation isn't a momentum signal.
+# ml/confluence/technical/dl were each scaled down proportionally (factor = (pool-0.05)/pool,
+# where pool is their own pre-existing sum in that regime) to absorb the 5pp, same mechanism as
+# the cs/breakout addition documented above — screener/cs/breakout stay pinned.
 REGIME_WEIGHTS = {
-    'BULL':     {'screener': 0.30, 'ml': 0.15,   'cs': 0.05, 'confluence': 0.15,   'technical': 0.12,  'dl': 0.08,   'breakout': 0.15},
-    'BEAR':     {'screener': 0.35, 'ml': 0.183,  'cs': 0.05, 'confluence': 0.183,  'technical': 0.092, 'dl': 0.092,  'breakout': 0.05},
-    'HIGH_VOL': {'screener': 0.20, 'ml': 0.13,   'cs': 0.05, 'confluence': 0.13,   'technical': 0.26,  'dl': 0.13,   'breakout': 0.10},
-    'CRASH':    {'screener': 0.40, 'ml': 0.18,   'cs': 0.05, 'confluence': 0.14,   'technical': 0.09,  'dl': 0.09,   'breakout': 0.05},
+    'BULL':     {'screener': 0.30, 'ml': 0.135,  'cs': 0.05, 'confluence': 0.135,  'technical': 0.108, 'dl': 0.072,  'breakout': 0.15, 'smart_money': 0.05},
+    'BEAR':     {'screener': 0.35, 'ml': 0.166,  'cs': 0.05, 'confluence': 0.166,  'technical': 0.084, 'dl': 0.084,  'breakout': 0.05, 'smart_money': 0.05},
+    'HIGH_VOL': {'screener': 0.20, 'ml': 0.12,   'cs': 0.05, 'confluence': 0.12,   'technical': 0.24,  'dl': 0.12,   'breakout': 0.10, 'smart_money': 0.05},
+    'CRASH':    {'screener': 0.40, 'ml': 0.162,  'cs': 0.05, 'confluence': 0.126,  'technical': 0.081, 'dl': 0.081,  'breakout': 0.05, 'smart_money': 0.05},
     # SIDEWAYS was silently falling back to BULL; a balanced blend is more appropriate for
     # a rangebound tape (lean slightly less on momentum/dl than BULL).
-    'SIDEWAYS': {'screener': 0.32, 'ml': 0.16,   'cs': 0.05, 'confluence': 0.16,   'technical': 0.10,  'dl': 0.08,   'breakout': 0.13},
+    'SIDEWAYS': {'screener': 0.32, 'ml': 0.144,  'cs': 0.05, 'confluence': 0.144,  'technical': 0.09,  'dl': 0.072,  'breakout': 0.13, 'smart_money': 0.05},
 }
 
 # Per-regime CATEGORY tilt (multipliers on CAT_BASE_WT). Rangebound/neutral = SIDEWAYS (no
@@ -872,6 +881,56 @@ class UnifiedRanker:
             self.conn.rollback()
             return {}
 
+    def _get_smart_money_scores(self):
+        """Insider buying (technical_signals.insider_buy_pct_90d, from insider_features.py) +
+        institutional block/bulk buy accumulation (block_deals.pct_transacted, the % of
+        float actually transacted -- cross-sectionally comparable, unlike raw qty/value_cr;
+        tickertape_deals_fetcher.py) -- a genuinely orthogonal signal previously only surfaced
+        on the standalone /smart-money page, never blended into the canonical score. Component
+        score is the average of whichever of the two are present for a symbol, not requiring
+        both -- most symbols will only ever have one.
+        """
+        cutoff = (date.today() - timedelta(days=5)).isoformat()
+        insider_scores = {}
+        try:
+            rows = self.conn.execute(
+                "SELECT symbol, insider_buy_pct_90d, date FROM technical_signals "
+                "WHERE date >= ? AND insider_buy_pct_90d IS NOT NULL ORDER BY date DESC",
+                (cutoff,),
+            ).fetchall()
+            for r in rows:
+                sym = r['symbol']
+                if sym not in insider_scores:
+                    insider_scores[sym] = float(r['insider_buy_pct_90d'] or 0) * 100
+        except Exception as e:
+            print(f"[UnifiedRanker] _get_smart_money_scores (insider) failed: {e}")
+            self.conn.rollback()
+
+        block_scores = {}
+        try:
+            deal_cutoff = (date.today() - timedelta(days=90)).isoformat()
+            rows = self.conn.execute(
+                "SELECT symbol, SUM(pct_transacted) AS total_pct FROM block_deals "
+                "WHERE date >= ? AND trade_type = 'buy' AND pct_transacted IS NOT NULL "
+                "GROUP BY symbol",
+                (deal_cutoff,),
+            ).fetchall()
+            for r in rows:
+                # 10% of float bought over 90d -> 100; scaled linearly, capped at 100. Most
+                # single block deals are 1-3% of float, so this rewards genuine accumulation
+                # (several deals or one large one) without saturating on a single normal-sized deal.
+                block_scores[r['symbol']] = min(100.0, float(r['total_pct'] or 0) * 10.0)
+        except Exception as e:
+            print(f"[UnifiedRanker] _get_smart_money_scores (block deals) failed: {e}")
+            self.conn.rollback()
+
+        result = {}
+        for sym in set(insider_scores) | set(block_scores):
+            parts = [v for v in (insider_scores.get(sym), block_scores.get(sym)) if v is not None]
+            if parts:
+                result[sym] = sum(parts) / len(parts)
+        return result
+
     def _get_avg_track_record(self):
         cutoff = (date.today() - timedelta(days=90)).isoformat()
         try:
@@ -1087,6 +1146,7 @@ class UnifiedRanker:
         technical_scores  = self._get_technical_scores()
         dl_scores         = self._get_dl_scores()
         breakout_scores   = self._get_breakout_scores()
+        smart_money_scores = self._get_smart_money_scores()
         avg_track         = self._get_avg_track_record()
 
         # Pre-loaded once for the whole universe (was up to 5 queries PER symbol inside
@@ -1098,17 +1158,22 @@ class UnifiedRanker:
         sector_map     = self._get_sector_map()
         mf_map         = self._get_multi_factor_map()
 
+        # smart_money_scores deliberately excluded from this union: it should raise the
+        # conviction of a stock already surfaced by another engine, not single-handedly
+        # introduce a new stock into the ranking on insider/block-deal activity alone with no
+        # technical/screener support.
         all_symbols = set(screener_scores) | set(ml_scores) | set(cs_scores) | set(confluence_scores) | set(technical_scores) | set(dl_scores) | set(breakout_scores)
         all_symbols = self._restrict_to_tradeable_universe(all_symbols)
 
         engine_maps = {
-            'screener':   screener_scores,
-            'ml':         ml_scores,
-            'cs':         cs_scores,
-            'confluence': confluence_scores,
-            'technical':  technical_scores,
-            'dl':         dl_scores,
-            'breakout':   breakout_scores,
+            'screener':    screener_scores,
+            'ml':          ml_scores,
+            'cs':          cs_scores,
+            'confluence':  confluence_scores,
+            'technical':   technical_scores,
+            'dl':          dl_scores,
+            'breakout':    breakout_scores,
+            'smart_money': smart_money_scores,
         }
         # Sanitize before blending: a single engine emitting NaN would otherwise NaN every
         # score it touches, and NaN survives `if unified < 1` to be written as a fake 'Buy'.

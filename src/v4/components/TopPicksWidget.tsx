@@ -7,7 +7,7 @@ import { cn } from '../../lib/utils';
 import { ConvictionPill } from '../../components/StockTagRow';
 
 // Command Center teaser for the canonical unified_recommendations ranking (same query as
-// BuyRecommendationsPage/getBuyRecommendations) -- so a user sees the platform's actual
+// /alpha's CommandCenterDashboard/getBuyRecommendations) -- so a user sees the platform's actual
 // highest-conviction picks on the very first screen, not just index/sector/mover context.
 export const TopPicksWidget: React.FC<{ onSelectStock?: (symbol: string) => void }> = ({ onSelectStock }) => {
   const navigate = useNavigate();
@@ -21,7 +21,7 @@ export const TopPicksWidget: React.FC<{ onSelectStock?: (symbol: string) => void
     <Card
       title="Today's Top Picks"
       icon={Zap}
-      onClick={() => navigate('/buy-recs')}
+      onClick={() => navigate('/alpha')}
       action={<ArrowRight className="w-3.5 h-3.5 text-slate-500" />}
     >
       {isLoading ? (

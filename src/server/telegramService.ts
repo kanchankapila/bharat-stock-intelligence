@@ -1,6 +1,18 @@
 import axios from 'axios';
 import { dbGet, dbRun } from './dbAsync';
 
+/**
+ * Telegram's legacy Markdown parser aborts the whole message on an unbalanced entity, so any
+ * free-text field (AI reasoning, a screener/level name) containing a stray `_`/`*`/`` ` ``/`[`
+ * silently drops the entire message ("can't parse entities: Can't find end of the entity...").
+ * Strip rather than backslash-escape: these strings are display-only and the markers carry no
+ * formatting meaning here, and legacy Markdown's escaping rules are inconsistent across clients.
+ */
+export function sanitizeMarkdown(text: string | null | undefined): string {
+  if (!text) return '';
+  return text.replace(/[_*`[\]]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
 export class TelegramNotificationService {
   private _settingsCache: { botToken: string; chatId: string; enabled: boolean } | null = null;
 
@@ -77,7 +89,7 @@ export class TelegramNotificationService {
     const text = `
 ${emoji} *NEW TRADING SIGNAL TRIGGERED*
 
-*Asset:* #${symbol}
+*Asset:* #${sanitizeMarkdown(symbol)}
 *Action:* ${type}
 *Confidence:* ${confidenceStr}
 
@@ -87,7 +99,7 @@ ${emoji} *NEW TRADING SIGNAL TRIGGERED*
 • *Stop Loss:* ₹${stopLoss?.toFixed(2) ?? 'N/A'}
 
 💡 *AI Analysis & Reasoning:*
-_${reasoning}_
+_${sanitizeMarkdown(reasoning)}_
     `.trim();
 
     return this.sendMarkdownMessage(text);
@@ -100,9 +112,9 @@ _${reasoning}_
     const text = `
 ⚠️ *KEY LEVEL CROSSOVER DETECTED*
 
-*Asset:* #${symbol}
+*Asset:* #${sanitizeMarkdown(symbol)}
 *Current Price:* ₹${price?.toFixed(2) ?? 'N/A'}
-*Crossed Level:* ${level}
+*Crossed Level:* ${sanitizeMarkdown(level)}
     `.trim();
 
     return this.sendMarkdownMessage(text);

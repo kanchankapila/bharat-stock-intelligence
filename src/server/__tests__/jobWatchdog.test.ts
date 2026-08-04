@@ -20,6 +20,8 @@ const {
 
 vi.mock('../telegramService', () => ({
   telegramService: { sendMarkdownMessage: mockSend },
+  sanitizeMarkdown: (text: string | null | undefined) =>
+    (text || '').replace(/[_*`[\]]/g, ' ').replace(/\s+/g, ' ').trim(),
 }));
 
 vi.mock('../jobHeartbeat', () => ({
@@ -165,6 +167,32 @@ describe('checkAndAlertDataQuality', () => {
     ]);
     await checkAndAlertDataQuality(new Date('2026-07-02T12:00:00Z'));
     expect(mockSend).toHaveBeenCalledTimes(1);
+  });
+
+  // Live 2026-08-04, 08:40 IST: data-quality-daily's detail strings routinely embed raw
+  // snake_case table names ("mf_sector_allocation is empty"), and Telegram's legacy Markdown
+  // parser aborts the ENTIRE message on the unbalanced underscore -- "Failed to dispatch
+  // telegram notification: can't parse entities". Confirms sanitizeMarkdown is actually wired
+  // into the outgoing text, not just present as an unused import.
+  it('strips markdown-breaking characters from a table-name-bearing detail before sending', async () => {
+    mockRunDataQualityChecks.mockResolvedValue([
+      {
+        id: 'mf-sector-allocation-freshness',
+        label: 'MF sector allocation',
+        category: 'ownership',
+        critical: true,
+        status: 'fail',
+        detail: 'mf_sector_allocation is empty (0 rows) -- *never* populated, see [fetcher] `logs`',
+      },
+    ]);
+    await checkAndAlertDataQuality(new Date('2026-07-02T12:00:00Z'));
+    expect(mockSend).toHaveBeenCalledTimes(1);
+    const sent = mockSend.mock.calls[0][0] as string;
+    // The message legitimately keeps its own *bold*/`code` formatting -- only the interpolated
+    // detail text (everything after the label's closing backtick) must be free of raw entities.
+    const detailPortion = sent.split('\n')[1];
+    expect(detailPortion).not.toMatch(/[_*`[\]]/);
+    expect(detailPortion).toBe('mf sector allocation is empty (0 rows) -- never populated, see fetcher logs');
   });
 
   it('does not alert for a critical check in pass/warn state', async () => {

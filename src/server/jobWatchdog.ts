@@ -10,7 +10,7 @@
 import { getLateJobs, wasAlreadyAlerted, markAlerted } from './jobHeartbeat';
 import { JOB_REGISTRY } from './jobRegistry';
 import { getSystemStatus } from './routers/monitor.router';
-import { telegramService } from './telegramService';
+import { telegramService, sanitizeMarkdown } from './telegramService';
 import { dbGet, dbRun } from './dbAsync';
 import { runDataQualityChecks, getLatestDataQualityResults } from './dataQualityChecks';
 
@@ -23,8 +23,10 @@ export async function checkAndAlertLateJobs(now: Date = new Date()): Promise<voi
     if (!entry?.critical) continue;
     if (await wasAlreadyAlerted(item.job, item.expectedAt)) continue;
 
-    const errorLine = item.lastError ? `\nLast error: \`${item.lastError.slice(0, 300)}\`` : '';
-    const text = `⚠️ *Job running late*: \`${item.label}\`\nExpected by ~${item.expectedAt.toISOString()} (${item.hoursLate}h late)${errorLine}`;
+    // Wrapped in backticks (inline code), but the message-level entity is still unbalanced if
+    // the error text itself contains a stray backtick/underscore/asterisk -- sanitize regardless.
+    const errorLine = item.lastError ? `\nLast error: \`${sanitizeMarkdown(item.lastError.slice(0, 300))}\`` : '';
+    const text = `⚠️ *Job running late*: \`${sanitizeMarkdown(item.label)}\`\nExpected by ~${item.expectedAt.toISOString()} (${item.hoursLate}h late)${errorLine}`;
     await telegramService.sendMarkdownMessage(text);
     await markAlerted(item.job, item.expectedAt.getTime());
   }
@@ -47,8 +49,8 @@ export async function checkAndAlertStaleScripts(now: Date = new Date()): Promise
     if (s.runState !== 'stale' && s.runState !== 'failed') continue;
     if (await wasAlreadyAlerted(s.id, startOfToday)) continue;
 
-    const errorLine = s.error ? `\nLast error: \`${String(s.error).slice(0, 300)}\`` : '';
-    const text = `⚠️ *Critical engine ${s.runState}*: \`${s.label}\`\nLast run: ${s.lastRunAt ?? 'never'}${errorLine}`;
+    const errorLine = s.error ? `\nLast error: \`${sanitizeMarkdown(String(s.error).slice(0, 300))}\`` : '';
+    const text = `⚠️ *Critical engine ${s.runState}*: \`${sanitizeMarkdown(s.label)}\`\nLast run: ${s.lastRunAt ?? 'never'}${errorLine}`;
     await telegramService.sendMarkdownMessage(text);
     await markAlerted(s.id, startOfToday.getTime());
   }
@@ -72,7 +74,11 @@ export async function checkAndAlertDataQuality(now: Date = new Date()): Promise<
     if (await wasAlreadyAlerted(r.id, startOfToday)) continue;
 
     const icon = r.status === 'error' ? '⛔' : '🚨';
-    const text = `${icon} *Data quality ${r.status}*: \`${r.label}\`\n${r.detail}`;
+    // r.detail routinely embeds raw snake_case table names (e.g. "mf_sector_allocation is
+    // empty") -- the underscores are unbalanced Markdown entities to Telegram's legacy
+    // parser and silently killed the whole message (confirmed live 2026-08-04, 08:40 IST,
+    // matching this check's own cron).
+    const text = `${icon} *Data quality ${r.status}*: \`${sanitizeMarkdown(r.label)}\`\n${sanitizeMarkdown(r.detail)}`;
     await telegramService.sendMarkdownMessage(text);
     await markAlerted(r.id, startOfToday.getTime());
   }
@@ -174,14 +180,17 @@ export async function buildDailyDigest(now: Date = new Date()): Promise<string> 
     const isProblem = state === 'fail' || state === 'error';
 
     if (isProblem) {
-      attention.push(`${dqIcon(state)} ${r.label} — ${r.detail}`);
+      // r.detail routinely embeds raw snake_case table names -- same unbalanced-entity failure
+      // as checkAndAlertDataQuality above, but here inside one single joined message, so an
+      // unsanitized detail anywhere in this loop kills the whole digest, not just one line.
+      attention.push(`${dqIcon(state)} ${sanitizeMarkdown(r.label)} — ${sanitizeMarkdown(r.detail)}`);
     }
 
     if (prev === undefined) continue;
     if (prev !== state) {
       const wasProblem = prev === 'fail' || prev === 'error';
-      if (wasProblem && !isProblem) changed.push(`✅ ${r.label} — recovered (was ${prev})`);
-      else if (!wasProblem && isProblem) changed.push(`${dqIcon(state)} ${r.label} — newly ${state}: ${r.detail}`);
+      if (wasProblem && !isProblem) changed.push(`✅ ${sanitizeMarkdown(r.label)} — recovered (was ${prev})`);
+      else if (!wasProblem && isProblem) changed.push(`${dqIcon(state)} ${sanitizeMarkdown(r.label)} — newly ${state}: ${sanitizeMarkdown(r.detail)}`);
       // pass<->warn transitions aren't worth a line
     } else if (state === 'pass') {
       unchangedHealthy++;

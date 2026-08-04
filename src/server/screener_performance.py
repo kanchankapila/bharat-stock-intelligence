@@ -403,15 +403,21 @@ def phase_d_sync_back(conn: ConnWrapper) -> None:
     """Sync tier to screener_master and win_rate_* columns to screener_reliability."""
     print("[PhaseD] Syncing tiers to screener_master...")
 
+    # source is required in both subqueries: without it, a scan_id colliding across providers
+    # (2026-08-04 screener_master memory) would either error ("more than one row returned by a
+    # subquery used as an expression") once both providers have a screener_performance_v2 row,
+    # or silently sync the wrong provider's tier.
     conn.execute("""
         UPDATE screener_master
         SET tier = (
             SELECT tier FROM screener_performance_v2
             WHERE screener_performance_v2.screener_id = screener_master.scan_id
+              AND screener_performance_v2.source = screener_master.source
         )
         WHERE EXISTS (
             SELECT 1 FROM screener_performance_v2
             WHERE screener_id = screener_master.scan_id
+              AND source = screener_master.source
         )
     """)
 

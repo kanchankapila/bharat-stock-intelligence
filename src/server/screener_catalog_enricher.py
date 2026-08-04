@@ -147,8 +147,11 @@ def run():
     print(f"[CatalogEnricher] trendlyne_screeners: {ts_updated} screener_url backfilled from screenpk")
 
     # ── Step 4: Fill screener_master.signal_type_tag ─────────────────────────
+    # source is required both to fetch (so trendlyne_screeners is only consulted for a
+    # Trendlyne row) and to scope the UPDATE below -- scan_id collides across providers
+    # (2026-08-04 memory), and an unscoped UPDATE would tag both colliding rows identically.
     sm_rows = con.execute("""
-        SELECT scan_id, name FROM screener_master
+        SELECT scan_id, name, source FROM screener_master
         WHERE signal_type_tag IS NULL OR signal_type_tag = ''
     """).fetchall()
 
@@ -157,19 +160,20 @@ def run():
         kw = extract_signal_keywords(row[1] or row[0])
         if kw:
             # also derive a screener_url if the scan_id matches a trendlyne_screeners pk
-            ts_row = con.execute(
-                "SELECT screenpk, screener_url FROM trendlyne_screeners WHERE screener_id = ? LIMIT 1",
-                (row[0],)
-            ).fetchone()
             url = None
-            if ts_row:
-                url = ts_row[1] or tl_screener_url(ts_row[0])
+            if row[2] == 'Trendlyne':
+                ts_row = con.execute(
+                    "SELECT screenpk, screener_url FROM trendlyne_screeners WHERE screener_id = ? LIMIT 1",
+                    (row[0],)
+                ).fetchone()
+                if ts_row:
+                    url = ts_row[1] or tl_screener_url(ts_row[0])
             con.execute("""
                 UPDATE screener_master
                 SET signal_type_tag = ?,
                     screener_url = COALESCE(screener_url, ?)
-                WHERE scan_id = ?
-            """, (kw, url, row[0]))
+                WHERE scan_id = ? AND source = ?
+            """, (kw, url, row[0], row[2]))
             sm_updated += 1
 
     con.commit()

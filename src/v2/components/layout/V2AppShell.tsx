@@ -4,7 +4,7 @@ import {
   TrendingUp, LayoutDashboard, BarChart2, Activity, Trophy, Filter,
   Target, Zap, Search, Briefcase, Calendar, Sparkles, Radio, FlaskConical,
   Star, History, Settings2, PieChart, Bookmark, Users, Globe, CheckCircle2,
-  ToggleLeft, ToggleRight, Settings, MonitorDot, X, BrainCircuit, Flame,
+  ToggleLeft, ToggleRight, Settings, MonitorDot, X, Flame,
   Gauge, Newspaper, Crosshair, Layers, ChartLine, MessageSquare,
 } from 'lucide-react';
 import { cn } from '../../../lib/utils';
@@ -46,6 +46,14 @@ export const V2AppShell: React.FC<V2AppShellProps> = ({
   // Grouped nav — every id here has a real, working route in App.tsx (verified against both
   // the v1 classic AppShell's nav list and the v2Enabled route block; anything present in v1
   // but missing a v2Enabled route got one added alongside this list: /alpha, /buy-recs, /economics).
+  //
+  // 2026-08-04: capped the primary "Command" group at the 2 pages worth trusting for a real
+  // decision (Alpha + Trade Cockpit, see AppShell.tsx's matching note). Alpha Cockpit and Buy
+  // Recommendations ran the identical unified_recommendations query as Alpha under two other
+  // names — both now redirect to /alpha in App.tsx rather than exist as separate nav entries.
+  // Top Rated (stock_scores only, a legacy INPUT to the canonical blend, not the merge) moved
+  // out of Markets — sitting next to Indices/Market Map implied it was reference data rather
+  // than an independent, sometimes-disagreeing scoring path.
   const tabGroups: { label: string; items: { label: string; id: string; icon: any }[] }[] = [
     {
       label: 'Command',
@@ -53,9 +61,8 @@ export const V2AppShell: React.FC<V2AppShellProps> = ({
         { label: 'Market Command',     id: 'market-command',        icon: Gauge },
         { label: 'Stock Intelligence', id: 'stock-intelligence-hub', icon: Search },
         { label: 'Dashboard',          id: 'dashboard',              icon: LayoutDashboard },
-        { label: 'Alpha Cockpit',      id: 'alpha-cockpit',          icon: BrainCircuit },
         { label: 'Alpha',              id: 'alpha',                  icon: Zap },
-        { label: 'Buy Recommendations', id: 'buy-recs',              icon: TrendingUp },
+        { label: 'Trade Cockpit',      id: 'trade-cockpit',          icon: Sparkles },
       ],
     },
     {
@@ -63,7 +70,6 @@ export const V2AppShell: React.FC<V2AppShellProps> = ({
       items: [
         { label: 'Indices',    id: 'indices',    icon: BarChart2 },
         { label: 'Market Map', id: 'market-map', icon: Activity },
-        { label: 'Top Rated',  id: 'top-rated',  icon: Trophy },
         { label: 'Intraday',   id: 'intraday',   icon: Flame },
       ],
     },
@@ -86,13 +92,13 @@ export const V2AppShell: React.FC<V2AppShellProps> = ({
       label: 'Intelligence',
       items: [
         { label: 'Screener Intel',      id: 'screener-intelligence', icon: BarChart2 },
-        { label: 'Trade Cockpit',       id: 'trade-cockpit',         icon: Sparkles },
         { label: 'Early Spotter',       id: 'early-spotter',         icon: Zap },
         { label: 'Best Picks',          id: 'best-picks',            icon: Crosshair },
         { label: 'Signal Intel',        id: 'signal-intelligence',   icon: Layers },
         { label: 'Signal Report Card',  id: 'signal-report-card',    icon: ChartLine },
         { label: 'Signals',             id: 'signals',               icon: Radio },
         { label: 'Signal Ledger',       id: 'signal-tracking',       icon: Radio },
+        { label: 'Top Rated',           id: 'top-rated',             icon: Trophy },
         { label: 'Strategy',            id: 'strategy',              icon: Star },
         { label: 'Strategy Builder',    id: 'strategy-builder',      icon: Target },
         { label: 'ML Builder',          id: 'builder',               icon: Settings2 },

@@ -67,10 +67,14 @@ export async function syncEtMarketstatsScreeners(timeframeFilter?: 'intraday' | 
       raw_data = excluded.raw_data,
       last_seen = excluded.last_seen
   `;
+  // ON CONFLICT target is (source, scan_id) -- screener_master's PK, not scan_id alone (which
+  // MC and ETnow independently collide on; see the 2026-08-04 screener_master memory). Not just
+  // a correctness nuance here: after that PK migration, ON CONFLICT(scan_id) alone no longer
+  // matches any unique constraint and Postgres rejects the upsert outright.
   const upsertMasterSql = `
     INSERT INTO screener_master (scan_id, name, source, inferred_timeframe, last_updated)
     VALUES (?, ?, 'et_marketstats', ?, CURRENT_TIMESTAMP)
-    ON CONFLICT(scan_id) DO UPDATE SET
+    ON CONFLICT(source, scan_id) DO UPDATE SET
       name = excluded.name,
       last_updated = CURRENT_TIMESTAMP
   `;

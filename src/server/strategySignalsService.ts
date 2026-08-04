@@ -42,7 +42,7 @@ export async function crossSourceFilter(minScore = 65): Promise<ConvergenceSigna
       (await dbAll(`
         SELECT DISTINCT tss.symbol
         FROM trendlyne_screener_stocks tss
-        JOIN screener_master sm ON sm.scan_id = tss.screener_id
+        JOIN screener_master sm ON sm.scan_id = tss.screener_id AND sm.source = 'Trendlyne'
         WHERE sm.inferred_sentiment = 'bullish' AND tss.symbol IS NOT NULL
       `) as { symbol: string }[]).map(r => r.symbol)
     );
@@ -60,7 +60,7 @@ export async function crossSourceFilter(minScore = 65): Promise<ConvergenceSigna
       (await dbAll(`
         SELECT DISTINCT ess.symbol
         FROM etnow_screener_stocks ess
-        LEFT JOIN screener_master sm ON sm.scan_id = ess.screener_id
+        LEFT JOIN screener_master sm ON sm.scan_id = ess.screener_id AND sm.source = 'ETnow'
         WHERE (sm.inferred_sentiment IS NULL OR sm.inferred_sentiment != 'bearish')
           AND ess.symbol IS NOT NULL
       `) as { symbol: string }[]).map(r => r.symbol)

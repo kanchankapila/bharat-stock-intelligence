@@ -190,7 +190,7 @@ export const scoringRouter = router({
         FROM nse_stocks n
         JOIN trendlyne_screener_stocks ts ON n.symbol = ts.symbol
         JOIN trendlyne_screeners tls ON tls.screener_id = ts.screener_id
-        LEFT JOIN screener_master sm ON sm.scan_id = ts.screener_id
+        LEFT JOIN screener_master sm ON sm.scan_id = ts.screener_id AND sm.source = 'Trendlyne'
         LEFT JOIN moneycontrol_screener_stocks ms ON n.symbol = ms.symbol
         LEFT JOIN latest_prices lp ON lp.symbol = n.symbol
         WHERE tls.timeframe = 'intraday' OR sm.inferred_timeframe = 'intraday'

@@ -1625,7 +1625,10 @@ CREATE TABLE IF NOT EXISTS "screener_master" (
   "category_confidence" DOUBLE PRECISION,
   "classified_by" TEXT,
   "stocks_synced_at" TEXT,
-  PRIMARY KEY ("scan_id")
+  -- PK is (source, scan_id), not scan_id alone -- scan_id collides across providers (MC and
+  -- ETnow independently hand out overlapping small integers). See migration
+  -- 1785900000001_screener-master-source-scan-id-pk.sql / the 2026-08-04 screener_master memory.
+  PRIMARY KEY ("source", "scan_id")
 );
 CREATE INDEX idx_screener_master_created_at ON screener_master(created_at DESC);
 

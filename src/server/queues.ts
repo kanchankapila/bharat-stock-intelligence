@@ -49,7 +49,7 @@ import { fetchTrendlyneChecklist } from './trendlyneService';
 import { pythonApi } from './pythonApi';
 import { recordHeartbeat, startHeartbeatMonitor } from './jobHeartbeat';
 import { startJobWatchdog, buildDailyDigest } from './jobWatchdog';
-import { telegramService } from './telegramService';
+import { telegramService, sanitizeMarkdown } from './telegramService';
 
 // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Redis connection shared across all BullMQ objects ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 
@@ -2183,14 +2183,17 @@ export async function initQueues(): Promise<boolean> {
         const failed = results.filter(r => r.status === 'fail' || r.status === 'error');
         const criticalFailed = failed.filter(r => r.critical);
 
+        // r.detail routinely embeds raw snake_case table names (e.g. "mf_sector_allocation is
+        // empty") -- unbalanced underscores kill this whole single-message digest in Telegram's
+        // legacy Markdown parser (confirmed live 2026-08-04, 08:40 IST, matching this job's cron).
         const lines = [`📊 *Daily Data-Integrity Report*`, `${passed}/${results.length} checks passed.`];
         if (failed.length) {
           lines.push('', '*Failures:*');
-          for (const r of failed) lines.push(`${r.critical ? '🚨' : '⚠️'} \`${r.label}\` — ${r.detail}`);
+          for (const r of failed) lines.push(`${r.critical ? '🚨' : '⚠️'} \`${sanitizeMarkdown(r.label)}\` — ${sanitizeMarkdown(r.detail)}`);
         }
         if (warned.length) {
           lines.push('', '*Warnings:*');
-          for (const r of warned) lines.push(`⚠️ \`${r.label}\` — ${r.detail}`);
+          for (const r of warned) lines.push(`⚠️ \`${sanitizeMarkdown(r.label)}\` — ${sanitizeMarkdown(r.detail)}`);
         }
         await telegramService.sendMarkdownMessage(lines.join('\n'));
 

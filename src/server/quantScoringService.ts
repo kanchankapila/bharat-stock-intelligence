@@ -151,13 +151,17 @@ async function loadScreenerConfluence(): Promise<Map<string, {
       COUNT(CASE WHEN sm.inferred_sentiment = 'bullish' THEN 1 END) AS bullish_count,
       COUNT(CASE WHEN sm.inferred_sentiment = 'bearish' THEN 1 END) AS bearish_count
     FROM (
-      SELECT symbol, screener_id AS sid FROM trendlyne_screener_stocks
+      SELECT symbol, screener_id AS sid, 'Trendlyne' AS src FROM trendlyne_screener_stocks
         WHERE symbol IS NOT NULL
       UNION ALL
-      SELECT symbol, scan_id AS sid FROM moneycontrol_screener_stocks
+      SELECT symbol, scan_id AS sid, 'MoneyControl' AS src FROM moneycontrol_screener_stocks
         WHERE symbol IS NOT NULL
     ) stocks
-    JOIN screener_master sm ON sm.scan_id = stocks.sid
+    -- source is required here: this UNION mixes Trendlyne screener_id and MoneyControl scan_id
+    -- into one numeric space with no other way to tell them apart at JOIN time, and those two
+    -- providers are not immune to future collisions just because MC/ETnow are today's known
+    -- pair (2026-08-04 screener_master memory).
+    JOIN screener_master sm ON sm.scan_id = stocks.sid AND sm.source = stocks.src
     WHERE sm.inferred_sentiment IN ('bullish', 'bearish')
     GROUP BY symbol
   `) as any[];

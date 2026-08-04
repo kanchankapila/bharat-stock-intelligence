@@ -253,7 +253,7 @@ db.exec(`
 
   -- 5b. Unified Screener Metadata (NLP Inferred)
   CREATE TABLE IF NOT EXISTS screener_master (
-    scan_id TEXT PRIMARY KEY,
+    scan_id TEXT,
     name TEXT NOT NULL,
     source TEXT NOT NULL,
     inferred_sentiment TEXT, -- 'bullish', 'bearish', 'neutral'
@@ -261,7 +261,11 @@ db.exec(`
     inferred_timeframe TEXT DEFAULT 'long_term', -- 'long_term', 'intraday'
     confidence REAL,
     weight_override REAL,
-    last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
+    last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
+    -- PK is (source, scan_id), not scan_id alone -- scan_id collides across providers (MC and
+    -- ETnow independently hand out overlapping small integers). See migration
+    -- 1785900000001_screener-master-source-scan-id-pk.sql / the 2026-08-04 screener_master memory.
+    PRIMARY KEY (source, scan_id)
   );
 
   -- 6. ETnow Intelligence (Placeholder for future sync)

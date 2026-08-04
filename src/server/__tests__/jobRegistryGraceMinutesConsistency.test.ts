@@ -149,7 +149,12 @@ describe('JOB_REGISTRY.graceMinutes consistency', () => {
     'agent-strategist': "jobName: 'agent-strat-daily'",
     'agent-auditor': "jobName: 'agent-audit-daily'",
     'agent-optimizer': "jobName: 'agent-optim-daily'",
-    'unified-ranker': "'unified-ranker-daily'",
+    // Unlike most jobs here, unified-ranker's Worker (and its lockDuration) is constructed
+    // BEFORE the 'unified-ranker-daily' addJobWithCatchup call, not after -- forward-search from
+    // that marker was landing on the NEXT unrelated job's lockDuration instead (a coincidental,
+    // borderline match that broke the moment an unrelated concurrent edit added ~230 chars
+    // between them). Same class of fix as intraday-fetcher/news-sentiment above.
+    'unified-ranker': 'unifiedRankerWorkerInstance = new Worker',
     'live-screener-collect': 'liveScreenerCollectWorker = new Worker',
     'quant-eod-sync': "'sync-quant-eod'",
     'outcome-resolver': "jobName: 'outcome-resolver-daily'",

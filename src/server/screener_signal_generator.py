@@ -52,9 +52,12 @@ def load_high_performing_screeners(con) -> dict:
                sc.category,
                COALESCE(ts.screener_name, sm.name, sm.scan_id) AS screener_name
         FROM screener_master sm
-        LEFT JOIN screener_performance_v2 spv ON spv.screener_id = sm.scan_id
-        LEFT JOIN screener_catalog sc          ON sc.screener_id  = sm.scan_id
-        LEFT JOIN trendlyne_screeners ts       ON ts.screener_id  = sm.scan_id
+        LEFT JOIN screener_performance_v2 spv ON spv.screener_id = sm.scan_id AND spv.source = sm.source
+        -- screener_catalog.source has BOTH casings live ('MoneyControl' AND 'moneycontrol') from
+        -- inconsistent past writers -- a real, separate data-quality issue, not cleaned up here;
+        -- LOWER() bridges it without touching the table's stored values.
+        LEFT JOIN screener_catalog sc          ON sc.screener_id  = sm.scan_id AND LOWER(sc.source) = LOWER(sm.source)
+        LEFT JOIN trendlyne_screeners ts       ON ts.screener_id  = sm.scan_id AND sm.source = 'Trendlyne'
         WHERE COALESCE(sc.signal_bias, sm.inferred_sentiment) = 'bullish'
           AND (COALESCE(spv.bayesian_score, 0.40) >= ? OR COALESCE(spv.tier, 'Unranked') IN ('A','B'))
     """, (BAYESIAN_THRESHOLD,)).fetchall()

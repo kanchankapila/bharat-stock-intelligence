@@ -35,6 +35,15 @@ interface NavGroup { label: string; items: NavItem[]; }
 // The old "Advanced" hide-behind-a-toggle mechanism (top-rated/signals/todays-picks/research)
 // is dropped in favor of this grouping -- each new group is small enough (4-7 items) to show
 // everything without an extra click, matching the density of the un-collapsed "Analysis" group.
+//
+// 2026-08-04 follow-up: "Top Picks" is capped at exactly the 2 pages worth trusting for a real
+// decision. Alpha (CommandCenterDashboard) and Buy Recs/Alpha Cockpit all ran the literal same
+// query (getBuyRecommendations -> unified_recommendations) under three different names -- Buy
+// Recs and Alpha Cockpit now redirect to /alpha (App.tsx) rather than exist as separate pages,
+// so there's no longer a real choice to make between them. Top Rated moved out -- it renders
+// stock_scores only (one INPUT to the canonical blend, not the merge itself) and already carries
+// its own LegacyScoreBanner -- it belongs beside Strategy/Strategy Builder in Alternative Screens,
+// not implying equal standing with the canonical page.
 const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Markets',
@@ -49,9 +58,7 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Top Picks',
     items: [
-      { icon: TrendingUp, label: 'Buy Recs 🟢',   id: 'buy-recs'      },
       { icon: Zap,        label: 'Alpha ⚡',      id: 'alpha'         },
-      { icon: Trophy,     label: 'Top Rated',     id: 'top-rated'     },
       { icon: Sparkles,   label: 'Trade Cockpit', id: 'trade-cockpit' },
     ],
   },
@@ -72,6 +79,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'Alternative Screens',
     items: [
       { icon: Crosshair, label: 'Best Picks',           id: 'best-picks'            },
+      { icon: Trophy,    label: 'Top Rated',            id: 'top-rated'             },
       { icon: Star,      label: 'Strategy',             id: 'strategy'              },
       { icon: Target,    label: 'Strategy Builder',     id: 'strategy-builder'      },
       { icon: Layers,    label: 'Signal Intel',         id: 'signal-intelligence'   },

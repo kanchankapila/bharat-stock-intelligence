@@ -422,9 +422,9 @@ export const monitorRouter = router({
           console.error(`[MONITOR] ${script.id} failed:`, msg);
           if (script.critical) {
             try {
-              const { TelegramNotificationService } = await import('../telegramService');
+              const { TelegramNotificationService, sanitizeMarkdown } = await import('../telegramService');
               await new TelegramNotificationService().sendMarkdownMessage(
-                `🚨 *Critical script failed*: \`${script.label}\`\nError: ${msg.slice(0, 300)}`
+                `🚨 *Critical script failed*: \`${script.label}\`\nError: ${sanitizeMarkdown(msg.slice(0, 300))}`
               );
             } catch { /* telegram optional */ }
           }

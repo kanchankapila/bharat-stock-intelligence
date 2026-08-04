@@ -14,7 +14,7 @@
  * Every pick carries its horizon, the reason it was selected, and the screeners it appears in.
  */
 import { dbAll } from './dbAsync';
-import { telegramService } from './telegramService';
+import { telegramService, sanitizeMarkdown } from './telegramService';
 
 /** Picks shown per horizon. Telegram caps a message at 4096 chars; see splitForTelegram. */
 export const MAX_PICKS_PER_HORIZON = 5;
@@ -73,15 +73,7 @@ export function normaliseHorizon(raw: string | null | undefined): Horizon {
   return 'POSITIONAL';
 }
 
-/**
- * Telegram's legacy Markdown parser aborts the whole message on an unbalanced entity, so a
- * screener name containing `_` or `*` would silently drop the entire digest. Strip rather
- * than backslash-escape: these strings are display-only and the markers carry no meaning here.
- */
-export function sanitizeMarkdown(text: string | null | undefined): string {
-  if (!text) return '';
-  return text.replace(/[_*`[\]]/g, ' ').replace(/\s+/g, ' ').trim();
-}
+export { sanitizeMarkdown } from './telegramService';
 
 function parseScreeners(json: string | null | undefined): { names: string[]; count: number } {
   if (!json) return { names: [], count: 0 };

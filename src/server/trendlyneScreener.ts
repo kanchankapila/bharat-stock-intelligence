@@ -185,8 +185,10 @@ export async function saveScreenerStocksToDB(
       }
     });
 
-    // Update screener_master to reflect fresh sync time
-    await dbRun(`UPDATE screener_master SET last_updated = ?, stocks_synced_at = ? WHERE scan_id = ?`, [now, now, screenerId]);
+    // Update screener_master to reflect fresh sync time. screener_master's PK is (source,
+    // scan_id) -- an unscoped WHERE would touch every provider's row sharing this scan_id
+    // number, not just Trendlyne's (see the 2026-08-04 screener_master memory).
+    await dbRun(`UPDATE screener_master SET last_updated = ?, stocks_synced_at = ? WHERE scan_id = ? AND source = 'Trendlyne'`, [now, now, screenerId]);
 
     // Diff patch: record entries/exits in screener_appearances
     const today = new Date().toISOString().slice(0, 10);
@@ -849,14 +851,18 @@ export async function getTrendlyneScreenerList() {
   }
 
   // 2. Load the "New Analysis" metadata from screener_master
+  // Keyed by (source, scan_id) -- scan_id alone collides across providers (MC and ETnow both
+  // hand out overlapping small integers, see the 2026-08-04 screener_master memory), and this
+  // function combines all 3 providers into one result list, so a bare-scan_id map would
+  // silently apply one provider's classification to an unrelated screener from another.
   const masterMeta = new Map<string, any>();
   try {
     const rows = await dbAll(`
-      SELECT scan_id, inferred_sentiment, inferred_category, inferred_timeframe, confidence
+      SELECT scan_id, source, inferred_sentiment, inferred_category, inferred_timeframe, confidence
       FROM screener_master
     `) as any[];
     for (const r of rows) {
-      masterMeta.set(r.scan_id, r);
+      masterMeta.set(`${r.source}::${r.scan_id}`, r);
     }
   } catch (err) {
     console.error('❌ Error loading screener_master metadata:', err);
@@ -892,7 +898,7 @@ export async function getTrendlyneScreenerList() {
   // only ever used for React keys/selection-equality in TrendlyneScreenerPanel.tsx -- the actual
   // data fetch keys off `screenpk`, which is untouched here, so this is safe to change.
   for (const s of trendlyneScreeners) {
-    const meta = masterMeta.get(s.screener_id);
+    const meta = masterMeta.get(`Trendlyne::${s.screener_id}`);
     result.push({
       id: `tl-${s.screener_id}`,
       name: s.screener_name,
@@ -909,7 +915,7 @@ export async function getTrendlyneScreenerList() {
   
   // 4. Process MoneyControl screeners
   for (const mc of mcScreeners) {
-    const meta = masterMeta.get(mc.scan_id);
+    const meta = masterMeta.get(`MoneyControl::${mc.scan_id}`);
     result.push({
       id: `mc-${mc.scan_id}`,
       name: mc.screener_name,
@@ -932,7 +938,7 @@ export async function getTrendlyneScreenerList() {
     `) as any[];
 
     for (const et of etScreeners) {
-      const meta = masterMeta.get(et.screener_id);
+      const meta = masterMeta.get(`ETnow::${et.screener_id}`);
       result.push({
         id: `et-${et.screener_id}`,
         name: et.screener_name,
@@ -1011,7 +1017,7 @@ export async function findScreenersByStock(stockId: string): Promise<Array<{
       SELECT s.screener_id, s.screener_name, s.screenpk, s.description, m.inferred_sentiment, s.sentiment as fallback_sentiment
       FROM trendlyne_screeners s
       JOIN trendlyne_screener_stocks ss ON s.screener_id = ss.screener_id
-      LEFT JOIN screener_master m ON s.screener_id = m.scan_id
+      LEFT JOIN screener_master m ON s.screener_id = m.scan_id AND m.source = 'Trendlyne'
       WHERE ss.stock_id = ? OR ss.symbol = ?
     `, [stockId, symbol]) as Array<{
       screener_id: string; 
@@ -1313,7 +1319,7 @@ export async function runIntradayScreenerScan(): Promise<{
     const allScreeners = await dbAll(`
       SELECT DISTINCT s.screener_id, s.screener_name, s.screenpk, s.sentiment, m.inferred_sentiment
       FROM trendlyne_screeners s
-      LEFT JOIN screener_master m ON s.screener_id = m.scan_id
+      LEFT JOIN screener_master m ON s.screener_id = m.scan_id AND m.source = 'Trendlyne'
       WHERE s.timeframe = 'intraday' OR m.inferred_timeframe = 'intraday'
     `) as any[];
 

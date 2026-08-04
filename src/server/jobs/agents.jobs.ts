@@ -15,6 +15,7 @@ import { Job } from 'bullmq';
 import { runPython } from '../pythonRunner';
 import { dbGet, dbAll } from '../dbAsync';
 import { registerRepeatableJob } from './registerJob';
+import { sanitizeMarkdown } from '../telegramService';
 
 export const QUEUE_AGENT_DATA_SCIENTIST = 'agent-data-scientist';
 export const QUEUE_AGENT_STRATEGIST     = 'agent-strategist';
@@ -45,10 +46,10 @@ async function processAgentStrategist(_job: Job): Promise<{ success: boolean }> 
       const { TelegramNotificationService } = await import('../telegramService');
       const tg = new TelegramNotificationService();
       for (const p of highPicks) {
-        const firstSentence = (p.narrative as string || '').split('.')[0];
+        const firstSentence = sanitizeMarkdown((p.narrative as string || '').split('.')[0]);
         await tg.sendMarkdownMessage(
           `🎯 *STRATEGY ALERT — ${(p.timeframe as string).toUpperCase()}*\n` +
-          `*${p.symbol}* | Entry: ₹${p.entry_zone_low}–${p.entry_zone_high} | SL: ₹${p.stop_loss}\n` +
+          `*${sanitizeMarkdown(p.symbol)}* | Entry: ₹${p.entry_zone_low}–${p.entry_zone_high} | SL: ₹${p.stop_loss}\n` +
           `T1: ₹${p.target_1} | T2: ₹${p.target_2} | T3: ₹${p.target_3}\n` +
           `Conviction: HIGH | Score: ${Number(p.composite_score).toFixed(0)}\n` +
           `${firstSentence}.`
@@ -78,7 +79,7 @@ async function processAgentOptimizer(_job: Job): Promise<{ success: boolean }> {
     try {
       const { TelegramNotificationService } = await import('../telegramService');
       const tg = new TelegramNotificationService();
-      const firstSentence = (latest.narrative as string || '').split('.')[0];
+      const firstSentence = sanitizeMarkdown((latest.narrative as string || '').split('.')[0]);
       await tg.sendMarkdownMessage(
         `⚙️ *OPTIMIZER ALERT*\n` +
         `Win rate: ${Number(latest.baseline_win_rate).toFixed(0)}% → ${Number(latest.new_win_rate).toFixed(0)}%\n` +

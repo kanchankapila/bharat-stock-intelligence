@@ -2,20 +2,23 @@ import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { cn } from '../../lib/utils';
 import {
-  Gauge, Search, Zap, TrendingUp, Users, Filter, Target, Activity,
+  Gauge, Search, Zap, Sparkles, Users, Filter, Target, Activity,
 } from 'lucide-react';
 
 // v4 (MarketCommandCenter + StockIntelligencePage) previously had no identity of its own --
 // just two routes rendered inside the v2 shell's sidebar with no cross-links to the
-// canonical recommendation surfaces (Alpha/Buy Recs/Money Flow) built alongside it. This
+// canonical recommendation surfaces (Alpha/Trade Cockpit/Money Flow) built alongside it. This
 // bar makes v4 read as one consolidated hub: every v4 page carries the same quick-nav strip
 // so a user lands on any of them and can reach the rest in one click.
+//
+// 2026-08-04: dropped Buy Recs -- it ran the same unified_recommendations query as Alpha and
+// now redirects there (App.tsx), so Alpha is the one canonical entry point here.
 
 const LINKS: { path: string; label: string; icon: React.ElementType }[] = [
   { path: '/market-command',        label: 'Command Center', icon: Gauge },
   { path: '/stock-intelligence-hub', label: 'Stock Intelligence', icon: Search },
   { path: '/alpha',                 label: 'Alpha',           icon: Zap },
-  { path: '/buy-recs',              label: 'Buy Recs',        icon: TrendingUp },
+  { path: '/trade-cockpit',         label: 'Trade Cockpit',   icon: Sparkles },
   { path: '/money-flow',            label: 'Money Flow',      icon: Users },
   { path: '/screener',              label: 'Screener',        icon: Filter },
   { path: '/fno-scanners',          label: 'F&O Intel',       icon: Target },

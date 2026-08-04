@@ -240,7 +240,7 @@ export const screenersRouter = router({
           spv.data_source,
           spv.last_computed
         FROM screener_performance_v2 spv
-        JOIN screener_master sm ON sm.scan_id = spv.screener_id
+        JOIN screener_master sm ON sm.scan_id = spv.screener_id AND sm.source = spv.source
         ${where}
         ORDER BY spv.bayesian_score DESC
         LIMIT ? OFFSET ?
@@ -249,13 +249,17 @@ export const screenersRouter = router({
 
   getScreenerDetail: publicProcedure
     .input(z.object({ screener_id: z.string() }))
+    // NOTE: screener_id (scan_id) alone can still be ambiguous across providers (MC/ETnow
+    // collide, see the 2026-08-04 screener_master memory) -- this procedure has no `source`
+    // input to disambiguate, so dbGet below can return either provider's row when both exist.
+    // The JOIN itself is now correct (sm always matches spv's own source), just not the input.
     .query(async ({ input }) => {
       const perf = await dbGet(`
         SELECT spv.*, sm.name, sm.inferred_category AS category, sm.subcategory,
                sm.inferred_sentiment AS sentiment, sm.inferred_timeframe AS timeframe,
                sm.classified_by
         FROM screener_performance_v2 spv
-        JOIN screener_master sm ON sm.scan_id = spv.screener_id
+        JOIN screener_master sm ON sm.scan_id = spv.screener_id AND sm.source = spv.source
         WHERE spv.screener_id = ?
       `, [input.screener_id]);
 
@@ -302,7 +306,7 @@ export const screenersRouter = router({
           SUM(CASE WHEN spv.tier IN ('A','B') THEN 1 ELSE 0 END)           AS tier_ab_count,
           MAX(spv.bayesian_score)                                           AS best_score
         FROM screener_performance_v2 spv
-        JOIN screener_master sm ON sm.scan_id = spv.screener_id
+        JOIN screener_master sm ON sm.scan_id = spv.screener_id AND sm.source = spv.source
         WHERE sm.inferred_category IS NOT NULL
         GROUP BY sm.inferred_category, sm.subcategory
         ORDER BY avg_win_rate DESC
@@ -334,8 +338,11 @@ export const screenersRouter = router({
           sa.return_20d, sa.outcome_20d, sa.nifty_ret_20d,
           spv.tier AS screener_tier
         FROM screener_appearances sa
-        JOIN screener_master sm ON sm.scan_id = sa.screener_id
-        LEFT JOIN screener_performance_v2 spv ON spv.screener_id = sa.screener_id
+        -- screener_appearances.source is lowercase ('moneycontrol') while screener_master.source
+        -- is not ('MoneyControl') -- a pre-existing casing mismatch between the two tables,
+        -- unrelated to this fix; LOWER() bridges it rather than normalizing either table.
+        JOIN screener_master sm ON sm.scan_id = sa.screener_id AND LOWER(sm.source) = sa.source
+        LEFT JOIN screener_performance_v2 spv ON spv.screener_id = sa.screener_id AND LOWER(spv.source) = sa.source
         ${where}
         ORDER BY sa.appeared_date DESC
         LIMIT ?

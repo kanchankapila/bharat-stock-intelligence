@@ -67,7 +67,13 @@ class AlphaQuantScoringEngine:
         'Trendlyne':      1.0,
         'MoneyControl':   0.9,
         'ETnow':          0.85,
-        'ETMarketstats':  0.8,
+        # Must match screener_master.source's actual stored value ('et_marketstats', written by
+        # etMarketstatsSync.ts) -- was 'ETMarketstats' here, a casing mismatch that silently
+        # missed this dict lookup and fell back to the 0.9 default instead of 0.8. Found while
+        # fixing the screener_master (source, scan_id) collision migration (2026-08-04 memory):
+        # the mismatch would also have produced duplicate screener_master rows under a composite
+        # PK, since 'ETMarketstats' and 'et_marketstats' would no longer collide on conflict.
+        'et_marketstats': 0.8,
     }
 
     def __init__(self):
@@ -188,6 +194,7 @@ class AlphaQuantScoringEngine:
                 ),
                 conn,
             )
+            tl_mappings['source'] = 'Trendlyne'
 
             # MoneyControl
             mc_screeners = pd.read_sql(
@@ -200,6 +207,7 @@ class AlphaQuantScoringEngine:
                 "SELECT scan_id, mcsymbol AS stock_id, symbol, last_seen FROM moneycontrol_screener_stocks",
                 conn,
             )
+            mc_mappings['source'] = 'MoneyControl'
 
             # ETnow (loaded from instance variable)
             et_screeners = pd.DataFrame(self.etnow_screeners)
@@ -210,16 +218,18 @@ class AlphaQuantScoringEngine:
                 "SELECT screener_id AS scan_id, symbol, stock_name AS stock_id, last_seen FROM etnow_screener_stocks",
                 conn,
             )
+            et_mappings['source'] = 'ETnow'
 
             # ET Marketstats/Technicals (loaded from instance variable)
             ems_screeners = pd.DataFrame(self.et_marketstats_screeners)
-            ems_screeners['source'] = 'ETMarketstats'
+            ems_screeners['source'] = 'et_marketstats'  # must match screener_master.source's real stored value
             ems_screeners['description'] = ""
 
             ems_mappings = pd.read_sql(
                 "SELECT screener_key AS scan_id, symbol, stock_name AS stock_id, last_seen FROM et_marketstats_screener_stocks",
                 conn,
             )
+            ems_mappings['source'] = 'et_marketstats'
 
         screeners = pd.concat([tl_screeners, mc_screeners, et_screeners, ems_screeners], ignore_index=True)
         mappings  = pd.concat([tl_mappings, mc_mappings, et_mappings, ems_mappings],     ignore_index=True)
@@ -260,11 +270,18 @@ class AlphaQuantScoringEngine:
                 conn.execute(text("DELETE FROM screener_master"))
                 screeners_to_infer = screeners
             else:
-                # Only infer for screeners not yet in screener_master
-                existing_ids = {
-                    r[0] for r in conn.execute(text("SELECT scan_id FROM screener_master"))
+                # Only infer for screeners not yet in screener_master. Keyed by (source, scan_id)
+                # -- scan_id alone collides across providers (MC and ETnow independently hand out
+                # overlapping small integers, see the 2026-08-04 screener_master memory); a bare
+                # scan_id membership check would have treated ETnow's colliding screener as
+                # "already present" (because MC's row with that scan_id exists) and silently
+                # skipped inferring it forever.
+                existing_pairs = {
+                    (r[0], r[1]) for r in conn.execute(text("SELECT source, scan_id FROM screener_master"))
                 }
-                screeners_to_infer = screeners[~screeners['scan_id'].isin(existing_ids)]
+                screeners_to_infer = screeners[
+                    ~screeners.apply(lambda r: (r['source'], r['scan_id']) in existing_pairs, axis=1)
+                ]
                 if not screeners_to_infer.empty:
                     print(f"Adding {len(screeners_to_infer)} new screeners to screener_master...")
                 else:
@@ -299,6 +316,10 @@ class AlphaQuantScoringEngine:
                 })
 
             if new_master_data:
+                # ON CONFLICT target is (source, scan_id) -- screener_master's real PK, not
+                # scan_id alone. Not just a correctness nuance: ON CONFLICT(scan_id) no longer
+                # matches any unique constraint after that PK migration and Postgres rejects the
+                # whole upsert (2026-08-04 screener_master memory).
                 conn.execute(text("""
                     INSERT INTO screener_master
                         (scan_id, name, source, inferred_sentiment, inferred_category,
@@ -306,7 +327,7 @@ class AlphaQuantScoringEngine:
                     VALUES
                         (:scan_id, :name, :source, :inferred_sentiment, :inferred_category,
                          :inferred_timeframe, :confidence, :signal_type_tag, :last_updated)
-                    ON CONFLICT(scan_id) DO UPDATE SET
+                    ON CONFLICT(source, scan_id) DO UPDATE SET
                         name=excluded.name,
                         inferred_sentiment=excluded.inferred_sentiment,
                         inferred_category=excluded.inferred_category,
@@ -364,6 +385,7 @@ class AlphaQuantScoringEngine:
                 if not name:
                     continue
                 sid = slugify(name)
+                source = row.get('source', '').strip()
 
                 bias      = row.get('signal_bias', '').strip()
                 horizon   = HORIZON_MAP.get(row.get('investment_horizon', '').strip())
@@ -382,6 +404,7 @@ class AlphaQuantScoringEngine:
 
                 updates.append({
                     'sid': sid,
+                    'source': source or None,
                     'bias': bias,
                     'horizon': horizon,
                     'category': category or None,
@@ -414,15 +437,28 @@ class AlphaQuantScoringEngine:
                     fields.append('weight_override=:weight'); params['weight'] = u['weight']
                 if not fields:
                     continue
+                # scan_id here is a name-slug, not the provider's own numeric id (a separate,
+                # pre-existing scheme from the CSV-override mechanism) -- still scope by source
+                # when the CSV row has one, since a slug collision across providers (two
+                # differently-sourced screeners sharing an identical name) is possible, not just
+                # the numeric MC/ETnow collision this fix is otherwise about.
+                where = 'scan_id=:sid'
+                if u['source']:
+                    where += ' AND source=:source'
+                    params['source'] = u['source']
                 result = conn.execute(
-                    text(f"UPDATE screener_master SET {', '.join(fields)} WHERE scan_id=:sid"),
+                    text(f"UPDATE screener_master SET {', '.join(fields)} WHERE {where}"),
                     params
                 )
                 applied += result.rowcount
 
         print(f"[ScoringEngine] CSV sync applied to {applied} screener_master rows.")
 
-    def _load_screener_metadata(self) -> Dict[str, Any]:
+    def _load_screener_metadata(self) -> Dict[Any, Any]:
+        # Keyed by (source, scan_id) -- scan_id alone collides across providers (MC and ETnow
+        # independently hand out overlapping small integers, see the 2026-08-04 screener_master
+        # memory). A bare-scan_id dict comprehension here would silently keep only whichever
+        # colliding row SQL happened to return last, discarding the other provider's metadata.
         with self.engine.connect() as conn:
             rows = conn.execute(text(
                 "SELECT scan_id, name, source, inferred_sentiment, inferred_category, "
@@ -431,7 +467,7 @@ class AlphaQuantScoringEngine:
                 "FROM screener_master"
             )).fetchall()
         return {
-            r[0]: {
+            (r[2], r[0]): {
                 'name':            r[1],
                 'source':          r[2],
                 'sentiment':       r[3],
@@ -589,12 +625,13 @@ class AlphaQuantScoringEngine:
                     'recency':   recency,
                 })
 
-        # Attach last_updated to screener metadata for recency decay
+        # Attach last_updated to screener metadata for recency decay. Keyed by (source, scan_id)
+        # for the same collision reason as _load_screener_metadata() above.
         with self.engine.connect() as conn:
             sm_rows = conn.execute(text(
-                "SELECT scan_id, last_updated FROM screener_master"
+                "SELECT scan_id, source, last_updated FROM screener_master"
             )).fetchall()
-        screener_updated = {r[0]: r[1] for r in sm_rows}
+        screener_updated = {(r[1], r[0]): r[2] for r in sm_rows}
 
         # Load latest win_probability (+ the regime it was set in) per symbol from ML-scored
         # technical signal rows. DISTINCT ON picks the row that supplied the MAX probability.
@@ -800,7 +837,8 @@ class AlphaQuantScoringEngine:
                 if not symbol or not isinstance(symbol, str) or pd.isna(symbol) or symbol.strip() == '' or symbol.upper() in ('NAN', 'NULL', '#N/A'):
                     continue
                 scan_id = m['scan_id']
-                meta = screeners_meta.get(scan_id)
+                meta_key = (m['source'], scan_id)
+                meta = screeners_meta.get(meta_key)
                 if not meta:
                     continue
 
@@ -819,7 +857,7 @@ class AlphaQuantScoringEngine:
                 stock_last_seen = m.get('last_seen')
                 recency = self._recency_weight(
                     stock_last_seen if (stock_last_seen and not pd.isna(stock_last_seen))
-                    else (screener_updated.get(scan_id) or '')
+                    else (screener_updated.get(meta_key) or '')
                 )
 
                 # Source-category deduplication

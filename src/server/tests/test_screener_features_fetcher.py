@@ -108,3 +108,44 @@ class TestRunWiresLogicalTradingDateIntoAsOf:
         assert seen["meta_as_of"] == "2099-01-01"
         assert seen["appearances_as_of"] == "2099-01-01"
         assert seen["snapshot_as_of"] == "2099-01-01"
+
+
+class TestComputeFeaturesSourceDisambiguation:
+    """screener_master's PK is (source, scan_id), not scan_id alone -- MoneyControl and ETnow
+    independently hand out overlapping small-integer scan_ids (2026-08-04 screener_master
+    memory, e.g. scan_id 173 is MC's "Double Dhamaka" AND ETnow's "Warren Buffet Screener").
+    compute_features() must key its meta lookup by (source, scan_id), or a stock appearing in
+    one provider's colliding screener would silently score using the OTHER provider's
+    sentiment/category/bayesian weight."""
+
+    def test_colliding_scan_id_resolves_to_the_correct_provider(self):
+        meta = {
+            ("moneycontrol", "173"): {
+                "sentiment": "bullish", "category": "technical", "bayesian": 0.60,
+                "alpha_20d": 0.02, "tier": "A", "name": "Double Dhamaka",
+            },
+            ("etnow", "173"): {
+                "sentiment": "bearish", "category": "fundamental", "bayesian": 0.30,
+                "alpha_20d": -0.01, "tier": "C", "name": "Warren Buffet Screener",
+            },
+        }
+        mc_only = sff.compute_features("INFY", [("moneycontrol", "173")], meta)
+        et_only = sff.compute_features("INFY", [("etnow", "173")], meta)
+
+        assert mc_only["screener_bull_count"] == 1.0
+        assert mc_only["screener_bear_count"] == 0.0
+        assert et_only["screener_bull_count"] == 0.0
+        assert et_only["screener_bear_count"] == 1.0
+        # Same bare scan_id, opposite sentiment -- proves the lookup is source-scoped, not
+        # coincidentally correct because only one row happened to exist.
+        assert mc_only["screener_momentum_score"] != et_only["screener_momentum_score"]
+
+    def test_unmatched_source_scan_id_pair_is_skipped_not_misattributed(self):
+        meta = {("moneycontrol", "173"): {
+            "sentiment": "bullish", "category": "technical", "bayesian": 0.60,
+            "alpha_20d": 0.02, "tier": "A", "name": "Double Dhamaka",
+        }}
+        # A source not present in meta must never fall back to some other source's row.
+        result = sff.compute_features("INFY", [("trendlyne", "173")], meta)
+        assert result["screener_bull_count"] == 0.0
+        assert result["screener_bear_count"] == 0.0
