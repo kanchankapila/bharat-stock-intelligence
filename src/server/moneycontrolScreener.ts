@@ -98,6 +98,43 @@ const MC_SCREENERS: McScreenerConfig[] = [
   { catId: '2', scanId: '396', type: 'pro', is_positive: true },
   { catId: '2', scanId: '394', type: 'pro', is_positive: true },
 
+  // Round 2 (2026-08-04): 178 (catId, scanId) proscanner URLs captured in urls.txt were
+  // diffed against the pairs above — after deduping by scanId (MC reuses the same scanId
+  // across several catId "category" tabs; moneycontrol_screeners itself is keyed on scan_id
+  // alone, so re-listing an already-covered scanId under a second catId would just double the
+  // live fetch for no new data), only 24 scanIds were genuinely uncovered. All 24 live-verified
+  // (real scannerName/scannerDescription/stock counts) before being added here. Every existing
+  // 'pro' entry above is is_positive:true — this batch adds the first BEARISH/distress
+  // fundamental scanners this codebase has ever ingested (falling profits/sales/margins, rising
+  // pledge, deteriorating cash-conversion-cycle, FII/promoter selling) — until now the pro-
+  // scanner side only ever saw bullish screens, an asymmetry the 2026-07-31 intraday audit
+  // flagged as a real bug class in a different screener source ("every weakness filter positive,
+  // every strength filter negative").
+  { catId: '3', scanId: '166', type: 'pro', is_positive: false },  // Low Promoter holding and High Pledge
+  { catId: '4', scanId: '173', type: 'pro', is_positive: true },   // Double Dhamaka (profit + margin growth)
+  { catId: '3', scanId: '363', type: 'pro', is_positive: false },  // Highly Pledged (>50% promoter pledge)
+  { catId: '6', scanId: '368', type: 'pro', is_positive: true },   // Zero Debt
+  { catId: '3', scanId: '372', type: 'pro', is_positive: true },   // Promoter Increasing Holding
+  { catId: '3', scanId: '373', type: 'pro', is_positive: true },   // FII Buying
+  { catId: '3', scanId: '380', type: 'pro', is_positive: true },   // Debt Free, Pledge Free
+  { catId: '4', scanId: '384', type: 'pro', is_positive: true },   // Sales Growth Breakout
+  { catId: '4', scanId: '385', type: 'pro', is_positive: true },   // Profit Growth Breakout
+  { catId: '3', scanId: '386', type: 'pro', is_positive: false },  // Promoter Decreasing Holding
+  { catId: '3', scanId: '387', type: 'pro', is_positive: false },  // FII Selling
+  { catId: '4', scanId: '401', type: 'pro', is_positive: false },  // Consistently Falling Profits
+  { catId: '4', scanId: '402', type: 'pro', is_positive: false },  // Consistently Falling Sales
+  { catId: '4', scanId: '404', type: 'pro', is_positive: false },  // Consistently Falling Profit Margin
+  { catId: '3', scanId: '420', type: 'pro', is_positive: false },  // Increasing Promoter Pledge
+  { catId: '3', scanId: '421', type: 'pro', is_positive: true },   // Decreasing Promoter Pledge
+  { catId: '4', scanId: '426', type: 'pro', is_positive: false },  // Profit to Loss
+  { catId: '6', scanId: '427', type: 'pro', is_positive: false },  // Deteriorating Cash Conversion Cycle
+  { catId: '6', scanId: '428', type: 'pro', is_positive: true },   // Improving Cash Conversion Cycle
+  { catId: '9', scanId: '519', type: 'pro', is_positive: true },   // Quarterly Profit Growth Higher than 25%
+  { catId: '9', scanId: '520', type: 'pro', is_positive: true },   // Quarterly Sales Growth Higher than 25%
+  { catId: '9', scanId: '521', type: 'pro', is_positive: true },   // Increasing Net Profit Margins
+  { catId: '9', scanId: '522', type: 'pro', is_positive: false },  // Falling Quarterly Profits
+  { catId: '9', scanId: '525', type: 'pro', is_positive: true },   // Increasing Institutional Interest
+
   // Technical (Techscanner)
   { catId: '25', scanId: 'OHLC_D_P_BPBULL', type: 'tech', is_positive: true },
   { catId: '25', scanId: 'OHLC_D_I_DSMARTBULLC', type: 'tech', is_positive: true },
@@ -213,6 +250,20 @@ export async function syncMoneyControlScreeners(timeframeFilter?: 'intraday' | '
           screener_name = excluded.screener_name,
           last_updated = CURRENT_TIMESTAMP
       `, [config.scanId, config.catId, screenerName, config.type, config.is_positive ? 1 : 0]);
+
+      // Seed screener_master for a brand-new scan_id. Found 2026-08-04 while adding 24 new
+      // scanners: this function's OWN later step only ever UPDATEs screener_master (see the
+      // "Update screener_master sync time" block below), so a scan_id that has never appeared
+      // in screener_master before gets no row at all — confluenceEngine.ts's classifyScreener()
+      // still scores it (it falls back to a keyword match on the name, then a generic
+      // neutral/weight-5 default), but silently loses the precise inferred_sentiment/category
+      // screenerClassifier.ts would otherwise assign. ON CONFLICT DO NOTHING so this never
+      // clobbers classification work already done for an existing scan_id.
+      await dbRun(`
+        INSERT INTO screener_master (scan_id, name, source, inferred_sentiment)
+        VALUES (?, ?, 'MoneyControl', ?)
+        ON CONFLICT(scan_id) DO NOTHING
+      `, [config.scanId, screenerName, config.is_positive ? 'bullish' : 'bearish']);
 
       const stocks = response.data.list?.scannerDetails || response.data.stock || response.data.stocks || [];
       console.log(`✅ Fetched ${stocks.length} stocks for MC: ${screenerName}`);
