@@ -77,6 +77,11 @@ export function relativeFromNow(input: string | number | Date | null | undefined
   return `${days}d ago`;
 }
 
+/** True once `updatedAt` (ms epoch, e.g. React Query's `dataUpdatedAt`) is older than `thresholdMs`. False for 0/missing -- "no data fetched yet" is not the same claim as "the data we have is stale". */
+export function isStale(updatedAt: number | null | undefined, thresholdMs: number): boolean {
+  return !!updatedAt && updatedAt > 0 && Date.now() - updatedAt > thresholdMs;
+}
+
 /** Current wall-clock time in a given IANA timezone, for exchange-local clocks. */
 export function currentTimeInZone(tz: string): string {
   return new Intl.DateTimeFormat('en-US', {

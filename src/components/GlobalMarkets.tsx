@@ -7,12 +7,13 @@ import { motion } from 'motion/react';
 import { GlobalMarketCards } from './GlobalMarketCards';
 import { useIntersectionObserver } from '../hooks/useIntersectionObserver';
 import { lookupExchangeTimeZone, currentTimeInZone } from '../lib/timeFormat';
+import { PriceFreshnessBadge } from './PriceFreshnessBadge';
 
 export const GlobalMarkets: React.FC<{ className?: string }> = ({ className }) => {
   const ref = React.useRef<HTMLDivElement>(null);
   const isVisible = useIntersectionObserver(ref, { threshold: 0.1 });
 
-  const { data: globalData, isLoading } = trpc.getGlobalIndices.useQuery(undefined, {
+  const { data: globalData, isLoading, dataUpdatedAt } = trpc.getGlobalIndices.useQuery(undefined, {
     enabled: isVisible,
     refetchInterval: isVisible ? 30000 : false,
   });
@@ -55,7 +56,13 @@ export const GlobalMarkets: React.FC<{ className?: string }> = ({ className }) =
   );
 
   return (
-    <Card ref={ref} title="Global Intelligence" icon={Activity} className={cn("h-full", className)}>
+    <Card
+      ref={ref}
+      title="Global Intelligence"
+      icon={Activity}
+      className={cn("h-full", className)}
+      action={<PriceFreshnessBadge updatedAt={dataUpdatedAt} thresholdMs={60_000} />}
+    >
       <div className="grid grid-cols-2 gap-3 pt-2">
         {displayIndices.map((idx: any) => {
           const isUp = Number(idx.direction) === 1 || parseFloat(idx.percentChange) >= 0;

@@ -10,15 +10,16 @@ import { initSentry, sentryEnabled, Sentry } from "./src/server/sentry";
 // As early as possible so startup-path errors are captured too. No-op without SENTRY_DSN.
 initSentry();
 
-// Suppress ioredis connection-time WARN about Redis 7 + requirepass ACL mismatch.
-// Every one of the 88 BullMQ connections logs this on startup — it's cosmetic;
-// auth still works (88 clients connected, zero rejections).
-const _origWarn = console.warn.bind(console);
-console.warn = (...args: unknown[]) => {
-  const msg = String(args[0] ?? '');
-  if (msg.includes('does not require a password')) return;
-  _origWarn(...args);
-};
+// Routes every console.log/info/debug/warn/error call in the whole process (not just this
+// file) through the real Winston logger — structured JSON + rotation + levels for the ~140
+// server files' worth of raw console.* calls, none of which need to change. Installed as early
+// as possible so even the uncaughtException/unhandledRejection handlers just below get it.
+// Also absorbs the ioredis ACL-warning suppression that used to be its own standalone
+// console.warn patch here — see installStructuredConsole's own doc comment for why folding it
+// in matters (two independent patches on console.warn is exactly the kind of thing that goes
+// stale silently).
+import { installStructuredConsole } from "./src/server/logger";
+installStructuredConsole();
 
 // EPIPE and ETIMEDOUT on startup are harmless ioredis reconnection noise caused by
 // TIME_WAIT sockets from the previous server instance. ioredis auto-reconnects.
@@ -313,10 +314,12 @@ async function startServer() {
   // was previously an open, anonymous relay any internet caller could drive against MoneyControl.
   app.all('/mcapi/*', async (req, res) => {
     if (mcapiRateLimited(req)) {
+      log.warn('mcapi_rate_limited', { ip: req.socket.remoteAddress, path: req.originalUrl });
       res.status(429).json({ error: 'Too many requests' });
       return;
     }
     if (!(await isAuthorizedInternalOrUser(req))) {
+      log.warn('mcapi_unauthorized', { ip: req.socket.remoteAddress, path: req.originalUrl });
       res.status(401).json({ error: 'Unauthorized' });
       return;
     }
@@ -417,10 +420,12 @@ async function startServer() {
   // internet with no auth was a real resource-exhaustion vector, not just a data-leak one.
   app.post('/api/export-picks', async (req, res) => {
     if (exportPicksRateLimited(req)) {
+      log.warn('export_picks_rate_limited', { ip: req.socket.remoteAddress });
       res.status(429).json({ success: false, error: 'Too many requests' });
       return;
     }
     if (!(await isAuthorizedInternalOrUser(req))) {
+      log.warn('export_picks_unauthorized', { ip: req.socket.remoteAddress });
       res.status(401).json({ success: false, error: 'Unauthorized' });
       return;
     }
@@ -524,10 +529,16 @@ async function startServer() {
   // also a matching x-internal-secret header.
   app.post("/api/internal/notify", (req, res) => {
     if (internalNotifyRateLimited(req)) {
+      log.warn('internal_notify_rate_limited', { ip: req.socket.remoteAddress });
       res.status(429).json({ success: false, error: 'Too many requests' });
       return;
     }
     if (!isAuthorizedInternalCaller(req)) {
+      // A non-loopback caller here means someone off this host tried to inject an alert into
+      // the live SSE stream every connected browser is subscribed to -- worth a distinct event
+      // name from the two rate-limit cases above, since this one specifically means the P0
+      // auth gate is doing its job against a real attempt, not just noisy traffic.
+      log.warn('internal_notify_forbidden', { ip: req.socket.remoteAddress });
       res.status(403).json({ success: false, error: 'Forbidden' });
       return;
     }

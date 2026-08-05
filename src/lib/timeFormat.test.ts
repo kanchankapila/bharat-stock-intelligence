@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatIST, relativeFromNow, lookupExchangeTimeZone, minutesSinceMidnightInZone, dayOfWeekInZone, isNseMarketOpen } from './timeFormat';
+import { formatIST, relativeFromNow, lookupExchangeTimeZone, minutesSinceMidnightInZone, dayOfWeekInZone, isNseMarketOpen, isStale } from './timeFormat';
 
 describe('formatIST', () => {
   it('always renders an explicit IST label', () => {
@@ -103,5 +103,27 @@ describe('isNseMarketOpen', () => {
   it('is closed on a weekend even during normal session hours', () => {
     // 2026-01-17 is a Saturday; -> 09:30 IST
     expect(isNseMarketOpen(new Date('2026-01-17T04:00:00Z'))).toBe(false);
+  });
+});
+
+describe('isStale', () => {
+  it('is false for a timestamp inside the threshold', () => {
+    expect(isStale(Date.now() - 1000, 5000)).toBe(false);
+  });
+
+  it('is true once older than the threshold', () => {
+    expect(isStale(Date.now() - 10_000, 5000)).toBe(true);
+  });
+
+  it('is false for 0 or missing -- "no data yet" is not the same claim as "stale data"', () => {
+    expect(isStale(0, 5000)).toBe(false);
+    expect(isStale(null, 5000)).toBe(false);
+    expect(isStale(undefined, 5000)).toBe(false);
+  });
+
+  it('is exactly on the boundary at false (strictly greater-than, not >=)', () => {
+    const now = Date.now();
+    expect(isStale(now - 5000, 5000)).toBe(false);
+    expect(isStale(now - 5001, 5000)).toBe(true);
   });
 });
