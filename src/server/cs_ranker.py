@@ -278,6 +278,18 @@ def _register_cs_model(conn: ConnWrapper, m: dict) -> int:
     downstream consumer with no safety net. Now matches the champion/challenger gate
     ml_ensemble.py/live_screener_ml_ranker.py already use: only activate if the new held-out
     rho beats the active model's by >= CS_PROMOTION_MARGIN, or there is no active model yet.
+
+    NOTE on `cv_roc_auc` (2026-08-05, found via a live production review that misread this
+    row as a broken/bypassed-gate AUC value): `model_registry.cv_roc_auc` is a column shared
+    across every model_type this platform registers -- for classifiers (Stacking Ensemble,
+    OnlineSGD, deep_learning) it genuinely holds an AUC. cs_ranker is a LightGBM *regressor*
+    (model_type='LightGBM Regressor') with no AUC concept at all -- this column instead holds
+    its held-out cross-sectional Spearman rho (same value `_active_cs_baseline` reads). A
+    "cv_roc_auc≈0.107" active row is NOT a broken/inverted classifier bar clearing an AUC
+    floor it shouldn't; it's a normal rho for this model (historical range across retrains has
+    been ~0.05-0.24) that correctly beat every later retrain attempt's rho (0.078-0.094, all
+    4 logged REJECTED in this same table) under the gate above. Don't re-flag this as a
+    promotion-gate bypass without checking model_type first.
     """
     import json
     version  = datetime.datetime.utcnow().strftime('%Y%m%d_%H%M%S')
