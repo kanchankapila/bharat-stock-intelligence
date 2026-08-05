@@ -86,6 +86,7 @@ const AgentStrategistPage      = React.lazy(() => import('./components/AgentStra
 const AgentAuditorPage         = React.lazy(() => import('./components/AgentAuditorPage').then(m => ({ default: m.AgentAuditorPage })));
 const AgentOptimizerPage       = React.lazy(() => import('./components/AgentOptimizerPage').then(m => ({ default: m.AgentOptimizerPage })));
 const CommandCenterDashboard   = React.lazy(() => import('./components/CommandCenterDashboard').then(m => ({ default: m.CommandCenterDashboard })));
+const ExportPortfolioView      = React.lazy(() => import('./components/ExportPortfolioView'));
 // Named-export lazy wrappers
 const ToDoPage           = React.lazy(() => import('./components/ToDoPage').then(m => ({ default: m.ToDoPage })));
 const InvestmentStrategy = React.lazy(() => import('./components/InvestmentStrategy').then(m => ({ default: m.InvestmentStrategy })));
@@ -571,6 +572,7 @@ export default function App() {
             <Route path="/profile" element={<ProfilePage />} />
             <Route path="/portfolio" element={<div className="p-6"><PortfolioAnalytics /></div>} />
             <Route path="/builder" element={<div className="p-6"><StrategyBuilder /></div>} />
+            <Route path="/export-picks" element={<div className="p-6"><ExportPortfolioView /></div>} />
             <Route path="/settings" element={<V2Settings />} />
             <Route path="/chat" element={<div className="p-4 h-full"><StockChatbot /></div>} />
             <Route path="/alpha-cockpit" element={<Navigate to="/alpha" replace />} />
@@ -766,6 +768,7 @@ export default function App() {
               <Route path="/profile" element={<ProfilePage />} />
               <Route path="/portfolio" element={<div className="p-6"><PortfolioAnalytics /></div>} />
               <Route path="/builder" element={<div className="p-6"><StrategyBuilder /></div>} />
+              <Route path="/export-picks" element={<div className="p-6"><ExportPortfolioView /></div>} />
               <Route path="/chat" element={<div className="p-4"><StockChatbot /></div>} />
               <Route path="/alpha-cockpit" element={<Navigate to="/alpha" replace />} />
               </Routes>

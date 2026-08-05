@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { auth } from '../lib/firebase';
 
 export default function ExportPortfolioView() {
   const [loading, setLoading] = useState(false);
@@ -18,10 +19,19 @@ export default function ExportPortfolioView() {
     setLoading(true);
     setStats(null);
     try {
+      // /api/export-picks sits outside tRPC and requires either a same-host caller or a
+      // logged-in user's Firebase ID token — see src/server/internalAuth.ts. Mirrors the same
+      // header shape main.tsx's tRPC client already attaches on every request.
+      const idToken = await auth.currentUser?.getIdToken();
       const resp = await fetch('/api/export-picks', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
+        },
         body: JSON.stringify({ strategy: 'composite', limit: 20, riskModel: 'risk_parity', start: runBacktest ? start : undefined, end: runBacktest ? end : undefined, runBacktest })
       });
+      if (resp.status === 401) throw new Error('Sign in to export a portfolio.');
       const j = await resp.json();
       if (!j.success) throw new Error(j.error || 'Export failed');
       setPicks(j.picks || []);

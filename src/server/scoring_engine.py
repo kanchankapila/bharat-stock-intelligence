@@ -1174,13 +1174,18 @@ def run_scoring(req: ScoringRequest):
     engine = AlphaQuantScoringEngine()
     engine.process_scoring(force_rebuild=req.rebuild)
 
+    import os
     import requests
     try:
+        headers = {}
+        secret = os.environ.get("INTERNAL_API_SECRET")
+        if secret:
+            headers["x-internal-secret"] = secret
         requests.post("http://127.0.0.1:3000/api/internal/notify", json={
             "type": "SUCCESS",
             "title": "Scoring Complete",
             "message": "The AI Quant Engine has finished calculating new scores."
-        }, timeout=2)
+        }, headers=headers, timeout=2)
     except requests.RequestException:
         pass
 

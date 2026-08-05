@@ -390,13 +390,18 @@ class StrategyOptimizer:
                 n += 1
         self.conn.commit()
         
+        import os
         import requests
         try:
+            headers = {}
+            secret = os.environ.get("INTERNAL_API_SECRET")
+            if secret:
+                headers["x-internal-secret"] = secret
             requests.post("http://127.0.0.1:3000/api/internal/notify", json={
                 "type": "SUCCESS",
                 "title": "Optimization Complete",
                 "message": "Strategy Optimizer finished. Weight overrides applied."
-            }, timeout=2)
+            }, headers=headers, timeout=2)
         except requests.RequestException:
             pass
             
