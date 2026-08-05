@@ -21,16 +21,44 @@ import { runPython } from "../pythonRunner";
 import { fetchWithCache } from "../cacheService";
 
 export const marketRouter = router({
-  // These upstream-fetching procedures (getGlobalMarketData/getMarketOverview/getTopMovers/
-  // getBreakouts/getSectorPerformance below) previously called their live MoneyControl/
-  // NiftyTrader/ET fetch functions directly with no caching -- every dashboard load AND every
-  // poll tick from every concurrent browser tab was a synchronous round-trip to a third-party
-  // API. At any real concurrency this both inflates request latency to the upstream's latency
-  // and risks the upstream rate-limiting/banning this app. fetchWithCache already implements
-  // Redis/in-memory fallback + in-flight de-dup (cache-stampede protection) -- these just
-  // weren't calling it. TTLs are short enough that a fresh page load is never more than one
-  // interval stale, matching how often the frontend already polls these.
-  getGlobalMarketData: publicProcedure
+  getMarketBreadth: publicProcedure
+    .query(async () => {
+      const breadth = await dbGet<any>(`
+        SELECT * FROM market_breadth
+        ORDER BY date DESC
+        LIMIT 1
+      `);
+      return breadth;
+    }),
+
+  // getFiiDiiFlow lives in ml.router.ts (accepts {days}, returns the recent-history array
+  // every real caller shares one cache entry over) -- this router must not redeclare it,
+  // mergeRouters() throws "Duplicate key" if two routers export the same procedure name.
+  //
+  // getMarketRegime lives in dl.router.ts (accepts an optional {date} for point-in-time
+  // lookback and parses the JSON feature columns) -- same reasoning, don't redeclare it here.
+
+    getEconomicCalendar: publicProcedure
+    .query(async () => {
+      const events = await dbAll<any>(`
+        SELECT * FROM eco_calendar
+        WHERE event_date >= date('now')
+        ORDER BY event_date, event_time
+        LIMIT 10
+      `);
+      return events;
+    }),
+
+    // These upstream-fetching procedures (getGlobalMarketData/getMarketOverview/getTopMovers/
+    // getBreakouts/getSectorPerformance below) previously called their live MoneyControl/
+    // NiftyTrader/ET fetch functions directly with no caching -- every dashboard load AND every
+    // poll tick from every concurrent browser tab was a synchronous round-trip to a third-party
+    // API. At any real concurrency this both inflates request latency to the upstream's latency
+    // and risks the upstream rate-limiting/banning this app. fetchWithCache already implements
+    // Redis/in-memory fallback + in-flight de-dup (cache-stampede protection) -- these just
+    // weren't calling it. TTLs are short enough that a fresh page load is never more than one
+    // interval stale, matching how often the frontend already polls these.
+    getGlobalMarketData: publicProcedure
     .query(async () => fetchWithCache('market:global-data', () => fetchGlobalMarketData(), 30)),
 
   getLiveStocks: publicProcedure

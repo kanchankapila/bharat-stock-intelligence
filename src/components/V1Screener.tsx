@@ -35,6 +35,8 @@ export const V1Screener: React.FC<{
   const [selectedSector, setSelectedSector] = useState<string>('All');
   const [selectedTimeframes, setSelectedTimeframes] = useState<string[]>(['1h', 'D']);
 
+  const { data: sectors } = trpc.getAllSectors.useQuery();
+
   const { data: stocks, isLoading: stocksLoading } = trpc.getScreenerResults.useQuery(
     {
       filter,
