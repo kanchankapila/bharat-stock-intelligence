@@ -168,6 +168,34 @@ describe('individual evaluate() functions', () => {
     expect(byId('bulk-deals-recency').sql).not.toMatch(/\bbulk_deals\b/);
   });
 
+  it('regime-edge-trust-floor passes as informational when no regime has enough history yet', () => {
+    const r = byId('regime-edge-trust-floor').evaluate({ breached_count: 0, ready_count: 0, latest_computed_at: null }, now);
+    expect(r.status).toBe('pass');
+    expect(r.detail).toMatch(/not.*enough history|no regime/i);
+  });
+
+  it('regime-edge-trust-floor warns when a ready regime is below the 0.55 trust floor', () => {
+    const r = byId('regime-edge-trust-floor').evaluate(
+      { breached_count: 1, ready_count: 3, latest_computed_at: now.toISOString() }, now);
+    expect(r.status).toBe('warn');
+    expect(r.detail).toMatch(/1 of 3/);
+  });
+
+  it('regime-edge-trust-floor passes when every ready regime clears the trust floor', () => {
+    const r = byId('regime-edge-trust-floor').evaluate(
+      { breached_count: 0, ready_count: 2, latest_computed_at: now.toISOString() }, now);
+    expect(r.status).toBe('pass');
+    expect(r.detail).toMatch(/clear the live-edge trust floor/);
+  });
+
+  it('regime-edge-trust-floor warns if its own snapshot has gone stale, even with no breach', () => {
+    const fourDaysLater = new Date(now.getTime() + 4 * 86_400_000);
+    const r = byId('regime-edge-trust-floor').evaluate(
+      { breached_count: 0, ready_count: 2, latest_computed_at: now.toISOString() }, fourDaysLater);
+    expect(r.status).toBe('warn');
+    expect(r.detail).toMatch(/refresh/);
+  });
+
   it('technical-signals-freshness-coverage fails on the exact silent-collapse regression (low coverage, job still "fresh")', () => {
     const r = byId('technical-signals-freshness-coverage').evaluate(
       { total: 2000, scored: 40, last_date: '2026-07-19T00:00:00Z' }, now,
