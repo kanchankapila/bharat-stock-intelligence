@@ -41,7 +41,7 @@ export function WorkstationPage({
   const kpis = [
     { label: 'Selected', value: selectedSymbol || '—' },
     { label: 'Search Matches', value: String(searchRows.length) },
-    { label: 'Flow Mood', value: flowMood, tone: flowMood === 'Risk-On' ? 'positive' : flowMood === 'Risk-Off' ? 'negative' : 'warning' as const },
+    { label: 'Flow Mood', value: flowMood, tone: flowMood === 'Risk-On' ? 'positive' as const : flowMood === 'Risk-Off' ? 'negative' as const : 'warning' as const },
     { label: 'Classification', value: classification },
   ];
 

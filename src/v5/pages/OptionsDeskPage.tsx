@@ -57,7 +57,7 @@ export function OptionsDeskPage() {
   const kpis = [
     { label: 'Symbol', value: symbol.toUpperCase() },
     { label: 'Chain Rows', value: String(rows.length) },
-    { label: 'PCR', value: pcr == null ? '—' : fmtFixed(pcr, 2), tone: pcr != null && pcr > 1 ? 'positive' : 'warning' as const },
+    { label: 'PCR', value: pcr == null ? '—' : fmtFixed(pcr, 2), tone: pcr != null && pcr > 1 ? 'positive' as const : 'warning' as const },
     { label: 'Alert Count', value: String(maxPainAlerts.length) },
   ];
 

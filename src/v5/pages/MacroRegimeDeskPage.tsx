@@ -11,6 +11,14 @@ type RegimeRecord = {
   dt?: string;
 };
 
+// getRegimeSummary's `history` rows come straight from market_regimes -- a different
+// field shape than `current` (which spreads getCurrentRegime()'s own {regime, prob, ...}).
+type RegimeHistoryRecord = {
+  date: string;
+  regime: string;
+  regime_prob: number | null;
+};
+
 type MacroTile = {
   symbol: string;
   label: string;
@@ -49,7 +57,7 @@ export function MacroRegimeDeskPage() {
   });
 
   const current = (regimeQ.data?.current ?? {}) as RegimeRecord;
-  const recent = (regimeQ.data?.recent ?? []) as RegimeRecord[];
+  const recent = (regimeQ.data?.history ?? []) as RegimeHistoryRecord[];
   const macroTiles = (macroQ.data ?? []) as MacroTile[];
 
   const bySym = useMemo(() => {
@@ -58,7 +66,7 @@ export function MacroRegimeDeskPage() {
     return m;
   }, [macroTiles]);
 
-  const flowRows = (fiiQ.data?.rows ?? fiiQ.data ?? []) as any[];
+  const flowRows = (fiiQ.data ?? []) as any[];
   const latestFlow = flowRows[0] ?? null;
   const fiiNet = numOrNull(latestFlow?.fii_net);
   const diiNet = numOrNull(latestFlow?.dii_net);
@@ -165,13 +173,13 @@ export function MacroRegimeDeskPage() {
             </thead>
             <tbody>
               {recent.slice(0, 30).map((row, i) => {
-                const p = numOrNull(row.prob);
+                const p = numOrNull(row.regime_prob);
                 const dir = s(row.regime).toUpperCase();
                 const up = dir === 'BULL';
                 const down = dir === 'BEAR' || dir === 'CRASH';
                 return (
-                  <tr key={`${s(row.dt)}-${i}`} className="v5-table-row-intel border-b border-slate-100">
-                    <td className="px-3 py-2 text-slate-700">{s(row.dt, '—')}</td>
+                  <tr key={`${s(row.date)}-${i}`} className="v5-table-row-intel border-b border-slate-100">
+                    <td className="px-3 py-2 text-slate-700">{s(row.date, '—')}</td>
                     <td className="px-3 py-2 font-semibold text-slate-800">{s(row.regime, 'UNKNOWN')}</td>
                     <td className="px-3 py-2 text-slate-700">{p == null ? '—' : `${fmtFixed(p * 100, 1)}%`}</td>
                     <td className="px-3 py-2">

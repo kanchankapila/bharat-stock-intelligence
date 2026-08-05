@@ -46,7 +46,7 @@ export function PortfolioDeskPage() {
     {
       label: 'Avg Win Prob',
       value: avgWinProb == null ? '—' : `${(avgWinProb * 100).toFixed(1)}%`,
-      tone: avgWinProb != null && avgWinProb >= 0.5 ? 'positive' : 'warning' as const,
+      tone: avgWinProb != null && avgWinProb >= 0.5 ? 'positive' as const : 'warning' as const,
     },
     { label: 'Analysis State', value: analyzeMutation.isPending ? 'Running' : analyzeMutation.data ? 'Ready' : 'Idle' },
   ];
