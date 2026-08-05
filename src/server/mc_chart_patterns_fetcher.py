@@ -59,24 +59,35 @@ BATCH_GAP_SEC  = 0.5
 
 def ensure_schema(con) -> None:
     cur = con.cursor()
+    # Columns/unique-key must match what upsert_patterns() actually writes (mcsymbol,
+    # stoploss_price, stoploss_pct, and a (mcsymbol, pattern_id) uniqueness -- pattern_id
+    # alone is NOT unique across stocks). This previously drifted from what upsert_patterns()
+    # needed (had sl_price/sl_pct instead of stoploss_price/stoploss_pct, no mcsymbol column
+    # at all, and PRIMARY KEY(pattern_id) instead of a (mcsymbol, pattern_id) unique key) --
+    # silently masked in production because the real table was already created via a separate
+    # migration with the correct shape, so this CREATE TABLE IF NOT EXISTS was always a no-op
+    # there. On a genuinely fresh DB (or if the table were ever dropped), upsert_patterns()
+    # would crash immediately with "no such column: mcsymbol". Found by the live_datasource
+    # test for this fetcher writing into a real throwaway (not-pre-existing) DB.
     cur.execute("""
         CREATE TABLE IF NOT EXISTS mc_chart_patterns (
             pattern_id     INTEGER NOT NULL,
+            mcsymbol       TEXT NOT NULL,
             symbol         TEXT NOT NULL,
             pattern_name   TEXT,
             direction      TEXT,
             time_frame     TEXT,
             entry_price    REAL,
             target_price   REAL,
-            sl_price       REAL,
+            stoploss_price REAL,
             target_return_pct REAL,
-            sl_pct         REAL,
+            stoploss_pct   REAL,
             comment        TEXT,
             p_status       TEXT,
             end_date       TEXT,
             created_at     TEXT,
             fetched_at     TEXT DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (pattern_id)
+            UNIQUE (mcsymbol, pattern_id)
         )
     """)
     cur.execute("CREATE INDEX IF NOT EXISTS idx_mccp_sym ON mc_chart_patterns(symbol)")

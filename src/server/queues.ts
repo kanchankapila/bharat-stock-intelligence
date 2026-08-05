@@ -1547,6 +1547,19 @@ export async function initQueues(): Promise<boolean> {
           removeOnFail: 3,
         },
       ),
+      // Investing.com India (free, no key) — separate cadence from the flat 15-min
+      // NEWS_SOURCES cycle above; see newsSentimentService.ts's INVESTING_SOURCES comment
+      // for why (both feeds refresh far slower than 15 min, would just re-fetch stale items).
+      addJobWithCatchup(newsSentimentQueue,
+        'investing-ideas-refresh',
+        {},
+        {
+          repeat: { every: 3 * 60 * 60 * 1000 }, // every 3h
+          jobId: 'investing-ideas-repeatable',
+          removeOnComplete: 3,
+          removeOnFail: 3,
+        },
+      ),
     ]);
 
     newsSentimentWorker = new Worker(
@@ -1571,6 +1584,8 @@ export async function initQueues(): Promise<boolean> {
           await svc.runGNewsStocksCycle();
         } else if (job.name === 'gnews-global-refresh') {
           await svc.runGNewsGlobalCycle();
+        } else if (job.name === 'investing-ideas-refresh') {
+          await svc.runInvestingIdeasCycle();
         } else {
           await svc.runNewsSentimentCycle();
         }
