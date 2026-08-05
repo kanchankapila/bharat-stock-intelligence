@@ -120,11 +120,11 @@ export function StockIntelligenceDeskPage({
   const latestNet = latestEstimate(earnings?.netProfit);
 
   const sourceBreakdownBars = useMemo(() => {
-    const grouped = screeners.reduce((acc: Record<string, number>, row: any) => {
+    const grouped: Record<string, number> = {};
+    screeners.forEach((row: any) => {
       const src = s(row.source, 'unknown').toLowerCase();
-      acc[src] = (acc[src] ?? 0) + 1;
-      return acc;
-    }, {});
+      grouped[src] = (grouped[src] ?? 0) + 1;
+    });
     return Object.entries(grouped).map(([src, count]) => ({
       label: src.toUpperCase(),
       value: count,

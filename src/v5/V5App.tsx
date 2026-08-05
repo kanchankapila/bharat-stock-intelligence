@@ -45,7 +45,7 @@ export default function V5App() {
   );
 
   const mood = useMemo(() => {
-    const entries = fiiDiiQ.data?.rows ?? fiiDiiQ.data ?? [];
+    const entries = fiiDiiQ.data ?? [];
     const latest = Array.isArray(entries) && entries.length ? (entries[0] as any) : null;
     const fiiNet = Number(latest?.fii_net ?? 0);
     const diiNet = Number(latest?.dii_net ?? 0);
@@ -56,7 +56,7 @@ export default function V5App() {
   }, [fiiDiiQ.data]);
 
   const dataStatus = useMemo(() => {
-    const entries = fiiDiiQ.data?.rows ?? fiiDiiQ.data ?? [];
+    const entries = fiiDiiQ.data ?? [];
     const latest = Array.isArray(entries) && entries.length ? (entries[0] as any) : null;
     const asOf = latest?.date ?? latest?.as_of_date ?? latest?.dt ?? null;
     const syncedAt = fiiDiiQ.dataUpdatedAt ? new Date(fiiDiiQ.dataUpdatedAt).toLocaleString('en-IN') : '—';

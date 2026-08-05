@@ -66,7 +66,7 @@ export function MarketPulsePage() {
     { label: 'NIFTY 50', value: indexCards[0]?.value == null ? '—' : fmtFixed(indexCards[0].value, 2) },
     { label: 'Gainers / Losers', value: `${gainers.length}/${losers.length}` },
     { label: 'Activity Events', value: String(feed.length) },
-    { label: 'Breadth Bias', value: gainers.length >= losers.length ? 'Positive' : 'Negative', tone: gainers.length >= losers.length ? 'positive' : 'negative' as const },
+    { label: 'Breadth Bias', value: gainers.length >= losers.length ? 'Positive' : 'Negative', tone: gainers.length >= losers.length ? 'positive' as const : 'negative' as const },
   ];
 
   const breadthInsights = [
