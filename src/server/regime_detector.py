@@ -23,6 +23,15 @@ MODEL_DIR  = Path(__file__).parent / "ml_models"
 HMM_PATH   = MODEL_DIR / "hmm_regime.pkl"
 N_STATES   = 5
 
+
+class NoRegimeData(Exception):
+    """Raised when _load_hmm_features returns nothing for a date -- distinguishes a genuine
+    "no data available" condition from the SIDEWAYS regime label (both used to be represented
+    by the same string, so update_regime()'s daily cron could silently return "SIDEWAYS" and
+    exit 0 without ever touching market_regimes -- indistinguishable from a real, correctly-
+    computed SIDEWAYS day in every monitoring signal. See the 2026-08 job-health investigation:
+    market_regimes' MAX(computed_at) was found frozen for weeks with no error anywhere."""
+
 # State label assignment (manual, based on emission mean inspection post-training)
 # Index → name mapping updated after each retrain
 DEFAULT_STATE_LABELS = {0: "BULL", 1: "SIDEWAYS", 2: "HIGH_VOL", 3: "BEAR", 4: "CRASH"}
@@ -207,7 +216,7 @@ def _label_day(model, scaler, state_labels: dict, date: str, publish_live: bool 
     """
     df = _load_hmm_features(lookback_days=120, as_of_date=date)  # recent 6 months for inference
     if df.empty:
-        return "SIDEWAYS"
+        raise NoRegimeData(f"no HMM features available for {date} (empty _load_hmm_features)")
 
     X = scaler.transform(df.fillna(0))
     viterbi_states = model.predict(X)            # most probable state sequence
@@ -257,8 +266,11 @@ def update_regime(date: str = None) -> str:
         date = datetime.today().strftime("%Y-%m-%d")
 
     if not HMM_PATH.exists():
-        print("[HMM] No model — run --mode train first")
-        return "SIDEWAYS"
+        # Was: print + `return "SIDEWAYS"` -- a clean exit 0 that never touches market_regimes,
+        # indistinguishable from a real day's write in job_heartbeat/BullMQ. This is the live
+        # daily cron path (dl-regime-daily), not backfill, so a missing model is a real
+        # operational problem that must surface as a failed job, not a silent no-op.
+        raise RuntimeError("[HMM] No model at " + str(HMM_PATH) + " — run --mode train first")
 
     with open(HMM_PATH, "rb") as f:
         bundle = pickle.load(f)
@@ -291,11 +303,20 @@ def backfill_regimes(start_date: str, end_date: str) -> int:
         return 0
 
     n = 0
+    skipped = 0
     for ts in trading_days:
         d = ts.strftime("%Y-%m-%d")
-        _label_day(model, scaler, state_labels, d, publish_live=False)
-        n += 1
-    print(f"[HMM] backfilled {n} regime days {start_date}..{end_date} (causal, day-by-day)")
+        try:
+            _label_day(model, scaler, state_labels, d, publish_live=False)
+            n += 1
+        except NoRegimeData:
+            # Unlike update_regime()'s live daily path, a single date missing its trailing
+            # 120-day feature window during a long historical backfill (e.g. near the start
+            # of stock_ohlcv's own history) is expected, not an operational failure -- skip
+            # just that day and keep going, don't abort the whole backfill.
+            skipped += 1
+    print(f"[HMM] backfilled {n} regime days {start_date}..{end_date} (causal, day-by-day)"
+          + (f", skipped {skipped} with no feature data" if skipped else ""))
     return n
 
 

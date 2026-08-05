@@ -607,6 +607,17 @@ class FeatureEngineer:
 
             only_date = datetime.today().strftime("%Y-%m-%d") if date_filter == "today" else None
             total = len(symbols)
+            if total == 0:
+                # Was silently a no-op: an empty symbol list (e.g. stock_ohlcv temporarily
+                # empty/unreachable) fell straight through the loop below to "Pipeline
+                # complete — 0 total rows written" and exit 0, indistinguishable from a
+                # healthy day in job_heartbeat/BullMQ. See the 2026-08 job-health
+                # investigation: feature_store's MAX(computed_at) was found frozen for
+                # weeks with no error anywhere.
+                raise RuntimeError(
+                    "[FE] No symbols found in stock_ohlcv with >=60 rows — refusing to "
+                    "report a silent-empty success."
+                )
             print(f"[FE] Processing {total} symbols in parallel{' (today-only mode)' if only_date else ''}...")
 
             args_list = [(sym, lookback_days, only_date) for sym in symbols]
@@ -651,6 +662,18 @@ class FeatureEngineer:
 
             con.commit()
             print(f"[FE] Pipeline complete — {written} total rows written")
+            if written == 0:
+                # Every symbol either had <60 rows post-fetch, threw inside
+                # _compute_symbol_unscaled/_write_symbol_features (each caught and logged
+                # individually above, never surfaced), or was silently skipped -- any of
+                # which used to exit 0 with feature_store untouched. Fail loudly instead so
+                # this shows up as a real BullMQ/job_heartbeat failure, not a clean "success"
+                # that quietly wrote nothing (same class of bug as the total==0 guard above).
+                raise RuntimeError(
+                    f"[FE] Processed {total} symbols but wrote 0 feature rows — every "
+                    "worker failed or returned no data. Refusing to report a silent-empty "
+                    "success; see the per-symbol [FE] ERROR lines above for the real cause."
+                )
         finally:
             con.close()
 
