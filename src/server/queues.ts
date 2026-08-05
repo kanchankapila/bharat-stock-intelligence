@@ -30,9 +30,6 @@ import { alphaQuant } from './alphaQuantClient';
 
 import { syncNiftyTraderScores, syncTrendlyneScores } from './syncProprietaryScores';
 import { syncTrendlyneTechnicals } from './technicalIntelligenceService';
-import { syncAllScreenerStocksToDB } from './trendlyneScreener';
-import { syncMoneyControlScreeners } from './moneycontrolScreener';
-import { runFullFundamentalsSync } from './fundamentalsSyncService';
 import { fetchDeliveryMap } from './deliveryFetcher';
 import { updateMonitorState } from './monitoringService';
 import { StepTracker } from './jobSteps';
@@ -126,6 +123,7 @@ export let stockScoringQueue:      Queue | null = null;
 export let mcScreenerSyncQueue:    Queue | null = null;
 export let etnowScreenerSyncQueue: Queue | null = null;
 export let etMarketstatsSyncQueue: Queue | null = null;
+export let trendlyneScreenerSyncQueue: Queue | null = null;
 export let nseScreenerSyncQueue:   Queue | null = null;  // PHASE 2: NSE master data sync
 export let fundamentalsSyncQueue:  Queue | null = null;
 export let quantScoringQueue:      Queue | null = null;
@@ -145,6 +143,7 @@ let scoringWorker:            Worker | null = null;
 let mcScreenerSyncWorker:     Worker | null = null;
 let etnowScreenerSyncWorker:  Worker | null = null;
 let etMarketstatsSyncWorker:  Worker | null = null;
+let trendlyneScreenerSyncWorker: Worker | null = null;
 let nseScreenerSyncWorker:    Worker | null = null;  // PHASE 2: NSE worker
 let fundamentalsSyncWorker:   Worker | null = null;
 let quantScoringWorker:       Worker | null = null;
@@ -958,6 +957,15 @@ async function processTrendlyneChecklistCycle(_job: Job): Promise<void> {
   const queue = trendlyneChecklistCycleQueue!;
   let nextDelayMs = randomDelayMs(15, 45);
   try {
+    // Checklist fundamentals (5yr PAT trend, sales growth, etc.) have no intraday sensitivity —
+    // unlike trendlyne-intraday-scan/confluence-compute, this job previously had NO market-hours
+    // gate at all, so it kept ticking straight through 09:15-15:30 IST, adding concurrent
+    // Trendlyne request load on top of the intraday scan's own calls (2026-08-04 job-timing
+    // audit). Skip-and-reschedule during market hours, same pattern as every other gated job.
+    if (await isMarketOpen()) {
+      console.log('[TRENDLYNE-CHECKLIST] Skipped — market hours (checklist data has no intraday sensitivity)');
+      return;
+    }
     const now = Date.now();
     let { cycleStartedAt, cycleCompletedAt } = await getCycleState();
 
@@ -1142,29 +1150,25 @@ async function processQuantEodSync(_job: Job): Promise<{ success: boolean }> {
     console.log('[QUANT EOD] 1.5. Syncing Trendlyne Technical Snapshots');
     await quantStep('trendlyne-technicals', 45, () => syncTrendlyneTechnicals());
 
-    // Phase 2 — three distinct vendors writing three disjoint table families
-    // (trendlyne_screeners* / moneycontrol_screeners* / etnow_screeners*), no shared rows. Only
-    // one Trendlyne call in the set, so the vendor constraint above still holds.
-    console.log('[QUANT EOD] 2/3/3b. Syncing Trendlyne + MoneyControl + ETNow Screeners');
-    const { syncETnowScreeners } = await import('./etnowScreenerSync');
-    await quantPhase([
-      quantStep('trendlyne-screeners', 60, () => syncAllScreenerStocksToDB()),
-      quantStep('mc-screeners', 45, () => syncMoneyControlScreeners()),
-      // Stays best-effort (pre-existing behaviour): ETNow must not abort the remaining steps.
-      quantStep('etnow-screeners', 30, () => syncETnowScreeners())
-        .catch((e: any) => console.error('[QUANT EOD] ETNow sync failed:', e.message)),
-    ]);
-
-    console.log('[QUANT EOD] 4. Syncing Point-in-time Fundamentals');
-    await quantStep('fundamentals-sync', 60, () => runFullFundamentalsSync());
-
-    console.log('[QUANT EOD] 5. Syncing Delivery Data for Today');
+    // Trendlyne/MoneyControl/ETNow SCREENER MEMBERSHIP sync, full-universe fundamentals resync,
+    // and the index-level PCR/GEX refresh were REMOVED from here 2026-08-04 (job-timing audit).
+    // All three were pure duplication, not a safety net:
+    //   - mc-screeners / etnow-screeners / trendlyne-screeners already run once, dependency-ordered,
+    //     at 18:00/18:20/18:40 IST (et-marketstats-sync/mc-sync/etnow-sync in screeners.jobs.ts) --
+    //     well before this job's 22:00 IST slot. Providers publish screener membership once/day
+    //     post-close; re-fetching ~1,300-1,400 screeners again 2-4h later re-wrote identical rows.
+    //   - fundamentals-sync (runFullFundamentalsSync(), a full-universe Yahoo Finance deep pull with
+    //     NO staleness filter) has its own dedicated WEEKLY job (sync-fundamentals-weekly, Sunday
+    //     08:30 IST). Calling it here too meant "weekly" fundamentals actually ran 6 nights/week --
+    //     D/E, ROE, revenue growth etc. don't change day-to-day outside earnings season.
+    //   - pcr_fetcher.py --gex (index PCR/GEX) already runs every 15 min during market hours
+    //     (market-regime-refresh) and once more in ml-daily-ops (~19:30 IST) -- a 4th same-day call
+    //     at 22:00 IST added nothing since index EOD PCR doesn't move after close.
+    // See docs session notes 2026-08-04 for the full evidence trail (each call traced to its
+    // function body, not just its job name).
+    console.log('[QUANT EOD] 4. Syncing Delivery Data for Today');
     const today = new Date().toISOString().split('T')[0];
     await quantStep('delivery-map', 10, () => fetchDeliveryMap(today));
-
-    console.log('[QUANT EOD] 6. Fetching PCR & Max Pain');
-    // No quantStep wrapper: runPython's execFile timeout already bounds and kills this one.
-    await runPython('pcr_fetcher.py', ['--gex'], 90_000).catch((e: any) => console.error('[QUANT EOD] pcr_fetcher failed:', e.message));
 
     updateMonitorState('quant-eod-sync', 'success');
     console.log('[QUEUE] quant-eod-sync completed successfully');
@@ -1315,6 +1319,7 @@ export async function initQueues(): Promise<boolean> {
     ({ queue: mcScreenerSyncQueue, worker: mcScreenerSyncWorker } = screenerJobs.mcScreenerSync);
     ({ queue: etnowScreenerSyncQueue, worker: etnowScreenerSyncWorker } = screenerJobs.etnowScreenerSync);
     ({ queue: etMarketstatsSyncQueue, worker: etMarketstatsSyncWorker } = screenerJobs.etMarketstatsSync);
+    ({ queue: trendlyneScreenerSyncQueue, worker: trendlyneScreenerSyncWorker } = screenerJobs.trendlyneScreenerSync);
     ({ queue: fundamentalsSyncQueue, worker: fundamentalsSyncWorker } = screenerJobs.fundamentalsSync);
     ({ queue: quantScoringQueue, worker: quantScoringWorker } = screenerJobs.quantScoring);
 
@@ -2092,7 +2097,7 @@ export async function initQueues(): Promise<boolean> {
       QUEUE_TRENDLYNE_DAILY_FETCH,
       async (job: Job) => {
         if (!job.data || !job.data.symbol) {
-          const symbols = getTrendlyneMetricSymbols();
+          const symbols = await getTrendlyneMetricSymbols();
           await enqueueTrendlyneMetricsFetchJobs(trendlyneDailyFetchQueue!, symbols, 12);
           return;
         }
@@ -2310,6 +2315,7 @@ export async function shutdownQueues(): Promise<void> {
     mcScreenerSyncWorker?.close(),
     etnowScreenerSyncWorker?.close(),
     etMarketstatsSyncWorker?.close(),
+    trendlyneScreenerSyncWorker?.close(),
     fundamentalsSyncWorker?.close(),
     quantScoringWorker?.close(),
     walkForwardOptimizeWorker?.close(),
@@ -2319,6 +2325,7 @@ export async function shutdownQueues(): Promise<void> {
     mcScreenerSyncQueue?.close(),
     etnowScreenerSyncQueue?.close(),
     etMarketstatsSyncQueue?.close(),
+    trendlyneScreenerSyncQueue?.close(),
     fundamentalsSyncQueue?.close(),
     quantScoringQueue?.close(),
     walkForwardOptimizeQueue?.close(),
