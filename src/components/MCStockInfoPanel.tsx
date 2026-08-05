@@ -332,7 +332,31 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
 
   const { data: peersData, isLoading: loadingPeers } = trpc.getNSEStocksBySector.useQuery(
     { sector: nseStockData?.sector ?? '' },
-    { enabled: isVisible && activeTab === 'financials' && !!nseStockData?.sector }
+    { enabled: isVisible && (activeTab === 'financials' || activeTab === 'earnings') && !!nseStockData?.sector }
+  );
+
+  // "Results & Earnings" tab content -- previously this tab fetched nothing of its own and
+  // silently rendered the Financials tab's content under a relabeled header (the "Forecasts,
+  // surprises, ratings and action calendar" subtitle described data that was never queried).
+  const { data: mcAnalystRating } = trpc.getMcAnalystRating.useQuery(
+    { symbol },
+    { enabled: isVisible && activeTab === 'earnings', staleTime: 3600000 }
+  );
+  const { data: mcEarningsForecast } = trpc.getMcEarningsForecast.useQuery(
+    { symbol },
+    { enabled: isVisible && activeTab === 'earnings', staleTime: 3600000 }
+  );
+  const { data: mcPriceForecast } = trpc.getMcPriceForecast.useQuery(
+    { symbol },
+    { enabled: isVisible && activeTab === 'earnings', staleTime: 3600000 }
+  );
+  const { data: mcConsensus } = trpc.getMcConsensus.useQuery(
+    { symbol },
+    { enabled: isVisible && activeTab === 'earnings', staleTime: 3600000 }
+  );
+  const { data: corporateActions } = trpc.getCorporateActions.useQuery(
+    { symbol },
+    { enabled: isVisible && activeTab === 'earnings', staleTime: 3600000 }
   );
 
 
@@ -1055,6 +1079,115 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
             title={activeTab === 'earnings' ? 'Results & Earnings' : 'Financials Core'}
             subtitle={activeTab === 'earnings' ? 'Forecasts, surprises, ratings and action calendar' : 'Valuation matrix, profitability and events'}
           />
+
+          {activeTab === 'earnings' && (() => {
+            const rating = mcAnalystRating as any;
+            const forecast = mcEarningsForecast as any;
+            const priceTarget = mcPriceForecast as any;
+            const consensus = mcConsensus as any;
+            const actions = corporateActions as any;
+            const hasRating = rating && rating.finalRating;
+            const hasPriceTarget = priceTarget && (priceTarget.high || priceTarget.mean || priceTarget.low);
+            const hasForecast = forecast && (forecast.eps?.length || forecast.revenue?.length || forecast.netProfit?.length);
+            const hasConsensus = consensus && Array.isArray(consensus.graphData) && consensus.graphData.length > 0;
+            const actionsList = Array.isArray(actions) ? actions : [];
+            const latestRow = (rows?: { date: string; high: string; low: string; avg: string; actual: string }[]) =>
+              rows && rows.length > 0 ? rows[rows.length - 1] : null;
+
+            return (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+                <Card title="Analyst Rating & Price Target" icon={BarChart3}>
+                  {!hasRating && !hasPriceTarget ? (
+                    <div className="text-[10px] font-semibold text-slate-500 py-4">No analyst coverage data captured yet for {symbol}.</div>
+                  ) : (
+                    <div className="space-y-3 pt-2">
+                      {hasRating && (
+                        <div className="flex items-center justify-between flex-wrap gap-2">
+                          <div>
+                            <span className={cn(
+                              'text-sm font-black uppercase tracking-wide',
+                              /buy/i.test(rating.finalRating) ? 'text-emerald-400' : /sell/i.test(rating.finalRating) ? 'text-rose-400' : 'text-amber-400'
+                            )}>{rating.finalRating}</span>
+                            <div className="text-[10px] text-slate-500 mt-0.5">{rating.analystCount} analysts covering</div>
+                          </div>
+                          {Array.isArray(rating.ratings) && (
+                            <div className="flex gap-1.5 flex-wrap">
+                              {rating.ratings.map((r: any, i: number) => (
+                                <span key={i} className="text-[9px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300">{r.name}: {r.value}</span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      {hasPriceTarget && (
+                        <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-800/60">
+                          <CompactMetricCard label="Low Target" value={priceTarget.low != null ? `₹${priceTarget.low}` : '—'} color="text-rose-400" />
+                          <CompactMetricCard label="Mean Target" value={priceTarget.mean != null ? `₹${priceTarget.mean}` : '—'} />
+                          <CompactMetricCard label="High Target" value={priceTarget.high != null ? `₹${priceTarget.high}` : '—'} color="text-emerald-400" />
+                        </div>
+                      )}
+                      {hasConsensus && (
+                        <div className="pt-2 border-t border-slate-800/60">
+                          <div className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1.5">Latest Consensus Mix</div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {consensus.graphData.map((series: any, i: number) => (
+                              Array.isArray(series.data) && series.data.length > 0 && (
+                                <span key={i} className="text-[9px] px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-300 border border-indigo-500/20">
+                                  {series.name}: {series.data[series.data.length - 1]}
+                                </span>
+                              )
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </Card>
+
+                <Card title="Earnings Estimates (latest period)" icon={History}>
+                  {!hasForecast ? (
+                    <div className="text-[10px] font-semibold text-slate-500 py-4">No earnings estimate data captured yet for {symbol}.</div>
+                  ) : (
+                    <div className="space-y-2.5 pt-2">
+                      {([
+                        ['EPS', latestRow(forecast.eps)],
+                        ['Net Profit', latestRow(forecast.netProfit)],
+                        ['Revenue', latestRow(forecast.revenue)],
+                      ] as [string, ReturnType<typeof latestRow>][]).map(([label, row]) => row && (
+                        <div key={label} className="p-2.5 bg-slate-950/60 rounded-xl border border-slate-800/50">
+                          <div className="flex items-center justify-between text-[9px] text-slate-500 uppercase tracking-widest mb-1">
+                            <span>{label}</span><span>{row.date}</span>
+                          </div>
+                          <div className="grid grid-cols-4 gap-2 text-center">
+                            <div><div className="text-xs font-mono font-bold text-slate-100">{row.avg}</div><div className="text-[8px] text-slate-600">Avg Est</div></div>
+                            <div><div className="text-xs font-mono font-bold text-rose-400">{row.low}</div><div className="text-[8px] text-slate-600">Low Est</div></div>
+                            <div><div className="text-xs font-mono font-bold text-emerald-400">{row.high}</div><div className="text-[8px] text-slate-600">High Est</div></div>
+                            <div><div className="text-xs font-mono font-bold text-indigo-300">{row.actual || '—'}</div><div className="text-[8px] text-slate-600">Actual</div></div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </Card>
+
+                <Card title="Corporate Actions" icon={History} className="lg:col-span-2">
+                  {actionsList.length === 0 ? (
+                    <div className="text-[10px] font-semibold text-slate-500 py-4">No recent corporate actions for {symbol}.</div>
+                  ) : (
+                    <div className="space-y-1.5 max-h-72 overflow-y-auto terminal-scrollbar pt-2">
+                      {actionsList.map((a: any, i: number) => (
+                        <div key={i} className="flex justify-between text-[11px] text-slate-400 border-b border-slate-800/40 pb-1">
+                          <span>{a.action_type ?? a.purpose}</span>
+                          <span className="font-mono text-slate-300">{a.ex_date}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </Card>
+              </div>
+            );
+          })()}
+
           {/* High-Density Valuation & Key Metrics */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
             {/* Dividends (Trendlyne) */}

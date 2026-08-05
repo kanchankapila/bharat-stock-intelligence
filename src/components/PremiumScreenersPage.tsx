@@ -326,7 +326,7 @@ const PremiumScreenersPage: React.FC<PremiumScreenersPageProps> = ({ onSelectSto
             <div className="glass rounded-xl border border-slate-800/60 p-3">
               <div className="text-[9px] uppercase tracking-widest text-slate-500">DVM Scores</div>
               <div className="text-[11px] text-slate-200 mt-1 whitespace-normal break-words">
-                D: {dvmQ.data?.d_score ?? '—'} • V: {dvmQ.data?.v_score ?? '—'} • M: {dvmQ.data?.m_score ?? '—'}
+                D: {dvmQ.data?.durability?.score ?? '—'} • V: {dvmQ.data?.valuation?.score ?? '—'} • M: {dvmQ.data?.momentum?.score ?? '—'}
               </div>
               <div className="text-[10px] text-slate-400 mt-1">Trendlyne DVM</div>
             </div>

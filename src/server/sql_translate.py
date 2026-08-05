@@ -50,21 +50,71 @@ def use_postgres() -> bool:
 
 
 def convert_placeholders(sql: str) -> str:
-    """Replace `?` placeholders with `:p0, :p1, ...`, skipping any inside literals."""
+    """Replace `?` placeholders with `:p0, :p1, ...`, skipping any inside string literals
+    or SQL comments (`-- ...` to end of line, `/* ... */`).
+
+    Comments matter here, not just literals: an apostrophe inside a `--`/`/* */` comment
+    (e.g. "the table's stored values") is not a string-literal delimiter, but a naive
+    quote-toggling scanner can't tell the difference -- it flips `in_single` on that lone
+    apostrophe and never flips back (nothing in the comment closes it), so every `?` after
+    that point in the query is silently left unconverted. It then reaches the driver as a
+    literal `?`, which Postgres doesn't understand as a placeholder there, producing a raw
+    "syntax error at or near ..." with no hint that a comment was the actual cause. Hit live
+    in screener_signal_generator.py's load_high_performing_screeners() query (a `-- ...
+    table's stored values.` comment line broke every `?` after it).
+    """
     out = []
     n = 0
     in_single = False
     in_double = False
-    for ch in sql:
+    in_line_comment = False
+    in_block_comment = False
+    i = 0
+    length = len(sql)
+    while i < length:
+        ch = sql[i]
+        nxt = sql[i + 1] if i + 1 < length else ""
+
+        if in_line_comment:
+            out.append(ch)
+            if ch == "\n":
+                in_line_comment = False
+            i += 1
+            continue
+
+        if in_block_comment:
+            out.append(ch)
+            if ch == "*" and nxt == "/":
+                out.append(nxt)
+                i += 2
+                in_block_comment = False
+                continue
+            i += 1
+            continue
+
+        if not in_single and not in_double:
+            if ch == "-" and nxt == "-":
+                in_line_comment = True
+                out.append(ch)
+                i += 1
+                continue
+            if ch == "/" and nxt == "*":
+                in_block_comment = True
+                out.append(ch)
+                i += 1
+                continue
+
         if ch == "'" and not in_double:
             in_single = not in_single
         elif ch == '"' and not in_single:
             in_double = not in_double
+
         if ch == "?" and not in_single and not in_double:
             out.append(f":p{n}")
             n += 1
         else:
             out.append(ch)
+        i += 1
     return "".join(out)
 
 
