@@ -6,7 +6,7 @@ import {
   Search, History, PieChart, Bookmark, Users, Globe, CheckCircle2,
   Star, LogIn, TrendingUp, ArrowUpRight, ArrowDownRight, Menu,
   ChevronLeft, ChevronRight, Radio, Settings2, Briefcase, Calendar, Sparkles,
-  FlaskConical, Layers, MonitorDot, ChartLine, X, MessageSquare, Gauge,
+  FlaskConical, Layers, MonitorDot, ChartLine, X, MessageSquare, Gauge, FileDown,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { nseStocksData } from '../data/nseStocks';
@@ -126,6 +126,7 @@ const NAV_GROUPS: NavGroup[] = [
       { icon: CheckCircle2,  label: 'ToDo',       id: 'todo'      },
       { icon: MonitorDot,    label: 'Monitor',    id: 'monitor'   },
       { icon: Calendar,      label: 'Jobs',       id: 'jobs'      },
+      { icon: FileDown,      label: 'Export Portfolio', id: 'export-picks' },
     ],
   },
 ];

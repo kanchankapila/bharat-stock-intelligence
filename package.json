@@ -26,6 +26,7 @@
     "update:sectors": "tsx scripts/updateSectors.ts",
     "smoke:ci": "tsx scripts/ci_smoke_test.ts",
     "dq:check": "tsx scripts/run_data_quality_checks.ts",
+    "schema:drift": "tsx scripts/checkSchemaDrift.ts",
     "migrate:up": "node-pg-migrate up -d POSTGRES_URL",
     "migrate:down": "node-pg-migrate down -d POSTGRES_URL",
     "migrate:create": "node-pg-migrate create -j sql -d POSTGRES_URL"
