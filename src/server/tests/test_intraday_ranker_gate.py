@@ -131,6 +131,40 @@ class TestEmissionGate:
         assert allowed is False, "a failed edge lookup must fail CLOSED, not open"
 
 
+class TestEmissionGateConstantsArePinned:
+    """The emission gate's whole job is to keep the engine's negative-edge Buy signals from
+    publishing. Loosening EMISSION_GATE_MIN_TRADES/MIN_AVG_PNL/LOOKBACK_DAYS would make the
+    gate easier to satisfy without the underlying edge actually improving -- i.e. exactly the
+    kind of silent weakening that would let a load-bearing constraint quietly stop doing its
+    job. Pinned here so any such change requires a conscious edit to this test, with a reason,
+    rather than slipping through as an incidental tweak. Run
+    `python scripts/check_load_bearing_constraints.py` before changing any of these -- it
+    reports the CURRENT live trailing edge, which is what should justify a change, not the
+    other way around."""
+
+    def test_min_trades_not_silently_lowered(self):
+        assert ir.EMISSION_GATE_MIN_TRADES == 100, (
+            f"EMISSION_GATE_MIN_TRADES changed to {ir.EMISSION_GATE_MIN_TRADES} -- a lower "
+            "sample-size floor makes the gate easier to open on noise, not on real edge."
+        )
+
+    def test_min_avg_pnl_not_silently_lowered_below_breakeven(self):
+        assert ir.EMISSION_GATE_MIN_AVG_PNL == 0.0, (
+            f"EMISSION_GATE_MIN_AVG_PNL changed to {ir.EMISSION_GATE_MIN_AVG_PNL} -- this gate "
+            "exists specifically to require a POSITIVE trailing edge before publishing; "
+            "anything below 0.0%/trade would let the engine publish while still losing money "
+            "net of the realised outcomes it's grading itself against."
+        )
+
+    def test_lookback_window_not_silently_shortened(self):
+        # A shorter window makes the trailing-edge estimate noisier and easier to flip open on
+        # a lucky few days -- 10d was chosen deliberately, not a placeholder.
+        assert ir.EMISSION_GATE_LOOKBACK_DAYS == 10, (
+            f"EMISSION_GATE_LOOKBACK_DAYS changed to {ir.EMISSION_GATE_LOOKBACK_DAYS} -- "
+            "shortening this window makes the realised-edge estimate noisier, not more current."
+        )
+
+
 # ── Reversal component ────────────────────────────────────────────────────────
 
 def _bar(sym, hhmm, hi, lo, close, vol=1000, ss="00"):
