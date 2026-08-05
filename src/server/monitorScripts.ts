@@ -457,14 +457,31 @@ export const MONITOR_SCRIPTS = [
     label: 'Intraday Breadth Capture',
     category: 'Data',
     critical: true,
-    description: 'Live adv/dec breadth nowcast off the 5-min quote refresh, feeding intraday_regime.py. Snapshot is throttled to every 15 min (matching the regime detector cadence) to avoid 3× redundant DB writes — the 20-min staleness guard in intraday_regime.py still sees a fresh row every cycle. Runs off the Node process setInterval (not a BullMQ job) -- no catch-up on a restart, so this is the one guard that catches a silent capture outage (e.g. the 2026-07-16 all-day gap).',
+    description: 'Live adv/dec breadth nowcast off the 5-min quote refresh, feeding intraday_regime.py. Snapshot is throttled to every 15 min (matching the regime detector cadence) to avoid 3× redundant DB writes — the 20-min staleness guard in intraday_regime.py still sees a fresh row every cycle. Runs inside the market-regime-refresh BullMQ worker (queues.ts) -- no catch-up on a restart, so this is the one guard that catches a silent capture outage (e.g. the 2026-07-16 all-day gap).',
     schedule: 'Every 15 min, market hours',
     pyScript: null,
     queueName: null,
     staleLimitHours: 1,
-    // Every 15 min, 9:15am-4:00pm IST (3:45-10:00 UTC, rounded to hour boundaries).
+    // Real window is 9:15am-3:30pm IST (3:45-10:00 UTC). market-regime-refresh's own
+    // isMarketOpen() guard (queues.ts) only calls persistIntradayBreadth() inside real NSE
+    // trading hours, and only stamps recordHeartbeat('intraday-breadth-capture', ...) on THAT
+    // branch (unlike its siblings market-regime-refresh/intraday-ranker, which also stamp
+    // 'success' on the closed-market early-return). The underlying job's own *registered* cron
+    // ('*/15 3-10 * * 1-5' in queues.ts) is rounded to hour boundaries for BullMQ's benefit, so
+    // it fires through 10:45 UTC -- 45 min past the real 10:00 UTC close. Mirroring that coarse
+    // pattern here made computeCronLateness() expect an occurrence as late as 10:45 UTC, and
+    // since no later occurrence exists until the next trading day it pins expectedAt there for
+    // the rest of the evening -- while the real MAX(snapshot_at) freezes at ~10:00:00 (the last
+    // genuine capture). Net effect: a real "Critical engine stale" Telegram alert fired every
+    // single trading-day evening (deadline = 10:15 UTC prev-occurrence + 25min grace = 10:40 UTC
+    // onward) -- confirmed live 2026-08-04/05 (last real snapshot_at 2026-08-04T10:00:00.238Z,
+    // matching the digest's own stale alert). Fixed by bounding the expected-occurrence set to
+    // the REAL 3:45-10:00 UTC window with 3 sub-patterns instead of one coarse hour-range one --
+    // deliberately NOT the literal repeat pattern registered in queues.ts (see the
+    // monitorScriptsCronMirror.test.ts exclusion for this id, matching the news-sentiment
+    // precedent for a synthesized-but-verified-equivalent cron set).
     // graceMinutes: 25 = 15-min interval + 10 min tolerance for a slow quote-fetch cycle.
-    cronPatterns: ['*/15 3-10 * * 1-5'],
+    cronPatterns: ['45 3 * * 1-5', '*/15 4-9 * * 1-5', '0 10 * * 1-5'],
     graceMinutes: 25,
   },
   // Both entries below (2026-08-03) close a gap found while auditing whether JOB_REGISTRY's

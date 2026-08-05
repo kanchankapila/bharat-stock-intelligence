@@ -3,6 +3,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { CronExpressionParser } from 'cron-parser';
 import { MONITOR_SCRIPTS } from '../monitorScripts';
+import { computeCronLateness } from '../jobHeartbeat';
 
 /**
  * Guards against the class of bug found 2026-08-03 while auditing job/Telegram health:
@@ -74,7 +75,14 @@ describe('MONITOR_SCRIPTS cronPatterns mirror consistency', () => {
   // `every:` fires every N ms from an arbitrary phase, not necessarily aligned to :00/:15/:30/
   // :45 the way a cron `*/15 * * * *` is, so this string was never going to appear literally
   // in source and never should. It gets its own equivalence check below instead.
-  it.each(withCron.filter(s => s.id !== 'news-sentiment').flatMap(s => s.cronPatterns.map((p: string) => ({ id: s.id, pattern: p }))))(
+  //
+  // intraday-breadth-capture (fixed 2026-08-05) is excluded for the same reason: its 3
+  // sub-patterns ('45 3 * * 1-5', '*/15 4-9 * * 1-5', '0 10 * * 1-5') deliberately narrow the
+  // real market-hours window to 3:45-10:00 UTC, tighter than the underlying job's OWN
+  // registered '*/15 3-10 * * 1-5' (which is hour-boundary-rounded through 10:45 UTC and
+  // caused a real daily false "stale" alert -- see the entry's own comment in
+  // monitorScripts.ts). None of the 3 sub-patterns will ever appear verbatim in source.
+  it.each(withCron.filter(s => s.id !== 'news-sentiment' && s.id !== 'intraday-breadth-capture').flatMap(s => s.cronPatterns.map((p: string) => ({ id: s.id, pattern: p }))))(
     '$id: cronPattern "$pattern" exists as a real repeat pattern somewhere in source',
     ({ pattern }) => {
       // A pattern that exists nowhere in source is definitely stale -- this alone would have
@@ -106,6 +114,61 @@ describe('MONITOR_SCRIPTS cronPatterns mirror consistency', () => {
       expect(next - prev).toBe(15 * 60_000);
       prev = next;
     }
+  });
+
+  describe("intraday-breadth-capture's synthesized cronPatterns fix (2026-08-05)", () => {
+    // Reproduces the exact live false-positive found via the daily Telegram digest: real
+    // last capture 2026-08-04T10:00:00.238Z (market close, 15:30 IST), checked at various
+    // points through that evening and the next trading day's open.
+    const REAL_LAST_SNAPSHOT = new Date('2026-08-04T10:00:00.238Z').getTime();
+
+    it('entry carries the narrowed 3-pattern set, not the coarse hour-rounded job cron', () => {
+      const entry = (MONITOR_SCRIPTS as readonly any[]).find(s => s.id === 'intraday-breadth-capture');
+      expect(entry?.cronPatterns).toEqual(['45 3 * * 1-5', '*/15 4-9 * * 1-5', '0 10 * * 1-5']);
+    });
+
+    it('the 3 sub-patterns never expect an occurrence past 10:00 UTC on the capture day', () => {
+      const patterns = ['45 3 * * 1-5', '*/15 4-9 * * 1-5', '0 10 * * 1-5'];
+      const cap = new Date('2026-08-04T10:00:00.000Z').getTime();
+      // Check every 5 minutes from shortly after close through midnight -- expectedAt must
+      // stay pinned at/before 10:00 UTC throughout, never advance to 10:15/10:30/10:45 the
+      // way the old coarse '*/15 3-10 * * 1-5' pattern did. Start at +5min: cron-parser's
+      // .prev() is exclusive of `now` itself, so checking exactly AT 10:00:00 returns the
+      // PRIOR (09:45) occurrence -- not a bug, just means the boundary instant itself needs
+      // its own margin, same as any exclusive-prev cron check.
+      for (let mins = 5; mins <= 14 * 60; mins += 5) {
+        const now = new Date(cap + mins * 60_000);
+        const { late, expectedAt } = computeCronLateness(patterns, 25, REAL_LAST_SNAPSHOT, now);
+        expect(expectedAt.getTime()).toBeLessThanOrEqual(cap);
+        expect(late).toBe(false);
+      }
+    });
+
+    it('NEGATIVE CONTROL: the old coarse single pattern really does false-flag "stale" for the rest of the evening', () => {
+      // Proves the bug was real, not hypothetical -- the exact pattern this entry carried
+      // before the 2026-08-05 fix. Checked at 11:15 UTC = 10:45 (last coarse occurrence) +
+      // 25min grace + 5min margin, i.e. just past the deadline the real digest alert crossed.
+      const oldPattern = ['*/15 3-10 * * 1-5'];
+      const checkAt = new Date('2026-08-04T11:15:00Z');
+      const { late, expectedAt } = computeCronLateness(oldPattern, 25, REAL_LAST_SNAPSHOT, checkAt);
+      expect(expectedAt.toISOString()).toBe('2026-08-04T10:45:00.000Z');
+      expect(late).toBe(true); // <-- this is the false "Critical engine stale" alert from the digest
+    });
+
+    it('correctly flags genuinely stale (zero captures all day) once that day\'s session has closed', () => {
+      // NOTE: during continuous market hours this check structurally can't fire "late" for a
+      // 15-min-cadence pattern with a 25min grace (interval < grace means the rolling deadline
+      // is always a few minutes in the FUTURE relative to `now`) -- by design, an intraday gap
+      // is only ever caught once the day's window has actually closed with nothing landed.
+      const patterns = ['45 3 * * 1-5', '*/15 4-9 * * 1-5', '0 10 * * 1-5'];
+      // Last real snapshot is a full trading day earlier than the day being checked -- i.e.
+      // 2026-08-04 had ZERO captures at all, checked that same evening (same checkpoint as
+      // the false-positive scenario above, but this time genuinely nothing landed that day).
+      const staleSince = new Date('2026-08-03T10:00:00.238Z').getTime();
+      const checkAt = new Date('2026-08-04T11:15:00Z');
+      const { late } = computeCronLateness(patterns, 25, staleSince, checkAt);
+      expect(late).toBe(true);
+    });
   });
 
   // Pinned regressions for the five entries fixed 2026-08-03, tied to their specific driving
