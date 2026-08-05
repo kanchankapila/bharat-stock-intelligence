@@ -46,7 +46,20 @@ export function syncNSEStocksToDatabase(): { success: boolean; message: string; 
         const BATCH_SIZE = 100;
         const ROW_PH = `(?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)`;
         const COLS = `symbol,name,sector,industry,isin,listing_date,exchange,status,last_updated`;
-        const CONFLICT = `name=excluded.name,sector=excluded.sector,industry=excluded.industry,`
+        // sector/industry: the static src/data/nseStocks.ts seed file hardcodes 'Unknown' for
+        // ~95% of symbols (real classification is backfilled separately by
+        // backfill_sector_mc.py/backfill_sector_industry.py, chained right after this sync --
+        // see processNSESync in jobs/sync.jobs.ts). This job runs weekly; a blind
+        // `sector=excluded.sector` would silently wipe every backfilled real value back to
+        // 'Unknown' on the very next run. Only take the incoming value when it's a genuine
+        // classification, or when the existing row has nothing at all (first-ever sync) --
+        // never let a placeholder downgrade a real one, matching the "gap-fill only, never
+        // clobber" convention the backfill scripts themselves already follow.
+        const CONFLICT = `name=excluded.name,`
+          + `sector=CASE WHEN excluded.sector IS NOT NULL AND excluded.sector NOT IN ('','Unknown') THEN excluded.sector `
+          +   `WHEN nse_stocks.sector IS NULL THEN excluded.sector ELSE nse_stocks.sector END,`
+          + `industry=CASE WHEN excluded.industry IS NOT NULL AND excluded.industry NOT IN ('','Unknown') THEN excluded.industry `
+          +   `WHEN nse_stocks.industry IS NULL THEN excluded.industry ELSE nse_stocks.industry END,`
           + `isin=excluded.isin,listing_date=excluded.listing_date,last_updated=CURRENT_TIMESTAMP`;
 
         let inserted = 0;

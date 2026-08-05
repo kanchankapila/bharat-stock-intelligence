@@ -106,10 +106,41 @@ async function processNSESync(_job: Job): Promise<{ success: boolean; stockCount
     const result = await syncNSEStocksToDatabase();
     const stockCount = (result?.inserted || 0) + (result?.updated || 0);
     console.log(`[QUEUE] NSE sync completed, ${stockCount} stocks updated`);
+    // Real sector/industry source (2026-08-05): backfill_sectors.py alone was a structural
+    // no-op for ~95% of the universe -- its only source, confluence_signals.sector, is itself
+    // populated from nse_stocks.sector (see confluenceEngine.ts's nseMap), so it can never
+    // create a classification that didn't already exist in nse_stocks. Live production showed
+    // 2,216/2,366 ACTIVE symbols stuck at sector='Unknown' despite this step running weekly for
+    // as long as nse-sync-weekly has existed. backfill_sector_mc.py hits MoneyControl's
+    // pricefeed (an independent, non-circular source, ~98% coverage) and is the one that
+    // actually creates new classifications; measured ~9-10 min live against the full universe
+    // (2328 mcsymbol-bearing stocks @ ~0.25s/req), hence the generous 900s budget below and the
+    // lockDuration bump on this job. Runs BEFORE backfill_sectors.py so that step's propagation
+    // into recommendation_log/unified_signals/signals picks up the freshest sector data, not a
+    // stale/absent one. --enumerate re-fetches every mcsymbol-bearing stock each run (no
+    // incremental mode in the script) -- acceptable at this job's weekly cadence, since sector
+    // classification changes rarely and a full weekly refresh also self-heals any transient
+    // per-symbol MC miss from the prior run.
+    await runPython('backfill_sector_mc.py', ['--enumerate', '--write', '--report-unmapped'], 900_000)
+      .catch(err => console.warn('[QUEUE] MC sector backfill failed (non-blocking):', (err as Error).message));
     // Backfill canonical nse_stocks.sector from already-resolved confluence data, then
     // propagate to historical signal tables. Keeps sector segmentation healthy over time.
     await runPython('backfill_sectors.py', [], 120_000)
       .catch(err => console.warn('[QUEUE] sector backfill failed (non-blocking):', (err as Error).message));
+    // Provider-mapping backfill (2026-08-05): mcsymbol/tlid resolution -- npm run sync:mappings
+    // was manual-only (a package.json script, never scheduled), so newly-added nse_stocks rows
+    // (this same job's syncNSEStocksToDatabase() call, above, can insert brand-new symbols)
+    // silently accumulated with no provider mapping forever. Live production had 544/2366
+    // ACTIVE symbols missing mcsymbol or tlid before this was first run by hand. Imported
+    // rather than shelled out to, matching how syncNSEStocksToDatabase itself is called above.
+    try {
+      const { syncMappings } = await import('../../../scripts/syncAllStockMappings');
+      const mapResult = await syncMappings();
+      console.log(`[QUEUE] stock-mapping sync completed (updated ${mapResult.updatedCount}, `
+        + `skipped ${mapResult.skippedCount}, failed ${mapResult.failedCount})`);
+    } catch (err) {
+      console.warn('[QUEUE] stock-mapping sync failed (non-blocking):', (err as Error).message);
+    }
     // Index membership flags (Nifty50/100/200/Midcap150/Smallcap250) — passive ETF flow signal.
     await runPython('index_membership_fetcher.py', [], 60_000)
       .catch(err => console.warn('[QUEUE] index_membership_fetcher failed (non-blocking):', (err as Error).message));
@@ -220,7 +251,12 @@ export async function registerSyncJobs(connection: any) {
     processor: processNSESync,
     monitorName: 'nse-sync',
     concurrency: 1,
-    lockDuration: 180000, // 3 minutes for NSE API calls
+    // Was 180000 (3 min, NSE API calls only) -- bumped 2026-08-05 to cover the new
+    // backfill_sector_mc.py step (measured ~9-10 min live enumerate against the full
+    // mcsymbol-bearing universe) plus backfill_sectors.py (120s) and
+    // index_membership_fetcher.py (60s), with real margin above the sum.
+    lockDuration: 20 * 60_000,
+    lockRenewTime: 5 * 60_000,
     // Preserves the original handler's extra `(${stockCount} stocks)` detail in the completed
     // log line (the standard helper logs a plain '... completed' line above it).
     onCompleted: (result: any) => console.log(`[QUEUE] nse-sync completed (${result?.stockCount || 0} stocks)`),

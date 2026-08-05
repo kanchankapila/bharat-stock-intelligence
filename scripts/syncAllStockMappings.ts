@@ -1,3 +1,4 @@
+import { pathToFileURL } from 'node:url';
 import { nseStocksData } from '../src/data/nseStocks';
 import { resolveMoneycontrolSymbol, getStockMapping } from '../src/server/stockMapping';
 import { dbGet, dbRun } from '../src/server/dbAsync';
@@ -19,7 +20,7 @@ async function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function syncMappings() {
+export async function syncMappings() {
   console.log(`Starting sync for ${nseStocksData.length} stocks...`);
 
   let updatedCount = 0;
@@ -125,6 +126,13 @@ async function syncMappings() {
   console.log(`Updated: ${updatedCount}`);
   console.log(`Skipped: ${skippedCount}`);
   console.log(`Failed:  ${failedCount}`);
+  return { updatedCount, skippedCount, failedCount };
 }
 
-syncMappings().catch(console.error);
+// Only auto-run when executed directly (`npm run sync:mappings` / `tsx scripts/...`) --
+// exported separately so processNSESync (jobs/sync.jobs.ts) can import and call it instead
+// of shelling out, matching how nseService.ts's syncNSEStocksToDatabase is already imported
+// and called there rather than run as its own subprocess.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  syncMappings().catch(console.error);
+}

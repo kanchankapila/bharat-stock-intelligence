@@ -1002,6 +1002,15 @@ class UnifiedRanker:
             return {}
 
     def _get_unified_signals_latest_map(self):
+        # WHERE signal_type = 'BUY': unified_signals carries a real direction column with
+        # genuinely different geometry conventions per direction (signals.ts's exit logic
+        # treats BUY/SELL rows' stop/target oppositely). This fallback's own caller
+        # (_get_entry_targets) only ever attaches its result to a long-entry-style setup
+        # (entry_zone_low/high, target above, stop below -- see the fallback-2 branch this
+        # mirrors), so an unfiltered "latest row regardless of direction" could hand a
+        # Buy-classified row a SELL signal's inverted short-style geometry. Filtering here
+        # matches the BUY-only convention _log_recommendations() already established for the
+        # recommendation_log fallback one tier up.
         try:
             rows = self.conn.execute("""
                 SELECT * FROM (
@@ -1009,6 +1018,7 @@ class UnifiedRanker:
                            stop_loss AS "stopLoss", reasoning AS trade_reasoning,
                            ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY signal_generated_at DESC) AS rn
                     FROM unified_signals
+                    WHERE signal_type = 'BUY'
                 ) t WHERE rn = 1
             """).fetchall()
             return {r['symbol']: r for r in rows}
@@ -1057,6 +1067,14 @@ class UnifiedRanker:
             }
 
         # Fallback 2: recommendation_log
+        # rr floor (2026-08-05): unlike fallback 1 (confluence_signals), whose own
+        # buildTradeSetup() can only ever produce risk_reward in {2,3,4} by construction
+        # (reward/risk cancels to the reward multiplier), this reads a genuinely independent
+        # entry/stop/target triple and can legitimately compute rr<1 -- live production had
+        # Buy-classified rows presenting e.g. a 0.69 R:R as an actionable long setup. A
+        # sub-1 R:R isn't a data-integrity bug in the source row itself, but it's not a trade
+        # plan this ranker should hand out as "Buy" geometry either -- fall through to the
+        # next, hopefully-better source instead of accepting it.
         row = rec_log_map.get(symbol)
         if row and row['entry_price'] is not None:
             ep = float(row['entry_price'])
@@ -1065,20 +1083,26 @@ class UnifiedRanker:
             rr = None
             if sl is not None and ep - sl > 0 and t1 is not None:
                 rr = round((t1 - ep) / (ep - sl), 2)
-            return {
-                'entry_zone_low':  round(ep * 0.99, 2),
-                'entry_zone_high': round(ep * 1.01, 2),
-                'stop_loss':       sl,
-                'target_1':        t1,
-                'target_2':        float(row['target_2']) if row['target_2'] is not None else None,
-                'target_3':        float(row['target_3']) if row['target_3'] is not None else None,
-                'risk_reward':     rr,
-                'timeframe':       row['timeframe'],
-                'trade_reasoning': row['trade_reasoning'],
-                'sector':          row['sector'],
-            }
+            if rr is None or rr >= 1.0:
+                return {
+                    'entry_zone_low':  round(ep * 0.99, 2),
+                    'entry_zone_high': round(ep * 1.01, 2),
+                    'stop_loss':       sl,
+                    'target_1':        t1,
+                    'target_2':        float(row['target_2']) if row['target_2'] is not None else None,
+                    'target_3':        float(row['target_3']) if row['target_3'] is not None else None,
+                    'risk_reward':     rr,
+                    'timeframe':       row['timeframe'],
+                    'trade_reasoning': row['trade_reasoning'],
+                    'sector':          row['sector'],
+                }
 
-        # Fallback 3: unified_signals
+        # Fallback 3: unified_signals — same rr floor as fallback 2, same reasoning: fall
+        # through to fallback 4 rather than accepting a sub-1 R:R setup. trade_reasoning is
+        # not specially preserved here (unlike a returned row) — the caller's own
+        # screener_summary fallback (see `if not et.get('trade_reasoning')` in run()) already
+        # covers this case with equally relevant context (why the stock scored the way it did),
+        # so there's nothing lost by falling through the same way fallback 2 does.
         row = unified_map.get(symbol)
         if row and row['entry'] is not None:
             ep = float(row['entry'])
@@ -1087,18 +1111,19 @@ class UnifiedRanker:
             rr = None
             if sl is not None and ep - sl > 0 and t1 is not None:
                 rr = round((t1 - ep) / (ep - sl), 2)
-            return {
-                'entry_zone_low':  round(ep * 0.99, 2),
-                'entry_zone_high': round(ep * 1.01, 2),
-                'stop_loss':       sl,
-                'target_1':        t1,
-                'target_2':        None,
-                'target_3':        None,
-                'risk_reward':     rr,
-                'timeframe':       'SWING',
-                'trade_reasoning': row['trade_reasoning'],
-                'sector':          sector_map.get(symbol),
-            }
+            if rr is None or rr >= 1.0:
+                return {
+                    'entry_zone_low':  round(ep * 0.99, 2),
+                    'entry_zone_high': round(ep * 1.01, 2),
+                    'stop_loss':       sl,
+                    'target_1':        t1,
+                    'target_2':        None,
+                    'target_3':        None,
+                    'risk_reward':     rr,
+                    'timeframe':       'SWING',
+                    'trade_reasoning': row['trade_reasoning'],
+                    'sector':          sector_map.get(symbol),
+                }
 
         # Fallback 4: default fallback with sector only
         return {
@@ -1261,6 +1286,22 @@ class UnifiedRanker:
             et = self._get_entry_targets(sym, confluence_map, rec_log_map, unified_map, sector_map)
             if not et.get('trade_reasoning'):
                 et['trade_reasoning'] = screener_summary
+
+            # Direction/geometry backstop: `_get_entry_targets`'s 3 fallback sources
+            # (confluence_signals, recommendation_log, unified_signals) are looked up by
+            # bare symbol only, with no awareness of THIS row's own `classification` --
+            # confluence_signals in particular can carry a long-only setup for a stock this
+            # ranker itself classifies Sell/Strong Sell (different bull/bear-count mechanism,
+            # confirmed live: Sell rows were storing entry/stop/target as if they were long
+            # trade plans). position_size_pct is already zeroed for anything outside
+            # Buy/Strong Buy (see raw_sizes above) -- extend that same "not an actionable long
+            # entry" invariant to the geometry fields themselves, at the point of truth, so no
+            # future drift in any upstream source can reintroduce this. trade_reasoning/sector
+            # stay -- they're informational, not a trade plan.
+            if classification not in ('Strong Buy', 'Buy'):
+                for k in ('entry_zone_low', 'entry_zone_high', 'stop_loss',
+                          'target_1', 'target_2', 'target_3', 'risk_reward', 'timeframe'):
+                    et[k] = None
 
             results.append({
                 'symbol':                  sym,
