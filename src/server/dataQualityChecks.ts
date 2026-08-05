@@ -684,6 +684,45 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     },
   },
 
+  // ── ML state (hand-rolled — not a datasource, so not in TABLE_FRESHNESS_CHECKS) ─────────
+  {
+    // 2026-08-05: converts a "worth re-checking after any material regime shift, not just
+    // trusting it's handled" review note into an actual automated check, rather than leaving
+    // it as something a human has to remember to look at. ml_calibration.py's
+    // edge_adjusted_probability() only shrinks a regime's win_probability toward neutral once
+    // that regime's LIVE discrimination decays below AUC_TRUST_FLOOR (0.55) -- this surfaces
+    // the moment that happens in the daily digest instead of relying on someone re-running
+    // scripts/diff_edge_adjustment.py by hand.
+    id: 'regime-edge-trust-floor',
+    label: 'ML win-probability regime edge status',
+    category: 'ml',
+    critical: false,
+    sql: `SELECT
+            SUM(CASE WHEN ready = 1 AND auc < 0.55 THEN 1 ELSE 0 END) AS breached_count,
+            SUM(CASE WHEN ready = 1 THEN 1 ELSE 0 END) AS ready_count,
+            MAX(computed_at) AS latest_computed_at
+          FROM regime_edge_status`,
+    evaluate: (row, now) => {
+      const readyCount = Number(row?.ready_count ?? 0);
+      const breachedCount = Number(row?.breached_count ?? 0);
+      if (readyCount === 0) {
+        return { status: 'pass', detail: 'No regime has accumulated enough history yet to evaluate live win-probability edge — expected while history builds.' };
+      }
+      const stale = daysStale(row?.latest_computed_at, now);
+      if (stale != null && stale > 3) {
+        return { status: 'warn', detail: `regime_edge_status hasn't refreshed in ${fmtDays(stale)} — ml_calibration.py's nightly snapshot may not be running.` };
+      }
+      if (breachedCount > 0) {
+        // Not critical: this doesn't mean anything is broken, just that a regime's live
+        // discrimination has decayed — edge_adjusted_probability() (if app_settings.
+        // edge_adjustment_enabled='true') will start shrinking that regime's win_probability
+        // toward neutral, which is the intended self-correction, not a failure to fix here.
+        return { status: 'warn', detail: `${breachedCount} of ${readyCount} regime(s) with sufficient history now sit below the 0.55 live-edge trust floor.` };
+      }
+      return { status: 'pass', detail: `All ${readyCount} regime(s) with sufficient history clear the live-edge trust floor.` };
+    },
+  },
+
   // ── Generated from TABLE_FRESHNESS_CHECKS (see the factory + mandate comment above) ──────
   ...TABLE_FRESHNESS_CHECKS.map(makeFreshnessCheck),
 ];

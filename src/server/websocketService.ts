@@ -120,13 +120,25 @@ export class WebSocketSignalService {
       timestamp: new Date().toISOString(),
     });
 
-    // NOTE: this threshold is effectively unreachable and has not fired since 2026-07-18.
-    // `confidence` here is the quant win_probability x100 (commit 0609a49 replaced the LLM's
-    // self-reported 85-98 confidence with it); win_probability peaks around 0.41 across the
-    // universe, so `>= 85` never passes. Stock recommendations are delivered by the daily
-    // digest in telegramRecommendations.ts instead. Left in place rather than re-tuned:
-    // lowering it would restore a ~1000-alerts/day firehose that was deliberately removed.
-    if (alert.signal && alert.signal.signalType === 'BUY' && (alert.signal.confidence ?? 0) >= 85) {
+    // FIXED 2026-08-05: this threshold was effectively unreachable and had not fired since
+    // 2026-07-18. `confidence` here is the quant win_probability x100 (commit 0609a49 replaced
+    // the LLM's self-reported 85-98 confidence with it); win_probability peaks around 0.41
+    // across the universe, so `>= 85` never passed. Note this only ever gated a *legacy
+    // per-signal* Telegram ping nested inside this function -- `this.broadcast()` two lines up
+    // (the actual WebSocket push to connected frontend clients) was NEVER gated by this check
+    // and has always fired for every AI/technical signal reaching this function; the dead
+    // threshold only silenced this secondary Telegram notification, not real-time delivery.
+    //
+    // Dropped the redundant absolute-confidence floor rather than re-tuning it to a new magic
+    // number: `processAISignal` (queues.ts) already gates on getAISignalMinConfidence() (win
+    // probability >= ~0.40-0.42, ~14/2264 stocks/day) BEFORE this function is ever called with
+    // source: 'AI' -- re-checking an absolute value here a second time, on a scale this
+    // function doesn't own, is exactly what broke last time the scale changed underneath it.
+    // Scoped to source === 'AI' specifically so the canonical unified_ranker broadcast wired
+    // in via broadcastCanonicalPicks() (unifiedSignalBroadcast.ts, source: 'UNIFIED') does NOT
+    // also trigger this -- telegramRecommendations.ts's once-daily digest is already the
+    // canonical Telegram delivery path for those picks; firing both would double-notify.
+    if (alert.source === 'AI' && alert.signal && alert.signal.signalType === 'BUY') {
       telegramService.sendSignalNotification(
         alert.symbol,
         'BUY',

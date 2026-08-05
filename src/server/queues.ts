@@ -2148,6 +2148,19 @@ export async function initQueues(): Promise<boolean> {
         // quality/win-prob loaders). The old 5-min budget timeout-killed 19 of its last
         // 24 runs, leaving unified_recommendations stale for the Top Rated tab.
         await runPython('unified_ranker.py', [], 30 * 60_000);
+
+        // Push today's highest-conviction canonical picks over WebSocket (2026-08-05 fix --
+        // see unifiedSignalBroadcast.ts's header for the gap this closes). Best-effort: the
+        // ranker's own DB write already succeeded above, so a broadcast failure here must
+        // never fail the job.
+        try {
+          const { broadcastCanonicalPicks } = await import('./unifiedSignalBroadcast');
+          const { wsSignalService } = await import('./websocketService');
+          const sent = await broadcastCanonicalPicks(wsSignalService);
+          console.log(`[QUEUE] unified-ranker broadcast ${sent} canonical pick(s) over WebSocket`);
+        } catch (e) {
+          console.warn('[QUEUE] unified-ranker WS broadcast failed:', (e as Error).message);
+        }
       },
       // No lockDuration previously -- fell back to BullMQ's 30s default while awaiting a
       // runPython call allowed up to 5 minutes, causing repeated "job stalled" failures

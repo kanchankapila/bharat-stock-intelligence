@@ -90,7 +90,13 @@ def make_db():
             symbol TEXT NOT NULL, computed_at DATETIME NOT NULL,
             confluence_score REAL, entry_zone_low REAL, entry_zone_high REAL,
             stop_loss REAL, target_1 REAL, target_2 REAL, target_3 REAL,
-            risk_reward REAL, suggested_timeframe TEXT, trade_reasoning TEXT, sector TEXT
+            risk_reward REAL, suggested_timeframe TEXT, trade_reasoning TEXT, sector TEXT,
+            trend_alignment_score REAL, volume_score REAL,
+            sector_strength_score REAL, fundamental_score REAL
+        );
+        CREATE TABLE stock_ohlcv (
+            symbol TEXT NOT NULL, date TEXT NOT NULL, close REAL, is_suspect INTEGER,
+            PRIMARY KEY (symbol, date)
         );
     ''')
     return conn
@@ -676,6 +682,71 @@ class TestConfluenceUrlSymbolGuard:
         os.unlink(csv_path)
 
 
+class TestConfluenceScoresDecorrelation:
+    """2026-08-05 fix (screener double-counting finding): the 'confluence' engine used to read
+    confluence_signals.confluence_score directly -- screenerComponent(0-60) + trend(0-15) +
+    volume(0-10) + sector(0-8) + fundamental(0-12) (confluenceEngine.ts's scoreStock()) -- up
+    to 60 of its own ~105 raw points is the SAME screener membership the separate 'screener'
+    engine (20-40% weight) already counts in full. It must now read only the four persisted
+    non-screener sub-score columns, so the 8-engine blend has one fewer correlated pair."""
+
+    def _seed(self, conn, symbol, confluence_score, trend=0, vol=0, sector=0, fund=0):
+        conn.execute(
+            "INSERT INTO confluence_signals "
+            "(symbol, computed_at, confluence_score, trend_alignment_score, volume_score, "
+            " sector_strength_score, fundamental_score) VALUES (?, datetime('now'), ?, ?, ?, ?, ?)",
+            (symbol, confluence_score, trend, vol, sector, fund),
+        )
+        conn.commit()
+
+    def test_ignores_the_screener_driven_total_score(self):
+        """A stock whose confluence_score is almost entirely the screener component must NOT
+        score near the top once that component is excluded -- its real non-screener
+        confirmation (trend+vol+sector+fund) is tiny."""
+        from unified_ranker import UnifiedRanker
+        conn = make_db()
+        ranker = UnifiedRanker(conn=conn)
+        # A: confluence_score is almost entirely screener-driven (60 of 62 raw points).
+        self._seed(conn, 'A', confluence_score=62, trend=1, vol=1, sector=0, fund=0)
+        # B: LOWER overall confluence_score, but its non-screener confirmation is much
+        # stronger (real trend/volume/sector/fundamental evidence, little screener credit).
+        self._seed(conn, 'B', confluence_score=40, trend=15, vol=10, sector=8, fund=12)
+
+        scores = ranker._get_confluence_scores()
+        assert scores['B'] > scores['A']
+
+    def test_sums_exactly_the_four_non_screener_columns(self):
+        from unified_ranker import UnifiedRanker
+        conn = make_db()
+        ranker = UnifiedRanker(conn=conn)
+        self._seed(conn, 'A', confluence_score=999, trend=5, vol=3, sector=2, fund=1)  # 999 ignored
+        self._seed(conn, 'B', confluence_score=0,   trend=0, vol=0, sector=0, fund=0)
+        scores = ranker._get_confluence_scores()
+        # _normalize_to_100's percentile-rank formula (less + 0.5*equal)/n*100 -- for 2 distinct
+        # values that's 75/25, not a naive 100/0 -- what matters here is A's real sub-score sum
+        # (11) ranks ABOVE B's (0) despite A's wildly larger (and ignored) confluence_score.
+        assert scores['A'] == pytest.approx(75.0)
+        assert scores['B'] == pytest.approx(25.0)
+        assert scores['A'] > scores['B']
+
+    def test_null_sub_score_columns_treated_as_zero_not_excluded(self):
+        """A row written before this fix (or by any writer that only ever sets
+        confluence_score) has NULL sub-score columns -- these must be treated as zero
+        contribution, not silently dropped or crash the query."""
+        from unified_ranker import UnifiedRanker
+        conn = make_db()
+        ranker = UnifiedRanker(conn=conn)
+        conn.execute(
+            "INSERT INTO confluence_signals (symbol, computed_at, confluence_score) "
+            "VALUES ('LEGACY', datetime('now'), 50)"
+        )
+        self._seed(conn, 'REAL', confluence_score=20, trend=15, vol=10, sector=8, fund=12)
+        conn.commit()
+        scores = ranker._get_confluence_scores()
+        assert 'LEGACY' in scores and 'REAL' in scores
+        assert scores['REAL'] > scores['LEGACY']  # REAL's real sub-scores beat LEGACY's all-NULL 0
+
+
 class TestUIGradeRanking:
     """Calibration + UI-grade output fixes so unified_recommendations can back the Top Rated tab."""
 
@@ -723,6 +794,54 @@ class TestUIGradeRanking:
         from unified_ranker import _classify
         assert _classify(50.0, bull=3, bear=3) == 'Hold'
         assert _classify(50.0, bull=0, bear=0) == 'Hold'
+
+
+class TestDirectionlessScoreFallback:
+    """2026-08-05 fix: a stock off every screener's radar (or exactly tied) used to be
+    Hold-forced regardless of how strong its blended score was -- the other 7 engines never
+    got a vote on direction. Now a genuinely extreme blended score can set direction ONLY in
+    that narrow no-opinion case, past a bar well above the ordinary Strong-tier gate."""
+
+    def test_high_score_no_screener_coverage_becomes_buy(self):
+        from unified_ranker import _classify, DIRECTIONLESS_BUY_FLOOR
+        assert _classify(DIRECTIONLESS_BUY_FLOOR, bull=0, bear=0) == 'Buy'
+
+    def test_very_high_score_no_screener_coverage_becomes_strong_buy(self):
+        from unified_ranker import _classify, DIRECTIONLESS_STRONG_BUY_FLOOR
+        assert _classify(DIRECTIONLESS_STRONG_BUY_FLOOR, bull=0, bear=0) == 'Strong Buy'
+
+    def test_low_score_no_screener_coverage_becomes_sell(self):
+        from unified_ranker import _classify, DIRECTIONLESS_SELL_CEIL
+        assert _classify(DIRECTIONLESS_SELL_CEIL, bull=0, bear=0) == 'Sell'
+
+    def test_very_low_score_no_screener_coverage_becomes_strong_sell(self):
+        from unified_ranker import _classify, DIRECTIONLESS_STRONG_SELL_CEIL
+        assert _classify(DIRECTIONLESS_STRONG_SELL_CEIL, bull=0, bear=0) == 'Strong Sell'
+
+    def test_moderate_score_no_screener_coverage_stays_hold(self):
+        """The fallback only fires on a genuinely extreme score -- an ordinary mid-range score
+        with zero screener coverage must remain Hold, not silently become actionable."""
+        from unified_ranker import _classify, DIRECTIONLESS_BUY_FLOOR, DIRECTIONLESS_SELL_CEIL
+        assert _classify(DIRECTIONLESS_BUY_FLOOR - 0.01, bull=0, bear=0) == 'Hold'
+        assert _classify(DIRECTIONLESS_SELL_CEIL + 0.01, bull=0, bear=0) == 'Hold'
+        assert _classify(55.0, bull=0, bear=0) == 'Hold'
+
+    def test_tied_screener_opinion_uses_the_same_fallback_as_silence(self):
+        """bull==bear (a genuine tied stand-off, total > 0) is treated the same as total==0 --
+        both are 'no net opinion', not distinct cases."""
+        from unified_ranker import _classify, DIRECTIONLESS_BUY_FLOOR
+        assert _classify(DIRECTIONLESS_BUY_FLOOR, bull=4, bear=4) == 'Buy'
+
+    def test_any_net_screener_tilt_overrides_the_fallback_even_at_extreme_scores(self):
+        """The instant screeners express ANY opinion (bull != bear), they take back full
+        authority -- an extreme blended score never overrides an actual (even weak) screener
+        signal in the opposite direction."""
+        from unified_ranker import _classify, DIRECTIONLESS_STRONG_BUY_FLOOR, DIRECTIONLESS_STRONG_SELL_CEIL
+        # Extremely high score, but screeners lean (even slightly) bearish -> still Sell-side,
+        # never a fallback-driven Buy.
+        assert _classify(DIRECTIONLESS_STRONG_BUY_FLOOR, bull=1, bear=2) == 'Sell'
+        # Extremely low score, but screeners lean (even slightly) bullish -> still Buy-side.
+        assert _classify(DIRECTIONLESS_STRONG_SELL_CEIL, bull=2, bear=1) == 'Buy'
 
     def test_normalize_is_robust_to_a_single_outlier(self):
         # min-max collapses the cluster near 0 when one outlier sets the max; percentile rank does not.
@@ -813,6 +932,170 @@ def test_normalize_sizes_respects_cap_and_gross():
 def test_normalize_sizes_all_zero():
     from unified_ranker import normalize_position_sizes
     assert normalize_position_sizes({'a': 0.0, 'b': 0.0}) == {'a': 0.0, 'b': 0.0}
+
+
+# ── Correlation-cluster exposure cap (#27/#30 follow-up, 2026-08-05) ────────────────────
+
+def _dates(n):
+    return [f"2026-06-{d:02d}" for d in range(1, n + 1)]
+
+
+class TestPearson:
+    def test_perfect_positive_correlation(self):
+        from unified_ranker import _pearson
+        a = [1.0, 2.0, 3.0, 4.0, 5.0]
+        b = [2.0, 4.0, 6.0, 8.0, 10.0]  # pure positive scaling of a
+        assert _pearson(a, b) == pytest.approx(1.0)
+
+    def test_perfect_negative_correlation(self):
+        from unified_ranker import _pearson
+        a = [1.0, 2.0, 3.0, 4.0, 5.0]
+        b = [5.0, 4.0, 3.0, 2.0, 1.0]
+        assert _pearson(a, b) == pytest.approx(-1.0)
+
+    def test_zero_variance_series_returns_none(self):
+        from unified_ranker import _pearson
+        # A circuit-locked/flat stretch has zero variance -- correlation is undefined, not 0.
+        assert _pearson([1.0, 1.0, 1.0], [1.0, 2.0, 3.0]) is None
+
+    def test_mismatched_length_returns_none(self):
+        from unified_ranker import _pearson
+        assert _pearson([1.0, 2.0], [1.0, 2.0, 3.0]) is None
+
+
+class TestClusterByCorrelation:
+    def test_groups_highly_correlated_symbols(self):
+        from unified_ranker import cluster_by_correlation
+        dates = _dates(25)
+        base = [((-1) ** i) * (i % 5 + 1) * 0.01 for i in range(25)]
+        returns = {
+            'A': dict(zip(dates, base)),
+            'B': dict(zip(dates, [v * 1.5 for v in base])),  # scaled copy of A -> corr 1.0
+            'C': dict(zip(dates, [(-1) ** (i + 1) for i in range(25)])),  # unrelated pattern
+        }
+        clusters = cluster_by_correlation(returns, threshold=0.65, min_overlap=10)
+        assert clusters.get('A') == clusters.get('B')
+        assert clusters.get('A') is not None
+        # C's pattern is deliberately uncorrelated with A/B and must not be swept in.
+        assert 'C' not in clusters
+
+    def test_respects_min_overlap_even_with_matching_values(self):
+        from unified_ranker import cluster_by_correlation
+        # A and B share only 5 overlapping dates -- below min_overlap=20 -- even though those
+        # shared points would otherwise look perfectly correlated.
+        shared = dict(zip(_dates(5), [0.01, 0.02, -0.01, 0.03, -0.02]))
+        a = dict(shared)
+        b = dict(shared)
+        for i, d in enumerate(_dates(30)[5:25]):
+            a[d] = 0.001 * i
+        clusters = cluster_by_correlation({'A': a, 'B': b}, min_overlap=20)
+        assert clusters == {}
+
+    def test_ignores_positionally_similar_but_date_disjoint_series(self):
+        """Two symbols with IDENTICAL return sequences but on completely disjoint calendar
+        dates must not be clustered -- proves alignment is by date, not by list position.
+        A naive positional zip() of the two series would report correlation 1.0."""
+        from unified_ranker import cluster_by_correlation
+        values = [0.01, -0.02, 0.03, 0.015, -0.01, 0.02, -0.015, 0.01, 0.005, -0.02,
+                  0.01, -0.02, 0.03, 0.015, -0.01, 0.02, -0.015, 0.01, 0.005, -0.02]
+        a_dates = _dates(20)                    # 2026-06-01 .. 2026-06-20
+        b_dates = [f"2026-07-{d:02d}" for d in range(1, 21)]  # 2026-07-01 .. 2026-07-20
+        clusters = cluster_by_correlation(
+            {'A': dict(zip(a_dates, values)), 'B': dict(zip(b_dates, values))},
+            min_overlap=10,
+        )
+        assert clusters == {}
+
+    def test_below_threshold_correlation_not_clustered(self):
+        from unified_ranker import cluster_by_correlation
+        dates = _dates(25)
+        a = dict(zip(dates, [0.01 * ((i % 7) - 3) for i in range(25)]))
+        b = dict(zip(dates, [0.01 * (((i * 3) % 7) - 3) for i in range(25)]))
+        clusters = cluster_by_correlation({'A': a, 'B': b}, threshold=0.99, min_overlap=10)
+        assert clusters == {}
+
+
+class TestApplyCorrelationCap:
+    def test_scales_down_over_cap_cluster_proportionally(self):
+        from unified_ranker import apply_correlation_cap
+        weights = {'A': 0.10, 'B': 0.10, 'C': 0.10}
+        clusters = {'A': 0, 'B': 0, 'C': 0}  # all one correlated cluster, total 0.30
+        out = apply_correlation_cap(weights, clusters, cap=0.15)
+        assert sum(out.values()) == pytest.approx(0.15)
+        # proportional: each started equal, so each still ends up equal post-scale
+        assert out['A'] == pytest.approx(out['B']) == pytest.approx(out['C'])
+
+    def test_leaves_ungrouped_symbols_untouched(self):
+        from unified_ranker import apply_correlation_cap
+        weights = {'A': 0.10, 'B': 0.10, 'Z': 0.09}
+        clusters = {'A': 0, 'B': 0}  # Z has no correlated peer -> absent from clusters
+        out = apply_correlation_cap(weights, clusters, cap=0.15)
+        assert out['Z'] == pytest.approx(0.09)  # unchanged
+
+    def test_never_increases_weight(self):
+        from unified_ranker import apply_correlation_cap
+        weights = {'A': 0.05, 'B': 0.05}
+        clusters = {'A': 0, 'B': 0}  # total 0.10, under the 0.35 default cap
+        out = apply_correlation_cap(weights, clusters)
+        assert out['A'] == pytest.approx(0.05)
+        assert out['B'] == pytest.approx(0.05)
+
+    def test_under_cap_cluster_is_a_no_op(self):
+        from unified_ranker import apply_correlation_cap
+        weights = {'A': 0.05, 'B': 0.05, 'C': 0.05}
+        clusters = {'A': 0, 'B': 0, 'C': 0}
+        out = apply_correlation_cap(weights, clusters, cap=0.35)
+        assert out == {'A': 0.05, 'B': 0.05, 'C': 0.05}
+
+
+class TestGetRecentReturns:
+    def _seed_ohlcv(self, conn, symbol, closes, start_day=1, suspect_days=()):
+        for i, c in enumerate(closes):
+            day = start_day + i
+            conn.execute(
+                "INSERT INTO stock_ohlcv (symbol, date, close, is_suspect) VALUES (?, ?, ?, ?)",
+                (symbol, f"2026-06-{day:02d}", c, 1 if day in suspect_days else 0),
+            )
+        conn.commit()
+
+    def test_computes_day_over_day_pct_returns_keyed_by_date(self):
+        from unified_ranker import UnifiedRanker
+        conn = make_db()
+        self._seed_ohlcv(conn, 'A', [100.0, 110.0, 99.0])
+        ranker = UnifiedRanker(conn=conn)
+        out = ranker._get_recent_returns(['A'])
+        assert out['A']['2026-06-02'] == pytest.approx(0.10)
+        assert out['A']['2026-06-03'] == pytest.approx((99.0 - 110.0) / 110.0)
+        # first day has no prior close, so it never appears as a return date
+        assert '2026-06-01' not in out['A']
+
+    def test_excludes_suspect_bars(self):
+        """A flagged impossible-move bar (2026-07-30/31 bad-bar-quarantine convention) must
+        not be able to manufacture a spurious return -- neither as the return INTO it nor as
+        the base a later return is computed FROM."""
+        from unified_ranker import UnifiedRanker
+        conn = make_db()
+        self._seed_ohlcv(conn, 'A', [100.0, 100.0, 5000.0, 101.0], suspect_days=[3])
+        ranker = UnifiedRanker(conn=conn)
+        out = ranker._get_recent_returns(['A'])
+        # the suspect day (2026-06-03, close=5000.0) never appears as a return date at all --
+        # a naive impl would report a fabricated +4900% move into it.
+        assert '2026-06-03' not in out['A']
+        # the next good bar's return is computed against the last known-GOOD close (day 2,
+        # 100.0), not against the excluded suspect close -- (101-100)/100, not (101-5000)/5000.
+        assert out['A']['2026-06-04'] == pytest.approx(0.01)
+
+    def test_missing_symbol_returns_empty_dict(self):
+        from unified_ranker import UnifiedRanker
+        conn = make_db()
+        ranker = UnifiedRanker(conn=conn)
+        assert ranker._get_recent_returns(['NOPE']) == {}
+
+    def test_no_symbols_short_circuits_without_query(self):
+        from unified_ranker import UnifiedRanker
+        conn = make_db()
+        ranker = UnifiedRanker(conn=conn)
+        assert ranker._get_recent_returns([]) == {}
 
 
 # ── _get_win_probabilities: per-row regime edge adjustment ──────────────────────

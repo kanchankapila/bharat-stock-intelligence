@@ -419,19 +419,156 @@ def normalize_position_sizes(raw: dict, sectors: dict | None = None,
     return {k: round(v, 4) for k, v in weights.items()}
 
 
+# ── Correlation-cluster exposure cap (#27/#30 follow-up, 2026-08-05) ────────────────────
+# The sector cap above is the "cheap first-order approximation" its own comment already flags
+# as needing a fuller covariance-based fix -- several independently-sized, highly-correlated
+# names that don't share a GICS sector TAG (e.g. IT-services split across sub-sector labels,
+# all riding the same USD/INR tailwind) can each individually approach MAX_POSITION and jointly
+# carry far more single-factor exposure than the sector cap alone implies. This is that fuller
+# fix's cheap first-order version: empirically cluster today's SIZED names by pairwise return
+# correlation (not a static taxonomy) and apply the identical over-cap-then-scale-down
+# mechanism the sector cap already uses, as a second pass on top of it.
+MAX_CORRELATION_CLUSTER_EXPOSURE = 0.35
+CORRELATION_CLUSTER_THRESHOLD = 0.65
+# Minimum overlapping daily-return observations required to trust a pairwise correlation
+# estimate. A short/sparse overlap (a recent listing, a long trading halt) can produce a
+# spuriously high correlation on noise alone -- symbols without enough overlap are left OUT
+# of every cluster rather than force-grouped on an untrustworthy number.
+CORRELATION_MIN_OVERLAP = 20
+RETURN_LOOKBACK_DAYS = 60
+
+
+def _pearson(a: list, b: list):
+    """Pearson correlation of two equal-length numeric sequences, or None if undefined
+    (fewer than 2 points, or one series has zero variance -- e.g. a circuit-locked stretch)."""
+    n = len(a)
+    if n < 2 or n != len(b):
+        return None
+    mean_a, mean_b = sum(a) / n, sum(b) / n
+    cov = sum((x - mean_a) * (y - mean_b) for x, y in zip(a, b))
+    var_a = sum((x - mean_a) ** 2 for x in a)
+    var_b = sum((y - mean_b) ** 2 for y in b)
+    denom = math.sqrt(var_a * var_b)
+    return cov / denom if denom > 0 else None
+
+
+def cluster_by_correlation(returns: dict, threshold: float = CORRELATION_CLUSTER_THRESHOLD,
+                            min_overlap: int = CORRELATION_MIN_OVERLAP) -> dict:
+    """Pure function -- no DB access. `returns`: {symbol: {date: pct_return}} (date-keyed, not
+    a plain list, so two symbols are compared on the SAME trading days rather than by list
+    position -- different symbols miss different days for unrelated reasons -- holidays for a
+    recently-listed name, a circuit lock, a data gap -- and positional alignment would silently
+    pair the wrong days together and produce a spurious estimate).
+
+    Union-find over every pair whose correlation clears `threshold`. Returns {symbol:
+    cluster_id} ONLY for symbols placed in a cluster of size >= 2; a symbol with no correlated
+    peer above threshold (or too little overlapping history to trust an estimate at all) is
+    omitted entirely, so apply_correlation_cap leaves it untouched rather than grouping it into
+    a meaningless catch-all bucket.
+    """
+    symbols = [s for s, r in returns.items() if len(r) >= min_overlap]
+    parent = {s: s for s in symbols}
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(x, y):
+        rx, ry = find(x), find(y)
+        if rx != ry:
+            parent[ry] = rx
+
+    for i, a in enumerate(symbols):
+        for b in symbols[i + 1:]:
+            common = sorted(returns[a].keys() & returns[b].keys())
+            if len(common) < min_overlap:
+                continue
+            xs = [returns[a][d] for d in common]
+            ys = [returns[b][d] for d in common]
+            corr = _pearson(xs, ys)
+            if corr is not None and corr >= threshold:
+                union(a, b)
+
+    groups: dict = {}
+    for s in symbols:
+        groups.setdefault(find(s), []).append(s)
+
+    clusters: dict = {}
+    for cid, (_root, members) in enumerate(g for g in groups.items() if len(g[1]) >= 2):
+        for m in members:
+            clusters[m] = cid
+    return clusters
+
+
+def apply_correlation_cap(weights: dict, clusters: dict,
+                           cap: float = MAX_CORRELATION_CLUSTER_EXPOSURE) -> dict:
+    """Pure function -- no DB access. Same over-cap-then-scale-down mechanism as the sector cap
+    in normalize_position_sizes, keyed on empirical correlation clusters instead of a static
+    sector label. `clusters` maps symbol -> cluster id only for symbols the caller placed in a
+    real >=2-member cluster (see cluster_by_correlation) -- a symbol absent from `clusters` is
+    left untouched here, so a missing or untrustworthy correlation estimate degrades to "no
+    extra cap" rather than to an incorrect one. Can only ever reduce a position's weight, never
+    raise it.
+    """
+    out = dict(weights)
+    totals: dict = {}
+    for sym, w in out.items():
+        cid = clusters.get(sym)
+        if cid is not None and w and w > 0:
+            totals[cid] = totals.get(cid, 0.0) + w
+    for cid, total in totals.items():
+        if total > cap:
+            scale = cap / total
+            for sym in out:
+                if clusters.get(sym) == cid:
+                    out[sym] *= scale
+    return {k: round(v, 4) for k, v in out.items()}
+
+
+# Bounded score-fallback for directionless stocks (2026-08-05 pipeline-review finding,
+# "direction and magnitude are decoupled" -- resolved per explicit user confirmation of the
+# bounded-fallback approach over full multi-engine voting or leaving it as-is). Screeners keep
+# FULL authority whenever they express ANY net opinion (bull != bear) -- this only changes the
+# case where a stock is off every screener's radar for the day (total==0) or exactly tied
+# (bull==bear, a genuine stand-off rather than silence): a multi-engine-consensus score this
+# extreme is itself real evidence the ~1,700-screener catalog simply hasn't caught up to. The
+# bar is set well ABOVE the existing Strong-tier gate (66/34) specifically so this fallback
+# only ever fires on a genuinely standout blended score, never an ordinary one that happened to
+# have no screener coverage that day.
+DIRECTIONLESS_STRONG_BUY_FLOOR  = 80.0
+DIRECTIONLESS_BUY_FLOOR         = 70.0
+DIRECTIONLESS_STRONG_SELL_CEIL  = 20.0
+DIRECTIONLESS_SELL_CEIL         = 30.0
+
+
 def _classify(score, bull, bear):
-    """Directional label (matches stock_scores taxonomy the Top Rated UI renders) from the
-    net screener bias balance, with magnitude gating the 'Strong' tiers."""
+    """Directional label (matches stock_scores taxonomy the Top Rated UI renders). Screeners
+    are the PRIMARY direction source: net screener bias (bull vs bear count) decides Buy vs
+    Sell whenever they express any opinion at all, with the 0-100 unified score only gating
+    the 'Strong' tier threshold. Only when screeners have NO net opinion (see
+    DIRECTIONLESS_* above) does the blended score itself get to set direction, and only past a
+    materially higher bar than the normal Strong-tier gate -- see that block's own comment."""
     bull = bull or 0
     bear = bear or 0
     total = bull + bear
-    if total == 0:
-        return 'Hold'
-    r = (bull - bear) / total
+    r = (bull - bear) / total if total else 0.0
     if r > 0:
         return 'Strong Buy' if (r >= 0.5 and score >= 66.0) else 'Buy'
     if r < 0:
         return 'Strong Sell' if (r <= -0.5 and score <= 34.0) else 'Sell'
+    # r == 0: either total==0 (silent) or bull==bear (a tied stand-off) -- both collapse to the
+    # same directionless fallback, since a tie is just as legitimately "no screener opinion" as
+    # outright silence.
+    if score >= DIRECTIONLESS_STRONG_BUY_FLOOR:
+        return 'Strong Buy'
+    if score >= DIRECTIONLESS_BUY_FLOOR:
+        return 'Buy'
+    if score <= DIRECTIONLESS_STRONG_SELL_CEIL:
+        return 'Strong Sell'
+    if score <= DIRECTIONLESS_SELL_CEIL:
+        return 'Sell'
     return 'Hold'
 
 
@@ -817,14 +954,34 @@ class UnifiedRanker:
         # (root cause: a blind "column 0" fallback when no header matched
         # nsecode/symbol) — defense in depth even after the legacy rows are purged,
         # in case a similar bug elsewhere reintroduces non-ticker values.
+        #
+        # DECORRELATION FIX (2026-08-05, screener double-counting finding): this used to read
+        # confluence_signals.confluence_score directly, which is
+        # screenerComponent(0-60) + trend(0-15) + volume(0-10) + sector(0-8) + fundamental(0-12)
+        # (confluenceEngine.ts's scoreStock()) -- up to 60 of its ~105 raw points is the SAME
+        # screener membership already blended in full as its own "screener" engine (20-40%
+        # weight). REGIME_WEIGHTS treats "screener" and "confluence" as two independent
+        # opinions; they were not -- a screener-driven mispricing was amplified across both.
+        # confluence_signals already persists the four non-screener sub-scores as their own
+        # columns (trend_alignment_score/volume_score/sector_strength_score/fundamental_score),
+        # so this now sums exactly those four and drops screenerComponent entirely, without
+        # touching confluenceEngine.ts or its own confluence_score output (still used as-is by
+        # the standalone Confluence page, intraday_ranker.py, etc.) -- only what THIS engine
+        # feeds into the unified blend changes. Percentile-normalized to 0-100 like
+        # _get_technical_scores, since the raw sum tops out around 45, not 100.
         cutoff = (date.today() - timedelta(days=1)).isoformat()
         try:
             rows = self.conn.execute(
-                "SELECT symbol, confluence_score FROM confluence_signals "
+                "SELECT symbol, "
+                "  (COALESCE(trend_alignment_score,0) + COALESCE(volume_score,0) "
+                "   + COALESCE(sector_strength_score,0) + COALESCE(fundamental_score,0)"
+                "  ) AS non_screener_score "
+                "FROM confluence_signals "
                 "WHERE computed_at >= ? AND symbol NOT LIKE '%://%' AND LENGTH(symbol) <= 20",
                 (cutoff,),
             ).fetchall()
-            return {r['symbol']: float(r['confluence_score'] or 0) for r in rows}
+            raw = {r['symbol']: float(r['non_screener_score'] or 0) for r in rows}
+            return _normalize_to_100(raw)
         except Exception as e:
             print(f"[UnifiedRanker] _get_confluence_scores failed: {e}")
             self.conn.rollback()
@@ -1048,6 +1205,48 @@ class UnifiedRanker:
         except Exception:
             self.conn.rollback()
             return {}
+
+    def _get_recent_returns(self, symbols: list, lookback_days: int = RETURN_LOOKBACK_DAYS) -> dict:
+        """{symbol: {date: pct_return}} from stock_ohlcv for the correlation-cluster cap
+        (#27/#30 follow-up) -- date-keyed rather than a plain list so cluster_by_correlation
+        can align two symbols on the SAME trading days (see that function's own docstring).
+        Bad-bar-quarantined (is_suspect) the same way backtester.py/performance_tracker.py
+        already are, so a flagged impossible-move bar can't manufacture a fake correlation.
+        lookback_days is calendar days x2 to comfortably cover weekends/holidays within the
+        window; this is a read-side cutoff, not an exact-match write key, so it carries none
+        of the date.today()-anchor write-target risk documented elsewhere in this file.
+        """
+        if not symbols:
+            return {}
+        cutoff = (date.today() - timedelta(days=lookback_days * 2)).isoformat()
+        placeholders = ','.join('?' for _ in symbols)
+        try:
+            rows = self.conn.execute(
+                f"SELECT symbol, date, close FROM stock_ohlcv "
+                f"WHERE symbol IN ({placeholders}) AND date >= ? AND close > 0 "
+                f"AND (is_suspect IS NULL OR is_suspect = 0) "
+                f"ORDER BY symbol, date",
+                tuple(symbols) + (cutoff,),
+            ).fetchall()
+        except Exception as e:
+            print(f"[UnifiedRanker] _get_recent_returns failed: {e}")
+            self.conn.rollback()
+            return {}
+
+        by_symbol: dict = {}
+        for r in rows:
+            by_symbol.setdefault(r['symbol'], []).append((r['date'], float(r['close'])))
+
+        out: dict = {}
+        for sym, series in by_symbol.items():
+            series.sort(key=lambda t: t[0])
+            rets = {}
+            for (d0, c0), (d1, c1) in zip(series, series[1:]):
+                if c0 > 0:
+                    rets[d1] = (c1 - c0) / c0
+            if rets:
+                out[sym] = rets
+        return out
 
     def _get_entry_targets(self, symbol, confluence_map, rec_log_map, unified_map, sector_map):
         # Fallback 1: confluence_signals (best source with entry zones, atr, risk-reward, etc.)
@@ -1338,6 +1537,23 @@ class UnifiedRanker:
         # Normalize conviction×inverse-vol into capped portfolio weights (# 6), then apply the
         # sector-concentration cap (#27/#30) using the same sector_map already loaded above.
         position_sizes = normalize_position_sizes(raw_sizes, sectors=sector_map)
+
+        # Correlation-cluster cap (#27/#30 follow-up, 2026-08-05): the sector cap alone can miss
+        # highly-correlated names that don't share a GICS sector tag. Best-effort second pass --
+        # a failure here must never block the ranker run, since sizes are already sector-capped
+        # and safe to publish without it.
+        try:
+            sized_symbols = [s for s, v in raw_sizes.items() if v and v > 0]
+            if sized_symbols:
+                returns_map = self._get_recent_returns(sized_symbols)
+                clusters = cluster_by_correlation(returns_map)
+                if clusters:
+                    position_sizes = apply_correlation_cap(position_sizes, clusters)
+                    print(f"[UnifiedRanker] correlation cap applied to "
+                          f"{len(set(clusters.values()))} cluster(s) covering {len(clusters)} symbols.")
+        except Exception as e:
+            print(f"[UnifiedRanker] correlation-cluster cap skipped: {e}")
+
         for r in results:
             r['position_size_pct'] = round(position_sizes.get(r['symbol'], 0.0) * 100, 2)
 

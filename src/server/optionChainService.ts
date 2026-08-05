@@ -1,6 +1,6 @@
 import { getNiftyTraderHeaders } from './niftytraderService';
 import { dbAll } from './dbAsync';
-import { parseNtOptionChainResponse } from './contracts/marketFeeds';
+import { parseNtOptionChainResponse, type NtOptionChainRow, type NtOptionChainTotals } from './contracts/marketFeeds';
 
 export interface OptionChainData {
   success: boolean;
@@ -77,7 +77,10 @@ export async function fetchOptionChain(symbol: string): Promise<any> {
       const oc = rd.opDatas;
       
       // Extract spot price from the first item if not found in root or first item index_close
-      const firstItem = oc[0] || {};
+      // Typed as Partial<NtOptionChainRow> (not the bare `{}` a naive fallback would infer):
+      // an untyped `{}` fallback makes every property access below error at the type level,
+      // since TS requires a property to exist on every member of the resulting union.
+      const firstItem: Partial<NtOptionChainRow> = oc[0] || {};
       const spotPrice = rd.spotPrice || firstItem.index_close || firstItem.last_price || 0;
       
       // The live NiftyTrader feed doesn't populate Greeks/IV (always 0) for individual stock
@@ -133,8 +136,8 @@ export async function fetchOptionChain(symbol: string): Promise<any> {
       };
       });
 
-      // Calculate PCR if volume_pcr is missing
-      const totals = rd.opTotals?.total_calls_puts || {};
+      // Calculate PCR if volume_pcr is missing (same {} -> Partial<T> typing fix as firstItem)
+      const totals: Partial<NtOptionChainTotals> = rd.opTotals?.total_calls_puts || {};
       const totalCallOi = totals.total_calls_oi || 0;
       const totalPutOi = totals.total_puts_oi || 0;
       const pcr = totals.volume_pcr || (totalCallOi > 0 ? totalPutOi / totalCallOi : 0);
