@@ -210,6 +210,14 @@ export const V2AppShell: React.FC<V2AppShellProps> = ({
               );
             })}
           </div>
+          {/* V5 is a separate top-level route (main.tsx), not a dashboardVersion value --
+              a plain navigation, not part of the onChangeVersion('v1'|'v2'|'v3') contract above. */}
+          <button
+            onClick={() => { window.location.href = '/v5'; }}
+            className="w-full py-1 rounded text-[9px] font-black uppercase tracking-wider transition-all cursor-pointer bg-violet-600 hover:bg-violet-500 text-white"
+          >
+            Switch to V5
+          </button>
         </div>
       </aside>
 

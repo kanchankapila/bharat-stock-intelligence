@@ -691,6 +691,14 @@ export const AppShell: React.FC<AppShellProps> = ({
             >
               V3 Pro
             </button>
+            {/* V5 is a separate top-level route (main.tsx), not a dashboardVersion value --
+                a plain navigation, not a localStorage-driven reload like its siblings. */}
+            <button
+              onClick={() => { window.location.href = '/v5'; }}
+              className="bg-violet-600 hover:bg-violet-500 text-white font-black text-[9px] rounded-md px-2.5 py-1 uppercase tracking-wider cursor-pointer transition-colors"
+            >
+              V5
+            </button>
           </div>
         </header>
 
