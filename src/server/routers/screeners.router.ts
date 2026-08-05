@@ -17,6 +17,20 @@ import {
 import { router, publicProcedure, adminProcedure } from "../trpc";
 import { SCANNER_CATALOG } from "../config/scannerCatalog";
 
+// Real quant_scores columns runScreener is allowed to filter on (see db.ts's CREATE TABLE).
+// A zod enum, not a free-form string -- prevents a client-supplied "id" from being
+// interpolated into the WHERE clause as arbitrary SQL.
+const SCREENER_CRITERIA_COLUMNS = [
+  'return_1w', 'return_1m', 'return_3m', 'return_6m', 'return_12m',
+  'above_sma200', 'sma200_distance_pct', 'momentum_score',
+  'annualized_vol', 'sharpe_ratio', 'max_drawdown_1y', 'vol_rank', 'sharpe_rank',
+  'trailing_pe', 'forward_pe', 'debt_to_equity', 'return_on_equity',
+  'operating_margins', 'revenue_growth', 'piotroski_f_score', 'valuation_score',
+  'bullish_screener_count', 'bearish_screener_count', 'screener_category_breadth',
+  'screener_net_score', 'confluence_rank',
+  'rank_momentum', 'rank_quality', 'rank_value', 'rank_composite',
+] as const;
+
 export const screenersRouter = router({
   getTrendingScreeners: publicProcedure
     .query(async () => fetchTrendingScreeners()),
@@ -569,5 +583,65 @@ export const screenersRouter = router({
         ORDER BY signal_date DESC, screener_momentum_score DESC
         LIMIT ?
       `, [input.days, input.limit]);
+    }),
+    
+    // Ids here must be real quant_scores columns (see SCREENER_CRITERIA_COLUMNS below) --
+    // runScreener whitelists against that same set, so an id added here without a backing
+    // column is rejected at request time rather than silently matching nothing.
+    getScreenerCriteria: publicProcedure
+    .query(async () => {
+      const criteria = {
+        'Fundamental': [
+          { id: 'trailing_pe', name: 'Trailing P/E', type: 'number' },
+          { id: 'forward_pe', name: 'Forward P/E', type: 'number' },
+          { id: 'debt_to_equity', name: 'Debt to Equity', type: 'number' },
+          { id: 'return_on_equity', name: 'Return on Equity', type: 'number' },
+        ],
+        'Technical': [
+          { id: 'return_1m', name: '1-Month Return', type: 'number' },
+          { id: 'return_3m', name: '3-Month Return', type: 'number' },
+          { id: 'above_sma200', name: 'Above 200-Day SMA', type: 'boolean' },
+        ],
+        'Quantitative': [
+            { id: 'momentum_score', name: 'Momentum Score', type: 'number' },
+            { id: 'valuation_score', name: 'Value Score', type: 'number' },
+            { id: 'rank_quality', name: 'Quality Score', type: 'number' },
+            { id: 'rank_composite', name: 'Overall Score', type: 'number' },
+        ]
+      };
+      return criteria;
+    }),
+
+  runScreener: publicProcedure
+    .input(z.array(z.object({
+      id: z.enum(SCREENER_CRITERIA_COLUMNS),
+      operator: z.enum(['gt', 'lt', 'eq', 'gte', 'lte']),
+      value: z.any(),
+    })))
+    .mutation(async ({ input }) => {
+      let query = 'SELECT * FROM quant_scores WHERE ';
+      const params: any[] = [];
+
+      input.forEach((criterion, index) => {
+        if (index > 0) {
+          query += ' AND ';
+        }
+
+        const operatorMap = {
+          'gt': '>',
+          'lt': '<',
+          'eq': '=',
+          'gte': '>=',
+          'lte': '<=',
+        };
+
+        // criterion.id is zod-validated against the SCREENER_CRITERIA_COLUMNS whitelist above,
+        // so this interpolation can't carry client-controlled SQL.
+        query += `${criterion.id} ${operatorMap[criterion.operator]} ?`;
+        params.push(criterion.value);
+      });
+
+      const results = await dbAll<any>(query, params);
+      return results;
     }),
 });

@@ -26,6 +26,7 @@ import { commandCenterRouter }  from "./routers/commandCenter.router";
 import { riskRouter }           from "./routers/risk.router";
 import { macroRouter }          from "./routers/macro.router";
 import { alertsRouter }         from "./routers/alerts.router";
+import { aiRouter }         from "./routers/ai.router";
 
 export const appRouter = mergeRouters(
   userRouter,
@@ -54,6 +55,7 @@ export const appRouter = mergeRouters(
   riskRouter,
   macroRouter,
   alertsRouter,
+  aiRouter,
 );
 
 export type AppRouter = typeof appRouter;

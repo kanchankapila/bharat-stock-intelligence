@@ -11,6 +11,7 @@ import {
   getAllIndustriesFromDB,
   getNSEStockCount,
 } from "../nseService";
+import { getQuantScoresBySymbol } from "../quantService";
 import { router, publicProcedure, adminProcedure } from "../trpc";
 
 export const stocksRouter = router({
@@ -66,6 +67,13 @@ export const stocksRouter = router({
 
   getNSEStockCount: publicProcedure
     .query(() => getNSEStockCount()),
+    
+  getQuantScores: publicProcedure
+    .input(z.object({ symbol: z.string().min(1) }))
+    .query(async ({ input }) => {
+        const scores = await getQuantScoresBySymbol(input.symbol.toUpperCase());
+        return scores ?? { error: 'Scores not found' };
+    }),
 
   getAlphaQuantDetail: publicProcedure
     .input(z.object({

@@ -1,13 +1,16 @@
 import React, { useState } from 'react';
 import { trpc } from '../../../lib/trpc';
+import { AiInsightsTab } from './AiInsightsTab';
+import { QuantFactorsTab } from './QuantFactorsTab';
+import { WhyThisPick } from '../../../components/WhyThisPick';
 import { V2LightweightChart } from '../../components/widgets/V2LightweightChart';
 import { OptionChainView } from '../../../components/OptionChainView';
-import { WhyThisPick } from '../../../components/WhyThisPick';
 import {
-  ArrowLeft, ArrowUpRight, Activity, TrendingUp, Filter, History, PieChart, Zap, LayoutDashboard, Database, BarChart3, Target, BrainCircuit
+  ArrowLeft, ArrowUpRight, Activity, TrendingUp, Filter, History, PieChart, Zap, LayoutDashboard, Database, BarChart3, Target, BrainCircuit, Lightbulb
 } from 'lucide-react';
 import { cn } from '../../../lib/utils';
 import type { MarketData } from '../../../services/marketService';
+import type { QuantScores } from '../../../server/quantService';
 
 interface V2StockDetailsProps {
   symbol: string;
@@ -16,7 +19,7 @@ interface V2StockDetailsProps {
 }
 
 export const V2StockDetails: React.FC<V2StockDetailsProps> = ({ symbol, stock, onBack }) => {
-  const [activeTab, setActiveTab] = useState<'Technicals' | 'Fundamentals' | 'F&O'>('Technicals');
+  const [activeTab, setActiveTab] = useState<'Technicals' | 'Fundamentals' | 'F&O' | 'AI Insights' | 'Quant Factors'>('Technicals');
 
   const { data: unifiedData } = trpc.getAlphaQuantDetail.useQuery({ symbol });
   const { data: trendlyneOverview } = trpc.getTrendlyneOverview.useQuery({ symbol });
@@ -25,6 +28,8 @@ export const V2StockDetails: React.FC<V2StockDetailsProps> = ({ symbol, stock, o
   const { data: overview } = trpc.getCompanyOverview.useQuery({ symbol });
   const { data: profileAnalysis } = trpc.getCompanyProfileAnalysis.useQuery({ symbol });
   const { data: niftyTraderData } = trpc.getNiftyTraderData.useQuery({ symbol });
+  const { data: quantScores } = trpc.getQuantScores.useQuery({ symbol });
+  const { data: aiInsights } = trpc.getAiInsights.useQuery({ symbol });
 
   // Real OHLCV chart data (Finding #75, 2026-07-28 audit): this used to generate 100
   // Math.random() candles. Now sourced from getOHLCData, the same procedure v4's
@@ -96,6 +101,16 @@ export const V2StockDetails: React.FC<V2StockDetailsProps> = ({ symbol, stock, o
             className={cn("px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2",
               activeTab === 'F&O' ? "bg-rose-600 text-white shadow-lg shadow-rose-500/20" : "text-slate-400 hover:text-slate-300")}>
             <Zap className="w-4 h-4" /> F&O Chain
+          </button>
+          <button onClick={() => setActiveTab('AI Insights')}
+            className={cn("px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2",
+              activeTab === 'AI Insights' ? "bg-yellow-600 text-white shadow-lg shadow-yellow-500/20" : "text-slate-400 hover:text-slate-300")}>
+            <Lightbulb className="w-4 h-4" /> AI Insights
+          </button>
+          <button onClick={() => setActiveTab('Quant Factors')}
+            className={cn("px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2",
+              activeTab === 'Quant Factors' ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20" : "text-slate-400 hover:text-slate-300")}>
+            <Zap className="w-4 h-4" /> Quant Factors
           </button>
         </div>
       </div>
@@ -722,6 +737,22 @@ export const V2StockDetails: React.FC<V2StockDetailsProps> = ({ symbol, stock, o
           </div>
         </div>
       )}
+
+        {/* ── AI INSIGHTS TAB ── */}
+        {activeTab === 'AI Insights' && (
+            <AiInsightsTab insights={aiInsights} />
+        )}
+
+        {/* ── QUANT FACTORS TAB ── */}
+        {activeTab === 'Quant Factors' && (
+            quantScores && 'overall_score' in quantScores ? (
+                <QuantFactorsTab scores={quantScores && !('error' in quantScores) ? (quantScores as QuantScores) : undefined} />
+            ) : (
+                <div className="p-6 bg-terminal-panel border border-terminal-border rounded-2xl">
+                    <p className="text-slate-400">No quant scores available for this stock.</p>
+                </div>
+            )
+        )}
     </div>
   );
 };
