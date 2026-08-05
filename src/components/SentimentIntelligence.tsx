@@ -476,7 +476,7 @@ export function SentimentIntelligence({ onSelectStock }: { onSelectStock: (symbo
             Market Sentiment Intelligence
           </h2>
           <p className="text-slate-400 text-sm mt-1">
-            Live news from 10+ sources · Refreshes every 30 seconds · Earnings, orders, policy, global cues
+            Live news from 16+ sources · Refreshes every 30 seconds · Earnings, orders, policy, global cues
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
