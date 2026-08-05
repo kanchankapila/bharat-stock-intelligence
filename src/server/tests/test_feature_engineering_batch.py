@@ -153,7 +153,13 @@ class TestBatchWrites:
     def test_shared_connection(self):
         """run_full_pipeline opens exactly ONE write connection (self._con) for the whole run.
         Workers compute features in a process pool; all writes flow through the single shared
-        main-process connection, which is committed and closed once."""
+        main-process connection, which is committed and closed once.
+
+        Both stub symbols intentionally resolve to (symbol, None) -- i.e. 0 rows written --
+        which the written==0 guard added 2026-08 (see TestZeroRowsGuard below) now correctly
+        raises on. That guard exists so a real production run that silently wrote 0 feature
+        rows fails loudly instead of exiting 0 and leaving feature_store looking merely quiet
+        rather than broken (see the 2026-08 job-health investigation in CLAUDE.md)."""
         fe = _stub_fe()
         mock_con = MagicMock()
         fe._con = MagicMock(return_value=mock_con)
@@ -180,15 +186,16 @@ class TestBatchWrites:
 
         with patch("src.server.feature_engineering.ProcessPoolExecutor", _FakeExecutor), \
              patch("src.server.feature_engineering.as_completed", lambda fs: list(fs)):
-            fe.run_full_pipeline(symbols=["SYM1", "SYM2"])
+            with pytest.raises(RuntimeError, match="wrote 0 feature rows"):
+                fe.run_full_pipeline(symbols=["SYM1", "SYM2"])
 
-        # Exactly one write connection opened for the whole run.
+        # Exactly one write connection opened for the whole run, even though it ultimately raised.
         assert fe._con.call_count == 1, (
             f"Expected exactly 1 self._con() call, got {fe._con.call_count}"
         )
         # Both symbols were dispatched to the pool.
         assert set(submitted) == {"SYM1", "SYM2"}, f"Symbols dispatched: {submitted}"
-        # The single shared connection is closed once at the end.
+        # The single shared connection is still closed via `finally`, even on the raise.
         mock_con.close.assert_called_once()
 
     def test_written_count_correct(self):
@@ -219,3 +226,88 @@ class TestBatchWrites:
             "SELECT COUNT(*) FROM feature_store WHERE symbol='TATA'"
         ).fetchone()[0]
         assert actual == n_rows, f"DB has {actual} rows, expected {n_rows}"
+
+
+class TestZeroRowsGuard:
+    """2026-08 job-health investigation: feature_store's MAX(computed_at) was found frozen
+    for weeks with no error anywhere in job_heartbeat/BullMQ. run_full_pipeline() used to
+    print 'Pipeline complete — 0 total rows written' and exit 0 whenever every symbol failed
+    or the symbol list itself was empty -- a silent-empty success indistinguishable from a
+    healthy day. Both guards must fail loudly instead."""
+
+    def test_empty_symbol_list_raises(self):
+        """symbols=None resolving to zero rows from stock_ohlcv must not exit 0 silently."""
+        fe = _stub_fe()
+        con = sqlite3.connect(":memory:")
+        con.row_factory = sqlite3.Row
+        con.execute("CREATE TABLE stock_ohlcv (symbol TEXT, date TEXT)")
+        con.commit()
+        fe._con = MagicMock(return_value=con)
+
+        with pytest.raises(RuntimeError, match="No symbols found"):
+            fe.run_full_pipeline(symbols=None)
+
+        # The connection opened to run the (empty) query must still be closed.
+        con2 = con  # sqlite3 has no MagicMock close-tracking; assert no exception on close
+        con2.close()
+
+    def test_all_workers_failing_raises(self):
+        """Every symbol resolving to (symbol, None) — the real shape when every worker hits
+        an exception or insufficient data — must raise, not report a clean 0-row success."""
+        fe = _stub_fe()
+        mock_con = MagicMock()
+        fe._con = MagicMock(return_value=mock_con)
+
+        class _FakeExecutor:
+            def __init__(self, *a, **k):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def submit(self, fn, arg):
+                fut = MagicMock()
+                fut.result = lambda: (arg[0], None)
+                return fut
+
+        with patch("src.server.feature_engineering.ProcessPoolExecutor", _FakeExecutor), \
+             patch("src.server.feature_engineering.as_completed", lambda fs: list(fs)):
+            with pytest.raises(RuntimeError, match="wrote 0 feature rows"):
+                fe.run_full_pipeline(symbols=["A", "B", "C"])
+
+        mock_con.close.assert_called_once()
+
+    def test_at_least_one_success_does_not_raise(self):
+        """Sanity check: the guard must not fire when real rows were actually written."""
+        fe = _stub_fe()
+        con = _make_in_memory_db(symbol="TATA")
+        fe._con = MagicMock(return_value=con)
+
+        feat_df = _make_feat_df(2)
+
+        class _FakeExecutor:
+            def __init__(self, *a, **k):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def submit(self, fn, arg):
+                fut = MagicMock()
+                fut.result = lambda: (arg[0], feat_df.copy())
+                return fut
+
+        with patch("src.server.feature_engineering.ProcessPoolExecutor", _FakeExecutor), \
+             patch("src.server.feature_engineering.as_completed", lambda fs: list(fs)), \
+             patch("src.server.feature_engineering.SCALER_PATH", _TMP_SCALER), \
+             patch("pickle.dump"):
+            fe._fit_scaler = lambda feat, **kw: MagicMock(transform=lambda X: X.values)
+            fe._apply_scaler = lambda feat, scaler: feat
+            # Should not raise.
+            fe.run_full_pipeline(symbols=["TATA"])
