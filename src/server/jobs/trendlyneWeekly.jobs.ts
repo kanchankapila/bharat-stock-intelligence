@@ -20,10 +20,30 @@ export const QUEUE_TRENDLYNE_MIDWEEK = 'trendlyne-midweek';
 export const QUEUE_TRENDLYNE_RATIOS_MONTHLY = 'trendlyne-ratios-monthly';
 
 async function processTrendlyneMidweek(_job: Job): Promise<{ success: boolean }> {
+  // Both scripts must still run even if one fails (a broken adv-tech fetch shouldn't skip
+  // price-analysis, and vice versa) -- but swallowing both failures via .catch() unconditionally
+  // resolving {success:true} meant a real failure never reached the worker's 'completed'/'failed'
+  // event, so registerRepeatableJob() always recorded this job as a success regardless of what
+  // actually happened underneath. This is exactly what let trendlyne_price_analysis_fetcher.py's
+  // FetchTracker fail-loud fix (2026-08-03, exits non-zero once 100% of a run's stocks return "no
+  // data") go unnoticed on 2026-07-28 and again on 2026-08-04 -- the script correctly exited 1
+  // both times, but this wrapper still reported "trendlyne-midweek completed" with no error.
+  // Collect failures and throw once both have had a chance to run, so a genuine break is visible
+  // in job_heartbeat/the daily digest instead of only in a DB-freshness staleness check.
+  const errors: string[] = [];
   await runPython('trendlyne_adv_tech_fetcher.py', [], 40 * 60_000)
-    .catch(e => console.warn('[QUEUE] trendlyne_adv_tech_fetcher failed:', (e as Error).message));
+    .catch(e => {
+      console.warn('[QUEUE] trendlyne_adv_tech_fetcher failed:', (e as Error).message);
+      errors.push(`trendlyne_adv_tech_fetcher: ${(e as Error).message}`);
+    });
   await runPython('trendlyne_price_analysis_fetcher.py', [], 40 * 60_000)
-    .catch(e => console.warn('[QUEUE] trendlyne_price_analysis_fetcher failed:', (e as Error).message));
+    .catch(e => {
+      console.warn('[QUEUE] trendlyne_price_analysis_fetcher failed:', (e as Error).message);
+      errors.push(`trendlyne_price_analysis_fetcher: ${(e as Error).message}`);
+    });
+  if (errors.length > 0) {
+    throw new Error(errors.join(' | '));
+  }
   return { success: true };
 }
 
