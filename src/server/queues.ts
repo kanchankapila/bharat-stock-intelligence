@@ -1814,7 +1814,15 @@ export async function initQueues(): Promise<boolean> {
     const preopenRep = await preopenQueue.getRepeatableJobs();
     for (const r of preopenRep) await preopenQueue.removeRepeatableByKey(r.key);
     await preopenQueue.add('preopen-daily', {}, {
-      repeat: { pattern: '40 3 * * 1-5' },
+      // tz is mandatory here: with no tz, BullMQ/cron-parser falls back to the Node process's
+      // local timezone, which on this deployment is Asia/Kolkata -- so '40 3' was firing at
+      // 3:40 AM IST (hours before NSE's 9:00-9:15 IST preopen session even opens) instead of
+      // the intended 3:40 AM UTC = 9:10 AM IST. Confirmed live via Redis (`bull:preopen-snapshot:
+      // repeat:*`): the stored repeat definition had no `tz` key and its computed next-fire
+      // epoch was 22:10 UTC (= 03:40 IST), while every sibling cron job in this file resolves
+      // to `tz: 'Etc/UTC'` either explicitly or via addJobWithCatchup()'s auto-injection --
+      // this was the one holdout still using a raw, pre-registerJob.ts-extraction Queue.add().
+      repeat: { pattern: '40 3 * * 1-5', tz: 'Etc/UTC' },
       jobId: 'preopen-daily',
       removeOnComplete: 3, removeOnFail: 3,
     });

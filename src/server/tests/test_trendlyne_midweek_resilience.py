@@ -60,6 +60,31 @@ class TestAdvTechFetchUsesRetryGet:
             assert tladv.fetch_adv_tech("1127", session=object()) is None
 
 
+class TestDist3mUsesQtrRowNotThreeYear:
+    """Regression for a bug found 2026-08-06 while live-probing why trendlyne-midweek kept
+    reporting 0 rows: the real Trendlyne response lists "Qtr" (3-month) BEFORE "3 Yr" in
+    returnsDeepDive.tableData, and the old `"Qtr" in label or "3" in label` condition matched
+    both -- so dist_3m_high_pct/dist_3m_low_pct silently ended up holding the 3-YEAR distance
+    (the last matching row wins) instead of the 3-month one, on every successful run."""
+
+    def _body(self):
+        return {
+            "returnsDeepDive": {
+                "tableData": [
+                    ["Qtr", -12.51, None, 1463.1, 1473.4, 1249.8, 1280.0, 13.13, 2.42],
+                    ["1 Yr", -9.32, None, 1411.5, 1611.8, 1249.8, 1280.0, 20.59, 2.42],
+                    ["3 Yr", 2.01, None, 1254.78, 1611.8, 1110.15, 1280.0, 20.59, 15.3],
+                ]
+            }
+        }
+
+    def test_dist_3m_takes_qtr_row_values(self):
+        from datetime import date
+        feat = tlpa.extract_features(self._body(), date.today())
+        assert feat["dist_3m_high_pct"] == 13.13
+        assert feat["dist_3m_low_pct"] == 2.42
+
+
 class TestFailureRateIsSurfacedLoudly:
     """Source-inspection wiring checks (mirrors the dl_trainer promotion-gate wiring test
     pattern): main() must construct a FetchTracker and call .finish() so a run where nearly
