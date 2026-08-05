@@ -44,10 +44,18 @@ def track_outcomes(conn):
         AND DATE(computed_at) <= DATE('now', '-1 day')
     """).fetchall()
 
-    # Load all OHLCV closing prices in memory to avoid N+1 queries
+    # Load all OHLCV closing prices in memory to avoid N+1 queries. is_suspect-guarded to match
+    # outcome_resolver.py's (the technical-sourced sibling writer) existing convention -- this
+    # cache previously had zero data-quality guarding, so a confluence signal_outcomes row could
+    # price its exit off a known-bad bar (2026-08-04: live-verified 52% of extreme screener
+    # return_20d rows trace to an is_suspect bar in the exit window -- the same contamination
+    # class, just discovered via a different table this time).
     ohlcv_cache = {}
     print("[OUTCOME-TRACKER] Loading OHLCV cache into memory...")
-    ohlcv_rows = conn.execute("SELECT symbol, date, close FROM stock_ohlcv WHERE close IS NOT NULL AND close > 0").fetchall()
+    ohlcv_rows = conn.execute(
+        "SELECT symbol, date, close FROM stock_ohlcv "
+        "WHERE close IS NOT NULL AND close > 0 AND COALESCE(is_suspect, 0) = 0"
+    ).fetchall()
     for row in ohlcv_rows:
         sym = row['symbol']
         dt = str(row['date'])
@@ -120,7 +128,15 @@ def track_outcomes(conn):
     return tracked
 
 def recompute_screener_reliability(conn):
-    """Recompute win rates for every screener based on signal_outcomes."""
+    """Recompute win rates for every screener based on signal_outcomes.
+
+    NOTE: doesn't cover et_marketstats (2026-08-04) -- that source has no dedicated screeners
+    table to UNION in here the way the other 3 do; left as a known, documented gap rather than
+    guessed at, since et_marketstats' screener-membership schema wasn't audited as part of this
+    pass. et_marketstats screeners still get measured via screener_performance.py's
+    appearance-based pipeline (screener_master-driven, all 4 sources), just not via this
+    signal_outcomes-based path.
+    """
     screeners = conn.execute("""
         SELECT screener_id AS scan_id, screener_name, 'trendlyne' AS source FROM trendlyne_screeners
         UNION ALL
@@ -129,10 +145,18 @@ def recompute_screener_reliability(conn):
         SELECT screener_id AS scan_id, screener_name, 'etnow' AS source FROM etnow_screeners
     """).fetchall()
 
+    # sign per (source, scan_id) -- screener_master.source is capitalized ('Trendlyne') while
+    # the `source` values above are lowercase; match case-insensitively. Unknown/unmatched
+    # defaults to bullish (sign=+1, unchanged prior behavior) -- see screener_performance.py's
+    # _sign_for_sentiment for the full rationale (only a CONFIRMED bearish tag flips).
+    sentiment_rows = conn.execute("SELECT scan_id, source, inferred_sentiment FROM screener_master").fetchall()
+    sentiment_by_key = {(r['scan_id'], r['source'].lower()): r['inferred_sentiment'] for r in sentiment_rows}
+
     updated = 0
     for screener in screeners:
         scan_id = screener['scan_id']
         source = screener['source']
+        sign = -1.0 if sentiment_by_key.get((scan_id, source)) == 'bearish' else 1.0
 
         # Get all symbols in this screener
         if source == 'trendlyne':
@@ -159,27 +183,40 @@ def recompute_screener_reliability(conn):
         # horizons later — without this filter that would silently blend two different
         # methodologies into "screener reliability", which is specifically about how this
         # script's OWN confluence-signal grading performed.
+        #
+        # is_suspect-guarded (2026-08-04): signal_outcomes.is_suspect is a post-hoc magnitude
+        # flag maintained by data_integrity_repair.py, independent of this script's own OHLCV
+        # cache guard above -- catches rows written before that repair last ran.
+        #
+        # Sign-aware (2026-08-04): outcome/return_pct are stored price-direction-only ('WIN' =
+        # price rose >2%), correct for a bullish screener but backwards for a confirmed bearish
+        # one (a bearish screener wins when the stock falls). For sign=-1 this flips WIN<->LOSS
+        # counting and negates return_pct so avg_return/reliability read as "did the screener's
+        # own predicted direction pay off," not "did price go up." See
+        # screener_performance.py::_sign_for_sentiment for the same convention applied to the
+        # appearance-based pipeline.
+        wins_case = "outcome = 'WIN'" if sign > 0 else "outcome = 'LOSS'"
         stats_7 = conn.execute(f"""
             SELECT
               COUNT(*) AS total,
-              SUM(CASE WHEN outcome = 'WIN'  THEN 1 ELSE 0 END) AS wins,
-              AVG(CASE WHEN outcome IN ('WIN','LOSS') THEN return_pct END) AS avg_return
+              SUM(CASE WHEN {wins_case} THEN 1 ELSE 0 END) AS wins,
+              AVG(CASE WHEN outcome IN ('WIN','LOSS') THEN ? * return_pct END) AS avg_return
             FROM signal_outcomes
             WHERE symbol IN ({placeholders}) AND horizon_days = 7 AND signal_source = 'confluence'
-              AND outcome IN ('WIN','LOSS','NEUTRAL')
-        """, symbols).fetchone()
+              AND outcome IN ('WIN','LOSS','NEUTRAL') AND (is_suspect IS NULL OR is_suspect = 0)
+        """, [sign] + symbols).fetchone()
 
         # 30-day win rate
         stats_30 = conn.execute(f"""
             SELECT
               COUNT(*) AS total,
-              SUM(CASE WHEN outcome = 'WIN'  THEN 1 ELSE 0 END) AS wins,
-              AVG(CASE WHEN outcome IN ('WIN','LOSS') THEN return_pct END) AS avg_return,
-              MAX(CASE WHEN return_pct < 0 THEN ABS(return_pct) ELSE 0 END) AS max_dd
+              SUM(CASE WHEN {wins_case} THEN 1 ELSE 0 END) AS wins,
+              AVG(CASE WHEN outcome IN ('WIN','LOSS') THEN ? * return_pct END) AS avg_return,
+              MAX(CASE WHEN ? * return_pct < 0 THEN ABS(? * return_pct) ELSE 0 END) AS max_dd
             FROM signal_outcomes
             WHERE symbol IN ({placeholders}) AND horizon_days = 30 AND signal_source = 'confluence'
-              AND outcome IN ('WIN','LOSS','NEUTRAL')
-        """, symbols).fetchone()
+              AND outcome IN ('WIN','LOSS','NEUTRAL') AND (is_suspect IS NULL OR is_suspect = 0)
+        """, [sign, sign, sign] + symbols).fetchone()
 
         total = stats_7['total'] or 0
         wins_7 = stats_7['wins'] or 0
@@ -206,7 +243,7 @@ def recompute_screener_reliability(conn):
               wins_30d, win_rate_30d, avg_return_30d,
               max_drawdown, reliability_score, last_updated
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(scan_id) DO UPDATE SET
+            ON CONFLICT(source, scan_id) DO UPDATE SET
               total_signals   = excluded.total_signals,
               wins_7d         = excluded.wins_7d,
               win_rate_7d     = excluded.win_rate_7d,
