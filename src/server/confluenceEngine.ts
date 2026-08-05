@@ -251,6 +251,14 @@ function scoreStock(
   fundScore: number;
   bullishCount: number;
   bearishCount: number;
+  // True when bearish screener weight outweighs bullish (rawScreener < 0 before the
+  // Math.max(0,...) floor below collapses it to the same 0 a genuinely screener-silent stock
+  // gets). confluenceScore/convictionLevel can't express "actively flagged," only "not
+  // flagged" -- this lets a caller distinguish the two without re-deriving rawScreener itself.
+  // bearish_screener_count/bullish_screener_count are already persisted columns on
+  // confluence_signals (db.ts) -- WHERE bearish_screener_count > bullish_screener_count is a
+  // valid query today; this field just saves every in-process caller from re-deriving it.
+  netBearish: boolean;
   timeframe: string;
   reasoning: string;
 } {
@@ -277,6 +285,7 @@ function scoreStock(
   }
 
   const multiplier = presenceMultiplier(bullishCount);
+  const netBearish = rawScreener < 0;
   const screenerComponent = Math.max(0, Math.min(60, rawScreener * multiplier * 1.2));
 
   // B. Trend alignment (0–15)
@@ -336,9 +345,15 @@ function scoreStock(
   if (volRatio > 1.5) parts.push(`${volRatio.toFixed(1)}x relative volume`);
   if (sectorScore > 5) parts.push('strong sector momentum');
   if (fundScore > 7) parts.push('strong fundamentals');
-  const reasoning = parts.length > 0
-    ? `${data.symbol}: ${parts.join(', ')}.`
-    : `${data.symbol} has weak confluence (score ${confluenceScore}).`;
+  // netBearish: the score-floor above hides this from confluenceScore, so say it in words --
+  // "weak confluence" previously described both "no signal either way" and "actively flagged
+  // by N bearish/red-flag scanners" identically, which is a materially different situation for
+  // anyone reading this string on a discovery/watchlist surface.
+  const reasoning = netBearish
+    ? `${data.symbol}: ${bearishCount} bearish scanner${bearishCount > 1 ? 's' : ''} flagged, no offsetting bullish signal (score ${confluenceScore}).`
+    : parts.length > 0
+      ? `${data.symbol}: ${parts.join(', ')}.`
+      : `${data.symbol} has weak confluence (score ${confluenceScore}).`;
 
   return {
     confluenceScore,
@@ -349,6 +364,7 @@ function scoreStock(
     fundScore,
     bullishCount,
     bearishCount,
+    netBearish,
     timeframe: suggestTimeframe(confluenceScore, volRatio, bullishClasses),
     reasoning,
   };
@@ -480,7 +496,15 @@ export async function computeConfluenceSignals(): Promise<{ computed: number; el
 
     const price = tech?.cmp ?? null;
     const atr = price && tech?.bb_width && tech.bb_width > 0 ? price * (tech.bb_width / 100) : (price ? price * 0.03 : null);
-    const setup = price && atr ? buildTradeSetup(price, atr, scored.confluenceScore) : null;
+    // buildTradeSetup only ever constructs a LONG setup (entry near CMP, stop below, targets
+    // above) -- this platform has no short-side trade construct (cash equity, no retail
+    // shorting; see unified_ranker.py's position-sizing comment "longs only"). Attaching it to
+    // a netBearish stock silently manufactured a long entry/stop/target plan for a name whose
+    // own screener signal is net-bearish -- exactly the geometry `unified_ranker.py` was found
+    // pulling through into Sell/Strong-Sell rows via `_get_entry_targets`'s confluence_signals
+    // fallback. `netBearish` is the same signed test already used above to distinguish "not
+    // flagged" from "actively flagged bearish" -- gate the setup on it too.
+    const setup = price && atr && !scored.netBearish ? buildTradeSetup(price, atr, scored.confluenceScore) : null;
 
     const weightsObj: Record<string, number> = {};
     ids.forEach((id, i) => { weightsObj[id] = classes[i].weight; });

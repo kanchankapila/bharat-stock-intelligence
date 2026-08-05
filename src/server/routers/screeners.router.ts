@@ -247,6 +247,78 @@ export const screenersRouter = router({
       `, params);
     }),
 
+  // Screener Confluence Universe: opt-in universe narrowing driven by screener membership,
+  // NOT a replacement for unified_ranker.py's own full-universe scoring. unified_ranker
+  // deliberately scores every symbol regardless of screener presence (screener-membership
+  // selection bias is a real, previously-fought class of bug in this codebase -- restricting
+  // the CORE ranker to only screener-appearing names would just trade survivorship bias for
+  // screener-coverage bias). This procedure is a pure read-only filter/rank layer on top of
+  // the canonical unified_recommendations output -- it narrows the universe for a caller that
+  // explicitly wants a curated, multi-screener-confirmed shortlist (a CANSLIM/Minervini-style
+  // "institutional confirmation" screen: N+ independent bullish screeners agreeing, zero
+  // active bearish screeners), it never feeds back into scoring. See the 2026-08-04 screener
+  // audit memory for why this is additive-only, and why minBullishScreeners defaults to 2 (the
+  // same "at least 2 independent confirming screens" bar screener_signal_generator.py already
+  // uses for its own signal-emission gate, MIN_BULL_SCREENERS).
+  getScreenerConfluenceUniverse: publicProcedure
+    .input(z.object({
+      minBullishScreeners: z.number().min(1).max(20).default(2),
+      excludeBearishSignals: z.boolean().default(true),
+      minUnifiedScore: z.number().min(0).max(100).default(0),
+      conviction: z.enum(['ALL', 'S_ELITE', 'A_HIGH', 'B_MEDIUM', 'C_LOW', 'D_MARGINAL']).default('ALL'),
+      limit: z.number().min(1).max(200).default(50),
+    }))
+    .query(async ({ input }) => {
+      const latestRow = await dbGet<{ ts: string }>(
+        'SELECT CAST(MAX(computed_at) AS TEXT) AS ts FROM unified_recommendations'
+      );
+      const latest = latestRow?.ts ?? null;
+      if (!latest) {
+        return { asOf: null, universeSize: 0, filteredCount: 0, stocks: [] };
+      }
+
+      const universeSizeRow = await dbGet<{ n: number }>(
+        'SELECT COUNT(*) AS n FROM unified_recommendations WHERE CAST(computed_at AS TEXT) = ?',
+        [latest]
+      );
+
+      const conditions = ['CAST(computed_at AS TEXT) = ?', 'bullish_screener_count >= ?', 'unified_score >= ?'];
+      const params: (string | number)[] = [latest, input.minBullishScreeners, input.minUnifiedScore];
+      if (input.excludeBearishSignals) {
+        conditions.push('bearish_screener_count = 0');
+      }
+      if (input.conviction !== 'ALL') {
+        conditions.push('conviction_level = ?');
+        params.push(input.conviction);
+      }
+      params.push(input.limit);
+
+      const stocks = await dbAll<any>(`
+        SELECT symbol, unified_score, conviction_level, classification, timeframe, sector,
+               bullish_screener_count, bearish_screener_count, screener_stock_score,
+               screener_names_json, entry_zone_low, entry_zone_high, stop_loss,
+               target_1, risk_reward, trade_reasoning
+        FROM unified_recommendations
+        WHERE ${conditions.join(' AND ')}
+        ORDER BY unified_score DESC
+        LIMIT ?
+      `, params);
+
+      const stocksParsed = stocks.map((r: any) => {
+        let screenerNames: any = null;
+        try { screenerNames = r.screener_names_json ? JSON.parse(r.screener_names_json) : null; }
+        catch { /* malformed JSON from an older row shape -- surface null, not a crash */ }
+        return { ...r, screener_names_json: undefined, screeners: screenerNames };
+      });
+
+      return {
+        asOf: latest,
+        universeSize: universeSizeRow?.n ?? 0,
+        filteredCount: stocksParsed.length,
+        stocks: stocksParsed,
+      };
+    }),
+
   getScreenerDetail: publicProcedure
     .input(z.object({ screener_id: z.string() }))
     // NOTE: screener_id (scan_id) alone can still be ambiguous across providers (MC/ETnow

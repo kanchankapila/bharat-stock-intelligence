@@ -30,6 +30,10 @@ class FakeConn:
                 screener_id TEXT, symbol TEXT, appeared_date TEXT,
                 return_20d REAL, nifty_ret_20d REAL, outcome_20d TEXT
             )""")
+        # 2026-08-04: compute_pit_scores now sign-adjusts a bearish screener's return (see
+        # _sign_for_sentiment). Empty here -- every screener_id in this file (GOOD/BAD/etc.) is
+        # untagged, which defaults to sign=+1, i.e. unchanged behavior for these tests.
+        self._c.execute("CREATE TABLE screener_master (scan_id TEXT, source TEXT, inferred_sentiment TEXT)")
 
     def execute(self, sql, params=()):
         # the production SQL uses `appeared_date::text`; sqlite has no cast syntax
@@ -137,3 +141,36 @@ class TestScoreShape:
             _add(conn, 'BAD', f'2026-04-{i:02d}', -6.0, 'LOSS')
         s = sp.compute_pit_scores(conn, '2026-07-01')
         assert s['GOOD']['bayesian_score'] > s['BAD']['bayesian_score']
+
+
+class TestSignAwareness:
+    """2026-08-04: compute_pit_scores must sign-adjust a bearish-tagged screener's return, the
+    same fix applied to phase_c_bayesian (screener_performance.py's primary pipeline) -- a
+    bearish screener whose stocks subsequently FALL is doing its job and must score as
+    reliable, not as a loser. See test_screener_performance.py for the phase_c equivalent."""
+
+    def test_bearish_screener_that_predicted_correctly_scores_as_winning(self, conn):
+        conn.execute(
+            "INSERT INTO screener_master (scan_id, source, inferred_sentiment) "
+            "VALUES ('BEARISH1', 'trendlyne', 'bearish')"
+        )
+        for i in range(1, 15):
+            # raw outcome/return stamped as if price fell (matching a bearish call) --
+            # outcome_20d itself is still direction-blind ('WIN' here just means "resolved"
+            # for the purposes of this fixture's _add helper), the sign fix operates on ret20d.
+            _add(conn, 'BEARISH1', f'2026-04-{i:02d}', -6.0, 'LOSS')
+        s = sp.compute_pit_scores(conn, '2026-07-01')['BEARISH1']
+        assert s['wr_20d'] == 1.0, "a bearish screener whose stocks fell must score as a WIN"
+
+    def test_bullish_and_correctly_predicting_bearish_screener_score_equivalently(self, conn):
+        """A bullish screener whose stocks rose 6% and a bearish screener whose stocks fell 6%
+        are both performing exactly as claimed -- they must land at the same bayesian_score."""
+        conn.execute(
+            "INSERT INTO screener_master (scan_id, source, inferred_sentiment) "
+            "VALUES ('BEARISH2', 'trendlyne', 'bearish')"
+        )
+        for i in range(1, 15):
+            _add(conn, 'BULL1', f'2026-04-{i:02d}', 6.0, 'WIN')
+            _add(conn, 'BEARISH2', f'2026-04-{i:02d}', -6.0, 'LOSS')
+        s = sp.compute_pit_scores(conn, '2026-07-01')
+        assert s['BULL1']['bayesian_score'] == s['BEARISH2']['bayesian_score']

@@ -24,10 +24,17 @@ MIN_SIGNALS_FOR_TIER = 5   # below this = Unranked
 
 
 def get_trading_days_after(conn: ConnWrapper, symbol: str, start_date: str, n: int):
-    """Return (price, actual_date) n trading days after start_date from stock_ohlcv."""
+    """Return (price, actual_date) n trading days after start_date from stock_ohlcv.
+
+    Excludes is_suspect bars (2026-07-31 bad-bar quarantine — circuit-locked/impossible-move
+    days) so a screener's measured return doesn't price off a known-bad print. Live-verified
+    2026-08-04: 52% of |return_20d|>50% screener_appearances rows traced to an is_suspect bar
+    in their window; skipping to the next clean bar is the same defensive pattern
+    backtester.py/performance_tracker.py already use.
+    """
     rows = conn.execute("""
         SELECT close, date FROM stock_ohlcv
-        WHERE symbol = ? AND date > ?
+        WHERE symbol = ? AND date > ? AND (is_suspect IS NULL OR is_suspect = 0)
         ORDER BY date ASC
         LIMIT ?
     """, (symbol, start_date, n + 5)).fetchall()
@@ -37,10 +44,10 @@ def get_trading_days_after(conn: ConnWrapper, symbol: str, start_date: str, n: i
 
 
 def get_price_on_or_after(conn: ConnWrapper, symbol: str, date: str):
-    """Return close price on date or next available trading day."""
+    """Return close price on date or next available trading day, excluding is_suspect bars."""
     row = conn.execute("""
         SELECT close FROM stock_ohlcv
-        WHERE symbol = ? AND date >= ?
+        WHERE symbol = ? AND date >= ? AND (is_suspect IS NULL OR is_suspect = 0)
         ORDER BY date ASC LIMIT 1
     """, (symbol, date)).fetchone()
     return row[0] if row else None
@@ -74,6 +81,7 @@ def phase_a_bootstrap(conn: ConnWrapper) -> dict:
         WHERE outcome IN ('WIN', 'LOSS', 'NEUTRAL')
           AND return_pct IS NOT NULL
           AND signal_source = 'technical'
+          AND (is_suspect IS NULL OR is_suspect = 0)
         ORDER BY horizon_days DESC, signal_date DESC
     """).fetchall()
 
@@ -249,11 +257,28 @@ def _adaptive_k_prior(conn: ConnWrapper) -> float:
     return K_PRIOR_STARTUP if days_of_history < 90 else K_PRIOR_MATURE
 
 
+def _sign_for_sentiment(sentiment) -> float:
+    """+1 measures 'did price rise' (correct for bullish/neutral/unclassified screeners,
+    which is what this whole file measured before this fix). -1 measures 'did price fall
+    relative to benchmark' for a CONFIRMED bearish tag only -- a bearish screener (Near 52
+    Week Low, RSI Bearish, Red Flags) is doing its job when the stock subsequently
+    underperforms, so a raw price-up=win metric was scoring every correctly-functioning
+    bearish/distress screener as near-zero reliability (live-verified 2026-08-04: ~29% of
+    the 1,669-screener catalog is bearish-tagged; 'RSI Bearish'/'Near 52 Week Low' etc all
+    showed reliability_score==0 despite large negative avg_return -- the correct outcome for
+    a bearish screener). 'neutral' is deliberately left at +1, not flipped -- it's not a
+    directional claim to reverse, and this file has no evidence either way for that tag.
+    """
+    return -1.0 if sentiment == 'bearish' else 1.0
+
+
 def phase_c_bayesian(conn: ConnWrapper, proxy_outcomes: dict) -> int:
     """Compute Bayesian scores + tiers. Write to screener_performance_v2."""
     print("[PhaseC] Computing Bayesian scores + tiers...")
 
-    all_screeners = conn.execute("SELECT scan_id, source FROM screener_master").fetchall()
+    all_screeners = conn.execute(
+        "SELECT scan_id, source, inferred_sentiment FROM screener_master"
+    ).fetchall()
 
     # Compute global mean win rate from well-tested screeners
     qualified = conn.execute("""
@@ -276,7 +301,9 @@ def phase_c_bayesian(conn: ConnWrapper, proxy_outcomes: dict) -> int:
 
     updated = 0
 
-    for screener_id, source in all_screeners:
+    for screener_id, source, inferred_sentiment in all_screeners:
+        sign = _sign_for_sentiment(inferred_sentiment)
+
         # Appearance-based returns
         app_rows = conn.execute("""
             SELECT return_5d, return_10d, return_20d, return_60d, return_120d,
@@ -295,19 +322,22 @@ def phase_c_bayesian(conn: ConnWrapper, proxy_outcomes: dict) -> int:
         ret20_list, nifty20_list = [], []
         ret5_list, ret10_list, ret60_list, ret120_list = [], [], [], []
 
+        # sign applies only to the stock-return leg -- nifty20_list stays the raw benchmark
+        # return, so alpha for a bearish screener reads as "outperformance vs. being long the
+        # index," not a doubly-flipped number.
         for row in app_rows:
             r5, r10, r20, r60, r120, nifty20, _ = row
             if r20 is not None:
-                ret20_list.append(float(r20))
+                ret20_list.append(sign * float(r20))
                 nifty20_list.append(float(nifty20) if nifty20 is not None else None)
-            if r5  is not None: ret5_list.append(float(r5))
-            if r10 is not None: ret10_list.append(float(r10))
-            if r60 is not None: ret60_list.append(float(r60))
-            if r120 is not None: ret120_list.append(float(r120))
+            if r5  is not None: ret5_list.append(sign * float(r5))
+            if r10 is not None: ret10_list.append(sign * float(r10))
+            if r60 is not None: ret60_list.append(sign * float(r60))
+            if r120 is not None: ret120_list.append(sign * float(r120))
 
         # Add proxy (20d only, no nifty benchmark available)
         for ret_pct, _ in proxy:
-            ret20_list.append(ret_pct)
+            ret20_list.append(sign * ret_pct)
             nifty20_list.append(None)
 
         resolved_count = len(ret20_list)
@@ -367,7 +397,7 @@ def phase_c_bayesian(conn: ConnWrapper, proxy_outcomes: dict) -> int:
                alpha_20d, alpha_60d, sharpe_20d, max_drawdown, median_ret_20d,
                bayesian_score, tier, data_source, last_computed)
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
-            ON CONFLICT(screener_id) DO UPDATE SET
+            ON CONFLICT(screener_id, source) DO UPDATE SET
               total_appearances=excluded.total_appearances,
               resolved_count=excluded.resolved_count,
               wr_5d=excluded.wr_5d, wr_10d=excluded.wr_10d, wr_20d=excluded.wr_20d,
@@ -423,6 +453,14 @@ def phase_d_sync_back(conn: ConnWrapper) -> None:
 
     print("[PhaseD] Syncing win_rate_* to screener_reliability...")
 
+    # source-scoped join, matching the (source, scan_id) PK on both tables (2026-08-04
+    # migration): without it, a colliding scan_id (2026-08-04 screener_master memory) joins
+    # screener_reliability's one row against BOTH providers' screener_performance_v2 rows, and
+    # Postgres's UPDATE...FROM applies whichever one happens to match last -- silently writing
+    # one provider's win rates onto the other's screener_reliability row. screener_reliability.
+    # source is lowercase ('trendlyne'), screener_performance_v2.source is capitalized
+    # ('Trendlyne') -- same casing split documented elsewhere in this file/screener_signal_
+    # generator.py, bridged with LOWER() rather than normalized at the source.
     conn.execute("""
         UPDATE screener_reliability
         SET win_rate_5d   = spv.wr_5d,
@@ -432,6 +470,7 @@ def phase_d_sync_back(conn: ConnWrapper) -> None:
             win_rate_120d = spv.wr_120d
         FROM screener_performance_v2 spv
         WHERE screener_reliability.scan_id = spv.screener_id
+          AND screener_reliability.source = LOWER(spv.source)
     """)
 
     conn.commit()
@@ -444,6 +483,11 @@ def phase_e_update_confidence(conn: ConnWrapper) -> None:
     """Drive screener_catalog.confidence from the computed bayesian_score."""
     print("[PhaseE] Updating screener_catalog confidence from bayesian_score...")
 
+    # source-scoped join (2026-08-04, same fix as phase_d_sync_back above): unscoped, this
+    # could apply one provider's bayesian_score-derived confidence onto a DIFFERENT provider's
+    # screener_catalog row whenever their scan_ids collide (20 pairs confirmed live). LOWER()
+    # bridges screener_catalog's historical mixed-case source values (both 'trendlyne' and
+    # 'Trendlyne' rows exist, per screener_signal_generator.py's own comment on this).
     conn.execute("""
         UPDATE screener_catalog sc
         SET confidence = CASE
@@ -454,13 +498,15 @@ def phase_e_update_confidence(conn: ConnWrapper) -> None:
         END
         FROM screener_performance_v2 spv
         WHERE sc.screener_id = spv.screener_id
+          AND LOWER(sc.source) = LOWER(spv.source)
           AND spv.bayesian_score IS NOT NULL
     """)
     conn.commit()
 
     changed = conn.execute("""
         SELECT COUNT(*) FROM screener_catalog sc
-        JOIN screener_performance_v2 spv ON spv.screener_id = sc.screener_id
+        JOIN screener_performance_v2 spv
+          ON spv.screener_id = sc.screener_id AND LOWER(sc.source) = LOWER(spv.source)
         WHERE spv.bayesian_score IS NOT NULL
     """).fetchone()[0]
     print(f"[PhaseE] Updated confidence for {changed} screeners in screener_catalog")
@@ -508,6 +554,14 @@ def compute_pit_scores(conn: ConnWrapper, as_of: str) -> dict:
     cutoff = (datetime.date.fromisoformat(as_of)
               - datetime.timedelta(days=RESOLUTION_LAG_DAYS)).isoformat()
 
+    # Sign map, keyed on scan_id alone (not (source, scan_id) -- screener_appearances.screener_id
+    # collides across providers same as everywhere else pre-migration; a wrong sentiment pick
+    # for a colliding id is no worse than the existing cross-provider ambiguity already documented
+    # elsewhere, and this PIT path is a lighter-weight historical reconstruction, not the primary
+    # phase_c pipeline above). Defaults to bullish (sign=+1, unchanged prior behavior) when unknown.
+    sentiment_by_id = {r[0]: r[1] for r in
+                        conn.execute("SELECT scan_id, inferred_sentiment FROM screener_master").fetchall()}
+
     rows = conn.execute("""
         SELECT screener_id, return_20d, nifty_ret_20d
         FROM screener_appearances
@@ -518,7 +572,8 @@ def compute_pit_scores(conn: ConnWrapper, as_of: str) -> dict:
 
     by_screener = defaultdict(list)
     for sid, r20, nifty20 in rows:
-        by_screener[sid].append((float(r20), float(nifty20) if nifty20 is not None else None))
+        sign = _sign_for_sentiment(sentiment_by_id.get(sid))
+        by_screener[sid].append((sign * float(r20), float(nifty20) if nifty20 is not None else None))
 
     # global prior from screeners with enough resolved history AS OF this date
     wrs = [_wr_from_list([r for r, _ in v]) for v in by_screener.values() if len(v) >= 10]

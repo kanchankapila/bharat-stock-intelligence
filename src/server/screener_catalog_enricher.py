@@ -181,13 +181,20 @@ def run():
 
     # ── Step 5: INSERT missing screener_catalog entries from screener_master ────
     # 858 screener_master rows have no catalog entry. Insert them with NLP-derived bias.
+    # sc.source vs sm.source case mismatch: screener_catalog historically got both 'trendlyne'
+    # and 'Trendlyne' rows (2026-08 screener_signal_generator.py comment documents the same
+    # split) -- match case-insensitively so a lowercase-cataloged screener isn't re-inserted,
+    # and source-scope the NOT EXISTS so a genuinely-missing MoneyControl/ETnow scan_id isn't
+    # silently skipped just because an unrelated provider's screener happens to share the same
+    # numeric scan_id (2026-08-04 screener_master collision class) and already has a row.
     missing = con.execute("""
         SELECT sm.scan_id, sm.name, sm.source, sm.inferred_sentiment, sm.inferred_category,
                ts.screenpk, ts.screener_url AS ts_url
         FROM screener_master sm
         LEFT JOIN trendlyne_screeners ts ON ts.screener_id = sm.scan_id
         WHERE NOT EXISTS (
-            SELECT 1 FROM screener_catalog sc WHERE sc.screener_id = sm.scan_id
+            SELECT 1 FROM screener_catalog sc
+            WHERE sc.screener_id = sm.scan_id AND LOWER(sc.source) = LOWER(sm.source)
         )
     """).fetchall()
 
@@ -217,7 +224,13 @@ def run():
     for row in missing:
         scan_id  = row[0]
         name     = row[1] or scan_id
-        source   = row[2] or 'unknown'
+        # Lowercased: unified_ranker.py's _get_screener_membership() joins screener_catalog on
+        # a hardcoded lowercase literal ('trendlyne'/'moneycontrol'/'etnow'), case-sensitively,
+        # not LOWER(sc.source) -- inserting screener_master's raw capitalized source
+        # ('MoneyControl') here would silently reproduce the exact orphaned-row bug this run is
+        # meant to close (874 pre-existing screener_catalog rows already sit under a capitalized
+        # source and are never read by that join; verified live 2026-08-04).
+        source   = (row[2] or 'unknown').lower()
         sentiment = row[3]
         category  = row[4] or 'other'
         screenpk  = row[5]
@@ -246,8 +259,10 @@ def run():
                   (screener_id, screener_name, source, signal_bias, category,
                    investment_horizon, confidence, signal_keywords, screener_url)
                 SELECT ?,?,?,?,?, ?,?,?,?
-                WHERE NOT EXISTS (SELECT 1 FROM screener_catalog WHERE screener_id = ?)
-            """, (scan_id, name, source, bias, cat_norm, horizon, confidence, kw, url, scan_id))
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM screener_catalog WHERE screener_id = ? AND LOWER(source) = LOWER(?)
+                )
+            """, (scan_id, name, source, bias, cat_norm, horizon, confidence, kw, url, scan_id, source))
             inserted += 1
         except Exception as e:
             print(f"  [WARN] Cannot insert {scan_id}: {e}")

@@ -51,9 +51,12 @@ export async function updateScreenerReliability(screenerId: string, horizonDays 
 
     const winRate = total === 0 ? 0 : (wins / total);
 
+    // ON CONFLICT(source, scan_id) matches screener_reliability's composite PK (2026-08-04
+    // migration) -- source='platform' here is this function's own synthetic bucket, distinct
+    // from the 4 real provider values, so it can never collide with a real screener's row.
     await dbRun(`INSERT INTO screener_reliability (scan_id, screener_name, source, total_signals, wins_7d, win_rate_7d, last_updated)
       VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-      ON CONFLICT(scan_id) DO UPDATE SET total_signals=excluded.total_signals, wins_7d=excluded.wins_7d, win_rate_7d=excluded.win_rate_7d, last_updated=CURRENT_TIMESTAMP
+      ON CONFLICT(source, scan_id) DO UPDATE SET total_signals=excluded.total_signals, wins_7d=excluded.wins_7d, win_rate_7d=excluded.win_rate_7d, last_updated=CURRENT_TIMESTAMP
     `, [screenerId, screenerId, 'platform', total, wins, winRate]);
 
     return { updated: true, total, wins, winRate };
