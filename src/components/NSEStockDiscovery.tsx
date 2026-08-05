@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Search, Filter, TrendingUp, Briefcase, Grid3x3, List, Loader } from 'lucide-react';
+import { Search, Filter, TrendingUp, Briefcase, Grid3x3, List as ListIcon, Loader } from 'lucide-react';
+import { List, type RowComponentProps } from 'react-window';
 import { cn } from '../lib/utils';
 import { trpc } from '../lib/trpc';
 import stockData from '../data/stocklist';
@@ -21,6 +22,48 @@ interface NSEStock {
 }
 
 type ViewMode = 'grid' | 'list';
+
+interface StockListRowProps {
+  stocks: NSEStock[];
+  onSelectStock?: (symbol: string) => void;
+}
+
+/** One virtualized row for the List view. Fixed height (see LIST_ROW_HEIGHT below) so
+ * react-window can compute scroll geometry without measuring every row up front -- the whole
+ * point of virtualizing a list that can be thousands of rows long. */
+function StockListRow({ index, style, stocks, onSelectStock }: RowComponentProps<StockListRowProps>): React.ReactElement | null {
+  const stock = stocks[index];
+  if (!stock) return null;
+  return (
+    <div
+      style={style}
+      onClick={() => onSelectStock && stock.symbol && onSelectStock(stock.symbol)}
+      className="grid grid-cols-12 gap-4 p-4 border-b border-slate-800/30 hover:bg-slate-800/50 transition-colors cursor-pointer group items-center"
+    >
+      <div className="col-span-2">
+        <span className="font-bold text-slate-100 group-hover:text-blue-400 transition-colors">
+          {stock.symbol}
+        </span>
+      </div>
+      <div className="col-span-4">
+        <p className="text-sm text-slate-300 line-clamp-1">{stock.name}</p>
+      </div>
+      <div className="col-span-3">
+        <span className="text-xs bg-slate-700/30 px-2 py-1 rounded text-slate-300">
+          {stock.sector}
+        </span>
+      </div>
+      <div className="col-span-3">
+        <span className="text-xs bg-slate-700/30 px-2 py-1 rounded text-slate-300">
+          {stock.industry}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+const LIST_ROW_HEIGHT = 68;
+const LIST_VIEWPORT_HEIGHT = 640;
 
 const NSEStockDiscovery: React.FC<{
   onSelectStock?: (symbol: string) => void;
@@ -96,16 +139,25 @@ const NSEStockDiscovery: React.FC<{
   const industries = industriesQuery.data || [];
   const totalStocks = stockCountQuery.data || 0;
 
-  // The unfiltered universe is thousands of rows -- rendering all of them as full card/row DOM
-  // subtrees at once (previously: no cap at all) was the first-open freeze/jank flagged in the
-  // 2026-08-02 audit. Cap the render to a page at a time instead of pulling in a virtualization
-  // library (a new dependency + a bundle-size tradeoff working against the same audit's other
-  // goal, and one this sandbox can't visually verify against a live browser).
+  // Grid view uses a responsive multi-column CSS grid (1/2/3 columns by viewport) with
+  // variable-height cards -- react-window's List/Grid need a known column count and row height
+  // up front, so virtualizing a *responsive* card grid safely (without a live browser in this
+  // sandbox to catch a layout regression) isn't a low-risk change. Kept as page-at-a-time
+  // rendering here; capped so the unfiltered thousands-of-rows universe never mounts as one
+  // giant DOM subtree (the freeze/jank flagged in the 2026-08-02 audit).
   const visibleStocks = useMemo(
     () => displayedStocks.slice(0, visibleCount),
     [displayedStocks, visibleCount],
   );
   const hasMore = visibleCount < displayedStocks.length;
+
+  // List view is a single fixed-height row layout -- the straightforward case for
+  // react-window's List, so it renders the FULL filtered set virtualized (no page cap, no
+  // "Load more" click) rather than reusing the grid view's manual pagination.
+  const listRowProps = useMemo<StockListRowProps>(
+    () => ({ stocks: displayedStocks, onSelectStock }),
+    [displayedStocks, onSelectStock],
+  );
 
   const clearFilters = () => {
     setSearchQuery('');
@@ -260,7 +312,7 @@ const NSEStockDiscovery: React.FC<{
           )}
           title="List View"
         >
-          <List className="w-4 h-4" />
+          <ListIcon className="w-4 h-4" />
         </button>
       </div>
 
@@ -343,7 +395,7 @@ const NSEStockDiscovery: React.FC<{
         </div>
       )}
 
-      {/* Stocks List View */}
+      {/* Stocks List View -- virtualized, renders the full filtered set regardless of count */}
       {!isLoading && displayedStocks.length > 0 && viewMode === 'list' && (
         <div className="space-y-3">
           <div className="text-sm font-medium text-slate-400 px-2">
@@ -356,41 +408,15 @@ const NSEStockDiscovery: React.FC<{
               <div className="col-span-3">Sector</div>
               <div className="col-span-3">Industry</div>
             </div>
-            {visibleStocks.map((stock) => (
-              <div
-                key={stock.symbol}
-                onClick={() => onSelectStock && stock.symbol && onSelectStock(stock.symbol)}
-                className="grid grid-cols-12 gap-4 p-4 border-b border-slate-800/30 hover:bg-slate-800/50 transition-colors cursor-pointer group"
-              >
-                <div className="col-span-2">
-                  <span className="font-bold text-slate-100 group-hover:text-blue-400 transition-colors">
-                    {stock.symbol}
-                  </span>
-                </div>
-                <div className="col-span-4">
-                  <p className="text-sm text-slate-300 line-clamp-1">{stock.name}</p>
-                </div>
-                <div className="col-span-3">
-                  <span className="text-xs bg-slate-700/30 px-2 py-1 rounded text-slate-300">
-                    {stock.sector}
-                  </span>
-                </div>
-                <div className="col-span-3">
-                  <span className="text-xs bg-slate-700/30 px-2 py-1 rounded text-slate-300">
-                    {stock.industry}
-                  </span>
-                </div>
-              </div>
-            ))}
+            <List
+              rowComponent={StockListRow}
+              rowCount={displayedStocks.length}
+              rowHeight={LIST_ROW_HEIGHT}
+              rowProps={listRowProps}
+              defaultHeight={LIST_VIEWPORT_HEIGHT}
+              style={{ height: Math.min(LIST_VIEWPORT_HEIGHT, displayedStocks.length * LIST_ROW_HEIGHT) }}
+            />
           </div>
-          {hasMore && (
-            <button
-              onClick={() => setVisibleCount(c => c + PAGE_SIZE)}
-              className="w-full py-3 bg-slate-800/50 border border-slate-800/30 rounded-lg text-sm font-medium text-slate-400 hover:text-white hover:border-slate-600 transition-all"
-            >
-              Load {Math.min(PAGE_SIZE, displayedStocks.length - visibleCount)} more ({displayedStocks.length - visibleCount} remaining)
-            </button>
-          )}
         </div>
       )}
 

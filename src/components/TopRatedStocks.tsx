@@ -9,6 +9,7 @@ import { cn } from '../lib/utils';
 import { motion } from 'motion/react';
 import stockData from '../data/stocklist';
 import { LegacyScoreBanner } from './CanonicalSourceNote';
+import { PriceFreshnessBadge } from './PriceFreshnessBadge';
 
 interface ScoredStock {
   symbol?: string;
@@ -139,8 +140,8 @@ const TopRatedStocks: React.FC<{
   watchlist: string[];
   onToggleWatchlist: (symbol: string, metadata?: { price?: number; name?: string; source?: string }) => void;
 }> = ({ onSelectStock, watchlist = [], onToggleWatchlist }) => {
-  const { data: longTermStocks, isLoading: isLoadingLT, refetch: refetchLT } = trpc.getTopRatedStocks.useQuery({ limit: 20, timeframe: 'long_term' }, { refetchInterval: 15 * 60_000 });
-  const { data: intradayStocks, isLoading: isLoadingID, refetch: refetchID } = trpc.getTopRatedStocks.useQuery({ limit: 20, timeframe: 'intraday' }, { refetchInterval: 5 * 60_000 });
+  const { data: longTermStocks, isLoading: isLoadingLT, refetch: refetchLT, dataUpdatedAt: ltUpdatedAt } = trpc.getTopRatedStocks.useQuery({ limit: 20, timeframe: 'long_term' }, { refetchInterval: 15 * 60_000 });
+  const { data: intradayStocks, isLoading: isLoadingID, refetch: refetchID, dataUpdatedAt: idUpdatedAt } = trpc.getTopRatedStocks.useQuery({ limit: 20, timeframe: 'intraday' }, { refetchInterval: 5 * 60_000 });
   const triggerStockScoring = trpc.triggerStockScoring.useMutation();
 
   const handleRecalculate = async () => {
@@ -182,14 +183,20 @@ const TopRatedStocks: React.FC<{
           </p>
         </div>
 
-        <button
-          onClick={handleRecalculate}
-          disabled={triggerStockScoring.isPending}
-          className="flex items-center gap-2 glass border border-slate-800/50 hover:border-blue-500/50 text-white px-6 py-3 rounded-2xl text-xs font-black uppercase tracking-widest transition-all group disabled:opacity-50"
-        >
-          <RefreshCw className={cn("w-4 h-4 transition-transform group-hover:rotate-180", triggerStockScoring.isPending && "animate-spin")} />
-          {triggerStockScoring.isPending ? 'Syncing intelligence...' : 'Refresh All Scopes'}
-        </button>
+        <div className="flex flex-col items-end gap-2">
+          <button
+            onClick={handleRecalculate}
+            disabled={triggerStockScoring.isPending}
+            className="flex items-center gap-2 glass border border-slate-800/50 hover:border-blue-500/50 text-white px-6 py-3 rounded-2xl text-xs font-black uppercase tracking-widest transition-all group disabled:opacity-50"
+          >
+            <RefreshCw className={cn("w-4 h-4 transition-transform group-hover:rotate-180", triggerStockScoring.isPending && "animate-spin")} />
+            {triggerStockScoring.isPending ? 'Syncing intelligence...' : 'Refresh All Scopes'}
+          </button>
+          <div className="flex items-center gap-3">
+            <PriceFreshnessBadge updatedAt={ltUpdatedAt} thresholdMs={20 * 60_000} label="long-term" />
+            <PriceFreshnessBadge updatedAt={idUpdatedAt} thresholdMs={8 * 60_000} label="intraday" />
+          </div>
+        </div>
       </div>
 
       <LegacyScoreBanner note="Ranked from the per-timeframe scoring engine (stock_scores), computed separately from the unified cross-engine model -- check Alpha / Buy Recs for the canonical, regime-aware view of the same stocks." />

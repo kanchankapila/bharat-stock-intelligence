@@ -2,17 +2,18 @@ import React from 'react';
 import { Card } from './Card';
 import { trpc } from '../lib/trpc';
 import { cn } from '../lib/utils';
-import { 
-  TrendingUp, TrendingDown, Star, ArrowUpRight, ArrowDownRight, 
-  Zap, Activity, Trophy 
+import {
+  TrendingUp, TrendingDown, Star, ArrowUpRight, ArrowDownRight,
+  Zap, Activity, Trophy
 } from 'lucide-react';
+import { PriceFreshnessBadge } from './PriceFreshnessBadge';
 
 interface TopMoversIntelligenceProps {
   onSelectStock: (symbol: string) => void;
 }
 
 export const TopMoversIntelligence: React.FC<TopMoversIntelligenceProps> = ({ onSelectStock }) => {
-  const { data: movers, isLoading } = trpc.getTopMovers.useQuery(undefined, {
+  const { data: movers, isLoading, dataUpdatedAt } = trpc.getTopMovers.useQuery(undefined, {
     refetchInterval: 60000
   });
 
@@ -74,9 +75,12 @@ export const TopMoversIntelligence: React.FC<TopMoversIntelligenceProps> = ({ on
           </h2>
           <p className="text-xs text-slate-500 mt-1">Real-time market activity and setup detection</p>
         </div>
-        <div className="flex items-center gap-2 px-3 py-1 bg-slate-900/60 border border-white/[0.08] rounded-full backdrop-blur-sm">
-           <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-           <span className="text-[9px] font-semibold text-slate-400 uppercase tracking-widest">Live NSE</span>
+        <div className="flex flex-col items-end gap-1.5">
+          <div className="flex items-center gap-2 px-3 py-1 bg-slate-900/60 border border-white/[0.08] rounded-full backdrop-blur-sm">
+             <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+             <span className="text-[9px] font-semibold text-slate-400 uppercase tracking-widest">Live NSE</span>
+          </div>
+          <PriceFreshnessBadge updatedAt={dataUpdatedAt} thresholdMs={90_000} />
         </div>
       </div>
 
