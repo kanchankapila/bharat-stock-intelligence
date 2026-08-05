@@ -6,8 +6,16 @@
  * and category (EARNINGS/ORDER_WIN/BUYBACK/POLICY/IPO/GLOBAL/SECTOR/GENERAL).
  * Aggregates into a market sentiment snapshot and Nifty range prediction.
  *
- * Sources (Indian): Economic Times, Business Standard, LiveMint, MoneyControl, The Hindu BusinessLine
- * Sources (Global): Reuters, Yahoo Finance (via globalMarketService)
+ * Sources (Indian): Economic Times, LiveMint, CNBC TV18, Zee Business, The Hindu BusinessLine, Tradebrains
+ * Sources (Global): Financial Times, CNBC TV18 World, MarketWatch, Yahoo Finance (via globalMarketService)
+ *
+ * MoneyControl's own rss.moneycontrol.com/* feeds (latestnews/buzzingstocks/brokeragerecos/
+ * economy/marketreports/internationalmarkets) are NOT used here as of 2026-08-05 -- all 6 were
+ * live-verified to return HTTP 200 with content frozen since Feb-Aug 2024 (confirmed via
+ * Last-Modified headers, cross-checked against a genuinely live feed on the same code path
+ * to rule out a caching artifact). Akamai's edge serves the stale snapshot indefinitely with
+ * a misleading `Cache-Control: max-age=30`. See the "Dead as of Aug 2026" note below before
+ * re-adding any moneycontrol.com/rss/* URL -- verify Last-Modified first, don't trust 200 OK.
  */
 
 import { dbGet, dbAll, dbRun, dbTransaction } from './dbAsync';
@@ -79,22 +87,25 @@ interface NewsSource {
 
 const NEWS_SOURCES: NewsSource[] = [
   // Indian sources — verified working June 2026
-  { name: 'ET Viewandrecofeed', url: 'https://economictimes.indiatimes.com/viewandrecofeed.cms', type: 'INDIAN' },
   { name: 'LiveMint Markets', url: 'https://www.livemint.com/rss/markets', type: 'INDIAN' },
   { name: 'LiveMint Companies', url: 'https://www.livemint.com/rss/companies', type: 'INDIAN' },
-  { name: 'MoneyControl Latest', url: 'https://www.moneycontrol.com/rss/latestnews.xml', type: 'INDIAN' },
-  { name: 'MoneyControl Markets', url: 'https://www.moneycontrol.com/rss/marketreports.xml', type: 'INDIAN' },
-  { name: 'MoneyControl Business', url: 'https://www.moneycontrol.com/rss/business.xml', type: 'INDIAN' },
-  { name: 'MoneyControl Economy', url: 'https://www.moneycontrol.com/rss/economy.xml', type: 'INDIAN' },
-  { name: 'MoneyControl Mutual Funds', url: 'https://www.moneycontrol.com/rss/mfnews.xml', type: 'INDIAN' },
   { name: 'Hindu BusinessLine', url: 'https://www.thehindubusinessline.com/markets/?service=rss', type: 'INDIAN' },
   { name: 'Zee Business Markets', url: 'https://www.zeebiz.com/market-news/rss.xml', type: 'INDIAN' },
   { name: 'CNBC TV18 Markets', url: 'https://www.cnbctv18.com/commonfeeds/v1/cne/rss/market.xml', type: 'INDIAN' },
   { name: 'Tradebrains', url: 'https://tradebrains.in/feed/', type: 'INDIAN' },
   { name: 'Google News India Markets', url: 'https://news.google.com/rss/search?q=Indian+stock+market+NSE+BSE&hl=en-IN&gl=IN&ceid=IN:en', type: 'INDIAN' },
   { name: 'Google News NIFTY', url: 'https://news.google.com/rss/search?q=NIFTY+SENSEX+trading&hl=en-IN&gl=IN&ceid=IN:en', type: 'INDIAN' },
+  // Added 2026-08-05 — live-verified fresh (real same-day pubDate) as replacements for the dead
+  // MoneyControl family below. High-frequency (items land within minutes of fetch), so these
+  // fit the flat 15-min NEWS_SOURCES cadence same as the sources they replace.
+  { name: 'ET Top Stories', url: 'https://economictimes.indiatimes.com/rssfeedstopstories.cms', type: 'INDIAN' }, // MoneyControl Latest replacement
+  { name: 'ET Stocks in News', url: 'https://economictimes.indiatimes.com/markets/stocks/rssfeeds/2146843.cms', type: 'INDIAN' }, // MoneyControl Buzzing Stocks replacement
+  { name: 'CNBC TV18 Business', url: 'https://www.cnbctv18.com/commonfeeds/v1/cne/rss/business.xml', type: 'INDIAN' }, // MoneyControl Markets/Business replacement
   // Global sources — verified working June 2026
   { name: 'Financial Times', url: 'https://www.ft.com/rss/home/uk', type: 'GLOBAL', timeout: 8000 },
+  // Added 2026-08-05 — live-verified fresh, MoneyControl Global Markets replacement.
+  { name: 'CNBC TV18 World', url: 'https://www.cnbctv18.com/commonfeeds/v1/cne/rss/world.xml', type: 'GLOBAL' },
+  { name: 'MarketWatch Top Stories', url: 'https://feeds.content.dowjones.io/public/rss/mw_topstories', type: 'GLOBAL', timeout: 8000 },
   // Dead as of June 2026 — removed:
   // Economic Times markets/economy RSS (return HTML not XML)
   // Business Standard RSS (403 Forbidden)
@@ -103,6 +114,25 @@ const NEWS_SOURCES: NewsSource[] = [
   // Yahoo Finance India RSS (500 Internal Server Error)
   // Reuters RSS feeds.reuters.com (domain connection error)
   // MoneyControl Broker Research (503)
+  // Dead as of Aug 2026 — removed (live-verified 2026-08-05, not just "used to fail" —
+  // all 6 return HTTP 200 with Last-Modified frozen between Feb and Aug 2024, over a year
+  // stale, cross-checked against a genuinely live feed on the identical fetch path to rule
+  // out a sandbox/proxy caching artifact):
+  //   MoneyControl Latest       (rss/latestnews.xml)         Last-Modified 2024-08-26
+  //   MoneyControl Markets      (rss/marketreports.xml)      Last-Modified 2024-06-03
+  //   MoneyControl Business     (rss/business.xml)           Last-Modified 2024-06-03
+  //   MoneyControl Economy      (rss/economy.xml)            Last-Modified 2024-06-03
+  //   MoneyControl Mutual Funds (rss/mfnews.xml)              Last-Modified 2024-02-19
+  //   MoneyControl Buzzing Stocks / Brokerage Recos / Global Markets — never added; the same
+  //   dead RSS family (buzzingstocks.xml/brokeragerecos.xml/internationalmarkets.xml all
+  //   Last-Modified 2024-06-03), confirmed at request time before wiring anything in.
+  //   ET Viewandrecofeed (viewandrecofeed.cms) — removed 2026-08-05. Not RSS at all: it's
+  //   ET's NewsML export (`<NewsML><articlelistroot><sec><stry><stname>...`), structurally
+  //   incompatible with parseRSS()'s `<item>...</item>` matcher (0 matches, always) — a
+  //   different failure mode from the CDATA-whitespace bug fixed the same day (see
+  //   extractCdata's comment above), but the same net effect: zero rows, forever, silently
+  //   (no error — parseRSS just returns []). Superseded by 'ET Top Stories'/'ET Stocks in
+  //   News' above, which are real RSS and live-verified working.
 ];
 
 // ─── Keyword Classifiers ──────────────────────────────────────────────────────
@@ -173,7 +203,16 @@ function stripHtml(html: string): string {
 }
 
 function extractCdata(block: string, tag: string): string {
-  const cdataRe = new RegExp(`<${tag}><!\\[CDATA\\[([\\s\\S]*?)\\]\\]><\\/${tag}>`, 'i');
+  // \s* around the CDATA markers -- some feeds (ET's RSS family confirmed 2026-08-05) emit
+  // `]]> </tag>` with a stray space/newline before the closing tag. A strict `]]></tag>`
+  // match then misses, falls through to plainRe, and plainRe's raw (unstripped) capture --
+  // literal `<![CDATA[...]]>` markers still in the string -- gets destroyed by stripHtml's
+  // `<[^>]*>` below: it spans from the leading `<` of `<![CDATA[` all the way to the `>` in
+  // `]]>`, silently wiping the entire title/description to '' with no error anywhere. An
+  // empty title then fails parseRSS's `if (title) items.push(...)` check, so the article is
+  // just dropped -- this is why `ET Viewandrecofeed` had zero rows in production despite
+  // being fetched successfully on every single 15-min cycle since it was added.
+  const cdataRe = new RegExp(`<${tag}>\\s*<!\\[CDATA\\[([\\s\\S]*?)\\]\\]>\\s*<\\/${tag}>`, 'i');
   const plainRe  = new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`, 'i');
   const m = cdataRe.exec(block) || plainRe.exec(block);
   return m ? stripHtml(m[1].trim()) : '';
@@ -751,6 +790,57 @@ export async function runGNewsStocksCycle(): Promise<{ fetched: number; inserted
   const batchSymbols = batch.map(b => b.symbol);
   console.log(`[SENTIMENT] GNews stocks cycle: batch=[${batchSymbols.join(',')}] fetched=${fetched} processed=${inserted}`);
   return { fetched, inserted, batch: batchSymbols };
+}
+
+// ─── Investing.com (slow-refresh RSS — separate cadence from NEWS_SOURCES) ────
+//
+// investing.com's India edition carries two feeds that don't fit NEWS_SOURCES' flat 15-min
+// cadence, added 2026-08-05 while replacing MoneyControl's dead RSS family:
+//   "Stock Market Investment Ideas" (news_1065) — analyst/target-price-flavored, the closest
+//     live match found for MoneyControl's dead brokeragerecos.xml (no clean 1:1 replacement
+//     exists — this is topically adjacent, not identical). Refreshes roughly once/day.
+//   "Economy News" (news_14) — genuinely global/US macro despite the in.investing.com host;
+//     live-verified 2026-08-05 (Bessent/Iran/Palantir headlines) — do NOT treat this as an
+//     India-economy source. Refreshes a few times/day.
+// Polling either on the flat 15-min cadence would just re-fetch the same items for hours
+// before anything new appears — the same wasted-request rationale this file already
+// documents for GNews/BSE above. 3h is a middle ground: tight enough to catch the economy
+// feed's multi-times-a-day cadence without hammering the once-a-day ideas feed for nothing.
+//
+// Caveat: investing.com's pubDate is a bare `YYYY-MM-DD HH:mm:ss` (no weekday, no offset),
+// unlike every RFC-822 date elsewhere in NEWS_SOURCES. `new Date(...)` parses it as the
+// server's LOCAL time zone (verified — no crash, ISO round-trip succeeds), which is only
+// correct if investing.com's raw timestamp is already IST for this India-edition subdomain.
+// Not confirmed against the source; `published_at` may be off by a few hours if that
+// assumption is wrong. Non-critical — dedup keys off (source name, link), not this field.
+const INVESTING_SOURCES: NewsSource[] = [
+  { name: 'Investing.com Stock Ideas', url: 'https://in.investing.com/rss/news_1065.rss', type: 'INDIAN' },
+  { name: 'Investing.com Global Economy', url: 'https://in.investing.com/rss/news_14.rss', type: 'GLOBAL' },
+];
+
+/** Dedicated slow-cadence cycle for INVESTING_SOURCES — see the comment above for why these
+ *  two feeds don't live in the flat-15-min NEWS_SOURCES array. */
+export async function runInvestingIdeasCycle(): Promise<{ fetched: number; inserted: number }> {
+  await ensureNSESymbols();
+
+  const sentRows = new Map<string, unknown[]>();
+  const legacyRows = new Map<string, unknown[]>();
+  let fetched = 0;
+
+  const results = await Promise.all(INVESTING_SOURCES.map(src =>
+    fetchSource(src).then(items => ({ src, items }))
+  ));
+  for (const { src, items } of results) {
+    fetched += items.length;
+    for (const raw of items.slice(0, 30)) {
+      processNewsItem(raw, src.name, src.type, sentRows, legacyRows);
+    }
+  }
+
+  const inserted = sentRows.size;
+  if (inserted > 0) await persistNewsRows(sentRows, legacyRows);
+  console.log(`[SENTIMENT] Investing.com cycle: fetched=${fetched}, processed=${inserted}`);
+  return { fetched, inserted };
 }
 
 // ─── Main Fetch + Score Cycle ─────────────────────────────────────────────────
