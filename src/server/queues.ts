@@ -1078,6 +1078,10 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean }> 
   await T.run('strategy-optimizer', () => runPython('strategy_optimizer.py', [], 30 * 60_000));
   await runPython('backtester.py', ['--start', '2023-01-01'], 30 * 60_000)
     .catch(e => console.warn('[QUEUE] backtester failed:', (e as Error).message));
+  // Backtest-driven strategy parameter tuning (holdout-gated inside the script itself).
+  // Keeps app_settings.optimal_* fresh only when out-of-sample Sharpe improves.
+  await T.run('backtest-optimizer', () => runPython('backtest_optimizer.py', ['--window', '365'], 60 * 60_000))
+    .catch(e => console.warn('[QUEUE] backtest_optimizer failed (weekly retrain continues):', (e as Error).message));
   await runPython('performance_tracker.py', ['--horizon', '5'])
     .catch(e => console.warn('[QUEUE] weekly performance_tracker(5) failed:', (e as Error).message));
   await runPython('performance_tracker.py', ['--horizon', '15'])

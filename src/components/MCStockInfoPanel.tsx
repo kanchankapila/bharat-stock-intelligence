@@ -185,14 +185,34 @@ const TrendlyneChecklistCard: React.FC<{ checklist: any }> = ({ checklist }) => 
 interface MCStockInfoPanelProps {
   symbol: string;
   scId: string;
-  section?: 'all' | 'technical' | 'fundamental' | 'insights' | 'overview' | 'shareholding' | 'peers' | 'trendlyne' | 'news';
+  section?: 'all' | 'technical' | 'fundamental' | 'earnings' | 'insights' | 'overview' | 'shareholding' | 'peers' | 'trendlyne' | 'news';
   onSelectStock?: (symbol: string) => void;
   watchlist?: string[];
   onToggleWatchlist?: (symbol: string, metadata?: { price?: number; name?: string; source?: string }) => void;
 }
 
 type Timeframe = 'D' | 'W' | 'M';
-type Tab = 'overview' | 'technical' | 'financials' | 'fno' | 'ai_report' | 'news';
+type Tab = 'overview' | 'technical' | 'financials' | 'earnings' | 'fno' | 'ai_report' | 'news';
+
+function PanelSectionHeader({
+  title,
+  subtitle,
+  right,
+}: {
+  title: string;
+  subtitle?: string;
+  right?: React.ReactNode;
+}) {
+  return (
+    <div className="mb-3 flex flex-wrap items-start justify-between gap-2 border-b border-slate-800/70 pb-2.5">
+      <div>
+        <h3 className="text-[11px] font-black uppercase tracking-[0.16em] text-slate-200">{title}</h3>
+        {subtitle ? <p className="mt-1 text-[10px] font-semibold text-slate-500">{subtitle}</p> : null}
+      </div>
+      {right ? <div className="shrink-0">{right}</div> : null}
+    </div>
+  );
+}
 
 export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({ 
   symbol, 
@@ -205,6 +225,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
   const [activeTab, setActiveTab] = React.useState<Tab>(
     section === 'technical' ? 'technical' :
     section === 'fundamental' ? 'financials' :
+    section === 'earnings' ? 'earnings' :
     section === 'insights' ? 'ai_report' :
     section === 'overview' ? 'overview' :
     section === 'shareholding' ? 'financials' :
@@ -226,6 +247,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
   React.useEffect(() => {
     if (section === 'technical') setActiveTab('technical');
     else if (section === 'fundamental') setActiveTab('financials');
+    else if (section === 'earnings') setActiveTab('earnings');
     else if (section === 'insights') setActiveTab('ai_report');
     else if (section === 'overview') setActiveTab('overview');
     else if (section === 'shareholding') setActiveTab('financials');
@@ -432,10 +454,18 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
   const currentPrice = eq?.pricecurrent || sp?.lastPrice || tech?.close?.toString() || '—';
   const changePct = eq?.pricepercentchange || sp?.perChange || '—';
 
+  const providerStatus = [
+    { name: 'MoneyControl', ok: !!eq || !!tech || !!classification },
+    { name: 'Trendlyne', ok: !!trendlyneOverview || !!trendlyneTa },
+    { name: 'TradeBrains', ok: !!tb },
+    { name: 'NSE/NiftyTrader', ok: !!niftyTraderData || !!nseStockData },
+  ];
+
   const TABS: { key: Tab; label: string }[] = [
     { key: 'overview',   label: 'Overview Cockpit' },
     { key: 'technical',  label: 'Technical Gauges' },
     { key: 'financials', label: 'Financials & Peers' },
+    { key: 'earnings',   label: 'Results & Earnings' },
     { key: 'fno',        label: 'Options & Flow (F&O)' },
     { key: 'ai_report',  label: 'AI Auditor Report' },
     { key: 'news',       label: 'Stock News' },
@@ -443,7 +473,46 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
 
 
   return (
-    <div ref={containerRef} className="space-y-4">
+    <div ref={containerRef} className="space-y-6">
+
+      <div className="rounded-2xl border border-slate-800 bg-slate-950/55 p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Institutional Stock Intelligence</p>
+            <h2 className="mt-1 text-lg font-black tracking-tight text-white">{symbol}</h2>
+            <p className="mt-1 text-[10px] font-semibold text-slate-400">
+              Multi-provider research surface across valuation, ownership, earnings, options and technical context.
+            </p>
+          </div>
+          <div className="flex flex-col items-end gap-1">
+            <div className={cn(
+              "text-base font-black tabular-nums",
+              parseFloat(String(changePct || 0)) >= 0 ? "text-emerald-400" : "text-rose-400"
+            )}>
+              ₹{currentPrice}
+            </div>
+            <div className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+              {changePct ? `${parseFloat(String(changePct)) >= 0 ? '+' : ''}${changePct}%` : 'day move unavailable'}
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center gap-1.5">
+          {providerStatus.map((src) => (
+            <span
+              key={src.name}
+              className={cn(
+                "rounded-full border px-2 py-0.5 text-[9px] font-black uppercase tracking-widest",
+                src.ok
+                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
+                  : "border-slate-700 bg-slate-900 text-slate-500"
+              )}
+            >
+              {src.name}
+            </span>
+          ))}
+        </div>
+      </div>
 
       {/* ── HEADER: Scores (Only show in 'all' or 'overview') ── */}
       {(!section || section === 'all' || section === 'overview') && (
@@ -529,6 +598,10 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
       {/* ── Trendlyne Price Return Insights (Visible on top across all tabs) ── */}
       {trendlyneTa?.body?.parameters?.price_analysis && (
         <div className="bg-slate-950/40 border border-slate-800/80 rounded-2xl p-3 space-y-2">
+          <PanelSectionHeader
+            title="Price Regime"
+            subtitle="Trendlyne benchmark-relative return posture"
+          />
           <div className="flex items-center justify-between">
             <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
               <TrendingUp className="w-3.5 h-3.5 text-indigo-500" />
@@ -589,21 +662,24 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
 
       {/* ── TAB BAR (Only show if section is 'all' or undefined) ── */}
       {(!section || section === 'all') && (
-        <div className="flex border-b border-white/[0.06] overflow-x-auto gap-1 scrollbar-none">
-          {TABS.map(tab => (
-            <button
-              key={tab.key}
-              onClick={() => setActiveTab(tab.key)}
-              className={cn(
-                "px-4 py-2 text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap border-b-2 -mb-px",
-                activeTab === tab.key
-                  ? "border-blue-500 text-blue-400 font-extrabold"
-                  : "border-transparent text-slate-500 hover:text-slate-300"
-              )}
-            >
-              {tab.label}
-            </button>
-          ))}
+        <div className="rounded-2xl border border-slate-800 bg-slate-950/35 p-1.5">
+          <div className="mb-1.5 px-2 text-[9px] font-black uppercase tracking-[0.16em] text-slate-500">Research Lenses</div>
+          <div className="flex overflow-x-auto gap-1 scrollbar-none">
+            {TABS.map(tab => (
+              <button
+                key={tab.key}
+                onClick={() => setActiveTab(tab.key)}
+                className={cn(
+                  "rounded-xl border px-3 py-2 text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap",
+                  activeTab === tab.key
+                    ? "border-blue-500 bg-blue-500/10 text-blue-300"
+                    : "border-transparent text-slate-500 hover:border-slate-700 hover:bg-slate-900/60 hover:text-slate-300"
+                )}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
@@ -644,7 +720,11 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
       })()}
 
       {activeTab === 'overview' && (
-        <div className="space-y-4">
+        <div className="rounded-2xl border border-slate-800 bg-slate-950/30 p-4 space-y-4">
+          <PanelSectionHeader
+            title="Overview Synthesis"
+            subtitle="Unified multi-engine read with valuation and profile context"
+          />
           {/* High-Density Intelligence Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {/* AlphaQuant Factor Breakdown */}
@@ -969,8 +1049,12 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
       {/* ══════════════════════════════════════════════════════════════ */}
       {/* FINANCIALS TAB                                                 */}
       {/* ══════════════════════════════════════════════════════════════ */}
-      {activeTab === 'financials' && (
-        <div className="space-y-6">
+      {(activeTab === 'financials' || activeTab === 'earnings') && (
+        <div className="rounded-2xl border border-slate-800 bg-slate-950/30 p-4 space-y-6">
+          <PanelSectionHeader
+            title={activeTab === 'earnings' ? 'Results & Earnings' : 'Financials Core'}
+            subtitle={activeTab === 'earnings' ? 'Forecasts, surprises, ratings and action calendar' : 'Valuation matrix, profitability and events'}
+          />
           {/* High-Density Valuation & Key Metrics */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
             {/* Dividends (Trendlyne) */}
@@ -1609,7 +1693,11 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
       {/* TECHNICAL TAB                                                  */}
       {/* ══════════════════════════════════════════════════════════════ */}
       {activeTab === 'technical' && (
-        <div className="space-y-6">
+        <div className="rounded-2xl border border-slate-800 bg-slate-950/30 p-4 space-y-6">
+          <PanelSectionHeader
+            title="Technical Gauges"
+            subtitle="Price structure, indicator stack and momentum diagnostics"
+          />
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2 space-y-6">
               {/* Historical Max Data Chart */}
@@ -2178,8 +2266,12 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
       {/* ══════════════════════════════════════════════════════════════ */}
       {/* PEERS PANEL (Rendered under Financials & Peers)               */}
       {/* ══════════════════════════════════════════════════════════════ */}
-      {activeTab === 'financials' && (
-        <div className="space-y-6">
+      {(activeTab === 'financials' || activeTab === 'earnings') && (
+        <div className="rounded-2xl border border-slate-800 bg-slate-950/30 p-4 space-y-6">
+          <PanelSectionHeader
+            title="Peers & Relative Positioning"
+            subtitle="Sector-level comparables for context, not direct recommendations"
+          />
           {loadingPeers ? (
             <div className="flex items-center justify-center p-8 bg-slate-900/10 border border-slate-800 border-dashed rounded-2xl">
               <span className="text-[10px] font-black uppercase tracking-widest text-slate-500 animate-pulse">Loading Peer Data...</span>
@@ -2339,7 +2431,11 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
       {/* ANALYSIS SECTION (Rendered under AI Auditor Report)            */}
       {/* ══════════════════════════════════════════════════════════════ */}
       {activeTab === 'ai_report' && (
-        <div className="space-y-6">
+        <div className="rounded-2xl border border-slate-800 bg-slate-950/30 p-4 space-y-6">
+          <PanelSectionHeader
+            title="AI Auditor Report"
+            subtitle="Qualitative synthesis, technical overlays and ownership intelligence"
+          />
 
           {/* Intelligence Hub: Qualitative Factors */}
           {(swot || tb?.insights) && (
@@ -2555,7 +2651,11 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
       {/* ANALYST RECOMMENDATIONS (Rendered under AI Auditor Report)     */}
       {/* ══════════════════════════════════════════════════════════════ */}
       {activeTab === 'ai_report' && (
-        <div className="space-y-6">
+        <div className="rounded-2xl border border-slate-800 bg-slate-950/30 p-4 space-y-6">
+          <PanelSectionHeader
+            title="Analyst & Forecast Lens"
+            subtitle="Consensus trend, target dispersion and valuation expectations"
+          />
 
           {/* Analyst Intelligence Dashboard */}
           {(ar || pf) && (
@@ -2792,7 +2892,11 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
 
       {/* ── F&O Tab ── */}
       {activeTab === 'fno' && (
-        <div className="space-y-4">
+        <div className="rounded-2xl border border-slate-800 bg-slate-950/30 p-4 space-y-6">
+          <PanelSectionHeader
+            title="Options & Flow"
+            subtitle="OI structure, PCR, max pain and rollover posture"
+          />
           
           {/* Expiry Selector & Contract Headers */}
           <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-950/40 border border-slate-800/80 rounded-2xl p-4">
@@ -3177,7 +3281,11 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
 
       {/* ── TAB: STOCK NEWS ── */}
       {activeTab === 'news' && (
-        <div className="space-y-4">
+        <div className="rounded-2xl border border-slate-800 bg-slate-950/30 p-4 space-y-4">
+          <PanelSectionHeader
+            title="News Flow"
+            subtitle="MoneyControl stock-specific stream with time-stamped items"
+          />
           <div className="flex items-center justify-between">
             <h3 className="text-xs font-black text-slate-300 uppercase tracking-widest flex items-center gap-2">
               <Newspaper className="w-4 h-4 text-blue-400" />

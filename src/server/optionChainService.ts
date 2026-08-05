@@ -1,5 +1,6 @@
 import { getNiftyTraderHeaders } from './niftytraderService';
 import { dbAll } from './dbAsync';
+import { parseNtOptionChainResponse } from './contracts/marketFeeds';
 
 export interface OptionChainData {
   success: boolean;
@@ -69,12 +70,11 @@ export async function fetchOptionChain(symbol: string): Promise<any> {
       throw new Error(`NiftyTrader API returned ${response.status}`);
     }
 
-    const json = await response.json();
-    
+    const json = parseNtOptionChainResponse(await response.json());
+
     if (json.result === 1 && json.resultData) {
       const rd = json.resultData;
-      // Handle both old 'optionChain' and new 'opDatas' keys
-      const oc = rd.opDatas || rd.optionChain || [];
+      const oc = rd.opDatas;
       
       // Extract spot price from the first item if not found in root or first item index_close
       const firstItem = oc[0] || {};

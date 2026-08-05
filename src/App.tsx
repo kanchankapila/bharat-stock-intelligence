@@ -86,6 +86,7 @@ const PriceAlertsPanel = React.lazy(() => import('./components/PriceAlertsPanel'
 const Watchlist = React.lazy(() => import('./components/Watchlist').then(m => ({ default: m.Watchlist })));
 const V1Screener = React.lazy(() => import('./components/V1Screener').then(m => ({ default: m.V1Screener })));
 const TrendlyneScreenerPanel = React.lazy(() => import('./components/TrendlyneScreenerPanel'));
+const PremiumScreenersPage = React.lazy(() => import('./components/PremiumScreenersPage'));
 const LiveMarketScreener = React.lazy(() => import('./components/LiveMarketScreener').then(m => ({ default: m.LiveMarketScreener })));
 const EODMarketScreener = React.lazy(() => import('./components/EODMarketScreener').then(m => ({ default: m.EODMarketScreener })));
 const NSEStockDiscovery = React.lazy(() => import('./components/NSEStockDiscovery'));
@@ -464,6 +465,7 @@ export default function App() {
             <Route path="/screener" element={<V1Screener stocks={stocks} onSelectStock={handleSelectStock} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
             <Route path="/screener-v2" element={<ScreenerPage_v2 />} />
             <Route path="/trendlyne" element={<TrendlyneScreenerPanel onSelectStock={handleSelectStock} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
+            <Route path="/premium-screeners" element={<PremiumScreenersPage onSelectStock={handleSelectStock} />} />
             <Route path="/live-screener" element={<LiveMarketScreener onSelectStock={handleSelectStock} />} />
             <Route path="/eod-screener" element={<EODMarketScreener onSelectStock={handleSelectStock} />} />
             <Route path="/discover" element={<div className="p-6"><NSEStockDiscovery onSelectStock={handleSelectStock} /></div>} />

@@ -15,6 +15,7 @@ import { PreMarketBriefingDeskPage } from './pages/PreMarketBriefingDeskPage';
 import { MacroRegimeDeskPage } from './pages/MacroRegimeDeskPage';
 import { InstitutionalFlowDeskPage } from './pages/InstitutionalFlowDeskPage';
 import './v5.css';
+import type { StockTab } from './pages/StockIntelligenceDeskPage';
 
 type DeskKey = 'pulse' | 'briefing' | 'macro-regime' | 'institutional-flow' | 'portfolio' | 'screener' | 'signals' | 'risk' | 'options' | 'workstation' | 'stock-intel' | 'earnings';
 
@@ -38,6 +39,7 @@ export default function V5App() {
   const [page, setPage] = useState<DeskKey>('pulse');
   const [query, setQuery] = useState('');
   const [selectedSymbol, setSelectedSymbol] = useState('RELIANCE');
+  const [stockIntelTab, setStockIntelTab] = useState<StockTab>('overview');
 
   const fiiDiiQ = trpc.getFiiDiiFlow.useQuery(
     { days: 10 },
@@ -75,11 +77,11 @@ export default function V5App() {
     if (page === 'institutional-flow') return <InstitutionalFlowDeskPage />;
     if (page === 'portfolio') return <PortfolioDeskPage />;
     if (page === 'screener') return <ScreenerLabPage onSelectSymbol={(sym) => { setSelectedSymbol(sym); setPage('workstation'); }} />;
-    if (page === 'earnings') return <EarningsPulseDeskPage onSelectSymbol={(sym) => { setSelectedSymbol(sym); setPage('stock-intel'); }} />;
-    if (page === 'signals') return <SignalReviewPage />;
-    if (page === 'risk') return <RiskDeskPage />;
-    if (page === 'options') return <OptionsDeskPage />;
-    if (page === 'stock-intel') return <StockIntelligenceDeskPage selectedSymbol={selectedSymbol} setSelectedSymbol={setSelectedSymbol} query={query} setQuery={setQuery} />;
+    if (page === 'earnings') return <EarningsPulseDeskPage onSelectSymbol={(sym) => { setSelectedSymbol(sym); setStockIntelTab('earnings'); setPage('stock-intel'); }} />;
+    if (page === 'signals') return <SignalReviewPage onSelectSymbol={(sym) => { setSelectedSymbol(sym); setStockIntelTab('overview'); setPage('stock-intel'); }} />;
+    if (page === 'risk') return <RiskDeskPage onSelectSymbol={(sym) => { setSelectedSymbol(sym); setStockIntelTab('overview'); setPage('stock-intel'); }} />;
+    if (page === 'options') return <OptionsDeskPage onSelectSymbol={(sym) => { setSelectedSymbol(sym); setStockIntelTab('overview'); setPage('stock-intel'); }} />;
+    if (page === 'stock-intel') return <StockIntelligenceDeskPage selectedSymbol={selectedSymbol} setSelectedSymbol={setSelectedSymbol} query={query} setQuery={setQuery} initialTab={stockIntelTab} />;
     return <WorkstationPage selectedSymbol={selectedSymbol} setSelectedSymbol={setSelectedSymbol} query={query} setQuery={setQuery} flowMood={mood.text} />;
   };
 

@@ -1,11 +1,11 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Activity, BadgeDollarSign, CalendarClock, Layers3, Newspaper, Search, ShieldCheck, UserCircle2 } from 'lucide-react';
 import { trpc } from '../../lib/trpc';
 import { fmtFixed, fmtINR, n, numOrNull, pctClass, s } from '../utils';
 import { V5KpiStrip } from '../components/V5KpiStrip';
 import { V5DecisionSummaryStrip, V5InsightPanel, V5MiniBarChart } from '../components/V5Visuals';
 
-type StockTab = 'overview' | 'financials' | 'earnings' | 'ownership' | 'screeners' | 'news';
+export type StockTab = 'overview' | 'financials' | 'earnings' | 'ownership' | 'screeners' | 'news';
 
 const TABS: { id: StockTab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { id: 'overview', label: 'Overview', icon: Activity },
@@ -21,13 +21,19 @@ export function StockIntelligenceDeskPage({
   setSelectedSymbol,
   query,
   setQuery,
+  initialTab,
 }: {
   selectedSymbol: string;
   setSelectedSymbol: (symbol: string) => void;
   query: string;
   setQuery: (query: string) => void;
+  initialTab?: StockTab;
 }) {
-  const [tab, setTab] = useState<StockTab>('overview');
+  const [tab, setTab] = useState<StockTab>(initialTab ?? 'overview');
+
+  useEffect(() => {
+    if (initialTab) setTab(initialTab);
+  }, [initialTab]);
 
   const searchQ = trpc.searchNSEStocks.useQuery(
     { query },
@@ -56,6 +62,11 @@ export function StockIntelligenceDeskPage({
 
   const shareholdingQ = trpc.getShareholding.useQuery(
     { symbol: selectedSymbol },
+    { enabled: !!selectedSymbol, refetchOnWindowFocus: true },
+  );
+
+  const superstarActivityQ = trpc.getSuperstarInvestorActivity.useQuery(
+    { symbol: selectedSymbol, limit: 20 },
     { enabled: !!selectedSymbol, refetchOnWindowFocus: true },
   );
 
@@ -89,7 +100,9 @@ export function StockIntelligenceDeskPage({
     { enabled: !!selectedSymbol, refetchOnWindowFocus: true },
   );
 
-  const searchRows = Array.isArray(searchQ.data) ? searchQ.data : [];
+  const searchRows = Array.isArray((searchQ.data as any)?.stocks)
+    ? ((searchQ.data as any).stocks as any[])
+    : [];
 
   const quote = quoteQ.data as any;
   const score = (scoreDetailQ.data as any)?.score;
@@ -97,6 +110,7 @@ export function StockIntelligenceDeskPage({
   const fundamentals = fundamentalsQ.data as any;
   const ratios = ratiosQ.data as any;
   const shareholding = shareholdingQ.data as any;
+  const superstarActivity = (superstarActivityQ.data ?? []) as any[];
   const earnings = earningsForecastQ.data as any;
   const analyst = analystRatingQ.data as any;
   const forecast = priceForecastQ.data as any;
@@ -170,6 +184,8 @@ export function StockIntelligenceDeskPage({
         />
 
         <div className="v5-compact-scroll mt-3 space-y-2 pr-1">
+          {searchQ.isLoading && <p className="text-sm text-slate-500">Searching stocks...</p>}
+          {searchQ.isError && <p className="text-sm text-rose-600">Search is temporarily unavailable.</p>}
           {searchRows.slice(0, 40).map((row: any) => {
             const sym = s(row.symbol);
             const active = selectedSymbol === sym;
@@ -184,7 +200,9 @@ export function StockIntelligenceDeskPage({
               </button>
             );
           })}
-          {!searchRows.length && <p className="text-sm text-slate-500">Search results will appear here.</p>}
+          {!searchQ.isLoading && !searchQ.isError && !searchRows.length && (
+            <p className="text-sm text-slate-500">Search results will appear here.</p>
+          )}
         </div>
       </div>
 
@@ -329,6 +347,40 @@ export function StockIntelligenceDeskPage({
                 'Use ownership trend with score and screeners before final action.',
               ]}
             />
+
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 xl:col-span-2">
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Superstar Investor Activity (InvestSights)</div>
+              <div className="v5-compact-scroll space-y-1.5 pr-1">
+                {superstarActivity.map((row: any, idx: number) => {
+                  const slug = s(row.investor_slug, 'investor');
+                  const activity = s(row.change_type, 'update').toUpperCase();
+                  const pctHolding = numOrNull(row.curr_pct_holding);
+                  const pctChange = numOrNull(row.pct_holding_change);
+                  const tone = activity === 'EXIT' || (pctChange != null && pctChange < 0)
+                    ? 'text-rose-700 bg-rose-50 border-rose-200'
+                    : 'text-emerald-700 bg-emerald-50 border-emerald-200';
+                  return (
+                    <div key={`${slug}-${s(row.period_end_date)}-${idx}`} className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-semibold text-slate-800">{slug.replace(/-/g, ' ')}</span>
+                        <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${tone}`}>{activity}</span>
+                      </div>
+                      <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                        <span className="rounded-full border border-slate-200 px-2 py-0.5">Holding: {pctHolding == null ? '—' : `${fmtFixed(pctHolding, 2)}%`}</span>
+                        <span className="rounded-full border border-slate-200 px-2 py-0.5">Change: {pctChange == null ? '—' : `${pctChange >= 0 ? '+' : ''}${fmtFixed(pctChange, 2)}%`}</span>
+                        <span className="rounded-full border border-slate-200 px-2 py-0.5">As of: {s(row.period_end_date, '—')}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+                {!superstarActivityQ.isLoading && superstarActivity.length === 0 && (
+                  <p className="text-sm text-slate-500">No superstar investor activity rows are available for this symbol yet.</p>
+                )}
+                {superstarActivityQ.isLoading && (
+                  <p className="text-sm text-slate-500">Loading superstar investor activity...</p>
+                )}
+              </div>
+            </div>
           </div>
         )}
 

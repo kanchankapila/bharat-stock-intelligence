@@ -4,8 +4,9 @@ import { trpc } from '../../lib/trpc';
 import { fmtFixed, fmtINR, n, numOrNull, s } from '../utils';
 import { V5KpiStrip } from '../components/V5KpiStrip';
 import { V5DecisionSummaryStrip, V5InsightPanel, V5MiniBarChart } from '../components/V5Visuals';
+import { stockDisplayName } from '../stockIdentity';
 
-export function OptionsDeskPage() {
+export function OptionsDeskPage({ onSelectSymbol }: { onSelectSymbol?: (symbol: string) => void }) {
   const [symbol, setSymbol] = useState('nifty');
 
   const optionsQ = trpc.getOptionsIntelligence.useQuery(undefined, {
@@ -147,7 +148,7 @@ export function OptionsDeskPage() {
           <table className="min-w-full text-sm">
             <thead>
               <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
-                <th className="px-3 py-2">Symbol</th>
+                <th className="px-3 py-2">Stock</th>
                 <th className="px-3 py-2">Expiry</th>
                 <th className="px-3 py-2">PCR</th>
                 <th className="px-3 py-2">Call OI</th>
@@ -155,15 +156,26 @@ export function OptionsDeskPage() {
               </tr>
             </thead>
             <tbody>
-              {(optionsQ.data ?? []).slice(0, 40).map((row: any, i: number) => (
-                <tr key={`${s(row.symbol)}-${i}`} className="v5-table-row-intel border-b border-slate-100">
-                  <td className="px-3 py-2 font-semibold text-slate-800">{s(row.symbol)}</td>
+              {(optionsQ.data ?? []).slice(0, 40).map((row: any, i: number) => {
+                const sym = s(row.symbol);
+                return (
+                <tr key={`${sym}-${i}`} className="v5-table-row-intel border-b border-slate-100">
+                  <td className="px-3 py-2 font-semibold text-slate-800">
+                    <button
+                      onClick={() => sym && onSelectSymbol?.(sym)}
+                      className="text-left hover:text-teal-700"
+                      title="Open stock intelligence"
+                    >
+                      <div>{stockDisplayName(sym, sym)}</div>
+                      <div className="text-[11px] font-medium text-slate-500">{sym}</div>
+                    </button>
+                  </td>
                   <td className="px-3 py-2">{s(row.expiry, '—')}</td>
                   <td className="px-3 py-2">{fmtFixed(row.pcr, 2)}</td>
                   <td className="px-3 py-2">{compact(n(row.total_call_oi))}</td>
                   <td className="px-3 py-2">{compact(n(row.total_put_oi))}</td>
                 </tr>
-              ))}
+              );})}
             </tbody>
           </table>
         </div>
@@ -175,24 +187,42 @@ export function OptionsDeskPage() {
           <V5InsightPanel title="Options Insights" insights={optionsInsights} />
         </div>
         <div className="v5-compact-scroll space-y-2 pr-1">
-          {maxPainAlerts.slice(0, 10).map((x: any) => (
+          {maxPainAlerts.slice(0, 10).map((x: any) => {
+            const sym = s(x.symbol);
+            return (
             <div key={s(x.symbol)} className="v5-table-row-intel rounded-lg border border-slate-200 p-2">
               <div className="flex items-center justify-between">
-                <div className="font-semibold text-slate-800">{s(x.symbol)}</div>
+                <button
+                  onClick={() => sym && onSelectSymbol?.(sym)}
+                  className="font-semibold text-slate-800 hover:text-teal-700 text-left"
+                  title="Open stock intelligence"
+                >
+                  <div>{stockDisplayName(sym, sym)}</div>
+                  <div className="text-[11px] font-medium text-slate-500">{sym}</div>
+                </button>
                 <div className="text-xs text-slate-500">{fmtFixed(x.diffPct, 2)}%</div>
               </div>
               <div className="text-[11px] text-slate-500">{s(x.rec)}</div>
             </div>
-          ))}
-          {(rolloverQ.data ?? []).slice(0, 8).map((x: any) => (
+          );})}
+          {(rolloverQ.data ?? []).slice(0, 8).map((x: any) => {
+            const sym = s(x.symbol);
+            return (
             <div key={`${s(x.symbol)}-roll`} className="v5-table-row-intel rounded-lg border border-slate-200 bg-slate-50 p-2">
               <div className="flex items-center justify-between">
-                <div className="font-semibold text-slate-800">{s(x.symbol)}</div>
+                <button
+                  onClick={() => sym && onSelectSymbol?.(sym)}
+                  className="font-semibold text-slate-800 hover:text-teal-700 text-left"
+                  title="Open stock intelligence"
+                >
+                  <div>{stockDisplayName(sym, sym)}</div>
+                  <div className="text-[11px] font-medium text-slate-500">{sym}</div>
+                </button>
                 <div className="text-xs text-slate-500">{s(x.positioning)}</div>
               </div>
               <div className="text-[11px] text-slate-500">Rollover {fmtFixed(x.rollover_pct, 1)}% | CoC {fmtFixed(x.cost_of_carry_ann, 1)}%</div>
             </div>
-          ))}
+          );})}
         </div>
       </div>
     </section>

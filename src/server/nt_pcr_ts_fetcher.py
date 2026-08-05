@@ -21,6 +21,7 @@ Run:
 
 import argparse
 from datetime import date as _date
+from urllib.parse import urlencode
 
 import requests
 
@@ -37,10 +38,7 @@ NT_HEADERS = {
     "Referer": "https://www.niftytrader.in/",
 }
 
-PCR_URL = (
-    "https://webapi.niftytrader.in/webapi/option/oi-pcr-data"
-    "?symbolName={symbol}&reqType={req_type}&reqDate={req_date}"
-)
+PCR_BASE_URL = "https://webapi.niftytrader.in/webapi/option/oi-pcr-data"
 
 # provider → reqType used in PCR API
 _REQ_TYPE = {
@@ -81,22 +79,84 @@ def _sf(v) -> float | None:
         return None
 
 
+def _candidate_pcr_urls(nt_symbol: str, req_type: str, req_date: str = "") -> list[str]:
+    """Build ordered request candidates for NiftyTrader PCR endpoint.
+
+    Why this exists: live probes have shown 400s for some query-shape combinations
+    (notably around symbol param naming and blank reqDate handling). Keep the canonical
+    shape first, then fall back to compatible variants.
+    """
+    symbol = (nt_symbol or "").strip()
+    if not symbol:
+        return []
+
+    req_date = (req_date or "").strip()
+    symbol_variants = [symbol]
+    lower = symbol.lower()
+    if lower not in symbol_variants:
+        symbol_variants.append(lower)
+
+    urls: list[str] = []
+    seen: set[str] = set()
+
+    def add_url(params: dict[str, str]) -> None:
+        q = urlencode(params)
+        url = f"{PCR_BASE_URL}?{q}"
+        if url not in seen:
+            seen.add(url)
+            urls.append(url)
+
+    # Primary/canonical form (seen in captured live URLs).
+    for sym in symbol_variants:
+        params = {"symbolName": sym, "reqType": req_type}
+        if req_date:
+            params["reqDate"] = req_date
+        add_url(params)
+
+    # Alternate symbol key, seen on sibling NT option endpoints.
+    for sym in symbol_variants:
+        params = {"symbol": sym, "reqType": req_type}
+        if req_date:
+            params["reqDate"] = req_date
+        add_url(params)
+
+    # Legacy blank reqDate variant (keep last; some older captures include this shape).
+    if not req_date:
+        for key in ("symbolName", "symbol"):
+            add_url({key: lower, "reqType": req_type, "reqDate": ""})
+
+    return urls
+
+
 def fetch_pcr(nt_symbol: str, req_type: str, req_date: str = "") -> tuple[list[str], list[dict]]:
     """Fetch PCR time series. Returns (expiry_dates, oiDatas)."""
-    url = PCR_URL.format(symbol=nt_symbol, req_type=req_type, req_date=req_date)
-    try:
-        r = retry_get(requests, url, headers=NT_HEADERS, timeout=20)
-        d = r.json()
-        if d.get("result") != 1:
-            print(f"  [PCR] API error for {nt_symbol}: {d.get('resultMessage')}")
-            return [], []
-        rd = d.get("resultData") or {}
-        expiries = rd.get("oiExpiryDates") or []
-        data     = rd.get("oiDatas") or []
-        return expiries, data
-    except Exception as e:
-        print(f"  [PCR] fetch error for {nt_symbol} after retries: {e}")
+    urls = _candidate_pcr_urls(nt_symbol, req_type, req_date)
+    if not urls:
         return [], []
+
+    last_err: Exception | None = None
+    last_api_msg: str | None = None
+
+    for url in urls:
+        try:
+            r = retry_get(requests, url, headers=NT_HEADERS, timeout=20)
+            d = r.json()
+            if d.get("result") != 1:
+                last_api_msg = str(d.get("resultMessage") or "unknown")
+                continue
+            rd = d.get("resultData") or {}
+            expiries = rd.get("oiExpiryDates") or []
+            data = rd.get("oiDatas") or []
+            return expiries, data
+        except Exception as e:
+            last_err = e
+            continue
+
+    if last_api_msg:
+        print(f"  [PCR] API error for {nt_symbol}: {last_api_msg}")
+    elif last_err:
+        print(f"  [PCR] fetch error for {nt_symbol} after retries: {last_err}")
+    return [], []
 
 
 def save_pcr_ts(index_name: str, data: list[dict]) -> int:

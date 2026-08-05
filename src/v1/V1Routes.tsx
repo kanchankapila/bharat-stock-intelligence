@@ -10,6 +10,7 @@ import { Globe, Activity } from 'lucide-react';
 
 // --- Lazy-loaded V1 page components ---
 const TrendlyneScreenerPanel = React.lazy(() => import('../components/TrendlyneScreenerPanel'));
+const PremiumScreenersPage  = React.lazy(() => import('../components/PremiumScreenersPage'));
 const LiveMarketScreener      = React.lazy(() => import('../components/LiveMarketScreener').then(m => ({ default: m.LiveMarketScreener })));
 const EODMarketScreener       = React.lazy(() => import('../components/EODMarketScreener').then(m => ({ default: m.EODMarketScreener })));
 const NSEStockDiscovery       = React.lazy(() => import('../components/NSEStockDiscovery'));
@@ -152,6 +153,7 @@ const V1Routes = ({
                             } />
                             <Route path="/screener" element={<V1Screener stocks={stocks} onSelectStock={onSelectStock} watchlist={watchlist} onToggleWatchlist={onToggleWatchlist} />} />
                             <Route path="/trendlyne" element={<TrendlyneScreenerPanel onSelectStock={onSelectStock} watchlist={watchlist} onToggleWatchlist={onToggleWatchlist} />} />
+                            <Route path="/premium-screeners" element={<PremiumScreenersPage onSelectStock={onSelectStock} />} />
                             <Route path="/live-screener" element={<LiveMarketScreener onSelectStock={onSelectStock} />} />
                             <Route path="/eod-screener" element={<EODMarketScreener onSelectStock={onSelectStock} />} />
                             <Route path="/discover" element={<div className="p-6"><NSEStockDiscovery onSelectStock={onSelectStock} /></div>} />

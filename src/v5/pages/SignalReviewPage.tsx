@@ -3,8 +3,9 @@ import { trpc } from '../../lib/trpc';
 import { fmtFixed, n, numOrNull, s } from '../utils';
 import { V5KpiStrip } from '../components/V5KpiStrip';
 import { V5DecisionSummaryStrip, V5InsightPanel, V5MiniBarChart, V5Sparkline } from '../components/V5Visuals';
+import { stockDisplayName } from '../stockIdentity';
 
-export function SignalReviewPage() {
+export function SignalReviewPage({ onSelectSymbol }: { onSelectSymbol?: (symbol: string) => void }) {
   const reportQ = trpc.getSignalReportCard.useQuery(undefined, {
     refetchInterval: 120_000,
     refetchOnWindowFocus: true,
@@ -106,7 +107,7 @@ export function SignalReviewPage() {
           <table className="min-w-full text-sm">
             <thead>
               <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
-                <th className="px-3 py-2">Symbol</th>
+                <th className="px-3 py-2">Stock</th>
                 <th className="px-3 py-2">Source</th>
                 <th className="px-3 py-2">Type</th>
                 <th className="px-3 py-2">Entry</th>
@@ -120,9 +121,19 @@ export function SignalReviewPage() {
                 const growth = numOrNull(row.growth_pct);
                 const entry = numOrNull(row.entry_price);
                 const current = numOrNull(row.current_price);
+                const sym = s(row.symbol);
                 return (
                   <tr key={String(row.id)} className="v5-table-row-intel border-b border-slate-100">
-                    <td className="px-3 py-2 font-semibold text-slate-800">{s(row.symbol)}</td>
+                    <td className="px-3 py-2 font-semibold text-slate-800">
+                      <button
+                        onClick={() => sym && onSelectSymbol?.(sym)}
+                        className="text-left hover:text-teal-700"
+                        title="Open stock intelligence"
+                      >
+                        <div>{stockDisplayName(sym, sym)}</div>
+                        <div className="text-[11px] font-medium text-slate-500">{sym}</div>
+                      </button>
+                    </td>
                     <td className="px-3 py-2">{s(row.signal_source)}</td>
                     <td className="px-3 py-2">{s(row.signal_type)}</td>
                     <td className="px-3 py-2">{entry == null ? '—' : `₹${fmtFixed(entry, 2)}`}</td>

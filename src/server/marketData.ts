@@ -2,6 +2,11 @@ import { getStockMapping } from './stockMapping';
 import { fetchTrendlyneFundamentals } from './trendlyneService';
 import { mcFetchJson } from './mcApiService';
 import { dbAll } from './dbAsync';
+import {
+  parseMcAdRatioCategoryResponse,
+  parseMcSectorPerformanceResponse,
+  parseMcSectorStocksResponse,
+} from './contracts/marketFeeds';
 
 export { fetchTrendlyneFundamentals };
 
@@ -229,7 +234,8 @@ export async function fetchSectorPerformance(opts?: {
     };
   }
   const url = `https://api.moneycontrol.com/mcapi/v1/sector/performance?dur=${dur}&type=${type}&section=${section}&limit=${limit}`;
-  return mcFetchJson(url);
+  const raw = await mcFetchJson(url);
+  return parseMcSectorPerformanceResponse(raw);
 }
 
 // Sector-wise advance/decline breadth -- a different cut than fetchSectorPerformance's price
@@ -237,7 +243,8 @@ export async function fetchSectorPerformance(opts?: {
 // https://api.moneycontrol.com/mcapi/v1/indices/ad-ratio/category-wise-list?ex=N&type=sector&categoryId=2
 export async function fetchSectorAdvanceDecline() {
   const url = `https://api.moneycontrol.com/mcapi/v1/indices/ad-ratio/category-wise-list?ex=N&type=sector&categoryId=2`;
-  return mcFetchJson(url);
+  const raw = await mcFetchJson(url);
+  return parseMcAdRatioCategoryResponse(raw);
 }
 
 // Sector -> constituent-stock mapping with per-stock financials (mkt cap, EPS, div yield,
@@ -248,7 +255,8 @@ export async function fetchSectorAdvanceDecline() {
 // https://api.moneycontrol.com/mcapi/v1/sector/get-all-stocks/financials?section=sector&slug=finance
 export async function fetchSectorStocks(slug: string) {
   const url = `https://api.moneycontrol.com/mcapi/v1/sector/get-all-stocks/financials?section=sector&slug=${encodeURIComponent(slug)}`;
-  return mcFetchJson(url);
+  const raw = await mcFetchJson(url);
+  return parseMcSectorStocksResponse(raw);
 }
 
 export async function fetchGlobalIndices() {

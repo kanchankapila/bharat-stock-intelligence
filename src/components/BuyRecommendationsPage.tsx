@@ -13,6 +13,7 @@ import { formatISTWithLocal, relativeFromNow } from '../lib/timeFormat';
 import { CanonicalBadge } from './CanonicalSourceNote';
 import { StockTagRow } from './StockTagRow';
 import { V4QuickNav } from '../v4/components/V4QuickNav';
+import stockData from '../data/stocklist';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -42,6 +43,14 @@ const pctFmt = (v: number | null | undefined, decimals = 1) =>
 const pctColor = (v: number | null | undefined) =>
   v == null ? 'text-slate-400' : v >= 0 ? 'text-emerald-400' : 'text-rose-400';
 const numFmt = (v: number | null | undefined) => v == null ? '—' : v.toFixed(1);
+const STOCK_NAME_BY_SYMBOL = new Map(
+  stockData.map((row) => [String(row.symbol || '').toUpperCase(), String(row.name || '').trim()])
+);
+const displayStockName = (symbol?: string | null) => {
+  const sym = String(symbol || '').trim().toUpperCase();
+  if (!sym) return '—';
+  return STOCK_NAME_BY_SYMBOL.get(sym) || sym;
+};
 
 // ─── Mini score bar ───────────────────────────────────────────────────────────
 
@@ -61,6 +70,7 @@ function StockCard({ p, onSelect }: { p: any; onSelect: (sym: string) => void })
   const style = CONV[p.conviction_level as keyof typeof CONV] ?? CONV.B_MEDIUM;
   const winPct = p.win_probability != null ? Math.round(p.win_probability * 100) : null;
   const rr = n2(p.risk_reward);
+  const sym = String(p.symbol || '').toUpperCase();
 
   return (
     <div
@@ -73,10 +83,11 @@ function StockCard({ p, onSelect }: { p: any; onSelect: (sym: string) => void })
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
           <button
-            onClick={() => onSelect(p.symbol)}
+            onClick={() => onSelect(sym)}
             className="font-bold text-white text-base leading-tight hover:text-sky-300 transition-colors text-left"
           >
-            {p.symbol}
+            <div>{displayStockName(sym)}</div>
+            <div className="text-[11px] font-medium text-slate-400 mt-0.5">{sym || '—'}</div>
           </button>
           {p.sector && <div className="text-[10px] text-slate-400 truncate mt-0.5">{p.sector}</div>}
         </div>
@@ -255,14 +266,16 @@ function StockCard({ p, onSelect }: { p: any; onSelect: (sym: string) => void })
 function IntradayPickCard({ p, onSelect }: { p: any; onSelect: (sym: string) => void }) {
   const style = CONV[p.conviction_level as keyof typeof CONV] ?? CONV.B_MEDIUM;
   const rr = n2(p.risk_reward);
+  const sym = String(p.symbol || '').toUpperCase();
   return (
     <div className={cn('rounded-xl border p-3 flex flex-col gap-1.5', style.bg, style.border)}>
       <div className="flex items-start justify-between gap-2">
         <button
-          onClick={() => onSelect(p.symbol)}
+          onClick={() => onSelect(sym)}
           className="font-bold text-white text-sm hover:text-sky-300 transition-colors text-left"
         >
-          {p.symbol}
+          <div>{displayStockName(sym)}</div>
+          <div className="text-[11px] font-medium text-slate-400 mt-0.5">{sym || '—'}</div>
         </button>
         <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded-full border', style.text, style.border)}>
           {style.label} · {n2(p.intraday_score)}

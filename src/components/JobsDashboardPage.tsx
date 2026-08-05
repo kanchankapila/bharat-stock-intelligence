@@ -20,6 +20,58 @@ const CATEGORIES = [
 
 type CategoryId = typeof CATEGORIES[number]['id'];
 
+function relFromIso(iso: string | null | undefined): string {
+  if (!iso) return 'Never';
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return 'Unknown';
+  const diff = Date.now() - t;
+  if (diff < 0) return 'Upcoming';
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'Just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+
+function fmtDuration(ms: number | null | undefined): string {
+  if (ms == null || !Number.isFinite(ms) || ms <= 0) return '—';
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  const s = ms / 1000;
+  if (s < 60) return `${s.toFixed(1)}s`;
+  const m = Math.floor(s / 60);
+  const rs = Math.round(s % 60);
+  return `${m}m ${rs}s`;
+}
+
+function fmtIstTime(value: string | number | null | undefined): string {
+  if (value == null) return 'Pending';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return 'Pending';
+  return d.toLocaleTimeString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true,
+  });
+}
+
+function fmtIstDateTime(value: string | number | null | undefined): string {
+  if (value == null) return 'Not scheduled';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return 'Not scheduled';
+  return d.toLocaleString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    weekday: 'short',
+    day: '2-digit',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+  }) + ' IST';
+}
+
 // Cron countdown component for real-time ticking
 const CronCountdown: React.FC<{ nextTimeIso: string | null }> = ({ nextTimeIso }) => {
   const [timeLeft, setTimeLeft] = useState('');
@@ -165,6 +217,8 @@ export default function JobsDashboardPage() {
       q.repeatable.map(r => ({
         queueId: q.id,
         queueLabel: q.label,
+        queueStatus: q.currentStatus,
+        queueLastSuccessAt: q.lastSuccessAt,
         jobName: r.name,
         cron: r.cron,
         next: r.next,
@@ -384,10 +438,10 @@ export default function JobsDashboardPage() {
             {allCrons.map((cron, idx) => {
               const catConfig = CATEGORIES.find(c => c.id === cron.category) || CATEGORIES[0];
               return (
-                <div key={cron.queueId + '-' + idx} className="p-3.5 rounded-xl border border-slate-800/50 bg-slate-900/20 flex flex-col justify-between space-y-3 relative overflow-hidden group hover:border-slate-800 transition-all">
+                <div key={cron.queueId + '-' + idx} className="p-3.5 rounded-xl border border-slate-800/50 bg-slate-900/20 flex flex-col justify-between space-y-3 relative group hover:border-slate-800 transition-all">
                   <div className="space-y-1">
                     <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-bold text-slate-300 truncate max-w-[150px]">
+                      <span className="text-[10px] font-bold text-slate-300 whitespace-normal break-words leading-tight">
                         {cron.queueLabel}
                       </span>
                       <span className={cn(
@@ -401,20 +455,33 @@ export default function JobsDashboardPage() {
                         {catConfig.label.split(' ')[0]}
                       </span>
                     </div>
-                    <h4 className="text-[11px] font-black text-slate-400 font-mono uppercase tracking-wider">
+                    <h4 className="text-[11px] font-black text-slate-400 font-mono uppercase tracking-wider whitespace-normal break-words leading-tight">
                       {cron.jobName}
                     </h4>
                   </div>
 
-                  <div className="flex items-center justify-between border-t border-slate-800/40 pt-2 bg-slate-900/10">
-                    <div className="flex flex-col">
-                      <span className="text-[8px] text-slate-500 font-black uppercase font-mono tracking-widest">Cron Pattern</span>
-                      <span className="text-[10px] font-bold text-slate-300 font-mono">{cron.cron}</span>
+                  <div className="flex items-start justify-between gap-3 border-t border-slate-800/40 pt-2 bg-slate-900/10">
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-[8px] text-slate-500 font-black uppercase font-mono tracking-widest">Schedule</span>
+                      <span className="text-[10px] font-bold text-slate-300 font-mono whitespace-normal break-all">{cron.cron}</span>
+                      <span className="text-[9px] text-slate-500 font-bold whitespace-normal break-words">{fmtIstDateTime(cron.next)}</span>
                     </div>
 
-                    <div className="flex flex-col text-right">
-                      <span className="text-[8px] text-slate-500 font-black uppercase font-mono tracking-widest">Next Execution</span>
+                    <div className="flex flex-col text-right min-w-0">
+                      <span className="text-[8px] text-slate-500 font-black uppercase font-mono tracking-widest">Next Execution (IST)</span>
                       <CronCountdown nextTimeIso={cron.next} />
+                      <span className={cn(
+                        "text-[9px] font-black uppercase tracking-wider",
+                        cron.queueStatus === 'running' ? 'text-blue-400' :
+                        cron.queueStatus === 'queued' ? 'text-amber-400' :
+                        cron.queueStatus === 'idle' ? 'text-emerald-400' :
+                        'text-rose-400'
+                      )}>
+                        {cron.queueStatus || 'offline'}
+                      </span>
+                      <span className="text-[9px] text-slate-500 whitespace-normal break-words">
+                        Last success: {relFromIso(cron.queueLastSuccessAt)}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -505,7 +572,7 @@ export default function JobsDashboardPage() {
                       )}>
                         {catConfig.label}
                       </span>
-                      <h3 className="text-sm font-black text-slate-200 mt-1.5 uppercase font-mono tracking-wide">
+                      <h3 className="text-sm font-black text-slate-200 mt-1.5 uppercase font-mono tracking-wide whitespace-normal break-words leading-tight">
                         {item.label}
                       </h3>
                     </div>
@@ -577,9 +644,34 @@ export default function JobsDashboardPage() {
                   </div>
                 </div>
 
+                {/* Realtime timing telemetry */}
+                <div className="grid grid-cols-2 gap-2 text-[10px] font-mono text-slate-400">
+                  <div className="rounded-lg border border-slate-800/60 bg-slate-950/30 px-2 py-1.5">
+                    <div className="text-[8px] uppercase tracking-wider text-slate-500 font-black">Current</div>
+                    <div className="font-bold text-slate-200">{item.currentStatus || 'offline'}</div>
+                  </div>
+                  <div className="rounded-lg border border-slate-800/60 bg-slate-950/30 px-2 py-1.5">
+                    <div className="text-[8px] uppercase tracking-wider text-slate-500 font-black">Next Run (IST)</div>
+                    <div className="font-bold text-indigo-300">{item.nextScheduledAt ? relFromIso(item.nextScheduledAt) : 'N/A'}</div>
+                    <div className="text-[9px] text-slate-500">{fmtIstDateTime(item.nextScheduledAt)}</div>
+                  </div>
+                  <div className="rounded-lg border border-slate-800/60 bg-slate-950/30 px-2 py-1.5">
+                    <div className="text-[8px] uppercase tracking-wider text-slate-500 font-black">Last Success (IST)</div>
+                    <div className="font-bold text-emerald-300">{relFromIso(item.lastSuccessAt)}</div>
+                    <div className="text-[9px] text-slate-500">{fmtIstDateTime(item.lastSuccessAt)}</div>
+                  </div>
+                  <div className="rounded-lg border border-slate-800/60 bg-slate-950/30 px-2 py-1.5">
+                    <div className="text-[8px] uppercase tracking-wider text-slate-500 font-black">Typical Runtime</div>
+                    <div className="font-bold text-slate-200">
+                      p50 {fmtDuration(item.duration?.p50Ms)}
+                      <span className="text-slate-500"> · p95 {fmtDuration(item.duration?.p95Ms)}</span>
+                    </div>
+                  </div>
+                </div>
+
                 {/* Footer trigger controls */}
                 <div className="flex items-center justify-between pt-1">
-                  <div className="text-[9px] text-slate-500 font-bold font-mono uppercase truncate max-w-[120px]">
+                  <div className="text-[9px] text-slate-500 font-bold font-mono uppercase whitespace-normal break-all pr-2">
                     ID: {item.id}
                   </div>
 
@@ -659,7 +751,7 @@ export default function JobsDashboardPage() {
               </thead>
               <tbody>
                 {allRecentJobs.map((job) => {
-                  const processedAt = job.processedOn ? new Date(job.processedOn).toLocaleTimeString() : 'Pending';
+                  const processedAt = fmtIstTime(job.processedOn ?? null);
                   const isFailed = job.state === 'failed';
                   const isActive = job.state === 'active';
                   const isExpanded = expandedJobId === job.id;
@@ -673,7 +765,10 @@ export default function JobsDashboardPage() {
                       )}>
                         {/* Time */}
                         <td className="py-3 px-4 text-slate-400 font-bold whitespace-nowrap">
-                          {processedAt}
+                          <div>{processedAt}</div>
+                          {job.finishedOn ? (
+                            <div className="text-[9px] text-slate-600">done {fmtIstTime(job.finishedOn)}</div>
+                          ) : null}
                         </td>
 
                         {/* Category badge */}
@@ -691,14 +786,14 @@ export default function JobsDashboardPage() {
                         </td>
 
                         {/* Queue Name */}
-                        <td className="py-3 px-4 text-slate-300 font-bold">
+                        <td className="py-3 px-4 text-slate-300 font-bold whitespace-normal break-words align-top">
                           {job.queueLabel}
                         </td>
 
                         {/* Job ID / Name */}
                         <td className="py-3 px-4">
                           <div className="flex flex-col">
-                            <span className="font-black text-slate-200 text-[11px] truncate max-w-[200px]">
+                            <span className="font-black text-slate-200 text-[11px] whitespace-normal break-words leading-tight">
                               {job.name}
                             </span>
                             <span className="text-[9px] text-slate-500 font-bold">
@@ -723,7 +818,7 @@ export default function JobsDashboardPage() {
                         {/* Progress */}
                         <td className="py-3 px-4">
                           {isFailed ? (
-                            <span className="text-[10px] text-rose-400 font-bold truncate max-w-[220px] block">
+                            <span className="text-[10px] text-rose-400 font-bold whitespace-normal break-words block leading-snug">
                               Err: {job.failedReason || 'Unknown error'}
                             </span>
                           ) : (

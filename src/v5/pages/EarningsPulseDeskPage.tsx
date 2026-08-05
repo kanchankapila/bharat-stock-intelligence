@@ -145,9 +145,19 @@ export function EarningsPulseDeskPage({
             <tbody>
               {shockers.slice(0, 80).map((row: any, i: number) => {
                 const chg = numOrNull(row.changePercent);
+                const sym = s(row.symbol);
                 return (
-                  <tr key={`${s(row.symbol)}-${i}`} className="v5-table-row-intel border-b border-slate-100">
-                    <td className="px-3 py-2 font-semibold text-slate-800">{s(row.symbol, '—')}</td>
+                  <tr key={`${sym}-${i}`} className="v5-table-row-intel border-b border-slate-100">
+                    <td className="px-3 py-2 font-semibold text-slate-800">
+                      <button
+                        onClick={() => sym && onSelectSymbol?.(sym)}
+                        className="text-left hover:text-teal-700"
+                        title="Open stock intelligence"
+                      >
+                        <div>{s(row.companyName, sym || '—')}</div>
+                        <div className="text-[11px] font-medium text-slate-500">{sym || '—'}</div>
+                      </button>
+                    </td>
                     <td className="px-3 py-2 text-slate-700">{s(row.companyName, '—')}</td>
                     <td className="px-3 py-2">
                       <span className={chg == null ? 'text-slate-500' : (chg >= 0 ? 'text-teal-700 font-semibold' : 'text-rose-700 font-semibold')}>

@@ -193,6 +193,28 @@ export const fundamentalsRouter = router({
     .input(z.object({ symbol: z.string() }))
     .query(async ({ input }) => fetchWithCache(`fund:mf-investments:${input.symbol}`, () => fetchMFInvestments(input.symbol), 3600)),
 
+  // InvestSights superstar investor activity (urls.txt expansion): per-stock entry/increase/
+  // decrease/exit activity keyed by NSE symbol, populated by
+  // investsights_investor_activity_fetcher.py.
+  getSuperstarInvestorActivity: publicProcedure
+    .input(z.object({ symbol: z.string(), limit: z.number().min(1).max(100).optional().default(30) }))
+    .query(async ({ input }) => fetchWithCache(`fund:superstar-activity:${input.symbol}:${input.limit}`, async () => {
+      try {
+        const rows = await dbAll<any>(
+          `SELECT symbol, investor_slug, change_type, curr_pct_holding, pct_holding_change, period_end_date, fetched_at
+           FROM superstar_investor_activity
+           WHERE symbol = ?
+           ORDER BY period_end_date DESC, fetched_at DESC
+           LIMIT ?`,
+          [input.symbol.toUpperCase(), input.limit]
+        );
+        return rows || [];
+      } catch (e) {
+        console.error('[Fundamentals Router] getSuperstarInvestorActivity failed:', e);
+        return [];
+      }
+    }, 3600)),
+
   getInsights: publicProcedure
     .input(z.object({ symbol: z.string() }))
     .query(async ({ input }) => getMoneycontrolInsights(input.symbol)),

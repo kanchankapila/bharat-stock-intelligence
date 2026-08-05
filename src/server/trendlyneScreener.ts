@@ -627,12 +627,31 @@ export async function fetchTrendlyneScreenerData(
           // 1. Fetch Quant Scores
           const placeholders = symbols.map(() => '?').join(',');
           const qScores = await dbAll(`
-            SELECT symbol, rank_composite, return_1w, return_1m, composite_class
+            SELECT symbol, rank_composite, return_1w, return_1m, composite_class, piotroski_f_score
             FROM quant_scores
             WHERE symbol IN (${placeholders})
           `, symbols) as any[];
 
           const scoreMap = new Map(qScores.map(q => [q.symbol, q]));
+
+          // 1b. Fetch latest technical_signals snapshot for Moneycontrol/MarketMojo derived scores.
+          const mcSignals = await dbAll(`
+            SELECT
+              ts.symbol,
+              ts.ext_mojo_quality_rank,
+              ts.ext_mojo_valuation_rank,
+              ts.ext_mojo_financial_pts,
+              ts.mc_cp_net_score
+            FROM technical_signals ts
+            WHERE ts.symbol IN (${placeholders})
+              AND ts.date = (
+                SELECT MAX(ts2.date)
+                FROM technical_signals ts2
+                WHERE ts2.symbol = ts.symbol
+              )
+          `, symbols) as any[];
+
+          const mcSignalMap = new Map(mcSignals.map(m => [m.symbol, m]));
 
           // 2. Fetch Other Screeners
           const otherScrs = await dbAll(`
@@ -659,7 +678,17 @@ export async function fetchTrendlyneScreenerData(
                 if (s.return_1w === undefined) s.return_1w = score.return_1w;
                 if (s.return_1m === undefined) s.return_1m = score.return_1m;
                 s.classification = score.composite_class;
+                s.piotroski_f_score = score.piotroski_f_score;
               }
+
+              const mc = mcSignalMap.get(s.symbol);
+              if (mc) {
+                s.mc_cp_net_score = mc.mc_cp_net_score;
+                s.ext_mojo_quality_rank = mc.ext_mojo_quality_rank;
+                s.ext_mojo_valuation_rank = mc.ext_mojo_valuation_rank;
+                s.ext_mojo_financial_pts = mc.ext_mojo_financial_pts;
+              }
+
               s.otherScreeners = scrMap.get(s.symbol) || [];
             }
           });

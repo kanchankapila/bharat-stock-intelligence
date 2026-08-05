@@ -4,6 +4,7 @@ import { trpc } from '../../lib/trpc';
 import { fmtFixed, n, numOrNull, s } from '../utils';
 import { V5KpiStrip } from '../components/V5KpiStrip';
 import { V5DecisionSummaryStrip, V5InsightPanel, V5MiniBarChart } from '../components/V5Visuals';
+import { stockDisplayName } from '../stockIdentity';
 
 export function ScreenerLabPage({ onSelectSymbol }: { onSelectSymbol?: (symbol: string) => void }) {
   const [minBullish, setMinBullish] = useState(2);
@@ -153,7 +154,7 @@ export function ScreenerLabPage({ onSelectSymbol }: { onSelectSymbol?: (symbol: 
           <table className="min-w-full text-sm">
             <thead>
               <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
-                <th className="px-3 py-2">Symbol</th>
+                <th className="px-3 py-2">Stock</th>
                 <th className="px-3 py-2">Unified</th>
                 <th className="px-3 py-2">Bull/Bear</th>
                 <th className="px-3 py-2">Conviction</th>
@@ -163,9 +164,20 @@ export function ScreenerLabPage({ onSelectSymbol }: { onSelectSymbol?: (symbol: 
               </tr>
             </thead>
             <tbody>
-              {filtered.slice(0, 120).map((row: any) => (
-                <tr key={s(row.symbol)} className="v5-table-row-intel border-b border-slate-100">
-                  <td className="px-3 py-2 font-semibold text-slate-800">{s(row.symbol)}</td>
+              {filtered.slice(0, 120).map((row: any) => {
+                const sym = s(row.symbol);
+                return (
+                <tr key={sym} className="v5-table-row-intel border-b border-slate-100">
+                  <td className="px-3 py-2 font-semibold text-slate-800">
+                    <button
+                      onClick={() => onSelectSymbol?.(sym)}
+                      className="text-left hover:text-teal-700"
+                      title="Open stock intelligence"
+                    >
+                      <div>{stockDisplayName(sym, sym)}</div>
+                      <div className="text-[11px] font-medium text-slate-500">{sym}</div>
+                    </button>
+                  </td>
                   <td className="px-3 py-2">{fmtFixed(row.unified_score, 1)}</td>
                   <td className="px-3 py-2">{n(row.bullish_screener_count)}/{n(row.bearish_screener_count)}</td>
                   <td className="px-3 py-2">{s(row.conviction_level, '—')}</td>
@@ -173,14 +185,14 @@ export function ScreenerLabPage({ onSelectSymbol }: { onSelectSymbol?: (symbol: 
                   <td className="px-3 py-2">{s(row.sector, 'Unclassified')}</td>
                   <td className="px-3 py-2">
                     <button
-                      onClick={() => onSelectSymbol?.(s(row.symbol))}
+                      onClick={() => onSelectSymbol?.(sym)}
                       className="rounded-lg border border-slate-300 px-2 py-1 text-xs font-semibold hover:bg-slate-100"
                     >
                       Open
                     </button>
                   </td>
                 </tr>
-              ))}
+              );})}
             </tbody>
           </table>
           {!filtered.length && <p className="py-6 text-center text-sm text-slate-500">No symbols matched your screener stack.</p>}

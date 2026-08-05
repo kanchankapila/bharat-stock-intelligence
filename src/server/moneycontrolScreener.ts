@@ -1,6 +1,7 @@
 import { dbGet, dbAll, dbRun, dbTransaction } from './dbAsync';
 import { getStockMapping, getSymbolFromMcsymbol } from './stockMapping';
 import { mcFetchJson } from './mcApiService';
+import { parseMcScannerDetailResponse } from './contracts/marketFeeds';
 import fs from 'fs';
 import path from 'path';
 import { isIntradayScreener } from './trendlyneScreener';
@@ -237,10 +238,10 @@ export async function syncMoneyControlScreeners(timeframeFilter?: 'intraday' | '
       : 'https://api.moneycontrol.com/mcapi/v1/techscanner/scanner-detail';
     
     const url = `${baseUrl}?catId=${config.catId}&scanId=${config.scanId}`;
-    const response = await mcFetchJson(url);
+    const response = parseMcScannerDetailResponse(await mcFetchJson(url));
 
-    if (response?.success === 1 && response.data) {
-      const screenerName = response.data.list?.scannerName || response.data.scanName || response.data.scanname || `MC Screener ${config.scanId}`;
+    if (response.success === 1 && response.data) {
+      const screenerName = response.data.list?.scannerName || `MC Screener ${config.scanId}`;
 
       // Upsert screener
       await dbRun(`
@@ -268,7 +269,7 @@ export async function syncMoneyControlScreeners(timeframeFilter?: 'intraday' | '
         ON CONFLICT(source, scan_id) DO NOTHING
       `, [config.scanId, screenerName, config.is_positive ? 'bullish' : 'bearish']);
 
-      const stocks = response.data.list?.scannerDetails || response.data.stock || response.data.stocks || [];
+      const stocks = response.data.list?.scannerDetails || [];
       console.log(`✅ Fetched ${stocks.length} stocks for MC: ${screenerName}`);
 
       // Snapshot previous active symbols BEFORE delete
@@ -291,8 +292,8 @@ export async function syncMoneyControlScreeners(timeframeFilter?: 'intraday' | '
       const incomingMcSymbols = new Set<string>();
 
       for (const stock of stocks) {
-        const mcsymbol = stock.stkId || stock.sc_id;
-        const stkname = stock.stkname || stock.stock_name || stock.shortName;
+        const mcsymbol = stock.stkId;
+        const stkname = stock.stkname;
         if (mcsymbol) {
           const nseSymbol = getSymbolFromMcsymbol(mcsymbol);
           await dbRun(upsertStockSql, [config.scanId, mcsymbol, stkname, nseSymbol, today, today]);

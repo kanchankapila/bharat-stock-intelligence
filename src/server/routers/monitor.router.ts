@@ -8,11 +8,79 @@ import { fetchIndexAdvanceDecline, fetchIndiaVix, fetchLiveMarketScreener, fetch
 import * as queueModule from '../queues';
 import { MONITOR_SCRIPTS } from '../monitorScripts';
 import { computeCronLateness } from '../jobHeartbeat';
+import { CronExpressionParser } from 'cron-parser';
 import { fetchWithCache } from '../cacheService';
 
 export { MONITOR_SCRIPTS };
 
 type ScriptId = typeof MONITOR_SCRIPTS[number]['id'];
+
+function asIso(value: unknown): string | null {
+  if (value == null) return null;
+  const n = Number(value);
+  if (Number.isFinite(n) && n > 0) {
+    return new Date(n).toISOString();
+  }
+  const d = new Date(String(value));
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+function percentileFromSorted(values: number[], p: number): number | null {
+  if (!values.length) return null;
+  if (values.length === 1) return values[0];
+  const idx = (values.length - 1) * p;
+  const lo = Math.floor(idx);
+  const hi = Math.ceil(idx);
+  if (lo === hi) return values[lo];
+  const weight = idx - lo;
+  return values[lo] * (1 - weight) + values[hi] * weight;
+}
+
+function summarizeDurationsMs(jobs: Array<{ processedOn?: number | null; finishedOn?: number | null }>) {
+  const durations = jobs
+    .map((j) => {
+      const start = Number(j.processedOn ?? 0);
+      const end = Number(j.finishedOn ?? 0);
+      if (!Number.isFinite(start) || !Number.isFinite(end) || start <= 0 || end <= start) return null;
+      return end - start;
+    })
+    .filter((v): v is number => v !== null)
+    .sort((a, b) => a - b);
+
+  if (!durations.length) {
+    return {
+      sampleSize: 0,
+      avgMs: null as number | null,
+      p50Ms: null as number | null,
+      p95Ms: null as number | null,
+      lastRunMs: null as number | null,
+    };
+  }
+
+  const sum = durations.reduce((acc, v) => acc + v, 0);
+  const lastDur = durations[durations.length - 1];
+  return {
+    sampleSize: durations.length,
+    avgMs: Math.round(sum / durations.length),
+    p50Ms: Math.round(percentileFromSorted(durations, 0.5) ?? lastDur),
+    p95Ms: Math.round(percentileFromSorted(durations, 0.95) ?? lastDur),
+    lastRunMs: Math.round(lastDur),
+  };
+}
+
+function nextCronTimeIso(cronPatterns: readonly string[] | undefined, now: Date): string | null {
+  if (!cronPatterns?.length) return null;
+  let minNext: Date | null = null;
+  for (const pattern of cronPatterns) {
+    try {
+      const next = CronExpressionParser.parse(pattern, { currentDate: now, tz: 'Etc/UTC' }).next().toDate();
+      if (!minNext || next < minNext) minNext = next;
+    } catch {
+      // Ignore malformed cron patterns and keep evaluating others.
+    }
+  }
+  return minNext ? minNext.toISOString() : null;
+}
 
 async function getLastRunAt(scriptId: ScriptId): Promise<string | null> {
   try {
@@ -254,9 +322,29 @@ async function getScriptStats(scriptId: ScriptId): Promise<Record<string, number
 
 export async function getSystemStatus(now: Date = new Date()) {
   const runStates: Record<string, string> = {};
+  const heartbeatByName = new Map<string, {
+    lastRunAt: string | null;
+    lastSuccessAt: string | null;
+    lastError: string | null;
+    runCount: number;
+    failCount: number;
+  }>();
   try {
     const rows = await dbAll<any>("SELECT key, value FROM app_settings WHERE key LIKE 'monitor_%'");
     for (const r of rows) runStates[r.key] = r.value;
+
+    const hbRows = await dbAll<any>(
+      'SELECT job_name, last_run_at, last_success_at, last_error, run_count, fail_count FROM job_heartbeat'
+    );
+    for (const row of hbRows) {
+      heartbeatByName.set(String(row.job_name), {
+        lastRunAt: asIso(row.last_run_at),
+        lastSuccessAt: asIso(row.last_success_at),
+        lastError: row.last_error ?? null,
+        runCount: Number(row.run_count ?? 0),
+        failCount: Number(row.fail_count ?? 0),
+      });
+    }
   } catch (err: unknown) {
     console.warn('[MONITOR] getSystemStatus failed:', (err as Error).message);
   }
@@ -306,12 +394,19 @@ export async function getSystemStatus(now: Date = new Date()) {
       runState = rawState === 'running' ? 'running' : (rawState === 'failed' ? 'failed' : 'never');
     }
 
+    const hb = heartbeatByName.get(s.id);
+    const nextScheduledAt = nextCronTimeIso((s as any).cronPatterns, now);
     return {
       ...s,
       lastRunAt,
+      lastSuccessAt: hb?.lastSuccessAt ?? (runState === 'success' ? lastRunAt : null),
+      lastFailureAt: runState === 'failed' ? lastRunAt : null,
+      nextScheduledAt,
+      runCount: hb?.runCount ?? 0,
+      failCount: hb?.failCount ?? 0,
       runState,
       stats,
-      error: runStates[`monitor_${s.id}_error`] ?? null,
+      error: runStates[`monitor_${s.id}_error`] ?? hb?.lastError ?? null,
     };
   }));
 }
@@ -525,6 +620,19 @@ export const monitorRouter = router({
             completedCount: 0,
             failedCount: 0,
             delayedCount: 0,
+            currentStatus: 'offline' as const,
+            lastStartedAt: null,
+            lastCompletedAt: null,
+            lastSuccessAt: null,
+            lastFailureAt: null,
+            nextScheduledAt: null,
+            duration: {
+              sampleSize: 0,
+              avgMs: null,
+              p50Ms: null,
+              p95Ms: null,
+              lastRunMs: null,
+            },
             repeatable: [] as any[],
             recentJobs: [] as any[],
           };
@@ -542,10 +650,10 @@ export const monitorRouter = router({
 
           // Fetch recent completed/failed/active/waiting jobs
           const [completedJobs, failedJobs, activeJobs, waitingJobs] = await Promise.all([
-            q.getJobs(['completed'], 0, 5, true),
-            q.getJobs(['failed'], 0, 5, true),
-            q.getJobs(['active'], 0, 5, true),
-            q.getJobs(['waiting'], 0, 5, true),
+            q.getJobs(['completed'], 0, 25, true),
+            q.getJobs(['failed'], 0, 25, true),
+            q.getJobs(['active'], 0, 10, true),
+            q.getJobs(['waiting'], 0, 10, true),
           ]);
 
           const formatJob = (job: any, state: string) => ({
@@ -566,6 +674,29 @@ export const monitorRouter = router({
             ...completedJobs.map(j => formatJob(j, 'completed')),
           ].slice(0, 10); // Limit to top 10 overall recent jobs
 
+          const succeededFinished = completedJobs
+            .map((j: any) => Number(j.finishedOn ?? 0))
+            .filter((v: number) => Number.isFinite(v) && v > 0);
+          const failedFinished = failedJobs
+            .map((j: any) => Number(j.finishedOn ?? 0))
+            .filter((v: number) => Number.isFinite(v) && v > 0);
+          const startedTimes = [...activeJobs, ...completedJobs, ...failedJobs]
+            .map((j: any) => Number(j.processedOn ?? 0))
+            .filter((v: number) => Number.isFinite(v) && v > 0);
+          const completedTimes = [...completedJobs, ...failedJobs]
+            .map((j: any) => Number(j.finishedOn ?? 0))
+            .filter((v: number) => Number.isFinite(v) && v > 0);
+          const duration = summarizeDurationsMs([...completedJobs, ...failedJobs]);
+          const latestRepeatableNext = repeatableJobs
+            .map((r: any) => Number(r.next ?? 0))
+            .filter((v: number) => Number.isFinite(v) && v > 0)
+            .sort((a: number, b: number) => a - b)[0] ?? null;
+
+          const currentStatus: 'offline' | 'running' | 'queued' | 'idle' =
+            active > 0 ? 'running' :
+            (waiting + delayed) > 0 ? 'queued' :
+            'idle';
+
           return {
             id: item.id,
             label: item.label,
@@ -577,6 +708,13 @@ export const monitorRouter = router({
             completedCount: completed,
             failedCount: failed,
             delayedCount: delayed,
+            currentStatus,
+            lastStartedAt: startedTimes.length ? new Date(Math.max(...startedTimes)).toISOString() : null,
+            lastCompletedAt: completedTimes.length ? new Date(Math.max(...completedTimes)).toISOString() : null,
+            lastSuccessAt: succeededFinished.length ? new Date(Math.max(...succeededFinished)).toISOString() : null,
+            lastFailureAt: failedFinished.length ? new Date(Math.max(...failedFinished)).toISOString() : null,
+            nextScheduledAt: latestRepeatableNext ? new Date(latestRepeatableNext).toISOString() : null,
+            duration,
             repeatable: repeatableJobs.map((r: any) => ({
               key: r.key,
               name: r.name,
@@ -597,6 +735,19 @@ export const monitorRouter = router({
             completedCount: 0,
             failedCount: 0,
             delayedCount: 0,
+            currentStatus: 'offline' as const,
+            lastStartedAt: null,
+            lastCompletedAt: null,
+            lastSuccessAt: null,
+            lastFailureAt: null,
+            nextScheduledAt: null,
+            duration: {
+              sampleSize: 0,
+              avgMs: null,
+              p50Ms: null,
+              p95Ms: null,
+              lastRunMs: null,
+            },
             repeatable: [] as any[],
             recentJobs: [] as any[],
             error: err.message,

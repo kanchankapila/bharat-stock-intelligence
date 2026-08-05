@@ -1,0 +1,380 @@
+{
+  "market_indices": [
+    {
+      "url": "https://json.bselivefeeds.indiatimes.com/ET_Community/indexsummary?sortby=value&sortorder=desc&pagesize=100&exchange=nse&callback=filterGetDataCBindex",
+      "status": "ERR",
+      "content_type": "",
+      "keys": [
+        "error:URLError"
+      ]
+    },
+    {
+      "url": "https://frapi.marketsmojo.com/market_marketoverview/getData",
+      "status": "ERR",
+      "content_type": "",
+      "keys": [
+        "error:URLError"
+      ]
+    },
+    {
+      "url": "https://frapi.marketsmojo.com/market_marketoverview/getGraphData?indice=1&period=1D&",
+      "status": "ERR",
+      "content_type": "",
+      "keys": [
+        "error:URLError"
+      ]
+    },
+    {
+      "url": "https://frapi.marketsmojo.com/market_marketoverview/getGraphData?indice=127&period=1D&",
+      "status": "ERR",
+      "content_type": "",
+      "keys": [
+        "error:URLError"
+      ]
+    },
+    {
+      "url": "https://frapi.marketsmojo.com/market_marketoverview/getGraphData?indice=2&period=1w&",
+      "status": "ERR",
+      "content_type": "",
+      "keys": [
+        "error:URLError"
+      ]
+    }
+  ],
+  "sectors": [
+    {
+      "url": "https://json.bselivefeeds.indiatimes.com/ET_Community/industryListingController?pagesize=250&pid=256&pageno=1&exchange=NSE&callback=filterGetDataCBindustry",
+      "status": "ERR",
+      "content_type": "",
+      "keys": [
+        "error:URLError"
+      ]
+    },
+    {
+      "url": "https://json.bselivefeeds.indiatimes.com/ET_Community/sectors?exchange=&callback=filterGetDataCBsectors",
+      "status": "ERR",
+      "content_type": "",
+      "keys": [
+        "error:URLError"
+      ]
+    },
+    {
+      "url": "https://api.moneycontrol.com/mcapi/v1/earnings/get-earnings-data?indexId=All&page=1&startDate=2025-09-16&endDate=2025-09-16&sector=&limit=18",
+      "status": "ERR",
+      "content_type": "",
+      "keys": [
+        "error:URLError"
+      ]
+    },
+    {
+      "url": "https://api.moneycontrol.com/mcapi/v1/earnings/result-calendar?indexId=All&fromDate=2025-09-16&toDate=2025-09-21&sector=",
+      "status": "ERR",
+      "content_type": "",
+      "keys": [
+        "error:URLError"
+      ]
+    },
+    {
+      "url": "https://api.moneycontrol.com/mcapi/v1/earnings/rapid-results?limit=21&page=1&type=BP&subType=yoy&category=all&sortBy=growth&indexId=N&sector=&search=&seq=desc",
+      "status": "ERR",
+      "content_type": "",
+      "keys": [
+        "error:URLError"
+      ]
+    }
+  ],
+  "stocks_price": [
+    {
+      "url": "https://priceapi.moneycontrol.com/pricefeed/nse/equitycash/BE03",
+      "status": "ERR",
+      "content_type": "",
+      "keys": [
+        "error:URLError"
+      ]
+    },
+    {
+      "url": "https://api.moneycontrol.com/mcapi/v1/indices/chart/exchange-advdec?ex=N",
+      "status": "ERR",
+      "content_type": "",
+      "keys": [
+        "error:URLError"
+      ]
+    },
+    {
+      "url": "https://api.moneycontrol.com/mcapi/v1/earnings/result-dashboard",
+      "status": "ERR",
+      "content_type": "",
+      "keys": [
+        "error:URLError"
+      ]
+    },
+    {
+      "url": "https://quotes-api.tickertape.in/quotes?sids=JKIN",
+      "status": "ERR",
+      "content_type": "",
+      "keys": [
+        "error:URLError"
+      ]
+    },
+    {
+      "url": "https://api.tickertape.in/stocks/charts/intra/JKIN",
+      "status": "ERR",
+      "content_type": "",
+      "keys": [
+        "error:URLError"
+      ]
+    }
+  ],
+  "fundamentals_financials": [
+    {
+      "url": "https://api.moneycontrol.com/mcapi/v1/stock/financial-historical/overview?scId=BE03&ex=N",
+      "status": "ERR",
+      "content_type": "",
+      "keys": [
+        "error:URLError"
+      ]
+    },
+    {
+      "url": "https://api.moneycontrol.com/mcapi/v1/stock/estimates/earning-forecast?scId=BE03&ex=N&deviceType=W&frequency=12&financialType=C",
+      "status": "ERR",
+      "content_type": "",
+      "keys": [
+        "error:URLError"
+      ]
+    },
+    {
+      "url": "https://api.moneycontrol.com/mcapi/v1/stock/estimates/valuation?deviceType=W&scId=BE03&ex=N&financialType=C",
+      "status": "ERR",
+      "content_type": "",
+      "keys": [
+        "error:URLError"
+      ]
+    },
+    {
+      "url": "https://api.moneycontrol.com/mcapi/v1/stock/estimates/hits-misses?deviceType=W&scId=BE03&ex=N&type=eps&financialType=C",
+      "status": "ERR",
+      "content_type": "",
+      "keys": [
+        "error:URLError"
+      ]
+    },
+    {
+      "url": "https://api.moneycontrol.com/mcapi/v1/stock/estimates/earning-forecast?scId=WSL&ex=N&deviceType=W&frequency=3&financialType=S",
+      "status": "ERR",
+      "content_type": "",
+      "keys": [
+        "error:URLError"
+      ]
+    }
+  ],
+  "screeners": [
+    {
+      "url": "https://json.bselivefeeds.indiatimes.com/ET_Community/industryListingController?pagesize=250&pid=256&pageno=1&exchange=NSE&callback=filterGetDataCBindustry",
+      "status": "ERR",
+      "content_type": "",
+      "keys": [
+        "error:URLError"
+      ]
+    },
+    {
+      "url": "https://json.bselivefeeds.indiatimes.com/ET_Community/sectors?exchange=&callback=filterGetDataCBsectors",
+      "status": "ERR",
+      "content_type": "",
+      "keys": [
+        "error:URLError"
+      ]
+    },
+    {
+      "url": "https://json.bselivefeeds.indiatimes.com/ET_Community/indexsummary?sortby=value&sortorder=desc&pagesize=100&exchange=nse&callback=filterGetDataCBindex",
+      "status": "ERR",
+      "content_type": "",
+      "keys": [
+        "error:URLError"
+      ]
+    },
+    {
+      "url": "https://json.bselivefeeds.indiatimes.com/technicalscreener.json?_=1629471748879",
+      "status": "ERR",
+      "content_type": "",
+      "keys": [
+        "error:URLError"
+      ]
+    },
+    {
+      "url": "https://frapi.marketsmojo.com/screener/search",
+      "status": "ERR",
+      "content_type": "",
+      "keys": [
+        "error:URLError"
+      ]
+    }
+  ],
+  "earnings_results": [
+    {
+      "url": "https://frapi.marketsmojo.com/market_resultscorner/getStockResult?sort=res_dt_ltst&",
+      "status": "ERR",
+      "content_type": "",
+      "keys": [
+        "error:URLError"
+      ]
+    },
+    {
+      "url": "https://frapi.marketsmojo.com/market_resultscorner/getStockResult?sort=score&",
+      "status": "ERR",
+      "content_type": "",
+      "keys": [
+        "error:URLError"
+      ]
+    },
+    {
+      "url": "https://frapi.marketsmojo.com/market_resultscorner/getStockResult?sort=res_dt_upcmg&",
+      "status": "ERR",
+      "content_type": "",
+      "keys": [
+        "error:URLError"
+      ]
+    },
+    {
+      "url": "https://api.moneycontrol.com/mcapi/v1/stock/estimates/price-forecast?scId=BE03&ex=N&deviceType=W",
+      "status": "ERR",
+      "content_type": "",
+      "keys": [
+        "error:URLError"
+      ]
+    },
+    {
+      "url": "https://api.moneycontrol.com/mcapi/v1/stock/estimates/consensus?scId=BE03&ex=N&deviceType=W",
+      "status": "ERR",
+      "content_type": "",
+      "keys": [
+        "error:URLError"
+      ]
+    }
+  ],
+  "shareholding_flows": [
+    {
+      "url": "https://api.moneycontrol.com/mcapi/v1/deals/insight?start=0&limit=3&value=value&range=1W&action=buy",
+      "status": "ERR",
+      "content_type": "",
+      "keys": [
+        "error:URLError"
+      ]
+    },
+    {
+      "url": "https://api.moneycontrol.com/mcapi/v1/deals/insight?start=0&limit=9&value=value&range=1W&action=buy&dealsType=topDeal",
+      "status": "ERR",
+      "content_type": "",
+      "keys": [
+        "error:URLError"
+      ]
+    },
+    {
+      "url": "https://api.moneycontrol.com/mcapi/v1/deals/insight?start=0&limit=9&value=value&range=1W&action=buy&dealsType=topInsider",
+      "status": "ERR",
+      "content_type": "",
+      "keys": [
+        "error:URLError"
+      ]
+    },
+    {
+      "url": "https://api.moneycontrol.com/mcapi/v1/deals/insight?start=0&limit=9&value=value&range=1W&action=buy&dealsType=topInvestor",
+      "status": "ERR",
+      "content_type": "",
+      "keys": [
+        "error:URLError"
+      ]
+    },
+    {
+      "url": "https://api.moneycontrol.com/mcapi/v1/deals/list?start=0&limit=24&orderBy=deal_date&sortBy=DESC&deviceType=W",
+      "status": "ERR",
+      "content_type": "",
+      "keys": [
+        "error:URLError"
+      ]
+    }
+  ],
+  "news_insights": [
+    {
+      "url": "https://frapi.marketsmojo.com/market_events/getData",
+      "status": "ERR",
+      "content_type": "",
+      "keys": [
+        "error:URLError"
+      ]
+    },
+    {
+      "url": "https://api.moneycontrol.com/mcapi/extdata/v2/mc-insights?scId=BE03&type=c&deviceType=W&appVersion=185",
+      "status": "ERR",
+      "content_type": "",
+      "keys": [
+        "error:URLError"
+      ]
+    },
+    {
+      "url": "https://api.moneycontrol.com/mcapi/v1/earnings/result-calendar?indexId=All&fromDate=2025-09-16&toDate=2025-09-21&sector=",
+      "status": "ERR",
+      "content_type": "",
+      "keys": [
+        "error:URLError"
+      ]
+    },
+    {
+      "url": "https://api.moneycontrol.com/mcapi/v1/deals/insight?start=0&limit=3&value=value&range=1W&action=buy",
+      "status": "ERR",
+      "content_type": "",
+      "keys": [
+        "error:URLError"
+      ]
+    },
+    {
+      "url": "https://api.moneycontrol.com/mcapi/v1/deals/insight?start=0&limit=9&value=value&range=1W&action=buy&dealsType=topDeal",
+      "status": "ERR",
+      "content_type": "",
+      "keys": [
+        "error:URLError"
+      ]
+    }
+  ],
+  "fno": [
+    {
+      "url": "https://json.bselivefeeds.indiatimes.com/ET_Community/industryListingController?pagesize=250&pid=256&pageno=1&exchange=NSE&callback=filterGetDataCBindustry",
+      "status": "ERR",
+      "content_type": "",
+      "keys": [
+        "error:URLError"
+      ]
+    },
+    {
+      "url": "https://json.bselivefeeds.indiatimes.com/ET_Community/sectors?exchange=&callback=filterGetDataCBsectors",
+      "status": "ERR",
+      "content_type": "",
+      "keys": [
+        "error:URLError"
+      ]
+    },
+    {
+      "url": "https://json.bselivefeeds.indiatimes.com/ET_Community/indexsummary?sortby=value&sortorder=desc&pagesize=100&exchange=nse&callback=filterGetDataCBindex",
+      "status": "ERR",
+      "content_type": "",
+      "keys": [
+        "error:URLError"
+      ]
+    },
+    {
+      "url": "https://json.bselivefeeds.indiatimes.com/technicalscreener.json?_=1629471748879",
+      "status": "ERR",
+      "content_type": "",
+      "keys": [
+        "error:URLError"
+      ]
+    },
+    {
+      "url": "https://json.bselivefeeds.indiatimes.com/markets_bse.json",
+      "status": "ERR",
+      "content_type": "",
+      "keys": [
+        "error:URLError"
+      ]
+    }
+  ]
+}

@@ -1,5 +1,6 @@
 import { mcFetchJson } from './mcApiService';
 import { getNiftyTraderHeaders } from './niftytraderService';
+import { parseNtOptionChainResponse } from './contracts/marketFeeds';
 
 // ─── Premarket ────────────────────────────────────────────────────────────────
 
@@ -477,7 +478,12 @@ export async function fetchOptionChain(symbol: string) {
     signal: AbortSignal.timeout(10000)
   });
   if (!res.ok) throw new Error('Failed to fetch option chain');
-  return res.json();
+  const raw = await res.json();
+  const parsed = parseNtOptionChainResponse(raw);
+  if (parsed.result !== 1 || !parsed.resultData) {
+    throw new Error('Failed to parse option chain response');
+  }
+  return raw;
 }
 
 export async function fetchIndexAdvanceDecline() {
