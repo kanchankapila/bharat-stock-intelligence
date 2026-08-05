@@ -122,6 +122,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'Tools',
     items: [
       { icon: MessageSquare, label: 'AI Chat',    id: 'chat'      },
+      { icon: Sparkles,      label: 'Switch to V5', id: 'v5'      },
       { icon: Globe,         label: 'Economics',  id: 'economics' },
       { icon: CheckCircle2,  label: 'ToDo',       id: 'todo'      },
       { icon: MonitorDot,    label: 'Monitor',    id: 'monitor'   },

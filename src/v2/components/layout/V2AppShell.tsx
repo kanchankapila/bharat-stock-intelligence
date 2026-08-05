@@ -129,6 +129,7 @@ export const V2AppShell: React.FC<V2AppShellProps> = ({
       label: 'Tools',
       items: [
         { label: 'AI Chat',  id: 'chat',    icon: MessageSquare },
+        { label: 'Switch to V5', id: 'v5', icon: Sparkles },
         { label: 'ToDo',     id: 'todo',    icon: CheckCircle2 },
         { label: 'Monitor',  id: 'monitor', icon: MonitorDot },
         { label: 'Jobs',     id: 'jobs',    icon: Calendar },
