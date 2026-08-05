@@ -30,6 +30,32 @@ def test_ignores_question_mark_in_double_quoted_identifier():
         'SELECT "we?rd" FROM t WHERE a=:p0'
 
 
+def test_apostrophe_inside_line_comment_does_not_break_later_placeholders():
+    """Regression: an apostrophe inside a `-- ...` comment (e.g. "table's") is not a
+    string-literal delimiter, but the old scanner had no comment awareness and toggled
+    in_single on it anyway -- corrupting every `?` after that line. Hit live in
+    screener_signal_generator.py's load_high_performing_screeners() query."""
+    sql = (
+        "SELECT a\n"
+        "-- bridges it without touching the table's stored values.\n"
+        "FROM t WHERE a >= ? OR b IN (?, ?)"
+    )
+    out = convert_placeholders(sql)
+    assert "?" not in out
+    assert out.count(":p") == 3
+    assert "a >= :p0 OR b IN (:p1, :p2)" in out
+
+
+def test_apostrophe_inside_block_comment_does_not_break_later_placeholders():
+    sql = "SELECT a /* the table's rows */ FROM t WHERE a = ?"
+    assert convert_placeholders(sql) == "SELECT a /* the table's rows */ FROM t WHERE a = :p0"
+
+
+def test_double_dash_inside_string_literal_is_not_treated_as_a_comment():
+    assert convert_placeholders("SELECT '--' AS q, a=? FROM t") == \
+        "SELECT '--' AS q, a=:p0 FROM t"
+
+
 # ─── function mapping (Postgres path) ──────────────────────────────────────────
 
 def _pg(sql):

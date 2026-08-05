@@ -157,33 +157,39 @@ export async function getNSEStockFromDB(symbol: string): Promise<NSEStockRow | u
 // Search NSE stocks from database
 export async function searchNSEStocksFromDB(query: string): Promise<NSEStockRow[]> {
   try {
-    const q = `%${query}%`;
+    // LIKE is case-sensitive on Postgres (unlike SQLite's implicit ASCII-only
+    // case-insensitivity) -- wrap both sides in LOWER() so "bel" matches the
+    // uppercase-stored "BEL" on both dialects, matching the LOWER()-bridging
+    // convention already used elsewhere in this codebase for cross-dialect matches.
+    const q = `%${query.toLowerCase()}%`;
     const rows = await dbAll<NSEStockRow>(`
-      SELECT 
-        n.id, 
-        n.symbol, 
-        n.name, 
-        n.sector, 
-        n.industry, 
-        n.isin, 
-        n.listing_date, 
-        n.exchange, 
-        n.status, 
-        COALESCE(f.market_cap, n.market_cap) as market_cap, 
-        COALESCE(f.trailing_pe, n.pe_ratio) as pe_ratio, 
-        COALESCE(f.dividend_yield, n.dividend_yield) as dividend_yield, 
+      SELECT
+        n.id,
+        n.symbol,
+        n.name,
+        n.sector,
+        n.industry,
+        n.isin,
+        n.listing_date,
+        n.exchange,
+        n.status,
+        COALESCE(f.market_cap, n.market_cap) as market_cap,
+        COALESCE(f.trailing_pe, n.pe_ratio) as pe_ratio,
+        COALESCE(f.dividend_yield, n.dividend_yield) as dividend_yield,
         n.last_updated
       FROM nse_stocks n
       LEFT JOIN stock_fundamentals f ON n.symbol = f.symbol
       WHERE n.status = 'ACTIVE' AND (
-        n.symbol LIKE ? OR
-        n.name LIKE ? OR
-        n.sector LIKE ? OR
-        n.industry LIKE ?
+        LOWER(n.symbol) LIKE ? OR
+        LOWER(n.name) LIKE ? OR
+        LOWER(n.sector) LIKE ? OR
+        LOWER(n.industry) LIKE ?
       )
-      ORDER BY n.symbol ASC
+      ORDER BY
+        CASE WHEN LOWER(n.symbol) = LOWER(?) THEN 0 ELSE 1 END,
+        n.symbol ASC
       LIMIT 100
-    `, [q, q, q, q]);
+    `, [q, q, q, q, query]);
     return rows;
   } catch (error) {
     console.error(`❌ Error searching NSE stocks:`, error);

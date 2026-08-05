@@ -1,6 +1,7 @@
 import { getNiftyTraderHeaders } from './niftytraderService';
 import { dbAll } from './dbAsync';
-import { parseNtOptionChainResponse, type NtOptionChainRow, type NtOptionChainTotals } from './contracts/marketFeeds';
+import { parseNtOptionChainResponse } from './contracts/marketFeeds';
+import type { NtOptionChainRow, NtOptionChainTotals } from './contracts/marketFeeds';
 
 export interface OptionChainData {
   success: boolean;

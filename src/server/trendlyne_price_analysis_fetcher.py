@@ -176,10 +176,15 @@ def extract_features(body: dict, today: date) -> dict:
             feat[f"alpha_ind_{key}"] = round(stock_ret - ind_ret, 2)
 
     # â”€â”€ Returns deep dive â€” distance from period high/low â”€â”€
+    # Live response rows (2026-08-06): Day, Week, Month, Qtr, Half Year, 1 Yr, 3 Yr, 5 Yr, 10 Yr.
+    # The old bare `"3" in label` fallback also matched "3 Yr" (which sorts AFTER "Qtr" in the
+    # table), silently overwriting the correct 3-month distance with the 3-YEAR distance on every
+    # successful run since this column was built -- excluding any "Yr" label keeps the fallback
+    # for a differently-labeled "3 Mth"/"3M" response without matching "3 Yr"/"3 Years".
     dd = body.get("returnsDeepDive", {})
     for row in dd.get("tableData", []):
         label = str(row[IDX_DD_PERIOD]) if len(row) > IDX_DD_PERIOD else ""
-        if "Qtr" in label or "3" in label:
+        if label == "Qtr" or ("3" in label and "Yr" not in label):
             if len(row) > IDX_DD_HIGH_DIST:
                 feat["dist_3m_high_pct"] = _sf(row[IDX_DD_HIGH_DIST])
             if len(row) > IDX_DD_LOW_DIST:
