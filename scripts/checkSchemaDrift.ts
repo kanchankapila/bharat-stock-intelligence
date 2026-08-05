@@ -177,6 +177,15 @@ export function formatReport(report: DriftReport): string {
   return lines.join("\n");
 }
 
+// node-pg-migrate's own internal bookkeeping table -- it self-creates this on the first
+// `npm run migrate:up` against any target DB (fresh or not), so it doesn't belong in a
+// from-scratch schema snapshot. Mirrors generate_pg_schema.py's SKIP set for the analogous
+// SQLite-internal tables (sqlite_sequence/sqlite_stat1/sqlite_stat4). Must stay in sync with
+// the identical skip in scripts/generatePgSchemaFromLive.ts -- if it isn't, this checker will
+// permanently report "pgmigrations live but not in file" against a file that deliberately never
+// includes it (or the reverse, once the file's own legacy nextval()-sequence default is fixed).
+const SKIP_LIVE_TABLES = new Set(["pgmigrations"]);
+
 async function fetchLiveSchema(): Promise<SchemaMap> {
   const { getPool } = await import("../src/server/pgClient");
   const pool = getPool();
@@ -188,6 +197,7 @@ async function fetchLiveSchema(): Promise<SchemaMap> {
   );
   const map: SchemaMap = new Map();
   for (const row of rows) {
+    if (SKIP_LIVE_TABLES.has(row.table_name)) continue;
     if (!map.has(row.table_name)) map.set(row.table_name, new Set());
     map.get(row.table_name)!.add(row.column_name);
   }
