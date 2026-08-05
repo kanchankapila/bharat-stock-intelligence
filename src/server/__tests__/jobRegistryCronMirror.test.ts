@@ -188,6 +188,7 @@ describe('JOB_REGISTRY cronPattern/everyMs mirror consistency', () => {
     { jobName: 'mc-screener-sync', marker: "jobName: 'mc-sync'", label: 'screeners.jobs.ts' },
     { jobName: 'etnow-screener-sync', marker: "jobName: 'etnow-sync'", label: 'screeners.jobs.ts' },
     { jobName: 'et-marketstats-sync', marker: "jobName: 'et-marketstats-sync'", label: 'screeners.jobs.ts' },
+    { jobName: 'trendlyne-screener-sync', marker: "jobName: 'trendlyne-screener-sync'", label: 'screeners.jobs.ts' },
     { jobName: 'fundamentals-sync', marker: "jobName: 'sync-fundamentals-weekly'", label: 'screeners.jobs.ts' },
     { jobName: 'quant-scoring', marker: "jobName: 'quant-score-daily'", label: 'screeners.jobs.ts' },
     { jobName: 'nse-sync', marker: "jobName: 'nse-sync-weekly'", label: 'sync.jobs.ts' },

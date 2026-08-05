@@ -14,20 +14,30 @@
  * initQueues() still assigns the result into its own module-level `let`s.
  */
 import { Job } from 'bullmq';
-import { syncAndScore } from '../scoringService';
+import { recalculateScores } from '../scoringService';
+import { syncAllScreenerStocksToDB } from '../trendlyneScreener';
 import { registerRepeatableJob } from './registerJob';
 import { runPython } from '../pythonRunner';
 
-export const QUEUE_STOCK_SCORING       = 'stock-scoring';
-export const QUEUE_MC_SCREENER_SYNC    = 'mc-screener-sync';
-export const QUEUE_ETNOW_SCREENER_SYNC = 'etnow-screener-sync';
-export const QUEUE_ET_MARKETSTATS_SYNC = 'et-marketstats-sync';
-export const QUEUE_FUNDAMENTALS_SYNC   = 'fundamentals-sync';
-export const QUEUE_QUANT_SCORING       = 'quant-scoring';
+export const QUEUE_STOCK_SCORING          = 'stock-scoring';
+export const QUEUE_MC_SCREENER_SYNC       = 'mc-screener-sync';
+export const QUEUE_ETNOW_SCREENER_SYNC    = 'etnow-screener-sync';
+export const QUEUE_ET_MARKETSTATS_SYNC    = 'et-marketstats-sync';
+export const QUEUE_TRENDLYNE_SCREENER_SYNC = 'trendlyne-screener-sync';
+export const QUEUE_FUNDAMENTALS_SYNC      = 'fundamentals-sync';
+export const QUEUE_QUANT_SCORING          = 'quant-scoring';
 
 async function processStockScoring(_job: Job): Promise<{ success: boolean }> {
   console.log('[QUEUE] Starting scheduled stock scoring...');
-  const result = await syncAndScore();
+  // Calls recalculateScores() directly, NOT syncAndScore() -- 2026-08-04 job-timing audit.
+  // syncAndScore() also re-syncs Trendlyne/MoneyControl/ETNow screener membership in-process,
+  // which made this scheduled 22:30 IST run a THIRD same-evening re-fetch of each provider
+  // (after the dedicated 18:00/18:20/18:40 IST syncs, then AGAIN inside quant-eod-sync at
+  // 22:00 IST). Those dedicated jobs are dependency-ordered ahead of this one and own screener
+  // membership now; this job only needs to re-score off what's already fresh in the DB.
+  // syncAndScore() itself is untouched and still used by scoring.router.ts's on-demand
+  // "resync everything now" trigger, where an explicit re-sync is the whole point.
+  const result = await recalculateScores();
   if (!result.success) throw new Error(`Stock scoring failed: ${result.message}`);
   return { success: true };
 }
@@ -50,6 +60,19 @@ async function processEtMarketstatsSync(_job: Job): Promise<{ success: boolean }
   console.log('[QUEUE] Starting scheduled ET Marketstats screener sync...');
   const { syncEtMarketstatsScreeners } = await import('../etMarketstatsSync');
   await syncEtMarketstatsScreeners();
+  return { success: true };
+}
+
+async function processTrendlyneScreenerSync(_job: Job): Promise<{ success: boolean }> {
+  console.log('[QUEUE] Starting scheduled Trendlyne screener-stock sync...');
+  // Given no dedicated schedule of its own before 2026-08-04: this membership sync only ever
+  // ran as a side effect of quant-eod-sync (22:00 IST) and stock-scoring's syncAndScore()
+  // (22:30 IST) -- both of which ALSO redundantly re-synced MC/ETnow (removed the same audit).
+  // Removing those two calls without adding this dedicated one would have left Trendlyne
+  // screener membership with no scheduled sync at all. Placed alongside its mc-sync/etnow-sync/
+  // et-marketstats-sync siblings (18:00-18:40 IST) rather than left in the 22:00/22:30 slot.
+  const result = await syncAllScreenerStocksToDB();
+  if (!result.success) throw new Error(`Trendlyne screener sync failed: ${result.error}`);
   return { success: true };
 }
 
@@ -136,11 +159,12 @@ export async function registerScreenerJobs(connection: any) {
     connection,
     queueName: QUEUE_ET_MARKETSTATS_SYNC,
     jobName: 'et-marketstats-sync',
-    // 6:00 PM IST (12:30 UTC) weekdays — FIRST of the three screener syncs. Moved from
-    // 11:35 PM (see the mc-sync note). This one mattered most: et_marketstats is the only
-    // screener source syncAndScore() does NOT re-sync in-process before scoring, yet
-    // scoring_engine.load_data() reads it — so at 11:35 PM it was always exactly one day
-    // behind the scores built from it at 10:30 PM.
+    // 6:00 PM IST (12:30 UTC) weekdays — FIRST of the four screener syncs. Moved from
+    // 11:35 PM (see the mc-sync note). scoring_engine.load_data() reads all four screener
+    // sources directly from the DB and nothing re-syncs any of them in-process anymore
+    // (2026-08-04: removed the redundant re-syncs from quant-eod-sync/stock-scoring — see
+    // trendlyne-screener-sync and mc-sync's notes) — every sync's ordering ahead of
+    // ml-daily-ops/stock-scoring is load-bearing now, not just this one.
     repeat: { pattern: '30 12 * * 1-5' },
     jobId: 'et-marketstats-sync-repeatable',
     removeOnComplete: 5,
@@ -151,6 +175,30 @@ export async function registerScreenerJobs(connection: any) {
     // ~92 screeners sequentially (fetch + 500ms rate-limit delay each) — a few minutes.
     lockDuration: 20 * 60 * 1000,
     lockRenewTime: 5 * 60 * 1000,
+  });
+
+  const trendlyneScreenerSync = await registerRepeatableJob({
+    connection,
+    queueName: QUEUE_TRENDLYNE_SCREENER_SYNC,
+    jobName: 'trendlyne-screener-sync',
+    // 6:10 PM IST (12:40 UTC) weekdays — between et-marketstats-sync (6:00 PM) and mc-sync
+    // (6:20 PM). New 2026-08-04: this membership sync previously had NO dedicated schedule —
+    // it only ran as a side effect of quant-eod-sync (10:00 PM) and stock-scoring's
+    // syncAndScore() (10:30 PM), both of which also redundantly re-synced MC/ETnow a 2nd/3rd
+    // time that same evening. Removing those two call sites (job-timing audit) meant Trendlyne
+    // screener membership needed its own slot here, alongside its MC/ETnow/ET-marketstats
+    // siblings, instead of being left in the 10:00/10:30 PM slot.
+    repeat: { pattern: '40 12 * * 1-5' },
+    jobId: 'trendlyne-screener-sync-repeatable',
+    removeOnComplete: 5,
+    removeOnFail: 3,
+    processor: processTrendlyneScreenerSync,
+    monitorName: 'trendlyne-screener-sync',
+    concurrency: 1,
+    // Hundreds of screeners sequentially (fetch + 500ms rate-limit delay each) — same order of
+    // magnitude runtime as mc-sync/etnow-sync's own sequential per-screener sync.
+    lockDuration: 90 * 60 * 1000,
+    lockRenewTime: 15 * 60 * 1000,
   });
 
   const fundamentalsSync = await registerRepeatableJob({
@@ -184,5 +232,5 @@ export async function registerScreenerJobs(connection: any) {
     lockRenewTime: 2 * 60 * 1000,
   });
 
-  return { stockScoring, mcScreenerSync, etnowScreenerSync, etMarketstatsSync, fundamentalsSync, quantScoring };
+  return { stockScoring, mcScreenerSync, etnowScreenerSync, etMarketstatsSync, trendlyneScreenerSync, fundamentalsSync, quantScoring };
 }

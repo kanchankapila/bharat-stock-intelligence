@@ -122,6 +122,7 @@ describe('JOB_REGISTRY.graceMinutes consistency', () => {
     'mc-screener-sync': "jobName: 'mc-sync'",
     'etnow-screener-sync': "jobName: 'etnow-sync'",
     'et-marketstats-sync': "jobName: 'et-marketstats-sync'",
+    'trendlyne-screener-sync': "jobName: 'trendlyne-screener-sync'",
     'nse-sync': "jobName: 'nse-sync-weekly'",
     'fundamentals-sync': "jobName: 'sync-fundamentals-weekly'",
     'quant-scoring': "jobName: 'quant-score-daily'",

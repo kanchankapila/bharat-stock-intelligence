@@ -29,7 +29,7 @@ function startMinuteUtc(jobName: string): number {
   return Number(hr) * 60 + Number(min);
 }
 
-const SCREENER_SYNCS = ['et-marketstats-sync', 'mc-screener-sync', 'etnow-screener-sync'];
+const SCREENER_SYNCS = ['et-marketstats-sync', 'trendlyne-screener-sync', 'mc-screener-sync', 'etnow-screener-sync'];
 
 describe('evening batch pipeline ordering', () => {
   it.each(SCREENER_SYNCS)(
@@ -46,11 +46,17 @@ describe('evening batch pipeline ordering', () => {
     },
   );
 
-  it('et-marketstats-sync in particular precedes stock-scoring', () => {
-    // syncAndScore() re-syncs trendlyne/mc/etnow in-process before scoring, so those three
-    // self-heal a bad order. et_marketstats is the ONE source it does not re-sync, so its
-    // ordering is load-bearing rather than belt-and-braces.
-    expect(startMinuteUtc('et-marketstats-sync')).toBeLessThan(startMinuteUtc('stock-scoring'));
+  it('all four screener syncs are now load-bearing ahead of stock-scoring, not just belt-and-braces', () => {
+    // 2026-08-04 job-timing audit: stock-scoring's scheduled path now calls recalculateScores()
+    // directly instead of syncAndScore() (which used to re-sync trendlyne/mc/etnow in-process
+    // before scoring — a THIRD same-evening re-fetch of each, on top of the dedicated 6:00-6:40
+    // PM syncs and quant-eod-sync's own now-removed re-sync at 10:00 PM). With no in-process
+    // re-sync left anywhere in the scheduled chain, every one of the four dedicated syncs'
+    // ordering ahead of stock-scoring is load-bearing — none of them is a belt-and-braces
+    // safety net anymore.
+    for (const sync of SCREENER_SYNCS) {
+      expect(startMinuteUtc(sync)).toBeLessThan(startMinuteUtc('stock-scoring'));
+    }
   });
 
   it('dl-feature-refresh runs after the day OHLCV bar is persisted', () => {

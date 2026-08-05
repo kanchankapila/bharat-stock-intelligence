@@ -53,6 +53,14 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   { jobName: 'mc-screener-sync', label: 'MoneyControl Screener Sync', cronPattern: '50 12 * * 1-5', graceMinutes: 105, critical: true },
   { jobName: 'etnow-screener-sync', label: 'ETNow Screener Sync', cronPattern: '10 13 * * 1-5', graceMinutes: 90, critical: true },
   { jobName: 'et-marketstats-sync', label: 'ET Marketstats Screener Sync', cronPattern: '30 12 * * 1-5', graceMinutes: 90, critical: false },
+  // New 2026-08-04 (job-timing audit): Trendlyne screener-stock membership previously had NO
+  // dedicated schedule of its own — it only synced as a side effect of quant-eod-sync (10:00 PM
+  // IST) and stock-scoring's syncAndScore() (10:30 PM IST), both of which ALSO redundantly
+  // re-synced MC/ETnow a 2nd/3rd time that same evening. Given its own slot alongside its
+  // mc/etnow/et-marketstats siblings instead; graceMinutes matches mc-screener-sync's corrected
+  // value (90min lockDuration + headroom), critical:true since it feeds
+  // screener_features_fetcher.py's screener_momentum_score same as MC/ETnow.
+  { jobName: 'trendlyne-screener-sync', label: 'Trendlyne Screener Sync', cronPattern: '40 12 * * 1-5', graceMinutes: 105, critical: true },
   { jobName: 'nse-sync', label: 'NSE Master List Sync', cronPattern: '0 2 * * 0', graceMinutes: 120, critical: false },
   { jobName: 'fundamentals-sync', label: 'Fundamentals Sync', cronPattern: '0 3 * * 0', graceMinutes: 120, critical: false },
   { jobName: 'quant-scoring', label: 'Quant Score Engine', cronPattern: '30 17 * * 1-5', graceMinutes: 45, critical: true },

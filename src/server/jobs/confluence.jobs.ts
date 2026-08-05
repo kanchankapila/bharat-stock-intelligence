@@ -33,6 +33,25 @@ import { makeConnection } from '../queues';
 export const QUEUE_CONFLUENCE_COMPUTE = 'confluence-compute';
 export const QUEUE_CONFLUENCE_OUTCOMES = 'confluence-outcomes';
 
+/**
+ * True during the hours where re-running the whole-universe confluence compute can actually see
+ * different input than its last run: the evening data-landing window (screener syncs 6:00-6:40 PM
+ * -> ml-daily-ops 7:30 PM -> stock-scoring/quant-scoring/confluence-outcomes 10:30 PM-11:30 PM ->
+ * dl-inference midnight -> screener-performance 2:30 AM) plus a short pre-open refresh window
+ * ahead of unified-ranker (7:30 AM). Outside these hours (~00:00-06:00, ~08:00-17:00 IST on a
+ * trading day) every upstream table (technical_signals, screener tables, stock_scores,
+ * quant_scores) is provably static until the next landing event, so recomputing this "whole-
+ * universe, heavy" signal on an unchanged input is pure waste, not a safety margin.
+ *
+ * Added 2026-08-04 (job-timing audit): this job's 30-min cadence + market-hours skip alone left
+ * ~15-17 nightly ticks (roughly 00:30-08:00 IST) recomputing frozen data every single night.
+ */
+export function isConfluenceComputeWindow(now = new Date()): boolean {
+  const ist = new Date(now.getTime() + 5.5 * 60 * 60 * 1000);
+  const hour = ist.getUTCHours();
+  return (hour >= 17 && hour <= 23) || hour === 6 || hour === 7;
+}
+
 async function processConfluenceCompute(_job: Job): Promise<{ computed: number; elite: number; strong: number }> {
   // Positional signal (whole-universe, heavy). Skip during market hours so it doesn't compete with
   // the intraday pipeline for CPU/DB — its consumers (positional dashboards + the post-close
@@ -40,6 +59,10 @@ async function processConfluenceCompute(_job: Job): Promise<{ computed: number; 
   // and the 30-min cadence resumes after close. Returning normally keeps the heartbeat fresh.
   if (await isMarketOpen()) {
     console.log('[QUEUE] confluence-compute skipped — market hours (positional signal runs off-hours)');
+    return { computed: 0, elite: 0, strong: 0 };
+  }
+  if (!isConfluenceComputeWindow()) {
+    console.log('[QUEUE] confluence-compute skipped — outside the evening-landing/pre-open window (inputs are static)');
     return { computed: 0, elite: 0, strong: 0 };
   }
   const { computeConfluenceSignals, runMLProbabilityOverlay } = await import('../confluenceEngine');

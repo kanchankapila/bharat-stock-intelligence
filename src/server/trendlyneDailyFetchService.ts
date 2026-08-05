@@ -1,11 +1,33 @@
 import { Queue } from 'bullmq';
 import { getAllStocks } from './stockMapping';
 import { fetchTrendlyneStockMetrics } from './trendlyneService';
+import { dbAll } from './dbAsync';
 
 const DEFAULT_WINDOW_HOURS = 12;
 const MAX_WINDOW_HOURS = 24;
 
-export function getTrendlyneMetricSymbols(): string[] {
+// Pre-warms fetchTrendlyneStockMetrics()'s 12h cache (see getTrendlyneStockMetrics in
+// trendlyne.router.ts, the on-demand caller sharing the same cache key) so a stock-detail
+// "Stock Metrics" popup loads fast on first click. No DB persistence happens here — this is
+// pure cache-warming. Was the full ~2,000-symbol universe (getAllStocks()), spread over a
+// 10 AM-10 PM window that overlaps market hours and the intraday Trendlyne scan/checklist
+// cycle's own request load, to warm a popup most of those symbols would never actually have
+// opened. Restricted 2026-08-04 (job-timing audit) to the top-N by market cap — the segment
+// actually likely to be viewed.
+const TOP_N_BY_MARKET_CAP = 500;
+
+export async function getTrendlyneMetricSymbols(limit = TOP_N_BY_MARKET_CAP): Promise<string[]> {
+  try {
+    const rows = await dbAll<{ symbol: string }>(
+      `SELECT symbol FROM nse_stocks WHERE market_cap IS NOT NULL AND status = 'ACTIVE'
+       ORDER BY market_cap DESC LIMIT ?`,
+      [limit],
+    );
+    if (rows.length > 0) return rows.map(r => r.symbol.toUpperCase());
+  } catch (err) {
+    console.warn('[TRENDLYNE DAILY FETCH] market-cap ranked query failed, falling back to full universe:', (err as Error).message);
+  }
+  // Fallback (nse_stocks not yet populated, or the query failed): full universe, same as before.
   return getAllStocks().map((stock) => stock.symbol.toUpperCase());
 }
 
