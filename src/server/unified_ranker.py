@@ -537,19 +537,80 @@ def apply_correlation_cap(weights: dict, clusters: dict,
 # bar is set well ABOVE the existing Strong-tier gate (66/34) specifically so this fallback
 # only ever fires on a genuinely standout blended score, never an ordinary one that happened to
 # have no screener coverage that day.
+#
+# FLAG-GATED, DEFAULT OFF (2026-08-06, quant-review finding): the "genuinely standout blended
+# score" premise above does not hold. Three of the eight engines -- screener, cs, confluence,
+# technical -- are percentile-RANK normalized (_normalize_to_100: guarantees a uniform 0-100
+# spread across the scored universe by construction, independent of whether the underlying
+# signal is objectively strong that day). When a stock has no screener opinion (the ONLY case
+# this fallback fires in), screener's weight (0.20-0.40, the single largest of the eight) is
+# redistributed by _blend()'s renormalization onto the remaining seven -- and cs+confluence+
+# technical alone can then represent over half of that redistributed weight (e.g. HIGH_VOL:
+# cs 0.05 + confluence 0.12 + technical 0.24 = 0.41 of the 0.80 remaining after screener drops
+# out). All three lean on the same underlying momentum/trend signal family (technical_score is
+# a raw RSI/MACD composite; confluence's non-screener sum is trend_alignment_score +
+# volume_score; cs_ranker is a cross-sectional alpha-percentile ranker) -- so on any day a
+# cohort of stocks is genuinely "hot," that cohort ranks top-percentile on all three
+# simultaneously and clears this fallback's 70/80 bar from shared momentum exposure alone, not
+# from independent multi-engine agreement. This is not a hypothetical: the platform's own
+# 2026-07-30/07-31 quant-strategy audits already measured short-horizon momentum to have
+# NEGATIVE forward alpha on this exact universe (mom21: -0.53%/5d, t=-3.21; intraday
+# vwap_dev/rvol: all negative, t up to -11) -- so a mechanism that manufactures broad "high
+# score on every parameter" Buy/Strong Buy classifications specifically FOR stocks lacking the
+# one genuinely independent, empirically-diverse check (screener consensus across ~1,700
+# separately-built screens) is systematically leaning into the platform's own documented losing
+# factor, not a validated edge. It also cannot be caught by is_red_flagged()'s hard veto, which
+# reads the same (empty, by construction) screener membership list.
+#
+# Traced directly to a real-world symptom: a 60+-Telegram-alert burst reported the day after
+# this fallback (and a companion websocketService.ts change removing an unrelated but
+# accidentally-protective Telegram threshold) shipped. That burst's Telegram root cause was a
+# separate, already-fixed gate (signals.py's AI-signal win_probability floor reverting to a
+# degenerate 0.40 default -- see the CLAUDE.md session note dated 2026-08-06) -- but reviewing
+# unified_recommendations for the same "why do so many stocks look great on every parameter"
+# question surfaced this mechanism as a second, independent contributor to implausibly broad
+# Buy/Strong Buy classification, on the canonical ranking table itself, not just the AI-signal
+# side channel.
+#
+# Rather than delete the mechanism outright (its actual premise -- screeners under-cover the
+# universe, and a stock can be genuinely strong before any screener catches up -- is real and
+# was an explicit, considered decision), it is disabled by default (missing/non-'true'
+# app_settings row = OFF, matching ml_calibration.is_edge_adjustment_enabled()'s established
+# convention) until it can be validated against live/historical unified_recommendations data:
+# specifically, whether stocks classified via this fallback path actually outperform, and
+# whether requiring genuine cross-engine diversity (e.g. the non-percentile ml/dl/breakout
+# engines, not just cs+confluence+technical) closes the gap. Flip with:
+#   UPDATE app_settings SET value='true' WHERE key='directionless_score_fallback_enabled';
+#   -- or INSERT if the key has never been set.
 DIRECTIONLESS_STRONG_BUY_FLOOR  = 80.0
 DIRECTIONLESS_BUY_FLOOR         = 70.0
 DIRECTIONLESS_STRONG_SELL_CEIL  = 20.0
 DIRECTIONLESS_SELL_CEIL         = 30.0
 
 
-def _classify(score, bull, bear):
+def is_directionless_fallback_enabled(conn) -> bool:
+    """Feature flag gating _classify's directionless-score fallback. Defaults to OFF (missing
+    row) -- see the DIRECTIONLESS_* block's own comment for why this shipped disabled."""
+    try:
+        row = conn.execute(
+            "SELECT value FROM app_settings WHERE key = 'directionless_score_fallback_enabled'"
+        ).fetchone()
+        return bool(row) and row['value'] == 'true'
+    except Exception as e:
+        print(f"[UnifiedRanker] is_directionless_fallback_enabled unavailable: {e}")
+        return False
+
+
+def _classify(score, bull, bear, *, directionless_fallback: bool = False):
     """Directional label (matches stock_scores taxonomy the Top Rated UI renders). Screeners
     are the PRIMARY direction source: net screener bias (bull vs bear count) decides Buy vs
     Sell whenever they express any opinion at all, with the 0-100 unified score only gating
     the 'Strong' tier threshold. Only when screeners have NO net opinion (see
     DIRECTIONLESS_* above) does the blended score itself get to set direction, and only past a
-    materially higher bar than the normal Strong-tier gate -- see that block's own comment."""
+    materially higher bar than the normal Strong-tier gate -- see that block's own comment.
+
+    directionless_fallback defaults to False (disabled) -- pass True only after reading
+    is_directionless_fallback_enabled()'s explanation of why this ships off by default."""
     bull = bull or 0
     bear = bear or 0
     total = bull + bear
@@ -560,7 +621,9 @@ def _classify(score, bull, bear):
         return 'Strong Sell' if (r <= -0.5 and score <= 34.0) else 'Sell'
     # r == 0: either total==0 (silent) or bull==bear (a tied stand-off) -- both collapse to the
     # same directionless fallback, since a tie is just as legitimately "no screener opinion" as
-    # outright silence.
+    # outright silence. Disabled by default -- see DIRECTIONLESS_* comment above.
+    if not directionless_fallback:
+        return 'Hold'
     if score >= DIRECTIONLESS_STRONG_BUY_FLOOR:
         return 'Strong Buy'
     if score >= DIRECTIONLESS_BUY_FLOOR:
@@ -1346,6 +1409,7 @@ class UnifiedRanker:
 
         regime, _conf     = self._get_regime()
         base_weights      = REGIME_WEIGHTS.get(regime, REGIME_WEIGHTS['BULL'])
+        directionless_fallback = is_directionless_fallback_enabled(self.conn)
         fund_scores       = self._get_fundamental_scores()
         quality_metrics   = self._get_quality_metrics()
         win_probs         = self._get_win_probabilities()
@@ -1431,7 +1495,7 @@ class UnifiedRanker:
 
             bull = bull_counts.get(sym, 0)
             bear = bear_counts.get(sym, 0)
-            classification = _classify(unified, bull, bear)
+            classification = _classify(unified, bull, bear, directionless_fallback=directionless_fallback)
 
             # Red-flag hard veto: a bearish solvency/governance screener removes the name from
             # the buy pool no matter how strong its score is (then it also ranks low + unsized).

@@ -796,52 +796,96 @@ class TestUIGradeRanking:
         assert _classify(50.0, bull=0, bear=0) == 'Hold'
 
 
-class TestDirectionlessScoreFallback:
-    """2026-08-05 fix: a stock off every screener's radar (or exactly tied) used to be
-    Hold-forced regardless of how strong its blended score was -- the other 7 engines never
-    got a vote on direction. Now a genuinely extreme blended score can set direction ONLY in
-    that narrow no-opinion case, past a bar well above the ordinary Strong-tier gate."""
+class TestDirectionlessScoreFallbackDisabledByDefault:
+    """2026-08-06 quant-review finding: the fallback below manufactures Buy/Strong Buy
+    classifications from a blended score that, for exactly the stocks this fallback fires on
+    (zero net screener opinion), is dominated by three percentile-RANK-normalized engines
+    (screener's redistributed weight lands mostly on cs/confluence/technical -- see
+    unified_ranker.py's DIRECTIONLESS_* comment for the full mechanism). Percentile-rank
+    guarantees a uniform spread regardless of whether the day's momentum cohort has any real
+    edge, and this platform's own 2026-07-30/07-31 audits already measured that momentum
+    factor to have NEGATIVE forward alpha. Traced to a real 60+-alert Telegram burst on
+    2026-08-06. The fallback now defaults to OFF (run() reads
+    is_directionless_fallback_enabled(); _classify's own default is also False) -- these tests
+    pin that a stock with zero/tied screener opinion is Hold-forced by default regardless of
+    how extreme its blended score is, i.e. this must be true with NO flag argument at all."""
+
+    def test_extreme_high_score_no_screener_coverage_stays_hold_by_default(self):
+        from unified_ranker import _classify, DIRECTIONLESS_STRONG_BUY_FLOOR
+        assert _classify(DIRECTIONLESS_STRONG_BUY_FLOOR, bull=0, bear=0) == 'Hold'
+        assert _classify(100.0, bull=0, bear=0) == 'Hold'
+
+    def test_extreme_low_score_no_screener_coverage_stays_hold_by_default(self):
+        from unified_ranker import _classify, DIRECTIONLESS_STRONG_SELL_CEIL
+        assert _classify(DIRECTIONLESS_STRONG_SELL_CEIL, bull=0, bear=0) == 'Hold'
+        assert _classify(0.0, bull=0, bear=0) == 'Hold'
+
+    def test_tied_screener_opinion_also_stays_hold_by_default(self):
+        from unified_ranker import _classify, DIRECTIONLESS_STRONG_BUY_FLOOR
+        assert _classify(DIRECTIONLESS_STRONG_BUY_FLOOR, bull=4, bear=4) == 'Hold'
+
+    def test_explicit_directionless_fallback_false_matches_the_default(self):
+        from unified_ranker import _classify, DIRECTIONLESS_STRONG_BUY_FLOOR
+        assert _classify(DIRECTIONLESS_STRONG_BUY_FLOOR, bull=0, bear=0,
+                          directionless_fallback=False) == 'Hold'
+
+    def test_real_screener_opinion_is_never_gated_by_the_flag(self):
+        """The flag only affects the total==0 / tied-vote case -- a stock with a genuine net
+        screener opinion classifies identically whether the fallback is on or off."""
+        from unified_ranker import _classify
+        assert _classify(55.0, bull=5, bear=3, directionless_fallback=False) == 'Buy'
+        assert _classify(55.0, bull=5, bear=3, directionless_fallback=True) == 'Buy'
+
+
+class TestDirectionlessScoreFallbackWhenEnabled:
+    """2026-08-05 mechanism, exercised with directionless_fallback=True (opt-in via
+    app_settings.directionless_score_fallback_enabled -- see
+    TestDirectionlessScoreFallbackDisabledByDefault above for why it ships off). A stock off
+    every screener's radar (or exactly tied) is Hold-forced regardless of blended score UNLESS
+    this flag is explicitly enabled, in which case a genuinely extreme blended score can set
+    direction, past a bar well above the ordinary Strong-tier gate."""
 
     def test_high_score_no_screener_coverage_becomes_buy(self):
         from unified_ranker import _classify, DIRECTIONLESS_BUY_FLOOR
-        assert _classify(DIRECTIONLESS_BUY_FLOOR, bull=0, bear=0) == 'Buy'
+        assert _classify(DIRECTIONLESS_BUY_FLOOR, bull=0, bear=0, directionless_fallback=True) == 'Buy'
 
     def test_very_high_score_no_screener_coverage_becomes_strong_buy(self):
         from unified_ranker import _classify, DIRECTIONLESS_STRONG_BUY_FLOOR
-        assert _classify(DIRECTIONLESS_STRONG_BUY_FLOOR, bull=0, bear=0) == 'Strong Buy'
+        assert _classify(DIRECTIONLESS_STRONG_BUY_FLOOR, bull=0, bear=0, directionless_fallback=True) == 'Strong Buy'
 
     def test_low_score_no_screener_coverage_becomes_sell(self):
         from unified_ranker import _classify, DIRECTIONLESS_SELL_CEIL
-        assert _classify(DIRECTIONLESS_SELL_CEIL, bull=0, bear=0) == 'Sell'
+        assert _classify(DIRECTIONLESS_SELL_CEIL, bull=0, bear=0, directionless_fallback=True) == 'Sell'
 
     def test_very_low_score_no_screener_coverage_becomes_strong_sell(self):
         from unified_ranker import _classify, DIRECTIONLESS_STRONG_SELL_CEIL
-        assert _classify(DIRECTIONLESS_STRONG_SELL_CEIL, bull=0, bear=0) == 'Strong Sell'
+        assert _classify(DIRECTIONLESS_STRONG_SELL_CEIL, bull=0, bear=0, directionless_fallback=True) == 'Strong Sell'
 
     def test_moderate_score_no_screener_coverage_stays_hold(self):
         """The fallback only fires on a genuinely extreme score -- an ordinary mid-range score
         with zero screener coverage must remain Hold, not silently become actionable."""
         from unified_ranker import _classify, DIRECTIONLESS_BUY_FLOOR, DIRECTIONLESS_SELL_CEIL
-        assert _classify(DIRECTIONLESS_BUY_FLOOR - 0.01, bull=0, bear=0) == 'Hold'
-        assert _classify(DIRECTIONLESS_SELL_CEIL + 0.01, bull=0, bear=0) == 'Hold'
-        assert _classify(55.0, bull=0, bear=0) == 'Hold'
+        assert _classify(DIRECTIONLESS_BUY_FLOOR - 0.01, bull=0, bear=0, directionless_fallback=True) == 'Hold'
+        assert _classify(DIRECTIONLESS_SELL_CEIL + 0.01, bull=0, bear=0, directionless_fallback=True) == 'Hold'
+        assert _classify(55.0, bull=0, bear=0, directionless_fallback=True) == 'Hold'
 
     def test_tied_screener_opinion_uses_the_same_fallback_as_silence(self):
         """bull==bear (a genuine tied stand-off, total > 0) is treated the same as total==0 --
         both are 'no net opinion', not distinct cases."""
         from unified_ranker import _classify, DIRECTIONLESS_BUY_FLOOR
-        assert _classify(DIRECTIONLESS_BUY_FLOOR, bull=4, bear=4) == 'Buy'
+        assert _classify(DIRECTIONLESS_BUY_FLOOR, bull=4, bear=4, directionless_fallback=True) == 'Buy'
 
     def test_any_net_screener_tilt_overrides_the_fallback_even_at_extreme_scores(self):
         """The instant screeners express ANY opinion (bull != bear), they take back full
         authority -- an extreme blended score never overrides an actual (even weak) screener
-        signal in the opposite direction."""
+        signal in the opposite direction. True regardless of the flag, since this branch never
+        reaches the fallback at all."""
         from unified_ranker import _classify, DIRECTIONLESS_STRONG_BUY_FLOOR, DIRECTIONLESS_STRONG_SELL_CEIL
         # Extremely high score, but screeners lean (even slightly) bearish -> still Sell-side,
         # never a fallback-driven Buy.
-        assert _classify(DIRECTIONLESS_STRONG_BUY_FLOOR, bull=1, bear=2) == 'Sell'
+        assert _classify(DIRECTIONLESS_STRONG_BUY_FLOOR, bull=1, bear=2, directionless_fallback=True) == 'Sell'
         # Extremely low score, but screeners lean (even slightly) bullish -> still Buy-side.
-        assert _classify(DIRECTIONLESS_STRONG_SELL_CEIL, bull=2, bear=1) == 'Buy'
+        assert _classify(DIRECTIONLESS_STRONG_SELL_CEIL, bull=2, bear=1, directionless_fallback=True) == 'Buy'
 
     def test_normalize_is_robust_to_a_single_outlier(self):
         # min-max collapses the cluster near 0 when one outlier sets the max; percentile rank does not.
@@ -851,6 +895,45 @@ class TestDirectionlessScoreFallback:
         # the non-outlier cluster must remain well-spread, not all crushed below ~1
         assert out['d'] > 50.0
         assert out['a'] < out['b'] < out['c'] < out['d'] < out['OUTLIER']
+
+
+class TestIsDirectionlessFallbackEnabled:
+    """is_directionless_fallback_enabled(conn) -- the app_settings-driven flag read once per
+    run() and threaded into every _classify() call. Mirrors
+    ml_calibration.is_edge_adjustment_enabled()'s established convention: missing/non-'true'
+    row = disabled, so shipping this is inert without an explicit opt-in."""
+
+    class _FakeRow(dict):
+        pass
+
+    class _FakeConn:
+        def __init__(self, value=None):
+            self._value = value
+        def execute(self, sql, params=()):
+            return self
+        def fetchone(self):
+            if self._value is None:
+                return None
+            return {'value': self._value}
+
+    def test_missing_row_is_disabled(self):
+        from unified_ranker import is_directionless_fallback_enabled
+        assert is_directionless_fallback_enabled(self._FakeConn(None)) is False
+
+    def test_explicit_false_value_is_disabled(self):
+        from unified_ranker import is_directionless_fallback_enabled
+        assert is_directionless_fallback_enabled(self._FakeConn('false')) is False
+
+    def test_explicit_true_value_is_enabled(self):
+        from unified_ranker import is_directionless_fallback_enabled
+        assert is_directionless_fallback_enabled(self._FakeConn('true')) is True
+
+    def test_query_failure_defaults_to_disabled(self):
+        from unified_ranker import is_directionless_fallback_enabled
+        class _BrokenConn:
+            def execute(self, sql, params=()):
+                raise RuntimeError('no app_settings table')
+        assert is_directionless_fallback_enabled(_BrokenConn()) is False
 
 
 # ── quality gate (#4): demote fundamentally weak names in the canonical ranking ──
