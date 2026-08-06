@@ -20,6 +20,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 import screener_performance as sp
 
 
+DEFAULT_SOURCE = 'trendlyne'  # matches this file's screener_master inserts elsewhere
+
+
 class FakeConn:
     """Minimal ConnWrapper stand-in over sqlite3 (the module only needs execute/commit)."""
 
@@ -27,7 +30,7 @@ class FakeConn:
         self._c = sqlite3.connect(':memory:')
         self._c.execute("""
             CREATE TABLE screener_appearances (
-                screener_id TEXT, symbol TEXT, appeared_date TEXT,
+                screener_id TEXT, source TEXT, symbol TEXT, appeared_date TEXT,
                 return_20d REAL, nifty_ret_20d REAL, outcome_20d TEXT
             )""")
         # 2026-08-04: compute_pit_scores now sign-adjusts a bearish screener's return (see
@@ -46,13 +49,21 @@ class FakeConn:
         self._c.close()
 
 
-def _add(conn, screener_id, appeared, ret20, outcome='WIN', nifty=0.0):
+def _add(conn, screener_id, appeared, ret20, outcome='WIN', nifty=0.0, source=DEFAULT_SOURCE):
     conn.execute(
         "INSERT INTO screener_appearances "
-        "(screener_id, symbol, appeared_date, return_20d, nifty_ret_20d, outcome_20d) "
-        "VALUES (?,?,?,?,?,?)",
-        (screener_id, 'SYM', appeared, ret20, nifty, outcome))
+        "(screener_id, source, symbol, appeared_date, return_20d, nifty_ret_20d, outcome_20d) "
+        "VALUES (?,?,?,?,?,?,?)",
+        (screener_id, source, 'SYM', appeared, ret20, nifty, outcome))
     conn.commit()
+
+
+def _key(screener_id, source=DEFAULT_SOURCE):
+    """compute_pit_scores (2026-08-06, source-scoped) keys its output by (source, screener_id),
+    matching screener_appearances' own (source, screener_id) key and the live
+    screener_performance_history PK migration -- MC/ETnow independently issue overlapping
+    scan_ids, confirmed live (scan_id 173 is both ETnow's and MoneyControl's)."""
+    return (source, screener_id)
 
 
 @pytest.fixture
@@ -78,8 +89,8 @@ class TestResolutionLag:
         as_of = '2026-07-01'
         _add(conn, 'S1', '2026-05-01', 10.0)      # long resolved
         scores = sp.compute_pit_scores(conn, as_of)
-        assert 'S1' in scores
-        assert scores['S1']['resolved_count'] == 1
+        assert _key('S1') in scores
+        assert scores[_key('S1')]['resolved_count'] == 1
 
 
 class TestNoLookAhead:
@@ -89,12 +100,12 @@ class TestNoLookAhead:
         as_of = '2026-06-01'
         for i in range(12):
             _add(conn, 'S1', f'2026-04-{i+1:02d}', 5.0, 'WIN')
-        before = sp.compute_pit_scores(conn, as_of)['S1']['bayesian_score']
+        before = sp.compute_pit_scores(conn, as_of)[_key('S1')]['bayesian_score']
 
         # a run of later losses -- known only after as_of
         for i in range(12):
             _add(conn, 'S1', f'2026-06-{i+10:02d}', -8.0, 'LOSS')
-        after = sp.compute_pit_scores(conn, as_of)['S1']['bayesian_score']
+        after = sp.compute_pit_scores(conn, as_of)[_key('S1')]['bayesian_score']
 
         assert before == after, "future outcomes leaked into a point-in-time score"
 
@@ -102,10 +113,10 @@ class TestNoLookAhead:
         """Sanity check the test above isn't passing because the filter drops everything."""
         for i in range(12):
             _add(conn, 'S1', f'2026-04-{i+1:02d}', 5.0, 'WIN')
-        early = sp.compute_pit_scores(conn, '2026-06-01')['S1']
+        early = sp.compute_pit_scores(conn, '2026-06-01')[_key('S1')]
         for i in range(12):
             _add(conn, 'S1', f'2026-06-{i+10:02d}', -8.0, 'LOSS')
-        late = sp.compute_pit_scores(conn, '2026-09-01')['S1']
+        late = sp.compute_pit_scores(conn, '2026-09-01')[_key('S1')]
 
         assert late['resolved_count'] > early['resolved_count']
         assert late['bayesian_score'] < early['bayesian_score'], \
@@ -116,7 +127,7 @@ class TestNoLookAhead:
         for i in range(1, 28):
             _add(conn, 'S1', f'2026-04-{i:02d}', 3.0, 'WIN')
         counts = [
-            sp.compute_pit_scores(conn, d).get('S1', {}).get('resolved_count', 0)
+            sp.compute_pit_scores(conn, d).get(_key('S1'), {}).get('resolved_count', 0)
             for d in ('2026-05-01', '2026-05-15', '2026-06-01', '2026-07-01')
         ]
         assert counts == sorted(counts)
@@ -126,21 +137,21 @@ class TestScoreShape:
     def test_score_is_a_bounded_probability_like_composite(self, conn):
         for i in range(1, 20):
             _add(conn, 'S1', f'2026-04-{i:02d}', 4.0, 'WIN')
-        s = sp.compute_pit_scores(conn, '2026-07-01')['S1']
+        s = sp.compute_pit_scores(conn, '2026-07-01')[_key('S1')]
         assert 0.0 <= s['bayesian_score'] <= 1.0
         assert 0.0 <= s['wr_20d'] <= 1.0
         assert s['tier'] in ('A', 'B', 'C', 'D', 'Unranked')
 
     def test_thin_history_is_unranked(self, conn):
         _add(conn, 'S1', '2026-04-01', 4.0, 'WIN')
-        assert sp.compute_pit_scores(conn, '2026-07-01')['S1']['tier'] == 'Unranked'
+        assert sp.compute_pit_scores(conn, '2026-07-01')[_key('S1')]['tier'] == 'Unranked'
 
     def test_losing_screener_scores_below_winning_screener(self, conn):
         for i in range(1, 15):
             _add(conn, 'GOOD', f'2026-04-{i:02d}', 6.0, 'WIN')
             _add(conn, 'BAD', f'2026-04-{i:02d}', -6.0, 'LOSS')
         s = sp.compute_pit_scores(conn, '2026-07-01')
-        assert s['GOOD']['bayesian_score'] > s['BAD']['bayesian_score']
+        assert s[_key('GOOD')]['bayesian_score'] > s[_key('BAD')]['bayesian_score']
 
 
 class TestSignAwareness:
@@ -159,7 +170,7 @@ class TestSignAwareness:
             # outcome_20d itself is still direction-blind ('WIN' here just means "resolved"
             # for the purposes of this fixture's _add helper), the sign fix operates on ret20d.
             _add(conn, 'BEARISH1', f'2026-04-{i:02d}', -6.0, 'LOSS')
-        s = sp.compute_pit_scores(conn, '2026-07-01')['BEARISH1']
+        s = sp.compute_pit_scores(conn, '2026-07-01')[_key('BEARISH1')]
         assert s['wr_20d'] == 1.0, "a bearish screener whose stocks fell must score as a WIN"
 
     def test_bullish_and_correctly_predicting_bearish_screener_score_equivalently(self, conn):
@@ -173,4 +184,4 @@ class TestSignAwareness:
             _add(conn, 'BULL1', f'2026-04-{i:02d}', 6.0, 'WIN')
             _add(conn, 'BEARISH2', f'2026-04-{i:02d}', -6.0, 'LOSS')
         s = sp.compute_pit_scores(conn, '2026-07-01')
-        assert s['BULL1']['bayesian_score'] == s['BEARISH2']['bayesian_score']
+        assert s[_key('BULL1')]['bayesian_score'] == s[_key('BEARISH2')]['bayesian_score']

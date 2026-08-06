@@ -531,8 +531,18 @@ RESOLUTION_LAG_DAYS = 30   # 20 trading days, with slack for weekends/holidays
 
 
 def ensure_pit_schema(conn: ConnWrapper) -> None:
+    # source-scoped PK (2026-08-06 fix): a 2026-08-05 migration
+    # (1786200000000_screener-performance-history-source-pk) already widened the LIVE table's
+    # PK to (source, screener_id, as_of_date) -- MC/ETnow hand out overlapping scan_ids (see the
+    # 2026-08-04 screener_master (source, scan_id) fix), and this table is no exception. This
+    # CREATE TABLE IF NOT EXISTS is a no-op against an already-migrated live DB, but must match
+    # it for a fresh/reset DB -- the old 2-column definition here silently drifted out of sync
+    # with the live schema for a day, during which every write below crashed with
+    # "no unique or exclusion constraint matching ON CONFLICT" (found via live job_heartbeat:
+    # screener-performance had failed on every run since the migration landed).
     conn.execute("""
         CREATE TABLE IF NOT EXISTS screener_performance_history (
+            source          TEXT NOT NULL,
             screener_id     TEXT NOT NULL,
             as_of_date      TEXT NOT NULL,
             bayesian_score  REAL,
@@ -541,7 +551,7 @@ def ensure_pit_schema(conn: ConnWrapper) -> None:
             alpha_20d       REAL,
             resolved_count  INTEGER,
             computed_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (screener_id, as_of_date)
+            PRIMARY KEY (source, screener_id, as_of_date)
         )
     """)
     conn.execute("""CREATE INDEX IF NOT EXISTS idx_sph_asof
@@ -550,20 +560,24 @@ def ensure_pit_schema(conn: ConnWrapper) -> None:
 
 
 def compute_pit_scores(conn: ConnWrapper, as_of: str) -> dict:
-    """bayesian_score per screener using ONLY appearances resolved strictly before as_of."""
+    """bayesian_score per (source, screener_id) using ONLY appearances resolved strictly
+    before as_of. Source-scoped (2026-08-06) to match screener_appearances' own (source,
+    screener_id) key and close the same cross-provider scan_id collision this table's PK
+    migration already closed at the schema level -- MC/ETnow independently issue overlapping
+    small-integer scan_ids (confirmed live: scan_id 173 is both ETnow's and MoneyControl's)."""
     cutoff = (datetime.date.fromisoformat(as_of)
               - datetime.timedelta(days=RESOLUTION_LAG_DAYS)).isoformat()
 
-    # Sign map, keyed on scan_id alone (not (source, scan_id) -- screener_appearances.screener_id
-    # collides across providers same as everywhere else pre-migration; a wrong sentiment pick
-    # for a colliding id is no worse than the existing cross-provider ambiguity already documented
-    # elsewhere, and this PIT path is a lighter-weight historical reconstruction, not the primary
-    # phase_c pipeline above). Defaults to bullish (sign=+1, unchanged prior behavior) when unknown.
-    sentiment_by_id = {r[0]: r[1] for r in
-                        conn.execute("SELECT scan_id, inferred_sentiment FROM screener_master").fetchall()}
+    # screener_appearances.source is lowercase ('moneycontrol'/'etnow'/'trendlyne'/
+    # 'et_marketstats'); screener_master.source is not ('MoneyControl'/'ETnow'/'Trendlyne') --
+    # same pre-existing casing mismatch load_screener_meta already bridges with LOWER(), applied
+    # here too rather than normalizing either table's stored values.
+    sentiment_by_key = {(r[1].lower(), r[0]): r[2] for r in
+                         conn.execute("SELECT scan_id, source, inferred_sentiment "
+                                      "FROM screener_master").fetchall()}
 
     rows = conn.execute("""
-        SELECT screener_id, return_20d, nifty_ret_20d
+        SELECT screener_id, source, return_20d, nifty_ret_20d
         FROM screener_appearances
         WHERE outcome_20d IN ('WIN','LOSS','NEUTRAL')
           AND return_20d IS NOT NULL
@@ -571,9 +585,10 @@ def compute_pit_scores(conn: ConnWrapper, as_of: str) -> dict:
     """, (cutoff,)).fetchall()
 
     by_screener = defaultdict(list)
-    for sid, r20, nifty20 in rows:
-        sign = _sign_for_sentiment(sentiment_by_id.get(sid))
-        by_screener[sid].append((sign * float(r20), float(nifty20) if nifty20 is not None else None))
+    for sid, source, r20, nifty20 in rows:
+        key = (source, sid)
+        sign = _sign_for_sentiment(sentiment_by_key.get(key))
+        by_screener[key].append((sign * float(r20), float(nifty20) if nifty20 is not None else None))
 
     # global prior from screeners with enough resolved history AS OF this date
     wrs = [_wr_from_list([r for r, _ in v]) for v in by_screener.values() if len(v) >= 10]
@@ -582,7 +597,7 @@ def compute_pit_scores(conn: ConnWrapper, as_of: str) -> dict:
     K_PRIOR = K_PRIOR_STARTUP if len(by_screener) < 50 else K_PRIOR_MATURE
 
     out = {}
-    for sid, vals in by_screener.items():
+    for key, vals in by_screener.items():
         rets = [r for r, _ in vals]
         niftys = [n for _, n in vals]
         n = len(rets)
@@ -600,7 +615,7 @@ def compute_pit_scores(conn: ConnWrapper, as_of: str) -> dict:
         elif composite >= 0.55: tier = 'B'
         elif composite >= 0.40: tier = 'C'
         else: tier = 'D'
-        out[sid] = {'bayesian_score': composite, 'tier': tier, 'wr_20d': round(wr, 4),
+        out[key] = {'bayesian_score': composite, 'tier': tier, 'wr_20d': round(wr, 4),
                     'alpha_20d': m.get('alpha'), 'resolved_count': n}
     return out
 
@@ -608,16 +623,16 @@ def compute_pit_scores(conn: ConnWrapper, as_of: str) -> dict:
 def phase_f_pit(conn: ConnWrapper, as_of: str) -> int:
     ensure_pit_schema(conn)
     scores = compute_pit_scores(conn, as_of)
-    for sid, s in scores.items():
+    for (source, sid), s in scores.items():
         conn.execute("""
             INSERT INTO screener_performance_history
-              (screener_id, as_of_date, bayesian_score, tier, wr_20d, alpha_20d, resolved_count)
-            VALUES (?,?,?,?,?,?,?)
-            ON CONFLICT(screener_id, as_of_date) DO UPDATE SET
+              (source, screener_id, as_of_date, bayesian_score, tier, wr_20d, alpha_20d, resolved_count)
+            VALUES (?,?,?,?,?,?,?,?)
+            ON CONFLICT(source, screener_id, as_of_date) DO UPDATE SET
               bayesian_score=excluded.bayesian_score, tier=excluded.tier,
               wr_20d=excluded.wr_20d, alpha_20d=excluded.alpha_20d,
               resolved_count=excluded.resolved_count, computed_at=CURRENT_TIMESTAMP
-        """, (sid, as_of, s['bayesian_score'], s['tier'], s['wr_20d'],
+        """, (source, sid, as_of, s['bayesian_score'], s['tier'], s['wr_20d'],
               s['alpha_20d'], s['resolved_count']))
     conn.commit()
     print(f"[PhaseF] as_of={as_of}: wrote {len(scores)} point-in-time screener scores")

@@ -99,23 +99,26 @@ def load_screener_meta(con, as_of: str | None = None) -> dict:
     screener_performance_history snapshot <= as_of, and only falls back to the current
     full-sample score when no PIT snapshot exists yet (bootstrap).
     """
-    # KNOWN REMAINING GAP: screener_performance_history's PK is (screener_id, as_of_date) with
-    # no source column at all (screener_performance.py), so pit[] stays keyed by bare scan_id --
-    # for the 7 scan_ids that collide between MC and ETnow (2026-08-04 screener_master memory),
-    # this can still surface the wrong provider's point-in-time bayesian_score/tier/alpha. Left
-    # as-is: fixing it needs a schema migration in screener_performance.py's writer too, out of
-    # scope for the screener_master (source, scan_id) migration this function was otherwise
-    # updated for (load_screener_meta's own `meta` dict above IS source-scoped now).
+    # Source-scoped (2026-08-06 fix, closes the gap this comment used to flag): screener_
+    # performance_history's PK was migrated to (source, screener_id, as_of_date) on 2026-08-05
+    # (same cross-provider scan_id collision class as the 2026-08-04 screener_master fix -- MC
+    # and ETnow independently issue overlapping small-integer scan_ids, confirmed live), and its
+    # writer (screener_performance.py's phase_f_pit) now populates that column. pit[] is keyed
+    # by (source, screener_id) to match -- source here is screener_performance_history's own
+    # stored value, which mirrors screener_appearances' lowercase convention
+    # ('moneycontrol'/'etnow'/'trendlyne'/'et_marketstats'), so it's looked up below via
+    # src.lower() against screener_master's mixed-case source, same bridge `meta`'s own key
+    # already uses.
     pit = {}
     if as_of:
         try:
-            for sid, score, tier, alpha in con.execute("""
-                SELECT DISTINCT ON (screener_id) screener_id, bayesian_score, tier, alpha_20d
+            for source, sid, score, tier, alpha in con.execute("""
+                SELECT DISTINCT ON (source, screener_id) source, screener_id, bayesian_score, tier, alpha_20d
                 FROM screener_performance_history
                 WHERE as_of_date <= ?
-                ORDER BY screener_id, as_of_date DESC
+                ORDER BY source, screener_id, as_of_date DESC
             """, (as_of,)).fetchall():
-                pit[sid] = (score, tier, alpha)
+                pit[(source, sid)] = (score, tier, alpha)
         except Exception as e:
             print(f"[ScreenerFeatures] PIT scores unavailable ({e}); "
                   f"falling back to full-sample bayesian_score")
@@ -147,7 +150,7 @@ def load_screener_meta(con, as_of: str | None = None) -> dict:
     meta = {}
     for row in rows:
         sid, src = row[0], row[1]
-        p = pit.get(sid)
+        p = pit.get((src.lower(), sid))
         meta[(src.lower(), sid)] = {
             "sentiment":  row[2] or "neutral",
             "category":   row[3] or "other",
