@@ -147,6 +147,7 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   { jobName: 'reward-engine', label: 'ML Daily Ops: Reward Engine', cronPattern: '0 14 * * 1-5', graceMinutes: 280, critical: false },
   { jobName: 'rl-agent-update', label: 'ML Daily Ops: RL Agent Update', cronPattern: '0 14 * * 1-5', graceMinutes: 280, critical: false },
   { jobName: 'signal-type-stats', label: 'ML Daily Ops: Signal Type Stats', cronPattern: '0 14 * * 1-5', graceMinutes: 280, critical: false },
+  { jobName: 'news-symbol-link', label: 'ML Daily Ops: News Symbol Link', cronPattern: '0 14 * * 1-5', graceMinutes: 280, critical: false },
 
   // Same story for ml-weekly-retrain's (cron '0 5 * * 0') StepTracker sub-steps.
   { jobName: 'ml-ensemble-train', label: 'ML Weekly Retrain: Ensemble Train', cronPattern: '0 5 * * 0', graceMinutes: 400, critical: false },

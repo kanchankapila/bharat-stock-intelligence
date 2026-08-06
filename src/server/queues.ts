@@ -945,6 +945,17 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   const { computeSignalTypeStats } = await import('./technicalSignalsService');
   await T.run('signal-type-stats', () => computeSignalTypeStats());
 
+  // news_symbol_link (news_sentiment_items -> symbol index) was built as a ONE-TIME manual
+  // backfill on 2026-07-31 and never touched again -- 3,754+ articles published since (found
+  // 2026-08-06 while tracing why a real, correctly-tagged, 24h-old bullish CELLO catalyst
+  // never influenced its score) had zero linkage rows. The writer is idempotent
+  // (ON CONFLICT(news_id, symbol) DO NOTHING, no destructive rebuild in the normal case) and
+  // measured 29s uncontended against the live DB -- cheap enough to run nightly, last in this
+  // chain so it picks up the day's full news-collection cycles (GNews runs up to every 6h).
+  // No dataQualityChecks.ts entry needed: this is a derived index built entirely from two
+  // already-monitored tables (news_sentiment_items, nse_stocks), not a new external datasource.
+  await T.run('news-symbol-link', () => runPython('data_integrity_repair.py', ['--news-link'], 5 * 60_000));
+
   // Surface the real per-step outcomes (and a degraded job state if any failed) instead of the
   // old blanket 'success' the completed handler used to stamp on all of these.
   T.finish();

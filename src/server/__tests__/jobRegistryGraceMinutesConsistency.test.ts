@@ -176,7 +176,7 @@ describe('JOB_REGISTRY.graceMinutes consistency', () => {
     'outcome-resolver-5d', 'outcome-resolver-15d', 'performance-tracker',
     'densify-feature-matrix', 'nse-bhavcopy-fetcher', 'ml-ensemble-incremental',
     'ml-ensemble-score', 'drift-detector', 'reward-engine', 'rl-agent-update',
-    'signal-type-stats',
+    'signal-type-stats', 'news-symbol-link',
   ];
   const mlWeeklyRetrainSubsteps = ['ml-ensemble-train', 'strategy-optimizer'];
   const eventDrivenIds = ['ai-signals', 'dl-retrain-emergency'];
