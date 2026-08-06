@@ -484,6 +484,22 @@ const BLOCKED_SIGNAL_TYPES = new Set<SignalType>([
   'CONSECUTIVE_STRENGTH', // avg -0.48%, 28% win rate
 ]);
 
+// "Meaningfully" bullish/bearish news sentiment threshold -- shared between scoreSignals'
+// score modifier and runTechnicalSignalScan's news-only persistence gate (2026-08-06).
+const NEWS_SENTIMENT_MEANINGFUL_THRESHOLD = 0.25;
+
+/** Whether a news_sentiment_score is strong enough to persist a technical_signals row even
+ * when no technical pattern fired that day (2026-08-06 fix). Before this, a symbol with a
+ * quiet chart but a real, material news catalyst (confirmed live: CELLO carried a
+ * correctly-tagged BULLISH M&A-talk article a full trading day before a +15.69% move) had its
+ * sentiment silently discarded regardless of strength, purely because `detectSignals()` found
+ * no technical pattern that day. Exported for testing -- the enclosing scan function is
+ * DB-heavy orchestration with no existing mock-DB test harness, so this is the extracted,
+ * independently-verifiable core of the fix. */
+export function isMeaningfulNewsSentiment(sentimentScore: number): boolean {
+  return Math.abs(sentimentScore) > NEWS_SENTIMENT_MEANINGFUL_THRESHOLD;
+}
+
 const SIGNAL_SCORES: Record<SignalType, Record<SignalStrength, number>> = {
   RSI_DIVERGENCE:     { HIGH: 4, MEDIUM: 2, WATCH: 1 },
   HIDDEN_DIVERGENCE:  { HIGH: 5, MEDIUM: 3, WATCH: 1 },
@@ -576,10 +592,12 @@ function scoreSignals(
   // FII headwind discount — heavy selling (< -3000 Cr 3-day net) reduces score 15%
   if (fii3dNet != null && fii3dNet < -3000) total *= 0.85;
 
-  // News Sentiment Modifier — highly bullish (>0.25) boosts score 15%, highly bearish (<-0.25) penalizes 25%
-  if (newsSentimentScore > 0.25) {
+  // News Sentiment Modifier — highly bullish (>threshold) boosts score 15%, highly bearish
+  // (<-threshold) penalizes 25%. Threshold shared with runTechnicalSignalScan's news-only
+  // persistence gate below (2026-08-06) -- one source of truth for "meaningfully" bullish/bearish.
+  if (newsSentimentScore > NEWS_SENTIMENT_MEANINGFUL_THRESHOLD) {
     total *= 1.15;
-  } else if (newsSentimentScore < -0.25) {
+  } else if (newsSentimentScore < -NEWS_SENTIMENT_MEANINGFUL_THRESHOLD) {
     total *= 0.75;
   }
 
@@ -1181,10 +1199,24 @@ export async function runTechnicalSignalScan(options: {
         const { signals, ...indicators } = detectSignals(rows, symbol, pcrLatestMap.get(symbol) ?? null);
         progress.processed++;
 
-        if (signals.length === 0) continue;
         const sentimentScore = newsSentiment.get(symbol) ?? 0;
-        const score = scoreSignals(signals, winRates, niftyRegime, fii3dNet, sentimentScore, learnedWeights);
-        if (score < minScore) continue;
+        // 2026-08-06: news sentiment used to be computed AFTER `if (signals.length === 0)
+        // continue` -- so a stock with an unremarkable chart that day but a real, material
+        // news catalyst (confirmed live: CELLO carried a correctly-tagged BULLISH M&A-talk
+        // article a full trading day before a +15.69% move) had its sentiment silently
+        // discarded, regardless of strength. hasMeaningfulNews lets such a symbol through the
+        // signal-count/score gates below with signalScore=0 and signals=[] purely so
+        // news_sentiment_score (and the technical indicators detectSignals() already computed
+        // above either way) land in technical_signals -- it does NOT create a trade signal:
+        // the downstream `signalScore > 0`/`>= 5` blocks (unified_signals mirror, WS broadcast,
+        // recommendation_log) all correctly no-op at signalScore=0.
+        const hasMeaningfulNews = isMeaningfulNewsSentiment(sentimentScore);
+
+        if (signals.length === 0 && !hasMeaningfulNews) continue;
+        const score = signals.length > 0
+          ? scoreSignals(signals, winRates, niftyRegime, fii3dNet, sentimentScore, learnedWeights)
+          : 0;
+        if (score < minScore && !hasMeaningfulNews) continue;
 
         // Pre-earnings discount: signals within 5 days of results date are lower quality
         let adjustedScore = score;
@@ -1197,7 +1229,7 @@ export async function runTechnicalSignalScan(options: {
             adjustedScore = Math.round(score * 0.70); // 30% discount within 5 days of earnings
           }
         }
-        if (adjustedScore < minScore) continue;
+        if (adjustedScore < minScore && !hasMeaningfulNews) continue;
 
         const latest = rows[rows.length - 1];
         const prev   = rows[rows.length - 2];
@@ -1223,11 +1255,19 @@ export async function runTechnicalSignalScan(options: {
     }
 
     results.sort((a, b) => b.signalScore - a.signalScore);
-    progress.found = results.length;
-    console.log(`[SIGNALS] Found ${results.length} setups (score ≥ ${minScore})`);
+    // signalScore===0 entries are news-only persistence rows (see hasMeaningfulNews above),
+    // not real setups -- keep progress.found honest about what was actually a signal, since
+    // this codebase's monitoring has repeatedly been burned by a count that looks fine but
+    // doesn't reflect what actually happened.
+    const realSetups = results.filter(r => r.signalScore > 0).length;
+    const newsOnlyRows = results.length - realSetups;
+    progress.found = realSetups;
+    console.log(`[SIGNALS] Found ${realSetups} setups (score ≥ ${minScore})`
+      + (newsOnlyRows > 0 ? `, +${newsOnlyRows} news-only rows persisted (no technical signal)` : ''));
 
-    // AI insights for top N
-    const aiLimit = Math.min(aiInsightsLimit, results.length);
+    // AI insights for top N -- bounded by realSetups, not results.length, so a quiet day
+    // with few real setups doesn't spend AI-insight budget on score=0 news-only rows.
+    const aiLimit = Math.min(aiInsightsLimit, realSetups);
     if (aiLimit > 0 && process.env.ANTHROPIC_API_KEY) {
       console.log(`[SIGNALS] Fetching AI insights for top ${aiLimit} stocks...`);
       for (let i = 0; i < aiLimit; i++) {
