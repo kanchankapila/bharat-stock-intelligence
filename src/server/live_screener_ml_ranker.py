@@ -137,9 +137,51 @@ def _load_active_metrics() -> dict | None:
     try:
         with open(MODEL_PATH, "rb") as f:
             art = pickle.load(f)
-        return {"test_auc": art.get("test_auc"), "trained_at": art.get("trained_at")}
+        # Full field set (2026-08-07), not just test_auc/trained_at -- needed so a REJECTED
+        # candidate's run can still refresh app_settings' live-edge status without overwriting
+        # the still-active model's own cv_auc/test_acc/base_rate/n_samples/n_features with a
+        # rejected candidate's numbers. See _persist_live_edge_status.
+        return {k: art.get(k) for k in
+                ("test_auc", "trained_at", "cv_auc", "test_acc", "base_rate",
+                 "n_samples", "feature_names")}
     except Exception:
         return None
+
+
+def _persist_live_edge_status(active: dict, live_auc: float | None, live_n: int,
+                               live_edge_proven: bool) -> None:
+    """Refresh app_settings.live_screener_ml_model_status' live_auc/live_edge_proven fields
+    for the model CURRENTLY DEPLOYED (MODEL_PATH) -- unconditionally, on every --train run,
+    not just when a new candidate happens to get promoted.
+
+    2026-08-07 fix: this used to be written only inside train()'s `if promote:` branch. Since
+    scoring always uses whatever's in MODEL_PATH regardless of whether that day's retrain
+    promotes, live_auc/live_edge_proven describe the DEPLOYED model, not the candidate -- but
+    as long as promotion kept failing (confirmed live: the deployed model's live AUC is 0.4615
+    over 671,257 resolved rows, essentially no real edge, and every subsequent candidate has
+    also failed to clear the resulting elevated STRICT_PROMOTION_MARGIN), this health signal
+    never reached app_settings at all. monitor.router.ts's "Intraday Edge" tab reads
+    live_screener_ml_scores.win_probability directly with no gate on this signal whatsoever --
+    a model with demonstrably no live edge was being rendered to users as a confidently
+    color-coded "ML XX%" badge indistinguishable from a model that actually works.
+    """
+    if not active:
+        return
+    execute("""
+        INSERT INTO app_settings (key, value, "updatedAt")
+        VALUES ('live_screener_ml_model_status', ?, ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value, "updatedAt" = excluded."updatedAt"
+    """, (
+        json.dumps({
+            "trained_at": active.get("trained_at"), "cv_auc": active.get("cv_auc"),
+            "test_auc": active.get("test_auc"), "test_acc": active.get("test_acc"),
+            "base_rate": active.get("base_rate"), "n_samples": active.get("n_samples"),
+            "n_features": len(active["feature_names"]) if active.get("feature_names") else None,
+            "live_auc": live_auc, "live_auc_rows": live_n,
+            "live_edge_proven": live_edge_proven,
+        }),
+        datetime.datetime.now().isoformat(),
+    ))
 
 
 def train():
@@ -257,22 +299,14 @@ def train():
     if promote:
         with open(MODEL_PATH, "wb") as f:
             pickle.dump(artifact, f)
-        execute("""
-            INSERT INTO app_settings (key, value, "updatedAt")
-            VALUES ('live_screener_ml_model_status', ?, ?)
-            ON CONFLICT(key) DO UPDATE SET value = excluded.value, "updatedAt" = excluded."updatedAt"
-        """, (
-            json.dumps({
-                "trained_at": artifact["trained_at"], "cv_auc": cv_auc, "test_auc": test_auc,
-                "test_acc": test_acc, "base_rate": base_rate, "n_samples": len(matrix),
-                "n_features": len(feature_cols),
-                # Surfaced so consumers (the Live Screener page's "Intraday Edge" tab) can tell
-                # a model with demonstrated live discrimination from one without.
-                "live_auc": live_auc, "live_auc_rows": live_n,
-                "live_edge_proven": live_edge_proven,
-            }),
-            datetime.datetime.now().isoformat(),
-        ))
+        # Surfaced so consumers (the Live Screener page's "Intraday Edge" tab) can tell a
+        # model with demonstrated live discrimination from one without.
+        _persist_live_edge_status(
+            {"trained_at": artifact["trained_at"], "cv_auc": cv_auc, "test_auc": test_auc,
+             "test_acc": test_acc, "base_rate": base_rate, "n_samples": len(matrix),
+             "feature_names": feature_cols},
+            live_auc, live_n, live_edge_proven,
+        )
         print(f"[LiveScreenerMLRanker] Model ACTIVATED (test_auc={test_auc:.4f}"
               + (f", beat baseline {baseline['test_auc']:.4f})" if baseline and baseline.get('test_auc') is not None else ", no prior model)"))
         if not live_edge_proven and live_auc is not None:
@@ -282,6 +316,12 @@ def train():
     else:
         with open(CANDIDATE_PATH, "wb") as f:
             pickle.dump(artifact, f)
+        # 2026-08-07 fix: refresh the DEPLOYED model's live-edge status even though this
+        # candidate was rejected -- live_auc/live_edge_proven describe whatever's still in
+        # MODEL_PATH (unchanged by a rejection), and that signal must keep reaching
+        # app_settings on every run, not just the rare one that happens to promote. Uses
+        # `baseline` (the still-active model's own metrics), not this rejected candidate's.
+        _persist_live_edge_status(baseline, live_auc, live_n, live_edge_proven)
         print(f"[LiveScreenerMLRanker] Candidate REJECTED: test_auc={test_auc:.4f} did not "
               f"beat active model's {baseline['test_auc']:.4f} + {margin} margin. "
               f"Saved to {CANDIDATE_PATH} for inspection; active model unchanged.")

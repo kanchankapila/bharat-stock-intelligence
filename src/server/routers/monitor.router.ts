@@ -15,6 +15,27 @@ export { MONITOR_SCRIPTS };
 
 type ScriptId = typeof MONITOR_SCRIPTS[number]['id'];
 
+/**
+ * Extracts `live_edge_proven` from a raw app_settings.live_screener_ml_model_status JSON
+ * string (2026-08-07). Exported/pure so it's independently testable without mocking the DB --
+ * the router procedure itself just calls this on the row it already fetched.
+ *
+ * Returns `null` (not `false`) for "no evidence either way" -- missing row, malformed JSON, or
+ * a JSON value that isn't a real boolean -- deliberately distinct from an explicit `false`
+ * ("live-graded against real outcomes and shown NO edge"), so a model that simply hasn't
+ * accumulated enough resolved rows yet keeps behaving as it always has instead of being
+ * pre-emptively suppressed.
+ */
+export function parseLiveEdgeProven(rawValue: string | null | undefined): boolean | null {
+  if (!rawValue) return null;
+  try {
+    const parsed = JSON.parse(rawValue);
+    return typeof parsed.live_edge_proven === 'boolean' ? parsed.live_edge_proven : null;
+  } catch {
+    return null;
+  }
+}
+
 function asIso(value: unknown): string | null {
   if (value == null) return null;
   const n = Number(value);
@@ -863,7 +884,7 @@ export const monitorRouter = router({
       );
       if (!latestRun?.id) return { asOf: null, stocks: [] };
 
-      const [appearances, filterStats, mlScores, runRow] = await Promise.all([
+      const [appearances, filterStats, mlScores, runRow, mlStatusRow] = await Promise.all([
         dbAll<{ symbol: string; filter_key: string; price: number; change_per: number; volume: number }>(
           "SELECT symbol, filter_key, price, change_per, volume FROM live_screener_appearances WHERE run_id = ?",
           [latestRun.id]
@@ -885,10 +906,25 @@ export const monitorRouter = router({
           [latestRun.id]
         ),
         dbGet<{ created_at: string }>("SELECT created_at FROM live_screener_runs WHERE id = ?", [latestRun.id]),
+        dbGet<{ value: string }>("SELECT value FROM app_settings WHERE key = 'live_screener_ml_model_status'"),
       ]);
 
+      // 2026-08-07 fix: live_edge_proven is refreshed on every --train run now (previously
+      // only when a candidate happened to promote -- see live_screener_ml_ranker.py's
+      // _persist_live_edge_status). Live-confirmed the deployed model's real AUC is 0.4615
+      // over 671,257 resolved rows (essentially no edge) while its held-out test_auc reads
+      // 0.641 -- exactly the CV/test-doesn't-survive-deployment gap this platform has hit
+      // repeatedly elsewhere.
+      const mlEdgeProven = parseLiveEdgeProven(mlStatusRow?.value);
+
       const statsByFilter = new Map(filterStats.map(f => [f.filter_key, f]));
-      const mlBySymbol = new Map(mlScores.map(m => [m.symbol, Number(m.win_probability)]));
+      // A model with a live-confirmed lack of edge must not be presented as a working signal --
+      // dropping it here (rather than filtering client-side) makes every consumer of this
+      // procedure fall back to the rule-based edge_score automatically, the same fallback path
+      // already used before any model has trained at all.
+      const mlBySymbol = mlEdgeProven === false
+        ? new Map<string, number>()
+        : new Map(mlScores.map(m => [m.symbol, Number(m.win_probability)]));
 
       type StockAgg = {
         symbol: string; price: number; change_per: number; volume: number;
@@ -938,13 +974,14 @@ export const monitorRouter = router({
         return b.edge_score - a.edge_score;
       });
 
-      return { asOf: runRow?.created_at ?? null, stocks };
+      return { asOf: runRow?.created_at ?? null, stocks, mlEdgeProven };
     }),
 
-  // Status of the currently-ACTIVE live_screener_intraday_clf model (written by
-  // live_screener_ml_ranker.py --train only when a retrain clears its promotion-margin
-  // check against the prior model -- a rejected candidate never touches this key, so it
-  // always reflects whichever model is actually scoring stocks right now).
+  // Status of the currently-ACTIVE live_screener_intraday_clf model. The trained_at/cv_auc/
+  // test_auc/etc. fields only change when a retrain clears its promotion-margin check against
+  // the prior model -- but live_auc/live_edge_proven (2026-08-07) refresh on EVERY --train
+  // run, including a rejected one, since they describe whatever's still deployed and scoring,
+  // not the rejected candidate. See live_screener_ml_ranker.py's _persist_live_edge_status.
   getLiveScreenerMlModelStatus: publicProcedure
     .query(async () => {
       const row = await dbGet<{ value: string }>(

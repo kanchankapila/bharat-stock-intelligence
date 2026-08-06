@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { trpc } from '../lib/trpc';
-import { Activity, Zap, TrendingUp, TrendingDown, Minus, Filter, X, Brain, BarChart2, Award, Play, Target, Clock } from 'lucide-react';
+import { Activity, Zap, TrendingUp, TrendingDown, Minus, Filter, X, Brain, BarChart2, Award, Play, Target, Clock, AlertTriangle } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 // --- Filter Definitions ---
@@ -497,12 +497,37 @@ export const LiveMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
                   <span>Base rate: <strong className="text-slate-200">{(mlModelStatus.base_rate * 100).toFixed(1)}%</strong></span>
                   <span>Trained on: <strong className="text-slate-200">{mlModelStatus.n_samples}</strong> samples</span>
                   <span>{new Date(mlModelStatus.trained_at).toLocaleString('en-IN')}</span>
+                  {mlModelStatus.live_auc != null && (
+                    <span>
+                      Live AUC ({mlModelStatus.live_auc_rows} resolved):{' '}
+                      <strong className={mlModelStatus.live_edge_proven ? 'text-emerald-300' : 'text-rose-300'}>
+                        {mlModelStatus.live_auc.toFixed(3)}
+                      </strong>
+                    </span>
+                  )}
                 </div>
               ) : (
                 <p className="text-[10px] font-mono text-slate-600 mt-3 pt-3 border-t border-slate-800/50">
                   No trained ML model yet — execute <code>live_screener_ml_ranker.py --train</code> once enough
                   same-day outcomes have resolved. Ranking below falls back to the single-best-filter rule until then.
                 </p>
+              )}
+              {/* 2026-08-07: live_edge_proven === false means the deployed model has been
+                  live-graded against real resolved outcomes and shown NO real discrimination
+                  (measured: 0.4615 AUC over 671k rows) despite a respectable held-out test_auc
+                  -- the classic CV/test-doesn't-survive-deployment gap this platform has hit
+                  before. The backend already drops ml_win_probability entirely once this is
+                  true (falls back to the rule-based ranking below); this banner explains why
+                  the "ML XX%" badges disappeared rather than leaving it unexplained. */}
+              {intradaySignals?.mlEdgeProven === false && (
+                <div className="mt-3 pt-3 border-t border-rose-900/40 flex items-start gap-2 text-[10px] font-mono text-rose-300">
+                  <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+                  <span>
+                    Trained model shows <strong>no demonstrated live edge</strong> against actual
+                    resolved outcomes — ML scores are hidden and ranking below uses the
+                    rule-based single-best-filter fallback instead.
+                  </span>
+                </div>
               )}
             </div>
 
