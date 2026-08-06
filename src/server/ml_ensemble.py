@@ -40,7 +40,9 @@ import pandas as pd
 
 from db_compat import connect, read_df, use_postgres, ConnWrapper
 from as_of import as_of_join_sql
-from model_promotion import clears_promotion_bar
+from model_promotion import (clears_promotion_bar, rejections_since,
+                              staleness_override_applies,
+                              DEFAULT_STALENESS_MAX_DAYS, DEFAULT_STALENESS_MAX_REJECTIONS)
 
 MODELS_DIR  = os.path.join(os.getcwd(), 'src', 'server', 'ml_models')
 ENSEMBLE_PATH = os.path.join(MODELS_DIR, 'ensemble.pkl')
@@ -2636,9 +2638,13 @@ def save_ensemble(ensemble: dict):
 # A candidate stuck behind a stale baseline forever (e.g. the baseline's CV AUC was inflated by
 # a leak that's since been fixed, so nothing can ever clear PROMOTION_MARGIN over it again) gets
 # auto-adopted once the baseline has gone unbeaten this long. This is a safety valve, not a
-# relaxation of the bar itself — it only fires after sustained, repeated rejection.
-STALENESS_MAX_DAYS = 7
-STALENESS_MAX_REJECTIONS = 10
+# relaxation of the bar itself — it only fires after sustained, repeated rejection. Thresholds
+# and the age/rejection-count math now live in model_promotion.py (2026-08-06) -- cs_ranker.py
+# and confluence_ml_engine.py had no equivalent safety valve at all, which is exactly how the
+# same "baseline predates a leak fix, nothing can ever beat it again" deadlock recurred for them
+# with no way to self-heal; see that module's staleness_override_applies() docstring.
+STALENESS_MAX_DAYS = DEFAULT_STALENESS_MAX_DAYS
+STALENESS_MAX_REJECTIONS = DEFAULT_STALENESS_MAX_REJECTIONS
 # A candidate's true held-out AUC is allowed to sit below baseline's by at most this much even
 # if its CV AUC clears the promotion bar — protects against promoting a model whose CV score
 # looks fine but that doesn't actually generalize (the cv/test gap seen 2026-07-14 onward).
@@ -2663,32 +2669,6 @@ def _active_baseline(conn: ConnWrapper) -> dict | None:
     except Exception:
         conn.rollback()
         return None
-
-
-def _rejections_since(conn: ConnWrapper, baseline_id: int) -> int:
-    """How many candidates have been registered (and rejected) against the current baseline."""
-    try:
-        row = conn.execute(
-            "SELECT COUNT(*) FROM model_registry WHERE model_name = 'ensemble' "
-            "AND is_active = 0 AND id > ?", (baseline_id,)
-        ).fetchone()
-        return int(row[0]) if row and row[0] is not None else 0
-    except Exception:
-        conn.rollback()
-        return 0
-
-
-def _days_since(trained_at) -> float:
-    try:
-        if isinstance(trained_at, str):
-            trained_at = datetime.datetime.fromisoformat(trained_at)
-        # Postgres returns tz-aware datetimes (UTC); datetime.now() is naive. Match awareness
-        # on both sides so the subtraction doesn't raise (which silently produced 0.0 here).
-        now = datetime.datetime.now(trained_at.tzinfo) if trained_at.tzinfo else datetime.datetime.now()
-        return (now - trained_at).total_seconds() / 86400.0
-    except Exception as e:
-        print(f"[Ensemble] _days_since failed for trained_at={trained_at!r}: {e}")
-        return 0.0
 
 
 def promote_or_register(conn: ConnWrapper, ensemble: dict) -> int:
@@ -2724,9 +2704,9 @@ def promote_or_register(conn: ConnWrapper, ensemble: dict) -> int:
     age_days = 0.0
     rejections = 0
     if baseline is not None and not clears_bar:
-        age_days = _days_since(baseline['trained_at'])
-        rejections = _rejections_since(conn, baseline['id'])
-        staleness_override = age_days >= STALENESS_MAX_DAYS and rejections >= STALENESS_MAX_REJECTIONS
+        rejections = rejections_since(conn, 'ensemble', baseline['id'])
+        staleness_override, age_days = staleness_override_applies(
+            baseline['trained_at'], rejections, STALENESS_MAX_DAYS, STALENESS_MAX_REJECTIONS)
 
     if baseline is not None and not clears_bar and not staleness_override:
         try:
