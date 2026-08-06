@@ -4,7 +4,25 @@ export const DEFAULT_AI_SIGNAL_MIN_CONFIDENCE = 65;
 // Quant-endorsement floor for the AI path: the scoring engine only writes a win_probability
 // for stocks it itself blessed (>=0.40), so requiring one ≥ this floor means an LLM-proposed
 // signal only persists when the quant model independently agrees. Matches scoring_engine's gate.
-export const DEFAULT_AI_SIGNAL_MIN_WIN_PROB = 0.40;
+//
+// FIXED 2026-08-06 (was 0.40): 0.40 sits exactly on a real degenerate-calibration plateau
+// discovered 2026-08-02 -- on most days ~95% of the whole universe shares one identical
+// calibrated_win_probability (observed 0.4064) because the base ensemble's raw predictions are
+// non-monotonic outside BEAR regime, so isotonic calibration collapses a wide raw range into
+// one flat value that sits just above 0.40. At floor=0.40 that value clears the gate for
+// virtually every stock instead of the intended handful/day, and every one of those still gets
+// an LLM call -- so any day the LLM's own (uncorrelated, routinely overconfident)
+// self-reported score clears getAISignalMinConfidence()'s separate 65 floor for a BUY on a
+// meaningful fraction of them produces a burst of persisted signals and, since 2026-08-05,
+// Telegram notifications (see websocketService.ts's AI_SIGNAL_TELEGRAM_DAILY_CAP). 0.42 clears
+// the plateau with margin (verified live 2026-08-02: narrows the pass rate to ~14/2264
+// stocks/day). That verification was previously applied only as a one-off `UPDATE app_settings`
+// on a single running deployment -- never committed anywhere -- so it silently reverted to this
+// stale 0.40 default on any fresh/reset DB (a new environment, a disaster-recovery restore, a
+// second deployment) with no error or warning. Codifying the safe value as the default here, and
+// via migrations/1786300000000_ai-signal-min-win-prob-seed.sql seeding the row itself, closes
+// that gap -- an app_settings override still wins over both if an operator sets one deliberately.
+export const DEFAULT_AI_SIGNAL_MIN_WIN_PROB = 0.42;
 
 let _cachedMinConfidence: number | null = null;
 let _cachedMinConfidenceExp = 0;
