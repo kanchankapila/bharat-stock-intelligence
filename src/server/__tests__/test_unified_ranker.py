@@ -265,17 +265,46 @@ class TestUnifiedRankerRun:
             assert scores['INFY'] > scores['WEAK']
         os.unlink(csv_path)
 
-    def test_rl_gate_excludes_negative_track_record(self):
+    def test_rl_gate_excludes_negative_track_record_with_enough_samples(self):
+        """A REAL track record of losing money -- MIN_RL_GATE_SAMPLES-or-more resolved
+        outcomes, consistently negative -- still excludes a symbol."""
         import os
         ranker, conn, csv_path = self._setup()
         conn.execute("INSERT INTO trendlyne_screener_stocks VALUES ('bull1','LOSER','LOSER')")
         conn.execute("INSERT INTO stock_scores VALUES ('LOSER','long_term',60)")
         conn.execute("INSERT INTO technical_signals (symbol, date, win_probability, signal_score) VALUES ('LOSER', date('now'), 0.72, 68)")
-        conn.execute("INSERT INTO recommendation_log (symbol, signal_date, actual_return_pct, generated_at) VALUES ('LOSER','2026-05-01',-8.0,date('now','-10 days'))")
+        for i in range(ranker.MIN_RL_GATE_SAMPLES):
+            conn.execute(
+                "INSERT INTO recommendation_log (symbol, signal_date, actual_return_pct, generated_at) "
+                "VALUES ('LOSER', ?, -8.0, date('now','-10 days'))",
+                (f'2026-05-{i+1:02d}',))
         conn.commit()
         results = ranker.run()
         symbols = [r['symbol'] for r in results]
         assert 'LOSER' not in symbols
+        os.unlink(csv_path)
+
+    def test_rl_gate_does_not_veto_on_a_thin_sample(self):
+        """2026-08-06 fix: a negative average on FEWER than MIN_RL_GATE_SAMPLES resolved
+        outcomes is noise, not a track record, and must not permanently exclude a symbol.
+        Live-confirmed this was NOT the prior behavior: 825 symbols platform-wide were
+        excluded, 352 of them (43%) on fewer than 5 samples -- e.g. KECL, gated out on exactly
+        2 stale technical_scan misses from 2026-05 despite strong current scores everywhere
+        else (cs_ranker 84.5, confluence 97.8, breakout 74.7)."""
+        import os
+        ranker, conn, csv_path = self._setup()
+        conn.execute("INSERT INTO trendlyne_screener_stocks VALUES ('bull1','THINLOSS','THINLOSS')")
+        conn.execute("INSERT INTO stock_scores VALUES ('THINLOSS','long_term',60)")
+        conn.execute("INSERT INTO technical_signals (symbol, date, win_probability, signal_score) VALUES ('THINLOSS', date('now'), 0.72, 68)")
+        assert ranker.MIN_RL_GATE_SAMPLES > 1, "test assumes 1 sample is below the floor"
+        conn.execute("INSERT INTO recommendation_log (symbol, signal_date, actual_return_pct, generated_at) VALUES ('THINLOSS','2026-05-01',-8.0,date('now','-10 days'))")
+        conn.commit()
+        results = ranker.run()
+        symbols = [r['symbol'] for r in results]
+        assert 'THINLOSS' in symbols, (
+            "a single old loss must not permanently veto a symbol -- MIN_RL_GATE_SAMPLES floor "
+            "not applied"
+        )
         os.unlink(csv_path)
 
     def test_quality_gate_demotes_weak_fundamentals(self):

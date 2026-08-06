@@ -1163,9 +1163,14 @@ class UnifiedRanker:
             self.conn.rollback()
             return 0.0
 
+    # Below this many resolved (symbol, 90d) outcomes, a negative average realized return is
+    # noise, not a track record -- don't let it veto a symbol. Mirrors this codebase's own
+    # established thin-sample convention (screener_performance.py's MIN_SIGNALS_FOR_TIER=5).
+    MIN_RL_GATE_SAMPLES = 5
+
     def _get_rl_gate_map(self):
-        """Pre-load per-symbol avg realized return over the trailing 90d, once for the
-        whole universe (was one query per symbol inside the run() loop)."""
+        """Pre-load per-symbol (avg realized return, sample count) over the trailing 90d, once
+        for the whole universe (was one query per symbol inside the run() loop)."""
         cutoff = (date.today() - timedelta(days=90)).isoformat()
         try:
             rows = self.conn.execute(
@@ -1174,15 +1179,32 @@ class UnifiedRanker:
                 "GROUP BY symbol",
                 (cutoff,),
             ).fetchall()
-            return {r['symbol']: float(r['avg_r'] or 0) for r in rows if r['cnt'] and r['cnt'] > 0}
+            return {r['symbol']: (float(r['avg_r'] or 0), int(r['cnt']))
+                    for r in rows if r['cnt'] and r['cnt'] > 0}
         except Exception as e:
             print(f"[UnifiedRanker] _get_rl_gate_map failed: {e}")
             self.conn.rollback()
             return {}
 
     def _passes_rl_gate(self, symbol, rl_gate_map):
-        if symbol in rl_gate_map:
-            return rl_gate_map[symbol] >= 0
+        """A track record of losing money (negative average realized return over the trailing
+        90d) removes a symbol from the ranked universe entirely -- but only once there's enough
+        history to trust the average. Without MIN_RL_GATE_SAMPLES this silently, permanently
+        excluded symbols on as few as 1-2 stale outcomes with no log line anywhere: confirmed
+        live (2026-08-06) 825 symbols platform-wide were excluded, 352 of them (43%) on fewer
+        than 5 samples -- e.g. KECL, gated out on exactly 2 technical_scan misses from 2026-05
+        (-5.25% avg) despite currently-strong scores across every other engine (cs_ranker 84.5,
+        confluence 97.8, breakout 74.7)."""
+        entry = rl_gate_map.get(symbol)
+        if entry is None:
+            return True
+        avg_r, cnt = entry
+        if cnt < self.MIN_RL_GATE_SAMPLES:
+            return True
+        if avg_r < 0:
+            print(f"[UnifiedRanker] RL gate excluded {symbol}: "
+                  f"avg_return={avg_r:.2f}% over {cnt} resolved outcomes (90d)")
+            return False
         return True
 
     def _get_confluence_latest_map(self):
