@@ -174,6 +174,80 @@ class TestLoadSymbolSequencesLabelRange:
         assert list(y5) == [1 if r > 0 else 0 for r in yr5]
 
 
+class TestFeatureClipping:
+    """2026-08-06: nan_to_num only maps true NaN/+-inf to 0 -- an extreme-but-finite outlier
+    (confirmed live: dist_sma200_pct in [-3644, +2771], ret_1d/ret_5d reaching +-1.5M/+-3.2M)
+    passes through untouched and can still blow up the first matmul. Both load_symbol_sequences
+    (training) and load_inference_sequence (inference) must clip to +-FEATURE_CLIP_BOUND so
+    training and serving see an identically-bounded feature distribution."""
+
+    def _fake_df(self, n, overrides=None):
+        import pandas as pd
+        import src.server.dl_engine as mod
+
+        feat_cols = mod.FEATURE_COLS[:mod.N_FEATURES]
+        numeric_cols = [c for c in feat_cols if c not in mod._VOL_ONEHOT]
+        data = {c: np.random.randn(n) * 0.5 for c in numeric_cols}
+        data["date"] = pd.date_range("2024-01-01", periods=n).strftime("%Y-%m-%d")
+        data["vol_regime"] = ["MED"] * n
+        data["target_ret_5d"] = np.random.choice([-1.0, 1.0], n)
+        data["target_ret_15d"] = np.random.choice([-1.0, 1.0], n)
+        if overrides:
+            for col, vals in overrides.items():
+                data[col] = vals
+        return pd.DataFrame(data)
+
+    def test_load_symbol_sequences_clips_extreme_finite_outlier(self):
+        import src.server.dl_engine as mod
+
+        n = mod.SEQUENCE_LEN + 5
+        # a single corrupted row mirroring the live-confirmed dist_sma200_pct outlier scale
+        overrides = {"dist_sma200_pct": [0.0] * (n - 1) + [3_644_000.0]}
+        fake_df = self._fake_df(n, overrides)
+
+        with patch.object(mod, "read_df", return_value=fake_df):
+            X, y5, y15, yr5, dates = mod.load_symbol_sequences("FAKESYM")
+
+        assert np.isfinite(X).all(), "clipped output must remain finite"
+        assert np.abs(X).max() <= mod.FEATURE_CLIP_BOUND, (
+            f"a feature value of {np.abs(X).max()} exceeded FEATURE_CLIP_BOUND="
+            f"{mod.FEATURE_CLIP_BOUND} -- the extreme outlier was not clipped"
+        )
+
+    def test_load_symbol_sequences_leaves_ordinary_values_untouched(self):
+        """Negative control: clipping must not distort values already well within bound."""
+        import src.server.dl_engine as mod
+
+        n = mod.SEQUENCE_LEN + 5
+        overrides = {"rsi_14": [42.5] * n}
+        fake_df = self._fake_df(n, overrides)
+
+        with patch.object(mod, "read_df", return_value=fake_df):
+            X, *_ = mod.load_symbol_sequences("FAKESYM")
+
+        feat_cols = mod.FEATURE_COLS[:mod.N_FEATURES]
+        rsi_idx = feat_cols.index("rsi_14")
+        assert np.allclose(X[:, :, rsi_idx], 42.5), (
+            "an ordinary in-range value must pass through clipping unchanged"
+        )
+
+    def test_load_inference_sequence_uses_the_same_bound_as_training(self):
+        """Train/serve skew guard: inference must clip identically to training, or the model
+        sees a differently-shaped feature distribution live than it was trained on."""
+        import src.server.dl_engine as mod
+
+        n = mod.SEQUENCE_LEN
+        overrides = {"op_margins": [0.0] * (n - 1) + [-19_479_000.0]}
+        fake_df = self._fake_df(n, overrides)
+
+        with patch.object(mod, "read_df", return_value=fake_df):
+            X, latest_date = mod.load_inference_sequence("FAKESYM")
+
+        assert X is not None
+        assert np.isfinite(X).all()
+        assert np.abs(X).max() <= mod.FEATURE_CLIP_BOUND
+
+
 class TestWalkForwardValidation:
     def test_train_lstm_calls_walk_forward_validate(self):
         """train_lstm must call walk_forward_validate (not return a hardcoded NaN stub)."""

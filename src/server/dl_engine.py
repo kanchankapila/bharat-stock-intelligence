@@ -44,6 +44,24 @@ CONFIG_PATH = MODEL_DIR / "dl_model_config.json"
 
 SEQUENCE_LEN = 60
 N_FEATURES   = 78
+
+# Defensive winsorization bound for raw engineered features fed to the LSTM (2026-08-06).
+# nan_to_num below only catches true NaN/+-inf; it does nothing for an extreme-but-finite
+# outlier -- and those are real and pervasive in feature_store, not hypothetical: live query
+# confirmed dist_sma200_pct in [-3644, +2771] (avg |value| ~2.15), ret_1d/ret_5d (fractional
+# return columns, legitimate range roughly +-1) reaching +-1.5M/+-3.2M, op_margins to -19479,
+# and 88k+ debt_to_equity rows with |value|>50 -- almost certainly the documented bad-OHLCV-bar
+# class (ohlcv_quality.py) and/or unit-scale mismatches in upstream ratio computations, not
+# clipped anywhere before reaching this model. A single such row in a 60-step sequence is
+# enough to blow up the first matmul (worse under this model's AMP/fp16 forward pass, whose
+# max representable magnitude is ~65504) and is a highly plausible contributor to the
+# recurring NaN-weight divergence documented in dl_model_config.json's stale v3 pin (see
+# CLAUDE.md's dl_trainer.py session notes) -- gradient clipping alone (added 2026-08-02) bounds
+# the backward pass, not this. 1e4 is deliberately wide: it is far above every plausible real
+# value for every FEATURE_COLS entry (bounded indicators like RSI/MACD/ratios are two to three
+# orders of magnitude smaller) while unambiguously catching the confirmed corruption-scale
+# outliers above -- this is a numerical-stability guard, not a per-column scale/unit fix.
+FEATURE_CLIP_BOUND = 1e4
 FEATURE_COLS = [
     "ret_1d","ret_5d","ret_15d","ret_21d","ret_63d","ret_126d","ret_252d",
     "sma20","sma50","sma200","ema8","ema21","dist_sma20_pct","dist_sma200_pct","above_sma200",
@@ -174,8 +192,11 @@ def load_symbol_sequences(
     # single-day "returns" from bad OHLCV rows -- see ohlcv_quality.py) can be +/-inf. Feeding
     # that straight into the LSTM blows up the first matmul instantly and diverges the whole
     # model; np.nan_to_num maps it to 0 (treated the same as the missing-data fillna(0) above)
-    # rather than letting a single row poison every future gradient step.
+    # rather than letting a single row poison every future gradient step. np.clip afterward
+    # catches the same failure mode's finite sibling -- an extreme-but-not-inf outlier
+    # (confirmed live, see FEATURE_CLIP_BOUND's own comment) that nan_to_num does not touch.
     X_all = np.nan_to_num(df[feat_cols].values.astype(np.float32), nan=0.0, posinf=0.0, neginf=0.0)
+    X_all = np.clip(X_all, -FEATURE_CLIP_BOUND, FEATURE_CLIP_BOUND)
     y5    = (df["target_ret_5d"]  > 0).astype(np.int64).values
     y15   = (df["target_ret_15d"] > 0).astype(np.int64).values
     yr5   = np.nan_to_num(df["target_ret_5d"].values.astype(np.float32), nan=0.0, posinf=0.0, neginf=0.0)
@@ -220,10 +241,13 @@ def load_inference_sequence(
         return None, None
     df = df.sort_values("date")
     df = _onehot_vol_regime(df).fillna(0)
-    # Same non-finite guard as load_symbol_sequences (training) -- a live inf feature here
-    # would otherwise produce an inf/NaN prediction, which the caller's finite-check then
-    # correctly drops, but there's no reason to let it reach the model at all.
+    # Same non-finite + extreme-outlier guard as load_symbol_sequences (training) -- must match
+    # exactly, or inference sees a different feature distribution than training did (train/serve
+    # skew). A live inf/extreme feature here would otherwise produce an inf/NaN prediction,
+    # which the caller's finite-check then correctly drops, but there's no reason to let it
+    # reach the model at all.
     X = np.nan_to_num(df[feat_cols].values.astype(np.float32), nan=0.0, posinf=0.0, neginf=0.0)
+    X = np.clip(X, -FEATURE_CLIP_BOUND, FEATURE_CLIP_BOUND)
     return X[np.newaxis], df["date"].iloc[-1]
 
 
