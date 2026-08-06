@@ -8,6 +8,7 @@ const { dbRun } = await import('../dbAsync');
 const {
   fetchBroadcastablePicks,
   broadcastCanonicalPicks,
+  getLatestUnifiedRecommendationsDay,
   resetBroadcastDedupForTests,
 } = await import('../unifiedSignalBroadcast');
 
@@ -130,5 +131,34 @@ describe('broadcastCanonicalPicks', () => {
     // that calls this must not fail just because a WS push failed after its own DB write
     // already succeeded.
     await expect(broadcastCanonicalPicks(fakeWs, TODAY)).resolves.toBe(0);
+  });
+
+  it('with no day argument, dedups off the real computed_at day, not the wall clock (2026-08-06 fix)', async () => {
+    // The bug this regression-locks: the old default (`new Date().toISOString().slice(0,10)`)
+    // used the server's UTC calendar date while computed_at is an IST-trading-day-scoped
+    // string -- a call straddling a UTC midnight boundary could reset the dedup guard
+    // mid-IST-day (re-broadcasting) or fail to reset for a genuinely new IST day. Seeding a
+    // row whose computed_at is NOT today's UTC date, then calling broadcastCanonicalPicks with
+    // no override, proves the dedup key comes from the data, not Date.now().
+    const notUtcToday = '2099-01-01'; // clearly not the real UTC date in any real test run
+    await seed({
+      symbol: 'ZZWSBROADCAST1', classification: 'Buy', conviction_level: 'A_HIGH',
+      unified_score: 70, computed_at: notUtcToday,
+    });
+    const calls: any[] = [];
+    const fakeWs = { broadcastNewSignal: (alert: any) => calls.push(alert) };
+
+    const firstSent = await broadcastCanonicalPicks(fakeWs);   // no `day` -- derives from data
+    const secondSent = await broadcastCanonicalPicks(fakeWs);  // simulates a retried job, same run
+
+    expect(firstSent).toBe(1);
+    expect(secondSent).toBe(0); // deduped against the SAME computed_at day, not a wall-clock one
+    expect(calls.filter((c) => c.symbol === 'ZZWSBROADCAST1').length).toBe(1);
+  });
+
+  it('getLatestUnifiedRecommendationsDay returns the actual latest computed_at day', async () => {
+    await seed({ symbol: 'ZZWSBROADCAST1', classification: 'Buy', conviction_level: 'A_HIGH', unified_score: 70, computed_at: '2099-06-15' });
+    const day = await getLatestUnifiedRecommendationsDay();
+    expect(day).toBe('2099-06-15');
   });
 });

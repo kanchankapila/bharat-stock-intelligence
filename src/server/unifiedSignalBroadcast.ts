@@ -61,8 +61,21 @@ export async function fetchBroadcastablePicks(limit = 30): Promise<CanonicalPick
   );
 }
 
-// Per-day dedup so a BullMQ retry/catchup re-running unified-ranker doesn't re-broadcast the
-// same day's picks a second (or third) time. Module-level state is fine -- exactly one process
+/**
+ * The actual `unified_recommendations.computed_at` calendar day whose picks are currently the
+ * latest -- the SAME subquery fetchBroadcastablePicks() already uses, exposed separately so the
+ * dedup guard below can key off it directly (2026-08-06 fix, see broadcastCanonicalPicks' own
+ * comment for why wall-clock UTC was wrong here).
+ */
+export async function getLatestUnifiedRecommendationsDay(): Promise<string | null> {
+  const row = await dbAll<{ d: string | null }>(
+    `SELECT max(substring(computed_at, 1, 10)) AS d FROM unified_recommendations`,
+  );
+  return row[0]?.d ?? null;
+}
+
+// Dedup so a BullMQ retry/catchup re-running unified-ranker doesn't re-broadcast the same
+// snapshot's picks a second (or third) time. Module-level state is fine -- exactly one process
 // owns the WebSocket server.
 let lastBroadcastDay: string | null = null;
 let broadcastedSymbols = new Set<string>();
@@ -74,27 +87,36 @@ export function resetBroadcastDedupForTests(): void {
 }
 
 /**
- * Broadcasts today's S_ELITE/A_HIGH Buy/Strong Buy rows over WebSocket. Call after
- * unified_ranker.py completes. Never throws -- a broadcast failure must not fail the ranker
- * job itself, since the canonical DB write already succeeded by the time this runs.
+ * Broadcasts the latest snapshot's S_ELITE/A_HIGH Buy/Strong Buy rows over WebSocket. Call
+ * after unified_ranker.py completes. Never throws -- a broadcast failure must not fail the
+ * ranker job itself, since the canonical DB write already succeeded by the time this runs.
  *
- * Returns the number of symbols actually broadcast (excludes ones already sent today).
+ * `day` should normally be omitted -- it then defaults to `unified_recommendations`' own latest
+ * `computed_at` day (2026-08-06 fix: the previous default, `new Date().toISOString()`, used the
+ * server's UTC wall-clock date while `computed_at` is an IST-trading-day-scoped string; a call
+ * straddling a UTC midnight boundary could reset the dedup guard mid-IST-day and re-broadcast,
+ * or fail to reset for a genuinely new IST trading day. Keying off the data itself removes the
+ * ambiguity entirely -- pass an explicit `day` only from a test that wants to simulate a
+ * specific calendar day.
+ *
+ * Returns the number of symbols actually broadcast (excludes ones already sent for this day).
  */
 export async function broadcastCanonicalPicks(
   ws: BroadcastTarget,
-  today: string = new Date().toISOString().slice(0, 10),
+  day?: string,
 ): Promise<number> {
-  if (today !== lastBroadcastDay) {
-    lastBroadcastDay = today;
-    broadcastedSymbols = new Set();
-  }
-
   let rows: CanonicalPickRow[];
   try {
     rows = await fetchBroadcastablePicks();
   } catch (e) {
     console.warn('[UnifiedSignalBroadcast] fetch failed:', (e as Error).message);
     return 0;
+  }
+
+  const today = day ?? (await getLatestUnifiedRecommendationsDay().catch(() => null));
+  if (today && today !== lastBroadcastDay) {
+    lastBroadcastDay = today;
+    broadcastedSymbols = new Set();
   }
 
   const now = new Date().toISOString();
