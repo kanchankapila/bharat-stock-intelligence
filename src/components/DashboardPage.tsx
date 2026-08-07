@@ -25,6 +25,7 @@ import { LiveMarketScreener } from './LiveMarketScreener';
 import { EODMarketScreener } from './EODMarketScreener';
 import { ActivityFeed } from './ActivityFeed';
 import { MarketBreadthIntraday } from './MarketBreadthIntraday';
+import { MarketMoodGauge } from './MarketMoodGauge';
 
 // ─── Fonts injected once ──────────────────────────────────────────────────────
 const FONT_FAMILY_DISPLAY = "'Rajdhani', sans-serif";
@@ -898,6 +899,12 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
             </div>
           </div>
         </div>
+      </div>
+
+      {/* ── Row 2.5: Market Mood Index — single-glance sentiment gauge (2026-08-06 urls.txt
+          data analysis; data already fed macro features, previously had no frontend surface). */}
+      <div className="glass border border-slate-800/50 shadow-[0_4px_20px_rgba(0,0,0,0.02)]" style={{ borderRadius: 10, padding: '10px 16px', marginBottom: 12 }}>
+        <MarketMoodGauge />
       </div>
 
       {/* ── Row 3: Index Overview + Global Markets ────────────────────────── */}

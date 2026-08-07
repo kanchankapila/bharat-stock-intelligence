@@ -670,6 +670,16 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
     // per-stock id). Promoted 2026-07-30 from a stale-expiry URL found in updated_urls.json.
     runPython('trendlyne_fno_activity_fetcher.py', [], 3 * 60_000)
       .catch(e => console.warn('[QUEUE] trendlyne_fno_activity_fetcher failed:', (e as Error).message)),
+    // Sector Relative Rotation Graph + sector x sector correlation matrix (2026-08-06 urls.txt
+    // analysis) → sector_rrg_history/sector_correlation_{pairs,stats,summary}.
+    runPython('investsights_sector_intel_fetcher.py', [], 2 * 60_000)
+      .catch(e => console.warn('[QUEUE] investsights_sector_intel_fetcher failed:', (e as Error).message)),
+    // Ranked institutional buy/sell deal activity (2026-08-06 urls.txt analysis) → institutional_deal_signals.
+    runPython('institutional_deals_fetcher.py', [], 2 * 60_000)
+      .catch(e => console.warn('[QUEUE] institutional_deals_fetcher failed:', (e as Error).message)),
+    // AI-generated earnings-call tone/takeaway (2026-08-06 urls.txt analysis) → concall_takeaways.
+    runPython('investsights_concall_fetcher.py', [], 2 * 60_000)
+      .catch(e => console.warn('[QUEUE] investsights_concall_fetcher failed:', (e as Error).message)),
   ]);
 
   // Earnings beat features (reads stock_earnings_beats, refreshed weekly by earnings_surprise_fetcher).

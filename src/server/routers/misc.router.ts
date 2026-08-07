@@ -200,6 +200,98 @@ export const miscRouter = router({
   getDeals: publicProcedure
     .query(async () => fetchDealsAll()),
 
+  // ── 2026-08-06 urls.txt data analysis: structured tables replacing raw-archived endpoints ──
+  // (docs/url_explorer/DATA_CATEGORIZATION_AND_USAGE.md). These read persisted history from
+  // sector_intel/institutional_deals/concall fetchers, complementing (not replacing) getDeals
+  // above — getDeals is a live on-demand snapshot across all 3 dealsTypes with no history;
+  // getInstitutionalDealHistory below is a persisted, queryable, freshness-monitored
+  // topInvestor-only trend.
+
+  getSectorRotationIntel: publicProcedure
+    .query(async () => fetchWithCache('sector_rotation_intel', async () => {
+      const [rrg, pairs, stats, summary] = await Promise.all([
+        dbAll<any>(`
+          SELECT sector, week_date, rs_ratio, rs_momentum, sector_return, stocks_count, quadrant
+          FROM sector_rrg_history
+          WHERE week_date = (SELECT MAX(week_date) FROM sector_rrg_history)
+          ORDER BY rs_ratio DESC
+        `),
+        dbAll<any>(`
+          SELECT sector_a, sector_b, correlation, pair_type
+          FROM sector_correlation_pairs
+          WHERE data_date = (SELECT MAX(data_date) FROM sector_correlation_pairs)
+            AND pair_type IS NOT NULL
+          ORDER BY pair_type, correlation DESC
+        `),
+        dbAll<any>(`
+          SELECT sector, avg_daily_return, volatility, total_return, data_points
+          FROM sector_correlation_stats
+          WHERE data_date = (SELECT MAX(data_date) FROM sector_correlation_stats)
+          ORDER BY total_return DESC
+        `),
+        dbGet<any>(`
+          SELECT data_date, avg_pairwise_correlation, pct_pairs_above_0_7, total_pairs, takeaway
+          FROM sector_correlation_summary
+          ORDER BY data_date DESC LIMIT 1
+        `),
+      ]);
+      return { rrg, correlationPairs: pairs, sectorStats: stats, summary: summary ?? null };
+    }, 900)),
+
+  getInstitutionalDealHistory: publicProcedure
+    .input(z.object({ symbol: z.string().optional(), days: z.number().min(1).max(90).optional().default(14) }))
+    .query(async ({ input }) => {
+      const key = `inst_deals_${input.symbol ?? 'all'}_${input.days}`;
+      return fetchWithCache(key, async () => {
+        const params: any[] = [];
+        let where = `deal_date >= date('now', '-${input.days} days')`;
+        if (input.symbol) { where += ` AND symbol = ?`; params.push(input.symbol.toUpperCase()); }
+        return dbAll<any>(`
+          SELECT symbol, exchange, sector, action, deal_type, deal_date, counterparty,
+                 quantity, deal_price, deal_value_cr_1w, deals_count_1w
+          FROM institutional_deal_signals
+          WHERE ${where}
+          ORDER BY deal_date DESC, deal_value_cr_1w DESC
+          LIMIT 200
+        `, params);
+      }, 900);
+    }),
+
+  getConcallTakeaways: publicProcedure
+    .input(z.object({ symbol: z.string().optional(), limit: z.number().min(1).max(50).optional().default(20) }))
+    .query(async ({ input }) => {
+      const key = `concall_takeaways_${input.symbol ?? 'all'}_${input.limit}`;
+      return fetchWithCache(key, async () => {
+        const params: any[] = [];
+        let where = '1=1';
+        if (input.symbol) { where += ` AND symbol = ?`; params.push(input.symbol.toUpperCase()); }
+        params.push(input.limit);
+        return dbAll<any>(`
+          SELECT symbol, company_name, quarter, fiscal_year, key_takeaway, tone_assessment,
+                 transcript_source, announcement_date, generated_at
+          FROM concall_takeaways
+          WHERE ${where}
+          ORDER BY announcement_date DESC
+          LIMIT ?
+        `, params);
+      }, 900);
+    }),
+
+  getMarketMoodIndex: publicProcedure
+    .query(async () => fetchWithCache('market_mood_index', async () => {
+      const rows = await dbAll<any>(`
+        SELECT date, close AS indicator
+        FROM macro_asset_prices
+        WHERE symbol = 'INDIA_MMI'
+        ORDER BY date DESC LIMIT 30
+      `);
+      if (!rows.length) return null;
+      const latest = rows[0];
+      const value = Number(latest.indicator);
+      const zone = value > 70 ? 'Extreme Greed' : value > 50 ? 'Greed' : value > 30 ? 'Fear' : 'Extreme Fear';
+      return { date: latest.date, indicator: value, zone, trail: rows.slice(1, 8) };
+    }, 900)),
+
   // Raw NSE PIT (insider) filings: promoter/designated-person transactions with before/after
   // %holding — richer than getDeals, previously only consumed as a binary flag by the scoring
   // engine (technical_signals.insider_buy_flag/sell_flag).

@@ -188,6 +188,9 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
     category: 'flows', critical: false, table: 'mf_stock_holdings', dateColumn: 'as_of_date', warnDays: 45 },
   { id: 'mf-sector-allocation-recency', label: 'mf_sector_allocation (MF sector flow)',
     category: 'flows', critical: false, table: 'mf_sector_allocation', dateColumn: 'month', warnDays: 45 },
+  // 2026-08-06 urls.txt data analysis (docs/url_explorer) -- see institutional_deals_fetcher.py.
+  { id: 'institutional-deal-signals-recency', label: 'institutional_deal_signals (MC ranked topInvestor buy/sell)',
+    category: 'flows', critical: false, table: 'institutional_deal_signals', dateColumn: 'deal_date', warnDays: 5, failDays: 10 },
 
   // fundamentals
   { id: 'tl-financial-quality-freshness', label: 'tl_financial_quality (weekly ET ratios)',
@@ -202,6 +205,11 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
     category: 'fundamentals', critical: false, table: 'stock_earnings_beats', dateColumn: 'fetched_at', warnDays: 10 },
   { id: 'eps-surprise-history-recency', label: 'eps_surprise_history',
     category: 'fundamentals', critical: false, table: 'eps_surprise_history', dateColumn: 'fetched_at', warnDays: 10 },
+  // 2026-08-06 urls.txt data analysis (docs/url_explorer) -- see investsights_concall_fetcher.py.
+  // Sparse by nature: the source's own "recent" window only has content when companies are
+  // actively holding earnings calls, so a quiet week outside results season is not a failure.
+  { id: 'concall-takeaways-recency', label: 'concall_takeaways (AI concall tone/takeaway)',
+    category: 'fundamentals', critical: false, table: 'concall_takeaways', dateColumn: 'announcement_date', warnDays: 14 },
 
   // macro
   { id: 'macro-asset-prices-freshness', label: 'macro_asset_prices (VIX/FII-DII/global indices/PCR-GEX/MMI)',
@@ -214,6 +222,11 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
     category: 'macro', critical: false, table: 'mc_global_snapshot', dateColumn: 'date', warnDays: 3, failDays: 5 },
   { id: 'sector-global-corr-freshness', label: 'sector_global_corr',
     category: 'macro', critical: false, table: 'sector_global_corr', dateColumn: 'date', warnDays: 3, failDays: 5 },
+  // 2026-08-06 urls.txt data analysis (docs/url_explorer) -- see investsights_sector_intel_fetcher.py.
+  { id: 'sector-rrg-history-freshness', label: 'sector_rrg_history (InvestSights Relative Rotation Graph)',
+    category: 'macro', critical: false, table: 'sector_rrg_history', dateColumn: 'week_date', warnDays: 3, failDays: 5 },
+  { id: 'sector-correlation-summary-freshness', label: 'sector_correlation_summary (InvestSights sector x sector matrix)',
+    category: 'macro', critical: false, table: 'sector_correlation_summary', dateColumn: 'data_date', warnDays: 3, failDays: 5 },
   { id: 'historical-fno-sentiment-freshness', label: 'historical_fno_sentiment (index-level PCR/GEX)',
     category: 'macro', critical: false, table: 'historical_fno_sentiment', dateColumn: 'date', warnDays: 3, failDays: 5 },
   { id: 'sector-fo-sentiment-freshness', label: 'sector_fo_sentiment',
