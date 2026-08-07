@@ -685,6 +685,12 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
     // futures don't exist for the rest of nse_stocks. Live-measured ~7s for the full universe.
     runPython('ndtv_fno_basis_fetcher.py', [], 2 * 60_000)
       .catch(e => console.warn('[QUEUE] ndtv_fno_basis_fetcher failed:', (e as Error).message)),
+    // Market-wide corporate-actions calendar sourced from real NSE filings (2026-08-07
+    // urls.txt open-source sourcing pass) → nse_filed_corporate_actions. Daily and cheap (one
+    // API call, ~40 rows): the completeness cross-check for mc_corporate_actions_fetcher.py's
+    // weekly per-stock crawl, so it should stay fresher than the thing it's checking.
+    runPython('investsights_corporate_actions_fetcher.py', [], 2 * 60_000)
+      .catch(e => console.warn('[QUEUE] investsights_corporate_actions_fetcher failed:', (e as Error).message)),
   ]);
 
   // Earnings beat features (reads stock_earnings_beats, refreshed weekly by earnings_surprise_fetcher).
