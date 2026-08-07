@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { trpc } from '../lib/trpc';
-import { TrendingUp, TrendingDown, Users, Search, HelpCircle, ShieldAlert } from 'lucide-react';
+import { TrendingUp, TrendingDown, Users, Search, HelpCircle, ShieldAlert, Handshake } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend } from 'recharts';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
@@ -10,7 +10,7 @@ interface Props {
 }
 
 export const SmartMoneyMonitor: React.FC<Props> = ({ onSelectStock }) => {
-  const [filterType, setFilterType] = useState<'accumulation' | 'distribution'>('accumulation');
+  const [filterType, setFilterType] = useState<'accumulation' | 'distribution' | 'deals'>('accumulation');
   const [searchQuery, setSearchQuery] = useState('');
 
   // Fixed 2026-07-30 (Finding #94, full-stack audit): this used to be a hardcoded array of
@@ -19,8 +19,16 @@ export const SmartMoneyMonitor: React.FC<Props> = ({ onSelectStock }) => {
   // technical_signals (see getSmartMoneyFlow in fundamentals.router.ts for the query and
   // the note on mf_chg_qoq standing in for DII).
   const { data: flowData, isLoading, isError } = trpc.getSmartMoneyFlow.useQuery(
-    { direction: filterType, limit: 30 },
-    { staleTime: 60 * 60 * 1000, refetchOnWindowFocus: false }
+    { direction: filterType === 'deals' ? 'accumulation' : filterType, limit: 30 },
+    { staleTime: 60 * 60 * 1000, refetchOnWindowFocus: false, enabled: filterType !== 'deals' }
+  );
+
+  // Ranked institutional buy/sell deal activity (2026-08-07 urls.txt follow-up) -- a different
+  // signal from the quarterly ownership-change flow above: individual, dated, counterparty-named
+  // transactions (institutional_deals_fetcher.py), not an aggregate %-of-float change.
+  const { data: dealsData, isLoading: dealsLoading, isError: dealsError } = trpc.getInstitutionalDealHistory.useQuery(
+    { days: 14 },
+    { staleTime: 60 * 60 * 1000, refetchOnWindowFocus: false, enabled: filterType === 'deals' }
   );
 
   const filtered = (flowData ?? [])
@@ -28,6 +36,9 @@ export const SmartMoneyMonitor: React.FC<Props> = ({ onSelectStock }) => {
       d.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       d.symbol.toLowerCase().includes(searchQuery.toLowerCase())
     );
+
+  const filteredDeals = (dealsData ?? [])
+    .filter(d => d.symbol.toLowerCase().includes(searchQuery.toLowerCase()));
 
   return (
     <div className="flex flex-col h-[580px] glass border border-slate-800/50 rounded-2xl p-5 text-slate-200">
@@ -39,7 +50,9 @@ export const SmartMoneyMonitor: React.FC<Props> = ({ onSelectStock }) => {
             Smart Money MF/FII Flow Monitor
           </h2>
           <p className="text-[10px] font-mono text-slate-500 uppercase tracking-widest mt-0.5">
-            Quarterly change in institutional promoter, FII, and DII ownership
+            {filterType === 'deals'
+              ? 'Ranked institutional buy/sell deal activity (last 14 days)'
+              : 'Quarterly change in institutional promoter, FII, and DII ownership'}
           </p>
         </div>
 
@@ -65,6 +78,16 @@ export const SmartMoneyMonitor: React.FC<Props> = ({ onSelectStock }) => {
             <TrendingDown className="w-3.5 h-3.5" />
             Distribution
           </button>
+          <button
+            onClick={() => setFilterType('deals')}
+            className={cn(
+              "px-3 py-1.5 rounded-md font-mono text-[10px] font-bold transition-all flex items-center gap-1",
+              filterType === 'deals' ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/10" : "text-slate-400 hover:text-slate-200"
+            )}
+          >
+            <Handshake className="w-3.5 h-3.5" />
+            Recent Deals
+          </button>
         </div>
       </div>
 
@@ -82,7 +105,65 @@ export const SmartMoneyMonitor: React.FC<Props> = ({ onSelectStock }) => {
 
       {/* Scrollable Flow Cards */}
       <div className="flex-grow overflow-y-auto pr-1 terminal-scrollbar min-h-0">
-        {isLoading ? (
+        {filterType === 'deals' ? (
+          dealsLoading ? (
+            <div className="flex items-center justify-center h-full text-slate-500 text-xs font-bold">
+              Loading recent deal activity...
+            </div>
+          ) : dealsError ? (
+            <div className="flex items-center justify-center h-full text-rose-400 text-xs font-bold">
+              Failed to load deal activity.
+            </div>
+          ) : filteredDeals.length === 0 ? (
+            <div className="flex items-center justify-center h-full text-slate-500 text-xs font-bold">
+              No institutional deals captured in the last 14 days.
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <AnimatePresence mode="popLayout">
+                {filteredDeals.map((deal, i) => (
+                  <motion.div
+                    key={`${deal.symbol}-${deal.deal_date}-${i}`}
+                    layout
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    transition={{ duration: 0.2 }}
+                    className="p-4 bg-slate-950/45 border border-slate-900 rounded-xl hover:border-slate-800/80 transition-all flex flex-col md:flex-row md:items-center justify-between gap-3 cursor-pointer"
+                    onClick={() => onSelectStock?.(deal.symbol)}
+                  >
+                    <div className="md:w-1/3 space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-black text-white uppercase tracking-wider">{deal.symbol}</span>
+                        <span className={cn("text-[9px] font-black px-1.5 py-0.5 rounded border uppercase",
+                          deal.action === 'buy' ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" : "bg-rose-500/10 text-rose-400 border-rose-500/20"
+                        )}>
+                          {deal.action === 'buy' ? 'Buy' : 'Sell'} · {deal.deal_type ?? 'block'}
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-slate-500 font-bold leading-tight truncate">{deal.counterparty ?? 'Unknown counterparty'}</p>
+                      <p className="text-[9px] text-slate-600 font-mono">{deal.deal_date}{deal.sector ? ` · ${deal.sector}` : ''}</p>
+                    </div>
+                    <div className="flex items-center gap-4 md:gap-6">
+                      {deal.deal_value_cr_1w != null && (
+                        <div className="text-right">
+                          <p className="text-[9px] text-slate-500 font-mono uppercase">1W Value</p>
+                          <p className="text-sm font-black text-white font-mono">₹{deal.deal_value_cr_1w.toFixed(1)}cr</p>
+                        </div>
+                      )}
+                      {deal.deals_count_1w != null && (
+                        <div className="text-right">
+                          <p className="text-[9px] text-slate-500 font-mono uppercase">Deals (1W)</p>
+                          <p className="text-sm font-black text-white font-mono">{deal.deals_count_1w}</p>
+                        </div>
+                      )}
+                    </div>
+                  </motion.div>
+                ))}
+              </AnimatePresence>
+            </div>
+          )
+        ) : isLoading ? (
           <div className="flex items-center justify-center h-full text-slate-500 text-xs font-bold">
             Loading institutional flow data...
           </div>
