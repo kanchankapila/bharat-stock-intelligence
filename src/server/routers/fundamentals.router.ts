@@ -168,6 +168,63 @@ export const fundamentalsRouter = router({
       }
     }),
 
+  // Deep per-stock corporate-action history (dividends/bonus/splits/rights), 2026-08-07
+  // urls.txt open-source sourcing pass. Distinct from getCorporateActions above (that one
+  // proxies ET Markets live with no persistence) — this reads the DB-backed ledger
+  // mc_corporate_actions_fetcher.py builds, the same one ohlcv_adjust.py's
+  // cross_validate_with_mc_actions() cross-checks against.
+  getCorporateActionHistory: publicProcedure
+    .input(z.object({ symbol: z.string() }))
+    .query(async ({ input }) => fetchWithCache(`fund:corp-action-history:${input.symbol}`, async () => {
+      try {
+        const rows = await dbAll<any>(
+          `SELECT action_type, announce_date, record_date, ratio_text, ratio_factor, amount, source
+           FROM stock_corporate_action_history
+           WHERE symbol = ?
+           ORDER BY COALESCE(record_date, announce_date) DESC`,
+          [input.symbol.toUpperCase()]
+        );
+        return rows || [];
+      } catch (e: any) {
+        console.error("[Fundamentals Router] Error fetching corporate action history:", e);
+        return [];
+      }
+    }, 3600)),
+
+  // Market-wide corporate actions sourced from real NSE regulatory filings (InvestSights),
+  // 2026-08-07 urls.txt open-source sourcing pass — the completeness cross-check for
+  // getCorporateActionHistory's per-stock MoneyControl ledger, not a replacement for it.
+  getFiledCorporateActionsCalendar: publicProcedure
+    .input(z.object({
+      daysBack: z.number().min(0).max(180).optional().default(14),
+      daysForward: z.number().min(0).max(365).optional().default(60),
+      symbol: z.string().optional(),
+    }))
+    .query(async ({ input }) => fetchWithCache(
+      `fund:filed-corp-actions:${input.daysBack}:${input.daysForward}:${input.symbol ?? ''}`,
+      async () => {
+        try {
+          const rows = await dbAll<any>(
+            `SELECT symbol, company_name, category, headline, dividend_per_share,
+                    record_date, ex_date, filing_date, source_url, upcoming
+             FROM nse_filed_corporate_actions
+             WHERE filing_date >= (CURRENT_DATE - (? || ' days')::interval)::text
+               AND filing_date <= (CURRENT_DATE + (? || ' days')::interval)::text
+               ${input.symbol ? "AND symbol = ?" : ""}
+             ORDER BY filing_date DESC`,
+            input.symbol
+              ? [input.daysBack, input.daysForward, input.symbol.toUpperCase()]
+              : [input.daysBack, input.daysForward]
+          );
+          return rows || [];
+        } catch (e: any) {
+          console.error("[Fundamentals Router] Error fetching filed corporate actions calendar:", e);
+          return [];
+        }
+      },
+      1800
+    )),
+
   // credit_rating_events is populated by credit_rating_fetcher.py but had no tRPC procedure at
   // all — only fed internal technical_signals scoring flags.
   getCreditRatingEvents: publicProcedure

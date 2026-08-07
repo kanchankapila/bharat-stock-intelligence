@@ -176,9 +176,6 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
     category: 'options', critical: false, table: 'nt_index_pcr_ts', dateColumn: 'fetched_at', warnDays: 3, failDays: 5 },
   { id: 'stock-option-features-freshness', label: 'stock_option_features (per-stock option chain features)',
     category: 'options', critical: false, table: 'stock_option_features', dateColumn: 'date', warnDays: 3, failDays: 5 },
-  // 2026-08-07 urls.txt follow-up (docs/url_explorer) -- see ndtv_fno_basis_fetcher.py.
-  { id: 'ndtv-fno-basis-freshness', label: 'ndtv_fno_basis (NDTV futures basis/roll-spread cross-check)',
-    category: 'options', critical: false, table: 'ndtv_fno_basis', dateColumn: 'date', warnDays: 3, failDays: 5 },
 
   // flows
   { id: 'insider-transactions-recency', label: 'insider_transactions (NSE PIT filings)',
@@ -198,8 +195,13 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
   // fundamentals
   { id: 'tl-financial-quality-freshness', label: 'tl_financial_quality (weekly ET ratios)',
     category: 'fundamentals', critical: false, table: 'tl_financial_quality', dateColumn: 'as_of_date', warnDays: 10, failDays: 16 },
+  // 2026-08-07: warnDays/failDays were 3/5, but the only writer (trendlyne_fundamentals_
+  // fetcher.py) runs weekly (Sunday, inside ml-weekly-retrain) -- flat-out false-alarmed FAIL
+  // every Thu/Fri/Sat/Sun-morning, every single week. Matched to tl-financial-quality-
+  // freshness's own weekly-cadence values right above (10/16 days) rather than a tighter
+  // number, since both are weekly Trendlyne-family checks with the same real cadence.
   { id: 'trendlyne-dvm-scores-freshness', label: 'trendlyne_dvm_scores',
-    category: 'fundamentals', critical: false, table: 'trendlyne_dvm_scores', dateColumn: 'date', warnDays: 3, failDays: 5 },
+    category: 'fundamentals', critical: false, table: 'trendlyne_dvm_scores', dateColumn: 'date', warnDays: 10, failDays: 16 },
   { id: 'proprietary-scores-history-freshness', label: 'proprietary_scores_history (Altman/Ohlson/Graham/DuPont)',
     category: 'fundamentals', critical: false, table: 'proprietary_scores_history', dateColumn: 'date', warnDays: 3, failDays: 5 },
   { id: 'working-capital-history-recency', label: 'working_capital_history (monthly cash-conversion-cycle)',
@@ -213,6 +215,16 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
   // actively holding earnings calls, so a quiet week outside results season is not a failure.
   { id: 'concall-takeaways-recency', label: 'concall_takeaways (AI concall tone/takeaway)',
     category: 'fundamentals', critical: false, table: 'concall_takeaways', dateColumn: 'announcement_date', warnDays: 14 },
+  // 2026-08-07 urls.txt open-source sourcing pass -- see mc_corporate_actions_fetcher.py /
+  // investsights_corporate_actions_fetcher.py. Both feed ohlcv_adjust.py's cross-validation
+  // (cross_validate_with_mc_actions) as well as the frontend corporate-action panels below.
+  // dateColumn is fetched_at, not the event date, matching stock-earnings-beats/eps-surprise-
+  // history's own pattern -- a stock's most recent real dividend/bonus/split can genuinely be
+  // months old with no staleness implied; what matters is whether the crawl itself is current.
+  { id: 'stock-corporate-action-history-freshness', label: 'stock_corporate_action_history (MC per-stock dividends/bonus/splits/rights)',
+    category: 'fundamentals', critical: false, table: 'stock_corporate_action_history', dateColumn: 'fetched_at', warnDays: 10, failDays: 16 },
+  { id: 'nse-filed-corporate-actions-freshness', label: 'nse_filed_corporate_actions (InvestSights, sourced from real NSE filings)',
+    category: 'fundamentals', critical: false, table: 'nse_filed_corporate_actions', dateColumn: 'fetched_at', warnDays: 3, failDays: 5 },
 
   // macro
   { id: 'macro-asset-prices-freshness', label: 'macro_asset_prices (VIX/FII-DII/global indices/PCR-GEX/MMI)',

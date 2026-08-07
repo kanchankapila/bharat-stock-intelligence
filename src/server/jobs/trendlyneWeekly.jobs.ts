@@ -64,6 +64,43 @@ async function processTrendlyneRatiosMonthly(_job: Job): Promise<{ success: bool
   await runPython('financial_ratios_fetcher.py', [], 60 * 60_000)
     .catch(e => console.warn('[QUEUE] financial_ratios_fetcher failed:', (e as Error).message));
 
+  // Deep per-stock corporate-action history (dividends/bonus/splits/rights), 2026-08-07
+  // urls.txt open-source sourcing pass -> stock_corporate_action_history. Weekly, not daily:
+  // dividends/bonus/splits are declared a handful of times a year per stock, so a daily crawl
+  // of ~2000+ stocks would be pure load for almost no new data -- matches
+  // financial_ratios_fetcher.py's own weekly cadence directly above for the same reason.
+  // 30 min budget: mc_pricefeed_fetcher.py (same per-stock MC crawl shape, same BATCH_SIZE=15
+  // concurrency) measures ~25 min full-universe; this fetcher's section=all payload is smaller
+  // per-stock than pricefeed's, so 30 min is headroom, not a guess -- re-measure and bump if a
+  // real run needs more.
+  await runPython('mc_corporate_actions_fetcher.py', [], 30 * 60_000)
+    .catch(e => console.warn('[QUEUE] mc_corporate_actions_fetcher failed:', (e as Error).message));
+
+  // ohlcv_adjust.py had NO scheduled run at all before this (its own docstring only documents
+  // manual `--report`/`--persist` invocation) -- so ohlcv_adjustment_factors, which
+  // backtester.load_bhavcopy_adjusted() depends on for every delisted-symbol backtest, was
+  // frozen at whatever a one-off manual run last left it. Scheduled here, weekly, right after
+  // the bhavcopy universe (nse_bhavcopy_fetcher.py, daily inside ml-daily-ops) and the fresh
+  // MC corporate-action history right above it -- both this step's real inputs.
+  await runPython('ohlcv_adjust.py', ['--persist'], 20 * 60_000)
+    .catch(e => console.warn('[QUEUE] ohlcv_adjust --persist failed:', (e as Error).message));
+  // Cross-validates the heuristic factors above against stock_corporate_action_history and
+  // fills genuine gaps (e.g. pre-2021 bonus/split events bhavcopy has no rows for at all) --
+  // see cross_validate_with_mc_actions()'s own docstring for the confirmed/filled/disagreement
+  // three-way split. Deliberately run as a SEPARATE step after --persist commits, not merged
+  // into one invocation, so a failure in the cross-check never blocks the heuristic scan.
+  await runPython('ohlcv_adjust.py', ['--cross-validate', '--persist'], 10 * 60_000)
+    .catch(e => console.warn('[QUEUE] ohlcv_adjust --cross-validate failed:', (e as Error).message));
+
+  // mc_seasonality_best_stocks refresh (added 2026-08-07 — the table's schema existed since
+  // moneycontrol_fetcher.py's original table batch, but no writer was ever built; the
+  // getMcSeasonality tRPC procedure / SeasonalityCalendar.tsx (Smart Money page) had been
+  // silently reading an always-empty table). 24 requests (12 months x bullish/bearish),
+  // measured ~48s uncontended; 10-min budget is generous headroom for MC rate-limit backoff.
+  // Weekly, not monthly: cheap enough that there's no reason to wait a month for movement.
+  await runPython('moneycontrol_fetcher.py', ['--seasonality'], 10 * 60_000)
+    .catch(e => console.warn('[QUEUE] moneycontrol_fetcher --seasonality failed:', (e as Error).message));
+
   if (!isFirstSundayOfMonth) {
     console.log('[QUEUE] trendlyne-ratios: weekly ratios done; monthly steps skipped '
       + '(not the first Sunday of the month)');
@@ -125,7 +162,11 @@ export async function registerTrendlyneWeeklyJobs(connection: any) {
     processor: processTrendlyneRatiosMonthly,
     monitorName: 'trendlyne-ratios-monthly',
     concurrency: 1,
-    lockDuration: 60 * 60 * 1000,
+    // 60min -> 270min (2026-08-07): matches jobRegistry.ts's graceMinutes bump for this same
+    // job -- see that file's comment for the full worst-case-budget derivation. lockRenewTime
+    // below already re-extends the lock every 10min while the worker is alive, so this ceiling
+    // mainly protects against a genuinely stalled/dead worker, not normal long-running steps.
+    lockDuration: 270 * 60 * 1000,
     lockRenewTime: 10 * 60 * 1000,
     monitorFn: updateMonitorState,
   });
