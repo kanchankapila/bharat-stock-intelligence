@@ -14,8 +14,8 @@ interface V2AppShellProps {
   setActiveTab: (tab: string) => void;
   v2Enabled: boolean;
   setV2Enabled: (enabled: boolean) => void;
-  dashboardVersion?: 'v1' | 'v2' | 'v3';
-  onChangeVersion?: (version: 'v1' | 'v2' | 'v3') => void;
+  dashboardVersion?: 'v1' | 'v2' | 'v3' | 'v6';
+  onChangeVersion?: (version: 'v1' | 'v2' | 'v3' | 'v6') => void;
   children: React.ReactNode;
 }
 
@@ -210,7 +210,7 @@ export const V2AppShell: React.FC<V2AppShellProps> = ({
       <div className="p-2.5 border-t border-terminal-border flex flex-col gap-2 bg-terminal-panel-header/50 rounded-xl">
         <span className="text-[9px] font-black uppercase text-slate-400 tracking-wider font-mono">Terminal Dashboard version</span>
         <div className="flex gap-1 bg-slate-950 p-0.5 rounded-lg border border-slate-900 select-none">
-          {(['v1', 'v2', 'v3'] as const).map((v) => {
+          {(['v1', 'v2', 'v3', 'v6'] as const).map((v) => {
             const active = (dashboardVersion || 'v3') === v;
             return (
               <button
@@ -219,11 +219,11 @@ export const V2AppShell: React.FC<V2AppShellProps> = ({
                 className={cn(
                   "flex-1 py-1 rounded text-[9px] font-black uppercase tracking-wider transition-all cursor-pointer",
                   active
-                    ? "bg-indigo-600 text-white font-extrabold shadow"
+                    ? (v === 'v6' ? "bg-teal-600 text-white font-extrabold shadow" : "bg-indigo-600 text-white font-extrabold shadow")
                     : "text-slate-500 hover:text-slate-300"
                 )}
               >
-                {v.toUpperCase()}
+                {v === 'v6' ? 'New' : v.toUpperCase()}
               </button>
             );
           })}

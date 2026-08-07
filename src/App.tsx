@@ -29,6 +29,7 @@ import V1Routes from './v1/V1Routes';
 
 // ─── V2+ Components ─────────────────
 const V2AppShell         = React.lazy(() => import('./v2/components/layout/V2AppShell').then(m => ({ default: m.V2AppShell })));
+const V6Shell            = React.lazy(() => import('./v6/V6Shell').then(m => ({ default: m.V6Shell })));
 const V2StockDetails     = React.lazy(() => import('./v2/views/stock-analysis/V2StockDetails').then(m => ({ default: m.V2StockDetails })));
 const V2Settings         = React.lazy(() => import('./v2/views/settings/V2Settings').then(m => ({ default: m.V2Settings })));
 const V2Dashboard        = React.lazy(() => import('./v2/views/dashboard/V2Dashboard').then(m => ({ default: m.V2Dashboard })));
@@ -190,18 +191,22 @@ export default function App() {
 
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [drawerSymbol, setDrawerSymbol] = useState<string | null>(null);
-  const [dashboardVersion, setDashboardVersion] = useState<'v1' | 'v2' | 'v3'>(() => {
+  // 'v6' = the Phase 1 consolidation shell (V6Shell, see src/v6/) -- not yet the default; reachable
+  // via the version switcher in every other shell until the phased rollout (see the "V6 Canonical
+  // Workbench" proposal) promotes it. Renders through the same v2Enabled route tree as v2/v3 so it
+  // inherits every existing page for free -- only the shell chrome differs.
+  const [dashboardVersion, setDashboardVersion] = useState<'v1' | 'v2' | 'v3' | 'v6'>(() => {
     const saved = localStorage.getItem('dashboardVersion');
-    if (saved === 'v1' || saved === 'v2' || saved === 'v3') return saved;
+    if (saved === 'v1' || saved === 'v2' || saved === 'v3' || saved === 'v6') return saved;
     const v2 = localStorage.getItem('v2Enabled') === 'true';
     return v2 ? 'v2' : 'v3'; // Default to v3
   });
-  const changeDashboardVersion = (version: 'v1' | 'v2' | 'v3') => {
+  const changeDashboardVersion = (version: 'v1' | 'v2' | 'v3' | 'v6') => {
     localStorage.setItem('dashboardVersion', version);
-    localStorage.setItem('v2Enabled', (version === 'v2' || version === 'v3') ? 'true' : 'false');
+    localStorage.setItem('v2Enabled', version !== 'v1' ? 'true' : 'false');
     setDashboardVersion(version);
   };
-  const v2Enabled = dashboardVersion === 'v2' || dashboardVersion === 'v3';
+  const v2Enabled = dashboardVersion === 'v2' || dashboardVersion === 'v3' || dashboardVersion === 'v6';
   const [researchSubTab, setResearchSubTab] = useState<'overview' | 'deep-learning'>('overview');
   const [selectedIndex, setSelectedIndex] = useState<{ id: string; name: string } | null>(null);
   const [user, setUser] = useState<FirebaseUser | null>(null);
@@ -354,21 +359,12 @@ export default function App() {
   );
 
   if (v2Enabled) {
-    return (
-      <V2AppShell
-        activeTab={activeTab}
-        setActiveTab={setActiveTab}
-        v2Enabled={v2Enabled}
-        setV2Enabled={(enabled) => {
-          changeDashboardVersion(enabled ? 'v2' : 'v1');
-          window.location.reload();
-        }}
-        dashboardVersion={dashboardVersion}
-        onChangeVersion={(v) => {
-          changeDashboardVersion(v);
-          window.location.reload();
-        }}
-      >
+    // Shared by both the V2AppShell (v2/v3) and V6Shell (Phase 1 consolidation) branches below --
+    // one route tree, rendered inside whichever shell chrome dashboardVersion selects. This is
+    // exactly the reuse the "V6 Canonical Workbench" proposal's Phase 1 calls for: v6 inherits
+    // every existing page for free rather than needing its own duplicate route definitions.
+    const routedContent = (
+      <>
         <AnimatePresence mode="wait">
           <SafeRoutes>
           <Routes location={location} key={activeTab}>
@@ -398,7 +394,9 @@ export default function App() {
               />
             } />
             <Route path="/details" element={selectedSymbol ? (
-              dashboardVersion === 'v3' ? (
+              // v6 reuses v3's stock-detail view as a Phase 1 placeholder -- the merged
+              // canonical stock-research page (Phase 3 of the consolidation) replaces this.
+              (dashboardVersion === 'v3' || dashboardVersion === 'v6') ? (
                 <V3Dashboard
                   stocks={stocks}
                   watchlist={watchlist}
@@ -418,7 +416,9 @@ export default function App() {
               )
             ) : <div className="p-6">Select a stock to view details</div>} />
             <Route path="/" element={
-              dashboardVersion === 'v3' ? (
+              // v6's real composed home page is Phase 3 of the consolidation; until then it
+              // reuses v3's dashboard as a placeholder, matching /details and /dashboard below.
+              (dashboardVersion === 'v3' || dashboardVersion === 'v6') ? (
                 <V3Dashboard
                   stocks={stocks}
                   watchlist={watchlist}
@@ -431,7 +431,7 @@ export default function App() {
               )
             } />
             <Route path="/dashboard" element={
-              dashboardVersion === 'v3' ? (
+              (dashboardVersion === 'v3' || dashboardVersion === 'v6') ? (
                 <V3Dashboard
                   stocks={stocks}
                   watchlist={watchlist}
@@ -545,6 +545,41 @@ export default function App() {
           onSelectStock={setDrawerSymbol}
         />
         <AlertsToast userId={user?.uid} />
+      </>
+    );
+
+    if (dashboardVersion === 'v6') {
+      return (
+        <V6Shell
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          dashboardVersion={dashboardVersion}
+          onChangeVersion={(v) => {
+            changeDashboardVersion(v);
+            window.location.reload();
+          }}
+        >
+          {routedContent}
+        </V6Shell>
+      );
+    }
+
+    return (
+      <V2AppShell
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        v2Enabled={v2Enabled}
+        setV2Enabled={(enabled) => {
+          changeDashboardVersion(enabled ? 'v2' : 'v1');
+          window.location.reload();
+        }}
+        dashboardVersion={dashboardVersion}
+        onChangeVersion={(v) => {
+          changeDashboardVersion(v);
+          window.location.reload();
+        }}
+      >
+        {routedContent}
       </V2AppShell>
     );
   }
