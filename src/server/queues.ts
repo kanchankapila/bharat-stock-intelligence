@@ -680,6 +680,11 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
     // AI-generated earnings-call tone/takeaway (2026-08-06 urls.txt analysis) → concall_takeaways.
     runPython('investsights_concall_fetcher.py', [], 2 * 60_000)
       .catch(e => console.warn('[QUEUE] investsights_concall_fetcher failed:', (e as Error).message)),
+    // NDTV Profit futures basis/roll-spread/PCR, independent cross-check for fno_rollover_fetcher.py
+    // (2026-08-07 urls.txt follow-up) → ndtv_fno_basis. F&O-eligible universe only (209 symbols) --
+    // futures don't exist for the rest of nse_stocks. Live-measured ~7s for the full universe.
+    runPython('ndtv_fno_basis_fetcher.py', [], 2 * 60_000)
+      .catch(e => console.warn('[QUEUE] ndtv_fno_basis_fetcher failed:', (e as Error).message)),
   ]);
 
   // Earnings beat features (reads stock_earnings_beats, refreshed weekly by earnings_surprise_fetcher).
