@@ -431,13 +431,6 @@ export const V3Dashboard: React.FC<V3DashboardProps> = ({
     { refetchInterval: isGenerating ? 3000 : false },
   );
 
-  // Auto-generate signals on load if empty
-  useEffect(() => {
-    if (aiSignals.length === 0 && stocks.length > 0 && !isGenerating) {
-      handleGenerateSignals();
-    }
-  }, [stocks.length]);
-
   // Sync scan progress
   useEffect(() => {
     if (!isGenerating || !savedSignals) return;

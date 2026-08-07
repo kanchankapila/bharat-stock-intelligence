@@ -210,7 +210,6 @@ export default function App() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const { stocks, dataUpdatedAt: stocksUpdatedAt } = useMarketData();
   const { data: realIndices } = trpc.getAllIndices.useQuery();
-  const syncNSEStocksMutation = trpc.syncNSEStocks.useMutation();
 
   const handleSelectIndexByName = useCallback((indexName: string) => {
     const u = indexName.toUpperCase();
@@ -238,11 +237,6 @@ export default function App() {
       navigate('/indices');
     }
   }, [navigate]);
-
-  useEffect(() => {
-    console.log('📊 Initializing NSE stocks database...');
-    syncNSEStocksMutation.mutate();
-  }, []);
 
   const displayIndices = useMemo(() => {
     const rawIndexData = realIndices?.data;

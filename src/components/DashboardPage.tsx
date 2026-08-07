@@ -440,12 +440,6 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
     }
   };
 
-  useEffect(() => {
-    if (aiSignals.length === 0 && stocks.length > 0 && !isGenerating) {
-      handleGenerateSignals();
-    }
-  }, [stocks.length]);
-
   // Derived market stats — this component polls getQueueStats every 2s and getSignals every
   // 3s while signal generation is running (potentially minutes on a cold cache), and every
   // tick re-rendered this component. These sorts/filters over the full live `stocks` list only
