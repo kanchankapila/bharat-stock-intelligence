@@ -176,6 +176,9 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
     category: 'options', critical: false, table: 'nt_index_pcr_ts', dateColumn: 'fetched_at', warnDays: 3, failDays: 5 },
   { id: 'stock-option-features-freshness', label: 'stock_option_features (per-stock option chain features)',
     category: 'options', critical: false, table: 'stock_option_features', dateColumn: 'date', warnDays: 3, failDays: 5 },
+  // 2026-08-07 urls.txt follow-up (docs/url_explorer) -- see ndtv_fno_basis_fetcher.py.
+  { id: 'ndtv-fno-basis-freshness', label: 'ndtv_fno_basis (NDTV futures basis/roll-spread cross-check)',
+    category: 'options', critical: false, table: 'ndtv_fno_basis', dateColumn: 'date', warnDays: 3, failDays: 5 },
 
   // flows
   { id: 'insider-transactions-recency', label: 'insider_transactions (NSE PIT filings)',
