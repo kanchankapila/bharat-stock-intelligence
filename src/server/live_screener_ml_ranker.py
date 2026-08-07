@@ -90,11 +90,127 @@ def _live_auc() -> tuple:
 def _load_training_frame() -> pd.DataFrame:
     return read_df("""
         SELECT o.symbol, o.filter_key, o.appeared_at, a.run_id, o.return_intraday,
-               a.change_per, a.volume
+               a.change_per, a.volume, r.created_at AS run_ts
         FROM live_screener_outcomes o
         JOIN live_screener_appearances a ON a.id = o.appearance_id
+        JOIN live_screener_runs r ON r.id = a.run_id
         WHERE o.return_intraday IS NOT NULL
     """)
+
+
+# ── point-in-time intraday reversal features ───────────────────────────────────
+# vwap_deviation_pct / intraday_range_pos: the SAME two inputs intraday_ranker.py's
+# _reversal_scores() already computes and this platform has independently validated as its
+# best-ranked intraday signal (IC -0.090 t=-5.7 at 10:15, per the 2026-07-31 intraday audit)
+# -- but that function only ever answers "as of right now" (today, via date.today()), which is
+# fine for live scoring but useless for training on history. Reconstructed here point-in-time
+# per historical run instead: for a given (symbol, run timestamp), only bars strictly at or
+# before that timestamp, on that SAME trading day, ever contribute -- a run at 10:00 must never
+# see the stock's 14:00 high. Processed one trading day at a time (not one global merge_asof
+# across the whole date range) specifically so a day boundary can never accidentally let a run
+# match a bar from a different session -- the exact class of leak this whole file was fixed
+# for earlier today, in a new guise.
+REVERSAL_FEATURE_COLS = ['vwap_deviation_pct', 'intraday_range_pos']
+
+
+def _load_intraday_bars_for_date(session_date: str) -> pd.DataFrame:
+    """On-grid 15m bars for one IST trading date. Drops the zero-volume synthetic 'last
+    price' quotes intraday_fetcher.py appended before its 2026-07-31 fix (still present in
+    older history) -- matches _reversal_scores()'s own on-grid filter (minute % 15 == 0,
+    second == 0), just against a pandas Timestamp instead of string-slicing the raw text.
+    A plain UTC calendar-date bound is sufficient here (not an IST-aware range): NSE's whole
+    09:15-15:30 IST session falls inside 03:45-10:00 UTC of the SAME calendar date, since IST
+    is ahead of UTC.
+    """
+    next_date = (pd.Timestamp(session_date) + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
+    df = read_df("""
+        SELECT symbol, datetime, high, low, close, volume
+        FROM intraday_ohlcv
+        WHERE interval = '15m' AND datetime >= ? AND datetime < ?
+    """, (session_date, next_date))
+    if df.empty:
+        return df
+    dt = pd.to_datetime(df['datetime'], utc=True)
+    on_grid = (dt.dt.minute % 15 == 0) & (dt.dt.second == 0)
+    df = df.loc[on_grid].copy()
+    df['datetime'] = dt.loc[on_grid]
+    for c in ('high', 'low', 'close', 'volume'):
+        df[c] = pd.to_numeric(df[c], errors='coerce')
+    return df.dropna(subset=['high', 'low', 'close'])
+
+
+def _empty_reversal_frame() -> pd.DataFrame:
+    """Explicit dtypes (not bare pd.DataFrame(columns=...), which defaults every column to
+    object) so a downstream .fillna()/arithmetic on an all-empty result doesn't hit pandas'
+    object-dtype-downcast-on-fillna FutureWarning."""
+    return pd.DataFrame({
+        'run_id': pd.Series(dtype='int64'), 'symbol': pd.Series(dtype='object'),
+        'vwap_deviation_pct': pd.Series(dtype='float64'),
+        'intraday_range_pos': pd.Series(dtype='float64'),
+    })
+
+
+def _asof_reversal_for_date(bars: pd.DataFrame, as_of: pd.DataFrame) -> pd.DataFrame:
+    """bars: one trading day's on-grid intraday_ohlcv rows (from _load_intraday_bars_for_date).
+    as_of: DataFrame with columns [run_id, symbol, ts] -- every row must fall on the SAME
+    trading day `bars` covers (caller's responsibility; _load_reversal_features enforces this
+    by looping per date). Returns [run_id, symbol, vwap_deviation_pct, intraday_range_pos]."""
+    if bars.empty or as_of.empty:
+        return _empty_reversal_frame()
+
+    # merge_asof (even with by=) requires the right frame globally sorted by the 'on' column,
+    # not by (symbol, datetime) -- sorting by datetime alone still leaves each symbol's own
+    # subsequence in chronological order (a subset of a sorted sequence stays sorted), which
+    # is what groupby(...).cumsum()/cummax()/cummin() below need to be correct.
+    b = bars.sort_values('datetime').copy()
+    b['typical_pv'] = (b['high'] + b['low'] + b['close']) / 3.0 * b['volume']
+    grp = b.groupby('symbol', sort=False)
+    b['cum_pv'] = grp['typical_pv'].cumsum()
+    b['cum_v'] = grp['volume'].cumsum()
+    b['cum_hi'] = grp['high'].cummax()
+    b['cum_lo'] = grp['low'].cummin()
+
+    a = as_of.copy()
+    # Cast to the SAME dtype as b['datetime'], not just utc=True -- pandas 2.x preserves
+    # sub-second resolution from the source rather than always coercing to [ns]. `ts` reaches
+    # this function from two different code paths with different native precisions
+    # (_build_matrix's `run_ts` comes from a bulk read_df() SQL read, typically [ns];
+    # score()'s comes from query_one()'s raw single-row cursor read, typically a plain Python
+    # datetime.datetime -> [us] once wrapped in a DataFrame column) -- merge_asof raises a
+    # hard MergeError on a [us] vs [ns] mismatch rather than silently coercing either side.
+    a['ts'] = pd.to_datetime(a['ts'], utc=True).astype(b['datetime'].dtype)
+    a = a.sort_values('ts')
+
+    merged = pd.merge_asof(
+        a, b, left_on='ts', right_on='datetime', by='symbol', direction='backward'
+    )
+
+    vwap = merged['cum_pv'] / merged['cum_v'].replace(0, np.nan)
+    merged['vwap_deviation_pct'] = (merged['close'] - vwap) / vwap * 100.0
+    span = merged['cum_hi'] - merged['cum_lo']
+    merged['intraday_range_pos'] = (merged['close'] - merged['cum_lo']) / span.replace(0, np.nan)
+
+    return merged[['run_id', 'symbol'] + REVERSAL_FEATURE_COLS]
+
+
+def _load_reversal_features(run_asof: pd.DataFrame) -> pd.DataFrame:
+    """run_asof: DataFrame with columns [run_id, symbol, ts, session_date] (session_date =
+    'YYYY-MM-DD' IST trading date the run belongs to; ts = the run's own UTC timestamp).
+    Returns [run_id, symbol, vwap_deviation_pct, intraday_range_pos] across all dates,
+    processed one trading day at a time so a run can never match a bar from a different day.
+    Missing for a (run_id, symbol) when that symbol had no intraday_ohlcv coverage that day
+    (a real, known gap -- intraday_fetcher.py doesn't reach 100% of the universe every cycle)
+    -- callers must fillna, not assume every row gets a value.
+    """
+    out = []
+    for session_date, day_asof in run_asof.groupby('session_date'):
+        try:
+            bars = _load_intraday_bars_for_date(session_date)
+        except Exception as e:
+            print(f"[LiveScreenerMLRanker] reversal features skipped for {session_date}: {str(e)[:100]}")
+            continue
+        out.append(_asof_reversal_for_date(bars, day_asof[['run_id', 'symbol', 'ts']]))
+    return pd.concat(out, ignore_index=True) if out else _empty_reversal_frame()
 
 
 def _build_matrix(df: pd.DataFrame):
@@ -115,9 +231,14 @@ def _build_matrix(df: pd.DataFrame):
     2026_08_07 memory). Grouping by (run_id, symbol) instead makes every training row exactly
     the same shape as a scoring-time row: this scan's filter matches, this scan's change_per/
     volume, nothing from later in the day folded in.
+
+    Also joins in vwap_deviation_pct/intraday_range_pos (see _load_reversal_features) --
+    this platform's own best-validated intraday signal family, computed point-in-time as of
+    each row's own run timestamp, never peeking at later bars from the same day.
     """
     agg = df.groupby(["run_id", "symbol"]).agg(
         appeared_at=("appeared_at", "first"),
+        run_ts=("run_ts", "first"),
         return_intraday=("return_intraday", "mean"),
         change_per=("change_per", "mean"),
         volume=("volume", "mean"),
@@ -131,7 +252,19 @@ def _build_matrix(df: pd.DataFrame):
     matrix = pd.merge(pivot, agg, on=["run_id", "symbol"])
     matrix["log_volume"] = np.log1p(matrix["volume"].clip(lower=0).fillna(0))
     matrix["change_per"] = matrix["change_per"].fillna(0.0)
-    feature_cols = filter_cols + ["change_per", "log_volume"]
+
+    run_asof = matrix[["run_id", "symbol", "appeared_at", "run_ts"]].rename(
+        columns={"appeared_at": "session_date", "run_ts": "ts"}
+    )
+    reversal = _load_reversal_features(run_asof)
+    matrix = matrix.merge(reversal, on=["run_id", "symbol"], how="left")
+    # Explicit, semantically-neutral fills (not the blanket 0.0 train() applies to every
+    # feature downstream) -- 0.0 = "at VWAP", 0.5 = "mid-range", for symbols with no
+    # intraday_ohlcv coverage that day (a real, known coverage gap, not an error).
+    matrix["vwap_deviation_pct"] = matrix["vwap_deviation_pct"].fillna(0.0)
+    matrix["intraday_range_pos"] = matrix["intraday_range_pos"].fillna(0.5)
+
+    feature_cols = filter_cols + ["change_per", "log_volume"] + REVERSAL_FEATURE_COLS
     return matrix.sort_values("appeared_at").reset_index(drop=True), feature_cols
 
 
@@ -352,8 +485,11 @@ def score():
         art = pickle.load(f)
     model, feature_names = art["model"], art["feature_names"]
 
-    run_row = query_one("SELECT MAX(id) FROM live_screener_runs WHERE status IN ('SUCCESS','PARTIAL')")
-    run_id = run_row[0] if run_row else None
+    run_row = query_one(
+        "SELECT id, created_at FROM live_screener_runs WHERE status IN ('SUCCESS','PARTIAL') "
+        "ORDER BY id DESC LIMIT 1"
+    )
+    run_id, run_ts = (run_row[0], run_row[1]) if run_row else (None, None)
     if not run_id:
         print("[LiveScreenerMLRanker] No live screener run to score yet.")
         return
@@ -372,6 +508,21 @@ def score():
     flags = pd.crosstab(appearances["symbol"], appearances["filter_key"]).clip(upper=1)
     matrix = agg.join(flags, how="left").fillna(0.0)
     matrix["log_volume"] = np.log1p(matrix["volume"].clip(lower=0))
+
+    # Point-in-time vwap_deviation_pct/intraday_range_pos for this run's own timestamp, via
+    # the exact same function _build_matrix() uses for training -- only present in the
+    # active model's feature_names once a model has been trained after this feature was
+    # added (2026-08-07); a currently-deployed older model simply never selects these
+    # columns below, so this is safe against an old model too.
+    if run_ts is not None and any(f in REVERSAL_FEATURE_COLS for f in feature_names):
+        session_date = str(run_ts)[:10]
+        run_asof = pd.DataFrame({
+            "run_id": run_id, "symbol": matrix.index, "ts": run_ts, "session_date": session_date,
+        })
+        reversal = _load_reversal_features(run_asof).set_index("symbol")
+        matrix = matrix.join(reversal[REVERSAL_FEATURE_COLS], how="left")
+        matrix["vwap_deviation_pct"] = matrix["vwap_deviation_pct"].fillna(0.0)
+        matrix["intraday_range_pos"] = matrix["intraday_range_pos"].fillna(0.5)
 
     for f in feature_names:
         if f not in matrix.columns:

@@ -92,15 +92,17 @@ def test_no_active_model_is_a_safe_no_op(monkeypatch):
 def _synthetic_training_frame(n_dates=20, symbols_per_day=15):
     """Same shape as test_live_screener_ml_ranker_cv.py's builder -- reused rather than
     re-guessed, since _load_training_frame()'s real columns (symbol/filter_key/appeared_at/
-    run_id/return_intraday/change_per/volume) aren't obvious from train()'s signature alone.
-    run_id was added 2026-08-07 when _build_matrix() moved from (appeared_at, symbol) to
-    (run_id, symbol) grouping (live_screener_ml_no_live_edge_2026_08_07 memory)."""
+    run_id/run_ts/return_intraday/change_per/volume) aren't obvious from train()'s signature
+    alone. run_id was added 2026-08-07 when _build_matrix() moved from (appeared_at, symbol)
+    to (run_id, symbol) grouping; run_ts the same day for the point-in-time reversal-feature
+    join (live_screener_ml_no_live_edge_2026_08_07 memory)."""
     import numpy as np
     import pandas as pd
     dates = pd.bdate_range("2026-06-01", periods=n_dates).strftime("%Y-%m-%d")
     rows = []
     rng = np.random.default_rng(42)
     for run_id, d in enumerate(dates, start=1):
+        run_ts = pd.Timestamp(f"{d}T05:00:00", tz="UTC")
         for i in range(symbols_per_day):
             change_per = float(rng.normal(0, 2))
             volume = float(rng.integers(10_000, 1_000_000))
@@ -108,6 +110,7 @@ def _synthetic_training_frame(n_dates=20, symbols_per_day=15):
             return_intraday = change_per / 100.0 + float(rng.normal(0, 0.01))
             rows.append({
                 "symbol": f"SYM{i}", "filter_key": filter_key, "appeared_at": d, "run_id": run_id,
+                "run_ts": run_ts,
                 "return_intraday": return_intraday, "change_per": change_per, "volume": volume,
             })
     return pd.DataFrame(rows)

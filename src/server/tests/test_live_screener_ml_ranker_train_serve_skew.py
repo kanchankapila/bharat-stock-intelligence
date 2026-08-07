@@ -32,18 +32,26 @@ def _multi_run_day_frame():
     scan cycles (run_id 1/2/3) -- the exact shape that used to collapse into a single smoothed
     row. change_per drifts sharply across the day (1.0% -> 9.0%) to make the smoothing
     (or its absence) unambiguous in the resulting matrix."""
+    # run_ts (added same day, for the point-in-time reversal-feature join) needs no real
+    # intraday_ohlcv coverage to exercise -- TESTCO is fictitious, so _load_reversal_features
+    # correctly finds nothing and _build_matrix's own neutral fill (0.0/0.5) takes over; these
+    # tests only assert on the filter-match/change_per columns, not the reversal ones.
     return pd.DataFrame([
         # run_id=1, 09:30 scan: only RSI_OVERSOLD matches, change_per is small early in the day
         {"symbol": "TESTCO", "filter_key": "RSI_OVERSOLD", "appeared_at": "2026-06-01",
-         "run_id": 1, "return_intraday": 0.05, "change_per": 1.0, "volume": 100_000},
+         "run_id": 1, "run_ts": pd.Timestamp("2026-06-01T04:00:00", tz="UTC"),
+         "return_intraday": 0.05, "change_per": 1.0, "volume": 100_000},
         # run_id=2, 12:00 scan: RSI_OVERSOLD still matching AND VOLUME_SURGE newly matches
         {"symbol": "TESTCO", "filter_key": "RSI_OVERSOLD", "appeared_at": "2026-06-01",
-         "run_id": 2, "return_intraday": 0.02, "change_per": 5.0, "volume": 400_000},
+         "run_id": 2, "run_ts": pd.Timestamp("2026-06-01T06:30:00", tz="UTC"),
+         "return_intraday": 0.02, "change_per": 5.0, "volume": 400_000},
         {"symbol": "TESTCO", "filter_key": "VOLUME_SURGE", "appeared_at": "2026-06-01",
-         "run_id": 2, "return_intraday": 0.02, "change_per": 5.0, "volume": 400_000},
+         "run_id": 2, "run_ts": pd.Timestamp("2026-06-01T06:30:00", tz="UTC"),
+         "return_intraday": 0.02, "change_per": 5.0, "volume": 400_000},
         # run_id=3, 15:00 scan: RSI_OVERSOLD has stopped matching (stock is no longer
         # oversold), only VOLUME_SURGE matches, change_per has run up to 9%
         {"symbol": "TESTCO", "filter_key": "VOLUME_SURGE", "appeared_at": "2026-06-01",
+         "run_id": 3, "run_ts": pd.Timestamp("2026-06-01T09:30:00", tz="UTC"),
          "run_id": 3, "return_intraday": -0.01, "change_per": 9.0, "volume": 900_000},
     ])
 
