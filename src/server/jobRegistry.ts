@@ -118,7 +118,12 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   // working_capital 60min + mf_stock_holdings 30min + mc_stockvitals_history 60min = up to
   // 210min worst case), not 3 -- same reasoning as the prior 150min bump when mf_stock_holdings
   // was added (see CLAUDE.md's session notes on this job's timeout history).
-  { jobName: 'trendlyne-ratios-monthly', label: 'ET Ratios (weekly) + Working Capital/MF Holdings/MC StockVitals History (monthly)', cronPattern: '30 12 * * 0', graceMinutes: 210, critical: false },
+  // graceMinutes 210 -> 270: 2026-08-07 added 3 more WEEKLY (every-Sunday, not just first-
+  // Sunday) steps -- mc_corporate_actions_fetcher.py (30min budget) + ohlcv_adjust.py --persist
+  // (20min budget, measured ~3.3min real) + ohlcv_adjust.py --cross-validate --persist (10min
+  // budget, measured ~9s real) = 60min more worst-case, same additive convention as every prior
+  // bump on this entry.
+  { jobName: 'trendlyne-ratios-monthly', label: 'ET Ratios (weekly) + Corporate Actions/OHLCV Adjust (weekly) + Working Capital/MF Holdings/MC StockVitals History (monthly)', cronPattern: '30 12 * * 0', graceMinutes: 270, critical: false },
   { jobName: 'dl-feature-refresh', label: 'DL Feature Refresh', cronPattern: '30 11 * * 1-5', graceMinutes: 90, critical: false },
 
   // ml-daily-ops (cron '0 14 * * 1-5', see queues.ts processMlDailyOps) writes each of its

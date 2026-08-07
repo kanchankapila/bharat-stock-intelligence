@@ -5,7 +5,7 @@ import stockData from '../data/stocklist';
 import {
   TrendingUp, TrendingDown, Activity, Zap, Info, AlertCircle,
   BarChart3, PieChart, Users, Filter, ArrowUpRight,
-  CheckCircle2, BrainCircuit, Search, Database, History, Newspaper
+  CheckCircle2, BrainCircuit, Search, Database, History, Newspaper, Gift
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import {
@@ -16,6 +16,13 @@ import {
   AdvancedChartWidget 
 } from './TradingViewWidgets';
 import { McNewsCard, McNewsLinks, McNewsEmptyState } from './McNewsCard';
+
+const ACTION_TYPE_COLORS: Record<string, string> = {
+  dividend: 'text-emerald-400 bg-emerald-500/10',
+  bonus: 'text-indigo-400 bg-indigo-500/10',
+  split: 'text-sky-400 bg-sky-500/10',
+  rights: 'text-amber-400 bg-amber-500/10',
+};
 
 
 const Candlestick = (props: any) => {
@@ -185,14 +192,14 @@ const TrendlyneChecklistCard: React.FC<{ checklist: any }> = ({ checklist }) => 
 interface MCStockInfoPanelProps {
   symbol: string;
   scId: string;
-  section?: 'all' | 'technical' | 'fundamental' | 'earnings' | 'insights' | 'overview' | 'shareholding' | 'peers' | 'trendlyne' | 'news';
+  section?: 'all' | 'technical' | 'fundamental' | 'earnings' | 'insights' | 'overview' | 'shareholding' | 'peers' | 'trendlyne' | 'news' | 'actions';
   onSelectStock?: (symbol: string) => void;
   watchlist?: string[];
   onToggleWatchlist?: (symbol: string, metadata?: { price?: number; name?: string; source?: string }) => void;
 }
 
 type Timeframe = 'D' | 'W' | 'M';
-type Tab = 'overview' | 'technical' | 'financials' | 'earnings' | 'fno' | 'ai_report' | 'news';
+type Tab = 'overview' | 'technical' | 'financials' | 'earnings' | 'fno' | 'ai_report' | 'news' | 'actions';
 
 function PanelSectionHeader({
   title,
@@ -231,6 +238,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
     section === 'shareholding' ? 'financials' :
     section === 'trendlyne' ? 'ai_report' :
     section === 'news' ? 'news' :
+    section === 'actions' ? 'actions' :
     section === 'peers' ? 'financials' : 'overview'
   );
 
@@ -254,6 +262,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
     else if (section === 'peers') setActiveTab('financials');
     else if (section === 'trendlyne') setActiveTab('ai_report');
     else if (section === 'news') setActiveTab('news');
+    else if (section === 'actions') setActiveTab('actions');
   }, [section]);
   const containerRef = React.useRef<HTMLDivElement>(null);
   const [isVisible, setIsVisible] = React.useState(false);
@@ -397,6 +406,17 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
     { enabled: isVisible && activeTab === 'news', staleTime: 60000 }
   );
 
+  // Deep corporate-action history (dividends/bonus/splits/rights), 2026-08-07 urls.txt
+  // open-source sourcing pass — DB-backed, unlike the live-only getCorporateActions.
+  const { data: actionHistory, isLoading: loadingActionHistory } = trpc.getCorporateActionHistory.useQuery(
+    { symbol },
+    { enabled: isVisible && activeTab === 'actions', staleTime: 300000 }
+  );
+  const { data: filedActions, isLoading: loadingFiledActions } = trpc.getFiledCorporateActionsCalendar.useQuery(
+    { symbol, daysBack: 180, daysForward: 180 },
+    { enabled: isVisible && activeTab === 'actions', staleTime: 300000 }
+  );
+
   if (!isVisible && !unifiedData) {
     return (
       <div ref={containerRef} className="h-40 flex items-center justify-center bg-slate-900/10 border border-dashed border-slate-800 rounded-2xl">
@@ -493,6 +513,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
     { key: 'fno',        label: 'Options & Flow (F&O)' },
     { key: 'ai_report',  label: 'AI Auditor Report' },
     { key: 'news',       label: 'Stock News' },
+    { key: 'actions',    label: 'Corporate Actions' },
   ];
 
 
@@ -3450,6 +3471,97 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
             moreLink={mcNewsData?.more_link}
             accent="blue"
           />
+        </div>
+      )}
+
+      {/* ── TAB: CORPORATE ACTIONS ── */}
+      {activeTab === 'actions' && (
+        <div className="rounded-2xl border border-slate-800 bg-slate-950/30 p-4 space-y-6">
+          <PanelSectionHeader
+            title="Corporate Action History"
+            subtitle="Dividends, bonus issues, stock splits and rights issues — the record ohlcv_adjust.py cross-checks against for split/bonus price adjustment"
+          />
+          <div>
+            <h3 className="text-xs font-black text-slate-300 uppercase tracking-widest flex items-center gap-2 mb-3">
+              <Gift className="w-4 h-4 text-indigo-400" />
+              <span>MoneyControl — {symbol}</span>
+            </h3>
+            {loadingActionHistory ? (
+              <div className="text-center py-8 bg-slate-900/30 border border-slate-800 rounded-2xl animate-pulse">
+                <p className="text-xs text-slate-400 font-bold">Fetching corporate-action history…</p>
+              </div>
+            ) : !actionHistory || actionHistory.length === 0 ? (
+              <div className="text-center py-8 bg-slate-900/30 border border-slate-800 rounded-2xl">
+                <p className="text-xs text-slate-500 font-semibold">No dividend, bonus, split or rights history on record for {symbol}.</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto -mx-1">
+                <table className="w-full text-xs min-w-[480px]">
+                  <thead>
+                    <tr className="text-[10px] text-slate-500 uppercase tracking-wider border-b border-slate-800/60">
+                      <th className="text-left px-2 py-2 font-medium">Date</th>
+                      <th className="text-left px-2 py-2 font-medium">Type</th>
+                      <th className="text-right px-2 py-2 font-medium">Ratio / Amount</th>
+                      <th className="text-left px-2 py-2 font-medium">Announced</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/30">
+                    {actionHistory.map((a: any, i: number) => (
+                      <tr key={i} className="hover:bg-slate-800/40">
+                        <td className="px-2 py-1.5 font-mono text-slate-300">{a.record_date || '—'}</td>
+                        <td className="px-2 py-1.5">
+                          <span className={cn("text-[9px] px-2 py-0.5 rounded font-bold uppercase",
+                            ACTION_TYPE_COLORS[a.action_type] || "text-slate-400 bg-slate-500/10")}>
+                            {a.action_type}
+                          </span>
+                        </td>
+                        <td className="px-2 py-1.5 text-right font-mono text-slate-200">
+                          {a.ratio_text ? a.ratio_text
+                            : a.amount != null ? `₹${Number(a.amount).toFixed(2)}`
+                            : '—'}
+                        </td>
+                        <td className="px-2 py-1.5 font-mono text-slate-500">{a.announce_date || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          <div>
+            <h3 className="text-xs font-black text-slate-300 uppercase tracking-widest flex items-center gap-2 mb-3">
+              <Database className="w-4 h-4 text-emerald-400" />
+              <span>Filed with NSE (last/next 6 months)</span>
+            </h3>
+            {loadingFiledActions ? (
+              <div className="text-center py-6 bg-slate-900/30 border border-slate-800 rounded-2xl animate-pulse">
+                <p className="text-xs text-slate-400 font-bold">Checking NSE filings…</p>
+              </div>
+            ) : !filedActions || filedActions.length === 0 ? (
+              <p className="text-xs text-slate-500 font-semibold">No NSE-filed corporate action in this window.</p>
+            ) : (
+              <div className="space-y-2">
+                {filedActions.map((f: any, i: number) => (
+                  <a
+                    key={i}
+                    href={f.source_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block p-2.5 bg-slate-950/50 border border-slate-800/60 rounded-lg hover:border-slate-700 transition-colors"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[9px] px-2 py-0.5 rounded font-bold uppercase text-emerald-400 bg-emerald-500/10 shrink-0">
+                        {(f.category || '').split('|')[0] || 'filing'}
+                      </span>
+                      <span className="text-[10px] text-slate-500 font-mono shrink-0">{f.filing_date}</span>
+                    </div>
+                    <p className="text-xs text-slate-200 mt-1.5 leading-snug line-clamp-2">{f.headline}</p>
+                  </a>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
