@@ -83,7 +83,7 @@ export function InstitutionalFlowDeskPage() {
 
       <div className="v5-card col-span-12 p-4 xl:col-span-5">
         <div className="mb-3 flex items-center gap-2">
-          <Landmark className="h-4 w-4 text-teal-700" />
+          <Landmark className="h-4 w-4 text-[var(--v5-positive)]" />
           <h2 className="v5-title text-lg font-semibold">Flow Snapshot</h2>
         </div>
 
@@ -107,7 +107,7 @@ export function InstitutionalFlowDeskPage() {
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
+              <tr className="border-b border-[var(--v5-border)] text-left text-xs uppercase tracking-wide text-[var(--v5-muted)]">
                 <th className="px-3 py-2">Category</th>
                 <th className="px-3 py-2">Date</th>
                 <th className="px-3 py-2">Buy</th>
@@ -119,12 +119,12 @@ export function InstitutionalFlowDeskPage() {
               {institutionalDetails.map((row: any, i: number) => {
                 const netVal = Number(row.netBuySell);
                 return (
-                  <tr key={`${s(row.category)}-${i}`} className="v5-table-row-intel border-b border-slate-100">
-                    <td className="px-3 py-2 font-semibold text-slate-800">{s(row.category, '—')}</td>
-                    <td className="px-3 py-2 text-slate-700">{s(row.date, '—')}</td>
-                    <td className="px-3 py-2 text-slate-700">{row.buyValue ?? '—'}</td>
-                    <td className="px-3 py-2 text-slate-700">{row.sellValue ?? '—'}</td>
-                    <td className={`px-3 py-2 font-semibold ${Number.isFinite(netVal) ? (netVal >= 0 ? 'text-teal-700' : 'text-rose-700') : 'text-slate-700'}`}>
+                  <tr key={`${s(row.category)}-${i}`} className="v5-table-row-intel border-b border-[var(--v5-border)]">
+                    <td className="px-3 py-2 font-semibold text-[var(--v5-ink)]">{s(row.category, '—')}</td>
+                    <td className="px-3 py-2 text-[var(--v5-ink-soft)]">{s(row.date, '—')}</td>
+                    <td className="px-3 py-2 text-[var(--v5-ink-soft)]">{row.buyValue ?? '—'}</td>
+                    <td className="px-3 py-2 text-[var(--v5-ink-soft)]">{row.sellValue ?? '—'}</td>
+                    <td className={`px-3 py-2 font-semibold ${Number.isFinite(netVal) ? (netVal >= 0 ? 'text-[var(--v5-positive)]' : 'text-[var(--v5-negative)]') : 'text-[var(--v5-ink-soft)]'}`}>
                       {row.netBuySell ?? '—'}
                     </td>
                   </tr>
@@ -132,7 +132,7 @@ export function InstitutionalFlowDeskPage() {
               })}
             </tbody>
           </table>
-          {!institutionalDetails.length && <p className="py-4 text-sm text-slate-500">No institutional detail rows available right now.</p>}
+          {!institutionalDetails.length && <p className="py-4 text-sm text-[var(--v5-muted)]">No institutional detail rows available right now.</p>}
         </div>
       </div>
     </section>

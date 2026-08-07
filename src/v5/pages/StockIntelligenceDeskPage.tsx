@@ -184,8 +184,8 @@ export function StockIntelligenceDeskPage({
         />
 
         <div className="v5-compact-scroll mt-3 space-y-2 pr-1">
-          {searchQ.isLoading && <p className="text-sm text-slate-500">Searching stocks...</p>}
-          {searchQ.isError && <p className="text-sm text-rose-600">Search is temporarily unavailable.</p>}
+          {searchQ.isLoading && <p className="text-sm text-[var(--v5-muted)]">Searching stocks...</p>}
+          {searchQ.isError && <p className="text-sm text-[var(--v5-negative-bright)]">Search is temporarily unavailable.</p>}
           {searchRows.slice(0, 40).map((row: any) => {
             const sym = s(row.symbol);
             const active = selectedSymbol === sym;
@@ -193,15 +193,15 @@ export function StockIntelligenceDeskPage({
               <button
                 key={sym}
                 onClick={() => setSelectedSymbol(sym)}
-                className={`w-full rounded-xl border px-3 py-2 text-left transition ${active ? 'border-teal-500 bg-teal-50' : 'border-slate-200 bg-white hover:bg-slate-50'}`}
+                className={`w-full rounded-xl border px-3 py-2 text-left transition ${active ? 'border-[var(--v5-accent)] bg-[var(--v5-accent-soft)]' : 'border-[var(--v5-border)] bg-[var(--v5-surface)] hover:bg-[var(--v5-surface-2)]'}`}
               >
-                <div className="text-sm font-semibold text-slate-800">{sym}</div>
-                <div className="text-xs text-slate-500">{s((row as any).companyName, s((row as any).name, 'NSE Listing'))}</div>
+                <div className="text-sm font-semibold text-[var(--v5-ink)]">{sym}</div>
+                <div className="text-xs text-[var(--v5-muted)]">{s((row as any).companyName, s((row as any).name, 'NSE Listing'))}</div>
               </button>
             );
           })}
           {!searchQ.isLoading && !searchQ.isError && !searchRows.length && (
-            <p className="text-sm text-slate-500">Search results will appear here.</p>
+            <p className="text-sm text-[var(--v5-muted)]">Search results will appear here.</p>
           )}
         </div>
       </div>
@@ -209,8 +209,8 @@ export function StockIntelligenceDeskPage({
       <div className="v5-card col-span-12 p-4 lg:col-span-9">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="v5-title text-2xl font-bold text-slate-900">{selectedSymbol}</h2>
-            <p className="text-sm text-slate-600">Professional stock intelligence with categorized live sections.</p>
+            <h2 className="v5-title text-2xl font-bold text-[var(--v5-ink)]">{selectedSymbol}</h2>
+            <p className="text-sm text-[var(--v5-ink-muted)]">Professional stock intelligence with categorized live sections.</p>
           </div>
           <div className="flex flex-wrap gap-2">
             {TABS.map((t) => {
@@ -220,7 +220,7 @@ export function StockIntelligenceDeskPage({
                 <button
                   key={t.id}
                   onClick={() => setTab(t.id)}
-                  className={`rounded-xl border px-3 py-1.5 text-xs font-semibold ${active ? 'border-teal-600 bg-teal-600 text-white' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}
+                  className={`rounded-xl border px-3 py-1.5 text-xs font-semibold ${active ? 'border-[var(--v5-accent)] bg-[var(--v5-accent)] text-white' : 'border-[var(--v5-border-soft)] bg-[var(--v5-surface)] text-[var(--v5-ink-soft)] hover:bg-[var(--v5-surface-2)]'}`}
                 >
                   <span className="inline-flex items-center gap-1.5"><Icon className="h-3.5 w-3.5" /> {t.label}</span>
                 </button>
@@ -308,16 +308,16 @@ export function StockIntelligenceDeskPage({
               <EstimateCard title="Net Profit (Latest)" row={latestNet} />
             </div>
 
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
-              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Corporate Actions</div>
+            <div className="rounded-2xl border border-[var(--v5-border)] bg-[var(--v5-surface-2)] p-3">
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--v5-muted)]">Corporate Actions</div>
               <div className="v5-compact-scroll space-y-1 pr-1">
                 {actionRows.slice(0, 40).map((a: any, i: number) => (
-                  <div key={`${s(a.action_type)}-${i}`} className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs">
-                    <span className="font-semibold text-slate-700">{s(a.action_type, s(a.purpose, 'Action'))}</span>
-                    <span className="text-slate-500">{s(a.ex_date, '—')}</span>
+                  <div key={`${s(a.action_type)}-${i}`} className="flex items-center justify-between rounded-lg border border-[var(--v5-border)] bg-[var(--v5-surface)] px-2 py-1.5 text-xs">
+                    <span className="font-semibold text-[var(--v5-ink-soft)]">{s(a.action_type, s(a.purpose, 'Action'))}</span>
+                    <span className="text-[var(--v5-muted)]">{s(a.ex_date, '—')}</span>
                   </div>
                 ))}
-                {!actionRows.length && <p className="text-sm text-slate-500">No corporate actions available for this symbol.</p>}
+                {!actionRows.length && <p className="text-sm text-[var(--v5-muted)]">No corporate actions available for this symbol.</p>}
               </div>
             </div>
           </div>
@@ -348,8 +348,8 @@ export function StockIntelligenceDeskPage({
               ]}
             />
 
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 xl:col-span-2">
-              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Superstar Investor Activity (InvestSights)</div>
+            <div className="rounded-2xl border border-[var(--v5-border)] bg-[var(--v5-surface-2)] p-3 xl:col-span-2">
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--v5-muted)]">Superstar Investor Activity (InvestSights)</div>
               <div className="v5-compact-scroll space-y-1.5 pr-1">
                 {superstarActivity.map((row: any, idx: number) => {
                   const slug = s(row.investor_slug, 'investor');
@@ -357,27 +357,27 @@ export function StockIntelligenceDeskPage({
                   const pctHolding = numOrNull(row.curr_pct_holding);
                   const pctChange = numOrNull(row.pct_holding_change);
                   const tone = activity === 'EXIT' || (pctChange != null && pctChange < 0)
-                    ? 'text-rose-700 bg-rose-50 border-rose-200'
-                    : 'text-emerald-700 bg-emerald-50 border-emerald-200';
+                    ? 'text-[var(--v5-negative)] bg-[var(--v5-negative-soft)] border-[var(--v5-negative-bright)]'
+                    : 'text-[var(--v5-positive)] bg-[var(--v5-accent-soft)] border-emerald-200';
                   return (
-                    <div key={`${slug}-${s(row.period_end_date)}-${idx}`} className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                    <div key={`${slug}-${s(row.period_end_date)}-${idx}`} className="rounded-lg border border-[var(--v5-border)] bg-[var(--v5-surface)] px-3 py-2">
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-sm font-semibold text-slate-800">{slug.replace(/-/g, ' ')}</span>
+                        <span className="text-sm font-semibold text-[var(--v5-ink)]">{slug.replace(/-/g, ' ')}</span>
                         <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${tone}`}>{activity}</span>
                       </div>
-                      <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-600">
-                        <span className="rounded-full border border-slate-200 px-2 py-0.5">Holding: {pctHolding == null ? '—' : `${fmtFixed(pctHolding, 2)}%`}</span>
-                        <span className="rounded-full border border-slate-200 px-2 py-0.5">Change: {pctChange == null ? '—' : `${pctChange >= 0 ? '+' : ''}${fmtFixed(pctChange, 2)}%`}</span>
-                        <span className="rounded-full border border-slate-200 px-2 py-0.5">As of: {s(row.period_end_date, '—')}</span>
+                      <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-[var(--v5-ink-muted)]">
+                        <span className="rounded-full border border-[var(--v5-border)] px-2 py-0.5">Holding: {pctHolding == null ? '—' : `${fmtFixed(pctHolding, 2)}%`}</span>
+                        <span className="rounded-full border border-[var(--v5-border)] px-2 py-0.5">Change: {pctChange == null ? '—' : `${pctChange >= 0 ? '+' : ''}${fmtFixed(pctChange, 2)}%`}</span>
+                        <span className="rounded-full border border-[var(--v5-border)] px-2 py-0.5">As of: {s(row.period_end_date, '—')}</span>
                       </div>
                     </div>
                   );
                 })}
                 {!superstarActivityQ.isLoading && superstarActivity.length === 0 && (
-                  <p className="text-sm text-slate-500">No superstar investor activity rows are available for this symbol yet.</p>
+                  <p className="text-sm text-[var(--v5-muted)]">No superstar investor activity rows are available for this symbol yet.</p>
                 )}
                 {superstarActivityQ.isLoading && (
-                  <p className="text-sm text-slate-500">Loading superstar investor activity...</p>
+                  <p className="text-sm text-[var(--v5-muted)]">Loading superstar investor activity...</p>
                 )}
               </div>
             </div>
@@ -398,32 +398,32 @@ export function StockIntelligenceDeskPage({
               />
             </div>
 
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
-              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">All Screener Names This Stock Is Part Of</div>
+            <div className="rounded-2xl border border-[var(--v5-border)] bg-[var(--v5-surface-2)] p-3">
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--v5-muted)]">All Screener Names This Stock Is Part Of</div>
               <div className="v5-compact-scroll space-y-2 pr-1">
                 {screeners.map((sc: any, i: number) => (
-                  <div key={`${s(sc.source)}-${s(sc.id)}-${i}`} className="rounded-lg border border-slate-200 bg-white p-2">
+                  <div key={`${s(sc.source)}-${s(sc.id)}-${i}`} className="rounded-lg border border-[var(--v5-border)] bg-[var(--v5-surface)] p-2">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-sm font-semibold text-slate-800">{s(sc.name, 'Screener')}</span>
-                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">{s(sc.source, 'source')}</span>
+                      <span className="text-sm font-semibold text-[var(--v5-ink)]">{s(sc.name, 'Screener')}</span>
+                      <span className="rounded-full bg-[var(--v5-surface-2)] px-2 py-0.5 text-[10px] font-semibold text-[var(--v5-ink-muted)]">{s(sc.source, 'source')}</span>
                     </div>
-                    <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-600">
-                      <span className="rounded-full border border-slate-200 px-2 py-0.5">Sentiment: {s(sc.sentiment, 'neutral')}</span>
-                      {s(sc.category).trim() ? <span className="rounded-full border border-slate-200 px-2 py-0.5">{s(sc.category)}</span> : null}
-                      {s(sc.subcategory).trim() ? <span className="rounded-full border border-slate-200 px-2 py-0.5">{s(sc.subcategory)}</span> : null}
+                    <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-[var(--v5-ink-muted)]">
+                      <span className="rounded-full border border-[var(--v5-border)] px-2 py-0.5">Sentiment: {s(sc.sentiment, 'neutral')}</span>
+                      {s(sc.category).trim() ? <span className="rounded-full border border-[var(--v5-border)] px-2 py-0.5">{s(sc.category)}</span> : null}
+                      {s(sc.subcategory).trim() ? <span className="rounded-full border border-[var(--v5-border)] px-2 py-0.5">{s(sc.subcategory)}</span> : null}
                     </div>
-                    {s(sc.description).trim() ? <p className="mt-1 text-xs text-slate-500">{s(sc.description)}</p> : null}
+                    {s(sc.description).trim() ? <p className="mt-1 text-xs text-[var(--v5-muted)]">{s(sc.description)}</p> : null}
                   </div>
                 ))}
-                {!screeners.length && <p className="text-sm text-slate-500">No screener memberships found for this stock.</p>}
+                {!screeners.length && <p className="text-sm text-[var(--v5-muted)]">No screener memberships found for this stock.</p>}
               </div>
             </div>
           </div>
         )}
 
         {tab === 'news' && (
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
-            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Stock News</div>
+          <div className="rounded-2xl border border-[var(--v5-border)] bg-[var(--v5-surface-2)] p-3">
+            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--v5-muted)]">Stock News</div>
             <div className="v5-compact-scroll space-y-2 pr-1">
               {news.map((item: any, i: number) => (
                 <a
@@ -431,14 +431,14 @@ export function StockIntelligenceDeskPage({
                   href={s(item.posturl)}
                   target="_blank"
                   rel="noreferrer"
-                  className="block rounded-lg border border-slate-200 bg-white p-2 hover:bg-slate-50"
+                  className="block rounded-lg border border-[var(--v5-border)] bg-[var(--v5-surface)] p-2 hover:bg-[var(--v5-surface-2)]"
                 >
-                  <div className="text-sm font-semibold text-slate-800">{s(item.heading, 'News item')}</div>
-                  <div className="mt-0.5 text-xs text-slate-500">{s(item.publish_date, '—')}</div>
-                  {s(item.description).trim() ? <p className="mt-1 text-xs text-slate-600">{s(item.description)}</p> : null}
+                  <div className="text-sm font-semibold text-[var(--v5-ink)]">{s(item.heading, 'News item')}</div>
+                  <div className="mt-0.5 text-xs text-[var(--v5-muted)]">{s(item.publish_date, '—')}</div>
+                  {s(item.description).trim() ? <p className="mt-1 text-xs text-[var(--v5-ink-muted)]">{s(item.description)}</p> : null}
                 </a>
               ))}
-              {!news.length && <p className="text-sm text-slate-500">No stock-specific news available right now.</p>}
+              {!news.length && <p className="text-sm text-[var(--v5-muted)]">No stock-specific news available right now.</p>}
             </div>
           </div>
         )}
@@ -447,10 +447,10 @@ export function StockIntelligenceDeskPage({
   );
 }
 
-function MetricCard({ label, value, toneClass = 'text-slate-900' }: { label: string; value: string; toneClass?: string }) {
+function MetricCard({ label, value, toneClass = 'text-[var(--v5-ink)]' }: { label: string; value: string; toneClass?: string }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
-      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{label}</div>
+    <div className="rounded-2xl border border-[var(--v5-border)] bg-[var(--v5-surface-2)] p-3">
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--v5-muted)]">{label}</div>
       <div className={`mt-1 text-lg font-bold ${toneClass}`}>{value}</div>
     </div>
   );
@@ -467,19 +467,19 @@ function CategoryCard({
 }) {
   const present = rows.filter(([, v]) => v != null);
   return (
-    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
-      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</div>
+    <div className="rounded-2xl border border-[var(--v5-border)] bg-[var(--v5-surface-2)] p-3">
+      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--v5-muted)]">{title}</div>
       {present.length ? (
         <div className="grid grid-cols-2 gap-2">
           {present.map(([label, value]) => (
-            <div key={label} className="rounded-lg border border-slate-200 bg-white p-2">
-              <div className="text-sm font-bold text-slate-800">{fmtFixed(value, 2)}{suffix ?? ''}</div>
-              <div className="text-[10px] uppercase tracking-wide text-slate-500">{label}</div>
+            <div key={label} className="rounded-lg border border-[var(--v5-border)] bg-[var(--v5-surface)] p-2">
+              <div className="text-sm font-bold text-[var(--v5-ink)]">{fmtFixed(value, 2)}{suffix ?? ''}</div>
+              <div className="text-[10px] uppercase tracking-wide text-[var(--v5-muted)]">{label}</div>
             </div>
           ))}
         </div>
       ) : (
-        <p className="text-sm text-slate-500">No values available.</p>
+        <p className="text-sm text-[var(--v5-muted)]">No values available.</p>
       )}
     </div>
   );
@@ -493,16 +493,16 @@ function EstimateCard({
   row: { date: string; high: string; low: string; avg: string; actual: string } | null;
 }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
-      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</div>
+    <div className="rounded-2xl border border-[var(--v5-border)] bg-[var(--v5-surface-2)] p-3">
+      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--v5-muted)]">{title}</div>
       {!row ? (
-        <p className="text-sm text-slate-500">No estimate data.</p>
+        <p className="text-sm text-[var(--v5-muted)]">No estimate data.</p>
       ) : (
         <div className="space-y-1.5 text-xs">
-          <div className="flex items-center justify-between"><span className="text-slate-500">Period</span><span className="font-semibold text-slate-700">{s(row.date, '—')}</span></div>
-          <div className="flex items-center justify-between"><span className="text-slate-500">Avg</span><span className="font-semibold text-slate-700">{s(row.avg, '—')}</span></div>
-          <div className="flex items-center justify-between"><span className="text-slate-500">Low / High</span><span className="font-semibold text-slate-700">{s(row.low, '—')} / {s(row.high, '—')}</span></div>
-          <div className="flex items-center justify-between"><span className="text-slate-500">Actual</span><span className="font-semibold text-slate-700">{s(row.actual, '—')}</span></div>
+          <div className="flex items-center justify-between"><span className="text-[var(--v5-muted)]">Period</span><span className="font-semibold text-[var(--v5-ink-soft)]">{s(row.date, '—')}</span></div>
+          <div className="flex items-center justify-between"><span className="text-[var(--v5-muted)]">Avg</span><span className="font-semibold text-[var(--v5-ink-soft)]">{s(row.avg, '—')}</span></div>
+          <div className="flex items-center justify-between"><span className="text-[var(--v5-muted)]">Low / High</span><span className="font-semibold text-[var(--v5-ink-soft)]">{s(row.low, '—')} / {s(row.high, '—')}</span></div>
+          <div className="flex items-center justify-between"><span className="text-[var(--v5-muted)]">Actual</span><span className="font-semibold text-[var(--v5-ink-soft)]">{s(row.actual, '—')}</span></div>
         </div>
       )}
     </div>

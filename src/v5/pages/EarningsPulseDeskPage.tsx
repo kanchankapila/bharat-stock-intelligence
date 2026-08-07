@@ -80,14 +80,14 @@ export function EarningsPulseDeskPage({
 
       <div className="v5-card col-span-12 p-4 xl:col-span-5">
         <div className="mb-3 flex items-center gap-2">
-          <CalendarClock className="h-4 w-4 text-teal-700" />
+          <CalendarClock className="h-4 w-4 text-[var(--v5-positive)]" />
           <h2 className="v5-title text-lg font-semibold">Earnings Pulse</h2>
         </div>
 
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-2">
           <MetricCard label="Declared" value={totalResults == null ? '—' : String(totalResults)} />
-          <MetricCard label="Beat" value={beat == null ? '—' : String(beat)} toneClass="text-teal-700" />
-          <MetricCard label="Miss" value={miss == null ? '—' : String(miss)} toneClass="text-rose-700" />
+          <MetricCard label="Beat" value={beat == null ? '—' : String(beat)} toneClass="text-[var(--v5-positive)]" />
+          <MetricCard label="Miss" value={miss == null ? '—' : String(miss)} toneClass="text-[var(--v5-negative)]" />
           <MetricCard label="In-Line" value={inLine == null ? '—' : String(inLine)} />
         </div>
 
@@ -107,17 +107,17 @@ export function EarningsPulseDeskPage({
               <button
                 key={`${sym}-${i}`}
                 onClick={() => item.symbol && onSelectSymbol?.(item.symbol)}
-                className="v5-table-row-intel w-full rounded-xl border border-slate-200 bg-white p-3 text-left hover:bg-slate-50"
+                className="v5-table-row-intel w-full rounded-xl border border-[var(--v5-border)] bg-[var(--v5-surface)] p-3 text-left hover:bg-[var(--v5-surface-2)]"
               >
                 <div className="flex items-center justify-between gap-2">
                   <div>
-                    <div className="text-sm font-semibold text-slate-800">{s(item.companyName, sym)}</div>
-                    <div className="text-xs text-slate-500">{s(item.symbol, '—')}</div>
+                    <div className="text-sm font-semibold text-[var(--v5-ink)]">{s(item.companyName, sym)}</div>
+                    <div className="text-xs text-[var(--v5-muted)]">{s(item.symbol, '—')}</div>
                   </div>
                   {npGrowth == null ? (
-                    <span className="text-xs text-slate-500">—</span>
+                    <span className="text-xs text-[var(--v5-muted)]">—</span>
                   ) : (
-                    <span className={`inline-flex items-center gap-1 text-xs font-semibold ${npGrowth >= 0 ? 'text-teal-700' : 'text-rose-700'}`}>
+                    <span className={`inline-flex items-center gap-1 text-xs font-semibold ${npGrowth >= 0 ? 'text-[var(--v5-positive)]' : 'text-[var(--v5-negative)]'}`}>
                       {npGrowth >= 0 ? <TrendingUp className="h-3.5 w-3.5" /> : <TrendingDown className="h-3.5 w-3.5" />}
                       {npGrowth >= 0 ? '+' : ''}{fmtFixed(npGrowth, 2)}%
                     </span>
@@ -126,7 +126,7 @@ export function EarningsPulseDeskPage({
               </button>
             );
           })}
-          {!earningsList.length && <p className="text-sm text-slate-500">No results declared in current payload.</p>}
+          {!earningsList.length && <p className="text-sm text-[var(--v5-muted)]">No results declared in current payload.</p>}
         </div>
       </div>
 
@@ -135,7 +135,7 @@ export function EarningsPulseDeskPage({
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
+              <tr className="border-b border-[var(--v5-border)] text-left text-xs uppercase tracking-wide text-[var(--v5-muted)]">
                 <th className="px-3 py-2">Symbol</th>
                 <th className="px-3 py-2">Company</th>
                 <th className="px-3 py-2">Change %</th>
@@ -147,40 +147,40 @@ export function EarningsPulseDeskPage({
                 const chg = numOrNull(row.changePercent);
                 const sym = s(row.symbol);
                 return (
-                  <tr key={`${sym}-${i}`} className="v5-table-row-intel border-b border-slate-100">
-                    <td className="px-3 py-2 font-semibold text-slate-800">
+                  <tr key={`${sym}-${i}`} className="v5-table-row-intel border-b border-[var(--v5-border)]">
+                    <td className="px-3 py-2 font-semibold text-[var(--v5-ink)]">
                       <button
                         onClick={() => sym && onSelectSymbol?.(sym)}
-                        className="text-left hover:text-teal-700"
+                        className="text-left hover:text-[var(--v5-positive)]"
                         title="Open stock intelligence"
                       >
                         <div>{s(row.companyName, sym || '—')}</div>
-                        <div className="text-[11px] font-medium text-slate-500">{sym || '—'}</div>
+                        <div className="text-[11px] font-medium text-[var(--v5-muted)]">{sym || '—'}</div>
                       </button>
                     </td>
-                    <td className="px-3 py-2 text-slate-700">{s(row.companyName, '—')}</td>
+                    <td className="px-3 py-2 text-[var(--v5-ink-soft)]">{s(row.companyName, '—')}</td>
                     <td className="px-3 py-2">
-                      <span className={chg == null ? 'text-slate-500' : (chg >= 0 ? 'text-teal-700 font-semibold' : 'text-rose-700 font-semibold')}>
+                      <span className={chg == null ? 'text-[var(--v5-muted)]' : (chg >= 0 ? 'text-[var(--v5-positive)] font-semibold' : 'text-[var(--v5-negative)] font-semibold')}>
                         {chg == null ? '—' : `${chg >= 0 ? '+' : ''}${fmtFixed(chg, 2)}%`}
                       </span>
                     </td>
-                    <td className="px-3 py-2 text-slate-700">{numOrNull(row.currentPrice) == null ? '—' : `₹${fmtFixed(row.currentPrice, 2)}`}</td>
+                    <td className="px-3 py-2 text-[var(--v5-ink-soft)]">{numOrNull(row.currentPrice) == null ? '—' : `₹${fmtFixed(row.currentPrice, 2)}`}</td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
-          {!shockers.length && <p className="py-6 text-center text-sm text-slate-500">No shocker rows available right now.</p>}
+          {!shockers.length && <p className="py-6 text-center text-sm text-[var(--v5-muted)]">No shocker rows available right now.</p>}
         </div>
       </div>
     </section>
   );
 }
 
-function MetricCard({ label, value, toneClass = 'text-slate-900' }: { label: string; value: string; toneClass?: string }) {
+function MetricCard({ label, value, toneClass = 'text-[var(--v5-ink)]' }: { label: string; value: string; toneClass?: string }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
-      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{label}</div>
+    <div className="rounded-2xl border border-[var(--v5-border)] bg-[var(--v5-surface-2)] p-3">
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--v5-muted)]">{label}</div>
       <div className={`mt-1 text-lg font-bold ${toneClass}`}>{value}</div>
     </div>
   );

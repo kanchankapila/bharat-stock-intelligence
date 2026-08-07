@@ -4,11 +4,16 @@ type KpiItem = {
   tone?: 'neutral' | 'positive' | 'negative' | 'warning';
 };
 
+// These map to CSS variables (v5.css) rather than hardcoded Tailwind text colors -- the
+// hardcoded classes this replaced (text-slate-900, text-teal-700, etc.) don't respond to
+// .v6-root's bridged theme at all, since Tailwind utility classes never reference a custom
+// property; they'd stay dark-on-dark under V6Shell's dark mode regardless of what v5.css itself
+// does. See v6-theme.css for the bridge and v5.css's header comment for the full story.
 function toneClass(tone: KpiItem['tone']): string {
-  if (tone === 'positive') return 'text-teal-700';
-  if (tone === 'negative') return 'text-rose-700';
-  if (tone === 'warning') return 'text-amber-700';
-  return 'text-slate-900';
+  if (tone === 'positive') return 'v5-kpi-value-positive';
+  if (tone === 'negative') return 'v5-kpi-value-negative';
+  if (tone === 'warning') return 'v5-kpi-value-warning';
+  return 'v5-kpi-value-neutral';
 }
 
 export function V5KpiStrip({ items }: { items: KpiItem[] }) {

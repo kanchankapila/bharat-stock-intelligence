@@ -41,6 +41,44 @@
   --v6-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
   --v6-shadow-sm: 0 4px 30px rgba(0, 0, 0, 0.2);
 
+  /* Bridge: v5's desk pages (Options/Risk/Signal Review/etc, rendered here for dashboardVersion
+     ==='v6' -- see App.tsx) use v5.css's own --v5-* variables and .v5-* classes, which .v5-root
+     (the standalone /v5 route) defines with its own light-only values. Aliasing the same names
+     here means those exact same components/classes pick up V6Shell's theme automatically with
+     zero changes to v5.css or the desk-page components themselves whenever they're nested under
+     .v6-root instead of .v5-root. --v5-sky/--v5-indigo are categorical chart colors (mini-fill/
+     sparkline variants), not semantic theme colors, so they get their own dark-legible shades
+     here rather than reusing a --v6-* token that means something else. */
+  --v5-bg: var(--v6-bg);
+  --v5-surface: var(--v6-surface);
+  --v5-surface-2: var(--v6-bg-band);
+  --v5-surface-2-to: var(--v6-bg-band);
+  --v5-ink: var(--v6-ink);
+  --v5-ink-soft: var(--v6-ink-soft);
+  --v5-ink-muted: var(--v6-muted);
+  --v5-muted: var(--v6-muted);
+  --v5-border: var(--v6-border);
+  --v5-border-soft: var(--v6-border);
+  --v5-accent: var(--v6-accent);
+  --v5-accent-deep: var(--v6-accent-ink);
+  --v5-accent-hover: var(--v6-accent-ink);
+  --v5-accent-soft: var(--v6-accent-soft);
+  --v5-accent-focus-ring: var(--v6-accent-soft);
+  --v5-positive: var(--v6-positive);
+  --v5-positive-bright: var(--v6-positive);
+  --v5-negative: var(--v6-negative);
+  --v5-negative-bright: var(--v6-negative);
+  --v5-negative-soft: var(--v6-negative-soft);
+  --v5-warning: var(--v6-warning);
+  --v5-amber-bright: var(--v6-warning);
+  --v5-sky: #38bdf8;
+  --v5-indigo: #818cf8;
+  --v5-stripe-a: var(--v6-border-strong);
+  --v5-stripe-b: var(--v6-border);
+  --v5-scrollbar-thumb: var(--v6-border-strong);
+  --v5-controlbar-bg: var(--v6-surface-raised);
+  --v5-sparkline-bg-to: var(--v6-bg-band);
+
   min-height: 100vh;
   background:
     radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.15) 0px, transparent 50%),
@@ -78,6 +116,37 @@
   --v6-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
   --v6-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05);
 
+  /* v5-bridge, light -- see the base .v6-root block's comment for why this exists. */
+  --v5-bg: var(--v6-bg);
+  --v5-surface: var(--v6-surface);
+  --v5-surface-2: var(--v6-bg-band);
+  --v5-surface-2-to: var(--v6-bg-band);
+  --v5-ink: var(--v6-ink);
+  --v5-ink-soft: var(--v6-ink-soft);
+  --v5-ink-muted: var(--v6-muted);
+  --v5-muted: var(--v6-muted);
+  --v5-border: var(--v6-border);
+  --v5-border-soft: var(--v6-border);
+  --v5-accent: var(--v6-accent);
+  --v5-accent-deep: var(--v6-accent-ink);
+  --v5-accent-hover: var(--v6-accent-ink);
+  --v5-accent-soft: var(--v6-accent-soft);
+  --v5-accent-focus-ring: var(--v6-accent-soft);
+  --v5-positive: var(--v6-positive);
+  --v5-positive-bright: var(--v6-positive);
+  --v5-negative: var(--v6-negative);
+  --v5-negative-bright: var(--v6-negative);
+  --v5-negative-soft: var(--v6-negative-soft);
+  --v5-warning: var(--v6-warning);
+  --v5-amber-bright: var(--v6-warning);
+  --v5-sky: #0284c7;
+  --v5-indigo: #4f46e5;
+  --v5-stripe-a: var(--v6-border-strong);
+  --v5-stripe-b: var(--v6-border);
+  --v5-scrollbar-thumb: var(--v6-border-strong);
+  --v5-controlbar-bg: var(--v6-surface-raised);
+  --v5-sparkline-bg-to: var(--v6-bg-band);
+
   background:
     radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.06) 0px, transparent 50%),
     radial-gradient(at 100% 0%, rgba(79, 70, 229, 0.05) 0px, transparent 50%),
@@ -110,6 +179,37 @@
   --v6-warning-soft: rgba(245, 158, 11, 0.12);
   --v6-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
   --v6-shadow-sm: 0 4px 30px rgba(0, 0, 0, 0.2);
+
+  /* v5-bridge, dark -- see the base .v6-root block's comment for why this exists. */
+  --v5-bg: var(--v6-bg);
+  --v5-surface: var(--v6-surface);
+  --v5-surface-2: var(--v6-bg-band);
+  --v5-surface-2-to: var(--v6-bg-band);
+  --v5-ink: var(--v6-ink);
+  --v5-ink-soft: var(--v6-ink-soft);
+  --v5-ink-muted: var(--v6-muted);
+  --v5-muted: var(--v6-muted);
+  --v5-border: var(--v6-border);
+  --v5-border-soft: var(--v6-border);
+  --v5-accent: var(--v6-accent);
+  --v5-accent-deep: var(--v6-accent-ink);
+  --v5-accent-hover: var(--v6-accent-ink);
+  --v5-accent-soft: var(--v6-accent-soft);
+  --v5-accent-focus-ring: var(--v6-accent-soft);
+  --v5-positive: var(--v6-positive);
+  --v5-positive-bright: var(--v6-positive);
+  --v5-negative: var(--v6-negative);
+  --v5-negative-bright: var(--v6-negative);
+  --v5-negative-soft: var(--v6-negative-soft);
+  --v5-warning: var(--v6-warning);
+  --v5-amber-bright: var(--v6-warning);
+  --v5-sky: #38bdf8;
+  --v5-indigo: #818cf8;
+  --v5-stripe-a: var(--v6-border-strong);
+  --v5-stripe-b: var(--v6-border);
+  --v5-scrollbar-thumb: var(--v6-border-strong);
+  --v5-controlbar-bg: var(--v6-surface-raised);
+  --v5-sparkline-bg-to: var(--v6-bg-band);
 
   background:
     radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.15) 0px, transparent 50%),

@@ -90,7 +90,7 @@ export function OptionsDeskPage({ onSelectSymbol }: { onSelectSymbol?: (symbol: 
       <div className="v5-card col-span-12 p-4">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2">
-            <Activity className="h-4 w-4 text-teal-700" />
+            <Activity className="h-4 w-4 text-[var(--v5-positive)]" />
             <h2 className="v5-title text-lg font-semibold">Options Desk</h2>
           </div>
           <input
@@ -111,30 +111,30 @@ export function OptionsDeskPage({ onSelectSymbol }: { onSelectSymbol?: (symbol: 
       </div>
 
       <div className="v5-card col-span-12 p-4 xl:col-span-6">
-        <div className="mb-2 flex items-center gap-2"><ShieldAlert className="h-4 w-4 text-rose-700" /><h3 className="v5-title text-base font-semibold">Top Call OI Resistance</h3></div>
+        <div className="mb-2 flex items-center gap-2"><ShieldAlert className="h-4 w-4 text-[var(--v5-negative)]" /><h3 className="v5-title text-base font-semibold">Top Call OI Resistance</h3></div>
         <div className="space-y-2">
           {topCallOI.map((r: any) => (
-            <div key={`c-${n(r.strikePrice)}`} className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-              <span className="font-semibold text-slate-800">{n(r.strikePrice)}</span>
-              <span className="text-slate-600">OI {compact(n(r.callOi))}</span>
-              <span className="text-slate-500">Δ {compact(n(r.callOiChange))}</span>
+            <div key={`c-${n(r.strikePrice)}`} className="flex items-center justify-between rounded-lg border border-[var(--v5-border)] bg-[var(--v5-surface-2)] px-3 py-2">
+              <span className="font-semibold text-[var(--v5-ink)]">{n(r.strikePrice)}</span>
+              <span className="text-[var(--v5-ink-muted)]">OI {compact(n(r.callOi))}</span>
+              <span className="text-[var(--v5-muted)]">Δ {compact(n(r.callOiChange))}</span>
             </div>
           ))}
-          {!topCallOI.length && <p className="text-sm text-slate-500">No call OI rows yet for this symbol.</p>}
+          {!topCallOI.length && <p className="text-sm text-[var(--v5-muted)]">No call OI rows yet for this symbol.</p>}
         </div>
       </div>
 
       <div className="v5-card col-span-12 p-4 xl:col-span-6">
-        <div className="mb-2 flex items-center gap-2"><Target className="h-4 w-4 text-emerald-700" /><h3 className="v5-title text-base font-semibold">Top Put OI Support</h3></div>
+        <div className="mb-2 flex items-center gap-2"><Target className="h-4 w-4 text-[var(--v5-positive)]" /><h3 className="v5-title text-base font-semibold">Top Put OI Support</h3></div>
         <div className="space-y-2">
           {topPutOI.map((r: any) => (
-            <div key={`p-${n(r.strikePrice)}`} className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-              <span className="font-semibold text-slate-800">{n(r.strikePrice)}</span>
-              <span className="text-slate-600">OI {compact(n(r.putOi))}</span>
-              <span className="text-slate-500">Δ {compact(n(r.putOiChange))}</span>
+            <div key={`p-${n(r.strikePrice)}`} className="flex items-center justify-between rounded-lg border border-[var(--v5-border)] bg-[var(--v5-surface-2)] px-3 py-2">
+              <span className="font-semibold text-[var(--v5-ink)]">{n(r.strikePrice)}</span>
+              <span className="text-[var(--v5-ink-muted)]">OI {compact(n(r.putOi))}</span>
+              <span className="text-[var(--v5-muted)]">Δ {compact(n(r.putOiChange))}</span>
             </div>
           ))}
-          {!topPutOI.length && <p className="text-sm text-slate-500">No put OI rows yet for this symbol.</p>}
+          {!topPutOI.length && <p className="text-sm text-[var(--v5-muted)]">No put OI rows yet for this symbol.</p>}
         </div>
       </div>
 
@@ -147,7 +147,7 @@ export function OptionsDeskPage({ onSelectSymbol }: { onSelectSymbol?: (symbol: 
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
+              <tr className="border-b border-[var(--v5-border)] text-left text-xs uppercase tracking-wide text-[var(--v5-muted)]">
                 <th className="px-3 py-2">Stock</th>
                 <th className="px-3 py-2">Expiry</th>
                 <th className="px-3 py-2">PCR</th>
@@ -159,15 +159,15 @@ export function OptionsDeskPage({ onSelectSymbol }: { onSelectSymbol?: (symbol: 
               {(optionsQ.data ?? []).slice(0, 40).map((row: any, i: number) => {
                 const sym = s(row.symbol);
                 return (
-                <tr key={`${sym}-${i}`} className="v5-table-row-intel border-b border-slate-100">
-                  <td className="px-3 py-2 font-semibold text-slate-800">
+                <tr key={`${sym}-${i}`} className="v5-table-row-intel border-b border-[var(--v5-border)]">
+                  <td className="px-3 py-2 font-semibold text-[var(--v5-ink)]">
                     <button
                       onClick={() => sym && onSelectSymbol?.(sym)}
-                      className="text-left hover:text-teal-700"
+                      className="text-left hover:text-[var(--v5-positive)]"
                       title="Open stock intelligence"
                     >
                       <div>{stockDisplayName(sym, sym)}</div>
-                      <div className="text-[11px] font-medium text-slate-500">{sym}</div>
+                      <div className="text-[11px] font-medium text-[var(--v5-muted)]">{sym}</div>
                     </button>
                   </td>
                   <td className="px-3 py-2">{s(row.expiry, '—')}</td>
@@ -190,37 +190,37 @@ export function OptionsDeskPage({ onSelectSymbol }: { onSelectSymbol?: (symbol: 
           {maxPainAlerts.slice(0, 10).map((x: any) => {
             const sym = s(x.symbol);
             return (
-            <div key={s(x.symbol)} className="v5-table-row-intel rounded-lg border border-slate-200 p-2">
+            <div key={s(x.symbol)} className="v5-table-row-intel rounded-lg border border-[var(--v5-border)] p-2">
               <div className="flex items-center justify-between">
                 <button
                   onClick={() => sym && onSelectSymbol?.(sym)}
-                  className="font-semibold text-slate-800 hover:text-teal-700 text-left"
+                  className="font-semibold text-[var(--v5-ink)] hover:text-[var(--v5-positive)] text-left"
                   title="Open stock intelligence"
                 >
                   <div>{stockDisplayName(sym, sym)}</div>
-                  <div className="text-[11px] font-medium text-slate-500">{sym}</div>
+                  <div className="text-[11px] font-medium text-[var(--v5-muted)]">{sym}</div>
                 </button>
-                <div className="text-xs text-slate-500">{fmtFixed(x.diffPct, 2)}%</div>
+                <div className="text-xs text-[var(--v5-muted)]">{fmtFixed(x.diffPct, 2)}%</div>
               </div>
-              <div className="text-[11px] text-slate-500">{s(x.rec)}</div>
+              <div className="text-[11px] text-[var(--v5-muted)]">{s(x.rec)}</div>
             </div>
           );})}
           {(rolloverQ.data ?? []).slice(0, 8).map((x: any) => {
             const sym = s(x.symbol);
             return (
-            <div key={`${s(x.symbol)}-roll`} className="v5-table-row-intel rounded-lg border border-slate-200 bg-slate-50 p-2">
+            <div key={`${s(x.symbol)}-roll`} className="v5-table-row-intel rounded-lg border border-[var(--v5-border)] bg-[var(--v5-surface-2)] p-2">
               <div className="flex items-center justify-between">
                 <button
                   onClick={() => sym && onSelectSymbol?.(sym)}
-                  className="font-semibold text-slate-800 hover:text-teal-700 text-left"
+                  className="font-semibold text-[var(--v5-ink)] hover:text-[var(--v5-positive)] text-left"
                   title="Open stock intelligence"
                 >
                   <div>{stockDisplayName(sym, sym)}</div>
-                  <div className="text-[11px] font-medium text-slate-500">{sym}</div>
+                  <div className="text-[11px] font-medium text-[var(--v5-muted)]">{sym}</div>
                 </button>
-                <div className="text-xs text-slate-500">{s(x.positioning)}</div>
+                <div className="text-xs text-[var(--v5-muted)]">{s(x.positioning)}</div>
               </div>
-              <div className="text-[11px] text-slate-500">Rollover {fmtFixed(x.rollover_pct, 1)}% | CoC {fmtFixed(x.cost_of_carry_ann, 1)}%</div>
+              <div className="text-[11px] text-[var(--v5-muted)]">Rollover {fmtFixed(x.rollover_pct, 1)}% | CoC {fmtFixed(x.cost_of_carry_ann, 1)}%</div>
             </div>
           );})}
         </div>
@@ -231,9 +231,9 @@ export function OptionsDeskPage({ onSelectSymbol }: { onSelectSymbol?: (symbol: 
 
 function Metric({ title, value }: { title: string; value: string }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
-      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{title}</div>
-      <div className="mt-1 text-lg font-bold text-slate-900">{value}</div>
+    <div className="rounded-2xl border border-[var(--v5-border)] bg-[var(--v5-surface-2)] p-3">
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--v5-muted)]">{title}</div>
+      <div className="mt-1 text-lg font-bold text-[var(--v5-ink)]">{value}</div>
     </div>
   );
 }
