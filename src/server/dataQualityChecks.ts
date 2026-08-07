@@ -250,9 +250,22 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
     category: 'macro', critical: false, table: 'nse_ipo_calendar', dateColumn: 'fetched_at', warnDays: 14 },
 
   // signals / scoring
+  // 2026-08-07: was warnDays/failDays 0.1/0.25 (2.4h/6h) -- but confluence.jobs.ts's
+  // processConfluenceCompute() deliberately skips ALL real writes outside a ~9h window
+  // (isMarketOpen() 9:15am-3:30pm PLUS isConfluenceComputeWindow()'s further 8am-9:15am/
+  // 3:30pm-5pm skip -- see that file's own docstring: "Outside these hours (~00:00-06:00,
+  // ~08:00-17:00 IST...)"), so this check false-alarmed WARN then CRITICAL FAIL every single
+  // trading day from ~2.4h and ~6h after the ~8am pre-open write, hours before the legitimate
+  // 5pm resume -- live-caught mid-warn via `npm run dq:check` at 10am IST. monitorScripts.ts's
+  // sibling 'confluence-compute' entry already carries the correct fix (staleLimitHours: 10,
+  // "generously above the real ~6h15m gap" per its own comment -- actually ~9h once
+  // isConfluenceComputeWindow's wider skip is counted, but 10h safely covers either estimate);
+  // this registry was never updated to match when that one was fixed. Matched to the same 10h
+  // ceiling here (9/12 = 0.375/0.5 days) rather than re-deriving a tighter number, so both
+  // registries agree on what "stale" means for the same underlying table.
   { id: 'confluence-signals-freshness', label: 'confluence_signals (canonical confluence engine)',
     category: 'scoring', critical: true, table: 'confluence_signals', dateColumn: 'computed_at',
-    tradingDayAware: false, warnDays: 0.1, failDays: 0.25 },
+    tradingDayAware: false, warnDays: 0.375, failDays: 0.5 },
   { id: 'unified-signals-freshness', label: 'unified_signals',
     category: 'signals', critical: false, table: 'unified_signals', dateColumn: 'signal_date', warnDays: 3, failDays: 5 },
   { id: 'screener-appearances-freshness', label: 'screener_appearances (feeds screener_momentum_score)',

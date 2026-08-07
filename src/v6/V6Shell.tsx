@@ -1,13 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  TrendingUp, Menu, X, Sun, Moon, Sparkles, ChevronDown,
+  TrendingUp, Menu, X, Sparkles, ChevronDown,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { NAV_GROUPS } from '../lib/navGroups';
 import { isNseMarketOpen } from '../lib/timeFormat';
 import './v6-theme.css';
 
-type Theme = 'light' | 'dark';
 type DashboardVersion = 'v1' | 'v2' | 'v3' | 'v6';
 
 interface V6ShellProps {
@@ -16,17 +15,6 @@ interface V6ShellProps {
   dashboardVersion?: DashboardVersion;
   onChangeVersion?: (version: DashboardVersion) => void;
   children: React.ReactNode;
-}
-
-const THEME_KEY = 'v6Theme';
-
-function readStoredTheme(): Theme | null {
-  const saved = localStorage.getItem(THEME_KEY);
-  return saved === 'light' || saved === 'dark' ? saved : null;
-}
-
-function systemPrefersDark(): boolean {
-  return typeof window !== 'undefined' && window.matchMedia?.('(prefers-color-scheme: dark)').matches;
 }
 
 /** Look up a nav item's label across every group, for the header title. */
@@ -57,21 +45,12 @@ export const V6Shell: React.FC<V6ShellProps> = ({
   children,
 }) => {
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [theme, setTheme] = useState<Theme>(() => readStoredTheme() ?? (systemPrefersDark() ? 'dark' : 'light'));
   const [marketOpen, setMarketOpen] = useState(() => isNseMarketOpen());
 
   useEffect(() => {
     const t = setInterval(() => setMarketOpen(isNseMarketOpen()), 60_000);
     return () => clearInterval(t);
   }, []);
-
-  const toggleTheme = () => {
-    setTheme((prev) => {
-      const next = prev === 'dark' ? 'light' : 'dark';
-      localStorage.setItem(THEME_KEY, next);
-      return next;
-    });
-  };
 
   const handleNav = (id: string) => {
     setActiveTab(id);
@@ -180,7 +159,7 @@ export const V6Shell: React.FC<V6ShellProps> = ({
   );
 
   return (
-    <div className={cn('v6-root', 'flex h-screen overflow-hidden')} data-theme={theme}>
+    <div className={cn('v6-root', 'flex h-screen overflow-hidden')}>
       {/* Desktop sidebar */}
       <aside
         className="hidden md:flex flex-col w-64 shrink-0 p-4"
@@ -255,16 +234,6 @@ export const V6Shell: React.FC<V6ShellProps> = ({
             />
             {marketOpen ? 'Market Live' : 'Market Closed'}
           </span>
-
-          <button
-            onClick={toggleTheme}
-            className="p-1.5 rounded-lg shrink-0"
-            style={{ border: '1px solid var(--v6-border)', color: 'var(--v6-muted)' }}
-            aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-            title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-          >
-            {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-          </button>
         </header>
 
         <main className="flex-1 overflow-y-auto v6-scrollbar p-4 sm:p-6" style={{ background: 'var(--v6-bg)' }}>

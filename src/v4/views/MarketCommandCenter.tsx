@@ -16,6 +16,7 @@ import { V4QuickNav } from '../components/V4QuickNav';
 import { TopPicksWidget } from '../components/TopPicksWidget';
 import { MoneyFlowPulseWidget } from '../components/MoneyFlowPulseWidget';
 import { MarketBreadthIntraday } from '../../components/MarketBreadthIntraday';
+import { ActivityFeed } from '../../components/ActivityFeed';
 import { currentTimeInZone } from '../../lib/timeFormat';
 
 const REGIME_STYLE: Record<string, { color: string; bg: string; label: string }> = {
@@ -116,6 +117,14 @@ export const MarketCommandCenter: React.FC<MarketCommandCenterProps> = ({ onSele
         <TopPicksWidget onSelectStock={onSelectStock} />
         <MoneyFlowPulseWidget />
       </div>
+
+      {/* Chronological signal/news/alert stream -- the one piece this page was missing
+          relative to v5's MarketPulsePage, per the Phase 3 home-page composition
+          ("V6 Canonical Workbench" proposal). Reuses the same shared component
+          DashboardPage.tsx already embeds, not a new implementation. */}
+      <Card title="Activity Feed" icon={Flame}>
+        <ActivityFeed onSelectStock={onSelectStock} />
+      </Card>
 
       <PreMarketBriefing />
 

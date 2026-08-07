@@ -2,15 +2,20 @@
  * V6 Workbench theme -- Phase 1 of the frontend consolidation, restyled 2026-08-07 to match
  * v1 AppShell's actual look and feel (the codebase's real "Premium Dark Theme": deep near-black
  * ground, indigo/violet ambient glow, frosted-glass surfaces, Inter + JetBrains Mono) instead of
- * v5's teal-on-white palette. Values below for dark mode are pulled directly from index.css's
- * global .glass/.glass-strong/body rules (indigo #6366f1, near-black #050508) rather than
- * approximated, so v6's dark mode is visually the same family as v1, not just similar.
+ * v5's teal-on-white palette. Values below are pulled directly from index.css's global
+ * .glass/.glass-strong/body rules (indigo #6366f1, near-black #050508) rather than approximated,
+ * so v6 is visually the same family as v1, not just similar.
  *
- * Light mode is a genuinely new design (v1 itself is dark-only, so there's no existing light
- * counterpart to copy) built on the same indigo accent -- frosted glass doesn't read correctly
- * over a flat light ground the way it does over v1's colored gradient backdrop, so light mode
- * uses flat elevated cards with a soft shadow instead of the blur effect, while keeping the same
- * ink/accent relationships so the two modes still read as one product.
+ * Dark-only, matching v1's own AppShell (which has no light mode at all) -- an earlier draft of
+ * this file added a light/dark toggle with its own light palette, but that's gone now: it let a
+ * stale `localStorage` value desync the shell chrome from the (theme-agnostic, always-dark) page
+ * content built from v1/v4 components, splitting the UI into a light header over a dark body.
+ * Removing the toggle removes the whole class of bug, not just this one instance of it.
+ *
+ * Neutrals (ink/muted/faint/border) are NOT flat Tailwind slate -- they're pulled from an
+ * indigo-tinted grey ramp (hue ~250deg, matching --v6-accent) so secondary text and borders read
+ * as a deliberate choice rather than an unconsidered default. v1's own index.css does use plain
+ * slate-400 in one spot (the `.label` utility) but that's not treated as precedent here.
  *
  * Scoped to `.v6-root` so it can't leak into AppShell/V2AppShell/v5-isolated, which define their
  * own color systems.
@@ -23,10 +28,10 @@
   --v6-surface-raised: rgba(8, 9, 12, 0.88);
   --v6-surface-blur: blur(20px) saturate(160%);
   --v6-surface-blur-strong: blur(32px) saturate(200%);
-  --v6-ink: #f1f5f9;
-  --v6-ink-soft: #cbd5e1;
-  --v6-muted: #94a3b8;
-  --v6-faint: #64748b;
+  --v6-ink: #f3f1fb;
+  --v6-ink-soft: #c8c4e6;
+  --v6-muted: #948fbf;
+  --v6-faint: #6b6592;
   --v6-border: rgba(255, 255, 255, 0.07);
   --v6-border-strong: rgba(255, 255, 255, 0.11);
   --v6-accent: #6366f1;
@@ -89,134 +94,6 @@
   color: var(--v6-ink);
   font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
   font-feature-settings: "cv02", "cv03", "cv04", "cv11";
-}
-
-.v6-root[data-theme="light"] {
-  --v6-bg: #f4f5f8;
-  --v6-bg-band: rgba(15, 23, 42, 0.03);
-  --v6-surface: #ffffff;
-  --v6-surface-raised: #ffffff;
-  --v6-surface-blur: none;
-  --v6-surface-blur-strong: none;
-  --v6-ink: #0f172a;
-  --v6-ink-soft: #334155;
-  --v6-muted: #64748b;
-  --v6-faint: #94a3b8;
-  --v6-border: #e2e5ec;
-  --v6-border-strong: #cbd2df;
-  --v6-accent: #4f46e5;
-  --v6-accent-ink: #4338ca;
-  --v6-accent-soft: #e9e8fd;
-  --v6-positive: #059669;
-  --v6-positive-soft: #e3f7f0;
-  --v6-negative: #e11d48;
-  --v6-negative-soft: #fde4ea;
-  --v6-warning: #b45309;
-  --v6-warning-soft: #fdf1de;
-  --v6-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
-  --v6-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05);
-
-  /* v5-bridge, light -- see the base .v6-root block's comment for why this exists. */
-  --v5-bg: var(--v6-bg);
-  --v5-surface: var(--v6-surface);
-  --v5-surface-2: var(--v6-bg-band);
-  --v5-surface-2-to: var(--v6-bg-band);
-  --v5-ink: var(--v6-ink);
-  --v5-ink-soft: var(--v6-ink-soft);
-  --v5-ink-muted: var(--v6-muted);
-  --v5-muted: var(--v6-muted);
-  --v5-border: var(--v6-border);
-  --v5-border-soft: var(--v6-border);
-  --v5-accent: var(--v6-accent);
-  --v5-accent-deep: var(--v6-accent-ink);
-  --v5-accent-hover: var(--v6-accent-ink);
-  --v5-accent-soft: var(--v6-accent-soft);
-  --v5-accent-focus-ring: var(--v6-accent-soft);
-  --v5-positive: var(--v6-positive);
-  --v5-positive-bright: var(--v6-positive);
-  --v5-negative: var(--v6-negative);
-  --v5-negative-bright: var(--v6-negative);
-  --v5-negative-soft: var(--v6-negative-soft);
-  --v5-warning: var(--v6-warning);
-  --v5-amber-bright: var(--v6-warning);
-  --v5-sky: #0284c7;
-  --v5-indigo: #4f46e5;
-  --v5-stripe-a: var(--v6-border-strong);
-  --v5-stripe-b: var(--v6-border);
-  --v5-scrollbar-thumb: var(--v6-border-strong);
-  --v5-controlbar-bg: var(--v6-surface-raised);
-  --v5-sparkline-bg-to: var(--v6-bg-band);
-
-  background:
-    radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.06) 0px, transparent 50%),
-    radial-gradient(at 100% 0%, rgba(79, 70, 229, 0.05) 0px, transparent 50%),
-    #f4f5f8;
-}
-
-/* Explicit dark override so a saved preference wins over the OS default either direction --
-   values match .v6-root's own top-level (dark) definition above. */
-.v6-root[data-theme="dark"] {
-  --v6-bg: #050508;
-  --v6-bg-band: rgba(255, 255, 255, 0.03);
-  --v6-surface: rgba(10, 11, 16, 0.65);
-  --v6-surface-raised: rgba(8, 9, 12, 0.88);
-  --v6-surface-blur: blur(20px) saturate(160%);
-  --v6-surface-blur-strong: blur(32px) saturate(200%);
-  --v6-ink: #f1f5f9;
-  --v6-ink-soft: #cbd5e1;
-  --v6-muted: #94a3b8;
-  --v6-faint: #64748b;
-  --v6-border: rgba(255, 255, 255, 0.07);
-  --v6-border-strong: rgba(255, 255, 255, 0.11);
-  --v6-accent: #6366f1;
-  --v6-accent-ink: #a5b4fc;
-  --v6-accent-soft: rgba(99, 102, 241, 0.15);
-  --v6-positive: #10b981;
-  --v6-positive-soft: rgba(16, 185, 129, 0.12);
-  --v6-negative: #f43f5e;
-  --v6-negative-soft: rgba(244, 63, 94, 0.12);
-  --v6-warning: #f59e0b;
-  --v6-warning-soft: rgba(245, 158, 11, 0.12);
-  --v6-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
-  --v6-shadow-sm: 0 4px 30px rgba(0, 0, 0, 0.2);
-
-  /* v5-bridge, dark -- see the base .v6-root block's comment for why this exists. */
-  --v5-bg: var(--v6-bg);
-  --v5-surface: var(--v6-surface);
-  --v5-surface-2: var(--v6-bg-band);
-  --v5-surface-2-to: var(--v6-bg-band);
-  --v5-ink: var(--v6-ink);
-  --v5-ink-soft: var(--v6-ink-soft);
-  --v5-ink-muted: var(--v6-muted);
-  --v5-muted: var(--v6-muted);
-  --v5-border: var(--v6-border);
-  --v5-border-soft: var(--v6-border);
-  --v5-accent: var(--v6-accent);
-  --v5-accent-deep: var(--v6-accent-ink);
-  --v5-accent-hover: var(--v6-accent-ink);
-  --v5-accent-soft: var(--v6-accent-soft);
-  --v5-accent-focus-ring: var(--v6-accent-soft);
-  --v5-positive: var(--v6-positive);
-  --v5-positive-bright: var(--v6-positive);
-  --v5-negative: var(--v6-negative);
-  --v5-negative-bright: var(--v6-negative);
-  --v5-negative-soft: var(--v6-negative-soft);
-  --v5-warning: var(--v6-warning);
-  --v5-amber-bright: var(--v6-warning);
-  --v5-sky: #38bdf8;
-  --v5-indigo: #818cf8;
-  --v5-stripe-a: var(--v6-border-strong);
-  --v5-stripe-b: var(--v6-border);
-  --v5-scrollbar-thumb: var(--v6-border-strong);
-  --v5-controlbar-bg: var(--v6-surface-raised);
-  --v5-sparkline-bg-to: var(--v6-bg-band);
-
-  background:
-    radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.15) 0px, transparent 50%),
-    radial-gradient(at 50% 0%, rgba(167, 139, 250, 0.1) 0px, transparent 50%),
-    radial-gradient(at 100% 0%, rgba(59, 130, 246, 0.15) 0px, transparent 50%),
-    #050508;
-  background-attachment: fixed;
 }
 
 .v6-title {

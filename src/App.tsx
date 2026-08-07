@@ -407,9 +407,17 @@ export default function App() {
               />
             } />
             <Route path="/details" element={selectedSymbol ? (
-              // v6 reuses v3's stock-detail view as a Phase 1 placeholder -- the merged
-              // canonical stock-research page (Phase 3 of the consolidation) replaces this.
-              (dashboardVersion === 'v3' || dashboardVersion === 'v6') ? (
+              // v6: Phase 3 of the consolidation replaced the v3-placeholder here with the real
+              // merged stock-research page (StockIntelligencePage, v4's base + v5's
+              // superstar-investor-activity addition) -- the same page /stock-intelligence-hub
+              // already uses for every version, so this now matches that page's content exactly.
+              dashboardVersion === 'v6' ? (
+                <StockIntelligencePage
+                  initialSymbol={selectedSymbol}
+                  watchlist={watchlist}
+                  onToggleWatchlist={toggleWatchlist}
+                />
+              ) : dashboardVersion === 'v3' ? (
                 <V3Dashboard
                   stocks={stocks}
                   watchlist={watchlist}
@@ -429,9 +437,17 @@ export default function App() {
               )
             ) : <div className="p-6">Select a stock to view details</div>} />
             <Route path="/" element={
-              // v6's real composed home page is Phase 3 of the consolidation; until then it
-              // reuses v3's dashboard as a placeholder, matching /details and /dashboard below.
-              (dashboardVersion === 'v3' || dashboardVersion === 'v6') ? (
+              // v6's real home: MarketCommandCenter is already exactly what Phase 3's composed-
+              // home-page spec described ("V6 Canonical Workbench" proposal) -- regime/breadth,
+              // canonical top picks, money flow, pre-market briefing, F&O read, sentiment, sector
+              // rotation, movers, breakouts, earnings -- all built from proven, reused widgets
+              // already. Only genuinely new addition was the Activity Feed card (see that file).
+              dashboardVersion === 'v6' ? (
+                <MarketCommandCenter
+                  onSelectStock={handleSelectStock}
+                  onSelectIndex={(id, name) => { setSelectedIndex({ id, name }); navigate('/indices'); }}
+                />
+              ) : dashboardVersion === 'v3' ? (
                 <V3Dashboard
                   stocks={stocks}
                   watchlist={watchlist}
@@ -444,7 +460,12 @@ export default function App() {
               )
             } />
             <Route path="/dashboard" element={
-              (dashboardVersion === 'v3' || dashboardVersion === 'v6') ? (
+              dashboardVersion === 'v6' ? (
+                <MarketCommandCenter
+                  onSelectStock={handleSelectStock}
+                  onSelectIndex={(id, name) => { setSelectedIndex({ id, name }); navigate('/indices'); }}
+                />
+              ) : dashboardVersion === 'v3' ? (
                 <V3Dashboard
                   stocks={stocks}
                   watchlist={watchlist}
@@ -478,7 +499,7 @@ export default function App() {
             <Route path="/discover" element={<div className="p-6"><NSEStockDiscovery onSelectStock={handleSelectStock} /></div>} />
             <Route path="/smart-money" element={
               dashboardVersion === 'v6'
-                ? <InstitutionalFlowDeskPage onSelectSymbol={handleSelectStock} />
+                ? <InstitutionalFlowDeskPage />
                 : <SmartMoneyPage onSelectStock={handleSelectStock} />
             } />
             <Route path="/earnings" element={

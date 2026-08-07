@@ -1,4 +1,4 @@
-import type { ComponentType } from 'react';
+import type { ComponentType, CSSProperties } from 'react';
 import {
   LayoutDashboard, Trophy, BarChart2, Activity, Filter, Target, Zap,
   Crosshair, Search, History, PieChart, Bookmark, Users, Globe, CheckCircle2,
@@ -7,7 +7,9 @@ import {
   Settings, Flame,
 } from 'lucide-react';
 
-export interface NavItem { icon: ComponentType<{ className?: string }>; label: string; id: string; }
+// V6Shell's nav render passes `style` (theme-token colors) alongside `className` -- lucide-react
+// icons accept both, so the type needs to say so or every themed icon usage fails tsc.
+export interface NavItem { icon: ComponentType<{ className?: string; style?: CSSProperties }>; label: string; id: string; }
 export interface NavGroup { label: string; items: NavItem[]; }
 
 /**
