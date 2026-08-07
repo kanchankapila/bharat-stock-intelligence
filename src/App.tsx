@@ -30,6 +30,20 @@ import V1Routes from './v1/V1Routes';
 // ─── V2+ Components ─────────────────
 const V2AppShell         = React.lazy(() => import('./v2/components/layout/V2AppShell').then(m => ({ default: m.V2AppShell })));
 const V6Shell            = React.lazy(() => import('./v6/V6Shell').then(m => ({ default: m.V6Shell })));
+// Phase 2 of the frontend consolidation ("V6 Canonical Workbench" proposal): v5's desk-page
+// implementations, swapped in only for dashboardVersion==='v6' -- v1/v2/v3 keep their existing
+// pages exactly as-is, matching the "gradual, default now, delete later" rollout.
+const OptionsDeskPage         = React.lazy(() => import('./v5/pages/OptionsDeskPage').then(m => ({ default: m.OptionsDeskPage })));
+const InstitutionalFlowDeskPage = React.lazy(() => import('./v5/pages/InstitutionalFlowDeskPage').then(m => ({ default: m.InstitutionalFlowDeskPage })));
+const EarningsPulseDeskPage   = React.lazy(() => import('./v5/pages/EarningsPulseDeskPage').then(m => ({ default: m.EarningsPulseDeskPage })));
+const SignalReviewPage        = React.lazy(() => import('./v5/pages/SignalReviewPage').then(m => ({ default: m.SignalReviewPage })));
+const RiskDeskPage            = React.lazy(() => import('./v5/pages/RiskDeskPage').then(m => ({ default: m.RiskDeskPage })));
+// RiskMetricsDashboard.tsx was fully built and wired to real procedures (getMultiFactorScores,
+// getRiskMetrics, getRiskDistribution, getRegimeSummary) but had NO route pointing at it at all
+// -- found 2026-08-07 during the version-consolidation review. Ships at /risk now (v1/v2/v3's
+// non-v6 fallback; v6 gets v5's RiskDeskPage, the stronger of the two independent
+// implementations of the same four procedures).
+const RiskMetricsDashboard    = React.lazy(() => import('./components/RiskMetricsDashboard').then(m => ({ default: m.RiskMetricsDashboard })));
 const V2StockDetails     = React.lazy(() => import('./v2/views/stock-analysis/V2StockDetails').then(m => ({ default: m.V2StockDetails })));
 const V2Settings         = React.lazy(() => import('./v2/views/settings/V2Settings').then(m => ({ default: m.V2Settings })));
 const V2Dashboard        = React.lazy(() => import('./v2/views/dashboard/V2Dashboard').then(m => ({ default: m.V2Dashboard })));
@@ -37,7 +51,6 @@ const V3Dashboard        = React.lazy(() => import('./v3/views/dashboard/V3Dashb
 const MarketCommandCenter = React.lazy(() => import('./v4/views/MarketCommandCenter').then(m => ({ default: m.MarketCommandCenter })));
 const StockIntelligencePage = React.lazy(() => import('./v4/views/StockIntelligencePage').then(m => ({ default: m.StockIntelligencePage })));
 const V2SignalTracking   = React.lazy(() => import('./v2/views/signals/V2SignalTracking').then(m => ({ default: m.V2SignalTracking })));
-const MarketDashboard_v2 = React.lazy(() => import('./v2/views/dashboard/MarketDashboard').then(m => ({ default: m.MarketDashboard })));
 const ScreenerPage_v2    = React.lazy(() => import('./v2/views/screener/ScreenerPage').then(m => ({ default: m.ScreenerPage })));
 const TopRatedStocks          = React.lazy(() => import('./components/TopRatedStocks'));
 const IntradayPage       = React.lazy(() => import('./components/IntradayPage'));
@@ -463,10 +476,27 @@ export default function App() {
             <Route path="/live-screener" element={<LiveMarketScreener onSelectStock={handleSelectStock} />} />
             <Route path="/eod-screener" element={<EODMarketScreener onSelectStock={handleSelectStock} />} />
             <Route path="/discover" element={<div className="p-6"><NSEStockDiscovery onSelectStock={handleSelectStock} /></div>} />
-            <Route path="/smart-money" element={<SmartMoneyPage onSelectStock={handleSelectStock} />} />
-            <Route path="/earnings" element={<EarningsPage onSelectStock={handleSelectStock} />} />
+            <Route path="/smart-money" element={
+              dashboardVersion === 'v6'
+                ? <InstitutionalFlowDeskPage onSelectSymbol={handleSelectStock} />
+                : <SmartMoneyPage onSelectStock={handleSelectStock} />
+            } />
+            <Route path="/earnings" element={
+              dashboardVersion === 'v6'
+                ? <EarningsPulseDeskPage onSelectSymbol={handleSelectStock} />
+                : <EarningsPage onSelectStock={handleSelectStock} />
+            } />
             <Route path="/fno-scanners" element={<FnOIntelligenceCenter onSelectStock={handleSelectStock} />} />
-            <Route path="/options" element={<div className="p-6"><OptionsIntelligence /></div>} />
+            <Route path="/options" element={
+              dashboardVersion === 'v6'
+                ? <OptionsDeskPage onSelectSymbol={handleSelectStock} />
+                : <div className="p-6"><OptionsIntelligence /></div>
+            } />
+            <Route path="/risk" element={
+              dashboardVersion === 'v6'
+                ? <RiskDeskPage onSelectSymbol={handleSelectStock} />
+                : <div className="p-6"><RiskMetricsDashboard /></div>
+            } />
             <Route path="/todays-picks" element={<TodaysPicks onSelectStock={handleSelectStock} />} />
             <Route path="/early-spotter" element={<EarlyHoursSpotter onSelectStock={handleSelectStock} />} />
             <Route path="/screener-intelligence" element={<ScreenerIntelligencePage />} />
@@ -476,10 +506,22 @@ export default function App() {
             <Route path="/agent-optimizer"      element={<AgentOptimizerPage />} />
             <Route path="/trade-cockpit" element={<TradeDecisionCockpit onSelectStock={handleSelectStock} />} />
             <Route path="/backtest" element={<V1Backtest stocks={stocks} />} />
-            <Route path="/signals" element={<DailySignals onSelectStock={handleSelectStock} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
-            <Route path="/signal-tracking" element={<V2SignalTracking />} />
+            {/* v5's SignalReviewPage consolidates all 3 of these into one page (queue stats,
+                report card, and the tracking ledger together) -- the strongest single UX call
+                in v5, per the consolidation review. v1/v2/v3 keep the 3 separate pages; the
+                routes stay resolvable either way so no existing bookmark/link breaks. */}
+            <Route path="/signals" element={
+              dashboardVersion === 'v6'
+                ? <SignalReviewPage onSelectSymbol={handleSelectStock} />
+                : <DailySignals onSelectStock={handleSelectStock} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />
+            } />
+            <Route path="/signal-tracking" element={
+              dashboardVersion === 'v6' ? <SignalReviewPage onSelectSymbol={handleSelectStock} /> : <V2SignalTracking />
+            } />
             <Route path="/signal-intelligence" element={<SignalIntelligence />} />
-            <Route path="/signal-report-card" element={<SignalReportCard />} />
+            <Route path="/signal-report-card" element={
+              dashboardVersion === 'v6' ? <SignalReviewPage onSelectSymbol={handleSelectStock} /> : <SignalReportCard />
+            } />
             <Route path="/research" element={
               <div className="flex flex-col">
                 <div className="flex gap-2 px-4 py-2 border-b border-slate-800">
@@ -513,7 +555,6 @@ export default function App() {
             <Route path="/alpha" element={<CommandCenterDashboard onSelectStock={(s) => { setDrawerSymbol(s); navigate('/trade-cockpit'); }} />} />
             <Route path="/buy-recs" element={<Navigate to="/alpha" replace />} />
             <Route path="/money-flow" element={<MoneyFlowPage />} />
-            <Route path="/market-dashboard" element={<MarketDashboard_v2 />} />
             <Route path="/economics" element={
               <div className="p-6 space-y-6">
                 <MacroDashboard />

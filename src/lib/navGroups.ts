@@ -3,7 +3,7 @@ import {
   LayoutDashboard, Trophy, BarChart2, Activity, Filter, Target, Zap,
   Crosshair, Search, History, PieChart, Bookmark, Users, Globe, CheckCircle2,
   Star, TrendingUp, Radio, Settings2, Briefcase, Calendar, Sparkles,
-  FlaskConical, Layers, MonitorDot, ChartLine, MessageSquare, Gauge, FileDown,
+  FlaskConical, Layers, MonitorDot, MessageSquare, Gauge, FileDown,
   Settings, Flame,
 } from 'lucide-react';
 
@@ -11,14 +11,19 @@ export interface NavItem { icon: ComponentType<{ className?: string }>; label: s
 export interface NavGroup { label: string; items: NavItem[]; }
 
 /**
- * Single source of truth for the app's nav, shared by every shell (AppShell.tsx, V2AppShell.tsx,
- * V6Shell.tsx, and any future one). Extracted 2026-08-07 specifically to close a recurring bug
- * class: the 2026-08-04 nav restructuring (see the section-header history below) landed in
- * AppShell.tsx with a comment claiming it was mirrored into V2AppShell.tsx -- it wasn't, so the
- * fix never reached the default (v2/v3) shell most users actually saw. Found and fixed once on
- * 2026-08-07; a THIRD shell being added the same week made it obvious this needed to stop being
- * two independently-maintained copies. Every id here must have a real, working route in App.tsx's
- * shared <Routes> tree -- verified against that file directly, not assumed.
+ * Nav source of truth for V6Shell.tsx (Phase 1+2 of the frontend consolidation). Extracted
+ * 2026-08-07 specifically to close a recurring bug class: the 2026-08-04 nav restructuring (see
+ * the section-header history below) landed in AppShell.tsx with a comment claiming it was
+ * mirrored into V2AppShell.tsx -- it wasn't, so the fix never reached the default (v2/v3) shell
+ * most users actually saw. AppShell.tsx and V2AppShell.tsx still keep their own local copies
+ * (not yet migrated onto this file) -- and as of Phase 2, this file's content has deliberately
+ * DIVERGED from theirs, not just duplicated it: v6 shows one consolidated "Signal Review" entry
+ * where the older shells still show three separate pages, and a "Risk" entry the older shells
+ * don't have a nav link for (though the /risk route itself works everywhere -- see App.tsx).
+ * Migrating AppShell.tsx/V2AppShell.tsx onto a shared file needs a parameterized version of this
+ * one (which items differ per shell), not a straight import, now that the difference is
+ * intentional rather than accidental drift. Every id here must have a real, working route in
+ * App.tsx's shared <Routes> tree -- verified against that file directly, not assumed.
  *
  * Nav restructuring history (2026-08-04 UX audit follow-up): the old flat 18-item "Intelligence"
  * group mixed the canonical cross-engine ranking (unified_recommendations, via unified_ranker.py
@@ -90,9 +95,12 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Signal Tools',
     items: [
-      { icon: Radio,        label: 'Signal Ledger',      id: 'signal-tracking'    },
-      { icon: Radio,        label: 'Signals',            id: 'signals'            },
-      { icon: ChartLine,    label: 'Signal Report Card', id: 'signal-report-card' },
+      // v5's SignalReviewPage consolidates the old Signal Ledger / Signals / Signal Report
+      // Card into one page (queue stats + report card + tracking ledger together) -- the id
+      // reuses 'signal-tracking' as the canonical entry point rather than introducing a new
+      // route; /signals and /signal-report-card stay resolvable directly for bookmarks/links,
+      // they just don't get their own nav item here anymore. v1/v2/v3 keep all three.
+      { icon: Radio,        label: 'Signal Review',       id: 'signal-tracking' },
       { icon: Activity,     label: 'Sentiment',          id: 'sentiment'          },
       { icon: History,      label: 'Backtest',           id: 'backtest'           },
       { icon: Settings2,    label: 'ML Builder',         id: 'builder'            },
@@ -104,6 +112,9 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { icon: PieChart,  label: 'Portfolio',  id: 'portfolio'  },
       { icon: Bookmark,  label: 'Watchlist',  id: 'watchlist'  },
+      // RiskMetricsDashboard.tsx existed fully wired but with no route anywhere -- v5's
+      // RiskDeskPage (the stronger of the two independent implementations) ships at /risk.
+      { icon: TrendingUp, label: 'Risk',      id: 'risk'       },
       { icon: Users,     label: 'Superstars', id: 'superstars' },
       { icon: Star,      label: 'My Profile', id: 'profile'    },
     ],

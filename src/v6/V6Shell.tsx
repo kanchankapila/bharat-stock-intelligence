@@ -93,7 +93,7 @@ export const V6Shell: React.FC<V6ShellProps> = ({
             className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
             style={{ background: 'var(--v6-accent)' }}
           >
-            <TrendingUp className="w-4 h-4" style={{ color: 'var(--v6-surface)' }} />
+            <TrendingUp className="w-4 h-4" style={{ color: '#ffffff' }} />
           </div>
           <div>
             <p className="v6-title text-[15px] font-bold leading-tight" style={{ color: 'var(--v6-ink)' }}>Workbench</p>
@@ -160,7 +160,7 @@ export const V6Shell: React.FC<V6ShellProps> = ({
                 onClick={() => switchVersion(v)}
                 className="flex-1 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider transition-colors"
                 style={active
-                  ? { background: 'var(--v6-accent)', color: 'var(--v6-surface)' }
+                  ? { background: 'var(--v6-accent)', color: '#ffffff' }
                   : { color: 'var(--v6-muted)' }}
               >
                 {v === 'v6' ? 'New' : v.toUpperCase()}
@@ -184,7 +184,12 @@ export const V6Shell: React.FC<V6ShellProps> = ({
       {/* Desktop sidebar */}
       <aside
         className="hidden md:flex flex-col w-64 shrink-0 p-4"
-        style={{ borderRight: '1px solid var(--v6-border)', background: 'var(--v6-surface)' }}
+        style={{
+          borderRight: '1px solid var(--v6-border)',
+          background: 'var(--v6-surface)',
+          backdropFilter: 'var(--v6-surface-blur)',
+          WebkitBackdropFilter: 'var(--v6-surface-blur)',
+        }}
       >
         {sidebarBody}
       </aside>
@@ -194,12 +199,18 @@ export const V6Shell: React.FC<V6ShellProps> = ({
         <>
           <div
             className="fixed inset-0 z-30 md:hidden"
-            style={{ background: 'rgba(10, 14, 13, 0.55)', backdropFilter: 'blur(2px)' }}
+            style={{ background: 'rgba(5, 5, 8, 0.6)', backdropFilter: 'blur(2px)' }}
             onClick={() => setMobileOpen(false)}
           />
           <aside
             className="fixed left-0 top-0 h-full w-72 max-w-[85vw] z-40 md:hidden flex flex-col p-4"
-            style={{ background: 'var(--v6-surface)', borderRight: '1px solid var(--v6-border)', boxShadow: 'var(--v6-shadow)' }}
+            style={{
+              background: 'var(--v6-surface-raised)',
+              backdropFilter: 'var(--v6-surface-blur-strong)',
+              WebkitBackdropFilter: 'var(--v6-surface-blur-strong)',
+              borderRight: '1px solid var(--v6-border-strong)',
+              boxShadow: 'var(--v6-shadow)',
+            }}
           >
             {sidebarBody}
           </aside>
@@ -210,7 +221,12 @@ export const V6Shell: React.FC<V6ShellProps> = ({
       <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
         <header
           className="flex items-center gap-3 px-4 sm:px-6 h-14 shrink-0"
-          style={{ borderBottom: '1px solid var(--v6-border)', background: 'var(--v6-surface-raised)' }}
+          style={{
+            borderBottom: '1px solid var(--v6-border)',
+            background: 'var(--v6-surface-raised)',
+            backdropFilter: 'var(--v6-surface-blur)',
+            WebkitBackdropFilter: 'var(--v6-surface-blur)',
+          }}
         >
           <button
             onClick={() => setMobileOpen(true)}

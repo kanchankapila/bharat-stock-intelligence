@@ -1,154 +1,142 @@
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap');
-
 /*
- * V6 Workbench theme -- Phase 1 of the frontend consolidation (see the "V6 Canonical Workbench"
- * proposal). Ports v5's light theme forward as-is and adds a genuinely designed dark mode
- * alongside it (not an inversion) per the 2026-08-07 decision. Scoped to `.v6-root` so it can't
- * leak into AppShell/V2AppShell/v5-isolated, which all define their own color systems.
+ * V6 Workbench theme -- Phase 1 of the frontend consolidation, restyled 2026-08-07 to match
+ * v1 AppShell's actual look and feel (the codebase's real "Premium Dark Theme": deep near-black
+ * ground, indigo/violet ambient glow, frosted-glass surfaces, Inter + JetBrains Mono) instead of
+ * v5's teal-on-white palette. Values below for dark mode are pulled directly from index.css's
+ * global .glass/.glass-strong/body rules (indigo #6366f1, near-black #050508) rather than
+ * approximated, so v6's dark mode is visually the same family as v1, not just similar.
  *
- * Phase 1 scope note: this token system covers the SHELL CHROME (sidebar, header, toggle) fully
- * in both themes. The ~44 existing pages rendered inside it (v1-v4 components) mostly hardcode
- * dark Tailwind classes already and do NOT yet respond to this toggle -- retrofitting them is
- * out of scope here and will happen naturally as pages get swapped for v5-desk equivalents in
- * later phases. Toggling to light will look correct on the shell chrome and on v5's own desk
- * pages; older pages will keep rendering however they already do regardless of the toggle state.
+ * Light mode is a genuinely new design (v1 itself is dark-only, so there's no existing light
+ * counterpart to copy) built on the same indigo accent -- frosted glass doesn't read correctly
+ * over a flat light ground the way it does over v1's colored gradient backdrop, so light mode
+ * uses flat elevated cards with a soft shadow instead of the blur effect, while keeping the same
+ * ink/accent relationships so the two modes still read as one product.
+ *
+ * Scoped to `.v6-root` so it can't leak into AppShell/V2AppShell/v5-isolated, which define their
+ * own color systems.
  */
 
 .v6-root {
-  --v6-bg: #f4f6f8;
-  --v6-bg-band: #eceff3;
-  --v6-surface: #ffffff;
-  --v6-surface-raised: #ffffff;
-  --v6-ink: #0f172a;
-  --v6-ink-soft: #3a4459;
-  --v6-muted: #64748b;
-  --v6-faint: #94a3b8;
-  --v6-border: #e2e8f0;
-  --v6-border-strong: #cbd5e1;
-  --v6-accent: #0f766e;
-  --v6-accent-ink: #0b5a53;
-  --v6-accent-soft: #ccfbf1;
-  --v6-positive: #0f766e;
-  --v6-positive-soft: #e3f6f2;
-  --v6-negative: #be123c;
-  --v6-negative-soft: #fce8ed;
-  --v6-warning: #b45309;
-  --v6-warning-soft: #fdf1de;
-  --v6-shadow: 0 16px 36px rgba(15, 23, 42, 0.06);
-  --v6-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05);
+  --v6-bg: #050508;
+  --v6-bg-band: rgba(255, 255, 255, 0.03);
+  --v6-surface: rgba(10, 11, 16, 0.65);
+  --v6-surface-raised: rgba(8, 9, 12, 0.88);
+  --v6-surface-blur: blur(20px) saturate(160%);
+  --v6-surface-blur-strong: blur(32px) saturate(200%);
+  --v6-ink: #f1f5f9;
+  --v6-ink-soft: #cbd5e1;
+  --v6-muted: #94a3b8;
+  --v6-faint: #64748b;
+  --v6-border: rgba(255, 255, 255, 0.07);
+  --v6-border-strong: rgba(255, 255, 255, 0.11);
+  --v6-accent: #6366f1;
+  --v6-accent-ink: #a5b4fc;
+  --v6-accent-soft: rgba(99, 102, 241, 0.15);
+  --v6-positive: #10b981;
+  --v6-positive-soft: rgba(16, 185, 129, 0.12);
+  --v6-negative: #f43f5e;
+  --v6-negative-soft: rgba(244, 63, 94, 0.12);
+  --v6-warning: #f59e0b;
+  --v6-warning-soft: rgba(245, 158, 11, 0.12);
+  --v6-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+  --v6-shadow-sm: 0 4px 30px rgba(0, 0, 0, 0.2);
 
   min-height: 100vh;
   background:
-    radial-gradient(circle at 12% 18%, #e6fffa 0%, transparent 35%),
-    radial-gradient(circle at 88% 0%, #dbeafe 0%, transparent 33%),
-    linear-gradient(180deg, #f9fafb 0%, #f1f5f9 100%);
+    radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.15) 0px, transparent 50%),
+    radial-gradient(at 50% 0%, rgba(167, 139, 250, 0.1) 0px, transparent 50%),
+    radial-gradient(at 100% 0%, rgba(59, 130, 246, 0.15) 0px, transparent 50%),
+    #050508;
+  background-attachment: fixed;
   color: var(--v6-ink);
-  font-family: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
-}
-
-@media (prefers-color-scheme: dark) {
-  .v6-root:not([data-theme="light"]) {
-    --v6-bg: #0d1210;
-    --v6-bg-band: #121815;
-    --v6-surface: #141b19;
-    --v6-surface-raised: #182120;
-    --v6-ink: #e8f2ef;
-    --v6-ink-soft: #b9c9c4;
-    --v6-muted: #869a94;
-    --v6-faint: #5a6b66;
-    --v6-border: #223330;
-    --v6-border-strong: #2d423e;
-    --v6-accent: #5fc9bb;
-    --v6-accent-ink: #8fdbcf;
-    --v6-accent-soft: #16352f;
-    --v6-positive: #5fc9bb;
-    --v6-positive-soft: #133a32;
-    --v6-negative: #e8899a;
-    --v6-negative-soft: #3a1b23;
-    --v6-warning: #e0b565;
-    --v6-warning-soft: #3a2c0f;
-    --v6-shadow: 0 16px 36px rgba(0, 0, 0, 0.45);
-    --v6-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-
-    background:
-      radial-gradient(circle at 12% 18%, #12241f 0%, transparent 40%),
-      radial-gradient(circle at 88% 0%, #101b26 0%, transparent 38%),
-      linear-gradient(180deg, #0d1210 0%, #0a0e0d 100%);
-  }
-}
-
-.v6-root[data-theme="dark"] {
-  --v6-bg: #0d1210;
-  --v6-bg-band: #121815;
-  --v6-surface: #141b19;
-  --v6-surface-raised: #182120;
-  --v6-ink: #e8f2ef;
-  --v6-ink-soft: #b9c9c4;
-  --v6-muted: #869a94;
-  --v6-faint: #5a6b66;
-  --v6-border: #223330;
-  --v6-border-strong: #2d423e;
-  --v6-accent: #5fc9bb;
-  --v6-accent-ink: #8fdbcf;
-  --v6-accent-soft: #16352f;
-  --v6-positive: #5fc9bb;
-  --v6-positive-soft: #133a32;
-  --v6-negative: #e8899a;
-  --v6-negative-soft: #3a1b23;
-  --v6-warning: #e0b565;
-  --v6-warning-soft: #3a2c0f;
-  --v6-shadow: 0 16px 36px rgba(0, 0, 0, 0.45);
-  --v6-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-
-  background:
-    radial-gradient(circle at 12% 18%, #12241f 0%, transparent 40%),
-    radial-gradient(circle at 88% 0%, #101b26 0%, transparent 38%),
-    linear-gradient(180deg, #0d1210 0%, #0a0e0d 100%);
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
 }
 
 .v6-root[data-theme="light"] {
-  --v6-bg: #f4f6f8;
-  --v6-bg-band: #eceff3;
+  --v6-bg: #f4f5f8;
+  --v6-bg-band: rgba(15, 23, 42, 0.03);
   --v6-surface: #ffffff;
   --v6-surface-raised: #ffffff;
+  --v6-surface-blur: none;
+  --v6-surface-blur-strong: none;
   --v6-ink: #0f172a;
-  --v6-ink-soft: #3a4459;
+  --v6-ink-soft: #334155;
   --v6-muted: #64748b;
   --v6-faint: #94a3b8;
-  --v6-border: #e2e8f0;
-  --v6-border-strong: #cbd5e1;
-  --v6-accent: #0f766e;
-  --v6-accent-ink: #0b5a53;
-  --v6-accent-soft: #ccfbf1;
-  --v6-positive: #0f766e;
-  --v6-positive-soft: #e3f6f2;
-  --v6-negative: #be123c;
-  --v6-negative-soft: #fce8ed;
+  --v6-border: #e2e5ec;
+  --v6-border-strong: #cbd2df;
+  --v6-accent: #4f46e5;
+  --v6-accent-ink: #4338ca;
+  --v6-accent-soft: #e9e8fd;
+  --v6-positive: #059669;
+  --v6-positive-soft: #e3f7f0;
+  --v6-negative: #e11d48;
+  --v6-negative-soft: #fde4ea;
   --v6-warning: #b45309;
   --v6-warning-soft: #fdf1de;
-  --v6-shadow: 0 16px 36px rgba(15, 23, 42, 0.06);
+  --v6-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
   --v6-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05);
 
   background:
-    radial-gradient(circle at 12% 18%, #e6fffa 0%, transparent 35%),
-    radial-gradient(circle at 88% 0%, #dbeafe 0%, transparent 33%),
-    linear-gradient(180deg, #f9fafb 0%, #f1f5f9 100%);
+    radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.06) 0px, transparent 50%),
+    radial-gradient(at 100% 0%, rgba(79, 70, 229, 0.05) 0px, transparent 50%),
+    #f4f5f8;
+}
+
+/* Explicit dark override so a saved preference wins over the OS default either direction --
+   values match .v6-root's own top-level (dark) definition above. */
+.v6-root[data-theme="dark"] {
+  --v6-bg: #050508;
+  --v6-bg-band: rgba(255, 255, 255, 0.03);
+  --v6-surface: rgba(10, 11, 16, 0.65);
+  --v6-surface-raised: rgba(8, 9, 12, 0.88);
+  --v6-surface-blur: blur(20px) saturate(160%);
+  --v6-surface-blur-strong: blur(32px) saturate(200%);
+  --v6-ink: #f1f5f9;
+  --v6-ink-soft: #cbd5e1;
+  --v6-muted: #94a3b8;
+  --v6-faint: #64748b;
+  --v6-border: rgba(255, 255, 255, 0.07);
+  --v6-border-strong: rgba(255, 255, 255, 0.11);
+  --v6-accent: #6366f1;
+  --v6-accent-ink: #a5b4fc;
+  --v6-accent-soft: rgba(99, 102, 241, 0.15);
+  --v6-positive: #10b981;
+  --v6-positive-soft: rgba(16, 185, 129, 0.12);
+  --v6-negative: #f43f5e;
+  --v6-negative-soft: rgba(244, 63, 94, 0.12);
+  --v6-warning: #f59e0b;
+  --v6-warning-soft: rgba(245, 158, 11, 0.12);
+  --v6-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+  --v6-shadow-sm: 0 4px 30px rgba(0, 0, 0, 0.2);
+
+  background:
+    radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.15) 0px, transparent 50%),
+    radial-gradient(at 50% 0%, rgba(167, 139, 250, 0.1) 0px, transparent 50%),
+    radial-gradient(at 100% 0%, rgba(59, 130, 246, 0.15) 0px, transparent 50%),
+    #050508;
+  background-attachment: fixed;
 }
 
 .v6-title {
-  font-family: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
   letter-spacing: -0.01em;
 }
 
 .v6-mono {
-  font-family: 'IBM Plex Mono', 'SF Mono', Consolas, monospace;
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
   font-variant-numeric: tabular-nums;
 }
 
+/* Frosted glass in dark mode (identical recipe to index.css's global .glass), flat elevated
+   card in light mode (blur reads muddy over a flat light ground -- see file header). */
 .v6-card {
   background: var(--v6-surface);
+  -webkit-backdrop-filter: var(--v6-surface-blur);
+  backdrop-filter: var(--v6-surface-blur);
   border: 1px solid var(--v6-border);
-  border-radius: 16px;
+  border-radius: 14px;
   box-shadow: var(--v6-shadow-sm);
 }
 
@@ -170,8 +158,11 @@
 .v6-chip-warning { background: var(--v6-warning-soft); color: var(--v6-warning); }
 
 .v6-scrollbar { scrollbar-width: thin; scrollbar-color: var(--v6-border-strong) transparent; }
-.v6-scrollbar::-webkit-scrollbar { width: 6px; }
-.v6-scrollbar::-webkit-scrollbar-thumb { background: var(--v6-border-strong); border-radius: 3px; }
+.v6-scrollbar::-webkit-scrollbar { width: 5px; }
+.v6-scrollbar::-webkit-scrollbar-thumb { background: rgba(99, 102, 241, 0.2); border-radius: 4px; }
+.v6-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(99, 102, 241, 0.4); }
+
+.v6-root ::selection { background: rgba(99, 102, 241, 0.28); color: var(--v6-ink); }
 
 /* Respect reduced-motion for the theme-toggle knob and sidebar drawer transitions. */
 @media (prefers-reduced-motion: reduce) {
