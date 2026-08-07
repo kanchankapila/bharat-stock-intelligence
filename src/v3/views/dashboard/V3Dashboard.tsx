@@ -313,6 +313,7 @@ interface V3DashboardProps {
   onSelectIndex?: (id: string, name: string) => void;
   initialSymbol?: string;
   initialTab?: 'market-pulse' | 'quant-ml' | 'signals' | 'stock-intelligence';
+  userId?: string | null;
 }
 
 export const V3Dashboard: React.FC<V3DashboardProps> = ({
@@ -323,6 +324,7 @@ export const V3Dashboard: React.FC<V3DashboardProps> = ({
   onSelectIndex,
   initialSymbol,
   initialTab,
+  userId,
 }) => {
   const news = useNewsFeed();
   const [activeTab, setActiveTab] = useState<'market-pulse' | 'quant-ml' | 'signals' | 'stock-intelligence'>(initialTab || 'market-pulse');
@@ -1111,7 +1113,7 @@ Based on the multi-factor scoring array and SWOT profiles, ${symbol} displays ${
               {/* Top Movers widget */}
               <div className="glass border border-slate-800/60 rounded-2xl p-5">
                 <SectionLabel>Extreme Movers (Daily)</SectionLabel>
-                <TopMoversIntelligence onSelectStock={selectStockForDeepAnalysis} />
+                <TopMoversIntelligence onSelectStock={selectStockForDeepAnalysis} userId={userId} />
               </div>
 
               {/* Pre-Market Panel */}

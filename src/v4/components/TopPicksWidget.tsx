@@ -5,11 +5,12 @@ import { trpc } from '../../lib/trpc';
 import { Card } from '../../components/Card';
 import { cn } from '../../lib/utils';
 import { ConvictionPill } from '../../components/StockTagRow';
+import { AddToPortfolioButton } from '../../components/AddToPortfolioButton';
 
 // Command Center teaser for the canonical unified_recommendations ranking (same query as
 // /alpha's CommandCenterDashboard/getBuyRecommendations) -- so a user sees the platform's actual
 // highest-conviction picks on the very first screen, not just index/sector/mover context.
-export const TopPicksWidget: React.FC<{ onSelectStock?: (symbol: string) => void }> = ({ onSelectStock }) => {
+export const TopPicksWidget: React.FC<{ onSelectStock?: (symbol: string) => void; userId?: string | null }> = ({ onSelectStock, userId }) => {
   const navigate = useNavigate();
   const { data, isLoading } = trpc.getBuyRecommendations.useQuery(
     { conviction: 'ALL', horizon: 'ALL', limit: 6 },
@@ -33,23 +34,25 @@ export const TopPicksWidget: React.FC<{ onSelectStock?: (symbol: string) => void
           {picks.map((p: any) => {
             const winPct = p.win_probability != null ? Math.round(p.win_probability * 100) : null;
             return (
-              <button
-                key={p.symbol}
-                onClick={(e) => { e.stopPropagation(); onSelectStock ? onSelectStock(p.symbol) : navigate('/stock-intelligence-hub'); }}
-                className="w-full flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-800/60 transition-colors text-left"
-              >
-                <div className="flex items-center gap-2 min-w-0">
-                  <span className="text-xs font-bold text-slate-100 shrink-0">{p.symbol}</span>
-                  <ConvictionPill level={p.conviction_level} />
-                  {p.sector && <span className="text-[10px] text-slate-500 truncate">{p.sector}</span>}
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  {winPct != null && (
-                    <span className={cn('text-[10px] font-semibold', winPct >= 55 ? 'text-emerald-400' : 'text-amber-400')}>{winPct}% win</span>
-                  )}
-                  <span className="text-xs font-mono font-bold text-slate-300">{Math.round(p.unified_score ?? 0)}</span>
-                </div>
-              </button>
+              <div key={p.symbol} className="flex items-center gap-1">
+                <button
+                  onClick={(e) => { e.stopPropagation(); onSelectStock ? onSelectStock(p.symbol) : navigate('/stock-intelligence-hub'); }}
+                  className="flex-1 min-w-0 flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-800/60 transition-colors text-left"
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-xs font-bold text-slate-100 shrink-0">{p.symbol}</span>
+                    <ConvictionPill level={p.conviction_level} />
+                    {p.sector && <span className="text-[10px] text-slate-500 truncate">{p.sector}</span>}
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {winPct != null && (
+                      <span className={cn('text-[10px] font-semibold', winPct >= 55 ? 'text-emerald-400' : 'text-amber-400')}>{winPct}% win</span>
+                    )}
+                    <span className="text-xs font-mono font-bold text-slate-300">{Math.round(p.unified_score ?? 0)}</span>
+                  </div>
+                </button>
+                <AddToPortfolioButton symbol={p.symbol} userId={userId} />
+              </div>
             );
           })}
         </div>

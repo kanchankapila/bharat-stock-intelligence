@@ -86,6 +86,8 @@ const SystemMonitorPage       = React.lazy(() => import('./components/SystemMoni
 const JobsDashboardPage   = React.lazy(() => import('./components/JobsDashboardPage'));
 const ProfilePage             = React.lazy(() => import('./components/ProfilePage'));
 const PortfolioAnalytics      = React.lazy(() => import('./components/PortfolioAnalytics'));
+const PortfolioTrackerPage    = React.lazy(() => import('./v6/pages/PortfolioTrackerPage'));
+const ScreenerBrowserPage     = React.lazy(() => import('./v6/pages/ScreenerBrowserPage'));
 const StrategyBuilder         = React.lazy(() => import('./components/StrategyBuilder'));
 const StockChatbot       = React.lazy(() => import('./components/StockChatbot'));
 const CommandCenterDashboard   = React.lazy(() => import('./components/CommandCenterDashboard').then(m => ({ default: m.CommandCenterDashboard })));
@@ -389,6 +391,7 @@ export default function App() {
                   watchlistDetails={watchlistDetails || []}
                   onSelectStock={handleSelectStock}
                   onRemove={toggleWatchlist}
+                  userId={user?.uid}
                 />
                 <PriceAlertsPanel userId={user?.uid} />
               </div>
@@ -397,6 +400,7 @@ export default function App() {
               <MarketCommandCenter
                 onSelectStock={handleSelectStock}
                 onSelectIndex={(id, name) => { setSelectedIndex({ id, name }); navigate('/indices'); }}
+              userId={user?.uid}
               />
             } />
             <Route path="/stock-intelligence-hub" element={
@@ -404,6 +408,7 @@ export default function App() {
                 initialSymbol={selectedSymbol}
                 watchlist={watchlist}
                 onToggleWatchlist={toggleWatchlist}
+              userId={user?.uid}
               />
             } />
             <Route path="/details" element={selectedSymbol ? (
@@ -416,6 +421,7 @@ export default function App() {
                   initialSymbol={selectedSymbol}
                   watchlist={watchlist}
                   onToggleWatchlist={toggleWatchlist}
+                userId={user?.uid}
                 />
               ) : dashboardVersion === 'v3' ? (
                 <V3Dashboard
@@ -426,6 +432,7 @@ export default function App() {
                   onSelectIndex={(id, name) => { setSelectedIndex({ id, name }); navigate('/indices'); }}
                   initialSymbol={selectedSymbol}
                   initialTab="stock-intelligence"
+                  userId={user?.uid}
                 />
               ) : (
                 <V2StockDetails
@@ -446,6 +453,7 @@ export default function App() {
                 <MarketCommandCenter
                   onSelectStock={handleSelectStock}
                   onSelectIndex={(id, name) => { setSelectedIndex({ id, name }); navigate('/indices'); }}
+                userId={user?.uid}
                 />
               ) : dashboardVersion === 'v3' ? (
                 <V3Dashboard
@@ -454,6 +462,7 @@ export default function App() {
                   onToggleWatchlist={toggleWatchlist}
                   onSelectStock={handleSelectStock}
                   onSelectIndex={(id, name) => { setSelectedIndex({ id, name }); navigate('/indices'); }}
+                userId={user?.uid}
                 />
               ) : (
                 <V2Dashboard />
@@ -464,6 +473,7 @@ export default function App() {
                 <MarketCommandCenter
                   onSelectStock={handleSelectStock}
                   onSelectIndex={(id, name) => { setSelectedIndex({ id, name }); navigate('/indices'); }}
+                userId={user?.uid}
                 />
               ) : dashboardVersion === 'v3' ? (
                 <V3Dashboard
@@ -472,6 +482,7 @@ export default function App() {
                   onToggleWatchlist={toggleWatchlist}
                   onSelectStock={handleSelectStock}
                   onSelectIndex={(id, name) => { setSelectedIndex({ id, name }); navigate('/indices'); }}
+                userId={user?.uid}
                 />
               ) : (
                 <V2Dashboard />
@@ -490,7 +501,11 @@ export default function App() {
                 <SectorConstituents onSelectStock={handleSelectStock} />
               </div>
             } />
-            <Route path="/screener" element={<V1Screener stocks={stocks} onSelectStock={handleSelectStock} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
+            <Route path="/screener" element={
+              dashboardVersion === 'v6'
+                ? <ScreenerBrowserPage onSelectStock={handleSelectStock} />
+                : <V1Screener stocks={stocks} onSelectStock={handleSelectStock} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />
+            } />
             <Route path="/screener-v2" element={<ScreenerPage_v2 />} />
             <Route path="/trendlyne" element={<TrendlyneScreenerPanel onSelectStock={handleSelectStock} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
             <Route path="/premium-screeners" element={<PremiumScreenersPage onSelectStock={handleSelectStock} />} />
@@ -567,7 +582,11 @@ export default function App() {
             <Route path="/monitor" element={<SystemMonitorPage />} />
             <Route path="/jobs" element={<JobsDashboardPage />} />
             <Route path="/profile" element={<ProfilePage />} />
-            <Route path="/portfolio" element={<div className="p-6"><PortfolioAnalytics /></div>} />
+            <Route path="/portfolio" element={
+              dashboardVersion === 'v6'
+                ? <div className="p-6"><PortfolioTrackerPage userId={user?.uid} onSelectStock={handleSelectStock} /></div>
+                : <div className="p-6"><PortfolioAnalytics /></div>
+            } />
             <Route path="/builder" element={<div className="p-6"><StrategyBuilder /></div>} />
             <Route path="/export-picks" element={<div className="p-6"><ExportPortfolioView /></div>} />
             <Route path="/settings" element={<V2Settings />} />

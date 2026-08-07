@@ -68,6 +68,7 @@ const LiveClock: React.FC = () => {
 interface MarketCommandCenterProps {
   onSelectStock?: (symbol: string) => void;
   onSelectIndex?: (id: string, name: string) => void;
+  userId?: string | null;
 }
 
 // Page 1 — "the pre-trading-day briefing" — a fresh page that combines what an expert analyst
@@ -77,7 +78,7 @@ interface MarketCommandCenterProps {
 // here computes its own numbers where a proven engine already exists (F&O read reuses
 // IndexFnoOverview's analyseOI(), sentiment/earnings pulses reuse the same tRPC queries as their
 // full pages) — this page's job is composition and prioritization, not new math.
-export const MarketCommandCenter: React.FC<MarketCommandCenterProps> = ({ onSelectStock, onSelectIndex }) => {
+export const MarketCommandCenter: React.FC<MarketCommandCenterProps> = ({ onSelectStock, onSelectIndex, userId }) => {
   return (
     <div className="space-y-6 pb-10">
       <V4QuickNav />
@@ -114,7 +115,7 @@ export const MarketCommandCenter: React.FC<MarketCommandCenterProps> = ({ onSele
 
       {/* Canonical picks + institutional flow -- the decisive numbers, front and center */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <TopPicksWidget onSelectStock={onSelectStock} />
+        <TopPicksWidget onSelectStock={onSelectStock} userId={userId} />
         <MoneyFlowPulseWidget />
       </div>
 
@@ -153,7 +154,7 @@ export const MarketCommandCenter: React.FC<MarketCommandCenterProps> = ({ onSele
             <TrendingUp className="w-4 h-4 text-indigo-400" />
             <h2 className="text-xs font-black text-slate-200 uppercase tracking-widest">Top Movers</h2>
           </div>
-          <TopMoversIntelligence onSelectStock={onSelectStock ?? (() => {})} />
+          <TopMoversIntelligence onSelectStock={onSelectStock ?? (() => {})} userId={userId} />
         </div>
         <div>
           <div className="flex items-center gap-2 mb-3">

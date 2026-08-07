@@ -7,12 +7,14 @@ import {
   Zap, Activity, Trophy
 } from 'lucide-react';
 import { PriceFreshnessBadge } from './PriceFreshnessBadge';
+import { AddToPortfolioButton } from './AddToPortfolioButton';
 
 interface TopMoversIntelligenceProps {
   onSelectStock: (symbol: string) => void;
+  userId?: string | null;
 }
 
-export const TopMoversIntelligence: React.FC<TopMoversIntelligenceProps> = ({ onSelectStock }) => {
+export const TopMoversIntelligence: React.FC<TopMoversIntelligenceProps> = ({ onSelectStock, userId }) => {
   const { data: movers, isLoading, dataUpdatedAt } = trpc.getTopMovers.useQuery(undefined, {
     refetchInterval: 60000
   });
@@ -31,14 +33,17 @@ export const TopMoversIntelligence: React.FC<TopMoversIntelligenceProps> = ({ on
               Vol: {stock.today_volume ? `${(stock.today_volume / 1000000).toFixed(1)}M` : '—'}
             </p>
           </div>
-          <div className="text-right">
-            <p className="text-white font-black text-xs tabular-nums">₹{Number(stock.today_close).toLocaleString()}</p>
-            <p className={cn(
-              "text-[10px] font-black tabular-nums",
-              Number(stock.change_percent) >= 0 ? "text-emerald-400" : "text-rose-400"
-            )}>
-              {Number(stock.change_percent) >= 0 ? '+' : ''}{Number(stock.change_percent).toFixed(2)}%
-            </p>
+          <div className="flex items-center gap-2">
+            <div className="text-right">
+              <p className="text-white font-black text-xs tabular-nums">₹{Number(stock.today_close).toLocaleString()}</p>
+              <p className={cn(
+                "text-[10px] font-black tabular-nums",
+                Number(stock.change_percent) >= 0 ? "text-emerald-400" : "text-rose-400"
+              )}>
+                {Number(stock.change_percent) >= 0 ? '+' : ''}{Number(stock.change_percent).toFixed(2)}%
+              </p>
+            </div>
+            <AddToPortfolioButton symbol={stock.symbol_name} currentPrice={Number(stock.today_close)} userId={userId} />
           </div>
         </div>
       ))}

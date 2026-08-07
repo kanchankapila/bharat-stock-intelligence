@@ -14,6 +14,7 @@ import { McNewsCard, McNewsLinks, McNewsEmptyState } from '../../components/McNe
 import { StockTagRow, ConvictionPill } from '../../components/StockTagRow';
 import { relativeFromNow } from '../../lib/timeFormat';
 import { V4QuickNav } from '../components/V4QuickNav';
+import { AddToPortfolioButton } from '../../components/AddToPortfolioButton';
 
 type TabId = 'overview' | 'technicals' | 'fundamentals' | 'ownership' | 'fno' | 'earnings' | 'news';
 
@@ -666,7 +667,8 @@ const StockHeaderCard: React.FC<{
   stockMeta?: { name?: string; sector?: string; industry?: string } | null;
   isWatched: boolean;
   onToggleWatchlist?: (symbol: string) => void;
-}> = ({ symbol, stockMeta, isWatched, onToggleWatchlist }) => {
+  userId?: string | null;
+}> = ({ symbol, stockMeta, isWatched, onToggleWatchlist, userId }) => {
   const { data: quote } = trpc.getLiveStockQuote.useQuery({ symbol }, { enabled: !!symbol, refetchInterval: 30_000, retry: false });
   const { data: predictions } = trpc.getTechnicalPredictions.useQuery({ symbol }, { enabled: !!symbol });
   const { data: unifiedScore, dataUpdatedAt } = trpc.getUnifiedScoreForSymbol.useQuery({ symbol }, { enabled: !!symbol });
@@ -715,6 +717,7 @@ const StockHeaderCard: React.FC<{
               {isWatched ? <Star className="w-4 h-4 text-amber-400 fill-amber-400" /> : <StarOff className="w-4 h-4 text-slate-500" />}
             </button>
           )}
+          <AddToPortfolioButton symbol={symbol} currentPrice={quote?.price} userId={userId} variant="pill" />
         </div>
       </div>
 
@@ -738,10 +741,11 @@ interface StockIntelligencePageProps {
   initialSymbol?: string | null;
   watchlist?: string[];
   onToggleWatchlist?: (symbol: string) => void;
+  userId?: string | null;
 }
 
 export const StockIntelligencePage: React.FC<StockIntelligencePageProps> = ({
-  initialSymbol, watchlist = [], onToggleWatchlist,
+  initialSymbol, watchlist = [], onToggleWatchlist, userId,
 }) => {
   const [symbol, setSymbol] = useState<string | null>(initialSymbol ?? null);
   const [tab, setTab] = useState<TabId>('overview');
@@ -761,7 +765,7 @@ export const StockIntelligencePage: React.FC<StockIntelligencePageProps> = ({
         <div className="text-center py-20 text-slate-500 text-sm">Search for a stock above to view its full intelligence profile.</div>
       ) : (
         <>
-          <StockHeaderCard symbol={symbol} stockMeta={stockMeta} isWatched={isWatched} onToggleWatchlist={onToggleWatchlist} />
+          <StockHeaderCard symbol={symbol} stockMeta={stockMeta} isWatched={isWatched} onToggleWatchlist={onToggleWatchlist} userId={userId} />
 
           <div className="flex gap-1 overflow-x-auto terminal-scrollbar border-b border-slate-800/60 pb-1">
             {TABS.map((t) => {

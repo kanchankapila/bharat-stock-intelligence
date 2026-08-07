@@ -363,10 +363,11 @@ interface DashboardPageProps {
   watchlist: string[];
   onToggleWatchlist: (symbol: string, metadata?: { price?: number; name?: string; source?: string }) => void;
   onSelectIndex?: (id: string, name: string) => void;
+  userId?: string | null;
 }
 
 const DashboardPage: React.FC<DashboardPageProps> = ({
-  stocks, onNewSignal, onSelectStock, watchlist, onToggleWatchlist, onSelectIndex,
+  stocks, onNewSignal, onSelectStock, watchlist, onToggleWatchlist, onSelectIndex, userId,
 }) => {
   const navigate = useNavigate();
   const news = useNewsFeed();
@@ -928,7 +929,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
 
       {/* ── Row 4: Top Movers ─────────────────────────────────────────────── */}
       <div style={{ marginBottom: 12 }}>
-        <TopMoversIntelligence onSelectStock={onSelectStock} />
+        <TopMoversIntelligence onSelectStock={onSelectStock} userId={userId} />
       </div>
 
       {/* ── Row 5: Intraday Breakouts ────────────────────────────────────── */}

@@ -240,6 +240,22 @@ CREATE TABLE IF NOT EXISTS "company_profiles" (
   "last_updated" TIMESTAMPTZ DEFAULT now()
 );
 
+-- ── concall_takeaways ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "concall_takeaways" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "symbol" TEXT NOT NULL,
+  "company_name" TEXT,
+  "quarter" TEXT NOT NULL,
+  "fiscal_year" TEXT NOT NULL,
+  "key_takeaway" TEXT,
+  "tone_assessment" TEXT,
+  "transcript_source" TEXT,
+  "announcement_date" TEXT NOT NULL,
+  "generated_at" TEXT,
+  "source" TEXT,
+  "fetched_at" TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
 -- ── confluence_signals ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "confluence_signals" (
   "symbol" TEXT NOT NULL,
@@ -849,6 +865,24 @@ CREATE TABLE IF NOT EXISTS "insider_transactions" (
   PRIMARY KEY ("symbol", "person_name", "transaction_date", "transaction_mode")
 );
 
+-- ── institutional_deal_signals ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "institutional_deal_signals" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "symbol" TEXT NOT NULL,
+  "exchange" TEXT,
+  "sector" TEXT,
+  "action" TEXT NOT NULL,
+  "deal_type" TEXT,
+  "deal_date" TEXT NOT NULL,
+  "counterparty" TEXT,
+  "quantity" REAL,
+  "deal_price" REAL,
+  "deal_value_cr_1w" REAL,
+  "deals_count_1w" INTEGER,
+  "source" TEXT,
+  "fetched_at" TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
 -- ── intraday_breadth_snapshots ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "intraday_breadth_snapshots" (
   "snapshot_at" TEXT NOT NULL PRIMARY KEY,
@@ -1401,6 +1435,25 @@ CREATE TABLE IF NOT EXISTS "mc_stock_vitals" (
   PRIMARY KEY ("symbol", "metric_name")
 );
 
+-- ── mf_portfolio_holdings ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "mf_portfolio_holdings" (
+  "id" INTEGER NOT NULL DEFAULT nextval('mf_portfolio_holdings_id_seq'::regclass) PRIMARY KEY,
+  "userId" TEXT NOT NULL,
+  "schemeName" TEXT NOT NULL,
+  "folioNumber" TEXT,
+  "category" TEXT,
+  "units" DOUBLE PRECISION NOT NULL,
+  "buyNav" DOUBLE PRECISION NOT NULL,
+  "buyDate" TEXT NOT NULL,
+  "currentNav" DOUBLE PRECISION,
+  "sellNav" DOUBLE PRECISION,
+  "sellDate" TEXT,
+  "notes" TEXT,
+  "createdAt" TIMESTAMPTZ DEFAULT now(),
+  "updatedAt" TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX idx_mf_portfolio_holdings_user ON public.mf_portfolio_holdings USING btree ("userId");
+
 -- ── mf_sector_allocation ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "mf_sector_allocation" (
   "month" TEXT NOT NULL,
@@ -1474,6 +1527,25 @@ CREATE TABLE IF NOT EXISTS "moneycontrol_screeners" (
 CREATE INDEX idx_mc_scan_id ON public.moneycontrol_screeners USING btree (scan_id);
 CREATE UNIQUE INDEX uq_moneycontrol_screeners_scan_id ON public.moneycontrol_screeners USING btree (scan_id);
 
+-- ── ndtv_fno_basis ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "ndtv_fno_basis" (
+  "symbol" TEXT NOT NULL,
+  "date" TEXT NOT NULL,
+  "spot_price" REAL,
+  "future_1m" REAL,
+  "future_2m" REAL,
+  "basis" REAL,
+  "roll_spread" REAL,
+  "rollover_pct" REAL,
+  "open_interest" REAL,
+  "oi_change_pct" REAL,
+  "put_call_ratio" REAL,
+  "broadcasted_at" TEXT,
+  "source" TEXT,
+  "fetched_at" TEXT DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY ("symbol", "date")
+);
+
 -- ── news_articles ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "news_articles" (
   "id" TEXT NOT NULL PRIMARY KEY,
@@ -1521,6 +1593,24 @@ CREATE TABLE IF NOT EXISTS "news_symbol_link" (
   PRIMARY KEY ("news_id", "symbol")
 );
 CREATE INDEX idx_nsl_symbol_pub ON public.news_symbol_link USING btree (symbol, published_at);
+
+-- ── nse_filed_corporate_actions ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "nse_filed_corporate_actions" (
+  "source_url" TEXT NOT NULL PRIMARY KEY,
+  "symbol" TEXT NOT NULL,
+  "company_name" TEXT,
+  "category" TEXT,
+  "headline" TEXT,
+  "dividend_per_share" REAL,
+  "record_date" TEXT,
+  "ex_date" TEXT,
+  "filing_date" TEXT,
+  "upcoming" INTEGER,
+  "source" TEXT DEFAULT 'investsights_nse_filings'::text,
+  "fetched_at" TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_nfca_filing_date ON public.nse_filed_corporate_actions USING btree (filing_date);
+CREATE INDEX idx_nfca_symbol ON public.nse_filed_corporate_actions USING btree (symbol);
 
 -- ── nse_ipo_calendar ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "nse_ipo_calendar" (
@@ -1714,6 +1804,22 @@ CREATE TABLE IF NOT EXISTS "order_book_snapshots" (
   "created_at" TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX idx_ob_symbol_time ON public.order_book_snapshots USING btree (symbol, "timestamp" DESC);
+
+-- ── portfolio_holdings ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "portfolio_holdings" (
+  "id" INTEGER NOT NULL DEFAULT nextval('portfolio_holdings_id_seq'::regclass) PRIMARY KEY,
+  "userId" TEXT NOT NULL,
+  "symbol" TEXT NOT NULL,
+  "quantity" DOUBLE PRECISION NOT NULL,
+  "buyPrice" DOUBLE PRECISION NOT NULL,
+  "buyDate" TEXT NOT NULL,
+  "sellPrice" DOUBLE PRECISION,
+  "sellDate" TEXT,
+  "notes" TEXT,
+  "createdAt" TIMESTAMPTZ DEFAULT now(),
+  "updatedAt" TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX idx_portfolio_holdings_user ON public.portfolio_holdings USING btree ("userId");
 
 -- ── preopen_snapshot ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "preopen_snapshot" (
@@ -2099,6 +2205,44 @@ CREATE TABLE IF NOT EXISTS "screener_weight_history" (
   "notes" TEXT
 );
 
+-- ── sector_correlation_pairs ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "sector_correlation_pairs" (
+  "data_date" TEXT NOT NULL,
+  "sector_a" TEXT NOT NULL,
+  "sector_b" TEXT NOT NULL,
+  "correlation" REAL,
+  "period_days" INTEGER,
+  "pair_type" TEXT,
+  "source" TEXT,
+  "fetched_at" TEXT DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY ("data_date", "sector_a", "sector_b")
+);
+
+-- ── sector_correlation_stats ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "sector_correlation_stats" (
+  "data_date" TEXT NOT NULL,
+  "sector" TEXT NOT NULL,
+  "avg_daily_return" REAL,
+  "volatility" REAL,
+  "total_return" REAL,
+  "data_points" INTEGER,
+  "period_days" INTEGER,
+  "source" TEXT,
+  "fetched_at" TEXT DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY ("data_date", "sector")
+);
+
+-- ── sector_correlation_summary ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "sector_correlation_summary" (
+  "data_date" TEXT NOT NULL PRIMARY KEY,
+  "avg_pairwise_correlation" REAL,
+  "pct_pairs_above_0_7" REAL,
+  "total_pairs" INTEGER,
+  "takeaway" TEXT,
+  "source" TEXT,
+  "fetched_at" TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
 -- ── sector_fo_sentiment ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "sector_fo_sentiment" (
   "sector" TEXT NOT NULL,
@@ -2118,6 +2262,21 @@ CREATE TABLE IF NOT EXISTS "sector_global_corr" (
   "corr_21d" REAL,
   "corr_63d" REAL,
   PRIMARY KEY ("date", "sector")
+);
+
+-- ── sector_rrg_history ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "sector_rrg_history" (
+  "sector" TEXT NOT NULL,
+  "week_date" TEXT NOT NULL,
+  "rs_ratio" REAL,
+  "rs_momentum" REAL,
+  "sector_return" REAL,
+  "stocks_count" INTEGER,
+  "quadrant" TEXT,
+  "weeks_window" INTEGER,
+  "source" TEXT,
+  "fetched_at" TEXT DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY ("sector", "week_date")
 );
 
 -- ── signal_actions ─────────────────────────────────────────────
@@ -2355,6 +2514,24 @@ CREATE TABLE IF NOT EXISTS "stock_block_deal_daily" (
   PRIMARY KEY ("symbol", "date")
 );
 CREATE INDEX idx_sbdd_date ON public.stock_block_deal_daily USING btree (date);
+
+-- ── stock_corporate_action_history ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "stock_corporate_action_history" (
+  "symbol" TEXT NOT NULL,
+  "action_type" TEXT NOT NULL,
+  "event_key" TEXT NOT NULL,
+  "announce_date" TEXT,
+  "record_date" TEXT,
+  "ratio_text" TEXT,
+  "ratio_factor" REAL,
+  "amount" REAL,
+  "detail" TEXT,
+  "source" TEXT DEFAULT 'moneycontrol'::text,
+  "fetched_at" TEXT DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY ("symbol", "action_type", "event_key")
+);
+CREATE INDEX idx_scah_record_date ON public.stock_corporate_action_history USING btree (record_date);
+CREATE INDEX idx_scah_symbol ON public.stock_corporate_action_history USING btree (symbol);
 
 -- ── stock_delivery_data ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "stock_delivery_data" (
